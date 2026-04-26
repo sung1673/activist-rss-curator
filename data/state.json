@@ -1,9 +1,81 @@
 {
-  "articles": [],
-  "last_run_at": "2026-04-26T23:35:15.754413+09:00",
-  "pending_clusters": [],
+  "articles": [
+    {
+      "canonical_url": "https://news.jkn.co.kr/post/895473",
+      "canonical_url_hash": "a1c254deef273ec1de47ca5a",
+      "normalized_title": "삼성전자 노사 갈등 이재용 회장 자택 앞 주주-노조 맞불 집회 예고",
+      "published_at": "2026-04-26T00:00:00+09:00",
+      "reason": null,
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T00:26:54.113366+09:00",
+      "status": "accepted",
+      "title": "삼성전자 노사 갈등, 이재용 회장 자택 앞 주주-노조 맞불 집회 예고",
+      "title_hash": "47b8c5a7993ba6574a6d5b0a"
+    }
+  ],
+  "last_run_at": "2026-04-27T00:26:54.113366+09:00",
+  "pending_clusters": [
+    {
+      "article_count": 1,
+      "articles": [
+        {
+          "article_published_at": "2026-04-26T00:00:00+09:00",
+          "canonical_url": "https://news.jkn.co.kr/post/895473",
+          "canonical_url_hash": "a1c254deef273ec1de47ca5a",
+          "clean_title": "삼성전자 노사 갈등, 이재용 회장 자택 앞 주주-노조 맞불 집회 예고",
+          "company_candidates": [
+            "삼성전자"
+          ],
+          "date_status": "article",
+          "feed_category": "env",
+          "feed_name": "env-feed-1",
+          "feed_published_at": "2026-04-26T19:05:12+09:00",
+          "feed_updated_at": "2026-04-26T19:05:12+09:00",
+          "link": "https://www.google.com/url?rct=j&sa=t&url=https://news.jkn.co.kr/post/895473&ct=ga&cd=CAIyGjkxMWE5M2FiMTExYThjY2E6Y29tOmtvOlVT&usg=AOvVaw3VmgZlggDZ-VAw2uCmqnJE",
+          "low_patterns": [],
+          "normalized_title": "삼성전자 노사 갈등 이재용 회장 자택 앞 주주-노조 맞불 집회 예고",
+          "prefixes": [],
+          "published_at": "2026-04-26T00:00:00+09:00",
+          "relevance_keywords": [
+            "행동주의"
+          ],
+          "relevance_level": "high",
+          "source": "재경일보",
+          "summary": "... 행동으로 해석됩니다. 기업의 주요 의사결정이나 노사 관계에 대한 주주 들의 직접적인 행동은 점차 확대되는 주주 행동주의 의 한 형태로 볼 수 있습니다.",
+          "title": "삼성전자 노사 갈등, 이재용 회장 자택 앞 <b>주주</b>-노조 '맞불 집회' 예고 - 재경일보",
+          "title_hash": "47b8c5a7993ba6574a6d5b0a",
+          "topic_keywords": [
+            "행동주의"
+          ]
+        }
+      ],
+      "cluster_key": "43bd8b1ccdfabbc7",
+      "companies": [
+        "삼성전자"
+      ],
+      "created_at": "2026-04-27T00:26:54.113366+09:00",
+      "guid": null,
+      "is_followup": false,
+      "keywords": [
+        "행동주의"
+      ],
+      "last_article_at": "2026-04-26T00:00:00+09:00",
+      "last_article_seen_at": "2026-04-27T00:26:54.113366+09:00",
+      "published_at": null,
+      "relevance_level": "high",
+      "representative_title": "삼성전자 노사 갈등, 이재용 회장 자택 앞 주주-노조 맞불 집회 예고",
+      "representative_title_normalized": "삼성전자 노사 갈등 이재용 회장 자택 앞 주주-노조 맞불 집회 예고",
+      "representative_url": "https://news.jkn.co.kr/post/895473",
+      "sequence": 1,
+      "status": "pending"
+    }
+  ],
   "published_clusters": [],
   "rejected_articles": [],
-  "seen_title_hashes": [],
-  "seen_url_hashes": []
+  "seen_title_hashes": [
+    "47b8c5a7993ba6574a6d5b0a"
+  ],
+  "seen_url_hashes": [
+    "a1c254deef273ec1de47ca5a"
+  ]
 }
