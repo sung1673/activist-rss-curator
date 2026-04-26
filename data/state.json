@@ -455,12 +455,348 @@
       "status": "accepted",
       "title": "주총 다 끝났는데…금융권 지배구조 개선안, 이달 발표도 난망",
       "title_hash": "0403963e4f8aaabee191578a"
+    },
+    {
+      "canonical_url": "https://www.newspim.com/news/view/20260323001136",
+      "canonical_url_hash": "cdd55c20e1c4d718014f5509",
+      "normalized_title": "차파트너스 삼영전자 최대주주 일본케미콘에 공개서한 발송",
+      "published_at": "2026-03-23T17:43:55+09:00",
+      "reason": "old_article",
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "rejected",
+      "title": "차파트너스, 삼영전자 최대주주 일본케미콘에 공개서한 발송",
+      "title_hash": "8c7646fa51756c5a65c14526"
+    },
+    {
+      "canonical_url": "https://www.bloter.net/news/articleView.html?idxno=658006",
+      "canonical_url_hash": "5c4c62608a0ee51a4d087707",
+      "normalized_title": "소액주주 액트 제3자배정 유증 전환…한화솔루션에 주주서한 보낸다",
+      "published_at": "2026-03-27T18:27:22+09:00",
+      "reason": "old_article",
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "rejected",
+      "title": "소액주주 액트 제3자배정 유증 전환…한화솔루션에 주주서한 보낸다",
+      "title_hash": "f863da671712f060e60de468"
+    },
+    {
+      "canonical_url": "https://www.msn.com/ko-kr/money/%EC%9D%BC%EB%B0%98/k-%EB%B0%B8%EB%A5%98%EC%97%85-%EB%A6%AC%ED%8F%AC%ED%8A%B8-%ED%81%AC%EB%9E%98%ED%94%84%ED%86%A4-%ED%99%94%EB%A0%A4%ED%95%9C-%EC%A3%BC%EC%A3%BC%ED%99%98%EC%9B%90-%EC%9D%B4%EB%A9%B4%EC%9D%98-%EA%B7%B8%EB%A6%BC%EC%9E%90-%EC%9E%A5%EB%B3%91%EA%B7%9C-%EC%9D%98%EC%9E%A5-%EC%9E%A5%EA%B8%B0%EC%A7%91%EA%B6%8C%EC%97%90-%EC%9D%B4%EC%82%AC%ED%9A%8C-%EB%8F%85%EB%A6%BD%EC%84%B1-%ED%99%95%EB%B3%B4-%EC%9A%94%EC%9B%90/ar-AA21CwhJ",
+      "canonical_url_hash": "a85c0912a26bae596850bced",
+      "normalized_title": "k-밸류업 리포트 크래프톤 화려한 주주환원 이면의 그림자 장병규 의장 장기집권에 이사회 독립성 확보 요원",
+      "published_at": "2026-04-24T10:21:13+09:00",
+      "reason": "low_relevance",
+      "relevance_level": "low",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "rejected",
+      "title": "[K-밸류업 리포트] 크래프톤 화려한 주주환원 이면의 그림자, 장병규 의장 장기집권에 이사회 독립성 확보 요원",
+      "title_hash": "e01e2d12eebdd724ff7aba53"
+    },
+    {
+      "canonical_url": "https://www.msn.com/ko-kr/news/other/%EC%8C%93%EC%95%84%EB%91%90%EB%A9%B4-%EB%A6%AC%EC%8A%A4%ED%81%AC-%EC%A0%9C%EC%95%BD%EC%97%85%EA%B3%84-%EC%9E%90%EC%82%AC%EC%A3%BC-%EC%86%8C%EA%B0%81-%EA%B7%9C%EC%A0%9C%EC%97%90-%EC%A0%84%EB%9E%B5-%EC%A0%84%EB%A9%B4-%EC%88%98%EC%A0%95/ar-AA21heA7",
+      "canonical_url_hash": "3455f8857be6d197286c9c16",
+      "normalized_title": "쌓아두면 리스크… 제약업계 자사주 소각 규제에 전략 전면 수정",
+      "published_at": "2026-04-20T04:55:00+09:00",
+      "reason": "old_article",
+      "relevance_level": "medium",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "rejected",
+      "title": "쌓아두면 리스크… 제약업계, 자사주 소각 규제에 전략 전면 수정",
+      "title_hash": "566578212e078490002c7137"
+    },
+    {
+      "canonical_url": "https://www.mt.co.kr/opinion/2026/04/14/2026041017100868652",
+      "canonical_url_hash": "219ab96bdaea6c2162c3485c",
+      "normalized_title": "유효상 칼럼 왜 지배구조 혁신이 경쟁력일까",
+      "published_at": "2026-04-14T06:00:00+09:00",
+      "reason": "old_article",
+      "relevance_level": "medium",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "rejected",
+      "title": "[유효상 칼럼] 왜 지배구조 혁신이 경쟁력일까",
+      "title_hash": "acb5ef04a50d0db54694ba03"
+    },
+    {
+      "canonical_url": "https://www.msn.com/ko-kr/money/topstories/%EC%8A%A4%ED%8A%9C%EC%96%B4%EB%93%9C%EC%8B%AD-%EC%BD%94%EB%93%9C-%ED%95%B5%EC%8B%AC%EC%9D%80-%EC%A7%80%EC%86%8D%EA%B0%80%EB%8A%A5-%EA%B0%80%EC%B9%98-%EC%B2%B4%ED%81%AC%EB%A6%AC%EC%8A%A4%ED%8A%B8-%EB%B3%B4%EB%8B%A4-%EC%9D%B4%ED%96%89%EC%9D%98-%EC%A7%88/ar-AA20V1Cn",
+      "canonical_url_hash": "6ecaf339553e59a1ff0f85a0",
+      "normalized_title": "스튜어드십 코드 핵심은 지속가능 가치…체크리스트보다 이행의 질",
+      "published_at": "2026-04-15T07:44:10+09:00",
+      "reason": "old_article",
+      "relevance_level": "medium",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "rejected",
+      "title": "스튜어드십 코드 핵심은 지속가능 가치…체크리스트보다 이행의 질",
+      "title_hash": "91468d41da708c64f40a43c6"
+    },
+    {
+      "canonical_url": "https://www.dailian.co.kr/news/view/1591085/%EC%A0%90%EA%B2%80-%EC%B2%B4%EA%B3%84-%EC%97%86%EC%96%B4-%EC%8B%A4%ED%9A%A8%EC%84%B1-%ED%95%9C%EA%B3%84%EC%8A%A4%ED%8A%9C%EC%96%B4%EB%93%9C%EC%8B%AD-2025",
+      "canonical_url_hash": "25936a4a4180ea1573b6d0d0",
+      "normalized_title": "점검 체계 없어 실효성 한계…스튜어드십 코드 개정 당위성 커지나",
+      "published_at": "2025-12-27T00:10:00+09:00",
+      "reason": "old_article",
+      "relevance_level": "medium",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "rejected",
+      "title": "점검 체계 없어 실효성 한계…스튜어드십 코드 개정 당위성 커지나",
+      "title_hash": "75fe77aae92232279865def6"
+    },
+    {
+      "canonical_url": "https://news.jkn.co.kr/post/895473",
+      "canonical_url_hash": "a1c254deef273ec1de47ca5a",
+      "normalized_title": "삼성전자 노사 갈등 이재용 회장 자택 앞 주주-노조 맞불 집회 예고",
+      "published_at": "2026-04-26T00:00:00+09:00",
+      "reason": "seen_url",
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "duplicate",
+      "title": "삼성전자 노사 갈등, 이재용 회장 자택 앞 주주-노조 맞불 집회 예고",
+      "title_hash": "47b8c5a7993ba6574a6d5b0a"
+    },
+    {
+      "canonical_url": "https://www.mk.co.kr/news/stock/12024349",
+      "canonical_url_hash": "0e508f20fce6eac853975c78",
+      "normalized_title": "lg화학 권고적 주주제안 왜 반대했나 … 英 행동주의펀드 국민연금에 항의서한",
+      "published_at": "2026-04-22T17:54:33+09:00",
+      "reason": "seen_url",
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "duplicate",
+      "title": "LG화학 권고적 주주제안 왜 반대했나 … 英 행동주의펀드, 국민연금에 항의서한",
+      "title_hash": "cd8121ec5db214ae65480326"
+    },
+    {
+      "canonical_url": "https://www.ceoscoredaily.com//page/view/2026042117471767662",
+      "canonical_url_hash": "d574238e2311840f86b854f7",
+      "normalized_title": "2026 산업 정책포럼 정석호 한국의결권자문대표 행동주의펀드 양태 다각화 활동 확대",
+      "published_at": "2026-04-22T07:00:00+09:00",
+      "reason": "seen_url",
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "duplicate",
+      "title": "[2026 산업·정책포럼] 정석호 한국의결권자문대표 행동주의펀드 양태 다각화, 활동 확대",
+      "title_hash": "2ea6451213779b7c297efff8"
+    },
+    {
+      "canonical_url": "https://www.msn.com/ko-kr/news/other/%EA%B2%89-%EC%9D%80-%EC%86%8C%EC%95%A1%EC%A3%BC%EC%A3%BC-%EB%B3%B4%ED%98%B8-%EB%92%A4-%EB%8A%94-%EC%98%A4%EB%84%88-%EC%9D%BC%EA%B0%80-%EC%86%8C%EC%86%A1-%EB%8C%80%EB%A6%AC%EC%9D%B8-%EC%88%98%EC%83%81%ED%95%9C-%ED%95%9C%EA%B5%AD%EC%95%A4%EC%BB%B4%ED%8D%BC%EB%8B%88-%EC%A3%BC%EC%A3%BC%EC%97%B0%EB%8C%80/ar-AA21saRb",
+      "canonical_url_hash": "da5958ddfeb84ac06bf1bf7a",
+      "normalized_title": "겉은 소액주주 보호 뒤는 오너 일가 소송 대리인 수상한 한국앤컴퍼니 주주연대",
+      "published_at": "2026-04-22T11:00:00+09:00",
+      "reason": "seen_url",
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "duplicate",
+      "title": "겉은 소액주주 보호, 뒤는 오너 일가 소송 대리인? 수상한 한국앤컴퍼니 주주연대",
+      "title_hash": "4c2984b06feba6f4d9af6feb"
+    },
+    {
+      "canonical_url": "https://www.msn.com/ko-kr/news/other/%EA%B2%89-%EC%9D%80-%EC%86%8C%EC%95%A1%EC%A3%BC%EC%A3%BC-%EB%B3%B4%ED%98%B8-%EB%92%A4-%EB%8A%94-%EC%98%A4%EB%84%88-%EC%9D%BC%EA%B0%80-%EC%86%8C%EC%86%A1-%EB%8C%80%EB%A6%AC%EC%9D%B8-%EC%88%98%EC%83%81%ED%95%9C-%ED%95%9C%EA%B5%AD%EC%95%A4%EC%BB%B4%ED%8D%BC%EB%8B%88-%EC%A3%BC%EC%A3%BC%EC%97%B0%EB%8C%80/ar-AA21saRb",
+      "canonical_url_hash": "da5958ddfeb84ac06bf1bf7a",
+      "normalized_title": "겉은 소액주주 보호 뒤는 오너 일가 소송 대리인 수상한 한국앤컴퍼니 주주연대",
+      "published_at": "2026-04-22T11:00:00+09:00",
+      "reason": "seen_url",
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "duplicate",
+      "title": "겉은 소액주주 보호, 뒤는 오너 일가 소송 대리인? 수상한 한국앤컴퍼니 주주연대",
+      "title_hash": "4c2984b06feba6f4d9af6feb"
+    },
+    {
+      "canonical_url": "http://www.enewstoday.co.kr/news/articleView.html?idxno=2423325",
+      "canonical_url_hash": "39399609d7682f021dd42bf9",
+      "normalized_title": "원아시아 투자 이사회는 뭐 했나 고려아연 소액주주 이사진 검찰 고발",
+      "published_at": "2026-04-27T02:30:00+09:00",
+      "reason": "same_title",
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "duplicate",
+      "title": "원아시아 투자, 이사회는 뭐 했나···고려아연 소액주주, 이사진 검찰 고발",
+      "title_hash": "5b882abb686e944776dd1a84"
+    },
+    {
+      "canonical_url": "https://www.msn.com/ko-kr/news/other/%EB%8B%A8%EB%8F%85-%EA%B5%AD%EB%AF%BC%EC%97%B0%EA%B8%88-%EC%99%9C-lg%ED%99%94%ED%95%99-%EA%B6%8C%EA%B3%A0%EC%A0%81-%EC%A3%BC%EC%A3%BC%EC%A0%9C%EC%95%88%EB%A7%8C-%EB%B0%98%EB%8C%80%ED%96%88%EB%82%98-%EC%97%B0%EA%B8%88%EC%97%90-%EC%84%9C%ED%95%9C-%EB%B3%B4%EB%82%B8-%ED%96%89%EB%8F%99%EC%A3%BC%EC%9D%98%ED%8E%80%EB%93%9C/ar-AA21rVOJ",
+      "canonical_url_hash": "9a789f2237a0d1f7319b6254",
+      "normalized_title": "국민연금 왜 lg화학 권고적 주주제안만 반대했나…연금에 서한 보낸 행동주의펀드",
+      "published_at": "2026-04-22T10:48:25+09:00",
+      "reason": "seen_url",
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "duplicate",
+      "title": "국민연금, 왜 LG화학 권고적 주주제안만 반대했나…연금에 서한 보낸 행동주의펀드",
+      "title_hash": "96231390ffae2f529702ef3a"
+    },
+    {
+      "canonical_url": "https://www.msn.com/ko-kr/money/topstories/%ED%96%89%EB%8F%99%EC%A3%BC%EC%9D%98-%ED%8E%80%EB%93%9C-1%EC%84%B8%EB%8C%80-%EA%B0%80-%EB%B3%B8-3%EC%B0%A8-%EC%83%81%EB%B2%95-%EA%B0%9C%EC%A0%95%EC%95%88-%EC%8B%9C%ED%96%89-%EC%A0%84-%EB%A7%88%EC%A7%80%EB%A7%89-%EC%A3%BC%EC%B4%9D/ar-AA21u2pN",
+      "canonical_url_hash": "4306328ef57c31a5d82fbb01",
+      "normalized_title": "행동주의 펀드 1세대가 본 3차 상법 개정안 시행 전 마지막 주총",
+      "published_at": "2026-04-22T16:46:02+09:00",
+      "reason": "seen_url",
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "duplicate",
+      "title": "행동주의 펀드 1세대가 본 3차 상법 개정안 시행 전 마지막 주총",
+      "title_hash": "e0401f1dd2df8269a7bf9757"
+    },
+    {
+      "canonical_url": "https://www.mk.co.kr/news/special-edition/12024133",
+      "canonical_url_hash": "47ed7d9e1c710d93afad0288",
+      "normalized_title": "법무법인 화우 경영권 분쟁부터 해외 딜까지 … 기업 자문 m&a 역량 확대",
+      "published_at": "2026-04-22T16:16:36+09:00",
+      "reason": "seen_url",
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "duplicate",
+      "title": "법무법인 화우, 경영권 분쟁부터 해외 딜까지 … 기업 자문 M&A 역량 확대",
+      "title_hash": "33433e008e51e6379cdf7761"
+    },
+    {
+      "canonical_url": "https://www.msn.com/ko-kr/money/%EC%9D%BC%EB%B0%98/%EA%B2%BD%EC%98%81-%EC%A0%95%EC%83%81%ED%99%94-%EC%B2%AB%EB%B0%9C-%EB%8F%99%EC%84%B1%EC%A0%9C%EC%95%BD-%EB%AA%A8%EC%A1%B0%EB%A6%AC-%EB%B0%94%EA%BF%A8%EB%8B%A4-%EC%9D%B4%EC%82%AC%ED%9A%8C-%ED%86%BA%EC%95%84%EB%B3%B4%EA%B8%B0/ar-AA21LTy8",
+      "canonical_url_hash": "117d9b9e577b7bb393103a5e",
+      "normalized_title": "경영 정상화 첫발…동성제약 모조리 바꿨다 이사회 톺아보기",
+      "published_at": "2026-04-26T22:00:00+09:00",
+      "reason": "seen_url",
+      "relevance_level": "medium",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "duplicate",
+      "title": "경영 정상화 첫발…동성제약, 모조리 바꿨다 [이사회 톺아보기]",
+      "title_hash": "dd47d8e92df62e440ab2e19d"
+    },
+    {
+      "canonical_url": "https://biz.newdaily.co.kr/site/data/html/2026/04/21/2026042100081.html",
+      "canonical_url_hash": "e53369e00d37afa5ea466eda",
+      "normalized_title": "동성제약 대표 교체-이사회 재편-자금 수혈에도 정상화 기대난",
+      "published_at": "2026-04-21T10:13:44+09:00",
+      "reason": "seen_url",
+      "relevance_level": "medium",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "duplicate",
+      "title": "동성제약, 대표 교체-이사회 재편-자금 수혈에도 정상화 기대난",
+      "title_hash": "8630077fc530f07a7dd2a4d2"
+    },
+    {
+      "canonical_url": "https://www.digitaltoday.co.kr/news/articleView.html?idxno=660205",
+      "canonical_url_hash": "b312530bccdcf06fc27537b6",
+      "normalized_title": "효성중공업 6월2일 임시주총 소집 결의…정관 변경 감사위원 겸 사외이사 선임 추진",
+      "published_at": "2026-04-24T17:22:01+09:00",
+      "reason": "seen_url",
+      "relevance_level": "medium",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "duplicate",
+      "title": "효성중공업, 6월2일 임시주총 소집 결의…정관 변경·감사위원 겸 사외이사 선임 추진",
+      "title_hash": "1e690a3f3c10cab6a70feb69"
+    },
+    {
+      "canonical_url": "https://www.digitaltoday.co.kr/news/articleView.html?idxno=658928",
+      "canonical_url_hash": "038180b6d64684ce18da5a83",
+      "normalized_title": "한국수출포장공업 5월7일 임시주총 소집…감사 장갑순 선임 안건",
+      "published_at": "2026-04-21T15:43:01+09:00",
+      "reason": "seen_url",
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "duplicate",
+      "title": "한국수출포장공업, 5월7일 임시주총 소집…감사 장갑순 선임 안건",
+      "title_hash": "ab41bc96182dfb7b3f4a3a5b"
+    },
+    {
+      "canonical_url": "https://www.msn.com/ko-kr/news/other/%EC%8B%A0%ED%95%9C%EA%B8%88%EC%9C%B5-%EB%B0%B8%EB%A5%98%EC%97%85-20-%EA%B3%B5%EA%B0%9C-roe-%EC%97%B0%EB%8F%99-%EC%83%81%ED%95%9C-%EC%97%86%EB%8A%94-%EC%A3%BC%EC%A3%BC%ED%99%98%EC%9B%90/ar-AA21w05B",
+      "canonical_url_hash": "8d0d85cbb915aba9651ed520",
+      "normalized_title": "신한금융 밸류업 2 0 공개…roe 연동 상한 없는 주주환원",
+      "published_at": "2026-04-23T06:20:42+09:00",
+      "reason": "seen_url",
+      "relevance_level": "medium",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "duplicate",
+      "title": "신한금융, 밸류업 2.0 공개…ROE 연동·상한 없는 주주환원",
+      "title_hash": "f2533153788ccb9c16f6d3ce"
+    },
+    {
+      "canonical_url": "https://www.mt.co.kr/finance/2026/04/26/2026042611244947565",
+      "canonical_url_hash": "2d45e4722100bea6cecc9b82",
+      "normalized_title": "자사주 2 3조 소각 환원율 50%…밸류업 판 짜는 금융지주들",
+      "published_at": "2026-04-26T13:57:00+09:00",
+      "reason": "seen_url",
+      "relevance_level": "medium",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "duplicate",
+      "title": "자사주 2.3조 소각·환원율 50%…밸류업 판 짜는 금융지주들",
+      "title_hash": "f2fdb568ee3ec36d404ec524"
+    },
+    {
+      "canonical_url": "https://www.msn.com/ko-kr/money/%EC%9E%AC%EB%AC%B4-%EA%B7%9C%EC%A0%95/%EC%A3%BC%EC%B4%9D-%EB%8B%A4-%EB%81%9D%EB%82%AC%EB%8A%94%EB%8D%B0-%EA%B8%88%EC%9C%B5%EA%B6%8C-%EC%A7%80%EB%B0%B0%EA%B5%AC%EC%A1%B0-%EA%B0%9C%EC%84%A0%EC%95%88-%EC%9D%B4%EB%8B%AC-%EB%B0%9C%ED%91%9C%EB%8F%84-%EB%82%9C%EB%A7%9D/ar-AA21JEwY",
+      "canonical_url_hash": "095328671592eb11a5a6e80f",
+      "normalized_title": "주총 다 끝났는데…금융권 지배구조 개선안 이달 발표도 난망",
+      "published_at": "2026-04-26T03:10:39+09:00",
+      "reason": "seen_url",
+      "relevance_level": "medium",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "duplicate",
+      "title": "주총 다 끝났는데…금융권 지배구조 개선안, 이달 발표도 난망",
+      "title_hash": "0403963e4f8aaabee191578a"
+    },
+    {
+      "canonical_url": "http://www.newstong.co.kr/view3.aspx?allSeq=21&cate=0&cnt=-5&newsNo=6&order=default&seq=14378676&subCate=2&txtSearch=",
+      "canonical_url_hash": "fbad2c4b370bc7ff2e4f0079",
+      "normalized_title": "db손보 밸류업의 역설 태워도 남는다…db손보 자사주 소각 오너 지배력만 키웠다 - 뉴스통",
+      "published_at": "2026-04-27T07:28:44+09:00",
+      "reason": null,
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "accepted",
+      "title": "[DB손보 밸류업의 역설] 태워도 남는다…DB손보 자사주 소각, 오너 지배력만 키웠다 - 뉴스통",
+      "title_hash": "454539c02c24534bcf3debfc"
+    },
+    {
+      "canonical_url": "https://futurechosun.com/archives/147050",
+      "canonical_url_hash": "cbfca319f30bd16e441358f9",
+      "normalized_title": "美 esg 주주제안 반토막…트럼프 안티 esg 기조에 기업들 눈치보기",
+      "published_at": "2026-04-20T13:23:50+09:00",
+      "reason": null,
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "accepted",
+      "title": "美 ESG 주주제안 반토막…트럼프 안티 ESG 기조에 기업들 눈치보기",
+      "title_hash": "c70e48f900a34e3a14500a23"
+    },
+    {
+      "canonical_url": "https://www.ceoscoredaily.com//page/view/2026042117494326882",
+      "canonical_url_hash": "2ef696290ac8dbc6be535cab",
+      "normalized_title": "2026 산업 정책 포럼 규제 리스크 행동주의 펀드 이중 공세…기업 지배구조 전면 재정비 해야",
+      "published_at": "2026-04-21T18:20:51+09:00",
+      "reason": null,
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "accepted",
+      "title": "[2026 산업·정책 포럼] 규제 리스크·행동주의 펀드 이중 공세…기업 지배구조 전면 재정비 해야",
+      "title_hash": "1dc4b91b0c26740d06e3b693"
+    },
+    {
+      "canonical_url": "http://www.enewstoday.co.kr/news/articleView.html?idxno=2423325",
+      "canonical_url_hash": "39399609d7682f021dd42bf9",
+      "normalized_title": "원아시아 투자 이사회는 뭐 했나 고려아연 소액주주 이사진 검찰 고발",
+      "published_at": "2026-04-27T02:30:00+09:00",
+      "reason": null,
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "accepted",
+      "title": "원아시아 투자, 이사회는 뭐 했나···고려아연 소액주주, 이사진 검찰 고발",
+      "title_hash": "5b882abb686e944776dd1a84"
+    },
+    {
+      "canonical_url": "https://news.jkn.co.kr/post/892805",
+      "canonical_url_hash": "c799b7637f926ed99123f148",
+      "normalized_title": "영풍 고려아연 경영권 분쟁 심화와 비철금속 섹터 강세 속 1%대 반등 성공",
+      "published_at": "2026-04-23T00:00:00+09:00",
+      "reason": null,
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "accepted",
+      "title": "영풍, 고려아연 경영권 분쟁 심화와 비철금속 섹터 강세 속 1%대 반등 성공",
+      "title_hash": "ff74f9c5cc1510522cd8bac9"
     }
   ],
-  "last_run_at": "2026-04-27T07:22:37.626930+09:00",
+  "last_run_at": "2026-04-27T07:47:39.716909+09:00",
   "pending_clusters": [
     {
-      "article_count": 2,
+      "article_count": 3,
       "articles": [
         {
           "article_published_at": null,
@@ -489,6 +825,11 @@
           "relevance_level": "high",
           "source": "msn.com",
           "summary": "영국계 행동주의 펀드 팰리서캐피탈이 LG화학 정기주총 의결권 행사와 관련해 국민연금에 판단 근거 설명을 요구하는 서한을 발송했다. 이는 국민연금이 다른 상장사들에 비해 LG화학 안건에서 유독 반대하는 논리가 납득되지 않으며, 국민연금의 결정이 소수주주와의 괴리를 보여준다는 비판을 담고 있다. 또한 팰리서캐피탈은 국민연금이 권고적 주주제안 도입에 반대한 결정 ...",
+          "theme_group": "shareholder_proposal",
+          "theme_groups": [
+            "shareholder_proposal",
+            "activism_trend"
+          ],
           "title": "[단독] “국민연금, 왜 LG화학 권고적 주주제안만 반대했나”…연금에 서한 보낸 행동주의펀드",
           "title_hash": "96231390ffae2f529702ef3a",
           "topic_keywords": [
@@ -523,6 +864,11 @@
           "relevance_level": "high",
           "source": "mk.co.kr",
           "summary": "영국계 행동주의 펀드 팰리서캐피털이 LG화학 정기 주주총회 의결권 행사와 관련해 국민연금에 판단 근거를 설명하라고 요구하는 서한을 발송해 이목이 집중된다. 국민연금이 다른 상장사의 권고적 주주제안 안건에는 찬성해 왔음에도 이번 LG화학 주총에서 반대한 논리가 충분히 납득되지 않는다는 이유에서다. 22일 금융투자업계에 따르면 팰리서캐피털은 최근 국민연금에 L ...",
+          "theme_group": "shareholder_proposal",
+          "theme_groups": [
+            "shareholder_proposal",
+            "activism_trend"
+          ],
           "title": "\"LG화학 권고적 주주제안 왜 반대했나\" … 英 행동주의펀드, 국민연금에 항의서한",
           "title_hash": "cd8121ec5db214ae65480326",
           "topic_keywords": [
@@ -530,6 +876,40 @@
             "주주제안",
             "주총",
             "주주총회"
+          ]
+        },
+        {
+          "article_published_at": "2026-04-20T13:23:50+09:00",
+          "canonical_url": "https://futurechosun.com/archives/147050",
+          "canonical_url_hash": "cbfca319f30bd16e441358f9",
+          "clean_title": "美 ESG 주주제안 반토막…트럼프 안티 ESG 기조에 기업들 눈치보기",
+          "company_candidates": [],
+          "date_status": "article",
+          "feed_category": "env",
+          "feed_name": "env-feed-2",
+          "feed_published_at": "2026-04-20T06:41:00+09:00",
+          "feed_updated_at": "2026-04-20T06:41:00+09:00",
+          "link": "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=69ee960b4686428585bd035ab1ce4ea1&url=https%3a%2f%2ffuturechosun.com%2farchives%2f147050&c=10514087001161569224&mkt=ko-kr",
+          "low_patterns": [],
+          "normalized_title": "美 esg 주주제안 반토막…트럼프 안티 esg 기조에 기업들 눈치보기",
+          "prefixes": [],
+          "published_at": "2026-04-20T13:23:50+09:00",
+          "relevance_keywords": [
+            "주주제안"
+          ],
+          "relevance_level": "high",
+          "source": "futurechosun.com",
+          "summary": "ESG 주주제안 3년 새 536→184건으로 급감 공개 제안 줄고 사전 협의 증가…“후퇴 아닌 방식 변화” 분석 미국 기업들을 대상으로 한 ESG(환경·사회·지배구조) 주주제안이 올해 들어 절반 수준으로 줄어든 것으로 나타났다. ESG 주주제안 분석 전문 기관 프록시 임팩트가 ...",
+          "theme_group": "shareholder_proposal",
+          "theme_groups": [
+            "shareholder_proposal",
+            "valueup_return"
+          ],
+          "title": "美 ESG 주주제안 반토막…트럼프 ‘안티 ESG’ 기조에 기업들 눈치보기",
+          "title_hash": "c70e48f900a34e3a14500a23",
+          "topic_keywords": [
+            "주주제안",
+            "지배구조"
           ]
         }
       ],
@@ -545,20 +925,28 @@
         "주주제안",
         "주주총회",
         "주총",
+        "지배구조",
         "행동주의"
       ],
       "last_article_at": "2026-04-22T17:54:33+09:00",
-      "last_article_seen_at": "2026-04-27T07:22:37.626930+09:00",
+      "last_article_seen_at": "2026-04-27T07:47:39.716909+09:00",
       "published_at": null,
       "relevance_level": "high",
-      "representative_title": "국민연금, 왜 LG화학 권고적 주주제안만 반대했나…연금에 서한 보낸 행동주의펀드",
+      "representative_title": "LG화학 주주제안·공개서한",
       "representative_title_normalized": "국민연금 왜 lg화학 권고적 주주제안만 반대했나…연금에 서한 보낸 행동주의펀드",
       "representative_url": "https://www.msn.com/ko-kr/news/other/%EB%8B%A8%EB%8F%85-%EA%B5%AD%EB%AF%BC%EC%97%B0%EA%B8%88-%EC%99%9C-lg%ED%99%94%ED%95%99-%EA%B6%8C%EA%B3%A0%EC%A0%81-%EC%A3%BC%EC%A3%BC%EC%A0%9C%EC%95%88%EB%A7%8C-%EB%B0%98%EB%8C%80%ED%96%88%EB%82%98-%EC%97%B0%EA%B8%88%EC%97%90-%EC%84%9C%ED%95%9C-%EB%B3%B4%EB%82%B8-%ED%96%89%EB%8F%99%EC%A3%BC%EC%9D%98%ED%8E%80%EB%93%9C/ar-AA21rVOJ",
       "sequence": 1,
-      "status": "pending"
+      "status": "pending",
+      "theme_group": "shareholder_proposal",
+      "theme_grouped": true,
+      "theme_groups": [
+        "activism_trend",
+        "shareholder_proposal",
+        "valueup_return"
+      ]
     },
     {
-      "article_count": 1,
+      "article_count": 4,
       "articles": [
         {
           "article_published_at": "2026-04-22T07:00:00+09:00",
@@ -582,36 +970,18 @@
           "relevance_level": "high",
           "source": "ceoscoredaily.com",
           "summary": "정석호 한국의결권자문대표가 21일 서울 한국프레스센터 기자회견장에서 열린 2026 CEO스코어데일리 산업정책포럼에서 ‘이재명 정부 1년 기업 지배구조 혁신 위한 도전과 과제’를 주제로 한 발표를 통해 최근 행동주의펀드의 양태가 다각화되고 있다고 분석했다.",
+          "theme_group": "activism_trend",
+          "theme_groups": [
+            "activism_trend",
+            "valueup_return"
+          ],
           "title": "[2026 산업·정책포럼] 정석호 한국의결권자문대표 “행동주의펀드 양태 다각화, 활동 확대”",
           "title_hash": "2ea6451213779b7c297efff8",
           "topic_keywords": [
             "행동주의",
             "지배구조"
           ]
-        }
-      ],
-      "cluster_key": "ab2946e535cf9fad",
-      "companies": [],
-      "created_at": "2026-04-27T07:22:37.626930+09:00",
-      "guid": null,
-      "is_followup": false,
-      "keywords": [
-        "행동주의",
-        "지배구조"
-      ],
-      "last_article_at": "2026-04-22T07:00:00+09:00",
-      "last_article_seen_at": "2026-04-27T07:22:37.626930+09:00",
-      "published_at": null,
-      "relevance_level": "high",
-      "representative_title": "[2026 산업·정책포럼] 정석호 한국의결권자문대표 행동주의펀드 양태 다각화, 활동 확대",
-      "representative_title_normalized": "2026 산업 정책포럼 정석호 한국의결권자문대표 행동주의펀드 양태 다각화 활동 확대",
-      "representative_url": "https://www.ceoscoredaily.com//page/view/2026042117471767662",
-      "sequence": 1,
-      "status": "pending"
-    },
-    {
-      "article_count": 1,
-      "articles": [
+        },
         {
           "article_published_at": null,
           "canonical_url": "https://www.msn.com/ko-kr/money/topstories/%ED%96%89%EB%8F%99%EC%A3%BC%EC%9D%98-%ED%8E%80%EB%93%9C-1%EC%84%B8%EB%8C%80-%EA%B0%80-%EB%B3%B8-3%EC%B0%A8-%EC%83%81%EB%B2%95-%EA%B0%9C%EC%A0%95%EC%95%88-%EC%8B%9C%ED%96%89-%EC%A0%84-%EB%A7%88%EC%A7%80%EB%A7%89-%EC%A3%BC%EC%B4%9D/ar-AA21u2pN",
@@ -637,6 +1007,11 @@
           "relevance_level": "high",
           "source": "msn.com",
           "summary": "강대권 라이프자산운용 대표국내 주식 싼 이유, 지배구조 문제“이렇게 바꾸면 더 좋아진다” 설득저평가 기업 발굴 ‘가치투자’ 초점이창환 얼라인파트너스 대표“대형 상장사 번 돈 제대로 쓰라”R＆D 투자나 주주에 돌려줘야‘자본배치’ 균형 바로잡기에 주목2023년 이수만 ...",
+          "theme_group": "activism_trend",
+          "theme_groups": [
+            "activism_trend",
+            "valueup_return"
+          ],
           "title": "‘행동주의 펀드 1세대’가 본 3차 상법 개정안 시행 전 마지막 주총",
           "title_hash": "e0401f1dd2df8269a7bf9757",
           "topic_keywords": [
@@ -645,33 +1020,113 @@
             "지배구조",
             "주총"
           ]
+        },
+        {
+          "article_published_at": null,
+          "canonical_url": "http://www.newstong.co.kr/view3.aspx?allSeq=21&cate=0&cnt=-5&newsNo=6&order=default&seq=14378676&subCate=2&txtSearch=",
+          "canonical_url_hash": "fbad2c4b370bc7ff2e4f0079",
+          "clean_title": "[DB손보 밸류업의 역설] 태워도 남는다…DB손보 자사주 소각, 오너 지배력만 키웠다 - 뉴스통",
+          "company_candidates": [
+            "DB손해보험"
+          ],
+          "date_status": "feed",
+          "feed_category": "env",
+          "feed_name": "env-feed-1",
+          "feed_published_at": "2026-04-27T07:28:44+09:00",
+          "feed_updated_at": "2026-04-27T07:28:44+09:00",
+          "link": "https://www.google.com/url?rct=j&sa=t&url=http://www.newstong.co.kr/view3.aspx%3Fseq%3D14378676%26allSeq%3D21%26txtSearch%3D%26cate%3D0%26cnt%3D-5%26subCate%3D2%26order%3Ddefault%26newsNo%3D6&ct=ga&cd=CAIyGjkxMWE5M2FiMTExYThjY2E6Y29tOmtvOlVT&usg=AOvVaw16apc49ktmPzTRr1ppCR3Z",
+          "low_patterns": [],
+          "normalized_title": "db손보 밸류업의 역설 태워도 남는다…db손보 자사주 소각 오너 지배력만 키웠다 - 뉴스통",
+          "prefixes": [],
+          "published_at": "2026-04-27T07:28:44+09:00",
+          "relevance_keywords": [
+            "행동주의"
+          ],
+          "relevance_level": "high",
+          "source": "newstong.co.kr",
+          "summary": "행동주의 견제 구조 완성. DB손해보험이 추진한 대규모 주주 환원 정책이 밸류업이 아닌 오너 일가의 지배력 방어에 치중하고 있다는 비판이 제기되고 있다.",
+          "theme_group": "activism_trend",
+          "theme_groups": [
+            "activism_trend",
+            "valueup_return"
+          ],
+          "title": "[DB손보 밸류업의 역설] 태워도 남는다…DB손보 자사주 소각, 오너 지배력만 키웠다 - 뉴스통",
+          "title_hash": "454539c02c24534bcf3debfc",
+          "topic_keywords": [
+            "행동주의",
+            "밸류업",
+            "자사주 소각"
+          ]
+        },
+        {
+          "article_published_at": "2026-04-21T18:20:51+09:00",
+          "canonical_url": "https://www.ceoscoredaily.com//page/view/2026042117494326882",
+          "canonical_url_hash": "2ef696290ac8dbc6be535cab",
+          "clean_title": "[2026 산업·정책 포럼] 규제 리스크·행동주의 펀드 이중 공세…기업 지배구조 전면 재정비 해야",
+          "company_candidates": [],
+          "date_status": "article",
+          "feed_category": "env",
+          "feed_name": "env-feed-3",
+          "feed_published_at": "2026-04-21T11:20:00+09:00",
+          "feed_updated_at": "2026-04-21T11:20:00+09:00",
+          "link": "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=69ee960cbfc4405f90b05b202b512814&url=https%3a%2f%2fwww.ceoscoredaily.com%2fpage%2fview%2f2026042117494326882&c=17858558684523206945&mkt=ko-kr",
+          "low_patterns": [],
+          "normalized_title": "2026 산업 정책 포럼 규제 리스크 행동주의 펀드 이중 공세…기업 지배구조 전면 재정비 해야",
+          "prefixes": [],
+          "published_at": "2026-04-21T18:20:51+09:00",
+          "relevance_keywords": [
+            "행동주의"
+          ],
+          "relevance_level": "high",
+          "source": "ceoscoredaily.com",
+          "summary": "이재명 정부 출범 1주년을 앞두고, 잇따른 상법 개정, 공정거래 규제 강화 등으로 기업 지배구조 전반이 중대한 변곡점을 맞고 있다. 전문가들은 날로 수위를 더해 가는 기업규제 리스크와 주주 행동주의라는 이중 압박 속에서, 기업 스스로 지배구조 혁신을 통해 위기를 기회로 전환할 것을 주문했다.",
+          "theme_group": "activism_trend",
+          "theme_groups": [
+            "activism_trend",
+            "valueup_return"
+          ],
+          "title": "[2026 산업·정책 포럼] 규제 리스크·행동주의 펀드 ‘이중 공세’…“기업 지배구조 전면 재정비 해야”",
+          "title_hash": "1dc4b91b0c26740d06e3b693",
+          "topic_keywords": [
+            "행동주의",
+            "지배구조"
+          ]
         }
       ],
-      "cluster_key": "b7e24f6c0a969069",
+      "cluster_key": "ab2946e535cf9fad",
       "companies": [
+        "DB손해보험",
         "가치투자"
       ],
       "created_at": "2026-04-27T07:22:37.626930+09:00",
       "guid": null,
       "is_followup": false,
       "keywords": [
-        "행동주의",
+        "밸류업",
         "얼라인",
+        "자사주 소각",
+        "주총",
         "지배구조",
-        "주총"
+        "행동주의"
       ],
       "last_article_at": "2026-04-22T16:46:02+09:00",
-      "last_article_seen_at": "2026-04-27T07:22:37.626930+09:00",
+      "last_article_seen_at": "2026-04-27T07:47:39.716909+09:00",
       "published_at": null,
       "relevance_level": "high",
-      "representative_title": "행동주의 펀드 1세대가 본 3차 상법 개정안 시행 전 마지막 주총",
-      "representative_title_normalized": "행동주의 펀드 1세대가 본 3차 상법 개정안 시행 전 마지막 주총",
-      "representative_url": "https://www.msn.com/ko-kr/money/topstories/%ED%96%89%EB%8F%99%EC%A3%BC%EC%9D%98-%ED%8E%80%EB%93%9C-1%EC%84%B8%EB%8C%80-%EA%B0%80-%EB%B3%B8-3%EC%B0%A8-%EC%83%81%EB%B2%95-%EA%B0%9C%EC%A0%95%EC%95%88-%EC%8B%9C%ED%96%89-%EC%A0%84-%EB%A7%88%EC%A7%80%EB%A7%89-%EC%A3%BC%EC%B4%9D/ar-AA21u2pN",
+      "representative_title": "행동주의 펀드·주주행동 트렌드",
+      "representative_title_normalized": "2026 산업 정책포럼 정석호 한국의결권자문대표 행동주의펀드 양태 다각화 활동 확대",
+      "representative_url": "https://www.ceoscoredaily.com//page/view/2026042117471767662",
       "sequence": 1,
-      "status": "pending"
+      "status": "pending",
+      "theme_group": "activism_trend",
+      "theme_grouped": true,
+      "theme_groups": [
+        "activism_trend",
+        "valueup_return"
+      ]
     },
     {
-      "article_count": 1,
+      "article_count": 2,
       "articles": [
         {
           "article_published_at": null,
@@ -695,85 +1150,84 @@
           "relevance_level": "high",
           "source": "msn.com",
           "summary": "한국앤컴퍼니 주총에서 2대 주주의 여론전으로 활용됐다는 지적이 나온 한국앤컴퍼니 주주연대를 둘러싼 의혹이 커지고 있다. 주주연대가 오너 일가의 법률 네트워크로 편입되기 위한 수단으로 활용됐다는 비판이 일면서다. 소액주주들의 권익 향상을 위해 자발적으로 설립된 조직이 특 ...",
+          "theme_group": "minority_shareholder",
+          "theme_groups": [
+            "minority_shareholder"
+          ],
           "title": "'겉'은 소액주주 보호, '뒤'는 오너 일가 소송 대리인? 수상한 한국앤컴퍼니 주주연대",
           "title_hash": "4c2984b06feba6f4d9af6feb",
           "topic_keywords": [
             "소액주주",
             "주총"
           ]
+        },
+        {
+          "article_published_at": "2026-04-27T02:30:00+09:00",
+          "canonical_url": "http://www.enewstoday.co.kr/news/articleView.html?idxno=2423325",
+          "canonical_url_hash": "39399609d7682f021dd42bf9",
+          "clean_title": "원아시아 투자, 이사회는 뭐 했나···고려아연 소액주주, 이사진 검찰 고발",
+          "company_candidates": [
+            "고려아연"
+          ],
+          "date_status": "article",
+          "feed_category": "env",
+          "feed_name": "env-feed-4",
+          "feed_published_at": "2026-04-26T19:31:00+09:00",
+          "feed_updated_at": "2026-04-26T19:31:00+09:00",
+          "link": "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=69ee960c81aa4f6294e0b6c1dd1920a3&url=https%3a%2f%2fwww.enewstoday.co.kr%2fnews%2farticleView.html%3fidxno%3d2423325&c=12029727195409651866&mkt=ko-kr",
+          "low_patterns": [],
+          "normalized_title": "원아시아 투자 이사회는 뭐 했나 고려아연 소액주주 이사진 검찰 고발",
+          "prefixes": [],
+          "published_at": "2026-04-27T02:30:00+09:00",
+          "relevance_keywords": [
+            "소액주주"
+          ],
+          "relevance_level": "high",
+          "source": "enewstoday.co.kr",
+          "summary": "[이뉴스투데이 노태하 기자] 고려아연 소액주주연합이 원아시아파트너스 펀드 투자와 관련해 회사 사외이사들을 검찰에 고발하고 금융당국에 진정서를 제출하며 논란이 확대되고 있다.소액주주연합은 해당 투자 건과 관련해 사외이사들을 서울중앙지방검찰청에 고발하는 동시에 금융위원회에 진정서를 제출했 ...",
+          "theme_group": "minority_shareholder",
+          "theme_groups": [
+            "minority_shareholder",
+            "board_audit"
+          ],
+          "title": "“원아시아 투자, 이사회는 뭐 했나”···고려아연 소액주주, 이사진 검찰 고발",
+          "title_hash": "5b882abb686e944776dd1a84",
+          "topic_keywords": [
+            "소액주주",
+            "이사회"
+          ]
         }
       ],
       "cluster_key": "e3d3900d0c45ee8e",
-      "companies": [],
+      "companies": [
+        "고려아연"
+      ],
       "created_at": "2026-04-27T07:22:37.626930+09:00",
       "guid": null,
       "is_followup": false,
       "keywords": [
         "소액주주",
+        "이사회",
         "주총"
       ],
-      "last_article_at": "2026-04-22T11:00:00+09:00",
-      "last_article_seen_at": "2026-04-27T07:22:37.626930+09:00",
+      "last_article_at": "2026-04-27T02:30:00+09:00",
+      "last_article_seen_at": "2026-04-27T07:47:39.716909+09:00",
       "published_at": null,
       "relevance_level": "high",
-      "representative_title": "겉은 소액주주 보호, 뒤는 오너 일가 소송 대리인? 수상한 한국앤컴퍼니 주주연대",
+      "representative_title": "고려아연 소액주주·주주연대 분쟁",
       "representative_title_normalized": "겉은 소액주주 보호 뒤는 오너 일가 소송 대리인 수상한 한국앤컴퍼니 주주연대",
       "representative_url": "https://www.msn.com/ko-kr/news/other/%EA%B2%89-%EC%9D%80-%EC%86%8C%EC%95%A1%EC%A3%BC%EC%A3%BC-%EB%B3%B4%ED%98%B8-%EB%92%A4-%EB%8A%94-%EC%98%A4%EB%84%88-%EC%9D%BC%EA%B0%80-%EC%86%8C%EC%86%A1-%EB%8C%80%EB%A6%AC%EC%9D%B8-%EC%88%98%EC%83%81%ED%95%9C-%ED%95%9C%EA%B5%AD%EC%95%A4%EC%BB%B4%ED%8D%BC%EB%8B%88-%EC%A3%BC%EC%A3%BC%EC%97%B0%EB%8C%80/ar-AA21saRb",
       "sequence": 1,
-      "status": "pending"
+      "status": "pending",
+      "theme_group": "minority_shareholder",
+      "theme_grouped": true,
+      "theme_groups": [
+        "board_audit",
+        "minority_shareholder"
+      ]
     },
     {
-      "article_count": 1,
-      "articles": [
-        {
-          "article_published_at": null,
-          "canonical_url": "https://www.topdaily.kr/articles/109790",
-          "canonical_url_hash": "74cfcfd8b3b4bf7eac4a1ae4",
-          "clean_title": "표결 실종 에스아이리소스 임시 주총, 의혹만 남겼다",
-          "company_candidates": [],
-          "date_status": "feed",
-          "feed_category": "env",
-          "feed_name": "env-feed-4",
-          "feed_published_at": "2026-04-22T07:13:00+09:00",
-          "feed_updated_at": "2026-04-22T07:13:00+09:00",
-          "link": "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=69ee902e6e69476f8b275681db9fafef&url=https%3a%2f%2fwww.topdaily.kr%2farticles%2f109790&c=10309327007413800379&mkt=ko-kr",
-          "low_patterns": [],
-          "normalized_title": "표결 실종 에스아이리소스 임시 주총 의혹만 남겼다",
-          "prefixes": [],
-          "published_at": "2026-04-22T07:13:00+09:00",
-          "relevance_keywords": [
-            "주총"
-          ],
-          "relevance_level": "medium",
-          "source": "topdaily.kr",
-          "summary": "의결 과정에서 표결을 생략한 주총 절차 자체에 대한 의문이 제기됐다. 이날 주총 출석 주주의 주식수는 4574만7849주로 의결권 있는 발행주식총수의 약 59%가 참석한 것으로 전해졌다. 회사 측은 최경덕 회장 지분율을 포함해 경영권을 지키기 위해 확보한 지분율이 총 45.37% (3515만5829주)라고 제시했다.",
-          "title": "'표결 실종' 에스아이리소스 임시 주총, 의혹만 남겼다",
-          "title_hash": "424a5f2fed4794e0de874491",
-          "topic_keywords": [
-            "주총"
-          ]
-        }
-      ],
-      "cluster_key": "584a5a70dee7c3c1",
-      "companies": [],
-      "created_at": "2026-04-27T07:22:37.626930+09:00",
-      "guid": null,
-      "is_followup": false,
-      "keywords": [
-        "주총"
-      ],
-      "last_article_at": "2026-04-22T07:13:00+09:00",
-      "last_article_seen_at": "2026-04-27T07:22:37.626930+09:00",
-      "published_at": null,
-      "relevance_level": "medium",
-      "representative_title": "표결 실종 에스아이리소스 임시 주총, 의혹만 남겼다",
-      "representative_title_normalized": "표결 실종 에스아이리소스 임시 주총 의혹만 남겼다",
-      "representative_url": "https://www.topdaily.kr/articles/109790",
-      "sequence": 1,
-      "status": "pending"
-    },
-    {
-      "article_count": 1,
+      "article_count": 2,
       "articles": [
         {
           "article_published_at": "2026-04-22T16:16:36+09:00",
@@ -797,260 +1251,84 @@
           "relevance_level": "high",
           "source": "mk.co.kr",
           "summary": "법무법인 화우가 최근 인수·합병(M&A) 조직 확대와 전략적 인재 영입을 앞세워 기업 자문 시장에서 존재감을 키우고 있다. 전통적으로 기업자문과 송무 분야에서 강점을 보여온 화우는 최근 경영권 분쟁, 금융 규제, 크로스보더 M&A 거래까지 아우르는 복합 자문 역량을 전면에 내세우며 M&A 시장 공략에 속도를 내고 있다. 화우는 2014년 M&A팀을 본격 출 ...",
+          "theme_group": "control_dispute",
+          "theme_groups": [
+            "control_dispute"
+          ],
           "title": "법무법인 화우, 경영권 분쟁부터 해외 딜까지 … 기업 자문 M&A 역량 확대",
           "title_hash": "33433e008e51e6379cdf7761",
           "topic_keywords": [
             "경영권 분쟁"
           ]
+        },
+        {
+          "article_published_at": "2026-04-23T00:00:00+09:00",
+          "canonical_url": "https://news.jkn.co.kr/post/892805",
+          "canonical_url_hash": "c799b7637f926ed99123f148",
+          "clean_title": "영풍, 고려아연 경영권 분쟁 심화와 비철금속 섹터 강세 속 1%대 반등 성공",
+          "company_candidates": [
+            "고려아연"
+          ],
+          "date_status": "article",
+          "feed_category": "env",
+          "feed_name": "env-feed-7",
+          "feed_published_at": "2026-04-23T08:32:00+09:00",
+          "feed_updated_at": "2026-04-23T08:32:00+09:00",
+          "link": "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=69ee960df2a64e9681fd99e7801c7b75&url=https%3a%2f%2fnews.jkn.co.kr%2fpost%2f892805&c=4790231942012820115&mkt=ko-kr",
+          "low_patterns": [
+            "장중"
+          ],
+          "normalized_title": "영풍 고려아연 경영권 분쟁 심화와 비철금속 섹터 강세 속 1%대 반등 성공",
+          "prefixes": [],
+          "published_at": "2026-04-23T00:00:00+09:00",
+          "relevance_keywords": [
+            "경영권 분쟁"
+          ],
+          "relevance_level": "high",
+          "source": "news.jkn.co.kr",
+          "summary": "영풍(000670)이 고려아연과의 경영권 분쟁이 격화되는 가운데 비철금속 섹터의 전반적인 상승세에 힘입어 1%대 반등을 기록했다. 금일 주가는 장중 변동성을 나타냈으나 매수 수급이 유입되며 666,600원선에서 마감했다. 공정거래위원회의 조사와 법적 가처분 신청 결과 등 지배구조와 관련된 불확실성이 향후 주가 향방의 핵심 변수로 작용할 전망이다.",
+          "theme_group": "control_dispute",
+          "theme_groups": [
+            "control_dispute",
+            "valueup_return"
+          ],
+          "title": "영풍, 고려아연 경영권 분쟁 심화와 비철금속 섹터 강세 속 1%대 반등 성공",
+          "title_hash": "ff74f9c5cc1510522cd8bac9",
+          "topic_keywords": [
+            "경영권 분쟁",
+            "지배구조"
+          ]
         }
       ],
       "cluster_key": "d2caea4852888818",
-      "companies": [],
+      "companies": [
+        "고려아연"
+      ],
       "created_at": "2026-04-27T07:22:37.626930+09:00",
       "guid": null,
       "is_followup": false,
       "keywords": [
-        "경영권 분쟁"
+        "경영권 분쟁",
+        "지배구조"
       ],
-      "last_article_at": "2026-04-22T16:16:36+09:00",
-      "last_article_seen_at": "2026-04-27T07:22:37.626930+09:00",
+      "last_article_at": "2026-04-23T00:00:00+09:00",
+      "last_article_seen_at": "2026-04-27T07:47:39.716909+09:00",
       "published_at": null,
       "relevance_level": "high",
-      "representative_title": "법무법인 화우, 경영권 분쟁부터 해외 딜까지 … 기업 자문 M&A 역량 확대",
+      "representative_title": "경영권 분쟁 관련",
       "representative_title_normalized": "법무법인 화우 경영권 분쟁부터 해외 딜까지 … 기업 자문 m&a 역량 확대",
       "representative_url": "https://www.mk.co.kr/news/special-edition/12024133",
       "sequence": 1,
-      "status": "pending"
+      "status": "pending",
+      "theme_group": "control_dispute",
+      "theme_grouped": true,
+      "theme_groups": [
+        "control_dispute",
+        "valueup_return"
+      ]
     },
     {
-      "article_count": 1,
-      "articles": [
-        {
-          "article_published_at": null,
-          "canonical_url": "https://www.msn.com/ko-kr/money/%EC%9D%BC%EB%B0%98/%EA%B2%BD%EC%98%81-%EC%A0%95%EC%83%81%ED%99%94-%EC%B2%AB%EB%B0%9C-%EB%8F%99%EC%84%B1%EC%A0%9C%EC%95%BD-%EB%AA%A8%EC%A1%B0%EB%A6%AC-%EB%B0%94%EA%BF%A8%EB%8B%A4-%EC%9D%B4%EC%82%AC%ED%9A%8C-%ED%86%BA%EC%95%84%EB%B3%B4%EA%B8%B0/ar-AA21LTy8",
-          "canonical_url_hash": "117d9b9e577b7bb393103a5e",
-          "clean_title": "경영 정상화 첫발…동성제약, 모조리 바꿨다 [이사회 톺아보기]",
-          "company_candidates": [
-            "동성제약",
-            "한국금융",
-            "태광산업"
-          ],
-          "date_status": "feed",
-          "feed_category": "env",
-          "feed_name": "env-feed-8",
-          "feed_published_at": "2026-04-26T22:00:00+09:00",
-          "feed_updated_at": "2026-04-26T22:00:00+09:00",
-          "link": "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=69ee903071e1441aa202ca682f291cb9&url=https%3a%2f%2fwww.msn.com%2fko-kr%2fmoney%2f%25EC%259D%25BC%25EB%25B0%2598%2f%25EA%25B2%25BD%25EC%2598%2581-%25EC%25A0%2595%25EC%2583%2581%25ED%2599%2594-%25EC%25B2%25AB%25EB%25B0%259C-%25EB%258F%2599%25EC%2584%25B1%25EC%25A0%259C%25EC%2595%25BD-%25EB%25AA%25A8%25EC%25A1%25B0%25EB%25A6%25AC-%25EB%25B0%2594%25EA%25BF%25A8%25EB%258B%25A4-%25EC%259D%25B4%25EC%2582%25AC%25ED%259A%258C-%25ED%2586%25BA%25EC%2595%2584%25EB%25B3%25B4%25EA%25B8%25B0%2far-AA21LTy8&c=7740537304450235111&mkt=ko-kr",
-          "low_patterns": [],
-          "normalized_title": "경영 정상화 첫발…동성제약 모조리 바꿨다 이사회 톺아보기",
-          "prefixes": [],
-          "published_at": "2026-04-26T22:00:00+09:00",
-          "relevance_keywords": [
-            "이사회"
-          ],
-          "relevance_level": "medium",
-          "source": "msn.com",
-          "summary": "[한국금융신문 양현우 기자] 동성제약이 유암코와 태광산업 컨소시엄을 새 주인으로 맞이했다. 새롭게 바뀐 동성제약은 신임 대표이사와 회계·법률 전문가 중심 이사회를 구성하며 경영 정상화에 속도를 내고 있다. 분쟁 리스크를 털어낸 동성제약이 대규모 자금 수혈과 경영 개편을 통해 실적 턴어라운드를 향한 의지를 다지는 모습이다. 대표이사부터 사외이사까지 전면 교체 ...",
-          "title": "경영 정상화 '첫발'…동성제약, 모조리 바꿨다 [이사회 톺아보기]",
-          "title_hash": "dd47d8e92df62e440ab2e19d",
-          "topic_keywords": [
-            "이사회"
-          ]
-        }
-      ],
-      "cluster_key": "a51b36d84830c130",
-      "companies": [
-        "동성제약",
-        "한국금융",
-        "태광산업"
-      ],
-      "created_at": "2026-04-27T07:22:37.626930+09:00",
-      "guid": null,
-      "is_followup": false,
-      "keywords": [
-        "이사회"
-      ],
-      "last_article_at": "2026-04-26T22:00:00+09:00",
-      "last_article_seen_at": "2026-04-27T07:22:37.626930+09:00",
-      "published_at": null,
-      "relevance_level": "medium",
-      "representative_title": "경영 정상화 첫발…동성제약, 모조리 바꿨다 [이사회 톺아보기]",
-      "representative_title_normalized": "경영 정상화 첫발…동성제약 모조리 바꿨다 이사회 톺아보기",
-      "representative_url": "https://www.msn.com/ko-kr/money/%EC%9D%BC%EB%B0%98/%EA%B2%BD%EC%98%81-%EC%A0%95%EC%83%81%ED%99%94-%EC%B2%AB%EB%B0%9C-%EB%8F%99%EC%84%B1%EC%A0%9C%EC%95%BD-%EB%AA%A8%EC%A1%B0%EB%A6%AC-%EB%B0%94%EA%BF%A8%EB%8B%A4-%EC%9D%B4%EC%82%AC%ED%9A%8C-%ED%86%BA%EC%95%84%EB%B3%B4%EA%B8%B0/ar-AA21LTy8",
-      "sequence": 1,
-      "status": "pending"
-    },
-    {
-      "article_count": 1,
-      "articles": [
-        {
-          "article_published_at": "2026-04-21T10:13:44+09:00",
-          "canonical_url": "https://biz.newdaily.co.kr/site/data/html/2026/04/21/2026042100081.html",
-          "canonical_url_hash": "e53369e00d37afa5ea466eda",
-          "clean_title": "동성제약, 대표 교체-이사회 재편-자금 수혈에도 정상화 기대난",
-          "company_candidates": [
-            "동성제약",
-            "태광산업"
-          ],
-          "date_status": "article",
-          "feed_category": "env",
-          "feed_name": "env-feed-8",
-          "feed_published_at": "2026-04-21T03:13:00+09:00",
-          "feed_updated_at": "2026-04-21T03:13:00+09:00",
-          "link": "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=69ee903071e1441aa202ca682f291cb9&url=https%3a%2f%2fbiz.newdaily.co.kr%2fsite%2fdata%2fhtml%2f2026%2f04%2f21%2f2026042100081.html&c=12601053387897207594&mkt=ko-kr",
-          "low_patterns": [],
-          "normalized_title": "동성제약 대표 교체-이사회 재편-자금 수혈에도 정상화 기대난",
-          "prefixes": [],
-          "published_at": "2026-04-21T10:13:44+09:00",
-          "relevance_keywords": [
-            "이사회"
-          ],
-          "relevance_level": "medium",
-          "source": "biz.newdaily.co.kr",
-          "summary": "동성제약이 대표이사 교체와 이사회 재편, 대규모 자금 수혈까지 잇달아 단행하면서 정상화 체제전환에 속도를 내고 있다. 유암코(연합자산관리)-태광산업 컨소시엄 체제도 빠르게 자리 잡는 모습이다.그러나 자본 급감과 대규모 손상차손이 한꺼번에 반영되면서 재무 부담은 오히려 선명해졌다. 회생인가에 대한 즉시항고와 거래정지 지속까지 겹친 만큼 동성제약의 정상화 여부 ...",
-          "title": "동성제약, 대표 교체-이사회 재편-자금 수혈에도 정상화 기대난",
-          "title_hash": "8630077fc530f07a7dd2a4d2",
-          "topic_keywords": [
-            "이사회"
-          ]
-        }
-      ],
-      "cluster_key": "81ba3e5173b3784c",
-      "companies": [
-        "동성제약",
-        "태광산업"
-      ],
-      "created_at": "2026-04-27T07:22:37.626930+09:00",
-      "guid": null,
-      "is_followup": false,
-      "keywords": [
-        "이사회"
-      ],
-      "last_article_at": "2026-04-21T10:13:44+09:00",
-      "last_article_seen_at": "2026-04-27T07:22:37.626930+09:00",
-      "published_at": null,
-      "relevance_level": "medium",
-      "representative_title": "동성제약, 대표 교체-이사회 재편-자금 수혈에도 정상화 기대난",
-      "representative_title_normalized": "동성제약 대표 교체-이사회 재편-자금 수혈에도 정상화 기대난",
-      "representative_url": "https://biz.newdaily.co.kr/site/data/html/2026/04/21/2026042100081.html",
-      "sequence": 1,
-      "status": "pending"
-    },
-    {
-      "article_count": 1,
-      "articles": [
-        {
-          "article_published_at": "2026-04-24T17:22:01+09:00",
-          "canonical_url": "https://www.digitaltoday.co.kr/news/articleView.html?idxno=660205",
-          "canonical_url_hash": "b312530bccdcf06fc27537b6",
-          "clean_title": "효성중공업, 6월2일 임시주총 소집 결의…정관 변경·감사위원 겸 사외이사 선임 추진",
-          "company_candidates": [
-            "효성중공업"
-          ],
-          "date_status": "article",
-          "feed_category": "env",
-          "feed_name": "env-feed-9",
-          "feed_published_at": "2026-04-24T10:22:00+09:00",
-          "feed_updated_at": "2026-04-24T10:22:00+09:00",
-          "link": "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=69ee903081244a53a3c26bd47f88f9ae&url=https%3a%2f%2fwww.digitaltoday.co.kr%2fnews%2farticleView.html%3fidxno%3d660205&c=14717260906473249311&mkt=ko-kr",
-          "low_patterns": [],
-          "normalized_title": "효성중공업 6월2일 임시주총 소집 결의…정관 변경 감사위원 겸 사외이사 선임 추진",
-          "prefixes": [],
-          "published_at": "2026-04-24T17:22:01+09:00",
-          "relevance_keywords": [
-            "주총",
-            "주주총회"
-          ],
-          "relevance_level": "medium",
-          "source": "digitaltoday.co.kr",
-          "summary": "[디지털투데이 AI공시팀] 전력 설비·건설 전문 기업 효성중공업(298040)이 6월2일 임시주주총회를 열고 정관 일부 변경과 감사위원회 위원이 되는 사외이사 선임 안건을 다룬다고 24일 공시했다.효성중공업은 이번 임시주총을 2026년 6월2일 오전 10시 서울특별시 마포구 마포대로 119(공덕동) 효성빌딩 지하1층 강당에서 개최하기로 했다. 의결권행사기준 ...",
-          "title": "효성중공업, 6월2일 임시주총 소집 결의…정관 변경·감사위원 겸 사외이사 선임 추진",
-          "title_hash": "1e690a3f3c10cab6a70feb69",
-          "topic_keywords": [
-            "주총",
-            "주주총회"
-          ]
-        }
-      ],
-      "cluster_key": "0202c5ece424b399",
-      "companies": [
-        "효성중공업"
-      ],
-      "created_at": "2026-04-27T07:22:37.626930+09:00",
-      "guid": null,
-      "is_followup": false,
-      "keywords": [
-        "주총",
-        "주주총회"
-      ],
-      "last_article_at": "2026-04-24T17:22:01+09:00",
-      "last_article_seen_at": "2026-04-27T07:22:37.626930+09:00",
-      "published_at": null,
-      "relevance_level": "medium",
-      "representative_title": "효성중공업, 6월2일 임시주총 소집 결의…정관 변경·감사위원 겸 사외이사 선임 추진",
-      "representative_title_normalized": "효성중공업 6월2일 임시주총 소집 결의…정관 변경 감사위원 겸 사외이사 선임 추진",
-      "representative_url": "https://www.digitaltoday.co.kr/news/articleView.html?idxno=660205",
-      "sequence": 1,
-      "status": "pending"
-    },
-    {
-      "article_count": 1,
-      "articles": [
-        {
-          "article_published_at": "2026-04-21T15:43:01+09:00",
-          "canonical_url": "https://www.digitaltoday.co.kr/news/articleView.html?idxno=658928",
-          "canonical_url_hash": "038180b6d64684ce18da5a83",
-          "clean_title": "한국수출포장공업, 5월7일 임시주총 소집…감사 장갑순 선임 안건",
-          "company_candidates": [],
-          "date_status": "article",
-          "feed_category": "env",
-          "feed_name": "env-feed-9",
-          "feed_published_at": "2026-04-21T08:43:00+09:00",
-          "feed_updated_at": "2026-04-21T08:43:00+09:00",
-          "link": "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=69ee903081244a53a3c26bd47f88f9ae&url=https%3a%2f%2fwww.digitaltoday.co.kr%2fnews%2farticleView.html%3fidxno%3d658928&c=5489934421162342064&mkt=ko-kr",
-          "low_patterns": [],
-          "normalized_title": "한국수출포장공업 5월7일 임시주총 소집…감사 장갑순 선임 안건",
-          "prefixes": [],
-          "published_at": "2026-04-21T15:43:01+09:00",
-          "relevance_keywords": [
-            "감사 선임"
-          ],
-          "relevance_level": "high",
-          "source": "digitaltoday.co.kr",
-          "summary": "[디지털투데이 AI공시팀] 골판지 제조 기업 한국수출포장공업(002200)은 임시주주총회를 열고 감사 선임 안건을 상정한다고 21일 공시했다.임시주주총회는 2026년5월7일 09 : 00에 서울 서초구 강남대로 27 aT센터 창조룸Ⅱ 4층에서 진행된다. 의결권행사기준일은 2026년4월10일이며, 이사회결의일은 2026년4월21일로 기재됐다.이번 주총 제1호 ...",
-          "title": "한국수출포장공업, 5월7일 임시주총 소집…감사 장갑순 선임 안건",
-          "title_hash": "ab41bc96182dfb7b3f4a3a5b",
-          "topic_keywords": [
-            "감사 선임",
-            "이사회",
-            "주총",
-            "주주총회"
-          ]
-        }
-      ],
-      "cluster_key": "59c35c53426c29f2",
-      "companies": [],
-      "created_at": "2026-04-27T07:22:37.626930+09:00",
-      "guid": null,
-      "is_followup": false,
-      "keywords": [
-        "감사 선임",
-        "이사회",
-        "주총",
-        "주주총회"
-      ],
-      "last_article_at": "2026-04-21T15:43:01+09:00",
-      "last_article_seen_at": "2026-04-27T07:22:37.626930+09:00",
-      "published_at": null,
-      "relevance_level": "high",
-      "representative_title": "한국수출포장공업, 5월7일 임시주총 소집…감사 장갑순 선임 안건",
-      "representative_title_normalized": "한국수출포장공업 5월7일 임시주총 소집…감사 장갑순 선임 안건",
-      "representative_url": "https://www.digitaltoday.co.kr/news/articleView.html?idxno=658928",
-      "sequence": 1,
-      "status": "pending"
-    },
-    {
-      "article_count": 1,
+      "article_count": 2,
       "articles": [
         {
           "article_published_at": null,
@@ -1078,39 +1356,17 @@
           "relevance_level": "medium",
           "source": "msn.com",
           "summary": "신한금융그룹이 기존 주주환원율 50% 목표를 넘어 성장성과 연계된 ‘상한 없는 주주환원’ 체계로 전환한다. 비과세 배당과 주당배당금(DPS) 확대를 병행해 주주가치 제고를 구조적으로 끌어올린다는 전략이다. 신한금융그룹은 23일 기업가치 제고 계획인 ‘신한 밸류업 2.0’을 발표했다고 밝혔다. 이번 계획은 기존 목표를 조기 달성한 데 따른 후속 전략으로, 주 ...",
+          "theme_group": "valueup_return",
+          "theme_groups": [
+            "valueup_return"
+          ],
           "title": "신한금융, ‘밸류업 2.0’ 공개…“ROE 연동·상한 없는 주주환원”",
           "title_hash": "f2533153788ccb9c16f6d3ce",
           "topic_keywords": [
             "밸류업",
             "주주환원"
           ]
-        }
-      ],
-      "cluster_key": "345d19afc884a821",
-      "companies": [
-        "신한금융",
-        "신한금융그룹"
-      ],
-      "created_at": "2026-04-27T07:22:37.626930+09:00",
-      "guid": null,
-      "is_followup": false,
-      "keywords": [
-        "밸류업",
-        "주주환원"
-      ],
-      "last_article_at": "2026-04-23T06:20:42+09:00",
-      "last_article_seen_at": "2026-04-27T07:22:37.626930+09:00",
-      "published_at": null,
-      "relevance_level": "medium",
-      "representative_title": "신한금융, 밸류업 2.0 공개…ROE 연동·상한 없는 주주환원",
-      "representative_title_normalized": "신한금융 밸류업 2 0 공개…roe 연동 상한 없는 주주환원",
-      "representative_url": "https://www.msn.com/ko-kr/news/other/%EC%8B%A0%ED%95%9C%EA%B8%88%EC%9C%B5-%EB%B0%B8%EB%A5%98%EC%97%85-20-%EA%B3%B5%EA%B0%9C-roe-%EC%97%B0%EB%8F%99-%EC%83%81%ED%95%9C-%EC%97%86%EB%8A%94-%EC%A3%BC%EC%A3%BC%ED%99%98%EC%9B%90/ar-AA21w05B",
-      "sequence": 1,
-      "status": "pending"
-    },
-    {
-      "article_count": 1,
-      "articles": [
+        },
         {
           "article_published_at": "2026-04-26T13:57:00+09:00",
           "canonical_url": "https://www.mt.co.kr/finance/2026/04/26/2026042611244947565",
@@ -1135,6 +1391,10 @@
           "relevance_level": "medium",
           "source": "mt.co.kr",
           "summary": "4대 금융지주(KB·신한·하나·우리)가 지난해 1분기보다 주당 현금배당 규모를 키운 데 이어 지주별 자사주 전량 소각과 성장률 연동 주주 환원 계획을 내놓는 등 주주 환원 체계를 고도화하는 모습이다.",
+          "theme_group": "valueup_return",
+          "theme_groups": [
+            "valueup_return"
+          ],
           "title": "자사주 2.3조 소각·환원율 50%…'밸류업' 판 짜는 금융지주들",
           "title_hash": "f2fdb568ee3ec36d404ec524",
           "topic_keywords": [
@@ -1142,78 +1402,33 @@
           ]
         }
       ],
-      "cluster_key": "c8f24dc20c469e3b",
+      "cluster_key": "345d19afc884a821",
       "companies": [
-        "금융지주"
+        "금융지주",
+        "신한금융",
+        "신한금융그룹"
       ],
       "created_at": "2026-04-27T07:22:37.626930+09:00",
       "guid": null,
       "is_followup": false,
       "keywords": [
-        "밸류업"
+        "밸류업",
+        "주주환원"
       ],
       "last_article_at": "2026-04-26T13:57:00+09:00",
       "last_article_seen_at": "2026-04-27T07:22:37.626930+09:00",
       "published_at": null,
       "relevance_level": "medium",
-      "representative_title": "자사주 2.3조 소각·환원율 50%…밸류업 판 짜는 금융지주들",
-      "representative_title_normalized": "자사주 2 3조 소각 환원율 50%…밸류업 판 짜는 금융지주들",
-      "representative_url": "https://www.mt.co.kr/finance/2026/04/26/2026042611244947565",
+      "representative_title": "밸류업·주주환원·지배구조",
+      "representative_title_normalized": "신한금융 밸류업 2 0 공개…roe 연동 상한 없는 주주환원",
+      "representative_url": "https://www.msn.com/ko-kr/news/other/%EC%8B%A0%ED%95%9C%EA%B8%88%EC%9C%B5-%EB%B0%B8%EB%A5%98%EC%97%85-20-%EA%B3%B5%EA%B0%9C-roe-%EC%97%B0%EB%8F%99-%EC%83%81%ED%95%9C-%EC%97%86%EB%8A%94-%EC%A3%BC%EC%A3%BC%ED%99%98%EC%9B%90/ar-AA21w05B",
       "sequence": 1,
-      "status": "pending"
-    },
-    {
-      "article_count": 1,
-      "articles": [
-        {
-          "article_published_at": null,
-          "canonical_url": "https://www.msn.com/ko-kr/money/%EC%9E%AC%EB%AC%B4-%EA%B7%9C%EC%A0%95/%EC%A3%BC%EC%B4%9D-%EB%8B%A4-%EB%81%9D%EB%82%AC%EB%8A%94%EB%8D%B0-%EA%B8%88%EC%9C%B5%EA%B6%8C-%EC%A7%80%EB%B0%B0%EA%B5%AC%EC%A1%B0-%EA%B0%9C%EC%84%A0%EC%95%88-%EC%9D%B4%EB%8B%AC-%EB%B0%9C%ED%91%9C%EB%8F%84-%EB%82%9C%EB%A7%9D/ar-AA21JEwY",
-          "canonical_url_hash": "095328671592eb11a5a6e80f",
-          "clean_title": "주총 다 끝났는데…금융권 지배구조 개선안, 이달 발표도 난망",
-          "company_candidates": [],
-          "date_status": "feed",
-          "feed_category": "env",
-          "feed_name": "env-feed-13",
-          "feed_published_at": "2026-04-26T03:10:39+09:00",
-          "feed_updated_at": "2026-04-26T03:10:39+09:00",
-          "link": "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=69ee9032ceac44ebaa230ea545c02692&url=https%3a%2f%2fwww.msn.com%2fko-kr%2fmoney%2f%25EC%259E%25AC%25EB%25AC%25B4-%25EA%25B7%259C%25EC%25A0%2595%2f%25EC%25A3%25BC%25EC%25B4%259D-%25EB%258B%25A4-%25EB%2581%259D%25EB%2582%25AC%25EB%258A%2594%25EB%258D%25B0-%25EA%25B8%2588%25EC%259C%25B5%25EA%25B6%258C-%25EC%25A7%2580%25EB%25B0%25B0%25EA%25B5%25AC%25EC%25A1%25B0-%25EA%25B0%259C%25EC%2584%25A0%25EC%2595%2588-%25EC%259D%25B4%25EB%258B%25AC-%25EB%25B0%259C%25ED%2591%259C%25EB%258F%2584-%25EB%2582%259C%25EB%25A7%259D%2far-AA21JEwY&c=12216288438564069030&mkt=ko-kr",
-          "low_patterns": [],
-          "normalized_title": "주총 다 끝났는데…금융권 지배구조 개선안 이달 발표도 난망",
-          "prefixes": [],
-          "published_at": "2026-04-26T03:10:39+09:00",
-          "relevance_keywords": [
-            "지배구조",
-            "주총"
-          ],
-          "relevance_level": "medium",
-          "source": "msn.com",
-          "summary": "이재명 대통령이 지적한 금융권 ‘부패한 이너서클(소수권력집단)’ 문제를 근절할 금융당국의 지배구조 개선안 발표가 차일피일 미뤄지고 있다. 당국은 사외이사 및 임원후보추천위원회의 독립성 확보 방안을 보강하며 막바지 작업에 한창인 ...",
-          "title": "“주총 다 끝났는데”…금융권 지배구조 개선안, 이달 발표도 '난망'",
-          "title_hash": "0403963e4f8aaabee191578a",
-          "topic_keywords": [
-            "지배구조",
-            "주총"
-          ]
-        }
-      ],
-      "cluster_key": "19a8733b9b9e1559",
-      "companies": [],
-      "created_at": "2026-04-27T07:22:37.626930+09:00",
-      "guid": null,
-      "is_followup": false,
-      "keywords": [
-        "지배구조",
-        "주총"
-      ],
-      "last_article_at": "2026-04-26T03:10:39+09:00",
-      "last_article_seen_at": "2026-04-27T07:22:37.626930+09:00",
-      "published_at": null,
-      "relevance_level": "medium",
-      "representative_title": "주총 다 끝났는데…금융권 지배구조 개선안, 이달 발표도 난망",
-      "representative_title_normalized": "주총 다 끝났는데…금융권 지배구조 개선안 이달 발표도 난망",
-      "representative_url": "https://www.msn.com/ko-kr/money/%EC%9E%AC%EB%AC%B4-%EA%B7%9C%EC%A0%95/%EC%A3%BC%EC%B4%9D-%EB%8B%A4-%EB%81%9D%EB%82%AC%EB%8A%94%EB%8D%B0-%EA%B8%88%EC%9C%B5%EA%B6%8C-%EC%A7%80%EB%B0%B0%EA%B5%AC%EC%A1%B0-%EA%B0%9C%EC%84%A0%EC%95%88-%EC%9D%B4%EB%8B%AC-%EB%B0%9C%ED%91%9C%EB%8F%84-%EB%82%9C%EB%A7%9D/ar-AA21JEwY",
-      "sequence": 1,
-      "status": "pending"
+      "status": "pending",
+      "theme_group": "valueup_return",
+      "theme_grouped": true,
+      "theme_groups": [
+        "valueup_return"
+      ]
     }
   ],
   "published_clusters": [
@@ -1270,6 +1485,252 @@
       "representative_url": "https://news.jkn.co.kr/post/895473",
       "sequence": 1,
       "status": "published"
+    },
+    {
+      "article_count": 6,
+      "articles": [
+        {
+          "article_published_at": null,
+          "canonical_url": "https://www.topdaily.kr/articles/109790",
+          "canonical_url_hash": "74cfcfd8b3b4bf7eac4a1ae4",
+          "clean_title": "표결 실종 에스아이리소스 임시 주총, 의혹만 남겼다",
+          "company_candidates": [],
+          "date_status": "feed",
+          "feed_category": "env",
+          "feed_name": "env-feed-4",
+          "feed_published_at": "2026-04-22T07:13:00+09:00",
+          "feed_updated_at": "2026-04-22T07:13:00+09:00",
+          "link": "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=69ee902e6e69476f8b275681db9fafef&url=https%3a%2f%2fwww.topdaily.kr%2farticles%2f109790&c=10309327007413800379&mkt=ko-kr",
+          "low_patterns": [],
+          "normalized_title": "표결 실종 에스아이리소스 임시 주총 의혹만 남겼다",
+          "prefixes": [],
+          "published_at": "2026-04-22T07:13:00+09:00",
+          "relevance_keywords": [
+            "주총"
+          ],
+          "relevance_level": "medium",
+          "source": "topdaily.kr",
+          "summary": "의결 과정에서 표결을 생략한 주총 절차 자체에 대한 의문이 제기됐다. 이날 주총 출석 주주의 주식수는 4574만7849주로 의결권 있는 발행주식총수의 약 59%가 참석한 것으로 전해졌다. 회사 측은 최경덕 회장 지분율을 포함해 경영권을 지키기 위해 확보한 지분율이 총 45.37% (3515만5829주)라고 제시했다.",
+          "theme_group": "board_audit",
+          "theme_groups": [
+            "board_audit"
+          ],
+          "title": "'표결 실종' 에스아이리소스 임시 주총, 의혹만 남겼다",
+          "title_hash": "424a5f2fed4794e0de874491",
+          "topic_keywords": [
+            "주총"
+          ]
+        },
+        {
+          "article_published_at": null,
+          "canonical_url": "https://www.msn.com/ko-kr/money/%EC%9D%BC%EB%B0%98/%EA%B2%BD%EC%98%81-%EC%A0%95%EC%83%81%ED%99%94-%EC%B2%AB%EB%B0%9C-%EB%8F%99%EC%84%B1%EC%A0%9C%EC%95%BD-%EB%AA%A8%EC%A1%B0%EB%A6%AC-%EB%B0%94%EA%BF%A8%EB%8B%A4-%EC%9D%B4%EC%82%AC%ED%9A%8C-%ED%86%BA%EC%95%84%EB%B3%B4%EA%B8%B0/ar-AA21LTy8",
+          "canonical_url_hash": "117d9b9e577b7bb393103a5e",
+          "clean_title": "경영 정상화 첫발…동성제약, 모조리 바꿨다 [이사회 톺아보기]",
+          "company_candidates": [
+            "동성제약",
+            "한국금융",
+            "태광산업"
+          ],
+          "date_status": "feed",
+          "feed_category": "env",
+          "feed_name": "env-feed-8",
+          "feed_published_at": "2026-04-26T22:00:00+09:00",
+          "feed_updated_at": "2026-04-26T22:00:00+09:00",
+          "link": "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=69ee903071e1441aa202ca682f291cb9&url=https%3a%2f%2fwww.msn.com%2fko-kr%2fmoney%2f%25EC%259D%25BC%25EB%25B0%2598%2f%25EA%25B2%25BD%25EC%2598%2581-%25EC%25A0%2595%25EC%2583%2581%25ED%2599%2594-%25EC%25B2%25AB%25EB%25B0%259C-%25EB%258F%2599%25EC%2584%25B1%25EC%25A0%259C%25EC%2595%25BD-%25EB%25AA%25A8%25EC%25A1%25B0%25EB%25A6%25AC-%25EB%25B0%2594%25EA%25BF%25A8%25EB%258B%25A4-%25EC%259D%25B4%25EC%2582%25AC%25ED%259A%258C-%25ED%2586%25BA%25EC%2595%2584%25EB%25B3%25B4%25EA%25B8%25B0%2far-AA21LTy8&c=7740537304450235111&mkt=ko-kr",
+          "low_patterns": [],
+          "normalized_title": "경영 정상화 첫발…동성제약 모조리 바꿨다 이사회 톺아보기",
+          "prefixes": [],
+          "published_at": "2026-04-26T22:00:00+09:00",
+          "relevance_keywords": [
+            "이사회"
+          ],
+          "relevance_level": "medium",
+          "source": "msn.com",
+          "summary": "[한국금융신문 양현우 기자] 동성제약이 유암코와 태광산업 컨소시엄을 새 주인으로 맞이했다. 새롭게 바뀐 동성제약은 신임 대표이사와 회계·법률 전문가 중심 이사회를 구성하며 경영 정상화에 속도를 내고 있다. 분쟁 리스크를 털어낸 동성제약이 대규모 자금 수혈과 경영 개편을 통해 실적 턴어라운드를 향한 의지를 다지는 모습이다. 대표이사부터 사외이사까지 전면 교체 ...",
+          "theme_group": "board_audit",
+          "theme_groups": [
+            "board_audit"
+          ],
+          "title": "경영 정상화 '첫발'…동성제약, 모조리 바꿨다 [이사회 톺아보기]",
+          "title_hash": "dd47d8e92df62e440ab2e19d",
+          "topic_keywords": [
+            "이사회"
+          ]
+        },
+        {
+          "article_published_at": "2026-04-21T10:13:44+09:00",
+          "canonical_url": "https://biz.newdaily.co.kr/site/data/html/2026/04/21/2026042100081.html",
+          "canonical_url_hash": "e53369e00d37afa5ea466eda",
+          "clean_title": "동성제약, 대표 교체-이사회 재편-자금 수혈에도 정상화 기대난",
+          "company_candidates": [
+            "동성제약",
+            "태광산업"
+          ],
+          "date_status": "article",
+          "feed_category": "env",
+          "feed_name": "env-feed-8",
+          "feed_published_at": "2026-04-21T03:13:00+09:00",
+          "feed_updated_at": "2026-04-21T03:13:00+09:00",
+          "link": "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=69ee903071e1441aa202ca682f291cb9&url=https%3a%2f%2fbiz.newdaily.co.kr%2fsite%2fdata%2fhtml%2f2026%2f04%2f21%2f2026042100081.html&c=12601053387897207594&mkt=ko-kr",
+          "low_patterns": [],
+          "normalized_title": "동성제약 대표 교체-이사회 재편-자금 수혈에도 정상화 기대난",
+          "prefixes": [],
+          "published_at": "2026-04-21T10:13:44+09:00",
+          "relevance_keywords": [
+            "이사회"
+          ],
+          "relevance_level": "medium",
+          "source": "biz.newdaily.co.kr",
+          "summary": "동성제약이 대표이사 교체와 이사회 재편, 대규모 자금 수혈까지 잇달아 단행하면서 정상화 체제전환에 속도를 내고 있다. 유암코(연합자산관리)-태광산업 컨소시엄 체제도 빠르게 자리 잡는 모습이다.그러나 자본 급감과 대규모 손상차손이 한꺼번에 반영되면서 재무 부담은 오히려 선명해졌다. 회생인가에 대한 즉시항고와 거래정지 지속까지 겹친 만큼 동성제약의 정상화 여부 ...",
+          "theme_group": "board_audit",
+          "theme_groups": [
+            "board_audit"
+          ],
+          "title": "동성제약, 대표 교체-이사회 재편-자금 수혈에도 정상화 기대난",
+          "title_hash": "8630077fc530f07a7dd2a4d2",
+          "topic_keywords": [
+            "이사회"
+          ]
+        },
+        {
+          "article_published_at": "2026-04-24T17:22:01+09:00",
+          "canonical_url": "https://www.digitaltoday.co.kr/news/articleView.html?idxno=660205",
+          "canonical_url_hash": "b312530bccdcf06fc27537b6",
+          "clean_title": "효성중공업, 6월2일 임시주총 소집 결의…정관 변경·감사위원 겸 사외이사 선임 추진",
+          "company_candidates": [
+            "효성중공업"
+          ],
+          "date_status": "article",
+          "feed_category": "env",
+          "feed_name": "env-feed-9",
+          "feed_published_at": "2026-04-24T10:22:00+09:00",
+          "feed_updated_at": "2026-04-24T10:22:00+09:00",
+          "link": "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=69ee903081244a53a3c26bd47f88f9ae&url=https%3a%2f%2fwww.digitaltoday.co.kr%2fnews%2farticleView.html%3fidxno%3d660205&c=14717260906473249311&mkt=ko-kr",
+          "low_patterns": [],
+          "normalized_title": "효성중공업 6월2일 임시주총 소집 결의…정관 변경 감사위원 겸 사외이사 선임 추진",
+          "prefixes": [],
+          "published_at": "2026-04-24T17:22:01+09:00",
+          "relevance_keywords": [
+            "주총",
+            "주주총회"
+          ],
+          "relevance_level": "medium",
+          "source": "digitaltoday.co.kr",
+          "summary": "[디지털투데이 AI공시팀] 전력 설비·건설 전문 기업 효성중공업(298040)이 6월2일 임시주주총회를 열고 정관 일부 변경과 감사위원회 위원이 되는 사외이사 선임 안건을 다룬다고 24일 공시했다.효성중공업은 이번 임시주총을 2026년 6월2일 오전 10시 서울특별시 마포구 마포대로 119(공덕동) 효성빌딩 지하1층 강당에서 개최하기로 했다. 의결권행사기준 ...",
+          "theme_group": "board_audit",
+          "theme_groups": [
+            "board_audit"
+          ],
+          "title": "효성중공업, 6월2일 임시주총 소집 결의…정관 변경·감사위원 겸 사외이사 선임 추진",
+          "title_hash": "1e690a3f3c10cab6a70feb69",
+          "topic_keywords": [
+            "주총",
+            "주주총회"
+          ]
+        },
+        {
+          "article_published_at": "2026-04-21T15:43:01+09:00",
+          "canonical_url": "https://www.digitaltoday.co.kr/news/articleView.html?idxno=658928",
+          "canonical_url_hash": "038180b6d64684ce18da5a83",
+          "clean_title": "한국수출포장공업, 5월7일 임시주총 소집…감사 장갑순 선임 안건",
+          "company_candidates": [],
+          "date_status": "article",
+          "feed_category": "env",
+          "feed_name": "env-feed-9",
+          "feed_published_at": "2026-04-21T08:43:00+09:00",
+          "feed_updated_at": "2026-04-21T08:43:00+09:00",
+          "link": "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=69ee903081244a53a3c26bd47f88f9ae&url=https%3a%2f%2fwww.digitaltoday.co.kr%2fnews%2farticleView.html%3fidxno%3d658928&c=5489934421162342064&mkt=ko-kr",
+          "low_patterns": [],
+          "normalized_title": "한국수출포장공업 5월7일 임시주총 소집…감사 장갑순 선임 안건",
+          "prefixes": [],
+          "published_at": "2026-04-21T15:43:01+09:00",
+          "relevance_keywords": [
+            "감사 선임"
+          ],
+          "relevance_level": "high",
+          "source": "digitaltoday.co.kr",
+          "summary": "[디지털투데이 AI공시팀] 골판지 제조 기업 한국수출포장공업(002200)은 임시주주총회를 열고 감사 선임 안건을 상정한다고 21일 공시했다.임시주주총회는 2026년5월7일 09 : 00에 서울 서초구 강남대로 27 aT센터 창조룸Ⅱ 4층에서 진행된다. 의결권행사기준일은 2026년4월10일이며, 이사회결의일은 2026년4월21일로 기재됐다.이번 주총 제1호 ...",
+          "theme_group": "board_audit",
+          "theme_groups": [
+            "board_audit"
+          ],
+          "title": "한국수출포장공업, 5월7일 임시주총 소집…감사 장갑순 선임 안건",
+          "title_hash": "ab41bc96182dfb7b3f4a3a5b",
+          "topic_keywords": [
+            "감사 선임",
+            "이사회",
+            "주총",
+            "주주총회"
+          ]
+        },
+        {
+          "article_published_at": null,
+          "canonical_url": "https://www.msn.com/ko-kr/money/%EC%9E%AC%EB%AC%B4-%EA%B7%9C%EC%A0%95/%EC%A3%BC%EC%B4%9D-%EB%8B%A4-%EB%81%9D%EB%82%AC%EB%8A%94%EB%8D%B0-%EA%B8%88%EC%9C%B5%EA%B6%8C-%EC%A7%80%EB%B0%B0%EA%B5%AC%EC%A1%B0-%EA%B0%9C%EC%84%A0%EC%95%88-%EC%9D%B4%EB%8B%AC-%EB%B0%9C%ED%91%9C%EB%8F%84-%EB%82%9C%EB%A7%9D/ar-AA21JEwY",
+          "canonical_url_hash": "095328671592eb11a5a6e80f",
+          "clean_title": "주총 다 끝났는데…금융권 지배구조 개선안, 이달 발표도 난망",
+          "company_candidates": [],
+          "date_status": "feed",
+          "feed_category": "env",
+          "feed_name": "env-feed-13",
+          "feed_published_at": "2026-04-26T03:10:39+09:00",
+          "feed_updated_at": "2026-04-26T03:10:39+09:00",
+          "link": "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=69ee9032ceac44ebaa230ea545c02692&url=https%3a%2f%2fwww.msn.com%2fko-kr%2fmoney%2f%25EC%259E%25AC%25EB%25AC%25B4-%25EA%25B7%259C%25EC%25A0%2595%2f%25EC%25A3%25BC%25EC%25B4%259D-%25EB%258B%25A4-%25EB%2581%259D%25EB%2582%25AC%25EB%258A%2594%25EB%258D%25B0-%25EA%25B8%2588%25EC%259C%25B5%25EA%25B6%258C-%25EC%25A7%2580%25EB%25B0%25B0%25EA%25B5%25AC%25EC%25A1%25B0-%25EA%25B0%259C%25EC%2584%25A0%25EC%2595%2588-%25EC%259D%25B4%25EB%258B%25AC-%25EB%25B0%259C%25ED%2591%259C%25EB%258F%2584-%25EB%2582%259C%25EB%25A7%259D%2far-AA21JEwY&c=12216288438564069030&mkt=ko-kr",
+          "low_patterns": [],
+          "normalized_title": "주총 다 끝났는데…금융권 지배구조 개선안 이달 발표도 난망",
+          "prefixes": [],
+          "published_at": "2026-04-26T03:10:39+09:00",
+          "relevance_keywords": [
+            "지배구조",
+            "주총"
+          ],
+          "relevance_level": "medium",
+          "source": "msn.com",
+          "summary": "이재명 대통령이 지적한 금융권 ‘부패한 이너서클(소수권력집단)’ 문제를 근절할 금융당국의 지배구조 개선안 발표가 차일피일 미뤄지고 있다. 당국은 사외이사 및 임원후보추천위원회의 독립성 확보 방안을 보강하며 막바지 작업에 한창인 ...",
+          "theme_group": "board_audit",
+          "theme_groups": [
+            "board_audit",
+            "valueup_return"
+          ],
+          "title": "“주총 다 끝났는데”…금융권 지배구조 개선안, 이달 발표도 '난망'",
+          "title_hash": "0403963e4f8aaabee191578a",
+          "topic_keywords": [
+            "지배구조",
+            "주총"
+          ]
+        }
+      ],
+      "cluster_key": "584a5a70dee7c3c1",
+      "companies": [
+        "동성제약",
+        "태광산업",
+        "한국금융",
+        "효성중공업"
+      ],
+      "created_at": "2026-04-27T07:22:37.626930+09:00",
+      "guid": "cluster:584a5a70dee7c3c1:20260427:1",
+      "is_followup": false,
+      "keywords": [
+        "감사 선임",
+        "이사회",
+        "주주총회",
+        "주총",
+        "지배구조"
+      ],
+      "last_article_at": "2026-04-26T22:00:00+09:00",
+      "last_article_seen_at": "2026-04-27T07:22:37.626930+09:00",
+      "published_at": "2026-04-27T07:47:39.716909+09:00",
+      "relevance_level": "high",
+      "representative_title": "이사회 재편·임시주총·감사 선임",
+      "representative_title_normalized": "표결 실종 에스아이리소스 임시 주총 의혹만 남겼다",
+      "representative_url": "https://www.topdaily.kr/articles/109790",
+      "sequence": 1,
+      "status": "published",
+      "theme_group": "board_audit",
+      "theme_grouped": true,
+      "theme_groups": [
+        "board_audit",
+        "valueup_return"
+      ]
     }
   ],
   "rejected_articles": [
@@ -1368,17 +1829,104 @@
       "status": "rejected",
       "title": "점검 체계 없어 실효성 한계…스튜어드십 코드 개정 당위성 커지나",
       "title_hash": "75fe77aae92232279865def6"
+    },
+    {
+      "canonical_url": "https://www.newspim.com/news/view/20260323001136",
+      "canonical_url_hash": "cdd55c20e1c4d718014f5509",
+      "normalized_title": "차파트너스 삼영전자 최대주주 일본케미콘에 공개서한 발송",
+      "published_at": "2026-03-23T17:43:55+09:00",
+      "reason": "old_article",
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "rejected",
+      "title": "차파트너스, 삼영전자 최대주주 일본케미콘에 공개서한 발송",
+      "title_hash": "8c7646fa51756c5a65c14526"
+    },
+    {
+      "canonical_url": "https://www.bloter.net/news/articleView.html?idxno=658006",
+      "canonical_url_hash": "5c4c62608a0ee51a4d087707",
+      "normalized_title": "소액주주 액트 제3자배정 유증 전환…한화솔루션에 주주서한 보낸다",
+      "published_at": "2026-03-27T18:27:22+09:00",
+      "reason": "old_article",
+      "relevance_level": "high",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "rejected",
+      "title": "소액주주 액트 제3자배정 유증 전환…한화솔루션에 주주서한 보낸다",
+      "title_hash": "f863da671712f060e60de468"
+    },
+    {
+      "canonical_url": "https://www.msn.com/ko-kr/money/%EC%9D%BC%EB%B0%98/k-%EB%B0%B8%EB%A5%98%EC%97%85-%EB%A6%AC%ED%8F%AC%ED%8A%B8-%ED%81%AC%EB%9E%98%ED%94%84%ED%86%A4-%ED%99%94%EB%A0%A4%ED%95%9C-%EC%A3%BC%EC%A3%BC%ED%99%98%EC%9B%90-%EC%9D%B4%EB%A9%B4%EC%9D%98-%EA%B7%B8%EB%A6%BC%EC%9E%90-%EC%9E%A5%EB%B3%91%EA%B7%9C-%EC%9D%98%EC%9E%A5-%EC%9E%A5%EA%B8%B0%EC%A7%91%EA%B6%8C%EC%97%90-%EC%9D%B4%EC%82%AC%ED%9A%8C-%EB%8F%85%EB%A6%BD%EC%84%B1-%ED%99%95%EB%B3%B4-%EC%9A%94%EC%9B%90/ar-AA21CwhJ",
+      "canonical_url_hash": "a85c0912a26bae596850bced",
+      "normalized_title": "k-밸류업 리포트 크래프톤 화려한 주주환원 이면의 그림자 장병규 의장 장기집권에 이사회 독립성 확보 요원",
+      "published_at": "2026-04-24T10:21:13+09:00",
+      "reason": "low_relevance",
+      "relevance_level": "low",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "rejected",
+      "title": "[K-밸류업 리포트] 크래프톤 화려한 주주환원 이면의 그림자, 장병규 의장 장기집권에 이사회 독립성 확보 요원",
+      "title_hash": "e01e2d12eebdd724ff7aba53"
+    },
+    {
+      "canonical_url": "https://www.msn.com/ko-kr/news/other/%EC%8C%93%EC%95%84%EB%91%90%EB%A9%B4-%EB%A6%AC%EC%8A%A4%ED%81%AC-%EC%A0%9C%EC%95%BD%EC%97%85%EA%B3%84-%EC%9E%90%EC%82%AC%EC%A3%BC-%EC%86%8C%EA%B0%81-%EA%B7%9C%EC%A0%9C%EC%97%90-%EC%A0%84%EB%9E%B5-%EC%A0%84%EB%A9%B4-%EC%88%98%EC%A0%95/ar-AA21heA7",
+      "canonical_url_hash": "3455f8857be6d197286c9c16",
+      "normalized_title": "쌓아두면 리스크… 제약업계 자사주 소각 규제에 전략 전면 수정",
+      "published_at": "2026-04-20T04:55:00+09:00",
+      "reason": "old_article",
+      "relevance_level": "medium",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "rejected",
+      "title": "쌓아두면 리스크… 제약업계, 자사주 소각 규제에 전략 전면 수정",
+      "title_hash": "566578212e078490002c7137"
+    },
+    {
+      "canonical_url": "https://www.mt.co.kr/opinion/2026/04/14/2026041017100868652",
+      "canonical_url_hash": "219ab96bdaea6c2162c3485c",
+      "normalized_title": "유효상 칼럼 왜 지배구조 혁신이 경쟁력일까",
+      "published_at": "2026-04-14T06:00:00+09:00",
+      "reason": "old_article",
+      "relevance_level": "medium",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "rejected",
+      "title": "[유효상 칼럼] 왜 지배구조 혁신이 경쟁력일까",
+      "title_hash": "acb5ef04a50d0db54694ba03"
+    },
+    {
+      "canonical_url": "https://www.msn.com/ko-kr/money/topstories/%EC%8A%A4%ED%8A%9C%EC%96%B4%EB%93%9C%EC%8B%AD-%EC%BD%94%EB%93%9C-%ED%95%B5%EC%8B%AC%EC%9D%80-%EC%A7%80%EC%86%8D%EA%B0%80%EB%8A%A5-%EA%B0%80%EC%B9%98-%EC%B2%B4%ED%81%AC%EB%A6%AC%EC%8A%A4%ED%8A%B8-%EB%B3%B4%EB%8B%A4-%EC%9D%B4%ED%96%89%EC%9D%98-%EC%A7%88/ar-AA20V1Cn",
+      "canonical_url_hash": "6ecaf339553e59a1ff0f85a0",
+      "normalized_title": "스튜어드십 코드 핵심은 지속가능 가치…체크리스트보다 이행의 질",
+      "published_at": "2026-04-15T07:44:10+09:00",
+      "reason": "old_article",
+      "relevance_level": "medium",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "rejected",
+      "title": "스튜어드십 코드 핵심은 지속가능 가치…체크리스트보다 이행의 질",
+      "title_hash": "91468d41da708c64f40a43c6"
+    },
+    {
+      "canonical_url": "https://www.dailian.co.kr/news/view/1591085/%EC%A0%90%EA%B2%80-%EC%B2%B4%EA%B3%84-%EC%97%86%EC%96%B4-%EC%8B%A4%ED%9A%A8%EC%84%B1-%ED%95%9C%EA%B3%84%EC%8A%A4%ED%8A%9C%EC%96%B4%EB%93%9C%EC%8B%AD-2025",
+      "canonical_url_hash": "25936a4a4180ea1573b6d0d0",
+      "normalized_title": "점검 체계 없어 실효성 한계…스튜어드십 코드 개정 당위성 커지나",
+      "published_at": "2025-12-27T00:10:00+09:00",
+      "reason": "old_article",
+      "relevance_level": "medium",
+      "seen_at": "2026-04-27T07:47:39.716909+09:00",
+      "status": "rejected",
+      "title": "점검 체계 없어 실효성 한계…스튜어드십 코드 개정 당위성 커지나",
+      "title_hash": "75fe77aae92232279865def6"
     }
   ],
   "seen_title_hashes": [
     "0403963e4f8aaabee191578a",
+    "1dc4b91b0c26740d06e3b693",
     "1e690a3f3c10cab6a70feb69",
     "2ea6451213779b7c297efff8",
     "33433e008e51e6379cdf7761",
     "424a5f2fed4794e0de874491",
+    "454539c02c24534bcf3debfc",
     "47b8c5a7993ba6574a6d5b0a",
     "4c2984b06feba6f4d9af6feb",
     "566578212e078490002c7137",
+    "5b882abb686e944776dd1a84",
     "75fe77aae92232279865def6",
     "8630077fc530f07a7dd2a4d2",
     "8c7646fa51756c5a65c14526",
@@ -1387,13 +1935,16 @@
     "96231390ffae2f529702ef3a",
     "ab41bc96182dfb7b3f4a3a5b",
     "acb5ef04a50d0db54694ba03",
+    "c70e48f900a34e3a14500a23",
     "cd8121ec5db214ae65480326",
     "dd47d8e92df62e440ab2e19d",
+    "e01e2d12eebdd724ff7aba53",
     "e0401f1dd2df8269a7bf9757",
     "e777fc5c31dcca017d15d6b1",
     "f2533153788ccb9c16f6d3ce",
     "f2fdb568ee3ec36d404ec524",
-    "f863da671712f060e60de468"
+    "f863da671712f060e60de468",
+    "ff74f9c5cc1510522cd8bac9"
   ],
   "seen_url_hashes": [
     "00886bcffc4d9457d6851cd6",
@@ -1404,7 +1955,9 @@
     "219ab96bdaea6c2162c3485c",
     "25936a4a4180ea1573b6d0d0",
     "2d45e4722100bea6cecc9b82",
+    "2ef696290ac8dbc6be535cab",
     "3455f8857be6d197286c9c16",
+    "39399609d7682f021dd42bf9",
     "4306328ef57c31a5d82fbb01",
     "47ed7d9e1c710d93afad0288",
     "5c4c62608a0ee51a4d087707",
@@ -1413,11 +1966,15 @@
     "8d0d85cbb915aba9651ed520",
     "9a789f2237a0d1f7319b6254",
     "a1c254deef273ec1de47ca5a",
+    "a85c0912a26bae596850bced",
     "b312530bccdcf06fc27537b6",
     "b636a909e6c437aa41ef006f",
+    "c799b7637f926ed99123f148",
+    "cbfca319f30bd16e441358f9",
     "cdd55c20e1c4d718014f5509",
     "d574238e2311840f86b854f7",
     "da5958ddfeb84ac06bf1bf7a",
-    "e53369e00d37afa5ea466eda"
+    "e53369e00d37afa5ea466eda",
+    "fbad2c4b370bc7ff2e4f0079"
   ]
 }
