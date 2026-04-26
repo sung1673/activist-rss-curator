@@ -95,7 +95,7 @@ def build_rss(clusters: list[dict[str, object]], config: dict[str, object], now:
     channel_link = str(config.get("public_feed_url") or "")
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        '<rss version="2.0">',
+        '<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">',
         "<channel>",
         f"<title>{escape(channel_title)}</title>",
         f"<link>{escape(channel_link)}</link>",
@@ -107,6 +107,7 @@ def build_rss(clusters: list[dict[str, object]], config: dict[str, object], now:
     for cluster in feed_clusters:
         pub_dt = parse_datetime(str(cluster.get("published_at") or ""), timezone_name) or now
         guid = str(cluster.get("guid") or cluster_guid(cluster, timezone_name))
+        description = item_description(cluster, config)
         lines.extend(
             [
                 "<item>",
@@ -114,7 +115,8 @@ def build_rss(clusters: list[dict[str, object]], config: dict[str, object], now:
                 f"<link>{escape(representative_link(cluster))}</link>",
                 f"<guid isPermaLink=\"false\">{escape(guid)}</guid>",
                 f"<pubDate>{escape(format_rfc822(pub_dt))}</pubDate>",
-                f"<description>{cdata(item_description(cluster, config))}</description>",
+                f"<description>{cdata(description)}</description>",
+                f"<content:encoded>{cdata(description)}</content:encoded>",
                 "</item>",
             ]
         )

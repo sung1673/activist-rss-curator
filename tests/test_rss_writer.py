@@ -27,6 +27,8 @@ def test_rss_item_description_contains_multiple_links(config, now) -> None:  # t
     rss = build_rss([cluster], config, now + timedelta(minutes=46))
     assert "<item>" in rss
     assert "<![CDATA[" in rss
+    assert 'xmlns:content="http://purl.org/rss/1.0/modules/content/"' in rss
+    assert "<content:encoded><![CDATA[" in rss
 
 
 def test_description_is_capped_at_3500_chars(config, now) -> None:  # type: ignore[no-untyped-def]
