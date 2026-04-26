@@ -3,7 +3,15 @@ from __future__ import annotations
 from datetime import timedelta
 
 from curator.cluster import cluster_articles
-from curator.rss_writer import build_rss, item_description
+from curator.rss_writer import (
+    article_short_url,
+    build_rss,
+    cluster_detail_url,
+    item_description,
+    item_link,
+    write_article_redirect_pages,
+    write_cluster_pages,
+)
 
 from conftest import make_article
 
@@ -24,11 +32,39 @@ def test_rss_item_description_contains_multiple_links(config, now) -> None:  # t
     description = item_description(cluster, config)
     assert "https://example.com/a" in description
     assert "https://example.com/b" in description
+    assert "<a href=" in description
+    assert "대표 링크:" not in description
     rss = build_rss([cluster], config, now + timedelta(minutes=46))
     assert "<item>" in rss
     assert "<![CDATA[" in rss
     assert 'xmlns:content="http://purl.org/rss/1.0/modules/content/"' in rss
     assert "<content:encoded><![CDATA[" in rss
+
+
+def test_public_feed_uses_short_links_and_detail_page(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["public_feed_url"] = "https://example.github.io/activist-rss-curator/feed.xml"
+    cluster = published_cluster(config, now)
+    description = item_description(cluster, config)
+    rss = build_rss([cluster], config, now + timedelta(minutes=46))
+
+    assert article_short_url(cluster["articles"][0], config) in description
+    assert cluster_detail_url(cluster, config) in description
+    assert item_link(cluster, config) == cluster_detail_url(cluster, config)
+    assert "<link>https://example.github.io/activist-rss-curator/items/" in rss
+    assert "\nhttps://example.com/a\n" not in description
+
+
+def test_writes_cluster_and_redirect_pages(config, now, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    cluster = published_cluster(config, now)
+    write_cluster_pages(tmp_path / "items", [cluster], config, now)
+    write_article_redirect_pages(tmp_path / "u", [cluster])
+
+    item_pages = list((tmp_path / "items").glob("*.html"))
+    redirect_pages = list((tmp_path / "u").glob("*.html"))
+    assert len(item_pages) == 1
+    assert len(redirect_pages) == 2
+    assert "관련 기사 2건" in item_pages[0].read_text(encoding="utf-8")
+    assert "window.location.replace" in redirect_pages[0].read_text(encoding="utf-8")
 
 
 def test_description_is_capped_at_3500_chars(config, now) -> None:  # type: ignore[no-untyped-def]

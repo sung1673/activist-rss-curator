@@ -12,7 +12,7 @@ from .dates import choose_publication_datetime, datetime_to_iso, is_too_old, now
 from .dedupe import dedupe_articles
 from .fetch import fetch_google_alerts_articles
 from .main import PROJECT_ROOT, prepare_article
-from .rss_writer import item_description, item_title, write_feed
+from .rss_writer import item_description, item_link, item_title, write_feed
 from .state import default_state, load_state
 
 
@@ -81,7 +81,7 @@ def build_preview(
                 "relevance_level": cluster.get("relevance_level"),
                 "article_count": cluster.get("article_count"),
                 "guid": cluster.get("guid"),
-                "link": cluster.get("representative_url"),
+                "link": item_link(cluster, config),
                 "description": item_description(cluster, config),
             }
         )

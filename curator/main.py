@@ -8,7 +8,7 @@ from .dates import choose_publication_datetime, datetime_to_iso, is_too_old, now
 from .dedupe import dedupe_articles
 from .fetch import fetch_google_alerts_articles
 from .relevance import relevance_details
-from .rss_writer import write_feed, write_index
+from .rss_writer import write_article_redirect_pages, write_cluster_pages, write_feed, write_index
 from .state import compact_state, load_state, remember_article, remember_rejected, save_state
 
 
@@ -86,7 +86,10 @@ def run(root: Path | None = None) -> dict[str, int]:
     published_now = cluster_articles(unique_articles, state, config, now)
     state["last_run_at"] = datetime_to_iso(now)
     compact_state(state, config, now)
-    write_feed(project_root / "public" / "feed.xml", list(state.get("published_clusters", [])), config, now)
+    published_clusters = list(state.get("published_clusters", []))
+    write_feed(project_root / "public" / "feed.xml", published_clusters, config, now)
+    write_cluster_pages(project_root / "public" / "items", published_clusters, config, now)
+    write_article_redirect_pages(project_root / "public" / "u", published_clusters)
     write_index(project_root / "public" / "index.html", state, config, now)
     save_state(state_path, state)
 
