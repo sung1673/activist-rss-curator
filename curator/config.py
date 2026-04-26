@@ -25,6 +25,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "buffer_minutes_high": 20,
         "max_pending_hours": 3,
         "cluster_window_hours": 48,
+        "theme_group_window_hours": 168,
         "max_links_per_item": 7,
         "max_description_chars": 3500,
     },

@@ -41,6 +41,39 @@ COMPANY_SUFFIX_PATTERN = re.compile(
 COMPANY_STOPWORDS = {"행동주의", "주주행동", "기업지배구조", "거버넌스", "이사회", "주주총회"}
 RELEVANCE_RANK = {"low": 0, "medium": 1, "high": 2}
 SENSITIVE_ARTICLE_KEYS = {"source_feed_url", "feed_url"}
+THEME_GROUPS = [
+    (
+        "shareholder_proposal",
+        "주주제안·공개서한",
+        ["주주제안", "공개서한", "권고적 주주제안", "국민연금"],
+    ),
+    (
+        "minority_shareholder",
+        "소액주주·주주연대 분쟁",
+        ["소액주주", "소액주주연대", "주주연대", "주주행동"],
+    ),
+    (
+        "activism_trend",
+        "행동주의 펀드·주주행동 트렌드",
+        ["행동주의", "행동주의 주주", "얼라인", "KCGI", "트러스톤", "플래쉬라이트", "엘리엇"],
+    ),
+    (
+        "control_dispute",
+        "경영권 분쟁 관련",
+        ["경영권 분쟁"],
+    ),
+    (
+        "board_audit",
+        "이사회 재편·임시주총·감사 선임",
+        ["이사회 교체", "감사 선임", "이사회", "감사위원", "사외이사", "임시주총", "임시 주총"],
+    ),
+    (
+        "valueup_return",
+        "밸류업·주주환원·지배구조",
+        ["밸류업", "주주환원", "자사주 매입", "자사주 소각", "지배구조", "거버넌스", "스튜어드십"],
+    ),
+]
+THEME_LABELS = {theme_id: label for theme_id, label, _ in THEME_GROUPS}
 
 
 def extract_company_candidates(text: str) -> list[str]:
@@ -56,6 +89,23 @@ def extract_company_candidates(text: str) -> list[str]:
     return candidates[:5]
 
 
+def extract_theme_groups(text: str, keywords: list[object] | None = None) -> list[str]:
+    haystack = f"{text or ''} {' '.join(str(keyword) for keyword in keywords or [])}".casefold()
+    groups: list[str] = []
+    for theme_id, _label, needles in THEME_GROUPS:
+        if any(needle.casefold() in haystack for needle in needles):
+            groups.append(theme_id)
+    explicit_board_terms = ["감사위원", "감사 선임", "사외이사", "이사회 재편", "이사회 교체", "임시주총", "임시 주총"]
+    higher_priority_groups = {"shareholder_proposal", "minority_shareholder", "activism_trend", "control_dispute"}
+    if (
+        "valueup_return" in groups
+        and not any(group in groups for group in higher_priority_groups)
+        and not any(term.casefold() in haystack for term in explicit_board_terms)
+    ):
+        groups = ["valueup_return"] + [group for group in groups if group != "valueup_return"]
+    return groups
+
+
 def enrich_article_for_clustering(article: dict[str, object]) -> dict[str, object]:
     enriched = dict(article)
     for key in SENSITIVE_ARTICLE_KEYS:
@@ -63,6 +113,8 @@ def enrich_article_for_clustering(article: dict[str, object]) -> dict[str, objec
     text = f"{article.get('clean_title') or article.get('title') or ''} {article.get('summary') or ''}"
     enriched["company_candidates"] = list(article.get("company_candidates") or extract_company_candidates(text))
     enriched["topic_keywords"] = list(article.get("topic_keywords") or topic_keywords_for_article(article))
+    enriched["theme_groups"] = extract_theme_groups(text, list(enriched["topic_keywords"]))
+    enriched["theme_group"] = primary_theme_group(enriched)
     return enriched
 
 
@@ -78,12 +130,30 @@ def article_datetime(article: dict[str, object], now: datetime, timezone_name: s
 def cluster_base_string(article: dict[str, object]) -> str:
     companies = list(article.get("company_candidates") or [])
     keywords = list(article.get("topic_keywords") or [])
+    theme_groups = list(article.get("theme_groups") or [])
     title_seed = str(article.get("normalized_title") or article.get("clean_title") or "untitled")
+    if theme_groups:
+        return f"theme:{theme_groups[0]}"
     if companies:
         return "|".join([str(item) for item in companies[:2] + keywords[:2]])
     if keywords:
         return "|".join([str(item) for item in keywords[:2] + [title_seed[:90]]])
     return title_seed
+
+
+def title_for_theme_group(theme_group: str, companies: list[object] | None = None) -> str:
+    label = THEME_LABELS.get(theme_group, "주주·거버넌스 뉴스")
+    company_names = [str(company) for company in companies or [] if str(company)]
+    if theme_group in {"shareholder_proposal", "minority_shareholder"} and company_names:
+        return f"{company_names[0]} {label}"
+    return label
+
+
+def primary_theme_group(value: dict[str, object]) -> str:
+    if value.get("theme_group"):
+        return str(value.get("theme_group"))
+    theme_groups = list(value.get("theme_groups") or [])
+    return str(theme_groups[0]) if theme_groups else ""
 
 
 def make_cluster_key(article: dict[str, object]) -> str:
@@ -121,6 +191,9 @@ def create_cluster(
         "relevance_level": enriched.get("relevance_level") or "medium",
         "keywords": list(enriched.get("topic_keywords") or []),
         "companies": list(enriched.get("company_candidates") or []),
+        "theme_groups": list(enriched.get("theme_groups") or []),
+        "theme_group": primary_theme_group(enriched),
+        "theme_grouped": False,
         "representative_title": enriched.get("clean_title") or enriched.get("title") or "",
         "representative_title_normalized": enriched.get("normalized_title") or "",
         "representative_url": enriched.get("canonical_url") or enriched.get("link") or "",
@@ -160,12 +233,25 @@ def add_article_to_cluster(article: dict[str, object], cluster: dict[str, object
     )
     cluster["keywords"] = sorted(set(cluster.get("keywords", [])) | set(enriched.get("topic_keywords", [])))
     cluster["companies"] = sorted(set(cluster.get("companies", [])) | set(enriched.get("company_candidates", [])))
+    cluster["theme_groups"] = sorted(set(cluster.get("theme_groups", [])) | set(enriched.get("theme_groups", [])))
+    cluster["theme_group"] = cluster.get("theme_group") or primary_theme_group(enriched)
+    if cluster.get("theme_grouped") and cluster.get("theme_groups"):
+        cluster["representative_title"] = title_for_theme_group(
+            primary_theme_group(cluster),
+            list(cluster.get("companies", [])),
+        )
 
 
 def same_company_and_keyword(article: dict[str, object], cluster: dict[str, object]) -> bool:
     companies = set(article.get("company_candidates") or [])
     keywords = set(article.get("topic_keywords") or [])
     return bool(companies & set(cluster.get("companies", []))) and bool(keywords & set(cluster.get("keywords", [])))
+
+
+def same_theme_group(article: dict[str, object], cluster: dict[str, object]) -> bool:
+    article_theme = primary_theme_group(article)
+    cluster_theme = primary_theme_group(cluster)
+    return bool(article_theme and article_theme == cluster_theme)
 
 
 def within_cluster_window(
@@ -180,17 +266,41 @@ def within_cluster_window(
     return hours_between(article_dt, cluster_dt) <= window_hours
 
 
+def within_theme_window(
+    article: dict[str, object],
+    cluster: dict[str, object],
+    now: datetime,
+    config: dict[str, object],
+    timezone_name: str,
+) -> bool:
+    cluster_config = config.get("cluster", {})
+    theme_window_hours = int(cluster_config.get("theme_group_window_hours", 168))  # type: ignore[union-attr]
+    article_dt = article_datetime(article, now, timezone_name)
+    cluster_dt = parse_datetime(str(cluster.get("last_article_at") or ""), timezone_name) or now
+    return hours_between(article_dt, cluster_dt) <= theme_window_hours
+
+
 def can_join_cluster(
     article: dict[str, object],
     cluster: dict[str, object],
     config: dict[str, object],
     now: datetime,
+    *,
+    allow_theme_group: bool = True,
 ) -> bool:
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
     cluster_config = config.get("cluster", {})
     dedupe_config = config.get("dedupe", {})
     window_hours = int(cluster_config.get("cluster_window_hours", 48))  # type: ignore[union-attr]
+    theme_window_match = (
+        allow_theme_group
+        and same_theme_group(article, cluster)
+        and within_theme_window(article, cluster, now, config, timezone_name)
+    )
     if not within_cluster_window(article, cluster, now, window_hours, timezone_name):
+        if theme_window_match:
+            cluster["theme_grouped"] = True
+            return True
         return False
 
     title_score = fuzz.token_set_ratio(
@@ -203,6 +313,10 @@ def can_join_cluster(
     if same_company_and_keyword(article, cluster):
         return True
 
+    if theme_window_match:
+        cluster["theme_grouped"] = True
+        return True
+
     representative = (cluster.get("articles") or [{}])[0]
     summary_score = fuzz.token_set_ratio(str(article.get("summary") or ""), str(representative.get("summary") or ""))
     return title_score >= 80 and summary_score >= int(dedupe_config.get("summary_cluster_threshold", 85))  # type: ignore[union-attr]
@@ -213,11 +327,71 @@ def find_matching_cluster(
     clusters: list[dict[str, object]],
     config: dict[str, object],
     now: datetime,
+    *,
+    allow_theme_group: bool = True,
 ) -> dict[str, object] | None:
     for cluster in clusters:
-        if can_join_cluster(article, cluster, config, now):
+        if can_join_cluster(article, cluster, config, now, allow_theme_group=allow_theme_group):
             return cluster
     return None
+
+
+def merge_cluster(source: dict[str, object], target: dict[str, object], now: datetime) -> None:
+    last_seen_values = [
+        str(value)
+        for value in (target.get("last_article_seen_at"), source.get("last_article_seen_at"))
+        if value
+    ]
+    last_article_values = [
+        str(value)
+        for value in (target.get("last_article_at"), source.get("last_article_at"))
+        if value
+    ]
+    for article in list(source.get("articles", [])):
+        add_article_to_cluster(article, target, now)
+    if last_seen_values:
+        target["last_article_seen_at"] = max(last_seen_values)
+    if last_article_values:
+        target["last_article_at"] = max(last_article_values)
+    target["theme_grouped"] = bool(target.get("theme_grouped") or source.get("theme_grouped") or same_theme_group(source, target))
+    target["keywords"] = sorted(set(target.get("keywords", [])) | set(source.get("keywords", [])))
+    target["companies"] = sorted(set(target.get("companies", [])) | set(source.get("companies", [])))
+    target["theme_groups"] = sorted(set(target.get("theme_groups", [])) | set(source.get("theme_groups", [])))
+    target["theme_group"] = target.get("theme_group") or primary_theme_group(source)
+    target["relevance_level"] = max_relevance(
+        str(target.get("relevance_level") or "medium"),
+        str(source.get("relevance_level") or "medium"),
+    )
+    if target.get("theme_grouped") and target.get("theme_groups"):
+        target["representative_title"] = title_for_theme_group(
+            primary_theme_group(target),
+            list(target.get("companies", [])),
+        )
+
+
+def reconcile_pending_clusters(state: dict[str, object], config: dict[str, object], now: datetime) -> None:
+    reconciled: list[dict[str, object]] = []
+    for cluster in list(state.get("pending_clusters", [])):
+        articles = [enrich_article_for_clustering(article) for article in list(cluster.get("articles", []))]
+        cluster["articles"] = articles
+        cluster["article_count"] = len(articles)
+        cluster["keywords"] = sorted(set(cluster.get("keywords", [])) | {keyword for article in articles for keyword in article.get("topic_keywords", [])})
+        cluster["companies"] = sorted(set(cluster.get("companies", [])) | {company for article in articles for company in article.get("company_candidates", [])})
+        cluster["theme_groups"] = sorted(set(cluster.get("theme_groups", [])) | {theme for article in articles for theme in article.get("theme_groups", [])})
+        cluster["theme_group"] = primary_theme_group(articles[0]) if articles else primary_theme_group(cluster)
+        representative_article = articles[0] if articles else {}
+        match = find_matching_cluster(representative_article, reconciled, config, now, allow_theme_group=True)
+        if match:
+            cluster["theme_grouped"] = bool(cluster.get("theme_grouped") or same_theme_group(representative_article, match))
+            merge_cluster(cluster, match, now)
+        else:
+            if cluster.get("theme_grouped") and cluster.get("theme_groups"):
+                cluster["representative_title"] = title_for_theme_group(
+                    primary_theme_group(cluster),
+                    list(cluster.get("companies", [])),
+                )
+            reconciled.append(cluster)
+    state["pending_clusters"] = reconciled
 
 
 def buffer_minutes_for_cluster(cluster: dict[str, object], config: dict[str, object]) -> int:
@@ -284,6 +458,7 @@ def cluster_articles(
             list(state.get("published_clusters", [])),
             config,
             now,
+            allow_theme_group=False,
         )
         if matched_published:
             followup = create_cluster(
@@ -298,4 +473,5 @@ def cluster_articles(
 
         pending.append(create_cluster(enriched, now, state))  # type: ignore[union-attr]
 
+    reconcile_pending_clusters(state, config, now)
     return publish_ready_clusters(state, config, now)
