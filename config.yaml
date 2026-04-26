@@ -1,6 +1,6 @@
 feed_url: ""
 feeds: []
-public_feed_url: ""
+public_feed_url: "https://sung1673.github.io/activist-rss-curator/feed.xml"
 timezone: "Asia/Seoul"
 
 fetch:
