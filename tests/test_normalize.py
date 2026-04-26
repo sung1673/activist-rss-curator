@@ -20,6 +20,14 @@ def test_google_news_rss_url_is_decoded_without_network() -> None:
     assert normalize_url(url) == "https://m.newsway.co.kr/news/view?ud=2022030315343249260"
 
 
+def test_bing_news_redirect_url_is_unwrapped() -> None:
+    url = (
+        "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=abc&"
+        "url=https%3a%2f%2fwww.mk.co.kr%2fnews%2fstock%2f12024349&c=123&mkt=ko-kr"
+    )
+    assert normalize_url(url) == "https://www.mk.co.kr/news/stock/12024349"
+
+
 def test_tracking_parameters_and_fragment_are_removed() -> None:
     assert (
         normalize_url("HTTPS://Example.COM/path/?utm_medium=rss&gclid=1&ref=nav&id=42#frag")

@@ -131,6 +131,12 @@ def decode_google_redirect_url(url: str) -> str:
             if target:
                 return unquote(target)
 
+    if hostname.endswith("bing.com") and parsed.path.lower().endswith("/news/apiclick.aspx"):
+        params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        target = params.get("url")
+        if target:
+            return unquote(target)
+
     if hostname == "news.google.com":
         decoded = decode_google_news_url(parsed.path)
         if decoded:

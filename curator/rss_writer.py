@@ -134,6 +134,10 @@ def write_feed(path: str | Path, clusters: list[dict[str, object]], config: dict
 def write_index(path: str | Path, state: dict[str, object], config: dict[str, object], now: datetime) -> str:
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
     published = sort_published_clusters(list(state.get("published_clusters", [])), timezone_name)
+    articles = list(state.get("articles", []))
+    unique_article_count = len({str(article.get("canonical_url")) for article in articles if article.get("canonical_url")})
+    duplicate_count = sum(1 for article in articles if article.get("status") == "duplicate")
+    pending_count = len(state.get("pending_clusters", []))
     recent_items = "\n".join(
         f"<li>{escape(format_kst(cluster.get('published_at'), timezone_name))} - {escape(item_title(cluster))}</li>"
         for cluster in published[:20]
@@ -156,7 +160,8 @@ def write_index(path: str | Path, state: dict[str, object], config: dict[str, ob
     <h1>정제 RSS - 행동주의 뉴스</h1>
     <p><a href="./feed.xml">feed.xml</a></p>
     <p>마지막 생성 시각: {escape(format_kst(now, timezone_name))}</p>
-    <p>최근 cluster: {len(published)}개 / rejected: {len(state.get("rejected_articles", []))}건 / seen articles: {len(state.get("articles", []))}건</p>
+    <p>최근 cluster: {len(published)}개 / pending: {pending_count}개 / rejected: {len(state.get("rejected_articles", []))}건</p>
+    <p>unique articles: {unique_article_count}건 / total seen records: {len(articles)}건 / duplicates: {duplicate_count}건</p>
     <h2>최근 cluster 목록</h2>
     <ul>
       {recent_items}
