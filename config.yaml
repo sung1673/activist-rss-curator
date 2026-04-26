@@ -1,0 +1,32 @@
+feed_url: ""
+feeds: []
+public_feed_url: ""
+timezone: "Asia/Seoul"
+
+fetch:
+  max_entries_per_feed: 0
+  enrich_pages: true
+
+date_filter:
+  max_article_age_days: 7
+  allow_unknown_date: true
+
+cluster:
+  buffer_minutes_default: 45
+  buffer_minutes_high: 20
+  max_pending_hours: 3
+  cluster_window_hours: 48
+  max_links_per_item: 7
+  max_description_chars: 3500
+
+dedupe:
+  title_duplicate_threshold: 92
+  title_cluster_threshold: 80
+  summary_cluster_threshold: 85
+  seen_history_days: 90
+
+publish:
+  max_items_in_feed: 50
+  publish_levels:
+    - high
+    - medium
