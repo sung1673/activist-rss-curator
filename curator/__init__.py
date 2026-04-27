@@ -10,4 +10,5 @@ __all__ = [
     "cluster",
     "rss_writer",
     "state",
+    "telegram_publisher",
 ]

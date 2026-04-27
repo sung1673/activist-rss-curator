@@ -17,6 +17,9 @@ def default_state() -> dict[str, object]:
         "pending_clusters": [],
         "published_clusters": [],
         "rejected_articles": [],
+        "telegram_sent_cluster_guids": [],
+        "telegram_send_records": [],
+        "telegram_initialized_at": None,
         "last_run_at": None,
     }
 
@@ -40,7 +43,16 @@ def load_state(path: str | Path) -> dict[str, object]:
         return default_state()
     state = default_state()
     state.update(loaded)
-    for key in ("seen_url_hashes", "seen_title_hashes", "articles", "pending_clusters", "published_clusters", "rejected_articles"):
+    for key in (
+        "seen_url_hashes",
+        "seen_title_hashes",
+        "articles",
+        "pending_clusters",
+        "published_clusters",
+        "rejected_articles",
+        "telegram_sent_cluster_guids",
+        "telegram_send_records",
+    ):
         if not isinstance(state.get(key), list):
             state[key] = []
     return state
@@ -107,3 +119,15 @@ def compact_state(state: dict[str, object], config: dict[str, object], now: date
     state["seen_title_hashes"] = sorted({str(article.get("title_hash")) for article in articles if article.get("title_hash")})
     state["rejected_articles"] = list(state.get("rejected_articles", []))[-1000:]
     state["published_clusters"] = list(state.get("published_clusters", []))[-500:]
+    state["telegram_send_records"] = list(state.get("telegram_send_records", []))[-1000:]
+    published_guids = {
+        str(cluster.get("guid"))
+        for cluster in state.get("published_clusters", [])
+        if cluster.get("guid")
+    }
+    recent_sent_guids = [
+        str(guid)
+        for guid in state.get("telegram_sent_cluster_guids", [])
+        if str(guid) in published_guids
+    ]
+    state["telegram_sent_cluster_guids"] = sorted(set(recent_sent_guids))

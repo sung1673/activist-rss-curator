@@ -1,6 +1,6 @@
 # 한국어 뉴스 큐레이션용 정제 RSS 생성기
 
-Google Alerts RSS를 15분마다 가져와 오래된 기사, 중복 기사, 관련도 낮은 기사를 제거하고 유사 기사들을 하나의 묶음으로 만든 뒤 `rss2tg_bot`이 구독할 수 있는 `public/feed.xml`을 생성합니다.
+Google Alerts RSS를 주기적으로 가져와 오래된 기사, 중복 기사, 관련도 낮은 기사를 제거하고 유사 기사들을 하나의 묶음으로 만든 뒤 `public/feed.xml`을 생성합니다. 선택적으로 Telegram Bot API를 사용해 정제된 묶음을 채널에 직접 발행할 수 있습니다.
 
 ## 구조
 
@@ -16,7 +16,13 @@ Google Alerts RSS -> rss2tg_bot -> Telegram channel
 Google Alerts RSS -> GitHub Actions 정제 -> GitHub Pages feed.xml -> rss2tg_bot -> Telegram channel
 ```
 
-Telegram bot은 새로 만들지 않습니다. 이 프로젝트는 `rss2tg_bot`이 읽을 정제 RSS만 생성합니다. RSS item 1개가 cluster 1개이며, item description 안에 유사 기사 여러 링크가 들어갑니다.
+직접 발행 구조:
+
+```text
+Google Alerts RSS -> GitHub Actions 정제 -> Telegram Bot API -> Telegram channel
+```
+
+RSS item 1개가 cluster 1개이며, item description 안에 유사 기사 여러 링크가 들어갑니다. 직접 발행을 켜면 Telegram 메시지는 HTML 링크 서식을 사용해 긴 기사 URL 대신 `매체명 - 제목` 형태의 클릭 가능한 줄로 표시합니다.
 
 ## 설치
 
@@ -55,6 +61,8 @@ Secret 이름:
 
 ```text
 CURATOR_FEEDS
+TELEGRAM_BOT_TOKEN
+TELEGRAM_CHAT_ID
 ```
 
 여러 Google Alerts RSS URL은 쉼표 또는 줄바꿈으로 구분합니다.
@@ -64,11 +72,14 @@ https://www.google.com/alerts/feeds/...
 https://www.google.com/alerts/feeds/...
 ```
 
+Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 workflow 파일에 직접 쓰지 말고 `TELEGRAM_BOT_TOKEN` Secret에 저장합니다. 채널 username을 공개해도 괜찮다면 `config.yaml`의 `telegram.chat_id`를 사용할 수 있고, 숨기고 싶다면 `TELEGRAM_CHAT_ID` Secret에 `@channel_username` 또는 numeric chat id를 저장합니다.
+
 ## GitHub Actions
 
 `.github/workflows/build-feed.yml`은 다음을 수행합니다.
 
-- 15분마다 실행
+- KST 07:00-23:45에는 15분마다 실행
+- KST 00:00-06:00에는 1시간마다 실행
 - Python 3.12 설치
 - `requirements.txt` 설치
 - `python -m curator.main` 실행
@@ -104,6 +115,18 @@ https://<owner>.github.io/<repo>/feed.xml
 
 RSS 본문에는 기사 1건을 한 줄로 표시합니다. rss2tg_bot이 본문 HTML 링크를 보존하지 않는 경우가 있어, 기사 목록에는 `mk.co.kr` 같은 도메인 대신 `매일경제` 같은 출처명을 표시합니다. RSS item link에는 GitHub Pages 중간 링크가 아니라 원문 기사 URL을 사용합니다. `msn.com`처럼 원문 확인이 어려운 중계 링크는 수집 단계에서 제외합니다.
 
+## Telegram 직접 발행
+
+직접 발행을 사용하면 `rss2tg_bot` 없이 이 프로젝트가 Telegram Bot API로 채널에 메시지를 보냅니다. 메시지는 긴 URL을 직접 노출하지 않고 HTML 링크로 표시합니다.
+
+필수 조건:
+
+- BotFather에서 만든 bot token을 `TELEGRAM_BOT_TOKEN` Secret에 저장
+- bot을 채널 관리자에 추가
+- `config.yaml`의 `telegram.chat_id` 또는 `TELEGRAM_CHAT_ID` Secret 설정
+
+처음 Secret을 연결한 실행에서는 기존 published cluster를 발송하지 않도록 기준선으로만 저장합니다. 이후 새로 published 되는 cluster부터 전송합니다. 전송한 guid는 `data/state.json`의 `telegram_sent_cluster_guids`에 저장되어 중복 발송을 막습니다.
+
 ## 운영 정책
 
 - 새 cluster는 pending 상태로 시작합니다.
@@ -116,10 +139,12 @@ RSS 본문에는 기사 1건을 한 줄로 표시합니다. rss2tg_bot이 본문
 - `msn.com` 같은 중계 링크는 기본적으로 제외합니다.
 - 이미 published된 cluster에 유사 기사가 나중에 들어오면 기존 item을 수정하지 않고 `[추가 N건] ...` follow-up cluster로 새 guid를 발행합니다.
 - `feed.xml`에는 최근 published cluster 50개만 유지합니다.
+- Telegram 직접 발행은 전송 성공한 cluster guid를 state에 저장하고, 이미 보낸 cluster는 다시 보내지 않습니다.
 
 ## 한계
 
 - `rss2tg_bot`이 메시지 렌더링을 최종 결정하므로 정확한 표시 형식은 bot 설정에 따라 달라질 수 있습니다.
 - 너무 긴 description은 텔레그램에서 분할될 수 있습니다. 기본 제한은 3500자입니다.
 - 이미 발행된 텔레그램 메시지를 RSS만으로 안정적으로 수정하는 것은 기대하지 않습니다.
+- GitHub Actions 기반 Telegram 발행은 대화형 봇이 아니라 예약 실행형 발행 봇입니다. 채널에 명령어를 보내 즉시 설정을 바꾸는 용도에는 맞지 않습니다.
 - 기업명 추정은 단순 규칙 기반입니다. `extract_company_candidates()`를 확장해 개선할 수 있습니다.

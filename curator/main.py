@@ -10,6 +10,10 @@ from .fetch import fetch_google_alerts_articles
 from .relevance import relevance_details
 from .rss_writer import write_feed, write_index
 from .state import compact_state, load_state, remember_article, remember_rejected, save_state
+from .telegram_publisher import (
+    initialize_telegram_state,
+    publish_unsent_telegram_clusters,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -69,6 +73,7 @@ def run(root: Path | None = None) -> dict[str, int]:
     state_path = project_root / "data" / "state.json"
     state = load_state(state_path)
     prune_excluded_pending_articles(state, config)
+    initialize_telegram_state(state, config, now)
 
     fetched_articles = fetch_google_alerts_articles(config)
     publish_levels = set(config.get("publish", {}).get("publish_levels", ["high", "medium"]))  # type: ignore[union-attr]
@@ -115,6 +120,7 @@ def run(root: Path | None = None) -> dict[str, int]:
     published_clusters = list(state.get("published_clusters", []))
     write_feed(project_root / "public" / "feed.xml", published_clusters, config, now)
     write_index(project_root / "public" / "index.html", state, config, now)
+    telegram_summary = publish_unsent_telegram_clusters(state, config, now)
     save_state(state_path, state)
 
     return {
@@ -125,6 +131,7 @@ def run(root: Path | None = None) -> dict[str, int]:
         "published_now": len(published_now),
         "pending": len(state.get("pending_clusters", [])),
         "published_total": len(state.get("published_clusters", [])),
+        **telegram_summary,
     }
 
 

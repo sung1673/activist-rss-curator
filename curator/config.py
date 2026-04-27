@@ -43,6 +43,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_items_in_feed": 50,
         "publish_levels": ["high", "medium"],
     },
+    "telegram": {
+        "enabled": True,
+        "chat_id": "@o2fjwoei",
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+        "max_articles_per_message": 7,
+        "max_message_chars": 3900,
+        "send_old_on_first_run": False,
+        "timeout_seconds": 20,
+    },
 }
 
 
