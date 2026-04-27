@@ -54,6 +54,58 @@ DIGEST_GROUP_STOPWORDS = {
     "this",
 }
 
+OPERATIONAL_SUMMARY_PATTERNS = (
+    "링크",
+    "url",
+    "urls",
+    "href",
+    "추려",
+    "읽기 좋게",
+    "발행",
+    "전송",
+    "메시지",
+    "건만",
+)
+
+FALLBACK_TOPIC_RULES = (
+    (
+        ("임원보수", "주식보상", "성과보수", "보수 공시", "보수체계"),
+        "임원보수·주식보상 공시 강화가 부각됐음",
+    ),
+    (
+        ("etf", "의결권", "운용사", "스튜어드십"),
+        "ETF·운용사 의결권 영향력이 이슈로 떠올랐음",
+    ),
+    (
+        ("코너스톤", "cornerstone", "ipo", "공모주", "상장 제도"),
+        "코너스톤 투자자 등 IPO 제도 논의가 이어졌음",
+    ),
+    (
+        ("해외부동산펀드", "핵심위험", "투자자 보호", "위험공시"),
+        "펀드 위험공시 등 투자자 보호 이슈가 확인됐음",
+    ),
+    (
+        ("소액주주", "주주제안", "고발", "검찰", "소송", "주주권"),
+        "소액주주 권리 행사와 법적 대응 이슈가 이어졌음",
+    ),
+    (
+        ("행동주의", "activist", "proxy", "이사회", "위임장", "board"),
+        "행동주의와 이사회 견제 흐름이 이어졌음",
+    ),
+    (
+        ("밸류업", "주주환원", "자사주", "배당"),
+        "밸류업·주주환원 논의가 이어졌음",
+    ),
+    (
+        ("지배구조", "거버넌스", "스튜어드십", "책임경영"),
+        "지배구조와 스튜어드십 논의가 이어졌음",
+    ),
+    (
+        ("경영권", "분쟁", "공개매수", "m&a", "인수"),
+        "경영권 분쟁과 자본시장 이벤트가 이어졌음",
+    ),
+)
+
 
 def ai_config(config: dict[str, object]) -> dict[str, Any]:
     value = config.get("ai", {})
@@ -380,11 +432,12 @@ def render_digest_entry_group(group: list[dict[str, object]], config: dict[str, 
     return lines
 
 
-def summary_bullet_lines(text: str, config: dict[str, object]) -> list[str]:
-    settings = digest_config(config)
-    max_bullets = int(settings.get("summary_bullets", 3))
-    max_chars = int(settings.get("summary_bullet_max_chars", 72))
+def is_operational_summary_line(line: str) -> bool:
+    lowered = line.casefold()
+    return any(pattern in lowered for pattern in OPERATIONAL_SUMMARY_PATTERNS)
 
+
+def digest_summary_candidates(text: str) -> list[str]:
     candidates: list[str] = []
     for raw_line in re.split(r"[\n\r]+", text):
         line = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", raw_line).strip()
@@ -392,15 +445,85 @@ def summary_bullet_lines(text: str, config: dict[str, object]) -> list[str]:
             candidates.append(line)
     if not candidates:
         candidates = [part.strip() for part in re.split(r"(?<=[.!?。])\s+|(?<=다\.)\s+", text) if part.strip()]
+    return [line for line in candidates if not is_operational_summary_line(line)]
+
+
+def summary_bullet_lines(text: str, config: dict[str, object]) -> list[str]:
+    settings = digest_config(config)
+    max_bullets = int(settings.get("summary_bullets", 3))
+    max_chars = int(settings.get("summary_bullet_max_chars", 72))
 
     bullets: list[str] = []
-    for line in candidates:
+    for line in digest_summary_candidates(text):
         if not line:
             continue
         bullets.append(f"- {escape(compact_text(line, max_chars=max_chars), quote=False)}")
         if len(bullets) >= max_bullets:
             break
     return bullets or ["- 주요 기사 흐름을 짧게 정리했음"]
+
+
+def digest_entry_content_text(entry: dict[str, object]) -> str:
+    article = entry.get("article")
+    cluster = entry.get("cluster")
+    parts = [str(entry.get("title") or "")]
+    if isinstance(article, dict):
+        parts.extend(
+            [
+                str(article.get("title") or ""),
+                str(article.get("clean_title") or ""),
+                str(article.get("summary") or ""),
+                " ".join(str(value) for value in article.get("keywords") or []),
+            ]
+        )
+    if isinstance(cluster, dict):
+        parts.extend(
+            [
+                str(cluster.get("representative_title") or ""),
+                str(cluster.get("theme_group") or ""),
+            ]
+        )
+    return " ".join(part for part in parts if part).casefold()
+
+
+def fallback_topic_bullets(entries: list[dict[str, object]], *, global_section: bool = False) -> list[str]:
+    scored: list[tuple[int, int, str]] = []
+    texts = [digest_entry_content_text(entry) for entry in entries]
+    for index, (patterns, phrase) in enumerate(FALLBACK_TOPIC_RULES):
+        score = 0
+        for text in texts:
+            if any(pattern.casefold() in text for pattern in patterns):
+                score += 1
+        if score:
+            scored.append((score, -index, phrase))
+
+    scored.sort(reverse=True)
+    bullets: list[str] = []
+    for _score, _index, phrase in scored:
+        line = f"해외에서는 {phrase}" if global_section and not phrase.startswith("해외") else phrase
+        if line not in bullets:
+            bullets.append(line)
+    return bullets
+
+
+def fallback_title_bullets(
+    entries: list[dict[str, object]],
+    config: dict[str, object],
+    *,
+    global_section: bool = False,
+) -> list[str]:
+    bullets: list[str] = []
+    for group in group_digest_entries(entries):
+        title = digest_group_title(group, config)
+        title = compact_text(re.sub(r"\s+", " ", title).strip(" -|"), max_chars=36)
+        if not title or is_operational_summary_line(title):
+            continue
+        line = f"{title} 이슈가 이어졌음"
+        if global_section:
+            line = f"해외에서는 {line}"
+        if line not in bullets:
+            bullets.append(line)
+    return bullets
 
 
 def fallback_daily_digest(
@@ -410,15 +533,31 @@ def fallback_daily_digest(
     end_at: datetime,
 ) -> str:
     entries = limited_digest_article_entries(clusters, config)
-    domestic_count = len(entries["domestic"])
-    global_count = len(entries["global"])
-    lines = []
-    if domestic_count:
-        lines.append("- 국내는 주주환원·지배구조 이슈가 이어졌음")
-    if global_count:
-        lines.append(f"- 해외는 행동주의·주주권 흐름을 같이 볼 만했음")
-    lines.append(f"- 링크 {domestic_count + global_count}건만 추려서 읽기 좋게 정리했음")
-    return "\n".join(lines[:3])
+    domestic_lines = fallback_topic_bullets(entries["domestic"])
+    global_lines = fallback_topic_bullets(entries["global"], global_section=True)
+    if not domestic_lines:
+        domestic_lines = fallback_title_bullets(entries["domestic"], config)
+    if not global_lines:
+        global_lines = fallback_title_bullets(entries["global"], config, global_section=True)
+
+    lines: list[str] = []
+    for line in domestic_lines[:2]:
+        if not is_operational_summary_line(line) and line not in lines:
+            lines.append(line)
+    for line in global_lines[:1]:
+        if not is_operational_summary_line(line) and line not in lines:
+            lines.append(line)
+
+    if not lines:
+        all_entries = entries["domestic"] + entries["global"]
+        lines = fallback_title_bullets(all_entries, config)[:3]
+    if not lines:
+        lines = ["주주행동·거버넌스 관련 기사 흐름이 이어졌음"]
+    return "\n".join(f"- {line}" for line in lines[:3])
+
+
+def has_meaningful_summary(text: str) -> bool:
+    return bool(digest_summary_candidates(text))
 
 
 def render_digest_link_sections(
@@ -473,7 +612,9 @@ def generate_daily_digest_review(
         max_tokens=max_tokens,
         config=config,
     )
-    return content or fallback_daily_digest(clusters, config, start_at, end_at)
+    if content and has_meaningful_summary(content):
+        return content
+    return fallback_daily_digest(clusters, config, start_at, end_at)
 
 
 def split_plain_telegram_text(text: str, max_chars: int) -> list[str]:
@@ -538,8 +679,11 @@ def publish_daily_digest_if_due(
         return {"daily_digest_sent": 0, "daily_digest_failed": 0}
 
     send_hour = int(settings.get("send_hour", 7))
+    send_minute = int(settings.get("send_minute", 0))
     send_window_minutes = int(settings.get("send_window_minutes", 59))
-    if now.hour != send_hour or now.minute > send_window_minutes:
+    send_start = now.replace(hour=send_hour, minute=send_minute, second=0, microsecond=0)
+    send_end = send_start + timedelta(minutes=send_window_minutes)
+    if not send_start <= now < send_end:
         return {"daily_digest_sent": 0, "daily_digest_failed": 0}
 
     digest_id = now.strftime("%Y-%m-%d")

@@ -32,6 +32,14 @@ def published_cluster(config, now):  # type: ignore[no-untyped-def]
     return state["published_clusters"][0]
 
 
+def digest_summary_block(message: str) -> str:
+    summary = message.split("<b>요약</b>\n", 1)[1]
+    for marker in ("\n\n<b>국내</b>", "\n\n<b>해외</b>"):
+        if marker in summary:
+            return summary.split(marker, 1)[0]
+    return summary
+
+
 def test_daily_digest_sends_once_in_morning_window(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import summaries
 
@@ -46,7 +54,7 @@ def test_daily_digest_sends_once_in_morning_window(config, now, monkeypatch) -> 
 
     monkeypatch.setattr(summaries, "send_telegram_message", fake_send)
     cluster = published_cluster(config, now)
-    digest_now = datetime(2026, 4, 26, 7, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    digest_now = datetime(2026, 4, 26, 6, 30, tzinfo=ZoneInfo("Asia/Seoul"))
     cluster["published_at"] = (digest_now - timedelta(minutes=30)).isoformat()
     state = {
         "published_clusters": [cluster],
@@ -68,7 +76,7 @@ def test_daily_digest_sends_once_in_morning_window(config, now, monkeypatch) -> 
 def test_daily_digest_skips_outside_send_hour(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     cluster = published_cluster(config, now)
-    digest_now = datetime(2026, 4, 26, 6, 55, tzinfo=ZoneInfo("Asia/Seoul"))
+    digest_now = datetime(2026, 4, 26, 7, 0, tzinfo=ZoneInfo("Asia/Seoul"))
     cluster["published_at"] = (digest_now - timedelta(minutes=30)).isoformat()
     state = {
         "published_clusters": [cluster],
@@ -167,3 +175,60 @@ def test_daily_digest_groups_similar_article_titles(config, now, monkeypatch) ->
     assert "링크:" in message
     assert 'href="https://example.com/a"' in message
     assert 'href="https://example.com/b"' in message
+
+
+def test_daily_digest_fallback_summary_uses_article_topics(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["ai"]["daily_digest_enabled"] = False  # type: ignore[index]
+    article = make_article(
+        "상장사 임원보수·주식보상 공시 강화 추진",
+        "https://example.com/pay",
+        source="자본시장뉴스",
+        published_at="2026-04-27T09:00:00+09:00",
+        summary="성과보수와 주식보상 공시가 투자자 보호 쟁점으로 부각",
+    )
+    clusters = [
+        {
+            "representative_title": "임원보수 주식보상 공시",
+            "published_at": article["published_at"],
+            "articles": [article],
+        }
+    ]
+
+    message = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))[0]
+    summary = digest_summary_block(message)
+
+    assert "임원보수" in summary
+    assert "주식보상" in summary
+    assert "링크" not in summary
+    assert "추려" not in summary
+
+
+def test_daily_digest_filters_operational_ai_summary_lines(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setattr(
+        summaries,
+        "call_github_models",
+        lambda *_args, **_kwargs: "- 링크 21건만 추려서 읽기 좋게 정리했음\n- 임원보수 공시 강화 흐름이 이어졌음",
+    )
+    article = make_article(
+        "상장사 임원보수 공시 강화 논의",
+        "https://example.com/pay",
+        source="자본시장뉴스",
+        published_at="2026-04-27T09:00:00+09:00",
+        summary="주식보상과 성과보수 공시 논의",
+    )
+    clusters = [
+        {
+            "representative_title": "임원보수 공시",
+            "published_at": article["published_at"],
+            "articles": [article],
+        }
+    ]
+
+    message = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))[0]
+    summary = digest_summary_block(message)
+
+    assert "임원보수 공시 강화" in summary
+    assert "링크 21건" not in summary
+    assert "읽기 좋게" not in summary

@@ -102,7 +102,7 @@ Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 
 GitHub Models를 사용하는 daily digest는 workflow의 `models: read` 권한과 자동 제공되는 `GITHUB_TOKEN`을 사용합니다. 별도 OpenAI API key는 필요하지 않으며, 호출이 실패하면 fallback 리뷰로 계속 실행됩니다.
 
 수동 실행도 `workflow_dispatch`로 가능합니다. 수동 실행 화면에서 `Send a Telegram smoke-test message`를 켜면 실제 뉴스 발행과 별개로 테스트 메시지 1건을 채널에 보내 bot token과 채널 관리자 권한을 확인할 수 있습니다.
-`Send a daily digest preview message`를 켜면 최근 24시간 기준 daily digest 미리보기를 채널에 전송합니다.
+`Send a daily digest preview message`를 켜면 최근 24시간 기준 daily digest 미리보기를 채널에 전송합니다. `Digest preview prefix`에 `NONE`을 넣으면 미리보기 접두어 없이 재발송할 수 있습니다.
 
 ## GitHub Pages
 
@@ -150,7 +150,7 @@ bot 연결만 즉시 확인하려면 Actions의 `Build curated RSS feed` 수동 
 
 일반 기사 묶음 메시지는 AI를 호출하지 않고 제목과 기사 링크만 발행합니다. GitHub Models는 매일 아침 리뷰에만 사용하며, 기본 모델은 `openai/gpt-4.1`입니다.
 
-매일 KST 07:00-07:59 사이 첫 실행에서 최근 24시간의 published/pending cluster를 모아 `데일리 거버넌스 리뷰`를 전송합니다. 리뷰는 짧은 bullet 요약과 국내/해외 기사 링크 목록으로 구성됩니다. 비슷한 제목과 핵심 토큰을 가진 기사는 대표 제목 아래 여러 언론사 링크로 묶어 보여줍니다. 이미 보낸 날짜는 `data/state.json`의 `daily_digest_sent_dates`에 저장해 중복 전송을 막습니다.
+매일 KST 06:30-06:59 사이 첫 실행에서 최근 24시간의 published/pending cluster를 모아 `데일리 거버넌스 리뷰`를 전송합니다. 07:00 전에 도착하도록 06:30 실행에서 먼저 생성하며, 리뷰는 짧은 bullet 요약과 국내/해외 기사 링크 목록으로 구성됩니다. 비슷한 제목과 핵심 토큰을 가진 기사는 대표 제목 아래 여러 언론사 링크로 묶어 보여줍니다. 이미 보낸 날짜는 `data/state.json`의 `daily_digest_sent_dates`에 저장해 중복 전송을 막습니다.
 
 ## 운영 정책
 
@@ -165,7 +165,7 @@ bot 연결만 즉시 확인하려면 Actions의 `Build curated RSS feed` 수동 
 - 이미 published된 cluster에 유사 기사가 나중에 들어오면 기존 item을 수정하지 않고 `[추가 N건] ...` follow-up cluster로 새 guid를 발행합니다.
 - `feed.xml`에는 최근 published cluster 50개만 유지합니다.
 - Telegram 직접 발행은 전송 성공한 cluster guid를 state에 저장하고, 이미 보낸 cluster는 다시 보내지 않습니다.
-- 매일 KST 07:00에는 최근 24시간 묶음을 데일리 digest로 별도 발행합니다.
+- 매일 KST 06:30에는 최근 24시간 묶음을 데일리 digest로 별도 발행합니다.
 
 ## 한계
 

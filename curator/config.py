@@ -68,8 +68,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "digest": {
         "enabled": True,
-        "send_hour": 7,
-        "send_window_minutes": 59,
+        "send_hour": 6,
+        "send_minute": 30,
+        "send_window_minutes": 30,
         "window_hours": 24,
         "max_clusters": 30,
         "max_articles_per_cluster": 2,

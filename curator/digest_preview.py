@@ -29,6 +29,15 @@ def preview_hours(config: dict[str, object]) -> int:
     return int(digest_config(config).get("window_hours", 24))
 
 
+def preview_prefix() -> str:
+    raw_value = os.environ.get("DIGEST_PREVIEW_PREFIX")
+    if raw_value is None:
+        return "[미리보기] "
+    if raw_value.strip().upper() == "NONE":
+        return ""
+    return raw_value
+
+
 def send_digest_preview(root: Path | None = None) -> dict[str, int]:
     project_root = root or PROJECT_ROOT
     config = load_config(project_root / "config.yaml")
@@ -44,8 +53,9 @@ def send_digest_preview(root: Path | None = None) -> dict[str, int]:
         return {"digest_preview_sent": 0, "digest_preview_failed": 0}
 
     messages = build_daily_digest_messages(clusters, config, now, start_at)
-    if messages:
-        messages[0] = "[미리보기] " + messages[0]
+    prefix = preview_prefix()
+    if messages and prefix:
+        messages[0] = prefix + messages[0]
 
     bot_token = telegram_bot_token()
     chat_id = telegram_chat_id(config)
