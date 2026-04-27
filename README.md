@@ -22,10 +22,10 @@ Google Alerts RSS -> GitHub Actions 정제 -> GitHub Pages feed.xml -> rss2tg_bo
 Google Alerts RSS -> GitHub Actions 정제 -> Telegram Bot API -> Telegram channel
 ```
 
-AI 요약 직접 발행 구조:
+AI 데일리 리뷰 구조:
 
 ```text
-Google Alerts/Google News RSS -> GitHub Actions 정제 -> GitHub Models 요약 -> Telegram Bot API -> Telegram channel
+Google Alerts/Google News RSS -> GitHub Actions 정제 -> GitHub Models daily digest -> Telegram Bot API -> Telegram channel
 ```
 
 RSS item 1개가 cluster 1개이며, item description 안에 유사 기사 여러 링크가 들어갑니다. 직접 발행을 켜면 Telegram 메시지는 HTML 링크 서식을 사용해 긴 기사 URL 대신 `매체명 - 제목` 형태의 클릭 가능한 줄로 표시합니다. 기업명이 추정되는 묶음은 `신한금융`, `고려아연`처럼 메시지 안에서 하위 그룹으로 나눠 표시합니다.
@@ -97,7 +97,7 @@ Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 
 - `python -m curator.main` 실행
 - `public/feed.xml`, `public/index.html`, `data/state.json` 변경 시 commit & push
 
-GitHub Models를 사용하는 AI 요약은 workflow의 `models: read` 권한과 자동 제공되는 `GITHUB_TOKEN`을 사용합니다. 별도 OpenAI API key는 필요하지 않으며, 호출이 실패하면 fallback 요약으로 계속 실행됩니다.
+GitHub Models를 사용하는 daily digest는 workflow의 `models: read` 권한과 자동 제공되는 `GITHUB_TOKEN`을 사용합니다. 별도 OpenAI API key는 필요하지 않으며, 호출이 실패하면 fallback 리뷰로 계속 실행됩니다.
 
 수동 실행도 `workflow_dispatch`로 가능합니다. 수동 실행 화면에서 `Send a Telegram smoke-test message`를 켜면 실제 뉴스 발행과 별개로 테스트 메시지 1건을 채널에 보내 bot token과 채널 관리자 권한을 확인할 수 있습니다.
 
@@ -143,9 +143,9 @@ RSS 본문에는 기사 1건을 한 줄로 표시합니다. rss2tg_bot이 본문
 
 bot 연결만 즉시 확인하려면 Actions의 `Build curated RSS feed` 수동 실행에서 `Send a Telegram smoke-test message` 옵션을 켭니다.
 
-## AI 요약과 데일리 리뷰
+## AI 데일리 리뷰
 
-새로 발행되는 기사 묶음에는 GitHub Models를 통해 2줄 요약을 붙입니다. 기본 모델은 묶음 요약 `openai/gpt-4o-mini`, 매일 아침 리뷰 `openai/gpt-4.1`입니다.
+일반 기사 묶음 메시지는 AI를 호출하지 않고 제목과 기사 링크만 발행합니다. GitHub Models는 매일 아침 리뷰에만 사용하며, 기본 모델은 `openai/gpt-4.1`입니다.
 
 매일 KST 07:00-07:59 사이 첫 실행에서 최근 24시간의 published/pending cluster를 모아 `데일리 거버넌스 리뷰`를 전송합니다. 리뷰는 카테고리별 흐름과 시장 맥락을 길게 정리하며, 이미 보낸 날짜는 `data/state.json`의 `daily_digest_sent_dates`에 저장해 중복 전송을 막습니다.
 
@@ -170,5 +170,5 @@ bot 연결만 즉시 확인하려면 Actions의 `Build curated RSS feed` 수동 
 - 너무 긴 description은 텔레그램에서 분할될 수 있습니다. 기본 제한은 3500자입니다.
 - 이미 발행된 텔레그램 메시지를 RSS만으로 안정적으로 수정하는 것은 기대하지 않습니다.
 - GitHub Actions 기반 Telegram 발행은 대화형 봇이 아니라 예약 실행형 발행 봇입니다. 채널에 명령어를 보내 즉시 설정을 바꾸는 용도에는 맞지 않습니다.
-- GitHub Models 호출 한도나 권한 문제로 AI 요약이 실패할 수 있으며, 이 경우 fallback 요약으로 발행합니다.
+- GitHub Models 호출 한도나 권한 문제로 daily digest 생성이 실패할 수 있으며, 이 경우 fallback 리뷰로 발행합니다.
 - 기업명 추정은 단순 규칙 기반입니다. `extract_company_candidates()`를 확장해 개선할 수 있습니다.

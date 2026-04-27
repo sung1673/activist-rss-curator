@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from curator.cluster import cluster_articles
-from curator.summaries import ensure_cluster_summaries, publish_daily_digest_if_due
+from curator.summaries import publish_daily_digest_if_due
 
 from conftest import make_article
 
@@ -30,18 +30,6 @@ def published_cluster(config, now):  # type: ignore[no-untyped-def]
     )
     cluster_articles([], state, config, now + timedelta(minutes=46))
     return state["published_clusters"][0]
-
-
-def test_cluster_summary_falls_back_without_github_models_token(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    from curator import summaries
-
-    monkeypatch.setattr(summaries, "github_models_token", lambda: "")
-    cluster = published_cluster(config, now)
-
-    ensure_cluster_summaries([cluster], config)
-
-    assert len(cluster["summary_lines"]) == 2
-    assert cluster["summary_model"] == "openai/gpt-4o-mini"
 
 
 def test_daily_digest_sends_once_in_morning_window(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]

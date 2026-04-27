@@ -144,10 +144,6 @@ ai:
   provider: "github_models"
   endpoint: "https://models.github.ai/inference/chat/completions"
   timeout_seconds: 25
-  cluster_summary_enabled: true
-  cluster_summary_model: "openai/gpt-4o-mini"
-  cluster_summary_max_tokens: 180
-  cluster_summary_max_clusters_per_run: 8
   daily_digest_enabled: true
   daily_digest_model: "openai/gpt-4.1"
   daily_digest_max_tokens: 900

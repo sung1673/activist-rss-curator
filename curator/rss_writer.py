@@ -203,15 +203,6 @@ def item_description(cluster: dict[str, object], config: dict[str, object]) -> s
         "",
     ]
 
-    summary_lines = [
-        compact_text(line, max_chars=120)
-        for line in (cluster.get("summary_lines") or [])
-        if str(line).strip()
-    ]
-    if summary_lines:
-        lines.extend(escape(line) for line in summary_lines[:2])
-        lines.append("")
-
     shown = articles[:max_links]
     for index, article in enumerate(shown, start=1):
         source = article_source_label(article)

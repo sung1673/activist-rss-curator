@@ -99,87 +99,6 @@ def call_github_models(
     return re.sub(r"\n{3,}", "\n\n", content).strip()
 
 
-def clean_summary_lines(text: str) -> list[str]:
-    lines: list[str] = []
-    for raw_line in text.splitlines():
-        line = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", raw_line).strip()
-        if line:
-            lines.append(compact_text(line, max_chars=120))
-    return lines[:2]
-
-
-def fallback_cluster_summary(cluster: dict[str, object], config: dict[str, object]) -> list[str]:
-    articles = publishable_articles(cluster, config)
-    section = telegram_section_label(cluster)
-    title = compact_text(cluster.get("representative_title") or item_title(cluster, len(articles)), max_chars=95)
-    sources = ", ".join(article_source_label(article) for article in articles[:3])
-    return [
-        compact_text(f"{section} 흐름에서 {title} 이슈가 포착됐습니다.", max_chars=120),
-        compact_text(f"주요 기사 {len(articles)}건을 묶었고, 출처는 {sources or '복수 매체'}입니다.", max_chars=120),
-    ]
-
-
-def cluster_prompt_context(cluster: dict[str, object], config: dict[str, object]) -> str:
-    articles = publishable_articles(cluster, config)[:5]
-    lines = [
-        f"섹션: {telegram_section_label(cluster)}",
-        f"대표 제목: {cluster.get('representative_title') or item_title(cluster, len(articles))}",
-        f"기사 수: {len(publishable_articles(cluster, config))}",
-        "기사:",
-    ]
-    for index, article in enumerate(articles, start=1):
-        source = article_source_label(article)
-        title = display_article_title(article, source)
-        summary = compact_text(article.get("summary") or "", max_chars=180)
-        lines.append(f"{index}. {source} - {title}")
-        if summary:
-            lines.append(f"   요약/본문 일부: {summary}")
-    return "\n".join(lines)
-
-
-def summarize_cluster(cluster: dict[str, object], config: dict[str, object]) -> list[str]:
-    settings = ai_config(config)
-    if not settings.get("cluster_summary_enabled", True):
-        return []
-    model = str(settings.get("cluster_summary_model") or "openai/gpt-4o-mini")
-    max_tokens = int(settings.get("cluster_summary_max_tokens", 180))
-    system_prompt = (
-        "당신은 한국어 자본시장 뉴스 에디터입니다. "
-        "행동주의, 주주권, 거버넌스 관점에서 텔레그램 메시지에 넣을 2줄 요약을 작성합니다. "
-        "분류, 기준시각, 링크, 투자권유 문구는 쓰지 않습니다."
-    )
-    user_prompt = (
-        "아래 기사 묶음을 한국어로 정확히 2줄 요약하세요. "
-        "각 줄은 80자 안팎으로 간결하게 쓰고, 과장 없이 핵심 쟁점과 의미를 분리하세요.\n\n"
-        f"{cluster_prompt_context(cluster, config)}"
-    )
-    content = call_github_models(
-        system_prompt,
-        user_prompt,
-        model=model,
-        max_tokens=max_tokens,
-        config=config,
-    )
-    lines = clean_summary_lines(content or "")
-    return lines or fallback_cluster_summary(cluster, config)
-
-
-def ensure_cluster_summaries(clusters: list[dict[str, object]], config: dict[str, object]) -> None:
-    settings = ai_config(config)
-    if not settings.get("cluster_summary_enabled", True):
-        return
-    limit = int(settings.get("cluster_summary_max_clusters_per_run", 8))
-    summarized = 0
-    for cluster in clusters:
-        if summarized >= limit:
-            return
-        if cluster.get("summary_lines"):
-            continue
-        cluster["summary_lines"] = summarize_cluster(cluster, config)
-        cluster["summary_model"] = str(settings.get("cluster_summary_model") or "openai/gpt-4o-mini")
-        summarized += 1
-
-
 def digest_cluster_datetime(cluster: dict[str, object], timezone_name: str) -> datetime | None:
     for key in ("published_at", "last_article_seen_at", "last_article_at", "created_at"):
         value = cluster.get(key)
@@ -218,7 +137,6 @@ def digest_context(clusters: list[dict[str, object]], config: dict[str, object])
         articles = publishable_articles(cluster, config)
         block = [
             f"{index}. [{telegram_section_label(cluster)}] {item_title(cluster, len(articles))}",
-            f"요약 후보: {' / '.join(str(line) for line in list(cluster.get('summary_lines') or [])[:2])}",
             "기사:",
         ]
         for article in articles[:max_articles]:
@@ -253,9 +171,6 @@ def fallback_daily_digest(
         for cluster in section_clusters[:6]:
             articles = publishable_articles(cluster, config)
             lines.append(f"- {compact_text(item_title(cluster, len(articles)), max_chars=100)}")
-            summary_lines = [str(line) for line in (cluster.get("summary_lines") or []) if str(line).strip()]
-            if summary_lines:
-                lines.append(f"  {compact_text(' '.join(summary_lines[:2]), max_chars=140)}")
         lines.append("")
     return "\n".join(lines).strip()
 

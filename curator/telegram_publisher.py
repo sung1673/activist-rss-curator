@@ -133,15 +133,6 @@ def build_telegram_message(cluster: dict[str, object], config: dict[str, object]
         "",
     ]
 
-    summary_lines = [
-        compact_text(line, max_chars=120)
-        for line in (cluster.get("summary_lines") or [])
-        if str(line).strip()
-    ]
-    if summary_lines:
-        lines.extend(escape(line) for line in summary_lines[:2])
-        lines.append("")
-
     shown_count = 0
     article_groups = grouped_articles(articles[:max_articles])
     show_groups = should_show_article_groups(article_groups)

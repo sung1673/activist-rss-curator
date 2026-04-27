@@ -10,7 +10,7 @@ from .fetch import fetch_google_alerts_articles
 from .relevance import relevance_details
 from .rss_writer import write_feed, write_index
 from .state import compact_state, load_state, remember_article, remember_rejected, save_state
-from .summaries import ensure_cluster_summaries, publish_daily_digest_if_due
+from .summaries import publish_daily_digest_if_due
 from .telegram_publisher import (
     initialize_telegram_state,
     publish_unsent_telegram_clusters,
@@ -116,7 +116,6 @@ def run(root: Path | None = None) -> dict[str, int]:
         remember_article(state, article, "accepted", now)
 
     published_now = cluster_articles(unique_articles, state, config, now)
-    ensure_cluster_summaries(published_now, config)
     state["last_run_at"] = datetime_to_iso(now)
     compact_state(state, config, now)
     published_clusters = list(state.get("published_clusters", []))
