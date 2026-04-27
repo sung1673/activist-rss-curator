@@ -37,6 +37,16 @@ on:
         required: false
         type: string
         default: "[미리보기] "
+      resend_recent_articles:
+        description: "Resend recently sent Telegram article clusters with current formatting"
+        required: false
+        type: boolean
+        default: false
+      resend_recent_article_count:
+        description: "Number of recent sent article clusters to resend"
+        required: false
+        type: string
+        default: "1"
 
 permissions:
   contents: write
@@ -95,6 +105,14 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m curator.digest_preview
+
+      - name: Resend recent Telegram articles
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.resend_recent_articles }}
+        env:
+          TELEGRAM_RESEND_COUNT: ${{ inputs.resend_recent_article_count }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m curator.telegram_resend
 
       - name: Commit generated files
         run: |
