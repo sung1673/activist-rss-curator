@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from curator.cluster import cluster_articles
-from curator.rss_writer import build_rss, item_description, item_link, item_title
+from curator.rss_writer import build_rss, item_description, item_link, item_title, write_index
 
 from conftest import make_article
 
@@ -163,3 +163,20 @@ def test_rss_channel_link_does_not_expose_source_feed(config, now) -> None:  # t
     config["feed_url"] = "https://alerts.example.invalid/private/token"
     rss = build_rss([], config, now)
     assert "private/token" not in rss
+
+
+def test_write_index_renders_recent_clusters(config, now, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    cluster = published_cluster(config, now)
+    html = write_index(
+        tmp_path / "index.html",
+        {
+            "published_clusters": [cluster],
+            "pending_clusters": [],
+            "articles": [],
+            "rejected_articles": [],
+        },
+        config,
+        now,
+    )
+    assert "정제 RSS - 행동주의 뉴스" in html
+    assert "[묶음 2건]" in html
