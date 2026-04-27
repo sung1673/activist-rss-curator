@@ -19,6 +19,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_enrich_articles": 90,
         "page_timeout_seconds": 8,
         "google_news_decode_limit": 160,
+        "state_google_news_decode_limit": 60,
     },
     "display": {
         "exclude_link_domains": ["msn.com"],

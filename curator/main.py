@@ -6,7 +6,7 @@ from .cluster import cluster_articles
 from .config import article_domain_is_excluded, load_config
 from .dates import choose_publication_datetime, datetime_to_iso, is_too_old, now_in_timezone
 from .dedupe import dedupe_articles
-from .fetch import fetch_google_alerts_articles
+from .fetch import decode_google_news_links_in_state, fetch_google_alerts_articles
 from .relevance import relevance_details
 from .rss_writer import write_feed, write_index
 from .state import compact_state, load_state, remember_article, remember_rejected, save_state
@@ -74,6 +74,7 @@ def run(root: Path | None = None) -> dict[str, int]:
     state_path = project_root / "data" / "state.json"
     state = load_state(state_path)
     prune_excluded_pending_articles(state, config)
+    decode_google_news_links_in_state(state, config)
     initialize_telegram_state(state, config, now)
 
     fetched_articles = fetch_google_alerts_articles(config)

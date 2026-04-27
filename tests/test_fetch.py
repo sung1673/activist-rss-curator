@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from curator.fetch import (
     apply_decoded_google_news_url,
+    decode_google_news_links_in_state,
     fetch_google_alerts_articles,
     google_news_article_id,
     google_news_decoding_params,
@@ -103,3 +104,27 @@ def test_google_news_decode_runs_beyond_page_enrich_limit(config, monkeypatch) -
     assert articles[0]["enriched"] is True
     assert articles[1]["canonical_url"] == "https://origin.example/CBMiBBB"
     assert "enriched" not in articles[1]
+
+
+def test_state_google_news_links_are_upgraded(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import fetch
+
+    state = {
+        "pending_clusters": [
+            {
+                "articles": [
+                    {
+                        "canonical_url": "https://news.google.com/rss/articles/CBMiAAA?oc=5",
+                        "canonical_url_hash": "old",
+                    }
+                ]
+            }
+        ],
+        "published_clusters": [],
+    }
+    monkeypatch.setattr(fetch, "decode_google_news_url_online", lambda *_args, **_kwargs: "https://origin.example/a")
+
+    assert decode_google_news_links_in_state(state, config) == 1
+    article = state["pending_clusters"][0]["articles"][0]
+    assert article["canonical_url"] == "https://origin.example/a"
+    assert article["canonical_url_hash"] != "old"

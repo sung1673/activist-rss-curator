@@ -184,6 +184,36 @@ def apply_decoded_google_news_url(article: dict[str, object], decoded_url: str |
     return enriched
 
 
+def decode_google_news_links_in_state(state: dict[str, object], config: dict[str, object]) -> int:
+    fetch_config = config.get("fetch", {})
+    limit = int(fetch_config.get("state_google_news_decode_limit", 60) or 0)  # type: ignore[union-attr]
+    if limit == 0:
+        return 0
+
+    page_timeout = float(fetch_config.get("page_timeout_seconds", 8.0) or 8.0)  # type: ignore[union-attr]
+    timeout = httpx.Timeout(page_timeout, connect=min(5.0, page_timeout))
+    headers = {"User-Agent": USER_AGENT}
+    decoded_count = 0
+    attempted = 0
+    clusters = list(state.get("pending_clusters", [])) + list(state.get("published_clusters", []))[-50:]
+    with httpx.Client(timeout=timeout, headers=headers) as client:
+        for cluster in clusters:
+            for article in list(cluster.get("articles", [])):
+                url = str(article.get("canonical_url") or article.get("link") or "")
+                if not google_news_article_id(url):
+                    continue
+                if limit > 0 and attempted >= limit:
+                    return decoded_count
+                attempted += 1
+                decoded = decode_google_news_url_online(url, client)
+                if not decoded:
+                    continue
+                updated = apply_decoded_google_news_url(article, decoded)
+                article.update(updated)
+                decoded_count += 1
+    return decoded_count
+
+
 def enrich_article(
     article: dict[str, object],
     client: httpx.Client,
