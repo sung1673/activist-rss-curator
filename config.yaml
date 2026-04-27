@@ -94,7 +94,7 @@ public_feed_url: "https://sung1673.github.io/activist-rss-curator/feed.xml"
 timezone: "Asia/Seoul"
 
 fetch:
-  max_entries_per_feed: 8
+  max_entries_per_feed: 5
   enrich_pages: true
   page_timeout_seconds: 8
   google_news_decode_limit: 25

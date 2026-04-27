@@ -14,7 +14,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "public_feed_url": "",
     "timezone": "Asia/Seoul",
     "fetch": {
-        "max_entries_per_feed": 8,
+        "max_entries_per_feed": 5,
         "enrich_pages": True,
         "page_timeout_seconds": 8,
         "google_news_decode_limit": 25,
