@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from curator.cluster import cluster_articles
-from curator.summaries import publish_daily_digest_if_due
+from curator.summaries import build_daily_digest_messages, publish_daily_digest_if_due
 
 from conftest import make_article
 
@@ -81,3 +81,55 @@ def test_daily_digest_skips_outside_send_hour(config, now, monkeypatch) -> None:
         "daily_digest_sent": 0,
         "daily_digest_failed": 0,
     }
+
+
+def test_daily_digest_lists_domestic_and_global_article_links(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setattr(
+        summaries,
+        "generate_daily_digest_review",
+        lambda *_args, **_kwargs: "- 국내 주주환원 흐름이 이어졌음\n- 해외 행동주의 이슈도 보였음",
+    )
+    config["digest"]["link_title_max_chars"] = 22  # type: ignore[index]
+    domestic_article = make_article(
+        "주주제안과 자사주 소각 의무화 논의가 매우 길게 이어지는 기사 제목",
+        "https://example.com/domestic",
+        source="국내뉴스",
+        published_at="2026-04-27T09:00:00+09:00",
+        summary="주주제안 자사주 소각",
+    )
+    domestic_article["feed_category"] = "supplemental"
+    global_article = make_article(
+        "Shareholder activism proxy fight expands across global boards",
+        "https://example.com/global",
+        source="Global News",
+        published_at="2026-04-26T21:00:00+09:00",
+        summary="shareholder activism proxy fight",
+    )
+    global_article["feed_category"] = "global"
+    clusters = [
+        {
+            "representative_title": "국내 주주환원",
+            "published_at": "2026-04-27T09:10:00+09:00",
+            "theme_group": "valueup_return",
+            "articles": [domestic_article],
+        },
+        {
+            "representative_title": "해외 행동주의",
+            "published_at": "2026-04-26T21:10:00+09:00",
+            "theme_group": "activism_trend",
+            "articles": [global_article],
+        },
+    ]
+
+    message = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))[0]
+
+    assert "<b>국내</b>" in message
+    assert "<b>해외</b>" in message
+    assert 'href="https://example.com/domestic"' in message
+    assert 'href="https://example.com/global"' in message
+    assert "04.27 /" in message
+    assert "04.26 /" in message
+    assert "매우 길게 이어지는 기사 제목" not in message
+    assert "..." in message

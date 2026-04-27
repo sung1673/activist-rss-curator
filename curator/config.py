@@ -64,7 +64,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "timeout_seconds": 25,
         "daily_digest_enabled": True,
         "daily_digest_model": "openai/gpt-4.1",
-        "daily_digest_max_tokens": 900,
+        "daily_digest_max_tokens": 220,
     },
     "digest": {
         "enabled": True,
@@ -72,7 +72,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "send_window_minutes": 59,
         "window_hours": 24,
         "max_clusters": 30,
-        "max_articles_per_cluster": 5,
+        "max_articles_per_cluster": 2,
+        "max_links_total": 24,
+        "max_links_per_section": 12,
+        "link_title_max_chars": 36,
+        "summary_bullets": 3,
+        "summary_bullet_max_chars": 48,
         "max_message_chars": 3900,
     },
 }

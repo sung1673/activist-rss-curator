@@ -5,11 +5,13 @@ import re
 from datetime import datetime, timedelta
 from html import escape
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
 from .dates import datetime_to_iso, format_kst, parse_datetime
 from .rss_writer import (
+    article_link,
     article_source_label,
     compact_text,
     display_article_title,
@@ -20,6 +22,7 @@ from .telegram_publisher import (
     send_telegram_message,
     telegram_bot_token,
     telegram_chat_id,
+    html_link,
     telegram_is_configured,
     telegram_section_label,
 )
@@ -150,29 +153,165 @@ def digest_context(clusters: list[dict[str, object]], config: dict[str, object])
     return "\n\n".join(blocks)
 
 
+def digest_article_datetime(
+    article: dict[str, object],
+    cluster: dict[str, object],
+    timezone_name: str,
+) -> datetime | None:
+    for key in ("article_published_at", "feed_published_at", "published_at", "feed_updated_at"):
+        value = article.get(key)
+        if value:
+            parsed = parse_datetime(str(value), timezone_name)
+            if parsed:
+                return parsed
+    return digest_cluster_datetime(cluster, timezone_name)
+
+
+def digest_article_is_global(article: dict[str, object]) -> bool:
+    feed_category = str(article.get("feed_category") or "").casefold()
+    if feed_category == "global":
+        return True
+    feed_name = str(article.get("feed_name") or "").casefold()
+    if "google-news-en-" in feed_name or feed_name.endswith("-en"):
+        return True
+    return False
+
+
+def digest_article_label(
+    article: dict[str, object],
+    cluster: dict[str, object],
+    config: dict[str, object],
+) -> str:
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    article_dt = digest_article_datetime(article, cluster, timezone_name)
+    if article_dt:
+        date_label = article_dt.astimezone(ZoneInfo(timezone_name)).strftime("%m.%d")
+    else:
+        date_label = "--.--"
+    source = article_source_label(article)
+    title = display_article_title(article, source)
+    title_max_chars = int(digest_config(config).get("link_title_max_chars", 44))
+    return f"{date_label} / {compact_text(title, max_chars=title_max_chars)}"
+
+
+def digest_article_entries(
+    clusters: list[dict[str, object]],
+    config: dict[str, object],
+) -> dict[str, list[dict[str, object]]]:
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    settings = digest_config(config)
+    max_articles_per_cluster = int(settings.get("max_articles_per_cluster", 2))
+    entries: dict[str, list[dict[str, object]]] = {"domestic": [], "global": []}
+    seen_urls: set[str] = set()
+
+    for cluster in clusters:
+        added_for_cluster = 0
+        for article in publishable_articles(cluster, config):
+            if added_for_cluster >= max_articles_per_cluster:
+                break
+            url = article_link(article)
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            article_dt = digest_article_datetime(article, cluster, timezone_name)
+            section = "global" if digest_article_is_global(article) else "domestic"
+            entries[section].append(
+                {
+                    "article": article,
+                    "cluster": cluster,
+                    "datetime": article_dt,
+                    "label": digest_article_label(article, cluster, config),
+                    "url": url,
+                }
+            )
+            added_for_cluster += 1
+
+    for section_entries in entries.values():
+        section_entries.sort(key=lambda entry: entry["datetime"] or datetime.min.replace(tzinfo=ZoneInfo("UTC")), reverse=True)
+    return entries
+
+
+def limited_digest_article_entries(
+    clusters: list[dict[str, object]],
+    config: dict[str, object],
+) -> dict[str, list[dict[str, object]]]:
+    entries = digest_article_entries(clusters, config)
+    settings = digest_config(config)
+    max_per_section = int(settings.get("max_links_per_section", 12))
+    max_total = int(settings.get("max_links_total", 24))
+
+    limited = {
+        "domestic": entries["domestic"][:max_per_section],
+        "global": entries["global"][:max_per_section],
+    }
+    while len(limited["domestic"]) + len(limited["global"]) > max_total:
+        if len(limited["domestic"]) >= len(limited["global"]) and limited["domestic"]:
+            limited["domestic"].pop()
+        elif limited["global"]:
+            limited["global"].pop()
+        else:
+            break
+    return limited
+
+
+def summary_bullet_lines(text: str, config: dict[str, object]) -> list[str]:
+    settings = digest_config(config)
+    max_bullets = int(settings.get("summary_bullets", 3))
+    max_chars = int(settings.get("summary_bullet_max_chars", 72))
+
+    candidates: list[str] = []
+    for raw_line in re.split(r"[\n\r]+", text):
+        line = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", raw_line).strip()
+        if line:
+            candidates.append(line)
+    if not candidates:
+        candidates = [part.strip() for part in re.split(r"(?<=[.!?。])\s+|(?<=다\.)\s+", text) if part.strip()]
+
+    bullets: list[str] = []
+    for line in candidates:
+        if not line:
+            continue
+        bullets.append(f"- {escape(compact_text(line, max_chars=max_chars), quote=False)}")
+        if len(bullets) >= max_bullets:
+            break
+    return bullets or ["- 주요 기사 흐름을 짧게 정리했음"]
+
+
 def fallback_daily_digest(
     clusters: list[dict[str, object]],
     config: dict[str, object],
     start_at: datetime,
     end_at: datetime,
 ) -> str:
-    by_section: dict[str, list[dict[str, object]]] = {}
-    for cluster in clusters:
-        by_section.setdefault(telegram_section_label(cluster), []).append(cluster)
+    entries = limited_digest_article_entries(clusters, config)
+    domestic_count = len(entries["domestic"])
+    global_count = len(entries["global"])
+    lines = []
+    if domestic_count:
+        lines.append("- 국내는 주주환원·지배구조 이슈가 이어졌음")
+    if global_count:
+        lines.append(f"- 해외는 행동주의·주주권 흐름을 같이 볼 만했음")
+    lines.append(f"- 링크 {domestic_count + global_count}건만 추려서 읽기 좋게 정리했음")
+    return "\n".join(lines[:3])
 
-    lines = [
-        "데일리 거버넌스 리뷰",
-        f"기간: {format_kst(start_at, str(config.get('timezone') or 'Asia/Seoul'))} - {format_kst(end_at, str(config.get('timezone') or 'Asia/Seoul'))}",
-        f"수집 묶음: {len(clusters)}개",
-        "",
-    ]
-    for section, section_clusters in by_section.items():
-        lines.append(f"[{section}]")
-        for cluster in section_clusters[:6]:
-            articles = publishable_articles(cluster, config)
-            lines.append(f"- {compact_text(item_title(cluster, len(articles)), max_chars=100)}")
-        lines.append("")
-    return "\n".join(lines).strip()
+
+def render_digest_link_sections(
+    clusters: list[dict[str, object]],
+    config: dict[str, object],
+) -> list[str]:
+    entries = limited_digest_article_entries(clusters, config)
+    labels = {"domestic": "국내", "global": "해외"}
+    lines: list[str] = []
+    for section_key in ("domestic", "global"):
+        section_entries = entries[section_key]
+        if not section_entries:
+            continue
+        if lines:
+            lines.append("")
+        lines.append(f"<b>{labels[section_key]}</b>")
+        for entry in section_entries:
+            lines.append(f"• {html_link(str(entry['label']), str(entry['url']))}")
+    return lines
 
 
 def generate_daily_digest_review(
@@ -188,15 +327,16 @@ def generate_daily_digest_review(
     max_tokens = int(settings.get("daily_digest_max_tokens", 900))
     system_prompt = (
         "당신은 한국 자본시장과 주주행동을 보는 시니어 에디터입니다. "
-        "전날부터 오늘 오전까지의 기사 묶음을 바탕으로 텔레그램 채널용 데일리 리뷰를 한국어로 작성합니다. "
+        "전날부터 오늘 오전까지의 기사 묶음을 바탕으로 텔레그램 채널용 데일리 리뷰 요약만 한국어로 작성합니다. "
         "투자 조언이나 매매 권유는 하지 말고, 기사에 없는 사실을 단정하지 마세요."
     )
     user_prompt = (
-        "아래 수집 묶음을 바탕으로 데일리 digest를 작성하세요.\n"
-        "- 5~8개 항목으로 정리\n"
-        "- 카테고리/묶음별 의미와 시장 맥락을 설명\n"
+        "아래 수집 묶음을 바탕으로 데일리 digest의 맨 위 요약만 작성하세요.\n"
+        "- bullet point 2~3개만 작성\n"
+        "- 각 bullet은 45자 안팎으로 아주 짧게 작성\n"
+        "- 문장 끝은 '~했음', '~보였음', '~이어졌음'처럼 간결한 메모체로 작성\n"
         "- 링크, 기준시각, high/medium 같은 내부 분류는 쓰지 않음\n"
-        "- 해외 기사는 한국 투자자 관점의 함의를 한국어로 풀어씀\n\n"
+        "- 긴 해설, 번호 목록, 제목은 쓰지 않음\n\n"
         f"기간: {format_kst(start_at, str(config.get('timezone') or 'Asia/Seoul'))} - {format_kst(end_at, str(config.get('timezone') or 'Asia/Seoul'))}\n\n"
         f"{digest_context(clusters, config)}"
     )
@@ -247,8 +387,19 @@ def build_daily_digest_messages(
 ) -> list[str]:
     max_chars = int(digest_config(config).get("max_message_chars", 3900))
     review = generate_daily_digest_review(clusters, config, start_at, now)
-    escaped = escape(review, quote=False)
-    return split_plain_telegram_text(escaped, max_chars)
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    start_label = start_at.astimezone(ZoneInfo(timezone_name)).strftime("%m.%d")
+    end_label = now.astimezone(ZoneInfo(timezone_name)).strftime("%m.%d")
+    lines = [
+        f"<b>데일리 거버넌스 리뷰 ({start_label}-{end_label})</b>",
+        "",
+        "<b>요약</b>",
+        *summary_bullet_lines(review, config),
+        "",
+        *render_digest_link_sections(clusters, config),
+    ]
+    message = "\n".join(line for line in lines if line is not None).strip()
+    return split_plain_telegram_text(message, max_chars)
 
 
 def publish_daily_digest_if_due(
