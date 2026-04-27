@@ -84,6 +84,48 @@ def test_governance_theme_is_primary_over_generic_board_terms(config, now) -> No
     assert enriched["theme_group"] == "valueup_return"
 
 
+def test_capital_market_policy_theme_groups_related_items(config, now) -> None:  # type: ignore[no-untyped-def]
+    state = {"pending_clusters": [], "published_clusters": []}
+    articles = [
+        make_article(
+            "중복상장 심사 문턱 높인다 모회사 주주 보호 의무화",
+            "https://example.com/listing",
+            summary="금융위가 자본시장법 시행령을 개정한다",
+            relevance_level="high",
+        ),
+        make_article(
+            "물적분할 주주 보호 장치 강화, 주식매수청구권 논의",
+            "https://example.com/spinoff",
+            summary="상법과 자본시장법 개정안이 함께 거론됐다",
+            relevance_level="high",
+        ),
+    ]
+    cluster_articles(articles, state, config, now)
+    assert len(state["pending_clusters"]) == 1
+    assert state["pending_clusters"][0]["theme_group"] == "capital_market_policy"
+    assert state["pending_clusters"][0]["representative_title"] == "정책·자본시장 제도"
+
+
+def test_capital_raise_theme_requires_company_match_when_companies_exist(config, now) -> None:  # type: ignore[no-untyped-def]
+    state = {"pending_clusters": [], "published_clusters": []}
+    articles = [
+        make_article(
+            "한화솔루션 유상증자 정정신고서 제출",
+            "https://example.com/hanwha",
+            summary="금감원 중점 심사 이후 공시가 정정됐다",
+            relevance_level="medium",
+        ),
+        make_article(
+            "보령 유상증자 불성실공시법인 지정예고",
+            "https://example.com/boryung",
+            summary="다른 기업의 자본조달 공시 이슈",
+            relevance_level="medium",
+        ),
+    ]
+    cluster_articles(articles, state, config, now)
+    assert len(state["pending_clusters"]) == 2
+
+
 def test_minority_shareholder_theme_requires_company_match(config, now) -> None:  # type: ignore[no-untyped-def]
     state = {"pending_clusters": [], "published_clusters": []}
     articles = [

@@ -25,8 +25,13 @@ KNOWN_COMPANIES = [
     "SK이노베이션",
     "LG화학",
     "LG전자",
+    "한화",
+    "한화솔루션",
     "현대차",
     "현대모비스",
+    "HD현대",
+    "HD현대일렉트릭",
+    "HD현대로보틱스",
     "한화오션",
     "두산밥캣",
     "DB하이텍",
@@ -35,6 +40,12 @@ KNOWN_COMPANIES = [
     "네이버",
     "셀트리온",
     "포스코홀딩스",
+    "우리금융",
+    "우리금융지주",
+    "일진홀딩스",
+    "슈프리마에이치큐",
+    "보령",
+    "코웨이",
 ]
 
 COMPANY_SUFFIX_PATTERN = re.compile(
@@ -70,13 +81,60 @@ THEME_GROUPS = [
         ["이사회 교체", "감사 선임", "이사회", "감사위원", "사외이사", "임시주총", "임시 주총"],
     ),
     (
+        "voting_disclosure",
+        "주총·의결권·표결 공시",
+        ["의결권", "의안별 표결", "의결정족수", "이사 보수한도", "의결권 자문"],
+    ),
+    (
+        "capital_market_policy",
+        "정책·자본시장 제도",
+        [
+            "중복상장",
+            "물적분할",
+            "인적분할",
+            "모회사 주주 보호",
+            "주식매수청구권",
+            "자본시장법",
+            "상법",
+            "집단소송법",
+            "상장폐지",
+            "공모주",
+            "IPO",
+            "WGBI",
+            "대기업집단",
+            "기업집단",
+            "공정위",
+            "금감원",
+            "금융위",
+            "ESG 공시",
+            "5%룰",
+            "경영권 영향 목적",
+        ],
+    ),
+    (
+        "capital_raise_disclosure",
+        "자본조달·공시",
+        ["유상증자", "정정신고서", "불성실공시", "불성실공시법인", "PRS", "현물출자", "영업양도"],
+    ),
+    (
+        "ownership_succession",
+        "지배구조·승계·대주주",
+        ["경영권 승계", "승계", "상속세", "오너일가", "총수일가", "총수", "대주주", "주식담보", "우호지분", "일감 몰아주기", "주주대표소송", "터널링"],
+    ),
+    (
         "valueup_return",
         "밸류업·주주환원·지배구조",
         ["밸류업", "주주환원", "자사주 매입", "자사주 소각", "지배구조", "거버넌스", "스튜어드십"],
     ),
 ]
 THEME_LABELS = {theme_id: label for theme_id, label, _ in THEME_GROUPS}
-COMPANY_STRICT_THEME_GROUPS = {"shareholder_proposal", "minority_shareholder", "control_dispute"}
+COMPANY_STRICT_THEME_GROUPS = {
+    "shareholder_proposal",
+    "minority_shareholder",
+    "control_dispute",
+    "capital_raise_disclosure",
+    "ownership_succession",
+}
 
 
 def extract_company_candidates(text: str) -> list[str]:

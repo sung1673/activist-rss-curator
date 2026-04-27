@@ -127,13 +127,14 @@ def apply_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
 
     feeds_value = os.environ.get("CURATOR_FEEDS")
     if feeds_value:
+        existing_feeds = config.get("feeds") if isinstance(config.get("feeds"), list) else []
         feeds = []
         for index, raw_url in enumerate(feeds_value.replace("\n", ",").split(","), start=1):
             url = raw_url.strip()
             if url:
                 feeds.append({"name": f"env-feed-{index}", "category": "env", "url": url})
         if feeds:
-            config["feeds"] = feeds
+            config["feeds"] = feeds + list(existing_feeds)
             config["feed_url"] = feeds[0]["url"]
     elif os.environ.get("CURATOR_FEED_URL"):
         config["feed_url"] = os.environ["CURATOR_FEED_URL"]

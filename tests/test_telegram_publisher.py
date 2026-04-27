@@ -41,6 +41,7 @@ def test_telegram_message_uses_html_links_without_visible_raw_urls(config, now) 
 
     assert "<a href=" in message
     assert "대표 기사 보기" in message
+    assert "[ 지배구조·주주권 ]" in message
     assert "1. " in message
     assert ">https://example.com/a<" not in message
     assert "\nhttps://example.com/a" not in message

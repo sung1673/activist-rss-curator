@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from .cluster import primary_theme_group
 from .dates import datetime_to_iso, format_kst, parse_datetime
 from .rss_writer import (
     article_link,
@@ -16,6 +17,20 @@ from .rss_writer import (
     item_title,
     publishable_articles,
 )
+
+
+SECTION_LABELS = {
+    "shareholder_proposal": "지배구조·주주권",
+    "minority_shareholder": "지배구조·주주권",
+    "activism_trend": "행동주의·주주행동",
+    "control_dispute": "경영권 분쟁",
+    "board_audit": "이사회·감사",
+    "voting_disclosure": "주총·의결권",
+    "capital_market_policy": "정책·자본시장",
+    "capital_raise_disclosure": "자본조달·공시",
+    "ownership_succession": "지주·승계",
+    "valueup_return": "밸류업·주주환원",
+}
 
 
 def telegram_config(config: dict[str, object]) -> dict[str, Any]:
@@ -45,6 +60,10 @@ def html_link(label: str, url: str) -> str:
 
 def cluster_guid_value(cluster: dict[str, object]) -> str:
     return str(cluster.get("guid") or "").strip()
+
+
+def telegram_section_label(cluster: dict[str, object]) -> str:
+    return SECTION_LABELS.get(primary_theme_group(cluster), "거버넌스·자본시장")
 
 
 def initialize_telegram_state(state: dict[str, object], config: dict[str, object], now: datetime) -> None:
@@ -84,9 +103,11 @@ def build_telegram_message(cluster: dict[str, object], config: dict[str, object]
     articles = publishable_articles(cluster, config)
     count = len(articles)
     published_at = parse_datetime(str(cluster.get("published_at") or ""), timezone_name)
+    section = telegram_section_label(cluster)
 
     lines = [
         f"<b>{escape(item_title(cluster, count))}</b>",
+        f"<b>[ {escape(section)} ]</b>",
         "",
         f"분류: {escape(str(cluster.get('relevance_level') or 'medium'))} · 기사 {count}건",
         f"기준시각: {escape(format_kst(published_at, timezone_name))}",

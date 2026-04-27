@@ -34,6 +34,27 @@ def test_load_config_supports_secret_feed_env(monkeypatch, tmp_path: Path) -> No
     ]
 
 
+def test_load_config_merges_secret_feeds_with_supplemental_feeds(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+feeds:
+  - name: supplemental
+    category: public
+    url: https://example.com/supplemental.xml
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CURATOR_FEEDS", "https://example.com/private.xml")
+
+    feeds = configured_feeds(load_config(config_path))
+
+    assert feeds == [
+        {"name": "env-feed-1", "category": "env", "url": "https://example.com/private.xml"},
+        {"name": "supplemental", "category": "public", "url": "https://example.com/supplemental.xml"},
+    ]
+
+
 def test_article_domain_exclusion_matches_subdomains() -> None:
     config = {"display": {"exclude_link_domains": ["msn.com"]}}
     assert article_domain_is_excluded({"canonical_url": "https://www.msn.com/ko-kr/news/x"}, config)

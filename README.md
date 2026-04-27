@@ -56,6 +56,7 @@ pytest
 
 Google Alerts RSS URL은 public repo에 직접 저장하지 말고 GitHub Actions Secret으로 관리하는 것을 권장합니다.
 `feed.xml`의 channel link에는 원본 Alert URL을 쓰지 않고, 필요하면 `public_feed_url`에 GitHub Pages의 공개 feed URL만 넣습니다.
+`config.yaml`의 `feeds`에는 공개되어도 괜찮은 Google News 보조 RSS를 둘 수 있습니다. `CURATOR_FEEDS` Secret이 있어도 보조 RSS는 함께 수집되며, 비공개 Google Alerts RSS가 먼저 처리됩니다.
 
 Secret 이름:
 
@@ -117,7 +118,7 @@ RSS 본문에는 기사 1건을 한 줄로 표시합니다. rss2tg_bot이 본문
 
 ## Telegram 직접 발행
 
-직접 발행을 사용하면 `rss2tg_bot` 없이 이 프로젝트가 Telegram Bot API로 채널에 메시지를 보냅니다. 메시지는 긴 URL을 직접 노출하지 않고 HTML 링크로 표시합니다.
+직접 발행을 사용하면 `rss2tg_bot` 없이 이 프로젝트가 Telegram Bot API로 채널에 메시지를 보냅니다. 메시지는 긴 URL을 직접 노출하지 않고 HTML 링크로 표시하며, 묶음마다 `정책·자본시장`, `지배구조·주주권`, `자본조달·공시`, `밸류업·주주환원` 같은 섹션 라벨을 붙입니다.
 
 필수 조건:
 
