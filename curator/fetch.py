@@ -229,14 +229,20 @@ def fetch_google_alerts_articles(config: dict[str, object]) -> list[dict[str, ob
         return articles
 
     page_timeout = float(fetch_config.get("page_timeout_seconds", 8.0) or 8.0)  # type: ignore[union-attr]
+    max_enrich_articles = int(fetch_config.get("max_enrich_articles", 0) or 0)  # type: ignore[union-attr]
     google_news_decode_limit = int(fetch_config.get("google_news_decode_limit", 25) or 0)  # type: ignore[union-attr]
     timeout = httpx.Timeout(page_timeout, connect=min(5.0, page_timeout))
     limits = httpx.Limits(max_connections=5, max_keepalive_connections=2)
     headers = {"User-Agent": USER_AGENT}
     enriched_articles: list[dict[str, object]] = []
+    enrich_attempts = 0
     google_news_decode_attempts = 0
     with httpx.Client(timeout=timeout, limits=limits, headers=headers) as client:
         for article in articles:
+            if max_enrich_articles > 0 and enrich_attempts >= max_enrich_articles:
+                enriched_articles.append(article)
+                continue
+            enrich_attempts += 1
             url = str(article.get("canonical_url") or article.get("link") or "")
             is_google_news = bool(google_news_article_id(url))
             should_decode_google_news = is_google_news and (
