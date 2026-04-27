@@ -75,21 +75,6 @@ feeds:
   - name: "google-news-en-proxy-contest"
     category: "global"
     url: "https://news.google.com/rss/search?q=proxy+contest+shareholder+proposal+universal+proxy+card+activist+when:7d&hl=en-US&gl=US&ceid=US:en"
-  - name: "google-news-en-elliott-campaign"
-    category: "global"
-    url: "https://news.google.com/rss/search?q=Elliott+Management+activist+investor+campaign+proxy+fight+when:7d&hl=en-US&gl=US&ceid=US:en"
-  - name: "google-news-en-starboard-campaign"
-    category: "global"
-    url: "https://news.google.com/rss/search?q=Starboard+Value+activist+investor+campaign+board+seats+when:7d&hl=en-US&gl=US&ceid=US:en"
-  - name: "google-news-en-third-point-campaign"
-    category: "global"
-    url: "https://news.google.com/rss/search?q=Third+Point+activist+investor+campaign+shareholder+value+when:7d&hl=en-US&gl=US&ceid=US:en"
-  - name: "google-news-en-trian-campaign"
-    category: "global"
-    url: "https://news.google.com/rss/search?q=Trian+Partners+activist+investor+campaign+board+when:7d&hl=en-US&gl=US&ceid=US:en"
-  - name: "google-news-en-de-shaw-campaign"
-    category: "global"
-    url: "https://news.google.com/rss/search?q=D.E.+Shaw+activist+investor+campaign+shareholder+when:7d&hl=en-US&gl=US&ceid=US:en"
 public_feed_url: "https://sung1673.github.io/activist-rss-curator/feed.xml"
 timezone: "Asia/Seoul"
 
@@ -98,7 +83,7 @@ fetch:
   enrich_pages: true
   max_enrich_articles: 90
   page_timeout_seconds: 8
-  google_news_decode_limit: 25
+  google_news_decode_limit: 160
 
 display:
   exclude_link_domains:

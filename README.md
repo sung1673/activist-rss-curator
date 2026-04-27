@@ -84,7 +84,9 @@ Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 
 `config.yaml`에는 공개 가능한 Google News 보조 RSS를 두 축으로 추가할 수 있습니다.
 
 - 국내: 주주제안, 행동주의 주주, 소액주주연대, 지배구조, 밸류업, 자사주 소각, 스튜어드십, 자본시장법/상법 등
-- 해외: `South Korea Value-up Program`, `Korea discount`, `shareholder activism`, `proxy fight`, `activist investor campaign`, `open letter`, `universal proxy`, `Elliott Management`, `Starboard Value` 등
+- 해외: `South Korea Value-up Program`, `Korea discount`, `shareholder activism`, `proxy fight`, `activist investor campaign`, `open letter`, `universal proxy` 등
+
+보조 RSS 검색어는 개별 기업명이나 특정 펀드명보다 이벤트와 제도 키워드 중심으로 구성합니다. 기업명 후보 목록은 검색용이 아니라 이미 수집된 기사들을 묶기 위한 내부 규칙으로만 사용합니다.
 
 ## GitHub Actions
 
@@ -100,6 +102,7 @@ Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 
 GitHub Models를 사용하는 daily digest는 workflow의 `models: read` 권한과 자동 제공되는 `GITHUB_TOKEN`을 사용합니다. 별도 OpenAI API key는 필요하지 않으며, 호출이 실패하면 fallback 리뷰로 계속 실행됩니다.
 
 수동 실행도 `workflow_dispatch`로 가능합니다. 수동 실행 화면에서 `Send a Telegram smoke-test message`를 켜면 실제 뉴스 발행과 별개로 테스트 메시지 1건을 채널에 보내 bot token과 채널 관리자 권한을 확인할 수 있습니다.
+`Send a daily digest preview message`를 켜면 최근 24시간 기준 daily digest 미리보기를 채널에 전송합니다.
 
 ## GitHub Pages
 

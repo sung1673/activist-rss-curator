@@ -157,6 +157,8 @@ def source_label_from_domain(domain: str) -> str:
 def article_source_label(article: dict[str, object]) -> str:
     domain = article_domain(article)
     source = article_source(article)
+    if domain in {"news.google.com", "news.url.google.com"} and source and source.casefold() not in {"news", "news.google.com"}:
+        return compact_text(source, max_chars=28)
     if domain:
         return compact_text(SOURCE_LABELS.get(domain) or source_label_from_domain(domain), max_chars=28)
     return compact_text(source, max_chars=28)

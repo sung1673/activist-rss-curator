@@ -20,6 +20,16 @@ on:
         required: false
         type: boolean
         default: false
+      send_digest_preview:
+        description: "Send a daily digest preview message"
+        required: false
+        type: boolean
+        default: false
+      digest_preview_hours:
+        description: "Digest preview lookback hours"
+        required: false
+        type: string
+        default: "24"
 
 permissions:
   contents: write
@@ -67,6 +77,16 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m curator.main
+
+      - name: Send digest preview
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.send_digest_preview }}
+        env:
+          CURATOR_FEEDS: ${{ secrets.CURATOR_FEEDS }}
+          DIGEST_PREVIEW_HOURS: ${{ inputs.digest_preview_hours }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m curator.digest_preview
 
       - name: Commit generated files
         run: |
