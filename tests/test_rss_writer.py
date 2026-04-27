@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from curator.cluster import cluster_articles
-from curator.rss_writer import build_rss, item_description, item_link
+from curator.rss_writer import build_rss, item_description, item_link, item_title
 
 from conftest import make_article
 
@@ -57,8 +57,9 @@ def test_msn_links_are_excluded_when_direct_links_exist(config, now) -> None:  #
 
     description = item_description(cluster, config)
     assert "msn.com" not in description
-    assert "중계 링크 | MSN 중계 기사" in description
-    assert "원문 링크 제외" in description
+    assert "MSN 중계 기사" not in description
+    assert "관련 기사 2건" in description
+    assert item_title(cluster, 2).startswith("[묶음 2건]")
 
 
 def test_excluded_only_cluster_is_not_published(config, now) -> None:  # type: ignore[no-untyped-def]
@@ -83,6 +84,53 @@ def test_source_domain_is_rendered_as_label(config, now) -> None:  # type: ignor
     description = item_description(state["published_clusters"][0], config)
     assert "매일경제 | 주주환원 확대" in description
     assert ">mk.co.kr |" not in description
+
+
+def test_old_low_relevance_published_cluster_is_hidden(config, now) -> None:  # type: ignore[no-untyped-def]
+    cluster = published_cluster(config, now)
+    cluster["representative_title"] = "로저스 커뮤니케이션, 주총서 이사 14명·KPMG 감사인 선임 승인"
+    cluster["articles"] = [
+        make_article(
+            "로저스 커뮤니케이션, 주총서 이사 14명·KPMG 감사인 선임 승인",
+            "https://www.mk.co.kr/news/stock/1200",
+            source="mk.co.kr",
+        )
+    ]
+    cluster["article_count"] = 1
+    cluster["relevance_level"] = "medium"
+
+    rss = build_rss([cluster], config, now + timedelta(minutes=46))
+    assert "<item>" not in rss
+    assert "로저스 커뮤니케이션" not in rss
+
+
+def test_strict_company_theme_filters_mixed_published_articles(config, now) -> None:  # type: ignore[no-untyped-def]
+    cluster = published_cluster(config, now)
+    cluster["representative_title"] = "고려아연 소액주주·주주연대 분쟁"
+    cluster["theme_group"] = "minority_shareholder"
+    cluster["companies"] = ["고려아연"]
+    cluster["articles"] = [
+        make_article(
+            "고려아연 소액주주연대, 주주제안 추진",
+            "https://www.dailian.co.kr/news/view/1",
+            source="dailian.co.kr",
+            summary="고려아연 소액주주연대 관련 기사",
+            relevance_level="high",
+        ),
+        make_article(
+            "풍산가 부자 주총서 표 대결",
+            "https://www.bloter.net/news/articleView.html?idxno=1",
+            source="bloter.net",
+            summary="풍산 소액주주와 경영권 분쟁 관련 기사",
+            relevance_level="high",
+        ),
+    ]
+    cluster["article_count"] = 2
+
+    description = item_description(cluster, config)
+    assert "데일리안 | 고려아연 소액주주연대, 주주제안 추진" in description
+    assert "풍산가 부자" not in description
+    assert "관련 기사 1건" in description
 
 
 def test_description_is_capped_at_3500_chars(config, now) -> None:  # type: ignore[no-untyped-def]

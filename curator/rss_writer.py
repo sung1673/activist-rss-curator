@@ -6,9 +6,15 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
-from .cluster import cluster_guid
+from .cluster import (
+    COMPANY_STRICT_THEME_GROUPS,
+    cluster_guid,
+    extract_company_candidates,
+    primary_theme_group,
+)
 from .config import article_domain_is_excluded
 from .dates import format_kst, format_rfc822, parse_datetime
+from .relevance import relevance_details
 
 
 SOURCE_LABELS = {
@@ -49,8 +55,9 @@ def attr_escape(value: str) -> str:
     return escape(value, {'"': "&quot;"})
 
 
-def item_title(cluster: dict[str, object]) -> str:
-    count = int(cluster.get("article_count") or len(cluster.get("articles", [])) or 1)
+def item_title(cluster: dict[str, object], article_count: int | None = None) -> str:
+    count_source = article_count if article_count is not None else cluster.get("article_count")
+    count = int(count_source or len(cluster.get("articles", [])) or 1)
     title = str(cluster.get("representative_title") or "제목 없음").strip()
     if cluster.get("is_followup"):
         return f"[추가 {count}건] {title}"
@@ -76,25 +83,55 @@ def is_excluded_display_link(article: dict[str, object], config: dict[str, objec
     return article_domain_is_excluded(article, config)
 
 
-def split_display_articles(
-    articles: list[dict[str, object]],
-    config: dict[str, object],
-) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-    included = [article for article in articles if not is_excluded_display_link(article, config)]
-    excluded = [article for article in articles if is_excluded_display_link(article, config)]
-    if included:
-        return included, excluded
-    return articles, []
+def article_current_relevance_level(article: dict[str, object]) -> str:
+    details = relevance_details(
+        str(article.get("clean_title") or article.get("title") or ""),
+        str(article.get("summary") or ""),
+    )
+    return str(details["level"])
+
+
+def article_companies_now(article: dict[str, object]) -> set[str]:
+    text = f"{article.get('clean_title') or article.get('title') or ''} {article.get('summary') or ''}"
+    return set(str(company) for company in list(article.get("company_candidates") or []) + extract_company_candidates(text))
+
+
+def article_matches_cluster_company(article: dict[str, object], cluster: dict[str, object]) -> bool:
+    theme_group = primary_theme_group(cluster)
+    if theme_group not in COMPANY_STRICT_THEME_GROUPS:
+        return True
+    cluster_companies = {str(company) for company in cluster.get("companies", []) if str(company)}
+    if not cluster_companies:
+        return True
+    return bool(article_companies_now(article) & cluster_companies)
+
+
+def publishable_articles(cluster: dict[str, object], config: dict[str, object]) -> list[dict[str, object]]:
+    publish_config = config.get("publish", {})
+    publish_levels = (
+        set(publish_config.get("publish_levels", ["high", "medium"]))
+        if isinstance(publish_config, dict)
+        else {"high", "medium"}
+    )
+    articles = []
+    for article in list(cluster.get("articles", [])):
+        if is_excluded_display_link(article, config):
+            continue
+        if article_current_relevance_level(article) not in publish_levels:
+            continue
+        if not article_matches_cluster_company(article, cluster):
+            continue
+        articles.append(article)
+    return articles
 
 
 def has_publishable_link(cluster: dict[str, object], config: dict[str, object]) -> bool:
-    articles = list(cluster.get("articles", []))
+    articles = publishable_articles(cluster, config)
     return any(article_link(article) and not is_excluded_display_link(article, config) for article in articles)
 
 
 def item_link(cluster: dict[str, object], config: dict[str, object]) -> str:
-    included, _excluded = split_display_articles(list(cluster.get("articles", [])), config)
-    for article in included:
+    for article in publishable_articles(cluster, config):
         link = article_link(article)
         if link:
             return link
@@ -158,8 +195,8 @@ def item_description(cluster: dict[str, object], config: dict[str, object]) -> s
     max_chars = int(cluster_config.get("max_description_chars", 3500))  # type: ignore[union-attr]
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
 
-    articles = list(cluster.get("articles", []))
-    article_count = int(cluster.get("article_count") or len(articles))
+    articles = publishable_articles(cluster, config)
+    article_count = len(articles)
     published_at = parse_datetime(str(cluster.get("published_at") or ""), timezone_name)
     lines = [
         f"<b>📌 {escape(compact_text(cluster.get('representative_title') or '제목 없음', max_chars=120))}</b>",
@@ -169,21 +206,14 @@ def item_description(cluster: dict[str, object], config: dict[str, object]) -> s
         "",
     ]
 
-    display_articles, excluded_articles = split_display_articles(articles, config)
-    rows: list[tuple[dict[str, object], bool]] = [(article, False) for article in display_articles] + [
-        (article, True) for article in excluded_articles
-    ]
-    shown = rows[:max_links]
-    for index, (article, is_excluded) in enumerate(shown, start=1):
+    shown = articles[:max_links]
+    for index, article in enumerate(shown, start=1):
         source = article_source_label(article)
         title = display_article_title(article, source)
-        if is_excluded:
-            lines.append(f"{index}. {escape(f'중계 링크 | {title}')} (원문 링크 제외)")
-        else:
-            label = f"{source} | {title}"
-            lines.append(f"{index}. {html_anchor(label, article_link(article))}")
+        label = f"{source} | {title}"
+        lines.append(f"{index}. {html_anchor(label, article_link(article))}")
 
-    remaining = len(rows) - len(shown)
+    remaining = len(articles) - len(shown)
     if remaining > 0:
         lines.append(f"외 {remaining}건")
     return trim_description("\n".join(lines).strip(), max_chars)
@@ -223,10 +253,11 @@ def build_rss(clusters: list[dict[str, object]], config: dict[str, object], now:
         guid = str(cluster.get("guid") or cluster_guid(cluster, timezone_name))
         description = item_description(cluster, config)
         link = item_link(cluster, config)
+        article_count = len(publishable_articles(cluster, config))
         lines.extend(
             [
                 "<item>",
-                f"<title>{escape(item_title(cluster))}</title>",
+                f"<title>{escape(item_title(cluster, article_count))}</title>",
                 f"<link>{escape(link)}</link>",
                 f"<guid isPermaLink=\"false\">{escape(guid)}</guid>",
                 f"<pubDate>{escape(format_rfc822(pub_dt))}</pubDate>",
@@ -257,8 +288,10 @@ def write_index(path: str | Path, state: dict[str, object], config: dict[str, ob
     pending_count = len(state.get("pending_clusters", []))
     recent_items = "\n".join(
         f'<li>{escape(format_kst(cluster.get("published_at"), timezone_name))} - '
-        f'<a href="{attr_escape(item_link(cluster, config))}">{escape(item_title(cluster))}</a></li>'
+        f'<a href="{attr_escape(item_link(cluster, config))}">'
+        f'{escape(item_title(cluster, len(publishable_articles(cluster, config))))}</a></li>'
         for cluster in published[:20]
+        if has_publishable_link(cluster, config)
     )
     html = f"""<!doctype html>
 <html lang="ko">
