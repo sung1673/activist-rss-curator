@@ -8,6 +8,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
+from rapidfuzz import fuzz
 
 from .dates import datetime_to_iso, format_kst, parse_datetime
 from .rss_writer import (
@@ -24,8 +25,34 @@ from .telegram_publisher import (
     telegram_chat_id,
     html_link,
     telegram_is_configured,
-    telegram_section_label,
 )
+
+
+DIGEST_GROUP_STOPWORDS = {
+    "관련",
+    "기사",
+    "뉴스",
+    "논란",
+    "확대",
+    "강화",
+    "제기",
+    "동시",
+    "추궁",
+    "영향",
+    "시장",
+    "기업",
+    "주주",
+    "단독",
+    "속보",
+    "종합",
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "that",
+    "this",
+}
 
 
 def ai_config(config: dict[str, object]) -> dict[str, Any]:
@@ -139,7 +166,7 @@ def digest_context(clusters: list[dict[str, object]], config: dict[str, object])
     for index, cluster in enumerate(clusters, start=1):
         articles = publishable_articles(cluster, config)
         block = [
-            f"{index}. [{telegram_section_label(cluster)}] {item_title(cluster, len(articles))}",
+            f"{index}. {item_title(cluster, len(articles))}",
             "기사:",
         ]
         for article in articles[:max_articles]:
@@ -194,6 +221,25 @@ def digest_article_label(
     return f"{date_label} / {compact_text(title, max_chars=title_max_chars)}"
 
 
+def digest_article_title(article: dict[str, object]) -> str:
+    source = article_source_label(article)
+    return display_article_title(article, source)
+
+
+def digest_group_tokens(article: dict[str, object]) -> set[str]:
+    text = f"{article.get('clean_title') or article.get('title') or ''} {article.get('summary') or ''}"
+    tokens = {
+        token.casefold()
+        for token in re.findall(r"[가-힣A-Za-z0-9]{2,}", text)
+        if token.casefold() not in DIGEST_GROUP_STOPWORDS
+    }
+    for company in article.get("company_candidates") or []:
+        value = str(company).strip().casefold()
+        if value:
+            tokens.add(value)
+    return tokens
+
+
 def digest_article_entries(
     clusters: list[dict[str, object]],
     config: dict[str, object],
@@ -221,6 +267,8 @@ def digest_article_entries(
                     "cluster": cluster,
                     "datetime": article_dt,
                     "label": digest_article_label(article, cluster, config),
+                    "title": digest_article_title(article),
+                    "tokens": digest_group_tokens(article),
                     "url": url,
                 }
             )
@@ -252,6 +300,84 @@ def limited_digest_article_entries(
         else:
             break
     return limited
+
+
+def digest_entries_are_same_story(
+    left: dict[str, object],
+    right: dict[str, object],
+) -> bool:
+    left_title = str(left.get("title") or "")
+    right_title = str(right.get("title") or "")
+    title_score = fuzz.token_set_ratio(left_title, right_title)
+    if title_score >= 82:
+        return True
+
+    left_tokens = set(left.get("tokens") or [])
+    right_tokens = set(right.get("tokens") or [])
+    overlap = left_tokens & right_tokens
+    distinctive_overlap = {
+        token
+        for token in overlap
+        if len(str(token)) >= 2 and str(token).casefold() not in DIGEST_GROUP_STOPWORDS
+    }
+    if len(distinctive_overlap) >= 3 and title_score >= 58:
+        return True
+    if len(distinctive_overlap) >= 4:
+        return True
+    return False
+
+
+def group_digest_entries(entries: list[dict[str, object]]) -> list[list[dict[str, object]]]:
+    groups: list[list[dict[str, object]]] = []
+    for entry in entries:
+        matched_group: list[dict[str, object]] | None = None
+        for group in groups:
+            if any(digest_entries_are_same_story(entry, existing) for existing in group):
+                matched_group = group
+                break
+        if matched_group is None:
+            groups.append([entry])
+        else:
+            matched_group.append(entry)
+    for group in groups:
+        group.sort(key=lambda entry: entry["datetime"] or datetime.min.replace(tzinfo=ZoneInfo("UTC")), reverse=True)
+    return groups
+
+
+def digest_group_date_label(group: list[dict[str, object]], config: dict[str, object]) -> str:
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    dates = [entry.get("datetime") for entry in group if entry.get("datetime")]
+    if not dates:
+        return "--.--"
+    return max(dates).astimezone(ZoneInfo(timezone_name)).strftime("%m.%d")  # type: ignore[union-attr]
+
+
+def digest_group_title(group: list[dict[str, object]], config: dict[str, object]) -> str:
+    title_max_chars = int(digest_config(config).get("link_title_max_chars", 54))
+    title = str(group[0].get("title") or "제목 없음")
+    return compact_text(title, max_chars=title_max_chars)
+
+
+def render_digest_entry_group(group: list[dict[str, object]], config: dict[str, object]) -> list[str]:
+    if len(group) == 1:
+        entry = group[0]
+        return [f"• {html_link(str(entry['label']), str(entry['url']))}"]
+
+    max_links = int(digest_config(config).get("max_links_per_group", 5))
+    title = digest_group_title(group, config)
+    lines = [f"• {digest_group_date_label(group, config)} / {escape(title, quote=False)} ({len(group)}건)"]
+    links = []
+    for entry in group[:max_links]:
+        article = entry["article"]
+        source = article_source_label(article)  # type: ignore[arg-type]
+        links.append(html_link(source, str(entry["url"])))
+    if links:
+        line = "  링크: " + " · ".join(links)
+        remaining = len(group) - len(links)
+        if remaining > 0:
+            line += f" · 외 {remaining}건"
+        lines.append(line)
+    return lines
 
 
 def summary_bullet_lines(text: str, config: dict[str, object]) -> list[str]:
@@ -309,8 +435,8 @@ def render_digest_link_sections(
         if lines:
             lines.append("")
         lines.append(f"<b>{labels[section_key]}</b>")
-        for entry in section_entries:
-            lines.append(f"• {html_link(str(entry['label']), str(entry['url']))}")
+        for group in group_digest_entries(section_entries):
+            lines.extend(render_digest_entry_group(group, config))
     return lines
 
 

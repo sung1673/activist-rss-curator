@@ -133,3 +133,37 @@ def test_daily_digest_lists_domestic_and_global_article_links(config, now, monke
     assert "04.26 /" in message
     assert "매우 길게 이어지는 기사 제목" not in message
     assert "..." in message
+
+
+def test_daily_digest_groups_similar_article_titles(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 소액주주 이슈가 이어졌음")
+    first = make_article(
+        "고려아연 소액주주, 사외이사 검찰 고발",
+        "https://example.com/a",
+        source="데일리안",
+        published_at="2026-04-27T09:00:00+09:00",
+        relevance_level="high",
+    )
+    first["company_candidates"] = ["고려아연"]
+    second = make_article(
+        "고려아연 소액주주, 검찰 고발·금융위 진정 동시 제기",
+        "https://example.com/b",
+        source="뉴스워치",
+        published_at="2026-04-27T09:10:00+09:00",
+        relevance_level="high",
+    )
+    second["company_candidates"] = ["고려아연"]
+    clusters = [
+        {"representative_title": "고려아연 소액주주", "published_at": first["published_at"], "articles": [first]},
+        {"representative_title": "고려아연 소액주주", "published_at": second["published_at"], "articles": [second]},
+    ]
+
+    message = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))[0]
+
+    assert "04.27 /" in message
+    assert "(2건)" in message
+    assert "링크:" in message
+    assert 'href="https://example.com/a"' in message
+    assert 'href="https://example.com/b"' in message

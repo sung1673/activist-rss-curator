@@ -83,7 +83,7 @@ Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 
 
 `config.yaml`에는 공개 가능한 Google News 보조 RSS를 두 축으로 추가할 수 있습니다.
 
-- 국내: 주주제안, 행동주의 주주, 소액주주연대, 지배구조, 밸류업, 자사주 소각, 스튜어드십, 자본시장법/상법 등
+- 국내: 주주제안, 행동주의 주주, 소액주주연대, 지배구조, 밸류업, 자사주 소각, 스튜어드십, 자본시장법/상법, 임원보수 공시, 코너스톤 투자자, ETF 의결권, 해외부동산펀드 위험설명서 등
 - 해외: `South Korea Value-up Program`, `Korea discount`, `shareholder activism`, `proxy fight`, `activist investor campaign`, `open letter`, `universal proxy` 등
 
 보조 RSS 검색어는 개별 기업명이나 특정 펀드명보다 이벤트와 제도 키워드 중심으로 구성합니다. 기업명 후보 목록은 검색용이 아니라 이미 수집된 기사들을 묶기 위한 내부 규칙으로만 사용합니다.
@@ -134,7 +134,7 @@ RSS 본문에는 기사 1건을 한 줄로 표시합니다. rss2tg_bot이 본문
 
 ## Telegram 직접 발행
 
-직접 발행을 사용하면 `rss2tg_bot` 없이 이 프로젝트가 Telegram Bot API로 채널에 메시지를 보냅니다. 메시지는 긴 URL을 직접 노출하지 않고 HTML 링크로 표시하며, 묶음마다 `정책·자본시장`, `지배구조·주주권`, `자본조달·공시`, `밸류업·주주환원` 같은 섹션 라벨을 붙입니다. 내부 분류값이나 기준시각, 대표기사보기 링크는 표시하지 않습니다.
+직접 발행을 사용하면 `rss2tg_bot` 없이 이 프로젝트가 Telegram Bot API로 채널에 메시지를 보냅니다. 메시지는 긴 URL을 직접 노출하지 않고 HTML 링크로 표시합니다. 키워드 기반 섹션 라벨은 오분류 가능성이 있어 메시지에 표시하지 않으며, 내부 분류값이나 기준시각, 대표기사보기 링크도 표시하지 않습니다.
 
 필수 조건:
 
@@ -150,7 +150,7 @@ bot 연결만 즉시 확인하려면 Actions의 `Build curated RSS feed` 수동 
 
 일반 기사 묶음 메시지는 AI를 호출하지 않고 제목과 기사 링크만 발행합니다. GitHub Models는 매일 아침 리뷰에만 사용하며, 기본 모델은 `openai/gpt-4.1`입니다.
 
-매일 KST 07:00-07:59 사이 첫 실행에서 최근 24시간의 published/pending cluster를 모아 `데일리 거버넌스 리뷰`를 전송합니다. 리뷰는 카테고리별 흐름과 시장 맥락을 길게 정리하며, 이미 보낸 날짜는 `data/state.json`의 `daily_digest_sent_dates`에 저장해 중복 전송을 막습니다.
+매일 KST 07:00-07:59 사이 첫 실행에서 최근 24시간의 published/pending cluster를 모아 `데일리 거버넌스 리뷰`를 전송합니다. 리뷰는 짧은 bullet 요약과 국내/해외 기사 링크 목록으로 구성됩니다. 비슷한 제목과 핵심 토큰을 가진 기사는 대표 제목 아래 여러 언론사 링크로 묶어 보여줍니다. 이미 보낸 날짜는 `data/state.json`의 `daily_digest_sent_dates`에 저장해 중복 전송을 막습니다.
 
 ## 운영 정책
 
