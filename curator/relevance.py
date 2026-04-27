@@ -61,6 +61,17 @@ LOW_PATTERNS = [
     "이사 14명",
 ]
 
+LOW_OVERRIDE_PATTERNS = [
+    "대표변호사",
+    "변호사 선출",
+    "기업 자문 M&A",
+    "실적 발표 앞두고",
+    "보합권",
+    "혼조세",
+    "섹터 강세",
+    "반등 성공",
+]
+
 
 def _contains(text: str, needle: str) -> bool:
     return needle.casefold() in text.casefold()
@@ -72,6 +83,8 @@ def find_matches(text: str, keywords: list[str]) -> list[str]:
 
 def classify_relevance(title: str, summary: str = "") -> str:
     text = f"{title or ''} {summary or ''}"
+    if find_matches(text, LOW_OVERRIDE_PATTERNS):
+        return "low"
     if find_matches(text, HIGH_KEYWORDS):
         return "high"
     if find_matches(text, LOW_PATTERNS):
@@ -83,13 +96,17 @@ def classify_relevance(title: str, summary: str = "") -> str:
 
 def relevance_details(title: str, summary: str = "") -> dict[str, object]:
     text = f"{title or ''} {summary or ''}"
+    low_override = find_matches(text, LOW_OVERRIDE_PATTERNS)
     high = find_matches(text, HIGH_KEYWORDS)
     low = find_matches(text, LOW_PATTERNS)
     medium = find_matches(text, MEDIUM_KEYWORDS)
 
     level = "low"
     matches: list[str] = []
-    if high:
+    if low_override:
+        level = "low"
+        matches = low_override
+    elif high:
         level = "high"
         matches = high
     elif low:
@@ -104,7 +121,8 @@ def relevance_details(title: str, summary: str = "") -> dict[str, object]:
         "matched_keywords": matches,
         "high_keywords": high,
         "medium_keywords": medium,
-        "low_patterns": low,
+        "low_patterns": low_override + low,
+        "low_override_patterns": low_override,
     }
 
 

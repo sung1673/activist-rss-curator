@@ -9,3 +9,15 @@ def test_high_medium_low_relevance() -> None:
     assert classify_relevance("특징주 장중 목표가 상향 리포트 브리핑", "") == "low"
     assert classify_relevance("증시요약(5) - 특징 종목(코스닥)", "") == "low"
     assert classify_relevance("로저스 커뮤니케이션, 주총서 이사 14명·KPMG 감사인 선임 승인", "") == "low"
+    assert classify_relevance(
+        "법무법인 동인, 제4대 경영대표변호사에 원창연 변호사 선출",
+        "경영권 분쟁부터 해외 딜까지 기업 자문 M&A 역량 확대",
+    ) == "low"
+    assert classify_relevance(
+        "한미사이언스, 경영권 분쟁 일단락 후 실적 발표 앞두고 보합권 혼조세",
+        "",
+    ) == "low"
+    assert classify_relevance(
+        "영풍, 고려아연 경영권 분쟁 심화와 비철금속 섹터 강세 속 1%대 반등 성공",
+        "",
+    ) == "low"
