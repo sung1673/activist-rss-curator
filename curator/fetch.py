@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Iterable
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin, urlsplit
 
 import feedparser
 import httpx
@@ -14,6 +15,7 @@ from .normalize import canonical_url_hash, hostname_from_url, normalize_title_pa
 
 
 USER_AGENT = "activist-rss-curator/1.0 (+https://github.com/)"
+GOOGLE_NEWS_DECODE_ENDPOINT = "https://news.google.com/_/DotsSplashUi/data/batchexecute"
 
 
 def fetch_feed_xml(feed_url: str, timeout: float = 20.0) -> str:
@@ -93,11 +95,97 @@ def canonical_href(html_text: str, base_url: str) -> str | None:
     return None
 
 
+def google_news_article_id(url: str) -> str | None:
+    parsed = urlsplit(str(url or ""))
+    if parsed.hostname != "news.google.com":
+        return None
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) >= 2 and parts[-2] in {"articles", "read"}:
+        return parts[-1]
+    return None
+
+
+def google_news_decoding_params(html_text: str) -> tuple[str, str] | None:
+    soup = BeautifulSoup(html_text or "", "html.parser")
+    element = soup.find(attrs={"data-n-a-sg": True, "data-n-a-ts": True})
+    if not element:
+        return None
+    signature = str(element.get("data-n-a-sg") or "")
+    timestamp = str(element.get("data-n-a-ts") or "")
+    if not signature or not timestamp:
+        return None
+    return signature, timestamp
+
+
+def parse_google_news_batch_response(text: str) -> str | None:
+    try:
+        payload_text = text.split("\n\n", 1)[1]
+        payload = json.loads(payload_text)
+        decoded_payload = json.loads(payload[0][2])
+    except (IndexError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if isinstance(decoded_payload, list) and len(decoded_payload) >= 2:
+        decoded_url = decoded_payload[1]
+        if isinstance(decoded_url, str) and decoded_url.startswith(("http://", "https://")):
+            return decoded_url
+    return None
+
+
+def decode_google_news_url_online(url: str, client: httpx.Client) -> str | None:
+    article_id = google_news_article_id(url)
+    if not article_id:
+        return None
+
+    params: tuple[str, str] | None = None
+    for prefix in ("https://news.google.com/articles/", "https://news.google.com/rss/articles/"):
+        try:
+            response = client.get(prefix + article_id, follow_redirects=True)
+            response.raise_for_status()
+        except httpx.HTTPError:
+            continue
+        params = google_news_decoding_params(response.text)
+        if params:
+            break
+    if not params:
+        return None
+
+    signature, timestamp = params
+    request_payload = [
+        "Fbv4je",
+        (
+            '["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,'
+            'null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,'
+            f'null,0],"{article_id}",{timestamp},"{signature}"]'
+        ),
+    ]
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        "User-Agent": USER_AGENT,
+    }
+    try:
+        response = client.post(
+            GOOGLE_NEWS_DECODE_ENDPOINT,
+            content=f"f.req={quote(json.dumps([[request_payload]], separators=(',', ':')))}",
+            headers=headers,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    return parse_google_news_batch_response(response.text)
+
+
 def enrich_article(article: dict[str, object], client: httpx.Client, config: dict[str, object]) -> dict[str, object]:
     enriched = dict(article)
     url = str(article.get("canonical_url") or article.get("link") or "")
     if not url:
         return enriched
+
+    decoded_google_news_url = decode_google_news_url_online(url, client)
+    if decoded_google_news_url:
+        normalized_decoded = normalize_url(decoded_google_news_url)
+        enriched["canonical_url"] = normalized_decoded
+        enriched["canonical_url_hash"] = canonical_url_hash(normalized_decoded)
+        url = normalized_decoded
 
     try:
         response = client.get(url, follow_redirects=True)
