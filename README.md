@@ -36,8 +36,6 @@ python -m curator.main
 
 - `public/feed.xml`
 - `public/index.html`
-- `public/items/*.html`
-- `public/u/*.html`
 - `data/state.json`
 
 테스트는 다음처럼 실행합니다.
@@ -74,7 +72,7 @@ https://www.google.com/alerts/feeds/...
 - Python 3.12 설치
 - `requirements.txt` 설치
 - `python -m curator.main` 실행
-- `public/feed.xml`, `public/index.html`, `public/items`, `public/u`, `data/state.json` 변경 시 commit & push
+- `public/feed.xml`, `public/index.html`, `data/state.json` 변경 시 commit & push
 
 수동 실행도 `workflow_dispatch`로 가능합니다.
 
@@ -104,7 +102,7 @@ https://<owner>.github.io/<repo>/feed.xml
 - `disable web page previews`: 활성화
 - `show the source name`: 선택 사항
 
-RSS 본문에는 기사 링크를 HTML anchor 형태로 넣습니다. 긴 원문 URL은 `public/u/*.html` 짧은 리다이렉트 링크로 감싸고, RSS item의 대표 link는 `public/items/*.html` 묶음 상세 페이지를 사용합니다. 이렇게 하면 bot이 item URL을 별도로 붙여도 MSN처럼 긴 URL이 메시지에 직접 노출되는 일을 줄일 수 있습니다.
+RSS 본문에는 기사 링크를 HTML anchor 형태로 넣고, 기사 1건을 한 줄로 표시합니다. RSS item link와 본문 링크에는 GitHub Pages 중간 링크가 아니라 원문 기사 URL을 사용합니다. `msn.com`처럼 원문 확인이 어려운 중계 링크는 클릭 링크로 만들지 않고 한 줄 안내만 표시합니다.
 
 ## 운영 정책
 

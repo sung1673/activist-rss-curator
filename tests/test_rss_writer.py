@@ -3,15 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from curator.cluster import cluster_articles
-from curator.rss_writer import (
-    article_short_url,
-    build_rss,
-    cluster_detail_url,
-    item_description,
-    item_link,
-    write_article_redirect_pages,
-    write_cluster_pages,
-)
+from curator.rss_writer import build_rss, item_description, item_link
 
 from conftest import make_article
 
@@ -41,30 +33,32 @@ def test_rss_item_description_contains_multiple_links(config, now) -> None:  # t
     assert "<content:encoded><![CDATA[" in rss
 
 
-def test_public_feed_uses_short_links_and_detail_page(config, now) -> None:  # type: ignore[no-untyped-def]
+def test_public_feed_does_not_expose_github_pages_item_links(config, now) -> None:  # type: ignore[no-untyped-def]
     config["public_feed_url"] = "https://example.github.io/activist-rss-curator/feed.xml"
     cluster = published_cluster(config, now)
     description = item_description(cluster, config)
     rss = build_rss([cluster], config, now + timedelta(minutes=46))
 
-    assert article_short_url(cluster["articles"][0], config) in description
-    assert cluster_detail_url(cluster, config) in description
-    assert item_link(cluster, config) == cluster_detail_url(cluster, config)
-    assert "<link>https://example.github.io/activist-rss-curator/items/" in rss
-    assert "\nhttps://example.com/a\n" not in description
+    assert "example.github.io" not in description
+    assert item_link(cluster, config) == "https://example.com/a"
+    assert "<link>https://example.com/a</link>" in rss
 
 
-def test_writes_cluster_and_redirect_pages(config, now, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_msn_links_are_excluded_when_direct_links_exist(config, now) -> None:  # type: ignore[no-untyped-def]
     cluster = published_cluster(config, now)
-    write_cluster_pages(tmp_path / "items", [cluster], config, now)
-    write_article_redirect_pages(tmp_path / "u", [cluster])
+    cluster["articles"].append(
+        make_article(
+            "MSN 중계 기사",
+            "https://www.msn.com/ko-kr/news/other/sample/ar-AA123",
+            source="msn.com",
+        )
+    )
+    cluster["article_count"] = 3
 
-    item_pages = list((tmp_path / "items").glob("*.html"))
-    redirect_pages = list((tmp_path / "u").glob("*.html"))
-    assert len(item_pages) == 1
-    assert len(redirect_pages) == 2
-    assert "관련 기사 2건" in item_pages[0].read_text(encoding="utf-8")
-    assert "window.location.replace" in redirect_pages[0].read_text(encoding="utf-8")
+    description = item_description(cluster, config)
+    assert "msn.com" not in description
+    assert "중계 링크 | MSN 중계 기사" in description
+    assert "원문 링크 제외" in description
 
 
 def test_description_is_capped_at_3500_chars(config, now) -> None:  # type: ignore[no-untyped-def]

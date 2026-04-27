@@ -4,8 +4,12 @@ public_feed_url: "https://sung1673.github.io/activist-rss-curator/feed.xml"
 timezone: "Asia/Seoul"
 
 fetch:
-  max_entries_per_feed: 2
+  max_entries_per_feed: 8
   enrich_pages: true
+
+display:
+  exclude_link_domains:
+    - msn.com
 
 date_filter:
   max_article_age_days: 7

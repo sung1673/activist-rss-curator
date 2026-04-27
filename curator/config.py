@@ -13,8 +13,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "public_feed_url": "",
     "timezone": "Asia/Seoul",
     "fetch": {
-        "max_entries_per_feed": 0,
+        "max_entries_per_feed": 8,
         "enrich_pages": True,
+    },
+    "display": {
+        "exclude_link_domains": ["msn.com"],
     },
     "date_filter": {
         "max_article_age_days": 7,
