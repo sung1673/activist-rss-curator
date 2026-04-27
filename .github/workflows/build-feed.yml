@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: write
+  models: read
   pages: write
   id-token: write
 
@@ -62,6 +63,7 @@ jobs:
       - name: Build feed
         env:
           CURATOR_FEEDS: ${{ secrets.CURATOR_FEEDS }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m curator.main

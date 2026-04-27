@@ -26,6 +26,8 @@ def test_rss_item_description_contains_multiple_links(config, now) -> None:  # t
     assert "https://example.com/b" in description
     assert "<a href=" in description
     assert "대표 링크:" not in description
+    assert "분류:" not in description
+    assert "기준시각:" not in description
     rss = build_rss([cluster], config, now + timedelta(minutes=46))
     assert "<item>" in rss
     assert "<![CDATA[" in rss

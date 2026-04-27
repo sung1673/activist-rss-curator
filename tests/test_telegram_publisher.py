@@ -40,8 +40,11 @@ def test_telegram_message_uses_html_links_without_visible_raw_urls(config, now) 
     message = build_telegram_message(cluster, config)
 
     assert "<a href=" in message
-    assert "대표 기사 보기" in message
+    assert "대표 기사 보기" not in message
+    assert "분류:" not in message
+    assert "기준시각:" not in message
     assert "[ 지배구조·주주권 ]" in message
+    assert "<b>고려아연</b>" in message
     assert "1. " in message
     assert ">https://example.com/a<" not in message
     assert "\nhttps://example.com/a" not in message

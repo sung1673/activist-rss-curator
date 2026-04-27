@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from .cluster import primary_theme_group
-from .dates import datetime_to_iso, format_kst, parse_datetime
+from .dates import datetime_to_iso
 from .rss_writer import (
     article_link,
     article_source_label,
@@ -66,6 +66,30 @@ def telegram_section_label(cluster: dict[str, object]) -> str:
     return SECTION_LABELS.get(primary_theme_group(cluster), "거버넌스·자본시장")
 
 
+def article_group_label(article: dict[str, object]) -> str:
+    companies = [str(company).strip() for company in (article.get("company_candidates") or []) if str(company).strip()]
+    if companies:
+        return companies[0]
+    return ""
+
+
+def grouped_articles(articles: list[dict[str, object]]) -> list[tuple[str, list[dict[str, object]]]]:
+    groups: list[tuple[str, list[dict[str, object]]]] = []
+    positions: dict[str, int] = {}
+    for article in articles:
+        label = article_group_label(article) or "기타"
+        if label not in positions:
+            positions[label] = len(groups)
+            groups.append((label, []))
+        groups[positions[label]][1].append(article)
+    return groups
+
+
+def should_show_article_groups(groups: list[tuple[str, list[dict[str, object]]]]) -> bool:
+    named_groups = [(label, items) for label, items in groups if label != "기타"]
+    return len(named_groups) >= 2 or any(len(items) >= 2 for _label, items in named_groups)
+
+
 def initialize_telegram_state(state: dict[str, object], config: dict[str, object], now: datetime) -> None:
     if not telegram_is_configured(config) or state.get("telegram_initialized_at"):
         return
@@ -97,42 +121,60 @@ def unsent_telegram_clusters(state: dict[str, object], config: dict[str, object]
 
 def build_telegram_message(cluster: dict[str, object], config: dict[str, object]) -> str:
     settings = telegram_config(config)
-    timezone_name = str(config.get("timezone") or "Asia/Seoul")
     max_articles = int(settings.get("max_articles_per_message", 7))
     max_chars = int(settings.get("max_message_chars", 3900))
     articles = publishable_articles(cluster, config)
     count = len(articles)
-    published_at = parse_datetime(str(cluster.get("published_at") or ""), timezone_name)
     section = telegram_section_label(cluster)
 
     lines = [
         f"<b>{escape(item_title(cluster, count))}</b>",
         f"<b>[ {escape(section)} ]</b>",
         "",
-        f"분류: {escape(str(cluster.get('relevance_level') or 'medium'))} · 기사 {count}건",
-        f"기준시각: {escape(format_kst(published_at, timezone_name))}",
-        "",
     ]
 
+    summary_lines = [
+        compact_text(line, max_chars=120)
+        for line in (cluster.get("summary_lines") or [])
+        if str(line).strip()
+    ]
+    if summary_lines:
+        lines.extend(escape(line) for line in summary_lines[:2])
+        lines.append("")
+
     shown_count = 0
-    for index, article in enumerate(articles[:max_articles], start=1):
-        source = article_source_label(article)
-        title = display_article_title(article, source)
-        label = compact_text(f"{source} - {title}", max_chars=110)
-        row = f"{index}. {html_link(label, article_link(article))}"
-        candidate = "\n".join(lines + [row])
-        if shown_count > 0 and len(candidate) > max_chars:
+    article_groups = grouped_articles(articles[:max_articles])
+    show_groups = should_show_article_groups(article_groups)
+    stop = False
+    for group_label, group_items in article_groups:
+        if stop:
             break
-        lines.append(row)
-        shown_count += 1
+        if show_groups and group_label:
+            group_line = f"<b>{escape(group_label)}</b>"
+            candidate = "\n".join(lines + [group_line])
+            if shown_count > 0 and len(candidate) > max_chars:
+                break
+            lines.append(group_line)
+        for article in group_items:
+            source = article_source_label(article)
+            title = display_article_title(article, source)
+            label = compact_text(f"{source} - {title}", max_chars=110)
+            row = f"{shown_count + 1}. {html_link(label, article_link(article))}"
+            candidate = "\n".join(lines + [row])
+            if shown_count > 0 and len(candidate) > max_chars:
+                stop = True
+                break
+            lines.append(row)
+            shown_count += 1
+        if show_groups and group_label and shown_count < min(count, max_articles):
+            lines.append("")
+
+    while lines and lines[-1] == "":
+        lines.pop()
 
     remaining = count - shown_count
     if remaining > 0:
         lines.append(f"외 {remaining}건")
-
-    representative = article_link(articles[0]) if articles else str(cluster.get("representative_url") or "")
-    if representative:
-        lines.extend(["", html_link("대표 기사 보기", representative)])
 
     message = "\n".join(lines).strip()
     if len(message) <= max_chars:

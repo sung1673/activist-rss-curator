@@ -84,6 +84,18 @@ def test_governance_theme_is_primary_over_generic_board_terms(config, now) -> No
     assert enriched["theme_group"] == "valueup_return"
 
 
+def test_global_activism_terms_are_clustered_as_activism(config, now) -> None:  # type: ignore[no-untyped-def]
+    article = make_article(
+        "Elliott Management launches proxy fight for board seats",
+        "https://example.com/elliott",
+        summary="An activist investor campaign includes an open letter to shareholders",
+        relevance_level="high",
+    )
+    enriched = enrich_article_for_clustering(article)
+    assert enriched["theme_group"] == "activism_trend"
+    assert "Elliott Management" in enriched["company_candidates"]
+
+
 def test_capital_market_policy_theme_groups_related_items(config, now) -> None:  # type: ignore[no-untyped-def]
     state = {"pending_clusters": [], "published_clusters": []}
     articles = [

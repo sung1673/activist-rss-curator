@@ -46,6 +46,23 @@ KNOWN_COMPANIES = [
     "슈프리마에이치큐",
     "보령",
     "코웨이",
+    "Shinhan Financial Group",
+    "KB Financial Group",
+    "Samsung C&T",
+    "Korea Zinc",
+    "LG Chem",
+    "Hyundai Motor",
+    "Hyundai Mobis",
+    "NPS",
+    "Elliott Management",
+    "Starboard Value",
+    "Third Point",
+    "Trian Partners",
+    "D.E. Shaw",
+    "ValueAct",
+    "Sachem Head",
+    "Saba Capital",
+    "Browning West",
 ]
 
 COMPANY_SUFFIX_PATTERN = re.compile(
@@ -58,17 +75,39 @@ THEME_GROUPS = [
     (
         "shareholder_proposal",
         "주주제안·공개서한",
-        ["주주제안", "공개서한", "권고적 주주제안", "국민연금"],
+        ["주주제안", "공개서한", "권고적 주주제안", "국민연금", "shareholder proposal", "open letter"],
     ),
     (
         "minority_shareholder",
         "소액주주·주주연대 분쟁",
-        ["소액주주", "소액주주연대", "주주연대", "주주행동"],
+        ["소액주주", "소액주주연대", "주주연대", "주주행동", "minority shareholder", "minority shareholders", "shareholder rights"],
     ),
     (
         "activism_trend",
         "행동주의 펀드·주주행동 트렌드",
-        ["행동주의", "행동주의 주주", "얼라인", "KCGI", "트러스톤", "플래쉬라이트", "엘리엇"],
+        [
+            "행동주의",
+            "행동주의 주주",
+            "얼라인",
+            "KCGI",
+            "트러스톤",
+            "플래쉬라이트",
+            "엘리엇",
+            "shareholder activism",
+            "activist investor",
+            "activist campaign",
+            "proxy fight",
+            "proxy contest",
+            "universal proxy",
+            "Elliott Management",
+            "Starboard Value",
+            "Third Point",
+            "Trian Partners",
+            "D.E. Shaw",
+            "ValueAct",
+            "Sachem Head",
+            "Saba Capital",
+        ],
     ),
     (
         "control_dispute",
@@ -78,12 +117,12 @@ THEME_GROUPS = [
     (
         "board_audit",
         "이사회 재편·임시주총·감사 선임",
-        ["이사회 교체", "감사 선임", "이사회", "감사위원", "사외이사", "임시주총", "임시 주총"],
+        ["이사회 교체", "감사 선임", "이사회", "감사위원", "사외이사", "임시주총", "임시 주총", "board seat", "board seats"],
     ),
     (
         "voting_disclosure",
         "주총·의결권·표결 공시",
-        ["의결권", "의안별 표결", "의결정족수", "이사 보수한도", "의결권 자문"],
+        ["의결권", "의안별 표결", "의결정족수", "이사 보수한도", "의결권 자문", "proxy voting"],
     ),
     (
         "capital_market_policy",
@@ -109,6 +148,9 @@ THEME_GROUPS = [
             "ESG 공시",
             "5%룰",
             "경영권 영향 목적",
+            "capital market reform",
+            "Commercial Act",
+            "fiduciary duty",
         ],
     ),
     (
@@ -119,12 +161,49 @@ THEME_GROUPS = [
     (
         "ownership_succession",
         "지배구조·승계·대주주",
-        ["경영권 승계", "승계", "상속세", "오너일가", "총수일가", "총수", "대주주", "주식담보", "우호지분", "일감 몰아주기", "주주대표소송", "터널링"],
+        [
+            "경영권 승계",
+            "승계",
+            "상속세",
+            "오너일가",
+            "총수일가",
+            "총수",
+            "대주주",
+            "주식담보",
+            "우호지분",
+            "일감 몰아주기",
+            "주주대표소송",
+            "터널링",
+            "chaebol",
+            "controlling shareholder",
+            "controlling shareholders",
+            "tunneling",
+        ],
     ),
     (
         "valueup_return",
         "밸류업·주주환원·지배구조",
-        ["밸류업", "주주환원", "자사주 매입", "자사주 소각", "지배구조", "거버넌스", "스튜어드십"],
+        [
+            "밸류업",
+            "주주환원",
+            "자사주 매입",
+            "자사주 소각",
+            "지배구조",
+            "거버넌스",
+            "스튜어드십",
+            "corporate governance",
+            "shareholder return",
+            "shareholder returns",
+            "shareholder value",
+            "share buyback",
+            "stock buyback",
+            "treasury shares",
+            "Korea discount",
+            "Value-up Program",
+            "stewardship code",
+            "National Pension Service",
+            "NPS",
+        ],
     ),
 ]
 THEME_LABELS = {theme_id: label for theme_id, label, _ in THEME_GROUPS}
@@ -139,8 +218,9 @@ COMPANY_STRICT_THEME_GROUPS = {
 
 def extract_company_candidates(text: str) -> list[str]:
     candidates: list[str] = []
+    folded_text = text.casefold()
     for company in KNOWN_COMPANIES:
-        if company in text:
+        if company in text or company.casefold() in folded_text:
             candidates.append(company)
 
     for match in COMPANY_SUFFIX_PATTERN.finditer(text):
@@ -156,6 +236,9 @@ def extract_theme_groups(text: str, keywords: list[object] | None = None) -> lis
     for theme_id, _label, needles in THEME_GROUPS:
         if any(needle.casefold() in haystack for needle in needles):
             groups.append(theme_id)
+    activism_priority_terms = ["shareholder activism", "activist investor", "activist campaign", "proxy fight", "proxy contest"]
+    if "activism_trend" in groups and any(term in haystack for term in activism_priority_terms):
+        groups = ["activism_trend"] + [group for group in groups if group != "activism_trend"]
     explicit_board_terms = ["감사위원", "감사 선임", "사외이사", "이사회 재편", "이사회 교체", "임시주총", "임시 주총"]
     higher_priority_groups = {"shareholder_proposal", "minority_shareholder", "activism_trend", "control_dispute"}
     if (

@@ -5,3 +5,4 @@ python-dateutil==2.9.0.post0
 rapidfuzz==3.10.1
 PyYAML==6.0.2
 pytest==8.3.3
+tzdata==2025.2

@@ -55,6 +55,28 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "send_old_on_first_run": False,
         "timeout_seconds": 20,
     },
+    "ai": {
+        "enabled": True,
+        "provider": "github_models",
+        "endpoint": "https://models.github.ai/inference/chat/completions",
+        "timeout_seconds": 25,
+        "cluster_summary_enabled": True,
+        "cluster_summary_model": "openai/gpt-4o-mini",
+        "cluster_summary_max_tokens": 180,
+        "cluster_summary_max_clusters_per_run": 8,
+        "daily_digest_enabled": True,
+        "daily_digest_model": "openai/gpt-4.1",
+        "daily_digest_max_tokens": 900,
+    },
+    "digest": {
+        "enabled": True,
+        "send_hour": 7,
+        "send_window_minutes": 59,
+        "window_hours": 24,
+        "max_clusters": 30,
+        "max_articles_per_cluster": 5,
+        "max_message_chars": 3900,
+    },
 }
 
 

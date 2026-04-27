@@ -45,6 +45,51 @@ feeds:
   - name: "google-news-배당소득 분리과세 주주환원"
     category: "supplemental"
     url: "https://news.google.com/rss/search?q=%EB%B0%B0%EB%8B%B9%EC%86%8C%EB%93%9D+%EB%B6%84%EB%A6%AC%EA%B3%BC%EC%84%B8+%EC%A3%BC%EC%A3%BC%ED%99%98%EC%9B%90&hl=ko&gl=KR&ceid=KR:ko"
+  - name: "google-news-en-korea-value-up-foreign-investors"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=South+Korea+corporate+Value-up+Program+foreign+investors+Korea+discount+shareholder+returns+when:7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-korea-governance-activism"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=South+Korea+shareholder+activism+corporate+governance+minority+shareholders+when:7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-korea-commercial-act-fiduciary-duty"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=South+Korea+Commercial+Act+fiduciary+duty+directors+shareholders+corporate+governance+when:7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-korea-nps-stewardship"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=South+Korea+National+Pension+Service+stewardship+code+proxy+voting+shareholder+rights+when:7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-korean-chaebol-governance"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=Korean+chaebol+governance+controlling+shareholder+tunneling+minority+shareholders+when:7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-korea-buyback-cancellation"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=South+Korea+treasury+shares+cancellation+share+buyback+shareholder+return+when:7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-korea-capital-market-reform"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=South+Korea+capital+market+reform+corporate+governance+shareholder+value+when:7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-activist-proxy-fight"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=shareholder+activism+proxy+fight+board+seats+activist+investor+when:7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-activist-open-letter"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=activist+investor+campaign+open+letter+shareholder+proposal+when:7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-proxy-contest"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=proxy+contest+shareholder+proposal+universal+proxy+card+activist+when:7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-elliott-campaign"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=Elliott+Management+activist+investor+campaign+proxy+fight+when:7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-starboard-campaign"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=Starboard+Value+activist+investor+campaign+board+seats+when:7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-third-point-campaign"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=Third+Point+activist+investor+campaign+shareholder+value+when:7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-trian-campaign"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=Trian+Partners+activist+investor+campaign+board+when:7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-de-shaw-campaign"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=D.E.+Shaw+activist+investor+campaign+shareholder+when:7d&hl=en-US&gl=US&ceid=US:en"
 public_feed_url: "https://sung1673.github.io/activist-rss-curator/feed.xml"
 timezone: "Asia/Seoul"
 
@@ -92,3 +137,25 @@ telegram:
   max_message_chars: 3900
   send_old_on_first_run: false
   timeout_seconds: 20
+
+ai:
+  enabled: true
+  provider: "github_models"
+  endpoint: "https://models.github.ai/inference/chat/completions"
+  timeout_seconds: 25
+  cluster_summary_enabled: true
+  cluster_summary_model: "openai/gpt-4o-mini"
+  cluster_summary_max_tokens: 180
+  cluster_summary_max_clusters_per_run: 8
+  daily_digest_enabled: true
+  daily_digest_model: "openai/gpt-4.1"
+  daily_digest_max_tokens: 900
+
+digest:
+  enabled: true
+  send_hour: 7
+  send_window_minutes: 59
+  window_hours: 24
+  max_clusters: 30
+  max_articles_per_cluster: 5
+  max_message_chars: 3900

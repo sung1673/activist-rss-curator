@@ -13,7 +13,7 @@ from .cluster import (
     primary_theme_group,
 )
 from .config import article_domain_is_excluded
-from .dates import format_kst, format_rfc822, parse_datetime
+from .dates import format_rfc822, parse_datetime
 from .relevance import relevance_details
 
 
@@ -193,18 +193,24 @@ def item_description(cluster: dict[str, object], config: dict[str, object]) -> s
     cluster_config = config.get("cluster", {})
     max_links = int(cluster_config.get("max_links_per_item", 7))  # type: ignore[union-attr]
     max_chars = int(cluster_config.get("max_description_chars", 3500))  # type: ignore[union-attr]
-    timezone_name = str(config.get("timezone") or "Asia/Seoul")
 
     articles = publishable_articles(cluster, config)
     article_count = len(articles)
-    published_at = parse_datetime(str(cluster.get("published_at") or ""), timezone_name)
     lines = [
         f"<b>📌 {escape(compact_text(cluster.get('representative_title') or '제목 없음', max_chars=120))}</b>",
         "",
-        f"관련 기사 {article_count}건 · 분류: {escape(str(cluster.get('relevance_level') or 'medium'))}",
-        f"기준시각: {escape(format_kst(published_at, timezone_name))}",
+        f"관련 기사 {article_count}건",
         "",
     ]
+
+    summary_lines = [
+        compact_text(line, max_chars=120)
+        for line in (cluster.get("summary_lines") or [])
+        if str(line).strip()
+    ]
+    if summary_lines:
+        lines.extend(escape(line) for line in summary_lines[:2])
+        lines.append("")
 
     shown = articles[:max_links]
     for index, article in enumerate(shown, start=1):

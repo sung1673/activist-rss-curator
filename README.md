@@ -22,7 +22,13 @@ Google Alerts RSS -> GitHub Actions 정제 -> GitHub Pages feed.xml -> rss2tg_bo
 Google Alerts RSS -> GitHub Actions 정제 -> Telegram Bot API -> Telegram channel
 ```
 
-RSS item 1개가 cluster 1개이며, item description 안에 유사 기사 여러 링크가 들어갑니다. 직접 발행을 켜면 Telegram 메시지는 HTML 링크 서식을 사용해 긴 기사 URL 대신 `매체명 - 제목` 형태의 클릭 가능한 줄로 표시합니다.
+AI 요약 직접 발행 구조:
+
+```text
+Google Alerts/Google News RSS -> GitHub Actions 정제 -> GitHub Models 요약 -> Telegram Bot API -> Telegram channel
+```
+
+RSS item 1개가 cluster 1개이며, item description 안에 유사 기사 여러 링크가 들어갑니다. 직접 발행을 켜면 Telegram 메시지는 HTML 링크 서식을 사용해 긴 기사 URL 대신 `매체명 - 제목` 형태의 클릭 가능한 줄로 표시합니다. 기업명이 추정되는 묶음은 `신한금융`, `고려아연`처럼 메시지 안에서 하위 그룹으로 나눠 표시합니다.
 
 ## 설치
 
@@ -75,6 +81,11 @@ https://www.google.com/alerts/feeds/...
 
 Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 workflow 파일에 직접 쓰지 말고 `TELEGRAM_BOT_TOKEN` Secret에 저장합니다. 채널 username을 공개해도 괜찮다면 `config.yaml`의 `telegram.chat_id`를 사용할 수 있고, 숨기고 싶다면 `TELEGRAM_CHAT_ID` Secret에 `@channel_username` 또는 numeric chat id를 저장합니다.
 
+`config.yaml`에는 공개 가능한 Google News 보조 RSS를 두 축으로 추가할 수 있습니다.
+
+- 국내: 주주제안, 행동주의 주주, 소액주주연대, 지배구조, 밸류업, 자사주 소각, 스튜어드십, 자본시장법/상법 등
+- 해외: `South Korea Value-up Program`, `Korea discount`, `shareholder activism`, `proxy fight`, `activist investor campaign`, `open letter`, `universal proxy`, `Elliott Management`, `Starboard Value` 등
+
 ## GitHub Actions
 
 `.github/workflows/build-feed.yml`은 다음을 수행합니다.
@@ -85,6 +96,8 @@ Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 
 - `requirements.txt` 설치
 - `python -m curator.main` 실행
 - `public/feed.xml`, `public/index.html`, `data/state.json` 변경 시 commit & push
+
+GitHub Models를 사용하는 AI 요약은 workflow의 `models: read` 권한과 자동 제공되는 `GITHUB_TOKEN`을 사용합니다. 별도 OpenAI API key는 필요하지 않으며, 호출이 실패하면 fallback 요약으로 계속 실행됩니다.
 
 수동 실행도 `workflow_dispatch`로 가능합니다. 수동 실행 화면에서 `Send a Telegram smoke-test message`를 켜면 실제 뉴스 발행과 별개로 테스트 메시지 1건을 채널에 보내 bot token과 채널 관리자 권한을 확인할 수 있습니다.
 
@@ -118,7 +131,7 @@ RSS 본문에는 기사 1건을 한 줄로 표시합니다. rss2tg_bot이 본문
 
 ## Telegram 직접 발행
 
-직접 발행을 사용하면 `rss2tg_bot` 없이 이 프로젝트가 Telegram Bot API로 채널에 메시지를 보냅니다. 메시지는 긴 URL을 직접 노출하지 않고 HTML 링크로 표시하며, 묶음마다 `정책·자본시장`, `지배구조·주주권`, `자본조달·공시`, `밸류업·주주환원` 같은 섹션 라벨을 붙입니다.
+직접 발행을 사용하면 `rss2tg_bot` 없이 이 프로젝트가 Telegram Bot API로 채널에 메시지를 보냅니다. 메시지는 긴 URL을 직접 노출하지 않고 HTML 링크로 표시하며, 묶음마다 `정책·자본시장`, `지배구조·주주권`, `자본조달·공시`, `밸류업·주주환원` 같은 섹션 라벨을 붙입니다. 내부 분류값이나 기준시각, 대표기사보기 링크는 표시하지 않습니다.
 
 필수 조건:
 
@@ -129,6 +142,12 @@ RSS 본문에는 기사 1건을 한 줄로 표시합니다. rss2tg_bot이 본문
 처음 Secret을 연결한 실행에서는 기존 published cluster를 발송하지 않도록 기준선으로만 저장합니다. 이후 새로 published 되는 cluster부터 전송합니다. 전송한 guid는 `data/state.json`의 `telegram_sent_cluster_guids`에 저장되어 중복 발송을 막습니다.
 
 bot 연결만 즉시 확인하려면 Actions의 `Build curated RSS feed` 수동 실행에서 `Send a Telegram smoke-test message` 옵션을 켭니다.
+
+## AI 요약과 데일리 리뷰
+
+새로 발행되는 기사 묶음에는 GitHub Models를 통해 2줄 요약을 붙입니다. 기본 모델은 묶음 요약 `openai/gpt-4o-mini`, 매일 아침 리뷰 `openai/gpt-4.1`입니다.
+
+매일 KST 07:00-07:59 사이 첫 실행에서 최근 24시간의 published/pending cluster를 모아 `데일리 거버넌스 리뷰`를 전송합니다. 리뷰는 카테고리별 흐름과 시장 맥락을 길게 정리하며, 이미 보낸 날짜는 `data/state.json`의 `daily_digest_sent_dates`에 저장해 중복 전송을 막습니다.
 
 ## 운영 정책
 
@@ -143,6 +162,7 @@ bot 연결만 즉시 확인하려면 Actions의 `Build curated RSS feed` 수동 
 - 이미 published된 cluster에 유사 기사가 나중에 들어오면 기존 item을 수정하지 않고 `[추가 N건] ...` follow-up cluster로 새 guid를 발행합니다.
 - `feed.xml`에는 최근 published cluster 50개만 유지합니다.
 - Telegram 직접 발행은 전송 성공한 cluster guid를 state에 저장하고, 이미 보낸 cluster는 다시 보내지 않습니다.
+- 매일 KST 07:00에는 최근 24시간 묶음을 데일리 digest로 별도 발행합니다.
 
 ## 한계
 
@@ -150,4 +170,5 @@ bot 연결만 즉시 확인하려면 Actions의 `Build curated RSS feed` 수동 
 - 너무 긴 description은 텔레그램에서 분할될 수 있습니다. 기본 제한은 3500자입니다.
 - 이미 발행된 텔레그램 메시지를 RSS만으로 안정적으로 수정하는 것은 기대하지 않습니다.
 - GitHub Actions 기반 Telegram 발행은 대화형 봇이 아니라 예약 실행형 발행 봇입니다. 채널에 명령어를 보내 즉시 설정을 바꾸는 용도에는 맞지 않습니다.
+- GitHub Models 호출 한도나 권한 문제로 AI 요약이 실패할 수 있으며, 이 경우 fallback 요약으로 발행합니다.
 - 기업명 추정은 단순 규칙 기반입니다. `extract_company_candidates()`를 확장해 개선할 수 있습니다.
