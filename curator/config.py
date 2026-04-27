@@ -52,6 +52,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "chat_id": "@o2fjwoei",
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
+        "single_article_web_page_preview": True,
+        "single_article_summary_chars": 30,
         "max_articles_per_message": 7,
         "max_message_chars": 3900,
         "send_old_on_first_run": False,

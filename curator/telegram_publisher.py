@@ -71,6 +71,23 @@ def should_show_article_groups(groups: list[tuple[str, list[dict[str, object]]]]
     return len(named_groups) >= 2 or any(len(items) >= 2 for _label, items in named_groups)
 
 
+def article_summary_preview(article: dict[str, object], config: dict[str, object]) -> str:
+    max_chars = int(telegram_config(config).get("single_article_summary_chars", 30))
+    summary = compact_text(article.get("summary") or "", max_chars=max_chars)
+    title = str(article.get("clean_title") or article.get("title") or "").strip()
+    if title and summary.casefold().startswith(title.casefold()):
+        summary = summary[len(title) :].lstrip(" -:|")
+        summary = compact_text(summary, max_chars=max_chars)
+    return summary
+
+
+def cluster_should_show_web_preview(cluster: dict[str, object], config: dict[str, object]) -> bool:
+    settings = telegram_config(config)
+    if not settings.get("single_article_web_page_preview", True):
+        return False
+    return len(publishable_articles(cluster, config)) == 1
+
+
 def initialize_telegram_state(state: dict[str, object], config: dict[str, object], now: datetime) -> None:
     if not telegram_is_configured(config) or state.get("telegram_initialized_at"):
         return
@@ -107,10 +124,7 @@ def build_telegram_message(cluster: dict[str, object], config: dict[str, object]
     articles = publishable_articles(cluster, config)
     count = len(articles)
 
-    lines = [
-        f"<b>{escape(item_title(cluster, count))}</b>",
-        "",
-    ]
+    lines = [] if count == 1 else [f"<b>{escape(item_title(cluster, count))}</b>", ""]
 
     shown_count = 0
     article_groups = grouped_articles(articles[:max_articles])
@@ -130,11 +144,15 @@ def build_telegram_message(cluster: dict[str, object], config: dict[str, object]
             title = display_article_title(article, source)
             label = compact_text(f"{source} - {title}", max_chars=110)
             row = f"{shown_count + 1}. {html_link(label, article_link(article))}"
-            candidate = "\n".join(lines + [row])
+            preview = article_summary_preview(article, config) if count == 1 else ""
+            row_lines = [row]
+            if preview:
+                row_lines.append(f"본문: {escape(preview)}")
+            candidate = "\n".join(lines + row_lines)
             if shown_count > 0 and len(candidate) > max_chars:
                 stop = True
                 break
-            lines.append(row)
+            lines.extend(row_lines)
             shown_count += 1
         if show_groups and group_label and shown_count < min(count, max_articles):
             lines.append("")
@@ -159,13 +177,18 @@ def send_telegram_message(
     text: str,
     config: dict[str, object],
     client: httpx.Client | None = None,
+    disable_web_page_preview: bool | None = None,
 ) -> dict[str, object]:
     settings = telegram_config(config)
     payload = {
         "chat_id": chat_id,
         "text": text,
         "parse_mode": str(settings.get("parse_mode") or "HTML"),
-        "disable_web_page_preview": bool(settings.get("disable_web_page_preview", True)),
+        "disable_web_page_preview": (
+            bool(settings.get("disable_web_page_preview", True))
+            if disable_web_page_preview is None
+            else disable_web_page_preview
+        ),
     }
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     timeout = float(settings.get("timeout_seconds", 20))
@@ -237,7 +260,14 @@ def publish_unsent_telegram_clusters(
     failed = 0
     for cluster in unsent_telegram_clusters(state, config):
         message = build_telegram_message(cluster, config)
-        response = send_telegram_message(bot_token, chat_id, message, config)
+        disable_preview = not cluster_should_show_web_preview(cluster, config)
+        response = send_telegram_message(
+            bot_token,
+            chat_id,
+            message,
+            config,
+            disable_web_page_preview=disable_preview,
+        )
         if response.get("ok"):
             mark_telegram_sent(state, cluster, now, response)
             sent += 1

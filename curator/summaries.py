@@ -106,6 +106,14 @@ FALLBACK_TOPIC_RULES = (
     ),
 )
 
+CIRCLED_NUMBERS = ("①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩")
+
+DIGEST_SOURCE_LABEL_OVERRIDES = {
+    "SISAJOURNAL": "SISA JOURNAL",
+    "SEOULFN": "SEOUL FN",
+    "NEWSFC": "NEWS FC",
+}
+
 
 def ai_config(config: dict[str, object]) -> dict[str, Any]:
     value = config.get("ai", {})
@@ -410,6 +418,12 @@ def digest_group_title(group: list[dict[str, object]], config: dict[str, object]
     return compact_text(title, max_chars=title_max_chars)
 
 
+def numbered_digest_source(index: int, source: str) -> str:
+    number = CIRCLED_NUMBERS[index - 1] if index <= len(CIRCLED_NUMBERS) else f"{index}."
+    label = DIGEST_SOURCE_LABEL_OVERRIDES.get(source, source)
+    return f"{number} {label}"
+
+
 def render_digest_entry_group(group: list[dict[str, object]], config: dict[str, object]) -> list[str]:
     if len(group) == 1:
         entry = group[0]
@@ -419,12 +433,12 @@ def render_digest_entry_group(group: list[dict[str, object]], config: dict[str, 
     title = digest_group_title(group, config)
     lines = [f"• {digest_group_date_label(group, config)} / {escape(title, quote=False)} ({len(group)}건)"]
     links = []
-    for entry in group[:max_links]:
+    for index, entry in enumerate(group[:max_links], start=1):
         article = entry["article"]
         source = article_source_label(article)  # type: ignore[arg-type]
-        links.append(html_link(source, str(entry["url"])))
+        links.append(html_link(numbered_digest_source(index, source), str(entry["url"])))
     if links:
-        line = "  링크: " + " · ".join(links)
+        line = "  " + " · ".join(links)
         remaining = len(group) - len(links)
         if remaining > 0:
             line += f" · 외 {remaining}건"

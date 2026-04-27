@@ -149,7 +149,7 @@ def test_daily_digest_groups_similar_article_titles(config, now, monkeypatch) ->
     monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 소액주주 이슈가 이어졌음")
     first = make_article(
         "고려아연 소액주주, 사외이사 검찰 고발",
-        "https://example.com/a",
+        "https://www.sisajournal.com/news/articleView.html?idxno=371009",
         source="데일리안",
         published_at="2026-04-27T09:00:00+09:00",
         relevance_level="high",
@@ -157,7 +157,7 @@ def test_daily_digest_groups_similar_article_titles(config, now, monkeypatch) ->
     first["company_candidates"] = ["고려아연"]
     second = make_article(
         "고려아연 소액주주, 검찰 고발·금융위 진정 동시 제기",
-        "https://example.com/b",
+        "https://www.seoulfn.com/news/articleView.html?idxno=627481",
         source="뉴스워치",
         published_at="2026-04-27T09:10:00+09:00",
         relevance_level="high",
@@ -172,9 +172,11 @@ def test_daily_digest_groups_similar_article_titles(config, now, monkeypatch) ->
 
     assert "04.27 /" in message
     assert "(2건)" in message
-    assert "링크:" in message
-    assert 'href="https://example.com/a"' in message
-    assert 'href="https://example.com/b"' in message
+    assert "① SEOUL FN" in message
+    assert "② SISA JOURNAL" in message
+    assert "링크:" not in message
+    assert 'href="https://www.sisajournal.com/news/articleView.html?idxno=371009"' in message
+    assert 'href="https://www.seoulfn.com/news/articleView.html?idxno=627481"' in message
 
 
 def test_daily_digest_fallback_summary_uses_article_topics(config, now) -> None:  # type: ignore[no-untyped-def]

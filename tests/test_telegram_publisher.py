@@ -35,6 +35,19 @@ def published_cluster(config, now):  # type: ignore[no-untyped-def]
     return state["published_clusters"][0]
 
 
+def single_article_cluster(config, now):  # type: ignore[no-untyped-def]
+    state = {"pending_clusters": [], "published_clusters": []}
+    article = make_article(
+        "금융당국, 상장회사 임원보수 공시 강화",
+        "https://example.com/single",
+        summary="성과보수와 주식보상 공시가 투자자 보호 쟁점으로 부각됐다",
+        relevance_level="high",
+    )
+    cluster_articles([article], state, config, now)
+    cluster_articles([], state, config, now + timedelta(minutes=21))
+    return state["published_clusters"][0]
+
+
 def test_telegram_message_uses_html_links_without_visible_raw_urls(config, now) -> None:  # type: ignore[no-untyped-def]
     cluster = published_cluster(config, now)
     message = build_telegram_message(cluster, config)
@@ -49,6 +62,16 @@ def test_telegram_message_uses_html_links_without_visible_raw_urls(config, now) 
     assert ">https://example.com/a<" not in message
     assert "\nhttps://example.com/a" not in message
     assert len(message) <= config["telegram"]["max_message_chars"]
+
+
+def test_single_article_message_omits_duplicate_heading_and_adds_preview(config, now) -> None:  # type: ignore[no-untyped-def]
+    cluster = single_article_cluster(config, now)
+    message = build_telegram_message(cluster, config)
+
+    assert not message.startswith("<b>")
+    assert "<a href=" in message
+    assert "금융당국, 상장회사 임원보수 공시 강화</a>" in message
+    assert "본문: 성과보수와 주식보상 공시가 투자자 보호 쟁점으로..." in message
 
 
 def test_telegram_initialization_does_not_backfill_old_clusters(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -91,3 +114,28 @@ def test_publish_unsent_telegram_clusters_marks_success(config, now, monkeypatch
     assert summary == {"telegram_sent": 1, "telegram_failed": 0}
     assert cluster["guid"] in state["telegram_sent_cluster_guids"]
     assert state["telegram_send_records"][0]["message_id"] == 123
+
+
+def test_single_article_publish_enables_web_page_preview(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import telegram_publisher
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "@test_channel")
+    cluster = single_article_cluster(config, now)
+    state = {
+        "published_clusters": [cluster],
+        "telegram_sent_cluster_guids": [],
+        "telegram_send_records": [],
+        "telegram_initialized_at": "2026-04-25T08:00:00+09:00",
+    }
+    kwargs_seen = []
+
+    def fake_send(*_args, **kwargs):  # type: ignore[no-untyped-def]
+        kwargs_seen.append(kwargs)
+        return {"ok": True, "message_id": 123, "chat_id": -100}
+
+    monkeypatch.setattr(telegram_publisher, "send_telegram_message", fake_send)
+    summary = publish_unsent_telegram_clusters(state, config, now)
+
+    assert summary == {"telegram_sent": 1, "telegram_failed": 0}
+    assert kwargs_seen[0]["disable_web_page_preview"] is False
