@@ -85,7 +85,7 @@ Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 
 - `python -m curator.main` 실행
 - `public/feed.xml`, `public/index.html`, `data/state.json` 변경 시 commit & push
 
-수동 실행도 `workflow_dispatch`로 가능합니다.
+수동 실행도 `workflow_dispatch`로 가능합니다. 수동 실행 화면에서 `Send a Telegram smoke-test message`를 켜면 실제 뉴스 발행과 별개로 테스트 메시지 1건을 채널에 보내 bot token과 채널 관리자 권한을 확인할 수 있습니다.
 
 ## GitHub Pages
 
@@ -126,6 +126,8 @@ RSS 본문에는 기사 1건을 한 줄로 표시합니다. rss2tg_bot이 본문
 - `config.yaml`의 `telegram.chat_id` 또는 `TELEGRAM_CHAT_ID` Secret 설정
 
 처음 Secret을 연결한 실행에서는 기존 published cluster를 발송하지 않도록 기준선으로만 저장합니다. 이후 새로 published 되는 cluster부터 전송합니다. 전송한 guid는 `data/state.json`의 `telegram_sent_cluster_guids`에 저장되어 중복 발송을 막습니다.
+
+bot 연결만 즉시 확인하려면 Actions의 `Build curated RSS feed` 수동 실행에서 `Send a Telegram smoke-test message` 옵션을 켭니다.
 
 ## 운영 정책
 

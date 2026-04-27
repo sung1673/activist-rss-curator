@@ -11,4 +11,5 @@ __all__ = [
     "rss_writer",
     "state",
     "telegram_publisher",
+    "telegram_smoke_test",
 ]
