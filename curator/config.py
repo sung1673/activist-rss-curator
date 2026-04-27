@@ -16,6 +16,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "fetch": {
         "max_entries_per_feed": 8,
         "enrich_pages": True,
+        "page_timeout_seconds": 8,
+        "google_news_decode_limit": 25,
     },
     "display": {
         "exclude_link_domains": ["msn.com"],

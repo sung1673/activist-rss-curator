@@ -174,13 +174,19 @@ def decode_google_news_url_online(url: str, client: httpx.Client) -> str | None:
     return parse_google_news_batch_response(response.text)
 
 
-def enrich_article(article: dict[str, object], client: httpx.Client, config: dict[str, object]) -> dict[str, object]:
+def enrich_article(
+    article: dict[str, object],
+    client: httpx.Client,
+    config: dict[str, object],
+    *,
+    decode_google_news: bool = True,
+) -> dict[str, object]:
     enriched = dict(article)
     url = str(article.get("canonical_url") or article.get("link") or "")
     if not url:
         return enriched
 
-    decoded_google_news_url = decode_google_news_url_online(url, client)
+    decoded_google_news_url = decode_google_news_url_online(url, client) if decode_google_news else None
     if decoded_google_news_url:
         normalized_decoded = normalize_url(decoded_google_news_url)
         enriched["canonical_url"] = normalized_decoded
@@ -222,13 +228,30 @@ def fetch_google_alerts_articles(config: dict[str, object]) -> list[dict[str, ob
     if not bool(fetch_config.get("enrich_pages", True)):  # type: ignore[union-attr]
         return articles
 
-    timeout = httpx.Timeout(10.0, connect=5.0)
+    page_timeout = float(fetch_config.get("page_timeout_seconds", 8.0) or 8.0)  # type: ignore[union-attr]
+    google_news_decode_limit = int(fetch_config.get("google_news_decode_limit", 25) or 0)  # type: ignore[union-attr]
+    timeout = httpx.Timeout(page_timeout, connect=min(5.0, page_timeout))
     limits = httpx.Limits(max_connections=5, max_keepalive_connections=2)
     headers = {"User-Agent": USER_AGENT}
     enriched_articles: list[dict[str, object]] = []
+    google_news_decode_attempts = 0
     with httpx.Client(timeout=timeout, limits=limits, headers=headers) as client:
         for article in articles:
-            enriched_articles.append(enrich_article(article, client, config))
+            url = str(article.get("canonical_url") or article.get("link") or "")
+            is_google_news = bool(google_news_article_id(url))
+            should_decode_google_news = is_google_news and (
+                google_news_decode_limit < 0 or google_news_decode_attempts < google_news_decode_limit
+            )
+            if should_decode_google_news:
+                google_news_decode_attempts += 1
+            enriched_articles.append(
+                enrich_article(
+                    article,
+                    client,
+                    config,
+                    decode_google_news=should_decode_google_news,
+                )
+            )
     return enriched_articles
 
 
