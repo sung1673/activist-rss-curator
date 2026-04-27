@@ -82,3 +82,23 @@ def test_governance_theme_is_primary_over_generic_board_terms(config, now) -> No
     )
     enriched = enrich_article_for_clustering(article)
     assert enriched["theme_group"] == "valueup_return"
+
+
+def test_minority_shareholder_theme_requires_company_match(config, now) -> None:  # type: ignore[no-untyped-def]
+    state = {"pending_clusters": [], "published_clusters": []}
+    articles = [
+        make_article(
+            "고려아연 소액주주, 사외이사 검찰 고발",
+            "https://example.com/korea-zinc",
+            summary="고려아연 소액주주가 이사회 의사결정 문제를 제기",
+            relevance_level="high",
+        ),
+        make_article(
+            "풍산 승계 딜레마, 주주충실 의무와 인적분할 유력",
+            "https://example.com/poongsan",
+            summary="풍산 소액주주와 주주충실 의무 논란",
+            relevance_level="high",
+        ),
+    ]
+    cluster_articles(articles, state, config, now)
+    assert len(state["pending_clusters"]) == 2

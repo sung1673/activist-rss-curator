@@ -7,7 +7,30 @@ from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
 from .cluster import cluster_guid
+from .config import article_domain_is_excluded
 from .dates import format_kst, format_rfc822, parse_datetime
+
+
+SOURCE_LABELS = {
+    "alphabiz.co.kr": "알파경제",
+    "biz.newdaily.co.kr": "뉴데일리경제",
+    "bloter.net": "블로터",
+    "ceoscoredaily.com": "CEO스코어데일리",
+    "dailian.co.kr": "데일리안",
+    "digitaltoday.co.kr": "디지털투데이",
+    "ebn.co.kr": "EBN",
+    "econovill.com": "이코노믹리뷰",
+    "enewstoday.co.kr": "이뉴스투데이",
+    "futurechosun.com": "더나은미래",
+    "mk.co.kr": "매일경제",
+    "msn.com": "MSN",
+    "mt.co.kr": "머니투데이",
+    "news.jkn.co.kr": "재경일보",
+    "newstong.co.kr": "뉴스통",
+    "newswatch.kr": "뉴스워치",
+    "topdaily.kr": "톱데일리",
+    "yna.co.kr": "연합뉴스",
+}
 
 
 def cdata(text: str) -> str:
@@ -49,17 +72,8 @@ def article_domain(article: dict[str, object]) -> str:
     return (urlsplit(article_link(article)).hostname or "").lower().removeprefix("www.")
 
 
-def excluded_display_domains(config: dict[str, object]) -> set[str]:
-    display_config = config.get("display", {})
-    domains = display_config.get("exclude_link_domains", ["msn.com"])  # type: ignore[union-attr]
-    return {str(domain).lower().removeprefix("www.") for domain in domains}
-
-
 def is_excluded_display_link(article: dict[str, object], config: dict[str, object]) -> bool:
-    domain = article_domain(article)
-    if not domain:
-        return False
-    return any(domain == excluded or domain.endswith(f".{excluded}") for excluded in excluded_display_domains(config))
+    return article_domain_is_excluded(article, config)
 
 
 def split_display_articles(
@@ -71,6 +85,11 @@ def split_display_articles(
     if included:
         return included, excluded
     return articles, []
+
+
+def has_publishable_link(cluster: dict[str, object], config: dict[str, object]) -> bool:
+    articles = list(cluster.get("articles", []))
+    return any(article_link(article) and not is_excluded_display_link(article, config) for article in articles)
 
 
 def item_link(cluster: dict[str, object], config: dict[str, object]) -> str:
@@ -88,6 +107,22 @@ def compact_text(value: object, *, max_chars: int = 92) -> str:
     if len(text) <= max_chars:
         return text
     return text[: max(0, max_chars - 3)].rstrip() + "..."
+
+
+def source_label_from_domain(domain: str) -> str:
+    domain = domain.lower().removeprefix("www.")
+    if domain in SOURCE_LABELS:
+        return SOURCE_LABELS[domain]
+    parts = domain.split(".")
+    return parts[0].upper() if parts else "출처"
+
+
+def article_source_label(article: dict[str, object]) -> str:
+    domain = article_domain(article)
+    source = article_source(article)
+    if domain:
+        return compact_text(SOURCE_LABELS.get(domain) or source_label_from_domain(domain), max_chars=28)
+    return compact_text(source, max_chars=28)
 
 
 def display_article_title(article: dict[str, object], source: str) -> str:
@@ -140,7 +175,7 @@ def item_description(cluster: dict[str, object], config: dict[str, object]) -> s
     ]
     shown = rows[:max_links]
     for index, (article, is_excluded) in enumerate(shown, start=1):
-        source = compact_text(article_source(article), max_chars=28)
+        source = article_source_label(article)
         title = display_article_title(article, source)
         if is_excluded:
             lines.append(f"{index}. {escape(f'중계 링크 | {title}')} (원문 링크 제외)")
@@ -165,7 +200,11 @@ def sort_published_clusters(clusters: list[dict[str, object]], timezone_name: st
 def build_rss(clusters: list[dict[str, object]], config: dict[str, object], now: datetime) -> str:
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
     max_items = int(config.get("publish", {}).get("max_items_in_feed", 50))  # type: ignore[union-attr]
-    feed_clusters = sort_published_clusters(clusters, timezone_name)[:max_items]
+    feed_clusters = [
+        cluster
+        for cluster in sort_published_clusters(clusters, timezone_name)
+        if has_publishable_link(cluster, config)
+    ][:max_items]
     channel_title = "정제 RSS - 행동주의 뉴스"
     channel_link = str(config.get("public_feed_url") or "")
     lines = [

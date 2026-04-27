@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -69,6 +70,23 @@ def configured_feeds(config: dict[str, Any]) -> list[dict[str, str]]:
             }
         )
     return normalized
+
+
+def excluded_link_domains(config: dict[str, Any]) -> set[str]:
+    display_config = config.get("display", {})
+    domains = display_config.get("exclude_link_domains", ["msn.com"]) if isinstance(display_config, dict) else []
+    return {str(domain).lower().removeprefix("www.") for domain in domains}
+
+
+def url_domain_is_excluded(url: object, config: dict[str, Any]) -> bool:
+    hostname = (urlsplit(str(url or "")).hostname or "").lower().removeprefix("www.")
+    if not hostname:
+        return False
+    return any(hostname == domain or hostname.endswith(f".{domain}") for domain in excluded_link_domains(config))
+
+
+def article_domain_is_excluded(article: dict[str, object], config: dict[str, Any]) -> bool:
+    return url_domain_is_excluded(article.get("canonical_url") or article.get("link"), config)
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

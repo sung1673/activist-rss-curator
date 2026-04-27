@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .cluster import cluster_articles
-from .config import load_config
+from .config import article_domain_is_excluded, load_config
 from .dates import choose_publication_datetime, datetime_to_iso, is_too_old, now_in_timezone
 from .dedupe import dedupe_articles
 from .fetch import fetch_google_alerts_articles
@@ -40,6 +40,27 @@ def prepare_article(article: dict[str, object], config: dict[str, object]) -> di
     return prepared
 
 
+def prune_excluded_pending_articles(state: dict[str, object], config: dict[str, object]) -> None:
+    kept_clusters: list[dict[str, object]] = []
+    for cluster in list(state.get("pending_clusters", [])):
+        articles = [
+            article
+            for article in list(cluster.get("articles", []))
+            if not article_domain_is_excluded(article, config)
+        ]
+        if not articles:
+            continue
+        if len(articles) != len(cluster.get("articles", [])):
+            cluster["articles"] = articles
+            cluster["article_count"] = len(articles)
+            representative = articles[0]
+            cluster["representative_title"] = representative.get("clean_title") or representative.get("title") or ""
+            cluster["representative_title_normalized"] = representative.get("normalized_title") or ""
+            cluster["representative_url"] = representative.get("canonical_url") or representative.get("link") or ""
+        kept_clusters.append(cluster)
+    state["pending_clusters"] = kept_clusters
+
+
 def run(root: Path | None = None) -> dict[str, int]:
     project_root = root or PROJECT_ROOT
     config = load_config(project_root / "config.yaml")
@@ -47,6 +68,7 @@ def run(root: Path | None = None) -> dict[str, int]:
     now = now_in_timezone(timezone_name)
     state_path = project_root / "data" / "state.json"
     state = load_state(state_path)
+    prune_excluded_pending_articles(state, config)
 
     fetched_articles = fetch_google_alerts_articles(config)
     publish_levels = set(config.get("publish", {}).get("publish_levels", ["high", "medium"]))  # type: ignore[union-attr]
@@ -69,6 +91,10 @@ def run(root: Path | None = None) -> dict[str, int]:
             continue
         if article.get("date_status") == "unknown" and not allow_unknown:
             remember_rejected(state, article, now, "date_unknown")
+            rejected_count += 1
+            continue
+        if article_domain_is_excluded(article, config):
+            remember_rejected(state, article, now, "excluded_domain")
             rejected_count += 1
             continue
         if article.get("relevance_level") not in publish_levels:

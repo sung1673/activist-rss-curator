@@ -61,6 +61,30 @@ def test_msn_links_are_excluded_when_direct_links_exist(config, now) -> None:  #
     assert "원문 링크 제외" in description
 
 
+def test_excluded_only_cluster_is_not_published(config, now) -> None:  # type: ignore[no-untyped-def]
+    state = {"pending_clusters": [], "published_clusters": []}
+    article = make_article(
+        "MSN 단독 중계 기사",
+        "https://www.msn.com/ko-kr/news/other/sample/ar-AA123",
+        source="msn.com",
+        relevance_level="high",
+    )
+    cluster_articles([article], state, config, now)
+    cluster_articles([], state, config, now + timedelta(minutes=21))
+    rss = build_rss(state["published_clusters"], config, now + timedelta(minutes=21))
+    assert "MSN 단독 중계 기사" not in rss
+
+
+def test_source_domain_is_rendered_as_label(config, now) -> None:  # type: ignore[no-untyped-def]
+    state = {"pending_clusters": [], "published_clusters": []}
+    article = make_article("주주환원 확대", "https://www.mk.co.kr/news/stock/1", source="mk.co.kr")
+    cluster_articles([article], state, config, now)
+    cluster_articles([], state, config, now + timedelta(minutes=46))
+    description = item_description(state["published_clusters"][0], config)
+    assert "매일경제 | 주주환원 확대" in description
+    assert ">mk.co.kr |" not in description
+
+
 def test_description_is_capped_at_3500_chars(config, now) -> None:  # type: ignore[no-untyped-def]
     cluster = published_cluster(config, now)
     long_articles = []

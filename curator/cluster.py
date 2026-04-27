@@ -17,6 +17,8 @@ KNOWN_COMPANIES = [
     "KB금융지주",
     "삼성물산",
     "고려아연",
+    "풍산",
+    "한국앤컴퍼니",
     "KT&G",
     "KT",
     "SK스퀘어",
@@ -74,6 +76,7 @@ THEME_GROUPS = [
     ),
 ]
 THEME_LABELS = {theme_id: label for theme_id, label, _ in THEME_GROUPS}
+COMPANY_STRICT_THEME_GROUPS = {"shareholder_proposal", "minority_shareholder", "control_dispute"}
 
 
 def extract_company_candidates(text: str) -> list[str]:
@@ -254,6 +257,22 @@ def same_theme_group(article: dict[str, object], cluster: dict[str, object]) -> 
     return bool(article_theme and article_theme == cluster_theme)
 
 
+def can_join_by_theme_group(article: dict[str, object], cluster: dict[str, object], title_score: float, threshold: int) -> bool:
+    theme_group = primary_theme_group(article)
+    if not theme_group or theme_group != primary_theme_group(cluster):
+        return False
+    if theme_group not in COMPANY_STRICT_THEME_GROUPS:
+        return True
+
+    article_companies = set(article.get("company_candidates") or [])
+    cluster_companies = set(cluster.get("companies") or [])
+    if article_companies and cluster_companies:
+        return bool(article_companies & cluster_companies)
+    if article_companies or cluster_companies:
+        return False
+    return title_score >= threshold
+
+
 def within_cluster_window(
     article: dict[str, object],
     cluster: dict[str, object],
@@ -292,10 +311,16 @@ def can_join_cluster(
     cluster_config = config.get("cluster", {})
     dedupe_config = config.get("dedupe", {})
     window_hours = int(cluster_config.get("cluster_window_hours", 48))  # type: ignore[union-attr]
+    title_threshold = int(dedupe_config.get("title_cluster_threshold", 80))  # type: ignore[union-attr]
+    title_score = fuzz.token_set_ratio(
+        str(article.get("normalized_title") or ""),
+        str(cluster.get("representative_title_normalized") or cluster.get("representative_title") or ""),
+    )
     theme_window_match = (
         allow_theme_group
         and same_theme_group(article, cluster)
         and within_theme_window(article, cluster, now, config, timezone_name)
+        and can_join_by_theme_group(article, cluster, title_score, title_threshold)
     )
     if not within_cluster_window(article, cluster, now, window_hours, timezone_name):
         if theme_window_match:
@@ -303,11 +328,7 @@ def can_join_cluster(
             return True
         return False
 
-    title_score = fuzz.token_set_ratio(
-        str(article.get("normalized_title") or ""),
-        str(cluster.get("representative_title_normalized") or cluster.get("representative_title") or ""),
-    )
-    if title_score >= int(dedupe_config.get("title_cluster_threshold", 80)):  # type: ignore[union-attr]
+    if title_score >= title_threshold:
         return True
 
     if same_company_and_keyword(article, cluster):
