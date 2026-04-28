@@ -172,8 +172,8 @@ def test_daily_digest_groups_similar_article_titles(config, now, monkeypatch) ->
 
     assert "04.27 /" in message
     assert "(2건)" in message
-    assert "① SEOUL FN" in message
-    assert "② SISA JOURNAL" in message
+    assert "① 서울파이낸스" in message
+    assert "② 시사저널" in message
     assert "링크:" not in message
     assert 'href="https://www.sisajournal.com/news/articleView.html?idxno=371009"' in message
     assert 'href="https://www.seoulfn.com/news/articleView.html?idxno=627481"' in message

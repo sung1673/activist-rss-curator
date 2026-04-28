@@ -29,6 +29,17 @@ def resend_count() -> int:
         return 1
 
 
+def resend_guid() -> str:
+    return os.environ.get("TELEGRAM_RESEND_GUID", "").strip()
+
+
+def find_cluster_by_guid(state: dict[str, object], guid: str) -> dict[str, object] | None:
+    for cluster in state.get("published_clusters", []):
+        if isinstance(cluster, dict) and cluster_guid_value(cluster) == guid:
+            return cluster
+    return None
+
+
 def recent_sent_clusters(
     state: dict[str, object],
     config: dict[str, object],
@@ -56,7 +67,12 @@ def resend_recent_articles(root: Path | None = None) -> dict[str, int]:
         return {"telegram_resend_sent": 0, "telegram_resend_failed": 0}
 
     state = load_state(project_root / "data" / "state.json")
-    clusters = recent_sent_clusters(state, config, count=resend_count())
+    target_guid = resend_guid()
+    if target_guid:
+        cluster = find_cluster_by_guid(state, target_guid)
+        clusters = [cluster] if cluster and publishable_articles(cluster, config) else []
+    else:
+        clusters = recent_sent_clusters(state, config, count=resend_count())
     if not clusters:
         return {"telegram_resend_sent": 0, "telegram_resend_failed": 0}
 

@@ -47,6 +47,11 @@ on:
         required: false
         type: string
         default: "1"
+      resend_cluster_guid:
+        description: "Optional exact cluster guid to resend"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -110,6 +115,7 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.resend_recent_articles }}
         env:
           TELEGRAM_RESEND_COUNT: ${{ inputs.resend_recent_article_count }}
+          TELEGRAM_RESEND_GUID: ${{ inputs.resend_cluster_guid }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m curator.telegram_resend

@@ -13,7 +13,6 @@ from .rss_writer import (
     article_source_label,
     compact_text,
     display_article_title,
-    item_title,
     publishable_articles,
 )
 
@@ -71,14 +70,17 @@ def should_show_article_groups(groups: list[tuple[str, list[dict[str, object]]]]
     return len(named_groups) >= 2 or any(len(items) >= 2 for _label, items in named_groups)
 
 
-def article_summary_preview(article: dict[str, object], config: dict[str, object]) -> str:
-    max_chars = int(telegram_config(config).get("single_article_summary_chars", 30))
-    summary = compact_text(article.get("summary") or "", max_chars=max_chars)
-    title = str(article.get("clean_title") or article.get("title") or "").strip()
-    if title and summary.casefold().startswith(title.casefold()):
-        summary = summary[len(title) :].lstrip(" -:|")
-        summary = compact_text(summary, max_chars=max_chars)
-    return summary
+def article_link_label(article: dict[str, object], config: dict[str, object], *, single: bool) -> str:
+    settings = telegram_config(config)
+    max_chars = int(
+        settings.get(
+            "single_article_link_title_chars" if single else "multi_article_link_title_chars",
+            54 if single else 84,
+        )
+    )
+    source = article_source_label(article)
+    title = display_article_title(article, source)
+    return compact_text(title, max_chars=max_chars)
 
 
 def cluster_should_show_web_preview(cluster: dict[str, object], config: dict[str, object]) -> bool:
@@ -124,11 +126,11 @@ def build_telegram_message(cluster: dict[str, object], config: dict[str, object]
     articles = publishable_articles(cluster, config)
     count = len(articles)
 
-    lines = [] if count == 1 else [f"<b>{escape(item_title(cluster, count))}</b>", ""]
+    lines: list[str] = []
 
     shown_count = 0
     article_groups = grouped_articles(articles[:max_articles])
-    show_groups = should_show_article_groups(article_groups)
+    show_groups = bool(settings.get("show_article_groups", False)) and should_show_article_groups(article_groups)
     stop = False
     for group_label, group_items in article_groups:
         if stop:
@@ -140,14 +142,10 @@ def build_telegram_message(cluster: dict[str, object], config: dict[str, object]
                 break
             lines.append(group_line)
         for article in group_items:
-            source = article_source_label(article)
-            title = display_article_title(article, source)
-            label = compact_text(f"{source} - {title}", max_chars=110)
-            row = f"{shown_count + 1}. {html_link(label, article_link(article))}"
-            preview = article_summary_preview(article, config) if count == 1 else ""
+            label = article_link_label(article, config, single=count == 1)
+            link_text = html_link(label, article_link(article))
+            row = link_text if count == 1 else f"{shown_count + 1}. {link_text}"
             row_lines = [row]
-            if preview:
-                row_lines.append(f"본문: {escape(preview)}")
             candidate = "\n".join(lines + row_lines)
             if shown_count > 0 and len(candidate) > max_chars:
                 stop = True

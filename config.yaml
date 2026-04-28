@@ -139,7 +139,9 @@ telegram:
   parse_mode: "HTML"
   disable_web_page_preview: true
   single_article_web_page_preview: true
-  single_article_summary_chars: 30
+  single_article_link_title_chars: 54
+  multi_article_link_title_chars: 84
+  show_article_groups: false
   max_articles_per_message: 7
   max_message_chars: 3900
   send_old_on_first_run: false

@@ -57,21 +57,25 @@ def test_telegram_message_uses_html_links_without_visible_raw_urls(config, now) 
     assert "분류:" not in message
     assert "기준시각:" not in message
     assert "[ 지배구조·주주권 ]" not in message
-    assert "<b>고려아연</b>" in message
+    assert "<b>고려아연</b>" not in message
+    assert "테스트뉴스 - " not in message
+    assert "고려아연 소액주주, 사외이사 검찰 고발</a>" in message
     assert "1. " in message
     assert ">https://example.com/a<" not in message
     assert "\nhttps://example.com/a" not in message
     assert len(message) <= config["telegram"]["max_message_chars"]
 
 
-def test_single_article_message_omits_duplicate_heading_and_adds_preview(config, now) -> None:  # type: ignore[no-untyped-def]
+def test_single_article_message_only_shows_trimmed_article_link(config, now) -> None:  # type: ignore[no-untyped-def]
     cluster = single_article_cluster(config, now)
     message = build_telegram_message(cluster, config)
 
     assert not message.startswith("<b>")
     assert "<a href=" in message
     assert "금융당국, 상장회사 임원보수 공시 강화</a>" in message
-    assert "본문: 성과보수와 주식보상 공시가 투자자 보호 쟁점으로..." in message
+    assert "테스트뉴스 - " not in message
+    assert "1. " not in message
+    assert "본문:" not in message
 
 
 def test_telegram_initialization_does_not_backfill_old_clusters(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
