@@ -99,6 +99,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_links_total": 24,
         "max_links_per_section": 12,
         "max_links_per_group": 5,
+        "max_duplicate_links": 12,
         "link_title_max_chars": 54,
         "summary_bullets": 3,
         "summary_bullet_max_chars": 48,

@@ -80,6 +80,46 @@ def test_daily_digest_sends_once_in_morning_window(config, now, monkeypatch) -> 
     assert "오늘의 리뷰" in sent_messages[0]
 
 
+def test_daily_digest_includes_duplicate_records(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주주제안 이슈 지속")
+
+    sent_messages = []
+
+    def fake_send(_bot_token, _chat_id, text, _config):  # type: ignore[no-untyped-def]
+        sent_messages.append(text)
+        return {"ok": True, "message_id": 78, "chat_id": -100}
+
+    monkeypatch.setattr(summaries, "send_telegram_message", fake_send)
+    cluster = published_cluster(config, now)
+    digest_now = datetime(2026, 4, 26, 6, 30, tzinfo=ZoneInfo("Asia/Seoul"))
+    cluster["published_at"] = (digest_now - timedelta(minutes=30)).isoformat()
+    state = {
+        "published_clusters": [cluster],
+        "pending_clusters": [],
+        "articles": [
+            {
+                "status": "duplicate",
+                "title": "중복된 소액주주 기사",
+                "canonical_url": "https://example.com/duplicate",
+                "published_at": "2026-04-26T06:00:00+09:00",
+                "seen_at": "2026-04-26T06:10:00+09:00",
+            }
+        ],
+        "daily_digest_sent_dates": [],
+        "daily_digest_records": [],
+    }
+
+    assert publish_daily_digest_if_due(state, config, digest_now) == {
+        "daily_digest_sent": 1,
+        "daily_digest_failed": 0,
+    }
+    assert "<b>중복 기사</b>" in sent_messages[0]
+    assert 'href="https://example.com/duplicate"' in sent_messages[0]
+
+
 def test_daily_digest_skips_outside_send_hour(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     cluster = published_cluster(config, now)

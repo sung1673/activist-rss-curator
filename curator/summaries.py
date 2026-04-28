@@ -683,6 +683,56 @@ def render_duplicate_mentions(
     return ["", "<b>중복 확인</b>", *rows]
 
 
+def duplicate_record_datetime(record: dict[str, object], config: dict[str, object]) -> datetime | None:
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    for key in ("seen_at", "published_at"):
+        parsed = parse_datetime(str(record.get(key) or ""), timezone_name)
+        if parsed:
+            return parsed
+    return None
+
+
+def duplicate_records_in_window(
+    state: dict[str, object],
+    config: dict[str, object],
+    start_at: datetime,
+    end_at: datetime,
+) -> list[dict[str, object]]:
+    seen_urls: set[str] = set()
+    selected: list[tuple[datetime, dict[str, object]]] = []
+    for record in list(state.get("articles", [])):
+        if not isinstance(record, dict) or record.get("status") != "duplicate":
+            continue
+        url = str(record.get("canonical_url") or "")
+        if not url or url in seen_urls:
+            continue
+        record_dt = duplicate_record_datetime(record, config)
+        if not record_dt or not start_at <= record_dt <= end_at:
+            continue
+        seen_urls.add(url)
+        selected.append((record_dt, record))
+    selected.sort(key=lambda item: item[0], reverse=True)
+    max_links = int(digest_config(config).get("max_duplicate_links", 12))
+    return [record for _dt, record in selected[:max_links]]
+
+
+def render_daily_duplicate_section(
+    duplicate_records: list[dict[str, object]],
+    config: dict[str, object],
+) -> list[str]:
+    if not duplicate_records:
+        return []
+    title_max_chars = int(digest_config(config).get("link_title_max_chars", 54))
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    rows = ["", "<b>중복 기사</b>"]
+    for record in duplicate_records:
+        record_dt = duplicate_record_datetime(record, config)
+        date_label = record_dt.astimezone(ZoneInfo(timezone_name)).strftime("%m.%d") if record_dt else "--.--"
+        label = f"{date_label} / {compact_text(record.get('title') or '중복 기사', max_chars=title_max_chars)}"
+        rows.append(f"• {html_link(label, str(record.get('canonical_url') or ''))}")
+    return rows
+
+
 def generate_daily_digest_review(
     clusters: list[dict[str, object]],
     config: dict[str, object],
@@ -795,6 +845,7 @@ def build_daily_digest_messages(
     config: dict[str, object],
     now: datetime,
     start_at: datetime,
+    duplicate_records: list[dict[str, object]] | None = None,
 ) -> list[str]:
     max_chars = int(digest_config(config).get("max_message_chars", 3900))
     review = generate_daily_digest_review(clusters, config, start_at, now)
@@ -808,6 +859,7 @@ def build_daily_digest_messages(
         *summary_bullet_lines(review, config),
         "",
         *render_digest_link_sections(clusters, config),
+        *render_daily_duplicate_section(duplicate_records or [], config),
     ]
     message = "\n".join(line for line in lines if line is not None).strip()
     return split_plain_telegram_text(message, max_chars)
@@ -971,14 +1023,15 @@ def publish_daily_digest_if_due(
 
     start_at = now - timedelta(hours=int(settings.get("window_hours", 24)))
     clusters = digest_clusters_in_window(state, config, start_at, now)
-    if not clusters:
+    duplicate_records = duplicate_records_in_window(state, config, start_at, now)
+    if not clusters and not duplicate_records:
         return {"daily_digest_sent": 0, "daily_digest_failed": 0}
 
     bot_token = telegram_bot_token()
     chat_id = telegram_chat_id(config)
     message_ids: list[object] = []
     failed = 0
-    for message in build_daily_digest_messages(clusters, config, now, start_at):
+    for message in build_daily_digest_messages(clusters, config, now, start_at, duplicate_records):
         response = send_telegram_message(bot_token, chat_id, message, config)
         if response.get("ok"):
             message_ids.append(response.get("message_id"))
