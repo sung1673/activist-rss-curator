@@ -163,7 +163,7 @@ telegram:
   show_article_groups: false
   batch_digest_enabled: true
   batch_digest_min_clusters: 2
-  hourly_digest_window_hours: 1
+  hourly_digest_window_hours: 0.5
   skip_hours:
     - 6
     - 7

@@ -9,8 +9,8 @@ on:
       - "public/index.html"
       - "data/state.json"
   schedule:
-    # KST hourly, skipping 06:00 and 07:00 regular updates.
-    - cron: "0 0-20,23 * * *"
+    # KST every 30 minutes, skipping 06:00-07:59 regular updates.
+    - cron: "*/30 0-20,23 * * *"
     # KST 06:30 daily digest only.
     - cron: "30 21 * * *"
   workflow_dispatch:

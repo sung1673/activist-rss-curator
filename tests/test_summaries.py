@@ -8,6 +8,7 @@ from curator.summaries import (
     build_daily_digest_messages,
     build_hourly_update_messages,
     digest_article_is_english,
+    hourly_update_start_at,
     publish_daily_digest_if_due,
     publish_hourly_telegram_update,
     summary_bullet_lines,
@@ -344,6 +345,10 @@ def test_hourly_update_message_omits_duplicate_references(config, now, monkeypat
     assert "<b>중복 확인</b>" not in message
     assert 'href="https://example.com/old"' not in message
     assert "04.24 / 신한금융 밸류업 2.0 발표" not in message
+
+
+def test_hourly_update_window_is_thirty_minutes(config, now) -> None:  # type: ignore[no-untyped-def]
+    assert hourly_update_start_at(config, now) == now - timedelta(minutes=30)
 
 
 def test_summary_bullet_lines_uses_concise_endings(config) -> None:  # type: ignore[no-untyped-def]

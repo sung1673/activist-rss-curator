@@ -68,7 +68,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "show_article_groups": False,
         "batch_digest_enabled": True,
         "batch_digest_min_clusters": 2,
-        "hourly_digest_window_hours": 1,
+        "hourly_digest_window_hours": 0.5,
         "skip_hours": [6, 7],
         "max_duplicate_mentions": 3,
         "max_articles_per_message": 7,
