@@ -10,10 +10,9 @@ from .fetch import decode_google_news_links_in_state, fetch_google_alerts_articl
 from .relevance import relevance_details
 from .rss_writer import write_feed, write_index
 from .state import compact_state, load_state, remember_article, remember_rejected, save_state
-from .summaries import publish_daily_digest_if_due
+from .summaries import publish_daily_digest_if_due, publish_hourly_telegram_update
 from .telegram_publisher import (
     initialize_telegram_state,
-    publish_unsent_telegram_clusters,
 )
 
 
@@ -110,7 +109,7 @@ def run(root: Path | None = None) -> dict[str, int]:
             continue
         candidates.append(article)
 
-    unique_articles, duplicates = dedupe_articles(candidates, state, config)
+    unique_articles, duplicates = dedupe_articles(candidates, state, config, now)
     for duplicate in duplicates:
         remember_article(state, duplicate, "duplicate", now, str(duplicate.get("duplicate_reason") or "duplicate"))
     for article in unique_articles:
@@ -122,7 +121,7 @@ def run(root: Path | None = None) -> dict[str, int]:
     published_clusters = list(state.get("published_clusters", []))
     write_feed(project_root / "public" / "feed.xml", published_clusters, config, now)
     write_index(project_root / "public" / "index.html", state, config, now)
-    telegram_summary = publish_unsent_telegram_clusters(state, config, now)
+    telegram_summary = publish_hourly_telegram_update(state, config, now, duplicates)
     digest_summary = publish_daily_digest_if_due(state, config, now)
     save_state(state_path, state)
 

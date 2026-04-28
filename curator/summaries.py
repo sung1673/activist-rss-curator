@@ -20,11 +20,16 @@ from .rss_writer import (
     publishable_articles,
 )
 from .telegram_publisher import (
+    build_telegram_message,
+    cluster_should_show_web_preview,
+    mark_telegram_sent,
     send_telegram_message,
     telegram_bot_token,
     telegram_chat_id,
     html_link,
     telegram_is_configured,
+    telegram_config,
+    unsent_telegram_clusters,
 )
 
 
@@ -593,6 +598,51 @@ def render_digest_link_sections(
     return lines
 
 
+def duplicate_match_date_label(match: dict[str, object], config: dict[str, object]) -> str:
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    for key in ("published_at", "seen_at"):
+        parsed = parse_datetime(str(match.get(key) or ""), timezone_name)
+        if parsed:
+            return parsed.astimezone(ZoneInfo(timezone_name)).strftime("%m.%d")
+    return "--.--"
+
+
+def duplicate_match_link(match: dict[str, object], config: dict[str, object]) -> str:
+    title_max_chars = int(digest_config(config).get("link_title_max_chars", 54))
+    label = f"{duplicate_match_date_label(match, config)} / {compact_text(match.get('title') or '기존 기사', max_chars=title_max_chars)}"
+    return html_link(label, str(match.get("canonical_url") or ""))
+
+
+def render_duplicate_mentions(
+    duplicates: list[dict[str, object]],
+    config: dict[str, object],
+) -> list[str]:
+    settings = telegram_config(config)
+    max_duplicates = int(settings.get("max_duplicate_mentions", 3))
+    max_matches = 3
+    rows: list[str] = []
+    seen_titles: set[str] = set()
+    for duplicate in duplicates:
+        matches = [match for match in list(duplicate.get("duplicate_matches") or []) if isinstance(match, dict)]
+        if not matches:
+            continue
+        source = article_source_label(duplicate)
+        title = display_article_title(duplicate, source)
+        title = compact_text(title, max_chars=int(digest_config(config).get("link_title_max_chars", 54)))
+        if not title or title in seen_titles:
+            continue
+        seen_titles.add(title)
+        links = [duplicate_match_link(match, config) for match in matches[:max_matches]]
+        rows.append(f"• {escape(title, quote=False)}")
+        if links:
+            rows.append("  기존 " + " · ".join(links))
+        if len(seen_titles) >= max_duplicates:
+            break
+    if not rows:
+        return []
+    return ["", "<b>중복 확인</b>", *rows]
+
+
 def generate_daily_digest_review(
     clusters: list[dict[str, object]],
     config: dict[str, object],
@@ -616,6 +666,44 @@ def generate_daily_digest_review(
         "- 문장 끝은 '~했음', '~보였음', '~이어졌음'처럼 간결한 메모체로 작성\n"
         "- 링크, 기준시각, high/medium 같은 내부 분류는 쓰지 않음\n"
         "- 긴 해설, 번호 목록, 제목은 쓰지 않음\n\n"
+        f"기간: {format_kst(start_at, str(config.get('timezone') or 'Asia/Seoul'))} - {format_kst(end_at, str(config.get('timezone') or 'Asia/Seoul'))}\n\n"
+        f"{digest_context(clusters, config)}"
+    )
+    content = call_github_models(
+        system_prompt,
+        user_prompt,
+        model=model,
+        max_tokens=max_tokens,
+        config=config,
+    )
+    if content and has_meaningful_summary(content):
+        return content
+    return fallback_daily_digest(clusters, config, start_at, end_at)
+
+
+def generate_hourly_digest_review(
+    clusters: list[dict[str, object]],
+    config: dict[str, object],
+    start_at: datetime,
+    end_at: datetime,
+) -> str:
+    settings = ai_config(config)
+    if not settings.get("hourly_digest_enabled", True):
+        return fallback_daily_digest(clusters, config, start_at, end_at)
+    model = str(settings.get("hourly_digest_model") or settings.get("daily_digest_model") or "openai/gpt-4.1")
+    max_tokens = int(settings.get("hourly_digest_max_tokens", 180))
+    system_prompt = (
+        "당신은 한국 자본시장과 주주행동을 보는 시니어 에디터입니다. "
+        "최근 1시간 안팎에 새로 묶인 기사들을 바탕으로 텔레그램 업데이트용 요약만 한국어로 작성합니다. "
+        "투자 조언이나 매매 권유는 하지 말고, 기사에 없는 사실을 단정하지 마세요."
+    )
+    user_prompt = (
+        "아래 신규 기사 묶음을 바탕으로 시간당 업데이트의 맨 위 요약만 작성하세요.\n"
+        "- bullet point 2~3개만 작성\n"
+        "- 각 bullet은 45자 안팎으로 아주 짧게 작성\n"
+        "- 문장 끝은 '~했음', '~보였음', '~이어졌음'처럼 간결한 메모체로 작성\n"
+        "- 링크, 기준시각, high/medium 같은 내부 분류는 쓰지 않음\n"
+        "- 운영 설명이나 '몇 건 정리' 같은 말은 쓰지 않음\n\n"
         f"기간: {format_kst(start_at, str(config.get('timezone') or 'Asia/Seoul'))} - {format_kst(end_at, str(config.get('timezone') or 'Asia/Seoul'))}\n\n"
         f"{digest_context(clusters, config)}"
     )
@@ -681,6 +769,143 @@ def build_daily_digest_messages(
     ]
     message = "\n".join(line for line in lines if line is not None).strip()
     return split_plain_telegram_text(message, max_chars)
+
+
+def build_hourly_update_messages(
+    clusters: list[dict[str, object]],
+    config: dict[str, object],
+    now: datetime,
+    start_at: datetime,
+    duplicates: list[dict[str, object]] | None = None,
+) -> list[str]:
+    max_chars = int(digest_config(config).get("max_message_chars", 3900))
+    review = generate_hourly_digest_review(clusters, config, start_at, now)
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    title_label = now.astimezone(ZoneInfo(timezone_name)).strftime("%m.%d %H:%M")
+    lines = [
+        f"<b>거버넌스 업데이트 ({title_label})</b>",
+        "",
+        "<b>요약</b>",
+        *summary_bullet_lines(review, config),
+        "",
+        *render_digest_link_sections(clusters, config),
+        *render_duplicate_mentions(duplicates or [], config),
+    ]
+    message = "\n".join(line for line in lines if line is not None).strip()
+    return split_plain_telegram_text(message, max_chars)
+
+
+def telegram_hour_is_skipped(config: dict[str, object], now: datetime) -> bool:
+    skip_hours = {int(hour) for hour in telegram_config(config).get("skip_hours", [])}
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    return now.astimezone(ZoneInfo(timezone_name)).hour in skip_hours
+
+
+def hourly_update_start_at(config: dict[str, object], now: datetime) -> datetime:
+    hours = float(telegram_config(config).get("hourly_digest_window_hours", 1))
+    return now - timedelta(hours=hours)
+
+
+def should_batch_telegram_update(
+    clusters: list[dict[str, object]],
+    duplicates: list[dict[str, object]],
+    config: dict[str, object],
+) -> bool:
+    settings = telegram_config(config)
+    if not settings.get("batch_digest_enabled", True):
+        return False
+    min_clusters = int(settings.get("batch_digest_min_clusters", 2))
+    duplicate_mentions = [duplicate for duplicate in duplicates if duplicate.get("duplicate_matches")]
+    return len(clusters) >= min_clusters or (bool(clusters) and bool(duplicate_mentions))
+
+
+def mark_clusters_sent_with_response(
+    state: dict[str, object],
+    clusters: list[dict[str, object]],
+    now: datetime,
+    response: dict[str, object],
+) -> None:
+    for cluster in clusters:
+        mark_telegram_sent(state, cluster, now, response)
+
+
+def remember_telegram_digest(
+    state: dict[str, object],
+    now: datetime,
+    start_at: datetime,
+    clusters: list[dict[str, object]],
+    duplicates: list[dict[str, object]],
+    message_ids: list[object],
+) -> None:
+    state.setdefault("telegram_digest_records", [])
+    state["telegram_digest_records"].append(  # type: ignore[index, union-attr]
+        {
+            "sent_at": datetime_to_iso(now),
+            "window_start": datetime_to_iso(start_at),
+            "window_end": datetime_to_iso(now),
+            "cluster_guids": [str(cluster.get("guid") or "") for cluster in clusters],
+            "duplicate_count": len([duplicate for duplicate in duplicates if duplicate.get("duplicate_matches")]),
+            "message_ids": message_ids,
+        }
+    )
+
+
+def publish_hourly_telegram_update(
+    state: dict[str, object],
+    config: dict[str, object],
+    now: datetime,
+    duplicates: list[dict[str, object]] | None = None,
+) -> dict[str, int]:
+    if not telegram_is_configured(config) or telegram_hour_is_skipped(config, now):
+        return {"telegram_sent": 0, "telegram_failed": 0}
+
+    clusters = unsent_telegram_clusters(state, config)
+    duplicate_articles = list(duplicates or [])
+    if not clusters:
+        return {"telegram_sent": 0, "telegram_failed": 0}
+
+    bot_token = telegram_bot_token()
+    chat_id = telegram_chat_id(config)
+    if should_batch_telegram_update(clusters, duplicate_articles, config):
+        start_at = hourly_update_start_at(config, now)
+        message_ids: list[object] = []
+        failed = 0
+        first_response: dict[str, object] | None = None
+        for message in build_hourly_update_messages(clusters, config, now, start_at, duplicate_articles):
+            response = send_telegram_message(
+                bot_token,
+                chat_id,
+                message,
+                config,
+                disable_web_page_preview=True,
+            )
+            if response.get("ok"):
+                first_response = first_response or response
+                message_ids.append(response.get("message_id"))
+            else:
+                failed += 1
+        if failed:
+            return {"telegram_sent": len(message_ids), "telegram_failed": failed}
+        mark_clusters_sent_with_response(state, clusters, now, first_response or {})
+        remember_telegram_digest(state, now, start_at, clusters, duplicate_articles, message_ids)
+        return {"telegram_sent": len(clusters), "telegram_failed": 0}
+
+    sent = 0
+    failed = 0
+    for cluster in clusters:
+        response = send_telegram_message(
+            bot_token,
+            chat_id,
+            build_telegram_message(cluster, config),
+            config,
+            disable_web_page_preview=not cluster_should_show_web_preview(cluster, config),
+        )
+        if response.get("ok"):
+            mark_telegram_sent(state, cluster, now, response)
+            sent += 1
+        else:
+            failed += 1
+    return {"telegram_sent": sent, "telegram_failed": failed}
 
 
 def publish_daily_digest_if_due(

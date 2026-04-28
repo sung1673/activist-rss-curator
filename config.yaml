@@ -1,5 +1,14 @@
 feed_url: ""
 feeds:
+  - name: "google-news-행동주의"
+    category: "core"
+    url: "https://news.google.com/rss/search?q=%ED%96%89%EB%8F%99%EC%A3%BC%EC%9D%98+when%3A7d&hl=ko&gl=KR&ceid=KR:ko"
+  - name: "google-news-소액주주"
+    category: "core"
+    url: "https://news.google.com/rss/search?q=%EC%86%8C%EC%95%A1%EC%A3%BC%EC%A3%BC+when%3A7d&hl=ko&gl=KR&ceid=KR:ko"
+  - name: "google-news-밸류업-벨류업"
+    category: "core"
+    url: "https://news.google.com/rss/search?q=%28%EB%B0%B8%EB%A5%98%EC%97%85+OR+%EB%B2%A8%EB%A5%98%EC%97%85%29+when%3A7d&hl=ko&gl=KR&ceid=KR:ko"
   - name: "google-news-중복상장 모회사 주주 보호"
     category: "supplemental"
     url: "https://news.google.com/rss/search?q=%EC%A4%91%EB%B3%B5%EC%83%81%EC%9E%A5+%EB%AA%A8%ED%9A%8C%EC%82%AC+%EC%A3%BC%EC%A3%BC+%EB%B3%B4%ED%98%B8&hl=ko&gl=KR&ceid=KR:ko"
@@ -125,7 +134,16 @@ dedupe:
   title_duplicate_threshold: 92
   title_cluster_threshold: 80
   summary_cluster_threshold: 85
-  seen_history_days: 90
+  seen_history_days: 60
+  duplicate_mention_days: 30
+
+state:
+  retention_days: 60
+  max_articles: 5000
+  max_rejected_articles: 1000
+  max_published_clusters: 500
+  max_telegram_records: 1000
+  max_digest_records: 400
 
 publish:
   max_items_in_feed: 50
@@ -142,6 +160,13 @@ telegram:
   single_article_link_title_chars: 54
   multi_article_link_title_chars: 84
   show_article_groups: false
+  batch_digest_enabled: true
+  batch_digest_min_clusters: 2
+  hourly_digest_window_hours: 1
+  skip_hours:
+    - 6
+    - 7
+  max_duplicate_mentions: 3
   max_articles_per_message: 7
   max_message_chars: 3900
   send_old_on_first_run: false
@@ -155,6 +180,9 @@ ai:
   daily_digest_enabled: true
   daily_digest_model: "openai/gpt-4.1"
   daily_digest_max_tokens: 220
+  hourly_digest_enabled: true
+  hourly_digest_model: "openai/gpt-4.1"
+  hourly_digest_max_tokens: 180
 
 digest:
   enabled: true

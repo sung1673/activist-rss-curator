@@ -22,6 +22,7 @@ def default_state() -> dict[str, object]:
         "telegram_initialized_at": None,
         "daily_digest_sent_dates": [],
         "daily_digest_records": [],
+        "telegram_digest_records": [],
         "last_run_at": None,
     }
 
@@ -56,6 +57,7 @@ def load_state(path: str | Path) -> dict[str, object]:
         "telegram_send_records",
         "daily_digest_sent_dates",
         "daily_digest_records",
+        "telegram_digest_records",
     ):
         if not isinstance(state.get(key), list):
             state[key] = []
@@ -72,8 +74,26 @@ def save_state(path: str | Path, state: dict[str, object]) -> None:
     tmp_path.replace(state_path)
 
 
+def clean_duplicate_matches(article: dict[str, object]) -> list[dict[str, object]]:
+    matches: list[dict[str, object]] = []
+    for match in list(article.get("duplicate_matches") or [])[:3]:
+        if not isinstance(match, dict):
+            continue
+        matches.append(
+            {
+                "title": match.get("title") or "",
+                "canonical_url": match.get("canonical_url") or "",
+                "published_at": match.get("published_at") or None,
+                "seen_at": match.get("seen_at") or None,
+                "status": match.get("status") or None,
+                "similarity": match.get("similarity") or None,
+            }
+        )
+    return matches
+
+
 def article_record(article: dict[str, object], status: str, now: datetime, reason: str | None = None) -> dict[str, object]:
-    return {
+    record = {
         "title": article.get("clean_title") or article.get("title") or "",
         "normalized_title": article.get("normalized_title") or "",
         "canonical_url": article.get("canonical_url") or article.get("link") or "",
@@ -85,6 +105,10 @@ def article_record(article: dict[str, object], status: str, now: datetime, reaso
         "reason": reason,
         "relevance_level": article.get("relevance_level") or None,
     }
+    duplicate_matches = clean_duplicate_matches(article)
+    if duplicate_matches:
+        record["duplicate_matches"] = duplicate_matches
+    return record
 
 
 def remember_article(state: dict[str, object], article: dict[str, object], status: str, now: datetime, reason: str | None = None) -> None:
@@ -110,7 +134,9 @@ def remember_rejected(state: dict[str, object], article: dict[str, object], now:
 
 def compact_state(state: dict[str, object], config: dict[str, object], now: datetime) -> None:
     seen_days = int(config.get("dedupe", {}).get("seen_history_days", 90))  # type: ignore[union-attr]
-    cutoff = now - timedelta(days=seen_days)
+    state_config = config.get("state", {})
+    retention_days = int(state_config.get("retention_days", seen_days)) if isinstance(state_config, dict) else seen_days
+    cutoff = now - timedelta(days=retention_days)
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
 
     articles = [
@@ -118,19 +144,58 @@ def compact_state(state: dict[str, object], config: dict[str, object], now: date
         for article in state.get("articles", [])
         if (parse_datetime(str(article.get("seen_at") or ""), timezone_name) or now) >= cutoff
     ]
-    state["articles"] = articles[-5000:]
-    state["seen_url_hashes"] = sorted({str(article.get("canonical_url_hash")) for article in articles if article.get("canonical_url_hash")})
-    state["seen_title_hashes"] = sorted({str(article.get("title_hash")) for article in articles if article.get("title_hash")})
-    state["rejected_articles"] = list(state.get("rejected_articles", []))[-1000:]
-    state["published_clusters"] = list(state.get("published_clusters", []))[-500:]
-    state["telegram_send_records"] = list(state.get("telegram_send_records", []))[-1000:]
-    state["daily_digest_records"] = list(state.get("daily_digest_records", []))[-400:]
+    max_articles = int(state_config.get("max_articles", 5000)) if isinstance(state_config, dict) else 5000
+    max_rejected = int(state_config.get("max_rejected_articles", 1000)) if isinstance(state_config, dict) else 1000
+    max_published = int(state_config.get("max_published_clusters", 500)) if isinstance(state_config, dict) else 500
+    max_telegram_records = int(state_config.get("max_telegram_records", 1000)) if isinstance(state_config, dict) else 1000
+    max_digest_records = int(state_config.get("max_digest_records", 400)) if isinstance(state_config, dict) else 400
+
+    retained_articles = articles[-max_articles:]
+    state["articles"] = retained_articles
+    state["seen_url_hashes"] = sorted({str(article.get("canonical_url_hash")) for article in retained_articles if article.get("canonical_url_hash")})
+    state["seen_title_hashes"] = sorted({str(article.get("title_hash")) for article in retained_articles if article.get("title_hash")})
+    state["rejected_articles"] = [
+        article
+        for article in state.get("rejected_articles", [])
+        if (parse_datetime(str(article.get("seen_at") or ""), timezone_name) or now) >= cutoff
+    ][-max_rejected:]
+    state["published_clusters"] = [
+        cluster
+        for cluster in state.get("published_clusters", [])
+        if (
+            parse_datetime(str(cluster.get("published_at") or ""), timezone_name)
+            or parse_datetime(str(cluster.get("last_article_seen_at") or ""), timezone_name)
+            or now
+        )
+        >= cutoff
+    ][-max_published:]
+    state["telegram_send_records"] = [
+        record
+        for record in state.get("telegram_send_records", [])
+        if (parse_datetime(str(record.get("sent_at") or ""), timezone_name) or now) >= cutoff
+    ][-max_telegram_records:]
+    state["daily_digest_records"] = [
+        record
+        for record in state.get("daily_digest_records", [])
+        if (parse_datetime(str(record.get("sent_at") or ""), timezone_name) or now) >= cutoff
+    ][-max_digest_records:]
+    state["telegram_digest_records"] = [
+        record
+        for record in state.get("telegram_digest_records", [])
+        if (parse_datetime(str(record.get("sent_at") or ""), timezone_name) or now) >= cutoff
+    ][-max_digest_records:]
     digest_ids = {
         str(record.get("digest_id"))
         for record in state.get("daily_digest_records", [])
         if isinstance(record, dict) and record.get("digest_id")
     }
-    state["daily_digest_sent_dates"] = sorted(digest_ids | {str(value) for value in state.get("daily_digest_sent_dates", []) if value})
+    recent_digest_ids = set(digest_ids)
+    for value in state.get("daily_digest_sent_dates", []):
+        digest_id = str(value)
+        parsed = parse_datetime(digest_id, timezone_name) or parse_datetime(f"{digest_id}T00:00:00", timezone_name)
+        if parsed and parsed >= cutoff:
+            recent_digest_ids.add(digest_id)
+    state["daily_digest_sent_dates"] = sorted(recent_digest_ids)
     published_guids = {
         str(cluster.get("guid"))
         for cluster in state.get("published_clusters", [])
