@@ -83,7 +83,7 @@ Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 
 
 `config.yaml`에는 공개 가능한 Google News 보조 RSS를 두 축으로 추가할 수 있습니다.
 
-- 국내: 주주제안, 행동주의 주주, 소액주주연대, 지배구조, 밸류업, 자사주 소각, 스튜어드십, 자본시장법/상법, 임원보수 공시, 코너스톤 투자자, ETF 의결권, 해외부동산펀드 위험설명서 등
+- 국내: 주주제안, 행동주의 주주, 소액주주연대, 지배구조, 밸류업, 자사주 소각, 스튜어드십, 자본시장법/상법, 상장폐지, 임원보수 공시, 코너스톤 투자자, ETF 의결권, 해외부동산펀드 위험설명서 등
 - 해외: `South Korea Value-up Program`, `Korea discount`, `shareholder activism`, `proxy fight`, `activist investor campaign`, `open letter`, `universal proxy` 등
 
 보조 RSS 검색어는 개별 기업명이나 특정 펀드명보다 이벤트와 제도 키워드 중심으로 구성합니다. 기업명 후보 목록은 검색용이 아니라 이미 수집된 기사들을 묶기 위한 내부 규칙으로만 사용합니다.
