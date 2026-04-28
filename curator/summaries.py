@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from rapidfuzz import fuzz
 
+from .cluster import THEME_LABELS
 from .dates import datetime_to_iso, format_kst, parse_datetime
 from .rss_writer import (
     article_link,
@@ -436,6 +437,74 @@ def digest_group_title(group: list[dict[str, object]], config: dict[str, object]
     return compact_text(title, max_chars=title_max_chars)
 
 
+def feed_keyword_label(article: dict[str, object]) -> str:
+    feed_name = str(article.get("feed_name") or "").strip()
+    fallback_keywords = [
+        str(keyword)
+        for keyword in list(article.get("relevance_keywords") or article.get("topic_keywords") or article.get("keywords") or [])
+        if str(keyword).strip()
+    ]
+    if not feed_name or feed_name.startswith("env-feed"):
+        return compact_text(" ".join(fallback_keywords[:3]), max_chars=42)
+    for prefix in ("google-news-en-", "google-news-"):
+        if feed_name.startswith(prefix):
+            feed_name = feed_name[len(prefix) :]
+            break
+    feed_name = feed_name.replace("-", " ")
+    feed_name = re.sub(r"\s+", " ", feed_name).strip()
+    return compact_text(feed_name, max_chars=42)
+
+
+def digest_subcategory_label(article: dict[str, object], cluster: dict[str, object] | None = None) -> str:
+    theme_ids: list[str] = []
+    if cluster:
+        theme_ids.extend(str(value) for value in list(cluster.get("theme_groups") or []))
+        if cluster.get("theme_group"):
+            theme_ids.insert(0, str(cluster.get("theme_group")))
+    labels: list[str] = []
+    for theme_id in theme_ids:
+        label = THEME_LABELS.get(theme_id)
+        if label and label not in labels:
+            labels.append(label)
+    if labels:
+        return compact_text(" · ".join(labels[:2]), max_chars=46)
+
+    category = str(article.get("feed_category") or "").strip()
+    category_labels = {
+        "core": "핵심 주주권",
+        "supplemental": "보조 수집",
+        "capital_market": "자본시장 제도",
+        "global": "해외",
+        "env": "알림 피드",
+    }
+    return category_labels.get(category, "")
+
+
+def digest_group_meta_line(group: list[dict[str, object]], config: dict[str, object]) -> str:
+    subcategories: list[str] = []
+    feed_keywords: list[str] = []
+    for entry in group:
+        article = entry.get("article")
+        cluster = entry.get("cluster")
+        if not isinstance(article, dict):
+            continue
+        subcategory = digest_subcategory_label(cluster=cluster if isinstance(cluster, dict) else None, article=article)
+        if subcategory and subcategory not in subcategories:
+            subcategories.append(subcategory)
+        keyword = feed_keyword_label(article)
+        if keyword and keyword not in feed_keywords:
+            feed_keywords.append(keyword)
+
+    parts = []
+    if subcategories:
+        parts.append("소분류: " + " / ".join(subcategories[:2]))
+    if feed_keywords:
+        parts.append("수집키워드: " + " / ".join(feed_keywords[:2]))
+    if not parts:
+        return ""
+    return "  " + " · ".join(parts)
+
+
 def numbered_digest_source(index: int, source: str) -> str:
     number = CIRCLED_NUMBERS[index - 1] if index <= len(CIRCLED_NUMBERS) else f"{index}."
     label = DIGEST_SOURCE_LABEL_OVERRIDES.get(source, source)
@@ -445,11 +514,18 @@ def numbered_digest_source(index: int, source: str) -> str:
 def render_digest_entry_group(group: list[dict[str, object]], config: dict[str, object]) -> list[str]:
     if len(group) == 1:
         entry = group[0]
-        return [f"• {html_link(str(entry['label']), str(entry['url']))}"]
+        lines = [f"• {html_link(str(entry['label']), str(entry['url']))}"]
+        meta = digest_group_meta_line(group, config)
+        if meta:
+            lines.append(meta)
+        return lines
 
     max_links = int(digest_config(config).get("max_links_per_group", 5))
     title = digest_group_title(group, config)
     lines = [f"• {digest_group_date_label(group, config)} / {escape(title, quote=False)} ({len(group)}건)"]
+    meta = digest_group_meta_line(group, config)
+    if meta:
+        lines.append(meta)
     links = []
     for index, entry in enumerate(group[:max_links], start=1):
         article = entry["article"]
@@ -722,15 +798,84 @@ def render_daily_duplicate_section(
 ) -> list[str]:
     if not duplicate_records:
         return []
-    title_max_chars = int(digest_config(config).get("link_title_max_chars", 54))
-    timezone_name = str(config.get("timezone") or "Asia/Seoul")
     rows = ["", "<b>중복 기사</b>"]
+
+    entries: list[dict[str, object]] = []
     for record in duplicate_records:
-        record_dt = duplicate_record_datetime(record, config)
-        date_label = record_dt.astimezone(ZoneInfo(timezone_name)).strftime("%m.%d") if record_dt else "--.--"
-        label = f"{date_label} / {compact_text(record.get('title') or '중복 기사', max_chars=title_max_chars)}"
-        rows.append(f"• {html_link(label, str(record.get('canonical_url') or ''))}")
+        url = str(record.get("canonical_url") or "")
+        if not url:
+            continue
+        entries.append(
+            {
+                "article": record,
+                "cluster": {},
+                "datetime": duplicate_record_datetime(record, config),
+                "title": str(record.get("title") or "중복 기사"),
+                "tokens": digest_group_tokens(record),
+                "url": url,
+                "record": record,
+            }
+        )
+
+    for group in group_digest_entries(entries):
+        rows.extend(render_duplicate_entry_group(group, config))
     return rows
+
+
+def duplicate_related_articles(record: dict[str, object], config: dict[str, object]) -> list[dict[str, object]]:
+    candidates = [record]
+    candidates.extend(match for match in list(record.get("duplicate_matches") or []) if isinstance(match, dict))
+
+    articles: list[dict[str, object]] = []
+    seen_urls: set[str] = set()
+    max_links = int(digest_config(config).get("max_links_per_group", 5))
+    for candidate in candidates:
+        url = str(candidate.get("canonical_url") or "")
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        articles.append(candidate)
+        if len(articles) >= max_links:
+            break
+    return articles
+
+
+def render_duplicate_entry_group(group: list[dict[str, object]], config: dict[str, object]) -> list[str]:
+    title = digest_group_title(group, config)
+    group_count = len(group)
+    lines = [f"• {digest_group_date_label(group, config)} / {escape(title, quote=False)} (중복 {group_count}건)"]
+    meta = digest_group_meta_line(group, config)
+    if meta:
+        lines.append(meta)
+
+    linked_articles: list[dict[str, object]] = []
+    seen_urls: set[str] = set()
+    max_links = int(digest_config(config).get("max_links_per_group", 5))
+    for entry in group:
+        record = entry.get("record")
+        if not isinstance(record, dict):
+            continue
+        for article in duplicate_related_articles(record, config):
+            url = str(article.get("canonical_url") or "")
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            linked_articles.append(article)
+            if len(linked_articles) >= max_links:
+                break
+        if len(linked_articles) >= max_links:
+            break
+    if linked_articles:
+        links = [
+            html_link(numbered_digest_source(index, article_source_label(article)), str(article.get("canonical_url") or ""))
+            for index, article in enumerate(linked_articles, start=1)
+        ]
+        remaining = max(0, group_count - len(linked_articles))
+        line = "  " + " · ".join(links)
+        if remaining > 0:
+            line += f" · 외 {remaining}건"
+        lines.append(line)
+    return lines
 
 
 def generate_daily_digest_review(
@@ -1014,7 +1159,7 @@ def publish_daily_digest_if_due(
     send_window_minutes = int(settings.get("send_window_minutes", 59))
     send_start = now.replace(hour=send_hour, minute=send_minute, second=0, microsecond=0)
     send_end = send_start + timedelta(minutes=send_window_minutes)
-    if not send_start <= now < send_end:
+    if not daily_digest_is_forced() and not send_start <= now < send_end:
         return {"daily_digest_sent": 0, "daily_digest_failed": 0}
 
     digest_id = now.strftime("%Y-%m-%d")
@@ -1056,3 +1201,13 @@ def publish_daily_digest_if_due(
         }
     )
     return {"daily_digest_sent": len(message_ids), "daily_digest_failed": 0}
+
+
+def daily_digest_is_forced() -> bool:
+    forced = os.environ.get("CURATOR_FORCE_DAILY_DIGEST", "").casefold()
+    if forced in {"1", "true", "yes", "on"}:
+        return True
+    return (
+        os.environ.get("GITHUB_EVENT_NAME") == "schedule"
+        and os.environ.get("CURATOR_EVENT_SCHEDULE") == "30 21 * * *"
+    )

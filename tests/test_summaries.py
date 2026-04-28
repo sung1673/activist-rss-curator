@@ -105,8 +105,18 @@ def test_daily_digest_includes_duplicate_records(config, now, monkeypatch) -> No
                 "status": "duplicate",
                 "title": "중복된 소액주주 기사",
                 "canonical_url": "https://example.com/duplicate",
+                "feed_name": "google-news-주주제안",
+                "feed_category": "core",
                 "published_at": "2026-04-26T06:00:00+09:00",
                 "seen_at": "2026-04-26T06:10:00+09:00",
+                "duplicate_matches": [
+                    {
+                        "title": "중복된 소액주주 기사",
+                        "canonical_url": "https://www.mk.co.kr/news/stock/1",
+                        "source": "매일경제",
+                        "published_at": "2026-04-26T05:50:00+09:00",
+                    }
+                ],
             }
         ],
         "daily_digest_sent_dates": [],
@@ -119,6 +129,9 @@ def test_daily_digest_includes_duplicate_records(config, now, monkeypatch) -> No
     }
     assert "<b>중복 기사</b>" in sent_messages[0]
     assert 'href="https://example.com/duplicate"' in sent_messages[0]
+    assert "① EXAMPLE" in sent_messages[0]
+    assert "② 매일경제" in sent_messages[0]
+    assert "수집키워드: 주주제안" in sent_messages[0]
 
 
 def test_daily_digest_skips_after_send_window(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -169,6 +182,38 @@ def test_daily_digest_tolerates_delayed_github_schedule(config, now, monkeypatch
     assert "데일리 주주·자본시장 브리핑" in sent_messages[0]
 
 
+def test_daily_digest_forced_for_delayed_dedicated_schedule(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "schedule")
+    monkeypatch.setenv("CURATOR_EVENT_SCHEDULE", "30 21 * * *")
+    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주주권 이슈 지속")
+
+    sent_messages = []
+
+    def fake_send(_bot_token, _chat_id, text, _config):  # type: ignore[no-untyped-def]
+        sent_messages.append(text)
+        return {"ok": True, "message_id": 80, "chat_id": -100}
+
+    monkeypatch.setattr(summaries, "send_telegram_message", fake_send)
+    cluster = published_cluster(config, now)
+    digest_now = datetime(2026, 4, 26, 11, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    cluster["published_at"] = (digest_now - timedelta(minutes=30)).isoformat()
+    state = {
+        "published_clusters": [cluster],
+        "pending_clusters": [],
+        "daily_digest_sent_dates": [],
+        "daily_digest_records": [],
+    }
+
+    assert publish_daily_digest_if_due(state, config, digest_now) == {
+        "daily_digest_sent": 1,
+        "daily_digest_failed": 0,
+    }
+    assert "데일리 주주·자본시장 브리핑" in sent_messages[0]
+
+
 def test_daily_digest_lists_korean_and_english_article_links(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import summaries
 
@@ -186,6 +231,7 @@ def test_daily_digest_lists_korean_and_english_article_links(config, now, monkey
         summary="주주제안 자사주 소각",
     )
     domestic_article["feed_category"] = "supplemental"
+    domestic_article["feed_name"] = "google-news-자사주 소각 의무화 밸류업"
     global_article = make_article(
         "Shareholder activism proxy fight expands across global boards",
         "https://example.com/global",
@@ -194,6 +240,7 @@ def test_daily_digest_lists_korean_and_english_article_links(config, now, monkey
         summary="shareholder activism proxy fight",
     )
     global_article["feed_category"] = "global"
+    global_article["feed_name"] = "google-news-en-activist-proxy-fight"
     clusters = [
         {
             "representative_title": "국내 주주환원",
@@ -219,6 +266,8 @@ def test_daily_digest_lists_korean_and_english_article_links(config, now, monkey
     assert "04.26 /" in message
     assert "매우 길게 이어지는 기사 제목" not in message
     assert "..." in message
+    assert "소분류:" in message
+    assert "수집키워드: 자사주 소각 의무화 밸류업" in message
 
 
 def test_global_category_korean_article_stays_in_korean_section(config, now) -> None:  # type: ignore[no-untyped-def]

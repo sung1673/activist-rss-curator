@@ -83,6 +83,10 @@ def clean_duplicate_matches(article: dict[str, object]) -> list[dict[str, object
             {
                 "title": match.get("title") or "",
                 "canonical_url": match.get("canonical_url") or "",
+                "source": match.get("source") or None,
+                "feed_name": match.get("feed_name") or None,
+                "feed_category": match.get("feed_category") or None,
+                "relevance_keywords": match.get("relevance_keywords") or [],
                 "published_at": match.get("published_at") or None,
                 "seen_at": match.get("seen_at") or None,
                 "status": match.get("status") or None,
@@ -104,6 +108,10 @@ def article_record(article: dict[str, object], status: str, now: datetime, reaso
         "status": status,
         "reason": reason,
         "relevance_level": article.get("relevance_level") or None,
+        "source": article.get("source") or None,
+        "feed_name": article.get("feed_name") or None,
+        "feed_category": article.get("feed_category") or None,
+        "relevance_keywords": article.get("relevance_keywords") or [],
     }
     duplicate_matches = clean_duplicate_matches(article)
     if duplicate_matches:
