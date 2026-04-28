@@ -130,7 +130,9 @@ def build_telegram_message(cluster: dict[str, object], config: dict[str, object]
 
     shown_count = 0
     article_groups = grouped_articles(articles[:max_articles])
-    show_groups = bool(settings.get("show_article_groups", False)) and should_show_article_groups(article_groups)
+    show_groups = bool(settings.get("show_article_groups", False)) and should_show_article_groups(
+        article_groups
+    )
     stop = False
     for group_label, group_items in article_groups:
         if stop:
