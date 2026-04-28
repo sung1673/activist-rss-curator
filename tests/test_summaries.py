@@ -81,7 +81,7 @@ def test_daily_digest_sends_once_in_morning_window(config, now, monkeypatch) -> 
     assert "오늘의 리뷰" in sent_messages[0]
 
 
-def test_daily_digest_includes_duplicate_records(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_daily_digest_merges_duplicate_records_into_article_groups(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import summaries
 
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
@@ -127,11 +127,54 @@ def test_daily_digest_includes_duplicate_records(config, now, monkeypatch) -> No
         "daily_digest_sent": 1,
         "daily_digest_failed": 0,
     }
-    assert "<b>중복 기사</b>" in sent_messages[0]
+    assert "<b>중복 기사</b>" not in sent_messages[0]
+    assert "(중복" not in sent_messages[0]
     assert 'href="https://example.com/duplicate"' in sent_messages[0]
+    assert "(2건)" in sent_messages[0]
     assert "① EXAMPLE" in sent_messages[0]
     assert "② 매일경제" in sent_messages[0]
-    assert "수집키워드: 주주제안" in sent_messages[0]
+    assert "수집키워드" not in sent_messages[0]
+
+
+def test_daily_digest_single_duplicate_record_renders_as_single_link(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주주제안 이슈 지속")
+
+    sent_messages = []
+
+    def fake_send(_bot_token, _chat_id, text, _config):  # type: ignore[no-untyped-def]
+        sent_messages.append(text)
+        return {"ok": True, "message_id": 81, "chat_id": -100}
+
+    monkeypatch.setattr(summaries, "send_telegram_message", fake_send)
+    digest_now = datetime(2026, 4, 26, 6, 30, tzinfo=ZoneInfo("Asia/Seoul"))
+    state = {
+        "published_clusters": [],
+        "pending_clusters": [],
+        "articles": [
+            {
+                "status": "duplicate",
+                "title": "소액주주 주주제안 관련 기사",
+                "canonical_url": "https://example.com/single-duplicate",
+                "published_at": "2026-04-26T06:00:00+09:00",
+                "seen_at": "2026-04-26T06:10:00+09:00",
+                "duplicate_matches": [],
+            }
+        ],
+        "daily_digest_sent_dates": [],
+        "daily_digest_records": [],
+    }
+
+    assert publish_daily_digest_if_due(state, config, digest_now) == {
+        "daily_digest_sent": 1,
+        "daily_digest_failed": 0,
+    }
+    assert 'href="https://example.com/single-duplicate"' in sent_messages[0]
+    assert "①" not in sent_messages[0]
+    assert "(1건)" not in sent_messages[0]
+    assert "중복 기사" not in sent_messages[0]
 
 
 def test_daily_digest_skips_after_send_window(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -266,8 +309,8 @@ def test_daily_digest_lists_korean_and_english_article_links(config, now, monkey
     assert "04.26 /" in message
     assert "매우 길게 이어지는 기사 제목" not in message
     assert "..." in message
-    assert "소분류:" in message
-    assert "수집키워드: 자사주 소각 의무화 밸류업" in message
+    assert "소분류:" not in message
+    assert "수집키워드" not in message
 
 
 def test_global_category_korean_article_stays_in_korean_section(config, now) -> None:  # type: ignore[no-untyped-def]

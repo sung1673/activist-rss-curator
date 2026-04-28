@@ -10,7 +10,6 @@ from zoneinfo import ZoneInfo
 import httpx
 from rapidfuzz import fuzz
 
-from .cluster import THEME_LABELS
 from .dates import datetime_to_iso, format_kst, parse_datetime
 from .rss_writer import (
     article_link,
@@ -319,11 +318,64 @@ def digest_group_tokens(article: dict[str, object]) -> set[str]:
     return tokens
 
 
+def digest_entry_for_article(
+    article: dict[str, object],
+    cluster: dict[str, object],
+    config: dict[str, object],
+    seen_urls: set[str],
+) -> dict[str, object] | None:
+    url = article_link(article)
+    if not url or url in seen_urls:
+        return None
+    seen_urls.add(url)
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    article_dt = digest_article_datetime(article, cluster, timezone_name)
+    return {
+        "article": article,
+        "cluster": cluster,
+        "datetime": article_dt,
+        "label": digest_article_label(article, cluster, config),
+        "title": digest_article_title(article),
+        "tokens": digest_group_tokens(article),
+        "url": url,
+    }
+
+
+def duplicate_record_candidates(record: dict[str, object]) -> list[dict[str, object]]:
+    candidates = [record]
+    candidates.extend(match for match in list(record.get("duplicate_matches") or []) if isinstance(match, dict))
+
+    articles: list[dict[str, object]] = []
+    seen_urls: set[str] = set()
+    for candidate in candidates:
+        url = str(candidate.get("canonical_url") or candidate.get("link") or "")
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        articles.append(candidate)
+    return articles
+
+
+def add_duplicate_entries(
+    entries: dict[str, list[dict[str, object]]],
+    duplicate_records: list[dict[str, object]],
+    config: dict[str, object],
+    seen_urls: set[str],
+) -> None:
+    for record in duplicate_records:
+        for article in duplicate_record_candidates(record):
+            entry = digest_entry_for_article(article, {}, config, seen_urls)
+            if not entry:
+                continue
+            section = "global" if digest_article_is_english(article) else "domestic"
+            entries[section].append(entry)
+
+
 def digest_article_entries(
     clusters: list[dict[str, object]],
     config: dict[str, object],
+    duplicate_records: list[dict[str, object]] | None = None,
 ) -> dict[str, list[dict[str, object]]]:
-    timezone_name = str(config.get("timezone") or "Asia/Seoul")
     settings = digest_config(config)
     max_articles_per_cluster = int(settings.get("max_articles_per_cluster", 2))
     entries: dict[str, list[dict[str, object]]] = {"domestic": [], "global": []}
@@ -334,24 +386,14 @@ def digest_article_entries(
         for article in publishable_articles(cluster, config):
             if added_for_cluster >= max_articles_per_cluster:
                 break
-            url = article_link(article)
-            if not url or url in seen_urls:
+            entry = digest_entry_for_article(article, cluster, config, seen_urls)
+            if not entry:
                 continue
-            seen_urls.add(url)
-            article_dt = digest_article_datetime(article, cluster, timezone_name)
             section = "global" if digest_article_is_english(article) else "domestic"
-            entries[section].append(
-                {
-                    "article": article,
-                    "cluster": cluster,
-                    "datetime": article_dt,
-                    "label": digest_article_label(article, cluster, config),
-                    "title": digest_article_title(article),
-                    "tokens": digest_group_tokens(article),
-                    "url": url,
-                }
-            )
+            entries[section].append(entry)
             added_for_cluster += 1
+
+    add_duplicate_entries(entries, duplicate_records or [], config, seen_urls)
 
     for section_entries in entries.values():
         section_entries.sort(key=lambda entry: entry["datetime"] or datetime.min.replace(tzinfo=ZoneInfo("UTC")), reverse=True)
@@ -361,8 +403,9 @@ def digest_article_entries(
 def limited_digest_article_entries(
     clusters: list[dict[str, object]],
     config: dict[str, object],
+    duplicate_records: list[dict[str, object]] | None = None,
 ) -> dict[str, list[dict[str, object]]]:
-    entries = digest_article_entries(clusters, config)
+    entries = digest_article_entries(clusters, config, duplicate_records)
     settings = digest_config(config)
     max_per_section = int(settings.get("max_links_per_section", 12))
     max_total = int(settings.get("max_links_total", 24))
@@ -437,74 +480,6 @@ def digest_group_title(group: list[dict[str, object]], config: dict[str, object]
     return compact_text(title, max_chars=title_max_chars)
 
 
-def feed_keyword_label(article: dict[str, object]) -> str:
-    feed_name = str(article.get("feed_name") or "").strip()
-    fallback_keywords = [
-        str(keyword)
-        for keyword in list(article.get("relevance_keywords") or article.get("topic_keywords") or article.get("keywords") or [])
-        if str(keyword).strip()
-    ]
-    if not feed_name or feed_name.startswith("env-feed"):
-        return compact_text(" ".join(fallback_keywords[:3]), max_chars=42)
-    for prefix in ("google-news-en-", "google-news-"):
-        if feed_name.startswith(prefix):
-            feed_name = feed_name[len(prefix) :]
-            break
-    feed_name = feed_name.replace("-", " ")
-    feed_name = re.sub(r"\s+", " ", feed_name).strip()
-    return compact_text(feed_name, max_chars=42)
-
-
-def digest_subcategory_label(article: dict[str, object], cluster: dict[str, object] | None = None) -> str:
-    theme_ids: list[str] = []
-    if cluster:
-        theme_ids.extend(str(value) for value in list(cluster.get("theme_groups") or []))
-        if cluster.get("theme_group"):
-            theme_ids.insert(0, str(cluster.get("theme_group")))
-    labels: list[str] = []
-    for theme_id in theme_ids:
-        label = THEME_LABELS.get(theme_id)
-        if label and label not in labels:
-            labels.append(label)
-    if labels:
-        return compact_text(" · ".join(labels[:2]), max_chars=46)
-
-    category = str(article.get("feed_category") or "").strip()
-    category_labels = {
-        "core": "핵심 주주권",
-        "supplemental": "보조 수집",
-        "capital_market": "자본시장 제도",
-        "global": "해외",
-        "env": "알림 피드",
-    }
-    return category_labels.get(category, "")
-
-
-def digest_group_meta_line(group: list[dict[str, object]], config: dict[str, object]) -> str:
-    subcategories: list[str] = []
-    feed_keywords: list[str] = []
-    for entry in group:
-        article = entry.get("article")
-        cluster = entry.get("cluster")
-        if not isinstance(article, dict):
-            continue
-        subcategory = digest_subcategory_label(cluster=cluster if isinstance(cluster, dict) else None, article=article)
-        if subcategory and subcategory not in subcategories:
-            subcategories.append(subcategory)
-        keyword = feed_keyword_label(article)
-        if keyword and keyword not in feed_keywords:
-            feed_keywords.append(keyword)
-
-    parts = []
-    if subcategories:
-        parts.append("소분류: " + " / ".join(subcategories[:2]))
-    if feed_keywords:
-        parts.append("수집키워드: " + " / ".join(feed_keywords[:2]))
-    if not parts:
-        return ""
-    return "  " + " · ".join(parts)
-
-
 def numbered_digest_source(index: int, source: str) -> str:
     number = CIRCLED_NUMBERS[index - 1] if index <= len(CIRCLED_NUMBERS) else f"{index}."
     label = DIGEST_SOURCE_LABEL_OVERRIDES.get(source, source)
@@ -514,18 +489,11 @@ def numbered_digest_source(index: int, source: str) -> str:
 def render_digest_entry_group(group: list[dict[str, object]], config: dict[str, object]) -> list[str]:
     if len(group) == 1:
         entry = group[0]
-        lines = [f"• {html_link(str(entry['label']), str(entry['url']))}"]
-        meta = digest_group_meta_line(group, config)
-        if meta:
-            lines.append(meta)
-        return lines
+        return [f"• {html_link(str(entry['label']), str(entry['url']))}"]
 
     max_links = int(digest_config(config).get("max_links_per_group", 5))
     title = digest_group_title(group, config)
     lines = [f"• {digest_group_date_label(group, config)} / {escape(title, quote=False)} ({len(group)}건)"]
-    meta = digest_group_meta_line(group, config)
-    if meta:
-        lines.append(meta)
     links = []
     for index, entry in enumerate(group[:max_links], start=1):
         article = entry["article"]
@@ -698,8 +666,9 @@ def has_meaningful_summary(text: str) -> bool:
 def render_digest_link_sections(
     clusters: list[dict[str, object]],
     config: dict[str, object],
+    duplicate_records: list[dict[str, object]] | None = None,
 ) -> list[str]:
-    entries = limited_digest_article_entries(clusters, config)
+    entries = limited_digest_article_entries(clusters, config, duplicate_records)
     labels = {"domestic": "국문", "global": "영문"}
     lines: list[str] = []
     for section_key in ("domestic", "global"):
@@ -712,51 +681,6 @@ def render_digest_link_sections(
         for group in group_digest_entries(section_entries):
             lines.extend(render_digest_entry_group(group, config))
     return lines
-
-
-def duplicate_match_date_label(match: dict[str, object], config: dict[str, object]) -> str:
-    timezone_name = str(config.get("timezone") or "Asia/Seoul")
-    for key in ("published_at", "seen_at"):
-        parsed = parse_datetime(str(match.get(key) or ""), timezone_name)
-        if parsed:
-            return parsed.astimezone(ZoneInfo(timezone_name)).strftime("%m.%d")
-    return "--.--"
-
-
-def duplicate_match_link(match: dict[str, object], config: dict[str, object]) -> str:
-    title_max_chars = int(digest_config(config).get("link_title_max_chars", 54))
-    label = f"{duplicate_match_date_label(match, config)} / {compact_text(match.get('title') or '기존 기사', max_chars=title_max_chars)}"
-    return html_link(label, str(match.get("canonical_url") or ""))
-
-
-def render_duplicate_mentions(
-    duplicates: list[dict[str, object]],
-    config: dict[str, object],
-) -> list[str]:
-    settings = telegram_config(config)
-    max_duplicates = int(settings.get("max_duplicate_mentions", 3))
-    max_matches = 3
-    rows: list[str] = []
-    seen_titles: set[str] = set()
-    for duplicate in duplicates:
-        matches = [match for match in list(duplicate.get("duplicate_matches") or []) if isinstance(match, dict)]
-        if not matches:
-            continue
-        source = article_source_label(duplicate)
-        title = display_article_title(duplicate, source)
-        title = compact_text(title, max_chars=int(digest_config(config).get("link_title_max_chars", 54)))
-        if not title or title in seen_titles:
-            continue
-        seen_titles.add(title)
-        links = [duplicate_match_link(match, config) for match in matches[:max_matches]]
-        rows.append(f"• {escape(title, quote=False)}")
-        if links:
-            rows.append("  기존 " + " · ".join(links))
-        if len(seen_titles) >= max_duplicates:
-            break
-    if not rows:
-        return []
-    return ["", "<b>중복 확인</b>", *rows]
 
 
 def duplicate_record_datetime(record: dict[str, object], config: dict[str, object]) -> datetime | None:
@@ -790,92 +714,6 @@ def duplicate_records_in_window(
     selected.sort(key=lambda item: item[0], reverse=True)
     max_links = int(digest_config(config).get("max_duplicate_links", 12))
     return [record for _dt, record in selected[:max_links]]
-
-
-def render_daily_duplicate_section(
-    duplicate_records: list[dict[str, object]],
-    config: dict[str, object],
-) -> list[str]:
-    if not duplicate_records:
-        return []
-    rows = ["", "<b>중복 기사</b>"]
-
-    entries: list[dict[str, object]] = []
-    for record in duplicate_records:
-        url = str(record.get("canonical_url") or "")
-        if not url:
-            continue
-        entries.append(
-            {
-                "article": record,
-                "cluster": {},
-                "datetime": duplicate_record_datetime(record, config),
-                "title": str(record.get("title") or "중복 기사"),
-                "tokens": digest_group_tokens(record),
-                "url": url,
-                "record": record,
-            }
-        )
-
-    for group in group_digest_entries(entries):
-        rows.extend(render_duplicate_entry_group(group, config))
-    return rows
-
-
-def duplicate_related_articles(record: dict[str, object], config: dict[str, object]) -> list[dict[str, object]]:
-    candidates = [record]
-    candidates.extend(match for match in list(record.get("duplicate_matches") or []) if isinstance(match, dict))
-
-    articles: list[dict[str, object]] = []
-    seen_urls: set[str] = set()
-    max_links = int(digest_config(config).get("max_links_per_group", 5))
-    for candidate in candidates:
-        url = str(candidate.get("canonical_url") or "")
-        if not url or url in seen_urls:
-            continue
-        seen_urls.add(url)
-        articles.append(candidate)
-        if len(articles) >= max_links:
-            break
-    return articles
-
-
-def render_duplicate_entry_group(group: list[dict[str, object]], config: dict[str, object]) -> list[str]:
-    title = digest_group_title(group, config)
-    group_count = len(group)
-    lines = [f"• {digest_group_date_label(group, config)} / {escape(title, quote=False)} (중복 {group_count}건)"]
-    meta = digest_group_meta_line(group, config)
-    if meta:
-        lines.append(meta)
-
-    linked_articles: list[dict[str, object]] = []
-    seen_urls: set[str] = set()
-    max_links = int(digest_config(config).get("max_links_per_group", 5))
-    for entry in group:
-        record = entry.get("record")
-        if not isinstance(record, dict):
-            continue
-        for article in duplicate_related_articles(record, config):
-            url = str(article.get("canonical_url") or "")
-            if not url or url in seen_urls:
-                continue
-            seen_urls.add(url)
-            linked_articles.append(article)
-            if len(linked_articles) >= max_links:
-                break
-        if len(linked_articles) >= max_links:
-            break
-    if linked_articles:
-        links = [
-            html_link(numbered_digest_source(index, article_source_label(article)), str(article.get("canonical_url") or ""))
-            for index, article in enumerate(linked_articles, start=1)
-        ]
-        remaining = max(0, group_count - len(linked_articles))
-        line = "  " + " · ".join(links)
-        if remaining > 0:
-            line += f" · 외 {remaining}건"
-        lines.append(line)
-    return lines
 
 
 def generate_daily_digest_review(
@@ -1003,8 +841,7 @@ def build_daily_digest_messages(
         "<b>요약</b>",
         *summary_bullet_lines(review, config),
         "",
-        *render_digest_link_sections(clusters, config),
-        *render_daily_duplicate_section(duplicate_records or [], config),
+        *render_digest_link_sections(clusters, config, duplicate_records or []),
     ]
     message = "\n".join(line for line in lines if line is not None).strip()
     return split_plain_telegram_text(message, max_chars)
