@@ -92,7 +92,7 @@ Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 
 
 `.github/workflows/build-feed.yml`은 다음을 수행합니다.
 
-- KST 기준 30분마다 실행
+- KST 기준 30분마다 실행 (`:05`, `:35`)
 - KST 06:00, 07:00 실행은 건너뜀
 - Python 3.12 설치
 - `requirements.txt` 설치
@@ -154,7 +154,7 @@ bot 연결만 즉시 확인하려면 Actions의 `Build curated RSS feed` 수동 
 
 일반 단일 기사 메시지는 AI를 호출하지 않고 제목 링크만 발행합니다. 여러 기사 묶음과 매일 아침 리뷰는 GitHub Models를 사용할 수 있으며, 기본 모델은 `openai/gpt-4.1`입니다.
 
-데일리 리뷰는 KST 06:30에 별도 schedule로 실행되며, 최근 24시간의 published/pending cluster를 모아 `데일리 거버넌스 리뷰`를 전송합니다. 일반 업데이트는 30분마다 실행하되 KST 06:00~07:59에는 건너뜁니다. 리뷰와 업데이트는 짧은 bullet 요약과 국문/영문 기사 링크 목록으로 구성됩니다. 비슷한 제목과 핵심 토큰을 가진 기사는 대표 제목 아래 여러 언론사 링크로 묶어 보여줍니다. 이미 보낸 날짜는 `data/state.json`의 `daily_digest_sent_dates`에 저장해 중복 전송을 막습니다.
+데일리 리뷰는 KST 06:30에 별도 schedule로 실행되며, 최근 24시간의 published/pending cluster를 모아 `데일리 거버넌스 리뷰`를 전송합니다. 일반 업데이트는 매시 `:05`, `:35`에 실행하되 KST 06:00~07:59에는 건너뜁니다. GitHub Actions schedule은 혼잡 시간대에 지연될 수 있으므로 정각 대신 약간 비껴 실행합니다. 리뷰와 업데이트는 짧은 bullet 요약과 국문/영문 기사 링크 목록으로 구성됩니다. 비슷한 제목과 핵심 토큰을 가진 기사는 대표 제목 아래 여러 언론사 링크로 묶어 보여줍니다. 이미 보낸 날짜는 `data/state.json`의 `daily_digest_sent_dates`에 저장해 중복 전송을 막습니다.
 
 ## 운영 정책
 
