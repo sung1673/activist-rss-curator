@@ -853,7 +853,7 @@ def build_daily_digest_messages(
     start_label = start_at.astimezone(ZoneInfo(timezone_name)).strftime("%m.%d")
     end_label = now.astimezone(ZoneInfo(timezone_name)).strftime("%m.%d")
     lines = [
-        f"<b>데일리 거버넌스 리뷰 ({start_label}-{end_label})</b>",
+        f"<b>데일리 주주·자본시장 브리핑 ({start_label}-{end_label})</b>",
         "",
         "<b>요약</b>",
         *summary_bullet_lines(review, config),
@@ -877,7 +877,7 @@ def build_hourly_update_messages(
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
     title_label = now.astimezone(ZoneInfo(timezone_name)).strftime("%m.%d %H:%M")
     lines = [
-        f"<b>거버넌스 업데이트 ({title_label})</b>",
+        f"<b>주주·자본시장 브리핑 ({title_label})</b>",
         "",
         "<b>요약</b>",
         *summary_bullet_lines(review, config),

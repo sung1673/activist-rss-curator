@@ -28,7 +28,7 @@ AI 데일리 리뷰 구조:
 Google Alerts/Google News RSS -> GitHub Actions 정제 -> GitHub Models daily digest -> Telegram Bot API -> Telegram channel
 ```
 
-RSS item 1개가 cluster 1개이며, item description 안에 유사 기사 여러 링크가 들어갑니다. 직접 발행을 켜면 Telegram 메시지는 HTML 링크 서식을 사용해 긴 기사 URL 대신 클릭 가능한 기사 제목으로 표시합니다. 한 실행에서 여러 cluster가 발행될 때는 개별 메시지로 흩뿌리지 않고 digest 스타일의 `거버넌스 업데이트` 한 묶음으로 발행합니다.
+RSS item 1개가 cluster 1개이며, item description 안에 유사 기사 여러 링크가 들어갑니다. 직접 발행을 켜면 Telegram 메시지는 HTML 링크 서식을 사용해 긴 기사 URL 대신 클릭 가능한 기사 제목으로 표시합니다. 한 실행에서 여러 cluster가 발행될 때는 개별 메시지로 흩뿌리지 않고 digest 스타일의 `주주·자본시장 브리핑` 한 묶음으로 발행합니다.
 
 ## 설치
 
@@ -83,7 +83,7 @@ Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 
 
 `config.yaml`에는 공개 가능한 Google News 보조 RSS를 두 축으로 추가할 수 있습니다.
 
-- 국내: 주주제안, 행동주의 주주, 소액주주연대, 지배구조, 밸류업, 자사주 소각, 스튜어드십, 자본시장법/상법, 상장폐지, 임원보수 공시, 코너스톤 투자자, ETF 의결권, 해외부동산펀드 위험설명서 등
+- 국내: 주주제안, 행동주의 주주, 소액주주연대, 지배구조, 밸류업, 자사주 소각, 스튜어드십, 금융회사 지배구조, 사외이사, 성과보상, 자본시장법/상법, 상장폐지, 상장적격성 실질심사, 거래정지 개선기간, 의무공개매수, 임원보수 공시, 코너스톤 투자자, ETF 의결권, 해외부동산펀드 위험설명서 등
 - 해외: `South Korea Value-up Program`, `Korea discount`, `shareholder activism`, `proxy fight`, `activist investor campaign`, `open letter`, `universal proxy` 등
 
 보조 RSS 검색어는 개별 기업명이나 특정 펀드명보다 이벤트와 제도 키워드 중심으로 구성합니다. 기업명 후보 목록은 검색용이 아니라 이미 수집된 기사들을 묶기 위한 내부 규칙으로만 사용합니다.
@@ -136,7 +136,7 @@ RSS 본문에는 기사 1건을 한 줄로 표시합니다. rss2tg_bot이 본문
 
 직접 발행을 사용하면 `rss2tg_bot` 없이 이 프로젝트가 Telegram Bot API로 채널에 메시지를 보냅니다. 메시지는 긴 URL을 직접 노출하지 않고 HTML 링크로 표시합니다. 키워드 기반 섹션 라벨은 오분류 가능성이 있어 메시지에 표시하지 않으며, 내부 분류값이나 기준시각, 대표기사보기 링크도 표시하지 않습니다. 단일 기사 업데이트는 제목 링크만 짧게 표시하고 Telegram 웹페이지 preview가 표시되도록 전송합니다.
 
-한 실행에서 발행할 cluster가 2개 이상이면 `거버넌스 업데이트` 형식으로 묶어서 전송합니다. 이 묶음 메시지는 GitHub Models의 `openai/gpt-4.1`을 사용해 2~3개 bullet 요약을 만들고, 국문/영문 기사 링크를 digest처럼 정리합니다. 요약은 `임박`, `부각`, `지속`처럼 짧은 명사형으로 끝나도록 후처리합니다. AI 호출이 실패하면 규칙 기반 fallback 요약으로 계속 발행합니다.
+한 실행에서 발행할 cluster가 2개 이상이면 `주주·자본시장 브리핑` 형식으로 묶어서 전송합니다. 이 묶음 메시지는 GitHub Models의 `openai/gpt-4.1`을 사용해 2~3개 bullet 요약을 만들고, 국문/영문 기사 링크를 digest처럼 정리합니다. 요약은 `임박`, `부각`, `지속`처럼 짧은 명사형으로 끝나도록 후처리합니다. AI 호출이 실패하면 규칙 기반 fallback 요약으로 계속 발행합니다.
 
 중복으로 걸러진 기사는 시간당 업데이트에 따로 표시하지 않습니다. 중복 기사 기록은 state에 남겨 두고, 데일리 리뷰의 `중복 기사` 섹션에만 모아 보여줍니다.
 
@@ -154,7 +154,7 @@ bot 연결만 즉시 확인하려면 Actions의 `Build curated RSS feed` 수동 
 
 일반 단일 기사 메시지는 AI를 호출하지 않고 제목 링크만 발행합니다. 여러 기사 묶음과 매일 아침 리뷰는 GitHub Models를 사용할 수 있으며, 기본 모델은 `openai/gpt-4.1`입니다.
 
-데일리 리뷰는 KST 06:30에 별도 schedule로 실행되며, 최근 24시간의 published/pending cluster를 모아 `데일리 거버넌스 리뷰`를 전송합니다. 일반 업데이트는 매시 `:05`, `:35`에 실행하되 KST 06:00~07:59에는 건너뜁니다. GitHub Actions schedule은 혼잡 시간대에 지연될 수 있으므로 정각 대신 약간 비껴 실행합니다. 리뷰와 업데이트는 짧은 bullet 요약과 국문/영문 기사 링크 목록으로 구성됩니다. 비슷한 제목과 핵심 토큰을 가진 기사는 대표 제목 아래 여러 언론사 링크로 묶어 보여줍니다. 이미 보낸 날짜는 `data/state.json`의 `daily_digest_sent_dates`에 저장해 중복 전송을 막습니다.
+데일리 리뷰는 KST 06:30에 별도 schedule로 실행되며, 최근 24시간의 published/pending cluster를 모아 `데일리 주주·자본시장 브리핑`을 전송합니다. 일반 업데이트는 매시 `:05`, `:35`에 실행하되 KST 06:00~07:59에는 건너뜁니다. GitHub Actions schedule은 혼잡 시간대에 지연될 수 있으므로 정각 대신 약간 비껴 실행합니다. 데일리 리뷰는 schedule 지연을 감안해 06:30~08:30 사이에 아직 발송되지 않았으면 전송합니다. 리뷰와 업데이트는 짧은 bullet 요약과 국문/영문 기사 링크 목록으로 구성됩니다. 비슷한 제목과 핵심 토큰을 가진 기사는 대표 제목 아래 여러 언론사 링크로 묶어 보여줍니다. 이미 보낸 날짜는 `data/state.json`의 `daily_digest_sent_dates`에 저장해 중복 전송을 막습니다.
 
 ## 운영 정책
 

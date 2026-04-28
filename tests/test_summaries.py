@@ -121,10 +121,10 @@ def test_daily_digest_includes_duplicate_records(config, now, monkeypatch) -> No
     assert 'href="https://example.com/duplicate"' in sent_messages[0]
 
 
-def test_daily_digest_skips_outside_send_hour(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_daily_digest_skips_after_send_window(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     cluster = published_cluster(config, now)
-    digest_now = datetime(2026, 4, 26, 7, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    digest_now = datetime(2026, 4, 26, 9, 0, tzinfo=ZoneInfo("Asia/Seoul"))
     cluster["published_at"] = (digest_now - timedelta(minutes=30)).isoformat()
     state = {
         "published_clusters": [cluster],
@@ -137,6 +137,36 @@ def test_daily_digest_skips_outside_send_hour(config, now, monkeypatch) -> None:
         "daily_digest_sent": 0,
         "daily_digest_failed": 0,
     }
+
+
+def test_daily_digest_tolerates_delayed_github_schedule(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주주권 이슈 지속")
+
+    sent_messages = []
+
+    def fake_send(_bot_token, _chat_id, text, _config):  # type: ignore[no-untyped-def]
+        sent_messages.append(text)
+        return {"ok": True, "message_id": 79, "chat_id": -100}
+
+    monkeypatch.setattr(summaries, "send_telegram_message", fake_send)
+    cluster = published_cluster(config, now)
+    digest_now = datetime(2026, 4, 26, 7, 31, tzinfo=ZoneInfo("Asia/Seoul"))
+    cluster["published_at"] = (digest_now - timedelta(minutes=30)).isoformat()
+    state = {
+        "published_clusters": [cluster],
+        "pending_clusters": [],
+        "daily_digest_sent_dates": [],
+        "daily_digest_records": [],
+    }
+
+    assert publish_daily_digest_if_due(state, config, digest_now) == {
+        "daily_digest_sent": 1,
+        "daily_digest_failed": 0,
+    }
+    assert "데일리 주주·자본시장 브리핑" in sent_messages[0]
 
 
 def test_daily_digest_lists_korean_and_english_article_links(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -341,7 +371,7 @@ def test_hourly_update_message_omits_duplicate_references(config, now, monkeypat
 
     message = build_hourly_update_messages([cluster], config, now, now - timedelta(hours=1), [duplicate])[0]
 
-    assert "거버넌스 업데이트" in message
+    assert "주주·자본시장 브리핑" in message
     assert "<b>중복 확인</b>" not in message
     assert 'href="https://example.com/old"' not in message
     assert "04.24 / 신한금융 밸류업 2.0 발표" not in message
@@ -392,7 +422,7 @@ def test_hourly_update_batches_multiple_clusters_and_marks_all(config, now, monk
 
     assert summary == {"telegram_sent": 2, "telegram_failed": 0}
     assert len(sent_messages) == 1
-    assert "거버넌스 업데이트" in sent_messages[0]
+    assert "주주·자본시장 브리핑" in sent_messages[0]
     assert set(state["telegram_sent_cluster_guids"]) == {first["guid"], second["guid"]}
     assert state["telegram_digest_records"][0]["message_ids"] == [88]
 

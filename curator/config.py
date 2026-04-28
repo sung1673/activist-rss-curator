@@ -92,7 +92,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": True,
         "send_hour": 6,
         "send_minute": 30,
-        "send_window_minutes": 30,
+        "send_window_minutes": 120,
         "window_hours": 24,
         "max_clusters": 30,
         "max_articles_per_cluster": 2,
