@@ -60,8 +60,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: build-feed-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-feed:
