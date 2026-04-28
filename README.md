@@ -136,9 +136,9 @@ RSS 본문에는 기사 1건을 한 줄로 표시합니다. rss2tg_bot이 본문
 
 직접 발행을 사용하면 `rss2tg_bot` 없이 이 프로젝트가 Telegram Bot API로 채널에 메시지를 보냅니다. 메시지는 긴 URL을 직접 노출하지 않고 HTML 링크로 표시합니다. 키워드 기반 섹션 라벨은 오분류 가능성이 있어 메시지에 표시하지 않으며, 내부 분류값이나 기준시각, 대표기사보기 링크도 표시하지 않습니다. 단일 기사 업데이트는 제목 링크만 짧게 표시하고 Telegram 웹페이지 preview가 표시되도록 전송합니다.
 
-한 실행에서 발행할 cluster가 2개 이상이면 `거버넌스 업데이트` 형식으로 묶어서 전송합니다. 이 묶음 메시지는 GitHub Models의 `openai/gpt-4.1`을 사용해 2~3개 bullet 요약을 만들고, 국내/해외 기사 링크를 digest처럼 정리합니다. AI 호출이 실패하면 규칙 기반 fallback 요약으로 계속 발행합니다.
+한 실행에서 발행할 cluster가 2개 이상이면 `거버넌스 업데이트` 형식으로 묶어서 전송합니다. 이 묶음 메시지는 GitHub Models의 `openai/gpt-4.1`을 사용해 2~3개 bullet 요약을 만들고, 국문/영문 기사 링크를 digest처럼 정리합니다. 요약은 `임박`, `부각`, `지속`처럼 짧은 명사형으로 끝나도록 후처리합니다. AI 호출이 실패하면 규칙 기반 fallback 요약으로 계속 발행합니다.
 
-중복으로 걸러진 기사가 있으면 최근 30일 안에 이미 state에 저장된 유사 기사 최대 3개를 `중복 확인` 섹션에 함께 표시할 수 있습니다. 단순 반복 수집으로 인한 과도한 알림을 막기 위해, 중복 확인은 새로 발행할 cluster가 있는 시간당 업데이트에만 붙입니다.
+중복으로 걸러진 기사는 시간당 업데이트에 따로 표시하지 않습니다. 중복 기사 기록은 state에 남겨 두되, 사용자가 읽는 일반 업데이트는 새로 발행할 기사 묶음 중심으로 유지합니다.
 
 필수 조건:
 
@@ -154,7 +154,7 @@ bot 연결만 즉시 확인하려면 Actions의 `Build curated RSS feed` 수동 
 
 일반 단일 기사 메시지는 AI를 호출하지 않고 제목 링크만 발행합니다. 여러 기사 묶음과 매일 아침 리뷰는 GitHub Models를 사용할 수 있으며, 기본 모델은 `openai/gpt-4.1`입니다.
 
-데일리 리뷰 기능은 유지되어 있으며, `digest.send_hour`, `digest.send_minute`, workflow schedule을 맞추면 최근 24시간의 published/pending cluster를 모아 `데일리 거버넌스 리뷰`를 전송할 수 있습니다. 현재 정기 workflow는 KST 06:00과 07:00을 건너뛰므로, 기본 운영의 중심은 매시 정각 `거버넌스 업데이트`입니다. 리뷰와 업데이트는 짧은 bullet 요약과 국내/해외 기사 링크 목록으로 구성됩니다. 비슷한 제목과 핵심 토큰을 가진 기사는 대표 제목 아래 여러 언론사 링크로 묶어 보여줍니다. 이미 보낸 날짜는 `data/state.json`의 `daily_digest_sent_dates`에 저장해 중복 전송을 막습니다.
+데일리 리뷰는 KST 06:30에 별도 schedule로 실행되며, 최근 24시간의 published/pending cluster를 모아 `데일리 거버넌스 리뷰`를 전송합니다. 매시 정각 업데이트는 KST 06:00과 07:00을 건너뜁니다. 리뷰와 업데이트는 짧은 bullet 요약과 국문/영문 기사 링크 목록으로 구성됩니다. 비슷한 제목과 핵심 토큰을 가진 기사는 대표 제목 아래 여러 언론사 링크로 묶어 보여줍니다. 이미 보낸 날짜는 `data/state.json`의 `daily_digest_sent_dates`에 저장해 중복 전송을 막습니다.
 
 ## 운영 정책
 
@@ -163,6 +163,7 @@ bot 연결만 즉시 확인하려면 Actions의 `Build curated RSS feed` 수동 
 - high relevance cluster는 20분 후 발행 가능합니다.
 - pending 상태가 3시간을 넘으면 강제 발행합니다.
 - article published date 기준 7일 초과 기사는 제외합니다.
+- 기본 설정에서는 발송일 기준 전일보다 오래된 기사도 제외합니다.
 - 발행 대상은 high, medium relevance입니다.
 - low relevance 기사는 `state.json`의 `rejected_articles`에 저장합니다.
 - `msn.com` 같은 중계 링크는 기본적으로 제외합니다.

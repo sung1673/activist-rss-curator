@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from .cluster import cluster_articles
 from .config import article_domain_is_excluded, load_config
-from .dates import choose_publication_datetime, datetime_to_iso, is_too_old, now_in_timezone
+from .dates import choose_publication_datetime, datetime_to_iso, get_timezone, is_too_old, now_in_timezone
 from .dedupe import dedupe_articles
 from .fetch import decode_google_news_links_in_state, fetch_google_alerts_articles
 from .relevance import relevance_details
@@ -44,25 +45,61 @@ def prepare_article(article: dict[str, object], config: dict[str, object]) -> di
     return prepared
 
 
-def prune_excluded_pending_articles(state: dict[str, object], config: dict[str, object]) -> None:
-    kept_clusters: list[dict[str, object]] = []
-    for cluster in list(state.get("pending_clusters", [])):
-        articles = [
-            article
-            for article in list(cluster.get("articles", []))
-            if not article_domain_is_excluded(article, config)
-        ]
-        if not articles:
-            continue
-        if len(articles) != len(cluster.get("articles", [])):
-            cluster["articles"] = articles
-            cluster["article_count"] = len(articles)
-            representative = articles[0]
-            cluster["representative_title"] = representative.get("clean_title") or representative.get("title") or ""
-            cluster["representative_title_normalized"] = representative.get("normalized_title") or ""
-            cluster["representative_url"] = representative.get("canonical_url") or representative.get("link") or ""
-        kept_clusters.append(cluster)
-    state["pending_clusters"] = kept_clusters
+def article_is_before_previous_day(
+    article: dict[str, object],
+    config: dict[str, object],
+    now: datetime,
+) -> bool:
+    date_filter = config.get("date_filter", {})
+    if not isinstance(date_filter, dict) or not date_filter.get("exclude_before_previous_day", False):
+        return False
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    published_at, _ = choose_publication_datetime(
+        article.get("article_published_at"),
+        article.get("feed_published_at") or article.get("published_at"),
+        article.get("feed_updated_at"),
+        timezone_name,
+    )
+    if not published_at:
+        return False
+    timezone = get_timezone(timezone_name)
+    cutoff_date = (now.astimezone(timezone) - timedelta(days=1)).date()
+    return published_at.astimezone(timezone).date() < cutoff_date
+
+
+def cluster_articles_allowed_by_policy(
+    cluster: dict[str, object],
+    config: dict[str, object],
+    now: datetime,
+) -> list[dict[str, object]]:
+    return [
+        article
+        for article in list(cluster.get("articles", []))
+        if not article_domain_is_excluded(article, config)
+        and not article_is_before_previous_day(article, config, now)
+    ]
+
+
+def refresh_cluster_representative(cluster: dict[str, object], articles: list[dict[str, object]]) -> None:
+    cluster["articles"] = articles
+    cluster["article_count"] = len(articles)
+    representative = articles[0]
+    cluster["representative_title"] = representative.get("clean_title") or representative.get("title") or ""
+    cluster["representative_title_normalized"] = representative.get("normalized_title") or ""
+    cluster["representative_url"] = representative.get("canonical_url") or representative.get("link") or ""
+
+
+def prune_excluded_pending_articles(state: dict[str, object], config: dict[str, object], now: datetime) -> None:
+    for state_key in ("pending_clusters", "published_clusters"):
+        kept_clusters: list[dict[str, object]] = []
+        for cluster in list(state.get(state_key, [])):
+            articles = cluster_articles_allowed_by_policy(cluster, config, now)
+            if not articles:
+                continue
+            if len(articles) != len(cluster.get("articles", [])):
+                refresh_cluster_representative(cluster, articles)
+            kept_clusters.append(cluster)
+        state[state_key] = kept_clusters
 
 
 def run(root: Path | None = None) -> dict[str, int]:
@@ -72,8 +109,9 @@ def run(root: Path | None = None) -> dict[str, int]:
     now = now_in_timezone(timezone_name)
     state_path = project_root / "data" / "state.json"
     state = load_state(state_path)
-    prune_excluded_pending_articles(state, config)
+    prune_excluded_pending_articles(state, config, now)
     decode_google_news_links_in_state(state, config)
+    prune_excluded_pending_articles(state, config, now)
     initialize_telegram_state(state, config, now)
 
     fetched_articles = fetch_google_alerts_articles(config)
@@ -93,6 +131,10 @@ def run(root: Path | None = None) -> dict[str, int]:
         )
         if is_too_old(published_at, now, max_age_days):
             remember_rejected(state, article, now, "old_article")
+            rejected_count += 1
+            continue
+        if article_is_before_previous_day(article, config, now):
+            remember_rejected(state, article, now, "before_previous_day")
             rejected_count += 1
             continue
         if article.get("date_status") == "unknown" and not allow_unknown:

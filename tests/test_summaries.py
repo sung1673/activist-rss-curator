@@ -7,8 +7,10 @@ from curator.cluster import cluster_articles
 from curator.summaries import (
     build_daily_digest_messages,
     build_hourly_update_messages,
+    digest_article_is_english,
     publish_daily_digest_if_due,
     publish_hourly_telegram_update,
+    summary_bullet_lines,
 )
 
 from conftest import make_article
@@ -39,7 +41,7 @@ def published_cluster(config, now):  # type: ignore[no-untyped-def]
 
 def digest_summary_block(message: str) -> str:
     summary = message.split("<b>요약</b>\n", 1)[1]
-    for marker in ("\n\n<b>국내</b>", "\n\n<b>해외</b>"):
+    for marker in ("\n\n<b>국문</b>", "\n\n<b>영문</b>"):
         if marker in summary:
             return summary.split(marker, 1)[0]
     return summary
@@ -96,7 +98,7 @@ def test_daily_digest_skips_outside_send_hour(config, now, monkeypatch) -> None:
     }
 
 
-def test_daily_digest_lists_domestic_and_global_article_links(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_daily_digest_lists_korean_and_english_article_links(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import summaries
 
     monkeypatch.setattr(
@@ -138,14 +140,55 @@ def test_daily_digest_lists_domestic_and_global_article_links(config, now, monke
 
     message = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))[0]
 
-    assert "<b>국내</b>" in message
-    assert "<b>해외</b>" in message
+    assert "<b>국문</b>" in message
+    assert "<b>영문</b>" in message
     assert 'href="https://example.com/domestic"' in message
     assert 'href="https://example.com/global"' in message
     assert "04.27 /" in message
     assert "04.26 /" in message
     assert "매우 길게 이어지는 기사 제목" not in message
     assert "..." in message
+
+
+def test_global_category_korean_article_stays_in_korean_section(config, now) -> None:  # type: ignore[no-untyped-def]
+    article = make_article(
+        "한국 밸류업 정책과 주주환원 논의",
+        "https://example.com/korean-global",
+        source="국문뉴스",
+        published_at="2026-04-27T09:00:00+09:00",
+        summary="국내 상장사 주주환원",
+    )
+    article["feed_category"] = "global"
+    article["feed_name"] = "google-news-en-korea"
+
+    assert not digest_article_is_english(article)
+
+    message = build_daily_digest_messages(
+        [
+            {
+                "representative_title": "한국 밸류업",
+                "published_at": article["published_at"],
+                "articles": [article],
+            }
+        ],
+        config,
+        now,
+        now - timedelta(hours=24),
+    )[0]
+
+    assert "<b>국문</b>" in message
+    assert "<b>영문</b>" not in message
+
+
+def test_english_title_is_english_even_with_korean_summary(config) -> None:  # type: ignore[no-untyped-def]
+    article = make_article(
+        "Activist investors press for board changes",
+        "https://example.com/english",
+        source="Global News",
+        summary="국문으로 보강된 요약",
+    )
+
+    assert digest_article_is_english(article)
 
 
 def test_daily_digest_groups_similar_article_titles(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -241,7 +284,7 @@ def test_daily_digest_filters_operational_ai_summary_lines(config, now, monkeypa
     assert "읽기 좋게" not in summary
 
 
-def test_hourly_update_message_includes_duplicate_references(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_hourly_update_message_omits_duplicate_references(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import summaries
 
     monkeypatch.setattr(summaries, "generate_hourly_digest_review", lambda *_args, **_kwargs: "- 주주제안 이슈가 이어졌음")
@@ -258,9 +301,22 @@ def test_hourly_update_message_includes_duplicate_references(config, now, monkey
     message = build_hourly_update_messages([cluster], config, now, now - timedelta(hours=1), [duplicate])[0]
 
     assert "거버넌스 업데이트" in message
-    assert "<b>중복 확인</b>" in message
-    assert 'href="https://example.com/old"' in message
-    assert "04.24 / 신한금융 밸류업 2.0 발표" in message
+    assert "<b>중복 확인</b>" not in message
+    assert 'href="https://example.com/old"' not in message
+    assert "04.24 / 신한금융 밸류업 2.0 발표" not in message
+
+
+def test_summary_bullet_lines_uses_concise_endings(config) -> None:  # type: ignore[no-untyped-def]
+    bullets = summary_bullet_lines(
+        "- 주총 표 대결 임박했음\n- 밸류업 논의가 이어졌음\n- ETF 의결권 영향력이 이슈로 떠올랐음",
+        config,
+    )
+
+    assert bullets == [
+        "- 주총 표 대결 임박",
+        "- 밸류업 논의 지속",
+        "- ETF 의결권 영향력 이슈 부상",
+    ]
 
 
 def test_hourly_update_batches_multiple_clusters_and_marks_all(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]

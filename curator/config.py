@@ -27,6 +27,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "date_filter": {
         "max_article_age_days": 7,
         "allow_unknown_date": True,
+        "exclude_before_previous_day": True,
     },
     "cluster": {
         "buffer_minutes_default": 45,

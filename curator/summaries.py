@@ -75,39 +75,39 @@ OPERATIONAL_SUMMARY_PATTERNS = (
 FALLBACK_TOPIC_RULES = (
     (
         ("임원보수", "주식보상", "성과보수", "보수 공시", "보수체계"),
-        "임원보수·주식보상 공시 강화가 부각됐음",
+        "임원보수·주식보상 공시 강화 부각",
     ),
     (
         ("etf", "의결권", "운용사", "스튜어드십"),
-        "ETF·운용사 의결권 영향력이 이슈로 떠올랐음",
+        "ETF·운용사 의결권 영향력 부상",
     ),
     (
         ("코너스톤", "cornerstone", "ipo", "공모주", "상장 제도"),
-        "코너스톤 투자자 등 IPO 제도 논의가 이어졌음",
+        "코너스톤 투자자 등 IPO 제도 논의 지속",
     ),
     (
         ("해외부동산펀드", "핵심위험", "투자자 보호", "위험공시"),
-        "펀드 위험공시 등 투자자 보호 이슈가 확인됐음",
+        "펀드 위험공시 등 투자자 보호 이슈 확인",
     ),
     (
         ("소액주주", "주주제안", "고발", "검찰", "소송", "주주권"),
-        "소액주주 권리 행사와 법적 대응 이슈가 이어졌음",
+        "소액주주 권리 행사와 법적 대응 지속",
     ),
     (
         ("행동주의", "activist", "proxy", "이사회", "위임장", "board"),
-        "행동주의와 이사회 견제 흐름이 이어졌음",
+        "행동주의와 이사회 견제 흐름 지속",
     ),
     (
         ("밸류업", "주주환원", "자사주", "배당"),
-        "밸류업·주주환원 논의가 이어졌음",
+        "밸류업·주주환원 논의 지속",
     ),
     (
         ("지배구조", "거버넌스", "스튜어드십", "책임경영"),
-        "지배구조와 스튜어드십 논의가 이어졌음",
+        "지배구조와 스튜어드십 논의 지속",
     ),
     (
         ("경영권", "분쟁", "공개매수", "m&a", "인수"),
-        "경영권 분쟁과 자본시장 이벤트가 이어졌음",
+        "경영권 분쟁과 자본시장 이벤트 지속",
     ),
 )
 
@@ -259,9 +259,22 @@ def digest_article_datetime(
     return digest_cluster_datetime(cluster, timezone_name)
 
 
-def digest_article_is_global(article: dict[str, object]) -> bool:
-    feed_category = str(article.get("feed_category") or "").casefold()
-    if feed_category == "global":
+def digest_article_is_english(article: dict[str, object]) -> bool:
+    title = str(article.get("clean_title") or article.get("title") or "")
+    summary = str(article.get("summary") or "")
+    title_hangul_count = len(re.findall(r"[가-힣]", title))
+    title_latin_count = len(re.findall(r"[A-Za-z]", title))
+    if title_hangul_count:
+        return False
+    if title_latin_count >= 12:
+        return True
+
+    text = f"{title} {summary}".strip()
+    hangul_count = len(re.findall(r"[가-힣]", text))
+    latin_count = len(re.findall(r"[A-Za-z]", text))
+    if hangul_count:
+        return False
+    if latin_count >= 12:
         return True
     feed_name = str(article.get("feed_name") or "").casefold()
     if "google-news-en-" in feed_name or feed_name.endswith("-en"):
@@ -325,7 +338,7 @@ def digest_article_entries(
                 continue
             seen_urls.add(url)
             article_dt = digest_article_datetime(article, cluster, timezone_name)
-            section = "global" if digest_article_is_global(article) else "domestic"
+            section = "global" if digest_article_is_english(article) else "domestic"
             entries[section].append(
                 {
                     "article": article,
@@ -474,12 +487,39 @@ def summary_bullet_lines(text: str, config: dict[str, object]) -> list[str]:
 
     bullets: list[str] = []
     for line in digest_summary_candidates(text):
+        line = concise_summary_line(line)
         if not line:
             continue
         bullets.append(f"- {escape(compact_text(line, max_chars=max_chars), quote=False)}")
         if len(bullets) >= max_bullets:
             break
-    return bullets or ["- 주요 기사 흐름을 짧게 정리했음"]
+    return bullets or ["- 주요 기사 흐름 요약"]
+
+
+def concise_summary_line(line: str) -> str:
+    text = re.sub(r"\s+", " ", str(line or "")).strip(" -•·.;。")
+    replacements = (
+        (r"임박했음$", "임박"),
+        (r"임박한 것으로 보였음$", "임박"),
+        (r"이슈로 떠올랐음$", "이슈 부상"),
+        (r"흐름이 이어졌음$", "흐름 지속"),
+        (r"논의가 이어졌음$", "논의 지속"),
+        (r"이슈가 이어졌음$", "이슈 지속"),
+        (r"대응이 이어졌음$", "대응 지속"),
+        (r"이어졌음$", "지속"),
+        (r"부각됐음$", "부각"),
+        (r"부각되었음$", "부각"),
+        (r"확인됐음$", "확인"),
+        (r"확인되었음$", "확인"),
+        (r"보였음$", "흐름"),
+        (r"나타났음$", "확인"),
+        (r"했음$", ""),
+    )
+    for pattern, replacement in replacements:
+        text = re.sub(pattern, replacement, text)
+    text = re.sub(r"(가|이) 부각$", " 부각", text)
+    text = re.sub(r"([가-힣A-Za-z0-9·]+)이 이슈 부상$", r"\1 이슈 부상", text)
+    return re.sub(r"\s+", " ", text).strip(" -•·.;。")
 
 
 def digest_entry_content_text(entry: dict[str, object]) -> str:
@@ -519,7 +559,7 @@ def fallback_topic_bullets(entries: list[dict[str, object]], *, global_section: 
     scored.sort(reverse=True)
     bullets: list[str] = []
     for _score, _index, phrase in scored:
-        line = f"해외에서는 {phrase}" if global_section and not phrase.startswith("해외") else phrase
+        line = f"영문 기사에서는 {phrase}" if global_section and not phrase.startswith("영문") else phrase
         if line not in bullets:
             bullets.append(line)
     return bullets
@@ -537,9 +577,9 @@ def fallback_title_bullets(
         title = compact_text(re.sub(r"\s+", " ", title).strip(" -|"), max_chars=36)
         if not title or is_operational_summary_line(title):
             continue
-        line = f"{title} 이슈가 이어졌음"
+        line = f"{title} 이슈 지속"
         if global_section:
-            line = f"해외에서는 {line}"
+            line = f"영문 기사에서는 {line}"
         if line not in bullets:
             bullets.append(line)
     return bullets
@@ -571,7 +611,7 @@ def fallback_daily_digest(
         all_entries = entries["domestic"] + entries["global"]
         lines = fallback_title_bullets(all_entries, config)[:3]
     if not lines:
-        lines = ["주주행동·거버넌스 관련 기사 흐름이 이어졌음"]
+        lines = ["주주행동·거버넌스 관련 기사 흐름 지속"]
     return "\n".join(f"- {line}" for line in lines[:3])
 
 
@@ -584,7 +624,7 @@ def render_digest_link_sections(
     config: dict[str, object],
 ) -> list[str]:
     entries = limited_digest_article_entries(clusters, config)
-    labels = {"domestic": "국내", "global": "해외"}
+    labels = {"domestic": "국문", "global": "영문"}
     lines: list[str] = []
     for section_key in ("domestic", "global"):
         section_entries = entries[section_key]
@@ -663,7 +703,8 @@ def generate_daily_digest_review(
         "아래 수집 묶음을 바탕으로 데일리 digest의 맨 위 요약만 작성하세요.\n"
         "- bullet point 2~3개만 작성\n"
         "- 각 bullet은 45자 안팎으로 아주 짧게 작성\n"
-        "- 문장 끝은 '~했음', '~보였음', '~이어졌음'처럼 간결한 메모체로 작성\n"
+        "- 문장 끝은 '임박', '부각', '지속', '확인' 같은 명사형으로 끝냄\n"
+        "- '~했음', '~보였음', '~이어졌음' 같은 종결어미는 쓰지 않음\n"
         "- 링크, 기준시각, high/medium 같은 내부 분류는 쓰지 않음\n"
         "- 긴 해설, 번호 목록, 제목은 쓰지 않음\n\n"
         f"기간: {format_kst(start_at, str(config.get('timezone') or 'Asia/Seoul'))} - {format_kst(end_at, str(config.get('timezone') or 'Asia/Seoul'))}\n\n"
@@ -701,7 +742,8 @@ def generate_hourly_digest_review(
         "아래 신규 기사 묶음을 바탕으로 시간당 업데이트의 맨 위 요약만 작성하세요.\n"
         "- bullet point 2~3개만 작성\n"
         "- 각 bullet은 45자 안팎으로 아주 짧게 작성\n"
-        "- 문장 끝은 '~했음', '~보였음', '~이어졌음'처럼 간결한 메모체로 작성\n"
+        "- 문장 끝은 '임박', '부각', '지속', '확인' 같은 명사형으로 끝냄\n"
+        "- '~했음', '~보였음', '~이어졌음' 같은 종결어미는 쓰지 않음\n"
         "- 링크, 기준시각, high/medium 같은 내부 분류는 쓰지 않음\n"
         "- 운영 설명이나 '몇 건 정리' 같은 말은 쓰지 않음\n\n"
         f"기간: {format_kst(start_at, str(config.get('timezone') or 'Asia/Seoul'))} - {format_kst(end_at, str(config.get('timezone') or 'Asia/Seoul'))}\n\n"
@@ -789,7 +831,6 @@ def build_hourly_update_messages(
         *summary_bullet_lines(review, config),
         "",
         *render_digest_link_sections(clusters, config),
-        *render_duplicate_mentions(duplicates or [], config),
     ]
     message = "\n".join(line for line in lines if line is not None).strip()
     return split_plain_telegram_text(message, max_chars)
@@ -815,8 +856,7 @@ def should_batch_telegram_update(
     if not settings.get("batch_digest_enabled", True):
         return False
     min_clusters = int(settings.get("batch_digest_min_clusters", 2))
-    duplicate_mentions = [duplicate for duplicate in duplicates if duplicate.get("duplicate_matches")]
-    return len(clusters) >= min_clusters or (bool(clusters) and bool(duplicate_mentions))
+    return len(clusters) >= min_clusters
 
 
 def mark_clusters_sent_with_response(
