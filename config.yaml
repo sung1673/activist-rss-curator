@@ -263,12 +263,12 @@ digest:
   send_minute: 30
   send_window_minutes: 120
   window_hours: 24
-  max_clusters: 30
-  max_articles_per_cluster: 2
-  max_links_total: 24
-  max_links_per_section: 12
-  max_links_per_group: 5
-  max_duplicate_links: 12
+  max_clusters: 0
+  max_articles_per_cluster: 0
+  max_links_total: 0
+  max_links_per_section: 0
+  max_links_per_group: 0
+  max_duplicate_links: 0
   link_title_max_chars: 54
   summary_bullets: 3
   summary_bullet_max_chars: 48

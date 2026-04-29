@@ -130,6 +130,14 @@ def digest_config(config: dict[str, object]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def digest_count_limit(settings: dict[str, Any], key: str, default: int) -> int | None:
+    try:
+        value = int(settings.get(key, default))
+    except (TypeError, ValueError):
+        value = default
+    return value if value > 0 else None
+
+
 def github_models_token() -> str:
     return (
         os.environ.get("GITHUB_MODELS_TOKEN")
@@ -220,13 +228,15 @@ def digest_clusters_in_window(
         if cluster_dt and start_at <= cluster_dt <= end_at:
             selected.append((cluster_dt, cluster))
     selected.sort(key=lambda item: item[0])
-    max_clusters = int(digest_config(config).get("max_clusters", 30))
+    max_clusters = digest_count_limit(digest_config(config), "max_clusters", 30)
+    if max_clusters is None:
+        return [cluster for _dt, cluster in selected]
     return [cluster for _dt, cluster in selected[-max_clusters:]]
 
 
 def digest_context(clusters: list[dict[str, object]], config: dict[str, object]) -> str:
     settings = digest_config(config)
-    max_articles = int(settings.get("max_articles_per_cluster", 5))
+    max_articles = digest_count_limit(settings, "max_articles_per_cluster", 5)
     blocks: list[str] = []
     for index, cluster in enumerate(clusters, start=1):
         articles = publishable_articles(cluster, config)
@@ -234,7 +244,8 @@ def digest_context(clusters: list[dict[str, object]], config: dict[str, object])
             f"{index}. {item_title(cluster, len(articles))}",
             "기사:",
         ]
-        for article in articles[:max_articles]:
+        articles_for_context = articles if max_articles is None else articles[:max_articles]
+        for article in articles_for_context:
             source = article_source_label(article)
             title = display_article_title(article, source)
             summary = compact_text(article.get("summary") or "", max_chars=140)
@@ -377,14 +388,14 @@ def digest_article_entries(
     duplicate_records: list[dict[str, object]] | None = None,
 ) -> dict[str, list[dict[str, object]]]:
     settings = digest_config(config)
-    max_articles_per_cluster = int(settings.get("max_articles_per_cluster", 2))
+    max_articles_per_cluster = digest_count_limit(settings, "max_articles_per_cluster", 2)
     entries: dict[str, list[dict[str, object]]] = {"domestic": [], "global": []}
     seen_urls: set[str] = set()
 
     for cluster in clusters:
         added_for_cluster = 0
         for article in publishable_articles(cluster, config):
-            if added_for_cluster >= max_articles_per_cluster:
+            if max_articles_per_cluster is not None and added_for_cluster >= max_articles_per_cluster:
                 break
             entry = digest_entry_for_article(article, cluster, config, seen_urls)
             if not entry:
@@ -407,14 +418,14 @@ def limited_digest_article_entries(
 ) -> dict[str, list[dict[str, object]]]:
     entries = digest_article_entries(clusters, config, duplicate_records)
     settings = digest_config(config)
-    max_per_section = int(settings.get("max_links_per_section", 12))
-    max_total = int(settings.get("max_links_total", 24))
+    max_per_section = digest_count_limit(settings, "max_links_per_section", 12)
+    max_total = digest_count_limit(settings, "max_links_total", 24)
 
     limited = {
-        "domestic": entries["domestic"][:max_per_section],
-        "global": entries["global"][:max_per_section],
+        "domestic": entries["domestic"] if max_per_section is None else entries["domestic"][:max_per_section],
+        "global": entries["global"] if max_per_section is None else entries["global"][:max_per_section],
     }
-    while len(limited["domestic"]) + len(limited["global"]) > max_total:
+    while max_total is not None and len(limited["domestic"]) + len(limited["global"]) > max_total:
         if len(limited["domestic"]) >= len(limited["global"]) and limited["domestic"]:
             limited["domestic"].pop()
         elif limited["global"]:
@@ -491,11 +502,12 @@ def render_digest_entry_group(group: list[dict[str, object]], config: dict[str, 
         entry = group[0]
         return [f"• {html_link(str(entry['label']), str(entry['url']))}"]
 
-    max_links = int(digest_config(config).get("max_links_per_group", 5))
+    max_links = digest_count_limit(digest_config(config), "max_links_per_group", 5)
     title = digest_group_title(group, config)
     lines = [f"• {digest_group_date_label(group, config)} / {escape(title, quote=False)} ({len(group)}건)"]
     links = []
-    for index, entry in enumerate(group[:max_links], start=1):
+    shown_group = group if max_links is None else group[:max_links]
+    for index, entry in enumerate(shown_group, start=1):
         article = entry["article"]
         source = article_source_label(article)  # type: ignore[arg-type]
         links.append(html_link(numbered_digest_source(index, source), str(entry["url"])))
@@ -712,7 +724,9 @@ def duplicate_records_in_window(
         seen_urls.add(url)
         selected.append((record_dt, record))
     selected.sort(key=lambda item: item[0], reverse=True)
-    max_links = int(digest_config(config).get("max_duplicate_links", 12))
+    max_links = digest_count_limit(digest_config(config), "max_duplicate_links", 12)
+    if max_links is None:
+        return [record for _dt, record in selected]
     return [record for _dt, record in selected[:max_links]]
 
 

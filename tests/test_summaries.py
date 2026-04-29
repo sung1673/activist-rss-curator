@@ -9,8 +9,10 @@ from curator.summaries import (
     build_hourly_update_messages,
     digest_article_is_english,
     hourly_update_start_at,
+    limited_digest_article_entries,
     publish_daily_digest_if_due,
     publish_hourly_telegram_update,
+    render_digest_entry_group,
     summary_bullet_lines,
 )
 
@@ -311,6 +313,34 @@ def test_daily_digest_lists_korean_and_english_article_links(config, now, monkey
     assert "..." in message
     assert "소분류:" not in message
     assert "수집키워드" not in message
+
+
+def test_daily_digest_zero_count_limits_show_all_entries(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["digest"]["max_articles_per_cluster"] = 0  # type: ignore[index]
+    config["digest"]["max_links_per_section"] = 0  # type: ignore[index]
+    config["digest"]["max_links_total"] = 0  # type: ignore[index]
+    config["digest"]["max_links_per_group"] = 0  # type: ignore[index]
+    articles = [
+        make_article(
+            f"소액주주 주주제안 기사 {index}",
+            f"https://example.com/article-{index}",
+            source=f"언론{index}",
+            published_at="2026-04-27T09:00:00+09:00",
+        )
+        for index in range(1, 7)
+    ]
+    cluster = {
+        "representative_title": "소액주주 주주제안",
+        "published_at": "2026-04-27T09:10:00+09:00",
+        "articles": articles,
+    }
+
+    entries = limited_digest_article_entries([cluster], config)["domestic"]
+    assert len(entries) == 6
+
+    group_lines = render_digest_entry_group(entries, config)
+    assert "외 " not in "\n".join(group_lines)
+    assert "⑥" in "\n".join(group_lines)
 
 
 def test_global_category_korean_article_stays_in_korean_section(config, now) -> None:  # type: ignore[no-untyped-def]
