@@ -110,6 +110,17 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m curator.digest_preview
 
+      - name: Send digest preview from commit marker
+        if: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[send-digest-preview]') }}
+        env:
+          CURATOR_FEEDS: ${{ secrets.CURATOR_FEEDS }}
+          DIGEST_PREVIEW_HOURS: "24"
+          DIGEST_PREVIEW_PREFIX: "NONE"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m curator.digest_preview
+
       - name: Resend recent Telegram articles
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.resend_recent_articles }}
         env:
