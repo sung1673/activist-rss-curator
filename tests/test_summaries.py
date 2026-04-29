@@ -46,7 +46,16 @@ def published_cluster(config, now):  # type: ignore[no-untyped-def]
 
 def digest_summary_block(message: str) -> str:
     summary = message.split("<b>요약</b>\n", 1)[1]
-    for marker in ("\n\n<b>국문</b>", "\n\n<b>영문</b>"):
+    for marker in (
+        "\n\n<b>주주행동·경영권 분쟁</b>",
+        "\n\n<b>밸류업·주주환원</b>",
+        "\n\n<b>지배구조·스튜어드십</b>",
+        "\n\n<b>자본시장 제도·정책</b>",
+        "\n\n<b>상장·공시·거래 리스크</b>",
+        "\n\n<b>기타 자본시장</b>",
+        "\n\n<b>국문</b>",
+        "\n\n<b>영문</b>",
+    ):
         if marker in summary:
             return summary.split(marker, 1)[0]
     return summary
@@ -305,7 +314,7 @@ def test_daily_digest_lists_korean_and_english_article_links(config, now, monkey
 
     message = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))[0]
 
-    assert "<b>국문</b>" in message
+    assert "<b>밸류업·주주환원</b>" in message
     assert "<b>영문</b>" in message
     assert 'href="https://example.com/domestic"' in message
     assert 'href="https://example.com/global"' in message
@@ -371,8 +380,87 @@ def test_global_category_korean_article_stays_in_korean_section(config, now) -> 
         now - timedelta(hours=24),
     )[0]
 
-    assert "<b>국문</b>" in message
+    assert "<b>밸류업·주주환원</b>" in message
     assert "<b>영문</b>" not in message
+
+
+def test_daily_digest_renders_topic_categories(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주요 이슈 지속")
+    articles = [
+        make_article(
+            "소액주주 주주제안으로 임시주총 표 대결",
+            "https://example.com/shareholder",
+            source="주주뉴스",
+            summary="소액주주 주주제안 경영권 분쟁",
+        ),
+        make_article(
+            "기업 밸류업 프로그램과 자사주 소각 확대",
+            "https://example.com/valueup",
+            source="밸류뉴스",
+            summary="밸류업 주주환원 자사주 소각",
+        ),
+        make_article(
+            "상장적격성 실질심사와 거래정지 개선기간 부여",
+            "https://example.com/risk",
+            source="리스크뉴스",
+            summary="상장폐지 거래정지 투자자 보호",
+        ),
+    ]
+    clusters = [
+        {"representative_title": article["clean_title"], "published_at": article["published_at"], "articles": [article]}
+        for article in articles
+    ]
+
+    message = "\n".join(build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24)))
+
+    assert "<b>주주행동·경영권 분쟁</b>" in message
+    assert "<b>밸류업·주주환원</b>" in message
+    assert "<b>상장·공시·거래 리스크</b>" in message
+
+
+def test_daily_digest_splits_on_section_and_group_boundaries(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주요 이슈 지속")
+    config["digest"]["max_message_chars"] = 650  # type: ignore[index]
+    titles = [
+        "공개서한 제출로 이사회 책임 추궁",
+        "임시주총 소집 청구와 표 대결 예고",
+        "감사 선임 안건 두고 주주연대 압박",
+        "위임장 권유 과정에서 경영진 견제",
+        "주주명부 열람 소송과 주주권 행사",
+        "소액주주 캠페인으로 정관 변경 요구",
+        "행동주의 펀드가 자본배치 개선 촉구",
+        "이사회 교체 요구와 경영진 반박",
+        "주주제안 안건 상정 여부 공방",
+        "기관투자자 주주활동 확대 흐름",
+        "공개매수 이후 경영권 분쟁 쟁점",
+    ]
+    articles = [
+        make_article(
+            title,
+            f"https://example.com/shareholder-{index}",
+            source=f"언론{index}",
+            summary="소액주주 주주제안 경영권 분쟁",
+        )
+        for index, title in enumerate(titles, start=1)
+    ]
+    clusters = [
+        {"representative_title": article["clean_title"], "published_at": article["published_at"], "articles": [article]}
+        for article in articles
+    ]
+
+    messages = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))
+
+    assert len(messages) > 1
+    assert all(len(message) <= 900 for message in messages)
+    for message in messages[1:]:
+        first_line = next(line for line in message.splitlines() if line.strip())
+        assert first_line.startswith("<b>주주행동·경영권 분쟁")
+        assert not first_line.startswith("  <a")
+        assert not first_line.startswith("①")
 
 
 def test_english_title_is_english_even_with_korean_summary(config) -> None:  # type: ignore[no-untyped-def]
@@ -569,7 +657,8 @@ def test_hourly_update_message_omits_duplicate_references(config, now, monkeypat
 
     message = build_hourly_update_messages([cluster], config, now, now - timedelta(hours=1), [duplicate])[0]
 
-    assert "주주·자본시장 브리핑" in message
+    assert "주주·자본시장 브리핑" not in message
+    assert message.startswith("<b>요약</b>")
     assert "<b>중복 확인</b>" not in message
     assert 'href="https://example.com/old"' not in message
     assert "04.24 / 신한금융 밸류업 2.0 발표" not in message
@@ -620,7 +709,8 @@ def test_hourly_update_batches_multiple_clusters_and_marks_all(config, now, monk
 
     assert summary == {"telegram_sent": 2, "telegram_failed": 0}
     assert len(sent_messages) == 1
-    assert "주주·자본시장 브리핑" in sent_messages[0]
+    assert "주주·자본시장 브리핑" not in sent_messages[0]
+    assert sent_messages[0].startswith("<b>요약</b>")
     assert set(state["telegram_sent_cluster_guids"]) == {first["guid"], second["guid"]}
     assert state["telegram_digest_records"][0]["message_ids"] == [88]
 

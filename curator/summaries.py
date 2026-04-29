@@ -163,6 +163,117 @@ DIGEST_SOURCE_LABEL_OVERRIDES = {
     "NEWSFC": "NEWS FC",
 }
 
+DIGEST_CATEGORY_RULES = (
+    (
+        "shareholder",
+        "주주행동·경영권 분쟁",
+        ("shareholder_proposal", "activism_trend", "control_dispute", "board_audit"),
+        (
+            "주주제안",
+            "소액주주",
+            "주주행동",
+            "행동주의",
+            "경영권 분쟁",
+            "공개서한",
+            "위임장",
+            "이사회 교체",
+            "감사 선임",
+            "임시주총",
+            "표 대결",
+            "얼라인",
+            "KCGI",
+            "트러스톤",
+            "엘리엇",
+            "activist",
+            "proxy fight",
+        ),
+    ),
+    (
+        "valueup",
+        "밸류업·주주환원",
+        ("valueup_return",),
+        (
+            "밸류업",
+            "벨류업",
+            "주주환원",
+            "배당",
+            "자사주",
+            "소각",
+            "저PBR",
+            "코리아밸류업",
+            "shareholder return",
+            "buyback",
+        ),
+    ),
+    (
+        "governance",
+        "지배구조·스튜어드십",
+        ("governance_stewardship", "voting_disclosure"),
+        (
+            "지배구조",
+            "거버넌스",
+            "스튜어드십",
+            "사외이사",
+            "의결권",
+            "전자투표",
+            "주총",
+            "주주총회",
+            "임원보수",
+            "주식보상",
+            "성과보수",
+            "governance",
+            "stewardship",
+            "board",
+        ),
+    ),
+    (
+        "policy",
+        "자본시장 제도·정책",
+        ("capital_market_policy",),
+        (
+            "자본시장법",
+            "상법",
+            "의무공개매수",
+            "코너스톤",
+            "IPO",
+            "공모가",
+            "공시",
+            "ESG 공시",
+            "금감원",
+            "금융위",
+            "공정위",
+            "대기업집단",
+            "총수",
+            "ISA",
+            "STO",
+            "증권사 IB",
+            "capital market reform",
+        ),
+    ),
+    (
+        "risk",
+        "상장·공시·거래 리스크",
+        ("listing_risk", "capital_raise_disclosure"),
+        (
+            "상장폐지",
+            "상장적격성",
+            "실질심사",
+            "거래정지",
+            "개선기간",
+            "유상증자",
+            "CB",
+            "EB",
+            "전환사채",
+            "리픽싱",
+            "불성실공시",
+            "정정신고서",
+            "투자자 보호",
+        ),
+    ),
+)
+
+DIGEST_DEFAULT_CATEGORY_LABEL = "기타 자본시장"
+
 
 def digest_config(config: dict[str, object]) -> dict[str, Any]:
     value = config.get("digest", {})
@@ -511,6 +622,22 @@ def numbered_digest_source(index: int, source: str) -> str:
     return f"{number} {label}"
 
 
+def wrapped_digest_source_link_lines(links: list[str], max_line_chars: int = 900) -> list[str]:
+    lines: list[str] = []
+    current: list[str] = []
+    for link in links:
+        candidate_links = current + [link]
+        candidate = " · ".join(candidate_links)
+        if current and len(candidate) > max_line_chars:
+            lines.append("  " + " · ".join(current))
+            current = [link]
+        else:
+            current = candidate_links
+    if current:
+        lines.append("  " + " · ".join(current))
+    return lines
+
+
 def render_digest_entry_group(group: list[dict[str, object]], config: dict[str, object]) -> list[str]:
     if len(group) == 1:
         entry = group[0]
@@ -526,11 +653,11 @@ def render_digest_entry_group(group: list[dict[str, object]], config: dict[str, 
         source = article_source_label(article)  # type: ignore[arg-type]
         links.append(html_link(numbered_digest_source(index, source), str(entry["url"])))
     if links:
-        line = "  " + " · ".join(links)
         remaining = len(group) - len(links)
+        link_lines = wrapped_digest_source_link_lines(links)
         if remaining > 0:
-            line += f" · 외 {remaining}건"
-        lines.append(line)
+            link_lines[-1] += f" · 외 {remaining}건"
+        lines.extend(link_lines)
     return lines
 
 
@@ -602,6 +729,8 @@ def digest_entry_content_text(entry: dict[str, object]) -> str:
                 str(article.get("title") or ""),
                 str(article.get("clean_title") or ""),
                 str(article.get("summary") or ""),
+                str(article.get("feed_name") or ""),
+                str(article.get("feed_category") or ""),
                 " ".join(str(value) for value in article.get("keywords") or []),
             ]
         )
@@ -610,6 +739,7 @@ def digest_entry_content_text(entry: dict[str, object]) -> str:
             [
                 str(cluster.get("representative_title") or ""),
                 str(cluster.get("theme_group") or ""),
+                " ".join(str(value) for value in cluster.get("keywords") or []),
             ]
         )
     return " ".join(part for part in parts if part).casefold()
@@ -707,6 +837,157 @@ def render_digest_link_sections(
         for group in group_digest_entries(section_entries, config):
             lines.extend(render_digest_entry_group(group, config))
     return lines
+
+
+def digest_group_content_text(group: list[dict[str, object]]) -> str:
+    return " ".join(digest_entry_content_text(entry) for entry in group).casefold()
+
+
+def digest_group_theme_groups(group: list[dict[str, object]]) -> set[str]:
+    theme_groups: set[str] = set()
+    for entry in group:
+        cluster = entry.get("cluster")
+        if isinstance(cluster, dict):
+            theme_group = str(cluster.get("theme_group") or "").strip().casefold()
+            if theme_group:
+                theme_groups.add(theme_group)
+    return theme_groups
+
+
+def digest_category_label_for_group(group: list[dict[str, object]]) -> str:
+    text = digest_group_content_text(group)
+    theme_groups = digest_group_theme_groups(group)
+    best_score = 0
+    best_label = DIGEST_DEFAULT_CATEGORY_LABEL
+    for _key, label, rule_theme_groups, keywords in DIGEST_CATEGORY_RULES:
+        score = 0
+        normalized_rule_theme_groups = {theme.casefold() for theme in rule_theme_groups}
+        score += 3 * len(theme_groups & normalized_rule_theme_groups)
+        for keyword in keywords:
+            if keyword.casefold() in text:
+                score += 2 if label == "상장·공시·거래 리스크" else 1
+        if score > best_score:
+            best_score = score
+            best_label = label
+    return best_label
+
+
+def render_daily_digest_section_blocks(
+    clusters: list[dict[str, object]],
+    config: dict[str, object],
+    duplicate_records: list[dict[str, object]] | None = None,
+) -> list[tuple[str, list[list[str]]]]:
+    entries = limited_digest_article_entries(clusters, config, duplicate_records)
+    section_blocks: list[tuple[str, list[list[str]]]] = []
+
+    domestic_groups = group_digest_entries(entries["domestic"], config)
+    if domestic_groups:
+        buckets: dict[str, list[list[str]]] = {
+            label: []
+            for _key, label, _theme_groups, _keywords in DIGEST_CATEGORY_RULES
+        }
+        buckets[DIGEST_DEFAULT_CATEGORY_LABEL] = []
+        for group in domestic_groups:
+            label = digest_category_label_for_group(group)
+            buckets.setdefault(label, []).append(render_digest_entry_group(group, config))
+        for _key, label, _theme_groups, _keywords in DIGEST_CATEGORY_RULES:
+            if buckets.get(label):
+                section_blocks.append((label, buckets[label]))
+        if buckets[DIGEST_DEFAULT_CATEGORY_LABEL]:
+            section_blocks.append((DIGEST_DEFAULT_CATEGORY_LABEL, buckets[DIGEST_DEFAULT_CATEGORY_LABEL]))
+
+    global_groups = group_digest_entries(entries["global"], config)
+    if global_groups:
+        section_blocks.append(("영문", [render_digest_entry_group(group, config) for group in global_groups]))
+
+    return section_blocks
+
+
+def telegram_text_length(lines: list[str]) -> int:
+    return len("\n".join(lines).strip())
+
+
+def append_digest_lines(current: list[str], lines: list[str]) -> list[str]:
+    if not current:
+        return list(lines)
+    if lines and current[-1] != "" and lines[0] != "":
+        return [*current, "", *lines]
+    return [*current, *lines]
+
+
+def digest_block_fallback_chunks(lines: list[str], max_chars: int) -> list[list[str]]:
+    if len(lines) <= 2:
+        return [chunk.splitlines() for chunk in split_plain_telegram_text("\n".join(lines).strip(), max_chars)]
+
+    section_header = lines[0] if lines[0].startswith("<b>") else ""
+    title_line = lines[1] if section_header and len(lines) > 1 and lines[1].startswith("• ") else ""
+    prefix = [line for line in (section_header, title_line) if line]
+    if not prefix:
+        return [chunk.splitlines() for chunk in split_plain_telegram_text("\n".join(lines).strip(), max_chars)]
+
+    chunks: list[list[str]] = []
+    current = list(prefix)
+    for line in lines[len(prefix) :]:
+        candidate = [*current, line]
+        if telegram_text_length(candidate) <= max_chars:
+            current = candidate
+            continue
+        if current != prefix:
+            chunks.append(current)
+            current = [*prefix, line]
+            continue
+        chunks.extend(chunk.splitlines() for chunk in split_plain_telegram_text(line, max_chars))
+        current = list(prefix)
+    if current != prefix:
+        chunks.append(current)
+    return chunks or [prefix]
+
+
+def split_digest_section_blocks(
+    header_lines: list[str],
+    section_blocks: list[tuple[str, list[list[str]]]],
+    max_chars: int,
+) -> list[str]:
+    messages: list[str] = []
+    current = [line for line in header_lines if line is not None]
+    current_section = ""
+
+    def flush() -> None:
+        nonlocal current, current_section
+        text = "\n".join(current).strip()
+        if text:
+            messages.append(text)
+        current = []
+        current_section = ""
+
+    for section_label, group_blocks in section_blocks:
+        for group_index, group_lines in enumerate(group_blocks):
+            continued = current_section == section_label or (not current and group_index > 0)
+            section_header = f"<b>{section_label}{' (계속)' if continued else ''}</b>"
+            block = list(group_lines) if current_section == section_label else [section_header, *group_lines]
+            candidate = append_digest_lines(current, block)
+            if telegram_text_length(candidate) <= max_chars:
+                current = candidate
+                current_section = section_label
+                continue
+
+            if current:
+                flush()
+
+            block = [f"<b>{section_label}{' (계속)' if group_index > 0 else ''}</b>", *group_lines]
+            if telegram_text_length(block) <= max_chars:
+                current = block
+                current_section = section_label
+                continue
+
+            chunks = digest_block_fallback_chunks(block, max_chars)
+            if chunks:
+                messages.extend("\n".join(chunk).strip() for chunk in chunks[:-1] if "\n".join(chunk).strip())
+                current = chunks[-1]
+                current_section = section_label
+
+    flush()
+    return messages
 
 
 def duplicate_record_datetime(record: dict[str, object], config: dict[str, object]) -> datetime | None:
@@ -863,16 +1144,14 @@ def build_daily_digest_messages(
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
     start_label = start_at.astimezone(ZoneInfo(timezone_name)).strftime("%m.%d")
     end_label = now.astimezone(ZoneInfo(timezone_name)).strftime("%m.%d")
-    lines = [
+    header_lines = [
         f"<b>데일리 주주·자본시장 브리핑 ({start_label}-{end_label})</b>",
         "",
         "<b>요약</b>",
         *summary_bullet_lines(review, config),
-        "",
-        *render_digest_link_sections(clusters, config, duplicate_records or []),
     ]
-    message = "\n".join(line for line in lines if line is not None).strip()
-    return split_plain_telegram_text(message, max_chars)
+    section_blocks = render_daily_digest_section_blocks(clusters, config, duplicate_records or [])
+    return split_digest_section_blocks(header_lines, section_blocks, max_chars)
 
 
 def build_hourly_update_messages(
@@ -884,11 +1163,7 @@ def build_hourly_update_messages(
 ) -> list[str]:
     max_chars = int(digest_config(config).get("max_message_chars", 3900))
     review = generate_hourly_digest_review(clusters, config, start_at, now)
-    timezone_name = str(config.get("timezone") or "Asia/Seoul")
-    title_label = now.astimezone(ZoneInfo(timezone_name)).strftime("%m.%d %H:%M")
     lines = [
-        f"<b>주주·자본시장 브리핑 ({title_label})</b>",
-        "",
         "<b>요약</b>",
         *summary_bullet_lines(review, config),
         "",
