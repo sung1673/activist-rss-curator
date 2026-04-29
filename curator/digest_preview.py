@@ -7,7 +7,12 @@ from pathlib import Path
 from .config import load_config
 from .dates import now_in_timezone
 from .state import load_state
-from .summaries import build_daily_digest_messages, digest_clusters_in_window, digest_config
+from .summaries import (
+    build_daily_digest_messages,
+    digest_clusters_in_window,
+    digest_config,
+    duplicate_records_in_window,
+)
 from .telegram_publisher import (
     send_telegram_message,
     telegram_bot_token,
@@ -49,10 +54,11 @@ def send_digest_preview(root: Path | None = None) -> dict[str, int]:
     start_at = now - timedelta(hours=preview_hours(config))
     state = load_state(project_root / "data" / "state.json")
     clusters = digest_clusters_in_window(state, config, start_at, now)
-    if not clusters:
+    duplicate_records = duplicate_records_in_window(state, config, start_at, now)
+    if not clusters and not duplicate_records:
         return {"digest_preview_sent": 0, "digest_preview_failed": 0}
 
-    messages = build_daily_digest_messages(clusters, config, now, start_at)
+    messages = build_daily_digest_messages(clusters, config, now, start_at, duplicate_records)
     prefix = preview_prefix()
     if messages and prefix:
         messages[0] = prefix + messages[0]
