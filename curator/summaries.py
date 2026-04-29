@@ -58,6 +58,49 @@ DIGEST_GROUP_STOPWORDS = {
     "that",
     "this",
 }
+DIGEST_GROUP_BROAD_TOKENS = {
+    "경영권",
+    "분쟁",
+    "경영권분쟁",
+    "주주",
+    "소액주주",
+    "소액주주연합",
+    "소액주주연대",
+    "주주연대",
+    "행동주의",
+    "이사회",
+    "사외이사",
+    "지배구조",
+    "거버넌스",
+    "밸류업",
+    "벨류업",
+    "주주환원",
+    "자사주",
+    "소각",
+    "의결권",
+    "상장사",
+    "기업가치",
+    "자본시장",
+    "공정위",
+    "금감원",
+    "금융위",
+    "관련",
+    "추진",
+    "부각",
+    "지속",
+    "확인",
+    "활용",
+    "수단",
+    "우려",
+    "확대",
+    "강화",
+    "shareholder",
+    "shareholders",
+    "activist",
+    "activism",
+    "governance",
+    "board",
+}
 
 OPERATIONAL_SUMMARY_PATTERNS = (
     "링크",
@@ -315,18 +358,46 @@ def digest_article_title(article: dict[str, object]) -> str:
     return display_article_title(article, source)
 
 
-def digest_group_tokens(article: dict[str, object]) -> set[str]:
-    text = f"{article.get('clean_title') or article.get('title') or ''} {article.get('summary') or ''}"
-    tokens = {
+def digest_tokens_from_text(text: str) -> set[str]:
+    return {
         token.casefold()
         for token in re.findall(r"[가-힣A-Za-z0-9]{2,}", text)
         if token.casefold() not in DIGEST_GROUP_STOPWORDS
     }
+
+
+def digest_group_tokens(article: dict[str, object]) -> set[str]:
+    text = f"{article.get('clean_title') or article.get('title') or ''} {article.get('summary') or ''}"
+    tokens = digest_tokens_from_text(text)
     for company in article.get("company_candidates") or []:
         value = str(company).strip().casefold()
         if value:
             tokens.add(value)
     return tokens
+
+
+def digest_title_tokens(article: dict[str, object]) -> set[str]:
+    return digest_tokens_from_text(str(article.get("clean_title") or article.get("title") or ""))
+
+
+def digest_company_tokens(entry: dict[str, object]) -> set[str]:
+    values: list[str] = []
+    article = entry.get("article")
+    cluster = entry.get("cluster")
+    if isinstance(article, dict):
+        values.extend(str(company) for company in article.get("company_candidates") or [])
+    if isinstance(cluster, dict):
+        values.extend(str(company) for company in cluster.get("companies") or [])
+    return {token for value in values for token in digest_tokens_from_text(value)}
+
+
+def digest_strong_tokens(entry: dict[str, object], key: str) -> set[str]:
+    weak_tokens = DIGEST_GROUP_BROAD_TOKENS | digest_company_tokens(entry)
+    return {
+        str(token)
+        for token in set(entry.get(key) or [])
+        if str(token).casefold() not in weak_tokens
+    }
 
 
 def digest_entry_for_article(
@@ -347,6 +418,7 @@ def digest_entry_for_article(
         "datetime": article_dt,
         "label": digest_article_label(article, cluster, config),
         "title": digest_article_title(article),
+        "title_tokens": digest_title_tokens(article),
         "tokens": digest_group_tokens(article),
         "url": url,
     }
@@ -445,17 +517,11 @@ def digest_entries_are_same_story(
     if title_score >= 82:
         return True
 
-    left_tokens = set(left.get("tokens") or [])
-    right_tokens = set(right.get("tokens") or [])
-    overlap = left_tokens & right_tokens
-    distinctive_overlap = {
-        token
-        for token in overlap
-        if len(str(token)) >= 2 and str(token).casefold() not in DIGEST_GROUP_STOPWORDS
-    }
-    if len(distinctive_overlap) >= 3 and title_score >= 58:
+    title_overlap = digest_strong_tokens(left, "title_tokens") & digest_strong_tokens(right, "title_tokens")
+    all_overlap = digest_strong_tokens(left, "tokens") & digest_strong_tokens(right, "tokens")
+    if len(title_overlap) >= 2 and title_score >= 58:
         return True
-    if len(distinctive_overlap) >= 4:
+    if len(title_overlap) >= 1 and len(all_overlap) >= 3 and title_score >= 58:
         return True
     return False
 

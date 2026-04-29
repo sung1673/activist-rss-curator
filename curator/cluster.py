@@ -17,6 +17,7 @@ KNOWN_COMPANIES = [
     "KB금융지주",
     "삼성물산",
     "고려아연",
+    "영풍",
     "풍산",
     "한국앤컴퍼니",
     "KT&G",
@@ -74,6 +75,36 @@ COMPANY_SUFFIX_PATTERN = re.compile(
 COMPANY_STOPWORDS = {"행동주의", "주주행동", "기업지배구조", "거버넌스", "이사회", "주주총회"}
 RELEVANCE_RANK = {"low": 0, "medium": 1, "high": 2}
 SENSITIVE_ARTICLE_KEYS = {"source_feed_url", "feed_url"}
+BROAD_CLUSTER_KEYWORDS = {
+    "행동주의",
+    "행동주의 주주",
+    "경영권 분쟁",
+    "소액주주",
+    "소액주주연대",
+    "주주행동",
+    "주주권",
+    "이사회",
+    "사외이사",
+    "지배구조",
+    "거버넌스",
+    "스튜어드십",
+    "밸류업",
+    "벨류업",
+    "주주환원",
+    "의결권",
+    "일반주주",
+    "공정위",
+    "금감원",
+    "금융위",
+    "상법",
+    "자본시장법",
+    "대기업집단",
+    "기업집단",
+    "shareholder activism",
+    "activist investor",
+    "corporate governance",
+    "shareholder rights",
+}
 THEME_GROUPS = [
     (
         "shareholder_proposal",
@@ -237,6 +268,7 @@ COMPANY_STRICT_THEME_GROUPS = {
     "capital_raise_disclosure",
     "ownership_succession",
 }
+STRICT_THEME_COMPANY_TITLE_THRESHOLD = 70
 
 
 def extract_company_candidates(text: str) -> list[str]:
@@ -409,10 +441,14 @@ def add_article_to_cluster(article: dict[str, object], cluster: dict[str, object
         )
 
 
+def shared_specific_keywords(article: dict[str, object], cluster: dict[str, object]) -> set[str]:
+    shared = set(article.get("topic_keywords") or []) & set(cluster.get("keywords", []))
+    return {keyword for keyword in shared if str(keyword).casefold() not in {item.casefold() for item in BROAD_CLUSTER_KEYWORDS}}
+
+
 def same_company_and_keyword(article: dict[str, object], cluster: dict[str, object]) -> bool:
     companies = set(article.get("company_candidates") or [])
-    keywords = set(article.get("topic_keywords") or [])
-    return bool(companies & set(cluster.get("companies", []))) and bool(keywords & set(cluster.get("keywords", [])))
+    return bool(companies & set(cluster.get("companies", []))) and bool(shared_specific_keywords(article, cluster))
 
 
 def same_theme_group(article: dict[str, object], cluster: dict[str, object]) -> bool:
@@ -431,7 +467,9 @@ def can_join_by_theme_group(article: dict[str, object], cluster: dict[str, objec
     article_companies = set(article.get("company_candidates") or [])
     cluster_companies = set(cluster.get("companies") or [])
     if article_companies and cluster_companies:
-        return bool(article_companies & cluster_companies)
+        return bool(article_companies & cluster_companies) and (
+            title_score >= STRICT_THEME_COMPANY_TITLE_THRESHOLD or bool(shared_specific_keywords(article, cluster))
+        )
     if article_companies or cluster_companies:
         return False
     return title_score >= threshold

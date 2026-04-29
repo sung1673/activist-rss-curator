@@ -8,6 +8,7 @@ from curator.summaries import (
     build_daily_digest_messages,
     build_hourly_update_messages,
     digest_article_is_english,
+    group_digest_entries,
     hourly_update_start_at,
     limited_digest_article_entries,
     publish_daily_digest_if_due,
@@ -418,6 +419,48 @@ def test_daily_digest_groups_similar_article_titles(config, now, monkeypatch) ->
     assert "링크:" not in message
     assert 'href="https://www.sisajournal.com/news/articleView.html?idxno=371009"' in message
     assert 'href="https://www.seoulfn.com/news/articleView.html?idxno=627481"' in message
+
+
+def test_digest_does_not_group_broad_same_company_dispute_titles(config, now) -> None:  # type: ignore[no-untyped-def]
+    articles = [
+        make_article(
+            "실체 불분명한 고려아연 소액주주연합 경영권 분쟁 속 기획 고발 의혹",
+            "https://example.com/korea-zinc-minority",
+            source="경기일보",
+            published_at="2026-04-29T20:30:00+09:00",
+            summary="고려아연 소액주주연합의 실체와 고발 배경을 둘러싼 의혹",
+        ),
+        make_article(
+            "영풍, 고려아연 황산 거래 중단은 경영권 분쟁 수단 본안서 다툴 것",
+            "https://example.com/korea-zinc-acid",
+            source="뉴시안",
+            published_at="2026-04-29T20:32:00+09:00",
+            summary="영풍이 황산취급대행 계약 종료와 거래거절 가처분 항고 기각에 입장을 냈다",
+        ),
+        make_article(
+            "최윤범, 고려아연 미래 성장 가속페달 영풍은 법적 분쟁 발목잡기",
+            "https://example.com/korea-zinc-growth",
+            source="아시아타임즈",
+            published_at="2026-04-29T20:35:00+09:00",
+            summary="영풍, 경영권 분쟁 후 소송전 확대해 고려아연의 신사업 투자와 함께 조명됐다",
+        ),
+    ]
+    for article in articles:
+        article["company_candidates"] = ["고려아연", "영풍"]
+    clusters = [
+        {
+            "representative_title": article["clean_title"],
+            "published_at": article["published_at"],
+            "companies": article["company_candidates"],
+            "articles": [article],
+        }
+        for article in articles
+    ]
+
+    entries = limited_digest_article_entries(clusters, config)["domestic"]
+    groups = group_digest_entries(entries)
+
+    assert [len(group) for group in groups] == [1, 1, 1]
 
 
 def test_daily_digest_fallback_summary_uses_article_topics(config, now) -> None:  # type: ignore[no-untyped-def]

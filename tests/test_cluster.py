@@ -156,3 +156,31 @@ def test_minority_shareholder_theme_requires_company_match(config, now) -> None:
     ]
     cluster_articles(articles, state, config, now)
     assert len(state["pending_clusters"]) == 2
+
+
+def test_same_company_control_dispute_requires_specific_story_match(config, now) -> None:  # type: ignore[no-untyped-def]
+    state = {"pending_clusters": [], "published_clusters": []}
+    articles = [
+        make_article(
+            "실체 불분명한 고려아연 소액주주연합 경영권 분쟁 속 기획 고발 의혹",
+            "https://example.com/korea-zinc-minority",
+            summary="고려아연 소액주주연합의 실체와 고발 배경을 둘러싼 의혹",
+            relevance_level="high",
+        ),
+        make_article(
+            "영풍, 고려아연 황산 거래 중단은 경영권 분쟁 수단 본안서 다툴 것",
+            "https://example.com/korea-zinc-acid",
+            summary="영풍이 황산취급대행 계약 종료와 거래거절 가처분 항고 기각에 입장을 냈다",
+            relevance_level="high",
+        ),
+        make_article(
+            "최윤범, 고려아연 미래 성장 가속페달 영풍은 법적 분쟁 발목잡기",
+            "https://example.com/korea-zinc-growth",
+            summary="고려아연의 신사업 투자와 영풍 측 법적 분쟁이 함께 조명됐다",
+            relevance_level="high",
+        ),
+    ]
+
+    cluster_articles(articles, state, config, now)
+
+    assert len(state["pending_clusters"]) == 3
