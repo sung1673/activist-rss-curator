@@ -8,6 +8,7 @@ from rapidfuzz import fuzz
 from .dates import datetime_to_iso, hours_between, parse_datetime
 from .normalize import stable_hash
 from .relevance import topic_keywords_for_article
+from .story_judge import judge_same_story, judgement_allows_same_story, story_judge_auto_accept_title_score
 
 
 KNOWN_COMPANIES = [
@@ -475,6 +476,31 @@ def can_join_by_theme_group(article: dict[str, object], cluster: dict[str, objec
     return title_score >= threshold
 
 
+def representative_article(cluster: dict[str, object]) -> dict[str, object]:
+    articles = list(cluster.get("articles") or [])
+    return articles[0] if articles and isinstance(articles[0], dict) else {}
+
+
+def ai_guard_allows_join(
+    article: dict[str, object],
+    cluster: dict[str, object],
+    config: dict[str, object],
+    title_score: float,
+    local_reason: str,
+) -> bool:
+    if title_score >= story_judge_auto_accept_title_score(config):
+        return True
+    judgement = judge_same_story(
+        article,
+        representative_article(cluster),
+        config,
+        title_score=title_score,
+        local_reason=local_reason,
+        context="cluster",
+    )
+    return judgement_allows_same_story(judgement, config, fallback=True)
+
+
 def within_cluster_window(
     article: dict[str, object],
     cluster: dict[str, object],
@@ -530,19 +556,22 @@ def can_join_cluster(
             return True
         return False
 
-    if title_score >= title_threshold:
+    if title_score >= title_threshold and ai_guard_allows_join(article, cluster, config, title_score, "title_similarity"):
         return True
 
-    if same_company_and_keyword(article, cluster):
+    if same_company_and_keyword(article, cluster) and ai_guard_allows_join(article, cluster, config, title_score, "same_company_specific_keyword"):
         return True
 
     if theme_window_match:
-        cluster["theme_grouped"] = True
-        return True
+        if ai_guard_allows_join(article, cluster, config, title_score, "same_theme_group"):
+            cluster["theme_grouped"] = True
+            return True
+        return False
 
     representative = (cluster.get("articles") or [{}])[0]
     summary_score = fuzz.token_set_ratio(str(article.get("summary") or ""), str(representative.get("summary") or ""))
-    return title_score >= 80 and summary_score >= int(dedupe_config.get("summary_cluster_threshold", 85))  # type: ignore[union-attr]
+    summary_match = title_score >= 80 and summary_score >= int(dedupe_config.get("summary_cluster_threshold", 85))  # type: ignore[union-attr]
+    return summary_match and ai_guard_allows_join(article, cluster, config, title_score, "title_and_summary_similarity")
 
 
 def find_matching_cluster(

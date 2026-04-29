@@ -87,6 +87,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "hourly_digest_enabled": True,
         "hourly_digest_model": "openai/gpt-4.1",
         "hourly_digest_max_tokens": 180,
+        "story_judge_enabled": True,
+        "story_judge_model": "openai/gpt-4.1",
+        "story_judge_max_tokens": 90,
+        "story_judge_max_calls_per_run": 8,
+        "story_judge_confidence_threshold": 0.75,
+        "story_judge_auto_accept_title_score": 88,
     },
     "digest": {
         "enabled": True,

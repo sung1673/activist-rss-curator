@@ -7,9 +7,9 @@ from html import escape
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import httpx
 from rapidfuzz import fuzz
 
+from .ai import ai_config, call_github_models
 from .dates import datetime_to_iso, format_kst, parse_datetime
 from .rss_writer import (
     article_link,
@@ -31,6 +31,7 @@ from .telegram_publisher import (
     telegram_config,
     unsent_telegram_clusters,
 )
+from .story_judge import judge_same_story, judgement_allows_same_story, story_judge_auto_accept_title_score
 
 
 DIGEST_GROUP_STOPWORDS = {
@@ -163,11 +164,6 @@ DIGEST_SOURCE_LABEL_OVERRIDES = {
 }
 
 
-def ai_config(config: dict[str, object]) -> dict[str, Any]:
-    value = config.get("ai", {})
-    return value if isinstance(value, dict) else {}
-
-
 def digest_config(config: dict[str, object]) -> dict[str, Any]:
     value = config.get("digest", {})
     return value if isinstance(value, dict) else {}
@@ -179,70 +175,6 @@ def digest_count_limit(settings: dict[str, Any], key: str, default: int) -> int 
     except (TypeError, ValueError):
         value = default
     return value if value > 0 else None
-
-
-def github_models_token() -> str:
-    return (
-        os.environ.get("GITHUB_MODELS_TOKEN")
-        or os.environ.get("GITHUB_TOKEN")
-        or os.environ.get("GH_TOKEN")
-        or ""
-    ).strip()
-
-
-def call_github_models(
-    system_prompt: str,
-    user_prompt: str,
-    *,
-    model: str,
-    max_tokens: int,
-    config: dict[str, object],
-    client: httpx.Client | None = None,
-) -> str | None:
-    settings = ai_config(config)
-    if not settings.get("enabled", True):
-        return None
-    token = github_models_token()
-    if not token:
-        return None
-
-    endpoint = str(settings.get("endpoint") or "https://models.github.ai/inference/chat/completions")
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": 0.2,
-        "max_tokens": max_tokens,
-    }
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    timeout = float(settings.get("timeout_seconds", 25))
-
-    try:
-        if client is None:
-            with httpx.Client(timeout=timeout) as local_client:
-                response = local_client.post(endpoint, headers=headers, json=payload)
-        else:
-            response = client.post(endpoint, headers=headers, json=payload)
-        if response.status_code >= 400:
-            return None
-        data = response.json()
-    except (httpx.HTTPError, ValueError, TypeError):
-        return None
-
-    try:
-        content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        return None
-    if not isinstance(content, str):
-        return None
-    return re.sub(r"\n{3,}", "\n\n", content).strip()
 
 
 def digest_cluster_datetime(cluster: dict[str, object], timezone_name: str) -> datetime | None:
@@ -510,28 +442,44 @@ def limited_digest_article_entries(
 def digest_entries_are_same_story(
     left: dict[str, object],
     right: dict[str, object],
+    config: dict[str, object] | None = None,
 ) -> bool:
     left_title = str(left.get("title") or "")
     right_title = str(right.get("title") or "")
     title_score = fuzz.token_set_ratio(left_title, right_title)
+    local_reason = ""
     if title_score >= 82:
-        return True
+        local_reason = "title_similarity"
 
     title_overlap = digest_strong_tokens(left, "title_tokens") & digest_strong_tokens(right, "title_tokens")
     all_overlap = digest_strong_tokens(left, "tokens") & digest_strong_tokens(right, "tokens")
-    if len(title_overlap) >= 2 and title_score >= 58:
+    if not local_reason and len(title_overlap) >= 2 and title_score >= 58:
+        local_reason = "title_token_overlap"
+    if not local_reason and len(title_overlap) >= 1 and len(all_overlap) >= 3 and title_score >= 58:
+        local_reason = "title_and_summary_token_overlap"
+    if not local_reason:
+        return False
+    if config is None or title_score >= story_judge_auto_accept_title_score(config):
         return True
-    if len(title_overlap) >= 1 and len(all_overlap) >= 3 and title_score >= 58:
-        return True
-    return False
+    left_article = left.get("article") if isinstance(left.get("article"), dict) else {}
+    right_article = right.get("article") if isinstance(right.get("article"), dict) else {}
+    judgement = judge_same_story(
+        left_article,  # type: ignore[arg-type]
+        right_article,  # type: ignore[arg-type]
+        config,
+        title_score=title_score,
+        local_reason=local_reason,
+        context="digest_group",
+    )
+    return judgement_allows_same_story(judgement, config, fallback=True)
 
 
-def group_digest_entries(entries: list[dict[str, object]]) -> list[list[dict[str, object]]]:
+def group_digest_entries(entries: list[dict[str, object]], config: dict[str, object] | None = None) -> list[list[dict[str, object]]]:
     groups: list[list[dict[str, object]]] = []
     for entry in entries:
         matched_group: list[dict[str, object]] | None = None
         for group in groups:
-            if any(digest_entries_are_same_story(entry, existing) for existing in group):
+            if any(digest_entries_are_same_story(entry, existing, config) for existing in group):
                 matched_group = group
                 break
         if matched_group is None:
@@ -694,7 +642,7 @@ def fallback_title_bullets(
     global_section: bool = False,
 ) -> list[str]:
     bullets: list[str] = []
-    for group in group_digest_entries(entries):
+    for group in group_digest_entries(entries, config):
         title = digest_group_title(group, config)
         title = compact_text(re.sub(r"\s+", " ", title).strip(" -|"), max_chars=36)
         if not title or is_operational_summary_line(title):
@@ -756,7 +704,7 @@ def render_digest_link_sections(
         if lines:
             lines.append("")
         lines.append(f"<b>{labels[section_key]}</b>")
-        for group in group_digest_entries(section_entries):
+        for group in group_digest_entries(section_entries, config):
             lines.extend(render_digest_entry_group(group, config))
     return lines
 

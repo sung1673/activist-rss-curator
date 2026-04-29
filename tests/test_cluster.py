@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from curator.cluster import cluster_articles, enrich_article_for_clustering
+from curator.story_judge import StoryJudgement
 
 from conftest import make_article
 
@@ -184,3 +185,29 @@ def test_same_company_control_dispute_requires_specific_story_match(config, now)
     cluster_articles(articles, state, config, now)
 
     assert len(state["pending_clusters"]) == 3
+
+
+def test_ai_story_judge_can_block_ambiguous_same_company_cluster(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    state = {"pending_clusters": [], "published_clusters": []}
+    monkeypatch.setattr(
+        "curator.cluster.judge_same_story",
+        lambda *_args, **_kwargs: StoryJudgement("related_but_different", 0.91, "같은 회사지만 다른 절차"),
+    )
+    articles = [
+        make_article(
+            "고려아연 소액주주, 사외이사 검찰 고발",
+            "https://example.com/korea-zinc-complaint",
+            summary="고려아연 소액주주연대가 검찰 고발에 나섰다",
+            relevance_level="high",
+        ),
+        make_article(
+            "고려아연 소액주주, 금융위 진정",
+            "https://example.com/korea-zinc-fsc",
+            summary="고려아연 소액주주연대가 금융위원회에 진정을 냈다",
+            relevance_level="high",
+        ),
+    ]
+
+    cluster_articles(articles, state, config, now)
+
+    assert len(state["pending_clusters"]) == 2

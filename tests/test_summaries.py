@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from curator.cluster import cluster_articles
+from curator.story_judge import StoryJudgement
 from curator.summaries import (
     build_daily_digest_messages,
     build_hourly_update_messages,
@@ -458,9 +459,41 @@ def test_digest_does_not_group_broad_same_company_dispute_titles(config, now) ->
     ]
 
     entries = limited_digest_article_entries(clusters, config)["domestic"]
-    groups = group_digest_entries(entries)
+    groups = group_digest_entries(entries, config)
 
     assert [len(group) for group in groups] == [1, 1, 1]
+
+
+def test_ai_story_judge_can_block_digest_grouping(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(
+        "curator.summaries.judge_same_story",
+        lambda *_args, **_kwargs: StoryJudgement("related_but_different", 0.9, "같은 회사지만 다른 사건"),
+    )
+    first = make_article(
+        "고려아연 소액주주, 사외이사 검찰 고발",
+        "https://example.com/digest-complaint",
+        source="시사저널",
+        published_at="2026-04-29T20:30:00+09:00",
+        relevance_level="high",
+    )
+    first["company_candidates"] = ["고려아연"]
+    second = make_article(
+        "고려아연 소액주주, 금융위 진정",
+        "https://example.com/digest-fsc",
+        source="서울파이낸스",
+        published_at="2026-04-29T20:32:00+09:00",
+        relevance_level="high",
+    )
+    second["company_candidates"] = ["고려아연"]
+    clusters = [
+        {"representative_title": first["clean_title"], "published_at": first["published_at"], "articles": [first]},
+        {"representative_title": second["clean_title"], "published_at": second["published_at"], "articles": [second]},
+    ]
+
+    entries = limited_digest_article_entries(clusters, config)["domestic"]
+    groups = group_digest_entries(entries, config)
+
+    assert [len(group) for group in groups] == [1, 1]
 
 
 def test_daily_digest_fallback_summary_uses_article_topics(config, now) -> None:  # type: ignore[no-untyped-def]
