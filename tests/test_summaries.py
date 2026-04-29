@@ -47,12 +47,8 @@ def published_cluster(config, now):  # type: ignore[no-untyped-def]
 def digest_summary_block(message: str) -> str:
     summary = message.split("<b>요약</b>\n", 1)[1]
     for marker in (
-        "\n\n<b>주주행동·경영권 분쟁</b>",
-        "\n\n<b>밸류업·주주환원</b>",
-        "\n\n<b>지배구조·스튜어드십</b>",
-        "\n\n<b>자본시장 제도·정책</b>",
-        "\n\n<b>상장·공시·거래 리스크</b>",
-        "\n\n<b>기타 자본시장</b>",
+        "\n\n<b>주주행동·거버넌스</b>",
+        "\n\n<b>자본시장·공시·상장</b>",
         "\n\n<b>국문</b>",
         "\n\n<b>영문</b>",
     ):
@@ -94,7 +90,7 @@ def test_daily_digest_sends_once_in_morning_window(config, now, monkeypatch) -> 
     assert "오늘의 리뷰" in sent_messages[0]
 
 
-def test_daily_digest_merges_duplicate_records_into_article_groups(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_daily_digest_uses_one_representative_for_duplicate_records(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import summaries
 
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
@@ -142,10 +138,11 @@ def test_daily_digest_merges_duplicate_records_into_article_groups(config, now, 
     }
     assert "<b>중복 기사</b>" not in sent_messages[0]
     assert "(중복" not in sent_messages[0]
-    assert 'href="https://example.com/duplicate"' in sent_messages[0]
-    assert "(2건)" in sent_messages[0]
-    assert "① EXAMPLE" in sent_messages[0]
-    assert "② 매일경제" in sent_messages[0]
+    assert 'href="https://www.mk.co.kr/news/stock/1"' in sent_messages[0]
+    assert 'href="https://example.com/duplicate"' not in sent_messages[0]
+    assert "(2건)" not in sent_messages[0]
+    assert "①" not in sent_messages[0]
+    assert "②" not in sent_messages[0]
     assert "수집키워드" not in sent_messages[0]
 
 
@@ -314,7 +311,7 @@ def test_daily_digest_lists_korean_and_english_article_links(config, now, monkey
 
     message = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))[0]
 
-    assert "<b>밸류업·주주환원</b>" in message
+    assert "<b>주주행동·거버넌스</b>" in message
     assert "<b>영문</b>" in message
     assert 'href="https://example.com/domestic"' in message
     assert 'href="https://example.com/global"' in message
@@ -380,7 +377,7 @@ def test_global_category_korean_article_stays_in_korean_section(config, now) -> 
         now - timedelta(hours=24),
     )[0]
 
-    assert "<b>밸류업·주주환원</b>" in message
+    assert "<b>주주행동·거버넌스</b>" in message
     assert "<b>영문</b>" not in message
 
 
@@ -415,9 +412,10 @@ def test_daily_digest_renders_topic_categories(config, now, monkeypatch) -> None
 
     message = "\n".join(build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24)))
 
-    assert "<b>주주행동·경영권 분쟁</b>" in message
-    assert "<b>밸류업·주주환원</b>" in message
-    assert "<b>상장·공시·거래 리스크</b>" in message
+    assert "<b>주주행동·거버넌스</b>" in message
+    assert "<b>자본시장·공시·상장</b>" in message
+    assert "<b>밸류업·주주환원</b>" not in message
+    assert "<b>상장·공시·거래 리스크</b>" not in message
 
 
 def test_daily_digest_splits_on_section_and_group_boundaries(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -458,7 +456,7 @@ def test_daily_digest_splits_on_section_and_group_boundaries(config, now, monkey
     assert all(len(message) <= 900 for message in messages)
     for message in messages[1:]:
         first_line = next(line for line in message.splitlines() if line.strip())
-        assert first_line.startswith("<b>주주행동·경영권 분쟁")
+        assert first_line.startswith("<b>주주행동·거버넌스")
         assert not first_line.startswith("  <a")
         assert not first_line.startswith("①")
 
@@ -502,12 +500,12 @@ def test_daily_digest_groups_similar_article_titles(config, now, monkeypatch) ->
     message = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))[0]
 
     assert "04.27 /" in message
-    assert "(2건)" in message
-    assert "① 서울파이낸스" in message
-    assert "② 시사저널" in message
+    assert "(2건)" not in message
+    assert "①" not in message
+    assert "②" not in message
     assert "링크:" not in message
-    assert 'href="https://www.sisajournal.com/news/articleView.html?idxno=371009"' in message
     assert 'href="https://www.seoulfn.com/news/articleView.html?idxno=627481"' in message
+    assert 'href="https://www.sisajournal.com/news/articleView.html?idxno=371009"' not in message
 
 
 def test_digest_does_not_group_broad_same_company_dispute_titles(config, now) -> None:  # type: ignore[no-untyped-def]

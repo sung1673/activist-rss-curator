@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timedelta
 from html import escape
 from typing import Any
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from rapidfuzz import fuzz
@@ -166,8 +167,16 @@ DIGEST_SOURCE_LABEL_OVERRIDES = {
 DIGEST_CATEGORY_RULES = (
     (
         "shareholder",
-        "주주행동·경영권 분쟁",
-        ("shareholder_proposal", "activism_trend", "control_dispute", "board_audit"),
+        "주주행동·거버넌스",
+        (
+            "shareholder_proposal",
+            "activism_trend",
+            "control_dispute",
+            "board_audit",
+            "valueup_return",
+            "governance_stewardship",
+            "voting_disclosure",
+        ),
         (
             "주주제안",
             "소액주주",
@@ -184,32 +193,12 @@ DIGEST_CATEGORY_RULES = (
             "KCGI",
             "트러스톤",
             "엘리엇",
-            "activist",
-            "proxy fight",
-        ),
-    ),
-    (
-        "valueup",
-        "밸류업·주주환원",
-        ("valueup_return",),
-        (
             "밸류업",
             "벨류업",
             "주주환원",
             "배당",
             "자사주",
             "소각",
-            "저PBR",
-            "코리아밸류업",
-            "shareholder return",
-            "buyback",
-        ),
-    ),
-    (
-        "governance",
-        "지배구조·스튜어드십",
-        ("governance_stewardship", "voting_disclosure"),
-        (
             "지배구조",
             "거버넌스",
             "스튜어드십",
@@ -221,15 +210,19 @@ DIGEST_CATEGORY_RULES = (
             "임원보수",
             "주식보상",
             "성과보수",
+            "activist",
+            "proxy fight",
             "governance",
             "stewardship",
             "board",
+            "shareholder return",
+            "buyback",
         ),
     ),
     (
-        "policy",
-        "자본시장 제도·정책",
-        ("capital_market_policy",),
+        "capital_market",
+        "자본시장·공시·상장",
+        ("capital_market_policy", "listing_risk", "capital_raise_disclosure"),
         (
             "자본시장법",
             "상법",
@@ -247,14 +240,6 @@ DIGEST_CATEGORY_RULES = (
             "ISA",
             "STO",
             "증권사 IB",
-            "capital market reform",
-        ),
-    ),
-    (
-        "risk",
-        "상장·공시·거래 리스크",
-        ("listing_risk", "capital_raise_disclosure"),
-        (
             "상장폐지",
             "상장적격성",
             "실질심사",
@@ -268,11 +253,12 @@ DIGEST_CATEGORY_RULES = (
             "불성실공시",
             "정정신고서",
             "투자자 보호",
+            "capital market reform",
         ),
     ),
 )
 
-DIGEST_DEFAULT_CATEGORY_LABEL = "기타 자본시장"
+DIGEST_DEFAULT_CATEGORY_LABEL = "자본시장·공시·상장"
 
 
 def digest_config(config: dict[str, object]) -> dict[str, Any]:
@@ -482,6 +468,39 @@ def duplicate_record_candidates(record: dict[str, object]) -> list[dict[str, obj
     return articles
 
 
+def duplicate_candidate_score(article: dict[str, object], config: dict[str, object]) -> tuple[int, datetime, str]:
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    url = str(article.get("canonical_url") or article.get("link") or "")
+    hostname = (urlsplit(url).hostname or "").lower().removeprefix("www.")
+    raw_source = str(article.get("source") or "").strip()
+    source = article_source_label(article)
+    title = str(article.get("clean_title") or article.get("title") or "")
+    parsed_date = parse_datetime(
+        str(article.get("article_published_at") or article.get("feed_published_at") or article.get("published_at") or ""),
+        timezone_name,
+    )
+
+    score = 0
+    if hostname and not any(hostname == domain or hostname.endswith(f".{domain}") for domain in ("news.google.com", "google.com", "msn.com")):
+        score += 6
+    if raw_source and source not in {"NEWS", "V", "M", "MSN", "GOOGLE"}:
+        score += 3
+    if len(title) >= 12:
+        score += 2
+    if article.get("summary"):
+        score += 1
+    if parsed_date:
+        score += 1
+    return score, parsed_date or datetime.min.replace(tzinfo=ZoneInfo("UTC")), url
+
+
+def duplicate_record_representative(record: dict[str, object], config: dict[str, object]) -> dict[str, object] | None:
+    candidates = duplicate_record_candidates(record)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda article: duplicate_candidate_score(article, config))
+
+
 def add_duplicate_entries(
     entries: dict[str, list[dict[str, object]]],
     duplicate_records: list[dict[str, object]],
@@ -489,12 +508,14 @@ def add_duplicate_entries(
     seen_urls: set[str],
 ) -> None:
     for record in duplicate_records:
-        for article in duplicate_record_candidates(record):
-            entry = digest_entry_for_article(article, {}, config, seen_urls)
-            if not entry:
-                continue
-            section = "global" if digest_article_is_english(article) else "domestic"
-            entries[section].append(entry)
+        article = duplicate_record_representative(record, config)
+        if not article:
+            continue
+        entry = digest_entry_for_article(article, {}, config, seen_urls)
+        if not entry:
+            continue
+        section = "global" if digest_article_is_english(article) else "domestic"
+        entries[section].append(entry)
 
 
 def digest_article_entries(
@@ -659,6 +680,20 @@ def render_digest_entry_group(group: list[dict[str, object]], config: dict[str, 
             link_lines[-1] += f" · 외 {remaining}건"
         lines.extend(link_lines)
     return lines
+
+
+def digest_representative_entry(group: list[dict[str, object]], config: dict[str, object]) -> dict[str, object]:
+    return max(
+        group,
+        key=lambda entry: duplicate_candidate_score(entry["article"], config)
+        if isinstance(entry.get("article"), dict)
+        else (0, datetime.min.replace(tzinfo=ZoneInfo("UTC")), str(entry.get("url") or "")),
+    )
+
+
+def render_representative_digest_entry_group(group: list[dict[str, object]], config: dict[str, object]) -> list[str]:
+    entry = digest_representative_entry(group, config)
+    return [f"• {html_link(str(entry['label']), str(entry['url']))}"]
 
 
 def is_operational_summary_line(line: str) -> bool:
@@ -863,7 +898,7 @@ def digest_category_label_for_group(group: list[dict[str, object]]) -> str:
         score += 3 * len(theme_groups & normalized_rule_theme_groups)
         for keyword in keywords:
             if keyword.casefold() in text:
-                score += 2 if label == "상장·공시·거래 리스크" else 1
+                score += 1
         if score > best_score:
             best_score = score
             best_label = label
@@ -884,19 +919,19 @@ def render_daily_digest_section_blocks(
             label: []
             for _key, label, _theme_groups, _keywords in DIGEST_CATEGORY_RULES
         }
-        buckets[DIGEST_DEFAULT_CATEGORY_LABEL] = []
+        buckets.setdefault(DIGEST_DEFAULT_CATEGORY_LABEL, [])
         for group in domestic_groups:
             label = digest_category_label_for_group(group)
-            buckets.setdefault(label, []).append(render_digest_entry_group(group, config))
+            buckets.setdefault(label, []).append(render_representative_digest_entry_group(group, config))
         for _key, label, _theme_groups, _keywords in DIGEST_CATEGORY_RULES:
             if buckets.get(label):
                 section_blocks.append((label, buckets[label]))
-        if buckets[DIGEST_DEFAULT_CATEGORY_LABEL]:
+        if DIGEST_DEFAULT_CATEGORY_LABEL not in [label for _key, label, _theme_groups, _keywords in DIGEST_CATEGORY_RULES] and buckets[DIGEST_DEFAULT_CATEGORY_LABEL]:
             section_blocks.append((DIGEST_DEFAULT_CATEGORY_LABEL, buckets[DIGEST_DEFAULT_CATEGORY_LABEL]))
 
     global_groups = group_digest_entries(entries["global"], config)
     if global_groups:
-        section_blocks.append(("영문", [render_digest_entry_group(group, config) for group in global_groups]))
+        section_blocks.append(("영문", [render_representative_digest_entry_group(group, config) for group in global_groups]))
 
     return section_blocks
 
