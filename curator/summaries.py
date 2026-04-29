@@ -729,8 +729,6 @@ def digest_entry_content_text(entry: dict[str, object]) -> str:
                 str(article.get("title") or ""),
                 str(article.get("clean_title") or ""),
                 str(article.get("summary") or ""),
-                str(article.get("feed_name") or ""),
-                str(article.get("feed_category") or ""),
                 " ".join(str(value) for value in article.get("keywords") or []),
             ]
         )
