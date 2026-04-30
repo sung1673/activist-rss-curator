@@ -92,6 +92,12 @@ DIGEST_GROUP_BROAD_TOKENS = {
     "지속",
     "확인",
     "활용",
+    "선임",
+    "신규",
+    "변경",
+    "결정",
+    "대상",
+    "규모",
     "수단",
     "우려",
     "확대",
@@ -105,6 +111,10 @@ DIGEST_GROUP_BROAD_TOKENS = {
 }
 
 DIGEST_GROUP_EVENT_TOKENS = {
+    "m&a",
+    "인수",
+    "합병",
+    "인수합병",
     "저pbr",
     "밸류업",
     "벨류업",
@@ -115,6 +125,8 @@ DIGEST_GROUP_EVENT_TOKENS = {
     "배당",
     "공개매수",
     "의무공개매수",
+    "자본시장법",
+    "일반주주",
     "중복상장",
     "상장폐지",
     "상장적격성",
@@ -130,12 +142,133 @@ DIGEST_GROUP_EVENT_TOKENS = {
     "공개서한",
     "경영권",
     "분쟁",
+    "소송",
+    "고발",
+    "검찰",
+    "진정",
     "지배구조",
     "스튜어드십",
     "거버넌스",
     "esg",
+    "공시",
+    "임원보수",
+    "주식보상",
+    "총수",
+    "동일인",
+    "대기업집단",
+    "사익편취",
+    "공정위",
+    "규제",
+    "지정",
     "ipo",
     "코너스톤",
+}
+
+DIGEST_GROUP_SPECIFIC_EVENT_TOKENS = {
+    "m&a",
+    "인수",
+    "합병",
+    "인수합병",
+    "저pbr",
+    "밸류업",
+    "벨류업",
+    "주주환원",
+    "주주가치",
+    "자사주",
+    "소각",
+    "배당",
+    "공개매수",
+    "의무공개매수",
+    "자본시장법",
+    "일반주주",
+    "중복상장",
+    "상장폐지",
+    "상장적격성",
+    "실질심사",
+    "거래정지",
+    "개선기간",
+    "주주제안",
+    "임시주총",
+    "감사",
+    "사외이사",
+    "위임장",
+    "공개서한",
+    "소송",
+    "고발",
+    "검찰",
+    "진정",
+    "임원보수",
+    "주식보상",
+    "총수",
+    "동일인",
+    "대기업집단",
+    "사익편취",
+    "공정위",
+    "규제",
+    "지정",
+    "ipo",
+    "코너스톤",
+}
+
+DIGEST_GROUP_POLICY_EVENT_TOKENS = {
+    "m&a",
+    "인수",
+    "합병",
+    "인수합병",
+    "공개매수",
+    "의무공개매수",
+    "자본시장법",
+    "일반주주",
+    "중복상장",
+    "임원보수",
+    "주식보상",
+    "총수",
+    "동일인",
+    "대기업집단",
+    "사익편취",
+    "공정위",
+    "규제",
+    "지정",
+    "ipo",
+    "코너스톤",
+}
+
+DIGEST_GROUP_PHRASE_TOKENS = {
+    "m&a": ("m&a", "m & a", "인수합병", "인수·합병"),
+    "저pbr": ("저pbr", "저 pbr"),
+    "밸류업": ("밸류업", "기업밸류업", "코리아밸류업"),
+    "벨류업": ("벨류업",),
+    "주주환원": ("주주환원", "주주 환원"),
+    "주주가치": ("주주가치", "주주 가치"),
+    "자사주": ("자사주", "자기주식"),
+    "소각": ("소각",),
+    "공개매수": ("공개매수",),
+    "의무공개매수": ("의무공개매수", "의무 공개매수"),
+    "자본시장법": ("자본시장법", "자본 시장법"),
+    "일반주주": ("일반주주", "일반 주주"),
+    "중복상장": ("중복상장", "중복 상장"),
+    "상장폐지": ("상장폐지", "상장 폐지"),
+    "상장적격성": ("상장적격성", "상장 적격성"),
+    "실질심사": ("실질심사", "실질 심사"),
+    "거래정지": ("거래정지", "거래 정지"),
+    "개선기간": ("개선기간", "개선 기간"),
+    "주주제안": ("주주제안", "주주 제안"),
+    "임시주총": ("임시주총", "임시 주총", "임시주주총회"),
+    "사외이사": ("사외이사", "사외 이사"),
+    "위임장": ("위임장",),
+    "공개서한": ("공개서한", "공개 서한"),
+    "지배구조": ("지배구조", "기업지배구조", "기업 지배구조"),
+    "스튜어드십": ("스튜어드십", "stewardship"),
+    "거버넌스": ("거버넌스", "governance"),
+    "임원보수": ("임원보수", "임원 보수"),
+    "주식보상": ("주식보상", "주식 보상"),
+    "총수": ("총수",),
+    "동일인": ("동일인",),
+    "대기업집단": ("대기업집단", "대기업 집단"),
+    "사익편취": ("사익편취", "사익 편취"),
+    "공정위": ("공정위", "공정거래위원회"),
+    "ipo": ("ipo", "기업공개"),
+    "코너스톤": ("코너스톤", "cornerstone"),
 }
 
 OPERATIONAL_SUMMARY_PATTERNS = (
@@ -201,14 +334,12 @@ DIGEST_SOURCE_LABEL_OVERRIDES = {
 DIGEST_CATEGORY_RULES = (
     (
         "shareholder",
-        "주주행동·거버넌스",
+        "주주행동·경영권",
         (
             "shareholder_proposal",
             "activism_trend",
             "control_dispute",
             "board_audit",
-            "valueup_return",
-            "governance_stewardship",
             "voting_disclosure",
         ),
         (
@@ -227,36 +358,46 @@ DIGEST_CATEGORY_RULES = (
             "KCGI",
             "트러스톤",
             "엘리엇",
+            "경영권",
+            "분쟁",
+            "소송",
+            "고발",
+            "검찰",
+            "주주대표소송",
+            "activist",
+            "proxy fight",
+            "proxy contest",
+            "board",
+        ),
+    ),
+    (
+        "valueup",
+        "밸류업·주주환원",
+        ("valueup_return",),
+        (
             "밸류업",
             "벨류업",
+            "저PBR",
+            "저 pbr",
+            "코리아밸류업",
             "주주환원",
             "배당",
             "자사주",
             "소각",
-            "지배구조",
-            "거버넌스",
-            "스튜어드십",
-            "사외이사",
-            "의결권",
-            "전자투표",
-            "주총",
-            "주주총회",
-            "임원보수",
-            "주식보상",
-            "성과보수",
-            "activist",
-            "proxy fight",
-            "governance",
-            "stewardship",
-            "board",
+            "기업가치",
             "shareholder return",
             "buyback",
         ),
     ),
     (
         "capital_market",
-        "자본시장·공시·상장",
-        ("capital_market_policy", "listing_risk", "capital_raise_disclosure"),
+        "자본시장 제도·공시",
+        (
+            "capital_market_policy",
+            "listing_risk",
+            "capital_raise_disclosure",
+            "governance_stewardship",
+        ),
         (
             "자본시장법",
             "상법",
@@ -274,6 +415,17 @@ DIGEST_CATEGORY_RULES = (
             "ISA",
             "STO",
             "증권사 IB",
+            "지배구조",
+            "거버넌스",
+            "스튜어드십",
+            "사외이사",
+            "의결권",
+            "전자투표",
+            "주총",
+            "주주총회",
+            "임원보수",
+            "주식보상",
+            "성과보수",
             "상장폐지",
             "상장적격성",
             "실질심사",
@@ -288,11 +440,78 @@ DIGEST_CATEGORY_RULES = (
             "정정신고서",
             "투자자 보호",
             "capital market reform",
+            "governance",
+            "stewardship",
         ),
     ),
 )
 
-DIGEST_DEFAULT_CATEGORY_LABEL = "자본시장·공시·상장"
+DIGEST_DEFAULT_CATEGORY_LABEL = "자본시장 제도·공시"
+DIGEST_VALUEUP_CATEGORY_TOKENS = {
+    "저pbr",
+    "밸류업",
+    "벨류업",
+    "주주환원",
+    "주주가치",
+    "자사주",
+    "소각",
+    "배당",
+}
+DIGEST_CAPITAL_MARKET_CATEGORY_TOKENS = {
+    "m&a",
+    "인수",
+    "합병",
+    "인수합병",
+    "공개매수",
+    "의무공개매수",
+    "자본시장법",
+    "일반주주",
+    "중복상장",
+    "상장폐지",
+    "상장적격성",
+    "실질심사",
+    "거래정지",
+    "개선기간",
+    "공시",
+    "임원보수",
+    "주식보상",
+    "총수",
+    "동일인",
+    "대기업집단",
+    "사익편취",
+    "공정위",
+    "규제",
+    "지정",
+    "ipo",
+    "코너스톤",
+}
+DIGEST_SHAREHOLDER_CATEGORY_TOKENS = {
+    "주주제안",
+    "임시주총",
+    "감사",
+    "사외이사",
+    "위임장",
+    "공개서한",
+    "소송",
+    "고발",
+    "검찰",
+    "진정",
+}
+DIGEST_SHAREHOLDER_PRIORITY_KEYWORDS = (
+    "행동주의",
+    "주주제안",
+    "주주행동",
+    "제보센터",
+    "제보 센터",
+    "얼라인",
+    "kcgi",
+    "트러스톤",
+    "엘리엇",
+    "위임장",
+    "공개서한",
+    "경영권 분쟁",
+    "표 대결",
+)
 
 
 def digest_config(config: dict[str, object]) -> dict[str, Any]:
@@ -422,11 +641,17 @@ def digest_article_title(article: dict[str, object]) -> str:
 
 
 def digest_tokens_from_text(text: str) -> set[str]:
-    return {
+    raw_text = str(text or "")
+    compact_casefolded = re.sub(r"\s+", "", raw_text.casefold())
+    tokens = {
         token.casefold()
-        for token in re.findall(r"[가-힣A-Za-z0-9]{2,}", text)
+        for token in re.findall(r"[가-힣A-Za-z0-9]{2,}", raw_text)
         if token.casefold() not in DIGEST_GROUP_STOPWORDS
     }
+    for normalized_token, phrases in DIGEST_GROUP_PHRASE_TOKENS.items():
+        if any(re.sub(r"\s+", "", phrase.casefold()) in compact_casefolded for phrase in phrases):
+            tokens.add(normalized_token)
+    return tokens
 
 
 def digest_group_tokens(article: dict[str, object]) -> set[str]:
@@ -477,12 +702,36 @@ def digest_event_tokens(entry: dict[str, object]) -> set[str]:
     return tokens & DIGEST_GROUP_EVENT_TOKENS
 
 
+def digest_specific_event_tokens(entry: dict[str, object]) -> set[str]:
+    return digest_event_tokens(entry) & DIGEST_GROUP_SPECIFIC_EVENT_TOKENS
+
+
 def digest_entries_share_primary_event(left: dict[str, object], right: dict[str, object]) -> bool:
     left_subject = digest_primary_title_token(left)
     if not left_subject or left_subject != digest_primary_title_token(right):
         return False
     event_overlap = digest_event_tokens(left) & digest_event_tokens(right)
-    return len(event_overlap) >= 2
+    specific_overlap = digest_specific_event_tokens(left) & digest_specific_event_tokens(right)
+    return len(event_overlap) >= 2 and bool(specific_overlap)
+
+
+def digest_entries_share_named_event(left: dict[str, object], right: dict[str, object]) -> bool:
+    title_score = fuzz.token_set_ratio(str(left.get("title") or ""), str(right.get("title") or ""))
+    event_overlap = digest_event_tokens(left) & digest_event_tokens(right)
+    specific_overlap = digest_specific_event_tokens(left) & digest_specific_event_tokens(right)
+    company_overlap = digest_company_tokens(left) & digest_company_tokens(right)
+    title_overlap = digest_strong_tokens(left, "title_tokens") & digest_strong_tokens(right, "title_tokens")
+    named_title_overlap = title_overlap - DIGEST_GROUP_EVENT_TOKENS
+    policy_overlap = specific_overlap & DIGEST_GROUP_POLICY_EVENT_TOKENS
+    if len(policy_overlap) >= 2 and len(specific_overlap) >= 3 and title_score >= 25:
+        return True
+    if len(policy_overlap) >= 2 and title_score >= 42:
+        return True
+    if company_overlap and specific_overlap and len(event_overlap) >= 2 and title_score >= 50:
+        return True
+    if named_title_overlap and specific_overlap and len(event_overlap) >= 2:
+        return True
+    return False
 
 
 def digest_entry_for_article(
@@ -641,12 +890,15 @@ def digest_entries_are_same_story(
 
     title_overlap = digest_strong_tokens(left, "title_tokens") & digest_strong_tokens(right, "title_tokens")
     all_overlap = digest_strong_tokens(left, "tokens") & digest_strong_tokens(right, "tokens")
-    if not local_reason and len(title_overlap) >= 2 and title_score >= 58:
+    named_title_overlap = title_overlap - DIGEST_GROUP_EVENT_TOKENS
+    if not local_reason and len(title_overlap) >= 2 and title_score >= 58 and (named_title_overlap or title_score >= 75):
         local_reason = "title_token_overlap"
-    if not local_reason and len(title_overlap) >= 1 and len(all_overlap) >= 3 and title_score >= 58:
+    if not local_reason and len(title_overlap) >= 1 and len(all_overlap) >= 3 and title_score >= 58 and named_title_overlap:
         local_reason = "title_and_summary_token_overlap"
     if not local_reason and digest_entries_share_primary_event(left, right):
-        return True
+        local_reason = "primary_event_overlap"
+    if not local_reason and digest_entries_share_named_event(left, right):
+        local_reason = "named_event_overlap"
     if not local_reason:
         return False
     if config is None or title_score >= story_judge_auto_accept_title_score(config):
@@ -902,7 +1154,7 @@ def fallback_daily_digest(
         all_entries = entries["domestic"] + entries["global"]
         lines = fallback_title_bullets(all_entries, config)[:3]
     if not lines:
-        lines = ["주주행동·거버넌스 관련 기사 흐름 지속"]
+        lines = ["주주행동·경영권 관련 기사 흐름 지속"]
     return "\n".join(f"- {line}" for line in lines[:3])
 
 
@@ -945,9 +1197,25 @@ def digest_group_theme_groups(group: list[dict[str, object]]) -> set[str]:
     return theme_groups
 
 
+def digest_group_event_token_union(group: list[dict[str, object]]) -> set[str]:
+    tokens: set[str] = set()
+    for entry in group:
+        tokens |= digest_event_tokens(entry)
+    return tokens
+
+
 def digest_category_label_for_group(group: list[dict[str, object]]) -> str:
     text = digest_group_content_text(group)
     theme_groups = digest_group_theme_groups(group)
+    event_tokens = digest_group_event_token_union(group)
+    if (event_tokens & DIGEST_SHAREHOLDER_CATEGORY_TOKENS) or any(
+        keyword.casefold() in text for keyword in DIGEST_SHAREHOLDER_PRIORITY_KEYWORDS
+    ):
+        return "주주행동·경영권"
+    if event_tokens & DIGEST_VALUEUP_CATEGORY_TOKENS:
+        return "밸류업·주주환원"
+    if event_tokens & DIGEST_CAPITAL_MARKET_CATEGORY_TOKENS:
+        return "자본시장 제도·공시"
     best_score = 0
     best_label = DIGEST_DEFAULT_CATEGORY_LABEL
     for _key, label, rule_theme_groups, keywords in DIGEST_CATEGORY_RULES:
@@ -989,7 +1257,7 @@ def render_daily_digest_section_blocks(
 
     global_groups = group_digest_entries(entries["global"], config)
     if global_groups:
-        section_blocks.append(("영문", [render_representative_digest_entry_group(group, config) for group in global_groups]))
+        section_blocks.append(("해외", [render_representative_digest_entry_group(group, config) for group in global_groups]))
 
     return section_blocks
 
@@ -1052,6 +1320,8 @@ def split_digest_section_blocks(
         current_section = ""
 
     for section_label, group_blocks in section_blocks:
+        if current_section and current_section != section_label and current:
+            flush()
         for group_index, group_lines in enumerate(group_blocks):
             continued = current_section == section_label or (not current and group_index > 0)
             section_header = f"<b>{section_label}{' (계속)' if continued else ''}</b>"

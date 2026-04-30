@@ -47,10 +47,11 @@ def published_cluster(config, now):  # type: ignore[no-untyped-def]
 def digest_summary_block(message: str) -> str:
     summary = message.split("<b>요약</b>\n", 1)[1]
     for marker in (
-        "\n\n<b>주주행동·거버넌스</b>",
-        "\n\n<b>자본시장·공시·상장</b>",
+        "\n\n<b>주주행동·경영권</b>",
+        "\n\n<b>밸류업·주주환원</b>",
+        "\n\n<b>자본시장 제도·공시</b>",
         "\n\n<b>국문</b>",
-        "\n\n<b>영문</b>",
+        "\n\n<b>해외</b>",
     ):
         if marker in summary:
             return summary.split(marker, 1)[0]
@@ -133,17 +134,18 @@ def test_daily_digest_uses_one_representative_for_duplicate_records(config, now,
     }
 
     assert publish_daily_digest_if_due(state, config, digest_now) == {
-        "daily_digest_sent": 1,
+        "daily_digest_sent": 2,
         "daily_digest_failed": 0,
     }
-    assert "<b>중복 기사</b>" not in sent_messages[0]
-    assert "(중복" not in sent_messages[0]
-    assert 'href="https://www.mk.co.kr/news/stock/1"' in sent_messages[0]
-    assert 'href="https://example.com/duplicate"' not in sent_messages[0]
-    assert "(2건)" not in sent_messages[0]
-    assert "①" not in sent_messages[0]
-    assert "②" not in sent_messages[0]
-    assert "수집키워드" not in sent_messages[0]
+    sent_text = "\n".join(sent_messages)
+    assert "<b>중복 기사</b>" not in sent_text
+    assert "(중복" not in sent_text
+    assert 'href="https://www.mk.co.kr/news/stock/1"' in sent_text
+    assert 'href="https://example.com/duplicate"' not in sent_text
+    assert "(2건)" not in sent_text
+    assert "①" not in sent_text
+    assert "②" not in sent_text
+    assert "수집키워드" not in sent_text
 
 
 def test_daily_digest_single_duplicate_record_renders_as_single_link(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -277,11 +279,11 @@ def test_daily_digest_lists_korean_and_english_article_links(config, now, monkey
     )
     config["digest"]["link_title_max_chars"] = 22  # type: ignore[index]
     domestic_article = make_article(
-        "주주제안과 자사주 소각 의무화 논의가 매우 길게 이어지는 기사 제목",
+        "밸류업과 자사주 소각 의무화 논의가 매우 길게 이어지는 기사 제목",
         "https://example.com/domestic",
         source="국내뉴스",
         published_at="2026-04-27T09:00:00+09:00",
-        summary="주주제안 자사주 소각",
+        summary="밸류업 자사주 소각",
     )
     domestic_article["feed_category"] = "supplemental"
     domestic_article["feed_name"] = "google-news-자사주 소각 의무화 밸류업"
@@ -309,10 +311,10 @@ def test_daily_digest_lists_korean_and_english_article_links(config, now, monkey
         },
     ]
 
-    message = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))[0]
+    message = "\n".join(build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24)))
 
-    assert "<b>주주행동·거버넌스</b>" in message
-    assert "<b>영문</b>" in message
+    assert "<b>밸류업·주주환원</b>" in message
+    assert "<b>해외</b>" in message
     assert 'href="https://example.com/domestic"' in message
     assert 'href="https://example.com/global"' in message
     assert "04.27 /" in message
@@ -377,8 +379,8 @@ def test_global_category_korean_article_stays_in_korean_section(config, now) -> 
         now - timedelta(hours=24),
     )[0]
 
-    assert "<b>주주행동·거버넌스</b>" in message
-    assert "<b>영문</b>" not in message
+    assert "<b>밸류업·주주환원</b>" in message
+    assert "<b>해외</b>" not in message
 
 
 def test_daily_digest_renders_topic_categories(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -412,9 +414,9 @@ def test_daily_digest_renders_topic_categories(config, now, monkeypatch) -> None
 
     message = "\n".join(build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24)))
 
-    assert "<b>주주행동·거버넌스</b>" in message
-    assert "<b>자본시장·공시·상장</b>" in message
-    assert "<b>밸류업·주주환원</b>" not in message
+    assert "<b>주주행동·경영권</b>" in message
+    assert "<b>밸류업·주주환원</b>" in message
+    assert "<b>자본시장 제도·공시</b>" in message
     assert "<b>상장·공시·거래 리스크</b>" not in message
 
 
@@ -442,7 +444,7 @@ def test_daily_digest_lists_articles_without_blank_lines(config, now, monkeypatc
     message = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))[0]
 
     assert "\n\n•" not in message
-    assert "주주행동·거버넌스</b>\n•" in message
+    assert "주주행동·경영권</b>\n•" in message
 
 
 def test_daily_digest_groups_same_subject_valueup_event(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -472,8 +474,107 @@ def test_daily_digest_groups_same_subject_valueup_event(config, now, monkeypatch
 
     assert [len(group) for group in groups] == [2]
     assert message.count("동원수산") == 1
+    assert "news.mtn.co.kr" not in message
     assert "①" not in message
     assert "②" not in message
+
+
+def test_daily_digest_groups_same_policy_event_across_titles(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 의무공개매수 논의 지속")
+    first = make_article(
+        "경영권 프리미엄 독식 막는다…M&A시 소액주주 지분도 의무매수 - SBSBiz",
+        "https://biz.sbs.co.kr/article/1",
+        source="SBSBiz",
+        published_at="2026-04-29T12:00:00+09:00",
+        summary="의무공개매수 자본시장법 일반주주 보호",
+    )
+    second = make_article(
+        "박상혁 의원, 의무공개매수제 자본시장법 개정안 발의…일반주주 권익 보호",
+        "https://www.etoday.co.kr/news/view/1",
+        source="이투데이",
+        published_at="2026-04-29T12:10:00+09:00",
+        summary="M&A 일반주주 지분 의무 공개매수",
+    )
+    clusters = [
+        {"representative_title": first["clean_title"], "published_at": first["published_at"], "articles": [first]},
+        {"representative_title": second["clean_title"], "published_at": second["published_at"], "articles": [second]},
+    ]
+
+    entries = limited_digest_article_entries(clusters, config)["domestic"]
+    groups = group_digest_entries(entries, config)
+    message = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))[0]
+
+    assert [len(group) for group in groups] == [2]
+    assert message.count("href=") == 1
+    assert "SBSBiz" not in message
+
+
+def test_daily_digest_groups_same_regulatory_designation_event(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 총수 지정 이슈 부각")
+    first = make_article(
+        "공정위 쿠팡 총수는 법인 아닌 김범석…5년 만에 동일인 변경",
+        "https://www.hani.co.kr/1",
+        source="한겨레",
+        published_at="2026-04-29T12:00:00+09:00",
+        summary="대기업집단 동일인 지정 사익편취 규제",
+    )
+    second = make_article(
+        "쿠팡 김범석 총수로 변경… 공정위, 대기업집단 102개 지정",
+        "https://www.skyedaily.com/1",
+        source="스카이데일리",
+        published_at="2026-04-29T12:10:00+09:00",
+        summary="공정위 총수 동일인 지정 규제",
+    )
+    clusters = [
+        {"representative_title": first["clean_title"], "published_at": first["published_at"], "articles": [first]},
+        {"representative_title": second["clean_title"], "published_at": second["published_at"], "articles": [second]},
+    ]
+
+    entries = limited_digest_article_entries(clusters, config)["domestic"]
+    groups = group_digest_entries(entries, config)
+    message = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))[0]
+
+    assert [len(group) for group in groups] == [2]
+    assert message.count("쿠팡") == 1
+
+
+def test_daily_digest_starts_new_message_for_new_category(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주요 이슈 지속")
+    shareholder = make_article(
+        "행동주의 펀드 공개서한 제출",
+        "https://example.com/shareholder",
+        source="행동뉴스",
+        summary="행동주의 공개서한",
+    )
+    valueup = make_article(
+        "동원수산 저PBR 해소 위한 밸류업 추진",
+        "https://example.com/valueup",
+        source="밸류뉴스",
+        summary="저PBR 밸류업 주주환원",
+    )
+    capital = make_article(
+        "상장적격성 실질심사와 거래정지 개선기간 부여",
+        "https://example.com/capital",
+        source="공시뉴스",
+        summary="상장폐지 거래정지 투자자 보호",
+    )
+    clusters = [
+        {"representative_title": article["clean_title"], "published_at": article["published_at"], "articles": [article]}
+        for article in (shareholder, valueup, capital)
+    ]
+
+    messages = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))
+
+    assert len(messages) == 3
+    assert "<b>주주행동·경영권</b>" in messages[0]
+    assert messages[1].startswith("<b>밸류업·주주환원</b>")
+    assert messages[2].startswith("<b>자본시장 제도·공시</b>")
 
 
 def test_daily_digest_splits_on_section_and_group_boundaries(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -514,7 +615,7 @@ def test_daily_digest_splits_on_section_and_group_boundaries(config, now, monkey
     assert all(len(message) <= 900 for message in messages)
     for message in messages[1:]:
         first_line = next(line for line in message.splitlines() if line.strip())
-        assert first_line.startswith("<b>주주행동·거버넌스")
+        assert first_line.startswith(("<b>주주행동·경영권", "<b>자본시장 제도·공시"))
         assert not first_line.startswith("  <a")
         assert not first_line.startswith("①")
 

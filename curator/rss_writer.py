@@ -14,6 +14,7 @@ from .cluster import (
 )
 from .config import article_domain_is_excluded
 from .dates import format_kst, format_rfc822, parse_datetime
+from .normalize import clean_title_text, strip_media_suffix
 from .relevance import relevance_details
 
 
@@ -45,6 +46,23 @@ SOURCE_LABELS = {
     "topdaily.kr": "톱데일리",
     "yna.co.kr": "연합뉴스",
 }
+
+DISPLAY_NOISY_PREFIX_PATTERN = re.compile(
+    r"^\s*\[(?:기고|ESG포커스|프록시보팅|대한민국\s*100대\s*CEO|관치금융\s*논쟁\s*\d+년)\]\s*",
+    re.IGNORECASE,
+)
+DISPLAY_DOMAIN_SUFFIX_PATTERN = re.compile(
+    r"\s*(?:(?:-|–|—|\|)\s*)+(?:[A-Za-z0-9_.-]+\.(?:co\.kr|com|net|kr)|v\.daum\.net)\s*$",
+    re.IGNORECASE,
+)
+DISPLAY_BRAND_SUFFIX_PATTERN = re.compile(
+    r"\s*(?:(?:-|–|—|\|)\s*)+(?:"
+    r"SBS\s*Biz|Chosunbiz|네이트|데일리브리프|데이터투자|페로타임즈|뉴스드림|"
+    r"세이프타임즈|파이낸셜리뷰|아시아경제\s*CORE"
+    r")\s*$",
+    re.IGNORECASE,
+)
+DISPLAY_BYLINE_SUFFIX_PATTERN = re.compile(r"\s+By\s+Investing\.com(?:\s*-\s*In\.{0,3})?\s*$", re.IGNORECASE)
 
 
 def cdata(text: str) -> str:
@@ -173,11 +191,22 @@ def article_source_label(article: dict[str, object]) -> str:
 
 
 def display_article_title(article: dict[str, object], source: str) -> str:
-    title = compact_text(article.get("clean_title") or article.get("title") or "제목 없음")
+    title = clean_title_text(article.get("clean_title") or article.get("title") or "제목 없음")
     source_variants = {source, source.upper(), source.lower(), source.casefold()}
     for variant in source_variants:
         if variant and title.casefold().startswith(f"{variant.casefold()} - "):
             title = title[len(variant) + 3 :].strip()
+        if variant and title.casefold().endswith(f" - {variant.casefold()}"):
+            title = title[: -(len(variant) + 3)].strip()
+    previous = ""
+    while title and title != previous:
+        previous = title
+        title = DISPLAY_NOISY_PREFIX_PATTERN.sub("", title).strip()
+        title = DISPLAY_BYLINE_SUFFIX_PATTERN.sub("", title).strip()
+        title = DISPLAY_BRAND_SUFFIX_PATTERN.sub("", title).strip()
+        title = DISPLAY_DOMAIN_SUFFIX_PATTERN.sub("", title).strip()
+        title, _source_suffix = strip_media_suffix(title)
+        title = clean_title_text(title)
     return compact_text(title)
 
 
