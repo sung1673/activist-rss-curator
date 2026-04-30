@@ -623,16 +623,10 @@ def digest_article_label(
     cluster: dict[str, object],
     config: dict[str, object],
 ) -> str:
-    timezone_name = str(config.get("timezone") or "Asia/Seoul")
-    article_dt = digest_article_datetime(article, cluster, timezone_name)
-    if article_dt:
-        date_label = article_dt.astimezone(ZoneInfo(timezone_name)).strftime("%m.%d")
-    else:
-        date_label = "--.--"
     source = article_source_label(article)
     title = display_article_title(article, source)
     title_max_chars = int(digest_config(config).get("link_title_max_chars", 44))
-    return f"{date_label} / {compact_text(title, max_chars=title_max_chars)}"
+    return compact_text(title, max_chars=title_max_chars)
 
 
 def digest_article_title(article: dict[str, object]) -> str:
@@ -976,7 +970,7 @@ def render_digest_entry_group(group: list[dict[str, object]], config: dict[str, 
 
     max_links = digest_count_limit(digest_config(config), "max_links_per_group", 5)
     title = digest_group_title(group, config)
-    lines = [f"• {digest_group_date_label(group, config)} / {escape(title, quote=False)} ({len(group)}건)"]
+    lines = [f"• {escape(title, quote=False)} ({len(group)}건)"]
     links = []
     shown_group = group if max_links is None else group[:max_links]
     for index, entry in enumerate(shown_group, start=1):
@@ -1536,7 +1530,6 @@ def build_hourly_update_messages(
     max_chars = int(digest_config(config).get("max_message_chars", 3900))
     review = generate_hourly_digest_review(clusters, config, start_at, now)
     lines = [
-        "<b>주주·자본시장 브리핑</b>",
         hourly_update_period_label(config, start_at, now),
         "",
         "<b>요약</b>",

@@ -7,6 +7,7 @@ from curator.fetch import (
     google_news_article_id,
     google_news_decoding_params,
     parse_google_news_batch_response,
+    source_from_html,
 )
 
 
@@ -36,6 +37,12 @@ def test_apply_decoded_google_news_url_replaces_canonical_link() -> None:
 
     assert decoded["canonical_url"] == "https://www.example.com/news/1"
     assert decoded["canonical_url_hash"] != "old"
+
+
+def test_daum_page_source_is_extracted_from_site_name() -> None:
+    html = '<meta property="og:site_name" content="Daum | 연합뉴스TV">'
+
+    assert source_from_html(html, "https://v.daum.net/v/20260430221133810") == "연합뉴스TV"
 
 
 def test_fetch_respects_max_enrich_articles(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]

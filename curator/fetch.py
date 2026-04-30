@@ -95,6 +95,47 @@ def canonical_href(html_text: str, base_url: str) -> str | None:
     return None
 
 
+def clean_page_source_name(value: object, base_url: str) -> str | None:
+    text = " ".join(str(value or "").split()).strip()
+    if not text:
+        return None
+    hostname = (urlsplit(base_url).hostname or "").lower().removeprefix("www.")
+    if hostname == "v.daum.net" and "|" in text:
+        parts = [part.strip() for part in text.split("|") if part.strip()]
+        if parts and parts[0].casefold() == "daum" and len(parts) >= 2:
+            text = parts[-1]
+    generic_names = {
+        "",
+        "daum",
+        "daum 뉴스",
+        "daum news",
+        "뉴스",
+        "news",
+        hostname,
+    }
+    if text.casefold() in generic_names:
+        return None
+    return text
+
+
+def source_from_html(html_text: str, base_url: str) -> str | None:
+    soup = BeautifulSoup(html_text or "", "html.parser")
+    meta_candidates = (
+        {"property": "og:site_name"},
+        {"property": "article:publisher"},
+        {"name": "publisher"},
+        {"name": "dc.publisher"},
+        {"name": "author"},
+    )
+    for attrs in meta_candidates:
+        tag = soup.find("meta", attrs=attrs)
+        content = tag.get("content") if tag else None
+        source = clean_page_source_name(content, base_url)
+        if source:
+            return source
+    return None
+
+
 def google_news_article_id(url: str) -> str | None:
     parsed = urlsplit(str(url or ""))
     if parsed.hostname != "news.google.com":
@@ -243,9 +284,12 @@ def enrich_article(
     normalized_canonical = normalize_url(canonical)
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
     article_published = extract_published_datetime_from_html(html_text, timezone_name)
+    source = source_from_html(html_text, final_url)
     enriched["canonical_url"] = normalized_canonical
     enriched["canonical_url_hash"] = canonical_url_hash(normalized_canonical)
     enriched["article_published_at"] = datetime_to_iso(article_published)
+    if source:
+        enriched["source"] = source
     return enriched
 
 

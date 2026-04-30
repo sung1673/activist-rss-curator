@@ -340,8 +340,8 @@ def test_daily_digest_lists_korean_and_english_article_links(config, now, monkey
     assert "<b>해외</b>" in message
     assert 'href="https://example.com/domestic"' in message
     assert 'href="https://example.com/global"' in message
-    assert "04.27 /" in message
-    assert "04.26 /" in message
+    assert "04.27 /" not in message
+    assert "04.26 /" not in message
     assert "매우 길게 이어지는 기사 제목" not in message
     assert "..." in message
     assert "소분류:" not in message
@@ -681,7 +681,7 @@ def test_daily_digest_groups_similar_article_titles(config, now, monkeypatch) ->
 
     message = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))[0]
 
-    assert "04.27 /" in message
+    assert "04.27 /" not in message
     assert "(2건)" not in message
     assert "①" not in message
     assert "②" not in message
@@ -838,7 +838,7 @@ def test_hourly_update_message_omits_duplicate_references(config, now, monkeypat
 
     message = build_hourly_update_messages([cluster], config, now, now - timedelta(hours=1), [duplicate])[0]
 
-    assert message.startswith("<b>주주·자본시장 브리핑</b>")
+    assert message.startswith("수집: 04.25 08:30-09:30 KST")
     assert "수집: 04.25 08:30-09:30 KST" in message
     assert "<b>요약</b>" in message
     assert "<b>중복 확인</b>" not in message
@@ -891,7 +891,7 @@ def test_hourly_update_batches_multiple_clusters_and_marks_all(config, now, monk
 
     assert summary == {"telegram_sent": 2, "telegram_failed": 0}
     assert len(sent_messages) == 1
-    assert sent_messages[0].startswith("<b>주주·자본시장 브리핑</b>")
+    assert sent_messages[0].startswith("수집: 04.25 09:00-09:30 KST")
     assert "수집: 04.25 09:00-09:30 KST" in sent_messages[0]
     assert "<b>요약</b>" in sent_messages[0]
     assert set(state["telegram_sent_cluster_guids"]) == {first["guid"], second["guid"]}

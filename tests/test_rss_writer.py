@@ -99,6 +99,17 @@ def test_google_news_fallback_uses_source_label_instead_of_news(config) -> None:
     assert article_source_label(article) == "한국경제"
 
 
+def test_daum_article_uses_extracted_source_label(config) -> None:  # type: ignore[no-untyped-def]
+    article = make_article(
+        "금감원, 한화투자증권 검사",
+        "https://v.daum.net/v/20260430221133810",
+        source="연합뉴스TV",
+    )
+    from curator.rss_writer import article_source_label
+
+    assert article_source_label(article) == "연합뉴스TV"
+
+
 def test_old_low_relevance_published_cluster_is_hidden(config, now) -> None:  # type: ignore[no-untyped-def]
     cluster = published_cluster(config, now)
     cluster["representative_title"] = "로저스 커뮤니케이션, 주총서 이사 14명·KPMG 감사인 선임 승인"

@@ -44,6 +44,7 @@ SOURCE_LABELS = {
     "seoulfn.com": "서울파이낸스",
     "sisajournal.com": "시사저널",
     "topdaily.kr": "톱데일리",
+    "v.daum.net": "다음뉴스",
     "yna.co.kr": "연합뉴스",
 }
 
@@ -184,6 +185,8 @@ def article_source_label(article: dict[str, object]) -> str:
     domain = article_domain(article)
     source = article_source(article)
     if domain in {"news.google.com", "news.url.google.com"} and source and source.casefold() not in {"news", "news.google.com"}:
+        return compact_text(source, max_chars=28)
+    if domain == "v.daum.net" and source and source.casefold() not in {"v", "v.daum.net", "daum", "daum 뉴스"}:
         return compact_text(source, max_chars=28)
     if domain:
         return compact_text(SOURCE_LABELS.get(domain) or source_label_from_domain(domain), max_chars=28)
