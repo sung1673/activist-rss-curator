@@ -418,6 +418,64 @@ def test_daily_digest_renders_topic_categories(config, now, monkeypatch) -> None
     assert "<b>상장·공시·거래 리스크</b>" not in message
 
 
+def test_daily_digest_lists_articles_without_blank_lines(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주요 이슈 지속")
+    first = make_article(
+        "소액주주 주주제안으로 임시주총 표 대결",
+        "https://example.com/shareholder-a",
+        source="주주뉴스",
+        summary="소액주주 주주제안",
+    )
+    second = make_article(
+        "행동주의 펀드 공개서한 제출",
+        "https://example.com/shareholder-b",
+        source="행동뉴스",
+        summary="행동주의 공개서한",
+    )
+    clusters = [
+        {"representative_title": first["clean_title"], "published_at": first["published_at"], "articles": [first]},
+        {"representative_title": second["clean_title"], "published_at": second["published_at"], "articles": [second]},
+    ]
+
+    message = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))[0]
+
+    assert "\n\n•" not in message
+    assert "주주행동·거버넌스</b>\n•" in message
+
+
+def test_daily_digest_groups_same_subject_valueup_event(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 밸류업 이슈 지속")
+    first = make_article(
+        "동원수산 저PBR 벗어나기 위한 밸류업 전략 수행해나갈 것",
+        "https://www.hankyung.com/article/2026042944076",
+        source="한국경제",
+        published_at="2026-04-29T09:00:00+09:00",
+    )
+    second = make_article(
+        "동원수산, 저PBR 탈출 승부수…밸류업 청사진 공개 - news.mtn.co.kr",
+        "https://news.mtn.co.kr/news-detail/2026042909124681068",
+        source="MTN",
+        published_at="2026-04-29T09:10:00+09:00",
+    )
+    clusters = [
+        {"representative_title": first["clean_title"], "published_at": first["published_at"], "articles": [first]},
+        {"representative_title": second["clean_title"], "published_at": second["published_at"], "articles": [second]},
+    ]
+
+    entries = limited_digest_article_entries(clusters, config)["domestic"]
+    groups = group_digest_entries(entries, config)
+    message = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))[0]
+
+    assert [len(group) for group in groups] == [2]
+    assert message.count("동원수산") == 1
+    assert "①" not in message
+    assert "②" not in message
+
+
 def test_daily_digest_splits_on_section_and_group_boundaries(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import summaries
 

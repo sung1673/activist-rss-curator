@@ -104,6 +104,40 @@ DIGEST_GROUP_BROAD_TOKENS = {
     "board",
 }
 
+DIGEST_GROUP_EVENT_TOKENS = {
+    "저pbr",
+    "밸류업",
+    "벨류업",
+    "주주환원",
+    "주주가치",
+    "자사주",
+    "소각",
+    "배당",
+    "공개매수",
+    "의무공개매수",
+    "중복상장",
+    "상장폐지",
+    "상장적격성",
+    "실질심사",
+    "거래정지",
+    "개선기간",
+    "주주제안",
+    "임시주총",
+    "이사회",
+    "감사",
+    "사외이사",
+    "위임장",
+    "공개서한",
+    "경영권",
+    "분쟁",
+    "지배구조",
+    "스튜어드십",
+    "거버넌스",
+    "esg",
+    "ipo",
+    "코너스톤",
+}
+
 OPERATIONAL_SUMMARY_PATTERNS = (
     "링크",
     "url",
@@ -429,6 +463,28 @@ def digest_strong_tokens(entry: dict[str, object], key: str) -> set[str]:
     }
 
 
+def digest_primary_title_token(entry: dict[str, object]) -> str:
+    title = str(entry.get("title") or "")
+    tokens = [token.casefold() for token in re.findall(r"[가-힣A-Za-z0-9]{2,}", title)]
+    for token in tokens:
+        if token not in DIGEST_GROUP_STOPWORDS and token not in DIGEST_GROUP_BROAD_TOKENS:
+            return token
+    return ""
+
+
+def digest_event_tokens(entry: dict[str, object]) -> set[str]:
+    tokens = {str(token).casefold() for token in set(entry.get("tokens") or []) | set(entry.get("title_tokens") or [])}
+    return tokens & DIGEST_GROUP_EVENT_TOKENS
+
+
+def digest_entries_share_primary_event(left: dict[str, object], right: dict[str, object]) -> bool:
+    left_subject = digest_primary_title_token(left)
+    if not left_subject or left_subject != digest_primary_title_token(right):
+        return False
+    event_overlap = digest_event_tokens(left) & digest_event_tokens(right)
+    return len(event_overlap) >= 2
+
+
 def digest_entry_for_article(
     article: dict[str, object],
     cluster: dict[str, object],
@@ -589,6 +645,8 @@ def digest_entries_are_same_story(
         local_reason = "title_token_overlap"
     if not local_reason and len(title_overlap) >= 1 and len(all_overlap) >= 3 and title_score >= 58:
         local_reason = "title_and_summary_token_overlap"
+    if not local_reason and digest_entries_share_primary_event(left, right):
+        return True
     if not local_reason:
         return False
     if config is None or title_score >= story_judge_auto_accept_title_score(config):
@@ -943,7 +1001,7 @@ def telegram_text_length(lines: list[str]) -> int:
 def append_digest_lines(current: list[str], lines: list[str]) -> list[str]:
     if not current:
         return list(lines)
-    if lines and current[-1] != "" and lines[0] != "":
+    if lines and lines[0].startswith("<b>") and current[-1] != "":
         return [*current, "", *lines]
     return [*current, *lines]
 
