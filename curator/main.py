@@ -12,7 +12,7 @@ from .fetch import decode_google_news_links_in_state, fetch_google_alerts_articl
 from .relevance import relevance_details
 from .rss_writer import write_feed, write_index
 from .state import compact_state, load_state, remember_article, remember_rejected, save_state
-from .summaries import publish_daily_digest_if_due, publish_hourly_telegram_update
+from .summaries import publish_hourly_telegram_update
 from .telegram_publisher import (
     initialize_telegram_state,
 )
@@ -168,7 +168,6 @@ def run(root: Path | None = None) -> dict[str, int]:
         telegram_summary = {"telegram_sent": 0, "telegram_failed": 0}
     else:
         telegram_summary = publish_hourly_telegram_update(state, config, now, duplicates)
-    digest_summary = publish_daily_digest_if_due(state, config, now)
     save_state(state_path, state)
 
     return {
@@ -180,7 +179,6 @@ def run(root: Path | None = None) -> dict[str, int]:
         "pending": len(state.get("pending_clusters", [])),
         "published_total": len(state.get("published_clusters", [])),
         **telegram_summary,
-        **digest_summary,
     }
 
 
