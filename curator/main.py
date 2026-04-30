@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -163,7 +164,10 @@ def run(root: Path | None = None) -> dict[str, int]:
     published_clusters = list(state.get("published_clusters", []))
     write_feed(project_root / "public" / "feed.xml", published_clusters, config, now)
     write_index(project_root / "public" / "index.html", state, config, now)
-    telegram_summary = publish_hourly_telegram_update(state, config, now, duplicates)
+    if os.environ.get("CURATOR_DISABLE_TELEGRAM_SEND", "").casefold() in {"1", "true", "yes", "on"}:
+        telegram_summary = {"telegram_sent": 0, "telegram_failed": 0}
+    else:
+        telegram_summary = publish_hourly_telegram_update(state, config, now, duplicates)
     digest_summary = publish_daily_digest_if_due(state, config, now)
     save_state(state_path, state)
 

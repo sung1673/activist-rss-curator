@@ -58,9 +58,28 @@ def digest_summary_block(message: str) -> str:
     return summary
 
 
+def test_daily_digest_disabled_by_default(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    cluster = published_cluster(config, now)
+    digest_now = datetime(2026, 4, 26, 6, 30, tzinfo=ZoneInfo("Asia/Seoul"))
+    cluster["published_at"] = (digest_now - timedelta(minutes=30)).isoformat()
+    state = {
+        "published_clusters": [cluster],
+        "pending_clusters": [],
+        "daily_digest_sent_dates": [],
+        "daily_digest_records": [],
+    }
+
+    assert publish_daily_digest_if_due(state, config, digest_now) == {
+        "daily_digest_sent": 0,
+        "daily_digest_failed": 0,
+    }
+
+
 def test_daily_digest_sends_once_in_morning_window(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import summaries
 
+    config["digest"]["enabled"] = True  # type: ignore[index]
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "오늘의 리뷰\n- 주주환원 이슈 정리")
 
@@ -94,6 +113,7 @@ def test_daily_digest_sends_once_in_morning_window(config, now, monkeypatch) -> 
 def test_daily_digest_uses_one_representative_for_duplicate_records(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import summaries
 
+    config["digest"]["enabled"] = True  # type: ignore[index]
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주주제안 이슈 지속")
 
@@ -151,6 +171,7 @@ def test_daily_digest_uses_one_representative_for_duplicate_records(config, now,
 def test_daily_digest_single_duplicate_record_renders_as_single_link(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import summaries
 
+    config["digest"]["enabled"] = True  # type: ignore[index]
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주주제안 이슈 지속")
 
@@ -210,6 +231,7 @@ def test_daily_digest_skips_after_send_window(config, now, monkeypatch) -> None:
 def test_daily_digest_tolerates_delayed_github_schedule(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import summaries
 
+    config["digest"]["enabled"] = True  # type: ignore[index]
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주주권 이슈 지속")
 
@@ -240,6 +262,7 @@ def test_daily_digest_tolerates_delayed_github_schedule(config, now, monkeypatch
 def test_daily_digest_forced_for_delayed_dedicated_schedule(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import summaries
 
+    config["digest"]["enabled"] = True  # type: ignore[index]
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setenv("GITHUB_EVENT_NAME", "schedule")
     monkeypatch.setenv("CURATOR_EVENT_SCHEDULE", "30 21 * * *")
@@ -770,6 +793,7 @@ def test_daily_digest_fallback_summary_uses_article_topics(config, now) -> None:
 def test_daily_digest_filters_operational_ai_summary_lines(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import summaries
 
+    config["ai"]["daily_digest_enabled"] = True  # type: ignore[index]
     monkeypatch.setattr(
         summaries,
         "call_github_models",
@@ -814,8 +838,9 @@ def test_hourly_update_message_omits_duplicate_references(config, now, monkeypat
 
     message = build_hourly_update_messages([cluster], config, now, now - timedelta(hours=1), [duplicate])[0]
 
-    assert "주주·자본시장 브리핑" not in message
-    assert message.startswith("<b>요약</b>")
+    assert message.startswith("<b>주주·자본시장 브리핑</b>")
+    assert "수집: 04.25 08:30-09:30 KST" in message
+    assert "<b>요약</b>" in message
     assert "<b>중복 확인</b>" not in message
     assert 'href="https://example.com/old"' not in message
     assert "04.24 / 신한금융 밸류업 2.0 발표" not in message
@@ -866,8 +891,9 @@ def test_hourly_update_batches_multiple_clusters_and_marks_all(config, now, monk
 
     assert summary == {"telegram_sent": 2, "telegram_failed": 0}
     assert len(sent_messages) == 1
-    assert "주주·자본시장 브리핑" not in sent_messages[0]
-    assert sent_messages[0].startswith("<b>요약</b>")
+    assert sent_messages[0].startswith("<b>주주·자본시장 브리핑</b>")
+    assert "수집: 04.25 09:00-09:30 KST" in sent_messages[0]
+    assert "<b>요약</b>" in sent_messages[0]
     assert set(state["telegram_sent_cluster_guids"]) == {first["guid"], second["guid"]}
     assert state["telegram_digest_records"][0]["message_ids"] == [88]
 

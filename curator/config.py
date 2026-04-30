@@ -81,7 +81,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "provider": "github_models",
         "endpoint": "https://models.github.ai/inference/chat/completions",
         "timeout_seconds": 25,
-        "daily_digest_enabled": True,
+        "daily_digest_enabled": False,
         "daily_digest_model": "openai/gpt-4.1",
         "daily_digest_max_tokens": 220,
         "hourly_digest_enabled": True,
@@ -95,7 +95,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "story_judge_auto_accept_title_score": 88,
     },
     "digest": {
-        "enabled": True,
+        "enabled": False,
         "send_hour": 6,
         "send_minute": 30,
         "send_window_minutes": 120,

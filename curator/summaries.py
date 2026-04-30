@@ -1515,6 +1515,17 @@ def build_daily_digest_messages(
     return split_digest_section_blocks(header_lines, section_blocks, max_chars)
 
 
+def hourly_update_period_label(config: dict[str, object], start_at: datetime, end_at: datetime) -> str:
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    start_local = start_at.astimezone(ZoneInfo(timezone_name))
+    end_local = end_at.astimezone(ZoneInfo(timezone_name))
+    if start_local.date() == end_local.date():
+        period = f"{start_local:%m.%d %H:%M}-{end_local:%H:%M}"
+    else:
+        period = f"{start_local:%m.%d %H:%M}-{end_local:%m.%d %H:%M}"
+    return f"수집: {period} KST"
+
+
 def build_hourly_update_messages(
     clusters: list[dict[str, object]],
     config: dict[str, object],
@@ -1525,6 +1536,9 @@ def build_hourly_update_messages(
     max_chars = int(digest_config(config).get("max_message_chars", 3900))
     review = generate_hourly_digest_review(clusters, config, start_at, now)
     lines = [
+        "<b>주주·자본시장 브리핑</b>",
+        hourly_update_period_label(config, start_at, now),
+        "",
         "<b>요약</b>",
         *summary_bullet_lines(review, config),
         "",

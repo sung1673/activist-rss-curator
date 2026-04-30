@@ -11,8 +11,6 @@ on:
   schedule:
     # KST every 30 minutes at :05/:35, skipping 06:00-07:59 regular updates.
     - cron: "5,35 0-20,23 * * *"
-    # KST 06:30 daily digest only.
-    - cron: "30 21 * * *"
   workflow_dispatch:
     inputs:
       send_telegram_test:
@@ -20,21 +18,11 @@ on:
         required: false
         type: boolean
         default: false
-      send_digest_preview:
-        description: "Send a daily digest preview message"
+      resend_last_briefing:
+        description: "Resend the latest periodic Telegram briefing with current formatting"
         required: false
         type: boolean
         default: false
-      digest_preview_hours:
-        description: "Digest preview lookback hours"
-        required: false
-        type: string
-        default: "24"
-      digest_preview_prefix:
-        description: "Digest preview prefix. Use NONE to send without a preview prefix."
-        required: false
-        type: string
-        default: "[미리보기] "
       resend_recent_articles:
         description: "Resend recently sent Telegram article clusters with current formatting"
         required: false
@@ -94,32 +82,19 @@ jobs:
         env:
           CURATOR_FEEDS: ${{ secrets.CURATOR_FEEDS }}
           CURATOR_EVENT_SCHEDULE: ${{ github.event.schedule }}
+          CURATOR_DISABLE_TELEGRAM_SEND: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[resend-last-briefing]') && '1' || '' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m curator.main
 
-      - name: Send digest preview
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.send_digest_preview }}
+      - name: Resend last Telegram briefing
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.resend_last_briefing) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[resend-last-briefing]')) }}
         env:
-          CURATOR_FEEDS: ${{ secrets.CURATOR_FEEDS }}
-          DIGEST_PREVIEW_HOURS: ${{ inputs.digest_preview_hours }}
-          DIGEST_PREVIEW_PREFIX: ${{ inputs.digest_preview_prefix }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m curator.digest_preview
-
-      - name: Send digest preview from commit marker
-        if: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[send-digest-preview]') }}
-        env:
-          CURATOR_FEEDS: ${{ secrets.CURATOR_FEEDS }}
-          DIGEST_PREVIEW_HOURS: "24"
-          DIGEST_PREVIEW_PREFIX: "NONE"
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m curator.digest_preview
+        run: python -m curator.telegram_resend_digest
 
       - name: Resend recent Telegram articles
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.resend_recent_articles }}
