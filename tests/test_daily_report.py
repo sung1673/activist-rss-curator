@@ -53,8 +53,9 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert 'href="https://bside.ai"' in html
     assert "bside-logo" in html
     assert "bside-logo__image" in html
-    assert "https://bside.ai/images/icons/bside-logo-gray.svg" in html
-    assert "background: var(--accent); -webkit-mask:" in html
+    assert 'viewBox="0 0 57 20"' in html
+    assert "color: var(--accent); flex: 0 0 auto" in html
+    assert "-webkit-mask:" not in html
     assert "Editor’s Brief" in html
     assert "brief__bullets" in html
     assert "story__image--logo" in html
