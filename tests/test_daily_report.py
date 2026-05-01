@@ -52,8 +52,13 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "BSIDE KOREA DAILY NEWS" in html
     assert "Editor’s Brief" in html
     assert "brief__bullets" in html
+    assert "NO IMAGE" in html
     assert "More:" in html
     assert "floating-nav" in html
+    assert "data-toc-section" in html
+    assert "data-section-index" in html
+    assert "data-progress-text" in html
+    assert "story__image--broken" in html
     assert "<table>" in html
     assert "한화솔루션 유상증자 정정요구" in html
 

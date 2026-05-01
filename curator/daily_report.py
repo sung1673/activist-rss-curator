@@ -285,28 +285,23 @@ def fallback_report_review(stories: list[dict[str, object]]) -> str:
     lead_titles = shareholder or top_titles
     if lead_titles:
         paragraphs.append(
-            "지난 24시간 자본시장 뉴스의 축은 경영 의사결정과 일반주주 보호를 둘러싼 감시 강화였습니다. "
-            + " / ".join(compact_text(title, max_chars=42) for title in lead_titles[:3])
-            + " 등은 이사회 책임과 주주권 행사 기준이 다시 쟁점화되고 있음을 보여줍니다."
+            "이사회 책임·주주권 기준 재점화"
         )
     if valueup:
         paragraphs.append(
-            "밸류업과 주주환원 보도는 자사주 소각, 배당 확대, 저평가 해소 계획으로 모였습니다. "
-            "시장은 단순 환원 규모보다 공시의 구체성, 지속 가능성, 자본배분 원칙을 함께 확인하려는 분위기입니다."
+            "밸류업·주주환원 공시 구체성 강조됨"
         )
     if capital:
         paragraphs.append(
-            "제도·공시 영역에서는 금융당국의 정정요구, 상장폐지·개선기간, 공개매수 관련 논의가 이어졌습니다. "
-            "이는 발행시장과 유통시장에서 투자자에게 제공되는 정보의 품질을 더 엄격히 보겠다는 흐름으로 해석됩니다."
+            "자본시장 제도·공시 품질 점검 강화"
         )
     if global_titles:
         paragraphs.append(
-            "영문·외신에서는 Korea discount, shareholder returns, activist pressure가 반복적으로 포착됐습니다. "
-            "국내 투자자 관점에서는 해외 행동주의 사례와 한국 시장을 바라보는 외국인 투자자의 평가를 함께 추적할 필요가 있습니다."
+            "해외 행동주의·Korea discount 추적 필요"
         )
     if not paragraphs:
-        paragraphs.append("지난 24시간에는 발행 가능한 기사 묶음이 많지 않았습니다. 새로 잡히는 주주행동과 자본시장 제도 흐름을 계속 확인합니다.")
-    return "\n\n".join(paragraphs[:4])
+        paragraphs.append("신규 발행 이슈 제한적")
+    return "\n".join(f"- {paragraph}" for paragraph in paragraphs[:4])
 
 
 def clean_report_paragraphs(text: str, *, max_paragraphs: int = 4) -> list[str]:
@@ -339,12 +334,36 @@ def clean_report_bullets(text: str, *, max_bullets: int = 4) -> list[str]:
             continue
         if any(pattern in bullet for pattern in ("링크", "몇 건", "정리했", "HTML", "텔레그램")) and len(bullet) < 90:
             continue
-        bullets.append(compact_text(bullet, max_chars=125))
+        bullets.append(compact_report_bullet(bullet))
         if len(bullets) >= max_bullets:
             break
     if len(bullets) >= 2:
         return bullets
-    return [compact_text(paragraph, max_chars=125) for paragraph in clean_report_paragraphs(text, max_paragraphs=max_bullets)]
+    return [compact_report_bullet(paragraph) for paragraph in clean_report_paragraphs(text, max_paragraphs=max_bullets)]
+
+
+def compact_report_bullet(text: str, max_chars: int = 58) -> str:
+    bullet = re.sub(r"\s+", " ", str(text or "")).strip(" -•·.。")
+    replacements = (
+        (r"강화되었(?:습니다|다)?$", "강화"),
+        (r"강화됐(?:습니다|다)?$", "강화"),
+        (r"확대되었(?:습니다|다)?$", "확대"),
+        (r"확대됐(?:습니다|다)?$", "확대"),
+        (r"부각되었(?:습니다|다)?$", "부각"),
+        (r"부각됐(?:습니다|다)?$", "부각"),
+        (r"이어졌(?:습니다|다)?$", "지속"),
+        (r"나타났(?:습니다|다)?$", "확인"),
+        (r"확인됐(?:습니다|다)?$", "확인"),
+        (r"확인되었(?:습니다|다)?$", "확인"),
+        (r"쟁점화되고 있(?:습니다|다)?$", "쟁점화"),
+        (r"가속화되고 있(?:습니다|다)?$", "가속화 중"),
+        (r"커지고 있(?:습니다|다)?$", "확대 중"),
+        (r"필요가 있(?:습니다|다)?$", "필요"),
+        (r"(?:입니다|습니다|합니다|된다|됩니다|했다|했습니다|이다|다)$", ""),
+    )
+    for pattern, replacement in replacements:
+        bullet = re.sub(pattern, replacement, bullet).strip(" .")
+    return compact_text(bullet, max_chars=max_chars)
 
 
 def generate_report_review(
@@ -367,10 +386,11 @@ def generate_report_review(
     user_prompt = (
         "아래 기사 묶음을 바탕으로 Telegram과 HTML 리포트 상단에 들어갈 상세 요약을 작성하세요.\n"
         "- bullet point 3~4개로 작성\n"
-        "- 각 bullet은 1문장, 90자 안팎\n"
+        "- 각 bullet은 16~34자 안팎의 간결한 명사형/상태형 구문으로 작성\n"
+        "- 예: '주주권 행사 기준 재점화', '정책 가속화 중', '공시 품질 점검 강화', '해외 행동주의 압박 확대'\n"
         "- 전체 흐름, 주요 사건, 제도/정책적 의미, 해외/영문 흐름을 균형 있게 반영\n"
         "- 전문 자본시장 기자의 톤으로, 정책·공시·주주권 의미를 해석하되 과장하지 않음\n"
-        "- '주목됩니다', '필요가 있습니다' 같은 일반 논평보다 기사체 문장 사용\n"
+        "- '주목됩니다', '필요가 있습니다' 같은 긴 문장형 표현은 쓰지 않음\n"
         "- '기사 N건을 정리했다' 같은 운영 설명은 쓰지 않음\n"
         "- 특정 종목 매수/매도 판단은 쓰지 않음\n\n"
         f"기간: {format_kst(start_at, str(config.get('timezone') or 'Asia/Seoul'))} - {format_kst(end_at, str(config.get('timezone') or 'Asia/Seoul'))}\n\n"
@@ -444,15 +464,23 @@ def render_link_list(links: list[dict[str, str]], config: dict[str, object], *, 
             published = escape(link_date_label(link, config))
             items.append(
                 "<tr>"
-                f"<td>{published}</td>"
-                f"<td>{source}</td>"
-                f'<td><a href="{url}">{title}</a></td>'
+                f'<td class="link-table__time">{published}</td>'
+                f'<td class="link-table__source">{source}</td>'
+                f'<td class="link-table__title"><a href="{url}">{title}</a></td>'
                 "</tr>"
             )
     return " ".join(items) if compact else "\n".join(items)
 
 
-def render_story(story: dict[str, object], config: dict[str, object], *, featured: bool = False) -> str:
+def render_story(
+    story: dict[str, object],
+    config: dict[str, object],
+    *,
+    featured: bool = False,
+    section_id: str = "",
+    section_index: int = 0,
+    section_total: int = 0,
+) -> str:
     links = story.get("links") if isinstance(story.get("links"), list) else []
     story_id = escape(str(story.get("id") or slugify(story.get("title"), "story")), quote=True)
     safe_title = escape(str(story.get("title") or "제목 없음"))
@@ -464,16 +492,23 @@ def render_story(story: dict[str, object], config: dict[str, object], *, feature
     timestamp = escape(date_label(story.get("datetime"), config))
     image_url = escape(str(story.get("image_url") or ""), quote=True)
     image_html = (
-        f'<a class="story__image" href="{primary_url}" aria-label="기사 이미지 보기"><img src="{image_url}" alt="" loading="lazy"></a>'
+        f'<a class="story__image" href="{primary_url}" aria-label="기사 이미지 보기"><img src="{image_url}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>'
         if image_url
-        else '<div class="story__image story__image--empty" aria-hidden="true"><span>BSIDE</span></div>'
+        else '<div class="story__image story__image--empty" aria-hidden="true"><span>NO IMAGE</span></div>'
     )
     normalized_links = [link for link in links if isinstance(link, dict)]
     more_links = render_link_list(normalized_links, config, compact=True)
     detail_links = render_link_list(normalized_links, config, compact=False)
     featured_class = " story--featured" if featured else ""
+    section_attrs = ""
+    if section_id:
+        section_attrs = (
+            f' data-section-key="{escape(section_id, quote=True)}"'
+            f' data-section-index="{section_index}"'
+            f' data-section-total="{section_total}"'
+        )
     return f"""
-          <article class="story{featured_class}" id="{story_id}" data-story>
+          <article class="story{featured_class}" id="{story_id}" data-story{section_attrs}>
             {image_html}
             <div class="story__body">
               <div class="story__meta"><span>{category}</span><span>{timestamp}</span><span>{sources}</span></div>
@@ -520,25 +555,25 @@ def render_report_html(
         section_id = slugify(category, "section")
         category_sections.append(
             f"""
-        <section class="section" id="{escape(section_id, quote=True)}" data-section>
+        <section class="section" id="{escape(section_id, quote=True)}" data-section data-section-count="{len(category_stories)}">
           <div class="section__rule"></div>
           <div class="section__head">
             <h2>{escape(category)}</h2>
             <span>{len(category_stories)}개 이슈</span>
           </div>
           <div class="story-list">
-            {''.join(render_story(story, config) for story in category_stories)}
+            {''.join(render_story(story, config, section_id=section_id, section_index=index, section_total=len(category_stories)) for index, story in enumerate(category_stories, start=1))}
           </div>
         </section>
             """
         )
     toc = "\n".join(
-        f'<a class="chip" href="#{escape(slugify(category, "section"), quote=True)}">{escape(category)} <span>{len(buckets.get(category, []))}</span></a>'
+        f'<a class="chip" data-toc-section="{escape(slugify(category, "section"), quote=True)}" href="#{escape(slugify(category, "section"), quote=True)}" style="--progress:0"><span class="chip__label">{escape(category)}</span><span class="chip__progress" data-progress-text>0/{len(buckets.get(category, []))}</span></a>'
         for category in REPORT_CATEGORY_ORDER
         if buckets.get(category)
     )
     side_category_links = "\n".join(
-        f'<a data-nav-section href="#{escape(slugify(category, "section"), quote=True)}">{escape(category)} <span>{len(buckets.get(category, []))}</span></a>'
+        f'<a data-nav-section data-section-target="{escape(slugify(category, "section"), quote=True)}" href="#{escape(slugify(category, "section"), quote=True)}"><span class="nav-label">{escape(category)}</span><span class="nav-progress" data-progress-text>0/{len(buckets.get(category, []))}</span></a>'
         for category in REPORT_CATEGORY_ORDER
         if buckets.get(category)
     )
@@ -600,8 +635,10 @@ def render_report_html(
     .brief__bullets li {{ position: relative; padding-left: 18px; font-size: 16px; color: #2e2738; }}
     .brief__bullets li::before {{ content: ""; position: absolute; left: 0; top: .72em; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }}
     .toc {{ position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 92%, transparent); backdrop-filter: blur(8px); }}
-    .chip {{ border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; background: var(--surface); text-decoration: none; font-size: 13px; }}
-    .chip span {{ color: var(--accent); font-weight: 800; margin-left: 4px; }}
+    .chip {{ --progress: 0; position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; background: var(--surface); text-decoration: none; font-size: 13px; transition: border-color .18s ease, background .18s ease, color .18s ease; }}
+    .chip::after {{ content: ""; position: absolute; left: 0; right: auto; bottom: 0; height: 3px; width: calc(var(--progress, 0) * 100%); background: var(--accent); transition: width .18s ease; }}
+    .chip__progress {{ color: var(--accent); font-weight: 800; font-variant-numeric: tabular-nums; }}
+    .chip.is-active {{ border-color: var(--accent); background: var(--accent-soft); color: var(--accent-deep); }}
     .featured {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; border-bottom: 1px solid var(--ink); padding: 30px 0; align-items: start; }}
     .section {{ padding: 34px 0 6px; }}
     .section__rule {{ height: 3px; background: linear-gradient(90deg, var(--accent), var(--ink)); margin-bottom: 14px; }}
@@ -631,12 +668,14 @@ def render_report_html(
     th:first-child, td:first-child {{ width: 92px; color: var(--muted); white-space: nowrap; }}
     th:nth-child(2), td:nth-child(2) {{ width: 120px; color: var(--accent-deep); }}
     td a {{ overflow-wrap: anywhere; }}
-    .floating-nav {{ position: fixed; top: 92px; right: 20px; z-index: 8; width: 230px; max-height: calc(100vh - 118px); overflow: auto; border: 1px solid var(--line); background: rgba(255,255,255,.94); box-shadow: 0 14px 40px rgba(44, 27, 84, .10); padding: 12px; }}
+    .floating-nav {{ position: fixed; top: 92px; right: 20px; z-index: 8; width: 246px; max-height: calc(100vh - 118px); overflow: auto; border: 1px solid var(--line); background: rgba(255,255,255,.94); box-shadow: 0 14px 40px rgba(44, 27, 84, .10); padding: 12px; }}
     .floating-nav h2 {{ font-size: 12px; margin: 0 0 8px; color: var(--accent-deep); letter-spacing: .04em; }}
-    .floating-nav a {{ display: block; text-decoration: none; border-left: 2px solid transparent; padding: 6px 8px; color: var(--muted); font-size: 12px; }}
-    .floating-nav a span {{ color: var(--accent); font-weight: 800; float: right; }}
+    .floating-nav a {{ display: flex; align-items: baseline; justify-content: space-between; gap: 10px; text-decoration: none; border-left: 2px solid transparent; padding: 6px 8px; color: var(--muted); font-size: 12px; transition: border-color .18s ease, background .18s ease, color .18s ease; }}
+    .floating-nav .nav-label {{ min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .floating-nav .nav-progress {{ flex: 0 0 auto; color: var(--accent); font-weight: 800; font-variant-numeric: tabular-nums; }}
     .floating-nav a.is-active {{ border-left-color: var(--accent); color: var(--ink); background: var(--accent-soft); }}
     .floating-nav__stories {{ margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }}
+    .floating-nav__stories a {{ display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
     .top-button {{ position: fixed; right: 22px; bottom: 24px; z-index: 9; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: var(--accent); text-decoration: none; box-shadow: 0 12px 28px rgba(76, 38, 156, .26); }}
     .footer {{ margin-top: 48px; border-top: 2px solid var(--ink); padding-top: 20px; color: var(--muted); font-size: 13px; }}
     .footer__brand {{ color: var(--accent); font-weight: 900; letter-spacing: .06em; }}
@@ -651,12 +690,19 @@ def render_report_html(
       .story {{ grid-template-columns: 96px minmax(0, 1fr); gap: 12px; }}
       .story--featured {{ grid-template-columns: 1fr; }}
       .story--featured h3, .story h3 {{ font-size: 19px; line-height: 1.22; }}
+      .story p {{ display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 8px; }}
       .story__meta {{ font-size: 11px; }}
+      summary {{ font-size: 12px; }}
+      .link-table {{ border: 0; background: transparent; }}
       .link-table table {{ min-width: 0; }}
       table, thead, tbody, tr, th, td {{ display: block; }}
       thead {{ display: none; }}
-      tr {{ padding: 8px 0; border-bottom: 1px solid var(--line); }}
-      td {{ border: 0; padding: 2px 8px; width: auto !important; }}
+      tr {{ display: grid; grid-template-columns: 72px minmax(0, 1fr); column-gap: 8px; row-gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--line); }}
+      td {{ border: 0; padding: 0; width: auto !important; }}
+      .link-table__time {{ grid-column: 1; color: var(--muted); font-size: 11px; }}
+      .link-table__source {{ grid-column: 2; color: var(--accent-deep); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+      .link-table__title {{ grid-column: 1 / -1; font-size: 13px; line-height: 1.35; }}
+      .link-table__title a {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }}
       .footer__grid {{ grid-template-columns: 1fr; }}
     }}
   </style>
@@ -716,16 +762,81 @@ def render_report_html(
     </footer>
   </div>
   <script>
-    const observer = new IntersectionObserver((entries) => {{
-      entries.forEach((entry) => {{
-        if (!entry.isIntersecting) return;
-        const id = entry.target.id;
-        document.querySelectorAll('[data-nav-story], [data-nav-section]').forEach((link) => {{
-          link.classList.toggle('is-active', link.getAttribute('href') === '#' + id);
-        }});
+    const noImageMarkup = '<span>NO IMAGE</span>';
+    document.querySelectorAll('.story__image img').forEach((image) => {{
+      const markBroken = () => {{
+        const container = image.closest('.story__image');
+        if (!container) return;
+        container.classList.add('story__image--empty', 'story__image--broken');
+        container.innerHTML = noImageMarkup;
+      }};
+      image.addEventListener('error', markBroken, {{ once: true }});
+      if (image.complete && image.naturalWidth === 0) markBroken();
+    }});
+
+    const sections = Array.from(document.querySelectorAll('[data-section]'));
+    const sectionStories = Array.from(document.querySelectorAll('[data-story][data-section-key]'));
+    const categoryLinks = Array.from(document.querySelectorAll('[data-toc-section], [data-nav-section]'));
+    const storyLinks = Array.from(document.querySelectorAll('[data-nav-story]'));
+
+    function sectionIdForLink(link) {{
+      return link.dataset.tocSection || link.dataset.sectionTarget || (link.getAttribute('href') || '').replace('#', '');
+    }}
+
+    function progressLinks(sectionId) {{
+      return categoryLinks.filter((link) => sectionIdForLink(link) === sectionId);
+    }}
+
+    function setSectionProgress(sectionId, index, total) {{
+      const ratio = total ? Math.max(0, Math.min(1, index / total)) : 0;
+      progressLinks(sectionId).forEach((link) => {{
+        link.style.setProperty('--progress', String(ratio));
+        const progress = link.querySelector('[data-progress-text]');
+        if (progress) progress.textContent = `${{index}}/${{total}}`;
       }});
-    }}, {{ rootMargin: '-20% 0px -70% 0px', threshold: 0.01 }});
-    document.querySelectorAll('[data-story], [data-section]').forEach((element) => observer.observe(element));
+    }}
+
+    function updateNavigation() {{
+      if (!sections.length) return;
+      const marker = window.scrollY + Math.min(220, window.innerHeight * 0.34);
+      let activeSection = sections[0];
+      sections.forEach((section) => {{
+        if (section.offsetTop <= marker) activeSection = section;
+      }});
+      const activeSectionId = activeSection.id;
+      const activeStories = sectionStories.filter((story) => story.dataset.sectionKey === activeSectionId);
+      let activeStory = activeStories[0] || null;
+      activeStories.forEach((story) => {{
+        if (story.offsetTop <= marker) activeStory = story;
+      }});
+      const total = Number(activeSection.dataset.sectionCount || activeStory?.dataset.sectionTotal || activeStories.length || 0);
+      const index = activeStory ? Number(activeStory.dataset.sectionIndex || 0) : 0;
+
+      categoryLinks.forEach((link) => {{
+        const isActive = sectionIdForLink(link) === activeSectionId;
+        link.classList.toggle('is-active', isActive);
+        if (!isActive) setSectionProgress(sectionIdForLink(link), 0, Number(link.querySelector('[data-progress-text]')?.textContent?.split('/')[1] || 0));
+      }});
+      setSectionProgress(activeSectionId, index, total);
+
+      const activeStoryId = activeStory ? `#${{activeStory.id}}` : '';
+      storyLinks.forEach((link) => {{
+        link.classList.toggle('is-active', link.getAttribute('href') === activeStoryId);
+      }});
+    }}
+
+    let navTicking = false;
+    function requestNavigationUpdate() {{
+      if (navTicking) return;
+      navTicking = true;
+      window.requestAnimationFrame(() => {{
+        updateNavigation();
+        navTicking = false;
+      }});
+    }}
+    window.addEventListener('scroll', requestNavigationUpdate, {{ passive: true }});
+    window.addEventListener('resize', requestNavigationUpdate);
+    updateNavigation();
   </script>
 </body>
 </html>

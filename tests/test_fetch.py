@@ -12,6 +12,7 @@ from curator.fetch import (
     image_url_from_entry,
     parse_google_news_batch_response,
     source_from_html,
+    usable_image_url,
 )
 
 
@@ -71,6 +72,11 @@ def test_image_url_from_entry_accepts_media_thumbnail_without_type() -> None:
     entry = SimpleNamespace(media_thumbnail=[{"url": "/thumb.jpg"}])
 
     assert image_url_from_entry(entry, "https://example.com/news/1") == "https://example.com/thumb.jpg"
+
+
+def test_usable_image_url_rejects_generic_or_pathless_images() -> None:
+    assert not usable_image_url("https://img.seoul.co.kr/")
+    assert not usable_image_url("https://static.mk.co.kr/2026/css/images/ic_mai_w.png")
 
 
 def test_fetch_respects_max_enrich_articles(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]
