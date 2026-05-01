@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from html import escape
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -46,6 +46,7 @@ REPORT_CATEGORY_ORDER = [
     "해외·영문",
     "기타",
 ]
+BSIDE_URL = "https://bside.ai"
 
 
 def report_hours() -> int:
@@ -73,6 +74,13 @@ def report_public_url(config: dict[str, object], date_id: str) -> str:
 def article_domain(url: str) -> str:
     hostname = (urlsplit(url).hostname or "").lower().removeprefix("www.")
     return hostname or "source"
+
+
+def source_logo_url(domain: str) -> str:
+    normalized = domain.lower().removeprefix("www.").strip()
+    if not normalized or normalized == "source":
+        return ""
+    return f"https://www.google.com/s2/favicons?domain={quote(normalized, safe='')}&sz=128"
 
 
 def slugify(value: object, fallback: str = "section") -> str:
@@ -105,8 +113,26 @@ def story_summary_for_display(story: dict[str, object]) -> str:
         "관련 뉴스를 묶어",
     )
     if any(pattern in summary for pattern in generic_patterns):
-        return ""
-    return summary
+        return fallback_story_summary(story)
+    return summary or fallback_story_summary(story)
+
+
+def fallback_story_summary(story: dict[str, object]) -> str:
+    title = compact_text(str(story.get("title") or "이 이슈"), max_chars=82)
+    category = str(story.get("category") or "")
+    source_line = compact_text(str(story.get("source_line") or story.get("primary_source") or ""), max_chars=42)
+    link_count = int(story.get("link_count") or 0)
+    category_tail = {
+        "주주행동·경영권": "주주권과 경영권 이슈의 후속 흐름을 보여줍니다.",
+        "밸류업·주주환원": "주주환원 정책의 실행 가능성과 시장 반응을 확인할 수 있습니다.",
+        "자본시장 제도·공시": "공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.",
+        "해외·영문": "해외 투자자와 외신이 바라보는 지배구조·행동주의 흐름을 보여줍니다.",
+    }.get(category, "자본시장 관점에서 후속 흐름을 확인할 만한 사안입니다.")
+    if source_line and link_count > 1:
+        return f"{source_line} 등 {link_count}개 매체가 '{title}' 흐름을 전했습니다. {category_tail}"
+    if source_line:
+        return f"{source_line} 보도로 확인된 '{title}' 이슈입니다. {category_tail}"
+    return f"'{title}' 이슈입니다. {category_tail}"
 
 
 def story_links(group: list[dict[str, object]]) -> list[dict[str, str]]:
@@ -203,6 +229,56 @@ def enrich_story_images(stories: list[dict[str, object]], config: dict[str, obje
 def story_source_line(links: list[dict[str, str]]) -> str:
     counter = Counter(link["source"] for link in links if link.get("source"))
     return " · ".join(source for source, _count in counter.most_common(4))
+
+
+def story_logo_context(story: dict[str, object]) -> tuple[str, str]:
+    links = story.get("links") if isinstance(story.get("links"), list) else []
+    first_link = next((link for link in links if isinstance(link, dict)), {})
+    source = str(
+        story.get("primary_source")
+        or (first_link.get("source") if isinstance(first_link, dict) else "")
+        or story.get("source_line")
+        or "NO IMAGE"
+    )
+    url = str(story.get("primary_url") or (first_link.get("url") if isinstance(first_link, dict) else ""))
+    domain = str(first_link.get("domain") if isinstance(first_link, dict) else "") or article_domain(url)
+    label = compact_text(source, max_chars=18) or "NO IMAGE"
+    return label, source_logo_url(domain)
+
+
+def source_logo_html(story: dict[str, object], href: str) -> str:
+    label, logo_url = story_logo_context(story)
+    safe_label = escape(label)
+    safe_attr_label = escape(label, quote=True)
+    safe_logo = escape(logo_url, quote=True)
+    logo_img = (
+        f'<img class="story__source-logo" src="{safe_logo}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">'
+        if logo_url
+        else ""
+    )
+    return (
+        f'<a class="story__image story__image--logo" href="{href}" aria-label="{safe_attr_label} 기사 보기" '
+        f'data-logo-label="{safe_attr_label}" data-logo-src="{safe_logo}">'
+        f'{logo_img}<span>{safe_label}</span></a>'
+    )
+
+
+def story_image_data_attrs(story: dict[str, object]) -> str:
+    label, logo_url = story_logo_context(story)
+    return (
+        f' data-logo-label="{escape(label, quote=True)}"'
+        f' data-logo-src="{escape(logo_url, quote=True)}"'
+    )
+
+
+def bside_logo_html(extra_class: str = "") -> str:
+    class_name = f"bside-logo {extra_class}".strip()
+    return (
+        f'<a class="{class_name}" href="{BSIDE_URL}" aria-label="BSIDE Korea 홈페이지">'
+        '<span class="bside-logo__mark">BSIDE</span>'
+        '<span class="bside-logo__text">KOREA DAILY NEWS</span>'
+        '</a>'
+    )
 
 
 def build_report_stories(
@@ -473,9 +549,9 @@ def render_story(
     timestamp = escape(date_label(story.get("datetime"), config))
     image_url = escape(str(story.get("image_url") or ""), quote=True)
     image_html = (
-        f'<a class="story__image" href="{primary_url}" aria-label="기사 이미지 보기"><img src="{image_url}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>'
+        f'<a class="story__image" href="{primary_url}" aria-label="기사 이미지 보기"{story_image_data_attrs(story)}><img src="{image_url}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>'
         if image_url
-        else '<div class="story__image story__image--empty" aria-hidden="true"><span>NO IMAGE</span></div>'
+        else source_logo_html(story, primary_url)
     )
     normalized_links = [link for link in links if isinstance(link, dict)]
     has_grouped_links = len(normalized_links) > 1
@@ -582,6 +658,8 @@ def render_report_html(
     title = f"비사이드 자본시장 데일리 - {date_id}"
     description = compact_text(" ".join(review_bullets), max_chars=180)
     canonical_url = escape(report_url, quote=True)
+    header_logo = bside_logo_html("bside-logo--top")
+    footer_logo = bside_logo_html("bside-logo--footer")
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -618,10 +696,15 @@ def render_report_html(
     .page {{ max-width: 1160px; margin: 0 auto; padding: 24px 24px 72px; }}
     .masthead {{ border-bottom: 2px solid var(--ink); padding-bottom: 22px; }}
     .brand-row {{ display: flex; justify-content: space-between; gap: 16px; align-items: baseline; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 24px; }}
-    .brand {{ font-size: 14px; font-weight: 800; letter-spacing: .08em; color: var(--accent); }}
+    .bside-logo {{ display: inline-flex; align-items: baseline; gap: 8px; color: var(--accent); text-decoration: none; }}
+    .bside-logo__mark {{ font-weight: 950; letter-spacing: .06em; }}
+    .bside-logo__text {{ font-size: 12px; font-weight: 800; letter-spacing: .08em; }}
+    .bside-logo:hover {{ color: var(--accent-deep); }}
+    .bside-logo--top {{ font-size: 14px; }}
+    .bside-logo--footer {{ margin-bottom: 10px; }}
     .edition {{ color: var(--muted); font-size: 13px; }}
     h1 {{ font-family: Georgia, "Times New Roman", serif; font-size: clamp(40px, 7vw, 78px); line-height: .96; letter-spacing: 0; margin: 0 0 16px; max-width: 940px; }}
-    .dek {{ max-width: 760px; color: #322b3d; font-size: 18px; margin: 0; }}
+    .dek {{ max-width: 1080px; color: #322b3d; font-size: 18px; margin: 0; text-wrap: pretty; }}
     .meta-strip {{ display: flex; flex-wrap: wrap; gap: 10px 18px; margin-top: 20px; color: var(--muted); font-size: 13px; }}
     .meta-strip strong {{ color: var(--accent-deep); }}
     .brief {{ display: grid; grid-template-columns: 220px 1fr; gap: 30px; border-bottom: 1px solid var(--ink); padding: 34px 0; }}
@@ -646,6 +729,9 @@ def render_report_html(
     .story__image {{ display: block; aspect-ratio: 4 / 3; background: var(--accent-soft); overflow: hidden; border: 1px solid var(--line); }}
     .story__image img {{ width: 100%; height: 100%; object-fit: cover; display: block; }}
     .story__image--empty {{ display: grid; place-items: center; color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .08em; }}
+    .story__image--logo {{ display: grid; place-items: center; justify-items: center; gap: 8px; padding: 14px; text-align: center; text-decoration: none; color: var(--accent-deep); background: linear-gradient(135deg, #f4efff, #ffffff); }}
+    .story__image--logo span {{ font-size: 12px; font-weight: 900; letter-spacing: .02em; line-height: 1.2; overflow-wrap: anywhere; }}
+    .story__source-logo {{ width: 42px !important; height: 42px !important; object-fit: contain !important; border-radius: 10px; background: #fff; padding: 6px; box-shadow: 0 4px 14px rgba(44, 27, 84, .10); }}
     .story--featured .story__image {{ aspect-ratio: 16 / 9; }}
     .story__meta {{ display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; margin-bottom: 8px; }}
     .story__meta span:not(:last-child)::after {{ content: "·"; margin-left: 8px; color: var(--line); }}
@@ -717,7 +803,7 @@ def render_report_html(
   <div class="page">
     <header class="masthead">
       <div class="brand-row">
-        <div class="brand">BSIDE KOREA DAILY NEWS</div>
+        {header_logo}
         <div class="edition">{start_label} - {end_label}</div>
       </div>
       <h1>주주·자본시장 데일리</h1>
@@ -748,7 +834,7 @@ def render_report_html(
     <footer class="footer">
       <div class="footer__grid">
         <div>
-          <p class="footer__brand">BSIDE KOREA</p>
+          {footer_logo}
           <p>건강한 자본시장을 위한 주주행동과 투자자 커뮤니케이션을 지향합니다. 이 페이지는 공개 뉴스와 RSS를 자동으로 큐레이션한 리포트이며 투자 조언이나 매매 권유가 아닙니다.</p>
         </div>
         <div>
@@ -759,14 +845,40 @@ def render_report_html(
     </footer>
   </div>
   <script>
-    const noImageMarkup = '<span>NO IMAGE</span>';
-    document.querySelectorAll('.story__image img').forEach((image) => {{
-      const markBroken = () => {{
-        const container = image.closest('.story__image');
-        if (!container) return;
-        container.classList.add('story__image--empty', 'story__image--broken');
-        container.innerHTML = noImageMarkup;
-      }};
+    function attachSourceLogoGuard(container) {{
+      container.querySelectorAll('.story__source-logo').forEach((logo) => {{
+        logo.addEventListener('error', () => logo.remove(), {{ once: true }});
+        if (logo.complete && logo.naturalWidth === 0) logo.remove();
+      }});
+    }}
+
+    function replaceWithSourceLogo(container) {{
+      const label = container.dataset.logoLabel || 'NO IMAGE';
+      const logoSrc = container.dataset.logoSrc || '';
+      container.classList.add('story__image--logo', 'story__image--broken');
+      container.classList.remove('story__image--empty');
+      container.innerHTML = '';
+      if (logoSrc) {{
+        const logo = new Image();
+        logo.className = 'story__source-logo';
+        logo.src = logoSrc;
+        logo.alt = '';
+        logo.loading = 'lazy';
+        logo.decoding = 'async';
+        logo.referrerPolicy = 'no-referrer';
+        logo.addEventListener('error', () => logo.remove(), {{ once: true }});
+        container.appendChild(logo);
+      }}
+      const text = document.createElement('span');
+      text.textContent = label;
+      container.appendChild(text);
+    }}
+
+    document.querySelectorAll('.story__image').forEach((container) => {{
+      attachSourceLogoGuard(container);
+      const image = container.querySelector('img:not(.story__source-logo)');
+      if (!image) return;
+      const markBroken = () => replaceWithSourceLogo(container);
       const fallbackTimer = window.setTimeout(() => {{
         if (!image.complete || image.naturalWidth === 0) markBroken();
       }}, 8000);
@@ -913,6 +1025,7 @@ def render_report_index(reports_dir: Path) -> str:
     )
     if not links:
         links = "<li>아직 발행된 리포트가 없습니다.</li>"
+    logo = bside_logo_html("brand")
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -923,7 +1036,8 @@ def render_report_index(reports_dir: Path) -> str:
     :root {{ --ink:#17131f; --muted:#6f6878; --line:#ded7e8; --paper:#fbfafc; --accent:#6b35d8; }}
     body {{ margin:0; color:var(--ink); background:var(--paper); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }}
     main {{ max-width:780px; margin:0 auto; padding:36px 20px 72px; }}
-    .brand {{ color:var(--accent); font-weight:900; letter-spacing:.08em; font-size:13px; border-bottom:1px solid var(--line); padding-bottom:12px; }}
+    .brand {{ display:inline-flex; align-items:baseline; gap:8px; color:var(--accent); font-weight:900; letter-spacing:.08em; font-size:13px; text-decoration:none; border-bottom:1px solid var(--line); padding-bottom:12px; }}
+    .bside-logo__text {{ font-size:11px; }}
     h1 {{ font-family:Georgia,"Times New Roman",serif; font-size:clamp(40px,7vw,68px); line-height:1; margin:26px 0 10px; }}
     p {{ color:var(--muted); }}
     ul {{ list-style:none; padding:0; margin:32px 0 0; border-top:2px solid var(--ink); }}
@@ -934,7 +1048,7 @@ def render_report_index(reports_dir: Path) -> str:
 </head>
 <body>
   <main>
-    <div class="brand">BSIDE KOREA DAILY NEWS</div>
+    {logo}
     <h1>리포트 아카이브</h1>
     <p>매일 발행된 주주·자본시장 데일리 리포트를 날짜별로 확인할 수 있습니다.</p>
     <ul>{links}</ul>

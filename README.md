@@ -119,6 +119,18 @@ Repository Settings의 Pages 메뉴에서 배포 source를 설정합니다. GitH
 https://<owner>.github.io/<repo>/feed.xml
 ```
 
+### Custom domain
+
+`news.bside.ai` 같은 하위 도메인을 쓰려면 GitHub Pages의 Custom domain에 `news.bside.ai`를 등록하고, DNS 제공자에서 다음 CNAME을 설정합니다.
+
+```text
+news CNAME <owner>.github.io
+```
+
+GitHub Actions 기반 Pages 배포에서는 repository의 `CNAME` 파일이 필수는 아닙니다. GitHub Pages Settings의 Custom domain과 DNS가 기준입니다. DNS 전파와 HTTPS 인증서 발급에는 시간이 걸릴 수 있으며, 가능하면 GitHub 계정에서 `bside.ai` 도메인을 먼저 verify 해 두는 것을 권장합니다.
+
+공개 repo에는 bot token, API key, 비공개 채널 ID 같은 값을 커밋하지 않습니다. 이 프로젝트는 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `CURATOR_FEEDS`를 GitHub Actions Secrets에서만 읽도록 운영합니다. `public/`과 `data/state.json`에는 공개 가능한 기사 URL, 제목, 처리 상태만 남는 구조를 유지합니다.
+
 ## rss2tg_bot 등록
 
 `rss2tg_bot`에서 GitHub Pages에 공개된 `feed.xml` URL을 구독 URL로 등록합니다.

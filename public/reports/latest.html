@@ -34,10 +34,15 @@
     .page { max-width: 1160px; margin: 0 auto; padding: 24px 24px 72px; }
     .masthead { border-bottom: 2px solid var(--ink); padding-bottom: 22px; }
     .brand-row { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 24px; }
-    .brand { font-size: 14px; font-weight: 800; letter-spacing: .08em; color: var(--accent); }
+    .bside-logo { display: inline-flex; align-items: baseline; gap: 8px; color: var(--accent); text-decoration: none; }
+    .bside-logo__mark { font-weight: 950; letter-spacing: .06em; }
+    .bside-logo__text { font-size: 12px; font-weight: 800; letter-spacing: .08em; }
+    .bside-logo:hover { color: var(--accent-deep); }
+    .bside-logo--top { font-size: 14px; }
+    .bside-logo--footer { margin-bottom: 10px; }
     .edition { color: var(--muted); font-size: 13px; }
     h1 { font-family: Georgia, "Times New Roman", serif; font-size: clamp(40px, 7vw, 78px); line-height: .96; letter-spacing: 0; margin: 0 0 16px; max-width: 940px; }
-    .dek { max-width: 760px; color: #322b3d; font-size: 18px; margin: 0; }
+    .dek { max-width: 1080px; color: #322b3d; font-size: 18px; margin: 0; text-wrap: pretty; }
     .meta-strip { display: flex; flex-wrap: wrap; gap: 10px 18px; margin-top: 20px; color: var(--muted); font-size: 13px; }
     .meta-strip strong { color: var(--accent-deep); }
     .brief { display: grid; grid-template-columns: 220px 1fr; gap: 30px; border-bottom: 1px solid var(--ink); padding: 34px 0; }
@@ -62,6 +67,9 @@
     .story__image { display: block; aspect-ratio: 4 / 3; background: var(--accent-soft); overflow: hidden; border: 1px solid var(--line); }
     .story__image img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .story__image--empty { display: grid; place-items: center; color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .08em; }
+    .story__image--logo { display: grid; place-items: center; justify-items: center; gap: 8px; padding: 14px; text-align: center; text-decoration: none; color: var(--accent-deep); background: linear-gradient(135deg, #f4efff, #ffffff); }
+    .story__image--logo span { font-size: 12px; font-weight: 900; letter-spacing: .02em; line-height: 1.2; overflow-wrap: anywhere; }
+    .story__source-logo { width: 42px !important; height: 42px !important; object-fit: contain !important; border-radius: 10px; background: #fff; padding: 6px; box-shadow: 0 4px 14px rgba(44, 27, 84, .10); }
     .story--featured .story__image { aspect-ratio: 16 / 9; }
     .story__meta { display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; margin-bottom: 8px; }
     .story__meta span:not(:last-child)::after { content: "·"; margin-left: 8px; color: var(--line); }
@@ -125,7 +133,7 @@
     <h2>검색 유형</h2>
     <a data-nav-section data-section-target="주주행동-경영권" href="#주주행동-경영권"><span class="nav-label">주주행동·경영권</span><span class="nav-progress" data-progress-text>0/23</span></a>
 <a data-nav-section data-section-target="밸류업-주주환원" href="#밸류업-주주환원"><span class="nav-label">밸류업·주주환원</span><span class="nav-progress" data-progress-text>0/15</span></a>
-<a data-nav-section data-section-target="자본시장-제도-공시" href="#자본시장-제도-공시"><span class="nav-label">자본시장 제도·공시</span><span class="nav-progress" data-progress-text>0/32</span></a>
+<a data-nav-section data-section-target="자본시장-제도-공시" href="#자본시장-제도-공시"><span class="nav-label">자본시장 제도·공시</span><span class="nav-progress" data-progress-text>0/31</span></a>
 <a data-nav-section data-section-target="해외-영문" href="#해외-영문"><span class="nav-label">해외·영문</span><span class="nav-progress" data-progress-text>0/4</span></a>
     <div class="floating-nav__stories">
       <h2>기사 목록</h2>
@@ -164,9 +172,9 @@
 <a data-nav-story data-nav-story-index="32" href="#story-55">밸류업 공시에 PBR 목표 띄운다</a>
 <a data-nav-story data-nav-story-index="33" href="#story-57">마크로젠, 흑자 기조 속 배당금 66.7% 상향… 분리과세 혜택 예상</a>
 <a data-nav-story data-nav-story-index="34" href="#story-58">조정호 메리츠금융그룹 회장 | 보상·위임·밸류업으로 원 메리츠</a>
-<a data-nav-story data-nav-story-index="35" href="#story-64">밸류업 지수 3000 돌파… ETF도 한 달 새 수익률 30% 반등</a>
-<a data-nav-story data-nav-story-index="36" href="#story-72">모두투어, 자사주 전량 현물배당…소액주주 포섭 노렸나</a>
-<a data-nav-story data-nav-story-index="37" href="#story-73">자회사 IPO 문턱 높아진다…주주가치 회복 기대 속 자금조달 경고음 [중복상장...</a>
+<a data-nav-story data-nav-story-index="35" href="#story-63">밸류업 지수 3000 돌파… ETF도 한 달 새 수익률 30% 반등</a>
+<a data-nav-story data-nav-story-index="36" href="#story-71">모두투어, 자사주 전량 현물배당…소액주주 포섭 노렸나</a>
+<a data-nav-story data-nav-story-index="37" href="#story-72">자회사 IPO 문턱 높아진다…주주가치 회복 기대 속 자금조달 경고음 [중복상장...</a>
 <a data-nav-story data-nav-story-index="38" href="#story-1">한화솔루션 유상증자 또 제동… 금감원, 신고서 2차 정정 요구</a>
 <a data-nav-story data-nav-story-index="39" href="#story-3">쿠팡 김범석, 이제야 총수…공정위, 5년간 동생 경영 왜 놓쳤나</a>
 <a data-nav-story data-nav-story-index="40" href="#story-13">기존 중복상장까지 풀어야 K디스카운트 해소…日 사례 참고해야</a>
@@ -189,34 +197,33 @@
 <a data-nav-story data-nav-story-index="57" href="#story-56">따따블은 옛말, 10분의 1토막도…공모주 잔혹사 코너스톤이 끝낼까</a>
 <a data-nav-story data-nav-story-index="58" href="#story-59">솔레센스, 마크 제임스 독립이사 선임..자본시장 전문성 강화</a>
 <a data-nav-story data-nav-story-index="59" href="#story-61">SOLAI LTD, 이사회 의장 교체..Man San Vincent Law 신...</a>
-<a data-nav-story data-nav-story-index="60" href="#story-62">기업지배구조 공시 의무화, 실질적 기업가치 제고에 영향 미미</a>
-<a data-nav-story data-nav-story-index="61" href="#story-63">티에스넥스젠 보통주 매매거래정지 기간 변경... 상장폐지 여부 결정 시까지 정지</a>
-<a data-nav-story data-nav-story-index="62" href="#story-65">비유테크놀러지, 회생절차 폐지결정 공시…상장적격성 실질심사 사유 해당</a>
-<a data-nav-story data-nav-story-index="63" href="#story-66">티에스넥스젠, 상장적격성 실질심사 대상 결정</a>
-<a data-nav-story data-nav-story-index="64" href="#story-67">공개매수 하한 50%+1주 설정…대통령령에 세부 위임</a>
-<a data-nav-story data-nav-story-index="65" href="#story-68">경영권 프리미엄 독식 막는다…M&amp;A시 소액주주 지분도 의무매수</a>
-<a data-nav-story data-nav-story-index="66" href="#story-69">한국거래소, 대호에이엘 개선기간 부여…거래정지 및 상장심사 병행</a>
-<a data-nav-story data-nav-story-index="67" href="#story-70">박상혁 의원, 자본시장법 개정안 발의</a>
-<a data-nav-story data-nav-story-index="68" href="#story-71">이정수 우리금융 사장, 주식교환 결정 동양생명 이사회 불참 이유는</a>
-<a data-nav-story data-nav-story-index="69" href="#story-74">[중복상장 금지 파장-①] 외국선 1사 1상장…핵심자산 집중해 기업가치 제고</a>
-<a data-nav-story data-nav-story-index="70" href="#story-10">UWMC Issues Open Letter to Two Harbors Stoc...</a>
-<a data-nav-story data-nav-story-index="71" href="#story-11">POSCO HOLDINGS (NYSE: PKX) targets 35–40% s...</a>
-<a data-nav-story data-nav-story-index="72" href="#story-12">Boaz Weinsteins activist investor Saba seiz...</a>
-<a data-nav-story data-nav-story-index="73" href="#story-60">Headlam Board Responds to Activist Investor...</a>
+<a data-nav-story data-nav-story-index="60" href="#story-62">티에스넥스젠 보통주 매매거래정지 기간 변경... 상장폐지 여부 결정 시까지 정지</a>
+<a data-nav-story data-nav-story-index="61" href="#story-64">비유테크놀러지, 회생절차 폐지결정 공시…상장적격성 실질심사 사유 해당</a>
+<a data-nav-story data-nav-story-index="62" href="#story-65">티에스넥스젠, 상장적격성 실질심사 대상 결정</a>
+<a data-nav-story data-nav-story-index="63" href="#story-66">공개매수 하한 50%+1주 설정…대통령령에 세부 위임</a>
+<a data-nav-story data-nav-story-index="64" href="#story-67">경영권 프리미엄 독식 막는다…M&amp;A시 소액주주 지분도 의무매수</a>
+<a data-nav-story data-nav-story-index="65" href="#story-68">한국거래소, 대호에이엘 개선기간 부여…거래정지 및 상장심사 병행</a>
+<a data-nav-story data-nav-story-index="66" href="#story-69">박상혁 의원, 자본시장법 개정안 발의</a>
+<a data-nav-story data-nav-story-index="67" href="#story-70">이정수 우리금융 사장, 주식교환 결정 동양생명 이사회 불참 이유는</a>
+<a data-nav-story data-nav-story-index="68" href="#story-73">[중복상장 금지 파장-①] 외국선 1사 1상장…핵심자산 집중해 기업가치 제고</a>
+<a data-nav-story data-nav-story-index="69" href="#story-10">UWMC Issues Open Letter to Two Harbors Stoc...</a>
+<a data-nav-story data-nav-story-index="70" href="#story-11">POSCO HOLDINGS (NYSE: PKX) targets 35–40% s...</a>
+<a data-nav-story data-nav-story-index="71" href="#story-12">Boaz Weinsteins activist investor Saba seiz...</a>
+<a data-nav-story data-nav-story-index="72" href="#story-60">Headlam Board Responds to Activist Investor...</a>
     </div>
   </aside>
   <a class="top-button" href="#top" aria-label="맨 위로">↑</a>
   <div class="page">
     <header class="masthead">
       <div class="brand-row">
-        <div class="brand">BSIDE KOREA DAILY NEWS</div>
-        <div class="edition">2026-04-30 14:53 KST - 2026-05-01 14:53 KST</div>
+        <a class="bside-logo bside-logo--top" href="https://bside.ai" aria-label="BSIDE Korea 홈페이지"><span class="bside-logo__mark">BSIDE</span><span class="bside-logo__text">KOREA DAILY NEWS</span></a>
+        <div class="edition">2026-04-30 15:32 KST - 2026-05-01 15:32 KST</div>
       </div>
       <h1>주주·자본시장 데일리</h1>
       <p class="dek">건강한 자본시장을 위한 주주행동, 지배구조, 밸류업, 자본시장 제도 뉴스를 하루 단위로 묶어 읽기 쉽게 정리했습니다.</p>
       <div class="meta-strip" aria-label="report stats">
-        <span><strong>74</strong>개 이슈</span>
-        <span><strong>118</strong>건 기사</span>
+        <span><strong>73</strong>개 이슈</span>
+        <span><strong>117</strong>건 기사</span>
         <span><strong>77</strong>개 매체</span>
         <a href="index.html">다른 일자 보기</a>
       </div>
@@ -233,14 +240,14 @@
     <nav class="toc" aria-label="report sections">
       <a class="chip" data-toc-section="주주행동-경영권" href="#주주행동-경영권" style="--progress:0"><span class="chip__label">주주행동·경영권</span><span class="chip__progress" data-progress-text>0/23</span></a>
 <a class="chip" data-toc-section="밸류업-주주환원" href="#밸류업-주주환원" style="--progress:0"><span class="chip__label">밸류업·주주환원</span><span class="chip__progress" data-progress-text>0/15</span></a>
-<a class="chip" data-toc-section="자본시장-제도-공시" href="#자본시장-제도-공시" style="--progress:0"><span class="chip__label">자본시장 제도·공시</span><span class="chip__progress" data-progress-text>0/32</span></a>
+<a class="chip" data-toc-section="자본시장-제도-공시" href="#자본시장-제도-공시" style="--progress:0"><span class="chip__label">자본시장 제도·공시</span><span class="chip__progress" data-progress-text>0/31</span></a>
 <a class="chip" data-toc-section="해외-영문" href="#해외-영문" style="--progress:0"><span class="chip__label">해외·영문</span><span class="chip__progress" data-progress-text>0/4</span></a>
     </nav>
 
     <section class="featured" aria-label="top stories">
       
           <article class="story story--featured" id="story-1" data-story>
-            <a class="story__image" href="https://www.donga.com/news/amp/all/20260430/133845249/2" aria-label="기사 이미지 보기"><img src="https://news.einfomax.co.kr/news/photo/202605/4412834_312530_483.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.donga.com/news/amp/all/20260430/133845249/2" aria-label="기사 이미지 보기" data-logo-label="DONGA" data-logo-src="https://www.google.com/s2/favicons?domain=donga.com&amp;sz=128"><img src="https://news.einfomax.co.kr/news/photo/202605/4412834_312530_483.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>05.01 01:40</span><span>뉴시스 · DONGA · 연합인포맥스 · BIZ</span></div>
               <h3><a href="https://www.donga.com/news/amp/all/20260430/133845249/2">한화솔루션 유상증자 또 제동… 금감원, 신고서 2차 정정 요구</a></h3>
@@ -252,7 +259,7 @@
     
 
           <article class="story story--featured" id="story-2" data-story>
-            <a class="story__image" href="https://it.chosun.com/news/articleView.html?idxno=2023092161373" aria-label="기사 이미지 보기"><img src="https://cdn.it.chosun.com/news/thumbnail/202604/2023092161373_442150_2325_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://it.chosun.com/news/articleView.html?idxno=2023092161373" aria-label="기사 이미지 보기" data-logo-label="IT" data-logo-src="https://www.google.com/s2/favicons?domain=it.chosun.com&amp;sz=128"><img src="https://cdn.it.chosun.com/news/thumbnail/202604/2023092161373_442150_2325_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>밸류업·주주환원</span><span>04.30 16:37</span><span>IT · 연합뉴스 · 뉴데일리경제 · Chosunbiz</span></div>
               <h3><a href="https://it.chosun.com/news/articleView.html?idxno=2023092161373">LG U+, 800억원 규모 자사주 소각</a></h3>
@@ -264,7 +271,7 @@
     
 
           <article class="story story--featured" id="story-3" data-story>
-            <a class="story__image" href="https://www.newsis.com/view/NISX20260430_0003613422" aria-label="기사 이미지 보기"><img src="https://img1.newsis.com/2019/09/05/NISI20190905_0015563316_web.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.newsis.com/view/NISX20260430_0003613422" aria-label="기사 이미지 보기" data-logo-label="뉴시스" data-logo-src="https://www.google.com/s2/favicons?domain=newsis.com&amp;sz=128"><img src="https://img1.newsis.com/2019/09/05/NISI20190905_0015563316_web.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>05.01 08:00</span><span>뉴시스 · NEWS · HANI · M</span></div>
               <h3><a href="https://www.newsis.com/view/NISX20260430_0003613422">쿠팡 김범석, 이제야 총수…공정위, 5년간 동생 경영 왜 놓쳤나</a></h3>
@@ -286,7 +293,7 @@
           <div class="story-list">
             
           <article class="story" id="story-5" data-story data-section-key="주주행동-경영권" data-section-index="1" data-section-total="23">
-            <a class="story__image" href="https://www.edaily.co.kr/News/Read?newsId=06586246645421368" aria-label="기사 이미지 보기"><img src="https://image.edaily.co.kr/images/Photo/files/NP/S/2026/04/PS26043002361.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.edaily.co.kr/News/Read?newsId=06586246645421368" aria-label="기사 이미지 보기" data-logo-label="MARKETIN" data-logo-src="https://www.google.com/s2/favicons?domain=marketin.edaily.co.kr&amp;sz=128"><img src="https://image.edaily.co.kr/images/Photo/files/NP/S/2026/04/PS26043002361.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.30 18:20</span><span>MARKETIN · 네이트뉴스 · EDAILY</span></div>
               <h3><a href="https://www.edaily.co.kr/News/Read?newsId=06586246645421368">스튜어드십코드, 실망스러운 수준…국민연금 목소리 키워야[만났습니다③]</a></h3>
@@ -309,7 +316,7 @@
           </article>
     
           <article class="story" id="story-8" data-story data-section-key="주주행동-경영권" data-section-index="2" data-section-total="23">
-            <div class="story__image story__image--empty" aria-hidden="true"><span>NO IMAGE</span></div>
+            <a class="story__image story__image--logo" href="https://kr.investing.com/news/stock-market-news/article-93CH-1921047" aria-label="KR 기사 보기" data-logo-label="KR" data-logo-src="https://www.google.com/s2/favicons?domain=kr.investing.com&amp;sz=128"><img class="story__source-logo" src="https://www.google.com/s2/favicons?domain=kr.investing.com&amp;sz=128" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"><span>KR</span></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.30 21:22</span><span>KR</span></div>
               <h3><a href="https://kr.investing.com/news/stock-market-news/article-93CH-1921047">울프 리서치, 행동주의 압력 속 쿠퍼 컴퍼니스 주목 - Investing.com 한국어</a></h3>
@@ -331,11 +338,11 @@
           </article>
     
           <article class="story" id="story-9" data-story data-section-key="주주행동-경영권" data-section-index="3" data-section-total="23">
-            <a class="story__image" href="https://news.nate.com/view/20260430n14832" aria-label="기사 이미지 보기"><img src="https://image.ajunews.com/content/image/2026/04/30/20260430094013380943.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://news.nate.com/view/20260430n14832" aria-label="기사 이미지 보기" data-logo-label="네이트뉴스" data-logo-src="https://www.google.com/s2/favicons?domain=news.nate.com&amp;sz=128"><img src="https://image.ajunews.com/content/image/2026/04/30/20260430094013380943.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.30 11:28</span><span>네이트뉴스 · AJUNEWS</span></div>
               <h3><a href="https://news.nate.com/view/20260430n14832">행동주의 펀드들 고배당 잔치…1위는 150억 챙긴 이창환 얼라인파트너스 대표</a></h3>
-              
+              <p>네이트뉴스 · AJUNEWS 등 2개 매체가 &#x27;행동주의 펀드들 고배당 잔치…1위는 150억 챙긴 이창환 얼라인파트너스 대표&#x27; 흐름을 전했습니다. 주주권과 경영권 이슈의 후속 흐름을 보여줍니다.</p>
               <div class="story__more"><strong>More:</strong> <a href="https://news.nate.com/view/20260430n14832">네이트뉴스</a> <a href="https://www.ajunews.com/view/20260430094336160">AJUNEWS</a></div>
             </div>
             
@@ -353,7 +360,7 @@
           </article>
     
           <article class="story" id="story-20" data-story data-section-key="주주행동-경영권" data-section-index="4" data-section-total="23">
-            <a class="story__image" href="http://sateconomy.co.kr/news/view/1065571379137202" aria-label="기사 이미지 보기"><img src="http://sateconomy.co.kr/news/data/20260501/p1065571379137202_962_thum.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="http://sateconomy.co.kr/news/view/1065571379137202" aria-label="기사 이미지 보기" data-logo-label="SATECONOMY" data-logo-src="https://www.google.com/s2/favicons?domain=sateconomy.co.kr&amp;sz=128"><img src="http://sateconomy.co.kr/news/data/20260501/p1065571379137202_962_thum.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>05.01 09:02</span><span>SATECONOMY</span></div>
               <h3><a href="http://sateconomy.co.kr/news/view/1065571379137202">우리금융, 동양생명 포괄적 주식교환 가액 낮아… 소액 주주 반발</a></h3>
@@ -364,7 +371,7 @@
           </article>
     
           <article class="story" id="story-21" data-story data-section-key="주주행동-경영권" data-section-index="5" data-section-total="23">
-            <a class="story__image" href="https://www.hankyung.com/article/202604203762G" aria-label="기사 이미지 보기"><img src="https://img.hankyung.com/photo/202604/01.44016062.1.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.hankyung.com/article/202604203762G" aria-label="기사 이미지 보기" data-logo-label="HANKYUNG" data-logo-src="https://www.google.com/s2/favicons?domain=hankyung.com&amp;sz=128"><img src="https://img.hankyung.com/photo/202604/01.44016062.1.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>05.01 06:00</span><span>HANKYUNG</span></div>
               <h3><a href="https://www.hankyung.com/article/202604203762G">기업 최고의 방어는 휼륭한 지배구조다</a></h3>
@@ -375,7 +382,7 @@
           </article>
     
           <article class="story" id="story-22" data-story data-section-key="주주행동-경영권" data-section-index="6" data-section-total="23">
-            <a class="story__image" href="http://www.impacton.net/news/articleView.html?idxno=18724" aria-label="기사 이미지 보기"><img src="https://cdn.impacton.net/news/thumbnail/202604/18724_30259_211_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="http://www.impacton.net/news/articleView.html?idxno=18724" aria-label="기사 이미지 보기" data-logo-label="IMPACTON" data-logo-src="https://www.google.com/s2/favicons?domain=impacton.net&amp;sz=128"><img src="https://cdn.impacton.net/news/thumbnail/202604/18724_30259_211_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.30 21:25</span><span>IMPACTON</span></div>
               <h3><a href="http://www.impacton.net/news/articleView.html?idxno=18724">【문성의 밸류업 인사이트】밸류업과 K-스튜어드십 코드 2.0</a></h3>
@@ -386,7 +393,7 @@
           </article>
     
           <article class="story" id="story-23" data-story data-section-key="주주행동-경영권" data-section-index="7" data-section-total="23">
-            <a class="story__image" href="https://www.digitaltoday.co.kr/news/articleView.html?idxno=662060" aria-label="기사 이미지 보기"><img src="https://cdn.digitaltoday.co.kr/news/photo/202604/662060_611407_511.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.digitaltoday.co.kr/news/articleView.html?idxno=662060" aria-label="기사 이미지 보기" data-logo-label="디지털투데이" data-logo-src="https://www.google.com/s2/favicons?domain=digitaltoday.co.kr&amp;sz=128"><img src="https://cdn.digitaltoday.co.kr/news/photo/202604/662060_611407_511.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.30 21:13</span><span>디지털투데이</span></div>
               <h3><a href="https://www.digitaltoday.co.kr/news/articleView.html?idxno=662060">차백신연구소, 임시주총서 정관 변경·이사 및 감사 선임 가결</a></h3>
@@ -397,7 +404,7 @@
           </article>
     
           <article class="story" id="story-24" data-story data-section-key="주주행동-경영권" data-section-index="8" data-section-total="23">
-            <a class="story__image" href="https://alphabiz.co.kr/news/view/1065574345393655" aria-label="기사 이미지 보기"><img src="https://alphabiz.co.kr/news/data/20260430/p1065574345393655_958_thum.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://alphabiz.co.kr/news/view/1065574345393655" aria-label="기사 이미지 보기" data-logo-label="알파경제" data-logo-src="https://www.google.com/s2/favicons?domain=alphabiz.co.kr&amp;sz=128"><img src="https://alphabiz.co.kr/news/data/20260430/p1065574345393655_958_thum.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.30 19:00</span><span>알파경제</span></div>
               <h3><a href="https://alphabiz.co.kr/news/view/1065574345393655">[특파원] 닛케이 6만엔 돌파 배경…AI 붐과 日 거버넌스 개혁 기대감 확대</a></h3>
@@ -408,7 +415,7 @@
           </article>
     
           <article class="story" id="story-25" data-story data-section-key="주주행동-경영권" data-section-index="9" data-section-total="23">
-            <a class="story__image" href="https://weekly.hankooki.com/news/articleView.html?idxno=7162134" aria-label="기사 이미지 보기"><img src="https://cdn.weekly.hankooki.com/news/thumbnail/202604/7162134_232604_5936_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://weekly.hankooki.com/news/articleView.html?idxno=7162134" aria-label="기사 이미지 보기" data-logo-label="WEEKLY" data-logo-src="https://www.google.com/s2/favicons?domain=weekly.hankooki.com&amp;sz=128"><img src="https://cdn.weekly.hankooki.com/news/thumbnail/202604/7162134_232604_5936_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.30 16:54</span><span>WEEKLY</span></div>
               <h3><a href="https://weekly.hankooki.com/news/articleView.html?idxno=7162134">[금융권 책무구조도] 하나카드, 대표·이사회 의장 분리…내부 책임 강화</a></h3>
@@ -419,7 +426,7 @@
           </article>
     
           <article class="story" id="story-26" data-story data-section-key="주주행동-경영권" data-section-index="10" data-section-total="23">
-            <a class="story__image" href="https://www.thevaluenews.co.kr/news/198456" aria-label="기사 이미지 보기"><img src="https://www.thevaluenews.co.kr/data/cheditor4/2604/35da5d330025d354f184f25c0ba496c62bd8bd18.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.thevaluenews.co.kr/news/198456" aria-label="기사 이미지 보기" data-logo-label="THEVALUENEWS" data-logo-src="https://www.google.com/s2/favicons?domain=thevaluenews.co.kr&amp;sz=128"><img src="https://www.thevaluenews.co.kr/data/cheditor4/2604/35da5d330025d354f184f25c0ba496c62bd8bd18.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.30 15:55</span><span>THEVALUENEWS</span></div>
               <h3><a href="https://www.thevaluenews.co.kr/news/198456">우리금융-동양생명 주식교환 추진…대주주·소액주주 간 형평성 논란 점화</a></h3>
@@ -430,7 +437,7 @@
           </article>
     
           <article class="story" id="story-27" data-story data-section-key="주주행동-경영권" data-section-index="11" data-section-total="23">
-            <a class="story__image" href="https://www.digitaltoday.co.kr/news/articleView.html?idxno=661872" aria-label="기사 이미지 보기"><img src="https://cdn.digitaltoday.co.kr/news/photo/202604/661872_611212_4542.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.digitaltoday.co.kr/news/articleView.html?idxno=661872" aria-label="기사 이미지 보기" data-logo-label="디지털투데이" data-logo-src="https://www.google.com/s2/favicons?domain=digitaltoday.co.kr&amp;sz=128"><img src="https://cdn.digitaltoday.co.kr/news/photo/202604/661872_611212_4542.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.30 15:52</span><span>디지털투데이</span></div>
               <h3><a href="https://www.digitaltoday.co.kr/news/articleView.html?idxno=661872">케이이엠텍, 6월11일 임시주총 소집…감사 선임 안건 상정</a></h3>
@@ -441,7 +448,7 @@
           </article>
     
           <article class="story" id="story-28" data-story data-section-key="주주행동-경영권" data-section-index="12" data-section-total="23">
-            <a class="story__image" href="https://www.meconomynews.com/news/articleView.html?idxno=130723" aria-label="기사 이미지 보기"><img src="https://www.meconomynews.com/news/thumbnail/202604/130723_161831_3255_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.meconomynews.com/news/articleView.html?idxno=130723" aria-label="기사 이미지 보기" data-logo-label="MECONOMYNEWS" data-logo-src="https://www.google.com/s2/favicons?domain=meconomynews.com&amp;sz=128"><img src="https://www.meconomynews.com/news/thumbnail/202604/130723_161831_3255_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.30 15:34</span><span>MECONOMYNEWS</span></div>
               <h3><a href="https://www.meconomynews.com/news/articleView.html?idxno=130723">행동주의 펀드 확산 속 이해관계자 중심 경영 재조명 학술세미나 성료</a></h3>
@@ -452,7 +459,7 @@
           </article>
     
           <article class="story" id="story-29" data-story data-section-key="주주행동-경영권" data-section-index="13" data-section-total="23">
-            <a class="story__image" href="https://go.seoul.co.kr/news/newsView.php?id=20260430500122" aria-label="기사 이미지 보기"><img src="https://img.seoul.co.kr/img/upload//2026/04/29/SSC_20260429182655_N4.png.webp" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://go.seoul.co.kr/news/newsView.php?id=20260430500122" aria-label="기사 이미지 보기" data-logo-label="GO" data-logo-src="https://www.google.com/s2/favicons?domain=go.seoul.co.kr&amp;sz=128"><img src="https://img.seoul.co.kr/img/upload//2026/04/29/SSC_20260429182655_N4.png.webp" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.30 14:35</span><span>GO</span></div>
               <h3><a href="https://go.seoul.co.kr/news/newsView.php?id=20260430500122">기업지배구조개발연구회, 이해관계자 중심주의와 펀드자본주의 학술세미나 실시</a></h3>
@@ -463,7 +470,7 @@
           </article>
     
           <article class="story" id="story-30" data-story data-section-key="주주행동-경영권" data-section-index="14" data-section-total="23">
-            <a class="story__image" href="https://www.joseilbo.com/news/htmls/2026/04/20260430567549.html" aria-label="기사 이미지 보기"><img src="https://www.joseilbo.com/gisa_img/17775157271777515727_khkim.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.joseilbo.com/news/htmls/2026/04/20260430567549.html" aria-label="기사 이미지 보기" data-logo-label="JOSEILBO" data-logo-src="https://www.google.com/s2/favicons?domain=joseilbo.com&amp;sz=128"><img src="https://www.joseilbo.com/gisa_img/17775157271777515727_khkim.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.30 11:23</span><span>JOSEILBO</span></div>
               <h3><a href="https://www.joseilbo.com/news/htmls/2026/04/20260430567549.html">이사회, 제 역할 했나 고려아연 소액주주, 5,500억 투자 검증 요구하며 고발</a></h3>
@@ -474,18 +481,18 @@
           </article>
     
           <article class="story" id="story-31" data-story data-section-key="주주행동-경영권" data-section-index="15" data-section-total="23">
-            <a class="story__image" href="https://www.fntimes.com/html/view.php?ud=2026043011081064772a735e27af_18" aria-label="기사 이미지 보기"><img src="https://cfnimage.commutil.kr/phpwas/restmb_allidxmake.php?pp=002&amp;idx=999&amp;simg=202604301115200626002a735e27af12411124362.jpg&amp;nmt=18" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.fntimes.com/html/view.php?ud=2026043011081064772a735e27af_18" aria-label="기사 이미지 보기" data-logo-label="FNTIMES" data-logo-src="https://www.google.com/s2/favicons?domain=fntimes.com&amp;sz=128"><img src="https://cfnimage.commutil.kr/phpwas/restmb_allidxmake.php?pp=002&amp;idx=999&amp;simg=202604301115200626002a735e27af12411124362.jpg&amp;nmt=18" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.30 11:23</span><span>FNTIMES</span></div>
               <h3><a href="https://www.fntimes.com/html/view.php?ud=2026043011081064772a735e27af_18">행동주의의 변신…지분 버리고 정보로 기업 겨눈다</a></h3>
-              
+              <p>FNTIMES 보도로 확인된 &#x27;행동주의의 변신…지분 버리고 정보로 기업 겨눈다&#x27; 이슈입니다. 주주권과 경영권 이슈의 후속 흐름을 보여줍니다.</p>
               
             </div>
             
           </article>
     
           <article class="story" id="story-32" data-story data-section-key="주주행동-경영권" data-section-index="16" data-section-total="23">
-            <a class="story__image" href="https://news.jkn.co.kr/post/899609" aria-label="기사 이미지 보기"><img src="https://images.jkn.co.kr/data/images/full/983954/k.png?w=800" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://news.jkn.co.kr/post/899609" aria-label="기사 이미지 보기" data-logo-label="재경일보" data-logo-src="https://www.google.com/s2/favicons?domain=news.jkn.co.kr&amp;sz=128"><img src="https://images.jkn.co.kr/data/images/full/983954/k.png?w=800" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.30 00:00</span><span>재경일보</span></div>
               <h3><a href="https://news.jkn.co.kr/post/899609">고려아연, 경영권 분쟁 속 하락 마감... 비철금속 섹터 부진 영향</a></h3>
@@ -496,77 +503,77 @@
           </article>
     
           <article class="story" id="story-33" data-story data-section-key="주주행동-경영권" data-section-index="17" data-section-total="23">
-            <a class="story__image" href="https://www.ngetnews.com/news/articleView.html?idxno=550106" aria-label="기사 이미지 보기"><img src="https://cdn.ngetnews.com/news/thumbnail/202604/550106_117899_4954_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.ngetnews.com/news/articleView.html?idxno=550106" aria-label="기사 이미지 보기" data-logo-label="NGETNEWS" data-logo-src="https://www.google.com/s2/favicons?domain=ngetnews.com&amp;sz=128"><img src="https://cdn.ngetnews.com/news/thumbnail/202604/550106_117899_4954_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.29 18:51</span><span>NGETNEWS</span></div>
               <h3><a href="https://www.ngetnews.com/news/articleView.html?idxno=550106">금감원의 사외이사 관리…보조에서 책임 강화로 [이슈 더보기] - 뉴스저널리즘</a></h3>
-              
+              <p>NGETNEWS 보도로 확인된 &#x27;금감원의 사외이사 관리…보조에서 책임 강화로 [이슈 더보기] - 뉴스저널리즘&#x27; 이슈입니다. 주주권과 경영권 이슈의 후속 흐름을 보여줍니다.</p>
               
             </div>
             
           </article>
     
           <article class="story" id="story-34" data-story data-section-key="주주행동-경영권" data-section-index="18" data-section-total="23">
-            <a class="story__image" href="https://www.mt.co.kr/stock/2026/04/29/2026042917040957348" aria-label="기사 이미지 보기"><img src="https://thumb.mt.co.kr/cdn-cgi/image/f=avif/21/2026/04/2026042917040957348_1.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.mt.co.kr/stock/2026/04/29/2026042917040957348" aria-label="기사 이미지 보기" data-logo-label="머니투데이" data-logo-src="https://www.google.com/s2/favicons?domain=mt.co.kr&amp;sz=128"><img src="https://thumb.mt.co.kr/cdn-cgi/image/f=avif/21/2026/04/2026042917040957348_1.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.29 17:42</span><span>머니투데이</span></div>
               <h3><a href="https://www.mt.co.kr/stock/2026/04/29/2026042917040957348">은퇴자금 수천억 물린 제이알리츠 소액주주들… 유증이라도 하겠다</a></h3>
-              
+              <p>머니투데이 보도로 확인된 &#x27;은퇴자금 수천억 물린 제이알리츠 소액주주들… 유증이라도 하겠다&#x27; 이슈입니다. 주주권과 경영권 이슈의 후속 흐름을 보여줍니다.</p>
               
             </div>
             
           </article>
     
           <article class="story" id="story-35" data-story data-section-key="주주행동-경영권" data-section-index="19" data-section-total="23">
-            <a class="story__image" href="http://www.newsian.co.kr/news/articleView.html?idxno=89093" aria-label="기사 이미지 보기"><img src="https://cdn.newsian.co.kr/news/thumbnail/202604/89093_81440_2745_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="http://www.newsian.co.kr/news/articleView.html?idxno=89093" aria-label="기사 이미지 보기" data-logo-label="NEWSIAN" data-logo-src="https://www.google.com/s2/favicons?domain=newsian.co.kr&amp;sz=128"><img src="https://cdn.newsian.co.kr/news/thumbnail/202604/89093_81440_2745_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.29 15:31</span><span>NEWSIAN</span></div>
               <h3><a href="http://www.newsian.co.kr/news/articleView.html?idxno=89093">영풍 고려아연 황산 거래 중단은 경영권 분쟁 수단…본안서 다툴 것</a></h3>
-              
+              <p>NEWSIAN 보도로 확인된 &#x27;영풍 고려아연 황산 거래 중단은 경영권 분쟁 수단…본안서 다툴 것&#x27; 이슈입니다. 주주권과 경영권 이슈의 후속 흐름을 보여줍니다.</p>
               
             </div>
             
           </article>
     
           <article class="story" id="story-36" data-story data-section-key="주주행동-경영권" data-section-index="20" data-section-total="23">
-            <a class="story__image" href="https://www.newsinside.kr/news/articleView.html?idxno=4635357" aria-label="기사 이미지 보기"><img src="https://cdn.newsinside.kr/news/photo/202604/4635357_935655_1541.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.newsinside.kr/news/articleView.html?idxno=4635357" aria-label="기사 이미지 보기" data-logo-label="NEWSINSIDE" data-logo-src="https://www.google.com/s2/favicons?domain=newsinside.kr&amp;sz=128"><img src="https://cdn.newsinside.kr/news/photo/202604/4635357_935655_1541.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.29 15:19</span><span>NEWSINSIDE</span></div>
               <h3><a href="https://www.newsinside.kr/news/articleView.html?idxno=4635357">삼천당제약, 주총 한 달 만에 사외이사 교체…금감원 출신 신규 선임</a></h3>
-              
+              <p>NEWSINSIDE 보도로 확인된 &#x27;삼천당제약, 주총 한 달 만에 사외이사 교체…금감원 출신 신규 선임&#x27; 이슈입니다. 주주권과 경영권 이슈의 후속 흐름을 보여줍니다.</p>
               
             </div>
             
           </article>
     
           <article class="story" id="story-37" data-story data-section-key="주주행동-경영권" data-section-index="21" data-section-total="23">
-            <a class="story__image" href="https://www.bloter.net/news/articleView.html?idxno=660868" aria-label="기사 이미지 보기"><img src="https://cdn.bloter.net/news/thumbnail/202604/660868_272841_1432_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.bloter.net/news/articleView.html?idxno=660868" aria-label="기사 이미지 보기" data-logo-label="블로터" data-logo-src="https://www.google.com/s2/favicons?domain=bloter.net&amp;sz=128"><img src="https://cdn.bloter.net/news/thumbnail/202604/660868_272841_1432_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.29 14:44</span><span>블로터</span></div>
               <h3><a href="https://www.bloter.net/news/articleView.html?idxno=660868">얼라인파트너스, 에이플러스에셋·덴티움 대상 주주 제보 센터 개설한다</a></h3>
-              
+              <p>블로터 보도로 확인된 &#x27;얼라인파트너스, 에이플러스에셋·덴티움 대상 주주 제보 센터 개설한다&#x27; 이슈입니다. 주주권과 경영권 이슈의 후속 흐름을 보여줍니다.</p>
               
             </div>
             
           </article>
     
           <article class="story" id="story-38" data-story data-section-key="주주행동-경영권" data-section-index="22" data-section-total="23">
-            <a class="story__image" href="https://www.kyeonggi.com/article/20260429580485" aria-label="기사 이미지 보기"><img src="https://ypzxxdrj8709.edge.naverncp.com/data2/content/image/2026/04/29/.cache/512/20260429580486.jpg?v=20260501145324" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.kyeonggi.com/article/20260429580485" aria-label="기사 이미지 보기" data-logo-label="KYEONGGI" data-logo-src="https://www.google.com/s2/favicons?domain=kyeonggi.com&amp;sz=128"><img src="https://ypzxxdrj8709.edge.naverncp.com/data2/content/image/2026/04/29/.cache/512/20260429580486.jpg?v=20260501153321" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.29 10:35</span><span>KYEONGGI</span></div>
               <h3><a href="https://www.kyeonggi.com/article/20260429580485">실체 불분명한 고려아연 소액주주연합... 경영권 분쟁 속 기획 고발 의혹</a></h3>
-              
+              <p>KYEONGGI 보도로 확인된 &#x27;실체 불분명한 고려아연 소액주주연합... 경영권 분쟁 속 기획 고발 의혹&#x27; 이슈입니다. 주주권과 경영권 이슈의 후속 흐름을 보여줍니다.</p>
               
             </div>
             
           </article>
     
           <article class="story" id="story-39" data-story data-section-key="주주행동-경영권" data-section-index="23" data-section-total="23">
-            <a class="story__image" href="https://www.sisajournal-e.com/news/articleView.html?idxno=420802" aria-label="기사 이미지 보기"><img src="https://cdn.sisajournal-e.com/news/thumbnail/202604/420802_234114_4432_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.sisajournal-e.com/news/articleView.html?idxno=420802" aria-label="기사 이미지 보기" data-logo-label="SISAJOURNAL-E" data-logo-src="https://www.google.com/s2/favicons?domain=sisajournal-e.com&amp;sz=128"><img src="https://cdn.sisajournal-e.com/news/thumbnail/202604/420802_234114_4432_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.29 00:00</span><span>SISAJOURNAL-E</span></div>
               <h3><a href="https://www.sisajournal-e.com/news/articleView.html?idxno=420802">소액주주 2.8만명 제이알글로벌리츠, 주식·채권·은행·운용사에 전방위 폭탄 - 시사저널e</a></h3>
-              
+              <p>SISAJOURNAL-E 보도로 확인된 &#x27;소액주주 2.8만명 제이알글로벌리츠, 주식·채권·은행·운용사에 전방위 폭탄 - 시사저널e&#x27; 이슈입니다. 주주권과 경영권 이슈의 후속 흐름을 보여줍니다.</p>
               
             </div>
             
@@ -584,7 +591,7 @@
           <div class="story-list">
             
           <article class="story" id="story-2" data-story data-section-key="밸류업-주주환원" data-section-index="1" data-section-total="15">
-            <a class="story__image" href="https://it.chosun.com/news/articleView.html?idxno=2023092161373" aria-label="기사 이미지 보기"><img src="https://cdn.it.chosun.com/news/thumbnail/202604/2023092161373_442150_2325_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://it.chosun.com/news/articleView.html?idxno=2023092161373" aria-label="기사 이미지 보기" data-logo-label="IT" data-logo-src="https://www.google.com/s2/favicons?domain=it.chosun.com&amp;sz=128"><img src="https://cdn.it.chosun.com/news/thumbnail/202604/2023092161373_442150_2325_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>밸류업·주주환원</span><span>04.30 16:37</span><span>IT · 연합뉴스 · 뉴데일리경제 · Chosunbiz</span></div>
               <h3><a href="https://it.chosun.com/news/articleView.html?idxno=2023092161373">LG U+, 800억원 규모 자사주 소각</a></h3>
@@ -611,7 +618,7 @@
           </article>
     
           <article class="story" id="story-4" data-story data-section-key="밸류업-주주환원" data-section-index="2" data-section-total="15">
-            <a class="story__image" href="https://news.nate.com/view/20260501n02236" aria-label="기사 이미지 보기"><img src="https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/se/2026/05/01/news-p.v1.20260430.39cb300598e14616976f4949df245a95_P2.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://news.nate.com/view/20260501n02236" aria-label="기사 이미지 보기" data-logo-label="네이트뉴스" data-logo-src="https://www.google.com/s2/favicons?domain=news.nate.com&amp;sz=128"><img src="https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/se/2026/05/01/news-p.v1.20260430.39cb300598e14616976f4949df245a95_P2.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>밸류업·주주환원</span><span>05.01 06:01</span><span>네이트뉴스 · 다음뉴스 · M · 연합뉴스</span></div>
               <h3><a href="https://news.nate.com/view/20260501n02236">중국 금융당국 증권사 성과급 40% 나중에 지급하라···보너스 과열 제동</a></h3>
@@ -635,7 +642,7 @@
           </article>
     
           <article class="story" id="story-6" data-story data-section-key="밸류업-주주환원" data-section-index="3" data-section-total="15">
-            <a class="story__image" href="https://www.newspim.com/news/view/20260430001247" aria-label="기사 이미지 보기"><img src="https://img.newspim.com/news/2026/04/30/2604301641161400_t1.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.newspim.com/news/view/20260430001247" aria-label="기사 이미지 보기" data-logo-label="NEWSPIM" data-logo-src="https://www.google.com/s2/favicons?domain=newspim.com&amp;sz=128"><img src="https://img.newspim.com/news/2026/04/30/2604301641161400_t1.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>밸류업·주주환원</span><span>04.30 16:42</span><span>NEWSPIM · 뉴데일리경제 · ELECTIMES</span></div>
               <h3><a href="https://www.newspim.com/news/view/20260430001247">DB하이텍, 주주환원 30% 목표…자사주 소각 확대</a></h3>
@@ -658,7 +665,7 @@
           </article>
     
           <article class="story" id="story-7" data-story data-section-key="밸류업-주주환원" data-section-index="4" data-section-total="15">
-            <a class="story__image" href="https://www.asiatoday.co.kr/kn/view.php?key=20260430010009888" aria-label="기사 이미지 보기"><img src="https://img.asiatoday.co.kr/file/2026y/04m/30d/2026043001001834100098881.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.asiatoday.co.kr/kn/view.php?key=20260430010009888" aria-label="기사 이미지 보기" data-logo-label="블로터" data-logo-src="https://www.google.com/s2/favicons?domain=bloter.net&amp;sz=128"><img src="https://img.asiatoday.co.kr/file/2026y/04m/30d/2026043001001834100098881.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>밸류업·주주환원</span><span>04.30 16:13</span><span>블로터 · ASIATODAY · 데일리안</span></div>
               <h3><a href="https://www.asiatoday.co.kr/kn/view.php?key=20260430010009888">LG유플러스, 자사주 소각…800억 규모</a></h3>
@@ -681,7 +688,7 @@
           </article>
     
           <article class="story" id="story-14" data-story data-section-key="밸류업-주주환원" data-section-index="5" data-section-total="15">
-            <a class="story__image" href="https://www.busan.com/view/busan/view.php?code=2026043014203738701" aria-label="기사 이미지 보기"><img src="https://www.busan.com/nas/wcms/wcms_data/photos/2026/03/23/2026032316312854681_l.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.busan.com/view/busan/view.php?code=2026043014203738701" aria-label="기사 이미지 보기" data-logo-label="BUSAN" data-logo-src="https://www.google.com/s2/favicons?domain=busan.com&amp;sz=128"><img src="https://www.busan.com/nas/wcms/wcms_data/photos/2026/03/23/2026032316312854681_l.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>밸류업·주주환원</span><span>04.30 16:19</span><span>BUSAN · 머니투데이</span></div>
               <h3><a href="https://www.busan.com/view/busan/view.php?code=2026043014203738701">BNK금융, 1분기 순이익 2114억 원 26.9%↑… 현금배당, 자사주 매입·소각 확대</a></h3>
@@ -703,11 +710,11 @@
           </article>
     
           <article class="story" id="story-18" data-story data-section-key="밸류업-주주환원" data-section-index="6" data-section-total="15">
-            <a class="story__image" href="https://www.yna.co.kr/view/AKR20260429137600017" aria-label="기사 이미지 보기"><img src="https://img8.yna.co.kr/etc/inner/KR/2026/04/29/AKR20260429137600017_02_i_P4.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.yna.co.kr/view/AKR20260429137600017" aria-label="기사 이미지 보기" data-logo-label="연합뉴스" data-logo-src="https://www.google.com/s2/favicons?domain=yna.co.kr&amp;sz=128"><img src="https://img8.yna.co.kr/etc/inner/KR/2026/04/29/AKR20260429137600017_02_i_P4.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>밸류업·주주환원</span><span>04.29 15:52</span><span>연합뉴스 · 뉴시스</span></div>
               <h3><a href="https://www.yna.co.kr/view/AKR20260429137600017">라온시큐어, 12억 규모 자사주 소각…밸류업 박차</a></h3>
-              
+              <p>연합뉴스 · 뉴시스 등 2개 매체가 &#x27;라온시큐어, 12억 규모 자사주 소각…밸류업 박차&#x27; 흐름을 전했습니다. 주주환원 정책의 실행 가능성과 시장 반응을 확인할 수 있습니다.</p>
               <div class="story__more"><strong>More:</strong> <a href="https://www.yna.co.kr/view/AKR20260429137600017">연합뉴스</a> <a href="https://www.newsis.com/view/NISX20260429_0003611488">뉴시스</a></div>
             </div>
             
@@ -725,7 +732,7 @@
           </article>
     
           <article class="story" id="story-41" data-story data-section-key="밸류업-주주환원" data-section-index="7" data-section-total="15">
-            <a class="story__image" href="http://sateconomy.co.kr/news/view/1065596243372291" aria-label="기사 이미지 보기"><img src="http://sateconomy.co.kr/news/data/20260430/p1065596243372291_280_thum.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="http://sateconomy.co.kr/news/view/1065596243372291" aria-label="기사 이미지 보기" data-logo-label="SATECONOMY" data-logo-src="https://www.google.com/s2/favicons?domain=sateconomy.co.kr&amp;sz=128"><img src="http://sateconomy.co.kr/news/data/20260430/p1065596243372291_280_thum.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>밸류업·주주환원</span><span>05.01 10:30</span><span>SATECONOMY</span></div>
               <h3><a href="http://sateconomy.co.kr/news/view/1065596243372291">신한금융 밸류업 2.0으로 금융권 선도…주주환원 새 기준 제시</a></h3>
@@ -736,7 +743,7 @@
           </article>
     
           <article class="story" id="story-43" data-story data-section-key="밸류업-주주환원" data-section-index="8" data-section-total="15">
-            <a class="story__image" href="https://daily.hankooki.com/news/articleView.html?idxno=1363178" aria-label="기사 이미지 보기"><img src="https://cdn.daily.hankooki.com/news/thumbnail/202604/1363178_1547033_2954_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://daily.hankooki.com/news/articleView.html?idxno=1363178" aria-label="기사 이미지 보기" data-logo-label="DAILY" data-logo-src="https://www.google.com/s2/favicons?domain=daily.hankooki.com&amp;sz=128"><img src="https://cdn.daily.hankooki.com/news/thumbnail/202604/1363178_1547033_2954_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>밸류업·주주환원</span><span>05.01 09:00</span><span>DAILY</span></div>
               <h3><a href="https://daily.hankooki.com/news/articleView.html?idxno=1363178">금융지주, 지배구조 TF 가동했지만…개편안 발표 안갯속 - 데일리한국</a></h3>
@@ -747,7 +754,7 @@
           </article>
     
           <article class="story" id="story-46" data-story data-section-key="밸류업-주주환원" data-section-index="9" data-section-total="15">
-            <a class="story__image" href="https://www.bloter.net/news/articleView.html?idxno=660977" aria-label="기사 이미지 보기"><img src="https://cdn.bloter.net/news/thumbnail/202604/660977_273174_3221_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.bloter.net/news/articleView.html?idxno=660977" aria-label="기사 이미지 보기" data-logo-label="블로터" data-logo-src="https://www.google.com/s2/favicons?domain=bloter.net&amp;sz=128"><img src="https://cdn.bloter.net/news/thumbnail/202604/660977_273174_3221_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>밸류업·주주환원</span><span>04.30 17:05</span><span>블로터</span></div>
               <h3><a href="https://www.bloter.net/news/articleView.html?idxno=660977">[유한 100주년]⑨ 엇갈린 밸류업 성적, 주주환원 합격·성장은 아직</a></h3>
@@ -758,7 +765,7 @@
           </article>
     
           <article class="story" id="story-55" data-story data-section-key="밸류업-주주환원" data-section-index="10" data-section-total="15">
-            <a class="story__image" href="https://www.newstomato.com/readnews.aspx?no=1299605" aria-label="기사 이미지 보기"><img src="https://image.newstomato.com/newsimg/2026/4/30/1299605/attach.jpg?v=202604300809" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.newstomato.com/readnews.aspx?no=1299605" aria-label="기사 이미지 보기" data-logo-label="NEWSTOMATO" data-logo-src="https://www.google.com/s2/favicons?domain=newstomato.com&amp;sz=128"><img src="https://image.newstomato.com/newsimg/2026/4/30/1299605/attach.jpg?v=202604300809" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>밸류업·주주환원</span><span>04.30 08:09</span><span>NEWSTOMATO</span></div>
               <h3><a href="https://www.newstomato.com/readnews.aspx?no=1299605">밸류업 공시에 PBR 목표 띄운다</a></h3>
@@ -769,55 +776,55 @@
           </article>
     
           <article class="story" id="story-57" data-story data-section-key="밸류업-주주환원" data-section-index="11" data-section-total="15">
-            <div class="story__image story__image--empty" aria-hidden="true"><span>NO IMAGE</span></div>
+            <a class="story__image story__image--logo" href="http://m.yakup.com/news/index.html?cat=all&amp;cat2=&amp;cat3=&amp;mode=view&amp;nid=323475&amp;num_start=176&amp;pmode=" aria-label="M 기사 보기" data-logo-label="M" data-logo-src="https://www.google.com/s2/favicons?domain=m.yakup.com&amp;sz=128"><img class="story__source-logo" src="https://www.google.com/s2/favicons?domain=m.yakup.com&amp;sz=128" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"><span>M</span></a>
             <div class="story__body">
               <div class="story__meta"><span>밸류업·주주환원</span><span>04.29 21:57</span><span>M</span></div>
               <h3><a href="http://m.yakup.com/news/index.html?cat=all&amp;cat2=&amp;cat3=&amp;mode=view&amp;nid=323475&amp;num_start=176&amp;pmode=">마크로젠, 흑자 기조 속 배당금 66.7% 상향… 분리과세 혜택 예상</a></h3>
-              
+              <p>M 보도로 확인된 &#x27;마크로젠, 흑자 기조 속 배당금 66.7% 상향… 분리과세 혜택 예상&#x27; 이슈입니다. 주주환원 정책의 실행 가능성과 시장 반응을 확인할 수 있습니다.</p>
               
             </div>
             
           </article>
     
           <article class="story" id="story-58" data-story data-section-key="밸류업-주주환원" data-section-index="12" data-section-total="15">
-            <a class="story__image" href="https://v.daum.net/v/20260429211501653" aria-label="기사 이미지 보기"><img src="https://img1.daumcdn.net/thumb/S1200x630/?fname=https://t1.daumcdn.net/news/202604/29/mkeconomy/20260429211502662rvkb.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://v.daum.net/v/20260429211501653" aria-label="기사 이미지 보기" data-logo-label="다음뉴스" data-logo-src="https://www.google.com/s2/favicons?domain=v.daum.net&amp;sz=128"><img src="https://img1.daumcdn.net/thumb/S1200x630/?fname=https://t1.daumcdn.net/news/202604/29/mkeconomy/20260429211502662rvkb.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>밸류업·주주환원</span><span>04.29 21:15</span><span>다음뉴스</span></div>
               <h3><a href="https://v.daum.net/v/20260429211501653">조정호 메리츠금융그룹 회장 | 보상·위임·밸류업으로 원 메리츠</a></h3>
-              
+              <p>다음뉴스 보도로 확인된 &#x27;조정호 메리츠금융그룹 회장 | 보상·위임·밸류업으로 원 메리츠&#x27; 이슈입니다. 주주환원 정책의 실행 가능성과 시장 반응을 확인할 수 있습니다.</p>
               
             </div>
             
           </article>
     
-          <article class="story" id="story-64" data-story data-section-key="밸류업-주주환원" data-section-index="13" data-section-total="15">
-            <a class="story__image" href="https://news.google.com/rss/articles/CBMibkFVX3lxTE1QVjUtSTZFalFHZVFyZFBQSS1vNUZDTk4welU5REhsWTlPMFptWmNEdENZai1JbkpaeTgyTVNIb0hSVjBQWC1hbEY1MlZNSGJVV0NFR1NtSFpUaWhOLS1VXy1OdHVzQ2ZMM09sd053?oc=5" aria-label="기사 이미지 보기"><img src="https://lh3.googleusercontent.com/J6_coFbogxhRI9iM864NL_liGXvsQp2AupsKei7z0cNNfDvGUmWUy20nuUhkREQyrpY4bEeIBuc=s0-w300" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-63" data-story data-section-key="밸류업-주주환원" data-section-index="13" data-section-total="15">
+            <a class="story__image" href="https://news.google.com/rss/articles/CBMibkFVX3lxTE1QVjUtSTZFalFHZVFyZFBQSS1vNUZDTk4welU5REhsWTlPMFptWmNEdENZai1JbkpaeTgyTVNIb0hSVjBQWC1hbEY1MlZNSGJVV0NFR1NtSFpUaWhOLS1VXy1OdHVzQ2ZMM09sd053?oc=5" aria-label="기사 이미지 보기" data-logo-label="아시아투데이" data-logo-src="https://www.google.com/s2/favicons?domain=news.google.com&amp;sz=128"><img src="https://lh3.googleusercontent.com/J6_coFbogxhRI9iM864NL_liGXvsQp2AupsKei7z0cNNfDvGUmWUy20nuUhkREQyrpY4bEeIBuc=s0-w300" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>밸류업·주주환원</span><span>04.29 17:30</span><span>아시아투데이</span></div>
               <h3><a href="https://news.google.com/rss/articles/CBMibkFVX3lxTE1QVjUtSTZFalFHZVFyZFBQSS1vNUZDTk4welU5REhsWTlPMFptWmNEdENZai1JbkpaeTgyTVNIb0hSVjBQWC1hbEY1MlZNSGJVV0NFR1NtSFpUaWhOLS1VXy1OdHVzQ2ZMM09sd053?oc=5">밸류업 지수 3000 돌파… ETF도 한 달 새 수익률 30% 반등</a></h3>
-              
+              <p>아시아투데이 보도로 확인된 &#x27;밸류업 지수 3000 돌파… ETF도 한 달 새 수익률 30% 반등&#x27; 이슈입니다. 주주환원 정책의 실행 가능성과 시장 반응을 확인할 수 있습니다.</p>
               
             </div>
             
           </article>
     
-          <article class="story" id="story-72" data-story data-section-key="밸류업-주주환원" data-section-index="14" data-section-total="15">
-            <a class="story__image" href="https://www.topdaily.kr/articles/109879" aria-label="기사 이미지 보기"><img src="https://assets.repress.co.kr/photos/be9e935ed2f469e2bf43a97fbdd22160/thumb.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-71" data-story data-section-key="밸류업-주주환원" data-section-index="14" data-section-total="15">
+            <a class="story__image" href="https://www.topdaily.kr/articles/109879" aria-label="기사 이미지 보기" data-logo-label="톱데일리" data-logo-src="https://www.google.com/s2/favicons?domain=topdaily.kr&amp;sz=128"><img src="https://assets.repress.co.kr/photos/be9e935ed2f469e2bf43a97fbdd22160/thumb.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>밸류업·주주환원</span><span>04.29 08:30</span><span>톱데일리</span></div>
               <h3><a href="https://www.topdaily.kr/articles/109879">모두투어, 자사주 전량 현물배당…소액주주 포섭 노렸나</a></h3>
-              
+              <p>톱데일리 보도로 확인된 &#x27;모두투어, 자사주 전량 현물배당…소액주주 포섭 노렸나&#x27; 이슈입니다. 주주환원 정책의 실행 가능성과 시장 반응을 확인할 수 있습니다.</p>
               
             </div>
             
           </article>
     
-          <article class="story" id="story-73" data-story data-section-key="밸류업-주주환원" data-section-index="15" data-section-total="15">
-            <a class="story__image" href="https://www.etoday.co.kr/news/view/2579934" aria-label="기사 이미지 보기"><img src="https://img.etoday.co.kr/pto_db/2026/04/20260428171027_2327559_1157_1246.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-72" data-story data-section-key="밸류업-주주환원" data-section-index="15" data-section-total="15">
+            <a class="story__image" href="https://www.etoday.co.kr/news/view/2579934" aria-label="기사 이미지 보기" data-logo-label="ETODAY" data-logo-src="https://www.google.com/s2/favicons?domain=etoday.co.kr&amp;sz=128"><img src="https://img.etoday.co.kr/pto_db/2026/04/20260428171027_2327559_1157_1246.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>밸류업·주주환원</span><span>04.29 06:00</span><span>ETODAY</span></div>
               <h3><a href="https://www.etoday.co.kr/news/view/2579934">자회사 IPO 문턱 높아진다…주주가치 회복 기대 속 자금조달 경고음 [중복상장 금지, 약일까?독일까?①]</a></h3>
-              
+              <p>ETODAY 보도로 확인된 &#x27;자회사 IPO 문턱 높아진다…주주가치 회복 기대 속 자금조달 경고음 [중복상장 금지, 약일까?독일까?①]&#x27; 이슈입니다. 주주환원 정책의 실행 가능성과 시장 반응을 확인할 수 있습니다.</p>
               
             </div>
             
@@ -826,16 +833,16 @@
           </div>
         </section>
             
-        <section class="section" id="자본시장-제도-공시" data-section data-section-count="32">
+        <section class="section" id="자본시장-제도-공시" data-section data-section-count="31">
           <div class="section__rule"></div>
           <div class="section__head">
             <h2>자본시장 제도·공시</h2>
-            <span>32개 이슈</span>
+            <span>31개 이슈</span>
           </div>
           <div class="story-list">
             
-          <article class="story" id="story-1" data-story data-section-key="자본시장-제도-공시" data-section-index="1" data-section-total="32">
-            <a class="story__image" href="https://www.donga.com/news/amp/all/20260430/133845249/2" aria-label="기사 이미지 보기"><img src="https://news.einfomax.co.kr/news/photo/202605/4412834_312530_483.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-1" data-story data-section-key="자본시장-제도-공시" data-section-index="1" data-section-total="31">
+            <a class="story__image" href="https://www.donga.com/news/amp/all/20260430/133845249/2" aria-label="기사 이미지 보기" data-logo-label="DONGA" data-logo-src="https://www.google.com/s2/favicons?domain=donga.com&amp;sz=128"><img src="https://news.einfomax.co.kr/news/photo/202605/4412834_312530_483.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>05.01 01:40</span><span>뉴시스 · DONGA · 연합인포맥스 · BIZ</span></div>
               <h3><a href="https://www.donga.com/news/amp/all/20260430/133845249/2">한화솔루션 유상증자 또 제동… 금감원, 신고서 2차 정정 요구</a></h3>
@@ -867,8 +874,8 @@
         
           </article>
     
-          <article class="story" id="story-3" data-story data-section-key="자본시장-제도-공시" data-section-index="2" data-section-total="32">
-            <a class="story__image" href="https://www.newsis.com/view/NISX20260430_0003613422" aria-label="기사 이미지 보기"><img src="https://img1.newsis.com/2019/09/05/NISI20190905_0015563316_web.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-3" data-story data-section-key="자본시장-제도-공시" data-section-index="2" data-section-total="31">
+            <a class="story__image" href="https://www.newsis.com/view/NISX20260430_0003613422" aria-label="기사 이미지 보기" data-logo-label="뉴시스" data-logo-src="https://www.google.com/s2/favicons?domain=newsis.com&amp;sz=128"><img src="https://img1.newsis.com/2019/09/05/NISI20190905_0015563316_web.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>05.01 08:00</span><span>뉴시스 · NEWS · HANI · M</span></div>
               <h3><a href="https://www.newsis.com/view/NISX20260430_0003613422">쿠팡 김범석, 이제야 총수…공정위, 5년간 동생 경영 왜 놓쳤나</a></h3>
@@ -893,8 +900,8 @@
         
           </article>
     
-          <article class="story" id="story-13" data-story data-section-key="자본시장-제도-공시" data-section-index="3" data-section-total="32">
-            <a class="story__image" href="https://marketin.edaily.co.kr/News/ReadE?newsId=06563286645421368" aria-label="기사 이미지 보기"><img src="https://image.edaily.co.kr/images/Photo/files/NP/S/2026/04/PS26043002362.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-13" data-story data-section-key="자본시장-제도-공시" data-section-index="3" data-section-total="31">
+            <a class="story__image" href="https://marketin.edaily.co.kr/News/ReadE?newsId=06563286645421368" aria-label="기사 이미지 보기" data-logo-label="MARKETIN" data-logo-src="https://www.google.com/s2/favicons?domain=marketin.edaily.co.kr&amp;sz=128"><img src="https://image.edaily.co.kr/images/Photo/files/NP/S/2026/04/PS26043002362.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.30 17:27</span><span>MARKETIN · 마켓인</span></div>
               <h3><a href="https://marketin.edaily.co.kr/News/ReadE?newsId=06563286645421368">기존 중복상장까지 풀어야 K디스카운트 해소…日 사례 참고해야</a></h3>
@@ -915,13 +922,13 @@
         
           </article>
     
-          <article class="story" id="story-15" data-story data-section-key="자본시장-제도-공시" data-section-index="4" data-section-total="32">
-            <a class="story__image" href="https://v.daum.net/v/20260430150218226" aria-label="기사 이미지 보기"><img src="https://img1.daumcdn.net/thumb/S1200x630/?fname=https://t1.daumcdn.net/news/202604/30/ked/20260430150219796ryhc.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-15" data-story data-section-key="자본시장-제도-공시" data-section-index="4" data-section-total="31">
+            <a class="story__image" href="https://v.daum.net/v/20260430150218226" aria-label="기사 이미지 보기" data-logo-label="한국경제" data-logo-src="https://www.google.com/s2/favicons?domain=v.daum.net&amp;sz=128"><img src="https://img1.daumcdn.net/thumb/S1200x630/?fname=https://t1.daumcdn.net/news/202604/30/ked/20260430150219796ryhc.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
-              <div class="story__meta"><span>자본시장 제도·공시</span><span>04.30 15:11</span><span>다음뉴스 · MARKETINSIGHT</span></div>
+              <div class="story__meta"><span>자본시장 제도·공시</span><span>04.30 15:11</span><span>한국경제 · MARKETINSIGHT</span></div>
               <h3><a href="https://v.daum.net/v/20260430150218226">중복상장 제한 등 자본시장 정책 관련 기업의 대응방안 [Lawyers view]</a></h3>
-              
-              <div class="story__more"><strong>More:</strong> <a href="https://v.daum.net/v/20260430150218226">다음뉴스</a> <a href="https://marketinsight.hankyung.com/article/202604293969r">MARKETINSIGHT</a></div>
+              <p>한국경제 · MARKETINSIGHT 등 2개 매체가 &#x27;중복상장 제한 등 자본시장 정책 관련 기업의 대응방안 [Lawyers view]&#x27; 흐름을 전했습니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
+              <div class="story__more"><strong>More:</strong> <a href="https://v.daum.net/v/20260430150218226">한국경제</a> <a href="https://marketinsight.hankyung.com/article/202604293969r">MARKETINSIGHT</a></div>
             </div>
             
             <details>
@@ -929,7 +936,7 @@
               <div class="link-table">
                 <table>
                   <thead><tr><th>일시</th><th>매체</th><th>기사</th></tr></thead>
-                  <tbody><tr><td class="link-table__time">04.30 15:11</td><td class="link-table__source">다음뉴스</td><td class="link-table__title"><a href="https://v.daum.net/v/20260430150218226">중복상장 제한 등 자본시장 정책 관련 기업의 대응방안 [Lawyers view]</a></td></tr>
+                  <tbody><tr><td class="link-table__time">04.30 15:11</td><td class="link-table__source">한국경제</td><td class="link-table__title"><a href="https://v.daum.net/v/20260430150218226">중복상장 제한 등 자본시장 정책 관련 기업의 대응방안 [Lawyers view]</a></td></tr>
 <tr><td class="link-table__time">04.29 09:25</td><td class="link-table__source">MARKETINSIGHT</td><td class="link-table__title"><a href="https://marketinsight.hankyung.com/article/202604293969r">중복상장 제한 등 자본시장 정책 관련 기업의 대응방안 [Lawyers view]</a></td></tr></tbody>
                 </table>
               </div>
@@ -937,12 +944,12 @@
         
           </article>
     
-          <article class="story" id="story-16" data-story data-section-key="자본시장-제도-공시" data-section-index="5" data-section-total="32">
-            <a class="story__image" href="https://www.lawtimes.co.kr/news/articleViewAmp.html?idxno=220160" aria-label="기사 이미지 보기"><img src="https://cdn.lawtimes.co.kr/news/photo/202604/220160_124618_5756.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-16" data-story data-section-key="자본시장-제도-공시" data-section-index="5" data-section-total="31">
+            <a class="story__image" href="https://www.lawtimes.co.kr/news/articleViewAmp.html?idxno=220160" aria-label="기사 이미지 보기" data-logo-label="LAWTIMES" data-logo-src="https://www.google.com/s2/favicons?domain=lawtimes.co.kr&amp;sz=128"><img src="https://cdn.lawtimes.co.kr/news/photo/202604/220160_124618_5756.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.30 09:58</span><span>LAWTIMES · 법률신문</span></div>
               <h3><a href="https://www.lawtimes.co.kr/news/articleViewAmp.html?idxno=220160">이사 보수 한도 승인 결의 시 주주 겸 이사의 의결권 행사 제한</a></h3>
-              
+              <p>LAWTIMES · 법률신문 등 2개 매체가 &#x27;이사 보수 한도 승인 결의 시 주주 겸 이사의 의결권 행사 제한&#x27; 흐름을 전했습니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               <div class="story__more"><strong>More:</strong> <a href="https://www.lawtimes.co.kr/news/articleViewAmp.html?idxno=220160">LAWTIMES</a> <a href="https://news.google.com/rss/articles/CBMickFVX3lxTE9fX09Rem8wMFY2UVVSOWVXZENhOWRSemRwWUljc2lGd2ZVM1FnMERSU3NCUlpoNzNrbDhIb1BfM3VuWHlkVHVMLTdyRGpieXBSTEpCMVZwcko4eUx0UVpZLWRSZF93SmoxTzE5RG5HT25ud9IBckFVX3lxTE9fX09Rem8wMFY2UVVSOWVXZENhOWRSemRwWUljc2lGd2ZVM1FnMERSU3NCUlpoNzNrbDhIb1BfM3VuWHlkVHVMLTdyRGpieXBSTEpCMVZwcko4eUx0UVpZLWRSZF93SmoxTzE5RG5HT25udw?oc=5">법률신문</a></div>
             </div>
             
@@ -959,12 +966,12 @@
         
           </article>
     
-          <article class="story" id="story-17" data-story data-section-key="자본시장-제도-공시" data-section-index="6" data-section-total="32">
-            <a class="story__image" href="https://www.hankyung.com/article/202604295328i" aria-label="기사 이미지 보기"><img src="https://img.hankyung.com/photo/202604/01.44117306.1.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-17" data-story data-section-key="자본시장-제도-공시" data-section-index="6" data-section-total="31">
+            <a class="story__image" href="https://www.hankyung.com/article/202604295328i" aria-label="기사 이미지 보기" data-logo-label="HANKYUNG" data-logo-src="https://www.google.com/s2/favicons?domain=hankyung.com&amp;sz=128"><img src="https://img.hankyung.com/photo/202604/01.44117306.1.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.30 08:00</span><span>HANKYUNG</span></div>
               <h3><a href="https://www.hankyung.com/article/202604295328i">거버넌스는 규제가 아니라 경영이다</a></h3>
-              
+              <p>HANKYUNG 등 2개 매체가 &#x27;거버넌스는 규제가 아니라 경영이다&#x27; 흐름을 전했습니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               <div class="story__more"><strong>More:</strong> <a href="https://www.hankyung.com/amp/202604295328i">HANKYUNG</a> <a href="https://www.hankyung.com/article/202604295328i">HANKYUNG</a></div>
             </div>
             
@@ -981,12 +988,12 @@
         
           </article>
     
-          <article class="story" id="story-19" data-story data-section-key="자본시장-제도-공시" data-section-index="7" data-section-total="32">
-            <a class="story__image" href="https://www.kbanker.co.kr/news/articleView.html?idxno=224810" aria-label="기사 이미지 보기"><img src="https://cdn.kbanker.co.kr/news/thumbnail/202604/224810_71786_4857_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-19" data-story data-section-key="자본시장-제도-공시" data-section-index="7" data-section-total="31">
+            <a class="story__image" href="https://www.kbanker.co.kr/news/articleView.html?idxno=224810" aria-label="기사 이미지 보기" data-logo-label="KBANKER" data-logo-src="https://www.google.com/s2/favicons?domain=kbanker.co.kr&amp;sz=128"><img src="https://cdn.kbanker.co.kr/news/thumbnail/202604/224810_71786_4857_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.29 14:49</span><span>KBANKER · TAXTIMES</span></div>
               <h3><a href="https://www.kbanker.co.kr/news/articleView.html?idxno=224810">대주주 중심 M&amp;A 제동…의무공개매수 도입 추진</a></h3>
-              
+              <p>KBANKER · TAXTIMES 등 2개 매체가 &#x27;대주주 중심 M&amp;A 제동…의무공개매수 도입 추진&#x27; 흐름을 전했습니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               <div class="story__more"><strong>More:</strong> <a href="https://www.kbanker.co.kr/news/articleView.html?idxno=224810">KBANKER</a> <a href="https://www.taxtimes.co.kr/news/article.html?no=274918">TAXTIMES</a></div>
             </div>
             
@@ -1003,8 +1010,8 @@
         
           </article>
     
-          <article class="story" id="story-40" data-story data-section-key="자본시장-제도-공시" data-section-index="8" data-section-total="32">
-            <a class="story__image" href="https://v.daum.net/v/20260501131434127" aria-label="기사 이미지 보기"><img src="https://img1.daumcdn.net/thumb/S1200x630/?fname=https://t1.daumcdn.net/news/202605/01/ked/20260501131436478ruoy.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-40" data-story data-section-key="자본시장-제도-공시" data-section-index="8" data-section-total="31">
+            <a class="story__image" href="https://v.daum.net/v/20260501131434127" aria-label="기사 이미지 보기" data-logo-label="다음뉴스" data-logo-src="https://www.google.com/s2/favicons?domain=v.daum.net&amp;sz=128"><img src="https://img1.daumcdn.net/thumb/S1200x630/?fname=https://t1.daumcdn.net/news/202605/01/ked/20260501131436478ruoy.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>05.01 13:14</span><span>다음뉴스</span></div>
               <h3><a href="https://v.daum.net/v/20260501131434127">[정보공시 Q&amp;A] 거버넌스 환경 변화와 ESG 공시</a></h3>
@@ -1014,8 +1021,8 @@
             
           </article>
     
-          <article class="story" id="story-42" data-story data-section-key="자본시장-제도-공시" data-section-index="9" data-section-total="32">
-            <a class="story__image" href="https://v.daum.net/v/20260501100001856" aria-label="기사 이미지 보기"><img src="https://img1.daumcdn.net/thumb/S1200x630/?fname=https://t1.daumcdn.net/news/202605/01/mkeconomy/20260501100003242rmvq.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-42" data-story data-section-key="자본시장-제도-공시" data-section-index="9" data-section-total="31">
+            <a class="story__image" href="https://v.daum.net/v/20260501100001856" aria-label="기사 이미지 보기" data-logo-label="매경이코노미" data-logo-src="https://www.google.com/s2/favicons?domain=v.daum.net&amp;sz=128"><img src="https://img1.daumcdn.net/thumb/S1200x630/?fname=https://t1.daumcdn.net/news/202605/01/mkeconomy/20260501100003242rmvq.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>05.01 10:00</span><span>매경이코노미</span></div>
               <h3><a href="https://v.daum.net/v/20260501100001856">한화솔루션 멈춰 세운 금감원…유증 계획 정정하라</a></h3>
@@ -1025,8 +1032,8 @@
             
           </article>
     
-          <article class="story" id="story-44" data-story data-section-key="자본시장-제도-공시" data-section-index="10" data-section-total="32">
-            <a class="story__image" href="https://news.nate.com/view/20260430n37973?mid=n1101" aria-label="기사 이미지 보기"><img src="https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/ey/2026/04/30/20260430215906_2328859_600_450.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-44" data-story data-section-key="자본시장-제도-공시" data-section-index="10" data-section-total="31">
+            <a class="story__image" href="https://news.nate.com/view/20260430n37973?mid=n1101" aria-label="기사 이미지 보기" data-logo-label="네이트뉴스" data-logo-src="https://www.google.com/s2/favicons?domain=news.nate.com&amp;sz=128"><img src="https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/ey/2026/04/30/20260430215906_2328859_600_450.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.30 22:01</span><span>네이트뉴스</span></div>
               <h3><a href="https://news.nate.com/view/20260430n37973?mid=n1101">한화솔루션, 금감원 유증 또 제동에 매우 무겁게 받아들여…성실히 보완</a></h3>
@@ -1036,8 +1043,8 @@
             
           </article>
     
-          <article class="story" id="story-45" data-story data-section-key="자본시장-제도-공시" data-section-index="11" data-section-total="32">
-            <a class="story__image" href="https://www.mk.co.kr/news/stock/12032914" aria-label="기사 이미지 보기"><img src="https://static.mk.co.kr/trans_30x13.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-45" data-story data-section-key="자본시장-제도-공시" data-section-index="11" data-section-total="31">
+            <a class="story__image" href="https://www.mk.co.kr/news/stock/12032914" aria-label="기사 이미지 보기" data-logo-label="매일경제" data-logo-src="https://www.google.com/s2/favicons?domain=mk.co.kr&amp;sz=128"><img src="https://static.mk.co.kr/trans_30x13.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.30 21:29</span><span>매일경제</span></div>
               <h3><a href="https://www.mk.co.kr/news/stock/12032914">글로바벤드 홀딩스, 새 최대주주 등극·이사회 의장 교체</a></h3>
@@ -1047,8 +1054,8 @@
             
           </article>
     
-          <article class="story" id="story-47" data-story data-section-key="자본시장-제도-공시" data-section-index="12" data-section-total="32">
-            <a class="story__image" href="https://www.digitaltoday.co.kr/news/articleView.html?idxno=661858" aria-label="기사 이미지 보기"><img src="https://cdn.digitaltoday.co.kr/news/photo/202604/661858_611198_3510.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-47" data-story data-section-key="자본시장-제도-공시" data-section-index="12" data-section-total="31">
+            <a class="story__image" href="https://www.digitaltoday.co.kr/news/articleView.html?idxno=661858" aria-label="기사 이미지 보기" data-logo-label="디지털투데이" data-logo-src="https://www.google.com/s2/favicons?domain=digitaltoday.co.kr&amp;sz=128"><img src="https://cdn.digitaltoday.co.kr/news/photo/202604/661858_611198_3510.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.30 15:43</span><span>디지털투데이</span></div>
               <h3><a href="https://www.digitaltoday.co.kr/news/articleView.html?idxno=661858">버킷스튜디오, 최대주주 변경 재추진…보통주 4534만8357주(32.75%) 공개매각 추진</a></h3>
@@ -1058,8 +1065,8 @@
             
           </article>
     
-          <article class="story" id="story-48" data-story data-section-key="자본시장-제도-공시" data-section-index="13" data-section-total="32">
-            <a class="story__image" href="https://www.mt.co.kr/stock/2026/04/30/2026043013412390006" aria-label="기사 이미지 보기"><img src="https://thumb.mt.co.kr/cdn-cgi/image/w=1200,h=776,fit=cover,bg=whilte,f=auto,quality=high,sharpen=2,g=face/21/2026/04/2026043013412390006_1.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-48" data-story data-section-key="자본시장-제도-공시" data-section-index="13" data-section-total="31">
+            <a class="story__image" href="https://www.mt.co.kr/stock/2026/04/30/2026043013412390006" aria-label="기사 이미지 보기" data-logo-label="머니투데이" data-logo-src="https://www.google.com/s2/favicons?domain=mt.co.kr&amp;sz=128"><img src="https://thumb.mt.co.kr/cdn-cgi/image/w=1200,h=776,fit=cover,bg=whilte,f=auto,quality=high,sharpen=2,g=face/21/2026/04/2026043013412390006_1.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.30 13:54</span><span>머니투데이</span></div>
               <h3><a href="https://www.mt.co.kr/stock/2026/04/30/2026043013412390006">코스피도 부실기업퇴출 드라이브···상장 실질 개선기간 2년→1년</a></h3>
@@ -1069,8 +1076,8 @@
             
           </article>
     
-          <article class="story" id="story-49" data-story data-section-key="자본시장-제도-공시" data-section-index="14" data-section-total="32">
-            <a class="story__image" href="https://www.sisaweek.com/news/articleViewAmp.html?idxno=235256" aria-label="기사 이미지 보기"><img src="https://www.sisaweek.com/news/photo/202604/235256_250830_4319.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-49" data-story data-section-key="자본시장-제도-공시" data-section-index="14" data-section-total="31">
+            <a class="story__image" href="https://www.sisaweek.com/news/articleViewAmp.html?idxno=235256" aria-label="기사 이미지 보기" data-logo-label="SISAWEEK" data-logo-src="https://www.google.com/s2/favicons?domain=sisaweek.com&amp;sz=128"><img src="https://www.sisaweek.com/news/photo/202604/235256_250830_4319.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.30 13:41</span><span>SISAWEEK</span></div>
               <h3><a href="https://www.sisaweek.com/news/articleViewAmp.html?idxno=235256">개선기간 부여… 광명전기, 상폐 위기 극복할까</a></h3>
@@ -1080,8 +1087,8 @@
             
           </article>
     
-          <article class="story" id="story-50" data-story data-section-key="자본시장-제도-공시" data-section-index="15" data-section-total="32">
-            <a class="story__image" href="https://www.electimes.com/news/articleView.html?idxno=367499" aria-label="기사 이미지 보기"><img src="https://cdn.electimes.com/news/thumbnail/202604/367499_579069_5359_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-50" data-story data-section-key="자본시장-제도-공시" data-section-index="15" data-section-total="31">
+            <a class="story__image" href="https://www.electimes.com/news/articleView.html?idxno=367499" aria-label="기사 이미지 보기" data-logo-label="ELECTIMES" data-logo-src="https://www.google.com/s2/favicons?domain=electimes.com&amp;sz=128"><img src="https://cdn.electimes.com/news/thumbnail/202604/367499_579069_5359_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.30 12:54</span><span>ELECTIMES</span></div>
               <h3><a href="https://www.electimes.com/news/articleView.html?idxno=367499">(데스크칼럼) 전력 슈퍼사이클 호기(好機), 중복상장 덫에 가두지 말아야</a></h3>
@@ -1091,19 +1098,19 @@
             
           </article>
     
-          <article class="story" id="story-51" data-story data-section-key="자본시장-제도-공시" data-section-index="16" data-section-total="32">
-            <a class="story__image" href="https://www.esgeconomy.com/news/articleView.html?idxno=15402" aria-label="기사 이미지 보기"><img src="https://cdn.esgeconomy.com/news/thumbnail/202604/15402_22477_5227_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-51" data-story data-section-key="자본시장-제도-공시" data-section-index="16" data-section-total="31">
+            <a class="story__image" href="https://www.esgeconomy.com/news/articleView.html?idxno=15402" aria-label="기사 이미지 보기" data-logo-label="ESGECONOMY" data-logo-src="https://www.google.com/s2/favicons?domain=esgeconomy.com&amp;sz=128"><img src="https://cdn.esgeconomy.com/news/thumbnail/202604/15402_22477_5227_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.30 11:35</span><span>ESGECONOMY</span></div>
               <h3><a href="https://www.esgeconomy.com/news/articleView.html?idxno=15402">ESG가 성과급에 묻는다...단기 보상인가, 미래 투자인가</a></h3>
-              
+              <p>ESGECONOMY 보도로 확인된 &#x27;ESG가 성과급에 묻는다...단기 보상인가, 미래 투자인가&#x27; 이슈입니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               
             </div>
             
           </article>
     
-          <article class="story" id="story-52" data-story data-section-key="자본시장-제도-공시" data-section-index="17" data-section-total="32">
-            <div class="story__image story__image--empty" aria-hidden="true"><span>NO IMAGE</span></div>
+          <article class="story" id="story-52" data-story data-section-key="자본시장-제도-공시" data-section-index="17" data-section-total="31">
+            <a class="story__image story__image--logo" href="https://www.lawtimes.co.kr/news/articleView.html?idxno=220165" aria-label="LAWTIMES 기사 보기" data-logo-label="LAWTIMES" data-logo-src="https://www.google.com/s2/favicons?domain=lawtimes.co.kr&amp;sz=128"><img class="story__source-logo" src="https://www.google.com/s2/favicons?domain=lawtimes.co.kr&amp;sz=128" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"><span>LAWTIMES</span></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.30 10:14</span><span>LAWTIMES</span></div>
               <h3><a href="https://www.lawtimes.co.kr/news/articleView.html?idxno=220165">[2026년 정기주주총회 리뷰] 제3호 : 이사 선임과 보수 승인 – 분리선출 감사위원 선임 증가 및 임원 보수 구조의 변화</a></h3>
@@ -1113,19 +1120,19 @@
             
           </article>
     
-          <article class="story" id="story-53" data-story data-section-key="자본시장-제도-공시" data-section-index="18" data-section-total="32">
-            <a class="story__image" href="https://www.lawtimes.co.kr/news/articleViewAmp.html?idxno=220161" aria-label="기사 이미지 보기"><img src="https://cdn.lawtimes.co.kr/news/photo/202604/220161_124619_5952.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-53" data-story data-section-key="자본시장-제도-공시" data-section-index="18" data-section-total="31">
+            <a class="story__image" href="https://www.lawtimes.co.kr/news/articleViewAmp.html?idxno=220161" aria-label="기사 이미지 보기" data-logo-label="LAWTIMES" data-logo-src="https://www.google.com/s2/favicons?domain=lawtimes.co.kr&amp;sz=128"><img src="https://cdn.lawtimes.co.kr/news/photo/202604/220161_124619_5952.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.30 10:04</span><span>LAWTIMES</span></div>
               <h3><a href="https://www.lawtimes.co.kr/news/articleViewAmp.html?idxno=220161">코스닥 상장폐지 요건 강화에 따른 기업의 대응전략 및 유의사항(2)</a></h3>
-              
+              <p>LAWTIMES 보도로 확인된 &#x27;코스닥 상장폐지 요건 강화에 따른 기업의 대응전략 및 유의사항(2)&#x27; 이슈입니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               
             </div>
             
           </article>
     
-          <article class="story" id="story-54" data-story data-section-key="자본시장-제도-공시" data-section-index="19" data-section-total="32">
-            <a class="story__image" href="https://www.hani.co.kr/arti/economy/economy_general/1256531.html" aria-label="기사 이미지 보기"><img src="https://flexible.img.hani.co.kr/flexible/normal/600/338/imgdb/original/2026/0429/20260429503553.webp" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-54" data-story data-section-key="자본시장-제도-공시" data-section-index="19" data-section-total="31">
+            <a class="story__image" href="https://www.hani.co.kr/arti/economy/economy_general/1256531.html" aria-label="기사 이미지 보기" data-logo-label="HANI" data-logo-src="https://www.google.com/s2/favicons?domain=hani.co.kr&amp;sz=128"><img src="https://flexible.img.hani.co.kr/flexible/normal/600/338/imgdb/original/2026/0429/20260429503553.webp" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.30 09:56</span><span>HANI</span></div>
               <h3><a href="https://www.hani.co.kr/arti/economy/economy_general/1256531.html">5년간 쿠팡 총수 책임 피한 김범석…동생 김유석 경영 참여 드러나 덜미</a></h3>
@@ -1135,144 +1142,133 @@
             
           </article>
     
-          <article class="story" id="story-56" data-story data-section-key="자본시장-제도-공시" data-section-index="20" data-section-total="32">
-            <a class="story__image" href="https://www.news1.kr/amp/finance/general-stock/6153286" aria-label="기사 이미지 보기"><img src="https://i3n.news1.kr/system/photos/2026/4/29/7883054/high.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-56" data-story data-section-key="자본시장-제도-공시" data-section-index="20" data-section-total="31">
+            <a class="story__image" href="https://www.news1.kr/amp/finance/general-stock/6153286" aria-label="기사 이미지 보기" data-logo-label="NEWS1" data-logo-src="https://www.google.com/s2/favicons?domain=news1.kr&amp;sz=128"><img src="https://i3n.news1.kr/system/photos/2026/4/29/7883054/high.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.30 06:00</span><span>NEWS1</span></div>
               <h3><a href="https://www.news1.kr/amp/finance/general-stock/6153286">따따블은 옛말, 10분의 1토막도…공모주 잔혹사 코너스톤이 끝낼까</a></h3>
-              
+              <p>NEWS1 보도로 확인된 &#x27;따따블은 옛말, 10분의 1토막도…공모주 잔혹사 코너스톤이 끝낼까&#x27; 이슈입니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               
             </div>
             
           </article>
     
-          <article class="story" id="story-59" data-story data-section-key="자본시장-제도-공시" data-section-index="21" data-section-total="32">
-            <a class="story__image" href="https://www.mk.co.kr/news/stock/12031410" aria-label="기사 이미지 보기"><img src="https://static.mk.co.kr/trans_30x13.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-59" data-story data-section-key="자본시장-제도-공시" data-section-index="21" data-section-total="31">
+            <a class="story__image" href="https://www.mk.co.kr/news/stock/12031410" aria-label="기사 이미지 보기" data-logo-label="매일경제" data-logo-src="https://www.google.com/s2/favicons?domain=mk.co.kr&amp;sz=128"><img src="https://static.mk.co.kr/trans_30x13.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.29 21:01</span><span>매일경제</span></div>
               <h3><a href="https://www.mk.co.kr/news/stock/12031410">솔레센스, 마크 제임스 독립이사 선임..자본시장 전문성 강화</a></h3>
-              
+              <p>매일경제 보도로 확인된 &#x27;솔레센스, 마크 제임스 독립이사 선임..자본시장 전문성 강화&#x27; 이슈입니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               
             </div>
             
           </article>
     
-          <article class="story" id="story-61" data-story data-section-key="자본시장-제도-공시" data-section-index="22" data-section-total="32">
-            <a class="story__image" href="https://www.mk.co.kr/news/stock/12031307" aria-label="기사 이미지 보기"><img src="https://static.mk.co.kr/trans_30x13.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-61" data-story data-section-key="자본시장-제도-공시" data-section-index="22" data-section-total="31">
+            <a class="story__image" href="https://www.mk.co.kr/news/stock/12031307" aria-label="기사 이미지 보기" data-logo-label="매일경제" data-logo-src="https://www.google.com/s2/favicons?domain=mk.co.kr&amp;sz=128"><img src="https://static.mk.co.kr/trans_30x13.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.29 19:50</span><span>매일경제</span></div>
               <h3><a href="https://www.mk.co.kr/news/stock/12031307">SOLAI LTD, 이사회 의장 교체..Man San Vincent Law 신임 의장 선임</a></h3>
-              
-              
-            </div>
-            
-          </article>
-    
-          <article class="story" id="story-62" data-story data-section-key="자본시장-제도-공시" data-section-index="23" data-section-total="32">
-            <a class="story__image" href="https://www.betanews.net/article/view/beta202604290078" aria-label="기사 이미지 보기"><img src="https://www.betanews.net/data/beta/image/2026/04/29/beta20260429000090.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
-            <div class="story__body">
-              <div class="story__meta"><span>자본시장 제도·공시</span><span>04.29 18:17</span><span>BETANEWS</span></div>
-              <h3><a href="https://www.betanews.net/article/view/beta202604290078">기업지배구조 공시 의무화, 실질적 기업가치 제고에 영향 미미</a></h3>
-              
+              <p>매일경제 보도로 확인된 &#x27;SOLAI LTD, 이사회 의장 교체..Man San Vincent Law 신임 의장 선임&#x27; 이슈입니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               
             </div>
             
           </article>
     
-          <article class="story" id="story-63" data-story data-section-key="자본시장-제도-공시" data-section-index="24" data-section-total="32">
-            <a class="story__image" href="https://www.datatooza.com/article/20260429181006393852ef32cfb6_80" aria-label="기사 이미지 보기"><img src="https://cgeimage.commutil.kr/phpwas/restmb_allidxmake.php?pp=002&amp;idx=999&amp;simg=20260429181001955_darttop1_043220.jpg&amp;nmt=80" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-62" data-story data-section-key="자본시장-제도-공시" data-section-index="23" data-section-total="31">
+            <a class="story__image" href="https://www.datatooza.com/article/20260429181006393852ef32cfb6_80" aria-label="기사 이미지 보기" data-logo-label="DATATOOZA" data-logo-src="https://www.google.com/s2/favicons?domain=datatooza.com&amp;sz=128"><img src="https://cgeimage.commutil.kr/phpwas/restmb_allidxmake.php?pp=002&amp;idx=999&amp;simg=20260429181001955_darttop1_043220.jpg&amp;nmt=80" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.29 18:10</span><span>DATATOOZA</span></div>
               <h3><a href="https://www.datatooza.com/article/20260429181006393852ef32cfb6_80">티에스넥스젠 보통주 매매거래정지 기간 변경... 상장폐지 여부 결정 시까지 정지</a></h3>
-              
+              <p>DATATOOZA 보도로 확인된 &#x27;티에스넥스젠 보통주 매매거래정지 기간 변경... 상장폐지 여부 결정 시까지 정지&#x27; 이슈입니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               
             </div>
             
           </article>
     
-          <article class="story" id="story-65" data-story data-section-key="자본시장-제도-공시" data-section-index="25" data-section-total="32">
-            <a class="story__image" href="https://www.digitaltoday.co.kr/news/articleView.html?idxno=661456" aria-label="기사 이미지 보기"><img src="https://cdn.digitaltoday.co.kr/news/photo/202604/661456_610806_5547.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-64" data-story data-section-key="자본시장-제도-공시" data-section-index="24" data-section-total="31">
+            <a class="story__image" href="https://www.digitaltoday.co.kr/news/articleView.html?idxno=661456" aria-label="기사 이미지 보기" data-logo-label="디지털투데이" data-logo-src="https://www.google.com/s2/favicons?domain=digitaltoday.co.kr&amp;sz=128"><img src="https://cdn.digitaltoday.co.kr/news/photo/202604/661456_610806_5547.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.29 17:01</span><span>디지털투데이</span></div>
               <h3><a href="https://www.digitaltoday.co.kr/news/articleView.html?idxno=661456">비유테크놀러지, 회생절차 폐지결정 공시…상장적격성 실질심사 사유 해당</a></h3>
-              
+              <p>디지털투데이 보도로 확인된 &#x27;비유테크놀러지, 회생절차 폐지결정 공시…상장적격성 실질심사 사유 해당&#x27; 이슈입니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               
             </div>
             
           </article>
     
-          <article class="story" id="story-66" data-story data-section-key="자본시장-제도-공시" data-section-index="26" data-section-total="32">
-            <a class="story__image" href="https://marketin.edaily.co.kr/News/ReadE?newsId=05241446645421040" aria-label="기사 이미지 보기"><img src="https://marketin.edaily.co.kr/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Fright_300x250.9bba24f0.png&amp;w=640&amp;q=75" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-65" data-story data-section-key="자본시장-제도-공시" data-section-index="25" data-section-total="31">
+            <a class="story__image" href="https://marketin.edaily.co.kr/News/ReadE?newsId=05241446645421040" aria-label="기사 이미지 보기" data-logo-label="MARKETIN" data-logo-src="https://www.google.com/s2/favicons?domain=marketin.edaily.co.kr&amp;sz=128"><img src="https://marketin.edaily.co.kr/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Fright_300x250.9bba24f0.png&amp;w=640&amp;q=75" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.29 16:11</span><span>MARKETIN</span></div>
               <h3><a href="https://marketin.edaily.co.kr/News/ReadE?newsId=05241446645421040">티에스넥스젠, 상장적격성 실질심사 대상 결정</a></h3>
-              
+              <p>MARKETIN 보도로 확인된 &#x27;티에스넥스젠, 상장적격성 실질심사 대상 결정&#x27; 이슈입니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               
             </div>
             
           </article>
     
-          <article class="story" id="story-67" data-story data-section-key="자본시장-제도-공시" data-section-index="27" data-section-total="32">
-            <a class="story__image" href="https://www.nspna.com/news?mode=view&amp;newsid=811358" aria-label="기사 이미지 보기"><img src="https://file.nspna.com/news/2026/04/29/20260429113244_811358_1.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-66" data-story data-section-key="자본시장-제도-공시" data-section-index="26" data-section-total="31">
+            <a class="story__image" href="https://www.nspna.com/news?mode=view&amp;newsid=811358" aria-label="기사 이미지 보기" data-logo-label="NSPNA" data-logo-src="https://www.google.com/s2/favicons?domain=nspna.com&amp;sz=128"><img src="https://file.nspna.com/news/2026/04/29/20260429113244_811358_1.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.29 12:09</span><span>NSPNA</span></div>
               <h3><a href="https://www.nspna.com/news?mode=view&amp;newsid=811358">공개매수 하한 50%+1주 설정…대통령령에 세부 위임</a></h3>
-              
+              <p>NSPNA 보도로 확인된 &#x27;공개매수 하한 50%+1주 설정…대통령령에 세부 위임&#x27; 이슈입니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               
             </div>
             
           </article>
     
-          <article class="story" id="story-68" data-story data-section-key="자본시장-제도-공시" data-section-index="28" data-section-total="32">
-            <a class="story__image" href="https://v.daum.net/v/20260429120326630" aria-label="기사 이미지 보기"><img src="https://img1.daumcdn.net/thumb/S1200x630/?fname=https://t1.daumcdn.net/news/202604/29/sbscnbc/20260429120328138eqfj.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-67" data-story data-section-key="자본시장-제도-공시" data-section-index="27" data-section-total="31">
+            <a class="story__image" href="https://v.daum.net/v/20260429120326630" aria-label="기사 이미지 보기" data-logo-label="SBS Biz" data-logo-src="https://www.google.com/s2/favicons?domain=v.daum.net&amp;sz=128"><img src="https://img1.daumcdn.net/thumb/S1200x630/?fname=https://t1.daumcdn.net/news/202604/29/sbscnbc/20260429120328138eqfj.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
-              <div class="story__meta"><span>자본시장 제도·공시</span><span>04.29 12:03</span><span>다음뉴스</span></div>
+              <div class="story__meta"><span>자본시장 제도·공시</span><span>04.29 12:03</span><span>SBS Biz</span></div>
               <h3><a href="https://v.daum.net/v/20260429120326630">경영권 프리미엄 독식 막는다…M&amp;A시 소액주주 지분도 의무매수</a></h3>
-              
+              <p>SBS Biz 보도로 확인된 &#x27;경영권 프리미엄 독식 막는다…M&amp;A시 소액주주 지분도 의무매수&#x27; 이슈입니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               
             </div>
             
           </article>
     
-          <article class="story" id="story-69" data-story data-section-key="자본시장-제도-공시" data-section-index="29" data-section-total="32">
-            <a class="story__image" href="https://ferrotimes.com/news/articleView.html?idxno=47753" aria-label="기사 이미지 보기"><img src="http://www.ferrotimes.com/news/thumbnail/202604/47753_53217_553_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-68" data-story data-section-key="자본시장-제도-공시" data-section-index="28" data-section-total="31">
+            <a class="story__image" href="https://ferrotimes.com/news/articleView.html?idxno=47753" aria-label="기사 이미지 보기" data-logo-label="FERROTIMES" data-logo-src="https://www.google.com/s2/favicons?domain=ferrotimes.com&amp;sz=128"><img src="http://www.ferrotimes.com/news/thumbnail/202604/47753_53217_553_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.29 10:06</span><span>FERROTIMES</span></div>
               <h3><a href="https://ferrotimes.com/news/articleView.html?idxno=47753">한국거래소, 대호에이엘 개선기간 부여…거래정지 및 상장심사 병행</a></h3>
-              
+              <p>FERROTIMES 보도로 확인된 &#x27;한국거래소, 대호에이엘 개선기간 부여…거래정지 및 상장심사 병행&#x27; 이슈입니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               
             </div>
             
           </article>
     
-          <article class="story" id="story-70" data-story data-section-key="자본시장-제도-공시" data-section-index="30" data-section-total="32">
-            <a class="story__image" href="https://intn.co.kr/news/articleView.html?idxno=2050460" aria-label="기사 이미지 보기"><img src="http://www.intn.co.kr/news/thumbnail/202604/2050460_734755_3647_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-69" data-story data-section-key="자본시장-제도-공시" data-section-index="29" data-section-total="31">
+            <a class="story__image" href="https://intn.co.kr/news/articleView.html?idxno=2050460" aria-label="기사 이미지 보기" data-logo-label="INTN" data-logo-src="https://www.google.com/s2/favicons?domain=intn.co.kr&amp;sz=128"><img src="http://www.intn.co.kr/news/thumbnail/202604/2050460_734755_3647_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.29 10:03</span><span>INTN</span></div>
               <h3><a href="https://intn.co.kr/news/articleView.html?idxno=2050460">박상혁 의원, 자본시장법 개정안 발의</a></h3>
-              
+              <p>INTN 보도로 확인된 &#x27;박상혁 의원, 자본시장법 개정안 발의&#x27; 이슈입니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               
             </div>
             
           </article>
     
-          <article class="story" id="story-71" data-story data-section-key="자본시장-제도-공시" data-section-index="31" data-section-total="32">
-            <a class="story__image" href="https://news.google.com/rss/articles/CBMidEFVX3lxTE5OREl6aExMR1UwZXB1TzRUMmdKYWI0TWZzS2J1QWdySDg0TmhfQjZDTklmcW9sX25iV0YxdlJkVy1iM1NBZjEwMGJGd0FuOFV4amcwbkJibE45Qi1tR0EwNnEtbk1iNEpBZ1MtS1J3MlVud01W?oc=5" aria-label="기사 이미지 보기"><img src="https://lh3.googleusercontent.com/J6_coFbogxhRI9iM864NL_liGXvsQp2AupsKei7z0cNNfDvGUmWUy20nuUhkREQyrpY4bEeIBuc=s0-w300" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-70" data-story data-section-key="자본시장-제도-공시" data-section-index="30" data-section-total="31">
+            <a class="story__image" href="https://news.google.com/rss/articles/CBMidEFVX3lxTE5OREl6aExMR1UwZXB1TzRUMmdKYWI0TWZzS2J1QWdySDg0TmhfQjZDTklmcW9sX25iV0YxdlJkVy1iM1NBZjEwMGJGd0FuOFV4amcwbkJibE45Qi1tR0EwNnEtbk1iNEpBZ1MtS1J3MlVud01W?oc=5" aria-label="기사 이미지 보기" data-logo-label="연합인포맥스" data-logo-src="https://www.google.com/s2/favicons?domain=news.google.com&amp;sz=128"><img src="https://lh3.googleusercontent.com/J6_coFbogxhRI9iM864NL_liGXvsQp2AupsKei7z0cNNfDvGUmWUy20nuUhkREQyrpY4bEeIBuc=s0-w300" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.29 08:48</span><span>연합인포맥스</span></div>
               <h3><a href="https://news.google.com/rss/articles/CBMidEFVX3lxTE5OREl6aExMR1UwZXB1TzRUMmdKYWI0TWZzS2J1QWdySDg0TmhfQjZDTklmcW9sX25iV0YxdlJkVy1iM1NBZjEwMGJGd0FuOFV4amcwbkJibE45Qi1tR0EwNnEtbk1iNEpBZ1MtS1J3MlVud01W?oc=5">이정수 우리금융 사장, 주식교환 결정 동양생명 이사회 불참 이유는</a></h3>
-              
+              <p>연합인포맥스 보도로 확인된 &#x27;이정수 우리금융 사장, 주식교환 결정 동양생명 이사회 불참 이유는&#x27; 이슈입니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               
             </div>
             
           </article>
     
-          <article class="story" id="story-74" data-story data-section-key="자본시장-제도-공시" data-section-index="32" data-section-total="32">
-            <a class="story__image" href="https://news.einfomax.co.kr/news/articleView.html?idxno=4412272" aria-label="기사 이미지 보기"><img src="https://cdn.news.einfomax.co.kr/news/thumbnail/202604/4412272_311817_273_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+          <article class="story" id="story-73" data-story data-section-key="자본시장-제도-공시" data-section-index="31" data-section-total="31">
+            <a class="story__image" href="https://news.einfomax.co.kr/news/articleView.html?idxno=4412272" aria-label="기사 이미지 보기" data-logo-label="연합인포맥스" data-logo-src="https://www.google.com/s2/favicons?domain=news.einfomax.co.kr&amp;sz=128"><img src="https://cdn.news.einfomax.co.kr/news/thumbnail/202604/4412272_311817_273_v150.jpg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>자본시장 제도·공시</span><span>04.29 00:00</span><span>연합인포맥스</span></div>
               <h3><a href="https://news.einfomax.co.kr/news/articleView.html?idxno=4412272">[중복상장 금지 파장-①] 외국선 1사 1상장…핵심자산 집중해 기업가치 제고</a></h3>
-              
+              <p>연합인포맥스 보도로 확인된 &#x27;[중복상장 금지 파장-①] 외국선 1사 1상장…핵심자산 집중해 기업가치 제고&#x27; 이슈입니다. 공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.</p>
               
             </div>
             
@@ -1290,7 +1286,7 @@
           <div class="story-list">
             
           <article class="story" id="story-10" data-story data-section-key="해외-영문" data-section-index="1" data-section-total="4">
-            <a class="story__image" href="https://quantisnow.com/insight/uwmc-issues-open-letter-to-two-harbors-stockholders-detailing-new-6525770" aria-label="기사 이미지 보기"><img src="https://quantisnow.com/opengraph-image" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://quantisnow.com/insight/uwmc-issues-open-letter-to-two-harbors-stockholders-detailing-new-6525770" aria-label="기사 이미지 보기" data-logo-label="QUANTISNOW" data-logo-src="https://www.google.com/s2/favicons?domain=quantisnow.com&amp;sz=128"><img src="https://quantisnow.com/opengraph-image" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>해외·영문</span><span>05.01 10:45</span><span>QUANTISNOW · Quantisnow</span></div>
               <h3><a href="https://quantisnow.com/insight/uwmc-issues-open-letter-to-two-harbors-stockholders-detailing-new-6525770">UWMC Issues Open Letter to Two Harbors Stockholders Detailing New $12 Per Share Offer</a></h3>
@@ -1312,7 +1308,7 @@
           </article>
     
           <article class="story" id="story-11" data-story data-section-key="해외-영문" data-section-index="2" data-section-total="4">
-            <a class="story__image" href="https://www.stocktitan.net/sec-filings/PKX/6-k-posco-holdings-inc-current-report-foreign-issuer-1b67a8644b58.html" aria-label="기사 이미지 보기"><img src="https://lh3.googleusercontent.com/J6_coFbogxhRI9iM864NL_liGXvsQp2AupsKei7z0cNNfDvGUmWUy20nuUhkREQyrpY4bEeIBuc=s0-w300" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.stocktitan.net/sec-filings/PKX/6-k-posco-holdings-inc-current-report-foreign-issuer-1b67a8644b58.html" aria-label="기사 이미지 보기" data-logo-label="STOCKTITAN" data-logo-src="https://www.google.com/s2/favicons?domain=stocktitan.net&amp;sz=128"><img src="https://lh3.googleusercontent.com/J6_coFbogxhRI9iM864NL_liGXvsQp2AupsKei7z0cNNfDvGUmWUy20nuUhkREQyrpY4bEeIBuc=s0-w300" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>해외·영문</span><span>05.01 02:49</span><span>STOCKTITAN · Stock Titan</span></div>
               <h3><a href="https://www.stocktitan.net/sec-filings/PKX/6-k-posco-holdings-inc-current-report-foreign-issuer-1b67a8644b58.html">POSCO HOLDINGS (NYSE: PKX) targets 35–40% shareholder returns for 2026–2028 - Stock Titan</a></h3>
@@ -1334,7 +1330,7 @@
           </article>
     
           <article class="story" id="story-12" data-story data-section-key="해외-영문" data-section-index="3" data-section-total="4">
-            <a class="story__image" href="https://www.cnbc.com/2026/04/30/boaz-weinsteins-hedge-fund-saba-uk-tech-fund-spacex.html" aria-label="기사 이미지 보기"><img src="https://image.cnbcfm.com/api/v1/image/107416509-1715954534877-gettyimages-1258512789-BLOOMBERG_INVEST.jpeg?v=1771849972&amp;w=1920&amp;h=1080" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.cnbc.com/2026/04/30/boaz-weinsteins-hedge-fund-saba-uk-tech-fund-spacex.html" aria-label="기사 이미지 보기" data-logo-label="CNBC" data-logo-src="https://www.google.com/s2/favicons?domain=cnbc.com&amp;sz=128"><img src="https://image.cnbcfm.com/api/v1/image/107416509-1715954534877-gettyimages-1258512789-BLOOMBERG_INVEST.jpeg?v=1771849972&amp;w=1920&amp;h=1080" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>해외·영문</span><span>04.30 21:51</span><span>CNBC</span></div>
               <h3><a href="https://www.cnbc.com/2026/04/30/boaz-weinsteins-hedge-fund-saba-uk-tech-fund-spacex.html">Boaz Weinsteins activist investor Saba seizes control of UK tech fund after bitter SpaceX...</a></h3>
@@ -1356,11 +1352,11 @@
           </article>
     
           <article class="story" id="story-60" data-story data-section-key="해외-영문" data-section-index="4" data-section-total="4">
-            <a class="story__image" href="https://news.google.com/rss/articles/CBMinAFBVV95cUxQdmR5TEpXSzlvanppRTJmYmRwLXcwY2dFVWQ3bndGZVkwMHo1TC1mU0gxLU1HV3lIejF3MlVFbEZMb2VDa25UVGNYbVFfSzBIZ19iZFhXRnlzS1dBZDZLTWI1VFF1ZVJTTWdidTJGaGNjRXM2VEo0LW5HdFBMdXQ0X1NnbzZ0Z2I2LUcxdXRpVlgyZDI5UmpwclN1Nko?oc=5" aria-label="기사 이미지 보기"><img src="https://lh3.googleusercontent.com/J6_coFbogxhRI9iM864NL_liGXvsQp2AupsKei7z0cNNfDvGUmWUy20nuUhkREQyrpY4bEeIBuc=s0-w300" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://news.google.com/rss/articles/CBMinAFBVV95cUxQdmR5TEpXSzlvanppRTJmYmRwLXcwY2dFVWQ3bndGZVkwMHo1TC1mU0gxLU1HV3lIejF3MlVFbEZMb2VDa25UVGNYbVFfSzBIZ19iZFhXRnlzS1dBZDZLTWI1VFF1ZVJTTWdidTJGaGNjRXM2VEo0LW5HdFBMdXQ0X1NnbzZ0Z2I2LUcxdXRpVlgyZDI5UmpwclN1Nko?oc=5" aria-label="기사 이미지 보기" data-logo-label="Insight DIY" data-logo-src="https://www.google.com/s2/favicons?domain=news.google.com&amp;sz=128"><img src="https://lh3.googleusercontent.com/J6_coFbogxhRI9iM864NL_liGXvsQp2AupsKei7z0cNNfDvGUmWUy20nuUhkREQyrpY4bEeIBuc=s0-w300" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>해외·영문</span><span>04.29 19:57</span><span>Insight DIY</span></div>
               <h3><a href="https://news.google.com/rss/articles/CBMinAFBVV95cUxQdmR5TEpXSzlvanppRTJmYmRwLXcwY2dFVWQ3bndGZVkwMHo1TC1mU0gxLU1HV3lIejF3MlVFbEZMb2VDa25UVGNYbVFfSzBIZ19iZFhXRnlzS1dBZDZLTWI1VFF1ZVJTTWdidTJGaGNjRXM2VEo0LW5HdFBMdXQ0X1NnbzZ0Z2I2LUcxdXRpVlgyZDI5UmpwclN1Nko?oc=5">Headlam Board Responds to Activist Investor Proposal</a></h3>
-              
+              <p>Insight DIY 보도로 확인된 &#x27;Headlam Board Responds to Activist Investor Proposal&#x27; 이슈입니다. 해외 투자자와 외신이 바라보는 지배구조·행동주의 흐름을 보여줍니다.</p>
               
             </div>
             
@@ -1373,7 +1369,7 @@
     <footer class="footer">
       <div class="footer__grid">
         <div>
-          <p class="footer__brand">BSIDE KOREA</p>
+          <a class="bside-logo bside-logo--footer" href="https://bside.ai" aria-label="BSIDE Korea 홈페이지"><span class="bside-logo__mark">BSIDE</span><span class="bside-logo__text">KOREA DAILY NEWS</span></a>
           <p>건강한 자본시장을 위한 주주행동과 투자자 커뮤니케이션을 지향합니다. 이 페이지는 공개 뉴스와 RSS를 자동으로 큐레이션한 리포트이며 투자 조언이나 매매 권유가 아닙니다.</p>
         </div>
         <div>
@@ -1384,14 +1380,40 @@
     </footer>
   </div>
   <script>
-    const noImageMarkup = '<span>NO IMAGE</span>';
-    document.querySelectorAll('.story__image img').forEach((image) => {
-      const markBroken = () => {
-        const container = image.closest('.story__image');
-        if (!container) return;
-        container.classList.add('story__image--empty', 'story__image--broken');
-        container.innerHTML = noImageMarkup;
-      };
+    function attachSourceLogoGuard(container) {
+      container.querySelectorAll('.story__source-logo').forEach((logo) => {
+        logo.addEventListener('error', () => logo.remove(), { once: true });
+        if (logo.complete && logo.naturalWidth === 0) logo.remove();
+      });
+    }
+
+    function replaceWithSourceLogo(container) {
+      const label = container.dataset.logoLabel || 'NO IMAGE';
+      const logoSrc = container.dataset.logoSrc || '';
+      container.classList.add('story__image--logo', 'story__image--broken');
+      container.classList.remove('story__image--empty');
+      container.innerHTML = '';
+      if (logoSrc) {
+        const logo = new Image();
+        logo.className = 'story__source-logo';
+        logo.src = logoSrc;
+        logo.alt = '';
+        logo.loading = 'lazy';
+        logo.decoding = 'async';
+        logo.referrerPolicy = 'no-referrer';
+        logo.addEventListener('error', () => logo.remove(), { once: true });
+        container.appendChild(logo);
+      }
+      const text = document.createElement('span');
+      text.textContent = label;
+      container.appendChild(text);
+    }
+
+    document.querySelectorAll('.story__image').forEach((container) => {
+      attachSourceLogoGuard(container);
+      const image = container.querySelector('img:not(.story__source-logo)');
+      if (!image) return;
+      const markBroken = () => replaceWithSourceLogo(container);
       const fallbackTimer = window.setTimeout(() => {
         if (!image.complete || image.naturalWidth === 0) markBroken();
       }, 8000);

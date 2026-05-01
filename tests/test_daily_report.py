@@ -49,10 +49,12 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert paths[0].name == "2026-05-01.html"
     assert (tmp_path / "public" / "reports" / "latest.html").exists()
     assert (tmp_path / "public" / "reports" / "index.html").exists()
-    assert "BSIDE KOREA DAILY NEWS" in html
+    assert 'href="https://bside.ai"' in html
+    assert "bside-logo" in html
     assert "Editor’s Brief" in html
     assert "brief__bullets" in html
-    assert "NO IMAGE" in html
+    assert "story__image--logo" in html
+    assert "story__source-logo" in html
     assert "floating-nav" in html
     assert "data-toc-section" in html
     assert "data-nav-story-index" in html
@@ -60,6 +62,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "data-progress-text" in html
     assert "story__image--broken" in html
     assert "기사 링크 1건 보기" not in html
+    assert "<p>" in html
     assert "한화솔루션 유상증자 정정요구" in html
 
 
