@@ -168,6 +168,10 @@ def usable_image_url(value: str) -> bool:
         "facebook-",
         "go_share",
         "/image/isw",
+        "ic_mai",
+        "search_pn",
+        "_next/static/media",
+        "thumb_400x226",
     )
     if any(token in lowered for token in generic_tokens):
         return False

@@ -96,6 +96,19 @@ def best_story_summary(group: list[dict[str, object]]) -> str:
     return ""
 
 
+def story_summary_for_display(story: dict[str, object]) -> str:
+    summary = compact_text(str(story.get("summary") or ""), max_chars=220)
+    generic_patterns = (
+        "관련 보도를 묶어",
+        "원문 링크와 함께 정리",
+        "관련 기사를 묶어",
+        "관련 뉴스를 묶어",
+    )
+    if any(pattern in summary for pattern in generic_patterns):
+        return ""
+    return summary
+
+
 def story_links(group: list[dict[str, object]]) -> list[dict[str, str]]:
     links: list[dict[str, str]] = []
     seen_urls: set[str] = set()
@@ -446,7 +459,8 @@ def render_story(story: dict[str, object], config: dict[str, object], *, feature
     primary_url = escape(str(story.get("primary_url") or "#"), quote=True)
     category = escape(str(story.get("category") or "기타"))
     sources = escape(str(story.get("source_line") or story.get("primary_source") or ""))
-    summary = escape(str(story.get("summary") or "관련 보도를 묶어 원문 링크와 함께 정리했습니다."))
+    summary = escape(story_summary_for_display(story))
+    summary_html = f"<p>{summary}</p>" if summary else ""
     timestamp = escape(date_label(story.get("datetime"), config))
     image_url = escape(str(story.get("image_url") or ""), quote=True)
     image_html = (
@@ -464,7 +478,7 @@ def render_story(story: dict[str, object], config: dict[str, object], *, feature
             <div class="story__body">
               <div class="story__meta"><span>{category}</span><span>{timestamp}</span><span>{sources}</span></div>
               <h3><a href="{primary_url}">{safe_title}</a></h3>
-              <p>{summary}</p>
+              {summary_html}
               <div class="story__more"><strong>More:</strong> {more_links}</div>
             </div>
             <details>
@@ -636,7 +650,7 @@ def render_report_html(
       .brand-row {{ align-items: flex-start; flex-direction: column; }}
       .story {{ grid-template-columns: 96px minmax(0, 1fr); gap: 12px; }}
       .story--featured {{ grid-template-columns: 1fr; }}
-      .story--featured h3, .story h3 {{ font-size: 22px; }}
+      .story--featured h3, .story h3 {{ font-size: 19px; line-height: 1.22; }}
       .story__meta {{ font-size: 11px; }}
       .link-table table {{ min-width: 0; }}
       table, thead, tbody, tr, th, td {{ display: block; }}
