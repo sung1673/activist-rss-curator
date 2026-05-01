@@ -42,6 +42,9 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
         json.dumps({"published_clusters": [report_cluster("cluster:test", now)], "pending_clusters": [], "articles": []}),
         encoding="utf-8",
     )
+    stale_variant_dir = tmp_path / "public" / "feed" / "variants"
+    stale_variant_dir.mkdir(parents=True)
+    (stale_variant_dir / "forbes.html").write_text("stale", encoding="utf-8")
 
     report = build_daily_report(tmp_path, now)
     paths = write_report_files(report, tmp_path)
@@ -50,18 +53,13 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert paths[0].name == "2026-05-01.html"
     assert (tmp_path / "public" / "feed" / "latest.html").exists()
     assert (tmp_path / "public" / "feed" / "index.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "forbes.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "ft.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "bloomberg.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "axios.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "techmeme.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "korea.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "radar.html").exists()
     assert (tmp_path / "public" / "feed" / "variants" / "memo.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "timeline.html").exists()
     assert (tmp_path / "public" / "feed" / "variants" / "board.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "atlas.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "studio.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "social.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "thread.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "forum.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "signal.html").exists()
+    assert not (tmp_path / "public" / "feed" / "variants" / "forbes.html").exists()
     assert 'href="https://bside.ai"' in html
     assert "bside-logo" in html
     assert "bside-logo__image" in html
@@ -101,12 +99,17 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "grid-template-columns: minmax(0, 1.35fr) minmax(260px, .95fr)" in html
     assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in html
     assert "Layout Lab" in html
-    assert "variants/forbes.html" in html
-    assert "variants/radar.html" in html
+    assert "variants/memo.html" in html
+    assert "variants/board.html" in html
+    assert "variants/social.html" in html
+    assert "variants/thread.html" in html
+    assert "variants/forum.html" in html
+    assert "variants/signal.html" in html
     assert "layout-standard" in html
-    assert "layout-bloomberg" in html
-    assert "layout-radar" in html
-    assert "layout-studio" in html
+    assert "layout-social" in html
+    assert "layout-thread" in html
+    assert "layout-forum" in html
+    assert "layout-signal" in html
     assert "is-mobile-context" in html
     assert "data-context-label" in html
     assert "bside-daily-read" in html
