@@ -850,6 +850,14 @@ def test_hourly_update_window_is_thirty_minutes(config, now) -> None:  # type: i
     assert hourly_update_start_at(config, now) == now - timedelta(minutes=30)
 
 
+def test_hourly_update_uses_two_overnight_half_windows(config) -> None:  # type: ignore[no-untyped-def]
+    first_half = datetime(2026, 5, 1, 3, 35, tzinfo=ZoneInfo("Asia/Seoul"))
+    second_half = datetime(2026, 5, 1, 6, 5, tzinfo=ZoneInfo("Asia/Seoul"))
+
+    assert hourly_update_start_at(config, first_half) == datetime(2026, 5, 1, 1, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    assert hourly_update_start_at(config, second_half) == datetime(2026, 5, 1, 3, 30, tzinfo=ZoneInfo("Asia/Seoul"))
+
+
 def test_summary_bullet_lines_uses_concise_endings(config) -> None:  # type: ignore[no-untyped-def]
     bullets = summary_bullet_lines(
         "- 주총 표 대결 임박했음\n- 밸류업 논의가 이어졌음\n- ETF 의결권 영향력이 이슈로 떠올랐음",
@@ -906,7 +914,7 @@ def test_hourly_update_skips_configured_hours(config, now, monkeypatch) -> None:
         "published_clusters": [cluster],
         "telegram_sent_cluster_guids": [],
     }
-    skip_now = datetime(2026, 4, 26, 6, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    skip_now = datetime(2026, 4, 26, 5, 0, tzinfo=ZoneInfo("Asia/Seoul"))
 
     assert publish_hourly_telegram_update(state, config, skip_now, []) == {
         "telegram_sent": 0,

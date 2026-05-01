@@ -1547,7 +1547,35 @@ def telegram_hour_is_skipped(config: dict[str, object], now: datetime) -> bool:
     return now.astimezone(ZoneInfo(timezone_name)).hour in skip_hours
 
 
+def overnight_half_window_start_at(config: dict[str, object], now: datetime) -> datetime | None:
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    local_now = now.astimezone(ZoneInfo(timezone_name))
+    windows = telegram_config(config).get("overnight_half_windows", [])
+    if not isinstance(windows, list):
+        return None
+
+    for raw_window in windows:
+        if not isinstance(raw_window, dict):
+            continue
+        try:
+            send_hour = int(raw_window.get("send_hour", -1))
+            start_hour = int(raw_window.get("start_hour", 0))
+            start_minute = int(raw_window.get("start_minute", 0))
+        except (TypeError, ValueError):
+            continue
+        if local_now.hour != send_hour:
+            continue
+        start_at = local_now.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
+        if start_at > local_now:
+            start_at -= timedelta(days=1)
+        return start_at
+    return None
+
+
 def hourly_update_start_at(config: dict[str, object], now: datetime) -> datetime:
+    overnight_start = overnight_half_window_start_at(config, now)
+    if overnight_start is not None:
+        return overnight_start
     hours = float(telegram_config(config).get("hourly_digest_window_hours", 1))
     return now - timedelta(hours=hours)
 

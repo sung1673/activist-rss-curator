@@ -165,6 +165,51 @@ feeds:
   - name: "google-news-en-korea-capital-market-reform"
     category: "global"
     url: "https://news.google.com/rss/search?q=South+Korea+capital+market+reform+corporate+governance+shareholder+value+when:7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-bloomberg-korea-valueup-governance"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=site%3Abloomberg.com+%28%22South+Korea%22+OR+Korea%29+%28%22Value-up+Program%22+OR+%22Korea+discount%22+OR+%22shareholder+returns%22+OR+%22corporate+governance%22%29+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-cnbc-korea-discount-governance"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=site%3Acnbc.com+%28%22South+Korea%22+OR+Korea%29+%28%22Korea+discount%22+OR+%22Value-up+Program%22+OR+%22corporate+governance%22+OR+%22shareholder+returns%22%29+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-forbes-korea-shareholder-value"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=site%3Aforbes.com+%28%22South+Korea%22+OR+Korea%29+%28%22corporate+governance%22+OR+%22shareholder+value%22+OR+%22activist+investor%22+OR+%22Korea+discount%22%29+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-reuters-korea-governance-reform"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=site%3Areuters.com+%28%22South+Korea%22+OR+Korea%29+%28%22corporate+governance%22+OR+%22shareholder+returns%22+OR+%22capital+market+reform%22+OR+%22Korea+discount%22%29+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-ft-korea-market-reform"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=site%3Aft.com+%28%22South+Korea%22+OR+Korea%29+%28%22corporate+governance%22+OR+%22shareholder+value%22+OR+%22Korea+discount%22+OR+%22capital+market+reform%22%29+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-wsj-korea-market-reform"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=site%3Awsj.com+%28%22South+Korea%22+OR+Korea%29+%28%22corporate+governance%22+OR+%22shareholder+value%22+OR+%22Korea+discount%22+OR+%22capital+market+reform%22%29+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-nikkei-korea-valueup-governance"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=site%3Aasia.nikkei.com+%28%22South+Korea%22+OR+Korea%29+%28%22corporate+governance%22+OR+%22shareholder+returns%22+OR+%22Value-up+Program%22+OR+%22Korea+discount%22%29+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-economist-korea-capital-markets"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=site%3Aeconomist.com+%28%22South+Korea%22+OR+Korea%29+%28%22corporate+governance%22+OR+%22capital+markets%22+OR+%22Korea+discount%22%29+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-barrons-korea-market-reform"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=site%3Abarrons.com+%28%22South+Korea%22+OR+Korea%29+%28%22stock+market%22+OR+%22Korea+discount%22+OR+%22shareholder+returns%22%29+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-marketwatch-korea-shareholder-returns"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=site%3Amarketwatch.com+%28%22South+Korea%22+OR+Korea%29+%28%22stocks%22+OR+%22shareholder+returns%22+OR+%22corporate+governance%22%29+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-institutional-investor-korea-stewardship"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=site%3Ainstitutionalinvestor.com+%28%22South+Korea%22+OR+Korea%29+%28%22National+Pension+Service%22+OR+stewardship+OR+governance+OR+%22proxy+voting%22%29+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-pionline-korea-nps-stewardship"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=site%3Apionline.com+%28%22South+Korea%22+OR+Korea%29+%28%22National+Pension+Service%22+OR+stewardship+OR+%22proxy+voting%22%29+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-major-outlets-korea-valueup"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=%28%22South+Korea%22+OR+Korea%29+%28%22Value-up+Program%22+OR+%22Korea+discount%22+OR+%22shareholder+returns%22+OR+%22corporate+governance%22%29+%28Bloomberg+OR+Reuters+OR+CNBC+OR+Forbes+OR+%22Financial+Times%22+OR+%22Wall+Street+Journal%22+OR+Nikkei%29+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-major-outlets-korea-activism"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=%28%22South+Korea%22+OR+Korea%29+%28%22activist+investor%22+OR+%22proxy+fight%22+OR+%22shareholder+proposal%22+OR+%22board+seats%22%29+%28Bloomberg+OR+Reuters+OR+CNBC+OR+Forbes+OR+%22Financial+Times%22+OR+%22Wall+Street+Journal%22+OR+Nikkei%29+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-korea-nps-global-coverage"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=%28%22South+Korea%22+OR+Korea%29+%28%22National+Pension+Service%22+OR+NPS%29+%28stewardship+OR+%22proxy+voting%22+OR+%22shareholder+rights%22%29+when%3A7d&hl=en-US&gl=US&ceid=US:en"
   - name: "google-news-en-activist-proxy-fight"
     category: "global"
     url: "https://news.google.com/rss/search?q=shareholder+activism+proxy+fight+board+seats+activist+investor+when:7d&hl=en-US&gl=US&ceid=US:en"
@@ -180,10 +225,10 @@ timezone: "Asia/Seoul"
 fetch:
   max_entries_per_feed: 5
   enrich_pages: true
-  max_enrich_articles: 90
+  max_enrich_articles: 120
   page_timeout_seconds: 8
-  google_news_decode_limit: 160
-  state_google_news_decode_limit: 60
+  google_news_decode_limit: 220
+  state_google_news_decode_limit: 80
 
 display:
   exclude_link_domains:
@@ -236,8 +281,18 @@ telegram:
   batch_digest_enabled: true
   batch_digest_min_clusters: 2
   hourly_digest_window_hours: 0.5
+  overnight_half_windows:
+    - send_hour: 3
+      start_hour: 1
+      start_minute: 0
+    - send_hour: 6
+      start_hour: 3
+      start_minute: 30
   skip_hours:
-    - 6
+    - 1
+    - 2
+    - 4
+    - 5
     - 7
   max_duplicate_mentions: 3
   max_articles_per_message: 7

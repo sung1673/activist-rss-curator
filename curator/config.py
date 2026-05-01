@@ -16,10 +16,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "fetch": {
         "max_entries_per_feed": 5,
         "enrich_pages": True,
-        "max_enrich_articles": 90,
+        "max_enrich_articles": 120,
         "page_timeout_seconds": 8,
-        "google_news_decode_limit": 160,
-        "state_google_news_decode_limit": 60,
+        "google_news_decode_limit": 220,
+        "state_google_news_decode_limit": 80,
     },
     "display": {
         "exclude_link_domains": ["msn.com"],
@@ -69,7 +69,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "batch_digest_enabled": True,
         "batch_digest_min_clusters": 2,
         "hourly_digest_window_hours": 0.5,
-        "skip_hours": [6, 7],
+        "overnight_half_windows": [
+            {"send_hour": 3, "start_hour": 1, "start_minute": 0},
+            {"send_hour": 6, "start_hour": 3, "start_minute": 30},
+        ],
+        "skip_hours": [1, 2, 4, 5, 7],
         "max_duplicate_mentions": 3,
         "max_articles_per_message": 7,
         "max_message_chars": 3900,

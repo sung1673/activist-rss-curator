@@ -9,8 +9,12 @@ on:
       - "public/index.html"
       - "data/state.json"
   schedule:
-    # KST every 30 minutes at :05/:35, skipping 06:00-07:59 regular updates.
-    - cron: "5,35 0-20,23 * * *"
+    # KST 08:05-00:35 every 30 minutes.
+    - cron: "5,35 0-15,23 * * *"
+    # KST 03:35, covering the first half of the overnight 01:00-06:00 window.
+    - cron: "35 18 * * *"
+    # KST 06:05, covering the second half of the overnight 01:00-06:00 window.
+    - cron: "5 21 * * *"
   workflow_dispatch:
     inputs:
       send_telegram_test:
@@ -82,7 +86,7 @@ jobs:
         env:
           CURATOR_FEEDS: ${{ secrets.CURATOR_FEEDS }}
           CURATOR_EVENT_SCHEDULE: ${{ github.event.schedule }}
-          CURATOR_DISABLE_TELEGRAM_SEND: ${{ github.event_name == 'push' && '1' || '' }}
+          CURATOR_DISABLE_TELEGRAM_SEND: ${{ github.event_name == 'push' && ! contains(github.event.head_commit.message, '[send-regular-update]') && '1' || '' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
