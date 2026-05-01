@@ -55,6 +55,18 @@ def test_image_href_extracts_og_image() -> None:
     assert image_href(html, "https://example.com/news/1") == "https://example.com/thumb.jpg"
 
 
+def test_image_href_extracts_json_ld_image() -> None:
+    html = '<script type="application/ld+json">{"image":{"url":"/article.jpg"}}</script>'
+
+    assert image_href(html, "https://example.com/news/1") == "https://example.com/article.jpg"
+
+
+def test_image_href_falls_back_to_large_img() -> None:
+    html = '<article><img src="/body.jpg" width="640" height="360"></article>'
+
+    assert image_href(html, "https://example.com/news/1") == "https://example.com/body.jpg"
+
+
 def test_image_url_from_entry_accepts_media_thumbnail_without_type() -> None:
     entry = SimpleNamespace(media_thumbnail=[{"url": "/thumb.jpg"}])
 

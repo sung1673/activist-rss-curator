@@ -337,3 +337,7 @@ digest:
   summary_bullets: 3
   summary_bullet_max_chars: 48
   max_message_chars: 3900
+
+report:
+  image_enrich_limit: 120
+  image_timeout_seconds: 4

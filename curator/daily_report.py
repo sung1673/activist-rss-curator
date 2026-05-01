@@ -9,9 +9,12 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
+import httpx
+
 from .ai import ai_config, call_github_models
 from .config import load_config
 from .dates import format_kst, now_in_timezone
+from .fetch import USER_AGENT, image_href
 from .rss_writer import article_link, article_source_label, compact_text
 from .state import load_state
 from .summaries import (
@@ -128,6 +131,60 @@ def story_image_url(group: list[dict[str, object]]) -> str:
         if image_url.startswith(("http://", "https://")):
             return image_url
     return ""
+
+
+def image_enrich_settings(config: dict[str, object]) -> tuple[int, float]:
+    report_config = config.get("report", {})
+    if not isinstance(report_config, dict):
+        report_config = {}
+    limit = int(report_config.get("image_enrich_limit", 120) or 120)
+    timeout = float(report_config.get("image_timeout_seconds", 4) or 4)
+    return max(0, limit), max(1.0, timeout)
+
+
+def story_image_candidates(story: dict[str, object]) -> list[str]:
+    candidates: list[str] = []
+    for value in [story.get("image_url"), story.get("primary_url")]:
+        text = str(value or "").strip()
+        if text.startswith(("http://", "https://")) and text not in candidates:
+            candidates.append(text)
+    links = story.get("links") if isinstance(story.get("links"), list) else []
+    for link in links[:4]:
+        if not isinstance(link, dict):
+            continue
+        url = str(link.get("url") or "").strip()
+        if url.startswith(("http://", "https://")) and url not in candidates:
+            candidates.append(url)
+    return candidates
+
+
+def discover_story_image(url: str, client: httpx.Client) -> str:
+    try:
+        response = client.get(url, follow_redirects=True)
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return ""
+    image_url = image_href(response.text, str(response.url))
+    return image_url or ""
+
+
+def enrich_story_images(stories: list[dict[str, object]], config: dict[str, object]) -> None:
+    limit, timeout = image_enrich_settings(config)
+    if limit <= 0:
+        return
+    checked = 0
+    with httpx.Client(timeout=timeout, headers={"User-Agent": USER_AGENT}) as client:
+        for story in stories:
+            if str(story.get("image_url") or "").startswith(("http://", "https://")):
+                continue
+            for candidate_url in story_image_candidates(story):
+                if checked >= limit:
+                    return
+                checked += 1
+                image_url = discover_story_image(candidate_url, client)
+                if image_url:
+                    story["image_url"] = image_url
+                    break
 
 
 def story_source_line(links: list[dict[str, str]]) -> str:
@@ -258,6 +315,25 @@ def clean_report_paragraphs(text: str, *, max_paragraphs: int = 4) -> list[str]:
     return paragraphs
 
 
+def clean_report_bullets(text: str, *, max_bullets: int = 4) -> list[str]:
+    normalized = re.sub(r"\r\n?", "\n", str(text or "")).strip()
+    candidates = [part for part in re.split(r"\n+|(?<=다\.)\s+", normalized) if part.strip()]
+    bullets: list[str] = []
+    for candidate in candidates:
+        bullet = re.sub(r"^\s*(?:[-*•·]|\d+[.)]|[①-⑩])\s*", "", candidate).strip()
+        bullet = re.sub(r"\s+", " ", bullet)
+        if not bullet or len(bullet) < 12:
+            continue
+        if any(pattern in bullet for pattern in ("링크", "몇 건", "정리했", "HTML", "텔레그램")) and len(bullet) < 90:
+            continue
+        bullets.append(compact_text(bullet, max_chars=125))
+        if len(bullets) >= max_bullets:
+            break
+    if len(bullets) >= 2:
+        return bullets
+    return [compact_text(paragraph, max_chars=125) for paragraph in clean_report_paragraphs(text, max_paragraphs=max_bullets)]
+
+
 def generate_report_review(
     clusters: list[dict[str, object]],
     stories: list[dict[str, object]],
@@ -272,14 +348,13 @@ def generate_report_review(
     max_tokens = int(settings.get("daily_report_max_tokens", 900))
     system_prompt = (
         "당신은 금융위원회, 금감원, 거래소, 기관투자자, 행동주의 펀드를 오래 취재한 전문 자본시장 기자입니다. "
-        "수집된 기사 묶음을 바탕으로 하루치 브리핑의 본문 해설만 한국어 기사체로 작성합니다. "
+        "수집된 기사 묶음을 바탕으로 하루치 브리핑의 핵심 bullet만 한국어 기사체로 작성합니다. "
         "투자 조언이나 매매 권유는 하지 말고, 기사에 없는 사실을 단정하지 마세요."
     )
     user_prompt = (
         "아래 기사 묶음을 바탕으로 Telegram과 HTML 리포트 상단에 들어갈 상세 요약을 작성하세요.\n"
-        "- 정확히 4개 문단으로 작성\n"
-        "- bullet point, 번호, 제목 없이 문단만 작성\n"
-        "- 각 문단은 2문장 안팎, 180자 안팎\n"
+        "- bullet point 3~4개로 작성\n"
+        "- 각 bullet은 1문장, 90자 안팎\n"
         "- 전체 흐름, 주요 사건, 제도/정책적 의미, 해외/영문 흐름을 균형 있게 반영\n"
         "- 전문 자본시장 기자의 톤으로, 정책·공시·주주권 의미를 해석하되 과장하지 않음\n"
         "- '주목됩니다', '필요가 있습니다' 같은 일반 논평보다 기사체 문장 사용\n"
@@ -295,8 +370,8 @@ def generate_report_review(
         max_tokens=max_tokens,
         config=config,
     )
-    if content and len(clean_report_paragraphs(content)) >= 2:
-        return "\n\n".join(clean_report_paragraphs(content))
+    if content and len(clean_report_bullets(content)) >= 2:
+        return "\n".join(f"- {bullet}" for bullet in clean_report_bullets(content))
     return fallback_report_review(stories)
 
 
@@ -418,8 +493,9 @@ def render_report_html(
 ) -> str:
     stats = report_stats(stories, clusters, duplicate_records)
     buckets = category_buckets(stories)
-    review_paragraphs = clean_report_paragraphs(review) or clean_report_paragraphs(fallback_report_review(stories))
-    review_html = "\n".join(f"<p>{escape(paragraph)}</p>" for paragraph in review_paragraphs)
+    review_bullets = clean_report_bullets(review) or clean_report_bullets(fallback_report_review(stories))
+    review_html = "\n".join(f"<li>{escape(bullet)}</li>" for bullet in review_bullets)
+    review_block_html = f'<ul class="brief__bullets">{review_html}</ul>' if review_html else ""
     featured_stories = stories[:3]
     featured_html = "\n".join(render_story(story, config, featured=True) for story in featured_stories)
     category_sections = []
@@ -460,7 +536,7 @@ def render_report_html(
     end_label = escape(format_kst(end_at, str(config.get("timezone") or "Asia/Seoul")))
     archive_url = "index.html"
     title = f"비사이드 자본시장 데일리 - {date_id}"
-    description = compact_text(" ".join(review_paragraphs), max_chars=180)
+    description = compact_text(" ".join(review_bullets), max_chars=180)
     canonical_url = escape(report_url, quote=True)
     return f"""<!doctype html>
 <html lang="ko">
@@ -506,7 +582,9 @@ def render_report_html(
     .meta-strip strong {{ color: var(--accent-deep); }}
     .brief {{ display: grid; grid-template-columns: 220px 1fr; gap: 30px; border-bottom: 1px solid var(--ink); padding: 34px 0; }}
     .brief h2, .section h2 {{ font-family: Georgia, "Times New Roman", serif; font-size: 28px; line-height: 1.1; margin: 0; }}
-    .brief p {{ margin: 0 0 15px; font-size: 17px; color: #2e2738; }}
+    .brief__bullets {{ margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }}
+    .brief__bullets li {{ position: relative; padding-left: 18px; font-size: 16px; color: #2e2738; }}
+    .brief__bullets li::before {{ content: ""; position: absolute; left: 0; top: .72em; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }}
     .toc {{ position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 92%, transparent); backdrop-filter: blur(8px); }}
     .chip {{ border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; background: var(--surface); text-decoration: none; font-size: 13px; }}
     .chip span {{ color: var(--accent); font-weight: 800; margin-left: 4px; }}
@@ -525,19 +603,20 @@ def render_report_html(
     .story__meta {{ display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; margin-bottom: 8px; }}
     .story__meta span:not(:last-child)::after {{ content: "·"; margin-left: 8px; color: var(--line); }}
     .story h3 {{ font-family: Georgia, "Times New Roman", serif; font-size: 24px; line-height: 1.16; margin: 0 0 8px; letter-spacing: 0; }}
-    .story--featured:first-child h3 {{ font-size: 32px; }}
+    .story--featured h3 {{ font-size: 26px; }}
     .story p {{ margin: 0 0 10px; color: #34312d; }}
     .story__more {{ font-size: 13px; color: var(--muted); }}
     .story__more strong {{ color: var(--green); }}
     .story__more a {{ margin-right: 8px; white-space: nowrap; }}
-    details {{ margin-top: 10px; }}
+    details {{ grid-column: 1 / -1; margin-top: 10px; max-width: 100%; }}
     summary {{ cursor: pointer; color: var(--green); font-size: 13px; font-weight: 800; }}
     .link-table {{ margin-top: 10px; border: 1px solid var(--line); background: var(--surface); overflow: auto; }}
-    table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
+    .link-table table {{ width: 100%; min-width: 660px; table-layout: fixed; border-collapse: collapse; font-size: 12px; }}
     th, td {{ padding: 8px 9px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }}
     th {{ color: var(--muted); font-weight: 700; background: #faf8fd; }}
-    td:first-child {{ width: 82px; color: var(--muted); white-space: nowrap; }}
-    td:nth-child(2) {{ width: 92px; color: var(--accent-deep); }}
+    th:first-child, td:first-child {{ width: 92px; color: var(--muted); white-space: nowrap; }}
+    th:nth-child(2), td:nth-child(2) {{ width: 120px; color: var(--accent-deep); }}
+    td a {{ overflow-wrap: anywhere; }}
     .floating-nav {{ position: fixed; top: 92px; right: 20px; z-index: 8; width: 230px; max-height: calc(100vh - 118px); overflow: auto; border: 1px solid var(--line); background: rgba(255,255,255,.94); box-shadow: 0 14px 40px rgba(44, 27, 84, .10); padding: 12px; }}
     .floating-nav h2 {{ font-size: 12px; margin: 0 0 8px; color: var(--accent-deep); letter-spacing: .04em; }}
     .floating-nav a {{ display: block; text-decoration: none; border-left: 2px solid transparent; padding: 6px 8px; color: var(--muted); font-size: 12px; }}
@@ -557,8 +636,9 @@ def render_report_html(
       .brand-row {{ align-items: flex-start; flex-direction: column; }}
       .story {{ grid-template-columns: 96px minmax(0, 1fr); gap: 12px; }}
       .story--featured {{ grid-template-columns: 1fr; }}
-      .story--featured:first-child h3, .story h3 {{ font-size: 22px; }}
+      .story--featured h3, .story h3 {{ font-size: 22px; }}
       .story__meta {{ font-size: 11px; }}
+      .link-table table {{ min-width: 0; }}
       table, thead, tbody, tr, th, td {{ display: block; }}
       thead {{ display: none; }}
       tr {{ padding: 8px 0; border-bottom: 1px solid var(--line); }}
@@ -595,7 +675,7 @@ def render_report_html(
 
     <section class="brief">
       <h2>Editor’s Brief</h2>
-      <div>{review_html}</div>
+      <div>{review_block_html}</div>
     </section>
 
     <nav class="toc" aria-label="report sections">
@@ -648,6 +728,7 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
     clusters = digest_clusters_in_window(state, config, start_at, end_at)
     duplicate_records = duplicate_records_in_window(state, config, start_at, end_at)
     stories = build_report_stories(clusters, duplicate_records, config)
+    enrich_story_images(stories, config)
     review = generate_report_review(clusters, stories, config, start_at, end_at)
     date_id = end_at.astimezone(ZoneInfo(timezone_name)).strftime("%Y-%m-%d")
     report_url = report_public_url(config, date_id)

@@ -36,6 +36,7 @@ def report_cluster(guid: str, now: datetime) -> dict[str, object]:
 def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     now = datetime(2026, 5, 1, 10, 20, tzinfo=ZoneInfo("Asia/Seoul"))
     (tmp_path / "data").mkdir()
+    (tmp_path / "config.yaml").write_text("report:\n  image_enrich_limit: 0\n", encoding="utf-8")
     (tmp_path / "data" / "state.json").write_text(
         json.dumps({"published_clusters": [report_cluster("cluster:test", now)], "pending_clusters": [], "articles": []}),
         encoding="utf-8",
@@ -50,6 +51,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert (tmp_path / "public" / "reports" / "index.html").exists()
     assert "BSIDE KOREA DAILY NEWS" in html
     assert "Editor’s Brief" in html
+    assert "brief__bullets" in html
     assert "More:" in html
     assert "floating-nav" in html
     assert "<table>" in html
@@ -59,6 +61,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
 def test_daily_report_telegram_message_links_to_report(tmp_path) -> None:
     now = datetime(2026, 5, 1, 10, 20, tzinfo=ZoneInfo("Asia/Seoul"))
     (tmp_path / "data").mkdir()
+    (tmp_path / "config.yaml").write_text("report:\n  image_enrich_limit: 0\n", encoding="utf-8")
     (tmp_path / "data" / "state.json").write_text(
         json.dumps({"published_clusters": [report_cluster("cluster:test", now)], "pending_clusters": [], "articles": []}),
         encoding="utf-8",

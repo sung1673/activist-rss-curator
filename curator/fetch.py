@@ -121,14 +121,100 @@ def image_href(html_text: str, base_url: str) -> str | None:
     meta_candidates = (
         {"property": "og:image"},
         {"property": "og:image:url"},
+        {"property": "og:image:secure_url"},
         {"name": "twitter:image"},
         {"name": "twitter:image:src"},
+        {"name": "twitter:image:url"},
+        {"name": "thumbnail"},
+        {"itemprop": "image"},
     )
     for attrs in meta_candidates:
         tag = soup.find("meta", attrs=attrs)
         content = tag.get("content") if tag else None
-        if content:
+        if content and usable_image_url(str(content)):
             return urljoin(base_url, str(content))
+    image_link = soup.find("link", rel=lambda value: value and "image_src" in value)
+    href = image_link.get("href") if image_link else None
+    if href and usable_image_url(str(href)):
+        return urljoin(base_url, str(href))
+    json_image = image_href_from_json_ld(soup, base_url)
+    if json_image:
+        return json_image
+    for tag in soup.find_all("img"):
+        for attr in ("src", "data-src", "data-original", "data-lazy-src", "data-url"):
+            src = tag.get(attr)
+            if src and usable_image_url(str(src)) and image_tag_is_large_enough(tag):
+                return urljoin(base_url, str(src))
+    return None
+
+
+def usable_image_url(value: str) -> bool:
+    lowered = value.strip().casefold()
+    if not lowered or lowered.startswith(("data:", "blob:", "javascript:")):
+        return False
+    parsed = urlsplit(value.strip())
+    if parsed.scheme in {"http", "https"} and not parsed.path.strip("/"):
+        return False
+    generic_tokens = (
+        "logo",
+        "icon",
+        "sprite",
+        "blank",
+        "spacer",
+        "profile_default",
+        "default_image",
+        "noimage",
+        "facebook_",
+        "facebook-",
+        "go_share",
+        "/image/isw",
+    )
+    if any(token in lowered for token in generic_tokens):
+        return False
+    if lowered.endswith((".svg", ".gif")):
+        return False
+    return True
+
+
+def image_tag_is_large_enough(tag: object) -> bool:
+    def numeric_attr(name: str) -> int:
+        try:
+            return int(str(tag.get(name) or "0").replace("px", "").strip())  # type: ignore[attr-defined]
+        except ValueError:
+            return 0
+
+    width = numeric_attr("width")
+    height = numeric_attr("height")
+    return not ((width and width < 120) or (height and height < 80))
+
+
+def image_href_from_json_ld(soup: BeautifulSoup, base_url: str) -> str | None:
+    def image_from_value(value: object) -> str | None:
+        if isinstance(value, str) and usable_image_url(value):
+            return urljoin(base_url, value)
+        if isinstance(value, list):
+            for item in value:
+                result = image_from_value(item)
+                if result:
+                    return result
+        if isinstance(value, dict):
+            for key in ("url", "contentUrl", "@id"):
+                result = image_from_value(value.get(key))
+                if result:
+                    return result
+        return None
+
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        try:
+            payload = json.loads(script.string or script.get_text() or "")
+        except json.JSONDecodeError:
+            continue
+        candidates = payload if isinstance(payload, list) else [payload]
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                result = image_from_value(candidate.get("image") or candidate.get("thumbnailUrl"))
+                if result:
+                    return result
     return None
 
 
