@@ -771,6 +771,7 @@ def render_report_html(
     .story__sources a {{ margin-right: 8px; white-space: nowrap; color: var(--accent-deep); }}
     .story__sources em {{ font-style: normal; color: var(--muted); white-space: nowrap; }}
     .story h3 {{ font-family: Georgia, "Times New Roman", serif; font-size: 24px; line-height: 1.16; margin: 0 0 8px; letter-spacing: 0; }}
+    .story h3 a {{ text-decoration-thickness: 1px; }}
     .story--featured h3 {{ font-size: 24px; }}
     .story p {{ margin: 0 0 10px; color: #34312d; }}
     details {{ grid-column: 1 / -1; margin-top: 10px; max-width: 100%; }}
@@ -808,15 +809,38 @@ def render_report_html(
       .floating-nav {{ display: none; }}
     }}
     @media (max-width: 860px) {{
-      .page {{ padding: 18px 16px 48px; }}
+      body {{ line-height: 1.52; -webkit-text-size-adjust: 100%; }}
+      .page {{ padding: 16px 14px 46px; }}
+      .masthead {{ padding-bottom: 18px; }}
+      h1 {{ font-size: 42px; line-height: 1.02; }}
+      .dek, .brief__bullets li, .story h3, .story p {{ word-break: keep-all; overflow-wrap: break-word; }}
+      .dek {{ font-size: 16px; line-height: 1.55; }}
+      .meta-strip {{ gap: 8px 13px; font-size: 12px; }}
+      .brief {{ gap: 16px; padding: 26px 0; }}
+      .brief h2, .section h2 {{ font-size: 26px; }}
+      .brief__bullets {{ gap: 9px; }}
+      .brief__bullets li {{ font-size: 14.5px; line-height: 1.55; }}
+      .toc {{ gap: 8px; padding: 11px 0; }}
+      .chip {{ padding: 7px 10px; font-size: 12px; }}
       .brief, .featured {{ grid-template-columns: 1fr; }}
       .brand-row {{ align-items: flex-start; flex-direction: column; }}
-      .story {{ grid-template-columns: 78px minmax(0, 1fr); gap: 10px; padding: 14px 0; }}
-      .story--featured {{ grid-template-columns: 1fr; }}
-      .story--featured h3, .story h3 {{ font-size: 17px; line-height: 1.24; margin-bottom: 6px; }}
-      .story p {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 6px; font-size: 14px; line-height: 1.45; }}
-      .story__meta {{ gap: 6px; margin-bottom: 5px; font-size: 10.5px; }}
+      .featured {{ gap: 0; padding: 22px 0; }}
+      .section {{ padding-top: 28px; }}
+      .story-list {{ margin-top: 10px; }}
+      .story, .story--featured {{ grid-template-columns: 82px minmax(0, 1fr); gap: 11px; align-items: start; padding: 15px 0; }}
+      .story--featured {{ border-top: 1px solid var(--line); }}
+      .story--featured .story__image {{ aspect-ratio: 4 / 3; }}
+      .story--featured h3, .story h3 {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 16.5px; line-height: 1.32; font-weight: 800; margin-bottom: 6px; }}
+      .story h3 a {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-decoration: none; }}
+      .story h3 a:focus-visible {{ outline: 2px solid var(--accent); outline-offset: 2px; }}
+      .story p {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 5px; color: #4a4353; font-size: 13.5px; line-height: 1.45; }}
+      .story__meta {{ flex-wrap: nowrap; gap: 6px; margin-bottom: 5px; overflow: hidden; color: #7a7285; font-size: 10.5px; line-height: 1.3; white-space: nowrap; }}
+      .story__meta span {{ min-width: 0; overflow: hidden; text-overflow: ellipsis; }}
       .story__meta span:not(:last-child)::after {{ margin-left: 6px; }}
+      .story__sources {{ display: inline-block; max-width: 42%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }}
+      .story__sources a {{ display: none; margin-right: 0; }}
+      .story__sources a:first-child {{ display: inline; }}
+      .story__sources em {{ display: none; }}
       .story__image--logo {{ gap: 5px; padding: 8px; }}
       .story__image--logo span {{ font-size: 9px; }}
       .story__source-logo {{ width: 32px !important; height: 32px !important; border-radius: 8px; padding: 5px; }}
