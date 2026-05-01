@@ -7,6 +7,7 @@ on:
     paths-ignore:
       - "public/feed.xml"
       - "public/index.html"
+      - "public/reports/**"
       - "data/state.json"
   schedule:
     # KST 08:05-00:35 every 30 minutes.
@@ -42,6 +43,11 @@ on:
         required: false
         type: string
         default: ""
+      send_daily_report:
+        description: "Build a 24-hour HTML daily report and send a Telegram briefing link"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -92,6 +98,14 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m curator.main
 
+      - name: Build and send daily report
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]')) }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m curator.daily_report
+
       - name: Resend last Telegram briefing
         if: ${{ (github.event_name == 'workflow_dispatch' && inputs.resend_last_briefing) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[resend-last-briefing]')) }}
         env:
@@ -113,7 +127,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/feed.xml public/index.html data/state.json
+          git add public/feed.xml public/index.html public/reports data/state.json
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else

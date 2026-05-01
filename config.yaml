@@ -308,6 +308,9 @@ ai:
   daily_digest_enabled: false
   daily_digest_model: "openai/gpt-4.1"
   daily_digest_max_tokens: 220
+  daily_report_enabled: true
+  daily_report_model: "openai/gpt-4.1"
+  daily_report_max_tokens: 900
   hourly_digest_enabled: true
   hourly_digest_model: "openai/gpt-4.1"
   hourly_digest_max_tokens: 180
