@@ -653,7 +653,7 @@ def render_report_html(
         section_id = slugify(category, "section")
         category_sections.append(
             f"""
-        <section class="section" id="{escape(section_id, quote=True)}" data-section data-section-count="{len(category_stories)}">
+        <section class="section" id="{escape(section_id, quote=True)}" data-section data-section-label="{escape(category, quote=True)}" data-section-count="{len(category_stories)}">
           <div class="section__rule"></div>
           <div class="section__head">
             <h2>{escape(category)}</h2>
@@ -682,6 +682,10 @@ def render_report_html(
     ]
     side_story_links = "\n".join(
         f'<a data-nav-story data-nav-story-index="{index}" href="#{escape(str(story.get("id") or ""), quote=True)}">{escape(compact_text(str(story.get("title") or ""), max_chars=46))}</a>'
+        for index, story in enumerate(ordered_section_stories)
+    )
+    mobile_story_links = "\n".join(
+        f'<a data-mobile-nav-story data-nav-story-index="{index}" href="#{escape(str(story.get("id") or ""), quote=True)}">{escape(compact_text(str(story.get("title") or ""), max_chars=36))}</a>'
         for index, story in enumerate(ordered_section_stories)
     )
     start_label = escape(format_kst(start_at, str(config.get("timezone") or "Asia/Seoul")))
@@ -722,7 +726,7 @@ def render_report_html(
       margin: 0;
       color: var(--ink);
       background: var(--paper);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
       line-height: 1.58;
     }}
     a {{ color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }}
@@ -737,28 +741,30 @@ def render_report_html(
     .bside-logo--footer {{ margin-bottom: 10px; }}
     .edition {{ color: var(--muted); font-size: 13px; }}
     h1 {{ font-family: Georgia, "Times New Roman", serif; font-size: clamp(40px, 7vw, 78px); line-height: .96; letter-spacing: 0; margin: 0 0 16px; max-width: 940px; }}
-    .dek {{ max-width: 1080px; color: #322b3d; font-size: 18px; margin: 0; text-wrap: pretty; }}
+    .dek {{ max-width: 760px; color: #322b3d; font-size: 18px; line-height: 1.62; margin: 0; text-wrap: pretty; word-break: keep-all; overflow-wrap: break-word; }}
     .meta-strip {{ display: flex; flex-wrap: wrap; gap: 10px 18px; margin-top: 20px; color: var(--muted); font-size: 13px; }}
     .meta-strip strong {{ color: var(--accent-deep); }}
     .brief {{ display: grid; grid-template-columns: 220px 1fr; gap: 30px; border-bottom: 1px solid var(--ink); padding: 34px 0; }}
     .brief h2, .section h2 {{ font-family: Georgia, "Times New Roman", serif; font-size: 28px; line-height: 1.1; margin: 0; }}
     .brief__bullets {{ margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }}
-    .brief__bullets li {{ position: relative; padding-left: 18px; font-size: 16px; color: #2e2738; }}
+    .brief__bullets li {{ position: relative; padding-left: 18px; font-size: 16px; line-height: 1.68; color: #2e2738; word-break: keep-all; overflow-wrap: break-word; }}
     .brief__bullets li::before {{ content: ""; position: absolute; left: 0; top: .72em; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }}
     .toc {{ position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 92%, transparent); backdrop-filter: blur(8px); }}
     .chip {{ --progress: 0; position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; background: var(--surface); text-decoration: none; font-size: 13px; transition: border-color .18s ease, background .18s ease, color .18s ease; }}
     .chip::after {{ content: ""; position: absolute; left: 0; right: auto; bottom: 0; height: 3px; width: calc(var(--progress, 0) * 100%); background: var(--accent); transition: width .18s ease; }}
     .chip__progress {{ color: var(--accent); font-weight: 800; font-variant-numeric: tabular-nums; }}
     .chip.is-active {{ border-color: var(--accent); background: var(--accent-soft); color: var(--accent-deep); }}
+    .mobile-story-nav {{ display: none; }}
     .featured {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; border-bottom: 1px solid var(--ink); padding: 30px 0; align-items: start; }}
-    .section {{ padding: 34px 0 6px; }}
+    .section {{ padding: 34px 0 6px; scroll-margin-top: 92px; }}
     .section__rule {{ height: 3px; background: linear-gradient(90deg, var(--accent), var(--ink)); margin-bottom: 14px; }}
     .section__head {{ display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }}
     .section__head span {{ color: var(--muted); font-size: 13px; }}
     .story-list {{ margin-top: 18px; }}
     .story {{ display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 18px; min-width: 0; border-top: 1px solid var(--line); padding: 18px 0; scroll-margin-top: 92px; }}
     .story--featured {{ grid-template-columns: 1fr; min-width: 0; overflow: hidden; border-top: 0; padding-top: 0; }}
-    .story__body {{ min-width: 0; }}
+    .story__body {{ min-width: 0; max-width: 780px; }}
+    .story--featured .story__body {{ max-width: none; }}
     .story__image {{ display: block; aspect-ratio: 4 / 3; background: var(--accent-soft); overflow: hidden; border: 1px solid var(--line); }}
     .story__image img {{ width: 100%; height: 100%; object-fit: cover; display: block; }}
     .story__image--empty {{ display: grid; place-items: center; color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .08em; }}
@@ -766,14 +772,15 @@ def render_report_html(
     .story__image--logo span {{ font-size: 12px; font-weight: 900; letter-spacing: .02em; line-height: 1.2; overflow-wrap: anywhere; }}
     .story__source-logo {{ width: 42px !important; height: 42px !important; object-fit: contain !important; border-radius: 10px; background: #fff; padding: 6px; box-shadow: 0 4px 14px rgba(44, 27, 84, .10); }}
     .story--featured .story__image {{ aspect-ratio: 16 / 9; }}
-    .story__meta {{ display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; margin-bottom: 8px; }}
+    .story__meta {{ display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; line-height: 1.45; margin-bottom: 8px; }}
     .story__meta span:not(:last-child)::after {{ content: "·"; margin-left: 8px; color: var(--line); }}
     .story__sources a {{ margin-right: 8px; white-space: nowrap; color: var(--accent-deep); }}
     .story__sources em {{ font-style: normal; color: var(--muted); white-space: nowrap; }}
-    .story h3 {{ font-family: Georgia, "Times New Roman", serif; font-size: 24px; line-height: 1.16; margin: 0 0 8px; letter-spacing: 0; }}
-    .story h3 a {{ text-decoration-thickness: 1px; }}
-    .story--featured h3 {{ font-size: 24px; }}
-    .story p {{ margin: 0 0 10px; color: #34312d; }}
+    .story h3 {{ font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif; font-size: 22px; line-height: 1.32; margin: 0 0 8px; letter-spacing: 0; font-weight: 800; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
+    .story h3 a {{ text-decoration-thickness: 1px; text-underline-offset: 4px; }}
+    .story--featured h3 {{ font-size: 21px; line-height: 1.3; }}
+    .story p {{ max-width: 760px; margin: 0 0 10px; color: #3f3948; font-size: 15.5px; line-height: 1.68; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
+    .story--featured p {{ font-size: 15px; line-height: 1.62; }}
     details {{ grid-column: 1 / -1; margin-top: 10px; max-width: 100%; }}
     summary {{ cursor: pointer; color: var(--green); font-size: 13px; font-weight: 800; }}
     .link-table {{ margin-top: 10px; border: 1px solid var(--line); background: var(--surface); overflow: auto; }}
@@ -820,12 +827,23 @@ def render_report_html(
       .brief h2, .section h2 {{ font-size: 26px; }}
       .brief__bullets {{ gap: 9px; }}
       .brief__bullets li {{ font-size: 14.5px; line-height: 1.55; }}
-      .toc {{ gap: 8px; padding: 11px 0; }}
+      .toc {{ flex-wrap: nowrap; gap: 8px; margin-left: -14px; margin-right: -14px; overflow-x: auto; padding: 11px 14px; scrollbar-width: none; }}
+      .toc::-webkit-scrollbar {{ display: none; }}
       .chip {{ padding: 7px 10px; font-size: 12px; }}
+      .chip {{ flex: 0 0 auto; }}
+      .mobile-story-nav {{ position: sticky; top: 52px; z-index: 4; display: block; margin: 0 -14px 12px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 96%, transparent); box-shadow: 0 12px 22px rgba(44, 27, 84, .06); backdrop-filter: blur(8px); }}
+      .mobile-story-nav__status {{ display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 14px 5px; color: var(--muted); font-size: 11px; font-weight: 800; }}
+      .mobile-story-nav__status strong {{ min-width: 0; overflow: hidden; color: var(--accent-deep); text-overflow: ellipsis; white-space: nowrap; }}
+      .mobile-story-nav__status span {{ flex: 0 0 auto; color: var(--accent); font-variant-numeric: tabular-nums; }}
+      .mobile-story-nav__links {{ display: flex; gap: 7px; overflow-x: auto; padding: 0 14px 10px; scrollbar-width: none; }}
+      .mobile-story-nav__links::-webkit-scrollbar {{ display: none; }}
+      .mobile-story-nav__links a {{ display: none; flex: 0 0 min(64vw, 250px); border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; background: var(--surface); color: #5f566e; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; line-height: 1.25; }}
+      .mobile-story-nav__links a.is-near-active {{ display: block; }}
+      .mobile-story-nav__links a.is-active {{ border-color: var(--accent); background: var(--accent-soft); color: var(--accent-deep); font-weight: 800; }}
       .brief, .featured {{ grid-template-columns: 1fr; }}
       .brand-row {{ align-items: flex-start; flex-direction: column; }}
       .featured {{ gap: 0; padding: 22px 0; }}
-      .section {{ padding-top: 28px; }}
+      .section {{ padding-top: 28px; scroll-margin-top: 124px; }}
       .story-list {{ margin-top: 10px; }}
       .story, .story--featured {{ grid-template-columns: 82px minmax(0, 1fr); gap: 11px; align-items: start; padding: 15px 0; }}
       .story--featured {{ border-top: 1px solid var(--line); }}
@@ -905,6 +923,15 @@ def render_report_html(
     <nav class="toc" aria-label="report sections">
       {toc}
     </nav>
+    <div class="mobile-story-nav" aria-label="현재 섹션 기사 네비게이션">
+      <div class="mobile-story-nav__status">
+        <strong data-mobile-section-label>섹션</strong>
+        <span data-mobile-progress>0/0</span>
+      </div>
+      <div class="mobile-story-nav__links">
+        {mobile_story_links}
+      </div>
+    </div>
 
     <section class="featured" aria-label="top stories">
       {featured_html}
@@ -971,7 +998,11 @@ def render_report_html(
     const sections = Array.from(document.querySelectorAll('[data-section]'));
     const sectionStories = Array.from(document.querySelectorAll('[data-story][data-section-key]'));
     const categoryLinks = Array.from(document.querySelectorAll('[data-toc-section], [data-nav-section]'));
-    const storyLinks = Array.from(document.querySelectorAll('[data-nav-story]'));
+    const desktopStoryLinks = Array.from(document.querySelectorAll('[data-nav-story]'));
+    const mobileStoryLinks = Array.from(document.querySelectorAll('[data-mobile-nav-story]'));
+    const storyLinks = [...desktopStoryLinks, ...mobileStoryLinks];
+    const mobileSectionLabel = document.querySelector('[data-mobile-section-label]');
+    const mobileProgress = document.querySelector('[data-mobile-progress]');
 
     function sectionIdForLink(link) {{
       return link.dataset.tocSection || link.dataset.sectionTarget || (link.getAttribute('href') || '').replace('#', '');
@@ -990,14 +1021,19 @@ def render_report_html(
       }});
     }}
 
-    function updateStoryWindow(activeStoryId) {{
-      if (!storyLinks.length) return;
-      let activeIndex = storyLinks.findIndex((link) => link.getAttribute('href') === activeStoryId);
+    function updateStoryWindowForLinks(links, activeStoryId) {{
+      if (!links.length) return;
+      let activeIndex = links.findIndex((link) => link.getAttribute('href') === activeStoryId);
       if (activeIndex < 0) activeIndex = 0;
-      storyLinks.forEach((link, index) => {{
+      links.forEach((link, index) => {{
         const isNear = Math.abs(index - activeIndex) <= 4;
         link.classList.toggle('is-near-active', isNear);
       }});
+    }}
+
+    function updateStoryWindow(activeStoryId) {{
+      updateStoryWindowForLinks(desktopStoryLinks, activeStoryId);
+      updateStoryWindowForLinks(mobileStoryLinks, activeStoryId);
     }}
 
     function updateNavigation() {{
@@ -1015,6 +1051,7 @@ def render_report_html(
       }});
       const total = Number(activeSection.dataset.sectionCount || activeStory?.dataset.sectionTotal || activeStories.length || 0);
       const index = activeStory ? Number(activeStory.dataset.sectionIndex || 0) : 0;
+      const activeSectionLabel = activeSection.dataset.sectionLabel || '';
 
       categoryLinks.forEach((link) => {{
         const isActive = sectionIdForLink(link) === activeSectionId;
@@ -1022,6 +1059,8 @@ def render_report_html(
         if (!isActive) setSectionProgress(sectionIdForLink(link), 0, Number(link.querySelector('[data-progress-text]')?.textContent?.split('/')[1] || 0));
       }});
       setSectionProgress(activeSectionId, index, total);
+      if (mobileSectionLabel) mobileSectionLabel.textContent = activeSectionLabel;
+      if (mobileProgress) mobileProgress.textContent = `${{index}}/${{total}}`;
 
       const activeStoryId = activeStory ? `#${{activeStory.id}}` : '';
       storyLinks.forEach((link) => {{
@@ -1041,6 +1080,16 @@ def render_report_html(
     }}
     window.addEventListener('scroll', requestNavigationUpdate, {{ passive: true }});
     window.addEventListener('resize', requestNavigationUpdate);
+    categoryLinks.forEach((link) => {{
+      link.addEventListener('click', (event) => {{
+        const sectionId = sectionIdForLink(link);
+        const target = document.getElementById(sectionId);
+        if (!target) return;
+        event.preventDefault();
+        target.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+        if (history.pushState) history.pushState(null, '', `#${{sectionId}}`);
+      }});
+    }});
     updateNavigation();
   </script>
 </body>

@@ -62,6 +62,9 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "story__source-logo" in html
     assert "floating-nav" in html
     assert "floating-nav__meta" in html
+    assert "mobile-story-nav" in html
+    assert "data-mobile-nav-story" in html
+    assert "data-mobile-section-label" in html
     assert "발행일자" in html
     assert "수집기간" in html
     assert "다른 일자 보기" in html
@@ -71,9 +74,14 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "grid-template-columns: 82px minmax(0, 1fr)" in html
     assert "word-break: keep-all" in html
     assert "font-size: 16.5px" in html
+    assert "Apple SD Gothic Neo" in html
+    assert "max-width: 760px" in html
+    assert "line-height: 1.68" in html
+    assert "scroll-margin-top: 124px" in html
     assert "-webkit-line-clamp: 2" in html
     assert "data-toc-section" in html
     assert "data-nav-story-index" in html
+    assert "target.scrollIntoView" in html
     assert "data-section-index" in html
     assert "data-progress-text" in html
     assert "story__image--broken" in html
