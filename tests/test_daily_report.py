@@ -53,13 +53,13 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "Editor’s Brief" in html
     assert "brief__bullets" in html
     assert "NO IMAGE" in html
-    assert "More:" in html
     assert "floating-nav" in html
     assert "data-toc-section" in html
+    assert "data-nav-story-index" in html
     assert "data-section-index" in html
     assert "data-progress-text" in html
     assert "story__image--broken" in html
-    assert "<table>" in html
+    assert "기사 링크 1건 보기" not in html
     assert "한화솔루션 유상증자 정정요구" in html
 
 
@@ -75,6 +75,8 @@ def test_daily_report_telegram_message_links_to_report(tmp_path) -> None:
     report = build_daily_report(tmp_path, now)
     message = build_report_telegram_message(report)
 
-    assert "비사이드 자본시장 데일리" in message
-    assert "전체 리포트 보기" in message
+    assert "26년 5월 1일 주주·자본시장 데일리" in message
+    assert "전체 리포트 보기" not in message
+    assert "주요 기사" in message
+    assert "주주행동·경영권" in message
     assert "reports/2026-05-01.html" in message

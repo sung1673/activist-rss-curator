@@ -285,22 +285,22 @@ def fallback_report_review(stories: list[dict[str, object]]) -> str:
     lead_titles = shareholder or top_titles
     if lead_titles:
         paragraphs.append(
-            "이사회 책임·주주권 기준 재점화"
+            "주주행동·경영권 이슈는 이사회 책임과 공시 투명성을 둘러싼 투자자 보호 쟁점으로 이어지고 있습니다."
         )
     if valueup:
         paragraphs.append(
-            "밸류업·주주환원 공시 구체성 강조됨"
+            "밸류업과 주주환원 보도는 자사주·배당 정책의 실행 가능성과 공시 구체성이 핵심 변수로 부각됩니다."
         )
     if capital:
         paragraphs.append(
-            "자본시장 제도·공시 품질 점검 강화"
+            "자본시장 제도·공시 분야에서는 감독당국의 정정 요구와 시장 규율 강화 흐름을 함께 볼 필요가 있습니다."
         )
     if global_titles:
         paragraphs.append(
-            "해외 행동주의·Korea discount 추적 필요"
+            "해외·영문 보도는 행동주의 캠페인과 한국 시장 평가가 맞물리는 지점을 중심으로 추적할 만합니다."
         )
     if not paragraphs:
-        paragraphs.append("신규 발행 이슈 제한적")
+        paragraphs.append("신규 발행 이슈는 제한적이지만 기존 주주권·공시 이슈의 후속 보도 흐름은 계속 확인할 필요가 있습니다.")
     return "\n".join(f"- {paragraph}" for paragraph in paragraphs[:4])
 
 
@@ -342,27 +342,8 @@ def clean_report_bullets(text: str, *, max_bullets: int = 4) -> list[str]:
     return [compact_report_bullet(paragraph) for paragraph in clean_report_paragraphs(text, max_paragraphs=max_bullets)]
 
 
-def compact_report_bullet(text: str, max_chars: int = 58) -> str:
+def compact_report_bullet(text: str, max_chars: int = 118) -> str:
     bullet = re.sub(r"\s+", " ", str(text or "")).strip(" -•·.。")
-    replacements = (
-        (r"강화되었(?:습니다|다)?$", "강화"),
-        (r"강화됐(?:습니다|다)?$", "강화"),
-        (r"확대되었(?:습니다|다)?$", "확대"),
-        (r"확대됐(?:습니다|다)?$", "확대"),
-        (r"부각되었(?:습니다|다)?$", "부각"),
-        (r"부각됐(?:습니다|다)?$", "부각"),
-        (r"이어졌(?:습니다|다)?$", "지속"),
-        (r"나타났(?:습니다|다)?$", "확인"),
-        (r"확인됐(?:습니다|다)?$", "확인"),
-        (r"확인되었(?:습니다|다)?$", "확인"),
-        (r"쟁점화되고 있(?:습니다|다)?$", "쟁점화"),
-        (r"가속화되고 있(?:습니다|다)?$", "가속화 중"),
-        (r"커지고 있(?:습니다|다)?$", "확대 중"),
-        (r"필요가 있(?:습니다|다)?$", "필요"),
-        (r"(?:입니다|습니다|합니다|된다|됩니다|했다|했습니다|이다|다)$", ""),
-    )
-    for pattern, replacement in replacements:
-        bullet = re.sub(pattern, replacement, bullet).strip(" .")
     return compact_text(bullet, max_chars=max_chars)
 
 
@@ -386,11 +367,10 @@ def generate_report_review(
     user_prompt = (
         "아래 기사 묶음을 바탕으로 Telegram과 HTML 리포트 상단에 들어갈 상세 요약을 작성하세요.\n"
         "- bullet point 3~4개로 작성\n"
-        "- 각 bullet은 16~34자 안팎의 간결한 명사형/상태형 구문으로 작성\n"
-        "- 예: '주주권 행사 기준 재점화', '정책 가속화 중', '공시 품질 점검 강화', '해외 행동주의 압박 확대'\n"
+        "- 각 bullet은 45~85자 안팎의 한 문장으로 작성\n"
+        "- 예: '주주권 행사와 이사회 책임 이슈가 맞물리며 투자자 보호 논의가 다시 부각됩니다.'\n"
         "- 전체 흐름, 주요 사건, 제도/정책적 의미, 해외/영문 흐름을 균형 있게 반영\n"
         "- 전문 자본시장 기자의 톤으로, 정책·공시·주주권 의미를 해석하되 과장하지 않음\n"
-        "- '주목됩니다', '필요가 있습니다' 같은 긴 문장형 표현은 쓰지 않음\n"
         "- '기사 N건을 정리했다' 같은 운영 설명은 쓰지 않음\n"
         "- 특정 종목 매수/매도 판단은 쓰지 않음\n\n"
         f"기간: {format_kst(start_at, str(config.get('timezone') or 'Asia/Seoul'))} - {format_kst(end_at, str(config.get('timezone') or 'Asia/Seoul'))}\n\n"
@@ -477,6 +457,7 @@ def render_story(
     config: dict[str, object],
     *,
     featured: bool = False,
+    show_details: bool = True,
     section_id: str = "",
     section_index: int = 0,
     section_total: int = 0,
@@ -497,8 +478,25 @@ def render_story(
         else '<div class="story__image story__image--empty" aria-hidden="true"><span>NO IMAGE</span></div>'
     )
     normalized_links = [link for link in links if isinstance(link, dict)]
-    more_links = render_link_list(normalized_links, config, compact=True)
-    detail_links = render_link_list(normalized_links, config, compact=False)
+    has_grouped_links = len(normalized_links) > 1
+    more_links = render_link_list(normalized_links, config, compact=True) if has_grouped_links else ""
+    detail_links = render_link_list(normalized_links, config, compact=False) if has_grouped_links else ""
+    more_html = f'<div class="story__more"><strong>More:</strong> {more_links}</div>' if more_links else ""
+    details_html = (
+        f"""
+            <details>
+              <summary>기사 링크 {len(normalized_links)}건 보기</summary>
+              <div class="link-table">
+                <table>
+                  <thead><tr><th>일시</th><th>매체</th><th>기사</th></tr></thead>
+                  <tbody>{detail_links}</tbody>
+                </table>
+              </div>
+            </details>
+        """
+        if show_details and has_grouped_links
+        else ""
+    )
     featured_class = " story--featured" if featured else ""
     section_attrs = ""
     if section_id:
@@ -514,17 +512,9 @@ def render_story(
               <div class="story__meta"><span>{category}</span><span>{timestamp}</span><span>{sources}</span></div>
               <h3><a href="{primary_url}">{safe_title}</a></h3>
               {summary_html}
-              <div class="story__more"><strong>More:</strong> {more_links}</div>
+              {more_html}
             </div>
-            <details>
-              <summary>기사 링크 {len(links)}건 보기</summary>
-              <div class="link-table">
-                <table>
-                  <thead><tr><th>일시</th><th>매체</th><th>기사</th></tr></thead>
-                  <tbody>{detail_links}</tbody>
-                </table>
-              </div>
-            </details>
+            {details_html}
           </article>
     """
 
@@ -546,7 +536,7 @@ def render_report_html(
     review_html = "\n".join(f"<li>{escape(bullet)}</li>" for bullet in review_bullets)
     review_block_html = f'<ul class="brief__bullets">{review_html}</ul>' if review_html else ""
     featured_stories = stories[:3]
-    featured_html = "\n".join(render_story(story, config, featured=True) for story in featured_stories)
+    featured_html = "\n".join(render_story(story, config, featured=True, show_details=False) for story in featured_stories)
     category_sections = []
     for category in REPORT_CATEGORY_ORDER:
         category_stories = buckets.get(category, [])
@@ -577,9 +567,14 @@ def render_report_html(
         for category in REPORT_CATEGORY_ORDER
         if buckets.get(category)
     )
+    ordered_section_stories = [
+        story
+        for category in REPORT_CATEGORY_ORDER
+        for story in buckets.get(category, [])
+    ]
     side_story_links = "\n".join(
-        f'<a data-nav-story href="#{escape(str(story.get("id") or ""), quote=True)}">{escape(compact_text(str(story.get("title") or ""), max_chars=44))}</a>'
-        for story in stories
+        f'<a data-nav-story data-nav-story-index="{index}" href="#{escape(str(story.get("id") or ""), quote=True)}">{escape(compact_text(str(story.get("title") or ""), max_chars=46))}</a>'
+        for index, story in enumerate(ordered_section_stories)
     )
     start_label = escape(format_kst(start_at, str(config.get("timezone") or "Asia/Seoul")))
     end_label = escape(format_kst(end_at, str(config.get("timezone") or "Asia/Seoul")))
@@ -645,8 +640,9 @@ def render_report_html(
     .section__head {{ display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }}
     .section__head span {{ color: var(--muted); font-size: 13px; }}
     .story-list {{ margin-top: 18px; }}
-    .story {{ display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 18px; border-top: 1px solid var(--line); padding: 18px 0; scroll-margin-top: 92px; }}
-    .story--featured {{ grid-template-columns: 1fr; border-top: 0; padding-top: 0; }}
+    .story {{ display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 18px; min-width: 0; border-top: 1px solid var(--line); padding: 18px 0; scroll-margin-top: 92px; }}
+    .story--featured {{ grid-template-columns: 1fr; min-width: 0; overflow: hidden; border-top: 0; padding-top: 0; }}
+    .story__body {{ min-width: 0; }}
     .story__image {{ display: block; aspect-ratio: 4 / 3; background: var(--accent-soft); overflow: hidden; border: 1px solid var(--line); }}
     .story__image img {{ width: 100%; height: 100%; object-fit: cover; display: block; }}
     .story__image--empty {{ display: grid; place-items: center; color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .08em; }}
@@ -654,7 +650,7 @@ def render_report_html(
     .story__meta {{ display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; margin-bottom: 8px; }}
     .story__meta span:not(:last-child)::after {{ content: "·"; margin-left: 8px; color: var(--line); }}
     .story h3 {{ font-family: Georgia, "Times New Roman", serif; font-size: 24px; line-height: 1.16; margin: 0 0 8px; letter-spacing: 0; }}
-    .story--featured h3 {{ font-size: 26px; }}
+    .story--featured h3 {{ font-size: 24px; }}
     .story p {{ margin: 0 0 10px; color: #34312d; }}
     .story__more {{ font-size: 13px; color: var(--muted); }}
     .story__more strong {{ color: var(--green); }}
@@ -676,6 +672,7 @@ def render_report_html(
     .floating-nav a.is-active {{ border-left-color: var(--accent); color: var(--ink); background: var(--accent-soft); }}
     .floating-nav__stories {{ margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }}
     .floating-nav__stories a {{ display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .floating-nav__stories a:not(.is-near-active) {{ display: none; }}
     .top-button {{ position: fixed; right: 22px; bottom: 24px; z-index: 9; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: var(--accent); text-decoration: none; box-shadow: 0 12px 28px rgba(76, 38, 156, .26); }}
     .footer {{ margin-top: 48px; border-top: 2px solid var(--ink); padding-top: 20px; color: var(--muted); font-size: 13px; }}
     .footer__brand {{ color: var(--accent); font-weight: 900; letter-spacing: .06em; }}
@@ -796,6 +793,16 @@ def render_report_html(
       }});
     }}
 
+    function updateStoryWindow(activeStoryId) {{
+      if (!storyLinks.length) return;
+      let activeIndex = storyLinks.findIndex((link) => link.getAttribute('href') === activeStoryId);
+      if (activeIndex < 0) activeIndex = 0;
+      storyLinks.forEach((link, index) => {{
+        const isNear = Math.abs(index - activeIndex) <= 4;
+        link.classList.toggle('is-near-active', isNear);
+      }});
+    }}
+
     function updateNavigation() {{
       if (!sections.length) return;
       const marker = window.scrollY + Math.min(220, window.innerHeight * 0.34);
@@ -823,6 +830,7 @@ def render_report_html(
       storyLinks.forEach((link) => {{
         link.classList.toggle('is-active', link.getAttribute('href') === activeStoryId);
       }});
+      updateStoryWindow(activeStoryId);
     }}
 
     let navTicking = false;
@@ -932,20 +940,43 @@ def render_report_index(reports_dir: Path) -> str:
 """
 
 
-def build_report_telegram_message(report: dict[str, object]) -> str:
+def report_link_label(report: dict[str, object]) -> str:
     date_id = str(report.get("date_id") or "")
+    try:
+        parsed = datetime.strptime(date_id, "%Y-%m-%d")
+    except ValueError:
+        return "주주·자본시장 데일리"
+    return f"{parsed.year % 100:02d}년 {parsed.month}월 {parsed.day}일 주주·자본시장 데일리"
+
+
+def telegram_story_title(story: dict[str, object]) -> str:
+    return compact_text(str(story.get("title") or "제목 없음"), max_chars=62)
+
+
+def build_report_telegram_message(report: dict[str, object]) -> str:
     review = str(report.get("review") or "")
-    paragraphs = clean_report_paragraphs(review, max_paragraphs=4)
-    if not paragraphs:
-        paragraphs = clean_report_paragraphs(fallback_report_review(report.get("stories") if isinstance(report.get("stories"), list) else []))
+    stories = report.get("stories") if isinstance(report.get("stories"), list) else []
+    bullets = clean_report_bullets(review, max_bullets=3)
+    if not bullets:
+        bullets = clean_report_bullets(fallback_report_review(stories), max_bullets=3)
     report_url = str(report.get("report_url") or "")
-    stats = report.get("stats") if isinstance(report.get("stats"), dict) else {}
-    stats_line = f"이슈 {stats.get('stories', 0)}개 · 기사 {stats.get('articles', 0)}건"
-    lines = [f"<b>비사이드 자본시장 데일리 ({escape(date_id)})</b>", escape(stats_line), ""]
-    for paragraph in paragraphs[:4]:
-        lines.append(escape(paragraph))
+    link_label = report_link_label(report)
+    lines = [f"<b>{escape(link_label)}</b>"]
+    for bullet in bullets[:3]:
+        lines.append(f"• {escape(bullet)}")
+    if stories:
         lines.append("")
-    lines.append(html_link("전체 리포트 보기", report_url))
+        lines.append("<b>주요 기사</b>")
+        buckets = category_buckets([story for story in stories if isinstance(story, dict)])
+        for category in REPORT_CATEGORY_ORDER:
+            category_stories = buckets.get(category, [])[:4]
+            if not category_stories:
+                continue
+            lines.append(f"<b>{escape(category)}</b>")
+            for story in category_stories:
+                lines.append(f"• {escape(telegram_story_title(story))}")
+            lines.append("")
+    lines.append(f"자세한 기사는 {html_link(link_label, report_url)}에서 확인하세요.")
     return "\n".join(lines).strip()
 
 
