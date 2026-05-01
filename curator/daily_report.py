@@ -48,10 +48,6 @@ REPORT_CATEGORY_ORDER = [
 ]
 BSIDE_URL = "https://bside.ai"
 BSIDE_LOGO_URL = "https://bside.ai/images/icons/bside-logo-gray.svg"
-BSIDE_LOGO_PURPLE_FILTER = (
-    "brightness(0) saturate(100%) invert(31%) sepia(93%) saturate(2227%) "
-    "hue-rotate(249deg) brightness(88%) contrast(91%)"
-)
 
 
 def report_hours() -> int:
@@ -280,7 +276,7 @@ def bside_logo_html(extra_class: str = "") -> str:
     class_name = f"bside-logo {extra_class}".strip()
     return (
         f'<a class="{class_name}" href="{BSIDE_URL}" aria-label="BSIDE Korea 홈페이지">'
-        f'<img class="bside-logo__image" src="{BSIDE_LOGO_URL}" alt="BSIDE" loading="lazy" decoding="async">'
+        '<span class="bside-logo__image" aria-hidden="true"></span>'
         '<span class="bside-logo__label">DAILY NEWS</span>'
         '</a>'
     )
@@ -734,7 +730,7 @@ def render_report_html(
     .masthead {{ border-bottom: 2px solid var(--ink); padding-bottom: 22px; }}
     .brand-row {{ display: flex; justify-content: space-between; gap: 16px; align-items: baseline; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 24px; }}
     .bside-logo {{ display: inline-flex; align-items: center; gap: 9px; color: var(--accent); text-decoration: none; }}
-    .bside-logo__image {{ width: 86px; height: auto; display: block; filter: {BSIDE_LOGO_PURPLE_FILTER}; }}
+    .bside-logo__image {{ width: 86px; height: 23px; display: block; background: var(--accent); -webkit-mask: url("{BSIDE_LOGO_URL}") center / contain no-repeat; mask: url("{BSIDE_LOGO_URL}") center / contain no-repeat; }}
     .bside-logo__label {{ font-size: 11px; font-weight: 900; letter-spacing: .12em; color: var(--accent); }}
     .bside-logo:hover .bside-logo__label {{ color: var(--accent-deep); }}
     .bside-logo--top .bside-logo__image {{ width: 92px; }}
@@ -815,11 +811,15 @@ def render_report_html(
       .page {{ padding: 18px 16px 48px; }}
       .brief, .featured {{ grid-template-columns: 1fr; }}
       .brand-row {{ align-items: flex-start; flex-direction: column; }}
-      .story {{ grid-template-columns: 96px minmax(0, 1fr); gap: 12px; }}
+      .story {{ grid-template-columns: 78px minmax(0, 1fr); gap: 10px; padding: 14px 0; }}
       .story--featured {{ grid-template-columns: 1fr; }}
-      .story--featured h3, .story h3 {{ font-size: 19px; line-height: 1.22; }}
-      .story p {{ display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 8px; }}
-      .story__meta {{ font-size: 11px; }}
+      .story--featured h3, .story h3 {{ font-size: 17px; line-height: 1.24; margin-bottom: 6px; }}
+      .story p {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 6px; font-size: 14px; line-height: 1.45; }}
+      .story__meta {{ gap: 6px; margin-bottom: 5px; font-size: 10.5px; }}
+      .story__meta span:not(:last-child)::after {{ margin-left: 6px; }}
+      .story__image--logo {{ gap: 5px; padding: 8px; }}
+      .story__image--logo span {{ font-size: 9px; }}
+      .story__source-logo {{ width: 32px !important; height: 32px !important; border-radius: 8px; padding: 5px; }}
       summary {{ font-size: 12px; }}
       .link-table {{ border: 0; background: transparent; }}
       .link-table table {{ min-width: 0; }}
@@ -1094,7 +1094,7 @@ def render_report_index(feed_dir: Path) -> str:
     body {{ margin:0; color:var(--ink); background:var(--paper); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }}
     main {{ max-width:780px; margin:0 auto; padding:36px 20px 72px; }}
     .brand {{ display:inline-flex; align-items:center; gap:8px; color:var(--accent); font-weight:900; letter-spacing:.08em; font-size:13px; text-decoration:none; border-bottom:1px solid var(--line); padding-bottom:12px; }}
-    .bside-logo__image {{ width:92px; height:auto; display:block; filter:{BSIDE_LOGO_PURPLE_FILTER}; }}
+    .bside-logo__image {{ width:92px; height:24px; display:block; background:var(--accent); -webkit-mask:url("{BSIDE_LOGO_URL}") center / contain no-repeat; mask:url("{BSIDE_LOGO_URL}") center / contain no-repeat; }}
     .bside-logo__label {{ font-size:11px; }}
     h1 {{ font-family:Georgia,"Times New Roman",serif; font-size:clamp(40px,7vw,68px); line-height:1; margin:26px 0 10px; }}
     p {{ color:var(--muted); }}

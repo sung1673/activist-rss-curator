@@ -54,7 +54,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "bside-logo" in html
     assert "bside-logo__image" in html
     assert "https://bside.ai/images/icons/bside-logo-gray.svg" in html
-    assert "filter: brightness(0) saturate(100%)" in html
+    assert "background: var(--accent); -webkit-mask:" in html
     assert "Editor’s Brief" in html
     assert "brief__bullets" in html
     assert "story__image--logo" in html
@@ -67,6 +67,8 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "max-width: 1000px" in html
     assert "width: 210px" in html
     assert "@media (max-width: 1160px)" in html
+    assert "grid-template-columns: 78px minmax(0, 1fr)" in html
+    assert "-webkit-line-clamp: 2" in html
     assert "data-toc-section" in html
     assert "data-nav-story-index" in html
     assert "data-section-index" in html

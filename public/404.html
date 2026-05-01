@@ -47,9 +47,11 @@
     }
     .bside-logo__image {
       width: 92px;
-      height: auto;
+      height: 24px;
       display: block;
-      filter: brightness(0) saturate(100%) invert(31%) sepia(93%) saturate(2227%) hue-rotate(249deg) brightness(88%) contrast(91%);
+      background: var(--accent);
+      -webkit-mask: url("https://bside.ai/images/icons/bside-logo-gray.svg") center / contain no-repeat;
+      mask: url("https://bside.ai/images/icons/bside-logo-gray.svg") center / contain no-repeat;
     }
     .bside-logo__label {
       font-size: 11px;
@@ -126,7 +128,7 @@
   <main>
     <div class="brand-row">
       <a class="bside-logo" href="https://bside.ai" aria-label="BSIDE Korea 홈페이지">
-        <img class="bside-logo__image" src="https://bside.ai/images/icons/bside-logo-gray.svg" alt="BSIDE" loading="lazy" decoding="async">
+        <span class="bside-logo__image" aria-hidden="true"></span>
         <span class="bside-logo__label">DAILY NEWS</span>
       </a>
       <div class="edition">404</div>
