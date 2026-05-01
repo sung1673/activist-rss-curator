@@ -45,6 +45,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     stale_variant_dir = tmp_path / "public" / "feed" / "variants"
     stale_variant_dir.mkdir(parents=True)
     (stale_variant_dir / "forbes.html").write_text("stale", encoding="utf-8")
+    (stale_variant_dir / "social.html").write_text("stale", encoding="utf-8")
 
     report = build_daily_report(tmp_path, now)
     paths = write_report_files(report, tmp_path)
@@ -55,11 +56,10 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert (tmp_path / "public" / "feed" / "index.html").exists()
     assert (tmp_path / "public" / "feed" / "variants" / "memo.html").exists()
     assert (tmp_path / "public" / "feed" / "variants" / "board.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "social.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "thread.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "forum.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "signal.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "pulse.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "deck.html").exists()
     assert not (tmp_path / "public" / "feed" / "variants" / "forbes.html").exists()
+    assert not (tmp_path / "public" / "feed" / "variants" / "social.html").exists()
     assert 'href="https://bside.ai"' in html
     assert "bside-logo" in html
     assert "bside-logo__image" in html
@@ -101,15 +101,13 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "Layout Lab" in html
     assert "variants/memo.html" in html
     assert "variants/board.html" in html
-    assert "variants/social.html" in html
-    assert "variants/thread.html" in html
-    assert "variants/forum.html" in html
-    assert "variants/signal.html" in html
+    assert "variants/pulse.html" in html
+    assert "variants/deck.html" in html
     assert "layout-standard" in html
-    assert "layout-social" in html
-    assert "layout-thread" in html
-    assert "layout-forum" in html
-    assert "layout-signal" in html
+    assert "layout-pulse" in html
+    assert "layout-deck" in html
+    assert "30분 체크포인트" in html
+    assert "오늘의 리딩 맵" in html
     assert "is-mobile-context" in html
     assert "data-context-label" in html
     assert "bside-daily-read" in html
