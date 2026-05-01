@@ -38,6 +38,26 @@ def summary_text(summary_html: str) -> str:
     return BeautifulSoup(summary_html or "", "html.parser").get_text(" ", strip=True)
 
 
+def image_url_from_entry(entry: object, base_url: str) -> str | None:
+    for attr in ("media_thumbnail", "media_content", "links"):
+        value = getattr(entry, attr, None)
+        if isinstance(value, list):
+            for item in value:
+                if not isinstance(item, dict):
+                    continue
+                url = item.get("url") or item.get("href")
+                media_type = str(item.get("type") or "")
+                rel = str(item.get("rel") or "")
+                medium = str(item.get("medium") or "")
+                if not url:
+                    continue
+                if attr == "media_thumbnail":
+                    return urljoin(base_url, str(url))
+                if "image" in media_type or "thumbnail" in rel or medium == "image":
+                    return urljoin(base_url, str(url))
+    return None
+
+
 def article_from_entry(
     entry: object,
     config: dict[str, object],
@@ -64,6 +84,7 @@ def article_from_entry(
         "canonical_url_hash": canonical_url_hash(canonical),
         "title_hash": title_parts["title_hash"],
         "summary": summary,
+        "image_url": image_url_from_entry(entry, normalized_link),
         "feed_published_at": datetime_to_iso(feed_published_at),
         "feed_updated_at": datetime_to_iso(feed_updated_at),
         "article_published_at": None,
@@ -92,6 +113,22 @@ def canonical_href(html_text: str, base_url: str) -> str | None:
     content = og_url.get("content") if og_url else None
     if content:
         return urljoin(base_url, str(content))
+    return None
+
+
+def image_href(html_text: str, base_url: str) -> str | None:
+    soup = BeautifulSoup(html_text or "", "html.parser")
+    meta_candidates = (
+        {"property": "og:image"},
+        {"property": "og:image:url"},
+        {"name": "twitter:image"},
+        {"name": "twitter:image:src"},
+    )
+    for attrs in meta_candidates:
+        tag = soup.find("meta", attrs=attrs)
+        content = tag.get("content") if tag else None
+        if content:
+            return urljoin(base_url, str(content))
     return None
 
 
@@ -285,11 +322,14 @@ def enrich_article(
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
     article_published = extract_published_datetime_from_html(html_text, timezone_name)
     source = source_from_html(html_text, final_url)
+    image = image_href(html_text, final_url)
     enriched["canonical_url"] = normalized_canonical
     enriched["canonical_url_hash"] = canonical_url_hash(normalized_canonical)
     enriched["article_published_at"] = datetime_to_iso(article_published)
     if source:
         enriched["source"] = source
+    if image:
+        enriched["image_url"] = normalize_url(image)
     return enriched
 
 

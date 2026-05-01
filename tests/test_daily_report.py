@@ -47,9 +47,12 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
 
     assert paths[0].name == "2026-05-01.html"
     assert (tmp_path / "public" / "reports" / "latest.html").exists()
+    assert (tmp_path / "public" / "reports" / "index.html").exists()
     assert "BSIDE KOREA DAILY NEWS" in html
     assert "Editor’s Brief" in html
     assert "More:" in html
+    assert "floating-nav" in html
+    assert "<table>" in html
     assert "한화솔루션 유상증자 정정요구" in html
 
 

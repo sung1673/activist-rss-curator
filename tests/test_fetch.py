@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from curator.fetch import (
     apply_decoded_google_news_url,
     decode_google_news_links_in_state,
     fetch_google_alerts_articles,
     google_news_article_id,
     google_news_decoding_params,
+    image_href,
+    image_url_from_entry,
     parse_google_news_batch_response,
     source_from_html,
 )
@@ -43,6 +47,18 @@ def test_daum_page_source_is_extracted_from_site_name() -> None:
     html = '<meta property="og:site_name" content="Daum | 연합뉴스TV">'
 
     assert source_from_html(html, "https://v.daum.net/v/20260430221133810") == "연합뉴스TV"
+
+
+def test_image_href_extracts_og_image() -> None:
+    html = '<meta property="og:image" content="/thumb.jpg">'
+
+    assert image_href(html, "https://example.com/news/1") == "https://example.com/thumb.jpg"
+
+
+def test_image_url_from_entry_accepts_media_thumbnail_without_type() -> None:
+    entry = SimpleNamespace(media_thumbnail=[{"url": "/thumb.jpg"}])
+
+    assert image_url_from_entry(entry, "https://example.com/news/1") == "https://example.com/thumb.jpg"
 
 
 def test_fetch_respects_max_enrich_articles(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]

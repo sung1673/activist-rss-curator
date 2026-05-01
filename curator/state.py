@@ -109,6 +109,7 @@ def article_record(article: dict[str, object], status: str, now: datetime, reaso
         "reason": reason,
         "relevance_level": article.get("relevance_level") or None,
         "source": article.get("source") or None,
+        "image_url": article.get("image_url") or None,
         "feed_name": article.get("feed_name") or None,
         "feed_category": article.get("feed_category") or None,
         "relevance_keywords": article.get("relevance_keywords") or [],
