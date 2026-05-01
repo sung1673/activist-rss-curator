@@ -210,7 +210,7 @@
     <header class="masthead">
       <div class="brand-row">
         <div class="brand">BSIDE KOREA DAILY NEWS</div>
-        <div class="edition">2026-04-30 14:45 KST - 2026-05-01 14:45 KST</div>
+        <div class="edition">2026-04-30 14:53 KST - 2026-05-01 14:53 KST</div>
       </div>
       <h1>주주·자본시장 데일리</h1>
       <p class="dek">건강한 자본시장을 위한 주주행동, 지배구조, 밸류업, 자본시장 제도 뉴스를 하루 단위로 묶어 읽기 쉽게 정리했습니다.</p>
@@ -419,7 +419,7 @@
           </article>
     
           <article class="story" id="story-26" data-story data-section-key="주주행동-경영권" data-section-index="10" data-section-total="23">
-            <div class="story__image story__image--empty" aria-hidden="true"><span>NO IMAGE</span></div>
+            <a class="story__image" href="https://www.thevaluenews.co.kr/news/198456" aria-label="기사 이미지 보기"><img src="https://www.thevaluenews.co.kr/data/cheditor4/2604/35da5d330025d354f184f25c0ba496c62bd8bd18.png" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.30 15:55</span><span>THEVALUENEWS</span></div>
               <h3><a href="https://www.thevaluenews.co.kr/news/198456">우리금융-동양생명 주식교환 추진…대주주·소액주주 간 형평성 논란 점화</a></h3>
@@ -551,7 +551,7 @@
           </article>
     
           <article class="story" id="story-38" data-story data-section-key="주주행동-경영권" data-section-index="22" data-section-total="23">
-            <a class="story__image" href="https://www.kyeonggi.com/article/20260429580485" aria-label="기사 이미지 보기"><img src="https://ypzxxdrj8709.edge.naverncp.com/data2/content/image/2026/04/29/.cache/512/20260429580486.jpg?v=20260501144623" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
+            <a class="story__image" href="https://www.kyeonggi.com/article/20260429580485" aria-label="기사 이미지 보기"><img src="https://ypzxxdrj8709.edge.naverncp.com/data2/content/image/2026/04/29/.cache/512/20260429580486.jpg?v=20260501145324" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>
             <div class="story__body">
               <div class="story__meta"><span>주주행동·경영권</span><span>04.29 10:35</span><span>KYEONGGI</span></div>
               <h3><a href="https://www.kyeonggi.com/article/20260429580485">실체 불분명한 고려아연 소액주주연합... 경영권 분쟁 속 기획 고발 의혹</a></h3>
@@ -1392,6 +1392,10 @@
         container.classList.add('story__image--empty', 'story__image--broken');
         container.innerHTML = noImageMarkup;
       };
+      const fallbackTimer = window.setTimeout(() => {
+        if (!image.complete || image.naturalWidth === 0) markBroken();
+      }, 8000);
+      image.addEventListener('load', () => window.clearTimeout(fallbackTimer), { once: true });
       image.addEventListener('error', markBroken, { once: true });
       if (image.complete && image.naturalWidth === 0) markBroken();
     });

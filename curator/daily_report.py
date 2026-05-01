@@ -767,6 +767,10 @@ def render_report_html(
         container.classList.add('story__image--empty', 'story__image--broken');
         container.innerHTML = noImageMarkup;
       }};
+      const fallbackTimer = window.setTimeout(() => {{
+        if (!image.complete || image.naturalWidth === 0) markBroken();
+      }}, 8000);
+      image.addEventListener('load', () => window.clearTimeout(fallbackTimer), {{ once: true }});
       image.addEventListener('error', markBroken, {{ once: true }});
       if (image.complete && image.naturalWidth === 0) markBroken();
     }});
