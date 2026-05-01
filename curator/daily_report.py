@@ -696,6 +696,7 @@ def render_report_html(
     description = compact_text(" ".join(review_bullets), max_chars=180)
     canonical_url = escape(report_url, quote=True)
     header_logo = bside_logo_html("bside-logo--top")
+    nav_logo = bside_logo_html("bside-logo--nav")
     footer_logo = bside_logo_html("bside-logo--footer")
     return f"""<!doctype html>
 <html lang="ko">
@@ -740,28 +741,34 @@ def render_report_html(
     .bside-logo--top .bside-logo__image {{ width: 92px; }}
     .bside-logo--footer {{ margin-bottom: 10px; }}
     .edition {{ color: var(--muted); font-size: 13px; }}
-    h1 {{ font-family: Georgia, "Times New Roman", serif; font-size: clamp(40px, 7vw, 78px); line-height: .96; letter-spacing: 0; margin: 0 0 16px; max-width: 940px; }}
-    .dek {{ max-width: 760px; color: #322b3d; font-size: 18px; line-height: 1.62; margin: 0; text-wrap: pretty; word-break: keep-all; overflow-wrap: break-word; }}
+    h1 {{ font-family: Georgia, "Times New Roman", serif; font-size: clamp(36px, 5.8vw, 64px); line-height: 1; letter-spacing: 0; margin: 0 0 14px; max-width: 880px; }}
+    .dek {{ max-width: 700px; color: #322b3d; font-size: 15.5px; line-height: 1.6; margin: 0; text-wrap: pretty; word-break: keep-all; overflow-wrap: break-word; }}
     .meta-strip {{ display: flex; flex-wrap: wrap; gap: 10px 18px; margin-top: 20px; color: var(--muted); font-size: 13px; }}
     .meta-strip strong {{ color: var(--accent-deep); }}
-    .brief {{ display: grid; grid-template-columns: 220px 1fr; gap: 30px; border-bottom: 1px solid var(--ink); padding: 34px 0; }}
-    .brief h2, .section h2 {{ font-family: Georgia, "Times New Roman", serif; font-size: 28px; line-height: 1.1; margin: 0; }}
-    .brief__bullets {{ margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }}
-    .brief__bullets li {{ position: relative; padding-left: 18px; font-size: 16px; line-height: 1.68; color: #2e2738; word-break: keep-all; overflow-wrap: break-word; }}
-    .brief__bullets li::before {{ content: ""; position: absolute; left: 0; top: .72em; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }}
-    .toc {{ position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 92%, transparent); backdrop-filter: blur(8px); }}
-    .chip {{ --progress: 0; position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; background: var(--surface); text-decoration: none; font-size: 13px; transition: border-color .18s ease, background .18s ease, color .18s ease; }}
+    .brief {{ display: grid; grid-template-columns: 150px 1fr; gap: 22px; border-bottom: 1px solid var(--ink); padding: 18px 0; }}
+    .brief h2 {{ font-family: Georgia, "Times New Roman", serif; font-size: 20px; line-height: 1.1; margin: 0; }}
+    .section h2 {{ font-family: Georgia, "Times New Roman", serif; font-size: 26px; line-height: 1.1; margin: 0; }}
+    .brief__bullets {{ margin: 0; padding: 0; list-style: none; display: grid; gap: 5px; }}
+    .brief__bullets li {{ position: relative; padding-left: 13px; font-size: 12.5px; line-height: 1.42; color: #2e2738; word-break: keep-all; overflow-wrap: break-word; }}
+    .brief__bullets li::before {{ content: ""; position: absolute; left: 0; top: .72em; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }}
+    .toc {{ position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 13px; padding: 10px 0; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 94%, transparent); backdrop-filter: blur(8px); }}
+    .toc__brand {{ display: flex; align-items: center; flex: 0 0 auto; padding-right: 2px; }}
+    .bside-logo--nav {{ gap: 7px; }}
+    .bside-logo--nav .bside-logo__image {{ width: 66px; }}
+    .bside-logo--nav .bside-logo__label {{ font-size: 9px; letter-spacing: .14em; white-space: nowrap; }}
+    .toc__chips {{ display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 8px; min-width: 0; }}
+    .chip {{ --progress: 0; position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; background: var(--surface); text-decoration: none; font-size: 12px; transition: border-color .18s ease, background .18s ease, color .18s ease; }}
     .chip::after {{ content: ""; position: absolute; left: 0; right: auto; bottom: 0; height: 3px; width: calc(var(--progress, 0) * 100%); background: var(--accent); transition: width .18s ease; }}
     .chip__progress {{ color: var(--accent); font-weight: 800; font-variant-numeric: tabular-nums; }}
     .chip.is-active {{ border-color: var(--accent); background: var(--accent-soft); color: var(--accent-deep); }}
     .mobile-story-nav {{ display: none; }}
-    .featured {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; border-bottom: 1px solid var(--ink); padding: 30px 0; align-items: start; }}
+    .featured {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; border-bottom: 1px solid var(--ink); padding: 24px 0; align-items: start; }}
     .section {{ padding: 34px 0 6px; scroll-margin-top: 92px; }}
     .section__rule {{ height: 3px; background: linear-gradient(90deg, var(--accent), var(--ink)); margin-bottom: 14px; }}
     .section__head {{ display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }}
     .section__head span {{ color: var(--muted); font-size: 13px; }}
-    .story-list {{ margin-top: 18px; }}
-    .story {{ display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 18px; min-width: 0; border-top: 1px solid var(--line); padding: 18px 0; scroll-margin-top: 92px; }}
+    .story-list {{ margin-top: 16px; }}
+    .story {{ display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 16px; min-width: 0; border-top: 1px solid var(--line); padding: 15px 0; scroll-margin-top: 92px; }}
     .story--featured {{ grid-template-columns: 1fr; min-width: 0; overflow: hidden; border-top: 0; padding-top: 0; }}
     .story__body {{ min-width: 0; max-width: 780px; }}
     .story--featured .story__body {{ max-width: none; }}
@@ -772,15 +779,15 @@ def render_report_html(
     .story__image--logo span {{ font-size: 12px; font-weight: 900; letter-spacing: .02em; line-height: 1.2; overflow-wrap: anywhere; }}
     .story__source-logo {{ width: 42px !important; height: 42px !important; object-fit: contain !important; border-radius: 10px; background: #fff; padding: 6px; box-shadow: 0 4px 14px rgba(44, 27, 84, .10); }}
     .story--featured .story__image {{ aspect-ratio: 16 / 9; }}
-    .story__meta {{ display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; line-height: 1.45; margin-bottom: 8px; }}
+    .story__meta {{ display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 11px; line-height: 1.42; margin-bottom: 6px; }}
     .story__meta span:not(:last-child)::after {{ content: "·"; margin-left: 8px; color: var(--line); }}
     .story__sources a {{ margin-right: 8px; white-space: nowrap; color: var(--accent-deep); }}
     .story__sources em {{ font-style: normal; color: var(--muted); white-space: nowrap; }}
-    .story h3 {{ font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif; font-size: 22px; line-height: 1.32; margin: 0 0 8px; letter-spacing: 0; font-weight: 800; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
+    .story h3 {{ font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif; font-size: 18.5px; line-height: 1.34; margin: 0 0 6px; letter-spacing: 0; font-weight: 800; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
     .story h3 a {{ text-decoration-thickness: 1px; text-underline-offset: 4px; }}
-    .story--featured h3 {{ font-size: 21px; line-height: 1.3; }}
-    .story p {{ max-width: 760px; margin: 0 0 10px; color: #3f3948; font-size: 15.5px; line-height: 1.68; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
-    .story--featured p {{ font-size: 15px; line-height: 1.62; }}
+    .story--featured h3 {{ font-size: 18.5px; line-height: 1.32; }}
+    .story p {{ max-width: 700px; margin: 0 0 8px; color: #3f3948; font-size: 14px; line-height: 1.58; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
+    .story--featured p {{ font-size: 13.5px; line-height: 1.55; }}
     details {{ grid-column: 1 / -1; margin-top: 10px; max-width: 100%; }}
     summary {{ cursor: pointer; color: var(--green); font-size: 13px; font-weight: 800; }}
     .link-table {{ margin-top: 10px; border: 1px solid var(--line); background: var(--surface); overflow: auto; }}
@@ -823,12 +830,18 @@ def render_report_html(
       .dek, .brief__bullets li, .story h3, .story p {{ word-break: keep-all; overflow-wrap: break-word; }}
       .dek {{ font-size: 16px; line-height: 1.55; }}
       .meta-strip {{ gap: 8px 13px; font-size: 12px; }}
-      .brief {{ gap: 16px; padding: 26px 0; }}
-      .brief h2, .section h2 {{ font-size: 26px; }}
+      .brief {{ gap: 14px; padding: 18px 0; }}
+      .brief h2 {{ font-size: 22px; }}
+      .section h2 {{ font-size: 26px; }}
       .brief__bullets {{ gap: 9px; }}
       .brief__bullets li {{ font-size: 14.5px; line-height: 1.55; }}
-      .toc {{ flex-wrap: nowrap; gap: 8px; margin-left: -14px; margin-right: -14px; overflow-x: auto; padding: 11px 14px; scrollbar-width: none; }}
-      .toc::-webkit-scrollbar {{ display: none; }}
+      .toc {{ flex-wrap: nowrap; gap: 8px; margin-left: -14px; margin-right: -14px; overflow: hidden; padding: 9px 14px; }}
+      .toc__brand {{ padding-right: 0; }}
+      .bside-logo--nav {{ gap: 5px; }}
+      .bside-logo--nav .bside-logo__image {{ width: 56px; }}
+      .bside-logo--nav .bside-logo__label {{ font-size: 8px; letter-spacing: .1em; }}
+      .toc__chips {{ flex-wrap: nowrap; gap: 8px; overflow-x: auto; scrollbar-width: none; }}
+      .toc__chips::-webkit-scrollbar {{ display: none; }}
       .chip {{ padding: 7px 10px; font-size: 12px; }}
       .chip {{ flex: 0 0 auto; }}
       .mobile-story-nav {{ position: sticky; top: 52px; z-index: 4; display: block; margin: 0 -14px 12px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 96%, transparent); box-shadow: 0 12px 22px rgba(44, 27, 84, .06); backdrop-filter: blur(8px); }}
@@ -921,7 +934,8 @@ def render_report_html(
     </section>
 
     <nav class="toc" aria-label="report sections">
-      {toc}
+      <div class="toc__brand">{nav_logo}</div>
+      <div class="toc__chips">{toc}</div>
     </nav>
     <div class="mobile-story-nav" aria-label="현재 섹션 기사 네비게이션">
       <div class="mobile-story-nav__status">

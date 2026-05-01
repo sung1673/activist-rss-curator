@@ -62,6 +62,9 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "story__source-logo" in html
     assert "floating-nav" in html
     assert "floating-nav__meta" in html
+    assert "toc__brand" in html
+    assert "bside-logo--nav" in html
+    assert "toc__chips" in html
     assert "mobile-story-nav" in html
     assert "data-mobile-nav-story" in html
     assert "data-mobile-section-label" in html
@@ -75,8 +78,10 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "word-break: keep-all" in html
     assert "font-size: 16.5px" in html
     assert "Apple SD Gothic Neo" in html
-    assert "max-width: 760px" in html
-    assert "line-height: 1.68" in html
+    assert "max-width: 700px" in html
+    assert "font-size: 18.5px" in html
+    assert "font-size: 12.5px" in html
+    assert "line-height: 1.58" in html
     assert "scroll-margin-top: 124px" in html
     assert "-webkit-line-clamp: 2" in html
     assert "data-toc-section" in html
