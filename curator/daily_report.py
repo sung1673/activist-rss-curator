@@ -637,6 +637,7 @@ def render_report_html(
     report_url: str,
     duplicate_records: list[dict[str, object]],
     clusters: list[dict[str, object]],
+    archive_links_html: str = "",
 ) -> str:
     stats = report_stats(stories, clusters, duplicate_records)
     buckets = category_buckets(stories)
@@ -690,7 +691,7 @@ def render_report_html(
     )
     start_label = escape(format_kst(start_at, str(config.get("timezone") or "Asia/Seoul")))
     end_label = escape(format_kst(end_at, str(config.get("timezone") or "Asia/Seoul")))
-    archive_url = "index.html"
+    archive_links_html = archive_links_html or '<span class="archive-panel__empty">아직 발행된 데일리가 없습니다.</span>'
     report_date_label = escape(date_id)
     title = f"비사이드 자본시장 데일리 - {date_id}"
     description = compact_text(" ".join(review_bullets), max_chars=180)
@@ -745,6 +746,17 @@ def render_report_html(
     .dek {{ max-width: 700px; color: #322b3d; font-size: 15.5px; line-height: 1.6; margin: 0; text-wrap: pretty; word-break: keep-all; overflow-wrap: break-word; }}
     .meta-strip {{ display: flex; flex-wrap: wrap; gap: 10px 18px; margin-top: 20px; color: var(--muted); font-size: 13px; }}
     .meta-strip strong {{ color: var(--accent-deep); }}
+    .archive-trigger {{ appearance: none; border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }}
+    .archive-panel[hidden] {{ display: none !important; }}
+    .archive-panel {{ position: fixed; top: 78px; right: 24px; z-index: 20; width: min(280px, calc(100vw - 32px)); }}
+    .archive-panel__card {{ border: 1px solid var(--line); background: rgba(255,255,255,.98); box-shadow: 0 18px 48px rgba(44, 27, 84, .16); padding: 10px; max-height: calc(100vh - 108px); overflow: auto; }}
+    .archive-panel__head {{ display: flex; justify-content: space-between; gap: 12px; padding: 4px 4px 8px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 900; letter-spacing: .04em; }}
+    .archive-panel__close {{ appearance: none; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; }}
+    .archive-panel__links {{ display: grid; gap: 4px; padding-top: 8px; }}
+    .archive-panel__link {{ display: flex; justify-content: space-between; gap: 12px; border-radius: 8px; padding: 8px 9px; color: var(--ink); text-decoration: none; font-size: 13px; }}
+    .archive-panel__link:hover, .archive-panel__link.is-current {{ background: var(--accent-soft); color: var(--accent-deep); }}
+    .archive-panel__link span {{ color: var(--muted); font-size: 11px; }}
+    .archive-panel__empty {{ padding: 8px 4px; color: var(--muted); font-size: 13px; }}
     .brief {{ display: grid; grid-template-columns: 150px 1fr; gap: 22px; border-bottom: 1px solid var(--ink); padding: 18px 0; }}
     .brief h2 {{ font-family: Georgia, "Times New Roman", serif; font-size: 20px; line-height: 1.1; margin: 0; }}
     .section h2 {{ font-family: Georgia, "Times New Roman", serif; font-size: 26px; line-height: 1.1; margin: 0; }}
@@ -762,12 +774,19 @@ def render_report_html(
     .chip__progress {{ color: var(--accent); font-weight: 800; font-variant-numeric: tabular-nums; }}
     .chip.is-active {{ border-color: var(--accent); background: var(--accent-soft); color: var(--accent-deep); }}
     .mobile-story-nav {{ display: none; }}
-    .featured {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; border-bottom: 1px solid var(--ink); padding: 24px 0; align-items: start; }}
+    .featured {{ display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, .95fr); gap: 0 24px; border-bottom: 1px solid var(--ink); padding: 24px 0; align-items: stretch; }}
+    .featured .story--featured:first-child {{ grid-row: span 2; border-right: 1px solid var(--line); padding-right: 24px; }}
+    .featured .story--featured:nth-child(n+2) {{ display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 14px; border-top: 1px solid var(--line); padding: 14px 0 0; }}
+    .featured .story--featured:nth-child(2) {{ border-top: 0; padding-top: 0; }}
+    .featured .story--featured:nth-child(n+2) .story__image {{ aspect-ratio: 4 / 3; }}
+    .featured .story--featured:nth-child(n+2) h3 {{ font-size: 17px; }}
+    .featured .story--featured:nth-child(n+2) p {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }}
     .section {{ padding: 34px 0 6px; scroll-margin-top: 92px; }}
     .section__rule {{ height: 3px; background: linear-gradient(90deg, var(--accent), var(--ink)); margin-bottom: 14px; }}
     .section__head {{ display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }}
     .section__head span {{ color: var(--muted); font-size: 13px; }}
-    .story-list {{ margin-top: 16px; }}
+    .story-list {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 26px; margin-top: 16px; }}
+    .story-list .story:first-child {{ grid-column: 1 / -1; grid-template-columns: 150px minmax(0, 1fr); }}
     .story {{ display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 16px; min-width: 0; border-top: 1px solid var(--line); padding: 15px 0; scroll-margin-top: 92px; }}
     .story--featured {{ grid-template-columns: 1fr; min-width: 0; overflow: hidden; border-top: 0; padding-top: 0; }}
     .story__body {{ min-width: 0; max-width: 780px; }}
@@ -785,6 +804,10 @@ def render_report_html(
     .story__sources em {{ font-style: normal; color: var(--muted); white-space: nowrap; }}
     .story h3 {{ font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif; font-size: 18.5px; line-height: 1.34; margin: 0 0 6px; letter-spacing: 0; font-weight: 800; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
     .story h3 a {{ text-decoration-thickness: 1px; text-underline-offset: 4px; }}
+    .story.is-read {{ opacity: .72; }}
+    .story.is-read .story__image {{ filter: grayscale(.2); opacity: .82; }}
+    .story.is-read h3 a {{ color: var(--muted); }}
+    .story.is-read h3 a::after {{ content: "읽음"; display: inline-block; margin-left: 7px; border: 1px solid var(--line); border-radius: 999px; padding: 1px 5px; color: var(--muted); font-size: 10px; font-weight: 800; line-height: 1.2; vertical-align: .15em; }}
     .story--featured h3 {{ font-size: 18.5px; line-height: 1.32; }}
     .story p {{ max-width: 700px; margin: 0 0 8px; color: #3f3948; font-size: 14px; line-height: 1.58; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
     .story--featured p {{ font-size: 13.5px; line-height: 1.55; }}
@@ -803,7 +826,7 @@ def render_report_html(
     .floating-nav__meta span {{ color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .05em; }}
     .floating-nav__meta strong {{ color: var(--ink); font-size: 12px; line-height: 1.25; }}
     .floating-nav__meta em {{ color: var(--muted); font-size: 11px; font-style: normal; line-height: 1.25; }}
-    .floating-nav__archive {{ border: 1px solid var(--accent); border-radius: 999px; background: var(--accent-soft); color: var(--accent-deep) !important; font-weight: 800; justify-content: center !important; padding: 7px 10px !important; }}
+    .floating-nav__archive {{ display: flex; align-items: center; justify-content: center; border: 1px solid var(--accent); border-radius: 999px; background: var(--accent-soft); color: var(--accent-deep) !important; font-weight: 800; padding: 7px 10px !important; text-decoration: none; }}
     .floating-nav h2 {{ font-size: 11px; margin: 0 0 7px; color: var(--accent-deep); letter-spacing: .04em; }}
     .floating-nav a {{ display: flex; align-items: baseline; justify-content: space-between; gap: 10px; text-decoration: none; border-left: 2px solid transparent; padding: 6px 8px; color: var(--muted); font-size: 12px; transition: border-color .18s ease, background .18s ease, color .18s ease; }}
     .floating-nav .nav-label {{ min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
@@ -811,6 +834,7 @@ def render_report_html(
     .floating-nav a.is-active {{ border-left-color: var(--accent); color: var(--ink); background: var(--accent-soft); }}
     .floating-nav__stories {{ margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }}
     .floating-nav__stories a {{ display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .floating-nav__stories a.is-read {{ color: #9a93a5; }}
     .floating-nav__stories a:not(.is-near-active) {{ display: none; }}
     .top-button {{ position: fixed; right: 22px; bottom: 24px; z-index: 9; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: var(--accent); text-decoration: none; box-shadow: 0 12px 28px rgba(76, 38, 156, .26); }}
     .footer {{ margin-top: 48px; border-top: 2px solid var(--ink); padding-top: 20px; color: var(--muted); font-size: 13px; }}
@@ -844,20 +868,27 @@ def render_report_html(
       .toc__chips::-webkit-scrollbar {{ display: none; }}
       .chip {{ padding: 7px 10px; font-size: 12px; }}
       .chip {{ flex: 0 0 auto; }}
+      .archive-panel {{ top: 58px; left: 14px; right: 14px; width: auto; }}
+      .archive-panel__card {{ max-height: 54vh; }}
       .mobile-story-nav {{ position: sticky; top: 52px; z-index: 4; display: block; margin: 0 -14px 12px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 96%, transparent); box-shadow: 0 12px 22px rgba(44, 27, 84, .06); backdrop-filter: blur(8px); }}
       .mobile-story-nav__status {{ display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 14px 5px; color: var(--muted); font-size: 11px; font-weight: 800; }}
       .mobile-story-nav__status strong {{ min-width: 0; overflow: hidden; color: var(--accent-deep); text-overflow: ellipsis; white-space: nowrap; }}
       .mobile-story-nav__status span {{ flex: 0 0 auto; color: var(--accent); font-variant-numeric: tabular-nums; }}
-      .mobile-story-nav__links {{ display: flex; gap: 7px; overflow-x: auto; padding: 0 14px 10px; scrollbar-width: none; }}
-      .mobile-story-nav__links::-webkit-scrollbar {{ display: none; }}
-      .mobile-story-nav__links a {{ display: none; flex: 0 0 min(64vw, 250px); border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; background: var(--surface); color: #5f566e; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; line-height: 1.25; }}
-      .mobile-story-nav__links a.is-near-active {{ display: block; }}
+      .mobile-story-nav__links {{ display: grid; gap: 4px; padding: 0 14px 10px; }}
+      .mobile-story-nav__links a {{ display: none; min-width: 0; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; background: var(--surface); color: #5f566e; text-decoration: none; overflow: hidden; font-size: 11.5px; line-height: 1.25; }}
+      .mobile-story-nav__links a::before {{ content: attr(data-context-label); flex: 0 0 28px; color: var(--muted); font-size: 9.5px; font-weight: 900; letter-spacing: .02em; }}
+      .mobile-story-nav__links a.is-mobile-context {{ display: flex; }}
       .mobile-story-nav__links a.is-active {{ border-color: var(--accent); background: var(--accent-soft); color: var(--accent-deep); font-weight: 800; }}
+      .mobile-story-nav__links a.is-active::before {{ color: var(--accent); }}
+      .mobile-story-nav__links a.is-read:not(.is-active) {{ color: #9a93a5; background: #f8f5fc; }}
       .brief, .featured {{ grid-template-columns: 1fr; }}
       .brand-row {{ align-items: flex-start; flex-direction: column; }}
       .featured {{ gap: 0; padding: 22px 0; }}
+      .featured .story--featured:first-child {{ grid-row: auto; border-right: 0; padding-right: 0; }}
+      .featured .story--featured:nth-child(n+2) {{ grid-template-columns: 82px minmax(0, 1fr); gap: 11px; padding: 15px 0; }}
       .section {{ padding-top: 28px; scroll-margin-top: 124px; }}
-      .story-list {{ margin-top: 10px; }}
+      .story-list {{ display: block; margin-top: 10px; }}
+      .story-list .story:first-child {{ grid-column: auto; grid-template-columns: 82px minmax(0, 1fr); }}
       .story, .story--featured {{ grid-template-columns: 82px minmax(0, 1fr); gap: 11px; align-items: start; padding: 15px 0; }}
       .story--featured {{ border-top: 1px solid var(--line); }}
       .story--featured .story__image {{ aspect-ratio: 4 / 3; }}
@@ -902,7 +933,7 @@ def render_report_html(
         <strong>{start_label}</strong>
         <em>{end_label}</em>
       </div>
-      <a class="floating-nav__archive" href="{archive_url}">다른 일자 보기</a>
+      <button class="archive-trigger floating-nav__archive" type="button" data-archive-toggle aria-expanded="false" aria-controls="archive-panel">다른 일자 보기</button>
     </div>
     <h2>검색 유형</h2>
     {side_category_links}
@@ -924,7 +955,7 @@ def render_report_html(
         <span><strong>{stats['stories']}</strong>개 이슈</span>
         <span><strong>{stats['articles']}</strong>건 기사</span>
         <span><strong>{stats['sources']}</strong>개 매체</span>
-        <a href="{archive_url}">다른 일자 보기</a>
+        <button class="archive-trigger" type="button" data-archive-toggle aria-expanded="false" aria-controls="archive-panel">다른 일자 보기</button>
       </div>
     </header>
 
@@ -965,6 +996,17 @@ def render_report_html(
         </div>
       </div>
     </footer>
+  </div>
+  <div class="archive-panel" id="archive-panel" data-archive-panel hidden>
+    <div class="archive-panel__card" role="dialog" aria-label="다른 일자 선택">
+      <div class="archive-panel__head">
+        <span>다른 일자 선택</span>
+        <button class="archive-panel__close" type="button" data-archive-close aria-label="닫기">×</button>
+      </div>
+      <div class="archive-panel__links">
+        {archive_links_html}
+      </div>
+    </div>
   </div>
   <script>
     function attachSourceLogoGuard(container) {{
@@ -1017,6 +1059,17 @@ def render_report_html(
     const storyLinks = [...desktopStoryLinks, ...mobileStoryLinks];
     const mobileSectionLabel = document.querySelector('[data-mobile-section-label]');
     const mobileProgress = document.querySelector('[data-mobile-progress]');
+    const archivePanel = document.querySelector('[data-archive-panel]');
+    const archiveToggles = Array.from(document.querySelectorAll('[data-archive-toggle]'));
+    const archiveClose = document.querySelector('[data-archive-close]');
+    const readStorageKey = `bside-daily-read:${{location.pathname}}`;
+    let readStoryIds = new Set();
+
+    try {{
+      readStoryIds = new Set(JSON.parse(localStorage.getItem(readStorageKey) || '[]'));
+    }} catch (error) {{
+      readStoryIds = new Set();
+    }}
 
     function sectionIdForLink(link) {{
       return link.dataset.tocSection || link.dataset.sectionTarget || (link.getAttribute('href') || '').replace('#', '');
@@ -1045,9 +1098,54 @@ def render_report_html(
       }});
     }}
 
+    function updateMobileStoryContext(activeStoryId) {{
+      if (!mobileStoryLinks.length) return;
+      let activeIndex = mobileStoryLinks.findIndex((link) => link.getAttribute('href') === activeStoryId);
+      if (activeIndex < 0) activeIndex = 0;
+      const contextLabels = new Map([
+        [activeIndex - 1, '이전'],
+        [activeIndex, '현재'],
+        [activeIndex + 1, '다음'],
+      ]);
+      mobileStoryLinks.forEach((link, index) => {{
+        const label = contextLabels.get(index) || '';
+        link.classList.toggle('is-mobile-context', Boolean(label));
+        if (label) link.dataset.contextLabel = label;
+        else delete link.dataset.contextLabel;
+      }});
+    }}
+
     function updateStoryWindow(activeStoryId) {{
       updateStoryWindowForLinks(desktopStoryLinks, activeStoryId);
-      updateStoryWindowForLinks(mobileStoryLinks, activeStoryId);
+      updateMobileStoryContext(activeStoryId);
+    }}
+
+    function applyReadState(storyId) {{
+      if (!storyId) return;
+      const story = document.getElementById(storyId);
+      if (story) story.classList.add('is-read');
+      storyLinks.forEach((link) => {{
+        link.classList.toggle('is-read', link.getAttribute('href') === `#${{storyId}}` || link.classList.contains('is-read'));
+      }});
+    }}
+
+    function saveReadState() {{
+      try {{
+        localStorage.setItem(readStorageKey, JSON.stringify(Array.from(readStoryIds).slice(-500)));
+      }} catch (error) {{}}
+    }}
+
+    function markStoryRead(storyId) {{
+      if (!storyId) return;
+      readStoryIds.add(storyId);
+      applyReadState(storyId);
+      saveReadState();
+    }}
+
+    function setArchiveOpen(open) {{
+      if (!archivePanel) return;
+      archivePanel.hidden = !open;
+      archiveToggles.forEach((toggle) => toggle.setAttribute('aria-expanded', open ? 'true' : 'false'));
     }}
 
     function updateNavigation() {{
@@ -1094,6 +1192,34 @@ def render_report_html(
     }}
     window.addEventListener('scroll', requestNavigationUpdate, {{ passive: true }});
     window.addEventListener('resize', requestNavigationUpdate);
+    readStoryIds.forEach((storyId) => applyReadState(storyId));
+    document.addEventListener('click', (event) => {{
+      const link = event.target.closest('a');
+      if (!link) return;
+      const story = link.closest('[data-story]');
+      if (!story) return;
+      const href = link.getAttribute('href') || '';
+      if (href.startsWith('#')) return;
+      markStoryRead(story.id);
+    }});
+    archiveToggles.forEach((toggle) => {{
+      toggle.addEventListener('click', (event) => {{
+        event.preventDefault();
+        event.stopPropagation();
+        setArchiveOpen(archivePanel ? archivePanel.hidden : false);
+      }});
+    }});
+    if (archiveClose) {{
+      archiveClose.addEventListener('click', () => setArchiveOpen(false));
+    }}
+    document.addEventListener('click', (event) => {{
+      if (!archivePanel || archivePanel.hidden) return;
+      if (archivePanel.contains(event.target) || archiveToggles.some((toggle) => toggle.contains(event.target))) return;
+      setArchiveOpen(false);
+    }});
+    document.addEventListener('keydown', (event) => {{
+      if (event.key === 'Escape') setArchiveOpen(false);
+    }});
     categoryLinks.forEach((link) => {{
       link.addEventListener('click', (event) => {{
         const sectionId = sectionIdForLink(link);
@@ -1125,7 +1251,19 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
     review = generate_report_review(clusters, stories, config, start_at, end_at)
     date_id = end_at.astimezone(ZoneInfo(timezone_name)).strftime("%Y-%m-%d")
     report_url = report_public_url(config, date_id)
-    html = render_report_html(stories, review, config, start_at, end_at, date_id, report_url, duplicate_records, clusters)
+    archive_links_html = render_report_archive_links(project_root / FEED_DIR, date_id)
+    html = render_report_html(
+        stories,
+        review,
+        config,
+        start_at,
+        end_at,
+        date_id,
+        report_url,
+        duplicate_records,
+        clusters,
+        archive_links_html,
+    )
     return {
         "config": config,
         "date_id": date_id,
@@ -1152,6 +1290,31 @@ def write_report_files(report: dict[str, object], root: Path | None = None) -> l
     latest_path.write_text(html, encoding="utf-8")
     index_path.write_text(render_report_index(feed_dir), encoding="utf-8")
     return [dated_path, latest_path, index_path]
+
+
+def render_report_archive_links(feed_dir: Path, current_date_id: str, *, max_items: int = 20) -> str:
+    date_ids = {current_date_id}
+    if feed_dir.exists():
+        date_ids.update(
+            path.stem
+            for path in feed_dir.glob("*.html")
+            if path.name not in {"latest.html", "index.html"} and path.stem
+        )
+    sorted_date_ids = sorted(date_ids, reverse=True)[:max_items]
+    if not sorted_date_ids:
+        return ""
+    items = []
+    for date_id in sorted_date_ids:
+        is_current = date_id == current_date_id
+        label = "현재" if is_current else ""
+        current_class = " is-current" if is_current else ""
+        items.append(
+            f'<a class="archive-panel__link{current_class}" href="{escape(date_id, quote=True)}.html">'
+            f"{escape(date_id)}"
+            f"<span>{escape(label)}</span>"
+            "</a>"
+        )
+    return "\n".join(items)
 
 
 def render_report_index(feed_dir: Path) -> str:

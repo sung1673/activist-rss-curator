@@ -71,6 +71,9 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "발행일자" in html
     assert "수집기간" in html
     assert "다른 일자 보기" in html
+    assert "data-archive-toggle" in html
+    assert "archive-panel__link is-current" in html
+    assert "setArchiveOpen" in html
     assert "max-width: 1000px" in html
     assert "width: 210px" in html
     assert "@media (max-width: 1160px)" in html
@@ -82,6 +85,12 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "font-size: 18.5px" in html
     assert "font-size: 12.5px" in html
     assert "line-height: 1.58" in html
+    assert "grid-template-columns: minmax(0, 1.35fr) minmax(260px, .95fr)" in html
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in html
+    assert "is-mobile-context" in html
+    assert "data-context-label" in html
+    assert "bside-daily-read" in html
+    assert "markStoryRead" in html
     assert "scroll-margin-top: 124px" in html
     assert "-webkit-line-clamp: 2" in html
     assert "data-toc-section" in html
