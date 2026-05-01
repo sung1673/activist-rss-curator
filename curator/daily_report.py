@@ -48,6 +48,10 @@ REPORT_CATEGORY_ORDER = [
 ]
 BSIDE_URL = "https://bside.ai"
 BSIDE_LOGO_URL = "https://bside.ai/images/icons/bside-logo-gray.svg"
+BSIDE_LOGO_PURPLE_FILTER = (
+    "brightness(0) saturate(100%) invert(31%) sepia(93%) saturate(2227%) "
+    "hue-rotate(249deg) brightness(88%) contrast(91%)"
+)
 
 
 def report_hours() -> int:
@@ -280,6 +284,11 @@ def bside_logo_html(extra_class: str = "") -> str:
         '<span class="bside-logo__label">DAILY NEWS</span>'
         '</a>'
     )
+
+
+def daily_report_write_only() -> bool:
+    value = os.environ.get("CURATOR_DAILY_REPORT_WRITE_ONLY", "")
+    return value.casefold() in {"1", "true", "yes", "on"}
 
 
 def build_report_stories(
@@ -724,7 +733,7 @@ def render_report_html(
     .masthead {{ border-bottom: 2px solid var(--ink); padding-bottom: 22px; }}
     .brand-row {{ display: flex; justify-content: space-between; gap: 16px; align-items: baseline; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 24px; }}
     .bside-logo {{ display: inline-flex; align-items: center; gap: 9px; color: var(--accent); text-decoration: none; }}
-    .bside-logo__image {{ width: 86px; height: auto; display: block; }}
+    .bside-logo__image {{ width: 86px; height: auto; display: block; filter: {BSIDE_LOGO_PURPLE_FILTER}; }}
     .bside-logo__label {{ font-size: 11px; font-weight: 900; letter-spacing: .12em; color: var(--accent); }}
     .bside-logo:hover .bside-logo__label {{ color: var(--accent-deep); }}
     .bside-logo--top .bside-logo__image {{ width: 92px; }}
@@ -1063,7 +1072,7 @@ def render_report_index(feed_dir: Path) -> str:
     body {{ margin:0; color:var(--ink); background:var(--paper); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }}
     main {{ max-width:780px; margin:0 auto; padding:36px 20px 72px; }}
     .brand {{ display:inline-flex; align-items:center; gap:8px; color:var(--accent); font-weight:900; letter-spacing:.08em; font-size:13px; text-decoration:none; border-bottom:1px solid var(--line); padding-bottom:12px; }}
-    .bside-logo__image {{ width:92px; height:auto; display:block; }}
+    .bside-logo__image {{ width:92px; height:auto; display:block; filter:{BSIDE_LOGO_PURPLE_FILTER}; }}
     .bside-logo__label {{ font-size:11px; }}
     h1 {{ font-family:Georgia,"Times New Roman",serif; font-size:clamp(40px,7vw,68px); line-height:1; margin:26px 0 10px; }}
     p {{ color:var(--muted); }}
@@ -1099,29 +1108,33 @@ def telegram_story_title(story: dict[str, object]) -> str:
 
 
 def build_report_telegram_message(report: dict[str, object]) -> str:
-    review = str(report.get("review") or "")
     stories = report.get("stories") if isinstance(report.get("stories"), list) else []
-    bullets = clean_report_bullets(review, max_bullets=3)
-    if not bullets:
-        bullets = clean_report_bullets(fallback_report_review(stories), max_bullets=3)
     report_url = str(report.get("report_url") or "")
     link_label = report_link_label(report)
+    stats = report.get("stats") if isinstance(report.get("stats"), dict) else {}
+    story_count = int(stats.get("stories") or len(stories))
+    article_count = int(stats.get("articles") or sum(int(story.get("link_count") or 0) for story in stories if isinstance(story, dict)))
+    source_count = int(
+        stats.get("sources")
+        or len(
+            {
+                str(link.get("source") or "")
+                for story in stories
+                if isinstance(story, dict)
+                for link in (story.get("links") if isinstance(story.get("links"), list) else [])
+                if isinstance(link, dict) and link.get("source")
+            }
+        )
+    )
     lines = [f"<b>{escape(link_label)}</b>"]
-    for bullet in bullets[:3]:
-        lines.append(f"• {escape(bullet)}")
+    lines.append(f"수집 기사 {article_count}건 · 이슈 {story_count}개 · 매체 {source_count}개")
     if stories:
         lines.append("")
-        lines.append("<b>주요 기사</b>")
-        buckets = category_buckets([story for story in stories if isinstance(story, dict)])
-        for category in REPORT_CATEGORY_ORDER:
-            category_stories = buckets.get(category, [])[:4]
-            if not category_stories:
-                continue
-            lines.append(f"<b>{escape(category)}</b>")
-            for story in category_stories:
-                lines.append(f"• {escape(telegram_story_title(story))}")
-            lines.append("")
-    lines.append(f"자세한 기사는 {html_link(link_label, report_url)}에서 확인하세요.")
+        lines.append("<b>메인 기사</b>")
+        for story in [story for story in stories if isinstance(story, dict)][:3]:
+            lines.append(f"• {escape(telegram_story_title(story))}")
+    lines.append("")
+    lines.append(html_link(link_label, report_url))
     return "\n".join(lines).strip()
 
 
@@ -1130,6 +1143,8 @@ def send_daily_report(root: Path | None = None) -> dict[str, int]:
     report = build_daily_report(project_root)
     write_report_files(report, project_root)
     config = report["config"] if isinstance(report.get("config"), dict) else load_config(project_root / "config.yaml")
+    if daily_report_write_only():
+        return {"daily_report_written": 1, "daily_report_sent": 0, "daily_report_failed": 0}
     if not telegram_is_configured(config):
         return {"daily_report_written": 1, "daily_report_sent": 0, "daily_report_failed": 0}
     response = send_telegram_message(

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from conftest import make_article
+from curator import daily_report
 from curator.daily_report import build_daily_report, build_report_telegram_message, write_report_files
 
 
@@ -53,6 +54,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "bside-logo" in html
     assert "bside-logo__image" in html
     assert "https://bside.ai/images/icons/bside-logo-gray.svg" in html
+    assert "filter: brightness(0) saturate(100%)" in html
     assert "Editor’s Brief" in html
     assert "brief__bullets" in html
     assert "story__image--logo" in html
@@ -73,7 +75,10 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
 def test_daily_report_telegram_message_links_to_report(tmp_path) -> None:
     now = datetime(2026, 5, 1, 10, 20, tzinfo=ZoneInfo("Asia/Seoul"))
     (tmp_path / "data").mkdir()
-    (tmp_path / "config.yaml").write_text("report:\n  image_enrich_limit: 0\n", encoding="utf-8")
+    (tmp_path / "config.yaml").write_text(
+        'public_feed_url: "https://news.bside.ai/feed.xml"\nreport:\n  image_enrich_limit: 0\n',
+        encoding="utf-8",
+    )
     (tmp_path / "data" / "state.json").write_text(
         json.dumps({"published_clusters": [report_cluster("cluster:test", now)], "pending_clusters": [], "articles": []}),
         encoding="utf-8",
@@ -84,6 +89,32 @@ def test_daily_report_telegram_message_links_to_report(tmp_path) -> None:
 
     assert "26년 5월 1일 주주·자본시장 데일리" in message
     assert "전체 리포트 보기" not in message
-    assert "주요 기사" in message
-    assert "주주행동·경영권" in message
-    assert "feed/2026-05-01.html" in message
+    assert "주요 기사" not in message
+    assert "메인 기사" in message
+    assert "수집 기사 2건" in message
+    assert "이슈 " in message
+    assert "매체 " in message
+    assert "https://news.bside.ai/feed/2026-05-01.html" in message
+
+
+def test_daily_report_write_only_writes_page_before_send(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    now = datetime(2026, 5, 1, 10, 20, tzinfo=ZoneInfo("Asia/Seoul"))
+    (tmp_path / "data").mkdir()
+    (tmp_path / "config.yaml").write_text("report:\n  image_enrich_limit: 0\n", encoding="utf-8")
+    (tmp_path / "data" / "state.json").write_text(
+        json.dumps({"published_clusters": [report_cluster("cluster:test", now)], "pending_clusters": [], "articles": []}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CURATOR_DAILY_REPORT_WRITE_ONLY", "1")
+    monkeypatch.setattr(daily_report, "now_in_timezone", lambda _timezone: now)
+    monkeypatch.setattr(daily_report, "telegram_is_configured", lambda _config: True)
+
+    def fail_send(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("write-only mode must not send Telegram messages")
+
+    monkeypatch.setattr(daily_report, "send_telegram_message", fail_send)
+
+    summary = daily_report.send_daily_report(tmp_path)
+
+    assert summary == {"daily_report_written": 1, "daily_report_sent": 0, "daily_report_failed": 0}
+    assert (tmp_path / "public" / "feed" / "latest.html").exists()
