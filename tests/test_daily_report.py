@@ -56,6 +56,12 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert (tmp_path / "public" / "feed" / "variants" / "axios.html").exists()
     assert (tmp_path / "public" / "feed" / "variants" / "techmeme.html").exists()
     assert (tmp_path / "public" / "feed" / "variants" / "korea.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "radar.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "memo.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "timeline.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "board.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "atlas.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "studio.html").exists()
     assert 'href="https://bside.ai"' in html
     assert "bside-logo" in html
     assert "bside-logo__image" in html
@@ -96,8 +102,11 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in html
     assert "Layout Lab" in html
     assert "variants/forbes.html" in html
+    assert "variants/radar.html" in html
     assert "layout-standard" in html
     assert "layout-bloomberg" in html
+    assert "layout-radar" in html
+    assert "layout-studio" in html
     assert "is-mobile-context" in html
     assert "data-context-label" in html
     assert "bside-daily-read" in html
