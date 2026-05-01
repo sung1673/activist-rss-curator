@@ -320,42 +320,29 @@ def write_feed(path: str | Path, clusters: list[dict[str, object]], config: dict
 
 def write_index(path: str | Path, state: dict[str, object], config: dict[str, object], now: datetime) -> str:
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
-    published = sort_published_clusters(list(state.get("published_clusters", [])), timezone_name)
-    articles = list(state.get("articles", []))
-    unique_article_count = len({str(article.get("canonical_url")) for article in articles if article.get("canonical_url")})
-    duplicate_count = sum(1 for article in articles if article.get("status") == "duplicate")
-    pending_count = len(state.get("pending_clusters", []))
-    recent_items = "\n".join(
-        f'<li>{escape(format_kst(cluster.get("published_at"), timezone_name))} - '
-        f'<a href="{attr_escape(item_link(cluster, config))}">'
-        f'{escape(item_title(cluster, len(publishable_articles(cluster, config))))}</a></li>'
-        for cluster in published[:20]
-        if has_publishable_link(cluster, config)
-    )
+    generated_at = escape(format_kst(now, timezone_name))
+    latest_url = "./feed/latest.html"
     html = f"""<!doctype html>
 <html lang="ko">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>정제 RSS - 행동주의 뉴스</title>
+  <meta http-equiv="refresh" content="0; url={latest_url}">
+  <link rel="canonical" href="{latest_url}">
+  <title>주주·자본시장 데일리</title>
   <style>
     body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; line-height: 1.6; }}
     main {{ max-width: 860px; }}
-    a {{ color: #0b57d0; }}
-    code {{ background: #f3f4f6; padding: 0.1rem 0.3rem; border-radius: 4px; }}
+    a {{ color: #6b35d8; }}
   </style>
+  <script>window.location.replace("{latest_url}");</script>
 </head>
 <body>
   <main>
-    <h1>정제 RSS - 행동주의 뉴스</h1>
-    <p><a href="./feed.xml">feed.xml</a></p>
-    <p>마지막 생성 시각: {escape(format_kst(now, timezone_name))}</p>
-    <p>최근 cluster: {len(published)}개 / pending: {pending_count}개 / rejected: {len(state.get("rejected_articles", []))}건</p>
-    <p>unique articles: {unique_article_count}건 / total seen records: {len(articles)}건 / duplicates: {duplicate_count}건</p>
-    <h2>최근 cluster 목록</h2>
-    <ul>
-      {recent_items}
-    </ul>
+    <h1>주주·자본시장 데일리</h1>
+    <p>최신 데일리 페이지로 이동합니다. 자동 이동되지 않으면 <a href="{latest_url}">여기</a>를 눌러주세요.</p>
+    <p>RSS는 <a href="./feed.xml">feed.xml</a>에서 확인할 수 있습니다.</p>
+    <p>마지막 생성 시각: {generated_at}</p>
   </main>
 </body>
 </html>

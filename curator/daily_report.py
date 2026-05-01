@@ -38,7 +38,7 @@ from .telegram_publisher import (
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-REPORTS_DIR = Path("public") / "reports"
+FEED_DIR = Path("public") / "feed"
 REPORT_CATEGORY_ORDER = [
     "주주행동·경영권",
     "밸류업·주주환원",
@@ -47,6 +47,7 @@ REPORT_CATEGORY_ORDER = [
     "기타",
 ]
 BSIDE_URL = "https://bside.ai"
+BSIDE_LOGO_URL = "https://bside.ai/images/icons/bside-logo-gray.svg"
 
 
 def report_hours() -> int:
@@ -67,8 +68,8 @@ def public_base_url(config: dict[str, object]) -> str:
 def report_public_url(config: dict[str, object], date_id: str) -> str:
     base_url = public_base_url(config)
     if not base_url:
-        return f"reports/{date_id}.html"
-    return f"{base_url}/reports/{date_id}.html"
+        return f"feed/{date_id}.html"
+    return f"{base_url}/feed/{date_id}.html"
 
 
 def article_domain(url: str) -> str:
@@ -275,8 +276,8 @@ def bside_logo_html(extra_class: str = "") -> str:
     class_name = f"bside-logo {extra_class}".strip()
     return (
         f'<a class="{class_name}" href="{BSIDE_URL}" aria-label="BSIDE Korea 홈페이지">'
-        '<span class="bside-logo__mark">BSIDE</span>'
-        '<span class="bside-logo__text">KOREA DAILY NEWS</span>'
+        f'<img class="bside-logo__image" src="{BSIDE_LOGO_URL}" alt="BSIDE" loading="lazy" decoding="async">'
+        '<span class="bside-logo__label">DAILY NEWS</span>'
         '</a>'
     )
 
@@ -441,7 +442,7 @@ def generate_report_review(
         "투자 조언이나 매매 권유는 하지 말고, 기사에 없는 사실을 단정하지 마세요."
     )
     user_prompt = (
-        "아래 기사 묶음을 바탕으로 Telegram과 HTML 리포트 상단에 들어갈 상세 요약을 작성하세요.\n"
+        "아래 기사 묶음을 바탕으로 Telegram과 HTML 데일리 상단에 들어갈 상세 요약을 작성하세요.\n"
         "- bullet point 3~4개로 작성\n"
         "- 각 bullet은 45~85자 안팎의 한 문장으로 작성\n"
         "- 예: '주주권 행사와 이사회 책임 이슈가 맞물리며 투자자 보호 논의가 다시 부각됩니다.'\n"
@@ -528,6 +529,32 @@ def render_link_list(links: list[dict[str, str]], config: dict[str, object], *, 
     return " ".join(items) if compact else "\n".join(items)
 
 
+def render_source_links(links: list[dict[str, str]], *, max_sources: int = 7) -> str:
+    items = []
+    seen_sources: set[str] = set()
+    for index, link in enumerate(links, start=1):
+        if len(items) >= max_sources:
+            break
+        source = compact_text(link.get("source") or link.get("domain") or f"기사 {index}", max_chars=28)
+        key = source.casefold()
+        url = str(link.get("url") or "")
+        if not source or not url or key in seen_sources:
+            continue
+        seen_sources.add(key)
+        items.append(f'<a href="{escape(url, quote=True)}">{escape(source)}</a>')
+    unique_source_count = len(
+        {
+            compact_text(str(link.get("source") or link.get("domain") or ""), max_chars=28).casefold()
+            for link in links
+            if str(link.get("source") or link.get("domain") or "").strip()
+        }
+    )
+    remaining = max(0, unique_source_count - len(seen_sources))
+    if remaining:
+        items.append(f"<em>외 {remaining}건</em>")
+    return " ".join(items)
+
+
 def render_story(
     story: dict[str, object],
     config: dict[str, object],
@@ -555,9 +582,10 @@ def render_story(
     )
     normalized_links = [link for link in links if isinstance(link, dict)]
     has_grouped_links = len(normalized_links) > 1
-    more_links = render_link_list(normalized_links, config, compact=True) if has_grouped_links else ""
     detail_links = render_link_list(normalized_links, config, compact=False) if has_grouped_links else ""
-    more_html = f'<div class="story__more"><strong>More:</strong> {more_links}</div>' if more_links else ""
+    source_links = render_source_links(normalized_links) if has_grouped_links else ""
+    source_meta = source_links or sources
+    source_meta_html = f'<span class="story__sources">{source_meta}</span>' if source_meta else ""
     details_html = (
         f"""
             <details>
@@ -585,10 +613,9 @@ def render_story(
           <article class="story{featured_class}" id="{story_id}" data-story{section_attrs}>
             {image_html}
             <div class="story__body">
-              <div class="story__meta"><span>{category}</span><span>{timestamp}</span><span>{sources}</span></div>
+              <div class="story__meta"><span>{category}</span><span>{timestamp}</span>{source_meta_html}</div>
               <h3><a href="{primary_url}">{safe_title}</a></h3>
               {summary_html}
-              {more_html}
             </div>
             {details_html}
           </article>
@@ -696,11 +723,11 @@ def render_report_html(
     .page {{ max-width: 1160px; margin: 0 auto; padding: 24px 24px 72px; }}
     .masthead {{ border-bottom: 2px solid var(--ink); padding-bottom: 22px; }}
     .brand-row {{ display: flex; justify-content: space-between; gap: 16px; align-items: baseline; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 24px; }}
-    .bside-logo {{ display: inline-flex; align-items: baseline; gap: 8px; color: var(--accent); text-decoration: none; }}
-    .bside-logo__mark {{ font-weight: 950; letter-spacing: .06em; }}
-    .bside-logo__text {{ font-size: 12px; font-weight: 800; letter-spacing: .08em; }}
-    .bside-logo:hover {{ color: var(--accent-deep); }}
-    .bside-logo--top {{ font-size: 14px; }}
+    .bside-logo {{ display: inline-flex; align-items: center; gap: 9px; color: var(--accent); text-decoration: none; }}
+    .bside-logo__image {{ width: 86px; height: auto; display: block; }}
+    .bside-logo__label {{ font-size: 11px; font-weight: 900; letter-spacing: .12em; color: var(--accent); }}
+    .bside-logo:hover .bside-logo__label {{ color: var(--accent-deep); }}
+    .bside-logo--top .bside-logo__image {{ width: 92px; }}
     .bside-logo--footer {{ margin-bottom: 10px; }}
     .edition {{ color: var(--muted); font-size: 13px; }}
     h1 {{ font-family: Georgia, "Times New Roman", serif; font-size: clamp(40px, 7vw, 78px); line-height: .96; letter-spacing: 0; margin: 0 0 16px; max-width: 940px; }}
@@ -735,12 +762,11 @@ def render_report_html(
     .story--featured .story__image {{ aspect-ratio: 16 / 9; }}
     .story__meta {{ display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; margin-bottom: 8px; }}
     .story__meta span:not(:last-child)::after {{ content: "·"; margin-left: 8px; color: var(--line); }}
+    .story__sources a {{ margin-right: 8px; white-space: nowrap; color: var(--accent-deep); }}
+    .story__sources em {{ font-style: normal; color: var(--muted); white-space: nowrap; }}
     .story h3 {{ font-family: Georgia, "Times New Roman", serif; font-size: 24px; line-height: 1.16; margin: 0 0 8px; letter-spacing: 0; }}
     .story--featured h3 {{ font-size: 24px; }}
     .story p {{ margin: 0 0 10px; color: #34312d; }}
-    .story__more {{ font-size: 13px; color: var(--muted); }}
-    .story__more strong {{ color: var(--green); }}
-    .story__more a {{ margin-right: 8px; white-space: nowrap; }}
     details {{ grid-column: 1 / -1; margin-top: 10px; max-width: 100%; }}
     summary {{ cursor: pointer; color: var(--green); font-size: 13px; font-weight: 800; }}
     .link-table {{ margin-top: 10px; border: 1px solid var(--line); background: var(--surface); overflow: auto; }}
@@ -791,7 +817,7 @@ def render_report_html(
   </style>
 </head>
 <body id="top">
-  <aside class="floating-nav" aria-label="리포트 네비게이션">
+  <aside class="floating-nav" aria-label="데일리 네비게이션">
     <h2>검색 유형</h2>
     {side_category_links}
     <div class="floating-nav__stories">
@@ -835,7 +861,7 @@ def render_report_html(
       <div class="footer__grid">
         <div>
           {footer_logo}
-          <p>건강한 자본시장을 위한 주주행동과 투자자 커뮤니케이션을 지향합니다. 이 페이지는 공개 뉴스와 RSS를 자동으로 큐레이션한 리포트이며 투자 조언이나 매매 권유가 아닙니다.</p>
+          <p>건강한 자본시장을 위한 주주행동과 투자자 커뮤니케이션을 지향합니다. 이 페이지는 공개 뉴스와 RSS를 자동으로 큐레이션한 데일리이며 투자 조언이나 매매 권유가 아닙니다.</p>
         </div>
         <div>
           <p>문의: support@bside.ai</p>
@@ -998,33 +1024,33 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
 def write_report_files(report: dict[str, object], root: Path | None = None) -> list[Path]:
     project_root = root or PROJECT_ROOT
     date_id = str(report["date_id"])
-    reports_dir = project_root / REPORTS_DIR
-    reports_dir.mkdir(parents=True, exist_ok=True)
+    feed_dir = project_root / FEED_DIR
+    feed_dir.mkdir(parents=True, exist_ok=True)
     html = str(report["html"])
-    dated_path = reports_dir / f"{date_id}.html"
-    latest_path = reports_dir / "latest.html"
-    index_path = reports_dir / "index.html"
+    dated_path = feed_dir / f"{date_id}.html"
+    latest_path = feed_dir / "latest.html"
+    index_path = feed_dir / "index.html"
     dated_path.write_text(html, encoding="utf-8")
     latest_path.write_text(html, encoding="utf-8")
-    index_path.write_text(render_report_index(reports_dir), encoding="utf-8")
+    index_path.write_text(render_report_index(feed_dir), encoding="utf-8")
     return [dated_path, latest_path, index_path]
 
 
-def render_report_index(reports_dir: Path) -> str:
-    report_files = sorted(
+def render_report_index(feed_dir: Path) -> str:
+    feed_files = sorted(
         [
             path
-            for path in reports_dir.glob("*.html")
+            for path in feed_dir.glob("*.html")
             if path.name not in {"latest.html", "index.html"}
         ],
         reverse=True,
     )
     links = "\n".join(
         f'<li><a href="{escape(path.name, quote=True)}">{escape(path.stem)}</a></li>'
-        for path in report_files
+        for path in feed_files
     )
     if not links:
-        links = "<li>아직 발행된 리포트가 없습니다.</li>"
+        links = "<li>아직 발행된 데일리가 없습니다.</li>"
     logo = bside_logo_html("brand")
     return f"""<!doctype html>
 <html lang="ko">
@@ -1036,8 +1062,9 @@ def render_report_index(reports_dir: Path) -> str:
     :root {{ --ink:#17131f; --muted:#6f6878; --line:#ded7e8; --paper:#fbfafc; --accent:#6b35d8; }}
     body {{ margin:0; color:var(--ink); background:var(--paper); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }}
     main {{ max-width:780px; margin:0 auto; padding:36px 20px 72px; }}
-    .brand {{ display:inline-flex; align-items:baseline; gap:8px; color:var(--accent); font-weight:900; letter-spacing:.08em; font-size:13px; text-decoration:none; border-bottom:1px solid var(--line); padding-bottom:12px; }}
-    .bside-logo__text {{ font-size:11px; }}
+    .brand {{ display:inline-flex; align-items:center; gap:8px; color:var(--accent); font-weight:900; letter-spacing:.08em; font-size:13px; text-decoration:none; border-bottom:1px solid var(--line); padding-bottom:12px; }}
+    .bside-logo__image {{ width:92px; height:auto; display:block; }}
+    .bside-logo__label {{ font-size:11px; }}
     h1 {{ font-family:Georgia,"Times New Roman",serif; font-size:clamp(40px,7vw,68px); line-height:1; margin:26px 0 10px; }}
     p {{ color:var(--muted); }}
     ul {{ list-style:none; padding:0; margin:32px 0 0; border-top:2px solid var(--ink); }}
@@ -1049,8 +1076,8 @@ def render_report_index(reports_dir: Path) -> str:
 <body>
   <main>
     {logo}
-    <h1>리포트 아카이브</h1>
-    <p>매일 발행된 주주·자본시장 데일리 리포트를 날짜별로 확인할 수 있습니다.</p>
+    <h1>데일리 아카이브</h1>
+    <p>매일 발행된 주주·자본시장 데일리를 날짜별로 확인할 수 있습니다.</p>
     <ul>{links}</ul>
   </main>
 </body>

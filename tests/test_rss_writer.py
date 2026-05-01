@@ -187,7 +187,7 @@ def test_rss_channel_link_does_not_expose_source_feed(config, now) -> None:  # t
     assert "private/token" not in rss
 
 
-def test_write_index_renders_recent_clusters(config, now, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_write_index_redirects_to_latest_daily(config, now, tmp_path) -> None:  # type: ignore[no-untyped-def]
     cluster = published_cluster(config, now)
     html = write_index(
         tmp_path / "index.html",
@@ -200,5 +200,7 @@ def test_write_index_renders_recent_clusters(config, now, tmp_path) -> None:  # 
         config,
         now,
     )
-    assert "정제 RSS - 행동주의 뉴스" in html
-    assert "[묶음 2건]" in html
+    assert "주주·자본시장 데일리" in html
+    assert "./feed/latest.html" in html
+    assert "./feed.xml" in html
+    assert "[묶음 2건]" not in html

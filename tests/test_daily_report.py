@@ -47,10 +47,12 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     html = paths[0].read_text(encoding="utf-8")
 
     assert paths[0].name == "2026-05-01.html"
-    assert (tmp_path / "public" / "reports" / "latest.html").exists()
-    assert (tmp_path / "public" / "reports" / "index.html").exists()
+    assert (tmp_path / "public" / "feed" / "latest.html").exists()
+    assert (tmp_path / "public" / "feed" / "index.html").exists()
     assert 'href="https://bside.ai"' in html
     assert "bside-logo" in html
+    assert "bside-logo__image" in html
+    assert "https://bside.ai/images/icons/bside-logo-gray.svg" in html
     assert "Editor’s Brief" in html
     assert "brief__bullets" in html
     assert "story__image--logo" in html
@@ -62,6 +64,8 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "data-progress-text" in html
     assert "story__image--broken" in html
     assert "기사 링크 1건 보기" not in html
+    assert "More:" not in html
+    assert "story__sources" in html
     assert "<p>" in html
     assert "한화솔루션 유상증자 정정요구" in html
 
@@ -82,4 +86,4 @@ def test_daily_report_telegram_message_links_to_report(tmp_path) -> None:
     assert "전체 리포트 보기" not in message
     assert "주요 기사" in message
     assert "주주행동·경영권" in message
-    assert "reports/2026-05-01.html" in message
+    assert "feed/2026-05-01.html" in message

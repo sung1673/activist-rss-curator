@@ -219,7 +219,7 @@ feeds:
   - name: "google-news-en-proxy-contest"
     category: "global"
     url: "https://news.google.com/rss/search?q=proxy+contest+shareholder+proposal+universal+proxy+card+activist+when:7d&hl=en-US&gl=US&ceid=US:en"
-public_feed_url: "https://sung1673.github.io/activist-rss-curator/feed.xml"
+public_feed_url: "https://news.bside.ai/feed.xml"
 timezone: "Asia/Seoul"
 
 fetch:
