@@ -50,6 +50,12 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert paths[0].name == "2026-05-01.html"
     assert (tmp_path / "public" / "feed" / "latest.html").exists()
     assert (tmp_path / "public" / "feed" / "index.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "forbes.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "ft.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "bloomberg.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "axios.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "techmeme.html").exists()
+    assert (tmp_path / "public" / "feed" / "variants" / "korea.html").exists()
     assert 'href="https://bside.ai"' in html
     assert "bside-logo" in html
     assert "bside-logo__image" in html
@@ -68,6 +74,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "mobile-story-nav" in html
     assert "data-mobile-nav-story" in html
     assert "data-mobile-section-label" in html
+    assert ".mobile-story-nav { display: none; }" in html
     assert "발행일자" in html
     assert "수집기간" in html
     assert "다른 일자 보기" in html
@@ -87,10 +94,15 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "line-height: 1.58" in html
     assert "grid-template-columns: minmax(0, 1.35fr) minmax(260px, .95fr)" in html
     assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in html
+    assert "Layout Lab" in html
+    assert "variants/forbes.html" in html
+    assert "layout-standard" in html
+    assert "layout-bloomberg" in html
     assert "is-mobile-context" in html
     assert "data-context-label" in html
     assert "bside-daily-read" in html
     assert "markStoryRead" in html
+    assert "lastActiveSectionId" in html
     assert "scroll-margin-top: 124px" in html
     assert "-webkit-line-clamp: 2" in html
     assert "data-toc-section" in html

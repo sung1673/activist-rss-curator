@@ -48,6 +48,38 @@ REPORT_CATEGORY_ORDER = [
 ]
 BSIDE_URL = "https://bside.ai"
 BSIDE_LOGO_SVG = """<svg fill="currentColor" viewBox="0 0 57 20" class="bside-logo__image" aria-hidden="true"><path fill="currentColor" d="M7.11306 19.3232C5.87526 19.3232 4.76917 19.032 3.78817 18.4496C2.80716 17.8673 2.03026 17.0798 1.46404 16.0738C0.891241 15.0745 0.601547 13.9429 0.588379 12.6855V1.80579C0.588379 1.44181 0.700305 1.14401 0.930744 0.925618C1.16118 0.700612 1.45087 0.594727 1.79982 0.594727C2.14877 0.594727 2.45821 0.707229 2.67549 0.925618C2.89934 1.15063 3.00467 1.44181 3.00467 1.80579V8.25158C3.55773 7.58316 4.22929 7.05372 5.01279 6.66328C5.79626 6.27284 6.65217 6.08093 7.58709 6.08093C8.73929 6.08093 9.77956 6.37211 10.6947 6.95446C11.6099 7.53684 12.3341 8.32437 12.8674 9.31705C13.4007 10.3097 13.6641 11.4347 13.6641 12.6921C13.6641 13.9495 13.3744 15.0812 12.795 16.0805C12.2156 17.0798 11.4387 17.8739 10.4577 18.4563C9.47667 19.0386 8.35741 19.3298 7.11306 19.3298V19.3232ZM7.11306 17.179C7.92288 17.179 8.64053 16.9871 9.27259 16.5967C9.90464 16.2062 10.405 15.6701 10.7803 14.9885C11.149 14.3069 11.3399 13.5392 11.3399 12.6988C11.3399 11.8583 11.1556 11.0774 10.7803 10.409C10.4116 9.74058 9.90464 9.21116 9.27259 8.82069C8.64053 8.43025 7.91629 8.23831 7.11306 8.23831C6.30982 8.23831 5.60532 8.43025 4.9667 8.82069C4.32806 9.21116 3.82109 9.74058 3.45897 10.409C3.09685 11.0774 2.91251 11.8384 2.91251 12.6988C2.91251 13.5591 3.09685 14.3069 3.45897 14.9885C3.82109 15.6701 4.32806 16.2128 4.9667 16.5967C5.60532 16.9871 6.32297 17.179 7.11306 17.179Z"></path><path fill="currentColor" d="M19.6288 19.3236C18.5227 19.3236 17.4956 19.1515 16.5541 18.814C15.6126 18.4765 14.8818 18.0397 14.355 17.5103C14.118 17.2588 14.0193 16.9676 14.0588 16.6367C14.0983 16.3125 14.2497 16.0411 14.5196 15.836C14.8357 15.5845 15.1517 15.472 15.4546 15.5117C15.764 15.5514 16.0273 15.6904 16.2512 15.9286C16.5211 16.233 16.9491 16.511 17.5482 16.7757C18.1408 17.0404 18.8058 17.1728 19.53 17.1728C20.4452 17.1728 21.1496 17.0206 21.6303 16.7161C22.1109 16.4117 22.3611 16.0213 22.3808 15.5448C22.4006 15.0683 22.1702 14.6514 21.7027 14.3006C21.2352 13.9499 20.3859 13.6653 19.1481 13.4403C17.5482 13.1227 16.3895 12.6462 15.6718 12.0108C14.9542 11.3756 14.5921 10.5946 14.5921 9.67476C14.5921 8.86076 14.8291 8.19238 15.3031 7.65632C15.7772 7.12029 16.3895 6.72323 17.1335 6.46511C17.8774 6.20041 18.6543 6.06805 19.4576 6.06805C20.5044 6.06805 21.4262 6.2335 22.236 6.571C23.0458 6.90853 23.6845 7.36514 24.1585 7.95414C24.3823 8.20561 24.4811 8.47694 24.4679 8.75488C24.4548 9.03285 24.3165 9.27108 24.0663 9.45638C23.8161 9.63505 23.5133 9.688 23.1643 9.62182C22.8154 9.55564 22.5257 9.41667 22.2887 9.19167C21.8936 8.80785 21.4657 8.54973 21.0048 8.40414C20.5439 8.25855 20.0172 8.19238 19.4115 8.19238C18.7136 8.19238 18.1276 8.3115 17.6404 8.54973C17.1598 8.78797 16.9162 9.13873 16.9162 9.60197C16.9162 9.88653 16.9886 10.1446 17.14 10.3763C17.2915 10.6079 17.5878 10.813 18.0289 10.9983C18.47 11.1836 19.1218 11.3623 19.9777 11.5344C21.1628 11.7726 22.1043 12.0771 22.7891 12.441C23.4803 12.805 23.9741 13.2352 24.2704 13.7183C24.5733 14.2014 24.7247 14.7639 24.7247 15.3992C24.7247 16.1338 24.5338 16.7889 24.1453 17.3779C23.7569 17.9669 23.1907 18.4368 22.4335 18.7875C21.683 19.1383 20.7414 19.3103 19.6222 19.3103L19.6288 19.3236Z"></path><path fill="currentColor" d="M26.8648 4.04907C26.4369 4.04907 26.0682 3.89686 25.7587 3.58583C25.4493 3.27478 25.2979 2.90419 25.2979 2.47403C25.2979 2.04388 25.4493 1.67327 25.7587 1.36223C26.0682 1.0512 26.4369 0.898987 26.8648 0.898987C27.2928 0.898987 27.6615 1.0512 27.9709 1.36223C28.2804 1.67327 28.4318 2.04388 28.4318 2.47403C28.4318 2.90419 28.2804 3.27478 27.9709 3.58583C27.6615 3.89686 27.2928 4.04907 26.8648 4.04907ZM26.8648 19.2304C26.5159 19.2304 26.2262 19.1179 25.9958 18.8862C25.7653 18.6546 25.6534 18.3635 25.6534 18.0127V7.39107C25.6534 7.0271 25.7653 6.7293 25.9958 6.51089C26.2262 6.28589 26.5159 6.18001 26.8648 6.18001C27.2138 6.18001 27.5232 6.29251 27.7405 6.51089C27.9644 6.73592 28.0697 7.0271 28.0697 7.39107V18.0127C28.0697 18.3635 27.9578 18.6546 27.7405 18.8862C27.5166 19.1179 27.2269 19.2304 26.8648 19.2304Z"></path><path fill="currentColor" d="M36.1018 19.3233C34.8641 19.3233 33.758 19.0322 32.7638 18.4498C31.7762 17.8674 30.9927 17.0799 30.4133 16.074C29.8341 15.0747 29.5444 13.9431 29.5444 12.6857C29.5444 11.4283 29.8077 10.3032 30.3409 9.31055C30.8741 8.31787 31.5918 7.53038 32.5136 6.94799C33.4288 6.36564 34.4691 6.07443 35.6212 6.07443C36.5562 6.07443 37.4186 6.26635 38.2088 6.65682C38.9988 7.04726 39.6638 7.57667 40.2036 8.24508V1.79932C40.2036 1.43534 40.3156 1.13754 40.5462 0.919148C40.7765 0.694142 41.0662 0.588257 41.415 0.588257C41.7641 0.588257 42.0736 0.70076 42.2909 0.919148C42.5147 1.14415 42.62 1.43534 42.62 1.79932V12.6791C42.62 13.9364 42.3303 15.0681 41.7509 16.0674C41.1715 17.0667 40.3947 17.8608 39.4136 18.4432C38.4327 19.0255 37.3265 19.3167 36.0888 19.3167L36.1018 19.3233ZM36.1018 17.1792C36.9118 17.1792 37.6294 16.9873 38.2615 16.5968C38.8936 16.2063 39.3938 15.6703 39.7559 14.9887C40.118 14.307 40.3024 13.5393 40.3024 12.6989C40.3024 11.8584 40.118 11.0775 39.7559 10.4091C39.3938 9.74073 38.8936 9.21129 38.2615 8.82085C37.6294 8.4304 36.905 8.23846 36.1018 8.23846C35.2986 8.23846 34.5941 8.4304 33.9556 8.82085C33.3168 9.21129 32.81 9.74073 32.4347 10.4091C32.0594 11.0775 31.875 11.8386 31.875 12.6989C31.875 13.5592 32.0594 14.307 32.4347 14.9887C32.8033 15.6703 33.3103 16.213 33.9556 16.5968C34.5941 16.9873 35.3118 17.1792 36.1018 17.1792Z"></path><path fill="currentColor" d="M50.6328 19.3231C49.3157 19.3231 48.1504 19.0386 47.1301 18.476C46.1095 17.9135 45.3063 17.1326 44.7334 16.14C44.154 15.1473 43.8643 14.0024 43.8643 12.7186C43.8643 11.4347 44.1343 10.2633 44.6807 9.27064C45.2272 8.27796 45.9843 7.49708 46.9457 6.93455C47.9134 6.37205 49.0195 6.08746 50.2704 6.08746C51.5216 6.08746 52.5684 6.36543 53.4504 6.90808C54.3393 7.45737 55.011 8.21179 55.4784 9.17799C55.9457 10.1442 56.1763 11.2494 56.1763 12.5068C56.1763 12.8112 56.071 13.0627 55.8669 13.2612C55.6628 13.4597 55.3995 13.559 55.0834 13.559H45.5169V11.6531H55.011L54.0366 12.3215C54.0234 11.5273 53.8654 10.8126 53.5625 10.1839C53.2596 9.55523 52.8316 9.05888 52.2787 8.6949C51.7254 8.3309 51.054 8.14561 50.264 8.14561C49.3619 8.14561 48.5916 8.34414 47.9463 8.74123C47.3078 9.13829 46.8204 9.68096 46.4848 10.3758C46.1554 11.0707 45.9843 11.8516 45.9843 12.7252C45.9843 13.5987 46.1819 14.3796 46.5769 15.0613C46.9719 15.7429 47.5184 16.2856 48.2163 16.6826C48.9143 17.0797 49.711 17.2782 50.6128 17.2782C51.1001 17.2782 51.6072 17.1856 52.1207 17.0069C52.6343 16.8282 53.049 16.6098 53.3648 16.3716C53.6019 16.1995 53.8587 16.1069 54.1354 16.0936C54.4119 16.087 54.6554 16.1664 54.8595 16.3451C55.1295 16.5833 55.2678 16.8481 55.2875 17.1326C55.3007 17.4172 55.1754 17.6687 54.9057 17.8738C54.3657 18.304 53.7007 18.6547 52.8975 18.9261C52.1007 19.1974 51.3372 19.3298 50.6063 19.3298L50.6328 19.3231Z"></path></svg>"""
+LAYOUT_VARIANTS = [
+    {
+        "slug": "forbes",
+        "name": "Forbes Lens",
+        "note": "대표 기사와 보조 기사를 강하게 분리한 비즈니스 매거진형",
+    },
+    {
+        "slug": "ft",
+        "name": "Broadsheet",
+        "note": "종이신문처럼 밀도 높은 다단 브로드시트형",
+    },
+    {
+        "slug": "bloomberg",
+        "name": "Market Board",
+        "note": "어두운 대시보드와 시장 모니터 감각을 살린 터미널형",
+    },
+    {
+        "slug": "axios",
+        "name": "Brief Cards",
+        "note": "짧은 요약과 빠른 스캔에 집중한 브리핑형",
+    },
+    {
+        "slug": "techmeme",
+        "name": "Source River",
+        "note": "묶음 기사와 출처 흐름을 앞세운 애그리게이터형",
+    },
+    {
+        "slug": "korea",
+        "name": "K-Market Grid",
+        "note": "국내 경제지 첫 화면처럼 촘촘하게 탐색하는 그리드형",
+    },
+]
 
 
 def report_hours() -> int:
@@ -280,6 +312,111 @@ def bside_logo_html(extra_class: str = "") -> str:
         '<span class="bside-logo__label">DAILY NEWS</span>'
         '</a>'
     )
+
+
+def variant_href(slug: str, *, in_variant_dir: bool) -> str:
+    if slug == "standard":
+        return "../latest.html" if in_variant_dir else "latest.html"
+    return f"{slug}.html" if in_variant_dir else f"variants/{slug}.html"
+
+
+def render_layout_variant_links(current_slug: str, *, in_variant_dir: bool) -> str:
+    items = [
+        {
+            "slug": "standard",
+            "name": "운영 기본",
+            "note": "현재 운영 중인 기본 레이아웃",
+        },
+        *LAYOUT_VARIANTS,
+    ]
+    return "\n".join(
+        (
+            f'<a class="variant-switcher__link{" is-active" if item["slug"] == current_slug else ""}" '
+            f'href="{escape(variant_href(str(item["slug"]), in_variant_dir=in_variant_dir), quote=True)}">'
+            f'<strong>{escape(str(item["name"]))}</strong>'
+            f'<span>{escape(str(item["note"]))}</span>'
+            "</a>"
+        )
+        for item in items
+    )
+
+
+def layout_variant_css() -> str:
+    return """
+    .variant-switcher { display: grid; gap: 8px; margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
+    .variant-switcher__title { color: var(--muted); font-size: 11px; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }
+    .variant-switcher__links { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+    .variant-switcher__link { min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 7px 8px; text-decoration: none; }
+    .variant-switcher__link strong { display: block; overflow: hidden; color: var(--accent-deep); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .variant-switcher__link span { display: block; overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+    .variant-switcher__link.is-active { border-color: var(--accent); background: var(--accent-soft); }
+
+    body.layout-ft { --paper: #fff5e5; --surface: #fffaf0; --line: #d7c7aa; --accent: #9b3f2f; --accent-deep: #60251c; }
+    body.layout-ft .page { max-width: 1180px; }
+    body.layout-ft h1 { max-width: none; border-bottom: 4px double var(--ink); padding-bottom: 12px; text-align: center; }
+    body.layout-ft .brief { grid-template-columns: 1fr; }
+    body.layout-ft .featured { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
+    body.layout-ft .featured .story--featured:first-child { grid-column: span 2; grid-row: span 2; border-right: 1px solid var(--line); padding-right: 18px; }
+    body.layout-ft .featured .story--featured:nth-child(n+2) { display: block; border-top: 0; border-left: 1px solid var(--line); padding: 0 0 0 16px; }
+    body.layout-ft .featured .story--featured:nth-child(n+2) .story__image { display: none; }
+    body.layout-ft .story-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 20px; }
+    body.layout-ft .story-list .story:first-child { grid-column: auto; grid-template-columns: 1fr; }
+    body.layout-ft .story { display: block; }
+    body.layout-ft .story__image { margin-bottom: 9px; }
+
+    body.layout-bloomberg { --ink: #f5f2ea; --muted: #ada89e; --line: #39362f; --paper: #11100e; --surface: #1c1a16; --accent: #f5b942; --accent-deep: #f7cf78; --accent-soft: #332817; --green: #77d970; }
+    body.layout-bloomberg a { color: inherit; }
+    body.layout-bloomberg .page { max-width: 1160px; }
+    body.layout-bloomberg .masthead, body.layout-bloomberg .brief, body.layout-bloomberg .featured, body.layout-bloomberg .footer { border-color: #f5b942; }
+    body.layout-bloomberg .toc, body.layout-bloomberg .archive-panel__card, body.layout-bloomberg .floating-nav { background: rgba(28,26,22,.96); }
+    body.layout-bloomberg .featured, body.layout-bloomberg .story-list { gap: 12px; }
+    body.layout-bloomberg .story { border: 1px solid var(--line); background: var(--surface); padding: 12px; }
+    body.layout-bloomberg .story-list .story:first-child { grid-column: auto; grid-template-columns: 112px minmax(0, 1fr); }
+    body.layout-bloomberg .story h3 { color: #fff8df; }
+
+    body.layout-axios .page { max-width: 860px; }
+    body.layout-axios h1 { font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif; font-size: 46px; font-weight: 900; }
+    body.layout-axios .featured { display: block; }
+    body.layout-axios .featured .story--featured:first-child, body.layout-axios .featured .story--featured:nth-child(n+2) { display: grid; grid-template-columns: 86px minmax(0, 1fr); border-right: 0; border-top: 1px solid var(--line); padding: 14px 0; }
+    body.layout-axios .story-list { display: block; }
+    body.layout-axios .story-list .story:first-child, body.layout-axios .story { grid-template-columns: 86px minmax(0, 1fr); }
+    body.layout-axios .story h3::before { content: "•"; color: var(--accent); margin-right: 7px; }
+    body.layout-axios .story p { font-size: 13px; }
+
+    body.layout-techmeme .page { max-width: 980px; }
+    body.layout-techmeme .featured { display: block; }
+    body.layout-techmeme .story-list { display: block; }
+    body.layout-techmeme .story-list .story:first-child, body.layout-techmeme .story, body.layout-techmeme .featured .story--featured:nth-child(n+2), body.layout-techmeme .featured .story--featured:first-child { display: block; border-right: 0; padding: 12px 0; }
+    body.layout-techmeme .story__image { display: none; }
+    body.layout-techmeme .story h3 { font-size: 16px; }
+    body.layout-techmeme .story__sources { display: block; margin-top: 4px; }
+    body.layout-techmeme details { display: block; }
+
+    body.layout-korea .page { max-width: 1120px; }
+    body.layout-korea .featured { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+    body.layout-korea .featured .story--featured:first-child, body.layout-korea .featured .story--featured:nth-child(n+2) { display: block; border: 1px solid var(--line); padding: 12px; background: var(--surface); }
+    body.layout-korea .story-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    body.layout-korea .story-list .story:first-child, body.layout-korea .story { display: block; border: 1px solid var(--line); background: var(--surface); padding: 12px; }
+    body.layout-korea .story__image { margin-bottom: 9px; }
+
+    body.layout-forbes .page { max-width: 1120px; }
+    body.layout-forbes h1 { font-size: clamp(42px, 6vw, 76px); }
+    body.layout-forbes .featured { grid-template-columns: minmax(0, 1.55fr) minmax(280px, .85fr); }
+    body.layout-forbes .featured .story--featured:first-child h3 { font-size: 28px; }
+    body.layout-forbes .story-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 34px; }
+
+    @media (max-width: 860px) {
+      .variant-switcher__links { display: flex; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+      .variant-switcher__links::-webkit-scrollbar { display: none; }
+      .variant-switcher__link { flex: 0 0 136px; }
+      body.layout-ft .featured, body.layout-ft .story-list,
+      body.layout-bloomberg .story-list, body.layout-korea .story-list,
+      body.layout-korea .featured, body.layout-forbes .story-list { display: block; }
+      body.layout-ft .featured .story--featured:first-child,
+      body.layout-bloomberg .story-list .story:first-child,
+      body.layout-korea .story-list .story:first-child { grid-column: auto; }
+    }
+    """
 
 
 def daily_report_write_only() -> bool:
@@ -638,6 +775,8 @@ def render_report_html(
     duplicate_records: list[dict[str, object]],
     clusters: list[dict[str, object]],
     archive_links_html: str = "",
+    layout_variant: str = "standard",
+    in_variant_dir: bool = False,
 ) -> str:
     stats = report_stats(stories, clusters, duplicate_records)
     buckets = category_buckets(stories)
@@ -699,6 +838,10 @@ def render_report_html(
     header_logo = bside_logo_html("bside-logo--top")
     nav_logo = bside_logo_html("bside-logo--nav")
     footer_logo = bside_logo_html("bside-logo--footer")
+    variant_slug = layout_variant if layout_variant in {"standard", *(str(item["slug"]) for item in LAYOUT_VARIANTS)} else "standard"
+    variant_class = f"layout-{variant_slug}"
+    variant_links_html = render_layout_variant_links(variant_slug, in_variant_dir=in_variant_dir)
+    variant_css = layout_variant_css()
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -870,7 +1013,7 @@ def render_report_html(
       .chip {{ flex: 0 0 auto; }}
       .archive-panel {{ top: 58px; left: 14px; right: 14px; width: auto; }}
       .archive-panel__card {{ max-height: 54vh; }}
-      .mobile-story-nav {{ position: sticky; top: 52px; z-index: 4; display: block; margin: 0 -14px 12px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 96%, transparent); box-shadow: 0 12px 22px rgba(44, 27, 84, .06); backdrop-filter: blur(8px); }}
+      .mobile-story-nav {{ display: none; }}
       .mobile-story-nav__status {{ display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 14px 5px; color: var(--muted); font-size: 11px; font-weight: 800; }}
       .mobile-story-nav__status strong {{ min-width: 0; overflow: hidden; color: var(--accent-deep); text-overflow: ellipsis; white-space: nowrap; }}
       .mobile-story-nav__status span {{ flex: 0 0 auto; color: var(--accent); font-variant-numeric: tabular-nums; }}
@@ -919,9 +1062,10 @@ def render_report_html(
       .link-table__title a {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }}
       .footer__grid {{ grid-template-columns: 1fr; }}
     }}
+    {variant_css}
   </style>
 </head>
-<body id="top">
+<body id="top" class="{escape(variant_class, quote=True)}">
   <aside class="floating-nav" aria-label="데일리 네비게이션">
     <div class="floating-nav__meta" aria-label="발행 및 수집 정보">
       <div class="floating-nav__meta-item">
@@ -956,6 +1100,10 @@ def render_report_html(
         <span><strong>{stats['articles']}</strong>건 기사</span>
         <span><strong>{stats['sources']}</strong>개 매체</span>
         <button class="archive-trigger" type="button" data-archive-toggle aria-expanded="false" aria-controls="archive-panel">다른 일자 보기</button>
+      </div>
+      <div class="variant-switcher" aria-label="레이아웃 실험 버전">
+        <div class="variant-switcher__title">Layout Lab</div>
+        <div class="variant-switcher__links">{variant_links_html}</div>
       </div>
     </header>
 
@@ -1170,6 +1318,11 @@ def render_report_html(
         link.classList.toggle('is-active', isActive);
         if (!isActive) setSectionProgress(sectionIdForLink(link), 0, Number(link.querySelector('[data-progress-text]')?.textContent?.split('/')[1] || 0));
       }});
+      if (activeSectionId !== lastActiveSectionId) {{
+        const activeChip = categoryLinks.find((link) => link.dataset.tocSection === activeSectionId);
+        if (activeChip) activeChip.scrollIntoView({{ block: 'nearest', inline: 'center', behavior: 'smooth' }});
+        lastActiveSectionId = activeSectionId;
+      }}
       setSectionProgress(activeSectionId, index, total);
       if (mobileSectionLabel) mobileSectionLabel.textContent = activeSectionLabel;
       if (mobileProgress) mobileProgress.textContent = `${{index}}/${{total}}`;
@@ -1182,6 +1335,7 @@ def render_report_html(
     }}
 
     let navTicking = false;
+    let lastActiveSectionId = '';
     function requestNavigationUpdate() {{
       if (navTicking) return;
       navTicking = true;
@@ -1263,6 +1417,8 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
         duplicate_records,
         clusters,
         archive_links_html,
+        "standard",
+        False,
     )
     return {
         "config": config,
@@ -1274,6 +1430,8 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
         "html": html,
         "report_url": report_url,
         "stats": report_stats(stories, clusters, duplicate_records),
+        "clusters": clusters,
+        "duplicate_records": duplicate_records,
     }
 
 
@@ -1288,11 +1446,33 @@ def write_report_files(report: dict[str, object], root: Path | None = None) -> l
     index_path = feed_dir / "index.html"
     dated_path.write_text(html, encoding="utf-8")
     latest_path.write_text(html, encoding="utf-8")
+    variant_dir = feed_dir / "variants"
+    variant_dir.mkdir(parents=True, exist_ok=True)
+    variant_paths: list[Path] = []
+    for variant in LAYOUT_VARIANTS:
+        variant_slug = str(variant["slug"])
+        variant_html = render_report_html(
+            list(report.get("stories") or []),
+            str(report.get("review") or ""),
+            dict(report.get("config") or {}),
+            report["start_at"],  # type: ignore[arg-type]
+            report["end_at"],  # type: ignore[arg-type]
+            date_id,
+            str(report.get("report_url") or ""),
+            list(report.get("duplicate_records") or []),
+            list(report.get("clusters") or []),
+            render_report_archive_links(feed_dir, date_id, link_prefix="../"),
+            variant_slug,
+            True,
+        )
+        variant_path = variant_dir / f"{variant_slug}.html"
+        variant_path.write_text(variant_html, encoding="utf-8")
+        variant_paths.append(variant_path)
     index_path.write_text(render_report_index(feed_dir), encoding="utf-8")
-    return [dated_path, latest_path, index_path]
+    return [dated_path, latest_path, index_path, *variant_paths]
 
 
-def render_report_archive_links(feed_dir: Path, current_date_id: str, *, max_items: int = 20) -> str:
+def render_report_archive_links(feed_dir: Path, current_date_id: str, *, link_prefix: str = "", max_items: int = 20) -> str:
     date_ids = {current_date_id}
     if feed_dir.exists():
         date_ids.update(
@@ -1309,7 +1489,7 @@ def render_report_archive_links(feed_dir: Path, current_date_id: str, *, max_ite
         label = "현재" if is_current else ""
         current_class = " is-current" if is_current else ""
         items.append(
-            f'<a class="archive-panel__link{current_class}" href="{escape(date_id, quote=True)}.html">'
+            f'<a class="archive-panel__link{current_class}" href="{escape(link_prefix + date_id, quote=True)}.html">'
             f"{escape(date_id)}"
             f"<span>{escape(label)}</span>"
             "</a>"
