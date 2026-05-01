@@ -60,6 +60,13 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "story__image--logo" in html
     assert "story__source-logo" in html
     assert "floating-nav" in html
+    assert "floating-nav__meta" in html
+    assert "발행일자" in html
+    assert "수집기간" in html
+    assert "다른 일자 보기" in html
+    assert "max-width: 1000px" in html
+    assert "width: 210px" in html
+    assert "@media (max-width: 1160px)" in html
     assert "data-toc-section" in html
     assert "data-nav-story-index" in html
     assert "data-section-index" in html

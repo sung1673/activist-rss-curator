@@ -691,6 +691,7 @@ def render_report_html(
     start_label = escape(format_kst(start_at, str(config.get("timezone") or "Asia/Seoul")))
     end_label = escape(format_kst(end_at, str(config.get("timezone") or "Asia/Seoul")))
     archive_url = "index.html"
+    report_date_label = escape(date_id)
     title = f"비사이드 자본시장 데일리 - {date_id}"
     description = compact_text(" ".join(review_bullets), max_chars=180)
     canonical_url = escape(report_url, quote=True)
@@ -729,7 +730,7 @@ def render_report_html(
       line-height: 1.58;
     }}
     a {{ color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }}
-    .page {{ max-width: 1160px; margin: 0 auto; padding: 24px 24px 72px; }}
+    .page {{ max-width: 1000px; margin: 0 auto; padding: 24px 24px 72px; }}
     .masthead {{ border-bottom: 2px solid var(--ink); padding-bottom: 22px; }}
     .brand-row {{ display: flex; justify-content: space-between; gap: 16px; align-items: baseline; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 24px; }}
     .bside-logo {{ display: inline-flex; align-items: center; gap: 9px; color: var(--accent); text-decoration: none; }}
@@ -785,8 +786,14 @@ def render_report_html(
     th:first-child, td:first-child {{ width: 92px; color: var(--muted); white-space: nowrap; }}
     th:nth-child(2), td:nth-child(2) {{ width: 120px; color: var(--accent-deep); }}
     td a {{ overflow-wrap: anywhere; }}
-    .floating-nav {{ position: fixed; top: 92px; right: 20px; z-index: 8; width: 246px; max-height: calc(100vh - 118px); overflow: auto; border: 1px solid var(--line); background: rgba(255,255,255,.94); box-shadow: 0 14px 40px rgba(44, 27, 84, .10); padding: 12px; }}
-    .floating-nav h2 {{ font-size: 12px; margin: 0 0 8px; color: var(--accent-deep); letter-spacing: .04em; }}
+    .floating-nav {{ position: fixed; top: 84px; right: 12px; z-index: 8; width: 210px; max-height: calc(100vh - 108px); overflow: auto; border: 1px solid var(--line); background: rgba(255,255,255,.94); box-shadow: 0 14px 40px rgba(44, 27, 84, .10); padding: 10px; }}
+    .floating-nav__meta {{ display: grid; gap: 8px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }}
+    .floating-nav__meta-item {{ display: grid; gap: 2px; }}
+    .floating-nav__meta span {{ color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .05em; }}
+    .floating-nav__meta strong {{ color: var(--ink); font-size: 12px; line-height: 1.25; }}
+    .floating-nav__meta em {{ color: var(--muted); font-size: 11px; font-style: normal; line-height: 1.25; }}
+    .floating-nav__archive {{ border: 1px solid var(--accent); border-radius: 999px; background: var(--accent-soft); color: var(--accent-deep) !important; font-weight: 800; justify-content: center !important; padding: 7px 10px !important; }}
+    .floating-nav h2 {{ font-size: 11px; margin: 0 0 7px; color: var(--accent-deep); letter-spacing: .04em; }}
     .floating-nav a {{ display: flex; align-items: baseline; justify-content: space-between; gap: 10px; text-decoration: none; border-left: 2px solid transparent; padding: 6px 8px; color: var(--muted); font-size: 12px; transition: border-color .18s ease, background .18s ease, color .18s ease; }}
     .floating-nav .nav-label {{ min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
     .floating-nav .nav-progress {{ flex: 0 0 auto; color: var(--accent); font-weight: 800; font-variant-numeric: tabular-nums; }}
@@ -798,7 +805,10 @@ def render_report_html(
     .footer {{ margin-top: 48px; border-top: 2px solid var(--ink); padding-top: 20px; color: var(--muted); font-size: 13px; }}
     .footer__brand {{ color: var(--accent); font-weight: 900; letter-spacing: .06em; }}
     .footer__grid {{ display: grid; grid-template-columns: 1.4fr 1fr; gap: 22px; }}
-    @media (max-width: 1480px) {{
+    @media (min-width: 1161px) and (max-width: 1320px) {{
+      .page {{ max-width: calc(100vw - 260px); margin-left: 24px; margin-right: 236px; }}
+    }}
+    @media (max-width: 1160px) {{
       .floating-nav {{ display: none; }}
     }}
     @media (max-width: 860px) {{
@@ -827,6 +837,18 @@ def render_report_html(
 </head>
 <body id="top">
   <aside class="floating-nav" aria-label="데일리 네비게이션">
+    <div class="floating-nav__meta" aria-label="발행 및 수집 정보">
+      <div class="floating-nav__meta-item">
+        <span>발행일자</span>
+        <strong>{report_date_label}</strong>
+      </div>
+      <div class="floating-nav__meta-item">
+        <span>수집기간</span>
+        <strong>{start_label}</strong>
+        <em>{end_label}</em>
+      </div>
+      <a class="floating-nav__archive" href="{archive_url}">다른 일자 보기</a>
+    </div>
     <h2>검색 유형</h2>
     {side_category_links}
     <div class="floating-nav__stories">
