@@ -1,0 +1,17 @@
+{
+  "archive_version": 1,
+  "files": [
+    {
+      "date": "2026-05-02",
+      "path": "articles/2026-05-02.jsonl",
+      "records": 613
+    },
+    {
+      "date": "2026-05-01",
+      "path": "articles/2026-05-01.jsonl",
+      "records": 157
+    }
+  ],
+  "generated_at": "2026-05-02T20:05:00.423806+09:00",
+  "total_records": 770
+}
