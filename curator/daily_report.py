@@ -7,7 +7,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from html import escape
 from pathlib import Path
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qsl, quote, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -107,6 +107,45 @@ def source_logo_url(domain: str) -> str:
     return f"https://www.google.com/s2/favicons?domain={quote(normalized, safe='')}&sz=128"
 
 
+def mobile_article_url(url: str) -> str:
+    """Return a conservative mobile-friendly article URL when a safe mapping is known."""
+    raw_url = str(url or "").strip()
+    if not raw_url.startswith(("http://", "https://")):
+        return raw_url
+    parsed = urlsplit(raw_url)
+    hostname = (parsed.hostname or "").lower()
+    bare_host = hostname.removeprefix("www.")
+    path = parsed.path or ""
+
+    if bare_host in {"n.news.naver.com", "m.news.nate.com", "v.daum.net"} or bare_host.startswith(("m.", "mobile.")):
+        return raw_url
+
+    if bare_host == "news.naver.com":
+        if path.startswith("/article/"):
+            return urlunsplit((parsed.scheme, "n.news.naver.com", path, parsed.query, ""))
+        if path == "/main/read.naver":
+            params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+            oid = params.get("oid")
+            aid = params.get("aid")
+            if oid and aid:
+                return urlunsplit((parsed.scheme, "n.news.naver.com", f"/article/{oid}/{aid}", "", ""))
+
+    if bare_host in {"news.v.daum.net", "v.daum.net"} and path.startswith("/v/"):
+        return urlunsplit((parsed.scheme, "v.daum.net", path, parsed.query, ""))
+
+    if bare_host == "news.nate.com" and path.startswith("/view/"):
+        return urlunsplit((parsed.scheme, "m.news.nate.com", path, parsed.query, ""))
+
+    return raw_url
+
+
+def mobile_link_attrs(url: str) -> str:
+    mobile_url = mobile_article_url(url)
+    if not mobile_url or mobile_url == url:
+        return ""
+    return f' data-mobile-url="{escape(mobile_url, quote=True)}"'
+
+
 def slugify(value: object, fallback: str = "section") -> str:
     text = re.sub(r"[^0-9A-Za-z가-힣]+", "-", str(value or "")).strip("-")
     return text or fallback
@@ -178,7 +217,9 @@ def story_links(group: list[dict[str, object]]) -> list[dict[str, str]]:
                 "source": source,
                 "title": title,
                 "url": url,
+                "mobile_url": mobile_article_url(url),
                 "domain": article_domain(url),
+                "image_url": str(article.get("image_url") or ""),
                 "published_at": published_at.isoformat() if published_at else "",
             }
         )
@@ -192,6 +233,15 @@ def story_image_urls(group: list[dict[str, object]]) -> list[str]:
         if not isinstance(article, dict):
             continue
         image_url = str(article.get("image_url") or "").strip()
+        if image_url.startswith(("http://", "https://")) and image_url not in image_urls:
+            image_urls.append(image_url)
+    return ordered_image_urls(image_urls)
+
+
+def story_link_image_urls(links: list[dict[str, str]]) -> list[str]:
+    image_urls: list[str] = []
+    for link in links:
+        image_url = str(link.get("image_url") or "").strip()
         if image_url.startswith(("http://", "https://")) and image_url not in image_urls:
             image_urls.append(image_url)
     return ordered_image_urls(image_urls)
@@ -337,19 +387,21 @@ def source_logo_html(story: dict[str, object], href: str) -> str:
     safe_label = escape(label)
     safe_attr_label = escape(label, quote=True)
     safe_logo = escape(logo_url, quote=True)
+    safe_href = escape(href, quote=True)
+    mobile_attrs = mobile_link_attrs(href)
     logo_img = (
         f'<img class="story__source-logo" src="{safe_logo}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">'
         if logo_url
         else ""
     )
     return (
-        f'<a class="story__image story__image--logo" href="{href}" aria-label="{safe_attr_label} 기사 보기" '
-        f'data-logo-label="{safe_attr_label}" data-logo-src="{safe_logo}">'
+        f'<a class="story__image story__image--logo" href="{safe_href}"{mobile_attrs} aria-label="{safe_attr_label} 기사 보기" '
+        f'data-logo-label="{safe_attr_label}" data-logo-src="{safe_logo}"{story_image_data_attrs(story, include_logo_context=False)}>'
         f'{logo_img}<span>{safe_label}</span></a>'
     )
 
 
-def story_image_data_attrs(story: dict[str, object]) -> str:
+def story_image_data_attrs(story: dict[str, object], *, include_logo_context: bool = True) -> str:
     label, logo_url = story_logo_context(story)
     raw_candidates = story.get("image_candidates")
     candidates: list[str] = []
@@ -363,11 +415,14 @@ def story_image_data_attrs(story: dict[str, object]) -> str:
         candidates.insert(0, primary_image)
     candidates = ordered_image_urls(candidates)
     candidates_json = json.dumps(candidates[:5], ensure_ascii=False)
-    return (
-        f' data-logo-label="{escape(label, quote=True)}"'
-        f' data-logo-src="{escape(logo_url, quote=True)}"'
-        f' data-image-candidates="{escape(candidates_json, quote=True)}"'
-    )
+    attrs = f' data-image-candidates="{escape(candidates_json, quote=True)}"'
+    if include_logo_context:
+        attrs = (
+            f' data-logo-label="{escape(label, quote=True)}"'
+            f' data-logo-src="{escape(logo_url, quote=True)}"'
+            f"{attrs}"
+        )
+    return attrs
 
 
 def bside_logo_html(extra_class: str = "") -> str:
@@ -547,7 +602,7 @@ def build_report_stories(
             latest_dt = max((dt for dt in (entry_datetime(entry) for entry in group) if dt), default=None)
             category = section_label or digest_category_label_for_group(group)
             title = str(representative.get("title") or digest_group_title(group, config) or "제목 없음")
-            image_candidates = story_image_urls(group)
+            image_candidates = ordered_image_urls([*story_image_urls(group), *story_link_image_urls(links)])
             stories.append(
                 {
                     "title": title,
@@ -926,16 +981,18 @@ def render_link_list(links: list[dict[str, str]], config: dict[str, object], *, 
     for index, link in enumerate(links, start=1):
         source = escape(link.get("source") or link.get("domain") or f"기사 {index}")
         title = escape(compact_text(link.get("title") or "", max_chars=86))
-        url = escape(link.get("url") or "", quote=True)
+        raw_url = link.get("url") or ""
+        url = escape(raw_url, quote=True)
+        mobile_attrs = mobile_link_attrs(raw_url)
         if compact:
-            items.append(f'<a href="{url}">{source}</a>')
+            items.append(f'<a href="{url}"{mobile_attrs}>{source}</a>')
         else:
             published = escape(link_date_label(link, config))
             items.append(
                 "<tr>"
                 f'<td class="link-table__time">{published}</td>'
                 f'<td class="link-table__source">{source}</td>'
-                f'<td class="link-table__title"><a href="{url}">{title}</a></td>'
+                f'<td class="link-table__title"><a href="{url}"{mobile_attrs}>{title}</a></td>'
                 "</tr>"
             )
     return " ".join(items) if compact else "\n".join(items)
@@ -953,7 +1010,7 @@ def render_source_links(links: list[dict[str, str]], *, max_sources: int = 7) ->
         if not source or not url or key in seen_sources:
             continue
         seen_sources.add(key)
-        items.append(f'<a href="{escape(url, quote=True)}">{escape(source)}</a>')
+        items.append(f'<a href="{escape(url, quote=True)}"{mobile_link_attrs(url)}>{escape(source)}</a>')
     unique_source_count = len(
         {
             compact_text(str(link.get("source") or link.get("domain") or ""), max_chars=28).casefold()
@@ -981,7 +1038,9 @@ def render_story(
     links = story.get("links") if isinstance(story.get("links"), list) else []
     story_id = escape(str(story.get("id") or slugify(story.get("title"), "story")), quote=True)
     safe_title = escape(str(story.get("title") or "제목 없음"))
-    primary_url = escape(str(story.get("primary_url") or "#"), quote=True)
+    raw_primary_url = str(story.get("primary_url") or "#")
+    primary_url = escape(raw_primary_url, quote=True)
+    primary_mobile_attrs = mobile_link_attrs(raw_primary_url)
     category = escape(str(story.get("category") or "기타"))
     sources = escape(str(story.get("source_line") or story.get("primary_source") or ""))
     summary = escape(story_summary_for_display(story))
@@ -1000,9 +1059,9 @@ def render_story(
     timestamp = escape(date_label(story.get("datetime"), config))
     image_url = escape(str(story.get("image_url") or ""), quote=True)
     image_html = (
-        f'<a class="story__image" href="{primary_url}" aria-label="기사 이미지 보기"{story_image_data_attrs(story)}><img src="{image_url}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>'
+        f'<a class="story__image" href="{primary_url}"{primary_mobile_attrs} aria-label="기사 이미지 보기"{story_image_data_attrs(story)}><img src="{image_url}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"></a>'
         if image_url
-        else source_logo_html(story, primary_url)
+        else source_logo_html(story, raw_primary_url)
     )
     normalized_links = [link for link in links if isinstance(link, dict)]
     has_grouped_links = len(normalized_links) > 1
@@ -1038,7 +1097,7 @@ def render_story(
             {image_html}
             <div class="story__body">
               <div class="story__meta"><span>{category}</span><span>{timestamp}</span>{source_meta_html}</div>
-              <h3><a href="{primary_url}">{safe_title}</a></h3>
+              <h3><a href="{primary_url}"{primary_mobile_attrs}>{safe_title}</a></h3>
               {summary_html}
             </div>
             {summary_after_body_html}
@@ -1543,6 +1602,22 @@ def render_report_html(
       }}
     }}
 
+    function promoteCandidateImage(container) {{
+      const candidates = imageCandidates(container);
+      if (!candidates.length) return null;
+      container.dataset.imageIndex = '0';
+      container.classList.remove('story__image--logo', 'story__image--empty', 'story__image--broken');
+      container.innerHTML = '';
+      const image = new Image();
+      image.src = candidates[0];
+      image.alt = '';
+      image.loading = 'lazy';
+      image.decoding = 'async';
+      image.referrerPolicy = 'no-referrer';
+      container.appendChild(image);
+      return image;
+    }}
+
     function tryNextImageCandidate(container, image) {{
       const candidates = imageCandidates(container);
       let currentIndex = Number(container.dataset.imageIndex || '0');
@@ -1561,7 +1636,8 @@ def render_report_html(
 
     document.querySelectorAll('.story__image').forEach((container) => {{
       attachSourceLogoGuard(container);
-      const image = container.querySelector('img:not(.story__source-logo)');
+      let image = container.querySelector('img:not(.story__source-logo)');
+      if (!image) image = promoteCandidateImage(container);
       if (!image) return;
       const markBroken = () => {{
         if (!tryNextImageCandidate(container, image)) replaceWithSourceLogo(container);
@@ -1580,6 +1656,7 @@ def render_report_html(
     const desktopStoryLinks = Array.from(document.querySelectorAll('[data-nav-story]'));
     const mobileStoryLinks = Array.from(document.querySelectorAll('[data-mobile-nav-story]'));
     const storyLinks = [...desktopStoryLinks, ...mobileStoryLinks];
+    const mobileArticleLinkQuery = window.matchMedia('(max-width: 860px)');
     const mobileSectionLabel = document.querySelector('[data-mobile-section-label]');
     const mobileProgress = document.querySelector('[data-mobile-progress]');
     const archivePanel = document.querySelector('[data-archive-panel]');
@@ -1596,6 +1673,14 @@ def render_report_html(
 
     function sectionIdForLink(link) {{
       return link.dataset.tocSection || link.dataset.sectionTarget || (link.getAttribute('href') || '').replace('#', '');
+    }}
+
+    function applyResponsiveArticleLinks() {{
+      const useMobileUrls = mobileArticleLinkQuery.matches;
+      document.querySelectorAll('a[data-mobile-url]').forEach((link) => {{
+        if (!link.dataset.desktopUrl) link.dataset.desktopUrl = link.getAttribute('href') || '';
+        link.setAttribute('href', useMobileUrls ? link.dataset.mobileUrl : link.dataset.desktopUrl);
+      }});
     }}
 
     function progressLinks(sectionId) {{
@@ -1754,7 +1839,14 @@ def render_report_html(
       }});
     }}
     window.addEventListener('scroll', requestNavigationUpdate, {{ passive: true }});
-    window.addEventListener('resize', requestNavigationUpdate);
+    window.addEventListener('resize', () => {{
+      applyResponsiveArticleLinks();
+      requestNavigationUpdate();
+    }});
+    if (mobileArticleLinkQuery.addEventListener) {{
+      mobileArticleLinkQuery.addEventListener('change', applyResponsiveArticleLinks);
+    }}
+    applyResponsiveArticleLinks();
     readStoryIds.forEach((storyId) => applyReadState(storyId));
     document.addEventListener('click', (event) => {{
       const link = event.target.closest('a');

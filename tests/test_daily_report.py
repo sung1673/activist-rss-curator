@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from conftest import make_article
 from curator import daily_report
-from curator.daily_report import build_daily_report, build_report_telegram_message, write_report_files
+from curator.daily_report import build_daily_report, build_report_telegram_message, mobile_article_url, write_report_files
 
 
 def report_cluster(guid: str, now: datetime) -> dict[str, object]:
@@ -17,7 +17,7 @@ def report_cluster(guid: str, now: datetime) -> dict[str, object]:
         "articles": [
             make_article(
                 "한화솔루션 유상증자 정정요구",
-                "https://example.com/a",
+                "https://news.naver.com/main/read.naver?oid=001&aid=0010000001",
                 source="연합뉴스",
                 summary="금융당국이 한화솔루션 유상증자 신고서에 정정을 요구했다.",
                 published_at=(now - timedelta(hours=1)).isoformat(),
@@ -106,6 +106,9 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "brief__link" in html
     assert "imageCandidates" in html
     assert "tryNextImageCandidate" in html
+    assert "promoteCandidateImage" in html
+    assert "applyResponsiveArticleLinks" in html
+    assert 'data-mobile-url="https://n.news.naver.com/article/001/0010000001"' in html
     assert "is-active-section" in html
     assert "좌우 스크롤" in html
     assert "밀어서 보기" in html
@@ -151,6 +154,16 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "story__sources" in html
     assert "<p>" in html
     assert "한화솔루션 유상증자 정정요구" in html
+
+
+def test_mobile_article_url_uses_known_mobile_hosts() -> None:
+    assert (
+        mobile_article_url("https://news.naver.com/main/read.naver?mode=LSD&oid=001&aid=0010000001")
+        == "https://n.news.naver.com/article/001/0010000001"
+    )
+    assert mobile_article_url("https://news.naver.com/article/015/0001234567") == "https://n.news.naver.com/article/015/0001234567"
+    assert mobile_article_url("https://news.v.daum.net/v/20260501090000001") == "https://v.daum.net/v/20260501090000001"
+    assert mobile_article_url("https://example.com/news/1") == "https://example.com/news/1"
 
 
 def test_daily_report_telegram_message_links_to_report(tmp_path) -> None:
