@@ -656,6 +656,23 @@ def digest_article_title(article: dict[str, object]) -> str:
     return display_article_title(article, source)
 
 
+def digest_article_identity_keys(article: dict[str, object]) -> set[str]:
+    keys: set[str] = set()
+    url = article_link(article)
+    if url:
+        keys.add(f"url:{url}")
+    url_hash = str(article.get("canonical_url_hash") or "").strip()
+    if url_hash:
+        keys.add(f"url_hash:{url_hash}")
+
+    display_title = digest_article_title(article)
+    normalized_title = re.sub(r"[^0-9a-z가-힣]+", " ", display_title.casefold()).strip()
+    compact_title = normalized_title.replace(" ", "")
+    if len(compact_title) >= 12:
+        keys.add(f"title:{normalized_title}")
+    return keys
+
+
 def digest_tokens_from_text(text: str) -> set[str]:
     raw_text = str(text or "")
     compact_casefolded = re.sub(r"\s+", "", raw_text.casefold())
@@ -754,12 +771,13 @@ def digest_entry_for_article(
     article: dict[str, object],
     cluster: dict[str, object],
     config: dict[str, object],
-    seen_urls: set[str],
+    seen_keys: set[str],
 ) -> dict[str, object] | None:
     url = article_link(article)
-    if not url or url in seen_urls:
+    identity_keys = digest_article_identity_keys(article)
+    if not url or identity_keys & seen_keys:
         return None
-    seen_urls.add(url)
+    seen_keys.update(identity_keys)
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
     article_dt = digest_article_datetime(article, cluster, timezone_name)
     return {
@@ -802,9 +820,10 @@ def duplicate_candidate_score(article: dict[str, object], config: dict[str, obje
     )
 
     score = 0
-    if hostname and not any(hostname == domain or hostname.endswith(f".{domain}") for domain in ("news.google.com", "google.com", "msn.com")):
+    portal_domains = ("news.google.com", "google.com", "msn.com", "v.daum.net", "daum.net", "news.naver.com")
+    if hostname and not any(hostname == domain or hostname.endswith(f".{domain}") for domain in portal_domains):
         score += 6
-    if raw_source and source not in {"NEWS", "V", "M", "MSN", "GOOGLE"}:
+    if raw_source and source not in {"NEWS", "V", "M", "MSN", "GOOGLE", "다음뉴스", "네이버뉴스"}:
         score += 3
     if len(title) >= 12:
         score += 2
@@ -826,13 +845,18 @@ def add_duplicate_entries(
     entries: dict[str, list[dict[str, object]]],
     duplicate_records: list[dict[str, object]],
     config: dict[str, object],
-    seen_urls: set[str],
+    seen_keys: set[str],
 ) -> None:
-    for record in duplicate_records:
+    ordered_records = sorted(
+        duplicate_records,
+        key=lambda record: duplicate_candidate_score(duplicate_record_representative(record, config) or record, config),
+        reverse=True,
+    )
+    for record in ordered_records:
         article = duplicate_record_representative(record, config)
         if not article:
             continue
-        entry = digest_entry_for_article(article, {}, config, seen_urls)
+        entry = digest_entry_for_article(article, {}, config, seen_keys)
         if not entry:
             continue
         section = "global" if digest_article_is_english(article) else "domestic"
@@ -847,21 +871,21 @@ def digest_article_entries(
     settings = digest_config(config)
     max_articles_per_cluster = digest_count_limit(settings, "max_articles_per_cluster", 2)
     entries: dict[str, list[dict[str, object]]] = {"domestic": [], "global": []}
-    seen_urls: set[str] = set()
+    seen_keys: set[str] = set()
 
     for cluster in clusters:
         added_for_cluster = 0
         for article in publishable_articles(cluster, config):
             if max_articles_per_cluster is not None and added_for_cluster >= max_articles_per_cluster:
                 break
-            entry = digest_entry_for_article(article, cluster, config, seen_urls)
+            entry = digest_entry_for_article(article, cluster, config, seen_keys)
             if not entry:
                 continue
             section = "global" if digest_article_is_english(article) else "domestic"
             entries[section].append(entry)
             added_for_cluster += 1
 
-    add_duplicate_entries(entries, duplicate_records or [], config, seen_urls)
+    add_duplicate_entries(entries, duplicate_records or [], config, seen_keys)
 
     for section_entries in entries.values():
         section_entries.sort(key=lambda entry: entry["datetime"] or datetime.min.replace(tzinfo=ZoneInfo("UTC")), reverse=True)
@@ -1369,7 +1393,7 @@ def split_digest_section_blocks(
 
 def duplicate_record_datetime(record: dict[str, object], config: dict[str, object]) -> datetime | None:
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
-    for key in ("seen_at", "published_at"):
+    for key in ("article_published_at", "feed_published_at", "published_at", "seen_at"):
         parsed = parse_datetime(str(record.get(key) or ""), timezone_name)
         if parsed:
             return parsed
@@ -1382,18 +1406,19 @@ def duplicate_records_in_window(
     start_at: datetime,
     end_at: datetime,
 ) -> list[dict[str, object]]:
-    seen_urls: set[str] = set()
+    seen_keys: set[str] = set()
     selected: list[tuple[datetime, dict[str, object]]] = []
     for record in list(state.get("articles", [])):
         if not isinstance(record, dict) or record.get("status") != "duplicate":
             continue
-        url = str(record.get("canonical_url") or "")
-        if not url or url in seen_urls:
+        article = duplicate_record_representative(record, config) or record
+        identity_keys = digest_article_identity_keys(article)
+        if not identity_keys or identity_keys & seen_keys:
             continue
         record_dt = duplicate_record_datetime(record, config)
         if not record_dt or not start_at <= record_dt <= end_at:
             continue
-        seen_urls.add(url)
+        seen_keys.update(identity_keys)
         selected.append((record_dt, record))
     selected.sort(key=lambda item: item[0], reverse=True)
     max_links = digest_count_limit(digest_config(config), "max_duplicate_links", 12)

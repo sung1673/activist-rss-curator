@@ -8,7 +8,9 @@ from curator.story_judge import StoryJudgement
 from curator.summaries import (
     build_daily_digest_messages,
     build_hourly_update_messages,
+    digest_article_entries,
     digest_article_is_english,
+    duplicate_records_in_window,
     group_digest_entries,
     hourly_update_start_at,
     limited_digest_article_entries,
@@ -500,6 +502,50 @@ def test_daily_digest_groups_same_subject_valueup_event(config, now, monkeypatch
     assert "news.mtn.co.kr" not in message
     assert "①" not in message
     assert "②" not in message
+
+
+def test_digest_entries_collapse_portal_mirror_same_article(config) -> None:  # type: ignore[no-untyped-def]
+    portal = make_article(
+        "[정보공시 Q&A] 거버넌스 환경 변화와 ESG 공시 - v.daum.net",
+        "https://v.daum.net/v/20260501131434127?f=p",
+        source="v.daum.net",
+        published_at="2026-05-01T13:14:34+09:00",
+    )
+    original = make_article(
+        "거버넌스 환경 변화와 ESG 공시",
+        "https://www.hankyung.com/amp/202604189712G",
+        source="한국경제",
+        published_at="2026-05-01T13:12:09+09:00",
+    )
+    portal["status"] = "duplicate"
+    original["status"] = "duplicate"
+
+    entries = digest_article_entries([], config, [portal, original])["domestic"]
+
+    assert len(entries) == 1
+    assert entries[0]["title"] == "거버넌스 환경 변화와 ESG 공시"
+    assert entries[0]["url"] == "https://www.hankyung.com/amp/202604189712G"
+
+
+def test_duplicate_window_uses_article_date_before_seen_date(config, now) -> None:  # type: ignore[no-untyped-def]
+    old_duplicate = make_article(
+        "거버넌스 환경 변화와 ESG 공시",
+        "https://www.hankyung.com/amp/202604189712G",
+        source="한국경제",
+        published_at="2026-05-01T13:12:09+09:00",
+    )
+    old_duplicate["status"] = "duplicate"
+    old_duplicate["seen_at"] = "2026-05-02T09:00:00+09:00"
+    state = {"articles": [old_duplicate]}
+
+    selected = duplicate_records_in_window(
+        state,
+        config,
+        datetime(2026, 5, 2, 0, 0, tzinfo=ZoneInfo("Asia/Seoul")),
+        datetime(2026, 5, 2, 23, 59, tzinfo=ZoneInfo("Asia/Seoul")),
+    )
+
+    assert selected == []
 
 
 def test_daily_digest_groups_same_policy_event_across_titles(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]

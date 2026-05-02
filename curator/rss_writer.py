@@ -49,7 +49,7 @@ SOURCE_LABELS = {
 }
 
 DISPLAY_NOISY_PREFIX_PATTERN = re.compile(
-    r"^\s*\[(?:기고|ESG포커스|프록시보팅|대한민국\s*100대\s*CEO|관치금융\s*논쟁\s*\d+년)\]\s*",
+    r"^\s*\[(?:기고|ESG포커스|정보공시\s*Q&A|프록시보팅|대한민국\s*100대\s*CEO|관치금융\s*논쟁\s*\d+년)\]\s*",
     re.IGNORECASE,
 )
 DISPLAY_DOMAIN_SUFFIX_PATTERN = re.compile(

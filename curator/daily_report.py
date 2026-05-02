@@ -16,9 +16,10 @@ from .ai import ai_config, call_github_models
 from .config import load_config
 from .dates import format_kst, now_in_timezone
 from .fetch import USER_AGENT, image_href
-from .rss_writer import article_link, article_source_label, compact_text
+from .rss_writer import article_link, article_source_label, compact_text, display_article_title
 from .state import load_state
 from .summaries import (
+    digest_article_identity_keys,
     digest_article_entries,
     digest_category_label_for_group,
     digest_config,
@@ -167,6 +168,33 @@ def best_story_summary(group: list[dict[str, object]]) -> str:
     return ""
 
 
+PORTAL_LINK_DOMAINS = {
+    "news.google.com",
+    "www.google.com",
+    "news.url.google.com",
+    "v.daum.net",
+    "news.v.daum.net",
+    "daum.net",
+    "msn.com",
+}
+PORTAL_SOURCE_LABELS = {"NEWS", "GOOGLE", "MSN", "DAUM", "다음뉴스", "v.daum.net"}
+
+
+def story_link_quality(link: dict[str, str]) -> int:
+    domain = article_domain(str(link.get("url") or ""))
+    source = str(link.get("source") or "").strip()
+    score = 0
+    if domain and domain not in PORTAL_LINK_DOMAINS:
+        score += 10
+    if source and source not in PORTAL_SOURCE_LABELS and not source.endswith(".net"):
+        score += 5
+    if str(link.get("image_url") or "").startswith(("http://", "https://")):
+        score += 2
+    if str(link.get("url") or "").startswith("https://"):
+        score += 1
+    return score
+
+
 def story_priority_score(group: list[dict[str, object]]) -> int:
     scores: list[int] = []
     for entry in group:
@@ -224,29 +252,39 @@ def fallback_story_summary(story: dict[str, object]) -> str:
 
 def story_links(group: list[dict[str, object]]) -> list[dict[str, str]]:
     links: list[dict[str, str]] = []
-    seen_urls: set[str] = set()
+    seen_keys: dict[str, int] = {}
     for entry in group:
         article = entry.get("article")
         if not isinstance(article, dict):
             continue
         url = str(entry.get("url") or article_link(article) or "")
-        if not url or url in seen_urls:
+        if not url:
             continue
-        seen_urls.add(url)
         source = article_source_label(article)
-        title = str(entry.get("title") or article.get("clean_title") or article.get("title") or source)
+        title = display_article_title(article, source) or str(entry.get("title") or article.get("clean_title") or article.get("title") or source)
         published_at = entry_datetime(entry)
-        links.append(
-            {
-                "source": source,
-                "title": title,
-                "url": url,
-                "mobile_url": mobile_article_url(url),
-                "domain": article_domain(url),
-                "image_url": str(article.get("image_url") or ""),
-                "published_at": published_at.isoformat() if published_at else "",
-            }
-        )
+        link = {
+            "source": source,
+            "title": title,
+            "url": url,
+            "mobile_url": mobile_article_url(url),
+            "domain": article_domain(url),
+            "image_url": str(article.get("image_url") or ""),
+            "published_at": published_at.isoformat() if published_at else "",
+        }
+        identity_keys = digest_article_identity_keys(article) or {f"url:{url}"}
+        existing_indices = [seen_keys[key] for key in identity_keys if key in seen_keys]
+        if existing_indices:
+            existing_index = min(existing_indices)
+            if story_link_quality(link) > story_link_quality(links[existing_index]):
+                links[existing_index] = link
+            for key in identity_keys:
+                seen_keys[key] = existing_index
+            continue
+        links.append(link)
+        current_index = len(links) - 1
+        for key in identity_keys:
+            seen_keys[key] = current_index
     return links
 
 
@@ -1332,7 +1370,7 @@ def render_report_html(
     .chip__progress {{ color: var(--accent); font-weight: 800; font-variant-numeric: tabular-nums; }}
     .chip.is-active {{ border-color: var(--accent); background: var(--accent-soft); color: var(--accent-deep); }}
     .mobile-story-nav {{ display: none; }}
-    .featured {{ display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, .95fr); gap: 0 24px; border-bottom: 1px solid var(--ink); padding: 24px 0; align-items: stretch; }}
+    .featured {{ display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, .95fr); gap: 0 24px; border-bottom: 1px solid var(--ink); padding: 24px 0; align-items: start; }}
     .priority .featured {{ border-bottom: 0; padding-bottom: 12px; }}
     .featured .story--featured:first-child {{ grid-row: span 2; border-right: 1px solid var(--line); padding-right: 24px; }}
     .featured .story--featured:nth-child(n+2) {{ display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 14px; border-top: 1px solid var(--line); padding: 14px 0 0; }}
@@ -1340,6 +1378,8 @@ def render_report_html(
     .featured .story--featured:nth-child(n+2) .story__image {{ aspect-ratio: 4 / 3; }}
     .featured .story--featured:nth-child(n+2) h3 {{ font-size: 17px; }}
     .featured .story--featured:nth-child(n+2) p {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }}
+    .featured .story--featured:nth-child(n+2) .story__summary {{ grid-column: 2; margin-top: -2px; padding-top: 7px; padding-bottom: 7px; }}
+    .featured .story--featured:nth-child(n+2) details {{ grid-column: 2; }}
     .section {{ position: relative; padding: 34px 0 6px; scroll-margin-top: 108px; }}
     .section__rule {{ height: 3px; background: linear-gradient(90deg, var(--accent), var(--ink)); margin-bottom: 14px; }}
     .section__head {{ position: sticky; top: 49px; z-index: 4; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 -2px 0; padding: 10px 2px 9px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 96%, transparent); backdrop-filter: blur(8px); }}
@@ -1348,7 +1388,7 @@ def render_report_html(
     .story-list {{ column-count: 2; column-gap: 28px; margin-top: 10px; }}
     .story-list .story:first-child {{ grid-template-columns: 104px minmax(0, 1fr); }}
     .story {{ position: relative; display: inline-grid; width: 100%; grid-template-columns: 104px minmax(0, 1fr); gap: 10px 14px; min-width: 0; break-inside: avoid; border-top: 1px solid var(--line); padding: 14px 0 16px; scroll-margin-top: 112px; vertical-align: top; }}
-    .story--featured {{ grid-template-columns: 1fr; min-width: 0; overflow: hidden; border-top: 0; padding-top: 0; }}
+    .story--featured {{ align-self: start; grid-template-columns: 1fr; min-width: 0; overflow: hidden; border-top: 0; padding-top: 0; }}
     .story__body {{ min-width: 0; max-width: 780px; }}
     .story--featured .story__body {{ max-width: none; }}
     .story__image {{ display: block; aspect-ratio: 4 / 3; background: var(--accent-soft); overflow: hidden; border: 1px solid var(--line); }}
