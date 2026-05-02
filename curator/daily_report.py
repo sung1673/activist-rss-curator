@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections import Counter, defaultdict
@@ -520,6 +521,161 @@ def story_context(stories: list[dict[str, object]], config: dict[str, object], m
     return "\n\n".join(blocks) or digest_context([], config)
 
 
+def fallback_story_brief(story: dict[str, object]) -> dict[str, str]:
+    title = compact_text(str(story.get("title") or ""), max_chars=86)
+    category = str(story.get("category") or "")
+    link_count = int(story.get("link_count") or 0)
+    summary = clean_brief_source_noise(story_summary_for_display(story))
+    source_line = compact_text(str(story.get("source_line") or story.get("primary_source") or ""), max_chars=72)
+    category_tail = {
+        "주주행동·경영권": "주주권과 경영권 이슈의 후속 흐름을 보여줍니다.",
+        "밸류업·주주환원": "주주환원 정책의 실행 가능성과 시장 반응을 확인할 수 있습니다.",
+        "자본시장 제도·공시": "공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.",
+        "해외·영문": "해외 투자자와 외신이 바라보는 지배구조·행동주의 흐름을 보여줍니다.",
+    }.get(category, "자본시장 관점에서 후속 흐름을 확인할 만한 사안입니다.")
+    if link_count <= 1 and summary and len(summary) >= 30:
+        point = compact_text(summary, max_chars=128)
+    else:
+        point = compact_text(f"{title}. {category_tail}", max_chars=128)
+
+    if category == "주주행동·경영권":
+        why = "주주권 행사, 이사회 책임, 경영권 대응의 기준을 함께 볼 사안입니다."
+    elif category == "밸류업·주주환원":
+        why = "주주환원 정책이 실제 실행과 공시 신뢰로 이어지는지 확인할 필요가 있습니다."
+    elif category == "자본시장 제도·공시":
+        why = "감독·공시·거래 제도 변화가 일반주주 보호와 시장 규율에 미칠 영향을 봐야 합니다."
+    elif category == "해외·영문":
+        why = "해외 투자자와 외신이 한국 시장 또는 글로벌 행동주의를 어떻게 해석하는지 보여줍니다."
+    else:
+        why = "자본시장 투자자 관점에서 후속 보도와 공시 연결 여부를 확인할 만합니다."
+
+    if link_count > 1 and source_line:
+        evidence = f"{source_line} 등 {link_count}건 보도"
+    elif source_line:
+        evidence = f"{source_line} 보도"
+    else:
+        evidence = "수집 기사 기준"
+
+    return {
+        "point": point,
+        "why": compact_text(why, max_chars=112),
+        "evidence": compact_text(evidence, max_chars=96),
+    }
+
+
+def clean_brief_source_noise(text: str) -> str:
+    cleaned = re.sub(r"https?://\S+", " ", str(text or ""))
+    cleaned = re.sub(r"\b[\w.-]+\.(?:com|net|co\.kr|kr|org|io)\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bGoogle News\b|\bv\.daum\.net\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -·|")
+    return cleaned
+
+
+def story_brief_context(stories: list[dict[str, object]], config: dict[str, object], max_stories: int) -> str:
+    blocks: list[str] = []
+    for story in stories[:max_stories]:
+        links = story.get("links") if isinstance(story.get("links"), list) else []
+        sources = ", ".join(str(link.get("source") or "") for link in links[:4] if isinstance(link, dict))
+        blocks.append(
+            "\n".join(
+                line
+                for line in (
+                    f"id: {story.get('id')}",
+                    f"category: {story.get('category')}",
+                    f"title: {story.get('title')}",
+                    f"sources: {sources}" if sources else "",
+                    f"summary: {story_summary_for_display(story)}",
+                )
+                if line
+            )
+        )
+    return "\n\n".join(blocks)
+
+
+def parse_story_brief_response(content: str | None) -> dict[str, dict[str, str]]:
+    if not content:
+        return {}
+    cleaned = re.sub(r"^```(?:json)?|```$", "", content.strip(), flags=re.IGNORECASE | re.MULTILINE).strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return {}
+    if isinstance(data, dict):
+        items = data.get("stories")
+    else:
+        items = data
+    if not isinstance(items, list):
+        return {}
+    parsed: dict[str, dict[str, str]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        story_id = str(item.get("id") or "").strip()
+        if not story_id:
+            continue
+        point = compact_text(str(item.get("point") or ""), max_chars=128)
+        why = compact_text(str(item.get("why") or ""), max_chars=112)
+        evidence = compact_text(str(item.get("evidence") or ""), max_chars=96)
+        if point or why or evidence:
+            parsed[story_id] = {
+                "point": point,
+                "why": why,
+                "evidence": evidence,
+            }
+    return parsed
+
+
+def attach_story_briefs(stories: list[dict[str, object]], config: dict[str, object]) -> None:
+    for story in stories:
+        story["brief"] = fallback_story_brief(story)
+
+    settings = ai_config(config)
+    if not settings.get("daily_report_enabled", True) or not settings.get("story_brief_enabled", True):
+        return
+    max_stories = int(settings.get("story_brief_max_stories", 8))
+    if max_stories <= 0:
+        return
+
+    model = str(settings.get("story_brief_model") or settings.get("daily_report_model") or "openai/gpt-4.1")
+    max_tokens = int(settings.get("story_brief_max_tokens", 1400))
+    system_prompt = (
+        "당신은 한국 자본시장 데일리 페이지의 편집자입니다. "
+        "기사 제목과 수집 요약만 바탕으로 투자자가 빠르게 읽을 수 있는 요점, 맥락, 근거를 씁니다. "
+        "기사에 없는 사실을 만들지 말고, 매수·매도 판단은 금지합니다."
+    )
+    user_prompt = (
+        "아래 기사 묶음별로 JSON만 출력하세요.\n"
+        "형식: {\"stories\":[{\"id\":\"story-1\",\"point\":\"...\",\"why\":\"...\",\"evidence\":\"...\"}]}\n"
+        "- point: 기사 핵심을 55~95자, 완성된 한국어 문장으로 작성\n"
+        "- why: 투자자/주주권/공시/제도 관점의 의미를 45~85자로 작성\n"
+        "- evidence: 직접 인용 대신 '어느 매체들이 다뤘는지' 또는 '복수 매체 보도' 수준으로 작성\n"
+        "- 저작권 보호를 위해 원문 문장을 길게 그대로 복사하지 않음\n"
+        "- 제공된 정보 밖의 수치·사실을 추가하지 않음\n\n"
+        f"{story_brief_context(stories, config, max_stories)}"
+    )
+    content = call_github_models(
+        system_prompt,
+        user_prompt,
+        model=model,
+        max_tokens=max_tokens,
+        config=config,
+    )
+    ai_briefs = parse_story_brief_response(content)
+    if not ai_briefs:
+        return
+    for story in stories[:max_stories]:
+        story_id = str(story.get("id") or "")
+        brief = ai_briefs.get(story_id)
+        if not brief:
+            continue
+        fallback = fallback_story_brief(story)
+        story["brief"] = {
+            "point": brief.get("point") or fallback["point"],
+            "why": brief.get("why") or fallback["why"],
+            "evidence": brief.get("evidence") or fallback["evidence"],
+        }
+
+
 def fallback_report_review(stories: list[dict[str, object]]) -> str:
     def titles_for(category: str, limit: int = 3) -> list[str]:
         return [str(story.get("title") or "") for story in stories if story.get("category") == category][:limit]
@@ -736,6 +892,7 @@ def render_story(
     section_id: str = "",
     section_index: int = 0,
     section_total: int = 0,
+    editorial: bool = False,
 ) -> str:
     links = story.get("links") if isinstance(story.get("links"), list) else []
     story_id = escape(str(story.get("id") or slugify(story.get("title"), "story")), quote=True)
@@ -744,7 +901,23 @@ def render_story(
     category = escape(str(story.get("category") or "기타"))
     sources = escape(str(story.get("source_line") or story.get("primary_source") or ""))
     summary = escape(story_summary_for_display(story))
-    summary_html = f"<p>{summary}</p>" if summary else ""
+    brief = story.get("brief") if isinstance(story.get("brief"), dict) else {}
+    if editorial and brief:
+        point = escape(str(brief.get("point") or ""))
+        why = escape(str(brief.get("why") or ""))
+        evidence = escape(str(brief.get("evidence") or ""))
+        insight_items = "\n".join(
+            item
+            for item in (
+                f'<p><strong>요점</strong>{point}</p>' if point else "",
+                f'<p><strong>맥락</strong>{why}</p>' if why else "",
+                f'<p><strong>근거</strong>{evidence}</p>' if evidence else "",
+            )
+            if item
+        )
+        summary_html = f'<div class="story__insight">{insight_items}</div>' if insight_items else ""
+    else:
+        summary_html = f"<p>{summary}</p>" if summary else ""
     timestamp = escape(date_label(story.get("datetime"), config))
     image_url = escape(str(story.get("image_url") or ""), quote=True)
     image_html = (
@@ -808,13 +981,37 @@ def render_report_html(
     layout_variant: str = "standard",
     in_variant_dir: bool = False,
 ) -> str:
+    variant_slug = layout_variant if layout_variant in {"standard", *(str(item["slug"]) for item in LAYOUT_VARIANTS)} else "standard"
+    is_standard_layout = variant_slug == "standard"
     stats = report_stats(stories, clusters, duplicate_records)
     buckets = category_buckets(stories)
     review_bullets = clean_report_bullets(review) or clean_report_bullets(fallback_report_review(stories))
     review_html = "\n".join(f"<li>{escape(bullet)}</li>" for bullet in review_bullets)
     review_block_html = f'<ul class="brief__bullets">{review_html}</ul>' if review_html else ""
-    featured_stories = stories[:3]
-    featured_html = "\n".join(render_story(story, config, featured=True, show_details=False) for story in featured_stories)
+    featured_stories = stories[: 5 if is_standard_layout else 3]
+    featured_html = "\n".join(
+        render_story(story, config, featured=True, show_details=False, editorial=is_standard_layout)
+        for story in featured_stories
+    )
+    featured_block_html = (
+        f"""
+    <section class="priority" aria-label="오늘의 중요 기사">
+      <div class="priority__head">
+        <h2>오늘의 중요 기사</h2>
+        <p>복수 보도, 주주권·공시 영향, 제도적 파급을 기준으로 먼저 읽을 기사를 배치했습니다.</p>
+      </div>
+      <div class="featured featured--priority">
+        {featured_html}
+      </div>
+    </section>
+        """
+        if is_standard_layout
+        else f"""
+    <section class="featured" aria-label="top stories">
+      {featured_html}
+    </section>
+        """
+    )
     category_sections = []
     for category in REPORT_CATEGORY_ORDER:
         category_stories = buckets.get(category, [])
@@ -830,7 +1027,7 @@ def render_report_html(
             <span>{len(category_stories)}개 이슈</span>
           </div>
           <div class="story-list">
-            {''.join(render_story(story, config, section_id=section_id, section_index=index, section_total=len(category_stories)) for index, story in enumerate(category_stories, start=1))}
+            {''.join(render_story(story, config, section_id=section_id, section_index=index, section_total=len(category_stories), editorial=is_standard_layout) for index, story in enumerate(category_stories, start=1))}
           </div>
         </section>
             """
@@ -868,10 +1065,10 @@ def render_report_html(
     header_logo = bside_logo_html("bside-logo--top")
     nav_logo = bside_logo_html("bside-logo--nav")
     footer_logo = bside_logo_html("bside-logo--footer")
-    variant_slug = layout_variant if layout_variant in {"standard", *(str(item["slug"]) for item in LAYOUT_VARIANTS)} else "standard"
     variant_class = f"layout-{variant_slug}"
     variant_links_html = render_layout_variant_links(variant_slug, in_variant_dir=in_variant_dir)
     variant_css = layout_variant_css()
+    brief_title = "오늘의 핵심 브리핑" if is_standard_layout else "Editor’s Brief"
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -936,6 +1133,10 @@ def render_report_html(
     .brief__bullets {{ margin: 0; padding: 0; list-style: none; display: grid; gap: 5px; }}
     .brief__bullets li {{ position: relative; padding-left: 13px; font-size: 12.5px; line-height: 1.42; color: #2e2738; word-break: keep-all; overflow-wrap: break-word; }}
     .brief__bullets li::before {{ content: ""; position: absolute; left: 0; top: .72em; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }}
+    .priority {{ border-bottom: 1px solid var(--ink); padding: 22px 0 8px; }}
+    .priority__head {{ display: flex; align-items: end; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }}
+    .priority__head h2 {{ font-family: Georgia, "Times New Roman", serif; font-size: 28px; line-height: 1.1; margin: 0; }}
+    .priority__head p {{ max-width: 520px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45; word-break: keep-all; }}
     .toc {{ position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 13px; padding: 10px 0; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 94%, transparent); backdrop-filter: blur(8px); }}
     .toc__brand {{ display: flex; align-items: center; flex: 0 0 auto; padding-right: 2px; }}
     .bside-logo--nav {{ gap: 7px; }}
@@ -948,6 +1149,7 @@ def render_report_html(
     .chip.is-active {{ border-color: var(--accent); background: var(--accent-soft); color: var(--accent-deep); }}
     .mobile-story-nav {{ display: none; }}
     .featured {{ display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, .95fr); gap: 0 24px; border-bottom: 1px solid var(--ink); padding: 24px 0; align-items: stretch; }}
+    .priority .featured {{ border-bottom: 0; padding-bottom: 12px; }}
     .featured .story--featured:first-child {{ grid-row: span 2; border-right: 1px solid var(--line); padding-right: 24px; }}
     .featured .story--featured:nth-child(n+2) {{ display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 14px; border-top: 1px solid var(--line); padding: 14px 0 0; }}
     .featured .story--featured:nth-child(2) {{ border-top: 0; padding-top: 0; }}
@@ -984,6 +1186,9 @@ def render_report_html(
     .story--featured h3 {{ font-size: 18.5px; line-height: 1.32; }}
     .story p {{ max-width: 700px; margin: 0 0 8px; color: #3f3948; font-size: 14px; line-height: 1.58; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
     .story--featured p {{ font-size: 13.5px; line-height: 1.55; }}
+    .story__insight {{ display: grid; gap: 5px; margin-top: 7px; }}
+    .story__insight p {{ display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 8px; max-width: 720px; margin: 0; color: #342d3d; font-size: 13.5px; line-height: 1.48; }}
+    .story__insight strong {{ color: var(--accent-deep); font-size: 11px; font-weight: 900; letter-spacing: .03em; }}
     details {{ grid-column: 1 / -1; margin-top: 10px; max-width: 100%; }}
     summary {{ cursor: pointer; color: var(--green); font-size: 13px; font-weight: 800; }}
     .link-table {{ margin-top: 10px; border: 1px solid var(--line); background: var(--surface); overflow: auto; }}
@@ -1029,6 +1234,10 @@ def render_report_html(
       .meta-strip {{ gap: 8px 13px; font-size: 12px; }}
       .brief {{ gap: 14px; padding: 18px 0; }}
       .brief h2 {{ font-size: 22px; }}
+      .priority {{ padding-top: 20px; }}
+      .priority__head {{ display: block; }}
+      .priority__head h2 {{ font-size: 25px; }}
+      .priority__head p {{ margin-top: 7px; font-size: 12.5px; }}
       .section h2 {{ font-size: 26px; }}
       .brief__bullets {{ gap: 9px; }}
       .brief__bullets li {{ font-size: 14.5px; line-height: 1.55; }}
@@ -1069,6 +1278,9 @@ def render_report_html(
       .story h3 a {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-decoration: none; }}
       .story h3 a:focus-visible {{ outline: 2px solid var(--accent); outline-offset: 2px; }}
       .story p {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 5px; color: #4a4353; font-size: 13.5px; line-height: 1.45; }}
+      .story__insight {{ gap: 4px; }}
+      .story__insight p {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; padding-left: 0; font-size: 12.8px; line-height: 1.42; }}
+      .story__insight strong {{ display: inline; margin-right: 6px; font-size: 10.5px; }}
       .story__meta {{ flex-wrap: nowrap; gap: 6px; margin-bottom: 5px; overflow: hidden; color: #7a7285; font-size: 10.5px; line-height: 1.3; white-space: nowrap; }}
       .story__meta span {{ min-width: 0; overflow: hidden; text-overflow: ellipsis; }}
       .story__meta span:not(:last-child)::after {{ margin-left: 6px; }}
@@ -1138,7 +1350,7 @@ def render_report_html(
     </header>
 
     <section class="brief">
-      <h2>Editor’s Brief</h2>
+      <h2>{brief_title}</h2>
       <div>{review_block_html}</div>
     </section>
 
@@ -1156,9 +1368,7 @@ def render_report_html(
       </div>
     </div>
 
-    <section class="featured" aria-label="top stories">
-      {featured_html}
-    </section>
+    {featured_block_html}
 
     {''.join(category_sections)}
 
@@ -1432,6 +1642,7 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
     duplicate_records = duplicate_records_in_window(state, config, start_at, end_at)
     stories = build_report_stories(clusters, duplicate_records, config)
     enrich_story_images(stories, config)
+    attach_story_briefs(stories, config)
     review = generate_report_review(clusters, stories, config, start_at, end_at)
     date_id = end_at.astimezone(ZoneInfo(timezone_name)).strftime("%Y-%m-%d")
     report_url = report_public_url(config, date_id)
@@ -1465,12 +1676,16 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
     }
 
 
+def normalize_generated_html(html: str) -> str:
+    return "\n".join(line.rstrip() for line in str(html).splitlines()) + "\n"
+
+
 def write_report_files(report: dict[str, object], root: Path | None = None) -> list[Path]:
     project_root = root or PROJECT_ROOT
     date_id = str(report["date_id"])
     feed_dir = project_root / FEED_DIR
     feed_dir.mkdir(parents=True, exist_ok=True)
-    html = str(report["html"])
+    html = normalize_generated_html(str(report["html"]))
     dated_path = feed_dir / f"{date_id}.html"
     latest_path = feed_dir / "latest.html"
     index_path = feed_dir / "index.html"
@@ -1500,7 +1715,7 @@ def write_report_files(report: dict[str, object], root: Path | None = None) -> l
             True,
         )
         variant_path = variant_dir / f"{variant_slug}.html"
-        variant_path.write_text(variant_html, encoding="utf-8", newline="\n")
+        variant_path.write_text(normalize_generated_html(variant_html), encoding="utf-8", newline="\n")
         variant_paths.append(variant_path)
     index_path.write_text(render_report_index(feed_dir), encoding="utf-8", newline="\n")
     return [dated_path, latest_path, index_path, *variant_paths]

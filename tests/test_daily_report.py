@@ -66,7 +66,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert 'viewBox="0 0 57 20"' in html
     assert "color: var(--accent); flex: 0 0 auto" in html
     assert "-webkit-mask:" not in html
-    assert "Editor’s Brief" in html
+    assert "Editor’s Brief" not in html
     assert "brief__bullets" in html
     assert "story__image--logo" in html
     assert "story__source-logo" in html
@@ -94,6 +94,13 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "Apple SD Gothic Neo" in html
     assert "max-width: 700px" in html
     assert "font-size: 18.5px" in html
+    assert "오늘의 핵심 브리핑" in html
+    assert "오늘의 중요 기사" in html
+    assert "복수 보도, 주주권·공시 영향" in html
+    assert "story__insight" in html
+    assert "요점" in html
+    assert "맥락" in html
+    assert "근거" in html
     assert "font-size: 12.5px" in html
     assert "line-height: 1.58" in html
     assert "grid-template-columns: minmax(0, 1.35fr) minmax(260px, .95fr)" in html
