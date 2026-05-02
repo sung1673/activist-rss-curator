@@ -1286,8 +1286,8 @@ def render_report_html(
     .story--featured h3 {{ font-size: 18.5px; line-height: 1.32; }}
     .story p {{ max-width: 700px; margin: 0 0 8px; color: #3f3948; font-size: 14px; line-height: 1.58; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
     .story--featured p {{ font-size: 13.5px; line-height: 1.55; }}
-    .story__summary {{ grid-column: 1 / -1; display: grid; gap: 4px; max-height: 4.35em; overflow: hidden; margin: 0; padding: 8px 10px 8px 13px; border-left: 3px solid rgba(112, 55, 224, .52); background: rgba(246, 240, 255, .50); list-style: none; color: #342d3d; font-size: 12.6px; line-height: 1.45; word-break: keep-all; overflow-wrap: break-word; }}
-    .story__summary li {{ position: relative; padding-left: 11px; }}
+    .story__summary {{ grid-column: 1 / -1; display: grid; gap: 4px; overflow: visible; margin: 0; padding: 8px 10px 8px 13px; border-left: 3px solid rgba(112, 55, 224, .52); background: rgba(246, 240, 255, .50); list-style: none; color: #342d3d; font-size: 12.6px; line-height: 1.45; word-break: keep-all; overflow-wrap: break-word; }}
+    .story__summary li {{ position: relative; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; padding-left: 11px; }}
     .story__summary li::before {{ content: ""; position: absolute; left: 0; top: .68em; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }}
     details {{ grid-column: 1 / -1; margin-top: 8px; max-width: 100%; min-width: 0; }}
     details[open] {{ padding-bottom: 3px; }}
@@ -1385,10 +1385,9 @@ def render_report_html(
       .story h3 a {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-decoration: none; }}
       .story h3 a:focus-visible {{ outline: 2px solid var(--accent); outline-offset: 2px; }}
       .story p {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 5px; color: #4a4353; font-size: 13.5px; line-height: 1.45; }}
-      .story__summary {{ display: block; max-height: 3.55em; overflow: hidden; padding: 7px 9px; font-size: 12.3px; line-height: 1.42; }}
-      .story__summary li {{ display: inline; padding-left: 0; }}
-      .story__summary li::before {{ content: "•"; position: static; display: inline; width: auto; height: auto; margin-right: 5px; color: var(--accent); background: transparent; }}
-      .story__summary li + li::before {{ content: " · "; margin: 0 4px 0 3px; color: var(--muted); }}
+      .story__summary {{ display: grid; gap: 3px; overflow: visible; padding: 7px 9px; font-size: 12.2px; line-height: 1.42; }}
+      .story__summary li {{ display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; padding-left: 10px; }}
+      .story__summary li::before {{ content: ""; position: absolute; left: 0; top: .66em; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }}
       .story__meta {{ flex-wrap: nowrap; gap: 6px; margin-bottom: 5px; overflow: hidden; color: #7a7285; font-size: 10.5px; line-height: 1.3; white-space: nowrap; }}
       .story__meta span {{ min-width: 0; overflow: hidden; text-overflow: ellipsis; }}
       .story__meta span:not(:last-child)::after {{ margin-left: 6px; }}
@@ -1614,25 +1613,25 @@ def render_report_html(
 
     function updateStoryWindowForLinks(links, activeStoryId) {{
       if (!links.length) return;
-      let activeIndex = links.findIndex((link) => link.getAttribute('href') === activeStoryId);
-      if (activeIndex < 0) activeIndex = 0;
+      const activeIndex = visualStoryIndexByHref.get(activeStoryId) ?? 0;
       links.forEach((link, index) => {{
-        const isNear = Math.abs(index - activeIndex) <= 4;
+        const linkIndex = visualStoryIndexByHref.get(link.getAttribute('href') || '') ?? index;
+        const isNear = Math.abs(linkIndex - activeIndex) <= 4;
         link.classList.toggle('is-near-active', isNear);
       }});
     }}
 
     function updateMobileStoryContext(activeStoryId) {{
       if (!mobileStoryLinks.length) return;
-      let activeIndex = mobileStoryLinks.findIndex((link) => link.getAttribute('href') === activeStoryId);
-      if (activeIndex < 0) activeIndex = 0;
+      const activeIndex = visualStoryIndexByHref.get(activeStoryId) ?? 0;
       const contextLabels = new Map([
         [activeIndex - 1, '이전'],
         [activeIndex, '현재'],
         [activeIndex + 1, '다음'],
       ]);
-      mobileStoryLinks.forEach((link, index) => {{
-        const label = contextLabels.get(index) || '';
+      mobileStoryLinks.forEach((link) => {{
+        const linkIndex = visualStoryIndexByHref.get(link.getAttribute('href') || '') ?? Number(link.dataset.navStoryIndex || 0);
+        const label = contextLabels.get(linkIndex) || '';
         link.classList.toggle('is-mobile-context', Boolean(label));
         if (label) link.dataset.contextLabel = label;
         else delete link.dataset.contextLabel;
@@ -1672,21 +1671,51 @@ def render_report_html(
       archiveToggles.forEach((toggle) => toggle.setAttribute('aria-expanded', open ? 'true' : 'false'));
     }}
 
+    function pageTop(element) {{
+      const rect = element.getBoundingClientRect();
+      return rect.top + window.scrollY;
+    }}
+
+    function visualStoryEntries(stories) {{
+      return stories.map((story) => {{
+        const rect = story.getBoundingClientRect();
+        return {{
+          story,
+          top: rect.top + window.scrollY,
+          left: rect.left + window.scrollX,
+          bottom: rect.bottom + window.scrollY,
+        }};
+      }}).sort((a, b) => {{
+        const topDelta = a.top - b.top;
+        if (Math.abs(topDelta) > 2) return topDelta;
+        return a.left - b.left;
+      }});
+    }}
+
     function updateNavigation() {{
       if (!sections.length) return;
       const marker = window.scrollY + Math.min(220, window.innerHeight * 0.34);
       let activeSection = sections[0];
       sections.forEach((section) => {{
-        if (section.offsetTop <= marker) activeSection = section;
+        if (pageTop(section) <= marker) activeSection = section;
       }});
       const activeSectionId = activeSection.id;
       const activeStories = sectionStories.filter((story) => story.dataset.sectionKey === activeSectionId);
+      const visualEntries = visualStoryEntries(activeStories);
+      visualStoryIndexByHref = new Map();
+      visualEntries.forEach((entry, index) => {{
+        if (entry.story.id) visualStoryIndexByHref.set(`#${{entry.story.id}}`, index);
+      }});
       let activeStory = activeStories[0] || null;
-      activeStories.forEach((story) => {{
-        if (story.offsetTop <= marker) activeStory = story;
+      let activeVisualIndex = 0;
+      visualEntries.forEach((entry, index) => {{
+        if (entry.top <= marker) {{
+          activeStory = entry.story;
+          activeVisualIndex = index;
+        }}
       }});
       const total = Number(activeSection.dataset.sectionCount || activeStory?.dataset.sectionTotal || activeStories.length || 0);
-      const index = activeStory ? Number(activeStory.dataset.sectionIndex || 0) : 0;
+      const index = activeStory ? Math.min(total, activeVisualIndex + 1) : 0;
       const activeSectionLabel = activeSection.dataset.sectionLabel || '';
 
       sections.forEach((section) => {{
@@ -1715,6 +1744,7 @@ def render_report_html(
 
     let navTicking = false;
     let lastActiveSectionId = '';
+    let visualStoryIndexByHref = new Map();
     function requestNavigationUpdate() {{
       if (navTicking) return;
       navTicking = true;

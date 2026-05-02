@@ -116,6 +116,9 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "column-count: 2" in html
     assert "break-inside: avoid" in html
     assert "display: inline-grid" in html
+    assert "max-height: 4.35em" not in html
+    assert "max-height: 3.55em" not in html
+    assert "-webkit-line-clamp: 1" in html
     assert "Layout Lab" in html
     assert "variants/memo.html" in html
     assert "variants/board.html" in html
@@ -138,6 +141,9 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "target.scrollIntoView" in html
     assert "data-section-index" in html
     assert "data-progress-text" in html
+    assert "visualStoryEntries" in html
+    assert "visualStoryIndexByHref" in html
+    assert "pageTop(section)" in html
     assert "story__image--broken" in html
     assert "✓" in html
     assert "기사 링크 1건 보기" not in html
