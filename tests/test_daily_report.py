@@ -97,10 +97,16 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "오늘의 핵심 브리핑" in html
     assert "오늘의 중요 기사" in html
     assert "복수 보도, 주주권·공시 영향" in html
-    assert "story__insight" in html
-    assert "요점" in html
-    assert "맥락" in html
-    assert "근거" in html
+    assert "story__summary" in html
+    assert "요점" not in html
+    assert "맥락" not in html
+    assert "근거" not in html
+    assert "brief__link" in html
+    assert "imageCandidates" in html
+    assert "tryNextImageCandidate" in html
+    assert "is-active-section" in html
+    assert "좌우 스크롤" in html
+    assert "밀어서 보기" in html
     assert "font-size: 12.5px" in html
     assert "line-height: 1.58" in html
     assert "grid-template-columns: minmax(0, 1.35fr) minmax(260px, .95fr)" in html
@@ -128,6 +134,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "data-section-index" in html
     assert "data-progress-text" in html
     assert "story__image--broken" in html
+    assert "✓" in html
     assert "기사 링크 1건 보기" not in html
     assert "More:" not in html
     assert "story__sources" in html

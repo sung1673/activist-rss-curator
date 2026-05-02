@@ -53,7 +53,7 @@ LAYOUT_VARIANTS = [
     {
         "slug": "memo",
         "name": "Investment Memo",
-        "note": "투자 메모처럼 핵심 판단 근거를 차곡차곡 읽는 노트형",
+        "note": "투자 메모처럼 핵심 논점을 차곡차곡 읽는 노트형",
     },
     {
         "slug": "board",
@@ -185,15 +185,47 @@ def story_links(group: list[dict[str, object]]) -> list[dict[str, str]]:
     return links
 
 
-def story_image_url(group: list[dict[str, object]]) -> str:
+def story_image_urls(group: list[dict[str, object]]) -> list[str]:
+    image_urls: list[str] = []
     for entry in group:
         article = entry.get("article")
         if not isinstance(article, dict):
             continue
         image_url = str(article.get("image_url") or "").strip()
-        if image_url.startswith(("http://", "https://")):
-            return image_url
-    return ""
+        if image_url.startswith(("http://", "https://")) and image_url not in image_urls:
+            image_urls.append(image_url)
+    return ordered_image_urls(image_urls)
+
+
+def story_image_url(group: list[dict[str, object]]) -> str:
+    urls = story_image_urls(group)
+    return urls[0] if urls else ""
+
+
+def image_quality_rank(image_url: str) -> int:
+    lower_url = image_url.casefold()
+    if any(pattern in lower_url for pattern in ("trans_30x13", "blank.", "spacer", "noimage", "no_img")):
+        return 50
+    if "lh3.googleusercontent.com/j6_cofbog" in lower_url:
+        return 45
+    if "googleusercontent.com" in lower_url and "s0-w300" in lower_url:
+        return 35
+    if "/logo" in lower_url or "logo." in lower_url:
+        return 40
+    return 0
+
+
+def article_preview_image_url(image_urls: list[str]) -> str:
+    return next((image_url for image_url in ordered_image_urls(image_urls) if image_quality_rank(image_url) < 35), "")
+
+
+def ordered_image_urls(image_urls: list[str]) -> list[str]:
+    unique_urls: list[str] = []
+    for image_url in image_urls:
+        image_url = str(image_url or "").strip()
+        if image_url.startswith(("http://", "https://")) and image_url not in unique_urls:
+            unique_urls.append(image_url)
+    return sorted(unique_urls, key=lambda url: (image_quality_rank(url), unique_urls.index(url)))
 
 
 def image_enrich_settings(config: dict[str, object]) -> tuple[int, float]:
@@ -207,12 +239,12 @@ def image_enrich_settings(config: dict[str, object]) -> tuple[int, float]:
 
 def story_image_candidates(story: dict[str, object]) -> list[str]:
     candidates: list[str] = []
-    for value in [story.get("image_url"), story.get("primary_url")]:
+    for value in [story.get("primary_url")]:
         text = str(value or "").strip()
         if text.startswith(("http://", "https://")) and text not in candidates:
             candidates.append(text)
     links = story.get("links") if isinstance(story.get("links"), list) else []
-    for link in links[:4]:
+    for link in links[:10]:
         if not isinstance(link, dict):
             continue
         url = str(link.get("url") or "").strip()
@@ -231,6 +263,24 @@ def discover_story_image(url: str, client: httpx.Client) -> str:
     return image_url or ""
 
 
+def append_story_image_candidate(story: dict[str, object], image_url: str) -> None:
+    image_url = str(image_url or "").strip()
+    if not image_url.startswith(("http://", "https://")):
+        return
+    image_candidates = story.get("image_candidates")
+    if not isinstance(image_candidates, list):
+        image_candidates = []
+        story["image_candidates"] = image_candidates
+    if image_url not in [str(value) for value in image_candidates]:
+        image_candidates.append(image_url)
+        story["image_candidates"] = ordered_image_urls([str(value) for value in image_candidates])
+    current_image = str(story.get("image_url") or "").strip()
+    if image_quality_rank(image_url) >= 35:
+        return
+    if not current_image.startswith(("http://", "https://")) or image_quality_rank(image_url) < image_quality_rank(current_image):
+        story["image_url"] = image_url
+
+
 def enrich_story_images(stories: list[dict[str, object]], config: dict[str, object]) -> None:
     limit, timeout = image_enrich_settings(config)
     if limit <= 0:
@@ -238,7 +288,9 @@ def enrich_story_images(stories: list[dict[str, object]], config: dict[str, obje
     checked = 0
     with httpx.Client(timeout=timeout, headers={"User-Agent": USER_AGENT}) as client:
         for story in stories:
-            if str(story.get("image_url") or "").startswith(("http://", "https://")):
+            current_candidates = story.get("image_candidates")
+            candidate_count = len(current_candidates) if isinstance(current_candidates, list) else 0
+            if str(story.get("image_url") or "").startswith(("http://", "https://")) and candidate_count >= 3:
                 continue
             for candidate_url in story_image_candidates(story):
                 if checked >= limit:
@@ -246,8 +298,10 @@ def enrich_story_images(stories: list[dict[str, object]], config: dict[str, obje
                 checked += 1
                 image_url = discover_story_image(candidate_url, client)
                 if image_url:
-                    story["image_url"] = image_url
-                    break
+                    append_story_image_candidate(story, image_url)
+                    current_candidates = story.get("image_candidates")
+                    if isinstance(current_candidates, list) and len(current_candidates) >= 3:
+                        break
 
 
 def story_source_line(links: list[dict[str, str]]) -> str:
@@ -257,10 +311,18 @@ def story_source_line(links: list[dict[str, str]]) -> str:
 
 def story_logo_context(story: dict[str, object]) -> tuple[str, str]:
     links = story.get("links") if isinstance(story.get("links"), list) else []
-    first_link = next((link for link in links if isinstance(link, dict)), {})
+    normalized_links = [link for link in links if isinstance(link, dict)]
+    first_link = next(
+        (
+            link
+            for link in normalized_links
+            if article_domain(str(link.get("url") or "")) not in {"news.google.com", "www.google.com"}
+        ),
+        normalized_links[0] if normalized_links else {},
+    )
     source = str(
-        story.get("primary_source")
-        or (first_link.get("source") if isinstance(first_link, dict) else "")
+        (first_link.get("source") if isinstance(first_link, dict) else "")
+        or story.get("primary_source")
         or story.get("source_line")
         or "NO IMAGE"
     )
@@ -289,9 +351,22 @@ def source_logo_html(story: dict[str, object], href: str) -> str:
 
 def story_image_data_attrs(story: dict[str, object]) -> str:
     label, logo_url = story_logo_context(story)
+    raw_candidates = story.get("image_candidates")
+    candidates: list[str] = []
+    if isinstance(raw_candidates, list):
+        for value in raw_candidates:
+            image_url = str(value or "").strip()
+            if image_url.startswith(("http://", "https://")) and image_url not in candidates:
+                candidates.append(image_url)
+    primary_image = str(story.get("image_url") or "").strip()
+    if primary_image.startswith(("http://", "https://")) and primary_image not in candidates:
+        candidates.insert(0, primary_image)
+    candidates = ordered_image_urls(candidates)
+    candidates_json = json.dumps(candidates[:5], ensure_ascii=False)
     return (
         f' data-logo-label="{escape(label, quote=True)}"'
         f' data-logo-src="{escape(logo_url, quote=True)}"'
+        f' data-image-candidates="{escape(candidates_json, quote=True)}"'
     )
 
 
@@ -472,6 +547,7 @@ def build_report_stories(
             latest_dt = max((dt for dt in (entry_datetime(entry) for entry in group) if dt), default=None)
             category = section_label or digest_category_label_for_group(group)
             title = str(representative.get("title") or digest_group_title(group, config) or "제목 없음")
+            image_candidates = story_image_urls(group)
             stories.append(
                 {
                     "title": title,
@@ -479,7 +555,8 @@ def build_report_stories(
                     "summary": best_story_summary(group),
                     "links": links,
                     "link_count": len(links),
-                    "image_url": story_image_url(group),
+                    "image_url": article_preview_image_url(image_candidates),
+                    "image_candidates": image_candidates,
                     "primary_url": str(representative.get("url") or links[0]["url"]),
                     "primary_source": links[0]["source"],
                     "source_line": story_source_line(links),
@@ -521,46 +598,47 @@ def story_context(stories: list[dict[str, object]], config: dict[str, object], m
     return "\n\n".join(blocks) or digest_context([], config)
 
 
-def fallback_story_brief(story: dict[str, object]) -> dict[str, str]:
+def brief_bullet(text: str, *, max_chars: int = 82) -> str:
+    bullet = clean_brief_source_noise(text)
+    bullet = re.sub(r"\s+", " ", bullet).strip(" -·|.。")
+    replacements = (
+        ("보도했습니다", "보도됨"),
+        ("보도합니다", "보도됨"),
+        ("이어지고 있습니다", "이어짐"),
+        ("했습니다", "했음"),
+        ("합니다", "함"),
+        ("됐습니다", "됐음"),
+        ("되었습니다", "됨"),
+        ("됩니다", "됨"),
+        ("있습니다", "있음"),
+        ("부각됩니다", "부각됨"),
+        ("필요합니다", "필요 있음"),
+    )
+    for before, after in replacements:
+        bullet = re.sub(f"{before}$", after, bullet)
+    if bullet and not re.search(r"(음|함|됨|있음|이어짐|부각|확인|필요)$", bullet):
+        bullet = f"{bullet} 보도됨"
+    return compact_text(bullet, max_chars=max_chars).strip(" .")
+
+
+def fallback_story_brief(story: dict[str, object]) -> dict[str, list[str]]:
     title = compact_text(str(story.get("title") or ""), max_chars=86)
     category = str(story.get("category") or "")
     link_count = int(story.get("link_count") or 0)
     summary = clean_brief_source_noise(story_summary_for_display(story))
-    source_line = compact_text(str(story.get("source_line") or story.get("primary_source") or ""), max_chars=72)
     category_tail = {
-        "주주행동·경영권": "주주권과 경영권 이슈의 후속 흐름을 보여줍니다.",
-        "밸류업·주주환원": "주주환원 정책의 실행 가능성과 시장 반응을 확인할 수 있습니다.",
-        "자본시장 제도·공시": "공시·감독 제도 변화가 자본시장에 미치는 영향을 짚어볼 사안입니다.",
-        "해외·영문": "해외 투자자와 외신이 바라보는 지배구조·행동주의 흐름을 보여줍니다.",
-    }.get(category, "자본시장 관점에서 후속 흐름을 확인할 만한 사안입니다.")
+        "주주행동·경영권": "주주권 행사와 이사회 책임 쟁점으로 이어짐",
+        "밸류업·주주환원": "주주환원 실행 가능성과 공시 구체성 확인 필요 있음",
+        "자본시장 제도·공시": "감독·공시 제도 변화와 투자자 보호 쟁점 있음",
+        "해외·영문": "해외 투자자 시각과 글로벌 행동주의 흐름 확인됨",
+    }.get(category, "자본시장 후속 흐름을 확인할 사안 있음")
+    bullets: list[str] = []
     if link_count <= 1 and summary and len(summary) >= 30:
-        point = compact_text(summary, max_chars=128)
+        bullets.append(brief_bullet(summary, max_chars=82))
     else:
-        point = compact_text(f"{title}. {category_tail}", max_chars=128)
-
-    if category == "주주행동·경영권":
-        why = "주주권 행사, 이사회 책임, 경영권 대응의 기준을 함께 볼 사안입니다."
-    elif category == "밸류업·주주환원":
-        why = "주주환원 정책이 실제 실행과 공시 신뢰로 이어지는지 확인할 필요가 있습니다."
-    elif category == "자본시장 제도·공시":
-        why = "감독·공시·거래 제도 변화가 일반주주 보호와 시장 규율에 미칠 영향을 봐야 합니다."
-    elif category == "해외·영문":
-        why = "해외 투자자와 외신이 한국 시장 또는 글로벌 행동주의를 어떻게 해석하는지 보여줍니다."
-    else:
-        why = "자본시장 투자자 관점에서 후속 보도와 공시 연결 여부를 확인할 만합니다."
-
-    if link_count > 1 and source_line:
-        evidence = f"{source_line} 등 {link_count}건 보도"
-    elif source_line:
-        evidence = f"{source_line} 보도"
-    else:
-        evidence = "수집 기사 기준"
-
-    return {
-        "point": point,
-        "why": compact_text(why, max_chars=112),
-        "evidence": compact_text(evidence, max_chars=96),
-    }
+        bullets.append(brief_bullet(f"{title} 이슈 보도됨", max_chars=82))
+    bullets.append(brief_bullet(category_tail, max_chars=82))
+    return {"bullets": [bullet for bullet in bullets if bullet][:2]}
 
 
 def clean_brief_source_noise(text: str) -> str:
@@ -592,7 +670,7 @@ def story_brief_context(stories: list[dict[str, object]], config: dict[str, obje
     return "\n\n".join(blocks)
 
 
-def parse_story_brief_response(content: str | None) -> dict[str, dict[str, str]]:
+def parse_story_brief_response(content: str | None) -> dict[str, dict[str, list[str]]]:
     if not content:
         return {}
     cleaned = re.sub(r"^```(?:json)?|```$", "", content.strip(), flags=re.IGNORECASE | re.MULTILINE).strip()
@@ -606,22 +684,30 @@ def parse_story_brief_response(content: str | None) -> dict[str, dict[str, str]]
         items = data
     if not isinstance(items, list):
         return {}
-    parsed: dict[str, dict[str, str]] = {}
+    parsed: dict[str, dict[str, list[str]]] = {}
     for item in items:
         if not isinstance(item, dict):
             continue
         story_id = str(item.get("id") or "").strip()
         if not story_id:
             continue
-        point = compact_text(str(item.get("point") or ""), max_chars=128)
-        why = compact_text(str(item.get("why") or ""), max_chars=112)
-        evidence = compact_text(str(item.get("evidence") or ""), max_chars=96)
-        if point or why or evidence:
-            parsed[story_id] = {
-                "point": point,
-                "why": why,
-                "evidence": evidence,
-            }
+        raw_bullets = item.get("bullets")
+        bullets: list[str] = []
+        if isinstance(raw_bullets, list):
+            bullets = [
+                brief_bullet(str(raw_bullet or ""), max_chars=88)
+                for raw_bullet in raw_bullets
+                if str(raw_bullet or "").strip()
+            ]
+        if not bullets:
+            bullets = [
+                brief_bullet(str(item.get(key) or ""), max_chars=88)
+                for key in ("point", "why")
+                if str(item.get(key) or "").strip()
+            ]
+        bullets = [bullet for bullet in bullets if bullet]
+        if bullets:
+            parsed[story_id] = {"bullets": bullets[:3]}
     return parsed
 
 
@@ -640,15 +726,15 @@ def attach_story_briefs(stories: list[dict[str, object]], config: dict[str, obje
     max_tokens = int(settings.get("story_brief_max_tokens", 1400))
     system_prompt = (
         "당신은 한국 자본시장 데일리 페이지의 편집자입니다. "
-        "기사 제목과 수집 요약만 바탕으로 투자자가 빠르게 읽을 수 있는 요점, 맥락, 근거를 씁니다. "
+        "기사 제목과 수집 요약만 바탕으로 투자자가 빠르게 읽을 수 있는 짧은 bullet 요약을 씁니다. "
         "기사에 없는 사실을 만들지 말고, 매수·매도 판단은 금지합니다."
     )
     user_prompt = (
         "아래 기사 묶음별로 JSON만 출력하세요.\n"
-        "형식: {\"stories\":[{\"id\":\"story-1\",\"point\":\"...\",\"why\":\"...\",\"evidence\":\"...\"}]}\n"
-        "- point: 기사 핵심을 55~95자, 완성된 한국어 문장으로 작성\n"
-        "- why: 투자자/주주권/공시/제도 관점의 의미를 45~85자로 작성\n"
-        "- evidence: 직접 인용 대신 '어느 매체들이 다뤘는지' 또는 '복수 매체 보도' 수준으로 작성\n"
+        "형식: {\"stories\":[{\"id\":\"story-1\",\"bullets\":[\"...\",\"...\"]}]}\n"
+        "- bullets: 기사 핵심과 투자자/주주권/공시/제도 관점 의미를 1~2개로 작성\n"
+        "- 각 bullet은 22~58자, '보도됨/이어짐/있음/확인됨/부각됨' 같은 짧은 정보성 문체\n"
+        "- '근거', '요점', '맥락' 같은 라벨은 쓰지 않음\n"
         "- 저작권 보호를 위해 원문 문장을 길게 그대로 복사하지 않음\n"
         "- 제공된 정보 밖의 수치·사실을 추가하지 않음\n\n"
         f"{story_brief_context(stories, config, max_stories)}"
@@ -669,11 +755,8 @@ def attach_story_briefs(stories: list[dict[str, object]], config: dict[str, obje
         if not brief:
             continue
         fallback = fallback_story_brief(story)
-        story["brief"] = {
-            "point": brief.get("point") or fallback["point"],
-            "why": brief.get("why") or fallback["why"],
-            "evidence": brief.get("evidence") or fallback["evidence"],
-        }
+        bullets = brief.get("bullets") or fallback["bullets"]
+        story["brief"] = {"bullets": [bullet for bullet in bullets if bullet][:3]}
 
 
 def fallback_report_review(stories: list[dict[str, object]]) -> str:
@@ -690,22 +773,22 @@ def fallback_report_review(stories: list[dict[str, object]]) -> str:
     lead_titles = shareholder or top_titles
     if lead_titles:
         paragraphs.append(
-            "주주행동·경영권 이슈는 이사회 책임과 공시 투명성을 둘러싼 투자자 보호 쟁점으로 이어지고 있습니다."
+            "주주행동·경영권 이슈가 이사회 책임과 공시 투명성 쟁점으로 이어짐"
         )
     if valueup:
         paragraphs.append(
-            "밸류업과 주주환원 보도는 자사주·배당 정책의 실행 가능성과 공시 구체성이 핵심 변수로 부각됩니다."
+            "밸류업·주주환원은 자사주·배당 실행 가능성과 공시 구체성이 부각됨"
         )
     if capital:
         paragraphs.append(
-            "자본시장 제도·공시 분야에서는 감독당국의 정정 요구와 시장 규율 강화 흐름을 함께 볼 필요가 있습니다."
+            "자본시장 제도·공시는 감독당국 요구와 시장 규율 강화 흐름 확인 필요 있음"
         )
     if global_titles:
         paragraphs.append(
-            "해외·영문 보도는 행동주의 캠페인과 한국 시장 평가가 맞물리는 지점을 중심으로 추적할 만합니다."
+            "해외·영문 보도는 행동주의 캠페인과 한국 시장 평가가 맞물리는 지점 있음"
         )
     if not paragraphs:
-        paragraphs.append("신규 발행 이슈는 제한적이지만 기존 주주권·공시 이슈의 후속 보도 흐름은 계속 확인할 필요가 있습니다.")
+        paragraphs.append("신규 발행 이슈는 제한적이나 주주권·공시 후속 흐름 확인 필요 있음")
     return "\n".join(f"- {paragraph}" for paragraph in paragraphs[:4])
 
 
@@ -766,16 +849,17 @@ def generate_report_review(
     max_tokens = int(settings.get("daily_report_max_tokens", 900))
     system_prompt = (
         "당신은 금융위원회, 금감원, 거래소, 기관투자자, 행동주의 펀드를 오래 취재한 전문 자본시장 기자입니다. "
-        "수집된 기사 묶음을 바탕으로 하루치 브리핑의 핵심 bullet만 한국어 기사체로 작성합니다. "
+        "수집된 기사 묶음을 바탕으로 하루치 브리핑의 핵심 bullet만 간결한 한국어 기사체로 작성합니다. "
         "투자 조언이나 매매 권유는 하지 말고, 기사에 없는 사실을 단정하지 마세요."
     )
     user_prompt = (
         "아래 기사 묶음을 바탕으로 Telegram과 HTML 데일리 상단에 들어갈 상세 요약을 작성하세요.\n"
         "- bullet point 3~4개로 작성\n"
-        "- 각 bullet은 45~85자 안팎의 한 문장으로 작성\n"
-        "- 예: '주주권 행사와 이사회 책임 이슈가 맞물리며 투자자 보호 논의가 다시 부각됩니다.'\n"
+        "- 각 bullet은 30~68자 안팎의 한 문장으로 작성\n"
+        "- 예: '주주권 행사와 이사회 책임 이슈가 맞물리며 투자자 보호 논의 부각됨'\n"
         "- 전체 흐름, 주요 사건, 제도/정책적 의미, 해외/영문 흐름을 균형 있게 반영\n"
         "- 전문 자본시장 기자의 톤으로, 정책·공시·주주권 의미를 해석하되 과장하지 않음\n"
+        "- '그랬음/보도됨/이어짐/있음/필요 있음'처럼 짧은 정보성 어미 사용\n"
         "- '기사 N건을 정리했다' 같은 운영 설명은 쓰지 않음\n"
         "- 특정 종목 매수/매도 판단은 쓰지 않음\n\n"
         f"기간: {format_kst(start_at, str(config.get('timezone') or 'Asia/Seoul'))} - {format_kst(end_at, str(config.get('timezone') or 'Asia/Seoul'))}\n\n"
@@ -902,20 +986,15 @@ def render_story(
     sources = escape(str(story.get("source_line") or story.get("primary_source") or ""))
     summary = escape(story_summary_for_display(story))
     brief = story.get("brief") if isinstance(story.get("brief"), dict) else {}
+    summary_html = ""
+    summary_after_body_html = ""
     if editorial and brief:
-        point = escape(str(brief.get("point") or ""))
-        why = escape(str(brief.get("why") or ""))
-        evidence = escape(str(brief.get("evidence") or ""))
-        insight_items = "\n".join(
-            item
-            for item in (
-                f'<p><strong>요점</strong>{point}</p>' if point else "",
-                f'<p><strong>맥락</strong>{why}</p>' if why else "",
-                f'<p><strong>근거</strong>{evidence}</p>' if evidence else "",
-            )
-            if item
-        )
-        summary_html = f'<div class="story__insight">{insight_items}</div>' if insight_items else ""
+        raw_bullets = brief.get("bullets")
+        bullets = [str(item) for item in raw_bullets if str(item or "").strip()] if isinstance(raw_bullets, list) else []
+        if not bullets:
+            bullets = [str(brief.get(key) or "") for key in ("point", "why") if str(brief.get(key) or "").strip()]
+        bullet_items = "\n".join(f"<li>{escape(brief_bullet(bullet, max_chars=88))}</li>" for bullet in bullets[:3])
+        summary_after_body_html = f'<ul class="story__summary">{bullet_items}</ul>' if bullet_items else ""
     else:
         summary_html = f"<p>{summary}</p>" if summary else ""
     timestamp = escape(date_label(story.get("datetime"), config))
@@ -962,6 +1041,7 @@ def render_story(
               <h3><a href="{primary_url}">{safe_title}</a></h3>
               {summary_html}
             </div>
+            {summary_after_body_html}
             {details_html}
           </article>
     """
@@ -986,9 +1066,19 @@ def render_report_html(
     stats = report_stats(stories, clusters, duplicate_records)
     buckets = category_buckets(stories)
     review_bullets = clean_report_bullets(review) or clean_report_bullets(fallback_report_review(stories))
-    review_html = "\n".join(f"<li>{escape(bullet)}</li>" for bullet in review_bullets)
-    review_block_html = f'<ul class="brief__bullets">{review_html}</ul>' if review_html else ""
     featured_stories = stories[: 5 if is_standard_layout else 3]
+    review_items: list[str] = []
+    for index, bullet in enumerate(review_bullets):
+        target_story = featured_stories[index] if is_standard_layout and index < len(featured_stories) else None
+        target_id = str(target_story.get("id") or "") if isinstance(target_story, dict) else ""
+        if target_id:
+            review_items.append(
+                f'<li><a class="brief__link" href="#{escape(target_id, quote=True)}">{escape(bullet)}</a></li>'
+            )
+        else:
+            review_items.append(f"<li>{escape(bullet)}</li>")
+    review_html = "\n".join(review_items)
+    review_block_html = f'<ul class="brief__bullets">{review_html}</ul>' if review_html else ""
     featured_html = "\n".join(
         render_story(story, config, featured=True, show_details=False, editorial=is_standard_layout)
         for story in featured_stories
@@ -1133,6 +1223,9 @@ def render_report_html(
     .brief__bullets {{ margin: 0; padding: 0; list-style: none; display: grid; gap: 5px; }}
     .brief__bullets li {{ position: relative; padding-left: 13px; font-size: 12.5px; line-height: 1.42; color: #2e2738; word-break: keep-all; overflow-wrap: break-word; }}
     .brief__bullets li::before {{ content: ""; position: absolute; left: 0; top: .72em; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }}
+    .brief__link {{ color: inherit; text-decoration: none; border-bottom: 1px solid rgba(112, 55, 224, .22); }}
+    .brief__link:hover {{ color: var(--accent-deep); border-bottom-color: var(--accent); }}
+    .brief__link::after {{ content: " 이동"; color: var(--accent); font-size: 10px; font-weight: 900; letter-spacing: .02em; }}
     .priority {{ border-bottom: 1px solid var(--ink); padding: 22px 0 8px; }}
     .priority__head {{ display: flex; align-items: end; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }}
     .priority__head h2 {{ font-family: Georgia, "Times New Roman", serif; font-size: 28px; line-height: 1.1; margin: 0; }}
@@ -1156,13 +1249,14 @@ def render_report_html(
     .featured .story--featured:nth-child(n+2) .story__image {{ aspect-ratio: 4 / 3; }}
     .featured .story--featured:nth-child(n+2) h3 {{ font-size: 17px; }}
     .featured .story--featured:nth-child(n+2) p {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }}
-    .section {{ padding: 34px 0 6px; scroll-margin-top: 92px; }}
+    .section {{ position: relative; padding: 34px 0 6px; scroll-margin-top: 108px; }}
     .section__rule {{ height: 3px; background: linear-gradient(90deg, var(--accent), var(--ink)); margin-bottom: 14px; }}
-    .section__head {{ display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }}
+    .section__head {{ position: sticky; top: 49px; z-index: 4; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 -2px 0; padding: 10px 2px 9px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 96%, transparent); backdrop-filter: blur(8px); }}
+    .section.is-active-section .section__head {{ border-bottom-color: rgba(112, 55, 224, .42); box-shadow: 0 8px 18px rgba(44, 27, 84, .06); }}
     .section__head span {{ color: var(--muted); font-size: 13px; }}
-    .story-list {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 26px; margin-top: 16px; }}
+    .story-list {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 26px; margin-top: 10px; }}
     .story-list .story:first-child {{ grid-column: 1 / -1; grid-template-columns: 150px minmax(0, 1fr); }}
-    .story {{ display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 16px; min-width: 0; border-top: 1px solid var(--line); padding: 15px 0; scroll-margin-top: 92px; }}
+    .story {{ position: relative; display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px 15px; min-width: 0; border-top: 1px solid var(--line); padding: 15px 0; scroll-margin-top: 112px; }}
     .story--featured {{ grid-template-columns: 1fr; min-width: 0; overflow: hidden; border-top: 0; padding-top: 0; }}
     .story__body {{ min-width: 0; max-width: 780px; }}
     .story--featured .story__body {{ max-width: none; }}
@@ -1179,19 +1273,21 @@ def render_report_html(
     .story__sources em {{ font-style: normal; color: var(--muted); white-space: nowrap; }}
     .story h3 {{ font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif; font-size: 18.5px; line-height: 1.34; margin: 0 0 6px; letter-spacing: 0; font-weight: 800; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
     .story h3 a {{ text-decoration-thickness: 1px; text-underline-offset: 4px; }}
-    .story.is-read {{ opacity: .72; }}
-    .story.is-read .story__image {{ filter: grayscale(.2); opacity: .82; }}
-    .story.is-read h3 a {{ color: var(--muted); }}
-    .story.is-read h3 a::after {{ content: "읽음"; display: inline-block; margin-left: 7px; border: 1px solid var(--line); border-radius: 999px; padding: 1px 5px; color: var(--muted); font-size: 10px; font-weight: 800; line-height: 1.2; vertical-align: .15em; }}
+    .story.is-read {{ background: linear-gradient(90deg, rgba(112, 55, 224, .075), transparent 60%); border-top-color: rgba(112, 55, 224, .28); }}
+    .story.is-read::after {{ content: "읽음"; position: absolute; top: 10px; right: 0; border: 1px solid rgba(112, 55, 224, .24); border-radius: 999px; padding: 2px 7px; color: var(--accent-deep); background: var(--accent-soft); font-size: 10px; font-weight: 900; line-height: 1.2; }}
+    .story.is-read .story__body, .story.is-read .story__summary, .story.is-read details {{ opacity: .72; }}
+    .story.is-read .story__image {{ filter: grayscale(.28); opacity: .78; }}
+    .story.is-read h3 a {{ color: #6f6878; }}
     .story--featured h3 {{ font-size: 18.5px; line-height: 1.32; }}
     .story p {{ max-width: 700px; margin: 0 0 8px; color: #3f3948; font-size: 14px; line-height: 1.58; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
     .story--featured p {{ font-size: 13.5px; line-height: 1.55; }}
-    .story__insight {{ display: grid; gap: 5px; margin-top: 7px; }}
-    .story__insight p {{ display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 8px; max-width: 720px; margin: 0; color: #342d3d; font-size: 13.5px; line-height: 1.48; }}
-    .story__insight strong {{ color: var(--accent-deep); font-size: 11px; font-weight: 900; letter-spacing: .03em; }}
+    .story__summary {{ grid-column: 1 / -1; display: grid; gap: 4px; margin: 0; padding: 8px 10px 8px 13px; border-left: 3px solid rgba(112, 55, 224, .52); background: rgba(246, 240, 255, .52); list-style: none; color: #342d3d; font-size: 12.8px; line-height: 1.45; word-break: keep-all; overflow-wrap: break-word; }}
+    .story__summary li {{ position: relative; padding-left: 11px; }}
+    .story__summary li::before {{ content: ""; position: absolute; left: 0; top: .68em; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }}
     details {{ grid-column: 1 / -1; margin-top: 10px; max-width: 100%; }}
     summary {{ cursor: pointer; color: var(--green); font-size: 13px; font-weight: 800; }}
-    .link-table {{ margin-top: 10px; border: 1px solid var(--line); background: var(--surface); overflow: auto; }}
+    summary::after {{ content: " · 좌우 스크롤"; color: var(--muted); font-size: 11px; font-weight: 700; }}
+    .link-table {{ margin-top: 10px; border: 1px solid var(--line); background: var(--surface); overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }}
     .link-table table {{ width: 100%; min-width: 660px; table-layout: fixed; border-collapse: collapse; font-size: 12px; }}
     th, td {{ padding: 8px 9px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }}
     th {{ color: var(--muted); font-weight: 700; background: #faf8fd; }}
@@ -1211,8 +1307,9 @@ def render_report_html(
     .floating-nav .nav-progress {{ flex: 0 0 auto; color: var(--accent); font-weight: 800; font-variant-numeric: tabular-nums; }}
     .floating-nav a.is-active {{ border-left-color: var(--accent); color: var(--ink); background: var(--accent-soft); }}
     .floating-nav__stories {{ margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }}
-    .floating-nav__stories a {{ display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-    .floating-nav__stories a.is-read {{ color: #9a93a5; }}
+    .floating-nav__stories a {{ display: flex; align-items: center; justify-content: space-between; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .floating-nav__stories a.is-read {{ color: #9a93a5; background: #f8f5fc; }}
+    .floating-nav__stories a.is-read::after {{ content: "✓"; flex: 0 0 auto; margin-left: 8px; color: var(--accent); font-weight: 900; }}
     .floating-nav__stories a:not(.is-near-active) {{ display: none; }}
     .top-button {{ position: fixed; right: 22px; bottom: 24px; z-index: 9; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: var(--accent); text-decoration: none; box-shadow: 0 12px 28px rgba(76, 38, 156, .26); }}
     .footer {{ margin-top: 48px; border-top: 2px solid var(--ink); padding-top: 20px; color: var(--muted); font-size: 13px; }}
@@ -1269,18 +1366,22 @@ def render_report_html(
       .featured .story--featured:first-child {{ grid-row: auto; border-right: 0; padding-right: 0; }}
       .featured .story--featured:nth-child(n+2) {{ grid-template-columns: 82px minmax(0, 1fr); gap: 11px; padding: 15px 0; }}
       .section {{ padding-top: 28px; scroll-margin-top: 124px; }}
+      .section__head {{ top: 50px; margin-left: -1px; margin-right: -1px; padding: 9px 1px 8px; }}
+      .section__head h2 {{ max-width: 72%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
       .story-list {{ display: block; margin-top: 10px; }}
       .story-list .story:first-child {{ grid-column: auto; grid-template-columns: 82px minmax(0, 1fr); }}
       .story, .story--featured {{ grid-template-columns: 82px minmax(0, 1fr); gap: 11px; align-items: start; padding: 15px 0; }}
+      .story.is-read::after {{ top: 8px; right: 2px; padding: 2px 6px; font-size: 9.5px; }}
       .story--featured {{ border-top: 1px solid var(--line); }}
       .story--featured .story__image {{ aspect-ratio: 4 / 3; }}
       .story--featured h3, .story h3 {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 16.5px; line-height: 1.32; font-weight: 800; margin-bottom: 6px; }}
       .story h3 a {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-decoration: none; }}
       .story h3 a:focus-visible {{ outline: 2px solid var(--accent); outline-offset: 2px; }}
       .story p {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 5px; color: #4a4353; font-size: 13.5px; line-height: 1.45; }}
-      .story__insight {{ gap: 4px; }}
-      .story__insight p {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; padding-left: 0; font-size: 12.8px; line-height: 1.42; }}
-      .story__insight strong {{ display: inline; margin-right: 6px; font-size: 10.5px; }}
+      .story__summary {{ display: block; max-height: 3.55em; overflow: hidden; padding: 7px 9px; font-size: 12.3px; line-height: 1.42; }}
+      .story__summary li {{ display: inline; padding-left: 0; }}
+      .story__summary li::before {{ content: "•"; position: static; display: inline; width: auto; height: auto; margin-right: 5px; color: var(--accent); background: transparent; }}
+      .story__summary li + li::before {{ content: " · "; margin: 0 4px 0 3px; color: var(--muted); }}
       .story__meta {{ flex-wrap: nowrap; gap: 6px; margin-bottom: 5px; overflow: hidden; color: #7a7285; font-size: 10.5px; line-height: 1.3; white-space: nowrap; }}
       .story__meta span {{ min-width: 0; overflow: hidden; text-overflow: ellipsis; }}
       .story__meta span:not(:last-child)::after {{ margin-left: 6px; }}
@@ -1292,16 +1393,16 @@ def render_report_html(
       .story__image--logo span {{ font-size: 9px; }}
       .story__source-logo {{ width: 32px !important; height: 32px !important; border-radius: 8px; padding: 5px; }}
       summary {{ font-size: 12px; }}
-      .link-table {{ border: 0; background: transparent; }}
-      .link-table table {{ min-width: 0; }}
-      table, thead, tbody, tr, th, td {{ display: block; }}
-      thead {{ display: none; }}
-      tr {{ display: grid; grid-template-columns: 72px minmax(0, 1fr); column-gap: 8px; row-gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--line); }}
-      td {{ border: 0; padding: 0; width: auto !important; }}
-      .link-table__time {{ grid-column: 1; color: var(--muted); font-size: 11px; }}
-      .link-table__source {{ grid-column: 2; color: var(--accent-deep); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-      .link-table__title {{ grid-column: 1 / -1; font-size: 13px; line-height: 1.35; }}
-      .link-table__title a {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }}
+      summary::after {{ content: " · 밀어서 보기"; font-size: 10.5px; }}
+      .link-table {{ border: 1px solid var(--line); background: var(--surface); overflow-x: auto; overflow-y: hidden; }}
+      .link-table table {{ width: 100%; min-width: 620px; table-layout: fixed; border-collapse: collapse; font-size: 11.5px; }}
+      .link-table th, .link-table td {{ display: table-cell; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }}
+      .link-table thead {{ display: table-header-group; }}
+      .link-table tbody {{ display: table-row-group; }}
+      .link-table tr {{ display: table-row; }}
+      .link-table__time {{ color: var(--muted); white-space: nowrap; }}
+      .link-table__source {{ color: var(--accent-deep); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+      .link-table__title {{ line-height: 1.35; }}
       .footer__grid {{ grid-template-columns: 1fr; }}
     }}
     {variant_css}
@@ -1426,16 +1527,44 @@ def render_report_html(
       container.appendChild(text);
     }}
 
+    function imageCandidates(container) {{
+      try {{
+        const candidates = JSON.parse(container.dataset.imageCandidates || '[]');
+        if (!Array.isArray(candidates)) return [];
+        return candidates.filter((url, index) => typeof url === 'string' && url.startsWith('http') && candidates.indexOf(url) === index);
+      }} catch (error) {{
+        return [];
+      }}
+    }}
+
+    function tryNextImageCandidate(container, image) {{
+      const candidates = imageCandidates(container);
+      let currentIndex = Number(container.dataset.imageIndex || '0');
+      const currentSrc = image.currentSrc || image.src || '';
+      if (candidates[currentIndex] && currentSrc && currentSrc !== candidates[currentIndex]) {{
+        currentIndex = Math.max(candidates.indexOf(currentSrc), currentIndex);
+      }}
+      for (let nextIndex = currentIndex + 1; nextIndex < candidates.length; nextIndex += 1) {{
+        if (!candidates[nextIndex] || candidates[nextIndex] === currentSrc) continue;
+        container.dataset.imageIndex = String(nextIndex);
+        image.src = candidates[nextIndex];
+        return true;
+      }}
+      return false;
+    }}
+
     document.querySelectorAll('.story__image').forEach((container) => {{
       attachSourceLogoGuard(container);
       const image = container.querySelector('img:not(.story__source-logo)');
       if (!image) return;
-      const markBroken = () => replaceWithSourceLogo(container);
+      const markBroken = () => {{
+        if (!tryNextImageCandidate(container, image)) replaceWithSourceLogo(container);
+      }};
       const fallbackTimer = window.setTimeout(() => {{
         if (!image.complete || image.naturalWidth === 0) markBroken();
       }}, 8000);
       image.addEventListener('load', () => window.clearTimeout(fallbackTimer), {{ once: true }});
-      image.addEventListener('error', markBroken, {{ once: true }});
+      image.addEventListener('error', markBroken);
       if (image.complete && image.naturalWidth === 0) markBroken();
     }});
 
@@ -1553,6 +1682,9 @@ def render_report_html(
       const index = activeStory ? Number(activeStory.dataset.sectionIndex || 0) : 0;
       const activeSectionLabel = activeSection.dataset.sectionLabel || '';
 
+      sections.forEach((section) => {{
+        section.classList.toggle('is-active-section', section.id === activeSectionId);
+      }});
       categoryLinks.forEach((link) => {{
         const isActive = sectionIdForLink(link) === activeSectionId;
         link.classList.toggle('is-active', isActive);
