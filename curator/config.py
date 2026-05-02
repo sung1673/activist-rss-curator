@@ -53,6 +53,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_telegram_records": 1000,
         "max_digest_records": 400,
     },
+    "priority": {
+        "enabled": True,
+        "overrides_path": "data/priority_overrides.yaml",
+        "thresholds": {
+            "top": 80,
+            "watch": 55,
+            "normal": 25,
+        },
+    },
+    "archive": {
+        "enabled": True,
+        "path": "data/archive",
+        "retention_days": 365,
+    },
     "publish": {
         "max_items_in_feed": 50,
         "publish_levels": ["high", "medium"],

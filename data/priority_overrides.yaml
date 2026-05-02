@@ -1,0 +1,29 @@
+# Manual priority controls for archived articles and story groups.
+#
+# Examples:
+#
+# url_hashes:
+#   "<canonical_url_hash>":
+#     level: top
+#     score_delta: 25
+#     reasons:
+#       - manual_top_story
+#
+# story_keys:
+#   "cluster:example":
+#     level: watch
+#     reasons:
+#       - manual_watch
+#
+# title_keywords:
+#   "고려아연":
+#     score_delta: 10
+#     reasons:
+#       - manual_keyword_watch
+#
+# Use `suppress: true` to keep an item archived but out of priority surfaces.
+
+record_ids: {}
+url_hashes: {}
+story_keys: {}
+title_keywords: {}

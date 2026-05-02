@@ -4,11 +4,13 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from .archive import archive_state
 from .cluster import cluster_articles
 from .config import article_domain_is_excluded, load_config
 from .dates import choose_publication_datetime, datetime_to_iso, get_timezone, is_too_old, now_in_timezone
 from .dedupe import dedupe_articles
 from .fetch import decode_google_news_links_in_state, fetch_google_alerts_articles
+from .priority import annotate_state_priorities, load_priority_overrides, priority_overrides_path
 from .relevance import relevance_details
 from .rss_writer import write_feed, write_index
 from .state import compact_state, load_state, remember_article, remember_rejected, save_state
@@ -160,7 +162,10 @@ def run(root: Path | None = None) -> dict[str, int]:
 
     published_now = cluster_articles(unique_articles, state, config, now)
     state["last_run_at"] = datetime_to_iso(now)
+    overrides = load_priority_overrides(priority_overrides_path(project_root, config))
+    priority_count = annotate_state_priorities(state, config, now, overrides)
     compact_state(state, config, now)
+    archive_summary = archive_state(project_root, state, config, now)
     published_clusters = list(state.get("published_clusters", []))
     write_feed(project_root / "public" / "feed.xml", published_clusters, config, now)
     write_index(project_root / "public" / "index.html", state, config, now)
@@ -178,6 +183,8 @@ def run(root: Path | None = None) -> dict[str, int]:
         "published_now": len(published_now),
         "pending": len(state.get("pending_clusters", [])),
         "published_total": len(state.get("published_clusters", [])),
+        "prioritized": priority_count,
+        **archive_summary,
         **telegram_summary,
     }
 

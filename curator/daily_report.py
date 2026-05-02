@@ -167,6 +167,30 @@ def best_story_summary(group: list[dict[str, object]]) -> str:
     return ""
 
 
+def story_priority_score(group: list[dict[str, object]]) -> int:
+    scores: list[int] = []
+    for entry in group:
+        article = entry.get("article")
+        if isinstance(article, dict):
+            try:
+                scores.append(int(article.get("priority_score") or 0))
+            except (TypeError, ValueError):
+                pass
+    return max(scores, default=0)
+
+
+def story_priority_level(group: list[dict[str, object]]) -> str:
+    levels = [
+        str(entry.get("article", {}).get("priority_level") or "")
+        for entry in group
+        if isinstance(entry.get("article"), dict)
+    ]
+    for level in ("top", "watch", "normal", "archive", "suppress"):
+        if level in levels:
+            return level
+    return ""
+
+
 def story_summary_for_display(story: dict[str, object]) -> str:
     summary = compact_text(str(story.get("summary") or ""), max_chars=220)
     generic_patterns = (
@@ -603,6 +627,7 @@ def build_report_stories(
             category = section_label or digest_category_label_for_group(group)
             title = str(representative.get("title") or digest_group_title(group, config) or "제목 없음")
             image_candidates = ordered_image_urls([*story_image_urls(group), *story_link_image_urls(links)])
+            priority_score = story_priority_score(group)
             stories.append(
                 {
                     "title": title,
@@ -617,7 +642,9 @@ def build_report_stories(
                     "source_line": story_source_line(links),
                     "datetime": latest_dt,
                     "section": section_key,
-                    "score": len(links) * 10 + (3 if category == "주주행동·경영권" else 0),
+                    "priority_score": priority_score,
+                    "priority_level": story_priority_level(group),
+                    "score": priority_score + len(links) * 5 + (6 if category == "주주행동·경영권" else 0),
                 }
             )
 

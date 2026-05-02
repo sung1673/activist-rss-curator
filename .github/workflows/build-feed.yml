@@ -11,6 +11,7 @@ on:
       - "curator/**"
       - "tests/**"
       - "public/404.html"
+      - "data/priority_overrides.yaml"
   schedule:
     # KST 08:05-00:35 every 30 minutes.
     - cron: "5,35 0-15,23 * * *"
@@ -136,7 +137,7 @@ jobs:
               echo "Changed files:"
               cat changed_files.txt
 
-              collection_regex='^(config\.yaml|requirements\.txt|curator/(ai|cluster|config|dates|dedupe|fetch|main|normalize|relevance|rss_writer|state|story_judge|summaries|telegram_publisher|telegram_resend|telegram_resend_digest|telegram_smoke_test)\.py|tests/(conftest|test_cluster|test_config|test_dates|test_dedupe|test_fetch|test_main|test_normalize|test_relevance|test_rss_writer|test_state|test_story_judge|test_summaries|test_telegram_publisher|test_telegram_resend_digest)\.py)$'
+              collection_regex='^(config\.yaml|requirements\.txt|data/priority_overrides\.yaml|curator/(ai|archive|cluster|config|dates|dedupe|fetch|main|normalize|priority|relevance|rss_writer|state|story_judge|summaries|telegram_publisher|telegram_resend|telegram_resend_digest|telegram_smoke_test)\.py|tests/(conftest|test_archive|test_cluster|test_config|test_dates|test_dedupe|test_fetch|test_main|test_normalize|test_priority|test_relevance|test_rss_writer|test_state|test_story_judge|test_summaries|test_telegram_publisher|test_telegram_resend_digest)\.py)$'
               page_regex='^(\.github/workflows/build-feed\.yml|curator/daily_report\.py|tests/test_daily_report\.py|public/404\.html)$'
 
               if grep -Eq "$collection_regex" changed_files.txt; then
@@ -209,7 +210,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/CNAME public/404.html public/feed.xml public/index.html public/feed data/state.json
+          git add public/CNAME public/404.html public/feed.xml public/index.html public/feed data/state.json data/archive data/priority_overrides.yaml
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else

@@ -299,6 +299,19 @@ state:
   max_telegram_records: 1000
   max_digest_records: 400
 
+priority:
+  enabled: true
+  overrides_path: "data/priority_overrides.yaml"
+  thresholds:
+    top: 80
+    watch: 55
+    normal: 25
+
+archive:
+  enabled: true
+  path: "data/archive"
+  retention_days: 365
+
 publish:
   max_items_in_feed: 50
   publish_levels:
