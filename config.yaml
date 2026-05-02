@@ -261,9 +261,9 @@ timezone: "Asia/Seoul"
 fetch:
   max_entries_per_feed: 5
   enrich_pages: true
-  max_enrich_articles: 150
-  page_timeout_seconds: 8
-  google_news_decode_limit: 220
+  max_enrich_articles: 120
+  page_timeout_seconds: 6
+  google_news_decode_limit: 180
   state_google_news_decode_limit: 80
 
 display:
