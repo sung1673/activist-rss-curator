@@ -219,13 +219,49 @@ feeds:
   - name: "google-news-en-proxy-contest"
     category: "global"
     url: "https://news.google.com/rss/search?q=proxy+contest+shareholder+proposal+universal+proxy+card+activist+when:7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-activist-board-seats-settlement"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=activist+investor+board+seats+settlement+shareholder+campaign+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-dissident-nominees-universal-proxy"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=dissident+nominees+universal+proxy+card+proxy+contest+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-poison-pill-activist-defense"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=poison+pill+shareholder+activism+activist+investor+defense+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-say-on-pay-vote-no"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=say+on+pay+vote+no+campaign+shareholder+advisory+vote+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-shareholder-proposal-agm"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=shareholder+proposal+annual+meeting+corporate+governance+vote+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-board-refreshment-governance"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=board+refreshment+independent+directors+corporate+governance+shareholder+pressure+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-activist-mna-strategic-alternatives"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=activist+investor+strategic+alternatives+spin+off+breakup+sale+campaign+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-stewardship-code-proxy-voting"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=stewardship+code+proxy+voting+institutional+investors+corporate+governance+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-listing-rules-shareholder-rights"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=listing+rules+shareholder+rights+corporate+governance+capital+market+reform+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-dual-class-shareholder-rights"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=dual+class+shares+shareholder+rights+corporate+governance+reform+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-japan-activism-governance"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=Japan+shareholder+activism+corporate+governance+proxy+fight+board+seats+when%3A7d&hl=en-US&gl=US&ceid=US:en"
+  - name: "google-news-en-europe-activism-governance"
+    category: "global"
+    url: "https://news.google.com/rss/search?q=Europe+shareholder+activism+corporate+governance+proxy+fight+board+seats+when%3A7d&hl=en-US&gl=US&ceid=US:en"
 public_feed_url: "https://news.bside.ai/feed.xml"
 timezone: "Asia/Seoul"
 
 fetch:
   max_entries_per_feed: 5
   enrich_pages: true
-  max_enrich_articles: 120
+  max_enrich_articles: 150
   page_timeout_seconds: 8
   google_news_decode_limit: 220
   state_google_news_decode_limit: 80

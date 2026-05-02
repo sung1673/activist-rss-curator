@@ -1158,7 +1158,11 @@ def render_report_html(
     variant_class = f"layout-{variant_slug}"
     variant_links_html = render_layout_variant_links(variant_slug, in_variant_dir=in_variant_dir)
     variant_css = layout_variant_css()
-    brief_title = "오늘의 핵심 브리핑" if is_standard_layout else "Editor’s Brief"
+    brief_title_html = (
+        '<span class="brief-title__eyebrow">오늘의</span><span>핵심 브리핑</span>'
+        if is_standard_layout
+        else "Editor’s Brief"
+    )
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -1217,10 +1221,11 @@ def render_report_html(
     .archive-panel__link:hover, .archive-panel__link.is-current {{ background: var(--accent-soft); color: var(--accent-deep); }}
     .archive-panel__link span {{ color: var(--muted); font-size: 11px; }}
     .archive-panel__empty {{ padding: 8px 4px; color: var(--muted); font-size: 13px; }}
-    .brief {{ display: grid; grid-template-columns: 150px 1fr; gap: 22px; border-bottom: 1px solid var(--ink); padding: 18px 0; }}
-    .brief h2 {{ font-family: Georgia, "Times New Roman", serif; font-size: 20px; line-height: 1.1; margin: 0; }}
+    .brief {{ display: grid; grid-template-columns: 168px 1fr; gap: 22px; align-items: start; border-bottom: 1px solid var(--ink); padding: 18px 0; }}
+    .brief h2 {{ display: grid; gap: 3px; align-content: start; border-left: 3px solid var(--accent); padding-left: 10px; font-family: Georgia, "Times New Roman", serif; font-size: 20px; line-height: 1.12; margin: 0; word-break: keep-all; }}
+    .brief-title__eyebrow {{ color: var(--accent); font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif; font-size: 11px; font-weight: 900; letter-spacing: .08em; }}
     .section h2 {{ font-family: Georgia, "Times New Roman", serif; font-size: 26px; line-height: 1.1; margin: 0; }}
-    .brief__bullets {{ margin: 0; padding: 0; list-style: none; display: grid; gap: 5px; }}
+    .brief__bullets {{ margin: 0; padding: 2px 0 0; list-style: none; display: grid; gap: 6px; }}
     .brief__bullets li {{ position: relative; padding-left: 13px; font-size: 12.5px; line-height: 1.42; color: #2e2738; word-break: keep-all; overflow-wrap: break-word; }}
     .brief__bullets li::before {{ content: ""; position: absolute; left: 0; top: .72em; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }}
     .brief__link {{ color: inherit; text-decoration: none; border-bottom: 1px solid rgba(112, 55, 224, .22); }}
@@ -1254,9 +1259,9 @@ def render_report_html(
     .section__head {{ position: sticky; top: 49px; z-index: 4; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 -2px 0; padding: 10px 2px 9px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 96%, transparent); backdrop-filter: blur(8px); }}
     .section.is-active-section .section__head {{ border-bottom-color: rgba(112, 55, 224, .42); box-shadow: 0 8px 18px rgba(44, 27, 84, .06); }}
     .section__head span {{ color: var(--muted); font-size: 13px; }}
-    .story-list {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 26px; margin-top: 10px; }}
-    .story-list .story:first-child {{ grid-column: 1 / -1; grid-template-columns: 150px minmax(0, 1fr); }}
-    .story {{ position: relative; display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px 15px; min-width: 0; border-top: 1px solid var(--line); padding: 15px 0; scroll-margin-top: 112px; }}
+    .story-list {{ column-count: 2; column-gap: 28px; margin-top: 10px; }}
+    .story-list .story:first-child {{ grid-template-columns: 104px minmax(0, 1fr); }}
+    .story {{ position: relative; display: inline-grid; width: 100%; grid-template-columns: 104px minmax(0, 1fr); gap: 10px 14px; min-width: 0; break-inside: avoid; border-top: 1px solid var(--line); padding: 14px 0 16px; scroll-margin-top: 112px; vertical-align: top; }}
     .story--featured {{ grid-template-columns: 1fr; min-width: 0; overflow: hidden; border-top: 0; padding-top: 0; }}
     .story__body {{ min-width: 0; max-width: 780px; }}
     .story--featured .story__body {{ max-width: none; }}
@@ -1271,7 +1276,7 @@ def render_report_html(
     .story__meta span:not(:last-child)::after {{ content: "·"; margin-left: 8px; color: var(--line); }}
     .story__sources a {{ margin-right: 8px; white-space: nowrap; color: var(--accent-deep); }}
     .story__sources em {{ font-style: normal; color: var(--muted); white-space: nowrap; }}
-    .story h3 {{ font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif; font-size: 18.5px; line-height: 1.34; margin: 0 0 6px; letter-spacing: 0; font-weight: 800; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
+    .story h3 {{ font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif; font-size: 17.5px; line-height: 1.34; margin: 0 0 5px; letter-spacing: 0; font-weight: 800; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
     .story h3 a {{ text-decoration-thickness: 1px; text-underline-offset: 4px; }}
     .story.is-read {{ background: linear-gradient(90deg, rgba(112, 55, 224, .075), transparent 60%); border-top-color: rgba(112, 55, 224, .28); }}
     .story.is-read::after {{ content: "읽음"; position: absolute; top: 10px; right: 0; border: 1px solid rgba(112, 55, 224, .24); border-radius: 999px; padding: 2px 7px; color: var(--accent-deep); background: var(--accent-soft); font-size: 10px; font-weight: 900; line-height: 1.2; }}
@@ -1281,13 +1286,14 @@ def render_report_html(
     .story--featured h3 {{ font-size: 18.5px; line-height: 1.32; }}
     .story p {{ max-width: 700px; margin: 0 0 8px; color: #3f3948; font-size: 14px; line-height: 1.58; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
     .story--featured p {{ font-size: 13.5px; line-height: 1.55; }}
-    .story__summary {{ grid-column: 1 / -1; display: grid; gap: 4px; margin: 0; padding: 8px 10px 8px 13px; border-left: 3px solid rgba(112, 55, 224, .52); background: rgba(246, 240, 255, .52); list-style: none; color: #342d3d; font-size: 12.8px; line-height: 1.45; word-break: keep-all; overflow-wrap: break-word; }}
+    .story__summary {{ grid-column: 1 / -1; display: grid; gap: 4px; max-height: 4.35em; overflow: hidden; margin: 0; padding: 8px 10px 8px 13px; border-left: 3px solid rgba(112, 55, 224, .52); background: rgba(246, 240, 255, .50); list-style: none; color: #342d3d; font-size: 12.6px; line-height: 1.45; word-break: keep-all; overflow-wrap: break-word; }}
     .story__summary li {{ position: relative; padding-left: 11px; }}
     .story__summary li::before {{ content: ""; position: absolute; left: 0; top: .68em; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }}
-    details {{ grid-column: 1 / -1; margin-top: 10px; max-width: 100%; }}
+    details {{ grid-column: 1 / -1; margin-top: 8px; max-width: 100%; min-width: 0; }}
+    details[open] {{ padding-bottom: 3px; }}
     summary {{ cursor: pointer; color: var(--green); font-size: 13px; font-weight: 800; }}
     summary::after {{ content: " · 좌우 스크롤"; color: var(--muted); font-size: 11px; font-weight: 700; }}
-    .link-table {{ margin-top: 10px; border: 1px solid var(--line); background: var(--surface); overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }}
+    .link-table {{ width: 100%; max-width: 100%; min-width: 0; margin-top: 10px; border: 1px solid var(--line); background: var(--surface); overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }}
     .link-table table {{ width: 100%; min-width: 660px; table-layout: fixed; border-collapse: collapse; font-size: 12px; }}
     th, td {{ padding: 8px 9px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }}
     th {{ color: var(--muted); font-weight: 700; background: #faf8fd; }}
@@ -1329,8 +1335,9 @@ def render_report_html(
       .dek, .brief__bullets li, .story h3, .story p {{ word-break: keep-all; overflow-wrap: break-word; }}
       .dek {{ font-size: 16px; line-height: 1.55; }}
       .meta-strip {{ gap: 8px 13px; font-size: 12px; }}
-      .brief {{ gap: 14px; padding: 18px 0; }}
-      .brief h2 {{ font-size: 22px; }}
+      .brief {{ gap: 12px; padding: 18px 0; }}
+      .brief h2 {{ font-size: 21px; }}
+      .brief-title__eyebrow {{ font-size: 10.5px; }}
       .priority {{ padding-top: 20px; }}
       .priority__head {{ display: block; }}
       .priority__head h2 {{ font-size: 25px; }}
@@ -1368,9 +1375,9 @@ def render_report_html(
       .section {{ padding-top: 28px; scroll-margin-top: 124px; }}
       .section__head {{ top: 50px; margin-left: -1px; margin-right: -1px; padding: 9px 1px 8px; }}
       .section__head h2 {{ max-width: 72%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-      .story-list {{ display: block; margin-top: 10px; }}
+      .story-list {{ display: block; column-count: auto; margin-top: 10px; }}
       .story-list .story:first-child {{ grid-column: auto; grid-template-columns: 82px minmax(0, 1fr); }}
-      .story, .story--featured {{ grid-template-columns: 82px minmax(0, 1fr); gap: 11px; align-items: start; padding: 15px 0; }}
+      .story, .story--featured {{ display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 11px; align-items: start; padding: 15px 0; }}
       .story.is-read::after {{ top: 8px; right: 2px; padding: 2px 6px; font-size: 9.5px; }}
       .story--featured {{ border-top: 1px solid var(--line); }}
       .story--featured .story__image {{ aspect-ratio: 4 / 3; }}
@@ -1451,7 +1458,7 @@ def render_report_html(
     </header>
 
     <section class="brief">
-      <h2>{brief_title}</h2>
+      <h2>{brief_title_html}</h2>
       <div>{review_block_html}</div>
     </section>
 

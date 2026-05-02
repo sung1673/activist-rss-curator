@@ -94,7 +94,9 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "Apple SD Gothic Neo" in html
     assert "max-width: 700px" in html
     assert "font-size: 18.5px" in html
-    assert "오늘의 핵심 브리핑" in html
+    assert "brief-title__eyebrow" in html
+    assert "오늘의" in html
+    assert "핵심 브리핑" in html
     assert "오늘의 중요 기사" in html
     assert "복수 보도, 주주권·공시 영향" in html
     assert "story__summary" in html
@@ -111,6 +113,9 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "line-height: 1.58" in html
     assert "grid-template-columns: minmax(0, 1.35fr) minmax(260px, .95fr)" in html
     assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in html
+    assert "column-count: 2" in html
+    assert "break-inside: avoid" in html
+    assert "display: inline-grid" in html
     assert "Layout Lab" in html
     assert "variants/memo.html" in html
     assert "variants/board.html" in html

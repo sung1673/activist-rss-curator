@@ -97,6 +97,36 @@ def test_global_activism_terms_are_clustered_as_activism(config, now) -> None:  
     assert "Elliott Management" in enriched["company_candidates"]
 
 
+def test_global_proxy_and_defense_terms_are_clustered_as_activism(config, now) -> None:  # type: ignore[no-untyped-def]
+    articles = [
+        make_article(
+            "Dissident nominees seek board seats under universal proxy card",
+            "https://example.com/universal-proxy",
+            summary="A shareholder campaign is headed to a contested annual meeting",
+            relevance_level="high",
+        ),
+        make_article(
+            "Company adopts poison pill after activist demands strategic alternatives",
+            "https://example.com/poison-pill",
+            summary="The board is reviewing a defense after an activist investor called for a spin-off",
+            relevance_level="high",
+        ),
+    ]
+    enriched = [enrich_article_for_clustering(article) for article in articles]
+    assert {article["theme_group"] for article in enriched} == {"activism_trend"}
+
+
+def test_global_voting_terms_are_grouped_as_voting_disclosure(config, now) -> None:  # type: ignore[no-untyped-def]
+    article = make_article(
+        "Say on pay vote and proxy advisory pressure board refreshment",
+        "https://example.com/say-on-pay",
+        summary="Annual meeting investors scrutinize independent directors and stewardship code voting",
+        relevance_level="medium",
+    )
+    enriched = enrich_article_for_clustering(article)
+    assert "voting_disclosure" in enriched["theme_groups"]
+
+
 def test_capital_market_policy_theme_groups_related_items(config, now) -> None:  # type: ignore[no-untyped-def]
     state = {"pending_clusters": [], "published_clusters": []}
     articles = [
