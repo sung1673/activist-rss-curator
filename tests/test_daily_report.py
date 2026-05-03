@@ -156,6 +156,29 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "한화솔루션 유상증자 정정요구" in html
 
 
+def test_daily_report_refreshes_archive_links_on_existing_pages(tmp_path) -> None:
+    first_now = datetime(2026, 5, 1, 10, 20, tzinfo=ZoneInfo("Asia/Seoul"))
+    second_now = datetime(2026, 5, 2, 10, 20, tzinfo=ZoneInfo("Asia/Seoul"))
+    (tmp_path / "data").mkdir()
+    (tmp_path / "config.yaml").write_text("report:\n  image_enrich_limit: 0\n", encoding="utf-8")
+    (tmp_path / "data" / "state.json").write_text(
+        json.dumps({"published_clusters": [report_cluster("cluster:test", first_now)], "pending_clusters": [], "articles": []}),
+        encoding="utf-8",
+    )
+
+    write_report_files(build_daily_report(tmp_path, first_now), tmp_path)
+    first_page = tmp_path / "public" / "feed" / "2026-05-01.html"
+    assert "2026-05-02.html" not in first_page.read_text(encoding="utf-8")
+
+    write_report_files(build_daily_report(tmp_path, second_now), tmp_path)
+    refreshed_first_html = first_page.read_text(encoding="utf-8")
+    second_html = (tmp_path / "public" / "feed" / "2026-05-02.html").read_text(encoding="utf-8")
+
+    assert 'href="2026-05-02.html">2026-05-02' in refreshed_first_html
+    assert 'href="2026-05-01.html">2026-05-01<span>현재</span>' in refreshed_first_html
+    assert 'href="2026-05-02.html">2026-05-02<span>현재</span>' in second_html
+
+
 def test_mobile_article_url_uses_known_mobile_hosts() -> None:
     assert (
         mobile_article_url("https://news.naver.com/main/read.naver?mode=LSD&oid=001&aid=0010000001")

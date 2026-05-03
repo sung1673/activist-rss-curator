@@ -4,4 +4,7 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.ssh
+.env.local
+.env.api
 .DS_Store

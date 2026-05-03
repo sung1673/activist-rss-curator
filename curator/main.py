@@ -12,6 +12,7 @@ from .dedupe import dedupe_articles
 from .fetch import decode_google_news_links_in_state, fetch_google_alerts_articles
 from .priority import annotate_state_priorities, load_priority_overrides, priority_overrides_path
 from .relevance import relevance_details
+from .remote_api import sync_state_to_remote_api
 from .rss_writer import write_feed, write_index
 from .state import compact_state, load_state, remember_article, remember_rejected, save_state
 from .summaries import publish_hourly_telegram_update
@@ -173,9 +174,7 @@ def run(root: Path | None = None) -> dict[str, int]:
         telegram_summary = {"telegram_sent": 0, "telegram_failed": 0}
     else:
         telegram_summary = publish_hourly_telegram_update(state, config, now, duplicates)
-    save_state(state_path, state)
-
-    return {
+    run_summary = {
         "fetched": len(fetched_articles),
         "accepted": len(unique_articles),
         "duplicates": len(duplicates),
@@ -186,6 +185,13 @@ def run(root: Path | None = None) -> dict[str, int]:
         "prioritized": priority_count,
         **archive_summary,
         **telegram_summary,
+    }
+    remote_summary = sync_state_to_remote_api(state, config, now, run_summary)
+    save_state(state_path, state)
+
+    return {
+        **run_summary,
+        **remote_summary,
     }
 
 

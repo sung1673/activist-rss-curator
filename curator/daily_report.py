@@ -17,6 +17,7 @@ from .config import load_config
 from .dates import format_kst, now_in_timezone
 from .fetch import USER_AGENT, image_href
 from .rss_writer import article_link, article_source_label, compact_text, display_article_title
+from .remote_api import sync_report_to_remote_api
 from .state import load_state
 from .summaries import (
     digest_article_identity_keys,
@@ -94,6 +95,10 @@ def report_public_url(config: dict[str, object], date_id: str) -> str:
     if not base_url:
         return f"feed/{date_id}.html"
     return f"{base_url}/feed/{date_id}.html"
+
+
+def report_read_api_url() -> str:
+    return os.environ.get("ACTIVIST_PUBLIC_API_URL", "").strip()
 
 
 def article_domain(url: str) -> str:
@@ -1282,6 +1287,8 @@ def render_report_html(
     variant_class = f"layout-{variant_slug}"
     variant_links_html = render_layout_variant_links(variant_slug, in_variant_dir=in_variant_dir)
     variant_css = layout_variant_css()
+    read_api_url_json = json.dumps(report_read_api_url(), ensure_ascii=False)
+    date_id_json = json.dumps(date_id, ensure_ascii=False)
     brief_title_html = (
         '<span class="brief-title__eyebrow">오늘의</span><span>핵심 브리핑</span>'
         if is_standard_layout
@@ -1729,6 +1736,9 @@ def render_report_html(
     const archivePanel = document.querySelector('[data-archive-panel]');
     const archiveToggles = Array.from(document.querySelectorAll('[data-archive-toggle]'));
     const archiveClose = document.querySelector('[data-archive-close]');
+    const archiveLinksContainer = document.querySelector('.archive-panel__links');
+    const remoteReportsApiUrl = {read_api_url_json};
+    const currentReportDateId = {date_id_json};
     const readStorageKey = `bside-daily-read:${{location.pathname}}`;
     let readStoryIds = new Set();
 
@@ -1821,6 +1831,48 @@ def render_report_html(
       if (!archivePanel) return;
       archivePanel.hidden = !open;
       archiveToggles.forEach((toggle) => toggle.setAttribute('aria-expanded', open ? 'true' : 'false'));
+    }}
+
+    function apiUrlWithAction(baseUrl, action) {{
+      if (!baseUrl) return '';
+      const separator = baseUrl.includes('?') ? '&' : '?';
+      return `${{baseUrl}}${{separator}}action=${{encodeURIComponent(action)}}`;
+    }}
+
+    function renderRemoteArchiveLinks(reports) {{
+      if (!archiveLinksContainer || !Array.isArray(reports) || !reports.length) return;
+      archiveLinksContainer.innerHTML = '';
+      reports.forEach((report) => {{
+        const dateId = String(report.date_id || '').slice(0, 10);
+        if (!/^\\d{{4}}-\\d{{2}}-\\d{{2}}$/.test(dateId)) return;
+        const link = document.createElement('a');
+        link.className = `archive-panel__link${{dateId === currentReportDateId ? ' is-current' : ''}}`;
+        link.href = report.public_url || `${{dateId}}.html`;
+        link.textContent = dateId;
+        const label = document.createElement('span');
+        label.textContent = dateId === currentReportDateId ? '현재' : `${{Number(report.article_count || 0)}}건`;
+        link.appendChild(label);
+        archiveLinksContainer.appendChild(link);
+      }});
+      if (!archiveLinksContainer.children.length) {{
+        const empty = document.createElement('span');
+        empty.className = 'archive-panel__empty';
+        empty.textContent = '아직 발행된 데일리가 없습니다.';
+        archiveLinksContainer.appendChild(empty);
+      }}
+    }}
+
+    async function loadRemoteArchiveLinks() {{
+      if (!remoteReportsApiUrl || !archiveLinksContainer) return;
+      try {{
+        const response = await fetch(`${{apiUrlWithAction(remoteReportsApiUrl, 'reports')}}&limit=30`, {{
+          headers: {{ 'Accept': 'application/json' }},
+          credentials: 'omit',
+        }});
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data && data.ok) renderRemoteArchiveLinks(data.reports || []);
+      }} catch (error) {{}}
     }}
 
     function pageTop(element) {{
@@ -1953,6 +2005,7 @@ def render_report_html(
       }});
     }});
     updateNavigation();
+    loadRemoteArchiveLinks();
   </script>
 </body>
 </html>
@@ -2046,7 +2099,8 @@ def write_report_files(report: dict[str, object], root: Path | None = None) -> l
         variant_path.write_text(normalize_generated_html(variant_html), encoding="utf-8", newline="\n")
         variant_paths.append(variant_path)
     index_path.write_text(render_report_index(feed_dir), encoding="utf-8", newline="\n")
-    return [dated_path, latest_path, index_path, *variant_paths]
+    refreshed_paths = refresh_existing_report_archive_links(feed_dir, date_id)
+    return [dated_path, latest_path, index_path, *variant_paths, *refreshed_paths]
 
 
 def render_report_archive_links(feed_dir: Path, current_date_id: str, *, link_prefix: str = "", max_items: int = 20) -> str:
@@ -2072,6 +2126,50 @@ def render_report_archive_links(feed_dir: Path, current_date_id: str, *, link_pr
             "</a>"
         )
     return "\n".join(items)
+
+
+ARCHIVE_LINKS_PATTERN = re.compile(
+    r'(<div class="archive-panel__links">\n)(.*?)(\n\s*</div>)',
+    re.DOTALL,
+)
+
+
+def refresh_report_archive_links_in_html(html: str, links_html: str) -> str:
+    replacement = r"\1" + links_html + r"\3"
+    return ARCHIVE_LINKS_PATTERN.sub(replacement, html, count=1)
+
+
+def refresh_existing_report_archive_links(feed_dir: Path, current_date_id: str) -> list[Path]:
+    if not feed_dir.exists():
+        return []
+    refreshed: list[Path] = []
+    dated_paths = [
+        path
+        for path in feed_dir.glob("*.html")
+        if path.name not in {"latest.html", "index.html"} and path.stem
+    ]
+    dated_paths.append(feed_dir / "latest.html")
+    for path in dated_paths:
+        if not path.exists():
+            continue
+        page_date_id = current_date_id if path.name == "latest.html" else path.stem
+        links_html = render_report_archive_links(feed_dir, page_date_id)
+        html = path.read_text(encoding="utf-8")
+        updated = refresh_report_archive_links_in_html(html, links_html)
+        if updated != html:
+            path.write_text(normalize_generated_html(updated), encoding="utf-8", newline="\n")
+            refreshed.append(path)
+
+    variant_dir = feed_dir / "variants"
+    if variant_dir.exists():
+        variant_links = render_report_archive_links(feed_dir, current_date_id, link_prefix="../")
+        for path in variant_dir.glob("*.html"):
+            html = path.read_text(encoding="utf-8")
+            updated = refresh_report_archive_links_in_html(html, variant_links)
+            if updated != html:
+                path.write_text(normalize_generated_html(updated), encoding="utf-8", newline="\n")
+                refreshed.append(path)
+    return refreshed
 
 
 def render_report_index(feed_dir: Path) -> str:
@@ -2171,11 +2269,12 @@ def send_daily_report(root: Path | None = None) -> dict[str, int]:
     project_root = root or PROJECT_ROOT
     report = build_daily_report(project_root)
     write_report_files(report, project_root)
+    remote_summary = sync_report_to_remote_api(report)
     config = report["config"] if isinstance(report.get("config"), dict) else load_config(project_root / "config.yaml")
     if daily_report_write_only():
-        return {"daily_report_written": 1, "daily_report_sent": 0, "daily_report_failed": 0}
+        return {"daily_report_written": 1, "daily_report_sent": 0, "daily_report_failed": 0, **remote_summary}
     if not telegram_is_configured(config):
-        return {"daily_report_written": 1, "daily_report_sent": 0, "daily_report_failed": 0}
+        return {"daily_report_written": 1, "daily_report_sent": 0, "daily_report_failed": 0, **remote_summary}
     response = send_telegram_message(
         telegram_bot_token(),
         telegram_chat_id(config),
@@ -2187,6 +2286,7 @@ def send_daily_report(root: Path | None = None) -> dict[str, int]:
         "daily_report_written": 1,
         "daily_report_sent": 1 if response.get("ok") else 0,
         "daily_report_failed": 0 if response.get("ok") else 1,
+        **remote_summary,
     }
 
 
