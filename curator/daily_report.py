@@ -1374,6 +1374,16 @@ def render_report_html(
     .db-pulse__item h3 {{ margin: 0; font-size: 14px; line-height: 1.36; font-weight: 850; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: keep-all; overflow-wrap: break-word; }}
     .db-pulse__meta {{ display: flex; flex-wrap: wrap; gap: 6px 9px; color: var(--muted); font-size: 10.8px; line-height: 1.35; }}
     .db-pulse__meta strong {{ color: var(--accent-deep); font-weight: 900; }}
+    .db-search {{ display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }}
+    .db-search input {{ min-width: 0; width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); padding: 9px 10px; font: inherit; font-size: 13px; }}
+    .db-search button {{ border: 1px solid var(--accent); border-radius: 8px; background: var(--accent); color: #fff; padding: 0 13px; font: inherit; font-size: 12px; font-weight: 900; cursor: pointer; }}
+    .db-search__results[hidden] {{ display: none !important; }}
+    .db-search__results {{ display: grid; gap: 6px; margin-top: 10px; }}
+    .db-search__result {{ display: grid; gap: 3px; border-top: 1px solid var(--line); padding: 8px 0 2px; text-decoration: none; color: inherit; }}
+    .db-search__result:hover h3 {{ color: var(--accent-deep); text-decoration: underline; text-underline-offset: 3px; }}
+    .db-search__result h3 {{ margin: 0; font-size: 13px; line-height: 1.36; font-weight: 820; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: keep-all; overflow-wrap: break-word; }}
+    .db-search__meta {{ display: flex; flex-wrap: wrap; gap: 6px 9px; color: var(--muted); font-size: 10.6px; line-height: 1.35; }}
+    .db-search__message {{ color: var(--muted); font-size: 12px; padding: 8px 0 0; }}
     .priority {{ border-bottom: 1px solid var(--ink); padding: 22px 0 8px; }}
     .priority__head {{ display: flex; align-items: end; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }}
     .priority__head h2 {{ font-family: Georgia, "Times New Roman", serif; font-size: 28px; line-height: 1.1; margin: 0; }}
@@ -1519,6 +1529,10 @@ def render_report_html(
       .db-pulse__head p {{ font-size: 12px; }}
       .db-pulse__list {{ grid-template-columns: 1fr; gap: 4px; }}
       .db-pulse__item h3 {{ font-size: 13.5px; -webkit-line-clamp: 2; }}
+      .db-search {{ grid-template-columns: 1fr auto; gap: 7px; }}
+      .db-search input {{ font-size: 12.5px; padding: 8px 9px; }}
+      .db-search button {{ padding: 0 11px; }}
+      .db-search__result h3 {{ font-size: 12.8px; }}
       .brand-row {{ align-items: flex-start; flex-direction: column; }}
       .featured {{ gap: 0; padding: 22px 0; }}
       .featured .story--featured:first-child {{ grid-row: auto; border-right: 0; padding-right: 0; }}
@@ -1621,6 +1635,11 @@ def render_report_html(
         <span class="db-pulse__badge" data-db-pulse-status>DB 연결</span>
       </div>
       <div class="db-pulse__list" data-db-pulse-list></div>
+      <form class="db-search" data-db-search>
+        <input type="search" name="q" autocomplete="off" placeholder="DB 기사 검색: 고려아연, 밸류업, 소액주주">
+        <button type="submit">검색</button>
+      </form>
+      <div class="db-search__results" data-db-search-results hidden></div>
     </section>
 
     <nav class="toc" aria-label="report sections">
@@ -1769,6 +1788,8 @@ def render_report_html(
     const dbPulse = document.querySelector('[data-db-pulse]');
     const dbPulseList = document.querySelector('[data-db-pulse-list]');
     const dbPulseStatus = document.querySelector('[data-db-pulse-status]');
+    const dbSearchForm = document.querySelector('[data-db-search]');
+    const dbSearchResults = document.querySelector('[data-db-search-results]');
     const remoteReportsApiUrl = {read_api_url_json};
     const currentReportDateId = {date_id_json};
     const readStorageKey = `bside-daily-read:${{location.pathname}}`;
@@ -1915,6 +1936,22 @@ def render_report_html(
       return `${{match[2]}}.${{match[3]}} ${{match[4]}}:${{match[5]}}`;
     }}
 
+    function articleDateLabel(article) {{
+      const raw = String(article.published_at || article.seen_at || article.sort_at || '').trim();
+      const match = raw.match(/^(\\d{{4}})-(\\d{{2}})-(\\d{{2}})\\s+(\\d{{2}}):(\\d{{2}})/);
+      if (!match) return '';
+      return `${{match[2]}}.${{match[3]}} ${{match[4]}}:${{match[5]}}`;
+    }}
+
+    function articleStatusLabel(article) {{
+      const status = String(article.status || '').toLowerCase();
+      if (status === 'published') return '발행';
+      if (status === 'accepted') return '수집';
+      if (status === 'pending') return '대기';
+      if (status === 'duplicate') return '중복';
+      return status || '수집';
+    }}
+
     function renderDbPulse(stories) {{
       if (!dbPulse || !dbPulseList || !Array.isArray(stories)) return;
       const items = stories
@@ -1969,6 +2006,71 @@ def render_report_html(
         const data = await response.json();
         if (data && data.ok) renderDbPulse(data.stories || []);
       }} catch (error) {{}}
+    }}
+
+    function showDbSearchMessage(message) {{
+      if (!dbSearchResults) return;
+      dbSearchResults.innerHTML = '';
+      const item = document.createElement('div');
+      item.className = 'db-search__message';
+      item.textContent = message;
+      dbSearchResults.appendChild(item);
+      dbSearchResults.hidden = false;
+    }}
+
+    function renderDbSearchResults(articles, query) {{
+      if (!dbSearchResults) return;
+      const items = Array.isArray(articles) ? articles.filter((article) => article && article.title && article.canonical_url).slice(0, 8) : [];
+      dbSearchResults.innerHTML = '';
+      if (!items.length) {{
+        showDbSearchMessage(`'${{query}}' 검색 결과가 없습니다.`);
+        return;
+      }}
+      items.forEach((article) => {{
+        const link = document.createElement('a');
+        link.className = 'db-search__result';
+        link.href = article.canonical_url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        const title = document.createElement('h3');
+        title.textContent = compactDbText(article.title, 96);
+        const meta = document.createElement('div');
+        meta.className = 'db-search__meta';
+        [articleDateLabel(article), article.source || article.feed_name || '', articleStatusLabel(article), article.relevance_level || '', article.priority_level || ''].filter(Boolean).forEach((value) => {{
+          const span = document.createElement('span');
+          span.textContent = String(value);
+          meta.appendChild(span);
+        }});
+        link.appendChild(title);
+        link.appendChild(meta);
+        dbSearchResults.appendChild(link);
+      }});
+      dbSearchResults.hidden = false;
+    }}
+
+    async function searchDbArticles(query) {{
+      if (!remoteReportsApiUrl || !dbSearchResults) return;
+      const cleaned = String(query || '').replace(/\\s+/g, ' ').trim();
+      if (cleaned.length < 2) {{
+        showDbSearchMessage('검색어를 2자 이상 입력해주세요.');
+        return;
+      }}
+      showDbSearchMessage('DB를 검색하는 중입니다.');
+      try {{
+        const response = await fetch(`${{apiUrlWithAction(remoteReportsApiUrl, 'articles')}}&q=${{encodeURIComponent(cleaned)}}&limit=8&days=90`, {{
+          headers: {{ 'Accept': 'application/json' }},
+          credentials: 'omit',
+        }});
+        if (!response.ok) {{
+          showDbSearchMessage('DB 검색을 불러오지 못했습니다.');
+          return;
+        }}
+        const data = await response.json();
+        if (data && data.ok) renderDbSearchResults(data.articles || [], cleaned);
+        else showDbSearchMessage('DB 검색을 불러오지 못했습니다.');
+      }} catch (error) {{
+        showDbSearchMessage('DB 검색을 불러오지 못했습니다.');
+      }}
     }}
 
     async function loadRemoteArchiveLinks() {{
@@ -2113,6 +2215,13 @@ def render_report_html(
         if (history.pushState) history.pushState(null, '', `#${{sectionId}}`);
       }});
     }});
+    if (dbSearchForm) {{
+      dbSearchForm.addEventListener('submit', (event) => {{
+        event.preventDefault();
+        const input = dbSearchForm.querySelector('input[name="q"]');
+        searchDbArticles(input ? input.value : '');
+      }});
+    }}
     updateNavigation();
     loadRemoteArchiveLinks();
     loadDbPulse();

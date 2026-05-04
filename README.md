@@ -92,7 +92,7 @@ Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 
 
 브라우저에서 읽기 API를 직접 쓰는 기능은 별도 repository variable `ACTIVIST_PUBLIC_API_URL`이 있을 때만 HTML에 주입됩니다. 이 URL은 브라우저 개발자 도구에서 보이는 공개 정보이므로 secret이 아니라 variable로 관리합니다. 쓰기 API는 URL이 알려져도 HMAC 서명 없이는 `401`로 거부됩니다.
 
-데일리 HTML은 static-first로 동작하지만, `ACTIVIST_PUBLIC_API_URL`이 있으면 브라우저에서 `reports`와 `latest_snapshot` read API를 호출해 다른 일자 목록과 `DB 이슈 흐름` 섹션을 보강합니다. API가 실패해도 정적 기사 페이지는 그대로 표시됩니다.
+데일리 HTML은 static-first로 동작하지만, `ACTIVIST_PUBLIC_API_URL`이 있으면 브라우저에서 `reports`, `latest_snapshot`, `articles` read API를 호출해 다른 일자 목록, `DB 이슈 흐름`, DB 기사 검색을 보강합니다. API가 실패해도 정적 기사 페이지는 그대로 표시됩니다.
 
 `config.yaml`에는 공개 가능한 Google News 보조 RSS를 두 축으로 추가할 수 있습니다.
 
