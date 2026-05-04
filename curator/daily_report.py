@@ -293,6 +293,56 @@ def story_links(group: list[dict[str, object]]) -> list[dict[str, str]]:
     return links
 
 
+def story_db_key(group: list[dict[str, object]]) -> str:
+    for entry in group:
+        article = entry.get("article")
+        if isinstance(article, dict):
+            story_key = str(article.get("story_key") or "").strip()
+            if story_key:
+                return story_key
+        cluster = entry.get("cluster")
+        if isinstance(cluster, dict):
+            story_key = str(cluster.get("story_key") or "").strip()
+            if story_key:
+                return story_key
+    return ""
+
+
+def story_db_query(title: str, links: list[dict[str, str]]) -> str:
+    stopwords = {
+        "관련",
+        "기사",
+        "보도",
+        "뉴스",
+        "종합",
+        "단독",
+        "속보",
+        "시장",
+        "자본시장",
+        "주주",
+        "기업",
+        "지난해",
+        "올해",
+        "오늘",
+        "이슈",
+        "확인",
+        "한국어",
+        "google",
+        "news",
+    }
+    tokens: list[str] = []
+    for source_text in [title, " ".join(link.get("title") or "" for link in links[:2])]:
+        for token in re.findall(r"[0-9A-Za-z가-힣]{2,}", source_text):
+            normalized = token.casefold()
+            if normalized in stopwords or token in stopwords:
+                continue
+            if token not in tokens:
+                tokens.append(token)
+            if len(tokens) >= 4:
+                return " ".join(tokens)
+    return compact_text(title, max_chars=32)
+
+
 def story_image_urls(group: list[dict[str, object]]) -> list[str]:
     image_urls: list[str] = []
     for entry in group:
@@ -671,6 +721,7 @@ def build_report_stories(
             title = str(representative.get("title") or digest_group_title(group, config) or "제목 없음")
             image_candidates = ordered_image_urls([*story_image_urls(group), *story_link_image_urls(links)])
             priority_score = story_priority_score(group)
+            db_key = story_db_key(group)
             stories.append(
                 {
                     "title": title,
@@ -687,6 +738,8 @@ def build_report_stories(
                     "section": section_key,
                     "priority_score": priority_score,
                     "priority_level": story_priority_level(group),
+                    "story_key": db_key,
+                    "db_query": story_db_query(title, links),
                     "score": priority_score + len(links) * 5 + (6 if category == "주주행동·경영권" else 0),
                 }
             )
@@ -1112,6 +1165,8 @@ def render_story(
     primary_url = escape(raw_primary_url, quote=True)
     primary_mobile_attrs = mobile_link_attrs(raw_primary_url)
     category = escape(str(story.get("category") or "기타"))
+    story_key = str(story.get("story_key") or "").strip()
+    db_query = str(story.get("db_query") or story.get("title") or "").strip()
     sources = escape(str(story.get("source_line") or story.get("primary_source") or ""))
     summary = escape(story_summary_for_display(story))
     brief = story.get("brief") if isinstance(story.get("brief"), dict) else {}
@@ -1154,10 +1209,24 @@ def render_story(
         if show_details and has_grouped_links
         else ""
     )
+    db_context_html = (
+        """
+            <details class="story-context" data-story-context>
+              <summary>DB 맥락 보기</summary>
+              <div class="story-context__body" data-story-context-body>펼치면 관련 기사와 매체 확산을 불러옵니다.</div>
+            </details>
+        """
+        if show_details and (story_key or db_query)
+        else ""
+    )
     featured_class = " story--featured" if featured else ""
-    section_attrs = ""
+    section_attrs = (
+        f' data-story-db-key="{escape(story_key, quote=True)}"'
+        f' data-story-db-query="{escape(db_query, quote=True)}"'
+        f' data-story-url="{escape(raw_primary_url, quote=True)}"'
+    )
     if section_id:
-        section_attrs = (
+        section_attrs += (
             f' data-section-key="{escape(section_id, quote=True)}"'
             f' data-section-index="{section_index}"'
             f' data-section-total="{section_total}"'
@@ -1172,6 +1241,7 @@ def render_story(
             </div>
             {summary_after_body_html}
             {details_html}
+            {db_context_html}
           </article>
     """
 
@@ -1448,6 +1518,20 @@ def render_report_html(
     details[open] {{ padding-bottom: 3px; }}
     summary {{ cursor: pointer; color: var(--green); font-size: 13px; font-weight: 800; }}
     summary::after {{ content: " · 좌우 스크롤"; color: var(--muted); font-size: 11px; font-weight: 700; }}
+    .story-context {{ margin-top: 4px; border-top: 1px solid rgba(112, 55, 224, .14); padding-top: 6px; }}
+    .story-context summary {{ color: var(--accent-deep); }}
+    .story-context summary::after {{ content: " · 관련 기사/매체"; color: var(--muted); font-size: 11px; font-weight: 700; }}
+    .story-context__body {{ display: grid; gap: 8px; margin-top: 8px; padding: 9px 10px; border-left: 3px solid rgba(112, 55, 224, .34); background: rgba(246, 240, 255, .38); color: #342d3d; font-size: 12px; line-height: 1.45; }}
+    .story-context__message {{ color: var(--muted); }}
+    .story-context__stats {{ display: flex; flex-wrap: wrap; gap: 6px; }}
+    .story-context__stat {{ border: 1px solid rgba(112, 55, 224, .18); border-radius: 999px; padding: 3px 7px; background: #fff; color: var(--accent-deep); font-size: 10.8px; font-weight: 850; }}
+    .story-context__spread {{ display: flex; flex-wrap: wrap; gap: 5px 8px; color: var(--muted); font-size: 11px; }}
+    .story-context__spread strong {{ color: var(--ink); }}
+    .story-context__timeline {{ display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }}
+    .story-context__timeline a {{ display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 8px; color: inherit; text-decoration: none; }}
+    .story-context__timeline a:hover .story-context__timeline-title {{ color: var(--accent-deep); text-decoration: underline; text-underline-offset: 3px; }}
+    .story-context__timeline-time {{ color: var(--muted); font-size: 10.8px; white-space: nowrap; }}
+    .story-context__timeline-title {{ min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
     .link-table {{ width: 100%; max-width: 100%; min-width: 0; margin-top: 10px; border: 1px solid var(--line); background: var(--surface); overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }}
     .link-table table {{ width: 100%; min-width: 660px; table-layout: fixed; border-collapse: collapse; font-size: 12px; }}
     th, td {{ padding: 8px 9px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }}
@@ -1553,6 +1637,8 @@ def render_report_html(
       .story__summary {{ display: grid; gap: 3px; overflow: visible; padding: 7px 9px; font-size: 12.2px; line-height: 1.42; }}
       .story__summary li {{ display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; padding-left: 10px; }}
       .story__summary li::before {{ content: ""; position: absolute; left: 0; top: .66em; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }}
+      .story-context__body {{ padding: 8px 9px; font-size: 11.5px; line-height: 1.42; }}
+      .story-context__timeline a {{ grid-template-columns: 58px minmax(0, 1fr); gap: 7px; }}
       .story__meta {{ flex-wrap: nowrap; gap: 6px; margin-bottom: 5px; overflow: hidden; color: #7a7285; font-size: 10.5px; line-height: 1.3; white-space: nowrap; }}
       .story__meta span {{ min-width: 0; overflow: hidden; text-overflow: ellipsis; }}
       .story__meta span:not(:last-child)::after {{ margin-left: 6px; }}
@@ -1790,6 +1876,7 @@ def render_report_html(
     const dbPulseStatus = document.querySelector('[data-db-pulse-status]');
     const dbSearchForm = document.querySelector('[data-db-search]');
     const dbSearchResults = document.querySelector('[data-db-search-results]');
+    const storyContextDetails = Array.from(document.querySelectorAll('[data-story-context]'));
     const remoteReportsApiUrl = {read_api_url_json};
     const currentReportDateId = {date_id_json};
     const readStorageKey = `bside-daily-read:${{location.pathname}}`;
@@ -2073,6 +2160,170 @@ def render_report_html(
       }}
     }}
 
+    function articleUrlKey(value) {{
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      try {{
+        const url = new URL(raw, location.href);
+        url.hash = '';
+        return `${{url.origin}}${{url.pathname.replace(/\\/$/, '')}}${{url.search}}`.toLowerCase();
+      }} catch (error) {{
+        return raw.replace(/#.*$/, '').replace(/\\/$/, '').toLowerCase();
+      }}
+    }}
+
+    async function fetchDbArticles(params) {{
+      if (!remoteReportsApiUrl) return [];
+      const query = new URLSearchParams(params);
+      try {{
+        const response = await fetch(`${{apiUrlWithAction(remoteReportsApiUrl, 'articles')}}&${{query.toString()}}`, {{
+          headers: {{ 'Accept': 'application/json' }},
+          credentials: 'omit',
+        }});
+        if (!response.ok) return [];
+        const data = await response.json();
+        return data && data.ok && Array.isArray(data.articles) ? data.articles : [];
+      }} catch (error) {{
+        return [];
+      }}
+    }}
+
+    function mergeContextArticles(batches) {{
+      const seen = new Set();
+      const merged = [];
+      batches.flat().forEach((article) => {{
+        if (!article || !article.canonical_url || !article.title) return;
+        const key = articleUrlKey(article.canonical_url);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        merged.push(article);
+      }});
+      return merged.sort((left, right) => String(right.sort_at || right.published_at || '').localeCompare(String(left.sort_at || left.published_at || '')));
+    }}
+
+    function sourceSpread(articles) {{
+      const counts = new Map();
+      articles.forEach((article) => {{
+        const source = String(article.source || article.feed_name || '매체 미상').trim();
+        counts.set(source, (counts.get(source) || 0) + 1);
+      }});
+      return Array.from(counts.entries()).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+    }}
+
+    function contextDateRange(articles) {{
+      const labels = articles.map(articleDateLabel).filter(Boolean);
+      if (!labels.length) return '';
+      const sorted = labels.slice().sort();
+      return sorted[0] === sorted[sorted.length - 1] ? sorted[0] : `${{sorted[0]}}-${{sorted[sorted.length - 1]}}`;
+    }}
+
+    function contextFilterTokens(query) {{
+      const generic = new Set(['관련', '기사', '보도', '뉴스', '시장', '자본시장', '주주', '기업', '밸류업', '주주환원', '자사주', '소각', 'google', 'news']);
+      return String(query || '')
+        .match(/[0-9A-Za-z가-힣]{{2,}}/g)?.filter((token, index, list) => {{
+          const normalized = token.toLowerCase();
+          return !generic.has(normalized) && list.indexOf(token) === index;
+        }}).slice(0, 5) || [];
+    }}
+
+    function articleMatchesContext(article, tokens) {{
+      if (!tokens.length) return true;
+      const text = `${{article.title || ''}} ${{article.summary || ''}}`.toLowerCase();
+      const hits = tokens.filter((token) => text.includes(token.toLowerCase()));
+      return hits.includes(tokens[0]) || hits.length >= 2;
+    }}
+
+    function renderStoryContext(details, articles) {{
+      const body = details.querySelector('[data-story-context-body]');
+      const story = details.closest('[data-story]');
+      if (!body || !story) return;
+      const currentKey = articleUrlKey(story.dataset.storyUrl || story.querySelector('h3 a')?.href || '');
+      const filterTokens = contextFilterTokens(story.dataset.storyDbQuery || '');
+      const items = mergeContextArticles([articles])
+        .filter((article) => articleUrlKey(article.canonical_url) !== currentKey)
+        .filter((article) => articleMatchesContext(article, filterTokens))
+        .slice(0, 8);
+      body.innerHTML = '';
+      if (!items.length) {{
+        const message = document.createElement('div');
+        message.className = 'story-context__message';
+        message.textContent = '아직 DB에서 연결할 만한 과거/관련 기사가 충분하지 않습니다.';
+        body.appendChild(message);
+        return;
+      }}
+
+      const spread = sourceSpread(items);
+      const stats = document.createElement('div');
+      stats.className = 'story-context__stats';
+      [
+        `관련 기사 ${{items.length}}건`,
+        `매체 ${{spread.length}}곳`,
+        contextDateRange(items),
+      ].filter(Boolean).forEach((label) => {{
+        const chip = document.createElement('span');
+        chip.className = 'story-context__stat';
+        chip.textContent = label;
+        stats.appendChild(chip);
+      }});
+      body.appendChild(stats);
+
+      const spreadLine = document.createElement('div');
+      spreadLine.className = 'story-context__spread';
+      const spreadTitle = document.createElement('strong');
+      spreadTitle.textContent = '확산';
+      spreadLine.appendChild(spreadTitle);
+      spread.slice(0, 5).forEach(([source, count]) => {{
+        const item = document.createElement('span');
+        item.textContent = `${{source}} ${{count}}`;
+        spreadLine.appendChild(item);
+      }});
+      body.appendChild(spreadLine);
+
+      const timeline = document.createElement('ol');
+      timeline.className = 'story-context__timeline';
+      items.slice(0, 6).forEach((article) => {{
+        const row = document.createElement('li');
+        const link = document.createElement('a');
+        link.href = article.canonical_url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        const time = document.createElement('span');
+        time.className = 'story-context__timeline-time';
+        time.textContent = articleDateLabel(article) || '일시 미상';
+        const title = document.createElement('span');
+        title.className = 'story-context__timeline-title';
+        const source = article.source || article.feed_name || '';
+        title.textContent = `${{source ? `${{source}} · ` : ''}}${{compactDbText(article.title, 74)}}`;
+        link.appendChild(time);
+        link.appendChild(title);
+        row.appendChild(link);
+        timeline.appendChild(row);
+      }});
+      body.appendChild(timeline);
+    }}
+
+    async function loadStoryContext(details) {{
+      if (!remoteReportsApiUrl || details.dataset.loaded === '1') return;
+      const body = details.querySelector('[data-story-context-body]');
+      const story = details.closest('[data-story]');
+      if (!body || !story) return;
+      body.innerHTML = '<div class="story-context__message">DB에서 관련 흐름을 불러오는 중입니다.</div>';
+      const storyKey = String(story.dataset.storyDbKey || '').trim();
+      const query = String(story.dataset.storyDbQuery || '').trim();
+      const batches = [];
+      if (storyKey) {{
+        batches.push(await fetchDbArticles({{ story_key: storyKey, limit: '16', days: '180' }}));
+      }}
+      if (query) {{
+        const currentItems = mergeContextArticles(batches);
+        if (currentItems.length < 4) {{
+          batches.push(await fetchDbArticles({{ q: query, limit: '12', days: '180' }}));
+        }}
+      }}
+      renderStoryContext(details, mergeContextArticles(batches));
+      details.dataset.loaded = '1';
+    }}
+
     async function loadRemoteArchiveLinks() {{
       if (!remoteReportsApiUrl || !archiveLinksContainer) return;
       try {{
@@ -2222,6 +2473,11 @@ def render_report_html(
         searchDbArticles(input ? input.value : '');
       }});
     }}
+    storyContextDetails.forEach((details) => {{
+      details.addEventListener('toggle', () => {{
+        if (details.open) loadStoryContext(details);
+      }});
+    }});
     updateNavigation();
     loadRemoteArchiveLinks();
     loadDbPulse();

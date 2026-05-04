@@ -101,7 +101,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "복수 보도, 주주권·공시 영향" in html
     assert "story__summary" in html
     assert "요점" not in html
-    assert "맥락" not in html
+    assert "맥락:" not in html
     assert "근거" not in html
     assert "brief__link" in html
     assert "imageCandidates" in html
@@ -147,6 +147,10 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "visualStoryEntries" in html
     assert "visualStoryIndexByHref" in html
     assert "pageTop(section)" in html
+    assert "DB 맥락 보기" in html
+    assert "data-story-context" in html
+    assert "loadStoryContext" in html
+    assert "관련 기사/매체" in html
     assert "story__image--broken" in html
     assert "✓" in html
     assert "기사 링크 1건 보기" not in html
