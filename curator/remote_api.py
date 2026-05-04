@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import base64
+import gzip
 import hashlib
 import hmac
 import json
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
@@ -13,12 +15,36 @@ import httpx
 from .archive import compact_archive_record
 from .dates import datetime_to_iso
 from .normalize import stable_hash
-from .priority import article_hash_key, story_key_for_article
+from .priority import article_hash_key
 
 
 MAX_SNAPSHOT_BYTES = 1_750_000
 DEFAULT_MAX_ARTICLES = 900
 DEFAULT_MAX_STORIES = 500
+
+ARTICLE_PUBLIC_KEYS = (
+    "record_id",
+    "canonical_url_hash",
+    "title_hash",
+    "canonical_url",
+    "title",
+    "normalized_title",
+    "summary",
+    "source",
+    "feed_name",
+    "feed_category",
+    "image_url",
+    "published_at",
+    "seen_at",
+    "status",
+    "reason",
+    "relevance_level",
+    "priority_score",
+    "priority_level",
+    "story_key",
+    "updated_at",
+)
+RAW_KIND_DECISION_TRACE = "decision_trace"
 
 
 def remote_api_url() -> str:
@@ -80,6 +106,46 @@ def article_archive_record(article: dict[str, object], config: dict[str, object]
     if not record.get("seen_at"):
         record["seen_at"] = datetime_to_iso(now)
     return compact_archive_record(record, config, now)
+
+
+def compact_article_payload(record: dict[str, object]) -> dict[str, object]:
+    """Return the hot-table article DTO, without raw/debug payload fields."""
+    return {key: record[key] for key in ARTICLE_PUBLIC_KEYS if record.get(key) not in (None, "", [])}
+
+
+def raw_retention_until(record: dict[str, object], now: datetime) -> str:
+    status = str(record.get("status") or "").lower()
+    reason = str(record.get("reason") or "").lower()
+    priority = str(record.get("priority_level") or "").lower()
+    days = 90
+    if priority in {"top", "watch"} or status in {"published", "clustered"}:
+        days = 365
+    elif status == "duplicate":
+        days = 90
+    elif status == "rejected":
+        if reason in {"before_previous_day", "old_article", "low_relevance", "excluded_domain"}:
+            days = 14
+        else:
+            days = 60
+    return datetime_to_iso(now + timedelta(days=days))
+
+
+def raw_record_payload(record: dict[str, object], now: datetime) -> dict[str, object]:
+    body = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    compressed = gzip.compress(body, compresslevel=6)
+    payload_hash = hashlib.sha256(body).hexdigest()
+    record_id = str(record.get("record_id") or "")
+    raw_id = f"raw:{stable_hash(record_id + ':' + RAW_KIND_DECISION_TRACE + ':' + payload_hash, length=32)}"
+    return {
+        "raw_id": raw_id,
+        "record_id": record_id,
+        "raw_kind": RAW_KIND_DECISION_TRACE,
+        "payload_hash": payload_hash,
+        "compression": "gzip",
+        "payload_base64": base64.b64encode(compressed).decode("ascii"),
+        "schema_version": int(record.get("archive_version") or 1),
+        "retained_until": raw_retention_until(record, now),
+    }
 
 
 def cluster_story_key(cluster: dict[str, object]) -> str:
@@ -148,13 +214,15 @@ def snapshot_payload(
     source_articles = [article for article in list(state.get("articles") or []) if isinstance(article, dict)][-article_limit:]
     article_id_lookup: dict[str, str] = {}
     articles_by_id: dict[str, dict[str, object]] = {}
+    raw_records_by_id: dict[str, dict[str, object]] = {}
 
     for article in source_articles:
         archived = article_archive_record(article, config, now)
         record_id = str(archived.get("record_id") or "")
         if not record_id:
             continue
-        articles_by_id[record_id] = archived
+        articles_by_id[record_id] = compact_article_payload(archived)
+        raw_records_by_id[record_id] = raw_record_payload(archived, now)
         article_id_lookup[article_hash_key(article)] = record_id
 
     clusters = [
@@ -169,7 +237,8 @@ def snapshot_payload(
         for article in extra_articles:
             record_id = str(article.get("record_id") or "")
             if record_id:
-                articles_by_id[record_id] = article
+                articles_by_id[record_id] = compact_article_payload(article)
+                raw_records_by_id[record_id] = raw_record_payload(article, now)
 
     run_summary = run_summary or {}
     finished_at = str(state.get("last_run_at") or datetime_to_iso(now))
@@ -183,6 +252,7 @@ def snapshot_payload(
             **{key: int(value) for key, value in run_summary.items() if isinstance(value, int)},
         },
         "articles": sorted(articles_by_id.values(), key=lambda item: str(item.get("seen_at") or "")),
+        "raw_records": sorted(raw_records_by_id.values(), key=lambda item: str(item.get("record_id") or "")),
         "stories": stories,
     }
 
@@ -191,9 +261,14 @@ def shrink_snapshot_payload(payload: dict[str, object], max_bytes: int = MAX_SNA
     current = payload
     while len(json.dumps(current, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")) > max_bytes:
         articles = list(current.get("articles") or [])
+        raw_records = list(current.get("raw_records") or [])
         stories = list(current.get("stories") or [])
-        if len(articles) > 100:
-            current["articles"] = articles[len(articles) // 4 :]
+        if len(articles) > 100 or len(raw_records) > 100:
+            trim_count = max(len(articles), len(raw_records)) // 4
+            if articles:
+                current["articles"] = articles[min(trim_count, len(articles)) :]
+            if raw_records:
+                current["raw_records"] = raw_records[min(trim_count, len(raw_records)) :]
             continue
         if len(stories) > 50:
             current["stories"] = stories[len(stories) // 4 :]
@@ -220,6 +295,7 @@ def sync_state_to_remote_api(
             "remote_api_synced": 1,
             "remote_api_failed": 0,
             "remote_api_articles": int(response.get("articles") or 0),
+            "remote_api_raw_records": int(response.get("raw_records") or 0),
             "remote_api_stories": int(response.get("stories") or 0),
         }
     return {"remote_api_synced": 0, "remote_api_failed": 1}

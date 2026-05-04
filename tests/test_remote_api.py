@@ -56,7 +56,15 @@ def test_snapshot_payload_builds_articles_and_stories(config) -> None:  # type: 
 
     assert payload["run"]["fetched"] == 1  # type: ignore[index]
     assert payload["articles"]
+    assert payload["raw_records"]
     assert payload["stories"]
+    article_payload = payload["articles"][0]  # type: ignore[index]
+    assert "archive_version" not in article_payload
+    assert "relevance_keywords" not in article_payload
+    raw_payload = payload["raw_records"][0]  # type: ignore[index]
+    assert raw_payload["raw_kind"] == "decision_trace"
+    assert raw_payload["compression"] == "gzip"
+    assert raw_payload["record_id"] == article_payload["record_id"]
     story = payload["stories"][0]  # type: ignore[index]
     assert story["article_ids"]
     assert story["status"] == "published"
