@@ -42,6 +42,7 @@ from .telegram_publisher import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FEED_DIR = Path("public") / "feed"
+NON_DATE_REPORT_PAGES = {"latest.html", "index.html", "workbench.html"}
 REPORT_CATEGORY_ORDER = [
     "주주행동·경영권",
     "밸류업·주주환원",
@@ -979,6 +980,19 @@ def render_source_links(links: list[dict[str, str]], *, max_sources: int = 7) ->
     return " ".join(items)
 
 
+def json_script_payload(value: object) -> str:
+    return escape(json.dumps(value, ensure_ascii=False).replace("</", "<\\/"))
+
+
+def story_brief_bullets(story: dict[str, object], *, max_chars: int = 88, max_items: int = 3) -> list[str]:
+    brief = story.get("brief") if isinstance(story.get("brief"), dict) else {}
+    raw_bullets = brief.get("bullets") if isinstance(brief, dict) else None
+    bullets = [str(item) for item in raw_bullets if str(item or "").strip()] if isinstance(raw_bullets, list) else []
+    if not bullets and isinstance(brief, dict):
+        bullets = [str(brief.get(key) or "") for key in ("point", "why") if str(brief.get(key) or "").strip()]
+    return [brief_bullet(bullet, max_chars=max_chars) for bullet in bullets[:max_items] if str(bullet or "").strip()]
+
+
 def render_story(
     story: dict[str, object],
     config: dict[str, object],
@@ -1001,15 +1015,10 @@ def render_story(
     db_query = str(story.get("db_query") or story.get("title") or "").strip()
     sources = escape(str(story.get("source_line") or story.get("primary_source") or ""))
     summary = escape(story_summary_for_display(story))
-    brief = story.get("brief") if isinstance(story.get("brief"), dict) else {}
     summary_html = ""
     summary_after_body_html = ""
-    if editorial and brief:
-        raw_bullets = brief.get("bullets")
-        bullets = [str(item) for item in raw_bullets if str(item or "").strip()] if isinstance(raw_bullets, list) else []
-        if not bullets:
-            bullets = [str(brief.get(key) or "") for key in ("point", "why") if str(brief.get(key) or "").strip()]
-        bullet_items = "\n".join(f"<li>{escape(brief_bullet(bullet, max_chars=88))}</li>" for bullet in bullets[:3])
+    if editorial:
+        bullet_items = "\n".join(f"<li>{escape(bullet)}</li>" for bullet in story_brief_bullets(story))
         summary_after_body_html = f'<ul class="story__summary">{bullet_items}</ul>' if bullet_items else ""
     else:
         summary_html = f"<p>{summary}</p>" if summary else ""
@@ -1022,22 +1031,11 @@ def render_story(
     )
     normalized_links = [link for link in links if isinstance(link, dict)]
     has_grouped_links = len(normalized_links) > 1
-    detail_links = render_link_list(normalized_links, config, compact=False) if has_grouped_links else ""
     source_links = render_source_links(normalized_links) if has_grouped_links else ""
     source_meta = source_links or sources
     source_meta_html = f'<span class="story__sources">{source_meta}</span>' if source_meta else ""
-    grouped_links_html = (
-        f"""
-              <div class="story-context__group">
-                <strong>현재 묶음</strong>
-                <div class="link-table">
-                  <table>
-                    <thead><tr><th>일시</th><th>매체</th><th>기사</th></tr></thead>
-                    <tbody>{detail_links}</tbody>
-                  </table>
-                </div>
-              </div>
-        """
+    current_links_data_html = (
+        f'<script type="application/json" data-story-current-links>{json_script_payload(normalized_links)}</script>'
         if has_grouped_links
         else ""
     )
@@ -1045,7 +1043,7 @@ def render_story(
         f"""
             <details class="story-context" data-story-context>
               <summary>관련 기사 보기</summary>
-              {grouped_links_html}
+              {current_links_data_html}
               <div class="story-context__body" data-story-context-body>펼치면 아카이브에서 관련 기사와 매체 확산을 불러옵니다.</div>
             </details>
         """
@@ -1349,9 +1347,7 @@ def render_report_html(
     .story-context {{ margin-top: 4px; border-top: 1px solid rgba(112, 55, 224, .14); padding-top: 6px; }}
     .story-context[hidden], .story-context__body[hidden] {{ display: none !important; }}
     .story-context summary {{ color: var(--accent-deep); }}
-    .story-context summary::after {{ content: " · 관련 기사/매체"; color: var(--muted); font-size: 11px; font-weight: 700; }}
-    .story-context__group {{ display: grid; gap: 6px; margin-top: 8px; }}
-    .story-context__group > strong {{ color: var(--accent-deep); font-size: 11px; font-weight: 900; letter-spacing: .03em; }}
+    .story-context summary::after {{ content: " · 통합 표"; color: var(--muted); font-size: 11px; font-weight: 700; }}
     .story-context__body {{ display: grid; gap: 8px; margin-top: 8px; padding: 9px 10px; border-left: 3px solid rgba(112, 55, 224, .34); background: rgba(246, 240, 255, .38); color: #342d3d; font-size: 12px; line-height: 1.45; }}
     .story-context__message {{ color: var(--muted); }}
     .story-context__stats {{ display: flex; flex-wrap: wrap; gap: 6px; }}
@@ -1363,12 +1359,19 @@ def render_report_html(
     .story-context__timeline a:hover .story-context__timeline-title {{ color: var(--accent-deep); text-decoration: underline; text-underline-offset: 3px; }}
     .story-context__timeline-time {{ color: var(--muted); font-size: 10.8px; white-space: nowrap; }}
     .story-context__timeline-title {{ min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .story-context__kind {{ display: inline-flex; align-items: center; justify-content: center; min-width: 52px; border: 1px solid rgba(112, 55, 224, .22); border-radius: 999px; padding: 2px 6px; background: #fff; color: var(--accent-deep); font-size: 10.5px; font-weight: 850; white-space: nowrap; }}
+    .story-context__kind--archive {{ color: var(--green); border-color: rgba(0, 120, 95, .25); }}
+    .story-context__row--current td {{ background: rgba(255,255,255,.55); }}
     .link-table {{ width: 100%; max-width: 100%; min-width: 0; margin-top: 10px; border: 1px solid var(--line); background: var(--surface); overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }}
     .link-table table {{ width: 100%; min-width: 660px; table-layout: fixed; border-collapse: collapse; font-size: 12px; }}
     th, td {{ padding: 8px 9px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }}
     th {{ color: var(--muted); font-weight: 700; background: #faf8fd; }}
     th:first-child, td:first-child {{ width: 92px; color: var(--muted); white-space: nowrap; }}
     th:nth-child(2), td:nth-child(2) {{ width: 120px; color: var(--accent-deep); }}
+    .story-context__table table {{ min-width: 720px; }}
+    .story-context__table th:first-child, .story-context__table td:first-child {{ width: 76px; color: inherit; }}
+    .story-context__table th:nth-child(2), .story-context__table td:nth-child(2) {{ width: 94px; color: var(--muted); white-space: nowrap; }}
+    .story-context__table th:nth-child(3), .story-context__table td:nth-child(3) {{ width: 120px; color: var(--accent-deep); }}
     td a {{ overflow-wrap: anywhere; }}
     .floating-nav {{ position: fixed; top: 84px; right: 12px; z-index: 8; width: 210px; max-height: calc(100vh - 108px); overflow: auto; border: 1px solid var(--line); background: rgba(255,255,255,.94); box-shadow: 0 14px 40px rgba(44, 27, 84, .10); padding: 10px; }}
     .floating-nav__meta {{ display: grid; gap: 8px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }}
@@ -1529,6 +1532,7 @@ def render_report_html(
         <span><strong>{stats['stories']}</strong>개 이슈</span>
         <span><strong>{stats['articles']}</strong>건 기사</span>
         <span><strong>{stats['sources']}</strong>개 매체</span>
+        <a href="workbench.html">AI 워크벤치 보기</a>
         <button class="archive-trigger" type="button" data-archive-toggle aria-expanded="false" aria-controls="archive-panel">다른 일자 보기</button>
       </div>
     </header>
@@ -2061,6 +2065,31 @@ def render_report_html(
       }}
     }}
 
+    function normalizedContextTitle(value) {{
+      return String(value || '')
+        .toLowerCase()
+        .replace(/\\s+-\\s+[^-·|]+$/, '')
+        .replace(/[\\[\\]()"“”'‘’·….,:;!?~\\-_/|]/g, ' ')
+        .replace(/\\s+/g, ' ')
+        .trim();
+    }}
+
+    function contextArticleKey(article) {{
+      const titleKey = normalizedContextTitle(article.title);
+      if (titleKey.length >= 12) return `title:${{titleKey}}`;
+      return `url:${{articleUrlKey(article.canonical_url)}}`;
+    }}
+
+    function contextArticleQuality(article) {{
+      const url = String(article.canonical_url || '').toLowerCase();
+      let score = 0;
+      if (!url.includes('news.google.com')) score += 3;
+      if (!url.includes('google.com/rss')) score += 1;
+      if (article.summary) score += 1;
+      if (article.image_url) score += 1;
+      return score;
+    }}
+
     async function fetchDbArticles(params) {{
       if (!remoteReportsApiUrl) return [];
       const query = new URLSearchParams(params);
@@ -2078,15 +2107,15 @@ def render_report_html(
     }}
 
     function mergeContextArticles(batches) {{
-      const seen = new Set();
-      const merged = [];
+      const seen = new Map();
       batches.flat().forEach((article) => {{
         if (!article || !article.canonical_url || !article.title) return;
-        const key = articleUrlKey(article.canonical_url);
-        if (!key || seen.has(key)) return;
-        seen.add(key);
-        merged.push(article);
+        const key = contextArticleKey(article);
+        if (!key) return;
+        const previous = seen.get(key);
+        if (!previous || contextArticleQuality(article) > contextArticleQuality(previous)) seen.set(key, article);
       }});
+      const merged = Array.from(seen.values());
       return merged.sort((left, right) => String(right.sort_at || right.published_at || '').localeCompare(String(left.sort_at || left.published_at || '')));
     }}
 
@@ -2106,24 +2135,67 @@ def render_report_html(
       return sorted[0] === sorted[sorted.length - 1] ? sorted[0] : `${{sorted[0]}}-${{sorted[sorted.length - 1]}}`;
     }}
 
-    function contextFilterTokens(query) {{
-      const generic = new Set(['관련', '기사', '보도', '뉴스', '시장', '자본시장', '주주', '기업', '밸류업', '주주환원', '자사주', '소각', 'google', 'news']);
-      return String(query || '')
-        .match(/[0-9A-Za-z가-힣]{{2,}}/g)?.filter((token, index, list) => {{
-          const normalized = token.toLowerCase();
-          return !generic.has(normalized) && list.indexOf(token) === index;
-        }}).slice(0, 5) || [];
+    function contextFilterTokens(query, title = '') {{
+      const generic = new Set([
+        '관련', '기사', '보도', '뉴스', '시장', '자본시장', '주주', '기업', '증시', '한국어',
+        '밸류업', '주주환원', '자사주', '소각', '지배구조', '경영권', '분쟁', '소액주주',
+        '공시', '제도', '거래소', '코스닥', '상장', '중복상장', '유상증자', '물적분할',
+        '종료보고서', '제출', '불성실공시법인', '지정', 'google', 'news'
+      ]);
+      const rawTokens = `${{title || ''}} ${{query || ''}}`.match(/[0-9A-Za-z가-힣]{{2,}}/g) || [];
+      const tokens = [];
+      rawTokens.forEach((token) => {{
+        const normalized = token.toLowerCase();
+        if (generic.has(normalized) || tokens.includes(token)) return;
+        tokens.push(token);
+      }});
+      return tokens.slice(0, 6);
+    }}
+
+    function isWeakContextToken(token) {{
+      return new Set([
+        '밸류업', '주주환원', '자사주', '소각', '지배구조', '경영권', '분쟁', '소액주주',
+        '공시', '제도', '거래소', '코스닥', '상장', '중복상장', '유상증자', '물적분할',
+        '종료보고서', '불성실공시법인', '감독', '제재'
+      ]).has(String(token || '').toLowerCase());
     }}
 
     function articleMatchesContext(article, tokens) {{
-      if (!tokens.length) return true;
-      const text = `${{article.title || ''}} ${{article.summary || ''}}`.toLowerCase();
+      if (!tokens.length) return false;
+      const text = `${{article.title || ''}} ${{article.summary || ''}} ${{article.source || article.feed_name || ''}}`.toLowerCase();
       const hits = tokens.filter((token) => text.includes(token.toLowerCase()));
-      return hits.includes(tokens[0]) || hits.length >= 2;
+      const strongHits = hits.filter((token) => token.length >= 3 && !isWeakContextToken(token));
+      return strongHits.length >= 1 || hits.length >= Math.min(3, Math.max(2, tokens.length));
     }}
 
-    function storyContextHasGroupedLinks(details) {{
-      return Boolean(details.querySelector('.story-context__group'));
+    function storyContextHasCurrentLinks(details) {{
+      return Boolean(details.querySelector('[data-story-current-links]'));
+    }}
+
+    function currentContextArticles(details) {{
+      const script = details.querySelector('[data-story-current-links]');
+      if (!script) return [];
+      try {{
+        const links = JSON.parse(script.textContent || '[]');
+        if (!Array.isArray(links)) return [];
+        return links
+          .filter((link) => link && link.url && link.title)
+          .map((link) => ({{
+            canonical_url: link.url,
+            title: link.title,
+            source: link.source || link.domain || '',
+            feed_name: link.source || link.domain || '',
+            published_at: link.published_at || '',
+            sort_at: link.published_at || '',
+            context_kind: 'current',
+          }}));
+      }} catch (error) {{
+        return [];
+      }}
+    }}
+
+    function contextKindLabel(article) {{
+      return article.context_kind === 'current' ? '현재 묶음' : '아카이브';
     }}
 
     function renderStoryContext(details, storyArticles, queryArticles) {{
@@ -2131,16 +2203,28 @@ def render_report_html(
       const story = details.closest('[data-story]');
       if (!body || !story) return;
       const currentKey = articleUrlKey(story.dataset.storyUrl || story.querySelector('h3 a')?.href || '');
-      const filterTokens = contextFilterTokens(story.dataset.storyDbQuery || '');
+      const storyTitle = story.querySelector('h3')?.textContent || '';
+      const filterTokens = contextFilterTokens(story.dataset.storyDbQuery || '', storyTitle);
       const isNotCurrent = (article) => articleUrlKey(article.canonical_url) !== currentKey;
-      const storyItems = mergeContextArticles([storyArticles]).filter(isNotCurrent);
+      const currentItems = mergeContextArticles([currentContextArticles(details)]).map((article) => ({{ ...article, context_kind: 'current' }}));
+      const currentKeys = new Set(currentItems.map((article) => contextArticleKey(article)).filter(Boolean));
+      const isNotCurrentGroup = (article) => !currentKeys.has(contextArticleKey(article));
+      const storyItems = mergeContextArticles([storyArticles])
+        .filter(isNotCurrent)
+        .filter(isNotCurrentGroup)
+        .filter((article) => articleMatchesContext(article, filterTokens))
+        .map((article) => ({{ ...article, context_kind: 'archive' }}));
       const queryItems = mergeContextArticles([queryArticles])
         .filter(isNotCurrent)
+        .filter(isNotCurrentGroup)
         .filter((article) => articleMatchesContext(article, filterTokens));
-      const items = mergeContextArticles([storyItems, queryItems]).slice(0, 8);
+      const archiveItems = mergeContextArticles([storyItems, queryItems])
+        .map((article) => ({{ ...article, context_kind: 'archive' }}))
+        .slice(0, Math.max(0, 10 - currentItems.length));
+      const items = [...currentItems, ...archiveItems];
       body.innerHTML = '';
       if (!items.length) {{
-        if (storyContextHasGroupedLinks(details)) {{
+        if (storyContextHasCurrentLinks(details)) {{
           body.hidden = true;
         }} else {{
           details.open = false;
@@ -2155,7 +2239,8 @@ def render_report_html(
       const stats = document.createElement('div');
       stats.className = 'story-context__stats';
       [
-        `관련 기사 ${{items.length}}건`,
+        currentItems.length ? `현재 묶음 ${{currentItems.length}}건` : '',
+        archiveItems.length ? `아카이브 ${{archiveItems.length}}건` : '',
         `매체 ${{spread.length}}곳`,
         contextDateRange(items),
       ].filter(Boolean).forEach((label) => {{
@@ -2178,35 +2263,51 @@ def render_report_html(
       }});
       body.appendChild(spreadLine);
 
-      const timeline = document.createElement('ol');
-      timeline.className = 'story-context__timeline';
-      items.slice(0, 6).forEach((article) => {{
-        const row = document.createElement('li');
+      const tableWrap = document.createElement('div');
+      tableWrap.className = 'link-table story-context__table';
+      const table = document.createElement('table');
+      table.innerHTML = '<thead><tr><th>구분</th><th>일시</th><th>매체</th><th>기사</th></tr></thead><tbody></tbody>';
+      const tbody = table.querySelector('tbody');
+      items.forEach((article) => {{
+        const row = document.createElement('tr');
+        row.className = article.context_kind === 'current' ? 'story-context__row--current' : 'story-context__row--archive';
+        const kindCell = document.createElement('td');
+        const kind = document.createElement('span');
+        kind.className = `story-context__kind${{article.context_kind === 'archive' ? ' story-context__kind--archive' : ''}}`;
+        kind.textContent = contextKindLabel(article);
+        kindCell.appendChild(kind);
+        const timeCell = document.createElement('td');
+        timeCell.textContent = articleDateLabel(article) || '일시 미상';
+        const sourceCell = document.createElement('td');
+        sourceCell.textContent = article.source || article.feed_name || '매체 미상';
+        const titleCell = document.createElement('td');
         const link = document.createElement('a');
         link.href = article.canonical_url;
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
-        const time = document.createElement('span');
-        time.className = 'story-context__timeline-time';
-        time.textContent = articleDateLabel(article) || '일시 미상';
-        const title = document.createElement('span');
-        title.className = 'story-context__timeline-title';
-        const source = article.source || article.feed_name || '';
-        title.textContent = `${{source ? `${{source}} · ` : ''}}${{compactDbText(article.title, 74)}}`;
-        link.appendChild(time);
-        link.appendChild(title);
-        row.appendChild(link);
-        timeline.appendChild(row);
+        link.textContent = compactDbText(article.title, 96);
+        titleCell.appendChild(link);
+        row.appendChild(kindCell);
+        row.appendChild(timeCell);
+        row.appendChild(sourceCell);
+        row.appendChild(titleCell);
+        tbody.appendChild(row);
       }});
-      body.appendChild(timeline);
+      tableWrap.appendChild(table);
+      body.appendChild(tableWrap);
     }}
 
     async function loadStoryContext(details) {{
-      if (!remoteReportsApiUrl || details.dataset.loaded === '1') return;
+      if (details.dataset.loaded === '1') return;
       const body = details.querySelector('[data-story-context-body]');
       const story = details.closest('[data-story]');
       if (!body || !story) return;
       body.innerHTML = '<div class="story-context__message">아카이브에서 관련 흐름을 불러오는 중입니다.</div>';
+      if (!remoteReportsApiUrl) {{
+        renderStoryContext(details, [], []);
+        details.dataset.loaded = '1';
+        return;
+      }}
       const storyKey = String(story.dataset.storyDbKey || '').trim();
       const query = String(story.dataset.storyDbQuery || '').trim();
       let storyArticles = [];
@@ -2227,7 +2328,7 @@ def render_report_html(
     function hideUnavailableStoryContexts() {{
       if (remoteReportsApiUrl) return;
       storyContextDetails.forEach((details) => {{
-        if (!storyContextHasGroupedLinks(details)) details.hidden = true;
+        if (!storyContextHasCurrentLinks(details)) details.hidden = true;
       }});
     }}
 
@@ -2395,6 +2496,284 @@ def render_report_html(
 """
 
 
+def workbench_story_payload(story: dict[str, object], config: dict[str, object]) -> dict[str, object]:
+    links = [link for link in (story.get("links") if isinstance(story.get("links"), list) else []) if isinstance(link, dict)]
+    return {
+        "id": str(story.get("id") or ""),
+        "title": str(story.get("title") or "제목 없음"),
+        "category": str(story.get("category") or "기타"),
+        "datetime": date_label(story.get("datetime"), config),
+        "source_line": str(story.get("source_line") or story.get("primary_source") or ""),
+        "summary": story_summary_for_display(story),
+        "bullets": story_brief_bullets(story, max_chars=96, max_items=3),
+        "primary_url": str(story.get("primary_url") or ""),
+        "image_url": str(story.get("image_url") or ""),
+        "story_key": str(story.get("story_key") or ""),
+        "db_query": str(story.get("db_query") or story.get("title") or ""),
+        "links": links[:12],
+    }
+
+
+def render_workbench_html(
+    stories: list[dict[str, object]],
+    config: dict[str, object],
+    start_at: datetime,
+    end_at: datetime,
+    date_id: str,
+    report_url: str,
+) -> str:
+    story_payloads = [workbench_story_payload(story, config) for story in stories[:40]]
+    start_label = escape(format_kst(start_at, str(config.get("timezone") or "Asia/Seoul")))
+    end_label = escape(format_kst(end_at, str(config.get("timezone") or "Asia/Seoul")))
+    report_link = escape(report_url, quote=True)
+    data_json = json_script_payload(story_payloads)
+    read_api_url_json = json.dumps(report_read_api_url(), ensure_ascii=False)
+    logo = bside_logo_html("bside-logo--top")
+    return f"""<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI 워크벤치 - {escape(date_id)}</title>
+  <style>
+    :root {{ --ink:#17131f; --muted:#6f6878; --line:#ded7e8; --paper:#fbfafc; --surface:#fff; --accent:#6b35d8; --accent-deep:#42207e; --accent-soft:#f0eafb; --green:#00785f; }}
+    * {{ box-sizing:border-box; }}
+    body {{ margin:0; background:var(--paper); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Segoe UI",sans-serif; line-height:1.55; }}
+    a {{ color:inherit; text-decoration-thickness:1px; text-underline-offset:3px; }}
+    .shell {{ max-width:1220px; margin:0 auto; padding:24px 24px 64px; }}
+    .top {{ display:flex; justify-content:space-between; align-items:center; gap:20px; border-bottom:2px solid var(--ink); padding-bottom:18px; }}
+    .bside-logo {{ display:inline-flex; align-items:center; gap:9px; color:var(--accent); text-decoration:none; }}
+    .bside-logo__image {{ width:92px; height:auto; display:block; color:var(--accent); }}
+    .bside-logo__label {{ color:var(--accent); font-size:11px; font-weight:900; letter-spacing:.12em; }}
+    .top__meta {{ color:var(--muted); font-size:12px; text-align:right; }}
+    .hero {{ display:grid; grid-template-columns:minmax(0,1fr) auto; gap:18px; align-items:end; padding:22px 0 18px; border-bottom:1px solid var(--line); }}
+    h1 {{ margin:0; font-family:Georgia,"Times New Roman",serif; font-size:42px; line-height:1; letter-spacing:0; }}
+    .hero p {{ margin:8px 0 0; color:#352e40; font-size:14px; }}
+    .hero a {{ display:inline-flex; border:1px solid var(--accent); border-radius:999px; padding:8px 12px; color:var(--accent-deep); background:var(--accent-soft); font-size:12px; font-weight:850; text-decoration:none; }}
+    .workbench {{ display:grid; grid-template-columns:340px minmax(0,1fr); gap:22px; align-items:start; padding-top:20px; }}
+    .story-list {{ position:sticky; top:16px; max-height:calc(100vh - 32px); overflow:auto; border:1px solid var(--line); background:rgba(255,255,255,.84); }}
+    .story-button {{ width:100%; appearance:none; border:0; border-bottom:1px solid var(--line); background:transparent; text-align:left; padding:13px 14px; cursor:pointer; color:inherit; }}
+    .story-button:hover, .story-button.is-active {{ background:var(--accent-soft); }}
+    .story-button strong {{ display:block; font-size:14px; line-height:1.35; word-break:keep-all; }}
+    .story-button span {{ display:flex; gap:7px; flex-wrap:wrap; margin-top:6px; color:var(--muted); font-size:11px; }}
+    .panel {{ min-height:calc(100vh - 160px); border-top:3px solid var(--accent); background:var(--surface); padding:22px; box-shadow:0 18px 46px rgba(44,27,84,.08); }}
+    .panel__meta {{ display:flex; flex-wrap:wrap; gap:8px; color:var(--muted); font-size:12px; margin-bottom:12px; }}
+    .panel h2 {{ margin:0; max-width:760px; font-size:28px; line-height:1.22; letter-spacing:0; word-break:keep-all; }}
+    .panel__layout {{ display:grid; grid-template-columns:220px minmax(0,1fr); gap:20px; margin-top:18px; align-items:start; }}
+    .panel__image {{ aspect-ratio:4/3; border:1px solid var(--line); background:var(--accent-soft); object-fit:cover; width:100%; }}
+    .panel__image[hidden] {{ display:none; }}
+    .panel__summary {{ margin:0; padding:12px 14px; border-left:3px solid rgba(112,55,224,.5); background:rgba(246,240,255,.58); list-style:none; display:grid; gap:7px; font-size:14px; line-height:1.48; }}
+    .panel__summary li {{ position:relative; padding-left:12px; }}
+    .panel__summary li::before {{ content:""; position:absolute; left:0; top:.72em; width:4px; height:4px; border-radius:50%; background:var(--accent); }}
+    .panel__actions {{ display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }}
+    .panel__actions a, .panel__actions button {{ appearance:none; border:1px solid var(--line); background:#fff; color:var(--ink); border-radius:999px; padding:8px 11px; font:inherit; font-size:12px; font-weight:850; text-decoration:none; cursor:pointer; }}
+    .panel__actions a:first-child {{ border-color:var(--accent); color:var(--accent-deep); background:var(--accent-soft); }}
+    .related {{ margin-top:24px; }}
+    .related__head {{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; color:var(--muted); font-size:12px; }}
+    .related__chips {{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:9px; }}
+    .related__chips span {{ border:1px solid rgba(112,55,224,.18); border-radius:999px; padding:3px 8px; color:var(--accent-deep); background:#fff; font-size:11px; font-weight:850; }}
+    .related__table {{ border:1px solid var(--line); overflow:auto; }}
+    table {{ width:100%; min-width:720px; border-collapse:collapse; font-size:12.5px; }}
+    th, td {{ padding:8px 9px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }}
+    th {{ background:#faf8fd; color:var(--muted); font-weight:800; }}
+    th:first-child, td:first-child {{ width:82px; }}
+    th:nth-child(2), td:nth-child(2) {{ width:96px; color:var(--muted); white-space:nowrap; }}
+    th:nth-child(3), td:nth-child(3) {{ width:124px; color:var(--accent-deep); }}
+    .kind {{ display:inline-flex; border:1px solid rgba(112,55,224,.22); border-radius:999px; padding:2px 7px; color:var(--accent-deep); background:#fff; font-size:10.5px; font-weight:850; white-space:nowrap; }}
+    .kind--archive {{ color:var(--green); border-color:rgba(0,120,95,.25); }}
+    .empty {{ color:var(--muted); font-size:13px; padding:12px; border:1px solid var(--line); background:#fff; }}
+    @media (max-width:900px) {{ .workbench {{ grid-template-columns:1fr; }} .story-list {{ position:static; max-height:none; }} .panel__layout {{ grid-template-columns:1fr; }} }}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="top">
+      {logo}
+      <div class="top__meta">{start_label}<br>{end_label}</div>
+    </header>
+    <section class="hero">
+      <div>
+        <h1>AI 요약 워크벤치</h1>
+        <p>기사 목록을 벗어나지 않고 요약, 현재 묶음, DB 아카이브 관련 기사를 한 화면에서 확인하는 데스크톱 실험 페이지입니다.</p>
+      </div>
+      <a href="{report_link}">데일리로 돌아가기</a>
+    </section>
+    <main class="workbench">
+      <nav class="story-list" data-workbench-list aria-label="기사 선택"></nav>
+      <section class="panel" data-workbench-panel aria-live="polite"></section>
+    </main>
+  </div>
+  <script type="application/json" id="workbench-data">{data_json}</script>
+  <script>
+    const stories = JSON.parse(document.getElementById('workbench-data')?.textContent || '[]');
+    const apiUrl = {read_api_url_json};
+    const list = document.querySelector('[data-workbench-list]');
+    const panel = document.querySelector('[data-workbench-panel]');
+    let activeIndex = 0;
+
+    function apiUrlWithAction(url, action) {{
+      if (!url) return '';
+      return `${{url}}${{url.includes('?') ? '&' : '?'}}action=${{encodeURIComponent(action)}}`;
+    }}
+    function compactText(value, max = 90) {{
+      const text = String(value || '').replace(/\\s+/g, ' ').trim();
+      return text.length <= max ? text : `${{text.slice(0, max - 1).trim()}}…`;
+    }}
+    function urlKey(value) {{
+      try {{
+        const url = new URL(String(value || ''), location.href);
+        url.hash = '';
+        return `${{url.origin}}${{url.pathname.replace(/\\/$/, '')}}${{url.search}}`.toLowerCase();
+      }} catch (error) {{
+        return String(value || '').replace(/#.*$/, '').replace(/\\/$/, '').toLowerCase();
+      }}
+    }}
+    function normalizedTitle(value) {{
+      return String(value || '')
+        .toLowerCase()
+        .replace(/\\s+-\\s+[^-·|]+$/, '')
+        .replace(/[\\[\\]()"“”'‘’·….,:;!?~\\-_/|]/g, ' ')
+        .replace(/\\s+/g, ' ')
+        .trim();
+    }}
+    function rowKey(article) {{
+      const title = normalizedTitle(article.title);
+      return title.length >= 12 ? `title:${{title}}` : `url:${{urlKey(article.canonical_url)}}`;
+    }}
+    function rowQuality(article) {{
+      const url = String(article.canonical_url || '').toLowerCase();
+      let score = 0;
+      if (!url.includes('news.google.com')) score += 3;
+      if (!url.includes('google.com/rss')) score += 1;
+      if (article.summary) score += 1;
+      if (article.image_url) score += 1;
+      return score;
+    }}
+    function dateLabel(article) {{
+      const raw = String(article.published_at || article.sort_at || '').trim();
+      const match = raw.match(/^(\\d{{4}})-(\\d{{2}})-(\\d{{2}})\\s+(\\d{{2}}):(\\d{{2}})/);
+      return match ? `${{match[2]}}.${{match[3]}} ${{match[4]}}:${{match[5]}}` : (article.datetime || '');
+    }}
+    function contextTokens(story) {{
+      const generic = new Set(['관련','기사','보도','뉴스','시장','자본시장','주주','기업','증시','한국어','밸류업','주주환원','자사주','소각','지배구조','경영권','분쟁','소액주주','공시','제도','거래소','코스닥','상장','중복상장','유상증자','물적분할','종료보고서','제출','불성실공시법인','지정','google','news']);
+      const tokens = [];
+      `${{story.title || ''}} ${{story.db_query || ''}}`.match(/[0-9A-Za-z가-힣]{{2,}}/g)?.forEach((token) => {{
+        const normalized = token.toLowerCase();
+        if (!generic.has(normalized) && !tokens.includes(token)) tokens.push(token);
+      }});
+      return tokens.slice(0, 6);
+    }}
+    function matchesStory(article, tokens) {{
+      if (!tokens.length) return false;
+      const weak = new Set(['밸류업','주주환원','자사주','소각','지배구조','경영권','분쟁','소액주주','공시','제도','거래소','코스닥','상장','중복상장','유상증자','물적분할','종료보고서','불성실공시법인','감독','제재']);
+      const text = `${{article.title || ''}} ${{article.summary || ''}} ${{article.source || article.feed_name || ''}}`.toLowerCase();
+      const hits = tokens.filter((token) => text.includes(token.toLowerCase()));
+      return hits.some((token) => token.length >= 3 && !weak.has(token.toLowerCase())) || hits.length >= Math.min(3, Math.max(2, tokens.length));
+    }}
+    function currentRows(story) {{
+      return (Array.isArray(story.links) ? story.links : []).filter((link) => link && link.url && link.title).map((link) => ({{
+        canonical_url: link.url,
+        title: link.title,
+        source: link.source || link.domain || '',
+        published_at: link.published_at || '',
+        context_kind: 'current',
+      }}));
+    }}
+    function mergeRows(rows) {{
+      const seen = new Map();
+      rows.flat().forEach((article) => {{
+        if (!article || !article.canonical_url || !article.title) return;
+        const key = rowKey(article);
+        if (!key) return;
+        const previous = seen.get(key);
+        if (!previous || rowQuality(article) > rowQuality(previous)) seen.set(key, article);
+      }});
+      const merged = Array.from(seen.values());
+      return merged.sort((left, right) => String(right.sort_at || right.published_at || '').localeCompare(String(left.sort_at || left.published_at || '')));
+    }}
+    async function fetchArchiveRows(story) {{
+      if (!apiUrl) return [];
+      const batches = [];
+      const tokens = contextTokens(story);
+      for (const params of [
+        story.story_key ? {{ story_key: story.story_key, limit: '16', days: '180' }} : null,
+        story.db_query ? {{ q: story.db_query, limit: '12', days: '180' }} : null,
+      ].filter(Boolean)) {{
+        try {{
+          const query = new URLSearchParams(params);
+          const response = await fetch(`${{apiUrlWithAction(apiUrl, 'articles')}}&${{query.toString()}}`, {{ headers: {{ Accept: 'application/json' }}, credentials: 'omit' }});
+          if (!response.ok) continue;
+          const data = await response.json();
+          if (data && data.ok && Array.isArray(data.articles)) batches.push(data.articles);
+        }} catch (error) {{}}
+      }}
+      const currentKeys = new Set(currentRows(story).map((article) => rowKey(article)));
+      return mergeRows(batches)
+        .filter((article) => !currentKeys.has(rowKey(article)))
+        .filter((article) => matchesStory(article, tokens))
+        .slice(0, 8)
+        .map((article) => ({{ ...article, context_kind: 'archive' }}));
+    }}
+    function renderList() {{
+      if (!list) return;
+      list.innerHTML = '';
+      stories.forEach((story, index) => {{
+        const button = document.createElement('button');
+        button.className = `story-button${{index === activeIndex ? ' is-active' : ''}}`;
+        button.type = 'button';
+        button.innerHTML = `<strong>${{compactText(story.title, 76)}}</strong><span><em>${{story.category || '기타'}}</em><em>${{story.datetime || ''}}</em><em>${{story.links?.length || 1}}건</em></span>`;
+        button.addEventListener('click', () => openStory(index));
+        list.appendChild(button);
+      }});
+    }}
+    function relatedTable(rows) {{
+      if (!rows.length) return '<div class="empty">표시할 관련 기사가 없습니다.</div>';
+      const chips = [`관련 기사 ${{rows.length}}건`, `매체 ${{new Set(rows.map((row) => row.source || row.feed_name || '')).size}}곳`];
+      return `
+        <div class="related__chips">${{chips.map((chip) => `<span>${{chip}}</span>`).join('')}}</div>
+        <div class="related__table"><table>
+          <thead><tr><th>구분</th><th>일시</th><th>매체</th><th>기사</th></tr></thead>
+          <tbody>${{rows.map((row) => `<tr><td><span class="kind${{row.context_kind === 'archive' ? ' kind--archive' : ''}}">${{row.context_kind === 'archive' ? '아카이브' : '현재 묶음'}}</span></td><td>${{dateLabel(row) || '일시 미상'}}</td><td>${{row.source || row.feed_name || '매체 미상'}}</td><td><a href="${{row.canonical_url}}" target="_blank" rel="noopener noreferrer">${{compactText(row.title, 110)}}</a></td></tr>`).join('')}}</tbody>
+        </table></div>`;
+    }}
+    async function openStory(index) {{
+      activeIndex = Math.max(0, Math.min(index, stories.length - 1));
+      renderList();
+      const story = stories[activeIndex] || {{}};
+      const bullets = Array.isArray(story.bullets) && story.bullets.length ? story.bullets : [story.summary || '요약 정보가 부족합니다.'];
+      panel.innerHTML = `
+        <div class="panel__meta"><span>${{story.category || '기타'}}</span><span>${{story.datetime || ''}}</span><span>${{story.source_line || ''}}</span></div>
+        <h2>${{story.title || '제목 없음'}}</h2>
+        <div class="panel__layout">
+          <img class="panel__image" src="${{story.image_url || ''}}" alt="" referrerpolicy="no-referrer" ${{!story.image_url ? 'hidden' : ''}}>
+          <div>
+            <ul class="panel__summary">${{bullets.map((bullet) => `<li>${{bullet}}</li>`).join('')}}</ul>
+            <div class="panel__actions">
+              <a href="${{story.primary_url || '#'}}" target="_blank" rel="noopener noreferrer">원문 새 탭</a>
+              <button type="button" data-prev>이전 기사</button>
+              <button type="button" data-next>다음 기사</button>
+            </div>
+          </div>
+        </div>
+        <section class="related">
+          <div class="related__head"><strong>관련 기사</strong><span data-related-status>현재 묶음과 DB 아카이브를 확인하는 중입니다.</span></div>
+          <div data-related-body>${{relatedTable(currentRows(story))}}</div>
+        </section>`;
+      panel.querySelector('[data-prev]')?.addEventListener('click', () => openStory(activeIndex - 1));
+      panel.querySelector('[data-next]')?.addEventListener('click', () => openStory(activeIndex + 1));
+      const archiveRows = await fetchArchiveRows(story);
+      const rows = [...currentRows(story), ...archiveRows];
+      panel.querySelector('[data-related-body]').innerHTML = relatedTable(rows);
+      panel.querySelector('[data-related-status]').textContent = archiveRows.length ? '아카이브 관련 기사까지 반영했습니다.' : '현재 묶음을 중심으로 표시합니다.';
+    }}
+    renderList();
+    openStory(0);
+  </script>
+</body>
+</html>
+"""
+
+
 def build_daily_report(root: Path | None = None, now: datetime | None = None) -> dict[str, object]:
     project_root = root or PROJECT_ROOT
     config = load_config(project_root / "config.yaml")
@@ -2425,6 +2804,7 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
         "standard",
         False,
     )
+    workbench_html = render_workbench_html(stories, config, start_at, end_at, date_id, report_url)
     return {
         "config": config,
         "date_id": date_id,
@@ -2433,6 +2813,7 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
         "stories": stories,
         "review": review,
         "html": html,
+        "workbench_html": workbench_html,
         "report_url": report_url,
         "stats": report_stats(stories, clusters, duplicate_records),
         "clusters": clusters,
@@ -2453,15 +2834,17 @@ def write_report_files(report: dict[str, object], root: Path | None = None) -> l
     dated_path = feed_dir / f"{date_id}.html"
     latest_path = feed_dir / "latest.html"
     index_path = feed_dir / "index.html"
+    workbench_path = feed_dir / "workbench.html"
     dated_path.write_text(html, encoding="utf-8", newline="\n")
     latest_path.write_text(html, encoding="utf-8", newline="\n")
+    workbench_path.write_text(normalize_generated_html(str(report.get("workbench_html") or "")), encoding="utf-8", newline="\n")
     variant_dir = feed_dir / "variants"
     if variant_dir.exists():
         for stale_path in variant_dir.glob("*.html"):
             stale_path.unlink()
     index_path.write_text(render_report_index(feed_dir), encoding="utf-8", newline="\n")
     refreshed_paths = refresh_existing_report_archive_links(feed_dir, date_id)
-    return [dated_path, latest_path, index_path, *refreshed_paths]
+    return [dated_path, latest_path, workbench_path, index_path, *refreshed_paths]
 
 
 def render_report_archive_links(feed_dir: Path, current_date_id: str, *, link_prefix: str = "", max_items: int = 20) -> str:
@@ -2470,7 +2853,7 @@ def render_report_archive_links(feed_dir: Path, current_date_id: str, *, link_pr
         date_ids.update(
             path.stem
             for path in feed_dir.glob("*.html")
-            if path.name not in {"latest.html", "index.html"} and path.stem
+            if path.name not in NON_DATE_REPORT_PAGES and path.stem
         )
     sorted_date_ids = sorted(date_ids, reverse=True)[:max_items]
     if not sorted_date_ids:
@@ -2507,7 +2890,7 @@ def refresh_existing_report_archive_links(feed_dir: Path, current_date_id: str) 
     dated_paths = [
         path
         for path in feed_dir.glob("*.html")
-        if path.name not in {"latest.html", "index.html"} and path.stem
+        if path.name not in NON_DATE_REPORT_PAGES and path.stem
     ]
     dated_paths.append(feed_dir / "latest.html")
     for path in dated_paths:
@@ -2529,7 +2912,7 @@ def render_report_index(feed_dir: Path) -> str:
         [
             path
             for path in feed_dir.glob("*.html")
-            if path.name not in {"latest.html", "index.html"}
+            if path.name not in NON_DATE_REPORT_PAGES
         ],
         reverse=True,
     )

@@ -54,6 +54,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert paths[0].name == "2026-05-01.html"
     assert (tmp_path / "public" / "feed" / "latest.html").exists()
     assert (tmp_path / "public" / "feed" / "index.html").exists()
+    assert (tmp_path / "public" / "feed" / "workbench.html").exists()
     assert not (tmp_path / "public" / "feed" / "variants" / "memo.html").exists()
     assert not (tmp_path / "public" / "feed" / "variants" / "board.html").exists()
     assert not (tmp_path / "public" / "feed" / "variants" / "pulse.html").exists()
@@ -82,6 +83,8 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "발행일자" in html
     assert "수집기간" in html
     assert "다른 일자 보기" in html
+    assert "AI 워크벤치 보기" in html
+    assert 'href="workbench.html"' in html
     assert "data-archive-toggle" in html
     assert "archive-panel__link is-current" in html
     assert "setArchiveOpen" in html
@@ -150,7 +153,11 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "아카이브 검색" in html
     assert "data-story-context" in html
     assert "loadStoryContext" in html
-    assert "관련 기사/매체" in html
+    assert "통합 표" in html
+    assert "data-story-current-links" in html
+    assert "story-context__table" in html
+    assert "현재 묶음" in html
+    assert "아카이브" in html
     assert "db-search__summary" in html
     assert "articleMatchReasons" in html
     assert "isGenericDbPulseTitle" in html
@@ -161,6 +168,11 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "story__sources" in html
     assert "<p>" in html
     assert "한화솔루션 유상증자 정정요구" in html
+    workbench_html = (tmp_path / "public" / "feed" / "workbench.html").read_text(encoding="utf-8")
+    assert "AI 요약 워크벤치" in workbench_html
+    assert "data-workbench-list" in workbench_html
+    assert "fetchArchiveRows" in workbench_html
+    assert "현재 묶음과 DB 아카이브" in workbench_html
 
 
 def test_daily_report_refreshes_archive_links_on_existing_pages(tmp_path) -> None:
