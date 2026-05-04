@@ -1108,9 +1108,11 @@ def render_story(
         if telegram_mentions
         else ""
     )
+    has_static_related_context = has_grouped_links or bool(telegram_mentions)
+    context_visibility_attrs = "" if has_static_related_context else ' hidden data-context-pending="1"'
     related_html = (
         f"""
-            <details class="story-context" data-story-context>
+            <details class="story-context" data-story-context{context_visibility_attrs}>
               <summary>관련 기사 보기</summary>
               {current_links_data_html}
               {telegram_mentions_data_html}
@@ -2283,6 +2285,10 @@ def render_report_html(
       }}
     }}
 
+    function storyContextHasStaticContent(details) {{
+      return storyContextHasCurrentLinks(details) || staticTelegramMentions(details).length > 0;
+    }}
+
     function mergeTelegramMentions(batches) {{
       const seen = new Map();
       batches.flat().forEach((message) => {{
@@ -2394,7 +2400,7 @@ def render_report_html(
       const items = [...currentItems, ...archiveItems];
       body.innerHTML = '';
       if (!items.length && !telegramMentions.length) {{
-        if (storyContextHasCurrentLinks(details)) {{
+        if (storyContextHasStaticContent(details)) {{
           body.hidden = true;
         }} else {{
           details.open = false;
@@ -2403,6 +2409,9 @@ def render_report_html(
         }}
         return;
       }}
+      details.hidden = false;
+      details.dataset.contextPending = '0';
+      delete details.dataset.empty;
       body.hidden = false;
 
       if (!items.length) {{
@@ -2506,7 +2515,32 @@ def render_report_html(
     function hideUnavailableStoryContexts() {{
       if (remoteReportsApiUrl) return;
       storyContextDetails.forEach((details) => {{
-        if (!storyContextHasCurrentLinks(details)) details.hidden = true;
+        if (!storyContextHasStaticContent(details)) details.hidden = true;
+      }});
+    }}
+
+    function preloadPendingStoryContexts() {{
+      if (!remoteReportsApiUrl) return;
+      const pending = storyContextDetails.filter((details) => details.hidden && details.dataset.contextPending === '1');
+      if (!pending.length) return;
+      if (!('IntersectionObserver' in window)) {{
+        pending.slice(0, 12).forEach((details) => loadStoryContext(details));
+        return;
+      }}
+      const detailsByTarget = new Map();
+      const observer = new IntersectionObserver((entries) => {{
+        entries.forEach((entry) => {{
+          if (!entry.isIntersecting) return;
+          const details = detailsByTarget.get(entry.target);
+          if (details) loadStoryContext(details);
+          observer.unobserve(entry.target);
+          detailsByTarget.delete(entry.target);
+        }});
+      }}, {{ rootMargin: '900px 0px' }});
+      pending.forEach((details) => {{
+        const target = details.closest('[data-story]') || details;
+        detailsByTarget.set(target, details);
+        observer.observe(target);
       }});
     }}
 
@@ -2665,6 +2699,7 @@ def render_report_html(
       }});
     }});
     hideUnavailableStoryContexts();
+    preloadPendingStoryContexts();
     updateNavigation();
     loadRemoteArchiveLinks();
     loadDbPulse();

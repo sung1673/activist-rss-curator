@@ -179,6 +179,8 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "아카이브 검색" in html
     assert "data-story-context" in html
     assert "loadStoryContext" in html
+    assert "preloadPendingStoryContexts" in html
+    assert "contextPending" in html
     assert "통합 표" in html
     assert "data-story-current-links" in html
     assert "story-context__table" in html
