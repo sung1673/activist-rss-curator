@@ -1362,6 +1362,18 @@ def render_report_html(
     .brief__link {{ color: inherit; text-decoration: none; border-bottom: 1px solid rgba(112, 55, 224, .22); }}
     .brief__link:hover {{ color: var(--accent-deep); border-bottom-color: var(--accent); }}
     .brief__link::after {{ content: " 이동"; color: var(--accent); font-size: 10px; font-weight: 900; letter-spacing: .02em; }}
+    .db-pulse {{ border-bottom: 1px solid var(--ink); padding: 18px 0 20px; }}
+    .db-pulse[hidden] {{ display: none !important; }}
+    .db-pulse__head {{ display: flex; align-items: end; justify-content: space-between; gap: 18px; margin-bottom: 12px; }}
+    .db-pulse__head h2 {{ margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 22px; line-height: 1.12; }}
+    .db-pulse__head p {{ margin: 4px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.42; }}
+    .db-pulse__badge {{ flex: 0 0 auto; border: 1px solid rgba(112, 55, 224, .24); border-radius: 999px; padding: 5px 9px; color: var(--accent-deep); background: var(--accent-soft); font-size: 11px; font-weight: 900; }}
+    .db-pulse__list {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }}
+    .db-pulse__item {{ display: grid; gap: 4px; min-width: 0; border-top: 1px solid var(--line); padding: 10px 0 2px; color: inherit; text-decoration: none; }}
+    .db-pulse__item:hover h3 {{ color: var(--accent-deep); text-decoration: underline; text-underline-offset: 3px; }}
+    .db-pulse__item h3 {{ margin: 0; font-size: 14px; line-height: 1.36; font-weight: 850; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: keep-all; overflow-wrap: break-word; }}
+    .db-pulse__meta {{ display: flex; flex-wrap: wrap; gap: 6px 9px; color: var(--muted); font-size: 10.8px; line-height: 1.35; }}
+    .db-pulse__meta strong {{ color: var(--accent-deep); font-weight: 900; }}
     .priority {{ border-bottom: 1px solid var(--ink); padding: 22px 0 8px; }}
     .priority__head {{ display: flex; align-items: end; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }}
     .priority__head h2 {{ font-family: Georgia, "Times New Roman", serif; font-size: 28px; line-height: 1.1; margin: 0; }}
@@ -1501,6 +1513,12 @@ def render_report_html(
       .mobile-story-nav__links a.is-active::before {{ color: var(--accent); }}
       .mobile-story-nav__links a.is-read:not(.is-active) {{ color: #9a93a5; background: #f8f5fc; }}
       .brief, .featured {{ grid-template-columns: 1fr; }}
+      .db-pulse {{ padding: 16px 0 18px; }}
+      .db-pulse__head {{ align-items: flex-start; gap: 10px; }}
+      .db-pulse__head h2 {{ font-size: 21px; }}
+      .db-pulse__head p {{ font-size: 12px; }}
+      .db-pulse__list {{ grid-template-columns: 1fr; gap: 4px; }}
+      .db-pulse__item h3 {{ font-size: 13.5px; -webkit-line-clamp: 2; }}
       .brand-row {{ align-items: flex-start; flex-direction: column; }}
       .featured {{ gap: 0; padding: 22px 0; }}
       .featured .story--featured:first-child {{ grid-row: auto; border-right: 0; padding-right: 0; }}
@@ -1592,6 +1610,17 @@ def render_report_html(
     <section class="brief">
       <h2>{brief_title_html}</h2>
       <div>{review_block_html}</div>
+    </section>
+
+    <section class="db-pulse" data-db-pulse hidden aria-label="DB 이슈 흐름">
+      <div class="db-pulse__head">
+        <div>
+          <h2>DB 이슈 흐름</h2>
+          <p>최근 수집 DB 기준으로 아직 페이지에 반영되지 않았거나 이어지는 이슈를 보강합니다.</p>
+        </div>
+        <span class="db-pulse__badge" data-db-pulse-status>DB 연결</span>
+      </div>
+      <div class="db-pulse__list" data-db-pulse-list></div>
     </section>
 
     <nav class="toc" aria-label="report sections">
@@ -1737,6 +1766,9 @@ def render_report_html(
     const archiveToggles = Array.from(document.querySelectorAll('[data-archive-toggle]'));
     const archiveClose = document.querySelector('[data-archive-close]');
     const archiveLinksContainer = document.querySelector('.archive-panel__links');
+    const dbPulse = document.querySelector('[data-db-pulse]');
+    const dbPulseList = document.querySelector('[data-db-pulse-list]');
+    const dbPulseStatus = document.querySelector('[data-db-pulse-status]');
     const remoteReportsApiUrl = {read_api_url_json};
     const currentReportDateId = {date_id_json};
     const readStorageKey = `bside-daily-read:${{location.pathname}}`;
@@ -1860,6 +1892,83 @@ def render_report_html(
         empty.textContent = '아직 발행된 데일리가 없습니다.';
         archiveLinksContainer.appendChild(empty);
       }}
+    }}
+
+    function compactDbText(value, maxChars) {{
+      const text = String(value || '').replace(/\\s+/g, ' ').trim();
+      if (text.length <= maxChars) return text;
+      return `${{text.slice(0, Math.max(0, maxChars - 1)).trim()}}…`;
+    }}
+
+    function storyStatusLabel(story) {{
+      const status = String(story.status || '').toLowerCase();
+      if (status === 'published') return '발행';
+      if (status === 'pending') return '대기';
+      if (status === 'clustered') return '묶음';
+      return status || '수집';
+    }}
+
+    function storyDateLabel(story) {{
+      const raw = String(story.published_at || story.last_article_seen_at || '').trim();
+      const match = raw.match(/^(\\d{{4}})-(\\d{{2}})-(\\d{{2}})\\s+(\\d{{2}}):(\\d{{2}})/);
+      if (!match) return '';
+      return `${{match[2]}}.${{match[3]}} ${{match[4]}}:${{match[5]}}`;
+    }}
+
+    function renderDbPulse(stories) {{
+      if (!dbPulse || !dbPulseList || !Array.isArray(stories)) return;
+      const items = stories
+        .filter((story) => story && story.representative_title && story.representative_url)
+        .slice(0, 6);
+      if (!items.length) return;
+      dbPulseList.innerHTML = '';
+      items.forEach((story) => {{
+        const link = document.createElement('a');
+        link.className = 'db-pulse__item';
+        link.href = story.representative_url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        const title = document.createElement('h3');
+        title.textContent = compactDbText(story.representative_title, 86);
+        const meta = document.createElement('div');
+        meta.className = 'db-pulse__meta';
+        const status = document.createElement('strong');
+        status.textContent = storyStatusLabel(story);
+        meta.appendChild(status);
+        const count = document.createElement('span');
+        count.textContent = `${{Number(story.article_count || 1)}}건`;
+        meta.appendChild(count);
+        const priority = Number(story.priority_score || 0);
+        if (priority) {{
+          const score = document.createElement('span');
+          score.textContent = `점수 ${{priority}}`;
+          meta.appendChild(score);
+        }}
+        const date = storyDateLabel(story);
+        if (date) {{
+          const dateEl = document.createElement('span');
+          dateEl.textContent = date;
+          meta.appendChild(dateEl);
+        }}
+        link.appendChild(title);
+        link.appendChild(meta);
+        dbPulseList.appendChild(link);
+      }});
+      if (dbPulseStatus) dbPulseStatus.textContent = `${{items.length}}개 이슈`;
+      dbPulse.hidden = false;
+    }}
+
+    async function loadDbPulse() {{
+      if (!remoteReportsApiUrl || !dbPulse || !dbPulseList) return;
+      try {{
+        const response = await fetch(`${{apiUrlWithAction(remoteReportsApiUrl, 'latest_snapshot')}}&limit=8`, {{
+          headers: {{ 'Accept': 'application/json' }},
+          credentials: 'omit',
+        }});
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data && data.ok) renderDbPulse(data.stories || []);
+      }} catch (error) {{}}
     }}
 
     async function loadRemoteArchiveLinks() {{
@@ -2006,6 +2115,7 @@ def render_report_html(
     }});
     updateNavigation();
     loadRemoteArchiveLinks();
+    loadDbPulse();
   </script>
 </body>
 </html>
