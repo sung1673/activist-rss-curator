@@ -51,29 +51,6 @@ REPORT_CATEGORY_ORDER = [
 ]
 BSIDE_URL = "https://bside.ai"
 BSIDE_LOGO_SVG = """<svg fill="currentColor" viewBox="0 0 57 20" class="bside-logo__image" aria-hidden="true"><path fill="currentColor" d="M7.11306 19.3232C5.87526 19.3232 4.76917 19.032 3.78817 18.4496C2.80716 17.8673 2.03026 17.0798 1.46404 16.0738C0.891241 15.0745 0.601547 13.9429 0.588379 12.6855V1.80579C0.588379 1.44181 0.700305 1.14401 0.930744 0.925618C1.16118 0.700612 1.45087 0.594727 1.79982 0.594727C2.14877 0.594727 2.45821 0.707229 2.67549 0.925618C2.89934 1.15063 3.00467 1.44181 3.00467 1.80579V8.25158C3.55773 7.58316 4.22929 7.05372 5.01279 6.66328C5.79626 6.27284 6.65217 6.08093 7.58709 6.08093C8.73929 6.08093 9.77956 6.37211 10.6947 6.95446C11.6099 7.53684 12.3341 8.32437 12.8674 9.31705C13.4007 10.3097 13.6641 11.4347 13.6641 12.6921C13.6641 13.9495 13.3744 15.0812 12.795 16.0805C12.2156 17.0798 11.4387 17.8739 10.4577 18.4563C9.47667 19.0386 8.35741 19.3298 7.11306 19.3298V19.3232ZM7.11306 17.179C7.92288 17.179 8.64053 16.9871 9.27259 16.5967C9.90464 16.2062 10.405 15.6701 10.7803 14.9885C11.149 14.3069 11.3399 13.5392 11.3399 12.6988C11.3399 11.8583 11.1556 11.0774 10.7803 10.409C10.4116 9.74058 9.90464 9.21116 9.27259 8.82069C8.64053 8.43025 7.91629 8.23831 7.11306 8.23831C6.30982 8.23831 5.60532 8.43025 4.9667 8.82069C4.32806 9.21116 3.82109 9.74058 3.45897 10.409C3.09685 11.0774 2.91251 11.8384 2.91251 12.6988C2.91251 13.5591 3.09685 14.3069 3.45897 14.9885C3.82109 15.6701 4.32806 16.2128 4.9667 16.5967C5.60532 16.9871 6.32297 17.179 7.11306 17.179Z"></path><path fill="currentColor" d="M19.6288 19.3236C18.5227 19.3236 17.4956 19.1515 16.5541 18.814C15.6126 18.4765 14.8818 18.0397 14.355 17.5103C14.118 17.2588 14.0193 16.9676 14.0588 16.6367C14.0983 16.3125 14.2497 16.0411 14.5196 15.836C14.8357 15.5845 15.1517 15.472 15.4546 15.5117C15.764 15.5514 16.0273 15.6904 16.2512 15.9286C16.5211 16.233 16.9491 16.511 17.5482 16.7757C18.1408 17.0404 18.8058 17.1728 19.53 17.1728C20.4452 17.1728 21.1496 17.0206 21.6303 16.7161C22.1109 16.4117 22.3611 16.0213 22.3808 15.5448C22.4006 15.0683 22.1702 14.6514 21.7027 14.3006C21.2352 13.9499 20.3859 13.6653 19.1481 13.4403C17.5482 13.1227 16.3895 12.6462 15.6718 12.0108C14.9542 11.3756 14.5921 10.5946 14.5921 9.67476C14.5921 8.86076 14.8291 8.19238 15.3031 7.65632C15.7772 7.12029 16.3895 6.72323 17.1335 6.46511C17.8774 6.20041 18.6543 6.06805 19.4576 6.06805C20.5044 6.06805 21.4262 6.2335 22.236 6.571C23.0458 6.90853 23.6845 7.36514 24.1585 7.95414C24.3823 8.20561 24.4811 8.47694 24.4679 8.75488C24.4548 9.03285 24.3165 9.27108 24.0663 9.45638C23.8161 9.63505 23.5133 9.688 23.1643 9.62182C22.8154 9.55564 22.5257 9.41667 22.2887 9.19167C21.8936 8.80785 21.4657 8.54973 21.0048 8.40414C20.5439 8.25855 20.0172 8.19238 19.4115 8.19238C18.7136 8.19238 18.1276 8.3115 17.6404 8.54973C17.1598 8.78797 16.9162 9.13873 16.9162 9.60197C16.9162 9.88653 16.9886 10.1446 17.14 10.3763C17.2915 10.6079 17.5878 10.813 18.0289 10.9983C18.47 11.1836 19.1218 11.3623 19.9777 11.5344C21.1628 11.7726 22.1043 12.0771 22.7891 12.441C23.4803 12.805 23.9741 13.2352 24.2704 13.7183C24.5733 14.2014 24.7247 14.7639 24.7247 15.3992C24.7247 16.1338 24.5338 16.7889 24.1453 17.3779C23.7569 17.9669 23.1907 18.4368 22.4335 18.7875C21.683 19.1383 20.7414 19.3103 19.6222 19.3103L19.6288 19.3236Z"></path><path fill="currentColor" d="M26.8648 4.04907C26.4369 4.04907 26.0682 3.89686 25.7587 3.58583C25.4493 3.27478 25.2979 2.90419 25.2979 2.47403C25.2979 2.04388 25.4493 1.67327 25.7587 1.36223C26.0682 1.0512 26.4369 0.898987 26.8648 0.898987C27.2928 0.898987 27.6615 1.0512 27.9709 1.36223C28.2804 1.67327 28.4318 2.04388 28.4318 2.47403C28.4318 2.90419 28.2804 3.27478 27.9709 3.58583C27.6615 3.89686 27.2928 4.04907 26.8648 4.04907ZM26.8648 19.2304C26.5159 19.2304 26.2262 19.1179 25.9958 18.8862C25.7653 18.6546 25.6534 18.3635 25.6534 18.0127V7.39107C25.6534 7.0271 25.7653 6.7293 25.9958 6.51089C26.2262 6.28589 26.5159 6.18001 26.8648 6.18001C27.2138 6.18001 27.5232 6.29251 27.7405 6.51089C27.9644 6.73592 28.0697 7.0271 28.0697 7.39107V18.0127C28.0697 18.3635 27.9578 18.6546 27.7405 18.8862C27.5166 19.1179 27.2269 19.2304 26.8648 19.2304Z"></path><path fill="currentColor" d="M36.1018 19.3233C34.8641 19.3233 33.758 19.0322 32.7638 18.4498C31.7762 17.8674 30.9927 17.0799 30.4133 16.074C29.8341 15.0747 29.5444 13.9431 29.5444 12.6857C29.5444 11.4283 29.8077 10.3032 30.3409 9.31055C30.8741 8.31787 31.5918 7.53038 32.5136 6.94799C33.4288 6.36564 34.4691 6.07443 35.6212 6.07443C36.5562 6.07443 37.4186 6.26635 38.2088 6.65682C38.9988 7.04726 39.6638 7.57667 40.2036 8.24508V1.79932C40.2036 1.43534 40.3156 1.13754 40.5462 0.919148C40.7765 0.694142 41.0662 0.588257 41.415 0.588257C41.7641 0.588257 42.0736 0.70076 42.2909 0.919148C42.5147 1.14415 42.62 1.43534 42.62 1.79932V12.6791C42.62 13.9364 42.3303 15.0681 41.7509 16.0674C41.1715 17.0667 40.3947 17.8608 39.4136 18.4432C38.4327 19.0255 37.3265 19.3167 36.0888 19.3167L36.1018 19.3233ZM36.1018 17.1792C36.9118 17.1792 37.6294 16.9873 38.2615 16.5968C38.8936 16.2063 39.3938 15.6703 39.7559 14.9887C40.118 14.307 40.3024 13.5393 40.3024 12.6989C40.3024 11.8584 40.118 11.0775 39.7559 10.4091C39.3938 9.74073 38.8936 9.21129 38.2615 8.82085C37.6294 8.4304 36.905 8.23846 36.1018 8.23846C35.2986 8.23846 34.5941 8.4304 33.9556 8.82085C33.3168 9.21129 32.81 9.74073 32.4347 10.4091C32.0594 11.0775 31.875 11.8386 31.875 12.6989C31.875 13.5592 32.0594 14.307 32.4347 14.9887C32.8033 15.6703 33.3103 16.213 33.9556 16.5968C34.5941 16.9873 35.3118 17.1792 36.1018 17.1792Z"></path><path fill="currentColor" d="M50.6328 19.3231C49.3157 19.3231 48.1504 19.0386 47.1301 18.476C46.1095 17.9135 45.3063 17.1326 44.7334 16.14C44.154 15.1473 43.8643 14.0024 43.8643 12.7186C43.8643 11.4347 44.1343 10.2633 44.6807 9.27064C45.2272 8.27796 45.9843 7.49708 46.9457 6.93455C47.9134 6.37205 49.0195 6.08746 50.2704 6.08746C51.5216 6.08746 52.5684 6.36543 53.4504 6.90808C54.3393 7.45737 55.011 8.21179 55.4784 9.17799C55.9457 10.1442 56.1763 11.2494 56.1763 12.5068C56.1763 12.8112 56.071 13.0627 55.8669 13.2612C55.6628 13.4597 55.3995 13.559 55.0834 13.559H45.5169V11.6531H55.011L54.0366 12.3215C54.0234 11.5273 53.8654 10.8126 53.5625 10.1839C53.2596 9.55523 52.8316 9.05888 52.2787 8.6949C51.7254 8.3309 51.054 8.14561 50.264 8.14561C49.3619 8.14561 48.5916 8.34414 47.9463 8.74123C47.3078 9.13829 46.8204 9.68096 46.4848 10.3758C46.1554 11.0707 45.9843 11.8516 45.9843 12.7252C45.9843 13.5987 46.1819 14.3796 46.5769 15.0613C46.9719 15.7429 47.5184 16.2856 48.2163 16.6826C48.9143 17.0797 49.711 17.2782 50.6128 17.2782C51.1001 17.2782 51.6072 17.1856 52.1207 17.0069C52.6343 16.8282 53.049 16.6098 53.3648 16.3716C53.6019 16.1995 53.8587 16.1069 54.1354 16.0936C54.4119 16.087 54.6554 16.1664 54.8595 16.3451C55.1295 16.5833 55.2678 16.8481 55.2875 17.1326C55.3007 17.4172 55.1754 17.6687 54.9057 17.8738C54.3657 18.304 53.7007 18.6547 52.8975 18.9261C52.1007 19.1974 51.3372 19.3298 50.6063 19.3298L50.6328 19.3231Z"></path></svg>"""
-LAYOUT_VARIANTS = [
-    {
-        "slug": "memo",
-        "name": "Investment Memo",
-        "note": "투자 메모처럼 핵심 논점을 차곡차곡 읽는 노트형",
-    },
-    {
-        "slug": "board",
-        "name": "Governance Board",
-        "note": "카테고리별 이슈를 보드처럼 훑는 워크룸형",
-    },
-    {
-        "slug": "pulse",
-        "name": "Market Pulse",
-        "note": "30분 안에 핵심 이슈를 훑는 시장 모니터형",
-    },
-    {
-        "slug": "deck",
-        "name": "Investor Deck",
-        "note": "섹션별 카드 덱으로 빠르게 넘겨보는 리딩 세션형",
-    },
-]
-
 
 def report_hours() -> int:
     raw_value = os.environ.get("DAILY_REPORT_HOURS", "24")
@@ -550,151 +527,6 @@ def bside_logo_html(extra_class: str = "") -> str:
         '<span class="bside-logo__label">DAILY NEWS</span>'
         '</a>'
     )
-
-
-def variant_href(slug: str, *, in_variant_dir: bool) -> str:
-    if slug == "standard":
-        return "../latest.html" if in_variant_dir else "latest.html"
-    return f"{slug}.html" if in_variant_dir else f"variants/{slug}.html"
-
-
-def render_layout_variant_links(current_slug: str, *, in_variant_dir: bool) -> str:
-    items = [
-        {
-            "slug": "standard",
-            "name": "운영 기본",
-            "note": "현재 운영 중인 기본 레이아웃",
-        },
-        *LAYOUT_VARIANTS,
-    ]
-    return "\n".join(
-        (
-            f'<a class="variant-switcher__link{" is-active" if item["slug"] == current_slug else ""}" '
-            f'href="{escape(variant_href(str(item["slug"]), in_variant_dir=in_variant_dir), quote=True)}">'
-            f'<strong>{escape(str(item["name"]))}</strong>'
-            f'<span>{escape(str(item["note"]))}</span>'
-            "</a>"
-        )
-        for item in items
-    )
-
-
-def layout_variant_css() -> str:
-    return """
-    .variant-switcher { display: grid; gap: 8px; margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
-    .variant-switcher__title { color: var(--muted); font-size: 11px; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }
-    .variant-switcher__links { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 6px; }
-    .variant-switcher__link { min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 7px 8px; text-decoration: none; }
-    .variant-switcher__link strong { display: block; overflow: hidden; color: var(--accent-deep); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-    .variant-switcher__link span { display: block; overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
-    .variant-switcher__link.is-active { border-color: var(--accent); background: var(--accent-soft); }
-
-    body.layout-memo { --paper: #fffdf7; --surface: #ffffff; --line: #eadfca; --accent: #8b5c00; --accent-deep: #5b3c00; --accent-soft: #fff4d7; --green: #557600; }
-    body.layout-memo .page { max-width: 980px; }
-    body.layout-memo .masthead, body.layout-memo .brief, body.layout-memo .section { background: linear-gradient(#fffdf7 31px, #f1e8d8 32px); background-size: 100% 32px; }
-    body.layout-memo h1 { font-family: Georgia, "Times New Roman", serif; font-size: clamp(40px, 5vw, 62px); }
-    body.layout-memo .featured { display: block; border-bottom: 1px dashed var(--line); }
-    body.layout-memo .featured .story--featured:first-child, body.layout-memo .featured .story--featured:nth-child(n+2), body.layout-memo .story-list .story:first-child, body.layout-memo .story { grid-template-columns: 96px minmax(0, 1fr); border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.86); box-shadow: 0 10px 24px rgba(97, 69, 18, .05); margin-bottom: 10px; padding: 12px; }
-    body.layout-memo .story-list { display: block; }
-    body.layout-memo .story h3 { font-size: 17px; }
-    body.layout-memo .story p::before { content: "Memo  "; color: var(--accent); font-weight: 900; }
-
-    body.layout-board { --paper: #f9fbf7; --surface: #ffffff; --line: #d9e4d2; --accent: #3b7d3a; --accent-deep: #21501f; --accent-soft: #edf8ea; --green: #2d735e; }
-    body.layout-board .page { max-width: 1180px; }
-    body.layout-board .featured { display: none; }
-    body.layout-board .section { border: 1px solid var(--line); border-radius: 18px; background: #fff; margin: 20px 0; padding: 16px; scroll-margin-top: 96px; }
-    body.layout-board .section__rule { display: none; }
-    body.layout-board .section__head { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
-    body.layout-board .story-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-    body.layout-board .story-list .story:first-child, body.layout-board .story { display: block; border: 1px solid var(--line); border-radius: 12px; background: var(--accent-soft); padding: 11px; }
-    body.layout-board .story__image { display: none; }
-    body.layout-board .story h3 { font-size: 16px; }
-
-    body.layout-pulse { --paper: #f4f7fb; --surface: #ffffff; --line: #d6e0ee; --accent: #155eef; --accent-deep: #123a83; --accent-soft: #eaf2ff; --green: #087f5b; }
-    body.layout-pulse .page { max-width: 1180px; padding-top: 16px; }
-    body.layout-pulse .masthead { border: 0; border-radius: 20px; background: #071b3a; color: #fff; padding: 18px; box-shadow: 0 20px 48px rgba(7, 27, 58, .16); }
-    body.layout-pulse .brand-row { border-color: rgba(255,255,255,.18); margin-bottom: 18px; }
-    body.layout-pulse .bside-logo, body.layout-pulse .bside-logo__image, body.layout-pulse .bside-logo__label { color: #fff; }
-    body.layout-pulse h1 { max-width: none; font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif; font-size: clamp(34px, 5vw, 58px); font-weight: 900; }
-    body.layout-pulse .dek { max-width: 760px; color: #dbe7ff; }
-    body.layout-pulse .edition, body.layout-pulse .meta-strip { color: #b9c9e7; }
-    body.layout-pulse .meta-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-    body.layout-pulse .meta-strip span { border: 1px solid rgba(255,255,255,.16); border-radius: 12px; background: rgba(255,255,255,.08); padding: 8px 10px; }
-    body.layout-pulse .meta-strip strong { color: #fff; }
-    body.layout-pulse .brief { grid-template-columns: 176px minmax(0, 1fr); border: 1px solid var(--line); border-radius: 16px; background: #fff; margin-top: 14px; padding: 14px; }
-    body.layout-pulse .brief h2 { font-size: 0; }
-    body.layout-pulse .brief h2::after { content: "30분 체크포인트"; color: var(--accent-deep); font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif; font-size: 15px; font-weight: 900; }
-    body.layout-pulse .brief__bullets { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; }
-    body.layout-pulse .brief__bullets li { border-left: 3px solid var(--accent); border-radius: 8px; background: var(--accent-soft); padding: 8px 10px 8px 12px; }
-    body.layout-pulse .brief__bullets li::before { display: none; }
-    body.layout-pulse .featured { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; border: 0; padding: 16px 0 10px; }
-    body.layout-pulse .featured .story--featured:first-child,
-    body.layout-pulse .featured .story--featured:nth-child(n+2) { display: block; border: 1px solid var(--line); border-radius: 16px; background: #fff; box-shadow: 0 10px 28px rgba(18, 58, 131, .07); padding: 13px; }
-    body.layout-pulse .featured .story__image { display: none; }
-    body.layout-pulse .featured h3 { font-size: 16px; }
-    body.layout-pulse .featured p { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-    body.layout-pulse .section { display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 18px; border-top: 1px solid var(--line); padding: 18px 0; scroll-margin-top: 98px; }
-    body.layout-pulse .section__rule { display: none; }
-    body.layout-pulse .section__head { position: sticky; top: 72px; display: block; align-self: start; }
-    body.layout-pulse .section__head h2 { font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif; font-size: 17px; font-weight: 900; }
-    body.layout-pulse .section__head span { display: block; margin-top: 6px; }
-    body.layout-pulse .story-list { display: block; counter-reset: pulse-rank; margin-top: 0; }
-    body.layout-pulse .story-list .story:first-child,
-    body.layout-pulse .story { position: relative; display: block; border: 0; border-bottom: 1px solid var(--line); background: #fff; margin: 0; padding: 11px 12px 11px 44px; }
-    body.layout-pulse .story::before { counter-increment: pulse-rank; content: counter(pulse-rank); position: absolute; left: 10px; top: 14px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; color: var(--accent-deep); background: var(--accent-soft); font-size: 11px; font-weight: 900; font-variant-numeric: tabular-nums; }
-    body.layout-pulse .story__image { display: none; }
-    body.layout-pulse .story h3 { font-size: 15px; margin-bottom: 3px; }
-    body.layout-pulse .story p { display: none; }
-    body.layout-pulse .story__sources { display: block; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-    body.layout-pulse details { display: none; }
-
-    body.layout-deck { --paper: #fbfafc; --surface: #ffffff; --line: #ded7e8; --accent: #6b35d8; --accent-deep: #42207e; --accent-soft: #f0eafb; --green: #00785f; }
-    body.layout-deck .page { max-width: none; padding: 0 0 72px; }
-    body.layout-deck .masthead { min-height: 52vh; display: grid; align-content: end; border: 0; padding: 28px clamp(22px, 7vw, 96px); background: linear-gradient(135deg, #ffffff 0%, #f5f0ff 46%, #eaf2ff 100%); }
-    body.layout-deck .brand-row { max-width: 1180px; width: 100%; border-color: rgba(107,53,216,.2); }
-    body.layout-deck h1 { max-width: 1040px; font-size: clamp(48px, 8vw, 94px); line-height: .92; }
-    body.layout-deck .dek { max-width: 780px; font-size: 17px; }
-    body.layout-deck .brief { position: relative; z-index: 2; max-width: 1080px; margin: -38px auto 0; border: 1px solid var(--line); border-radius: 24px; background: rgba(255,255,255,.96); box-shadow: 0 22px 54px rgba(44, 27, 84, .12); padding: 18px; }
-    body.layout-deck .brief h2 { font-size: 0; }
-    body.layout-deck .brief h2::after { content: "오늘의 리딩 맵"; font-family: Georgia, "Times New Roman", serif; font-size: 22px; }
-    body.layout-deck .toc { max-width: 1080px; margin: 16px auto 0; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.9); padding: 8px 10px; }
-    body.layout-deck .featured { display: none; }
-    body.layout-deck .section { max-width: 1180px; min-height: 70vh; display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 24px; margin: 0 auto; border-top: 0; padding: 42px 24px; scroll-margin-top: 96px; }
-    body.layout-deck .section__rule { display: none; }
-    body.layout-deck .section__head { position: sticky; top: 92px; display: block; align-self: start; }
-    body.layout-deck .section__head h2 { font-size: 30px; }
-    body.layout-deck .section__head span { display: block; margin-top: 8px; }
-    body.layout-deck .story-list { display: flex; gap: 16px; overflow-x: auto; margin-top: 0; padding: 8px 4px 22px; scroll-snap-type: x proximity; }
-    body.layout-deck .story-list .story:first-child,
-    body.layout-deck .story { flex: 0 0 310px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 24px; background: #fff; box-shadow: 0 14px 36px rgba(44, 27, 84, .08); overflow: hidden; padding: 0; scroll-snap-align: start; }
-    body.layout-deck .story__image { aspect-ratio: 16 / 10; border: 0; border-bottom: 1px solid var(--line); }
-    body.layout-deck .story__body { padding: 14px; }
-    body.layout-deck .story h3 { font-size: 17px; }
-    body.layout-deck .story p { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-    body.layout-deck .story__sources { display: none; }
-    body.layout-deck details { display: none; }
-
-    @media (max-width: 860px) {
-      .variant-switcher__links { display: flex; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
-      .variant-switcher__links::-webkit-scrollbar { display: none; }
-      .variant-switcher__link { flex: 0 0 136px; }
-      body.layout-board .story-list { display: block; }
-      body.layout-pulse .meta-strip, body.layout-pulse .brief__bullets { grid-template-columns: 1fr; }
-      body.layout-pulse .brief, body.layout-pulse .section { display: block; }
-      body.layout-pulse .featured { display: block; }
-      body.layout-pulse .featured .story--featured:first-child,
-      body.layout-pulse .featured .story--featured:nth-child(n+2) { margin-bottom: 10px; }
-      body.layout-pulse .section__head { position: static; margin-bottom: 8px; }
-      body.layout-deck .masthead { min-height: auto; padding: 24px; }
-      body.layout-deck h1 { font-size: clamp(40px, 12vw, 58px); }
-      body.layout-deck .brief, body.layout-deck .toc { margin-left: 18px; margin-right: 18px; }
-      body.layout-deck .section { display: block; min-height: auto; padding: 28px 18px; }
-      body.layout-deck .section__head { position: static; margin-bottom: 12px; }
-      body.layout-deck .story-list { display: grid; grid-template-columns: 1fr; overflow: visible; }
-      body.layout-deck .story-list .story:first-child,
-      body.layout-deck .story { flex: auto; }
-    }
-    """
 
 
 def daily_report_write_only() -> bool:
@@ -1194,29 +1026,30 @@ def render_story(
     source_links = render_source_links(normalized_links) if has_grouped_links else ""
     source_meta = source_links or sources
     source_meta_html = f'<span class="story__sources">{source_meta}</span>' if source_meta else ""
-    details_html = (
+    grouped_links_html = (
         f"""
-            <details>
-              <summary>기사 링크 {len(normalized_links)}건 보기</summary>
-              <div class="link-table">
-                <table>
-                  <thead><tr><th>일시</th><th>매체</th><th>기사</th></tr></thead>
-                  <tbody>{detail_links}</tbody>
-                </table>
+              <div class="story-context__group">
+                <strong>현재 묶음</strong>
+                <div class="link-table">
+                  <table>
+                    <thead><tr><th>일시</th><th>매체</th><th>기사</th></tr></thead>
+                    <tbody>{detail_links}</tbody>
+                  </table>
+                </div>
               </div>
-            </details>
         """
-        if show_details and has_grouped_links
+        if has_grouped_links
         else ""
     )
-    db_context_html = (
-        """
+    related_html = (
+        f"""
             <details class="story-context" data-story-context>
-              <summary>DB 맥락 보기</summary>
-              <div class="story-context__body" data-story-context-body>펼치면 관련 기사와 매체 확산을 불러옵니다.</div>
+              <summary>관련 기사 보기</summary>
+              {grouped_links_html}
+              <div class="story-context__body" data-story-context-body>펼치면 아카이브에서 관련 기사와 매체 확산을 불러옵니다.</div>
             </details>
         """
-        if show_details and (story_key or db_query)
+        if show_details and (story_key or db_query or has_grouped_links)
         else ""
     )
     featured_class = " story--featured" if featured else ""
@@ -1240,8 +1073,7 @@ def render_story(
               {summary_html}
             </div>
             {summary_after_body_html}
-            {details_html}
-            {db_context_html}
+            {related_html}
           </article>
     """
 
@@ -1260,15 +1092,23 @@ def render_report_html(
     layout_variant: str = "standard",
     in_variant_dir: bool = False,
 ) -> str:
-    variant_slug = layout_variant if layout_variant in {"standard", *(str(item["slug"]) for item in LAYOUT_VARIANTS)} else "standard"
-    is_standard_layout = variant_slug == "standard"
+    _ = (layout_variant, in_variant_dir)
     stats = report_stats(stories, clusters, duplicate_records)
     buckets = category_buckets(stories)
     review_bullets = clean_report_bullets(review) or clean_report_bullets(fallback_report_review(stories))
-    featured_stories = stories[: 5 if is_standard_layout else 3]
+    featured_stories = stories[:5]
+    featured_ids = {str(story.get("id") or "") for story in featured_stories}
+    section_buckets = {
+        category: (
+            [story for story in category_stories if str(story.get("id") or "") not in featured_ids]
+            if len(stories) > len(featured_stories)
+            else list(category_stories)
+        )
+        for category, category_stories in buckets.items()
+    }
     review_items: list[str] = []
     for index, bullet in enumerate(review_bullets):
-        target_story = featured_stories[index] if is_standard_layout and index < len(featured_stories) else None
+        target_story = featured_stories[index] if index < len(featured_stories) else None
         target_id = str(target_story.get("id") or "") if isinstance(target_story, dict) else ""
         if target_id:
             review_items.append(
@@ -1279,7 +1119,7 @@ def render_report_html(
     review_html = "\n".join(review_items)
     review_block_html = f'<ul class="brief__bullets">{review_html}</ul>' if review_html else ""
     featured_html = "\n".join(
-        render_story(story, config, featured=True, show_details=False, editorial=is_standard_layout)
+        render_story(story, config, featured=True, show_details=False, editorial=True)
         for story in featured_stories
     )
     featured_block_html = (
@@ -1294,16 +1134,10 @@ def render_report_html(
       </div>
     </section>
         """
-        if is_standard_layout
-        else f"""
-    <section class="featured" aria-label="top stories">
-      {featured_html}
-    </section>
-        """
     )
     category_sections = []
     for category in REPORT_CATEGORY_ORDER:
-        category_stories = buckets.get(category, [])
+        category_stories = section_buckets.get(category, [])
         if not category_stories:
             continue
         section_id = slugify(category, "section")
@@ -1316,25 +1150,25 @@ def render_report_html(
             <span>{len(category_stories)}개 이슈</span>
           </div>
           <div class="story-list">
-            {''.join(render_story(story, config, section_id=section_id, section_index=index, section_total=len(category_stories), editorial=is_standard_layout) for index, story in enumerate(category_stories, start=1))}
+            {''.join(render_story(story, config, section_id=section_id, section_index=index, section_total=len(category_stories), editorial=True) for index, story in enumerate(category_stories, start=1))}
           </div>
         </section>
             """
         )
     toc = "\n".join(
-        f'<a class="chip" data-toc-section="{escape(slugify(category, "section"), quote=True)}" href="#{escape(slugify(category, "section"), quote=True)}" style="--progress:0"><span class="chip__label">{escape(category)}</span><span class="chip__progress" data-progress-text>0/{len(buckets.get(category, []))}</span></a>'
+        f'<a class="chip" data-toc-section="{escape(slugify(category, "section"), quote=True)}" href="#{escape(slugify(category, "section"), quote=True)}" style="--progress:0"><span class="chip__label">{escape(category)}</span><span class="chip__progress" data-progress-text>0/{len(section_buckets.get(category, []))}</span></a>'
         for category in REPORT_CATEGORY_ORDER
-        if buckets.get(category)
+        if section_buckets.get(category)
     )
     side_category_links = "\n".join(
-        f'<a data-nav-section data-section-target="{escape(slugify(category, "section"), quote=True)}" href="#{escape(slugify(category, "section"), quote=True)}"><span class="nav-label">{escape(category)}</span><span class="nav-progress" data-progress-text>0/{len(buckets.get(category, []))}</span></a>'
+        f'<a data-nav-section data-section-target="{escape(slugify(category, "section"), quote=True)}" href="#{escape(slugify(category, "section"), quote=True)}"><span class="nav-label">{escape(category)}</span><span class="nav-progress" data-progress-text>0/{len(section_buckets.get(category, []))}</span></a>'
         for category in REPORT_CATEGORY_ORDER
-        if buckets.get(category)
+        if section_buckets.get(category)
     )
     ordered_section_stories = [
         story
         for category in REPORT_CATEGORY_ORDER
-        for story in buckets.get(category, [])
+        for story in section_buckets.get(category, [])
     ]
     side_story_links = "\n".join(
         f'<a data-nav-story data-nav-story-index="{index}" href="#{escape(str(story.get("id") or ""), quote=True)}">{escape(compact_text(str(story.get("title") or ""), max_chars=46))}</a>'
@@ -1354,16 +1188,9 @@ def render_report_html(
     header_logo = bside_logo_html("bside-logo--top")
     nav_logo = bside_logo_html("bside-logo--nav")
     footer_logo = bside_logo_html("bside-logo--footer")
-    variant_class = f"layout-{variant_slug}"
-    variant_links_html = render_layout_variant_links(variant_slug, in_variant_dir=in_variant_dir)
-    variant_css = layout_variant_css()
     read_api_url_json = json.dumps(report_read_api_url(), ensure_ascii=False)
     date_id_json = json.dumps(date_id, ensure_ascii=False)
-    brief_title_html = (
-        '<span class="brief-title__eyebrow">오늘의</span><span>핵심 브리핑</span>'
-        if is_standard_layout
-        else "Editor’s Brief"
-    )
+    brief_title_html = '<span class="brief-title__eyebrow">오늘의</span><span>핵심 브리핑</span>'
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -1453,6 +1280,9 @@ def render_report_html(
     .db-search__result:hover h3 {{ color: var(--accent-deep); text-decoration: underline; text-underline-offset: 3px; }}
     .db-search__result h3 {{ margin: 0; font-size: 13px; line-height: 1.36; font-weight: 820; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: keep-all; overflow-wrap: break-word; }}
     .db-search__meta {{ display: flex; flex-wrap: wrap; gap: 6px 9px; color: var(--muted); font-size: 10.6px; line-height: 1.35; }}
+    .db-search__summary {{ margin: 0; color: #4b4357; font-size: 11.6px; line-height: 1.42; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }}
+    .db-search__why {{ display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }}
+    .db-search__why span {{ border: 1px solid rgba(112, 55, 224, .16); border-radius: 999px; padding: 2px 6px; background: rgba(246, 240, 255, .5); color: var(--accent-deep); font-size: 10px; font-weight: 850; }}
     .db-search__message {{ color: var(--muted); font-size: 12px; padding: 8px 0 0; }}
     .priority {{ border-bottom: 1px solid var(--ink); padding: 22px 0 8px; }}
     .priority__head {{ display: flex; align-items: end; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }}
@@ -1469,25 +1299,24 @@ def render_report_html(
     .chip__progress {{ color: var(--accent); font-weight: 800; font-variant-numeric: tabular-nums; }}
     .chip.is-active {{ border-color: var(--accent); background: var(--accent-soft); color: var(--accent-deep); }}
     .mobile-story-nav {{ display: none; }}
-    .featured {{ display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, .95fr); gap: 0 24px; border-bottom: 1px solid var(--ink); padding: 24px 0; align-items: start; }}
-    .priority .featured {{ border-bottom: 0; padding-bottom: 12px; }}
-    .featured .story--featured:first-child {{ grid-row: span 2; border-right: 1px solid var(--line); padding-right: 24px; }}
-    .featured .story--featured:nth-child(n+2) {{ display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 14px; border-top: 1px solid var(--line); padding: 14px 0 0; }}
-    .featured .story--featured:nth-child(2) {{ border-top: 0; padding-top: 0; }}
-    .featured .story--featured:nth-child(n+2) .story__image {{ aspect-ratio: 4 / 3; }}
-    .featured .story--featured:nth-child(n+2) h3 {{ font-size: 17px; }}
-    .featured .story--featured:nth-child(n+2) p {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }}
-    .featured .story--featured:nth-child(n+2) .story__summary {{ grid-column: 2; margin-top: -2px; padding-top: 7px; padding-bottom: 7px; }}
-    .featured .story--featured:nth-child(n+2) details {{ grid-column: 2; }}
+    .featured {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 28px; border-bottom: 1px solid var(--ink); padding: 18px 0 8px; align-items: start; }}
+    .priority .featured {{ border-bottom: 0; padding-bottom: 8px; }}
+    .featured .story--featured, .featured .story--featured:first-child, .featured .story--featured:nth-child(n+2) {{ display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 10px 14px; border-top: 1px solid var(--line); border-right: 0; padding: 14px 0 16px; }}
+    .featured .story--featured:first-child, .featured .story--featured:nth-child(2) {{ border-top: 0; padding-top: 0; }}
+    .featured .story--featured .story__image {{ aspect-ratio: 4 / 3; }}
+    .featured .story--featured h3 {{ font-size: 17.5px; }}
+    .featured .story--featured p {{ display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }}
+    .featured .story--featured .story__summary {{ grid-column: 1 / -1; margin: 0; }}
+    .featured .story--featured details {{ grid-column: 1 / -1; }}
     .section {{ position: relative; padding: 34px 0 6px; scroll-margin-top: 108px; }}
     .section__rule {{ height: 3px; background: linear-gradient(90deg, var(--accent), var(--ink)); margin-bottom: 14px; }}
     .section__head {{ position: sticky; top: 49px; z-index: 4; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 -2px 0; padding: 10px 2px 9px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 96%, transparent); backdrop-filter: blur(8px); }}
     .section.is-active-section .section__head {{ border-bottom-color: rgba(112, 55, 224, .42); box-shadow: 0 8px 18px rgba(44, 27, 84, .06); }}
     .section__head span {{ color: var(--muted); font-size: 13px; }}
-    .story-list {{ column-count: 2; column-gap: 28px; margin-top: 10px; }}
+    .story-list {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 28px; margin-top: 10px; align-items: start; }}
     .story-list .story:first-child {{ grid-template-columns: 104px minmax(0, 1fr); }}
-    .story {{ position: relative; display: inline-grid; width: 100%; grid-template-columns: 104px minmax(0, 1fr); gap: 10px 14px; min-width: 0; break-inside: avoid; border-top: 1px solid var(--line); padding: 14px 0 16px; scroll-margin-top: 112px; vertical-align: top; }}
-    .story--featured {{ align-self: start; grid-template-columns: 1fr; min-width: 0; overflow: hidden; border-top: 0; padding-top: 0; }}
+    .story {{ position: relative; display: grid; width: 100%; grid-template-columns: 104px minmax(0, 1fr); gap: 10px 14px; min-width: 0; border-top: 1px solid var(--line); padding: 14px 0 16px; scroll-margin-top: 112px; vertical-align: top; }}
+    .story--featured {{ align-self: start; min-width: 0; overflow: hidden; }}
     .story__body {{ min-width: 0; max-width: 780px; }}
     .story--featured .story__body {{ max-width: none; }}
     .story__image {{ display: block; aspect-ratio: 4 / 3; background: var(--accent-soft); overflow: hidden; border: 1px solid var(--line); }}
@@ -1521,6 +1350,8 @@ def render_report_html(
     .story-context {{ margin-top: 4px; border-top: 1px solid rgba(112, 55, 224, .14); padding-top: 6px; }}
     .story-context summary {{ color: var(--accent-deep); }}
     .story-context summary::after {{ content: " · 관련 기사/매체"; color: var(--muted); font-size: 11px; font-weight: 700; }}
+    .story-context__group {{ display: grid; gap: 6px; margin-top: 8px; }}
+    .story-context__group > strong {{ color: var(--accent-deep); font-size: 11px; font-weight: 900; letter-spacing: .03em; }}
     .story-context__body {{ display: grid; gap: 8px; margin-top: 8px; padding: 9px 10px; border-left: 3px solid rgba(112, 55, 224, .34); background: rgba(246, 240, 255, .38); color: #342d3d; font-size: 12px; line-height: 1.45; }}
     .story-context__message {{ color: var(--muted); }}
     .story-context__stats {{ display: flex; flex-wrap: wrap; gap: 6px; }}
@@ -1624,7 +1455,7 @@ def render_report_html(
       .section {{ padding-top: 28px; scroll-margin-top: 124px; }}
       .section__head {{ top: 50px; margin-left: -1px; margin-right: -1px; padding: 9px 1px 8px; }}
       .section__head h2 {{ max-width: 72%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-      .story-list {{ display: block; column-count: auto; margin-top: 10px; }}
+      .story-list {{ display: grid; grid-template-columns: 1fr; gap: 0; margin-top: 10px; }}
       .story-list .story:first-child {{ grid-column: auto; grid-template-columns: 82px minmax(0, 1fr); }}
       .story, .story--featured {{ display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 11px; align-items: start; padding: 15px 0; }}
       .story.is-read::after {{ top: 8px; right: 2px; padding: 2px 6px; font-size: 9.5px; }}
@@ -1662,10 +1493,9 @@ def render_report_html(
       .link-table__title {{ line-height: 1.35; }}
       .footer__grid {{ grid-template-columns: 1fr; }}
     }}
-    {variant_css}
   </style>
 </head>
-<body id="top" class="{escape(variant_class, quote=True)}">
+<body id="top">
   <aside class="floating-nav" aria-label="데일리 네비게이션">
     <div class="floating-nav__meta" aria-label="발행 및 수집 정보">
       <div class="floating-nav__meta-item">
@@ -1701,10 +1531,6 @@ def render_report_html(
         <span><strong>{stats['sources']}</strong>개 매체</span>
         <button class="archive-trigger" type="button" data-archive-toggle aria-expanded="false" aria-controls="archive-panel">다른 일자 보기</button>
       </div>
-      <div class="variant-switcher" aria-label="레이아웃 실험 버전">
-        <div class="variant-switcher__title">Layout Lab</div>
-        <div class="variant-switcher__links">{variant_links_html}</div>
-      </div>
     </header>
 
     <section class="brief">
@@ -1712,17 +1538,17 @@ def render_report_html(
       <div>{review_block_html}</div>
     </section>
 
-    <section class="db-pulse" data-db-pulse hidden aria-label="DB 이슈 흐름">
+    <section class="db-pulse" data-db-pulse hidden aria-label="이슈 레이더">
       <div class="db-pulse__head">
         <div>
-          <h2>DB 이슈 흐름</h2>
-          <p>최근 수집 DB 기준으로 아직 페이지에 반영되지 않았거나 이어지는 이슈를 보강합니다.</p>
+          <h2>이슈 레이더</h2>
+          <p>DB에 누적된 최근 기사 중 후속 확인이 필요한 흐름을 보여줍니다.</p>
         </div>
-        <span class="db-pulse__badge" data-db-pulse-status>DB 연결</span>
+        <span class="db-pulse__badge" data-db-pulse-status>최근 흐름</span>
       </div>
       <div class="db-pulse__list" data-db-pulse-list></div>
       <form class="db-search" data-db-search>
-        <input type="search" name="q" autocomplete="off" placeholder="DB 기사 검색: 고려아연, 밸류업, 소액주주">
+        <input type="search" name="q" autocomplete="off" placeholder="아카이브 검색: 고려아연, 유상증자, 소액주주">
         <button type="submit">검색</button>
       </form>
       <div class="db-search__results" data-db-search-results hidden></div>
@@ -2039,10 +1865,57 @@ def render_report_html(
       return status || '수집';
     }}
 
+    function isGenericDbPulseTitle(value) {{
+      const title = String(value || '').replace(/\\s+/g, ' ').trim();
+      if (!title) return true;
+      const genericTitles = new Set([
+        '밸류업·주주환원·지배구조',
+        '주주행동·경영권',
+        '자본시장 제도·공시',
+        '해외·영문',
+      ]);
+      if (genericTitles.has(title)) return true;
+      return title.length <= 28 && /^[0-9A-Za-z가-힣]+(?:[·/|][0-9A-Za-z가-힣]+)+$/.test(title);
+    }}
+
+    function searchTokens(query) {{
+      return String(query || '')
+        .match(/[0-9A-Za-z가-힣]{{2,}}/g)?.map((token) => token.toLowerCase())
+        .filter((token, index, list) => list.indexOf(token) === index)
+        .slice(0, 5) || [];
+    }}
+
+    function articleMatchReasons(article, query) {{
+      const tokens = searchTokens(query);
+      const title = String(article.title || '').toLowerCase();
+      const summary = String(article.summary || '').toLowerCase();
+      const source = String(article.source || article.feed_name || '').toLowerCase();
+      const feed = String(article.feed_category || article.relevance_level || article.priority_level || '').toLowerCase();
+      const reasons = [];
+      if (tokens.some((token) => title.includes(token))) reasons.push('제목 일치');
+      if (tokens.some((token) => summary.includes(token))) reasons.push('요약 일치');
+      if (tokens.some((token) => source.includes(token))) reasons.push('매체 일치');
+      if (tokens.some((token) => feed.includes(token))) reasons.push('분류 일치');
+      return reasons.length ? reasons.slice(0, 3) : ['관련도순'];
+    }}
+
+    function articleSearchSnippet(article, query) {{
+      const text = String(article.summary || article.title || '').replace(/\\s+/g, ' ').trim();
+      if (!text) return '';
+      const tokens = searchTokens(query);
+      const lower = text.toLowerCase();
+      const hit = tokens.find((token) => lower.includes(token));
+      if (!hit) return compactDbText(text, 118);
+      const index = Math.max(0, lower.indexOf(hit) - 34);
+      const snippet = text.slice(index, index + 124);
+      return `${{index > 0 ? '…' : ''}}${{compactDbText(snippet, 118)}}${{index + 124 < text.length ? '…' : ''}}`;
+    }}
+
     function renderDbPulse(stories) {{
       if (!dbPulse || !dbPulseList || !Array.isArray(stories)) return;
       const items = stories
         .filter((story) => story && story.representative_title && story.representative_url)
+        .filter((story) => !isGenericDbPulseTitle(story.representative_title))
         .slice(0, 6);
       if (!items.length) return;
       dbPulseList.innerHTML = '';
@@ -2113,6 +1986,10 @@ def render_report_html(
         showDbSearchMessage(`'${{query}}' 검색 결과가 없습니다.`);
         return;
       }}
+      const message = document.createElement('div');
+      message.className = 'db-search__message';
+      message.textContent = `'${{query}}' 검색 결과 ${{items.length}}건`;
+      dbSearchResults.appendChild(message);
       items.forEach((article) => {{
         const link = document.createElement('a');
         link.className = 'db-search__result';
@@ -2128,8 +2005,20 @@ def render_report_html(
           span.textContent = String(value);
           meta.appendChild(span);
         }});
+        const summary = document.createElement('p');
+        summary.className = 'db-search__summary';
+        summary.textContent = articleSearchSnippet(article, query);
+        const reasons = document.createElement('div');
+        reasons.className = 'db-search__why';
+        articleMatchReasons(article, query).forEach((reason) => {{
+          const chip = document.createElement('span');
+          chip.textContent = reason;
+          reasons.appendChild(chip);
+        }});
         link.appendChild(title);
         link.appendChild(meta);
+        if (summary.textContent) link.appendChild(summary);
+        link.appendChild(reasons);
         dbSearchResults.appendChild(link);
       }});
       dbSearchResults.hidden = false;
@@ -2142,21 +2031,21 @@ def render_report_html(
         showDbSearchMessage('검색어를 2자 이상 입력해주세요.');
         return;
       }}
-      showDbSearchMessage('DB를 검색하는 중입니다.');
+      showDbSearchMessage('아카이브를 검색하는 중입니다.');
       try {{
         const response = await fetch(`${{apiUrlWithAction(remoteReportsApiUrl, 'articles')}}&q=${{encodeURIComponent(cleaned)}}&limit=8&days=90`, {{
           headers: {{ 'Accept': 'application/json' }},
           credentials: 'omit',
         }});
         if (!response.ok) {{
-          showDbSearchMessage('DB 검색을 불러오지 못했습니다.');
+          showDbSearchMessage('아카이브 검색을 불러오지 못했습니다.');
           return;
         }}
         const data = await response.json();
         if (data && data.ok) renderDbSearchResults(data.articles || [], cleaned);
-        else showDbSearchMessage('DB 검색을 불러오지 못했습니다.');
+        else showDbSearchMessage('아카이브 검색을 불러오지 못했습니다.');
       }} catch (error) {{
-        showDbSearchMessage('DB 검색을 불러오지 못했습니다.');
+        showDbSearchMessage('아카이브 검색을 불러오지 못했습니다.');
       }}
     }}
 
@@ -2247,7 +2136,7 @@ def render_report_html(
       if (!items.length) {{
         const message = document.createElement('div');
         message.className = 'story-context__message';
-        message.textContent = '아직 DB에서 연결할 만한 과거/관련 기사가 충분하지 않습니다.';
+        message.textContent = '아직 아카이브에서 연결할 만한 과거/관련 기사가 충분하지 않습니다.';
         body.appendChild(message);
         return;
       }}
@@ -2307,7 +2196,7 @@ def render_report_html(
       const body = details.querySelector('[data-story-context-body]');
       const story = details.closest('[data-story]');
       if (!body || !story) return;
-      body.innerHTML = '<div class="story-context__message">DB에서 관련 흐름을 불러오는 중입니다.</div>';
+      body.innerHTML = '<div class="story-context__message">아카이브에서 관련 흐름을 불러오는 중입니다.</div>';
       const storyKey = String(story.dataset.storyDbKey || '').trim();
       const query = String(story.dataset.storyDbQuery || '').trim();
       const batches = [];
@@ -2548,34 +2437,12 @@ def write_report_files(report: dict[str, object], root: Path | None = None) -> l
     dated_path.write_text(html, encoding="utf-8", newline="\n")
     latest_path.write_text(html, encoding="utf-8", newline="\n")
     variant_dir = feed_dir / "variants"
-    variant_dir.mkdir(parents=True, exist_ok=True)
-    variant_paths: list[Path] = []
-    expected_variant_files = {f'{variant["slug"]}.html' for variant in LAYOUT_VARIANTS}
-    for stale_path in variant_dir.glob("*.html"):
-        if stale_path.name not in expected_variant_files:
+    if variant_dir.exists():
+        for stale_path in variant_dir.glob("*.html"):
             stale_path.unlink()
-    for variant in LAYOUT_VARIANTS:
-        variant_slug = str(variant["slug"])
-        variant_html = render_report_html(
-            list(report.get("stories") or []),
-            str(report.get("review") or ""),
-            dict(report.get("config") or {}),
-            report["start_at"],  # type: ignore[arg-type]
-            report["end_at"],  # type: ignore[arg-type]
-            date_id,
-            str(report.get("report_url") or ""),
-            list(report.get("duplicate_records") or []),
-            list(report.get("clusters") or []),
-            render_report_archive_links(feed_dir, date_id, link_prefix="../"),
-            variant_slug,
-            True,
-        )
-        variant_path = variant_dir / f"{variant_slug}.html"
-        variant_path.write_text(normalize_generated_html(variant_html), encoding="utf-8", newline="\n")
-        variant_paths.append(variant_path)
     index_path.write_text(render_report_index(feed_dir), encoding="utf-8", newline="\n")
     refreshed_paths = refresh_existing_report_archive_links(feed_dir, date_id)
-    return [dated_path, latest_path, index_path, *variant_paths, *refreshed_paths]
+    return [dated_path, latest_path, index_path, *refreshed_paths]
 
 
 def render_report_archive_links(feed_dir: Path, current_date_id: str, *, link_prefix: str = "", max_items: int = 20) -> str:
@@ -2635,15 +2502,6 @@ def refresh_existing_report_archive_links(feed_dir: Path, current_date_id: str) 
             path.write_text(normalize_generated_html(updated), encoding="utf-8", newline="\n")
             refreshed.append(path)
 
-    variant_dir = feed_dir / "variants"
-    if variant_dir.exists():
-        variant_links = render_report_archive_links(feed_dir, current_date_id, link_prefix="../")
-        for path in variant_dir.glob("*.html"):
-            html = path.read_text(encoding="utf-8")
-            updated = refresh_report_archive_links_in_html(html, variant_links)
-            if updated != html:
-                path.write_text(normalize_generated_html(updated), encoding="utf-8", newline="\n")
-                refreshed.append(path)
     return refreshed
 
 

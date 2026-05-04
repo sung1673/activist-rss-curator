@@ -170,6 +170,26 @@ def test_daily_digest_uses_one_representative_for_duplicate_records(config, now,
     assert "수집키워드" not in sent_text
 
 
+def test_digest_skips_duplicate_record_when_story_already_present(config, now) -> None:  # type: ignore[no-untyped-def]
+    cluster = published_cluster(config, now)
+    for article in cluster["articles"]:  # type: ignore[index]
+        article["story_key"] = "hanwha-solutions-rights-offering"  # type: ignore[index]
+    duplicate = make_article(
+        "한화솔루션 유상증자 또 정정 요구",
+        "https://example.com/duplicate-hanwha",
+        source="다른매체",
+        summary="같은 한화솔루션 유상증자 정정 요구 기사",
+        published_at=now.isoformat(),
+    )
+    duplicate["status"] = "duplicate"
+    duplicate["story_key"] = "hanwha-solutions-rights-offering"
+
+    entries = digest_article_entries([cluster], config, [duplicate])
+    titles = [str(entry["title"]) for section in entries.values() for entry in section]
+
+    assert "한화솔루션 유상증자 또 정정 요구" not in titles
+
+
 def test_daily_digest_single_duplicate_record_renders_as_single_link(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import summaries
 

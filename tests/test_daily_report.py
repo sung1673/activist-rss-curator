@@ -54,10 +54,10 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert paths[0].name == "2026-05-01.html"
     assert (tmp_path / "public" / "feed" / "latest.html").exists()
     assert (tmp_path / "public" / "feed" / "index.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "memo.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "board.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "pulse.html").exists()
-    assert (tmp_path / "public" / "feed" / "variants" / "deck.html").exists()
+    assert not (tmp_path / "public" / "feed" / "variants" / "memo.html").exists()
+    assert not (tmp_path / "public" / "feed" / "variants" / "board.html").exists()
+    assert not (tmp_path / "public" / "feed" / "variants" / "pulse.html").exists()
+    assert not (tmp_path / "public" / "feed" / "variants" / "deck.html").exists()
     assert not (tmp_path / "public" / "feed" / "variants" / "forbes.html").exists()
     assert not (tmp_path / "public" / "feed" / "variants" / "social.html").exists()
     assert 'href="https://bside.ai"' in html
@@ -114,24 +114,21 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "밀어서 보기" in html
     assert "font-size: 12.5px" in html
     assert "line-height: 1.58" in html
-    assert "grid-template-columns: minmax(0, 1.35fr) minmax(260px, .95fr)" in html
     assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in html
-    assert "column-count: 2" in html
-    assert "break-inside: avoid" in html
-    assert "display: inline-grid" in html
+    assert "column-count: 2" not in html
+    assert "break-inside: avoid" not in html
+    assert "display: inline-grid" not in html
     assert "max-height: 4.35em" not in html
     assert "max-height: 3.55em" not in html
     assert "-webkit-line-clamp: 1" in html
-    assert "Layout Lab" in html
-    assert "variants/memo.html" in html
-    assert "variants/board.html" in html
-    assert "variants/pulse.html" in html
-    assert "variants/deck.html" in html
-    assert "layout-standard" in html
-    assert "layout-pulse" in html
-    assert "layout-deck" in html
-    assert "30분 체크포인트" in html
-    assert "오늘의 리딩 맵" in html
+    assert "Layout Lab" not in html
+    assert "variants/memo.html" not in html
+    assert "variants/board.html" not in html
+    assert "variants/pulse.html" not in html
+    assert "variants/deck.html" not in html
+    assert "layout-standard" not in html
+    assert "layout-pulse" not in html
+    assert "layout-deck" not in html
     assert "is-mobile-context" in html
     assert "data-context-label" in html
     assert "bside-daily-read" in html
@@ -147,10 +144,16 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "visualStoryEntries" in html
     assert "visualStoryIndexByHref" in html
     assert "pageTop(section)" in html
-    assert "DB 맥락 보기" in html
+    assert "DB 맥락 보기" not in html
+    assert "관련 기사 보기" in html
+    assert "이슈 레이더" in html
+    assert "아카이브 검색" in html
     assert "data-story-context" in html
     assert "loadStoryContext" in html
     assert "관련 기사/매체" in html
+    assert "db-search__summary" in html
+    assert "articleMatchReasons" in html
+    assert "isGenericDbPulseTitle" in html
     assert "story__image--broken" in html
     assert "✓" in html
     assert "기사 링크 1건 보기" not in html

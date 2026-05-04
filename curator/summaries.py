@@ -841,12 +841,32 @@ def duplicate_record_representative(record: dict[str, object], config: dict[str,
     return max(candidates, key=lambda article: duplicate_candidate_score(article, config))
 
 
+def digest_article_story_key(article: dict[str, object] | None) -> str:
+    if not isinstance(article, dict):
+        return ""
+    return str(article.get("story_key") or article.get("cluster_key") or "").strip()
+
+
+def digest_entry_story_key(entry: dict[str, object]) -> str:
+    article = entry.get("article")
+    return digest_article_story_key(article if isinstance(article, dict) else None)
+
+
+def duplicate_record_story_keys(record: dict[str, object], representative: dict[str, object] | None) -> set[str]:
+    keys = {digest_article_story_key(record), digest_article_story_key(representative)}
+    for candidate in duplicate_record_candidates(record):
+        keys.add(digest_article_story_key(candidate))
+    return {key for key in keys if key}
+
+
 def add_duplicate_entries(
     entries: dict[str, list[dict[str, object]]],
     duplicate_records: list[dict[str, object]],
     config: dict[str, object],
     seen_keys: set[str],
+    seen_story_keys: set[str] | None = None,
 ) -> None:
+    seen_story_keys = seen_story_keys if seen_story_keys is not None else set()
     ordered_records = sorted(
         duplicate_records,
         key=lambda record: duplicate_candidate_score(duplicate_record_representative(record, config) or record, config),
@@ -856,9 +876,13 @@ def add_duplicate_entries(
         article = duplicate_record_representative(record, config)
         if not article:
             continue
+        story_keys = duplicate_record_story_keys(record, article)
+        if story_keys & seen_story_keys:
+            continue
         entry = digest_entry_for_article(article, {}, config, seen_keys)
         if not entry:
             continue
+        seen_story_keys.update(story_keys)
         section = "global" if digest_article_is_english(article) else "domestic"
         entries[section].append(entry)
 
@@ -885,7 +909,14 @@ def digest_article_entries(
             entries[section].append(entry)
             added_for_cluster += 1
 
-    add_duplicate_entries(entries, duplicate_records or [], config, seen_keys)
+    seen_story_keys = {
+        key
+        for section_entries in entries.values()
+        for entry in section_entries
+        for key in (digest_entry_story_key(entry),)
+        if key
+    }
+    add_duplicate_entries(entries, duplicate_records or [], config, seen_keys, seen_story_keys)
 
     for section_entries in entries.values():
         section_entries.sort(key=lambda entry: entry["datetime"] or datetime.min.replace(tzinfo=ZoneInfo("UTC")), reverse=True)
