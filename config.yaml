@@ -298,7 +298,10 @@ fetch:
   max_entries_per_feed: 5
   enrich_pages: true
   max_enrich_articles: 120
+  feed_timeout_seconds: 20
+  feed_fetch_workers: 8
   page_timeout_seconds: 6
+  enrich_workers: 6
   google_news_decode_limit: 180
   state_google_news_decode_limit: 80
 

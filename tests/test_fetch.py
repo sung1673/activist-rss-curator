@@ -111,6 +111,72 @@ def test_fetch_respects_max_enrich_articles(config, monkeypatch) -> None:  # typ
     assert "enriched" not in articles[1]
 
 
+def test_parallel_feed_fetch_preserves_configured_feed_order(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import fetch
+
+    config["feeds"] = [
+        {"name": "first", "category": "test", "url": "https://example.com/first.xml"},
+        {"name": "second", "category": "test", "url": "https://example.com/second.xml"},
+    ]
+    config["fetch"]["enrich_pages"] = False
+    config["fetch"]["feed_fetch_workers"] = 2
+    config["fetch"]["max_entries_per_feed"] = 0
+    xml_by_url = {
+        "https://example.com/first.xml": """
+        <rss><channel>
+          <item><title>첫 피드 기사</title><link>https://example.com/a</link></item>
+        </channel></rss>
+        """,
+        "https://example.com/second.xml": """
+        <rss><channel>
+          <item><title>둘째 피드 기사</title><link>https://example.com/b</link></item>
+        </channel></rss>
+        """,
+    }
+
+    monkeypatch.setattr(fetch, "fetch_feed_xml", lambda url, **_kwargs: xml_by_url[url])
+
+    articles = fetch_google_alerts_articles(config)
+
+    assert [article["feed_name"] for article in articles] == ["first", "second"]
+    assert [article["canonical_url"] for article in articles] == ["https://example.com/a", "https://example.com/b"]
+
+
+def test_parallel_enrichment_preserves_article_order(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import fetch
+
+    config["feeds"] = [{"name": "test", "category": "test", "url": "https://example.com/rss.xml"}]
+    config["fetch"]["feed_fetch_workers"] = 1
+    config["fetch"]["enrich_workers"] = 3
+    config["fetch"]["max_entries_per_feed"] = 0
+    config["fetch"]["max_enrich_articles"] = 0
+    config["fetch"]["google_news_decode_limit"] = 0
+    xml = """
+    <rss><channel>
+      <item><title>첫 기사</title><link>https://example.com/a</link></item>
+      <item><title>둘째 기사</title><link>https://example.com/b</link></item>
+      <item><title>셋째 기사</title><link>https://example.com/c</link></item>
+    </channel></rss>
+    """
+
+    monkeypatch.setattr(fetch, "fetch_feed_xml", lambda *_args, **_kwargs: xml)
+
+    def fake_enrich(article, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+        enriched = dict(article)
+        enriched["enriched_url"] = article["canonical_url"]
+        return enriched
+
+    monkeypatch.setattr(fetch, "enrich_article", fake_enrich)
+
+    articles = fetch_google_alerts_articles(config)
+
+    assert [article["enriched_url"] for article in articles] == [
+        "https://example.com/a",
+        "https://example.com/b",
+        "https://example.com/c",
+    ]
+
+
 def test_google_news_decode_runs_beyond_page_enrich_limit(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import fetch
 

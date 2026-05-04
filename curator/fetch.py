@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import quote, urljoin, urlsplit
@@ -22,6 +23,30 @@ def fetch_feed_xml(feed_url: str, timeout: float = 20.0) -> str:
     response = httpx.get(feed_url, timeout=timeout, follow_redirects=True, headers={"User-Agent": USER_AGENT})
     response.raise_for_status()
     return response.text
+
+
+def fetch_config_int(fetch_config: object, key: str, default: int) -> int:
+    if not isinstance(fetch_config, dict):
+        return default
+    value = fetch_config.get(key, default)
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def fetch_config_float(fetch_config: object, key: str, default: float) -> float:
+    if not isinstance(fetch_config, dict):
+        return default
+    value = fetch_config.get(key, default)
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def source_from_entry(entry: object, title_parts: dict[str, object], link: str) -> str:
@@ -101,6 +126,53 @@ def parse_feed(
 ) -> list[dict[str, object]]:
     parsed = feedparser.parse(xml_text)
     return [article_from_entry(entry, config, feed_meta) for entry in parsed.entries]
+
+
+def fetch_feed_articles(
+    feed_meta: dict[str, str],
+    config: dict[str, object],
+    *,
+    max_entries: int,
+    timeout: float,
+) -> list[dict[str, object]]:
+    xml_text = fetch_feed_xml(feed_meta["url"], timeout=timeout)
+    feed_articles = parse_feed(xml_text, config, feed_meta)
+    if max_entries > 0:
+        return feed_articles[:max_entries]
+    return feed_articles
+
+
+def fetch_all_feed_articles(config: dict[str, object], fetch_config: object) -> list[dict[str, object]]:
+    feeds = configured_feeds(config)
+    if not feeds:
+        return []
+
+    max_entries = fetch_config_int(fetch_config, "max_entries_per_feed", 0)
+    feed_timeout = fetch_config_float(fetch_config, "feed_timeout_seconds", 20.0)
+    workers = max(1, fetch_config_int(fetch_config, "feed_fetch_workers", 1))
+
+    if workers <= 1 or len(feeds) <= 1:
+        articles: list[dict[str, object]] = []
+        for feed_meta in feeds:
+            try:
+                articles.extend(fetch_feed_articles(feed_meta, config, max_entries=max_entries, timeout=feed_timeout))
+            except httpx.HTTPError:
+                continue
+        return articles
+
+    results: list[list[dict[str, object]]] = [[] for _ in feeds]
+    with ThreadPoolExecutor(max_workers=min(workers, len(feeds))) as executor:
+        future_map = {
+            executor.submit(fetch_feed_articles, feed_meta, config, max_entries=max_entries, timeout=feed_timeout): index
+            for index, feed_meta in enumerate(feeds)
+        }
+        for future in as_completed(future_map):
+            index = future_map[future]
+            try:
+                results[index] = future.result()
+            except httpx.HTTPError:
+                results[index] = []
+    return [article for batch in results for article in batch]
 
 
 def canonical_href(html_text: str, base_url: str) -> str | None:
@@ -423,48 +495,104 @@ def enrich_article(
     return enriched
 
 
+def enrichment_jobs(
+    articles: list[dict[str, object]],
+    *,
+    max_enrich_articles: int,
+    google_news_decode_limit: int,
+) -> list[tuple[int, dict[str, object], bool, bool]]:
+    jobs: list[tuple[int, dict[str, object], bool, bool]] = []
+    google_news_decode_attempts = 0
+    for index, article in enumerate(articles):
+        url = str(article.get("canonical_url") or article.get("link") or "")
+        is_google_news = bool(google_news_article_id(url))
+        should_decode_google_news = is_google_news and (
+            google_news_decode_limit < 0 or google_news_decode_attempts < google_news_decode_limit
+        )
+        if should_decode_google_news:
+            google_news_decode_attempts += 1
+        should_enrich = not (max_enrich_articles > 0 and index + 1 > max_enrich_articles)
+        jobs.append((index, article, should_decode_google_news, should_enrich))
+    return jobs
+
+
+def enrich_article_job(
+    job: tuple[int, dict[str, object], bool, bool],
+    config: dict[str, object],
+    *,
+    timeout: httpx.Timeout,
+    limits: httpx.Limits,
+    headers: dict[str, str],
+) -> tuple[int, dict[str, object]]:
+    index, article, should_decode_google_news, should_enrich = job
+    if not should_decode_google_news and not should_enrich:
+        return index, article
+
+    decoded_article = article
+    with httpx.Client(timeout=timeout, limits=limits, headers=headers) as client:
+        if should_decode_google_news:
+            url = str(article.get("canonical_url") or article.get("link") or "")
+            decoded_article = apply_decoded_google_news_url(
+                article,
+                decode_google_news_url_online(url, client),
+            )
+        if should_enrich:
+            decoded_article = enrich_article(
+                decoded_article,
+                client,
+                config,
+                decode_google_news=False,
+            )
+    return index, decoded_article
+
+
 def fetch_google_alerts_articles(config: dict[str, object]) -> list[dict[str, object]]:
-    articles: list[dict[str, object]] = []
     fetch_config = config.get("fetch", {})
-    max_entries = int(fetch_config.get("max_entries_per_feed", 0) or 0)  # type: ignore[union-attr]
-    for feed_meta in configured_feeds(config):
-        try:
-            xml_text = fetch_feed_xml(feed_meta["url"])
-        except httpx.HTTPError:
-            continue
-        feed_articles = parse_feed(xml_text, config, feed_meta)
-        if max_entries > 0:
-            feed_articles = feed_articles[:max_entries]
-        articles.extend(feed_articles)
+    articles = fetch_all_feed_articles(config, fetch_config)
 
     if not bool(fetch_config.get("enrich_pages", True)):  # type: ignore[union-attr]
         return articles
 
-    page_timeout = float(fetch_config.get("page_timeout_seconds", 8.0) or 8.0)  # type: ignore[union-attr]
-    max_enrich_articles = int(fetch_config.get("max_enrich_articles", 0) or 0)  # type: ignore[union-attr]
-    google_news_decode_limit = int(fetch_config.get("google_news_decode_limit", 25) or 0)  # type: ignore[union-attr]
+    page_timeout = fetch_config_float(fetch_config, "page_timeout_seconds", 8.0)
+    max_enrich_articles = fetch_config_int(fetch_config, "max_enrich_articles", 0)
+    google_news_decode_limit = fetch_config_int(fetch_config, "google_news_decode_limit", 25)
+    enrich_workers = max(1, fetch_config_int(fetch_config, "enrich_workers", 1))
     timeout = httpx.Timeout(page_timeout, connect=min(5.0, page_timeout))
-    limits = httpx.Limits(max_connections=5, max_keepalive_connections=2)
+    limits = httpx.Limits(max_connections=max(5, enrich_workers), max_keepalive_connections=max(2, enrich_workers // 2))
     headers = {"User-Agent": USER_AGENT}
+    jobs = enrichment_jobs(
+        articles,
+        max_enrich_articles=max_enrich_articles,
+        google_news_decode_limit=google_news_decode_limit,
+    )
+
+    if enrich_workers > 1 and len(jobs) > 1:
+        results: list[dict[str, object] | None] = [None for _ in jobs]
+        with ThreadPoolExecutor(max_workers=min(enrich_workers, len(jobs))) as executor:
+            future_map = {
+                executor.submit(enrich_article_job, job, config, timeout=timeout, limits=limits, headers=headers): job[0]
+                for job in jobs
+            }
+            for future in as_completed(future_map):
+                index = future_map[future]
+                try:
+                    result_index, result_article = future.result()
+                    results[result_index] = result_article
+                except httpx.HTTPError:
+                    results[index] = articles[index]
+        return [article for article in results if article is not None]
+
     enriched_articles: list[dict[str, object]] = []
-    enrich_attempts = 0
-    google_news_decode_attempts = 0
     with httpx.Client(timeout=timeout, limits=limits, headers=headers) as client:
-        for article in articles:
-            enrich_attempts += 1
-            url = str(article.get("canonical_url") or article.get("link") or "")
-            is_google_news = bool(google_news_article_id(url))
-            should_decode_google_news = is_google_news and (
-                google_news_decode_limit < 0 or google_news_decode_attempts < google_news_decode_limit
-            )
+        for _index, article, should_decode_google_news, should_enrich in jobs:
             decoded_article = article
             if should_decode_google_news:
-                google_news_decode_attempts += 1
+                url = str(article.get("canonical_url") or article.get("link") or "")
                 decoded_article = apply_decoded_google_news_url(
                     article,
                     decode_google_news_url_online(url, client),
                 )
-            if max_enrich_articles > 0 and enrich_attempts > max_enrich_articles:
+            if not should_enrich:
                 enriched_articles.append(decoded_article)
                 continue
             enriched_articles.append(

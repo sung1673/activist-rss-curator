@@ -1332,11 +1332,10 @@ def render_report_html(
     .story__sources em {{ font-style: normal; color: var(--muted); white-space: nowrap; }}
     .story h3 {{ font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif; font-size: 17.5px; line-height: 1.34; margin: 0 0 5px; letter-spacing: 0; font-weight: 800; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
     .story h3 a {{ text-decoration-thickness: 1px; text-underline-offset: 4px; }}
-    .story.is-read {{ background: linear-gradient(90deg, rgba(112, 55, 224, .075), transparent 60%); border-top-color: rgba(112, 55, 224, .28); }}
-    .story.is-read::after {{ content: "읽음"; position: absolute; top: 10px; right: 0; border: 1px solid rgba(112, 55, 224, .24); border-radius: 999px; padding: 2px 7px; color: var(--accent-deep); background: var(--accent-soft); font-size: 10px; font-weight: 900; line-height: 1.2; }}
-    .story.is-read .story__body, .story.is-read .story__summary, .story.is-read details {{ opacity: .72; }}
-    .story.is-read .story__image {{ filter: grayscale(.28); opacity: .78; }}
-    .story.is-read h3 a {{ color: #6f6878; }}
+    .story.is-read {{ background: linear-gradient(90deg, rgba(112, 55, 224, .055), transparent 64%); border-top-color: rgba(112, 55, 224, .24); }}
+    .story.is-read::after {{ content: "읽음"; position: absolute; top: 16px; left: 8px; z-index: 2; border: 1px solid rgba(112, 55, 224, .30); border-radius: 999px; padding: 2px 7px; color: var(--accent-deep); background: rgba(255,255,255,.92); box-shadow: 0 4px 12px rgba(44, 27, 84, .12); font-size: 10px; font-weight: 900; line-height: 1.2; pointer-events: none; }}
+    .story.is-read .story__image {{ filter: saturate(.86) grayscale(.12); opacity: .90; }}
+    .story.is-read h3 a {{ color: #5f566e; }}
     .story--featured h3 {{ font-size: 18.5px; line-height: 1.32; }}
     .story p {{ max-width: 700px; margin: 0 0 8px; color: #3f3948; font-size: 14px; line-height: 1.58; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
     .story--featured p {{ font-size: 13.5px; line-height: 1.55; }}
@@ -1348,6 +1347,7 @@ def render_report_html(
     summary {{ cursor: pointer; color: var(--green); font-size: 13px; font-weight: 800; }}
     summary::after {{ content: " · 좌우 스크롤"; color: var(--muted); font-size: 11px; font-weight: 700; }}
     .story-context {{ margin-top: 4px; border-top: 1px solid rgba(112, 55, 224, .14); padding-top: 6px; }}
+    .story-context[hidden], .story-context__body[hidden] {{ display: none !important; }}
     .story-context summary {{ color: var(--accent-deep); }}
     .story-context summary::after {{ content: " · 관련 기사/매체"; color: var(--muted); font-size: 11px; font-weight: 700; }}
     .story-context__group {{ display: grid; gap: 6px; margin-top: 8px; }}
@@ -1458,7 +1458,7 @@ def render_report_html(
       .story-list {{ display: grid; grid-template-columns: 1fr; gap: 0; margin-top: 10px; }}
       .story-list .story:first-child {{ grid-column: auto; grid-template-columns: 82px minmax(0, 1fr); }}
       .story, .story--featured {{ display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 11px; align-items: start; padding: 15px 0; }}
-      .story.is-read::after {{ top: 8px; right: 2px; padding: 2px 6px; font-size: 9.5px; }}
+      .story.is-read::after {{ top: 20px; left: 6px; padding: 2px 6px; font-size: 9.5px; }}
       .story--featured {{ border-top: 1px solid var(--line); }}
       .story--featured .story__image {{ aspect-ratio: 4 / 3; }}
       .story--featured h3, .story h3 {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 16.5px; line-height: 1.32; font-weight: 800; margin-bottom: 6px; }}
@@ -2122,24 +2122,34 @@ def render_report_html(
       return hits.includes(tokens[0]) || hits.length >= 2;
     }}
 
-    function renderStoryContext(details, articles) {{
+    function storyContextHasGroupedLinks(details) {{
+      return Boolean(details.querySelector('.story-context__group'));
+    }}
+
+    function renderStoryContext(details, storyArticles, queryArticles) {{
       const body = details.querySelector('[data-story-context-body]');
       const story = details.closest('[data-story]');
       if (!body || !story) return;
       const currentKey = articleUrlKey(story.dataset.storyUrl || story.querySelector('h3 a')?.href || '');
       const filterTokens = contextFilterTokens(story.dataset.storyDbQuery || '');
-      const items = mergeContextArticles([articles])
-        .filter((article) => articleUrlKey(article.canonical_url) !== currentKey)
-        .filter((article) => articleMatchesContext(article, filterTokens))
-        .slice(0, 8);
+      const isNotCurrent = (article) => articleUrlKey(article.canonical_url) !== currentKey;
+      const storyItems = mergeContextArticles([storyArticles]).filter(isNotCurrent);
+      const queryItems = mergeContextArticles([queryArticles])
+        .filter(isNotCurrent)
+        .filter((article) => articleMatchesContext(article, filterTokens));
+      const items = mergeContextArticles([storyItems, queryItems]).slice(0, 8);
       body.innerHTML = '';
       if (!items.length) {{
-        const message = document.createElement('div');
-        message.className = 'story-context__message';
-        message.textContent = '아직 아카이브에서 연결할 만한 과거/관련 기사가 충분하지 않습니다.';
-        body.appendChild(message);
+        if (storyContextHasGroupedLinks(details)) {{
+          body.hidden = true;
+        }} else {{
+          details.open = false;
+          details.hidden = true;
+          details.dataset.empty = '1';
+        }}
         return;
       }}
+      body.hidden = false;
 
       const spread = sourceSpread(items);
       const stats = document.createElement('div');
@@ -2199,18 +2209,26 @@ def render_report_html(
       body.innerHTML = '<div class="story-context__message">아카이브에서 관련 흐름을 불러오는 중입니다.</div>';
       const storyKey = String(story.dataset.storyDbKey || '').trim();
       const query = String(story.dataset.storyDbQuery || '').trim();
-      const batches = [];
+      let storyArticles = [];
+      let queryArticles = [];
       if (storyKey) {{
-        batches.push(await fetchDbArticles({{ story_key: storyKey, limit: '16', days: '180' }}));
+        storyArticles = await fetchDbArticles({{ story_key: storyKey, limit: '16', days: '180' }});
       }}
       if (query) {{
-        const currentItems = mergeContextArticles(batches);
+        const currentItems = mergeContextArticles([storyArticles]);
         if (currentItems.length < 4) {{
-          batches.push(await fetchDbArticles({{ q: query, limit: '12', days: '180' }}));
+          queryArticles = await fetchDbArticles({{ q: query, limit: '12', days: '180' }});
         }}
       }}
-      renderStoryContext(details, mergeContextArticles(batches));
+      renderStoryContext(details, storyArticles, queryArticles);
       details.dataset.loaded = '1';
+    }}
+
+    function hideUnavailableStoryContexts() {{
+      if (remoteReportsApiUrl) return;
+      storyContextDetails.forEach((details) => {{
+        if (!storyContextHasGroupedLinks(details)) details.hidden = true;
+      }});
     }}
 
     async function loadRemoteArchiveLinks() {{
@@ -2367,6 +2385,7 @@ def render_report_html(
         if (details.open) loadStoryContext(details);
       }});
     }});
+    hideUnavailableStoryContexts();
     updateNavigation();
     loadRemoteArchiveLinks();
     loadDbPulse();
