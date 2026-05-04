@@ -19,6 +19,7 @@ from .summaries import publish_hourly_telegram_update
 from .telegram_publisher import (
     initialize_telegram_state,
 )
+from .telegram_sources import collect_telegram_sources
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -165,6 +166,7 @@ def run(root: Path | None = None) -> dict[str, int]:
     state["last_run_at"] = datetime_to_iso(now)
     overrides = load_priority_overrides(priority_overrides_path(project_root, config))
     priority_count = annotate_state_priorities(state, config, now, overrides)
+    telegram_source_summary = collect_telegram_sources(state, config, now)
     compact_state(state, config, now)
     archive_summary = archive_state(project_root, state, config, now)
     published_clusters = list(state.get("published_clusters", []))
@@ -184,6 +186,7 @@ def run(root: Path | None = None) -> dict[str, int]:
         "published_total": len(state.get("published_clusters", [])),
         "prioritized": priority_count,
         **archive_summary,
+        **telegram_source_summary,
         **telegram_summary,
     }
     remote_summary = sync_state_to_remote_api(state, config, now, run_summary)

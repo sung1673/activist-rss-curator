@@ -75,6 +75,10 @@ Secret 이름:
 CURATOR_FEEDS
 TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID
+TELEGRAM_API_ID
+TELEGRAM_API_HASH
+TELEGRAM_SESSION
+TELEGRAM_SESSION_STRING
 ACTIVIST_API_URL
 ACTIVIST_API_SECRET
 ```
@@ -93,6 +97,8 @@ Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 
 브라우저에서 읽기 API를 직접 쓰는 기능은 별도 repository variable `ACTIVIST_PUBLIC_API_URL`이 있을 때만 HTML에 주입됩니다. 이 URL은 브라우저 개발자 도구에서 보이는 공개 정보이므로 secret이 아니라 variable로 관리합니다. 쓰기 API는 URL이 알려져도 HMAC 서명 없이는 `401`로 거부됩니다.
 
 데일리 HTML은 static-first로 동작하지만, `ACTIVIST_PUBLIC_API_URL`이 있으면 브라우저에서 `reports`, `latest_snapshot`, `articles` read API를 호출해 다른 일자 목록, `이슈 레이더`, 아카이브 검색, 기사별 `관련 기사 보기`를 보강합니다. `관련 기사 보기`는 현재 묶음 링크와 같은 story 또는 제목 토큰 기반 관련 기사를 한 곳에 모아 매체 확산과 최근 흐름을 보여줍니다. API가 실패해도 정적 기사 페이지는 그대로 표시됩니다.
+
+Telegram 공개 채널 기반 시장 언급 보강은 `telegram_sources.enabled`를 켰을 때만 동작합니다. MTProto 읽기 계정의 `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION`은 Secret으로만 주입하고, 수집 대상은 공개 채널만 둡니다. 수동 등록·비활성화는 `python -m curator.telegram_sources add|enable|disable|list`로 최소 관리할 수 있으며, 자세한 운영 정책은 [`docs/telegram-public-channels.md`](docs/telegram-public-channels.md)를 참고합니다.
 
 `config.yaml`에는 공개 가능한 Google News 보조 RSS를 두 축으로 추가할 수 있습니다.
 

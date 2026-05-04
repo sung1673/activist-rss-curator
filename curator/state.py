@@ -23,6 +23,12 @@ def default_state() -> dict[str, object]:
         "daily_digest_sent_dates": [],
         "daily_digest_records": [],
         "telegram_digest_records": [],
+        "telegram_source_channels": [],
+        "telegram_source_messages": [],
+        "telegram_article_matches": [],
+        "telegram_channel_candidates": [],
+        "telegram_issue_signals": [],
+        "telegram_source_runs": [],
         "last_run_at": None,
     }
 
@@ -58,6 +64,12 @@ def load_state(path: str | Path) -> dict[str, object]:
         "daily_digest_sent_dates",
         "daily_digest_records",
         "telegram_digest_records",
+        "telegram_source_channels",
+        "telegram_source_messages",
+        "telegram_article_matches",
+        "telegram_channel_candidates",
+        "telegram_issue_signals",
+        "telegram_source_runs",
     ):
         if not isinstance(state.get(key), list):
             state[key] = []
@@ -193,6 +205,41 @@ def compact_state(state: dict[str, object], config: dict[str, object], now: date
         record
         for record in state.get("telegram_digest_records", [])
         if (parse_datetime(str(record.get("sent_at") or ""), timezone_name) or now) >= cutoff
+    ][-max_digest_records:]
+    state["telegram_source_messages"] = [
+        record
+        for record in state.get("telegram_source_messages", [])
+        if (parse_datetime(str(record.get("posted_at") or record.get("collected_at") or ""), timezone_name) or now) >= cutoff
+    ][-max_telegram_records:]
+    message_keys = {
+        f"id:{record.get('telegram_channel_id')}:{int(record.get('telegram_message_id') or 0)}"
+        for record in state.get("telegram_source_messages", [])
+        if isinstance(record, dict) and record.get("telegram_channel_id") and record.get("telegram_message_id")
+    } | {
+        f"handle:{str(record.get('handle') or '').removeprefix('@')}:{int(record.get('telegram_message_id') or 0)}"
+        for record in state.get("telegram_source_messages", [])
+        if isinstance(record, dict) and record.get("handle") and record.get("telegram_message_id")
+    }
+    state["telegram_article_matches"] = [
+        record
+        for record in state.get("telegram_article_matches", [])
+        if isinstance(record, dict) and str(record.get("telegram_message_key") or "") in message_keys
+    ][-max_telegram_records:]
+    state["telegram_channel_candidates"] = [
+        record
+        for record in state.get("telegram_channel_candidates", [])
+        if isinstance(record, dict)
+    ][-max_telegram_records:]
+    state["telegram_issue_signals"] = [
+        record
+        for record in state.get("telegram_issue_signals", [])
+        if isinstance(record, dict)
+    ][-200:]
+    state["telegram_source_runs"] = [
+        record
+        for record in state.get("telegram_source_runs", [])
+        if isinstance(record, dict)
+        and (parse_datetime(str(record.get("ran_at") or ""), timezone_name) or now) >= cutoff
     ][-max_digest_records:]
     digest_ids = {
         str(record.get("digest_id"))

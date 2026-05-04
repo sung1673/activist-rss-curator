@@ -16,9 +16,11 @@ from .ai import ai_config, call_github_models
 from .config import load_config
 from .dates import format_kst, now_in_timezone
 from .fetch import USER_AGENT, image_href
+from .normalize import canonical_url_hash
 from .rss_writer import article_link, article_source_label, compact_text, display_article_title
 from .remote_api import sync_report_to_remote_api
 from .state import load_state
+from .telegram_sources import risk_flags_for_text
 from .summaries import (
     digest_article_identity_keys,
     digest_article_entries,
@@ -589,6 +591,67 @@ def build_report_stories(
     return stories
 
 
+def attach_telegram_mentions(stories: list[dict[str, object]], state: dict[str, object]) -> None:
+    messages_by_key = {
+        f"id:{message.get('telegram_channel_id')}:{int(message.get('telegram_message_id') or 0)}": message
+        for message in state.get("telegram_source_messages", [])
+        if isinstance(message, dict) and message.get("telegram_channel_id") and message.get("telegram_message_id") and not message.get("deleted_at")
+    }
+    messages_by_key.update(
+        {
+            f"handle:{str(message.get('handle') or '').removeprefix('@')}:{int(message.get('telegram_message_id') or 0)}": message
+            for message in state.get("telegram_source_messages", [])
+            if isinstance(message, dict) and message.get("handle") and message.get("telegram_message_id") and not message.get("deleted_at")
+        }
+    )
+    matches_by_article: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for match in state.get("telegram_article_matches", []):
+        if isinstance(match, dict) and match.get("article_id") and match.get("telegram_message_key"):
+            matches_by_article[str(match["article_id"])].append(match)
+
+    for story in stories:
+        seen_messages: set[str] = set()
+        mentions: list[dict[str, object]] = []
+        links = story.get("links") if isinstance(story.get("links"), list) else []
+        article_ids = {
+            canonical_url_hash(str(link.get("url") or ""))
+            for link in links
+            if isinstance(link, dict) and link.get("url")
+        }
+        for article_id in article_ids:
+            for match in matches_by_article.get(article_id, []):
+                message_key = str(match.get("telegram_message_key") or "")
+                if not message_key or message_key in seen_messages:
+                    continue
+                message = messages_by_key.get(message_key)
+                if not isinstance(message, dict):
+                    continue
+                seen_messages.add(message_key)
+                text = str(message.get("text") or "")
+                mentions.append(
+                    {
+                        "message_url": message.get("message_url") or match.get("message_url") or "",
+                        "channel_title": message.get("channel_title") or match.get("channel_title") or "",
+                        "channel_handle": message.get("handle") or match.get("channel_handle") or "",
+                        "posted_at": message.get("posted_at") or "",
+                        "text": compact_text(text, max_chars=160),
+                        "excerpt": compact_text(text, max_chars=120),
+                        "match_type": match.get("match_type") or "",
+                        "score": match.get("score") or 0,
+                        "risk_flags": risk_flags_for_text(text),
+                    }
+                )
+        mentions.sort(
+            key=lambda item: (
+                float(item.get("score") or 0),
+                str(item.get("posted_at") or ""),
+            ),
+            reverse=True,
+        )
+        if mentions:
+            story["telegram_mentions"] = mentions[:5]
+
+
 def story_context(stories: list[dict[str, object]], config: dict[str, object], max_stories: int = 18) -> str:
     blocks: list[str] = []
     for index, story in enumerate(stories[:max_stories], start=1):
@@ -1039,15 +1102,22 @@ def render_story(
         if has_grouped_links
         else ""
     )
+    telegram_mentions = story.get("telegram_mentions") if isinstance(story.get("telegram_mentions"), list) else []
+    telegram_mentions_data_html = (
+        f'<script type="application/json" data-story-telegram-mentions>{json_script_payload(telegram_mentions)}</script>'
+        if telegram_mentions
+        else ""
+    )
     related_html = (
         f"""
             <details class="story-context" data-story-context>
               <summary>관련 기사 보기</summary>
               {current_links_data_html}
+              {telegram_mentions_data_html}
               <div class="story-context__body" data-story-context-body>펼치면 아카이브에서 관련 기사와 매체 확산을 불러옵니다.</div>
             </details>
         """
-        if show_details and (story_key or db_query or has_grouped_links)
+        if show_details and (story_key or db_query or has_grouped_links or telegram_mentions)
         else ""
     )
     featured_class = " story--featured" if featured else ""
@@ -1372,6 +1442,14 @@ def render_report_html(
     .story-context__table th:first-child, .story-context__table td:first-child {{ width: 76px; color: inherit; }}
     .story-context__table th:nth-child(2), .story-context__table td:nth-child(2) {{ width: 94px; color: var(--muted); white-space: nowrap; }}
     .story-context__table th:nth-child(3), .story-context__table td:nth-child(3) {{ width: 120px; color: var(--accent-deep); }}
+    .story-context__telegram {{ display: grid; gap: 7px; padding-top: 2px; }}
+    .story-context__telegram-head {{ display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ink); font-size: 11.5px; font-weight: 900; }}
+    .story-context__telegram-list {{ display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }}
+    .story-context__telegram-list a {{ display: grid; gap: 3px; padding: 7px 8px; border: 1px solid rgba(112, 55, 224, .12); border-radius: 8px; background: rgba(255,255,255,.72); color: inherit; text-decoration: none; }}
+    .story-context__telegram-list a:hover strong {{ color: var(--accent-deep); text-decoration: underline; text-underline-offset: 3px; }}
+    .story-context__telegram-meta {{ display: flex; flex-wrap: wrap; gap: 4px 7px; color: var(--muted); font-size: 10.8px; }}
+    .story-context__telegram-meta span {{ white-space: nowrap; }}
+    .story-context__telegram-list p {{ margin: 0; color: var(--ink); font-size: 11.5px; line-height: 1.38; }}
     td a {{ overflow-wrap: anywhere; }}
     .floating-nav {{ position: fixed; top: 84px; right: 12px; z-index: 8; width: 210px; max-height: calc(100vh - 108px); overflow: auto; border: 1px solid var(--line); background: rgba(255,255,255,.94); box-shadow: 0 14px 40px rgba(44, 27, 84, .10); padding: 10px; }}
     .floating-nav__meta {{ display: grid; gap: 8px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }}
@@ -2106,6 +2184,28 @@ def render_report_html(
       }}
     }}
 
+    async function fetchTelegramMentions(story) {{
+      if (!remoteReportsApiUrl || !story) return [];
+      const params = new URLSearchParams();
+      const url = String(story.dataset.storyUrl || '').trim();
+      const query = String(story.dataset.storyDbQuery || story.querySelector('h3')?.textContent || '').trim();
+      if (url) params.set('url', url);
+      if (query) params.set('q', query);
+      params.set('limit', '5');
+      try {{
+        const response = await fetch(`${{apiUrlWithAction(remoteReportsApiUrl, 'telegram_reactions')}}&${{params.toString()}}`, {{
+          headers: {{ 'Accept': 'application/json' }},
+          credentials: 'omit',
+        }});
+        if (!response.ok) return [];
+        const data = await response.json();
+        const messages = data.messages || data.telegram_messages || data.reactions || [];
+        return data && data.ok && Array.isArray(messages) ? messages : [];
+      }} catch (error) {{
+        return [];
+      }}
+    }}
+
     function mergeContextArticles(batches) {{
       const seen = new Map();
       batches.flat().forEach((article) => {{
@@ -2172,6 +2272,27 @@ def render_report_html(
       return Boolean(details.querySelector('[data-story-current-links]'));
     }}
 
+    function staticTelegramMentions(details) {{
+      const script = details.querySelector('[data-story-telegram-mentions]');
+      if (!script) return [];
+      try {{
+        const mentions = JSON.parse(script.textContent || '[]');
+        return Array.isArray(mentions) ? mentions : [];
+      }} catch (error) {{
+        return [];
+      }}
+    }}
+
+    function mergeTelegramMentions(batches) {{
+      const seen = new Map();
+      batches.flat().forEach((message) => {{
+        if (!message || !(message.message_url || message.url)) return;
+        const key = message.message_url || message.url;
+        if (!seen.has(key)) seen.set(key, message);
+      }});
+      return Array.from(seen.values()).slice(0, 5);
+    }}
+
     function currentContextArticles(details) {{
       const script = details.querySelector('[data-story-current-links]');
       if (!script) return [];
@@ -2198,7 +2319,56 @@ def render_report_html(
       return article.context_kind === 'current' ? '현재 묶음' : '아카이브';
     }}
 
-    function renderStoryContext(details, storyArticles, queryArticles) {{
+    function telegramMatchLabel(value) {{
+      const type = String(value || '');
+      if (type === 'exact_url' || type === 'canonical_url') return 'URL 직접';
+      if (type === 'ticker') return '종목 추정';
+      if (type === 'keyword') return '키워드 추정';
+      return '관련 언급';
+    }}
+
+    function renderTelegramMentions(body, mentions) {{
+      const items = Array.isArray(mentions) ? mentions.filter((message) => message && (message.message_url || message.url) && (message.text || message.excerpt)).slice(0, 5) : [];
+      if (!items.length) return;
+      const section = document.createElement('div');
+      section.className = 'story-context__telegram';
+      const head = document.createElement('div');
+      head.className = 'story-context__telegram-head';
+      const title = document.createElement('strong');
+      title.textContent = 'Telegram 언급';
+      const count = document.createElement('span');
+      const channelCount = new Set(items.map((item) => item.channel_title || item.channel_handle || item.handle).filter(Boolean)).size;
+      count.textContent = `${{items.length}}건 · 채널 ${{channelCount}}곳`;
+      head.appendChild(title);
+      head.appendChild(count);
+      section.appendChild(head);
+      const list = document.createElement('ul');
+      list.className = 'story-context__telegram-list';
+      items.forEach((item) => {{
+        const row = document.createElement('li');
+        const link = document.createElement('a');
+        link.href = item.message_url || item.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        const meta = document.createElement('div');
+        meta.className = 'story-context__telegram-meta';
+        [item.channel_title || item.channel_handle || item.handle || '공개 채널', item.posted_at || '', telegramMatchLabel(item.match_type), ...(Array.isArray(item.risk_flags) ? item.risk_flags : [])].filter(Boolean).forEach((value) => {{
+          const span = document.createElement('span');
+          span.textContent = String(value);
+          meta.appendChild(span);
+        }});
+        const excerpt = document.createElement('p');
+        excerpt.textContent = compactDbText(item.excerpt || item.text || '', 120);
+        link.appendChild(meta);
+        link.appendChild(excerpt);
+        row.appendChild(link);
+        list.appendChild(row);
+      }});
+      section.appendChild(list);
+      body.appendChild(section);
+    }}
+
+    function renderStoryContext(details, storyArticles, queryArticles, telegramMentions = []) {{
       const body = details.querySelector('[data-story-context-body]');
       const story = details.closest('[data-story]');
       if (!body || !story) return;
@@ -2223,7 +2393,7 @@ def render_report_html(
         .slice(0, Math.max(0, 10 - currentItems.length));
       const items = [...currentItems, ...archiveItems];
       body.innerHTML = '';
-      if (!items.length) {{
+      if (!items.length && !telegramMentions.length) {{
         if (storyContextHasCurrentLinks(details)) {{
           body.hidden = true;
         }} else {{
@@ -2234,6 +2404,11 @@ def render_report_html(
         return;
       }}
       body.hidden = false;
+
+      if (!items.length) {{
+        renderTelegramMentions(body, telegramMentions);
+        return;
+      }}
 
       const spread = sourceSpread(items);
       const stats = document.createElement('div');
@@ -2295,6 +2470,7 @@ def render_report_html(
       }});
       tableWrap.appendChild(table);
       body.appendChild(tableWrap);
+      renderTelegramMentions(body, telegramMentions);
     }}
 
     async function loadStoryContext(details) {{
@@ -2312,6 +2488,7 @@ def render_report_html(
       const query = String(story.dataset.storyDbQuery || '').trim();
       let storyArticles = [];
       let queryArticles = [];
+      let telegramMentions = staticTelegramMentions(details);
       if (storyKey) {{
         storyArticles = await fetchDbArticles({{ story_key: storyKey, limit: '16', days: '180' }});
       }}
@@ -2321,7 +2498,8 @@ def render_report_html(
           queryArticles = await fetchDbArticles({{ q: query, limit: '12', days: '180' }});
         }}
       }}
-      renderStoryContext(details, storyArticles, queryArticles);
+      telegramMentions = mergeTelegramMentions([telegramMentions, await fetchTelegramMentions(story)]);
+      renderStoryContext(details, storyArticles, queryArticles, telegramMentions);
       details.dataset.loaded = '1';
     }}
 
@@ -2784,6 +2962,7 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
     clusters = digest_clusters_in_window(state, config, start_at, end_at)
     duplicate_records = duplicate_records_in_window(state, config, start_at, end_at)
     stories = build_report_stories(clusters, duplicate_records, config)
+    attach_telegram_mentions(stories, state)
     enrich_story_images(stories, config)
     attach_story_briefs(stories, config)
     review = generate_report_review(clusters, stories, config, start_at, end_at)

@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from conftest import make_article
 from curator import daily_report
 from curator.daily_report import build_daily_report, build_report_telegram_message, mobile_article_url, write_report_files
+from curator.normalize import canonical_url_hash
 
 
 def report_cluster(guid: str, now: datetime) -> dict[str, object]:
@@ -39,7 +40,32 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     (tmp_path / "data").mkdir()
     (tmp_path / "config.yaml").write_text("report:\n  image_enrich_limit: 0\n", encoding="utf-8")
     (tmp_path / "data" / "state.json").write_text(
-        json.dumps({"published_clusters": [report_cluster("cluster:test", now)], "pending_clusters": [], "articles": []}),
+        json.dumps(
+            {
+                "published_clusters": [report_cluster("cluster:test", now)],
+                "pending_clusters": [],
+                "articles": [],
+                "telegram_source_messages": [
+                    {
+                        "handle": "marketnews",
+                        "telegram_channel_id": "100",
+                        "channel_title": "시장 채널",
+                        "telegram_message_id": 7,
+                        "posted_at": now.isoformat(),
+                        "text": "한화솔루션 유상증자 관련 시장 언급",
+                        "message_url": "https://t.me/marketnews/7",
+                    }
+                ],
+                "telegram_article_matches": [
+                    {
+                        "article_id": canonical_url_hash("https://news.naver.com/main/read.naver?oid=001&aid=0010000001"),
+                        "telegram_message_key": "id:100:7",
+                        "match_type": "canonical_url",
+                        "score": 0.96,
+                    }
+                ],
+            }
+        ),
         encoding="utf-8",
     )
     stale_variant_dir = tmp_path / "public" / "feed" / "variants"
@@ -158,6 +184,10 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "story-context__table" in html
     assert "현재 묶음" in html
     assert "아카이브" in html
+    assert "fetchTelegramMentions" in html
+    assert "data-story-telegram-mentions" in html
+    assert "Telegram 언급" in html
+    assert "URL 직접" in html
     assert "db-search__summary" in html
     assert "articleMatchReasons" in html
     assert "isGenericDbPulseTitle" in html
