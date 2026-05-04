@@ -1542,7 +1542,7 @@ def render_report_html(
       <div class="db-pulse__head">
         <div>
           <h2>이슈 레이더</h2>
-          <p>DB에 누적된 최근 기사 중 후속 확인이 필요한 흐름을 보여줍니다.</p>
+          <p>아카이브에 누적된 최근 기사 중 후속 확인이 필요한 흐름을 보여줍니다.</p>
         </div>
         <span class="db-pulse__badge" data-db-pulse-status>최근 흐름</span>
       </div>
