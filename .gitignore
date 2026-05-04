@@ -7,4 +7,5 @@ venv/
 .env.ssh
 .env.local
 .env.api
+data/backfill_*.json
 .DS_Store
