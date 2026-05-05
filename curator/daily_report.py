@@ -2778,14 +2778,16 @@ def render_workbench_html(
     .panel__meta {{ display:flex; flex-wrap:wrap; gap:8px; color:var(--muted); font-size:12px; margin-bottom:12px; }}
     .panel h2 {{ margin:0; max-width:760px; font-size:28px; line-height:1.22; letter-spacing:0; word-break:keep-all; }}
     .panel__layout {{ display:grid; grid-template-columns:220px minmax(0,1fr); gap:20px; margin-top:18px; align-items:start; }}
-    .panel__image {{ aspect-ratio:4/3; border:1px solid var(--line); background:var(--accent-soft); object-fit:cover; width:100%; }}
-    .panel__image[hidden] {{ display:none; }}
+    .panel__image {{ aspect-ratio:4/3; border:1px solid var(--line); background:var(--accent-soft); width:100%; display:flex; align-items:center; justify-content:center; overflow:hidden; color:var(--accent-deep); text-decoration:none; }}
+    .panel__image img {{ width:100%; height:100%; object-fit:cover; display:block; }}
+    .panel__image--placeholder {{ background:linear-gradient(135deg,#f6f1ff,#fff); font-size:13px; font-weight:900; letter-spacing:0; }}
+    .panel__image--placeholder span {{ display:inline-flex; border:1px solid rgba(112,55,224,.2); border-radius:999px; padding:5px 10px; background:#fff; }}
     .panel__summary {{ margin:0; padding:12px 14px; border-left:3px solid rgba(112,55,224,.5); background:rgba(246,240,255,.58); list-style:none; display:grid; gap:7px; font-size:14px; line-height:1.48; }}
     .panel__summary li {{ position:relative; padding-left:12px; }}
     .panel__summary li::before {{ content:""; position:absolute; left:0; top:.72em; width:4px; height:4px; border-radius:50%; background:var(--accent); }}
     .panel__actions {{ display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }}
     .panel__actions a, .panel__actions button {{ appearance:none; border:1px solid var(--line); background:#fff; color:var(--ink); border-radius:999px; padding:8px 11px; font:inherit; font-size:12px; font-weight:850; text-decoration:none; cursor:pointer; }}
-    .panel__actions a:first-child {{ border-color:var(--accent); color:var(--accent-deep); background:var(--accent-soft); }}
+    .panel__actions .is-primary {{ border-color:var(--accent); color:var(--accent-deep); background:var(--accent-soft); }}
     .related {{ margin-top:24px; }}
     .related__head {{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; color:var(--muted); font-size:12px; }}
     .related__chips {{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:9px; }}
@@ -2800,7 +2802,15 @@ def render_workbench_html(
     .kind {{ display:inline-flex; border:1px solid rgba(112,55,224,.22); border-radius:999px; padding:2px 7px; color:var(--accent-deep); background:#fff; font-size:10.5px; font-weight:850; white-space:nowrap; }}
     .kind--archive {{ color:var(--green); border-color:rgba(0,120,95,.25); }}
     .empty {{ color:var(--muted); font-size:13px; padding:12px; border:1px solid var(--line); background:#fff; }}
-    @media (max-width:900px) {{ .workbench {{ grid-template-columns:1fr; }} .story-list {{ position:static; max-height:none; }} .panel__layout {{ grid-template-columns:1fr; }} }}
+    .reader[hidden] {{ display:none; }}
+    .reader {{ position:fixed; top:18px; right:18px; bottom:18px; width:min(620px,46vw); z-index:30; display:grid; grid-template-rows:auto minmax(0,1fr) auto; border:1px solid var(--line); border-top:3px solid var(--accent); background:#fff; box-shadow:0 22px 70px rgba(28,18,56,.2); }}
+    .reader__head {{ display:flex; align-items:flex-start; justify-content:space-between; gap:14px; padding:12px 14px; border-bottom:1px solid var(--line); }}
+    .reader__title {{ min-width:0; font-size:13px; font-weight:900; line-height:1.35; word-break:keep-all; }}
+    .reader__close {{ appearance:none; border:1px solid var(--line); border-radius:999px; background:#fff; color:var(--accent-deep); padding:5px 9px; font:inherit; font-size:12px; font-weight:850; cursor:pointer; }}
+    .reader iframe {{ width:100%; height:100%; border:0; background:#fff; }}
+    .reader__foot {{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 14px; border-top:1px solid var(--line); color:var(--muted); font-size:11.5px; }}
+    .reader__foot a {{ color:var(--accent-deep); font-weight:850; }}
+    @media (max-width:900px) {{ .workbench {{ grid-template-columns:1fr; }} .story-list {{ position:static; max-height:none; }} .panel__layout {{ grid-template-columns:1fr; }} .reader {{ left:12px; right:12px; top:12px; bottom:12px; width:auto; }} }}
   </style>
 </head>
 <body>
@@ -2821,22 +2831,84 @@ def render_workbench_html(
       <section class="panel" data-workbench-panel aria-live="polite"></section>
     </main>
   </div>
+  <aside class="reader" data-reader hidden aria-label="기사 원문 보기">
+    <div class="reader__head">
+      <div class="reader__title" data-reader-title>기사 원문</div>
+      <button class="reader__close" type="button" data-reader-close>닫기</button>
+    </div>
+    <iframe data-reader-frame title="기사 원문" referrerpolicy="no-referrer" sandbox="allow-same-origin allow-scripts allow-forms allow-popups"></iframe>
+    <div class="reader__foot">
+      <span>언론사 보안 정책에 따라 화면 안에서 열리지 않을 수 있습니다.</span>
+      <a href="#" target="_blank" rel="noopener noreferrer" data-reader-open>새 탭</a>
+    </div>
+  </aside>
   <script type="application/json" id="workbench-data">{data_json}</script>
   <script>
     const stories = JSON.parse(document.getElementById('workbench-data')?.textContent || '[]');
     const apiUrl = {read_api_url_json};
     const list = document.querySelector('[data-workbench-list]');
     const panel = document.querySelector('[data-workbench-panel]');
+    const reader = document.querySelector('[data-reader]');
+    const readerFrame = document.querySelector('[data-reader-frame]');
+    const readerTitle = document.querySelector('[data-reader-title]');
+    const readerOpen = document.querySelector('[data-reader-open]');
     let activeIndex = 0;
 
     function apiUrlWithAction(url, action) {{
       if (!url) return '';
       return `${{url}}${{url.includes('?') ? '&' : '?'}}action=${{encodeURIComponent(action)}}`;
     }}
+    function escapeHtml(value) {{
+      return String(value ?? '').replace(/[&<>"']/g, (char) => ({{
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }}[char]));
+    }}
+    function safeUrl(value) {{
+      try {{
+        const url = new URL(String(value || ''), location.href);
+        return ['http:', 'https:'].includes(url.protocol) ? url.href : '#';
+      }} catch (error) {{
+        return '#';
+      }}
+    }}
     function compactText(value, max = 90) {{
       const text = String(value || '').replace(/\\s+/g, ' ').trim();
       return text.length <= max ? text : `${{text.slice(0, max - 1).trim()}}…`;
     }}
+    function noImageMarkup() {{
+      return '<div class="panel__image panel__image--placeholder" aria-label="이미지 없음"><span>NO IMAGE</span></div>';
+    }}
+    function storyImageMarkup(story) {{
+      const imageUrl = safeUrl(story.image_url);
+      if (imageUrl === '#') return noImageMarkup();
+      const articleUrl = safeUrl(story.primary_url);
+      return `<a class="panel__image" href="${{escapeHtml(articleUrl)}}" target="_blank" rel="noopener noreferrer" aria-label="기사 이미지 보기"><img data-panel-image src="${{escapeHtml(imageUrl)}}" alt="" referrerpolicy="no-referrer"></a>`;
+    }}
+    function installImageFallback() {{
+      const image = panel?.querySelector('[data-panel-image]');
+      image?.addEventListener('error', () => {{
+        const wrapper = image.closest('.panel__image');
+        if (wrapper) wrapper.outerHTML = noImageMarkup();
+      }}, {{ once: true }});
+    }}
+    function openReader(story) {{
+      const url = safeUrl(story.primary_url);
+      if (!reader || !readerFrame || url === '#') return;
+      reader.hidden = false;
+      readerFrame.src = url;
+      if (readerTitle) readerTitle.textContent = compactText(story.title, 82) || '기사 원문';
+      if (readerOpen) readerOpen.href = url;
+    }}
+    function closeReader() {{
+      if (!reader || !readerFrame) return;
+      reader.hidden = true;
+      readerFrame.src = 'about:blank';
+    }}
+    document.querySelector('[data-reader-close]')?.addEventListener('click', closeReader);
     function urlKey(value) {{
       try {{
         const url = new URL(String(value || ''), location.href);
@@ -2939,7 +3011,7 @@ def render_workbench_html(
         const button = document.createElement('button');
         button.className = `story-button${{index === activeIndex ? ' is-active' : ''}}`;
         button.type = 'button';
-        button.innerHTML = `<strong>${{compactText(story.title, 76)}}</strong><span><em>${{story.category || '기타'}}</em><em>${{story.datetime || ''}}</em><em>${{story.links?.length || 1}}건</em></span>`;
+        button.innerHTML = `<strong>${{escapeHtml(compactText(story.title, 76))}}</strong><span><em>${{escapeHtml(story.category || '기타')}}</em><em>${{escapeHtml(story.datetime || '')}}</em><em>${{story.links?.length || 1}}건</em></span>`;
         button.addEventListener('click', () => openStory(index));
         list.appendChild(button);
       }});
@@ -2948,10 +3020,10 @@ def render_workbench_html(
       if (!rows.length) return '<div class="empty">표시할 관련 기사가 없습니다.</div>';
       const chips = [`관련 기사 ${{rows.length}}건`, `매체 ${{new Set(rows.map((row) => row.source || row.feed_name || '')).size}}곳`];
       return `
-        <div class="related__chips">${{chips.map((chip) => `<span>${{chip}}</span>`).join('')}}</div>
+        <div class="related__chips">${{chips.map((chip) => `<span>${{escapeHtml(chip)}}</span>`).join('')}}</div>
         <div class="related__table"><table>
           <thead><tr><th>구분</th><th>일시</th><th>매체</th><th>기사</th></tr></thead>
-          <tbody>${{rows.map((row) => `<tr><td><span class="kind${{row.context_kind === 'archive' ? ' kind--archive' : ''}}">${{row.context_kind === 'archive' ? '아카이브' : '현재 묶음'}}</span></td><td>${{dateLabel(row) || '일시 미상'}}</td><td>${{row.source || row.feed_name || '매체 미상'}}</td><td><a href="${{row.canonical_url}}" target="_blank" rel="noopener noreferrer">${{compactText(row.title, 110)}}</a></td></tr>`).join('')}}</tbody>
+          <tbody>${{rows.map((row) => `<tr><td><span class="kind${{row.context_kind === 'archive' ? ' kind--archive' : ''}}">${{row.context_kind === 'archive' ? '아카이브' : '현재 묶음'}}</span></td><td>${{escapeHtml(dateLabel(row) || '일시 미상')}}</td><td>${{escapeHtml(row.source || row.feed_name || '매체 미상')}}</td><td><a href="${{escapeHtml(safeUrl(row.canonical_url))}}" target="_blank" rel="noopener noreferrer">${{escapeHtml(compactText(row.title, 110))}}</a></td></tr>`).join('')}}</tbody>
         </table></div>`;
     }}
     async function openStory(index) {{
@@ -2960,14 +3032,15 @@ def render_workbench_html(
       const story = stories[activeIndex] || {{}};
       const bullets = Array.isArray(story.bullets) && story.bullets.length ? story.bullets : [story.summary || '요약 정보가 부족합니다.'];
       panel.innerHTML = `
-        <div class="panel__meta"><span>${{story.category || '기타'}}</span><span>${{story.datetime || ''}}</span><span>${{story.source_line || ''}}</span></div>
-        <h2>${{story.title || '제목 없음'}}</h2>
+        <div class="panel__meta"><span>${{escapeHtml(story.category || '기타')}}</span><span>${{escapeHtml(story.datetime || '')}}</span><span>${{escapeHtml(story.source_line || '')}}</span></div>
+        <h2>${{escapeHtml(story.title || '제목 없음')}}</h2>
         <div class="panel__layout">
-          <img class="panel__image" src="${{story.image_url || ''}}" alt="" referrerpolicy="no-referrer" ${{!story.image_url ? 'hidden' : ''}}>
+          ${{storyImageMarkup(story)}}
           <div>
-            <ul class="panel__summary">${{bullets.map((bullet) => `<li>${{bullet}}</li>`).join('')}}</ul>
+            <ul class="panel__summary">${{bullets.map((bullet) => `<li>${{escapeHtml(bullet)}}</li>`).join('')}}</ul>
             <div class="panel__actions">
-              <a href="${{story.primary_url || '#'}}" target="_blank" rel="noopener noreferrer">원문 새 탭</a>
+              <button class="is-primary" type="button" data-reader-open-story>오른쪽에서 원문 보기</button>
+              <a href="${{escapeHtml(safeUrl(story.primary_url))}}" target="_blank" rel="noopener noreferrer">새 탭</a>
               <button type="button" data-prev>이전 기사</button>
               <button type="button" data-next>다음 기사</button>
             </div>
@@ -2977,6 +3050,8 @@ def render_workbench_html(
           <div class="related__head"><strong>관련 기사</strong><span data-related-status>현재 묶음과 DB 아카이브를 확인하는 중입니다.</span></div>
           <div data-related-body>${{relatedTable(currentRows(story))}}</div>
         </section>`;
+      installImageFallback();
+      panel.querySelector('[data-reader-open-story]')?.addEventListener('click', () => openReader(story));
       panel.querySelector('[data-prev]')?.addEventListener('click', () => openStory(activeIndex - 1));
       panel.querySelector('[data-next]')?.addEventListener('click', () => openStory(activeIndex + 1));
       const archiveRows = await fetchArchiveRows(story);
