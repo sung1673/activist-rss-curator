@@ -10,6 +10,7 @@
 ## 수집 흐름
 
 1. `config.yaml`의 `telegram_sources.channels` 또는 `python -m curator.telegram_sources add <handle>`로 수동 채널을 등록합니다.
+   이미 읽기 계정이 여러 공개 채널에 가입되어 있다면 `python -m curator.telegram_sources import-joined --dry-run`으로 먼저 스캔하고, 확인 후 `--enable`을 붙여 수집 대상으로 등록합니다.
 2. `curator.main` 실행 중 `telegram_sources.enabled`가 켜져 있으면 enabled 채널을 순회합니다.
 3. 최초 수집은 채널당 `backfill_limit` 기본 100개, 이후에는 `last_message_id` 이후 새 메시지만 가져옵니다.
 4. 채널 하나에서 FloodWait 또는 권한 오류가 발생해도 해당 채널만 실패 기록하고 다른 채널 수집은 계속합니다.
@@ -33,3 +34,35 @@
 - 경제, 증권, 주식, 공시, 실적, 환율, 채권, 뉴스 등은 품질 점수 가점입니다.
 - 수익보장, 리딩방, 무료추천, 선물, 카지노, 레퍼럴, VIP방 등은 감점입니다.
 - 자동 입장이 켜져 있어도 하루 최대 join 수와 랜덤 지연을 둡니다. FloodWait, private, invite required, too many channels 계열 오류는 후보 실패로만 기록합니다.
+
+## 로컬 설정과 GitHub Secrets
+
+로컬 테스트용 비밀값은 repository root의 `.env.telegram`에 둘 수 있습니다. 이 파일은 `.gitignore`에 포함되어 커밋되지 않습니다.
+
+```text
+TELEGRAM_API_ID=123456
+TELEGRAM_API_HASH=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TELEGRAM_SESSION=data/telegram-reader
+```
+
+처음 로컬에서 실행하면 Telethon이 전화번호와 로그인 코드를 요청하고 `data/telegram-reader.session` 파일을 만듭니다. 이 파일 역시 커밋하지 않습니다.
+
+GitHub Actions에서 수집하려면 file session 대신 `TELEGRAM_SESSION_STRING` Secret을 권장합니다. 로컬에서 다음 명령으로 생성합니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m curator.telegram_sources make-session --out .env.telegram
+```
+
+생성된 `TELEGRAM_SESSION_STRING` 값을 GitHub repository의 Actions Secret에 추가합니다. `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`도 같은 위치에 Secret으로 넣습니다.
+
+이미 가입된 공개 채널을 가져올 때는 먼저 dry-run으로 규모와 품질 점수를 봅니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m curator.telegram_sources import-joined --limit 500 --min-quality 60 --dry-run
+```
+
+확인 후 수집 대상으로 바로 켜려면 `--enable`을 붙입니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m curator.telegram_sources import-joined --limit 500 --min-quality 60 --enable
+```

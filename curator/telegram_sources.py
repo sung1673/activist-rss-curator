@@ -84,6 +84,9 @@ class TelegramMessageClient(Protocol):
     async def join_channel(self, candidate: dict[str, object]) -> dict[str, object]:
         ...
 
+    async def list_joined_public_channels(self, *, limit: int) -> list[dict[str, object]]:
+        ...
+
     async def close(self) -> None:
         ...
 
@@ -190,6 +193,25 @@ def enabled_channels(state: dict[str, object]) -> list[dict[str, object]]:
         for channel in state.get("telegram_source_channels", [])
         if isinstance(channel, dict) and bool(channel.get("enabled", True))
     ]
+
+
+def load_env_files(root: Path, names: tuple[str, ...] = (".env", ".env.local", ".env.telegram")) -> list[Path]:
+    loaded: list[Path] = []
+    for name in names:
+        path = root / name
+        if not path.exists():
+            continue
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+        loaded.append(path)
+    return loaded
 
 
 def normalize_message_text(text: object) -> str:
@@ -607,6 +629,29 @@ class TelethonClientAdapter:
         result = await self.client(JoinChannelRequest(normalize_channel_handle(candidate.get("handle"))))
         return {"ok": True, "result": str(result)[:120]}
 
+    async def list_joined_public_channels(self, *, limit: int) -> list[dict[str, object]]:
+        channels: list[dict[str, object]] = []
+        async for dialog in self.client.iter_dialogs(limit=limit):
+            entity = getattr(dialog, "entity", None)
+            handle = normalize_channel_handle(getattr(entity, "username", "") or "")
+            if not handle:
+                continue
+            is_channel = bool(getattr(dialog, "is_channel", False) or getattr(entity, "broadcast", False) or getattr(entity, "megagroup", False))
+            if not is_channel:
+                continue
+            title = str(getattr(dialog, "title", "") or getattr(entity, "title", "") or "")
+            record = {
+                "handle": handle,
+                "telegram_channel_id": getattr(entity, "id", None),
+                "title": title,
+                "description": str(getattr(entity, "about", "") or ""),
+                "joined": True,
+                "source": "discovered",
+            }
+            record["quality_score"] = score_channel_candidate(record)
+            channels.append(record)
+        return channels
+
 
 async def _collect_with_client(
     state: dict[str, object],
@@ -707,6 +752,117 @@ async def auto_join_candidates(state: dict[str, object], config: dict[str, objec
             candidate["status"] = "failed"
             candidate["failure_reason"] = f"flood_wait_{wait}s" if wait else exc.__class__.__name__
     return joined
+
+
+async def _import_joined_with_client(
+    state: dict[str, object],
+    client: TelegramMessageClient,
+    *,
+    limit: int,
+    enable: bool,
+    min_quality: int,
+    source: str,
+) -> dict[str, int]:
+    ensure_telegram_state(state)
+    imported = updated = skipped = enabled_count = 0
+    existing_keys = {
+        channel_key(channel)
+        for channel in state.get("telegram_source_channels", [])
+        if isinstance(channel, dict)
+    }
+    joined_channels = await client.list_joined_public_channels(limit=limit)
+    for channel in joined_channels:
+        score = int(channel.get("quality_score") or score_channel_candidate(channel))
+        if score < min_quality:
+            skipped += 1
+            continue
+        payload = dict(channel)
+        payload["quality_score"] = score
+        payload["joined"] = True
+        key = channel_key(payload)
+        is_existing = key in existing_keys
+        if is_existing:
+            payload.pop("source", None)
+            if enable:
+                payload["enabled"] = True
+                enabled_count += 1
+            else:
+                payload.pop("enabled", None)
+            updated += 1
+        else:
+            payload["source"] = source
+            payload["enabled"] = enable
+            imported += 1
+            enabled_count += int(enable)
+            existing_keys.add(key)
+        upsert_telegram_channel(state, payload)
+    return {
+        "telegram_joined_seen": len(joined_channels),
+        "telegram_joined_imported": imported,
+        "telegram_joined_updated": updated,
+        "telegram_joined_skipped_low_quality": skipped,
+        "telegram_joined_enabled": enabled_count,
+    }
+
+
+def import_joined_public_channels(
+    state: dict[str, object],
+    config: dict[str, object],
+    *,
+    limit: int = 500,
+    enable: bool = False,
+    min_quality: int = 0,
+    source: str = "discovered",
+    client: TelegramMessageClient | None = None,
+) -> dict[str, int]:
+    if client is not None:
+        return asyncio.run(
+            _import_joined_with_client(
+                state,
+                client,
+                limit=limit,
+                enable=enable,
+                min_quality=min_quality,
+                source=source,
+            )
+        )
+
+    adapter = TelethonClientAdapter(config)
+
+    async def run_with_adapter() -> dict[str, int]:
+        async with adapter as opened:
+            return await _import_joined_with_client(
+                state,
+                opened,
+                limit=limit,
+                enable=enable,
+                min_quality=min_quality,
+                source=source,
+            )
+
+    return asyncio.run(run_with_adapter())
+
+
+def make_telegram_session_string(config: dict[str, object]) -> str:
+    try:
+        from telethon import TelegramClient  # type: ignore
+        from telethon.sessions import StringSession  # type: ignore
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError("Telethon is not installed") from exc
+    settings = telegram_sources_config(config)
+    api_id = int(os.environ.get("TELEGRAM_API_ID") or settings.get("api_id") or 0)
+    api_hash = os.environ.get("TELEGRAM_API_HASH", "").strip() or str(settings.get("api_hash") or "")
+    if not api_id or not api_hash:
+        raise RuntimeError("TELEGRAM_API_ID/TELEGRAM_API_HASH is required")
+
+    async def create_session() -> str:
+        client = TelegramClient(StringSession(), api_id, api_hash)
+        await client.start()
+        session = client.session.save()
+        await client.disconnect()
+        return str(session)
+
+    return asyncio.run(create_session())
 
 
 def telegram_snapshot_payload(state: dict[str, object], config: dict[str, object]) -> dict[str, object]:
@@ -826,12 +982,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("candidates", help="List discovered candidate channels")
     subparsers.add_parser("collect", help="Run one Telegram source collection pass")
+
+    import_parser = subparsers.add_parser("import-joined", help="Import public channels already joined by the Telegram reader account")
+    import_parser.add_argument("--limit", type=int, default=500, help="Maximum dialogs to scan")
+    import_parser.add_argument("--min-quality", type=int, default=0, help="Skip channels below this quality score")
+    import_parser.add_argument("--enable", action="store_true", help="Enable imported channels for collection immediately")
+    import_parser.add_argument("--dry-run", action="store_true", help="Scan and print a summary without writing state.json")
+
+    session_parser = subparsers.add_parser("make-session", help="Interactively create a TELEGRAM_SESSION_STRING for GitHub Actions")
+    session_parser.add_argument("--out", default="", help="Optional local env file to write TELEGRAM_SESSION_STRING into, e.g. .env.telegram")
     return parser
 
 
 def cli_main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     root = Path(args.root).resolve()
+    load_env_files(root)
     config = load_config(root / "config.yaml")
     state_path = state_path_for_root(root)
     state = load_state(state_path)
@@ -875,6 +1041,32 @@ def cli_main(argv: list[str] | None = None) -> int:
         summary = collect_telegram_sources(state, config, now)
         save_state(state_path, state)
         print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "import-joined":
+        target_state = json.loads(json.dumps(state, ensure_ascii=False)) if args.dry_run else state
+        summary = import_joined_public_channels(
+            target_state,
+            config,
+            limit=max(1, int(args.limit)),
+            enable=bool(args.enable),
+            min_quality=max(0, int(args.min_quality)),
+        )
+        if not args.dry_run:
+            save_state(state_path, target_state)
+        summary["dry_run"] = int(bool(args.dry_run))
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "make-session":
+        session = make_telegram_session_string(config)
+        if args.out:
+            out_path = (root / str(args.out)).resolve()
+            existing = out_path.read_text(encoding="utf-8") if out_path.exists() else ""
+            lines = [line for line in existing.splitlines() if not line.startswith("TELEGRAM_SESSION_STRING=")]
+            lines.append(f"TELEGRAM_SESSION_STRING={session}")
+            out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            print(json.dumps({"ok": True, "written": str(out_path)}, ensure_ascii=False, indent=2))
+        else:
+            print(session)
         return 0
     return 1
 

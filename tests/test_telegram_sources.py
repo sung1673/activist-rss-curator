@@ -13,6 +13,7 @@ from curator.telegram_sources import (
     canonicalize_telegram_url,
     collect_telegram_sources,
     extract_urls,
+    import_joined_public_channels,
     mark_deleted_message,
     normalize_telegram_message,
     reconcile_recent_deletions,
@@ -22,9 +23,16 @@ from curator.telegram_sources import (
 
 
 class FakeTelegramClient:
-    def __init__(self, messages_by_handle: dict[str, list[dict[str, object]]] | None = None, *, fail_handles: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        messages_by_handle: dict[str, list[dict[str, object]]] | None = None,
+        *,
+        fail_handles: set[str] | None = None,
+        joined_channels: list[dict[str, object]] | None = None,
+    ) -> None:
         self.messages_by_handle = messages_by_handle or {}
         self.fail_handles = fail_handles or set()
+        self.joined_channels = joined_channels or []
         self.join_calls: list[dict[str, object]] = []
 
     async def get_channel_info(self, channel: dict[str, object]) -> dict[str, object]:
@@ -55,6 +63,9 @@ class FakeTelegramClient:
     async def join_channel(self, candidate: dict[str, object]) -> dict[str, object]:
         self.join_calls.append(candidate)
         return {"ok": True}
+
+    async def list_joined_public_channels(self, *, limit: int) -> list[dict[str, object]]:
+        return self.joined_channels[:limit]
 
     async def close(self) -> None:
         return None
@@ -140,6 +151,25 @@ def test_auto_join_disabled_prevents_join_call(config, now) -> None:  # type: ig
 
     assert joined == 0
     assert client.join_calls == []
+
+
+def test_import_joined_public_channels_respects_quality_and_enable(config) -> None:  # type: ignore[no-untyped-def]
+    state: dict[str, object] = {}
+    client = FakeTelegramClient(
+        joined_channels=[
+            {"handle": "good_stock_news", "title": "경제 증권 주식 뉴스", "description": "공시 실적 환율 채권"},
+            {"handle": "bad_vip", "title": "수익보장 급등주 보장 VIP방", "description": "무료추천 리딩방"},
+        ]
+    )
+
+    summary = import_joined_public_channels(state, config, client=client, enable=True, min_quality=70)
+
+    assert summary["telegram_joined_seen"] == 2
+    assert summary["telegram_joined_imported"] == 1
+    assert summary["telegram_joined_skipped_low_quality"] == 1
+    assert state["telegram_source_channels"][0]["handle"] == "good_stock_news"  # type: ignore[index]
+    assert state["telegram_source_channels"][0]["enabled"] is True  # type: ignore[index]
+    assert state["telegram_source_channels"][0]["source"] == "discovered"  # type: ignore[index]
 
 
 def test_floodwait_marks_channel_failure_and_continues(config, now) -> None:  # type: ignore[no-untyped-def]

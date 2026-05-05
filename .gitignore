@@ -7,5 +7,7 @@ venv/
 .env.ssh
 .env.local
 .env.api
+.env.telegram
+*.session
 data/backfill_*.json
 .DS_Store
