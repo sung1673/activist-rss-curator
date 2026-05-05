@@ -176,6 +176,18 @@ class TelegramArticleMatchContext:
     article_tokens: list[ArticleTokenRecord]
     token_index: dict[str, list[int]]
 
+
+@dataclass
+class TelegramBackfillFetchResult:
+    index: int
+    total: int
+    channel: dict[str, object]
+    raw_messages: list[dict[str, object]]
+    error: BaseException | None
+    started_at: datetime
+    monotonic_started_at: float
+    fetch_elapsed_seconds: float
+
 try:  # Windows PowerShell often defaults to cp949 even after WSL launches python.exe.
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 except Exception:
@@ -389,6 +401,7 @@ def compact_backfill_per_channel(rows: object, *, limit: int = 80) -> list[dict[
                 "inserted": int(row.get("inserted") or 0),
                 "updated": int(row.get("updated") or 0),
                 "elapsed_seconds": float(row.get("elapsed_seconds") or 0),
+                "fetch_elapsed_seconds": float(row.get("fetch_elapsed_seconds") or 0),
                 "index": int(row.get("index") or 0),
                 "total": int(row.get("total") or 0),
                 **({"error": row.get("error")} if row.get("error") else {}),
@@ -1446,6 +1459,7 @@ async def _backfill_messages_with_client(
             channels = channels[start_index + 1 :]
     if channel_limit > 0:
         channels = channels[:channel_limit]
+    worker_count = max(1, int(settings.get("backfill_channel_workers", 1)))
 
     inserted = updated = unchanged = failed = seen = outside_window = matches_inserted = 0
     touched_messages: list[dict[str, object]] = []
@@ -1453,111 +1467,147 @@ async def _backfill_messages_with_client(
     per_channel: list[dict[str, object]] = []
     match_context = build_article_match_context(state, config)
 
-    for index, channel in enumerate(channels, start=1):
-        channel_seen = channel_inserted = channel_updated = channel_failed = 0
+    async def fetch_channel(index: int, channel: dict[str, object]) -> TelegramBackfillFetchResult:
         started_at = datetime.now()
         monotonic_started_at = time.monotonic()
         if progress:
             print(f"[{index}/{len(channels)}] @{channel.get('handle') or ''} backfill start", flush=True)
         try:
-            async def fetch_channel() -> tuple[dict[str, object], list[dict[str, object]]]:
+            async def load_messages() -> list[dict[str, object]]:
                 info = await client.get_channel_info(channel)
                 channel.update(info)
-                raw_messages = await client.iter_messages(channel, min_id=0, limit=limit_per_channel, since=since)
-                return info, raw_messages
+                return await client.iter_messages(channel, min_id=0, limit=limit_per_channel, since=since)
 
-            _info, raw_messages = await asyncio.wait_for(fetch_channel(), timeout=channel_timeout)
+            raw_messages = await asyncio.wait_for(load_messages(), timeout=channel_timeout)
+            return TelegramBackfillFetchResult(
+                index=index,
+                total=len(channels),
+                channel=channel,
+                raw_messages=raw_messages,
+                error=None,
+                started_at=started_at,
+                monotonic_started_at=monotonic_started_at,
+                fetch_elapsed_seconds=round(time.monotonic() - monotonic_started_at, 2),
+            )
         except Exception as exc:  # noqa: BLE001
-            channel["last_error"] = error_label(exc)
-            failed += 1
-            channel_failed = 1
+            return TelegramBackfillFetchResult(
+                index=index,
+                total=len(channels),
+                channel=channel,
+                raw_messages=[],
+                error=exc,
+                started_at=started_at,
+                monotonic_started_at=monotonic_started_at,
+                fetch_elapsed_seconds=round(time.monotonic() - monotonic_started_at, 2),
+            )
+
+    indexed_channels = list(enumerate(channels, start=1))
+    for batch_start in range(0, len(indexed_channels), worker_count):
+        if max_messages > 0 and seen >= max_messages:
+            break
+        batch = indexed_channels[batch_start : batch_start + worker_count]
+        fetch_results = await asyncio.gather(*(fetch_channel(index, channel) for index, channel in batch))
+        for fetch_result in sorted(fetch_results, key=lambda result: result.index):
+            if max_messages > 0 and seen >= max_messages:
+                break
+            index = fetch_result.index
+            channel = fetch_result.channel
+            channel_seen = channel_inserted = channel_updated = channel_failed = 0
+            if fetch_result.error is not None:
+                channel["last_error"] = error_label(fetch_result.error)
+                failed += 1
+                channel_failed = 1
+                per_channel.append(
+                    {
+                        "handle": channel.get("handle") or "",
+                        "title": channel.get("title") or "",
+                        "status": "failed",
+                        "error": channel.get("last_error") or "",
+                        "elapsed_seconds": round(time.monotonic() - fetch_result.monotonic_started_at, 2),
+                        "fetch_elapsed_seconds": fetch_result.fetch_elapsed_seconds,
+                        "index": index,
+                        "total": len(channels),
+                    }
+                )
+                if checkpoint_callback:
+                    checkpoint_callback()
+                if progress:
+                    print(
+                        f"[{index}/{len(channels)}] @{channel.get('handle') or ''} failed={channel.get('last_error')} "
+                        f"elapsed={round(time.monotonic() - fetch_result.monotonic_started_at, 1)}s",
+                        flush=True,
+                    )
+                continue
+
+            raw_messages = fetch_result.raw_messages
+            max_message_id = int(channel.get("last_message_id") or 0)
+            for raw_message in raw_messages:
+                if max_messages > 0 and seen >= max_messages:
+                    break
+                if time.monotonic() - fetch_result.monotonic_started_at > channel_timeout:
+                    channel_failed = 1
+                    channel["last_error"] = "processing_timeout"
+                    failed += 1
+                    break
+                message = normalize_telegram_message(channel, raw_message, now)
+                posted_at = parse_datetime(message.get("posted_at"), timezone_name)
+                if posted_at and posted_at < since:
+                    outside_window += 1
+                    continue
+                if not message.get("telegram_message_id"):
+                    continue
+                seen += 1
+                channel_seen += 1
+                status = upsert_telegram_message(state, message)
+                inserted += int(status == "inserted")
+                updated += int(status == "updated")
+                unchanged += int(status == "unchanged")
+                channel_inserted += int(status == "inserted")
+                channel_updated += int(status == "updated")
+                touched_messages.append(message)
+                max_message_id = max(max_message_id, int(message.get("telegram_message_id") or 0))
+                for match in match_message_to_articles(state, message, config, match_context):
+                    if upsert_article_match(state, match) == "inserted":
+                        matches_inserted += 1
+                        touched_matches.append(match)
+            channel["last_message_id"] = max(max_message_id, int(channel.get("last_message_id") or 0))
+            channel["last_collected_at"] = datetime_to_iso(now)
+            if not channel_failed:
+                channel["last_error"] = None
             per_channel.append(
                 {
                     "handle": channel.get("handle") or "",
                     "title": channel.get("title") or "",
-                    "status": "failed",
-                    "error": channel.get("last_error") or "",
-                    "elapsed_seconds": round((datetime.now() - started_at).total_seconds(), 2),
+                    "status": "ok" if not channel_failed else "failed",
+                    "messages_seen": channel_seen,
+                    "inserted": channel_inserted,
+                    "updated": channel_updated,
+                    "elapsed_seconds": round(time.monotonic() - fetch_result.monotonic_started_at, 2),
+                    "fetch_elapsed_seconds": fetch_result.fetch_elapsed_seconds,
                     "index": index,
                     "total": len(channels),
                 }
             )
-            if checkpoint_callback:
-                checkpoint_callback()
             if progress:
                 print(
-                    f"[{index}/{len(channels)}] @{channel.get('handle') or ''} failed={channel.get('last_error')} "
-                    f"elapsed={round((datetime.now() - started_at).total_seconds(), 1)}s",
+                    f"[{index}/{len(channels)}] @{channel.get('handle') or ''} "
+                    f"seen={channel_seen} inserted={channel_inserted} updated={channel_updated} "
+                    f"fetch={fetch_result.fetch_elapsed_seconds}s elapsed={round(time.monotonic() - fetch_result.monotonic_started_at, 1)}s",
                     flush=True,
                 )
-            continue
-
-        max_message_id = int(channel.get("last_message_id") or 0)
-        for raw_message in raw_messages:
+            if checkpoint_callback:
+                checkpoint_callback()
             if max_messages > 0 and seen >= max_messages:
+                if progress:
+                    print(f"max_messages={max_messages} reached; stopping backfill", flush=True)
                 break
-            if time.monotonic() - monotonic_started_at > channel_timeout:
-                channel_failed = 1
-                channel["last_error"] = "processing_timeout"
-                failed += 1
-                break
-            message = normalize_telegram_message(channel, raw_message, now)
-            posted_at = parse_datetime(message.get("posted_at"), timezone_name)
-            if posted_at and posted_at < since:
-                outside_window += 1
-                continue
-            if not message.get("telegram_message_id"):
-                continue
-            seen += 1
-            channel_seen += 1
-            status = upsert_telegram_message(state, message)
-            inserted += int(status == "inserted")
-            updated += int(status == "updated")
-            unchanged += int(status == "unchanged")
-            channel_inserted += int(status == "inserted")
-            channel_updated += int(status == "updated")
-            touched_messages.append(message)
-            max_message_id = max(max_message_id, int(message.get("telegram_message_id") or 0))
-            for match in match_message_to_articles(state, message, config, match_context):
-                if upsert_article_match(state, match) == "inserted":
-                    matches_inserted += 1
-                    touched_matches.append(match)
-        channel["last_message_id"] = max(max_message_id, int(channel.get("last_message_id") or 0))
-        channel["last_collected_at"] = datetime_to_iso(now)
-        if not channel_failed:
-            channel["last_error"] = None
-        per_channel.append(
-            {
-                "handle": channel.get("handle") or "",
-                "title": channel.get("title") or "",
-                "status": "ok" if not channel_failed else "failed",
-                "messages_seen": channel_seen,
-                "inserted": channel_inserted,
-                "updated": channel_updated,
-                "elapsed_seconds": round((datetime.now() - started_at).total_seconds(), 2),
-                "index": index,
-                "total": len(channels),
-            }
-        )
-        if progress:
-            print(
-                f"[{index}/{len(channels)}] @{channel.get('handle') or ''} "
-                f"seen={channel_seen} inserted={channel_inserted} updated={channel_updated} "
-                f"elapsed={round((datetime.now() - started_at).total_seconds(), 1)}s",
-                flush=True,
-            )
-        if checkpoint_callback:
-            checkpoint_callback()
-        if max_messages > 0 and seen >= max_messages:
-            if progress:
-                print(f"max_messages={max_messages} reached; stopping backfill", flush=True)
-            break
 
     state["telegram_issue_signals"] = telegram_issue_signals(state)
     summary: dict[str, object] = {
         "telegram_backfill_channels": len(channels),
         "telegram_backfill_days": max(1, days),
         "telegram_backfill_since": datetime_to_iso(since),
+        "telegram_backfill_channel_workers": worker_count,
         "telegram_backfill_messages_seen": seen,
         "telegram_messages_inserted": inserted,
         "telegram_messages_updated": updated,
@@ -1824,6 +1874,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     backfill_parser.add_argument("--start-after", default="", help="Resume after this channel handle in the enabled-channel order")
     backfill_parser.add_argument("--max-messages", type=int, default=0, help="Stop after this many messages across all channels, 0 means unlimited")
     backfill_parser.add_argument("--timeout-per-channel", type=float, default=0, help="Override per-channel backfill timeout seconds")
+    backfill_parser.add_argument("--workers", type=int, default=0, help="Fetch this many channels concurrently during backfill, 0 uses config")
     backfill_parser.add_argument("--no-checkpoint", action="store_true", help="Do not save state after each channel")
     backfill_parser.add_argument("--dry-run", action="store_true", help="Run against a state copy without writing state.json or remote DB")
     backfill_parser.add_argument("--no-remote", action="store_true", help="Do not sync collected messages to the remote DB API")
@@ -1949,6 +2000,10 @@ def cli_main(argv: list[str] | None = None) -> int:
         if args.timeout_per_channel and float(args.timeout_per_channel) > 0:
             telegram_settings = dict(telegram_sources_config(config))
             telegram_settings["backfill_channel_timeout_seconds"] = float(args.timeout_per_channel)
+            target_config["telegram_sources"] = telegram_settings
+        if args.workers and int(args.workers) > 0:
+            telegram_settings = dict(telegram_sources_config(target_config))
+            telegram_settings["backfill_channel_workers"] = max(1, int(args.workers))
             target_config["telegram_sources"] = telegram_settings
         checkpoint_callback = None
         if not args.dry_run and not args.no_checkpoint:

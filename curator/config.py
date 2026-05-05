@@ -108,6 +108,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "history_backfill_limit_per_channel": 3000,
         "history_backfill_channel_limit": 0,
         "backfill_channel_timeout_seconds": 60,
+        "backfill_channel_workers": 1,
         "weak_match_min_overlap": 3,
         "weak_match_min_strong_overlap": 2,
         "weak_match_window_hours": 96,

@@ -314,6 +314,27 @@ def test_backfill_messages_filters_by_window_and_estimates_growth(config, now) -
     assert summary["telegram_estimated_daily_messages"] > 0
 
 
+def test_backfill_messages_accepts_channel_workers(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["telegram_sources"] = {  # type: ignore[index]
+        "enabled": True,
+        "channels": [{"handle": "first"}, {"handle": "second"}],
+        "backfill_channel_workers": 2,
+    }
+    state = {"articles": []}
+    client = FakeTelegramClient(
+        {
+            "first": [{"id": 1, "text": "첫 채널", "date": now}],
+            "second": [{"id": 2, "text": "둘째 채널", "date": now}],
+        }
+    )
+
+    summary = backfill_telegram_messages(state, config, now, days=3, limit_per_channel=100, client=client, sync_remote=False)
+
+    assert summary["telegram_backfill_channel_workers"] == 2
+    assert summary["telegram_backfill_messages_seen"] == 2
+    assert all("fetch_elapsed_seconds" in row for row in summary["telegram_backfill_per_channel"])  # type: ignore[union-attr]
+
+
 def test_telegram_run_record_keeps_compact_channel_progress(now) -> None:  # type: ignore[no-untyped-def]
     record = telegram_run_record(
         now,

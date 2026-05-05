@@ -99,12 +99,15 @@ DB에 실제 반영하려면 `--dry-run`을 제거합니다. 원격 DB API 동�
 
 대량 백필은 채널별 메시지 수 차이가 커서 오래 걸릴 수 있습니다. 중간 실패 때 다시 처음부터 하지 않도록 기본 CLI는 채널 하나가 끝날 때마다 `data/state.json`을 checkpoint 저장합니다. 특정 채널에서 Telethon의 `old message`/security 경고가 반복되면 해당 채널을 건너뛰고 이어서 실행합니다.
 
+기본 동작은 안전하게 채널 1개씩 가져오지만, Windows 로컬에서 네트워크 여유가 있을 때는 `--workers`로 여러 채널을 동시에 가져올 수 있습니다. 각 채널은 `--timeout-per-channel` 안에 fetch가 끝나지 않으면 해당 채널만 실패 처리되고 다음 채널로 넘어갑니다.
+
 ```powershell
 .\.venv\Scripts\python.exe -m curator.telegram_sources backfill-messages `
   --days 180 `
   --limit-per-channel 1000 `
   --skip-handles GoUpstock `
-  --timeout-per-channel 90
+  --timeout-per-channel 90 `
+  --workers 3
 ```
 
 이미 앞 채널을 처리했다면 `--start-after`로 이어받을 수 있습니다.
@@ -113,7 +116,8 @@ DB에 실제 반영하려면 `--dry-run`을 제거합니다. 원격 DB API 동�
 .\.venv\Scripts\python.exe -m curator.telegram_sources backfill-messages `
   --days 180 `
   --limit-per-channel 1000 `
-  --start-after GoUpstock
+  --start-after GoUpstock `
+  --workers 3
 ```
 
 처음부터 6개월 전체를 한 번에 돌리기보다 `--max-messages 5000`처럼 잘라 실행하면 DB 반영과 장애 확인이 쉽습니다.
