@@ -63,6 +63,64 @@ def report_hours() -> int:
         return 24
 
 
+CONTEXT_EXCERPT_STOPWORDS = {
+    "관련",
+    "기사",
+    "보도",
+    "뉴스",
+    "시장",
+    "자본시장",
+    "주주",
+    "기업",
+    "증시",
+    "한국어",
+    "밸류업",
+    "주주환원",
+    "자사주",
+    "소각",
+    "지배구조",
+    "경영권",
+    "분쟁",
+    "소액주주",
+    "공시",
+    "제도",
+    "google",
+    "news",
+}
+
+
+def context_excerpt_tokens(value: str, max_tokens: int = 10) -> list[str]:
+    tokens: list[str] = []
+    for token in re.findall(r"[0-9A-Za-z가-힣]{2,}", value or ""):
+        normalized = token.casefold()
+        if normalized in CONTEXT_EXCERPT_STOPWORDS or normalized in tokens:
+            continue
+        tokens.append(normalized)
+        if len(tokens) >= max_tokens:
+            break
+    return tokens
+
+
+def contextual_text_excerpt(text: str, query: str, max_chars: int = 140) -> str:
+    compacted = re.sub(r"\s+", " ", text or "").strip()
+    if not compacted:
+        return ""
+    lowered = compacted.casefold()
+    hit_index: int | None = None
+    for token in context_excerpt_tokens(query):
+        index = lowered.find(token)
+        if index >= 0:
+            hit_index = index
+            break
+    if hit_index is None:
+        return compact_text(compacted, max_chars=max_chars)
+    start = max(0, hit_index - 42)
+    snippet = compacted[start : start + max_chars]
+    prefix = "... " if start > 0 else ""
+    suffix = " ..." if start + max_chars < len(compacted) else ""
+    return compact_text(f"관련 문맥: {prefix}{snippet}{suffix}", max_chars=max_chars + 14)
+
+
 def public_base_url(config: dict[str, object]) -> str:
     feed_url = str(config.get("public_feed_url") or "").strip()
     if feed_url.endswith("/feed.xml"):
@@ -613,6 +671,12 @@ def attach_telegram_mentions(stories: list[dict[str, object]], state: dict[str, 
         seen_messages: set[str] = set()
         mentions: list[dict[str, object]] = []
         links = story.get("links") if isinstance(story.get("links"), list) else []
+        context_query = " ".join(
+            [
+                str(story.get("title") or ""),
+                " ".join(str(link.get("title") or "") for link in links if isinstance(link, dict)),
+            ]
+        )
         article_ids = {
             canonical_url_hash(str(link.get("url") or ""))
             for link in links
@@ -626,18 +690,24 @@ def attach_telegram_mentions(stories: list[dict[str, object]], state: dict[str, 
                 message = messages_by_key.get(message_key)
                 if not isinstance(message, dict):
                     continue
+                score = float(match.get("score") or 0)
+                match_type = str(match.get("match_type") or "")
+                if match_type in {"keyword", "ticker"} and score < 0.53:
+                    continue
                 seen_messages.add(message_key)
                 text = str(message.get("text") or "")
+                contextual = contextual_text_excerpt(text, context_query, max_chars=140)
                 mentions.append(
                     {
                         "message_url": message.get("message_url") or match.get("message_url") or "",
                         "channel_title": message.get("channel_title") or match.get("channel_title") or "",
                         "channel_handle": message.get("handle") or match.get("channel_handle") or "",
                         "posted_at": message.get("posted_at") or "",
-                        "text": compact_text(text, max_chars=160),
-                        "excerpt": compact_text(text, max_chars=120),
-                        "match_type": match.get("match_type") or "",
-                        "score": match.get("score") or 0,
+                        "text": contextual,
+                        "excerpt": contextual,
+                        "match_type": match_type,
+                        "score": score,
+                        "reason": match.get("reason") or "",
                         "risk_flags": risk_flags_for_text(text),
                     }
                 )
@@ -1424,31 +1494,28 @@ def render_report_html(
     .story-context {{ margin-top: 4px; border-top: 1px solid rgba(112, 55, 224, .14); padding-top: 6px; }}
     .story-context[hidden], .story-context__body[hidden] {{ display: none !important; }}
     .story-context summary {{ color: var(--accent-deep); }}
-    .story-context summary::after {{ content: " · 통합 표"; color: var(--muted); font-size: 11px; font-weight: 700; }}
+    .story-context summary::after {{ content: " · 통합 목록"; color: var(--muted); font-size: 11px; font-weight: 700; }}
     .story-context__body {{ display: grid; gap: 8px; margin-top: 8px; padding: 9px 10px; border-left: 3px solid rgba(112, 55, 224, .34); background: rgba(246, 240, 255, .38); color: #342d3d; font-size: 12px; line-height: 1.45; }}
     .story-context__message {{ color: var(--muted); }}
     .story-context__stats {{ display: flex; flex-wrap: wrap; gap: 6px; }}
     .story-context__stat {{ border: 1px solid rgba(112, 55, 224, .18); border-radius: 999px; padding: 3px 7px; background: #fff; color: var(--accent-deep); font-size: 10.8px; font-weight: 850; }}
     .story-context__spread {{ display: flex; flex-wrap: wrap; gap: 5px 8px; color: var(--muted); font-size: 11px; }}
     .story-context__spread strong {{ color: var(--ink); }}
-    .story-context__timeline {{ display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }}
-    .story-context__timeline a {{ display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 8px; color: inherit; text-decoration: none; }}
-    .story-context__timeline a:hover .story-context__timeline-title {{ color: var(--accent-deep); text-decoration: underline; text-underline-offset: 3px; }}
-    .story-context__timeline-time {{ color: var(--muted); font-size: 10.8px; white-space: nowrap; }}
-    .story-context__timeline-title {{ min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .story-context__articles {{ display: grid; gap: 7px; min-width: 0; }}
+    .story-context__article {{ display: grid; gap: 4px; padding: 8px 9px; border: 1px solid rgba(112, 55, 224, .12); border-radius: 8px; background: rgba(255,255,255,.72); color: inherit; text-decoration: none; min-width: 0; }}
+    .story-context__article:hover .story-context__article-title {{ color: var(--accent-deep); text-decoration: underline; text-underline-offset: 3px; }}
+    .story-context__article-meta {{ display: flex; flex-wrap: wrap; gap: 4px 7px; align-items: center; color: var(--muted); font-size: 10.8px; }}
+    .story-context__article-title {{ color: var(--ink); font-size: 12px; font-weight: 850; line-height: 1.38; word-break: keep-all; overflow-wrap: anywhere; }}
+    .story-context__article-snippet {{ margin: 0; color: #4d4659; font-size: 11.4px; line-height: 1.38; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }}
     .story-context__kind {{ display: inline-flex; align-items: center; justify-content: center; min-width: 52px; border: 1px solid rgba(112, 55, 224, .22); border-radius: 999px; padding: 2px 6px; background: #fff; color: var(--accent-deep); font-size: 10.5px; font-weight: 850; white-space: nowrap; }}
     .story-context__kind--archive {{ color: var(--green); border-color: rgba(0, 120, 95, .25); }}
-    .story-context__row--current td {{ background: rgba(255,255,255,.55); }}
+    .story-context__article--current {{ background: rgba(255,255,255,.86); }}
     .link-table {{ width: 100%; max-width: 100%; min-width: 0; margin-top: 10px; border: 1px solid var(--line); background: var(--surface); overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }}
     .link-table table {{ width: 100%; min-width: 660px; table-layout: fixed; border-collapse: collapse; font-size: 12px; }}
     th, td {{ padding: 8px 9px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }}
     th {{ color: var(--muted); font-weight: 700; background: #faf8fd; }}
     th:first-child, td:first-child {{ width: 92px; color: var(--muted); white-space: nowrap; }}
     th:nth-child(2), td:nth-child(2) {{ width: 120px; color: var(--accent-deep); }}
-    .story-context__table table {{ min-width: 720px; }}
-    .story-context__table th:first-child, .story-context__table td:first-child {{ width: 76px; color: inherit; }}
-    .story-context__table th:nth-child(2), .story-context__table td:nth-child(2) {{ width: 94px; color: var(--muted); white-space: nowrap; }}
-    .story-context__table th:nth-child(3), .story-context__table td:nth-child(3) {{ width: 120px; color: var(--accent-deep); }}
     .story-context__telegram {{ display: grid; gap: 7px; padding-top: 2px; }}
     .story-context__telegram-head {{ display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ink); font-size: 11.5px; font-weight: 900; }}
     .story-context__telegram-list {{ display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }}
@@ -1557,7 +1624,10 @@ def render_report_html(
       .story__summary li {{ display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; padding-left: 10px; }}
       .story__summary li::before {{ content: ""; position: absolute; left: 0; top: .66em; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }}
       .story-context__body {{ padding: 8px 9px; font-size: 11.5px; line-height: 1.42; }}
-      .story-context__timeline a {{ grid-template-columns: 58px minmax(0, 1fr); gap: 7px; }}
+      .story-context__articles {{ gap: 6px; }}
+      .story-context__article {{ padding: 7px 8px; }}
+      .story-context__article-title {{ font-size: 11.8px; line-height: 1.34; }}
+      .story-context__article-snippet {{ font-size: 11px; -webkit-line-clamp: 2; }}
       .story__meta {{ flex-wrap: nowrap; gap: 6px; margin-bottom: 5px; overflow: hidden; color: #7a7285; font-size: 10.5px; line-height: 1.3; white-space: nowrap; }}
       .story__meta span {{ min-width: 0; overflow: hidden; text-overflow: ellipsis; }}
       .story__meta span:not(:last-child)::after {{ margin-left: 6px; }}
@@ -2338,8 +2408,38 @@ def render_report_html(
       return '관련 언급';
     }}
 
-    function renderTelegramMentions(body, mentions) {{
-      const items = Array.isArray(mentions) ? mentions.filter((message) => message && (message.message_url || message.url) && (message.text || message.excerpt)).slice(0, 5) : [];
+    function telegramTokenHitCount(text, tokens) {{
+      const lowered = String(text || '').toLowerCase();
+      return (tokens || []).filter((token) => lowered.includes(String(token || '').toLowerCase())).length;
+    }}
+
+    function telegramMentionIsUseful(item, tokens) {{
+      const matchType = String(item.match_type || '');
+      if (matchType === 'exact_url' || matchType === 'canonical_url') return true;
+      const score = Number(item.score || 0);
+      const text = `${{item.context_excerpt || ''}} ${{item.excerpt || ''}} ${{item.text || ''}}`;
+      const hits = telegramTokenHitCount(text, tokens);
+      return score >= 0.53 && (hits > 0 || !tokens.length);
+    }}
+
+    function telegramContextSnippet(item, tokens) {{
+      const raw = String(item.context_excerpt || item.excerpt || item.text || '').replace(/\\s+/g, ' ').trim();
+      if (!raw) return '';
+      const lowered = raw.toLowerCase();
+      const hit = (tokens || []).find((token) => lowered.includes(String(token || '').toLowerCase()));
+      if (!hit || raw.startsWith('관련 문맥:')) return compactDbText(raw, 138);
+      const index = Math.max(0, lowered.indexOf(String(hit).toLowerCase()) - 42);
+      const snippet = raw.slice(index, index + 138);
+      return compactDbText(`관련 문맥: ${{index > 0 ? '... ' : ''}}${{snippet}}${{index + 138 < raw.length ? ' ...' : ''}}`, 154);
+    }}
+
+    function renderTelegramMentions(body, mentions, tokens = []) {{
+      const items = Array.isArray(mentions)
+        ? mentions
+          .filter((message) => message && (message.message_url || message.url) && (message.text || message.excerpt || message.context_excerpt))
+          .filter((message) => telegramMentionIsUseful(message, tokens))
+          .slice(0, 5)
+        : [];
       if (!items.length) return;
       const section = document.createElement('div');
       section.className = 'story-context__telegram';
@@ -2363,13 +2463,13 @@ def render_report_html(
         link.rel = 'noopener noreferrer';
         const meta = document.createElement('div');
         meta.className = 'story-context__telegram-meta';
-        [item.channel_title || item.channel_handle || item.handle || '공개 채널', item.posted_at || '', telegramMatchLabel(item.match_type), ...(Array.isArray(item.risk_flags) ? item.risk_flags : [])].filter(Boolean).forEach((value) => {{
+        [item.channel_title || item.channel_handle || item.handle || '공개 채널', item.posted_at || '', telegramMatchLabel(item.match_type), item.reason || '', ...(Array.isArray(item.risk_flags) ? item.risk_flags : [])].filter(Boolean).forEach((value) => {{
           const span = document.createElement('span');
-          span.textContent = String(value);
+          span.textContent = compactDbText(String(value), 52);
           meta.appendChild(span);
         }});
         const excerpt = document.createElement('p');
-        excerpt.textContent = compactDbText(item.excerpt || item.text || '', 120);
+        excerpt.textContent = telegramContextSnippet(item, tokens);
         link.appendChild(meta);
         link.appendChild(excerpt);
         row.appendChild(link);
@@ -2420,7 +2520,7 @@ def render_report_html(
       body.hidden = false;
 
       if (!items.length) {{
-        renderTelegramMentions(body, telegramMentions);
+        renderTelegramMentions(body, telegramMentions, filterTokens);
         return;
       }}
 
@@ -2452,39 +2552,41 @@ def render_report_html(
       }});
       body.appendChild(spreadLine);
 
-      const tableWrap = document.createElement('div');
-      tableWrap.className = 'link-table story-context__table';
-      const table = document.createElement('table');
-      table.innerHTML = '<thead><tr><th>구분</th><th>일시</th><th>매체</th><th>기사</th></tr></thead><tbody></tbody>';
-      const tbody = table.querySelector('tbody');
+      const list = document.createElement('div');
+      list.className = 'story-context__articles';
       items.forEach((article) => {{
-        const row = document.createElement('tr');
-        row.className = article.context_kind === 'current' ? 'story-context__row--current' : 'story-context__row--archive';
-        const kindCell = document.createElement('td');
+        const row = document.createElement('a');
+        row.className = `story-context__article${{article.context_kind === 'current' ? ' story-context__article--current' : ''}}`;
+        row.href = article.canonical_url;
+        row.target = '_blank';
+        row.rel = 'noopener noreferrer';
+        const meta = document.createElement('div');
+        meta.className = 'story-context__article-meta';
         const kind = document.createElement('span');
         kind.className = `story-context__kind${{article.context_kind === 'archive' ? ' story-context__kind--archive' : ''}}`;
         kind.textContent = contextKindLabel(article);
-        kindCell.appendChild(kind);
-        const timeCell = document.createElement('td');
-        timeCell.textContent = articleDateLabel(article) || '일시 미상';
-        const sourceCell = document.createElement('td');
-        sourceCell.textContent = article.source || article.feed_name || '매체 미상';
-        const titleCell = document.createElement('td');
-        const link = document.createElement('a');
-        link.href = article.canonical_url;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.textContent = compactDbText(article.title, 96);
-        titleCell.appendChild(link);
-        row.appendChild(kindCell);
-        row.appendChild(timeCell);
-        row.appendChild(sourceCell);
-        row.appendChild(titleCell);
-        tbody.appendChild(row);
+        meta.appendChild(kind);
+        [articleDateLabel(article) || '일시 미상', article.source || article.feed_name || '매체 미상', ...articleMatchReasons(article, story.dataset.storyDbQuery || storyTitle)].filter(Boolean).forEach((value) => {{
+          const span = document.createElement('span');
+          span.textContent = compactDbText(value, 42);
+          meta.appendChild(span);
+        }});
+        const title = document.createElement('strong');
+        title.className = 'story-context__article-title';
+        title.textContent = compactDbText(article.title, 108);
+        const snippetText = articleSearchSnippet(article, story.dataset.storyDbQuery || storyTitle);
+        row.appendChild(meta);
+        row.appendChild(title);
+        if (snippetText) {{
+          const snippet = document.createElement('p');
+          snippet.className = 'story-context__article-snippet';
+          snippet.textContent = snippetText;
+          row.appendChild(snippet);
+        }}
+        list.appendChild(row);
       }});
-      tableWrap.appendChild(table);
-      body.appendChild(tableWrap);
-      renderTelegramMentions(body, telegramMentions);
+      body.appendChild(list);
+      renderTelegramMentions(body, telegramMentions, filterTokens);
     }}
 
     async function loadStoryContext(details) {{

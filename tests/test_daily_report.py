@@ -182,9 +182,9 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "loadStoryContext" in html
     assert "preloadPendingStoryContexts" in html
     assert "contextPending" in html
-    assert "통합 표" in html
+    assert "통합 목록" in html
     assert "data-story-current-links" in html
-    assert "story-context__table" in html
+    assert "story-context__articles" in html
     assert "현재 묶음" in html
     assert "아카이브" in html
     assert "fetchTelegramMentions" in html

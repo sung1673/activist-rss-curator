@@ -464,6 +464,38 @@ function text_excerpt(?string $text, int $max = 180): string {
     return mb_substr($text, 0, $max - 1, 'UTF-8') . '…';
 }
 
+function query_context_excerpt(?string $text, string $query, int $max = 180): string {
+    $clean = trim(preg_replace('/\s+/u', ' ', (string)$text));
+    if ($clean === '') {
+        return '';
+    }
+    $tokens = search_tokens($query);
+    if (!$tokens) {
+        return text_excerpt($clean, $max);
+    }
+    $lower = mb_strtolower($clean, 'UTF-8');
+    $hitIndex = null;
+    foreach ($tokens as $token) {
+        $needle = mb_strtolower((string)$token, 'UTF-8');
+        if ($needle === '') {
+            continue;
+        }
+        $pos = mb_strpos($lower, $needle, 0, 'UTF-8');
+        if ($pos !== false) {
+            $hitIndex = (int)$pos;
+            break;
+        }
+    }
+    if ($hitIndex === null) {
+        return text_excerpt($clean, $max);
+    }
+    $start = max(0, $hitIndex - 42);
+    $snippet = mb_substr($clean, $start, $max, 'UTF-8');
+    $prefix = $start > 0 ? '... ' : '';
+    $suffix = ($start + $max) < mb_strlen($clean, 'UTF-8') ? ' ...' : '';
+    return text_excerpt('관련 문맥: ' . $prefix . $snippet . $suffix, $max + 18);
+}
+
 function decode_json_array(?string $value): array {
     if ($value === null || $value === '') {
         return array();
@@ -472,8 +504,10 @@ function decode_json_array(?string $value): array {
     return is_array($decoded) ? $decoded : array();
 }
 
-function public_telegram_message(array $row): array {
+function public_telegram_message(array $row, string $query = ''): array {
     $riskFlags = decode_json_array(isset($row['risk_flags_json']) ? (string)$row['risk_flags_json'] : null);
+    $text = isset($row['text']) ? (string)$row['text'] : '';
+    $contextExcerpt = query_context_excerpt($text, $query, 180);
     return array(
         'channel_handle' => isset($row['channel_handle']) ? (string)$row['channel_handle'] : '',
         'channel_title' => isset($row['channel_title']) && $row['channel_title'] !== null ? (string)$row['channel_title'] : (isset($row['channel_handle']) ? (string)$row['channel_handle'] : ''),
@@ -482,8 +516,10 @@ function public_telegram_message(array $row): array {
         'message_url' => isset($row['message_url']) ? (string)$row['message_url'] : '',
         'match_type' => isset($row['match_type']) ? (string)$row['match_type'] : 'keyword',
         'score' => isset($row['score']) ? (float)$row['score'] : 0,
+        'reason' => isset($row['reason']) ? (string)$row['reason'] : '',
         'risk_flags' => $riskFlags,
-        'excerpt' => text_excerpt(isset($row['text']) ? (string)$row['text'] : '', 180),
+        'excerpt' => $contextExcerpt,
+        'context_excerpt' => $contextExcerpt,
     );
 }
 
@@ -1173,28 +1209,28 @@ function handle_read(string $action, array $config): void {
         }
         if ($articleIds) {
             $placeholders = implode(',', array_fill(0, count($articleIds), '?'));
-            $sql = 'SELECT m.channel_handle, COALESCE(c.title, m.channel_handle) AS channel_title, m.telegram_message_id, m.posted_at, m.message_url, m.text, m.risk_flags_json, tm.match_type, tm.score '
+            $sql = 'SELECT m.channel_handle, COALESCE(c.title, m.channel_handle) AS channel_title, m.telegram_message_id, m.posted_at, m.message_url, m.text, m.risk_flags_json, tm.match_type, tm.score, tm.reason '
                 . 'FROM ' . table_name($config, 'telegram_article_matches') . ' tm '
                 . 'JOIN ' . table_name($config, 'telegram_messages') . ' m ON m.message_key = tm.message_key '
                 . 'LEFT JOIN ' . table_name($config, 'telegram_channels') . ' c ON c.handle = m.channel_handle '
                 . 'WHERE tm.article_id IN (' . $placeholders . ') AND m.deleted_at IS NULL '
-                . 'AND (tm.match_type IN ("exact_url","canonical_url") OR tm.score >= 0.4500) '
+                . 'AND (tm.match_type IN ("exact_url","canonical_url") OR tm.score >= 0.5300) '
                 . 'ORDER BY tm.score DESC, m.posted_at DESC LIMIT ' . $limit;
             $stmt = $pdo->prepare($sql);
             $stmt->execute($articleIds);
             foreach ($stmt->fetchAll() as $row) {
-                $messagesByKey[(string)$row['message_url']] = public_telegram_message($row);
+                $messagesByKey[(string)$row['message_url']] = public_telegram_message($row, $query);
             }
         }
         if ($url !== '' && count($messagesByKey) < $limit) {
-            $stmt = $pdo->prepare('SELECT m.channel_handle, COALESCE(c.title, m.channel_handle) AS channel_title, m.telegram_message_id, m.posted_at, m.message_url, m.text, m.risk_flags_json, "exact_url" AS match_type, 0.9000 AS score '
+            $stmt = $pdo->prepare('SELECT m.channel_handle, COALESCE(c.title, m.channel_handle) AS channel_title, m.telegram_message_id, m.posted_at, m.message_url, m.text, m.risk_flags_json, "exact_url" AS match_type, 0.9000 AS score, "URL 직접 공유" AS reason '
                 . 'FROM ' . table_name($config, 'telegram_messages') . ' m '
                 . 'LEFT JOIN ' . table_name($config, 'telegram_channels') . ' c ON c.handle = m.channel_handle '
                 . 'WHERE m.deleted_at IS NULL AND m.urls_json LIKE ? AND m.posted_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY) '
                 . 'ORDER BY m.posted_at DESC LIMIT ' . $limit);
             $stmt->execute(array('%' . $url . '%'));
             foreach ($stmt->fetchAll() as $row) {
-                $messagesByKey[(string)$row['message_url']] = public_telegram_message($row);
+                $messagesByKey[(string)$row['message_url']] = public_telegram_message($row, $query);
             }
         }
         if ($query !== '' && count($messagesByKey) < $limit) {
@@ -1206,14 +1242,14 @@ function handle_read(string $action, array $config): void {
                     $where[] = 'm.normalized_text LIKE ?';
                     $params[] = '%' . mb_strtolower($token, 'UTF-8') . '%';
                 }
-                $sql = 'SELECT m.channel_handle, COALESCE(c.title, m.channel_handle) AS channel_title, m.telegram_message_id, m.posted_at, m.message_url, m.text, m.risk_flags_json, "keyword" AS match_type, 0.4600 AS score '
+                $sql = 'SELECT m.channel_handle, COALESCE(c.title, m.channel_handle) AS channel_title, m.telegram_message_id, m.posted_at, m.message_url, m.text, m.risk_flags_json, "keyword" AS match_type, 0.5600 AS score, "검색어 문맥 일치" AS reason '
                     . 'FROM ' . table_name($config, 'telegram_messages') . ' m '
                     . 'LEFT JOIN ' . table_name($config, 'telegram_channels') . ' c ON c.handle = m.channel_handle '
                     . 'WHERE ' . implode(' AND ', $where) . ' ORDER BY m.posted_at DESC LIMIT ' . $limit;
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute($params);
                 foreach ($stmt->fetchAll() as $row) {
-                    $messagesByKey[(string)$row['message_url']] = public_telegram_message($row);
+                    $messagesByKey[(string)$row['message_url']] = public_telegram_message($row, $query);
                 }
             }
         }
