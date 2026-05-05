@@ -131,6 +131,8 @@ DB에 실제 반영하려면 `--dry-run`을 제거합니다. 원격 DB API 동�
 
 `telegram_remote_last_error`가 `unknown_action`이면 PHP API가 아직 `upsert_telegram_snapshot` action을 지원하지 않는 상태입니다.
 이 경우 로컬 백필은 계속할 수 있지만, DB 기반 Telegram 반응 화면은 서버 API 업데이트 후 활성화됩니다.
+서버 API 배포본은 `deploy/activist/api.php`에 보관합니다. 운영 서버에서는 `/www_root/activist/api.php`로 배치하며, `_private/config.php`는 서버에만 두고 repository에 포함하지 않습니다.
+현재 API는 `upsert_telegram_snapshot` write action과 `telegram_reactions` read action을 지원합니다.
 
 PHP API 업데이트 전에도 DB 적재 병목을 줄이려면 로컬에서 직접 MySQL 동기화를 실행할 수 있습니다. 이 명령은 `.env`의 DB 접속 정보를 읽고 `activist_telegram_channels`, `activist_telegram_messages`, `activist_telegram_article_matches`, `activist_telegram_issue_signals` 테이블을 생성한 뒤 로컬 state의 공개 채널 메시지를 upsert합니다.
 
