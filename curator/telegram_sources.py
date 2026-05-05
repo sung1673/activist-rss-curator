@@ -918,7 +918,7 @@ def parse_handle_list(value: object) -> set[str]:
     if isinstance(value, (list, tuple, set)):
         raw_items = [str(item) for item in value]
     else:
-        raw_items = re.split(r"[,\\s]+", str(value))
+        raw_items = re.split(r"[,\s]+", str(value))
     return {normalize_channel_handle(item) for item in raw_items if normalize_channel_handle(item)}
 
 

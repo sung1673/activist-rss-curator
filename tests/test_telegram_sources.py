@@ -21,6 +21,7 @@ from curator.telegram_sources import (
     match_message_to_articles,
     message_key,
     normalize_telegram_message,
+    parse_handle_list,
     rematch_telegram_articles,
     reconcile_recent_deletions,
     score_channel_candidate,
@@ -123,6 +124,14 @@ def test_load_env_files_includes_api_env(tmp_path, monkeypatch) -> None:  # type
 
     assert tmp_path / ".env.api" in loaded
     assert "example.com/api.php" in os.environ["ACTIVIST_API_URL"]
+
+
+def test_parse_handle_list_does_not_split_letter_s() -> None:
+    assert parse_handle_list("GoUpstock, LS_WooBond realtime_stock_news") == {
+        "GoUpstock",
+        "LS_WooBond",
+        "realtime_stock_news",
+    }
 
 
 def test_telegram_message_upsert_prevents_duplicates_and_tracks_edits(now) -> None:  # type: ignore[no-untyped-def]
