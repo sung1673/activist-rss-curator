@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -205,6 +206,23 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "data-workbench-list" in workbench_html
     assert "fetchArchiveRows" in workbench_html
     assert "현재 묶음과 DB 아카이브" in workbench_html
+    workbench_data = re.search(r'<script type="application/json" id="workbench-data">(.*?)</script>', workbench_html, re.S)
+    assert workbench_data
+    assert "&quot;" not in workbench_data.group(1)
+    workbench_stories = json.loads(workbench_data.group(1))
+    assert workbench_stories
+    assert all(isinstance(story.get("title"), str) for story in workbench_stories)
+    current_link_data = re.findall(r'<script type="application/json" data-story-current-links>(.*?)</script>', html, re.S)
+    assert all("&quot;" not in script for script in current_link_data)
+    assert all(isinstance(json.loads(script), list) for script in current_link_data)
+
+
+def test_json_script_payload_keeps_application_json_parseable() -> None:
+    payload = daily_report.json_script_payload([{"title": 'A "quoted" title', "url": "https://example.com/a</script>"}])
+
+    assert "&quot;" not in payload
+    assert "<\\/script>" in payload
+    assert json.loads(payload)[0]["title"] == 'A "quoted" title'
 
 
 def test_daily_report_refreshes_archive_links_on_existing_pages(tmp_path) -> None:

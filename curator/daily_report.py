@@ -1044,7 +1044,12 @@ def render_source_links(links: list[dict[str, str]], *, max_sources: int = 7) ->
 
 
 def json_script_payload(value: object) -> str:
-    return escape(json.dumps(value, ensure_ascii=False).replace("</", "<\\/"))
+    return (
+        json.dumps(value, ensure_ascii=False)
+        .replace("</", "<\\/")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
 
 
 def story_brief_bullets(story: dict[str, object], *, max_chars: int = 88, max_items: int = 3) -> list[str]:
