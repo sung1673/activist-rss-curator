@@ -6,10 +6,11 @@ import os
 import random
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 from urllib.parse import urlsplit
 
 import httpx
@@ -27,6 +28,8 @@ from .normalize import canonical_url_hash, normalize_url
 
 
 DEFAULT_LIMIT = 50
+TRANSIENT_MYSQL_ERROR_CODES = {2006, 2013, 2014, 2055}
+T = TypeVar("T")
 
 
 @dataclass
@@ -91,41 +94,78 @@ def db_connect() -> Any:
     return pymysql.connect(**db_config_from_env(), cursorclass=pymysql.cursors.DictCursor)
 
 
+def mysql_error_code(exc: BaseException) -> int | None:
+    args = getattr(exc, "args", ())
+    if args and isinstance(args[0], int):
+        return args[0]
+    return None
+
+
+def transient_mysql_connection_error(exc: BaseException) -> bool:
+    return mysql_error_code(exc) in TRANSIENT_MYSQL_ERROR_CODES
+
+
+def ensure_db_connection(conn: Any) -> None:
+    ping = getattr(conn, "ping", None)
+    if callable(ping):
+        ping(reconnect=True)
+
+
+def db_operation(conn: Any, label: str, operation: Callable[[], T]) -> T:
+    for attempt in range(2):
+        try:
+            ensure_db_connection(conn)
+            return operation()
+        except Exception as exc:
+            if attempt == 0 and transient_mysql_connection_error(exc):
+                print(f"MySQL connection lost during {label}; reconnecting once", file=sys.stderr, flush=True)
+                continue
+            raise
+    raise RuntimeError(f"MySQL operation failed: {label}")
+
+
 def google_news_host(url: str) -> bool:
     return (urlsplit(str(url or "")).hostname or "").casefold() == "news.google.com"
 
 
 def select_candidates(conn: Any, *, limit: int, include_rejected: bool) -> list[dict[str, Any]]:
     status_clause = "" if include_rejected else "AND status <> 'rejected'"
-    with conn.cursor() as cur:
-        cur.execute(
-            f"""
-            SELECT record_id, canonical_url, canonical_url_hash, title_hash, title, normalized_title,
-                   summary, source, feed_name, feed_category, image_url, published_at, seen_at,
-                   status, reason, relevance_level, priority_score, priority_level, story_key
-            FROM activist_articles
-            WHERE canonical_url LIKE %s
-              {status_clause}
-            ORDER BY sort_at DESC, updated_at DESC
-            LIMIT %s
-            """,
-            ("https://news.google.com/%", limit),
-        )
-        return list(cur.fetchall())
+
+    def operation() -> list[dict[str, Any]]:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT record_id, canonical_url, canonical_url_hash, title_hash, title, normalized_title,
+                       summary, source, feed_name, feed_category, image_url, published_at, seen_at,
+                       status, reason, relevance_level, priority_score, priority_level, story_key
+                FROM activist_articles
+                WHERE canonical_url LIKE %s
+                  {status_clause}
+                ORDER BY sort_at DESC, updated_at DESC
+                LIMIT %s
+                """,
+                ("https://news.google.com/%", limit),
+            )
+            return list(cur.fetchall())
+
+    return db_operation(conn, "select Google News candidates", operation)
 
 
 def existing_record_for_hash(conn: Any, url_hash: str, record_id: str) -> dict[str, Any] | None:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT record_id, status, title
-            FROM activist_articles
-            WHERE canonical_url_hash = %s AND record_id <> %s
-            LIMIT 1
-            """,
-            (url_hash, record_id),
-        )
-        return cur.fetchone()
+    def operation() -> dict[str, Any] | None:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT record_id, status, title
+                FROM activist_articles
+                WHERE canonical_url_hash = %s AND record_id <> %s
+                LIMIT 1
+                """,
+                (url_hash, record_id),
+            )
+            return cur.fetchone()
+
+    return db_operation(conn, "find URL hash conflict", operation)
 
 
 def row_to_article(row: dict[str, Any]) -> dict[str, object]:
@@ -203,19 +243,22 @@ def update_article_row(
         assignments.append("status = 'duplicate'")
         assignments.append("reason = %(reason)s")
 
-    with conn.cursor() as cur:
-        cur.execute(
-            f"UPDATE activist_articles SET {', '.join(assignments)} WHERE record_id = %(record_id)s",
-            values,
-        )
-        cur.execute(
-            """
-            UPDATE activist_stories
-            SET representative_url = %s, updated_at = NOW()
-            WHERE representative_url = %s
-            """,
-            (canonical_url, old_url),
-        )
+    def operation() -> None:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE activist_articles SET {', '.join(assignments)} WHERE record_id = %(record_id)s",
+                values,
+            )
+            cur.execute(
+                """
+                UPDATE activist_stories
+                SET representative_url = %s, updated_at = NOW()
+                WHERE representative_url = %s
+                """,
+                (canonical_url, old_url),
+            )
+
+    db_operation(conn, "update repaired article URL", operation)
 
 
 def repair_state_file(path: Path, old_url: str, repaired: dict[str, object], *, apply: bool) -> int:
