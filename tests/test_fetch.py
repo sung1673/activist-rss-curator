@@ -6,6 +6,7 @@ from curator.fetch import (
     apply_decoded_google_news_url,
     decode_google_news_links_in_state,
     fetch_google_alerts_articles,
+    GoogleNewsDecodeResult,
     google_news_article_id,
     google_news_decoding_params,
     image_href,
@@ -194,8 +195,10 @@ def test_google_news_decode_runs_beyond_page_enrich_limit(config, monkeypatch) -
     monkeypatch.setattr(fetch, "fetch_feed_xml", lambda *_args, **_kwargs: xml)
     monkeypatch.setattr(
         fetch,
-        "decode_google_news_url_online",
-        lambda url, _client: "https://origin.example/" + url.rsplit("/", 1)[-1].split("?", 1)[0],
+        "decode_google_news_url_online_result",
+        lambda url, _client: GoogleNewsDecodeResult(
+            decoded_url="https://origin.example/" + url.rsplit("/", 1)[-1].split("?", 1)[0]
+        ),
     )
 
     def fake_enrich(article, *_args, **_kwargs):  # type: ignore[no-untyped-def]
@@ -229,9 +232,69 @@ def test_state_google_news_links_are_upgraded(config, monkeypatch) -> None:  # t
         ],
         "published_clusters": [],
     }
-    monkeypatch.setattr(fetch, "decode_google_news_url_online", lambda *_args, **_kwargs: "https://origin.example/a")
+    monkeypatch.setattr(
+        fetch,
+        "decode_google_news_url_online_result",
+        lambda *_args, **_kwargs: GoogleNewsDecodeResult(decoded_url="https://origin.example/a"),
+    )
 
     assert decode_google_news_links_in_state(state, config) == 1
     article = state["pending_clusters"][0]["articles"][0]
     assert article["canonical_url"] == "https://origin.example/a"
     assert article["canonical_url_hash"] != "old"
+
+
+def test_google_news_decode_runs_even_when_page_enrichment_disabled(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import fetch
+
+    config["feeds"] = [{"name": "test", "category": "test", "url": "https://example.com/rss.xml"}]
+    config["fetch"]["enrich_pages"] = False
+    config["fetch"]["max_entries_per_feed"] = 0
+    config["fetch"]["google_news_decode_limit"] = 1
+    config["fetch"]["google_news_decode_sleep_seconds"] = 0
+    xml = """
+    <rss><channel>
+      <item><title>첫 기사</title><link>https://news.google.com/rss/articles/CBMiAAA?oc=5</link></item>
+    </channel></rss>
+    """
+
+    monkeypatch.setattr(fetch, "fetch_feed_xml", lambda *_args, **_kwargs: xml)
+    monkeypatch.setattr(
+        fetch,
+        "decode_google_news_url_online_result",
+        lambda *_args, **_kwargs: GoogleNewsDecodeResult(decoded_url="https://origin.example/a"),
+    )
+
+    articles = fetch_google_alerts_articles(config)
+
+    assert articles[0]["canonical_url"] == "https://origin.example/a"
+
+
+def test_google_news_decode_stops_on_rate_limit(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import fetch
+
+    config["feeds"] = [{"name": "test", "category": "test", "url": "https://example.com/rss.xml"}]
+    config["fetch"]["enrich_pages"] = False
+    config["fetch"]["max_entries_per_feed"] = 0
+    config["fetch"]["google_news_decode_limit"] = 5
+    config["fetch"]["google_news_decode_sleep_seconds"] = 0
+    calls = []
+    xml = """
+    <rss><channel>
+      <item><title>첫 기사</title><link>https://news.google.com/rss/articles/CBMiAAA?oc=5</link></item>
+      <item><title>둘째 기사</title><link>https://news.google.com/rss/articles/CBMiBBB?oc=5</link></item>
+    </channel></rss>
+    """
+
+    monkeypatch.setattr(fetch, "fetch_feed_xml", lambda *_args, **_kwargs: xml)
+
+    def fake_decode(url, _client):  # type: ignore[no-untyped-def]
+        calls.append(url)
+        return GoogleNewsDecodeResult(rate_limited=True, error="rate_limited")
+
+    monkeypatch.setattr(fetch, "decode_google_news_url_online_result", fake_decode)
+
+    articles = fetch_google_alerts_articles(config)
+
+    assert len(calls) == 1
+    assert articles[0]["canonical_url"].startswith("https://news.google.com/")

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
-from urllib.parse import quote, urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import feedparser
 import httpx
@@ -17,6 +19,13 @@ from .normalize import canonical_url_hash, hostname_from_url, normalize_title_pa
 
 USER_AGENT = "activist-rss-curator/1.0 (+https://github.com/)"
 GOOGLE_NEWS_DECODE_ENDPOINT = "https://news.google.com/_/DotsSplashUi/data/batchexecute"
+
+
+@dataclass(frozen=True)
+class GoogleNewsDecodeResult:
+    decoded_url: str | None = None
+    rate_limited: bool = False
+    error: str = ""
 
 
 def fetch_feed_xml(feed_url: str, timeout: float = 20.0) -> str:
@@ -368,26 +377,39 @@ def parse_google_news_batch_response(text: str) -> str | None:
         decoded_url = decoded_payload[1]
         if isinstance(decoded_url, str) and decoded_url.startswith(("http://", "https://")):
             return decoded_url
+    marker = '[\\"garturlres\\",\\"'
+    if marker in text:
+        tail = text.split(marker, 1)[1]
+        encoded_url = tail.split('\\",', 1)[0]
+        try:
+            decoded_url = json.loads(f'"{encoded_url}"')
+        except json.JSONDecodeError:
+            decoded_url = encoded_url.replace("\\/", "/")
+        if isinstance(decoded_url, str) and decoded_url.startswith(("http://", "https://")):
+            return decoded_url
     return None
 
 
-def decode_google_news_url_online(url: str, client: httpx.Client) -> str | None:
+def decode_google_news_url_online_result(url: str, client: httpx.Client) -> GoogleNewsDecodeResult:
     article_id = google_news_article_id(url)
     if not article_id:
-        return None
+        return GoogleNewsDecodeResult(error="not_google_news")
 
     params: tuple[str, str] | None = None
     for prefix in ("https://news.google.com/articles/", "https://news.google.com/rss/articles/"):
         try:
             response = client.get(prefix + article_id, follow_redirects=True)
+            if response.status_code == 429:
+                return GoogleNewsDecodeResult(rate_limited=True, error="google_news_get_rate_limited")
             response.raise_for_status()
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
             continue
         params = google_news_decoding_params(response.text)
         if params:
             break
     if not params:
-        return None
+        return GoogleNewsDecodeResult(error=locals().get("last_error", "missing_decoding_params"))
 
     signature, timestamp = params
     request_payload = [
@@ -401,17 +423,27 @@ def decode_google_news_url_online(url: str, client: httpx.Client) -> str | None:
     headers = {
         "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
         "User-Agent": USER_AGENT,
+        "Referer": "https://news.google.com/",
     }
     try:
         response = client.post(
-            GOOGLE_NEWS_DECODE_ENDPOINT,
-            content=f"f.req={quote(json.dumps([[request_payload]], separators=(',', ':')))}",
+            f"{GOOGLE_NEWS_DECODE_ENDPOINT}?rpcids=Fbv4je",
+            data={"f.req": json.dumps([[request_payload]], separators=(",", ":"))},
             headers=headers,
         )
+        if response.status_code == 429:
+            return GoogleNewsDecodeResult(rate_limited=True, error="google_news_post_rate_limited")
         response.raise_for_status()
-    except httpx.HTTPError:
-        return None
-    return parse_google_news_batch_response(response.text)
+    except httpx.HTTPError as exc:
+        return GoogleNewsDecodeResult(error=f"{type(exc).__name__}: {exc}")
+    decoded_url = parse_google_news_batch_response(response.text)
+    if decoded_url:
+        return GoogleNewsDecodeResult(decoded_url=decoded_url)
+    return GoogleNewsDecodeResult(error="missing_decoded_url")
+
+
+def decode_google_news_url_online(url: str, client: httpx.Client) -> str | None:
+    return decode_google_news_url_online_result(url, client).decoded_url
 
 
 def apply_decoded_google_news_url(article: dict[str, object], decoded_url: str | None) -> dict[str, object]:
@@ -424,6 +456,43 @@ def apply_decoded_google_news_url(article: dict[str, object], decoded_url: str |
     return enriched
 
 
+def decode_google_news_articles(
+    articles: list[dict[str, object]],
+    config: dict[str, object],
+    *,
+    timeout: httpx.Timeout,
+    limits: httpx.Limits,
+    headers: dict[str, str],
+) -> list[dict[str, object]]:
+    fetch_config = config.get("fetch", {})
+    decode_limit = fetch_config_int(fetch_config, "google_news_decode_limit", 25)
+    if decode_limit == 0:
+        return articles
+    sleep_seconds = max(0.0, fetch_config_float(fetch_config, "google_news_decode_sleep_seconds", 0.0))
+    stop_on_rate_limit = True
+    if isinstance(fetch_config, dict):
+        stop_on_rate_limit = bool(fetch_config.get("google_news_decode_stop_on_rate_limit", True))
+
+    decoded_articles = [dict(article) for article in articles]
+    decode_attempts = 0
+    with httpx.Client(timeout=timeout, limits=limits, headers=headers) as client:
+        for index, article in enumerate(decoded_articles):
+            url = str(article.get("canonical_url") or article.get("link") or "")
+            if not google_news_article_id(url):
+                continue
+            if decode_limit > 0 and decode_attempts >= decode_limit:
+                break
+            decode_attempts += 1
+            result = decode_google_news_url_online_result(url, client)
+            if result.decoded_url:
+                decoded_articles[index] = apply_decoded_google_news_url(article, result.decoded_url)
+            elif result.rate_limited and stop_on_rate_limit:
+                break
+            if sleep_seconds and (decode_limit < 0 or decode_attempts < decode_limit):
+                time.sleep(sleep_seconds)
+    return decoded_articles
+
+
 def decode_google_news_links_in_state(state: dict[str, object], config: dict[str, object]) -> int:
     fetch_config = config.get("fetch", {})
     limit = int(fetch_config.get("state_google_news_decode_limit", 60) or 0)  # type: ignore[union-attr]
@@ -431,6 +500,8 @@ def decode_google_news_links_in_state(state: dict[str, object], config: dict[str
         return 0
 
     page_timeout = float(fetch_config.get("page_timeout_seconds", 8.0) or 8.0)  # type: ignore[union-attr]
+    sleep_seconds = max(0.0, fetch_config_float(fetch_config, "google_news_decode_sleep_seconds", 0.0))
+    stop_on_rate_limit = bool(fetch_config.get("google_news_decode_stop_on_rate_limit", True))  # type: ignore[union-attr]
     timeout = httpx.Timeout(page_timeout, connect=min(5.0, page_timeout))
     headers = {"User-Agent": USER_AGENT}
     decoded_count = 0
@@ -445,12 +516,18 @@ def decode_google_news_links_in_state(state: dict[str, object], config: dict[str
                 if limit > 0 and attempted >= limit:
                     return decoded_count
                 attempted += 1
-                decoded = decode_google_news_url_online(url, client)
-                if not decoded:
+                result = decode_google_news_url_online_result(url, client)
+                if result.rate_limited and stop_on_rate_limit:
+                    return decoded_count
+                if not result.decoded_url:
+                    if sleep_seconds and (limit < 0 or attempted < limit):
+                        time.sleep(sleep_seconds)
                     continue
-                updated = apply_decoded_google_news_url(article, decoded)
+                updated = apply_decoded_google_news_url(article, result.decoded_url)
                 article.update(updated)
                 decoded_count += 1
+                if sleep_seconds and (limit < 0 or attempted < limit):
+                    time.sleep(sleep_seconds)
     return decoded_count
 
 
@@ -550,20 +627,21 @@ def fetch_google_alerts_articles(config: dict[str, object]) -> list[dict[str, ob
     fetch_config = config.get("fetch", {})
     articles = fetch_all_feed_articles(config, fetch_config)
 
-    if not bool(fetch_config.get("enrich_pages", True)):  # type: ignore[union-attr]
-        return articles
-
     page_timeout = fetch_config_float(fetch_config, "page_timeout_seconds", 8.0)
     max_enrich_articles = fetch_config_int(fetch_config, "max_enrich_articles", 0)
-    google_news_decode_limit = fetch_config_int(fetch_config, "google_news_decode_limit", 25)
     enrich_workers = max(1, fetch_config_int(fetch_config, "enrich_workers", 1))
     timeout = httpx.Timeout(page_timeout, connect=min(5.0, page_timeout))
     limits = httpx.Limits(max_connections=max(5, enrich_workers), max_keepalive_connections=max(2, enrich_workers // 2))
     headers = {"User-Agent": USER_AGENT}
+    articles = decode_google_news_articles(articles, config, timeout=timeout, limits=limits, headers=headers)
+
+    if not bool(fetch_config.get("enrich_pages", True)):  # type: ignore[union-attr]
+        return articles
+
     jobs = enrichment_jobs(
         articles,
         max_enrich_articles=max_enrich_articles,
-        google_news_decode_limit=google_news_decode_limit,
+        google_news_decode_limit=0,
     )
 
     if enrich_workers > 1 and len(jobs) > 1:

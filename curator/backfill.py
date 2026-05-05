@@ -37,6 +37,7 @@ DEFAULT_FEED_WORKERS = 24
 DEFAULT_ENRICH_WORKERS = 12
 DEFAULT_MAX_ENRICH_ARTICLES = 1000
 DEFAULT_GOOGLE_NEWS_DECODE_LIMIT = -1
+DEFAULT_GOOGLE_NEWS_DECODE_SLEEP_SECONDS = 0.35
 DEFAULT_API_TIMEOUT_SECONDS = 60.0
 DEFAULT_MAX_PAYLOAD_BYTES = 1_750_000
 
@@ -342,6 +343,8 @@ def backfill_config(base_config: dict[str, Any], args: argparse.Namespace, feeds
     fetch_config["enrich_workers"] = args.enrich_workers
     fetch_config["max_enrich_articles"] = args.max_enrich_articles
     fetch_config["google_news_decode_limit"] = args.google_news_decode_limit
+    fetch_config["google_news_decode_sleep_seconds"] = args.google_news_decode_sleep
+    fetch_config["google_news_decode_stop_on_rate_limit"] = True
     fetch_config["feed_timeout_seconds"] = args.feed_timeout
     fetch_config["page_timeout_seconds"] = args.page_timeout
     date_filter = config.setdefault("date_filter", {})
@@ -485,6 +488,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_GOOGLE_NEWS_DECODE_LIMIT,
         help="0 disables online Google News decoding; -1 means unlimited. Default: -1.",
+    )
+    parser.add_argument(
+        "--google-news-decode-sleep",
+        type=float,
+        default=DEFAULT_GOOGLE_NEWS_DECODE_SLEEP_SECONDS,
+        help="Seconds to wait between Google News decode attempts. Default: 0.35.",
     )
     parser.add_argument("--feed-timeout", type=float, default=20.0)
     parser.add_argument("--page-timeout", type=float, default=6.0)

@@ -22,6 +22,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "page_timeout_seconds": 6,
         "enrich_workers": 6,
         "google_news_decode_limit": 180,
+        "google_news_decode_sleep_seconds": 0.35,
+        "google_news_decode_stop_on_rate_limit": True,
         "state_google_news_decode_limit": 80,
     },
     "display": {

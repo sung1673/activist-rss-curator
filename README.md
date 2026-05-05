@@ -147,6 +147,18 @@ cd C:\BSIDE\codex\260525_텔레그램_행동주의_채널\activist-rss-curator
 
 중간에 끊기면 같은 명령을 다시 실행하면 됩니다. 진행 상태는 `data/backfill_progress.json`, 중복 판단용 임시 state는 `data/backfill_state.json`에 저장되며 둘 다 커밋되지 않습니다. 처음부터 다시 하려면 `--restart`를 붙입니다.
 
+Google News가 일시적으로 429 rate limit을 반환하면 원문 URL 복원이 중단될 수 있습니다. 이 경우 DB에 남은 `news.google.com` URL은 별도 보정 스크립트로 천천히 재처리합니다. 먼저 dry-run으로 확인합니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m curator.google_news_repair --limit 20 --sleep 2
+```
+
+디코딩이 성공하는 상태가 확인되면 `--apply`를 붙입니다. 성공한 기사만 `canonical_url`, `canonical_url_hash`, `source`, `image_url`을 갱신하고, Google에서 다시 429를 반환하면 DB를 건드리지 않고 해당 실행을 멈춥니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m curator.google_news_repair --limit 100 --sleep 2 --apply
+```
+
 작게 시험하려면 다음처럼 dry-run을 먼저 돌립니다.
 
 ```powershell
@@ -162,6 +174,7 @@ cd C:\BSIDE\codex\260525_텔레그램_행동주의_채널\activist-rss-curator
   --feed-workers 32 `
   --enrich-workers 16 `
   --max-enrich-articles 1600 `
+  --google-news-decode-sleep 0.5 `
   --sleep 0.5
 ```
 
