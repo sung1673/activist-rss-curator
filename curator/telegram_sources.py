@@ -6,13 +6,14 @@ import json
 import os
 import random
 import re
+import sys
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
 from .config import load_config
-from .dates import datetime_to_iso
+from .dates import datetime_to_iso, parse_datetime
 from .normalize import canonical_url_hash, normalize_title, normalize_url, stable_hash
 from .remote_api import post_remote_action, remote_api_configured
 from .state import load_state, save_state
@@ -54,6 +55,7 @@ GENERIC_MATCH_TOKENS = {
     "기사",
     "뉴스",
     "보도",
+    "속보",
     "시장",
     "자본시장",
     "기업",
@@ -62,8 +64,37 @@ GENERIC_MATCH_TOKENS = {
     "금융",
     "경제",
     "공시",
+    "https",
+    "http",
+    "www",
+    "com",
+    "co",
+    "kr",
+    "html",
+    "article",
+    "articleview",
+    "idxno",
+    "news",
+    "utm",
+    "rss",
 }
 
+try:  # Windows PowerShell often defaults to cp949 even after WSL launches python.exe.
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+except Exception:
+    pass
+PUBLIC_CHANNEL_SOURCE_TYPES = {"public_channel", "telegram_public_channel", "channel"}
+NON_COLLECTABLE_SOURCE_TYPES = {
+    "private_chat",
+    "user",
+    "bot",
+    "saved_messages",
+    "basic_group",
+    "group",
+    "public_group",
+    "megagroup",
+    "supergroup",
+}
 
 class TelegramFloodWait(Exception):
     def __init__(self, seconds: int) -> None:
@@ -71,11 +102,22 @@ class TelegramFloodWait(Exception):
         self.seconds = seconds
 
 
+class TelegramUnsafeSource(Exception):
+    """Raised when a Telegram entity is not a public broadcast channel."""
+
+
 class TelegramMessageClient(Protocol):
     async def get_channel_info(self, channel: dict[str, object]) -> dict[str, object]:
         ...
 
-    async def iter_messages(self, channel: dict[str, object], *, min_id: int, limit: int) -> list[dict[str, object]]:
+    async def iter_messages(
+        self,
+        channel: dict[str, object],
+        *,
+        min_id: int,
+        limit: int,
+        since: datetime | None = None,
+    ) -> list[dict[str, object]]:
         ...
 
     async def recommend_channels(self, seed_channel: dict[str, object], *, limit: int) -> list[dict[str, object]]:
@@ -134,9 +176,27 @@ def configured_channels(config: dict[str, object]) -> list[dict[str, object]]:
         raw_channel.setdefault("source", "manual")
         raw_channel.setdefault("enabled", True)
         raw_channel.setdefault("joined", False)
+        raw_channel.setdefault("source_type", "public_channel")
+        raw_channel.setdefault("is_public_channel", True)
         raw_channel.setdefault("quality_score", score_channel_candidate(raw_channel))
         normalized.append(raw_channel)
     return normalized
+
+
+def is_collectable_public_channel(channel: dict[str, object]) -> bool:
+    handle = normalize_channel_handle(channel.get("handle") or channel.get("username"))
+    if not handle:
+        return False
+    source_type = str(channel.get("source_type") or "public_channel").strip().casefold()
+    if source_type in NON_COLLECTABLE_SOURCE_TYPES:
+        return False
+    if source_type and source_type not in PUBLIC_CHANNEL_SOURCE_TYPES:
+        return False
+    if channel.get("is_public_channel") is False:
+        return False
+    if channel.get("is_private_chat") or channel.get("is_saved_messages") or channel.get("is_group"):
+        return False
+    return True
 
 
 def ensure_telegram_state(state: dict[str, object]) -> None:
@@ -168,6 +228,8 @@ def upsert_telegram_channel(state: dict[str, object], channel: dict[str, object]
         "joined": bool(channel.get("joined", False)),
         "enabled": bool(channel.get("enabled", True)),
         "source": channel.get("source") or "manual",
+        "source_type": channel.get("source_type") or "public_channel",
+        "is_public_channel": bool(channel.get("is_public_channel", True)),
         "quality_score": int(channel.get("quality_score") or score_channel_candidate(channel)),
         "last_message_id": int(channel.get("last_message_id") or 0),
         "last_collected_at": channel.get("last_collected_at") or None,
@@ -191,7 +253,7 @@ def enabled_channels(state: dict[str, object]) -> list[dict[str, object]]:
     return [
         channel
         for channel in state.get("telegram_source_channels", [])
-        if isinstance(channel, dict) and bool(channel.get("enabled", True))
+        if isinstance(channel, dict) and bool(channel.get("enabled", True)) and is_collectable_public_channel(channel)
     ]
 
 
@@ -250,6 +312,8 @@ def normalize_telegram_message(channel: dict[str, object], raw_message: dict[str
         "handle": normalize_channel_handle(channel.get("handle") or channel.get("username")),
         "telegram_channel_id": channel.get("telegram_channel_id") or channel.get("channel_id") or None,
         "channel_title": channel.get("title") or "",
+        "source_type": "public_channel",
+        "is_public_channel": True,
         "telegram_message_id": message_id,
         "posted_at": posted_at if isinstance(posted_at, str) else datetime_to_iso(posted_at),
         "edited_at": edited_at if isinstance(edited_at, str) or edited_at is None else datetime_to_iso(edited_at),
@@ -346,6 +410,7 @@ def article_tokens(article: dict[str, object]) -> set[str]:
         str(article.get(key) or "")
         for key in ("title", "normalized_title", "summary")
     )
+    text = URL_PATTERN.sub(" ", text)
     tokens = {token.casefold() for token in re.findall(r"[0-9A-Za-z가-힣]{2,}", text)}
     tokens.update(title_signature(article.get("title")))
     return {token for token in tokens if token not in GENERIC_MATCH_TOKENS}
@@ -358,8 +423,23 @@ def title_signature(value: object) -> set[str]:
 
 
 def message_tokens(message: dict[str, object]) -> set[str]:
-    tokens = {token.casefold() for token in re.findall(r"[0-9A-Za-z가-힣]{2,}", str(message.get("normalized_text") or ""))}
+    text = URL_PATTERN.sub(" ", str(message.get("normalized_text") or message.get("text") or ""))
+    tokens = {token.casefold() for token in re.findall(r"[0-9A-Za-z가-힣]{2,}", text)}
     return {token for token in tokens if token not in GENERIC_MATCH_TOKENS}
+
+
+def weak_match_within_window(
+    message: dict[str, object],
+    article: dict[str, object],
+    *,
+    timezone_name: str,
+    window_hours: int,
+) -> bool:
+    message_dt = parse_datetime(message.get("posted_at"), timezone_name)
+    article_dt = parse_datetime(article.get("published_at") or article.get("seen_at"), timezone_name)
+    if not message_dt or not article_dt:
+        return True
+    return abs((message_dt - article_dt).total_seconds()) <= window_hours * 3600
 
 
 def upsert_article_match(state: dict[str, object], match: dict[str, object]) -> str:
@@ -422,14 +502,22 @@ def match_message_to_articles(state: dict[str, object], message: dict[str, objec
 
     settings = telegram_sources_config(config)
     min_overlap = int(settings.get("weak_match_min_overlap", 2))
+    min_strong_overlap = int(settings.get("weak_match_min_strong_overlap", 1))
+    window_hours = int(settings.get("weak_match_window_hours", 168))
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
     tokens = message_tokens(message)
     if not tokens:
         return []
     for article in state.get("articles", []):
         if not isinstance(article, dict):
             continue
+        if not weak_match_within_window(message, article, timezone_name=timezone_name, window_hours=window_hours):
+            continue
         overlap = sorted(tokens & article_tokens(article))
         if len(overlap) < min_overlap:
+            continue
+        strong_overlap = [token for token in overlap if len(token) >= 3 or re.search(r"\d", token)]
+        if len(strong_overlap) < min_strong_overlap:
             continue
         results.append(
             {
@@ -546,6 +634,8 @@ def upsert_channel_candidate(state: dict[str, object], candidate: dict[str, obje
         "title": candidate.get("title") or "",
         "description": candidate.get("description") or "",
         "source": candidate.get("source") or "recommendation",
+        "source_type": candidate.get("source_type") or "public_channel",
+        "is_public_channel": bool(candidate.get("is_public_channel", True)),
         "status": candidate.get("status") or "pending",
         "quality_score": score_channel_candidate(candidate),
         "last_checked_at": candidate.get("last_checked_at") or None,
@@ -591,20 +681,57 @@ class TelethonClientAdapter:
     async def close(self) -> None:
         await self.client.disconnect()
 
-    async def get_channel_info(self, channel: dict[str, object]) -> dict[str, object]:
-        entity = await self.client.get_entity(normalize_channel_handle(channel.get("handle") or channel.get("username")))
-        return {
-            "handle": getattr(entity, "username", None) or channel.get("handle"),
-            "telegram_channel_id": getattr(entity, "id", None),
-            "title": getattr(entity, "title", None) or channel.get("title") or "",
-            "description": getattr(entity, "about", None) or channel.get("description") or "",
+    def _public_broadcast_record(self, entity: object, fallback: dict[str, object]) -> dict[str, object]:
+        handle = normalize_channel_handle(getattr(entity, "username", "") or fallback.get("handle") or fallback.get("username"))
+        is_broadcast = bool(getattr(entity, "broadcast", False))
+        is_group = bool(getattr(entity, "megagroup", False) or getattr(entity, "gigagroup", False))
+        if not handle or not is_broadcast or is_group:
+            raise TelegramUnsafeSource("not_public_broadcast_channel")
+        record = {
+            "handle": handle,
+            "telegram_channel_id": getattr(entity, "id", None) or fallback.get("telegram_channel_id") or fallback.get("channel_id"),
+            "title": getattr(entity, "title", None) or fallback.get("title") or "",
+            "description": getattr(entity, "about", None) or fallback.get("description") or "",
             "joined": True,
+            "source_type": "public_channel",
+            "is_public_channel": True,
         }
+        record["quality_score"] = int(fallback.get("quality_score") or score_channel_candidate(record))
+        return record
 
-    async def iter_messages(self, channel: dict[str, object], *, min_id: int, limit: int) -> list[dict[str, object]]:
-        entity = await self.client.get_entity(normalize_channel_handle(channel.get("handle") or channel.get("username")))
+    async def _get_public_broadcast_entity(self, channel: dict[str, object]) -> tuple[object, dict[str, object]]:
+        handle = normalize_channel_handle(channel.get("handle") or channel.get("username"))
+        if not handle:
+            raise TelegramUnsafeSource("public_channel_handle_required")
+        entity = await self.client.get_entity(handle)
+        return entity, self._public_broadcast_record(entity, channel)
+
+    async def get_channel_info(self, channel: dict[str, object]) -> dict[str, object]:
+        _entity, record = await self._get_public_broadcast_entity(channel)
+        return record
+
+    async def iter_messages(
+        self,
+        channel: dict[str, object],
+        *,
+        min_id: int,
+        limit: int,
+        since: datetime | None = None,
+    ) -> list[dict[str, object]]:
+        entity, _record = await self._get_public_broadcast_entity(channel)
         messages: list[dict[str, object]] = []
-        async for message in self.client.iter_messages(entity, min_id=min_id, limit=limit, reverse=True):
+        iter_kwargs: dict[str, object] = {"limit": limit}
+        if since is not None:
+            iter_kwargs["reverse"] = False
+        elif min_id:
+            iter_kwargs["min_id"] = min_id
+            iter_kwargs["reverse"] = True
+        else:
+            iter_kwargs["reverse"] = False
+        async for message in self.client.iter_messages(entity, **iter_kwargs):
+            message_date = parse_datetime(getattr(message, "date", None), "Asia/Seoul")
+            if since is not None and message_date and message_date < since:
+                break
             messages.append(
                 {
                     "id": int(message.id or 0),
@@ -616,38 +743,51 @@ class TelethonClientAdapter:
                     "replies_count": getattr(getattr(message, "replies", None), "replies", 0) or 0,
                 }
             )
+        if since is not None or not min_id:
+            messages.reverse()
         return messages
 
     async def recommend_channels(self, seed_channel: dict[str, object], *, limit: int) -> list[dict[str, object]]:
-        # Telethon does not expose a stable public-channel recommendation primitive for all accounts.
-        # Keep this hook for an existing backend/admin implementation; default collector records no candidates.
-        return []
+        try:
+            from telethon.tl.functions.channels import GetChannelRecommendationsRequest  # type: ignore
+        except ImportError:  # pragma: no cover
+            return []
+
+        entity, _record = await self._get_public_broadcast_entity(seed_channel)
+        result = await self.client(GetChannelRecommendationsRequest(entity))
+        raw_chats = list(getattr(result, "chats", []) or [])
+        candidates: list[dict[str, object]] = []
+        for chat in raw_chats:
+            try:
+                record = self._public_broadcast_record(chat, {"source": "recommendation"})
+            except TelegramUnsafeSource:
+                continue
+            record["source"] = "recommendation"
+            record["status"] = "pending"
+            record["quality_score"] = score_channel_candidate(record)
+            candidates.append(record)
+            if len(candidates) >= limit:
+                break
+        return candidates
 
     async def join_channel(self, candidate: dict[str, object]) -> dict[str, object]:
         from telethon.tl.functions.channels import JoinChannelRequest  # type: ignore
 
-        result = await self.client(JoinChannelRequest(normalize_channel_handle(candidate.get("handle"))))
+        entity, _record = await self._get_public_broadcast_entity(candidate)
+        result = await self.client(JoinChannelRequest(entity))
         return {"ok": True, "result": str(result)[:120]}
 
     async def list_joined_public_channels(self, *, limit: int) -> list[dict[str, object]]:
         channels: list[dict[str, object]] = []
         async for dialog in self.client.iter_dialogs(limit=limit):
             entity = getattr(dialog, "entity", None)
-            handle = normalize_channel_handle(getattr(entity, "username", "") or "")
-            if not handle:
-                continue
-            is_channel = bool(getattr(dialog, "is_channel", False) or getattr(entity, "broadcast", False) or getattr(entity, "megagroup", False))
-            if not is_channel:
+            try:
+                record = self._public_broadcast_record(entity, {"source": "discovered"})
+            except TelegramUnsafeSource:
                 continue
             title = str(getattr(dialog, "title", "") or getattr(entity, "title", "") or "")
-            record = {
-                "handle": handle,
-                "telegram_channel_id": getattr(entity, "id", None),
-                "title": title,
-                "description": str(getattr(entity, "about", "") or ""),
-                "joined": True,
-                "source": "discovered",
-            }
+            record["title"] = title or record.get("title") or ""
+            record["source"] = "discovered"
             record["quality_score"] = score_channel_candidate(record)
             channels.append(record)
         return channels
@@ -772,6 +912,9 @@ async def _import_joined_with_client(
     }
     joined_channels = await client.list_joined_public_channels(limit=limit)
     for channel in joined_channels:
+        if not is_collectable_public_channel(channel):
+            skipped += 1
+            continue
         score = int(channel.get("quality_score") or score_channel_candidate(channel))
         if score < min_quality:
             skipped += 1
@@ -895,6 +1038,61 @@ def sync_telegram_to_remote_api(state: dict[str, object], config: dict[str, obje
     return {"telegram_remote_synced": 0, "telegram_remote_failed": 1}
 
 
+def sync_telegram_batch_to_remote_api(
+    state: dict[str, object],
+    config: dict[str, object],
+    *,
+    messages: list[dict[str, object]],
+    matches: list[dict[str, object]],
+) -> dict[str, int]:
+    if not remote_api_configured() or not messages:
+        return {}
+    settings = telegram_sources_config(config)
+    batch_size = max(1, int(settings.get("remote_batch_size", 300)))
+    synced = failed = remote_messages = remote_matches = 0
+    channels = list(state.get("telegram_source_channels", []))
+    signals = list(state.get("telegram_issue_signals", []))
+    candidates = list(state.get("telegram_channel_candidates", []))
+    message_keys = {message_key(message) for message in messages}
+    relevant_matches = [
+        match for match in matches if isinstance(match, dict) and str(match.get("telegram_message_key") or "") in message_keys
+    ]
+    for index in range(0, len(messages), batch_size):
+        chunk = messages[index : index + batch_size]
+        chunk_keys = {message_key(message) for message in chunk}
+        chunk_matches = [
+            match
+            for match in relevant_matches
+            if isinstance(match, dict) and str(match.get("telegram_message_key") or "") in chunk_keys
+        ]
+        try:
+            response = post_remote_action(
+                "upsert_telegram_snapshot",
+                {
+                    "channels": channels,
+                    "messages": chunk,
+                    "article_matches": chunk_matches,
+                    "issue_signals": signals,
+                    "channel_candidates": candidates,
+                },
+            )
+        except Exception:
+            failed += 1
+            continue
+        if response.get("ok"):
+            synced += 1
+            remote_messages += int(response.get("messages") or len(chunk))
+            remote_matches += int(response.get("article_matches") or len(chunk_matches))
+        else:
+            failed += 1
+    return {
+        "telegram_remote_synced": synced,
+        "telegram_remote_failed": failed,
+        "telegram_remote_messages": remote_messages,
+        "telegram_remote_matches": remote_matches,
+    }
+
+
 def collect_telegram_sources(
     state: dict[str, object],
     config: dict[str, object],
@@ -933,6 +1131,203 @@ def collect_telegram_sources(
         summary.update(sync_telegram_to_remote_api(state, config))
     state.setdefault("telegram_source_runs", [])
     state["telegram_source_runs"].append({"ran_at": datetime_to_iso(now), **summary})  # type: ignore[index, union-attr]
+    return summary
+
+
+async def _backfill_messages_with_client(
+    state: dict[str, object],
+    config: dict[str, object],
+    now: datetime,
+    client: TelegramMessageClient,
+    *,
+    days: int,
+    limit_per_channel: int,
+    channel_limit: int,
+    progress: bool = False,
+) -> dict[str, object]:
+    settings = telegram_sources_config(config)
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    channel_timeout = max(5.0, float(settings.get("backfill_channel_timeout_seconds", 60)))
+    since = now - timedelta(days=max(1, days))
+    channels = enabled_channels(state)
+    if channel_limit > 0:
+        channels = channels[:channel_limit]
+
+    inserted = updated = unchanged = failed = seen = outside_window = matches_inserted = 0
+    touched_messages: list[dict[str, object]] = []
+    touched_matches: list[dict[str, object]] = []
+    per_channel: list[dict[str, object]] = []
+
+    for index, channel in enumerate(channels, start=1):
+        channel_seen = channel_inserted = channel_updated = channel_failed = 0
+        started_at = datetime.now()
+        if progress:
+            print(f"[{index}/{len(channels)}] @{channel.get('handle') or ''} backfill start", flush=True)
+        try:
+            async def fetch_channel() -> tuple[dict[str, object], list[dict[str, object]]]:
+                info = await client.get_channel_info(channel)
+                channel.update(info)
+                raw_messages = await client.iter_messages(channel, min_id=0, limit=limit_per_channel, since=since)
+                return info, raw_messages
+
+            _info, raw_messages = await asyncio.wait_for(fetch_channel(), timeout=channel_timeout)
+        except Exception as exc:  # noqa: BLE001
+            wait = flood_wait_seconds(exc)
+            channel["last_error"] = f"flood_wait_{wait}s" if wait else ("timeout" if isinstance(exc, TimeoutError) else exc.__class__.__name__)
+            failed += 1
+            channel_failed = 1
+            per_channel.append(
+                {
+                    "handle": channel.get("handle") or "",
+                    "title": channel.get("title") or "",
+                    "status": "failed",
+                    "error": channel.get("last_error") or "",
+                    "elapsed_seconds": round((datetime.now() - started_at).total_seconds(), 2),
+                    "index": index,
+                    "total": len(channels),
+                }
+            )
+            if progress:
+                print(
+                    f"[{index}/{len(channels)}] @{channel.get('handle') or ''} failed={channel.get('last_error')} "
+                    f"elapsed={round((datetime.now() - started_at).total_seconds(), 1)}s",
+                    flush=True,
+                )
+            continue
+
+        max_message_id = int(channel.get("last_message_id") or 0)
+        for raw_message in raw_messages:
+            message = normalize_telegram_message(channel, raw_message, now)
+            posted_at = parse_datetime(message.get("posted_at"), timezone_name)
+            if posted_at and posted_at < since:
+                outside_window += 1
+                continue
+            if not message.get("telegram_message_id"):
+                continue
+            seen += 1
+            channel_seen += 1
+            status = upsert_telegram_message(state, message)
+            inserted += int(status == "inserted")
+            updated += int(status == "updated")
+            unchanged += int(status == "unchanged")
+            channel_inserted += int(status == "inserted")
+            channel_updated += int(status == "updated")
+            touched_messages.append(message)
+            max_message_id = max(max_message_id, int(message.get("telegram_message_id") or 0))
+            for match in match_message_to_articles(state, message, config):
+                if upsert_article_match(state, match) == "inserted":
+                    matches_inserted += 1
+                    touched_matches.append(match)
+        channel["last_message_id"] = max(max_message_id, int(channel.get("last_message_id") or 0))
+        channel["last_collected_at"] = datetime_to_iso(now)
+        channel["last_error"] = None
+        per_channel.append(
+            {
+                "handle": channel.get("handle") or "",
+                "title": channel.get("title") or "",
+                "status": "ok" if not channel_failed else "failed",
+                "messages_seen": channel_seen,
+                "inserted": channel_inserted,
+                "updated": channel_updated,
+                "elapsed_seconds": round((datetime.now() - started_at).total_seconds(), 2),
+                "index": index,
+                "total": len(channels),
+            }
+        )
+        if progress:
+            print(
+                f"[{index}/{len(channels)}] @{channel.get('handle') or ''} "
+                f"seen={channel_seen} inserted={channel_inserted} updated={channel_updated} "
+                f"elapsed={round((datetime.now() - started_at).total_seconds(), 1)}s",
+                flush=True,
+            )
+
+    state["telegram_issue_signals"] = telegram_issue_signals(state)
+    summary: dict[str, object] = {
+        "telegram_backfill_channels": len(channels),
+        "telegram_backfill_days": max(1, days),
+        "telegram_backfill_since": datetime_to_iso(since),
+        "telegram_backfill_messages_seen": seen,
+        "telegram_messages_inserted": inserted,
+        "telegram_messages_updated": updated,
+        "telegram_messages_unchanged": unchanged,
+        "telegram_matches_inserted": matches_inserted,
+        "telegram_channel_failed": failed,
+        "telegram_messages_outside_window": outside_window,
+        "telegram_backfill_per_channel": per_channel,
+        "_touched_messages": touched_messages,
+        "_touched_matches": touched_matches,
+    }
+    if settings.get("estimate_storage_bytes", True):
+        sample = touched_messages[-500:] if len(touched_messages) > 500 else touched_messages
+        if sample:
+            sample_bytes = len(json.dumps(sample, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+            avg_message_bytes = max(1, round(sample_bytes / len(sample)))
+            daily_messages = seen / max(1, days)
+            summary["telegram_estimated_avg_message_bytes"] = avg_message_bytes
+            summary["telegram_estimated_daily_messages"] = round(daily_messages, 1)
+            summary["telegram_estimated_monthly_messages"] = round(daily_messages * 30)
+            summary["telegram_estimated_yearly_messages"] = round(daily_messages * 365)
+            summary["telegram_estimated_monthly_mb"] = round(daily_messages * 30 * avg_message_bytes / 1024 / 1024, 2)
+            summary["telegram_estimated_yearly_mb"] = round(daily_messages * 365 * avg_message_bytes / 1024 / 1024, 2)
+    return summary
+
+
+def backfill_telegram_messages(
+    state: dict[str, object],
+    config: dict[str, object],
+    now: datetime,
+    *,
+    days: int = 14,
+    limit_per_channel: int = 1000,
+    channel_limit: int = 0,
+    client: TelegramMessageClient | None = None,
+    sync_remote: bool = True,
+    progress: bool = False,
+) -> dict[str, object]:
+    ensure_telegram_state(state)
+    register_configured_channels(state, config)
+    owns_client = client is None
+    if client is None:
+        adapter = TelethonClientAdapter(config)
+
+        async def run_with_adapter() -> dict[str, object]:
+            async with adapter as opened:
+                return await _backfill_messages_with_client(
+                    state,
+                    config,
+                    now,
+                    opened,
+                    days=days,
+                    limit_per_channel=limit_per_channel,
+                    channel_limit=channel_limit,
+                    progress=progress,
+                )
+
+        summary = asyncio.run(run_with_adapter())
+    else:
+        async def run_with_client() -> dict[str, object]:
+            return await _backfill_messages_with_client(
+                state,
+                config,
+                now,
+                client,
+                days=days,
+                limit_per_channel=limit_per_channel,
+                channel_limit=channel_limit,
+                progress=progress,
+            )
+
+        summary = asyncio.run(run_with_client())
+
+    touched_messages = [message for message in summary.pop("_touched_messages", []) if isinstance(message, dict)]
+    touched_matches = [match for match in summary.pop("_touched_matches", []) if isinstance(match, dict)]
+    if sync_remote and not owns_client and touched_messages:
+        summary.update(sync_telegram_batch_to_remote_api(state, config, messages=touched_messages, matches=touched_matches))
+    elif sync_remote and touched_messages:
+        summary.update(sync_telegram_batch_to_remote_api(state, config, messages=touched_messages, matches=touched_matches))
+    state.setdefault("telegram_source_runs", [])
+    state["telegram_source_runs"].append({"ran_at": datetime_to_iso(now), "mode": "backfill", **{k: v for k, v in summary.items() if isinstance(v, (int, float, str))}})  # type: ignore[index, union-attr]
     return summary
 
 
@@ -982,6 +1377,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("candidates", help="List discovered candidate channels")
     subparsers.add_parser("collect", help="Run one Telegram source collection pass")
+
+    discover_parser = subparsers.add_parser("discover", help="Discover similar public-channel candidates from enabled seed channels")
+    discover_parser.add_argument("--limit", type=int, default=20, help="Maximum recommendations per seed channel")
+    discover_parser.add_argument("--dry-run", action="store_true", help="Discover and print a summary without writing state.json")
+
+    backfill_parser = subparsers.add_parser("backfill-messages", help="Backfill public-channel messages for a historical window")
+    backfill_parser.add_argument("--days", type=int, default=14, help="How many days back to collect")
+    backfill_parser.add_argument("--limit-per-channel", type=int, default=1000, help="Maximum messages to scan per channel")
+    backfill_parser.add_argument("--channel-limit", type=int, default=0, help="Limit number of enabled channels, 0 means all")
+    backfill_parser.add_argument("--dry-run", action="store_true", help="Run against a state copy without writing state.json or remote DB")
+    backfill_parser.add_argument("--no-remote", action="store_true", help="Do not sync collected messages to the remote DB API")
 
     import_parser = subparsers.add_parser("import-joined", help="Import public channels already joined by the Telegram reader account")
     import_parser.add_argument("--limit", type=int, default=500, help="Maximum dialogs to scan")
@@ -1040,6 +1446,49 @@ def cli_main(argv: list[str] | None = None) -> int:
         now = now_in_timezone(str(config.get("timezone") or "Asia/Seoul"))
         summary = collect_telegram_sources(state, config, now)
         save_state(state_path, state)
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "discover":
+        from .dates import now_in_timezone
+
+        target_state = json.loads(json.dumps(state, ensure_ascii=False)) if args.dry_run else state
+        target_config = dict(config)
+        telegram_settings = dict(telegram_sources_config(config))
+        telegram_settings["discover_enabled"] = True
+        telegram_settings["recommendation_limit"] = max(1, int(args.limit))
+        target_config["telegram_sources"] = telegram_settings
+        now = now_in_timezone(str(config.get("timezone") or "Asia/Seoul"))
+        adapter = TelethonClientAdapter(target_config)
+
+        async def run_discover() -> dict[str, int]:
+            async with adapter as opened:
+                return await _discover_with_client(target_state, target_config, now, opened)
+
+        summary = asyncio.run(run_discover())
+        if not args.dry_run:
+            save_state(state_path, target_state)
+        summary["dry_run"] = int(bool(args.dry_run))
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "backfill-messages":
+        from .dates import now_in_timezone
+
+        target_state = json.loads(json.dumps(state, ensure_ascii=False)) if args.dry_run else state
+        now = now_in_timezone(str(config.get("timezone") or "Asia/Seoul"))
+        summary = backfill_telegram_messages(
+            target_state,
+            config,
+            now,
+            days=max(1, int(args.days)),
+            limit_per_channel=max(1, int(args.limit_per_channel)),
+            channel_limit=max(0, int(args.channel_limit)),
+            sync_remote=not args.dry_run and not args.no_remote,
+            progress=True,
+        )
+        if not args.dry_run:
+            save_state(state_path, target_state)
+        summary["dry_run"] = int(bool(args.dry_run))
+        summary["remote_disabled"] = int(bool(args.no_remote))
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0
     if args.command == "import-joined":

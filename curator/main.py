@@ -20,6 +20,7 @@ from .telegram_publisher import (
     initialize_telegram_state,
 )
 from .telegram_sources import collect_telegram_sources
+from .telegram_dashboard import write_telegram_dashboard
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -172,6 +173,7 @@ def run(root: Path | None = None) -> dict[str, int]:
     published_clusters = list(state.get("published_clusters", []))
     write_feed(project_root / "public" / "feed.xml", published_clusters, config, now)
     write_index(project_root / "public" / "index.html", state, config, now)
+    write_telegram_dashboard(project_root, state, config, now)
     if os.environ.get("CURATOR_DISABLE_TELEGRAM_SEND", "").casefold() in {"1", "true", "yes", "on"}:
         telegram_summary = {"telegram_sent": 0, "telegram_failed": 0}
     else:

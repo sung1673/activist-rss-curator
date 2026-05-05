@@ -137,7 +137,7 @@ jobs:
               echo "Changed files:"
               cat changed_files.txt
 
-              collection_regex='^(config\.yaml|requirements\.txt|data/priority_overrides\.yaml|curator/(ai|archive|cluster|config|dates|dedupe|fetch|main|normalize|priority|relevance|remote_api|rss_writer|state|story_judge|summaries|telegram_publisher|telegram_resend|telegram_resend_digest|telegram_smoke_test|telegram_sources)\.py|tests/(conftest|test_archive|test_cluster|test_config|test_dates|test_dedupe|test_fetch|test_main|test_normalize|test_priority|test_relevance|test_remote_api|test_rss_writer|test_state|test_story_judge|test_summaries|test_telegram_publisher|test_telegram_resend_digest|test_telegram_sources)\.py)$'
+              collection_regex='^(config\.yaml|requirements\.txt|data/priority_overrides\.yaml|curator/(ai|archive|cluster|config|dates|dedupe|fetch|main|normalize|priority|relevance|remote_api|rss_writer|state|story_judge|summaries|telegram_dashboard|telegram_publisher|telegram_resend|telegram_resend_digest|telegram_smoke_test|telegram_sources)\.py|tests/(conftest|test_archive|test_cluster|test_config|test_dates|test_dedupe|test_fetch|test_main|test_normalize|test_priority|test_relevance|test_remote_api|test_rss_writer|test_state|test_story_judge|test_summaries|test_telegram_dashboard|test_telegram_publisher|test_telegram_resend_digest|test_telegram_sources)\.py)$'
               page_regex='^(\.github/workflows/build-feed\.yml|curator/daily_report\.py|tests/test_daily_report\.py|public/404\.html)$'
 
               if grep -Eq "$collection_regex" changed_files.txt; then

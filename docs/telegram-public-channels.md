@@ -15,6 +15,8 @@
 3. 최초 수집은 채널당 `backfill_limit` 기본 100개, 이후에는 `last_message_id` 이후 새 메시지만 가져옵니다.
 4. 채널 하나에서 FloodWait 또는 권한 오류가 발생해도 해당 채널만 실패 기록하고 다른 채널 수집은 계속합니다.
 
+코드 레벨에서도 수집 대상은 `username`이 있는 Telegram broadcast channel로 제한합니다. 공개 그룹, supergroup/megagroup, 개인 대화, 저장한 메시지, bot/user dialog는 `source_type`과 Telethon entity 검증에서 제외됩니다.
+
 ## 기사 매칭 기준
 
 - URL 직접 매칭: 메시지 본문 URL을 추출하고 tracking query, fragment, trailing slash 등을 정리한 뒤 기존 기사 URL과 비교합니다.
@@ -66,3 +68,54 @@ GitHub Actions에서 수집하려면 file session 대신 `TELEGRAM_SESSION_STRIN
 ```powershell
 .\.venv\Scripts\python.exe -m curator.telegram_sources import-joined --limit 500 --min-quality 60 --enable
 ```
+
+## 유사 채널 후보 발견
+
+Telethon의 `channels.GetChannelRecommendationsRequest`를 사용할 수 있는 계정/채널에서는 seed 채널 기준 유사 채널 후보를 가져올 수 있습니다. 후보는 바로 가입하지 않고 `pending` 상태로만 저장합니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m curator.telegram_sources discover --limit 20 --dry-run
+```
+
+확인 후 dry-run을 제거하면 `data/state.json`의 `telegram_channel_candidates`에 후보가 저장됩니다. 자동 입장은 `auto_join_enabled: false`가 기본값입니다.
+
+## 2주 샘플 및 6개월 백필
+
+정기 GitHub Actions는 새 메시지만 가볍게 수집하고, 과거 6개월 백필은 네트워크 여유가 있는 Windows 로컬에서 실행하는 방식을 권장합니다. 먼저 2주 샘플로 규모를 확인합니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m curator.telegram_sources backfill-messages --days 14 --channel-limit 20 --limit-per-channel 1000 --dry-run
+```
+
+DB에 실제 반영하려면 `--dry-run`을 제거합니다. 원격 DB API 동기화를 잠시 끄려면 `--no-remote`를 붙입니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m curator.telegram_sources backfill-messages --days 180 --channel-limit 0 --limit-per-channel 3000
+```
+
+출력에는 채널 수, 수집 메시지 수, 삽입/업데이트 수, 실패 채널 수, 최근 샘플 기준 일/월/연 저장량 추정치가 포함됩니다.
+
+## 운영 대시보드
+
+`curator.main`은 공개-safe 운영 점검 페이지 `public/feed/telegram-admin.html`을 생성합니다.
+
+- 수집 가능 공개 채널 수
+- enabled 채널 수와 실패 채널 수
+- 최근 24시간/14일 메시지 수
+- 기사 매칭 수
+- 채널별 최근 수집 상태
+- 메시지 유형 분포
+- 최근 14일 키워드
+- 월간/연간 DB 저장량 추정
+
+GitHub Pages가 공개 페이지이므로 비밀값, session, raw_json 전문, 관리자 쓰기 기능은 노출하지 않습니다. 채널 승인/비활성화/백필 실행은 CLI 또는 내부 API에서만 수행합니다.
+
+## 분석 활용 방향
+
+Telegram 메시지는 기사와 같은 방식의 원문 뉴스가 아니라 시장 반응 보조 신호입니다. 현재 구조에서는 다음 분석이 유용합니다.
+
+- 같은 기사 URL이 여러 채널에서 공유되는지 확인해 기사 반응도를 계산합니다.
+- 같은 키워드/종목/제도 표현이 짧은 시간 여러 채널에서 반복되는지 확인해 이슈 확산을 감지합니다.
+- URL 직접 매칭과 키워드 추정 매칭을 구분해 신뢰도를 다르게 표시합니다.
+- 채널별 품질 점수, 반복 공유 성향, 홍보성/루머성 risk flag를 누적해 source quality를 관리합니다.
+- 뉴스 중요도와 Telegram 언급량이 동시에 높아지는 경우를 핵심 이슈 후보로 올립니다.

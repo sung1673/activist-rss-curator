@@ -80,7 +80,7 @@ def save_state(path: str | Path, state: dict[str, object]) -> None:
     state_path = Path(path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = state_path.with_suffix(state_path.suffix + ".tmp")
-    with tmp_path.open("w", encoding="utf-8") as handle:
+    with tmp_path.open("w", encoding="utf-8", newline="\n") as handle:
         json.dump(state, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
     tmp_path.replace(state_path)

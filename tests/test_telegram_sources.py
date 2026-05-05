@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from conftest import make_article
@@ -10,6 +10,7 @@ from curator.state import article_record
 from curator.telegram_sources import (
     TelegramFloodWait,
     auto_join_candidates,
+    backfill_telegram_messages,
     canonicalize_telegram_url,
     collect_telegram_sources,
     extract_urls,
@@ -46,13 +47,27 @@ class FakeTelegramClient:
             "joined": True,
         }
 
-    async def iter_messages(self, channel: dict[str, object], *, min_id: int, limit: int) -> list[dict[str, object]]:
+    async def iter_messages(
+        self,
+        channel: dict[str, object],
+        *,
+        min_id: int,
+        limit: int,
+        since: datetime | None = None,
+    ) -> list[dict[str, object]]:
         handle = str(channel.get("handle") or "")
-        return [
+        messages = [
             message
             for message in self.messages_by_handle.get(handle, [])
             if int(message.get("id") or message.get("telegram_message_id") or 0) > min_id
-        ][:limit]
+        ]
+        if since is not None:
+            messages = [
+                message
+                for message in messages
+                if not isinstance(message.get("date"), datetime) or message["date"] >= since
+            ]
+        return messages[:limit]
 
     async def recommend_channels(self, seed_channel: dict[str, object], *, limit: int) -> list[dict[str, object]]:
         return [
@@ -172,6 +187,32 @@ def test_import_joined_public_channels_respects_quality_and_enable(config) -> No
     assert state["telegram_source_channels"][0]["source"] == "discovered"  # type: ignore[index]
 
 
+def test_import_joined_public_channels_keeps_only_public_channel_records(config) -> None:  # type: ignore[no-untyped-def]
+    state: dict[str, object] = {}
+    client = FakeTelegramClient(
+        joined_channels=[
+            {
+                "handle": "good_stock_news",
+                "title": "경제 증권 주식 뉴스",
+                "source_type": "public_channel",
+                "is_public_channel": True,
+            },
+            {
+                "handle": "public_stock_group",
+                "title": "공개 주식 토론방",
+                "source_type": "public_group",
+                "is_public_channel": False,
+            },
+        ]
+    )
+
+    summary = import_joined_public_channels(state, config, client=client, enable=True)
+
+    assert summary["telegram_joined_seen"] == 2
+    assert summary["telegram_joined_imported"] == 1
+    assert state["telegram_source_channels"][0]["handle"] == "good_stock_news"  # type: ignore[index]
+
+
 def test_floodwait_marks_channel_failure_and_continues(config, now) -> None:  # type: ignore[no-untyped-def]
     config["telegram_sources"] = {  # type: ignore[index]
         "enabled": True,
@@ -188,6 +229,30 @@ def test_floodwait_marks_channel_failure_and_continues(config, now) -> None:  # 
     assert summary["telegram_messages_inserted"] == 1
     failed_channel = next(channel for channel in state["telegram_source_channels"] if channel["handle"] == "slow")  # type: ignore[index]
     assert failed_channel["last_error"] == "flood_wait_42s"
+
+
+def test_backfill_messages_filters_by_window_and_estimates_growth(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["telegram_sources"] = {  # type: ignore[index]
+        "enabled": True,
+        "channels": [{"handle": "marketnews"}],
+        "weak_match_min_overlap": 2,
+        "weak_match_limit_per_message": 5,
+    }
+    state = {"articles": []}
+    client = FakeTelegramClient(
+        {
+            "marketnews": [
+                {"id": 1, "text": "오래된 메시지", "date": now - timedelta(days=10)},
+                {"id": 2, "text": "최근 메시지", "date": now},
+            ]
+        }
+    )
+
+    summary = backfill_telegram_messages(state, config, now, days=3, limit_per_channel=100, client=client, sync_remote=False)
+
+    assert summary["telegram_backfill_messages_seen"] == 1
+    assert summary["telegram_messages_inserted"] == 1
+    assert summary["telegram_estimated_daily_messages"] > 0
 
 
 def test_deleted_message_marking(now) -> None:  # type: ignore[no-untyped-def]

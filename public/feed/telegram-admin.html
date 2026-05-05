@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Telegram 수집 운영 대시보드 | BSIDE Daily News</title>
+  <style>
+    :root { --ink:#171321; --muted:#6d6478; --accent:#6f35e8; --line:#ded7ec; --soft:#f6f1ff; --paper:#fff; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Arial, "Noto Sans KR", sans-serif; color:var(--ink); background:#fbf9ff; }
+    main { max-width:1120px; margin:0 auto; padding:28px 22px 56px; }
+    header { display:flex; justify-content:space-between; gap:20px; align-items:flex-start; border-bottom:2px solid var(--ink); padding-bottom:18px; }
+    h1 { margin:20px 0 8px; font-family:Georgia, "Times New Roman", serif; font-size:42px; letter-spacing:0; }
+    h2 { margin:30px 0 12px; font-size:20px; }
+    p { color:var(--muted); line-height:1.6; }
+    a { color:var(--accent); }
+    .brand { color:var(--accent); font-size:34px; font-weight:800; letter-spacing:-1px; text-decoration:none; }
+    .brand span { font-size:12px; letter-spacing:2px; margin-left:8px; }
+    .stats { display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin:22px 0; }
+    .stat { border:1px solid var(--line); background:var(--paper); padding:14px; min-height:96px; }
+    .stat strong { display:block; font-size:25px; color:var(--accent); }
+    .stat p { margin:8px 0 0; color:var(--ink); font-weight:700; }
+    .stat span { color:var(--muted); font-size:12px; }
+    .grid { display:grid; grid-template-columns:1.1fr .9fr; gap:20px; }
+    table { width:100%; border-collapse:collapse; background:var(--paper); border:1px solid var(--line); }
+    th, td { border-bottom:1px solid var(--line); padding:9px 10px; text-align:left; font-size:13px; vertical-align:top; }
+    th { color:var(--accent); background:var(--soft); }
+    .chips { display:flex; flex-wrap:wrap; gap:8px; }
+    .chips span { border:1px solid var(--line); border-radius:999px; padding:7px 10px; background:var(--paper); font-size:13px; }
+    .types { list-style:none; padding:0; margin:0; border:1px solid var(--line); background:var(--paper); }
+    .types li { display:flex; justify-content:space-between; padding:10px 12px; border-bottom:1px solid var(--line); }
+    .bars { border:1px solid var(--line); background:var(--paper); padding:12px; }
+    .bars div { display:grid; grid-template-columns:88px minmax(20px,1fr) 44px; gap:8px; align-items:center; margin:6px 0; font-size:12px; }
+    .bars b { display:block; height:8px; border-radius:99px; background:var(--accent); }
+    .note { border-left:4px solid var(--accent); background:var(--soft); padding:12px 14px; }
+    @media (max-width:900px) { .stats { grid-template-columns:repeat(2,1fr); } .grid { grid-template-columns:1fr; } h1 { font-size:32px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <a class="brand" href="https://bside.ai">bside<span>DAILY NEWS</span></a>
+    <p>2026-05-05T11:52:17.427823+09:00</p>
+  </header>
+  <h1>Telegram 수집 운영 대시보드</h1>
+  <p>공개 broadcast 채널만 대상으로 수집 상태, 메시지 유형, 기사 매칭, 후보 채널과 저장량 추정치를 확인합니다. 개인 대화, 저장한 메시지, 그룹 대화는 수집 대상에서 제외됩니다.</p>
+  <section class="stats"><article class="stat"><strong>32</strong><p>수집 가능 공개 채널</p><span>enabled 32</span></article>
+<article class="stat"><strong>175</strong><p>최근 24시간 메시지</p></article>
+<article class="stat"><strong>268</strong><p>최근 14일 메시지</p></article>
+<article class="stat"><strong>134</strong><p>기사 매칭</p></article>
+<article class="stat"><strong>0</strong><p>추천 후보</p><span>pending 0</span></article>
+<article class="stat"><strong>574건</strong><p>월간 예상</p><span>0.71 MB</span></article></section>
+  <section class="grid">
+    <div>
+      <h2>채널별 수집 상태</h2>
+      <table>
+        <thead><tr><th>Handle</th><th>Title</th><th>Quality</th><th>Messages</th><th>Latest</th><th>Error</th></tr></thead>
+        <tbody><tr><td>@mk81_koreainvestment</td><td>한국투자증권/기관영업부/이민근</td><td>62</td><td>98</td><td>2026-05-05T01:19:30+00:00</td><td></td></tr>
+<tr><td>@sedaily_industry_company</td><td>산업뉴스 채널_서울경제</td><td>68</td><td>87</td><td>2026-05-05T02:39:29+00:00</td><td></td></tr>
+<tr><td>@sedaily_issue_trend</td><td>사회·이슈 채널_서울경제</td><td>62</td><td>83</td><td>2026-05-05T02:45:31+00:00</td><td></td></tr>
+<tr><td>@GoUpstock</td><td>오를주식(GoUp)📈 - 뉴스/정보/주식/경제/정치/코인</td><td>68</td><td>0</td><td></td><td></td></tr>
+<tr><td>@companyreport</td><td>[주식] 증권사 리포트</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@moneythemestock</td><td>머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@darthacking</td><td>AWAKE - 실시간 주식 공시 정리채널</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@sedaily_worldwide_news</td><td>국제뉴스 채널_서울경제</td><td>68</td><td>0</td><td></td><td></td></tr>
+<tr><td>@realtime_stock_news</td><td>실시간 주식 뉴스</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@stock_messenger</td><td>⚡️번개맞은뉴스 - 상위2% 주식텔레그램 채널</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@kwusa</td><td>키움증권 미국주식 톡톡</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@valjuman</td><td>지엘리서치 GL RESEARCH_ 주식, 경제, 독립리서치</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@yakjangsu</td><td>미국 제약-바이오 주식/약장수</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@rassiro_channel</td><td>씽크풀-주식투자속보(구 AI라씨로)</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@rassiro_gongsi</td><td>씽크풀-실시간 실적분석(구 AI라씨로)</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@maindisclosurenews</td><td>주요공시 알리미</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@globalequity1</td><td>LS증권/글로벌주식영업팀</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@bdragon0808</td><td>한양증권 제약/바이오 오병용</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@kisthemacro</td><td>[한국투자증권] 경제/채권/자산배분/크레딧 Macro팀</td><td>68</td><td>0</td><td></td><td></td></tr>
+<tr><td>@kmj_retailcosmetics</td><td>[한투증권 김명주] 유통/화장품</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@hanaglobalbottomup</td><td>[하나증권 해외주식분석]</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@hyundaiindustirial</td><td>현대차증권 철강/비철금속</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@lim_econ</td><td>한화투자증권 경제 임혜윤</td><td>62</td><td>0</td><td></td><td></td></tr>
+<tr><td>@chinaitev</td><td>[한투증권 이동연] 글로벌 기업(IT S/W)</td><td>62</td><td>0</td><td></td><td></td></tr></tbody>
+      </table>
+    </div>
+    <div>
+      <h2>메시지 유형</h2>
+      <ul class="types"><li><b>기타</b><span>233건</span></li>
+<li><b>매크로·해외</b><span>20건</span></li>
+<li><b>실적</b><span>14건</span></li>
+<li><b>공시·규제</b><span>1건</span></li></ul>
+      <h2>최근 14일 키워드</h2>
+      <div class="chips"><span>https <b>178</b></span>
+<span>www <b>176</b></span>
+<span>com <b>173</b></span>
+<span>sedaily <b>170</b></span>
+<span>article <b>170</b></span>
+<span>프리미엄 <b>164</b></span>
+<span>컨버전스 <b>161</b></span>
+<span>미디어 <b>136</b></span>
+<span>시그널 <b>105</b></span>
+<span>signal <b>60</b></span>
+<span>투자의 <b>37</b></span>
+<span>바른 <b>14</b></span>
+<span>판매 <b>10</b></span>
+<span>대비 <b>9</b></span>
+<span>어린이날 <b>9</b></span>
+<span>ai <b>9</b></span>
+<span>전년 <b>8</b></span>
+<span>뉴욕 <b>8</b></span>
+<span>4월 <b>7</b></span>
+<span>최대 <b>7</b></span>
+<span>비율 <b>7</b></span>
+<span>속보 <b>7</b></span>
+<span>화재 <b>7</b></span>
+<span>미국 <b>7</b></span></div>
+    </div>
+  </section>
+  <section class="grid">
+    <div>
+      <h2>일별 수집량</h2>
+      <div class="bars"><div><span>2026-04-22</span><b style="width:16.4%"></b><em>20</em></div>
+<div><span>2026-04-23</span><b style="width:13.1%"></b><em>16</em></div>
+<div><span>2026-04-24</span><b style="width:5.7%"></b><em>7</em></div>
+<div><span>2026-04-25</span><b style="width:0.8%"></b><em>1</em></div>
+<div><span>2026-04-26</span><b style="width:4.1%"></b><em>5</em></div>
+<div><span>2026-04-27</span><b style="width:6.6%"></b><em>8</em></div>
+<div><span>2026-04-28</span><b style="width:4.9%"></b><em>6</em></div>
+<div><span>2026-04-29</span><b style="width:7.4%"></b><em>9</em></div>
+<div><span>2026-04-30</span><b style="width:6.6%"></b><em>8</em></div>
+<div><span>2026-05-02</span><b style="width:0.8%"></b><em>1</em></div>
+<div><span>2026-05-04</span><b style="width:100.0%"></b><em>122</em></div>
+<div><span>2026-05-05</span><b style="width:53.3%"></b><em>65</em></div></div>
+    </div>
+    <div>
+      <h2>분석 제안</h2>
+      <div class="note">
+        <p>URL 직접 공유는 기사 반응도, 키워드 반복 언급은 시장 관심도, 여러 채널 동시 언급은 이슈 확산 신호로 해석할 수 있습니다.</p>
+        <p>추천 후보는 바로 가입하지 않고 pending 상태로 유지한 뒤, 운영자가 품질 점수와 제목을 보고 승인하는 방식이 안전합니다.</p>
+      </div>
+    </div>
+  </section>
+  <section>
+    <h2>기사-텔레그램 이슈 신호</h2>
+    <table>
+      <thead><tr><th>Article</th><th>Messages</th><th>Channels</th><th>Keywords</th><th>Risk flags</th></tr></thead>
+      <tbody><tr><td>7aa27936e520878cfb602a69</td><td>8</td><td>3</td><td>바른, 프리미엄, 합니다, 함께, 시그널</td><td>promotional</td></tr>
+<tr><td>e81224f1113b8c21d33bdd90</td><td>6</td><td>2</td><td>구조, 상승, 바른, 프리미엄, 성과급</td><td>promotional</td></tr>
+<tr><td>10e752a3cb365e05c87c28cf</td><td>5</td><td>2</td><td>외환시장에서, 미국과, 바른, 프리미엄, 성과급</td><td>promotional</td></tr>
+<tr><td>84d2560e2999d203149f0726</td><td>4</td><td>2</td><td>합니다, 바른, 함께, 프리미엄, 시그널</td><td></td></tr>
+<tr><td>3f7301e2136011d80607e1bb</td><td>4</td><td>2</td><td>미국과, 달러화의, 호르무즈, 합니다, 바른</td><td>promotional</td></tr>
+<tr><td>7ab948725050d0e586079dd3</td><td>3</td><td>2</td><td>바른, 프리미엄, 합니다, 감소, 시그널</td><td></td></tr>
+<tr><td>7a75f77cbffae4059831cd64</td><td>3</td><td>2</td><td>바른, 프리미엄, 합니다, 하락, 시그널</td><td></td></tr>
+<tr><td>78fd9476597709aca3d31e35</td><td>2</td><td>2</td><td>바른, 프리미엄, 붕괴, 공공기관, 가는</td><td></td></tr>
+<tr><td>596662c6fbd4da79f45f9d6d</td><td>2</td><td>2</td><td>합니다, 바른, 함께, 프리미엄, 한국gm</td><td></td></tr>
+<tr><td>0734c2fb5dc076ef9e3e7354</td><td>2</td><td>2</td><td>바른, 고위험, 프리미엄, 전원체계, 분만실</td><td></td></tr>
+<tr><td>7a3cd30d2b9cacbdb0164d16</td><td>2</td><td>2</td><td>바른, 고위험, 프리미엄, 전원체계, 분만실</td><td></td></tr>
+<tr><td>8ad24c4c18160ccd9514bedd</td><td>2</td><td>2</td><td>바른, 프리미엄, 성과급, 취약층, 컨버전스</td><td></td></tr></tbody>
+    </table>
+  </section>
+</main>
+</body>
+</html>

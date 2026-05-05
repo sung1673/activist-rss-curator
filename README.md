@@ -98,7 +98,7 @@ Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 
 
 데일리 HTML은 static-first로 동작하지만, `ACTIVIST_PUBLIC_API_URL`이 있으면 브라우저에서 `reports`, `latest_snapshot`, `articles` read API를 호출해 다른 일자 목록, `이슈 레이더`, 아카이브 검색, 기사별 `관련 기사 보기`를 보강합니다. `관련 기사 보기`는 현재 묶음 링크와 같은 story 또는 제목 토큰 기반 관련 기사를 한 곳에 모아 매체 확산과 최근 흐름을 보여줍니다. API가 실패해도 정적 기사 페이지는 그대로 표시됩니다.
 
-Telegram 공개 채널 기반 시장 언급 보강은 `telegram_sources.enabled`를 켰을 때만 동작합니다. MTProto 읽기 계정의 `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING`은 Secret으로만 주입하고, 수집 대상은 공개 채널만 둡니다. 수동 등록·비활성화는 `python -m curator.telegram_sources add|enable|disable|list`로 관리할 수 있습니다. 이미 읽기 계정이 가입한 공개 채널은 `python -m curator.telegram_sources import-joined --dry-run`으로 먼저 확인한 뒤 `--enable`로 수집 대상에 올립니다. 자세한 운영 정책은 [`docs/telegram-public-channels.md`](docs/telegram-public-channels.md)를 참고합니다.
+Telegram 공개 채널 기반 시장 언급 보강은 `telegram_sources.enabled`를 켰을 때만 동작합니다. MTProto 읽기 계정의 `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING`은 Secret으로만 주입하고, 수집 대상은 username이 있는 공개 broadcast 채널로 제한합니다. 수동 등록·비활성화는 `python -m curator.telegram_sources add|enable|disable|list`로 관리할 수 있습니다. 이미 읽기 계정이 가입한 공개 채널은 `python -m curator.telegram_sources import-joined --dry-run`으로 먼저 확인한 뒤 `--enable`로 수집 대상에 올립니다. 유사 채널 후보는 `discover`로 pending 후보에만 저장하고 자동 입장은 기본 비활성화입니다. 과거 수집은 Windows 로컬에서 `backfill-messages --days 180`로 실행할 수 있으며, 운영 점검용 공개-safe 페이지는 `/feed/telegram-admin.html`에 생성됩니다. 자세한 운영 정책은 [`docs/telegram-public-channels.md`](docs/telegram-public-channels.md)를 참고합니다.
 
 `config.yaml`에는 공개 가능한 Google News 보조 RSS를 두 축으로 추가할 수 있습니다.
 
@@ -213,7 +213,7 @@ news CNAME <owner>.github.io
 
 GitHub Actions 기반 Pages 배포에서는 GitHub Pages Settings의 Custom domain과 DNS가 기준입니다. 이 저장소는 배포 산출물에 `public/CNAME`도 함께 포함해 `news.bside.ai` 설정이 유지되도록 합니다. DNS 전파와 HTTPS 인증서 발급에는 시간이 걸릴 수 있으며, 가능하면 GitHub 계정에서 `bside.ai` 도메인을 먼저 verify 해 두는 것을 권장합니다.
 
-공개 repo에는 bot token, API key, 비공개 채널 ID, PHP API secret, DB 비밀번호 같은 값을 커밋하지 않습니다. 이 프로젝트는 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `CURATOR_FEEDS`, `ACTIVIST_API_URL`, `ACTIVIST_API_SECRET`을 GitHub Actions Secrets에서만 읽도록 운영합니다. `public/`과 `data/state.json`에는 공개 가능한 기사 URL, 제목, 처리 상태만 남는 구조를 유지합니다.
+공개 repo에는 bot token, API key, 비공개 채널 ID, PHP API secret, DB 비밀번호 같은 값을 커밋하지 않습니다. 이 프로젝트는 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `CURATOR_FEEDS`, `ACTIVIST_API_URL`, `ACTIVIST_API_SECRET`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING`을 GitHub Actions Secrets에서만 읽도록 운영합니다. `public/`과 `data/state.json`에는 공개 가능한 기사 URL, 제목, 처리 상태, 공개 Telegram 채널의 메시지 메타데이터만 남는 구조를 유지합니다.
 
 ## rss2tg_bot 등록
 
