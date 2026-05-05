@@ -128,6 +128,17 @@ DB에 실제 반영하려면 `--dry-run`을 제거합니다. 원격 DB API 동�
 .\.venv\Scripts\python.exe -m curator.telegram_sources stats
 ```
 
+특정 채널만 다시 확인하려면 `--only-handles`를 사용합니다. 메시지가 0건인 채널도 `last_collected_at`이 있으면 처리 완료로 봅니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m curator.telegram_sources backfill-messages `
+  --days 180 `
+  --limit-per-channel 1000 `
+  --only-handles GoUpstock `
+  --timeout-per-channel 90 `
+  --workers 1
+```
+
 이미 로컬 `data/state.json`에 쌓인 메시지를 원격 API로 다시 밀어 넣을 때는 아래 명령을 사용합니다.
 
 ```powershell

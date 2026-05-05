@@ -1431,6 +1431,7 @@ async def _backfill_messages_with_client(
     limit_per_channel: int,
     channel_limit: int,
     progress: bool = False,
+    only_handles: set[str] | None = None,
     skip_handles: set[str] | None = None,
     start_after_handle: str = "",
     max_messages: int = 0,
@@ -1441,6 +1442,13 @@ async def _backfill_messages_with_client(
     channel_timeout = max(5.0, float(settings.get("backfill_channel_timeout_seconds", 60)))
     since = now - timedelta(days=max(1, days))
     channels = enabled_channels(state)
+    only_handles = only_handles or set()
+    if only_handles:
+        channels = [
+            channel
+            for channel in channels
+            if normalize_channel_handle(channel.get("handle") or channel.get("username")) in only_handles
+        ]
     skip_handles = skip_handles or set()
     if skip_handles:
         channels = [
@@ -1645,6 +1653,7 @@ def backfill_telegram_messages(
     client: TelegramMessageClient | None = None,
     sync_remote: bool = True,
     progress: bool = False,
+    only_handles: set[str] | None = None,
     skip_handles: set[str] | None = None,
     start_after_handle: str = "",
     max_messages: int = 0,
@@ -1667,6 +1676,7 @@ def backfill_telegram_messages(
                     limit_per_channel=limit_per_channel,
                     channel_limit=channel_limit,
                     progress=progress,
+                    only_handles=only_handles,
                     skip_handles=skip_handles,
                     start_after_handle=start_after_handle,
                     max_messages=max_messages,
@@ -1685,6 +1695,7 @@ def backfill_telegram_messages(
                 limit_per_channel=limit_per_channel,
                 channel_limit=channel_limit,
                 progress=progress,
+                only_handles=only_handles,
                 skip_handles=skip_handles,
                 start_after_handle=start_after_handle,
                 max_messages=max_messages,
@@ -1745,14 +1756,19 @@ def telegram_state_stats(state: dict[str, object], config: dict[str, object]) ->
     match_types: Counter[str] = Counter(str(match.get("match_type") or "unknown") for match in matches)
     channel_rows: list[dict[str, object]] = []
     first_uncollected = ""
-    last_collected = ""
+    last_processed = ""
+    uncollected_handles: list[str] = []
     for index, channel in enumerate(channels, start=1):
         handle = normalize_channel_handle(channel.get("handle") or channel.get("username"))
         count = int(message_counts.get(handle, 0))
-        if count > 0:
-            last_collected = handle
-        elif not first_uncollected:
-            first_uncollected = handle
+        collected_at = str(channel.get("last_collected_at") or "")
+        processed = bool(collected_at or count > 0)
+        if processed:
+            last_processed = handle
+        else:
+            uncollected_handles.append(handle)
+            if not first_uncollected:
+                first_uncollected = handle
         channel_rows.append(
             {
                 "index": index,
@@ -1765,7 +1781,7 @@ def telegram_state_stats(state: dict[str, object], config: dict[str, object]) ->
             }
         )
 
-    resume_after = last_collected
+    retry_handles = ",".join(uncollected_handles[:10])
     return {
         "telegram_channels_enabled": len(channels),
         "telegram_messages": len(messages),
@@ -1773,12 +1789,14 @@ def telegram_state_stats(state: dict[str, object], config: dict[str, object]) ->
         "telegram_match_types": dict(match_types),
         "telegram_source_runs": len([run for run in state.get("telegram_source_runs", []) if isinstance(run, dict)]),
         "first_uncollected_handle": first_uncollected,
-        "resume_after_handle": resume_after,
+        "uncollected_handles": uncollected_handles,
+        "last_processed_handle": last_processed,
+        "resume_after_handle": last_processed,
         "next_backfill_command": (
             ".\\.venv\\Scripts\\python.exe -m curator.telegram_sources backfill-messages "
-            f"--days 180 --limit-per-channel 1000 --start-after {resume_after} "
-            "--timeout-per-channel 90 --max-messages 5000"
-            if resume_after
+            f"--days 180 --limit-per-channel 1000 --only-handles {retry_handles} "
+            "--timeout-per-channel 90 --workers 3"
+            if retry_handles
             else ""
         ),
         "channels": channel_rows,
@@ -1870,6 +1888,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     backfill_parser.add_argument("--days", type=int, default=14, help="How many days back to collect")
     backfill_parser.add_argument("--limit-per-channel", type=int, default=1000, help="Maximum messages to scan per channel")
     backfill_parser.add_argument("--channel-limit", type=int, default=0, help="Limit number of enabled channels, 0 means all")
+    backfill_parser.add_argument("--only-handles", default="", help="Comma/space separated channel handles to include, empty means all")
     backfill_parser.add_argument("--skip-handles", default="", help="Comma/space separated channel handles to skip")
     backfill_parser.add_argument("--start-after", default="", help="Resume after this channel handle in the enabled-channel order")
     backfill_parser.add_argument("--max-messages", type=int, default=0, help="Stop after this many messages across all channels, 0 means unlimited")
@@ -2018,6 +2037,7 @@ def cli_main(argv: list[str] | None = None) -> int:
             channel_limit=max(0, int(args.channel_limit)),
             sync_remote=not args.dry_run and not args.no_remote,
             progress=True,
+            only_handles=parse_handle_list(args.only_handles),
             skip_handles=parse_handle_list(args.skip_handles),
             start_after_handle=args.start_after,
             max_messages=max(0, int(args.max_messages)),

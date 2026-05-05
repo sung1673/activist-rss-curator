@@ -363,8 +363,54 @@ def test_telegram_state_stats_suggests_resume_after_last_collected(config, now) 
     stats = telegram_state_stats(state, config)
 
     assert stats["telegram_channels_enabled"] == 3
-    assert stats["resume_after_handle"] == "second"
-    assert "--start-after second" in stats["next_backfill_command"]
+    assert stats["last_processed_handle"] == "second"
+    assert stats["first_uncollected_handle"] == "third"
+    assert stats["uncollected_handles"] == ["third"]
+    assert "--only-handles third" in stats["next_backfill_command"]
+
+
+def test_telegram_state_stats_treats_zero_message_collected_channel_as_processed(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["telegram_sources"] = {
+        "enabled": True,
+        "channels": [{"handle": "empty"}],
+    }  # type: ignore[index]
+    state = {
+        "telegram_source_channels": [{"handle": "empty", "enabled": True, "last_collected_at": now.isoformat()}],
+    }
+
+    stats = telegram_state_stats(state, config)
+
+    assert stats["first_uncollected_handle"] == ""
+    assert stats["next_backfill_command"] == ""
+
+
+def test_backfill_messages_only_handles_limits_collection(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["telegram_sources"] = {  # type: ignore[index]
+        "enabled": True,
+        "channels": [{"handle": "first"}, {"handle": "second"}],
+    }
+    state = {"articles": []}
+    client = FakeTelegramClient(
+        {
+            "first": [{"id": 1, "text": "첫 채널", "date": now}],
+            "second": [{"id": 2, "text": "둘째 채널", "date": now}],
+        }
+    )
+
+    summary = backfill_telegram_messages(
+        state,
+        config,
+        now,
+        days=3,
+        limit_per_channel=100,
+        client=client,
+        sync_remote=False,
+        only_handles={"second"},
+    )
+
+    assert summary["telegram_backfill_channels"] == 1
+    assert summary["telegram_backfill_messages_seen"] == 1
+    assert state["telegram_source_messages"][0]["handle"] == "second"  # type: ignore[index]
 
 
 def test_deleted_message_marking(now) -> None:  # type: ignore[no-untyped-def]
