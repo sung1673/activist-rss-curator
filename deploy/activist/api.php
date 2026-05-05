@@ -487,6 +487,205 @@ function public_telegram_message(array $row): array {
     );
 }
 
+function scalar_int(PDO $pdo, string $sql, array $params = array()): int {
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return (int)$stmt->fetchColumn();
+}
+
+function telegram_dashboard_message_type(string $text): string {
+    $lower = mb_strtolower($text, 'UTF-8');
+    if (preg_match('/공시|불성실공시|거래정지|상장폐지|정정신고서/u', $lower) === 1) {
+        return '공시·규제';
+    }
+    if (preg_match('/실적|매출|영업이익|컨센서스|가이던스/u', $lower) === 1) {
+        return '실적';
+    }
+    if (preg_match('/주주|행동주의|경영권|위임장|공개매수|이사회/u', $lower) === 1) {
+        return '주주·지배구조';
+    }
+    if (preg_match('/밸류업|벨류업|배당|자사주|주주환원/u', $lower) === 1) {
+        return '밸류업·환원';
+    }
+    if (preg_match('/환율|채권|금리|fed|미국|중국|일본/u', $lower) === 1) {
+        return '매크로·해외';
+    }
+    return '기타';
+}
+
+function telegram_dashboard_tokens(string $text): array {
+    $stopwords = array(
+        '그리고' => true, '관련' => true, '기사' => true, '뉴스' => true, '시장' => true,
+        '오늘' => true, '이번' => true, '지난' => true, '있는' => true, '없는' => true,
+        '으로' => true, '에서' => true, '한다' => true, '했다' => true, '합니다' => true,
+        '보도' => true, '공유' => true, 'https' => true, 'http' => true, 'www' => true,
+    );
+    preg_match_all('/[0-9A-Za-z가-힣·.\-]{2,}/u', mb_strtolower($text, 'UTF-8'), $matches);
+    $tokens = array();
+    foreach ($matches[0] as $token) {
+        $token = trim((string)$token, ".-_·");
+        if ($token === '' || isset($stopwords[$token]) || mb_strlen($token, 'UTF-8') < 2) {
+            continue;
+        }
+        $tokens[] = mb_substr($token, 0, 40, 'UTF-8');
+    }
+    return array_slice(array_values(array_unique($tokens)), 0, 24);
+}
+
+function public_telegram_signal(array $row): array {
+    $payload = decode_json_array(isset($row['payload_json']) ? (string)$row['payload_json'] : null);
+    $messages = array();
+    foreach ((isset($payload['top_related_messages']) && is_array($payload['top_related_messages'])) ? $payload['top_related_messages'] : array() as $message) {
+        if (!is_array($message)) {
+            continue;
+        }
+        $messages[] = array(
+            'channel_title' => isset($message['channel_title']) ? (string)$message['channel_title'] : '',
+            'channel_handle' => isset($message['channel_handle']) ? (string)$message['channel_handle'] : '',
+            'posted_at' => isset($message['posted_at']) ? (string)$message['posted_at'] : '',
+            'message_url' => isset($message['message_url']) ? (string)$message['message_url'] : '',
+            'excerpt' => text_excerpt(isset($message['excerpt']) ? (string)$message['excerpt'] : '', 140),
+            'views' => isset($message['views']) ? (int)$message['views'] : 0,
+            'forwards' => isset($message['forwards']) ? (int)$message['forwards'] : 0,
+        );
+    }
+    return array(
+        'article_id' => isset($row['article_id']) ? (string)$row['article_id'] : '',
+        'signal_type' => isset($payload['signal_type']) ? (string)$payload['signal_type'] : 'article_match',
+        'signal_title' => isset($payload['signal_title']) ? text_excerpt((string)$payload['signal_title'], 120) : (isset($row['article_id']) ? (string)$row['article_id'] : ''),
+        'related_telegram_count' => isset($row['related_telegram_count']) ? (int)$row['related_telegram_count'] : 0,
+        'related_telegram_channels_count' => isset($row['related_telegram_channels_count']) ? (int)$row['related_telegram_channels_count'] : 0,
+        'first_seen_at' => isset($row['first_seen_at']) ? (string)$row['first_seen_at'] : '',
+        'latest_seen_at' => isset($row['latest_seen_at']) ? (string)$row['latest_seen_at'] : '',
+        'confidence_score' => isset($row['confidence_score']) ? (float)$row['confidence_score'] : 0,
+        'top_channels' => (isset($payload['top_channels']) && is_array($payload['top_channels'])) ? array_slice($payload['top_channels'], 0, 8) : array(),
+        'top_keywords' => (isset($payload['top_keywords']) && is_array($payload['top_keywords'])) ? array_slice($payload['top_keywords'], 0, 8) : array(),
+        'risk_flags' => (isset($payload['risk_flags']) && is_array($payload['risk_flags'])) ? array_slice($payload['risk_flags'], 0, 8) : array(),
+        'top_related_messages' => array_slice($messages, 0, 5),
+    );
+}
+
+function handle_telegram_dashboard(PDO $pdo, array $config): void {
+    $channels = table_name($config, 'telegram_channels');
+    $messages = table_name($config, 'telegram_messages');
+    $matches = table_name($config, 'telegram_article_matches');
+    $signals = table_name($config, 'telegram_issue_signals');
+    $referenceSql = '(SELECT COALESCE(MAX(posted_at), NOW()) FROM ' . $messages . ' WHERE deleted_at IS NULL)';
+
+    $counts = array(
+        'channels_total' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $channels),
+        'channels_collectable' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $channels . ' WHERE is_public_channel = 1'),
+        'channels_enabled' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $channels . ' WHERE is_public_channel = 1 AND enabled = 1'),
+        'channels_failed' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $channels . ' WHERE is_public_channel = 1 AND enabled = 1 AND last_error IS NOT NULL AND last_error <> ""'),
+        'messages_total' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $messages . ' WHERE deleted_at IS NULL'),
+        'messages_24h' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $messages . ' WHERE deleted_at IS NULL AND posted_at >= DATE_SUB(' . $referenceSql . ', INTERVAL 24 HOUR)'),
+        'messages_14d' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $messages . ' WHERE deleted_at IS NULL AND posted_at >= DATE_SUB(' . $referenceSql . ', INTERVAL 14 DAY)'),
+        'matches_total' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $matches),
+        'signals_total' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $signals),
+    );
+
+    $stmt = $pdo->prepare(
+        'SELECT c.handle, c.title, c.quality_score, c.enabled, c.last_error, c.last_collected_at, c.last_message_id, '
+        . 'COUNT(m.message_key) AS messages, MAX(m.posted_at) AS latest_at '
+        . 'FROM ' . $channels . ' c '
+        . 'LEFT JOIN ' . $messages . ' m ON m.channel_handle = c.handle AND m.deleted_at IS NULL '
+        . 'WHERE c.is_public_channel = 1 '
+        . 'GROUP BY c.handle, c.title, c.quality_score, c.enabled, c.last_error, c.last_collected_at, c.last_message_id '
+        . 'ORDER BY messages DESC, latest_at DESC, c.quality_score DESC LIMIT 40'
+    );
+    $stmt->execute();
+    $topChannels = array();
+    foreach ($stmt->fetchAll() as $row) {
+        $topChannels[] = array(
+            'handle' => (string)$row['handle'],
+            'title' => (string)($row['title'] ?: $row['handle']),
+            'quality_score' => (int)$row['quality_score'],
+            'enabled' => (int)$row['enabled'],
+            'messages' => (int)$row['messages'],
+            'latest_at' => (string)($row['latest_at'] ?: ''),
+            'last_collected_at' => (string)($row['last_collected_at'] ?: ''),
+            'last_message_id' => (int)$row['last_message_id'],
+            'last_error' => (string)($row['last_error'] ?: ''),
+        );
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT DATE(posted_at) AS day_key, COUNT(*) AS count_value FROM ' . $messages
+        . ' WHERE deleted_at IS NULL AND posted_at >= DATE_SUB(' . $referenceSql . ', INTERVAL 21 DAY) '
+        . 'GROUP BY DATE(posted_at) ORDER BY day_key ASC'
+    );
+    $stmt->execute();
+    $dayCounts = array();
+    foreach ($stmt->fetchAll() as $row) {
+        $dayCounts[] = array((string)$row['day_key'], (int)$row['count_value']);
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT text, normalized_text FROM ' . $messages
+        . ' WHERE deleted_at IS NULL AND posted_at >= DATE_SUB(' . $referenceSql . ', INTERVAL 14 DAY) '
+        . 'ORDER BY posted_at DESC LIMIT 10000'
+    );
+    $stmt->execute();
+    $typeCounts = array();
+    $keywordCounts = array();
+    $bytes = 0;
+    $sampleCount = 0;
+    foreach ($stmt->fetchAll() as $row) {
+        $text = (string)($row['normalized_text'] ?: $row['text'] ?: '');
+        $type = telegram_dashboard_message_type($text);
+        $typeCounts[$type] = isset($typeCounts[$type]) ? $typeCounts[$type] + 1 : 1;
+        foreach (telegram_dashboard_tokens($text) as $token) {
+            $keywordCounts[$token] = isset($keywordCounts[$token]) ? $keywordCounts[$token] + 1 : 1;
+        }
+        if ($sampleCount < 500) {
+            $bytes += strlen($text);
+            $sampleCount++;
+        }
+    }
+    arsort($typeCounts);
+    arsort($keywordCounts);
+
+    $stmt = $pdo->prepare(
+        'SELECT article_id, related_telegram_count, related_telegram_channels_count, first_seen_at, latest_seen_at, confidence_score, payload_json '
+        . 'FROM ' . $signals . ' ORDER BY confidence_score DESC, related_telegram_channels_count DESC, related_telegram_count DESC LIMIT 20'
+    );
+    $stmt->execute();
+    $signalRows = array();
+    foreach ($stmt->fetchAll() as $row) {
+        $signalRows[] = public_telegram_signal($row);
+    }
+
+    $dailyMessages = $counts['messages_14d'] > 0 ? $counts['messages_14d'] / 14 : 0;
+    $avgBytes = $sampleCount > 0 ? max(1, (int)round($bytes / $sampleCount)) : 0;
+    respond(200, array(
+        'ok' => true,
+        'generated_at' => gmdate('c'),
+        'source' => 'db',
+        'counts' => $counts,
+        'top_channels' => $topChannels,
+        'type_counts' => array_map(
+            function ($label, $count) { return array('label' => (string)$label, 'count' => (int)$count); },
+            array_keys($typeCounts),
+            array_values($typeCounts)
+        ),
+        'day_counts' => $dayCounts,
+        'top_keywords' => array_map(
+            function ($label, $count) { return array('label' => (string)$label, 'count' => (int)$count); },
+            array_slice(array_keys($keywordCounts), 0, 30),
+            array_slice(array_values($keywordCounts), 0, 30)
+        ),
+        'signals' => $signalRows,
+        'growth' => array(
+            'avg_message_bytes' => $avgBytes,
+            'daily_messages' => round($dailyMessages, 1),
+            'monthly_messages' => (int)round($dailyMessages * 30),
+            'yearly_messages' => (int)round($dailyMessages * 365),
+            'monthly_mb' => $avgBytes ? round($dailyMessages * 30 * $avgBytes / 1024 / 1024, 2) : 0,
+            'yearly_mb' => $avgBytes ? round($dailyMessages * 365 * $avgBytes / 1024 / 1024, 2) : 0,
+        ),
+    ));
+}
+
 function handle_write(string $action, array $config): void {
     $allowed = array('upsert_snapshot', 'upsert_report', 'upsert_telegram_snapshot', 'schema');
     if (!in_array($action, $allowed, true)) {
@@ -925,11 +1124,14 @@ function handle_read(string $action, array $config): void {
     if ($action === 'health') {
         respond(200, array('ok' => true, 'service' => 'activist', 'time' => gmdate('c')));
     }
-    if (!in_array($action, array('reports', 'report', 'latest_snapshot', 'articles', 'telegram_reactions'), true)) {
+    if (!in_array($action, array('reports', 'report', 'latest_snapshot', 'articles', 'telegram_reactions', 'telegram_dashboard'), true)) {
         respond(404, array('ok' => false, 'error' => 'unknown_action'));
     }
     $pdo = pdo_conn($config);
     ensure_schema($pdo, $config);
+    if ($action === 'telegram_dashboard') {
+        handle_telegram_dashboard($pdo, $config);
+    }
     if ($action === 'reports') {
         $limit = isset($_GET['limit']) ? max(1, min(60, (int)$_GET['limit'])) : 20;
         $stmt = $pdo->prepare('SELECT date_id, title, start_at, end_at, public_url, story_count, article_count, updated_at FROM ' . table_name($config, 'reports') . ' ORDER BY date_id DESC LIMIT ' . $limit);

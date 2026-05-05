@@ -8,6 +8,7 @@ from html import escape
 from pathlib import Path
 
 from .dates import datetime_to_iso, parse_datetime
+from .remote_api import remote_api_url
 from .telegram_sources import ensure_telegram_state, is_collectable_public_channel, message_key, ordered_message_tokens, telegram_issue_signals
 
 
@@ -157,6 +158,9 @@ def _stat_card(label: str, value: object, note: str = "") -> str:
 
 def write_telegram_dashboard(project_root: Path, state: dict[str, object], config: dict[str, object], now: datetime) -> Path:
     model = telegram_dashboard_model(state, config, now)
+    api_url = remote_api_url()
+    fallback_model_json = json.dumps(model, ensure_ascii=False, separators=(",", ":"))
+    api_url_json = json.dumps(api_url, ensure_ascii=False)
     output_path = project_root / TELEGRAM_DASHBOARD_RELATIVE_PATH
     output_path.parent.mkdir(parents=True, exist_ok=True)
     stats = "\n".join(
@@ -237,6 +241,8 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
     .bars div {{ display:grid; grid-template-columns:88px minmax(20px,1fr) 44px; gap:8px; align-items:center; margin:6px 0; font-size:12px; }}
     .bars b {{ display:block; height:8px; border-radius:99px; background:var(--accent); }}
     .note {{ border-left:4px solid var(--accent); background:var(--soft); padding:12px 14px; }}
+    .status {{ display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line); border-radius:999px; padding:6px 10px; font-size:12px; color:var(--muted); background:var(--paper); }}
+    .status b {{ color:var(--accent); }}
     @media (max-width:900px) {{ .stats {{ grid-template-columns:repeat(2,1fr); }} .grid {{ grid-template-columns:1fr; }} h1 {{ font-size:32px; }} }}
   </style>
 </head>
@@ -248,26 +254,27 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
   </header>
   <h1>Telegram 수집 운영 대시보드</h1>
   <p>공개 broadcast 채널만 대상으로 수집 상태, 메시지 유형, 기사 매칭, 후보 채널과 저장량 추정치를 확인합니다. 개인 대화, 저장한 메시지, 그룹 대화는 수집 대상에서 제외됩니다.</p>
-  <section class="stats">{stats}</section>
+  <p class="status" id="data-status"><b>정적 fallback</b> DB API를 확인하는 중입니다.</p>
+  <section class="stats" id="stats">{stats}</section>
   <section class="grid">
     <div>
       <h2>채널별 수집 상태</h2>
       <table>
         <thead><tr><th>Handle</th><th>Title</th><th>Quality</th><th>Messages</th><th>Latest</th><th>Error</th></tr></thead>
-        <tbody>{channel_rows or '<tr><td colspan="6">수집 대상 채널이 아직 없습니다.</td></tr>'}</tbody>
+        <tbody id="channel-rows">{channel_rows or '<tr><td colspan="6">수집 대상 채널이 아직 없습니다.</td></tr>'}</tbody>
       </table>
     </div>
     <div>
       <h2>메시지 유형</h2>
-      <ul class="types">{type_rows or '<li><b>데이터 없음</b><span>0건</span></li>'}</ul>
+      <ul class="types" id="type-rows">{type_rows or '<li><b>데이터 없음</b><span>0건</span></li>'}</ul>
       <h2>최근 14일 키워드</h2>
-      <div class="chips">{keyword_rows or '<span>키워드 없음</span>'}</div>
+      <div class="chips" id="keyword-rows">{keyword_rows or '<span>키워드 없음</span>'}</div>
     </div>
   </section>
   <section class="grid">
     <div>
       <h2>일별 수집량</h2>
-      <div class="bars">{day_rows or '<p>아직 표시할 수집량이 없습니다.</p>'}</div>
+      <div class="bars" id="day-rows">{day_rows or '<p>아직 표시할 수집량이 없습니다.</p>'}</div>
     </div>
     <div>
       <h2>분석 제안</h2>
@@ -281,10 +288,77 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
       <h2>Telegram 이슈 신호</h2>
     <table>
       <thead><tr><th>Article</th><th>Messages</th><th>Channels</th><th>Keywords</th><th>Risk flags</th></tr></thead>
-      <tbody>{signal_rows or '<tr><td colspan="5">아직 기사와 연결된 Telegram 신호가 없습니다.</td></tr>'}</tbody>
+      <tbody id="signal-rows">{signal_rows or '<tr><td colspan="5">아직 기사와 연결된 Telegram 신호가 없습니다.</td></tr>'}</tbody>
     </table>
   </section>
 </main>
+<script>
+const fallbackModel = {fallback_model_json};
+const telegramDashboardApiUrl = {api_url_json};
+const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}}[ch]));
+const compact = (value, max = 90) => {{
+  const text = String(value ?? "").replace(/\\s+/g, " ").trim();
+  return text.length <= max ? text : `${{text.slice(0, Math.max(0, max - 1)).trim()}}…`;
+}};
+const statCard = (label, value, note = "") => `<article class="stat"><strong>${{esc(value)}}</strong><p>${{esc(label)}}</p>${{note ? `<span>${{esc(note)}}</span>` : ""}}</article>`;
+const listEntries = (items) => Array.isArray(items) ? items : Object.entries(items || {{}}).map(([label, count]) => ({{label, count}}));
+function modelFromApi(data) {{
+  const counts = data.counts || {{}};
+  return {{
+    generated_at: data.generated_at || fallbackModel.generated_at,
+    channels_collectable: counts.channels_collectable ?? fallbackModel.channels_collectable,
+    channels_enabled: counts.channels_enabled ?? fallbackModel.channels_enabled,
+    channels_failed: counts.channels_failed ?? fallbackModel.channels_failed,
+    messages_24h: counts.messages_24h ?? fallbackModel.messages_24h,
+    messages_14d: counts.messages_14d ?? fallbackModel.messages_14d,
+    matches_total: counts.matches_total ?? fallbackModel.matches_total,
+    signals_total: counts.signals_total ?? 0,
+    candidates_total: fallbackModel.candidates_total ?? 0,
+    candidate_pending: fallbackModel.candidate_pending ?? 0,
+    top_channels: data.top_channels || fallbackModel.top_channels || [],
+    type_counts: data.type_counts || fallbackModel.type_counts || [],
+    day_counts: data.day_counts || fallbackModel.day_counts || [],
+    top_keywords: data.top_keywords || fallbackModel.top_keywords || [],
+    signals: data.signals || fallbackModel.signals || [],
+    growth: data.growth || fallbackModel.growth || {{}},
+  }};
+}}
+function renderDashboard(model, sourceLabel) {{
+  const growth = model.growth || {{}};
+  document.getElementById("stats").innerHTML = [
+    statCard("수집 가능 공개 채널", model.channels_collectable, `enabled ${{model.channels_enabled ?? 0}}`),
+    statCard("최근 24시간 메시지", model.messages_24h ?? 0),
+    statCard("최근 14일 메시지", model.messages_14d ?? 0),
+    statCard("기사 매칭", model.matches_total ?? 0),
+    statCard("이슈 신호", model.signals_total ?? (model.signals || []).length),
+    statCard("월간 예상", `${{growth.monthly_messages ?? 0}}건`, `${{growth.monthly_mb ?? 0}} MB`),
+  ].join("");
+  document.getElementById("channel-rows").innerHTML = (model.top_channels || []).map((row) => `<tr><td>@${{esc(row.handle || "")}}</td><td>${{esc(compact(row.title, 42))}}</td><td>${{esc(row.quality_score || 0)}}</td><td>${{esc(row.messages || 0)}}</td><td>${{esc(row.latest_at || row.last_collected_at || "")}}</td><td>${{esc(row.last_error || "")}}</td></tr>`).join("") || '<tr><td colspan="6">수집 대상 채널이 아직 없습니다.</td></tr>';
+  document.getElementById("type-rows").innerHTML = listEntries(model.type_counts).map((row) => `<li><b>${{esc(row.label ?? row[0] ?? "")}}</b><span>${{esc(row.count ?? row[1] ?? 0)}}건</span></li>`).join("") || '<li><b>데이터 없음</b><span>0건</span></li>';
+  document.getElementById("keyword-rows").innerHTML = listEntries(model.top_keywords).slice(0, 24).map((row) => `<span>${{esc(row.label ?? row[0] ?? "")}} <b>${{esc(row.count ?? row[1] ?? 0)}}</b></span>`).join("") || '<span>키워드 없음</span>';
+  const maxDay = Math.max(1, ...(model.day_counts || []).map((row) => Number(row[1] || row.count || 0)));
+  document.getElementById("day-rows").innerHTML = (model.day_counts || []).map((row) => {{
+    const day = row[0] ?? row.day ?? "";
+    const count = Number(row[1] ?? row.count ?? 0);
+    return `<div><span>${{esc(day)}}</span><b style="width:${{Math.min(100, count * 100 / maxDay).toFixed(1)}}%"></b><em>${{count}}</em></div>`;
+  }}).join("") || '<p>아직 표시할 수집량이 없습니다.</p>';
+  document.getElementById("signal-rows").innerHTML = (model.signals || []).map((signal) => `<tr><td><b>${{esc(signal.signal_title || signal.article_id || "")}}</b><br><small>${{esc(signal.signal_type || "")}}</small></td><td>${{esc(signal.related_telegram_count || 0)}}</td><td>${{esc(signal.related_telegram_channels_count || 0)}}</td><td>${{esc((signal.top_keywords || []).slice(0, 5).join(", "))}}</td><td>${{esc((signal.risk_flags || []).slice(0, 5).join(", "))}}</td></tr>`).join("") || '<tr><td colspan="5">아직 기사와 연결된 Telegram 신호가 없습니다.</td></tr>';
+  document.getElementById("data-status").innerHTML = `<b>${{esc(sourceLabel)}}</b> 생성시각 ${{esc(model.generated_at || "")}}`;
+}}
+renderDashboard(fallbackModel, "정적 fallback");
+if (telegramDashboardApiUrl) {{
+  const separator = telegramDashboardApiUrl.includes("?") ? "&" : "?";
+  fetch(`${{telegramDashboardApiUrl}}${{separator}}action=telegram_dashboard`, {{cache: "no-store"}})
+    .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${{response.status}}`)))
+    .then((data) => {{
+      if (!data.ok) throw new Error(data.error || "api_error");
+      renderDashboard(modelFromApi(data), "DB 기준");
+    }})
+    .catch((error) => {{
+      document.getElementById("data-status").innerHTML = `<b>정적 fallback</b> DB API 확인 실패: ${{esc(error.message)}}`;
+    }});
+}}
+</script>
 </body>
 </html>
 """

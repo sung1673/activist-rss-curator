@@ -196,8 +196,9 @@ PHP API 업데이트 전에도 DB 적재 병목을 줄이려면 로컬에서 직
 - 메시지 유형 분포
 - 최근 14일 키워드
 - 월간/연간 DB 저장량 추정
+- DB API가 설정되어 있으면 `telegram_dashboard` read action으로 최신 DB 집계를 불러와 정적 fallback을 갱신
 
-GitHub Pages가 공개 페이지이므로 비밀값, session, raw_json 전문, 관리자 쓰기 기능은 노출하지 않습니다. 채널 승인/비활성화/백필 실행은 CLI 또는 내부 API에서만 수행합니다.
+GitHub Pages가 공개 페이지이므로 비밀값, session, raw_json 전문, 관리자 쓰기 기능은 노출하지 않습니다. PHP API도 대시보드 응답에서는 집계값, 채널별 건수, 공개-safe 이슈 신호만 반환하고 메시지 전문이나 raw_json을 반환하지 않습니다. 채널 승인/비활성화/백필 실행은 CLI 또는 내부 API에서만 수행합니다.
 
 ## 분석 활용 방향
 
