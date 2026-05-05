@@ -272,7 +272,7 @@ def enabled_channels(state: dict[str, object]) -> list[dict[str, object]]:
     ]
 
 
-def load_env_files(root: Path, names: tuple[str, ...] = (".env", ".env.local", ".env.telegram")) -> list[Path]:
+def load_env_files(root: Path, names: tuple[str, ...] = (".env", ".env.local", ".env.api", ".env.telegram")) -> list[Path]:
     loaded: list[Path] = []
     for name in names:
         path = root / name
@@ -289,6 +289,42 @@ def load_env_files(root: Path, names: tuple[str, ...] = (".env", ".env.local", "
                 os.environ[key] = value
         loaded.append(path)
     return loaded
+
+
+def compact_backfill_per_channel(rows: object, *, limit: int = 80) -> list[dict[str, object]]:
+    if not isinstance(rows, list):
+        return []
+    compacted: list[dict[str, object]] = []
+    for row in rows[-limit:]:
+        if not isinstance(row, dict):
+            continue
+        compacted.append(
+            {
+                "handle": row.get("handle") or "",
+                "title": row.get("title") or "",
+                "status": row.get("status") or "",
+                "messages_seen": int(row.get("messages_seen") or 0),
+                "inserted": int(row.get("inserted") or 0),
+                "updated": int(row.get("updated") or 0),
+                "elapsed_seconds": float(row.get("elapsed_seconds") or 0),
+                "index": int(row.get("index") or 0),
+                "total": int(row.get("total") or 0),
+                **({"error": row.get("error")} if row.get("error") else {}),
+            }
+        )
+    return compacted
+
+
+def telegram_run_record(now: datetime, mode: str, summary: dict[str, object]) -> dict[str, object]:
+    record: dict[str, object] = {
+        "ran_at": datetime_to_iso(now),
+        "mode": mode,
+        **{key: value for key, value in summary.items() if isinstance(value, (int, float, str))},
+    }
+    per_channel = compact_backfill_per_channel(summary.get("telegram_backfill_per_channel"))
+    if per_channel:
+        record["telegram_backfill_per_channel"] = per_channel
+    return record
 
 
 def normalize_message_text(text: object) -> str:
@@ -1087,13 +1123,24 @@ def telegram_snapshot_payload(state: dict[str, object], config: dict[str, object
     }
 
 
-def sync_telegram_to_remote_api(state: dict[str, object], config: dict[str, object]) -> dict[str, int]:
+def remote_response_error(response: dict[str, Any]) -> str:
+    for key in ("error", "reason", "message"):
+        value = str(response.get(key) or "").strip()
+        if value:
+            return value[:180]
+    status_code = response.get("status_code")
+    if status_code:
+        return f"remote_http_{status_code}"
+    return "remote_api_rejected"
+
+
+def sync_telegram_to_remote_api(state: dict[str, object], config: dict[str, object]) -> dict[str, object]:
     if not remote_api_configured():
-        return {}
+        return {"telegram_remote_synced": 0, "telegram_remote_failed": 0, "telegram_remote_skipped": 1}
     try:
         response = post_remote_action("upsert_telegram_snapshot", telegram_snapshot_payload(state, config))
-    except Exception:
-        return {"telegram_remote_synced": 0, "telegram_remote_failed": 1}
+    except Exception as exc:  # noqa: BLE001
+        return {"telegram_remote_synced": 0, "telegram_remote_failed": 1, "telegram_remote_last_error": error_label(exc)}
     if response.get("ok"):
         return {
             "telegram_remote_synced": 1,
@@ -1101,7 +1148,7 @@ def sync_telegram_to_remote_api(state: dict[str, object], config: dict[str, obje
             "telegram_remote_messages": int(response.get("messages") or 0),
             "telegram_remote_matches": int(response.get("article_matches") or 0),
         }
-    return {"telegram_remote_synced": 0, "telegram_remote_failed": 1}
+    return {"telegram_remote_synced": 0, "telegram_remote_failed": 1, "telegram_remote_last_error": remote_response_error(response)}
 
 
 def sync_telegram_batch_to_remote_api(
@@ -1110,12 +1157,15 @@ def sync_telegram_batch_to_remote_api(
     *,
     messages: list[dict[str, object]],
     matches: list[dict[str, object]],
-) -> dict[str, int]:
-    if not remote_api_configured() or not messages:
+) -> dict[str, object]:
+    if not messages:
         return {}
+    if not remote_api_configured():
+        return {"telegram_remote_synced": 0, "telegram_remote_failed": 0, "telegram_remote_skipped": 1}
     settings = telegram_sources_config(config)
     batch_size = max(1, int(settings.get("remote_batch_size", 300)))
     synced = failed = remote_messages = remote_matches = 0
+    last_error = ""
     channels = list(state.get("telegram_source_channels", []))
     signals = list(state.get("telegram_issue_signals", []))
     candidates = list(state.get("telegram_channel_candidates", []))
@@ -1142,8 +1192,9 @@ def sync_telegram_batch_to_remote_api(
                     "channel_candidates": candidates,
                 },
             )
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
             failed += 1
+            last_error = error_label(exc)
             continue
         if response.get("ok"):
             synced += 1
@@ -1151,12 +1202,16 @@ def sync_telegram_batch_to_remote_api(
             remote_matches += int(response.get("article_matches") or len(chunk_matches))
         else:
             failed += 1
-    return {
+            last_error = remote_response_error(response)
+    result: dict[str, object] = {
         "telegram_remote_synced": synced,
         "telegram_remote_failed": failed,
         "telegram_remote_messages": remote_messages,
         "telegram_remote_matches": remote_matches,
     }
+    if last_error:
+        result["telegram_remote_last_error"] = last_error
+    return result
 
 
 def collect_telegram_sources(
@@ -1196,7 +1251,7 @@ def collect_telegram_sources(
     if summary.get("telegram_messages_inserted") or summary.get("telegram_messages_updated") or summary.get("telegram_matches_inserted"):
         summary.update(sync_telegram_to_remote_api(state, config))
     state.setdefault("telegram_source_runs", [])
-    state["telegram_source_runs"].append({"ran_at": datetime_to_iso(now), **summary})  # type: ignore[index, union-attr]
+    state["telegram_source_runs"].append(telegram_run_record(now, "collect", summary))  # type: ignore[index, union-attr]
     return summary
 
 
@@ -1442,7 +1497,7 @@ def backfill_telegram_messages(
     elif sync_remote and touched_messages:
         summary.update(sync_telegram_batch_to_remote_api(state, config, messages=touched_messages, matches=touched_matches))
     state.setdefault("telegram_source_runs", [])
-    state["telegram_source_runs"].append({"ran_at": datetime_to_iso(now), "mode": "backfill", **{k: v for k, v in summary.items() if isinstance(v, (int, float, str))}})  # type: ignore[index, union-attr]
+    state["telegram_source_runs"].append(telegram_run_record(now, "backfill", summary))  # type: ignore[index, union-attr]
     return summary
 
 
@@ -1473,12 +1528,67 @@ def cli_channel_table(channels: list[dict[str, object]]) -> list[dict[str, objec
     ]
 
 
+def telegram_state_stats(state: dict[str, object], config: dict[str, object]) -> dict[str, object]:
+    ensure_telegram_state(state)
+    register_configured_channels(state, config)
+    channels = enabled_channels(state)
+    messages = [message for message in state.get("telegram_source_messages", []) if isinstance(message, dict)]
+    matches = [match for match in state.get("telegram_article_matches", []) if isinstance(match, dict)]
+    message_counts: Counter[str] = Counter(
+        normalize_channel_handle(message.get("handle") or message.get("username"))
+        for message in messages
+        if normalize_channel_handle(message.get("handle") or message.get("username"))
+    )
+    match_types: Counter[str] = Counter(str(match.get("match_type") or "unknown") for match in matches)
+    channel_rows: list[dict[str, object]] = []
+    first_uncollected = ""
+    last_collected = ""
+    for index, channel in enumerate(channels, start=1):
+        handle = normalize_channel_handle(channel.get("handle") or channel.get("username"))
+        count = int(message_counts.get(handle, 0))
+        if count > 0:
+            last_collected = handle
+        elif not first_uncollected:
+            first_uncollected = handle
+        channel_rows.append(
+            {
+                "index": index,
+                "handle": handle,
+                "title": channel.get("title") or "",
+                "messages": count,
+                "last_message_id": int(channel.get("last_message_id") or 0),
+                "last_collected_at": channel.get("last_collected_at") or "",
+                "last_error": channel.get("last_error") or "",
+            }
+        )
+
+    resume_after = last_collected
+    return {
+        "telegram_channels_enabled": len(channels),
+        "telegram_messages": len(messages),
+        "telegram_article_matches": len(matches),
+        "telegram_match_types": dict(match_types),
+        "telegram_source_runs": len([run for run in state.get("telegram_source_runs", []) if isinstance(run, dict)]),
+        "first_uncollected_handle": first_uncollected,
+        "resume_after_handle": resume_after,
+        "next_backfill_command": (
+            ".\\.venv\\Scripts\\python.exe -m curator.telegram_sources backfill-messages "
+            f"--days 180 --limit-per-channel 1000 --start-after {resume_after} "
+            "--timeout-per-channel 90 --max-messages 5000"
+            if resume_after
+            else ""
+        ),
+        "channels": channel_rows,
+    }
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Manage Telegram public-channel sources for the RSS curator.")
     parser.add_argument("--root", default=".", help="Project root containing config.yaml and data/state.json")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("list", help="List configured Telegram source channels")
+    subparsers.add_parser("stats", help="Show local Telegram collection statistics and next backfill hint")
     add_parser = subparsers.add_parser("add", help="Add or update a manual public channel source")
     add_parser.add_argument("handle")
     add_parser.add_argument("--title", default="")
@@ -1492,6 +1602,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("candidates", help="List discovered candidate channels")
     subparsers.add_parser("collect", help="Run one Telegram source collection pass")
+    sync_parser = subparsers.add_parser("sync-remote", help="Sync locally stored Telegram messages to the remote API in batches")
+    sync_parser.add_argument("--limit", type=int, default=0, help="Limit most recent messages to sync, 0 means all local messages")
 
     discover_parser = subparsers.add_parser("discover", help="Discover similar public-channel candidates from enabled seed channels")
     discover_parser.add_argument("--limit", type=int, default=20, help="Maximum recommendations per seed channel")
@@ -1533,6 +1645,9 @@ def cli_main(argv: list[str] | None = None) -> int:
         register_configured_channels(state, config)
         print(json.dumps(cli_channel_table(list(state.get("telegram_source_channels", []))), ensure_ascii=False, indent=2))
         return 0
+    if args.command == "stats":
+        print(json.dumps(telegram_state_stats(state, config), ensure_ascii=False, indent=2))
+        return 0
     if args.command == "add":
         record = upsert_telegram_channel(
             state,
@@ -1568,6 +1683,22 @@ def cli_main(argv: list[str] | None = None) -> int:
         save_state(state_path, state)
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0
+    if args.command == "sync-remote":
+        limit = max(0, int(args.limit))
+        messages = [message for message in state.get("telegram_source_messages", []) if isinstance(message, dict)]
+        if limit:
+            messages = messages[-limit:]
+        message_keys = {message_key(message) for message in messages}
+        matches = [
+            match
+            for match in state.get("telegram_article_matches", [])
+            if isinstance(match, dict) and str(match.get("telegram_message_key") or "") in message_keys
+        ]
+        summary = sync_telegram_batch_to_remote_api(state, config, messages=messages, matches=matches)
+        summary["telegram_local_messages_selected"] = len(messages)
+        summary["telegram_local_matches_selected"] = len(matches)
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0 if not summary.get("telegram_remote_failed") else 1
     if args.command == "discover":
         from .dates import now_in_timezone
 

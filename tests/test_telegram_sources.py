@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -15,10 +16,13 @@ from curator.telegram_sources import (
     collect_telegram_sources,
     extract_urls,
     import_joined_public_channels,
+    load_env_files,
     mark_deleted_message,
     normalize_telegram_message,
     reconcile_recent_deletions,
     score_channel_candidate,
+    telegram_run_record,
+    telegram_state_stats,
     upsert_telegram_message,
 )
 
@@ -106,6 +110,16 @@ def test_extract_urls_strips_trailing_punctuation() -> None:
 
 def test_canonicalize_telegram_url_removes_tracking_params() -> None:
     assert canonicalize_telegram_url("HTTPS://Example.COM/news/?utm_source=tg&fbclid=1#frag") == "https://example.com/news"
+
+
+def test_load_env_files_includes_api_env(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.delenv("ACTIVIST_API_URL", raising=False)
+    (tmp_path / ".env.api").write_text("ACTIVIST_API_URL=https://example.com/api.php\n", encoding="utf-8")
+
+    loaded = load_env_files(tmp_path)
+
+    assert tmp_path / ".env.api" in loaded
+    assert "example.com/api.php" in os.environ["ACTIVIST_API_URL"]
 
 
 def test_telegram_message_upsert_prevents_duplicates_and_tracks_edits(now) -> None:  # type: ignore[no-untyped-def]
@@ -253,6 +267,38 @@ def test_backfill_messages_filters_by_window_and_estimates_growth(config, now) -
     assert summary["telegram_backfill_messages_seen"] == 1
     assert summary["telegram_messages_inserted"] == 1
     assert summary["telegram_estimated_daily_messages"] > 0
+
+
+def test_telegram_run_record_keeps_compact_channel_progress(now) -> None:  # type: ignore[no-untyped-def]
+    record = telegram_run_record(
+        now,
+        "backfill",
+        {
+            "telegram_messages_inserted": 3,
+            "telegram_backfill_per_channel": [
+                {"handle": "marketnews", "title": "경제 뉴스", "status": "ok", "messages_seen": 3, "inserted": 3, "elapsed_seconds": 1.2}
+            ],
+        },
+    )
+
+    assert record["mode"] == "backfill"
+    assert record["telegram_backfill_per_channel"][0]["handle"] == "marketnews"  # type: ignore[index]
+
+
+def test_telegram_state_stats_suggests_resume_after_last_collected(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["telegram_sources"] = {
+        "enabled": True,
+        "channels": [{"handle": "first"}, {"handle": "second"}, {"handle": "third"}],
+    }  # type: ignore[index]
+    state: dict[str, object] = {}
+    upsert_telegram_message(state, normalize_telegram_message({"handle": "first"}, {"id": 1, "text": "a"}, now))
+    upsert_telegram_message(state, normalize_telegram_message({"handle": "second"}, {"id": 2, "text": "b"}, now))
+
+    stats = telegram_state_stats(state, config)
+
+    assert stats["telegram_channels_enabled"] == 3
+    assert stats["resume_after_handle"] == "second"
+    assert "--start-after second" in stats["next_backfill_command"]
 
 
 def test_deleted_message_marking(now) -> None:  # type: ignore[no-untyped-def]

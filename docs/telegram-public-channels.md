@@ -88,6 +88,7 @@ Telethon의 `channels.GetChannelRecommendationsRequest`를 사용할 수 있는 
 ```
 
 DB에 실제 반영하려면 `--dry-run`을 제거합니다. 원격 DB API 동기화를 잠시 끄려면 `--no-remote`를 붙입니다.
+`telegram_sources` CLI는 `.env`, `.env.local`, `.env.api`, `.env.telegram` 순서로 로컬 환경 파일을 읽습니다.
 
 ```powershell
 .\.venv\Scripts\python.exe -m curator.telegram_sources backfill-messages --days 180 --channel-limit 0 --limit-per-channel 3000
@@ -115,6 +116,21 @@ DB에 실제 반영하려면 `--dry-run`을 제거합니다. 원격 DB API 동�
 ```
 
 처음부터 6개월 전체를 한 번에 돌리기보다 `--max-messages 5000`처럼 잘라 실행하면 DB 반영과 장애 확인이 쉽습니다.
+
+백필 진행 상황과 다음 이어받기 명령은 아래 명령으로 확인합니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m curator.telegram_sources stats
+```
+
+이미 로컬 `data/state.json`에 쌓인 메시지를 원격 API로 다시 밀어 넣을 때는 아래 명령을 사용합니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m curator.telegram_sources sync-remote --limit 1000
+```
+
+`telegram_remote_last_error`가 `unknown_action`이면 PHP API가 아직 `upsert_telegram_snapshot` action을 지원하지 않는 상태입니다.
+이 경우 로컬 백필은 계속할 수 있지만, DB 기반 Telegram 반응 화면은 서버 API 업데이트 후 활성화됩니다.
 
 ## 운영 대시보드
 
