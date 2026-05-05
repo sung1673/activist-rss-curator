@@ -13,5 +13,6 @@ __all__ = [
     "telegram_publisher",
     "telegram_dashboard",
     "telegram_sources",
+    "telegram_db_sync",
     "telegram_smoke_test",
 ]
