@@ -7,10 +7,12 @@ import os
 import random
 import re
 import sys
+import time
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from .config import load_config
 from .dates import datetime_to_iso, parse_datetime
@@ -78,6 +80,19 @@ GENERIC_MATCH_TOKENS = {
     "utm",
     "rss",
 }
+
+
+@dataclass(frozen=True)
+class ArticleTokenRecord:
+    article: dict[str, object]
+    tokens: set[str]
+    article_dt: datetime | None
+
+
+@dataclass(frozen=True)
+class TelegramArticleMatchContext:
+    url_index: dict[str, dict[str, object]]
+    article_tokens: list[ArticleTokenRecord]
 
 try:  # Windows PowerShell often defaults to cp949 even after WSL launches python.exe.
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
@@ -405,6 +420,22 @@ def article_url_index(state: dict[str, object]) -> dict[str, dict[str, object]]:
     return index
 
 
+def build_article_match_context(state: dict[str, object], config: dict[str, object]) -> TelegramArticleMatchContext:
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    records: list[ArticleTokenRecord] = []
+    for article in state.get("articles", []):
+        if not isinstance(article, dict):
+            continue
+        records.append(
+            ArticleTokenRecord(
+                article=article,
+                tokens=article_tokens(article),
+                article_dt=parse_datetime(article.get("published_at") or article.get("seen_at"), timezone_name),
+            )
+        )
+    return TelegramArticleMatchContext(url_index=article_url_index(state), article_tokens=records)
+
+
 def article_tokens(article: dict[str, object]) -> set[str]:
     text = " ".join(
         str(article.get(key) or "")
@@ -442,6 +473,12 @@ def weak_match_within_window(
     return abs((message_dt - article_dt).total_seconds()) <= window_hours * 3600
 
 
+def weak_match_datetimes_within_window(message_dt: datetime | None, article_dt: datetime | None, *, window_hours: int) -> bool:
+    if not message_dt or not article_dt:
+        return True
+    return abs((message_dt - article_dt).total_seconds()) <= window_hours * 3600
+
+
 def upsert_article_match(state: dict[str, object], match: dict[str, object]) -> str:
     ensure_telegram_state(state)
     matches = state["telegram_article_matches"]  # type: ignore[index]
@@ -465,8 +502,14 @@ def upsert_article_match(state: dict[str, object], match: dict[str, object]) -> 
     return "inserted"
 
 
-def match_message_to_articles(state: dict[str, object], message: dict[str, object], config: dict[str, object]) -> list[dict[str, object]]:
-    url_index = article_url_index(state)
+def match_message_to_articles(
+    state: dict[str, object],
+    message: dict[str, object],
+    config: dict[str, object],
+    context: TelegramArticleMatchContext | None = None,
+) -> list[dict[str, object]]:
+    context = context or build_article_match_context(state, config)
+    url_index = context.url_index
     results: list[dict[str, object]] = []
     seen: set[tuple[str, str]] = set()
 
@@ -508,12 +551,12 @@ def match_message_to_articles(state: dict[str, object], message: dict[str, objec
     tokens = message_tokens(message)
     if not tokens:
         return []
-    for article in state.get("articles", []):
-        if not isinstance(article, dict):
+    message_dt = parse_datetime(message.get("posted_at"), timezone_name)
+    for record in context.article_tokens:
+        article = record.article
+        if not weak_match_datetimes_within_window(message_dt, record.article_dt, window_hours=window_hours):
             continue
-        if not weak_match_within_window(message, article, timezone_name=timezone_name, window_hours=window_hours):
-            continue
-        overlap = sorted(tokens & article_tokens(article))
+        overlap = sorted(tokens & record.tokens)
         if len(overlap) < min_overlap:
             continue
         strong_overlap = [token for token in overlap if len(token) >= 3 or re.search(r"\d", token)]
@@ -653,6 +696,28 @@ def flood_wait_seconds(error: BaseException) -> int | None:
         return int(seconds) if seconds is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def error_label(error: BaseException) -> str:
+    wait = flood_wait_seconds(error)
+    if wait:
+        return f"flood_wait_{wait}s"
+    if isinstance(error, (TimeoutError, asyncio.TimeoutError)):
+        return "timeout"
+    message = str(error).strip()
+    if "old message" in message.casefold() or "security error" in message.casefold():
+        return "telegram_security_old_message"
+    return error.__class__.__name__
+
+
+def parse_handle_list(value: object) -> set[str]:
+    if not value:
+        return set()
+    if isinstance(value, (list, tuple, set)):
+        raw_items = [str(item) for item in value]
+    else:
+        raw_items = re.split(r"[,\\s]+", str(value))
+    return {normalize_channel_handle(item) for item in raw_items if normalize_channel_handle(item)}
 
 
 class TelethonClientAdapter:
@@ -803,6 +868,7 @@ async def _collect_with_client(
     backfill_limit = int(settings.get("backfill_limit", 100))
     incremental_limit = int(settings.get("incremental_limit", 200))
     inserted = updated = unchanged = failed = matches_inserted = 0
+    match_context = build_article_match_context(state, config)
 
     for channel in enabled_channels(state):
         try:
@@ -826,7 +892,7 @@ async def _collect_with_client(
             updated += int(status == "updated")
             unchanged += int(status == "unchanged")
             max_message_id = max(max_message_id, int(message.get("telegram_message_id") or 0))
-            for match in match_message_to_articles(state, message, config):
+            for match in match_message_to_articles(state, message, config, match_context):
                 if upsert_article_match(state, match) == "inserted":
                     matches_inserted += 1
         channel["last_message_id"] = max_message_id
@@ -1144,12 +1210,32 @@ async def _backfill_messages_with_client(
     limit_per_channel: int,
     channel_limit: int,
     progress: bool = False,
+    skip_handles: set[str] | None = None,
+    start_after_handle: str = "",
+    max_messages: int = 0,
+    checkpoint_callback: Callable[[], None] | None = None,
 ) -> dict[str, object]:
     settings = telegram_sources_config(config)
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
     channel_timeout = max(5.0, float(settings.get("backfill_channel_timeout_seconds", 60)))
     since = now - timedelta(days=max(1, days))
     channels = enabled_channels(state)
+    skip_handles = skip_handles or set()
+    if skip_handles:
+        channels = [
+            channel
+            for channel in channels
+            if normalize_channel_handle(channel.get("handle") or channel.get("username")) not in skip_handles
+        ]
+    start_after = normalize_channel_handle(start_after_handle)
+    if start_after:
+        start_index = -1
+        for index, channel in enumerate(channels):
+            if normalize_channel_handle(channel.get("handle") or channel.get("username")) == start_after:
+                start_index = index
+                break
+        if start_index >= 0:
+            channels = channels[start_index + 1 :]
     if channel_limit > 0:
         channels = channels[:channel_limit]
 
@@ -1157,10 +1243,12 @@ async def _backfill_messages_with_client(
     touched_messages: list[dict[str, object]] = []
     touched_matches: list[dict[str, object]] = []
     per_channel: list[dict[str, object]] = []
+    match_context = build_article_match_context(state, config)
 
     for index, channel in enumerate(channels, start=1):
         channel_seen = channel_inserted = channel_updated = channel_failed = 0
         started_at = datetime.now()
+        monotonic_started_at = time.monotonic()
         if progress:
             print(f"[{index}/{len(channels)}] @{channel.get('handle') or ''} backfill start", flush=True)
         try:
@@ -1172,8 +1260,7 @@ async def _backfill_messages_with_client(
 
             _info, raw_messages = await asyncio.wait_for(fetch_channel(), timeout=channel_timeout)
         except Exception as exc:  # noqa: BLE001
-            wait = flood_wait_seconds(exc)
-            channel["last_error"] = f"flood_wait_{wait}s" if wait else ("timeout" if isinstance(exc, TimeoutError) else exc.__class__.__name__)
+            channel["last_error"] = error_label(exc)
             failed += 1
             channel_failed = 1
             per_channel.append(
@@ -1187,6 +1274,8 @@ async def _backfill_messages_with_client(
                     "total": len(channels),
                 }
             )
+            if checkpoint_callback:
+                checkpoint_callback()
             if progress:
                 print(
                     f"[{index}/{len(channels)}] @{channel.get('handle') or ''} failed={channel.get('last_error')} "
@@ -1197,6 +1286,13 @@ async def _backfill_messages_with_client(
 
         max_message_id = int(channel.get("last_message_id") or 0)
         for raw_message in raw_messages:
+            if max_messages > 0 and seen >= max_messages:
+                break
+            if time.monotonic() - monotonic_started_at > channel_timeout:
+                channel_failed = 1
+                channel["last_error"] = "processing_timeout"
+                failed += 1
+                break
             message = normalize_telegram_message(channel, raw_message, now)
             posted_at = parse_datetime(message.get("posted_at"), timezone_name)
             if posted_at and posted_at < since:
@@ -1214,13 +1310,14 @@ async def _backfill_messages_with_client(
             channel_updated += int(status == "updated")
             touched_messages.append(message)
             max_message_id = max(max_message_id, int(message.get("telegram_message_id") or 0))
-            for match in match_message_to_articles(state, message, config):
+            for match in match_message_to_articles(state, message, config, match_context):
                 if upsert_article_match(state, match) == "inserted":
                     matches_inserted += 1
                     touched_matches.append(match)
         channel["last_message_id"] = max(max_message_id, int(channel.get("last_message_id") or 0))
         channel["last_collected_at"] = datetime_to_iso(now)
-        channel["last_error"] = None
+        if not channel_failed:
+            channel["last_error"] = None
         per_channel.append(
             {
                 "handle": channel.get("handle") or "",
@@ -1241,6 +1338,12 @@ async def _backfill_messages_with_client(
                 f"elapsed={round((datetime.now() - started_at).total_seconds(), 1)}s",
                 flush=True,
             )
+        if checkpoint_callback:
+            checkpoint_callback()
+        if max_messages > 0 and seen >= max_messages:
+            if progress:
+                print(f"max_messages={max_messages} reached; stopping backfill", flush=True)
+            break
 
     state["telegram_issue_signals"] = telegram_issue_signals(state)
     summary: dict[str, object] = {
@@ -1284,6 +1387,10 @@ def backfill_telegram_messages(
     client: TelegramMessageClient | None = None,
     sync_remote: bool = True,
     progress: bool = False,
+    skip_handles: set[str] | None = None,
+    start_after_handle: str = "",
+    max_messages: int = 0,
+    checkpoint_callback: Callable[[], None] | None = None,
 ) -> dict[str, object]:
     ensure_telegram_state(state)
     register_configured_channels(state, config)
@@ -1302,6 +1409,10 @@ def backfill_telegram_messages(
                     limit_per_channel=limit_per_channel,
                     channel_limit=channel_limit,
                     progress=progress,
+                    skip_handles=skip_handles,
+                    start_after_handle=start_after_handle,
+                    max_messages=max_messages,
+                    checkpoint_callback=checkpoint_callback,
                 )
 
         summary = asyncio.run(run_with_adapter())
@@ -1316,6 +1427,10 @@ def backfill_telegram_messages(
                 limit_per_channel=limit_per_channel,
                 channel_limit=channel_limit,
                 progress=progress,
+                skip_handles=skip_handles,
+                start_after_handle=start_after_handle,
+                max_messages=max_messages,
+                checkpoint_callback=checkpoint_callback,
             )
 
         summary = asyncio.run(run_with_client())
@@ -1386,6 +1501,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     backfill_parser.add_argument("--days", type=int, default=14, help="How many days back to collect")
     backfill_parser.add_argument("--limit-per-channel", type=int, default=1000, help="Maximum messages to scan per channel")
     backfill_parser.add_argument("--channel-limit", type=int, default=0, help="Limit number of enabled channels, 0 means all")
+    backfill_parser.add_argument("--skip-handles", default="", help="Comma/space separated channel handles to skip")
+    backfill_parser.add_argument("--start-after", default="", help="Resume after this channel handle in the enabled-channel order")
+    backfill_parser.add_argument("--max-messages", type=int, default=0, help="Stop after this many messages across all channels, 0 means unlimited")
+    backfill_parser.add_argument("--timeout-per-channel", type=float, default=0, help="Override per-channel backfill timeout seconds")
+    backfill_parser.add_argument("--no-checkpoint", action="store_true", help="Do not save state after each channel")
     backfill_parser.add_argument("--dry-run", action="store_true", help="Run against a state copy without writing state.json or remote DB")
     backfill_parser.add_argument("--no-remote", action="store_true", help="Do not sync collected messages to the remote DB API")
 
@@ -1474,16 +1594,28 @@ def cli_main(argv: list[str] | None = None) -> int:
         from .dates import now_in_timezone
 
         target_state = json.loads(json.dumps(state, ensure_ascii=False)) if args.dry_run else state
+        target_config = dict(config)
+        if args.timeout_per_channel and float(args.timeout_per_channel) > 0:
+            telegram_settings = dict(telegram_sources_config(config))
+            telegram_settings["backfill_channel_timeout_seconds"] = float(args.timeout_per_channel)
+            target_config["telegram_sources"] = telegram_settings
+        checkpoint_callback = None
+        if not args.dry_run and not args.no_checkpoint:
+            checkpoint_callback = lambda: save_state(state_path, target_state)
         now = now_in_timezone(str(config.get("timezone") or "Asia/Seoul"))
         summary = backfill_telegram_messages(
             target_state,
-            config,
+            target_config,
             now,
             days=max(1, int(args.days)),
             limit_per_channel=max(1, int(args.limit_per_channel)),
             channel_limit=max(0, int(args.channel_limit)),
             sync_remote=not args.dry_run and not args.no_remote,
             progress=True,
+            skip_handles=parse_handle_list(args.skip_handles),
+            start_after_handle=args.start_after,
+            max_messages=max(0, int(args.max_messages)),
+            checkpoint_callback=checkpoint_callback,
         )
         if not args.dry_run:
             save_state(state_path, target_state)
