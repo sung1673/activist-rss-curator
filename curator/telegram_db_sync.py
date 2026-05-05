@@ -293,7 +293,33 @@ def executemany_upsert(conn: Any, table: str, rows: list[dict[str, object]], upd
     return len(rows)
 
 
-def sync_state_to_db(state: dict[str, object], *, limit: int = 0, timezone_name: str = "Asia/Seoul", migrate: bool = True) -> dict[str, int]:
+def delete_existing_match_rows(conn: Any, message_keys: set[str], *, replace_all: bool) -> int:
+    table = table_name("telegram_article_matches")
+    signals = table_name("telegram_issue_signals")
+    with conn.cursor() as cur:
+        if replace_all:
+            match_count = cur.execute(f"DELETE FROM {table}")
+            cur.execute(f"DELETE FROM {signals}")
+            return int(match_count)
+        deleted = 0
+        keys = sorted(message_keys)
+        for index in range(0, len(keys), 500):
+            chunk = keys[index : index + 500]
+            if not chunk:
+                continue
+            placeholders = ", ".join(["%s"] * len(chunk))
+            deleted += int(cur.execute(f"DELETE FROM {table} WHERE message_key IN ({placeholders})", chunk))
+        return deleted
+
+
+def sync_state_to_db(
+    state: dict[str, object],
+    *,
+    limit: int = 0,
+    timezone_name: str = "Asia/Seoul",
+    migrate: bool = True,
+    replace_matches: bool = False,
+) -> dict[str, int]:
     ensure_telegram_state(state)
     conn = connect_db()
     try:
@@ -304,6 +330,7 @@ def sync_state_to_db(state: dict[str, object], *, limit: int = 0, timezone_name:
         message_key_set = {str(row["message_key"]) for row in messages}
         matches = match_rows(state, message_key_set if limit else None)
         signals = signal_rows(state, timezone_name)
+        deleted_matches = delete_existing_match_rows(conn, message_key_set, replace_all=not limit) if replace_matches else 0
         channel_count = executemany_upsert(
             conn,
             table_name("telegram_channels"),
@@ -372,6 +399,7 @@ def sync_state_to_db(state: dict[str, object], *, limit: int = 0, timezone_name:
             "telegram_db_channels": channel_count,
             "telegram_db_messages": message_count,
             "telegram_db_matches": match_count,
+            "telegram_db_matches_deleted": deleted_matches,
             "telegram_db_signals": signal_count,
         }
     except Exception:
@@ -404,6 +432,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", default=".", help="Project root containing .env and data/state.json")
     parser.add_argument("--limit", type=int, default=0, help="Sync only the most recent N messages, 0 means all")
     parser.add_argument("--no-migrate", action="store_true", help="Do not create missing activist_telegram_* tables")
+    parser.add_argument("--replace-matches", action="store_true", help="Delete existing Telegram article matches before inserting current matches")
     parser.add_argument("--counts", action="store_true", help="Only print current DB counts")
     return parser
 
@@ -421,6 +450,7 @@ def main(argv: list[str] | None = None) -> int:
         limit=max(0, int(args.limit)),
         timezone_name="Asia/Seoul",
         migrate=not args.no_migrate,
+        replace_matches=bool(args.replace_matches),
     )
     summary.update(db_counts())
     print(json.dumps(summary, ensure_ascii=False, indent=2))

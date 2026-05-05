@@ -20,8 +20,9 @@
 ## 기사 매칭 기준
 
 - URL 직접 매칭: 메시지 본문 URL을 추출하고 tracking query, fragment, trailing slash 등을 정리한 뒤 기존 기사 URL과 비교합니다.
-- canonical URL 매칭: 정규화 URL hash가 같은 경우 매칭합니다.
-- 키워드 추정 매칭: URL이 없을 때 기사 제목, 요약, 메시지의 핵심 토큰 overlap이 충분한 경우 낮은 score로 연결합니다.
+- canonical URL 매칭: 정규화 URL hash가 같은 경우 매칭합니다. 기사에 `duplicate_matches`가 있으면 그 안의 원본/중복 URL도 같은 기사 후보로 인덱싱합니다.
+- 키워드 추정 매칭: URL이 없을 때만 사용합니다. 회사명·고유명사 성격의 단서와 이벤트 단서가 함께 겹치는 경우에만 낮은 score로 연결합니다.
+- 기본 약한 매칭 창은 96시간입니다. 메시지 하나는 최대 3개 기사까지만 추정 연결합니다.
 - UI에서는 URL 직접 매칭과 키워드 추정 매칭을 구분해서 표시해야 합니다.
 
 ## 삭제와 수정 추적
@@ -127,6 +128,18 @@ DB에 실제 반영하려면 `--dry-run`을 제거합니다. 원격 DB API 동�
 
 ```powershell
 .\.venv\Scripts\python.exe -m curator.telegram_sources sync-remote --limit 1000
+```
+
+매칭 정책을 바꾼 뒤에는 로컬 state의 Telegram 기사 연결을 재계산할 수 있습니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m curator.telegram_sources rematch --progress
+```
+
+직접 MySQL 동기화를 쓰는 환경에서는 기존 매칭 테이블을 새 결과로 교체합니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m curator.telegram_db_sync --limit 0 --replace-matches
 ```
 
 `telegram_remote_last_error`가 `unknown_action`이면 PHP API가 아직 `upsert_telegram_snapshot` action을 지원하지 않는 상태입니다.

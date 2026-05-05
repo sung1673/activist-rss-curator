@@ -80,6 +80,87 @@ GENERIC_MATCH_TOKENS = {
     "utm",
     "rss",
 }
+WEAK_MATCH_EVENT_TOKENS = {
+    "activist",
+    "activism",
+    "board",
+    "buyback",
+    "campaign",
+    "contest",
+    "delisting",
+    "director",
+    "dividend",
+    "governance",
+    "letter",
+    "nominee",
+    "nomination",
+    "proxy",
+    "settlement",
+    "shareholder",
+    "stake",
+    "stewardship",
+    "tender",
+    "감리",
+    "감사",
+    "감사의견",
+    "감자",
+    "거래소",
+    "거래정지",
+    "검찰",
+    "경영권",
+    "고발",
+    "공개매수",
+    "공개서한",
+    "교체",
+    "금감원",
+    "노조",
+    "리스크",
+    "물적분할",
+    "배당",
+    "밸류업",
+    "불성실공시",
+    "분쟁",
+    "분할",
+    "상장폐지",
+    "선임",
+    "소각",
+    "소송",
+    "소액주주",
+    "스튜어드십",
+    "실적",
+    "위임장",
+    "유상증자",
+    "의결권",
+    "이사회",
+    "자사주",
+    "정정",
+    "제재",
+    "주주권",
+    "주주제안",
+    "주주총회",
+    "주주환원",
+    "지배구조",
+    "합병",
+    "해임",
+}
+WEAK_MATCH_EVENT_SUBSTRINGS = {
+    "감사",
+    "거래정지",
+    "경영권",
+    "공개매수",
+    "물적분할",
+    "밸류업",
+    "불성실공시",
+    "상장폐지",
+    "소액주주",
+    "스튜어드십",
+    "위임장",
+    "유상증자",
+    "자사주",
+    "주주제안",
+    "주주환원",
+    "지배구조",
+}
 
 
 @dataclass(frozen=True)
@@ -93,6 +174,7 @@ class ArticleTokenRecord:
 class TelegramArticleMatchContext:
     url_index: dict[str, dict[str, object]]
     article_tokens: list[ArticleTokenRecord]
+    token_index: dict[str, list[int]]
 
 try:  # Windows PowerShell often defaults to cp949 even after WSL launches python.exe.
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
@@ -443,16 +525,43 @@ def article_id(article: dict[str, object]) -> str:
     return str(article.get("record_id") or article.get("canonical_url_hash") or article.get("title_hash") or "").strip()
 
 
+def article_match_status(article: dict[str, object]) -> str:
+    return str(article.get("status") or "").strip().casefold()
+
+
+def article_all_urls(article: dict[str, object]) -> list[str]:
+    urls: list[str] = []
+    for key in ("canonical_url", "link", "original_url", "resolved_url"):
+        value = str(article.get(key) or "").strip()
+        if value:
+            urls.append(value)
+    for duplicate in article.get("duplicate_matches") or []:
+        if not isinstance(duplicate, dict):
+            continue
+        for key in ("canonical_url", "link", "original_url", "resolved_url"):
+            value = str(duplicate.get(key) or "").strip()
+            if value:
+                urls.append(value)
+    return urls
+
+
+def index_article_url(index: dict[str, dict[str, object]], url: str, article: dict[str, object]) -> None:
+    canonical = canonicalize_telegram_url(url)
+    if not canonical:
+        return
+    for key in (canonical, canonical_url_hash(canonical)):
+        existing = index.get(key)
+        if existing is None or article_match_status(existing) in {"duplicate", "rejected"}:
+            index[key] = article
+
+
 def article_url_index(state: dict[str, object]) -> dict[str, dict[str, object]]:
     index: dict[str, dict[str, object]] = {}
     for article in state.get("articles", []):
         if not isinstance(article, dict):
             continue
-        for key in ("canonical_url", "link", "original_url", "resolved_url"):
-            url = canonicalize_telegram_url(str(article.get(key) or ""))
-            if url:
-                index[url] = article
-                index[canonical_url_hash(url)] = article
+        for url in article_all_urls(article):
+            index_article_url(index, url, article)
     return index
 
 
@@ -462,14 +571,23 @@ def build_article_match_context(state: dict[str, object], config: dict[str, obje
     for article in state.get("articles", []):
         if not isinstance(article, dict):
             continue
+        if article_match_status(article) in {"duplicate", "rejected"}:
+            continue
+        tokens = article_tokens(article)
+        if not tokens:
+            continue
         records.append(
             ArticleTokenRecord(
                 article=article,
-                tokens=article_tokens(article),
+                tokens=tokens,
                 article_dt=parse_datetime(article.get("published_at") or article.get("seen_at"), timezone_name),
             )
         )
-    return TelegramArticleMatchContext(url_index=article_url_index(state), article_tokens=records)
+    token_index: dict[str, list[int]] = {}
+    for index, record in enumerate(records):
+        for token in record.tokens:
+            token_index.setdefault(token, []).append(index)
+    return TelegramArticleMatchContext(url_index=article_url_index(state), article_tokens=records, token_index=token_index)
 
 
 def article_tokens(article: dict[str, object]) -> set[str]:
@@ -493,6 +611,39 @@ def message_tokens(message: dict[str, object]) -> set[str]:
     text = URL_PATTERN.sub(" ", str(message.get("normalized_text") or message.get("text") or ""))
     tokens = {token.casefold() for token in re.findall(r"[0-9A-Za-z가-힣]{2,}", text)}
     return {token for token in tokens if token not in GENERIC_MATCH_TOKENS}
+
+
+def is_event_match_token(token: str) -> bool:
+    lowered = token.casefold()
+    return lowered in WEAK_MATCH_EVENT_TOKENS or any(keyword in lowered for keyword in WEAK_MATCH_EVENT_SUBSTRINGS)
+
+
+def is_strong_match_token(token: str) -> bool:
+    return len(token) >= 3 or bool(re.search(r"\d", token))
+
+
+def weak_match_components(overlap: list[str]) -> tuple[list[str], list[str], list[str]]:
+    event_tokens = [token for token in overlap if is_event_match_token(token)]
+    entity_tokens = [token for token in overlap if token not in event_tokens and is_strong_match_token(token)]
+    strong_tokens = [token for token in overlap if is_strong_match_token(token)]
+    return event_tokens, entity_tokens, strong_tokens
+
+
+def weak_match_is_plausible(overlap: list[str], *, min_overlap: int, min_strong_overlap: int) -> bool:
+    if len(overlap) < min_overlap:
+        return False
+    event_tokens, entity_tokens, strong_tokens = weak_match_components(overlap)
+    if len(strong_tokens) < min_strong_overlap:
+        return False
+    if not event_tokens or not entity_tokens:
+        return False
+    return True
+
+
+def weak_match_score(overlap: list[str]) -> float:
+    event_tokens, entity_tokens, strong_tokens = weak_match_components(overlap)
+    score = 0.34 + len(event_tokens) * 0.07 + len(entity_tokens) * 0.06 + max(0, len(strong_tokens) - 2) * 0.03
+    return round(min(0.68, score), 4)
 
 
 def weak_match_within_window(
@@ -580,23 +731,24 @@ def match_message_to_articles(
         return results
 
     settings = telegram_sources_config(config)
-    min_overlap = int(settings.get("weak_match_min_overlap", 2))
-    min_strong_overlap = int(settings.get("weak_match_min_strong_overlap", 1))
-    window_hours = int(settings.get("weak_match_window_hours", 168))
+    min_overlap = int(settings.get("weak_match_min_overlap", 3))
+    min_strong_overlap = int(settings.get("weak_match_min_strong_overlap", 2))
+    window_hours = int(settings.get("weak_match_window_hours", 96))
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
     tokens = message_tokens(message)
     if not tokens:
         return []
     message_dt = parse_datetime(message.get("posted_at"), timezone_name)
-    for record in context.article_tokens:
+    candidate_indexes: set[int] = set()
+    for token in tokens:
+        candidate_indexes.update(context.token_index.get(token, []))
+    for record_index in candidate_indexes:
+        record = context.article_tokens[record_index]
         article = record.article
         if not weak_match_datetimes_within_window(message_dt, record.article_dt, window_hours=window_hours):
             continue
         overlap = sorted(tokens & record.tokens)
-        if len(overlap) < min_overlap:
-            continue
-        strong_overlap = [token for token in overlap if len(token) >= 3 or re.search(r"\d", token)]
-        if len(strong_overlap) < min_strong_overlap:
+        if not weak_match_is_plausible(overlap, min_overlap=min_overlap, min_strong_overlap=min_strong_overlap):
             continue
         results.append(
             {
@@ -607,11 +759,12 @@ def match_message_to_articles(
                 "channel_handle": message.get("handle") or "",
                 "channel_title": message.get("channel_title") or "",
                 "match_type": "keyword",
-                "score": min(0.72, 0.35 + len(overlap) * 0.08),
+                "score": weak_match_score(overlap),
                 "reason": "키워드 추정 일치: " + ", ".join(overlap[:5]),
             }
         )
-    return results[: int(settings.get("weak_match_limit_per_message", 5))]
+    results.sort(key=lambda item: (float(item.get("score") or 0), str(item.get("reason") or "")), reverse=True)
+    return results[: int(settings.get("weak_match_limit_per_message", 3))]
 
 
 def risk_flags_for_text(text: str) -> list[str]:
@@ -1582,6 +1735,55 @@ def telegram_state_stats(state: dict[str, object], config: dict[str, object]) ->
     }
 
 
+def rematch_telegram_articles(
+    state: dict[str, object],
+    config: dict[str, object],
+    *,
+    limit: int = 0,
+    progress: bool = False,
+) -> dict[str, object]:
+    ensure_telegram_state(state)
+    messages = [message for message in state.get("telegram_source_messages", []) if isinstance(message, dict)]
+    if limit:
+        messages = messages[-limit:]
+    selected_keys = {message_key(message) for message in messages}
+    old_matches = [match for match in state.get("telegram_article_matches", []) if isinstance(match, dict)]
+    old_selected_count = sum(1 for match in old_matches if str(match.get("telegram_message_key") or "") in selected_keys)
+    kept_matches = [
+        match
+        for match in old_matches
+        if limit and str(match.get("telegram_message_key") or "") not in selected_keys
+    ]
+    kept_count = len(kept_matches)
+    state["telegram_article_matches"] = kept_matches
+
+    context = build_article_match_context(state, config)
+    inserted = 0
+    match_types: Counter[str] = Counter()
+    started_at = time.monotonic()
+    for index, message in enumerate(messages, start=1):
+        for match in match_message_to_articles(state, message, config, context):
+            if upsert_article_match(state, match) == "inserted":
+                inserted += 1
+                match_types.update([str(match.get("match_type") or "unknown")])
+        if progress and (index % 1000 == 0 or index == len(messages)):
+            elapsed = max(0.001, time.monotonic() - started_at)
+            rate = index / elapsed
+            remaining = max(0, len(messages) - index)
+            eta = round(remaining / rate, 1) if rate else 0
+            print(f"rematch {index}/{len(messages)} messages, new_matches={inserted}, eta={eta}s", flush=True)
+
+    state["telegram_issue_signals"] = telegram_issue_signals(state)
+    return {
+        "telegram_rematch_messages": len(messages),
+        "telegram_rematch_old_matches": old_selected_count,
+        "telegram_rematch_new_matches": inserted,
+        "telegram_rematch_kept_matches": kept_count,
+        "telegram_rematch_match_types": dict(match_types),
+        "telegram_rematch_issue_signals": len(state.get("telegram_issue_signals", [])),
+    }
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Manage Telegram public-channel sources for the RSS curator.")
     parser.add_argument("--root", default=".", help="Project root containing config.yaml and data/state.json")
@@ -1604,6 +1806,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("collect", help="Run one Telegram source collection pass")
     sync_parser = subparsers.add_parser("sync-remote", help="Sync locally stored Telegram messages to the remote API in batches")
     sync_parser.add_argument("--limit", type=int, default=0, help="Limit most recent messages to sync, 0 means all local messages")
+
+    rematch_parser = subparsers.add_parser("rematch", help="Rebuild Telegram article matches with the current matching policy")
+    rematch_parser.add_argument("--limit", type=int, default=0, help="Rematch only the most recent N messages, 0 means all")
+    rematch_parser.add_argument("--dry-run", action="store_true", help="Print the rematch summary without writing state.json")
+    rematch_parser.add_argument("--progress", action="store_true", help="Print periodic rematch progress")
 
     discover_parser = subparsers.add_parser("discover", help="Discover similar public-channel candidates from enabled seed channels")
     discover_parser.add_argument("--limit", type=int, default=20, help="Maximum recommendations per seed channel")
@@ -1699,6 +1906,19 @@ def cli_main(argv: list[str] | None = None) -> int:
         summary["telegram_local_matches_selected"] = len(matches)
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0 if not summary.get("telegram_remote_failed") else 1
+    if args.command == "rematch":
+        target_state = json.loads(json.dumps(state, ensure_ascii=False)) if args.dry_run else state
+        summary = rematch_telegram_articles(
+            target_state,
+            config,
+            limit=max(0, int(args.limit)),
+            progress=bool(args.progress),
+        )
+        if not args.dry_run:
+            save_state(state_path, target_state)
+        summary["dry_run"] = int(bool(args.dry_run))
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0
     if args.command == "discover":
         from .dates import now_in_timezone
 

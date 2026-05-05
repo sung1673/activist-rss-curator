@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from curator.telegram_db_sync import channel_rows, match_rows, message_rows, mysql_datetime, table_name
+from curator.telegram_db_sync import channel_rows, delete_existing_match_rows, match_rows, message_rows, mysql_datetime, table_name
 
 
 def test_mysql_datetime_formats_timezone_aware_value() -> None:
@@ -53,3 +53,29 @@ def test_telegram_db_rows_are_compact_and_keyed(now) -> None:  # type: ignore[no
     assert messages[0]["message_key"] == "id:100:7"
     assert messages[0]["risk_flags_json"] == "[]"
     assert matches[0]["article_id"] == "article-1"
+
+
+def test_delete_existing_match_rows_replaces_selected_messages(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DB_TABLE_PREFIX", "activist_")
+    calls: list[tuple[str, object]] = []
+
+    class Cursor:
+        def execute(self, sql: str, params: object = None) -> int:
+            calls.append((sql, params))
+            return 2
+
+        def __enter__(self) -> "Cursor":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    class Conn:
+        def cursor(self) -> Cursor:
+            return Cursor()
+
+    deleted = delete_existing_match_rows(Conn(), {"id:1:1", "id:1:2"}, replace_all=False)
+
+    assert deleted == 2
+    assert "WHERE message_key IN" in calls[0][0]
+    assert calls[0][1] == ["id:1:1", "id:1:2"]

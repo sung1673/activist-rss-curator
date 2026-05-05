@@ -882,6 +882,45 @@ function search_tokens(string $query): array {
     return $tokens;
 }
 
+function telegram_event_token(string $token): bool {
+    $lower = mb_strtolower($token, 'UTF-8');
+    $terms = array(
+        'activist', 'activism', 'board', 'buyback', 'campaign', 'contest', 'delisting', 'director',
+        'dividend', 'governance', 'letter', 'proxy', 'settlement', 'shareholder', 'stake',
+        'stewardship', 'tender', '감리', '감사', '감사의견', '감자', '거래정지', '검찰', '경영권',
+        '고발', '공개매수', '공개서한', '교체', '금감원', '노조', '리스크', '물적분할', '배당',
+        '밸류업', '불성실공시', '분쟁', '분할', '상장폐지', '선임', '소각', '소송', '소액주주',
+        '스튜어드십', '실적', '위임장', '유상증자', '의결권', '이사회', '자사주', '정정',
+        '제재', '주주제안', '주주총회', '주주환원', '지배구조', '합병', '해임'
+    );
+    foreach ($terms as $term) {
+        if ($lower === $term || mb_strpos($lower, $term, 0, 'UTF-8') !== false) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function telegram_strong_token(string $token): bool {
+    return mb_strlen($token, 'UTF-8') >= 3 || preg_match('/\d/u', $token) === 1;
+}
+
+function telegram_query_fallback_allowed(array $tokens): bool {
+    if (count($tokens) < 3) {
+        return false;
+    }
+    $eventCount = 0;
+    $entityCount = 0;
+    foreach ($tokens as $token) {
+        if (telegram_event_token($token)) {
+            $eventCount++;
+        } elseif (telegram_strong_token($token)) {
+            $entityCount++;
+        }
+    }
+    return $eventCount >= 1 && $entityCount >= 1;
+}
+
 function handle_read(string $action, array $config): void {
     if ($action === 'health') {
         respond(200, array('ok' => true, 'service' => 'activist', 'time' => gmdate('c')));
@@ -937,6 +976,7 @@ function handle_read(string $action, array $config): void {
                 . 'JOIN ' . table_name($config, 'telegram_messages') . ' m ON m.message_key = tm.message_key '
                 . 'LEFT JOIN ' . table_name($config, 'telegram_channels') . ' c ON c.handle = m.channel_handle '
                 . 'WHERE tm.article_id IN (' . $placeholders . ') AND m.deleted_at IS NULL '
+                . 'AND (tm.match_type IN ("exact_url","canonical_url") OR tm.score >= 0.4500) '
                 . 'ORDER BY tm.score DESC, m.posted_at DESC LIMIT ' . $limit;
             $stmt = $pdo->prepare($sql);
             $stmt->execute($articleIds);
@@ -956,15 +996,15 @@ function handle_read(string $action, array $config): void {
             }
         }
         if ($query !== '' && count($messagesByKey) < $limit) {
-            $tokens = array_slice(search_tokens($query), 0, 4);
-            if (count($tokens) >= 2) {
+            $tokens = array_slice(search_tokens($query), 0, 5);
+            if (telegram_query_fallback_allowed($tokens)) {
                 $where = array('m.deleted_at IS NULL', 'm.posted_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY)');
                 $params = array();
                 foreach ($tokens as $token) {
                     $where[] = 'm.normalized_text LIKE ?';
                     $params[] = '%' . mb_strtolower($token, 'UTF-8') . '%';
                 }
-                $sql = 'SELECT m.channel_handle, COALESCE(c.title, m.channel_handle) AS channel_title, m.telegram_message_id, m.posted_at, m.message_url, m.text, m.risk_flags_json, "keyword" AS match_type, 0.5200 AS score '
+                $sql = 'SELECT m.channel_handle, COALESCE(c.title, m.channel_handle) AS channel_title, m.telegram_message_id, m.posted_at, m.message_url, m.text, m.risk_flags_json, "keyword" AS match_type, 0.4600 AS score '
                     . 'FROM ' . table_name($config, 'telegram_messages') . ' m '
                     . 'LEFT JOIN ' . table_name($config, 'telegram_channels') . ' c ON c.handle = m.channel_handle '
                     . 'WHERE ' . implode(' AND ', $where) . ' ORDER BY m.posted_at DESC LIMIT ' . $limit;

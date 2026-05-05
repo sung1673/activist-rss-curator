@@ -18,7 +18,10 @@ from curator.telegram_sources import (
     import_joined_public_channels,
     load_env_files,
     mark_deleted_message,
+    match_message_to_articles,
+    message_key,
     normalize_telegram_message,
+    rematch_telegram_articles,
     reconcile_recent_deletions,
     score_channel_candidate,
     telegram_run_record,
@@ -149,6 +152,18 @@ def test_article_url_direct_matching(config, now) -> None:  # type: ignore[no-un
     assert match["score"] == 1.0
 
 
+def test_duplicate_article_url_alias_matches_parent_article(config, now) -> None:  # type: ignore[no-untyped-def]
+    article = article_record(make_article("고려아연 경영권 분쟁", "https://example.com/canonical"), "accepted", now)
+    article["duplicate_matches"] = [{"canonical_url": "https://news.example.com/a?utm_source=alert"}]
+    state = {"articles": [article]}
+    message = normalize_telegram_message({"handle": "marketnews"}, {"id": 3, "text": "공유 https://news.example.com/a?utm_medium=tg"}, now)
+
+    matches = match_message_to_articles(state, message, telegram_config(config))
+
+    assert matches[0]["article_id"] == article["canonical_url_hash"]
+    assert matches[0]["match_type"] == "exact_url"
+
+
 def test_keyword_weak_matching_without_url(config, now) -> None:  # type: ignore[no-untyped-def]
     article = make_article("한화솔루션 유상증자 정정 요구", "https://example.com/h", summary="금감원이 유상증자 신고서 정정을 요구했다.")
     state = {"articles": [article_record(article, "accepted", now)]}
@@ -159,6 +174,36 @@ def test_keyword_weak_matching_without_url(config, now) -> None:  # type: ignore
     match = state["telegram_article_matches"][0]  # type: ignore[index]
     assert match["match_type"] == "keyword"
     assert "키워드 추정" in match["reason"]
+
+
+def test_keyword_weak_matching_requires_entity_and_event(config, now) -> None:  # type: ignore[no-untyped-def]
+    article = make_article("삼성전자 노조 리스크에 목표가 하향", "https://example.com/s", summary="노조 리스크가 보도됐다.")
+    state = {"articles": [article_record(article, "accepted", now)]}
+    message = normalize_telegram_message({"handle": "marketnews"}, {"id": 4, "text": "삼성전자 실적 발표와 시장 반응"}, now)
+
+    matches = match_message_to_articles(state, message, telegram_config(config))
+
+    assert matches == []
+
+
+def test_rematch_rebuilds_article_matches_with_current_policy(config, now) -> None:  # type: ignore[no-untyped-def]
+    article = make_article("한화솔루션 유상증자 정정 요구", "https://example.com/h", summary="금감원이 유상증자 신고서 정정을 요구했다.")
+    message = normalize_telegram_message(
+        {"handle": "marketnews"},
+        {"id": 5, "text": "한화솔루션 유상증자 정정 요구 이슈"},
+        now,
+    )
+    state = {
+        "articles": [article_record(article, "accepted", now)],
+        "telegram_source_messages": [message],
+        "telegram_article_matches": [{"article_id": "old", "telegram_message_key": message_key(message), "match_type": "keyword"}],
+    }
+
+    summary = rematch_telegram_articles(state, telegram_config(config))
+
+    assert summary["telegram_rematch_old_matches"] == 1
+    assert summary["telegram_rematch_new_matches"] == 1
+    assert state["telegram_article_matches"][0]["article_id"] == article["canonical_url_hash"]  # type: ignore[index]
 
 
 def test_channel_candidate_scoring() -> None:
