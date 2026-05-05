@@ -8,7 +8,7 @@ from html import escape
 from pathlib import Path
 
 from .dates import datetime_to_iso, parse_datetime
-from .telegram_sources import ensure_telegram_state, is_collectable_public_channel, message_key, telegram_issue_signals
+from .telegram_sources import ensure_telegram_state, is_collectable_public_channel, message_key, ordered_message_tokens, telegram_issue_signals
 
 
 TELEGRAM_DASHBOARD_RELATIVE_PATH = Path("public") / "feed" / "telegram-admin.html"
@@ -50,8 +50,7 @@ def _compact(value: object, max_chars: int = 90) -> str:
 
 
 def _tokens(text: str) -> list[str]:
-    tokens = [token.casefold() for token in re.findall(r"[0-9A-Za-z가-힣]{2,}", text)]
-    return [token for token in tokens if token not in TOKEN_STOPWORDS and len(token) >= 2]
+    return [token for token in ordered_message_tokens({"text": text}) if token not in TOKEN_STOPWORDS and len(token) >= 2]
 
 
 def _message_type(message: dict[str, object]) -> str:
@@ -122,7 +121,7 @@ def telegram_dashboard_model(state: dict[str, object], config: dict[str, object]
         avg_bytes = max(1, round(len(json.dumps(sample, ensure_ascii=False, sort_keys=True).encode("utf-8")) / len(sample)))
     daily_messages = len(recent_14d) / 14 if recent_14d else 0
 
-    signals = telegram_issue_signals(state, limit=12)
+    signals = telegram_issue_signals(state, config, limit=12, now=now)
     return {
         "generated_at": datetime_to_iso(now),
         "channels_total": len(channels),
@@ -191,7 +190,7 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
     )
     signal_rows = "\n".join(
         "<tr>"
-        f"<td>{escape(str(signal.get('article_id') or ''))}</td>"
+        f"<td><b>{escape(str(signal.get('signal_title') or signal.get('article_id') or ''))}</b><br><small>{escape(str(signal.get('signal_type') or ''))}</small></td>"
         f"<td>{escape(str(signal.get('related_telegram_count') or 0))}</td>"
         f"<td>{escape(str(signal.get('related_telegram_channels_count') or 0))}</td>"
         f"<td>{escape(', '.join(str(keyword) for keyword in signal.get('top_keywords', [])[:5]))}</td>"
@@ -279,7 +278,7 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
     </div>
   </section>
   <section>
-    <h2>기사-텔레그램 이슈 신호</h2>
+      <h2>Telegram 이슈 신호</h2>
     <table>
       <thead><tr><th>Article</th><th>Messages</th><th>Channels</th><th>Keywords</th><th>Risk flags</th></tr></thead>
       <tbody>{signal_rows or '<tr><td colspan="5">아직 기사와 연결된 Telegram 신호가 없습니다.</td></tr>'}</tbody>

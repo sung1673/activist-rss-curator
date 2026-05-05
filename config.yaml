@@ -406,6 +406,11 @@ telegram_sources:
   weak_match_min_strong_overlap: 2
   weak_match_window_hours: 96
   weak_match_limit_per_message: 3
+  signal_window_hours: 72
+  signal_min_messages: 3
+  signal_min_channels: 2
+  signal_limit: 40
+  signal_max_messages_per_signal: 5
   max_remote_messages: 500
   remote_batch_size: 300
   discover_enabled: false

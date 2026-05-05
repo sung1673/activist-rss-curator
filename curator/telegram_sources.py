@@ -8,11 +8,12 @@ import random
 import re
 import sys
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Protocol
+from urllib.parse import urlsplit
 
 from .config import load_config
 from .dates import datetime_to_iso, parse_datetime
@@ -79,6 +80,127 @@ GENERIC_MATCH_TOKENS = {
     "news",
     "utm",
     "rss",
+}
+SIGNAL_STOP_TOKENS = GENERIC_MATCH_TOKENS | {
+    "amp",
+    "api",
+    "channel",
+    "id",
+    "qoq",
+    "review",
+    "krx",
+    "naver",
+    "signal",
+    "yoy",
+    "telegram",
+    "억원",
+    "경우",
+    "견조한",
+    "금액",
+    "기업명",
+    "대비",
+    "거래",
+    "공유",
+    "구독",
+    "기준",
+    "내용",
+    "내일",
+    "대한",
+    "링크",
+    "리포트",
+    "목표가",
+    "매일",
+    "미디어",
+    "바른",
+    "보기",
+    "브리핑",
+    "분석",
+    "비중",
+    "시가총액",
+    "상위",
+    "서울경제",
+    "시그널",
+    "예상",
+    "오늘",
+    "오전",
+    "오후",
+    "올해",
+    "이번",
+    "있는",
+    "전년",
+    "전망",
+    "자료",
+    "정보",
+    "종목",
+    "주식",
+    "채널",
+    "컨버전스",
+    "투자",
+    "프리미엄",
+    "합니다",
+    "했습니다",
+    "한다",
+    "했다",
+    "현재",
+    "확인",
+}
+SIGNAL_EVENT_LABELS = {
+    "activist": "행동주의",
+    "activism": "행동주의",
+    "board": "이사회",
+    "buyback": "자사주",
+    "campaign": "행동주의 캠페인",
+    "contest": "표대결",
+    "delisting": "상장폐지",
+    "director": "이사회",
+    "dividend": "배당",
+    "governance": "지배구조",
+    "proxy": "위임장",
+    "settlement": "합의",
+    "shareholder": "주주",
+    "stake": "지분",
+    "stewardship": "스튜어드십",
+    "tender": "공개매수",
+    "감리": "감리",
+    "감사의견": "감사의견",
+    "감자": "감자",
+    "거래정지": "거래정지",
+    "검찰": "검찰",
+    "경영권": "경영권",
+    "고발": "고발",
+    "공개매수": "공개매수",
+    "공개서한": "공개서한",
+    "교체": "이사회 교체",
+    "금감원": "감독당국",
+    "노조": "노조",
+    "리스크": "리스크",
+    "물적분할": "물적분할",
+    "배당": "배당",
+    "밸류업": "밸류업",
+    "불성실공시": "불성실공시",
+    "분쟁": "분쟁",
+    "분할": "분할",
+    "상장폐지": "상장폐지",
+    "선임": "선임",
+    "소각": "자사주 소각",
+    "소송": "소송",
+    "소액주주": "소액주주",
+    "스튜어드십": "스튜어드십",
+    "실적": "실적",
+    "위임장": "위임장",
+    "유상증자": "유상증자",
+    "의결권": "의결권",
+    "이사회": "이사회",
+    "자사주": "자사주",
+    "정정": "정정",
+    "제재": "제재",
+    "주주권": "주주권",
+    "주주제안": "주주제안",
+    "주주총회": "주주총회",
+    "주주환원": "주주환원",
+    "지배구조": "지배구조",
+    "합병": "합병",
+    "해임": "해임",
 }
 WEAK_MATCH_EVENT_TOKENS = {
     "activist",
@@ -626,9 +748,110 @@ def message_tokens(message: dict[str, object]) -> set[str]:
     return {token for token in tokens if token not in GENERIC_MATCH_TOKENS}
 
 
+def ordered_message_tokens(message: dict[str, object]) -> list[str]:
+    text = URL_PATTERN.sub(" ", str(message.get("normalized_text") or message.get("text") or ""))
+    seen: set[str] = set()
+    tokens: list[str] = []
+    for token in re.findall(r"[0-9A-Za-z가-힣]{2,}", text):
+        lowered = token.casefold()
+        if lowered in seen or lowered in SIGNAL_STOP_TOKENS:
+            continue
+        if re.fullmatch(r"\d{4}", lowered):
+            continue
+        if re.fullmatch(r"\d{4}년", lowered):
+            continue
+        if re.fullmatch(r"\d{1,2}[월일시분]", lowered):
+            continue
+        if re.fullmatch(r"\d+q\d+", lowered):
+            continue
+        if re.fullmatch(r"\d+(?:\.\d+)?%?", lowered):
+            continue
+        if re.fullmatch(r"[0-9,]+원", lowered):
+            continue
+        if lowered.isdigit() and len(lowered) < 4:
+            continue
+        seen.add(lowered)
+        tokens.append(lowered)
+    return tokens
+
+
 def is_event_match_token(token: str) -> bool:
     lowered = token.casefold()
     return lowered in WEAK_MATCH_EVENT_TOKENS or any(keyword in lowered for keyword in WEAK_MATCH_EVENT_SUBSTRINGS)
+
+
+def signal_event_label(token: str) -> str:
+    lowered = token.casefold()
+    if lowered in SIGNAL_EVENT_LABELS:
+        return SIGNAL_EVENT_LABELS[lowered]
+    for keyword, label in SIGNAL_EVENT_LABELS.items():
+        if keyword in lowered:
+            return label
+    return token
+
+
+def signal_entity_tokens(tokens: list[str], *, limit: int = 6) -> list[str]:
+    entities: list[str] = []
+    for token in tokens:
+        if is_event_match_token(token):
+            continue
+        if token in SIGNAL_STOP_TOKENS:
+            continue
+        if len(token) < 3 and not re.search(r"\d", token):
+            continue
+        if re.fullmatch(r"\d{1,3}", token):
+            continue
+        if re.search(r"(?:월|일|분기|실적발표|컨센서스)$", token) and len(token) <= 6:
+            continue
+        entities.append(token)
+        if len(entities) >= limit:
+            break
+    return entities
+
+
+def telegram_signal_message_score(message: dict[str, object]) -> int:
+    views = max(0, int(message.get("views") or 0))
+    forwards = max(0, int(message.get("forwards") or 0))
+    replies = max(0, int(message.get("replies_count") or 0))
+    return views + forwards * 3 + replies * 4
+
+
+def telegram_signal_excerpt(message: dict[str, object], *, max_chars: int = 170) -> str:
+    text = re.sub(r"\s+", " ", str(message.get("text") or message.get("normalized_text") or "")).strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max(0, max_chars - 1)].rstrip() + "…"
+
+
+def telegram_signal_message_payload(message: dict[str, object]) -> dict[str, object]:
+    return {
+        "message_url": message.get("message_url") or "",
+        "channel_title": message.get("channel_title") or "",
+        "channel_handle": message.get("handle") or "",
+        "posted_at": message.get("posted_at") or "",
+        "excerpt": telegram_signal_excerpt(message),
+        "views": int(message.get("views") or 0),
+        "forwards": int(message.get("forwards") or 0),
+        "risk_flags": risk_flags_for_text(str(message.get("text") or "")),
+    }
+
+
+def is_boilerplate_signal_url(url: str) -> bool:
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return True
+    host = parsed.netloc.casefold()
+    path = parsed.path.strip("/")
+    if not host:
+        return True
+    if host in {"signal.sedaily.com", "www.sedaily.com"} and not path:
+        return True
+    if host in {"t.me", "telegram.me"}:
+        return True
+    if not path and not parsed.query:
+        return True
+    return False
 
 
 def is_strong_match_token(token: str) -> bool:
@@ -794,7 +1017,7 @@ def risk_flags_for_text(text: str) -> list[str]:
     return flags
 
 
-def telegram_issue_signals(state: dict[str, object], *, limit: int = 20) -> list[dict[str, object]]:
+def telegram_article_match_signals(state: dict[str, object]) -> list[dict[str, object]]:
     ensure_telegram_state(state)
     messages_by_key = {
         message_key(message): message
@@ -821,19 +1044,22 @@ def telegram_issue_signals(state: dict[str, object], *, limit: int = 20) -> list
         keyword_counter: Counter[str] = Counter()
         flags: set[str] = set()
         for message in related_messages:
-            keyword_counter.update(list(message_tokens(message))[:8])
+            keyword_counter.update(ordered_message_tokens(message)[:8])
             flags.update(risk_flags_for_text(str(message.get("text") or "")))
         confidence = min(1.0, 0.18 + len(related_messages) * 0.08 + len(channels) * 0.16)
         signals.append(
             {
                 "article_id": article,
+                "signal_type": "article_match",
+                "signal_key": article,
+                "signal_title": f"기사 매칭 {article[:10]}",
                 "related_telegram_count": len(related_messages),
                 "related_telegram_channels_count": len(channels),
                 "first_seen_at": dates[0] if dates else "",
                 "latest_seen_at": dates[-1] if dates else "",
                 "top_related_messages": sorted(
-                    related_messages,
-                    key=lambda item: int(item.get("views") or 0) + int(item.get("forwards") or 0) * 2,
+                    [telegram_signal_message_payload(message) for message in related_messages],
+                    key=lambda item: int(item.get("views") or 0) + int(item.get("forwards") or 0) * 3,
                     reverse=True,
                 )[:5],
                 "top_channels": sorted(channels)[:8],
@@ -842,11 +1068,183 @@ def telegram_issue_signals(state: dict[str, object], *, limit: int = 20) -> list
                 "risk_flags": sorted(flags),
             }
         )
+    return signals
+
+
+def latest_signal_reference_time(messages: list[dict[str, object]], timezone_name: str) -> datetime | None:
+    dates = [parse_datetime(message.get("posted_at"), timezone_name) for message in messages]
+    dates = [date for date in dates if date is not None]
+    return max(dates) if dates else None
+
+
+def telegram_url_burst_signals(
+    messages: list[dict[str, object]],
+    *,
+    min_messages: int,
+    min_channels: int,
+    max_messages_per_signal: int,
+) -> list[dict[str, object]]:
+    grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for message in messages:
+        for url in message.get("urls") or []:
+            canonical = canonicalize_telegram_url(str(url))
+            if canonical and not is_boilerplate_signal_url(canonical):
+                grouped[canonical].append(message)
+
+    signals: list[dict[str, object]] = []
+    for canonical, related_messages in grouped.items():
+        channels = {str(message.get("handle") or message.get("telegram_channel_id") or "") for message in related_messages}
+        if len(related_messages) < min_messages or len(channels) < min_channels:
+            continue
+        dates = sorted(str(message.get("posted_at") or "") for message in related_messages if message.get("posted_at"))
+        flags: set[str] = set()
+        keyword_counter: Counter[str] = Counter()
+        for message in related_messages:
+            keyword_counter.update(ordered_message_tokens(message)[:8])
+            flags.update(risk_flags_for_text(str(message.get("text") or "")))
+        top_messages = sorted(related_messages, key=telegram_signal_message_score, reverse=True)[:max_messages_per_signal]
+        title = telegram_signal_excerpt(top_messages[0], max_chars=80) if top_messages else canonical
+        confidence = min(1.0, 0.24 + len(related_messages) * 0.06 + len(channels) * 0.18)
+        signals.append(
+            {
+                "article_id": "telegram-url:" + stable_hash(canonical, 24),
+                "signal_type": "url_burst",
+                "signal_key": canonical,
+                "signal_title": title,
+                "related_telegram_count": len(related_messages),
+                "related_telegram_channels_count": len(channels),
+                "first_seen_at": dates[0] if dates else "",
+                "latest_seen_at": dates[-1] if dates else "",
+                "top_related_messages": [telegram_signal_message_payload(message) for message in top_messages],
+                "top_channels": sorted(channels)[:8],
+                "top_keywords": [keyword for keyword, _count in keyword_counter.most_common(8)],
+                "confidence_score": round(confidence, 3),
+                "risk_flags": sorted(flags),
+            }
+        )
+    return signals
+
+
+def telegram_topic_burst_signals(
+    messages: list[dict[str, object]],
+    *,
+    min_messages: int,
+    min_channels: int,
+    max_messages_per_signal: int,
+) -> list[dict[str, object]]:
+    grouped: dict[tuple[str, str], list[dict[str, object]]] = defaultdict(list)
+    for message in messages:
+        tokens = ordered_message_tokens(message)
+        event_tokens = [token for token in tokens if is_event_match_token(token)]
+        if not event_tokens:
+            continue
+        entities = signal_entity_tokens(tokens)
+        if not entities:
+            continue
+        for event in event_tokens[:4]:
+            for entity in entities[:4]:
+                grouped[(entity, signal_event_label(event))].append(message)
+
+    signals: list[dict[str, object]] = []
+    seen_message_sets: set[tuple[str, ...]] = set()
+    for (entity, event_label), related_messages in grouped.items():
+        unique_by_key = {message_key(message): message for message in related_messages}
+        related_messages = list(unique_by_key.values())
+        channels = {str(message.get("handle") or message.get("telegram_channel_id") or "") for message in related_messages}
+        enough_single_channel_volume = len(related_messages) >= max(min_messages * 2, 5)
+        if len(related_messages) < min_messages:
+            continue
+        if len(channels) < min_channels and not enough_single_channel_volume:
+            continue
+        message_set_key = tuple(sorted(message_key(message) for message in related_messages)[:24])
+        if message_set_key in seen_message_sets:
+            continue
+        seen_message_sets.add(message_set_key)
+        dates = sorted(str(message.get("posted_at") or "") for message in related_messages if message.get("posted_at"))
+        flags: set[str] = set()
+        keyword_counter: Counter[str] = Counter()
+        for message in related_messages:
+            keyword_counter.update(ordered_message_tokens(message)[:10])
+            flags.update(risk_flags_for_text(str(message.get("text") or "")))
+        top_messages = sorted(related_messages, key=telegram_signal_message_score, reverse=True)[:max_messages_per_signal]
+        confidence = min(1.0, 0.14 + len(related_messages) * 0.045 + len(channels) * 0.15)
+        title = f"{entity} · {event_label}"
+        signals.append(
+            {
+                "article_id": "telegram-topic:" + stable_hash(f"{entity}|{event_label}", 24),
+                "signal_type": "topic_burst",
+                "signal_key": f"{entity}|{event_label}",
+                "signal_title": title,
+                "related_telegram_count": len(related_messages),
+                "related_telegram_channels_count": len(channels),
+                "first_seen_at": dates[0] if dates else "",
+                "latest_seen_at": dates[-1] if dates else "",
+                "top_related_messages": [telegram_signal_message_payload(message) for message in top_messages],
+                "top_channels": sorted(channels)[:8],
+                "top_keywords": [keyword for keyword, _count in keyword_counter.most_common(8)],
+                "confidence_score": round(confidence, 3),
+                "risk_flags": sorted(flags),
+            }
+        )
+    return signals
+
+
+def telegram_issue_signals(
+    state: dict[str, object],
+    config: dict[str, object] | None = None,
+    *,
+    limit: int = 20,
+    now: datetime | None = None,
+) -> list[dict[str, object]]:
+    ensure_telegram_state(state)
+    settings = telegram_sources_config(config or {})
+    timezone_name = str((config or {}).get("timezone") or "Asia/Seoul")
+    configured_limit = int(settings.get("signal_limit", limit))
+    signal_limit = configured_limit if limit == 20 else min(configured_limit, limit)
+    window_hours = int(settings.get("signal_window_hours", 72))
+    min_messages = int(settings.get("signal_min_messages", 3))
+    min_channels = int(settings.get("signal_min_channels", 2))
+    max_messages_per_signal = int(settings.get("signal_max_messages_per_signal", 5))
+    messages = [
+        message
+        for message in state.get("telegram_source_messages", [])
+        if isinstance(message, dict) and not message.get("deleted_at")
+    ]
+    reference_time = now or latest_signal_reference_time(messages, timezone_name)
+    recent_messages = messages
+    if reference_time and window_hours > 0:
+        window_start = reference_time - timedelta(hours=window_hours)
+        recent_messages = [
+            message
+            for message in messages
+            if (parse_datetime(message.get("posted_at"), timezone_name) or reference_time) >= window_start
+        ]
+    signals = telegram_article_match_signals(state)
+    signals.extend(
+        telegram_url_burst_signals(
+            recent_messages,
+            min_messages=max(2, min_messages),
+            min_channels=max(1, min_channels),
+            max_messages_per_signal=max_messages_per_signal,
+        )
+    )
+    signals.extend(
+        telegram_topic_burst_signals(
+            recent_messages,
+            min_messages=min_messages,
+            min_channels=min_channels,
+            max_messages_per_signal=max_messages_per_signal,
+        )
+    )
     return sorted(
         signals,
-        key=lambda item: (int(item.get("related_telegram_channels_count") or 0), int(item.get("related_telegram_count") or 0)),
+        key=lambda item: (
+            float(item.get("confidence_score") or 0),
+            int(item.get("related_telegram_channels_count") or 0),
+            int(item.get("related_telegram_count") or 0),
+        ),
         reverse=True,
-    )[:limit]
+    )[:signal_limit]
 
 
 def score_channel_candidate(candidate: dict[str, object]) -> int:
@@ -1101,7 +1499,7 @@ async def _collect_with_client(
         channel["last_collected_at"] = datetime_to_iso(now)
         channel["last_error"] = None
 
-    state["telegram_issue_signals"] = telegram_issue_signals(state)
+    state["telegram_issue_signals"] = telegram_issue_signals(state, config, now=now)
     return {
         "telegram_channels": len(enabled_channels(state)),
         "telegram_messages_inserted": inserted,
@@ -1610,7 +2008,7 @@ async def _backfill_messages_with_client(
                     print(f"max_messages={max_messages} reached; stopping backfill", flush=True)
                 break
 
-    state["telegram_issue_signals"] = telegram_issue_signals(state)
+    state["telegram_issue_signals"] = telegram_issue_signals(state, config, now=now)
     summary: dict[str, object] = {
         "telegram_backfill_channels": len(channels),
         "telegram_backfill_days": max(1, days),
@@ -1841,7 +2239,7 @@ def rematch_telegram_articles(
             eta = round(remaining / rate, 1) if rate else 0
             print(f"rematch {index}/{len(messages)} messages, new_matches={inserted}, eta={eta}s", flush=True)
 
-    state["telegram_issue_signals"] = telegram_issue_signals(state)
+    state["telegram_issue_signals"] = telegram_issue_signals(state, config)
     return {
         "telegram_rematch_messages": len(messages),
         "telegram_rematch_old_matches": old_selected_count,

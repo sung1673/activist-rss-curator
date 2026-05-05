@@ -25,6 +25,7 @@ from curator.telegram_sources import (
     rematch_telegram_articles,
     reconcile_recent_deletions,
     score_channel_candidate,
+    telegram_issue_signals,
     telegram_run_record,
     telegram_state_stats,
     upsert_telegram_message,
@@ -213,6 +214,45 @@ def test_rematch_rebuilds_article_matches_with_current_policy(config, now) -> No
     assert summary["telegram_rematch_old_matches"] == 1
     assert summary["telegram_rematch_new_matches"] == 1
     assert state["telegram_article_matches"][0]["article_id"] == article["canonical_url_hash"]  # type: ignore[index]
+
+
+def test_telegram_issue_signals_include_topic_bursts(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["telegram_sources"] = {
+        "signal_window_hours": 72,
+        "signal_min_messages": 2,
+        "signal_min_channels": 2,
+        "signal_limit": 10,
+    }  # type: ignore[index]
+    state = {
+        "telegram_source_messages": [
+            normalize_telegram_message({"handle": "first"}, {"id": 1, "text": "삼성전자 자사주 소각 주주환원 이슈", "date": now}, now),
+            normalize_telegram_message({"handle": "second"}, {"id": 2, "text": "삼성전자 자사주 소각 확대 보도", "date": now}, now),
+        ]
+    }
+
+    signals = telegram_issue_signals(state, config, now=now)
+
+    assert any(signal.get("signal_type") == "topic_burst" for signal in signals)
+    assert any("삼성전자" in str(signal.get("signal_title") or "") for signal in signals)
+
+
+def test_telegram_issue_signals_include_url_bursts(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["telegram_sources"] = {
+        "signal_window_hours": 72,
+        "signal_min_messages": 2,
+        "signal_min_channels": 2,
+        "signal_limit": 10,
+    }  # type: ignore[index]
+    state = {
+        "telegram_source_messages": [
+            normalize_telegram_message({"handle": "first"}, {"id": 1, "text": "공유 https://example.com/a?utm_source=tg", "date": now}, now),
+            normalize_telegram_message({"handle": "second"}, {"id": 2, "text": "확인 https://example.com/a?utm_medium=chat", "date": now}, now),
+        ]
+    }
+
+    signals = telegram_issue_signals(state, config, now=now)
+
+    assert any(signal.get("signal_type") == "url_burst" for signal in signals)
 
 
 def test_channel_candidate_scoring() -> None:
