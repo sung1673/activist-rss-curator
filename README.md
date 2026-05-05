@@ -159,6 +159,23 @@ Google News가 일시적으로 429 rate limit을 반환하면 원문 URL 복원�
 .\.venv\Scripts\python.exe -m curator.google_news_repair --limit 100 --sleep 2 --apply
 ```
 
+Windows에서 상태 확인과 작은 배치를 반복하려면 래퍼 스크립트를 사용할 수 있습니다. `stats`는 DB에 남은 Google News URL 수만 확인하고 Google에 요청하지 않습니다.
+
+```powershell
+.\scripts\repair_google_news_windows.ps1 -Mode stats
+.\scripts\repair_google_news_windows.ps1 -Mode dry-run -Limit 5 -SleepSeconds 20
+.\scripts\repair_google_news_windows.ps1 -Mode apply -Limit 10 -SleepSeconds 20 -SleepMaxSeconds 45 -Repeat 3 -PauseMinutes 60
+```
+
+동일 기능은 Python으로 직접 실행할 수도 있습니다.
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\repair_google_news_windows.py --mode stats
+.\.venv\Scripts\python.exe .\scripts\repair_google_news_windows.py --mode apply --limit 10 --sleep-seconds 20 --sleep-max-seconds 45
+```
+
+`SleepSeconds`는 기사 1건 처리 후 대기 시간입니다. `SleepMaxSeconds`를 함께 주면 각 건마다 `SleepSeconds`~`SleepMaxSeconds` 사이에서 랜덤하게 쉽니다. Google News가 `rate_limited=1`을 반환하면 스크립트는 다음 batch를 진행하지 않고 멈춥니다.
+
 작게 시험하려면 다음처럼 dry-run을 먼저 돌립니다.
 
 ```powershell

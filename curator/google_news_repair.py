@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import sys
 import time
 from dataclasses import dataclass
@@ -146,6 +147,26 @@ def mysql_datetime(value: object) -> datetime | None:
     return parsed.replace(tzinfo=None)
 
 
+def repair_sleep_seconds(args: argparse.Namespace) -> float:
+    if args.sleep_min is None and args.sleep_max is None:
+        return max(0.0, float(args.sleep))
+    low = float(args.sleep_min if args.sleep_min is not None else args.sleep)
+    high = float(args.sleep_max if args.sleep_max is not None else low)
+    low = max(0.0, low)
+    high = max(0.0, high)
+    if high < low:
+        low, high = high, low
+    if high == low:
+        return low
+    return random.uniform(low, high)
+
+
+def sleep_between_repairs(args: argparse.Namespace) -> None:
+    seconds = repair_sleep_seconds(args)
+    if seconds > 0:
+        time.sleep(seconds)
+
+
 def update_article_row(
     conn: Any,
     *,
@@ -254,8 +275,7 @@ def repair_google_news_urls(args: argparse.Namespace) -> RepairStats:
                 if not result.decoded_url or google_news_host(result.decoded_url):
                     stats.failed += 1
                     print(f"[{stats.scanned}/{len(rows)}] decode failed: {row.get('record_id')} {result.error}", flush=True)
-                    if args.sleep:
-                        time.sleep(args.sleep)
+                    sleep_between_repairs(args)
                     continue
                 stats.decoded += 1
                 repaired = apply_decoded_google_news_url(row_to_article(row), result.decoded_url)
@@ -271,8 +291,7 @@ def repair_google_news_urls(args: argparse.Namespace) -> RepairStats:
                         f"[{stats.scanned}/{len(rows)}] conflict skipped: {row.get('record_id')} -> {conflict.get('record_id')}",
                         flush=True,
                     )
-                    if args.sleep:
-                        time.sleep(args.sleep)
+                    sleep_between_repairs(args)
                     continue
                 if args.apply:
                     update_article_row(
@@ -294,8 +313,7 @@ def repair_google_news_urls(args: argparse.Namespace) -> RepairStats:
                     )
                     if state_path:
                         stats.state_updated += repair_state_file(state_path, old_url, repaired, apply=False)
-                if args.sleep:
-                    time.sleep(args.sleep)
+                sleep_between_repairs(args)
     finally:
         conn.close()
     return stats
@@ -306,6 +324,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", default=str(PROJECT_ROOT))
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     parser.add_argument("--sleep", type=float, default=1.0, help="Seconds to wait between Google News decode attempts.")
+    parser.add_argument("--sleep-min", type=float, default=None, help="Minimum randomized sleep seconds between decode attempts.")
+    parser.add_argument("--sleep-max", type=float, default=None, help="Maximum randomized sleep seconds between decode attempts.")
     parser.add_argument("--page-timeout", type=float, default=8.0)
     parser.add_argument("--apply", action="store_true", help="Write repaired URLs to MySQL. Without this, only prints candidates.")
     parser.add_argument("--include-rejected", action="store_true", help="Also repair rejected rows.")
