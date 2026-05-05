@@ -205,6 +205,9 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "AI 요약 워크벤치" in workbench_html
     assert "data-workbench-list" in workbench_html
     assert "fetchArchiveRows" in workbench_html
+    assert "relatedContextMarkup" in workbench_html
+    assert "related__grid" in workbench_html
+    assert "telegram-card" in workbench_html
     assert "현재 묶음과 DB 아카이브" in workbench_html
     assert "NO IMAGE" in workbench_html
     assert "panel__image--placeholder" in workbench_html
@@ -217,6 +220,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     workbench_stories = json.loads(workbench_data.group(1))
     assert workbench_stories
     assert all(isinstance(story.get("title"), str) for story in workbench_stories)
+    assert any(story.get("telegram_mentions") for story in workbench_stories)
     current_link_data = re.findall(r'<script type="application/json" data-story-current-links>(.*?)</script>', html, re.S)
     assert all("&quot;" not in script for script in current_link_data)
     assert all(isinstance(json.loads(script), list) for script in current_link_data)

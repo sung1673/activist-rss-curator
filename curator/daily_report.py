@@ -2818,6 +2818,11 @@ def render_report_html(
 
 def workbench_story_payload(story: dict[str, object], config: dict[str, object]) -> dict[str, object]:
     links = [link for link in (story.get("links") if isinstance(story.get("links"), list) else []) if isinstance(link, dict)]
+    telegram_mentions = [
+        mention
+        for mention in (story.get("telegram_mentions") if isinstance(story.get("telegram_mentions"), list) else [])
+        if isinstance(mention, dict)
+    ]
     return {
         "id": str(story.get("id") or ""),
         "title": str(story.get("title") or "제목 없음"),
@@ -2831,6 +2836,7 @@ def workbench_story_payload(story: dict[str, object], config: dict[str, object])
         "story_key": str(story.get("story_key") or ""),
         "db_query": str(story.get("db_query") or story.get("title") or ""),
         "links": links[:12],
+        "telegram_mentions": telegram_mentions[:5],
     }
 
 
@@ -2894,13 +2900,14 @@ def render_workbench_html(
     .related__head {{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; color:var(--muted); font-size:12px; }}
     .related__chips {{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:9px; }}
     .related__chips span {{ border:1px solid rgba(112,55,224,.18); border-radius:999px; padding:3px 8px; color:var(--accent-deep); background:#fff; font-size:11px; font-weight:850; }}
-    .related__table {{ border:1px solid var(--line); overflow:auto; }}
-    table {{ width:100%; min-width:720px; border-collapse:collapse; font-size:12.5px; }}
-    th, td {{ padding:8px 9px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }}
-    th {{ background:#faf8fd; color:var(--muted); font-weight:800; }}
-    th:first-child, td:first-child {{ width:82px; }}
-    th:nth-child(2), td:nth-child(2) {{ width:96px; color:var(--muted); white-space:nowrap; }}
-    th:nth-child(3), td:nth-child(3) {{ width:124px; color:var(--accent-deep); }}
+    .related__grid {{ display:grid; gap:8px; }}
+    .related-card, .telegram-card {{ display:grid; gap:5px; min-width:0; border:1px solid rgba(112,55,224,.13); background:rgba(255,255,255,.84); padding:10px 11px; color:inherit; text-decoration:none; }}
+    .related-card:hover strong, .telegram-card:hover strong {{ color:var(--accent-deep); text-decoration:underline; text-underline-offset:3px; }}
+    .related-card__meta, .telegram-card__meta {{ display:flex; flex-wrap:wrap; gap:5px 8px; align-items:center; color:var(--muted); font-size:11px; line-height:1.35; }}
+    .related-card strong, .telegram-card strong {{ color:var(--ink); font-size:13px; line-height:1.38; word-break:keep-all; overflow-wrap:anywhere; }}
+    .related-card p, .telegram-card p {{ margin:0; color:#4d4659; font-size:12px; line-height:1.42; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }}
+    .telegram-block {{ display:grid; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }}
+    .telegram-block__head {{ display:flex; justify-content:space-between; gap:12px; color:var(--ink); font-size:12px; font-weight:900; }}
     .kind {{ display:inline-flex; border:1px solid rgba(112,55,224,.22); border-radius:999px; padding:2px 7px; color:var(--accent-deep); background:#fff; font-size:10.5px; font-weight:850; white-space:nowrap; }}
     .kind--archive {{ color:var(--green); border-color:rgba(0,120,95,.25); }}
     .empty {{ color:var(--muted); font-size:13px; padding:12px; border:1px solid var(--line); background:#fff; }}
@@ -3067,6 +3074,8 @@ def render_workbench_html(
         canonical_url: link.url,
         title: link.title,
         source: link.source || link.domain || '',
+        feed_name: link.source || link.domain || '',
+        summary: link.summary || '',
         published_at: link.published_at || '',
         context_kind: 'current',
       }}));
@@ -3106,6 +3115,60 @@ def render_workbench_html(
         .slice(0, 8)
         .map((article) => ({{ ...article, context_kind: 'archive' }}));
     }}
+    function matchReasons(article, story) {{
+      const tokens = contextTokens(story);
+      const text = `${{article.title || ''}} ${{article.summary || ''}} ${{article.source || article.feed_name || ''}}`.toLowerCase();
+      const reasons = [];
+      tokens.forEach((token) => {{
+        if (reasons.length < 3 && text.includes(token.toLowerCase())) reasons.push(token);
+      }});
+      return reasons.length ? reasons : [article.context_kind === 'archive' ? '아카이브 관련' : '현재 묶음'];
+    }}
+    function rowSnippet(article, story) {{
+      const text = String(article.summary || article.title || '').replace(/\\s+/g, ' ').trim();
+      if (!text) return '';
+      const tokens = contextTokens(story);
+      const lowered = text.toLowerCase();
+      const hit = tokens.find((token) => lowered.includes(token.toLowerCase()));
+      if (!hit) return compactText(text, 120);
+      const index = Math.max(0, lowered.indexOf(hit.toLowerCase()) - 34);
+      return compactText(`${{index > 0 ? '… ' : ''}}${{text.slice(index, index + 130)}}${{index + 130 < text.length ? ' …' : ''}}`, 132);
+    }}
+    function telegramMatchLabel(value) {{
+      const type = String(value || '');
+      if (type === 'exact_url' || type === 'canonical_url') return 'URL 직접';
+      if (type === 'ticker') return '종목 추정';
+      if (type === 'keyword') return '키워드 추정';
+      return '관련 언급';
+    }}
+    function telegramSnippet(item, story) {{
+      const text = String(item.context_excerpt || item.excerpt || item.text || '').replace(/\\s+/g, ' ').trim();
+      if (!text) return '';
+      if (text.startsWith('관련 문맥:')) return compactText(text, 156);
+      const tokens = contextTokens(story);
+      const lowered = text.toLowerCase();
+      const hit = tokens.find((token) => lowered.includes(token.toLowerCase()));
+      if (!hit) return compactText(text, 142);
+      const index = Math.max(0, lowered.indexOf(hit.toLowerCase()) - 42);
+      return compactText(`관련 문맥: ${{index > 0 ? '... ' : ''}}${{text.slice(index, index + 142)}}${{index + 142 < text.length ? ' ...' : ''}}`, 158);
+    }}
+    function usefulTelegramMentions(story) {{
+      const seen = new Set();
+      const tokens = contextTokens(story);
+      return (Array.isArray(story.telegram_mentions) ? story.telegram_mentions : [])
+        .filter((item) => item && (item.message_url || item.url))
+        .filter((item) => {{
+          const key = item.message_url || item.url;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          const matchType = String(item.match_type || '');
+          if (matchType === 'exact_url' || matchType === 'canonical_url') return true;
+          const score = Number(item.score || 0);
+          const text = `${{item.context_excerpt || ''}} ${{item.excerpt || ''}} ${{item.text || ''}}`.toLowerCase();
+          return score >= 0.53 && (!tokens.length || tokens.some((token) => text.includes(token.toLowerCase())));
+        }})
+        .slice(0, 5);
+    }}
     function renderList() {{
       if (!list) return;
       list.innerHTML = '';
@@ -3118,15 +3181,42 @@ def render_workbench_html(
         list.appendChild(button);
       }});
     }}
-    function relatedTable(rows) {{
-      if (!rows.length) return '<div class="empty">표시할 관련 기사가 없습니다.</div>';
-      const chips = [`관련 기사 ${{rows.length}}건`, `매체 ${{new Set(rows.map((row) => row.source || row.feed_name || '')).size}}곳`];
+    function relatedContextMarkup(rows, story) {{
+      const telegramItems = usefulTelegramMentions(story);
+      if (!rows.length && !telegramItems.length) return '<div class="empty">표시할 관련 기사나 Telegram 언급이 없습니다.</div>';
+      const chips = [
+        rows.length ? `관련 기사 ${{rows.length}}건` : '',
+        rows.length ? `매체 ${{new Set(rows.map((row) => row.source || row.feed_name || '')).size}}곳` : '',
+        telegramItems.length ? `Telegram ${{telegramItems.length}}건` : '',
+      ].filter(Boolean);
+      const articleCards = rows.map((row) => `
+        <a class="related-card" href="${{escapeHtml(safeUrl(row.canonical_url))}}" target="_blank" rel="noopener noreferrer">
+          <div class="related-card__meta">
+            <span class="kind${{row.context_kind === 'archive' ? ' kind--archive' : ''}}">${{row.context_kind === 'archive' ? '아카이브' : '현재 묶음'}}</span>
+            <span>${{escapeHtml(dateLabel(row) || '일시 미상')}}</span>
+            <span>${{escapeHtml(row.source || row.feed_name || '매체 미상')}}</span>
+            <span>${{escapeHtml(matchReasons(row, story).join(' · '))}}</span>
+          </div>
+          <strong>${{escapeHtml(compactText(row.title, 118))}}</strong>
+          ${{rowSnippet(row, story) ? `<p>${{escapeHtml(rowSnippet(row, story))}}</p>` : ''}}
+        </a>
+      `).join('');
+      const telegramCards = telegramItems.map((item) => `
+        <a class="telegram-card" href="${{escapeHtml(safeUrl(item.message_url || item.url))}}" target="_blank" rel="noopener noreferrer">
+          <div class="telegram-card__meta">
+            <span>${{escapeHtml(item.channel_title || item.channel_handle || item.handle || '공개 채널')}}</span>
+            <span>${{escapeHtml(String(item.posted_at || ''))}}</span>
+            <span>${{escapeHtml(telegramMatchLabel(item.match_type))}}</span>
+            ${{Array.isArray(item.risk_flags) ? item.risk_flags.slice(0, 2).map((flag) => `<span>${{escapeHtml(flag)}}</span>`).join('') : ''}}
+          </div>
+          <strong>Telegram 언급</strong>
+          <p>${{escapeHtml(telegramSnippet(item, story))}}</p>
+        </a>
+      `).join('');
       return `
         <div class="related__chips">${{chips.map((chip) => `<span>${{escapeHtml(chip)}}</span>`).join('')}}</div>
-        <div class="related__table"><table>
-          <thead><tr><th>구분</th><th>일시</th><th>매체</th><th>기사</th></tr></thead>
-          <tbody>${{rows.map((row) => `<tr><td><span class="kind${{row.context_kind === 'archive' ? ' kind--archive' : ''}}">${{row.context_kind === 'archive' ? '아카이브' : '현재 묶음'}}</span></td><td>${{escapeHtml(dateLabel(row) || '일시 미상')}}</td><td>${{escapeHtml(row.source || row.feed_name || '매체 미상')}}</td><td><a href="${{escapeHtml(safeUrl(row.canonical_url))}}" target="_blank" rel="noopener noreferrer">${{escapeHtml(compactText(row.title, 110))}}</a></td></tr>`).join('')}}</tbody>
-        </table></div>`;
+        <div class="related__grid">${{articleCards}}</div>
+        ${{telegramItems.length ? `<div class="telegram-block"><div class="telegram-block__head"><strong>Telegram 언급</strong><span>${{telegramItems.length}}건</span></div>${{telegramCards}}</div>` : ''}}`;
     }}
     async function openStory(index) {{
       activeIndex = Math.max(0, Math.min(index, stories.length - 1));
@@ -3150,7 +3240,7 @@ def render_workbench_html(
         </div>
         <section class="related">
           <div class="related__head"><strong>관련 기사</strong><span data-related-status>현재 묶음과 DB 아카이브를 확인하는 중입니다.</span></div>
-          <div data-related-body>${{relatedTable(currentRows(story))}}</div>
+          <div data-related-body>${{relatedContextMarkup(currentRows(story), story)}}</div>
         </section>`;
       installImageFallback();
       panel.querySelector('[data-reader-open-story]')?.addEventListener('click', () => openReader(story));
@@ -3158,8 +3248,11 @@ def render_workbench_html(
       panel.querySelector('[data-next]')?.addEventListener('click', () => openStory(activeIndex + 1));
       const archiveRows = await fetchArchiveRows(story);
       const rows = [...currentRows(story), ...archiveRows];
-      panel.querySelector('[data-related-body]').innerHTML = relatedTable(rows);
-      panel.querySelector('[data-related-status]').textContent = archiveRows.length ? '아카이브 관련 기사까지 반영했습니다.' : '현재 묶음을 중심으로 표시합니다.';
+      panel.querySelector('[data-related-body]').innerHTML = relatedContextMarkup(rows, story);
+      const telegramCount = usefulTelegramMentions(story).length;
+      panel.querySelector('[data-related-status]').textContent = archiveRows.length || telegramCount
+        ? 'DB 아카이브와 Telegram 언급까지 반영했습니다.'
+        : '현재 묶음을 중심으로 표시합니다.';
     }}
     renderList();
     openStory(0);
