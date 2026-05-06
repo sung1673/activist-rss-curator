@@ -78,6 +78,7 @@ MAJOR_SOURCE_TERMS = (
     "barron's",
 )
 SUPPRESS_REASONS = {"low_relevance", "excluded_domain"}
+BROAD_CONTEXT_THEME_GROUPS = {"board_audit"}
 
 
 def priority_config(config: dict[str, object]) -> dict[str, Any]:
@@ -168,13 +169,17 @@ def article_hash_key(article: dict[str, object]) -> str:
 
 
 def story_key_for_article(article: dict[str, object], cluster: dict[str, object] | None = None) -> str:
+    normalized_title = str(article.get("normalized_title") or article.get("title") or "").strip()
+    article_story_key = f"story:{stable_hash(normalized_title or article_hash_key(article), length=16)}"
     if cluster:
+        theme_group = str(cluster.get("theme_group") or article.get("theme_group") or "").strip()
+        if theme_group in BROAD_CONTEXT_THEME_GROUPS:
+            return article_story_key
         for key in ("cluster_key", "guid"):
             value = str(cluster.get(key) or "").strip()
             if value:
                 return value
-    normalized_title = str(article.get("normalized_title") or article.get("title") or "").strip()
-    return f"story:{stable_hash(normalized_title or article_hash_key(article), length=16)}"
+    return article_story_key
 
 
 def cluster_lookup_key(article: dict[str, object]) -> str:

@@ -67,5 +67,43 @@ def test_annotate_state_priorities_updates_articles_and_clusters(config, now) ->
     assert state["published_clusters"][0]["priority_level"] in {"top", "watch", "normal"}
 
 
+def test_priority_avoids_broad_board_story_key(config, now) -> None:  # type: ignore[no-untyped-def]
+    article = make_article(
+        "삼성전자 이사회 의장 파업 현실화 땐 노사 모두 설 자리 잃을 것",
+        "https://example.com/samsung-board",
+    )
+    record = {
+        "title": article["clean_title"],
+        "normalized_title": article["normalized_title"],
+        "canonical_url": article["canonical_url"],
+        "canonical_url_hash": article["canonical_url_hash"],
+        "title_hash": article["title_hash"],
+        "published_at": article["published_at"],
+        "seen_at": now.isoformat(),
+        "status": "accepted",
+        "relevance_level": "high",
+        "source": "뉴스토마토",
+    }
+    state = {
+        "articles": [record],
+        "rejected_articles": [],
+        "pending_clusters": [],
+        "published_clusters": [
+            {
+                "status": "published",
+                "cluster_key": "4ad8e7d69977be29",
+                "theme_group": "board_audit",
+                "articles": [article],
+                "article_count": 1,
+            }
+        ],
+    }
+
+    annotate_state_priorities(state, config, now, {})
+
+    assert state["articles"][0]["story_key"].startswith("story:")
+    assert state["articles"][0]["story_key"] != "4ad8e7d69977be29"
+
+
 def test_load_priority_overrides_handles_missing_file(tmp_path) -> None:
     assert load_priority_overrides(tmp_path / "missing.yaml") == {}
