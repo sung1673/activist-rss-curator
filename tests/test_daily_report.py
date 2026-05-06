@@ -238,6 +238,9 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "telegram_dashboard" in search_html
     assert "latest_snapshot" in search_html
     assert "articles" in search_html
+    assert "primaryTelegramMessage" in search_html
+    assert "top_related_messages" in search_html
+    assert "telegram-preview" in search_html
     assert "투자 추천이 아니라" in search_html
     current_link_data = re.findall(r'<script type="application/json" data-story-current-links>(.*?)</script>', html, re.S)
     assert all("&quot;" not in script for script in current_link_data)

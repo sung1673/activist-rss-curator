@@ -3236,6 +3236,8 @@ def render_search_html(
     .meta {{ display:flex; flex-wrap:wrap; gap:6px 9px; color:var(--muted); font-size:11px; }}
     .reasons {{ display:flex; flex-wrap:wrap; gap:5px; }}
     .reasons span {{ border:1px solid rgba(112,55,224,.16); border-radius:999px; padding:2px 7px; background:var(--accent-soft); color:var(--accent-deep); font-size:10.5px; font-weight:850; }}
+    .telegram-preview {{ display:grid; gap:4px; border-left:3px solid rgba(112,55,224,.35); padding-left:9px; color:#4b4357; font-size:12px; line-height:1.45; }}
+    .telegram-preview span {{ display:block; }}
     .section-label {{ margin:16px 0 0; border-bottom:2px solid var(--ink); padding-bottom:7px; font-family:Georgia,"Times New Roman",serif; font-size:24px; }}
     @media (max-width:860px) {{
       .page {{ padding:18px 14px 48px; }}
@@ -3342,6 +3344,10 @@ def render_search_html(
         row.title, row.representative_title, row.signal_title, row.summary, row.signal_summary,
         row.source, row.feed_name, row.feed_category, row.topic_category,
         Array.isArray(row.top_keywords) ? row.top_keywords.join(' ') : '',
+        Array.isArray(row.top_channels) ? row.top_channels.join(' ') : '',
+        telegramMessages(row).map((message) => [
+          message.excerpt, message.text, message.channel_title, message.channel_handle,
+        ].join(' ')).join(' '),
       ].join(' ').toLowerCase();
       const queryTokens = tokens(query);
       return !queryTokens.length || queryTokens.some((token) => haystack.includes(token));
@@ -3365,7 +3371,10 @@ def render_search_html(
       return reasons.length ? reasons.slice(0, 4) : ['관련도순'];
     }}
     function snippet(row, query) {{
-      const text = String(row.search_snippet || row.summary || row.signal_summary || row.title || row.representative_title || row.signal_title || '').replace(/\\s+/g, ' ').trim();
+      const primaryMessage = primaryTelegramMessage(row);
+      const text = String(
+        row.search_snippet || row.summary || row.signal_summary || primaryMessage?.excerpt || primaryMessage?.text || row.title || row.representative_title || row.signal_title || ''
+      ).replace(/\\s+/g, ' ').trim();
       if (!text) return '';
       const lower = text.toLowerCase();
       const hit = tokens(query).find((token) => lower.includes(token));
@@ -3373,7 +3382,32 @@ def render_search_html(
       const index = Math.max(0, lower.indexOf(hit) - 42);
       return `${{index > 0 ? '…' : ''}}${{compactText(text.slice(index, index + 158), 150)}}${{index + 158 < text.length ? '…' : ''}}`;
     }}
+    function telegramMessages(row) {{
+      return Array.isArray(row.top_related_messages) ? row.top_related_messages.filter(Boolean) : [];
+    }}
+    function primaryTelegramMessage(row) {{
+      return telegramMessages(row).find((message) => message && (message.message_url || message.url)) || null;
+    }}
+    function safeResultUrl(value) {{
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      try {{
+        const parsed = new URL(raw, location.href);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.href;
+      }} catch (error) {{}}
+      return '';
+    }}
+    function resultHref(row, kind) {{
+      if (kind === 'Telegram') {{
+        const primaryMessage = primaryTelegramMessage(row);
+        return safeResultUrl(primaryMessage?.message_url || primaryMessage?.url || row.message_url || row.url);
+      }}
+      return safeResultUrl(row.canonical_url || row.representative_url || row.url || row.message_url);
+    }}
     function sourceName(row) {{
+      const primaryMessage = primaryTelegramMessage(row);
+      if (primaryMessage) return String(primaryMessage.channel_title || primaryMessage.channel_handle || 'Telegram');
+      if (Array.isArray(row.top_channels) && row.top_channels.length) return `채널 ${{row.top_channels.length}}곳`;
       return String(row.source || row.feed_name || row.primary_source || row.channel_title || row.channel_handle || '출처 미상');
     }}
     function countValues(rows, getter) {{
@@ -3406,7 +3440,7 @@ def render_search_html(
     }}
     function resultCard(row, kind, query) {{
       const title = row.title || row.representative_title || row.signal_title || '제목 없음';
-      const href = row.canonical_url || row.representative_url || row.url || row.message_url || '#';
+      const href = resultHref(row, kind);
       const meta = [
         kind,
         dateLabel(row),
@@ -3414,10 +3448,18 @@ def render_search_html(
         row.feed_category || row.topic_category || '',
       ].filter(Boolean);
       const reasons = matchReasons(row, query);
-      return `<a class="result-card" href="${{escapeHtml(href)}}" target="_blank" rel="noopener noreferrer">
+      const telegramPreview = kind === 'Telegram'
+        ? telegramMessages(row).slice(0, 3).map((message) => {{
+          const channel = message.channel_title || message.channel_handle || 'Telegram';
+          const text = message.excerpt || message.text || '';
+          return text ? `<span>${{escapeHtml(compactText(channel, 24))}} · ${{escapeHtml(compactText(text, 96))}}</span>` : '';
+        }}).join('')
+        : '';
+      return `<a class="result-card" href="${{escapeHtml(href || '#')}}" target="_blank" rel="noopener noreferrer">
         <div class="meta">${{meta.map((item) => `<span>${{escapeHtml(compactText(item, 42))}}</span>`).join('')}}</div>
         <h3>${{escapeHtml(compactText(title, 118))}}</h3>
         ${{snippet(row, query) ? `<p>${{escapeHtml(snippet(row, query))}}</p>` : ''}}
+        ${{telegramPreview ? `<div class="telegram-preview">${{telegramPreview}}</div>` : ''}}
         <div class="reasons">${{reasons.map((reason) => `<span>${{escapeHtml(reason)}}</span>`).join('')}}</div>
       </a>`;
     }}
