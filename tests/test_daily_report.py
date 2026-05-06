@@ -224,6 +224,9 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "serverSearch" in search_html
     assert "query_interpretation" in search_html
     assert "source_counts" in search_html
+    assert 'data-tab="official"' in search_html
+    assert 'data-tab="history"' in search_html
+    assert "market_sensitive" in search_html
     assert "panel__image--placeholder" in workbench_html
     assert "오른쪽에서 기사 보기" in workbench_html
     assert "data-reader-body" in workbench_html

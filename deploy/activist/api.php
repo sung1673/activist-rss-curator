@@ -1305,6 +1305,10 @@ function search_event_rules(): array {
         array('id' => 'management_dispute', 'label' => '경영권·주주행동', 'keywords' => array('경영권', '공개매수', '주주제안', '주주총회', '주총', '의결권', '이사회', '가처분', '소송', '행동주의', '스튜어드십', '주주행동', 'proxy', 'board', 'shareholder', 'activist')),
         array('id' => 'delisting', 'label' => '상장폐지·거래정지', 'keywords' => array('상장폐지', '상폐', '거래정지', '관리종목', '실질심사', '감사의견', '자본잠식', '정리매매', '불성실공시', 'delisting')),
         array('id' => 'valueup', 'label' => '밸류업·자본정책', 'keywords' => array('밸류업', '벨류업', '기업가치', '자사주', '소각', '배당', '주주환원', 'roe', 'pbr', '유상증자', '감자', 'buyback', 'dividend')),
+        array('id' => 'tender_offer', 'label' => '공개매수·M&A', 'keywords' => array('공개매수', 'tender offer', '매수가', '응모', '최대주주 변경', '인수', '합병', 'm&a')),
+        array('id' => 'shareholder_action', 'label' => '주주제안·의결권', 'keywords' => array('주주제안', '의결권대리행사', '위임장', '주주서한', '공개서한', '행동주의 펀드', 'shareholder proposal', 'proxy solicitation')),
+        array('id' => 'disclosure_violation', 'label' => '불성실공시·제재', 'keywords' => array('불성실공시', '정정공시', '지연공시', '제재', '벌점', '공시위반', 'disclosure violation')),
+        array('id' => 'capital_policy', 'label' => '증자·CB·자본정책', 'keywords' => array('유상증자', '전환사채', 'cb', 'bw', 'eb', '리픽싱', '감자', '배당', '자사주', '소각')),
         array('id' => 'disclosure', 'label' => '공시·제도', 'keywords' => array('공시', '주요사항보고서', 'dart', 'kind', '거래소', '금융위', '금감원', '정정공시', '제도', '감독', 'disclosure')),
         array('id' => 'global', 'label' => '해외·영문', 'keywords' => array('activist', 'activism', 'proxy', 'settlement', 'tender offer', 'governance', 'stewardship', 'sec', 'bloomberg', 'cnbc')),
     );
@@ -1470,6 +1474,18 @@ function search_score_row(array $row, string $kind, string $query, string $sort)
         $final = $smart - $breakdown['risk_penalty'] * 1.5;
     } else {
         $final = $smart;
+    }
+    if ($kind === 'telegram') {
+        $hasArticleAnchor = isset($row['article_id']) && (string)$row['article_id'] !== '' && strpos((string)$row['article_id'], 'telegram-topic:') !== 0;
+        if (!$hasArticleAnchor) {
+            $channelCount = isset($row['related_telegram_channels_count']) ? (int)$row['related_telegram_channels_count'] : 0;
+            $cap = $channelCount > 1 ? 0.62 : 0.45;
+            $flags = search_row_risk_flags($row);
+            if (in_array('promotional', $flags, true) || in_array('rumor', $flags, true) || in_array('unverified', $flags, true)) {
+                $cap = min($cap, 0.35);
+            }
+            $final = min($final, $cap);
+        }
     }
     $breakdown['final_score'] = round(max(0.0, $final), 4);
     return $breakdown;

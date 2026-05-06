@@ -3305,6 +3305,10 @@ def render_search_html(
           <option value="management_dispute">경영권·주주행동</option>
           <option value="delisting">상장폐지·거래정지</option>
           <option value="valueup">밸류업·자본정책</option>
+          <option value="tender_offer">공개매수·M&A</option>
+          <option value="shareholder_action">주주제안·의결권</option>
+          <option value="disclosure_violation">불성실공시·제재</option>
+          <option value="capital_policy">증자·CB·자본정책</option>
           <option value="disclosure">공시·제도</option>
           <option value="global">해외·영문</option>
         </select>
@@ -3324,7 +3328,9 @@ def render_search_html(
       <button type="button" class="is-active" data-tab="all">전체</button>
       <button type="button" data-tab="issues">이슈</button>
       <button type="button" data-tab="articles">기사</button>
+      <button type="button" data-tab="official">공시·제도</button>
       <button type="button" data-tab="telegram">Telegram</button>
+      <button type="button" data-tab="history">과거사례</button>
       <button type="button" data-tab="timeline">타임라인</button>
     </div>
 
@@ -3377,6 +3383,10 @@ def render_search_html(
       {{ id: 'management_dispute', label: '경영권·주주행동', keywords: ['경영권', '공개매수', '주주제안', '주주총회', '주총', '의결권', '이사회', '가처분', '소송', '행동주의', '스튜어드십', '주주행동'] }},
       {{ id: 'delisting', label: '상장폐지·거래정지', keywords: ['상장폐지', '상폐', '거래정지', '관리종목', '실질심사', '감사의견', '자본잠식', '정리매매', '불성실공시'] }},
       {{ id: 'valueup', label: '밸류업·자본정책', keywords: ['밸류업', '벨류업', '기업가치', '자사주', '소각', '배당', '주주환원', 'roe', 'pbr', '유상증자', '감자'] }},
+      {{ id: 'tender_offer', label: '공개매수·M&A', keywords: ['공개매수', 'tender offer', '매수가', '응모', '최대주주 변경', '인수', '합병'] }},
+      {{ id: 'shareholder_action', label: '주주제안·의결권', keywords: ['주주제안', '의결권대리행사', '위임장', '주주서한', '공개서한', '행동주의 펀드'] }},
+      {{ id: 'disclosure_violation', label: '불성실공시·제재', keywords: ['불성실공시', '정정공시', '지연공시', '제재', '벌점', '공시위반'] }},
+      {{ id: 'capital_policy', label: '증자·CB·자본정책', keywords: ['유상증자', '전환사채', 'cb', 'bw', 'eb', '리픽싱', '감자', '배당', '자사주', '소각'] }},
       {{ id: 'disclosure', label: '공시·제도', keywords: ['공시', '주요사항보고서', 'dart', 'kind', '거래소', '금융위', '금감원', '정정공시', '제도', '감독'] }},
       {{ id: 'global', label: '해외·영문', keywords: ['activist', 'proxy', 'board', 'shareholder', 'governance', 'stewardship', 'tender offer', 'sec', 'bloomberg', 'cnbc'] }},
     ];
@@ -3427,6 +3437,8 @@ def render_search_html(
       if (queryTokens.some((token) => summary.includes(token))) reasons.push('요약 일치');
       if (queryTokens.some((token) => source.includes(token))) reasons.push('매체 일치');
       if (Number(row.related_telegram_count || 0)) reasons.push(`Telegram ${{Number(row.related_telegram_count || 0)}}건`);
+      if (Number(row.related_telegram_channels_count || 0)) reasons.push(`채널 ${{Number(row.related_telegram_channels_count || 0)}}곳`);
+      if (Number(row.publisher_count || row.related_publishers_count || 0)) reasons.push(`매체 ${{Number(row.publisher_count || row.related_publishers_count || 0)}}곳`);
       if (Number(row.article_count || 0) > 1) reasons.push(`기사 ${{Number(row.article_count || 0)}}건`);
       return reasons.length ? reasons.slice(0, 4) : ['관련도순'];
     }}
@@ -3534,6 +3546,20 @@ def render_search_html(
       if (hidePromotional?.checked && flags.includes('promotional')) return false;
       if (hideTelegramOnly?.checked && isTelegramOnly(row, kind)) return false;
       return true;
+    }}
+    function rowTimestamp(row) {{
+      const raw = String(row.published_at || row.sort_at || row.last_article_seen_at || row.latest_seen_at || row.first_seen_at || row.posted_at || '').trim();
+      const parsed = raw ? Date.parse(raw.replace(' ', 'T')) : NaN;
+      return Number.isFinite(parsed) ? parsed : 0;
+    }}
+    function isOfficialRow(row) {{
+      const event = classifyEvent(row).id;
+      return ['disclosure', 'disclosure_violation', 'delisting', 'capital_policy'].includes(event)
+        || /(공시|dart|kind|거래소|금융위|금감원|법원|주요사항보고서|정정공시|불성실공시)/i.test(rowText(row));
+    }}
+    function isHistoricalRow(row) {{
+      const ts = rowTimestamp(row);
+      return ts > 0 && (Date.now() - ts) > 14 * 24 * 60 * 60 * 1000;
     }}
     function whyMatters(row, kind) {{
       if (Array.isArray(row.why_matters) && row.why_matters.length) return row.why_matters.slice(0, 3);
@@ -3694,11 +3720,11 @@ def render_search_html(
         ? telegramMessages(row).slice(0, 3).map((message) => {{
           const channel = message.channel_title || message.channel_handle || 'Telegram';
           const text = message.excerpt || message.text || '';
-          return text ? `<span>${{escapeHtml(compactText(channel, 24))}} · ${{escapeHtml(compactText(text, 96))}}</span>` : '';
+          return text ? `<span>${{escapeHtml(compactText(channel, 24))}} · ${{escapeHtml(compactText(text, 150))}}</span>` : '';
         }}).join('')
         : '';
       const why = whyMatters(row, kind);
-      const flags = riskFlags(row).filter((flag) => flag !== 'market_sensitive');
+      const flags = riskFlags(row);
       return `<a class="result-card" href="${{escapeHtml(href || '#')}}" target="_blank" rel="noopener noreferrer">
         <div class="meta">${{meta.map((item) => `<span>${{escapeHtml(compactText(item, 42))}}</span>`).join('')}}</div>
         <h3>${{escapeHtml(compactText(title, 118))}}</h3>
@@ -3754,9 +3780,19 @@ def render_search_html(
       const groups = [];
       if (state.tab === 'all' || state.tab === 'issues') groups.push(['이슈', stories, '이슈']);
       if (state.tab === 'all' || state.tab === 'articles') groups.push(['기사', articles, '기사']);
+      if (state.tab === 'official') groups.push(['공시·제도', [
+        ...stories.map((row) => [row, '이슈']),
+        ...articles.map((row) => [row, '기사']),
+        ...signals.map((row) => [row, 'Telegram']),
+      ].filter(([row]) => isOfficialRow(row)), 'mixed']);
       if (state.tab === 'all' || state.tab === 'telegram') groups.push(['Telegram 신호', signals, 'Telegram']);
+      if (state.tab === 'history') groups.push(['과거사례', [
+        ...stories.map((row) => [row, '이슈']),
+        ...articles.map((row) => [row, '기사']),
+        ...signals.map((row) => [row, 'Telegram']),
+      ].filter(([row]) => isHistoricalRow(row)), 'mixed']);
       const html = groups.map(([label, rows, kind]) => rows.length
-        ? `<h3 class="section-label">${{label}}</h3>${{rows.slice(0, state.tab === 'all' ? 12 : 40).map((row) => resultCard(row, kind, query)).join('')}}`
+        ? `<h3 class="section-label">${{label}}</h3>${{rows.slice(0, state.tab === 'all' ? 12 : 40).map((entry) => Array.isArray(entry) ? resultCard(entry[0], entry[1], query) : resultCard(entry, kind, query)).join('')}}`
         : '').join('');
       results.innerHTML = html || '<div class="status">검색 결과가 없습니다. 검색어를 조금 넓혀보세요.</div>';
       statusEl.textContent = query ? `'${{query}}' 기준 기사 ${{articles.length}}건, 이슈 ${{stories.length}}건, Telegram 신호 ${{signals.length}}건` : '검색어를 입력하면 DB 아카이브와 Telegram 신호를 조회합니다.';
