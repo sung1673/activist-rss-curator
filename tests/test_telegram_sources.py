@@ -282,6 +282,52 @@ def test_telegram_topic_burst_does_not_treat_interface_board_as_governance(confi
     assert not any("이사회" in str(signal.get("signal_title") or "") for signal in signals)
 
 
+def test_telegram_topic_burst_ignores_disclosure_template_tokens(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["telegram_sources"] = {
+        "signal_window_hours": 72,
+        "signal_min_messages": 2,
+        "signal_min_channels": 2,
+        "signal_limit": 10,
+    }  # type: ignore[index]
+    state = {
+        "telegram_source_messages": [
+            normalize_telegram_message(
+                {"handle": "first"},
+                {
+                    "id": 1,
+                    "text": "기업명: 현대백화점 시가총액: 2조 4,711억 보고서명: 연결재무제표기준영업 잠정실적 공정공시 매출액 영업익 순이익",
+                    "date": now,
+                },
+                now,
+            ),
+            normalize_telegram_message(
+                {"handle": "second"},
+                {
+                    "id": 2,
+                    "text": "기업명: 에스엠 시가총액: 2조 보고서명: 영업 잠정실적 공정공시 매출액 영업익 순이익",
+                    "date": now,
+                },
+                now,
+            ),
+            normalize_telegram_message(
+                {"handle": "third"},
+                {
+                    "id": 3,
+                    "text": "기업명: 지누스 시가총액: 2,833억 보고서명: 연결재무제표기준영업 잠정실적 공정공시 매출액 영업익 순이익",
+                    "date": now,
+                },
+                now,
+            ),
+        ]
+    }
+
+    signals = telegram_issue_signals(state, config, now=now)
+    titles = [str(signal.get("signal_title") or "") for signal in signals]
+
+    assert not any("보고서명" in title or "2조" in title for title in titles)
+    assert ordered_message_tokens({"text": "보고서명 공정공시 2조 4,711억 A069960 report stockinfo7.com"}) == []
+
+
 def test_telegram_topic_burst_keeps_governance_board_context(config, now) -> None:  # type: ignore[no-untyped-def]
     config["telegram_sources"] = {
         "signal_window_hours": 72,

@@ -358,9 +358,10 @@ const listEntries = (items) => Array.isArray(items) ? items : Object.entries(ite
 const dashboardNoiseTokens = new Set([
   "article", "articleview", "channel", "com", "contents", "daily", "feed", "flashnews", "html", "http", "https",
   "investment", "m", "news", "pdf", "rd", "report", "review", "rss", "spot", "stock", "url", "view", "www",
-  "관련", "기사", "뉴스", "리포트", "링크", "목표가", "브리핑", "시가총액", "종목", "주식", "채널",
+  "관련", "공정공시", "기사", "기업명", "뉴스", "리포트", "링크", "매출", "매출액", "목표가", "보고서명",
+  "브리핑", "시가총액", "순이익", "영업익", "영업이익", "예상치", "잠정", "잠정실적", "종목", "주식", "채널",
 ]);
-const dashboardNoiseParts = ["rassiro", "sedaily", "stockinfo", "telegram"];
+const dashboardNoiseParts = ["rassiro", "sedaily", "stockinfo", "telegram", "한국투자증권", "한투증권"];
 function keywordLabel(row) {{
   return String(row?.label ?? row?.[0] ?? "").trim();
 }}
@@ -374,17 +375,33 @@ function isUsefulDashboardKeyword(value) {{
   if (/^(?:https?:\\/\\/|www\\.)/.test(text)) return false;
   if (/\\.(?:com|co\\.kr|kr|net|org|io|ai)(?:\\/|$)/.test(text)) return false;
   if (/^[0-9,.%+-]+$/.test(text)) return false;
+  if (/^\\d+(?:\\.\\d+)?q$/.test(text)) return false;
+  if (/^\\d+(?:\\.\\d+)?(?:조|억|만원|천원|원|달러|usd|krw)$/.test(text)) return false;
+  if (/^[a-z]\\d{{5,6}}$/.test(text)) return false;
   if (/^[a-z]{{1,2}}$/.test(text) && text !== "ai") return false;
   return true;
+}}
+function signalTitleTokens(signal) {{
+  return String(signal?.signal_key || signal?.signal_title || "")
+    .split(/[·|,]/)
+    .map((token) => token.trim())
+    .filter(Boolean);
 }}
 function cleanKeywordRows(items, limit = 24) {{
   return listEntries(items).filter((row) => isUsefulDashboardKeyword(keywordLabel(row))).slice(0, limit);
 }}
 function cleanIssueRows(signals) {{
-  return (signals || []).map((signal) => ({{
-    ...signal,
-    top_keywords: (signal.top_keywords || []).filter(isUsefulDashboardKeyword).slice(0, 8),
-  }}));
+  return (signals || [])
+    .map((signal) => ({{
+      ...signal,
+      top_keywords: (signal.top_keywords || []).filter(isUsefulDashboardKeyword).slice(0, 8),
+    }}))
+    .filter((signal) => {{
+      if (signal.signal_type === "article_match" || signal.signal_type === "url_burst") return true;
+      const titleTokens = signalTitleTokens(signal);
+      const usefulTitleTokens = titleTokens.filter(isUsefulDashboardKeyword);
+      return usefulTitleTokens.length >= 2 || (usefulTitleTokens.length >= 1 && (signal.top_keywords || []).length >= 2);
+    }});
 }}
 function signalKeywordText(signal) {{
   return (signal.top_keywords || []).filter(isUsefulDashboardKeyword).slice(0, 5).join(", ");

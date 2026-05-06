@@ -120,6 +120,8 @@ SIGNAL_STOP_TOKENS = GENERIC_MATCH_TOKENS | {
     "링크",
     "리포트",
     "목표가",
+    "매출",
+    "매출액",
     "매일",
     "미디어",
     "바른",
@@ -128,10 +130,14 @@ SIGNAL_STOP_TOKENS = GENERIC_MATCH_TOKENS | {
     "분석",
     "비중",
     "시가총액",
+    "순이익",
     "상위",
     "서울경제",
     "시그널",
     "예상",
+    "예상치",
+    "영업익",
+    "영업이익",
     "오늘",
     "오전",
     "오후",
@@ -145,6 +151,11 @@ SIGNAL_STOP_TOKENS = GENERIC_MATCH_TOKENS | {
     "종목",
     "주식",
     "채널",
+    "공정공시",
+    "기업명",
+    "보고서명",
+    "잠정",
+    "잠정실적",
     "컨버전스",
     "투자",
     "프리미엄",
@@ -160,6 +171,8 @@ SIGNAL_STOP_SUBSTRINGS = {
     "sedaily",
     "stockinfo",
     "telegram",
+    "한국투자증권",
+    "한투증권",
 }
 SIGNAL_STOP_DOMAIN_SUFFIXES = {
     ".com",
@@ -845,6 +858,12 @@ def is_signal_noise_token(token: str) -> bool:
     if any(lowered.endswith(suffix) for suffix in SIGNAL_STOP_DOMAIN_SUFFIXES):
         return True
     if re.fullmatch(r"(?:m|www|news|article|view|readnews|contents?|files?|feed)s?", lowered):
+        return True
+    if re.fullmatch(r"\d+(?:\.\d+)?q", lowered):
+        return True
+    if re.fullmatch(r"\d+(?:\.\d+)?(?:조|억|만원|천원|원|달러|usd|krw)", lowered):
+        return True
+    if re.fullmatch(r"[a-z]\d{5,6}", lowered):
         return True
     if re.fullmatch(r"[a-z]{1,2}", lowered) and lowered not in {"ai"}:
         return True
