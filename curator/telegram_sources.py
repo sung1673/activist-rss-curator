@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Protocol
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 from .config import load_config
 from .dates import datetime_to_iso, parse_datetime
@@ -836,6 +837,122 @@ def telegram_signal_message_payload(message: dict[str, object]) -> dict[str, obj
     }
 
 
+def channel_quality_metrics(state: dict[str, object], channel: dict[str, object]) -> dict[str, object]:
+    handle = normalize_channel_handle(channel.get("handle") or channel.get("username"))
+    if not handle:
+        return {
+            "messages": 0,
+            "matches": 0,
+            "direct_matches": 0,
+            "weak_matches": 0,
+            "risk_messages": 0,
+            "match_rate": 0.0,
+            "direct_match_rate": 0.0,
+            "risk_rate": 0.0,
+            "signal_quality_score": int(channel.get("quality_score") or score_channel_candidate(channel)),
+        }
+
+    messages = [
+        message
+        for message in state.get("telegram_source_messages", [])
+        if isinstance(message, dict)
+        and not message.get("deleted_at")
+        and normalize_channel_handle(message.get("handle") or message.get("channel_handle")) == handle
+    ]
+    message_keys = {message_key(message) for message in messages}
+    matches = [
+        match
+        for match in state.get("telegram_article_matches", [])
+        if isinstance(match, dict)
+        and (
+            normalize_channel_handle(match.get("channel_handle")) == handle
+            or str(match.get("telegram_message_key") or "") in message_keys
+        )
+    ]
+    direct_matches = [
+        match
+        for match in matches
+        if str(match.get("match_type") or "") in {"exact_url", "canonical_url"}
+    ]
+    weak_matches = [match for match in matches if match not in direct_matches]
+    risk_messages = [
+        message
+        for message in messages
+        if risk_flags_for_text(str(message.get("text") or message.get("normalized_text") or ""))
+    ]
+    message_count = len(messages)
+    match_count = len(matches)
+    match_rate = match_count / message_count if message_count else 0.0
+    direct_match_rate = len(direct_matches) / message_count if message_count else 0.0
+    risk_rate = len(risk_messages) / message_count if message_count else 0.0
+    base_score = int(channel.get("quality_score") or score_channel_candidate(channel))
+    activity_bonus = min(10, message_count // 250)
+    direct_bonus = min(18, len(direct_matches) * 3)
+    weak_bonus = min(8, len(weak_matches))
+    match_rate_bonus = min(14, int(match_rate * 42))
+    risk_penalty = min(24, int(risk_rate * 48))
+    signal_quality_score = max(
+        0,
+        min(100, base_score + activity_bonus + direct_bonus + weak_bonus + match_rate_bonus - risk_penalty),
+    )
+    return {
+        "messages": message_count,
+        "matches": match_count,
+        "direct_matches": len(direct_matches),
+        "weak_matches": len(weak_matches),
+        "risk_messages": len(risk_messages),
+        "match_rate": round(match_rate, 4),
+        "direct_match_rate": round(direct_match_rate, 4),
+        "risk_rate": round(risk_rate, 4),
+        "signal_quality_score": signal_quality_score,
+    }
+
+
+def refresh_channel_runtime_quality(state: dict[str, object]) -> None:
+    ensure_telegram_state(state)
+    for channel in state.get("telegram_source_channels", []):
+        if not isinstance(channel, dict):
+            continue
+        metrics = channel_quality_metrics(state, channel)
+        channel["signal_quality_score"] = metrics["signal_quality_score"]
+        channel["quality_metrics"] = metrics
+
+
+def prune_telegram_state(state: dict[str, object], config: dict[str, object], now: datetime) -> dict[str, int]:
+    ensure_telegram_state(state)
+    settings = telegram_sources_config(config)
+    retention_days = int(settings.get("message_retention_days", 365))
+    max_messages = int(settings.get("local_state_message_limit", 80000))
+    messages = [message for message in state.get("telegram_source_messages", []) if isinstance(message, dict)]
+    if retention_days > 0:
+        cutoff = now - timedelta(days=retention_days)
+        messages = [
+            message
+            for message in messages
+            if (parse_datetime(message.get("posted_at"), str(config.get("timezone") or "Asia/Seoul")) or now) >= cutoff
+        ]
+    if max_messages > 0 and len(messages) > max_messages:
+        messages = sorted(
+            messages,
+            key=lambda message: str(message.get("posted_at") or "") + ":" + str(message.get("telegram_message_id") or ""),
+            reverse=True,
+        )[:max_messages]
+        messages.sort(key=lambda message: str(message.get("posted_at") or "") + ":" + str(message.get("telegram_message_id") or ""))
+    kept_keys = {message_key(message) for message in messages}
+    old_message_count = len(state.get("telegram_source_messages", [])) if isinstance(state.get("telegram_source_messages"), list) else 0
+    old_match_count = len(state.get("telegram_article_matches", [])) if isinstance(state.get("telegram_article_matches"), list) else 0
+    state["telegram_source_messages"] = messages
+    state["telegram_article_matches"] = [
+        match
+        for match in state.get("telegram_article_matches", [])
+        if isinstance(match, dict) and str(match.get("telegram_message_key") or "") in kept_keys
+    ]
+    return {
+        "telegram_messages_pruned": max(0, old_message_count - len(messages)),
+        "telegram_matches_pruned": max(0, old_match_count - len(state.get("telegram_article_matches", []))),
+    }
+
+
 def is_boilerplate_signal_url(url: str) -> bool:
     try:
         parsed = urlsplit(url)
@@ -1042,11 +1159,40 @@ def telegram_article_match_signals(state: dict[str, object]) -> list[dict[str, o
         channels = {str(message.get("handle") or message.get("telegram_channel_id") or "") for message in related_messages}
         dates = sorted(str(message.get("posted_at") or "") for message in related_messages if message.get("posted_at"))
         keyword_counter: Counter[str] = Counter()
+        channel_counter: Counter[str] = Counter()
         flags: set[str] = set()
         for message in related_messages:
             keyword_counter.update(ordered_message_tokens(message)[:8])
+            channel_counter.update([str(message.get("channel_title") or message.get("handle") or message.get("telegram_channel_id") or "")])
             flags.update(risk_flags_for_text(str(message.get("text") or "")))
-        confidence = min(1.0, 0.18 + len(related_messages) * 0.08 + len(channels) * 0.16)
+        direct_count = len(
+            [
+                match
+                for match in matches
+                if str(match.get("match_type") or "") in {"exact_url", "canonical_url"}
+            ]
+        )
+        weak_count = max(0, len(matches) - direct_count)
+        score_values = [float(match.get("score") or 0) for match in matches]
+        avg_score = sum(score_values) / len(score_values) if score_values else 0
+        confidence = min(
+            1.0,
+            0.16
+            + len(related_messages) * 0.055
+            + len(channels) * 0.14
+            + direct_count * 0.16
+            + max(0.0, avg_score - 0.5) * 0.28,
+        )
+        top_messages = []
+        for match in matches:
+            message = messages_by_key.get(str(match.get("telegram_message_key") or ""))
+            if not isinstance(message, dict):
+                continue
+            payload = telegram_signal_message_payload(message)
+            payload["match_type"] = match.get("match_type") or ""
+            payload["score"] = float(match.get("score") or 0)
+            payload["reason"] = match.get("reason") or ""
+            top_messages.append(payload)
         signals.append(
             {
                 "article_id": article,
@@ -1055,17 +1201,28 @@ def telegram_article_match_signals(state: dict[str, object]) -> list[dict[str, o
                 "signal_title": f"기사 매칭 {article[:10]}",
                 "related_telegram_count": len(related_messages),
                 "related_telegram_channels_count": len(channels),
+                "direct_url_count": direct_count,
+                "keyword_match_count": weak_count,
                 "first_seen_at": dates[0] if dates else "",
                 "latest_seen_at": dates[-1] if dates else "",
                 "top_related_messages": sorted(
-                    [telegram_signal_message_payload(message) for message in related_messages],
-                    key=lambda item: int(item.get("views") or 0) + int(item.get("forwards") or 0) * 3,
+                    top_messages,
+                    key=lambda item: (
+                        float(item.get("score") or 0),
+                        int(item.get("views") or 0) + int(item.get("forwards") or 0) * 3,
+                    ),
                     reverse=True,
                 )[:5],
                 "top_channels": sorted(channels)[:8],
+                "top_channel_counts": [
+                    {"channel": channel, "count": count}
+                    for channel, count in channel_counter.most_common(8)
+                    if channel
+                ],
                 "top_keywords": [keyword for keyword, _count in keyword_counter.most_common(8)],
                 "confidence_score": round(confidence, 3),
                 "risk_flags": sorted(flags),
+                "signal_summary": f"URL 직접 {direct_count}건, 키워드 추정 {weak_count}건",
             }
         )
     return signals
@@ -1099,8 +1256,10 @@ def telegram_url_burst_signals(
         dates = sorted(str(message.get("posted_at") or "") for message in related_messages if message.get("posted_at"))
         flags: set[str] = set()
         keyword_counter: Counter[str] = Counter()
+        channel_counter: Counter[str] = Counter()
         for message in related_messages:
             keyword_counter.update(ordered_message_tokens(message)[:8])
+            channel_counter.update([str(message.get("channel_title") or message.get("handle") or message.get("telegram_channel_id") or "")])
             flags.update(risk_flags_for_text(str(message.get("text") or "")))
         top_messages = sorted(related_messages, key=telegram_signal_message_score, reverse=True)[:max_messages_per_signal]
         title = telegram_signal_excerpt(top_messages[0], max_chars=80) if top_messages else canonical
@@ -1113,13 +1272,21 @@ def telegram_url_burst_signals(
                 "signal_title": title,
                 "related_telegram_count": len(related_messages),
                 "related_telegram_channels_count": len(channels),
+                "direct_url_count": len(related_messages),
+                "keyword_match_count": 0,
                 "first_seen_at": dates[0] if dates else "",
                 "latest_seen_at": dates[-1] if dates else "",
                 "top_related_messages": [telegram_signal_message_payload(message) for message in top_messages],
                 "top_channels": sorted(channels)[:8],
+                "top_channel_counts": [
+                    {"channel": channel, "count": count}
+                    for channel, count in channel_counter.most_common(8)
+                    if channel
+                ],
                 "top_keywords": [keyword for keyword, _count in keyword_counter.most_common(8)],
                 "confidence_score": round(confidence, 3),
                 "risk_flags": sorted(flags),
+                "signal_summary": f"동일 URL {len(related_messages)}건 공유",
             }
         )
     return signals
@@ -1163,8 +1330,10 @@ def telegram_topic_burst_signals(
         dates = sorted(str(message.get("posted_at") or "") for message in related_messages if message.get("posted_at"))
         flags: set[str] = set()
         keyword_counter: Counter[str] = Counter()
+        channel_counter: Counter[str] = Counter()
         for message in related_messages:
             keyword_counter.update(ordered_message_tokens(message)[:10])
+            channel_counter.update([str(message.get("channel_title") or message.get("handle") or message.get("telegram_channel_id") or "")])
             flags.update(risk_flags_for_text(str(message.get("text") or "")))
         top_messages = sorted(related_messages, key=telegram_signal_message_score, reverse=True)[:max_messages_per_signal]
         confidence = min(1.0, 0.14 + len(related_messages) * 0.045 + len(channels) * 0.15)
@@ -1177,13 +1346,21 @@ def telegram_topic_burst_signals(
                 "signal_title": title,
                 "related_telegram_count": len(related_messages),
                 "related_telegram_channels_count": len(channels),
+                "direct_url_count": 0,
+                "keyword_match_count": len(related_messages),
                 "first_seen_at": dates[0] if dates else "",
                 "latest_seen_at": dates[-1] if dates else "",
                 "top_related_messages": [telegram_signal_message_payload(message) for message in top_messages],
                 "top_channels": sorted(channels)[:8],
+                "top_channel_counts": [
+                    {"channel": channel, "count": count}
+                    for channel, count in channel_counter.most_common(8)
+                    if channel
+                ],
                 "top_keywords": [keyword for keyword, _count in keyword_counter.most_common(8)],
                 "confidence_score": round(confidence, 3),
                 "risk_flags": sorted(flags),
+                "signal_summary": f"{event_label} 관련 언급 {len(related_messages)}건",
             }
         )
     return signals
@@ -1499,7 +1676,9 @@ async def _collect_with_client(
         channel["last_collected_at"] = datetime_to_iso(now)
         channel["last_error"] = None
 
+    prune_summary = prune_telegram_state(state, config, now)
     state["telegram_issue_signals"] = telegram_issue_signals(state, config, now=now)
+    refresh_channel_runtime_quality(state)
     return {
         "telegram_channels": len(enabled_channels(state)),
         "telegram_messages_inserted": inserted,
@@ -1507,6 +1686,7 @@ async def _collect_with_client(
         "telegram_messages_unchanged": unchanged,
         "telegram_matches_inserted": matches_inserted,
         "telegram_channel_failed": failed,
+        **prune_summary,
     }
 
 
@@ -2008,7 +2188,9 @@ async def _backfill_messages_with_client(
                     print(f"max_messages={max_messages} reached; stopping backfill", flush=True)
                 break
 
+    prune_summary = prune_telegram_state(state, config, now)
     state["telegram_issue_signals"] = telegram_issue_signals(state, config, now=now)
+    refresh_channel_runtime_quality(state)
     summary: dict[str, object] = {
         "telegram_backfill_channels": len(channels),
         "telegram_backfill_days": max(1, days),
@@ -2021,6 +2203,7 @@ async def _backfill_messages_with_client(
         "telegram_matches_inserted": matches_inserted,
         "telegram_channel_failed": failed,
         "telegram_messages_outside_window": outside_window,
+        **prune_summary,
         "telegram_backfill_per_channel": per_channel,
         "_touched_messages": touched_messages,
         "_touched_matches": touched_matches,
@@ -2239,7 +2422,9 @@ def rematch_telegram_articles(
             eta = round(remaining / rate, 1) if rate else 0
             print(f"rematch {index}/{len(messages)} messages, new_matches={inserted}, eta={eta}s", flush=True)
 
+    prune_summary = prune_telegram_state(state, config, datetime.now(ZoneInfo(str(config.get("timezone") or "Asia/Seoul"))))
     state["telegram_issue_signals"] = telegram_issue_signals(state, config)
+    refresh_channel_runtime_quality(state)
     return {
         "telegram_rematch_messages": len(messages),
         "telegram_rematch_old_matches": old_selected_count,
@@ -2247,6 +2432,7 @@ def rematch_telegram_articles(
         "telegram_rematch_kept_matches": kept_count,
         "telegram_rematch_match_types": dict(match_types),
         "telegram_rematch_issue_signals": len(state.get("telegram_issue_signals", [])),
+        **prune_summary,
     }
 
 

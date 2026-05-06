@@ -37,4 +37,7 @@ def test_telegram_dashboard_writes_public_safe_status_page(tmp_path, config, now
     assert "Telegram 수집 운영 대시보드" in html
     assert "공개 broadcast 채널만" in html
     assert "marketnews" in html
+    assert "매칭 품질" in html
+    assert "Signal" not in html
+    assert "signal_quality_score" in html
     assert "TELEGRAM_API_HASH" not in html

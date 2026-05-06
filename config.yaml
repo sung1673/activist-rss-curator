@@ -411,6 +411,8 @@ telegram_sources:
   signal_min_channels: 2
   signal_limit: 40
   signal_max_messages_per_signal: 5
+  message_retention_days: 365
+  local_state_message_limit: 80000
   max_remote_messages: 500
   remote_batch_size: 300
   discover_enabled: false

@@ -583,6 +583,9 @@ function public_telegram_signal(array $row): array {
             'excerpt' => text_excerpt(isset($message['excerpt']) ? (string)$message['excerpt'] : '', 140),
             'views' => isset($message['views']) ? (int)$message['views'] : 0,
             'forwards' => isset($message['forwards']) ? (int)$message['forwards'] : 0,
+            'match_type' => isset($message['match_type']) ? (string)$message['match_type'] : '',
+            'score' => isset($message['score']) ? (float)$message['score'] : 0,
+            'reason' => isset($message['reason']) ? (string)$message['reason'] : '',
         );
     }
     return array(
@@ -591,10 +594,14 @@ function public_telegram_signal(array $row): array {
         'signal_title' => isset($payload['signal_title']) ? text_excerpt((string)$payload['signal_title'], 120) : (isset($row['article_id']) ? (string)$row['article_id'] : ''),
         'related_telegram_count' => isset($row['related_telegram_count']) ? (int)$row['related_telegram_count'] : 0,
         'related_telegram_channels_count' => isset($row['related_telegram_channels_count']) ? (int)$row['related_telegram_channels_count'] : 0,
+        'direct_url_count' => isset($payload['direct_url_count']) ? (int)$payload['direct_url_count'] : 0,
+        'keyword_match_count' => isset($payload['keyword_match_count']) ? (int)$payload['keyword_match_count'] : 0,
         'first_seen_at' => isset($row['first_seen_at']) ? (string)$row['first_seen_at'] : '',
         'latest_seen_at' => isset($row['latest_seen_at']) ? (string)$row['latest_seen_at'] : '',
         'confidence_score' => isset($row['confidence_score']) ? (float)$row['confidence_score'] : 0,
+        'signal_summary' => isset($payload['signal_summary']) ? text_excerpt((string)$payload['signal_summary'], 120) : '',
         'top_channels' => (isset($payload['top_channels']) && is_array($payload['top_channels'])) ? array_slice($payload['top_channels'], 0, 8) : array(),
+        'top_channel_counts' => (isset($payload['top_channel_counts']) && is_array($payload['top_channel_counts'])) ? array_slice($payload['top_channel_counts'], 0, 8) : array(),
         'top_keywords' => (isset($payload['top_keywords']) && is_array($payload['top_keywords'])) ? array_slice($payload['top_keywords'], 0, 8) : array(),
         'risk_flags' => (isset($payload['risk_flags']) && is_array($payload['risk_flags'])) ? array_slice($payload['risk_flags'], 0, 8) : array(),
         'top_related_messages' => array_slice($messages, 0, 5),
@@ -620,6 +627,35 @@ function handle_telegram_dashboard(PDO $pdo, array $config): void {
         'signals_total' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $signals),
     );
 
+    $matchByChannel = array();
+    $stmt = $pdo->prepare(
+        'SELECT channel_handle, COUNT(*) AS matches, '
+        . 'SUM(CASE WHEN match_type IN ("exact_url","canonical_url") THEN 1 ELSE 0 END) AS direct_matches, '
+        . 'SUM(CASE WHEN match_type NOT IN ("exact_url","canonical_url") THEN 1 ELSE 0 END) AS weak_matches, '
+        . 'AVG(score) AS avg_score '
+        . 'FROM ' . $matches . ' GROUP BY channel_handle'
+    );
+    $stmt->execute();
+    foreach ($stmt->fetchAll() as $row) {
+        $matchByChannel[(string)$row['channel_handle']] = array(
+            'matches' => (int)$row['matches'],
+            'direct_matches' => (int)$row['direct_matches'],
+            'weak_matches' => (int)$row['weak_matches'],
+            'avg_score' => isset($row['avg_score']) ? round((float)$row['avg_score'], 4) : 0,
+        );
+    }
+
+    $riskByChannel = array();
+    $stmt = $pdo->prepare(
+        'SELECT channel_handle, COUNT(*) AS risk_messages FROM ' . $messages
+        . ' WHERE deleted_at IS NULL AND risk_flags_json IS NOT NULL AND risk_flags_json <> "" AND risk_flags_json <> "[]" '
+        . 'GROUP BY channel_handle'
+    );
+    $stmt->execute();
+    foreach ($stmt->fetchAll() as $row) {
+        $riskByChannel[(string)$row['channel_handle']] = (int)$row['risk_messages'];
+    }
+
     $stmt = $pdo->prepare(
         'SELECT c.handle, c.title, c.quality_score, c.enabled, c.last_error, c.last_collected_at, c.last_message_id, '
         . 'COUNT(m.message_key) AS messages, MAX(m.posted_at) AS latest_at '
@@ -632,18 +668,43 @@ function handle_telegram_dashboard(PDO $pdo, array $config): void {
     $stmt->execute();
     $topChannels = array();
     foreach ($stmt->fetchAll() as $row) {
+        $handle = (string)$row['handle'];
+        $channelMatches = isset($matchByChannel[$handle]) ? $matchByChannel[$handle] : array('matches' => 0, 'direct_matches' => 0, 'weak_matches' => 0, 'avg_score' => 0);
+        $messageCount = (int)$row['messages'];
+        $riskMessages = isset($riskByChannel[$handle]) ? (int)$riskByChannel[$handle] : 0;
+        $baseQuality = (int)$row['quality_score'];
+        $matchRate = $messageCount > 0 ? $channelMatches['matches'] / $messageCount : 0;
+        $riskRate = $messageCount > 0 ? $riskMessages / $messageCount : 0;
+        $signalQuality = max(0, min(100, $baseQuality + min(10, (int)floor($messageCount / 250)) + min(18, $channelMatches['direct_matches'] * 3) + min(8, $channelMatches['weak_matches']) + min(14, (int)floor($matchRate * 42)) - min(24, (int)floor($riskRate * 48))));
         $topChannels[] = array(
-            'handle' => (string)$row['handle'],
+            'handle' => $handle,
             'title' => (string)($row['title'] ?: $row['handle']),
-            'quality_score' => (int)$row['quality_score'],
+            'quality_score' => $baseQuality,
+            'signal_quality_score' => $signalQuality,
             'enabled' => (int)$row['enabled'],
-            'messages' => (int)$row['messages'],
+            'messages' => $messageCount,
+            'matches' => $channelMatches['matches'],
+            'direct_matches' => $channelMatches['direct_matches'],
+            'weak_matches' => $channelMatches['weak_matches'],
+            'match_rate' => round($matchRate, 4),
+            'avg_match_score' => $channelMatches['avg_score'],
+            'risk_messages' => $riskMessages,
+            'risk_rate' => round($riskRate, 4),
             'latest_at' => (string)($row['latest_at'] ?: ''),
             'last_collected_at' => (string)($row['last_collected_at'] ?: ''),
             'last_message_id' => (int)$row['last_message_id'],
             'last_error' => (string)($row['last_error'] ?: ''),
         );
     }
+    usort($topChannels, function ($left, $right) {
+        foreach (array('signal_quality_score', 'matches', 'messages') as $key) {
+            $diff = (int)$right[$key] <=> (int)$left[$key];
+            if ($diff !== 0) {
+                return $diff;
+            }
+        }
+        return strcmp((string)$right['latest_at'], (string)$left['latest_at']);
+    });
 
     $stmt = $pdo->prepare(
         'SELECT DATE(posted_at) AS day_key, COUNT(*) AS count_value FROM ' . $messages
@@ -691,6 +752,27 @@ function handle_telegram_dashboard(PDO $pdo, array $config): void {
         $signalRows[] = public_telegram_signal($row);
     }
 
+    $matchTypeRows = array();
+    $stmt = $pdo->prepare('SELECT match_type AS label, COUNT(*) AS count FROM ' . $matches . ' GROUP BY match_type ORDER BY count DESC');
+    $stmt->execute();
+    foreach ($stmt->fetchAll() as $row) {
+        $matchTypeRows[] = array('label' => (string)$row['label'], 'count' => (int)$row['count']);
+    }
+
+    $qualityBands = array('80+' => 0, '60-79' => 0, '40-59' => 0, '0-39' => 0);
+    foreach ($topChannels as $row) {
+        $score = isset($row['signal_quality_score']) ? (int)$row['signal_quality_score'] : 0;
+        if ($score >= 80) {
+            $qualityBands['80+']++;
+        } elseif ($score >= 60) {
+            $qualityBands['60-79']++;
+        } elseif ($score >= 40) {
+            $qualityBands['40-59']++;
+        } else {
+            $qualityBands['0-39']++;
+        }
+    }
+
     $dailyMessages = $counts['messages_14d'] > 0 ? $counts['messages_14d'] / 14 : 0;
     $avgBytes = $sampleCount > 0 ? max(1, (int)round($bytes / $sampleCount)) : 0;
     respond(200, array(
@@ -711,6 +793,12 @@ function handle_telegram_dashboard(PDO $pdo, array $config): void {
             array_slice(array_values($keywordCounts), 0, 30)
         ),
         'signals' => $signalRows,
+        'match_type_counts' => $matchTypeRows,
+        'quality_bands' => array_map(
+            function ($label, $count) { return array('label' => (string)$label, 'count' => (int)$count); },
+            array_keys($qualityBands),
+            array_values($qualityBands)
+        ),
         'growth' => array(
             'avg_message_bytes' => $avgBytes,
             'daily_messages' => round($dailyMessages, 1),
@@ -1117,6 +1205,62 @@ function search_tokens(string $query): array {
     return $tokens;
 }
 
+function article_search_snippet(array $row, string $query, int $max = 150): string {
+    $text = trim(preg_replace('/\s+/u', ' ', (string)($row['summary'] ?: $row['title'] ?: '')));
+    if ($text === '') {
+        return '';
+    }
+    $tokens = search_tokens($query);
+    if (!$tokens) {
+        return text_excerpt($text, $max);
+    }
+    $lower = mb_strtolower($text, 'UTF-8');
+    foreach ($tokens as $token) {
+        $pos = mb_strpos($lower, mb_strtolower((string)$token, 'UTF-8'), 0, 'UTF-8');
+        if ($pos !== false) {
+            $start = max(0, (int)$pos - 38);
+            $snippet = mb_substr($text, $start, $max, 'UTF-8');
+            return text_excerpt(($start > 0 ? '... ' : '') . $snippet, $max + 4);
+        }
+    }
+    return text_excerpt($text, $max);
+}
+
+function article_search_reasons(array $row, string $query): array {
+    $tokens = search_tokens($query);
+    $textFields = array(
+        '제목' => (string)($row['title'] ?: ''),
+        '요약' => (string)($row['summary'] ?: ''),
+        '매체' => (string)(($row['source'] ?: '') . ' ' . ($row['feed_name'] ?: '')),
+        '분류' => (string)($row['feed_category'] ?: ''),
+    );
+    $reasons = array();
+    foreach ($tokens as $token) {
+        $needle = mb_strtolower((string)$token, 'UTF-8');
+        foreach ($textFields as $label => $value) {
+            if ($value !== '' && mb_strpos(mb_strtolower($value, 'UTF-8'), $needle, 0, 'UTF-8') !== false) {
+                $reasons[] = $label . ' ' . $token;
+                break;
+            }
+        }
+        if (count($reasons) >= 4) {
+            break;
+        }
+    }
+    return $reasons;
+}
+
+function public_article_row(array $row, string $query): array {
+    if ($query !== '') {
+        $row['search_snippet'] = article_search_snippet($row, $query);
+        $row['match_reasons'] = article_search_reasons($row, $query);
+    } else {
+        $row['search_snippet'] = text_excerpt((string)($row['summary'] ?: ''), 150);
+        $row['match_reasons'] = array();
+    }
+    return $row;
+}
+
 function telegram_event_token(string $token): bool {
     $lower = mb_strtolower($token, 'UTF-8');
     $terms = array(
@@ -1294,6 +1438,10 @@ function handle_read(string $action, array $config): void {
             . ' ORDER BY sort_at DESC, priority_score DESC LIMIT ' . $limit;
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
-        respond(200, array('ok' => true, 'articles' => $stmt->fetchAll()));
+        $rows = array();
+        foreach ($stmt->fetchAll() as $row) {
+            $rows[] = public_article_row($row, $query);
+        }
+        respond(200, array('ok' => true, 'articles' => $rows));
     }
 }

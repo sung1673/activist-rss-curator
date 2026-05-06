@@ -2166,10 +2166,11 @@ def render_report_html(
         }});
         const summary = document.createElement('p');
         summary.className = 'db-search__summary';
-        summary.textContent = articleSearchSnippet(article, query);
+        summary.textContent = article.search_snippet || articleSearchSnippet(article, query);
         const reasons = document.createElement('div');
         reasons.className = 'db-search__why';
-        articleMatchReasons(article, query).forEach((reason) => {{
+        const reasonItems = Array.isArray(article.match_reasons) && article.match_reasons.length ? article.match_reasons : articleMatchReasons(article, query);
+        reasonItems.forEach((reason) => {{
           const chip = document.createElement('span');
           chip.textContent = reason;
           reasons.appendChild(chip);
@@ -2916,7 +2917,11 @@ def render_workbench_html(
     .reader__head {{ display:flex; align-items:flex-start; justify-content:space-between; gap:14px; padding:12px 14px; border-bottom:1px solid var(--line); }}
     .reader__title {{ min-width:0; font-size:13px; font-weight:900; line-height:1.35; word-break:keep-all; }}
     .reader__close {{ appearance:none; border:1px solid var(--line); border-radius:999px; background:#fff; color:var(--accent-deep); padding:5px 9px; font:inherit; font-size:12px; font-weight:850; cursor:pointer; }}
-    .reader iframe {{ width:100%; height:100%; border:0; background:#fff; }}
+    .reader__body {{ overflow:auto; padding:14px; display:grid; gap:12px; align-content:start; }}
+    .reader__meta {{ display:flex; flex-wrap:wrap; gap:6px 9px; color:var(--muted); font-size:11.5px; }}
+    .reader__body h3 {{ margin:0; font-size:20px; line-height:1.28; word-break:keep-all; }}
+    .reader__body p {{ margin:0; color:#453e4f; font-size:13px; line-height:1.55; }}
+    .reader__note {{ border-left:3px solid rgba(112,55,224,.35); background:var(--accent-soft); padding:10px 12px; color:#3e3550; font-size:12px; line-height:1.5; }}
     .reader__foot {{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 14px; border-top:1px solid var(--line); color:var(--muted); font-size:11.5px; }}
     .reader__foot a {{ color:var(--accent-deep); font-weight:850; }}
     @media (max-width:900px) {{ .workbench {{ grid-template-columns:1fr; }} .story-list {{ position:static; max-height:none; }} .panel__layout {{ grid-template-columns:1fr; }} .reader {{ left:12px; right:12px; top:12px; bottom:12px; width:auto; }} }}
@@ -2945,9 +2950,9 @@ def render_workbench_html(
       <div class="reader__title" data-reader-title>기사 원문</div>
       <button class="reader__close" type="button" data-reader-close>닫기</button>
     </div>
-    <iframe data-reader-frame title="기사 원문" referrerpolicy="no-referrer" sandbox="allow-same-origin allow-scripts allow-forms allow-popups"></iframe>
+    <div class="reader__body" data-reader-body></div>
     <div class="reader__foot">
-      <span>언론사 보안 정책에 따라 화면 안에서 열리지 않을 수 있습니다.</span>
+      <span>원문은 언론사 페이지에서 열고, 이 패널은 다음 기사로 돌아오기 위한 보조 화면입니다.</span>
       <a href="#" target="_blank" rel="noopener noreferrer" data-reader-open>새 탭</a>
     </div>
   </aside>
@@ -2958,7 +2963,7 @@ def render_workbench_html(
     const list = document.querySelector('[data-workbench-list]');
     const panel = document.querySelector('[data-workbench-panel]');
     const reader = document.querySelector('[data-reader]');
-    const readerFrame = document.querySelector('[data-reader-frame]');
+    const readerBody = document.querySelector('[data-reader-body]');
     const readerTitle = document.querySelector('[data-reader-title]');
     const readerOpen = document.querySelector('[data-reader-open]');
     let activeIndex = 0;
@@ -2997,8 +3002,8 @@ def render_workbench_html(
       const articleUrl = safeUrl(story.primary_url);
       return `<a class="panel__image" href="${{escapeHtml(articleUrl)}}" target="_blank" rel="noopener noreferrer" aria-label="기사 이미지 보기"><img data-panel-image src="${{escapeHtml(imageUrl)}}" alt="" referrerpolicy="no-referrer"></a>`;
     }}
-    function installImageFallback() {{
-      const image = panel?.querySelector('[data-panel-image]');
+    function installImageFallback(root = panel) {{
+      const image = root?.querySelector('[data-panel-image]');
       image?.addEventListener('error', () => {{
         const wrapper = image.closest('.panel__image');
         if (wrapper) wrapper.outerHTML = noImageMarkup();
@@ -3006,16 +3011,24 @@ def render_workbench_html(
     }}
     function openReader(story) {{
       const url = safeUrl(story.primary_url);
-      if (!reader || !readerFrame || url === '#') return;
+      if (!reader || !readerBody || url === '#') return;
       reader.hidden = false;
-      readerFrame.src = url;
       if (readerTitle) readerTitle.textContent = compactText(story.title, 82) || '기사 원문';
       if (readerOpen) readerOpen.href = url;
+      const bullets = Array.isArray(story.bullets) && story.bullets.length ? story.bullets : [story.summary || '요약 정보가 부족합니다.'];
+      readerBody.innerHTML = `
+        <div class="reader__meta"><span>${{escapeHtml(story.category || '기타')}}</span><span>${{escapeHtml(story.datetime || '')}}</span><span>${{escapeHtml(story.source_line || '')}}</span></div>
+        <h3>${{escapeHtml(story.title || '제목 없음')}}</h3>
+        ${{storyImageMarkup(story)}}
+        <ul class="panel__summary">${{bullets.map((bullet) => `<li>${{escapeHtml(bullet)}}</li>`).join('')}}</ul>
+        <div class="reader__note">보안 정책 때문에 외부 언론사 원문을 페이지 안에 안정적으로 삽입하지 않습니다. 새 탭으로 원문을 열고, 이 패널에서 현재 기사 맥락과 다음 기사 이동 흐름을 유지합니다.</div>
+      `;
+      installImageFallback(readerBody);
     }}
     function closeReader() {{
-      if (!reader || !readerFrame) return;
+      if (!reader || !readerBody) return;
       reader.hidden = true;
-      readerFrame.src = 'about:blank';
+      readerBody.innerHTML = '';
     }}
     document.querySelector('[data-reader-close]')?.addEventListener('click', closeReader);
     function urlKey(value) {{
@@ -3231,7 +3244,7 @@ def render_workbench_html(
           <div>
             <ul class="panel__summary">${{bullets.map((bullet) => `<li>${{escapeHtml(bullet)}}</li>`).join('')}}</ul>
             <div class="panel__actions">
-              <button class="is-primary" type="button" data-reader-open-story>오른쪽에서 원문 보기</button>
+              <button class="is-primary" type="button" data-reader-open-story>오른쪽에서 기사 보기</button>
               <a href="${{escapeHtml(safeUrl(story.primary_url))}}" target="_blank" rel="noopener noreferrer">새 탭</a>
               <button type="button" data-prev>이전 기사</button>
               <button type="button" data-next>다음 기사</button>

@@ -100,6 +100,8 @@ Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 
 
 Telegram 공개 채널 기반 시장 언급 보강은 `telegram_sources.enabled`를 켰을 때만 동작합니다. MTProto 읽기 계정의 `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING`은 Secret으로만 주입하고, 수집 대상은 username이 있는 공개 broadcast 채널로 제한합니다. 수동 등록·비활성화는 `python -m curator.telegram_sources add|enable|disable|list`로 관리할 수 있습니다. 이미 읽기 계정이 가입한 공개 채널은 `python -m curator.telegram_sources import-joined --dry-run`으로 먼저 확인한 뒤 `--enable`로 수집 대상에 올립니다. 유사 채널 후보는 `discover`로 pending 후보에만 저장하고 자동 입장은 기본 비활성화입니다. 과거 수집은 Windows 로컬에서 `backfill-messages --days 180`로 실행할 수 있으며, 운영 점검용 공개-safe 페이지는 `/feed/telegram-admin.html`에 생성됩니다. 자세한 운영 정책은 [`docs/telegram-public-channels.md`](docs/telegram-public-channels.md)를 참고합니다.
 
+Telegram 채널 품질은 채널명 키워드만으로 고정하지 않고, 수집 후 실제 성과로 보정합니다. 운영 대시보드는 기본 품질 점수와 별도로 `signal_quality_score`를 계산해 메시지 수, 기사 URL 직접 매칭, 키워드 추정 매칭, 매칭률, 리스크성 문구 비율을 함께 보여줍니다. 이 점수는 투자 추천이 아니라 “이 채널이 기사/이슈 보강에 얼마나 도움이 되는지”를 보는 운영 지표입니다.
+
 `config.yaml`에는 공개 가능한 Google News 보조 RSS를 두 축으로 추가할 수 있습니다.
 
 - 국내: 주주제안, 행동주의 주주, 소액주주연대, 지배구조, 밸류업, 자사주 소각, 자사주 취득 후 소각, 상법 개정, 일반주주 의결권, 스튜어드십, 금융회사 지배구조, 사외이사, 성과보상, 자본시장법/상법, 상장폐지, 상장적격성 실질심사, 거래정지 개선기간, 의무공개매수, CB/EB, 전환사채 리픽싱, STO 제도화, 증권사 IB, 임원보수 공시, 코너스톤 투자자, ETF 의결권, 해외부동산펀드 위험설명서 등
@@ -196,6 +198,8 @@ Windows에서 상태 확인과 작은 배치를 반복하려면 래퍼 스크립
 ```
 
 관련 기사 보기 품질을 위해 백필은 `config.yaml`의 모든 Google News 키워드와 별도 broad backfill 키워드를 함께 사용합니다. `--config-only`를 붙이면 `config.yaml`의 키워드만 사용합니다. 백필 후에는 `https://news.bside.ai/feed/latest.html`을 새로고침하면 `관련 기사 보기`, 아카이브 검색, 이슈 레이더가 DB에 축적된 과거 기사 기반으로 더 풍부하게 표시됩니다.
+
+Telegram 메시지는 로컬 `state.json`이 지나치게 커지지 않도록 `telegram_sources.message_retention_days`와 `telegram_sources.local_state_message_limit`로 보존 범위를 제한합니다. 기본값은 365일, 8만 건이며 DB는 장기 분석 저장소 역할을 맡고 GitHub Pages는 최신 정적 페이지와 공개-safe 대시보드를 유지합니다.
 
 ## GitHub Actions
 

@@ -13,6 +13,7 @@ from curator.telegram_sources import (
     auto_join_candidates,
     backfill_telegram_messages,
     canonicalize_telegram_url,
+    channel_quality_metrics,
     collect_telegram_sources,
     extract_urls,
     import_joined_public_channels,
@@ -253,6 +254,31 @@ def test_telegram_issue_signals_include_url_bursts(config, now) -> None:  # type
     signals = telegram_issue_signals(state, config, now=now)
 
     assert any(signal.get("signal_type") == "url_burst" for signal in signals)
+
+
+def test_channel_quality_metrics_uses_matches_and_risk_flags(now) -> None:  # type: ignore[no-untyped-def]
+    channel = {"handle": "marketnews", "title": "경제 증권 뉴스", "quality_score": 70}
+    first = normalize_telegram_message(channel, {"id": 1, "text": "공유 https://example.com/a", "date": now}, now)
+    second = normalize_telegram_message(channel, {"id": 2, "text": "급등주 추천 루머", "date": now}, now)
+    state = {
+        "telegram_source_messages": [first, second],
+        "telegram_article_matches": [
+            {
+                "article_id": "article",
+                "telegram_message_key": message_key(first),
+                "channel_handle": "marketnews",
+                "match_type": "exact_url",
+                "score": 1.0,
+            }
+        ],
+    }
+
+    metrics = channel_quality_metrics(state, channel)
+
+    assert metrics["messages"] == 2
+    assert metrics["direct_matches"] == 1
+    assert metrics["risk_messages"] == 1
+    assert 50 <= metrics["signal_quality_score"] < 70
 
 
 def test_channel_candidate_scoring() -> None:

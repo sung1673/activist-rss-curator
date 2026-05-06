@@ -9,7 +9,14 @@ from pathlib import Path
 
 from .dates import datetime_to_iso, parse_datetime
 from .remote_api import remote_api_url
-from .telegram_sources import ensure_telegram_state, is_collectable_public_channel, message_key, ordered_message_tokens, telegram_issue_signals
+from .telegram_sources import (
+    channel_quality_metrics,
+    ensure_telegram_state,
+    is_collectable_public_channel,
+    message_key,
+    ordered_message_tokens,
+    telegram_issue_signals,
+)
 
 
 TELEGRAM_DASHBOARD_RELATIVE_PATH = Path("public") / "feed" / "telegram-admin.html"
@@ -104,17 +111,33 @@ def telegram_dashboard_model(state: dict[str, object], config: dict[str, object]
         handle = str(channel.get("handle") or "")
         channel_messages = messages_by_channel.get(handle, [])
         latest_at = max((str(message.get("posted_at") or "") for message in channel_messages), default="")
+        metrics = channel_quality_metrics(state, channel)
         channel_rows.append(
             {
                 "handle": handle,
                 "title": channel.get("title") or handle,
                 "quality_score": int(channel.get("quality_score") or 0),
+                "signal_quality_score": int(metrics.get("signal_quality_score") or 0),
                 "messages": len(channel_messages),
+                "matches": int(metrics.get("matches") or 0),
+                "direct_matches": int(metrics.get("direct_matches") or 0),
+                "weak_matches": int(metrics.get("weak_matches") or 0),
+                "risk_messages": int(metrics.get("risk_messages") or 0),
+                "match_rate": float(metrics.get("match_rate") or 0),
+                "risk_rate": float(metrics.get("risk_rate") or 0),
                 "latest_at": latest_at,
                 "last_error": channel.get("last_error") or "",
             }
         )
-    channel_rows.sort(key=lambda row: (int(row.get("messages") or 0), str(row.get("latest_at") or "")), reverse=True)
+    channel_rows.sort(
+        key=lambda row: (
+            int(row.get("signal_quality_score") or 0),
+            int(row.get("matches") or 0),
+            int(row.get("messages") or 0),
+            str(row.get("latest_at") or ""),
+        ),
+        reverse=True,
+    )
 
     sample = recent_14d[-500:] if len(recent_14d) > 500 else recent_14d
     avg_bytes = 0
@@ -123,6 +146,18 @@ def telegram_dashboard_model(state: dict[str, object], config: dict[str, object]
     daily_messages = len(recent_14d) / 14 if recent_14d else 0
 
     signals = telegram_issue_signals(state, config, limit=12, now=now)
+    match_type_counter: Counter[str] = Counter(str(match.get("match_type") or "unknown") for match in matches)
+    quality_bands: Counter[str] = Counter()
+    for row in channel_rows:
+        score = int(row.get("signal_quality_score") or 0)
+        if score >= 80:
+            quality_bands["80+"] += 1
+        elif score >= 60:
+            quality_bands["60-79"] += 1
+        elif score >= 40:
+            quality_bands["40-59"] += 1
+        else:
+            quality_bands["0-39"] += 1
     return {
         "generated_at": datetime_to_iso(now),
         "channels_total": len(channels),
@@ -140,6 +175,8 @@ def telegram_dashboard_model(state: dict[str, object], config: dict[str, object]
         "day_counts": sorted(day_counter.items())[-21:],
         "top_keywords": keyword_counter.most_common(30),
         "signals": signals,
+        "match_type_counts": match_type_counter.most_common(),
+        "quality_bands": quality_bands.most_common(),
         "growth": {
             "avg_message_bytes": avg_bytes,
             "daily_messages": round(daily_messages, 1),
@@ -169,6 +206,7 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
             _stat_card("최근 24시간 메시지", model["messages_24h"]),
             _stat_card("최근 14일 메시지", model["messages_14d"]),
             _stat_card("기사 매칭", model["matches_total"]),
+            _stat_card("시그널 채널", len([row for row in model["top_channels"] if row.get("matches")]), "매칭 1건 이상"),
             _stat_card("추천 후보", model["candidates_total"], f"pending {model['candidate_pending']}"),
             _stat_card("월간 예상", f"{model['growth']['monthly_messages']}건", f"{model['growth']['monthly_mb']} MB"),
         ]
@@ -177,8 +215,11 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
         "<tr>"
         f"<td>@{escape(str(row.get('handle') or ''))}</td>"
         f"<td>{escape(_compact(row.get('title'), 42))}</td>"
-        f"<td>{escape(str(row.get('quality_score') or 0))}</td>"
+        f"<td>{escape(str(row.get('signal_quality_score') or row.get('quality_score') or 0))}<br><small>기본 {escape(str(row.get('quality_score') or 0))}</small></td>"
         f"<td>{escape(str(row.get('messages') or 0))}</td>"
+        f"<td>{escape(str(row.get('matches') or 0))}<br><small>URL {escape(str(row.get('direct_matches') or 0))} · 추정 {escape(str(row.get('weak_matches') or 0))}</small></td>"
+        f"<td>{escape(str(round(float(row.get('match_rate') or 0) * 100, 1)))}%</td>"
+        f"<td>{escape(str(row.get('risk_messages') or 0))}</td>"
         f"<td>{escape(str(row.get('latest_at') or ''))}</td>"
         f"<td>{escape(str(row.get('last_error') or ''))}</td>"
         "</tr>"
@@ -194,13 +235,21 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
     )
     signal_rows = "\n".join(
         "<tr>"
-        f"<td><b>{escape(str(signal.get('signal_title') or signal.get('article_id') or ''))}</b><br><small>{escape(str(signal.get('signal_type') or ''))}</small></td>"
+        f"<td><b>{escape(str(signal.get('signal_title') or signal.get('article_id') or ''))}</b><br><small>{escape(str(signal.get('signal_summary') or signal.get('signal_type') or ''))}</small></td>"
         f"<td>{escape(str(signal.get('related_telegram_count') or 0))}</td>"
         f"<td>{escape(str(signal.get('related_telegram_channels_count') or 0))}</td>"
         f"<td>{escape(', '.join(str(keyword) for keyword in signal.get('top_keywords', [])[:5]))}</td>"
         f"<td>{escape(', '.join(str(flag) for flag in signal.get('risk_flags', [])[:5]))}</td>"
         "</tr>"
         for signal in model["signals"]
+    )
+    match_type_rows = "\n".join(
+        f"<li><b>{escape(str(label))}</b><span>{count}건</span></li>"
+        for label, count in model["match_type_counts"]
+    )
+    quality_rows = "\n".join(
+        f"<span>{escape(str(label))} <b>{count}</b></span>"
+        for label, count in model["quality_bands"]
     )
     day_rows = "\n".join(
         f"<div><span>{escape(str(day))}</span><b style=\"width:{min(100, count * 100 / max(1, max((c for _d, c in model['day_counts']), default=1))):.1f}%\"></b><em>{count}</em></div>"
@@ -224,7 +273,7 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
     a {{ color:var(--accent); }}
     .brand {{ color:var(--accent); font-size:34px; font-weight:800; letter-spacing:-1px; text-decoration:none; }}
     .brand span {{ font-size:12px; letter-spacing:2px; margin-left:8px; }}
-    .stats {{ display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin:22px 0; }}
+    .stats {{ display:grid; grid-template-columns:repeat(7,1fr); gap:10px; margin:22px 0; }}
     .stat {{ border:1px solid var(--line); background:var(--paper); padding:14px; min-height:96px; }}
     .stat strong {{ display:block; font-size:25px; color:var(--accent); }}
     .stat p {{ margin:8px 0 0; color:var(--ink); font-weight:700; }}
@@ -260,8 +309,8 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
     <div>
       <h2>채널별 수집 상태</h2>
       <table>
-        <thead><tr><th>Handle</th><th>Title</th><th>Quality</th><th>Messages</th><th>Latest</th><th>Error</th></tr></thead>
-        <tbody id="channel-rows">{channel_rows or '<tr><td colspan="6">수집 대상 채널이 아직 없습니다.</td></tr>'}</tbody>
+        <thead><tr><th>Handle</th><th>Title</th><th>Quality</th><th>Messages</th><th>Matches</th><th>Match rate</th><th>Risk</th><th>Latest</th><th>Error</th></tr></thead>
+        <tbody id="channel-rows">{channel_rows or '<tr><td colspan="9">수집 대상 채널이 아직 없습니다.</td></tr>'}</tbody>
       </table>
     </div>
     <div>
@@ -269,6 +318,10 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
       <ul class="types" id="type-rows">{type_rows or '<li><b>데이터 없음</b><span>0건</span></li>'}</ul>
       <h2>최근 14일 키워드</h2>
       <div class="chips" id="keyword-rows">{keyword_rows or '<span>키워드 없음</span>'}</div>
+      <h2>매칭 품질</h2>
+      <ul class="types" id="match-type-rows">{match_type_rows or '<li><b>매칭 없음</b><span>0건</span></li>'}</ul>
+      <h2>채널 품질 분포</h2>
+      <div class="chips" id="quality-rows">{quality_rows or '<span>아직 평가 전</span>'}</div>
     </div>
   </section>
   <section class="grid">
@@ -320,6 +373,8 @@ function modelFromApi(data) {{
     day_counts: data.day_counts || fallbackModel.day_counts || [],
     top_keywords: data.top_keywords || fallbackModel.top_keywords || [],
     signals: data.signals || fallbackModel.signals || [],
+    match_type_counts: data.match_type_counts || fallbackModel.match_type_counts || [],
+    quality_bands: data.quality_bands || fallbackModel.quality_bands || [],
     growth: data.growth || fallbackModel.growth || {{}},
   }};
 }}
@@ -330,19 +385,22 @@ function renderDashboard(model, sourceLabel) {{
     statCard("최근 24시간 메시지", model.messages_24h ?? 0),
     statCard("최근 14일 메시지", model.messages_14d ?? 0),
     statCard("기사 매칭", model.matches_total ?? 0),
+    statCard("시그널 채널", (model.top_channels || []).filter((row) => Number(row.matches || 0) > 0).length, "매칭 1건 이상"),
     statCard("이슈 신호", model.signals_total ?? (model.signals || []).length),
     statCard("월간 예상", `${{growth.monthly_messages ?? 0}}건`, `${{growth.monthly_mb ?? 0}} MB`),
   ].join("");
-  document.getElementById("channel-rows").innerHTML = (model.top_channels || []).map((row) => `<tr><td>@${{esc(row.handle || "")}}</td><td>${{esc(compact(row.title, 42))}}</td><td>${{esc(row.quality_score || 0)}}</td><td>${{esc(row.messages || 0)}}</td><td>${{esc(row.latest_at || row.last_collected_at || "")}}</td><td>${{esc(row.last_error || "")}}</td></tr>`).join("") || '<tr><td colspan="6">수집 대상 채널이 아직 없습니다.</td></tr>';
+  document.getElementById("channel-rows").innerHTML = (model.top_channels || []).map((row) => `<tr><td>@${{esc(row.handle || "")}}</td><td>${{esc(compact(row.title, 42))}}</td><td>${{esc(row.signal_quality_score || row.quality_score || 0)}}<br><small>기본 ${{esc(row.quality_score || 0)}}</small></td><td>${{esc(row.messages || 0)}}</td><td>${{esc(row.matches || 0)}}<br><small>URL ${{esc(row.direct_matches || 0)}} · 추정 ${{esc(row.weak_matches || 0)}}</small></td><td>${{esc(((Number(row.match_rate || 0)) * 100).toFixed(1))}}%</td><td>${{esc(row.risk_messages || 0)}}</td><td>${{esc(row.latest_at || row.last_collected_at || "")}}</td><td>${{esc(row.last_error || "")}}</td></tr>`).join("") || '<tr><td colspan="9">수집 대상 채널이 아직 없습니다.</td></tr>';
   document.getElementById("type-rows").innerHTML = listEntries(model.type_counts).map((row) => `<li><b>${{esc(row.label ?? row[0] ?? "")}}</b><span>${{esc(row.count ?? row[1] ?? 0)}}건</span></li>`).join("") || '<li><b>데이터 없음</b><span>0건</span></li>';
   document.getElementById("keyword-rows").innerHTML = listEntries(model.top_keywords).slice(0, 24).map((row) => `<span>${{esc(row.label ?? row[0] ?? "")}} <b>${{esc(row.count ?? row[1] ?? 0)}}</b></span>`).join("") || '<span>키워드 없음</span>';
+  document.getElementById("match-type-rows").innerHTML = listEntries(model.match_type_counts).map((row) => `<li><b>${{esc(row.label ?? row[0] ?? "")}}</b><span>${{esc(row.count ?? row[1] ?? 0)}}건</span></li>`).join("") || '<li><b>매칭 없음</b><span>0건</span></li>';
+  document.getElementById("quality-rows").innerHTML = listEntries(model.quality_bands).map((row) => `<span>${{esc(row.label ?? row[0] ?? "")}} <b>${{esc(row.count ?? row[1] ?? 0)}}</b></span>`).join("") || '<span>아직 평가 전</span>';
   const maxDay = Math.max(1, ...(model.day_counts || []).map((row) => Number(row[1] || row.count || 0)));
   document.getElementById("day-rows").innerHTML = (model.day_counts || []).map((row) => {{
     const day = row[0] ?? row.day ?? "";
     const count = Number(row[1] ?? row.count ?? 0);
     return `<div><span>${{esc(day)}}</span><b style="width:${{Math.min(100, count * 100 / maxDay).toFixed(1)}}%"></b><em>${{count}}</em></div>`;
   }}).join("") || '<p>아직 표시할 수집량이 없습니다.</p>';
-  document.getElementById("signal-rows").innerHTML = (model.signals || []).map((signal) => `<tr><td><b>${{esc(signal.signal_title || signal.article_id || "")}}</b><br><small>${{esc(signal.signal_type || "")}}</small></td><td>${{esc(signal.related_telegram_count || 0)}}</td><td>${{esc(signal.related_telegram_channels_count || 0)}}</td><td>${{esc((signal.top_keywords || []).slice(0, 5).join(", "))}}</td><td>${{esc((signal.risk_flags || []).slice(0, 5).join(", "))}}</td></tr>`).join("") || '<tr><td colspan="5">아직 기사와 연결된 Telegram 신호가 없습니다.</td></tr>';
+  document.getElementById("signal-rows").innerHTML = (model.signals || []).map((signal) => `<tr><td><b>${{esc(signal.signal_title || signal.article_id || "")}}</b><br><small>${{esc(signal.signal_summary || signal.signal_type || "")}}</small></td><td>${{esc(signal.related_telegram_count || 0)}}</td><td>${{esc(signal.related_telegram_channels_count || 0)}}</td><td>${{esc((signal.top_keywords || []).slice(0, 5).join(", "))}}</td><td>${{esc((signal.risk_flags || []).slice(0, 5).join(", "))}}</td></tr>`).join("") || '<tr><td colspan="5">아직 기사와 연결된 Telegram 신호가 없습니다.</td></tr>';
   document.getElementById("data-status").innerHTML = `<b>${{esc(sourceLabel)}}</b> 생성시각 ${{esc(model.generated_at || "")}}`;
 }}
 renderDashboard(fallbackModel, "정적 fallback");

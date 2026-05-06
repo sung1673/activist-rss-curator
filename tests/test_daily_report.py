@@ -211,9 +211,10 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "현재 묶음과 DB 아카이브" in workbench_html
     assert "NO IMAGE" in workbench_html
     assert "panel__image--placeholder" in workbench_html
-    assert "오른쪽에서 원문 보기" in workbench_html
-    assert "data-reader-frame" in workbench_html
-    assert "sandbox=\"allow-same-origin allow-scripts allow-forms allow-popups\"" in workbench_html
+    assert "오른쪽에서 기사 보기" in workbench_html
+    assert "data-reader-body" in workbench_html
+    assert "외부 언론사 원문을 페이지 안에 안정적으로 삽입하지 않습니다" in workbench_html
+    assert "data-reader-frame" not in workbench_html
     workbench_data = re.search(r'<script type="application/json" id="workbench-data">(.*?)</script>', workbench_html, re.S)
     assert workbench_data
     assert "&quot;" not in workbench_data.group(1)
