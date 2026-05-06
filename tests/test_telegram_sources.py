@@ -508,3 +508,25 @@ def test_collect_skips_when_disabled(config) -> None:  # type: ignore[no-untyped
     config["telegram_sources"] = {"enabled": False, "channels": [{"handle": "marketnews"}]}  # type: ignore[index]
 
     assert collect_telegram_sources({}, config, now)["telegram_source_skipped"] == 1
+
+
+def test_collect_does_not_fail_feed_build_when_session_is_invalid(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import telegram_sources
+
+    class BrokenAdapter:
+        def __init__(self, _config: dict[str, object]) -> None:
+            pass
+
+        async def __aenter__(self) -> "BrokenAdapter":
+            raise EOFError("session requires interactive login")
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(telegram_sources, "TelethonClientAdapter", BrokenAdapter)
+    state: dict[str, object] = {}
+    summary = collect_telegram_sources(state, telegram_config(config), now)
+
+    assert summary["telegram_source_connect_failed"] == 1
+    assert summary["telegram_source_error"] == "EOFError"
+    assert state["telegram_source_runs"][0]["telegram_source_connect_failed"] == 1  # type: ignore[index]

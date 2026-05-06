@@ -1982,7 +1982,17 @@ def collect_telegram_sources(
                 summary.update(await _discover_with_client(state, config, now, opened))
                 return summary
 
-        summary = asyncio.run(run_with_adapter())
+        try:
+            summary = asyncio.run(run_with_adapter())
+        except Exception as exc:  # noqa: BLE001 - Telegram auth/session errors must not break feed builds.
+            summary = {
+                "telegram_source_channels_registered": registered,
+                "telegram_source_connect_failed": 1,
+                "telegram_source_error": exc.__class__.__name__,
+            }
+            state.setdefault("telegram_source_runs", [])
+            state["telegram_source_runs"].append(telegram_run_record(now, "collect", summary))  # type: ignore[index, union-attr]
+            return summary
     else:
         async def run_with_client() -> dict[str, int]:
             summary = await _collect_with_client(state, config, now, client)
