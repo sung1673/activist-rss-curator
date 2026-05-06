@@ -1300,15 +1300,472 @@ function telegram_query_fallback_allowed(array $tokens): bool {
     return $eventCount >= 1 && $entityCount >= 1;
 }
 
+function search_event_rules(): array {
+    return array(
+        array('id' => 'management_dispute', 'label' => '경영권·주주행동', 'keywords' => array('경영권', '공개매수', '주주제안', '주주총회', '주총', '의결권', '이사회', '가처분', '소송', '행동주의', '스튜어드십', '주주행동', 'proxy', 'board', 'shareholder', 'activist')),
+        array('id' => 'delisting', 'label' => '상장폐지·거래정지', 'keywords' => array('상장폐지', '상폐', '거래정지', '관리종목', '실질심사', '감사의견', '자본잠식', '정리매매', '불성실공시', 'delisting')),
+        array('id' => 'valueup', 'label' => '밸류업·자본정책', 'keywords' => array('밸류업', '벨류업', '기업가치', '자사주', '소각', '배당', '주주환원', 'roe', 'pbr', '유상증자', '감자', 'buyback', 'dividend')),
+        array('id' => 'disclosure', 'label' => '공시·제도', 'keywords' => array('공시', '주요사항보고서', 'dart', 'kind', '거래소', '금융위', '금감원', '정정공시', '제도', '감독', 'disclosure')),
+        array('id' => 'global', 'label' => '해외·영문', 'keywords' => array('activist', 'activism', 'proxy', 'settlement', 'tender offer', 'governance', 'stewardship', 'sec', 'bloomberg', 'cnbc')),
+    );
+}
+
+function search_text_blob(array $row): string {
+    $parts = array();
+    foreach (array('title', 'representative_title', 'signal_title', 'summary', 'signal_summary', 'source', 'feed_name', 'feed_category', 'theme_group', 'relevance_level') as $key) {
+        if (isset($row[$key]) && $row[$key] !== null) {
+            $parts[] = (string)$row[$key];
+        }
+    }
+    if (isset($row['top_keywords']) && is_array($row['top_keywords'])) {
+        $parts[] = implode(' ', $row['top_keywords']);
+    }
+    if (isset($row['top_channels']) && is_array($row['top_channels'])) {
+        $parts[] = implode(' ', $row['top_channels']);
+    }
+    if (isset($row['top_related_messages']) && is_array($row['top_related_messages'])) {
+        foreach ($row['top_related_messages'] as $message) {
+            if (is_array($message)) {
+                foreach (array('excerpt', 'text', 'channel_title', 'channel_handle') as $key) {
+                    if (isset($message[$key]) && $message[$key] !== null) {
+                        $parts[] = (string)$message[$key];
+                    }
+                }
+            }
+        }
+    }
+    return implode(' ', $parts);
+}
+
+function search_classify_event(array $row): array {
+    $haystack = mb_strtolower(search_text_blob($row), 'UTF-8');
+    $best = array('id' => 'general', 'label' => '일반 이슈', 'hits' => array());
+    foreach (search_event_rules() as $rule) {
+        $hits = array();
+        foreach ($rule['keywords'] as $keyword) {
+            if ($keyword !== '' && mb_strpos($haystack, mb_strtolower((string)$keyword, 'UTF-8'), 0, 'UTF-8') !== false) {
+                $hits[] = (string)$keyword;
+            }
+        }
+        if (count($hits) > count($best['hits'])) {
+            $best = array('id' => $rule['id'], 'label' => $rule['label'], 'hits' => array_slice(array_values(array_unique($hits)), 0, 8));
+        }
+    }
+    return $best;
+}
+
+function search_row_risk_flags(array $row): array {
+    $flags = array();
+    if (isset($row['risk_flags']) && is_array($row['risk_flags'])) {
+        foreach ($row['risk_flags'] as $flag) {
+            $flags[(string)$flag] = true;
+        }
+    }
+    if (isset($row['risk_flags_json'])) {
+        foreach (decode_json_array((string)$row['risk_flags_json']) as $flag) {
+            $flags[(string)$flag] = true;
+        }
+    }
+    foreach (telegram_risk_flags(search_text_blob($row)) as $flag) {
+        $flags[(string)$flag] = true;
+    }
+    return array_values(array_keys($flags));
+}
+
+function search_spread_score(array $row): float {
+    $articleCount = isset($row['article_count']) ? (int)$row['article_count'] : 0;
+    $telegramCount = isset($row['related_telegram_count']) ? (int)$row['related_telegram_count'] : 0;
+    $channelCount = isset($row['related_telegram_channels_count']) ? (int)$row['related_telegram_channels_count'] : 0;
+    $publisherCount = isset($row['publisher_count']) ? (int)$row['publisher_count'] : 0;
+    $engagement = 0.0;
+    if (isset($row['top_related_messages']) && is_array($row['top_related_messages'])) {
+        foreach ($row['top_related_messages'] as $message) {
+            if (is_array($message)) {
+                $engagement += ((int)($message['views'] ?? 0)) / 5000.0 + ((int)($message['forwards'] ?? 0)) / 50.0;
+            }
+        }
+    }
+    return min(1.0, log(1 + $articleCount + $publisherCount * 2 + $telegramCount + $channelCount * 2 + $engagement) / 4.0);
+}
+
+function search_recency_score(array $row): float {
+    $raw = '';
+    foreach (array('published_at', 'sort_at', 'last_article_seen_at', 'latest_seen_at', 'first_seen_at', 'posted_at', 'seen_at', 'updated_at') as $key) {
+        if (isset($row[$key]) && (string)$row[$key] !== '') {
+            $raw = (string)$row[$key];
+            break;
+        }
+    }
+    if ($raw === '') {
+        return 0.25;
+    }
+    $ts = strtotime($raw);
+    if ($ts === false) {
+        return 0.25;
+    }
+    $ageHours = max(0.0, (time() - $ts) / 3600.0);
+    return max(0.0, min(1.0, 1.0 - $ageHours / (24.0 * 14.0)));
+}
+
+function search_materiality_score(array $row): float {
+    $event = search_classify_event($row);
+    if ($event['id'] === 'management_dispute' || $event['id'] === 'delisting') {
+        return 1.0;
+    }
+    if ($event['id'] === 'valueup' || $event['id'] === 'disclosure') {
+        return 0.72;
+    }
+    if ($event['id'] === 'global') {
+        return 0.55;
+    }
+    return 0.35;
+}
+
+function search_risk_penalty(array $row): float {
+    $flags = search_row_risk_flags($row);
+    $penalty = 0.0;
+    if (in_array('promotional', $flags, true)) { $penalty += 0.35; }
+    if (in_array('rumor', $flags, true)) { $penalty += 0.22; }
+    if (in_array('unverified', $flags, true)) { $penalty += 0.12; }
+    return $penalty;
+}
+
+function search_score_row(array $row, string $kind, string $query, string $sort): array {
+    $tokens = search_tokens($query);
+    $text = mb_strtolower(search_text_blob($row), 'UTF-8');
+    $hits = 0;
+    foreach ($tokens as $token) {
+        if (mb_strpos($text, mb_strtolower((string)$token, 'UTF-8'), 0, 'UTF-8') !== false) {
+            $hits++;
+        }
+    }
+    $queryRelevance = count($tokens) > 0 ? $hits / count($tokens) : 0.5;
+    $officialAnchor = preg_match('/공시|dart|kind|거래소|금융위|금감원|법원|주요사항보고서/iu', $text) === 1 ? 1.0 : 0.0;
+    $confidence = isset($row['confidence_score']) ? (float)$row['confidence_score'] : ($kind === 'telegram' ? 0.5 : 0.65);
+    $base = $kind === 'story' ? 0.08 : ($kind === 'article' ? 0.02 : -0.02);
+    $breakdown = array(
+        'relevance' => round($queryRelevance, 4),
+        'official_anchor' => round($officialAnchor, 4),
+        'source_diversity' => round(search_spread_score($row), 4),
+        'recency' => round(search_recency_score($row), 4),
+        'materiality' => round(search_materiality_score($row), 4),
+        'momentum' => round($kind === 'telegram' ? search_spread_score($row) : ((isset($row['related_telegram_count']) ? min(1.0, (float)$row['related_telegram_count'] / 10.0) : 0.0)), 4),
+        'risk_penalty' => round(search_risk_penalty($row), 4),
+    );
+    $smart = $base
+        + 0.28 * $breakdown['relevance']
+        + 0.14 * $breakdown['official_anchor']
+        + 0.16 * $breakdown['source_diversity']
+        + 0.16 * $breakdown['recency']
+        + 0.16 * $breakdown['materiality']
+        + 0.10 * $confidence
+        - $breakdown['risk_penalty'];
+    if ($sort === 'latest') {
+        $final = $breakdown['recency'];
+    } elseif ($sort === 'spread') {
+        $final = $breakdown['source_diversity'];
+    } elseif ($sort === 'telegram_momentum' || $sort === 'telegram') {
+        $final = $kind === 'telegram' ? $breakdown['momentum'] + $confidence * 0.2 : $breakdown['momentum'];
+    } elseif ($sort === 'low_noise') {
+        $final = $smart - $breakdown['risk_penalty'] * 1.5;
+    } else {
+        $final = $smart;
+    }
+    $breakdown['final_score'] = round(max(0.0, $final), 4);
+    return $breakdown;
+}
+
+function search_sort_rows(array $rows, string $kind, string $query, string $sort): array {
+    foreach ($rows as $idx => $row) {
+        $score = search_score_row($row, $kind, $query, $sort);
+        $rows[$idx]['search_score'] = $score['final_score'];
+        $rows[$idx]['score_breakdown'] = $score;
+    }
+    usort($rows, function ($a, $b) {
+        $score = ((float)($b['search_score'] ?? 0)) <=> ((float)($a['search_score'] ?? 0));
+        if ($score !== 0) {
+            return $score;
+        }
+        return strcmp((string)($b['sort_at'] ?? $b['latest_seen_at'] ?? ''), (string)($a['sort_at'] ?? $a['latest_seen_at'] ?? ''));
+    });
+    return $rows;
+}
+
+function search_why_matters(array $row, string $kind): array {
+    $event = search_classify_event($row);
+    $flags = search_row_risk_flags($row);
+    $lines = array();
+    if ($event['id'] === 'management_dispute') {
+        $lines[] = '주주권·의결권·이사회 책임 쟁점과 연결되는 이슈입니다.';
+    } elseif ($event['id'] === 'delisting') {
+        $lines[] = '거래 가능성과 투자자 보호 절차에 직접 연결되는 시장 민감 이벤트입니다.';
+    } elseif ($event['id'] === 'valueup') {
+        $lines[] = '자사주·배당·기업가치 제고 등 실제 자본정책 여부를 함께 봐야 합니다.';
+    } elseif ($event['id'] === 'disclosure') {
+        $lines[] = '공시·제도 변화와 후속 기사 확산 여부를 확인할 필요가 있습니다.';
+    } elseif ($event['id'] === 'global') {
+        $lines[] = '해외 행동주의·거버넌스 흐름을 국내 관점에서 비교해 볼 수 있습니다.';
+    }
+    if ((int)($row['article_count'] ?? 0) > 1) {
+        $lines[] = '복수 기사로 묶인 이슈라 단발 보도보다 확산도가 높습니다.';
+    }
+    if ((int)($row['related_telegram_channels_count'] ?? 0) > 1) {
+        $lines[] = 'Telegram 여러 채널에서 반복 언급됐습니다.';
+    }
+    if (in_array('promotional', $flags, true) || in_array('rumor', $flags, true) || in_array('unverified', $flags, true)) {
+        $lines[] = '미확인·홍보성 가능성이 있어 원문 확인이 필요합니다.';
+    }
+    return array_slice($lines, 0, 3);
+}
+
+function search_public_story_row(array $row, string $query, string $sort): array {
+    $row['title'] = isset($row['representative_title']) ? (string)$row['representative_title'] : '';
+    $row['event_type'] = search_classify_event($row);
+    $row['risk_flags'] = search_row_risk_flags($row);
+    $row['why_matters'] = search_why_matters($row, 'story');
+    $row['verification_status'] = preg_match('/공시|dart|kind|거래소|금융위|금감원/iu', search_text_blob($row)) === 1 ? 'official_hint' : 'media_confirmed';
+    $score = search_score_row($row, 'story', $query, $sort);
+    $row['search_score'] = $score['final_score'];
+    $row['score_breakdown'] = $score;
+    return $row;
+}
+
+function search_public_article_row(array $row, string $query, string $sort): array {
+    $row = public_article_row($row, $query);
+    $row['event_type'] = search_classify_event($row);
+    $row['risk_flags'] = search_row_risk_flags($row);
+    $row['why_matters'] = search_why_matters($row, 'article');
+    $score = search_score_row($row, 'article', $query, $sort);
+    $row['search_score'] = $score['final_score'];
+    $row['score_breakdown'] = $score;
+    return $row;
+}
+
+function search_public_telegram_row(array $row, string $query, string $sort): array {
+    $signal = public_telegram_signal($row);
+    $signal['event_type'] = search_classify_event($signal);
+    $signal['risk_flags'] = search_row_risk_flags($signal);
+    $signal['why_matters'] = search_why_matters($signal, 'telegram');
+    $score = search_score_row($signal, 'telegram', $query, $sort);
+    $signal['search_score'] = $score['final_score'];
+    $signal['score_breakdown'] = $score;
+    return $signal;
+}
+
+function search_query_interpretation(string $query, array $rows): array {
+    $tokens = search_tokens($query);
+    $events = array();
+    foreach ($rows as $row) {
+        $event = search_classify_event($row);
+        if ($event['id'] !== 'general') {
+            if (!isset($events[$event['id']])) {
+                $events[$event['id']] = array('id' => $event['id'], 'label' => $event['label'], 'count' => 0);
+            }
+            $events[$event['id']]['count']++;
+        }
+    }
+    usort($events, function ($a, $b) { return ((int)$b['count']) <=> ((int)$a['count']); });
+    return array(
+        'keywords' => $tokens,
+        'event_types' => array_slice(array_values($events), 0, 5),
+        'query_intent' => count($events) ? 'event_keyword' : 'general_news',
+        'confidence' => min(0.95, 0.45 + count($tokens) * 0.12 + count($events) * 0.08),
+    );
+}
+
+function search_briefing(string $query, array $articles, array $stories, array $telegram): array {
+    $rows = array_merge($stories, $articles, $telegram);
+    $events = array();
+    $riskCounts = array();
+    $sources = array();
+    $channels = array();
+    foreach ($rows as $row) {
+        $event = search_classify_event($row);
+        $events[$event['label']] = ($events[$event['label']] ?? 0) + 1;
+        foreach (search_row_risk_flags($row) as $flag) {
+            $riskCounts[$flag] = ($riskCounts[$flag] ?? 0) + 1;
+        }
+        if (isset($row['source']) && $row['source'] !== '') {
+            $sources[(string)$row['source']] = true;
+        }
+        if (isset($row['feed_name']) && $row['feed_name'] !== '') {
+            $sources[(string)$row['feed_name']] = true;
+        }
+        if (isset($row['top_channels']) && is_array($row['top_channels'])) {
+            foreach ($row['top_channels'] as $channel) {
+                $channels[(string)$channel] = true;
+            }
+        }
+    }
+    arsort($events);
+    arsort($riskCounts);
+    $eventLabel = $events ? (string)array_key_first($events) : '일반 이슈';
+    $riskFlags = array_slice(array_keys($riskCounts), 0, 6);
+    $headline = $query . ' 관련 공개 정보가 ' . $eventLabel . ' 관점에서 정리됐습니다.';
+    $bullets = array(
+        $eventLabel . ' 관련 기사·이슈·Telegram 언급을 함께 확인할 수 있습니다.',
+        count($sources) > 0 ? '기사 출처 ' . count($sources) . '곳이 검색어와 연결됩니다.' : '기사 출처 확산은 아직 제한적입니다.',
+        count($channels) > 0 ? 'Telegram 공개 채널 ' . count($channels) . '곳에서 관련 언급이 확인됩니다.' : 'Telegram 관련 언급은 제한적입니다.',
+    );
+    if ($riskFlags) {
+        $bullets[] = '주의 플래그: ' . implode(' · ', $riskFlags);
+    } else {
+        $bullets[] = '주요 루머·홍보성 플래그는 제한적입니다.';
+    }
+    return array(
+        'headline' => $headline,
+        'verification_status' => count($articles) > 0 || count($stories) > 0 ? 'media_confirmed' : 'telegram_only',
+        'spread_status' => (count($articles) + count($stories) + count($telegram)) >= 10 ? 'expanding' : 'limited',
+        'source_counts' => array(
+            'articles' => count($articles),
+            'stories' => count($stories),
+            'publishers' => count($sources),
+            'telegram_signals' => count($telegram),
+            'telegram_channels' => count($channels),
+        ),
+        'risk_flags' => $riskFlags,
+        'bullets' => $bullets,
+        'disclaimer' => '공개 정보 기반 이슈 정리이며 투자 제안·권유·종목 추천이 아닙니다.',
+    );
+}
+
+function search_timeline(array $articles, array $stories, array $telegram): array {
+    $items = array();
+    foreach ($stories as $row) {
+        $items[] = array('kind' => '이슈', 'time' => (string)($row['last_article_seen_at'] ?? $row['published_at'] ?? ''), 'title' => (string)($row['representative_title'] ?? ''), 'url' => (string)($row['representative_url'] ?? ''), 'event_type' => $row['event_type'] ?? null);
+    }
+    foreach ($articles as $row) {
+        $items[] = array('kind' => '기사', 'time' => (string)($row['published_at'] ?? $row['sort_at'] ?? ''), 'title' => (string)($row['title'] ?? ''), 'url' => (string)($row['canonical_url'] ?? ''), 'event_type' => $row['event_type'] ?? null);
+    }
+    foreach ($telegram as $signal) {
+        foreach (array_slice((array)($signal['top_related_messages'] ?? array()), 0, 4) as $message) {
+            if (is_array($message)) {
+                $items[] = array('kind' => 'Telegram', 'time' => (string)($message['posted_at'] ?? ''), 'title' => text_excerpt((string)($message['excerpt'] ?? $signal['signal_title'] ?? ''), 120), 'url' => (string)($message['message_url'] ?? ''), 'event_type' => $signal['event_type'] ?? null);
+            }
+        }
+    }
+    usort($items, function ($a, $b) {
+        return strtotime((string)$b['time']) <=> strtotime((string)$a['time']);
+    });
+    return array_slice($items, 0, 40);
+}
+
+function handle_search(PDO $pdo, array $config): void {
+    $query = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
+    if (mb_strlen($query, 'UTF-8') < 2) {
+        respond(400, array('ok' => false, 'error' => 'query_too_short'));
+    }
+    $limit = isset($_GET['limit']) ? max(1, min(60, (int)$_GET['limit'])) : 30;
+    $days = isset($_GET['days']) ? max(1, min(365, (int)$_GET['days'])) : 365;
+    $sort = isset($_GET['sort']) ? (string)$_GET['sort'] : 'smart';
+    if (!in_array($sort, array('smart', 'latest', 'spread', 'official', 'telegram_momentum', 'telegram', 'low_noise'), true)) {
+        $sort = 'smart';
+    }
+    $tokens = search_tokens($query);
+    if (!$tokens) {
+        respond(400, array('ok' => false, 'error' => 'query_too_short'));
+    }
+    $articleWhere = array(
+        'canonical_url IS NOT NULL',
+        'title IS NOT NULL',
+        '(status IS NULL OR status NOT IN ("rejected", "duplicate"))',
+        'sort_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY)',
+    );
+    $articleParams = array();
+    foreach ($tokens as $token) {
+        $like = '%' . $token . '%';
+        $articleWhere[] = '(title LIKE ? OR normalized_title LIKE ? OR summary LIKE ? OR source LIKE ? OR feed_name LIKE ? OR feed_category LIKE ?)';
+        array_push($articleParams, $like, $like, $like, $like, $like, $like);
+    }
+    $articleSql = 'SELECT record_id, canonical_url, title, summary, source, feed_name, feed_category, image_url, published_at, seen_at, status, reason, relevance_level, priority_score, priority_level, story_key, sort_at FROM '
+        . table_name($config, 'articles')
+        . ' WHERE ' . implode(' AND ', $articleWhere)
+        . ' ORDER BY sort_at DESC, priority_score DESC LIMIT ' . min(120, $limit * 3);
+    $stmt = $pdo->prepare($articleSql);
+    $stmt->execute($articleParams);
+    $articles = array();
+    foreach ($stmt->fetchAll() as $row) {
+        $articles[] = search_public_article_row($row, $query, $sort);
+    }
+
+    $storyWhere = array('representative_title IS NOT NULL', 'sort_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY)');
+    $storyParams = array();
+    foreach ($tokens as $token) {
+        $like = '%' . $token . '%';
+        $storyWhere[] = '(representative_title LIKE ? OR theme_group LIKE ? OR relevance_level LIKE ?)';
+        array_push($storyParams, $like, $like, $like);
+    }
+    $storySql = 'SELECT story_key, guid, representative_title, representative_url, relevance_level, theme_group, status, article_count, priority_score, published_at, last_article_seen_at, sort_at FROM '
+        . table_name($config, 'stories')
+        . ' WHERE ' . implode(' AND ', $storyWhere)
+        . ' ORDER BY sort_at DESC, priority_score DESC LIMIT ' . min(80, $limit * 2);
+    $stmt = $pdo->prepare($storySql);
+    $stmt->execute($storyParams);
+    $stories = array();
+    foreach ($stmt->fetchAll() as $row) {
+        $stories[] = search_public_story_row($row, $query, $sort);
+    }
+
+    $signalsTable = table_name($config, 'telegram_issue_signals');
+    $signalSql = 'SELECT article_id, related_telegram_count, related_telegram_channels_count, first_seen_at, latest_seen_at, confidence_score, payload_json, updated_at FROM '
+        . $signalsTable
+        . ' WHERE latest_seen_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY)'
+        . ' ORDER BY related_telegram_channels_count DESC, related_telegram_count DESC, latest_seen_at DESC LIMIT 160';
+    $stmt = $pdo->prepare($signalSql);
+    $stmt->execute();
+    $telegram = array();
+    foreach ($stmt->fetchAll() as $row) {
+        $signal = search_public_telegram_row($row, $query, $sort);
+        $text = mb_strtolower(search_text_blob($signal), 'UTF-8');
+        $matches = false;
+        foreach ($tokens as $token) {
+            if (mb_strpos($text, mb_strtolower((string)$token, 'UTF-8'), 0, 'UTF-8') !== false) {
+                $matches = true;
+                break;
+            }
+        }
+        if ($matches) {
+            $telegram[] = $signal;
+        }
+    }
+
+    $articles = array_slice(search_sort_rows($articles, 'article', $query, $sort), 0, $limit);
+    $stories = array_slice(search_sort_rows($stories, 'story', $query, $sort), 0, $limit);
+    $telegram = array_slice(search_sort_rows($telegram, 'telegram', $query, $sort), 0, $limit);
+    $allRows = array_merge($stories, $articles, $telegram);
+    $interpretation = search_query_interpretation($query, $allRows);
+    $briefing = search_briefing($query, $articles, $stories, $telegram);
+    respond(200, array(
+        'ok' => true,
+        'query' => $query,
+        'query_interpretation' => $interpretation,
+        'briefing' => $briefing,
+        'tabs' => array(
+            'overview' => count($allRows),
+            'stories' => count($stories),
+            'articles' => count($articles),
+            'telegram' => count($telegram),
+            'timeline' => count($allRows),
+        ),
+        'stories' => $stories,
+        'articles' => $articles,
+        'telegram' => $telegram,
+        'timeline' => search_timeline($articles, $stories, $telegram),
+    ));
+}
+
 function handle_read(string $action, array $config): void {
     if ($action === 'health') {
         respond(200, array('ok' => true, 'service' => 'activist', 'time' => gmdate('c')));
     }
-    if (!in_array($action, array('reports', 'report', 'latest_snapshot', 'articles', 'telegram_reactions', 'telegram_dashboard'), true)) {
+    if (!in_array($action, array('reports', 'report', 'latest_snapshot', 'articles', 'telegram_reactions', 'telegram_dashboard', 'search'), true)) {
         respond(404, array('ok' => false, 'error' => 'unknown_action'));
     }
     $pdo = pdo_conn($config);
     ensure_schema($pdo, $config);
+    if ($action === 'search') {
+        handle_search($pdo, $config);
+    }
     if ($action === 'telegram_dashboard') {
         handle_telegram_dashboard($pdo, $config);
     }

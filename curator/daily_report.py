@@ -3372,7 +3372,7 @@ def render_search_html(
     const hidePromotional = document.querySelector('[data-hide-promotional]');
     const hideTelegramOnly = document.querySelector('[data-hide-telegram-only]');
     const tabButtons = Array.from(document.querySelectorAll('[data-tab]'));
-    const state = {{ query: '', tab: 'all', articles: [], stories: [], signals: [] }};
+    const state = {{ query: '', tab: 'all', articles: [], stories: [], signals: [], serverSearch: null }};
     const EVENT_RULES = [
       {{ id: 'management_dispute', label: '경영권·주주행동', keywords: ['경영권', '공개매수', '주주제안', '주주총회', '주총', '의결권', '이사회', '가처분', '소송', '행동주의', '스튜어드십', '주주행동'] }},
       {{ id: 'delisting', label: '상장폐지·거래정지', keywords: ['상장폐지', '상폐', '거래정지', '관리종목', '실질심사', '감사의견', '자본잠식', '정리매매', '불성실공시'] }},
@@ -3413,7 +3413,7 @@ def render_search_html(
       return !queryTokens.length || queryTokens.some((token) => haystack.includes(token));
     }}
     function dateLabel(row) {{
-      const raw = String(row.published_at || row.sort_at || row.last_article_seen_at || row.latest_seen_at || row.first_seen_at || '').trim();
+      const raw = String(row.published_at || row.sort_at || row.last_article_seen_at || row.latest_seen_at || row.first_seen_at || row.posted_at || row.time || '').trim();
       const match = raw.match(/^(\\d{{4}})-(\\d{{2}})-(\\d{{2}})[ T](\\d{{2}}):(\\d{{2}})/);
       return match ? `${{match[2]}}.${{match[3]}} ${{match[4]}}:${{match[5]}}` : '';
     }}
@@ -3449,6 +3449,7 @@ def render_search_html(
       return telegramMessages(row).find((message) => message && (message.message_url || message.url)) || null;
     }}
     function classifyEvent(row) {{
+      if (row.event_type && typeof row.event_type === 'object' && row.event_type.id) return row.event_type;
       const haystack = rowText(row).toLowerCase();
       const matched = EVENT_RULES
         .map((rule) => ({{ ...rule, hits: rule.keywords.filter((keyword) => haystack.includes(keyword.toLowerCase())) }}))
@@ -3519,6 +3520,7 @@ def render_search_html(
     }}
     function rowScore(row, kind, query) {{
       const mode = sortMode?.value || 'smart';
+      if (mode === 'smart' && Number.isFinite(Number(row.search_score))) return Number(row.search_score);
       if (mode === 'latest') return recencyScore(row);
       if (mode === 'spread') return spreadScore(row, kind);
       if (mode === 'telegram') return kind === 'Telegram' ? spreadScore(row, kind) + Number(row.confidence_score || 0) * 0.2 : Number(row.related_telegram_count || 0) / 20;
@@ -3534,6 +3536,7 @@ def render_search_html(
       return true;
     }}
     function whyMatters(row, kind) {{
+      if (Array.isArray(row.why_matters) && row.why_matters.length) return row.why_matters.slice(0, 3);
       const event = classifyEvent(row);
       const flags = riskFlags(row);
       const lines = [];
@@ -3549,6 +3552,16 @@ def render_search_html(
     }}
     function renderInterpretation(query, rows) {{
       if (!interpretationEl) return;
+      const serverInterpretation = state.serverSearch?.query_interpretation;
+      if (serverInterpretation && query) {{
+        const chips = [
+          ...(Array.isArray(serverInterpretation.keywords) ? serverInterpretation.keywords.slice(0, 4).map((token) => ['검색어', token]) : []),
+          ...(Array.isArray(serverInterpretation.event_types) ? serverInterpretation.event_types.slice(0, 4).map((event) => ['이벤트', `${{event.label || event.id}} ${{event.count || 0}}`]) : []),
+        ];
+        interpretationEl.hidden = !chips.length;
+        interpretationEl.innerHTML = chips.map(([type, label]) => `<span>${{escapeHtml(type)}}: ${{escapeHtml(label)}}</span>`).join('');
+        return;
+      }}
       const queryTokens = tokens(query);
       const events = countValues(rows.map((row) => classifyEvent(row)), (row) => row.label).slice(0, 4);
       const chips = [
@@ -3564,6 +3577,26 @@ def render_search_html(
       if (!query || !allRows.length) {{
         briefingEl.hidden = true;
         briefingEl.innerHTML = '';
+        return;
+      }}
+      const serverBriefing = state.serverSearch?.briefing;
+      if (serverBriefing) {{
+        const counts = serverBriefing.source_counts || {{}};
+        const event = state.serverSearch?.query_interpretation?.event_types?.[0]?.label || '검색 이슈';
+        const bullets = Array.isArray(serverBriefing.bullets) ? serverBriefing.bullets.slice(0, 5) : [];
+        briefingEl.hidden = false;
+        briefingEl.innerHTML = `
+          <h2>이슈 브리핑</h2>
+          <div class="briefing__grid">
+            <div class="briefing__metric"><span>이벤트</span><strong>${{escapeHtml(event)}}</strong></div>
+            <div class="briefing__metric"><span>기사</span><strong>${{Number(counts.articles || articles.length)}}</strong></div>
+            <div class="briefing__metric"><span>이슈</span><strong>${{Number(counts.stories || stories.length)}}</strong></div>
+            <div class="briefing__metric"><span>Telegram</span><strong>${{Number(counts.telegram_signals || signals.length)}}</strong></div>
+          </div>
+          ${{serverBriefing.headline ? `<p>${{escapeHtml(serverBriefing.headline)}}</p>` : ''}}
+          <ul>${{bullets.map((line) => `<li>${{escapeHtml(line)}}</li>`).join('')}}</ul>
+          <div class="briefing__notice">${{escapeHtml(serverBriefing.disclaimer || '공개 정보 기반 이슈 정리이며 투자 제안·권유·종목 추천이 아닙니다.')}}</div>
+        `;
         return;
       }}
       const event = countValues(allRows.map((row) => classifyEvent(row)), (row) => row.label)[0]?.[0] || '일반 이슈';
@@ -3677,6 +3710,14 @@ def render_search_html(
       </a>`;
     }}
     function timelineRows(articles, stories, signals, query) {{
+      const serverTimeline = Array.isArray(state.serverSearch?.timeline) ? state.serverSearch.timeline : [];
+      if (serverTimeline.length) {{
+        return serverTimeline.slice(0, 40).map((item) => {{
+          const title = item.title || item.excerpt || item.text || '제목 없음';
+          const href = safeResultUrl(item.url || item.message_url);
+          return `<div class="timeline-item"><time>${{escapeHtml(dateLabel(item) || '일시 미상')}}</time><a href="${{escapeHtml(href || '#')}}" target="_blank" rel="noopener noreferrer">${{escapeHtml(item.kind || '항목')}} · ${{escapeHtml(compactText(title, 118))}}</a></div>`;
+        }}).join('');
+      }}
       const rows = [
         ...stories.map((row) => ({{ row, kind: '이슈' }})),
         ...articles.map((row) => ({{ row, kind: '기사' }})),
@@ -3725,6 +3766,29 @@ def render_search_html(
       if (!response.ok) throw new Error(`HTTP ${{response.status}}`);
       return response.json();
     }}
+    function searchSortParam() {{
+      const mode = sortMode?.value || 'smart';
+      return mode === 'telegram' ? 'telegram_momentum' : mode;
+    }}
+    function applySearchPayload(payload) {{
+      state.serverSearch = payload || null;
+      state.articles = Array.isArray(payload?.articles) ? payload.articles : [];
+      state.stories = Array.isArray(payload?.stories) ? payload.stories : [];
+      state.signals = Array.isArray(payload?.telegram) ? payload.telegram : (Array.isArray(payload?.signals) ? payload.signals : []);
+      render();
+    }}
+    async function runFallbackSearch(cleaned) {{
+      const [articleResult, storyResult, telegramResult] = await Promise.allSettled([
+        fetchJson(`${{apiUrlWithAction(readApiUrl, 'articles')}}&q=${{encodeURIComponent(cleaned)}}&limit=40&days=365`),
+        fetchJson(`${{apiUrlWithAction(readApiUrl, 'latest_snapshot')}}&limit=60`),
+        fetchJson(apiUrlWithAction(readApiUrl, 'telegram_dashboard')),
+      ]);
+      state.serverSearch = null;
+      state.articles = articleResult.status === 'fulfilled' && articleResult.value?.ok ? (articleResult.value.articles || []) : [];
+      state.stories = storyResult.status === 'fulfilled' && storyResult.value?.ok ? (storyResult.value.stories || []) : [];
+      state.signals = telegramResult.status === 'fulfilled' && telegramResult.value?.ok ? (telegramResult.value.signals || []) : [];
+      render();
+    }}
     async function runSearch(query) {{
       const cleaned = String(query || '').replace(/\\s+/g, ' ').trim();
       state.query = cleaned;
@@ -3733,25 +3797,28 @@ def render_search_html(
       if (cleaned.length < 2) {{
         statusEl.textContent = '검색어를 2자 이상 입력해주세요.';
         results.innerHTML = '';
+        state.serverSearch = null;
         updateMetrics([], [], []);
         return;
       }}
       if (!readApiUrl) {{
         statusEl.textContent = '공개 DB API가 설정되면 검색 결과가 표시됩니다.';
         results.innerHTML = '';
+        state.serverSearch = null;
         updateMetrics([], [], []);
         return;
       }}
       statusEl.textContent = '검색 중입니다.';
-      const [articleResult, storyResult, telegramResult] = await Promise.allSettled([
-        fetchJson(`${{apiUrlWithAction(readApiUrl, 'articles')}}&q=${{encodeURIComponent(cleaned)}}&limit=40&days=365`),
-        fetchJson(`${{apiUrlWithAction(readApiUrl, 'latest_snapshot')}}&limit=60`),
-        fetchJson(apiUrlWithAction(readApiUrl, 'telegram_dashboard')),
-      ]);
-      state.articles = articleResult.status === 'fulfilled' && articleResult.value?.ok ? (articleResult.value.articles || []) : [];
-      state.stories = storyResult.status === 'fulfilled' && storyResult.value?.ok ? (storyResult.value.stories || []) : [];
-      state.signals = telegramResult.status === 'fulfilled' && telegramResult.value?.ok ? (telegramResult.value.signals || []) : [];
-      render();
+      try {{
+        const payload = await fetchJson(`${{apiUrlWithAction(readApiUrl, 'search')}}&q=${{encodeURIComponent(cleaned)}}&limit=40&days=365&sort=${{encodeURIComponent(searchSortParam())}}`);
+        if (payload?.ok) {{
+          applySearchPayload(payload);
+          return;
+        }}
+      }} catch (error) {{
+        console.info('통합 검색 API를 사용할 수 없어 기존 조회 방식으로 전환합니다.', error);
+      }}
+      await runFallbackSearch(cleaned);
     }}
     form?.addEventListener('submit', (event) => {{
       event.preventDefault();
