@@ -96,7 +96,7 @@ Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 
 
 브라우저에서 읽기 API를 직접 쓰는 기능은 별도 repository variable `ACTIVIST_PUBLIC_API_URL`이 있을 때만 HTML에 주입됩니다. 이 URL은 브라우저 개발자 도구에서 보이는 공개 정보이므로 secret이 아니라 variable로 관리합니다. 쓰기 API는 URL이 알려져도 HMAC 서명 없이는 `401`로 거부됩니다.
 
-데일리 HTML은 static-first로 동작하지만, `ACTIVIST_PUBLIC_API_URL`이 있으면 브라우저에서 `reports`, `latest_snapshot`, `articles` read API를 호출해 다른 일자 목록, `이슈 레이더`, 아카이브 검색, 기사별 `관련 기사 보기`를 보강합니다. `관련 기사 보기`는 현재 묶음 링크와 같은 story 또는 제목 토큰 기반 관련 기사를 한 곳에 모아 매체 확산과 최근 흐름을 보여줍니다. API가 실패해도 정적 기사 페이지는 그대로 표시됩니다.
+데일리 HTML은 static-first로 동작하지만, `ACTIVIST_PUBLIC_API_URL`이 있으면 브라우저에서 `reports`, `latest_snapshot`, `articles`, `telegram_dashboard` read API를 호출해 다른 일자 목록, `이슈 레이더`, 기사별 `관련 기사 보기`, 별도 `시장 이슈 검색` 페이지를 보강합니다. 검색은 `/feed/search.html`에서 기사·이슈·Telegram 공개 채널 신호를 한 화면에 모아 보여주고, 데일리 페이지 본문에는 검색 UI를 직접 넣지 않습니다. `관련 기사 보기`는 현재 묶음 링크와 같은 story 또는 제목 토큰 기반 관련 기사를 한 곳에 모아 매체 확산과 최근 흐름을 보여줍니다. API가 실패해도 정적 기사 페이지는 그대로 표시됩니다.
 
 Telegram 공개 채널 기반 시장 언급 보강은 `telegram_sources.enabled`를 켰을 때만 동작합니다. MTProto 읽기 계정의 `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING`은 Secret으로만 주입하고, 수집 대상은 username이 있는 공개 broadcast 채널로 제한합니다. 수동 등록·비활성화는 `python -m curator.telegram_sources add|enable|disable|list`로 관리할 수 있습니다. 이미 읽기 계정이 가입한 공개 채널은 `python -m curator.telegram_sources import-joined --dry-run`으로 먼저 확인한 뒤 `--enable`로 수집 대상에 올립니다. 유사 채널 후보는 `discover`로 pending 후보에만 저장하고 자동 입장은 기본 비활성화입니다. 과거 수집은 Windows 로컬에서 `backfill-messages --days 180`로 실행할 수 있으며, 운영 점검용 공개-safe 페이지는 `/feed/telegram-admin.html`에 생성됩니다. 자세한 운영 정책은 [`docs/telegram-public-channels.md`](docs/telegram-public-channels.md)를 참고합니다.
 
@@ -197,7 +197,7 @@ Windows에서 상태 확인과 작은 배치를 반복하려면 래퍼 스크립
   --sleep 0.5
 ```
 
-관련 기사 보기 품질을 위해 백필은 `config.yaml`의 모든 Google News 키워드와 별도 broad backfill 키워드를 함께 사용합니다. `--config-only`를 붙이면 `config.yaml`의 키워드만 사용합니다. 백필 후에는 `https://news.bside.ai/feed/latest.html`을 새로고침하면 `관련 기사 보기`, 아카이브 검색, 이슈 레이더가 DB에 축적된 과거 기사 기반으로 더 풍부하게 표시됩니다.
+관련 기사 보기 품질을 위해 백필은 `config.yaml`의 모든 Google News 키워드와 별도 broad backfill 키워드를 함께 사용합니다. `--config-only`를 붙이면 `config.yaml`의 키워드만 사용합니다. 백필 후에는 `https://news.bside.ai/feed/latest.html`과 `https://news.bside.ai/feed/search.html`을 새로고침하면 `관련 기사 보기`, 시장 이슈 검색, 이슈 레이더가 DB에 축적된 과거 기사 기반으로 더 풍부하게 표시됩니다.
 
 Telegram 메시지는 로컬 `state.json`이 지나치게 커지지 않도록 `telegram_sources.message_retention_days`와 `telegram_sources.local_state_message_limit`로 보존 범위를 제한합니다. 기본값은 365일, 8만 건이며 DB는 장기 분석 저장소 역할을 맡고 GitHub Pages는 최신 정적 페이지와 공개-safe 대시보드를 유지합니다.
 

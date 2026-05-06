@@ -44,7 +44,7 @@ from .telegram_publisher import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FEED_DIR = Path("public") / "feed"
-NON_DATE_REPORT_PAGES = {"latest.html", "index.html", "workbench.html"}
+NON_DATE_REPORT_PAGES = {"latest.html", "index.html", "workbench.html", "search.html", "telegram-admin.html"}
 REPORT_CATEGORY_ORDER = [
     "주주행동·경영권",
     "밸류업·주주환원",
@@ -1416,19 +1416,10 @@ def render_report_html(
     .db-pulse__item h3 {{ margin: 0; font-size: 14px; line-height: 1.36; font-weight: 850; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: keep-all; overflow-wrap: break-word; }}
     .db-pulse__meta {{ display: flex; flex-wrap: wrap; gap: 6px 9px; color: var(--muted); font-size: 10.8px; line-height: 1.35; }}
     .db-pulse__meta strong {{ color: var(--accent-deep); font-weight: 900; }}
-    .db-search {{ display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }}
-    .db-search input {{ min-width: 0; width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); padding: 9px 10px; font: inherit; font-size: 13px; }}
-    .db-search button {{ border: 1px solid var(--accent); border-radius: 8px; background: var(--accent); color: #fff; padding: 0 13px; font: inherit; font-size: 12px; font-weight: 900; cursor: pointer; }}
-    .db-search__results[hidden] {{ display: none !important; }}
-    .db-search__results {{ display: grid; gap: 6px; margin-top: 10px; }}
-    .db-search__result {{ display: grid; gap: 3px; border-top: 1px solid var(--line); padding: 8px 0 2px; text-decoration: none; color: inherit; }}
-    .db-search__result:hover h3 {{ color: var(--accent-deep); text-decoration: underline; text-underline-offset: 3px; }}
-    .db-search__result h3 {{ margin: 0; font-size: 13px; line-height: 1.36; font-weight: 820; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: keep-all; overflow-wrap: break-word; }}
-    .db-search__meta {{ display: flex; flex-wrap: wrap; gap: 6px 9px; color: var(--muted); font-size: 10.6px; line-height: 1.35; }}
-    .db-search__summary {{ margin: 0; color: #4b4357; font-size: 11.6px; line-height: 1.42; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }}
-    .db-search__why {{ display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }}
-    .db-search__why span {{ border: 1px solid rgba(112, 55, 224, .16); border-radius: 999px; padding: 2px 6px; background: rgba(246, 240, 255, .5); color: var(--accent-deep); font-size: 10px; font-weight: 850; }}
-    .db-search__message {{ color: var(--muted); font-size: 12px; padding: 8px 0 0; }}
+    .search-entry {{ display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }}
+    .search-entry p {{ margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.42; }}
+    .search-entry__button {{ flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--accent); border-radius: 999px; background: var(--accent-soft); color: var(--accent-deep); padding: 7px 11px; text-decoration: none; font-size: 12px; font-weight: 900; }}
+    .search-entry__button:hover {{ background: #fff; }}
     .priority {{ border-bottom: 1px solid var(--ink); padding: 22px 0 8px; }}
     .priority__head {{ display: flex; align-items: end; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }}
     .priority__head h2 {{ font-family: Georgia, "Times New Roman", serif; font-size: 28px; line-height: 1.1; margin: 0; }}
@@ -1599,10 +1590,7 @@ def render_report_html(
       .db-pulse__head p {{ font-size: 12px; }}
       .db-pulse__list {{ grid-template-columns: 1fr; gap: 4px; }}
       .db-pulse__item h3 {{ font-size: 13.5px; -webkit-line-clamp: 2; }}
-      .db-search {{ grid-template-columns: 1fr auto; gap: 7px; }}
-      .db-search input {{ font-size: 12.5px; padding: 8px 9px; }}
-      .db-search button {{ padding: 0 11px; }}
-      .db-search__result h3 {{ font-size: 12.8px; }}
+      .search-entry {{ align-items: flex-start; flex-direction: column; gap: 8px; }}
       .brand-row {{ align-items: flex-start; flex-direction: column; }}
       .featured {{ gap: 0; padding: 22px 0; }}
       .featured .story--featured:first-child {{ grid-row: auto; border-right: 0; padding-right: 0; }}
@@ -1688,6 +1676,7 @@ def render_report_html(
         <span><strong>{stats['articles']}</strong>건 기사</span>
         <span><strong>{stats['sources']}</strong>개 매체</span>
         <a href="workbench.html">AI 워크벤치 보기</a>
+        <a href="search.html">시장 이슈 검색</a>
         <button class="archive-trigger" type="button" data-archive-toggle aria-expanded="false" aria-controls="archive-panel">다른 일자 보기</button>
       </div>
     </header>
@@ -1706,11 +1695,10 @@ def render_report_html(
         <span class="db-pulse__badge" data-db-pulse-status>최근 흐름</span>
       </div>
       <div class="db-pulse__list" data-db-pulse-list></div>
-      <form class="db-search" data-db-search>
-        <input type="search" name="q" autocomplete="off" placeholder="아카이브 검색: 고려아연, 유상증자, 소액주주">
-        <button type="submit">검색</button>
-      </form>
-      <div class="db-search__results" data-db-search-results hidden></div>
+      <div class="search-entry">
+        <p>기사·이슈·Telegram 신호를 함께 보려면 별도 검색 화면에서 확인하세요.</p>
+        <a class="search-entry__button" href="search.html">시장 이슈 검색</a>
+      </div>
     </section>
 
     <nav class="toc" aria-label="report sections">
@@ -1859,8 +1847,6 @@ def render_report_html(
     const dbPulse = document.querySelector('[data-db-pulse]');
     const dbPulseList = document.querySelector('[data-db-pulse-list]');
     const dbPulseStatus = document.querySelector('[data-db-pulse-status]');
-    const dbSearchForm = document.querySelector('[data-db-search]');
-    const dbSearchResults = document.querySelector('[data-db-search-results]');
     const storyContextDetails = Array.from(document.querySelectorAll('[data-story-context]'));
     const remoteReportsApiUrl = {read_api_url_json};
     const currentReportDateId = {date_id_json};
@@ -2125,88 +2111,6 @@ def render_report_html(
         const data = await response.json();
         if (data && data.ok) renderDbPulse(data.stories || []);
       }} catch (error) {{}}
-    }}
-
-    function showDbSearchMessage(message) {{
-      if (!dbSearchResults) return;
-      dbSearchResults.innerHTML = '';
-      const item = document.createElement('div');
-      item.className = 'db-search__message';
-      item.textContent = message;
-      dbSearchResults.appendChild(item);
-      dbSearchResults.hidden = false;
-    }}
-
-    function renderDbSearchResults(articles, query) {{
-      if (!dbSearchResults) return;
-      const items = Array.isArray(articles) ? articles.filter((article) => article && article.title && article.canonical_url).slice(0, 8) : [];
-      dbSearchResults.innerHTML = '';
-      if (!items.length) {{
-        showDbSearchMessage(`'${{query}}' 검색 결과가 없습니다.`);
-        return;
-      }}
-      const message = document.createElement('div');
-      message.className = 'db-search__message';
-      message.textContent = `'${{query}}' 검색 결과 ${{items.length}}건`;
-      dbSearchResults.appendChild(message);
-      items.forEach((article) => {{
-        const link = document.createElement('a');
-        link.className = 'db-search__result';
-        link.href = article.canonical_url;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        const title = document.createElement('h3');
-        title.textContent = compactDbText(article.title, 96);
-        const meta = document.createElement('div');
-        meta.className = 'db-search__meta';
-        [articleDateLabel(article), article.source || article.feed_name || '', articleStatusLabel(article), article.relevance_level || '', article.priority_level || ''].filter(Boolean).forEach((value) => {{
-          const span = document.createElement('span');
-          span.textContent = String(value);
-          meta.appendChild(span);
-        }});
-        const summary = document.createElement('p');
-        summary.className = 'db-search__summary';
-        summary.textContent = article.search_snippet || articleSearchSnippet(article, query);
-        const reasons = document.createElement('div');
-        reasons.className = 'db-search__why';
-        const reasonItems = Array.isArray(article.match_reasons) && article.match_reasons.length ? article.match_reasons : articleMatchReasons(article, query);
-        reasonItems.forEach((reason) => {{
-          const chip = document.createElement('span');
-          chip.textContent = reason;
-          reasons.appendChild(chip);
-        }});
-        link.appendChild(title);
-        link.appendChild(meta);
-        if (summary.textContent) link.appendChild(summary);
-        link.appendChild(reasons);
-        dbSearchResults.appendChild(link);
-      }});
-      dbSearchResults.hidden = false;
-    }}
-
-    async function searchDbArticles(query) {{
-      if (!remoteReportsApiUrl || !dbSearchResults) return;
-      const cleaned = String(query || '').replace(/\\s+/g, ' ').trim();
-      if (cleaned.length < 2) {{
-        showDbSearchMessage('검색어를 2자 이상 입력해주세요.');
-        return;
-      }}
-      showDbSearchMessage('아카이브를 검색하는 중입니다.');
-      try {{
-        const response = await fetch(`${{apiUrlWithAction(remoteReportsApiUrl, 'articles')}}&q=${{encodeURIComponent(cleaned)}}&limit=8&days=90`, {{
-          headers: {{ 'Accept': 'application/json' }},
-          credentials: 'omit',
-        }});
-        if (!response.ok) {{
-          showDbSearchMessage('아카이브 검색을 불러오지 못했습니다.');
-          return;
-        }}
-        const data = await response.json();
-        if (data && data.ok) renderDbSearchResults(data.articles || [], cleaned);
-        else showDbSearchMessage('아카이브 검색을 불러오지 못했습니다.');
-      }} catch (error) {{
-        showDbSearchMessage('아카이브 검색을 불러오지 못했습니다.');
-      }}
     }}
 
     function articleUrlKey(value) {{
@@ -2796,13 +2700,6 @@ def render_report_html(
         if (history.pushState) history.pushState(null, '', `#${{sectionId}}`);
       }});
     }});
-    if (dbSearchForm) {{
-      dbSearchForm.addEventListener('submit', (event) => {{
-        event.preventDefault();
-        const input = dbSearchForm.querySelector('input[name="q"]');
-        searchDbArticles(input ? input.value : '');
-      }});
-    }}
     storyContextDetails.forEach((details) => {{
       details.addEventListener('toggle', () => {{
         if (details.open) loadStoryContext(details);
@@ -3277,6 +3174,324 @@ def render_workbench_html(
 """
 
 
+def render_search_html(
+    config: dict[str, object],
+    start_at: datetime,
+    end_at: datetime,
+    date_id: str,
+    report_url: str,
+) -> str:
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    start_label = escape(format_kst(start_at, timezone_name))
+    end_label = escape(format_kst(end_at, timezone_name))
+    report_link = escape(report_url, quote=True)
+    read_api_url_json = json.dumps(report_read_api_url(), ensure_ascii=False)
+    logo = bside_logo_html("bside-logo--top")
+    return f"""<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>시장 이슈 검색 | BSIDE Daily News</title>
+  <style>
+    :root {{ --paper:#fbfafc; --surface:#fff; --ink:#17121f; --muted:#746b80; --line:#ded5eb; --accent:#7037e0; --accent-deep:#4e20b5; --accent-soft:#f3edff; --green:#00785f; }}
+    * {{ box-sizing:border-box; }}
+    body {{ margin:0; color:var(--ink); background:var(--paper); font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Segoe UI",sans-serif; line-height:1.55; }}
+    a {{ color:inherit; text-underline-offset:3px; }}
+    .page {{ max-width:1120px; margin:0 auto; padding:24px 24px 72px; }}
+    .brand-row {{ display:flex; justify-content:space-between; gap:16px; align-items:baseline; border-bottom:2px solid var(--ink); padding-bottom:14px; margin-bottom:26px; }}
+    .bside-logo {{ display:inline-flex; align-items:center; gap:9px; color:var(--accent); text-decoration:none; }}
+    .bside-logo__image {{ width:92px; height:auto; display:block; color:var(--accent); flex:0 0 auto; }}
+    .bside-logo__label {{ color:var(--accent); font-size:11px; font-weight:900; letter-spacing:.12em; }}
+    .edition {{ color:var(--muted); font-size:12px; text-align:right; }}
+    .hero {{ display:grid; gap:14px; border-bottom:1px solid var(--line); padding-bottom:22px; }}
+    h1 {{ margin:0; font-family:Georgia,"Times New Roman",serif; font-size:clamp(38px,6vw,62px); line-height:1; letter-spacing:0; }}
+    .dek {{ max-width:760px; margin:0; color:#342d3d; font-size:15px; word-break:keep-all; }}
+    .actions {{ display:flex; flex-wrap:wrap; gap:8px; }}
+    .actions a {{ display:inline-flex; border:1px solid var(--line); border-radius:999px; padding:7px 11px; background:var(--surface); color:var(--accent-deep); text-decoration:none; font-size:12px; font-weight:850; }}
+    .search-box {{ display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; margin-top:8px; max-width:760px; }}
+    .search-box input {{ min-width:0; width:100%; border:1px solid var(--line); border-radius:10px; background:var(--surface); color:var(--ink); padding:12px 13px; font:inherit; font-size:15px; }}
+    .search-box button {{ border:1px solid var(--accent); border-radius:10px; background:var(--accent); color:#fff; padding:0 18px; font:inherit; font-size:13px; font-weight:900; cursor:pointer; }}
+    .suggestions {{ display:flex; flex-wrap:wrap; gap:7px; margin-top:4px; }}
+    .suggestions button, .tabs button {{ border:1px solid var(--line); border-radius:999px; background:var(--surface); color:var(--muted); padding:6px 10px; font:inherit; font-size:12px; font-weight:800; cursor:pointer; }}
+    .suggestions button:hover, .tabs button:hover, .tabs button.is-active {{ border-color:var(--accent); background:var(--accent-soft); color:var(--accent-deep); }}
+    .tabs {{ display:flex; flex-wrap:wrap; gap:8px; margin:18px 0 14px; }}
+    .dashboard {{ display:grid; grid-template-columns:260px minmax(0,1fr); gap:22px; align-items:start; padding-top:2px; }}
+    .insight {{ position:sticky; top:16px; display:grid; gap:10px; border:1px solid var(--line); background:var(--surface); padding:14px; }}
+    .insight h2, .results h2 {{ margin:0; font-family:Georgia,"Times New Roman",serif; font-size:21px; line-height:1.1; }}
+    .metric-grid {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }}
+    .metric {{ border:1px solid rgba(112,55,224,.15); background:var(--accent-soft); padding:9px; }}
+    .metric span {{ display:block; color:var(--muted); font-size:10.5px; font-weight:850; }}
+    .metric strong {{ display:block; color:var(--accent-deep); font-size:20px; line-height:1.15; }}
+    .panel {{ border-top:1px solid var(--line); padding-top:10px; }}
+    .panel h3 {{ margin:0 0 6px; color:var(--accent-deep); font-size:12px; letter-spacing:.03em; }}
+    .chip-list {{ display:flex; flex-wrap:wrap; gap:5px; }}
+    .chip-list span {{ border:1px solid rgba(112,55,224,.16); border-radius:999px; background:#fff; color:#4c435a; padding:3px 7px; font-size:11px; }}
+    .results {{ display:grid; gap:12px; min-width:0; }}
+    .status {{ color:var(--muted); font-size:13px; padding:10px 0; }}
+    .result-card {{ display:grid; gap:6px; border-top:1px solid var(--line); padding:13px 0 14px; color:inherit; text-decoration:none; }}
+    .result-card:hover h3 {{ color:var(--accent-deep); text-decoration:underline; text-underline-offset:4px; }}
+    .result-card h3 {{ margin:0; font-size:18px; line-height:1.34; font-weight:850; word-break:keep-all; overflow-wrap:break-word; }}
+    .result-card p {{ margin:0; color:#4d4659; font-size:13px; line-height:1.48; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }}
+    .meta {{ display:flex; flex-wrap:wrap; gap:6px 9px; color:var(--muted); font-size:11px; }}
+    .reasons {{ display:flex; flex-wrap:wrap; gap:5px; }}
+    .reasons span {{ border:1px solid rgba(112,55,224,.16); border-radius:999px; padding:2px 7px; background:var(--accent-soft); color:var(--accent-deep); font-size:10.5px; font-weight:850; }}
+    .section-label {{ margin:16px 0 0; border-bottom:2px solid var(--ink); padding-bottom:7px; font-family:Georgia,"Times New Roman",serif; font-size:24px; }}
+    @media (max-width:860px) {{
+      .page {{ padding:18px 14px 48px; }}
+      .brand-row {{ align-items:flex-start; flex-direction:column; }}
+      .edition {{ text-align:left; }}
+      .search-box {{ grid-template-columns:1fr; }}
+      .search-box button {{ padding:10px 14px; }}
+      .dashboard {{ grid-template-columns:1fr; }}
+      .insight {{ position:static; }}
+      .result-card h3 {{ font-size:16px; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div class="brand-row">
+        {logo}
+        <div class="edition">{start_label}<br>{end_label}</div>
+      </div>
+      <h1>시장 이슈 검색</h1>
+      <p class="dek">뉴스 기사, 이슈 묶음, Telegram 공개 채널 신호를 한 화면에서 함께 확인합니다. 검색 결과는 투자 추천이 아니라 시장 언급과 공개 출처를 정리한 보조 정보입니다.</p>
+      <div class="actions">
+        <a href="{report_link}">최신 데일리로 돌아가기</a>
+        <a href="workbench.html">AI 워크벤치</a>
+        <a href="telegram-admin.html">Telegram 현황</a>
+      </div>
+      <form class="search-box" data-search-form>
+        <input type="search" name="q" autocomplete="off" placeholder="예: 고려아연, 상장폐지, 주주제안, 공개매수, 밸류업">
+        <button type="submit">검색</button>
+      </form>
+      <div class="suggestions" aria-label="추천 검색어">
+        <button type="button" data-suggest="상장폐지">상장폐지</button>
+        <button type="button" data-suggest="주주제안">주주제안</button>
+        <button type="button" data-suggest="공개매수">공개매수</button>
+        <button type="button" data-suggest="밸류업">밸류업</button>
+        <button type="button" data-suggest="스튜어드십">스튜어드십</button>
+      </div>
+    </header>
+
+    <div class="tabs" role="tablist" aria-label="검색 범위">
+      <button type="button" class="is-active" data-tab="all">전체</button>
+      <button type="button" data-tab="articles">기사</button>
+      <button type="button" data-tab="issues">이슈</button>
+      <button type="button" data-tab="telegram">Telegram</button>
+    </div>
+
+    <main class="dashboard">
+      <aside class="insight" aria-label="검색 분석">
+        <h2>검색 분석</h2>
+        <div class="metric-grid">
+          <div class="metric"><span>기사</span><strong data-count-articles>0</strong></div>
+          <div class="metric"><span>이슈</span><strong data-count-stories>0</strong></div>
+          <div class="metric"><span>Telegram</span><strong data-count-telegram>0</strong></div>
+          <div class="metric"><span>매체</span><strong data-count-sources>0</strong></div>
+        </div>
+        <div class="panel">
+          <h3>주요 매체</h3>
+          <div class="chip-list" data-top-sources><span>검색 후 표시됩니다</span></div>
+        </div>
+        <div class="panel">
+          <h3>분류·키워드</h3>
+          <div class="chip-list" data-top-keywords><span>검색 후 표시됩니다</span></div>
+        </div>
+        <div class="panel">
+          <h3>읽는 방법</h3>
+          <div class="status">제목·요약 일치, 출처 다양성, Telegram 반복 언급, 최신성을 함께 보세요.</div>
+        </div>
+      </aside>
+      <section class="results" aria-live="polite">
+        <h2>검색 결과</h2>
+        <div class="status" data-status>검색어를 입력하면 DB 아카이브와 Telegram 신호를 조회합니다.</div>
+        <div data-results></div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const readApiUrl = {read_api_url_json};
+    const form = document.querySelector('[data-search-form]');
+    const input = form?.querySelector('input[name="q"]');
+    const results = document.querySelector('[data-results]');
+    const statusEl = document.querySelector('[data-status]');
+    const tabButtons = Array.from(document.querySelectorAll('[data-tab]'));
+    const state = {{ query: '', tab: 'all', articles: [], stories: [], signals: [] }};
+
+    function escapeHtml(value) {{
+      return String(value || '').replace(/[&<>"']/g, (char) => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[char]));
+    }}
+    function apiUrlWithAction(baseUrl, action) {{
+      if (!baseUrl) return '';
+      return `${{baseUrl}}${{baseUrl.includes('?') ? '&' : '?'}}action=${{encodeURIComponent(action)}}`;
+    }}
+    function compactText(value, maxChars = 128) {{
+      const text = String(value || '').replace(/\\s+/g, ' ').trim();
+      if (text.length <= maxChars) return text;
+      return `${{text.slice(0, Math.max(0, maxChars - 1)).trim()}}…`;
+    }}
+    function tokens(value) {{
+      return String(value || '').match(/[0-9A-Za-z가-힣]{{2,}}/g)?.map((token) => token.toLowerCase()).filter((token, index, list) => list.indexOf(token) === index).slice(0, 8) || [];
+    }}
+    function includesQuery(row, query) {{
+      const haystack = [
+        row.title, row.representative_title, row.signal_title, row.summary, row.signal_summary,
+        row.source, row.feed_name, row.feed_category, row.topic_category,
+        Array.isArray(row.top_keywords) ? row.top_keywords.join(' ') : '',
+      ].join(' ').toLowerCase();
+      const queryTokens = tokens(query);
+      return !queryTokens.length || queryTokens.some((token) => haystack.includes(token));
+    }}
+    function dateLabel(row) {{
+      const raw = String(row.published_at || row.sort_at || row.last_article_seen_at || row.latest_seen_at || row.first_seen_at || '').trim();
+      const match = raw.match(/^(\\d{{4}})-(\\d{{2}})-(\\d{{2}})[ T](\\d{{2}}):(\\d{{2}})/);
+      return match ? `${{match[2]}}.${{match[3]}} ${{match[4]}}:${{match[5]}}` : '';
+    }}
+    function matchReasons(row, query) {{
+      const queryTokens = tokens(query);
+      const title = String(row.title || row.representative_title || row.signal_title || '').toLowerCase();
+      const summary = String(row.summary || row.signal_summary || '').toLowerCase();
+      const source = String(row.source || row.feed_name || '').toLowerCase();
+      const reasons = [];
+      if (queryTokens.some((token) => title.includes(token))) reasons.push('제목 일치');
+      if (queryTokens.some((token) => summary.includes(token))) reasons.push('요약 일치');
+      if (queryTokens.some((token) => source.includes(token))) reasons.push('매체 일치');
+      if (Number(row.related_telegram_count || 0)) reasons.push(`Telegram ${{Number(row.related_telegram_count || 0)}}건`);
+      if (Number(row.article_count || 0) > 1) reasons.push(`기사 ${{Number(row.article_count || 0)}}건`);
+      return reasons.length ? reasons.slice(0, 4) : ['관련도순'];
+    }}
+    function snippet(row, query) {{
+      const text = String(row.search_snippet || row.summary || row.signal_summary || row.title || row.representative_title || row.signal_title || '').replace(/\\s+/g, ' ').trim();
+      if (!text) return '';
+      const lower = text.toLowerCase();
+      const hit = tokens(query).find((token) => lower.includes(token));
+      if (!hit) return compactText(text, 150);
+      const index = Math.max(0, lower.indexOf(hit) - 42);
+      return `${{index > 0 ? '…' : ''}}${{compactText(text.slice(index, index + 158), 150)}}${{index + 158 < text.length ? '…' : ''}}`;
+    }}
+    function sourceName(row) {{
+      return String(row.source || row.feed_name || row.primary_source || row.channel_title || row.channel_handle || '출처 미상');
+    }}
+    function countValues(rows, getter) {{
+      const counts = new Map();
+      rows.forEach((row) => {{
+        const value = String(getter(row) || '').trim();
+        if (!value) return;
+        counts.set(value, (counts.get(value) || 0) + 1);
+      }});
+      return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 7);
+    }}
+    function setChips(selector, values) {{
+      const node = document.querySelector(selector);
+      if (!node) return;
+      node.innerHTML = values.length ? values.map(([label, count]) => `<span>${{escapeHtml(label)}} ${{count}}</span>`).join('') : '<span>표시할 항목 없음</span>';
+    }}
+    function updateMetrics(articles, stories, signals) {{
+      const sources = new Set(articles.map(sourceName).filter(Boolean));
+      document.querySelector('[data-count-articles]').textContent = String(articles.length);
+      document.querySelector('[data-count-stories]').textContent = String(stories.length);
+      document.querySelector('[data-count-telegram]').textContent = String(signals.length);
+      document.querySelector('[data-count-sources]').textContent = String(sources.size);
+      setChips('[data-top-sources]', countValues(articles, sourceName));
+      const keywords = [
+        ...articles.map((row) => row.feed_category || row.relevance_level || row.priority_level || ''),
+        ...stories.map((row) => row.topic_category || row.feed_category || ''),
+        ...signals.flatMap((row) => Array.isArray(row.top_keywords) ? row.top_keywords : []),
+      ];
+      setChips('[data-top-keywords]', countValues(keywords.map((value) => ({{ value }})), (row) => row.value));
+    }}
+    function resultCard(row, kind, query) {{
+      const title = row.title || row.representative_title || row.signal_title || '제목 없음';
+      const href = row.canonical_url || row.representative_url || row.url || row.message_url || '#';
+      const meta = [
+        kind,
+        dateLabel(row),
+        sourceName(row),
+        row.feed_category || row.topic_category || '',
+      ].filter(Boolean);
+      const reasons = matchReasons(row, query);
+      return `<a class="result-card" href="${{escapeHtml(href)}}" target="_blank" rel="noopener noreferrer">
+        <div class="meta">${{meta.map((item) => `<span>${{escapeHtml(compactText(item, 42))}}</span>`).join('')}}</div>
+        <h3>${{escapeHtml(compactText(title, 118))}}</h3>
+        ${{snippet(row, query) ? `<p>${{escapeHtml(snippet(row, query))}}</p>` : ''}}
+        <div class="reasons">${{reasons.map((reason) => `<span>${{escapeHtml(reason)}}</span>`).join('')}}</div>
+      </a>`;
+    }}
+    function render() {{
+      const query = state.query;
+      const articles = state.articles.filter((row) => includesQuery(row, query));
+      const stories = state.stories.filter((row) => includesQuery(row, query));
+      const signals = state.signals.filter((row) => includesQuery(row, query));
+      updateMetrics(articles, stories, signals);
+      const groups = [];
+      if (state.tab === 'all' || state.tab === 'articles') groups.push(['기사', articles, '기사']);
+      if (state.tab === 'all' || state.tab === 'issues') groups.push(['이슈', stories, '이슈']);
+      if (state.tab === 'all' || state.tab === 'telegram') groups.push(['Telegram 신호', signals, 'Telegram']);
+      const html = groups.map(([label, rows, kind]) => rows.length
+        ? `<h3 class="section-label">${{label}}</h3>${{rows.slice(0, state.tab === 'all' ? 12 : 40).map((row) => resultCard(row, kind, query)).join('')}}`
+        : '').join('');
+      results.innerHTML = html || '<div class="status">검색 결과가 없습니다. 검색어를 조금 넓혀보세요.</div>';
+      statusEl.textContent = query ? `'${{query}}' 기준 기사 ${{articles.length}}건, 이슈 ${{stories.length}}건, Telegram 신호 ${{signals.length}}건` : '검색어를 입력하면 DB 아카이브와 Telegram 신호를 조회합니다.';
+    }}
+    async function fetchJson(url) {{
+      const response = await fetch(url, {{ headers: {{ Accept: 'application/json' }}, credentials: 'omit', cache: 'no-store' }});
+      if (!response.ok) throw new Error(`HTTP ${{response.status}}`);
+      return response.json();
+    }}
+    async function runSearch(query) {{
+      const cleaned = String(query || '').replace(/\\s+/g, ' ').trim();
+      state.query = cleaned;
+      if (input) input.value = cleaned;
+      if (history.replaceState) history.replaceState(null, '', cleaned ? `?q=${{encodeURIComponent(cleaned)}}` : location.pathname);
+      if (cleaned.length < 2) {{
+        statusEl.textContent = '검색어를 2자 이상 입력해주세요.';
+        results.innerHTML = '';
+        updateMetrics([], [], []);
+        return;
+      }}
+      if (!readApiUrl) {{
+        statusEl.textContent = '공개 DB API가 설정되면 검색 결과가 표시됩니다.';
+        results.innerHTML = '';
+        updateMetrics([], [], []);
+        return;
+      }}
+      statusEl.textContent = '검색 중입니다.';
+      const [articleResult, storyResult, telegramResult] = await Promise.allSettled([
+        fetchJson(`${{apiUrlWithAction(readApiUrl, 'articles')}}&q=${{encodeURIComponent(cleaned)}}&limit=40&days=365`),
+        fetchJson(`${{apiUrlWithAction(readApiUrl, 'latest_snapshot')}}&limit=60`),
+        fetchJson(apiUrlWithAction(readApiUrl, 'telegram_dashboard')),
+      ]);
+      state.articles = articleResult.status === 'fulfilled' && articleResult.value?.ok ? (articleResult.value.articles || []) : [];
+      state.stories = storyResult.status === 'fulfilled' && storyResult.value?.ok ? (storyResult.value.stories || []) : [];
+      state.signals = telegramResult.status === 'fulfilled' && telegramResult.value?.ok ? (telegramResult.value.signals || []) : [];
+      render();
+    }}
+    form?.addEventListener('submit', (event) => {{
+      event.preventDefault();
+      runSearch(input ? input.value : '');
+    }});
+    document.querySelectorAll('[data-suggest]').forEach((button) => {{
+      button.addEventListener('click', () => runSearch(button.dataset.suggest || ''));
+    }});
+    tabButtons.forEach((button) => {{
+      button.addEventListener('click', () => {{
+        state.tab = button.dataset.tab || 'all';
+        tabButtons.forEach((item) => item.classList.toggle('is-active', item === button));
+        render();
+      }});
+    }});
+    const initialQuery = new URLSearchParams(location.search).get('q') || '';
+    if (initialQuery) runSearch(initialQuery);
+  </script>
+</body>
+</html>
+"""
+
+
 def build_daily_report(root: Path | None = None, now: datetime | None = None) -> dict[str, object]:
     project_root = root or PROJECT_ROOT
     config = load_config(project_root / "config.yaml")
@@ -3309,6 +3524,7 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
         False,
     )
     workbench_html = render_workbench_html(stories, config, start_at, end_at, date_id, report_url)
+    search_html = render_search_html(config, start_at, end_at, date_id, report_url)
     return {
         "config": config,
         "date_id": date_id,
@@ -3318,6 +3534,7 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
         "review": review,
         "html": html,
         "workbench_html": workbench_html,
+        "search_html": search_html,
         "report_url": report_url,
         "stats": report_stats(stories, clusters, duplicate_records),
         "clusters": clusters,
@@ -3339,16 +3556,18 @@ def write_report_files(report: dict[str, object], root: Path | None = None) -> l
     latest_path = feed_dir / "latest.html"
     index_path = feed_dir / "index.html"
     workbench_path = feed_dir / "workbench.html"
+    search_path = feed_dir / "search.html"
     dated_path.write_text(html, encoding="utf-8", newline="\n")
     latest_path.write_text(html, encoding="utf-8", newline="\n")
     workbench_path.write_text(normalize_generated_html(str(report.get("workbench_html") or "")), encoding="utf-8", newline="\n")
+    search_path.write_text(normalize_generated_html(str(report.get("search_html") or "")), encoding="utf-8", newline="\n")
     variant_dir = feed_dir / "variants"
     if variant_dir.exists():
         for stale_path in variant_dir.glob("*.html"):
             stale_path.unlink()
     index_path.write_text(render_report_index(feed_dir), encoding="utf-8", newline="\n")
     refreshed_paths = refresh_existing_report_archive_links(feed_dir, date_id)
-    return [dated_path, latest_path, workbench_path, index_path, *refreshed_paths]
+    return [dated_path, latest_path, workbench_path, search_path, index_path, *refreshed_paths]
 
 
 def render_report_archive_links(feed_dir: Path, current_date_id: str, *, link_prefix: str = "", max_items: int = 20) -> str:
@@ -3442,9 +3661,12 @@ def render_report_index(feed_dir: Path) -> str:
     .bside-logo__label {{ font-size:11px; }}
     h1 {{ font-family:Georgia,"Times New Roman",serif; font-size:clamp(40px,7vw,68px); line-height:1; margin:26px 0 10px; }}
     p {{ color:var(--muted); }}
+    .actions {{ display:flex; flex-wrap:wrap; gap:8px; margin-top:18px; }}
+    .actions a {{ display:inline-flex; border:1px solid var(--line); border-radius:999px; padding:8px 12px; color:var(--accent); background:#fff; font-size:13px; font-weight:850; }}
     ul {{ list-style:none; padding:0; margin:32px 0 0; border-top:2px solid var(--ink); }}
     li {{ border-bottom:1px solid var(--line); }}
-    a {{ display:block; padding:16px 0; color:inherit; text-decoration:none; font-size:20px; }}
+    ul a {{ display:block; padding:16px 0; color:inherit; text-decoration:none; font-size:20px; }}
+    a {{ color:inherit; text-decoration:none; }}
     a:hover {{ color:var(--accent); }}
   </style>
 </head>
@@ -3453,6 +3675,11 @@ def render_report_index(feed_dir: Path) -> str:
     {logo}
     <h1>데일리 아카이브</h1>
     <p>매일 발행된 주주·자본시장 데일리를 날짜별로 확인할 수 있습니다.</p>
+    <div class="actions">
+      <a href="latest.html">최신 데일리</a>
+      <a href="search.html">시장 이슈 검색</a>
+      <a href="workbench.html">AI 워크벤치</a>
+    </div>
     <ul>{links}</ul>
   </main>
 </body>

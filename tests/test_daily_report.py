@@ -82,6 +82,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert (tmp_path / "public" / "feed" / "latest.html").exists()
     assert (tmp_path / "public" / "feed" / "index.html").exists()
     assert (tmp_path / "public" / "feed" / "workbench.html").exists()
+    assert (tmp_path / "public" / "feed" / "search.html").exists()
     assert not (tmp_path / "public" / "feed" / "variants" / "memo.html").exists()
     assert not (tmp_path / "public" / "feed" / "variants" / "board.html").exists()
     assert not (tmp_path / "public" / "feed" / "variants" / "pulse.html").exists()
@@ -112,8 +113,12 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "다른 일자 보기" in html
     assert "AI 워크벤치 보기" in html
     assert 'href="workbench.html"' in html
+    assert "시장 이슈 검색" in html
+    assert 'href="search.html"' in html
+    assert "search-entry" in html
     assert "data-archive-toggle" in html
     assert "archive-panel__link is-current" in html
+    assert "telegram-admin.html\">telegram-admin" not in html
     assert "setArchiveOpen" in html
     assert "max-width: 1000px" in html
     assert "width: 210px" in html
@@ -179,7 +184,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "DB 맥락 보기" not in html
     assert "관련 기사 보기" in html
     assert "이슈 레이더" in html
-    assert "아카이브 검색" in html
+    assert "아카이브 검색" not in html
     assert "data-story-context" in html
     assert "loadStoryContext" in html
     assert "preloadPendingStoryContexts" in html
@@ -193,7 +198,8 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "data-story-telegram-mentions" in html
     assert "Telegram 언급" in html
     assert "URL 직접" in html
-    assert "db-search__summary" in html
+    assert "db-search__summary" not in html
+    assert "data-db-search" not in html
     assert "articleMatchReasons" in html
     assert "isGenericDbPulseTitle" in html
     assert "story__image--broken" in html
@@ -224,6 +230,15 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert workbench_stories
     assert all(isinstance(story.get("title"), str) for story in workbench_stories)
     assert any(story.get("telegram_mentions") for story in workbench_stories)
+    search_html = (tmp_path / "public" / "feed" / "search.html").read_text(encoding="utf-8")
+    assert "시장 이슈 검색" in search_html
+    assert "검색 분석" in search_html
+    assert "Telegram 신호" in search_html
+    assert "data-search-form" in search_html
+    assert "telegram_dashboard" in search_html
+    assert "latest_snapshot" in search_html
+    assert "articles" in search_html
+    assert "투자 추천이 아니라" in search_html
     current_link_data = re.findall(r'<script type="application/json" data-story-current-links>(.*?)</script>', html, re.S)
     assert all("&quot;" not in script for script in current_link_data)
     assert all(isinstance(json.loads(script), list) for script in current_link_data)
