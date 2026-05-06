@@ -22,6 +22,7 @@ from curator.telegram_sources import (
     match_message_to_articles,
     message_key,
     normalize_telegram_message,
+    ordered_message_tokens,
     parse_handle_list,
     rematch_telegram_articles,
     reconcile_recent_deletions,
@@ -235,6 +236,77 @@ def test_telegram_issue_signals_include_topic_bursts(config, now) -> None:  # ty
 
     assert any(signal.get("signal_type") == "topic_burst" for signal in signals)
     assert any("삼성전자" in str(signal.get("signal_title") or "") for signal in signals)
+
+
+def test_telegram_signal_tokens_drop_url_boilerplate() -> None:
+    tokens = ordered_message_tokens(
+        {
+            "text": (
+                "http://spot.rassiro.com/rd/20260506/1023242 "
+                "프리미엄 컨버전스 미디어 시그널 투자의 바른 길을 함께 합니다"
+            )
+        }
+    )
+
+    assert "spot" not in tokens
+    assert "rassiro" not in tokens
+    assert "rd" not in tokens
+    assert "프리미엄" not in tokens
+    assert "투자" not in tokens
+
+
+def test_telegram_topic_burst_does_not_treat_interface_board_as_governance(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["telegram_sources"] = {
+        "signal_window_hours": 72,
+        "signal_min_messages": 2,
+        "signal_min_channels": 2,
+        "signal_limit": 10,
+    }  # type: ignore[index]
+    state = {
+        "telegram_source_messages": [
+            normalize_telegram_message(
+                {"handle": "first"},
+                {"id": 1, "text": "엑시콘 CLT Interface Board 공급계약체결 삼성전자", "date": now},
+                now,
+            ),
+            normalize_telegram_message(
+                {"handle": "second"},
+                {"id": 2, "text": "엑시콘 Interface Board 계약상대 삼성전자 계약내용 공시", "date": now},
+                now,
+            ),
+        ]
+    }
+
+    signals = telegram_issue_signals(state, config, now=now)
+
+    assert not any("이사회" in str(signal.get("signal_title") or "") for signal in signals)
+
+
+def test_telegram_topic_burst_keeps_governance_board_context(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["telegram_sources"] = {
+        "signal_window_hours": 72,
+        "signal_min_messages": 2,
+        "signal_min_channels": 2,
+        "signal_limit": 10,
+    }  # type: ignore[index]
+    state = {
+        "telegram_source_messages": [
+            normalize_telegram_message(
+                {"handle": "first"},
+                {"id": 1, "text": "WEX Board Members Proxy Contest settlement", "date": now},
+                now,
+            ),
+            normalize_telegram_message(
+                {"handle": "second"},
+                {"id": 2, "text": "WEX board seats shareholder proxy campaign", "date": now},
+                now,
+            ),
+        ]
+    }
+
+    signals = telegram_issue_signals(state, config, now=now)
+
+    assert any("wex" in str(signal.get("signal_title") or "") and "이사회" in str(signal.get("signal_title") or "") for signal in signals)
 
 
 def test_telegram_issue_signals_include_url_bursts(config, now) -> None:  # type: ignore[no-untyped-def]

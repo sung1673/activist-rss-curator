@@ -355,6 +355,40 @@ const compact = (value, max = 90) => {{
 }};
 const statCard = (label, value, note = "") => `<article class="stat"><strong>${{esc(value)}}</strong><p>${{esc(label)}}</p>${{note ? `<span>${{esc(note)}}</span>` : ""}}</article>`;
 const listEntries = (items) => Array.isArray(items) ? items : Object.entries(items || {{}}).map(([label, count]) => ({{label, count}}));
+const dashboardNoiseTokens = new Set([
+  "article", "articleview", "channel", "com", "contents", "daily", "feed", "flashnews", "html", "http", "https",
+  "investment", "m", "news", "pdf", "rd", "report", "review", "rss", "spot", "stock", "url", "view", "www",
+  "관련", "기사", "뉴스", "리포트", "링크", "목표가", "브리핑", "시가총액", "종목", "주식", "채널",
+]);
+const dashboardNoiseParts = ["rassiro", "sedaily", "stockinfo", "telegram"];
+function keywordLabel(row) {{
+  return String(row?.label ?? row?.[0] ?? "").trim();
+}}
+function keywordCount(row) {{
+  return row?.count ?? row?.[1] ?? 0;
+}}
+function isUsefulDashboardKeyword(value) {{
+  const text = String(value ?? "").trim().toLowerCase();
+  if (!text || dashboardNoiseTokens.has(text)) return false;
+  if (dashboardNoiseParts.some((part) => text.includes(part))) return false;
+  if (/^(?:https?:\\/\\/|www\\.)/.test(text)) return false;
+  if (/\\.(?:com|co\\.kr|kr|net|org|io|ai)(?:\\/|$)/.test(text)) return false;
+  if (/^[0-9,.%+-]+$/.test(text)) return false;
+  if (/^[a-z]{{1,2}}$/.test(text) && text !== "ai") return false;
+  return true;
+}}
+function cleanKeywordRows(items, limit = 24) {{
+  return listEntries(items).filter((row) => isUsefulDashboardKeyword(keywordLabel(row))).slice(0, limit);
+}}
+function cleanIssueRows(signals) {{
+  return (signals || []).map((signal) => ({{
+    ...signal,
+    top_keywords: (signal.top_keywords || []).filter(isUsefulDashboardKeyword).slice(0, 8),
+  }}));
+}}
+function signalKeywordText(signal) {{
+  return (signal.top_keywords || []).filter(isUsefulDashboardKeyword).slice(0, 5).join(", ");
+}}
 function modelFromApi(data) {{
   const counts = data.counts || {{}};
   return {{
@@ -372,7 +406,7 @@ function modelFromApi(data) {{
     type_counts: data.type_counts || fallbackModel.type_counts || [],
     day_counts: data.day_counts || fallbackModel.day_counts || [],
     top_keywords: data.top_keywords || fallbackModel.top_keywords || [],
-    signals: data.signals || fallbackModel.signals || [],
+    signals: cleanIssueRows(data.signals || fallbackModel.signals || []),
     match_type_counts: data.match_type_counts || fallbackModel.match_type_counts || [],
     quality_bands: data.quality_bands || fallbackModel.quality_bands || [],
     growth: data.growth || fallbackModel.growth || {{}},
@@ -391,7 +425,7 @@ function renderDashboard(model, sourceLabel) {{
   ].join("");
   document.getElementById("channel-rows").innerHTML = (model.top_channels || []).map((row) => `<tr><td>@${{esc(row.handle || "")}}</td><td>${{esc(compact(row.title, 42))}}</td><td>${{esc(row.signal_quality_score || row.quality_score || 0)}}<br><small>기본 ${{esc(row.quality_score || 0)}}</small></td><td>${{esc(row.messages || 0)}}</td><td>${{esc(row.matches || 0)}}<br><small>URL ${{esc(row.direct_matches || 0)}} · 추정 ${{esc(row.weak_matches || 0)}}</small></td><td>${{esc(((Number(row.match_rate || 0)) * 100).toFixed(1))}}%</td><td>${{esc(row.risk_messages || 0)}}</td><td>${{esc(row.latest_at || row.last_collected_at || "")}}</td><td>${{esc(row.last_error || "")}}</td></tr>`).join("") || '<tr><td colspan="9">수집 대상 채널이 아직 없습니다.</td></tr>';
   document.getElementById("type-rows").innerHTML = listEntries(model.type_counts).map((row) => `<li><b>${{esc(row.label ?? row[0] ?? "")}}</b><span>${{esc(row.count ?? row[1] ?? 0)}}건</span></li>`).join("") || '<li><b>데이터 없음</b><span>0건</span></li>';
-  document.getElementById("keyword-rows").innerHTML = listEntries(model.top_keywords).slice(0, 24).map((row) => `<span>${{esc(row.label ?? row[0] ?? "")}} <b>${{esc(row.count ?? row[1] ?? 0)}}</b></span>`).join("") || '<span>키워드 없음</span>';
+  document.getElementById("keyword-rows").innerHTML = cleanKeywordRows(model.top_keywords).map((row) => `<span>${{esc(keywordLabel(row))}} <b>${{esc(keywordCount(row))}}</b></span>`).join("") || '<span>키워드 없음</span>';
   document.getElementById("match-type-rows").innerHTML = listEntries(model.match_type_counts).map((row) => `<li><b>${{esc(row.label ?? row[0] ?? "")}}</b><span>${{esc(row.count ?? row[1] ?? 0)}}건</span></li>`).join("") || '<li><b>매칭 없음</b><span>0건</span></li>';
   document.getElementById("quality-rows").innerHTML = listEntries(model.quality_bands).map((row) => `<span>${{esc(row.label ?? row[0] ?? "")}} <b>${{esc(row.count ?? row[1] ?? 0)}}</b></span>`).join("") || '<span>아직 평가 전</span>';
   const maxDay = Math.max(1, ...(model.day_counts || []).map((row) => Number(row[1] || row.count || 0)));
@@ -400,7 +434,7 @@ function renderDashboard(model, sourceLabel) {{
     const count = Number(row[1] ?? row.count ?? 0);
     return `<div><span>${{esc(day)}}</span><b style="width:${{Math.min(100, count * 100 / maxDay).toFixed(1)}}%"></b><em>${{count}}</em></div>`;
   }}).join("") || '<p>아직 표시할 수집량이 없습니다.</p>';
-  document.getElementById("signal-rows").innerHTML = (model.signals || []).map((signal) => `<tr><td><b>${{esc(signal.signal_title || signal.article_id || "")}}</b><br><small>${{esc(signal.signal_summary || signal.signal_type || "")}}</small></td><td>${{esc(signal.related_telegram_count || 0)}}</td><td>${{esc(signal.related_telegram_channels_count || 0)}}</td><td>${{esc((signal.top_keywords || []).slice(0, 5).join(", "))}}</td><td>${{esc((signal.risk_flags || []).slice(0, 5).join(", "))}}</td></tr>`).join("") || '<tr><td colspan="5">아직 기사와 연결된 Telegram 신호가 없습니다.</td></tr>';
+  document.getElementById("signal-rows").innerHTML = (model.signals || []).map((signal) => `<tr><td><b>${{esc(signal.signal_title || signal.article_id || "")}}</b><br><small>${{esc(signal.signal_summary || signal.signal_type || "")}}</small></td><td>${{esc(signal.related_telegram_count || 0)}}</td><td>${{esc(signal.related_telegram_channels_count || 0)}}</td><td>${{esc(signalKeywordText(signal))}}</td><td>${{esc((signal.risk_flags || []).slice(0, 5).join(", "))}}</td></tr>`).join("") || '<tr><td colspan="5">아직 기사와 연결된 Telegram 신호가 없습니다.</td></tr>';
   document.getElementById("data-status").innerHTML = `<b>${{esc(sourceLabel)}}</b> 생성시각 ${{esc(model.generated_at || "")}}`;
 }}
 renderDashboard(fallbackModel, "정적 fallback");

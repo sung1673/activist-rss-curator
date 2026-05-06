@@ -86,14 +86,24 @@ SIGNAL_STOP_TOKENS = GENERIC_MATCH_TOKENS | {
     "amp",
     "api",
     "channel",
+    "daily",
+    "flashnews",
     "id",
+    "interface",
+    "investment",
+    "pdf",
     "qoq",
+    "rd",
+    "report",
     "review",
     "krx",
+    "stock",
+    "url",
     "naver",
     "signal",
     "yoy",
     "telegram",
+    "clt",
     "억원",
     "경우",
     "견조한",
@@ -144,6 +154,54 @@ SIGNAL_STOP_TOKENS = GENERIC_MATCH_TOKENS | {
     "했다",
     "현재",
     "확인",
+}
+SIGNAL_STOP_SUBSTRINGS = {
+    "rassiro",
+    "sedaily",
+    "stockinfo",
+    "telegram",
+}
+SIGNAL_STOP_DOMAIN_SUFFIXES = {
+    ".com",
+    ".co.kr",
+    ".kr",
+    ".net",
+    ".org",
+    ".io",
+    ".ai",
+}
+AMBIGUOUS_ENGLISH_BOARD_TOKENS = {"board", "boards", "director", "directors"}
+BOARD_GOVERNANCE_CONTEXT_TOKENS = {
+    "activist",
+    "activism",
+    "boardroom",
+    "campaign",
+    "contest",
+    "director",
+    "directors",
+    "governance",
+    "nomination",
+    "nominee",
+    "nominees",
+    "proxy",
+    "settlement",
+    "shareholder",
+    "shareholders",
+    "stewardship",
+}
+BOARD_PRODUCT_CONTEXT_TOKENS = {
+    "clt",
+    "circuit",
+    "contract",
+    "controller",
+    "interface",
+    "mainboard",
+    "motherboard",
+    "pcb",
+    "supply",
+    "공급계약체결",
+    "계약내용",
+    "계약상대",
 }
 SIGNAL_EVENT_LABELS = {
     "activist": "행동주의",
@@ -755,7 +813,7 @@ def ordered_message_tokens(message: dict[str, object]) -> list[str]:
     tokens: list[str] = []
     for token in re.findall(r"[0-9A-Za-z가-힣]{2,}", text):
         lowered = token.casefold()
-        if lowered in seen or lowered in SIGNAL_STOP_TOKENS:
+        if lowered in seen or is_signal_noise_token(lowered):
             continue
         if re.fullmatch(r"\d{4}", lowered):
             continue
@@ -776,9 +834,52 @@ def ordered_message_tokens(message: dict[str, object]) -> list[str]:
     return tokens
 
 
+def is_signal_noise_token(token: str) -> bool:
+    lowered = str(token or "").casefold().strip()
+    if not lowered:
+        return True
+    if lowered in SIGNAL_STOP_TOKENS:
+        return True
+    if any(part in lowered for part in SIGNAL_STOP_SUBSTRINGS):
+        return True
+    if any(lowered.endswith(suffix) for suffix in SIGNAL_STOP_DOMAIN_SUFFIXES):
+        return True
+    if re.fullmatch(r"(?:m|www|news|article|view|readnews|contents?|files?|feed)s?", lowered):
+        return True
+    if re.fullmatch(r"[a-z]{1,2}", lowered) and lowered not in {"ai"}:
+        return True
+    return False
+
+
 def is_event_match_token(token: str) -> bool:
     lowered = token.casefold()
     return lowered in WEAK_MATCH_EVENT_TOKENS or any(keyword in lowered for keyword in WEAK_MATCH_EVENT_SUBSTRINGS)
+
+
+def english_board_token_is_governance(tokens: list[str], text: str) -> bool:
+    token_set = {token.casefold() for token in tokens}
+    lowered_text = text.casefold()
+    if token_set & BOARD_PRODUCT_CONTEXT_TOKENS:
+        if not token_set & BOARD_GOVERNANCE_CONTEXT_TOKENS:
+            return False
+    return bool(
+        token_set & BOARD_GOVERNANCE_CONTEXT_TOKENS
+        or re.search(r"\bboard\s+(?:member|members|seat|seats|nominee|nominees|refresh|representation)\b", lowered_text)
+        or re.search(r"\bboard\s+of\s+directors?\b", lowered_text)
+    )
+
+
+def signal_event_tokens_for_message(message: dict[str, object], tokens: list[str]) -> list[str]:
+    text = str(message.get("normalized_text") or message.get("text") or "")
+    events: list[str] = []
+    for token in tokens:
+        lowered = token.casefold()
+        if not is_event_match_token(lowered):
+            continue
+        if lowered in AMBIGUOUS_ENGLISH_BOARD_TOKENS and not english_board_token_is_governance(tokens, text):
+            continue
+        events.append(lowered)
+    return events
 
 
 def signal_event_label(token: str) -> str:
@@ -796,7 +897,7 @@ def signal_entity_tokens(tokens: list[str], *, limit: int = 6) -> list[str]:
     for token in tokens:
         if is_event_match_token(token):
             continue
-        if token in SIGNAL_STOP_TOKENS:
+        if is_signal_noise_token(token):
             continue
         if len(token) < 3 and not re.search(r"\d", token):
             continue
@@ -1302,7 +1403,7 @@ def telegram_topic_burst_signals(
     grouped: dict[tuple[str, str], list[dict[str, object]]] = defaultdict(list)
     for message in messages:
         tokens = ordered_message_tokens(message)
-        event_tokens = [token for token in tokens if is_event_match_token(token)]
+        event_tokens = signal_event_tokens_for_message(message, tokens)
         if not event_tokens:
             continue
         entities = signal_entity_tokens(tokens)
