@@ -393,7 +393,7 @@ telegram:
 telegram_sources:
   # MTProto 기반 공개 채널 읽기 수집입니다. 기본값은 꺼져 있으며,
   # api_id/api_hash/session은 GitHub Secrets 또는 로컬 .env에만 둡니다.
-  enabled: false
+  enabled: true
   channels: []
   backfill_limit: 100
   incremental_limit: 200

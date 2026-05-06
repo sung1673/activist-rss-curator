@@ -295,6 +295,7 @@ COMPANY_STRICT_THEME_GROUPS = {
     "shareholder_proposal",
     "minority_shareholder",
     "control_dispute",
+    "board_audit",
     "capital_raise_disclosure",
     "ownership_succession",
 }
@@ -362,7 +363,13 @@ def cluster_base_string(article: dict[str, object]) -> str:
     theme_groups = list(article.get("theme_groups") or [])
     title_seed = str(article.get("normalized_title") or article.get("clean_title") or "untitled")
     if theme_groups:
-        return f"theme:{theme_groups[0]}"
+        theme_group = str(theme_groups[0])
+        if theme_group in COMPANY_STRICT_THEME_GROUPS:
+            company_seed = "|".join(str(item) for item in companies[:2])
+            if company_seed:
+                return f"theme:{theme_group}|company:{company_seed}"
+            return f"theme:{theme_group}|title:{title_seed[:90]}"
+        return f"theme:{theme_group}"
     if companies:
         return "|".join([str(item) for item in companies[:2] + keywords[:2]])
     if keywords:

@@ -45,7 +45,7 @@ def test_cluster_does_not_store_source_feed_url(config, now) -> None:  # type: i
     assert "source_feed_url" not in stored_article
 
 
-def test_theme_articles_are_clustered_within_theme_window(config, now) -> None:  # type: ignore[no-untyped-def]
+def test_board_audit_theme_requires_specific_company_or_title_match(config, now) -> None:  # type: ignore[no-untyped-def]
     state = {"pending_clusters": [], "published_clusters": []}
     articles = [
         make_article(
@@ -62,10 +62,48 @@ def test_theme_articles_are_clustered_within_theme_window(config, now) -> None: 
         ),
     ]
     cluster_articles(articles, state, config, now)
+    assert len(state["pending_clusters"]) == 2
+
+
+def test_board_audit_theme_clusters_same_company_followups(config, now) -> None:  # type: ignore[no-untyped-def]
+    state = {"pending_clusters": [], "published_clusters": []}
+    articles = [
+        make_article(
+            "삼성전자 파업 전운에 이사회 의장 노사 모두 설 자리 잃을 것 경고",
+            "https://example.com/samsung-board-a",
+            summary="삼성전자 이사회 의장이 파업 전운과 노사 대화를 언급했다",
+            published_at=(now - timedelta(hours=2)).isoformat(),
+        ),
+        make_article(
+            "삼성전자 이사회 의장 파업 현실화 땐 노사 모두 설 자리 잃을 것",
+            "https://example.com/samsung-board-b",
+            summary="삼성전자 노조 파업 우려에 이사회 의장이 대화를 촉구했다",
+            published_at=now.isoformat(),
+        ),
+    ]
+    cluster_articles(articles, state, config, now)
     assert len(state["pending_clusters"]) == 1
     assert state["pending_clusters"][0]["article_count"] == 2
-    assert state["pending_clusters"][0]["theme_grouped"] is True
-    assert state["pending_clusters"][0]["representative_title"] == "이사회 재편·임시주총·감사 선임"
+
+
+def test_board_audit_theme_does_not_mix_unrelated_board_articles(config, now) -> None:  # type: ignore[no-untyped-def]
+    state = {"pending_clusters": [], "published_clusters": []}
+    articles = [
+        make_article(
+            "삼성전자 이사회 의장 파업 현실화 땐 노사 모두 설 자리 잃을 것",
+            "https://example.com/samsung-board",
+            summary="삼성전자 노조 파업 우려에 이사회 의장이 대화를 촉구했다",
+            published_at=now.isoformat(),
+        ),
+        make_article(
+            "WEX, 임팩티브와 합의…이사회에 이사 3인 추가",
+            "https://example.com/wex-board",
+            summary="WEX와 Impactive가 proxy contest를 합의하고 이사회에 이사를 추가한다",
+            published_at=now.isoformat(),
+        ),
+    ]
+    cluster_articles(articles, state, config, now)
+    assert len(state["pending_clusters"]) == 2
 
 
 def test_governance_valueup_theme_does_not_join_generic_meeting_theme(config, now) -> None:  # type: ignore[no-untyped-def]
