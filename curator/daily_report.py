@@ -3216,6 +3216,11 @@ def render_search_html(
     .suggestions button, .tabs button {{ border:1px solid var(--line); border-radius:999px; background:var(--surface); color:var(--muted); padding:6px 10px; font:inherit; font-size:12px; font-weight:800; cursor:pointer; }}
     .suggestions button:hover, .tabs button:hover, .tabs button.is-active {{ border-color:var(--accent); background:var(--accent-soft); color:var(--accent-deep); }}
     .tabs {{ display:flex; flex-wrap:wrap; gap:8px; margin:18px 0 14px; }}
+    .interpretation {{ display:flex; flex-wrap:wrap; gap:7px; margin-top:2px; }}
+    .interpretation span {{ border:1px solid rgba(112,55,224,.18); border-radius:999px; background:#fff; color:var(--accent-deep); padding:4px 8px; font-size:11.5px; font-weight:850; }}
+    .search-controls {{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px; }}
+    .search-controls select {{ border:1px solid var(--line); border-radius:999px; background:#fff; color:#362d42; padding:7px 10px; font:inherit; font-size:12px; font-weight:800; }}
+    .search-controls label {{ display:inline-flex; align-items:center; gap:5px; border:1px solid var(--line); border-radius:999px; background:#fff; color:#4a4255; padding:7px 9px; font-size:12px; font-weight:800; }}
     .dashboard {{ display:grid; grid-template-columns:260px minmax(0,1fr); gap:22px; align-items:start; padding-top:2px; }}
     .insight {{ position:sticky; top:16px; display:grid; gap:10px; border:1px solid var(--line); background:var(--surface); padding:14px; }}
     .insight h2, .results h2 {{ margin:0; font-family:Georgia,"Times New Roman",serif; font-size:21px; line-height:1.1; }}
@@ -3229,6 +3234,15 @@ def render_search_html(
     .chip-list span {{ border:1px solid rgba(112,55,224,.16); border-radius:999px; background:#fff; color:#4c435a; padding:3px 7px; font-size:11px; }}
     .results {{ display:grid; gap:12px; min-width:0; }}
     .status {{ color:var(--muted); font-size:13px; padding:10px 0; }}
+    .briefing {{ display:grid; gap:10px; border-top:3px solid var(--accent); background:#fff; padding:14px; box-shadow:0 16px 34px rgba(70,43,102,.06); }}
+    .briefing[hidden] {{ display:none; }}
+    .briefing h2 {{ margin:0; font-family:Georgia,"Times New Roman",serif; font-size:22px; line-height:1.15; }}
+    .briefing__grid {{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }}
+    .briefing__metric {{ border:1px solid rgba(112,55,224,.14); background:var(--accent-soft); padding:8px; }}
+    .briefing__metric span {{ display:block; color:var(--muted); font-size:10.5px; font-weight:850; }}
+    .briefing__metric strong {{ display:block; color:var(--accent-deep); font-size:18px; line-height:1.2; }}
+    .briefing ul {{ margin:0; padding-left:18px; color:#342d3d; font-size:13px; line-height:1.55; }}
+    .briefing__notice {{ color:var(--muted); font-size:11.5px; }}
     .result-card {{ display:grid; gap:6px; border-top:1px solid var(--line); padding:13px 0 14px; color:inherit; text-decoration:none; }}
     .result-card:hover h3 {{ color:var(--accent-deep); text-decoration:underline; text-underline-offset:4px; }}
     .result-card h3 {{ margin:0; font-size:18px; line-height:1.34; font-weight:850; word-break:keep-all; overflow-wrap:break-word; }}
@@ -3238,6 +3252,13 @@ def render_search_html(
     .reasons span {{ border:1px solid rgba(112,55,224,.16); border-radius:999px; padding:2px 7px; background:var(--accent-soft); color:var(--accent-deep); font-size:10.5px; font-weight:850; }}
     .telegram-preview {{ display:grid; gap:4px; border-left:3px solid rgba(112,55,224,.35); padding-left:9px; color:#4b4357; font-size:12px; line-height:1.45; }}
     .telegram-preview span {{ display:block; }}
+    .why-matters {{ display:grid; gap:4px; border-left:3px solid rgba(0,120,95,.42); padding-left:9px; color:#3d3548; font-size:12.5px; line-height:1.5; }}
+    .why-matters span::before {{ content:"• "; color:var(--accent); font-weight:900; }}
+    .risk-flags {{ display:flex; flex-wrap:wrap; gap:5px; }}
+    .risk-flags span {{ border:1px solid #efd2a7; border-radius:999px; background:#fff7ea; color:#8a4b00; padding:2px 7px; font-size:10.5px; font-weight:850; }}
+    .timeline-list {{ display:grid; gap:8px; }}
+    .timeline-item {{ display:grid; grid-template-columns:72px minmax(0,1fr); gap:8px; border-top:1px solid var(--line); padding-top:8px; font-size:12.5px; }}
+    .timeline-item time {{ color:var(--accent-deep); font-weight:900; }}
     .section-label {{ margin:16px 0 0; border-bottom:2px solid var(--ink); padding-bottom:7px; font-family:Georgia,"Times New Roman",serif; font-size:24px; }}
     @media (max-width:860px) {{
       .page {{ padding:18px 14px 48px; }}
@@ -3245,6 +3266,7 @@ def render_search_html(
       .edition {{ text-align:left; }}
       .search-box {{ grid-template-columns:1fr; }}
       .search-box button {{ padding:10px 14px; }}
+      .briefing__grid {{ grid-template-columns:repeat(2,minmax(0,1fr)); }}
       .dashboard {{ grid-template-columns:1fr; }}
       .insight {{ position:static; }}
       .result-card h3 {{ font-size:16px; }}
@@ -3276,13 +3298,34 @@ def render_search_html(
         <button type="button" data-suggest="밸류업">밸류업</button>
         <button type="button" data-suggest="스튜어드십">스튜어드십</button>
       </div>
+      <div class="interpretation" data-query-interpretation hidden></div>
+      <div class="search-controls" aria-label="검색 필터">
+        <select data-event-filter>
+          <option value="all">전체 이벤트</option>
+          <option value="management_dispute">경영권·주주행동</option>
+          <option value="delisting">상장폐지·거래정지</option>
+          <option value="valueup">밸류업·자본정책</option>
+          <option value="disclosure">공시·제도</option>
+          <option value="global">해외·영문</option>
+        </select>
+        <select data-sort-mode>
+          <option value="smart">스마트 정렬</option>
+          <option value="latest">최신순</option>
+          <option value="spread">확산도순</option>
+          <option value="telegram">Telegram 급증순</option>
+          <option value="low_noise">노이즈 낮은 순</option>
+        </select>
+        <label><input type="checkbox" data-hide-promotional checked> 홍보성 제외</label>
+        <label><input type="checkbox" data-hide-telegram-only> Telegram-only 숨김</label>
+      </div>
     </header>
 
     <div class="tabs" role="tablist" aria-label="검색 범위">
       <button type="button" class="is-active" data-tab="all">전체</button>
-      <button type="button" data-tab="articles">기사</button>
       <button type="button" data-tab="issues">이슈</button>
+      <button type="button" data-tab="articles">기사</button>
       <button type="button" data-tab="telegram">Telegram</button>
+      <button type="button" data-tab="timeline">타임라인</button>
     </div>
 
     <main class="dashboard">
@@ -3310,6 +3353,7 @@ def render_search_html(
       <section class="results" aria-live="polite">
         <h2>검색 결과</h2>
         <div class="status" data-status>검색어를 입력하면 DB 아카이브와 Telegram 신호를 조회합니다.</div>
+        <section class="briefing" data-briefing hidden></section>
         <div data-results></div>
       </section>
     </main>
@@ -3321,8 +3365,21 @@ def render_search_html(
     const input = form?.querySelector('input[name="q"]');
     const results = document.querySelector('[data-results]');
     const statusEl = document.querySelector('[data-status]');
+    const briefingEl = document.querySelector('[data-briefing]');
+    const interpretationEl = document.querySelector('[data-query-interpretation]');
+    const eventFilter = document.querySelector('[data-event-filter]');
+    const sortMode = document.querySelector('[data-sort-mode]');
+    const hidePromotional = document.querySelector('[data-hide-promotional]');
+    const hideTelegramOnly = document.querySelector('[data-hide-telegram-only]');
     const tabButtons = Array.from(document.querySelectorAll('[data-tab]'));
     const state = {{ query: '', tab: 'all', articles: [], stories: [], signals: [] }};
+    const EVENT_RULES = [
+      {{ id: 'management_dispute', label: '경영권·주주행동', keywords: ['경영권', '공개매수', '주주제안', '주주총회', '주총', '의결권', '이사회', '가처분', '소송', '행동주의', '스튜어드십', '주주행동'] }},
+      {{ id: 'delisting', label: '상장폐지·거래정지', keywords: ['상장폐지', '상폐', '거래정지', '관리종목', '실질심사', '감사의견', '자본잠식', '정리매매', '불성실공시'] }},
+      {{ id: 'valueup', label: '밸류업·자본정책', keywords: ['밸류업', '벨류업', '기업가치', '자사주', '소각', '배당', '주주환원', 'roe', 'pbr', '유상증자', '감자'] }},
+      {{ id: 'disclosure', label: '공시·제도', keywords: ['공시', '주요사항보고서', 'dart', 'kind', '거래소', '금융위', '금감원', '정정공시', '제도', '감독'] }},
+      {{ id: 'global', label: '해외·영문', keywords: ['activist', 'proxy', 'board', 'shareholder', 'governance', 'stewardship', 'tender offer', 'sec', 'bloomberg', 'cnbc'] }},
+    ];
 
     function escapeHtml(value) {{
       return String(value || '').replace(/[&<>"']/g, (char) => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[char]));
@@ -3339,8 +3396,8 @@ def render_search_html(
     function tokens(value) {{
       return String(value || '').match(/[0-9A-Za-z가-힣]{{2,}}/g)?.map((token) => token.toLowerCase()).filter((token, index, list) => list.indexOf(token) === index).slice(0, 8) || [];
     }}
-    function includesQuery(row, query) {{
-      const haystack = [
+    function rowText(row) {{
+      return [
         row.title, row.representative_title, row.signal_title, row.summary, row.signal_summary,
         row.source, row.feed_name, row.feed_category, row.topic_category,
         Array.isArray(row.top_keywords) ? row.top_keywords.join(' ') : '',
@@ -3348,7 +3405,10 @@ def render_search_html(
         telegramMessages(row).map((message) => [
           message.excerpt, message.text, message.channel_title, message.channel_handle,
         ].join(' ')).join(' '),
-      ].join(' ').toLowerCase();
+      ].join(' ');
+    }}
+    function includesQuery(row, query) {{
+      const haystack = rowText(row).toLowerCase();
       const queryTokens = tokens(query);
       return !queryTokens.length || queryTokens.some((token) => haystack.includes(token));
     }}
@@ -3388,6 +3448,147 @@ def render_search_html(
     function primaryTelegramMessage(row) {{
       return telegramMessages(row).find((message) => message && (message.message_url || message.url)) || null;
     }}
+    function classifyEvent(row) {{
+      const haystack = rowText(row).toLowerCase();
+      const matched = EVENT_RULES
+        .map((rule) => ({{ ...rule, hits: rule.keywords.filter((keyword) => haystack.includes(keyword.toLowerCase())) }}))
+        .filter((rule) => rule.hits.length)
+        .sort((a, b) => b.hits.length - a.hits.length);
+      return matched[0] || {{ id: 'general', label: '일반 이슈', keywords: [], hits: [] }};
+    }}
+    function riskFlags(row) {{
+      const flags = Array.isArray(row.risk_flags) ? row.risk_flags : [];
+      const text = rowText(row).toLowerCase();
+      const inferred = [];
+      if (/(수익보장|리딩방|무료추천|급등주|vip|레퍼럴)/i.test(text)) inferred.push('promotional');
+      if (/(카더라|찌라시|확인[ ]?불가|미확인|루머)/i.test(text)) inferred.push('rumor');
+      if (/(공개매수|경영권|상장폐지|거래정지|관리종목|감사의견|유상증자|불성실공시)/i.test(text)) inferred.push('market_sensitive');
+      return [...new Set([...flags, ...inferred].map((flag) => String(flag || '').trim()).filter(Boolean))];
+    }}
+    function isTelegramOnly(row, kind) {{
+      if (kind !== 'Telegram') return false;
+      const signalType = String(row.signal_type || '').toLowerCase();
+      return signalType === 'topic_burst' || !String(row.article_id || '').trim() || String(row.article_id || '').startsWith('telegram-topic:');
+    }}
+    function recencyScore(row) {{
+      const raw = String(row.published_at || row.sort_at || row.last_article_seen_at || row.latest_seen_at || row.first_seen_at || '').trim();
+      const parsed = raw ? Date.parse(raw.replace(' ', 'T')) : NaN;
+      if (!Number.isFinite(parsed)) return 0.25;
+      const ageHours = Math.max(0, (Date.now() - parsed) / 36e5);
+      return Math.max(0, Math.min(1, 1 - ageHours / (24 * 14)));
+    }}
+    function spreadScore(row, kind) {{
+      const articles = Number(row.article_count || row.related_article_count || 0);
+      const publishers = Number(row.publisher_count || row.related_publishers_count || 0);
+      const telegram = Number(row.related_telegram_count || 0);
+      const channels = Number(row.related_telegram_channels_count || 0);
+      const engagement = telegramMessages(row).reduce((sum, message) => sum + Number(message.views || 0) / 5000 + Number(message.forwards || 0) / 50, 0);
+      return Math.min(1, Math.log1p(articles + publishers * 2 + telegram + channels * 2 + engagement) / 4);
+    }}
+    function materialityScore(row) {{
+      const event = classifyEvent(row).id;
+      if (event === 'management_dispute' || event === 'delisting') return 1;
+      if (event === 'valueup' || event === 'disclosure') return 0.72;
+      if (event === 'global') return 0.55;
+      return 0.35;
+    }}
+    function riskPenalty(row) {{
+      const flags = riskFlags(row);
+      let penalty = 0;
+      if (flags.includes('promotional')) penalty += 0.35;
+      if (flags.includes('rumor')) penalty += 0.22;
+      if (flags.includes('unverified')) penalty += 0.12;
+      return penalty;
+    }}
+    function smartScore(row, kind, query) {{
+      const queryTokens = tokens(query);
+      const text = rowText(row).toLowerCase();
+      const queryRelevance = queryTokens.length ? queryTokens.filter((token) => text.includes(token)).length / queryTokens.length : 0.5;
+      const officialHint = /(공시|dart|kind|거래소|금융위|금감원|법원|주요사항보고서)/i.test(text) ? 1 : 0;
+      const base = kind === '이슈' ? 0.08 : kind === '기사' ? 0.02 : -0.02;
+      const score =
+        base +
+        0.28 * queryRelevance +
+        0.14 * officialHint +
+        0.16 * spreadScore(row, kind) +
+        0.16 * recencyScore(row) +
+        0.16 * materialityScore(row) +
+        0.10 * (kind === 'Telegram' ? Number(row.confidence_score || 0.5) : 0.65) -
+        riskPenalty(row);
+      return Math.max(0, score);
+    }}
+    function rowScore(row, kind, query) {{
+      const mode = sortMode?.value || 'smart';
+      if (mode === 'latest') return recencyScore(row);
+      if (mode === 'spread') return spreadScore(row, kind);
+      if (mode === 'telegram') return kind === 'Telegram' ? spreadScore(row, kind) + Number(row.confidence_score || 0) * 0.2 : Number(row.related_telegram_count || 0) / 20;
+      if (mode === 'low_noise') return smartScore(row, kind, query) - riskPenalty(row) * 1.5;
+      return smartScore(row, kind, query);
+    }}
+    function passesSearchFilters(row, kind) {{
+      const selectedEvent = eventFilter?.value || 'all';
+      if (selectedEvent !== 'all' && classifyEvent(row).id !== selectedEvent) return false;
+      const flags = riskFlags(row);
+      if (hidePromotional?.checked && flags.includes('promotional')) return false;
+      if (hideTelegramOnly?.checked && isTelegramOnly(row, kind)) return false;
+      return true;
+    }}
+    function whyMatters(row, kind) {{
+      const event = classifyEvent(row);
+      const flags = riskFlags(row);
+      const lines = [];
+      if (event.id === 'management_dispute') lines.push('주주권·의결권·이사회 책임 쟁점과 연결되는 이슈입니다.');
+      else if (event.id === 'delisting') lines.push('거래 가능성과 투자자 보호 절차에 직접 연결되는 시장 민감 이벤트입니다.');
+      else if (event.id === 'valueup') lines.push('자사주·배당·기업가치 제고 등 실제 자본정책 여부를 함께 봐야 합니다.');
+      else if (event.id === 'disclosure') lines.push('공시·제도 변화와 후속 기사 확산 여부를 확인할 필요가 있습니다.');
+      else if (event.id === 'global') lines.push('해외 시장의 행동주의·거버넌스 흐름을 국내 관점에서 비교해 볼 수 있습니다.');
+      if (Number(row.publisher_count || row.article_count || 0) > 1) lines.push('복수 매체가 다루고 있어 단발 보도보다 확산도가 높습니다.');
+      if (Number(row.related_telegram_channels_count || 0) > 1) lines.push(`Telegram ${{Number(row.related_telegram_channels_count)}}개 채널에서 반복 언급됐습니다.`);
+      if (flags.includes('promotional') || flags.includes('rumor') || flags.includes('unverified')) lines.push('미확인·홍보성 가능성이 있어 원문 확인이 필요합니다.');
+      return lines.slice(0, 3);
+    }}
+    function renderInterpretation(query, rows) {{
+      if (!interpretationEl) return;
+      const queryTokens = tokens(query);
+      const events = countValues(rows.map((row) => classifyEvent(row)), (row) => row.label).slice(0, 4);
+      const chips = [
+        ...queryTokens.slice(0, 4).map((token) => ['검색어', token]),
+        ...events.map(([label, count]) => ['이벤트', `${{label}} ${{count}}`]),
+      ];
+      interpretationEl.hidden = !chips.length;
+      interpretationEl.innerHTML = chips.map(([type, label]) => `<span>${{escapeHtml(type)}}: ${{escapeHtml(label)}}</span>`).join('');
+    }}
+    function renderBriefing(query, articles, stories, signals) {{
+      if (!briefingEl) return;
+      const allRows = [...stories, ...articles, ...signals];
+      if (!query || !allRows.length) {{
+        briefingEl.hidden = true;
+        briefingEl.innerHTML = '';
+        return;
+      }}
+      const event = countValues(allRows.map((row) => classifyEvent(row)), (row) => row.label)[0]?.[0] || '일반 이슈';
+      const sources = new Set(articles.map(sourceName).filter(Boolean));
+      const telegramChannels = new Set(signals.flatMap((row) => Array.isArray(row.top_channels) ? row.top_channels : telegramMessages(row).map((message) => message.channel_handle || message.channel_title)).filter(Boolean));
+      const riskCounts = countValues(allRows.flatMap((row) => riskFlags(row)).map((value) => ({{ value }})), (row) => row.value);
+      const bullets = [
+        `${{event}} 관점에서 기사·이슈·Telegram 언급을 함께 정리했습니다.`,
+        sources.size ? `기사 출처 ${{sources.size}}곳이 검색어와 연결됩니다.` : '아직 기사 출처 확산은 제한적입니다.',
+        telegramChannels.size ? `Telegram 공개 채널 ${{telegramChannels.size}}곳에서 관련 언급이 확인됩니다.` : 'Telegram 관련 언급은 제한적입니다.',
+        riskCounts.length ? `주의 플래그: ${{riskCounts.map(([label, count]) => `${{label}} ${{count}}`).join(' · ')}}` : '주요 루머·홍보성 플래그는 제한적입니다.',
+      ];
+      briefingEl.hidden = false;
+      briefingEl.innerHTML = `
+        <h2>이슈 브리핑</h2>
+        <div class="briefing__grid">
+          <div class="briefing__metric"><span>이벤트</span><strong>${{escapeHtml(event)}}</strong></div>
+          <div class="briefing__metric"><span>기사</span><strong>${{articles.length}}</strong></div>
+          <div class="briefing__metric"><span>이슈</span><strong>${{stories.length}}</strong></div>
+          <div class="briefing__metric"><span>Telegram</span><strong>${{signals.length}}</strong></div>
+        </div>
+        <ul>${{bullets.map((line) => `<li>${{escapeHtml(line)}}</li>`).join('')}}</ul>
+        <div class="briefing__notice">공개 정보 기반 이슈 정리이며 투자 제안·권유·종목 추천이 아닙니다.</div>
+      `;
+    }}
     function safeResultUrl(value) {{
       const raw = String(value || '').trim();
       if (!raw) return '';
@@ -3425,12 +3626,20 @@ def render_search_html(
       node.innerHTML = values.length ? values.map(([label, count]) => `<span>${{escapeHtml(label)}} ${{count}}</span>`).join('') : '<span>표시할 항목 없음</span>';
     }}
     function updateMetrics(articles, stories, signals) {{
-      const sources = new Set(articles.map(sourceName).filter(Boolean));
+      const sources = new Set([
+        ...articles.map(sourceName),
+        ...stories.map(sourceName),
+        ...signals.flatMap((row) => Array.isArray(row.top_channels) ? row.top_channels : [sourceName(row)]),
+      ].filter(Boolean));
       document.querySelector('[data-count-articles]').textContent = String(articles.length);
       document.querySelector('[data-count-stories]').textContent = String(stories.length);
       document.querySelector('[data-count-telegram]').textContent = String(signals.length);
       document.querySelector('[data-count-sources]').textContent = String(sources.size);
-      setChips('[data-top-sources]', countValues(articles, sourceName));
+      setChips('[data-top-sources]', countValues([
+        ...articles,
+        ...stories,
+        ...signals.flatMap((row) => (Array.isArray(row.top_channels) ? row.top_channels : []).map((channel) => ({{ source: channel }}))),
+      ], sourceName));
       const keywords = [
         ...articles.map((row) => row.feed_category || row.relevance_level || row.priority_level || ''),
         ...stories.map((row) => row.topic_category || row.feed_category || ''),
@@ -3455,23 +3664,55 @@ def render_search_html(
           return text ? `<span>${{escapeHtml(compactText(channel, 24))}} · ${{escapeHtml(compactText(text, 96))}}</span>` : '';
         }}).join('')
         : '';
+      const why = whyMatters(row, kind);
+      const flags = riskFlags(row).filter((flag) => flag !== 'market_sensitive');
       return `<a class="result-card" href="${{escapeHtml(href || '#')}}" target="_blank" rel="noopener noreferrer">
         <div class="meta">${{meta.map((item) => `<span>${{escapeHtml(compactText(item, 42))}}</span>`).join('')}}</div>
         <h3>${{escapeHtml(compactText(title, 118))}}</h3>
         ${{snippet(row, query) ? `<p>${{escapeHtml(snippet(row, query))}}</p>` : ''}}
+        ${{why.length ? `<div class="why-matters">${{why.map((line) => `<span>${{escapeHtml(line)}}</span>`).join('')}}</div>` : ''}}
         ${{telegramPreview ? `<div class="telegram-preview">${{telegramPreview}}</div>` : ''}}
+        ${{flags.length ? `<div class="risk-flags">${{flags.map((flag) => `<span>${{escapeHtml(flag)}}</span>`).join('')}}</div>` : ''}}
         <div class="reasons">${{reasons.map((reason) => `<span>${{escapeHtml(reason)}}</span>`).join('')}}</div>
       </a>`;
     }}
+    function timelineRows(articles, stories, signals, query) {{
+      const rows = [
+        ...stories.map((row) => ({{ row, kind: '이슈' }})),
+        ...articles.map((row) => ({{ row, kind: '기사' }})),
+        ...signals.flatMap((row) => telegramMessages(row).slice(0, 4).map((message) => ({{ row: {{ ...message, signal_title: row.signal_title, top_keywords: row.top_keywords, risk_flags: row.risk_flags }}, kind: 'Telegram' }}))),
+      ];
+      return rows
+        .map((item) => {{
+          const raw = item.row.published_at || item.row.sort_at || item.row.latest_seen_at || item.row.posted_at || item.row.first_seen_at || '';
+          const ts = Date.parse(String(raw).replace(' ', 'T'));
+          return {{ ...item, ts: Number.isFinite(ts) ? ts : 0 }};
+        }})
+        .sort((a, b) => b.ts - a.ts)
+        .slice(0, 30)
+        .map((item) => {{
+          const title = item.row.title || item.row.representative_title || item.row.signal_title || item.row.excerpt || item.row.text || '제목 없음';
+          const href = item.kind === 'Telegram' ? safeResultUrl(item.row.message_url || item.row.url) : resultHref(item.row, item.kind);
+          return `<div class="timeline-item"><time>${{escapeHtml(dateLabel(item.row) || '일시 미상')}}</time><a href="${{escapeHtml(href || '#')}}" target="_blank" rel="noopener noreferrer">${{escapeHtml(item.kind)}} · ${{escapeHtml(compactText(title, 118))}}</a></div>`;
+        }}).join('');
+    }}
     function render() {{
       const query = state.query;
-      const articles = state.articles.filter((row) => includesQuery(row, query));
-      const stories = state.stories.filter((row) => includesQuery(row, query));
-      const signals = state.signals.filter((row) => includesQuery(row, query));
+      const articles = state.articles.filter((row) => includesQuery(row, query)).filter((row) => passesSearchFilters(row, '기사')).sort((a, b) => rowScore(b, '기사', query) - rowScore(a, '기사', query));
+      const stories = state.stories.filter((row) => includesQuery(row, query)).filter((row) => passesSearchFilters(row, '이슈')).sort((a, b) => rowScore(b, '이슈', query) - rowScore(a, '이슈', query));
+      const signals = state.signals.filter((row) => includesQuery(row, query)).filter((row) => passesSearchFilters(row, 'Telegram')).sort((a, b) => rowScore(b, 'Telegram', query) - rowScore(a, 'Telegram', query));
       updateMetrics(articles, stories, signals);
+      renderInterpretation(query, [...stories, ...articles, ...signals]);
+      renderBriefing(query, articles, stories, signals);
+      if (state.tab === 'timeline') {{
+        const timeline = timelineRows(articles, stories, signals, query);
+        results.innerHTML = timeline ? `<h3 class="section-label">타임라인</h3><div class="timeline-list">${{timeline}}</div>` : '<div class="status">타임라인으로 표시할 결과가 없습니다.</div>';
+        statusEl.textContent = query ? `'${{query}}' 기준 시간순 이벤트를 표시합니다.` : '검색어를 입력하면 타임라인을 조회합니다.';
+        return;
+      }}
       const groups = [];
-      if (state.tab === 'all' || state.tab === 'articles') groups.push(['기사', articles, '기사']);
       if (state.tab === 'all' || state.tab === 'issues') groups.push(['이슈', stories, '이슈']);
+      if (state.tab === 'all' || state.tab === 'articles') groups.push(['기사', articles, '기사']);
       if (state.tab === 'all' || state.tab === 'telegram') groups.push(['Telegram 신호', signals, 'Telegram']);
       const html = groups.map(([label, rows, kind]) => rows.length
         ? `<h3 class="section-label">${{label}}</h3>${{rows.slice(0, state.tab === 'all' ? 12 : 40).map((row) => resultCard(row, kind, query)).join('')}}`
@@ -3525,6 +3766,9 @@ def render_search_html(
         tabButtons.forEach((item) => item.classList.toggle('is-active', item === button));
         render();
       }});
+    }});
+    [eventFilter, sortMode, hidePromotional, hideTelegramOnly].filter(Boolean).forEach((control) => {{
+      control.addEventListener('change', render);
     }});
     const initialQuery = new URLSearchParams(location.search).get('q') || '';
     if (initialQuery) runSearch(initialQuery);

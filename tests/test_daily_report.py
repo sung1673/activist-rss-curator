@@ -241,6 +241,16 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "primaryTelegramMessage" in search_html
     assert "top_related_messages" in search_html
     assert "telegram-preview" in search_html
+    assert "이슈 브리핑" in search_html
+    assert "data-query-interpretation" in search_html
+    assert "data-event-filter" in search_html
+    assert "data-sort-mode" in search_html
+    assert "data-hide-promotional" in search_html
+    assert "data-hide-telegram-only" in search_html
+    assert "whyMatters" in search_html
+    assert "smartScore" in search_html
+    assert "timelineRows" in search_html
+    assert "투자 제안·권유·종목 추천이 아닙니다" in search_html
     assert "투자 추천이 아니라" in search_html
     current_link_data = re.findall(r'<script type="application/json" data-story-current-links>(.*?)</script>', html, re.S)
     assert all("&quot;" not in script for script in current_link_data)
