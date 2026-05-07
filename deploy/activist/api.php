@@ -568,6 +568,238 @@ function telegram_dashboard_tokens(string $text): array {
     return array_slice(array_values(array_unique($tokens)), 0, 24);
 }
 
+function telegram_listed_company_candidates(string $text): array {
+    $known = array(
+        '삼성전자', '고려아연', '영풍', '풍산', '한국앤컴퍼니', 'KT&G', 'KT', 'SK스퀘어',
+        'SK이노베이션', 'LG화학', 'LG전자', '한화', '한화솔루션', '현대차', '현대모비스',
+        'HD현대', 'HD현대일렉트릭', 'HD현대로보틱스', '한화오션', '두산밥캣', 'DB하이텍',
+        'SM엔터', '카카오', '네이버', '셀트리온', '포스코홀딩스', '우리금융', '우리금융지주',
+        '일진홀딩스', '슈프리마에이치큐', '보령', '코웨이', '쿠팡', '아이로보틱스',
+        '인크레더블버즈', 'Shinhan Financial Group', 'KB Financial Group', 'Samsung C&T',
+        'Korea Zinc', 'LG Chem', 'Hyundai Motor', 'Hyundai Mobis'
+    );
+    $excluded = array_change_key_case(array(
+        'NPS' => true, '국민연금' => true, 'Elliott Management' => true, 'Starboard Value' => true,
+        'Third Point' => true, 'Trian Partners' => true, 'D.E. Shaw' => true, 'ValueAct' => true,
+        'Sachem Head' => true, 'Saba Capital' => true, 'Browning West' => true
+    ), CASE_LOWER);
+    $candidates = array();
+    $lower = mb_strtolower($text, 'UTF-8');
+    foreach ($known as $company) {
+        if (mb_strpos($text, $company) !== false || mb_strpos($lower, mb_strtolower($company, 'UTF-8')) !== false) {
+            $candidates[] = $company;
+        }
+    }
+    if (preg_match_all('/([가-힣A-Za-z0-9&]{2,}(?:금융|지주|전자|물산|제약|화학|바이오|엔터|건설|증권|은행|보험|투자|홀딩스|그룹|산업|상사|에너지|중공업|해운|통신))/u', $text, $matches)) {
+        foreach ($matches[1] as $match) {
+            $candidates[] = trim((string)$match);
+        }
+    }
+    $unique = array();
+    foreach ($candidates as $company) {
+        $company = trim(preg_replace('/\s+/u', ' ', (string)$company), " -·,");
+        if ($company === '' || isset($excluded[mb_strtolower($company, 'UTF-8')])) {
+            continue;
+        }
+        $unique[$company] = true;
+    }
+    $companies = array_keys($unique);
+    usort($companies, function ($left, $right) {
+        return mb_strlen($right, 'UTF-8') <=> mb_strlen($left, 'UTF-8');
+    });
+    $filtered = array();
+    foreach ($companies as $company) {
+        $contained = false;
+        foreach ($filtered as $existing) {
+            if ($company !== $existing && mb_strpos($existing, $company) !== false) {
+                $contained = true;
+                break;
+            }
+        }
+        if (!$contained) {
+            $filtered[] = $company;
+        }
+    }
+    return array_slice($filtered, 0, 4);
+}
+
+function count_rows_to_label_counts(array $counts, int $limit = 6): array {
+    arsort($counts);
+    $rows = array();
+    foreach (array_slice($counts, 0, $limit, true) as $label => $count) {
+        if ((string)$label === '') {
+            continue;
+        }
+        $rows[] = array('label' => (string)$label, 'count' => (int)$count);
+    }
+    return $rows;
+}
+
+function telegram_company_signal_score(array $row): int {
+    $mentions = (int)($row['mentions_14d'] ?? 0);
+    $recent = (int)($row['mentions_24h'] ?? 0);
+    $channels = (int)($row['channels_count'] ?? 0);
+    $events = isset($row['event_types']) && is_array($row['event_types']) ? count($row['event_types']) : 0;
+    $velocity = (float)($row['velocity_ratio'] ?? 0);
+    $flags = isset($row['risk_flags']) && is_array($row['risk_flags']) ? $row['risk_flags'] : array();
+    $score = min(30, $mentions * 3) + min(24, $channels * 8) + min(16, $recent * 5) + min(12, $events * 4);
+    if ($velocity >= 2 && $recent >= 2) {
+        $score += 12;
+    } elseif ($velocity >= 1.3 && $recent >= 2) {
+        $score += 6;
+    }
+    if (in_array('promotional', $flags, true)) {
+        $score -= 12;
+    }
+    if (in_array('rumor', $flags, true) || in_array('unverified', $flags, true)) {
+        $score -= 8;
+    }
+    if ($channels <= 1 && $mentions >= 5) {
+        $score -= 10;
+    }
+    return max(0, min(100, (int)$score));
+}
+
+function telegram_company_lifecycle(array $row): string {
+    $recent = (int)($row['mentions_24h'] ?? 0);
+    $previous = (int)($row['mentions_prev_24h'] ?? 0);
+    $velocity = (float)($row['velocity_ratio'] ?? 0);
+    $channels = (int)($row['channels_count'] ?? 0);
+    if ($recent >= 2 && $previous === 0) {
+        return 'new';
+    }
+    if ($recent >= 2 && $velocity >= 1.4 && $channels >= 2) {
+        return 'rising';
+    }
+    if ($recent > 0) {
+        return 'active';
+    }
+    return 'fading';
+}
+
+function telegram_company_bucket(array $row): string {
+    $flags = isset($row['risk_flags']) && is_array($row['risk_flags']) ? $row['risk_flags'] : array();
+    if (array_intersect($flags, array('rumor', 'promotional', 'unverified'))) {
+        return 'risk_watch';
+    }
+    return in_array((string)($row['lifecycle'] ?? ''), array('new', 'rising'), true) ? 'new_rising' : 'tracked_company';
+}
+
+function telegram_company_signal_rows(PDO $pdo, string $messagesTable, string $referenceSql): array {
+    $stmt = $pdo->prepare(
+        'SELECT channel_handle, channel_title, posted_at, message_url, text, normalized_text, '
+        . 'CASE WHEN posted_at >= DATE_SUB(' . $referenceSql . ', INTERVAL 24 HOUR) THEN 1 ELSE 0 END AS is_recent, '
+        . 'CASE WHEN posted_at >= DATE_SUB(' . $referenceSql . ', INTERVAL 48 HOUR) AND posted_at < DATE_SUB(' . $referenceSql . ', INTERVAL 24 HOUR) THEN 1 ELSE 0 END AS is_previous '
+        . 'FROM ' . $messagesTable . ' WHERE deleted_at IS NULL AND posted_at >= DATE_SUB(' . $referenceSql . ', INTERVAL 14 DAY) '
+        . 'ORDER BY posted_at DESC LIMIT 20000'
+    );
+    $stmt->execute();
+    $grouped = array();
+    foreach ($stmt->fetchAll() as $row) {
+        $text = (string)($row['normalized_text'] ?: $row['text'] ?: '');
+        $companies = telegram_listed_company_candidates($text);
+        if (!$companies) {
+            continue;
+        }
+        $handle = (string)($row['channel_handle'] ?: $row['channel_title'] ?: 'unknown');
+        $eventType = telegram_dashboard_message_type($text);
+        $flags = telegram_risk_flags($text);
+        foreach ($companies as $company) {
+            if (!isset($grouped[$company])) {
+                $grouped[$company] = array(
+                    'company' => $company,
+                    'mentions_14d' => 0,
+                    'mentions_24h' => 0,
+                    'mentions_prev_24h' => 0,
+                    'channels' => array(),
+                    'event_types' => array(),
+                    'risk_flags' => array(),
+                    'top_messages' => array(),
+                    'latest_at' => '',
+                );
+            }
+            $grouped[$company]['mentions_14d']++;
+            if ((int)$row['is_recent'] === 1) {
+                $grouped[$company]['mentions_24h']++;
+            } elseif ((int)$row['is_previous'] === 1) {
+                $grouped[$company]['mentions_prev_24h']++;
+            }
+            $grouped[$company]['channels'][$handle] = ($grouped[$company]['channels'][$handle] ?? 0) + 1;
+            $grouped[$company]['event_types'][$eventType] = ($grouped[$company]['event_types'][$eventType] ?? 0) + 1;
+            foreach ($flags as $flag) {
+                $grouped[$company]['risk_flags'][$flag] = ($grouped[$company]['risk_flags'][$flag] ?? 0) + 1;
+            }
+            $postedAt = (string)($row['posted_at'] ?: '');
+            if ($postedAt > $grouped[$company]['latest_at']) {
+                $grouped[$company]['latest_at'] = $postedAt;
+            }
+            if (count($grouped[$company]['top_messages']) < 5) {
+                $grouped[$company]['top_messages'][] = array(
+                    'channel_title' => (string)($row['channel_title'] ?: $handle),
+                    'channel_handle' => $handle,
+                    'posted_at' => $postedAt,
+                    'message_url' => (string)($row['message_url'] ?: ''),
+                    'excerpt' => text_excerpt($text, 120),
+                    'event_type' => $eventType,
+                    'risk_flags' => $flags,
+                );
+            }
+        }
+    }
+    $rows = array();
+    foreach ($grouped as $company => $row) {
+        $previous = (int)$row['mentions_prev_24h'];
+        $recent = (int)$row['mentions_24h'];
+        $public = array(
+            'company' => $company,
+            'mentions_14d' => (int)$row['mentions_14d'],
+            'mentions_24h' => $recent,
+            'mentions_prev_24h' => $previous,
+            'channels_count' => count($row['channels']),
+            'top_channels' => count_rows_to_label_counts($row['channels'], 6),
+            'event_types' => count_rows_to_label_counts($row['event_types'], 5),
+            'risk_flags' => array_map(function ($item) { return (string)$item['label']; }, count_rows_to_label_counts($row['risk_flags'], 6)),
+            'velocity_ratio' => $previous > 0 ? round($recent / $previous, 2) : ($recent > 0 ? (float)$recent : 0.0),
+            'top_messages' => $row['top_messages'],
+            'latest_at' => (string)$row['latest_at'],
+        );
+        $public['signal_score'] = telegram_company_signal_score($public);
+        $public['lifecycle'] = telegram_company_lifecycle($public);
+        $public['analysis_bucket'] = telegram_company_bucket($public);
+        $rows[] = $public;
+    }
+    usort($rows, function ($left, $right) {
+        foreach (array('signal_score', 'mentions_24h', 'channels_count', 'mentions_14d') as $key) {
+            $diff = (int)($right[$key] ?? 0) <=> (int)($left[$key] ?? 0);
+            if ($diff !== 0) {
+                return $diff;
+            }
+        }
+        return strcmp((string)($right['latest_at'] ?? ''), (string)($left['latest_at'] ?? ''));
+    });
+    return $rows;
+}
+
+function telegram_company_signal_overview(array $rows): array {
+    $buckets = array('new_rising' => 0, 'risk_watch' => 0, 'tracked_company' => 0);
+    $topScore = 0;
+    foreach ($rows as $row) {
+        $bucket = (string)($row['analysis_bucket'] ?? 'tracked_company');
+        if (!isset($buckets[$bucket])) {
+            $buckets[$bucket] = 0;
+        }
+        $buckets[$bucket]++;
+        $topScore = max($topScore, (int)($row['signal_score'] ?? 0));
+    }
+    return array(
+        'companies_total' => count($rows),
+        'top_score' => $topScore,
+        'new_rising' => $buckets['new_rising'],
+        'risk_watch' => $buckets['risk_watch'],
+        'tracked' => $buckets['tracked_company'],
+    );
+}
+
 function public_telegram_signal(array $row): array {
     $payload = decode_json_array(isset($row['payload_json']) ? (string)$row['payload_json'] : null);
     $messages = array();
@@ -890,6 +1122,9 @@ function handle_telegram_dashboard(PDO $pdo, array $config): void {
     $newRisingSignals = array_values(array_filter($signalRows, function ($signal) { return ($signal['analysis_bucket'] ?? '') === 'new_rising'; }));
     $watchlistSignals = array_values(array_filter($signalRows, function ($signal) { return ($signal['analysis_bucket'] ?? '') === 'watchlist_candidate'; }));
     $riskWatchSignals = array_values(array_filter($signalRows, function ($signal) { return ($signal['analysis_bucket'] ?? '') === 'risk_watch'; }));
+    $companyRows = telegram_company_signal_rows($pdo, $messages, $referenceSql);
+    $newCompanyRows = array_values(array_filter($companyRows, function ($row) { return ($row['analysis_bucket'] ?? '') === 'new_rising'; }));
+    $companyRiskRows = array_values(array_filter($companyRows, function ($row) { return ($row['analysis_bucket'] ?? '') === 'risk_watch'; }));
 
     $matchTypeRows = array();
     $stmt = $pdo->prepare('SELECT match_type AS label, COUNT(*) AS count FROM ' . $matches . ' GROUP BY match_type ORDER BY count DESC');
@@ -937,6 +1172,10 @@ function handle_telegram_dashboard(PDO $pdo, array $config): void {
         'watchlist_candidates' => array_slice($watchlistSignals, 0, 8),
         'risk_watch_signals' => array_slice($riskWatchSignals, 0, 8),
         'risk_flag_counts' => telegram_risk_flag_counts($signalRows),
+        'company_signal_overview' => telegram_company_signal_overview($companyRows),
+        'top_company_signals' => array_slice($companyRows, 0, 16),
+        'new_rising_companies' => array_slice($newCompanyRows, 0, 8),
+        'company_risk_watch' => array_slice($companyRiskRows, 0, 8),
         'match_type_counts' => $matchTypeRows,
         'quality_bands' => array_map(
             function ($label, $count) { return array('label' => (string)$label, 'count' => (int)$count); },

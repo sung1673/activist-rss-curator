@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from html import escape
 from pathlib import Path
 
+from .cluster import extract_company_candidates
 from .dates import datetime_to_iso, parse_datetime
 from .remote_api import remote_api_url
 from .telegram_sources import (
@@ -40,6 +41,19 @@ TOKEN_STOPWORDS = {
     "보도",
     "공유",
 }
+NON_LISTED_COMPANY_NAMES = {
+    "NPS",
+    "국민연금",
+    "Elliott Management",
+    "Starboard Value",
+    "Third Point",
+    "Trian Partners",
+    "D.E. Shaw",
+    "ValueAct",
+    "Sachem Head",
+    "Saba Capital",
+    "Browning West",
+}
 
 
 def _dt(value: object, timezone_name: str) -> datetime | None:
@@ -60,6 +74,24 @@ def _compact(value: object, max_chars: int = 90) -> str:
 
 def _tokens(text: str) -> list[str]:
     return [token for token in ordered_message_tokens({"text": text}) if token not in TOKEN_STOPWORDS and len(token) >= 2]
+
+
+def _listed_company_candidates(text: str) -> list[str]:
+    candidates = []
+    for company in extract_company_candidates(text):
+        cleaned = re.sub(r"\s+", " ", str(company or "")).strip(" -·,")
+        if not cleaned or cleaned in NON_LISTED_COMPANY_NAMES:
+            continue
+        if cleaned.casefold() in {name.casefold() for name in NON_LISTED_COMPANY_NAMES}:
+            continue
+        candidates.append(cleaned)
+
+    filtered: list[str] = []
+    for company in sorted(dict.fromkeys(candidates), key=len, reverse=True):
+        if any(company != existing and company in existing for existing in filtered):
+            continue
+        filtered.append(company)
+    return filtered[:4]
 
 
 def _message_type(message: dict[str, object]) -> str:
@@ -178,6 +210,145 @@ def _top_risk_flags(messages: list[dict[str, object]], signals: list[dict[str, o
     return counter.most_common(12)
 
 
+def _company_signal_score(row: dict[str, object]) -> int:
+    mentions = int(row.get("mentions_14d") or 0)
+    recent = int(row.get("mentions_24h") or 0)
+    channels = int(row.get("channels_count") or 0)
+    events = len(row.get("event_types") or [])
+    velocity_ratio = float(row.get("velocity_ratio") or 0)
+    risk_flags = set(str(flag) for flag in row.get("risk_flags", []))
+    score = min(30, mentions * 3) + min(24, channels * 8) + min(16, recent * 5) + min(12, events * 4)
+    if velocity_ratio >= 2 and recent >= 2:
+        score += 12
+    elif velocity_ratio >= 1.3 and recent >= 2:
+        score += 6
+    if "promotional" in risk_flags:
+        score -= 12
+    if "rumor" in risk_flags or "unverified" in risk_flags:
+        score -= 8
+    if channels <= 1 and mentions >= 5:
+        score -= 10
+    return max(0, min(100, int(score)))
+
+
+def _company_lifecycle(row: dict[str, object]) -> str:
+    recent = int(row.get("mentions_24h") or 0)
+    previous = int(row.get("mentions_prev_24h") or 0)
+    velocity = float(row.get("velocity_ratio") or 0)
+    channels = int(row.get("channels_count") or 0)
+    if recent >= 2 and previous == 0:
+        return "new"
+    if recent >= 2 and velocity >= 1.4 and channels >= 2:
+        return "rising"
+    if recent > 0:
+        return "active"
+    return "fading"
+
+
+def _company_signal_bucket(row: dict[str, object]) -> str:
+    risk_flags = set(str(flag) for flag in row.get("risk_flags", []))
+    if risk_flags & {"rumor", "promotional", "unverified"}:
+        return "risk_watch"
+    lifecycle = str(row.get("lifecycle") or "")
+    if lifecycle in {"new", "rising"}:
+        return "new_rising"
+    return "tracked_company"
+
+
+def company_signal_rows(messages: list[dict[str, object]], timezone_name: str, now: datetime) -> list[dict[str, object]]:
+    since_24h = now - timedelta(hours=24)
+    prev_24h = now - timedelta(hours=48)
+    since_14d = now - timedelta(days=14)
+    grouped: dict[str, dict[str, object]] = {}
+    for message in messages:
+        posted_at = _message_datetime(message, timezone_name, now)
+        if posted_at < since_14d:
+            continue
+        text = str(message.get("normalized_text") or message.get("text") or "")
+        companies = _listed_company_candidates(text)
+        if not companies:
+            continue
+        handle = str(message.get("handle") or message.get("channel_title") or "")
+        message_url = str(message.get("message_url") or "")
+        event_type = _message_type(message)
+        flags = risk_flags_for_text(text)
+        for company in companies:
+            row = grouped.setdefault(
+                company,
+                {
+                    "company": company,
+                    "mentions_14d": 0,
+                    "mentions_24h": 0,
+                    "mentions_prev_24h": 0,
+                    "channels": Counter(),
+                    "event_types": Counter(),
+                    "risk_flags_counter": Counter(),
+                    "top_messages": [],
+                    "latest_at": "",
+                },
+            )
+            row["mentions_14d"] = int(row["mentions_14d"]) + 1
+            if posted_at >= since_24h:
+                row["mentions_24h"] = int(row["mentions_24h"]) + 1
+            elif posted_at >= prev_24h:
+                row["mentions_prev_24h"] = int(row["mentions_prev_24h"]) + 1
+            row["channels"][handle or "unknown"] += 1  # type: ignore[index]
+            row["event_types"][event_type] += 1  # type: ignore[index]
+            row["risk_flags_counter"].update(flags)  # type: ignore[index]
+            latest_at = datetime_to_iso(posted_at)
+            if latest_at > str(row.get("latest_at") or ""):
+                row["latest_at"] = latest_at
+            row["top_messages"].append(  # type: ignore[union-attr]
+                {
+                    "channel_title": message.get("channel_title") or handle,
+                    "channel_handle": handle,
+                    "posted_at": latest_at,
+                    "message_url": message_url,
+                    "excerpt": _compact(text, 120),
+                    "event_type": event_type,
+                    "risk_flags": flags,
+                }
+            )
+
+    rows: list[dict[str, object]] = []
+    for row in grouped.values():
+        channels: Counter[str] = row.pop("channels")  # type: ignore[assignment]
+        event_types: Counter[str] = row.pop("event_types")  # type: ignore[assignment]
+        risk_counter: Counter[str] = row.pop("risk_flags_counter")  # type: ignore[assignment]
+        previous = int(row.get("mentions_prev_24h") or 0)
+        recent = int(row.get("mentions_24h") or 0)
+        velocity_ratio = round((recent / previous) if previous else (float(recent) if recent else 0.0), 2)
+        messages_for_company = sorted(
+            list(row.get("top_messages") or []),
+            key=lambda message: str(message.get("posted_at") or ""),
+            reverse=True,
+        )[:5]
+        public_row = {
+            **row,
+            "channels_count": len([channel for channel in channels if channel]),
+            "top_channels": [{"label": label, "count": count} for label, count in channels.most_common(6)],
+            "event_types": [{"label": label, "count": count} for label, count in event_types.most_common(5)],
+            "risk_flags": [label for label, _count in risk_counter.most_common(6)],
+            "velocity_ratio": velocity_ratio,
+            "top_messages": messages_for_company,
+        }
+        public_row["signal_score"] = _company_signal_score(public_row)
+        public_row["lifecycle"] = _company_lifecycle(public_row)
+        public_row["analysis_bucket"] = _company_signal_bucket(public_row)
+        rows.append(public_row)
+
+    rows.sort(
+        key=lambda row: (
+            int(row.get("signal_score") or 0),
+            int(row.get("mentions_24h") or 0),
+            int(row.get("channels_count") or 0),
+            int(row.get("mentions_14d") or 0),
+        ),
+        reverse=True,
+    )
+    return rows
+
+
 def telegram_dashboard_model(state: dict[str, object], config: dict[str, object], now: datetime) -> dict[str, object]:
     ensure_telegram_state(state)
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
@@ -208,6 +379,10 @@ def telegram_dashboard_model(state: dict[str, object], config: dict[str, object]
         day_counter[_date_key(message.get("posted_at"), timezone_name)] += 1
     for message in recent_14d:
         keyword_counter.update(_tokens(str(message.get("normalized_text") or message.get("text") or ""))[:18])
+    company_signals = company_signal_rows(messages, timezone_name, now)
+    company_buckets: dict[str, list[dict[str, object]]] = {"new_rising": [], "risk_watch": [], "tracked_company": []}
+    for row in company_signals:
+        company_buckets.setdefault(str(row.get("analysis_bucket") or "tracked_company"), []).append(row)
 
     channel_rows: list[dict[str, object]] = []
     for channel in enabled_channels:
@@ -298,6 +473,16 @@ def telegram_dashboard_model(state: dict[str, object], config: dict[str, object]
         "watchlist_candidates": analysis_buckets.get("watchlist_candidate", [])[:8],
         "risk_watch_signals": analysis_buckets.get("risk_watch", [])[:8],
         "risk_flag_counts": _top_risk_flags(recent_14d, signals),
+        "company_signal_overview": {
+            "companies_total": len(company_signals),
+            "top_score": int(company_signals[0].get("signal_score") or 0) if company_signals else 0,
+            "new_rising": len(company_buckets.get("new_rising", [])),
+            "risk_watch": len(company_buckets.get("risk_watch", [])),
+            "tracked": len(company_buckets.get("tracked_company", [])),
+        },
+        "top_company_signals": company_signals[:16],
+        "new_rising_companies": company_buckets.get("new_rising", [])[:8],
+        "company_risk_watch": company_buckets.get("risk_watch", [])[:8],
         "match_type_counts": match_type_counter.most_common(),
         "quality_bands": quality_bands.most_common(),
         "growth": {
@@ -329,6 +514,25 @@ def _signal_card(signal: dict[str, object]) -> str:
         f'<div class="signal-card__meta"><span>{escape(str(signal.get("related_telegram_count") or 0))}건</span>'
         f'<span>{escape(str(signal.get("related_telegram_channels_count") or 0))}채널</span>'
         f'<span>{escape(str(signal.get("signal_type") or ""))}</span></div>'
+        f'<div class="risk-chips">{flag_html}</div>'
+        "</article>"
+    )
+
+
+def _company_card(row: dict[str, object]) -> str:
+    flags = [str(flag) for flag in row.get("risk_flags", [])[:4]]
+    flag_html = "".join(f"<span>{escape(flag)}</span>" for flag in flags)
+    events = ", ".join(str(item.get("label") or "") for item in row.get("event_types", [])[:4] if isinstance(item, dict))
+    return (
+        '<article class="signal-card company-card">'
+        f'<div class="signal-card__top"><b>{escape(str(row.get("signal_score") or 0))}</b>'
+        f'<span>{escape(str(row.get("lifecycle") or ""))}</span></div>'
+        f'<h3>{escape(_compact(row.get("company"), 48))}</h3>'
+        f'<p>{escape(_compact(events or "상장사 언급 추적", 112))}</p>'
+        f'<div class="signal-card__meta"><span>24h {escape(str(row.get("mentions_24h") or 0))}</span>'
+        f'<span>14d {escape(str(row.get("mentions_14d") or 0))}</span>'
+        f'<span>{escape(str(row.get("channels_count") or 0))}채널</span>'
+        f'<span>{escape(str(row.get("velocity_ratio") or 0))}x</span></div>'
         f'<div class="risk-chips">{flag_html}</div>'
         "</article>"
     )
@@ -368,6 +572,31 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
     risk_flag_rows = "\n".join(
         f"<span>{escape(str(label))} <b>{count}</b></span>"
         for label, count in model["risk_flag_counts"]
+    )
+    company_overview = model["company_signal_overview"]
+    company_stats = "\n".join(
+        [
+            _stat_card("상장사 추적", company_overview["companies_total"], "최근 14일"),
+            _stat_card("상위 회사 점수", company_overview["top_score"], "100점 기준"),
+            _stat_card("상승 상장사", company_overview["new_rising"], "24h 증가"),
+            _stat_card("리스크 확인", company_overview["risk_watch"], "루머·홍보성 등"),
+            _stat_card("추적 중", company_overview["tracked"], "반복 언급"),
+        ]
+    )
+    new_company_cards = "\n".join(_company_card(row) for row in model["new_rising_companies"])
+    risk_company_cards = "\n".join(_company_card(row) for row in model["company_risk_watch"])
+    company_rows = "\n".join(
+        "<tr>"
+        f"<td><b>{escape(str(row.get('company') or ''))}</b><br><small>{escape(str(row.get('lifecycle') or ''))}</small></td>"
+        f"<td>{escape(str(row.get('signal_score') or 0))}</td>"
+        f"<td>{escape(str(row.get('mentions_24h') or 0))} / {escape(str(row.get('mentions_14d') or 0))}</td>"
+        f"<td>{escape(str(row.get('channels_count') or 0))}</td>"
+        f"<td>{escape(str(row.get('velocity_ratio') or 0))}x</td>"
+        f"<td>{escape(', '.join(str(item.get('label') or '') for item in row.get('event_types', [])[:3] if isinstance(item, dict)))}</td>"
+        f"<td>{escape(', '.join(str(flag) for flag in row.get('risk_flags', [])[:4]))}</td>"
+        f"<td>{escape(str(row.get('latest_at') or ''))}</td>"
+        "</tr>"
+        for row in model["top_company_signals"][:16]
     )
     channel_rows = "\n".join(
         "<tr>"
@@ -450,6 +679,9 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
     .signal-card__meta {{ display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; color:var(--muted); font-size:11px; }}
     .risk-chips {{ display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }}
     .risk-chips span {{ border:1px solid rgba(111,53,232,.18); border-radius:999px; padding:3px 7px; color:var(--accent); background:var(--soft); font-size:10.5px; font-weight:800; }}
+    .company-board {{ grid-template-columns:1fr 1fr; }}
+    .company-table {{ overflow-x:auto; border:1px solid var(--line); background:var(--paper); }}
+    .company-table table {{ min-width:860px; border:0; }}
     table {{ width:100%; border-collapse:collapse; background:var(--paper); border:1px solid var(--line); }}
     th, td {{ border-bottom:1px solid var(--line); padding:9px 10px; text-align:left; font-size:13px; vertical-align:top; }}
     th {{ color:var(--accent); background:var(--soft); }}
@@ -476,6 +708,27 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
   <p>공개 broadcast 채널의 언급 확산, 기사 매칭, 다채널 반응, 위험 플래그를 함께 보며 시장 관심 흐름을 확인합니다. 개인 대화, 저장한 메시지, 그룹 대화는 수집 대상에서 제외됩니다.</p>
   <p class="status" id="data-status"><b>정적 fallback</b> DB API를 확인하는 중입니다.</p>
   <section class="stats" id="stats">{stats}</section>
+  <section>
+    <h2>상장사 시그널 분석</h2>
+    <p>상장사명 기준으로 Telegram 언급을 다시 묶어 24시간 증가, 다채널 확산, 주요 이벤트, 위험 플래그를 확인합니다. 회사 중심으로 먼저 보고, 아래 이슈 신호는 보조 맥락으로 사용합니다.</p>
+    <section class="stats signal-stats" id="company-stats">{company_stats}</section>
+    <div class="signal-board company-board">
+      <section class="signal-lane">
+        <h2>상승 상장사</h2>
+        <div class="signal-list" id="new-company-rows">{new_company_cards or '<p>최근 상승 상장사 신호가 아직 없습니다.</p>'}</div>
+      </section>
+      <section class="signal-lane">
+        <h2>리스크 확인</h2>
+        <div class="signal-list" id="risk-company-rows">{risk_company_cards or '<p>확인 필요 상장사 신호가 아직 없습니다.</p>'}</div>
+      </section>
+    </div>
+    <div class="company-table">
+      <table>
+        <thead><tr><th>상장사</th><th>Score</th><th>24h/14d</th><th>Channels</th><th>Velocity</th><th>Events</th><th>Risk</th><th>Latest</th></tr></thead>
+        <tbody id="company-rows">{company_rows or '<tr><td colspan="8">상장사 기준으로 묶을 Telegram 신호가 아직 없습니다.</td></tr>'}</tbody>
+      </table>
+    </div>
+  </section>
   <section>
     <h2>시장 시그널 분석</h2>
     <p>점수는 언급량, 채널 폭, 최신성, confidence를 더하고 루머·홍보성·단일 채널 도배 위험을 감점한 보조 지표입니다. 투자 추천이 아니라 확인 우선순위를 정하기 위한 신호입니다.</p>
@@ -677,6 +930,26 @@ function signalCard(signal) {{
   const summary = signal.signal_summary || signalKeywordText(signal) || signal.signal_type || "";
   return `<article class="signal-card"><div class="signal-card__top"><b>${{esc(signal.signal_score || 0)}}</b><span>${{esc(signal.lifecycle || "")}}</span></div><h3>${{esc(compact(signal.signal_title || signal.article_id || "", 78))}}</h3><p>${{esc(compact(summary, 112))}}</p><div class="signal-card__meta"><span>${{esc(signal.related_telegram_count || 0)}}건</span><span>${{esc(signal.related_telegram_channels_count || 0)}}채널</span><span>${{esc(signal.signal_type || "")}}</span></div><div class="risk-chips">${{flags}}</div></article>`;
 }}
+function companyEventText(row, limit = 4) {{
+  return listEntries(row.event_types || []).slice(0, limit).map((item) => keywordLabel(item)).filter(Boolean).join(", ");
+}}
+function companyRiskText(row, limit = 4) {{
+  return (row.risk_flags || []).slice(0, limit).join(", ");
+}}
+function companyCard(row) {{
+  const flags = (row.risk_flags || []).slice(0, 4).map((flag) => `<span>${{esc(flag)}}</span>`).join("");
+  return `<article class="signal-card company-card"><div class="signal-card__top"><b>${{esc(row.signal_score || 0)}}</b><span>${{esc(row.lifecycle || "")}}</span></div><h3>${{esc(compact(row.company || "", 48))}}</h3><p>${{esc(compact(companyEventText(row) || "상장사 언급 추적", 112))}}</p><div class="signal-card__meta"><span>24h ${{esc(row.mentions_24h || 0)}}</span><span>14d ${{esc(row.mentions_14d || 0)}}</span><span>${{esc(row.channels_count || 0)}}채널</span><span>${{esc(row.velocity_ratio || 0)}}x</span></div><div class="risk-chips">${{flags}}</div></article>`;
+}}
+function companyOverview(model, rows) {{
+  const fallback = model.company_signal_overview || {{}};
+  return {{
+    companies_total: fallback.companies_total ?? rows.length,
+    top_score: rows[0]?.signal_score || fallback.top_score || 0,
+    new_rising: fallback.new_rising ?? rows.filter((row) => row.analysis_bucket === "new_rising").length,
+    risk_watch: fallback.risk_watch ?? rows.filter((row) => row.analysis_bucket === "risk_watch").length,
+    tracked: fallback.tracked ?? rows.filter((row) => row.analysis_bucket === "tracked_company").length,
+  }};
+}}
 function riskFlagRows(model, signals) {{
   const counts = new Map();
   listEntries(model.risk_flag_counts || []).forEach((row) => {{
@@ -709,6 +982,10 @@ function modelFromApi(data) {{
     day_counts: data.day_counts || fallbackModel.day_counts || [],
     top_keywords: data.top_keywords || fallbackModel.top_keywords || [],
     signals: signals.slice(0, 12),
+    company_signal_overview: data.company_signal_overview || fallbackModel.company_signal_overview || {{}},
+    top_company_signals: data.top_company_signals || fallbackModel.top_company_signals || [],
+    new_rising_companies: data.new_rising_companies || fallbackModel.new_rising_companies || [],
+    company_risk_watch: data.company_risk_watch || fallbackModel.company_risk_watch || [],
     signal_overview: signalOverview(sourceModel, signals),
     new_rising_signals: groups.new_rising.slice(0, 8),
     watchlist_candidates: groups.watchlist_candidate.slice(0, 8),
@@ -724,6 +1001,8 @@ function renderDashboard(model, sourceLabel) {{
   const signals = enrichDashboardSignals(model.signals || []);
   const groups = signalGroups(signals);
   const overview = model.signal_overview || signalOverview(model, signals);
+  const companyRows = model.top_company_signals || [];
+  const companyStats = companyOverview(model, companyRows);
   document.getElementById("stats").innerHTML = [
     statCard("수집 가능 공개 채널", model.channels_collectable, `enabled ${{model.channels_enabled ?? 0}}`),
     statCard("최근 24시간 메시지", model.messages_24h ?? 0),
@@ -733,6 +1012,16 @@ function renderDashboard(model, sourceLabel) {{
     statCard("이슈 신호", model.signals_total ?? (model.signals || []).length),
     statCard("월간 예상", `${{growth.monthly_messages ?? 0}}건`, `${{growth.monthly_mb ?? 0}} MB`),
   ].join("");
+  document.getElementById("company-stats").innerHTML = [
+    statCard("상장사 추적", companyStats.companies_total ?? 0, "최근 14일"),
+    statCard("상위 회사 점수", companyStats.top_score ?? 0, "100점 기준"),
+    statCard("상승 상장사", companyStats.new_rising ?? 0, "24h 증가"),
+    statCard("리스크 확인", companyStats.risk_watch ?? 0, "루머·홍보성 등"),
+    statCard("추적 중", companyStats.tracked ?? 0, "반복 언급"),
+  ].join("");
+  document.getElementById("new-company-rows").innerHTML = (model.new_rising_companies || companyRows.filter((row) => row.analysis_bucket === "new_rising")).slice(0, 8).map(companyCard).join("") || '<p>최근 상승 상장사 신호가 아직 없습니다.</p>';
+  document.getElementById("risk-company-rows").innerHTML = (model.company_risk_watch || companyRows.filter((row) => row.analysis_bucket === "risk_watch")).slice(0, 8).map(companyCard).join("") || '<p>확인 필요 상장사 신호가 아직 없습니다.</p>';
+  document.getElementById("company-rows").innerHTML = companyRows.slice(0, 16).map((row) => `<tr><td><b>${{esc(row.company || "")}}</b><br><small>${{esc(row.lifecycle || "")}}</small></td><td>${{esc(row.signal_score || 0)}}</td><td>${{esc(row.mentions_24h || 0)}} / ${{esc(row.mentions_14d || 0)}}</td><td>${{esc(row.channels_count || 0)}}</td><td>${{esc(row.velocity_ratio || 0)}}x</td><td>${{esc(companyEventText(row, 3))}}</td><td>${{esc(companyRiskText(row, 4))}}</td><td>${{esc(row.latest_at || "")}}</td></tr>`).join("") || '<tr><td colspan="8">상장사 기준으로 묶을 Telegram 신호가 아직 없습니다.</td></tr>';
   document.getElementById("signal-stats").innerHTML = [
     statCard("상위 시그널 점수", overview.top_score ?? 0, "100점 기준"),
     statCard("New/Rising", overview.new_rising ?? groups.new_rising.length, "최근 부상"),

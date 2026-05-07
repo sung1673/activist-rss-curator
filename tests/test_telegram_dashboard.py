@@ -42,6 +42,9 @@ def test_telegram_dashboard_writes_public_safe_status_page(tmp_path, config, now
     assert "New/Rising" in html
     assert "Watch 후보" in html
     assert "Risk watch" in html
+    assert "상장사 시그널 분석" in html
+    assert "상승 상장사" in html
+    assert "company_signal_overview" in html
     assert "signal_quality_score" in html
     assert "TELEGRAM_API_HASH" not in html
 
@@ -104,3 +107,8 @@ def test_telegram_dashboard_model_builds_investor_signal_sections(config, now) -
     assert model["watchlist_candidates"]
     assert model["watchlist_candidates"][0]["signal_score"] > 0  # type: ignore[index]
     assert model["watchlist_candidates"][0]["lifecycle"] in {"new", "rising", "active"}  # type: ignore[index]
+    assert model["company_signal_overview"]["companies_total"] >= 1  # type: ignore[index]
+    assert model["top_company_signals"][0]["company"] == "삼성전자"  # type: ignore[index]
+    assert model["top_company_signals"][0]["mentions_24h"] == 2  # type: ignore[index]
+    assert model["top_company_signals"][0]["channels_count"] == 2  # type: ignore[index]
+    assert model["top_company_signals"][0]["signal_score"] > 0  # type: ignore[index]
