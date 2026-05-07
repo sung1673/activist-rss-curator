@@ -179,7 +179,8 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "visualStoryEntries" in html
     assert "visualStoryIndexByHref" in html
     assert "pageTop(section)" in html
-    assert html.count("const currentItems = mergeContextArticles([storyArticles]);") == 1
+    assert html.count("const currentItems = mergeContextArticles([storyArticles]).filter") == 1
+    assert "contextFallbackQueries" in html
     assert html.count("if (activeSectionId !== lastActiveSectionId)") == 1
     assert "DB 맥락 보기" not in html
     assert "관련 기사 보기" in html

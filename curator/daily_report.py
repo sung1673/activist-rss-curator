@@ -364,6 +364,13 @@ def story_db_query(title: str, links: list[dict[str, str]]) -> str:
         "오늘",
         "이슈",
         "확인",
+        "제약",
+        "바이오",
+        "레이더",
+        "정기",
+        "마무리",
+        "매출",
+        "클럽",
         "한국어",
         "google",
         "news",
@@ -1174,7 +1181,7 @@ def render_story(
     source_meta_html = f'<span class="story__sources">{source_meta}</span>' if source_meta else ""
     current_links_data_html = (
         f'<script type="application/json" data-story-current-links>{json_script_payload(normalized_links)}</script>'
-        if has_grouped_links
+        if normalized_links
         else ""
     )
     telegram_mentions = story.get("telegram_mentions") if isinstance(story.get("telegram_mentions"), list) else []
@@ -1183,7 +1190,11 @@ def render_story(
         if telegram_mentions
         else ""
     )
-    has_static_related_context = has_grouped_links or bool(telegram_mentions)
+    has_reliable_telegram_context = any(
+        isinstance(mention, dict) and str(mention.get("match_type") or "") in {"exact_url", "canonical_url"}
+        for mention in telegram_mentions
+    )
+    has_static_related_context = has_grouped_links or has_reliable_telegram_context
     context_visibility_attrs = "" if has_static_related_context else ' hidden data-context-pending="1"'
     related_html = (
         f"""
@@ -2220,6 +2231,7 @@ def render_report_html(
     function contextFilterTokens(query, title = '') {{
       const generic = new Set([
         '관련', '기사', '보도', '뉴스', '시장', '자본시장', '주주', '기업', '증시', '한국어',
+        '제약', '바이오', '레이더', '정기', '마무리', '매출', '클럽',
         '밸류업', '주주환원', '자사주', '소각', '지배구조', '경영권', '분쟁', '소액주주',
         '공시', '제도', '거래소', '코스닥', '상장', '중복상장', '유상증자', '물적분할',
         '종료보고서', '제출', '불성실공시법인', '지정', 'google', 'news'
@@ -2240,7 +2252,7 @@ def render_report_html(
         '공시', '제도', '거래소', '코스닥', '상장', '중복상장', '유상증자', '물적분할',
         '종료보고서', '불성실공시법인', '감독', '제재', '이사회', '의장', '이사',
         '사외이사', '감사', '감사위원', '선임', '검토', 'board', 'director', 'directors',
-        'chair', 'chairman', 'nominee', 'nominees'
+        'chair', 'chairman', 'nominee', 'nominees', '정기', '마무리', '매출', '성장', '개선', '통해', '실적'
       ]).has(String(token || '').toLowerCase());
     }}
 
@@ -2253,7 +2265,7 @@ def render_report_html(
     }}
 
     function storyContextHasCurrentLinks(details) {{
-      return Boolean(details.querySelector('[data-story-current-links]'));
+      return currentContextArticles(details).length > 1;
     }}
 
     function staticTelegramMentions(details) {{
@@ -2267,8 +2279,20 @@ def render_report_html(
       }}
     }}
 
+    function usefulTelegramMentions(mentions, tokens = []) {{
+      return Array.isArray(mentions)
+        ? mentions
+          .filter((message) => message && (message.message_url || message.url) && (message.text || message.excerpt || message.context_excerpt))
+          .filter((message) => telegramMentionIsUseful(message, tokens))
+          .slice(0, 5)
+        : [];
+    }}
+
     function storyContextHasStaticContent(details) {{
-      return storyContextHasCurrentLinks(details) || staticTelegramMentions(details).length > 0;
+      const story = details.closest('[data-story]');
+      const storyTitle = story?.querySelector('h3')?.textContent || '';
+      const tokens = contextFilterTokens(story?.dataset.storyDbQuery || '', storyTitle);
+      return storyContextHasCurrentLinks(details) || usefulTelegramMentions(staticTelegramMentions(details), tokens).length > 0;
     }}
 
     function mergeTelegramMentions(batches) {{
@@ -2324,9 +2348,11 @@ def render_report_html(
       const matchType = String(item.match_type || '');
       if (matchType === 'exact_url' || matchType === 'canonical_url') return true;
       const score = Number(item.score || 0);
+      const flags = Array.isArray(item.risk_flags) ? item.risk_flags : [];
+      if (flags.includes('promotional')) return false;
       const text = `${{item.context_excerpt || ''}} ${{item.excerpt || ''}} ${{item.text || ''}}`;
       const hits = telegramTokenHitCount(text, tokens);
-      return score >= 0.53 && (hits > 0 || !tokens.length);
+      return score >= 0.58 && hits >= Math.min(2, Math.max(1, tokens.length));
     }}
 
     function telegramContextSnippet(item, tokens) {{
@@ -2341,12 +2367,7 @@ def render_report_html(
     }}
 
     function renderTelegramMentions(body, mentions, tokens = []) {{
-      const items = Array.isArray(mentions)
-        ? mentions
-          .filter((message) => message && (message.message_url || message.url) && (message.text || message.excerpt || message.context_excerpt))
-          .filter((message) => telegramMentionIsUseful(message, tokens))
-          .slice(0, 5)
-        : [];
+      const items = usefulTelegramMentions(mentions, tokens);
       if (!items.length) return;
       const section = document.createElement('div');
       section.className = 'story-context__telegram';
@@ -2393,6 +2414,7 @@ def render_report_html(
       const currentKey = articleUrlKey(story.dataset.storyUrl || story.querySelector('h3 a')?.href || '');
       const storyTitle = story.querySelector('h3')?.textContent || '';
       const filterTokens = contextFilterTokens(story.dataset.storyDbQuery || '', storyTitle);
+      const filteredTelegramMentions = usefulTelegramMentions(telegramMentions, filterTokens);
       const isNotCurrent = (article) => articleUrlKey(article.canonical_url) !== currentKey;
       const currentItems = mergeContextArticles([currentContextArticles(details)]).map((article) => ({{ ...article, context_kind: 'current' }}));
       const currentKeys = new Set(currentItems.map((article) => contextArticleKey(article)).filter(Boolean));
@@ -2409,9 +2431,11 @@ def render_report_html(
       const archiveItems = mergeContextArticles([storyItems, queryItems])
         .map((article) => ({{ ...article, context_kind: 'archive' }}))
         .slice(0, Math.max(0, 10 - currentItems.length));
-      const items = [...currentItems, ...archiveItems];
+      const hasGroupedCurrent = currentItems.length > 1;
+      const hasRelatedContext = hasGroupedCurrent || archiveItems.length > 0 || filteredTelegramMentions.length > 0;
+      const items = (hasGroupedCurrent || archiveItems.length > 0) ? [...currentItems, ...archiveItems] : [];
       body.innerHTML = '';
-      if (!items.length && !telegramMentions.length) {{
+      if (!hasRelatedContext) {{
         if (storyContextHasStaticContent(details)) {{
           body.hidden = true;
         }} else {{
@@ -2427,7 +2451,7 @@ def render_report_html(
       body.hidden = false;
 
       if (!items.length) {{
-        renderTelegramMentions(body, telegramMentions, filterTokens);
+        renderTelegramMentions(body, filteredTelegramMentions, filterTokens);
         return;
       }}
 
@@ -2493,7 +2517,18 @@ def render_report_html(
         list.appendChild(row);
       }});
       body.appendChild(list);
-      renderTelegramMentions(body, telegramMentions, filterTokens);
+      renderTelegramMentions(body, filteredTelegramMentions, filterTokens);
+    }}
+
+    function contextFallbackQueries(query, title = '') {{
+      const tokens = contextFilterTokens(query, title);
+      const strongTokens = tokens.filter((token) => token.length >= 3 && !isWeakContextToken(token));
+      const eventTokens = tokens.filter((token) => token.length >= 2 && isWeakContextToken(token));
+      const queries = [];
+      if (strongTokens[0]) queries.push(strongTokens[0]);
+      if (strongTokens[0] && eventTokens[0]) queries.push(`${{strongTokens[0]}} ${{eventTokens[0]}}`);
+      if (strongTokens.length >= 2) queries.push(`${{strongTokens[0]}} ${{strongTokens[1]}}`);
+      return Array.from(new Set(queries.filter((item) => item && item !== query))).slice(0, 3);
     }}
 
     async function loadStoryContext(details) {{
@@ -2509,6 +2544,8 @@ def render_report_html(
       }}
       const storyKey = String(story.dataset.storyDbKey || '').trim();
       const query = String(story.dataset.storyDbQuery || '').trim();
+      const storyTitle = story.querySelector('h3')?.textContent || '';
+      const filterTokens = contextFilterTokens(query, storyTitle);
       let storyArticles = [];
       let queryArticles = [];
       let telegramMentions = staticTelegramMentions(details);
@@ -2516,9 +2553,18 @@ def render_report_html(
         storyArticles = await fetchDbArticles({{ story_key: storyKey, limit: '16', days: '180' }});
       }}
       if (query) {{
-        const currentItems = mergeContextArticles([storyArticles]);
+        const currentItems = mergeContextArticles([storyArticles]).filter((article) => articleMatchesContext(article, filterTokens));
         if (currentItems.length < 4) {{
           queryArticles = await fetchDbArticles({{ q: query, limit: '12', days: '180' }});
+        }}
+        let queryItems = mergeContextArticles([queryArticles]).filter((article) => articleMatchesContext(article, filterTokens));
+        if (currentItems.length + queryItems.length < 3) {{
+          for (const fallbackQuery of contextFallbackQueries(query, storyTitle)) {{
+            const fallbackArticles = await fetchDbArticles({{ q: fallbackQuery, limit: '12', days: '180' }});
+            queryArticles = mergeContextArticles([queryArticles, fallbackArticles]);
+            queryItems = mergeContextArticles([queryArticles]).filter((article) => articleMatchesContext(article, filterTokens));
+            if (currentItems.length + queryItems.length >= 3) break;
+          }}
         }}
       }}
       telegramMentions = mergeTelegramMentions([telegramMentions, await fetchTelegramMentions(story)]);
