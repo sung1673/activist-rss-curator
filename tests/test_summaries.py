@@ -972,6 +972,19 @@ def test_hourly_update_batches_multiple_clusters_and_marks_all(config, now, monk
     assert state["telegram_digest_records"][0]["message_ids"] == [88]
 
 
+def test_hourly_update_includes_latest_daily_link(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    config["public_feed_url"] = "https://news.bside.ai/feed.xml"
+    monkeypatch.setattr(summaries, "generate_hourly_digest_review", lambda *_args, **_kwargs: "- 소액주주 이슈 지속")
+    cluster = published_cluster(config, now)
+
+    message = build_hourly_update_messages([cluster], config, now, now - timedelta(minutes=30))[0]
+
+    assert 'href="https://news.bside.ai/feed/latest.html"' in message
+    assert "26년 4월 25일 주주·자본시장 데일리" in message
+
+
 def test_hourly_update_skips_configured_hours(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "@test_channel")

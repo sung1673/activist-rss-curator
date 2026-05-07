@@ -541,6 +541,21 @@ def digest_config(config: dict[str, object]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def latest_daily_url(config: dict[str, object]) -> str:
+    feed_url = str(config.get("public_feed_url") or "").strip()
+    if feed_url.endswith("/feed.xml"):
+        return f"{feed_url[: -len('/feed.xml')]}/feed/latest.html"
+    if feed_url.endswith("feed.xml"):
+        return f"{feed_url[: -len('feed.xml')]}feed/latest.html"
+    return ""
+
+
+def latest_daily_link_label(config: dict[str, object], now: datetime) -> str:
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    local_now = now.astimezone(ZoneInfo(timezone_name))
+    return f"{local_now:%y}년 {local_now.month}월 {local_now.day}일 주주·자본시장 데일리"
+
+
 def digest_count_limit(settings: dict[str, Any], key: str, default: int) -> int | None:
     try:
         value = int(settings.get(key, default))
@@ -1253,6 +1268,15 @@ def render_digest_link_sections(
     return lines
 
 
+def render_hourly_update_link_sections(
+    clusters: list[dict[str, object]],
+    config: dict[str, object],
+    duplicate_records: list[dict[str, object]] | None = None,
+) -> list[str]:
+    lines = render_digest_link_sections(clusters, config, duplicate_records)
+    return lines or ["<b>기사</b>", "• 새로 발행할 기사 묶음이 없습니다."]
+
+
 def digest_group_content_text(group: list[dict[str, object]]) -> str:
     return " ".join(digest_entry_content_text(entry) for entry in group).casefold()
 
@@ -1613,8 +1637,11 @@ def build_hourly_update_messages(
         "<b>요약</b>",
         *summary_bullet_lines(review, config),
         "",
-        *render_digest_link_sections(clusters, config),
+        *render_hourly_update_link_sections(clusters, config, duplicates),
     ]
+    report_url = latest_daily_url(config)
+    if report_url:
+        lines.extend(["", html_link(latest_daily_link_label(config, now), report_url)])
     message = "\n".join(line for line in lines if line is not None).strip()
     return split_plain_telegram_text(message, max_chars)
 
