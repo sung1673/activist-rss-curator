@@ -685,13 +685,14 @@ function telegram_company_bucket(array $row): string {
     return in_array((string)($row['lifecycle'] ?? ''), array('new', 'rising'), true) ? 'new_rising' : 'tracked_company';
 }
 
-function telegram_company_signal_rows(PDO $pdo, string $messagesTable, string $referenceSql): array {
+function telegram_company_signal_rows(PDO $pdo, string $messagesTable, string $channelsTable, string $referenceSql): array {
     $stmt = $pdo->prepare(
-        'SELECT channel_handle, channel_title, posted_at, message_url, text, normalized_text, '
-        . 'CASE WHEN posted_at >= DATE_SUB(' . $referenceSql . ', INTERVAL 24 HOUR) THEN 1 ELSE 0 END AS is_recent, '
-        . 'CASE WHEN posted_at >= DATE_SUB(' . $referenceSql . ', INTERVAL 48 HOUR) AND posted_at < DATE_SUB(' . $referenceSql . ', INTERVAL 24 HOUR) THEN 1 ELSE 0 END AS is_previous '
-        . 'FROM ' . $messagesTable . ' WHERE deleted_at IS NULL AND posted_at >= DATE_SUB(' . $referenceSql . ', INTERVAL 14 DAY) '
-        . 'ORDER BY posted_at DESC LIMIT 20000'
+        'SELECT m.channel_handle, COALESCE(c.title, m.channel_handle) AS channel_title, m.posted_at, m.message_url, m.text, m.normalized_text, '
+        . 'CASE WHEN m.posted_at >= DATE_SUB(' . $referenceSql . ', INTERVAL 24 HOUR) THEN 1 ELSE 0 END AS is_recent, '
+        . 'CASE WHEN m.posted_at >= DATE_SUB(' . $referenceSql . ', INTERVAL 48 HOUR) AND m.posted_at < DATE_SUB(' . $referenceSql . ', INTERVAL 24 HOUR) THEN 1 ELSE 0 END AS is_previous '
+        . 'FROM ' . $messagesTable . ' m LEFT JOIN ' . $channelsTable . ' c ON c.handle = m.channel_handle '
+        . 'WHERE m.deleted_at IS NULL AND m.posted_at >= DATE_SUB(' . $referenceSql . ', INTERVAL 14 DAY) '
+        . 'ORDER BY m.posted_at DESC LIMIT 20000'
     );
     $stmt->execute();
     $grouped = array();
@@ -1122,7 +1123,7 @@ function handle_telegram_dashboard(PDO $pdo, array $config): void {
     $newRisingSignals = array_values(array_filter($signalRows, function ($signal) { return ($signal['analysis_bucket'] ?? '') === 'new_rising'; }));
     $watchlistSignals = array_values(array_filter($signalRows, function ($signal) { return ($signal['analysis_bucket'] ?? '') === 'watchlist_candidate'; }));
     $riskWatchSignals = array_values(array_filter($signalRows, function ($signal) { return ($signal['analysis_bucket'] ?? '') === 'risk_watch'; }));
-    $companyRows = telegram_company_signal_rows($pdo, $messages, $referenceSql);
+    $companyRows = telegram_company_signal_rows($pdo, $messages, $channels, $referenceSql);
     $newCompanyRows = array_values(array_filter($companyRows, function ($row) { return ($row['analysis_bucket'] ?? '') === 'new_rising'; }));
     $companyRiskRows = array_values(array_filter($companyRows, function ($row) { return ($row['analysis_bucket'] ?? '') === 'risk_watch'; }));
 
