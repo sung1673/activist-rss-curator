@@ -914,6 +914,36 @@ def test_hourly_update_message_omits_duplicate_references(config, now, monkeypat
     assert "04.24 / 신한금융 밸류업 2.0 발표" not in message
 
 
+def test_hourly_update_excludes_duplicate_records_even_when_unrelated(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setattr(summaries, "generate_hourly_digest_review", lambda *_args, **_kwargs: "- 공시 이슈 지속")
+    cluster = published_cluster(config, now)
+    duplicate = make_article(
+        "공정위 대기업집단 공시 설명회 개최",
+        "https://example.com/duplicate-disclosure",
+        source="뉴스핌",
+        summary="공정위 공시 설명회 기사",
+    )
+    duplicate["status"] = "duplicate"
+    duplicate["published_at"] = now.isoformat()
+    duplicate["duplicate_matches"] = [
+        {
+            "title": "공정위·대한상의, 대기업집단 공시 설명회",
+            "canonical_url": "https://example.com/original-disclosure",
+            "source": "뉴스1",
+            "published_at": now.isoformat(),
+        }
+    ]
+
+    message = build_hourly_update_messages([cluster], config, now, now - timedelta(minutes=30), [duplicate])[0]
+
+    assert "공정위 대기업집단 공시 설명회" not in message
+    assert "duplicate-disclosure" not in message
+    assert "original-disclosure" not in message
+    assert "신한금융 밸류업" in message
+
+
 def test_hourly_update_window_is_thirty_minutes(config, now) -> None:  # type: ignore[no-untyped-def]
     assert hourly_update_start_at(config, now) == now - timedelta(minutes=30)
 

@@ -1654,13 +1654,16 @@ def build_hourly_update_messages(
 ) -> list[str]:
     max_chars = int(digest_config(config).get("max_message_chars", 3900))
     review = generate_hourly_digest_review(clusters, config, start_at, now)
+    # Hourly Telegram pushes should stay strictly "new cluster" oriented.
+    # Duplicate/archive records are useful for the daily page and morning digest,
+    # but including them here makes already-seen articles look newly pushed.
     lines = [
         hourly_update_period_label(config, start_at, now),
         "",
         "<b>요약</b>",
         *summary_bullet_lines(review, config),
         "",
-        *render_hourly_update_link_sections(clusters, config, duplicates),
+        *render_hourly_update_link_sections(clusters, config, None),
     ]
     daily_link_block = hourly_daily_link_block(config, now)
     if daily_link_block:
