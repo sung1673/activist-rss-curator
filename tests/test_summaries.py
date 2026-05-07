@@ -984,7 +984,43 @@ def test_hourly_update_includes_latest_daily_link(config, now, monkeypatch) -> N
     message = build_hourly_update_messages([cluster], config, now, now - timedelta(minutes=30))[0]
 
     assert 'href="https://news.bside.ai/feed/latest.html"' in message
+    assert "━━━━━━━━━━━━" in message
+    assert "<b>데일리 보기</b>" in message
     assert "26년 4월 25일 주주·자본시장 데일리" in message
+    assert "주요 기사·관련 기사·아카이브 확인" in message
+
+
+def test_hourly_update_uses_one_link_for_duplicate_story_group(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    config["public_feed_url"] = "https://news.bside.ai/feed.xml"
+    monkeypatch.setattr(summaries, "generate_hourly_digest_review", lambda *_args, **_kwargs: "- 공시 설명회 이슈 지속")
+    first = make_article(
+        "공정위 대기업집단 공시 설명회 개최",
+        "https://example.com/a",
+        source="뉴스핌",
+        summary="공정위가 대기업집단 공시 설명회를 열었다.",
+    )
+    second = make_article(
+        "공정위·대한상의 대기업집단 공시 설명회 개최",
+        "https://example.com/b",
+        source="뉴스1",
+        summary="공정위와 대한상의가 대기업집단 공시 설명회를 열었다.",
+    )
+    cluster = {
+        "guid": "cluster:disclosure:20260425:1",
+        "representative_title": "공정위 대기업집단 공시 설명회",
+        "published_at": now.isoformat(),
+        "articles": [first, second],
+    }
+
+    message = build_hourly_update_messages([cluster], config, now, now - timedelta(minutes=30))[0]
+
+    assert "(2건)" not in message
+    assert "①" not in message
+    assert "②" not in message
+    assert 'href="https://example.com/' in message
+    assert message.count("<a href=") == 2
 
 
 def test_latest_daily_link_helpers_use_custom_domain(config, now) -> None:  # type: ignore[no-untyped-def]

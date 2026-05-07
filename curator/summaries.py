@@ -1273,8 +1273,31 @@ def render_hourly_update_link_sections(
     config: dict[str, object],
     duplicate_records: list[dict[str, object]] | None = None,
 ) -> list[str]:
-    lines = render_digest_link_sections(clusters, config, duplicate_records)
+    entries = limited_digest_article_entries(clusters, config, duplicate_records)
+    labels = {"domestic": "국문", "global": "영문"}
+    lines: list[str] = []
+    for section_key in ("domestic", "global"):
+        section_entries = entries[section_key]
+        if not section_entries:
+            continue
+        if lines:
+            lines.append("")
+        lines.append(f"<b>{labels[section_key]}</b>")
+        for group in group_digest_entries(section_entries, config):
+            lines.extend(render_representative_digest_entry_group(group, config))
     return lines or ["<b>기사</b>", "• 새로 발행할 기사 묶음이 없습니다."]
+
+
+def hourly_daily_link_block(config: dict[str, object], now: datetime) -> list[str]:
+    report_url = latest_daily_url(config)
+    if not report_url:
+        return []
+    return [
+        "━━━━━━━━━━━━",
+        "<b>데일리 보기</b>",
+        html_link(latest_daily_link_label(config, now), report_url),
+        "주요 기사·관련 기사·아카이브 확인",
+    ]
 
 
 def digest_group_content_text(group: list[dict[str, object]]) -> str:
@@ -1639,9 +1662,9 @@ def build_hourly_update_messages(
         "",
         *render_hourly_update_link_sections(clusters, config, duplicates),
     ]
-    report_url = latest_daily_url(config)
-    if report_url:
-        lines.extend(["", html_link(latest_daily_link_label(config, now), report_url)])
+    daily_link_block = hourly_daily_link_block(config, now)
+    if daily_link_block:
+        lines.extend(["", *daily_link_block])
     message = "\n".join(line for line in lines if line is not None).strip()
     return split_plain_telegram_text(message, max_chars)
 
