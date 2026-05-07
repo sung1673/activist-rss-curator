@@ -13,6 +13,8 @@ from curator.summaries import (
     duplicate_records_in_window,
     group_digest_entries,
     hourly_update_start_at,
+    latest_daily_link_label,
+    latest_daily_url,
     limited_digest_article_entries,
     publish_daily_digest_if_due,
     publish_hourly_telegram_update,
@@ -983,6 +985,13 @@ def test_hourly_update_includes_latest_daily_link(config, now, monkeypatch) -> N
 
     assert 'href="https://news.bside.ai/feed/latest.html"' in message
     assert "26년 4월 25일 주주·자본시장 데일리" in message
+
+
+def test_latest_daily_link_helpers_use_custom_domain(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["public_feed_url"] = "https://news.bside.ai/feed.xml"
+
+    assert latest_daily_url(config) == "https://news.bside.ai/feed/latest.html"
+    assert latest_daily_link_label(config, now) == "26년 4월 25일 주주·자본시장 데일리"
 
 
 def test_hourly_update_skips_configured_hours(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
