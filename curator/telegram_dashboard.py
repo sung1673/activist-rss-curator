@@ -15,6 +15,7 @@ from .telegram_sources import (
     is_collectable_public_channel,
     message_key,
     ordered_message_tokens,
+    risk_flags_for_text,
     telegram_issue_signals,
 )
 
@@ -76,6 +77,107 @@ def _message_type(message: dict[str, object]) -> str:
     return "기타"
 
 
+def _message_datetime(message: dict[str, object], timezone_name: str, fallback: datetime) -> datetime:
+    return _dt(message.get("posted_at"), timezone_name) or fallback
+
+
+def _signal_datetime(signal: dict[str, object], key: str, timezone_name: str, fallback: datetime) -> datetime:
+    return _dt(signal.get(key), timezone_name) or fallback
+
+
+def _signal_risk_flags(signal: dict[str, object]) -> list[str]:
+    flags = [str(flag) for flag in signal.get("risk_flags", []) if str(flag)]
+    if int(signal.get("related_telegram_channels_count") or 0) <= 1 and int(signal.get("related_telegram_count") or 0) >= 5:
+        flags.append("single_channel_spike")
+    return sorted(set(flags))
+
+
+def _signal_lifecycle(signal: dict[str, object], timezone_name: str, now: datetime) -> str:
+    first_seen = _signal_datetime(signal, "first_seen_at", timezone_name, now)
+    latest_seen = _signal_datetime(signal, "latest_seen_at", timezone_name, first_seen)
+    first_age_hours = max(0.0, (now - first_seen).total_seconds() / 3600)
+    latest_age_hours = max(0.0, (now - latest_seen).total_seconds() / 3600)
+    count = int(signal.get("related_telegram_count") or 0)
+    channels = int(signal.get("related_telegram_channels_count") or 0)
+    if first_age_hours <= 24 and latest_age_hours <= 8:
+        return "new"
+    if latest_age_hours <= 12 and (channels >= 2 or count >= 5):
+        return "rising"
+    if latest_age_hours <= 36:
+        return "active"
+    if latest_age_hours <= 96:
+        return "fading"
+    return "stale"
+
+
+def _signal_score(signal: dict[str, object], timezone_name: str, now: datetime) -> int:
+    count = int(signal.get("related_telegram_count") or 0)
+    channels = int(signal.get("related_telegram_channels_count") or 0)
+    confidence = float(signal.get("confidence_score") or 0)
+    latest_seen = _signal_datetime(signal, "latest_seen_at", timezone_name, now)
+    latest_age_hours = max(0.0, (now - latest_seen).total_seconds() / 3600)
+    freshness = 14 if latest_age_hours <= 6 else 10 if latest_age_hours <= 24 else 5 if latest_age_hours <= 72 else 0
+    score = min(26, count * 4) + min(30, channels * 10) + min(22, round(confidence * 22)) + freshness
+    flags = _signal_risk_flags(signal)
+    if "promotional" in flags:
+        score -= 14
+    if "rumor" in flags or "unverified" in flags:
+        score -= 8
+    if "single_channel_spike" in flags:
+        score -= 10
+    return max(0, min(100, int(score)))
+
+
+def _signal_bucket(signal: dict[str, object], timezone_name: str, now: datetime) -> str:
+    lifecycle = _signal_lifecycle(signal, timezone_name, now)
+    signal_type = str(signal.get("signal_type") or "")
+    flags = set(_signal_risk_flags(signal))
+    if flags & {"rumor", "promotional", "unverified", "single_channel_spike"}:
+        return "risk_watch"
+    if signal_type in {"topic_burst", "url_burst"}:
+        return "watchlist_candidate"
+    if lifecycle in {"new", "rising"}:
+        return "new_rising"
+    return "confirmed_reaction"
+
+
+def _enrich_signal(signal: dict[str, object], timezone_name: str, now: datetime) -> dict[str, object]:
+    enriched = dict(signal)
+    enriched["signal_score"] = _signal_score(signal, timezone_name, now)
+    enriched["lifecycle"] = _signal_lifecycle(signal, timezone_name, now)
+    enriched["analysis_bucket"] = _signal_bucket(signal, timezone_name, now)
+    enriched["risk_flags"] = _signal_risk_flags(signal)
+    return enriched
+
+
+def _message_volume_snapshot(messages: list[dict[str, object]], timezone_name: str, now: datetime) -> dict[str, object]:
+    since_24h = now - timedelta(hours=24)
+    prev_24h = now - timedelta(hours=48)
+    recent = [message for message in messages if _message_datetime(message, timezone_name, now) >= since_24h]
+    previous = [
+        message
+        for message in messages
+        if prev_24h <= _message_datetime(message, timezone_name, now) < since_24h
+    ]
+    ratio = (len(recent) / len(previous)) if previous else (float(len(recent)) if recent else 0.0)
+    label = "rising" if ratio >= 1.4 and len(recent) >= 5 else "cooling" if previous and ratio <= 0.7 else "steady"
+    return {
+        "recent_24h": len(recent),
+        "previous_24h": len(previous),
+        "velocity_ratio": round(ratio, 2),
+        "velocity_label": label,
+    }
+
+
+def _top_risk_flags(messages: list[dict[str, object]], signals: list[dict[str, object]]) -> list[tuple[str, int]]:
+    counter: Counter[str] = Counter()
+    for message in messages:
+        counter.update(risk_flags_for_text(str(message.get("text") or message.get("normalized_text") or "")))
+    for signal in signals:
+        counter.update(_signal_risk_flags(signal))
+    return counter.most_common(12)
+
+
 def telegram_dashboard_model(state: dict[str, object], config: dict[str, object], now: datetime) -> dict[str, object]:
     ensure_telegram_state(state)
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
@@ -93,6 +195,7 @@ def telegram_dashboard_model(state: dict[str, object], config: dict[str, object]
     since_14d = now - timedelta(days=14)
     recent_24h = [message for message in messages if (_dt(message.get("posted_at"), timezone_name) or now) >= since_24h]
     recent_14d = [message for message in messages if (_dt(message.get("posted_at"), timezone_name) or now) >= since_14d]
+    volume = _message_volume_snapshot(messages, timezone_name, now)
 
     messages_by_channel: dict[str, list[dict[str, object]]] = defaultdict(list)
     type_counter: Counter[str] = Counter()
@@ -145,7 +248,15 @@ def telegram_dashboard_model(state: dict[str, object], config: dict[str, object]
         avg_bytes = max(1, round(len(json.dumps(sample, ensure_ascii=False, sort_keys=True).encode("utf-8")) / len(sample)))
     daily_messages = len(recent_14d) / 14 if recent_14d else 0
 
-    signals = telegram_issue_signals(state, config, limit=12, now=now)
+    signals = [
+        _enrich_signal(signal, timezone_name, now)
+        for signal in telegram_issue_signals(state, config, limit=30, now=now)
+    ]
+    signals.sort(key=lambda signal: (int(signal.get("signal_score") or 0), float(signal.get("confidence_score") or 0)), reverse=True)
+    analysis_buckets: dict[str, list[dict[str, object]]] = {"new_rising": [], "watchlist_candidate": [], "risk_watch": [], "confirmed_reaction": []}
+    for signal in signals:
+        bucket = str(signal.get("analysis_bucket") or "confirmed_reaction")
+        analysis_buckets.setdefault(bucket, []).append(signal)
     match_type_counter: Counter[str] = Counter(str(match.get("match_type") or "unknown") for match in matches)
     quality_bands: Counter[str] = Counter()
     for row in channel_rows:
@@ -174,7 +285,19 @@ def telegram_dashboard_model(state: dict[str, object], config: dict[str, object]
         "type_counts": type_counter.most_common(),
         "day_counts": sorted(day_counter.items())[-21:],
         "top_keywords": keyword_counter.most_common(30),
-        "signals": signals,
+        "signals": signals[:12],
+        "signal_overview": {
+            "top_score": int(signals[0].get("signal_score") or 0) if signals else 0,
+            "new_rising": len(analysis_buckets.get("new_rising", [])),
+            "watchlist_candidates": len(analysis_buckets.get("watchlist_candidate", [])),
+            "risk_watch": len(analysis_buckets.get("risk_watch", [])),
+            "confirmed_reactions": len(analysis_buckets.get("confirmed_reaction", [])),
+            **volume,
+        },
+        "new_rising_signals": analysis_buckets.get("new_rising", [])[:8],
+        "watchlist_candidates": analysis_buckets.get("watchlist_candidate", [])[:8],
+        "risk_watch_signals": analysis_buckets.get("risk_watch", [])[:8],
+        "risk_flag_counts": _top_risk_flags(recent_14d, signals),
         "match_type_counts": match_type_counter.most_common(),
         "quality_bands": quality_bands.most_common(),
         "growth": {
@@ -191,6 +314,24 @@ def telegram_dashboard_model(state: dict[str, object], config: dict[str, object]
 def _stat_card(label: str, value: object, note: str = "") -> str:
     note_html = f"<span>{escape(str(note))}</span>" if note else ""
     return f'<article class="stat"><strong>{escape(str(value))}</strong><p>{escape(label)}</p>{note_html}</article>'
+
+
+def _signal_card(signal: dict[str, object]) -> str:
+    flags = [str(flag) for flag in signal.get("risk_flags", [])[:4]]
+    flag_html = "".join(f"<span>{escape(flag)}</span>" for flag in flags)
+    keywords = ", ".join(str(keyword) for keyword in signal.get("top_keywords", [])[:5])
+    return (
+        '<article class="signal-card">'
+        f'<div class="signal-card__top"><b>{escape(str(signal.get("signal_score") or 0))}</b>'
+        f'<span>{escape(str(signal.get("lifecycle") or ""))}</span></div>'
+        f'<h3>{escape(_compact(signal.get("signal_title"), 78))}</h3>'
+        f'<p>{escape(_compact(signal.get("signal_summary") or keywords or signal.get("signal_type"), 112))}</p>'
+        f'<div class="signal-card__meta"><span>{escape(str(signal.get("related_telegram_count") or 0))}건</span>'
+        f'<span>{escape(str(signal.get("related_telegram_channels_count") or 0))}채널</span>'
+        f'<span>{escape(str(signal.get("signal_type") or ""))}</span></div>'
+        f'<div class="risk-chips">{flag_html}</div>'
+        "</article>"
+    )
 
 
 def write_telegram_dashboard(project_root: Path, state: dict[str, object], config: dict[str, object], now: datetime) -> Path:
@@ -210,6 +351,23 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
             _stat_card("추천 후보", model["candidates_total"], f"pending {model['candidate_pending']}"),
             _stat_card("월간 예상", f"{model['growth']['monthly_messages']}건", f"{model['growth']['monthly_mb']} MB"),
         ]
+    )
+    overview = model["signal_overview"]
+    signal_stats = "\n".join(
+        [
+            _stat_card("상위 시그널 점수", overview["top_score"], "100점 기준"),
+            _stat_card("New/Rising", overview["new_rising"], "최근 부상"),
+            _stat_card("Watch 후보", overview["watchlist_candidates"], "기사 전 단계"),
+            _stat_card("Risk watch", overview["risk_watch"], "확인 필요"),
+            _stat_card("24h 속도", f"{overview['velocity_ratio']}x", str(overview["velocity_label"])),
+        ]
+    )
+    new_rising_cards = "\n".join(_signal_card(signal) for signal in model["new_rising_signals"])
+    watchlist_cards = "\n".join(_signal_card(signal) for signal in model["watchlist_candidates"])
+    risk_cards = "\n".join(_signal_card(signal) for signal in model["risk_watch_signals"])
+    risk_flag_rows = "\n".join(
+        f"<span>{escape(str(label))} <b>{count}</b></span>"
+        for label, count in model["risk_flag_counts"]
     )
     channel_rows = "\n".join(
         "<tr>"
@@ -279,6 +437,19 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
     .stat p {{ margin:8px 0 0; color:var(--ink); font-weight:700; }}
     .stat span {{ color:var(--muted); font-size:12px; }}
     .grid {{ display:grid; grid-template-columns:1.1fr .9fr; gap:20px; }}
+    .signal-stats {{ grid-template-columns:repeat(5,1fr); margin-top:12px; }}
+    .signal-board {{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin:16px 0 28px; }}
+    .signal-lane {{ border-top:2px solid var(--ink); padding-top:10px; }}
+    .signal-lane h2 {{ margin:0 0 10px; font-size:18px; }}
+    .signal-list {{ display:grid; gap:10px; }}
+    .signal-card {{ border:1px solid var(--line); background:var(--paper); padding:12px; min-height:152px; }}
+    .signal-card__top {{ display:flex; justify-content:space-between; align-items:center; gap:8px; color:var(--accent); font-weight:900; font-size:12px; }}
+    .signal-card__top b {{ display:inline-flex; align-items:center; justify-content:center; min-width:34px; height:26px; border-radius:999px; background:var(--soft); border:1px solid rgba(111,53,232,.22); }}
+    .signal-card h3 {{ margin:10px 0 7px; font-size:15px; line-height:1.35; }}
+    .signal-card p {{ margin:0; font-size:12.5px; line-height:1.45; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }}
+    .signal-card__meta {{ display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; color:var(--muted); font-size:11px; }}
+    .risk-chips {{ display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }}
+    .risk-chips span {{ border:1px solid rgba(111,53,232,.18); border-radius:999px; padding:3px 7px; color:var(--accent); background:var(--soft); font-size:10.5px; font-weight:800; }}
     table {{ width:100%; border-collapse:collapse; background:var(--paper); border:1px solid var(--line); }}
     th, td {{ border-bottom:1px solid var(--line); padding:9px 10px; text-align:left; font-size:13px; vertical-align:top; }}
     th {{ color:var(--accent); background:var(--soft); }}
@@ -292,7 +463,7 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
     .note {{ border-left:4px solid var(--accent); background:var(--soft); padding:12px 14px; }}
     .status {{ display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line); border-radius:999px; padding:6px 10px; font-size:12px; color:var(--muted); background:var(--paper); }}
     .status b {{ color:var(--accent); }}
-    @media (max-width:900px) {{ .stats {{ grid-template-columns:repeat(2,1fr); }} .grid {{ grid-template-columns:1fr; }} h1 {{ font-size:32px; }} }}
+    @media (max-width:900px) {{ .stats, .signal-stats {{ grid-template-columns:repeat(2,1fr); }} .grid, .signal-board {{ grid-template-columns:1fr; }} h1 {{ font-size:32px; }} }}
   </style>
 </head>
 <body>
@@ -301,10 +472,30 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
     <a class="brand" href="https://bside.ai">bside<span>DAILY NEWS</span></a>
     <p>{escape(str(model["generated_at"]))}</p>
   </header>
-  <h1>Telegram 수집 운영 대시보드</h1>
-  <p>공개 broadcast 채널만 대상으로 수집 상태, 메시지 유형, 기사 매칭, 후보 채널과 저장량 추정치를 확인합니다. 개인 대화, 저장한 메시지, 그룹 대화는 수집 대상에서 제외됩니다.</p>
+  <h1>Telegram 시장 시그널 대시보드</h1>
+  <p>공개 broadcast 채널의 언급 확산, 기사 매칭, 다채널 반응, 위험 플래그를 함께 보며 시장 관심 흐름을 확인합니다. 개인 대화, 저장한 메시지, 그룹 대화는 수집 대상에서 제외됩니다.</p>
   <p class="status" id="data-status"><b>정적 fallback</b> DB API를 확인하는 중입니다.</p>
   <section class="stats" id="stats">{stats}</section>
+  <section>
+    <h2>시장 시그널 분석</h2>
+    <p>점수는 언급량, 채널 폭, 최신성, confidence를 더하고 루머·홍보성·단일 채널 도배 위험을 감점한 보조 지표입니다. 투자 추천이 아니라 확인 우선순위를 정하기 위한 신호입니다.</p>
+    <section class="stats signal-stats" id="signal-stats">{signal_stats}</section>
+    <div class="chips" id="risk-flag-rows">{risk_flag_rows or '<span>위험 플래그 없음</span>'}</div>
+    <div class="signal-board">
+      <section class="signal-lane">
+        <h2>New/Rising</h2>
+        <div class="signal-list" id="new-rising-rows">{new_rising_cards or '<p>최근 부상 신호가 아직 없습니다.</p>'}</div>
+      </section>
+      <section class="signal-lane">
+        <h2>Watch 후보</h2>
+        <div class="signal-list" id="watchlist-rows">{watchlist_cards or '<p>기사 전 단계 후보가 아직 없습니다.</p>'}</div>
+      </section>
+      <section class="signal-lane">
+        <h2>Risk watch</h2>
+        <div class="signal-list" id="risk-watch-rows">{risk_cards or '<p>확인 필요 신호가 아직 없습니다.</p>'}</div>
+      </section>
+    </div>
+  </section>
   <section class="grid">
     <div>
       <h2>채널별 수집 상태</h2>
@@ -408,8 +599,100 @@ function cleanIssueRows(signals) {{
 function signalKeywordText(signal) {{
   return (signal.top_keywords || []).filter(isUsefulDashboardKeyword).slice(0, 5).join(", ");
 }}
+function signalDate(value) {{
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime()) ? date : new Date();
+}}
+function signalRiskFlags(signal) {{
+  const flags = new Set(signal.risk_flags || []);
+  if (Number(signal.related_telegram_channels_count || 0) <= 1 && Number(signal.related_telegram_count || 0) >= 5) flags.add("single_channel_spike");
+  return [...flags].sort();
+}}
+function signalLifecycle(signal) {{
+  const now = new Date();
+  const first = signalDate(signal.first_seen_at);
+  const latest = signalDate(signal.latest_seen_at || signal.first_seen_at);
+  const firstAge = Math.max(0, (now - first) / 36e5);
+  const latestAge = Math.max(0, (now - latest) / 36e5);
+  const count = Number(signal.related_telegram_count || 0);
+  const channels = Number(signal.related_telegram_channels_count || 0);
+  if (firstAge <= 24 && latestAge <= 8) return "new";
+  if (latestAge <= 12 && (channels >= 2 || count >= 5)) return "rising";
+  if (latestAge <= 36) return "active";
+  if (latestAge <= 96) return "fading";
+  return "stale";
+}}
+function signalScore(signal) {{
+  const now = new Date();
+  const latest = signalDate(signal.latest_seen_at || signal.first_seen_at);
+  const latestAge = Math.max(0, (now - latest) / 36e5);
+  const freshness = latestAge <= 6 ? 14 : latestAge <= 24 ? 10 : latestAge <= 72 ? 5 : 0;
+  let score = Math.min(26, Number(signal.related_telegram_count || 0) * 4)
+    + Math.min(30, Number(signal.related_telegram_channels_count || 0) * 10)
+    + Math.min(22, Math.round(Number(signal.confidence_score || 0) * 22))
+    + freshness;
+  const flags = new Set(signalRiskFlags(signal));
+  if (flags.has("promotional")) score -= 14;
+  if (flags.has("rumor") || flags.has("unverified")) score -= 8;
+  if (flags.has("single_channel_spike")) score -= 10;
+  return Math.max(0, Math.min(100, Math.round(score)));
+}}
+function signalBucket(signal) {{
+  const flags = new Set(signal.risk_flags || []);
+  if (["rumor", "promotional", "unverified", "single_channel_spike"].some((flag) => flags.has(flag))) return "risk_watch";
+  if (["topic_burst", "url_burst"].includes(signal.signal_type || "")) return "watchlist_candidate";
+  return ["new", "rising"].includes(signal.lifecycle) ? "new_rising" : "confirmed_reaction";
+}}
+function enrichDashboardSignals(signals) {{
+  return cleanIssueRows(signals).map((signal) => {{
+    const risk_flags = signalRiskFlags(signal);
+    const lifecycle = signal.lifecycle || signalLifecycle(signal);
+    const enriched = {{...signal, risk_flags, lifecycle, signal_score: signal.signal_score || signalScore({{...signal, risk_flags, lifecycle}})}};
+    return {{...enriched, analysis_bucket: signal.analysis_bucket || signalBucket(enriched)}};
+  }}).sort((a, b) => Number(b.signal_score || 0) - Number(a.signal_score || 0));
+}}
+function signalGroups(signals) {{
+  return {{
+    new_rising: signals.filter((signal) => signal.analysis_bucket === "new_rising"),
+    watchlist_candidate: signals.filter((signal) => signal.analysis_bucket === "watchlist_candidate"),
+    risk_watch: signals.filter((signal) => signal.analysis_bucket === "risk_watch"),
+    confirmed_reaction: signals.filter((signal) => signal.analysis_bucket === "confirmed_reaction"),
+  }};
+}}
+function signalOverview(model, signals) {{
+  const groups = signalGroups(signals);
+  const fallback = model.signal_overview || {{}};
+  return {{
+    top_score: signals[0]?.signal_score || fallback.top_score || 0,
+    new_rising: groups.new_rising.length,
+    watchlist_candidates: groups.watchlist_candidate.length,
+    risk_watch: groups.risk_watch.length,
+    confirmed_reactions: groups.confirmed_reaction.length,
+    velocity_ratio: fallback.velocity_ratio ?? 0,
+    velocity_label: fallback.velocity_label ?? "steady",
+  }};
+}}
+function signalCard(signal) {{
+  const flags = (signal.risk_flags || []).slice(0, 4).map((flag) => `<span>${{esc(flag)}}</span>`).join("");
+  const summary = signal.signal_summary || signalKeywordText(signal) || signal.signal_type || "";
+  return `<article class="signal-card"><div class="signal-card__top"><b>${{esc(signal.signal_score || 0)}}</b><span>${{esc(signal.lifecycle || "")}}</span></div><h3>${{esc(compact(signal.signal_title || signal.article_id || "", 78))}}</h3><p>${{esc(compact(summary, 112))}}</p><div class="signal-card__meta"><span>${{esc(signal.related_telegram_count || 0)}}건</span><span>${{esc(signal.related_telegram_channels_count || 0)}}채널</span><span>${{esc(signal.signal_type || "")}}</span></div><div class="risk-chips">${{flags}}</div></article>`;
+}}
+function riskFlagRows(model, signals) {{
+  const counts = new Map();
+  listEntries(model.risk_flag_counts || []).forEach((row) => {{
+    counts.set(keywordLabel(row), Number(keywordCount(row) || 0));
+  }});
+  signals.forEach((signal) => (signal.risk_flags || []).forEach((flag) => counts.set(flag, (counts.get(flag) || 0) + 1)));
+  return [...counts.entries()].filter(([label]) => label).sort((a, b) => b[1] - a[1]).slice(0, 12);
+}}
 function modelFromApi(data) {{
   const counts = data.counts || {{}};
+  const sourceModel = {{
+    signal_overview: data.signal_overview || fallbackModel.signal_overview || {{}},
+    risk_flag_counts: data.risk_flag_counts || fallbackModel.risk_flag_counts || [],
+  }};
+  const signals = enrichDashboardSignals(data.signals || fallbackModel.signals || []);
+  const groups = signalGroups(signals);
   return {{
     generated_at: data.generated_at || fallbackModel.generated_at,
     channels_collectable: counts.channels_collectable ?? fallbackModel.channels_collectable,
@@ -425,7 +708,12 @@ function modelFromApi(data) {{
     type_counts: data.type_counts || fallbackModel.type_counts || [],
     day_counts: data.day_counts || fallbackModel.day_counts || [],
     top_keywords: data.top_keywords || fallbackModel.top_keywords || [],
-    signals: cleanIssueRows(data.signals || fallbackModel.signals || []),
+    signals: signals.slice(0, 12),
+    signal_overview: signalOverview(sourceModel, signals),
+    new_rising_signals: groups.new_rising.slice(0, 8),
+    watchlist_candidates: groups.watchlist_candidate.slice(0, 8),
+    risk_watch_signals: groups.risk_watch.slice(0, 8),
+    risk_flag_counts: riskFlagRows(sourceModel, signals),
     match_type_counts: data.match_type_counts || fallbackModel.match_type_counts || [],
     quality_bands: data.quality_bands || fallbackModel.quality_bands || [],
     growth: data.growth || fallbackModel.growth || {{}},
@@ -433,6 +721,9 @@ function modelFromApi(data) {{
 }}
 function renderDashboard(model, sourceLabel) {{
   const growth = model.growth || {{}};
+  const signals = enrichDashboardSignals(model.signals || []);
+  const groups = signalGroups(signals);
+  const overview = model.signal_overview || signalOverview(model, signals);
   document.getElementById("stats").innerHTML = [
     statCard("수집 가능 공개 채널", model.channels_collectable, `enabled ${{model.channels_enabled ?? 0}}`),
     statCard("최근 24시간 메시지", model.messages_24h ?? 0),
@@ -442,6 +733,17 @@ function renderDashboard(model, sourceLabel) {{
     statCard("이슈 신호", model.signals_total ?? (model.signals || []).length),
     statCard("월간 예상", `${{growth.monthly_messages ?? 0}}건`, `${{growth.monthly_mb ?? 0}} MB`),
   ].join("");
+  document.getElementById("signal-stats").innerHTML = [
+    statCard("상위 시그널 점수", overview.top_score ?? 0, "100점 기준"),
+    statCard("New/Rising", overview.new_rising ?? groups.new_rising.length, "최근 부상"),
+    statCard("Watch 후보", overview.watchlist_candidates ?? groups.watchlist_candidate.length, "기사 전 단계"),
+    statCard("Risk watch", overview.risk_watch ?? groups.risk_watch.length, "확인 필요"),
+    statCard("24h 속도", `${{overview.velocity_ratio ?? 0}}x`, overview.velocity_label || "steady"),
+  ].join("");
+  document.getElementById("risk-flag-rows").innerHTML = riskFlagRows(model, signals).map(([label, count]) => `<span>${{esc(label)}} <b>${{esc(count)}}</b></span>`).join("") || '<span>위험 플래그 없음</span>';
+  document.getElementById("new-rising-rows").innerHTML = (model.new_rising_signals || groups.new_rising).slice(0, 8).map(signalCard).join("") || '<p>최근 부상 신호가 아직 없습니다.</p>';
+  document.getElementById("watchlist-rows").innerHTML = (model.watchlist_candidates || groups.watchlist_candidate).slice(0, 8).map(signalCard).join("") || '<p>기사 전 단계 후보가 아직 없습니다.</p>';
+  document.getElementById("risk-watch-rows").innerHTML = (model.risk_watch_signals || groups.risk_watch).slice(0, 8).map(signalCard).join("") || '<p>확인 필요 신호가 아직 없습니다.</p>';
   document.getElementById("channel-rows").innerHTML = (model.top_channels || []).map((row) => `<tr><td>@${{esc(row.handle || "")}}</td><td>${{esc(compact(row.title, 42))}}</td><td>${{esc(row.signal_quality_score || row.quality_score || 0)}}<br><small>기본 ${{esc(row.quality_score || 0)}}</small></td><td>${{esc(row.messages || 0)}}</td><td>${{esc(row.matches || 0)}}<br><small>URL ${{esc(row.direct_matches || 0)}} · 추정 ${{esc(row.weak_matches || 0)}}</small></td><td>${{esc(((Number(row.match_rate || 0)) * 100).toFixed(1))}}%</td><td>${{esc(row.risk_messages || 0)}}</td><td>${{esc(row.latest_at || row.last_collected_at || "")}}</td><td>${{esc(row.last_error || "")}}</td></tr>`).join("") || '<tr><td colspan="9">수집 대상 채널이 아직 없습니다.</td></tr>';
   document.getElementById("type-rows").innerHTML = listEntries(model.type_counts).map((row) => `<li><b>${{esc(row.label ?? row[0] ?? "")}}</b><span>${{esc(row.count ?? row[1] ?? 0)}}건</span></li>`).join("") || '<li><b>데이터 없음</b><span>0건</span></li>';
   document.getElementById("keyword-rows").innerHTML = cleanKeywordRows(model.top_keywords).map((row) => `<span>${{esc(keywordLabel(row))}} <b>${{esc(keywordCount(row))}}</b></span>`).join("") || '<span>키워드 없음</span>';
@@ -453,7 +755,7 @@ function renderDashboard(model, sourceLabel) {{
     const count = Number(row[1] ?? row.count ?? 0);
     return `<div><span>${{esc(day)}}</span><b style="width:${{Math.min(100, count * 100 / maxDay).toFixed(1)}}%"></b><em>${{count}}</em></div>`;
   }}).join("") || '<p>아직 표시할 수집량이 없습니다.</p>';
-  document.getElementById("signal-rows").innerHTML = (model.signals || []).map((signal) => `<tr><td><b>${{esc(signal.signal_title || signal.article_id || "")}}</b><br><small>${{esc(signal.signal_summary || signal.signal_type || "")}}</small></td><td>${{esc(signal.related_telegram_count || 0)}}</td><td>${{esc(signal.related_telegram_channels_count || 0)}}</td><td>${{esc(signalKeywordText(signal))}}</td><td>${{esc((signal.risk_flags || []).slice(0, 5).join(", "))}}</td></tr>`).join("") || '<tr><td colspan="5">아직 기사와 연결된 Telegram 신호가 없습니다.</td></tr>';
+  document.getElementById("signal-rows").innerHTML = signals.map((signal) => `<tr><td><b>${{esc(signal.signal_title || signal.article_id || "")}}</b><br><small>${{esc(signal.signal_summary || signal.signal_type || "")}}</small></td><td>${{esc(signal.related_telegram_count || 0)}}</td><td>${{esc(signal.related_telegram_channels_count || 0)}}</td><td>${{esc(signalKeywordText(signal))}}</td><td>${{esc((signal.risk_flags || []).slice(0, 5).join(", "))}}</td></tr>`).join("") || '<tr><td colspan="5">아직 기사와 연결된 Telegram 신호가 없습니다.</td></tr>';
   document.getElementById("data-status").innerHTML = `<b>${{esc(sourceLabel)}}</b> 생성시각 ${{esc(model.generated_at || "")}}`;
 }}
 renderDashboard(fallbackModel, "정적 fallback");

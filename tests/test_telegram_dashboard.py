@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from curator.telegram_dashboard import write_telegram_dashboard
+from curator.telegram_dashboard import telegram_dashboard_model, write_telegram_dashboard
 
 
 def test_telegram_dashboard_writes_public_safe_status_page(tmp_path, config, now) -> None:  # type: ignore[no-untyped-def]
@@ -34,10 +34,73 @@ def test_telegram_dashboard_writes_public_safe_status_page(tmp_path, config, now
     path = write_telegram_dashboard(tmp_path, state, config, now)
     html = path.read_text(encoding="utf-8")
 
-    assert "Telegram 수집 운영 대시보드" in html
-    assert "공개 broadcast 채널만" in html
+    assert "Telegram 시장 시그널 대시보드" in html
+    assert "공개 broadcast 채널" in html
     assert "marketnews" in html
     assert "매칭 품질" in html
-    assert "Signal" not in html
+    assert "시장 시그널 분석" in html
+    assert "New/Rising" in html
+    assert "Watch 후보" in html
+    assert "Risk watch" in html
     assert "signal_quality_score" in html
     assert "TELEGRAM_API_HASH" not in html
+
+
+def test_telegram_dashboard_model_builds_investor_signal_sections(config, now) -> None:  # type: ignore[no-untyped-def]
+    state = {
+        "telegram_source_channels": [
+            {
+                "handle": "first",
+                "title": "경제 증권 뉴스",
+                "enabled": True,
+                "source_type": "public_channel",
+                "is_public_channel": True,
+                "quality_score": 80,
+            },
+            {
+                "handle": "second",
+                "title": "공시 채널",
+                "enabled": True,
+                "source_type": "public_channel",
+                "is_public_channel": True,
+                "quality_score": 75,
+            },
+        ],
+        "telegram_source_messages": [
+            {
+                "handle": "first",
+                "channel_title": "경제 증권 뉴스",
+                "telegram_message_id": 1,
+                "posted_at": now.isoformat(),
+                "text": "삼성전자 자사주 소각 주주환원 이슈",
+                "normalized_text": "삼성전자 자사주 소각 주주환원 이슈",
+                "message_url": "https://t.me/first/1",
+            },
+            {
+                "handle": "second",
+                "channel_title": "공시 채널",
+                "telegram_message_id": 2,
+                "posted_at": now.isoformat(),
+                "text": "삼성전자 자사주 소각 확대 보도",
+                "normalized_text": "삼성전자 자사주 소각 확대 보도",
+                "message_url": "https://t.me/second/2",
+            },
+        ],
+        "telegram_article_matches": [],
+        "telegram_channel_candidates": [],
+        "telegram_issue_signals": [],
+    }
+    config["telegram_sources"] = {
+        "signal_window_hours": 72,
+        "signal_min_messages": 2,
+        "signal_min_channels": 2,
+        "signal_limit": 10,
+    }
+
+    model = telegram_dashboard_model(state, config, now)
+
+    assert model["signal_overview"]["top_score"] > 0  # type: ignore[index]
+    assert model["signal_overview"]["watchlist_candidates"] >= 1  # type: ignore[index]
+    assert model["watchlist_candidates"]
+    assert model["watchlist_candidates"][0]["signal_score"] > 0  # type: ignore[index]
+    assert model["watchlist_candidates"][0]["lifecycle"] in {"new", "rising", "active"}  # type: ignore[index]

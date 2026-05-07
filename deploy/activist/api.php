@@ -608,6 +608,134 @@ function public_telegram_signal(array $row): array {
     );
 }
 
+function telegram_signal_risk_flags(array $signal): array {
+    $flags = array();
+    foreach ((isset($signal['risk_flags']) && is_array($signal['risk_flags'])) ? $signal['risk_flags'] : array() as $flag) {
+        $flag = (string)$flag;
+        if ($flag !== '') {
+            $flags[$flag] = true;
+        }
+    }
+    if ((int)($signal['related_telegram_channels_count'] ?? 0) <= 1 && (int)($signal['related_telegram_count'] ?? 0) >= 5) {
+        $flags['single_channel_spike'] = true;
+    }
+    $labels = array_keys($flags);
+    sort($labels);
+    return $labels;
+}
+
+function telegram_signal_age_hours(?string $value): float {
+    $time = $value ? strtotime($value) : false;
+    if ($time === false) {
+        return 0.0;
+    }
+    return max(0.0, (time() - $time) / 3600.0);
+}
+
+function telegram_signal_lifecycle(array $signal): string {
+    $firstAge = telegram_signal_age_hours(isset($signal['first_seen_at']) ? (string)$signal['first_seen_at'] : null);
+    $latestAge = telegram_signal_age_hours(isset($signal['latest_seen_at']) ? (string)$signal['latest_seen_at'] : null);
+    $count = (int)($signal['related_telegram_count'] ?? 0);
+    $channels = (int)($signal['related_telegram_channels_count'] ?? 0);
+    if ($firstAge <= 24 && $latestAge <= 8) {
+        return 'new';
+    }
+    if ($latestAge <= 12 && ($channels >= 2 || $count >= 5)) {
+        return 'rising';
+    }
+    if ($latestAge <= 36) {
+        return 'active';
+    }
+    if ($latestAge <= 96) {
+        return 'fading';
+    }
+    return 'stale';
+}
+
+function telegram_signal_score(array $signal): int {
+    $count = (int)($signal['related_telegram_count'] ?? 0);
+    $channels = (int)($signal['related_telegram_channels_count'] ?? 0);
+    $confidence = (float)($signal['confidence_score'] ?? 0);
+    $latestAge = telegram_signal_age_hours(isset($signal['latest_seen_at']) ? (string)$signal['latest_seen_at'] : null);
+    $freshness = $latestAge <= 6 ? 14 : ($latestAge <= 24 ? 10 : ($latestAge <= 72 ? 5 : 0));
+    $score = min(26, $count * 4) + min(30, $channels * 10) + min(22, (int)round($confidence * 22)) + $freshness;
+    $flags = telegram_signal_risk_flags($signal);
+    if (in_array('promotional', $flags, true)) {
+        $score -= 14;
+    }
+    if (in_array('rumor', $flags, true) || in_array('unverified', $flags, true)) {
+        $score -= 8;
+    }
+    if (in_array('single_channel_spike', $flags, true)) {
+        $score -= 10;
+    }
+    return max(0, min(100, (int)$score));
+}
+
+function telegram_signal_bucket(array $signal): string {
+    $flags = telegram_signal_risk_flags($signal);
+    if (array_intersect($flags, array('rumor', 'promotional', 'unverified', 'single_channel_spike'))) {
+        return 'risk_watch';
+    }
+    if (in_array((string)($signal['signal_type'] ?? ''), array('topic_burst', 'url_burst'), true)) {
+        return 'watchlist_candidate';
+    }
+    return in_array((string)($signal['lifecycle'] ?? telegram_signal_lifecycle($signal)), array('new', 'rising'), true)
+        ? 'new_rising'
+        : 'confirmed_reaction';
+}
+
+function telegram_enrich_signal(array $signal): array {
+    $signal['risk_flags'] = telegram_signal_risk_flags($signal);
+    $signal['lifecycle'] = telegram_signal_lifecycle($signal);
+    $signal['signal_score'] = telegram_signal_score($signal);
+    $signal['analysis_bucket'] = telegram_signal_bucket($signal);
+    return $signal;
+}
+
+function telegram_signal_overview(array $signals, array $counts): array {
+    $buckets = array('new_rising' => 0, 'watchlist_candidate' => 0, 'risk_watch' => 0, 'confirmed_reaction' => 0);
+    $topScore = 0;
+    foreach ($signals as $signal) {
+        $bucket = (string)($signal['analysis_bucket'] ?? 'confirmed_reaction');
+        if (!isset($buckets[$bucket])) {
+            $buckets[$bucket] = 0;
+        }
+        $buckets[$bucket]++;
+        $topScore = max($topScore, (int)($signal['signal_score'] ?? 0));
+    }
+    $recent = (int)($counts['messages_24h'] ?? 0);
+    $previous = (int)($counts['messages_prev_24h'] ?? 0);
+    $ratio = $previous > 0 ? round($recent / $previous, 2) : ($recent > 0 ? (float)$recent : 0.0);
+    $label = ($ratio >= 1.4 && $recent >= 5) ? 'rising' : (($previous > 0 && $ratio <= 0.7) ? 'cooling' : 'steady');
+    return array(
+        'top_score' => $topScore,
+        'new_rising' => $buckets['new_rising'],
+        'watchlist_candidates' => $buckets['watchlist_candidate'],
+        'risk_watch' => $buckets['risk_watch'],
+        'confirmed_reactions' => $buckets['confirmed_reaction'],
+        'recent_24h' => $recent,
+        'previous_24h' => $previous,
+        'velocity_ratio' => $ratio,
+        'velocity_label' => $label,
+    );
+}
+
+function telegram_risk_flag_counts(array $signals): array {
+    $counts = array();
+    foreach ($signals as $signal) {
+        foreach (telegram_signal_risk_flags($signal) as $flag) {
+            $counts[$flag] = isset($counts[$flag]) ? $counts[$flag] + 1 : 1;
+        }
+    }
+    arsort($counts);
+    return array_map(
+        function ($label, $count) { return array('label' => (string)$label, 'count' => (int)$count); },
+        array_keys($counts),
+        array_values($counts)
+    );
+}
+
 function handle_telegram_dashboard(PDO $pdo, array $config): void {
     $channels = table_name($config, 'telegram_channels');
     $messages = table_name($config, 'telegram_messages');
@@ -622,6 +750,7 @@ function handle_telegram_dashboard(PDO $pdo, array $config): void {
         'channels_failed' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $channels . ' WHERE is_public_channel = 1 AND enabled = 1 AND last_error IS NOT NULL AND last_error <> ""'),
         'messages_total' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $messages . ' WHERE deleted_at IS NULL'),
         'messages_24h' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $messages . ' WHERE deleted_at IS NULL AND posted_at >= DATE_SUB(' . $referenceSql . ', INTERVAL 24 HOUR)'),
+        'messages_prev_24h' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $messages . ' WHERE deleted_at IS NULL AND posted_at >= DATE_SUB(' . $referenceSql . ', INTERVAL 48 HOUR) AND posted_at < DATE_SUB(' . $referenceSql . ', INTERVAL 24 HOUR)'),
         'messages_14d' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $messages . ' WHERE deleted_at IS NULL AND posted_at >= DATE_SUB(' . $referenceSql . ', INTERVAL 14 DAY)'),
         'matches_total' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $matches),
         'signals_total' => scalar_int($pdo, 'SELECT COUNT(*) FROM ' . $signals),
@@ -749,8 +878,18 @@ function handle_telegram_dashboard(PDO $pdo, array $config): void {
     $stmt->execute();
     $signalRows = array();
     foreach ($stmt->fetchAll() as $row) {
-        $signalRows[] = public_telegram_signal($row);
+        $signalRows[] = telegram_enrich_signal(public_telegram_signal($row));
     }
+    usort($signalRows, function ($left, $right) {
+        $score = (int)($right['signal_score'] ?? 0) <=> (int)($left['signal_score'] ?? 0);
+        if ($score !== 0) {
+            return $score;
+        }
+        return (float)($right['confidence_score'] ?? 0) <=> (float)($left['confidence_score'] ?? 0);
+    });
+    $newRisingSignals = array_values(array_filter($signalRows, function ($signal) { return ($signal['analysis_bucket'] ?? '') === 'new_rising'; }));
+    $watchlistSignals = array_values(array_filter($signalRows, function ($signal) { return ($signal['analysis_bucket'] ?? '') === 'watchlist_candidate'; }));
+    $riskWatchSignals = array_values(array_filter($signalRows, function ($signal) { return ($signal['analysis_bucket'] ?? '') === 'risk_watch'; }));
 
     $matchTypeRows = array();
     $stmt = $pdo->prepare('SELECT match_type AS label, COUNT(*) AS count FROM ' . $matches . ' GROUP BY match_type ORDER BY count DESC');
@@ -792,7 +931,12 @@ function handle_telegram_dashboard(PDO $pdo, array $config): void {
             array_slice(array_keys($keywordCounts), 0, 30),
             array_slice(array_values($keywordCounts), 0, 30)
         ),
-        'signals' => $signalRows,
+        'signals' => array_slice($signalRows, 0, 12),
+        'signal_overview' => telegram_signal_overview($signalRows, $counts),
+        'new_rising_signals' => array_slice($newRisingSignals, 0, 8),
+        'watchlist_candidates' => array_slice($watchlistSignals, 0, 8),
+        'risk_watch_signals' => array_slice($riskWatchSignals, 0, 8),
+        'risk_flag_counts' => telegram_risk_flag_counts($signalRows),
         'match_type_counts' => $matchTypeRows,
         'quality_bands' => array_map(
             function ($label, $count) { return array('label' => (string)$label, 'count' => (int)$count); },
