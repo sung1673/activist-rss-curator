@@ -26,13 +26,20 @@
     .metric strong { display:block; color:var(--accent-deep); font-size:24px; line-height:1.15; }
     .section { border-top:2px solid var(--ink); margin-top:28px; padding-top:18px; }
     .section h2 { margin:0 0 14px; font-family:Georgia,"Times New Roman",serif; font-size:28px; line-height:1.1; }
+    .analysis-tabs { display:flex; flex-wrap:wrap; gap:7px; margin:-2px 0 14px; }
+    .analysis-tab { border:1px solid var(--line); border-radius:999px; background:var(--surface); color:var(--muted); padding:7px 11px; font:inherit; font-size:12px; font-weight:900; cursor:pointer; }
+    .analysis-tab.is-active { border-color:var(--accent); background:var(--accent-soft); color:var(--accent-deep); box-shadow:inset 0 0 0 1px rgba(112,55,224,.24); }
+    .analysis-period { display:none; }
+    .analysis-period.is-active { display:grid; gap:12px; }
+    .analysis-period__meta { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; color:var(--muted); font-size:12px; }
+    .analysis-period__meta strong { color:var(--accent-deep); }
     .analysis-grid { display:grid; grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr); gap:16px; align-items:start; }
     .analysis-panel { border:1px solid var(--line); background:var(--surface); padding:14px; box-shadow:0 14px 32px rgba(70,43,102,.05); }
     .analysis-panel h3 { margin:0 0 7px; font-size:16px; color:var(--accent-deep); }
     .analysis-panel p { margin:0 0 12px; color:var(--muted); font-size:12px; line-height:1.45; }
     .keyword-cloud { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
     .keyword-chip { display:inline-flex; align-items:center; gap:5px; border:1px solid rgba(112,55,224,.16); border-radius:999px; padding:5px 9px; background:var(--accent-soft); color:var(--accent-deep); font-weight:900; line-height:1; }
-    .keyword-chip small { color:var(--muted); font-size:10px; font-weight:850; }
+    .keyword-chip small { color:var(--muted); font-size:10px; font-weight:850; white-space:nowrap; }
     .keyword-chip--l1 { font-size:11px; opacity:.76; }
     .keyword-chip--l2 { font-size:12px; opacity:.86; }
     .keyword-chip--l3 { font-size:13px; }
@@ -40,11 +47,12 @@
     .keyword-chip--l5 { font-size:17px; background:#ece3ff; }
     .keyword-chip--l6 { font-size:20px; background:#e5d8ff; border-color:rgba(112,55,224,.32); }
     .heatmap { display:grid; gap:7px; overflow-x:auto; padding-bottom:2px; }
-    .heatmap__row { min-width:520px; display:grid; grid-template-columns:minmax(142px,1.15fr) repeat(4,minmax(58px,.62fr)); gap:6px; align-items:stretch; }
+    .heatmap__row { min-width:620px; display:grid; grid-template-columns:minmax(164px,1.2fr) repeat(4,minmax(82px,.62fr)); gap:6px; align-items:stretch; }
     .heatmap__row--head { color:var(--muted); font-size:11px; font-weight:900; }
     .heatmap__name { display:grid; gap:2px; border:1px solid var(--line); background:#fff; padding:7px 8px; min-height:40px; }
     .heatmap__name strong { font-size:13px; line-height:1.2; word-break:keep-all; }
     .heatmap__name span { color:var(--muted); font-size:10.5px; }
+    .heatmap__name em { color:#8a8195; font-size:10px; line-height:1.2; font-style:normal; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .heatmap__bucket, .heatmap__cell { display:flex; align-items:center; justify-content:center; min-height:40px; border:1px solid var(--line); background:#fff; border-radius:7px; text-align:center; }
     .heatmap__bucket { padding:4px; }
     .heatmap__cell { color:var(--accent-deep); font-size:12px; font-weight:950; }
@@ -82,9 +90,13 @@
       .metric-grid, .analysis-grid, .signal-grid, .story-grid, .split { grid-template-columns:1fr; }
       .keyword-chip--l5 { font-size:15px; }
       .keyword-chip--l6 { font-size:17px; }
-      .heatmap__row { min-width:390px; grid-template-columns:minmax(118px,1.1fr) repeat(4,52px); gap:5px; }
+      .analysis-tabs { gap:6px; }
+      .analysis-tab { padding:7px 10px; }
+      .analysis-period__meta { display:grid; gap:4px; }
+      .heatmap__row { min-width:520px; grid-template-columns:minmax(132px,1.1fr) repeat(4,76px); gap:5px; }
       .heatmap__name strong { font-size:12px; }
-      .heatmap__bucket, .heatmap__cell { min-height:34px; font-size:10px; }
+      .heatmap__name em { display:none; }
+      .heatmap__bucket, .heatmap__cell { min-height:36px; font-size:10px; }
       .story-card h3 { font-size:16px; }
     }
   </style>
@@ -94,7 +106,7 @@
     <header class="hero">
       <div class="brand-row">
         <a class="bside-logo bside-logo--top" href="https://bside.ai" aria-label="BSIDE Korea 홈페이지"><svg fill="currentColor" viewBox="0 0 57 20" class="bside-logo__image" aria-hidden="true"><path fill="currentColor" d="M7.11306 19.3232C5.87526 19.3232 4.76917 19.032 3.78817 18.4496C2.80716 17.8673 2.03026 17.0798 1.46404 16.0738C0.891241 15.0745 0.601547 13.9429 0.588379 12.6855V1.80579C0.588379 1.44181 0.700305 1.14401 0.930744 0.925618C1.16118 0.700612 1.45087 0.594727 1.79982 0.594727C2.14877 0.594727 2.45821 0.707229 2.67549 0.925618C2.89934 1.15063 3.00467 1.44181 3.00467 1.80579V8.25158C3.55773 7.58316 4.22929 7.05372 5.01279 6.66328C5.79626 6.27284 6.65217 6.08093 7.58709 6.08093C8.73929 6.08093 9.77956 6.37211 10.6947 6.95446C11.6099 7.53684 12.3341 8.32437 12.8674 9.31705C13.4007 10.3097 13.6641 11.4347 13.6641 12.6921C13.6641 13.9495 13.3744 15.0812 12.795 16.0805C12.2156 17.0798 11.4387 17.8739 10.4577 18.4563C9.47667 19.0386 8.35741 19.3298 7.11306 19.3298V19.3232ZM7.11306 17.179C7.92288 17.179 8.64053 16.9871 9.27259 16.5967C9.90464 16.2062 10.405 15.6701 10.7803 14.9885C11.149 14.3069 11.3399 13.5392 11.3399 12.6988C11.3399 11.8583 11.1556 11.0774 10.7803 10.409C10.4116 9.74058 9.90464 9.21116 9.27259 8.82069C8.64053 8.43025 7.91629 8.23831 7.11306 8.23831C6.30982 8.23831 5.60532 8.43025 4.9667 8.82069C4.32806 9.21116 3.82109 9.74058 3.45897 10.409C3.09685 11.0774 2.91251 11.8384 2.91251 12.6988C2.91251 13.5591 3.09685 14.3069 3.45897 14.9885C3.82109 15.6701 4.32806 16.2128 4.9667 16.5967C5.60532 16.9871 6.32297 17.179 7.11306 17.179Z"></path><path fill="currentColor" d="M19.6288 19.3236C18.5227 19.3236 17.4956 19.1515 16.5541 18.814C15.6126 18.4765 14.8818 18.0397 14.355 17.5103C14.118 17.2588 14.0193 16.9676 14.0588 16.6367C14.0983 16.3125 14.2497 16.0411 14.5196 15.836C14.8357 15.5845 15.1517 15.472 15.4546 15.5117C15.764 15.5514 16.0273 15.6904 16.2512 15.9286C16.5211 16.233 16.9491 16.511 17.5482 16.7757C18.1408 17.0404 18.8058 17.1728 19.53 17.1728C20.4452 17.1728 21.1496 17.0206 21.6303 16.7161C22.1109 16.4117 22.3611 16.0213 22.3808 15.5448C22.4006 15.0683 22.1702 14.6514 21.7027 14.3006C21.2352 13.9499 20.3859 13.6653 19.1481 13.4403C17.5482 13.1227 16.3895 12.6462 15.6718 12.0108C14.9542 11.3756 14.5921 10.5946 14.5921 9.67476C14.5921 8.86076 14.8291 8.19238 15.3031 7.65632C15.7772 7.12029 16.3895 6.72323 17.1335 6.46511C17.8774 6.20041 18.6543 6.06805 19.4576 6.06805C20.5044 6.06805 21.4262 6.2335 22.236 6.571C23.0458 6.90853 23.6845 7.36514 24.1585 7.95414C24.3823 8.20561 24.4811 8.47694 24.4679 8.75488C24.4548 9.03285 24.3165 9.27108 24.0663 9.45638C23.8161 9.63505 23.5133 9.688 23.1643 9.62182C22.8154 9.55564 22.5257 9.41667 22.2887 9.19167C21.8936 8.80785 21.4657 8.54973 21.0048 8.40414C20.5439 8.25855 20.0172 8.19238 19.4115 8.19238C18.7136 8.19238 18.1276 8.3115 17.6404 8.54973C17.1598 8.78797 16.9162 9.13873 16.9162 9.60197C16.9162 9.88653 16.9886 10.1446 17.14 10.3763C17.2915 10.6079 17.5878 10.813 18.0289 10.9983C18.47 11.1836 19.1218 11.3623 19.9777 11.5344C21.1628 11.7726 22.1043 12.0771 22.7891 12.441C23.4803 12.805 23.9741 13.2352 24.2704 13.7183C24.5733 14.2014 24.7247 14.7639 24.7247 15.3992C24.7247 16.1338 24.5338 16.7889 24.1453 17.3779C23.7569 17.9669 23.1907 18.4368 22.4335 18.7875C21.683 19.1383 20.7414 19.3103 19.6222 19.3103L19.6288 19.3236Z"></path><path fill="currentColor" d="M26.8648 4.04907C26.4369 4.04907 26.0682 3.89686 25.7587 3.58583C25.4493 3.27478 25.2979 2.90419 25.2979 2.47403C25.2979 2.04388 25.4493 1.67327 25.7587 1.36223C26.0682 1.0512 26.4369 0.898987 26.8648 0.898987C27.2928 0.898987 27.6615 1.0512 27.9709 1.36223C28.2804 1.67327 28.4318 2.04388 28.4318 2.47403C28.4318 2.90419 28.2804 3.27478 27.9709 3.58583C27.6615 3.89686 27.2928 4.04907 26.8648 4.04907ZM26.8648 19.2304C26.5159 19.2304 26.2262 19.1179 25.9958 18.8862C25.7653 18.6546 25.6534 18.3635 25.6534 18.0127V7.39107C25.6534 7.0271 25.7653 6.7293 25.9958 6.51089C26.2262 6.28589 26.5159 6.18001 26.8648 6.18001C27.2138 6.18001 27.5232 6.29251 27.7405 6.51089C27.9644 6.73592 28.0697 7.0271 28.0697 7.39107V18.0127C28.0697 18.3635 27.9578 18.6546 27.7405 18.8862C27.5166 19.1179 27.2269 19.2304 26.8648 19.2304Z"></path><path fill="currentColor" d="M36.1018 19.3233C34.8641 19.3233 33.758 19.0322 32.7638 18.4498C31.7762 17.8674 30.9927 17.0799 30.4133 16.074C29.8341 15.0747 29.5444 13.9431 29.5444 12.6857C29.5444 11.4283 29.8077 10.3032 30.3409 9.31055C30.8741 8.31787 31.5918 7.53038 32.5136 6.94799C33.4288 6.36564 34.4691 6.07443 35.6212 6.07443C36.5562 6.07443 37.4186 6.26635 38.2088 6.65682C38.9988 7.04726 39.6638 7.57667 40.2036 8.24508V1.79932C40.2036 1.43534 40.3156 1.13754 40.5462 0.919148C40.7765 0.694142 41.0662 0.588257 41.415 0.588257C41.7641 0.588257 42.0736 0.70076 42.2909 0.919148C42.5147 1.14415 42.62 1.43534 42.62 1.79932V12.6791C42.62 13.9364 42.3303 15.0681 41.7509 16.0674C41.1715 17.0667 40.3947 17.8608 39.4136 18.4432C38.4327 19.0255 37.3265 19.3167 36.0888 19.3167L36.1018 19.3233ZM36.1018 17.1792C36.9118 17.1792 37.6294 16.9873 38.2615 16.5968C38.8936 16.2063 39.3938 15.6703 39.7559 14.9887C40.118 14.307 40.3024 13.5393 40.3024 12.6989C40.3024 11.8584 40.118 11.0775 39.7559 10.4091C39.3938 9.74073 38.8936 9.21129 38.2615 8.82085C37.6294 8.4304 36.905 8.23846 36.1018 8.23846C35.2986 8.23846 34.5941 8.4304 33.9556 8.82085C33.3168 9.21129 32.81 9.74073 32.4347 10.4091C32.0594 11.0775 31.875 11.8386 31.875 12.6989C31.875 13.5592 32.0594 14.307 32.4347 14.9887C32.8033 15.6703 33.3103 16.213 33.9556 16.5968C34.5941 16.9873 35.3118 17.1792 36.1018 17.1792Z"></path><path fill="currentColor" d="M50.6328 19.3231C49.3157 19.3231 48.1504 19.0386 47.1301 18.476C46.1095 17.9135 45.3063 17.1326 44.7334 16.14C44.154 15.1473 43.8643 14.0024 43.8643 12.7186C43.8643 11.4347 44.1343 10.2633 44.6807 9.27064C45.2272 8.27796 45.9843 7.49708 46.9457 6.93455C47.9134 6.37205 49.0195 6.08746 50.2704 6.08746C51.5216 6.08746 52.5684 6.36543 53.4504 6.90808C54.3393 7.45737 55.011 8.21179 55.4784 9.17799C55.9457 10.1442 56.1763 11.2494 56.1763 12.5068C56.1763 12.8112 56.071 13.0627 55.8669 13.2612C55.6628 13.4597 55.3995 13.559 55.0834 13.559H45.5169V11.6531H55.011L54.0366 12.3215C54.0234 11.5273 53.8654 10.8126 53.5625 10.1839C53.2596 9.55523 52.8316 9.05888 52.2787 8.6949C51.7254 8.3309 51.054 8.14561 50.264 8.14561C49.3619 8.14561 48.5916 8.34414 47.9463 8.74123C47.3078 9.13829 46.8204 9.68096 46.4848 10.3758C46.1554 11.0707 45.9843 11.8516 45.9843 12.7252C45.9843 13.5987 46.1819 14.3796 46.5769 15.0613C46.9719 15.7429 47.5184 16.2856 48.2163 16.6826C48.9143 17.0797 49.711 17.2782 50.6128 17.2782C51.1001 17.2782 51.6072 17.1856 52.1207 17.0069C52.6343 16.8282 53.049 16.6098 53.3648 16.3716C53.6019 16.1995 53.8587 16.1069 54.1354 16.0936C54.4119 16.087 54.6554 16.1664 54.8595 16.3451C55.1295 16.5833 55.2678 16.8481 55.2875 17.1326C55.3007 17.4172 55.1754 17.6687 54.9057 17.8738C54.3657 18.304 53.7007 18.6547 52.8975 18.9261C52.1007 19.1974 51.3372 19.3298 50.6063 19.3298L50.6328 19.3231Z"></path></svg><span class="bside-logo__label">DAILY NEWS</span></a>
-        <div class="edition">2026-05-08 17:40 KST<br>2026-05-09 17:40 KST</div>
+        <div class="edition">2026-05-08 18:36 KST<br>2026-05-09 18:36 KST</div>
       </div>
       <h1>Telegram 데일리</h1>
       <p class="dek">공개 금융·증권 Telegram 채널에서 포착된 시장 언급, 기사 공유, 키워드 확산을 주주·자본시장 데일리의 보조 신호로 정리했습니다. 투자 추천이 아니라 공개 출처 기반의 시장 반응 현황입니다.</p>
@@ -104,190 +116,1024 @@
         <a href="telegram-admin.html">Telegram 수집 현황</a>
       </div>
       <div class="metric-grid">
-        <div class="metric"><span>수집 채널</span><strong>62</strong></div>
-        <div class="metric"><span>Telegram 메시지</span><strong>2128</strong></div>
+        <div class="metric"><span>수집 채널</span><strong>60</strong></div>
+        <div class="metric"><span>Telegram 메시지</span><strong>1938</strong></div>
         <div class="metric"><span>기사 연결 이슈</span><strong>4</strong></div>
         <div class="metric"><span>시장 언급 신호</span><strong>12</strong></div>
       </div>
     </header>
     <section class="section">
       <h2>Telegram 분석</h2>
-      <div class="analysis-grid">
-        <article class="analysis-panel">
-          <h3>키워드 클라우드</h3>
-          <p>수집 메시지와 기사 연결 신호에서 반복되는 표현을 추렸습니다. 숫자는 언급 메시지 기준 빈도입니다.</p>
-          <div class="keyword-cloud"><span class="keyword-chip keyword-chip--l6" title="161건 · 31채널">미국<small>161</small></span>
-<span class="keyword-chip keyword-chip--l5" title="142건 · 19채널">이란<small>142</small></span>
-<span class="keyword-chip keyword-chip--l5" title="140건 · 17채널">공급<small>140</small></span>
-<span class="keyword-chip keyword-chip--l5" title="135건 · 21채널">트럼프<small>135</small></span>
-<span class="keyword-chip keyword-chip--l5" title="131건 · 29채널">반도체<small>131</small></span>
-<span class="keyword-chip keyword-chip--l5" title="129건 · 10채널">부족<small>129</small></span>
-<span class="keyword-chip keyword-chip--l4" title="103건 · 19채널">수요<small>103</small></span>
-<span class="keyword-chip keyword-chip--l3" title="87건 · 25채널">상승<small>87</small></span>
-<span class="keyword-chip keyword-chip--l3" title="84건 · 22채널">최대<small>84</small></span>
-<span class="keyword-chip keyword-chip--l3" title="83건 · 17채널">생산<small>83</small></span>
-<span class="keyword-chip keyword-chip--l3" title="83건 · 4채널">속보<small>83</small></span>
-<span class="keyword-chip keyword-chip--l3" title="79건 · 8채널">급증<small>79</small></span>
-<span class="keyword-chip keyword-chip--l3" title="79건 · 18채널">가격<small>79</small></span>
-<span class="keyword-chip keyword-chip--l3" title="79건 · 22채널">실적<small>79</small></span>
-<span class="keyword-chip keyword-chip--l3" title="76건 · 17채널">애플<small>76</small></span>
-<span class="keyword-chip keyword-chip--l3" title="73건 · 18채널">달러<small>73</small></span>
-<span class="keyword-chip keyword-chip--l3" title="72건 · 14채널">데이터<small>72</small></span>
-<span class="keyword-chip keyword-chip--l2" title="62건 · 21채널">분기<small>62</small></span>
-<span class="keyword-chip keyword-chip--l2" title="60건 · 15채널">삼성전자<small>60</small></span>
-<span class="keyword-chip keyword-chip--l2" title="59건 · 20채널">발표<small>59</small></span>
-<span class="keyword-chip keyword-chip--l2" title="59건 · 20채널">확대<small>59</small></span>
-<span class="keyword-chip keyword-chip--l2" title="56건 · 18채널">글로벌<small>56</small></span>
-<span class="keyword-chip keyword-chip--l2" title="55건 · 18채널">인텔<small>55</small></span>
-<span class="keyword-chip keyword-chip--l2" title="53건 · 12채널">호르무즈<small>53</small></span>
-<span class="keyword-chip keyword-chip--l2" title="52건 · 15채널">메모리<small>52</small></span>
-<span class="keyword-chip keyword-chip--l2" title="50건 · 14채널">세계<small>50</small></span>
-<span class="keyword-chip keyword-chip--l2" title="50건 · 12채널">있다고<small>50</small></span>
-<span class="keyword-chip keyword-chip--l2" title="49건 · 10채널">정부<small>49</small></span>
-<span class="keyword-chip keyword-chip--l2" title="48건 · 18채널">전망<small>48</small></span>
-<span class="keyword-chip keyword-chip--l2" title="47건 · 16채널">사상<small>47</small></span>
-<span class="keyword-chip keyword-chip--l2" title="46건 · 17채널">있다는<small>46</small></span>
-<span class="keyword-chip keyword-chip--l2" title="46건 · 10채널">단독<small>46</small></span>
-<span class="keyword-chip keyword-chip--l2" title="45건 · 1채널">인용하여<small>45</small></span>
-<span class="keyword-chip keyword-chip--l2" title="45건 · 11채널">따른<small>45</small></span></div>
-        </article>
-        <article class="analysis-panel">
-          <h3>종목 언급 히트맵</h3>
-          <p>Telegram 메시지에서 포착된 회사·티커 후보를 수집 기간의 시간대별 언급량으로 표시합니다.</p>
-          <div class="heatmap" role="table" aria-label="종목 언급 히트맵">
-            <div class="heatmap__row heatmap__row--head" role="row">
-              <span>종목</span>
-              <span class="heatmap__bucket">17:40-23:40</span><span class="heatmap__bucket">05.08 23:40-05.09 05:40</span><span class="heatmap__bucket">05:40-11:40</span><span class="heatmap__bucket">11:40-17:40</span>
+      <div class="analysis-tabs" role="tablist" aria-label="Telegram 분석 기간">
+        <button type="button" class="analysis-tab is-active" data-analysis-period="1d">1일</button>
+<button type="button" class="analysis-tab" data-analysis-period="3d">3일</button>
+<button type="button" class="analysis-tab" data-analysis-period="7d">일주일</button>
+<button type="button" class="analysis-tab" data-analysis-period="30d">한달</button>
+      </div>
+
+            <div class="analysis-period is-active" data-analysis-panel="1d">
+              <div class="analysis-period__meta">
+                <strong>1일 분석 기간</strong>
+                <span>2026-05-08 18:36 KST - 2026-05-09 18:36 KST</span>
+                <span>1938건 · 60채널</span>
+              </div>
+              <div class="analysis-grid">
+                <article class="analysis-panel">
+                  <h3>키워드 클라우드</h3>
+                  <p>수집 메시지와 기사 연결 신호에서 반복되는 표현을 추렸습니다. 숫자는 언급 메시지와 채널 기준입니다.</p>
+                  <div class="keyword-cloud"><span class="keyword-chip keyword-chip--l6" title="152건 · 30채널 · 석학들의 마켓 (인)사이트, 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, [주식픽!] - 가장 빠른 주식뉴스">미국<small>152건 · 30채널</small></span>
+<span class="keyword-chip keyword-chip--l5" title="142건 · 19채널 · [주식픽!] - 가장 빠른 주식뉴스, 단독 &amp; 속보 뉴스 콜렉터, Polaristimes">이란<small>142건 · 19채널</small></span>
+<span class="keyword-chip keyword-chip--l5" title="136건 · 21채널 · [주식픽!] - 가장 빠른 주식뉴스, 단독 &amp; 속보 뉴스 콜렉터, 세상의 (부)족한 것들에 대해서">트럼프<small>136건 · 21채널</small></span>
+<span class="keyword-chip keyword-chip--l5" title="124건 · 14채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 그로쓰리서치(Growth Research) [독립리서치]">공급<small>124건 · 14채널</small></span>
+<span class="keyword-chip keyword-chip--l4" title="121건 · 28채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 단독 &amp; 속보 뉴스 콜렉터">반도체<small>121건 · 28채널</small></span>
+<span class="keyword-chip keyword-chip--l4" title="119건 · 9채널 · 세상의 (부)족한 것들에 대해서, 매일경제TV MBN골드 김태윤 대표 무료 주식 채널, 메모장">부족<small>119건 · 9채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="87건 · 17채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, [메리츠 Tech 김선우, 양승수, 김동관]">수요<small>87건 · 17채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="83건 · 22채널 · 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서, 머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈">실적<small>83건 · 22채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="81건 · 24채널 · 단독 &amp; 속보 뉴스 콜렉터, 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트">상승<small>81건 · 24채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="78건 · 17채널 · 세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터, [주식픽!] - 가장 빠른 주식뉴스">애플<small>78건 · 17채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="77건 · 17채널 · 세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터, [주식픽!] - 가장 빠른 주식뉴스">생산<small>77건 · 17채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="69건 · 18채널 · 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서">달러<small>69건 · 18채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="69건 · 14채널 · 석학들의 마켓 (인)사이트, 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 세상의 (부)족한 것들에 대해서">데이터<small>69건 · 14채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="67건 · 18채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, [메리츠 Tech 김선우, 양승수, 김동관]">가격<small>67건 · 18채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="67건 · 8채널 · 세상의 (부)족한 것들에 대해서, [주식픽!] - 가장 빠른 주식뉴스, 매일경제TV MBN골드 김태윤 대표 무료 주식 채널">급증<small>67건 · 8채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="57건 · 18채널 · 단독 &amp; 속보 뉴스 콜렉터, 세상의 (부)족한 것들에 대해서, 머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈">인텔<small>57건 · 18채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="56건 · 21채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈">분기<small>56건 · 21채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="55건 · 14채널 · 단독 &amp; 속보 뉴스 콜렉터, 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트">삼성전자<small>55건 · 14채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="53건 · 20채널 · 세상의 (부)족한 것들에 대해서, [주식픽!] - 가장 빠른 주식뉴스, [메리츠 Tech 김선우, 양승수, 김동관]">확대<small>53건 · 20채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="50건 · 18채널 · 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서, 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel">글로벌<small>50건 · 18채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="49건 · 12채널 · [주식픽!] - 가장 빠른 주식뉴스, 세상의 (부)족한 것들에 대해서, Polaristimes">호르무즈<small>49건 · 12채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="45건 · 14채널 · 세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치], [메리츠 Tech 김선우, 양승수, 김동관]">메모리<small>45건 · 14채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="44건 · 10채널 · 세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터, [주식픽!] - 가장 빠른 주식뉴스">정부<small>44건 · 10채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="44건 · 18채널 · [주식픽!] - 가장 빠른 주식뉴스, [메리츠 Tech 김선우, 양승수, 김동관], 세상의 (부)족한 것들에 대해서">전망<small>44건 · 18채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="43건 · 12채널 · [주식픽!] - 가장 빠른 주식뉴스, 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 세상의 (부)족한 것들에 대해서">중국<small>43건 · 12채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="43건 · 19채널 · 인포맥스, 단독 &amp; 속보 뉴스 콜렉터, 석학들의 마켓 (인)사이트">고용<small>43건 · 19채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="43건 · 13채널 · 세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터, 종목투자전략 채널_서울경제">코스피<small>43건 · 13채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="42건 · 18채널 · 석학들의 마켓 (인)사이트, 단독 &amp; 속보 뉴스 콜렉터, [주식픽!] - 가장 빠른 주식뉴스">급등<small>42건 · 18채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="41건 · 7채널 · [주식픽!] - 가장 빠른 주식뉴스, 단독 &amp; 속보 뉴스 콜렉터, 세상의 (부)족한 것들에 대해서">제재<small>41건 · 7채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="41건 · 13채널 · [주식픽!] - 가장 빠른 주식뉴스, 단독 &amp; 속보 뉴스 콜렉터, 세상의 (부)족한 것들에 대해서">합의<small>41건 · 13채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="41건 · 14채널 · 세상의 (부)족한 것들에 대해서, [주식픽!] - 가장 빠른 주식뉴스, 단독 &amp; 속보 뉴스 콜렉터">tsmc<small>41건 · 14채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="41건 · 17채널 · 석학들의 마켓 (인)사이트, 단독 &amp; 속보 뉴스 콜렉터, 세상의 (부)족한 것들에 대해서">주가<small>41건 · 17채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="40건 · 15채널 · 단독 &amp; 속보 뉴스 콜렉터, 세상의 (부)족한 것들에 대해서, 머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈">사상<small>40건 · 15채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="40건 · 5채널 · [주식픽!] - 가장 빠른 주식뉴스, 단독 &amp; 속보 뉴스 콜렉터, 투자의 빅 픽처를 위한 퍼즐 한 조각">정상회담<small>40건 · 5채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="40건 · 17채널 · 석학들의 마켓 (인)사이트, 매일경제TV MBN골드 김태윤 대표 무료 주식 채널, [메리츠 Tech 김선우, 양승수, 김동관]">성장<small>40건 · 17채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="39건 · 15채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 그로쓰리서치(Growth Research) [독립리서치]">인프라<small>39건 · 15채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="39건 · 3채널 · 석학들의 마켓 (인)사이트, [메리츠 Tech 김선우, 양승수, 김동관], 인포마켓 infomarket">코멘트<small>39건 · 3채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="37건 · 15채널 · 석학들의 마켓 (인)사이트, 인포마켓 infomarket, 그로쓰리서치(Growth Research) [독립리서치]">기술<small>37건 · 15채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="36건 · 18채널 · 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트">지난<small>36건 · 18채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="36건 · 11채널 · 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 석학들의 마켓 (인)사이트, 미국 제약-바이오 주식/약장수">동안<small>36건 · 11채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="36건 · 10채널 · [주식픽!] - 가장 빠른 주식뉴스, 인포마켓 infomarket, 석학들의 마켓 (인)사이트">체결<small>36건 · 10채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="36건 · 17채널 · 석학들의 마켓 (인)사이트, 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 세상의 (부)족한 것들에 대해서">위해<small>36건 · 17채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="36건 · 14채널 · 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서, 급등일보 미국주식🇺🇸 속보·리서치">에너지<small>36건 · 14채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="36건 · 6채널 · 석학들의 마켓 (인)사이트, 그로쓰리서치(Growth Research) [독립리서치], 몰?루">활용<small>36건 · 6채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="35건 · 9채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 키움증권 미국주식 톡톡">인공지능<small>35건 · 9채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="35건 · 17채널 · 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터">계약<small>35건 · 17채널</small></span></div>
+                </article>
+                <article class="analysis-panel">
+                  <h3>종목 언급 히트맵</h3>
+                  <p>장전·오전·장중 후반·이후 구간별로 회사·티커 후보 언급량을 집계했습니다.</p>
+                  <div class="heatmap" role="table" aria-label="종목 언급 히트맵">
+                    <div class="heatmap__row heatmap__row--head" role="row">
+                      <span>종목</span>
+                      <span class="heatmap__bucket">장전<br>06:00-09:00</span><span class="heatmap__bucket">오전<br>09:00-12:00</span><span class="heatmap__bucket">장중 후반<br>12:00-15:30</span><span class="heatmap__bucket">이후<br>15:30-익일 06:00</span>
+                    </div>
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>삼성전자</strong>
+                <span>65건 · 16채널</span>
+                <em>단독 &amp; 속보 뉴스 콜렉터, 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l3" aria-label="삼성전자 장전 06:00-09:00 16건">16</span><span class="heatmap__cell heatmap__cell--l3" aria-label="삼성전자 오전 09:00-12:00 14건">14</span><span class="heatmap__cell heatmap__cell--l2" aria-label="삼성전자 장중 후반 12:00-15:30 11건">11</span><span class="heatmap__cell heatmap__cell--l5" aria-label="삼성전자 이후 15:30-익일 06:00 24건">24</span>
             </div>
 
-        <div class="heatmap__row">
-          <div class="heatmap__name">
-            <strong>현대차</strong>
-            <span>32건 · 7채널</span>
-          </div>
-          <span class="heatmap__cell heatmap__cell--l1" aria-label="현대차 17:40-23:40 5건">5</span><span class="heatmap__cell heatmap__cell--l2" aria-label="현대차 05.08 23:40-05.09 05:40 8건">8</span><span class="heatmap__cell heatmap__cell--l5" aria-label="현대차 05:40-11:40 18건">18</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차 11:40-17:40 1건">1</span>
-        </div>
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>현대차</strong>
+                <span>31건 · 7채널</span>
+                <em>석학들의 마켓 (인)사이트, 단독 &amp; 속보 뉴스 콜렉터, [주식픽!] - 가장 빠른 주식뉴스</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l2" aria-label="현대차 장전 06:00-09:00 7건">7</span><span class="heatmap__cell heatmap__cell--l2" aria-label="현대차 오전 09:00-12:00 11건">11</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차 장중 후반 12:00-15:30 1건">1</span><span class="heatmap__cell heatmap__cell--l2" aria-label="현대차 이후 15:30-익일 06:00 12건">12</span>
+            </div>
 
 
-        <div class="heatmap__row">
-          <div class="heatmap__name">
-            <strong>한화</strong>
-            <span>19건 · 6채널</span>
-          </div>
-          <span class="heatmap__cell heatmap__cell--l1" aria-label="한화 17:40-23:40 3건">3</span><span class="heatmap__cell heatmap__cell--l1" aria-label="한화 05.08 23:40-05.09 05:40 4건">4</span><span class="heatmap__cell heatmap__cell--l2" aria-label="한화 05:40-11:40 7건">7</span><span class="heatmap__cell heatmap__cell--l1" aria-label="한화 11:40-17:40 5건">5</span>
-        </div>
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>SK하이닉스</strong>
+                <span>30건 · 16채널</span>
+                <em>세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치], 석학들의 마</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l2" aria-label="SK하이닉스 장전 06:00-09:00 8건">8</span><span class="heatmap__cell heatmap__cell--l2" aria-label="SK하이닉스 오전 09:00-12:00 8건">8</span><span class="heatmap__cell heatmap__cell--l1" aria-label="SK하이닉스 장중 후반 12:00-15:30 4건">4</span><span class="heatmap__cell heatmap__cell--l2" aria-label="SK하이닉스 이후 15:30-익일 06:00 10건">10</span>
+            </div>
 
 
-        <div class="heatmap__row">
-          <div class="heatmap__name">
-            <strong>KT&amp;G</strong>
-            <span>10건 · 1채널</span>
-          </div>
-          <span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 17:40-23:40 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 05.08 23:40-05.09 05:40 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 05:40-11:40 5건">5</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 11:40-17:40 1건">1</span>
-        </div>
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>한화</strong>
+                <span>18건 · 6채널</span>
+                <em>석학들의 마켓 (인)사이트, [주식픽!] - 가장 빠른 주식뉴스, 세상의 (부)족한 것들에 대해서</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="한화 장전 06:00-09:00 5건">5</span><span class="heatmap__cell heatmap__cell--l1" aria-label="한화 오전 09:00-12:00 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="한화 장중 후반 12:00-15:30 5건">5</span><span class="heatmap__cell heatmap__cell--l1" aria-label="한화 이후 15:30-익일 06:00 6건">6</span>
+            </div>
 
 
-        <div class="heatmap__row">
-          <div class="heatmap__name">
-            <strong>HD현대</strong>
-            <span>9건 · 7채널</span>
-          </div>
-          <span class="heatmap__cell heatmap__cell--l2" aria-label="HD현대 17:40-23:40 6건">6</span><span class="heatmap__cell heatmap__cell--l0" aria-label="HD현대 05.08 23:40-05.09 05:40 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="HD현대 05:40-11:40 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="HD현대 11:40-17:40 1건">1</span>
-        </div>
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>KT&amp;G</strong>
+                <span>10건 · 1채널</span>
+                <em>석학들의 마켓 (인)사이트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 장전 06:00-09:00 3건">3</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 오전 09:00-12:00 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 장중 후반 12:00-15:30 1건">1</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 이후 15:30-익일 06:00 4건">4</span>
+            </div>
 
 
-        <div class="heatmap__row">
-          <div class="heatmap__name">
-            <strong>KT</strong>
-            <span>5건 · 5채널</span>
-          </div>
-          <span class="heatmap__cell heatmap__cell--l1" aria-label="KT 17:40-23:40 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT 05.08 23:40-05.09 05:40 3건">3</span><span class="heatmap__cell heatmap__cell--l0" aria-label="KT 05:40-11:40 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="KT 11:40-17:40 0건"></span>
-        </div>
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>HD현대</strong>
+                <span>5건 · 4채널</span>
+                <em>석학들의 마켓 (인)사이트, 몰?루, 세상의 (부)족한 것들에 대해서</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="HD현대 장전 06:00-09:00 1건">1</span><span class="heatmap__cell heatmap__cell--l1" aria-label="HD현대 오전 09:00-12:00 1건">1</span><span class="heatmap__cell heatmap__cell--l1" aria-label="HD현대 장중 후반 12:00-15:30 1건">1</span><span class="heatmap__cell heatmap__cell--l1" aria-label="HD현대 이후 15:30-익일 06:00 2건">2</span>
+            </div>
 
 
-        <div class="heatmap__row">
-          <div class="heatmap__name">
-            <strong>현대차그룹</strong>
-            <span>5건 · 3채널</span>
-          </div>
-          <span class="heatmap__cell heatmap__cell--l0" aria-label="현대차그룹 17:40-23:40 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차그룹 05.08 23:40-05.09 05:40 1건">1</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차그룹 05:40-11:40 4건">4</span><span class="heatmap__cell heatmap__cell--l0" aria-label="현대차그룹 11:40-17:40 0건"></span>
-        </div>
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>기아</strong>
+                <span>5건 · 4채널</span>
+                <em>단독 &amp; 속보 뉴스 콜렉터, 산업뉴스 채널_서울경제, 국제뉴스 채널_서울경제</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l0" aria-label="기아 장전 06:00-09:00 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="기아 오전 09:00-12:00 3건">3</span><span class="heatmap__cell heatmap__cell--l0" aria-label="기아 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="기아 이후 15:30-익일 06:00 2건">2</span>
+            </div>
 
 
-        <div class="heatmap__row">
-          <div class="heatmap__name">
-            <strong>블루산업</strong>
-            <span>5건 · 2채널</span>
-          </div>
-          <span class="heatmap__cell heatmap__cell--l1" aria-label="블루산업 17:40-23:40 4건">4</span><span class="heatmap__cell heatmap__cell--l1" aria-label="블루산업 05.08 23:40-05.09 05:40 1건">1</span><span class="heatmap__cell heatmap__cell--l0" aria-label="블루산업 05:40-11:40 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="블루산업 11:40-17:40 0건"></span>
-        </div>
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>현대차그룹</strong>
+                <span>5건 · 3채널</span>
+                <em>단독 &amp; 속보 뉴스 콜렉터, 산업뉴스 채널_서울경제, 국제뉴스 채널_서울경제</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l0" aria-label="현대차그룹 장전 06:00-09:00 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차그룹 오전 09:00-12:00 4건">4</span><span class="heatmap__cell heatmap__cell--l0" aria-label="현대차그룹 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차그룹 이후 15:30-익일 06:00 1건">1</span>
+            </div>
 
 
-        <div class="heatmap__row">
-          <div class="heatmap__name">
-            <strong>하나은행</strong>
-            <span>4건 · 2채널</span>
-          </div>
-          <span class="heatmap__cell heatmap__cell--l1" aria-label="하나은행 17:40-23:40 1건">1</span><span class="heatmap__cell heatmap__cell--l0" aria-label="하나은행 05.08 23:40-05.09 05:40 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="하나은행 05:40-11:40 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="하나은행 11:40-17:40 1건">1</span>
-        </div>
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>하이브</strong>
+                <span>5건 · 2채널</span>
+                <em>단독 &amp; 속보 뉴스 콜렉터, [주식픽!] - 가장 빠른 주식뉴스</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="하이브 장전 06:00-09:00 1건">1</span><span class="heatmap__cell heatmap__cell--l1" aria-label="하이브 오전 09:00-12:00 3건">3</span><span class="heatmap__cell heatmap__cell--l0" aria-label="하이브 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="하이브 이후 15:30-익일 06:00 1건">1</span>
+            </div>
 
 
-        <div class="heatmap__row">
-          <div class="heatmap__name">
-            <strong>삼성바이오</strong>
-            <span>3건 · 3채널</span>
-          </div>
-          <span class="heatmap__cell heatmap__cell--l1" aria-label="삼성바이오 17:40-23:40 2건">2</span><span class="heatmap__cell heatmap__cell--l0" aria-label="삼성바이오 05.08 23:40-05.09 05:40 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="삼성바이오 05:40-11:40 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="삼성바이오 11:40-17:40 1건">1</span>
-        </div>
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>KT</strong>
+                <span>4건 · 4채널</span>
+                <em>석학들의 마켓 (인)사이트, 몰?루, 메모장</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l0" aria-label="KT 장전 06:00-09:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="KT 오전 09:00-12:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="KT 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT 이후 15:30-익일 06:00 4건">4</span>
+            </div>
 
 
-        <div class="heatmap__row">
-          <div class="heatmap__name">
-            <strong>효성중공업</strong>
-            <span>3건 · 3채널</span>
-          </div>
-          <span class="heatmap__cell heatmap__cell--l1" aria-label="효성중공업 17:40-23:40 3건">3</span><span class="heatmap__cell heatmap__cell--l0" aria-label="효성중공업 05.08 23:40-05.09 05:40 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="효성중공업 05:40-11:40 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="효성중공업 11:40-17:40 0건"></span>
-        </div>
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>하나은행</strong>
+                <span>4건 · 2채널</span>
+                <em>[주식픽!] - 가장 빠른 주식뉴스, 단독 &amp; 속보 뉴스 콜렉터</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="하나은행 장전 06:00-09:00 1건">1</span><span class="heatmap__cell heatmap__cell--l1" aria-label="하나은행 오전 09:00-12:00 1건">1</span><span class="heatmap__cell heatmap__cell--l0" aria-label="하나은행 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="하나은행 이후 15:30-익일 06:00 2건">2</span>
+            </div>
 
 
-        <div class="heatmap__row">
-          <div class="heatmap__name">
-            <strong>재생에너지</strong>
-            <span>3건 · 2채널</span>
-          </div>
-          <span class="heatmap__cell heatmap__cell--l1" aria-label="재생에너지 17:40-23:40 1건">1</span><span class="heatmap__cell heatmap__cell--l0" aria-label="재생에너지 05.08 23:40-05.09 05:40 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="재생에너지 05:40-11:40 1건">1</span><span class="heatmap__cell heatmap__cell--l1" aria-label="재생에너지 11:40-17:40 1건">1</span>
-        </div>
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>삼성바이오</strong>
+                <span>3건 · 3채널</span>
+                <em>[주식픽!] - 가장 빠른 주식뉴스, 사회·이슈 채널_서울경제, 산업뉴스 채널_서울경제</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l0" aria-label="삼성바이오 장전 06:00-09:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="삼성바이오 오전 09:00-12:00 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="삼성바이오 장중 후반 12:00-15:30 1건">1</span><span class="heatmap__cell heatmap__cell--l1" aria-label="삼성바이오 이후 15:30-익일 06:00 2건">2</span>
+            </div>
 
 
-        <div class="heatmap__row">
-          <div class="heatmap__name">
-            <strong>교도통신</strong>
-            <span>3건 · 2채널</span>
-          </div>
-          <span class="heatmap__cell heatmap__cell--l0" aria-label="교도통신 17:40-23:40 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="교도통신 05.08 23:40-05.09 05:40 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="교도통신 05:40-11:40 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="교도통신 11:40-17:40 1건">1</span>
-        </div>
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>효성중공업</strong>
+                <span>3건 · 3채널</span>
+                <em>인포맥스, 글로벌 인사이트: Standard Capital, 공시정보알림-전체공시</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l0" aria-label="효성중공업 장전 06:00-09:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="효성중공업 오전 09:00-12:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="효성중공업 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="효성중공업 이후 15:30-익일 06:00 3건">3</span>
+            </div>
 
 
-        <div class="heatmap__row">
-          <div class="heatmap__name">
-            <strong>타법인주식및출자증권</strong>
-            <span>3건 · 1채널</span>
-          </div>
-          <span class="heatmap__cell heatmap__cell--l1" aria-label="타법인주식및출자증권 17:40-23:40 3건">3</span><span class="heatmap__cell heatmap__cell--l0" aria-label="타법인주식및출자증권 05.08 23:40-05.09 05:40 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="타법인주식및출자증권 05:40-11:40 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="타법인주식및출자증권 11:40-17:40 0건"></span>
-        </div>
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>블루산업</strong>
+                <span>3건 · 2채널</span>
+                <em>공시정보알림-전체공시, 단독 &amp; 속보 뉴스 콜렉터</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l0" aria-label="블루산업 장전 06:00-09:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="블루산업 오전 09:00-12:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="블루산업 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="블루산업 이후 15:30-익일 06:00 3건">3</span>
+            </div>
 
 
-        <div class="heatmap__row">
-          <div class="heatmap__name">
-            <strong>한국은행</strong>
-            <span>2건 · 2채널</span>
-          </div>
-          <span class="heatmap__cell heatmap__cell--l0" aria-label="한국은행 17:40-23:40 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="한국은행 05.08 23:40-05.09 05:40 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="한국은행 05:40-11:40 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="한국은행 11:40-17:40 2건">2</span>
-        </div>
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>세계은행</strong>
+                <span>2건 · 2채널</span>
+                <em>단독 &amp; 속보 뉴스 콜렉터, 석학들의 마켓 (인)사이트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l0" aria-label="세계은행 장전 06:00-09:00 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="세계은행 오전 09:00-12:00 1건">1</span><span class="heatmap__cell heatmap__cell--l0" aria-label="세계은행 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="세계은행 이후 15:30-익일 06:00 1건">1</span>
+            </div>
 
-          </div>
-        </article>
-      </div>
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>한국앤컴퍼니</strong>
+                <span>2건 · 2채널</span>
+                <em>단독 &amp; 속보 뉴스 콜렉터, AWAKE - 실시간 주식 공시 정리채널</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="한국앤컴퍼니 장전 06:00-09:00 1건">1</span><span class="heatmap__cell heatmap__cell--l0" aria-label="한국앤컴퍼니 오전 09:00-12:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="한국앤컴퍼니 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="한국앤컴퍼니 이후 15:30-익일 06:00 1건">1</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>워킹그룹</strong>
+                <span>2건 · 2채널</span>
+                <em>글로벌 인사이트: Standard Capital, 아틀라스산업연구소</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="워킹그룹 장전 06:00-09:00 2건">2</span><span class="heatmap__cell heatmap__cell--l0" aria-label="워킹그룹 오전 09:00-12:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="워킹그룹 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="워킹그룹 이후 15:30-익일 06:00 0건"></span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>hd현대중공업</strong>
+                <span>2건 · 2채널</span>
+                <em>석학들의 마켓 (인)사이트, AWAKE - 실시간 주식 공시 정리채널</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="hd현대중공업 장전 06:00-09:00 1건">1</span><span class="heatmap__cell heatmap__cell--l0" aria-label="hd현대중공업 오전 09:00-12:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="hd현대중공업 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="hd현대중공업 이후 15:30-익일 06:00 1건">1</span>
+            </div>
+
+                  </div>
+                </article>
+              </div>
+            </div>
+
+
+            <div class="analysis-period" data-analysis-panel="3d">
+              <div class="analysis-period__meta">
+                <strong>3일 분석 기간</strong>
+                <span>2026-05-06 18:36 KST - 2026-05-09 18:36 KST</span>
+                <span>5000건 · 77채널</span>
+              </div>
+              <div class="analysis-grid">
+                <article class="analysis-panel">
+                  <h3>키워드 클라우드</h3>
+                  <p>수집 메시지와 기사 연결 신호에서 반복되는 표현을 추렸습니다. 숫자는 언급 메시지와 채널 기준입니다.</p>
+                  <div class="keyword-cloud"><span class="keyword-chip keyword-chip--l6" title="457건 · 48채널 · AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, 석학들의 마켓 (인)사이트">실적<small>457건 · 48채널</small></span>
+<span class="keyword-chip keyword-chip--l5" title="402건 · 62채널 · 석학들의 마켓 (인)사이트, 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 세상의 (부)족한 것들에 대해서">미국<small>402건 · 62채널</small></span>
+<span class="keyword-chip keyword-chip--l4" title="294건 · 37채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 그로쓰리서치(Growth Research) [독립리서치]">공급<small>294건 · 37채널</small></span>
+<span class="keyword-chip keyword-chip--l4" title="289건 · 53채널 · 키움증권 미국주식 톡톡, 머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈, AWAKE - 실시간 주식 공시 정리채널">분기<small>289건 · 53채널</small></span>
+<span class="keyword-chip keyword-chip--l4" title="281건 · 27채널 · AWAKE - 실시간 주식 공시 정리채널, 석학들의 마켓 (인)사이트, 씽크풀-실시간 실적분석(구 AI라씨로)">매출액<small>281건 · 27채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="266건 · 46채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 그로쓰리서치(Growth Research) [독립리서치]">반도체<small>266건 · 46채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="256건 · 16채널 · 공시정보알림-전체공시, 공시정보알림-주요공시, 씽크풀-주식투자속보(구 AI라씨로)">코스닥<small>256건 · 16채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="246건 · 24채널 · 공시정보알림-전체공시, 공시정보알림-주요공시, 석학들의 마켓 (인)사이트">유가<small>246건 · 24채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="246건 · 17채널 · AWAKE - 실시간 주식 공시 정리채널, 석학들의 마켓 (인)사이트, Yeouido Lab_여의도 톺아보기">시가총액<small>246건 · 17채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="240건 · 37채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, [메리츠 Tech 김선우, 양승수, 김동관]">수요<small>240건 · 37채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="234건 · 29채널 · 석학들의 마켓 (인)사이트, 씽크풀-실시간 실적분석(구 AI라씨로), 씽크풀-주식투자속보(구 AI라씨로)">영업이익<small>234건 · 29채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="230건 · 34채널 · [주식픽!] - 가장 빠른 주식뉴스, 단독 &amp; 속보 뉴스 콜렉터, Polaristimes">이란<small>230건 · 34채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="215건 · 40채널 · 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 석학들의 마켓 (인)사이트, 키움증권 미국주식 톡톡">달러<small>215건 · 40채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="215건 · 51채널 · 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치]">글로벌<small>215건 · 51채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="208건 · 22채널 · 세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치], [메리츠 Tech 김선우, 양승수, 김동관]">부족<small>208건 · 22채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="208건 · 48채널 · 키움증권 미국주식 톡톡, AWAKE - 실시간 주식 공시 정리채널, 석학들의 마켓 (인)사이트">매출<small>208건 · 48채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="201건 · 42채널 · [주식픽!] - 가장 빠른 주식뉴스, 단독 &amp; 속보 뉴스 콜렉터, 석학들의 마켓 (인)사이트">트럼프<small>201건 · 42채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="194건 · 45채널 · 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터">상승<small>194건 · 45채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="192건 · 22채널 · 씽크풀-실시간 실적분석(구 AI라씨로), 씽크풀-주식투자속보(구 AI라씨로), 석학들의 마켓 (인)사이트">연결<small>192건 · 22채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="187건 · 37채널 · 씽크풀-실시간 실적분석(구 AI라씨로), 씽크풀-주식투자속보(구 AI라씨로), 세상의 (부)족한 것들에 대해서">올해<small>187건 · 37채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="182건 · 38채널 · 석학들의 마켓 (인)사이트, 신한 리서치, 키움증권 미국주식 톡톡">성장<small>182건 · 38채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="178건 · 37채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel">가격<small>178건 · 37채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="176건 · 41채널 · 그로쓰리서치(Growth Research) [독립리서치], 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트">확대<small>176건 · 41채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="168건 · 42채널 · [메리츠 Tech 김선우, 양승수, 김동관], 석학들의 마켓 (인)사이트, 신한 리서치">전망<small>168건 · 42채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="162건 · 39채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 단독 &amp; 속보 뉴스 콜렉터">생산<small>162건 · 39채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="154건 · 17채널 · AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, 공시정보알림-전체공시">잠정<small>154건 · 17채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="150건 · 25채널 · 세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치], 씽크풀-주식투자속보(구 AI라씨로)">급증<small>150건 · 25채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="148건 · 18채널 · AWAKE - 실시간 주식 공시 정리채널, 석학들의 마켓 (인)사이트, Yeouido Lab_여의도 톺아보기">순이익<small>148건 · 18채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="143건 · 10채널 · AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, 공시정보알림-전체공시">공정공시<small>143건 · 10채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="138건 · 38채널 · 세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치], 석학들의 마켓 (인)사이트">인프라<small>138건 · 38채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="137건 · 42채널 · 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트">위해<small>137건 · 42채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="134건 · 36채널 · 세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터, 석학들의 마켓 (인)사이트">삼성전자<small>134건 · 36채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="132건 · 29채널 · 석학들의 마켓 (인)사이트, 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 세상의 (부)족한 것들에 대해서">데이터<small>132건 · 29채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="130건 · 43채널 · 석학들의 마켓 (인)사이트, 머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈, 신한 리서치">주가<small>130건 · 43채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="130건 · 11채널 · 씽크풀-주식투자속보(구 AI라씨로), 세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터">목표가<small>130건 · 11채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="126건 · 35채널 · 석학들의 마켓 (인)사이트, 그로쓰리서치(Growth Research) [독립리서치], 머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈">규모<small>126건 · 35채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="126건 · 40채널 · 키움증권 미국주식 톡톡, 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트">상향<small>126건 · 40채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="123건 · 29채널 · 세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치], 석학들의 마켓 (인)사이트">메모리<small>123건 · 29채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="122건 · 17채널 · AWAKE - 실시간 주식 공시 정리채널, 세상의 (부)족한 것들에 대해서, 사회·이슈 채널_서울경제">영업익<small>122건 · 17채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="121건 · 44채널 · 석학들의 마켓 (인)사이트, 그로쓰리서치(Growth Research) [독립리서치], 신한 리서치">지속<small>121건 · 44채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="119건 · 43채널 · 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서, [메리츠 Tech 김선우, 양승수, 김동관]">신규<small>119건 · 43채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="119건 · 28채널 · AWAKE - 실시간 주식 공시 정리채널, 석학들의 마켓 (인)사이트, Yeouido Lab_여의도 톺아보기">예상치<small>119건 · 28채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="118건 · 37채널 · Polaristimes, 한투증권 중국/신흥국 정정영, [주식픽!] - 가장 빠른 주식뉴스">중국<small>118건 · 37채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="116건 · 10채널 · AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, Yeouido Lab_여의도 톺아보기">연결재무제표기준영업<small>116건 · 10채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="114건 · 20채널 · 석학들의 마켓 (인)사이트, [주식] 증권사 리포트, 신한 리서치">매수<small>114건 · 20채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="113건 · 36채널 · 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서">계약<small>113건 · 36채널</small></span></div>
+                </article>
+                <article class="analysis-panel">
+                  <h3>종목 언급 히트맵</h3>
+                  <p>장전·오전·장중 후반·이후 구간별로 회사·티커 후보 언급량을 집계했습니다.</p>
+                  <div class="heatmap" role="table" aria-label="종목 언급 히트맵">
+                    <div class="heatmap__row heatmap__row--head" role="row">
+                      <span>종목</span>
+                      <span class="heatmap__bucket">장전<br>06:00-09:00</span><span class="heatmap__bucket">오전<br>09:00-12:00</span><span class="heatmap__bucket">장중 후반<br>12:00-15:30</span><span class="heatmap__bucket">이후<br>15:30-익일 06:00</span>
+                    </div>
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>삼성전자</strong>
+                <span>149건 · 38채널</span>
+                <em>세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터, 석학들의 마켓 (인)사이트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l3" aria-label="삼성전자 장전 06:00-09:00 37건">37</span><span class="heatmap__cell heatmap__cell--l2" aria-label="삼성전자 오전 09:00-12:00 27건">27</span><span class="heatmap__cell heatmap__cell--l2" aria-label="삼성전자 장중 후반 12:00-15:30 20건">20</span><span class="heatmap__cell heatmap__cell--l5" aria-label="삼성전자 이후 15:30-익일 06:00 65건">65</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>SK하이닉스</strong>
+                <span>95건 · 32채널</span>
+                <em>세상의 (부)족한 것들에 대해서, 머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈, 그로쓰리서치(Growth Res</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l2" aria-label="SK하이닉스 장전 06:00-09:00 31건">31</span><span class="heatmap__cell heatmap__cell--l1" aria-label="SK하이닉스 오전 09:00-12:00 15건">15</span><span class="heatmap__cell heatmap__cell--l1" aria-label="SK하이닉스 장중 후반 12:00-15:30 11건">11</span><span class="heatmap__cell heatmap__cell--l3" aria-label="SK하이닉스 이후 15:30-익일 06:00 38건">38</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>현대차</strong>
+                <span>82건 · 23채널</span>
+                <em>석학들의 마켓 (인)사이트, 단독 &amp; 속보 뉴스 콜렉터, 매일경제TV MBN골드 조선일 대표 무료 주식 </em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="현대차 장전 06:00-09:00 13건">13</span><span class="heatmap__cell heatmap__cell--l2" aria-label="현대차 오전 09:00-12:00 29건">29</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차 장중 후반 12:00-15:30 14건">14</span><span class="heatmap__cell heatmap__cell--l2" aria-label="현대차 이후 15:30-익일 06:00 26건">26</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>한화</strong>
+                <span>58건 · 17채널</span>
+                <em>석학들의 마켓 (인)사이트, 공시정보알림-전체공시, 씽크풀-주식투자속보(구 AI라씨로)</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="한화 장전 06:00-09:00 10건">10</span><span class="heatmap__cell heatmap__cell--l1" aria-label="한화 오전 09:00-12:00 12건">12</span><span class="heatmap__cell heatmap__cell--l1" aria-label="한화 장중 후반 12:00-15:30 12건">12</span><span class="heatmap__cell heatmap__cell--l2" aria-label="한화 이후 15:30-익일 06:00 24건">24</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>HD현대</strong>
+                <span>56건 · 20채널</span>
+                <em>씽크풀-주식투자속보(구 AI라씨로), [주식] 증권사 리포트, 석학들의 마켓 (인)사이트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="HD현대 장전 06:00-09:00 13건">13</span><span class="heatmap__cell heatmap__cell--l2" aria-label="HD현대 오전 09:00-12:00 25건">25</span><span class="heatmap__cell heatmap__cell--l1" aria-label="HD현대 장중 후반 12:00-15:30 7건">7</span><span class="heatmap__cell heatmap__cell--l1" aria-label="HD현대 이후 15:30-익일 06:00 11건">11</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>카카오</strong>
+                <span>41건 · 9채널</span>
+                <em>공시정보알림-전체공시, [주식] 증권사 리포트, 석학들의 마켓 (인)사이트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="카카오 장전 06:00-09:00 10건">10</span><span class="heatmap__cell heatmap__cell--l1" aria-label="카카오 오전 09:00-12:00 6건">6</span><span class="heatmap__cell heatmap__cell--l1" aria-label="카카오 장중 후반 12:00-15:30 7건">7</span><span class="heatmap__cell heatmap__cell--l2" aria-label="카카오 이후 15:30-익일 06:00 18건">18</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>hd현대중공업</strong>
+                <span>39건 · 14채널</span>
+                <em>씽크풀-주식투자속보(구 AI라씨로), [주식] 증권사 리포트, 석학들의 마켓 (인)사이트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="hd현대중공업 장전 06:00-09:00 12건">12</span><span class="heatmap__cell heatmap__cell--l2" aria-label="hd현대중공업 오전 09:00-12:00 18건">18</span><span class="heatmap__cell heatmap__cell--l1" aria-label="hd현대중공업 장중 후반 12:00-15:30 5건">5</span><span class="heatmap__cell heatmap__cell--l1" aria-label="hd현대중공업 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>KT&amp;G</strong>
+                <span>31건 · 6채널</span>
+                <em>석학들의 마켓 (인)사이트, 씽크풀-주식투자속보(구 AI라씨로), [주식] 증권사 리포트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 장전 06:00-09:00 13건">13</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 오전 09:00-12:00 10건">10</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 장중 후반 12:00-15:30 4건">4</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>현대모비스</strong>
+                <span>23건 · 14채널</span>
+                <em>매일경제TV MBN골드 조선일 대표 무료 주식 채널, 매일경제TV MBN골드 김태윤 대표 무료 주식 채널</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="현대모비스 장전 06:00-09:00 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대모비스 오전 09:00-12:00 9건">9</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대모비스 장중 후반 12:00-15:30 8건">8</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대모비스 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>현대차그룹</strong>
+                <span>19건 · 14채널</span>
+                <em>단독 &amp; 속보 뉴스 콜렉터, 실시간 주식 뉴스, 지엘리서치 GL RESEARCH_ 주식, 경제, 독립리서</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="현대차그룹 장전 06:00-09:00 1건">1</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차그룹 오전 09:00-12:00 7건">7</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차그룹 장중 후반 12:00-15:30 7건">7</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차그룹 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>KT</strong>
+                <span>17건 · 16채널</span>
+                <em>신한 리서치, 석학들의 마켓 (인)사이트, 몰?루</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="KT 장전 06:00-09:00 3건">3</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT 오전 09:00-12:00 2건">2</span><span class="heatmap__cell heatmap__cell--l0" aria-label="KT 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT 이후 15:30-익일 06:00 12건">12</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>금호석유화학</strong>
+                <span>17건 · 7채널</span>
+                <em>씽크풀-주식투자속보(구 AI라씨로), [주식] 증권사 리포트, 매일경제TV MBN골드 조선일 대표 무료 </em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="금호석유화학 장전 06:00-09:00 5건">5</span><span class="heatmap__cell heatmap__cell--l1" aria-label="금호석유화학 오전 09:00-12:00 6건">6</span><span class="heatmap__cell heatmap__cell--l1" aria-label="금호석유화학 장중 후반 12:00-15:30 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="금호석유화학 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>LG유플러스</strong>
+                <span>14건 · 3채널</span>
+                <em>[주식] 증권사 리포트, 석학들의 마켓 (인)사이트, AWAKE - 실시간 주식 공시 정리채널</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="LG유플러스 장전 06:00-09:00 5건">5</span><span class="heatmap__cell heatmap__cell--l1" aria-label="LG유플러스 오전 09:00-12:00 3건">3</span><span class="heatmap__cell heatmap__cell--l1" aria-label="LG유플러스 장중 후반 12:00-15:30 3건">3</span><span class="heatmap__cell heatmap__cell--l1" aria-label="LG유플러스 이후 15:30-익일 06:00 3건">3</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>하이브</strong>
+                <span>13건 · 9채널</span>
+                <em>단독 &amp; 속보 뉴스 콜렉터, 그로쓰리서치(Growth Research) [독립리서치], [주식픽!] - </em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="하이브 장전 06:00-09:00 3건">3</span><span class="heatmap__cell heatmap__cell--l1" aria-label="하이브 오전 09:00-12:00 4건">4</span><span class="heatmap__cell heatmap__cell--l1" aria-label="하이브 장중 후반 12:00-15:30 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="하이브 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>현대지에프홀딩스</strong>
+                <span>12건 · 5채널</span>
+                <em>AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, 산업뉴스 채널_서울경제</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l0" aria-label="현대지에프홀딩스 장전 06:00-09:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="현대지에프홀딩스 오전 09:00-12:00 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대지에프홀딩스 장중 후반 12:00-15:30 9건">9</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대지에프홀딩스 이후 15:30-익일 06:00 3건">3</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>기아</strong>
+                <span>11건 · 9채널</span>
+                <em>단독 &amp; 속보 뉴스 콜렉터, 석학들의 마켓 (인)사이트, 산업뉴스 채널_서울경제</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="기아 장전 06:00-09:00 1건">1</span><span class="heatmap__cell heatmap__cell--l1" aria-label="기아 오전 09:00-12:00 4건">4</span><span class="heatmap__cell heatmap__cell--l1" aria-label="기아 장중 후반 12:00-15:30 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="기아 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>동원산업</strong>
+                <span>9건 · 5채널</span>
+                <em>AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, 산업뉴스 채널_서울경제</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l0" aria-label="동원산업 장전 06:00-09:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="동원산업 오전 09:00-12:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="동원산업 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="동원산업 이후 15:30-익일 06:00 9건">9</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>고려아연</strong>
+                <span>9건 · 5채널</span>
+                <em>신한 리서치, 세상의 (부)족한 것들에 대해서, [주식] 증권사 리포트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="고려아연 장전 06:00-09:00 6건">6</span><span class="heatmap__cell heatmap__cell--l1" aria-label="고려아연 오전 09:00-12:00 1건">1</span><span class="heatmap__cell heatmap__cell--l0" aria-label="고려아연 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="고려아연 이후 15:30-익일 06:00 2건">2</span>
+            </div>
+
+                  </div>
+                </article>
+              </div>
+            </div>
+
+
+            <div class="analysis-period" data-analysis-panel="7d">
+              <div class="analysis-period__meta">
+                <strong>일주일 분석 기간</strong>
+                <span>2026-05-02 18:36 KST - 2026-05-09 18:36 KST</span>
+                <span>5000건 · 77채널</span>
+              </div>
+              <div class="analysis-grid">
+                <article class="analysis-panel">
+                  <h3>키워드 클라우드</h3>
+                  <p>수집 메시지와 기사 연결 신호에서 반복되는 표현을 추렸습니다. 숫자는 언급 메시지와 채널 기준입니다.</p>
+                  <div class="keyword-cloud"><span class="keyword-chip keyword-chip--l6" title="457건 · 48채널 · AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, 석학들의 마켓 (인)사이트">실적<small>457건 · 48채널</small></span>
+<span class="keyword-chip keyword-chip--l5" title="402건 · 62채널 · 석학들의 마켓 (인)사이트, 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 세상의 (부)족한 것들에 대해서">미국<small>402건 · 62채널</small></span>
+<span class="keyword-chip keyword-chip--l4" title="294건 · 37채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 그로쓰리서치(Growth Research) [독립리서치]">공급<small>294건 · 37채널</small></span>
+<span class="keyword-chip keyword-chip--l4" title="289건 · 53채널 · 키움증권 미국주식 톡톡, 머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈, AWAKE - 실시간 주식 공시 정리채널">분기<small>289건 · 53채널</small></span>
+<span class="keyword-chip keyword-chip--l4" title="281건 · 27채널 · AWAKE - 실시간 주식 공시 정리채널, 석학들의 마켓 (인)사이트, 씽크풀-실시간 실적분석(구 AI라씨로)">매출액<small>281건 · 27채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="266건 · 46채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 그로쓰리서치(Growth Research) [독립리서치]">반도체<small>266건 · 46채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="256건 · 16채널 · 공시정보알림-전체공시, 공시정보알림-주요공시, 씽크풀-주식투자속보(구 AI라씨로)">코스닥<small>256건 · 16채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="246건 · 24채널 · 공시정보알림-전체공시, 공시정보알림-주요공시, 석학들의 마켓 (인)사이트">유가<small>246건 · 24채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="246건 · 17채널 · AWAKE - 실시간 주식 공시 정리채널, 석학들의 마켓 (인)사이트, Yeouido Lab_여의도 톺아보기">시가총액<small>246건 · 17채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="240건 · 37채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, [메리츠 Tech 김선우, 양승수, 김동관]">수요<small>240건 · 37채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="234건 · 29채널 · 석학들의 마켓 (인)사이트, 씽크풀-실시간 실적분석(구 AI라씨로), 씽크풀-주식투자속보(구 AI라씨로)">영업이익<small>234건 · 29채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="230건 · 34채널 · [주식픽!] - 가장 빠른 주식뉴스, 단독 &amp; 속보 뉴스 콜렉터, Polaristimes">이란<small>230건 · 34채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="215건 · 40채널 · 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 석학들의 마켓 (인)사이트, 키움증권 미국주식 톡톡">달러<small>215건 · 40채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="215건 · 51채널 · 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치]">글로벌<small>215건 · 51채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="208건 · 22채널 · 세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치], [메리츠 Tech 김선우, 양승수, 김동관]">부족<small>208건 · 22채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="208건 · 48채널 · 키움증권 미국주식 톡톡, AWAKE - 실시간 주식 공시 정리채널, 석학들의 마켓 (인)사이트">매출<small>208건 · 48채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="201건 · 42채널 · [주식픽!] - 가장 빠른 주식뉴스, 단독 &amp; 속보 뉴스 콜렉터, 석학들의 마켓 (인)사이트">트럼프<small>201건 · 42채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="194건 · 45채널 · 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터">상승<small>194건 · 45채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="192건 · 22채널 · 씽크풀-실시간 실적분석(구 AI라씨로), 씽크풀-주식투자속보(구 AI라씨로), 석학들의 마켓 (인)사이트">연결<small>192건 · 22채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="187건 · 37채널 · 씽크풀-실시간 실적분석(구 AI라씨로), 씽크풀-주식투자속보(구 AI라씨로), 세상의 (부)족한 것들에 대해서">올해<small>187건 · 37채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="182건 · 38채널 · 석학들의 마켓 (인)사이트, 신한 리서치, 키움증권 미국주식 톡톡">성장<small>182건 · 38채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="178건 · 37채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel">가격<small>178건 · 37채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="176건 · 41채널 · 그로쓰리서치(Growth Research) [독립리서치], 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트">확대<small>176건 · 41채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="168건 · 42채널 · [메리츠 Tech 김선우, 양승수, 김동관], 석학들의 마켓 (인)사이트, 신한 리서치">전망<small>168건 · 42채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="162건 · 39채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 단독 &amp; 속보 뉴스 콜렉터">생산<small>162건 · 39채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="154건 · 17채널 · AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, 공시정보알림-전체공시">잠정<small>154건 · 17채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="150건 · 25채널 · 세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치], 씽크풀-주식투자속보(구 AI라씨로)">급증<small>150건 · 25채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="148건 · 18채널 · AWAKE - 실시간 주식 공시 정리채널, 석학들의 마켓 (인)사이트, Yeouido Lab_여의도 톺아보기">순이익<small>148건 · 18채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="143건 · 10채널 · AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, 공시정보알림-전체공시">공정공시<small>143건 · 10채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="138건 · 38채널 · 세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치], 석학들의 마켓 (인)사이트">인프라<small>138건 · 38채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="137건 · 42채널 · 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트">위해<small>137건 · 42채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="134건 · 36채널 · 세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터, 석학들의 마켓 (인)사이트">삼성전자<small>134건 · 36채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="132건 · 29채널 · 석학들의 마켓 (인)사이트, 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 세상의 (부)족한 것들에 대해서">데이터<small>132건 · 29채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="130건 · 43채널 · 석학들의 마켓 (인)사이트, 머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈, 신한 리서치">주가<small>130건 · 43채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="130건 · 11채널 · 씽크풀-주식투자속보(구 AI라씨로), 세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터">목표가<small>130건 · 11채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="126건 · 35채널 · 석학들의 마켓 (인)사이트, 그로쓰리서치(Growth Research) [독립리서치], 머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈">규모<small>126건 · 35채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="126건 · 40채널 · 키움증권 미국주식 톡톡, 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트">상향<small>126건 · 40채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="123건 · 29채널 · 세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치], 석학들의 마켓 (인)사이트">메모리<small>123건 · 29채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="122건 · 17채널 · AWAKE - 실시간 주식 공시 정리채널, 세상의 (부)족한 것들에 대해서, 사회·이슈 채널_서울경제">영업익<small>122건 · 17채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="121건 · 44채널 · 석학들의 마켓 (인)사이트, 그로쓰리서치(Growth Research) [독립리서치], 신한 리서치">지속<small>121건 · 44채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="119건 · 43채널 · 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서, [메리츠 Tech 김선우, 양승수, 김동관]">신규<small>119건 · 43채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="119건 · 28채널 · AWAKE - 실시간 주식 공시 정리채널, 석학들의 마켓 (인)사이트, Yeouido Lab_여의도 톺아보기">예상치<small>119건 · 28채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="118건 · 37채널 · Polaristimes, 한투증권 중국/신흥국 정정영, [주식픽!] - 가장 빠른 주식뉴스">중국<small>118건 · 37채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="116건 · 10채널 · AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, Yeouido Lab_여의도 톺아보기">연결재무제표기준영업<small>116건 · 10채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="114건 · 20채널 · 석학들의 마켓 (인)사이트, [주식] 증권사 리포트, 신한 리서치">매수<small>114건 · 20채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="113건 · 36채널 · 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서">계약<small>113건 · 36채널</small></span></div>
+                </article>
+                <article class="analysis-panel">
+                  <h3>종목 언급 히트맵</h3>
+                  <p>장전·오전·장중 후반·이후 구간별로 회사·티커 후보 언급량을 집계했습니다.</p>
+                  <div class="heatmap" role="table" aria-label="종목 언급 히트맵">
+                    <div class="heatmap__row heatmap__row--head" role="row">
+                      <span>종목</span>
+                      <span class="heatmap__bucket">장전<br>06:00-09:00</span><span class="heatmap__bucket">오전<br>09:00-12:00</span><span class="heatmap__bucket">장중 후반<br>12:00-15:30</span><span class="heatmap__bucket">이후<br>15:30-익일 06:00</span>
+                    </div>
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>삼성전자</strong>
+                <span>149건 · 38채널</span>
+                <em>세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터, 석학들의 마켓 (인)사이트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l3" aria-label="삼성전자 장전 06:00-09:00 37건">37</span><span class="heatmap__cell heatmap__cell--l2" aria-label="삼성전자 오전 09:00-12:00 27건">27</span><span class="heatmap__cell heatmap__cell--l2" aria-label="삼성전자 장중 후반 12:00-15:30 20건">20</span><span class="heatmap__cell heatmap__cell--l5" aria-label="삼성전자 이후 15:30-익일 06:00 65건">65</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>SK하이닉스</strong>
+                <span>95건 · 32채널</span>
+                <em>세상의 (부)족한 것들에 대해서, 머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈, 그로쓰리서치(Growth Res</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l2" aria-label="SK하이닉스 장전 06:00-09:00 31건">31</span><span class="heatmap__cell heatmap__cell--l1" aria-label="SK하이닉스 오전 09:00-12:00 15건">15</span><span class="heatmap__cell heatmap__cell--l1" aria-label="SK하이닉스 장중 후반 12:00-15:30 11건">11</span><span class="heatmap__cell heatmap__cell--l3" aria-label="SK하이닉스 이후 15:30-익일 06:00 38건">38</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>현대차</strong>
+                <span>82건 · 23채널</span>
+                <em>석학들의 마켓 (인)사이트, 단독 &amp; 속보 뉴스 콜렉터, 매일경제TV MBN골드 조선일 대표 무료 주식 </em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="현대차 장전 06:00-09:00 13건">13</span><span class="heatmap__cell heatmap__cell--l2" aria-label="현대차 오전 09:00-12:00 29건">29</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차 장중 후반 12:00-15:30 14건">14</span><span class="heatmap__cell heatmap__cell--l2" aria-label="현대차 이후 15:30-익일 06:00 26건">26</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>한화</strong>
+                <span>58건 · 17채널</span>
+                <em>석학들의 마켓 (인)사이트, 공시정보알림-전체공시, 씽크풀-주식투자속보(구 AI라씨로)</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="한화 장전 06:00-09:00 10건">10</span><span class="heatmap__cell heatmap__cell--l1" aria-label="한화 오전 09:00-12:00 12건">12</span><span class="heatmap__cell heatmap__cell--l1" aria-label="한화 장중 후반 12:00-15:30 12건">12</span><span class="heatmap__cell heatmap__cell--l2" aria-label="한화 이후 15:30-익일 06:00 24건">24</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>HD현대</strong>
+                <span>56건 · 20채널</span>
+                <em>씽크풀-주식투자속보(구 AI라씨로), [주식] 증권사 리포트, 석학들의 마켓 (인)사이트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="HD현대 장전 06:00-09:00 13건">13</span><span class="heatmap__cell heatmap__cell--l2" aria-label="HD현대 오전 09:00-12:00 25건">25</span><span class="heatmap__cell heatmap__cell--l1" aria-label="HD현대 장중 후반 12:00-15:30 7건">7</span><span class="heatmap__cell heatmap__cell--l1" aria-label="HD현대 이후 15:30-익일 06:00 11건">11</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>카카오</strong>
+                <span>41건 · 9채널</span>
+                <em>공시정보알림-전체공시, [주식] 증권사 리포트, 석학들의 마켓 (인)사이트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="카카오 장전 06:00-09:00 10건">10</span><span class="heatmap__cell heatmap__cell--l1" aria-label="카카오 오전 09:00-12:00 6건">6</span><span class="heatmap__cell heatmap__cell--l1" aria-label="카카오 장중 후반 12:00-15:30 7건">7</span><span class="heatmap__cell heatmap__cell--l2" aria-label="카카오 이후 15:30-익일 06:00 18건">18</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>hd현대중공업</strong>
+                <span>39건 · 14채널</span>
+                <em>씽크풀-주식투자속보(구 AI라씨로), [주식] 증권사 리포트, 석학들의 마켓 (인)사이트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="hd현대중공업 장전 06:00-09:00 12건">12</span><span class="heatmap__cell heatmap__cell--l2" aria-label="hd현대중공업 오전 09:00-12:00 18건">18</span><span class="heatmap__cell heatmap__cell--l1" aria-label="hd현대중공업 장중 후반 12:00-15:30 5건">5</span><span class="heatmap__cell heatmap__cell--l1" aria-label="hd현대중공업 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>KT&amp;G</strong>
+                <span>31건 · 6채널</span>
+                <em>석학들의 마켓 (인)사이트, 씽크풀-주식투자속보(구 AI라씨로), [주식] 증권사 리포트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 장전 06:00-09:00 13건">13</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 오전 09:00-12:00 10건">10</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 장중 후반 12:00-15:30 4건">4</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>현대모비스</strong>
+                <span>23건 · 14채널</span>
+                <em>매일경제TV MBN골드 조선일 대표 무료 주식 채널, 매일경제TV MBN골드 김태윤 대표 무료 주식 채널</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="현대모비스 장전 06:00-09:00 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대모비스 오전 09:00-12:00 9건">9</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대모비스 장중 후반 12:00-15:30 8건">8</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대모비스 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>현대차그룹</strong>
+                <span>19건 · 14채널</span>
+                <em>단독 &amp; 속보 뉴스 콜렉터, 실시간 주식 뉴스, 지엘리서치 GL RESEARCH_ 주식, 경제, 독립리서</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="현대차그룹 장전 06:00-09:00 1건">1</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차그룹 오전 09:00-12:00 7건">7</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차그룹 장중 후반 12:00-15:30 7건">7</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차그룹 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>KT</strong>
+                <span>17건 · 16채널</span>
+                <em>신한 리서치, 석학들의 마켓 (인)사이트, 몰?루</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="KT 장전 06:00-09:00 3건">3</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT 오전 09:00-12:00 2건">2</span><span class="heatmap__cell heatmap__cell--l0" aria-label="KT 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT 이후 15:30-익일 06:00 12건">12</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>금호석유화학</strong>
+                <span>17건 · 7채널</span>
+                <em>씽크풀-주식투자속보(구 AI라씨로), [주식] 증권사 리포트, 매일경제TV MBN골드 조선일 대표 무료 </em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="금호석유화학 장전 06:00-09:00 5건">5</span><span class="heatmap__cell heatmap__cell--l1" aria-label="금호석유화학 오전 09:00-12:00 6건">6</span><span class="heatmap__cell heatmap__cell--l1" aria-label="금호석유화학 장중 후반 12:00-15:30 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="금호석유화학 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>LG유플러스</strong>
+                <span>14건 · 3채널</span>
+                <em>[주식] 증권사 리포트, 석학들의 마켓 (인)사이트, AWAKE - 실시간 주식 공시 정리채널</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="LG유플러스 장전 06:00-09:00 5건">5</span><span class="heatmap__cell heatmap__cell--l1" aria-label="LG유플러스 오전 09:00-12:00 3건">3</span><span class="heatmap__cell heatmap__cell--l1" aria-label="LG유플러스 장중 후반 12:00-15:30 3건">3</span><span class="heatmap__cell heatmap__cell--l1" aria-label="LG유플러스 이후 15:30-익일 06:00 3건">3</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>하이브</strong>
+                <span>13건 · 9채널</span>
+                <em>단독 &amp; 속보 뉴스 콜렉터, 그로쓰리서치(Growth Research) [독립리서치], [주식픽!] - </em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="하이브 장전 06:00-09:00 3건">3</span><span class="heatmap__cell heatmap__cell--l1" aria-label="하이브 오전 09:00-12:00 4건">4</span><span class="heatmap__cell heatmap__cell--l1" aria-label="하이브 장중 후반 12:00-15:30 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="하이브 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>현대지에프홀딩스</strong>
+                <span>12건 · 5채널</span>
+                <em>AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, 산업뉴스 채널_서울경제</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l0" aria-label="현대지에프홀딩스 장전 06:00-09:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="현대지에프홀딩스 오전 09:00-12:00 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대지에프홀딩스 장중 후반 12:00-15:30 9건">9</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대지에프홀딩스 이후 15:30-익일 06:00 3건">3</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>기아</strong>
+                <span>11건 · 9채널</span>
+                <em>단독 &amp; 속보 뉴스 콜렉터, 석학들의 마켓 (인)사이트, 산업뉴스 채널_서울경제</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="기아 장전 06:00-09:00 1건">1</span><span class="heatmap__cell heatmap__cell--l1" aria-label="기아 오전 09:00-12:00 4건">4</span><span class="heatmap__cell heatmap__cell--l1" aria-label="기아 장중 후반 12:00-15:30 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="기아 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>동원산업</strong>
+                <span>9건 · 5채널</span>
+                <em>AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, 산업뉴스 채널_서울경제</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l0" aria-label="동원산업 장전 06:00-09:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="동원산업 오전 09:00-12:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="동원산업 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="동원산업 이후 15:30-익일 06:00 9건">9</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>고려아연</strong>
+                <span>9건 · 5채널</span>
+                <em>신한 리서치, 세상의 (부)족한 것들에 대해서, [주식] 증권사 리포트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="고려아연 장전 06:00-09:00 6건">6</span><span class="heatmap__cell heatmap__cell--l1" aria-label="고려아연 오전 09:00-12:00 1건">1</span><span class="heatmap__cell heatmap__cell--l0" aria-label="고려아연 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="고려아연 이후 15:30-익일 06:00 2건">2</span>
+            </div>
+
+                  </div>
+                </article>
+              </div>
+            </div>
+
+
+            <div class="analysis-period" data-analysis-panel="30d">
+              <div class="analysis-period__meta">
+                <strong>한달 분석 기간</strong>
+                <span>2026-04-09 18:36 KST - 2026-05-09 18:36 KST</span>
+                <span>5000건 · 77채널</span>
+              </div>
+              <div class="analysis-grid">
+                <article class="analysis-panel">
+                  <h3>키워드 클라우드</h3>
+                  <p>수집 메시지와 기사 연결 신호에서 반복되는 표현을 추렸습니다. 숫자는 언급 메시지와 채널 기준입니다.</p>
+                  <div class="keyword-cloud"><span class="keyword-chip keyword-chip--l6" title="457건 · 48채널 · AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, 석학들의 마켓 (인)사이트">실적<small>457건 · 48채널</small></span>
+<span class="keyword-chip keyword-chip--l5" title="402건 · 62채널 · 석학들의 마켓 (인)사이트, 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 세상의 (부)족한 것들에 대해서">미국<small>402건 · 62채널</small></span>
+<span class="keyword-chip keyword-chip--l4" title="294건 · 37채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 그로쓰리서치(Growth Research) [독립리서치]">공급<small>294건 · 37채널</small></span>
+<span class="keyword-chip keyword-chip--l4" title="289건 · 53채널 · 키움증권 미국주식 톡톡, 머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈, AWAKE - 실시간 주식 공시 정리채널">분기<small>289건 · 53채널</small></span>
+<span class="keyword-chip keyword-chip--l4" title="281건 · 27채널 · AWAKE - 실시간 주식 공시 정리채널, 석학들의 마켓 (인)사이트, 씽크풀-실시간 실적분석(구 AI라씨로)">매출액<small>281건 · 27채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="266건 · 46채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 그로쓰리서치(Growth Research) [독립리서치]">반도체<small>266건 · 46채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="256건 · 16채널 · 공시정보알림-전체공시, 공시정보알림-주요공시, 씽크풀-주식투자속보(구 AI라씨로)">코스닥<small>256건 · 16채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="246건 · 24채널 · 공시정보알림-전체공시, 공시정보알림-주요공시, 석학들의 마켓 (인)사이트">유가<small>246건 · 24채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="246건 · 17채널 · AWAKE - 실시간 주식 공시 정리채널, 석학들의 마켓 (인)사이트, Yeouido Lab_여의도 톺아보기">시가총액<small>246건 · 17채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="240건 · 37채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, [메리츠 Tech 김선우, 양승수, 김동관]">수요<small>240건 · 37채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="234건 · 29채널 · 석학들의 마켓 (인)사이트, 씽크풀-실시간 실적분석(구 AI라씨로), 씽크풀-주식투자속보(구 AI라씨로)">영업이익<small>234건 · 29채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="230건 · 34채널 · [주식픽!] - 가장 빠른 주식뉴스, 단독 &amp; 속보 뉴스 콜렉터, Polaristimes">이란<small>230건 · 34채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="215건 · 40채널 · 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 석학들의 마켓 (인)사이트, 키움증권 미국주식 톡톡">달러<small>215건 · 40채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="215건 · 51채널 · 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치]">글로벌<small>215건 · 51채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="208건 · 22채널 · 세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치], [메리츠 Tech 김선우, 양승수, 김동관]">부족<small>208건 · 22채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="208건 · 48채널 · 키움증권 미국주식 톡톡, AWAKE - 실시간 주식 공시 정리채널, 석학들의 마켓 (인)사이트">매출<small>208건 · 48채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="201건 · 42채널 · [주식픽!] - 가장 빠른 주식뉴스, 단독 &amp; 속보 뉴스 콜렉터, 석학들의 마켓 (인)사이트">트럼프<small>201건 · 42채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="194건 · 45채널 · 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터">상승<small>194건 · 45채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="192건 · 22채널 · 씽크풀-실시간 실적분석(구 AI라씨로), 씽크풀-주식투자속보(구 AI라씨로), 석학들의 마켓 (인)사이트">연결<small>192건 · 22채널</small></span>
+<span class="keyword-chip keyword-chip--l3" title="187건 · 37채널 · 씽크풀-실시간 실적분석(구 AI라씨로), 씽크풀-주식투자속보(구 AI라씨로), 세상의 (부)족한 것들에 대해서">올해<small>187건 · 37채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="182건 · 38채널 · 석학들의 마켓 (인)사이트, 신한 리서치, 키움증권 미국주식 톡톡">성장<small>182건 · 38채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="178건 · 37채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel">가격<small>178건 · 37채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="176건 · 41채널 · 그로쓰리서치(Growth Research) [독립리서치], 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트">확대<small>176건 · 41채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="168건 · 42채널 · [메리츠 Tech 김선우, 양승수, 김동관], 석학들의 마켓 (인)사이트, 신한 리서치">전망<small>168건 · 42채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="162건 · 39채널 · 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트, 단독 &amp; 속보 뉴스 콜렉터">생산<small>162건 · 39채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="154건 · 17채널 · AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, 공시정보알림-전체공시">잠정<small>154건 · 17채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="150건 · 25채널 · 세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치], 씽크풀-주식투자속보(구 AI라씨로)">급증<small>150건 · 25채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="148건 · 18채널 · AWAKE - 실시간 주식 공시 정리채널, 석학들의 마켓 (인)사이트, Yeouido Lab_여의도 톺아보기">순이익<small>148건 · 18채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="143건 · 10채널 · AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, 공시정보알림-전체공시">공정공시<small>143건 · 10채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="138건 · 38채널 · 세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치], 석학들의 마켓 (인)사이트">인프라<small>138건 · 38채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="137건 · 42채널 · 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트">위해<small>137건 · 42채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="134건 · 36채널 · 세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터, 석학들의 마켓 (인)사이트">삼성전자<small>134건 · 36채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="132건 · 29채널 · 석학들의 마켓 (인)사이트, 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 세상의 (부)족한 것들에 대해서">데이터<small>132건 · 29채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="130건 · 43채널 · 석학들의 마켓 (인)사이트, 머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈, 신한 리서치">주가<small>130건 · 43채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="130건 · 11채널 · 씽크풀-주식투자속보(구 AI라씨로), 세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터">목표가<small>130건 · 11채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="126건 · 35채널 · 석학들의 마켓 (인)사이트, 그로쓰리서치(Growth Research) [독립리서치], 머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈">규모<small>126건 · 35채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="126건 · 40채널 · 키움증권 미국주식 톡톡, 세상의 (부)족한 것들에 대해서, 석학들의 마켓 (인)사이트">상향<small>126건 · 40채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="123건 · 29채널 · 세상의 (부)족한 것들에 대해서, 그로쓰리서치(Growth Research) [독립리서치], 석학들의 마켓 (인)사이트">메모리<small>123건 · 29채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="122건 · 17채널 · AWAKE - 실시간 주식 공시 정리채널, 세상의 (부)족한 것들에 대해서, 사회·이슈 채널_서울경제">영업익<small>122건 · 17채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="121건 · 44채널 · 석학들의 마켓 (인)사이트, 그로쓰리서치(Growth Research) [독립리서치], 신한 리서치">지속<small>121건 · 44채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="119건 · 43채널 · 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서, [메리츠 Tech 김선우, 양승수, 김동관]">신규<small>119건 · 43채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="119건 · 28채널 · AWAKE - 실시간 주식 공시 정리채널, 석학들의 마켓 (인)사이트, Yeouido Lab_여의도 톺아보기">예상치<small>119건 · 28채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="118건 · 37채널 · Polaristimes, 한투증권 중국/신흥국 정정영, [주식픽!] - 가장 빠른 주식뉴스">중국<small>118건 · 37채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="116건 · 10채널 · AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, Yeouido Lab_여의도 톺아보기">연결재무제표기준영업<small>116건 · 10채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="114건 · 20채널 · 석학들의 마켓 (인)사이트, [주식] 증권사 리포트, 신한 리서치">매수<small>114건 · 20채널</small></span>
+<span class="keyword-chip keyword-chip--l2" title="113건 · 36채널 · 피에이뉴스 글로벌 뉴스 채널 PANews Official Channel, 석학들의 마켓 (인)사이트, 세상의 (부)족한 것들에 대해서">계약<small>113건 · 36채널</small></span></div>
+                </article>
+                <article class="analysis-panel">
+                  <h3>종목 언급 히트맵</h3>
+                  <p>장전·오전·장중 후반·이후 구간별로 회사·티커 후보 언급량을 집계했습니다.</p>
+                  <div class="heatmap" role="table" aria-label="종목 언급 히트맵">
+                    <div class="heatmap__row heatmap__row--head" role="row">
+                      <span>종목</span>
+                      <span class="heatmap__bucket">장전<br>06:00-09:00</span><span class="heatmap__bucket">오전<br>09:00-12:00</span><span class="heatmap__bucket">장중 후반<br>12:00-15:30</span><span class="heatmap__bucket">이후<br>15:30-익일 06:00</span>
+                    </div>
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>삼성전자</strong>
+                <span>149건 · 38채널</span>
+                <em>세상의 (부)족한 것들에 대해서, 단독 &amp; 속보 뉴스 콜렉터, 석학들의 마켓 (인)사이트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l3" aria-label="삼성전자 장전 06:00-09:00 37건">37</span><span class="heatmap__cell heatmap__cell--l2" aria-label="삼성전자 오전 09:00-12:00 27건">27</span><span class="heatmap__cell heatmap__cell--l2" aria-label="삼성전자 장중 후반 12:00-15:30 20건">20</span><span class="heatmap__cell heatmap__cell--l5" aria-label="삼성전자 이후 15:30-익일 06:00 65건">65</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>SK하이닉스</strong>
+                <span>95건 · 32채널</span>
+                <em>세상의 (부)족한 것들에 대해서, 머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈, 그로쓰리서치(Growth Res</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l2" aria-label="SK하이닉스 장전 06:00-09:00 31건">31</span><span class="heatmap__cell heatmap__cell--l1" aria-label="SK하이닉스 오전 09:00-12:00 15건">15</span><span class="heatmap__cell heatmap__cell--l1" aria-label="SK하이닉스 장중 후반 12:00-15:30 11건">11</span><span class="heatmap__cell heatmap__cell--l3" aria-label="SK하이닉스 이후 15:30-익일 06:00 38건">38</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>현대차</strong>
+                <span>82건 · 23채널</span>
+                <em>석학들의 마켓 (인)사이트, 단독 &amp; 속보 뉴스 콜렉터, 매일경제TV MBN골드 조선일 대표 무료 주식 </em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="현대차 장전 06:00-09:00 13건">13</span><span class="heatmap__cell heatmap__cell--l2" aria-label="현대차 오전 09:00-12:00 29건">29</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차 장중 후반 12:00-15:30 14건">14</span><span class="heatmap__cell heatmap__cell--l2" aria-label="현대차 이후 15:30-익일 06:00 26건">26</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>한화</strong>
+                <span>58건 · 17채널</span>
+                <em>석학들의 마켓 (인)사이트, 공시정보알림-전체공시, 씽크풀-주식투자속보(구 AI라씨로)</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="한화 장전 06:00-09:00 10건">10</span><span class="heatmap__cell heatmap__cell--l1" aria-label="한화 오전 09:00-12:00 12건">12</span><span class="heatmap__cell heatmap__cell--l1" aria-label="한화 장중 후반 12:00-15:30 12건">12</span><span class="heatmap__cell heatmap__cell--l2" aria-label="한화 이후 15:30-익일 06:00 24건">24</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>HD현대</strong>
+                <span>56건 · 20채널</span>
+                <em>씽크풀-주식투자속보(구 AI라씨로), [주식] 증권사 리포트, 석학들의 마켓 (인)사이트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="HD현대 장전 06:00-09:00 13건">13</span><span class="heatmap__cell heatmap__cell--l2" aria-label="HD현대 오전 09:00-12:00 25건">25</span><span class="heatmap__cell heatmap__cell--l1" aria-label="HD현대 장중 후반 12:00-15:30 7건">7</span><span class="heatmap__cell heatmap__cell--l1" aria-label="HD현대 이후 15:30-익일 06:00 11건">11</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>카카오</strong>
+                <span>41건 · 9채널</span>
+                <em>공시정보알림-전체공시, [주식] 증권사 리포트, 석학들의 마켓 (인)사이트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="카카오 장전 06:00-09:00 10건">10</span><span class="heatmap__cell heatmap__cell--l1" aria-label="카카오 오전 09:00-12:00 6건">6</span><span class="heatmap__cell heatmap__cell--l1" aria-label="카카오 장중 후반 12:00-15:30 7건">7</span><span class="heatmap__cell heatmap__cell--l2" aria-label="카카오 이후 15:30-익일 06:00 18건">18</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>hd현대중공업</strong>
+                <span>39건 · 14채널</span>
+                <em>씽크풀-주식투자속보(구 AI라씨로), [주식] 증권사 리포트, 석학들의 마켓 (인)사이트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="hd현대중공업 장전 06:00-09:00 12건">12</span><span class="heatmap__cell heatmap__cell--l2" aria-label="hd현대중공업 오전 09:00-12:00 18건">18</span><span class="heatmap__cell heatmap__cell--l1" aria-label="hd현대중공업 장중 후반 12:00-15:30 5건">5</span><span class="heatmap__cell heatmap__cell--l1" aria-label="hd현대중공업 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>KT&amp;G</strong>
+                <span>31건 · 6채널</span>
+                <em>석학들의 마켓 (인)사이트, 씽크풀-주식투자속보(구 AI라씨로), [주식] 증권사 리포트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 장전 06:00-09:00 13건">13</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 오전 09:00-12:00 10건">10</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 장중 후반 12:00-15:30 4건">4</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT&amp;G 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>현대모비스</strong>
+                <span>23건 · 14채널</span>
+                <em>매일경제TV MBN골드 조선일 대표 무료 주식 채널, 매일경제TV MBN골드 김태윤 대표 무료 주식 채널</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="현대모비스 장전 06:00-09:00 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대모비스 오전 09:00-12:00 9건">9</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대모비스 장중 후반 12:00-15:30 8건">8</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대모비스 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>현대차그룹</strong>
+                <span>19건 · 14채널</span>
+                <em>단독 &amp; 속보 뉴스 콜렉터, 실시간 주식 뉴스, 지엘리서치 GL RESEARCH_ 주식, 경제, 독립리서</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="현대차그룹 장전 06:00-09:00 1건">1</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차그룹 오전 09:00-12:00 7건">7</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차그룹 장중 후반 12:00-15:30 7건">7</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대차그룹 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>KT</strong>
+                <span>17건 · 16채널</span>
+                <em>신한 리서치, 석학들의 마켓 (인)사이트, 몰?루</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="KT 장전 06:00-09:00 3건">3</span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT 오전 09:00-12:00 2건">2</span><span class="heatmap__cell heatmap__cell--l0" aria-label="KT 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="KT 이후 15:30-익일 06:00 12건">12</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>금호석유화학</strong>
+                <span>17건 · 7채널</span>
+                <em>씽크풀-주식투자속보(구 AI라씨로), [주식] 증권사 리포트, 매일경제TV MBN골드 조선일 대표 무료 </em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="금호석유화학 장전 06:00-09:00 5건">5</span><span class="heatmap__cell heatmap__cell--l1" aria-label="금호석유화학 오전 09:00-12:00 6건">6</span><span class="heatmap__cell heatmap__cell--l1" aria-label="금호석유화학 장중 후반 12:00-15:30 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="금호석유화학 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>LG유플러스</strong>
+                <span>14건 · 3채널</span>
+                <em>[주식] 증권사 리포트, 석학들의 마켓 (인)사이트, AWAKE - 실시간 주식 공시 정리채널</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="LG유플러스 장전 06:00-09:00 5건">5</span><span class="heatmap__cell heatmap__cell--l1" aria-label="LG유플러스 오전 09:00-12:00 3건">3</span><span class="heatmap__cell heatmap__cell--l1" aria-label="LG유플러스 장중 후반 12:00-15:30 3건">3</span><span class="heatmap__cell heatmap__cell--l1" aria-label="LG유플러스 이후 15:30-익일 06:00 3건">3</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>하이브</strong>
+                <span>13건 · 9채널</span>
+                <em>단독 &amp; 속보 뉴스 콜렉터, 그로쓰리서치(Growth Research) [독립리서치], [주식픽!] - </em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="하이브 장전 06:00-09:00 3건">3</span><span class="heatmap__cell heatmap__cell--l1" aria-label="하이브 오전 09:00-12:00 4건">4</span><span class="heatmap__cell heatmap__cell--l1" aria-label="하이브 장중 후반 12:00-15:30 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="하이브 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>현대지에프홀딩스</strong>
+                <span>12건 · 5채널</span>
+                <em>AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, 산업뉴스 채널_서울경제</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l0" aria-label="현대지에프홀딩스 장전 06:00-09:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="현대지에프홀딩스 오전 09:00-12:00 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대지에프홀딩스 장중 후반 12:00-15:30 9건">9</span><span class="heatmap__cell heatmap__cell--l1" aria-label="현대지에프홀딩스 이후 15:30-익일 06:00 3건">3</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>기아</strong>
+                <span>11건 · 9채널</span>
+                <em>단독 &amp; 속보 뉴스 콜렉터, 석학들의 마켓 (인)사이트, 산업뉴스 채널_서울경제</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="기아 장전 06:00-09:00 1건">1</span><span class="heatmap__cell heatmap__cell--l1" aria-label="기아 오전 09:00-12:00 4건">4</span><span class="heatmap__cell heatmap__cell--l1" aria-label="기아 장중 후반 12:00-15:30 2건">2</span><span class="heatmap__cell heatmap__cell--l1" aria-label="기아 이후 15:30-익일 06:00 4건">4</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>동원산업</strong>
+                <span>9건 · 5채널</span>
+                <em>AWAKE - 실시간 주식 공시 정리채널, 공시정보알림-주요공시, 산업뉴스 채널_서울경제</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l0" aria-label="동원산업 장전 06:00-09:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="동원산업 오전 09:00-12:00 0건"></span><span class="heatmap__cell heatmap__cell--l0" aria-label="동원산업 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="동원산업 이후 15:30-익일 06:00 9건">9</span>
+            </div>
+
+
+            <div class="heatmap__row">
+              <div class="heatmap__name">
+                <strong>고려아연</strong>
+                <span>9건 · 5채널</span>
+                <em>신한 리서치, 세상의 (부)족한 것들에 대해서, [주식] 증권사 리포트</em>
+              </div>
+              <span class="heatmap__cell heatmap__cell--l1" aria-label="고려아연 장전 06:00-09:00 6건">6</span><span class="heatmap__cell heatmap__cell--l1" aria-label="고려아연 오전 09:00-12:00 1건">1</span><span class="heatmap__cell heatmap__cell--l0" aria-label="고려아연 장중 후반 12:00-15:30 0건"></span><span class="heatmap__cell heatmap__cell--l1" aria-label="고려아연 이후 15:30-익일 06:00 2건">2</span>
+            </div>
+
+                  </div>
+                </article>
+              </div>
+            </div>
+
     </section>
     <section class="section">
       <h2>시장 언급 신호</h2>
@@ -374,7 +1220,7 @@
             <a class="story-card__source" href="https://www.mk.co.kr/news/stock/12041720" target="_blank" rel="noopener noreferrer">기사</a>
           </div>
           <ul class="story-card__bullets">
-            <li>어레이 디지털, 최대주주 TDS의 비구속 인수 제안 접수 확인됨</li><li>소액주주 이익 보호 장치 마련됐으나, 제안 불확실성 부각됨</li>
+            <li>💡 AI 분석 최대주주의 비구속 인수 제안은 소액주주에게 프리미엄 매각 기회를 제공할 수 있어 긍정적입니다. 특별위원회가 독립 자문사를 선임해 보도됨</li><li>감독·공시 제도 변화와 투자자 보호 쟁점 있음</li>
           </ul>
           <div class="mention-list">
             <a class="mention" href="https://t.me/twomachine/7514" target="_blank" rel="noopener noreferrer"><span>서초동 투자머신 · keyword</span><strong>관련 문맥: ... 토리 설계를 적용합니다. 2. 인프라 확장 및 전력 확보 로드맵 IREN은 디지털 수요와 물리적 인프라 공급 사이의 &#x27;구조적 단절&#x27;을 해결하는 것을 핵심 경쟁력으로 내세우고 있습니다. 확...</strong></a><a class="mention" href="https://t.me/gatubang/51431" target="_blank" rel="noopener noreferrer"><span>가투방(DCTG) 저장소 · keyword</span><strong>LIG Defense &amp; Aerospace (LIG넥스원) - 1Q26 surprise: Raise PO to W1,360,000 (1Q26 어닝 서프라이즈, 목표주가 136만원으로 상향) Source: B...</strong></a><a class="mention" href="https://t.me/ivy77788/4450" target="_blank" rel="noopener noreferrer"><span>플렉서블 리서치 · keyword</span><strong>관련 문맥: ... simplywall.st CLARITY Act 안이 Circle을 미국 &#x27;디지털 달러&#x27; 핵심 인프라로 재편할 가능성. 규제 승인으로 전략적 지위 강화. 🌐 simplywall.st · 🔗...</strong></a><a class="mention" href="https://t.me/merITz_tech/16821" target="_blank" rel="noopener noreferrer"><span>[메리츠 Tech 김선우, 양승수, 김동관] · keyword</span><strong>[메리츠증권 전기전자/IT부품 양승수] ▶ 4월 대만 AP 업체 MediaTek 매출액 46,736.6백만대만달러(-26.1% MoM, -4.1% YoY) 발표 - 4월 매출은 스마트폰 고객사의 재고 조정과...</strong></a>
@@ -395,7 +1241,7 @@
             <a class="story-card__source" href="https://www.mk.co.kr/news/stock/12041583" target="_blank" rel="noopener noreferrer">기사</a>
           </div>
           <ul class="story-card__bullets">
-            <li>케이이 홀딩스, 4월 자사주 매입·소각으로 발행주식 3,443만주 감소 확인됨</li><li>적극적 주주환원 정책이 주당 가치 상승에 긍정적으로 작용함</li>
+            <li>4월 발행주식 수 3,443만주 감소, 자사주 매입·소각 지속 2026년 EPS 0.5747달러로 전년비 49.66% 증가 전망 2027년 매 보도됨</li><li>주주환원 실행 가능성과 공시 구체성 확인 필요 있음</li>
           </ul>
           <div class="mention-list">
             <a class="mention" href="https://t.me/darthacking/140032" target="_blank" rel="noopener noreferrer"><span>AWAKE - 실시간 주식 공시 정리채널 · keyword</span><strong>관련 문맥: 2026.05.08 14:21:34 기업명: 현대지에프홀딩스(시가총액: 2조 3,183억) A005440 보고서명: 수시공시의무관련사항(공정공시) 제목 : 주주환원 정책 * 주요내용 □ 기존 배...</strong></a><a class="mention" href="https://t.me/mbngoldcsi/25160" target="_blank" rel="noopener noreferrer"><span>매일경제TV MBN골드 조선일 대표 무료 주식 채널 · keyword</span><strong>관련 문맥: ... 업체인 월테크놀러지 인수로 반도체 사업 경쟁력 강화 기대감. - 자회사 한솔홀딩스의 450억원 유상증자로 인한 자본 확충 호재. 코스맥스엔비티 (1,401억) +29.8% - 국내외 주요...</strong></a><a class="mention" href="https://t.me/mbngoldcsi/25159" target="_blank" rel="noopener noreferrer"><span>매일경제TV MBN골드 조선일 대표 무료 주식 채널 · keyword</span><strong>관련 문맥: ... 가 : 130,000원(🔺18.18%) - 제목 : 지분법 기저효과로 이익 감소, 주주환원 기조는 유지 - 내용 : 주요 Q&amp;A - 주주환원 정책 유지, 투자 기조는 보수적 접근 - 기관...</strong></a><a class="mention" href="https://t.me/daolresearch/14161" target="_blank" rel="noopener noreferrer"><span>다올투자증권 리서치센터 · keyword</span><strong>관련 문맥: ... 일부로 기보유 자사주 약 9.5% 전량 소각 완료했으며, 하반기 중 자사주 매입 진행 및 신규 주주환원 정책 발표 예정. 신규 주주환원 정책은 배당 강화가 중심이며, 향후 배당은 글로벌...</strong></a>
@@ -416,7 +1262,7 @@
             <a class="story-card__source" href="https://www.sisaon.co.kr/news/articleView.html?idxno=200903" target="_blank" rel="noopener noreferrer">기사</a>
           </div>
           <ul class="story-card__bullets">
-            <li>서브노티카 2, 경영권 분쟁 이후 얼리 액세스 출시 예정임 보도됨</li><li>경영권 이슈가 신작 흥행과 기업 이미지에 변수로 작용함</li>
+            <li>오는 15일, 언노운 월즈의 신작 ‘서브노티카 2’가 얼리 액세스로 공개될 예정이지만, 이를 둘러싼 시선엔 기대와 불안이 뒤섞여 있다. 34주 보도됨</li><li>주주권 행사와 이사회 책임 쟁점으로 이어짐</li>
           </ul>
           <div class="mention-list">
             <a class="mention" href="https://t.me/getfeed/129415" target="_blank" rel="noopener noreferrer"><span>석학들의 마켓 (인)사이트 · keyword</span><strong>한국가구 기업분석( Space-X 주주) 📝 핵심적 본문 요약 한국가구의 주주 증여는 스페이스X 주식 보유와 연관되어 분석된다. 회사는 식품 유통이 주력이며, 100% 자회사의 높은 수익성이 특징이다. 스페...</strong></a><a class="mention" href="https://t.me/miraebond/2950" target="_blank" rel="noopener noreferrer"><span>[미래에셋증권 채권] 민지희 · keyword</span><strong>카시카리 미니애폴리스 연은 총재 5/7 발언 (투표권 O) - 이란 전쟁을 둘러싼 불확실성으로 인해 미래를 예측하기 어려움 - 호르무즈 해협 폐쇄가 장기화될 경우, 다음 조치는 금리 인상이 될 수도 있음 -...</strong></a>
@@ -468,112 +1314,112 @@
         <tr>
           <td>3</td>
           <td>세상의 (부)족한 것들에 대해서</td>
-          <td>209</td>
+          <td>180</td>
         </tr>
 
 
         <tr>
           <td>4</td>
           <td>석학들의 마켓 (인)사이트</td>
-          <td>160</td>
+          <td>146</td>
         </tr>
 
 
         <tr>
           <td>5</td>
           <td>피에이뉴스 글로벌 뉴스 채널 PANews Official Channel</td>
-          <td>115</td>
+          <td>107</td>
         </tr>
 
 
         <tr>
           <td>6</td>
-          <td>사회·이슈 채널_서울경제</td>
-          <td>64</td>
-        </tr>
-
-
-        <tr>
-          <td>7</td>
           <td>투자의 빅 픽처를 위한 퍼즐 한 조각</td>
           <td>61</td>
         </tr>
 
 
         <tr>
-          <td>8</td>
-          <td>산업뉴스 채널_서울경제</td>
+          <td>7</td>
+          <td>사회·이슈 채널_서울경제</td>
           <td>51</td>
         </tr>
 
 
         <tr>
-          <td>9</td>
-          <td>국제뉴스 채널_서울경제</td>
-          <td>47</td>
+          <td>8</td>
+          <td>산업뉴스 채널_서울경제</td>
+          <td>40</td>
         </tr>
 
 
         <tr>
-          <td>10</td>
+          <td>9</td>
           <td>인포맥스</td>
           <td>40</td>
         </tr>
 
 
         <tr>
-          <td>11</td>
-          <td>공시정보알림-전체공시</td>
+          <td>10</td>
+          <td>국제뉴스 채널_서울경제</td>
           <td>37</td>
         </tr>
 
 
         <tr>
-          <td>12</td>
-          <td>[메리츠 Tech 김선우, 양승수, 김동관]</td>
-          <td>34</td>
-        </tr>
-
-
-        <tr>
-          <td>13</td>
+          <td>11</td>
           <td>인포마켓 infomarket</td>
           <td>34</td>
         </tr>
 
 
         <tr>
-          <td>14</td>
-          <td>머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈</td>
-          <td>32</td>
-        </tr>
-
-
-        <tr>
-          <td>15</td>
-          <td>AWAKE - 실시간 주식 공시 정리채널</td>
+          <td>12</td>
+          <td>[메리츠 Tech 김선우, 양승수, 김동관]</td>
           <td>31</td>
         </tr>
 
 
         <tr>
-          <td>16</td>
-          <td>씽크풀-주식투자속보(구 AI라씨로)</td>
-          <td>28</td>
+          <td>13</td>
+          <td>머니서퍼🏄🏻‍♂️ 가장빠른 주식뉴스📈</td>
+          <td>29</td>
         </tr>
 
 
         <tr>
-          <td>17</td>
+          <td>14</td>
           <td>미국 제약-바이오 주식/약장수</td>
           <td>27</td>
         </tr>
 
 
         <tr>
-          <td>18</td>
+          <td>15</td>
           <td>메모장</td>
           <td>27</td>
+        </tr>
+
+
+        <tr>
+          <td>16</td>
+          <td>AWAKE - 실시간 주식 공시 정리채널</td>
+          <td>26</td>
+        </tr>
+
+
+        <tr>
+          <td>17</td>
+          <td>Polaristimes</td>
+          <td>25</td>
+        </tr>
+
+
+        <tr>
+          <td>18</td>
+          <td>몰?루</td>
+          <td>24</td>
         </tr>
         </tbody>
         </table>
@@ -727,5 +1573,18 @@
       </div>
     </section>
   </div>
+  <script>
+    document.querySelectorAll('[data-analysis-period]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const period = button.getAttribute('data-analysis-period');
+        document.querySelectorAll('[data-analysis-period]').forEach((item) => {
+          item.classList.toggle('is-active', item === button);
+        });
+        document.querySelectorAll('[data-analysis-panel]').forEach((panel) => {
+          panel.classList.toggle('is-active', panel.getAttribute('data-analysis-panel') === period);
+        });
+      });
+    });
+  </script>
 </body>
 </html>

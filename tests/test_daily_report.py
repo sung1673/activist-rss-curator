@@ -233,6 +233,13 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "Telegram 분석" in telegram_html
     assert "키워드 클라우드" in telegram_html
     assert "종목 언급 히트맵" in telegram_html
+    assert 'data-analysis-period="1d"' in telegram_html
+    assert 'data-analysis-period="3d"' in telegram_html
+    assert 'data-analysis-period="7d"' in telegram_html
+    assert 'data-analysis-period="30d"' in telegram_html
+    assert "장전" in telegram_html
+    assert "09:00-12:00" in telegram_html
+    assert "15:30-익일 06:00" in telegram_html
     assert "keyword-chip" in telegram_html
     assert "heatmap__cell" in telegram_html
     assert "한화솔루션" in telegram_html
