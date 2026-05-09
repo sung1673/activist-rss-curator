@@ -53,8 +53,17 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
                         "channel_title": "시장 채널",
                         "telegram_message_id": 7,
                         "posted_at": now.isoformat(),
-                        "text": "한화솔루션 유상증자 관련 시장 언급",
+                        "text": "한화솔루션 유상증자 관련 시장 언급. 주주환원과 이사회 책임 논의가 이어짐",
                         "message_url": "https://t.me/marketnews/7",
+                    },
+                    {
+                        "handle": "marketnews",
+                        "telegram_channel_id": "100",
+                        "channel_title": "시장 채널",
+                        "telegram_message_id": 8,
+                        "posted_at": (now - timedelta(hours=2)).isoformat(),
+                        "text": "삼성전자 자사주 소각과 주주환원 키워드가 반복 언급됨",
+                        "message_url": "https://t.me/marketnews/8",
                     }
                 ],
                 "telegram_article_matches": [
@@ -221,6 +230,13 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "AI 요약 워크벤치" not in telegram_html
     assert "data-workbench-list" not in telegram_html
     assert "시장 언급 신호" in telegram_html
+    assert "Telegram 분석" in telegram_html
+    assert "키워드 클라우드" in telegram_html
+    assert "종목 언급 히트맵" in telegram_html
+    assert "keyword-chip" in telegram_html
+    assert "heatmap__cell" in telegram_html
+    assert "한화솔루션" in telegram_html
+    assert "유상증자" in telegram_html
     assert "주요 이슈와 Telegram 반응" in telegram_html
     assert "최근 Telegram 원문 발췌" in telegram_html
     assert "시장 채널" in telegram_html

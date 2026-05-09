@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from .ai import ai_config, call_github_models
+from .cluster import KNOWN_COMPANIES, extract_company_candidates
 from .config import load_config
 from .dates import format_kst, now_in_timezone, parse_datetime
 from .fetch import USER_AGENT, image_href
@@ -2871,6 +2872,411 @@ def telegram_daily_signal_title(signal: dict[str, object]) -> str:
     return "Telegram 언급 신호"
 
 
+TELEGRAM_DAILY_KEYWORD_STOPWORDS = CONTEXT_EXCERPT_STOPWORDS | {
+    "ai",
+    "a",
+    "b",
+    "c",
+    "com",
+    "co",
+    "kr",
+    "net",
+    "org",
+    "www",
+    "http",
+    "https",
+    "t",
+    "me",
+    "amp",
+    "api",
+    "pdf",
+    "url",
+    "view",
+    "rss",
+    "qoq",
+    "yoy",
+    "clt",
+    "id",
+    "뉴스",
+    "기사",
+    "관련",
+    "문맥",
+    "링크",
+    "보고서",
+    "보고서명",
+    "공시링크",
+    "회사정보",
+    "기업명",
+    "기업정보",
+    "리포트",
+    "자료",
+    "현재",
+    "오늘",
+    "내일",
+    "오전",
+    "오후",
+    "최근",
+    "이번",
+    "대한",
+    "대비",
+    "기준",
+    "내용",
+    "주요",
+    "확인",
+    "합니다",
+    "했습니다",
+    "있습니다",
+    "한다",
+    "했다",
+    "시장",
+    "주식",
+    "종목",
+    "투자",
+    "증권",
+    "채널",
+    "한국투자증권",
+    "한투증권",
+    "서울경제",
+    "프리미엄",
+    "컨버전스",
+    "미디어",
+    "시그널",
+    "signal",
+    "본문보기",
+    "본문",
+    "키워드",
+    "함께",
+    "바른",
+    "길을",
+    "투자의",
+    "네이버뉴스",
+    "다음뉴스",
+    "것으로",
+    "있다",
+    "있는",
+    "이는",
+    "이런",
+    "모든",
+    "전체",
+    "가능성",
+    "보도했습니다",
+    "보도했습니다.",
+    "보도됨",
+    "panews는",
+    "특히",
+    "통해",
+    "없음",
+    "최종",
+    "핵심",
+    "수요가",
+    "있으며",
+    "있고",
+    "따르면",
+    "따라",
+    "아니다",
+    "보고자",
+    "이후",
+    "한국",
+    "요약",
+    "하여",
+    "내용을",
+    "클릭",
+    "읽으십시오",
+    "학습",
+    "향후",
+    "지원",
+    "않으면",
+    "판단은",
+    "여긴",
+    "모른다",
+    "핵심적",
+    "투자책임",
+    "내용이",
+    "전용이다",
+    "sight",
+    "직접해라",
+    "기다릴뿐",
+    "떄까지",
+    "오지",
+    "원문보기",
+    "테마보기",
+    "그것은",
+    "우라가",
+    "부정확할",
+    "인사이트가",
+    "이러한",
+    "하고",
+}
+TELEGRAM_DAILY_KEYWORD_ALIASES = {
+    "벨류업": "밸류업",
+    "valueup": "밸류업",
+    "buyback": "자사주",
+    "governance": "거버넌스",
+    "activism": "행동주의",
+    "activist": "행동주의",
+}
+TELEGRAM_DAILY_COMPANY_STOPWORDS = {
+    "Google",
+    "Google News",
+    "Investing",
+    "Investing.com",
+    "한국투자증권",
+    "한투증권",
+    "서울경제",
+    "LS증권",
+    "대신증권",
+    "키움증권",
+    "하나증권",
+    "현대차증권",
+    "SK증권",
+    "다올투자증권",
+    "유진투자증권",
+    "미래에셋증권",
+    "NH투자증권",
+    "KB증권",
+    "삼성증권",
+    "신한투자증권",
+    "메리츠증권",
+    "연합인포맥스",
+    "매일경제TV",
+    "네이버",
+    "전기전자",
+    "주요주주특정증권",
+    "단순투자",
+    "장기투자",
+    "국제금융",
+    "공동보유",
+    "공급부족",
+    "조각투자",
+    "금융투자",
+    "중앙은행",
+    "석유화학",
+    "글로벌에너지",
+}
+TELEGRAM_DAILY_KNOWN_COMPANY_NAMES = {company.casefold() for company in KNOWN_COMPANIES}
+TELEGRAM_DAILY_COMPANY_NOISE_PATTERN = re.compile(
+    r"(?:특정증권|단순투자|장기투자|국제금융|전기전자|공동보유|공급부족|조각투자|금융투자|네이버뉴스|다음뉴스)"
+)
+
+
+def telegram_daily_message_text(message: dict[str, object]) -> str:
+    return str(message.get("normalized_text") or message.get("text") or "")
+
+
+def telegram_daily_keyword_token(token: str) -> str:
+    cleaned = (token or "").strip(" \t\r\n#@$/\\[](){},.:;·'\"“”‘’<>")
+    return TELEGRAM_DAILY_KEYWORD_ALIASES.get(cleaned.casefold(), cleaned)
+
+
+def telegram_daily_keyword_tokens(text: str) -> list[str]:
+    without_urls = re.sub(r"https?://\S+|www\.\S+|t\.me/\S+", " ", text or "", flags=re.I)
+    tokens: list[str] = []
+    for raw_token in re.findall(r"[가-힣A-Za-z][가-힣A-Za-z0-9&.+_-]{1,}", without_urls):
+        token = telegram_daily_keyword_token(raw_token)
+        lowered = token.casefold()
+        if len(token) < 2 or lowered in TELEGRAM_DAILY_KEYWORD_STOPWORDS:
+            continue
+        if any(part in lowered for part in ("stockinfo", "telegram", "sedaily", "rassiro")):
+            continue
+        if any(lowered.endswith(suffix) for suffix in (".com", ".co.kr", ".kr", ".net", ".org", ".io", ".ai")):
+            continue
+        if re.fullmatch(r"\d+(?:년|월|일|분기|조|억|원|%)?", token):
+            continue
+        if re.fullmatch(r"[A-Za-z]{2}", token) and lowered != "ai":
+            continue
+        if len(token) > 18:
+            token = compact_text(token, max_chars=18)
+        tokens.append(token)
+    return tokens
+
+
+def telegram_daily_keyword_cloud(
+    messages: list[dict[str, object]],
+    signal_rows: list[dict[str, object]],
+    *,
+    limit: int = 34,
+) -> list[dict[str, object]]:
+    counter: Counter[str] = Counter()
+    channel_map: dict[str, set[str]] = defaultdict(set)
+    display_names: dict[str, str] = {}
+    for message in messages:
+        channel = str(message.get("channel_title") or message.get("handle") or "")
+        unique_tokens = set(telegram_daily_keyword_tokens(telegram_daily_message_text(message)))
+        for token in unique_tokens:
+            key = token.casefold()
+            counter[key] += 1
+            display_names.setdefault(key, token)
+            if channel:
+                channel_map[key].add(channel)
+
+    for signal in signal_rows:
+        for keyword in telegram_daily_list(signal.get("top_keywords"), limit=6):
+            token = telegram_daily_keyword_token(keyword)
+            key = token.casefold()
+            if not token or key in TELEGRAM_DAILY_KEYWORD_STOPWORDS:
+                continue
+            counter[key] += 2
+            display_names.setdefault(key, token)
+
+    if not counter:
+        return []
+    max_count = max(counter.values()) or 1
+    rows: list[dict[str, object]] = []
+    for key, count in counter.most_common(limit):
+        level = 3 if max_count <= 1 else 1 + int((count - 1) / max(1, max_count - 1) * 5)
+        rows.append(
+            {
+                "keyword": display_names.get(key, key),
+                "count": count,
+                "channels_count": len(channel_map.get(key, set())),
+                "level": max(1, min(6, level)),
+            }
+        )
+    return rows
+
+
+def telegram_daily_stock_candidates(text: str) -> list[str]:
+    search_text = re.sub(r"네이버뉴스|다음뉴스|Google News|Investing\.com", " ", text or "", flags=re.I)
+    candidates = list(extract_company_candidates(search_text))
+    for match in re.finditer(r"(?:기업명|종목명|회사명)\s*[:：]\s*([가-힣A-Za-z0-9&.\-]{2,24})", text or ""):
+        candidates.append(match.group(1))
+    for match in re.finditer(
+        r"\b(?:NASDAQ|NYSE|AMEX|KOSPI|KOSDAQ|ticker|티커)\s*[:：]?\s*([A-Z][A-Z0-9.\-]{1,7})\b",
+        text or "",
+        flags=re.I,
+    ):
+        candidates.append(match.group(1).upper())
+
+    filtered: list[str] = []
+    stopwords = {value.casefold() for value in TELEGRAM_DAILY_COMPANY_STOPWORDS}
+    for raw_company in candidates:
+        company = re.sub(r"\s+", " ", str(raw_company or "")).strip(" -·,.:;()[]")
+        if not company:
+            continue
+        if company.casefold() in stopwords:
+            continue
+        if company.casefold() not in TELEGRAM_DAILY_KNOWN_COMPANY_NAMES and TELEGRAM_DAILY_COMPANY_NOISE_PATTERN.search(company):
+            continue
+        if company.casefold() not in TELEGRAM_DAILY_KNOWN_COMPANY_NAMES and company.endswith(("금융", "투자", "증권", "전자")) and len(company) <= 6:
+            continue
+        if re.fullmatch(r"\d{1,6}", company):
+            continue
+        if len(company) < 2 or len(company) > 28:
+            continue
+        if any(company != existing and company in existing for existing in filtered):
+            continue
+        filtered.append(company)
+        if len(filtered) >= 4:
+            break
+    return filtered
+
+
+def telegram_daily_time_buckets(
+    start_at: datetime,
+    end_at: datetime,
+    config: dict[str, object],
+    *,
+    bucket_count: int = 4,
+) -> list[dict[str, object]]:
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    total_seconds = max(1.0, (end_at - start_at).total_seconds())
+    step_seconds = total_seconds / bucket_count
+    buckets: list[dict[str, object]] = []
+    for index in range(bucket_count):
+        bucket_start = start_at + timedelta(seconds=step_seconds * index)
+        bucket_end = end_at if index == bucket_count - 1 else start_at + timedelta(seconds=step_seconds * (index + 1))
+        label_start = bucket_start.astimezone(ZoneInfo(timezone_name))
+        label_end = bucket_end.astimezone(ZoneInfo(timezone_name))
+        if label_start.date() == label_end.date():
+            label = f"{label_start:%H:%M}-{label_end:%H:%M}"
+        else:
+            label = f"{label_start:%m.%d %H:%M}-{label_end:%m.%d %H:%M}"
+        buckets.append({"start": bucket_start, "end": bucket_end, "label": label})
+    return buckets
+
+
+def telegram_daily_bucket_index(posted_at: datetime, buckets: list[dict[str, object]]) -> int:
+    for index, bucket in enumerate(buckets):
+        bucket_start = bucket["start"]
+        bucket_end = bucket["end"]
+        if isinstance(bucket_start, datetime) and isinstance(bucket_end, datetime) and bucket_start <= posted_at <= bucket_end:
+            return index
+    return max(0, len(buckets) - 1)
+
+
+def telegram_daily_stock_heatmap(
+    messages: list[dict[str, object]],
+    config: dict[str, object],
+    start_at: datetime,
+    end_at: datetime,
+    *,
+    limit: int = 14,
+) -> tuple[list[str], list[dict[str, object]]]:
+    buckets = telegram_daily_time_buckets(start_at, end_at, config)
+    grouped: dict[str, dict[str, object]] = {}
+    for message in messages:
+        posted_at = telegram_daily_dt(message.get("posted_at"), config)
+        if not posted_at:
+            continue
+        text = telegram_daily_message_text(message)
+        companies = telegram_daily_stock_candidates(text)
+        if not companies:
+            continue
+        channel = str(message.get("channel_title") or message.get("handle") or "")
+        bucket_index = telegram_daily_bucket_index(posted_at, buckets)
+        for company in dict.fromkeys(companies):
+            row = grouped.setdefault(
+                company,
+                {
+                    "company": company,
+                    "count": 0,
+                    "channels": Counter(),
+                    "buckets": [0 for _ in buckets],
+                    "latest_at": "",
+                },
+            )
+            row["count"] = int(row["count"]) + 1
+            row["buckets"][bucket_index] += 1  # type: ignore[index]
+            if channel:
+                row["channels"][channel] += 1  # type: ignore[index]
+            latest = posted_at.isoformat()
+            if latest > str(row.get("latest_at") or ""):
+                row["latest_at"] = latest
+
+    rows: list[dict[str, object]] = []
+    max_cell = 1
+    for row in grouped.values():
+        channel_counter: Counter[str] = row.pop("channels")  # type: ignore[assignment]
+        bucket_values = [int(value) for value in row.get("buckets", [])]
+        max_cell = max(max_cell, *(bucket_values or [1]))
+        rows.append(
+            {
+                **row,
+                "channels_count": len([channel for channel in channel_counter if channel]),
+                "top_channels": [{"label": label, "count": count} for label, count in channel_counter.most_common(3)],
+            }
+        )
+    rows.sort(
+        key=lambda row: (
+            int(row.get("count") or 0),
+            int(row.get("channels_count") or 0),
+            str(row.get("latest_at") or ""),
+        ),
+        reverse=True,
+    )
+    for row in rows:
+        row["max_cell"] = max_cell
+    return [str(bucket.get("label") or "") for bucket in buckets], rows[:limit]
+
+
+def telegram_daily_heat_level(value: int, max_cell: int) -> int:
+    if value <= 0:
+        return 0
+    if max_cell <= 1:
+        return 3
+    return max(1, min(5, 1 + int((value - 1) / max(1, max_cell - 1) * 4)))
+
+
 def render_telegram_daily_html(
     stories: list[dict[str, object]],
     state: dict[str, object],
@@ -2883,6 +3289,8 @@ def render_telegram_daily_html(
     messages = telegram_daily_messages(state, config, start_at, end_at)
     story_rows = telegram_daily_story_rows(stories)
     signal_rows = telegram_daily_signal_rows(state, limit=12)
+    keyword_cloud = telegram_daily_keyword_cloud(messages, signal_rows)
+    heatmap_labels, heatmap_rows = telegram_daily_stock_heatmap(messages, config, start_at, end_at)
     channel_counter: Counter[str] = Counter(
         str(message.get("channel_title") or message.get("handle") or "")
         for message in messages
@@ -2907,6 +3315,31 @@ def render_telegram_daily_html(
         """
         for signal in signal_rows[:6]
     ) or '<p class="empty">아직 표시할 시장 언급 신호가 충분하지 않습니다.</p>'
+
+    keyword_cloud_html = "\n".join(
+        f'<span class="keyword-chip keyword-chip--l{int(row["level"])}" '
+        f'title="{int(row["count"])}건 · {int(row["channels_count"])}채널">'
+        f'{escape(str(row["keyword"]))}<small>{int(row["count"])}</small></span>'
+        for row in keyword_cloud
+    ) or '<p class="empty">키워드를 계산할 Telegram 메시지가 아직 충분하지 않습니다.</p>'
+
+    heatmap_header_html = "".join(f'<span class="heatmap__bucket">{escape(label)}</span>' for label in heatmap_labels)
+    heatmap_rows_html = "\n".join(
+        f"""
+        <div class="heatmap__row">
+          <div class="heatmap__name">
+            <strong>{escape(str(row.get("company") or ""))}</strong>
+            <span>{int(row.get("count") or 0)}건 · {int(row.get("channels_count") or 0)}채널</span>
+          </div>
+          {''.join(
+              f'<span class="heatmap__cell heatmap__cell--l{telegram_daily_heat_level(int(value), int(row.get("max_cell") or 1))}" '
+              f'aria-label="{escape(str(row.get("company") or ""), quote=True)} {escape(heatmap_labels[index] if index < len(heatmap_labels) else "", quote=True)} {int(value)}건">{int(value) if int(value) else ""}</span>'
+              for index, value in enumerate(row.get("buckets", []))
+          )}
+        </div>
+        """
+        for row in heatmap_rows
+    ) or '<p class="empty">종목명으로 묶을 Telegram 언급이 아직 없습니다.</p>'
 
     story_cards_html = "\n".join(
         f"""
@@ -2988,6 +3421,34 @@ def render_telegram_daily_html(
     .metric strong {{ display:block; color:var(--accent-deep); font-size:24px; line-height:1.15; }}
     .section {{ border-top:2px solid var(--ink); margin-top:28px; padding-top:18px; }}
     .section h2 {{ margin:0 0 14px; font-family:Georgia,"Times New Roman",serif; font-size:28px; line-height:1.1; }}
+    .analysis-grid {{ display:grid; grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr); gap:16px; align-items:start; }}
+    .analysis-panel {{ border:1px solid var(--line); background:var(--surface); padding:14px; box-shadow:0 14px 32px rgba(70,43,102,.05); }}
+    .analysis-panel h3 {{ margin:0 0 7px; font-size:16px; color:var(--accent-deep); }}
+    .analysis-panel p {{ margin:0 0 12px; color:var(--muted); font-size:12px; line-height:1.45; }}
+    .keyword-cloud {{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }}
+    .keyword-chip {{ display:inline-flex; align-items:center; gap:5px; border:1px solid rgba(112,55,224,.16); border-radius:999px; padding:5px 9px; background:var(--accent-soft); color:var(--accent-deep); font-weight:900; line-height:1; }}
+    .keyword-chip small {{ color:var(--muted); font-size:10px; font-weight:850; }}
+    .keyword-chip--l1 {{ font-size:11px; opacity:.76; }}
+    .keyword-chip--l2 {{ font-size:12px; opacity:.86; }}
+    .keyword-chip--l3 {{ font-size:13px; }}
+    .keyword-chip--l4 {{ font-size:15px; }}
+    .keyword-chip--l5 {{ font-size:17px; background:#ece3ff; }}
+    .keyword-chip--l6 {{ font-size:20px; background:#e5d8ff; border-color:rgba(112,55,224,.32); }}
+    .heatmap {{ display:grid; gap:7px; overflow-x:auto; padding-bottom:2px; }}
+    .heatmap__row {{ min-width:520px; display:grid; grid-template-columns:minmax(142px,1.15fr) repeat(4,minmax(58px,.62fr)); gap:6px; align-items:stretch; }}
+    .heatmap__row--head {{ color:var(--muted); font-size:11px; font-weight:900; }}
+    .heatmap__name {{ display:grid; gap:2px; border:1px solid var(--line); background:#fff; padding:7px 8px; min-height:40px; }}
+    .heatmap__name strong {{ font-size:13px; line-height:1.2; word-break:keep-all; }}
+    .heatmap__name span {{ color:var(--muted); font-size:10.5px; }}
+    .heatmap__bucket, .heatmap__cell {{ display:flex; align-items:center; justify-content:center; min-height:40px; border:1px solid var(--line); background:#fff; border-radius:7px; text-align:center; }}
+    .heatmap__bucket {{ padding:4px; }}
+    .heatmap__cell {{ color:var(--accent-deep); font-size:12px; font-weight:950; }}
+    .heatmap__cell--l0 {{ color:transparent; background:#fff; }}
+    .heatmap__cell--l1 {{ background:#f7f2ff; }}
+    .heatmap__cell--l2 {{ background:#eee3ff; }}
+    .heatmap__cell--l3 {{ background:#ddccff; }}
+    .heatmap__cell--l4 {{ background:#c6a8ff; }}
+    .heatmap__cell--l5 {{ background:#9b6cf0; color:#fff; }}
     .signal-grid {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }}
     .signal-card, .story-card {{ border:1px solid var(--line); background:var(--surface); padding:14px; box-shadow:0 14px 32px rgba(70,43,102,.05); }}
     .signal-card__meta, .story-card__meta {{ display:flex; flex-wrap:wrap; gap:6px 9px; color:var(--muted); font-size:11px; }}
@@ -3013,7 +3474,12 @@ def render_telegram_daily_html(
       .page {{ padding:18px 14px 50px; }}
       .brand-row {{ align-items:flex-start; flex-direction:column; }}
       .edition {{ text-align:left; }}
-      .metric-grid, .signal-grid, .story-grid, .split {{ grid-template-columns:1fr; }}
+      .metric-grid, .analysis-grid, .signal-grid, .story-grid, .split {{ grid-template-columns:1fr; }}
+      .keyword-chip--l5 {{ font-size:15px; }}
+      .keyword-chip--l6 {{ font-size:17px; }}
+      .heatmap__row {{ min-width:390px; grid-template-columns:minmax(118px,1.1fr) repeat(4,52px); gap:5px; }}
+      .heatmap__name strong {{ font-size:12px; }}
+      .heatmap__bucket, .heatmap__cell {{ min-height:34px; font-size:10px; }}
       .story-card h3 {{ font-size:16px; }}
     }}
   </style>
@@ -3039,6 +3505,27 @@ def render_telegram_daily_html(
         <div class="metric"><span>시장 언급 신호</span><strong>{len(signal_rows)}</strong></div>
       </div>
     </header>
+    <section class="section">
+      <h2>Telegram 분석</h2>
+      <div class="analysis-grid">
+        <article class="analysis-panel">
+          <h3>키워드 클라우드</h3>
+          <p>수집 메시지와 기사 연결 신호에서 반복되는 표현을 추렸습니다. 숫자는 언급 메시지 기준 빈도입니다.</p>
+          <div class="keyword-cloud">{keyword_cloud_html}</div>
+        </article>
+        <article class="analysis-panel">
+          <h3>종목 언급 히트맵</h3>
+          <p>Telegram 메시지에서 포착된 회사·티커 후보를 수집 기간의 시간대별 언급량으로 표시합니다.</p>
+          <div class="heatmap" role="table" aria-label="종목 언급 히트맵">
+            <div class="heatmap__row heatmap__row--head" role="row">
+              <span>종목</span>
+              {heatmap_header_html}
+            </div>
+            {heatmap_rows_html}
+          </div>
+        </article>
+      </div>
+    </section>
     <section class="section">
       <h2>시장 언급 신호</h2>
       <div class="signal-grid">{top_signals_html}</div>
