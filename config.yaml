@@ -337,7 +337,7 @@ state:
   max_articles: 5000
   max_rejected_articles: 1000
   max_published_clusters: 500
-  max_telegram_records: 1000
+  max_telegram_records: 5000
   max_digest_records: 400
 
 priority:
@@ -401,7 +401,7 @@ telegram_sources:
   history_backfill_limit_per_channel: 3000
   history_backfill_channel_limit: 0
   backfill_channel_timeout_seconds: 60
-  backfill_channel_workers: 1
+  backfill_channel_workers: 3
   weak_match_min_overlap: 3
   weak_match_min_strong_overlap: 2
   weak_match_window_hours: 96
@@ -412,11 +412,11 @@ telegram_sources:
   signal_limit: 40
   signal_max_messages_per_signal: 5
   message_retention_days: 365
-  local_state_message_limit: 80000
+  local_state_message_limit: 5000
   max_remote_messages: 500
   remote_batch_size: 300
   discover_enabled: false
-  recommendation_limit: 20
+  recommendation_limit: 30
   auto_join_enabled: false
   auto_join_daily_limit: 0
   auto_join_delay_min_seconds: 3

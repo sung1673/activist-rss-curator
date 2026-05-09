@@ -39,6 +39,25 @@ POSITIVE_CHANNEL_KEYWORDS = {
     "ai",
     "뉴스",
 }
+STRONG_CHANNEL_KEYWORDS = {
+    "공시",
+    "실적",
+    "증권사",
+    "리서치",
+    "리포트",
+    "기업분석",
+    "시장",
+    "매크로",
+    "금리",
+    "채권",
+    "환율",
+    "해외주식",
+    "글로벌",
+    "자본시장",
+    "지배구조",
+    "주주",
+    "밸류업",
+}
 NEGATIVE_CHANNEL_KEYWORDS = {
     "수익보장",
     "리딩방",
@@ -1563,9 +1582,16 @@ def score_channel_candidate(candidate: dict[str, object]) -> int:
     for keyword in POSITIVE_CHANNEL_KEYWORDS:
         if keyword.casefold() in text:
             score += 6
+    for keyword in STRONG_CHANNEL_KEYWORDS:
+        if keyword.casefold() in text:
+            score += 5
     for keyword in NEGATIVE_CHANNEL_KEYWORDS:
         if keyword.casefold() in text:
-            score -= 18
+            score -= 22
+    if any(keyword.casefold() in text for keyword in ("증권사", "리서치", "공시", "기업분석")):
+        score += 8
+    if any(keyword.casefold() in text for keyword in ("급등", "추천", "수익")):
+        score -= 8
     return max(0, min(100, score))
 
 
@@ -1870,6 +1896,156 @@ async def auto_join_candidates(state: dict[str, object], config: dict[str, objec
     return joined
 
 
+async def expand_similar_channels(
+    state: dict[str, object],
+    config: dict[str, object],
+    now: datetime,
+    client: TelegramMessageClient,
+    *,
+    target_multiplier: float = 3.0,
+    target_count: int = 0,
+    recommendation_limit: int = 30,
+    seed_limit: int = 0,
+    seed_min_quality: int = 60,
+    min_quality: int = 70,
+    max_join: int = 0,
+    delay_min_seconds: float = 3.0,
+    delay_max_seconds: float = 9.0,
+    dry_run: bool = False,
+) -> dict[str, object]:
+    """Expand public Telegram sources through high-quality similar-channel recommendations."""
+    ensure_telegram_state(state)
+    current_channels = enabled_channels(state)
+    current_enabled = len(current_channels)
+    computed_target = max(current_enabled, int(round(current_enabled * max(1.0, target_multiplier))))
+    if target_count > 0:
+        computed_target = max(current_enabled, target_count)
+    needed = max(0, computed_target - current_enabled)
+    if max_join > 0:
+        needed = min(needed, max_join)
+
+    existing_keys = {
+        channel_key(channel)
+        for channel in state.get("telegram_source_channels", [])
+        if isinstance(channel, dict)
+    }
+    existing_keys.update(
+        channel_key(candidate)
+        for candidate in state.get("telegram_channel_candidates", [])
+        if isinstance(candidate, dict) and candidate.get("status") == "joined"
+    )
+    seeds = sorted(
+        [
+            channel
+            for channel in current_channels
+            if int(channel.get("quality_score") or score_channel_candidate(channel)) >= seed_min_quality
+        ],
+        key=lambda channel: int(channel.get("quality_score") or score_channel_candidate(channel)),
+        reverse=True,
+    )
+    if seed_limit > 0:
+        seeds = seeds[:seed_limit]
+
+    found = 0
+    eligible: dict[str, dict[str, object]] = {}
+    seed_failures: list[dict[str, object]] = []
+    for seed in seeds:
+        if len(eligible) >= needed and needed > 0:
+            break
+        try:
+            recommendations = await client.recommend_channels(seed, limit=max(1, recommendation_limit))
+        except Exception as exc:  # noqa: BLE001
+            seed["last_recommendation_error"] = error_label(exc)
+            seed_failures.append({"handle": seed.get("handle") or "", "error": error_label(exc)})
+            continue
+        seed["last_recommendation_checked_at"] = datetime_to_iso(now)
+        for candidate in recommendations:
+            if not isinstance(candidate, dict):
+                continue
+            candidate["last_checked_at"] = datetime_to_iso(now)
+            candidate["source"] = candidate.get("source") or "recommendation"
+            candidate_record = upsert_channel_candidate(state, candidate)
+            found += 1
+            if not is_collectable_public_channel(candidate_record):
+                candidate_record["status"] = candidate_record.get("status") or "rejected"
+                candidate_record["failure_reason"] = "not_public_channel"
+                continue
+            key = channel_key(candidate_record)
+            if key in existing_keys or key in eligible:
+                continue
+            score = int(candidate_record.get("quality_score") or score_channel_candidate(candidate_record))
+            if score < min_quality:
+                candidate_record["status"] = candidate_record.get("status") or "pending"
+                candidate_record["failure_reason"] = f"low_quality_{score}"
+                continue
+            candidate_record["status"] = "accepted" if dry_run else "pending_join"
+            eligible[key] = candidate_record
+            if len(eligible) >= needed and needed > 0:
+                break
+
+    joined = failed = 0
+    joined_handles: list[str] = []
+    failed_channels: list[dict[str, object]] = []
+    flood_wait_until_retry = 0
+    join_targets = sorted(
+        eligible.values(),
+        key=lambda candidate: int(candidate.get("quality_score") or score_channel_candidate(candidate)),
+        reverse=True,
+    )
+    if needed > 0:
+        join_targets = join_targets[:needed]
+    if not dry_run:
+        for candidate in join_targets:
+            try:
+                if delay_max_seconds > 0 or delay_min_seconds > 0:
+                    await asyncio.sleep(random.uniform(max(0, delay_min_seconds), max(delay_min_seconds, delay_max_seconds)))
+                await client.join_channel(candidate)
+                candidate["status"] = "joined"
+                candidate["failure_reason"] = None
+                channel = upsert_telegram_channel(
+                    state,
+                    {
+                        **candidate,
+                        "enabled": True,
+                        "joined": True,
+                        "source": "recommendation",
+                        "quality_score": int(candidate.get("quality_score") or score_channel_candidate(candidate)),
+                    },
+                )
+                joined += 1
+                joined_handles.append(str(channel.get("handle") or ""))
+                existing_keys.add(channel_key(channel))
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                label = error_label(exc)
+                candidate["status"] = "failed"
+                candidate["failure_reason"] = label
+                failed_channels.append({"handle": candidate.get("handle") or "", "error": label})
+                wait = flood_wait_seconds(exc)
+                if wait:
+                    flood_wait_until_retry = wait
+                    break
+
+    final_enabled = len(enabled_channels(state)) if not dry_run else current_enabled + min(needed, len(join_targets))
+    return {
+        "telegram_expand_current_enabled": current_enabled,
+        "telegram_expand_target_count": computed_target,
+        "telegram_expand_needed": max(0, computed_target - current_enabled),
+        "telegram_expand_seed_count": len(seeds),
+        "telegram_expand_candidates_found": found,
+        "telegram_expand_eligible_candidates": len(eligible),
+        "telegram_expand_join_targets": len(join_targets),
+        "telegram_expand_joined": joined,
+        "telegram_expand_failed": failed,
+        "telegram_expand_final_enabled": final_enabled,
+        "telegram_expand_joined_handles": joined_handles[:80],
+        "telegram_expand_failed_channels": failed_channels[:20],
+        "telegram_expand_seed_failures": seed_failures[:20],
+        "telegram_expand_retry_after_seconds": flood_wait_until_retry,
+        "dry_run": int(bool(dry_run)),
+    }
+
+
 async def _import_joined_with_client(
     state: dict[str, object],
     client: TelegramMessageClient,
@@ -1878,6 +2054,7 @@ async def _import_joined_with_client(
     enable: bool,
     min_quality: int,
     source: str,
+    max_import: int = 0,
 ) -> dict[str, int]:
     ensure_telegram_state(state)
     imported = updated = skipped = enabled_count = 0
@@ -1888,6 +2065,8 @@ async def _import_joined_with_client(
     }
     joined_channels = await client.list_joined_public_channels(limit=limit)
     for channel in joined_channels:
+        if max_import > 0 and imported >= max_import:
+            break
         if not is_collectable_public_channel(channel):
             skipped += 1
             continue
@@ -1932,6 +2111,7 @@ def import_joined_public_channels(
     enable: bool = False,
     min_quality: int = 0,
     source: str = "discovered",
+    max_import: int = 0,
     client: TelegramMessageClient | None = None,
 ) -> dict[str, int]:
     if client is not None:
@@ -1943,6 +2123,7 @@ def import_joined_public_channels(
                 enable=enable,
                 min_quality=min_quality,
                 source=source,
+                max_import=max_import,
             )
         )
 
@@ -1957,6 +2138,7 @@ def import_joined_public_channels(
                 enable=enable,
                 min_quality=min_quality,
                 source=source,
+                max_import=max_import,
             )
 
     return asyncio.run(run_with_adapter())
@@ -2608,6 +2790,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     discover_parser.add_argument("--limit", type=int, default=20, help="Maximum recommendations per seed channel")
     discover_parser.add_argument("--dry-run", action="store_true", help="Discover and print a summary without writing state.json")
 
+    expand_parser = subparsers.add_parser("expand-similar", help="Join and enable high-quality similar public channels until a target count is reached")
+    expand_parser.add_argument("--target-multiplier", type=float, default=3.0, help="Target enabled-channel multiplier, default triples the current count")
+    expand_parser.add_argument("--target-count", type=int, default=0, help="Absolute target enabled-channel count, 0 uses multiplier")
+    expand_parser.add_argument("--recommendation-limit", type=int, default=30, help="Maximum recommendations per seed channel")
+    expand_parser.add_argument("--seed-limit", type=int, default=0, help="Limit high-quality seed channels, 0 means all")
+    expand_parser.add_argument("--seed-min-quality", type=int, default=60, help="Use only seed channels at or above this quality score")
+    expand_parser.add_argument("--min-quality", type=int, default=70, help="Join only candidate channels at or above this quality score")
+    expand_parser.add_argument("--max-join", type=int, default=0, help="Maximum channels to join in this run, 0 means up to target")
+    expand_parser.add_argument("--delay-min-seconds", type=float, default=3.0, help="Minimum random delay between joins")
+    expand_parser.add_argument("--delay-max-seconds", type=float, default=9.0, help="Maximum random delay between joins")
+    expand_parser.add_argument("--dry-run", action="store_true", help="Discover join targets without joining or writing state.json")
+
     backfill_parser = subparsers.add_parser("backfill-messages", help="Backfill public-channel messages for a historical window")
     backfill_parser.add_argument("--days", type=int, default=14, help="How many days back to collect")
     backfill_parser.add_argument("--limit-per-channel", type=int, default=1000, help="Maximum messages to scan per channel")
@@ -2625,6 +2819,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     import_parser = subparsers.add_parser("import-joined", help="Import public channels already joined by the Telegram reader account")
     import_parser.add_argument("--limit", type=int, default=500, help="Maximum dialogs to scan")
     import_parser.add_argument("--min-quality", type=int, default=0, help="Skip channels below this quality score")
+    import_parser.add_argument("--max-import", type=int, default=0, help="Import at most this many new channels, 0 means unlimited")
     import_parser.add_argument("--enable", action="store_true", help="Enable imported channels for collection immediately")
     import_parser.add_argument("--dry-run", action="store_true", help="Scan and print a summary without writing state.json")
 
@@ -2735,6 +2930,38 @@ def cli_main(argv: list[str] | None = None) -> int:
         summary["dry_run"] = int(bool(args.dry_run))
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0
+    if args.command == "expand-similar":
+        from .dates import now_in_timezone
+
+        register_configured_channels(state, config)
+        target_state = json.loads(json.dumps(state, ensure_ascii=False)) if args.dry_run else state
+        now = now_in_timezone(str(config.get("timezone") or "Asia/Seoul"))
+        adapter = TelethonClientAdapter(config)
+
+        async def run_expand() -> dict[str, object]:
+            async with adapter as opened:
+                return await expand_similar_channels(
+                    target_state,
+                    config,
+                    now,
+                    opened,
+                    target_multiplier=max(1.0, float(args.target_multiplier)),
+                    target_count=max(0, int(args.target_count)),
+                    recommendation_limit=max(1, int(args.recommendation_limit)),
+                    seed_limit=max(0, int(args.seed_limit)),
+                    seed_min_quality=max(0, int(args.seed_min_quality)),
+                    min_quality=max(0, int(args.min_quality)),
+                    max_join=max(0, int(args.max_join)),
+                    delay_min_seconds=max(0.0, float(args.delay_min_seconds)),
+                    delay_max_seconds=max(0.0, float(args.delay_max_seconds)),
+                    dry_run=bool(args.dry_run),
+                )
+
+        summary = asyncio.run(run_expand())
+        if not args.dry_run:
+            save_state(state_path, target_state)
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0 if not summary.get("telegram_expand_failed") else 1
     if args.command == "backfill-messages":
         from .dates import now_in_timezone
 
@@ -2781,6 +3008,7 @@ def cli_main(argv: list[str] | None = None) -> int:
             limit=max(1, int(args.limit)),
             enable=bool(args.enable),
             min_quality=max(0, int(args.min_quality)),
+            max_import=max(0, int(args.max_import)),
         )
         if not args.dry_run:
             save_state(state_path, target_state)

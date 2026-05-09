@@ -332,7 +332,9 @@ def test_daily_report_telegram_message_links_to_report(tmp_path) -> None:
     assert "26년 5월 1일 주주·자본시장 데일리" in message
     assert "전체 리포트 보기" not in message
     assert "주요 기사" not in message
-    assert "메인 기사" in message
+    assert "핵심 브리핑" in message
+    assert "오늘의 중요 기사" in message
+    assert "카테고리별 이슈" in message
     assert "수집 기사 2건" in message
     assert "이슈 " in message
     assert "매체 " in message

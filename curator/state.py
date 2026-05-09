@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -83,7 +84,14 @@ def save_state(path: str | Path, state: dict[str, object]) -> None:
     with tmp_path.open("w", encoding="utf-8", newline="\n") as handle:
         json.dump(state, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
-    tmp_path.replace(state_path)
+    for attempt in range(6):
+        try:
+            tmp_path.replace(state_path)
+            return
+        except PermissionError:
+            if attempt == 5:
+                raise
+            time.sleep(0.2 * (attempt + 1))
 
 
 def clean_duplicate_matches(article: dict[str, object]) -> list[dict[str, object]]:

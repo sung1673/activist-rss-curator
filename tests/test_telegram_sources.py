@@ -16,6 +16,7 @@ from curator.telegram_sources import (
     channel_quality_metrics,
     collect_telegram_sources,
     extract_urls,
+    expand_similar_channels,
     import_joined_public_channels,
     load_env_files,
     mark_deleted_message,
@@ -41,10 +42,12 @@ class FakeTelegramClient:
         *,
         fail_handles: set[str] | None = None,
         joined_channels: list[dict[str, object]] | None = None,
+        recommendations_by_handle: dict[str, list[dict[str, object]]] | None = None,
     ) -> None:
         self.messages_by_handle = messages_by_handle or {}
         self.fail_handles = fail_handles or set()
         self.joined_channels = joined_channels or []
+        self.recommendations_by_handle = recommendations_by_handle or {}
         self.join_calls: list[dict[str, object]] = []
 
     async def get_channel_info(self, channel: dict[str, object]) -> dict[str, object]:
@@ -81,10 +84,12 @@ class FakeTelegramClient:
         return messages[:limit]
 
     async def recommend_channels(self, seed_channel: dict[str, object], *, limit: int) -> list[dict[str, object]]:
-        return [
+        handle = str(seed_channel.get("handle") or "")
+        recommendations = self.recommendations_by_handle.get(handle) or [
             {"handle": "good_stock_news", "title": "경제 증권 주식 뉴스", "description": "공시 실적 환율"},
             {"handle": "bad_vip", "title": "급등주 보장 VIP방", "description": "무료추천 리딩방"},
-        ][:limit]
+        ]
+        return recommendations[:limit]
 
     async def join_channel(self, candidate: dict[str, object]) -> dict[str, object]:
         self.join_calls.append(candidate)
@@ -405,6 +410,70 @@ def test_channel_candidate_scoring() -> None:
 
     assert good > 70
     assert bad < 30
+
+
+def test_expand_similar_channels_joins_high_quality_until_target(config, now) -> None:  # type: ignore[no-untyped-def]
+    state = {
+        "telegram_source_channels": [
+            {"handle": "seed", "title": "증권사 리서치 공시 뉴스", "enabled": True, "quality_score": 88}
+        ]
+    }
+    client = FakeTelegramClient(
+        recommendations_by_handle={
+            "seed": [
+                {"handle": "good_first", "title": "경제 증권 리서치 뉴스", "description": "공시 실적 기업분석"},
+                {"handle": "bad_vip", "title": "급등주 보장 VIP방", "description": "무료추천 리딩방"},
+                {"handle": "good_second", "title": "글로벌 증권 뉴스", "description": "해외주식 환율 채권 리포트"},
+            ]
+        }
+    )
+
+    summary = asyncio.run(
+        expand_similar_channels(
+            state,
+            config,
+            now,
+            client,
+            target_multiplier=3,
+            recommendation_limit=10,
+            delay_min_seconds=0,
+            delay_max_seconds=0,
+        )
+    )
+
+    handles = {channel["handle"] for channel in state["telegram_source_channels"]}  # type: ignore[index]
+    assert summary["telegram_expand_current_enabled"] == 1
+    assert summary["telegram_expand_target_count"] == 3
+    assert summary["telegram_expand_joined"] == 2
+    assert handles == {"seed", "good_first", "good_second"}
+    assert [candidate["handle"] for candidate in client.join_calls] == ["good_first", "good_second"]
+
+
+def test_expand_similar_channels_dry_run_does_not_join(config, now) -> None:  # type: ignore[no-untyped-def]
+    state = {
+        "telegram_source_channels": [
+            {"handle": "seed", "title": "증권사 리서치 공시 뉴스", "enabled": True, "quality_score": 88}
+        ]
+    }
+    client = FakeTelegramClient()
+
+    summary = asyncio.run(
+        expand_similar_channels(
+            state,
+            config,
+            now,
+            client,
+            target_multiplier=3,
+            delay_min_seconds=0,
+            delay_max_seconds=0,
+            dry_run=True,
+        )
+    )
+
+    assert summary["telegram_expand_join_targets"] == 1
+    assert summary["telegram_expand_joined"] == 0
+    assert client.join_calls == []
+    assert len(state["telegram_source_channels"]) == 1  # type: ignore[index]
 
 
 def test_auto_join_disabled_prevents_join_call(config, now) -> None:  # type: ignore[no-untyped-def]

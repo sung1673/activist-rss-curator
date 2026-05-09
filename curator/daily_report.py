@@ -4202,8 +4202,42 @@ def telegram_story_title(story: dict[str, object]) -> str:
     return compact_text(str(story.get("title") or "제목 없음"), max_chars=62)
 
 
+def telegram_story_url(report_url: str, story: dict[str, object]) -> str:
+    story_id = str(story.get("id") or "").strip()
+    return f"{report_url}#{story_id}" if report_url and story_id else report_url
+
+
+def telegram_story_link(report_url: str, story: dict[str, object], *, max_chars: int = 62) -> str:
+    title = compact_text(str(story.get("title") or "제목 없음"), max_chars=max_chars)
+    return html_link(title, telegram_story_url(report_url, story))
+
+
+def telegram_story_brief(story: dict[str, object]) -> str:
+    bullets = story_brief_bullets(story, max_chars=70, max_items=1)
+    if bullets:
+        return bullets[0]
+    return compact_text(str(story.get("summary") or ""), max_chars=70)
+
+
+def telegram_category_summary(stories: list[dict[str, object]], report_url: str) -> list[str]:
+    buckets = category_buckets(stories)
+    lines: list[str] = []
+    for category in REPORT_CATEGORY_ORDER:
+        category_stories = [story for story in buckets.get(category, []) if isinstance(story, dict)]
+        if not category_stories:
+            continue
+        links = " · ".join(telegram_story_link(report_url, story, max_chars=34) for story in category_stories[:2])
+        if not links:
+            continue
+        lines.append(f"• {escape(category)} {len(category_stories)}개: {links}")
+        if len(lines) >= 4:
+            break
+    return lines
+
+
 def build_report_telegram_message(report: dict[str, object]) -> str:
     stories = report.get("stories") if isinstance(report.get("stories"), list) else []
+    stories = [story for story in stories if isinstance(story, dict)]
     report_url = str(report.get("report_url") or "")
     link_label = report_link_label(report)
     stats = report.get("stats") if isinstance(report.get("stats"), dict) else {}
@@ -4223,14 +4257,37 @@ def build_report_telegram_message(report: dict[str, object]) -> str:
     )
     lines = [f"<b>{escape(link_label)}</b>"]
     lines.append(f"수집 기사 {article_count}건 · 이슈 {story_count}개 · 매체 {source_count}개")
+
+    review = str(report.get("review") or "")
+    review_bullets = clean_report_bullets(review, max_bullets=3) or clean_report_bullets(fallback_report_review(stories), max_bullets=3)
+    if review_bullets:
+        lines.append("")
+        lines.append("<b>핵심 브리핑</b>")
+        for bullet in review_bullets[:3]:
+            lines.append(f"• {escape(compact_text(bullet, max_chars=94))}")
+
     if stories:
         lines.append("")
-        lines.append("<b>메인 기사</b>")
-        for story in [story for story in stories if isinstance(story, dict)][:3]:
-            lines.append(f"• {escape(telegram_story_title(story))}")
+        lines.append("<b>오늘의 중요 기사</b>")
+        for index, story in enumerate(stories[:4], start=1):
+            lines.append(f"{index}. {telegram_story_link(report_url, story, max_chars=68)}")
+            brief = telegram_story_brief(story)
+            if brief:
+                lines.append(f"   - {escape(brief)}")
+
+    category_lines = telegram_category_summary(stories, report_url)
+    if category_lines:
+        lines.append("")
+        lines.append("<b>카테고리별 이슈</b>")
+        lines.extend(category_lines)
+
     lines.append("")
-    lines.append(html_link(link_label, report_url))
-    return "\n".join(lines).strip()
+    lines.append("▶ " + html_link(link_label, report_url))
+    message = "\n".join(lines).strip()
+    if len(message) <= 3900:
+        return message
+    trimmed = "\n".join(lines[:2] + ["", "<b>오늘의 중요 기사</b>"] + [f"{index}. {telegram_story_link(report_url, story, max_chars=60)}" for index, story in enumerate(stories[:5], start=1)] + ["", "▶ " + html_link(link_label, report_url)])
+    return trimmed[:3900].rstrip()
 
 
 def send_daily_report(root: Path | None = None) -> dict[str, int]:
