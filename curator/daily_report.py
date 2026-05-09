@@ -14,7 +14,7 @@ import httpx
 
 from .ai import ai_config, call_github_models
 from .config import load_config
-from .dates import format_kst, now_in_timezone
+from .dates import format_kst, now_in_timezone, parse_datetime
 from .fetch import USER_AGENT, image_href
 from .normalize import canonical_url_hash
 from .rss_writer import article_link, article_source_label, compact_text, display_article_title
@@ -44,7 +44,7 @@ from .telegram_publisher import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FEED_DIR = Path("public") / "feed"
-NON_DATE_REPORT_PAGES = {"latest.html", "index.html", "workbench.html", "search.html", "telegram-admin.html"}
+NON_DATE_REPORT_PAGES = {"latest.html", "index.html", "telegram.html", "workbench.html", "search.html", "telegram-admin.html"}
 REPORT_CATEGORY_ORDER = [
     "주주행동·경영권",
     "밸류업·주주환원",
@@ -1686,7 +1686,7 @@ def render_report_html(
         <span><strong>{stats['stories']}</strong>개 이슈</span>
         <span><strong>{stats['articles']}</strong>건 기사</span>
         <span><strong>{stats['sources']}</strong>개 매체</span>
-        <a href="workbench.html">AI 워크벤치 보기</a>
+        <a href="telegram.html">Telegram 데일리 보기</a>
         <a href="search.html">시장 이슈 검색</a>
         <button class="archive-trigger" type="button" data-archive-toggle aria-expanded="false" aria-controls="archive-panel">다른 일자 보기</button>
       </div>
@@ -2785,481 +2785,282 @@ def render_report_html(
 """
 
 
-def workbench_story_payload(story: dict[str, object], config: dict[str, object]) -> dict[str, object]:
-    links = [link for link in (story.get("links") if isinstance(story.get("links"), list) else []) if isinstance(link, dict)]
-    telegram_mentions = [
-        mention
-        for mention in (story.get("telegram_mentions") if isinstance(story.get("telegram_mentions"), list) else [])
-        if isinstance(mention, dict)
+def telegram_daily_dt(value: object, config: dict[str, object]) -> datetime | None:
+    return parse_datetime(value, str(config.get("timezone") or "Asia/Seoul"))
+
+
+def telegram_daily_messages(
+    state: dict[str, object],
+    config: dict[str, object],
+    start_at: datetime,
+    end_at: datetime,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for message in state.get("telegram_source_messages", []):
+        if not isinstance(message, dict) or message.get("deleted_at"):
+            continue
+        posted_at = telegram_daily_dt(message.get("posted_at"), config)
+        if posted_at and start_at <= posted_at <= end_at:
+            rows.append(message)
+    rows.sort(key=lambda item: telegram_daily_dt(item.get("posted_at"), config) or start_at, reverse=True)
+    return rows
+
+
+def telegram_daily_story_rows(stories: list[dict[str, object]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for story in stories:
+        mentions = [
+            mention
+            for mention in (story.get("telegram_mentions") if isinstance(story.get("telegram_mentions"), list) else [])
+            if isinstance(mention, dict)
+        ]
+        if not mentions:
+            continue
+        channels = {
+            str(mention.get("channel_handle") or mention.get("channel_title") or "")
+            for mention in mentions
+            if mention.get("channel_handle") or mention.get("channel_title")
+        }
+        rows.append(
+            {
+                "story": story,
+                "mentions": mentions,
+                "mention_count": len(mentions),
+                "channel_count": len(channels),
+            }
+        )
+    return sorted(rows, key=lambda row: (int(row["mention_count"]), int(row["channel_count"])), reverse=True)
+
+
+def telegram_daily_signal_rows(state: dict[str, object], *, limit: int = 10) -> list[dict[str, object]]:
+    signals = [
+        signal
+        for signal in state.get("telegram_issue_signals", [])
+        if isinstance(signal, dict) and int(signal.get("related_telegram_count") or 0) > 0
     ]
-    return {
-        "id": str(story.get("id") or ""),
-        "title": str(story.get("title") or "제목 없음"),
-        "category": str(story.get("category") or "기타"),
-        "datetime": date_label(story.get("datetime"), config),
-        "source_line": str(story.get("source_line") or story.get("primary_source") or ""),
-        "summary": story_summary_for_display(story),
-        "bullets": story_brief_bullets(story, max_chars=96, max_items=3),
-        "primary_url": str(story.get("primary_url") or ""),
-        "image_url": str(story.get("image_url") or ""),
-        "story_key": str(story.get("story_key") or ""),
-        "db_query": str(story.get("db_query") or story.get("title") or ""),
-        "links": links[:12],
-        "telegram_mentions": telegram_mentions[:5],
-    }
+    signals.sort(
+        key=lambda signal: (
+            float(signal.get("confidence_score") or 0),
+            int(signal.get("related_telegram_channels_count") or 0),
+            int(signal.get("related_telegram_count") or 0),
+        ),
+        reverse=True,
+    )
+    return signals[:limit]
 
 
-def render_workbench_html(
+def telegram_daily_excerpt(value: object, *, max_chars: int = 150) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    return compact_text(text, max_chars=max_chars)
+
+
+def telegram_daily_list(value: object, *, limit: int = 5) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    rows = [str(item).strip() for item in value if str(item).strip()]
+    return rows[:limit]
+
+
+def telegram_daily_signal_title(signal: dict[str, object]) -> str:
+    raw_title = str(signal.get("signal_title") or "").strip()
+    if raw_title and not raw_title.startswith("기사 매칭 "):
+        return compact_text(raw_title, max_chars=82)
+    keywords = telegram_daily_list(signal.get("top_keywords"), limit=4)
+    if keywords:
+        return compact_text(" · ".join(keywords), max_chars=82)
+    return "Telegram 언급 신호"
+
+
+def render_telegram_daily_html(
     stories: list[dict[str, object]],
+    state: dict[str, object],
     config: dict[str, object],
     start_at: datetime,
     end_at: datetime,
     date_id: str,
     report_url: str,
 ) -> str:
-    story_payloads = [workbench_story_payload(story, config) for story in stories[:40]]
+    messages = telegram_daily_messages(state, config, start_at, end_at)
+    story_rows = telegram_daily_story_rows(stories)
+    signal_rows = telegram_daily_signal_rows(state, limit=12)
+    channel_counter: Counter[str] = Counter(
+        str(message.get("channel_title") or message.get("handle") or "")
+        for message in messages
+        if message.get("channel_title") or message.get("handle")
+    )
+    matched_story_ids = {str(row["story"].get("id") or "") for row in story_rows if isinstance(row.get("story"), dict)}
     start_label = escape(format_kst(start_at, str(config.get("timezone") or "Asia/Seoul")))
     end_label = escape(format_kst(end_at, str(config.get("timezone") or "Asia/Seoul")))
     report_link = escape(report_url, quote=True)
-    data_json = json_script_payload(story_payloads)
-    read_api_url_json = json.dumps(report_read_api_url(), ensure_ascii=False)
     logo = bside_logo_html("bside-logo--top")
+    top_signals_html = "\n".join(
+        f"""
+        <article class="signal-card">
+          <div class="signal-card__meta">
+            <span>{escape(str(signal.get("signal_type") or "signal"))}</span>
+            <strong>{int(signal.get("related_telegram_count") or 0)}건 · {int(signal.get("related_telegram_channels_count") or 0)}채널</strong>
+          </div>
+          <h3>{escape(telegram_daily_signal_title(signal))}</h3>
+          <p>{escape(telegram_daily_excerpt(signal.get("signal_summary") or "", max_chars=112))}</p>
+          <div class="tag-row">{''.join(f'<span>{escape(keyword)}</span>' for keyword in telegram_daily_list(signal.get("top_keywords"), limit=5))}</div>
+        </article>
+        """
+        for signal in signal_rows[:6]
+    ) or '<p class="empty">아직 표시할 시장 언급 신호가 충분하지 않습니다.</p>'
+
+    story_cards_html = "\n".join(
+        f"""
+        <article class="story-card">
+          <div class="story-card__head">
+            <div>
+              <div class="story-card__meta">
+                <span>{escape(str(row["story"].get("category") or "기타"))}</span>
+                <span>{escape(date_label(row["story"].get("datetime"), config))}</span>
+                <span>Telegram {int(row["mention_count"])}건 · {int(row["channel_count"])}채널</span>
+              </div>
+              <h3><a href="{report_link}#{escape(str(row["story"].get("id") or ""), quote=True)}">{escape(str(row["story"].get("title") or "제목 없음"))}</a></h3>
+            </div>
+            <a class="story-card__source" href="{escape(str(row["story"].get("primary_url") or "#"), quote=True)}" target="_blank" rel="noopener noreferrer">기사</a>
+          </div>
+          <ul class="story-card__bullets">
+            {''.join(f'<li>{escape(bullet)}</li>' for bullet in story_brief_bullets(row["story"], max_chars=86, max_items=2))}
+          </ul>
+          <div class="mention-list">
+            {''.join(
+                f'<a class="mention" href="{escape(str(mention.get("message_url") or "#"), quote=True)}" target="_blank" rel="noopener noreferrer">'
+                f'<span>{escape(str(mention.get("channel_title") or mention.get("channel_handle") or "Telegram"))} · {escape(compact_text(str(mention.get("match_type") or "언급"), max_chars=18))}</span>'
+                f'<strong>{escape(telegram_daily_excerpt(mention.get("excerpt") or mention.get("text") or "", max_chars=118))}</strong>'
+                f'</a>'
+                for mention in list(row["mentions"])[:4]
+            )}
+          </div>
+        </article>
+        """
+        for row in story_rows[:18]
+    ) or '<p class="empty">기사와 직접 연결된 Telegram 언급이 아직 없습니다.</p>'
+
+    channel_rows_html = "\n".join(
+        f"""
+        <tr>
+          <td>{rank}</td>
+          <td>{escape(channel)}</td>
+          <td>{count}</td>
+        </tr>
+        """
+        for rank, (channel, count) in enumerate(channel_counter.most_common(18), start=1)
+    ) or '<tr><td colspan="3">수집된 채널 언급이 없습니다.</td></tr>'
+
+    recent_messages_html = "\n".join(
+        f"""
+        <a class="recent-message" href="{escape(str(message.get("message_url") or "#"), quote=True)}" target="_blank" rel="noopener noreferrer">
+          <span>{escape(date_label(telegram_daily_dt(message.get("posted_at"), config), config))} · {escape(str(message.get("channel_title") or message.get("handle") or "Telegram"))}</span>
+          <strong>{escape(telegram_daily_excerpt(message.get("text"), max_chars=136))}</strong>
+        </a>
+        """
+        for message in messages[:24]
+    ) or '<p class="empty">최근 Telegram 메시지가 없습니다.</p>'
+
     return f"""<!doctype html>
 <html lang="ko">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI 워크벤치 - {escape(date_id)}</title>
+  <title>Telegram 데일리 - {escape(date_id)}</title>
   <style>
     :root {{ --ink:#17131f; --muted:#6f6878; --line:#ded7e8; --paper:#fbfafc; --surface:#fff; --accent:#6b35d8; --accent-deep:#42207e; --accent-soft:#f0eafb; --green:#00785f; }}
     * {{ box-sizing:border-box; }}
     body {{ margin:0; background:var(--paper); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Segoe UI",sans-serif; line-height:1.55; }}
     a {{ color:inherit; text-decoration-thickness:1px; text-underline-offset:3px; }}
-    .shell {{ max-width:1220px; margin:0 auto; padding:24px 24px 64px; }}
-    .top {{ display:flex; justify-content:space-between; align-items:center; gap:20px; border-bottom:2px solid var(--ink); padding-bottom:18px; }}
+    .page {{ max-width:1080px; margin:0 auto; padding:24px 22px 68px; }}
+    .brand-row {{ display:flex; justify-content:space-between; gap:16px; align-items:baseline; border-bottom:2px solid var(--ink); padding-bottom:14px; margin-bottom:26px; }}
     .bside-logo {{ display:inline-flex; align-items:center; gap:9px; color:var(--accent); text-decoration:none; }}
-    .bside-logo__image {{ width:92px; height:auto; display:block; color:var(--accent); }}
+    .bside-logo__image {{ width:92px; height:auto; display:block; color:var(--accent); flex:0 0 auto; }}
     .bside-logo__label {{ color:var(--accent); font-size:11px; font-weight:900; letter-spacing:.12em; }}
-    .top__meta {{ color:var(--muted); font-size:12px; text-align:right; }}
-    .hero {{ display:grid; grid-template-columns:minmax(0,1fr) auto; gap:18px; align-items:end; padding:22px 0 18px; border-bottom:1px solid var(--line); }}
-    h1 {{ margin:0; font-family:Georgia,"Times New Roman",serif; font-size:42px; line-height:1; letter-spacing:0; }}
-    .hero p {{ margin:8px 0 0; color:#352e40; font-size:14px; }}
-    .hero a {{ display:inline-flex; border:1px solid var(--accent); border-radius:999px; padding:8px 12px; color:var(--accent-deep); background:var(--accent-soft); font-size:12px; font-weight:850; text-decoration:none; }}
-    .workbench {{ display:grid; grid-template-columns:340px minmax(0,1fr); gap:22px; align-items:start; padding-top:20px; }}
-    .story-list {{ position:sticky; top:16px; max-height:calc(100vh - 32px); overflow:auto; border:1px solid var(--line); background:rgba(255,255,255,.84); }}
-    .story-button {{ width:100%; appearance:none; border:0; border-bottom:1px solid var(--line); background:transparent; text-align:left; padding:13px 14px; cursor:pointer; color:inherit; }}
-    .story-button:hover, .story-button.is-active {{ background:var(--accent-soft); }}
-    .story-button strong {{ display:block; font-size:14px; line-height:1.35; word-break:keep-all; }}
-    .story-button span {{ display:flex; gap:7px; flex-wrap:wrap; margin-top:6px; color:var(--muted); font-size:11px; }}
-    .panel {{ min-height:calc(100vh - 160px); border-top:3px solid var(--accent); background:var(--surface); padding:22px; box-shadow:0 18px 46px rgba(44,27,84,.08); }}
-    .panel__meta {{ display:flex; flex-wrap:wrap; gap:8px; color:var(--muted); font-size:12px; margin-bottom:12px; }}
-    .panel h2 {{ margin:0; max-width:760px; font-size:28px; line-height:1.22; letter-spacing:0; word-break:keep-all; }}
-    .panel__layout {{ display:grid; grid-template-columns:220px minmax(0,1fr); gap:20px; margin-top:18px; align-items:start; }}
-    .panel__image {{ aspect-ratio:4/3; border:1px solid var(--line); background:var(--accent-soft); width:100%; display:flex; align-items:center; justify-content:center; overflow:hidden; color:var(--accent-deep); text-decoration:none; }}
-    .panel__image img {{ width:100%; height:100%; object-fit:cover; display:block; }}
-    .panel__image--placeholder {{ background:linear-gradient(135deg,#f6f1ff,#fff); font-size:13px; font-weight:900; letter-spacing:0; }}
-    .panel__image--placeholder span {{ display:inline-flex; border:1px solid rgba(112,55,224,.2); border-radius:999px; padding:5px 10px; background:#fff; }}
-    .panel__summary {{ margin:0; padding:12px 14px; border-left:3px solid rgba(112,55,224,.5); background:rgba(246,240,255,.58); list-style:none; display:grid; gap:7px; font-size:14px; line-height:1.48; }}
-    .panel__summary li {{ position:relative; padding-left:12px; }}
-    .panel__summary li::before {{ content:""; position:absolute; left:0; top:.72em; width:4px; height:4px; border-radius:50%; background:var(--accent); }}
-    .panel__actions {{ display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }}
-    .panel__actions a, .panel__actions button {{ appearance:none; border:1px solid var(--line); background:#fff; color:var(--ink); border-radius:999px; padding:8px 11px; font:inherit; font-size:12px; font-weight:850; text-decoration:none; cursor:pointer; }}
-    .panel__actions .is-primary {{ border-color:var(--accent); color:var(--accent-deep); background:var(--accent-soft); }}
-    .related {{ margin-top:24px; }}
-    .related__head {{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; color:var(--muted); font-size:12px; }}
-    .related__chips {{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:9px; }}
-    .related__chips span {{ border:1px solid rgba(112,55,224,.18); border-radius:999px; padding:3px 8px; color:var(--accent-deep); background:#fff; font-size:11px; font-weight:850; }}
-    .related__grid {{ display:grid; gap:8px; }}
-    .related-card, .telegram-card {{ display:grid; gap:5px; min-width:0; border:1px solid rgba(112,55,224,.13); background:rgba(255,255,255,.84); padding:10px 11px; color:inherit; text-decoration:none; }}
-    .related-card:hover strong, .telegram-card:hover strong {{ color:var(--accent-deep); text-decoration:underline; text-underline-offset:3px; }}
-    .related-card__meta, .telegram-card__meta {{ display:flex; flex-wrap:wrap; gap:5px 8px; align-items:center; color:var(--muted); font-size:11px; line-height:1.35; }}
-    .related-card strong, .telegram-card strong {{ color:var(--ink); font-size:13px; line-height:1.38; word-break:keep-all; overflow-wrap:anywhere; }}
-    .related-card p, .telegram-card p {{ margin:0; color:#4d4659; font-size:12px; line-height:1.42; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }}
-    .telegram-block {{ display:grid; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }}
-    .telegram-block__head {{ display:flex; justify-content:space-between; gap:12px; color:var(--ink); font-size:12px; font-weight:900; }}
-    .kind {{ display:inline-flex; border:1px solid rgba(112,55,224,.22); border-radius:999px; padding:2px 7px; color:var(--accent-deep); background:#fff; font-size:10.5px; font-weight:850; white-space:nowrap; }}
-    .kind--archive {{ color:var(--green); border-color:rgba(0,120,95,.25); }}
+    .edition {{ color:var(--muted); font-size:12px; text-align:right; }}
+    .hero {{ display:grid; gap:13px; border-bottom:1px solid var(--line); padding-bottom:22px; }}
+    h1 {{ margin:0; font-family:Georgia,"Times New Roman",serif; font-size:clamp(40px,6vw,64px); line-height:1; letter-spacing:0; }}
+    .dek {{ max-width:760px; margin:0; color:#342d3d; font-size:15px; word-break:keep-all; }}
+    .actions, .tag-row {{ display:flex; flex-wrap:wrap; gap:7px; }}
+    .actions a, .tag-row span {{ display:inline-flex; border:1px solid var(--line); border-radius:999px; padding:6px 10px; background:var(--surface); color:var(--accent-deep); text-decoration:none; font-size:12px; font-weight:850; }}
+    .metric-grid {{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-top:8px; }}
+    .metric {{ border:1px solid rgba(112,55,224,.15); background:var(--accent-soft); padding:12px; }}
+    .metric span {{ display:block; color:var(--muted); font-size:11px; font-weight:850; }}
+    .metric strong {{ display:block; color:var(--accent-deep); font-size:24px; line-height:1.15; }}
+    .section {{ border-top:2px solid var(--ink); margin-top:28px; padding-top:18px; }}
+    .section h2 {{ margin:0 0 14px; font-family:Georgia,"Times New Roman",serif; font-size:28px; line-height:1.1; }}
+    .signal-grid {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }}
+    .signal-card, .story-card {{ border:1px solid var(--line); background:var(--surface); padding:14px; box-shadow:0 14px 32px rgba(70,43,102,.05); }}
+    .signal-card__meta, .story-card__meta {{ display:flex; flex-wrap:wrap; gap:6px 9px; color:var(--muted); font-size:11px; }}
+    .signal-card__meta strong {{ color:var(--accent-deep); }}
+    .signal-card h3, .story-card h3 {{ margin:7px 0 7px; font-size:18px; line-height:1.32; word-break:keep-all; }}
+    .signal-card p {{ margin:0 0 10px; color:#4d4659; font-size:13px; line-height:1.46; }}
+    .story-grid {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }}
+    .story-card__head {{ display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }}
+    .story-card__source {{ flex:0 0 auto; border:1px solid var(--accent); border-radius:999px; padding:5px 9px; color:var(--accent-deep); background:var(--accent-soft); text-decoration:none; font-size:11px; font-weight:900; }}
+    .story-card__bullets {{ margin:10px 0 0; padding:10px 12px 10px 24px; border-left:3px solid rgba(112,55,224,.45); background:rgba(246,240,255,.6); color:#342d3d; font-size:13px; line-height:1.45; }}
+    .mention-list {{ display:grid; gap:7px; margin-top:11px; }}
+    .mention, .recent-message {{ display:grid; gap:3px; border:1px solid rgba(112,55,224,.12); background:rgba(255,255,255,.86); padding:9px 10px; color:inherit; text-decoration:none; }}
+    .mention:hover strong, .recent-message:hover strong {{ color:var(--accent-deep); text-decoration:underline; text-underline-offset:3px; }}
+    .mention span, .recent-message span {{ color:var(--muted); font-size:11px; }}
+    .mention strong, .recent-message strong {{ font-size:12.5px; line-height:1.42; color:#322b3e; }}
+    .split {{ display:grid; grid-template-columns:330px minmax(0,1fr); gap:22px; align-items:start; }}
+    table {{ width:100%; border-collapse:collapse; background:#fff; border:1px solid var(--line); }}
+    th, td {{ border-bottom:1px solid var(--line); padding:8px 9px; text-align:left; font-size:12px; }}
+    th {{ color:var(--accent-deep); background:var(--accent-soft); font-weight:900; }}
+    .recent-list {{ display:grid; gap:7px; }}
     .empty {{ color:var(--muted); font-size:13px; padding:12px; border:1px solid var(--line); background:#fff; }}
-    .reader[hidden] {{ display:none; }}
-    .reader {{ position:fixed; top:18px; right:18px; bottom:18px; width:min(620px,46vw); z-index:30; display:grid; grid-template-rows:auto minmax(0,1fr) auto; border:1px solid var(--line); border-top:3px solid var(--accent); background:#fff; box-shadow:0 22px 70px rgba(28,18,56,.2); }}
-    .reader__head {{ display:flex; align-items:flex-start; justify-content:space-between; gap:14px; padding:12px 14px; border-bottom:1px solid var(--line); }}
-    .reader__title {{ min-width:0; font-size:13px; font-weight:900; line-height:1.35; word-break:keep-all; }}
-    .reader__close {{ appearance:none; border:1px solid var(--line); border-radius:999px; background:#fff; color:var(--accent-deep); padding:5px 9px; font:inherit; font-size:12px; font-weight:850; cursor:pointer; }}
-    .reader__body {{ overflow:auto; padding:14px; display:grid; gap:12px; align-content:start; }}
-    .reader__meta {{ display:flex; flex-wrap:wrap; gap:6px 9px; color:var(--muted); font-size:11.5px; }}
-    .reader__body h3 {{ margin:0; font-size:20px; line-height:1.28; word-break:keep-all; }}
-    .reader__body p {{ margin:0; color:#453e4f; font-size:13px; line-height:1.55; }}
-    .reader__note {{ border-left:3px solid rgba(112,55,224,.35); background:var(--accent-soft); padding:10px 12px; color:#3e3550; font-size:12px; line-height:1.5; }}
-    .reader__foot {{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 14px; border-top:1px solid var(--line); color:var(--muted); font-size:11.5px; }}
-    .reader__foot a {{ color:var(--accent-deep); font-weight:850; }}
-    @media (max-width:900px) {{ .workbench {{ grid-template-columns:1fr; }} .story-list {{ position:static; max-height:none; }} .panel__layout {{ grid-template-columns:1fr; }} .reader {{ left:12px; right:12px; top:12px; bottom:12px; width:auto; }} }}
+    @media (max-width:900px) {{
+      .page {{ padding:18px 14px 50px; }}
+      .brand-row {{ align-items:flex-start; flex-direction:column; }}
+      .edition {{ text-align:left; }}
+      .metric-grid, .signal-grid, .story-grid, .split {{ grid-template-columns:1fr; }}
+      .story-card h3 {{ font-size:16px; }}
+    }}
   </style>
 </head>
 <body>
-  <div class="shell">
-    <header class="top">
-      {logo}
-      <div class="top__meta">{start_label}<br>{end_label}</div>
-    </header>
-    <section class="hero">
-      <div>
-        <h1>AI 요약 워크벤치</h1>
-        <p>기사 목록을 벗어나지 않고 요약, 현재 묶음, DB 아카이브 관련 기사를 한 화면에서 확인하는 데스크톱 실험 페이지입니다.</p>
+  <div class="page">
+    <header class="hero">
+      <div class="brand-row">
+        {logo}
+        <div class="edition">{start_label}<br>{end_label}</div>
       </div>
-      <a href="{report_link}">데일리로 돌아가기</a>
+      <h1>Telegram 데일리</h1>
+      <p class="dek">공개 금융·증권 Telegram 채널에서 포착된 시장 언급, 기사 공유, 키워드 확산을 주주·자본시장 데일리의 보조 신호로 정리했습니다. 투자 추천이 아니라 공개 출처 기반의 시장 반응 현황입니다.</p>
+      <div class="actions">
+        <a href="{report_link}">주주·자본시장 데일리로 돌아가기</a>
+        <a href="search.html">시장 이슈 검색</a>
+        <a href="telegram-admin.html">Telegram 수집 현황</a>
+      </div>
+      <div class="metric-grid">
+        <div class="metric"><span>수집 채널</span><strong>{len({str(message.get("handle") or message.get("channel_title") or "") for message in messages if message.get("handle") or message.get("channel_title")})}</strong></div>
+        <div class="metric"><span>Telegram 메시지</span><strong>{len(messages)}</strong></div>
+        <div class="metric"><span>기사 연결 이슈</span><strong>{len(matched_story_ids)}</strong></div>
+        <div class="metric"><span>시장 언급 신호</span><strong>{len(signal_rows)}</strong></div>
+      </div>
+    </header>
+    <section class="section">
+      <h2>시장 언급 신호</h2>
+      <div class="signal-grid">{top_signals_html}</div>
     </section>
-    <main class="workbench">
-      <nav class="story-list" data-workbench-list aria-label="기사 선택"></nav>
-      <section class="panel" data-workbench-panel aria-live="polite"></section>
-    </main>
+    <section class="section">
+        <h2>주요 이슈와 Telegram 반응</h2>
+      <div class="story-grid">{story_cards_html}</div>
+    </section>
+    <section class="section split">
+      <div>
+        <h2>채널별 언급</h2>
+        <table>
+          <thead><tr><th>#</th><th>채널</th><th>건수</th></tr></thead>
+          <tbody>{channel_rows_html}</tbody>
+        </table>
+      </div>
+      <div>
+        <h2>최근 Telegram 원문 발췌</h2>
+        <div class="recent-list">{recent_messages_html}</div>
+      </div>
+    </section>
   </div>
-  <aside class="reader" data-reader hidden aria-label="기사 원문 보기">
-    <div class="reader__head">
-      <div class="reader__title" data-reader-title>기사 원문</div>
-      <button class="reader__close" type="button" data-reader-close>닫기</button>
-    </div>
-    <div class="reader__body" data-reader-body></div>
-    <div class="reader__foot">
-      <span>원문은 언론사 페이지에서 열고, 이 패널은 다음 기사로 돌아오기 위한 보조 화면입니다.</span>
-      <a href="#" target="_blank" rel="noopener noreferrer" data-reader-open>새 탭</a>
-    </div>
-  </aside>
-  <script type="application/json" id="workbench-data">{data_json}</script>
-  <script>
-    const stories = JSON.parse(document.getElementById('workbench-data')?.textContent || '[]');
-    const apiUrl = {read_api_url_json};
-    const list = document.querySelector('[data-workbench-list]');
-    const panel = document.querySelector('[data-workbench-panel]');
-    const reader = document.querySelector('[data-reader]');
-    const readerBody = document.querySelector('[data-reader-body]');
-    const readerTitle = document.querySelector('[data-reader-title]');
-    const readerOpen = document.querySelector('[data-reader-open]');
-    let activeIndex = 0;
-
-    function apiUrlWithAction(url, action) {{
-      if (!url) return '';
-      return `${{url}}${{url.includes('?') ? '&' : '?'}}action=${{encodeURIComponent(action)}}`;
-    }}
-    function escapeHtml(value) {{
-      return String(value ?? '').replace(/[&<>"']/g, (char) => ({{
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;',
-      }}[char]));
-    }}
-    function safeUrl(value) {{
-      try {{
-        const url = new URL(String(value || ''), location.href);
-        return ['http:', 'https:'].includes(url.protocol) ? url.href : '#';
-      }} catch (error) {{
-        return '#';
-      }}
-    }}
-    function compactText(value, max = 90) {{
-      const text = String(value || '').replace(/\\s+/g, ' ').trim();
-      return text.length <= max ? text : `${{text.slice(0, max - 1).trim()}}…`;
-    }}
-    function noImageMarkup() {{
-      return '<div class="panel__image panel__image--placeholder" aria-label="이미지 없음"><span>NO IMAGE</span></div>';
-    }}
-    function storyImageMarkup(story) {{
-      const imageUrl = safeUrl(story.image_url);
-      if (imageUrl === '#') return noImageMarkup();
-      const articleUrl = safeUrl(story.primary_url);
-      return `<a class="panel__image" href="${{escapeHtml(articleUrl)}}" target="_blank" rel="noopener noreferrer" aria-label="기사 이미지 보기"><img data-panel-image src="${{escapeHtml(imageUrl)}}" alt="" referrerpolicy="no-referrer"></a>`;
-    }}
-    function installImageFallback(root = panel) {{
-      const image = root?.querySelector('[data-panel-image]');
-      image?.addEventListener('error', () => {{
-        const wrapper = image.closest('.panel__image');
-        if (wrapper) wrapper.outerHTML = noImageMarkup();
-      }}, {{ once: true }});
-    }}
-    function openReader(story) {{
-      const url = safeUrl(story.primary_url);
-      if (!reader || !readerBody || url === '#') return;
-      reader.hidden = false;
-      if (readerTitle) readerTitle.textContent = compactText(story.title, 82) || '기사 원문';
-      if (readerOpen) readerOpen.href = url;
-      const bullets = Array.isArray(story.bullets) && story.bullets.length ? story.bullets : [story.summary || '요약 정보가 부족합니다.'];
-      readerBody.innerHTML = `
-        <div class="reader__meta"><span>${{escapeHtml(story.category || '기타')}}</span><span>${{escapeHtml(story.datetime || '')}}</span><span>${{escapeHtml(story.source_line || '')}}</span></div>
-        <h3>${{escapeHtml(story.title || '제목 없음')}}</h3>
-        ${{storyImageMarkup(story)}}
-        <ul class="panel__summary">${{bullets.map((bullet) => `<li>${{escapeHtml(bullet)}}</li>`).join('')}}</ul>
-        <div class="reader__note">보안 정책 때문에 외부 언론사 원문을 페이지 안에 안정적으로 삽입하지 않습니다. 새 탭으로 원문을 열고, 이 패널에서 현재 기사 맥락과 다음 기사 이동 흐름을 유지합니다.</div>
-      `;
-      installImageFallback(readerBody);
-    }}
-    function closeReader() {{
-      if (!reader || !readerBody) return;
-      reader.hidden = true;
-      readerBody.innerHTML = '';
-    }}
-    document.querySelector('[data-reader-close]')?.addEventListener('click', closeReader);
-    function urlKey(value) {{
-      try {{
-        const url = new URL(String(value || ''), location.href);
-        url.hash = '';
-        return `${{url.origin}}${{url.pathname.replace(/\\/$/, '')}}${{url.search}}`.toLowerCase();
-      }} catch (error) {{
-        return String(value || '').replace(/#.*$/, '').replace(/\\/$/, '').toLowerCase();
-      }}
-    }}
-    function normalizedTitle(value) {{
-      return String(value || '')
-        .toLowerCase()
-        .replace(/\\s+-\\s+[^-·|]+$/, '')
-        .replace(/[\\[\\]()"“”'‘’·….,:;!?~\\-_/|]/g, ' ')
-        .replace(/\\s+/g, ' ')
-        .trim();
-    }}
-    function rowKey(article) {{
-      const title = normalizedTitle(article.title);
-      return title.length >= 12 ? `title:${{title}}` : `url:${{urlKey(article.canonical_url)}}`;
-    }}
-    function rowQuality(article) {{
-      const url = String(article.canonical_url || '').toLowerCase();
-      let score = 0;
-      if (!url.includes('news.google.com')) score += 3;
-      if (!url.includes('google.com/rss')) score += 1;
-      if (article.summary) score += 1;
-      if (article.image_url) score += 1;
-      return score;
-    }}
-    function compactDateLabelFromValue(value) {{
-      const raw = String(value || '').trim();
-      if (!raw) return '';
-      const direct = raw.match(/^(\\d{{4}})-(\\d{{2}})-(\\d{{2}})[ T](\\d{{2}}):(\\d{{2}})/);
-      if (direct) return `${{direct[2]}}.${{direct[3]}} ${{direct[4]}}:${{direct[5]}}`;
-      const parsed = new Date(raw);
-      if (Number.isNaN(parsed.getTime())) return '';
-      const parts = new Intl.DateTimeFormat('en-CA', {{
-        timeZone: 'Asia/Seoul',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      }}).formatToParts(parsed).reduce((acc, part) => {{
-        acc[part.type] = part.value;
-        return acc;
-      }}, {{}});
-      return parts.month && parts.day && parts.hour && parts.minute ? `${{parts.month}}.${{parts.day}} ${{parts.hour}}:${{parts.minute}}` : '';
-    }}
-    function dateLabel(article) {{
-      for (const key of ['published_at', 'article_published_at', 'feed_published_at', 'seen_at', 'sort_at', 'created_at', 'updated_at', 'datetime']) {{
-        const label = compactDateLabelFromValue(article?.[key]);
-        if (label) return label;
-      }}
-      return '';
-    }}
-    function contextTokens(story) {{
-      const generic = new Set(['관련','기사','보도','뉴스','시장','자본시장','주주','기업','증시','한국어','밸류업','주주환원','자사주','소각','지배구조','경영권','분쟁','소액주주','공시','제도','거래소','코스닥','상장','중복상장','유상증자','물적분할','종료보고서','제출','불성실공시법인','지정','google','news']);
-      const tokens = [];
-      `${{story.title || ''}} ${{story.db_query || ''}}`.match(/[0-9A-Za-z가-힣]{{2,}}/g)?.forEach((token) => {{
-        const normalized = token.toLowerCase();
-        if (!generic.has(normalized) && !tokens.includes(token)) tokens.push(token);
-      }});
-      return tokens.slice(0, 6);
-    }}
-    function matchesStory(article, tokens) {{
-      if (!tokens.length) return false;
-      const weak = new Set(['밸류업','주주환원','자사주','소각','지배구조','경영권','분쟁','소액주주','공시','제도','거래소','코스닥','상장','중복상장','유상증자','물적분할','종료보고서','불성실공시법인','감독','제재']);
-      const text = `${{article.title || ''}} ${{article.summary || ''}} ${{article.source || article.feed_name || ''}}`.toLowerCase();
-      const hits = tokens.filter((token) => text.includes(token.toLowerCase()));
-      return hits.some((token) => token.length >= 3 && !weak.has(token.toLowerCase())) || hits.length >= Math.min(3, Math.max(2, tokens.length));
-    }}
-    function currentRows(story) {{
-      return (Array.isArray(story.links) ? story.links : []).filter((link) => link && link.url && link.title).map((link) => ({{
-        canonical_url: link.url,
-        title: link.title,
-        source: link.source || link.domain || '',
-        feed_name: link.source || link.domain || '',
-        summary: link.summary || '',
-        published_at: link.published_at || '',
-        context_kind: 'current',
-      }}));
-    }}
-    function mergeRows(rows) {{
-      const seen = new Map();
-      rows.flat().forEach((article) => {{
-        if (!article || !article.canonical_url || !article.title) return;
-        const key = rowKey(article);
-        if (!key) return;
-        const previous = seen.get(key);
-        if (!previous || rowQuality(article) > rowQuality(previous)) seen.set(key, article);
-      }});
-      const merged = Array.from(seen.values());
-      return merged.sort((left, right) => String(right.sort_at || right.published_at || '').localeCompare(String(left.sort_at || left.published_at || '')));
-    }}
-    async function fetchArchiveRows(story) {{
-      if (!apiUrl) return [];
-      const batches = [];
-      const tokens = contextTokens(story);
-      for (const params of [
-        story.story_key ? {{ story_key: story.story_key, limit: '16', days: '180' }} : null,
-        story.db_query ? {{ q: story.db_query, limit: '12', days: '180' }} : null,
-      ].filter(Boolean)) {{
-        try {{
-          const query = new URLSearchParams(params);
-          const response = await fetch(`${{apiUrlWithAction(apiUrl, 'articles')}}&${{query.toString()}}`, {{ headers: {{ Accept: 'application/json' }}, credentials: 'omit' }});
-          if (!response.ok) continue;
-          const data = await response.json();
-          if (data && data.ok && Array.isArray(data.articles)) batches.push(data.articles);
-        }} catch (error) {{}}
-      }}
-      const currentKeys = new Set(currentRows(story).map((article) => rowKey(article)));
-      return mergeRows(batches)
-        .filter((article) => !currentKeys.has(rowKey(article)))
-        .filter((article) => matchesStory(article, tokens))
-        .slice(0, 8)
-        .map((article) => ({{ ...article, context_kind: 'archive' }}));
-    }}
-    function matchReasons(article, story) {{
-      const tokens = contextTokens(story);
-      const text = `${{article.title || ''}} ${{article.summary || ''}} ${{article.source || article.feed_name || ''}}`.toLowerCase();
-      const reasons = [];
-      tokens.forEach((token) => {{
-        if (reasons.length < 3 && text.includes(token.toLowerCase())) reasons.push(token);
-      }});
-      return reasons.length ? reasons : [article.context_kind === 'archive' ? '아카이브 관련' : '현재 묶음'];
-    }}
-    function rowSnippet(article, story) {{
-      const text = String(article.summary || article.title || '').replace(/\\s+/g, ' ').trim();
-      if (!text) return '';
-      const tokens = contextTokens(story);
-      const lowered = text.toLowerCase();
-      const hit = tokens.find((token) => lowered.includes(token.toLowerCase()));
-      if (!hit) return compactText(text, 120);
-      const index = Math.max(0, lowered.indexOf(hit.toLowerCase()) - 34);
-      return compactText(`${{index > 0 ? '… ' : ''}}${{text.slice(index, index + 130)}}${{index + 130 < text.length ? ' …' : ''}}`, 132);
-    }}
-    function telegramMatchLabel(value) {{
-      const type = String(value || '');
-      if (type === 'exact_url' || type === 'canonical_url') return 'URL 직접';
-      if (type === 'ticker') return '종목 추정';
-      if (type === 'keyword') return '키워드 추정';
-      return '관련 언급';
-    }}
-    function telegramSnippet(item, story) {{
-      const text = String(item.context_excerpt || item.excerpt || item.text || '').replace(/\\s+/g, ' ').trim();
-      if (!text) return '';
-      if (text.startsWith('관련 문맥:')) return compactText(text, 156);
-      const tokens = contextTokens(story);
-      const lowered = text.toLowerCase();
-      const hit = tokens.find((token) => lowered.includes(token.toLowerCase()));
-      if (!hit) return compactText(text, 142);
-      const index = Math.max(0, lowered.indexOf(hit.toLowerCase()) - 42);
-      return compactText(`관련 문맥: ${{index > 0 ? '... ' : ''}}${{text.slice(index, index + 142)}}${{index + 142 < text.length ? ' ...' : ''}}`, 158);
-    }}
-    function usefulTelegramMentions(story) {{
-      const seen = new Set();
-      const tokens = contextTokens(story);
-      return (Array.isArray(story.telegram_mentions) ? story.telegram_mentions : [])
-        .filter((item) => item && (item.message_url || item.url))
-        .filter((item) => {{
-          const key = item.message_url || item.url;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          const matchType = String(item.match_type || '');
-          if (matchType === 'exact_url' || matchType === 'canonical_url') return true;
-          const score = Number(item.score || 0);
-          const text = `${{item.context_excerpt || ''}} ${{item.excerpt || ''}} ${{item.text || ''}}`.toLowerCase();
-          return score >= 0.53 && (!tokens.length || tokens.some((token) => text.includes(token.toLowerCase())));
-        }})
-        .slice(0, 5);
-    }}
-    function renderList() {{
-      if (!list) return;
-      list.innerHTML = '';
-      stories.forEach((story, index) => {{
-        const button = document.createElement('button');
-        button.className = `story-button${{index === activeIndex ? ' is-active' : ''}}`;
-        button.type = 'button';
-        button.innerHTML = `<strong>${{escapeHtml(compactText(story.title, 76))}}</strong><span><em>${{escapeHtml(story.category || '기타')}}</em><em>${{escapeHtml(story.datetime || '')}}</em><em>${{story.links?.length || 1}}건</em></span>`;
-        button.addEventListener('click', () => openStory(index));
-        list.appendChild(button);
-      }});
-    }}
-    function relatedContextMarkup(rows, story) {{
-      const telegramItems = usefulTelegramMentions(story);
-      if (!rows.length && !telegramItems.length) return '<div class="empty">표시할 관련 기사나 Telegram 언급이 없습니다.</div>';
-      const chips = [
-        rows.length ? `관련 기사 ${{rows.length}}건` : '',
-        rows.length ? `매체 ${{new Set(rows.map((row) => row.source || row.feed_name || '')).size}}곳` : '',
-        telegramItems.length ? `Telegram ${{telegramItems.length}}건` : '',
-      ].filter(Boolean);
-      const articleCards = rows.map((row) => `
-        <a class="related-card" href="${{escapeHtml(safeUrl(row.canonical_url))}}" target="_blank" rel="noopener noreferrer">
-          <div class="related-card__meta">
-            <span class="kind${{row.context_kind === 'archive' ? ' kind--archive' : ''}}">${{row.context_kind === 'archive' ? '아카이브' : '현재 묶음'}}</span>
-            <span>${{escapeHtml(dateLabel(row) || '일시 미상')}}</span>
-            <span>${{escapeHtml(row.source || row.feed_name || '매체 미상')}}</span>
-            <span>${{escapeHtml(matchReasons(row, story).join(' · '))}}</span>
-          </div>
-          <strong>${{escapeHtml(compactText(row.title, 118))}}</strong>
-          ${{rowSnippet(row, story) ? `<p>${{escapeHtml(rowSnippet(row, story))}}</p>` : ''}}
-        </a>
-      `).join('');
-      const telegramCards = telegramItems.map((item) => `
-        <a class="telegram-card" href="${{escapeHtml(safeUrl(item.message_url || item.url))}}" target="_blank" rel="noopener noreferrer">
-          <div class="telegram-card__meta">
-            <span>${{escapeHtml(item.channel_title || item.channel_handle || item.handle || '공개 채널')}}</span>
-            <span>${{escapeHtml(String(item.posted_at || ''))}}</span>
-            <span>${{escapeHtml(telegramMatchLabel(item.match_type))}}</span>
-            ${{Array.isArray(item.risk_flags) ? item.risk_flags.slice(0, 2).map((flag) => `<span>${{escapeHtml(flag)}}</span>`).join('') : ''}}
-          </div>
-          <strong>Telegram 언급</strong>
-          <p>${{escapeHtml(telegramSnippet(item, story))}}</p>
-        </a>
-      `).join('');
-      return `
-        <div class="related__chips">${{chips.map((chip) => `<span>${{escapeHtml(chip)}}</span>`).join('')}}</div>
-        <div class="related__grid">${{articleCards}}</div>
-        ${{telegramItems.length ? `<div class="telegram-block"><div class="telegram-block__head"><strong>Telegram 언급</strong><span>${{telegramItems.length}}건</span></div>${{telegramCards}}</div>` : ''}}`;
-    }}
-    async function openStory(index) {{
-      activeIndex = Math.max(0, Math.min(index, stories.length - 1));
-      renderList();
-      const story = stories[activeIndex] || {{}};
-      const bullets = Array.isArray(story.bullets) && story.bullets.length ? story.bullets : [story.summary || '요약 정보가 부족합니다.'];
-      panel.innerHTML = `
-        <div class="panel__meta"><span>${{escapeHtml(story.category || '기타')}}</span><span>${{escapeHtml(story.datetime || '')}}</span><span>${{escapeHtml(story.source_line || '')}}</span></div>
-        <h2>${{escapeHtml(story.title || '제목 없음')}}</h2>
-        <div class="panel__layout">
-          ${{storyImageMarkup(story)}}
-          <div>
-            <ul class="panel__summary">${{bullets.map((bullet) => `<li>${{escapeHtml(bullet)}}</li>`).join('')}}</ul>
-            <div class="panel__actions">
-              <button class="is-primary" type="button" data-reader-open-story>오른쪽에서 기사 보기</button>
-              <a href="${{escapeHtml(safeUrl(story.primary_url))}}" target="_blank" rel="noopener noreferrer">새 탭</a>
-              <button type="button" data-prev>이전 기사</button>
-              <button type="button" data-next>다음 기사</button>
-            </div>
-          </div>
-        </div>
-        <section class="related">
-          <div class="related__head"><strong>관련 기사</strong><span data-related-status>현재 묶음과 DB 아카이브를 확인하는 중입니다.</span></div>
-          <div data-related-body>${{relatedContextMarkup(currentRows(story), story)}}</div>
-        </section>`;
-      installImageFallback();
-      panel.querySelector('[data-reader-open-story]')?.addEventListener('click', () => openReader(story));
-      panel.querySelector('[data-prev]')?.addEventListener('click', () => openStory(activeIndex - 1));
-      panel.querySelector('[data-next]')?.addEventListener('click', () => openStory(activeIndex + 1));
-      const archiveRows = await fetchArchiveRows(story);
-      const rows = [...currentRows(story), ...archiveRows];
-      panel.querySelector('[data-related-body]').innerHTML = relatedContextMarkup(rows, story);
-      const telegramCount = usefulTelegramMentions(story).length;
-      panel.querySelector('[data-related-status]').textContent = archiveRows.length || telegramCount
-        ? 'DB 아카이브와 Telegram 언급까지 반영했습니다.'
-        : '현재 묶음을 중심으로 표시합니다.';
-    }}
-    renderList();
-    openStory(0);
-  </script>
 </body>
 </html>
 """
@@ -3375,7 +3176,7 @@ def render_search_html(
       <p class="dek">뉴스 기사, 이슈 묶음, Telegram 공개 채널 신호를 한 화면에서 함께 확인합니다. 검색 결과는 투자 추천이 아니라 시장 언급과 공개 출처를 정리한 보조 정보입니다.</p>
       <div class="actions">
         <a href="{report_link}">최신 데일리로 돌아가기</a>
-        <a href="workbench.html">AI 워크벤치</a>
+        <a href="telegram.html">Telegram 데일리</a>
         <a href="telegram-admin.html">Telegram 현황</a>
       </div>
       <form class="search-box" data-search-form>
@@ -4025,7 +3826,7 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
         "standard",
         False,
     )
-    workbench_html = render_workbench_html(stories, config, start_at, end_at, date_id, report_url)
+    telegram_html = render_telegram_daily_html(stories, state, config, start_at, end_at, date_id, report_url)
     search_html = render_search_html(config, start_at, end_at, date_id, report_url)
     return {
         "config": config,
@@ -4035,7 +3836,7 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
         "stories": stories,
         "review": review,
         "html": html,
-        "workbench_html": workbench_html,
+        "telegram_html": telegram_html,
         "search_html": search_html,
         "report_url": report_url,
         "stats": report_stats(stories, clusters, duplicate_records),
@@ -4057,11 +3858,14 @@ def write_report_files(report: dict[str, object], root: Path | None = None) -> l
     dated_path = feed_dir / f"{date_id}.html"
     latest_path = feed_dir / "latest.html"
     index_path = feed_dir / "index.html"
+    telegram_path = feed_dir / "telegram.html"
     workbench_path = feed_dir / "workbench.html"
     search_path = feed_dir / "search.html"
     dated_path.write_text(html, encoding="utf-8", newline="\n")
     latest_path.write_text(html, encoding="utf-8", newline="\n")
-    workbench_path.write_text(normalize_generated_html(str(report.get("workbench_html") or "")), encoding="utf-8", newline="\n")
+    telegram_path.write_text(normalize_generated_html(str(report.get("telegram_html") or "")), encoding="utf-8", newline="\n")
+    if workbench_path.exists():
+        workbench_path.unlink()
     search_path.write_text(normalize_generated_html(str(report.get("search_html") or "")), encoding="utf-8", newline="\n")
     variant_dir = feed_dir / "variants"
     if variant_dir.exists():
@@ -4069,7 +3873,7 @@ def write_report_files(report: dict[str, object], root: Path | None = None) -> l
             stale_path.unlink()
     index_path.write_text(render_report_index(feed_dir), encoding="utf-8", newline="\n")
     refreshed_paths = refresh_existing_report_archive_links(feed_dir, date_id)
-    return [dated_path, latest_path, workbench_path, search_path, index_path, *refreshed_paths]
+    return [dated_path, latest_path, telegram_path, search_path, index_path, *refreshed_paths]
 
 
 def render_report_archive_links(feed_dir: Path, current_date_id: str, *, link_prefix: str = "", max_items: int = 20) -> str:
@@ -4105,7 +3909,11 @@ ARCHIVE_LINKS_PATTERN = re.compile(
 
 def refresh_report_archive_links_in_html(html: str, links_html: str) -> str:
     replacement = r"\1" + links_html + r"\3"
-    return ARCHIVE_LINKS_PATTERN.sub(replacement, html, count=1)
+    updated = ARCHIVE_LINKS_PATTERN.sub(replacement, html, count=1)
+    return (
+        updated.replace('<a href="workbench.html">AI 워크벤치 보기</a>', '<a href="telegram.html">Telegram 데일리 보기</a>')
+        .replace('<a href="workbench.html">AI 워크벤치</a>', '<a href="telegram.html">Telegram 데일리</a>')
+    )
 
 
 def refresh_existing_report_archive_links(feed_dir: Path, current_date_id: str) -> list[Path]:
@@ -4180,7 +3988,7 @@ def render_report_index(feed_dir: Path) -> str:
     <div class="actions">
       <a href="latest.html">최신 데일리</a>
       <a href="search.html">시장 이슈 검색</a>
-      <a href="workbench.html">AI 워크벤치</a>
+      <a href="telegram.html">Telegram 데일리</a>
     </div>
     <ul>{links}</ul>
   </main>
@@ -4200,39 +4008,6 @@ def report_link_label(report: dict[str, object]) -> str:
 
 def telegram_story_title(story: dict[str, object]) -> str:
     return compact_text(str(story.get("title") or "제목 없음"), max_chars=62)
-
-
-def telegram_story_url(report_url: str, story: dict[str, object]) -> str:
-    story_id = str(story.get("id") or "").strip()
-    return f"{report_url}#{story_id}" if report_url and story_id else report_url
-
-
-def telegram_story_link(report_url: str, story: dict[str, object], *, max_chars: int = 62) -> str:
-    title = compact_text(str(story.get("title") or "제목 없음"), max_chars=max_chars)
-    return html_link(title, telegram_story_url(report_url, story))
-
-
-def telegram_story_brief(story: dict[str, object]) -> str:
-    bullets = story_brief_bullets(story, max_chars=70, max_items=1)
-    if bullets:
-        return bullets[0]
-    return compact_text(str(story.get("summary") or ""), max_chars=70)
-
-
-def telegram_category_summary(stories: list[dict[str, object]], report_url: str) -> list[str]:
-    buckets = category_buckets(stories)
-    lines: list[str] = []
-    for category in REPORT_CATEGORY_ORDER:
-        category_stories = [story for story in buckets.get(category, []) if isinstance(story, dict)]
-        if not category_stories:
-            continue
-        links = " · ".join(telegram_story_link(report_url, story, max_chars=34) for story in category_stories[:2])
-        if not links:
-            continue
-        lines.append(f"• {escape(category)} {len(category_stories)}개: {links}")
-        if len(lines) >= 4:
-            break
-    return lines
 
 
 def build_report_telegram_message(report: dict[str, object]) -> str:
@@ -4258,36 +4033,15 @@ def build_report_telegram_message(report: dict[str, object]) -> str:
     lines = [f"<b>{escape(link_label)}</b>"]
     lines.append(f"수집 기사 {article_count}건 · 이슈 {story_count}개 · 매체 {source_count}개")
 
-    review = str(report.get("review") or "")
-    review_bullets = clean_report_bullets(review, max_bullets=3) or clean_report_bullets(fallback_report_review(stories), max_bullets=3)
-    if review_bullets:
-        lines.append("")
-        lines.append("<b>핵심 브리핑</b>")
-        for bullet in review_bullets[:3]:
-            lines.append(f"• {escape(compact_text(bullet, max_chars=94))}")
-
     if stories:
         lines.append("")
-        lines.append("<b>오늘의 중요 기사</b>")
-        for index, story in enumerate(stories[:4], start=1):
-            lines.append(f"{index}. {telegram_story_link(report_url, story, max_chars=68)}")
-            brief = telegram_story_brief(story)
-            if brief:
-                lines.append(f"   - {escape(brief)}")
-
-    category_lines = telegram_category_summary(stories, report_url)
-    if category_lines:
-        lines.append("")
-        lines.append("<b>카테고리별 이슈</b>")
-        lines.extend(category_lines)
+        lines.append("<b>메인 기사</b>")
+        for story in stories[:3]:
+            lines.append(f"• {escape(telegram_story_title(story))}")
 
     lines.append("")
-    lines.append("▶ " + html_link(link_label, report_url))
-    message = "\n".join(lines).strip()
-    if len(message) <= 3900:
-        return message
-    trimmed = "\n".join(lines[:2] + ["", "<b>오늘의 중요 기사</b>"] + [f"{index}. {telegram_story_link(report_url, story, max_chars=60)}" for index, story in enumerate(stories[:5], start=1)] + ["", "▶ " + html_link(link_label, report_url)])
-    return trimmed[:3900].rstrip()
+    lines.append(html_link(link_label, report_url))
+    return "\n".join(lines).strip()
 
 
 def send_daily_report(root: Path | None = None) -> dict[str, int]:

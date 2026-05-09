@@ -81,7 +81,8 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert paths[0].name == "2026-05-01.html"
     assert (tmp_path / "public" / "feed" / "latest.html").exists()
     assert (tmp_path / "public" / "feed" / "index.html").exists()
-    assert (tmp_path / "public" / "feed" / "workbench.html").exists()
+    assert (tmp_path / "public" / "feed" / "telegram.html").exists()
+    assert not (tmp_path / "public" / "feed" / "workbench.html").exists()
     assert (tmp_path / "public" / "feed" / "search.html").exists()
     assert not (tmp_path / "public" / "feed" / "variants" / "memo.html").exists()
     assert not (tmp_path / "public" / "feed" / "variants" / "board.html").exists()
@@ -111,8 +112,9 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "발행일자" in html
     assert "수집기간" in html
     assert "다른 일자 보기" in html
-    assert "AI 워크벤치 보기" in html
-    assert 'href="workbench.html"' in html
+    assert "AI 워크벤치 보기" not in html
+    assert "Telegram 데일리 보기" in html
+    assert 'href="telegram.html"' in html
     assert "시장 이슈 검색" in html
     assert 'href="search.html"' in html
     assert "search-entry" in html
@@ -214,17 +216,17 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "story__sources" in html
     assert "<p>" in html
     assert "한화솔루션 유상증자 정정요구" in html
-    workbench_html = (tmp_path / "public" / "feed" / "workbench.html").read_text(encoding="utf-8")
-    assert "AI 요약 워크벤치" in workbench_html
-    assert "data-workbench-list" in workbench_html
-    assert "fetchArchiveRows" in workbench_html
-    assert "compactDateLabelFromValue" in workbench_html
-    assert "[ T](\\d{2}):(\\d{2})" in workbench_html
-    assert "relatedContextMarkup" in workbench_html
-    assert "related__grid" in workbench_html
-    assert "telegram-card" in workbench_html
-    assert "현재 묶음과 DB 아카이브" in workbench_html
-    assert "NO IMAGE" in workbench_html
+    telegram_html = (tmp_path / "public" / "feed" / "telegram.html").read_text(encoding="utf-8")
+    assert "Telegram 데일리" in telegram_html
+    assert "AI 요약 워크벤치" not in telegram_html
+    assert "data-workbench-list" not in telegram_html
+    assert "시장 언급 신호" in telegram_html
+    assert "주요 이슈와 Telegram 반응" in telegram_html
+    assert "최근 Telegram 원문 발췌" in telegram_html
+    assert "시장 채널" in telegram_html
+    assert "투자 추천이 아니라" in telegram_html
+    assert "Telegram 원문" in telegram_html
+    assert "한화솔루션 유상증자 관련 시장 언급" in telegram_html
     search_html = (tmp_path / "public" / "feed" / "search.html").read_text(encoding="utf-8")
     assert "apiUrlWithAction(readApiUrl, 'search')" in search_html
     assert "runFallbackSearch" in search_html
@@ -234,18 +236,6 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert 'data-tab="official"' in search_html
     assert 'data-tab="history"' in search_html
     assert "market_sensitive" in search_html
-    assert "panel__image--placeholder" in workbench_html
-    assert "오른쪽에서 기사 보기" in workbench_html
-    assert "data-reader-body" in workbench_html
-    assert "외부 언론사 원문을 페이지 안에 안정적으로 삽입하지 않습니다" in workbench_html
-    assert "data-reader-frame" not in workbench_html
-    workbench_data = re.search(r'<script type="application/json" id="workbench-data">(.*?)</script>', workbench_html, re.S)
-    assert workbench_data
-    assert "&quot;" not in workbench_data.group(1)
-    workbench_stories = json.loads(workbench_data.group(1))
-    assert workbench_stories
-    assert all(isinstance(story.get("title"), str) for story in workbench_stories)
-    assert any(story.get("telegram_mentions") for story in workbench_stories)
     search_html = (tmp_path / "public" / "feed" / "search.html").read_text(encoding="utf-8")
     assert "시장 이슈 검색" in search_html
     assert "검색 분석" in search_html
@@ -332,9 +322,10 @@ def test_daily_report_telegram_message_links_to_report(tmp_path) -> None:
     assert "26년 5월 1일 주주·자본시장 데일리" in message
     assert "전체 리포트 보기" not in message
     assert "주요 기사" not in message
-    assert "핵심 브리핑" in message
-    assert "오늘의 중요 기사" in message
-    assert "카테고리별 이슈" in message
+    assert "핵심 브리핑" not in message
+    assert "오늘의 중요 기사" not in message
+    assert "카테고리별 이슈" not in message
+    assert "메인 기사" in message
     assert "수집 기사 2건" in message
     assert "이슈 " in message
     assert "매체 " in message
