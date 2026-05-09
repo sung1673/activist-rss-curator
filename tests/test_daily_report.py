@@ -241,7 +241,14 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "09:00-12:00" in telegram_html
     assert "15:30-익일 06:00" in telegram_html
     assert "keyword-chip" in telegram_html
+    assert "data-keyword-detail-key" in telegram_html
+    assert "keyword-detail" in telegram_html
+    assert "trend-line" in telegram_html
+    assert "channel-type-tabs" in telegram_html
+    assert "뉴스·기사" in telegram_html
+    assert "리서치·종목분석" in telegram_html
     assert "heatmap__cell" in telegram_html
+    assert ".heatmap { display:grid; gap:7px; overflow:hidden" in telegram_html
     assert "한화솔루션" in telegram_html
     assert "유상증자" in telegram_html
     assert "주요 이슈와 Telegram 반응" in telegram_html
