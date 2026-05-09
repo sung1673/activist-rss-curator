@@ -230,6 +230,13 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "AI 요약 워크벤치" not in telegram_html
     assert "data-workbench-list" not in telegram_html
     assert "시장 언급 신호" in telegram_html
+    assert "Market Attention Score" in telegram_html
+    assert "급증 후보" in telegram_html
+    assert "URL·기사 확인" in telegram_html
+    assert "검증 필요" in telegram_html
+    assert "signal-table" in telegram_html
+    assert "확인상태" in telegram_html
+    assert "기관/Risk" in telegram_html
     assert "Telegram 분석" in telegram_html
     assert "키워드 클라우드" in telegram_html
     assert "종목 언급 히트맵" in telegram_html

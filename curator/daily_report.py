@@ -2898,6 +2898,191 @@ def telegram_daily_signal_title(signal: dict[str, object]) -> str:
     return "Telegram 언급 신호"
 
 
+def telegram_daily_signal_type_label(signal_type: object) -> str:
+    labels = {
+        "article_match": "기사 반응",
+        "url_burst": "URL 확산",
+        "topic_burst": "주제 급증",
+        "entity_rising": "종목 부상",
+        "risk_watch": "검증 필요",
+    }
+    return labels.get(str(signal_type or ""), "시장 언급")
+
+
+def telegram_daily_signal_risk_flags(signal: dict[str, object]) -> list[str]:
+    flags = [str(flag) for flag in signal.get("risk_flags", []) if str(flag)]
+    count = int(signal.get("related_telegram_count") or 0)
+    channels = int(signal.get("related_telegram_channels_count") or 0)
+    if count >= 5 and channels <= 1 and "single_source" not in flags:
+        flags.append("single_source")
+    return flags
+
+
+def telegram_daily_signal_confirmation(signal: dict[str, object]) -> dict[str, str]:
+    signal_type = str(signal.get("signal_type") or "")
+    direct_count = int(signal.get("direct_url_count") or 0)
+    keyword_count = int(signal.get("keyword_match_count") or 0)
+    if direct_count > 0:
+        return {"key": "direct", "label": f"URL 직접 {direct_count}건", "tone": "confirmed"}
+    if signal_type == "url_burst":
+        return {"key": "url_burst", "label": "동일 URL 확산", "tone": "confirmed"}
+    if keyword_count > 0:
+        return {"key": "keyword", "label": f"키워드 추정 {keyword_count}건", "tone": "estimated"}
+    return {"key": "tg_only", "label": "Telegram-only", "tone": "watch"}
+
+
+def telegram_daily_signal_channel_types(signal: dict[str, object]) -> Counter[str]:
+    counter: Counter[str] = Counter()
+    for message in signal.get("top_related_messages", []):
+        if not isinstance(message, dict):
+            continue
+        channel_type = telegram_daily_classify_channel(
+            {},
+            {
+                "channel_title": message.get("channel_title") or message.get("channel_handle"),
+                "text": message.get("excerpt") or "",
+            },
+        )
+        counter[channel_type] += 1
+    return counter
+
+
+def telegram_daily_signal_institutional_relevance(
+    signal: dict[str, object],
+    channel_types: Counter[str],
+) -> int:
+    text = " ".join(
+        [
+            telegram_daily_signal_title(signal),
+            str(signal.get("signal_summary") or ""),
+            " ".join(telegram_daily_list(signal.get("top_keywords"), limit=10)),
+        ]
+    )
+    institutional_terms = (
+        "공시",
+        "실적",
+        "리포트",
+        "목표가",
+        "투자의견",
+        "주주",
+        "밸류업",
+        "자사주",
+        "배당",
+        "거버넌스",
+        "경영권",
+        "이사회",
+        "주총",
+        "공개매수",
+        "유상증자",
+        "상장폐지",
+    )
+    score = 0
+    if channel_types.get("research"):
+        score += 32
+    if channel_types.get("disclosure"):
+        score += 30
+    if channel_types.get("news"):
+        score += 10
+    score += min(28, sum(1 for term in institutional_terms if term in text) * 7)
+    return min(100, score)
+
+
+def telegram_daily_signal_scores(signal: dict[str, object]) -> dict[str, object]:
+    count = int(signal.get("related_telegram_count") or 0)
+    channels = int(signal.get("related_telegram_channels_count") or 0)
+    confidence = max(0.0, min(1.0, float(signal.get("confidence_score") or 0)))
+    signal_type = str(signal.get("signal_type") or "")
+    direct_count = int(signal.get("direct_url_count") or 0)
+    keyword_count = int(signal.get("keyword_match_count") or 0)
+    risk_flags = telegram_daily_signal_risk_flags(signal)
+    channel_types = telegram_daily_signal_channel_types(signal)
+    confirmation = telegram_daily_signal_confirmation(signal)
+
+    velocity_score = min(100, count * 5 + channels * 3)
+    breadth_score = min(100, channels * 7 + len(channel_types) * 12)
+    quality_score = min(100, int(confidence * 44) + min(28, direct_count * 14) + min(28, channels * 4))
+    novelty_score = min(100, 40 + (20 if signal_type in {"topic_burst", "url_burst"} else 0) + min(40, count * 3))
+    confirmation_score = 90 if direct_count else 78 if signal_type == "url_burst" else 58 if keyword_count else 32
+    institutional_score = telegram_daily_signal_institutional_relevance(signal, channel_types)
+    risk_score = min(100, len(risk_flags) * 22 + (16 if channels <= 1 and count >= 5 else 0) + (8 if not direct_count else 0))
+    attention_score = min(
+        100,
+        round(
+            velocity_score * 0.22
+            + breadth_score * 0.18
+            + quality_score * 0.16
+            + novelty_score * 0.14
+            + confirmation_score * 0.15
+            + institutional_score * 0.15
+        ),
+    )
+
+    badges: list[dict[str, str]] = []
+    if velocity_score >= 60 or signal_type in {"topic_burst", "url_burst"}:
+        badges.append({"key": "rising", "label": "RISING"})
+    if confirmation["key"] in {"direct", "url_burst"}:
+        badges.append({"key": "confirmed", "label": "CONFIRMED"})
+    elif confirmation["key"] == "keyword":
+        badges.append({"key": "estimated", "label": "KEYWORD-MATCH"})
+    if institutional_score >= 45:
+        badges.append({"key": "institutional", "label": "INSTITUTIONAL"})
+    if risk_score >= 40:
+        badges.append({"key": "risk", "label": "RISK WATCH"})
+    if confirmation["key"] == "tg_only":
+        badges.append({"key": "tg_only", "label": "TG-ONLY"})
+
+    return {
+        "market_attention_score": attention_score,
+        "velocity_score": velocity_score,
+        "source_breadth_score": breadth_score,
+        "quality_weighted_score": quality_score,
+        "novelty_score": novelty_score,
+        "news_confirmation_score": confirmation_score,
+        "institutional_relevance_score": institutional_score,
+        "rumor_risk_score": risk_score,
+        "risk_flags": risk_flags,
+        "channel_types": [
+            {
+                "key": key,
+                "label": telegram_daily_channel_type_label(key),
+                "count": value,
+            }
+            for key, value in channel_types.most_common()
+        ],
+        "confirmation": confirmation,
+        "badges": badges,
+    }
+
+
+def telegram_daily_enriched_signals(signal_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    enriched: list[dict[str, object]] = []
+    for signal in signal_rows:
+        row = dict(signal)
+        row.update(telegram_daily_signal_scores(row))
+        row["display_title"] = telegram_daily_signal_title(row)
+        row["signal_type_label"] = telegram_daily_signal_type_label(row.get("signal_type"))
+        enriched.append(row)
+    enriched.sort(
+        key=lambda row: (
+            int(row.get("market_attention_score") or 0),
+            int(row.get("related_telegram_channels_count") or 0),
+            int(row.get("related_telegram_count") or 0),
+        ),
+        reverse=True,
+    )
+    return enriched
+
+
+def telegram_daily_signal_summary_counts(signals: list[dict[str, object]]) -> dict[str, int]:
+    return {
+        "rising": sum(1 for signal in signals if any(badge.get("key") == "rising" for badge in signal.get("badges", []) if isinstance(badge, dict))),
+        "confirmed": sum(1 for signal in signals if str((signal.get("confirmation") or {}).get("key") if isinstance(signal.get("confirmation"), dict) else "") in {"direct", "url_burst"}),
+        "institutional": sum(1 for signal in signals if int(signal.get("institutional_relevance_score") or 0) >= 45),
+        "risk": sum(1 for signal in signals if int(signal.get("rumor_risk_score") or 0) >= 40),
+        "tg_only": sum(1 for signal in signals if str((signal.get("confirmation") or {}).get("key") if isinstance(signal.get("confirmation"), dict) else "") == "tg_only"),
+    }
+
+
 TELEGRAM_DAILY_CHANNEL_TYPES = (
     {
         "key": "news",
@@ -3154,6 +3339,16 @@ TELEGRAM_DAILY_COMPANY_STOPWORDS = {
     "네이버",
     "NAVER",
     "전기전자",
+    "방위산업",
+    "세계은행",
+    "투자은행",
+    "워킹그룹",
+    "국제에너지",
+    "국제정세",
+    "미국증시",
+    "중국증시",
+    "50만전자",
+    "30만전자",
     "주요주주특정증권",
     "단순투자",
     "장기투자",
@@ -3209,7 +3404,7 @@ TELEGRAM_DAILY_EXTRA_COMPANY_NAMES = {
 }
 TELEGRAM_DAILY_KNOWN_COMPANY_NAMES = {company.casefold() for company in KNOWN_COMPANIES + list(TELEGRAM_DAILY_EXTRA_COMPANY_NAMES)}
 TELEGRAM_DAILY_COMPANY_NOISE_PATTERN = re.compile(
-    r"(?:특정증권|단순투자|장기투자|국제금융|전기전자|공동보유|공급부족|조각투자|금융투자|네이버뉴스|다음뉴스|공시대상|불성실공시|주요사항보고서)"
+    r"(?:특정증권|단순투자|장기투자|국제금융|전기전자|방위산업|세계은행|투자은행|워킹그룹|국제에너지|공동보유|공급부족|조각투자|금융투자|네이버뉴스|다음뉴스|공시대상|불성실공시|주요사항보고서)"
 )
 
 
@@ -3689,18 +3884,21 @@ def render_telegram_daily_html(
 ) -> str:
     messages = telegram_daily_messages(state, config, start_at, end_at)
     story_rows = telegram_daily_story_rows(stories)
-    signal_rows = telegram_daily_signal_rows(state, limit=12)
+    signal_rows = telegram_daily_enriched_signals(telegram_daily_signal_rows(state, limit=18))
+    signal_summary_counts = telegram_daily_signal_summary_counts(signal_rows)
     analysis_periods: list[dict[str, object]] = []
     for period_index, period in enumerate(TELEGRAM_DAILY_ANALYSIS_PERIODS):
         period_key = str(period["key"])
         period_start_at = start_at if period_key == "1d" else end_at - timedelta(days=int(period["days"]))
         period_messages = telegram_daily_messages(state, config, period_start_at, end_at)
-        period_signal_rows = telegram_daily_signal_rows(
-            state,
-            limit=24,
-            config=config,
-            start_at=period_start_at,
-            end_at=end_at,
+        period_signal_rows = telegram_daily_enriched_signals(
+            telegram_daily_signal_rows(
+                state,
+                limit=24,
+                config=config,
+                start_at=period_start_at,
+                end_at=end_at,
+            )
         )
         period_channels = {
             str(message.get("channel_title") or message.get("handle") or "")
@@ -3782,17 +3980,59 @@ def render_telegram_daily_html(
     top_signals_html = "\n".join(
         f"""
         <article class="signal-card">
+          <div class="signal-card__score">{int(signal.get("market_attention_score") or 0)}</div>
           <div class="signal-card__meta">
-            <span>{escape(str(signal.get("signal_type") or "signal"))}</span>
+            <span>{escape(str(signal.get("signal_type_label") or "시장 언급"))}</span>
             <strong>{int(signal.get("related_telegram_count") or 0)}건 · {int(signal.get("related_telegram_channels_count") or 0)}채널</strong>
           </div>
-          <h3>{escape(telegram_daily_signal_title(signal))}</h3>
+          <h3>{escape(str(signal.get("display_title") or telegram_daily_signal_title(signal)))}</h3>
           <p>{escape(telegram_daily_excerpt(signal.get("signal_summary") or "", max_chars=112))}</p>
+          <div class="signal-badges">
+            {''.join(f'<span class="signal-badge signal-badge--{escape(str(badge.get("key") or ""), quote=True)}">{escape(str(badge.get("label") or ""))}</span>' for badge in signal.get("badges", []) if isinstance(badge, dict))}
+          </div>
           <div class="tag-row">{''.join(f'<span>{escape(keyword)}</span>' for keyword in telegram_daily_list(signal.get("top_keywords"), limit=5))}</div>
         </article>
         """
-        for signal in signal_rows[:6]
+        for signal in signal_rows[:4]
     ) or '<p class="empty">아직 표시할 시장 언급 신호가 충분하지 않습니다.</p>'
+    signal_table_rows_html = "\n".join(
+        f"""
+        <tr>
+          <td><strong class="score-pill">{int(signal.get("market_attention_score") or 0)}</strong></td>
+          <td>
+            <b>{escape(str(signal.get("display_title") or telegram_daily_signal_title(signal)))}</b>
+            <div class="signal-table__badges">
+              {''.join(f'<span class="signal-badge signal-badge--{escape(str(badge.get("key") or ""), quote=True)}">{escape(str(badge.get("label") or ""))}</span>' for badge in signal.get("badges", []) if isinstance(badge, dict))}
+            </div>
+            <small>{escape(telegram_daily_excerpt(signal.get("signal_summary") or " · ".join(telegram_daily_list(signal.get("top_keywords"), limit=5)), max_chars=118))}</small>
+          </td>
+          <td>{escape(str(signal.get("signal_type_label") or "시장 언급"))}</td>
+          <td>{int(signal.get("related_telegram_count") or 0)}건<br><small>{int(signal.get("related_telegram_channels_count") or 0)}채널</small></td>
+          <td><span class="confirm-pill confirm-pill--{escape(str((signal.get("confirmation") or {}).get("tone") if isinstance(signal.get("confirmation"), dict) else "watch"), quote=True)}">{escape(str((signal.get("confirmation") or {}).get("label") if isinstance(signal.get("confirmation"), dict) else "확인 필요"))}</span></td>
+          <td>{''.join(f'<span>{escape(str(item.get("label") or ""))} {int(item.get("count") or 0)}</span>' for item in signal.get("channel_types", []) if isinstance(item, dict)) or '<span>유형 미상</span>'}</td>
+          <td>{int(signal.get("institutional_relevance_score") or 0)}<br><small>Risk {int(signal.get("rumor_risk_score") or 0)}</small></td>
+        </tr>
+        """
+        for signal in signal_rows[:12]
+    ) or '<tr><td colspan="7">아직 표시할 시장 언급 신호가 충분하지 않습니다.</td></tr>'
+    signal_table_html = f"""
+      <div class="signal-table-wrap" aria-label="시장 언급 신호 상세">
+        <table class="signal-table">
+          <thead>
+            <tr>
+              <th>Score</th>
+              <th>Signal</th>
+              <th>유형</th>
+              <th>언급</th>
+              <th>확인상태</th>
+              <th>채널 유형</th>
+              <th>기관/Risk</th>
+            </tr>
+          </thead>
+          <tbody>{signal_table_rows_html}</tbody>
+        </table>
+      </div>
+    """
 
     analysis_tabs_html = "\n".join(
         f'<button type="button" class="analysis-tab{" is-active" if period["active"] else ""}" '
@@ -3972,12 +4212,14 @@ def render_telegram_daily_html(
     .dek {{ max-width:760px; margin:0; color:#342d3d; font-size:15px; word-break:keep-all; }}
     .actions, .tag-row {{ display:flex; flex-wrap:wrap; gap:7px; }}
     .actions a, .tag-row span {{ display:inline-flex; border:1px solid var(--line); border-radius:999px; padding:6px 10px; background:var(--surface); color:var(--accent-deep); text-decoration:none; font-size:12px; font-weight:850; }}
-    .metric-grid {{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-top:8px; }}
+    .metric-grid {{ display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; margin-top:8px; }}
     .metric {{ border:1px solid rgba(112,55,224,.15); background:var(--accent-soft); padding:12px; }}
     .metric span {{ display:block; color:var(--muted); font-size:11px; font-weight:850; }}
     .metric strong {{ display:block; color:var(--accent-deep); font-size:24px; line-height:1.15; }}
+    .metric-footnote {{ color:var(--muted); font-size:12px; margin-top:3px; }}
     .section {{ border-top:2px solid var(--ink); margin-top:28px; padding-top:18px; }}
     .section h2 {{ margin:0 0 14px; font-family:Georgia,"Times New Roman",serif; font-size:28px; line-height:1.1; }}
+    .section-note {{ margin:-8px 0 14px; color:var(--muted); font-size:13px; }}
     .analysis-tabs {{ display:flex; flex-wrap:wrap; gap:7px; margin:-2px 0 14px; }}
     .analysis-tab {{ border:1px solid var(--line); border-radius:999px; background:var(--surface); color:var(--muted); padding:7px 11px; font:inherit; font-size:12px; font-weight:900; cursor:pointer; }}
     .analysis-tab.is-active {{ border-color:var(--accent); background:var(--accent-soft); color:var(--accent-deep); box-shadow:inset 0 0 0 1px rgba(112,55,224,.24); }}
@@ -4044,11 +4286,29 @@ def render_telegram_daily_html(
     .heatmap__cell--l4 {{ background:#c6a8ff; }}
     .heatmap__cell--l5 {{ background:#9b6cf0; color:#fff; }}
     .signal-grid {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }}
-    .signal-card, .story-card {{ border:1px solid var(--line); background:var(--surface); padding:14px; box-shadow:0 14px 32px rgba(70,43,102,.05); }}
+    .signal-card, .story-card {{ position:relative; border:1px solid var(--line); background:var(--surface); padding:14px; box-shadow:0 14px 32px rgba(70,43,102,.05); }}
+    .signal-card__score {{ position:absolute; right:12px; top:12px; min-width:38px; height:32px; display:grid; place-items:center; border-radius:10px; background:var(--ink); color:#fff; font-weight:950; font-size:16px; }}
     .signal-card__meta, .story-card__meta {{ display:flex; flex-wrap:wrap; gap:6px 9px; color:var(--muted); font-size:11px; }}
     .signal-card__meta strong {{ color:var(--accent-deep); }}
     .signal-card h3, .story-card h3 {{ margin:7px 0 7px; font-size:18px; line-height:1.32; word-break:keep-all; }}
+    .signal-card h3 {{ padding-right:40px; }}
     .signal-card p {{ margin:0 0 10px; color:#4d4659; font-size:13px; line-height:1.46; }}
+    .signal-badges, .signal-table__badges {{ display:flex; flex-wrap:wrap; gap:5px; margin:7px 0; }}
+    .signal-badge {{ display:inline-flex; border:1px solid rgba(112,55,224,.18); border-radius:999px; background:#fff; color:var(--accent-deep); padding:3px 6px; font-size:9.5px; font-weight:950; letter-spacing:.02em; }}
+    .signal-badge--confirmed {{ border-color:rgba(0,120,95,.25); color:var(--green); background:#f0fbf7; }}
+    .signal-badge--risk {{ border-color:rgba(176,83,0,.26); color:#9a4a00; background:#fff6eb; }}
+    .signal-badge--tg_only, .signal-badge--estimated {{ color:#665b72; background:#f8f6fb; }}
+    .signal-table-wrap {{ margin-top:14px; overflow-x:auto; border:1px solid var(--line); background:#fff; }}
+    .signal-table {{ border:0; min-width:860px; }}
+    .signal-table th, .signal-table td {{ vertical-align:top; }}
+    .signal-table b {{ display:block; margin-bottom:3px; line-height:1.35; }}
+    .signal-table small {{ color:var(--muted); line-height:1.35; }}
+    .signal-table td:nth-child(6) span {{ display:inline-flex; margin:0 4px 4px 0; border:1px solid var(--line); border-radius:999px; padding:2px 6px; color:var(--accent-deep); background:#fff; white-space:nowrap; }}
+    .score-pill {{ display:inline-grid; place-items:center; min-width:34px; height:30px; border-radius:9px; background:var(--ink); color:#fff; font-size:14px; }}
+    .confirm-pill {{ display:inline-flex; border-radius:999px; border:1px solid var(--line); padding:4px 7px; font-size:11px; font-weight:950; white-space:nowrap; }}
+    .confirm-pill--confirmed {{ color:var(--green); border-color:rgba(0,120,95,.24); background:#effbf7; }}
+    .confirm-pill--estimated {{ color:#7b5700; border-color:rgba(189,137,0,.24); background:#fff9e8; }}
+    .confirm-pill--watch {{ color:#665b72; background:#f8f6fb; }}
     .story-grid {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }}
     .story-card__head {{ display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }}
     .story-card__source {{ flex:0 0 auto; border:1px solid var(--accent); border-radius:999px; padding:5px 9px; color:var(--accent-deep); background:var(--accent-soft); text-decoration:none; font-size:11px; font-weight:900; }}
@@ -4068,7 +4328,9 @@ def render_telegram_daily_html(
       .page {{ padding:18px 14px 50px; }}
       .brand-row {{ align-items:flex-start; flex-direction:column; }}
       .edition {{ text-align:left; }}
-      .metric-grid, .keyword-layout, .signal-grid, .story-grid, .split {{ grid-template-columns:1fr; }}
+      .metric-grid {{ grid-template-columns:repeat(2,minmax(0,1fr)); }}
+      .keyword-layout, .signal-grid, .story-grid, .split {{ grid-template-columns:1fr; }}
+      .metric:last-child {{ grid-column:1 / -1; }}
       .keyword-chip--l5 {{ font-size:15px; }}
       .keyword-chip--l6 {{ font-size:17px; }}
       .analysis-tabs {{ gap:6px; }}
@@ -4102,11 +4364,13 @@ def render_telegram_daily_html(
         <a href="telegram-admin.html">Telegram 수집 현황</a>
       </div>
       <div class="metric-grid">
-        <div class="metric"><span>수집 채널</span><strong>{len({str(message.get("handle") or message.get("channel_title") or "") for message in messages if message.get("handle") or message.get("channel_title")})}</strong></div>
-        <div class="metric"><span>Telegram 메시지</span><strong>{len(messages)}</strong></div>
-        <div class="metric"><span>기사 연결 이슈</span><strong>{len(matched_story_ids)}</strong></div>
-        <div class="metric"><span>시장 언급 신호</span><strong>{len(signal_rows)}</strong></div>
+        <div class="metric"><span>급증 후보</span><strong>{signal_summary_counts["rising"]}</strong></div>
+        <div class="metric"><span>URL·기사 확인</span><strong>{signal_summary_counts["confirmed"]}</strong></div>
+        <div class="metric"><span>기관·공시 관여</span><strong>{signal_summary_counts["institutional"]}</strong></div>
+        <div class="metric"><span>검증 필요</span><strong>{signal_summary_counts["risk"]}</strong></div>
+        <div class="metric"><span>TG-only</span><strong>{signal_summary_counts["tg_only"]}</strong></div>
       </div>
+      <div class="metric-footnote">{len({str(message.get("handle") or message.get("channel_title") or "") for message in messages if message.get("handle") or message.get("channel_title")})}개 채널 · {len(messages)}개 메시지 · 기사 연결 이슈 {len(matched_story_ids)}건을 바탕으로 계산했습니다.</div>
     </header>
     <section class="section">
       <h2>Telegram 분석</h2>
@@ -4117,7 +4381,9 @@ def render_telegram_daily_html(
     </section>
     <section class="section">
       <h2>시장 언급 신호</h2>
+      <p class="section-note">언급량, 채널 폭, 확인상태, 기관성, 검증 필요 요소를 합산한 Market Attention Score 기준입니다.</p>
       <div class="signal-grid">{top_signals_html}</div>
+      {signal_table_html}
     </section>
     <section class="section">
         <h2>주요 이슈와 Telegram 반응</h2>
