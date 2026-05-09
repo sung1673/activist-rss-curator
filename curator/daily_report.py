@@ -1998,18 +1998,41 @@ def render_report_html(
       return status || '수집';
     }}
 
+    function compactDateLabelFromValue(value) {{
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      const direct = raw.match(/^(\\d{{4}})-(\\d{{2}})-(\\d{{2}})[ T](\\d{{2}}):(\\d{{2}})/);
+      if (direct) return `${{direct[2]}}.${{direct[3]}} ${{direct[4]}}:${{direct[5]}}`;
+      const parsed = new Date(raw);
+      if (Number.isNaN(parsed.getTime())) return '';
+      const parts = new Intl.DateTimeFormat('en-CA', {{
+        timeZone: 'Asia/Seoul',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }}).formatToParts(parsed).reduce((acc, part) => {{
+        acc[part.type] = part.value;
+        return acc;
+      }}, {{}});
+      return parts.month && parts.day && parts.hour && parts.minute ? `${{parts.month}}.${{parts.day}} ${{parts.hour}}:${{parts.minute}}` : '';
+    }}
+
+    function firstDateLabel(record, keys) {{
+      for (const key of keys) {{
+        const label = compactDateLabelFromValue(record?.[key]);
+        if (label) return label;
+      }}
+      return '';
+    }}
+
     function storyDateLabel(story) {{
-      const raw = String(story.published_at || story.last_article_seen_at || '').trim();
-      const match = raw.match(/^(\\d{{4}})-(\\d{{2}})-(\\d{{2}})\\s+(\\d{{2}}):(\\d{{2}})/);
-      if (!match) return '';
-      return `${{match[2]}}.${{match[3]}} ${{match[4]}}:${{match[5]}}`;
+      return firstDateLabel(story, ['published_at', 'last_article_seen_at', 'last_article_at', 'sort_at', 'created_at', 'datetime']);
     }}
 
     function articleDateLabel(article) {{
-      const raw = String(article.published_at || article.seen_at || article.sort_at || '').trim();
-      const match = raw.match(/^(\\d{{4}})-(\\d{{2}})-(\\d{{2}})\\s+(\\d{{2}}):(\\d{{2}})/);
-      if (!match) return '';
-      return `${{match[2]}}.${{match[3]}} ${{match[4]}}:${{match[5]}}`;
+      return firstDateLabel(article, ['published_at', 'article_published_at', 'feed_published_at', 'seen_at', 'sort_at', 'created_at', 'updated_at', 'datetime']);
     }}
 
     function articleStatusLabel(article) {{
@@ -3006,10 +3029,32 @@ def render_workbench_html(
       if (article.image_url) score += 1;
       return score;
     }}
+    function compactDateLabelFromValue(value) {{
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      const direct = raw.match(/^(\\d{{4}})-(\\d{{2}})-(\\d{{2}})[ T](\\d{{2}}):(\\d{{2}})/);
+      if (direct) return `${{direct[2]}}.${{direct[3]}} ${{direct[4]}}:${{direct[5]}}`;
+      const parsed = new Date(raw);
+      if (Number.isNaN(parsed.getTime())) return '';
+      const parts = new Intl.DateTimeFormat('en-CA', {{
+        timeZone: 'Asia/Seoul',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }}).formatToParts(parsed).reduce((acc, part) => {{
+        acc[part.type] = part.value;
+        return acc;
+      }}, {{}});
+      return parts.month && parts.day && parts.hour && parts.minute ? `${{parts.month}}.${{parts.day}} ${{parts.hour}}:${{parts.minute}}` : '';
+    }}
     function dateLabel(article) {{
-      const raw = String(article.published_at || article.sort_at || '').trim();
-      const match = raw.match(/^(\\d{{4}})-(\\d{{2}})-(\\d{{2}})\\s+(\\d{{2}}):(\\d{{2}})/);
-      return match ? `${{match[2]}}.${{match[3]}} ${{match[4]}}:${{match[5]}}` : (article.datetime || '');
+      for (const key of ['published_at', 'article_published_at', 'feed_published_at', 'seen_at', 'sort_at', 'created_at', 'updated_at', 'datetime']) {{
+        const label = compactDateLabelFromValue(article?.[key]);
+        if (label) return label;
+      }}
+      return '';
     }}
     function contextTokens(story) {{
       const generic = new Set(['관련','기사','보도','뉴스','시장','자본시장','주주','기업','증시','한국어','밸류업','주주환원','자사주','소각','지배구조','경영권','분쟁','소액주주','공시','제도','거래소','코스닥','상장','중복상장','유상증자','물적분할','종료보고서','제출','불성실공시법인','지정','google','news']);
@@ -3468,10 +3513,32 @@ def render_search_html(
       const queryTokens = tokens(query);
       return !queryTokens.length || queryTokens.some((token) => haystack.includes(token));
     }}
+    function compactDateLabelFromValue(value) {{
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      const direct = raw.match(/^(\\d{{4}})-(\\d{{2}})-(\\d{{2}})[ T](\\d{{2}}):(\\d{{2}})/);
+      if (direct) return `${{direct[2]}}.${{direct[3]}} ${{direct[4]}}:${{direct[5]}}`;
+      const parsed = new Date(raw);
+      if (Number.isNaN(parsed.getTime())) return '';
+      const parts = new Intl.DateTimeFormat('en-CA', {{
+        timeZone: 'Asia/Seoul',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }}).formatToParts(parsed).reduce((acc, part) => {{
+        acc[part.type] = part.value;
+        return acc;
+      }}, {{}});
+      return parts.month && parts.day && parts.hour && parts.minute ? `${{parts.month}}.${{parts.day}} ${{parts.hour}}:${{parts.minute}}` : '';
+    }}
     function dateLabel(row) {{
-      const raw = String(row.published_at || row.sort_at || row.last_article_seen_at || row.latest_seen_at || row.first_seen_at || row.posted_at || row.time || '').trim();
-      const match = raw.match(/^(\\d{{4}})-(\\d{{2}})-(\\d{{2}})[ T](\\d{{2}}):(\\d{{2}})/);
-      return match ? `${{match[2]}}.${{match[3]}} ${{match[4]}}:${{match[5]}}` : '';
+      for (const key of ['published_at', 'article_published_at', 'feed_published_at', 'sort_at', 'last_article_seen_at', 'latest_seen_at', 'first_seen_at', 'posted_at', 'seen_at', 'created_at', 'updated_at', 'datetime', 'time']) {{
+        const label = compactDateLabelFromValue(row?.[key]);
+        if (label) return label;
+      }}
+      return '';
     }}
     function matchReasons(row, query) {{
       const queryTokens = tokens(query);

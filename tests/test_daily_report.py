@@ -202,6 +202,10 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "db-search__summary" not in html
     assert "data-db-search" not in html
     assert "articleMatchReasons" in html
+    assert "compactDateLabelFromValue" in html
+    assert "[ T](\\d{2}):(\\d{2})" in html
+    assert "article_published_at" in html
+    assert "feed_published_at" in html
     assert "isGenericDbPulseTitle" in html
     assert "story__image--broken" in html
     assert "✓" in html
@@ -214,6 +218,8 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "AI 요약 워크벤치" in workbench_html
     assert "data-workbench-list" in workbench_html
     assert "fetchArchiveRows" in workbench_html
+    assert "compactDateLabelFromValue" in workbench_html
+    assert "[ T](\\d{2}):(\\d{2})" in workbench_html
     assert "relatedContextMarkup" in workbench_html
     assert "related__grid" in workbench_html
     assert "telegram-card" in workbench_html
