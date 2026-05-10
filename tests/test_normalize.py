@@ -53,3 +53,9 @@ def test_google_alert_bold_tags_and_pipe_suffix_are_removed() -> None:
     parts = normalize_title_parts("BP, 기후 공시 없애려다 제동… <b>주주</b>들 압박 | - 임팩트온")
     assert parts["source_suffix"] == "임팩트온"
     assert parts["clean_title"] == "BP, 기후 공시 없애려다 제동… 주주들 압박"
+
+
+def test_escaped_google_alert_bold_tags_are_removed() -> None:
+    parts = normalize_title_parts("[&lt;b&gt;주주&lt;/b&gt;칼럼] 삼성전자 소액&lt;b&gt;주주&lt;/b&gt;")
+    assert parts["clean_title"] == "[주주칼럼] 삼성전자 소액주주"
+    assert parts["normalized_title"] == "주주칼럼 삼성전자 소액주주"

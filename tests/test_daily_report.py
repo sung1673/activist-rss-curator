@@ -213,6 +213,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "db-search__summary" not in html
     assert "data-db-search" not in html
     assert "articleMatchReasons" in html
+    assert "function cleanDbText" in html
     assert "compactDateLabelFromValue" in html
     assert "[ T](\\d{2}):(\\d{2})" in html
     assert "article_published_at" in html
@@ -250,6 +251,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "09:00-12:00" in telegram_html
     assert "15:30-익일 06:00" in telegram_html
     assert "keyword-chip" in telegram_html
+    assert "function cleanDisplayText" in telegram_html
     assert "data-keyword-detail-key" in telegram_html
     assert "keyword-detail" in telegram_html
     assert "trend-line" in telegram_html
@@ -297,6 +299,7 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "whyMatters" in search_html
     assert "smartScore" in search_html
     assert "timelineRows" in search_html
+    assert "function cleanDisplayText" in search_html
     assert "투자 제안·권유·종목 추천이 아닙니다" in search_html
     assert "투자 추천이 아니라" in search_html
     current_link_data = re.findall(r'<script type="application/json" data-story-current-links>(.*?)</script>', html, re.S)

@@ -1985,8 +1985,20 @@ def render_report_html(
       }}
     }}
 
+    function cleanDbText(value) {{
+      return String(value || '')
+        .replace(/&lt;\\s*\\/?\\s*[a-z][^&]*?&gt;/gi, '')
+        .replace(/<\\s*\\/?\\s*[a-z][^>]*?>/gi, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;|&apos;/gi, "'")
+        .replace(/&amp;/gi, '&')
+        .replace(/\\s+/g, ' ')
+        .trim();
+    }}
+
     function compactDbText(value, maxChars) {{
-      const text = String(value || '').replace(/\\s+/g, ' ').trim();
+      const text = cleanDbText(value);
       if (text.length <= maxChars) return text;
       return `${{text.slice(0, Math.max(0, maxChars - 1)).trim()}}…`;
     }}
@@ -2067,8 +2079,8 @@ def render_report_html(
 
     function articleMatchReasons(article, query) {{
       const tokens = searchTokens(query);
-      const title = String(article.title || '').toLowerCase();
-      const summary = String(article.summary || '').toLowerCase();
+      const title = cleanDbText(article.title || '').toLowerCase();
+      const summary = cleanDbText(article.summary || '').toLowerCase();
       const source = String(article.source || article.feed_name || '').toLowerCase();
       const feed = String(article.feed_category || article.relevance_level || article.priority_level || '').toLowerCase();
       const reasons = [];
@@ -2080,7 +2092,7 @@ def render_report_html(
     }}
 
     function articleSearchSnippet(article, query) {{
-      const text = String(article.summary || article.title || '').replace(/\\s+/g, ' ').trim();
+      const text = cleanDbText(article.summary || article.title || '');
       if (!text) return '';
       const tokens = searchTokens(query);
       const lower = text.toLowerCase();
@@ -2161,7 +2173,7 @@ def render_report_html(
     }}
 
     function normalizedContextTitle(value) {{
-      return String(value || '')
+      return cleanDbText(value)
         .toLowerCase()
         .replace(/\\s+-\\s+[^-·|]+$/, '')
         .replace(/[\\[\\]()"“”'‘’·….,:;!?~\\-_/|]/g, ' ')
@@ -2260,7 +2272,7 @@ def render_report_html(
         '공시', '제도', '거래소', '코스닥', '상장', '중복상장', '유상증자', '물적분할',
         '종료보고서', '제출', '불성실공시법인', '지정', 'google', 'news'
       ]);
-      const rawTokens = `${{title || ''}} ${{query || ''}}`.match(/[0-9A-Za-z가-힣]{{2,}}/g) || [];
+      const rawTokens = `${{cleanDbText(title)}} ${{cleanDbText(query)}}`.match(/[0-9A-Za-z가-힣]{{2,}}/g) || [];
       const tokens = [];
       rawTokens.forEach((token) => {{
         const normalized = token.toLowerCase();
@@ -2282,7 +2294,7 @@ def render_report_html(
 
     function articleMatchesContext(article, tokens) {{
       if (!tokens.length) return false;
-      const text = `${{article.title || ''}} ${{article.summary || ''}} ${{article.source || article.feed_name || ''}}`.toLowerCase();
+      const text = cleanDbText(`${{article.title || ''}} ${{article.summary || ''}} ${{article.source || article.feed_name || ''}}`).toLowerCase();
       const hits = tokens.filter((token) => text.includes(token.toLowerCase()));
       const strongHits = hits.filter((token) => token.length >= 3 && !isWeakContextToken(token));
       return strongHits.length >= 1 || hits.length >= Math.min(3, Math.max(2, tokens.length));
@@ -4416,8 +4428,19 @@ def render_telegram_daily_html(
     function escapeHtml(value) {{
       return String(value || '').replace(/[&<>"']/g, (char) => ({{ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }}[char]));
     }}
+    function cleanDisplayText(value) {{
+      return String(value || '')
+        .replace(/&lt;\\s*\\/?\\s*[a-z][^&]*?&gt;/gi, '')
+        .replace(/<\\s*\\/?\\s*[a-z][^>]*?>/gi, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;|&apos;/gi, "'")
+        .replace(/&amp;/gi, '&')
+        .replace(/\\s+/g, ' ')
+        .trim();
+    }}
     function compactText(value, maxLength) {{
-      const text = String(value || '').replace(/\\s+/g, ' ').trim();
+      const text = cleanDisplayText(value);
       return text.length > maxLength ? text.slice(0, Math.max(0, maxLength - 1)).trim() + '…' : text;
     }}
     function detailPanelFor(key) {{
@@ -4751,12 +4774,23 @@ def render_search_html(
     function escapeHtml(value) {{
       return String(value || '').replace(/[&<>"']/g, (char) => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[char]));
     }}
+    function cleanDisplayText(value) {{
+      return String(value || '')
+        .replace(/&lt;\\s*\\/?\\s*[a-z][^&]*?&gt;/gi, '')
+        .replace(/<\\s*\\/?\\s*[a-z][^>]*?>/gi, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;|&apos;/gi, "'")
+        .replace(/&amp;/gi, '&')
+        .replace(/\\s+/g, ' ')
+        .trim();
+    }}
     function apiUrlWithAction(baseUrl, action) {{
       if (!baseUrl) return '';
       return `${{baseUrl}}${{baseUrl.includes('?') ? '&' : '?'}}action=${{encodeURIComponent(action)}}`;
     }}
     function compactText(value, maxChars = 128) {{
-      const text = String(value || '').replace(/\\s+/g, ' ').trim();
+      const text = cleanDisplayText(value);
       if (text.length <= maxChars) return text;
       return `${{text.slice(0, Math.max(0, maxChars - 1)).trim()}}…`;
     }}
@@ -4772,7 +4806,7 @@ def render_search_html(
         telegramMessages(row).map((message) => [
           message.excerpt, message.text, message.channel_title, message.channel_handle,
         ].join(' ')).join(' '),
-      ].join(' ');
+      ].map(cleanDisplayText).join(' ');
     }}
     function includesQuery(row, query) {{
       const haystack = rowText(row).toLowerCase();
@@ -4808,8 +4842,8 @@ def render_search_html(
     }}
     function matchReasons(row, query) {{
       const queryTokens = tokens(query);
-      const title = String(row.title || row.representative_title || row.signal_title || '').toLowerCase();
-      const summary = String(row.summary || row.signal_summary || '').toLowerCase();
+      const title = cleanDisplayText(row.title || row.representative_title || row.signal_title || '').toLowerCase();
+      const summary = cleanDisplayText(row.summary || row.signal_summary || '').toLowerCase();
       const source = String(row.source || row.feed_name || '').toLowerCase();
       const reasons = [];
       if (queryTokens.some((token) => title.includes(token))) reasons.push('제목 일치');
@@ -4823,9 +4857,9 @@ def render_search_html(
     }}
     function snippet(row, query) {{
       const primaryMessage = primaryTelegramMessage(row);
-      const text = String(
+      const text = cleanDisplayText(
         row.search_snippet || row.summary || row.signal_summary || primaryMessage?.excerpt || primaryMessage?.text || row.title || row.representative_title || row.signal_title || ''
-      ).replace(/\\s+/g, ' ').trim();
+      );
       if (!text) return '';
       const lower = text.toLowerCase();
       const hit = tokens(query).find((token) => lower.includes(token));
