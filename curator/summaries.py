@@ -1720,7 +1720,9 @@ def should_batch_telegram_update(
     if not settings.get("batch_digest_enabled", True):
         return False
     min_clusters = int(settings.get("batch_digest_min_clusters", 2))
-    return len(clusters) >= min_clusters
+    if len(clusters) >= min_clusters:
+        return True
+    return any(len(publishable_articles(cluster, config)) > 1 for cluster in clusters)
 
 
 def mark_clusters_sent_with_response(

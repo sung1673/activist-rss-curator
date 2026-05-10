@@ -944,6 +944,82 @@ def test_hourly_update_excludes_duplicate_records_even_when_unrelated(config, no
     assert "신한금융 밸류업" in message
 
 
+def test_hourly_update_batches_single_multi_article_cluster_as_one_representative(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "@test_channel")
+    monkeypatch.setattr(summaries, "generate_hourly_digest_review", lambda *_args, **_kwargs: "- 신한금융 밸류업 IR 보도 지속")
+    now = datetime(2026, 5, 10, 18, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    article_specs = [
+        (
+            "진옥동 신한금융 회장, 북중미서 밸류업 2.0 IR…성장·주주환원 병행",
+            "https://www.etnews.com/20260508000144",
+            "전자신문",
+        ),
+        (
+            "진옥동 신한금융 회장, 북중미 IR 직접 나선다…밸류업 2.0 설득전",
+            "https://www.etoday.co.kr/news/view/2582829",
+            "이투데이",
+        ),
+        (
+            "북중미 IR 나선 진옥동 신한금융 회장 성장할수록 주주환원 확대",
+            "https://www.newspim.com/news/view/20260508000895",
+            "뉴스핌",
+        ),
+        (
+            "진옥동 성장할수록 주주환원 확대…신한금융 밸류업 2.0, 북중미서 통할까",
+            "https://www.betanews.net/article/view/beta202605100006",
+            "베타뉴스",
+        ),
+        (
+            "진옥동 신한금융 회장, 북중미서 밸류업 2.0 직접 알린다…성장할수록 주주환원 확대",
+            "https://www.todayeconomic.com/news/article.html?no=30506",
+            "투데이경제",
+        ),
+    ]
+    articles = [
+        make_article(
+            title,
+            url,
+            source=source,
+            published_at=(now - timedelta(minutes=index)).isoformat(),
+            summary="진옥동 신한금융 회장이 북중미 IR에서 밸류업 2.0과 주주환원 확대를 설명했다.",
+        )
+        for index, (title, url, source) in enumerate(article_specs)
+    ]
+    cluster = {
+        "guid": "cluster:shinhan-ir:20260510:1",
+        "representative_title": "신한금융 밸류업 2.0 북중미 IR",
+        "published_at": now.isoformat(),
+        "articles": articles,
+    }
+    state = {
+        "published_clusters": [cluster],
+        "pending_clusters": [],
+        "telegram_sent_cluster_guids": [],
+        "telegram_send_records": [],
+        "telegram_digest_records": [],
+    }
+    sent_messages = []
+
+    def fake_send(_bot_token, _chat_id, text, _config, **_kwargs):  # type: ignore[no-untyped-def]
+        sent_messages.append(text)
+        return {"ok": True, "message_id": 228, "chat_id": -100}
+
+    monkeypatch.setattr(summaries, "send_telegram_message", fake_send)
+
+    assert publish_hourly_telegram_update(state, config, now) == {"telegram_sent": 1, "telegram_failed": 0}
+    sent_text = sent_messages[0]
+    article_url_count = sum(url in sent_text for _title, url, _source in article_specs)
+
+    assert "<b>국문</b>" in sent_text
+    assert article_url_count == 1
+    assert "1. " not in sent_text
+    assert "2. " not in sent_text
+    assert state["telegram_digest_records"][0]["cluster_guids"] == ["cluster:shinhan-ir:20260510:1"]
+
+
 def test_hourly_update_window_is_thirty_minutes(config, now) -> None:  # type: ignore[no-untyped-def]
     assert hourly_update_start_at(config, now) == now - timedelta(minutes=30)
 
