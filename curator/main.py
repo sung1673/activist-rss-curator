@@ -9,7 +9,7 @@ from .cluster import cluster_articles
 from .config import article_domain_is_excluded, load_config
 from .dates import choose_publication_datetime, datetime_to_iso, get_timezone, is_too_old, now_in_timezone
 from .dedupe import dedupe_articles
-from .fetch import decode_google_news_links_in_state, fetch_google_alerts_articles
+from .fetch import fetch_google_alerts_articles
 from .priority import annotate_state_priorities, load_priority_overrides, priority_overrides_path
 from .relevance import relevance_details
 from .remote_api import sync_state_to_remote_api
@@ -115,8 +115,6 @@ def run(root: Path | None = None) -> dict[str, int]:
     now = now_in_timezone(timezone_name)
     state_path = project_root / "data" / "state.json"
     state = load_state(state_path)
-    prune_excluded_pending_articles(state, config, now)
-    decode_google_news_links_in_state(state, config)
     prune_excluded_pending_articles(state, config, now)
     initialize_telegram_state(state, config, now)
 

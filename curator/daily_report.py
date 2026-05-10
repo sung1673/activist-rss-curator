@@ -4079,8 +4079,10 @@ def render_telegram_daily_html(
                 f"""
                 <div class="heatmap__row">
                   <div class="heatmap__name">
-                    <strong>{escape(str(row.get("company") or ""))}</strong>
-                    <span>{int(row.get("count") or 0)}건 · {int(row.get("channels_count") or 0)}채널</span>
+                    <div class="heatmap__name-line">
+                      <strong>{escape(str(row.get("company") or ""))}</strong>
+                      <span>{int(row.get("count") or 0)}건 · {int(row.get("channels_count") or 0)}채널</span>
+                    </div>
                     <em>{escape(", ".join(str(channel.get("label") or "") for channel in row.get("top_channels", []) if isinstance(channel, dict))[:46])}</em>
                   </div>
                   {''.join(
@@ -4123,13 +4125,15 @@ def render_telegram_daily_html(
         analysis_panels_html_parts.append(
             f"""
             <div class="analysis-period{' is-active' if period['active'] else ''}" data-analysis-panel="{escape(period_key, quote=True)}">
-              <div class="analysis-period__meta">
-                <strong>{escape(str(period["label"]))} 분석 기간</strong>
-                <span>{escape(period_range)}</span>
-                <span>{int(period.get("messages_count") or 0)}건 · {int(period.get("channels_count") or 0)}채널</span>
-              </div>
-              <div class="channel-type-tabs" role="tablist" aria-label="Telegram 채널 유형">
-                {channel_tabs_html}
+              <div class="analysis-controls">
+                <div class="analysis-period__meta">
+                  <strong>{escape(str(period["label"]))} 분석 기간</strong>
+                  <span>{escape(period_range)}</span>
+                  <span>{int(period.get("messages_count") or 0)}건 · {int(period.get("channels_count") or 0)}채널</span>
+                </div>
+                <div class="channel-type-tabs" role="tablist" aria-label="Telegram 채널 유형">
+                  {channel_tabs_html}
+                </div>
               </div>
               {''.join(view_html_parts)}
             </div>
@@ -4220,11 +4224,12 @@ def render_telegram_daily_html(
     .section {{ border-top:2px solid var(--ink); margin-top:28px; padding-top:18px; }}
     .section h2 {{ margin:0 0 14px; font-family:Georgia,"Times New Roman",serif; font-size:28px; line-height:1.1; }}
     .section-note {{ margin:-8px 0 14px; color:var(--muted); font-size:13px; }}
-    .analysis-tabs {{ display:flex; flex-wrap:wrap; gap:7px; margin:-2px 0 14px; }}
+    .analysis-tabs {{ position:sticky; top:0; z-index:34; display:flex; flex-wrap:wrap; gap:7px; margin:-2px 0 0; padding:8px 0 9px; background:linear-gradient(180deg,var(--bg) 0%,rgba(250,248,252,.96) 100%); border-bottom:1px solid var(--line); backdrop-filter:blur(10px); }}
     .analysis-tab {{ border:1px solid var(--line); border-radius:999px; background:var(--surface); color:var(--muted); padding:7px 11px; font:inherit; font-size:12px; font-weight:900; cursor:pointer; }}
     .analysis-tab.is-active {{ border-color:var(--accent); background:var(--accent-soft); color:var(--accent-deep); box-shadow:inset 0 0 0 1px rgba(112,55,224,.24); }}
     .analysis-period {{ display:none; }}
     .analysis-period.is-active {{ display:grid; gap:12px; }}
+    .analysis-controls {{ position:sticky; top:49px; z-index:33; display:grid; gap:8px; margin:0 0 3px; padding:8px 0 9px; background:linear-gradient(180deg,rgba(250,248,252,.98) 0%,rgba(250,248,252,.94) 100%); border-bottom:1px solid var(--line); backdrop-filter:blur(10px); }}
     .analysis-period__meta {{ display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; color:var(--muted); font-size:12px; }}
     .analysis-period__meta strong {{ color:var(--accent-deep); }}
     .channel-type-tabs {{ display:flex; flex-wrap:wrap; gap:7px; margin:0 0 3px; }}
@@ -4233,7 +4238,7 @@ def render_telegram_daily_html(
     .channel-type-tab.is-active {{ border-color:var(--accent); background:var(--accent-soft); color:var(--accent-deep); }}
     .analysis-view {{ display:none; gap:14px; }}
     .analysis-view.is-active {{ display:grid; }}
-    .keyword-layout {{ display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.46fr); gap:16px; align-items:stretch; }}
+    .keyword-layout {{ display:grid; grid-template-columns:minmax(220px,.72fr) minmax(360px,1.18fr); gap:16px; align-items:stretch; }}
     .analysis-panel {{ border:1px solid var(--line); background:var(--surface); padding:14px; box-shadow:0 14px 32px rgba(70,43,102,.05); }}
     .analysis-panel--cloud {{ min-height:220px; }}
     .analysis-panel--heatmap {{ padding-bottom:12px; }}
@@ -4270,11 +4275,12 @@ def render_telegram_daily_html(
     .keyword-detail__messages span {{ color:var(--muted); font-size:10.5px; }}
     .keyword-detail__messages strong {{ color:#2f2839; font-size:12px; line-height:1.42; }}
     .heatmap {{ display:grid; gap:7px; overflow:hidden; padding-bottom:2px; }}
-    .heatmap__row {{ display:grid; grid-template-columns:minmax(118px,1.05fr) repeat(4,minmax(46px,.5fr)); gap:5px; align-items:stretch; }}
+    .heatmap__row {{ display:grid; grid-template-columns:minmax(164px,1.38fr) repeat(4,minmax(46px,.5fr)); gap:5px; align-items:stretch; }}
     .heatmap__row--head {{ color:var(--muted); font-size:11px; font-weight:900; }}
-    .heatmap__name {{ display:grid; gap:2px; border:1px solid var(--line); background:#fff; padding:6px 7px; min-height:38px; overflow:hidden; }}
-    .heatmap__name strong {{ font-size:12.5px; line-height:1.2; word-break:keep-all; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
-    .heatmap__name span {{ color:var(--muted); font-size:10.5px; }}
+    .heatmap__name {{ display:grid; gap:2px; border:1px solid var(--line); background:#fff; padding:6px 7px; min-height:36px; overflow:hidden; }}
+    .heatmap__name-line {{ display:flex; align-items:baseline; gap:6px; min-width:0; }}
+    .heatmap__name strong {{ flex:1 1 auto; min-width:0; font-size:12.5px; line-height:1.2; word-break:keep-all; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+    .heatmap__name span {{ flex:0 0 auto; color:var(--muted); font-size:10.5px; white-space:nowrap; }}
     .heatmap__name em {{ color:#8a8195; font-size:10px; line-height:1.2; font-style:normal; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
     .heatmap__bucket, .heatmap__cell {{ display:flex; align-items:center; justify-content:center; min-height:38px; border:1px solid var(--line); background:#fff; border-radius:7px; text-align:center; }}
     .heatmap__bucket {{ padding:4px; }}
@@ -4333,14 +4339,16 @@ def render_telegram_daily_html(
       .metric:last-child {{ grid-column:1 / -1; }}
       .keyword-chip--l5 {{ font-size:15px; }}
       .keyword-chip--l6 {{ font-size:17px; }}
-      .analysis-tabs {{ gap:6px; }}
+      .analysis-tabs {{ top:0; gap:6px; padding:7px 0 8px; overflow-x:auto; flex-wrap:nowrap; }}
       .analysis-tab {{ padding:7px 10px; }}
+      .analysis-controls {{ top:45px; gap:6px; padding:7px 0 8px; }}
       .channel-type-tabs {{ overflow-x:auto; flex-wrap:nowrap; padding-bottom:4px; }}
       .channel-type-tab {{ flex:0 0 auto; }}
       .analysis-period__meta {{ display:grid; gap:4px; }}
       .keyword-detail {{ min-height:0; }}
-      .heatmap__row {{ grid-template-columns:minmax(88px,1.1fr) repeat(4,minmax(38px,.55fr)); gap:4px; }}
+      .heatmap__row {{ grid-template-columns:minmax(124px,1.35fr) repeat(4,minmax(36px,.52fr)); gap:4px; }}
       .heatmap__name {{ padding:5px 6px; }}
+      .heatmap__name-line {{ gap:4px; }}
       .heatmap__name strong {{ font-size:11px; }}
       .heatmap__name span {{ font-size:9.5px; }}
       .heatmap__name em {{ display:none; }}

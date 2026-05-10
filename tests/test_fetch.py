@@ -219,6 +219,7 @@ def test_google_news_decode_runs_beyond_page_enrich_limit(config, monkeypatch) -
 def test_state_google_news_links_are_upgraded(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import fetch
 
+    config["fetch"]["state_google_news_decode_limit"] = 10  # type: ignore[index]
     state = {
         "pending_clusters": [
             {

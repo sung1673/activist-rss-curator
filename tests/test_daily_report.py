@@ -238,6 +238,8 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "확인상태" in telegram_html
     assert "기관/Risk" in telegram_html
     assert "Telegram 분석" in telegram_html
+    assert "analysis-controls" in telegram_html
+    assert "position:sticky; top:49px" in telegram_html
     assert "키워드 클라우드" in telegram_html
     assert "종목 언급 히트맵" in telegram_html
     assert 'data-analysis-period="1d"' in telegram_html
@@ -252,9 +254,11 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "keyword-detail" in telegram_html
     assert "trend-line" in telegram_html
     assert "channel-type-tabs" in telegram_html
+    assert "grid-template-columns:minmax(220px,.72fr) minmax(360px,1.18fr)" in telegram_html
     assert "뉴스·기사" in telegram_html
     assert "리서치·종목분석" in telegram_html
     assert "heatmap__cell" in telegram_html
+    assert "heatmap__name-line" in telegram_html
     assert ".heatmap { display:grid; gap:7px; overflow:hidden" in telegram_html
     assert "한화솔루션" in telegram_html
     assert "유상증자" in telegram_html
