@@ -281,6 +281,10 @@ DIGEST_GROUP_PHRASE_TOKENS = {
     "코너스톤": ("코너스톤", "cornerstone"),
 }
 
+DIGEST_GROUP_COMPANY_TOKENS = {
+    "삼성전자",
+}
+
 OPERATIONAL_SUMMARY_PATTERNS = (
     "링크",
     "url",
@@ -734,7 +738,10 @@ def digest_company_tokens(entry: dict[str, object]) -> set[str]:
         values.extend(str(company) for company in article.get("company_candidates") or [])
     if isinstance(cluster, dict):
         values.extend(str(company) for company in cluster.get("companies") or [])
-    return {token for value in values for token in digest_tokens_from_text(value)}
+    tokens = {token for value in values for token in digest_tokens_from_text(value)}
+    entry_tokens = {str(token).casefold() for token in set(entry.get("tokens") or []) | set(entry.get("title_tokens") or [])}
+    tokens.update(token for token in entry_tokens if token in DIGEST_GROUP_COMPANY_TOKENS)
+    return tokens
 
 
 def digest_strong_tokens(entry: dict[str, object], key: str) -> set[str]:
