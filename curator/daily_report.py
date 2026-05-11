@@ -5,7 +5,7 @@ import os
 import re
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
-from html import escape
+from html import escape, unescape
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
@@ -62,6 +62,13 @@ def report_hours() -> int:
         return max(1, int(raw_value))
     except ValueError:
         return 24
+
+
+def clean_display_text(value: object) -> str:
+    text = unescape(str(value or ""))
+    text = re.sub(r"<\s*/?\s*[a-zA-Z][^>]*>", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
 CONTEXT_EXCERPT_STOPWORDS = {
@@ -305,7 +312,10 @@ def story_links(group: list[dict[str, object]]) -> list[dict[str, str]]:
         if not url:
             continue
         source = article_source_label(article)
-        title = display_article_title(article, source) or str(entry.get("title") or article.get("clean_title") or article.get("title") or source)
+        title = clean_display_text(
+            display_article_title(article, source)
+            or str(entry.get("title") or article.get("clean_title") or article.get("title") or source)
+        )
         published_at = entry_datetime(entry)
         link = {
             "source": source,
@@ -619,7 +629,7 @@ def build_report_stories(
                 continue
             latest_dt = max((dt for dt in (entry_datetime(entry) for entry in group) if dt), default=None)
             category = section_label or digest_category_label_for_group(group)
-            title = str(representative.get("title") or digest_group_title(group, config) or "제목 없음")
+            title = clean_display_text(representative.get("title") or digest_group_title(group, config) or "제목 없음")
             image_candidates = ordered_image_urls([*story_image_urls(group), *story_link_image_urls(links)])
             priority_score = story_priority_score(group)
             db_key = story_db_key(group)
@@ -1152,15 +1162,15 @@ def render_story(
 ) -> str:
     links = story.get("links") if isinstance(story.get("links"), list) else []
     story_id = escape(str(story.get("id") or slugify(story.get("title"), "story")), quote=True)
-    safe_title = escape(str(story.get("title") or "제목 없음"))
+    safe_title = escape(clean_display_text(story.get("title") or "제목 없음"))
     raw_primary_url = str(story.get("primary_url") or "#")
     primary_url = escape(raw_primary_url, quote=True)
     primary_mobile_attrs = mobile_link_attrs(raw_primary_url)
-    category = escape(str(story.get("category") or "기타"))
+    category = escape(clean_display_text(story.get("category") or "기타"))
     story_key = str(story.get("story_key") or "").strip()
     db_query = str(story.get("db_query") or story.get("title") or "").strip()
-    sources = escape(str(story.get("source_line") or story.get("primary_source") or ""))
-    summary = escape(story_summary_for_display(story))
+    sources = escape(clean_display_text(story.get("source_line") or story.get("primary_source") or ""))
+    summary = escape(clean_display_text(story_summary_for_display(story)))
     summary_html = ""
     summary_after_body_html = ""
     if editorial:
@@ -2064,10 +2074,45 @@ def render_report_html(
         '밸류업·주주환원·지배구조',
         '주주행동·경영권',
         '자본시장 제도·공시',
+        '정책·자본시장 제도',
+        '정책·자본시장 제도·공시',
         '해외·영문',
       ]);
       if (genericTitles.has(title)) return true;
       return title.length <= 28 && /^[0-9A-Za-z가-힣]+(?:[·/|][0-9A-Za-z가-힣]+)+$/.test(title);
+    }}
+
+    function dbPulseCandidateTitles(story) {{
+      const candidates = [
+        story?.representative_title,
+        story?.title,
+        story?.primary_title,
+        story?.headline,
+      ];
+      ['articles', 'latest_articles', 'related_articles', 'links'].forEach((key) => {{
+        const rows = Array.isArray(story?.[key]) ? story[key] : [];
+        rows.forEach((row) => candidates.push(row?.title || row?.representative_title || row?.headline));
+      }});
+      return candidates.map(cleanDbText).filter(Boolean);
+    }}
+
+    function dbPulseDisplayTitle(story) {{
+      const titles = dbPulseCandidateTitles(story);
+      return titles.find((title) => !isGenericDbPulseTitle(title)) || titles[0] || '';
+    }}
+
+    function dbPulseDisplayUrl(story) {{
+      const urls = [
+        story?.representative_url,
+        story?.canonical_url,
+        story?.url,
+      ];
+      ['articles', 'latest_articles', 'related_articles', 'links'].forEach((key) => {{
+        const rows = Array.isArray(story?.[key]) ? story[key] : [];
+        rows.forEach((row) => urls.push(row?.canonical_url || row?.url || row?.representative_url));
+      }});
+      const cleaned = urls.map((url) => String(url || '').trim()).filter(Boolean);
+      return cleaned.find((url) => !/\\/\\/news\\.google\\.com\\//i.test(url)) || cleaned[0] || '';
     }}
 
     function searchTokens(query) {{
@@ -2106,19 +2151,25 @@ def render_report_html(
     function renderDbPulse(stories) {{
       if (!dbPulse || !dbPulseList || !Array.isArray(stories)) return;
       const items = stories
-        .filter((story) => story && story.representative_title && story.representative_url)
-        .filter((story) => !isGenericDbPulseTitle(story.representative_title))
+        .map((story) => ({{
+          story,
+          title: dbPulseDisplayTitle(story),
+          url: dbPulseDisplayUrl(story),
+        }}))
+        .filter((item) => item.story && item.title && item.url)
+        .filter((item) => !isGenericDbPulseTitle(item.title))
         .slice(0, 6);
       if (!items.length) return;
       dbPulseList.innerHTML = '';
-      items.forEach((story) => {{
+      items.forEach((item) => {{
+        const story = item.story;
         const link = document.createElement('a');
         link.className = 'db-pulse__item';
-        link.href = story.representative_url;
+        link.href = item.url;
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
         const title = document.createElement('h3');
-        title.textContent = compactDbText(story.representative_title, 86);
+        title.textContent = compactDbText(item.title, 86);
         const meta = document.createElement('div');
         meta.className = 'db-pulse__meta';
         const status = document.createElement('strong');
@@ -3095,6 +3146,38 @@ def telegram_daily_signal_summary_counts(signals: list[dict[str, object]]) -> di
     }
 
 
+def telegram_daily_signal_detail(signal: dict[str, object], config: dict[str, object]) -> dict[str, object]:
+    title = str(signal.get("display_title") or telegram_daily_signal_title(signal))
+    messages: list[dict[str, object]] = []
+    for message in signal.get("top_related_messages", []):
+        if not isinstance(message, dict):
+            continue
+        posted_at = telegram_daily_dt(message.get("posted_at") or message.get("created_at"), config)
+        text = str(message.get("excerpt") or message.get("text") or message.get("context_excerpt") or "")
+        handle = str(message.get("channel_handle") or message.get("handle") or "")
+        messages.append(
+            {
+                "channel": str(message.get("channel_title") or handle or "Telegram"),
+                "channel_url": telegram_channel_public_url(handle),
+                "channel_type": telegram_daily_channel_type_label(message.get("channel_content_type")),
+                "posted_at": date_label(posted_at, config) if posted_at else "일시 미상",
+                "url": str(message.get("message_url") or message.get("url") or ""),
+                "excerpt": contextual_text_excerpt(text, title, max_chars=128) if text else "",
+            }
+        )
+    return {
+        "title": title,
+        "meta": [
+            str(signal.get("signal_type_label") or "시장 언급"),
+            f'{int(signal.get("related_telegram_count") or 0)}건',
+            f'{int(signal.get("related_telegram_channels_count") or 0)}채널',
+            str((signal.get("confirmation") or {}).get("label") if isinstance(signal.get("confirmation"), dict) else ""),
+        ],
+        "summary": telegram_daily_excerpt(signal.get("signal_summary") or " · ".join(telegram_daily_list(signal.get("top_keywords"), limit=5)), max_chars=160),
+        "messages": messages[:6],
+    }
+
+
 TELEGRAM_DAILY_CHANNEL_TYPES = (
     {
         "key": "news",
@@ -3670,6 +3753,27 @@ def telegram_daily_keyword_trend(
     return [{"label": label, "count": counts[index]} for index, label in enumerate(labels)]
 
 
+def telegram_channel_public_url(handle: object) -> str:
+    username = str(handle or "").strip().removeprefix("@")
+    if re.fullmatch(r"[A-Za-z0-9_]{4,32}", username):
+        return f"https://t.me/{username}"
+    return ""
+
+
+def telegram_daily_message_detail(message: dict[str, object], config: dict[str, object], query: str = "") -> dict[str, object]:
+    posted_at = telegram_daily_dt(message.get("posted_at"), config)
+    handle = str(message.get("handle") or message.get("channel_handle") or "").strip()
+    text = telegram_daily_message_text(message)
+    return {
+        "channel": str(message.get("channel_title") or handle or "Telegram"),
+        "channel_url": telegram_channel_public_url(handle),
+        "channel_type": telegram_daily_channel_type_label(message.get("channel_content_type")),
+        "posted_at": date_label(posted_at, config) if posted_at else "일시 미상",
+        "url": str(message.get("message_url") or ""),
+        "excerpt": contextual_text_excerpt(text, query, max_chars=128) if query else telegram_daily_excerpt(text, max_chars=128),
+    }
+
+
 def telegram_daily_keyword_details(
     keyword_rows: list[dict[str, object]],
     messages: list[dict[str, object]],
@@ -3691,26 +3795,23 @@ def telegram_daily_keyword_details(
             for message in messages
             if telegram_daily_message_has_keyword(message, keyword)
         ]
-        channel_counter: Counter[str] = Counter(
-            str(message.get("channel_title") or message.get("handle") or "Telegram")
-            for message in matched_messages
-        )
+        channel_counter: Counter[str] = Counter()
+        channel_labels: dict[str, str] = {}
+        channel_urls: dict[str, str] = {}
+        for message in matched_messages:
+            handle = str(message.get("handle") or "").strip()
+            key = handle.removeprefix("@") or str(message.get("channel_title") or "Telegram")
+            label = str(message.get("channel_title") or handle or "Telegram")
+            channel_counter[key] += 1
+            channel_labels[key] = label
+            channel_urls[key] = telegram_channel_public_url(handle)
         type_counter: Counter[str] = Counter(
             str(message.get("channel_content_type") or "community")
             for message in matched_messages
         )
         recent_messages = []
         for message in matched_messages[:5]:
-            posted_at = telegram_daily_dt(message.get("posted_at"), config)
-            recent_messages.append(
-                {
-                    "channel": str(message.get("channel_title") or message.get("handle") or "Telegram"),
-                    "channel_type": telegram_daily_channel_type_label(message.get("channel_content_type")),
-                    "posted_at": date_label(posted_at, config) if posted_at else "일시 미상",
-                    "url": str(message.get("message_url") or ""),
-                    "excerpt": contextual_text_excerpt(telegram_daily_message_text(message), keyword, max_chars=116),
-                }
-            )
+            recent_messages.append(telegram_daily_message_detail(message, config, keyword))
         rows.append(
             {
                 "keyword": keyword,
@@ -3718,8 +3819,12 @@ def telegram_daily_keyword_details(
                 "count": int(keyword_row.get("count") or len(matched_messages)),
                 "channels_count": len(channel_counter),
                 "top_channels": [
-                    {"label": label, "count": count}
-                    for label, count in channel_counter.most_common(5)
+                    {
+                        "label": channel_labels.get(key, key),
+                        "url": channel_urls.get(key, ""),
+                        "count": count,
+                    }
+                    for key, count in channel_counter.most_common(5)
                 ],
                 "channel_types": [
                     {
@@ -3830,7 +3935,9 @@ def telegram_daily_stock_heatmap(
         companies = telegram_daily_message_stock_candidates(message)
         if not companies:
             continue
-        channel = str(message.get("channel_title") or message.get("handle") or "")
+        handle = str(message.get("handle") or "").strip()
+        channel_key = handle.removeprefix("@") or str(message.get("channel_title") or "")
+        channel_label = str(message.get("channel_title") or handle or "")
         bucket_index = telegram_daily_bucket_index(posted_at, buckets, config)
         for company in dict.fromkeys(companies):
             row = grouped.setdefault(
@@ -3839,14 +3946,21 @@ def telegram_daily_stock_heatmap(
                     "company": company,
                     "count": 0,
                     "channels": Counter(),
+                    "channel_labels": {},
+                    "channel_urls": {},
                     "buckets": [0 for _ in buckets],
+                    "mentions": [],
                     "latest_at": "",
                 },
             )
             row["count"] = int(row["count"]) + 1
             row["buckets"][bucket_index] += 1  # type: ignore[index]
-            if channel:
-                row["channels"][channel] += 1  # type: ignore[index]
+            if channel_key:
+                row["channels"][channel_key] += 1  # type: ignore[index]
+                row["channel_labels"][channel_key] = channel_label  # type: ignore[index]
+                row["channel_urls"][channel_key] = telegram_channel_public_url(handle)  # type: ignore[index]
+            if isinstance(row.get("mentions"), list) and len(row["mentions"]) < 8:  # type: ignore[index]
+                row["mentions"].append(telegram_daily_message_detail(message, config, company))  # type: ignore[index]
             latest = posted_at.isoformat()
             if latest > str(row.get("latest_at") or ""):
                 row["latest_at"] = latest
@@ -3855,13 +3969,22 @@ def telegram_daily_stock_heatmap(
     max_cell = 1
     for row in grouped.values():
         channel_counter: Counter[str] = row.pop("channels")  # type: ignore[assignment]
+        channel_labels: dict[str, str] = row.pop("channel_labels")  # type: ignore[assignment]
+        channel_urls: dict[str, str] = row.pop("channel_urls")  # type: ignore[assignment]
         bucket_values = [int(value) for value in row.get("buckets", [])]
         max_cell = max(max_cell, *(bucket_values or [1]))
         rows.append(
             {
                 **row,
                 "channels_count": len([channel for channel in channel_counter if channel]),
-                "top_channels": [{"label": label, "count": count} for label, count in channel_counter.most_common(3)],
+                "top_channels": [
+                    {
+                        "label": channel_labels.get(key, key),
+                        "url": channel_urls.get(key, ""),
+                        "count": count,
+                    }
+                    for key, count in channel_counter.most_common(3)
+                ],
             }
         )
     rows.sort(
@@ -3989,9 +4112,13 @@ def render_telegram_daily_html(
     end_label = escape(format_kst(end_at, str(config.get("timezone") or "Asia/Seoul")))
     report_link = escape(report_url, quote=True)
     logo = bside_logo_html("bside-logo--top")
+    signal_detail_data = {
+        f"signal-{index}": telegram_daily_signal_detail(signal, config)
+        for index, signal in enumerate(signal_rows[:12])
+    }
     top_signals_html = "\n".join(
         f"""
-        <article class="signal-card">
+        <article class="signal-card" role="button" tabindex="0" data-signal-detail-key="signal-{index}">
           <div class="signal-card__score">{int(signal.get("market_attention_score") or 0)}</div>
           <div class="signal-card__meta">
             <span>{escape(str(signal.get("signal_type_label") or "시장 언급"))}</span>
@@ -4005,11 +4132,11 @@ def render_telegram_daily_html(
           <div class="tag-row">{''.join(f'<span>{escape(keyword)}</span>' for keyword in telegram_daily_list(signal.get("top_keywords"), limit=5))}</div>
         </article>
         """
-        for signal in signal_rows[:4]
+        for index, signal in enumerate(signal_rows[:4])
     ) or '<p class="empty">아직 표시할 시장 언급 신호가 충분하지 않습니다.</p>'
     signal_table_rows_html = "\n".join(
         f"""
-        <tr>
+        <tr data-signal-detail-key="signal-{index}">
           <td><strong class="score-pill">{int(signal.get("market_attention_score") or 0)}</strong></td>
           <td>
             <b>{escape(str(signal.get("display_title") or telegram_daily_signal_title(signal)))}</b>
@@ -4025,7 +4152,7 @@ def render_telegram_daily_html(
           <td>{int(signal.get("institutional_relevance_score") or 0)}<br><small>Risk {int(signal.get("rumor_risk_score") or 0)}</small></td>
         </tr>
         """
-        for signal in signal_rows[:12]
+        for index, signal in enumerate(signal_rows[:12])
     ) or '<tr><td colspan="7">아직 표시할 시장 언급 신호가 충분하지 않습니다.</td></tr>'
     signal_table_html = f"""
       <div class="signal-table-wrap" aria-label="시장 언급 신호 상세">
@@ -4044,6 +4171,9 @@ def render_telegram_daily_html(
           <tbody>{signal_table_rows_html}</tbody>
         </table>
       </div>
+      <aside class="telegram-detail-panel" data-signal-detail-panel>
+        <div class="telegram-detail-panel__empty">시장 언급 신호를 선택하면 관련 Telegram 원문 발췌가 표시됩니다.</div>
+      </aside>
     """
 
     analysis_tabs_html = "\n".join(
@@ -4053,6 +4183,7 @@ def render_telegram_daily_html(
     )
     analysis_panels_html_parts: list[str] = []
     keyword_detail_data: dict[str, list[dict[str, object]]] = {}
+    heatmap_detail_data: dict[str, dict[str, object]] = {}
     for period in analysis_periods:
         period_key = str(period["key"])
         period_start = period["start_at"] if isinstance(period.get("start_at"), datetime) else start_at
@@ -4087,19 +4218,33 @@ def render_telegram_daily_html(
             heatmap_header_html = "".join(
                 f'<span class="heatmap__bucket">{escape(label).replace(chr(10), "<br>")}</span>' for label in heatmap_labels
             )
+            heatmap_detail_data[view_key] = {
+                str(row.get("company") or ""): {
+                    "title": str(row.get("company") or ""),
+                    "meta": [
+                        f'{int(row.get("count") or 0)}건',
+                        f'{int(row.get("channels_count") or 0)}채널',
+                    ],
+                    "channels": row.get("top_channels", []),
+                    "messages": row.get("mentions", []),
+                }
+                for row in view.get("heatmap_rows", [])
+                if isinstance(row, dict) and row.get("company")
+            }
             heatmap_rows_html = "\n".join(
                 f"""
                 <div class="heatmap__row">
-                  <div class="heatmap__name">
+                  <button type="button" class="heatmap__name" data-heatmap-detail-key="{escape(view_key, quote=True)}" data-heatmap-company="{escape(str(row.get("company") or ""), quote=True)}">
                     <div class="heatmap__name-line">
                       <strong>{escape(str(row.get("company") or ""))}</strong>
                       <span>{int(row.get("count") or 0)}건 · {int(row.get("channels_count") or 0)}채널</span>
                     </div>
                     <em>{escape(", ".join(str(channel.get("label") or "") for channel in row.get("top_channels", []) if isinstance(channel, dict))[:46])}</em>
-                  </div>
+                  </button>
                   {''.join(
-                      f'<span class="heatmap__cell heatmap__cell--l{telegram_daily_heat_level(int(value), int(row.get("max_cell") or 1))}" '
-                      f'aria-label="{escape(str(row.get("company") or ""), quote=True)} {escape(heatmap_labels[index].replace(chr(10), " "), quote=True) if index < len(heatmap_labels) else ""} {int(value)}건">{int(value) if int(value) else ""}</span>'
+                      f'<button type="button" class="heatmap__cell heatmap__cell--l{telegram_daily_heat_level(int(value), int(row.get("max_cell") or 1))}" '
+                      f'data-heatmap-detail-key="{escape(view_key, quote=True)}" data-heatmap-company="{escape(str(row.get("company") or ""), quote=True)}" '
+                      f'aria-label="{escape(str(row.get("company") or ""), quote=True)} {escape(heatmap_labels[index].replace(chr(10), " "), quote=True) if index < len(heatmap_labels) else ""} {int(value)}건">{int(value) if int(value) else ""}</button>'
                       for index, value in enumerate(row.get("buckets", []))
                   )}
                 </div>
@@ -4130,6 +4275,9 @@ def render_telegram_daily_html(
                       </div>
                       {heatmap_rows_html}
                     </div>
+                    <aside class="telegram-detail-panel telegram-detail-panel--inline" data-heatmap-detail-panel="{escape(view_key, quote=True)}">
+                      <div class="telegram-detail-panel__empty">종목을 선택하면 관련 Telegram 언급이 표시됩니다.</div>
+                    </aside>
                   </article>
                 </div>
                 """
@@ -4153,6 +4301,8 @@ def render_telegram_daily_html(
         )
     analysis_panels_html = "\n".join(analysis_panels_html_parts)
     keyword_detail_json = html_json(keyword_detail_data)
+    heatmap_detail_json = html_json(heatmap_detail_data)
+    signal_detail_json = html_json(signal_detail_data)
 
     story_cards_html = "\n".join(
         f"""
@@ -4280,7 +4430,8 @@ def render_telegram_daily_html(
     .trend-line path {{ fill:none; stroke:var(--accent); stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }}
     .trend-line circle {{ fill:#fff; stroke:var(--accent); stroke-width:2; }}
     .keyword-detail__channels {{ display:grid; gap:5px; margin:8px 0 10px; color:#4b4357; font-size:12px; }}
-    .keyword-detail__channels span {{ display:flex; justify-content:space-between; gap:10px; border-bottom:1px solid rgba(222,215,232,.55); padding-bottom:4px; }}
+    .keyword-detail__channels span, .keyword-detail__channels a {{ display:flex; justify-content:space-between; gap:10px; border-bottom:1px solid rgba(222,215,232,.55); padding-bottom:4px; color:inherit; text-decoration:none; }}
+    .keyword-detail__channels a:hover b {{ color:var(--accent-deep); text-decoration:underline; text-underline-offset:3px; }}
     .keyword-detail__messages {{ display:grid; gap:7px; }}
     .keyword-detail__messages a {{ display:grid; gap:3px; border:1px solid rgba(112,55,224,.12); background:#fff; padding:8px; text-decoration:none; }}
     .keyword-detail__messages a:hover strong {{ color:var(--accent-deep); text-decoration:underline; text-underline-offset:3px; }}
@@ -4289,14 +4440,15 @@ def render_telegram_daily_html(
     .heatmap {{ display:grid; gap:7px; overflow:hidden; padding-bottom:2px; }}
     .heatmap__row {{ display:grid; grid-template-columns:minmax(164px,1.38fr) repeat(4,minmax(46px,.5fr)); gap:5px; align-items:stretch; }}
     .heatmap__row--head {{ color:var(--muted); font-size:11px; font-weight:900; }}
-    .heatmap__name {{ display:grid; gap:2px; border:1px solid var(--line); background:#fff; padding:6px 7px; min-height:36px; overflow:hidden; }}
+    .heatmap__name {{ display:grid; gap:2px; border:1px solid var(--line); background:#fff; padding:6px 7px; min-height:36px; overflow:hidden; text-align:left; color:inherit; cursor:pointer; }}
     .heatmap__name-line {{ display:flex; align-items:baseline; gap:6px; min-width:0; }}
     .heatmap__name strong {{ flex:1 1 auto; min-width:0; font-size:12.5px; line-height:1.2; word-break:keep-all; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
     .heatmap__name span {{ flex:0 0 auto; color:var(--muted); font-size:10.5px; white-space:nowrap; }}
     .heatmap__name em {{ color:#8a8195; font-size:10px; line-height:1.2; font-style:normal; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
     .heatmap__bucket, .heatmap__cell {{ display:flex; align-items:center; justify-content:center; min-height:38px; border:1px solid var(--line); background:#fff; border-radius:7px; text-align:center; }}
     .heatmap__bucket {{ padding:4px; }}
-    .heatmap__cell {{ color:var(--accent-deep); font-size:12px; font-weight:950; }}
+    .heatmap__cell {{ color:var(--accent-deep); font:inherit; font-size:12px; font-weight:950; cursor:pointer; }}
+    .heatmap__name:hover, .heatmap__cell:hover, .heatmap__name.is-active, .heatmap__cell.is-active {{ border-color:var(--accent); box-shadow:inset 0 0 0 1px rgba(112,55,224,.2); }}
     .heatmap__cell--l0 {{ color:transparent; background:#fff; }}
     .heatmap__cell--l1 {{ background:#f7f2ff; }}
     .heatmap__cell--l2 {{ background:#eee3ff; }}
@@ -4305,6 +4457,8 @@ def render_telegram_daily_html(
     .heatmap__cell--l5 {{ background:#9b6cf0; color:#fff; }}
     .signal-grid {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }}
     .signal-card, .story-card {{ position:relative; border:1px solid var(--line); background:var(--surface); padding:14px; box-shadow:0 14px 32px rgba(70,43,102,.05); }}
+    .signal-card {{ cursor:pointer; }}
+    .signal-card:hover, .signal-card.is-active {{ border-color:var(--accent); box-shadow:0 14px 32px rgba(70,43,102,.1), inset 0 0 0 1px rgba(112,55,224,.16); }}
     .signal-card__score {{ position:absolute; right:12px; top:12px; min-width:38px; height:32px; display:grid; place-items:center; border-radius:10px; background:var(--ink); color:#fff; font-weight:950; font-size:16px; }}
     .signal-card__meta, .story-card__meta {{ display:flex; flex-wrap:wrap; gap:6px 9px; color:var(--muted); font-size:11px; }}
     .signal-card__meta strong {{ color:var(--accent-deep); }}
@@ -4322,6 +4476,21 @@ def render_telegram_daily_html(
     .signal-table b {{ display:block; margin-bottom:3px; line-height:1.35; }}
     .signal-table small {{ color:var(--muted); line-height:1.35; }}
     .signal-table td:nth-child(6) span {{ display:inline-flex; margin:0 4px 4px 0; border:1px solid var(--line); border-radius:999px; padding:2px 6px; color:var(--accent-deep); background:#fff; white-space:nowrap; }}
+    .signal-table tr[data-signal-detail-key] {{ cursor:pointer; }}
+    .signal-table tr[data-signal-detail-key]:hover td {{ background:#fbf8ff; }}
+    .telegram-detail-panel {{ margin-top:10px; display:grid; gap:8px; border:1px solid rgba(112,55,224,.2); background:linear-gradient(180deg,#fff,#faf7ff); padding:12px; }}
+    .telegram-detail-panel__empty {{ color:var(--muted); font-size:12.5px; }}
+    .telegram-detail-panel h3 {{ margin:0; font-size:18px; line-height:1.25; }}
+    .telegram-detail-panel__meta {{ display:flex; flex-wrap:wrap; gap:6px; }}
+    .telegram-detail-panel__meta span {{ display:inline-flex; border:1px solid var(--line); border-radius:999px; background:#fff; color:var(--accent-deep); padding:3px 7px; font-size:11px; font-weight:900; }}
+    .telegram-detail-panel__summary {{ margin:0; color:#4d4659; font-size:12.5px; line-height:1.45; }}
+    .telegram-detail-panel__channels {{ display:flex; flex-wrap:wrap; gap:5px; }}
+    .telegram-detail-panel__channels a, .telegram-detail-panel__channels span {{ border:1px solid rgba(112,55,224,.16); border-radius:999px; background:#fff; color:var(--accent-deep); padding:3px 7px; text-decoration:none; font-size:10.8px; font-weight:850; }}
+    .telegram-detail-panel__messages {{ display:grid; gap:6px; }}
+    .telegram-detail-panel__messages a {{ display:grid; gap:3px; border:1px solid rgba(112,55,224,.12); border-radius:8px; background:#fff; padding:8px; color:inherit; text-decoration:none; }}
+    .telegram-detail-panel__messages a:hover strong {{ color:var(--accent-deep); text-decoration:underline; text-underline-offset:3px; }}
+    .telegram-detail-panel__messages span {{ color:var(--muted); font-size:10.5px; }}
+    .telegram-detail-panel__messages strong {{ color:#2f2839; font-size:12px; line-height:1.42; }}
     .score-pill {{ display:inline-grid; place-items:center; min-width:34px; height:30px; border-radius:9px; background:var(--ink); color:#fff; font-size:14px; }}
     .confirm-pill {{ display:inline-flex; border-radius:999px; border:1px solid var(--line); padding:4px 7px; font-size:11px; font-weight:950; white-space:nowrap; }}
     .confirm-pill--confirmed {{ color:var(--green); border-color:rgba(0,120,95,.24); background:#effbf7; }}
@@ -4425,6 +4594,8 @@ def render_telegram_daily_html(
   </div>
   <script>
     const keywordDetailData = {keyword_detail_json};
+    const heatmapDetailData = {heatmap_detail_json};
+    const signalDetailData = {signal_detail_json};
     function escapeHtml(value) {{
       return String(value || '').replace(/[&<>"']/g, (char) => ({{ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }}[char]));
     }}
@@ -4474,7 +4645,11 @@ def render_telegram_daily_html(
       const channels = Array.isArray(detail.top_channels) ? detail.top_channels : [];
       const types = Array.isArray(detail.channel_types) ? detail.channel_types : [];
       const messages = Array.isArray(detail.messages) ? detail.messages : [];
-      const channelHtml = channels.map((row) => `<span><b>${{escapeHtml(compactText(row.label, 34))}}</b><em>${{Number(row.count || 0)}}건</em></span>`).join('') || '<span><b>채널 데이터 없음</b><em>0건</em></span>';
+      const channelHtml = channels.map((row) => {{
+        const body = `<b>${{escapeHtml(compactText(row.label, 34))}}</b><em>${{Number(row.count || 0)}}건</em>`;
+        const href = String(row.url || '');
+        return href ? `<a href="${{escapeHtml(href)}}" target="_blank" rel="noopener noreferrer">${{body}}</a>` : `<span>${{body}}</span>`;
+      }}).join('') || '<span><b>채널 데이터 없음</b><em>0건</em></span>';
       const typeHtml = types.map((row) => `<span>${{escapeHtml(row.label)}} ${{Number(row.count || 0)}}건</span>`).join('');
       const messageHtml = messages.map((message) => {{
         const href = String(message.url || '#');
@@ -4494,6 +4669,45 @@ def render_telegram_daily_html(
         <div class="keyword-detail__channels">${{channelHtml}}</div>
         <div class="keyword-detail__messages">${{messageHtml}}</div>
       `;
+    }}
+    function renderMentionsDetail(panel, detail) {{
+      if (!panel || !detail) return;
+      const meta = Array.isArray(detail.meta) ? detail.meta.filter(Boolean) : [];
+      const channels = Array.isArray(detail.channels) ? detail.channels : [];
+      const messages = Array.isArray(detail.messages) ? detail.messages : [];
+      const channelHtml = channels.map((row) => {{
+        const label = `${{compactText(row.label || row.channel || '채널', 24)}} ${{Number(row.count || 0) ? Number(row.count || 0) + '건' : ''}}`;
+        const href = String(row.url || row.channel_url || '');
+        return href ? `<a href="${{escapeHtml(href)}}" target="_blank" rel="noopener noreferrer">${{escapeHtml(label)}}</a>` : `<span>${{escapeHtml(label)}}</span>`;
+      }}).join('');
+      const messageHtml = messages.map((message) => {{
+        const href = String(message.url || '#');
+        return `<a href="${{escapeHtml(href)}}" target="_blank" rel="noopener noreferrer"><span>${{escapeHtml(message.posted_at || '일시 미상')}} · ${{escapeHtml(message.channel_type || 'Telegram')}} · ${{escapeHtml(compactText(message.channel || 'Telegram', 28))}}</span><strong>${{escapeHtml(compactText(message.excerpt || '', 140))}}</strong></a>`;
+      }}).join('') || '<div class="telegram-detail-panel__empty">대표 원문 발췌가 아직 없습니다.</div>';
+      panel.innerHTML = `
+        <h3>${{escapeHtml(detail.title || '상세 언급')}}</h3>
+        <div class="telegram-detail-panel__meta">${{meta.map((item) => `<span>${{escapeHtml(item)}}</span>`).join('')}}</div>
+        ${{detail.summary ? `<p class="telegram-detail-panel__summary">${{escapeHtml(detail.summary)}}</p>` : ''}}
+        ${{channelHtml ? `<div class="telegram-detail-panel__channels">${{channelHtml}}</div>` : ''}}
+        <div class="telegram-detail-panel__messages">${{messageHtml}}</div>
+      `;
+    }}
+    function selectHeatmapItem(button) {{
+      const key = button.getAttribute('data-heatmap-detail-key') || '';
+      const company = button.getAttribute('data-heatmap-company') || '';
+      const panel = Array.from(document.querySelectorAll('[data-heatmap-detail-panel]')).find((item) => item.getAttribute('data-heatmap-detail-panel') === key);
+      const detail = heatmapDetailData[key]?.[company];
+      document.querySelectorAll(`[data-heatmap-detail-key="${{key.replace(/"/g, '\\"')}}"]`).forEach((item) => {{
+        item.classList.toggle('is-active', item.getAttribute('data-heatmap-company') === company);
+      }});
+      renderMentionsDetail(panel, detail);
+    }}
+    function selectSignalItem(key) {{
+      const panel = document.querySelector('[data-signal-detail-panel]');
+      document.querySelectorAll('[data-signal-detail-key]').forEach((item) => {{
+        item.classList.toggle('is-active', item.getAttribute('data-signal-detail-key') === key);
+      }});
+      renderMentionsDetail(panel, signalDetailData[key]);
     }}
     function selectKeywordButton(button) {{
       const key = button.getAttribute('data-keyword-detail-key') || '';
@@ -4547,7 +4761,21 @@ def render_telegram_daily_html(
     document.querySelectorAll('[data-keyword]').forEach((button) => {{
       button.addEventListener('click', () => selectKeywordButton(button));
     }});
+    document.querySelectorAll('[data-heatmap-company]').forEach((button) => {{
+      button.addEventListener('click', () => selectHeatmapItem(button));
+    }});
+    document.querySelectorAll('[data-signal-detail-key]').forEach((item) => {{
+      item.addEventListener('click', () => selectSignalItem(item.getAttribute('data-signal-detail-key') || ''));
+      item.addEventListener('keydown', (event) => {{
+        if (event.key === 'Enter' || event.key === ' ') {{
+          event.preventDefault();
+          selectSignalItem(item.getAttribute('data-signal-detail-key') || '');
+        }}
+      }});
+    }});
     document.querySelectorAll('[data-analysis-view].is-active').forEach(initAnalysisView);
+    const firstSignal = document.querySelector('[data-signal-detail-key]');
+    if (firstSignal) selectSignalItem(firstSignal.getAttribute('data-signal-detail-key') || '');
   </script>
 </body>
 </html>
@@ -4601,31 +4829,34 @@ def render_search_html(
     .search-controls {{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px; }}
     .search-controls select {{ border:1px solid var(--line); border-radius:999px; background:#fff; color:#362d42; padding:7px 10px; font:inherit; font-size:12px; font-weight:800; }}
     .search-controls label {{ display:inline-flex; align-items:center; gap:5px; border:1px solid var(--line); border-radius:999px; background:#fff; color:#4a4255; padding:7px 9px; font-size:12px; font-weight:800; }}
-    .dashboard {{ display:grid; grid-template-columns:260px minmax(0,1fr); gap:22px; align-items:start; padding-top:2px; }}
-    .insight {{ position:sticky; top:16px; display:grid; gap:10px; border:1px solid var(--line); background:var(--surface); padding:14px; }}
-    .insight h2, .results h2 {{ margin:0; font-family:Georgia,"Times New Roman",serif; font-size:21px; line-height:1.1; }}
-    .metric-grid {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }}
-    .metric {{ border:1px solid rgba(112,55,224,.15); background:var(--accent-soft); padding:9px; }}
-    .metric span {{ display:block; color:var(--muted); font-size:10.5px; font-weight:850; }}
-    .metric strong {{ display:block; color:var(--accent-deep); font-size:20px; line-height:1.15; }}
-    .panel {{ border-top:1px solid var(--line); padding-top:10px; }}
+    .dashboard {{ display:grid; grid-template-columns:230px minmax(0,1fr); gap:20px; align-items:start; padding-top:2px; }}
+    .insight {{ position:sticky; top:16px; display:grid; gap:8px; border:1px solid var(--line); background:var(--surface); padding:11px; }}
+    .insight h2, .results h2 {{ margin:0; font-family:Georgia,"Times New Roman",serif; font-size:19px; line-height:1.1; }}
+    .metric-grid {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }}
+    .metric {{ border:1px solid rgba(112,55,224,.15); background:var(--accent-soft); padding:7px; }}
+    .metric span {{ display:block; color:var(--muted); font-size:10px; font-weight:850; }}
+    .metric strong {{ display:block; color:var(--accent-deep); font-size:17px; line-height:1.15; }}
+    .panel {{ border-top:1px solid var(--line); padding-top:8px; }}
     .panel h3 {{ margin:0 0 6px; color:var(--accent-deep); font-size:12px; letter-spacing:.03em; }}
     .chip-list {{ display:flex; flex-wrap:wrap; gap:5px; }}
-    .chip-list span {{ border:1px solid rgba(112,55,224,.16); border-radius:999px; background:#fff; color:#4c435a; padding:3px 7px; font-size:11px; }}
+    .chip-list span, .chip-list button {{ border:1px solid rgba(112,55,224,.16); border-radius:999px; background:#fff; color:#4c435a; padding:3px 7px; font:inherit; font-size:11px; cursor:pointer; }}
+    .chip-list button:hover, .chip-list button.is-active {{ border-color:var(--accent); color:var(--accent-deep); background:var(--accent-soft); }}
     .results {{ display:grid; gap:12px; min-width:0; }}
     .status {{ color:var(--muted); font-size:13px; padding:10px 0; }}
-    .briefing {{ display:grid; gap:10px; border-top:3px solid var(--accent); background:#fff; padding:14px; box-shadow:0 16px 34px rgba(70,43,102,.06); }}
+    .briefing {{ display:grid; gap:8px; border-top:2px solid var(--accent); background:#fff; padding:10px 12px; box-shadow:0 12px 26px rgba(70,43,102,.05); }}
     .briefing[hidden] {{ display:none; }}
-    .briefing h2 {{ margin:0; font-family:Georgia,"Times New Roman",serif; font-size:22px; line-height:1.15; }}
-    .briefing__grid {{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }}
-    .briefing__metric {{ border:1px solid rgba(112,55,224,.14); background:var(--accent-soft); padding:8px; }}
-    .briefing__metric span {{ display:block; color:var(--muted); font-size:10.5px; font-weight:850; }}
-    .briefing__metric strong {{ display:block; color:var(--accent-deep); font-size:18px; line-height:1.2; }}
-    .briefing ul {{ margin:0; padding-left:18px; color:#342d3d; font-size:13px; line-height:1.55; }}
+    .briefing h2 {{ margin:0; font-family:Georgia,"Times New Roman",serif; font-size:18px; line-height:1.15; }}
+    .briefing__grid {{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; }}
+    .briefing__metric {{ border:1px solid rgba(112,55,224,.14); background:var(--accent-soft); padding:6px 7px; }}
+    .briefing__metric span {{ display:block; color:var(--muted); font-size:10px; font-weight:850; }}
+    .briefing__metric strong {{ display:block; color:var(--accent-deep); font-size:15px; line-height:1.2; }}
+    .briefing p {{ margin:0; color:#342d3d; font-size:12.5px; line-height:1.45; }}
+    .briefing ul {{ margin:0; padding-left:17px; color:#342d3d; font-size:12px; line-height:1.45; }}
     .briefing__notice {{ color:var(--muted); font-size:11.5px; }}
     .result-card {{ display:grid; gap:6px; border-top:1px solid var(--line); padding:13px 0 14px; color:inherit; text-decoration:none; }}
-    .result-card:hover h3 {{ color:var(--accent-deep); text-decoration:underline; text-underline-offset:4px; }}
+    .result-card:hover .result-title {{ color:var(--accent-deep); text-decoration:underline; text-underline-offset:4px; }}
     .result-card h3 {{ margin:0; font-size:18px; line-height:1.34; font-weight:850; word-break:keep-all; overflow-wrap:break-word; }}
+    .result-title {{ color:inherit; text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:3px; }}
     .result-card p {{ margin:0; color:#4d4659; font-size:13px; line-height:1.48; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }}
     .meta {{ display:flex; flex-wrap:wrap; gap:6px 9px; color:var(--muted); font-size:11px; }}
     .reasons {{ display:flex; flex-wrap:wrap; gap:5px; }}
@@ -4636,6 +4867,11 @@ def render_search_html(
     .why-matters span::before {{ content:"• "; color:var(--accent); font-weight:900; }}
     .risk-flags {{ display:flex; flex-wrap:wrap; gap:5px; }}
     .risk-flags span {{ border:1px solid #efd2a7; border-radius:999px; background:#fff7ea; color:#8a4b00; padding:2px 7px; font-size:10.5px; font-weight:850; }}
+    .result-links {{ display:flex; flex-wrap:wrap; gap:5px; }}
+    .result-links a {{ border:1px solid rgba(112,55,224,.16); border-radius:999px; background:#fff; color:var(--accent-deep); padding:2px 7px; font-size:10.5px; font-weight:850; text-decoration:none; }}
+    .result-links a:hover {{ border-color:var(--accent); background:var(--accent-soft); }}
+    .entity-row {{ display:flex; flex-wrap:wrap; gap:5px; }}
+    .entity-row span {{ border:1px solid rgba(0,120,95,.18); border-radius:999px; background:#f1fbf7; color:#006c57; padding:2px 7px; font-size:10.5px; font-weight:850; }}
     .timeline-list {{ display:grid; gap:8px; }}
     .timeline-item {{ display:grid; grid-template-columns:72px minmax(0,1fr); gap:8px; border-top:1px solid var(--line); padding-top:8px; font-size:12.5px; }}
     .timeline-item time {{ color:var(--accent-deep); font-weight:900; }}
@@ -4758,7 +4994,7 @@ def render_search_html(
     const hidePromotional = document.querySelector('[data-hide-promotional]');
     const hideTelegramOnly = document.querySelector('[data-hide-telegram-only]');
     const tabButtons = Array.from(document.querySelectorAll('[data-tab]'));
-    const state = {{ query: '', tab: 'all', articles: [], stories: [], signals: [], serverSearch: null }};
+    const state = {{ query: '', tab: 'all', articles: [], stories: [], signals: [], serverSearch: null, sourceFilter: '', keywordFilter: '' }};
     const EVENT_RULES = [
       {{ id: 'management_dispute', label: '경영권·주주행동', keywords: ['경영권', '공개매수', '주주제안', '주주총회', '주총', '의결권', '이사회', '가처분', '소송', '행동주의', '스튜어드십', '주주행동'] }},
       {{ id: 'delisting', label: '상장폐지·거래정지', keywords: ['상장폐지', '상폐', '거래정지', '관리종목', '실질심사', '감사의견', '자본잠식', '정리매매', '불성실공시'] }},
@@ -4955,6 +5191,8 @@ def render_search_html(
     function passesSearchFilters(row, kind) {{
       const selectedEvent = eventFilter?.value || 'all';
       if (selectedEvent !== 'all' && classifyEvent(row).id !== selectedEvent) return false;
+      if (state.sourceFilter && !sourceName(row).toLowerCase().includes(state.sourceFilter.toLowerCase())) return false;
+      if (state.keywordFilter && !rowText(row).toLowerCase().includes(state.keywordFilter.toLowerCase())) return false;
       const flags = riskFlags(row);
       if (hidePromotional?.checked && flags.includes('promotional')) return false;
       if (hideTelegramOnly?.checked && isTelegramOnly(row, kind)) return false;
@@ -4985,6 +5223,8 @@ def render_search_html(
       else if (event.id === 'disclosure') lines.push('공시·제도 변화와 후속 기사 확산 여부를 확인할 필요가 있습니다.');
       else if (event.id === 'global') lines.push('해외 시장의 행동주의·거버넌스 흐름을 국내 관점에서 비교해 볼 수 있습니다.');
       if (Number(row.publisher_count || row.article_count || 0) > 1) lines.push('복수 매체가 다루고 있어 단발 보도보다 확산도가 높습니다.');
+      if (kind === '기사' && resultHref(row, kind)) lines.push('원문 링크 1건을 바로 확인할 수 있습니다.');
+      if (kind === '이슈' && Number(row.article_count || row.related_article_count || 0) > 0) lines.push(`연결 기사 ${{Number(row.article_count || row.related_article_count)}}건이 있습니다.`);
       if (Number(row.related_telegram_channels_count || 0) > 1) lines.push(`Telegram ${{Number(row.related_telegram_channels_count)}}개 채널에서 반복 언급됐습니다.`);
       if (flags.includes('promotional') || flags.includes('rumor') || flags.includes('unverified')) lines.push('미확인·홍보성 가능성이 있어 원문 확인이 필요합니다.');
       return lines.slice(0, 3);
@@ -5032,8 +5272,8 @@ def render_search_html(
             <div class="briefing__metric"><span>이슈</span><strong>${{Number(counts.stories || stories.length)}}</strong></div>
             <div class="briefing__metric"><span>Telegram</span><strong>${{Number(counts.telegram_signals || signals.length)}}</strong></div>
           </div>
-          ${{serverBriefing.headline ? `<p>${{escapeHtml(serverBriefing.headline)}}</p>` : ''}}
-          <ul>${{bullets.map((line) => `<li>${{escapeHtml(line)}}</li>`).join('')}}</ul>
+          ${{serverBriefing.headline ? `<p>${{escapeHtml(compactText(serverBriefing.headline, 132))}}</p>` : ''}}
+          <ul>${{bullets.slice(0, 3).map((line) => `<li>${{escapeHtml(compactText(line, 116))}}</li>`).join('')}}</ul>
           <div class="briefing__notice">${{escapeHtml(serverBriefing.disclaimer || '공개 정보 기반 이슈 정리이며 투자 제안·권유·종목 추천이 아닙니다.')}}</div>
         `;
         return;
@@ -5057,7 +5297,7 @@ def render_search_html(
           <div class="briefing__metric"><span>이슈</span><strong>${{stories.length}}</strong></div>
           <div class="briefing__metric"><span>Telegram</span><strong>${{signals.length}}</strong></div>
         </div>
-        <ul>${{bullets.map((line) => `<li>${{escapeHtml(line)}}</li>`).join('')}}</ul>
+        <ul>${{bullets.slice(0, 3).map((line) => `<li>${{escapeHtml(compactText(line, 116))}}</li>`).join('')}}</ul>
         <div class="briefing__notice">공개 정보 기반 이슈 정리이며 투자 제안·권유·종목 추천이 아닙니다.</div>
       `;
     }}
@@ -5080,7 +5320,11 @@ def render_search_html(
     function sourceName(row) {{
       const primaryMessage = primaryTelegramMessage(row);
       if (primaryMessage) return String(primaryMessage.channel_title || primaryMessage.channel_handle || 'Telegram');
-      if (Array.isArray(row.top_channels) && row.top_channels.length) return `채널 ${{row.top_channels.length}}곳`;
+      if (Array.isArray(row.top_channels) && row.top_channels.length) {{
+        const first = row.top_channels[0];
+        if (typeof first === 'string') return `채널 ${{row.top_channels.length}}곳`;
+        if (first && typeof first === 'object') return String(first.label || first.channel || `채널 ${{row.top_channels.length}}곳`);
+      }}
       return String(row.source || row.feed_name || row.primary_source || row.channel_title || row.channel_handle || '출처 미상');
     }}
     function countValues(rows, getter) {{
@@ -5092,10 +5336,13 @@ def render_search_html(
       }});
       return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 7);
     }}
-    function setChips(selector, values) {{
+    function setChips(selector, values, filterType = '') {{
       const node = document.querySelector(selector);
       if (!node) return;
-      node.innerHTML = values.length ? values.map(([label, count]) => `<span>${{escapeHtml(label)}} ${{count}}</span>`).join('') : '<span>표시할 항목 없음</span>';
+      node.innerHTML = values.length ? values.map(([label, count]) => {{
+        const active = (filterType === 'source' && state.sourceFilter === label) || (filterType === 'keyword' && state.keywordFilter === label);
+        return `<button type="button" class="${{active ? 'is-active' : ''}}" data-search-filter="${{escapeHtml(filterType)}}" data-filter-label="${{escapeHtml(label)}}">${{escapeHtml(label)}} ${{count}}</button>`;
+      }}).join('') : '<span>표시할 항목 없음</span>';
     }}
     function updateMetrics(articles, stories, signals) {{
       const sources = new Set([
@@ -5110,14 +5357,36 @@ def render_search_html(
       setChips('[data-top-sources]', countValues([
         ...articles,
         ...stories,
-        ...signals.flatMap((row) => (Array.isArray(row.top_channels) ? row.top_channels : []).map((channel) => ({{ source: channel }}))),
-      ], sourceName));
+        ...signals.flatMap((row) => (Array.isArray(row.top_channels) ? row.top_channels : []).map((channel) => ({{ source: typeof channel === 'string' ? channel : channel?.label || channel?.channel || '' }}))),
+      ], sourceName), 'source');
       const keywords = [
         ...articles.map((row) => row.feed_category || row.relevance_level || row.priority_level || ''),
         ...stories.map((row) => row.topic_category || row.feed_category || ''),
         ...signals.flatMap((row) => Array.isArray(row.top_keywords) ? row.top_keywords : []),
       ];
-      setChips('[data-top-keywords]', countValues(keywords.map((value) => ({{ value }})), (row) => row.value));
+      setChips('[data-top-keywords]', countValues(keywords.map((value) => ({{ value }})), (row) => row.value), 'keyword');
+    }}
+    function resultLinks(row, kind) {{
+      const links = [];
+      const push = (url, label) => {{
+        const href = safeResultUrl(url);
+        const cleanLabel = compactText(label || href, 44);
+        if (!href || links.some((item) => item.href === href)) return;
+        links.push({{ href, label: cleanLabel }});
+      }};
+      push(resultHref(row, kind), row.title || row.representative_title || row.signal_title || '원문');
+      if (Array.isArray(row.links)) row.links.forEach((item) => push(item.url || item.canonical_url, item.title || item.source || '기사'));
+      if (Array.isArray(row.articles)) row.articles.forEach((item) => push(item.url || item.canonical_url, item.title || item.source || '기사'));
+      telegramMessages(row).forEach((message) => push(message.message_url || message.url, message.channel_title || message.channel_handle || 'Telegram'));
+      return links.slice(0, 5);
+    }}
+    function entityHints(row, query) {{
+      const hints = [];
+      const event = classifyEvent(row);
+      if (event.id !== 'other') hints.push(event.label);
+      const queryTokens = tokens(query).filter((token) => rowText(row).toLowerCase().includes(token));
+      queryTokens.slice(0, 3).forEach((token) => hints.push(`관련어: ${{token}}`));
+      return hints.filter((hint, index, list) => hint && list.indexOf(hint) === index).slice(0, 4);
     }}
     function resultCard(row, kind, query) {{
       const title = row.title || row.representative_title || row.signal_title || '제목 없음';
@@ -5138,15 +5407,20 @@ def render_search_html(
         : '';
       const why = whyMatters(row, kind);
       const flags = riskFlags(row);
-      return `<a class="result-card" href="${{escapeHtml(href || '#')}}" target="_blank" rel="noopener noreferrer">
+      const links = resultLinks(row, kind);
+      const linkHtml = links.length > 1 ? `<div class="result-links">${{links.map((link, index) => `<a href="${{escapeHtml(link.href)}}" target="_blank" rel="noopener noreferrer">${{index === 0 ? '대표' : '링크 ' + (index + 1)}} · ${{escapeHtml(link.label)}}</a>`).join('')}}</div>` : '';
+      const entityHtml = entityHints(row, query).length ? `<div class="entity-row">${{entityHints(row, query).map((hint) => `<span>${{escapeHtml(hint)}}</span>`).join('')}}</div>` : '';
+      return `<article class="result-card">
         <div class="meta">${{meta.map((item) => `<span>${{escapeHtml(compactText(item, 42))}}</span>`).join('')}}</div>
-        <h3>${{escapeHtml(compactText(title, 118))}}</h3>
+        <h3><a class="result-title" href="${{escapeHtml(href || '#')}}" target="_blank" rel="noopener noreferrer">${{escapeHtml(compactText(title, 118))}}</a></h3>
+        ${{entityHtml}}
         ${{snippet(row, query) ? `<p>${{escapeHtml(snippet(row, query))}}</p>` : ''}}
         ${{why.length ? `<div class="why-matters">${{why.map((line) => `<span>${{escapeHtml(line)}}</span>`).join('')}}</div>` : ''}}
         ${{telegramPreview ? `<div class="telegram-preview">${{telegramPreview}}</div>` : ''}}
         ${{flags.length ? `<div class="risk-flags">${{flags.map((flag) => `<span>${{escapeHtml(flag)}}</span>`).join('')}}</div>` : ''}}
+        ${{linkHtml}}
         <div class="reasons">${{reasons.map((reason) => `<span>${{escapeHtml(reason)}}</span>`).join('')}}</div>
-      </a>`;
+      </article>`;
     }}
     function timelineRows(articles, stories, signals, query) {{
       const serverTimeline = Array.isArray(state.serverSearch?.timeline) ? state.serverSearch.timeline : [];
@@ -5241,6 +5515,8 @@ def render_search_html(
     async function runSearch(query) {{
       const cleaned = String(query || '').replace(/\\s+/g, ' ').trim();
       state.query = cleaned;
+      state.sourceFilter = '';
+      state.keywordFilter = '';
       if (input) input.value = cleaned;
       if (history.replaceState) history.replaceState(null, '', cleaned ? `?q=${{encodeURIComponent(cleaned)}}` : location.pathname);
       if (cleaned.length < 2) {{
@@ -5285,6 +5561,15 @@ def render_search_html(
     }});
     [eventFilter, sortMode, hidePromotional, hideTelegramOnly].filter(Boolean).forEach((control) => {{
       control.addEventListener('change', render);
+    }});
+    document.addEventListener('click', (event) => {{
+      const chip = event.target.closest?.('[data-search-filter]');
+      if (!chip) return;
+      const type = chip.getAttribute('data-search-filter') || '';
+      const label = chip.getAttribute('data-filter-label') || '';
+      if (type === 'source') state.sourceFilter = state.sourceFilter === label ? '' : label;
+      if (type === 'keyword') state.keywordFilter = state.keywordFilter === label ? '' : label;
+      render();
     }});
     const initialQuery = new URLSearchParams(location.search).get('q') || '';
     if (initialQuery) runSearch(initialQuery);

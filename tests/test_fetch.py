@@ -213,7 +213,7 @@ def test_google_news_decode_runs_beyond_page_enrich_limit(config, monkeypatch) -
     assert articles[0]["canonical_url"] == "https://origin.example/CBMiAAA"
     assert articles[0]["enriched"] is True
     assert articles[1]["canonical_url"] == "https://origin.example/CBMiBBB"
-    assert "enriched" not in articles[1]
+    assert articles[1]["enriched"] is True
 
 
 def test_state_google_news_links_are_upgraded(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]

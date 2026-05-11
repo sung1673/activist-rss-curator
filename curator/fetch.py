@@ -453,6 +453,7 @@ def apply_decoded_google_news_url(article: dict[str, object], decoded_url: str |
     enriched = dict(article)
     enriched["canonical_url"] = normalized_decoded
     enriched["canonical_url_hash"] = canonical_url_hash(normalized_decoded)
+    enriched["google_news_decoded"] = True
     return enriched
 
 
@@ -577,43 +578,61 @@ def enrichment_jobs(
     *,
     max_enrich_articles: int,
     google_news_decode_limit: int,
-) -> list[tuple[int, dict[str, object], bool, bool]]:
-    jobs: list[tuple[int, dict[str, object], bool, bool]] = []
+    google_news_decoded_enrich_limit: int = 0,
+) -> list[tuple[int, dict[str, object], bool, bool, bool]]:
+    jobs: list[tuple[int, dict[str, object], bool, bool, bool]] = []
     google_news_decode_attempts = 0
+    google_news_decoded_enrich_attempts = 0
     for index, article in enumerate(articles):
         url = str(article.get("canonical_url") or article.get("link") or "")
         is_google_news = bool(google_news_article_id(url))
+        is_decoded_google_news = bool(article.get("google_news_decoded"))
         should_decode_google_news = is_google_news and (
             google_news_decode_limit < 0 or google_news_decode_attempts < google_news_decode_limit
         )
         if should_decode_google_news:
             google_news_decode_attempts += 1
         should_enrich = not (max_enrich_articles > 0 and index + 1 > max_enrich_articles)
-        jobs.append((index, article, should_decode_google_news, should_enrich))
+        should_enrich_decoded_google_news = False
+        if (is_decoded_google_news or (is_google_news and should_decode_google_news)) and not should_enrich:
+            should_enrich_decoded_google_news = (
+                google_news_decoded_enrich_limit < 0
+                or google_news_decoded_enrich_attempts < google_news_decoded_enrich_limit
+            )
+            if should_enrich_decoded_google_news:
+                google_news_decoded_enrich_attempts += 1
+        jobs.append((index, article, should_decode_google_news, should_enrich, should_enrich_decoded_google_news))
     return jobs
 
 
 def enrich_article_job(
-    job: tuple[int, dict[str, object], bool, bool],
+    job: tuple[int, dict[str, object], bool, bool, bool],
     config: dict[str, object],
     *,
     timeout: httpx.Timeout,
     limits: httpx.Limits,
     headers: dict[str, str],
 ) -> tuple[int, dict[str, object]]:
-    index, article, should_decode_google_news, should_enrich = job
-    if not should_decode_google_news and not should_enrich:
+    index, article, should_decode_google_news, should_enrich, should_enrich_decoded_google_news = job
+    if not should_decode_google_news and not should_enrich and not should_enrich_decoded_google_news:
         return index, article
 
     decoded_article = article
     with httpx.Client(timeout=timeout, limits=limits, headers=headers) as client:
+        decoded_url = None
         if should_decode_google_news:
             url = str(article.get("canonical_url") or article.get("link") or "")
+            decoded_url = decode_google_news_url_online(url, client)
             decoded_article = apply_decoded_google_news_url(
                 article,
-                decode_google_news_url_online(url, client),
+                decoded_url,
             )
-        if should_enrich:
+        should_enrich_now = should_enrich or (
+            should_enrich_decoded_google_news
+            and (bool(decoded_url) or bool(decoded_article.get("google_news_decoded")))
+            and not bool(google_news_article_id(str(decoded_article.get("canonical_url") or "")))
+        )
+        if should_enrich_now:
             decoded_article = enrich_article(
                 decoded_article,
                 client,
@@ -642,6 +661,7 @@ def fetch_google_alerts_articles(config: dict[str, object]) -> list[dict[str, ob
         articles,
         max_enrich_articles=max_enrich_articles,
         google_news_decode_limit=0,
+        google_news_decoded_enrich_limit=fetch_config_int(fetch_config, "google_news_decoded_enrich_limit", 0),
     )
 
     if enrich_workers > 1 and len(jobs) > 1:
@@ -662,15 +682,22 @@ def fetch_google_alerts_articles(config: dict[str, object]) -> list[dict[str, ob
 
     enriched_articles: list[dict[str, object]] = []
     with httpx.Client(timeout=timeout, limits=limits, headers=headers) as client:
-        for _index, article, should_decode_google_news, should_enrich in jobs:
+        for _index, article, should_decode_google_news, should_enrich, should_enrich_decoded_google_news in jobs:
             decoded_article = article
+            decoded_url = None
             if should_decode_google_news:
                 url = str(article.get("canonical_url") or article.get("link") or "")
+                decoded_url = decode_google_news_url_online(url, client)
                 decoded_article = apply_decoded_google_news_url(
                     article,
-                    decode_google_news_url_online(url, client),
+                    decoded_url,
                 )
-            if not should_enrich:
+            should_enrich_now = should_enrich or (
+                should_enrich_decoded_google_news
+                and (bool(decoded_url) or bool(decoded_article.get("google_news_decoded")))
+                and not bool(google_news_article_id(str(decoded_article.get("canonical_url") or "")))
+            )
+            if not should_enrich_now:
                 enriched_articles.append(decoded_article)
                 continue
             enriched_articles.append(
