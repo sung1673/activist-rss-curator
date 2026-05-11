@@ -36,6 +36,47 @@ def report_cluster(guid: str, now: datetime) -> dict[str, object]:
     }
 
 
+def test_clean_display_text_removes_double_encoded_html_tags() -> None:
+    assert daily_report.clean_display_text("[&amp;lt;b&amp;gt;주주&amp;lt;/b&amp;gt;칼럼] 삼성전자") == "[주주칼럼] 삼성전자"
+
+
+def test_db_pulse_static_stories_filters_generic_titles_and_google_news_only_urls() -> None:
+    rows = daily_report.db_pulse_static_stories(
+        [
+            {
+                "title": "정책·자본시장 제도",
+                "url": "https://www.newstomato.com/ReadNews.aspx?no=1300364",
+                "links": [{"title": "증시 중복상장 금지로 코리아 디스카운트 끝낸다", "url": "https://news.google.com/rss/articles/test"}],
+            },
+            {
+                "title": "밸류업·주주환원·지배구조",
+                "links": [{"title": "침묵 깬 DB손보, 얼라인에 정면 반박", "url": "https://example.com/db"}],
+                "link_count": 2,
+                "priority_score": 77,
+            },
+        ],
+    )
+
+    assert rows == [
+        {
+            "title": "증시 중복상장 금지로 코리아 디스카운트 끝낸다",
+            "representative_url": "https://www.newstomato.com/ReadNews.aspx?no=1300364",
+            "status": "current",
+            "article_count": 1,
+            "priority_score": 0,
+            "sort_at": "",
+        },
+        {
+            "title": "침묵 깬 DB손보, 얼라인에 정면 반박",
+            "representative_url": "https://example.com/db",
+            "status": "current",
+            "article_count": 2,
+            "priority_score": 77,
+            "sort_at": "",
+        }
+    ]
+
+
 def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     now = datetime(2026, 5, 1, 10, 20, tzinfo=ZoneInfo("Asia/Seoul"))
     (tmp_path / "data").mkdir()

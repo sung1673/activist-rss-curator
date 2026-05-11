@@ -65,8 +65,13 @@ def report_hours() -> int:
 
 
 def clean_display_text(value: object) -> str:
-    text = unescape(str(value or ""))
-    text = re.sub(r"<\s*/?\s*[a-zA-Z][^>]*>", " ", text)
+    text = str(value or "")
+    for _ in range(3):
+        decoded = unescape(text)
+        if decoded == text:
+            break
+        text = decoded
+    text = re.sub(r"<\s*/?\s*[a-zA-Z][^>]*>", "", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
@@ -1058,6 +1063,67 @@ def report_stats(stories: list[dict[str, object]], clusters: list[dict[str, obje
     }
 
 
+DB_PULSE_GENERIC_TITLES = {
+    "밸류업·주주환원·지배구조",
+    "주주행동·경영권",
+    "자본시장 제도·공시",
+    "정책·자본시장 제도",
+    "정책·자본시장 제도·공시",
+    "해외·영문",
+}
+
+
+def is_generic_db_pulse_title(value: object) -> bool:
+    title = clean_display_text(value)
+    if not title:
+        return True
+    if title in DB_PULSE_GENERIC_TITLES:
+        return True
+    return len(title) <= 28 and re.fullmatch(r"[0-9A-Za-z가-힣]+(?:[·/|][0-9A-Za-z가-힣]+)+", title) is not None
+
+
+def db_pulse_static_stories(stories: list[dict[str, object]], *, limit: int = 6) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for story in stories:
+        links = [link for link in story.get("links", []) if isinstance(link, dict)] if isinstance(story.get("links"), list) else []
+        title_candidates = [
+            story.get("title"),
+            story.get("representative_title"),
+            *(link.get("title") for link in links),
+        ]
+        clean_titles = []
+        for title_candidate in title_candidates:
+            clean_title = clean_display_text(title_candidate)
+            if clean_title:
+                clean_titles.append(clean_title)
+        title = next((item for item in clean_titles if not is_generic_db_pulse_title(item)), clean_titles[0] if clean_titles else "")
+        if not title or is_generic_db_pulse_title(title):
+            continue
+        url_candidates = [
+            story.get("primary_url"),
+            story.get("url"),
+            *(link.get("url") for link in links),
+        ]
+        urls = [str(url or "").strip() for url in url_candidates if str(url or "").strip()]
+        url = next((item for item in urls if "news.google.com/" not in item.lower()), "")
+        if not url:
+            continue
+        story_datetime = story.get("datetime")
+        rows.append(
+            {
+                "title": title,
+                "representative_url": url,
+                "status": "current",
+                "article_count": int(story.get("link_count") or len(links) or 1),
+                "priority_score": int(story.get("priority_score") or 0),
+                "sort_at": story_datetime.isoformat() if isinstance(story_datetime, datetime) else "",
+            }
+        )
+        if len(rows) >= limit:
+            break
+    return rows
+
+
 def category_buckets(stories: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:
     buckets: dict[str, list[dict[str, object]]] = defaultdict(list)
     for story in stories:
@@ -1357,6 +1423,7 @@ def render_report_html(
     footer_logo = bside_logo_html("bside-logo--footer")
     read_api_url_json = json.dumps(report_read_api_url(), ensure_ascii=False)
     date_id_json = json.dumps(date_id, ensure_ascii=False)
+    db_pulse_static_json = html_json(db_pulse_static_stories(stories))
     brief_title_html = '<span class="brief-title__eyebrow">오늘의</span><span>핵심 브리핑</span>'
     return f"""<!doctype html>
 <html lang="ko">
@@ -1872,6 +1939,7 @@ def render_report_html(
     const storyContextDetails = Array.from(document.querySelectorAll('[data-story-context]'));
     const remoteReportsApiUrl = {read_api_url_json};
     const currentReportDateId = {date_id_json};
+    const staticDbPulseStories = {db_pulse_static_json};
     const readStorageKey = `bside-daily-read:${{location.pathname}}`;
     let readStoryIds = new Set();
 
@@ -1995,14 +2063,25 @@ def render_report_html(
       }}
     }}
 
+    function decodeDbEntities(value) {{
+      let text = String(value || '');
+      for (let index = 0; index < 3; index += 1) {{
+        const decoded = text
+          .replace(/&lt;/gi, '<')
+          .replace(/&gt;/gi, '>')
+          .replace(/&nbsp;/gi, ' ')
+          .replace(/&quot;/gi, '"')
+          .replace(/&#39;|&apos;/gi, "'")
+          .replace(/&amp;/gi, '&');
+        if (decoded === text) break;
+        text = decoded;
+      }}
+      return text;
+    }}
+
     function cleanDbText(value) {{
-      return String(value || '')
-        .replace(/&lt;\\s*\\/?\\s*[a-z][^&]*?&gt;/gi, '')
+      return decodeDbEntities(value)
         .replace(/<\\s*\\/?\\s*[a-z][^>]*?>/gi, '')
-        .replace(/&nbsp;/gi, ' ')
-        .replace(/&quot;/gi, '"')
-        .replace(/&#39;|&apos;/gi, "'")
-        .replace(/&amp;/gi, '&')
         .replace(/\\s+/g, ' ')
         .trim();
     }}
@@ -2112,7 +2191,7 @@ def render_report_html(
         rows.forEach((row) => urls.push(row?.canonical_url || row?.url || row?.representative_url));
       }});
       const cleaned = urls.map((url) => String(url || '').trim()).filter(Boolean);
-      return cleaned.find((url) => !/\\/\\/news\\.google\\.com\\//i.test(url)) || cleaned[0] || '';
+      return cleaned.find((url) => !/\\/\\/news\\.google\\.com\\//i.test(url)) || '';
     }}
 
     function searchTokens(query) {{
@@ -2842,6 +2921,7 @@ def render_report_html(
     preloadPendingStoryContexts();
     updateNavigation();
     loadRemoteArchiveLinks();
+    renderDbPulse(staticDbPulseStories);
     loadDbPulse();
   </script>
 </body>
@@ -4116,26 +4196,9 @@ def render_telegram_daily_html(
         f"signal-{index}": telegram_daily_signal_detail(signal, config)
         for index, signal in enumerate(signal_rows[:12])
     }
-    top_signals_html = "\n".join(
-        f"""
-        <article class="signal-card" role="button" tabindex="0" data-signal-detail-key="signal-{index}">
-          <div class="signal-card__score">{int(signal.get("market_attention_score") or 0)}</div>
-          <div class="signal-card__meta">
-            <span>{escape(str(signal.get("signal_type_label") or "시장 언급"))}</span>
-            <strong>{int(signal.get("related_telegram_count") or 0)}건 · {int(signal.get("related_telegram_channels_count") or 0)}채널</strong>
-          </div>
-          <h3>{escape(str(signal.get("display_title") or telegram_daily_signal_title(signal)))}</h3>
-          <p>{escape(telegram_daily_excerpt(signal.get("signal_summary") or "", max_chars=112))}</p>
-          <div class="signal-badges">
-            {''.join(f'<span class="signal-badge signal-badge--{escape(str(badge.get("key") or ""), quote=True)}">{escape(str(badge.get("label") or ""))}</span>' for badge in signal.get("badges", []) if isinstance(badge, dict))}
-          </div>
-          <div class="tag-row">{''.join(f'<span>{escape(keyword)}</span>' for keyword in telegram_daily_list(signal.get("top_keywords"), limit=5))}</div>
-        </article>
-        """
-        for index, signal in enumerate(signal_rows[:4])
-    ) or '<p class="empty">아직 표시할 시장 언급 신호가 충분하지 않습니다.</p>'
-    signal_table_rows_html = "\n".join(
-        f"""
+    def signal_table_row_html(index: int, signal: dict[str, object]) -> str:
+        key = f"signal-{index}"
+        return f"""
         <tr data-signal-detail-key="signal-{index}">
           <td><strong class="score-pill">{int(signal.get("market_attention_score") or 0)}</strong></td>
           <td>
@@ -4151,7 +4214,17 @@ def render_telegram_daily_html(
           <td>{''.join(f'<span>{escape(str(item.get("label") or ""))} {int(item.get("count") or 0)}</span>' for item in signal.get("channel_types", []) if isinstance(item, dict)) or '<span>유형 미상</span>'}</td>
           <td>{int(signal.get("institutional_relevance_score") or 0)}<br><small>Risk {int(signal.get("rumor_risk_score") or 0)}</small></td>
         </tr>
+        <tr class="signal-detail-row" data-signal-detail-row="{escape(key, quote=True)}" hidden>
+          <td colspan="7">
+            <div class="telegram-detail-panel telegram-detail-panel--signal" data-signal-detail-panel="{escape(key, quote=True)}">
+              <div class="telegram-detail-panel__empty">이 신호의 관련 Telegram 원문 발췌가 여기에 표시됩니다.</div>
+            </div>
+          </td>
+        </tr>
         """
+
+    signal_table_rows_html = "\n".join(
+        signal_table_row_html(index, signal)
         for index, signal in enumerate(signal_rows[:12])
     ) or '<tr><td colspan="7">아직 표시할 시장 언급 신호가 충분하지 않습니다.</td></tr>'
     signal_table_html = f"""
@@ -4171,9 +4244,6 @@ def render_telegram_daily_html(
           <tbody>{signal_table_rows_html}</tbody>
         </table>
       </div>
-      <aside class="telegram-detail-panel" data-signal-detail-panel>
-        <div class="telegram-detail-panel__empty">시장 언급 신호를 선택하면 관련 Telegram 원문 발췌가 표시됩니다.</div>
-      </aside>
     """
 
     analysis_tabs_html = "\n".join(
@@ -4455,16 +4525,9 @@ def render_telegram_daily_html(
     .heatmap__cell--l3 {{ background:#ddccff; }}
     .heatmap__cell--l4 {{ background:#c6a8ff; }}
     .heatmap__cell--l5 {{ background:#9b6cf0; color:#fff; }}
-    .signal-grid {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }}
-    .signal-card, .story-card {{ position:relative; border:1px solid var(--line); background:var(--surface); padding:14px; box-shadow:0 14px 32px rgba(70,43,102,.05); }}
-    .signal-card {{ cursor:pointer; }}
-    .signal-card:hover, .signal-card.is-active {{ border-color:var(--accent); box-shadow:0 14px 32px rgba(70,43,102,.1), inset 0 0 0 1px rgba(112,55,224,.16); }}
-    .signal-card__score {{ position:absolute; right:12px; top:12px; min-width:38px; height:32px; display:grid; place-items:center; border-radius:10px; background:var(--ink); color:#fff; font-weight:950; font-size:16px; }}
-    .signal-card__meta, .story-card__meta {{ display:flex; flex-wrap:wrap; gap:6px 9px; color:var(--muted); font-size:11px; }}
-    .signal-card__meta strong {{ color:var(--accent-deep); }}
-    .signal-card h3, .story-card h3 {{ margin:7px 0 7px; font-size:18px; line-height:1.32; word-break:keep-all; }}
-    .signal-card h3 {{ padding-right:40px; }}
-    .signal-card p {{ margin:0 0 10px; color:#4d4659; font-size:13px; line-height:1.46; }}
+    .story-card {{ position:relative; border:1px solid var(--line); background:var(--surface); padding:14px; box-shadow:0 14px 32px rgba(70,43,102,.05); }}
+    .story-card__meta {{ display:flex; flex-wrap:wrap; gap:6px 9px; color:var(--muted); font-size:11px; }}
+    .story-card h3 {{ margin:7px 0 7px; font-size:18px; line-height:1.32; word-break:keep-all; }}
     .signal-badges, .signal-table__badges {{ display:flex; flex-wrap:wrap; gap:5px; margin:7px 0; }}
     .signal-badge {{ display:inline-flex; border:1px solid rgba(112,55,224,.18); border-radius:999px; background:#fff; color:var(--accent-deep); padding:3px 6px; font-size:9.5px; font-weight:950; letter-spacing:.02em; }}
     .signal-badge--confirmed {{ border-color:rgba(0,120,95,.25); color:var(--green); background:#f0fbf7; }}
@@ -4477,8 +4540,11 @@ def render_telegram_daily_html(
     .signal-table small {{ color:var(--muted); line-height:1.35; }}
     .signal-table td:nth-child(6) span {{ display:inline-flex; margin:0 4px 4px 0; border:1px solid var(--line); border-radius:999px; padding:2px 6px; color:var(--accent-deep); background:#fff; white-space:nowrap; }}
     .signal-table tr[data-signal-detail-key] {{ cursor:pointer; }}
-    .signal-table tr[data-signal-detail-key]:hover td {{ background:#fbf8ff; }}
+    .signal-table tr[data-signal-detail-key]:hover td, .signal-table tr[data-signal-detail-key].is-active td {{ background:#fbf8ff; }}
+    .signal-detail-row[hidden] {{ display:none; }}
+    .signal-detail-row td {{ padding:0; background:#fbf8ff; }}
     .telegram-detail-panel {{ margin-top:10px; display:grid; gap:8px; border:1px solid rgba(112,55,224,.2); background:linear-gradient(180deg,#fff,#faf7ff); padding:12px; }}
+    .telegram-detail-panel--signal {{ margin:0; border:0; border-top:1px solid rgba(112,55,224,.18); box-shadow:inset 3px 0 0 rgba(112,55,224,.3); }}
     .telegram-detail-panel__empty {{ color:var(--muted); font-size:12.5px; }}
     .telegram-detail-panel h3 {{ margin:0; font-size:18px; line-height:1.25; }}
     .telegram-detail-panel__meta {{ display:flex; flex-wrap:wrap; gap:6px; }}
@@ -4516,7 +4582,7 @@ def render_telegram_daily_html(
       .brand-row {{ align-items:flex-start; flex-direction:column; }}
       .edition {{ text-align:left; }}
       .metric-grid {{ grid-template-columns:repeat(2,minmax(0,1fr)); }}
-      .keyword-layout, .signal-grid, .story-grid, .split {{ grid-template-columns:1fr; }}
+      .keyword-layout, .story-grid, .split {{ grid-template-columns:1fr; }}
       .metric:last-child {{ grid-column:1 / -1; }}
       .keyword-chip--l5 {{ font-size:15px; }}
       .keyword-chip--l6 {{ font-size:17px; }}
@@ -4571,7 +4637,6 @@ def render_telegram_daily_html(
     <section class="section">
       <h2>시장 언급 신호</h2>
       <p class="section-note">언급량, 채널 폭, 확인상태, 기관성, 검증 필요 요소를 합산한 Market Attention Score 기준입니다.</p>
-      <div class="signal-grid">{top_signals_html}</div>
       {signal_table_html}
     </section>
     <section class="section">
@@ -4599,14 +4664,24 @@ def render_telegram_daily_html(
     function escapeHtml(value) {{
       return String(value || '').replace(/[&<>"']/g, (char) => ({{ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }}[char]));
     }}
+    function decodeDisplayEntities(value) {{
+      let text = String(value || '');
+      for (let index = 0; index < 3; index += 1) {{
+        const decoded = text
+          .replace(/&lt;/gi, '<')
+          .replace(/&gt;/gi, '>')
+          .replace(/&nbsp;/gi, ' ')
+          .replace(/&quot;/gi, '"')
+          .replace(/&#39;|&apos;/gi, "'")
+          .replace(/&amp;/gi, '&');
+        if (decoded === text) break;
+        text = decoded;
+      }}
+      return text;
+    }}
     function cleanDisplayText(value) {{
-      return String(value || '')
-        .replace(/&lt;\\s*\\/?\\s*[a-z][^&]*?&gt;/gi, '')
+      return decodeDisplayEntities(value)
         .replace(/<\\s*\\/?\\s*[a-z][^>]*?>/gi, '')
-        .replace(/&nbsp;/gi, ' ')
-        .replace(/&quot;/gi, '"')
-        .replace(/&#39;|&apos;/gi, "'")
-        .replace(/&amp;/gi, '&')
         .replace(/\\s+/g, ' ')
         .trim();
     }}
@@ -4702,12 +4777,24 @@ def render_telegram_daily_html(
       }});
       renderMentionsDetail(panel, detail);
     }}
+    function signalPanelFor(key) {{
+      return Array.from(document.querySelectorAll('[data-signal-detail-panel]')).find((panel) => panel.getAttribute('data-signal-detail-panel') === key);
+    }}
+    function signalDetailRowFor(key) {{
+      return Array.from(document.querySelectorAll('[data-signal-detail-row]')).find((row) => row.getAttribute('data-signal-detail-row') === key);
+    }}
     function selectSignalItem(key) {{
-      const panel = document.querySelector('[data-signal-detail-panel]');
-      document.querySelectorAll('[data-signal-detail-key]').forEach((item) => {{
-        item.classList.toggle('is-active', item.getAttribute('data-signal-detail-key') === key);
+      const row = Array.from(document.querySelectorAll('[data-signal-detail-key]')).find((item) => item.getAttribute('data-signal-detail-key') === key);
+      const detailRow = signalDetailRowFor(key);
+      const wasOpen = row?.classList.contains('is-active') && detailRow && !detailRow.hidden;
+      document.querySelectorAll('[data-signal-detail-key]').forEach((item) => item.classList.remove('is-active'));
+      document.querySelectorAll('[data-signal-detail-row]').forEach((item) => {{
+        item.hidden = true;
       }});
-      renderMentionsDetail(panel, signalDetailData[key]);
+      if (wasOpen) return;
+      if (row) row.classList.add('is-active');
+      if (detailRow) detailRow.hidden = false;
+      renderMentionsDetail(signalPanelFor(key), signalDetailData[key]);
     }}
     function selectKeywordButton(button) {{
       const key = button.getAttribute('data-keyword-detail-key') || '';
@@ -4774,8 +4861,6 @@ def render_telegram_daily_html(
       }});
     }});
     document.querySelectorAll('[data-analysis-view].is-active').forEach(initAnalysisView);
-    const firstSignal = document.querySelector('[data-signal-detail-key]');
-    if (firstSignal) selectSignalItem(firstSignal.getAttribute('data-signal-detail-key') || '');
   </script>
 </body>
 </html>
@@ -5010,14 +5095,24 @@ def render_search_html(
     function escapeHtml(value) {{
       return String(value || '').replace(/[&<>"']/g, (char) => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[char]));
     }}
+    function decodeDisplayEntities(value) {{
+      let text = String(value || '');
+      for (let index = 0; index < 3; index += 1) {{
+        const decoded = text
+          .replace(/&lt;/gi, '<')
+          .replace(/&gt;/gi, '>')
+          .replace(/&nbsp;/gi, ' ')
+          .replace(/&quot;/gi, '"')
+          .replace(/&#39;|&apos;/gi, "'")
+          .replace(/&amp;/gi, '&');
+        if (decoded === text) break;
+        text = decoded;
+      }}
+      return text;
+    }}
     function cleanDisplayText(value) {{
-      return String(value || '')
-        .replace(/&lt;\\s*\\/?\\s*[a-z][^&]*?&gt;/gi, '')
+      return decodeDisplayEntities(value)
         .replace(/<\\s*\\/?\\s*[a-z][^>]*?>/gi, '')
-        .replace(/&nbsp;/gi, ' ')
-        .replace(/&quot;/gi, '"')
-        .replace(/&#39;|&apos;/gi, "'")
-        .replace(/&amp;/gi, '&')
         .replace(/\\s+/g, ' ')
         .trim();
     }}
