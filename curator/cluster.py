@@ -16,6 +16,7 @@ KNOWN_COMPANIES = [
     "신한지주",
     "KB금융",
     "KB금융지주",
+    "삼성전자",
     "삼성물산",
     "고려아연",
     "영풍",
@@ -70,6 +71,10 @@ KNOWN_COMPANIES = [
     "Browning West",
 ]
 
+COMPANY_ALIASES = {
+    "삼전": "삼성전자",
+}
+
 COMPANY_SUFFIX_PATTERN = re.compile(
     r"([가-힣A-Za-z0-9&]{2,}(?:금융|지주|전자|물산|제약|화학|바이오|엔터|건설|증권|은행|보험|투자|홀딩스|그룹|산업|상사|에너지|중공업|해운|통신))"
 )
@@ -105,6 +110,10 @@ BROAD_CLUSTER_KEYWORDS = {
     "activist investor",
     "corporate governance",
     "shareholder rights",
+}
+CLUSTER_EVENT_PHRASE_TOKENS = {
+    "집단소송": ("집단소송", "집단 소송"),
+    "손해배상": ("손해배상", "손해 배상", "손배"),
 }
 THEME_GROUPS = [
     (
@@ -305,15 +314,36 @@ STRICT_THEME_COMPANY_TITLE_THRESHOLD = 70
 def extract_company_candidates(text: str) -> list[str]:
     candidates: list[str] = []
     folded_text = text.casefold()
+    for alias, canonical in COMPANY_ALIASES.items():
+        if alias in text or alias.casefold() in folded_text:
+            candidates.append(canonical)
+
     for company in KNOWN_COMPANIES:
         if company in text or company.casefold() in folded_text:
-            candidates.append(company)
+            if company not in candidates:
+                candidates.append(company)
 
     for match in COMPANY_SUFFIX_PATTERN.finditer(text):
         value = match.group(1).strip()
         if value not in COMPANY_STOPWORDS and value not in candidates:
             candidates.append(value)
     return candidates[:5]
+
+
+def event_keywords_for_clustering(text: str) -> list[str]:
+    haystack = text.casefold()
+    keywords: list[str] = []
+    for keyword, phrases in CLUSTER_EVENT_PHRASE_TOKENS.items():
+        if any(phrase.casefold() in haystack for phrase in phrases):
+            keywords.append(keyword)
+
+    strike_terms = ("파업", "파업시", "파업 시")
+    litigation_terms = ("집단소송", "집단 소송", "소송", "손해배상", "손해 배상", "손배")
+    if any(term.casefold() in haystack for term in strike_terms) and any(
+        term.casefold() in haystack for term in litigation_terms
+    ):
+        keywords.append("파업소송")
+    return list(dict.fromkeys(keywords))
 
 
 def extract_theme_groups(text: str, keywords: list[object] | None = None) -> list[str]:
@@ -342,7 +372,8 @@ def enrich_article_for_clustering(article: dict[str, object]) -> dict[str, objec
         enriched.pop(key, None)
     text = f"{article.get('clean_title') or article.get('title') or ''} {article.get('summary') or ''}"
     enriched["company_candidates"] = list(article.get("company_candidates") or extract_company_candidates(text))
-    enriched["topic_keywords"] = list(article.get("topic_keywords") or topic_keywords_for_article(article))
+    topic_keywords = list(article.get("topic_keywords") or topic_keywords_for_article(article))
+    enriched["topic_keywords"] = list(dict.fromkeys(topic_keywords + event_keywords_for_clustering(text)))
     enriched["theme_groups"] = extract_theme_groups(text, list(enriched["topic_keywords"]))
     enriched["theme_group"] = primary_theme_group(enriched)
     return enriched

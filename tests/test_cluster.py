@@ -106,6 +106,54 @@ def test_board_audit_theme_does_not_mix_unrelated_board_articles(config, now) ->
     assert len(state["pending_clusters"]) == 2
 
 
+def test_samsung_shareholder_strike_lawsuit_clusters_alias_titles(config, now) -> None:  # type: ignore[no-untyped-def]
+    state = {"pending_clusters": [], "published_clusters": []}
+    articles = [
+        make_article(
+            "[기획] 삼전 소액주주 뿔났다... 파업시 집단소송",
+            "https://example.com/samsung-shareholder-lawsuit-a",
+            summary="삼전 소액주주들이 파업에 따른 집단소송 가능성을 제기했다",
+            relevance_level="high",
+        ),
+        make_article(
+            "삼성전자 소액주주들, 파업 금지 집단소송 착수",
+            "https://example.com/samsung-shareholder-lawsuit-b",
+            summary="삼성전자 소액주주들이 노조 파업 금지 집단소송에 착수했다",
+            relevance_level="high",
+        ),
+    ]
+
+    cluster_articles(articles, state, config, now)
+
+    assert len(state["pending_clusters"]) == 1
+    assert state["pending_clusters"][0]["article_count"] == 2
+    assert "삼성전자" in state["pending_clusters"][0]["companies"]
+    assert "집단소송" in state["pending_clusters"][0]["keywords"]
+    assert "파업소송" in state["pending_clusters"][0]["keywords"]
+
+
+def test_samsung_shareholder_strike_lawsuit_does_not_merge_board_chair_article(config, now) -> None:  # type: ignore[no-untyped-def]
+    state = {"pending_clusters": [], "published_clusters": []}
+    articles = [
+        make_article(
+            "삼성전자 소액주주들, 파업 금지 집단소송 착수",
+            "https://example.com/samsung-lawsuit",
+            summary="삼성전자 소액주주들이 노조 파업 금지 집단소송에 착수했다",
+            relevance_level="high",
+        ),
+        make_article(
+            "삼성전자 이사회 의장 파업 현실화 땐 노사 모두 설 자리 잃을 것",
+            "https://example.com/samsung-board-chair",
+            summary="삼성전자 노조 파업 우려에 이사회 의장이 대화를 촉구했다",
+            relevance_level="high",
+        ),
+    ]
+
+    cluster_articles(articles, state, config, now)
+
+    assert len(state["pending_clusters"]) == 2
+
+
 def test_governance_valueup_theme_does_not_join_generic_meeting_theme(config, now) -> None:  # type: ignore[no-untyped-def]
     article = make_article("주총 다 끝났는데 금융권 지배구조 개선안 난망", "https://example.com/governance")
     enriched = enrich_article_for_clustering(article)

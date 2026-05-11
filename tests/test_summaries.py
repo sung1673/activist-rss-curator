@@ -526,6 +526,41 @@ def test_daily_digest_groups_same_subject_valueup_event(config, now, monkeypatch
     assert "②" not in message
 
 
+def test_daily_digest_groups_samsung_shareholder_strike_lawsuit(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 파업 소송 이슈 지속")
+    first = make_article(
+        "[기획] 삼전 소액주주 뿔났다... 파업시 집단소송",
+        "https://example.com/samsung-shareholder-lawsuit-a",
+        source="디지털타임스",
+        published_at="2026-05-10T18:41:00+09:00",
+        summary="[기획] 삼전 소액주주들이 파업시 집단소송을 검토했다",
+        relevance_level="high",
+    )
+    second = make_article(
+        "삼성전자 소액주주들, 파업 금지 집단소송 착수",
+        "https://example.com/samsung-shareholder-lawsuit-b",
+        source="디지털타임스",
+        published_at="2026-05-10T14:35:00+09:00",
+        summary="삼성전자 소액주주들이 파업 금지 집단소송에 착수했다",
+        relevance_level="high",
+    )
+    clusters = [
+        {"representative_title": first["clean_title"], "published_at": first["published_at"], "articles": [first]},
+        {"representative_title": second["clean_title"], "published_at": second["published_at"], "articles": [second]},
+    ]
+
+    entries = limited_digest_article_entries(clusters, config)["domestic"]
+    groups = group_digest_entries(entries, config)
+    message = build_daily_digest_messages(clusters, config, now, now - timedelta(hours=24))[0]
+
+    assert [len(group) for group in groups] == [2]
+    assert message.count("href=") == 1
+    assert "①" not in message
+    assert "②" not in message
+
+
 def test_digest_entries_collapse_portal_mirror_same_article(config) -> None:  # type: ignore[no-untyped-def]
     portal = make_article(
         "[정보공시 Q&A] 거버넌스 환경 변화와 ESG 공시 - v.daum.net",
