@@ -16,7 +16,7 @@ from .ai import ai_config, call_github_models
 from .cluster import KNOWN_COMPANIES, extract_company_candidates
 from .config import load_config
 from .dates import format_kst, now_in_timezone, parse_datetime
-from .fetch import USER_AGENT, image_href
+from .fetch import USER_AGENT, image_hrefs, usable_image_url
 from .normalize import canonical_url_hash
 from .rss_writer import article_link, article_source_label, compact_text, display_article_title
 from .remote_api import sync_report_to_remote_api
@@ -322,6 +322,10 @@ def story_links(group: list[dict[str, object]]) -> list[dict[str, str]]:
             or str(entry.get("title") or article.get("clean_title") or article.get("title") or source)
         )
         published_at = entry_datetime(entry)
+        article_image_values = [str(article.get("image_url") or "")]
+        raw_image_candidates = article.get("image_candidates")
+        if isinstance(raw_image_candidates, list):
+            article_image_values.extend(str(value or "") for value in raw_image_candidates)
         link = {
             "source": source,
             "title": title,
@@ -329,6 +333,7 @@ def story_links(group: list[dict[str, object]]) -> list[dict[str, str]]:
             "mobile_url": mobile_article_url(url),
             "domain": article_domain(url),
             "image_url": str(article.get("image_url") or ""),
+            "image_candidates": ordered_image_urls(article_image_values),
             "published_at": published_at.isoformat() if published_at else "",
         }
         identity_keys = digest_article_identity_keys(article) or {f"url:{url}"}
@@ -404,24 +409,32 @@ def story_db_query(title: str, links: list[dict[str, str]]) -> str:
     return compact_text(title, max_chars=32)
 
 
+def append_preview_image_urls(image_urls: list[str], value: object) -> None:
+    if isinstance(value, list):
+        for item in value:
+            append_preview_image_urls(image_urls, item)
+        return
+    image_url = str(value or "").strip()
+    if image_url.startswith(("http://", "https://")) and image_url not in image_urls:
+        image_urls.append(image_url)
+
+
 def story_image_urls(group: list[dict[str, object]]) -> list[str]:
     image_urls: list[str] = []
     for entry in group:
         article = entry.get("article")
         if not isinstance(article, dict):
             continue
-        image_url = str(article.get("image_url") or "").strip()
-        if image_url.startswith(("http://", "https://")) and image_url not in image_urls:
-            image_urls.append(image_url)
+        append_preview_image_urls(image_urls, article.get("image_url"))
+        append_preview_image_urls(image_urls, article.get("image_candidates"))
     return ordered_image_urls(image_urls)
 
 
-def story_link_image_urls(links: list[dict[str, str]]) -> list[str]:
+def story_link_image_urls(links: list[dict[str, object]]) -> list[str]:
     image_urls: list[str] = []
     for link in links:
-        image_url = str(link.get("image_url") or "").strip()
-        if image_url.startswith(("http://", "https://")) and image_url not in image_urls:
-            image_urls.append(image_url)
+        append_preview_image_urls(image_urls, link.get("image_url"))
+        append_preview_image_urls(image_urls, link.get("image_candidates"))
     return ordered_image_urls(image_urls)
 
 
@@ -436,8 +449,6 @@ def image_quality_rank(image_url: str) -> int:
         return 50
     if "lh3.googleusercontent.com/j6_cofbog" in lower_url:
         return 45
-    if "googleusercontent.com" in lower_url and "s0-w300" in lower_url:
-        return 35
     if "/logo" in lower_url or "logo." in lower_url:
         return 40
     return 0
@@ -451,7 +462,12 @@ def ordered_image_urls(image_urls: list[str]) -> list[str]:
     unique_urls: list[str] = []
     for image_url in image_urls:
         image_url = str(image_url or "").strip()
-        if image_url.startswith(("http://", "https://")) and image_url not in unique_urls:
+        if (
+            image_url.startswith(("http://", "https://"))
+            and usable_image_url(image_url)
+            and image_quality_rank(image_url) < 35
+            and image_url not in unique_urls
+        ):
             unique_urls.append(image_url)
     return sorted(unique_urls, key=lambda url: (image_quality_rank(url), unique_urls.index(url)))
 
@@ -487,13 +503,13 @@ def discover_story_image(url: str, client: httpx.Client) -> str:
         response.raise_for_status()
     except httpx.HTTPError:
         return ""
-    image_url = image_href(response.text, str(response.url))
-    return image_url or ""
+    candidates = ordered_image_urls(image_hrefs(response.text, str(response.url)))
+    return candidates[0] if candidates else ""
 
 
 def append_story_image_candidate(story: dict[str, object], image_url: str) -> None:
     image_url = str(image_url or "").strip()
-    if not image_url.startswith(("http://", "https://")):
+    if not image_url.startswith(("http://", "https://")) or image_quality_rank(image_url) >= 35:
         return
     image_candidates = story.get("image_candidates")
     if not isinstance(image_candidates, list):

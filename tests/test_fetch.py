@@ -10,7 +10,9 @@ from curator.fetch import (
     google_news_article_id,
     google_news_decoding_params,
     image_href,
+    image_hrefs,
     image_url_from_entry,
+    image_urls_from_entry,
     parse_google_news_batch_response,
     source_from_html,
     usable_image_url,
@@ -43,6 +45,7 @@ def test_apply_decoded_google_news_url_replaces_canonical_link() -> None:
 
     assert decoded["canonical_url"] == "https://www.example.com/news/1"
     assert decoded["canonical_url_hash"] != "old"
+    assert decoded["google_news_url"] == "https://news.google.com/rss/articles/CBMiABC"
 
 
 def test_daum_page_source_is_extracted_from_site_name() -> None:
@@ -55,6 +58,20 @@ def test_image_href_extracts_og_image() -> None:
     html = '<meta property="og:image" content="/thumb.jpg">'
 
     assert image_href(html, "https://example.com/news/1") == "https://example.com/thumb.jpg"
+
+
+def test_image_hrefs_collects_multiple_usable_candidates() -> None:
+    html = """
+    <meta property="og:image" content="/thumb.jpg">
+    <script type="application/ld+json">{"image":["/json.jpg"]}</script>
+    <article><img src="/body.jpg" width="640" height="360"></article>
+    """
+
+    assert image_hrefs(html, "https://example.com/news/1") == [
+        "https://example.com/thumb.jpg",
+        "https://example.com/json.jpg",
+        "https://example.com/body.jpg",
+    ]
 
 
 def test_image_href_extracts_json_ld_image() -> None:
@@ -75,9 +92,24 @@ def test_image_url_from_entry_accepts_media_thumbnail_without_type() -> None:
     assert image_url_from_entry(entry, "https://example.com/news/1") == "https://example.com/thumb.jpg"
 
 
+def test_image_urls_from_entry_rejects_google_news_placeholder_but_keeps_real_thumbnail() -> None:
+    entry = SimpleNamespace(
+        media_thumbnail=[
+            {"url": "https://lh3.googleusercontent.com/J6_COFBogAAAA=s0-w300"},
+            {"url": "https://lh3.googleusercontent.com/proxy/real-image=s0-w300-h170"},
+        ]
+    )
+
+    assert image_urls_from_entry(entry, "https://news.google.com/rss/articles/CBMi") == [
+        "https://lh3.googleusercontent.com/proxy/real-image=s0-w300-h170"
+    ]
+
+
 def test_usable_image_url_rejects_generic_or_pathless_images() -> None:
     assert not usable_image_url("https://img.seoul.co.kr/")
     assert not usable_image_url("https://static.mk.co.kr/2026/css/images/ic_mai_w.png")
+    assert not usable_image_url("https://lh3.googleusercontent.com/J6_COFBogAAAA=s0-w300")
+    assert usable_image_url("https://lh3.googleusercontent.com/proxy/real-image=s0-w300")
 
 
 def test_fetch_respects_max_enrich_articles(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]

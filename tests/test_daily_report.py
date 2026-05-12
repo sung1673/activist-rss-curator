@@ -77,6 +77,26 @@ def test_db_pulse_static_stories_filters_generic_titles_and_google_news_only_url
     ]
 
 
+def test_story_image_urls_uses_candidates_and_keeps_google_news_real_thumbnail() -> None:
+    group = [
+        {
+            "article": {
+                "image_url": "https://example.com/logo.png",
+                "image_candidates": [
+                    "https://lh3.googleusercontent.com/J6_COFBogAAAA=s0-w300",
+                    "https://lh3.googleusercontent.com/proxy/news-photo=s0-w300-h170",
+                    "https://cdn.example.com/article.jpg",
+                ],
+            }
+        }
+    ]
+
+    assert daily_report.story_image_urls(group) == [
+        "https://lh3.googleusercontent.com/proxy/news-photo=s0-w300-h170",
+        "https://cdn.example.com/article.jpg",
+    ]
+
+
 def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     now = datetime(2026, 5, 1, 10, 20, tzinfo=ZoneInfo("Asia/Seoul"))
     (tmp_path / "data").mkdir()

@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 from .config import configured_feeds
 from .dates import datetime_to_iso, extract_published_datetime_from_html, parse_datetime
 from .normalize import canonical_url_hash, hostname_from_url, normalize_title_parts, normalize_url
+from .relevance import relevance_details
 
 
 USER_AGENT = "activist-rss-curator/1.0 (+https://github.com/)"
@@ -73,6 +74,12 @@ def summary_text(summary_html: str) -> str:
 
 
 def image_url_from_entry(entry: object, base_url: str) -> str | None:
+    candidates = image_urls_from_entry(entry, base_url)
+    return candidates[0] if candidates else None
+
+
+def image_urls_from_entry(entry: object, base_url: str) -> list[str]:
+    candidates: list[str] = []
     for attr in ("media_thumbnail", "media_content", "links"):
         value = getattr(entry, attr, None)
         if isinstance(value, list):
@@ -85,11 +92,15 @@ def image_url_from_entry(entry: object, base_url: str) -> str | None:
                 medium = str(item.get("medium") or "")
                 if not url:
                     continue
+                image_url = urljoin(base_url, str(url))
                 if attr == "media_thumbnail":
-                    return urljoin(base_url, str(url))
+                    if usable_image_url(image_url) and image_url not in candidates:
+                        candidates.append(image_url)
+                    continue
                 if "image" in media_type or "thumbnail" in rel or medium == "image":
-                    return urljoin(base_url, str(url))
-    return None
+                    if usable_image_url(image_url) and image_url not in candidates:
+                        candidates.append(image_url)
+    return candidates
 
 
 def article_from_entry(
@@ -107,6 +118,7 @@ def article_from_entry(
     feed_updated_at = parse_datetime(getattr(entry, "updated", None), timezone_name)
     summary = summary_text(str(getattr(entry, "summary", "") or ""))
     canonical = normalized_link
+    image_candidates = image_urls_from_entry(entry, normalized_link)
     article = {
         "title": raw_title,
         "clean_title": title_parts["clean_title"],
@@ -118,7 +130,8 @@ def article_from_entry(
         "canonical_url_hash": canonical_url_hash(canonical),
         "title_hash": title_parts["title_hash"],
         "summary": summary,
-        "image_url": image_url_from_entry(entry, normalized_link),
+        "image_url": image_candidates[0] if image_candidates else None,
+        "image_candidates": image_candidates,
         "feed_published_at": datetime_to_iso(feed_published_at),
         "feed_updated_at": datetime_to_iso(feed_updated_at),
         "article_published_at": None,
@@ -198,7 +211,19 @@ def canonical_href(html_text: str, base_url: str) -> str | None:
 
 
 def image_href(html_text: str, base_url: str) -> str | None:
+    candidates = image_hrefs(html_text, base_url)
+    return candidates[0] if candidates else None
+
+
+def append_image_candidate(candidates: list[str], value: str, base_url: str) -> None:
+    image_url = urljoin(base_url, value)
+    if usable_image_url(image_url) and image_url not in candidates:
+        candidates.append(image_url)
+
+
+def image_hrefs(html_text: str, base_url: str) -> list[str]:
     soup = BeautifulSoup(html_text or "", "html.parser")
+    candidates: list[str] = []
     meta_candidates = (
         {"property": "og:image"},
         {"property": "og:image:url"},
@@ -213,20 +238,21 @@ def image_href(html_text: str, base_url: str) -> str | None:
         tag = soup.find("meta", attrs=attrs)
         content = tag.get("content") if tag else None
         if content and usable_image_url(str(content)):
-            return urljoin(base_url, str(content))
+            append_image_candidate(candidates, str(content), base_url)
     image_link = soup.find("link", rel=lambda value: value and "image_src" in value)
     href = image_link.get("href") if image_link else None
     if href and usable_image_url(str(href)):
-        return urljoin(base_url, str(href))
-    json_image = image_href_from_json_ld(soup, base_url)
-    if json_image:
-        return json_image
+        append_image_candidate(candidates, str(href), base_url)
+    for json_image in image_hrefs_from_json_ld(soup, base_url):
+        if json_image not in candidates:
+            candidates.append(json_image)
     for tag in soup.find_all("img"):
         for attr in ("src", "data-src", "data-original", "data-lazy-src", "data-url"):
             src = tag.get(attr)
             if src and usable_image_url(str(src)) and image_tag_is_large_enough(tag):
-                return urljoin(base_url, str(src))
-    return None
+                append_image_candidate(candidates, str(src), base_url)
+                break
+    return candidates
 
 
 def usable_image_url(value: str) -> bool:
@@ -237,6 +263,7 @@ def usable_image_url(value: str) -> bool:
     if parsed.scheme in {"http", "https"} and not parsed.path.strip("/"):
         return False
     generic_tokens = (
+        "j6_cofbog",
         "logo",
         "icon",
         "sprite",
@@ -248,6 +275,8 @@ def usable_image_url(value: str) -> bool:
         "facebook_",
         "facebook-",
         "go_share",
+        "favicon",
+        "favicons",
         "/image/isw",
         "ic_mai",
         "search_pn",
@@ -273,21 +302,21 @@ def image_tag_is_large_enough(tag: object) -> bool:
     return not ((width and width < 120) or (height and height < 80))
 
 
-def image_href_from_json_ld(soup: BeautifulSoup, base_url: str) -> str | None:
-    def image_from_value(value: object) -> str | None:
+def image_hrefs_from_json_ld(soup: BeautifulSoup, base_url: str) -> list[str]:
+    results: list[str] = []
+
+    def collect_image_from_value(value: object) -> None:
         if isinstance(value, str) and usable_image_url(value):
-            return urljoin(base_url, value)
+            image_url = urljoin(base_url, value)
+            if image_url not in results:
+                results.append(image_url)
+            return
         if isinstance(value, list):
             for item in value:
-                result = image_from_value(item)
-                if result:
-                    return result
+                collect_image_from_value(item)
         if isinstance(value, dict):
             for key in ("url", "contentUrl", "@id"):
-                result = image_from_value(value.get(key))
-                if result:
-                    return result
-        return None
+                collect_image_from_value(value.get(key))
 
     for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
         try:
@@ -297,10 +326,13 @@ def image_href_from_json_ld(soup: BeautifulSoup, base_url: str) -> str | None:
         candidates = payload if isinstance(payload, list) else [payload]
         for candidate in candidates:
             if isinstance(candidate, dict):
-                result = image_from_value(candidate.get("image") or candidate.get("thumbnailUrl"))
-                if result:
-                    return result
-    return None
+                collect_image_from_value(candidate.get("image") or candidate.get("thumbnailUrl"))
+    return results
+
+
+def image_href_from_json_ld(soup: BeautifulSoup, base_url: str) -> str | None:
+    candidates = image_hrefs_from_json_ld(soup, base_url)
+    return candidates[0] if candidates else None
 
 
 def clean_page_source_name(value: object, base_url: str) -> str | None:
@@ -451,10 +483,25 @@ def apply_decoded_google_news_url(article: dict[str, object], decoded_url: str |
         return article
     normalized_decoded = normalize_url(decoded_url)
     enriched = dict(article)
+    original_url = str(article.get("canonical_url") or article.get("link") or "")
+    if google_news_article_id(original_url):
+        enriched["google_news_url"] = original_url
     enriched["canonical_url"] = normalized_decoded
     enriched["canonical_url_hash"] = canonical_url_hash(normalized_decoded)
     enriched["google_news_decoded"] = True
     return enriched
+
+
+def should_decode_google_news_article(article: dict[str, object], config: dict[str, object]) -> bool:
+    fetch_config = config.get("fetch", {})
+    if not isinstance(fetch_config, dict) or not bool(fetch_config.get("google_news_decode_publish_levels_only", False)):
+        return True
+    publish_levels = set(config.get("publish", {}).get("publish_levels", ["high", "medium"]))  # type: ignore[union-attr]
+    relevance = relevance_details(
+        str(article.get("clean_title") or article.get("title") or ""),
+        str(article.get("summary") or ""),
+    )
+    return str(relevance.get("level") or "") in publish_levels
 
 
 def decode_google_news_articles(
@@ -480,6 +527,8 @@ def decode_google_news_articles(
         for index, article in enumerate(decoded_articles):
             url = str(article.get("canonical_url") or article.get("link") or "")
             if not google_news_article_id(url):
+                continue
+            if not should_decode_google_news_article(article, config):
                 continue
             if decode_limit > 0 and decode_attempts >= decode_limit:
                 break
@@ -562,19 +611,31 @@ def enrich_article(
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
     article_published = extract_published_datetime_from_html(html_text, timezone_name)
     source = source_from_html(html_text, final_url)
-    image = image_href(html_text, final_url)
+    image_candidates = image_hrefs(html_text, final_url)
     enriched["canonical_url"] = normalized_canonical
     enriched["canonical_url_hash"] = canonical_url_hash(normalized_canonical)
     enriched["article_published_at"] = datetime_to_iso(article_published)
     if source:
         enriched["source"] = source
-    if image:
-        enriched["image_url"] = normalize_url(image)
+    merged_candidates: list[str] = []
+    existing_candidates = enriched.get("image_candidates")
+    for existing in existing_candidates if isinstance(existing_candidates, list) else []:
+        text = str(existing or "").strip()
+        if text.startswith(("http://", "https://")) and usable_image_url(text) and text not in merged_candidates:
+            merged_candidates.append(text)
+    for image in image_candidates:
+        normalized_image = normalize_url(image)
+        if normalized_image and normalized_image not in merged_candidates:
+            merged_candidates.append(normalized_image)
+    if merged_candidates:
+        enriched["image_candidates"] = merged_candidates
+        enriched["image_url"] = merged_candidates[0]
     return enriched
 
 
 def enrichment_jobs(
     articles: list[dict[str, object]],
+    config: dict[str, object],
     *,
     max_enrich_articles: int,
     google_news_decode_limit: int,
@@ -587,12 +648,15 @@ def enrichment_jobs(
         url = str(article.get("canonical_url") or article.get("link") or "")
         is_google_news = bool(google_news_article_id(url))
         is_decoded_google_news = bool(article.get("google_news_decoded"))
-        should_decode_google_news = is_google_news and (
+        can_decode_google_news = is_google_news and should_decode_google_news_article(article, config)
+        should_decode_google_news = can_decode_google_news and (
             google_news_decode_limit < 0 or google_news_decode_attempts < google_news_decode_limit
         )
         if should_decode_google_news:
             google_news_decode_attempts += 1
         should_enrich = not (max_enrich_articles > 0 and index + 1 > max_enrich_articles)
+        if is_google_news and not is_decoded_google_news and not should_decode_google_news:
+            should_enrich = False
         should_enrich_decoded_google_news = False
         if (is_decoded_google_news or (is_google_news and should_decode_google_news)) and not should_enrich:
             should_enrich_decoded_google_news = (
@@ -659,6 +723,7 @@ def fetch_google_alerts_articles(config: dict[str, object]) -> list[dict[str, ob
 
     jobs = enrichment_jobs(
         articles,
+        config,
         max_enrich_articles=max_enrich_articles,
         google_news_decode_limit=0,
         google_news_decoded_enrich_limit=fetch_config_int(fetch_config, "google_news_decoded_enrich_limit", 0),
