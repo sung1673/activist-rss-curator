@@ -304,7 +304,7 @@ fetch:
   enrich_workers: 6
   google_news_decode_limit: 10
   google_news_decoded_enrich_limit: 180
-  google_news_decode_sleep_seconds: 17
+  google_news_decode_sleep_seconds: 25
   google_news_decode_stop_on_rate_limit: true
   google_news_decode_publish_levels_only: true
   state_google_news_decode_limit: 0
