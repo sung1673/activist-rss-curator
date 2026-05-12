@@ -68,8 +68,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: build-feed-${{ github.ref }}
-  cancel-in-progress: true
+  group: curator-state-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-feed:
