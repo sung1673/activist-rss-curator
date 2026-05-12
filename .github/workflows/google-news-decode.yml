@@ -10,7 +10,7 @@ on:
         description: "Maximum Google News URLs to decode in one run"
         required: false
         type: string
-        default: "30"
+        default: "40"
       sleep_seconds:
         description: "Seconds to wait between decode attempts"
         required: false
@@ -56,7 +56,7 @@ jobs:
           ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
         run: |
           set -euo pipefail
-          limit="${LIMIT_INPUT:-30}"
+          limit="${LIMIT_INPUT:-40}"
           sleep_seconds="${SLEEP_INPUT:-17}"
           max_runtime_minutes="${RUNTIME_INPUT:-20}"
           python -m curator.google_news_state_decode \
