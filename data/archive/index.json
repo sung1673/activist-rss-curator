@@ -4,12 +4,12 @@
     {
       "date": "2026-05-13",
       "path": "articles/2026-05-13.jsonl",
-      "records": 397
+      "records": 466
     },
     {
       "date": "2026-05-12",
       "path": "articles/2026-05-12.jsonl",
-      "records": 899
+      "records": 918
     },
     {
       "date": "2026-05-11",
@@ -67,6 +67,6 @@
       "records": 157
     }
   ],
-  "generated_at": "2026-05-13T02:19:15.608014+09:00",
-  "total_records": 9055
+  "generated_at": "2026-05-13T05:17:08.972751+09:00",
+  "total_records": 9143
 }
