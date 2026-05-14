@@ -153,6 +153,13 @@ jobs:
           echo "page=$page_run" >> "$GITHUB_OUTPUT"
           echo "Run mode: full=$full_run page=$page_run"
 
+      - name: Refresh checkout to latest branch head
+        run: |
+          set -euo pipefail
+          branch="${GITHUB_REF#refs/heads/}"
+          git fetch --no-tags origin "$branch"
+          git reset --hard "origin/$branch"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

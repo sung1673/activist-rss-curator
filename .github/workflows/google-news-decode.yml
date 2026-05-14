@@ -39,6 +39,13 @@ jobs:
         with:
           fetch-depth: 2
 
+      - name: Refresh checkout to latest branch head
+        run: |
+          set -euo pipefail
+          branch="${GITHUB_REF#refs/heads/}"
+          git fetch --no-tags origin "$branch"
+          git reset --hard "origin/$branch"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
