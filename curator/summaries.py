@@ -228,6 +228,15 @@ DIGEST_GROUP_SPECIFIC_EVENT_TOKENS = {
     "금감원정정요구",
 }
 
+DIGEST_GROUP_CONTEXTUAL_EVENT_TOKENS = {
+    "소액주주단체논란",
+    "배후의혹",
+    "단체실체논란",
+    "유증정정",
+    "유증재추진",
+    "금감원정정요구",
+}
+
 DIGEST_GROUP_POLICY_EVENT_TOKENS = {
     "m&a",
     "인수",
@@ -844,6 +853,9 @@ def digest_entries_share_named_event(left: dict[str, object], right: dict[str, o
     if len(policy_overlap) >= 2 and len(specific_overlap) >= 3 and title_score >= 25:
         return True
     if len(policy_overlap) >= 2 and title_score >= 42:
+        return True
+    contextual_overlap = specific_overlap & DIGEST_GROUP_CONTEXTUAL_EVENT_TOKENS
+    if company_overlap and len(contextual_overlap) >= 2 and title_score >= 40:
         return True
     if company_overlap and specific_overlap and len(event_overlap) >= 2 and title_score >= 50:
         return True

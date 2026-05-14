@@ -11,6 +11,7 @@ from curator.summaries import (
     digest_article_entries,
     digest_article_is_english,
     duplicate_records_in_window,
+    digest_entries_are_same_story,
     group_digest_entries,
     hourly_update_start_at,
     latest_daily_link_label,
@@ -922,7 +923,10 @@ def test_digest_groups_hanwha_solution_rights_issue_refiling(config, now) -> Non
 
     entries = limited_digest_article_entries(clusters, config)["domestic"]
     groups = group_digest_entries(entries, config)
+    first_entry = next(entry for entry in entries if "1.8조 유증" in str(entry.get("title") or ""))
+    khan_entry = next(entry for entry in entries if "두 차례 반려" in str(entry.get("title") or ""))
 
+    assert digest_entries_are_same_story(first_entry, khan_entry, config)
     assert [len(group) for group in groups] == [3]
 
 
