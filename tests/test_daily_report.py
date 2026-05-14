@@ -97,7 +97,7 @@ def test_story_image_urls_uses_candidates_and_keeps_google_news_real_thumbnail()
     ]
 
 
-def test_story_image_urls_rejects_edaily_site_banners_and_keeps_article_photo() -> None:
+def test_story_image_urls_rejects_edaily_site_banners_and_unscoped_photos() -> None:
     group = [
         {
             "article": {
@@ -110,9 +110,7 @@ def test_story_image_urls_rejects_edaily_site_banners_and_keeps_article_photo() 
         }
     ]
 
-    assert daily_report.story_image_urls(group) == [
-        "https://image.edaily.co.kr/images/Photo/files/NP/S/2026/05/PS26051300123.jpg",
-    ]
+    assert daily_report.story_image_urls(group) == []
 
 
 def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:

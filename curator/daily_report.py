@@ -449,6 +449,8 @@ def image_quality_rank(image_url: str) -> int:
         "defaultimg",
         "/images/content/",
         "/images/aichat/",
+        "image.edaily.co.kr/images/photo/files/",
+        "image.edaily.co.kr/images/vision/files/",
         "banner",
         "grandbanner",
         "배너",
