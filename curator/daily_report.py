@@ -445,6 +445,20 @@ def story_image_url(group: list[dict[str, object]]) -> str:
 
 def image_quality_rank(image_url: str) -> int:
     lower_url = image_url.casefold()
+    low_quality_patterns = (
+        "defaultimg",
+        "/images/content/",
+        "/images/aichat/",
+        "banner",
+        "grandbanner",
+        "배너",
+        "최상단",
+        "공모전",
+        "전략포럼",
+        "gaic_",
+    )
+    if any(pattern in lower_url for pattern in low_quality_patterns):
+        return 60
     if any(pattern in lower_url for pattern in ("trans_30x13", "blank.", "spacer", "noimage", "no_img")):
         return 50
     if "lh3.googleusercontent.com/j6_cofbog" in lower_url:
@@ -1574,7 +1588,8 @@ def render_report_html(
     .story h3 {{ font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif; font-size: 17.5px; line-height: 1.34; margin: 0 0 5px; letter-spacing: 0; font-weight: 800; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }}
     .story h3 a {{ text-decoration-thickness: 1px; text-underline-offset: 4px; }}
     .story.is-read {{ background: linear-gradient(90deg, rgba(112, 55, 224, .055), transparent 64%); border-top-color: rgba(112, 55, 224, .24); }}
-    .story.is-read::after {{ content: "읽음"; position: absolute; top: 16px; left: 8px; z-index: 2; border: 1px solid rgba(112, 55, 224, .30); border-radius: 999px; padding: 2px 7px; color: var(--accent-deep); background: rgba(255,255,255,.92); box-shadow: 0 4px 12px rgba(44, 27, 84, .12); font-size: 10px; font-weight: 900; line-height: 1.2; pointer-events: none; }}
+    .story.is-read::after {{ content: "읽음"; position: absolute; top: 9px; right: 0; z-index: 2; border: 1px solid rgba(112, 55, 224, .30); border-radius: 999px; padding: 2px 7px; color: var(--accent-deep); background: rgba(255,255,255,.92); box-shadow: 0 4px 12px rgba(44, 27, 84, .12); font-size: 10px; font-weight: 900; line-height: 1.2; pointer-events: none; }}
+    .story.is-read .story__body {{ padding-right: 42px; }}
     .story.is-read .story__image {{ filter: saturate(.86) grayscale(.12); opacity: .90; }}
     .story.is-read h3 a {{ color: #5f566e; }}
     .story--featured h3 {{ font-size: 18.5px; line-height: 1.32; }}
@@ -1614,6 +1629,10 @@ def render_report_html(
     th:nth-child(2), td:nth-child(2) {{ width: 120px; color: var(--accent-deep); }}
     .story-context__telegram {{ display: grid; gap: 7px; padding-top: 2px; }}
     .story-context__telegram-head {{ display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ink); font-size: 11.5px; font-weight: 900; }}
+    .story-context__telegram-head a {{ color: var(--accent-deep); text-decoration: underline; text-underline-offset: 3px; }}
+    .story-context__telegram-channel-list {{ display: flex; flex-wrap: wrap; gap: 5px; margin-top: -2px; }}
+    .story-context__telegram-channel {{ max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid rgba(112, 55, 224, .16); border-radius: 999px; padding: 2px 7px; background: rgba(255,255,255,.78); color: var(--accent-deep); font-size: 10.5px; font-weight: 800; text-decoration: none; }}
+    .story-context__telegram-channel:hover {{ border-color: rgba(112, 55, 224, .38); background: var(--accent-soft); }}
     .story-context__telegram-list {{ display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }}
     .story-context__telegram-list a {{ display: grid; gap: 3px; padding: 7px 8px; border: 1px solid rgba(112, 55, 224, .12); border-radius: 8px; background: rgba(255,255,255,.72); color: inherit; text-decoration: none; }}
     .story-context__telegram-list a:hover strong {{ color: var(--accent-deep); text-decoration: underline; text-underline-offset: 3px; }}
@@ -1706,7 +1725,8 @@ def render_report_html(
       .story-list {{ display: grid; grid-template-columns: 1fr; gap: 0; margin-top: 10px; }}
       .story-list .story:first-child {{ grid-column: auto; grid-template-columns: 82px minmax(0, 1fr); }}
       .story, .story--featured {{ display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 11px; align-items: start; padding: 15px 0; }}
-      .story.is-read::after {{ top: 20px; left: 6px; padding: 2px 6px; font-size: 9.5px; }}
+      .story.is-read::after {{ top: 8px; right: 0; left: auto; padding: 2px 6px; font-size: 9.5px; }}
+      .story.is-read .story__body {{ padding-right: 38px; }}
       .story--featured {{ border-top: 1px solid var(--line); }}
       .story--featured .story__image {{ aspect-ratio: 4 / 3; }}
       .story--featured h3, .story h3 {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 16.5px; line-height: 1.32; font-weight: 800; margin-bottom: 6px; }}
@@ -1956,7 +1976,21 @@ def render_report_html(
     const remoteReportsApiUrl = {read_api_url_json};
     const currentReportDateId = {date_id_json};
     const staticDbPulseStories = {db_pulse_static_json};
-    const readStorageKey = `bside-daily-read:${{location.pathname}}`;
+
+    function simpleHash(value) {{
+      let hash = 2166136261;
+      for (let index = 0; index < value.length; index += 1) {{
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+      }}
+      return (hash >>> 0).toString(36);
+    }}
+
+    const readPageFingerprint = Array.from(document.querySelectorAll('[data-story]'))
+      .slice(0, 60)
+      .map((story) => `${{story.dataset.storyDbKey || ''}}:${{story.dataset.storyUrl || ''}}:${{story.querySelector('h3')?.textContent || story.id}}`)
+      .join('|');
+    const readStorageKey = `bside-daily-read:v2:${{location.pathname}}:${{currentReportDateId || simpleHash(readPageFingerprint)}}:${{simpleHash(readPageFingerprint)}}`;
     let readStoryIds = new Set();
 
     try {{
@@ -2027,7 +2061,8 @@ def render_report_html(
       const story = document.getElementById(storyId);
       if (story) story.classList.add('is-read');
       storyLinks.forEach((link) => {{
-        link.classList.toggle('is-read', link.getAttribute('href') === `#${{storyId}}` || link.classList.contains('is-read'));
+        const linkedStoryId = (link.getAttribute('href') || '').replace('#', '');
+        link.classList.toggle('is-read', readStoryIds.has(linkedStoryId));
       }});
     }}
 
@@ -2521,6 +2556,37 @@ def render_report_html(
       return '관련 언급';
     }}
 
+    function telegramHandleFromUrl(value) {{
+      const match = String(value || '').match(/^https?:\\/\\/t\\.me\\/([^\\/\\?]+)(?:\\/|$)/i);
+      if (!match) return '';
+      const handle = match[1].trim();
+      return handle && handle !== 'c' ? handle : '';
+    }}
+
+    function telegramChannelUrl(item) {{
+      const raw = String(item.channel_url || item.telegram_channel_url || '').trim();
+      if (/^https?:\\/\\//i.test(raw)) return raw;
+      const handle = String(item.channel_handle || item.handle || telegramHandleFromUrl(item.message_url || item.url) || '').replace(/^@/, '').trim();
+      return handle ? `https://t.me/${{handle}}` : '';
+    }}
+
+    function telegramChannelLabel(item) {{
+      const handle = String(item.channel_handle || item.handle || telegramHandleFromUrl(item.message_url || item.url) || '').replace(/^@/, '').trim();
+      return compactDbText(String(item.channel_title || handle || '공개 채널'), 42);
+    }}
+
+    function telegramMentionChannels(items) {{
+      const channels = new Map();
+      items.forEach((item) => {{
+        const url = telegramChannelUrl(item);
+        const label = telegramChannelLabel(item);
+        const key = url || label;
+        if (!channels.has(key)) channels.set(key, {{ label, url, count: 0 }});
+        channels.get(key).count += 1;
+      }});
+      return Array.from(channels.values()).sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+    }}
+
     function telegramTokenHitCount(text, tokens) {{
       const lowered = String(text || '').toLowerCase();
       return (tokens || []).filter((token) => lowered.includes(String(token || '').toLowerCase())).length;
@@ -2557,12 +2623,35 @@ def render_report_html(
       head.className = 'story-context__telegram-head';
       const title = document.createElement('strong');
       title.textContent = 'Telegram 언급';
-      const count = document.createElement('span');
-      const channelCount = new Set(items.map((item) => item.channel_title || item.channel_handle || item.handle).filter(Boolean)).size;
-      count.textContent = `${{items.length}}건 · 채널 ${{channelCount}}곳`;
+      const channels = telegramMentionChannels(items);
+      const count = document.createElement(channels[0]?.url ? 'a' : 'span');
+      count.textContent = `${{items.length}}건 · 채널 ${{channels.length}}곳`;
+      count.title = channels.map((channel) => `${{channel.label}} ${{channel.count}}건`).join('\\n');
+      if (channels[0]?.url) {{
+        count.href = channels[0].url;
+        count.target = '_blank';
+        count.rel = 'noopener noreferrer';
+      }}
       head.appendChild(title);
       head.appendChild(count);
       section.appendChild(head);
+      if (channels.length) {{
+        const channelList = document.createElement('div');
+        channelList.className = 'story-context__telegram-channel-list';
+        channels.slice(0, 5).forEach((channel) => {{
+          const chip = document.createElement(channel.url ? 'a' : 'span');
+          chip.className = 'story-context__telegram-channel';
+          chip.textContent = `${{channel.label}} ${{channel.count}}`;
+          chip.title = `${{channel.label}} ${{channel.count}}건`;
+          if (channel.url) {{
+            chip.href = channel.url;
+            chip.target = '_blank';
+            chip.rel = 'noopener noreferrer';
+          }}
+          channelList.appendChild(chip);
+        }});
+        section.appendChild(channelList);
+      }}
       const list = document.createElement('ul');
       list.className = 'story-context__telegram-list';
       items.forEach((item) => {{

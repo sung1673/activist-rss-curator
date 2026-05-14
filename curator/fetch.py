@@ -282,6 +282,16 @@ def usable_image_url(value: str) -> bool:
         "search_pn",
         "_next/static/media",
         "thumb_400x226",
+        "defaultimg",
+        "/images/content/",
+        "/images/aichat/",
+        "banner",
+        "grandbanner",
+        "배너",
+        "최상단",
+        "공모전",
+        "전략포럼",
+        "gaic_",
     )
     if any(token in lowered for token in generic_tokens):
         return False

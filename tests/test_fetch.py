@@ -109,6 +109,9 @@ def test_usable_image_url_rejects_generic_or_pathless_images() -> None:
     assert not usable_image_url("https://img.seoul.co.kr/")
     assert not usable_image_url("https://static.mk.co.kr/2026/css/images/ic_mai_w.png")
     assert not usable_image_url("https://lh3.googleusercontent.com/J6_COFBogAAAA=s0-w300")
+    assert not usable_image_url("https://image.edaily.co.kr/images/content/defaultimg.jpg")
+    assert not usable_image_url("https://image.edaily.co.kr/images/content/PC_%EA%B3%B5%EB%AA%A8%EC%A0%84_1080x128.png")
+    assert usable_image_url("https://image.edaily.co.kr/images/Photo/files/NP/S/2026/05/PS26051300123.jpg")
     assert usable_image_url("https://lh3.googleusercontent.com/proxy/real-image=s0-w300")
 
 

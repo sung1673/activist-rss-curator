@@ -97,6 +97,24 @@ def test_story_image_urls_uses_candidates_and_keeps_google_news_real_thumbnail()
     ]
 
 
+def test_story_image_urls_rejects_edaily_site_banners_and_keeps_article_photo() -> None:
+    group = [
+        {
+            "article": {
+                "image_candidates": [
+                    "https://image.edaily.co.kr/images/content/defaultimg.jpg",
+                    "https://image.edaily.co.kr/images/content/PC_%EA%B3%B5%EB%AA%A8%EC%A0%84_1080x128.png",
+                    "https://image.edaily.co.kr/images/Photo/files/NP/S/2026/05/PS26051300123.jpg",
+                ],
+            }
+        }
+    ]
+
+    assert daily_report.story_image_urls(group) == [
+        "https://image.edaily.co.kr/images/Photo/files/NP/S/2026/05/PS26051300123.jpg",
+    ]
+
+
 def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     now = datetime(2026, 5, 1, 10, 20, tzinfo=ZoneInfo("Asia/Seoul"))
     (tmp_path / "data").mkdir()
@@ -239,6 +257,8 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "is-mobile-context" in html
     assert "data-context-label" in html
     assert "bside-daily-read" in html
+    assert "bside-daily-read:v2:" in html
+    assert "simpleHash(readPageFingerprint)" in html
     assert "markStoryRead" in html
     assert "lastActiveSectionId" in html
     assert "scroll-margin-top: 124px" in html
@@ -270,6 +290,8 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert "fetchTelegramMentions" in html
     assert "data-story-telegram-mentions" in html
     assert "Telegram 언급" in html
+    assert "telegramMentionChannels" in html
+    assert "story-context__telegram-channel-list" in html
     assert "URL 직접" in html
     assert "db-search__summary" not in html
     assert "data-db-search" not in html
