@@ -74,12 +74,6 @@ jobs:
 
       - name: Commit decoded state
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/state.json
-          if git diff --cached --quiet; then
-            echo "No Google News URL changes to commit"
-          else
-            git commit -m "Decode Google News URLs"
-            git push
-          fi
+          bash .github/scripts/commit-generated-changes.sh \
+            "Decode Google News URLs" \
+            data/state.json

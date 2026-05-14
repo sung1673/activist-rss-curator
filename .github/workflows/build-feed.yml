@@ -225,15 +225,16 @@ jobs:
 
       - name: Commit generated files
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/CNAME public/404.html public/feed.xml public/index.html public/feed data/state.json data/archive data/priority_overrides.yaml
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Update curated RSS feed"
-            git push
-          fi
+          bash .github/scripts/commit-generated-changes.sh \
+            "Update curated RSS feed" \
+            public/CNAME \
+            public/404.html \
+            public/feed.xml \
+            public/index.html \
+            public/feed \
+            data/state.json \
+            data/archive \
+            data/priority_overrides.yaml
 
       - name: Configure Pages
         if: vars.ENABLE_PAGES == 'true'
