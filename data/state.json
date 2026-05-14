@@ -178670,8 +178670,9 @@
       "title_hash": "b9992be1d789a9fc7d771595"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiUEFVX3lxTE5keU4xeWtZbmYxbHhYNkRBRTdNQ1dfTkl4allXbl9yR180cVJMa29OVUU3cnRZOHBCUkVfM2Z0ZDBNUEZ3ZmFTQUxuemlCbzcy?oc=5",
-      "canonical_url_hash": "3ec925ade63d87c754fe8c64",
+      "article_published_at": "2026-05-14T16:00:39+09:00",
+      "canonical_url": "https://www.munhwa.com/article/11588983",
+      "canonical_url_hash": "be3f778fda42708372f4ef57",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.msn.com/ko-kr/news/other/%EA%B3%A0%EB%A0%A4%EC%95%84%EC%97%B0-%EB%B9%84%ED%8C%90%ED%95%9C-%EC%86%8C%EC%95%A1%EC%A3%BC%EC%A3%BC-%EB%8B%A8%EC%B2%B4-%EC%8B%A4%EC%B2%B4-%EB%85%BC%EB%9E%80/ar-AA239IMI",
@@ -178704,8 +178705,26 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-소액주주",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiUEFVX3lxTE5keU4xeWtZbmYxbHhYNkRBRTdNQ1dfTkl4allXbl9yR180cVJMa29OVUU3cnRZOHBCUkVfM2Z0ZDBNUEZ3ZmFTQUxuemlCbzcy?oc=5",
+      "image_candidates": [
+        "https://wimg.munhwa.com/news/cms/2026/05/14/news-p.v1.20260514.285edd0bb9094ec9a48ed025eba2216f_R.png",
+        "https://wimg.munhwa.com/news/cms/2026/05/14/news-p.v1.20260514.285edd0bb9094ec9a48ed025eba2216f_T1.png",
+        "https://wimg.munhwa.com/news/cms/2026/05/14/news-p.v1.20260514.285edd0bb9094ec9a48ed025eba2216f_P1.png",
+        "https://wimg.munhwa.com/svc/user/a84e03bc-1788-45fe-aded-b1d9aa321892.jpg",
+        "https://static.munhwa.com/img/1X1.png",
+        "https://wimg.munhwa.com//news/cms/2026/05/14/news-p.v1.20260514.df4d8152a8e54ecd80e2817204bf8b4b_T1.jpg",
+        "https://wimg.munhwa.com//news/cms/2026/05/14/news-p.v1.20260514.2f89d8daa6894e1b969b387476c676aa_T1.jpg",
+        "https://wimg.munhwa.com//news/cms/2026/05/14/news-p.v1.20260514.5816e12683204e1194ecba6e6c596a59_T1.jpg",
+        "https://wimg.munhwa.com//news/cms/2026/05/14/news-p.v1.20260514.28d65f67f3a34423a1e23bb23b91f41b_T1.jpg",
+        "https://wimg.munhwa.com//news/cms/2026/05/14/news-p.v1.20260514.231523333f89452695bbae28d279befa_T1.jpg",
+        "https://wimg.munhwa.com//news/cms/2026/05/10/news-a.v1.20260510.81a08969e9b946f5aa47f23e3990b15b_T1.jpg",
+        "https://wimg.munhwa.com//news/cms/2026/05/11/news-p.v1.20260511.bce7f5e4c3494ae597ac229fdc7cb6b2_T1.jpg",
+        "https://wimg.munhwa.com//news/cms/2026/05/11/rcv.YNA.20260511.PYH2026051103190001300_T1.jpg",
+        "https://wimg.munhwa.com//news/cms/2026/05/13/news-p.v1.20260513.ca4f0483a2ac4fa68e89f1e4bc791f44_T1.jpg",
+        "https://wimg.munhwa.com//news/cms/2026/05/12/news-p.v1.20260512.dac18e07b4ac474997f13aade3975dbc_T1.png"
+      ],
+      "image_url": "https://wimg.munhwa.com/news/cms/2026/05/14/news-p.v1.20260514.285edd0bb9094ec9a48ed025eba2216f_R.png",
       "normalized_title": "고려아연 비판한 소액주주 단체…실체 논란",
       "priority_level": "watch",
       "priority_reasons": [
@@ -178732,8 +178751,9 @@
       "title_hash": "7bdbf751a1da541dbaae4500"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiVEFVX3lxTE9WUmk3dDRQUW5rN25HTFdtNXF4ck5IYUUyaHJqZXdiVnFMak9DTkNOS2xGVlZoOVVKN25zQURzWllXS19qZXIwelB3cGg5czFmVldrbNIBVEFVX3lxTE9WUmk3dDRQUW5rN25HTFdtNXF4ck5IYUUyaHJqZXdiVnFMak9DTkNOS2xGVlZoOVVKN25zQURzWllXS19qZXIwelB3cGg5czFmVldrbA?oc=5",
-      "canonical_url_hash": "12c04f7e3b969425afa2ffe9",
+      "article_published_at": "2026-05-14T17:54:52+09:00",
+      "canonical_url": "https://www.hankyung.com/article/2026051472171",
+      "canonical_url_hash": "dbd2ee9bfe7afffd339ef2e3",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.hankyung.com/article/2026051472171",
@@ -178752,6 +178772,8 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-소액주주",
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiVEFVX3lxTE9WUmk3dDRQUW5rN25HTFdtNXF4ck5IYUUyaHJqZXdiVnFMak9DTkNOS2xGVlZoOVVKN25zQURzWllXS19qZXIwelB3cGg5czFmVldrbNIBVEFVX3lxTE9WUmk3dDRQUW5rN25HTFdtNXF4ck5IYUUyaHJqZXdiVnFMak9DTkNOS2xGVlZoOVVKN25zQURzWllXS19qZXIwelB3cGg5czFmVldrbA?oc=5",
       "image_candidates": [],
       "image_url": null,
       "normalized_title": "상장사 합병 반대 소액주주도 보호한다",
@@ -178781,8 +178803,8 @@
       "title_hash": "7e630f8e2599277a38420e47"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiZEFVX3lxTE9vWVBtdWRyZGcwdUhZWTFDSVI4Q2ljYUhWWTExWE1feGdCdzRUaFZPSFctSXN4Z1VJS282S3VYNVRIMG93UEh5V2htdW1jODVMVEpmWHhhcnFNT3UyQVFHLW5oMVc?oc=5",
-      "canonical_url_hash": "2f2ab666a90628f87ad72fc6",
+      "canonical_url": "https://www.ddaily.co.kr/page/view/2026051417400962642",
+      "canonical_url_hash": "2f921e69584dbde556f5ed96",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.msn.com/ko-kr/news/other/%EA%B3%A0%EB%A0%A4%EC%95%84%EC%97%B0-%EC%86%8C%EC%95%A1%EC%A3%BC%EC%A3%BC-%EB%8B%A8%EC%B2%B4-%EB%8B%A8%EC%B2%B4%EB%AA%85-%ED%98%BC%EC%9A%A9%EC%97%90-%EB%8C%80%ED%91%9C%EC%84%B1-%EB%85%BC%EB%9E%80/ar-AA23aLVr",
@@ -178802,8 +178824,35 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-소액주주",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiZEFVX3lxTE9vWVBtdWRyZGcwdUhZWTFDSVI4Q2ljYUhWWTExWE1feGdCdzRUaFZPSFctSXN4Z1VJS282S3VYNVRIMG93UEh5V2htdW1jODVMVEpmWHhhcnFNT3UyQVFHLW5oMVc?oc=5",
+      "image_candidates": [
+        "https://www.ddaily.co.kr/photos/2026/03/07/2026030718512259778_l.jpg",
+        "https://www.ddaily.co.kr/upload/ads/2024/01/30/f37bd37c97f092f313c5d59d0cb6f1d2.jpg",
+        "https://www.ddaily.co.kr/upload/ads/2024/01/30/73839b2a3524098228396c9b62c90267.jpg",
+        "https://www.ddaily.co.kr/upload/ads/2024/01/30/d4339f3dbc618d5f51573a0246d91ab8.jpg",
+        "https://www.ddaily.co.kr/upload/ads/2024/01/30/cb8ee9b3ea353c3326ca1007238e6b3b.jpg",
+        "https://www.ddaily.co.kr/upload/ads/2024/02/02/ccf4fd622ed2a3ee7c4a3e847daf5667.jpg",
+        "https://www.ddaily.co.kr/upload/ads/2024/03/18/b2972ef1073c864cb2847cd7c8a48b40.jpg",
+        "https://www.ddaily.co.kr/upload/ads/2024/04/16/02b990c8a254256a5a11d2f962ee3c8d.jpg",
+        "https://www.ddaily.co.kr/upload/ads/2024/04/23/e116d21c489c3c352624f082ed507552.jpg",
+        "https://www.ddaily.co.kr/upload/ads/2024/05/14/9b58a746a46904230c0687e0b38c6db3.jpg",
+        "https://www.ddaily.co.kr/upload/ads/2024/06/12/2e1b35e0664823ba3a48374946bebb6b.jpg",
+        "https://www.ddaily.co.kr/upload/ads/2024/07/03/1e399a6270849338721feb22f3d2b72e.jpg",
+        "https://www.ddaily.co.kr/upload/ads/2024/10/14/47d358dc0b9c88d2061573c34ca582ba.jpg",
+        "https://www.ddaily.co.kr/upload/ads/2024/11/06/ad1d19b5df75fecce94af794dc01d93a.jpg",
+        "https://www.ddaily.co.kr/upload/ads/2025/01/07/c6dfeadf288c0c0d9273cc6c30b0a53d.jpg",
+        "https://www.ddaily.co.kr/assets/images/skin_img/arl_011_more.png",
+        "https://www.ddaily.co.kr/assets/images/common/naver_channel.jpg",
+        "https://www.ddaily.co.kr/photos/2026/05/14/2026051419124056535_m.jpg",
+        "https://www.ddaily.co.kr/photos/2026/05/14/2026051417274609135_m.JPG",
+        "https://www.ddaily.co.kr/photos/2023/07/18/2023071811365606538_m.jpg",
+        "https://www.ddaily.co.kr/photos/2026/05/14/2026051423285235585_m.jpg",
+        "https://www.ddaily.co.kr/photos/2026/05/14/2026051423024740423_m.jpg",
+        "https://www.ddaily.co.kr/photos/2025/12/10/2025121013323696736_m.jpg",
+        "https://www.ddaily.co.kr/upload/ads/2026/03/12/8e1d9494bf7494c21b80fa82b40a76da.jpg"
+      ],
+      "image_url": "https://www.ddaily.co.kr/photos/2026/03/07/2026030718512259778_l.jpg",
       "normalized_title": "고려아연 소액주주 단체 단체명 혼용에 대표성 논란",
       "priority_level": "watch",
       "priority_reasons": [
@@ -178830,8 +178879,8 @@
       "title_hash": "bb55762ea186eb9bd6ee3285"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiT0FVX3lxTFBpSzM3NW5rY1R2X09JYmYwU1BoNzFXcEVLRFl0azdzTndzT2Q2VXFFbV9QcHFVOTBQWHo2dE9GcDFuRkZPTHJoTFJERHYyODg?oc=5",
-      "canonical_url_hash": "747a0f5c8b56e03b79b8793d",
+      "canonical_url": "https://dealsite.co.kr/articles/161626",
+      "canonical_url_hash": "a97f240a942565945ad60bb2",
       "duplicate_matches": [
         {
           "canonical_url": "https://dealsite.co.kr/articles/161626",
@@ -178853,6 +178902,8 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-밸류업-벨류업",
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiT0FVX3lxTFBpSzM3NW5rY1R2X09JYmYwU1BoNzFXcEVLRFl0azdzTndzT2Q2VXFFbV9QcHFVOTBQWHo2dE9GcDFuRkZPTHJoTFJERHYyODg?oc=5",
       "image_candidates": [],
       "image_url": null,
       "normalized_title": "벨류업 시동 lg 주주환원 강화 지배구조 선진화…밸류업 모범생",
@@ -178884,8 +178935,9 @@
       "title_hash": "48c1704d3a651ddaf1b237ba"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiVkFVX3lxTFB6RzNLMXJyaHA2d2swcVVOc2w0YUZBLU1SOHV4LVhCR0hUcFFCd2NpcklxU3FINkFNUlJpNm51cWZGZ3BwYWktQzdPbE1uTldZcW5fU25B?oc=5",
-      "canonical_url_hash": "3df5f814b7351317c4357e98",
+      "article_published_at": "2026-05-14T05:00:03+09:00",
+      "canonical_url": "https://www.joongang.co.kr/article/25428199",
+      "canonical_url_hash": "28cd3fa3161f8cc6d3442137",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.joongang.co.kr/article/25428199",
@@ -178904,8 +178956,15 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-밸류업-벨류업",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiVkFVX3lxTFB6RzNLMXJyaHA2d2swcVVOc2w0YUZBLU1SOHV4LVhCR0hUcFFCd2NpcklxU3FINkFNUlJpNm51cWZGZ3BwYWktQzdPbE1uTldZcW5fU25B?oc=5",
+      "image_candidates": [
+        "https://pds.joongang.co.kr/news/component/htmlphoto_mmdata/202605/14/9fd719cb-3162-4169-8edc-97171ca5fc2f.jpg",
+        "https://pds.joongang.co.kr/news/component/htmlphoto_mmdata/202605/14/dc92f19a-51fc-4b9e-8454-7015d73f86f3.jpg",
+        "https://pds.joongang.co.kr/news/component/htmlphoto_mmdata/202605/14/e0bb2ee5-d865-43bd-838f-60cf79af16c5.jpg",
+        "https://img.joongang.co.kr/pubimg/share/ja-opengraph-img.png"
+      ],
+      "image_url": "https://pds.joongang.co.kr/news/component/htmlphoto_mmdata/202605/14/9fd719cb-3162-4169-8edc-97171ca5fc2f.jpg",
       "normalized_title": "투자도 배당도 다 해라…길 잃은 코리아 밸류업 더롱뷰",
       "priority_level": "normal",
       "priority_reasons": [
@@ -178931,8 +178990,8 @@
       "title_hash": "8876956a45395f3520d3e6ba"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiT0FVX3lxTE9MczBlaGJKbmk2cjFmTWs0V0VFZXJMQVotMzRWeWNPNlgybzRWdERiNlU5MWI4eHhvNWtFMXM1VzR1aVdrWDBYdjZWWmJWTUU?oc=5",
-      "canonical_url_hash": "c052c52b28318e3486f7bc7c",
+      "canonical_url": "https://dealsite.co.kr/articles/161724",
+      "canonical_url_hash": "d8610bba5ca211accee5f2c9",
       "duplicate_matches": [
         {
           "canonical_url": "https://dealsite.co.kr/articles/161724",
@@ -178952,6 +179011,8 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-중복상장 모회사 주주 보호",
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiT0FVX3lxTE9MczBlaGJKbmk2cjFmTWs0V0VFZXJMQVotMzRWeWNPNlgybzRWdERiNlU5MWI4eHhvNWtFMXM1VzR1aVdrWDBYdjZWWmJWTUU?oc=5",
       "image_candidates": [],
       "image_url": null,
       "normalized_title": "디티에스 ipo 다산네트웍스 강행 의지…주주환원책 관심 집중",
@@ -178982,8 +179043,9 @@
       "title_hash": "f2f1ea581669c45b639e8e0e"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiYEFVX3lxTE1ZOHhaMGI0dmdtZjNCaU9STktnSlcwYXlSeWJKanY4TGI5amUtdk5TbnFtTS1mNERKVXNKS3U4VTlRRHpWeFFNSWp2RkotTWVKVHgwRnVDdEJQdk9qZGVqVNIBYEFVX3lxTE1ZOHhaMGI0dmdtZjNCaU9STktnSlcwYXlSeWJKanY4TGI5amUtdk5TbnFtTS1mNERKVXNKS3U4VTlRRHpWeFFNSWp2RkotTWVKVHgwRnVDdEJQdk9qZGVqVA?oc=5",
-      "canonical_url_hash": "06535f62eb6082840ecd3ab2",
+      "article_published_at": "2026-05-14T18:01:11+09:00",
+      "canonical_url": "https://www.yna.co.kr/view/AKR20260514164151003",
+      "canonical_url_hash": "586679e1bc4aeb66e0f8e00f",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.yna.co.kr/view/AKR20260514164151003",
@@ -179003,8 +179065,12 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-유상증자 정정신고서 금감원",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiYEFVX3lxTE1ZOHhaMGI0dmdtZjNCaU9STktnSlcwYXlSeWJKanY4TGI5amUtdk5TbnFtTS1mNERKVXNKS3U4VTlRRHpWeFFNSWp2RkotTWVKVHgwRnVDdEJQdk9qZGVqVNIBYEFVX3lxTE1ZOHhaMGI0dmdtZjNCaU9STktnSlcwYXlSeWJKanY4TGI5amUtdk5TbnFtTS1mNERKVXNKS3U4VTlRRHpWeFFNSWp2RkotTWVKVHgwRnVDdEJQdk9qZGVqVA?oc=5",
+      "image_candidates": [
+        "https://img4.yna.co.kr/photo/cms/2025/04/06/03/PCM20250406000003990_P4.jpg"
+      ],
+      "image_url": "https://img4.yna.co.kr/photo/cms/2025/04/06/03/PCM20250406000003990_P4.jpg",
       "normalized_title": "한화솔루션 1 8조 유상증자 일정 공시…정정신고서 제출 종합",
       "priority_level": "normal",
       "priority_reasons": [
@@ -179034,8 +179100,9 @@
       "title_hash": "3f05e4941c462ac0ad4872a2"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMieEFVX3lxTE9JRlNkUjU4a3F1aXBaYmFQeGhwd3h1OFdyU3JUWXVLXzgteVFMc2dueDFZY19RbGkxYi1lTFd4NEtxZkd3T0VKVUdCM0VoanRPYWREbzVLWVNTSGs1cURlb1UtaFNzY2JkOGVxeUpKYnEtVGtDTzhnLdIBeEFVX3lxTE9JRlNkUjU4a3F1aXBaYmFQeGhwd3h1OFdyU3JUWXVLXzgteVFMc2dueDFZY19RbGkxYi1lTFd4NEtxZkd3T0VKVUdCM0VoanRPYWREbzVLWVNTSGs1cURlb1UtaFNzY2JkOGVxeUpKYnEtVGtDTzhnLQ?oc=5",
-      "canonical_url_hash": "5dba0eeb04dbcd3fc9373092",
+      "article_published_at": "2026-05-14T17:34:48+09:00",
+      "canonical_url": "https://www.newsis.com/view/NISX20260514_0003630089",
+      "canonical_url_hash": "2ac56a051751ff0de0d03a0f",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.google.com/rss/articles/CBMiYEFVX3lxTFBld3BZd0pqLTMxTXgyLTY0eFBPZlNBQkxha1AtcUN2MFQwSUxWaXlSWFR3REZsdnJUdmhRekt3em9BblJMYjBFS2ZpNHllR25odEdhQzNSa25YM0V3TDB5Q9IBeEFVX3lxTE9JRlNkUjU4a3F1aXBaYmFQeGhwd3h1OFdyU3JUWXVLXzgteVFMc2dueDFZY19RbGkxYi1lTFd4NEtxZkd3T0VKVUdCM0VoanRPYWREbzVLWVNTSGs1cURlb1UtaFNzY2JkOGVxeUpKYnEtVGtDTzhnLQ?oc=5",
@@ -179070,8 +179137,13 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-유상증자 정정신고서 금감원",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMieEFVX3lxTE9JRlNkUjU4a3F1aXBaYmFQeGhwd3h1OFdyU3JUWXVLXzgteVFMc2dueDFZY19RbGkxYi1lTFd4NEtxZkd3T0VKVUdCM0VoanRPYWREbzVLWVNTSGs1cURlb1UtaFNzY2JkOGVxeUpKYnEtVGtDTzhnLdIBeEFVX3lxTE9JRlNkUjU4a3F1aXBaYmFQeGhwd3h1OFdyU3JUWXVLXzgteVFMc2dueDFZY19RbGkxYi1lTFd4NEtxZkd3T0VKVUdCM0VoanRPYWREbzVLWVNTSGs1cURlb1UtaFNzY2JkOGVxeUpKYnEtVGtDTzhnLQ?oc=5",
+      "image_candidates": [
+        "https://img1.newsis.com/2026/04/03/NISI20260403_0002102229_web.jpg",
+        "https://image.newsis.com/2026/04/03/NISI20260403_0002102229_web.jpg"
+      ],
+      "image_url": "https://img1.newsis.com/2026/04/03/NISI20260403_0002102229_web.jpg",
       "normalized_title": "무겁게 받아들였다…한화솔루션 금감원 2차 정정 반영 유증 신고서 다시 제출",
       "priority_level": "normal",
       "priority_reasons": [
@@ -179099,8 +179171,9 @@
       "title_hash": "5b6876603f437b4555d5ef2c"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMic0FVX3lxTE1xRTE4M3YxdXdLZDluMkwtZzR6TzFZQkNMYkRQY242dU5LLUxYVEg4OVNNanJMMjliVG5jelNYeXlIakIwVFowakVlbWlGNUxfeTNTMzNETlA5NXJsVDl5TTU4dERhMDNGN25kN3ZsaWthNms?oc=5",
-      "canonical_url_hash": "712548b410e4c3e7a4cfc1da",
+      "article_published_at": "2026-05-15T00:27:32+09:00",
+      "canonical_url": "https://www.esgbusinessreview.kr/news/articleView.html?idxno=6503",
+      "canonical_url_hash": "e2b3302dfa8660a10358da39",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.esgbusinessreview.kr/news/articleView.html?idxno=6503",
@@ -179120,8 +179193,20 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-ESG 공시 지배구조",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMic0FVX3lxTE1xRTE4M3YxdXdLZDluMkwtZzR6TzFZQkNMYkRQY242dU5LLUxYVEg4OVNNanJMMjliVG5jelNYeXlIakIwVFowakVlbWlGNUxfeTNTMzNETlA5NXJsVDl5TTU4dERhMDNGN25kN3ZsaWthNms?oc=5",
+      "image_candidates": [
+        "https://cdn.esgbusinessreview.kr/news/photo/202605/6503_6352_305.png",
+        "https://cdn.esgbusinessreview.kr/news/photo/202605/6503_6353_4147.jpeg",
+        "https://cdn.esgbusinessreview.kr/image/newsroom/default-user.png",
+        "https://cdn.esgbusinessreview.kr/news/thumbnail/custom/20260515/6447_6279_5017_1777672217_140.jpg",
+        "https://cdn.esgbusinessreview.kr/news/thumbnail/custom/20260515/6455_6289_1927_1777846767_140.jpg",
+        "https://cdn.esgbusinessreview.kr/news/thumbnail/custom/20260515/6504_6354_1213_1778775134_350.jpg",
+        "https://cdn.esgbusinessreview.kr/news/thumbnail/custom/20260515/6503_6352_305_1778772606_350.jpg",
+        "https://cdn.esgbusinessreview.kr/news/thumbnail/custom/20260515/6502_6351_433_1778771074_350.jpg",
+        "https://cdn.esgbusinessreview.kr/news/thumbnail/custom/20260515/6501_6349_463_1778715963_350.jpg"
+      ],
+      "image_url": "https://cdn.esgbusinessreview.kr/news/photo/202605/6503_6352_305.png",
       "normalized_title": "뉴욕 캘리포니아 연기금 스페이스x ipo 지배구조에 공개 반발 - esg비즈니스리뷰",
       "priority_level": "normal",
       "priority_reasons": [
@@ -179149,8 +179234,9 @@
       "title_hash": "7ede6e17a2654158a74ed7c3"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMickFVX3lxTE1OMHRkQnJuMmZUa1N2M283NmdyN2NfTlVHX0JHRGN1NEQ3ejlBWmFKbUM5Y0VGRGpObkE1MFJ4ZkoyYUczZWxQUVlLUEh0TDJhamxuNmc1SFY2czBJSjNiQW5tQ3RWa1hjajZUODF1cm9wQdIBckFVX3lxTE1OMHRkQnJuMmZUa1N2M283NmdyN2NfTlVHX0JHRGN1NEQ3ejlBWmFKbUM5Y0VGRGpObkE1MFJ4ZkoyYUczZWxQUVlLUEh0TDJhamxuNmc1SFY2czBJSjNiQW5tQ3RWa1hjajZUODF1cm9wQQ?oc=5",
-      "canonical_url_hash": "2bf6a183d7aead97793a64cf",
+      "article_published_at": "2026-05-14T00:00:00+09:00",
+      "canonical_url": "https://www.polinews.co.kr/news/articleView.html?idxno=731140",
+      "canonical_url_hash": "33a568cf74722bf3631fa5ba",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.polinews.co.kr/news/articleView.html?idxno=731140",
@@ -179169,8 +179255,12 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-사외이사 경영진 견제",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMickFVX3lxTE1OMHRkQnJuMmZUa1N2M283NmdyN2NfTlVHX0JHRGN1NEQ3ejlBWmFKbUM5Y0VGRGpObkE1MFJ4ZkoyYUczZWxQUVlLUEh0TDJhamxuNmc1SFY2czBJSjNiQW5tQ3RWa1hjajZUODF1cm9wQdIBckFVX3lxTE1OMHRkQnJuMmZUa1N2M283NmdyN2NfTlVHX0JHRGN1NEQ3ejlBWmFKbUM5Y0VGRGpObkE1MFJ4ZkoyYUczZWxQUVlLUEh0TDJhamxuNmc1SFY2czBJSjNiQW5tQ3RWa1hjajZUODF1cm9wQQ?oc=5",
+      "image_candidates": [
+        "https://www.polinews.co.kr/news/photo/202605/731140_550106_3246.jpg"
+      ],
+      "image_url": "https://www.polinews.co.kr/news/photo/202605/731140_550106_3246.jpg",
       "normalized_title": "거수기 논란 끊겠다는 kt…사외이사 윤리 규범 강화에 담긴 메시지 - 폴리뉴스 polinews",
       "priority_level": "normal",
       "priority_reasons": [
@@ -179197,8 +179287,9 @@
       "title_hash": "bccbc17c21d2c91e722be0c9"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiakFVX3lxTE9YZUh4cVdoaHNUSW9oRDB0SDFDUm5FVHkyaG4ycmluTEE0V3lCaU10MmZIQWYzb05VUF9DLUxNaG5tdDZNNHFkaDhrM3RvTF8tZUlxUmpEQndqYmJrYXRvcWJYSk9Tb0JBS1E?oc=5",
-      "canonical_url_hash": "a268189bf46d7cb4221558b2",
+      "article_published_at": "2026-05-14T11:02:19+09:00",
+      "canonical_url": "https://www.newsway.co.kr/news/view?ud=2026051410380481505",
+      "canonical_url_hash": "17ac4b2373ed647604ff6bf0",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.newsway.co.kr/news/view?ud=2026051410380481505",
@@ -179218,8 +179309,18 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-사외이사 경영진 견제",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiakFVX3lxTE9YZUh4cVdoaHNUSW9oRDB0SDFDUm5FVHkyaG4ycmluTEE0V3lCaU10MmZIQWYzb05VUF9DLUxNaG5tdDZNNHFkaDhrM3RvTF8tZUlxUmpEQndqYmJrYXRvcWJYSk9Tb0JBS1E?oc=5",
+      "image_candidates": [
+        "https://nimage.newsway.co.kr/photo/2023/08/26/20230826000016_0700.jpg",
+        "https://nimage.newsway.co.kr/photo/2024/05/08/20240508000115_0700.png",
+        "https://nimage.newsway.co.kr/photo/2026/04/22/20260422000053_0700.jpg",
+        "https://nimage.newsway.co.kr/photo/2025/02/27/20250227000050_0700.jpg",
+        "https://nimage.newsway.co.kr/photo/2026/05/14/20260514000092_0700.jpg",
+        "https://nimage.newsway.co.kr/assets/image/photo/opinion/junhuk210.png",
+        "https://nimage.newsway.co.kr/assets/image/missingchild/child/20241107150218017.jpg"
+      ],
+      "image_url": "https://nimage.newsway.co.kr/photo/2023/08/26/20230826000016_0700.jpg",
       "normalized_title": "kt 이사회 거버넌스 논란 정면돌파 강령 위반시 퇴출",
       "priority_level": "normal",
       "priority_reasons": [
@@ -179247,8 +179348,9 @@
       "title_hash": "a3e9e527f5d7c51a6249f41c"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMibkFVX3lxTE5xa3BtMjlBSGltMEM4Tl9Rbk5FZkpkWjFrcVQtck1PQktrU1o4aEt1cFo0QUYtUWt3ZWhGRDZLUk8zTGQzQmNHTWw1Q2d5NS1FWk1KTGxmX1ZjRE1yQkw4cmZva2N1QzFrY3lGYzhR?oc=5",
-      "canonical_url_hash": "939a3e4f36334cbac2860495",
+      "article_published_at": "2026-05-14T11:00:41+09:00",
+      "canonical_url": "https://www.newsinside.kr/news/articleView.html?idxno=4673039",
+      "canonical_url_hash": "93d7659ff04b65ee22f77d11",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.newsinside.kr/news/articleView.html?idxno=4673039",
@@ -179268,8 +179370,13 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-사외이사 경영진 견제",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMibkFVX3lxTE5xa3BtMjlBSGltMEM4Tl9Rbk5FZkpkWjFrcVQtck1PQktrU1o4aEt1cFo0QUYtUWt3ZWhGRDZLUk8zTGQzQmNHTWw1Q2d5NS1FWk1KTGxmX1ZjRE1yQkw4cmZva2N1QzFrY3lGYzhR?oc=5",
+      "image_candidates": [
+        "https://cdn.newsinside.kr/news/photo/202605/4673039_936083_5836.jpg",
+        "https://cdn.newsinside.kr/image/newsroom/default-user.png"
+      ],
+      "image_url": "https://cdn.newsinside.kr/news/photo/202605/4673039_936083_5836.jpg",
       "normalized_title": "kt 이사회 사외이사 권한 남용 원천 차단…인사 투자 개입하면 사직 권고 - 뉴스인사이드",
       "priority_level": "normal",
       "priority_reasons": [
@@ -179297,8 +179404,9 @@
       "title_hash": "1d34e062c88adc977c40084c"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiV0FVX3lxTE9YdF9rY1F3TndTam43TWNDMjZfS2JUeWxZU1FlQXVaQWdka0NhU21GX1NZVnkzbDE2ekNPaXRHaW5IS2lUc1kxVGpRQ09HX2V1TGRQdDMxTQ?oc=5",
-      "canonical_url_hash": "675223abfd16f1b335d49836",
+      "article_published_at": "2026-05-14T16:01:46+09:00",
+      "canonical_url": "https://www.huffingtonpost.kr/article/257213",
+      "canonical_url_hash": "2662f1a13535e0f89e161621",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.huffingtonpost.kr/article/257213",
@@ -179317,8 +179425,31 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-사외이사 경영진 견제",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiV0FVX3lxTE9YdF9rY1F3TndTam43TWNDMjZfS2JUeWxZU1FlQXVaQWdka0NhU21GX1NZVnkzbDE2ekNPaXRHaW5IS2lUc1kxVGpRQ09HX2V1TGRQdDMxTQ?oc=5",
+      "image_candidates": [
+        "https://cdn.huffingtonpost.kr/news/photo/202605/202605141906.jpg?v=257213",
+        "https://cdn.huffingtonpost.kr/news/photo/202605/202605141906.jpg",
+        "https://www.huffingtonpost.kr/resources/images/common/no_image_profile.webp",
+        "https://www.huffingtonpost.kr/resources/images/ico_facebook.png",
+        "https://www.huffingtonpost.kr/resources/images/ico_x.png",
+        "https://www.huffingtonpost.kr/resources/images/ico_kakao.png",
+        "https://www.huffingtonpost.kr/resources/images/ico_link.png",
+        "https://cdn.huffingtonpost.kr/news/photo/202605/202605139534.jpg",
+        "https://cdn.huffingtonpost.kr/news/photo/202605/202605144491.jpg",
+        "https://cdn.huffingtonpost.kr/news/photo/202605/202605143379.jpg",
+        "https://cdn.huffingtonpost.kr/news/photo/202605/202605145448.jpg",
+        "https://cdn.huffingtonpost.kr/news/photo/202605/202605143587.jpg",
+        "https://cdn.huffingtonpost.kr/news/photo/202605/202605143404.jpg",
+        "https://cdn.huffingtonpost.kr/news/photo/202605/202605148825.png",
+        "https://cdn.huffingtonpost.kr/news/photo/202605/202605142853.jpg",
+        "https://cdn.huffingtonpost.kr/news/photo/202605/202605144192.png",
+        "https://cdn.huffingtonpost.kr/news/photo/202605/202605142241.jpg",
+        "https://cdn.huffingtonpost.kr/news/photo/202605/202605145703.jpg",
+        "https://www.huffingtonpost.kr/resources/images/ins1.png",
+        "https://www.huffingtonpost.kr/resources/images/ins2.png"
+      ],
+      "image_url": "https://cdn.huffingtonpost.kr/news/photo/202605/202605141906.jpg?v=257213",
       "normalized_title": "키움증권 이사회에 드리운 오너 그림자 후계자 김동준 창업공신 이현 투톱 존재로 독립성 훼손 우려려 - 허프포스트코리아",
       "priority_level": "normal",
       "priority_reasons": [
@@ -179345,8 +179476,9 @@
       "title_hash": "913de8e04b5830f61e574514"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMibEFVX3lxTE45dk85QlkyWUtYVFBQMGdldzkzS3Q0RkxvWDhlVk8xZXNLUmNkeDhsRDczcXJfRWo0N0NZQ0JVLUFTcFktQ205WTBRVGx2d0IyaGIxMXU2dm1RVHlYZWtIaDdXdjBTek83bEV0etIBbEFVX3lxTE45dk85QlkyWUtYVFBQMGdldzkzS3Q0RkxvWDhlVk8xZXNLUmNkeDhsRDczcXJfRWo0N0NZQ0JVLUFTcFktQ205WTBRVGx2d0IyaGIxMXU2dm1RVHlYZWtIaDdXdjBTek83bEV0eg?oc=5",
-      "canonical_url_hash": "9ddfec020ece6d6f87f53bf1",
+      "article_published_at": "2026-05-14T00:00:00+09:00",
+      "canonical_url": "https://www.bloter.net/news/articleView.html?idxno=662389",
+      "canonical_url_hash": "cd1407370d534da718a7294b",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.bloter.net/news/articleView.html?idxno=662389",
@@ -179365,8 +179497,12 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-성과보상 지배구조",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMibEFVX3lxTE45dk85QlkyWUtYVFBQMGdldzkzS3Q0RkxvWDhlVk8xZXNLUmNkeDhsRDczcXJfRWo0N0NZQ0JVLUFTcFktQ205WTBRVGx2d0IyaGIxMXU2dm1RVHlYZWtIaDdXdjBTek83bEV0etIBbEFVX3lxTE45dk85QlkyWUtYVFBQMGdldzkzS3Q0RkxvWDhlVk8xZXNLUmNkeDhsRDczcXJfRWo0N0NZQ0JVLUFTcFktQ205WTBRVGx2d0IyaGIxMXU2dm1RVHlYZWtIaDdXdjBTek83bEV0eg?oc=5",
+      "image_candidates": [
+        "https://cdn.bloter.net/news/photo/202605/662389_274748_3655.png"
+      ],
+      "image_url": "https://cdn.bloter.net/news/photo/202605/662389_274748_3655.png",
       "normalized_title": "웅진 재건의 명암 ④ 대기업 된 윤새봄 체제…지배구조는 낙제점",
       "priority_level": "normal",
       "priority_reasons": [
@@ -179393,8 +179529,9 @@
       "title_hash": "5ca936f73cdf5a6b96456558"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMic0FVX3lxTE1mMDJ1U09hNWJTWk8xemhTeXRfdElEMkNkNXZyUExiWjJVdFJpeHdXTmRPVUVIck1lbVhIVEhPOVMwX004SG04TXE5YjNfX1lnSlBEWkJ3SGJ4RGVFbW9CRjM4REFyYTd3VUhWQ0diazAxZDQ?oc=5",
-      "canonical_url_hash": "48e9cf482d9ef7085c2c9d82",
+      "article_published_at": "2026-05-14T20:11:02+09:00",
+      "canonical_url": "https://www.digitaltoday.co.kr/news/articleView.html?idxno=665978",
+      "canonical_url_hash": "3bac87b503d68f119abbcbae",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.digitaltoday.co.kr/news/articleView.html?idxno=665978",
@@ -179414,8 +179551,12 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-상장적격성 실질심사",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMic0FVX3lxTE1mMDJ1U09hNWJTWk8xemhTeXRfdElEMkNkNXZyUExiWjJVdFJpeHdXTmRPVUVIck1lbVhIVEhPOVMwX004SG04TXE5YjNfX1lnSlBEWkJ3SGJ4RGVFbW9CRjM4REFyYTd3VUhWQ0diazAxZDQ?oc=5",
+      "image_candidates": [
+        "https://cdn.digitaltoday.co.kr/news/photo/202605/665978_615191_1512.jpg"
+      ],
+      "image_url": "https://cdn.digitaltoday.co.kr/news/photo/202605/665978_615191_1512.jpg",
       "normalized_title": "옵투스제약 불성실공시법인 지정 예고돼",
       "priority_level": "normal",
       "priority_reasons": [
@@ -179436,7 +179577,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-15T05:16:27.088004+09:00",
-      "source": "디지털투데이",
+      "source": "디지털투데이 (DigitalToday)",
       "status": "duplicate",
       "story_key": "story:45779573d09366c5",
       "summary": "옵투스제약, 불성실공시법인 지정 예고돼 디지털투데이",
@@ -179444,8 +179585,9 @@
       "title_hash": "45779573d09366c54a1aadd3"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
-      "canonical_url_hash": "c7fbfe2067a7e9c6bdf2fa12",
+      "article_published_at": "2026-05-14T07:00:00+09:00",
+      "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
+      "canonical_url_hash": "bd7172c5014d2fab2e1b39e7",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
@@ -179465,8 +179607,17 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-금융투자회사 성과급",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
+      "image_candidates": [
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301970_4611.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301968_4050.png",
+        "https://cdn.fetv.co.kr/image/newsroom/default-user.png",
+        "https://cdn.fetv.co.kr/news/thumbnail/custom/20260515/301539_301217_1722_1777511843_120.jpg",
+        "https://cdn.fetv.co.kr/news/thumbnail/custom/20260515/302040_301700_1915_1778307555_120.jpg"
+      ],
+      "image_url": "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
       "normalized_title": "삼성전자 성과급 논란 ③시장 경제형 사외이사 산식 개편 투자 여력에 무게두나 - fetv co kr",
       "priority_level": "normal",
       "priority_reasons": [
@@ -179486,7 +179637,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-15T05:16:27.088004+09:00",
-      "source": "fetv.co.kr",
+      "source": "FETV",
       "status": "duplicate",
       "story_key": "story:e525084e2b670b99",
       "summary": "[삼성전자 성과급 논란] ③시장·경제형 사외이사, '산식 개편' 투자 여력에 무게두나 fetv.co.kr",
@@ -179494,8 +179645,9 @@
       "title_hash": "e525084e2b670b99a2bd7284"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiZ0FVX3lxTFBUa0pyZWpSenBGcDZoWGlvRlI0Z1QxN25UOGVfQWE5bGxESVFUblFEY091VGQ3QWVOTmZMZEhyeEQ1YzNPM0laZ3g2b0lCaHg0bHp3UWcxYXV3Q1VkMUVEcm1WVks2Z1U?oc=5",
-      "canonical_url_hash": "3bafb7c85a2278b7a319911d",
+      "article_published_at": "2026-05-14T09:06:10+09:00",
+      "canonical_url": "https://www.jabon.co.kr/news/articleView.html?idxno=3434",
+      "canonical_url_hash": "679ea8e652f729f829a591b0",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.jabon.co.kr/news/articleView.html?idxno=3434",
@@ -179514,8 +179666,23 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-자사주 취득 1년 이내 소각",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiZ0FVX3lxTFBUa0pyZWpSenBGcDZoWGlvRlI0Z1QxN25UOGVfQWE5bGxESVFUblFEY091VGQ3QWVOTmZMZEhyeEQ1YzNPM0laZ3g2b0lCaHg0bHp3UWcxYXV3Q1VkMUVEcm1WVks2Z1U?oc=5",
+      "image_candidates": [
+        "https://cdn.jabon.co.kr/news/photo/202605/3434_3981_326.png",
+        "https://cdn.jabon.co.kr/image/newsroom/default-user.png",
+        "https://cdn.jabon.co.kr/news/thumbnail/custom/20260514/3263_3698_5925_1778155166_120.jpg",
+        "https://cdn.jabon.co.kr/news/thumbnail/custom/20260514/3306_3740_1056_1778292658_120.jpg",
+        "https://cdn.jabon.co.kr/news/thumbnail/custom/20260514/3280_3715_1422_1778206462_120.jpg",
+        "https://cdn.jabon.co.kr/news/thumbnail/custom/20260514/3351_3891_3415_1778459655_120.jpg",
+        "https://cdn.jabon.co.kr/image/sample/300x250_1.jpg",
+        "https://cdn.jabon.co.kr/news/thumbnail/custom/20260514/3465_4014_380_1778751481_300.jpg",
+        "https://cdn.jabon.co.kr/news/thumbnail/custom/20260514/3464_4013_358_1778751309_300.jpg",
+        "https://cdn.jabon.co.kr/news/thumbnail/custom/20260514/3461_4009_414_1778749454_300.jpg",
+        "https://cdn.jabon.co.kr/news/thumbnail/custom/20260514/3460_4008_5743_1778749064_300.jpg",
+        "https://cdn.jabon.co.kr/news/thumbnail/custom/20260514/3459_4006_4712_1778748432_300.jpg"
+      ],
+      "image_url": "https://cdn.jabon.co.kr/news/photo/202605/3434_3981_326.png",
       "normalized_title": "최태원 sk 지배구조 30년…자사주 이혼 v프로젝트 삼각 균열 - jabon co kr",
       "priority_level": "normal",
       "priority_reasons": [
@@ -179534,7 +179701,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-15T05:16:27.088004+09:00",
-      "source": "jabon.co.kr",
+      "source": "자본시장뉴스",
       "status": "duplicate",
       "story_key": "story:2562479a4d4bf4dc",
       "summary": "최태원 SK 지배구조 30년…자사주·이혼·V프로젝트 '삼각 균열' jabon.co.kr",
@@ -179542,8 +179709,9 @@
       "title_hash": "2562479a4d4bf4dcc8cdaa51"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMigwFBVV95cUxQdHFtWlJfV3BIQTg1RFc3M1dmUko3aWJwcWdUZWEtWG5Qd1FoZlRaRC1fLU10cUY1QlQtMnJpVlozYm15WDdsc2pBOXBhSHBWQzY5RmNLSE9nSFJYTWoxNWJFTWdBRE1Wd2ZIRTNIcW56NjlFNHdGRXRrVi1fWEpWdmROQdIBlwFBVV95cUxNNk15ZGlZU0RneW5ybGdPR0lzakNCMUFxNnBmdldmM2pheWFiZ0ZKcGtJX1BGWjZfZTZhRGxQTDl1WE9uWkZDMkVvcG9ETUJUWlFmSGtvczVBRS05U3hGRmoxUDcwUjQ3ajY3bmNxcWJWZ1RUV3J1eDFheS1YUHljVms3NDVoUzVkblRlZmNvX29jVTRSWWtV?oc=5",
-      "canonical_url_hash": "bc957d8c27d970ad666cb09e",
+      "article_published_at": "2026-05-14T17:54:34.945000+09:00",
+      "canonical_url": "https://biz.chosun.com/topics/law_firm/2026/05/14/7WRM62LT3FG53BAYOESBCRR72A",
+      "canonical_url_hash": "78f9522ed45b417a340fe1b1",
       "duplicate_matches": [
         {
           "canonical_url": "https://biz.chosun.com/topics/law_firm/2026/05/14/7WRM62LT3FG53BAYOESBCRR72A",
@@ -179562,8 +179730,12 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-주가누르기 방지법",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMigwFBVV95cUxQdHFtWlJfV3BIQTg1RFc3M1dmUko3aWJwcWdUZWEtWG5Qd1FoZlRaRC1fLU10cUY1QlQtMnJpVlozYm15WDdsc2pBOXBhSHBWQzY5RmNLSE9nSFJYTWoxNWJFTWdBRE1Wd2ZIRTNIcW56NjlFNHdGRXRrVi1fWEpWdmROQdIBlwFBVV95cUxNNk15ZGlZU0RneW5ybGdPR0lzakNCMUFxNnBmdldmM2pheWFiZ0ZKcGtJX1BGWjZfZTZhRGxQTDl1WE9uWkZDMkVvcG9ETUJUWlFmSGtvczVBRS05U3hGRmoxUDcwUjQ3ajY3bmNxcWJWZ1RUV3J1eDFheS1YUHljVms3NDVoUzVkblRlZmNvX29jVTRSWWtV?oc=5",
+      "image_candidates": [
+        "https://biz.chosun.com/resizer/v2/62HCGUMRIVEMXA2U4OHDXTQ5EA.jpg?auth=d86a4c53d7fc2ec6002f5119dcd38f04485d37988a25745b43c788612a991dbb&height=388&smart=true&width=740"
+      ],
+      "image_url": "https://biz.chosun.com/resizer/v2/62HCGUMRIVEMXA2U4OHDXTQ5EA.jpg?auth=d86a4c53d7fc2ec6002f5119dcd38f04485d37988a25745b43c788612a991dbb&height=388&smart=true&width=740",
       "normalized_title": "광장 코스닥 회원사에 개정상법 주가누르기 방지법 강의 - 조선비즈 - chosunbiz",
       "priority_level": "normal",
       "priority_reasons": [
@@ -179583,7 +179755,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-15T05:16:27.088004+09:00",
-      "source": "Chosunbiz",
+      "source": "조선비즈",
       "status": "duplicate",
       "story_key": "story:78761bf099da2b62",
       "summary": "광장, 코스닥 회원사에 개정상법·주가누르기 방지법 강의 - 조선비즈 Chosunbiz",
@@ -179591,8 +179763,9 @@
       "title_hash": "78761bf099da2b626bf6d76a"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMirwFBVV95cUxOblNTckttcmh2THNOcFdMMHBDM0FKUEh6UlZFRkNBdTl2ekhVR0Y0dk82aDc0Y0otU1UxZXVxV2UwVW1SYUQxZkM4cUp5SzZCcXFMUU1uR2RZVXdjX0ZYOEQ0OHY4WmEzbklESXBuNVVjQW9qWTFrWEt6OEthUzdVY2JtaFk2ckZPd29hNnBiOWNndjNyZHdSOG1ldW1xZDZzZGNwVWR1NDBjcUdXYVBz?oc=5",
-      "canonical_url_hash": "7270428ac956bfababe39c7a",
+      "article_published_at": "2026-05-14T13:30:20+09:00",
+      "canonical_url": "https://www.digitaltoday.co.kr/en/view/55465/mgame-to-buy-back-2-billion-won-of-treasury-shares-and-cancel-all",
+      "canonical_url_hash": "e6cb6bcb38994f94129c9d30",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.digitaltoday.co.kr/en/view/55465/mgame-to-buy-back-2-billion-won-of-treasury-shares-and-cancel-all",
@@ -179611,8 +179784,12 @@
       ],
       "feed_category": "global",
       "feed_name": "google-news-en-korea-buyback-cancellation",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMirwFBVV95cUxOblNTckttcmh2THNOcFdMMHBDM0FKUEh6UlZFRkNBdTl2ekhVR0Y0dk82aDc0Y0otU1UxZXVxV2UwVW1SYUQxZkM4cUp5SzZCcXFMUU1uR2RZVXdjX0ZYOEQ0OHY4WmEzbklESXBuNVVjQW9qWTFrWEt6OEthUzdVY2JtaFk2ckZPd29hNnBiOWNndjNyZHdSOG1ldW1xZDZzZGNwVWR1NDBjcUdXYVBz?oc=5",
+      "image_candidates": [
+        "https://cdn.digitaltoday.co.kr/news/photo/202605/665778_614988_4645.jpg"
+      ],
+      "image_url": "https://cdn.digitaltoday.co.kr/news/photo/202605/665778_614988_4645.jpg",
       "normalized_title": "mgame to buy back 2 billion won of treasury shares and cancel all",
       "priority_level": "normal",
       "priority_reasons": [
@@ -179631,7 +179808,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-15T05:16:27.088004+09:00",
-      "source": "디지털투데이",
+      "source": "DigitalToday",
       "status": "duplicate",
       "story_key": "story:fd6b6dc57f4a7917",
       "summary": "Mgame to buy back 2 billion won of treasury shares and cancel all 디지털투데이",
@@ -179639,8 +179816,8 @@
       "title_hash": "fd6b6dc57f4a7917d8ceb7e4"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiT0FVX3lxTE5ybUhyTUd5MC1PWHQ5X1p3UC1wOEtON2VNQ1VfMndONktvcGd3X0RRVmNFMjcwenFfMnhiYllQZWdGa0o5TzRuUFdvajVDU0U?oc=5",
-      "canonical_url_hash": "96a96ef847ac99d8977ec026",
+      "canonical_url": "https://v.daum.net/v/20260514150739938",
+      "canonical_url_hash": "9f6e6aba2102046d5b3766d6",
       "duplicate_matches": [
         {
           "canonical_url": "https://v.daum.net/v/20260514150739938",
@@ -179659,8 +179836,13 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-합병비율 주식매수청구권",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiT0FVX3lxTE5ybUhyTUd5MC1PWHQ5X1p3UC1wOEtON2VNQ1VfMndONktvcGd3X0RRVmNFMjcwenFfMnhiYllQZWdGa0o5TzRuUFdvajVDU0U?oc=5",
+      "image_candidates": [
+        "https://img1.daumcdn.net/thumb/S1200x630?fname=https%3A%2F%2Ft1.daumcdn.net%2Fnews%2F202605%2F14%2Fdt%2F20260514150740407most.jpg",
+        "https://img3.daumcdn.net/thumb/R658x0.q70?fname=https%3A%2F%2Ft1.daumcdn.net%2Fnews%2F202605%2F14%2Fdt%2F20260514150740407most.jpg"
+      ],
+      "image_url": "https://img1.daumcdn.net/thumb/S1200x630?fname=https%3A%2F%2Ft1.daumcdn.net%2Fnews%2F202605%2F14%2Fdt%2F20260514150740407most.jpg",
       "normalized_title": "상장사 합병 시 자산 수익가치 반영…자본시장법 개정안 국회 정무위 통과 - v daum net",
       "priority_level": "watch",
       "priority_reasons": [
@@ -179681,7 +179863,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-15T05:16:27.088004+09:00",
-      "source": "v.daum.net",
+      "source": "디지털타임스",
       "status": "duplicate",
       "story_key": "story:0f043470c9e86d9f",
       "summary": "“상장사 합병 시 자산·수익가치 반영”…자본시장법 개정안 국회 정무위 통과 v.daum.net",
@@ -179689,8 +179871,8 @@
       "title_hash": "0f043470c9e86d9f0ad61032"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE5HZndUWWUwc3FrSFdkcjZqblEzeEF3dzF3cTdHbFczTVFWSjRaWXFyakViTzJOTlZDclRTQ0VyaXF1cXlaQjRyM3pzODJ5X2x4UUZB?oc=5",
-      "canonical_url_hash": "7e7af6978c285b1044579875",
+      "canonical_url": "https://news.nate.com/view/20260514n14607",
+      "canonical_url_hash": "0f4e84d68edcba320d595348",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.nate.com/view/20260514n14607",
@@ -179709,8 +179891,13 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-합병비율 주식매수청구권",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE5HZndUWWUwc3FrSFdkcjZqblEzeEF3dzF3cTdHbFczTVFWSjRaWXFyakViTzJOTlZDclRTQ0VyaXF1cXlaQjRyM3pzODJ5X2x4UUZB?oc=5",
+      "image_candidates": [
+        "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/hk/2026/05/14/01.44275116.1.jpg",
+        "https://tracking.cyad1.nate.com/target/setRetarget.php?category=KI6789H"
+      ],
+      "image_url": "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/hk/2026/05/14/01.44275116.1.jpg",
       "normalized_title": "공정가액 합병 반대주주 보호도 담겼다…주식매수청구권도 연동 - 네이트",
       "priority_level": "watch",
       "priority_reasons": [
@@ -179729,7 +179916,7 @@
       ],
       "relevance_level": "high",
       "seen_at": "2026-05-15T05:16:27.088004+09:00",
-      "source": "네이트",
+      "source": "네이트 뉴스",
       "status": "duplicate",
       "story_key": "story:3583746e72db714c",
       "summary": "'공정가액 합병' 반대주주 보호도 담겼다…주식매수청구권도 연동 네이트",
@@ -179737,8 +179924,9 @@
       "title_hash": "3583746e72db714cedb2b020"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMi-gFBVV95cUxNRWRPTTZremQ0V2thNjlrNHJZRXI4VFdqRUN6VmFzZmlYYy1uNFZ1bkltWkt0VURGeFlmZ3Iyb2tpdDZuSHNEUzhaM0NhendEejNvSXd6NzZOVWZOSGFIcmM0b1RUYmI2eXJESUdURXdEUGJRY1l4eVlRd2REaURRejByMERBYVRSSE1lU3poVUdIVVZFTFNTMWtXcUl6S01JZFVCUktBOVZBTHBSbUhXYW41QmpiQ29iSDRmbVI5bktRUU9fOGlqeGJ3clBvb0poSFVmTVBsbUFEQnIwT0NBcHpybHljVWFjeThPd3MwcGZfSW0tQTZxWDJ3?oc=5",
-      "canonical_url_hash": "4e214bfc73cfdd442fe16658",
+      "article_published_at": "2026-05-14T19:30:00+09:00",
+      "canonical_url": "https://www.prnewswire.com/news-releases/trilogy-metals-announces-election-of-directors-and-voting-results-from-the-2026-annual-meeting-of-shareholders-302771813.html",
+      "canonical_url_hash": "dd9233c922a9ecdf8bb54008",
       "duplicate_matches": [
         {
           "canonical_url": "https://trilogymetals.com/news-and-media/news/trilogy-metals-announces-election-of-directors-and-voting-results-from-the-2026-annual-meeting-of-shareholders",
@@ -179757,8 +179945,19 @@
       ],
       "feed_category": "global",
       "feed_name": "google-news-en-withhold-vote-directors",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMi-gFBVV95cUxNRWRPTTZremQ0V2thNjlrNHJZRXI4VFdqRUN6VmFzZmlYYy1uNFZ1bkltWkt0VURGeFlmZ3Iyb2tpdDZuSHNEUzhaM0NhendEejNvSXd6NzZOVWZOSGFIcmM0b1RUYmI2eXJESUdURXdEUGJRY1l4eVlRd2REaURRejByMERBYVRSSE1lU3poVUdIVVZFTFNTMWtXcUl6S01JZFVCUktBOVZBTHBSbUhXYW41QmpiQ29iSDRmbVI5bktRUU9fOGlqeGJ3clBvb0poSFVmTVBsbUFEQnIwT0NBcHpybHljVWFjeThPd3MwcGZfSW0tQTZxWDJ3?oc=5",
+      "image_candidates": [
+        "https://mma.prnewswire.com/media/2979871/Trilogy_Metals_Inc__Trilogy_Metals_Announces_Election_of_Directo.jpg?p=facebook",
+        "https://mma.prnewswire.com/media/2979871/Trilogy_Metals_Inc__Trilogy_Metals_Announces_Election_of_Directo.jpg?p=twitter",
+        "https://rt.prnewswire.com/rt.gif?DateId=20260514&NewsItemId=VA59479&Transmission_Id=202605140630PR_NEWS_USPR_____VA59479",
+        "https://www.prnewswire.com/content/dam/newWidget-desktop.png",
+        "https://mma.prnewswire.com/media/2960914/Trilogy_Metals_Inc__Trilogy_Metals_Announces_Commencement_of_Per.jpg?w=300",
+        "https://www.prnewswire.com/content/dam/prnewswire/subject-and-industry-code-images/MNG.jpg",
+        "https://www.prnewswire.com/content/dam/prnewswire/subject-and-industry-code-images/PRM.jpg",
+        "https://www.prnewswire.com/content/dam/prnewswire/subject-and-industry-code-images/PER.jpg"
+      ],
+      "image_url": "https://mma.prnewswire.com/media/2979871/Trilogy_Metals_Inc__Trilogy_Metals_Announces_Election_of_Directo.jpg?p=facebook",
       "normalized_title": "trilogy metals announces election of directors and voting results from the 2026 annual meeting of shareholders - pr newswire",
       "priority_level": "normal",
       "priority_reasons": [
@@ -179777,7 +179976,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-15T05:16:27.088004+09:00",
-      "source": "PR Newswire",
+      "source": "Trilogy Metals Inc.",
       "status": "duplicate",
       "story_key": "story:a8641e6362f31b30",
       "summary": "Trilogy Metals Announces Election of Directors and Voting Results from the 2026 Annual Meeting of Shareholders PR Newswire",
@@ -179835,12 +180034,23 @@
       "title_hash": "f2bdea22e0d9b97b9aa36eb0"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiWkFVX3lxTE9YMnJIazFEVGFBQi1hc3A0S0J6azNweXJCWllmUHg0TUZ5djlueGZEb2p1TjVHMkhiS3NEaUVzT1RyUGs0RXhUQW5xYmZiLTctcUZ3NWhFYXlTZ9IBX0FVX3lxTE9oOU9jMTlJenJmWW12QWZodTdLYWF5ZFhBbmR1eEg3YjVxSGhwMlF1dUIya2FfY05wYVlTUVJvckNzYUx2bTUxSGlDYXFNXzBaWTFiandfV3Rhb3NsdWRv?oc=5",
-      "canonical_url_hash": "ba326f3389b98b2fe48e38a3",
+      "article_published_at": "2026-05-14T18:26:00+09:00",
+      "canonical_url": "https://www.khan.co.kr/article/202605141826001",
+      "canonical_url_hash": "9a2687971f4a2169da5b83db",
       "feed_category": "supplemental",
       "feed_name": "google-news-유상증자 정정신고서 금감원",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiWkFVX3lxTE9YMnJIazFEVGFBQi1hc3A0S0J6azNweXJCWllmUHg0TUZ5djlueGZEb2p1TjVHMkhiS3NEaUVzT1RyUGs0RXhUQW5xYmZiLTctcUZ3NWhFYXlTZ9IBX0FVX3lxTE9oOU9jMTlJenJmWW12QWZodTdLYWF5ZFhBbmR1eEg3YjVxSGhwMlF1dUIya2FfY05wYVlTUVJvckNzYUx2bTUxSGlDYXFNXzBaWTFiandfV3Rhb3NsdWRv?oc=5",
+      "image_candidates": [
+        "https://img.khan.co.kr/news/2026/05/14/news-p.v1.20260407.1823af0d134b4d46b4931d16f93c46cc_P1.png",
+        "https://img.khan.co.kr/newsletter/c/300x200/195403/2026/3383041/20260512093155_9264.jpg",
+        "https://img.khan.co.kr/news/2026/05/14/news-p.v1.20260514.a67e80b058fc4be9bd9fb9f2274b316d_P1.jpg",
+        "https://img.khan.co.kr/news/2026/05/13/l_2026051401000333100036461.jpg",
+        "https://img.khan.co.kr/ranking/khan/mobile/MAInteractive/1268_1776719186_gu364pO6G0rAtUXl.jpg",
+        "https://img.khan.co.kr/news/c/180x120/2026/05/14/news-p.v1.20260512.c666961e1b0946cd9e77f679a55707a1_P1.jpg",
+        "https://img.khan.co.kr/news/c/180x120/2026/05/13/news-p.v1.20260511.168eed2a8e0e4d77906fcff318d61240_P1.jpg"
+      ],
+      "image_url": "https://img.khan.co.kr/news/2026/05/14/news-p.v1.20260407.1823af0d134b4d46b4931d16f93c46cc_P1.png",
       "normalized_title": "두 차례 반려 한화솔루션 유상증자 관련 정정신고서 제출",
       "priority_level": "normal",
       "priority_reasons": [
@@ -179913,16 +180123,16 @@
     "2026-04-29",
     "2026-04-30"
   ],
-  "last_google_news_decode_at": "2026-05-15T05:07:45.008339+09:00",
+  "last_google_news_decode_at": "2026-05-15T06:48:39.669984+09:00",
   "last_run_at": "2026-05-15T05:16:27.088004+09:00",
   "pending_clusters": [
     {
       "article_count": 1,
       "articles": [
         {
-          "article_published_at": null,
-          "canonical_url": "https://news.google.com/rss/articles/CBMiWkFVX3lxTE9YMnJIazFEVGFBQi1hc3A0S0J6azNweXJCWllmUHg0TUZ5djlueGZEb2p1TjVHMkhiS3NEaUVzT1RyUGs0RXhUQW5xYmZiLTctcUZ3NWhFYXlTZ9IBX0FVX3lxTE9oOU9jMTlJenJmWW12QWZodTdLYWF5ZFhBbmR1eEg3YjVxSGhwMlF1dUIya2FfY05wYVlTUVJvckNzYUx2bTUxSGlDYXFNXzBaWTFiandfV3Rhb3NsdWRv?oc=5",
-          "canonical_url_hash": "ba326f3389b98b2fe48e38a3",
+          "article_published_at": "2026-05-14T18:26:00+09:00",
+          "canonical_url": "https://www.khan.co.kr/article/202605141826001",
+          "canonical_url_hash": "9a2687971f4a2169da5b83db",
           "clean_title": "두 차례 반려 한화솔루션, 유상증자 관련 정정신고서 제출",
           "company_candidates": [
             "한화",
@@ -179933,8 +180143,18 @@
           "feed_name": "google-news-유상증자 정정신고서 금감원",
           "feed_published_at": "2026-05-14T18:26:00+09:00",
           "feed_updated_at": "2026-05-14T18:26:00+09:00",
-          "image_candidates": [],
-          "image_url": null,
+          "google_news_decoded": true,
+          "google_news_url": "https://news.google.com/rss/articles/CBMiWkFVX3lxTE9YMnJIazFEVGFBQi1hc3A0S0J6azNweXJCWllmUHg0TUZ5djlueGZEb2p1TjVHMkhiS3NEaUVzT1RyUGs0RXhUQW5xYmZiLTctcUZ3NWhFYXlTZ9IBX0FVX3lxTE9oOU9jMTlJenJmWW12QWZodTdLYWF5ZFhBbmR1eEg3YjVxSGhwMlF1dUIya2FfY05wYVlTUVJvckNzYUx2bTUxSGlDYXFNXzBaWTFiandfV3Rhb3NsdWRv?oc=5",
+          "image_candidates": [
+            "https://img.khan.co.kr/news/2026/05/14/news-p.v1.20260407.1823af0d134b4d46b4931d16f93c46cc_P1.png",
+            "https://img.khan.co.kr/newsletter/c/300x200/195403/2026/3383041/20260512093155_9264.jpg",
+            "https://img.khan.co.kr/news/2026/05/14/news-p.v1.20260514.a67e80b058fc4be9bd9fb9f2274b316d_P1.jpg",
+            "https://img.khan.co.kr/news/2026/05/13/l_2026051401000333100036461.jpg",
+            "https://img.khan.co.kr/ranking/khan/mobile/MAInteractive/1268_1776719186_gu364pO6G0rAtUXl.jpg",
+            "https://img.khan.co.kr/news/c/180x120/2026/05/14/news-p.v1.20260512.c666961e1b0946cd9e77f679a55707a1_P1.jpg",
+            "https://img.khan.co.kr/news/c/180x120/2026/05/13/news-p.v1.20260511.168eed2a8e0e4d77906fcff318d61240_P1.jpg"
+          ],
+          "image_url": "https://img.khan.co.kr/news/2026/05/14/news-p.v1.20260407.1823af0d134b4d46b4931d16f93c46cc_P1.png",
           "link": "https://news.google.com/rss/articles/CBMiWkFVX3lxTE9YMnJIazFEVGFBQi1hc3A0S0J6azNweXJCWllmUHg0TUZ5djlueGZEb2p1TjVHMkhiS3NEaUVzT1RyUGs0RXhUQW5xYmZiLTctcUZ3NWhFYXlTZ9IBX0FVX3lxTE9oOU9jMTlJenJmWW12QWZodTdLYWF5ZFhBbmR1eEg3YjVxSGhwMlF1dUIya2FfY05wYVlTUVJvckNzYUx2bTUxSGlDYXFNXzBaWTFiandfV3Rhb3NsdWRv?oc=5",
           "low_patterns": [],
           "normalized_title": "두 차례 반려 한화솔루션 유상증자 관련 정정신고서 제출",
@@ -179990,7 +180210,7 @@
       "relevance_level": "medium",
       "representative_title": "두 차례 반려 한화솔루션, 유상증자 관련 정정신고서 제출",
       "representative_title_normalized": "두 차례 반려 한화솔루션 유상증자 관련 정정신고서 제출",
-      "representative_url": "https://news.google.com/rss/articles/CBMiWkFVX3lxTE9YMnJIazFEVGFBQi1hc3A0S0J6azNweXJCWllmUHg0TUZ5djlueGZEb2p1TjVHMkhiS3NEaUVzT1RyUGs0RXhUQW5xYmZiLTctcUZ3NWhFYXlTZ9IBX0FVX3lxTE9oOU9jMTlJenJmWW12QWZodTdLYWF5ZFhBbmR1eEg3YjVxSGhwMlF1dUIya2FfY05wYVlTUVJvckNzYUx2bTUxSGlDYXFNXzBaWTFiandfV3Rhb3NsdWRv?oc=5",
+      "representative_url": "https://www.khan.co.kr/article/202605141826001",
       "sequence": 29,
       "status": "pending",
       "theme_group": "capital_raise_disclosure",
@@ -216832,7 +217052,6 @@
     "049d72ae49cf919ad08a7b0a",
     "0521b5029e5a53abc89eb874",
     "05e83a1280fd8961301f0290",
-    "06535f62eb6082840ecd3ab2",
     "089093664af3e07910841077",
     "08d0d307e409d182660be4a9",
     "08fa0b4840cc127760410f0e",
@@ -216868,7 +217087,6 @@
     "106016751c2306b944cddb7a",
     "11a59f881c5c89f0ff9747c7",
     "11d9218e96b7f1ea5c4141c1",
-    "12c04f7e3b969425afa2ffe9",
     "13339e7258f5ef52ec1a2b0b",
     "14b5662f9b604ba4ed852125",
     "14ec7b6052fbd941cc6df004",
@@ -216931,7 +217149,6 @@
     "2ac56a051751ff0de0d03a0f",
     "2b259866d4ae8ee37bac8a44",
     "2b99c44ee1c2ca6d9bdf9735",
-    "2bf6a183d7aead97793a64cf",
     "2c7e9d121fee7e90cb18ea8c",
     "2ca9513f734471d00c9e6e1a",
     "2ca9a1dffd821a8f7448d4c7",
@@ -216940,7 +217157,6 @@
     "2e09a3aa186672723742e7af",
     "2e0ed4f53413dc1bfc3345fa",
     "2e3091ceeedc1fd0f599b3e2",
-    "2f2ab666a90628f87ad72fc6",
     "2f921e69584dbde556f5ed96",
     "2fb2ce16e4690305e1947068",
     "3017561595249f89d9ecb130",
@@ -216974,19 +217190,16 @@
     "3b5facbe3f0c02131d803b48",
     "3b86c1270b1bf80b7b8ec7ff",
     "3bac87b503d68f119abbcbae",
-    "3bafb7c85a2278b7a319911d",
     "3bcb775f4a4d32bf7c939fac",
     "3c02fb6f9672e59f8de8d35d",
     "3ca91227b76640ee6fca0d84",
     "3cca6f06136fcccc2e5cc4b3",
     "3d97ce49fb57f9ddd6eff5cb",
     "3df50807f7825e53af7ec9d8",
-    "3df5f814b7351317c4357e98",
     "3e23555b72f1726f93eb5e18",
     "3e4cd6867a3c63dfbfc0df27",
     "3e569fcc16a80353142e26e3",
     "3ea202e2f1a4b474a895ce49",
-    "3ec925ade63d87c754fe8c64",
     "3f0bccf39ff39ce62702606e",
     "3f2dc044c773797e8d40b8cc",
     "3f3b6f0201679a774cd32acc",
@@ -217017,7 +217230,6 @@
     "47de9d8b36387447d4250eed",
     "482b9fa64e541daa1a64a92a",
     "489e4dfaa0a47c6a04eeac33",
-    "48e9cf482d9ef7085c2c9d82",
     "498073d201a5a19fc9dc239e",
     "49b6a67edc3537bb7c24729d",
     "4a1c77e2e8f0c48c7a347f88",
@@ -217029,7 +217241,6 @@
     "4b49a21fdfdec0d1b426faec",
     "4c65f99dd33229bc1dc5c094",
     "4d274b1eb8f540d1b9ba1625",
-    "4e214bfc73cfdd442fe16658",
     "4e7880e243de36a54665de04",
     "4e8e58ae63aa92551b1944cb",
     "4e93a3490a859b92c32a4d38",
@@ -217080,7 +217291,6 @@
     "5d484cefbd0e9c0135772c3e",
     "5d5765fe3302b1a1e9ed41cf",
     "5d7fa8199d8205efadc60d6d",
-    "5dba0eeb04dbcd3fc9373092",
     "5de4abd4721ff95f8851c6df",
     "5e755ceb4d9df071f1ad8084",
     "5e7a0dd8eae881eaffd1ae3b",
@@ -217106,7 +217316,6 @@
     "66182454fc60f3203f3df887",
     "661c1076fd9ee3e84baaa068",
     "66ab9266e65065027e37118f",
-    "675223abfd16f1b335d49836",
     "675d8f770aba78cd01e36e0a",
     "679ea8e652f729f829a591b0",
     "67a3c141a9be299a221f43de",
@@ -217139,12 +217348,9 @@
     "7002955491faf1e6e55c3884",
     "708f543a41103d501c26a9a1",
     "70d7233d4d052c7bac545c97",
-    "712548b410e4c3e7a4cfc1da",
     "71bfaf7f34c8cae8cbe889c8",
-    "7270428ac956bfababe39c7a",
     "7286fdada51522cb3507d9cb",
     "73459ea774ad21c24165a012",
-    "747a0f5c8b56e03b79b8793d",
     "74b7b5f03ea16b1f606f0042",
     "750af7bfffec8d2b91c56338",
     "75454fbcad322e365639c52e",
@@ -217172,7 +217378,6 @@
     "7e057410e358cadff9dc5685",
     "7e5704651cc0de91c3ed85c2",
     "7e630cc2d6507646f64eb327",
-    "7e7af6978c285b1044579875",
     "7f6d339ef00c768eb6258b40",
     "7fc6b3054980f4e221c7b32f",
     "7fd43019118f06eb940adc63",
@@ -217224,7 +217429,6 @@
     "92eafba63acab035e512cb42",
     "930126a12b3f50d192fa1958",
     "9380f9c8fcf092fa18778d86",
-    "939a3e4f36334cbac2860495",
     "93a88e01b0398df922bc5c0b",
     "93d7659ff04b65ee22f77d11",
     "93ed51987f110c3fa31a105a",
@@ -217236,7 +217440,6 @@
     "96542ad956bcad7e2db4af23",
     "968ae806cb652e5dff14cc17",
     "9694e5cbf7af457c5a7c73ea",
-    "96a96ef847ac99d8977ec026",
     "96f4d7c14544b95abd08a636",
     "96fd387a4489994874dfed32",
     "97428e75dd597c15813dd150",
@@ -217246,13 +217449,13 @@
     "99881c8da37bddd98024c1dc",
     "99cb2f39a7e3253b4231a44f",
     "99cfa2def44ab510ad3aaf9e",
+    "9a2687971f4a2169da5b83db",
     "9a47088b0ef7470a072915e8",
     "9ae10703a46d022baee24dec",
     "9b9ff2417adb7615646fa131",
     "9c476e248a1eeae39ab0cc51",
     "9d3ff56be2e61fc001196104",
     "9ddc5340c7511df78195695b",
-    "9ddfec020ece6d6f87f53bf1",
     "9de522b38eff7c48acf61f62",
     "9deb0cc841c3779fb8c84723",
     "9debb6684b56bb907eaa3553",
@@ -217268,7 +217471,6 @@
     "a0c21bb22e1ba75551a2d7c3",
     "a0d8016409c3d7955ac12719",
     "a108686e0ed1361011b73a20",
-    "a268189bf46d7cb4221558b2",
     "a46bd8a3e01aef8cf4fa9d47",
     "a4be358e20ce3e0304699780",
     "a4c00c55d307fdd360a6b102",
@@ -217327,14 +217529,12 @@
     "b9b2ddd947c7da5b8ca9df2d",
     "b9e4250121bb744cebb6ec75",
     "b9f79f338a98333b938200f5",
-    "ba326f3389b98b2fe48e38a3",
     "bad116fc38b682131776fefe",
     "bbab73d70e5b7f36ddb51ef0",
     "bbc9f34a50ed88d8f16fd31d",
     "bc1778bd8619385e6b25a4d5",
     "bc21e5510b4e379bea8d4b13",
     "bc43aa455f9255c4dbb02e8d",
-    "bc957d8c27d970ad666cb09e",
     "bc9ca204af59c6cfdaea9bd3",
     "bd0b05a1ce3faf4a435fb9a0",
     "bd102df7ac322cfbd740b972",
@@ -217348,7 +217548,6 @@
     "bf53bafeebfe081f79a9d467",
     "c010e0557feed4a9141921c5",
     "c0242aeffb32ab3a92bc6915",
-    "c052c52b28318e3486f7bc7c",
     "c074c47f83d9453ad2ce2a33",
     "c10706737edd01bb8886ee6a",
     "c15400b357201acdafcf6481",
@@ -217377,7 +217576,6 @@
     "c7da6f2c401ecff20cd63a24",
     "c7e541b9961191220ef033f0",
     "c7f7c821ef95b17127d65ed3",
-    "c7fbfe2067a7e9c6bdf2fa12",
     "c87028f4eb6a054b982ee009",
     "c8c6850a2d01aa60a0de50c2",
     "c934228b362227310a7ad7fa",
@@ -217440,6 +217638,7 @@
     "dc9dd4f5f57e148e7850d754",
     "dca6f38df2bf75cfc86b225a",
     "dd2e6e64df849a6129059b35",
+    "dd9233c922a9ecdf8bb54008",
     "ddd62023dae710ca047be372",
     "de2bcf230730b72baa9f50dc",
     "de36477bc8232f464de0e971",
