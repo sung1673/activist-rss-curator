@@ -275,6 +275,74 @@ def test_minority_shareholder_theme_requires_company_match(config, now) -> None:
     assert len(state["pending_clusters"]) == 2
 
 
+def test_korea_zinc_minority_shareholder_group_controversy_clusters(config, now) -> None:  # type: ignore[no-untyped-def]
+    state = {"pending_clusters": [], "published_clusters": []}
+    articles = [
+        make_article(
+            "고려아연 비판 소액주주 단체, 실체 논란 확산",
+            "https://example.com/korea-zinc-minority-1",
+            summary="고려아연 소액주주 단체의 실체와 대표성 논란이 확산됐다",
+            relevance_level="high",
+        ),
+        make_article(
+            "기자와 접촉 금지 사전 지침…고려아연 소액주주 단체 배후설 논란",
+            "https://example.com/korea-zinc-minority-2",
+            summary="고려아연 소액주주 단체를 둘러싼 배후설과 사전 지침 논란이 제기됐다",
+            relevance_level="high",
+        ),
+        make_article(
+            "기자랑 말 섞지 말라...고려아연 소액주주 단체, 배후조종 의혹 커진 이유",
+            "https://example.com/korea-zinc-minority-3",
+            summary="고려아연 소액주주 단체 관련 배후조종 의혹이 커졌다는 보도",
+            relevance_level="high",
+        ),
+        make_article(
+            "고려아연 소액주주 단체, 단체명 혼용에 대표성 논란",
+            "https://example.com/korea-zinc-minority-4",
+            summary="고려아연 소액주주 단체의 단체명 혼용과 대표성 논란이 보도됐다",
+            relevance_level="high",
+        ),
+    ]
+
+    cluster_articles(articles, state, config, now)
+
+    assert len(state["pending_clusters"]) == 1
+    cluster = state["pending_clusters"][0]
+    assert cluster["article_count"] == 4
+    assert "소액주주단체논란" in cluster["keywords"]
+
+
+def test_hanwha_solution_rights_issue_refiling_clusters(config, now) -> None:  # type: ignore[no-untyped-def]
+    state = {"pending_clusters": [], "published_clusters": []}
+    articles = [
+        make_article(
+            "한화솔루션, 1.8조 유증 또 줄이진 않아…금감원 제동 뒤 재추진",
+            "https://example.com/hanwha-rights-1",
+            summary="한화솔루션이 금감원 제동 이후 유상증자 신고서를 다시 추진했다",
+            relevance_level="medium",
+        ),
+        make_article(
+            "두 차례 반려 한화솔루션, 유상증자 관련 정정신고서 제출",
+            "https://example.com/hanwha-rights-2",
+            summary="한화솔루션이 유상증자 관련 정정신고서를 제출했다",
+            relevance_level="medium",
+        ),
+        make_article(
+            "무겁게 받아들였다…한화솔루션, 금감원 2차 정정 반영 유증 신고서 다시 제출",
+            "https://example.com/hanwha-rights-3",
+            summary="한화솔루션이 금감원 2차 정정 요구를 반영해 유증 신고서를 다시 제출했다",
+            relevance_level="medium",
+        ),
+    ]
+
+    cluster_articles(articles, state, config, now)
+
+    assert len(state["pending_clusters"]) == 1
+    cluster = state["pending_clusters"][0]
+    assert cluster["article_count"] == 3
+    assert "유증정정" in cluster["keywords"]
+
+
 def test_same_company_control_dispute_requires_specific_story_match(config, now) -> None:  # type: ignore[no-untyped-def]
     state = {"pending_clusters": [], "published_clusters": []}
     articles = [

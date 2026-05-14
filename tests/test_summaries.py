@@ -835,6 +835,97 @@ def test_digest_does_not_group_broad_same_company_dispute_titles(config, now) ->
     assert [len(group) for group in groups] == [1, 1, 1]
 
 
+def test_digest_groups_korea_zinc_minority_shareholder_group_controversy(config, now) -> None:  # type: ignore[no-untyped-def]
+    articles = [
+        make_article(
+            "고려아연 비판 소액주주 단체, 실체 논란 확산",
+            "https://example.com/digest-korea-zinc-minority-1",
+            source="Queen 이코노미퀸",
+            published_at="2026-05-15T09:00:00+09:00",
+            summary="고려아연 소액주주 단체의 실체와 대표성 논란이 확산됐다",
+        ),
+        make_article(
+            "기자와 접촉 금지 사전 지침…고려아연 소액주주 단체 배후설 논란",
+            "https://example.com/digest-korea-zinc-minority-2",
+            source="머니투데이",
+            published_at="2026-05-15T09:10:00+09:00",
+            summary="고려아연 소액주주 단체를 둘러싼 배후설과 사전 지침 논란이 제기됐다",
+        ),
+        make_article(
+            "기자랑 말 섞지 말라...고려아연 소액주주 단체, 배후조종 의혹 커진 이유",
+            "https://example.com/digest-korea-zinc-minority-3",
+            source="서울경제",
+            published_at="2026-05-15T09:20:00+09:00",
+            summary="고려아연 소액주주 단체 관련 배후조종 의혹이 커졌다는 보도",
+        ),
+        make_article(
+            "고려아연 소액주주 단체, 단체명 혼용에 대표성 논란",
+            "https://example.com/digest-korea-zinc-minority-4",
+            source="이데일리",
+            published_at="2026-05-15T09:30:00+09:00",
+            summary="고려아연 소액주주 단체의 단체명 혼용과 대표성 논란이 보도됐다",
+        ),
+    ]
+    for article in articles:
+        article["company_candidates"] = ["고려아연"]
+    clusters = [
+        {
+            "representative_title": article["clean_title"],
+            "published_at": article["published_at"],
+            "companies": article["company_candidates"],
+            "articles": [article],
+        }
+        for article in articles
+    ]
+
+    entries = limited_digest_article_entries(clusters, config)["domestic"]
+    groups = group_digest_entries(entries, config)
+
+    assert [len(group) for group in groups] == [4]
+
+
+def test_digest_groups_hanwha_solution_rights_issue_refiling(config, now) -> None:  # type: ignore[no-untyped-def]
+    articles = [
+        make_article(
+            "한화솔루션, 1.8조 유증 또 줄이진 않아…금감원 제동 뒤 재추진",
+            "https://example.com/digest-hanwha-rights-1",
+            source="연합뉴스",
+            published_at="2026-05-15T10:00:00+09:00",
+            summary="한화솔루션이 금감원 제동 이후 유상증자 신고서를 다시 추진했다",
+        ),
+        make_article(
+            "두 차례 반려 한화솔루션, 유상증자 관련 정정신고서 제출",
+            "https://example.com/digest-hanwha-rights-2",
+            source="뉴스핌",
+            published_at="2026-05-15T10:10:00+09:00",
+            summary="한화솔루션이 유상증자 관련 정정신고서를 제출했다",
+        ),
+        make_article(
+            "무겁게 받아들였다…한화솔루션, 금감원 2차 정정 반영 유증 신고서 다시 제출",
+            "https://example.com/digest-hanwha-rights-3",
+            source="매일경제",
+            published_at="2026-05-15T10:20:00+09:00",
+            summary="한화솔루션이 금감원 2차 정정 요구를 반영해 유증 신고서를 다시 제출했다",
+        ),
+    ]
+    for article in articles:
+        article["company_candidates"] = ["한화솔루션"]
+    clusters = [
+        {
+            "representative_title": article["clean_title"],
+            "published_at": article["published_at"],
+            "companies": article["company_candidates"],
+            "articles": [article],
+        }
+        for article in articles
+    ]
+
+    entries = limited_digest_article_entries(clusters, config)["domestic"]
+    groups = group_digest_entries(entries, config)
+
+    assert [len(group) for group in groups] == [3]
+
+
 def test_ai_story_judge_can_block_digest_grouping(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(
         "curator.summaries.judge_same_story",

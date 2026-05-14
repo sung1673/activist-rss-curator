@@ -165,6 +165,12 @@ DIGEST_GROUP_EVENT_TOKENS = {
     "지정",
     "ipo",
     "코너스톤",
+    "소액주주단체논란",
+    "배후의혹",
+    "단체실체논란",
+    "유증정정",
+    "유증재추진",
+    "금감원정정요구",
 }
 
 DIGEST_GROUP_SPECIFIC_EVENT_TOKENS = {
@@ -214,6 +220,12 @@ DIGEST_GROUP_SPECIFIC_EVENT_TOKENS = {
     "지정",
     "ipo",
     "코너스톤",
+    "소액주주단체논란",
+    "배후의혹",
+    "단체실체논란",
+    "유증정정",
+    "유증재추진",
+    "금감원정정요구",
 }
 
 DIGEST_GROUP_POLICY_EVENT_TOKENS = {
@@ -279,10 +291,38 @@ DIGEST_GROUP_PHRASE_TOKENS = {
     "공정위": ("공정위", "공정거래위원회"),
     "ipo": ("ipo", "기업공개"),
     "코너스톤": ("코너스톤", "cornerstone"),
+    "고려아연": ("고려아연",),
+    "한화솔루션": ("한화솔루션",),
+    "소액주주단체논란": (
+        "소액주주 단체 실체",
+        "소액주주 단체 배후",
+        "소액주주 단체 대표성",
+        "단체명 혼용",
+        "사전 대응지침",
+        "사전 지침",
+        "기자와 접촉 금지",
+        "기자랑 말 섞지 말라",
+    ),
+    "배후의혹": ("배후설", "배후 의혹", "배후조종", "배후 조종", "배후세력"),
+    "단체실체논란": ("실체 논란", "대표성 논란", "단체명 혼용"),
+    "유증정정": (
+        "유증 신고서",
+        "유상증자 관련 정정신고서",
+        "정정신고서 제출",
+        "정정 반영",
+        "정정요구",
+        "정정 요구",
+        "2차 정정",
+        "두 차례 반려",
+    ),
+    "유증재추진": ("재추진", "다시 제출", "일정 공시"),
+    "금감원정정요구": ("금감원 제동", "금감원 2차 정정", "금감원 정정", "금감원 반려"),
 }
 
 DIGEST_GROUP_COMPANY_TOKENS = {
     "삼성전자",
+    "고려아연",
+    "한화솔루션",
 }
 
 OPERATIONAL_SUMMARY_PATTERNS = (
@@ -713,6 +753,19 @@ def digest_tokens_from_text(text: str) -> set[str]:
     for normalized_token, phrases in DIGEST_GROUP_PHRASE_TOKENS.items():
         if any(re.sub(r"\s+", "", phrase.casefold()) in compact_casefolded for phrase in phrases):
             tokens.add(normalized_token)
+    if (
+        "고려아연" in compact_casefolded
+        and "소액주주" in compact_casefolded
+        and "단체" in compact_casefolded
+        and any(term in compact_casefolded for term in ("실체", "배후", "대표성", "혼용", "지침", "조종", "의혹"))
+    ):
+        tokens.update({"고려아연", "소액주주단체논란", "단체실체논란"})
+    if (
+        "한화솔루션" in compact_casefolded
+        and any(term in compact_casefolded for term in ("유상증자", "유증"))
+        and any(term in compact_casefolded for term in ("정정신고서", "정정", "반려", "제동", "금감원", "재추진", "신고서", "다시제출"))
+    ):
+        tokens.update({"한화솔루션", "유증정정", "금감원정정요구"})
     return tokens
 
 
