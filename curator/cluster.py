@@ -8,6 +8,7 @@ from rapidfuzz import fuzz
 from .dates import datetime_to_iso, hours_between, parse_datetime
 from .normalize import stable_hash
 from .relevance import topic_keywords_for_article
+from .story_signature import event_tokens_for_text, story_signature_decision
 from .story_judge import judge_same_story, judgement_allows_same_story, story_judge_auto_accept_title_score
 
 
@@ -110,14 +111,6 @@ BROAD_CLUSTER_KEYWORDS = {
     "activist investor",
     "corporate governance",
     "shareholder rights",
-}
-CLUSTER_EVENT_PHRASE_TOKENS = {
-    "배후의혹": ("배후설", "배후 의혹", "배후조종", "배후 조종", "배후세력"),
-    "단체실체논란": ("실체 논란", "대표성 논란", "단체명 혼용"),
-    "집단소송": ("집단소송", "집단 소송"),
-    "손해배상": ("손해배상", "손해 배상", "손배"),
-    "유증정정": ("유증 신고서", "유상증자 관련 정정신고서", "정정신고서 제출", "정정 반영", "정정요구", "정정 요구", "2차 정정", "두 차례 반려"),
-    "유증재추진": ("재추진", "다시 제출", "일정 공시"),
 }
 THEME_GROUPS = [
     (
@@ -335,33 +328,7 @@ def extract_company_candidates(text: str) -> list[str]:
 
 
 def event_keywords_for_clustering(text: str) -> list[str]:
-    haystack = text.casefold()
-    compact_haystack = re.sub(r"\s+", "", haystack)
-    keywords: list[str] = []
-    for keyword, phrases in CLUSTER_EVENT_PHRASE_TOKENS.items():
-        if any(phrase.casefold() in haystack for phrase in phrases):
-            keywords.append(keyword)
-
-    strike_terms = ("파업", "파업시", "파업 시")
-    litigation_terms = ("집단소송", "집단 소송", "소송", "손해배상", "손해 배상", "손배")
-    if any(term.casefold() in haystack for term in strike_terms) and any(
-        term.casefold() in haystack for term in litigation_terms
-    ):
-        keywords.append("파업소송")
-    if (
-        "고려아연" in compact_haystack
-        and "소액주주" in compact_haystack
-        and "단체" in compact_haystack
-        and any(term in compact_haystack for term in ("실체", "배후", "대표성", "혼용", "지침", "조종", "의혹"))
-    ):
-        keywords.extend(["소액주주단체논란", "단체실체논란"])
-    if (
-        "한화솔루션" in compact_haystack
-        and any(term in compact_haystack for term in ("유상증자", "유증"))
-        and any(term in compact_haystack for term in ("정정신고서", "정정", "반려", "제동", "금감원", "재추진", "신고서", "다시제출"))
-    ):
-        keywords.extend(["유증정정", "금감원정정요구"])
-    return list(dict.fromkeys(keywords))
+    return event_tokens_for_text(text)
 
 
 def extract_theme_groups(text: str, keywords: list[object] | None = None) -> list[str]:
@@ -642,6 +609,19 @@ def can_join_cluster(
         return False
 
     if title_score >= title_threshold and ai_guard_allows_join(article, cluster, config, title_score, "title_similarity"):
+        return True
+
+    signature = story_signature_decision(
+        article.get("normalized_title") or article.get("clean_title") or article.get("title") or "",
+        cluster.get("representative_title_normalized") or cluster.get("representative_title") or "",
+        left_companies=article.get("company_candidates") or [],
+        right_companies=cluster.get("companies") or [],
+        left_event_tokens=article.get("topic_keywords") or [],
+        right_event_tokens=cluster.get("keywords") or [],
+        title_score=title_score,
+        config=config,
+    )
+    if signature.same_story and ai_guard_allows_join(article, cluster, config, title_score, f"story_signature:{signature.reason}"):
         return True
 
     if same_company_and_keyword(article, cluster) and ai_guard_allows_join(article, cluster, config, title_score, "same_company_specific_keyword"):

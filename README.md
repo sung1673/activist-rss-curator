@@ -273,7 +273,7 @@ RSS 본문에는 기사 1건을 한 줄로 표시합니다. rss2tg_bot이 본문
 
 한 실행에서 발행할 cluster가 2개 이상이면 별도 제목줄 없이 요약과 기사 링크만 묶어서 전송합니다. 이 묶음 메시지는 GitHub Models의 `openai/gpt-4.1`을 사용해 2~3개 bullet 요약을 만들고, 국문/영문 기사 링크를 digest처럼 정리합니다. 요약은 `임박`, `부각`, `지속`처럼 짧은 명사형으로 끝나도록 후처리합니다. AI 호출이 실패하면 규칙 기반 fallback 요약으로 계속 발행합니다.
 
-묶음 판단은 규칙 기반을 기본으로 하되, 같은 회사와 넓은 키워드 때문에 애매하게 붙을 수 있는 기사 pair는 GitHub Models를 보수적 심판으로 사용합니다. AI는 `same_story`, `related_but_different`, `different` 중 하나만 판단하며, `same_story`이고 confidence가 기준값 이상일 때만 묶음을 허용합니다. 기본 설정은 실행당 최대 8회만 확인하므로 quota를 과도하게 쓰지 않습니다.
+묶음 판단은 규칙 기반을 기본으로 하되, 제목 유사도뿐 아니라 회사명, 사건 토큰, 규제기관/절차 표현을 함께 보는 story signature를 사용합니다. 자주 반복되는 사건 패턴은 `data/story_rules.yaml`에 추가할 수 있으며, 운영 메모는 `docs/story-grouping.md`에 정리되어 있습니다. 같은 회사와 넓은 키워드 때문에 애매하게 붙을 수 있는 기사 pair는 GitHub Models를 보수적 심판으로 사용합니다. AI는 `same_story`, `related_but_different`, `different` 중 하나만 판단하며, `same_story`이고 confidence가 기준값 이상일 때만 묶음을 허용합니다. 기본 설정은 실행당 최대 8회만 확인하므로 quota를 과도하게 쓰지 않습니다.
 
 중복으로 걸러진 기사는 시간당 업데이트에 따로 표시하지 않습니다. 중복 기사 기록은 state에 남겨 두고, 데일리 리뷰에서는 별도 `중복 기사` 섹션을 만들지 않고 유사한 일반 기사 묶음 안에 함께 표시합니다.
 

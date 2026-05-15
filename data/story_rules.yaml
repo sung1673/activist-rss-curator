@@ -1,0 +1,68 @@
+# 같은 사건 묶음 후보를 찾기 위한 운영 규칙입니다.
+# Python 코드를 수정하지 않고 자주 반복되는 사건 패턴을 보강할 때 사용합니다.
+rules:
+  - id: minority_shareholder_group_controversy
+    tokens:
+      - 소액주주단체논란
+      - 단체실체논란
+    require_all:
+      - 소액주주
+      - 단체
+    require_any_groups:
+      - [실체, 배후, 대표성, 혼용, 지침, 조종, 의혹]
+
+  - id: rights_issue_refiling_after_regulator_review
+    tokens:
+      - 유증정정
+      - 금감원정정요구
+    require_any_groups:
+      - [유상증자, 유증]
+      - [정정신고서, 정정, 반려, 제동, 금감원, 재추진, 신고서, 다시제출]
+
+  - id: strike_litigation
+    tokens:
+      - 파업소송
+    require_any_groups:
+      - [파업, 파업시, "파업 시"]
+      - [집단소송, "집단 소송", 소송, 손해배상, "손해 배상", 손배]
+
+  - id: buyback_or_treasury_share_return_disclosure
+    tokens:
+      - 자사주환원공시
+    require_any_groups:
+      - [자사주, 자기주식]
+      - [소각, 매입, 취득]
+      - [결정, 공시, 발표]
+
+  - id: delisting_or_listing_eligibility_review
+    tokens:
+      - 상폐심사
+    require_any_groups:
+      - [상장폐지, 상폐, 상장적격성]
+      - [실질심사, 거래정지, 개선기간]
+
+phrase_tokens:
+  배후의혹:
+    - 배후설
+    - 배후 의혹
+    - 배후조종
+    - 배후 조종
+    - 배후세력
+  단체실체논란:
+    - 실체 논란
+    - 대표성 논란
+    - 단체명 혼용
+  유증정정:
+    - 유증 신고서
+    - 유상증자 관련 정정신고서
+    - 정정신고서 제출
+    - 정정 반영
+    - 정정요구
+    - 정정 요구
+    - 2차 정정
+    - 두 차례 반려
+  금감원정정요구:
+    - 금감원 제동
+    - 금감원 2차 정정
+    - 금감원 정정
+    - 금감원 반려

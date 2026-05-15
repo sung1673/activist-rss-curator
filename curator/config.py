@@ -68,6 +68,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "normal": 25,
         },
     },
+    "story_rules": {
+        "path": "data/story_rules.yaml",
+    },
     "archive": {
         "enabled": True,
         "path": "data/archive",

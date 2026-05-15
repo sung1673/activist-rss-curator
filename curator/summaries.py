@@ -33,6 +33,13 @@ from .telegram_publisher import (
     unsent_telegram_clusters,
 )
 from .story_judge import judge_same_story, judgement_allows_same_story, story_judge_auto_accept_title_score
+from .story_signature import (
+    contextual_event_token_universe,
+    event_tokens_for_text,
+    specific_event_token_universe,
+    story_rule_token_universe,
+    story_signature_decision,
+)
 
 
 DIGEST_GROUP_STOPWORDS = {
@@ -762,6 +769,7 @@ def digest_tokens_from_text(text: str) -> set[str]:
     for normalized_token, phrases in DIGEST_GROUP_PHRASE_TOKENS.items():
         if any(re.sub(r"\s+", "", phrase.casefold()) in compact_casefolded for phrase in phrases):
             tokens.add(normalized_token)
+    tokens.update(token.casefold() for token in event_tokens_for_text(raw_text))
     if (
         "고려아연" in compact_casefolded
         and "소액주주" in compact_casefolded
@@ -826,11 +834,11 @@ def digest_primary_title_token(entry: dict[str, object]) -> str:
 
 def digest_event_tokens(entry: dict[str, object]) -> set[str]:
     tokens = {str(token).casefold() for token in set(entry.get("tokens") or []) | set(entry.get("title_tokens") or [])}
-    return tokens & DIGEST_GROUP_EVENT_TOKENS
+    return tokens & (DIGEST_GROUP_EVENT_TOKENS | {token.casefold() for token in story_rule_token_universe()})
 
 
 def digest_specific_event_tokens(entry: dict[str, object]) -> set[str]:
-    return digest_event_tokens(entry) & DIGEST_GROUP_SPECIFIC_EVENT_TOKENS
+    return digest_event_tokens(entry) & (DIGEST_GROUP_SPECIFIC_EVENT_TOKENS | {token.casefold() for token in specific_event_token_universe()})
 
 
 def digest_entries_share_primary_event(left: dict[str, object], right: dict[str, object]) -> bool:
@@ -854,7 +862,18 @@ def digest_entries_share_named_event(left: dict[str, object], right: dict[str, o
         return True
     if len(policy_overlap) >= 2 and title_score >= 42:
         return True
-    contextual_overlap = specific_overlap & DIGEST_GROUP_CONTEXTUAL_EVENT_TOKENS
+    signature = story_signature_decision(
+        left.get("title") or "",
+        right.get("title") or "",
+        left_companies=digest_company_tokens(left),
+        right_companies=digest_company_tokens(right),
+        left_event_tokens=digest_event_tokens(left),
+        right_event_tokens=digest_event_tokens(right),
+        title_score=title_score,
+    )
+    if signature.same_story:
+        return True
+    contextual_overlap = specific_overlap & (DIGEST_GROUP_CONTEXTUAL_EVENT_TOKENS | {token.casefold() for token in contextual_event_token_universe()})
     if company_overlap and len(contextual_overlap) >= 2 and title_score >= 40:
         return True
     if company_overlap and specific_overlap and len(event_overlap) >= 2 and title_score >= 50:
