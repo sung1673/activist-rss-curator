@@ -21,6 +21,7 @@ from .normalize import canonical_url_hash
 from .rss_writer import article_link, article_source_label, compact_text, display_article_title
 from .remote_api import sync_report_to_remote_api
 from .state import load_state
+from .story_review import build_story_review, write_story_review_files
 from .telegram_sources import risk_flags_for_text
 from .summaries import (
     digest_article_identity_keys,
@@ -45,7 +46,15 @@ from .telegram_publisher import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FEED_DIR = Path("public") / "feed"
-NON_DATE_REPORT_PAGES = {"latest.html", "index.html", "telegram.html", "workbench.html", "search.html", "telegram-admin.html"}
+NON_DATE_REPORT_PAGES = {
+    "latest.html",
+    "index.html",
+    "telegram.html",
+    "workbench.html",
+    "search.html",
+    "telegram-admin.html",
+    "story-review.html",
+}
 REPORT_CATEGORY_ORDER = [
     "주주행동·경영권",
     "밸류업·주주환원",
@@ -5816,6 +5825,7 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
     )
     telegram_html = render_telegram_daily_html(stories, state, config, start_at, end_at, date_id, report_url)
     search_html = render_search_html(config, start_at, end_at, date_id, report_url)
+    story_review = build_story_review(stories, config, start_at, end_at, date_id)
     return {
         "config": config,
         "date_id": date_id,
@@ -5826,6 +5836,7 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
         "html": html,
         "telegram_html": telegram_html,
         "search_html": search_html,
+        "story_review": story_review,
         "report_url": report_url,
         "stats": report_stats(stories, clusters, duplicate_records),
         "clusters": clusters,
@@ -5855,13 +5866,18 @@ def write_report_files(report: dict[str, object], root: Path | None = None) -> l
     if workbench_path.exists():
         workbench_path.unlink()
     search_path.write_text(normalize_generated_html(str(report.get("search_html") or "")), encoding="utf-8", newline="\n")
+    review_paths = write_story_review_files(
+        report.get("story_review") if isinstance(report.get("story_review"), dict) else {},
+        project_root,
+        logo_html=bside_logo_html("bside-logo--top"),
+    )
     variant_dir = feed_dir / "variants"
     if variant_dir.exists():
         for stale_path in variant_dir.glob("*.html"):
             stale_path.unlink()
     index_path.write_text(render_report_index(feed_dir), encoding="utf-8", newline="\n")
     refreshed_paths = refresh_existing_report_archive_links(feed_dir, date_id)
-    return [dated_path, latest_path, telegram_path, search_path, index_path, *refreshed_paths]
+    return [dated_path, latest_path, telegram_path, search_path, index_path, *review_paths, *refreshed_paths]
 
 
 def render_report_archive_links(feed_dir: Path, current_date_id: str, *, link_prefix: str = "", max_items: int = 20) -> str:

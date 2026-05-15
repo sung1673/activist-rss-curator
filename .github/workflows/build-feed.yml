@@ -138,7 +138,7 @@ jobs:
               cat changed_files.txt
 
               collection_regex='^(config\.yaml|requirements\.txt|data/priority_overrides\.yaml|curator/(ai|archive|cluster|config|dates|dedupe|fetch|main|normalize|priority|relevance|remote_api|rss_writer|state|story_judge|summaries|telegram_dashboard|telegram_publisher|telegram_resend|telegram_resend_digest|telegram_smoke_test|telegram_sources)\.py|tests/(conftest|test_archive|test_cluster|test_config|test_dates|test_dedupe|test_fetch|test_main|test_normalize|test_priority|test_relevance|test_remote_api|test_rss_writer|test_state|test_story_judge|test_summaries|test_telegram_dashboard|test_telegram_publisher|test_telegram_resend_digest|test_telegram_sources)\.py)$'
-              page_regex='^(\.github/workflows/build-feed\.yml|curator/daily_report\.py|tests/test_daily_report\.py|public/404\.html)$'
+              page_regex='^(\.github/workflows/build-feed\.yml|curator/(daily_report|story_review)\.py|tests/(test_daily_report|test_story_review)\.py|public/404\.html)$'
 
               if grep -Eq "$collection_regex" changed_files.txt; then
                 full_run=true
@@ -201,6 +201,8 @@ jobs:
         env:
           CURATOR_DAILY_REPORT_WRITE_ONLY: "1"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STORY_REVIEW_ACCESS_TOKEN: ${{ secrets.STORY_REVIEW_ACCESS_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
           ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
           ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
@@ -263,3 +265,11 @@ jobs:
           ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
           ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
         run: python -m curator.daily_report
+
+      - name: Send story review message
+        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 21 * * *') || (github.event_name == 'workflow_dispatch' && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]')) }}
+        env:
+          STORY_REVIEW_ACCESS_TOKEN: ${{ secrets.STORY_REVIEW_ACCESS_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m curator.story_review send

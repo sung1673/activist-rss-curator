@@ -353,6 +353,12 @@ priority:
 story_rules:
   path: "data/story_rules.yaml"
 
+story_review:
+  enabled: true
+  min_score: 72
+  max_candidates: 12
+  send_empty: false
+
 archive:
   enabled: true
   path: "data/archive"

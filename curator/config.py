@@ -71,6 +71,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "story_rules": {
         "path": "data/story_rules.yaml",
     },
+    "story_review": {
+        "enabled": True,
+        "min_score": 72,
+        "max_candidates": 12,
+        "send_empty": False,
+    },
     "archive": {
         "enabled": True,
         "path": "data/archive",

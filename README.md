@@ -81,6 +81,7 @@ TELEGRAM_SESSION
 TELEGRAM_SESSION_STRING
 ACTIVIST_API_URL
 ACTIVIST_API_SECRET
+STORY_REVIEW_ACCESS_TOKEN
 ```
 
 여러 Google Alerts RSS URL은 쉼표 또는 줄바꿈으로 구분합니다.
@@ -91,6 +92,8 @@ https://www.google.com/alerts/feeds/...
 ```
 
 Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 workflow 파일에 직접 쓰지 말고 `TELEGRAM_BOT_TOKEN` Secret에 저장합니다. 채널 username을 공개해도 괜찮다면 `config.yaml`의 `telegram.chat_id`를 사용할 수 있고, 숨기고 싶다면 `TELEGRAM_CHAT_ID` Secret에 `@channel_username` 또는 numeric chat id를 저장합니다.
+
+`STORY_REVIEW_ACCESS_TOKEN`은 “묶였어야 했는데 분리된 후보” 관리자 페이지 접근 링크에 쓰는 선택 Secret입니다. 설정하지 않으면 workflow가 `TELEGRAM_BOT_TOKEN`에서 별도 review token을 파생해 사용합니다. GitHub Pages는 정적 호스팅이므로 이 token gate는 운영 편의용 접근 제한입니다. 후보 데이터 자체가 민감해지는 경우에는 PHP API에서 token을 서버 측 검증하는 방식으로 분리해야 합니다.
 
 선택적으로 PHP/MySQL 하이브리드 저장소를 사용할 수 있습니다. `ACTIVIST_API_URL`에는 PHP API URL을, `ACTIVIST_API_SECRET`에는 서버 `_private/config.php`와 동일한 HMAC secret을 저장합니다. 이 값이 없으면 기존처럼 `state.json`과 `data/archive`만 사용하며, 값이 있으면 GitHub Actions가 수집 결과와 데일리 리포트 메타데이터를 PHP API로 동기화합니다. DB 비밀번호는 GitHub에 저장하지 않고 PHP 서버의 비공개 config에만 둡니다. 기사 hot row에는 화면·검색·중복 판단에 필요한 scalar 필드만 저장하고, 원본/debug payload는 PHP API의 `article_raw` 테이블에 gzip 압축 형태로 분리 저장합니다.
 
@@ -274,6 +277,8 @@ RSS 본문에는 기사 1건을 한 줄로 표시합니다. rss2tg_bot이 본문
 한 실행에서 발행할 cluster가 2개 이상이면 별도 제목줄 없이 요약과 기사 링크만 묶어서 전송합니다. 이 묶음 메시지는 GitHub Models의 `openai/gpt-4.1`을 사용해 2~3개 bullet 요약을 만들고, 국문/영문 기사 링크를 digest처럼 정리합니다. 요약은 `임박`, `부각`, `지속`처럼 짧은 명사형으로 끝나도록 후처리합니다. AI 호출이 실패하면 규칙 기반 fallback 요약으로 계속 발행합니다.
 
 묶음 판단은 규칙 기반을 기본으로 하되, 제목 유사도뿐 아니라 회사명, 사건 토큰, 규제기관/절차 표현을 함께 보는 story signature를 사용합니다. 자주 반복되는 사건 패턴은 `data/story_rules.yaml`에 추가할 수 있으며, 운영 메모는 `docs/story-grouping.md`에 정리되어 있습니다. 같은 회사와 넓은 키워드 때문에 애매하게 붙을 수 있는 기사 pair는 GitHub Models를 보수적 심판으로 사용합니다. AI는 `same_story`, `related_but_different`, `different` 중 하나만 판단하며, `same_story`이고 confidence가 기준값 이상일 때만 묶음을 허용합니다. 기본 설정은 실행당 최대 8회만 확인하므로 quota를 과도하게 쓰지 않습니다.
+
+매일 데일리 페이지를 생성할 때 `/feed/story-review.html`도 함께 생성합니다. 이 페이지는 데일리에서 서로 다른 이슈 카드로 남았지만 회사명, 사건 토큰, 제목/요약 유사도가 높아 “묶였어야 했을 가능성”이 있는 후보를 보여줍니다. 오전 데일리 발송 workflow가 끝나면 bot이 token 포함 관리자 링크를 채널로 보내며, 페이지에서는 후보별 확인 완료 표시와 `data/story_rules.yaml` 초안 복사를 할 수 있습니다.
 
 중복으로 걸러진 기사는 시간당 업데이트에 따로 표시하지 않습니다. 중복 기사 기록은 state에 남겨 두고, 데일리 리뷰에서는 별도 `중복 기사` 섹션을 만들지 않고 유사한 일반 기사 묶음 안에 함께 표시합니다.
 
