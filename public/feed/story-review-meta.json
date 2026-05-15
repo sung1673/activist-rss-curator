@@ -1,0 +1,51 @@
+{
+  "date_id": "2026-05-15",
+  "generated_at": "2026-05-15T10:28:53.068761+09:00",
+  "start_at": "2026-05-14T10:24:39.267377+09:00",
+  "end_at": "2026-05-15T10:24:39.267377+09:00",
+  "start_label": "2026-05-14 10:24 KST",
+  "end_label": "2026-05-15 10:24 KST",
+  "candidate_count": 1,
+  "candidate_hash": "146b514a5ec204cf",
+  "page_url": "https://news.bside.ai/feed/story-review.html",
+  "candidates": [
+    {
+      "id": "dbd07f629821",
+      "score": 72.7,
+      "left": {
+        "id": "story-17",
+        "title": "KT 이사회, 거버넌스 논란 정면돌파···강령 위반시 퇴출",
+        "summary": "KT 이사회, '거버넌스 논란' 정면돌파···강령 위반시 '퇴출' 뉴스웨이",
+        "category": "밸류업·주주환원",
+        "datetime": "05.14 11:02",
+        "source_line": "NEWSWAY",
+        "link_count": 1,
+        "url": "https://www.newsway.co.kr/news/view?ud=2026051410380481505",
+        "links": [
+          {
+            "source": "NEWSWAY",
+            "title": "KT 이사회, 거버넌스 논란 정면돌파···강령 위반시 퇴출",
+            "url": "https://www.newsway.co.kr/news/view?ud=2026051410380481505"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-18",
+        "title": "[뉴스+]KT, 이사회 독립성 강화 본격화…박윤영 체제서 지배구조 안정화 시험대 - 비즈니스플러스",
+        "summary": "[뉴스+]KT, 이사회 독립성 강화 본격화…'박윤영 체제'서 지배구조 안정화 시험대 비즈니스플러스",
+        "category": "밸류업·주주환원",
+        "datetime": "05.14 10:46",
+        "source_line": "BUSINESSPLUS",
+        "link_count": 1,
+        "url": "https://www.businessplus.kr/news/articleView.html?idxno=111770",
+        "links": [
+          {
+            "source": "BUSINESSPLUS",
+            "title": "[뉴스+]KT, 이사회 독립성 강화 본격화…박윤영 체제서 지배구조 안정화 시험대 - 비즈니스플러스",
+            "url": "https://www.businessplus.kr/news/articleView.html?idxno=111770"
+          }
+        ]
+      }
+    }
+  ]
+}
