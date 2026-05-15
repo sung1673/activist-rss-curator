@@ -97,6 +97,20 @@ def clean_text(value: object) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def text_has_encoding_damage(value: object) -> bool:
+    text = str(value or "")
+    if not text:
+        return False
+    damaged = sum(1 for char in text if char == "\ufffd" or 0xD800 <= ord(char) <= 0xDFFF)
+    if damaged:
+        return True
+    korean = sum(1 for char in text if "\uac00" <= char <= "\ud7a3")
+    cjk = sum(1 for char in text if "\u4e00" <= char <= "\u9fff")
+    if cjk >= 4 and korean == 0 and re.search(r"[\udc00-\udfff]", text):
+        return True
+    return False
+
+
 def compact(value: object, max_chars: int = 96) -> str:
     text = clean_text(value)
     if len(text) <= max_chars:
@@ -231,6 +245,8 @@ def score_story_pair(
     left_title = clean_text(left.get("title"))
     right_title = clean_text(right.get("title"))
     if not left_title or not right_title:
+        return None
+    if text_has_encoding_damage(left.get("title")) or text_has_encoding_damage(right.get("title")):
         return None
 
     title_score = float(fuzz.token_set_ratio(left_title, right_title))

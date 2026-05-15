@@ -8,6 +8,7 @@ from curator.story_review import (
     render_story_review_html,
     story_review_access_token,
     story_review_message,
+    text_has_encoding_damage,
     token_hash,
 )
 
@@ -114,3 +115,22 @@ def test_story_review_message_uses_tokenized_admin_link(monkeypatch) -> None:
     assert "묶음 후보 리뷰" in message
     assert "token=review-token" in message
     assert "관리자 페이지에서 후보 검토" in message
+
+
+def test_story_review_skips_encoding_damaged_titles() -> None:
+    now = datetime(2026, 5, 10, 8, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    damaged = "KT \udcec\uc520\udcec\uad97\udced\uc276"
+    assert text_has_encoding_damage(damaged)
+
+    review = build_story_review(
+        [
+            story(damaged, "NEWSWAY", "https://example.com/a", now),
+            story(damaged + " 추가", "BUSINESSPLUS", "https://example.com/b", now),
+        ],
+        {"timezone": "Asia/Seoul", "story_review": {"min_score": 1}},
+        now - timedelta(days=1),
+        now,
+        "2026-05-10",
+    )
+
+    assert review["candidate_count"] == 0
