@@ -175039,8 +175039,9 @@
       "title_hash": "587761374d81202c07d9beb4"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
-      "canonical_url_hash": "c7fbfe2067a7e9c6bdf2fa12",
+      "article_published_at": "2026-05-14T07:00:00+09:00",
+      "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
+      "canonical_url_hash": "bd7172c5014d2fab2e1b39e7",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
@@ -175060,8 +175061,17 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-금융투자회사 성과급",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
+      "image_candidates": [
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301970_4611.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301968_4050.png",
+        "https://cdn.fetv.co.kr/image/newsroom/default-user.png",
+        "https://cdn.fetv.co.kr/news/thumbnail/custom/20260517/302040_301700_1915_1778307555_120.jpg",
+        "https://cdn.fetv.co.kr/news/thumbnail/custom/20260517/301539_301217_1722_1777511843_120.jpg"
+      ],
+      "image_url": "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
       "normalized_title": "삼성전자 성과급 논란 ③시장 경제형 사외이사 산식 개편 투자 여력에 무게두나 - fetv co kr",
       "priority_level": "normal",
       "priority_reasons": [
@@ -175081,7 +175091,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-17T04:40:51.572200+09:00",
-      "source": "fetv.co.kr",
+      "source": "FETV",
       "status": "duplicate",
       "story_key": "story:e525084e2b670b99",
       "summary": "[삼성전자 성과급 논란] ③시장·경제형 사외이사, '산식 개편' 투자 여력에 무게두나 fetv.co.kr",
@@ -175089,8 +175099,8 @@
       "title_hash": "e525084e2b670b99a2bd7284"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMi4wFBVV95cUxOaE9MbkRVZ0JMSC10X2lPUWhaU1ozVXA3aGFpeTA5M1F3c0YyWG9KVk9tSDRDczlodHlpRTRlYm91Xzd3ZWJ2cHhNWFUtc0VRUWsxMnZUdFVUOHYyZEh5VUxHT21YcWE5M3FTM1I4ZUxSTE54Z3ExSjUxVUNoQXRyTllmSFAzSUVkNlZueWJPZFJLd3lDM21YWnl2emJiVzQ1NjBzam10U05FVXI5MzF1bm9VcE8tX0Uya3JzZGVPLWh3WGtuNjk4WHlsN0c2aG55V0NqbmpGVkJnNl9WVktMVE9KSQ?oc=5",
-      "canonical_url_hash": "97fe2c133065c62b09a63f87",
+      "canonical_url": "https://www.msn.com/en-us/money/news/swatch-gains-after-surviving-activist-investor-s-bid-to-shake-up-the-board/ar-AA231qy5?ocid=finance-verthp-feeds",
+      "canonical_url_hash": "114bfea719cb6dea7e253444",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.google.com/rss/articles/CBMiwAFBVV95cUxPZ1ZuS1AzQzZtOENMdzdSWHF5ZzFZamt1WUpScFVBcGFqclZlTGZBSEIzRlE5WTVVbG9tSC1sZ2FWSjBleTFlNG1oM19yLTJXNVR2cmswa0x5MlBHU2xBOS1aWFk2ZmcxS3R6NEhLb2ZpSTVfdXZueVM1YVZxNFZobTU2ZnVsTkhibHlWZlVVUkp4eHNKQS16SVNzLUVUYjh3c2ZQSEtwbzVDMnpYc21DTi1ieXhnX0lMdzE1Ym8xVEo?oc=5",
@@ -175109,6 +175119,8 @@
       ],
       "feed_category": "global",
       "feed_name": "google-news-en-activist-board-seats-settlement",
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMi4wFBVV95cUxOaE9MbkRVZ0JMSC10X2lPUWhaU1ozVXA3aGFpeTA5M1F3c0YyWG9KVk9tSDRDczlodHlpRTRlYm91Xzd3ZWJ2cHhNWFUtc0VRUWsxMnZUdFVUOHYyZEh5VUxHT21YcWE5M3FTM1I4ZUxSTE54Z3ExSjUxVUNoQXRyTllmSFAzSUVkNlZueWJPZFJLd3lDM21YWnl2emJiVzQ1NjBzam10U05FVXI5MzF1bm9VcE8tX0Uya3JzZGVPLWh3WGtuNjk4WHlsN0c2aG55V0NqbmpGVkJnNl9WVktMVE9KSQ?oc=5",
       "image_candidates": [],
       "image_url": null,
       "normalized_title": "swatch gains after surviving activist investors bid to shake up the board",
@@ -175183,7 +175195,7 @@
     "2026-04-29",
     "2026-04-30"
   ],
-  "last_google_news_decode_at": "2026-05-17T03:55:33.184492+09:00",
+  "last_google_news_decode_at": "2026-05-17T04:52:06.633707+09:00",
   "last_run_at": "2026-05-17T04:40:51.572200+09:00",
   "pending_clusters": [],
   "published_clusters": [
@@ -209183,7 +209195,6 @@
     "96542ad956bcad7e2db4af23",
     "9694e5cbf7af457c5a7c73ea",
     "96fd387a4489994874dfed32",
-    "97fe2c133065c62b09a63f87",
     "98353bca29823225d86dc3b8",
     "994adbc396788211fa4a7c36",
     "99881c8da37bddd98024c1dc",
@@ -209304,7 +209315,6 @@
     "c6abd2ac19c20ffefbef619a",
     "c744dc0057a751fbe5268215",
     "c7f7c821ef95b17127d65ed3",
-    "c7fbfe2067a7e9c6bdf2fa12",
     "c89c03b597db5c6e903b6a33",
     "c9cf90a5cdc25e7bd621e106",
     "ca0f16aa98c2ec942a320369",
