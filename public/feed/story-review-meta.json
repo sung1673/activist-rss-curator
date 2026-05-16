@@ -1,51 +1,12 @@
 {
-  "date_id": "2026-05-16",
-  "generated_at": "2026-05-16T07:00:23.642201+09:00",
-  "start_at": "2026-05-15T06:59:03.697102+09:00",
-  "end_at": "2026-05-16T06:59:03.697102+09:00",
-  "start_label": "2026-05-15 06:59 KST",
-  "end_label": "2026-05-16 06:59 KST",
-  "candidate_count": 1,
-  "candidate_hash": "6051dd0397511420",
+  "date_id": "2026-05-17",
+  "generated_at": "2026-05-17T06:47:29.643765+09:00",
+  "start_at": "2026-05-16T06:46:05.725666+09:00",
+  "end_at": "2026-05-17T06:46:05.725666+09:00",
+  "start_label": "2026-05-16 06:46 KST",
+  "end_label": "2026-05-17 06:46 KST",
+  "candidate_count": 0,
+  "candidate_hash": "4f53cda18c2baa0c",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": [
-    {
-      "id": "564588c4c58a",
-      "score": 89.1,
-      "left": {
-        "id": "story-9",
-        "title": "MBK, 美 로비업체 3곳 선임…고려아연 美 제련소 겨냥 논란",
-        "summary": "[서울=뉴시스]유희석 기자 = MBK파트너스(이하 MBK)가 고려아연 경영권 분쟁과 관련해 미국 현지 로비업체를 잇달아 선임하며 대응 수위를 높이고 있다. 업계에서는 MBK가 고려아연 적대적 인수합병(M&A) 분쟁을 미국 정·재계 영역으로까지 확대하고 있다는 분석이 ...",
-        "category": "주주행동·경영권",
-        "datetime": "05.15 17:38",
-        "source_line": "FNNEWS",
-        "link_count": 1,
-        "url": "https://www.fnnews.com/news/202605151738303227",
-        "links": [
-          {
-            "source": "FNNEWS",
-            "title": "MBK, 美 로비업체 3곳 선임…고려아연 美 제련소 겨냥 논란",
-            "url": "https://www.fnnews.com/news/202605151738303227"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-11",
-        "title": "홈플러스 논란 커지는데…MBK, 고려아연 분쟁 위해 美 로비업체 잇단 선임",
-        "summary": "MBK파트너스(MBK)가 고려아연 경영권 분쟁과 관련해 미국 현지 로비업체를 잇달아 선임하면서 재계 안팎의 우려가 커지고 있다. 홈플러스 사태로 노조 단식과 고용 불안 논란이 이어지는 상황에서, 정작 MBK는 국내 포트폴리오 기업 정상화보다 고려아연 인수전에 집중하고 ...",
-        "category": "주주행동·경영권",
-        "datetime": "05.15 14:01",
-        "source_line": "KYEONGGI",
-        "link_count": 1,
-        "url": "https://www.kyeonggi.com/article/20260515580475",
-        "links": [
-          {
-            "source": "KYEONGGI",
-            "title": "홈플러스 논란 커지는데…MBK, 고려아연 분쟁 위해 美 로비업체 잇단 선임",
-            "url": "https://www.kyeonggi.com/article/20260515580475"
-          }
-        ]
-      }
-    }
-  ]
+  "candidates": []
 }
