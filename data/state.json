@@ -55411,8 +55411,9 @@
       "title_hash": "fc7d96568dda61dd54426a0d"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
-      "canonical_url_hash": "3df4911a1820d3da6d6d8fb6",
+      "article_published_at": "2026-05-16T11:16:44+09:00",
+      "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
+      "canonical_url_hash": "c14715adf062a15b2d8cb3df",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
@@ -55432,8 +55433,12 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-대기업집단 총수 공정위",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
+      "image_candidates": [
+        "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg"
+      ],
+      "image_url": "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg",
       "normalized_title": "쿠팡 김범석 총수 지정 제동…법원 공정위 처분 효력 정지",
       "priority_level": "normal",
       "priority_reasons": [
@@ -55461,8 +55466,9 @@
       "title_hash": "696c78a464064d86c226fe37"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
-      "canonical_url_hash": "c7fbfe2067a7e9c6bdf2fa12",
+      "article_published_at": "2026-05-14T07:00:00+09:00",
+      "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
+      "canonical_url_hash": "bd7172c5014d2fab2e1b39e7",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
@@ -55482,8 +55488,16 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-금융투자회사 성과급",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
+      "image_candidates": [
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301970_4611.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301968_4050.png",
+        "https://cdn.fetv.co.kr/image/newsroom/default-user.png",
+        "https://cdn.fetv.co.kr/news/thumbnail/custom/20260518/302040_301700_1915_1778307555_120.jpg"
+      ],
+      "image_url": "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
       "normalized_title": "삼성전자 성과급 논란 ③시장 경제형 사외이사 산식 개편 투자 여력에 무게두나 - fetv co kr",
       "priority_level": "normal",
       "priority_reasons": [
@@ -55503,7 +55517,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-17T08:59:30.549662+09:00",
-      "source": "fetv.co.kr",
+      "source": "FETV",
       "status": "duplicate",
       "story_key": "story:e525084e2b670b99",
       "summary": "[삼성전자 성과급 논란] ③시장·경제형 사외이사, '산식 개편' 투자 여력에 무게두나 fetv.co.kr",
@@ -55511,8 +55525,8 @@
       "title_hash": "e525084e2b670b99a2bd7284"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMi4wFBVV95cUxOaE9MbkRVZ0JMSC10X2lPUWhaU1ozVXA3aGFpeTA5M1F3c0YyWG9KVk9tSDRDczlodHlpRTRlYm91Xzd3ZWJ2cHhNWFUtc0VRUWsxMnZUdFVUOHYyZEh5VUxHT21YcWE5M3FTM1I4ZUxSTE54Z3ExSjUxVUNoQXRyTllmSFAzSUVkNlZueWJPZFJLd3lDM21YWnl2emJiVzQ1NjBzam10U05FVXI5MzF1bm9VcE8tX0Uya3JzZGVPLWh3WGtuNjk4WHlsN0c2aG55V0NqbmpGVkJnNl9WVktMVE9KSQ?oc=5",
-      "canonical_url_hash": "97fe2c133065c62b09a63f87",
+      "canonical_url": "https://www.msn.com/en-us/money/news/swatch-gains-after-surviving-activist-investor-s-bid-to-shake-up-the-board/ar-AA231qy5?ocid=finance-verthp-feeds",
+      "canonical_url_hash": "114bfea719cb6dea7e253444",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.google.com/rss/articles/CBMiwAFBVV95cUxPZ1ZuS1AzQzZtOENMdzdSWHF5ZzFZamt1WUpScFVBcGFqclZlTGZBSEIzRlE5WTVVbG9tSC1sZ2FWSjBleTFlNG1oM19yLTJXNVR2cmswa0x5MlBHU2xBOS1aWFk2ZmcxS3R6NEhLb2ZpSTVfdXZueVM1YVZxNFZobTU2ZnVsTkhibHlWZlVVUkp4eHNKQS16SVNzLUVUYjh3c2ZQSEtwbzVDMnpYc21DTi1ieXhnX0lMdzE1Ym8xVEo?oc=5",
@@ -55531,6 +55545,8 @@
       ],
       "feed_category": "global",
       "feed_name": "google-news-en-activist-board-seats-settlement",
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMi4wFBVV95cUxOaE9MbkRVZ0JMSC10X2lPUWhaU1ozVXA3aGFpeTA5M1F3c0YyWG9KVk9tSDRDczlodHlpRTRlYm91Xzd3ZWJ2cHhNWFUtc0VRUWsxMnZUdFVUOHYyZEh5VUxHT21YcWE5M3FTM1I4ZUxSTE54Z3ExSjUxVUNoQXRyTllmSFAzSUVkNlZueWJPZFJLd3lDM21YWnl2emJiVzQ1NjBzam10U05FVXI5MzF1bm9VcE8tX0Uya3JzZGVPLWh3WGtuNjk4WHlsN0c2aG55V0NqbmpGVkJnNl9WVktMVE9KSQ?oc=5",
       "image_candidates": [],
       "image_url": null,
       "normalized_title": "swatch gains after surviving activist investors bid to shake up the board",
@@ -69347,8 +69363,9 @@
       "title_hash": "fc7d96568dda61dd54426a0d"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
-      "canonical_url_hash": "3df4911a1820d3da6d6d8fb6",
+      "article_published_at": "2026-05-16T11:16:44+09:00",
+      "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
+      "canonical_url_hash": "c14715adf062a15b2d8cb3df",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
@@ -69368,8 +69385,12 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-대기업집단 총수 공정위",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
+      "image_candidates": [
+        "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg"
+      ],
+      "image_url": "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg",
       "normalized_title": "쿠팡 김범석 총수 지정 제동…법원 공정위 처분 효력 정지",
       "priority_level": "normal",
       "priority_reasons": [
@@ -69397,8 +69418,9 @@
       "title_hash": "696c78a464064d86c226fe37"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
-      "canonical_url_hash": "c7fbfe2067a7e9c6bdf2fa12",
+      "article_published_at": "2026-05-14T07:00:00+09:00",
+      "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
+      "canonical_url_hash": "bd7172c5014d2fab2e1b39e7",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
@@ -69418,8 +69440,16 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-금융투자회사 성과급",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
+      "image_candidates": [
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301970_4611.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301968_4050.png",
+        "https://cdn.fetv.co.kr/image/newsroom/default-user.png",
+        "https://cdn.fetv.co.kr/news/thumbnail/custom/20260518/302040_301700_1915_1778307555_120.jpg"
+      ],
+      "image_url": "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
       "normalized_title": "삼성전자 성과급 논란 ③시장 경제형 사외이사 산식 개편 투자 여력에 무게두나 - fetv co kr",
       "priority_level": "normal",
       "priority_reasons": [
@@ -69439,7 +69469,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-17T13:04:00.145780+09:00",
-      "source": "fetv.co.kr",
+      "source": "FETV",
       "status": "duplicate",
       "story_key": "story:e525084e2b670b99",
       "summary": "[삼성전자 성과급 논란] ③시장·경제형 사외이사, '산식 개편' 투자 여력에 무게두나 fetv.co.kr",
@@ -69447,8 +69477,8 @@
       "title_hash": "e525084e2b670b99a2bd7284"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMivwFBVV95cUxOQnV5Z1NwWTZiREVXMG5oUVBiMUYyVW5rcmJiUzhiWlQyOXJkdm5SNmNXT2V6ek1UdHlIOURid0QxMC1Ga2hmcmhEUVNpeVBDUWUxQWdBaUxNMWxjdkM3STMwYWN3dy1ZYlBJZWVUZDNvNU9WOHFjN0ZsQkdHZEhDX1dvR3VNSDhVbVJOTDMyeEV0WlpnemE1ejRHNERKMWNVTkwwRGkxb29NcVZUTEtoNE5DWklqeGg4OXowWHFqMA?oc=5",
-      "canonical_url_hash": "9d405e2490f50af74b013002",
+      "canonical_url": "https://www.msn.com/en-us/money/news/swatch-gains-after-surviving-activist-investors-bid-to-shake-up-the-board/ar-AA231qy5",
+      "canonical_url_hash": "11f90f06a1deb4bf9dac4e56",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.google.com/rss/articles/CBMiwAFBVV95cUxPZ1ZuS1AzQzZtOENMdzdSWHF5ZzFZamt1WUpScFVBcGFqclZlTGZBSEIzRlE5WTVVbG9tSC1sZ2FWSjBleTFlNG1oM19yLTJXNVR2cmswa0x5MlBHU2xBOS1aWFk2ZmcxS3R6NEhLb2ZpSTVfdXZueVM1YVZxNFZobTU2ZnVsTkhibHlWZlVVUkp4eHNKQS16SVNzLUVUYjh3c2ZQSEtwbzVDMnpYc21DTi1ieXhnX0lMdzE1Ym8xVEo?oc=5",
@@ -69467,6 +69497,8 @@
       ],
       "feed_category": "global",
       "feed_name": "google-news-en-activist-board-seats-settlement",
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMivwFBVV95cUxOQnV5Z1NwWTZiREVXMG5oUVBiMUYyVW5rcmJiUzhiWlQyOXJkdm5SNmNXT2V6ek1UdHlIOURid0QxMC1Ga2hmcmhEUVNpeVBDUWUxQWdBaUxNMWxjdkM3STMwYWN3dy1ZYlBJZWVUZDNvNU9WOHFjN0ZsQkdHZEhDX1dvR3VNSDhVbVJOTDMyeEV0WlpnemE1ejRHNERKMWNVTkwwRGkxb29NcVZUTEtoNE5DWklqeGg4OXowWHFqMA?oc=5",
       "image_candidates": [],
       "image_url": null,
       "normalized_title": "swatch gains after surviving activist investors bid to shake up the board",
@@ -83334,8 +83366,9 @@
       "title_hash": "fc7d96568dda61dd54426a0d"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
-      "canonical_url_hash": "3df4911a1820d3da6d6d8fb6",
+      "article_published_at": "2026-05-16T11:16:44+09:00",
+      "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
+      "canonical_url_hash": "c14715adf062a15b2d8cb3df",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
@@ -83355,8 +83388,12 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-대기업집단 총수 공정위",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
+      "image_candidates": [
+        "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg"
+      ],
+      "image_url": "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg",
       "normalized_title": "쿠팡 김범석 총수 지정 제동…법원 공정위 처분 효력 정지",
       "priority_level": "normal",
       "priority_reasons": [
@@ -83384,8 +83421,9 @@
       "title_hash": "696c78a464064d86c226fe37"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
-      "canonical_url_hash": "c7fbfe2067a7e9c6bdf2fa12",
+      "article_published_at": "2026-05-14T07:00:00+09:00",
+      "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
+      "canonical_url_hash": "bd7172c5014d2fab2e1b39e7",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
@@ -83405,8 +83443,16 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-금융투자회사 성과급",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
+      "image_candidates": [
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301970_4611.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301968_4050.png",
+        "https://cdn.fetv.co.kr/image/newsroom/default-user.png",
+        "https://cdn.fetv.co.kr/news/thumbnail/custom/20260518/302040_301700_1915_1778307555_120.jpg"
+      ],
+      "image_url": "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
       "normalized_title": "삼성전자 성과급 논란 ③시장 경제형 사외이사 산식 개편 투자 여력에 무게두나 - fetv co kr",
       "priority_level": "normal",
       "priority_reasons": [
@@ -83426,7 +83472,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-17T15:50:45.102522+09:00",
-      "source": "fetv.co.kr",
+      "source": "FETV",
       "status": "duplicate",
       "story_key": "story:e525084e2b670b99",
       "summary": "[삼성전자 성과급 논란] ③시장·경제형 사외이사, '산식 개편' 투자 여력에 무게두나 fetv.co.kr",
@@ -83434,8 +83480,8 @@
       "title_hash": "e525084e2b670b99a2bd7284"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMivwFBVV95cUxOQnV5Z1NwWTZiREVXMG5oUVBiMUYyVW5rcmJiUzhiWlQyOXJkdm5SNmNXT2V6ek1UdHlIOURid0QxMC1Ga2hmcmhEUVNpeVBDUWUxQWdBaUxNMWxjdkM3STMwYWN3dy1ZYlBJZWVUZDNvNU9WOHFjN0ZsQkdHZEhDX1dvR3VNSDhVbVJOTDMyeEV0WlpnemE1ejRHNERKMWNVTkwwRGkxb29NcVZUTEtoNE5DWklqeGg4OXowWHFqMA?oc=5",
-      "canonical_url_hash": "9d405e2490f50af74b013002",
+      "canonical_url": "https://www.msn.com/en-us/money/news/swatch-gains-after-surviving-activist-investors-bid-to-shake-up-the-board/ar-AA231qy5",
+      "canonical_url_hash": "11f90f06a1deb4bf9dac4e56",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.google.com/rss/articles/CBMiwAFBVV95cUxPZ1ZuS1AzQzZtOENMdzdSWHF5ZzFZamt1WUpScFVBcGFqclZlTGZBSEIzRlE5WTVVbG9tSC1sZ2FWSjBleTFlNG1oM19yLTJXNVR2cmswa0x5MlBHU2xBOS1aWFk2ZmcxS3R6NEhLb2ZpSTVfdXZueVM1YVZxNFZobTU2ZnVsTkhibHlWZlVVUkp4eHNKQS16SVNzLUVUYjh3c2ZQSEtwbzVDMnpYc21DTi1ieXhnX0lMdzE1Ym8xVEo?oc=5",
@@ -83454,6 +83500,8 @@
       ],
       "feed_category": "global",
       "feed_name": "google-news-en-activist-board-seats-settlement",
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMivwFBVV95cUxOQnV5Z1NwWTZiREVXMG5oUVBiMUYyVW5rcmJiUzhiWlQyOXJkdm5SNmNXT2V6ek1UdHlIOURid0QxMC1Ga2hmcmhEUVNpeVBDUWUxQWdBaUxNMWxjdkM3STMwYWN3dy1ZYlBJZWVUZDNvNU9WOHFjN0ZsQkdHZEhDX1dvR3VNSDhVbVJOTDMyeEV0WlpnemE1ejRHNERKMWNVTkwwRGkxb29NcVZUTEtoNE5DWklqeGg4OXowWHFqMA?oc=5",
       "image_candidates": [],
       "image_url": null,
       "normalized_title": "swatch gains after surviving activist investors bid to shake up the board",
@@ -83482,12 +83530,20 @@
       "title_hash": "a26a88320fe684fa4fd40369"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
-      "canonical_url_hash": "622d2f8ccb767d4f846844e9",
+      "canonical_url": "https://www.dailymedi.com/news/news_view.php?wr_id=936519",
+      "canonical_url_hash": "9f8b8f83f9c8e247c3444985",
       "feed_category": "capital_market",
       "feed_name": "google-news-CB 발행 주주가치",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
+      "image_candidates": [
+        "https://www.dailymedi.com/img/facebook.png",
+        "https://www.dailymedi.com/img/twitter.png",
+        "https://www.dailymedi.com/img/kakao.png",
+        "https://www.dailymedi.com/data/news_cont/2605/d20260515_2077716647_zABmRNX8_359c3cc33b2d96b7a2d4c245fb685f9b585348b4.png",
+        "https://www.dailymedi.com/img/topb.png"
+      ],
+      "image_url": "https://www.dailymedi.com/img/facebook.png",
       "normalized_title": "오스코텍 이사회 독립성 강화 선언 - 데일리메디",
       "priority_level": "normal",
       "priority_reasons": [
@@ -97323,8 +97379,9 @@
       "title_hash": "fc7d96568dda61dd54426a0d"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
-      "canonical_url_hash": "3df4911a1820d3da6d6d8fb6",
+      "article_published_at": "2026-05-16T11:16:44+09:00",
+      "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
+      "canonical_url_hash": "c14715adf062a15b2d8cb3df",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
@@ -97344,8 +97401,12 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-대기업집단 총수 공정위",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
+      "image_candidates": [
+        "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg"
+      ],
+      "image_url": "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg",
       "normalized_title": "쿠팡 김범석 총수 지정 제동…법원 공정위 처분 효력 정지",
       "priority_level": "normal",
       "priority_reasons": [
@@ -97373,8 +97434,9 @@
       "title_hash": "696c78a464064d86c226fe37"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
-      "canonical_url_hash": "c7fbfe2067a7e9c6bdf2fa12",
+      "article_published_at": "2026-05-14T07:00:00+09:00",
+      "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
+      "canonical_url_hash": "bd7172c5014d2fab2e1b39e7",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
@@ -97394,8 +97456,16 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-금융투자회사 성과급",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
+      "image_candidates": [
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301970_4611.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301968_4050.png",
+        "https://cdn.fetv.co.kr/image/newsroom/default-user.png",
+        "https://cdn.fetv.co.kr/news/thumbnail/custom/20260518/302040_301700_1915_1778307555_120.jpg"
+      ],
+      "image_url": "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
       "normalized_title": "삼성전자 성과급 논란 ③시장 경제형 사외이사 산식 개편 투자 여력에 무게두나 - fetv co kr",
       "priority_level": "normal",
       "priority_reasons": [
@@ -97415,7 +97485,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-17T18:09:57.399463+09:00",
-      "source": "fetv.co.kr",
+      "source": "FETV",
       "status": "duplicate",
       "story_key": "story:e525084e2b670b99",
       "summary": "[삼성전자 성과급 논란] ③시장·경제형 사외이사, '산식 개편' 투자 여력에 무게두나 fetv.co.kr",
@@ -97423,8 +97493,8 @@
       "title_hash": "e525084e2b670b99a2bd7284"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
-      "canonical_url_hash": "622d2f8ccb767d4f846844e9",
+      "canonical_url": "https://www.dailymedi.com/news/news_view.php?wr_id=936519",
+      "canonical_url_hash": "9f8b8f83f9c8e247c3444985",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
@@ -97443,8 +97513,16 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-CB 발행 주주가치",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
+      "image_candidates": [
+        "https://www.dailymedi.com/img/facebook.png",
+        "https://www.dailymedi.com/img/twitter.png",
+        "https://www.dailymedi.com/img/kakao.png",
+        "https://www.dailymedi.com/data/news_cont/2605/d20260515_2077716647_zABmRNX8_359c3cc33b2d96b7a2d4c245fb685f9b585348b4.png",
+        "https://www.dailymedi.com/img/topb.png"
+      ],
+      "image_url": "https://www.dailymedi.com/img/facebook.png",
       "normalized_title": "오스코텍 이사회 독립성 강화 선언 - 데일리메디",
       "priority_level": "normal",
       "priority_reasons": [
@@ -111382,8 +111460,9 @@
       "title_hash": "fc7d96568dda61dd54426a0d"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
-      "canonical_url_hash": "3df4911a1820d3da6d6d8fb6",
+      "article_published_at": "2026-05-16T11:16:44+09:00",
+      "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
+      "canonical_url_hash": "c14715adf062a15b2d8cb3df",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
@@ -111403,8 +111482,12 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-대기업집단 총수 공정위",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
+      "image_candidates": [
+        "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg"
+      ],
+      "image_url": "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg",
       "normalized_title": "쿠팡 김범석 총수 지정 제동…법원 공정위 처분 효력 정지",
       "priority_level": "normal",
       "priority_reasons": [
@@ -111432,8 +111515,9 @@
       "title_hash": "696c78a464064d86c226fe37"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
-      "canonical_url_hash": "c7fbfe2067a7e9c6bdf2fa12",
+      "article_published_at": "2026-05-14T07:00:00+09:00",
+      "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
+      "canonical_url_hash": "bd7172c5014d2fab2e1b39e7",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
@@ -111453,8 +111537,16 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-금융투자회사 성과급",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
+      "image_candidates": [
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301970_4611.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301968_4050.png",
+        "https://cdn.fetv.co.kr/image/newsroom/default-user.png",
+        "https://cdn.fetv.co.kr/news/thumbnail/custom/20260518/302040_301700_1915_1778307555_120.jpg"
+      ],
+      "image_url": "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
       "normalized_title": "삼성전자 성과급 논란 ③시장 경제형 사외이사 산식 개편 투자 여력에 무게두나 - fetv co kr",
       "priority_level": "normal",
       "priority_reasons": [
@@ -111474,7 +111566,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-17T19:52:17.901875+09:00",
-      "source": "fetv.co.kr",
+      "source": "FETV",
       "status": "duplicate",
       "story_key": "story:e525084e2b670b99",
       "summary": "[삼성전자 성과급 논란] ③시장·경제형 사외이사, '산식 개편' 투자 여력에 무게두나 fetv.co.kr",
@@ -111482,8 +111574,8 @@
       "title_hash": "e525084e2b670b99a2bd7284"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
-      "canonical_url_hash": "622d2f8ccb767d4f846844e9",
+      "canonical_url": "https://www.dailymedi.com/news/news_view.php?wr_id=936519",
+      "canonical_url_hash": "9f8b8f83f9c8e247c3444985",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
@@ -111502,8 +111594,16 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-CB 발행 주주가치",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
+      "image_candidates": [
+        "https://www.dailymedi.com/img/facebook.png",
+        "https://www.dailymedi.com/img/twitter.png",
+        "https://www.dailymedi.com/img/kakao.png",
+        "https://www.dailymedi.com/data/news_cont/2605/d20260515_2077716647_zABmRNX8_359c3cc33b2d96b7a2d4c245fb685f9b585348b4.png",
+        "https://www.dailymedi.com/img/topb.png"
+      ],
+      "image_url": "https://www.dailymedi.com/img/facebook.png",
       "normalized_title": "오스코텍 이사회 독립성 강화 선언 - 데일리메디",
       "priority_level": "normal",
       "priority_reasons": [
@@ -125388,8 +125488,9 @@
       "title_hash": "fc7d96568dda61dd54426a0d"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
-      "canonical_url_hash": "3df4911a1820d3da6d6d8fb6",
+      "article_published_at": "2026-05-16T11:16:44+09:00",
+      "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
+      "canonical_url_hash": "c14715adf062a15b2d8cb3df",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
@@ -125409,8 +125510,12 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-대기업집단 총수 공정위",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
+      "image_candidates": [
+        "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg"
+      ],
+      "image_url": "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg",
       "normalized_title": "쿠팡 김범석 총수 지정 제동…법원 공정위 처분 효력 정지",
       "priority_level": "normal",
       "priority_reasons": [
@@ -125438,8 +125543,9 @@
       "title_hash": "696c78a464064d86c226fe37"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
-      "canonical_url_hash": "c7fbfe2067a7e9c6bdf2fa12",
+      "article_published_at": "2026-05-14T07:00:00+09:00",
+      "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
+      "canonical_url_hash": "bd7172c5014d2fab2e1b39e7",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
@@ -125459,8 +125565,16 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-금융투자회사 성과급",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
+      "image_candidates": [
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301970_4611.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301968_4050.png",
+        "https://cdn.fetv.co.kr/image/newsroom/default-user.png",
+        "https://cdn.fetv.co.kr/news/thumbnail/custom/20260518/302040_301700_1915_1778307555_120.jpg"
+      ],
+      "image_url": "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
       "normalized_title": "삼성전자 성과급 논란 ③시장 경제형 사외이사 산식 개편 투자 여력에 무게두나 - fetv co kr",
       "priority_level": "normal",
       "priority_reasons": [
@@ -125480,7 +125594,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-17T21:02:20.675920+09:00",
-      "source": "fetv.co.kr",
+      "source": "FETV",
       "status": "duplicate",
       "story_key": "story:e525084e2b670b99",
       "summary": "[삼성전자 성과급 논란] ③시장·경제형 사외이사, '산식 개편' 투자 여력에 무게두나 fetv.co.kr",
@@ -125488,8 +125602,8 @@
       "title_hash": "e525084e2b670b99a2bd7284"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
-      "canonical_url_hash": "622d2f8ccb767d4f846844e9",
+      "canonical_url": "https://www.dailymedi.com/news/news_view.php?wr_id=936519",
+      "canonical_url_hash": "9f8b8f83f9c8e247c3444985",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
@@ -125508,8 +125622,16 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-CB 발행 주주가치",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
+      "image_candidates": [
+        "https://www.dailymedi.com/img/facebook.png",
+        "https://www.dailymedi.com/img/twitter.png",
+        "https://www.dailymedi.com/img/kakao.png",
+        "https://www.dailymedi.com/data/news_cont/2605/d20260515_2077716647_zABmRNX8_359c3cc33b2d96b7a2d4c245fb685f9b585348b4.png",
+        "https://www.dailymedi.com/img/topb.png"
+      ],
+      "image_url": "https://www.dailymedi.com/img/facebook.png",
       "normalized_title": "오스코텍 이사회 독립성 강화 선언 - 데일리메디",
       "priority_level": "normal",
       "priority_reasons": [
@@ -139176,8 +139298,9 @@
       "title_hash": "fc7d96568dda61dd54426a0d"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
-      "canonical_url_hash": "3df4911a1820d3da6d6d8fb6",
+      "article_published_at": "2026-05-16T11:16:44+09:00",
+      "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
+      "canonical_url_hash": "c14715adf062a15b2d8cb3df",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
@@ -139197,8 +139320,12 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-대기업집단 총수 공정위",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
+      "image_candidates": [
+        "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg"
+      ],
+      "image_url": "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg",
       "normalized_title": "쿠팡 김범석 총수 지정 제동…법원 공정위 처분 효력 정지",
       "priority_level": "normal",
       "priority_reasons": [
@@ -139226,12 +139353,21 @@
       "title_hash": "696c78a464064d86c226fe37"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
-      "canonical_url_hash": "c7fbfe2067a7e9c6bdf2fa12",
+      "article_published_at": "2026-05-14T07:00:00+09:00",
+      "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
+      "canonical_url_hash": "bd7172c5014d2fab2e1b39e7",
       "feed_category": "capital_market",
       "feed_name": "google-news-금융투자회사 성과급",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
+      "image_candidates": [
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301970_4611.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301968_4050.png",
+        "https://cdn.fetv.co.kr/image/newsroom/default-user.png",
+        "https://cdn.fetv.co.kr/news/thumbnail/custom/20260518/302040_301700_1915_1778307555_120.jpg"
+      ],
+      "image_url": "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
       "normalized_title": "삼성전자 성과급 논란 ③시장 경제형 사외이사 산식 개편 투자 여력에 무게두나 - fetv co kr",
       "priority_level": "normal",
       "priority_reasons": [
@@ -139250,7 +139386,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-17T22:52:15.205212+09:00",
-      "source": "fetv.co.kr",
+      "source": "FETV",
       "status": "duplicate",
       "story_key": "story:e525084e2b670b99",
       "summary": "[삼성전자 성과급 논란] ③시장·경제형 사외이사, '산식 개편' 투자 여력에 무게두나 fetv.co.kr",
@@ -139258,8 +139394,8 @@
       "title_hash": "e525084e2b670b99a2bd7284"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
-      "canonical_url_hash": "622d2f8ccb767d4f846844e9",
+      "canonical_url": "https://www.dailymedi.com/news/news_view.php?wr_id=936519",
+      "canonical_url_hash": "9f8b8f83f9c8e247c3444985",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
@@ -139278,8 +139414,16 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-CB 발행 주주가치",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
+      "image_candidates": [
+        "https://www.dailymedi.com/img/facebook.png",
+        "https://www.dailymedi.com/img/twitter.png",
+        "https://www.dailymedi.com/img/kakao.png",
+        "https://www.dailymedi.com/data/news_cont/2605/d20260515_2077716647_zABmRNX8_359c3cc33b2d96b7a2d4c245fb685f9b585348b4.png",
+        "https://www.dailymedi.com/img/topb.png"
+      ],
+      "image_url": "https://www.dailymedi.com/img/facebook.png",
       "normalized_title": "오스코텍 이사회 독립성 강화 선언 - 데일리메디",
       "priority_level": "normal",
       "priority_reasons": [
@@ -144646,12 +144790,17 @@
       "title_hash": "9f3638262d1cc10696c213a0"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
-      "canonical_url_hash": "3df4911a1820d3da6d6d8fb6",
+      "article_published_at": "2026-05-16T11:16:44+09:00",
+      "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
+      "canonical_url_hash": "c14715adf062a15b2d8cb3df",
       "feed_category": "supplemental",
       "feed_name": "google-news-대기업집단 총수 공정위",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
+      "image_candidates": [
+        "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg"
+      ],
+      "image_url": "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg",
       "normalized_title": "쿠팡 김범석 총수 지정 제동…법원 공정위 처분 효력 정지",
       "priority_level": "archive",
       "priority_reasons": [
@@ -153075,12 +153224,21 @@
       "title_hash": "eabfc01b8c30c7548376c9c2"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
-      "canonical_url_hash": "c7fbfe2067a7e9c6bdf2fa12",
+      "article_published_at": "2026-05-14T07:00:00+09:00",
+      "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
+      "canonical_url_hash": "bd7172c5014d2fab2e1b39e7",
       "feed_category": "capital_market",
       "feed_name": "google-news-금융투자회사 성과급",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
+      "image_candidates": [
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301970_4611.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301968_4050.png",
+        "https://cdn.fetv.co.kr/image/newsroom/default-user.png",
+        "https://cdn.fetv.co.kr/news/thumbnail/custom/20260518/302040_301700_1915_1778307555_120.jpg"
+      ],
+      "image_url": "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
       "normalized_title": "삼성전자 성과급 논란 ③시장 경제형 사외이사 산식 개편 투자 여력에 무게두나 - fetv co kr",
       "priority_level": "normal",
       "priority_reasons": [
@@ -153099,7 +153257,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-18T00:03:37.996564+09:00",
-      "source": "fetv.co.kr",
+      "source": "FETV",
       "status": "duplicate",
       "story_key": "story:e525084e2b670b99",
       "summary": "[삼성전자 성과급 논란] ③시장·경제형 사외이사, '산식 개편' 투자 여력에 무게두나 fetv.co.kr",
@@ -153107,8 +153265,8 @@
       "title_hash": "e525084e2b670b99a2bd7284"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
-      "canonical_url_hash": "622d2f8ccb767d4f846844e9",
+      "canonical_url": "https://www.dailymedi.com/news/news_view.php?wr_id=936519",
+      "canonical_url_hash": "9f8b8f83f9c8e247c3444985",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
@@ -153127,8 +153285,16 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-CB 발행 주주가치",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
+      "image_candidates": [
+        "https://www.dailymedi.com/img/facebook.png",
+        "https://www.dailymedi.com/img/twitter.png",
+        "https://www.dailymedi.com/img/kakao.png",
+        "https://www.dailymedi.com/data/news_cont/2605/d20260515_2077716647_zABmRNX8_359c3cc33b2d96b7a2d4c245fb685f9b585348b4.png",
+        "https://www.dailymedi.com/img/topb.png"
+      ],
+      "image_url": "https://www.dailymedi.com/img/facebook.png",
       "normalized_title": "오스코텍 이사회 독립성 강화 선언 - 데일리메디",
       "priority_level": "normal",
       "priority_reasons": [
@@ -158543,12 +158709,17 @@
       "title_hash": "7dc1e0140d104891d593ee41"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
-      "canonical_url_hash": "3df4911a1820d3da6d6d8fb6",
+      "article_published_at": "2026-05-16T11:16:44+09:00",
+      "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
+      "canonical_url_hash": "c14715adf062a15b2d8cb3df",
       "feed_category": "supplemental",
       "feed_name": "google-news-대기업집단 총수 공정위",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
+      "image_candidates": [
+        "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg"
+      ],
+      "image_url": "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg",
       "normalized_title": "쿠팡 김범석 총수 지정 제동…법원 공정위 처분 효력 정지",
       "priority_level": "archive",
       "priority_reasons": [
@@ -166945,12 +167116,21 @@
       "title_hash": "eabfc01b8c30c7548376c9c2"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
-      "canonical_url_hash": "c7fbfe2067a7e9c6bdf2fa12",
+      "article_published_at": "2026-05-14T07:00:00+09:00",
+      "canonical_url": "https://www.fetv.co.kr/news/articleView.html?idxno=302332",
+      "canonical_url_hash": "bd7172c5014d2fab2e1b39e7",
       "feed_category": "capital_market",
       "feed_name": "google-news-금융투자회사 성과급",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTE1YdnhfM3FMYlFFUjMwV2xVdkpXdjN3RE9heXBPQV9yUUFMME9XbEMyUTVqRWN3dDN0eUozWTg1eHVFRV9XZkFzbFdCR3hfYzNlcTFFX292SnBYcXdiVUlYYmFtVnUyZ3dt?oc=5",
+      "image_candidates": [
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301970_4611.png",
+        "https://cdn.fetv.co.kr/news/photo/202605/302332_301968_4050.png",
+        "https://cdn.fetv.co.kr/image/newsroom/default-user.png",
+        "https://cdn.fetv.co.kr/news/thumbnail/custom/20260518/302040_301700_1915_1778307555_120.jpg"
+      ],
+      "image_url": "https://cdn.fetv.co.kr/news/photo/202605/302332_301969_4212.png",
       "normalized_title": "삼성전자 성과급 논란 ③시장 경제형 사외이사 산식 개편 투자 여력에 무게두나 - fetv co kr",
       "priority_level": "normal",
       "priority_reasons": [
@@ -166969,7 +167149,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-18T01:05:57.515910+09:00",
-      "source": "fetv.co.kr",
+      "source": "FETV",
       "status": "duplicate",
       "story_key": "story:e525084e2b670b99",
       "summary": "[삼성전자 성과급 논란] ③시장·경제형 사외이사, '산식 개편' 투자 여력에 무게두나 fetv.co.kr",
@@ -166977,8 +167157,8 @@
       "title_hash": "e525084e2b670b99a2bd7284"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
-      "canonical_url_hash": "622d2f8ccb767d4f846844e9",
+      "canonical_url": "https://www.dailymedi.com/news/news_view.php?wr_id=936519",
+      "canonical_url_hash": "9f8b8f83f9c8e247c3444985",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
@@ -166997,8 +167177,16 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-CB 발행 주주가치",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
+      "image_candidates": [
+        "https://www.dailymedi.com/img/facebook.png",
+        "https://www.dailymedi.com/img/twitter.png",
+        "https://www.dailymedi.com/img/kakao.png",
+        "https://www.dailymedi.com/data/news_cont/2605/d20260515_2077716647_zABmRNX8_359c3cc33b2d96b7a2d4c245fb685f9b585348b4.png",
+        "https://www.dailymedi.com/img/topb.png"
+      ],
+      "image_url": "https://www.dailymedi.com/img/facebook.png",
       "normalized_title": "오스코텍 이사회 독립성 강화 선언 - 데일리메디",
       "priority_level": "normal",
       "priority_reasons": [
@@ -167071,7 +167259,7 @@
     "2026-04-29",
     "2026-04-30"
   ],
-  "last_google_news_decode_at": "2026-05-17T07:08:10.019295+09:00",
+  "last_google_news_decode_at": "2026-05-18T02:20:29.070451+09:00",
   "last_run_at": "2026-05-18T01:05:57.515910+09:00",
   "pending_clusters": [],
   "published_clusters": [
@@ -167257,8 +167445,8 @@
       "articles": [
         {
           "article_published_at": null,
-          "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
-          "canonical_url_hash": "622d2f8ccb767d4f846844e9",
+          "canonical_url": "https://www.dailymedi.com/news/news_view.php?wr_id=936519",
+          "canonical_url_hash": "9f8b8f83f9c8e247c3444985",
           "clean_title": "오스코텍 이사회 독립성 강화 선언 - 데일리메디",
           "company_candidates": [],
           "date_status": "feed",
@@ -167266,8 +167454,16 @@
           "feed_name": "google-news-CB 발행 주주가치",
           "feed_published_at": "2026-05-17T15:25:00+09:00",
           "feed_updated_at": "2026-05-17T15:25:00+09:00",
-          "image_candidates": [],
-          "image_url": null,
+          "google_news_decoded": true,
+          "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
+          "image_candidates": [
+            "https://www.dailymedi.com/img/facebook.png",
+            "https://www.dailymedi.com/img/twitter.png",
+            "https://www.dailymedi.com/img/kakao.png",
+            "https://www.dailymedi.com/data/news_cont/2605/d20260515_2077716647_zABmRNX8_359c3cc33b2d96b7a2d4c245fb685f9b585348b4.png",
+            "https://www.dailymedi.com/img/topb.png"
+          ],
+          "image_url": "https://www.dailymedi.com/img/facebook.png",
           "link": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
           "low_patterns": [],
           "normalized_title": "오스코텍 이사회 독립성 강화 선언 - 데일리메디",
@@ -167317,7 +167513,7 @@
       "relevance_level": "medium",
       "representative_title": "오스코텍 이사회 독립성 강화 선언 - 데일리메디",
       "representative_title_normalized": "오스코텍 이사회 독립성 강화 선언 - 데일리메디",
-      "representative_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBLQzdnQnp6ZGdkVGxyZmUxT2VuQThaWUxHY09XemJBYnEtMGdGUFNNa1FKMzNtV05YOE5fSWN0NWJnQjdKbVBqaVJXdGx0SlpyM2hRdDF1OW9iT09TSlIycUVJUTVUZGtt?oc=5",
+      "representative_url": "https://www.dailymedi.com/news/news_view.php?wr_id=936519",
       "sequence": 1,
       "status": "published",
       "theme_group": "board_audit",
@@ -178064,12 +178260,17 @@
       "title_hash": "9f3638262d1cc10696c213a0"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
-      "canonical_url_hash": "3df4911a1820d3da6d6d8fb6",
+      "article_published_at": "2026-05-16T11:16:44+09:00",
+      "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
+      "canonical_url_hash": "c14715adf062a15b2d8cb3df",
       "feed_category": "supplemental",
       "feed_name": "google-news-대기업집단 총수 공정위",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
+      "image_candidates": [
+        "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg"
+      ],
+      "image_url": "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg",
       "normalized_title": "쿠팡 김범석 총수 지정 제동…법원 공정위 처분 효력 정지",
       "priority_level": "archive",
       "priority_reasons": [
@@ -191639,12 +191840,17 @@
       "title_hash": "7dc1e0140d104891d593ee41"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
-      "canonical_url_hash": "3df4911a1820d3da6d6d8fb6",
+      "article_published_at": "2026-05-16T11:16:44+09:00",
+      "canonical_url": "https://www.sankyungtoday.com/news/articleView.html?idxno=60763",
+      "canonical_url_hash": "c14715adf062a15b2d8cb3df",
       "feed_category": "supplemental",
       "feed_name": "google-news-대기업집단 총수 공정위",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE1pZWFBQ1BoTTVNY2lmTGhoTVgxVUVEd0I1ekQ0Z2wzSmMyTk9JQWo0N1pqZm9mb1FzNW5jUWFEYk9RUkRCOWNac25TREh5SE9raHktdE1ZWnFoYkNVUHQtM1hCSVRXZkNTZGJDSGdTaEnSAXRBVV95cUxNQ04tbnRfRzR5c19NamYyb2o5NzhuNXFBcHU1T0VDSndSNWRtZ01ybmtJVzFMQVlOUl9COHNfTVZDYVB1YnpobHN1dWY3dU5tMzZ4amdZWDZqenpObXVjLW50QW9ac1hzaFhzWnl0TUJzcmNOSg?oc=5",
+      "image_candidates": [
+        "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg"
+      ],
+      "image_url": "https://cdn.sankyungtoday.com/news/photo/202605/60763_26778_1559.jpg",
       "normalized_title": "쿠팡 김범석 총수 지정 제동…법원 공정위 처분 효력 정지",
       "priority_level": "archive",
       "priority_reasons": [
@@ -200406,6 +200612,7 @@
     "114bfea719cb6dea7e253444",
     "11a59f881c5c89f0ff9747c7",
     "11dabea1334eda2b6ae8d7d5",
+    "11f90f06a1deb4bf9dac4e56",
     "13b87675649cd01b3b291f70",
     "13ee76819ace0de8a7e9685e",
     "14e4c8564c563b5b56b0fdf2",
@@ -200480,7 +200687,6 @@
     "3cca6f06136fcccc2e5cc4b3",
     "3d97ce49fb57f9ddd6eff5cb",
     "3da3e395f62f679874d0d3af",
-    "3df4911a1820d3da6d6d8fb6",
     "3df50807f7825e53af7ec9d8",
     "3df5f814b7351317c4357e98",
     "3e3dd75746d35d4426138461",
@@ -200585,7 +200791,6 @@
     "615c82226df9328839cdca25",
     "61cdd6040e6b49b8080a4de0",
     "6200145b2f1103f0e04a9140",
-    "622d2f8ccb767d4f846844e9",
     "6241edc14071d0e5c91d1bdb",
     "634a43d85bd2821c4b3ad5f8",
     "63e07a8376e03d384ae95b27",
@@ -200714,13 +200919,11 @@
     "9694e5cbf7af457c5a7c73ea",
     "96e5b89b06001ea8c6ab13f6",
     "96fd387a4489994874dfed32",
-    "97fe2c133065c62b09a63f87",
     "98353bca29823225d86dc3b8",
     "994adbc396788211fa4a7c36",
     "99881c8da37bddd98024c1dc",
     "9c476e248a1eeae39ab0cc51",
     "9d3ff56be2e61fc001196104",
-    "9d405e2490f50af74b013002",
     "9dbf3a59f03286e2cbdc8ca9",
     "9ddfec020ece6d6f87f53bf1",
     "9de522b38eff7c48acf61f62",
@@ -200732,6 +200935,7 @@
     "9ed9dc567b3ddbdc730598cc",
     "9f258d89457507cdf7fbe39d",
     "9f2cce0328ac81af4134e531",
+    "9f8b8f83f9c8e247c3444985",
     "9f98343084b57858b8656334",
     "a0c21bb22e1ba75551a2d7c3",
     "a0d3725904589461e2d9d40c",
@@ -200844,7 +201048,6 @@
     "c6abd2ac19c20ffefbef619a",
     "c744dc0057a751fbe5268215",
     "c7f7c821ef95b17127d65ed3",
-    "c7fbfe2067a7e9c6bdf2fa12",
     "c9cc2af4a60d8b69fbf6c51a",
     "c9cf90a5cdc25e7bd621e106",
     "ca0f16aa98c2ec942a320369",
