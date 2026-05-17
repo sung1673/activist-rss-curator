@@ -1,12 +1,51 @@
 {
-  "date_id": "2026-05-17",
-  "generated_at": "2026-05-17T06:47:29.643765+09:00",
-  "start_at": "2026-05-16T06:46:05.725666+09:00",
-  "end_at": "2026-05-17T06:46:05.725666+09:00",
-  "start_label": "2026-05-16 06:46 KST",
-  "end_label": "2026-05-17 06:46 KST",
-  "candidate_count": 0,
-  "candidate_hash": "4f53cda18c2baa0c",
+  "date_id": "2026-05-18",
+  "generated_at": "2026-05-18T06:56:04.722702+09:00",
+  "start_at": "2026-05-17T06:54:28.253209+09:00",
+  "end_at": "2026-05-18T06:54:28.253209+09:00",
+  "start_label": "2026-05-17 06:54 KST",
+  "end_label": "2026-05-18 06:54 KST",
+  "candidate_count": 1,
+  "candidate_hash": "013bd81f636e481f",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": []
+  "candidates": [
+    {
+      "id": "fd4a960845d0",
+      "score": 88.1,
+      "left": {
+        "id": "story-1",
+        "title": "MBK, 美 로비 확대…고려아연 분쟁 안보전 번지나",
+        "summary": "체크메이트 추가 선임…CFIUS 대응망 확대 홈플러스 논란 속 “포트폴리오 관리보다 분쟁 집중” 비판도 MBK파트너스가 고려아연 경영권 분쟁과 관련해 미국 현지 로비 활동을 확대하고 있다. 업계에서는 단순 경영권 분쟁을 넘어 핵심 광물 공급망과 미국 안보 이슈까지 연결되는 양상이라는…",
+        "category": "주주행동·경영권",
+        "datetime": "05.17 16:00",
+        "source_line": "INEWS24",
+        "link_count": 1,
+        "url": "https://www.inews24.com/view/1969144",
+        "links": [
+          {
+            "source": "INEWS24",
+            "title": "MBK, 美 로비 확대…고려아연 분쟁 안보전 번지나",
+            "url": "https://www.inews24.com/view/1969144"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-2",
+        "title": "MBK, 고려아연 분쟁 관련 美 로비업체 추가 선임",
+        "summary": "MBK파트너스가 고려아연 경영권 분쟁과 관련해 미국 현지 로비를 강화하는 모양새다.17일 업계에 따르면 MBK파트너스는 미국 현지 로비업체를 추가로 선임했다. 고려아연의 미국 테네시주 통합 제련소 건설 사업과 핵심광물 공급망 이슈가 경영권 분쟁의 주요 쟁점으로 부상하면서 MBK도 미국…",
+        "category": "주주행동·경영권",
+        "datetime": "05.17 09:38",
+        "source_line": "ZDNET",
+        "link_count": 1,
+        "url": "https://zdnet.co.kr/view?no=20260517012845",
+        "links": [
+          {
+            "source": "ZDNET",
+            "title": "MBK, 고려아연 분쟁 관련 美 로비업체 추가 선임",
+            "url": "https://zdnet.co.kr/view?no=20260517012845"
+          }
+        ]
+      }
+    }
+  ]
 }
