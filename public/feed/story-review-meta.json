@@ -1,48 +1,129 @@
 {
-  "date_id": "2026-05-18",
-  "generated_at": "2026-05-18T06:56:04.722702+09:00",
-  "start_at": "2026-05-17T06:54:28.253209+09:00",
-  "end_at": "2026-05-18T06:54:28.253209+09:00",
-  "start_label": "2026-05-17 06:54 KST",
-  "end_label": "2026-05-18 06:54 KST",
-  "candidate_count": 1,
-  "candidate_hash": "013bd81f636e481f",
+  "date_id": "2026-05-19",
+  "generated_at": "2026-05-19T07:07:22.893428+09:00",
+  "start_at": "2026-05-18T07:04:03.901293+09:00",
+  "end_at": "2026-05-19T07:04:03.901293+09:00",
+  "start_label": "2026-05-18 07:04 KST",
+  "end_label": "2026-05-19 07:04 KST",
+  "candidate_count": 6,
+  "candidate_hash": "cb4a68245f1fdaf6",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "fd4a960845d0",
-      "score": 88.1,
+      "id": "569e4ed609dd",
+      "score": 107.4,
       "left": {
-        "id": "story-1",
-        "title": "MBK, 美 로비 확대…고려아연 분쟁 안보전 번지나",
-        "summary": "체크메이트 추가 선임…CFIUS 대응망 확대 홈플러스 논란 속 “포트폴리오 관리보다 분쟁 집중” 비판도 MBK파트너스가 고려아연 경영권 분쟁과 관련해 미국 현지 로비 활동을 확대하고 있다. 업계에서는 단순 경영권 분쟁을 넘어 핵심 광물 공급망과 미국 안보 이슈까지 연결되는 양상이라는…",
-        "category": "주주행동·경영권",
-        "datetime": "05.17 16:00",
-        "source_line": "INEWS24",
+        "id": "story-21",
+        "title": "상장폐지 기로에 선 유틸렉스, 거래정지 기간 연장... 이의신청 결과 주목",
+        "summary": "상장폐지 기로에 선 유틸렉스, 거래정지 기간 연장... 이의신청 결과 주목 데이터투자",
+        "category": "자본시장 제도·공시",
+        "datetime": "05.18 20:36",
+        "source_line": "DATATOOZA",
         "link_count": 1,
-        "url": "https://www.inews24.com/view/1969144",
+        "url": "https://www.datatooza.com/article/20260518184149567852ef3090d5_80",
         "links": [
           {
-            "source": "INEWS24",
-            "title": "MBK, 美 로비 확대…고려아연 분쟁 안보전 번지나",
-            "url": "https://www.inews24.com/view/1969144"
+            "source": "DATATOOZA",
+            "title": "상장폐지 기로에 선 유틸렉스, 거래정지 기간 연장... 이의신청 결과 주목",
+            "url": "https://www.datatooza.com/article/20260518184149567852ef3090d5_80"
           }
         ]
       },
       "right": {
-        "id": "story-2",
-        "title": "MBK, 고려아연 분쟁 관련 美 로비업체 추가 선임",
-        "summary": "MBK파트너스가 고려아연 경영권 분쟁과 관련해 미국 현지 로비를 강화하는 모양새다.17일 업계에 따르면 MBK파트너스는 미국 현지 로비업체를 추가로 선임했다. 고려아연의 미국 테네시주 통합 제련소 건설 사업과 핵심광물 공급망 이슈가 경영권 분쟁의 주요 쟁점으로 부상하면서 MBK도 미국…",
-        "category": "주주행동·경영권",
-        "datetime": "05.17 09:38",
-        "source_line": "ZDNET",
+        "id": "story-23",
+        "title": "인크레더블버즈 상장폐지 사유 발생... 주권매매거래정지 기간 이의신청 결정일까지 변경",
+        "summary": "인크레더블버즈 상장폐지 사유 발생... 주권매매거래정지 기간 이의신청 결정일까지 변경 데이터투자",
+        "category": "자본시장 제도·공시",
+        "datetime": "05.18 18:42",
+        "source_line": "DATATOOZA",
         "link_count": 1,
-        "url": "https://zdnet.co.kr/view?no=20260517012845",
+        "url": "https://www.datatooza.com/article/20260518184229541652ef37b9fc_80",
         "links": [
           {
-            "source": "ZDNET",
-            "title": "MBK, 고려아연 분쟁 관련 美 로비업체 추가 선임",
-            "url": "https://zdnet.co.kr/view?no=20260517012845"
+            "source": "DATATOOZA",
+            "title": "인크레더블버즈 상장폐지 사유 발생... 주권매매거래정지 기간 이의신청 결정일까지 변경",
+            "url": "https://www.datatooza.com/article/20260518184229541652ef37b9fc_80"
+          }
+        ]
+      }
+    },
+    {
+      "id": "13d0dc5ba7a0",
+      "score": 88.7,
+      "left": {
+        "id": "story-5",
+        "title": "삼성전자 소액주주, 노조 15% 이익연동 성과급 요구에 법적 대응 추진 - Traders Union",
+        "summary": "한국 주주행동주의 본부는 성과급 구조가 주주 재산권에 부정적 영향을 줄 수 있다며 법적 대응과 원고단 모집을 예고했다. 노조 요구 미수용 시 약 5만명 ...",
+        "category": "주주행동·경영권",
+        "datetime": "05.18 15:48",
+        "source_line": "TRADERSUNION · POPCORNNEWS",
+        "link_count": 2,
+        "url": "https://tradersunion.com/ko/news/financial-news/show/2070261-samsung-shareholders-union-bonus-lawsuit",
+        "links": [
+          {
+            "source": "TRADERSUNION",
+            "title": "삼성전자 소액주주, 노조 15% 이익연동 성과급 요구에 법적 대응 추진 - Traders Union",
+            "url": "https://tradersunion.com/ko/news/financial-news/show/2070261-samsung-shareholders-union-bonus-lawsuit"
+          },
+          {
+            "source": "POPCORNNEWS",
+            "title": "삼성전자 소액주주, 노조 몽니에 성과급 반대 한 목소리",
+            "url": "http://www.popcornnews.net/news/articleView.html?idxno=121636"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-13",
+        "title": "삼성전자 소액주주 영업이익 15% 성과급, 상법 위반·재산권 침해 소지 소송 예고",
+        "summary": "삼성전자(005930) 소액주주 단체가 노동조합이 요구하는 ‘영업이익 15% 성과급’ 지급안에 대해 “영업이익과 자동으로 연결해 성과급을 일괄 지급하는 구조는 상법상 자본충실 원칙과 배당 관련 법리와 상충할 소지가 있다”고 주장했다. 주주운동본부는 노조의 성과급 지급안 ...",
+        "category": "주주행동·경영권",
+        "datetime": "05.18 15:06",
+        "source_line": "SEDAILY",
+        "link_count": 1,
+        "url": "https://www.sedaily.com/article/20045384",
+        "links": [
+          {
+            "source": "SEDAILY",
+            "title": "삼성전자 소액주주 영업이익 15% 성과급, 상법 위반·재산권 침해 소지 소송 예고",
+            "url": "https://www.sedaily.com/article/20045384"
+          }
+        ]
+      }
+    },
+    {
+      "id": "bd8872a946e2",
+      "score": 85.9,
+      "left": {
+        "id": "story-25",
+        "title": "하나증권, 홍콩 푸투증권 VIP 초청 코리아 밸류업 투자포럼 개최…해외 자금 유치 확대 - 투데이e코노믹",
+        "summary": "하나증권, 홍콩 푸투증권 VIP 초청 ‘코리아 밸류업 투자포럼’ 개최…해외 자금 유치 확대 투데이e코노믹",
+        "category": "밸류업·주주환원",
+        "datetime": "05.18 15:50",
+        "source_line": "TODAYECONOMIC",
+        "link_count": 1,
+        "url": "https://www.todayeconomic.com/news/article.html?no=30623",
+        "links": [
+          {
+            "source": "TODAYECONOMIC",
+            "title": "하나증권, 홍콩 푸투증권 VIP 초청 코리아 밸류업 투자포럼 개최…해외 자금 유치 확대 - 투데이e코노믹",
+            "url": "https://www.todayeconomic.com/news/article.html?no=30623"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-26",
+        "title": "해외 큰손들 서울로 모셨다…하나증권, 코리아 밸류업 투자 포럼 성료",
+        "summary": "“해외 큰손들 서울로 모셨다”…하나증권, ‘코리아 밸류업 투자 포럼’ 성료 thefairnews.co.kr",
+        "category": "밸류업·주주환원",
+        "datetime": "05.18 11:01",
+        "source_line": "THEFAIRNEWS",
+        "link_count": 1,
+        "url": "https://www.thefairnews.co.kr/news/articleView.html?idxno=77209",
+        "links": [
+          {
+            "source": "THEFAIRNEWS",
+            "title": "해외 큰손들 서울로 모셨다…하나증권, 코리아 밸류업 투자 포럼 성료",
+            "url": "https://www.thefairnews.co.kr/news/articleView.html?idxno=77209"
           }
         ]
       }

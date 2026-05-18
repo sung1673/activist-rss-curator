@@ -57,9 +57,9 @@
       <h1>묶음 후보 관리자</h1>
       <p class="lead">데일리 기사 중 “같은 이슈로 묶였어야 했는데 분리됐을 가능성이 있는 후보”를 자동으로 추립니다. 이 화면에서 후보를 확인하고, 필요한 경우 <code>data/story_rules.yaml</code> 또는 묶음 로직 보강 작업으로 이어갑니다.</p>
       <div class="meta">
-        <span>2026-05-18</span>
-        <span>2026-05-17 06:54 KST - 2026-05-18 06:54 KST</span>
-        <span>후보 1건</span>
+        <span>2026-05-19</span>
+        <span>2026-05-18 07:04 KST - 2026-05-19 07:04 KST</span>
+        <span>후보 6건</span>
       </div>
     </header>
 
@@ -80,50 +80,297 @@
         <a href="latest.html">최신 데일리로 돌아가기</a>
       </div>
 
-      <article class="candidate" data-candidate-id="fd4a960845d0">
+      <article class="candidate" data-candidate-id="569e4ed609dd">
         <div class="candidate__head">
           <div>
-            <span class="candidate__score">점수 88.1</span>
+            <span class="candidate__score">점수 107.4</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 52.3</span>
+          <span>내용 57.4</span>
+          <span>회사 데이터투자</span>
+          <span>사건 거래정지, 기간, 데이터투자, 상장폐지, 상폐심사, 이의신청</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">자본시장 제도·공시 · 05.18 20:36 · 1건</div>
+            <h3><a href="https://www.datatooza.com/article/20260518184149567852ef3090d5_80" target="_blank" rel="noopener">상장폐지 기로에 선 유틸렉스, 거래정지 기간 연장... 이의신청 결과 주목</a></h3>
+            <p>상장폐지 기로에 선 유틸렉스, 거래정지 기간 연장... 이의신청 결과 주목 데이터투자</p>
+            <div class="story-mini__sources">DATATOOZA</div>
+            <ul><li><a href="https://www.datatooza.com/article/20260518184149567852ef3090d5_80" target="_blank" rel="noopener">상장폐지 기로에 선 유틸렉스, 거래정지 기간 연장... 이의신청 결과 주목</a><span>DATATOOZA</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">자본시장 제도·공시 · 05.18 18:42 · 1건</div>
+            <h3><a href="https://www.datatooza.com/article/20260518184229541652ef37b9fc_80" target="_blank" rel="noopener">인크레더블버즈 상장폐지 사유 발생... 주권매매거래정지 기간 이의신청 결정일까지 변경</a></h3>
+            <p>인크레더블버즈 상장폐지 사유 발생... 주권매매거래정지 기간 이의신청 결정일까지 변경 데이터투자</p>
+            <div class="story-mini__sources">DATATOOZA</div>
+            <ul><li><a href="https://www.datatooza.com/article/20260518184229541652ef37b9fc_80" target="_blank" rel="noopener">인크레더블버즈 상장폐지 사유 발생... 주권매매거래정지 기간 이의신청 결정일까지 변경</a><span>DATATOOZA</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_569e4ed609dd
+  tokens:
+    - 거래정지
+    - 기간
+    - 데이터투자
+  require_any_groups:
+    - [데이터투자]
+    - [거래정지, 기간, 데이터투자, 상장폐지, 이의신청]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
+
+      <article class="candidate" data-candidate-id="13d0dc5ba7a0">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 88.7</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 48.0</span>
+          <span>내용 43.0</span>
+          <span>회사 삼성전자</span>
+          <span>사건 15, 삼성전자, 성과급, 소액주주</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 05.18 15:48 · 2건</div>
+            <h3><a href="https://tradersunion.com/ko/news/financial-news/show/2070261-samsung-shareholders-union-bonus-lawsuit" target="_blank" rel="noopener">삼성전자 소액주주, 노조 15% 이익연동 성과급 요구에 법적 대응 추진 - Traders Union</a></h3>
+            <p>한국 주주행동주의 본부는 성과급 구조가 주주 재산권에 부정적 영향을 줄 수 있다며 법적 대응과 원고단 모집을 예고했다. 노조 요구 미수용 시 약 5만명 ...</p>
+            <div class="story-mini__sources">TRADERSUNION · POPCORNNEWS</div>
+            <ul><li><a href="https://tradersunion.com/ko/news/financial-news/show/2070261-samsung-shareholders-union-bonus-lawsuit" target="_blank" rel="noopener">삼성전자 소액주주, 노조 15% 이익연동 성과급 요구에 법적 대응 추진 - Traders Union</a><span>TRADERSUNION</span></li>
+<li><a href="http://www.popcornnews.net/news/articleView.html?idxno=121636" target="_blank" rel="noopener">삼성전자 소액주주, 노조 몽니에 성과급 반대 한 목소리</a><span>POPCORNNEWS</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 05.18 15:06 · 1건</div>
+            <h3><a href="https://www.sedaily.com/article/20045384" target="_blank" rel="noopener">삼성전자 소액주주 영업이익 15% 성과급, 상법 위반·재산권 침해 소지 소송 예고</a></h3>
+            <p>삼성전자(005930) 소액주주 단체가 노동조합이 요구하는 ‘영업이익 15% 성과급’ 지급안에 대해 “영업이익과 자동으로 연결해 성과급을 일괄 지급하는 구조는 상법상 자본충실 원칙과 배당 관련 법리와 상충할 소지가 있다”고 주장했다. 주주운동본부는 노조의 성과급 지급안 ...</p>
+            <div class="story-mini__sources">SEDAILY</div>
+            <ul><li><a href="https://www.sedaily.com/article/20045384" target="_blank" rel="noopener">삼성전자 소액주주 영업이익 15% 성과급, 상법 위반·재산권 침해 소지 소송 예고</a><span>SEDAILY</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_13d0dc5ba7a0
+  tokens:
+    - 15
+    - 삼성전자
+    - 성과급
+  require_any_groups:
+    - [삼성전자]
+    - [15, 삼성전자, 성과급, 소액주주]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
+
+      <article class="candidate" data-candidate-id="bd8872a946e2">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 85.9</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 37.9</span>
+          <span>내용 38.2</span>
+          <span>회사 하나증권</span>
+          <span>사건 밸류업, 코리아, 하나증권, 해외</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">밸류업·주주환원 · 05.18 15:50 · 1건</div>
+            <h3><a href="https://www.todayeconomic.com/news/article.html?no=30623" target="_blank" rel="noopener">하나증권, 홍콩 푸투증권 VIP 초청 코리아 밸류업 투자포럼 개최…해외 자금 유치 확대 - 투데이e코노믹</a></h3>
+            <p>하나증권, 홍콩 푸투증권 VIP 초청 ‘코리아 밸류업 투자포럼’ 개최…해외 자금 유치 확대 투데이e코노믹</p>
+            <div class="story-mini__sources">TODAYECONOMIC</div>
+            <ul><li><a href="https://www.todayeconomic.com/news/article.html?no=30623" target="_blank" rel="noopener">하나증권, 홍콩 푸투증권 VIP 초청 코리아 밸류업 투자포럼 개최…해외 자금 유치 확대 - 투데이e코노믹</a><span>TODAYECONOMIC</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">밸류업·주주환원 · 05.18 11:01 · 1건</div>
+            <h3><a href="https://www.thefairnews.co.kr/news/articleView.html?idxno=77209" target="_blank" rel="noopener">해외 큰손들 서울로 모셨다…하나증권, 코리아 밸류업 투자 포럼 성료</a></h3>
+            <p>“해외 큰손들 서울로 모셨다”…하나증권, ‘코리아 밸류업 투자 포럼’ 성료 thefairnews.co.kr</p>
+            <div class="story-mini__sources">THEFAIRNEWS</div>
+            <ul><li><a href="https://www.thefairnews.co.kr/news/articleView.html?idxno=77209" target="_blank" rel="noopener">해외 큰손들 서울로 모셨다…하나증권, 코리아 밸류업 투자 포럼 성료</a><span>THEFAIRNEWS</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_bd8872a946e2
+  tokens:
+    - 밸류업
+    - 코리아
+    - 하나증권
+  require_any_groups:
+    - [하나증권]
+    - [밸류업, 코리아, 하나증권, 해외]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
+
+      <article class="candidate" data-candidate-id="41d2d76b4841">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 81.6</span>
             <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
           </div>
           <label><input type="checkbox" data-review-done> 확인 완료</label>
         </div>
         <div class="candidate__signals">
           <span>제목 50.0</span>
-          <span>내용 50.6</span>
-          <span>회사 고려아연</span>
-          <span>사건 17일, mbk, mbk파트너스가, 경영권, 고려아연, 관련해, 따르면, 미국, 분쟁, 분쟁과, 선임, 업계에, 추가, 현지</span>
+          <span>내용 55.3</span>
+          <span>회사 삼성전자</span>
+          <span>사건 15, 단체가, 대해, 배당, 법리와, 삼성전자, 상법상, 성과급, 소액주주, 영업이익, 원칙과, 있다</span>
         </div>
         <div class="candidate__stories">
 
           <section class="story-mini">
-            <div class="story-mini__meta">주주행동·경영권 · 05.17 16:00 · 1건</div>
-            <h3><a href="https://www.inews24.com/view/1969144" target="_blank" rel="noopener">MBK, 美 로비 확대…고려아연 분쟁 안보전 번지나</a></h3>
-            <p>체크메이트 추가 선임…CFIUS 대응망 확대 홈플러스 논란 속 “포트폴리오 관리보다 분쟁 집중” 비판도 MBK파트너스가 고려아연 경영권 분쟁과 관련해 미국 현지 로비 활동을 확대하고 있다. 업계에서는 단순 경영권 분쟁을 넘어 핵심 광물 공급망과 미국 안보 이슈까지 연결되는 양상이라는…</p>
-            <div class="story-mini__sources">INEWS24</div>
-            <ul><li><a href="https://www.inews24.com/view/1969144" target="_blank" rel="noopener">MBK, 美 로비 확대…고려아연 분쟁 안보전 번지나</a><span>INEWS24</span></li></ul>
+            <div class="story-mini__meta">주주행동·경영권 · 05.18 15:06 · 1건</div>
+            <h3><a href="https://www.sedaily.com/article/20045384" target="_blank" rel="noopener">삼성전자 소액주주 영업이익 15% 성과급, 상법 위반·재산권 침해 소지 소송 예고</a></h3>
+            <p>삼성전자(005930) 소액주주 단체가 노동조합이 요구하는 ‘영업이익 15% 성과급’ 지급안에 대해 “영업이익과 자동으로 연결해 성과급을 일괄 지급하는 구조는 상법상 자본충실 원칙과 배당 관련 법리와 상충할 소지가 있다”고 주장했다. 주주운동본부는 노조의 성과급 지급안 ...</p>
+            <div class="story-mini__sources">SEDAILY</div>
+            <ul><li><a href="https://www.sedaily.com/article/20045384" target="_blank" rel="noopener">삼성전자 소액주주 영업이익 15% 성과급, 상법 위반·재산권 침해 소지 소송 예고</a><span>SEDAILY</span></li></ul>
           </section>
 
 
           <section class="story-mini">
-            <div class="story-mini__meta">주주행동·경영권 · 05.17 09:38 · 1건</div>
-            <h3><a href="https://zdnet.co.kr/view?no=20260517012845" target="_blank" rel="noopener">MBK, 고려아연 분쟁 관련 美 로비업체 추가 선임</a></h3>
-            <p>MBK파트너스가 고려아연 경영권 분쟁과 관련해 미국 현지 로비를 강화하는 모양새다.17일 업계에 따르면 MBK파트너스는 미국 현지 로비업체를 추가로 선임했다. 고려아연의 미국 테네시주 통합 제련소 건설 사업과 핵심광물 공급망 이슈가 경영권 분쟁의 주요 쟁점으로 부상하면서 MBK도 미국…</p>
-            <div class="story-mini__sources">ZDNET</div>
-            <ul><li><a href="https://zdnet.co.kr/view?no=20260517012845" target="_blank" rel="noopener">MBK, 고려아연 분쟁 관련 美 로비업체 추가 선임</a><span>ZDNET</span></li></ul>
+            <div class="story-mini__meta">밸류업·주주환원 · 05.18 14:31 · 1건</div>
+            <h3><a href="https://www.yna.co.kr/view/AKR20260518099800003" target="_blank" rel="noopener">삼성전자 주주단체 영업익 연동 성과급 상법상 원칙과 충돌</a></h3>
+            <p>(서울=연합뉴스) 임성호 기자 = 삼성전자 소액주주 단체가 노동조합의 &#x27;영업이익 15% 성과급&#x27; 지급 요구에 대해 &quot;영업이익에 기계적으로 연동된 성과급 일률 지급 방식은 상법상 자본충실의 원칙 및 배당 법리와 충돌할 수 있다&quot;고 지적했다. 소액주주 단체인 &#x27;대한민국 주주운동본부&#x27;는 1…</p>
+            <div class="story-mini__sources">연합뉴스</div>
+            <ul><li><a href="https://www.yna.co.kr/view/AKR20260518099800003" target="_blank" rel="noopener">삼성전자 주주단체 영업익 연동 성과급 상법상 원칙과 충돌</a><span>연합뉴스</span></li></ul>
           </section>
 
         </div>
         <details class="rule">
           <summary>story_rules.yaml 초안 보기</summary>
-          <pre>- id: review_fd4a960845d0
+          <pre>- id: review_41d2d76b4841
   tokens:
-    - 17일
-    - mbk
-    - mbk파트너스가
+    - 15
+    - 단체가
+    - 대해
   require_any_groups:
-    - [고려아연]
-    - [17일, mbk, mbk파트너스가, 경영권, 고려아연, 분쟁]</pre>
+    - [삼성전자]
+    - [15, 단체가, 대해, 배당, 삼성전자, 성과급]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
+
+      <article class="candidate" data-candidate-id="b03e06611bd0">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 78.0</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 41.0</span>
+          <span>내용 41.1</span>
+          <span>회사 삼성전자</span>
+          <span>사건 15, 삼성전자, 성과급, 소액주주, 요구에</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 05.18 15:48 · 2건</div>
+            <h3><a href="https://tradersunion.com/ko/news/financial-news/show/2070261-samsung-shareholders-union-bonus-lawsuit" target="_blank" rel="noopener">삼성전자 소액주주, 노조 15% 이익연동 성과급 요구에 법적 대응 추진 - Traders Union</a></h3>
+            <p>한국 주주행동주의 본부는 성과급 구조가 주주 재산권에 부정적 영향을 줄 수 있다며 법적 대응과 원고단 모집을 예고했다. 노조 요구 미수용 시 약 5만명 ...</p>
+            <div class="story-mini__sources">TRADERSUNION · POPCORNNEWS</div>
+            <ul><li><a href="https://tradersunion.com/ko/news/financial-news/show/2070261-samsung-shareholders-union-bonus-lawsuit" target="_blank" rel="noopener">삼성전자 소액주주, 노조 15% 이익연동 성과급 요구에 법적 대응 추진 - Traders Union</a><span>TRADERSUNION</span></li>
+<li><a href="http://www.popcornnews.net/news/articleView.html?idxno=121636" target="_blank" rel="noopener">삼성전자 소액주주, 노조 몽니에 성과급 반대 한 목소리</a><span>POPCORNNEWS</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">밸류업·주주환원 · 05.18 14:31 · 1건</div>
+            <h3><a href="https://www.yna.co.kr/view/AKR20260518099800003" target="_blank" rel="noopener">삼성전자 주주단체 영업익 연동 성과급 상법상 원칙과 충돌</a></h3>
+            <p>(서울=연합뉴스) 임성호 기자 = 삼성전자 소액주주 단체가 노동조합의 &#x27;영업이익 15% 성과급&#x27; 지급 요구에 대해 &quot;영업이익에 기계적으로 연동된 성과급 일률 지급 방식은 상법상 자본충실의 원칙 및 배당 법리와 충돌할 수 있다&quot;고 지적했다. 소액주주 단체인 &#x27;대한민국 주주운동본부&#x27;는 1…</p>
+            <div class="story-mini__sources">연합뉴스</div>
+            <ul><li><a href="https://www.yna.co.kr/view/AKR20260518099800003" target="_blank" rel="noopener">삼성전자 주주단체 영업익 연동 성과급 상법상 원칙과 충돌</a><span>연합뉴스</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_b03e06611bd0
+  tokens:
+    - 15
+    - 삼성전자
+    - 성과급
+  require_any_groups:
+    - [삼성전자]
+    - [15, 삼성전자, 성과급, 소액주주]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
+
+      <article class="candidate" data-candidate-id="21c0e829b97f">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 73.9</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 21.3</span>
+          <span>내용 35.5</span>
+          <span>회사 삼성전자</span>
+          <span>사건 삼성전자, 성과급, 영업이익, 있다</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 05.18 15:06 · 1건</div>
+            <h3><a href="https://www.sedaily.com/article/20045384" target="_blank" rel="noopener">삼성전자 소액주주 영업이익 15% 성과급, 상법 위반·재산권 침해 소지 소송 예고</a></h3>
+            <p>삼성전자(005930) 소액주주 단체가 노동조합이 요구하는 ‘영업이익 15% 성과급’ 지급안에 대해 “영업이익과 자동으로 연결해 성과급을 일괄 지급하는 구조는 상법상 자본충실 원칙과 배당 관련 법리와 상충할 소지가 있다”고 주장했다. 주주운동본부는 노조의 성과급 지급안 ...</p>
+            <div class="story-mini__sources">SEDAILY</div>
+            <ul><li><a href="https://www.sedaily.com/article/20045384" target="_blank" rel="noopener">삼성전자 소액주주 영업이익 15% 성과급, 상법 위반·재산권 침해 소지 소송 예고</a><span>SEDAILY</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 05.18 14:53 · 1건</div>
+            <h3><a href="https://www.seoul.co.kr/news/economy/securities/2026/05/18/20260518500161" target="_blank" rel="noopener">주총 열자는 개미들…노사 갈등에 등장한 제3의 플레이어</a></h3>
+            <p>삼성전자 노사의 영업이익 연동 성과급 갈등에 소액주주들이 뛰어들었다. 액트 조사에서 95%가 고정 성과급 제도화에 반대했고, 임시주총 소집까지 요구했다. 주주권 강화 흐름 속에 노사 갈등이 경영·배분 문제로 번지고 있다.</p>
+            <div class="story-mini__sources">SEOUL</div>
+            <ul><li><a href="https://www.seoul.co.kr/news/economy/securities/2026/05/18/20260518500161" target="_blank" rel="noopener">주총 열자는 개미들…노사 갈등에 등장한 제3의 플레이어</a><span>SEOUL</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_21c0e829b97f
+  tokens:
+    - 삼성전자
+    - 성과급
+    - 영업이익
+  require_any_groups:
+    - [삼성전자]
+    - [삼성전자, 성과급, 영업이익, 있다]</pre>
           <button type="button" data-copy-rule>규칙 초안 복사</button>
         </details>
       </article>
@@ -131,7 +378,7 @@
     </section>
   </main>
   <script>
-    const REVIEW = {"accessTokenHash": "7bdf33924ae2f63973a383247e994a0681d0a288ca2df20d5f70c51a333def01", "candidateCount": 1, "candidateHash": "013bd81f636e481f"};
+    const REVIEW = {"accessTokenHash": "7bdf33924ae2f63973a383247e994a0681d0a288ca2df20d5f70c51a333def01", "candidateCount": 6, "candidateHash": "cb4a68245f1fdaf6"};
     const gate = document.getElementById('gate');
     const content = document.getElementById('content');
     const tokenInput = document.getElementById('tokenInput');
