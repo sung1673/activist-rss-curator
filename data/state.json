@@ -168719,8 +168719,8 @@
       "title_hash": "8c73396fa90cf82a2a384f68"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMic0FVX3lxTE82S2kzRmxDUWxmZU4tanhNMW94THpvM2hnY1pSR1hyUkpPQmNJTjlLaWhMYVVhNW5lVjI4MTdoQkp6NUFyWVIzb3ZaTFJpaTlKM0xJVWw3OWFHZzFfcWxQOF9hSFg1eEZUUjEwU2RBSUZCN3c?oc=5",
-      "canonical_url_hash": "d1463f223d7d2e4b26d906dc",
+      "canonical_url": "https://marketin.edaily.co.kr/News/ReadE?newsId=01252966645450560",
+      "canonical_url_hash": "999ac57bff17d7be21462357",
       "duplicate_matches": [
         {
           "canonical_url": "https://marketin.edaily.co.kr/News/ReadE?newsId=01252966645450560",
@@ -168740,8 +168740,13 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-행동주의",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMic0FVX3lxTE82S2kzRmxDUWxmZU4tanhNMW94THpvM2hnY1pSR1hyUkpPQmNJTjlLaWhMYVVhNW5lVjI4MTdoQkp6NUFyWVIzb3ZaTFJpaTlKM0xJVWw3OWFHZzFfcWxQOF9hSFg1eEZUUjEwU2RBSUZCN3c?oc=5",
+      "image_candidates": [
+        "https://marketin.edaily.co.kr/_next/image?q=75&url=%2F_next%2Fstatic%2Fmedia%2Fright_300x250.9bba24f0.png&w=640",
+        "https://marketin.edaily.co.kr/_next/image?q=75&url=https%3A%2F%2Fimage.edaily.co.kr%2Fimages%2Fvision%2Ffiles%2FNP%2FS%2F2026%2F05%2FPS26051801072b.jpg&w=640"
+      ],
+      "image_url": "https://marketin.edaily.co.kr/_next/image?q=75&url=%2F_next%2Fstatic%2Fmedia%2Fright_300x250.9bba24f0.png&w=640",
       "normalized_title": "바이오래드 행동주의펀드 엘리엇 지분 인수 소식에 급등",
       "priority_level": "watch",
       "priority_reasons": [
@@ -168770,8 +168775,9 @@
       "title_hash": "7664bdd4ac6ce98b47d13fec"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiX0FVX3lxTE83SzlTTlk3NlhZcmpiclIwcjhlb0pyZHJiVlp6LWhnOEgzR2FvV1diOUV1all3Zy00SDNvcHZvbTEzU1MtelA3YmZlX3lhUzdwdEhscm9yWFhFVTRLRHZB?oc=5",
-      "canonical_url_hash": "d65638dcd3a9d2e1ae42d59f",
+      "article_published_at": "2026-05-18T10:22:46+09:00",
+      "canonical_url": "https://www.news1.kr/finance/general-stock/6169743",
+      "canonical_url_hash": "ba836190809dbb05f0a1406a",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.msn.com/ko-kr/money/%EA%B2%BD%EC%A0%9C/%EC%86%8C%EC%95%A1%EC%A3%BC%EC%A3%BC-%ED%94%8C%EB%9E%AB%ED%8F%BC-%EC%82%BC%EC%84%B1%EC%A0%84%EC%9E%90-%EC%A3%BC%EC%A3%BC-%EC%98%81%EC%97%85%EC%9D%B5-%EC%97%B0%EB%8F%99-%EC%84%B1%EA%B3%BC%EA%B8%89-%EC%A0%9C%EB%8F%84%ED%99%94-95-%EB%B0%98%EB%8C%80/ar-AA23ofVe",
@@ -168804,8 +168810,13 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-소액주주",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiX0FVX3lxTE83SzlTTlk3NlhZcmpiclIwcjhlb0pyZHJiVlp6LWhnOEgzR2FvV1diOUV1all3Zy00SDNvcHZvbTEzU1MtelA3YmZlX3lhUzdwdEhscm9yWFhFVTRLRHZB?oc=5",
+      "image_candidates": [
+        "https://i3n.news1.kr/system/photos/2026/5/17/7910053/high.jpg",
+        "https://www.news1.kr/_next/image?q=75&url=https%3A%2F%2Fi3n.news1.kr%2Fsystem%2Fphotos%2F2026%2F5%2F17%2F7910053%2Fhigh.jpg&w=1920"
+      ],
+      "image_url": "https://i3n.news1.kr/system/photos/2026/5/17/7910053/high.jpg",
       "normalized_title": "소액주주 단체 삼성전자 성과급 제도화 주주 95% 반대",
       "priority_level": "watch",
       "priority_reasons": [
@@ -168832,8 +168843,9 @@
       "title_hash": "20923bae05ae2559114fe383"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiVEFVX3lxTFBCWDV1allaMTdtWGozNnYwN25weFFaWllUR0FnLThRQUNjR1J0Y1lPOXFzc3hXbG50NDMwMFVKQzhtX25pd2tKbG5TSG5xQ3RhYWlOTg?oc=5",
-      "canonical_url_hash": "425964946acaa9a839141e31",
+      "article_published_at": "2026-05-18T05:00:00+09:00",
+      "canonical_url": "https://www.etoday.co.kr/news/view/2585211",
+      "canonical_url_hash": "2062555a4c544ca3f073b3b0",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.msn.com/ko-kr/news/other/%EB%8B%A8%EB%8F%85-%EC%9E%90%ED%9A%8C%EC%82%AC-%EC%83%81%EC%9E%A5-%EC%86%8C%EC%95%A1%EC%A3%BC%EC%A3%BC-%EA%B3%BC%EB%B0%98-%EB%8F%99%EC%9D%98-%EB%B0%9B%EB%8A%94%EB%8B%A4-%EA%B5%AD%EB%82%B4-%EC%B2%AB-%EC%82%AC%EB%A1%80-%EC%A4%91%EB%B3%B5%EC%83%81%EC%9E%A5-%EC%98%88%EC%99%B8%ED%97%88%EC%9A%A9-%EA%B8%B0%EC%A4%80/ar-AA23qIWw",
@@ -168853,8 +168865,25 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-중복상장 모회사 주주 보호",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiVEFVX3lxTFBCWDV1allaMTdtWGozNnYwN25weFFaWllUR0FnLThRQUNjR1J0Y1lPOXFzc3hXbG50NDMwMFVKQzhtX25pd2tKbG5TSG5xQ3RhYWlOTg?oc=5",
+      "image_candidates": [
+        "https://img.etoday.co.kr/pto_db/2026/05/20260517170335_2334561_1199_826.jpg",
+        "https://img.etoday.co.kr/pto_db/2026/05/600/20260517170335_2334561_1199_826.jpg",
+        "https://img.etoday.co.kr/crop/140/88/2334070.jpg",
+        "https://img.etoday.co.kr/crop/140/88/2335020.jpg",
+        "https://img.etoday.co.kr/crop/140/88/2335042.jpg",
+        "https://img.etoday.co.kr/crop/140/88/2334900.jpg",
+        "https://img.etoday.co.kr/crop/140/88/2335036.jpg",
+        "https://img.etoday.co.kr/crop/140/88/2335108.jpg",
+        "https://img.etoday.co.kr/crop/140/88/2335113.jpg",
+        "https://img.etoday.co.kr/crop/140/88/2334546.jpg",
+        "https://img.etoday.co.kr/web/eto_ad/e_pc_poli_uni_300_80.jpg",
+        "https://i.ytimg.com/vi/SmMlYFmNc4s/mqdefault.jpg",
+        "https://img.etoday.co.kr/crop/300/170/2334966.jpg",
+        "https://img.etoday.co.kr/crop/300/190/2334988.jpg"
+      ],
+      "image_url": "https://img.etoday.co.kr/pto_db/2026/05/20260517170335_2334561_1199_826.jpg",
       "normalized_title": "자회사 상장 소액주주 과반 동의 받는다… 국내 첫 사례 중복상장 예외허용 기준 ①",
       "priority_level": "watch",
       "priority_reasons": [
@@ -168882,8 +168911,9 @@
       "title_hash": "7732a28c408dfea5914270c2"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE5oZFZsUXZoQ29kOTk5Z2t3WXY4ZnNHMTcxOWpmakEyTWxBenJGaEhXX3paU0dCT1NaOFJ4YjQ0WFA4TzM1OUlDZVprMm14TWxVSEVVRjVwQTlWalNaVlh0SE5haEwtOXdNVGlKREtXTDHSAXBBVV95cUxOaGRWbFF2aENvZDk5OWdrd1l2OGZzRzE3MTlqZmpBMk1sQXpyRmhIV196WlNHQk9TWjhSeGI0NFhQOE8zNTlJQ2VaazJteE1sVUhFVUY1cEE5VmpTWlZYdEhOYWhMLTl3TVRpSkRLV0wx?oc=5",
-      "canonical_url_hash": "5eafb1084f174275542c5004",
+      "article_published_at": "2026-05-18T00:00:00+09:00",
+      "canonical_url": "https://www.electimes.com/news/articleView.html?idxno=368149",
+      "canonical_url_hash": "98c209932a2e78690171dc9b",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.electimes.com/news/articleView.html?idxno=368149",
@@ -168903,8 +168933,12 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-유상증자 정정신고서 금감원",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMicEFVX3lxTE5oZFZsUXZoQ29kOTk5Z2t3WXY4ZnNHMTcxOWpmakEyTWxBenJGaEhXX3paU0dCT1NaOFJ4YjQ0WFA4TzM1OUlDZVprMm14TWxVSEVVRjVwQTlWalNaVlh0SE5haEwtOXdNVGlKREtXTDHSAXBBVV95cUxOaGRWbFF2aENvZDk5OWdrd1l2OGZzRzE3MTlqZmpBMk1sQXpyRmhIV196WlNHQk9TWjhSeGI0NFhQOE8zNTlJQ2VaazJteE1sVUhFVUY1cEE5VmpTWlZYdEhOYWhMLTl3TVRpSkRLV0wx?oc=5",
+      "image_candidates": [
+        "https://www.electimes.com/news/photo/202605/368149_579807_4923.png"
+      ],
+      "image_url": "https://www.electimes.com/news/photo/202605/368149_579807_4923.png",
       "normalized_title": "뼈 깎는 자구책 얹은 한화솔루션 금감원 제동 속 1 8조 유상증자 재시동",
       "priority_level": "normal",
       "priority_reasons": [
@@ -168933,8 +168967,9 @@
       "title_hash": "ca7f9bf02287488fc13e90ea"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE1YNGhBUTN6SzhfSkxiZFY1Z2Z1bEdfRmpaWEpJbXVQVXEtQlk2b3ZITFBNR2JxQS10ZllSQVREOVVNNzFEWmRuaUZFYzhGcnFra1Jz0gFTQVVfeXFMTVg0aEFRM3pLOF9KTGJkVjVnZnVsR19GalpYSkltdVBVcS1CWTZvdkhMUE1HYnFBLXRmWVJBVEQ5VU03MURaZG5pRkVjOEZycWtrUnM?oc=5",
-      "canonical_url_hash": "24b55196148bf0eb1a2633ad",
+      "article_published_at": "2026-05-18T18:36:04+09:00",
+      "canonical_url": "https://m.sedaily.com/article/2004553520045535",
+      "canonical_url_hash": "e7787459b40f9248ba5b1d58",
       "duplicate_matches": [
         {
           "canonical_url": "https://m.sedaily.com/article/2004553520045535",
@@ -168953,8 +168988,12 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-ESG 공시 지배구조",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE1YNGhBUTN6SzhfSkxiZFY1Z2Z1bEdfRmpaWEpJbXVQVXEtQlk2b3ZITFBNR2JxQS10ZllSQVREOVVNNzFEWmRuaUZFYzhGcnFra1Jz0gFTQVVfeXFMTVg0aEFRM3pLOF9KTGJkVjVnZnVsR19GalpYSkltdVBVcS1CWTZvdkhMUE1HYnFBLXRmWVJBVEQ5VU03MURaZG5pRkVjOEZycWtrUnM?oc=5",
+      "image_candidates": [
+        "https://wimg.sedaily.com/news/cms/2026/05/18/news-p.v1.20260514.9e4a6a1cbdf646fba03340053d23c9e6_R.jpg"
+      ],
+      "image_url": "https://wimg.sedaily.com/news/cms/2026/05/18/news-p.v1.20260514.9e4a6a1cbdf646fba03340053d23c9e6_R.jpg",
       "normalized_title": "곽병진 한국회계기준원장 esg 공시 늦추면 되레 기업 부담",
       "priority_level": "normal",
       "priority_reasons": [
@@ -168983,8 +169022,9 @@
       "title_hash": "4cad9be5fc6a7596d809b29d"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMibEFVX3lxTE13UTlpY2ItYWFQNDlDeE9nQkZfOGFrRjg0Z3RkVXVrdVFNU3JPcjdFamIwNWJ1elc1c0FydkJ4MlV5YlZoV1lyaE9lbUlyX2FoeV9jSzNaWUtyZ2tpaWZWQy1sTXdHdktJRzhEWQ?oc=5",
-      "canonical_url_hash": "e27a739518734d46327ff101",
+      "article_published_at": "2026-05-18T10:44:18+09:00",
+      "canonical_url": "http://www.ferrotimes.com/news/articleView.html?idxno=48056",
+      "canonical_url_hash": "4ea8613bcc1d07e7842f92de",
       "duplicate_matches": [
         {
           "canonical_url": "http://www.ferrotimes.com/news/articleView.html?idxno=48056",
@@ -169003,8 +169043,14 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-상장폐지 소액주주 투자자 보호",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMibEFVX3lxTE13UTlpY2ItYWFQNDlDeE9nQkZfOGFrRjg0Z3RkVXVrdVFNU3JPcjdFamIwNWJ1elc1c0FydkJ4MlV5YlZoV1lyaE9lbUlyX2FoeV9jSzNaWUtyZ2tpaWZWQy1sTXdHdktJRzhEWQ?oc=5",
+      "image_candidates": [
+        "http://www.ferrotimes.com/news/thumbnail/202605/48056_53551_4112_v150.jpg",
+        "https://www.ferrotimes.com/news/photo/202605/48056_53551_4112.jpg",
+        "https://www.ferrotimes.com/image/newsroom/default-user.png"
+      ],
+      "image_url": "http://www.ferrotimes.com/news/thumbnail/202605/48056_53551_4112_v150.jpg",
       "normalized_title": "대호에이엘 개선계획서 제출…내달 16일까지 상장폐지 가부 - 페로타임즈",
       "priority_level": "normal",
       "priority_reasons": [
@@ -169024,7 +169070,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-19T07:00:03.619904+09:00",
-      "source": "페로타임즈",
+      "source": "페로타임즈(FerroTimes)",
       "status": "duplicate",
       "story_key": "story:aa46cddd6fb02fac",
       "summary": "대호에이엘, 개선계획서 제출…내달 16일까지 상장폐지 ‘가부’ 페로타임즈",
@@ -169032,8 +169078,9 @@
       "title_hash": "aa46cddd6fb02facad9fe6d6"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMic0FVX3lxTE1vRmIzZ3pqRU5mZjFnRGY1dFZ3X3BJbU12bmVnMFFtaXlnMHkwc2haUEN2eXJpVGRyc01DS1VLemp4V3hRS0JzdGhqTGd0OE1xSy1PZGNNSktzWWhrUUlVWGNZSWpZWXFYMG5ZcTVLMGlQVFk?oc=5",
-      "canonical_url_hash": "40690935ebedf29d65e9b08b",
+      "article_published_at": "2026-05-18T20:36:13+09:00",
+      "canonical_url": "https://www.datatooza.com/article/20260518184149567852ef3090d5_80",
+      "canonical_url_hash": "514ec1875728cf5f3a0ad200",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.datatooza.com/article/20260518184149567852ef3090d5_80",
@@ -169053,8 +169100,45 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-상장폐지 소액주주 투자자 보호",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMic0FVX3lxTE1vRmIzZ3pqRU5mZjFnRGY1dFZ3X3BJbU12bmVnMFFtaXlnMHkwc2haUEN2eXJpVGRyc01DS1VLemp4V3hRS0JzdGhqTGd0OE1xSy1PZGNNSktzWWhrUUlVWGNZSWpZWXFYMG5ZcTVLMGlQVFk?oc=5",
+      "image_candidates": [
+        "https://cgeimage.commutil.kr/phpwas/restmb_allidxmake.php?idx=999&nmt=80&pp=002&simg=20260518184148543_darttop1_263050.jpg",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_nh.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_mirae.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_kb.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_ls.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_woori.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_youant.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_hana.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_zum.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_google.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_msn.jpg",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_edaily.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/lng_flag_korea.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/lng_flag_america.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/lng_flag_china.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/lng_flag_japan.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/lng_flag_spain.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/nico_sns01.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/nico_sns02.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/nico_sns03.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/nico_sns04.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/nico_sns05.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/nico_sns06.png",
+        "https://cgeimage.commutil.kr/phpwas/restmb_allidxmake.php?idx=55&nmt=80&pp=002&simg=20260518184148543_darttop1_263050.jpg",
+        "https://cgeimage.commutil.kr/phpwas/restmb_allidxmake.php?idx=595&nmt=80&pp=002&simg=20260518184148543_darttop1_263050.jpg",
+        "https://cgeimage.commutil.kr/phpwas/restmb_allidxmake.php?idx=999&nmt=80&pp=002&simg=202509182025029138edd30f73a8123710344_0.png",
+        "https://cgeimage.commutil.kr/phpwas/restmb_setimgmake.php?h=74&m=12&nmt=80&pp=006&simg=20260518130923098350e80ea657695915251142.jpg&w=100",
+        "https://cgeimage.commutil.kr/phpwas/restmb_setimgmake.php?h=74&m=12&nmt=80&pp=006&simg=20260514123902077660e80ea657695915251142.jpg&w=100",
+        "https://cgeimage.commutil.kr/phpwas/restmb_setimgmake.php?h=74&m=12&nmt=80&pp=006&simg=20260513113135073680e80ea657695822611096.jpg&w=100",
+        "https://cgeimage.commutil.kr/phpwas/restmb_setimgmake.php?h=74&m=12&nmt=80&pp=006&simg=20260513101740022930e80ea657695822611096.jpg&w=100",
+        "https://cgeimage.commutil.kr/phpwas/restmb_setimgmake.php?h=74&m=12&nmt=80&pp=006&simg=20260511105644027120e80ea657695915251142.jpg&w=100",
+        "https://cgeimage.commutil.kr/phpwas/restmb_setimgmake.php?h=74&m=12&nmt=80&pp=006&simg=20260508121506076720e80ea65769211234197189.jpg&w=100",
+        "https://cgeimage.commutil.kr/phpwas/restmb_setimgmake.php?h=74&m=12&nmt=80&pp=006&simg=20260507140219042810e80ea657695915251142.jpg&w=100",
+        "https://cgeimage.commutil.kr/phpwas/restmb_setimgmake.php?h=74&m=12&nmt=80&pp=006&simg=20260507123339067550e80ea657695915251142.jpg&w=100"
+      ],
+      "image_url": "https://cgeimage.commutil.kr/phpwas/restmb_allidxmake.php?idx=999&nmt=80&pp=002&simg=20260518184148543_darttop1_263050.jpg",
       "normalized_title": "상장폐지 기로에 선 유틸렉스 거래정지 기간 연장 이의신청 결과 주목 - 데이터투자",
       "priority_level": "normal",
       "priority_reasons": [
@@ -169083,8 +169167,9 @@
       "title_hash": "b7d0bd3d4246314626b656ea"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiUkFVX3lxTE1zM25NOFA1VGY1Y2lJb0Z2UEJ5M2hnc2JwdE16NmlsV1h2TURhei15TUd3UVNSbHZTVDB0MGlrVFFQem52cWt6MzRaUXZIRF9Fanc?oc=5",
-      "canonical_url_hash": "b747e4077f51131532838535",
+      "article_published_at": "2026-05-18T09:19:55+09:00",
+      "canonical_url": "https://www.mk.co.kr/news/stock/12050637",
+      "canonical_url_hash": "e5507626ccae0e673bf2cfff",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.mk.co.kr/news/stock/12050637",
@@ -169103,8 +169188,25 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-성과보상 지배구조",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiUkFVX3lxTE1zM25NOFA1VGY1Y2lJb0Z2UEJ5M2hnc2JwdE16NmlsV1h2TURhei15TUd3UVNSbHZTVDB0MGlrVFFQem52cWt6MzRaUXZIRF9Fanc?oc=5",
+      "image_candidates": [
+        "https://pimg.mk.co.kr/news/cms/202605/18/rcv.NEWS1.NEWS1.20260506.2026-05-06T144749_1007891846_SOCIETY_I_R.jpg",
+        "https://pimg.mk.co.kr/news/cms/202605/18/news-p.v1.20260120.0ea60afb1f344d0d9cbd161629d7f1b5_R.jpg",
+        "https://static.mk.co.kr/trans_30x13.png",
+        "https://static.mk.co.kr/2026/css/images/ic_myagent_jb.png",
+        "https://wimg.mk.co.kr/news/cms/202605/18/rcv.NEWS1.NEWS1.20260506.2026-05-06T144749_1007891846_SOCIETY_I_P1.jpg",
+        "https://wimg.mk.co.kr/news/cms/202605/18/news-p.v1.20260120.0ea60afb1f344d0d9cbd161629d7f1b5_P1.jpg",
+        "https://wimg.mk.co.kr/news/cms/202605/19/rcv.NEWS1.NEWS1.20260517.2026-05-17T163552_1007910520_SOCIETY_I_R.jpg",
+        "https://wimg.mk.co.kr/news/cms/202605/19/news-p.v1.20260519.187f58f238a5487d9433def0f4f69b72_R.png",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/A12051425_231_20260518214842.png",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/X20260515135816_251_20260515135905.png",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/X20260423093839_251_20260511143320.png",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/X20260506150155_251_20260511143109.jpg",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/X20260422084524_251_20260511143413.png",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/X20260504164003_251_20260511143451.png"
+      ],
+      "image_url": "https://pimg.mk.co.kr/news/cms/202605/18/rcv.NEWS1.NEWS1.20260506.2026-05-06T144749_1007891846_SOCIETY_I_R.jpg",
       "normalized_title": "삼성전자 주주 95% 영업이익 연동 성과급 제도화 반대한다",
       "priority_level": "normal",
       "priority_reasons": [
@@ -169132,8 +169234,9 @@
       "title_hash": "df3ab3b410f85795a89a9b4f"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMic0FVX3lxTE1vRmIzZ3pqRU5mZjFnRGY1dFZ3X3BJbU12bmVnMFFtaXlnMHkwc2haUEN2eXJpVGRyc01DS1VLemp4V3hRS0JzdGhqTGd0OE1xSy1PZGNNSktzWWhrUUlVWGNZSWpZWXFYMG5ZcTVLMGlQVFk?oc=5",
-      "canonical_url_hash": "40690935ebedf29d65e9b08b",
+      "article_published_at": "2026-05-18T20:36:13+09:00",
+      "canonical_url": "https://www.datatooza.com/article/20260518184149567852ef3090d5_80",
+      "canonical_url_hash": "514ec1875728cf5f3a0ad200",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.datatooza.com/article/20260518184149567852ef3090d5_80",
@@ -169153,8 +169256,45 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-거래정지 개선기간",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMic0FVX3lxTE1vRmIzZ3pqRU5mZjFnRGY1dFZ3X3BJbU12bmVnMFFtaXlnMHkwc2haUEN2eXJpVGRyc01DS1VLemp4V3hRS0JzdGhqTGd0OE1xSy1PZGNNSktzWWhrUUlVWGNZSWpZWXFYMG5ZcTVLMGlQVFk?oc=5",
+      "image_candidates": [
+        "https://cgeimage.commutil.kr/phpwas/restmb_allidxmake.php?idx=999&nmt=80&pp=002&simg=20260518184148543_darttop1_263050.jpg",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_nh.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_mirae.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_kb.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_ls.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_woori.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_youant.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_hana.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_zum.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_google.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_msn.jpg",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/coop/coop_edaily.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/lng_flag_korea.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/lng_flag_america.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/lng_flag_china.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/lng_flag_japan.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/lng_flag_spain.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/nico_sns01.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/nico_sns02.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/nico_sns03.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/nico_sns04.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/nico_sns05.png",
+        "https://cgeimage.commutil.kr/datatooza202508_www/img/nico_sns06.png",
+        "https://cgeimage.commutil.kr/phpwas/restmb_allidxmake.php?idx=55&nmt=80&pp=002&simg=20260518184148543_darttop1_263050.jpg",
+        "https://cgeimage.commutil.kr/phpwas/restmb_allidxmake.php?idx=595&nmt=80&pp=002&simg=20260518184148543_darttop1_263050.jpg",
+        "https://cgeimage.commutil.kr/phpwas/restmb_allidxmake.php?idx=999&nmt=80&pp=002&simg=202509182025029138edd30f73a8123710344_0.png",
+        "https://cgeimage.commutil.kr/phpwas/restmb_setimgmake.php?h=74&m=12&nmt=80&pp=006&simg=20260518130923098350e80ea657695915251142.jpg&w=100",
+        "https://cgeimage.commutil.kr/phpwas/restmb_setimgmake.php?h=74&m=12&nmt=80&pp=006&simg=20260514123902077660e80ea657695915251142.jpg&w=100",
+        "https://cgeimage.commutil.kr/phpwas/restmb_setimgmake.php?h=74&m=12&nmt=80&pp=006&simg=20260513113135073680e80ea657695822611096.jpg&w=100",
+        "https://cgeimage.commutil.kr/phpwas/restmb_setimgmake.php?h=74&m=12&nmt=80&pp=006&simg=20260513101740022930e80ea657695822611096.jpg&w=100",
+        "https://cgeimage.commutil.kr/phpwas/restmb_setimgmake.php?h=74&m=12&nmt=80&pp=006&simg=20260511105644027120e80ea657695915251142.jpg&w=100",
+        "https://cgeimage.commutil.kr/phpwas/restmb_setimgmake.php?h=74&m=12&nmt=80&pp=006&simg=20260508121506076720e80ea65769211234197189.jpg&w=100",
+        "https://cgeimage.commutil.kr/phpwas/restmb_setimgmake.php?h=74&m=12&nmt=80&pp=006&simg=20260507140219042810e80ea657695915251142.jpg&w=100",
+        "https://cgeimage.commutil.kr/phpwas/restmb_setimgmake.php?h=74&m=12&nmt=80&pp=006&simg=20260507123339067550e80ea657695915251142.jpg&w=100"
+      ],
+      "image_url": "https://cgeimage.commutil.kr/phpwas/restmb_allidxmake.php?idx=999&nmt=80&pp=002&simg=20260518184148543_darttop1_263050.jpg",
       "normalized_title": "상장폐지 기로에 선 유틸렉스 거래정지 기간 연장 이의신청 결과 주목 - 데이터투자",
       "priority_level": "normal",
       "priority_reasons": [
@@ -169183,8 +169323,9 @@
       "title_hash": "b7d0bd3d4246314626b656ea"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMibEFVX3lxTE13UTlpY2ItYWFQNDlDeE9nQkZfOGFrRjg0Z3RkVXVrdVFNU3JPcjdFamIwNWJ1elc1c0FydkJ4MlV5YlZoV1lyaE9lbUlyX2FoeV9jSzNaWUtyZ2tpaWZWQy1sTXdHdktJRzhEWQ?oc=5",
-      "canonical_url_hash": "e27a739518734d46327ff101",
+      "article_published_at": "2026-05-18T10:44:18+09:00",
+      "canonical_url": "http://www.ferrotimes.com/news/articleView.html?idxno=48056",
+      "canonical_url_hash": "4ea8613bcc1d07e7842f92de",
       "duplicate_matches": [
         {
           "canonical_url": "http://www.ferrotimes.com/news/articleView.html?idxno=48056",
@@ -169203,8 +169344,14 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-거래정지 개선기간",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMibEFVX3lxTE13UTlpY2ItYWFQNDlDeE9nQkZfOGFrRjg0Z3RkVXVrdVFNU3JPcjdFamIwNWJ1elc1c0FydkJ4MlV5YlZoV1lyaE9lbUlyX2FoeV9jSzNaWUtyZ2tpaWZWQy1sTXdHdktJRzhEWQ?oc=5",
+      "image_candidates": [
+        "http://www.ferrotimes.com/news/thumbnail/202605/48056_53551_4112_v150.jpg",
+        "https://www.ferrotimes.com/news/photo/202605/48056_53551_4112.jpg",
+        "https://www.ferrotimes.com/image/newsroom/default-user.png"
+      ],
+      "image_url": "http://www.ferrotimes.com/news/thumbnail/202605/48056_53551_4112_v150.jpg",
       "normalized_title": "대호에이엘 개선계획서 제출…내달 16일까지 상장폐지 가부 - 페로타임즈",
       "priority_level": "normal",
       "priority_reasons": [
@@ -169224,7 +169371,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-19T07:00:03.619904+09:00",
-      "source": "페로타임즈",
+      "source": "페로타임즈(FerroTimes)",
       "status": "duplicate",
       "story_key": "story:aa46cddd6fb02fac",
       "summary": "대호에이엘, 개선계획서 제출…내달 16일까지 상장폐지 ‘가부’ 페로타임즈",
@@ -169232,8 +169379,9 @@
       "title_hash": "aa46cddd6fb02facad9fe6d6"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiVkFVX3lxTE5oclpXWS1fNnlfZV9HcTFlTHhzanJxTkM2d2VPUENhSTQwNmRySzMzZnFOVkZnT3U0ZXVZVkdUTGJHRWNnOTBMVGQ4VnM0SXlSM040NmtB?oc=5",
-      "canonical_url_hash": "13c8f35512b0cdc1bd61a66b",
+      "article_published_at": "2026-05-18T06:12:47+09:00",
+      "canonical_url": "https://www.mk.co.kr/news/business/12050554",
+      "canonical_url_hash": "09e7d48b8ef0ce47c81ea7e9",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.mk.co.kr/news/business/12050554",
@@ -169252,8 +169400,23 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-금융투자회사 성과급",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiVkFVX3lxTE5oclpXWS1fNnlfZV9HcTFlTHhzanJxTkM2d2VPUENhSTQwNmRySzMzZnFOVkZnT3U0ZXVZVkdUTGJHRWNnOTBMVGQ4VnM0SXlSM040NmtB?oc=5",
+      "image_candidates": [
+        "https://pimg.mk.co.kr/news/cms/202605/18/news-g.v1.20260517.27febb95cf1648839adbf7fb98088ffb_R.jpg",
+        "https://static.mk.co.kr/trans_30x13.png",
+        "https://static.mk.co.kr/2026/css/images/ic_myagent_jb.png",
+        "https://wimg.mk.co.kr/news/cms/202605/18/news-g.v1.20260517.27febb95cf1648839adbf7fb98088ffb_P1.jpg",
+        "https://wimg.mk.co.kr/news/cms/202605/19/rcv.NEWS1.NEWS1.20260517.2026-05-17T163552_1007910520_SOCIETY_I_R.jpg",
+        "https://wimg.mk.co.kr/news/cms/202605/19/news-p.v1.20260519.187f58f238a5487d9433def0f4f69b72_R.png",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/A12051425_231_20260518214842.png",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/X20260515135816_251_20260515135905.png",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/X20260423093839_251_20260511143320.png",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/X20260506150155_251_20260511143109.jpg",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/X20260422084524_251_20260511143413.png",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/X20260504164003_251_20260511143451.png"
+      ],
+      "image_url": "https://pimg.mk.co.kr/news/cms/202605/18/news-g.v1.20260517.27febb95cf1648839adbf7fb98088ffb_R.jpg",
       "normalized_title": "영업익 30% 달라 k조선 번진 성과급 요구…오히려 좋다는 월가",
       "priority_level": "normal",
       "priority_reasons": [
@@ -169280,8 +169443,8 @@
       "title_hash": "ae4d3e2e00cd3c156e5bf577"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE9YOTJBSFlFUkx4T2J5cFFLN25KZzFzdXB5Q0t1WGtXZHZaRDRiamhGY2g2ZGZBb0FUZkR6SzN5akZ5bjVFdUNvZFJFdm13OUtCbWs4?oc=5",
-      "canonical_url_hash": "a9163597c96af51beb6b3f01",
+      "canonical_url": "https://news.nate.com/view/20260518n33440",
+      "canonical_url_hash": "40d81c7fefa19a030b210ad1",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.nate.com/view/20260518n33440",
@@ -169300,8 +169463,13 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-상법 개정 자사주 일반주주",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE9YOTJBSFlFUkx4T2J5cFFLN25KZzFzdXB5Q0t1WGtXZHZaRDRiamhGY2g2ZGZBb0FUZkR6SzN5akZ5bjVFdUNvZFJFdm13OUtCbWs4?oc=5",
+      "image_candidates": [
+        "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/mk/2026/05/18/news-p.v1.20260518.1b47eab244284e63858e993f7233fe60_P1.jpg",
+        "https://tracking.cyad1.nate.com/target/setRetarget.php?category=KI6789H"
+      ],
+      "image_url": "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/mk/2026/05/18/news-p.v1.20260518.1b47eab244284e63858e993f7233fe60_P1.jpg",
       "normalized_title": "두나무 핵심인재 보상에 자사주 17만주 푼다…상법 개정 맞춰 정관도 정비 - 네이트",
       "priority_level": "normal",
       "priority_reasons": [
@@ -169321,7 +169489,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-19T07:00:03.619904+09:00",
-      "source": "네이트",
+      "source": "네이트 뉴스",
       "status": "duplicate",
       "story_key": "story:63456a7e5b795792",
       "summary": "[단독] 두나무, 핵심인재 보상에 자사주 17만주 푼다…상법 개정 맞춰 정관도 정비 네이트",
@@ -169329,8 +169497,8 @@
       "title_hash": "63456a7e5b795792a355e109"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiVEFVX3lxTE5jUXNDOXdiQW9VMTF3YW11eWEwd3NsOU1VcTN2Q2RtcWNGVk5DNGVtTlJQbGpBWkxFaUU5N3dYUHJfRFFoT2hWRk41cmNuOU1UMks1SQ?oc=5",
-      "canonical_url_hash": "3faf1c2643dcf95ceb2da004",
+      "canonical_url": "https://v.daum.net/v/20260518050020215",
+      "canonical_url_hash": "eaf1c9df44695f265c1ba54f",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.msn.com/ko-kr/news/other/%EB%8B%A8%EB%8F%85-%EC%9E%90%ED%9A%8C%EC%82%AC-%EC%83%81%EC%9E%A5-%EC%86%8C%EC%95%A1%EC%A3%BC%EC%A3%BC-%EA%B3%BC%EB%B0%98-%EB%8F%99%EC%9D%98-%EB%B0%9B%EB%8A%94%EB%8B%A4-%EA%B5%AD%EB%82%B4-%EC%B2%AB-%EC%82%AC%EB%A1%80-%EC%A4%91%EB%B3%B5%EC%83%81%EC%9E%A5-%EC%98%88%EC%99%B8%ED%97%88%EC%9A%A9-%EA%B8%B0%EC%A4%80/ar-AA23qIWw",
@@ -169350,8 +169518,13 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-일반주주 의결권 상법",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiVEFVX3lxTE5jUXNDOXdiQW9VMTF3YW11eWEwd3NsOU1VcTN2Q2RtcWNGVk5DNGVtTlJQbGpBWkxFaUU5N3dYUHJfRFFoT2hWRk41cmNuOU1UMks1SQ?oc=5",
+      "image_candidates": [
+        "https://img1.daumcdn.net/thumb/S1200x630?fname=https%3A%2F%2Ft1.daumcdn.net%2Fnews%2F202605%2F18%2F552786-gygG85f%2F20260518050020897ayoi.jpg",
+        "https://img3.daumcdn.net/thumb/R658x0.q70?fname=https%3A%2F%2Ft1.daumcdn.net%2Fnews%2F202605%2F18%2F552786-gygG85f%2F20260518050020897ayoi.jpg"
+      ],
+      "image_url": "https://img1.daumcdn.net/thumb/S1200x630?fname=https%3A%2F%2Ft1.daumcdn.net%2Fnews%2F202605%2F18%2F552786-gygG85f%2F20260518050020897ayoi.jpg",
       "normalized_title": "자회사 상장 소액주주 과반 동의 받는다… 국내 첫 사례 중복상장 예외허용 기준 ① - v daum net",
       "priority_level": "watch",
       "priority_reasons": [
@@ -169371,7 +169544,7 @@
       ],
       "relevance_level": "high",
       "seen_at": "2026-05-19T07:00:03.619904+09:00",
-      "source": "v.daum.net",
+      "source": "이투데이",
       "status": "duplicate",
       "story_key": "story:f0b85867fcff8958",
       "summary": "[단독] '자회사 상장' 소액주주 과반 동의 받는다… 국내 첫 사례 [중복상장 예외허용 기준 ①] v.daum.net",
@@ -169379,8 +169552,9 @@
       "title_hash": "f0b85867fcff8958d24578e3"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiWkFVX3lxTE92SUdIbUs2c05mOE9aOGRkQXRNOEpLU3h3WDdGWURjNXZuMFRhSnpYUmd0QlljejlhUVpxOS1YcEJHZm9OMlF4RWZrdC1TXzhGUnh0dmd1akM5d9IBXkFVX3lxTE9ORks2MzZQYjB5V08tOEtDTzBKUmlhT3RjTDJ4elFZbDIxYlItSC1TX29kNTdyVU9QWUJtTHdIVElzUnpyMy01YmlBQW15UXVsLXBkMWRUWkFiQTJnVVE?oc=5",
-      "canonical_url_hash": "87d74bbcb56a3232c0714e8d",
+      "article_published_at": "2026-05-18T18:16:36+09:00",
+      "canonical_url": "https://www.fnnews.com/news/202605181815514971",
+      "canonical_url_hash": "c5ad4cac7a0a3b12c4efee31",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.fnnews.com/news/202605181815514971",
@@ -169400,8 +169574,13 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-일반주주 의결권 상법",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiWkFVX3lxTE92SUdIbUs2c05mOE9aOGRkQXRNOEpLU3h3WDdGWURjNXZuMFRhSnpYUmd0QlljejlhUVpxOS1YcEJHZm9OMlF4RWZrdC1TXzhGUnh0dmd1akM5d9IBXkFVX3lxTE9ORks2MzZQYjB5V08tOEtDTzBKUmlhT3RjTDJ4elFZbDIxYlItSC1TX29kNTdyVU9QWUJtTHdIVElzUnpyMy01YmlBQW15UXVsLXBkMWRUWkFiQTJnVVE?oc=5",
+      "image_candidates": [
+        "https://static.fnnews.com/resources/w/img/fn_empty.jpg",
+        "https://www.fnnews.com/resources/w/img/fn_empty.jpg"
+      ],
+      "image_url": "https://static.fnnews.com/resources/w/img/fn_empty.jpg",
       "normalized_title": "전자주주총회 플랫폼 구축 속도낸다",
       "priority_level": "normal",
       "priority_reasons": [
@@ -169430,8 +169609,8 @@
       "title_hash": "8ec1dddc49b70d70674572b2"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiUkFVX3lxTE5ZaG15bk5wbndPUloydFNWRmt1R0hneHI0OUVKX0IxcTFxbTdib0RselFOQ3NfUEM4UnVSVW5qT2FKZFd2ZzZYZ2ZzaHZqNzYxdEE?oc=5",
-      "canonical_url_hash": "5e452d0349092944963f840f",
+      "canonical_url": "https://stock.mk.co.kr/news/view/1089525",
+      "canonical_url_hash": "be91e8662bc95db37578400e",
       "duplicate_matches": [
         {
           "canonical_url": "https://stock.mk.co.kr/news/view/1089525",
@@ -169450,8 +169629,12 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-CB 발행 주주가치",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiUkFVX3lxTE5ZaG15bk5wbndPUloydFNWRmt1R0hneHI0OUVKX0IxcTFxbTdib0RselFOQ3NfUEM4UnVSVW5qT2FKZFd2ZzZYZ2ZzaHZqNzYxdEE?oc=5",
+      "image_candidates": [
+        "https://stock.mk.co.kr/images/default.jpg"
+      ],
+      "image_url": "https://stock.mk.co.kr/images/default.jpg",
       "normalized_title": "온투 이노베이션 11억 달러 전환사채 발행 3억 달러 자사주 매입 병행 - 매일경제 마켓",
       "priority_level": "normal",
       "priority_reasons": [
@@ -169479,8 +169662,9 @@
       "title_hash": "9a0ff473ef1cd58fca5ddf58"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiogFBVV95cUxNV3Z1TEpGZ0dFempZY1hjQVBXMWc2NTlZaF8zODM5djRIWUZpeXNyeXE1RGN2ZDF3Rjc5SjJiZ0ozbVplOHBJYTJSVGlGQVZfS2xURjlzenRSS0tWN0xXVEtTRjlSSnJvRVBKLUlPby1OU2FKWXBoaXd1dzBtaFE5ajNmOEc2djJVOG83dmRzd3BtWTdZbXd4RUdyXzJCVVpIQUE?oc=5",
-      "canonical_url_hash": "69ee66cc0d98d89bf73828cc",
+      "article_published_at": "2026-05-18T15:06:14+09:00",
+      "canonical_url": "https://en.sedaily.com/markets/2026/05/18/samsung-minority-shareholders-threaten-lawsuit-over-unions",
+      "canonical_url_hash": "51c876e4b72f0a16a9f01d03",
       "duplicate_matches": [
         {
           "canonical_url": "https://en.sedaily.com/markets/2026/05/18/samsung-minority-shareholders-threaten-lawsuit-over-unions",
@@ -169500,8 +169684,20 @@
       ],
       "feed_category": "global",
       "feed_name": "google-news-en-korea-governance-activism",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiogFBVV95cUxNV3Z1TEpGZ0dFempZY1hjQVBXMWc2NTlZaF8zODM5djRIWUZpeXNyeXE1RGN2ZDF3Rjc5SjJiZ0ozbVplOHBJYTJSVGlGQVZfS2xURjlzenRSS0tWN0xXVEtTRjlSSnJvRVBKLUlPby1OU2FKWXBoaXd1dzBtaFE5ajNmOEc2djJVOG83dmRzd3BtWTdZbXd4RUdyXzJCVVpIQUE?oc=5",
+      "image_candidates": [
+        "https://wimg.sedaily.com/news/cms/2026/05/18/rcv.YNA.20260518.PYH2026051811640001300_P1.jpg",
+        "https://en.sedaily.com/ad-mirae-asset.png",
+        "https://en.sedaily.com/awards/apac-gold-ai-driven.png",
+        "https://en.sedaily.com/awards/apac-gold-newsletter.png",
+        "https://en.sedaily.com/awards/apac-silver-innovative.png",
+        "https://en.sedaily.com/awards/KakaoTalk_Photo_2026-05-12-09-52-54.png",
+        "https://en.sedaily.com/awards/KakaoTalk_Photo_2026-05-12-09-52-58.png",
+        "https://image-cdn-ak.spotifycdn.com/image/ab67706c0000d72c7847d2356567a550cbd4b1d2",
+        "https://d3t3ozftmdmh3i.cloudfront.net/staging/podcast_uploaded_episode/45804598/45804598-1779082633100-1aaaa1e31dda4.jpg"
+      ],
+      "image_url": "https://wimg.sedaily.com/news/cms/2026/05/18/rcv.YNA.20260518.PYH2026051811640001300_P1.jpg",
       "normalized_title": "samsung minority shareholders threaten lawsuit over unions 15% profit bonus demand - seoul economic daily",
       "priority_level": "watch",
       "priority_reasons": [
@@ -169529,8 +169725,9 @@
       "title_hash": "310b1f149450882cc4a33117"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMingFBVV95cUxOYldpNEN6TnZCZTdQT1FHVEhvRWtObkFWSDJfQ0dHTnJONVhiUHR6RG1BNTlVb0UzWHpoMkV4N1lBeHVXZ0lkZVVmUk00YnZDS3JEU0VhTG0wZWVpTGdEU0xNeEMxb0V3UnJMeEhHVUJRWnFuTlNubVkwVDBrMWxycEgxakRNaDcyTFZ4eGpLX2RmMndubm9CSnVfMGNMZw?oc=5",
-      "canonical_url_hash": "92bbdd0b7ac2a0f464e07882",
+      "article_published_at": "2026-05-19T05:05:15+09:00",
+      "canonical_url": "https://asia.nikkei.com/opinion/uzbekistan-fund-s-ipo-taps-growing-interest-from-global-investors",
+      "canonical_url_hash": "3e9c63d9b979946b7e666730",
       "duplicate_matches": [
         {
           "canonical_url": "https://asia.nikkei.com/opinion/uzbekistan-fund-s-ipo-taps-growing-interest-from-global-investors",
@@ -169549,8 +169746,25 @@
       ],
       "feed_category": "global",
       "feed_name": "google-news-en-nikkei-korea-valueup-governance",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMingFBVV95cUxOYldpNEN6TnZCZTdQT1FHVEhvRWtObkFWSDJfQ0dHTnJONVhiUHR6RG1BNTlVb0UzWHpoMkV4N1lBeHVXZ0lkZVVmUk00YnZDS3JEU0VhTG0wZWVpTGdEU0xNeEMxb0V3UnJMeEhHVUJRWnFuTlNubVkwVDBrMWxycEgxakRNaDcyTFZ4eGpLX2RmMndubm9CSnVfMGNMZw?oc=5",
+      "image_candidates": [
+        "https://images.ft.com/v3/image/raw/https%3A%2F%2Fcms-image-bucket-productionv3-ap-northeast-1-a7d2.s3.ap-northeast-1.amazonaws.com%2Fimages%2F7%2F2%2F0%2F8%2F12498027-2-eng-GB%2F125b50b687e1-2025-06-04T154949Z_1788873986_RC2PVEA1MO2G_RTRMADP_3_UZBEKISTAN-DAILYLIFE.JPG?dpr=2&fit=cover&format=auto&gravity=faces&height=630&quality=medium&source=nar-cms&width=1260",
+        "https://images.ft.com/v3/image/raw/https%3A%2F%2Fcms-image-bucket-productionv3-ap-northeast-1-a7d2.s3.ap-northeast-1.amazonaws.com%2Fimages%2F7%2F2%2F0%2F8%2F12498027-2-eng-GB%2F125b50b687e1-2025-06-04T154949Z_1788873986_RC2PVEA1MO2G_RTRMADP_3_UZBEKISTAN-DAILYLIFE.JPG?dpr=2&fit=cover&format=auto&gravity=faces&quality=medium&source=nar-cms&width=1200",
+        "https://images.ft.com/v3/image/raw/https%3A%2F%2Fcms-image-bucket-productionv3-ap-northeast-1-a7d2.s3.ap-northeast-1.amazonaws.com%2Fimages%2F7%2F2%2F0%2F8%2F12498027-2-eng-GB%2F125b50b687e1-2025-06-04T154949Z_1788873986_RC2PVEA1MO2G_RTRMADP_3_UZBEKISTAN-DAILYLIFE.JPG?dpr=2&fit=cover&format=auto&gravity=faces&quality=medium&source=nar-cms&width=780",
+        "https://images.ft.com/v3/image/raw/https%3A%2F%2Fcms-image-bucket-productionv3-ap-northeast-1-a7d2.s3.ap-northeast-1.amazonaws.com%2Fimages%2F0%2F1%2F9%2F4%2F12404910-1-eng-GB%2Fa0ea366b9811-IMG_2788.jpeg?dpr=2&fit=cover&format=auto&gravity=faces&height=394&quality=medium&source=nar-cms&width=700",
+        "https://images.ft.com/v3/image/raw/https%3A%2F%2Fcms-image-bucket-productionv3-ap-northeast-1-a7d2.s3.ap-northeast-1.amazonaws.com%2Fimages%2F4%2F5%2F5%2F2%2F11822554-2-eng-GB%2Fdce663c1af5d-photo_SXM2025121200009648.jpg?dpr=2&fit=cover&format=auto&gravity=faces&height=100&quality=medium&source=nar-cms&width=178",
+        "https://images.ft.com/v3/image/raw/https%3A%2F%2Fcms-image-bucket-productionv3-ap-northeast-1-a7d2.s3.ap-northeast-1.amazonaws.com%2Fimages%2F3%2F0%2F2%2F4%2F11844203-1-eng-GB%2F4bdbf9f24d6a-2025-04-17T130748Z_1814778015_RC2EYDAZ4BWV_RTRMADP_3_KAZAKHSTAN-GOLD.jpg?dpr=2&fit=cover&format=auto&gravity=faces&height=100&quality=medium&source=nar-cms&width=178",
+        "https://images.ft.com/v3/image/raw/https%3A%2F%2Fcms-image-bucket-productionv3-ap-northeast-1-a7d2.s3.ap-northeast-1.amazonaws.com%2Fimages%2F2%2F0%2F8%2F3%2F11853802-2-eng-GB%2F6d657d1bafc0-20251219N-Takaichi-Central-Asia.jpg?dpr=2&fit=cover&format=auto&gravity=faces&height=100&quality=medium&source=nar-cms&width=178",
+        "https://images.ft.com/v3/image/raw/https%3A%2F%2Fcms-image-bucket-productionv3-ap-northeast-1-a7d2.s3.ap-northeast-1.amazonaws.com%2Fimages%2F8%2F8%2F9%2F4%2F12164988-2-eng-GB%2Fb6c2c0240a5c-IMG_9092.jpg?dpr=2&fit=cover&format=auto&gravity=faces&height=100&quality=medium&source=nar-cms&width=178",
+        "https://images.ft.com/v3/image/raw/https%3A%2F%2Fcms-image-bucket-productionv3-ap-northeast-1-a7d2.s3.ap-northeast-1.amazonaws.com%2Fimages%2F8%2F5%2F1%2F0%2F12010158-5-eng-GB%2Fecd4cfcb36e3-IMG_5258.JPG?dpr=2&fit=cover&format=auto&gravity=faces&height=100&quality=medium&source=nar-cms&width=178",
+        "https://images.ft.com/v3/image/raw/https%3A%2F%2Fcms-image-bucket-productionv3-ap-northeast-1-a7d2.s3.ap-northeast-1.amazonaws.com%2Fimages%2F4%2F5%2F7%2F3%2F11523754-2-eng-GB%2F8b858f96df15-photo_SXM2025091600014492.jpg?dpr=2&fit=cover&format=auto&gravity=faces&height=100&quality=medium&source=nar-cms&width=178",
+        "https://images.ft.com/v3/image/raw/https%3A%2F%2Fcms-image-bucket-productionv3-ap-northeast-1-a7d2.s3.ap-northeast-1.amazonaws.com%2Fimages%2F2%2F8%2F7%2F9%2F11479782-4-eng-GB%2Fff215320618b-SuzuT20250913-IMG_6801.jpg?dpr=2&fit=cover&format=auto&gravity=faces&height=100&quality=medium&source=nar-cms&width=178",
+        "https://images.ft.com/v3/image/raw/https%3A%2F%2Fcms-image-bucket-productionv3-ap-northeast-1-a7d2.s3.ap-northeast-1.amazonaws.com%2Fimages%2F2%2F8%2F7%2F1%2F12471782-2-eng-GB%2Fe14317eff194-2024-03-19T070940Z_145634438_RC2SO6AIAR5G_RTRMADP_3_JAPAN-ECONOMY-BOJ.JPG?dpr=2&fit=cover&format=auto&gravity=faces&height=100&quality=medium&source=nar-cms&width=178",
+        "https://images.ft.com/v3/image/raw/https%3A%2F%2Fcms-image-bucket-productionv3-ap-northeast-1-a7d2.s3.ap-northeast-1.amazonaws.com%2Fimages%2F5%2F8%2F6%2F5%2F12495685-1-eng-GB%2Fdfc20e69a53b-2026-02-15T164004Z_480745440_UP1EM2F1AAQTV_RTRMADP_3_CRICKET-T20-WORLDCUP-IND-PAK.JPG?dpr=2&fit=cover&format=auto&gravity=faces&height=100&quality=medium&source=nar-cms&width=178",
+        "https://images.ft.com/v3/image/raw/https%3A%2F%2Fcms-image-bucket-productionv3-ap-northeast-1-a7d2.s3.ap-northeast-1.amazonaws.com%2Fimages%2F9%2F0%2F3%2F1%2F12491309-1-eng-GB%2F885e33d309a5-2026-04-15T035907Z_1262375447_RC23MEAMJXSA_RTRMADP_3_JAPAN-DEFENCE.JPG?dpr=2&fit=cover&format=auto&gravity=faces&height=100&quality=medium&source=nar-cms&width=178"
+      ],
+      "image_url": "https://images.ft.com/v3/image/raw/https%3A%2F%2Fcms-image-bucket-productionv3-ap-northeast-1-a7d2.s3.ap-northeast-1.amazonaws.com%2Fimages%2F7%2F2%2F0%2F8%2F12498027-2-eng-GB%2F125b50b687e1-2025-06-04T154949Z_1788873986_RC2PVEA1MO2G_RTRMADP_3_UZBEKISTAN-DAILYLIFE.JPG?dpr=2&fit=cover&format=auto&gravity=faces&height=630&quality=medium&source=nar-cms&width=1260",
       "normalized_title": "uzbekistan funds ipo taps growing interest from global investors - nikkei asia",
       "priority_level": "normal",
       "priority_reasons": [
@@ -169727,12 +169941,25 @@
       "title_hash": "89bf113c72aaf362eacc59a7"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMitwFBVV95cUxNdm4wMnVxT3Y5blkzeG10MHVIVmJfc25YVGNTRV9nVy04TGY2bDNnMWtVSzhXc0FWZGhYdnY0dnU0c1dleTFOR2ZqSlNpRTl1dnVCTGhwUzBkQ2F1X2hscDFRQm9wcUFsdGkwaE5Mem5QTFBRcWg1LTVZUlk4V0hLQ19uR29MQkNGc3lIenVpNXpYOHd4YVNqanJSbGhTY245dVpMY2RLcWR5UVNmVGpVaWlBc3NFR0E?oc=5",
-      "canonical_url_hash": "f8c62d5cd468efd060a59ce1",
+      "article_published_at": "2026-05-19T06:12:39+09:00",
+      "canonical_url": "https://www.stocktitan.net/sec-filings/SEER/prec14a-seer-inc-preliminary-contested-proxy-statement-1912cfc8b84d.html",
+      "canonical_url_hash": "421ba937c619ec4ffe09dc50",
       "feed_category": "global",
       "feed_name": "google-news-en-dissident-nominees-universal-proxy",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMitwFBVV95cUxNdm4wMnVxT3Y5blkzeG10MHVIVmJfc25YVGNTRV9nVy04TGY2bDNnMWtVSzhXc0FWZGhYdnY0dnU0c1dleTFOR2ZqSlNpRTl1dnVCTGhwUzBkQ2F1X2hscDFRQm9wcUFsdGkwaE5Mem5QTFBRcWg1LTVZUlk4V0hLQ19uR29MQkNGc3lIenVpNXpYOHd4YVNqanJSbGhTY245dVpMY2RLcWR5UVNmVGpVaWlBc3NFR0E?oc=5",
+      "image_candidates": [
+        "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_0.jpg",
+        "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_1.jpg",
+        "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_2.jpg",
+        "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_3.jpg",
+        "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_4.jpg",
+        "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_5.jpg",
+        "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_6.jpg",
+        "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_7.jpg",
+        "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_8.jpg"
+      ],
+      "image_url": "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_0.jpg",
       "normalized_title": "seer seer faces proxy contest as radoff-jec holds ~7 6% stake - stock titan",
       "priority_level": "top",
       "priority_reasons": [
@@ -169760,12 +169987,27 @@
       "title_hash": "f64c860a95977306d7120841"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMi3AFBVV95cUxOaWM3bzZ3TUhHT2RTQ1hHalE0Wm5GOFhDZjcwZ2tkRnBpb2FDaGF0NjBKcnNXV3oyb2RlUXIwWFJoWm5aSm9QVndEZThZQVpXdXA5SngweW5yNHJUYlJ1SUxNaXVXNTM1allOU2F3cm1IbkRJMjJQVlF5RG44djJSTlNrZ3FaWUFqWHhRSFBxWEc0NzRpMzZ1MEx1V09CTEZOQ0RyZDltYVdwYlkyaEZGczM3Q05PVktETnhQckl4dVlnNjZLa2puY1RPSVFlc0lUM2VKU0lIY0U0c191?oc=5",
-      "canonical_url_hash": "6d5bc2ac9805115b485a13dc",
+      "article_published_at": "2026-05-18T21:50:30.624208+09:00",
+      "canonical_url": "https://www.quiverquant.com/news/Global+Water+Resources+Inc.+Announces+Election+of+Directors+and+Approval+of+Key+Measures+at+2026+Annual+Meeting",
+      "canonical_url_hash": "acf089d544b5e63c2b469e45",
       "feed_category": "global",
       "feed_name": "google-news-en-withhold-vote-directors",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMi3AFBVV95cUxOaWM3bzZ3TUhHT2RTQ1hHalE0Wm5GOFhDZjcwZ2tkRnBpb2FDaGF0NjBKcnNXV3oyb2RlUXIwWFJoWm5aSm9QVndEZThZQVpXdXA5SngweW5yNHJUYlJ1SUxNaXVXNTM1allOU2F3cm1IbkRJMjJQVlF5RG44djJSTlNrZ3FaWUFqWHhRSFBxWEc0NzRpMzZ1MEx1V09CTEZOQ0RyZDltYVdwYlkyaEZGczM3Q05PVktETnhQckl4dVlnNjZLa2puY1RPSVFlc0lUM2VKU0lIY0U0c191?oc=5",
+      "image_candidates": [
+        "https://www.quiverquant.com/images/gwrs_rect_new.png",
+        "https://quiverquant.com/images/nvda_new.png",
+        "https://quiverquant.com/images/tem_new.png",
+        "https://quiverquant.com/images/pltr_new.png",
+        "https://www.quiverquant.com/images/P000197_congress_headshot.png",
+        "https://www.quiverquant.com/images/M001190_congress_headshot.png",
+        "https://www.quiverquant.com/static/img/jd-vance.jpg",
+        "https://www.quiverquant.com/static/img/google_preferred_source_badge_light.png",
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f3/Seal_of_the_United_States_Supreme_Court.svg/1920px-Seal_of_the_United_States_Supreme_Court.svg.png",
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/Flag_of_the_United_States_House_of_Representatives.svg/3840px-Flag_of_the_United_States_House_of_Representatives.svg.png",
+        "https://www.whitehouse.gov/wp-content/uploads/2026/05/P20260515DT-1236.jpg"
+      ],
+      "image_url": "https://www.quiverquant.com/images/gwrs_rect_new.png",
       "normalized_title": "global water resources inc announces election of directors and approval of key measures at 2026 annual meeting - quiver quantitative",
       "priority_level": "normal",
       "priority_reasons": [
@@ -169836,7 +170078,7 @@
     "2026-04-29",
     "2026-04-30"
   ],
-  "last_google_news_decode_at": "2026-05-19T06:46:41.266285+09:00",
+  "last_google_news_decode_at": "2026-05-19T07:50:07.784324+09:00",
   "last_run_at": "2026-05-19T07:00:03.619904+09:00",
   "pending_clusters": [
     {
@@ -170102,9 +170344,9 @@
       "article_count": 1,
       "articles": [
         {
-          "article_published_at": null,
-          "canonical_url": "https://news.google.com/rss/articles/CBMitwFBVV95cUxNdm4wMnVxT3Y5blkzeG10MHVIVmJfc25YVGNTRV9nVy04TGY2bDNnMWtVSzhXc0FWZGhYdnY0dnU0c1dleTFOR2ZqSlNpRTl1dnVCTGhwUzBkQ2F1X2hscDFRQm9wcUFsdGkwaE5Mem5QTFBRcWg1LTVZUlk4V0hLQ19uR29MQkNGc3lIenVpNXpYOHd4YVNqanJSbGhTY245dVpMY2RLcWR5UVNmVGpVaWlBc3NFR0E?oc=5",
-          "canonical_url_hash": "f8c62d5cd468efd060a59ce1",
+          "article_published_at": "2026-05-19T06:12:39+09:00",
+          "canonical_url": "https://www.stocktitan.net/sec-filings/SEER/prec14a-seer-inc-preliminary-contested-proxy-statement-1912cfc8b84d.html",
+          "canonical_url_hash": "421ba937c619ec4ffe09dc50",
           "clean_title": "Seer (SEER) faces proxy contest as Radoff-JEC holds ~7.6% stake - Stock Titan",
           "company_candidates": [],
           "date_status": "feed",
@@ -170112,8 +170354,20 @@
           "feed_name": "google-news-en-dissident-nominees-universal-proxy",
           "feed_published_at": "2026-05-19T06:12:39+09:00",
           "feed_updated_at": "2026-05-19T06:12:39+09:00",
-          "image_candidates": [],
-          "image_url": null,
+          "google_news_decoded": true,
+          "google_news_url": "https://news.google.com/rss/articles/CBMitwFBVV95cUxNdm4wMnVxT3Y5blkzeG10MHVIVmJfc25YVGNTRV9nVy04TGY2bDNnMWtVSzhXc0FWZGhYdnY0dnU0c1dleTFOR2ZqSlNpRTl1dnVCTGhwUzBkQ2F1X2hscDFRQm9wcUFsdGkwaE5Mem5QTFBRcWg1LTVZUlk4V0hLQ19uR29MQkNGc3lIenVpNXpYOHd4YVNqanJSbGhTY245dVpMY2RLcWR5UVNmVGpVaWlBc3NFR0E?oc=5",
+          "image_candidates": [
+            "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_0.jpg",
+            "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_1.jpg",
+            "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_2.jpg",
+            "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_3.jpg",
+            "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_4.jpg",
+            "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_5.jpg",
+            "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_6.jpg",
+            "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_7.jpg",
+            "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_8.jpg"
+          ],
+          "image_url": "https://www.sec.gov/Archives/edgar/data/0001726445/000119312526229128/img259451563_0.jpg",
           "link": "https://news.google.com/rss/articles/CBMitwFBVV95cUxNdm4wMnVxT3Y5blkzeG10MHVIVmJfc25YVGNTRV9nVy04TGY2bDNnMWtVSzhXc0FWZGhYdnY0dnU0c1dleTFOR2ZqSlNpRTl1dnVCTGhwUzBkQ2F1X2hscDFRQm9wcUFsdGkwaE5Mem5QTFBRcWg1LTVZUlk4V0hLQ19uR29MQkNGc3lIenVpNXpYOHd4YVNqanJSbGhTY245dVpMY2RLcWR5UVNmVGpVaWlBc3NFR0E?oc=5",
           "low_patterns": [],
           "normalized_title": "seer seer faces proxy contest as radoff-jec holds ~7 6% stake - stock titan",
@@ -170164,7 +170418,7 @@
       "relevance_level": "high",
       "representative_title": "Seer (SEER) faces proxy contest as Radoff-JEC holds ~7.6% stake - Stock Titan",
       "representative_title_normalized": "seer seer faces proxy contest as radoff-jec holds ~7 6% stake - stock titan",
-      "representative_url": "https://news.google.com/rss/articles/CBMitwFBVV95cUxNdm4wMnVxT3Y5blkzeG10MHVIVmJfc25YVGNTRV9nVy04TGY2bDNnMWtVSzhXc0FWZGhYdnY0dnU0c1dleTFOR2ZqSlNpRTl1dnVCTGhwUzBkQ2F1X2hscDFRQm9wcUFsdGkwaE5Mem5QTFBRcWg1LTVZUlk4V0hLQ19uR29MQkNGc3lIenVpNXpYOHd4YVNqanJSbGhTY245dVpMY2RLcWR5UVNmVGpVaWlBc3NFR0E?oc=5",
+      "representative_url": "https://www.stocktitan.net/sec-filings/SEER/prec14a-seer-inc-preliminary-contested-proxy-statement-1912cfc8b84d.html",
       "sequence": 20,
       "status": "pending",
       "theme_group": "activism_trend",
@@ -170177,9 +170431,9 @@
       "article_count": 1,
       "articles": [
         {
-          "article_published_at": null,
-          "canonical_url": "https://news.google.com/rss/articles/CBMi3AFBVV95cUxOaWM3bzZ3TUhHT2RTQ1hHalE0Wm5GOFhDZjcwZ2tkRnBpb2FDaGF0NjBKcnNXV3oyb2RlUXIwWFJoWm5aSm9QVndEZThZQVpXdXA5SngweW5yNHJUYlJ1SUxNaXVXNTM1allOU2F3cm1IbkRJMjJQVlF5RG44djJSTlNrZ3FaWUFqWHhRSFBxWEc0NzRpMzZ1MEx1V09CTEZOQ0RyZDltYVdwYlkyaEZGczM3Q05PVktETnhQckl4dVlnNjZLa2puY1RPSVFlc0lUM2VKU0lIY0U0c191?oc=5",
-          "canonical_url_hash": "6d5bc2ac9805115b485a13dc",
+          "article_published_at": "2026-05-18T21:50:30.624208+09:00",
+          "canonical_url": "https://www.quiverquant.com/news/Global+Water+Resources+Inc.+Announces+Election+of+Directors+and+Approval+of+Key+Measures+at+2026+Annual+Meeting",
+          "canonical_url_hash": "acf089d544b5e63c2b469e45",
           "clean_title": "Global Water Resources Inc. Announces Election of Directors and Approval of Key Measures at 2026 Annual Meeting - Quiver Quantitative",
           "company_candidates": [],
           "date_status": "feed",
@@ -170187,8 +170441,22 @@
           "feed_name": "google-news-en-withhold-vote-directors",
           "feed_published_at": "2026-05-19T06:50:00+09:00",
           "feed_updated_at": "2026-05-19T06:50:00+09:00",
-          "image_candidates": [],
-          "image_url": null,
+          "google_news_decoded": true,
+          "google_news_url": "https://news.google.com/rss/articles/CBMi3AFBVV95cUxOaWM3bzZ3TUhHT2RTQ1hHalE0Wm5GOFhDZjcwZ2tkRnBpb2FDaGF0NjBKcnNXV3oyb2RlUXIwWFJoWm5aSm9QVndEZThZQVpXdXA5SngweW5yNHJUYlJ1SUxNaXVXNTM1allOU2F3cm1IbkRJMjJQVlF5RG44djJSTlNrZ3FaWUFqWHhRSFBxWEc0NzRpMzZ1MEx1V09CTEZOQ0RyZDltYVdwYlkyaEZGczM3Q05PVktETnhQckl4dVlnNjZLa2puY1RPSVFlc0lUM2VKU0lIY0U0c191?oc=5",
+          "image_candidates": [
+            "https://www.quiverquant.com/images/gwrs_rect_new.png",
+            "https://quiverquant.com/images/nvda_new.png",
+            "https://quiverquant.com/images/tem_new.png",
+            "https://quiverquant.com/images/pltr_new.png",
+            "https://www.quiverquant.com/images/P000197_congress_headshot.png",
+            "https://www.quiverquant.com/images/M001190_congress_headshot.png",
+            "https://www.quiverquant.com/static/img/jd-vance.jpg",
+            "https://www.quiverquant.com/static/img/google_preferred_source_badge_light.png",
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f3/Seal_of_the_United_States_Supreme_Court.svg/1920px-Seal_of_the_United_States_Supreme_Court.svg.png",
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/Flag_of_the_United_States_House_of_Representatives.svg/3840px-Flag_of_the_United_States_House_of_Representatives.svg.png",
+            "https://www.whitehouse.gov/wp-content/uploads/2026/05/P20260515DT-1236.jpg"
+          ],
+          "image_url": "https://www.quiverquant.com/images/gwrs_rect_new.png",
           "link": "https://news.google.com/rss/articles/CBMi3AFBVV95cUxOaWM3bzZ3TUhHT2RTQ1hHalE0Wm5GOFhDZjcwZ2tkRnBpb2FDaGF0NjBKcnNXV3oyb2RlUXIwWFJoWm5aSm9QVndEZThZQVpXdXA5SngweW5yNHJUYlJ1SUxNaXVXNTM1allOU2F3cm1IbkRJMjJQVlF5RG44djJSTlNrZ3FaWUFqWHhRSFBxWEc0NzRpMzZ1MEx1V09CTEZOQ0RyZDltYVdwYlkyaEZGczM3Q05PVktETnhQckl4dVlnNjZLa2puY1RPSVFlc0lUM2VKU0lIY0U0c191?oc=5",
           "low_patterns": [],
           "normalized_title": "global water resources inc announces election of directors and approval of key measures at 2026 annual meeting - quiver quantitative",
@@ -170237,7 +170505,7 @@
       "relevance_level": "medium",
       "representative_title": "Global Water Resources Inc. Announces Election of Directors and Approval of Key Measures at 2026 Annual Meeting - Quiver Quantitative",
       "representative_title_normalized": "global water resources inc announces election of directors and approval of key measures at 2026 annual meeting - quiver quantitative",
-      "representative_url": "https://news.google.com/rss/articles/CBMi3AFBVV95cUxOaWM3bzZ3TUhHT2RTQ1hHalE0Wm5GOFhDZjcwZ2tkRnBpb2FDaGF0NjBKcnNXV3oyb2RlUXIwWFJoWm5aSm9QVndEZThZQVpXdXA5SngweW5yNHJUYlJ1SUxNaXVXNTM1allOU2F3cm1IbkRJMjJQVlF5RG44djJSTlNrZ3FaWUFqWHhRSFBxWEc0NzRpMzZ1MEx1V09CTEZOQ0RyZDltYVdwYlkyaEZGczM3Q05PVktETnhQckl4dVlnNjZLa2puY1RPSVFlc0lUM2VKU0lIY0U0c191?oc=5",
+      "representative_url": "https://www.quiverquant.com/news/Global+Water+Resources+Inc.+Announces+Election+of+Directors+and+Approval+of+Key+Measures+at+2026+Annual+Meeting",
       "sequence": 1,
       "status": "pending",
       "theme_group": "voting_disclosure",
@@ -205948,7 +206216,6 @@
     "123c915dd1613c9e8d80d80f",
     "12a68c73afc48c2fd3976f40",
     "1379dcbd6fc7cad2b23041fa",
-    "13c8f35512b0cdc1bd61a66b",
     "13ee76819ace0de8a7e9685e",
     "14e4c8564c563b5b56b0fdf2",
     "14ec7b6052fbd941cc6df004",
@@ -205991,7 +206258,6 @@
     "228a1bb2f0cb323d9c8d3d09",
     "22acbfa672c3e21337356fca",
     "23578b791e7f38b55a8c382d",
-    "24b55196148bf0eb1a2633ad",
     "24e9ffb2a079ec2ae8184cd8",
     "256600b2e3494e21ad86b789",
     "25aed4d29d415ec838c49681",
@@ -206048,16 +206314,14 @@
     "3f0bccf39ff39ce62702606e",
     "3f15c0431653afe8450289aa",
     "3f2dc044c773797e8d40b8cc",
-    "3faf1c2643dcf95ceb2da004",
     "3ff6164ed8220fa347c7314c",
-    "40690935ebedf29d65e9b08b",
     "4073ec2adeb4e601bbc4284b",
     "40d81c7fefa19a030b210ad1",
     "413604b8f9bea77a4d012199",
     "4191e6562990b18004a9b1e1",
     "41a062c64b9083bb86ef401c",
     "41c42a15e356da20a6da0490",
-    "425964946acaa9a839141e31",
+    "421ba937c619ec4ffe09dc50",
     "434c950b7dea99660021026d",
     "43580c1bcc75e92d2263e474",
     "442c8cf170e91fdc9abcea20",
@@ -206153,8 +206417,6 @@
     "5d5765fe3302b1a1e9ed41cf",
     "5dba0eeb04dbcd3fc9373092",
     "5e1d1b614c664f9f76864f53",
-    "5e452d0349092944963f840f",
-    "5eafb1084f174275542c5004",
     "5efe0fc3ab6d08c69ba19cc1",
     "5f2354bc9ec35d63936f5783",
     "5f3bcdc6da4ea74fdad17d98",
@@ -206187,7 +206449,6 @@
     "6936bca89c1b301f38da464d",
     "698a762bd89730c9c91cebcd",
     "69cbe2a2c2906cf856173b1c",
-    "69ee66cc0d98d89bf73828cc",
     "6a0429ed644d1be5fb868912",
     "6a3823a4b15160abb3635b3f",
     "6ac284b1802816482d29e801",
@@ -206201,7 +206462,6 @@
     "6bc40d62d29d7d8624ca7155",
     "6c30adc6286e2db5b4acffb6",
     "6cc230b209bc80fa18294604",
-    "6d5bc2ac9805115b485a13dc",
     "6d7ca6162243a6d852b55eb2",
     "6dacd370e377a777437487d2",
     "6dd633ddf0aa3ab55b59f02e",
@@ -206281,7 +206541,6 @@
     "86f26f50a0f57ebeabe07f21",
     "8742e758ac28b551329db289",
     "874b335c52baa306a6342aed",
-    "87d74bbcb56a3232c0714e8d",
     "887f136c6f39307a8e69d376",
     "8960d15aad156e2a0e0ea62c",
     "899dfd1d95d69e9b6de9acd4",
@@ -206311,7 +206570,6 @@
     "917101592ba44c695dd023aa",
     "91ab3ce3229475b2b9149402",
     "926ece6ac23c736b911e0e3f",
-    "92bbdd0b7ac2a0f464e07882",
     "92ecd5d37234512c63ad98e6",
     "930126a12b3f50d192fa1958",
     "93a59ae4888812fd245915e4",
@@ -206373,7 +206631,6 @@
     "a83d1a58977de4688c18154c",
     "a90942f467a38d938592db78",
     "a9105dcb391b976f4b4d8b5c",
-    "a9163597c96af51beb6b3f01",
     "a92be67d606990f524fd7d3b",
     "a95de720a776fd131647808d",
     "a9e172fdcb96d262edc390e9",
@@ -206387,6 +206644,7 @@
     "ac736f4ca0f332ed5d8d1f0b",
     "acc6fee10204bfff48e347b9",
     "acd21cea8bc612ee8915bb76",
+    "acf089d544b5e63c2b469e45",
     "ad388225e60ef9961f43afac",
     "ad69607c642d8daeb6b3665f",
     "ad7be1f19e2578819c04a093",
@@ -206411,7 +206669,6 @@
     "b66c8e6dff387c0d6775022e",
     "b6cd79dbc992a22844d12747",
     "b6e43c9df5533099d0776cdf",
-    "b747e4077f51131532838535",
     "b74b377a7d384a4e29f6dbe3",
     "b7584d9577b40c240c8e89d0",
     "b81d9bc5a56ecf26135723e6",
@@ -206494,7 +206751,6 @@
     "cf24f8227aebe682786d3a7d",
     "d00ccd2715b4e62326307a1c",
     "d062a33ed1c075b59fedcaba",
-    "d1463f223d7d2e4b26d906dc",
     "d302e9bd6c42461c66842214",
     "d3e369f6cce233613076f217",
     "d3f57d4ade877290d4cb34b1",
@@ -206505,7 +206761,6 @@
     "d5c5b27417dd8f8b63aa71ef",
     "d5f9e0ccae42f519d9887cc8",
     "d64bacec86947e8cc9b8f1bc",
-    "d65638dcd3a9d2e1ae42d59f",
     "d6e0596a2f883381d811eb18",
     "d86777331bb458fe4d39d7d1",
     "d8d0440a3f063a7465bad768",
@@ -206535,7 +206790,6 @@
     "e1b042543528f5b039ad7415",
     "e24c2f3e16dee0b28ef89219",
     "e258b270c3b40b7b98e8acb4",
-    "e27a739518734d46327ff101",
     "e288e7094f00523200f5116e",
     "e2a42c1d03362ac98025fe65",
     "e33f7b1d41f4eb0728adc7c1",
@@ -206602,7 +206856,6 @@
     "f7d9a2eb738b14d680f1ab92",
     "f7e955db4e5dbabeb4456331",
     "f8c3d2c78755f750b71ddf22",
-    "f8c62d5cd468efd060a59ce1",
     "f8cc399854dfd1188203c781",
     "f9073cf784e5d36bac7b03ad",
     "f9205e75558a2bb01f2064f8",
