@@ -1,111 +1,86 @@
 {
-  "date_id": "2026-05-20",
-  "generated_at": "2026-05-20T07:17:31.504263+09:00",
-  "start_at": "2026-05-19T07:15:26.154972+09:00",
-  "end_at": "2026-05-20T07:15:26.154972+09:00",
-  "start_label": "2026-05-19 07:15 KST",
-  "end_label": "2026-05-20 07:15 KST",
+  "date_id": "2026-05-21",
+  "generated_at": "2026-05-21T07:29:48.810871+09:00",
+  "start_at": "2026-05-20T07:27:14.461959+09:00",
+  "end_at": "2026-05-21T07:27:14.461959+09:00",
+  "start_label": "2026-05-20 07:27 KST",
+  "end_label": "2026-05-21 07:27 KST",
   "candidate_count": 2,
-  "candidate_hash": "7e76f5988e6e84fe",
+  "candidate_hash": "b51d224ea5f97302",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "5cb9e8214239",
-      "score": 88.4,
+      "id": "73f7ae3323fd",
+      "score": 83.9,
       "left": {
-        "id": "story-1",
-        "title": "유증 연기 한화솔루션, 소액주주는 고려아연 지분 처분 압박[시그널]",
-        "summary": "19일 주주행동주의 플랫폼 액트(ACT)에 따르면 한화솔루션 소액 주주 연대 대표는 최근 게시판에 “한화임팩트가 보유한 고려아연 지분을 매각하고 유상증자를 ...",
-        "category": "주주행동·경영권",
-        "datetime": "05.20 05:31",
-        "source_line": "네이트뉴스 · NEWS1 · TV · MARKETIN · 연합인포맥스",
-        "link_count": 5,
-        "url": "https://news.nate.com/view/20260520n02354",
+        "id": "story-46",
+        "title": "삼성전자 주주들 주총 없이 영업이익 연동 성과급 합의, 무효 노사 경고",
+        "summary": "삼성전자 노사가 성과급 지급 기준을 두고 막판까지 줄다리기 협상에 나선 가운데, 삼성전자 주주단체가 주주총회 결의 없이는 '영업이익 연동 성과급 합의'는 법률상 무효라고 주장했다. 소액주주 단체인 '대한민국 주주운동본부'는 20일 보도자료를 내고 \"주주총회의 결의를 거치지 않은 노사간…",
+        "category": "자본시장 제도·공시",
+        "datetime": "05.20 11:51",
+        "source_line": "JOSEILBO",
+        "link_count": 1,
+        "url": "https://www.joseilbo.com/news/htmls/2026/05/20260520568632.html",
         "links": [
           {
-            "source": "네이트뉴스",
-            "title": "유증 연기 한화솔루션, 소액주주는 고려아연 지분 처분 압박[시그널]",
-            "url": "https://news.nate.com/view/20260520n02354"
-          },
-          {
-            "source": "NEWS1",
-            "title": "고려아연 지분 팔아 유증 철회하라…한화솔루션 소액주주 반발",
-            "url": "https://www.news1.kr/finance/general-stock/6171333"
-          },
-          {
-            "source": "TV",
-            "title": "[마켓인]고려아연 지분 팔아라…한화솔루션 압박 나선 소액주주",
-            "url": "https://tv.edaily.co.kr/News/NewsRead?Kind=257&NewsId=03503046645450560"
-          },
-          {
-            "source": "MARKETIN",
-            "title": "고려아연 지분 팔아라…한화솔루션 유증에 뿔난 소액주주",
-            "url": "https://marketin.edaily.co.kr/News/Read?newsId=03506326645450560"
-          },
-          {
-            "source": "연합인포맥스",
-            "title": "한화솔루션 유증에 소액주주 반발 확산…고려아연 지분부터 팔아라",
-            "url": "https://news.einfomax.co.kr/news/articleView.html?idxno=4415564"
+            "source": "JOSEILBO",
+            "title": "삼성전자 주주들 주총 없이 영업이익 연동 성과급 합의, 무효 노사 경고",
+            "url": "https://www.joseilbo.com/news/htmls/2026/05/20260520568632.html"
           }
         ]
       },
       "right": {
-        "id": "story-4",
-        "title": "최윤범 백기사였나…한화솔루션 소액주주들, 고려아연 지분 매각 압박",
-        "summary": "[더팩트｜윤정원 기자] 한화솔루션 소액주주들이 '최윤범 고려아연 회장 백기사' 의혹을 꺼내 들었다. 한화임팩트가 보유한 고려아연 지분을 팔아 한화솔루션 유상증자를 철회하거나 규모를 줄여야 한다는 주장이다. 한화솔루션 소액주주연대 대표는 지난 18일 온라인 주주 게시글을 통해 \"한화임팩…",
-        "category": "주주행동·경영권",
-        "datetime": "05.19 17:02",
-        "source_line": "NEWS",
+        "id": "story-48",
+        "title": "삼성전자 성과급 합의 앞두고 주주 반발…법적 대응 예고",
+        "summary": "삼성전자 노사가 성과급 협상 막바지에 접어든 가운데 주주단체가 법적 대응을 예고하고 나섰다. 노사 합의가 이뤄지더라도 주주총회 결의 없이 영업이익 연동 성과급을 명문화하면 법률상 무효라는 주장이다. 이번 주주단체의 법적 대응 예고는 삼성전자 성과급 협상이 노사 간 문제 ...",
+        "category": "밸류업·주주환원",
+        "datetime": "05.20 04:20",
+        "source_line": "METROSEOUL",
         "link_count": 1,
-        "url": "https://news.tf.co.kr/read/economy/2324268.htm",
+        "url": "https://metroseoul.co.kr/article/20260520500111",
         "links": [
           {
-            "source": "NEWS",
-            "title": "최윤범 백기사였나…한화솔루션 소액주주들, 고려아연 지분 매각 압박",
-            "url": "https://news.tf.co.kr/read/economy/2324268.htm"
+            "source": "METROSEOUL",
+            "title": "삼성전자 성과급 합의 앞두고 주주 반발…법적 대응 예고",
+            "url": "https://metroseoul.co.kr/article/20260520500111"
           }
         ]
       }
     },
     {
-      "id": "b10ff475926c",
-      "score": 72.5,
+      "id": "9140845a4cd8",
+      "score": 77.6,
       "left": {
-        "id": "story-23",
-        "title": "밸류업 공시가 갈랐다…공시 기업, 주가·ROE·PBR 모두 우위",
-        "summary": "기업가치 제고(밸류업) 공시에 참여한 상장기업이 미공시기업보다 주가수익률과 자본효율성, 주가순자산비율(PBR) 등 주요 지표에서 우수한 성과를 보인 것으로 나타났다. 코스피 시장에서는 중대형주를 중심으로 자사주 매입과 배당 확대가 실제 기업가치 개선으로 이어진 ...",
-        "category": "밸류업·주주환원",
-        "datetime": "05.19 11:16",
-        "source_line": "EDAILY · FNTIMES",
-        "link_count": 2,
-        "url": "https://www.edaily.co.kr/News/Read?newsId=03161926645450560",
+        "id": "story-25",
+        "title": "삼성전자 파업 전야 극적 합의··· 정부 중재로 돌파구 - 그린포스트코리아",
+        "summary": "... 주주 들, 노조 상대 \"직접 소송 불사\"··· \"노조가 주주 배당금 강탈\" · [삼성노조 겨눈 ' 주주행동주의 ' 역습①] \"비이성적 노조 요구가 리스크\" · TSMC로 물량 ...",
+        "category": "주주행동·경영권",
+        "datetime": "05.20 23:47",
+        "source_line": "GREENPOSTKOREA",
+        "link_count": 1,
+        "url": "https://www.greenpostkorea.co.kr/news/articleView.html?idxno=306721",
         "links": [
           {
-            "source": "EDAILY",
-            "title": "밸류업 공시가 갈랐다…공시 기업, 주가·ROE·PBR 모두 우위",
-            "url": "https://www.edaily.co.kr/News/Read?newsId=03161926645450560"
-          },
-          {
-            "source": "FNTIMES",
-            "title": "DQN양종희號 KB금융, 급락장서도 외인 매수·주가 선방···비결은 [금융지주 밸류업 점검]",
-            "url": "https://www.fntimes.com/html/view.php?ud=202605182203179614b4a7c6999c_18"
+            "source": "GREENPOSTKOREA",
+            "title": "삼성전자 파업 전야 극적 합의··· 정부 중재로 돌파구 - 그린포스트코리아",
+            "url": "https://www.greenpostkorea.co.kr/news/articleView.html?idxno=306721"
           }
         ]
       },
       "right": {
         "id": "story-26",
-        "title": "안으로는 상생, 밖으로는 환율 쇼크···과열된 주주환원에 찬물",
-        "summary": "주요 금융지주들이 밸류업 프로그램에 맞춰 주주환원을 확대하는 가운데, 1분기 CET1 비율이 일제히 하락했다. 고환율과 생산적·포용금융 정책으로 위험가중자산 부담이 커지면서 자본적정성에 경고등이 켜졌으며, 이익창출 기반 없는 과도한 배당 경쟁은 건전성 악화로 이어질 수 있다는 우려가…",
-        "category": "밸류업·주주환원",
-        "datetime": "05.19 17:55",
-        "source_line": "NEWSWAY",
+        "title": "삼성전자 주주단체 긴급조정권 발동해야…총파업 앞두고 탄원서 모집",
+        "summary": "[서울=뉴시스]박나리 기자 = 삼성전자 노사가 2차 사후조정에서도 합의점을 찾지 못하면서 노조가 21일 총파업을 예고한 가운데, 삼성전자 소액주주 단체가 주주행동 플랫폼을 통해 정부에 긴급조정권 발동을 촉구하는 전자서명에 나섰다. 20일 업계에 따르면 ...",
+        "category": "주주행동·경영권",
+        "datetime": "05.20 16:02",
+        "source_line": "FNNEWS",
         "link_count": 1,
-        "url": "https://www.newsway.co.kr/news/view?ud=2026051915092780796",
+        "url": "https://www.fnnews.com/news/202605201601376412",
         "links": [
           {
-            "source": "NEWSWAY",
-            "title": "안으로는 상생, 밖으로는 환율 쇼크···과열된 주주환원에 찬물",
-            "url": "https://www.newsway.co.kr/news/view?ud=2026051915092780796"
+            "source": "FNNEWS",
+            "title": "삼성전자 주주단체 긴급조정권 발동해야…총파업 앞두고 탄원서 모집",
+            "url": "https://www.fnnews.com/news/202605201601376412"
           }
         ]
       }
