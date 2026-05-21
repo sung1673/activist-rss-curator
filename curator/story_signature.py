@@ -30,6 +30,10 @@ DEFAULT_EVENT_PHRASE_TOKENS: dict[str, tuple[str, ...]] = {
     "금감원정정요구": ("금감원 제동", "금감원 2차 정정", "금감원 정정", "금감원 반려"),
     "자사주환원공시": ("자사주 소각 결정", "자기주식 소각 결정", "자사주 매입 결정", "자기주식 취득 결정"),
     "상폐심사": ("상장폐지 실질심사", "상장적격성 실질심사", "거래정지", "개선기간 부여"),
+    "중복상장규제": ("중복상장", "중복 상장"),
+    "주주동의": ("주주 동의", "주주동의", "단계별 주주동의"),
+    "모회사주주": ("모회사 주주", "모·자회사", "모자회사"),
+    "주주보호장치": ("주주보호 장치", "주주 보호 장치", "주주보호"),
 }
 
 DEFAULT_STORY_RULES: tuple[dict[str, object], ...] = (
@@ -59,6 +63,14 @@ DEFAULT_STORY_RULES: tuple[dict[str, object], ...] = (
         "tokens": ["상폐심사"],
         "require_any_groups": [["상장폐지", "상폐", "상장적격성"], ["실질심사", "거래정지", "개선기간"]],
     },
+    {
+        "id": "duplicate_listing_shareholder_consent_policy",
+        "tokens": ["중복상장규제", "주주동의", "모회사주주", "주주보호장치"],
+        "require_any_groups": [
+            ["중복상장", "중복 상장"],
+            ["주주 동의", "주주동의", "모회사 주주", "모·자회사", "주주보호", "주주 보호", "규제", "금지"],
+        ],
+    },
 )
 
 SPECIFIC_EVENT_TOKENS = {
@@ -73,6 +85,10 @@ SPECIFIC_EVENT_TOKENS = {
     "금감원정정요구",
     "자사주환원공시",
     "상폐심사",
+    "중복상장규제",
+    "주주동의",
+    "모회사주주",
+    "주주보호장치",
 }
 
 CONTEXTUAL_EVENT_TOKENS = {
@@ -85,6 +101,10 @@ CONTEXTUAL_EVENT_TOKENS = {
     "금감원정정요구",
     "자사주환원공시",
     "상폐심사",
+    "중복상장규제",
+    "주주동의",
+    "모회사주주",
+    "주주보호장치",
 }
 
 
@@ -250,6 +270,12 @@ def story_signature_decision(
         reason = "same_company_specific_event"
     elif company_overlap and len(specific_overlap) >= 1 and len(event_overlap) >= 3 and computed_title_score >= 40:
         reason = "same_company_event_signature"
+    elif (
+        "중복상장규제" in contextual_overlap
+        and bool({"주주동의", "모회사주주", "주주보호장치"} & contextual_overlap)
+        and computed_title_score >= 25
+    ):
+        reason = "duplicate_listing_policy_signature"
     elif len(contextual_overlap) >= 3 and computed_title_score >= 52:
         reason = "contextual_event_signature"
 

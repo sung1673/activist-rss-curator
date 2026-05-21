@@ -285,6 +285,8 @@ def score_story_pair(
         score += 22
     if signature.same_story:
         score += 18
+    if signature.reason == "duplicate_listing_policy_signature":
+        score += 20
     if company_overlap:
         score += 20
     score += min(22, title_score * 0.22)

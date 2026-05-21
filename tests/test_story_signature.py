@@ -17,6 +17,24 @@ def test_generic_minority_shareholder_group_controversy_signature() -> None:
     assert "단체실체논란" in tokens
 
 
+def test_duplicate_listing_policy_signature_without_company_name() -> None:
+    left_tokens = event_tokens_for_text("중복상장, 주주 동의 어떻게 받을까? 모회사 주주 동의 범위 쟁점")
+    right_tokens = event_tokens_for_text("원칙 금지·예외 허용 중복상장 가닥...주주보호 장치 쟁점")
+
+    decision = story_signature_decision(
+        "중복상장, 주주 동의 어떻게 받을까?...MoM 놓고 기관과 PE·증권사 격돌",
+        "원칙 금지·예외 허용 중복상장 가닥...주주보호 장치 쟁점",
+        left_event_tokens=left_tokens,
+        right_event_tokens=right_tokens,
+        title_score=35,
+    )
+
+    assert {"중복상장규제", "주주동의", "모회사주주"} & set(left_tokens)
+    assert {"중복상장규제", "주주보호장치"} <= set(right_tokens)
+    assert decision.same_story
+    assert decision.reason == "duplicate_listing_policy_signature"
+
+
 def test_story_signature_allows_same_company_contextual_event_low_title_overlap() -> None:
     left_tokens = event_tokens_for_text("한화솔루션, 1.8조 유증 또 줄이진 않아…금감원 제동 뒤 재추진")
     right_tokens = event_tokens_for_text("두 차례 반려 한화솔루션, 유상증자 관련 정정신고서 제출")

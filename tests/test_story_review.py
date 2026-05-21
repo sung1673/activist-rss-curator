@@ -70,6 +70,43 @@ def test_build_story_review_detects_split_candidate() -> None:
     assert candidate["score"] >= 60
 
 
+def test_story_review_detects_duplicate_listing_policy_split_candidate() -> None:
+    now = datetime(2026, 5, 21, 8, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    config = {
+        "timezone": "Asia/Seoul",
+        "public_feed_url": "https://news.bside.ai/feed.xml",
+        "story_review": {"min_score": 60, "max_candidates": 5},
+    }
+    stories = [
+        story(
+            "중복상장, 주주 동의 어떻게 받을까?...MoM 놓고 기관과 PE·증권사 격돌[자본법안 와치]",
+            "에너지경제신문",
+            "https://example.com/duplicate-listing-review-a",
+            now,
+            "중복상장 제도와 모회사 주주 동의 범위가 쟁점",
+        ),
+        story(
+            "원칙 금지·예외 허용 중복상장 가닥...주주보호 장치 쟁점",
+            "디지털투데이",
+            "https://example.com/duplicate-listing-review-b",
+            now - timedelta(minutes=1),
+            "중복상장 규제 방향과 주주보호 장치가 논의됐다",
+        ),
+        story(
+            "자본시장법 중복상장 제도 손질 필요...핵심은 모회사 주주 동의 범위",
+            "스트레이트뉴스",
+            "https://example.com/duplicate-listing-review-c",
+            now - timedelta(hours=3),
+            "자본시장법상 중복상장 제도와 모회사 주주 동의 범위가 제기됐다",
+        ),
+    ]
+
+    review = build_story_review(stories, config, now - timedelta(days=1), now, "2026-05-21")
+
+    assert review["candidate_count"] >= 1
+    assert any("중복상장" in candidate["left"]["title"] and "중복상장" in candidate["right"]["title"] for candidate in review["candidates"])  # type: ignore[index]
+
+
 def test_story_review_token_falls_back_to_derived_bot_token(monkeypatch) -> None:
     monkeypatch.delenv("STORY_REVIEW_ACCESS_TOKEN", raising=False)
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:secret")
