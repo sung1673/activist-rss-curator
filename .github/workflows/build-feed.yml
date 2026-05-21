@@ -17,8 +17,8 @@ on:
     - cron: "5,35 0-15,23 * * *"
     # KST 03:35, covering the first half of the overnight 01:00-06:00 window.
     - cron: "35 18 * * *"
-    # KST 06:00, covering the second half of the overnight window and publishing the daily report.
-    - cron: "0 21 * * *"
+    # KST 05:00, scheduled early so the daily report can still arrive near 06:00 if Actions is delayed.
+    - cron: "0 20 * * *"
   workflow_dispatch:
     inputs:
       run_mode:
@@ -197,7 +197,7 @@ jobs:
         run: python -m curator.main
 
       - name: Build daily report page
-        if: ${{ steps.run_mode.outputs.page == 'true' || (github.event_name == 'schedule' && github.event.schedule == '0 21 * * *') || (github.event_name == 'workflow_dispatch' && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]')) }}
+        if: ${{ steps.run_mode.outputs.page == 'true' || (github.event_name == 'schedule' && github.event.schedule == '0 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]')) }}
         env:
           CURATOR_DAILY_REPORT_WRITE_ONLY: "1"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -256,7 +256,7 @@ jobs:
         uses: actions/deploy-pages@v4
 
       - name: Send daily report message
-        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 21 * * *') || (github.event_name == 'workflow_dispatch' && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]')) }}
+        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]')) }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -267,7 +267,7 @@ jobs:
         run: python -m curator.daily_report
 
       - name: Send story review message
-        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 21 * * *') || (github.event_name == 'workflow_dispatch' && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]')) }}
+        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]')) }}
         env:
           STORY_REVIEW_ACCESS_TOKEN: ${{ secrets.STORY_REVIEW_ACCESS_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
