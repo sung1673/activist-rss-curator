@@ -1,86 +1,134 @@
 {
-  "date_id": "2026-05-21",
-  "generated_at": "2026-05-21T13:44:52.389479+09:00",
-  "start_at": "2026-05-20T13:42:04.106309+09:00",
-  "end_at": "2026-05-21T13:42:04.106309+09:00",
-  "start_label": "2026-05-20 13:42 KST",
-  "end_label": "2026-05-21 13:42 KST",
-  "candidate_count": 2,
-  "candidate_hash": "b51d224ea5f97302",
+  "date_id": "2026-05-22",
+  "generated_at": "2026-05-22T06:35:39.321365+09:00",
+  "start_at": "2026-05-21T06:33:37.477951+09:00",
+  "end_at": "2026-05-22T06:33:37.477951+09:00",
+  "start_label": "2026-05-21 06:33 KST",
+  "end_label": "2026-05-22 06:33 KST",
+  "candidate_count": 10,
+  "candidate_hash": "f09d2155117344fe",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "73f7ae3323fd",
-      "score": 83.9,
+      "id": "a33f30664105",
+      "score": 92.1,
       "left": {
-        "id": "story-33",
-        "title": "삼성전자 주주들 주총 없이 영업이익 연동 성과급 합의, 무효 노사 경고",
-        "summary": "삼성전자 노사가 성과급 지급 기준을 두고 막판까지 줄다리기 협상에 나선 가운데, 삼성전자 주주단체가 주주총회 결의 없이는 '영업이익 연동 성과급 합의'는 법률상 무효라고 주장했다. 소액주주 단체인 '대한민국 주주운동본부'는 20일 보도자료를 내고 \"주주총회의 결의를 거치지 않은 노사간…",
-        "category": "자본시장 제도·공시",
-        "datetime": "05.20 11:51",
-        "source_line": "JOSEILBO",
+        "id": "story-40",
+        "title": "[심층진단] 하나금융, 이사회 내 소비자보호위원회 첫 가동의 금융공학적 함의와 지배구조 리스크 관리 전략 - 뉴스밸류",
+        "summary": "[심층진단] 하나금융, 이사회 내 ‘소비자보호위원회’ 첫 가동의 금융공학적 함의와 지배구조 리스크 관리 전략 뉴스밸류",
+        "category": "밸류업·주주환원",
+        "datetime": "05.21 09:50",
+        "source_line": "NEWSVALUE",
         "link_count": 1,
-        "url": "https://www.joseilbo.com/news/htmls/2026/05/20260520568632.html",
+        "url": "https://www.newsvalue.kr/news/articleView.html?idxno=23749",
         "links": [
           {
-            "source": "JOSEILBO",
-            "title": "삼성전자 주주들 주총 없이 영업이익 연동 성과급 합의, 무효 노사 경고",
-            "url": "https://www.joseilbo.com/news/htmls/2026/05/20260520568632.html"
+            "source": "NEWSVALUE",
+            "title": "[심층진단] 하나금융, 이사회 내 소비자보호위원회 첫 가동의 금융공학적 함의와 지배구조 리스크 관리 전략 - 뉴스밸류",
+            "url": "https://www.newsvalue.kr/news/articleView.html?idxno=23749"
           }
         ]
       },
       "right": {
-        "id": "story-35",
-        "title": "삼성전자 성과급 합의 앞두고 주주 반발…법적 대응 예고",
-        "summary": "삼성전자 노사가 성과급 협상 막바지에 접어든 가운데 주주단체가 법적 대응을 예고하고 나섰다. 노사 합의가 이뤄지더라도 주주총회 결의 없이 영업이익 연동 성과급을 명문화하면 법률상 무효라는 주장이다. 이번 주주단체의 법적 대응 예고는 삼성전자 성과급 협상이 노사 간 문제 ...",
+        "id": "story-41",
+        "title": "하나금융, 금융지주 최초 이사회 산하 소비자보호위원회 개최… 거버넌스 새 지평",
+        "summary": "하나금융, 금융지주 최초 이사회 산하 ‘소비자보호위원회’ 개최… 거버넌스 새 지평 NBN미디어",
         "category": "밸류업·주주환원",
-        "datetime": "05.20 04:20",
-        "source_line": "METROSEOUL",
+        "datetime": "05.21 00:00",
+        "source_line": "NBNTV",
         "link_count": 1,
-        "url": "https://metroseoul.co.kr/article/20260520500111",
+        "url": "https://www.nbntv.kr/news/articleView.html?idxno=340154",
         "links": [
           {
-            "source": "METROSEOUL",
-            "title": "삼성전자 성과급 합의 앞두고 주주 반발…법적 대응 예고",
-            "url": "https://metroseoul.co.kr/article/20260520500111"
+            "source": "NBNTV",
+            "title": "하나금융, 금융지주 최초 이사회 산하 소비자보호위원회 개최… 거버넌스 새 지평",
+            "url": "https://www.nbntv.kr/news/articleView.html?idxno=340154"
           }
         ]
       }
     },
     {
-      "id": "9140845a4cd8",
-      "score": 77.6,
+      "id": "c0cc239ed682",
+      "score": 89.2,
       "left": {
-        "id": "story-15",
-        "title": "삼성전자 파업 전야 극적 합의··· 정부 중재로 돌파구 - 그린포스트코리아",
-        "summary": "... 주주 들, 노조 상대 \"직접 소송 불사\"··· \"노조가 주주 배당금 강탈\" · [삼성노조 겨눈 ' 주주행동주의 ' 역습①] \"비이성적 노조 요구가 리스크\" · TSMC로 물량 ...",
-        "category": "주주행동·경영권",
-        "datetime": "05.20 23:47",
-        "source_line": "GREENPOSTKOREA",
-        "link_count": 1,
-        "url": "https://www.greenpostkorea.co.kr/news/articleView.html?idxno=306721",
+        "id": "story-14",
+        "title": "삼성전자 주주단체 영업이익 12% 연동 성과급 위법…법적대응(종합2보)",
+        "summary": "(서울=연합뉴스) 이동환 양수연 기자 = 삼성전자 주주단체인 '대한민국 주주운동본부'는 21일 삼성전자 노사의 임금협상 잠정 합의안을 위법으로 규정하며 법적 대응을 예고했다. 주주운동본부는 이날 오전 이재용 삼성전자 회장 자택 일대에서 집회를 열고 \"세전 영업이익의 12%를 미리 계산…",
+        "category": "밸류업·주주환원",
+        "datetime": "05.21 12:42",
+        "source_line": "연합뉴스 · NEWS1 · HANSBIZ",
+        "link_count": 3,
+        "url": "https://www.yna.co.kr/view/AKR20260521070953004",
         "links": [
           {
-            "source": "GREENPOSTKOREA",
-            "title": "삼성전자 파업 전야 극적 합의··· 정부 중재로 돌파구 - 그린포스트코리아",
-            "url": "https://www.greenpostkorea.co.kr/news/articleView.html?idxno=306721"
+            "source": "연합뉴스",
+            "title": "삼성전자 주주단체 영업이익 12% 연동 성과급 위법…법적대응(종합2보)",
+            "url": "https://www.yna.co.kr/view/AKR20260521070953004"
+          },
+          {
+            "source": "NEWS1",
+            "title": "삼성전자 주주단체 성과급 잠정합의안 위법…법적대응(종합)",
+            "url": "https://www.news1.kr/society/incident-accident/6173939"
+          },
+          {
+            "source": "HANSBIZ",
+            "title": "[이슈체크] 삼성전자 주주단체 성과급 12%는 위장 배당 반발",
+            "url": "http://www.hansbiz.co.kr/news/articleView.html?idxno=840120"
           }
         ]
       },
       "right": {
-        "id": "story-16",
-        "title": "삼성전자 주주단체 긴급조정권 발동해야…총파업 앞두고 탄원서 모집",
-        "summary": "[서울=뉴시스]박나리 기자 = 삼성전자 노사가 2차 사후조정에서도 합의점을 찾지 못하면서 노조가 21일 총파업을 예고한 가운데, 삼성전자 소액주주 단체가 주주행동 플랫폼을 통해 정부에 긴급조정권 발동을 촉구하는 전자서명에 나섰다. 20일 업계에 따르면 ...",
-        "category": "주주행동·경영권",
-        "datetime": "05.20 16:02",
-        "source_line": "FNNEWS",
+        "id": "story-36",
+        "title": "삼성 노사 대타협, 500만 주주들 들고 일어나나… 세전 영업익 12% 성과급 위법",
+        "summary": "삼성전자 노사가 총파업 직전에 극적으로 합의에 성공한 가운데, 이번엔 삼성전자 주주 단체가 잠정 합의안을 위법으로 규정하고 법적 대응에 나서기로 했다. 대한민국주주운동본부는 21일 서울 용산구 이재용 삼성전자 회장 자택 일대에서 집회를 열고, “세전 영업이익의 12%를 미리 계산해 성…",
+        "category": "밸류업·주주환원",
+        "datetime": "05.21 13:34",
+        "source_line": "CEO스코어데일리",
         "link_count": 1,
-        "url": "https://www.fnnews.com/news/202605201601376412",
+        "url": "https://www.ceoscoredaily.com//page/view/2026052113031325325",
         "links": [
           {
-            "source": "FNNEWS",
-            "title": "삼성전자 주주단체 긴급조정권 발동해야…총파업 앞두고 탄원서 모집",
-            "url": "https://www.fnnews.com/news/202605201601376412"
+            "source": "CEO스코어데일리",
+            "title": "삼성 노사 대타협, 500만 주주들 들고 일어나나… 세전 영업익 12% 성과급 위법",
+            "url": "https://www.ceoscoredaily.com//page/view/2026052113031325325"
+          }
+        ]
+      }
+    },
+    {
+      "id": "81cb896b7261",
+      "score": 86.5,
+      "left": {
+        "id": "story-36",
+        "title": "삼성 노사 대타협, 500만 주주들 들고 일어나나… 세전 영업익 12% 성과급 위법",
+        "summary": "삼성전자 노사가 총파업 직전에 극적으로 합의에 성공한 가운데, 이번엔 삼성전자 주주 단체가 잠정 합의안을 위법으로 규정하고 법적 대응에 나서기로 했다. 대한민국주주운동본부는 21일 서울 용산구 이재용 삼성전자 회장 자택 일대에서 집회를 열고, “세전 영업이익의 12%를 미리 계산해 성…",
+        "category": "밸류업·주주환원",
+        "datetime": "05.21 13:34",
+        "source_line": "CEO스코어데일리",
+        "link_count": 1,
+        "url": "https://www.ceoscoredaily.com//page/view/2026052113031325325",
+        "links": [
+          {
+            "source": "CEO스코어데일리",
+            "title": "삼성 노사 대타협, 500만 주주들 들고 일어나나… 세전 영업익 12% 성과급 위법",
+            "url": "https://www.ceoscoredaily.com//page/view/2026052113031325325"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-45",
+        "title": "노조 웃은 다음날…삼전 주주들 성과급 위법, 가처분 낼 것",
+        "summary": "삼성전자 노사의 성과급 잠정 합의안이 발표되자 삼성전자 주주단체인 ‘대한민국 주주운동본부’가 21일 서울 용산구 이재용 회장 자택 인근에서 기자회견을 열고 법적 대응을 예고했다. 기업 활동을 통해 벌어들인 수익을 누구와 어떤 기준으로 나눠야 할지가 사회적 논의 ...",
+        "category": "밸류업·주주환원",
+        "datetime": "05.22 00:11",
+        "source_line": "KOREADAILY",
+        "link_count": 1,
+        "url": "https://www.koreadaily.com/article/20260521081142040",
+        "links": [
+          {
+            "source": "KOREADAILY",
+            "title": "노조 웃은 다음날…삼전 주주들 성과급 위법, 가처분 낼 것",
+            "url": "https://www.koreadaily.com/article/20260521081142040"
           }
         ]
       }
