@@ -4,17 +4,17 @@
     {
       "date": "2026-05-23",
       "path": "articles/2026-05-23.jsonl",
-      "records": 411
+      "records": 530
     },
     {
       "date": "2026-05-22",
       "path": "articles/2026-05-22.jsonl",
-      "records": 885
+      "records": 941
     },
     {
       "date": "2026-05-21",
       "path": "articles/2026-05-21.jsonl",
-      "records": 940
+      "records": 948
     },
     {
       "date": "2026-05-20",
@@ -117,6 +117,6 @@
       "records": 157
     }
   ],
-  "generated_at": "2026-05-23T01:30:40.135553+09:00",
-  "total_records": 17366
+  "generated_at": "2026-05-23T05:28:58.256552+09:00",
+  "total_records": 17549
 }
