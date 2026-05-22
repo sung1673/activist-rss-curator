@@ -1,134 +1,124 @@
 {
-  "date_id": "2026-05-22",
-  "generated_at": "2026-05-22T06:35:39.321365+09:00",
-  "start_at": "2026-05-21T06:33:37.477951+09:00",
-  "end_at": "2026-05-22T06:33:37.477951+09:00",
-  "start_label": "2026-05-21 06:33 KST",
-  "end_label": "2026-05-22 06:33 KST",
-  "candidate_count": 10,
-  "candidate_hash": "f09d2155117344fe",
+  "date_id": "2026-05-23",
+  "generated_at": "2026-05-23T06:17:09.165024+09:00",
+  "start_at": "2026-05-22T06:15:00.223059+09:00",
+  "end_at": "2026-05-23T06:15:00.223059+09:00",
+  "start_label": "2026-05-22 06:15 KST",
+  "end_label": "2026-05-23 06:15 KST",
+  "candidate_count": 5,
+  "candidate_hash": "3fb39ccacd9a1379",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "a33f30664105",
-      "score": 92.1,
+      "id": "5afe63e498a8",
+      "score": 78.7,
       "left": {
-        "id": "story-40",
-        "title": "[심층진단] 하나금융, 이사회 내 소비자보호위원회 첫 가동의 금융공학적 함의와 지배구조 리스크 관리 전략 - 뉴스밸류",
-        "summary": "[심층진단] 하나금융, 이사회 내 ‘소비자보호위원회’ 첫 가동의 금융공학적 함의와 지배구조 리스크 관리 전략 뉴스밸류",
-        "category": "밸류업·주주환원",
-        "datetime": "05.21 09:50",
-        "source_line": "NEWSVALUE",
+        "id": "story-1",
+        "title": "삼성전자 주주단체 성과급 결정은 주주 권한...법적 대응 예고 | - 딜라이트닷넷",
+        "summary": "주주 운동본부는 대법원 기자회견 전날에도 행동주의 수위를 높였다. 이들은 전날 이재용 삼성전자 회장의 자택 일대에서 집회를 열고, 이번 노사 합의에 ...",
+        "category": "주주행동·경영권",
+        "datetime": "05.22 19:00",
+        "source_line": "DELIGHTI",
         "link_count": 1,
-        "url": "https://www.newsvalue.kr/news/articleView.html?idxno=23749",
+        "url": "https://www.delighti.co.kr/news/articleView.html?idxno=116781",
         "links": [
           {
-            "source": "NEWSVALUE",
-            "title": "[심층진단] 하나금융, 이사회 내 소비자보호위원회 첫 가동의 금융공학적 함의와 지배구조 리스크 관리 전략 - 뉴스밸류",
-            "url": "https://www.newsvalue.kr/news/articleView.html?idxno=23749"
+            "source": "DELIGHTI",
+            "title": "삼성전자 주주단체 성과급 결정은 주주 권한...법적 대응 예고 | - 딜라이트닷넷",
+            "url": "https://www.delighti.co.kr/news/articleView.html?idxno=116781"
           }
         ]
       },
       "right": {
-        "id": "story-41",
-        "title": "하나금융, 금융지주 최초 이사회 산하 소비자보호위원회 개최… 거버넌스 새 지평",
-        "summary": "하나금융, 금융지주 최초 이사회 산하 ‘소비자보호위원회’ 개최… 거버넌스 새 지평 NBN미디어",
-        "category": "밸류업·주주환원",
-        "datetime": "05.21 00:00",
-        "source_line": "NBNTV",
+        "id": "story-2",
+        "title": "주주단체 삼성전자 성과급은 상법 위반, 주총 승인 대상",
+        "summary": "국회와 정부를 향해 “주주권의 실효적 행사와 주주 참여 확대를 위한 제도 개선이 필요하다”며 “글로벌 거버넌스 흐름이 주주행동주의 ·ESG·세이온페이(Say-on- ...",
+        "category": "주주행동·경영권",
+        "datetime": "05.22 15:29",
+        "source_line": "BUBB",
         "link_count": 1,
-        "url": "https://www.nbntv.kr/news/articleView.html?idxno=340154",
+        "url": "http://www.bubb.co.kr/news/articleView.html?idxno=4749",
         "links": [
           {
-            "source": "NBNTV",
-            "title": "하나금융, 금융지주 최초 이사회 산하 소비자보호위원회 개최… 거버넌스 새 지평",
-            "url": "https://www.nbntv.kr/news/articleView.html?idxno=340154"
+            "source": "BUBB",
+            "title": "주주단체 삼성전자 성과급은 상법 위반, 주총 승인 대상",
+            "url": "http://www.bubb.co.kr/news/articleView.html?idxno=4749"
           }
         ]
       }
     },
     {
-      "id": "c0cc239ed682",
-      "score": 89.2,
+      "id": "a89a75811bba",
+      "score": 77.5,
       "left": {
-        "id": "story-14",
-        "title": "삼성전자 주주단체 영업이익 12% 연동 성과급 위법…법적대응(종합2보)",
-        "summary": "(서울=연합뉴스) 이동환 양수연 기자 = 삼성전자 주주단체인 '대한민국 주주운동본부'는 21일 삼성전자 노사의 임금협상 잠정 합의안을 위법으로 규정하며 법적 대응을 예고했다. 주주운동본부는 이날 오전 이재용 삼성전자 회장 자택 일대에서 집회를 열고 \"세전 영업이익의 12%를 미리 계산…",
-        "category": "밸류업·주주환원",
-        "datetime": "05.21 12:42",
-        "source_line": "연합뉴스 · NEWS1 · HANSBIZ",
-        "link_count": 3,
-        "url": "https://www.yna.co.kr/view/AKR20260521070953004",
+        "id": "story-10",
+        "title": "[이슈체크] 성과급 둘러싼 삼성 내전…노동권 vs 주주권 전면전 되나",
+        "summary": "서울=한스경제 고예인 기자 | 삼성전자 노사의 성과급 잠정 합의안을 둘러싸고 이번에는 주주행동주의 단체가 공개 반발에 나섰다. 회사 영업이익을 재원 ...",
+        "category": "주주행동·경영권",
+        "datetime": "05.22 00:00",
+        "source_line": "HANSBIZ",
+        "link_count": 1,
+        "url": "http://www.hansbiz.co.kr/news/articleView.html?idxno=840383",
         "links": [
-          {
-            "source": "연합뉴스",
-            "title": "삼성전자 주주단체 영업이익 12% 연동 성과급 위법…법적대응(종합2보)",
-            "url": "https://www.yna.co.kr/view/AKR20260521070953004"
-          },
-          {
-            "source": "NEWS1",
-            "title": "삼성전자 주주단체 성과급 잠정합의안 위법…법적대응(종합)",
-            "url": "https://www.news1.kr/society/incident-accident/6173939"
-          },
           {
             "source": "HANSBIZ",
-            "title": "[이슈체크] 삼성전자 주주단체 성과급 12%는 위장 배당 반발",
-            "url": "http://www.hansbiz.co.kr/news/articleView.html?idxno=840120"
+            "title": "[이슈체크] 성과급 둘러싼 삼성 내전…노동권 vs 주주권 전면전 되나",
+            "url": "http://www.hansbiz.co.kr/news/articleView.html?idxno=840383"
           }
         ]
       },
       "right": {
-        "id": "story-36",
-        "title": "삼성 노사 대타협, 500만 주주들 들고 일어나나… 세전 영업익 12% 성과급 위법",
-        "summary": "삼성전자 노사가 총파업 직전에 극적으로 합의에 성공한 가운데, 이번엔 삼성전자 주주 단체가 잠정 합의안을 위법으로 규정하고 법적 대응에 나서기로 했다. 대한민국주주운동본부는 21일 서울 용산구 이재용 삼성전자 회장 자택 일대에서 집회를 열고, “세전 영업이익의 12%를 미리 계산해 성…",
+        "id": "story-21",
+        "title": "[심층분석] 삼성전자 성과급 자사주 지급, 주주총회 쟁점 되나 - 이코노미트리뷴",
+        "summary": "[심층분석] 삼성전자 성과급 자사주 지급, 주주총회 쟁점 되나 이코노미트리뷴",
         "category": "밸류업·주주환원",
-        "datetime": "05.21 13:34",
-        "source_line": "CEO스코어데일리",
+        "datetime": "05.22 09:54",
+        "source_line": "ECONOMYTRIBUNE",
         "link_count": 1,
-        "url": "https://www.ceoscoredaily.com//page/view/2026052113031325325",
+        "url": "https://www.economytribune.co.kr/news/articleView.html?idxno=3902763",
         "links": [
           {
-            "source": "CEO스코어데일리",
-            "title": "삼성 노사 대타협, 500만 주주들 들고 일어나나… 세전 영업익 12% 성과급 위법",
-            "url": "https://www.ceoscoredaily.com//page/view/2026052113031325325"
+            "source": "ECONOMYTRIBUNE",
+            "title": "[심층분석] 삼성전자 성과급 자사주 지급, 주주총회 쟁점 되나 - 이코노미트리뷴",
+            "url": "https://www.economytribune.co.kr/news/articleView.html?idxno=3902763"
           }
         ]
       }
     },
     {
-      "id": "81cb896b7261",
-      "score": 86.5,
+      "id": "f8ca30261de5",
+      "score": 74.8,
       "left": {
-        "id": "story-36",
-        "title": "삼성 노사 대타협, 500만 주주들 들고 일어나나… 세전 영업익 12% 성과급 위법",
-        "summary": "삼성전자 노사가 총파업 직전에 극적으로 합의에 성공한 가운데, 이번엔 삼성전자 주주 단체가 잠정 합의안을 위법으로 규정하고 법적 대응에 나서기로 했다. 대한민국주주운동본부는 21일 서울 용산구 이재용 삼성전자 회장 자택 일대에서 집회를 열고, “세전 영업이익의 12%를 미리 계산해 성…",
-        "category": "밸류업·주주환원",
-        "datetime": "05.21 13:34",
-        "source_line": "CEO스코어데일리",
+        "id": "story-1",
+        "title": "삼성전자 주주단체 성과급 결정은 주주 권한...법적 대응 예고 | - 딜라이트닷넷",
+        "summary": "주주 운동본부는 대법원 기자회견 전날에도 행동주의 수위를 높였다. 이들은 전날 이재용 삼성전자 회장의 자택 일대에서 집회를 열고, 이번 노사 합의에 ...",
+        "category": "주주행동·경영권",
+        "datetime": "05.22 19:00",
+        "source_line": "DELIGHTI",
         "link_count": 1,
-        "url": "https://www.ceoscoredaily.com//page/view/2026052113031325325",
+        "url": "https://www.delighti.co.kr/news/articleView.html?idxno=116781",
         "links": [
           {
-            "source": "CEO스코어데일리",
-            "title": "삼성 노사 대타협, 500만 주주들 들고 일어나나… 세전 영업익 12% 성과급 위법",
-            "url": "https://www.ceoscoredaily.com//page/view/2026052113031325325"
+            "source": "DELIGHTI",
+            "title": "삼성전자 주주단체 성과급 결정은 주주 권한...법적 대응 예고 | - 딜라이트닷넷",
+            "url": "https://www.delighti.co.kr/news/articleView.html?idxno=116781"
           }
         ]
       },
       "right": {
-        "id": "story-45",
-        "title": "노조 웃은 다음날…삼전 주주들 성과급 위법, 가처분 낼 것",
-        "summary": "삼성전자 노사의 성과급 잠정 합의안이 발표되자 삼성전자 주주단체인 ‘대한민국 주주운동본부’가 21일 서울 용산구 이재용 회장 자택 인근에서 기자회견을 열고 법적 대응을 예고했다. 기업 활동을 통해 벌어들인 수익을 누구와 어떤 기준으로 나눠야 할지가 사회적 논의 ...",
-        "category": "밸류업·주주환원",
-        "datetime": "05.22 00:11",
-        "source_line": "KOREADAILY",
+        "id": "story-10",
+        "title": "[이슈체크] 성과급 둘러싼 삼성 내전…노동권 vs 주주권 전면전 되나",
+        "summary": "서울=한스경제 고예인 기자 | 삼성전자 노사의 성과급 잠정 합의안을 둘러싸고 이번에는 주주행동주의 단체가 공개 반발에 나섰다. 회사 영업이익을 재원 ...",
+        "category": "주주행동·경영권",
+        "datetime": "05.22 00:00",
+        "source_line": "HANSBIZ",
         "link_count": 1,
-        "url": "https://www.koreadaily.com/article/20260521081142040",
+        "url": "http://www.hansbiz.co.kr/news/articleView.html?idxno=840383",
         "links": [
           {
-            "source": "KOREADAILY",
-            "title": "노조 웃은 다음날…삼전 주주들 성과급 위법, 가처분 낼 것",
-            "url": "https://www.koreadaily.com/article/20260521081142040"
+            "source": "HANSBIZ",
+            "title": "[이슈체크] 성과급 둘러싼 삼성 내전…노동권 vs 주주권 전면전 되나",
+            "url": "http://www.hansbiz.co.kr/news/articleView.html?idxno=840383"
           }
         ]
       }
