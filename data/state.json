@@ -170968,8 +170968,9 @@
       "title_hash": "fe315c7d991e3511ba2762b1"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiakFVX3lxTE92VDBWekQ0ZFM2M2NMclF6dERtaXMwUjdoVzFGN0NscHZfZkhNOHdCOC1EcXhnMEw4Mi1xX05aSnJwQ0hwUEFBMlRZaDFta0xBaVBKbFlndVlnbllXdmEzY3RBUWF2LTdjNVE?oc=5",
-      "canonical_url_hash": "05c0b1680267e9ea17871dc3",
+      "article_published_at": "2026-05-22T12:25:01+09:00",
+      "canonical_url": "https://www.bosa.co.kr/news/articleView.html?idxno=3005056",
+      "canonical_url_hash": "44a3e614fef351194ea20c78",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.bosa.co.kr/news/articleView.html?idxno=3005056",
@@ -170988,8 +170989,25 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-소액주주",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiakFVX3lxTE92VDBWekQ0ZFM2M2NMclF6dERtaXMwUjdoVzFGN0NscHZfZkhNOHdCOC1EcXhnMEw4Mi1xX05aSnJwQ0hwUEFBMlRZaDFta0xBaVBKbFlndVlnbllXdmEzY3RBUWF2LTdjNVE?oc=5",
+      "image_candidates": [
+        "https://cdn.bosa.co.kr/news/photo/202605/3005056_405358_4317.jpg",
+        "https://cdn.bosa.co.kr/news/photo/member/eunje_20260429045035.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3005072_405376_19_1779458470_120.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3005014_405316_853_1779401339_120.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3004889_405179_5425_1779234867_300.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3004859_405168_3732_1779208652_300.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3004857_405165_1234_1779203555_300.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3004846_405136_3751_1779169071_300.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3004794_405084_5412_1779148454_300.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3004839_405121_183_1779157084_300.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3004996_405298_3719_1779349040_120.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3005011_405314_038_1779372038_120.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3005001_405305_3042_1779363042_120.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3005017_405319_2856_1779402537_120.jpg"
+      ],
+      "image_url": "https://cdn.bosa.co.kr/news/photo/202605/3005056_405358_4317.jpg",
       "normalized_title": "휴온스 자회사간 합병 논란…소액주주 우회 편입 반발",
       "priority_level": "watch",
       "priority_reasons": [
@@ -171016,8 +171034,9 @@
       "title_hash": "c974cd7cc1b3f131b2ed7cbe"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMid0FVX3lxTE5pa1R5c09fX2pxbzNJcXVJSlVuRVNZam10SXo5eGkzc1NzVk9qclBpU1ZVX1BNbmxmQldXeFNHZmdVTEJLV1dUanZOcHNyazU4amI3SEZlRmZ3LVc0QWJkTXNTYzZlVHpON3J2ZHVDR2tsR3RkU3pB0gF3QVVfeXFMTmlrVHlzT19fanFvM0lxdUlKVW5FU1lqbXRJejl4aTNzU3NWT2pyUGlTVlVfUE1ubGZCV1d4U0dmZ1VMQktXV1Rqdk5wc3JrNThqYjdIRmVGZnctVzRBYmRNc1NjNmVUek43cnZkdUNHa2xHdGRTekE?oc=5",
-      "canonical_url_hash": "aa871f5757ecb73738fb48f2",
+      "article_published_at": "2026-05-22T00:00:00+09:00",
+      "canonical_url": "https://www.straightnews.co.kr/news/articleView.html?idxno=303240",
+      "canonical_url_hash": "87ede7b9d195c72e90917ad9",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.straightnews.co.kr/news/articleView.html?idxno=303240",
@@ -171039,8 +171058,12 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-밸류업-벨류업",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMid0FVX3lxTE5pa1R5c09fX2pxbzNJcXVJSlVuRVNZam10SXo5eGkzc1NzVk9qclBpU1ZVX1BNbmxmQldXeFNHZmdVTEJLV1dUanZOcHNyazU4amI3SEZlRmZ3LVc0QWJkTXNTYzZlVHpON3J2ZHVDR2tsR3RkU3pB0gF3QVVfeXFMTmlrVHlzT19fanFvM0lxdUlKVW5FU1lqbXRJejl4aTNzU3NWT2pyUGlTVlVfUE1ubGZCV1d4U0dmZ1VMQktXV1Rqdk5wc3JrNThqYjdIRmVGZnctVzRBYmRNc1NjNmVUek43cnZkdUNHa2xHdGRTekE?oc=5",
+      "image_candidates": [
+        "https://www.straightnews.co.kr/news/photo/202605/303240_212887_2049.jpg"
+      ],
+      "image_url": "https://www.straightnews.co.kr/news/photo/202605/303240_212887_2049.jpg",
       "normalized_title": "밸류업 경쟁 본격화…lg 3500억원 규모 자사주 소각",
       "priority_level": "normal",
       "priority_reasons": [
@@ -171068,8 +171091,9 @@
       "title_hash": "dd624ae2c7c985eb909d8223"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiYEFVX3lxTE9JbVoyTHA2ek5hOUJOZ1VaLVRucktlSVpGSVY0UGRoUmZmbm14YlRLSmNfaEZESms5VGJLQU16RF9Jclhwa3c0dWZJVEIwalJlcnVHcTlsTUE0OWpFdTZicg?oc=5",
-      "canonical_url_hash": "cbffa10d451fa976d5643759",
+      "article_published_at": "2026-05-22T13:57:16+09:00",
+      "canonical_url": "http://www.s-d.kr/news/articleView.html?idxno=79894",
+      "canonical_url_hash": "05ca118c3f84fbb5e01196cf",
       "duplicate_matches": [
         {
           "canonical_url": "http://www.s-d.kr/news/articleView.html?idxno=79894",
@@ -171088,8 +171112,20 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-유상증자 정정신고서 금감원",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiYEFVX3lxTE9JbVoyTHA2ek5hOUJOZ1VaLVRucktlSVpGSVY0UGRoUmZmbm14YlRLSmNfaEZESms5VGJLQU16RF9Jclhwa3c0dWZJVEIwalJlcnVHcTlsTUE0OWpFdTZicg?oc=5",
+      "image_candidates": [
+        "http://www.s-d.kr/news/thumbnail/202605/79894_80431_5213_v150.jpg",
+        "http://www.s-d.kr/image/sns/tsns_face.png",
+        "http://www.s-d.kr/image/sns/tsns_blog.png",
+        "http://www.s-d.kr/image/sns/tsns_post.png",
+        "http://www.s-d.kr/news/photo/202605/79894_80434_5341.jpg",
+        "http://www.s-d.kr/news/photo/202605/79894_80433_535.jpg",
+        "http://www.s-d.kr/news/photo/202605/79894_80432_5246.jpg",
+        "http://www.s-d.kr/news/photo/202605/79894_80435_5423.jpg",
+        "http://www.s-d.kr/image/newsroom/default-user.png"
+      ],
+      "image_url": "http://www.s-d.kr/news/thumbnail/202605/79894_80431_5213_v150.jpg",
       "normalized_title": "1 8조 유증 추진 한화솔루션 삼세판 도전 성공할까 금감원 심사 주목",
       "priority_level": "normal",
       "priority_reasons": [
@@ -171109,7 +171145,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-23T05:28:58.256552+09:00",
-      "source": "동양뉴스",
+      "source": "증권일보",
       "status": "duplicate",
       "story_key": "story:c99610c4ee398ebb",
       "summary": "1.8조 유증 추진 한화솔루션, 삼세판 도전 성공할까···금감원 심사 주목 동양뉴스",
@@ -171117,8 +171153,9 @@
       "title_hash": "c99610c4ee398ebb3356aad5"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMic0FVX3lxTFB5elV3Tlp3UnVUbGNkbEtBektoVXFkaDJEQ2lDY0o4c0dpUUNhbjE2NG9qaU9XcmdQZ2hYVHBJbEd2UTNlRlp6VnA0Q0NhUjJENy1lS0FKQ0ZXMTEwTHczR2JzakxYYVlPZU5LYmNXUU1xTUnSAXdBVV95cUxPRk85QkhmZDZZWVRndHExSVpsMm9TVEtnTm5Val9hcHFzNzFYY0dMTi1NWUVXSDE0NHJwSkZhQUJHdTNyQjNpOWxManVhR2pwc1BCTWNNazQ3anQ0NkNoZXFUM1Q5RGE4RnZXaURRU1daVi1QM3Ruaw?oc=5",
-      "canonical_url_hash": "c061c88c83c0e0bff957b1a2",
+      "article_published_at": "2026-05-22T07:27:24+09:00",
+      "canonical_url": "https://www.pinpointnews.co.kr/news/articleView.html?idxno=454473",
+      "canonical_url_hash": "42afa971c76965611b4b59e7",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.pinpointnews.co.kr/news/articleView.html?idxno=454473",
@@ -171137,8 +171174,13 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-금융지주 지배구조 개편",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMic0FVX3lxTFB5elV3Tlp3UnVUbGNkbEtBektoVXFkaDJEQ2lDY0o4c0dpUUNhbjE2NG9qaU9XcmdQZ2hYVHBJbEd2UTNlRlp6VnA0Q0NhUjJENy1lS0FKQ0ZXMTEwTHczR2JzakxYYVlPZU5LYmNXUU1xTUnSAXdBVV95cUxPRk85QkhmZDZZWVRndHExSVpsMm9TVEtnTm5Val9hcHFzNzFYY0dMTi1NWUVXSDE0NHJwSkZhQUJHdTNyQjNpOWxManVhR2pwc1BCTWNNazQ3anQ0NkNoZXFUM1Q5RGE4RnZXaURRU1daVi1QM3Ruaw?oc=5",
+      "image_candidates": [
+        "https://cdn.pinpointnews.co.kr/news/thumbnail/202605/454473_444126_836_v150.jpg",
+        "https://cdn.pinpointnews.co.kr/news/photo/202605/454473_444126_836.jpg"
+      ],
+      "image_url": "https://cdn.pinpointnews.co.kr/news/thumbnail/202605/454473_444126_836_v150.jpg",
       "normalized_title": "ceo in&out 새 지배구조 첫 적용될까… 양종희 kb 회장 연임 변수는",
       "priority_level": "normal",
       "priority_reasons": [
@@ -171165,8 +171207,9 @@
       "title_hash": "b72bb57f70135139df5d436b"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiZEFVX3lxTFAtSUxvUzJkVzdabTBXcEZOM2ZEdVZmaGV2cDNKazZ6U28tbE9mNHUySTNCT2dmR0hlZURrQVN0Qk16RVY3Z1FWTElyQUNURGVpVlJiRmZJUmFjZ1VrV2lqZTlnZks?oc=5",
-      "canonical_url_hash": "29a015a9ace5a76186a47357",
+      "article_published_at": "2026-05-22T13:04:35+09:00",
+      "canonical_url": "http://www.press9.kr/news/articleView.html?idxno=76951",
+      "canonical_url_hash": "63573e920bf687197f1b6b36",
       "duplicate_matches": [
         {
           "canonical_url": "http://www.press9.kr/news/articleView.html?idxno=76951",
@@ -171186,8 +171229,13 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-배당소득 분리과세 주주환원",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiZEFVX3lxTFAtSUxvUzJkVzdabTBXcEZOM2ZEdVZmaGV2cDNKazZ6U28tbE9mNHUySTNCT2dmR0hlZURrQVN0Qk16RVY3Z1FWTElyQUNURGVpVlJiRmZJUmFjZ1VrV2lqZTlnZks?oc=5",
+      "image_candidates": [
+        "http://www.press9.kr/news/thumbnail/202605/76951_89684_5752_v150.jpg",
+        "http://www.press9.kr/news/photo/202605/76951_89684_5752.jpeg"
+      ],
+      "image_url": "http://www.press9.kr/news/thumbnail/202605/76951_89684_5752_v150.jpg",
       "normalized_title": "고배당 분리과세 혜택 입는 lg…풍부한 순현금으로 추가 주주환원 기대 - press9",
       "priority_level": "normal",
       "priority_reasons": [
@@ -171215,8 +171263,9 @@
       "title_hash": "67f2ce1e1bba8e28ded84d16"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMibEFVX3lxTFBJRVpCd25RMGVrRWxIcmxhQzgwd2xPUjVfc2g5a3d5WW9BamxDdm10bDJ4VlRTeEJmSDV1aUdOSFpHQ1lGTk1FTVlvaW5nTG5EZ2R3Ti1OMGVweXhZMXUxdnpiVjB3eHprQXFvSA?oc=5",
-      "canonical_url_hash": "746130f96050ba1cc942b37d",
+      "article_published_at": "2026-05-22T15:00:00+09:00",
+      "canonical_url": "https://www.econovill.com/news/articleView.html?idxno=739426",
+      "canonical_url_hash": "d78c2f26ab72213cad48c22b",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.econovill.com/news/articleView.html?idxno=739426",
@@ -171235,8 +171284,17 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-배당소득 분리과세 주주환원",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMibEFVX3lxTFBJRVpCd25RMGVrRWxIcmxhQzgwd2xPUjVfc2g5a3d5WW9BamxDdm10bDJ4VlRTeEJmSDV1aUdOSFpHQ1lGTk1FTVlvaW5nTG5EZ2R3Ti1OMGVweXhZMXUxdnpiVjB3eHprQXFvSA?oc=5",
+      "image_candidates": [
+        "https://cdn.econovill.com/news/thumbnail/202605/739426_710826_5929_v150.jpg",
+        "https://cdn.econovill.com/news/photo/202605/739426_710826_5929.jpg",
+        "https://cdn.econovill.com/image/c-dr01-box-title.png",
+        "https://cdn.econovill.com/news/orgPhoto/202605/739426_710826_5929.jpg",
+        "https://cdn.econovill.com/news/orgPhoto/202605/739426_711939_344.jpg",
+        "https://cdn.econovill.com/news/orgPhoto/202605/739426_711940_3428.jpg"
+      ],
+      "image_url": "https://cdn.econovill.com/news/thumbnail/202605/739426_710826_5929_v150.jpg",
       "normalized_title": "금융지주 주주환원율 50% 시대③ 하나 체감 수익률 제고 vs 우리 환원 기반 확충…전략 다변화 - er 이코노믹리뷰",
       "priority_level": "normal",
       "priority_reasons": [
@@ -171263,8 +171321,8 @@
       "title_hash": "8b3d00070ca82d582804b79b"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiW0FVX3lxTE1FSVJrTVpQenFINWxEZ0g5ZG1oLThRNGF5QWNXTzhOaXFDWnplUF9NVnhJQWllOXB0M1hJc3FJczF2SVJXb1hBdjVuYlhnQ2dtU0JBdDVKX0Rodzg?oc=5",
-      "canonical_url_hash": "8d583703659f70fcb55a19c5",
+      "canonical_url": "https://www.kyeonggi.com/article/20260522580038",
+      "canonical_url_hash": "91d649b8d19dacc0c8caa885",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.kyeonggi.com/article/20260522580038",
@@ -171283,8 +171341,16 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-성과보상 지배구조",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiW0FVX3lxTE1FSVJrTVpQenFINWxEZ0g5ZG1oLThRNGF5QWNXTzhOaXFDWnplUF9NVnhJQWllOXB0M1hJc3FJczF2SVJXb1hBdjVuYlhnQ2dtU0JBdDVKX0Rodzg?oc=5",
+      "image_candidates": [
+        "https://ypzxxdrj8709.edge.naverncp.com/data2/content/image/2026/05/22/.cache/512/20260522580039.jpg?v=20260523064150",
+        "https://ypzxxdrj8709.edge.naverncp.com/data1/resources/pc/common/images/ico/share_ico.png",
+        "https://ypzxxdrj8709.edge.naverncp.com/data1/resources/pc/common/images/ico/print_ico.png",
+        "https://ypzxxdrj8709.edge.naverncp.com/data1/resources/pc/common/images/ico/txt_ico.png",
+        "https://ypzxxdrj8709.edge.naverncp.com/data2/content/image/2026/05/22/.cache/512/20260522580039.jpg"
+      ],
+      "image_url": "https://ypzxxdrj8709.edge.naverncp.com/data2/content/image/2026/05/22/.cache/512/20260522580039.jpg?v=20260523064150",
       "normalized_title": "삼성전자 주주들 노사 성과협약은 상법 위반 전면 무효 법적 대응 예고",
       "priority_level": "normal",
       "priority_reasons": [
@@ -171311,8 +171377,9 @@
       "title_hash": "ee6eac2c6548851c7d2439dc"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMihAFBVV95cUxNWTN0cU1EOW9aWkNXTzk2eDF2WVluaElia2hDc0U1dUZNcWh4LXJfTGgwMGpQV1FSZzRyZDk5Wkdmb2xoZ2lZS1hyaV90ek5mZWZfWHpzUDFCeEpwZ1JYMzNOTkc0TEdWcklMQ1NIb2ZJVEp6eWZheFd1R0RUSE5KN08yZ0jSAZgBQVVfeXFMT3l4VVdvSFpNT3pfMTZWXzAxV3RuUmJCX29yVkE2SGtzOHpQeS02MzRucDd3X05VQXNubmdIR0ZkZXJtaHQ5QjE4V1ZETnRnakNSclFjRndXN0Rnak55RWJBRGdsR1dTZm93QlRyQy10MjFIVFJyLTRqYzFrYVl4WXh0b3pIZHNPVUREbGh1ZUZ4YWVVOEFJb0I?oc=5",
-      "canonical_url_hash": "2142f89539bbc2487691eaf7",
+      "article_published_at": "2026-05-22T15:05:05.226000+09:00",
+      "canonical_url": "https://biz.chosun.com/industry/company/2026/05/22/KPAHMMXWZRBHXHLGO57TGQNZZI",
+      "canonical_url_hash": "cb8d04ab4165df9575314902",
       "duplicate_matches": [
         {
           "canonical_url": "https://biz.chosun.com/industry/company/2026/05/22/KPAHMMXWZRBHXHLGO57TGQNZZI",
@@ -171331,8 +171398,12 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-금융투자회사 성과급",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMihAFBVV95cUxNWTN0cU1EOW9aWkNXTzk2eDF2WVluaElia2hDc0U1dUZNcWh4LXJfTGgwMGpQV1FSZzRyZDk5Wkdmb2xoZ2lZS1hyaV90ek5mZWZfWHpzUDFCeEpwZ1JYMzNOTkc0TEdWcklMQ1NIb2ZJVEp6eWZheFd1R0RUSE5KN08yZ0jSAZgBQVVfeXFMT3l4VVdvSFpNT3pfMTZWXzAxV3RuUmJCX29yVkE2SGtzOHpQeS02MzRucDd3X05VQXNubmdIR0ZkZXJtaHQ5QjE4V1ZETnRnakNSclFjRndXN0Rnak55RWJBRGdsR1dTZm93QlRyQy10MjFIVFJyLTRqYzFrYVl4WXh0b3pIZHNPVUREbGh1ZUZ4YWVVOEFJb0I?oc=5",
+      "image_candidates": [
+        "https://biz.chosun.com/resizer/v2/HFQWMNJZHA2DAMRWGM2DQMRYGI.jpg?auth=5e8e8c64d229142b4e756ee7fb993cd3ed9c8dc5a0f9eade1af60009563a6c77&height=630&smart=true&width=1200"
+      ],
+      "image_url": "https://biz.chosun.com/resizer/v2/HFQWMNJZHA2DAMRWGM2DQMRYGI.jpg?auth=5e8e8c64d229142b4e756ee7fb993cd3ed9c8dc5a0f9eade1af60009563a6c77&height=630&smart=true&width=1200",
       "normalized_title": "신분 실적 경영 리스크 없는 삼성전자 직원의 성과급 6억원 파장… 전례 없다 재계 후폭풍 우려 - 조선비즈 - chosunbiz",
       "priority_level": "normal",
       "priority_reasons": [
@@ -171352,7 +171423,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-23T05:28:58.256552+09:00",
-      "source": "Chosunbiz",
+      "source": "조선비즈",
       "status": "duplicate",
       "story_key": "story:e3e2d65bf4b8f771",
       "summary": "신분·실적·경영 리스크 없는 삼성전자 직원의 ‘성과급 6억원’ 파장… “전례 없다. 재계 후폭풍 우려” - 조선비즈 Chosunbiz",
@@ -171360,8 +171431,9 @@
       "title_hash": "e3e2d65bf4b8f771cc975aa4"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMid0FVX3lxTE5pa1R5c09fX2pxbzNJcXVJSlVuRVNZam10SXo5eGkzc1NzVk9qclBpU1ZVX1BNbmxmQldXeFNHZmdVTEJLV1dUanZOcHNyazU4amI3SEZlRmZ3LVc0QWJkTXNTYzZlVHpON3J2ZHVDR2tsR3RkU3pB0gF3QVVfeXFMTmlrVHlzT19fanFvM0lxdUlKVW5FU1lqbXRJejl4aTNzU3NWT2pyUGlTVlVfUE1ubGZCV1d4U0dmZ1VMQktXV1Rqdk5wc3JrNThqYjdIRmVGZnctVzRBYmRNc1NjNmVUek43cnZkdUNHa2xHdGRTekE?oc=5",
-      "canonical_url_hash": "aa871f5757ecb73738fb48f2",
+      "article_published_at": "2026-05-22T00:00:00+09:00",
+      "canonical_url": "https://www.straightnews.co.kr/news/articleView.html?idxno=303240",
+      "canonical_url_hash": "87ede7b9d195c72e90917ad9",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.straightnews.co.kr/news/articleView.html?idxno=303240",
@@ -171383,8 +171455,12 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-기업 밸류업 프로그램 자본시장",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMid0FVX3lxTE5pa1R5c09fX2pxbzNJcXVJSlVuRVNZam10SXo5eGkzc1NzVk9qclBpU1ZVX1BNbmxmQldXeFNHZmdVTEJLV1dUanZOcHNyazU4amI3SEZlRmZ3LVc0QWJkTXNTYzZlVHpON3J2ZHVDR2tsR3RkU3pB0gF3QVVfeXFMTmlrVHlzT19fanFvM0lxdUlKVW5FU1lqbXRJejl4aTNzU3NWT2pyUGlTVlVfUE1ubGZCV1d4U0dmZ1VMQktXV1Rqdk5wc3JrNThqYjdIRmVGZnctVzRBYmRNc1NjNmVUek43cnZkdUNHa2xHdGRTekE?oc=5",
+      "image_candidates": [
+        "https://www.straightnews.co.kr/news/photo/202605/303240_212887_2049.jpg"
+      ],
+      "image_url": "https://www.straightnews.co.kr/news/photo/202605/303240_212887_2049.jpg",
       "normalized_title": "밸류업 경쟁 본격화…lg 3500억원 규모 자사주 소각",
       "priority_level": "normal",
       "priority_reasons": [
@@ -171412,8 +171488,9 @@
       "title_hash": "dd624ae2c7c985eb909d8223"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMid0FVX3lxTE85cFlvenBTZ21xR3BjUEpJRi1ndlVxd1FLMzlSZ0lpY29XaGZ2TlBucS1kVE15cEMyY3A4cmd4UkhyQ1g0UmxULVVNaHk1eTBwWXY2ajNzTUY5cmhyR0QwTDFkNVlnY0JSbTZEVmdnZE5KNjVUdW9j?oc=5",
-      "canonical_url_hash": "6ad83e4730f705ebac119496",
+      "article_published_at": "2026-05-22T09:54:56+09:00",
+      "canonical_url": "https://www.economytribune.co.kr/news/articleView.html?idxno=3902763",
+      "canonical_url_hash": "36c41d18bd05e45822447eda",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.economytribune.co.kr/news/articleView.html?idxno=3902763",
@@ -171434,8 +171511,20 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-자사주 취득 1년 이내 소각",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMid0FVX3lxTE85cFlvenBTZ21xR3BjUEpJRi1ndlVxd1FLMzlSZ0lpY29XaGZ2TlBucS1kVE15cEMyY3A4cmd4UkhyQ1g0UmxULVVNaHk1eTBwWXY2ajNzTUY5cmhyR0QwTDFkNVlnY0JSbTZEVmdnZE5KNjVUdW9j?oc=5",
+      "image_candidates": [
+        "https://cdn.economytribune.co.kr/news/photo/202605/3902763_3895_4453.jpg",
+        "https://cdn.economytribune.co.kr/image/newsroom/default-user.png",
+        "https://cdn.economytribune.co.kr/news/thumbnail/custom/20260523/3902620_3709_1231_1778724751_120.jpg",
+        "https://cdn.economytribune.co.kr/image/sample/300x250_1.jpg",
+        "https://cdn.economytribune.co.kr/news/thumbnail/custom/20260523/3902778_3912_556_1779465956_300.jpg",
+        "https://cdn.economytribune.co.kr/news/thumbnail/custom/20260523/3902777_3911_2346_1779445426_300.jpg",
+        "https://cdn.economytribune.co.kr/news/thumbnail/custom/20260523/3902776_3908_5247_1779436368_300.jpg",
+        "https://cdn.economytribune.co.kr/news/thumbnail/custom/20260523/3902774_3907_2821_1779424101_300.jpg",
+        "https://cdn.economytribune.co.kr/news/thumbnail/custom/20260523/3902773_3906_66_1779419166_300.jpg"
+      ],
+      "image_url": "https://cdn.economytribune.co.kr/news/photo/202605/3902763_3895_4453.jpg",
       "normalized_title": "심층분석 삼성전자 성과급 자사주 지급 주주총회 쟁점 되나 - 이코노미트리뷴",
       "priority_level": "normal",
       "priority_reasons": [
@@ -171464,8 +171553,9 @@
       "title_hash": "e489ec3b1d86984532fb7ee5"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMilwFBVV95cUxPTWoxd2ZqYzJsSTRvZUtsWW1sd2owTVI2SzZBaDZ4OVd3SjgydDFNM2dZMlppek0wVVJRa2VNd0hvNnI1Nml6aFhONDZDZUdua3ppQTJvQzl4Ylp1ZE42bUJPb1VaaUJFYkJtaTNGb05jdzlZLXUxODVPa2ZLcHRrdXFoVTkzQjNPX1JNMlhhYmp6aWRxcF9n0gGXAUFVX3lxTE9NajF3ZmpjMmxJNG9lS2xZbWx3ajBNUjZLNkFoNng5V3dKODJ0MU0zZ1kyWml6TTBVUlFrZU13SG82cjU2aXpoWE40NkNlR25remlBMm9DOXhiWnVkTjZtQk9vVVppQkViQm1pM0ZvTmN3OVktdTE4NU9rZktwdGt1cWhVOTNCM09fUk0yWGFianppZHFwX2c?oc=5",
-      "canonical_url_hash": "b67fd64f8e4185a6c7967780",
+      "article_published_at": "2026-05-22T09:47:00.713000+09:00",
+      "canonical_url": "https://biz.chosun.com/stock/c-biz_bot/2026/05/22/MJRTQMZTGBSDCN3BMQZTEOBXMY",
+      "canonical_url_hash": "21a610d74713692c6ccbae24",
       "duplicate_matches": [
         {
           "canonical_url": "https://biz.chosun.com/stock/c-biz_bot/2026/05/22/MJRTQMZTGBSDCN3BMQZTEOBXMY",
@@ -171484,8 +171574,12 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-코리아 밸류업 지수 ETF",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMilwFBVV95cUxPTWoxd2ZqYzJsSTRvZUtsWW1sd2owTVI2SzZBaDZ4OVd3SjgydDFNM2dZMlppek0wVVJRa2VNd0hvNnI1Nml6aFhONDZDZUdua3ppQTJvQzl4Ylp1ZE42bUJPb1VaaUJFYkJtaTNGb05jdzlZLXUxODVPa2ZLcHRrdXFoVTkzQjNPX1JNMlhhYmp6aWRxcF9n0gGXAUFVX3lxTE9NajF3ZmpjMmxJNG9lS2xZbWx3ajBNUjZLNkFoNng5V3dKODJ0MU0zZ1kyWml6TTBVUlFrZU13SG82cjU2aXpoWE40NkNlR25remlBMm9DOXhiWnVkTjZtQk9vVVppQkViQm1pM0ZvTmN3OVktdTE4NU9rZktwdGt1cWhVOTNCM09fUk0yWGFianppZHFwX2c?oc=5",
+      "image_candidates": [
+        "https://biz.chosun.com/resizer/v2/HBSWIMRSME4GKOJSGVRGCZBQHA.png?auth=c49b11f84dca86c4668e470015aab0d3e5cdf55240824bd1d7ec449a330cf8d3&height=522&smart=true&width=996"
+      ],
+      "image_url": "https://biz.chosun.com/resizer/v2/HBSWIMRSME4GKOJSGVRGCZBQHA.png?auth=c49b11f84dca86c4668e470015aab0d3e5cdf55240824bd1d7ec449a330cf8d3&height=522&smart=true&width=996",
       "normalized_title": "강세 토픽 밸류업 지수 편입 시총하위 50 테마 엘앤씨바이오 +6 65% soop +6 29% - 조선비즈 - chosunbiz",
       "priority_level": "normal",
       "priority_reasons": [
@@ -171505,7 +171599,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-23T05:28:58.256552+09:00",
-      "source": "Chosunbiz",
+      "source": "조선비즈",
       "status": "duplicate",
       "story_key": "story:3a85a7baed85aedc",
       "summary": "[강세 토픽] 밸류업 지수 편입 (시총하위 50) 테마, 엘앤씨바이오 +6.65%, SOOP +6.29% - 조선비즈 Chosunbiz",
@@ -171513,8 +171607,9 @@
       "title_hash": "3a85a7baed85aedced2da0c5"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMitgFBVV95cUxOT3k4SlRYVlJKY0ZKdndNZHQ0dHFBYmVFUXRLZEFmeDdoQWJlSzR4ZGYxVXo2alZoZ1Z2VkJiZ2V5dEZOWVVWTWFYWE1YVXBhdnpUVC1NVWVOQURaSkdUUG5na0NhNy1Ma2VXVkFFUW5mbjd2V3V0QVpZNXk1N2dfb01YZGlJT0YxRmJfSFFEeUpnVkdFWjFBTTBMa2I4b2E0MXBBTDU1UlVuRUZLNXFaeU5ZbFpqQQ?oc=5",
-      "canonical_url_hash": "2f4b4b0731a30f881a8d6998",
+      "article_published_at": "2026-05-22T05:38:24+09:00",
+      "canonical_url": "https://www.irreview.org/articles/2026/5/21/corporate-governance-in-japan-evolution-from-stakeholder-to-shareholder",
+      "canonical_url_hash": "5c96ca35366d5c1f801448cd",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.irreview.org/articles/2026/5/21/corporate-governance-in-japan-evolution-from-stakeholder-to-shareholder",
@@ -171533,8 +171628,14 @@
       ],
       "feed_category": "global",
       "feed_name": "google-news-en-dual-class-shareholder-rights",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMitgFBVV95cUxOT3k4SlRYVlJKY0ZKdndNZHQ0dHFBYmVFUXRLZEFmeDdoQWJlSzR4ZGYxVXo2alZoZ1Z2VkJiZ2V5dEZOWVVWTWFYWE1YVXBhdnpUVC1NVWVOQURaSkdUUG5na0NhNy1Ma2VXVkFFUW5mbjd2V3V0QVpZNXk1N2dfb01YZGlJT0YxRmJfSFFEeUpnVkdFWjFBTTBMa2I4b2E0MXBBTDU1UlVuRUZLNXFaeU5ZbFpqQQ?oc=5",
+      "image_candidates": [
+        "http://static1.squarespace.com/static/59c9242349fc2b90f0548d0b/60e01d59b195413149edc983/6a0f6cd7dd0b8b03a4243df4/1779395904904/agathe-2cdvYh6ULCs-unsplash.jpg?format=1500w",
+        "https://images.squarespace-cdn.com/content/v1/59c9242349fc2b90f0548d0b/e6a49698-10af-4220-b616-681d0fa4ea12/International.png",
+        "https://static1.squarespace.com/static/59c9242349fc2b90f0548d0b/t/63e3282a462f4622a5d7f9db/1779147023885"
+      ],
+      "image_url": "http://static1.squarespace.com/static/59c9242349fc2b90f0548d0b/60e01d59b195413149edc983/6a0f6cd7dd0b8b03a4243df4/1779395904904/agathe-2cdvYh6ULCs-unsplash.jpg?format=1500w",
       "normalized_title": "corporate governance in japan evolution from stakeholder to shareholder - international relations review",
       "priority_level": "normal",
       "priority_reasons": [
@@ -171560,8 +171661,9 @@
       "title_hash": "76005f5720a69bca8570585a"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE9pVXl4RVRUWWdHOWl0M1prVnh2WklhVmtZNk02T1ZKUmNaamRDUy1QUnNoOURpZ0xUcVhfTUVYRmR1MEkwak40T1BlVDg1ZnE4dV9N?oc=5",
-      "canonical_url_hash": "74d0f79249925fa44a713b04",
+      "article_published_at": "2026-05-22T11:23:00+09:00",
+      "canonical_url": "https://newneek.co/@newneek/article/40743",
+      "canonical_url_hash": "b22bc01e1f30f7dbeb3c2498",
       "duplicate_matches": [
         {
           "canonical_url": "https://newneek.co/@newneek/article/40743",
@@ -171580,8 +171682,13 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-감사의견 거절 상장폐지",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE9pVXl4RVRUWWdHOWl0M1prVnh2WklhVmtZNk02T1ZKUmNaamRDUy1QUnNoOURpZ0xUcVhfTUVYRmR1MEkwak40T1BlVDg1ZnE4dV9N?oc=5",
+      "image_candidates": [
+        "https://d2phebdq64jyfk.cloudfront.net/media/article/7f687624eed84d11917ed6594b613c20.jpg",
+        "https://d2phebdq64jyfk.cloudfront.net/media/image/user/photo/8b14497f-da47-49e9-90fa-5d5941a28c2a.1716181328.355366.jpg"
+      ],
+      "image_url": "https://d2phebdq64jyfk.cloudfront.net/media/article/7f687624eed84d11917ed6594b613c20.jpg",
       "normalized_title": "이차전지 대장주 금양 상장폐지 결정 시총 10조에서 추락한 이유 🔋📉 - 뉴닉",
       "priority_level": "normal",
       "priority_reasons": [
@@ -171609,10 +171716,12 @@
       "title_hash": "e40ac930a478e72edf6f5737"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMi3gFBVV95cUxNYUgtY2RZSkFjTXp5eW53Qi1WNnpxcUgxNk5lNDM3UGd0YXJGT1p4MG1KbDlSMUhxc1liYTJiejdsUnE0X29kYklCbjlsenNjaGRLVXdneE83QlBWUlJTUDJUWUw2TDNLYk1EWnN1X3NQajR5dWZGdkRyRDljN3M3dHNqT2Q1N1pDWEI3VEQ3SmlDRm1jakFWV0xwV0NKN3h0U280S2NoYmFndXp1ZW42TllxVnJWZWpFNlNXbGhiNGpoVE9JbVB3LVBFOFNuUVpMeklLNGQ1UUJDYkUxalE?oc=5",
-      "canonical_url_hash": "9e9daca88778bd512535e3b1",
+      "canonical_url": "https://m.investing.com/news/sec-filings/mcdonalds-shareholders-approve-board-nominees-and-key-proposals-at-annual-meeting-93CH-4707010?ampMode=1",
+      "canonical_url_hash": "a093a7650bedd5f4c623c896",
       "feed_category": "global",
       "feed_name": "google-news-en-shareholder-proposal-agm",
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMi3gFBVV95cUxNYUgtY2RZSkFjTXp5eW53Qi1WNnpxcUgxNk5lNDM3UGd0YXJGT1p4MG1KbDlSMUhxc1liYTJiejdsUnE0X29kYklCbjlsenNjaGRLVXdneE83QlBWUlJTUDJUWUw2TDNLYk1EWnN1X3NQajR5dWZGdkRyRDljN3M3dHNqT2Q1N1pDWEI3VEQ3SmlDRm1jakFWV0xwV0NKN3h0U280S2NoYmFndXp1ZW42TllxVnJWZWpFNlNXbGhiNGpoVE9JbVB3LVBFOFNuUVpMeklLNGQ1UUJDYkUxalE?oc=5",
       "image_candidates": [],
       "image_url": null,
       "normalized_title": "mcdonalds shareholders approve board nominees and key proposals at annual meeting",
@@ -185738,8 +185847,9 @@
       "title_hash": "fe315c7d991e3511ba2762b1"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiakFVX3lxTE92VDBWekQ0ZFM2M2NMclF6dERtaXMwUjdoVzFGN0NscHZfZkhNOHdCOC1EcXhnMEw4Mi1xX05aSnJwQ0hwUEFBMlRZaDFta0xBaVBKbFlndVlnbllXdmEzY3RBUWF2LTdjNVE?oc=5",
-      "canonical_url_hash": "05c0b1680267e9ea17871dc3",
+      "article_published_at": "2026-05-22T12:25:01+09:00",
+      "canonical_url": "https://www.bosa.co.kr/news/articleView.html?idxno=3005056",
+      "canonical_url_hash": "44a3e614fef351194ea20c78",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.bosa.co.kr/news/articleView.html?idxno=3005056",
@@ -185758,8 +185868,25 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-소액주주",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiakFVX3lxTE92VDBWekQ0ZFM2M2NMclF6dERtaXMwUjdoVzFGN0NscHZfZkhNOHdCOC1EcXhnMEw4Mi1xX05aSnJwQ0hwUEFBMlRZaDFta0xBaVBKbFlndVlnbllXdmEzY3RBUWF2LTdjNVE?oc=5",
+      "image_candidates": [
+        "https://cdn.bosa.co.kr/news/photo/202605/3005056_405358_4317.jpg",
+        "https://cdn.bosa.co.kr/news/photo/member/eunje_20260429045035.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3005072_405376_19_1779458470_120.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3005014_405316_853_1779401339_120.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3004889_405179_5425_1779234867_300.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3004859_405168_3732_1779208652_300.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3004857_405165_1234_1779203555_300.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3004846_405136_3751_1779169071_300.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3004794_405084_5412_1779148454_300.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3004839_405121_183_1779157084_300.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3004996_405298_3719_1779349040_120.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3005011_405314_038_1779372038_120.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3005001_405305_3042_1779363042_120.jpg",
+        "https://cdn.bosa.co.kr/news/thumbnail/custom/20260522/3005017_405319_2856_1779402537_120.jpg"
+      ],
+      "image_url": "https://cdn.bosa.co.kr/news/photo/202605/3005056_405358_4317.jpg",
       "normalized_title": "휴온스 자회사간 합병 논란…소액주주 우회 편입 반발",
       "priority_level": "watch",
       "priority_reasons": [
@@ -185786,8 +185913,9 @@
       "title_hash": "c974cd7cc1b3f131b2ed7cbe"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMid0FVX3lxTE5pa1R5c09fX2pxbzNJcXVJSlVuRVNZam10SXo5eGkzc1NzVk9qclBpU1ZVX1BNbmxmQldXeFNHZmdVTEJLV1dUanZOcHNyazU4amI3SEZlRmZ3LVc0QWJkTXNTYzZlVHpON3J2ZHVDR2tsR3RkU3pB0gF3QVVfeXFMTmlrVHlzT19fanFvM0lxdUlKVW5FU1lqbXRJejl4aTNzU3NWT2pyUGlTVlVfUE1ubGZCV1d4U0dmZ1VMQktXV1Rqdk5wc3JrNThqYjdIRmVGZnctVzRBYmRNc1NjNmVUek43cnZkdUNHa2xHdGRTekE?oc=5",
-      "canonical_url_hash": "aa871f5757ecb73738fb48f2",
+      "article_published_at": "2026-05-22T00:00:00+09:00",
+      "canonical_url": "https://www.straightnews.co.kr/news/articleView.html?idxno=303240",
+      "canonical_url_hash": "87ede7b9d195c72e90917ad9",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.straightnews.co.kr/news/articleView.html?idxno=303240",
@@ -185809,8 +185937,12 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-밸류업-벨류업",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMid0FVX3lxTE5pa1R5c09fX2pxbzNJcXVJSlVuRVNZam10SXo5eGkzc1NzVk9qclBpU1ZVX1BNbmxmQldXeFNHZmdVTEJLV1dUanZOcHNyazU4amI3SEZlRmZ3LVc0QWJkTXNTYzZlVHpON3J2ZHVDR2tsR3RkU3pB0gF3QVVfeXFMTmlrVHlzT19fanFvM0lxdUlKVW5FU1lqbXRJejl4aTNzU3NWT2pyUGlTVlVfUE1ubGZCV1d4U0dmZ1VMQktXV1Rqdk5wc3JrNThqYjdIRmVGZnctVzRBYmRNc1NjNmVUek43cnZkdUNHa2xHdGRTekE?oc=5",
+      "image_candidates": [
+        "https://www.straightnews.co.kr/news/photo/202605/303240_212887_2049.jpg"
+      ],
+      "image_url": "https://www.straightnews.co.kr/news/photo/202605/303240_212887_2049.jpg",
       "normalized_title": "밸류업 경쟁 본격화…lg 3500억원 규모 자사주 소각",
       "priority_level": "normal",
       "priority_reasons": [
@@ -185838,8 +185970,9 @@
       "title_hash": "dd624ae2c7c985eb909d8223"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiYEFVX3lxTE9JbVoyTHA2ek5hOUJOZ1VaLVRucktlSVpGSVY0UGRoUmZmbm14YlRLSmNfaEZESms5VGJLQU16RF9Jclhwa3c0dWZJVEIwalJlcnVHcTlsTUE0OWpFdTZicg?oc=5",
-      "canonical_url_hash": "cbffa10d451fa976d5643759",
+      "article_published_at": "2026-05-22T13:57:16+09:00",
+      "canonical_url": "http://www.s-d.kr/news/articleView.html?idxno=79894",
+      "canonical_url_hash": "05ca118c3f84fbb5e01196cf",
       "duplicate_matches": [
         {
           "canonical_url": "http://www.s-d.kr/news/articleView.html?idxno=79894",
@@ -185858,8 +185991,20 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-유상증자 정정신고서 금감원",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiYEFVX3lxTE9JbVoyTHA2ek5hOUJOZ1VaLVRucktlSVpGSVY0UGRoUmZmbm14YlRLSmNfaEZESms5VGJLQU16RF9Jclhwa3c0dWZJVEIwalJlcnVHcTlsTUE0OWpFdTZicg?oc=5",
+      "image_candidates": [
+        "http://www.s-d.kr/news/thumbnail/202605/79894_80431_5213_v150.jpg",
+        "http://www.s-d.kr/image/sns/tsns_face.png",
+        "http://www.s-d.kr/image/sns/tsns_blog.png",
+        "http://www.s-d.kr/image/sns/tsns_post.png",
+        "http://www.s-d.kr/news/photo/202605/79894_80434_5341.jpg",
+        "http://www.s-d.kr/news/photo/202605/79894_80433_535.jpg",
+        "http://www.s-d.kr/news/photo/202605/79894_80432_5246.jpg",
+        "http://www.s-d.kr/news/photo/202605/79894_80435_5423.jpg",
+        "http://www.s-d.kr/image/newsroom/default-user.png"
+      ],
+      "image_url": "http://www.s-d.kr/news/thumbnail/202605/79894_80431_5213_v150.jpg",
       "normalized_title": "1 8조 유증 추진 한화솔루션 삼세판 도전 성공할까 금감원 심사 주목",
       "priority_level": "normal",
       "priority_reasons": [
@@ -185879,7 +186024,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-23T06:10:38.078938+09:00",
-      "source": "동양뉴스",
+      "source": "증권일보",
       "status": "duplicate",
       "story_key": "story:c99610c4ee398ebb",
       "summary": "1.8조 유증 추진 한화솔루션, 삼세판 도전 성공할까···금감원 심사 주목 동양뉴스",
@@ -185887,8 +186032,9 @@
       "title_hash": "c99610c4ee398ebb3356aad5"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMid0FVX3lxTE9GTzlCSGZkNllZVGd0cTFJWmwyb1NUS2dOblVqX2FwcXM3MVhjR0xOLU1ZRVdIMTQ0cnBKRmFBQkd1M3JCM2k5bExqdWFHanBzUEJNY01rNDdqdDQ2Q2hlcVQzVDlEYThGdldpRFFTV1pWLVAzdG5r0gF3QVVfeXFMT0ZPOUJIZmQ2WVlUZ3RxMUlabDJvU1RLZ05uVWpfYXBxczcxWGNHTE4tTVlFV0gxNDRycEpGYUFCR3UzckIzaTlsTGp1YUdqcHNQQk1jTWs0N2p0NDZDaGVxVDNUOURhOEZ2V2lEUVNXWlYtUDN0bms?oc=5",
-      "canonical_url_hash": "cf6ca9f17e0dc8b713453dcc",
+      "article_published_at": "2026-05-22T00:00:00+09:00",
+      "canonical_url": "https://www.pinpointnews.co.kr/news/articleView.html?idxno=454473",
+      "canonical_url_hash": "42afa971c76965611b4b59e7",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.pinpointnews.co.kr/news/articleView.html?idxno=454473",
@@ -185907,8 +186053,12 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-금융지주 지배구조 개편",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMid0FVX3lxTE9GTzlCSGZkNllZVGd0cTFJWmwyb1NUS2dOblVqX2FwcXM3MVhjR0xOLU1ZRVdIMTQ0cnBKRmFBQkd1M3JCM2k5bExqdWFHanBzUEJNY01rNDdqdDQ2Q2hlcVQzVDlEYThGdldpRFFTV1pWLVAzdG5r0gF3QVVfeXFMT0ZPOUJIZmQ2WVlUZ3RxMUlabDJvU1RLZ05uVWpfYXBxczcxWGNHTE4tTVlFV0gxNDRycEpGYUFCR3UzckIzaTlsTGp1YUdqcHNQQk1jTWs0N2p0NDZDaGVxVDNUOURhOEZ2V2lEUVNXWlYtUDN0bms?oc=5",
+      "image_candidates": [
+        "https://www.pinpointnews.co.kr/news/photo/202605/454473_444126_836.jpg"
+      ],
+      "image_url": "https://www.pinpointnews.co.kr/news/photo/202605/454473_444126_836.jpg",
       "normalized_title": "ceo in&out 새 지배구조 첫 적용될까… 양종희 kb 회장 연임 변수는",
       "priority_level": "normal",
       "priority_reasons": [
@@ -185935,8 +186085,9 @@
       "title_hash": "b72bb57f70135139df5d436b"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiZEFVX3lxTFAtSUxvUzJkVzdabTBXcEZOM2ZEdVZmaGV2cDNKazZ6U28tbE9mNHUySTNCT2dmR0hlZURrQVN0Qk16RVY3Z1FWTElyQUNURGVpVlJiRmZJUmFjZ1VrV2lqZTlnZks?oc=5",
-      "canonical_url_hash": "29a015a9ace5a76186a47357",
+      "article_published_at": "2026-05-22T13:04:35+09:00",
+      "canonical_url": "http://www.press9.kr/news/articleView.html?idxno=76951",
+      "canonical_url_hash": "63573e920bf687197f1b6b36",
       "duplicate_matches": [
         {
           "canonical_url": "http://www.press9.kr/news/articleView.html?idxno=76951",
@@ -185956,8 +186107,13 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-배당소득 분리과세 주주환원",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiZEFVX3lxTFAtSUxvUzJkVzdabTBXcEZOM2ZEdVZmaGV2cDNKazZ6U28tbE9mNHUySTNCT2dmR0hlZURrQVN0Qk16RVY3Z1FWTElyQUNURGVpVlJiRmZJUmFjZ1VrV2lqZTlnZks?oc=5",
+      "image_candidates": [
+        "http://www.press9.kr/news/thumbnail/202605/76951_89684_5752_v150.jpg",
+        "http://www.press9.kr/news/photo/202605/76951_89684_5752.jpeg"
+      ],
+      "image_url": "http://www.press9.kr/news/thumbnail/202605/76951_89684_5752_v150.jpg",
       "normalized_title": "고배당 분리과세 혜택 입는 lg…풍부한 순현금으로 추가 주주환원 기대 - press9",
       "priority_level": "normal",
       "priority_reasons": [
@@ -185985,8 +186141,9 @@
       "title_hash": "67f2ce1e1bba8e28ded84d16"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMibEFVX3lxTFBJRVpCd25RMGVrRWxIcmxhQzgwd2xPUjVfc2g5a3d5WW9BamxDdm10bDJ4VlRTeEJmSDV1aUdOSFpHQ1lGTk1FTVlvaW5nTG5EZ2R3Ti1OMGVweXhZMXUxdnpiVjB3eHprQXFvSA?oc=5",
-      "canonical_url_hash": "746130f96050ba1cc942b37d",
+      "article_published_at": "2026-05-22T15:00:00+09:00",
+      "canonical_url": "https://www.econovill.com/news/articleView.html?idxno=739426",
+      "canonical_url_hash": "d78c2f26ab72213cad48c22b",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.econovill.com/news/articleView.html?idxno=739426",
@@ -186005,8 +186162,17 @@
       ],
       "feed_category": "supplemental",
       "feed_name": "google-news-배당소득 분리과세 주주환원",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMibEFVX3lxTFBJRVpCd25RMGVrRWxIcmxhQzgwd2xPUjVfc2g5a3d5WW9BamxDdm10bDJ4VlRTeEJmSDV1aUdOSFpHQ1lGTk1FTVlvaW5nTG5EZ2R3Ti1OMGVweXhZMXUxdnpiVjB3eHprQXFvSA?oc=5",
+      "image_candidates": [
+        "https://cdn.econovill.com/news/thumbnail/202605/739426_710826_5929_v150.jpg",
+        "https://cdn.econovill.com/news/photo/202605/739426_710826_5929.jpg",
+        "https://cdn.econovill.com/image/c-dr01-box-title.png",
+        "https://cdn.econovill.com/news/orgPhoto/202605/739426_710826_5929.jpg",
+        "https://cdn.econovill.com/news/orgPhoto/202605/739426_711939_344.jpg",
+        "https://cdn.econovill.com/news/orgPhoto/202605/739426_711940_3428.jpg"
+      ],
+      "image_url": "https://cdn.econovill.com/news/thumbnail/202605/739426_710826_5929_v150.jpg",
       "normalized_title": "금융지주 주주환원율 50% 시대③ 하나 체감 수익률 제고 vs 우리 환원 기반 확충…전략 다변화 - er 이코노믹리뷰",
       "priority_level": "normal",
       "priority_reasons": [
@@ -186033,8 +186199,8 @@
       "title_hash": "8b3d00070ca82d582804b79b"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiW0FVX3lxTE1FSVJrTVpQenFINWxEZ0g5ZG1oLThRNGF5QWNXTzhOaXFDWnplUF9NVnhJQWllOXB0M1hJc3FJczF2SVJXb1hBdjVuYlhnQ2dtU0JBdDVKX0Rodzg?oc=5",
-      "canonical_url_hash": "8d583703659f70fcb55a19c5",
+      "canonical_url": "https://www.kyeonggi.com/article/20260522580038",
+      "canonical_url_hash": "91d649b8d19dacc0c8caa885",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.kyeonggi.com/article/20260522580038",
@@ -186053,8 +186219,16 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-성과보상 지배구조",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiW0FVX3lxTE1FSVJrTVpQenFINWxEZ0g5ZG1oLThRNGF5QWNXTzhOaXFDWnplUF9NVnhJQWllOXB0M1hJc3FJczF2SVJXb1hBdjVuYlhnQ2dtU0JBdDVKX0Rodzg?oc=5",
+      "image_candidates": [
+        "https://ypzxxdrj8709.edge.naverncp.com/data2/content/image/2026/05/22/.cache/512/20260522580039.jpg?v=20260523064150",
+        "https://ypzxxdrj8709.edge.naverncp.com/data1/resources/pc/common/images/ico/share_ico.png",
+        "https://ypzxxdrj8709.edge.naverncp.com/data1/resources/pc/common/images/ico/print_ico.png",
+        "https://ypzxxdrj8709.edge.naverncp.com/data1/resources/pc/common/images/ico/txt_ico.png",
+        "https://ypzxxdrj8709.edge.naverncp.com/data2/content/image/2026/05/22/.cache/512/20260522580039.jpg"
+      ],
+      "image_url": "https://ypzxxdrj8709.edge.naverncp.com/data2/content/image/2026/05/22/.cache/512/20260522580039.jpg?v=20260523064150",
       "normalized_title": "삼성전자 주주들 노사 성과협약은 상법 위반 전면 무효 법적 대응 예고",
       "priority_level": "normal",
       "priority_reasons": [
@@ -186081,8 +186255,9 @@
       "title_hash": "ee6eac2c6548851c7d2439dc"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMihAFBVV95cUxNWTN0cU1EOW9aWkNXTzk2eDF2WVluaElia2hDc0U1dUZNcWh4LXJfTGgwMGpQV1FSZzRyZDk5Wkdmb2xoZ2lZS1hyaV90ek5mZWZfWHpzUDFCeEpwZ1JYMzNOTkc0TEdWcklMQ1NIb2ZJVEp6eWZheFd1R0RUSE5KN08yZ0jSAZgBQVVfeXFMT3l4VVdvSFpNT3pfMTZWXzAxV3RuUmJCX29yVkE2SGtzOHpQeS02MzRucDd3X05VQXNubmdIR0ZkZXJtaHQ5QjE4V1ZETnRnakNSclFjRndXN0Rnak55RWJBRGdsR1dTZm93QlRyQy10MjFIVFJyLTRqYzFrYVl4WXh0b3pIZHNPVUREbGh1ZUZ4YWVVOEFJb0I?oc=5",
-      "canonical_url_hash": "2142f89539bbc2487691eaf7",
+      "article_published_at": "2026-05-22T15:05:05.226000+09:00",
+      "canonical_url": "https://biz.chosun.com/industry/company/2026/05/22/KPAHMMXWZRBHXHLGO57TGQNZZI",
+      "canonical_url_hash": "cb8d04ab4165df9575314902",
       "duplicate_matches": [
         {
           "canonical_url": "https://biz.chosun.com/industry/company/2026/05/22/KPAHMMXWZRBHXHLGO57TGQNZZI",
@@ -186101,8 +186276,12 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-금융투자회사 성과급",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMihAFBVV95cUxNWTN0cU1EOW9aWkNXTzk2eDF2WVluaElia2hDc0U1dUZNcWh4LXJfTGgwMGpQV1FSZzRyZDk5Wkdmb2xoZ2lZS1hyaV90ek5mZWZfWHpzUDFCeEpwZ1JYMzNOTkc0TEdWcklMQ1NIb2ZJVEp6eWZheFd1R0RUSE5KN08yZ0jSAZgBQVVfeXFMT3l4VVdvSFpNT3pfMTZWXzAxV3RuUmJCX29yVkE2SGtzOHpQeS02MzRucDd3X05VQXNubmdIR0ZkZXJtaHQ5QjE4V1ZETnRnakNSclFjRndXN0Rnak55RWJBRGdsR1dTZm93QlRyQy10MjFIVFJyLTRqYzFrYVl4WXh0b3pIZHNPVUREbGh1ZUZ4YWVVOEFJb0I?oc=5",
+      "image_candidates": [
+        "https://biz.chosun.com/resizer/v2/HFQWMNJZHA2DAMRWGM2DQMRYGI.jpg?auth=5e8e8c64d229142b4e756ee7fb993cd3ed9c8dc5a0f9eade1af60009563a6c77&height=630&smart=true&width=1200"
+      ],
+      "image_url": "https://biz.chosun.com/resizer/v2/HFQWMNJZHA2DAMRWGM2DQMRYGI.jpg?auth=5e8e8c64d229142b4e756ee7fb993cd3ed9c8dc5a0f9eade1af60009563a6c77&height=630&smart=true&width=1200",
       "normalized_title": "신분 실적 경영 리스크 없는 삼성전자 직원의 성과급 6억원 파장… 전례 없다 재계 후폭풍 우려 - 조선비즈 - chosunbiz",
       "priority_level": "normal",
       "priority_reasons": [
@@ -186122,7 +186301,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-23T06:10:38.078938+09:00",
-      "source": "Chosunbiz",
+      "source": "조선비즈",
       "status": "duplicate",
       "story_key": "story:e3e2d65bf4b8f771",
       "summary": "신분·실적·경영 리스크 없는 삼성전자 직원의 ‘성과급 6억원’ 파장… “전례 없다. 재계 후폭풍 우려” - 조선비즈 Chosunbiz",
@@ -186130,8 +186309,9 @@
       "title_hash": "e3e2d65bf4b8f771cc975aa4"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMid0FVX3lxTE5pa1R5c09fX2pxbzNJcXVJSlVuRVNZam10SXo5eGkzc1NzVk9qclBpU1ZVX1BNbmxmQldXeFNHZmdVTEJLV1dUanZOcHNyazU4amI3SEZlRmZ3LVc0QWJkTXNTYzZlVHpON3J2ZHVDR2tsR3RkU3pB0gF3QVVfeXFMTmlrVHlzT19fanFvM0lxdUlKVW5FU1lqbXRJejl4aTNzU3NWT2pyUGlTVlVfUE1ubGZCV1d4U0dmZ1VMQktXV1Rqdk5wc3JrNThqYjdIRmVGZnctVzRBYmRNc1NjNmVUek43cnZkdUNHa2xHdGRTekE?oc=5",
-      "canonical_url_hash": "aa871f5757ecb73738fb48f2",
+      "article_published_at": "2026-05-22T00:00:00+09:00",
+      "canonical_url": "https://www.straightnews.co.kr/news/articleView.html?idxno=303240",
+      "canonical_url_hash": "87ede7b9d195c72e90917ad9",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.straightnews.co.kr/news/articleView.html?idxno=303240",
@@ -186153,8 +186333,12 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-기업 밸류업 프로그램 자본시장",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMid0FVX3lxTE5pa1R5c09fX2pxbzNJcXVJSlVuRVNZam10SXo5eGkzc1NzVk9qclBpU1ZVX1BNbmxmQldXeFNHZmdVTEJLV1dUanZOcHNyazU4amI3SEZlRmZ3LVc0QWJkTXNTYzZlVHpON3J2ZHVDR2tsR3RkU3pB0gF3QVVfeXFMTmlrVHlzT19fanFvM0lxdUlKVW5FU1lqbXRJejl4aTNzU3NWT2pyUGlTVlVfUE1ubGZCV1d4U0dmZ1VMQktXV1Rqdk5wc3JrNThqYjdIRmVGZnctVzRBYmRNc1NjNmVUek43cnZkdUNHa2xHdGRTekE?oc=5",
+      "image_candidates": [
+        "https://www.straightnews.co.kr/news/photo/202605/303240_212887_2049.jpg"
+      ],
+      "image_url": "https://www.straightnews.co.kr/news/photo/202605/303240_212887_2049.jpg",
       "normalized_title": "밸류업 경쟁 본격화…lg 3500억원 규모 자사주 소각",
       "priority_level": "normal",
       "priority_reasons": [
@@ -186182,8 +186366,9 @@
       "title_hash": "dd624ae2c7c985eb909d8223"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMid0FVX3lxTE85cFlvenBTZ21xR3BjUEpJRi1ndlVxd1FLMzlSZ0lpY29XaGZ2TlBucS1kVE15cEMyY3A4cmd4UkhyQ1g0UmxULVVNaHk1eTBwWXY2ajNzTUY5cmhyR0QwTDFkNVlnY0JSbTZEVmdnZE5KNjVUdW9j?oc=5",
-      "canonical_url_hash": "6ad83e4730f705ebac119496",
+      "article_published_at": "2026-05-22T09:54:56+09:00",
+      "canonical_url": "https://www.economytribune.co.kr/news/articleView.html?idxno=3902763",
+      "canonical_url_hash": "36c41d18bd05e45822447eda",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.economytribune.co.kr/news/articleView.html?idxno=3902763",
@@ -186204,8 +186389,20 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-자사주 취득 1년 이내 소각",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMid0FVX3lxTE85cFlvenBTZ21xR3BjUEpJRi1ndlVxd1FLMzlSZ0lpY29XaGZ2TlBucS1kVE15cEMyY3A4cmd4UkhyQ1g0UmxULVVNaHk1eTBwWXY2ajNzTUY5cmhyR0QwTDFkNVlnY0JSbTZEVmdnZE5KNjVUdW9j?oc=5",
+      "image_candidates": [
+        "https://cdn.economytribune.co.kr/news/photo/202605/3902763_3895_4453.jpg",
+        "https://cdn.economytribune.co.kr/image/newsroom/default-user.png",
+        "https://cdn.economytribune.co.kr/news/thumbnail/custom/20260523/3902620_3709_1231_1778724751_120.jpg",
+        "https://cdn.economytribune.co.kr/image/sample/300x250_1.jpg",
+        "https://cdn.economytribune.co.kr/news/thumbnail/custom/20260523/3902778_3912_556_1779465956_300.jpg",
+        "https://cdn.economytribune.co.kr/news/thumbnail/custom/20260523/3902777_3911_2346_1779445426_300.jpg",
+        "https://cdn.economytribune.co.kr/news/thumbnail/custom/20260523/3902776_3908_5247_1779436368_300.jpg",
+        "https://cdn.economytribune.co.kr/news/thumbnail/custom/20260523/3902774_3907_2821_1779424101_300.jpg",
+        "https://cdn.economytribune.co.kr/news/thumbnail/custom/20260523/3902773_3906_66_1779419166_300.jpg"
+      ],
+      "image_url": "https://cdn.economytribune.co.kr/news/photo/202605/3902763_3895_4453.jpg",
       "normalized_title": "심층분석 삼성전자 성과급 자사주 지급 주주총회 쟁점 되나 - 이코노미트리뷴",
       "priority_level": "normal",
       "priority_reasons": [
@@ -186234,8 +186431,9 @@
       "title_hash": "e489ec3b1d86984532fb7ee5"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMilwFBVV95cUxPTWoxd2ZqYzJsSTRvZUtsWW1sd2owTVI2SzZBaDZ4OVd3SjgydDFNM2dZMlppek0wVVJRa2VNd0hvNnI1Nml6aFhONDZDZUdua3ppQTJvQzl4Ylp1ZE42bUJPb1VaaUJFYkJtaTNGb05jdzlZLXUxODVPa2ZLcHRrdXFoVTkzQjNPX1JNMlhhYmp6aWRxcF9n0gGXAUFVX3lxTE9NajF3ZmpjMmxJNG9lS2xZbWx3ajBNUjZLNkFoNng5V3dKODJ0MU0zZ1kyWml6TTBVUlFrZU13SG82cjU2aXpoWE40NkNlR25remlBMm9DOXhiWnVkTjZtQk9vVVppQkViQm1pM0ZvTmN3OVktdTE4NU9rZktwdGt1cWhVOTNCM09fUk0yWGFianppZHFwX2c?oc=5",
-      "canonical_url_hash": "b67fd64f8e4185a6c7967780",
+      "article_published_at": "2026-05-22T09:47:00.713000+09:00",
+      "canonical_url": "https://biz.chosun.com/stock/c-biz_bot/2026/05/22/MJRTQMZTGBSDCN3BMQZTEOBXMY",
+      "canonical_url_hash": "21a610d74713692c6ccbae24",
       "duplicate_matches": [
         {
           "canonical_url": "https://biz.chosun.com/stock/c-biz_bot/2026/05/22/MJRTQMZTGBSDCN3BMQZTEOBXMY",
@@ -186254,8 +186452,12 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-코리아 밸류업 지수 ETF",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMilwFBVV95cUxPTWoxd2ZqYzJsSTRvZUtsWW1sd2owTVI2SzZBaDZ4OVd3SjgydDFNM2dZMlppek0wVVJRa2VNd0hvNnI1Nml6aFhONDZDZUdua3ppQTJvQzl4Ylp1ZE42bUJPb1VaaUJFYkJtaTNGb05jdzlZLXUxODVPa2ZLcHRrdXFoVTkzQjNPX1JNMlhhYmp6aWRxcF9n0gGXAUFVX3lxTE9NajF3ZmpjMmxJNG9lS2xZbWx3ajBNUjZLNkFoNng5V3dKODJ0MU0zZ1kyWml6TTBVUlFrZU13SG82cjU2aXpoWE40NkNlR25remlBMm9DOXhiWnVkTjZtQk9vVVppQkViQm1pM0ZvTmN3OVktdTE4NU9rZktwdGt1cWhVOTNCM09fUk0yWGFianppZHFwX2c?oc=5",
+      "image_candidates": [
+        "https://biz.chosun.com/resizer/v2/HBSWIMRSME4GKOJSGVRGCZBQHA.png?auth=c49b11f84dca86c4668e470015aab0d3e5cdf55240824bd1d7ec449a330cf8d3&height=522&smart=true&width=996"
+      ],
+      "image_url": "https://biz.chosun.com/resizer/v2/HBSWIMRSME4GKOJSGVRGCZBQHA.png?auth=c49b11f84dca86c4668e470015aab0d3e5cdf55240824bd1d7ec449a330cf8d3&height=522&smart=true&width=996",
       "normalized_title": "강세 토픽 밸류업 지수 편입 시총하위 50 테마 엘앤씨바이오 +6 65% soop +6 29% - 조선비즈 - chosunbiz",
       "priority_level": "normal",
       "priority_reasons": [
@@ -186275,7 +186477,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-23T06:10:38.078938+09:00",
-      "source": "Chosunbiz",
+      "source": "조선비즈",
       "status": "duplicate",
       "story_key": "story:3a85a7baed85aedc",
       "summary": "[강세 토픽] 밸류업 지수 편입 (시총하위 50) 테마, 엘앤씨바이오 +6.65%, SOOP +6.29% - 조선비즈 Chosunbiz",
@@ -186283,8 +186485,8 @@
       "title_hash": "3a85a7baed85aedced2da0c5"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMi3gFBVV95cUxNYUgtY2RZSkFjTXp5eW53Qi1WNnpxcUgxNk5lNDM3UGd0YXJGT1p4MG1KbDlSMUhxc1liYTJiejdsUnE0X29kYklCbjlsenNjaGRLVXdneE83QlBWUlJTUDJUWUw2TDNLYk1EWnN1X3NQajR5dWZGdkRyRDljN3M3dHNqT2Q1N1pDWEI3VEQ3SmlDRm1jakFWV0xwV0NKN3h0U280S2NoYmFndXp1ZW42TllxVnJWZWpFNlNXbGhiNGpoVE9JbVB3LVBFOFNuUVpMeklLNGQ1UUJDYkUxalE?oc=5",
-      "canonical_url_hash": "9e9daca88778bd512535e3b1",
+      "canonical_url": "https://m.investing.com/news/sec-filings/mcdonalds-shareholders-approve-board-nominees-and-key-proposals-at-annual-meeting-93CH-4707010?ampMode=1",
+      "canonical_url_hash": "a093a7650bedd5f4c623c896",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.google.com/rss/articles/CBMi3gFBVV95cUxNYUgtY2RZSkFjTXp5eW53Qi1WNnpxcUgxNk5lNDM3UGd0YXJGT1p4MG1KbDlSMUhxc1liYTJiejdsUnE0X29kYklCbjlsenNjaGRLVXdneE83QlBWUlJTUDJUWUw2TDNLYk1EWnN1X3NQajR5dWZGdkRyRDljN3M3dHNqT2Q1N1pDWEI3VEQ3SmlDRm1jakFWV0xwV0NKN3h0U280S2NoYmFndXp1ZW42TllxVnJWZWpFNlNXbGhiNGpoVE9JbVB3LVBFOFNuUVpMeklLNGQ1UUJDYkUxalE?oc=5",
@@ -186303,6 +186505,8 @@
       ],
       "feed_category": "global",
       "feed_name": "google-news-en-shareholder-proposal-agm",
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMi3gFBVV95cUxNYUgtY2RZSkFjTXp5eW53Qi1WNnpxcUgxNk5lNDM3UGd0YXJGT1p4MG1KbDlSMUhxc1liYTJiejdsUnE0X29kYklCbjlsenNjaGRLVXdneE83QlBWUlJTUDJUWUw2TDNLYk1EWnN1X3NQajR5dWZGdkRyRDljN3M3dHNqT2Q1N1pDWEI3VEQ3SmlDRm1jakFWV0xwV0NKN3h0U280S2NoYmFndXp1ZW42TllxVnJWZWpFNlNXbGhiNGpoVE9JbVB3LVBFOFNuUVpMeklLNGQ1UUJDYkUxalE?oc=5",
       "image_candidates": [],
       "image_url": null,
       "normalized_title": "mcdonalds shareholders approve board nominees and key proposals at annual meeting",
@@ -186331,8 +186535,9 @@
       "title_hash": "88bef09d3cb6853603ec73d6"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMitgFBVV95cUxOT3k4SlRYVlJKY0ZKdndNZHQ0dHFBYmVFUXRLZEFmeDdoQWJlSzR4ZGYxVXo2alZoZ1Z2VkJiZ2V5dEZOWVVWTWFYWE1YVXBhdnpUVC1NVWVOQURaSkdUUG5na0NhNy1Ma2VXVkFFUW5mbjd2V3V0QVpZNXk1N2dfb01YZGlJT0YxRmJfSFFEeUpnVkdFWjFBTTBMa2I4b2E0MXBBTDU1UlVuRUZLNXFaeU5ZbFpqQQ?oc=5",
-      "canonical_url_hash": "2f4b4b0731a30f881a8d6998",
+      "article_published_at": "2026-05-22T05:38:24+09:00",
+      "canonical_url": "https://www.irreview.org/articles/2026/5/21/corporate-governance-in-japan-evolution-from-stakeholder-to-shareholder",
+      "canonical_url_hash": "5c96ca35366d5c1f801448cd",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.irreview.org/articles/2026/5/21/corporate-governance-in-japan-evolution-from-stakeholder-to-shareholder",
@@ -186351,8 +186556,14 @@
       ],
       "feed_category": "global",
       "feed_name": "google-news-en-dual-class-shareholder-rights",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMitgFBVV95cUxOT3k4SlRYVlJKY0ZKdndNZHQ0dHFBYmVFUXRLZEFmeDdoQWJlSzR4ZGYxVXo2alZoZ1Z2VkJiZ2V5dEZOWVVWTWFYWE1YVXBhdnpUVC1NVWVOQURaSkdUUG5na0NhNy1Ma2VXVkFFUW5mbjd2V3V0QVpZNXk1N2dfb01YZGlJT0YxRmJfSFFEeUpnVkdFWjFBTTBMa2I4b2E0MXBBTDU1UlVuRUZLNXFaeU5ZbFpqQQ?oc=5",
+      "image_candidates": [
+        "http://static1.squarespace.com/static/59c9242349fc2b90f0548d0b/60e01d59b195413149edc983/6a0f6cd7dd0b8b03a4243df4/1779395904904/agathe-2cdvYh6ULCs-unsplash.jpg?format=1500w",
+        "https://images.squarespace-cdn.com/content/v1/59c9242349fc2b90f0548d0b/e6a49698-10af-4220-b616-681d0fa4ea12/International.png",
+        "https://static1.squarespace.com/static/59c9242349fc2b90f0548d0b/t/63e3282a462f4622a5d7f9db/1779147023885"
+      ],
+      "image_url": "http://static1.squarespace.com/static/59c9242349fc2b90f0548d0b/60e01d59b195413149edc983/6a0f6cd7dd0b8b03a4243df4/1779395904904/agathe-2cdvYh6ULCs-unsplash.jpg?format=1500w",
       "normalized_title": "corporate governance in japan evolution from stakeholder to shareholder - international relations review",
       "priority_level": "normal",
       "priority_reasons": [
@@ -186378,8 +186589,9 @@
       "title_hash": "76005f5720a69bca8570585a"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE9pVXl4RVRUWWdHOWl0M1prVnh2WklhVmtZNk02T1ZKUmNaamRDUy1QUnNoOURpZ0xUcVhfTUVYRmR1MEkwak40T1BlVDg1ZnE4dV9N?oc=5",
-      "canonical_url_hash": "74d0f79249925fa44a713b04",
+      "article_published_at": "2026-05-22T11:23:00+09:00",
+      "canonical_url": "https://newneek.co/@newneek/article/40743",
+      "canonical_url_hash": "b22bc01e1f30f7dbeb3c2498",
       "duplicate_matches": [
         {
           "canonical_url": "https://newneek.co/@newneek/article/40743",
@@ -186398,8 +186610,13 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-감사의견 거절 상장폐지",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE9pVXl4RVRUWWdHOWl0M1prVnh2WklhVmtZNk02T1ZKUmNaamRDUy1QUnNoOURpZ0xUcVhfTUVYRmR1MEkwak40T1BlVDg1ZnE4dV9N?oc=5",
+      "image_candidates": [
+        "https://d2phebdq64jyfk.cloudfront.net/media/article/7f687624eed84d11917ed6594b613c20.jpg",
+        "https://d2phebdq64jyfk.cloudfront.net/media/image/user/photo/8b14497f-da47-49e9-90fa-5d5941a28c2a.1716181328.355366.jpg"
+      ],
+      "image_url": "https://d2phebdq64jyfk.cloudfront.net/media/article/7f687624eed84d11917ed6594b613c20.jpg",
       "normalized_title": "이차전지 대장주 금양 상장폐지 결정 시총 10조에서 추락한 이유 🔋📉 - 뉴닉",
       "priority_level": "normal",
       "priority_reasons": [
@@ -186472,7 +186689,7 @@
     "2026-04-29",
     "2026-04-30"
   ],
-  "last_google_news_decode_at": "2026-05-23T05:28:10.088222+09:00",
+  "last_google_news_decode_at": "2026-05-23T06:44:31.519508+09:00",
   "last_run_at": "2026-05-23T06:10:38.078938+09:00",
   "pending_clusters": [
     {
@@ -186480,8 +186697,8 @@
       "articles": [
         {
           "article_published_at": null,
-          "canonical_url": "https://news.google.com/rss/articles/CBMi3gFBVV95cUxNYUgtY2RZSkFjTXp5eW53Qi1WNnpxcUgxNk5lNDM3UGd0YXJGT1p4MG1KbDlSMUhxc1liYTJiejdsUnE0X29kYklCbjlsenNjaGRLVXdneE83QlBWUlJTUDJUWUw2TDNLYk1EWnN1X3NQajR5dWZGdkRyRDljN3M3dHNqT2Q1N1pDWEI3VEQ3SmlDRm1jakFWV0xwV0NKN3h0U280S2NoYmFndXp1ZW42TllxVnJWZWpFNlNXbGhiNGpoVE9JbVB3LVBFOFNuUVpMeklLNGQ1UUJDYkUxalE?oc=5",
-          "canonical_url_hash": "9e9daca88778bd512535e3b1",
+          "canonical_url": "https://m.investing.com/news/sec-filings/mcdonalds-shareholders-approve-board-nominees-and-key-proposals-at-annual-meeting-93CH-4707010?ampMode=1",
+          "canonical_url_hash": "a093a7650bedd5f4c623c896",
           "clean_title": "McDonalds shareholders approve board nominees and key proposals at annual meeting",
           "company_candidates": [],
           "date_status": "feed",
@@ -186489,6 +186706,8 @@
           "feed_name": "google-news-en-shareholder-proposal-agm",
           "feed_published_at": "2026-05-22T23:43:00+09:00",
           "feed_updated_at": "2026-05-22T23:43:00+09:00",
+          "google_news_decoded": true,
+          "google_news_url": "https://news.google.com/rss/articles/CBMi3gFBVV95cUxNYUgtY2RZSkFjTXp5eW53Qi1WNnpxcUgxNk5lNDM3UGd0YXJGT1p4MG1KbDlSMUhxc1liYTJiejdsUnE0X29kYklCbjlsenNjaGRLVXdneE83QlBWUlJTUDJUWUw2TDNLYk1EWnN1X3NQajR5dWZGdkRyRDljN3M3dHNqT2Q1N1pDWEI3VEQ3SmlDRm1jakFWV0xwV0NKN3h0U280S2NoYmFndXp1ZW42TllxVnJWZWpFNlNXbGhiNGpoVE9JbVB3LVBFOFNuUVpMeklLNGQ1UUJDYkUxalE?oc=5",
           "image_candidates": [],
           "image_url": null,
           "link": "https://news.google.com/rss/articles/CBMi3gFBVV95cUxNYUgtY2RZSkFjTXp5eW53Qi1WNnpxcUgxNk5lNDM3UGd0YXJGT1p4MG1KbDlSMUhxc1liYTJiejdsUnE0X29kYklCbjlsenNjaGRLVXdneE83QlBWUlJTUDJUWUw2TDNLYk1EWnN1X3NQajR5dWZGdkRyRDljN3M3dHNqT2Q1N1pDWEI3VEQ3SmlDRm1jakFWV0xwV0NKN3h0U280S2NoYmFndXp1ZW42TllxVnJWZWpFNlNXbGhiNGpoVE9JbVB3LVBFOFNuUVpMeklLNGQ1UUJDYkUxalE?oc=5",
@@ -186539,7 +186758,7 @@
       "relevance_level": "medium",
       "representative_title": "McDonalds shareholders approve board nominees and key proposals at annual meeting",
       "representative_title_normalized": "mcdonalds shareholders approve board nominees and key proposals at annual meeting",
-      "representative_url": "https://news.google.com/rss/articles/CBMi3gFBVV95cUxNYUgtY2RZSkFjTXp5eW53Qi1WNnpxcUgxNk5lNDM3UGd0YXJGT1p4MG1KbDlSMUhxc1liYTJiejdsUnE0X29kYklCbjlsenNjaGRLVXdneE83QlBWUlJTUDJUWUw2TDNLYk1EWnN1X3NQajR5dWZGdkRyRDljN3M3dHNqT2Q1N1pDWEI3VEQ3SmlDRm1jakFWV0xwV0NKN3h0U280S2NoYmFndXp1ZW42TllxVnJWZWpFNlNXbGhiNGpoVE9JbVB3LVBFOFNuUVpMeklLNGQ1UUJDYkUxalE?oc=5",
+      "representative_url": "https://m.investing.com/news/sec-filings/mcdonalds-shareholders-approve-board-nominees-and-key-proposals-at-annual-meeting-93CH-4707010?ampMode=1",
       "sequence": 1,
       "status": "pending",
       "theme_group": "voting_disclosure",
@@ -222391,7 +222610,6 @@
     "04c3b9b8116b6f2c12854c33",
     "0556e5ba155162fb5a626358",
     "05653ec17de53f9ccf201b36",
-    "05c0b1680267e9ea17871dc3",
     "05ca118c3f84fbb5e01196cf",
     "05d6b68c135210ce005fe7f6",
     "05ea297ea7c0a9917c549476",
@@ -222477,7 +222695,6 @@
     "20f35e99eb49a3a09039813e",
     "20f604ffaa546288f275d50f",
     "212fa67ba1a70fc433f642ae",
-    "2142f89539bbc2487691eaf7",
     "216f65534cbf203687edcfd1",
     "218856f318a45a19dfd09ee8",
     "21a610d74713692c6ccbae24",
@@ -222505,7 +222722,6 @@
     "28c47cca5dc5b880028a573a",
     "292cbb44bcea49d03f7c0fae",
     "2989f348abc095fe5f9c854c",
-    "29a015a9ace5a76186a47357",
     "29e0287002bf3dc45f96d108",
     "2ac2403270f9724eae4c73d2",
     "2aea89e00cd39f61dc6dc546",
@@ -222524,7 +222740,6 @@
     "2eeaca00f19850b4625a0701",
     "2f0671961f5b72ba2a6ac309",
     "2f2a1a6eeb8b4d15f68812c6",
-    "2f4b4b0731a30f881a8d6998",
     "2f6d049f63ca2636d350d005",
     "307ddafd77a0137349c9691c",
     "30cf33701fa489b8bc7df7f2",
@@ -222713,7 +222928,6 @@
     "6a3823a4b15160abb3635b3f",
     "6a812c3b11c7b6a3918c837c",
     "6ac284b1802816482d29e801",
-    "6ad83e4730f705ebac119496",
     "6aec414f732ec1acc735a0ed",
     "6ba742cf9f325c30c9c95c01",
     "6bc40d62d29d7d8624ca7155",
@@ -222742,10 +222956,8 @@
     "735ed32277f3773f4ea90eb3",
     "7367789de03334ec08c75ef9",
     "740a319f9a07cb4ed19c8f0a",
-    "746130f96050ba1cc942b37d",
     "7463aa667c51477760f3fc39",
     "7499b528361981aaf5d5ae3e",
-    "74d0f79249925fa44a713b04",
     "7654741a22c2be75ceb238b7",
     "76e873062da34fb9a154f3d5",
     "774eb6d6ff6f9e732b67b6bc",
@@ -222798,7 +223010,6 @@
     "8c845e96c216b13d665cfad7",
     "8cd284c39a245d360fa23c80",
     "8cf83691749077124266c716",
-    "8d583703659f70fcb55a19c5",
     "8d7021574d2958a8a2ac0c05",
     "8dda9769b0e0a39f40cd2f66",
     "8e80b2b18f1e0b7e43732be7",
@@ -222855,7 +223066,6 @@
     "9db10adadbbbfbd63c6a2c06",
     "9e0178f680018d766eb0bdc6",
     "9e393edec2666c3ad2a975b7",
-    "9e9daca88778bd512535e3b1",
     "9ea517ddb501a4ac3a1381f0",
     "9ed5037aa3b9434fbc4147e4",
     "9ed9dc567b3ddbdc730598cc",
@@ -222865,6 +223075,7 @@
     "9feb7bb65b91668153cc0d7a",
     "a06d19907d014fb89a623b65",
     "a07d0c849b29e51007606bdf",
+    "a093a7650bedd5f4c623c896",
     "a0c21bb22e1ba75551a2d7c3",
     "a108455894e5545a0a8a86da",
     "a11dc878dddfbe22d368bb57",
@@ -222895,7 +223106,6 @@
     "aa1f99b967fc3f9ee034c945",
     "aa29a99424690a4b4f20fa5d",
     "aa57010521ac69a1f3ee2fa0",
-    "aa871f5757ecb73738fb48f2",
     "ab3a54f89c541f941da62de0",
     "ab516e7a3da0aa9b05fa8528",
     "ab69f3dbff777fba96f33af3",
@@ -222944,7 +223154,6 @@
     "b5d5c62a21fa886ece5099df",
     "b6292007dd82816222e45b33",
     "b64befaaaf04ce137b87fce4",
-    "b67fd64f8e4185a6c7967780",
     "b6df80e1406016941e25ea1d",
     "b747e4077f51131532838535",
     "b74fbb8e79d53a35fa3e7fa0",
@@ -222975,7 +223184,6 @@
     "bdf7e7f3c0a9c24426777327",
     "bf16920c664f15cc97bf8d16",
     "bf5aa3e6c29fba06da5b1e9e",
-    "c061c88c83c0e0bff957b1a2",
     "c103804e86eddf9ec6d0746f",
     "c15400b357201acdafcf6481",
     "c18f67ba7827b967533878af",
@@ -223011,7 +223219,6 @@
     "cb8d04ab4165df9575314902",
     "cb97bc24fa5df1e7556a08b5",
     "cbc7b8aff90432f196e989ca",
-    "cbffa10d451fa976d5643759",
     "cc2aa32253bdde463e9df3ed",
     "ccc99c18a4e2734e2364f530",
     "ccdcc3cb9a884f28586e89cb",
@@ -223026,7 +223233,6 @@
     "ceb7f6ce7852fd5ed8031550",
     "cf182d94d5fbb2be41b5f054",
     "cf210b7616bb44f0e58b1be1",
-    "cf6ca9f17e0dc8b713453dcc",
     "cfa38e10b1c83b7bb2034f8e",
     "d062a33ed1c075b59fedcaba",
     "d0af9b8e2c755ddcff610cab",
