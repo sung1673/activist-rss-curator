@@ -154,10 +154,12 @@ jobs:
           echo "Run mode: full=$full_run page=$page_run"
 
       - name: Refresh checkout to latest branch head
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           branch="${GITHUB_REF#refs/heads/}"
-          git fetch --no-tags origin "$branch"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" fetch --no-tags origin "$branch"
           git reset --hard "origin/$branch"
 
       - name: Set up Python
