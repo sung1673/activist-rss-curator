@@ -1,31 +1,31 @@
 {
-  "date_id": "2026-05-23",
-  "generated_at": "2026-05-23T23:22:53.988600+09:00",
-  "start_at": "2026-05-22T23:21:10.974348+09:00",
-  "end_at": "2026-05-23T23:21:10.974348+09:00",
-  "start_label": "2026-05-22 23:21 KST",
-  "end_label": "2026-05-23 23:21 KST",
-  "candidate_count": 2,
-  "candidate_hash": "ea8e08fd484a2a47",
+  "date_id": "2026-05-24",
+  "generated_at": "2026-05-24T05:59:07.796064+09:00",
+  "start_at": "2026-05-23T05:57:49.552937+09:00",
+  "end_at": "2026-05-24T05:57:49.552937+09:00",
+  "start_label": "2026-05-23 05:57 KST",
+  "end_label": "2026-05-24 05:57 KST",
+  "candidate_count": 3,
+  "candidate_hash": "b9156568a747ba3f",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "422a00a4899a",
-      "score": 87.6,
+      "id": "301969db5351",
+      "score": 88.3,
       "left": {
-        "id": "story-3",
-        "title": "소액주주 액트 삼성전자 주주명부 확보…지분 1.5% 결집 나선다",
+        "id": "story-2",
+        "title": "소액주주 액트 삼성전자 주주명부 확보…1.5% 지분 결집 나선다",
         "summary": "소액주주 액트 \"삼성전자 주주명부 확보\"…1.5% 지분 결집 나선다 네이트",
         "category": "주주행동·경영권",
         "datetime": "05.23 20:55",
-        "source_line": "네이트 · NEWS1",
+        "source_line": "네이트뉴스 · NEWS1",
         "link_count": 2,
-        "url": "https://www.news1.kr/industry/general-industry/6176157",
+        "url": "https://news.nate.com/view/20260523n13443",
         "links": [
           {
-            "source": "네이트",
+            "source": "네이트뉴스",
             "title": "소액주주 액트 삼성전자 주주명부 확보…1.5% 지분 결집 나선다",
-            "url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTFA2VWxYRHpCaUt5ZHIyREdtYk1KY1RtMVdOaTRlQ1dpaTIySDQzdnZ6Rm9yWi1leUplbDNacEpmUlhDSVprOVdLUkVXZUhuUGRjOTFj?oc=5"
+            "url": "https://news.nate.com/view/20260523n13443"
           },
           {
             "source": "NEWS1",
@@ -53,39 +53,82 @@
       }
     },
     {
-      "id": "5afe63e498a8",
-      "score": 78.7,
+      "id": "965d1c447926",
+      "score": 77.4,
       "left": {
-        "id": "story-1",
-        "title": "삼성전자 주주단체 성과급 결정은 주주 권한...법적 대응 예고 | - 딜라이트닷넷",
-        "summary": "주주 운동본부는 대법원 기자회견 전날에도 행동주의 수위를 높였다. 이들은 전날 이재용 삼성전자 회장의 자택 일대에서 집회를 열고, 이번 노사 합의에 ...",
+        "id": "story-2",
+        "title": "소액주주 액트 삼성전자 주주명부 확보…1.5% 지분 결집 나선다",
+        "summary": "소액주주 액트 \"삼성전자 주주명부 확보\"…1.5% 지분 결집 나선다 네이트",
         "category": "주주행동·경영권",
-        "datetime": "05.22 19:00",
-        "source_line": "DELIGHTI",
-        "link_count": 1,
-        "url": "https://www.delighti.co.kr/news/articleView.html?idxno=116781",
+        "datetime": "05.23 20:55",
+        "source_line": "네이트뉴스 · NEWS1",
+        "link_count": 2,
+        "url": "https://news.nate.com/view/20260523n13443",
         "links": [
           {
-            "source": "DELIGHTI",
-            "title": "삼성전자 주주단체 성과급 결정은 주주 권한...법적 대응 예고 | - 딜라이트닷넷",
-            "url": "https://www.delighti.co.kr/news/articleView.html?idxno=116781"
+            "source": "네이트뉴스",
+            "title": "소액주주 액트 삼성전자 주주명부 확보…1.5% 지분 결집 나선다",
+            "url": "https://news.nate.com/view/20260523n13443"
+          },
+          {
+            "source": "NEWS1",
+            "title": "소액주주 액트 삼성전자 주주명부 확보…지분 1.5% 결집 나선다",
+            "url": "https://www.news1.kr/industry/general-industry/6176157"
           }
         ]
       },
       "right": {
-        "id": "story-2",
-        "title": "주주단체 삼성전자 성과급은 상법 위반, 주총 승인 대상",
-        "summary": "국회와 정부를 향해 “주주권의 실효적 행사와 주주 참여 확대를 위한 제도 개선이 필요하다”며 “글로벌 거버넌스 흐름이 주주행동주의 ·ESG·세이온페이(Say-on- ...",
-        "category": "주주행동·경영권",
-        "datetime": "05.22 15:29",
-        "source_line": "BUBB",
+        "id": "story-7",
+        "title": "6억 성과급에 뿔난 개미들…삼성전자 주주명부 열린다",
+        "summary": "'6억 성과급'에 뿔난 개미들…삼성전자 주주명부 열린다 네이트",
+        "category": "밸류업·주주환원",
+        "datetime": "05.23 21:15",
+        "source_line": "네이트뉴스",
         "link_count": 1,
-        "url": "http://www.bubb.co.kr/news/articleView.html?idxno=4749",
+        "url": "https://news.nate.com/view/20260523n13589",
         "links": [
           {
-            "source": "BUBB",
-            "title": "주주단체 삼성전자 성과급은 상법 위반, 주총 승인 대상",
-            "url": "http://www.bubb.co.kr/news/articleView.html?idxno=4749"
+            "source": "네이트뉴스",
+            "title": "6억 성과급에 뿔난 개미들…삼성전자 주주명부 열린다",
+            "url": "https://news.nate.com/view/20260523n13589"
+          }
+        ]
+      }
+    },
+    {
+      "id": "fb031e6e71aa",
+      "score": 75.5,
+      "left": {
+        "id": "story-5",
+        "title": "삼성전자, 주주명부 열람 수용…소액주주 임시주총 청구 본격화",
+        "summary": "삼성전자가 소액주주의 주주명부 열람·등사 청구를 받아들였다. 노사 성과급 합의에 반발한 소액주주들은 주주명부를 확보하는 대로 지분 결집에 나서 임시주주총회 소집 청구를 추진할 방침이다. 23일 소액주주 플랫폼 액트는 삼성전자에 제기한 주주명부 열람·등사 청구가 회사 측에 수용됐다고 밝…",
+        "category": "주주행동·경영권",
+        "datetime": "05.23 17:56",
+        "source_line": "매일경제",
+        "link_count": 1,
+        "url": "https://www.mk.co.kr/news/stock/12056297",
+        "links": [
+          {
+            "source": "매일경제",
+            "title": "삼성전자, 주주명부 열람 수용…소액주주 임시주총 청구 본격화",
+            "url": "https://www.mk.co.kr/news/stock/12056297"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-7",
+        "title": "6억 성과급에 뿔난 개미들…삼성전자 주주명부 열린다",
+        "summary": "'6억 성과급'에 뿔난 개미들…삼성전자 주주명부 열린다 네이트",
+        "category": "밸류업·주주환원",
+        "datetime": "05.23 21:15",
+        "source_line": "네이트뉴스",
+        "link_count": 1,
+        "url": "https://news.nate.com/view/20260523n13589",
+        "links": [
+          {
+            "source": "네이트뉴스",
+            "title": "6억 성과급에 뿔난 개미들…삼성전자 주주명부 열린다",
+            "url": "https://news.nate.com/view/20260523n13589"
           }
         ]
       }
