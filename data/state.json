@@ -171204,8 +171204,9 @@
       "title_hash": "1826c05a6a90292b90595a36"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBjcW1rTWFLM2NGT2FuNWlSNEZIWWdPZUFpVm82THl0Vm95elpIakwxTnRqaTBwTmJXdU9BbS1iUVNFYWJNcWp3WjBHbjQxeFFQVTQ5dzhia2FyZjNUNS05eWR1MEsyWTYy?oc=5",
-      "canonical_url_hash": "92331171419ef9290c23d3b9",
+      "article_published_at": "2026-05-21T18:30:19+09:00",
+      "canonical_url": "https://www.cbci.co.kr/news/articleView.html?idxno=576295",
+      "canonical_url_hash": "740a319f9a07cb4ed19c8f0a",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.google.com/rss/articles/CBMiY0FVX3lxTE80QkExWTUyX28zeF9wQ1lPb3B1cGVwYTktZ1pWR3NfNWplM0dzaGN3N2xLSEtleDYtYnlEZHVQTk9XUU9oR0pMQTRLS3N2Wk83cFZ0d3dDdV9uLVZoYU9PdlFkRQ?oc=5",
@@ -171240,8 +171241,19 @@
       ],
       "feed_category": "capital_market",
       "feed_name": "google-news-거래정지 개선기간",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiaEFVX3lxTFBjcW1rTWFLM2NGT2FuNWlSNEZIWWdPZUFpVm82THl0Vm95elpIakwxTnRqaTBwTmJXdU9BbS1iUVNFYWJNcWp3WjBHbjQxeFFQVTQ5dzhia2FyZjNUNS05eWR1MEsyWTYy?oc=5",
+      "image_candidates": [
+        "https://www.cbci.co.kr/news/thumbnail/202605/576295_391134_290_v150.jpg",
+        "https://www.cbci.co.kr/news/photo/202605/576295_391134_290.jpg",
+        "https://www.cbci.co.kr/image/newsroom/default-user.png",
+        "https://www.cbci.co.kr/news/photo/survey/202308/429_202308311428.jpg",
+        "https://www.cbci.co.kr/news/photo/survey/202308/430_202308311429.jpg",
+        "https://www.cbci.co.kr/news/photo/survey/202308/438_202308311437.jpg",
+        "https://www.cbci.co.kr/news/photo/survey/202308/434_202308311433.jpg",
+        "https://www.cbci.co.kr/news/photo/survey/202308/436_202308311435.jpg"
+      ],
+      "image_url": "https://www.cbci.co.kr/news/thumbnail/202605/576295_391134_290_v150.jpg",
       "normalized_title": "삼부토건 거래소서 추가 개선기간 부여…매매거래정지 지속",
       "priority_level": "watch",
       "priority_reasons": [
@@ -171263,7 +171275,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-24T04:45:24.356595+09:00",
-      "source": "CBC뉴스",
+      "source": "CBC뉴스 | CBCNEWS",
       "status": "duplicate",
       "story_key": "story:b6ddd01a568675ae",
       "summary": "[속보] 삼부토건, 거래소서 추가 개선기간 부여…매매거래정지 지속 CBC뉴스",
@@ -171271,8 +171283,8 @@
       "title_hash": "b6ddd01a568675ae21efc82d"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTFBXYng4V21qU1J1aFRJb19mdFg2Z0VlRzVYeWtZYVA3QXl0RXVmQWZGSWp0R1hrQnowNXVVSTY5dHptQnFOcXhySWhwVXNlZ2ZxOUxr?oc=5",
-      "canonical_url_hash": "6ba00c0e56a7596ee4ec0ad7",
+      "canonical_url": "https://news.nate.com/view/20260523n11456",
+      "canonical_url_hash": "4f3d1802af5d86a19d4f1ea6",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.mk.co.kr/news/stock/12056297",
@@ -171291,8 +171303,14 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-주주명부 열람 등사",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTFBXYng4V21qU1J1aFRJb19mdFg2Z0VlRzVYeWtZYVA3QXl0RXVmQWZGSWp0R1hrQnowNXVVSTY5dHptQnFOcXhySWhwVXNlZ2ZxOUxr?oc=5",
+      "image_candidates": [
+        "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/mk/2026/05/23/rcv.YNA.20260521.PYH2026052110110001300_P1.jpg",
+        "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/mk/2026/05/23/news-p.v1.20260523.f9ccaca6584b48809e2aa22703bb4c04_P1.png",
+        "https://tracking.cyad1.nate.com/target/setRetarget.php?category=KI6789H"
+      ],
+      "image_url": "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/mk/2026/05/23/rcv.YNA.20260521.PYH2026052110110001300_P1.jpg",
       "normalized_title": "삼성전자 주주명부 열람 수용…소액주주 임시주총 청구 본격화 - 네이트",
       "priority_level": "watch",
       "priority_reasons": [
@@ -171311,7 +171329,7 @@
       ],
       "relevance_level": "high",
       "seen_at": "2026-05-24T04:45:24.356595+09:00",
-      "source": "네이트",
+      "source": "네이트 뉴스",
       "status": "duplicate",
       "story_key": "story:4188fbb70a665aa7",
       "summary": "[단독] 삼성전자, 주주명부 열람 수용…소액주주 임시주총 청구 본격화 네이트",
@@ -171319,8 +171337,8 @@
       "title_hash": "4188fbb70a665aa7b85a0b4b"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiYEFVX3lxTE5JdzZ5aWNVM25rSHVfNUltekc3MmVhdWE5T0FHdGpvTjVibzhMbWpHWU5zQVFsaTZ6LWZlVW0xdzBPeXo1LWVHcmR4QW42UklpN21hakY5cU01Z1dBdkR2Zw?oc=5",
-      "canonical_url_hash": "ee6511ab8baded78d1c70898",
+      "canonical_url": "https://news.nate.com/view/20260523n13589",
+      "canonical_url_hash": "7760e6b6c1fe593a50484c64",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.nate.com/view/20260523n13589",
@@ -171339,8 +171357,16 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-주주명부 열람 등사",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiYEFVX3lxTE5JdzZ5aWNVM25rSHVfNUltekc3MmVhdWE5T0FHdGpvTjVibzhMbWpHWU5zQVFsaTZ6LWZlVW0xdzBPeXo1LWVHcmR4QW42UklpN21hakY5cU01Z1dBdkR2Zw?oc=5",
+      "image_candidates": [
+        "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/hk/2026/05/23/ZA.44379444.1.jpg",
+        "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/hk/2026/05/23/ZA.44354106.1.jpg",
+        "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/hk/2026/05/23/02.44366094.1.jpg",
+        "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/hk/2026/05/23/ZN.44359970.1.jpg",
+        "https://tracking.cyad1.nate.com/target/setRetarget.php?category=KI6789H"
+      ],
+      "image_url": "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/hk/2026/05/23/ZA.44379444.1.jpg",
       "normalized_title": "6억 성과급에 뿔난 개미들…삼성전자 주주명부 열린다 - 네이트",
       "priority_level": "normal",
       "priority_reasons": [
@@ -171359,7 +171385,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-24T04:45:24.356595+09:00",
-      "source": "네이트",
+      "source": "네이트 뉴스",
       "status": "duplicate",
       "story_key": "story:047d0457833fb36a",
       "summary": "'6억 성과급'에 뿔난 개미들…삼성전자 주주명부 열린다 네이트",
@@ -171367,8 +171393,8 @@
       "title_hash": "047d0457833fb36a1572c9ab"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTFA2VWxYRHpCaUt5ZHIyREdtYk1KY1RtMVdOaTRlQ1dpaTIySDQzdnZ6Rm9yWi1leUplbDNacEpmUlhDSVprOVdLUkVXZUhuUGRjOTFj?oc=5",
-      "canonical_url_hash": "b7e73522d15373ea585df01a",
+      "canonical_url": "https://news.nate.com/view/20260523n13443",
+      "canonical_url_hash": "decc44aeb8f94e58c7d43ea1",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.msn.com/ko-kr/news/other/%EC%86%8C%EC%95%A1%EC%A3%BC%EC%A3%BC-%EC%95%A1%ED%8A%B8-%EC%82%BC%EC%84%B1%EC%A0%84%EC%9E%90-%EC%A3%BC%EC%A3%BC%EB%AA%85%EB%B6%80-%ED%99%95%EB%B3%B4-1-5-%EC%A7%80%EB%B6%84-%EA%B2%B0%EC%A7%91-%EB%82%98%EC%84%A0%EB%8B%A4/ar-AA23SBix",
@@ -171401,8 +171427,13 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-주주명부 열람 등사",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTFA2VWxYRHpCaUt5ZHIyREdtYk1KY1RtMVdOaTRlQ1dpaTIySDQzdnZ6Rm9yWi1leUplbDNacEpmUlhDSVprOVdLUkVXZUhuUGRjOTFj?oc=5",
+      "image_candidates": [
+        "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/ae/2026/05/23/ae_1779537305407_505537_0.jpg",
+        "https://tracking.cyad1.nate.com/target/setRetarget.php?category=KI6789H"
+      ],
+      "image_url": "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/ae/2026/05/23/ae_1779537305407_505537_0.jpg",
       "normalized_title": "소액주주 액트 삼성전자 주주명부 확보…1 5% 지분 결집 나선다 - 네이트",
       "priority_level": "watch",
       "priority_reasons": [
@@ -171421,7 +171452,7 @@
       ],
       "relevance_level": "high",
       "seen_at": "2026-05-24T04:45:24.356595+09:00",
-      "source": "네이트",
+      "source": "네이트 뉴스",
       "status": "duplicate",
       "story_key": "story:3e827c4c32c3d960",
       "summary": "소액주주 액트 \"삼성전자 주주명부 확보\"…1.5% 지분 결집 나선다 네이트",
@@ -171429,8 +171460,8 @@
       "title_hash": "3e827c4c32c3d960a50830dc"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE1mN0c1SkpOMTE4TnVObGtuVVdELXNIbTk3NzVUZ1hkTVFnSmZfNldLcEpEajdPcEw0YmJVc200SXFfSEJVTGFNWTY1WWMwczdrT3B3?oc=5",
-      "canonical_url_hash": "4765dbfa8d75d7f1a9463cf7",
+      "canonical_url": "https://news.nate.com/view/20260523n13410",
+      "canonical_url_hash": "21c8316d0cc6985fcc8b6b78",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.nate.com/view/20260523n13410",
@@ -171449,8 +171480,13 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-주주명부 열람 등사",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE1mN0c1SkpOMTE4TnVObGtuVVdELXNIbTk3NzVUZ1hkTVFnSmZfNldLcEpEajdPcEw0YmJVc200SXFfSEJVTGFNWTY1WWMwczdrT3B3?oc=5",
+      "image_candidates": [
+        "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/ey/2026/05/23/20260522095641_2336982_1000_633.jpg",
+        "https://tracking.cyad1.nate.com/target/setRetarget.php?category=KI6789H"
+      ],
+      "image_url": "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/ey/2026/05/23/20260522095641_2336982_1000_633.jpg",
       "normalized_title": "삼성 임단협 투표율 80% 돌파…일부 주주 임시주총 열어야 - 네이트",
       "priority_level": "normal",
       "priority_reasons": [
@@ -171469,7 +171505,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-24T04:45:24.356595+09:00",
-      "source": "네이트",
+      "source": "네이트 뉴스",
       "status": "duplicate",
       "story_key": "story:0835427b59d06d03",
       "summary": "삼성 임단협 투표율 80% 돌파…일부 주주 \"임시주총 열어야\" 네이트",
@@ -171522,7 +171558,7 @@
     "2026-04-29",
     "2026-04-30"
   ],
-  "last_google_news_decode_at": "2026-05-24T02:39:08.921411+09:00",
+  "last_google_news_decode_at": "2026-05-24T04:58:31.656212+09:00",
   "last_run_at": "2026-05-24T04:45:24.356595+09:00",
   "pending_clusters": [],
   "published_clusters": [
@@ -205644,7 +205680,6 @@
     "46cd8fe21c7aa8db6b58df4e",
     "46ede26bbea353693ffaddeb",
     "4715c1db427a72abd447a37c",
-    "4765dbfa8d75d7f1a9463cf7",
     "48354785a8a259e2b70f2c4f",
     "485bb749cce6e00f957af0b4",
     "48b3499fec5dea54d3b3661b",
@@ -205740,7 +205775,6 @@
     "6ac284b1802816482d29e801",
     "6ad83e4730f705ebac119496",
     "6aec414f732ec1acc735a0ed",
-    "6ba00c0e56a7596ee4ec0ad7",
     "6ba742cf9f325c30c9c95c01",
     "6bc40d62d29d7d8624ca7155",
     "6be2ce962ee1d6a994837cf5",
@@ -205826,7 +205860,6 @@
     "906f861f31d852352d036d1d",
     "91d649b8d19dacc0c8caa885",
     "92052499f50df3d7be64bf2a",
-    "92331171419ef9290c23d3b9",
     "92bbdd0b7ac2a0f464e07882",
     "93c3a92fa7e7f32fa204b81a",
     "93d3a02421d7de2095e8f9fd",
@@ -205934,7 +205967,6 @@
     "b67fd64f8e4185a6c7967780",
     "b6df80e1406016941e25ea1d",
     "b747e4077f51131532838535",
-    "b7e73522d15373ea585df01a",
     "b8057fa4a3ca42266542e45b",
     "b8fa68cf6a0f40f88dd70cf8",
     "b9f79f338a98333b938200f5",
@@ -206085,7 +206117,6 @@
     "ed32ef41e4cacb3d4fdf5267",
     "edb5d2787a4e3d1a3450763b",
     "ee11795024db4af4dc601f1e",
-    "ee6511ab8baded78d1c70898",
     "eedd5acfd1fc0cdbe93b9295",
     "ef04a7fb1432d45a66871982",
     "ef8514cc2e83fac78714edb2",
