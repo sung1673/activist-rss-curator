@@ -170240,8 +170240,9 @@
       "title_hash": "794d27983ecbcd0c491c8684"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiUkFVX3lxTE8zQTNGV2V5bS1KeFZ5a2lsVlNJSWg2ZC0tX2NQdTVrZDJIWmlZV3dMc25UNUdHdVdkVGUwTGtuQ3lQLWM2QTMxenZkdXg3b2daQnc?oc=5",
-      "canonical_url_hash": "fc39ba11c57e01e1373615f8",
+      "article_published_at": "2026-05-23T17:56:27+09:00",
+      "canonical_url": "https://www.mk.co.kr/news/stock/12056297",
+      "canonical_url_hash": "22223f233d9a19ad761acd0a",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.mk.co.kr/news/stock/12056297",
@@ -170260,8 +170261,25 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-주주명부 열람 등사",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiUkFVX3lxTE8zQTNGV2V5bS1KeFZ5a2lsVlNJSWg2ZC0tX2NQdTVrZDJIWmlZV3dMc25UNUdHdVdkVGUwTGtuQ3lQLWM2QTMxenZkdXg3b2daQnc?oc=5",
+      "image_candidates": [
+        "https://pimg.mk.co.kr/news/cms/202605/23/rcv.YNA.20260521.PYH2026052110110001300_R.jpg",
+        "https://pimg.mk.co.kr/news/cms/202605/23/news-p.v1.20260523.f9ccaca6584b48809e2aa22703bb4c04_R.png",
+        "https://static.mk.co.kr/trans_30x13.png",
+        "https://static.mk.co.kr/2026/css/images/ic_myagent_jb.png",
+        "https://wimg.mk.co.kr/news/cms/202605/23/rcv.YNA.20260521.PYH2026052110110001300_P1.jpg",
+        "https://wimg.mk.co.kr/news/cms/202605/23/news-p.v1.20260523.f9ccaca6584b48809e2aa22703bb4c04_P1.png",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/A12056297_232_20260523212239.jpg",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/A12056199_232_20260523163438.png",
+        "https://wimg.mk.co.kr/news/cms/202605/23/news-p.v1.20260523.a1b2c2604b024679afeafff0388929b7_R.jpg",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/X20260515135816_251_20260515135905.png",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/X20260423093839_251_20260511143320.png",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/X20260506150155_251_20260511143109.jpg",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/X20260422084524_251_20260511143413.png",
+        "https://wimg.mk.co.kr/svc/desking/1000/index/202605/X20260504164003_251_20260511143451.png"
+      ],
+      "image_url": "https://pimg.mk.co.kr/news/cms/202605/23/rcv.YNA.20260521.PYH2026052110110001300_R.jpg",
       "normalized_title": "삼성전자 주주명부 열람 수용…소액주주 임시주총 청구 본격화",
       "priority_level": "watch",
       "priority_reasons": [
@@ -170289,8 +170307,8 @@
       "title_hash": "794d27983ecbcd0c491c8684"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiYEFVX3lxTE5JdzZ5aWNVM25rSHVfNUltekc3MmVhdWE5T0FHdGpvTjVibzhMbWpHWU5zQVFsaTZ6LWZlVW0xdzBPeXo1LWVHcmR4QW42UklpN21hakY5cU01Z1dBdkR2Zw?oc=5",
-      "canonical_url_hash": "ee6511ab8baded78d1c70898",
+      "canonical_url": "https://news.nate.com/view/20260523n13589",
+      "canonical_url_hash": "7760e6b6c1fe593a50484c64",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.nate.com/view/20260523n13589",
@@ -170309,8 +170327,16 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-주주명부 열람 등사",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiYEFVX3lxTE5JdzZ5aWNVM25rSHVfNUltekc3MmVhdWE5T0FHdGpvTjVibzhMbWpHWU5zQVFsaTZ6LWZlVW0xdzBPeXo1LWVHcmR4QW42UklpN21hakY5cU01Z1dBdkR2Zw?oc=5",
+      "image_candidates": [
+        "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/hk/2026/05/23/ZA.44379444.1.jpg",
+        "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/hk/2026/05/23/ZA.44354106.1.jpg",
+        "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/hk/2026/05/23/02.44366094.1.jpg",
+        "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/hk/2026/05/23/ZN.44359970.1.jpg",
+        "https://tracking.cyad1.nate.com/target/setRetarget.php?category=KI6789H"
+      ],
+      "image_url": "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/hk/2026/05/23/ZA.44379444.1.jpg",
       "normalized_title": "6억 성과급에 뿔난 개미들…삼성전자 주주명부 열린다 - 네이트",
       "priority_level": "normal",
       "priority_reasons": [
@@ -170329,7 +170355,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-24T05:53:33.601222+09:00",
-      "source": "네이트",
+      "source": "네이트 뉴스",
       "status": "duplicate",
       "story_key": "story:047d0457833fb36a",
       "summary": "'6억 성과급'에 뿔난 개미들…삼성전자 주주명부 열린다 네이트",
@@ -170337,8 +170363,8 @@
       "title_hash": "047d0457833fb36a1572c9ab"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTFA2VWxYRHpCaUt5ZHIyREdtYk1KY1RtMVdOaTRlQ1dpaTIySDQzdnZ6Rm9yWi1leUplbDNacEpmUlhDSVprOVdLUkVXZUhuUGRjOTFj?oc=5",
-      "canonical_url_hash": "b7e73522d15373ea585df01a",
+      "canonical_url": "https://news.nate.com/view/20260523n13443",
+      "canonical_url_hash": "decc44aeb8f94e58c7d43ea1",
       "duplicate_matches": [
         {
           "canonical_url": "https://www.msn.com/ko-kr/news/other/%EC%86%8C%EC%95%A1%EC%A3%BC%EC%A3%BC-%EC%95%A1%ED%8A%B8-%EC%82%BC%EC%84%B1%EC%A0%84%EC%9E%90-%EC%A3%BC%EC%A3%BC%EB%AA%85%EB%B6%80-%ED%99%95%EB%B3%B4-1-5-%EC%A7%80%EB%B6%84-%EA%B2%B0%EC%A7%91-%EB%82%98%EC%84%A0%EB%8B%A4/ar-AA23SBix",
@@ -170371,8 +170397,13 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-주주명부 열람 등사",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTFA2VWxYRHpCaUt5ZHIyREdtYk1KY1RtMVdOaTRlQ1dpaTIySDQzdnZ6Rm9yWi1leUplbDNacEpmUlhDSVprOVdLUkVXZUhuUGRjOTFj?oc=5",
+      "image_candidates": [
+        "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/ae/2026/05/23/ae_1779537305407_505537_0.jpg",
+        "https://tracking.cyad1.nate.com/target/setRetarget.php?category=KI6789H"
+      ],
+      "image_url": "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/ae/2026/05/23/ae_1779537305407_505537_0.jpg",
       "normalized_title": "소액주주 액트 삼성전자 주주명부 확보…1 5% 지분 결집 나선다 - 네이트",
       "priority_level": "watch",
       "priority_reasons": [
@@ -170391,7 +170422,7 @@
       ],
       "relevance_level": "high",
       "seen_at": "2026-05-24T05:53:33.601222+09:00",
-      "source": "네이트",
+      "source": "네이트 뉴스",
       "status": "duplicate",
       "story_key": "story:3e827c4c32c3d960",
       "summary": "소액주주 액트 \"삼성전자 주주명부 확보\"…1.5% 지분 결집 나선다 네이트",
@@ -170399,8 +170430,8 @@
       "title_hash": "3e827c4c32c3d960a50830dc"
     },
     {
-      "canonical_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE1mN0c1SkpOMTE4TnVObGtuVVdELXNIbTk3NzVUZ1hkTVFnSmZfNldLcEpEajdPcEw0YmJVc200SXFfSEJVTGFNWTY1WWMwczdrT3B3?oc=5",
-      "canonical_url_hash": "4765dbfa8d75d7f1a9463cf7",
+      "canonical_url": "https://news.nate.com/view/20260523n13410",
+      "canonical_url_hash": "21c8316d0cc6985fcc8b6b78",
       "duplicate_matches": [
         {
           "canonical_url": "https://news.nate.com/view/20260523n13410",
@@ -170419,8 +170450,13 @@
       ],
       "feed_category": "core",
       "feed_name": "google-news-주주명부 열람 등사",
-      "image_candidates": [],
-      "image_url": null,
+      "google_news_decoded": true,
+      "google_news_url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE1mN0c1SkpOMTE4TnVObGtuVVdELXNIbTk3NzVUZ1hkTVFnSmZfNldLcEpEajdPcEw0YmJVc200SXFfSEJVTGFNWTY1WWMwczdrT3B3?oc=5",
+      "image_candidates": [
+        "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/ey/2026/05/23/20260522095641_2336982_1000_633.jpg",
+        "https://tracking.cyad1.nate.com/target/setRetarget.php?category=KI6789H"
+      ],
+      "image_url": "https://thumbnews.nateimg.co.kr/view610///news.nateimg.co.kr/orgImg/ey/2026/05/23/20260522095641_2336982_1000_633.jpg",
       "normalized_title": "삼성 임단협 투표율 80% 돌파…일부 주주 임시주총 열어야 - 네이트",
       "priority_level": "normal",
       "priority_reasons": [
@@ -170439,7 +170475,7 @@
       ],
       "relevance_level": "medium",
       "seen_at": "2026-05-24T05:53:33.601222+09:00",
-      "source": "네이트",
+      "source": "네이트 뉴스",
       "status": "duplicate",
       "story_key": "story:0835427b59d06d03",
       "summary": "삼성 임단협 투표율 80% 돌파…일부 주주 \"임시주총 열어야\" 네이트",
@@ -170492,7 +170528,7 @@
     "2026-04-29",
     "2026-04-30"
   ],
-  "last_google_news_decode_at": "2026-05-24T04:58:31.656212+09:00",
+  "last_google_news_decode_at": "2026-05-24T06:11:26.795961+09:00",
   "last_run_at": "2026-05-24T05:53:33.601222+09:00",
   "pending_clusters": [],
   "published_clusters": [
@@ -204352,7 +204388,6 @@
     "46cd8fe21c7aa8db6b58df4e",
     "46ede26bbea353693ffaddeb",
     "4715c1db427a72abd447a37c",
-    "4765dbfa8d75d7f1a9463cf7",
     "48354785a8a259e2b70f2c4f",
     "485bb749cce6e00f957af0b4",
     "48b3499fec5dea54d3b3661b",
@@ -204615,7 +204650,6 @@
     "b67fd64f8e4185a6c7967780",
     "b6df80e1406016941e25ea1d",
     "b747e4077f51131532838535",
-    "b7e73522d15373ea585df01a",
     "b8057fa4a3ca42266542e45b",
     "b8fa68cf6a0f40f88dd70cf8",
     "b9f79f338a98333b938200f5",
@@ -204753,7 +204787,6 @@
     "ed32ef41e4cacb3d4fdf5267",
     "edb5d2787a4e3d1a3450763b",
     "ee11795024db4af4dc601f1e",
-    "ee6511ab8baded78d1c70898",
     "ef8514cc2e83fac78714edb2",
     "efddf03bb4dff5e10950c876",
     "f013bc8d6d3bc4dfeda1d4ad",
@@ -204793,7 +204826,6 @@
     "fb3e692aa43a2cbfb26ca828",
     "fb9e054fbf4fd51ececc8602",
     "fbdfd42eda11641adf4e8962",
-    "fc39ba11c57e01e1373615f8",
     "fd5e44cde9f1c93b7be33b5b",
     "fd885458a02d85ce410526e6",
     "fe8db5388721cd291a36f8db",
