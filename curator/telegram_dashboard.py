@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 import re
+import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from html import escape
 from pathlib import Path
+from urllib.parse import urlencode
 
 from .cluster import extract_company_candidates
 from .dates import datetime_to_iso, parse_datetime
 from .remote_api import remote_api_url
+from .telegram_publisher import html_link, send_telegram_message, telegram_bot_token, telegram_chat_id
 from .telegram_sources import (
     channel_quality_metrics,
     ensure_telegram_state,
@@ -22,6 +27,7 @@ from .telegram_sources import (
 
 
 TELEGRAM_DASHBOARD_RELATIVE_PATH = Path("public") / "feed" / "telegram-admin.html"
+TELEGRAM_ADMIN_STORAGE_KEY = "telegramAdminAccessToken"
 TOKEN_STOPWORDS = {
     "그리고",
     "관련",
@@ -501,6 +507,131 @@ def _stat_card(label: str, value: object, note: str = "") -> str:
     return f'<article class="stat"><strong>{escape(str(value))}</strong><p>{escape(label)}</p>{note_html}</article>'
 
 
+def telegram_admin_access_token() -> str:
+    explicit = os.environ.get("TELEGRAM_ADMIN_ACCESS_TOKEN", "").strip()
+    if explicit:
+        return explicit
+    shared = os.environ.get("STORY_REVIEW_ACCESS_TOKEN", "").strip()
+    if shared:
+        return shared
+    bot_token = telegram_bot_token()
+    if bot_token:
+        return hashlib.sha256(f"telegram-admin:{bot_token}".encode("utf-8")).hexdigest()
+    return ""
+
+
+def telegram_admin_access_token_hash(token: str | None = None) -> str:
+    value = (token if token is not None else telegram_admin_access_token()).strip()
+    if not value:
+        return ""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _dashboard_public_base_url(config: dict[str, object]) -> str:
+    feed_url = str(config.get("public_feed_url") or "").strip()
+    if feed_url.endswith("/feed.xml"):
+        return feed_url[: -len("/feed.xml")]
+    return feed_url.rstrip("/")
+
+
+def telegram_admin_public_url(config: dict[str, object], token: str | None = None) -> str:
+    base_url = _dashboard_public_base_url(config)
+    path = "feed/telegram-admin.html"
+    url = f"{base_url}/{path}" if base_url else path
+    if token:
+        return f"{url}?{urlencode({'token': token})}"
+    return url
+
+
+def _locked_fallback_model(model: dict[str, object], token_hash: str) -> dict[str, object]:
+    if not token_hash:
+        return model
+    return {
+        "generated_at": model.get("generated_at"),
+        "channels_total": 0,
+        "channels_collectable": 0,
+        "channels_enabled": 0,
+        "channels_failed": 0,
+        "messages_total": 0,
+        "messages_24h": 0,
+        "messages_14d": 0,
+        "matches_total": 0,
+        "candidates_total": 0,
+        "candidate_pending": 0,
+        "top_channels": [],
+        "type_counts": [],
+        "day_counts": [],
+        "top_keywords": [],
+        "signals": [],
+        "signal_overview": {
+            "top_score": 0,
+            "new_rising": 0,
+            "watchlist_candidates": 0,
+            "risk_watch": 0,
+            "confirmed_reactions": 0,
+            "velocity_ratio": 0,
+            "velocity_label": "locked",
+        },
+        "new_rising_signals": [],
+        "watchlist_candidates": [],
+        "risk_watch_signals": [],
+        "risk_flag_counts": [],
+        "company_signal_overview": {
+            "companies_total": 0,
+            "top_score": 0,
+            "new_rising": 0,
+            "risk_watch": 0,
+            "tracked": 0,
+        },
+        "top_company_signals": [],
+        "new_rising_companies": [],
+        "company_risk_watch": [],
+        "match_type_counts": [],
+        "quality_bands": [],
+        "growth": {
+            "avg_message_bytes": 0,
+            "daily_messages": 0,
+            "monthly_messages": 0,
+            "yearly_messages": 0,
+            "monthly_mb": 0,
+            "yearly_mb": 0,
+        },
+    }
+
+
+def build_telegram_admin_access_message(config: dict[str, object], now: datetime) -> str:
+    token = telegram_admin_access_token()
+    url = telegram_admin_public_url(config, token)
+    return "\n".join(
+        [
+            "<b>Telegram admin 승인 링크</b>",
+            "아래 링크로 Telegram 수집 운영 대시보드에 접근할 수 있습니다.",
+            f"생성시각: {escape(datetime_to_iso(now))}",
+            html_link("telegram-admin 열기", url),
+        ]
+    )
+
+
+def send_telegram_admin_access_message(
+    config: dict[str, object],
+    now: datetime,
+) -> dict[str, object]:
+    token = telegram_admin_access_token()
+    bot_token = telegram_bot_token()
+    chat_id = telegram_chat_id(config)
+    if not token:
+        return {"ok": False, "error": "telegram_admin_access_token_missing"}
+    if not bot_token or not chat_id:
+        return {"ok": False, "error": "telegram_not_configured"}
+    return send_telegram_message(
+        bot_token,
+        chat_id,
+        build_telegram_admin_access_message(config, now),
+        config,
+        disable_web_page_preview=True,
+    )
+
+
 def _signal_card(signal: dict[str, object]) -> str:
     flags = [str(flag) for flag in signal.get("risk_flags", [])[:4]]
     flag_html = "".join(f"<span>{escape(flag)}</span>" for flag in flags)
@@ -540,8 +671,11 @@ def _company_card(row: dict[str, object]) -> str:
 
 def write_telegram_dashboard(project_root: Path, state: dict[str, object], config: dict[str, object], now: datetime) -> Path:
     model = telegram_dashboard_model(state, config, now)
+    access_hash = telegram_admin_access_token_hash()
+    model = _locked_fallback_model(model, access_hash)
     api_url = remote_api_url()
     fallback_model_json = json.dumps(model, ensure_ascii=False, separators=(",", ":"))
+    access_hash_json = json.dumps(access_hash, ensure_ascii=False)
     api_url_json = json.dumps(api_url, ensure_ascii=False)
     output_path = project_root / TELEGRAM_DASHBOARD_RELATIVE_PATH
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -651,6 +785,7 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
   <style>
     :root {{ --ink:#171321; --muted:#6d6478; --accent:#6f35e8; --line:#ded7ec; --soft:#f6f1ff; --paper:#fff; }}
     * {{ box-sizing:border-box; }}
+    [hidden] {{ display:none !important; }}
     body {{ margin:0; font-family:Arial, "Noto Sans KR", sans-serif; color:var(--ink); background:#fbf9ff; }}
     main {{ max-width:1120px; margin:0 auto; padding:28px 22px 56px; }}
     header {{ display:flex; justify-content:space-between; gap:20px; align-items:flex-start; border-bottom:2px solid var(--ink); padding-bottom:18px; }}
@@ -695,6 +830,12 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
     .note {{ border-left:4px solid var(--accent); background:var(--soft); padding:12px 14px; }}
     .status {{ display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line); border-radius:999px; padding:6px 10px; font-size:12px; color:var(--muted); background:var(--paper); }}
     .status b {{ color:var(--accent); }}
+    .access-gate {{ margin:24px 0; border:1px solid var(--line); background:var(--paper); padding:22px; max-width:620px; }}
+    .access-gate h1 {{ margin-top:0; font-size:30px; }}
+    .access-form {{ display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }}
+    .access-form input {{ flex:1 1 280px; min-height:42px; border:1px solid var(--line); border-radius:8px; padding:0 12px; font-size:14px; }}
+    .access-form button {{ min-height:42px; border:1px solid var(--accent); border-radius:999px; padding:0 18px; color:var(--accent); background:var(--paper); font-weight:800; cursor:pointer; }}
+    .access-error {{ color:#a22828; font-size:13px; }}
     @media (max-width:900px) {{ .stats, .signal-stats {{ grid-template-columns:repeat(2,1fr); }} .grid, .signal-board {{ grid-template-columns:1fr; }} h1 {{ font-size:32px; }} }}
   </style>
 </head>
@@ -704,6 +845,16 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
     <a class="brand" href="https://bside.ai">bside<span>DAILY NEWS</span></a>
     <p>{escape(str(model["generated_at"]))}</p>
   </header>
+  <section class="access-gate" id="access-gate" hidden>
+    <h1>Telegram admin 승인 필요</h1>
+    <p>이 페이지는 Telegram 채널로 발송된 승인 링크 또는 관리자 token이 있어야 열립니다.</p>
+    <form class="access-form" id="access-form">
+      <input id="access-token-input" type="password" autocomplete="one-time-code" placeholder="관리자 token">
+      <button type="submit">승인</button>
+    </form>
+    <p class="access-error" id="access-error" hidden>token이 올바르지 않습니다.</p>
+  </section>
+  <div id="dashboard-content" hidden>
   <h1>Telegram 시장 시그널 대시보드</h1>
   <p>공개 broadcast 채널의 언급 확산, 기사 매칭, 다채널 반응, 위험 플래그를 함께 보며 시장 관심 흐름을 확인합니다. 개인 대화, 저장한 메시지, 그룹 대화는 수집 대상에서 제외됩니다.</p>
   <p class="status" id="data-status"><b>정적 fallback</b> DB API를 확인하는 중입니다.</p>
@@ -788,10 +939,13 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
       <tbody id="signal-rows">{signal_rows or '<tr><td colspan="5">아직 기사와 연결된 Telegram 신호가 없습니다.</td></tr>'}</tbody>
     </table>
   </section>
+  </div>
 </main>
 <script>
 const fallbackModel = {fallback_model_json};
 const telegramDashboardApiUrl = {api_url_json};
+const telegramAdminAccessHash = {access_hash_json};
+const telegramAdminStorageKey = "{TELEGRAM_ADMIN_STORAGE_KEY}";
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}}[ch]));
 const compact = (value, max = 90) => {{
   const text = String(value ?? "").replace(/\\s+/g, " ").trim();
@@ -1047,19 +1201,74 @@ function renderDashboard(model, sourceLabel) {{
   document.getElementById("signal-rows").innerHTML = signals.map((signal) => `<tr><td><b>${{esc(signal.signal_title || signal.article_id || "")}}</b><br><small>${{esc(signal.signal_summary || signal.signal_type || "")}}</small></td><td>${{esc(signal.related_telegram_count || 0)}}</td><td>${{esc(signal.related_telegram_channels_count || 0)}}</td><td>${{esc(signalKeywordText(signal))}}</td><td>${{esc((signal.risk_flags || []).slice(0, 5).join(", "))}}</td></tr>`).join("") || '<tr><td colspan="5">아직 기사와 연결된 Telegram 신호가 없습니다.</td></tr>';
   document.getElementById("data-status").innerHTML = `<b>${{esc(sourceLabel)}}</b> 생성시각 ${{esc(model.generated_at || "")}}`;
 }}
-renderDashboard(fallbackModel, "정적 fallback");
-if (telegramDashboardApiUrl) {{
-  const separator = telegramDashboardApiUrl.includes("?") ? "&" : "?";
-  fetch(`${{telegramDashboardApiUrl}}${{separator}}action=telegram_dashboard`, {{cache: "no-store"}})
-    .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${{response.status}}`)))
-    .then((data) => {{
-      if (!data.ok) throw new Error(data.error || "api_error");
-      renderDashboard(modelFromApi(data), "DB 기준");
-    }})
-    .catch((error) => {{
-      document.getElementById("data-status").innerHTML = `<b>정적 fallback</b> DB API 확인 실패: ${{esc(error.message)}}`;
-    }});
+async function sha256Hex(text) {{
+  const bytes = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }}
+function tokenFromUrl() {{
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("token") || "";
+  if (token) {{
+    params.delete("token");
+    const nextQuery = params.toString();
+    const nextUrl = `${{window.location.pathname}}${{nextQuery ? `?${{nextQuery}}` : ""}}${{window.location.hash}}`;
+    window.history.replaceState(null, "", nextUrl);
+  }}
+  return token;
+}}
+function dashboardApiUrl() {{
+  if (!telegramDashboardApiUrl) return "";
+  const url = new URL(telegramDashboardApiUrl, window.location.href);
+  url.searchParams.set("action", "telegram_dashboard");
+  return url.toString();
+}}
+async function loadDashboard(token) {{
+  renderDashboard(fallbackModel, "정적 fallback");
+  if (!telegramDashboardApiUrl) return;
+  try {{
+    const headers = token ? {{"X-Telegram-Admin-Token": token}} : {{}};
+    const response = await fetch(dashboardApiUrl(), {{cache: "no-store", headers}});
+    const data = response.ok ? await response.json() : await Promise.reject(new Error(`HTTP ${{response.status}}`));
+    if (!data.ok) throw new Error(data.error || "api_error");
+    renderDashboard(modelFromApi(data), "DB 기준");
+  }} catch (error) {{
+    document.getElementById("data-status").innerHTML = `<b>정적 fallback</b> DB API 확인 실패: ${{esc(error.message)}}`;
+  }}
+}}
+async function unlockDashboard(rawToken) {{
+  const token = String(rawToken || "").trim();
+  if (telegramAdminAccessHash) {{
+    if (!token || await sha256Hex(token) !== telegramAdminAccessHash) {{
+      document.getElementById("access-error").hidden = false;
+      document.getElementById("access-gate").hidden = false;
+      document.getElementById("dashboard-content").hidden = true;
+      return;
+    }}
+    window.localStorage.setItem(telegramAdminStorageKey, token);
+  }}
+  document.getElementById("access-error").hidden = true;
+  document.getElementById("access-gate").hidden = true;
+  document.getElementById("dashboard-content").hidden = false;
+  await loadDashboard(token);
+}}
+document.getElementById("access-form").addEventListener("submit", (event) => {{
+  event.preventDefault();
+  unlockDashboard(document.getElementById("access-token-input").value);
+}});
+(async () => {{
+  const token = tokenFromUrl() || window.localStorage.getItem(telegramAdminStorageKey) || "";
+  if (!telegramAdminAccessHash) {{
+    await unlockDashboard("");
+    return;
+  }}
+  if (token) {{
+    await unlockDashboard(token);
+  }} else {{
+    document.getElementById("access-gate").hidden = false;
+    document.getElementById("dashboard-content").hidden = true;
+  }}
+}})();
 </script>
 </body>
 </html>
@@ -1073,10 +1282,19 @@ def main() -> None:
     from .dates import now_in_timezone
     from .state import load_state
 
+    command = sys.argv[1] if len(sys.argv) > 1 else "write"
     project_root = Path.cwd()
     config = load_config(project_root / "config.yaml")
     state = load_state(project_root / "data" / "state.json")
     now = now_in_timezone(str(config.get("timezone") or "Asia/Seoul"))
+    if command == "send-access":
+        response = send_telegram_admin_access_message(config, now)
+        print(json.dumps(response, ensure_ascii=False))
+        if not response.get("ok"):
+            raise SystemExit(1)
+        return
+    if command != "write":
+        raise SystemExit(f"unknown command: {command}")
     path = write_telegram_dashboard(project_root, state, config, now)
     print(path)
 

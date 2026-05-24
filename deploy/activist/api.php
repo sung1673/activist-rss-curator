@@ -22,7 +22,7 @@ if ($origin !== '' && $allowedOrigin !== '' && hash_equals($allowedOrigin, $orig
     header('Access-Control-Allow-Origin: ' . $allowedOrigin);
     header('Vary: Origin');
     header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, X-Activist-Timestamp, X-Activist-Nonce, X-Activist-Signature');
+    header('Access-Control-Allow-Headers: Content-Type, X-Activist-Timestamp, X-Activist-Nonce, X-Activist-Signature, X-Telegram-Admin-Token');
 }
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
@@ -969,7 +969,41 @@ function telegram_risk_flag_counts(array $signals): array {
     );
 }
 
+function telegram_admin_access_hash(array $config): string {
+    if (isset($config['telegram_admin_access_token_hash'])) {
+        $hash = strtolower(trim((string)$config['telegram_admin_access_token_hash']));
+        if (preg_match('/^[a-f0-9]{64}$/', $hash)) {
+            return $hash;
+        }
+    }
+    if (isset($config['telegram_admin_access_token'])) {
+        $token = trim((string)$config['telegram_admin_access_token']);
+        if ($token !== '') {
+            return hash('sha256', $token);
+        }
+    }
+    return '';
+}
+
+function require_telegram_admin_access(array $config): void {
+    $expected = telegram_admin_access_hash($config);
+    if ($expected === '') {
+        return;
+    }
+    $token = '';
+    if (isset($_GET['admin_token'])) {
+        $token = trim((string)$_GET['admin_token']);
+    }
+    if ($token === '' && isset($_SERVER['HTTP_X_TELEGRAM_ADMIN_TOKEN'])) {
+        $token = trim((string)$_SERVER['HTTP_X_TELEGRAM_ADMIN_TOKEN']);
+    }
+    if ($token === '' || !hash_equals($expected, hash('sha256', $token))) {
+        respond(403, array('ok' => false, 'error' => 'admin_token_required'));
+    }
+}
+
 function handle_telegram_dashboard(PDO $pdo, array $config): void {
+    require_telegram_admin_access($config);
     $channels = table_name($config, 'telegram_channels');
     $messages = table_name($config, 'telegram_messages');
     $matches = table_name($config, 'telegram_article_matches');

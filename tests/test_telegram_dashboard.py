@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from curator.telegram_dashboard import telegram_dashboard_model, write_telegram_dashboard
+import hashlib
+
+from curator.telegram_dashboard import (
+    build_telegram_admin_access_message,
+    telegram_admin_access_token_hash,
+    telegram_dashboard_model,
+    write_telegram_dashboard,
+)
 
 
 def test_telegram_dashboard_writes_public_safe_status_page(tmp_path, config, now) -> None:  # type: ignore[no-untyped-def]
@@ -112,3 +119,42 @@ def test_telegram_dashboard_model_builds_investor_signal_sections(config, now) -
     assert model["top_company_signals"][0]["mentions_24h"] == 2  # type: ignore[index]
     assert model["top_company_signals"][0]["channels_count"] == 2  # type: ignore[index]
     assert model["top_company_signals"][0]["signal_score"] > 0  # type: ignore[index]
+
+
+def test_telegram_dashboard_requires_token_without_embedding_data(tmp_path, config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("TELEGRAM_ADMIN_ACCESS_TOKEN", "admin-secret-token")
+    state = {
+        "telegram_source_channels": [
+            {
+                "handle": "sensitivechannel",
+                "title": "Sensitive Channel",
+                "enabled": True,
+                "source_type": "public_channel",
+                "is_public_channel": True,
+                "quality_score": 90,
+            }
+        ],
+        "telegram_source_messages": [],
+        "telegram_article_matches": [],
+        "telegram_channel_candidates": [],
+        "telegram_issue_signals": [],
+    }
+
+    path = write_telegram_dashboard(tmp_path, state, config, now)
+    html = path.read_text(encoding="utf-8")
+
+    expected_hash = hashlib.sha256(b"admin-secret-token").hexdigest()
+    assert "Telegram admin" in html
+    assert expected_hash in html
+    assert "admin-secret-token" not in html
+    assert "sensitivechannel" not in html
+
+
+def test_telegram_admin_access_message_contains_token_link(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("TELEGRAM_ADMIN_ACCESS_TOKEN", "admin-secret-token")
+
+    message = build_telegram_admin_access_message(config, now)
+
+    assert "Telegram admin" in message
+    assert "telegram-admin.html?token=admin-secret-token" in message
+    assert telegram_admin_access_token_hash() == hashlib.sha256(b"admin-secret-token").hexdigest()

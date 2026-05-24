@@ -203,7 +203,29 @@ PHP API 업데이트 전에도 DB 적재 병목을 줄이려면 로컬에서 직
 - URL 직접 매칭, 키워드 추정 매칭, 매칭률, 리스크성 메시지 수
 - 매칭 방식별 분포와 채널 품질 구간
 
-GitHub Pages가 공개 페이지이므로 비밀값, session, raw_json 전문, 관리자 쓰기 기능은 노출하지 않습니다. PHP API도 대시보드 응답에서는 집계값, 채널별 건수, 공개-safe 이슈 신호만 반환하고 메시지 전문이나 raw_json을 반환하지 않습니다. 채널 승인/비활성화/백필 실행은 CLI 또는 내부 API에서만 수행합니다.
+GitHub Pages가 공개 페이지이므로 비밀값, session, raw_json 전문, 관리자 쓰기 기능은 노출하지 않습니다. `telegram-admin.html`은 관리자 token gate를 통과하기 전까지 정적 fallback 데이터도 비운 상태로 렌더링합니다. PHP API도 대시보드 응답에서는 집계값, 채널별 건수, 공개-safe 이슈 신호만 반환하고 메시지 전문이나 raw_json을 반환하지 않습니다. 채널 승인/비활성화/백필 실행은 CLI 또는 내부 API에서만 수행합니다.
+
+### telegram-admin 접근 승인
+
+`public/feed/telegram-admin.html`은 정적 GitHub Pages에 배포되므로 서버 세션 기반 로그인은 사용할 수 없습니다. 대신 운영 페이지는 관리자 token gate를 먼저 통과해야 내용을 렌더링하고, Telegram bot이 승인 링크를 채널에 발송하는 방식으로 접근을 제한합니다.
+
+권장 설정:
+
+- GitHub Secret `TELEGRAM_ADMIN_ACCESS_TOKEN`에 충분히 긴 임의 token을 저장합니다.
+- workflow 수동 실행에서 `send_telegram_admin_access`를 켜거나 매일 정기 실행 시 bot이 승인 링크를 채널에 발송합니다.
+- PHP API 서버의 `_private/config.php`에는 같은 token의 SHA-256 값인 `telegram_admin_access_token_hash`를 넣으면 `telegram_dashboard` API도 token 없이는 403을 반환합니다.
+
+로컬/수동 발송:
+
+```powershell
+.\.venv\Scripts\python.exe -m curator.telegram_dashboard send-access
+```
+
+보안 한계:
+
+- GitHub Pages는 정적 호스팅이므로 진짜 계정 로그인/세션을 제공하지 않습니다.
+- API 서버에 `telegram_admin_access_token_hash`를 설정해야 DB 기반 대시보드 응답도 보호됩니다.
+- token 링크를 받은 채널 구성원은 해당 링크로 접근할 수 있으므로 token은 주기적으로 교체하는 것이 좋습니다.
 
 채널 품질 점수는 두 단계로 봅니다.
 
