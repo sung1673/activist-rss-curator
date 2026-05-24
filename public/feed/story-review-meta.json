@@ -1,134 +1,124 @@
 {
-  "date_id": "2026-05-24",
-  "generated_at": "2026-05-24T05:59:07.796064+09:00",
-  "start_at": "2026-05-23T05:57:49.552937+09:00",
-  "end_at": "2026-05-24T05:57:49.552937+09:00",
-  "start_label": "2026-05-23 05:57 KST",
-  "end_label": "2026-05-24 05:57 KST",
+  "date_id": "2026-05-25",
+  "generated_at": "2026-05-25T00:27:43.969934+09:00",
+  "start_at": "2026-05-24T00:26:28.234529+09:00",
+  "end_at": "2026-05-25T00:26:28.234529+09:00",
+  "start_label": "2026-05-24 00:26 KST",
+  "end_label": "2026-05-25 00:26 KST",
   "candidate_count": 3,
-  "candidate_hash": "b9156568a747ba3f",
+  "candidate_hash": "a7680a94dab333a5",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "301969db5351",
-      "score": 88.3,
+      "id": "7109a7cafd28",
+      "score": 84.8,
       "left": {
         "id": "story-2",
-        "title": "소액주주 액트 삼성전자 주주명부 확보…1.5% 지분 결집 나선다",
-        "summary": "소액주주 액트 \"삼성전자 주주명부 확보\"…1.5% 지분 결집 나선다 네이트",
+        "title": "[삼전 성과급] 주주단체 임시주총 추진..사측, 주주명부 열람 전격 허용",
+        "summary": "... 주주 총회 의결 대상이라는 입장이다.24일 주주행동주의 플랫폼 액트(ACT)와 대한민국 주주 운동본부 등에 따르면 삼성전자 측은 최근 제기된 주주 명부 열람 ...",
         "category": "주주행동·경영권",
-        "datetime": "05.23 20:55",
-        "source_line": "네이트뉴스 · NEWS1",
-        "link_count": 2,
-        "url": "https://news.nate.com/view/20260523n13443",
-        "links": [
-          {
-            "source": "네이트뉴스",
-            "title": "소액주주 액트 삼성전자 주주명부 확보…1.5% 지분 결집 나선다",
-            "url": "https://news.nate.com/view/20260523n13443"
-          },
-          {
-            "source": "NEWS1",
-            "title": "소액주주 액트 삼성전자 주주명부 확보…지분 1.5% 결집 나선다",
-            "url": "https://www.news1.kr/industry/general-industry/6176157"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-5",
-        "title": "삼성전자, 주주명부 열람 수용…소액주주 임시주총 청구 본격화",
-        "summary": "삼성전자가 소액주주의 주주명부 열람·등사 청구를 받아들였다. 노사 성과급 합의에 반발한 소액주주들은 주주명부를 확보하는 대로 지분 결집에 나서 임시주주총회 소집 청구를 추진할 방침이다. 23일 소액주주 플랫폼 액트는 삼성전자에 제기한 주주명부 열람·등사 청구가 회사 측에 수용됐다고 밝…",
-        "category": "주주행동·경영권",
-        "datetime": "05.23 17:56",
-        "source_line": "매일경제",
+        "datetime": "05.24 21:44",
+        "source_line": "4TH",
         "link_count": 1,
-        "url": "https://www.mk.co.kr/news/stock/12056297",
+        "url": "http://www.4th.kr/news/articleView.html?idxno=2112195",
         "links": [
           {
-            "source": "매일경제",
-            "title": "삼성전자, 주주명부 열람 수용…소액주주 임시주총 청구 본격화",
-            "url": "https://www.mk.co.kr/news/stock/12056297"
-          }
-        ]
-      }
-    },
-    {
-      "id": "965d1c447926",
-      "score": 77.4,
-      "left": {
-        "id": "story-2",
-        "title": "소액주주 액트 삼성전자 주주명부 확보…1.5% 지분 결집 나선다",
-        "summary": "소액주주 액트 \"삼성전자 주주명부 확보\"…1.5% 지분 결집 나선다 네이트",
-        "category": "주주행동·경영권",
-        "datetime": "05.23 20:55",
-        "source_line": "네이트뉴스 · NEWS1",
-        "link_count": 2,
-        "url": "https://news.nate.com/view/20260523n13443",
-        "links": [
-          {
-            "source": "네이트뉴스",
-            "title": "소액주주 액트 삼성전자 주주명부 확보…1.5% 지분 결집 나선다",
-            "url": "https://news.nate.com/view/20260523n13443"
-          },
-          {
-            "source": "NEWS1",
-            "title": "소액주주 액트 삼성전자 주주명부 확보…지분 1.5% 결집 나선다",
-            "url": "https://www.news1.kr/industry/general-industry/6176157"
+            "source": "4TH",
+            "title": "[삼전 성과급] 주주단체 임시주총 추진..사측, 주주명부 열람 전격 허용",
+            "url": "http://www.4th.kr/news/articleView.html?idxno=2112195"
           }
         ]
       },
       "right": {
         "id": "story-7",
-        "title": "6억 성과급에 뿔난 개미들…삼성전자 주주명부 열린다",
-        "summary": "'6억 성과급'에 뿔난 개미들…삼성전자 주주명부 열린다 네이트",
-        "category": "밸류업·주주환원",
-        "datetime": "05.23 21:15",
-        "source_line": "네이트뉴스",
+        "title": "소액주주 플랫폼 액트 삼전 주주명부 열람 허가…지분 1.5% 결집 나설 것",
+        "summary": "소액주주 플랫폼 액트 \"삼전 주주명부 열람 허가…'지분 1.5%' 결집 나설 것\" | 연합인포맥스",
+        "category": "주주행동·경영권",
+        "datetime": "05.24 10:24",
+        "source_line": "연합인포맥스",
         "link_count": 1,
-        "url": "https://news.nate.com/view/20260523n13589",
+        "url": "https://news.google.com/rss/articles/CBMidEFVX3lxTFBFUjI1MUc0ZUR0Uk5zY3BRNDNWQWhCdmwwNHNCU29BblpwVTFJYUUyNGt1MFQ1SldBVzA0WXNpNmY3c0xTcURVQUlQenhvMkxzVlZiV0FTVU5iaEtRSE9DTV9tbVA3MFpOLXNpV2pLNmo5VHhT?oc=5",
         "links": [
           {
-            "source": "네이트뉴스",
-            "title": "6억 성과급에 뿔난 개미들…삼성전자 주주명부 열린다",
-            "url": "https://news.nate.com/view/20260523n13589"
+            "source": "연합인포맥스",
+            "title": "소액주주 플랫폼 액트 삼전 주주명부 열람 허가…지분 1.5% 결집 나설 것",
+            "url": "https://news.google.com/rss/articles/CBMidEFVX3lxTFBFUjI1MUc0ZUR0Uk5zY3BRNDNWQWhCdmwwNHNCU29BblpwVTFJYUUyNGt1MFQ1SldBVzA0WXNpNmY3c0xTcURVQUlQenhvMkxzVlZiV0FTVU5iaEtRSE9DTV9tbVA3MFpOLXNpV2pLNmo5VHhT?oc=5"
           }
         ]
       }
     },
     {
-      "id": "fb031e6e71aa",
-      "score": 75.5,
+      "id": "85569ad78ef7",
+      "score": 81.9,
       "left": {
-        "id": "story-5",
-        "title": "삼성전자, 주주명부 열람 수용…소액주주 임시주총 청구 본격화",
-        "summary": "삼성전자가 소액주주의 주주명부 열람·등사 청구를 받아들였다. 노사 성과급 합의에 반발한 소액주주들은 주주명부를 확보하는 대로 지분 결집에 나서 임시주주총회 소집 청구를 추진할 방침이다. 23일 소액주주 플랫폼 액트는 삼성전자에 제기한 주주명부 열람·등사 청구가 회사 측에 수용됐다고 밝…",
+        "id": "story-4",
+        "title": "삼성 소액주주 주총 요구 길 열려 이르면 27일 주주명부 열람하기로",
+        "summary": "삼성전자 최대 노동조합인 초기업노조 삼성전자지부(초기업노조)가 사측과 임금 협상 잠정합의안을 끌어냈지만 후폭풍은 갈수록 커지고 있다. 대대적인 총파업 돌입 직전에 노사 합의를 이뤄냈다는 성과에도 반도체·비반도체 부문 간 노노 갈등과 소액주주들의 반발에 더해 파업권을 둘러싼 사회적 논쟁…",
         "category": "주주행동·경영권",
-        "datetime": "05.23 17:56",
+        "datetime": "05.24 17:44",
         "source_line": "매일경제",
         "link_count": 1,
-        "url": "https://www.mk.co.kr/news/stock/12056297",
+        "url": "https://www.mk.co.kr/news/business/12056647",
         "links": [
           {
             "source": "매일경제",
-            "title": "삼성전자, 주주명부 열람 수용…소액주주 임시주총 청구 본격화",
-            "url": "https://www.mk.co.kr/news/stock/12056297"
+            "title": "삼성 소액주주 주총 요구 길 열려 이르면 27일 주주명부 열람하기로",
+            "url": "https://www.mk.co.kr/news/business/12056647"
           }
         ]
       },
       "right": {
         "id": "story-7",
-        "title": "6억 성과급에 뿔난 개미들…삼성전자 주주명부 열린다",
-        "summary": "'6억 성과급'에 뿔난 개미들…삼성전자 주주명부 열린다 네이트",
-        "category": "밸류업·주주환원",
-        "datetime": "05.23 21:15",
-        "source_line": "네이트뉴스",
+        "title": "소액주주 플랫폼 액트 삼전 주주명부 열람 허가…지분 1.5% 결집 나설 것",
+        "summary": "소액주주 플랫폼 액트 \"삼전 주주명부 열람 허가…'지분 1.5%' 결집 나설 것\" | 연합인포맥스",
+        "category": "주주행동·경영권",
+        "datetime": "05.24 10:24",
+        "source_line": "연합인포맥스",
         "link_count": 1,
-        "url": "https://news.nate.com/view/20260523n13589",
+        "url": "https://news.google.com/rss/articles/CBMidEFVX3lxTFBFUjI1MUc0ZUR0Uk5zY3BRNDNWQWhCdmwwNHNCU29BblpwVTFJYUUyNGt1MFQ1SldBVzA0WXNpNmY3c0xTcURVQUlQenhvMkxzVlZiV0FTVU5iaEtRSE9DTV9tbVA3MFpOLXNpV2pLNmo5VHhT?oc=5",
         "links": [
           {
-            "source": "네이트뉴스",
-            "title": "6억 성과급에 뿔난 개미들…삼성전자 주주명부 열린다",
-            "url": "https://news.nate.com/view/20260523n13589"
+            "source": "연합인포맥스",
+            "title": "소액주주 플랫폼 액트 삼전 주주명부 열람 허가…지분 1.5% 결집 나설 것",
+            "url": "https://news.google.com/rss/articles/CBMidEFVX3lxTFBFUjI1MUc0ZUR0Uk5zY3BRNDNWQWhCdmwwNHNCU29BblpwVTFJYUUyNGt1MFQ1SldBVzA0WXNpNmY3c0xTcURVQUlQenhvMkxzVlZiV0FTVU5iaEtRSE9DTV9tbVA3MFpOLXNpV2pLNmo5VHhT?oc=5"
+          }
+        ]
+      }
+    },
+    {
+      "id": "a18da1a9ff00",
+      "score": 78.7,
+      "left": {
+        "id": "story-2",
+        "title": "[삼전 성과급] 주주단체 임시주총 추진..사측, 주주명부 열람 전격 허용",
+        "summary": "... 주주 총회 의결 대상이라는 입장이다.24일 주주행동주의 플랫폼 액트(ACT)와 대한민국 주주 운동본부 등에 따르면 삼성전자 측은 최근 제기된 주주 명부 열람 ...",
+        "category": "주주행동·경영권",
+        "datetime": "05.24 21:44",
+        "source_line": "4TH",
+        "link_count": 1,
+        "url": "http://www.4th.kr/news/articleView.html?idxno=2112195",
+        "links": [
+          {
+            "source": "4TH",
+            "title": "[삼전 성과급] 주주단체 임시주총 추진..사측, 주주명부 열람 전격 허용",
+            "url": "http://www.4th.kr/news/articleView.html?idxno=2112195"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-4",
+        "title": "삼성 소액주주 주총 요구 길 열려 이르면 27일 주주명부 열람하기로",
+        "summary": "삼성전자 최대 노동조합인 초기업노조 삼성전자지부(초기업노조)가 사측과 임금 협상 잠정합의안을 끌어냈지만 후폭풍은 갈수록 커지고 있다. 대대적인 총파업 돌입 직전에 노사 합의를 이뤄냈다는 성과에도 반도체·비반도체 부문 간 노노 갈등과 소액주주들의 반발에 더해 파업권을 둘러싼 사회적 논쟁…",
+        "category": "주주행동·경영권",
+        "datetime": "05.24 17:44",
+        "source_line": "매일경제",
+        "link_count": 1,
+        "url": "https://www.mk.co.kr/news/business/12056647",
+        "links": [
+          {
+            "source": "매일경제",
+            "title": "삼성 소액주주 주총 요구 길 열려 이르면 27일 주주명부 열람하기로",
+            "url": "https://www.mk.co.kr/news/business/12056647"
           }
         ]
       }
