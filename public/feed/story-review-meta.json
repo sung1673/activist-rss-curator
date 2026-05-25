@@ -1,124 +1,124 @@
 {
-  "date_id": "2026-05-25",
-  "generated_at": "2026-05-25T06:02:09.553315+09:00",
-  "start_at": "2026-05-24T06:00:52.270414+09:00",
-  "end_at": "2026-05-25T06:00:52.270414+09:00",
-  "start_label": "2026-05-24 06:00 KST",
-  "end_label": "2026-05-25 06:00 KST",
+  "date_id": "2026-05-26",
+  "generated_at": "2026-05-26T06:12:20.882755+09:00",
+  "start_at": "2026-05-25T06:11:19.023204+09:00",
+  "end_at": "2026-05-26T06:11:19.023204+09:00",
+  "start_label": "2026-05-25 06:11 KST",
+  "end_label": "2026-05-26 06:11 KST",
   "candidate_count": 3,
-  "candidate_hash": "a7680a94dab333a5",
+  "candidate_hash": "e09da75de34da92f",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "7109a7cafd28",
-      "score": 84.8,
+      "id": "e81b627a1889",
+      "score": 79.9,
       "left": {
-        "id": "story-2",
-        "title": "[삼전 성과급] 주주단체 임시주총 추진..사측, 주주명부 열람 전격 허용",
-        "summary": "... 주주 총회 의결 대상이라는 입장이다.24일 주주행동주의 플랫폼 액트(ACT)와 대한민국 주주 운동본부 등에 따르면 삼성전자 측은 최근 제기된 주주 명부 열람 ...",
+        "id": "story-4",
+        "title": "삼성 부문별 성과급 갈등 심화: 격차 최대 100배. 비반도체 부문 강력 반발, 삼성 주가 압박 계속될까?",
+        "summary": "소액 주주 플랫폼 '액트(Act)'는 '한국 주주행동주의 센터'가 공식적인 집단행동에 나섬에 따라, 삼성전자의 주주 명부를 확보한 후 임시 주주 총회 소집을 요구할 ...",
         "category": "주주행동·경영권",
-        "datetime": "05.24 21:44",
-        "source_line": "4TH",
+        "datetime": "05.25 19:26",
+        "source_line": "TRADINGKEY",
         "link_count": 1,
-        "url": "http://www.4th.kr/news/articleView.html?idxno=2112195",
+        "url": "https://www.tradingkey.com/kr/analysis/stocks/more/261925658-samsung-chip-worker-union-bonus-tradingkey",
         "links": [
           {
-            "source": "4TH",
-            "title": "[삼전 성과급] 주주단체 임시주총 추진..사측, 주주명부 열람 전격 허용",
-            "url": "http://www.4th.kr/news/articleView.html?idxno=2112195"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-7",
-        "title": "소액주주 플랫폼 액트 삼전 주주명부 열람 허가…지분 1.5% 결집 나설 것",
-        "summary": "소액주주 플랫폼 액트 \"삼전 주주명부 열람 허가…'지분 1.5%' 결집 나설 것\" | 연합인포맥스",
-        "category": "주주행동·경영권",
-        "datetime": "05.24 10:24",
-        "source_line": "연합인포맥스",
-        "link_count": 1,
-        "url": "https://news.google.com/rss/articles/CBMidEFVX3lxTFBFUjI1MUc0ZUR0Uk5zY3BRNDNWQWhCdmwwNHNCU29BblpwVTFJYUUyNGt1MFQ1SldBVzA0WXNpNmY3c0xTcURVQUlQenhvMkxzVlZiV0FTVU5iaEtRSE9DTV9tbVA3MFpOLXNpV2pLNmo5VHhT?oc=5",
-        "links": [
-          {
-            "source": "연합인포맥스",
-            "title": "소액주주 플랫폼 액트 삼전 주주명부 열람 허가…지분 1.5% 결집 나설 것",
-            "url": "https://news.google.com/rss/articles/CBMidEFVX3lxTFBFUjI1MUc0ZUR0Uk5zY3BRNDNWQWhCdmwwNHNCU29BblpwVTFJYUUyNGt1MFQ1SldBVzA0WXNpNmY3c0xTcURVQUlQenhvMkxzVlZiV0FTVU5iaEtRSE9DTV9tbVA3MFpOLXNpV2pLNmo5VHhT?oc=5"
-          }
-        ]
-      }
-    },
-    {
-      "id": "85569ad78ef7",
-      "score": 81.9,
-      "left": {
-        "id": "story-5",
-        "title": "삼성 소액주주 주총 요구 길 열려 이르면 27일 주주명부 열람하기로",
-        "summary": "삼성전자 최대 노동조합인 초기업노조 삼성전자지부(초기업노조)가 사측과 임금 협상 잠정합의안을 끌어냈지만 후폭풍은 갈수록 커지고 있다. 대대적인 총파업 돌입 직전에 노사 합의를 이뤄냈다는 성과에도 반도체·비반도체 부문 간 노노 갈등과 소액주주들의 반발에 더해 파업권을 둘러싼 사회적 논쟁…",
-        "category": "주주행동·경영권",
-        "datetime": "05.24 17:44",
-        "source_line": "매일경제",
-        "link_count": 1,
-        "url": "https://www.mk.co.kr/news/business/12056647",
-        "links": [
-          {
-            "source": "매일경제",
-            "title": "삼성 소액주주 주총 요구 길 열려 이르면 27일 주주명부 열람하기로",
-            "url": "https://www.mk.co.kr/news/business/12056647"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-7",
-        "title": "소액주주 플랫폼 액트 삼전 주주명부 열람 허가…지분 1.5% 결집 나설 것",
-        "summary": "소액주주 플랫폼 액트 \"삼전 주주명부 열람 허가…'지분 1.5%' 결집 나설 것\" | 연합인포맥스",
-        "category": "주주행동·경영권",
-        "datetime": "05.24 10:24",
-        "source_line": "연합인포맥스",
-        "link_count": 1,
-        "url": "https://news.google.com/rss/articles/CBMidEFVX3lxTFBFUjI1MUc0ZUR0Uk5zY3BRNDNWQWhCdmwwNHNCU29BblpwVTFJYUUyNGt1MFQ1SldBVzA0WXNpNmY3c0xTcURVQUlQenhvMkxzVlZiV0FTVU5iaEtRSE9DTV9tbVA3MFpOLXNpV2pLNmo5VHhT?oc=5",
-        "links": [
-          {
-            "source": "연합인포맥스",
-            "title": "소액주주 플랫폼 액트 삼전 주주명부 열람 허가…지분 1.5% 결집 나설 것",
-            "url": "https://news.google.com/rss/articles/CBMidEFVX3lxTFBFUjI1MUc0ZUR0Uk5zY3BRNDNWQWhCdmwwNHNCU29BblpwVTFJYUUyNGt1MFQ1SldBVzA0WXNpNmY3c0xTcURVQUlQenhvMkxzVlZiV0FTVU5iaEtRSE9DTV9tbVA3MFpOLXNpV2pLNmo5VHhT?oc=5"
-          }
-        ]
-      }
-    },
-    {
-      "id": "a18da1a9ff00",
-      "score": 78.7,
-      "left": {
-        "id": "story-2",
-        "title": "[삼전 성과급] 주주단체 임시주총 추진..사측, 주주명부 열람 전격 허용",
-        "summary": "... 주주 총회 의결 대상이라는 입장이다.24일 주주행동주의 플랫폼 액트(ACT)와 대한민국 주주 운동본부 등에 따르면 삼성전자 측은 최근 제기된 주주 명부 열람 ...",
-        "category": "주주행동·경영권",
-        "datetime": "05.24 21:44",
-        "source_line": "4TH",
-        "link_count": 1,
-        "url": "http://www.4th.kr/news/articleView.html?idxno=2112195",
-        "links": [
-          {
-            "source": "4TH",
-            "title": "[삼전 성과급] 주주단체 임시주총 추진..사측, 주주명부 열람 전격 허용",
-            "url": "http://www.4th.kr/news/articleView.html?idxno=2112195"
+            "source": "TRADINGKEY",
+            "title": "삼성 부문별 성과급 갈등 심화: 격차 최대 100배. 비반도체 부문 강력 반발, 삼성 주가 압박 계속될까?",
+            "url": "https://www.tradingkey.com/kr/analysis/stocks/more/261925658-samsung-chip-worker-union-bonus-tradingkey"
           }
         ]
       },
       "right": {
         "id": "story-5",
-        "title": "삼성 소액주주 주총 요구 길 열려 이르면 27일 주주명부 열람하기로",
-        "summary": "삼성전자 최대 노동조합인 초기업노조 삼성전자지부(초기업노조)가 사측과 임금 협상 잠정합의안을 끌어냈지만 후폭풍은 갈수록 커지고 있다. 대대적인 총파업 돌입 직전에 노사 합의를 이뤄냈다는 성과에도 반도체·비반도체 부문 간 노노 갈등과 소액주주들의 반발에 더해 파업권을 둘러싼 사회적 논쟁…",
+        "title": "삼성전자 주가 전망 특별성과금 소액주주 반발 주식배당금 - 브런치",
+        "summary": "행동주의 투자 흐름까지 이어지는 상황. 이번 논란에서 가장 주목받는 부분 가운데 하나는 행동주의 움직임입니다. 일부 주주 단체는 주주 명부 열람과 등사를 ...",
         "category": "주주행동·경영권",
-        "datetime": "05.24 17:44",
-        "source_line": "매일경제",
+        "datetime": "05.25 03:24",
+        "source_line": "BRUNCH",
         "link_count": 1,
-        "url": "https://www.mk.co.kr/news/business/12056647",
+        "url": "https://brunch.co.kr/@d609b0887c0144b/649",
         "links": [
           {
-            "source": "매일경제",
-            "title": "삼성 소액주주 주총 요구 길 열려 이르면 27일 주주명부 열람하기로",
-            "url": "https://www.mk.co.kr/news/business/12056647"
+            "source": "BRUNCH",
+            "title": "삼성전자 주가 전망 특별성과금 소액주주 반발 주식배당금 - 브런치",
+            "url": "https://brunch.co.kr/@d609b0887c0144b/649"
+          }
+        ]
+      }
+    },
+    {
+      "id": "8a2b7eb91d65",
+      "score": 77.3,
+      "left": {
+        "id": "story-4",
+        "title": "삼성 부문별 성과급 갈등 심화: 격차 최대 100배. 비반도체 부문 강력 반발, 삼성 주가 압박 계속될까?",
+        "summary": "소액 주주 플랫폼 '액트(Act)'는 '한국 주주행동주의 센터'가 공식적인 집단행동에 나섬에 따라, 삼성전자의 주주 명부를 확보한 후 임시 주주 총회 소집을 요구할 ...",
+        "category": "주주행동·경영권",
+        "datetime": "05.25 19:26",
+        "source_line": "TRADINGKEY",
+        "link_count": 1,
+        "url": "https://www.tradingkey.com/kr/analysis/stocks/more/261925658-samsung-chip-worker-union-bonus-tradingkey",
+        "links": [
+          {
+            "source": "TRADINGKEY",
+            "title": "삼성 부문별 성과급 갈등 심화: 격차 최대 100배. 비반도체 부문 강력 반발, 삼성 주가 압박 계속될까?",
+            "url": "https://www.tradingkey.com/kr/analysis/stocks/more/261925658-samsung-chip-worker-union-bonus-tradingkey"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-6",
+        "title": "수억 원 성과급 잔치의 후폭풍…삼성전자, 노조 내홍부터 주주 반발까지 첩첩산중",
+        "summary": "\"최대 100배 성과급 격차\"…수억 원대 돈잔치에 갈라진 노조 내홍 \"합의 무효\" 뿔난 소액주주들…주주명부 확보·법적 대응 예고 \"일할 맛 안 난다\"…삼성발 연일 보도에 타 직장인·공무원 '현타' 호소 삼성전자 노사의 임금협상 잠정합의안이 가결될 가능성이 커지는 가운데, 내부 부서 간…",
+        "category": "주주행동·경영권",
+        "datetime": "05.25 12:19",
+        "source_line": "IMAEIL",
+        "link_count": 1,
+        "url": "https://www.imaeil.com/page/view/2026052413111802779",
+        "links": [
+          {
+            "source": "IMAEIL",
+            "title": "수억 원 성과급 잔치의 후폭풍…삼성전자, 노조 내홍부터 주주 반발까지 첩첩산중",
+            "url": "https://www.imaeil.com/page/view/2026052413111802779"
+          }
+        ]
+      }
+    },
+    {
+      "id": "8df889072afd",
+      "score": 77.2,
+      "left": {
+        "id": "story-5",
+        "title": "삼성전자 주가 전망 특별성과금 소액주주 반발 주식배당금 - 브런치",
+        "summary": "행동주의 투자 흐름까지 이어지는 상황. 이번 논란에서 가장 주목받는 부분 가운데 하나는 행동주의 움직임입니다. 일부 주주 단체는 주주 명부 열람과 등사를 ...",
+        "category": "주주행동·경영권",
+        "datetime": "05.25 03:24",
+        "source_line": "BRUNCH",
+        "link_count": 1,
+        "url": "https://brunch.co.kr/@d609b0887c0144b/649",
+        "links": [
+          {
+            "source": "BRUNCH",
+            "title": "삼성전자 주가 전망 특별성과금 소액주주 반발 주식배당금 - 브런치",
+            "url": "https://brunch.co.kr/@d609b0887c0144b/649"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-6",
+        "title": "수억 원 성과급 잔치의 후폭풍…삼성전자, 노조 내홍부터 주주 반발까지 첩첩산중",
+        "summary": "\"최대 100배 성과급 격차\"…수억 원대 돈잔치에 갈라진 노조 내홍 \"합의 무효\" 뿔난 소액주주들…주주명부 확보·법적 대응 예고 \"일할 맛 안 난다\"…삼성발 연일 보도에 타 직장인·공무원 '현타' 호소 삼성전자 노사의 임금협상 잠정합의안이 가결될 가능성이 커지는 가운데, 내부 부서 간…",
+        "category": "주주행동·경영권",
+        "datetime": "05.25 12:19",
+        "source_line": "IMAEIL",
+        "link_count": 1,
+        "url": "https://www.imaeil.com/page/view/2026052413111802779",
+        "links": [
+          {
+            "source": "IMAEIL",
+            "title": "수억 원 성과급 잔치의 후폭풍…삼성전자, 노조 내홍부터 주주 반발까지 첩첩산중",
+            "url": "https://www.imaeil.com/page/view/2026052413111802779"
           }
         ]
       }
