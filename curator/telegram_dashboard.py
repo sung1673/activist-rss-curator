@@ -1283,6 +1283,7 @@ def main() -> None:
     from .state import load_state
 
     command = sys.argv[1] if len(sys.argv) > 1 else "write"
+    strict = "--strict" in sys.argv[2:]
     project_root = Path.cwd()
     config = load_config(project_root / "config.yaml")
     state = load_state(project_root / "data" / "state.json")
@@ -1290,7 +1291,7 @@ def main() -> None:
     if command == "send-access":
         response = send_telegram_admin_access_message(config, now)
         print(json.dumps(response, ensure_ascii=False))
-        if not response.get("ok"):
+        if strict and not response.get("ok"):
             raise SystemExit(1)
         return
     if command != "write":
