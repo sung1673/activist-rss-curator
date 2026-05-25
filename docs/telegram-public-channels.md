@@ -214,6 +214,7 @@ GitHub Pages가 공개 페이지이므로 비밀값, session, raw_json 전문, �
 - GitHub Secret `TELEGRAM_ADMIN_ACCESS_TOKEN`에 충분히 긴 임의 token을 저장합니다.
 - workflow 수동 실행에서 `send_telegram_admin_access`를 켜거나 매일 정기 실행 시 bot이 승인 링크를 채널에 발송합니다.
 - PHP API 서버의 `_private/config.php`에는 같은 token의 SHA-256 값인 `telegram_admin_access_token_hash`를 넣으면 `telegram_dashboard` API도 token 없이는 403을 반환합니다.
+- `telegram_admin_access_token_hash`가 서버에 없으면 안전을 위해 `telegram_dashboard` API는 닫힌 상태로 응답합니다. 서버 배포 후 `_private/config.php`에 token hash를 반드시 설정해야 DB 기반 관리자 대시보드가 열립니다.
 
 로컬/수동 발송:
 

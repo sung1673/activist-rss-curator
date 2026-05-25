@@ -988,7 +988,7 @@ function telegram_admin_access_hash(array $config): string {
 function require_telegram_admin_access(array $config): void {
     $expected = telegram_admin_access_hash($config);
     if ($expected === '') {
-        return;
+        respond(403, array('ok' => false, 'error' => 'admin_token_not_configured'));
     }
     $token = '';
     if (isset($_GET['admin_token'])) {
