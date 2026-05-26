@@ -1,124 +1,96 @@
 {
-  "date_id": "2026-05-26",
-  "generated_at": "2026-05-26T06:12:20.882755+09:00",
-  "start_at": "2026-05-25T06:11:19.023204+09:00",
-  "end_at": "2026-05-26T06:11:19.023204+09:00",
-  "start_label": "2026-05-25 06:11 KST",
-  "end_label": "2026-05-26 06:11 KST",
-  "candidate_count": 3,
-  "candidate_hash": "e09da75de34da92f",
+  "date_id": "2026-05-27",
+  "generated_at": "2026-05-27T06:52:59.820517+09:00",
+  "start_at": "2026-05-26T06:51:07.863877+09:00",
+  "end_at": "2026-05-27T06:51:07.863877+09:00",
+  "start_label": "2026-05-26 06:51 KST",
+  "end_label": "2026-05-27 06:51 KST",
+  "candidate_count": 2,
+  "candidate_hash": "b7aaa9dbdb657219",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "e81b627a1889",
-      "score": 79.9,
+      "id": "4ed5edb7e1f7",
+      "score": 85.9,
       "left": {
-        "id": "story-4",
-        "title": "삼성 부문별 성과급 갈등 심화: 격차 최대 100배. 비반도체 부문 강력 반발, 삼성 주가 압박 계속될까?",
-        "summary": "소액 주주 플랫폼 '액트(Act)'는 '한국 주주행동주의 센터'가 공식적인 집단행동에 나섬에 따라, 삼성전자의 주주 명부를 확보한 후 임시 주주 총회 소집을 요구할 ...",
+        "id": "story-14",
+        "title": "삼성전자 성과급 12% 후폭풍…소액주주 행동주의 대표 민경권 검증론까지",
+        "summary": "삼성전자 ‘성과급 12%’ 후폭풍…소액주주 행동주의 대표 민경권 검증론까지 인더스트리뉴스",
         "category": "주주행동·경영권",
-        "datetime": "05.25 19:26",
-        "source_line": "TRADINGKEY",
+        "datetime": "05.26 16:20",
+        "source_line": "INDUSTRYNEWS",
         "link_count": 1,
-        "url": "https://www.tradingkey.com/kr/analysis/stocks/more/261925658-samsung-chip-worker-union-bonus-tradingkey",
+        "url": "https://www.industrynews.co.kr/news/articleView.html?idxno=81422",
         "links": [
           {
-            "source": "TRADINGKEY",
-            "title": "삼성 부문별 성과급 갈등 심화: 격차 최대 100배. 비반도체 부문 강력 반발, 삼성 주가 압박 계속될까?",
-            "url": "https://www.tradingkey.com/kr/analysis/stocks/more/261925658-samsung-chip-worker-union-bonus-tradingkey"
+            "source": "INDUSTRYNEWS",
+            "title": "삼성전자 성과급 12% 후폭풍…소액주주 행동주의 대표 민경권 검증론까지",
+            "url": "https://www.industrynews.co.kr/news/articleView.html?idxno=81422"
           }
         ]
       },
       "right": {
-        "id": "story-5",
-        "title": "삼성전자 주가 전망 특별성과금 소액주주 반발 주식배당금 - 브런치",
-        "summary": "행동주의 투자 흐름까지 이어지는 상황. 이번 논란에서 가장 주목받는 부분 가운데 하나는 행동주의 움직임입니다. 일부 주주 단체는 주주 명부 열람과 등사를 ...",
+        "id": "story-16",
+        "title": "배당 넘어 성과급까지…삼성전자發 소액주주 행동주의 확산",
+        "summary": "삼성전자 소액 주주 들이 최근 회사의 성과급 체계를 문제 삼으며 반발하고 있다. 국내 자본시장에서 개인 주주 행동주의 가 배당·자사주 중심에서 보상.",
         "category": "주주행동·경영권",
-        "datetime": "05.25 03:24",
-        "source_line": "BRUNCH",
+        "datetime": "05.27 06:02",
+        "source_line": "KUKINEWS",
         "link_count": 1,
-        "url": "https://brunch.co.kr/@d609b0887c0144b/649",
+        "url": "https://www.kukinews.com/article/view/kuk202605260151",
         "links": [
           {
-            "source": "BRUNCH",
-            "title": "삼성전자 주가 전망 특별성과금 소액주주 반발 주식배당금 - 브런치",
-            "url": "https://brunch.co.kr/@d609b0887c0144b/649"
+            "source": "KUKINEWS",
+            "title": "배당 넘어 성과급까지…삼성전자發 소액주주 행동주의 확산",
+            "url": "https://www.kukinews.com/article/view/kuk202605260151"
           }
         ]
       }
     },
     {
-      "id": "8a2b7eb91d65",
-      "score": 77.3,
+      "id": "398cc7b8e401",
+      "score": 85.5,
       "left": {
-        "id": "story-4",
-        "title": "삼성 부문별 성과급 갈등 심화: 격차 최대 100배. 비반도체 부문 강력 반발, 삼성 주가 압박 계속될까?",
-        "summary": "소액 주주 플랫폼 '액트(Act)'는 '한국 주주행동주의 센터'가 공식적인 집단행동에 나섬에 따라, 삼성전자의 주주 명부를 확보한 후 임시 주주 총회 소집을 요구할 ...",
-        "category": "주주행동·경영권",
-        "datetime": "05.25 19:26",
-        "source_line": "TRADINGKEY",
-        "link_count": 1,
-        "url": "https://www.tradingkey.com/kr/analysis/stocks/more/261925658-samsung-chip-worker-union-bonus-tradingkey",
+        "id": "story-18",
+        "title": "한화솔루션, 유상증자 1.7조로 추가 축소…주주 반발에 자산 매각",
+        "summary": "한화솔루션, 유상증자 1.7조로 추가 축소…주주 반발에 자산 매각 한겨레",
+        "category": "자본시장 제도·공시",
+        "datetime": "05.26 17:42",
+        "source_line": "한겨레 · 한경매거진&북",
+        "link_count": 2,
+        "url": "https://news.google.com/rss/articles/CBMiakFVX3lxTE1fclkxdV9XQVNQM1Z5bHN1S2xuNTVvZXp5MzZsUE9XaFQxX2Y2U0pyM2hnWl9Bay1WMEZNY0NmbHltMTVjclVaVmRJNE93Z0JadFUzM1JTa0dMNXRybExXN1RCbThwV2Nmenc?oc=5",
         "links": [
           {
-            "source": "TRADINGKEY",
-            "title": "삼성 부문별 성과급 갈등 심화: 격차 최대 100배. 비반도체 부문 강력 반발, 삼성 주가 압박 계속될까?",
-            "url": "https://www.tradingkey.com/kr/analysis/stocks/more/261925658-samsung-chip-worker-union-bonus-tradingkey"
+            "source": "한겨레",
+            "title": "한화솔루션, 유상증자 1.7조로 추가 축소…주주 반발에 자산 매각",
+            "url": "https://news.google.com/rss/articles/CBMiakFVX3lxTE1fclkxdV9XQVNQM1Z5bHN1S2xuNTVvZXp5MzZsUE9XaFQxX2Y2U0pyM2hnWl9Bay1WMEZNY0NmbHltMTVjclVaVmRJNE93Z0JadFUzM1JTa0dMNXRybExXN1RCbThwV2Nmenc?oc=5"
+          },
+          {
+            "source": "한경매거진&북",
+            "title": "한화솔루션, 유증 1.7조로 축소…자진정정 신고서 금감원 제출",
+            "url": "https://news.google.com/rss/articles/CBMibEFVX3lxTFBVRXhqamdGM0lQb2trdU5ham1tTGt0M0hEQkZnYk03Y0RGWkNtelc0LWFvWnNQbW9lc3JvM0RjUDNqTWdaM1V3T2tPcjNrT2xMdGhXckQzcG5iRXZObUFJNjJXOS13a2d0Y1V2Nw?oc=5"
           }
         ]
       },
       "right": {
-        "id": "story-6",
-        "title": "수억 원 성과급 잔치의 후폭풍…삼성전자, 노조 내홍부터 주주 반발까지 첩첩산중",
-        "summary": "\"최대 100배 성과급 격차\"…수억 원대 돈잔치에 갈라진 노조 내홍 \"합의 무효\" 뿔난 소액주주들…주주명부 확보·법적 대응 예고 \"일할 맛 안 난다\"…삼성발 연일 보도에 타 직장인·공무원 '현타' 호소 삼성전자 노사의 임금협상 잠정합의안이 가결될 가능성이 커지는 가운데, 내부 부서 간…",
-        "category": "주주행동·경영권",
-        "datetime": "05.25 12:19",
-        "source_line": "IMAEIL",
-        "link_count": 1,
-        "url": "https://www.imaeil.com/page/view/2026052413111802779",
+        "id": "story-19",
+        "title": "한화솔루션 유증 규모 1조7000억으로 추가 축소…금감원에 정정신고서 제출",
+        "summary": "한화솔루션 유증 규모 1조7000억으로 추가 축소…금감원에 정정신고서 제출 v.daum.net",
+        "category": "자본시장 제도·공시",
+        "datetime": "05.26 17:37",
+        "source_line": "v.daum.net · 부산일보",
+        "link_count": 2,
+        "url": "https://news.google.com/rss/articles/CBMiT0FVX3lxTFBGa0JtcjJiRHdzSXNTZ0poRlQxQlR2Sl9VU1VvX2VIRTdFZlk5RGZuVUw3N2RlRW9xRWI3WkU4NEhIc3BtTml4NkJnbk8yNWs?oc=5",
         "links": [
           {
-            "source": "IMAEIL",
-            "title": "수억 원 성과급 잔치의 후폭풍…삼성전자, 노조 내홍부터 주주 반발까지 첩첩산중",
-            "url": "https://www.imaeil.com/page/view/2026052413111802779"
-          }
-        ]
-      }
-    },
-    {
-      "id": "8df889072afd",
-      "score": 77.2,
-      "left": {
-        "id": "story-5",
-        "title": "삼성전자 주가 전망 특별성과금 소액주주 반발 주식배당금 - 브런치",
-        "summary": "행동주의 투자 흐름까지 이어지는 상황. 이번 논란에서 가장 주목받는 부분 가운데 하나는 행동주의 움직임입니다. 일부 주주 단체는 주주 명부 열람과 등사를 ...",
-        "category": "주주행동·경영권",
-        "datetime": "05.25 03:24",
-        "source_line": "BRUNCH",
-        "link_count": 1,
-        "url": "https://brunch.co.kr/@d609b0887c0144b/649",
-        "links": [
+            "source": "v.daum.net",
+            "title": "한화솔루션 유증 규모 1조7000억으로 추가 축소…금감원에 정정신고서 제출",
+            "url": "https://news.google.com/rss/articles/CBMiT0FVX3lxTFBGa0JtcjJiRHdzSXNTZ0poRlQxQlR2Sl9VU1VvX2VIRTdFZlk5RGZuVUw3N2RlRW9xRWI3WkU4NEhIc3BtTml4NkJnbk8yNWs?oc=5"
+          },
           {
-            "source": "BRUNCH",
-            "title": "삼성전자 주가 전망 특별성과금 소액주주 반발 주식배당금 - 브런치",
-            "url": "https://brunch.co.kr/@d609b0887c0144b/649"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-6",
-        "title": "수억 원 성과급 잔치의 후폭풍…삼성전자, 노조 내홍부터 주주 반발까지 첩첩산중",
-        "summary": "\"최대 100배 성과급 격차\"…수억 원대 돈잔치에 갈라진 노조 내홍 \"합의 무효\" 뿔난 소액주주들…주주명부 확보·법적 대응 예고 \"일할 맛 안 난다\"…삼성발 연일 보도에 타 직장인·공무원 '현타' 호소 삼성전자 노사의 임금협상 잠정합의안이 가결될 가능성이 커지는 가운데, 내부 부서 간…",
-        "category": "주주행동·경영권",
-        "datetime": "05.25 12:19",
-        "source_line": "IMAEIL",
-        "link_count": 1,
-        "url": "https://www.imaeil.com/page/view/2026052413111802779",
-        "links": [
-          {
-            "source": "IMAEIL",
-            "title": "수억 원 성과급 잔치의 후폭풍…삼성전자, 노조 내홍부터 주주 반발까지 첩첩산중",
-            "url": "https://www.imaeil.com/page/view/2026052413111802779"
+            "source": "부산일보",
+            "title": "한화솔루션, 유증액 1000억 더 줄여… 금감원 심사 고려한 듯",
+            "url": "https://news.google.com/rss/articles/CBMidEFVX3lxTE93QzBxZlBJVzJSWmMtM0djS1Y4ZHh0MU9aRTczZHJmbWYzdlNTVW5fM29fTGpTZFVwcXV4eVBYUHFUMmFsWWpVZ2o3WXVPSlg5d0dwQ3JlUnFZTVhIRkdlT19vRjM5WklidnpQX0NFUllxeGtQ?oc=5"
           }
         ]
       }

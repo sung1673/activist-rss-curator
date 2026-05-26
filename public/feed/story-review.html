@@ -57,9 +57,9 @@
       <h1>묶음 후보 관리자</h1>
       <p class="lead">데일리 기사 중 “같은 이슈로 묶였어야 했는데 분리됐을 가능성이 있는 후보”를 자동으로 추립니다. 이 화면에서 후보를 확인하고, 필요한 경우 <code>data/story_rules.yaml</code> 또는 묶음 로직 보강 작업으로 이어갑니다.</p>
       <div class="meta">
-        <span>2026-05-26</span>
-        <span>2026-05-25 06:11 KST - 2026-05-26 06:11 KST</span>
-        <span>후보 3건</span>
+        <span>2026-05-27</span>
+        <span>2026-05-26 06:51 KST - 2026-05-27 06:51 KST</span>
+        <span>후보 2건</span>
       </div>
     </header>
 
@@ -80,148 +80,101 @@
         <a href="latest.html">최신 데일리로 돌아가기</a>
       </div>
 
-      <article class="candidate" data-candidate-id="e81b627a1889">
+      <article class="candidate" data-candidate-id="4ed5edb7e1f7">
         <div class="candidate__head">
           <div>
-            <span class="candidate__score">점수 79.9</span>
+            <span class="candidate__score">점수 85.9</span>
             <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
           </div>
           <label><input type="checkbox" data-review-done> 확인 완료</label>
         </div>
         <div class="candidate__signals">
-          <span>제목 30.4</span>
-          <span>내용 34.8</span>
-          <span>회사 삼성전자</span>
-          <span>사건 반발, 삼성전자, 주가</span>
-        </div>
-        <div class="candidate__stories">
-
-          <section class="story-mini">
-            <div class="story-mini__meta">주주행동·경영권 · 05.25 19:26 · 1건</div>
-            <h3><a href="https://www.tradingkey.com/kr/analysis/stocks/more/261925658-samsung-chip-worker-union-bonus-tradingkey" target="_blank" rel="noopener">삼성 부문별 성과급 갈등 심화: 격차 최대 100배. 비반도체 부문 강력 반발, 삼성 주가 압박 계속될까?</a></h3>
-            <p>소액 주주 플랫폼 &#x27;액트(Act)&#x27;는 &#x27;한국 주주행동주의 센터&#x27;가 공식적인 집단행동에 나섬에 따라, 삼성전자의 주주 명부를 확보한 후 임시 주주 총회 소집을 요구할 ...</p>
-            <div class="story-mini__sources">TRADINGKEY</div>
-            <ul><li><a href="https://www.tradingkey.com/kr/analysis/stocks/more/261925658-samsung-chip-worker-union-bonus-tradingkey" target="_blank" rel="noopener">삼성 부문별 성과급 갈등 심화: 격차 최대 100배. 비반도체 부문 강력 반발, 삼성 주가 압박 계속될까?</a><span>TRADINGKEY</span></li></ul>
-          </section>
-
-
-          <section class="story-mini">
-            <div class="story-mini__meta">주주행동·경영권 · 05.25 03:24 · 1건</div>
-            <h3><a href="https://brunch.co.kr/@d609b0887c0144b/649" target="_blank" rel="noopener">삼성전자 주가 전망 특별성과금 소액주주 반발 주식배당금 - 브런치</a></h3>
-            <p>행동주의 투자 흐름까지 이어지는 상황. 이번 논란에서 가장 주목받는 부분 가운데 하나는 행동주의 움직임입니다. 일부 주주 단체는 주주 명부 열람과 등사를 ...</p>
-            <div class="story-mini__sources">BRUNCH</div>
-            <ul><li><a href="https://brunch.co.kr/@d609b0887c0144b/649" target="_blank" rel="noopener">삼성전자 주가 전망 특별성과금 소액주주 반발 주식배당금 - 브런치</a><span>BRUNCH</span></li></ul>
-          </section>
-
-        </div>
-        <details class="rule">
-          <summary>story_rules.yaml 초안 보기</summary>
-          <pre>- id: review_e81b627a1889
-  tokens:
-    - 반발
-    - 삼성전자
-    - 주가
-  require_any_groups:
-    - [삼성전자]
-    - [반발, 삼성전자, 주가]</pre>
-          <button type="button" data-copy-rule>규칙 초안 복사</button>
-        </details>
-      </article>
-
-
-      <article class="candidate" data-candidate-id="8a2b7eb91d65">
-        <div class="candidate__head">
-          <div>
-            <span class="candidate__score">점수 77.3</span>
-            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
-          </div>
-          <label><input type="checkbox" data-review-done> 확인 완료</label>
-        </div>
-        <div class="candidate__signals">
-          <span>제목 28.3</span>
+          <span>제목 49.3</span>
           <span>내용 34.1</span>
           <span>회사 삼성전자</span>
-          <span>사건 100배, 격차, 반발, 삼성전자, 성과급, 최대</span>
+          <span>사건 삼성전자, 성과급, 소액주주, 행동주의</span>
         </div>
         <div class="candidate__stories">
 
           <section class="story-mini">
-            <div class="story-mini__meta">주주행동·경영권 · 05.25 19:26 · 1건</div>
-            <h3><a href="https://www.tradingkey.com/kr/analysis/stocks/more/261925658-samsung-chip-worker-union-bonus-tradingkey" target="_blank" rel="noopener">삼성 부문별 성과급 갈등 심화: 격차 최대 100배. 비반도체 부문 강력 반발, 삼성 주가 압박 계속될까?</a></h3>
-            <p>소액 주주 플랫폼 &#x27;액트(Act)&#x27;는 &#x27;한국 주주행동주의 센터&#x27;가 공식적인 집단행동에 나섬에 따라, 삼성전자의 주주 명부를 확보한 후 임시 주주 총회 소집을 요구할 ...</p>
-            <div class="story-mini__sources">TRADINGKEY</div>
-            <ul><li><a href="https://www.tradingkey.com/kr/analysis/stocks/more/261925658-samsung-chip-worker-union-bonus-tradingkey" target="_blank" rel="noopener">삼성 부문별 성과급 갈등 심화: 격차 최대 100배. 비반도체 부문 강력 반발, 삼성 주가 압박 계속될까?</a><span>TRADINGKEY</span></li></ul>
+            <div class="story-mini__meta">주주행동·경영권 · 05.26 16:20 · 1건</div>
+            <h3><a href="https://www.industrynews.co.kr/news/articleView.html?idxno=81422" target="_blank" rel="noopener">삼성전자 성과급 12% 후폭풍…소액주주 행동주의 대표 민경권 검증론까지</a></h3>
+            <p>삼성전자 ‘성과급 12%’ 후폭풍…소액주주 행동주의 대표 민경권 검증론까지 인더스트리뉴스</p>
+            <div class="story-mini__sources">INDUSTRYNEWS</div>
+            <ul><li><a href="https://www.industrynews.co.kr/news/articleView.html?idxno=81422" target="_blank" rel="noopener">삼성전자 성과급 12% 후폭풍…소액주주 행동주의 대표 민경권 검증론까지</a><span>INDUSTRYNEWS</span></li></ul>
           </section>
 
 
           <section class="story-mini">
-            <div class="story-mini__meta">주주행동·경영권 · 05.25 12:19 · 1건</div>
-            <h3><a href="https://www.imaeil.com/page/view/2026052413111802779" target="_blank" rel="noopener">수억 원 성과급 잔치의 후폭풍…삼성전자, 노조 내홍부터 주주 반발까지 첩첩산중</a></h3>
-            <p>&quot;최대 100배 성과급 격차&quot;…수억 원대 돈잔치에 갈라진 노조 내홍 &quot;합의 무효&quot; 뿔난 소액주주들…주주명부 확보·법적 대응 예고 &quot;일할 맛 안 난다&quot;…삼성발 연일 보도에 타 직장인·공무원 &#x27;현타&#x27; 호소 삼성전자 노사의 임금협상 잠정합의안이 가결될 가능성이 커지는 가운데, 내부 부서 간…</p>
-            <div class="story-mini__sources">IMAEIL</div>
-            <ul><li><a href="https://www.imaeil.com/page/view/2026052413111802779" target="_blank" rel="noopener">수억 원 성과급 잔치의 후폭풍…삼성전자, 노조 내홍부터 주주 반발까지 첩첩산중</a><span>IMAEIL</span></li></ul>
+            <div class="story-mini__meta">주주행동·경영권 · 05.27 06:02 · 1건</div>
+            <h3><a href="https://www.kukinews.com/article/view/kuk202605260151" target="_blank" rel="noopener">배당 넘어 성과급까지…삼성전자發 소액주주 행동주의 확산</a></h3>
+            <p>삼성전자 소액 주주 들이 최근 회사의 성과급 체계를 문제 삼으며 반발하고 있다. 국내 자본시장에서 개인 주주 행동주의 가 배당·자사주 중심에서 보상.</p>
+            <div class="story-mini__sources">KUKINEWS</div>
+            <ul><li><a href="https://www.kukinews.com/article/view/kuk202605260151" target="_blank" rel="noopener">배당 넘어 성과급까지…삼성전자發 소액주주 행동주의 확산</a><span>KUKINEWS</span></li></ul>
           </section>
 
         </div>
         <details class="rule">
           <summary>story_rules.yaml 초안 보기</summary>
-          <pre>- id: review_8a2b7eb91d65
+          <pre>- id: review_4ed5edb7e1f7
   tokens:
-    - 100배
-    - 격차
-    - 반발
+    - 삼성전자
+    - 성과급
+    - 소액주주
   require_any_groups:
     - [삼성전자]
-    - [100배, 격차, 반발, 삼성전자, 성과급]</pre>
+    - [삼성전자, 성과급, 소액주주, 행동주의]</pre>
           <button type="button" data-copy-rule>규칙 초안 복사</button>
         </details>
       </article>
 
 
-      <article class="candidate" data-candidate-id="8df889072afd">
+      <article class="candidate" data-candidate-id="398cc7b8e401">
         <div class="candidate__head">
           <div>
-            <span class="candidate__score">점수 77.2</span>
-            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+            <span class="candidate__score">점수 85.5</span>
+            <strong>회사명 겹침 · 사건 토큰 겹침</strong>
           </div>
           <label><input type="checkbox" data-review-done> 확인 완료</label>
         </div>
         <div class="candidate__signals">
-          <span>제목 30.4</span>
-          <span>내용 29.5</span>
-          <span>회사 삼성전자</span>
-          <span>사건 가운데, 반발, 삼성전자</span>
+          <span>제목 54.5</span>
+          <span>내용 53.8</span>
+          <span>회사 한화, 한화솔루션</span>
+          <span>사건 금감원, 금감원정정요구, 유증, 유증정정, 제출, 추가, 축소, 한화솔루션</span>
         </div>
         <div class="candidate__stories">
 
           <section class="story-mini">
-            <div class="story-mini__meta">주주행동·경영권 · 05.25 03:24 · 1건</div>
-            <h3><a href="https://brunch.co.kr/@d609b0887c0144b/649" target="_blank" rel="noopener">삼성전자 주가 전망 특별성과금 소액주주 반발 주식배당금 - 브런치</a></h3>
-            <p>행동주의 투자 흐름까지 이어지는 상황. 이번 논란에서 가장 주목받는 부분 가운데 하나는 행동주의 움직임입니다. 일부 주주 단체는 주주 명부 열람과 등사를 ...</p>
-            <div class="story-mini__sources">BRUNCH</div>
-            <ul><li><a href="https://brunch.co.kr/@d609b0887c0144b/649" target="_blank" rel="noopener">삼성전자 주가 전망 특별성과금 소액주주 반발 주식배당금 - 브런치</a><span>BRUNCH</span></li></ul>
+            <div class="story-mini__meta">자본시장 제도·공시 · 05.26 17:42 · 2건</div>
+            <h3><a href="https://news.google.com/rss/articles/CBMiakFVX3lxTE1fclkxdV9XQVNQM1Z5bHN1S2xuNTVvZXp5MzZsUE9XaFQxX2Y2U0pyM2hnWl9Bay1WMEZNY0NmbHltMTVjclVaVmRJNE93Z0JadFUzM1JTa0dMNXRybExXN1RCbThwV2Nmenc?oc=5" target="_blank" rel="noopener">한화솔루션, 유상증자 1.7조로 추가 축소…주주 반발에 자산 매각</a></h3>
+            <p>한화솔루션, 유상증자 1.7조로 추가 축소…주주 반발에 자산 매각 한겨레</p>
+            <div class="story-mini__sources">한겨레 · 한경매거진&amp;북</div>
+            <ul><li><a href="https://news.google.com/rss/articles/CBMiakFVX3lxTE1fclkxdV9XQVNQM1Z5bHN1S2xuNTVvZXp5MzZsUE9XaFQxX2Y2U0pyM2hnWl9Bay1WMEZNY0NmbHltMTVjclVaVmRJNE93Z0JadFUzM1JTa0dMNXRybExXN1RCbThwV2Nmenc?oc=5" target="_blank" rel="noopener">한화솔루션, 유상증자 1.7조로 추가 축소…주주 반발에 자산 매각</a><span>한겨레</span></li>
+<li><a href="https://news.google.com/rss/articles/CBMibEFVX3lxTFBVRXhqamdGM0lQb2trdU5ham1tTGt0M0hEQkZnYk03Y0RGWkNtelc0LWFvWnNQbW9lc3JvM0RjUDNqTWdaM1V3T2tPcjNrT2xMdGhXckQzcG5iRXZObUFJNjJXOS13a2d0Y1V2Nw?oc=5" target="_blank" rel="noopener">한화솔루션, 유증 1.7조로 축소…자진정정 신고서 금감원 제출</a><span>한경매거진&amp;북</span></li></ul>
           </section>
 
 
           <section class="story-mini">
-            <div class="story-mini__meta">주주행동·경영권 · 05.25 12:19 · 1건</div>
-            <h3><a href="https://www.imaeil.com/page/view/2026052413111802779" target="_blank" rel="noopener">수억 원 성과급 잔치의 후폭풍…삼성전자, 노조 내홍부터 주주 반발까지 첩첩산중</a></h3>
-            <p>&quot;최대 100배 성과급 격차&quot;…수억 원대 돈잔치에 갈라진 노조 내홍 &quot;합의 무효&quot; 뿔난 소액주주들…주주명부 확보·법적 대응 예고 &quot;일할 맛 안 난다&quot;…삼성발 연일 보도에 타 직장인·공무원 &#x27;현타&#x27; 호소 삼성전자 노사의 임금협상 잠정합의안이 가결될 가능성이 커지는 가운데, 내부 부서 간…</p>
-            <div class="story-mini__sources">IMAEIL</div>
-            <ul><li><a href="https://www.imaeil.com/page/view/2026052413111802779" target="_blank" rel="noopener">수억 원 성과급 잔치의 후폭풍…삼성전자, 노조 내홍부터 주주 반발까지 첩첩산중</a><span>IMAEIL</span></li></ul>
+            <div class="story-mini__meta">자본시장 제도·공시 · 05.26 17:37 · 2건</div>
+            <h3><a href="https://news.google.com/rss/articles/CBMiT0FVX3lxTFBGa0JtcjJiRHdzSXNTZ0poRlQxQlR2Sl9VU1VvX2VIRTdFZlk5RGZuVUw3N2RlRW9xRWI3WkU4NEhIc3BtTml4NkJnbk8yNWs?oc=5" target="_blank" rel="noopener">한화솔루션 유증 규모 1조7000억으로 추가 축소…금감원에 정정신고서 제출</a></h3>
+            <p>한화솔루션 유증 규모 1조7000억으로 추가 축소…금감원에 정정신고서 제출 v.daum.net</p>
+            <div class="story-mini__sources">v.daum.net · 부산일보</div>
+            <ul><li><a href="https://news.google.com/rss/articles/CBMiT0FVX3lxTFBGa0JtcjJiRHdzSXNTZ0poRlQxQlR2Sl9VU1VvX2VIRTdFZlk5RGZuVUw3N2RlRW9xRWI3WkU4NEhIc3BtTml4NkJnbk8yNWs?oc=5" target="_blank" rel="noopener">한화솔루션 유증 규모 1조7000억으로 추가 축소…금감원에 정정신고서 제출</a><span>v.daum.net</span></li>
+<li><a href="https://news.google.com/rss/articles/CBMidEFVX3lxTE93QzBxZlBJVzJSWmMtM0djS1Y4ZHh0MU9aRTczZHJmbWYzdlNTVW5fM29fTGpTZFVwcXV4eVBYUHFUMmFsWWpVZ2o3WXVPSlg5d0dwQ3JlUnFZTVhIRkdlT19vRjM5WklidnpQX0NFUllxeGtQ?oc=5" target="_blank" rel="noopener">한화솔루션, 유증액 1000억 더 줄여… 금감원 심사 고려한 듯</a><span>부산일보</span></li></ul>
           </section>
 
         </div>
         <details class="rule">
           <summary>story_rules.yaml 초안 보기</summary>
-          <pre>- id: review_8df889072afd
+          <pre>- id: review_398cc7b8e401
   tokens:
-    - 가운데
-    - 반발
-    - 삼성전자
+    - 금감원
+    - 금감원정정요구
+    - 유증
   require_any_groups:
-    - [삼성전자]
-    - [가운데, 반발, 삼성전자]</pre>
+    - [한화, 한화솔루션]
+    - [금감원, 금감원정정요구, 유증, 유증정정, 추가, 축소, 한화솔루션]</pre>
           <button type="button" data-copy-rule>규칙 초안 복사</button>
         </details>
       </article>
@@ -229,7 +182,7 @@
     </section>
   </main>
   <script>
-    const REVIEW = {"accessTokenHash": "7bdf33924ae2f63973a383247e994a0681d0a288ca2df20d5f70c51a333def01", "candidateCount": 3, "candidateHash": "e09da75de34da92f"};
+    const REVIEW = {"accessTokenHash": "7bdf33924ae2f63973a383247e994a0681d0a288ca2df20d5f70c51a333def01", "candidateCount": 2, "candidateHash": "b7aaa9dbdb657219"};
     const gate = document.getElementById('gate');
     const content = document.getElementById('content');
     const tokenInput = document.getElementById('tokenInput');
