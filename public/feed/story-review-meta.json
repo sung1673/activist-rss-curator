@@ -1,12 +1,51 @@
 {
-  "date_id": "2026-06-01",
-  "generated_at": "2026-06-01T06:06:20.033661+09:00",
-  "start_at": "2026-05-31T06:05:00.414421+09:00",
-  "end_at": "2026-06-01T06:05:00.414421+09:00",
-  "start_label": "2026-05-31 06:05 KST",
-  "end_label": "2026-06-01 06:05 KST",
-  "candidate_count": 0,
-  "candidate_hash": "4f53cda18c2baa0c",
+  "date_id": "2026-06-02",
+  "generated_at": "2026-06-02T07:40:41.169970+09:00",
+  "start_at": "2026-06-01T07:38:18.368928+09:00",
+  "end_at": "2026-06-02T07:38:18.368928+09:00",
+  "start_label": "2026-06-01 07:38 KST",
+  "end_label": "2026-06-02 07:38 KST",
+  "candidate_count": 1,
+  "candidate_hash": "02457c32bc95fff5",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": []
+  "candidates": [
+    {
+      "id": "f43bd63070a2",
+      "score": 74.0,
+      "left": {
+        "id": "story-12",
+        "title": "자산 매각까지 꺼낸 한화솔루션…금감원 투자자 리스크 고지가 핵심",
+        "summary": "자산 매각까지 꺼낸 한화솔루션…금감원 \"투자자 리스크 고지가 핵심\" 뉴스토마토",
+        "category": "자본시장 제도·공시",
+        "datetime": "06.01 17:06",
+        "source_line": "뉴스토마토",
+        "link_count": 1,
+        "url": "https://news.google.com/rss/articles/CBMiYEFVX3lxTE0yOF9hM0JyXzdHQ2tSb01aMlNoeGp0dTBhbzFIaExpQ2xiTU50OHJLcHFwSVhKcjI0c0NJSjc4cHdNQTE2MWx5NS1qb09KYjNnaUhnRnhuU2htbGxGTHh5eQ?oc=5",
+        "links": [
+          {
+            "source": "뉴스토마토",
+            "title": "자산 매각까지 꺼낸 한화솔루션…금감원 투자자 리스크 고지가 핵심",
+            "url": "https://news.google.com/rss/articles/CBMiYEFVX3lxTE0yOF9hM0JyXzdHQ2tSb01aMlNoeGp0dTBhbzFIaExpQ2xiTU50OHJLcHFwSVhKcjI0c0NJSjc4cHdNQTE2MWx5NS1qb09KYjNnaUhnRnhuU2htbGxGTHh5eQ?oc=5"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-21",
+        "title": "한화솔루션 유증, 이번엔 금감원 문턱 넘을까",
+        "summary": "한화솔루션 유증, 이번엔 금감원 문턱 넘을까 데일리한국",
+        "category": "자본시장 제도·공시",
+        "datetime": "06.01 07:00",
+        "source_line": "데일리한국",
+        "link_count": 1,
+        "url": "https://news.google.com/rss/articles/CBMib0FVX3lxTE5ReFFkSEZQOFNDekRyOGVNV2NTQWJzZXV2ZHVQU0prN1kyM1hHOG9EUUlWbThaWWxBNnVpVnNFQUpTZUNMTENhaTRqblh1UFBnV0V3TEpJYk5TNGl5WnZpZFo5TmwxcGtrZmlyMWNYY9IBc0FVX3lxTE52YWxFck1vaEtmTVh2MGlycnhOOUx5eFVUTnN4Y202WlcycTh1eGlSZktqU1d2X1RJTTU1MFZvM3NuRWl3Y244T3JuMTRNZ2lhMjBnZGpXMVUzc2NYUmJjLVM5V3o5VHNUOU55ZDNDdUNhTXM?oc=5",
+        "links": [
+          {
+            "source": "데일리한국",
+            "title": "한화솔루션 유증, 이번엔 금감원 문턱 넘을까",
+            "url": "https://news.google.com/rss/articles/CBMib0FVX3lxTE5ReFFkSEZQOFNDekRyOGVNV2NTQWJzZXV2ZHVQU0prN1kyM1hHOG9EUUlWbThaWWxBNnVpVnNFQUpTZUNMTENhaTRqblh1UFBnV0V3TEpJYk5TNGl5WnZpZFo5TmwxcGtrZmlyMWNYY9IBc0FVX3lxTE52YWxFck1vaEtmTVh2MGlycnhOOUx5eFVUTnN4Y202WlcycTh1eGlSZktqU1d2X1RJTTU1MFZvM3NuRWl3Y244T3JuMTRNZ2lhMjBnZGpXMVUzc2NYUmJjLVM5V3o5VHNUOU55ZDNDdUNhTXM?oc=5"
+          }
+        ]
+      }
+    }
+  ]
 }
