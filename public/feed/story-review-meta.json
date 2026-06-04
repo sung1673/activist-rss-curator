@@ -1,12 +1,61 @@
 {
-  "date_id": "2026-06-04",
-  "generated_at": "2026-06-04T07:34:56.699774+09:00",
-  "start_at": "2026-06-03T07:33:22.514643+09:00",
-  "end_at": "2026-06-04T07:33:22.514643+09:00",
-  "start_label": "2026-06-03 07:33 KST",
-  "end_label": "2026-06-04 07:33 KST",
-  "candidate_count": 0,
-  "candidate_hash": "4f53cda18c2baa0c",
+  "date_id": "2026-06-05",
+  "generated_at": "2026-06-05T06:48:04.351783+09:00",
+  "start_at": "2026-06-04T06:46:15.524991+09:00",
+  "end_at": "2026-06-05T06:46:15.524991+09:00",
+  "start_label": "2026-06-04 06:46 KST",
+  "end_label": "2026-06-05 06:46 KST",
+  "candidate_count": 1,
+  "candidate_hash": "eb9282d9c9626957",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": []
+  "candidates": [
+    {
+      "id": "41c3637c4404",
+      "score": 109.2,
+      "left": {
+        "id": "story-11",
+        "title": "셀트리온, 1천억 규모 자사주 소각 완료…주주환원 속도",
+        "summary": "신영證 주주환원 속도…1조 자사주 소각 결정 네이트",
+        "category": "밸류업·주주환원",
+        "datetime": "06.04 18:06",
+        "source_line": "네이트 · INEWS24",
+        "link_count": 2,
+        "url": "https://www.inews24.com/view/1973925",
+        "links": [
+          {
+            "source": "네이트",
+            "title": "신영證 주주환원 속도…1조 자사주 소각 결정",
+            "url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE9XS0Jhc0Utd0d4eVR5aGZjT2xEQVM1anNEZzFoT051RUZFVjRnbW5GSUlQN1RyR0R5b1JkVmVRVHhxWnpPRno1RDduczZHUkxQZ0pF?oc=5"
+          },
+          {
+            "source": "INEWS24",
+            "title": "셀트리온, 1천억 규모 자사주 소각 완료…주주환원 속도",
+            "url": "https://www.inews24.com/view/1973925"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-15",
+        "title": "셀트리온, 1000억 자사주 소각 반영…주당가치 상승 효과 기대",
+        "summary": "[데일리한국 최성수 기자]셀트리온은 약 1000억원 규모 자사주 소각 절차가 4일 변경상장을 통해 최종 반영됐다고 밝혔다.이번에 소각된 주식은 총 48만8977주다. 이에 따라 셀트리온 발행주식총수는 약 2억2163만주로 줄었다.이번 소각은 최근 공시한 1000억원 규모 자사주 취득…",
+        "category": "밸류업·주주환원",
+        "datetime": "06.04 15:36",
+        "source_line": "DAILY · FNNEWS",
+        "link_count": 2,
+        "url": "https://daily.hankooki.com/news/articleView.html?idxno=1373573",
+        "links": [
+          {
+            "source": "DAILY",
+            "title": "셀트리온, 1000억 자사주 소각 반영…주당가치 상승 효과 기대",
+            "url": "https://daily.hankooki.com/news/articleView.html?idxno=1373573"
+          },
+          {
+            "source": "FNNEWS",
+            "title": "셀트리온, 자사주 소각 완료…연내 2조 주주환원",
+            "url": "https://www.fnnews.com/news/202606041505398609"
+          }
+        ]
+      }
+    }
+  ]
 }

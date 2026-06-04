@@ -57,9 +57,9 @@
       <h1>묶음 후보 관리자</h1>
       <p class="lead">데일리 기사 중 “같은 이슈로 묶였어야 했는데 분리됐을 가능성이 있는 후보”를 자동으로 추립니다. 이 화면에서 후보를 확인하고, 필요한 경우 <code>data/story_rules.yaml</code> 또는 묶음 로직 보강 작업으로 이어갑니다.</p>
       <div class="meta">
-        <span>2026-06-04</span>
-        <span>2026-06-03 07:33 KST - 2026-06-04 07:33 KST</span>
-        <span>후보 0건</span>
+        <span>2026-06-05</span>
+        <span>2026-06-04 06:46 KST - 2026-06-05 06:46 KST</span>
+        <span>후보 1건</span>
       </div>
     </header>
 
@@ -79,11 +79,61 @@
         </div>
         <a href="latest.html">최신 데일리로 돌아가기</a>
       </div>
-      <div class="empty">오늘은 우선 검토할 분리 후보가 없습니다.</div>
+
+      <article class="candidate" data-candidate-id="41c3637c4404">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 109.2</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침 · 본문/요약 유사도 높음</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 58.5</span>
+          <span>내용 61.0</span>
+          <span>회사 셀트리온</span>
+          <span>사건 규모, 셀트리온, 소각, 완료, 자사주, 자사주환원공시, 주주환원</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">밸류업·주주환원 · 06.04 18:06 · 2건</div>
+            <h3><a href="https://www.inews24.com/view/1973925" target="_blank" rel="noopener">셀트리온, 1천억 규모 자사주 소각 완료…주주환원 속도</a></h3>
+            <p>신영證 주주환원 속도…1조 자사주 소각 결정 네이트</p>
+            <div class="story-mini__sources">네이트 · INEWS24</div>
+            <ul><li><a href="https://news.google.com/rss/articles/CBMiU0FVX3lxTE9XS0Jhc0Utd0d4eVR5aGZjT2xEQVM1anNEZzFoT051RUZFVjRnbW5GSUlQN1RyR0R5b1JkVmVRVHhxWnpPRno1RDduczZHUkxQZ0pF?oc=5" target="_blank" rel="noopener">신영證 주주환원 속도…1조 자사주 소각 결정</a><span>네이트</span></li>
+<li><a href="https://www.inews24.com/view/1973925" target="_blank" rel="noopener">셀트리온, 1천억 규모 자사주 소각 완료…주주환원 속도</a><span>INEWS24</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">밸류업·주주환원 · 06.04 15:36 · 2건</div>
+            <h3><a href="https://daily.hankooki.com/news/articleView.html?idxno=1373573" target="_blank" rel="noopener">셀트리온, 1000억 자사주 소각 반영…주당가치 상승 효과 기대</a></h3>
+            <p>[데일리한국 최성수 기자]셀트리온은 약 1000억원 규모 자사주 소각 절차가 4일 변경상장을 통해 최종 반영됐다고 밝혔다.이번에 소각된 주식은 총 48만8977주다. 이에 따라 셀트리온 발행주식총수는 약 2억2163만주로 줄었다.이번 소각은 최근 공시한 1000억원 규모 자사주 취득…</p>
+            <div class="story-mini__sources">DAILY · FNNEWS</div>
+            <ul><li><a href="https://daily.hankooki.com/news/articleView.html?idxno=1373573" target="_blank" rel="noopener">셀트리온, 1000억 자사주 소각 반영…주당가치 상승 효과 기대</a><span>DAILY</span></li>
+<li><a href="https://www.fnnews.com/news/202606041505398609" target="_blank" rel="noopener">셀트리온, 자사주 소각 완료…연내 2조 주주환원</a><span>FNNEWS</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_41c3637c4404
+  tokens:
+    - 규모
+    - 셀트리온
+    - 소각
+  require_any_groups:
+    - [셀트리온]
+    - [규모, 셀트리온, 소각, 완료, 자사주]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
     </section>
   </main>
   <script>
-    const REVIEW = {"accessTokenHash": "7bdf33924ae2f63973a383247e994a0681d0a288ca2df20d5f70c51a333def01", "candidateCount": 0, "candidateHash": "4f53cda18c2baa0c"};
+    const REVIEW = {"accessTokenHash": "7bdf33924ae2f63973a383247e994a0681d0a288ca2df20d5f70c51a333def01", "candidateCount": 1, "candidateHash": "eb9282d9c9626957"};
     const gate = document.getElementById('gate');
     const content = document.getElementById('content');
     const tokenInput = document.getElementById('tokenInput');
