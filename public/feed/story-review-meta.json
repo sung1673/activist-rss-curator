@@ -1,58 +1,164 @@
 {
-  "date_id": "2026-06-05",
-  "generated_at": "2026-06-05T06:48:04.351783+09:00",
-  "start_at": "2026-06-04T06:46:15.524991+09:00",
-  "end_at": "2026-06-05T06:46:15.524991+09:00",
-  "start_label": "2026-06-04 06:46 KST",
-  "end_label": "2026-06-05 06:46 KST",
-  "candidate_count": 1,
-  "candidate_hash": "eb9282d9c9626957",
+  "date_id": "2026-06-06",
+  "generated_at": "2026-06-06T06:32:39.507146+09:00",
+  "start_at": "2026-06-05T06:31:07.101537+09:00",
+  "end_at": "2026-06-06T06:31:07.101537+09:00",
+  "start_label": "2026-06-05 06:31 KST",
+  "end_label": "2026-06-06 06:31 KST",
+  "candidate_count": 4,
+  "candidate_hash": "8779c504ea3037a2",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "41c3637c4404",
-      "score": 109.2,
+      "id": "80fae83be44a",
+      "score": 83.7,
       "left": {
         "id": "story-11",
-        "title": "셀트리온, 1천억 규모 자사주 소각 완료…주주환원 속도",
-        "summary": "신영證 주주환원 속도…1조 자사주 소각 결정 네이트",
+        "title": "신영證, 자사주 소각 전 배당 확 늘렸다⋯왜?",
+        "summary": "자사주 32% 소각 결정⋯배당도 전년비 50%↑ 93세 원국회 회장 승계 '초읽기'⋯현금확보 목적 분석 50%대 달하는 자기주식 처분 계획을 밝힌 신영증권이 배당을 확대한 배경에 이목이 쏠린다. 소각과 맞물릴 것으로 보이는 승계 작업을 고려해 현금 확보에 나섰단 분석이 나온다. 5일…",
         "category": "밸류업·주주환원",
-        "datetime": "06.04 18:06",
-        "source_line": "네이트 · INEWS24",
-        "link_count": 2,
-        "url": "https://www.inews24.com/view/1973925",
+        "datetime": "06.05 11:02",
+        "source_line": "INEWS24 · DAILY · 리더스팩트",
+        "link_count": 3,
+        "url": "https://www.inews24.com/view/1974129",
         "links": [
           {
-            "source": "네이트",
-            "title": "신영證 주주환원 속도…1조 자사주 소각 결정",
-            "url": "https://news.google.com/rss/articles/CBMiU0FVX3lxTE9XS0Jhc0Utd0d4eVR5aGZjT2xEQVM1anNEZzFoT051RUZFVjRnbW5GSUlQN1RyR0R5b1JkVmVRVHhxWnpPRno1RDduczZHUkxQZ0pF?oc=5"
+            "source": "INEWS24",
+            "title": "신영證, 자사주 소각 전 배당 확 늘렸다⋯왜?",
+            "url": "https://www.inews24.com/view/1974129"
           },
           {
-            "source": "INEWS24",
-            "title": "셀트리온, 1천억 규모 자사주 소각 완료…주주환원 속도",
-            "url": "https://www.inews24.com/view/1973925"
+            "source": "DAILY",
+            "title": "배당 늘리고 자사주 소각…코웨이, 주주환원·책임경영 속도 낸다",
+            "url": "https://daily.hankooki.com/news/articleView.html?idxno=1373792"
+          },
+          {
+            "source": "리더스팩트",
+            "title": "자사주 부자 1위 신영증권, 9400억 소각 추진…오너일가 배당 229억",
+            "url": "https://news.google.com/rss/articles/CBMicEFVX3lxTFA1Wm95dGx5N0JTeVBJbENON0pXTTNKWE1oU0lNaGd0ci1vdHBZMlpQYksxajk4V2RHU3ctN2NIUXFwc0xRcnZkMS03emhzd1lDSmg5Y0tKWldWSWctOW1paXpHVUhGX1NPTlNYWVZ4ZWI?oc=5"
           }
         ]
       },
       "right": {
         "id": "story-15",
-        "title": "셀트리온, 1000억 자사주 소각 반영…주당가치 상승 효과 기대",
-        "summary": "[데일리한국 최성수 기자]셀트리온은 약 1000억원 규모 자사주 소각 절차가 4일 변경상장을 통해 최종 반영됐다고 밝혔다.이번에 소각된 주식은 총 48만8977주다. 이에 따라 셀트리온 발행주식총수는 약 2억2163만주로 줄었다.이번 소각은 최근 공시한 1000억원 규모 자사주 취득…",
+        "title": "신영증권, 1조 규모 자사주 소각...주당 배당금 7500원",
+        "summary": "신영증권, 1조 규모 자사주 소각...주당 배당금 7500원 메트로신문",
         "category": "밸류업·주주환원",
-        "datetime": "06.04 15:36",
-        "source_line": "DAILY · FNNEWS",
-        "link_count": 2,
-        "url": "https://daily.hankooki.com/news/articleView.html?idxno=1373573",
+        "datetime": "06.05 10:46",
+        "source_line": "메트로신문",
+        "link_count": 1,
+        "url": "https://news.google.com/rss/articles/CBMiYEFVX3lxTFA1M1RFS240aHVTOFhyRlNTSXhsUlFGSmxCaWY4M3F6dVh6b05ISGZmRUI3Nlc1dkM0N1pIUU9pNTVrYUdlLVFmQnhPZWs5OGZ1U2xEQVFlRnYzUXM3S1pWVQ?oc=5",
         "links": [
           {
-            "source": "DAILY",
-            "title": "셀트리온, 1000억 자사주 소각 반영…주당가치 상승 효과 기대",
-            "url": "https://daily.hankooki.com/news/articleView.html?idxno=1373573"
+            "source": "메트로신문",
+            "title": "신영증권, 1조 규모 자사주 소각...주당 배당금 7500원",
+            "url": "https://news.google.com/rss/articles/CBMiYEFVX3lxTFA1M1RFS240aHVTOFhyRlNTSXhsUlFGSmxCaWY4M3F6dVh6b05ISGZmRUI3Nlc1dkM0N1pIUU9pNTVrYUdlLVFmQnhPZWs5OGZ1U2xEQVFlRnYzUXM3S1pWVQ?oc=5"
+          }
+        ]
+      }
+    },
+    {
+      "id": "97c60b507d9f",
+      "score": 75.4,
+      "left": {
+        "id": "story-11",
+        "title": "신영證, 자사주 소각 전 배당 확 늘렸다⋯왜?",
+        "summary": "자사주 32% 소각 결정⋯배당도 전년비 50%↑ 93세 원국회 회장 승계 '초읽기'⋯현금확보 목적 분석 50%대 달하는 자기주식 처분 계획을 밝힌 신영증권이 배당을 확대한 배경에 이목이 쏠린다. 소각과 맞물릴 것으로 보이는 승계 작업을 고려해 현금 확보에 나섰단 분석이 나온다. 5일…",
+        "category": "밸류업·주주환원",
+        "datetime": "06.05 11:02",
+        "source_line": "INEWS24 · DAILY · 리더스팩트",
+        "link_count": 3,
+        "url": "https://www.inews24.com/view/1974129",
+        "links": [
+          {
+            "source": "INEWS24",
+            "title": "신영證, 자사주 소각 전 배당 확 늘렸다⋯왜?",
+            "url": "https://www.inews24.com/view/1974129"
           },
           {
-            "source": "FNNEWS",
-            "title": "셀트리온, 자사주 소각 완료…연내 2조 주주환원",
-            "url": "https://www.fnnews.com/news/202606041505398609"
+            "source": "DAILY",
+            "title": "배당 늘리고 자사주 소각…코웨이, 주주환원·책임경영 속도 낸다",
+            "url": "https://daily.hankooki.com/news/articleView.html?idxno=1373792"
+          },
+          {
+            "source": "리더스팩트",
+            "title": "자사주 부자 1위 신영증권, 9400억 소각 추진…오너일가 배당 229억",
+            "url": "https://news.google.com/rss/articles/CBMicEFVX3lxTFA1Wm95dGx5N0JTeVBJbENON0pXTTNKWE1oU0lNaGd0ci1vdHBZMlpQYksxajk4V2RHU3ctN2NIUXFwc0xRcnZkMS03emhzd1lDSmg5Y0tKWldWSWctOW1paXpHVUhGX1NPTlNYWVZ4ZWI?oc=5"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-12",
+        "title": "코웨이, 주주환원율 40%로 확대 … 기업가치 더 높인다",
+        "summary": "코웨이가 주주환원 확대와 지배구조 개선을 앞세워 기업가치 제고에 속도를 내고 있다. 총주주환원율을 기존보다 두 배 높이고 분기배당을 도입한 데 이어 경영진의 자사주 매입까지 이어지면서 국내 밸류업 대표 기업으로 입지를 넓히는 모습이다.5일 관련업계에 따르면 코웨이는 최근 한국거래소가…",
+        "category": "밸류업·주주환원",
+        "datetime": "06.05 10:27",
+        "source_line": "뉴데일리경제 · WIKITREE · 데이터뉴스",
+        "link_count": 3,
+        "url": "https://biz.newdaily.co.kr/site/data/html/2026/06/05/2026060500085.html",
+        "links": [
+          {
+            "source": "뉴데일리경제",
+            "title": "코웨이, 주주환원율 40%로 확대 … 기업가치 더 높인다",
+            "url": "https://biz.newdaily.co.kr/site/data/html/2026/06/05/2026060500085.html"
+          },
+          {
+            "source": "WIKITREE",
+            "title": "코웨이, 주주환원율 20%에서 40%로 두 배 인상 밸류업 우수기업 선정",
+            "url": "https://www.wikitree.co.kr/articles/1139883"
+          },
+          {
+            "source": "데이터뉴스",
+            "title": "코웨이, 주주환원·지배구조·책임경영으로 기업가치 제고 가속",
+            "url": "https://news.google.com/rss/articles/CBMiX0FVX3lxTFBUS0t3VDI0UXgwZXNvY2Rpblp5TzlmbUpJX3JEZ29teUQ3U2hmU2pRMjF3bVhrXzFTZFpEVElQVHR5MFJPQTJQRldrSktuZnNKUVlmTGw4RFdJMC1ENkhz?oc=5"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4eab601863ed",
+      "score": 74.6,
+      "left": {
+        "id": "story-12",
+        "title": "코웨이, 주주환원율 40%로 확대 … 기업가치 더 높인다",
+        "summary": "코웨이가 주주환원 확대와 지배구조 개선을 앞세워 기업가치 제고에 속도를 내고 있다. 총주주환원율을 기존보다 두 배 높이고 분기배당을 도입한 데 이어 경영진의 자사주 매입까지 이어지면서 국내 밸류업 대표 기업으로 입지를 넓히는 모습이다.5일 관련업계에 따르면 코웨이는 최근 한국거래소가…",
+        "category": "밸류업·주주환원",
+        "datetime": "06.05 10:27",
+        "source_line": "뉴데일리경제 · WIKITREE · 데이터뉴스",
+        "link_count": 3,
+        "url": "https://biz.newdaily.co.kr/site/data/html/2026/06/05/2026060500085.html",
+        "links": [
+          {
+            "source": "뉴데일리경제",
+            "title": "코웨이, 주주환원율 40%로 확대 … 기업가치 더 높인다",
+            "url": "https://biz.newdaily.co.kr/site/data/html/2026/06/05/2026060500085.html"
+          },
+          {
+            "source": "WIKITREE",
+            "title": "코웨이, 주주환원율 20%에서 40%로 두 배 인상 밸류업 우수기업 선정",
+            "url": "https://www.wikitree.co.kr/articles/1139883"
+          },
+          {
+            "source": "데이터뉴스",
+            "title": "코웨이, 주주환원·지배구조·책임경영으로 기업가치 제고 가속",
+            "url": "https://news.google.com/rss/articles/CBMiX0FVX3lxTFBUS0t3VDI0UXgwZXNvY2Rpblp5TzlmbUpJX3JEZ29teUQ3U2hmU2pRMjF3bVhrXzFTZFpEVElQVHR5MFJPQTJQRldrSktuZnNKUVlmTGw4RFdJMC1ENkhz?oc=5"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-31",
+        "title": "코웨이, 밸류업 경영 성과 가시화…주주친화 정책 가속도",
+        "summary": "코웨이, 밸류업 경영 성과 가시화…주주친화 정책 가속도 필드뉴스",
+        "category": "밸류업·주주환원",
+        "datetime": "06.05 09:31",
+        "source_line": "필드뉴스",
+        "link_count": 1,
+        "url": "https://news.google.com/rss/articles/CBMiakFVX3lxTE9RcTBFZm5Ga21HQnEzVWlRUHdPSDZXdnJYdHJhY0tJNDBhNWRsYXN2RURzclZPNmxURTlNX01EMUZFeWFKRjZRZmxicWNzaFVVYTNNQkE5Wi0taWtnWmFwbUFvRUlaUy16X0HSAWxBVV95cUxQek5MTUljbGJReUtQRnEwUm05UXhrMXNrY1M3VmpBYjF3ZUU4dXItM0xuamVwZVBDdnd4d2pITmRQZW1oOHUyLXZJZlQ2VFhSWHA3YzVDWWVpLUlVSkZmLWZ2MmVldU1tVGs0cFE?oc=5",
+        "links": [
+          {
+            "source": "필드뉴스",
+            "title": "코웨이, 밸류업 경영 성과 가시화…주주친화 정책 가속도",
+            "url": "https://news.google.com/rss/articles/CBMiakFVX3lxTE9RcTBFZm5Ga21HQnEzVWlRUHdPSDZXdnJYdHJhY0tJNDBhNWRsYXN2RURzclZPNmxURTlNX01EMUZFeWFKRjZRZmxicWNzaFVVYTNNQkE5Wi0taWtnWmFwbUFvRUlaUy16X0HSAWxBVV95cUxQek5MTUljbGJReUtQRnEwUm05UXhrMXNrY1M3VmpBYjF3ZUU4dXItM0xuamVwZVBDdnd4d2pITmRQZW1oOHUyLXZJZlQ2VFhSWHA3YzVDWWVpLUlVSkZmLWZ2MmVldU1tVGs0cFE?oc=5"
           }
         ]
       }
