@@ -2,7 +2,20 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from curator.state import compact_state
+from conftest import make_article
+
+from curator.state import compact_state, remember_article
+
+
+def test_rejected_article_does_not_poison_dedupe_indexes(config, now) -> None:  # type: ignore[no-untyped-def]
+    state: dict[str, object] = {"articles": [], "seen_url_hashes": [], "seen_title_hashes": []}
+    rejected = make_article("Rejected article title", "https://example.com/rejected")
+
+    remember_article(state, rejected, "rejected", now, "low_relevance")
+
+    assert state["seen_url_hashes"] == []
+    assert state["seen_title_hashes"] == []
+    assert state["articles"][0]["status"] == "rejected"  # type: ignore[index]
 
 
 def test_compact_state_respects_two_month_retention(config, now) -> None:  # type: ignore[no-untyped-def]
@@ -48,3 +61,32 @@ def test_compact_state_respects_two_month_retention(config, now) -> None:  # typ
     assert state["daily_digest_records"] == []
     assert state["daily_digest_sent_dates"] == []
     assert state["telegram_digest_records"] == []
+
+
+def test_compact_state_excludes_recent_rejected_articles_from_dedupe_indexes(config, now) -> None:  # type: ignore[no-untyped-def]
+    recent_seen = (now - timedelta(days=1)).isoformat()
+    accepted = make_article("Accepted title", "https://example.com/accepted")
+    rejected = make_article("Rejected title", "https://example.com/rejected")
+    state = {
+        "articles": [
+            {
+                "title": accepted["clean_title"],
+                "canonical_url_hash": accepted["canonical_url_hash"],
+                "title_hash": accepted["title_hash"],
+                "seen_at": recent_seen,
+                "status": "accepted",
+            },
+            {
+                "title": rejected["clean_title"],
+                "canonical_url_hash": rejected["canonical_url_hash"],
+                "title_hash": rejected["title_hash"],
+                "seen_at": recent_seen,
+                "status": "rejected",
+            },
+        ]
+    }
+
+    compact_state(state, config, now)
+
+    assert state["seen_url_hashes"] == [accepted["canonical_url_hash"]]
+    assert state["seen_title_hashes"] == [accepted["title_hash"]]

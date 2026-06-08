@@ -28,6 +28,7 @@ from curator.telegram_sources import (
     rematch_telegram_articles,
     reconcile_recent_deletions,
     score_channel_candidate,
+    telegram_candidate_articles,
     telegram_issue_signals,
     telegram_run_record,
     telegram_state_stats,
@@ -140,6 +141,32 @@ def test_parse_handle_list_does_not_split_letter_s() -> None:
         "LS_WooBond",
         "realtime_stock_news",
     }
+
+
+def test_telegram_candidate_articles_promotes_reference_channel_urls(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["telegram_sources"] = {
+        "candidate_source_enabled": True,
+        "candidate_source_handles": ["activistkorea"],
+        "candidate_window_hours": 168,
+        "candidate_limit_per_run": 10,
+    }
+    message = normalize_telegram_message(
+        {"handle": "activistkorea", "title": "Activist Korea"},
+        {
+            "id": 10,
+            "date": now,
+            "text": "Shareholder governance article\nhttps://example.com/article?utm_source=tg",
+        },
+        now,
+    )
+    state = {"telegram_source_messages": [message], "articles": []}
+
+    candidates = telegram_candidate_articles(state, config, now)
+
+    assert len(candidates) == 1
+    assert candidates[0]["canonical_url"] == "https://example.com/article"
+    assert candidates[0]["telegram_candidate"] is True
+    assert candidates[0]["feed_name"] == "Telegram:activistkorea"
 
 
 def test_telegram_message_upsert_prevents_duplicates_and_tracks_edits(now) -> None:  # type: ignore[no-untyped-def]

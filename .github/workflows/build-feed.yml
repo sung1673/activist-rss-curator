@@ -193,7 +193,6 @@ jobs:
         env:
           CURATOR_FEEDS: ${{ secrets.CURATOR_FEEDS }}
           CURATOR_EVENT_SCHEDULE: ${{ github.event.schedule }}
-          CURATOR_DISABLE_GOOGLE_NEWS_DECODE: "1"
           CURATOR_DISABLE_TELEGRAM_SEND: ${{ github.event_name == 'push' && ! contains(github.event.head_commit.message, '[send-regular-update]') && '1' || '' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

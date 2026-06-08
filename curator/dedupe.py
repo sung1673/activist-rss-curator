@@ -40,15 +40,36 @@ def duplicate_reason(
     title = str(article.get("normalized_title") or "")
     title_hash = str(article.get("title_hash") or article_title_hash(article))
 
-    seen_url_hashes = set(state.get("seen_url_hashes", []))
-    seen_title_hashes = set(state.get("seen_title_hashes", []))
+    state_articles = [candidate for candidate in list(state.get("articles", [])) if isinstance(candidate, dict)]
+    rejected_url_hashes = {
+        str(candidate.get("canonical_url_hash") or "")
+        for candidate in state_articles
+        if candidate.get("status") == "rejected" and candidate.get("canonical_url_hash")
+    }
+    rejected_title_hashes = {
+        str(candidate.get("title_hash") or "")
+        for candidate in state_articles
+        if candidate.get("status") == "rejected" and candidate.get("title_hash")
+    }
+    active_url_hashes = {
+        str(candidate.get("canonical_url_hash") or "")
+        for candidate in state_articles
+        if candidate.get("status") != "rejected" and candidate.get("canonical_url_hash")
+    }
+    active_title_hashes = {
+        str(candidate.get("title_hash") or "")
+        for candidate in state_articles
+        if candidate.get("status") != "rejected" and candidate.get("title_hash")
+    }
+    seen_url_hashes = (set(state.get("seen_url_hashes", [])) - rejected_url_hashes) | active_url_hashes
+    seen_title_hashes = (set(state.get("seen_title_hashes", [])) - rejected_title_hashes) | active_title_hashes
     if url_hash and url_hash in seen_url_hashes:
         return "seen_url"
     if title_hash and title_hash in seen_title_hashes:
         return "seen_title"
 
     threshold = int(config.get("dedupe", {}).get("title_duplicate_threshold", 92))  # type: ignore[union-attr]
-    candidates = unique_articles + list(state.get("articles", []))
+    candidates = unique_articles + [candidate for candidate in state_articles if candidate.get("status") != "rejected"]
     for candidate in candidates:
         candidate_title = str(candidate.get("normalized_title") or "")
         if title and title == candidate_title:
@@ -122,7 +143,7 @@ def duplicate_matches(
     matches: list[tuple[datetime, dict[str, object]]] = []
     seen_keys: set[tuple[str, str]] = set()
     for record in reversed(list(state.get("articles", []))):
-        if not isinstance(record, dict) or record.get("status") == "duplicate":
+        if not isinstance(record, dict) or record.get("status") in {"duplicate", "rejected"}:
             continue
         record_dt = duplicate_reference_datetime(record, timezone_name)
         if record_dt and record_dt < cutoff:

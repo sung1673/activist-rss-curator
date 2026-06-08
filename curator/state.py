@@ -149,6 +149,9 @@ def remember_article(state: dict[str, object], article: dict[str, object], statu
     state.setdefault("seen_title_hashes", [])
     state["articles"].append(record)  # type: ignore[index, union-attr]
 
+    if status == "rejected":
+        return
+
     url_hash = str(record.get("canonical_url_hash") or "")
     title_hash = str(record.get("title_hash") or "")
     if url_hash and url_hash not in state["seen_url_hashes"]:  # type: ignore[operator]
@@ -183,8 +186,9 @@ def compact_state(state: dict[str, object], config: dict[str, object], now: date
 
     retained_articles = articles[-max_articles:]
     state["articles"] = retained_articles
-    state["seen_url_hashes"] = sorted({str(article.get("canonical_url_hash")) for article in retained_articles if article.get("canonical_url_hash")})
-    state["seen_title_hashes"] = sorted({str(article.get("title_hash")) for article in retained_articles if article.get("title_hash")})
+    dedupe_articles = [article for article in retained_articles if article.get("status") != "rejected"]
+    state["seen_url_hashes"] = sorted({str(article.get("canonical_url_hash")) for article in dedupe_articles if article.get("canonical_url_hash")})
+    state["seen_title_hashes"] = sorted({str(article.get("title_hash")) for article in dedupe_articles if article.get("title_hash")})
     state["rejected_articles"] = [
         article
         for article in state.get("rejected_articles", [])

@@ -19,7 +19,7 @@ from .summaries import publish_hourly_telegram_update
 from .telegram_publisher import (
     initialize_telegram_state,
 )
-from .telegram_sources import collect_telegram_sources
+from .telegram_sources import collect_telegram_sources, telegram_candidate_articles
 from .telegram_dashboard import write_telegram_dashboard
 
 
@@ -117,8 +117,10 @@ def run(root: Path | None = None) -> dict[str, int]:
     state = load_state(state_path)
     prune_excluded_pending_articles(state, config, now)
     initialize_telegram_state(state, config, now)
+    telegram_source_summary = collect_telegram_sources(state, config, now)
 
     fetched_articles = fetch_google_alerts_articles(config)
+    fetched_articles.extend(telegram_candidate_articles(state, config, now))
     publish_levels = set(config.get("publish", {}).get("publish_levels", ["high", "medium"]))  # type: ignore[union-attr]
     max_age_days = int(config.get("date_filter", {}).get("max_article_age_days", 7))  # type: ignore[union-attr]
     allow_unknown = bool(config.get("date_filter", {}).get("allow_unknown_date", True))  # type: ignore[union-attr]
@@ -165,7 +167,6 @@ def run(root: Path | None = None) -> dict[str, int]:
     state["last_run_at"] = datetime_to_iso(now)
     overrides = load_priority_overrides(priority_overrides_path(project_root, config))
     priority_count = annotate_state_priorities(state, config, now, overrides)
-    telegram_source_summary = collect_telegram_sources(state, config, now)
     compact_state(state, config, now)
     archive_summary = archive_state(project_root, state, config, now)
     published_clusters = list(state.get("published_clusters", []))

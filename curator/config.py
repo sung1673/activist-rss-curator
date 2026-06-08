@@ -110,8 +110,19 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "timeout_seconds": 20,
     },
     "telegram_sources": {
-        "enabled": False,
-        "channels": [],
+        "enabled": True,
+        "channels": [
+            {
+                "handle": "activistkorea",
+                "title": "한국기업거버넌스포럼",
+                "source": "manual",
+                "quality_score": 90,
+                "enabled": True,
+                "joined": False,
+                "source_type": "public_channel",
+                "is_public_channel": True,
+            }
+        ],
         "backfill_limit": 100,
         "incremental_limit": 200,
         "history_backfill_days": 180,
@@ -128,6 +139,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "signal_min_channels": 2,
         "signal_limit": 40,
         "signal_max_messages_per_signal": 5,
+        "candidate_source_enabled": True,
+        "candidate_source_handles": ["activistkorea"],
+        "candidate_window_hours": 168,
+        "candidate_limit_per_run": 50,
         "max_remote_messages": 500,
         "remote_batch_size": 300,
         "discover_enabled": False,

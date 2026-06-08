@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 from .config import load_config
 from .dates import datetime_to_iso, parse_datetime
-from .normalize import canonical_url_hash, normalize_title, normalize_url, stable_hash
+from .normalize import canonical_url_hash, hostname_from_url, normalize_title, normalize_title_parts, normalize_url, stable_hash
 from .remote_api import post_remote_action, remote_api_configured
 from .state import load_state, save_state
 
@@ -971,6 +971,92 @@ def telegram_signal_excerpt(message: dict[str, object], *, max_chars: int = 170)
     if len(text) <= max_chars:
         return text
     return text[: max(0, max_chars - 1)].rstrip() + "…"
+
+
+def telegram_candidate_title(message: dict[str, object], url: str) -> str:
+    text = str(message.get("text") or "")
+    text = URL_PATTERN.sub(" ", text)
+    lines = [re.sub(r"\s+", " ", line).strip(" -|·\t") for line in text.splitlines()]
+    for line in lines:
+        if len(line) >= 12 and not line.startswith(("@", "#")):
+            return line[:220]
+    host = hostname_from_url(url).removeprefix("www.")
+    return f"Telegram 공개채널 공유 기사 - {host or 'unknown'}"
+
+
+def telegram_candidate_articles(state: dict[str, object], config: dict[str, object], now: datetime) -> list[dict[str, object]]:
+    settings = telegram_sources_config(config)
+    if not bool(settings.get("candidate_source_enabled", True)):
+        return []
+    ensure_telegram_state(state)
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    window_hours = max(1, int(settings.get("candidate_window_hours", 168)))
+    limit = max(0, int(settings.get("candidate_limit_per_run", 50)))
+    if limit == 0:
+        return []
+    allowed_handles = {
+        normalize_channel_handle(handle)
+        for handle in settings.get("candidate_source_handles", [])
+        if normalize_channel_handle(handle)
+    }
+    cutoff = now - timedelta(hours=window_hours)
+    existing_hashes = {
+        str(article.get("canonical_url_hash") or "")
+        for article in state.get("articles", [])
+        if isinstance(article, dict) and article.get("canonical_url_hash")
+    }
+    emitted_hashes: set[str] = set()
+    candidates: list[dict[str, object]] = []
+    messages = [
+        message
+        for message in state.get("telegram_source_messages", [])
+        if isinstance(message, dict) and not message.get("deleted_at")
+    ]
+    messages.sort(key=lambda item: str(item.get("posted_at") or item.get("collected_at") or ""), reverse=True)
+    for message in messages:
+        handle = normalize_channel_handle(message.get("handle") or message.get("username"))
+        if allowed_handles and handle not in allowed_handles:
+            continue
+        posted_at = parse_datetime(message.get("posted_at"), timezone_name)
+        if posted_at and posted_at < cutoff:
+            continue
+        for url in message.get("urls") or []:
+            canonical_url = canonicalize_telegram_url(str(url or ""))
+            if not canonical_url or is_boilerplate_signal_url(canonical_url):
+                continue
+            url_hash = canonical_url_hash(canonical_url)
+            if url_hash in existing_hashes or url_hash in emitted_hashes:
+                continue
+            title = telegram_candidate_title(message, canonical_url)
+            title_parts = normalize_title_parts(title)
+            posted_iso = datetime_to_iso(posted_at) if posted_at else str(message.get("posted_at") or "")
+            candidate = {
+                "title": title,
+                "clean_title": title_parts["clean_title"],
+                "normalized_title": title_parts["normalized_title"],
+                "prefixes": title_parts["prefixes"],
+                "source": hostname_from_url(canonical_url).removeprefix("www.") or str(message.get("channel_title") or "Telegram"),
+                "link": canonical_url,
+                "canonical_url": canonical_url,
+                "canonical_url_hash": url_hash,
+                "title_hash": title_parts["title_hash"],
+                "summary": telegram_signal_excerpt(message, max_chars=260),
+                "image_url": None,
+                "feed_published_at": posted_iso or None,
+                "feed_updated_at": message.get("collected_at") or posted_iso or None,
+                "article_published_at": posted_iso or None,
+                "feed_name": f"Telegram:{handle}" if handle else "Telegram",
+                "feed_category": "telegram_reference",
+                "telegram_candidate": True,
+                "telegram_source_handle": handle,
+                "telegram_source_title": message.get("channel_title") or "",
+                "telegram_source_message_url": message.get("message_url") or "",
+            }
+            candidates.append(candidate)
+            emitted_hashes.add(url_hash)
+            if len(candidates) >= limit:
+                return candidates
+    return candidates
 
 
 def telegram_signal_message_payload(message: dict[str, object]) -> dict[str, object]:

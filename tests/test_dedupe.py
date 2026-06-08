@@ -42,3 +42,29 @@ def test_duplicate_keeps_recent_reference_matches(config, now) -> None:  # type:
 
     assert unique == []
     assert duplicates[0]["duplicate_matches"][0]["canonical_url"] == "https://example.com/old"
+
+
+def test_rejected_history_does_not_dedupe_new_article(config, now) -> None:  # type: ignore[no-untyped-def]
+    rejected = make_article("Same title should be reconsidered", "https://example.com/rejected")
+    state = {
+        "seen_url_hashes": [rejected["canonical_url_hash"]],
+        "seen_title_hashes": [rejected["title_hash"]],
+        "articles": [
+            {
+                "title": rejected["clean_title"],
+                "normalized_title": rejected["normalized_title"],
+                "canonical_url": rejected["canonical_url"],
+                "canonical_url_hash": rejected["canonical_url_hash"],
+                "title_hash": rejected["title_hash"],
+                "published_at": rejected["published_at"],
+                "seen_at": (now - timedelta(days=1)).isoformat(),
+                "status": "rejected",
+            }
+        ],
+    }
+    article = make_article("Same title should be reconsidered", "https://example.com/fresh")
+
+    unique, duplicates = dedupe_articles([article], state, config, now)
+
+    assert len(unique) == 1
+    assert duplicates == []
