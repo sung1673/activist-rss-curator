@@ -1,10 +1,10 @@
 {
   "date_id": "2026-06-08",
-  "generated_at": "2026-06-08T13:06:44.776798+09:00",
-  "start_at": "2026-06-07T13:05:14.975562+09:00",
-  "end_at": "2026-06-08T13:05:14.975562+09:00",
-  "start_label": "2026-06-07 13:05 KST",
-  "end_label": "2026-06-08 13:05 KST",
+  "generated_at": "2026-06-08T14:26:47.414093+09:00",
+  "start_at": "2026-06-07T14:24:47.978698+09:00",
+  "end_at": "2026-06-08T14:24:47.978698+09:00",
+  "start_label": "2026-06-07 14:24 KST",
+  "end_label": "2026-06-08 14:24 KST",
   "candidate_count": 3,
   "candidate_hash": "44419a8100cdcd18",
   "page_url": "https://news.bside.ai/feed/story-review.html",
@@ -13,7 +13,7 @@
       "id": "098868666735",
       "score": 84.3,
       "left": {
-        "id": "story-7",
+        "id": "story-10",
         "title": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH",
         "summary": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH - 한국경제 https://www.hankyung.com/amp/2026060822806",
         "category": "밸류업·주주환원",
@@ -30,7 +30,7 @@
         ]
       },
       "right": {
-        "id": "story-13",
+        "id": "story-18",
         "title": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감",
         "summary": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감 - 한국정경신문 https://kpenews.com/View.aspx?No=4103612",
         "category": "밸류업·주주환원",
@@ -51,7 +51,7 @@
       "id": "4b270d663cee",
       "score": 83.3,
       "left": {
-        "id": "story-12",
+        "id": "story-16",
         "title": "밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)",
         "summary": "밑 빠진 독에 '밸류업' 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑) https://www.ilovepc.co.kr/news/articleView.html?idxno=59610",
         "category": "밸류업·주주환원",
@@ -68,7 +68,7 @@
         ]
       },
       "right": {
-        "id": "story-13",
+        "id": "story-18",
         "title": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감",
         "summary": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감 - 한국정경신문 https://kpenews.com/View.aspx?No=4103612",
         "category": "밸류업·주주환원",
@@ -89,7 +89,7 @@
       "id": "e62a73a75c3b",
       "score": 82.6,
       "left": {
-        "id": "story-7",
+        "id": "story-10",
         "title": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH",
         "summary": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH - 한국경제 https://www.hankyung.com/amp/2026060822806",
         "category": "밸류업·주주환원",
@@ -106,7 +106,7 @@
         ]
       },
       "right": {
-        "id": "story-12",
+        "id": "story-16",
         "title": "밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)",
         "summary": "밑 빠진 독에 '밸류업' 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑) https://www.ilovepc.co.kr/news/articleView.html?idxno=59610",
         "category": "밸류업·주주환원",
@@ -123,5 +123,57 @@
         ]
       }
     }
-  ]
+  ],
+  "benchmark_coverage": {
+    "enabled": true,
+    "handles": [
+      "activistkorea"
+    ],
+    "url_count": 110,
+    "matched_count": 34,
+    "missing_count": 76,
+    "coverage_rate": 30.9,
+    "missing": [
+      {
+        "title": "기업가치 제고 공시 누적 731개사…밸류업 지수 사상 최고치 경신",
+        "url": "https://www.asiae.co.kr/article/2026060810543766317",
+        "source_message_url": "https://t.me/activistkorea/113167",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_title"
+      },
+      {
+        "title": "밸류업 공시 731개사 돌파···지수 최고치·ETF 자금 유입 지속",
+        "url": "https://www.seoulfn.com/news/articleView.html?idxno=630583",
+        "source_message_url": "https://t.me/activistkorea/113165",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_title"
+      },
+      {
+        "title": "밸류업 지수, 지난달 사상 최고치 경신…코스피 수익률 크게 웃돌아",
+        "url": "https://news.nate.com/view/20260608n16399",
+        "source_message_url": "https://t.me/activistkorea/113166",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_title"
+      },
+      {
+        "title": "밸류업 공시 731곳으로 확대…시총 83% 참여·지수도 사상 최고",
+        "url": "https://v.daum.net/v/20260608112321168",
+        "source_message_url": "https://t.me/activistkorea/113162",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "similar_title"
+      },
+      {
+        "title": "밸류업 공시 731곳 돌파…지난달 밸류업지수 사상 최고치 경신",
+        "url": "https://marketin.edaily.co.kr/News/ReadE?newsId=02955286645479752",
+        "source_message_url": "https://t.me/activistkorea/113163",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_title"
+      }
+    ]
+  }
 }

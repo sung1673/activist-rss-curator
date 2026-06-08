@@ -24,6 +24,18 @@
     .content { display:none; margin-top:26px; }
     .content.is-open { display:block; }
     .toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid var(--line); padding:0 0 14px; margin-bottom:18px; }
+    .benchmark { border:1px solid var(--line); background:#fff; margin:0 0 24px; padding:18px; }
+    .benchmark__head { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; border-bottom:1px solid var(--line); padding-bottom:14px; }
+    .benchmark h2 { margin:0 0 6px; font-size:22px; }
+    .benchmark p { margin:0; color:var(--muted); line-height:1.55; }
+    .benchmark__stats { display:flex; flex-wrap:wrap; gap:7px; justify-content:flex-end; }
+    .benchmark__stats span, .benchmark-item__meta span { border:1px solid var(--line); border-radius:999px; padding:6px 9px; color:#3b245f; font-size:12px; font-weight:850; background:var(--soft); }
+    .benchmark__list { display:grid; gap:10px; margin-top:14px; }
+    .benchmark-item { border-left:3px solid var(--accent); background:#fdfcff; padding:12px; }
+    .benchmark-item__meta { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+    .benchmark-item h3 { margin:0 0 7px; font-size:17px; line-height:1.35; }
+    .benchmark-item p { margin:0 0 8px; color:#4a4058; }
+    .benchmark-item__links { display:flex; justify-content:space-between; gap:10px; color:var(--muted); font-size:12px; }
     .candidate { border-top:3px solid var(--accent); background:#fff; margin:18px 0 26px; padding:18px; box-shadow:0 18px 45px rgba(80, 45, 130, .06); }
     .candidate.is-done { opacity:.58; }
     .candidate__head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
@@ -45,7 +57,7 @@
     @media (max-width:760px) {
       main { padding:20px 14px 60px; }
       .candidate__stories { grid-template-columns:1fr; }
-      .toolbar, .candidate__head { flex-direction:column; align-items:stretch; }
+      .toolbar, .candidate__head, .benchmark__head, .benchmark-item__links { flex-direction:column; align-items:stretch; }
       .story-mini h3 { font-size:18px; }
     }
   </style>
@@ -58,7 +70,7 @@
       <p class="lead">데일리 기사 중 “같은 이슈로 묶였어야 했는데 분리됐을 가능성이 있는 후보”를 자동으로 추립니다. 이 화면에서 후보를 확인하고, 필요한 경우 <code>data/story_rules.yaml</code> 또는 묶음 로직 보강 작업으로 이어갑니다.</p>
       <div class="meta">
         <span>2026-06-08</span>
-        <span>2026-06-07 13:05 KST - 2026-06-08 13:05 KST</span>
+        <span>2026-06-07 14:24 KST - 2026-06-08 14:24 KST</span>
         <span>후보 3건</span>
       </div>
     </header>
@@ -72,6 +84,216 @@
     </section>
 
     <section class="content" id="content">
+
+      <section class="benchmark">
+        <div class="benchmark__head">
+          <div>
+            <h2>Benchmark 누락 점검</h2>
+            <p>기준 채널: activistkorea</p>
+          </div>
+          <div class="benchmark__stats">
+            <span>URL 110건</span>
+            <span>반영 34건</span>
+            <span>누락 76건</span>
+            <span>커버리지 30.9%</span>
+          </div>
+        </div>
+        <div class="benchmark__list">
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.08 13:37</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>duplicate</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://www.asiae.co.kr/article/2026060810543766317" target="_blank" rel="noopener">기업가치 제고 공시 누적 731개사…밸류업 지수 사상 최고치 경신</a></h3>
+            <p>seen_title</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113167" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.08 13:37</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>duplicate</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://www.seoulfn.com/news/articleView.html?idxno=630583" target="_blank" rel="noopener">밸류업 공시 731개사 돌파···지수 최고치·ETF 자금 유입 지속</a></h3>
+            <p>seen_title</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113165" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.08 13:37</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>duplicate</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://news.nate.com/view/20260608n16399" target="_blank" rel="noopener">밸류업 지수, 지난달 사상 최고치 경신…코스피 수익률 크게 웃돌아</a></h3>
+            <p>seen_title</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113166" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.08 13:37</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>duplicate</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://v.daum.net/v/20260608112321168" target="_blank" rel="noopener">밸류업 공시 731곳으로 확대…시총 83% 참여·지수도 사상 최고</a></h3>
+            <p>similar_title</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113162" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.08 13:37</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>duplicate</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://marketin.edaily.co.kr/News/ReadE?newsId=02955286645479752" target="_blank" rel="noopener">밸류업 공시 731곳 돌파…지난달 밸류업지수 사상 최고치 경신</a></h3>
+            <p>seen_title</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113163" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.08 13:37</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>duplicate</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://www.etoday.co.kr/news/view/2591393" target="_blank" rel="noopener">코리아 밸류업 지수 사상 최고치 경신…공시 참여 기업 731사 돌파</a></h3>
+            <p>seen_title</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113160" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.08 13:37</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>duplicate</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://fntoday.co.kr/news/articleView.html?idxno=385837" target="_blank" rel="noopener">코스피 웃돈 밸류업 지수 사상 최고치… ETF 자금도 7.8배 폭발</a></h3>
+            <p>seen_title</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113161" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.08 13:37</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>duplicate</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://www.yna.co.kr/amp/view/AKR20260608076600008" target="_blank" rel="noopener">밸류업 지수, 지난달 사상 최고…코스피 상승률 웃돌았다</a></h3>
+            <p>seen_title</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113159" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.08 13:37</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>duplicate</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://news.nate.com/view/20260608n13117" target="_blank" rel="noopener">코리아 밸류업 지수 사상 최고치 경신…공시 참여 기업 731사 돌파</a></h3>
+            <p>seen_title</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113157" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.08 12:15</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>duplicate</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://www.bloter.net/news/articleViewAmp.html?idxno=664710" target="_blank" rel="noopener">[ESG 점검] 일동제약, 환경지표 목표 미달…주주권익 과제 여전</a></h3>
+            <p>same_title</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113153" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.08 12:15</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>rejected</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://www.insightkorea.co.kr/news/articleViewAmp.html?idxno=247747" target="_blank" rel="noopener">SK바이오팜, 美 뉴저지에 K-바이오 교두보 연다…오픈 이노베이션 공간 LinX 개소</a></h3>
+            <p>low_relevance</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113154" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.08 12:15</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>rejected</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://www.vietnam.vn/ko/mo-kenh-huy-dong-von-cho-doanh-nghiep-nha-nuoc" target="_blank" rel="noopener">국영기업의 자본 조달 채널 개방.</a></h3>
+            <p>low_relevance</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113155" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+        </div>
+      </section>
+
       <div class="toolbar">
         <div>
           <strong>검토 후보</strong>
