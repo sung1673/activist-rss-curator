@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+from collections import defaultdict
 from datetime import datetime
 from html import escape, unescape
 from pathlib import Path
@@ -15,10 +16,12 @@ from rapidfuzz import fuzz
 
 from .cluster import extract_company_candidates
 from .config import load_config
-from .dates import format_kst, now_in_timezone
+from .dates import format_kst, now_in_timezone, parse_datetime
+from .normalize import canonical_url_hash
 from .story_signature import event_tokens_for_text, story_signature_decision
 from .summaries import digest_tokens_from_text
 from .telegram_publisher import html_link, send_telegram_message, telegram_bot_token, telegram_chat_id, telegram_is_configured
+from .telegram_sources import canonicalize_telegram_url, extract_urls, is_boilerplate_signal_url, normalize_channel_handle
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -188,6 +191,184 @@ def story_primary_link(story: dict[str, object]) -> str:
     return ""
 
 
+def story_url_hashes(stories: list[dict[str, object]]) -> set[str]:
+    hashes: set[str] = set()
+    for story in stories:
+        if not isinstance(story, dict):
+            continue
+        urls = [story_primary_link(story)]
+        links = story.get("links") if isinstance(story.get("links"), list) else []
+        urls.extend(str(link.get("url") or "") for link in links if isinstance(link, dict))
+        for url in urls:
+            canonical_url = canonicalize_telegram_url(str(url or ""))
+            if canonical_url:
+                hashes.add(canonical_url_hash(canonical_url))
+    return hashes
+
+
+def article_status_index(state: dict[str, object]) -> dict[str, dict[str, object]]:
+    indexed: dict[str, dict[str, object]] = {}
+    for article in state.get("articles", []):
+        if not isinstance(article, dict):
+            continue
+        url = str(article.get("canonical_url") or article.get("link") or "")
+        canonical_url = canonicalize_telegram_url(url)
+        url_hash = str(article.get("canonical_url_hash") or "")
+        if not url_hash and canonical_url:
+            url_hash = canonical_url_hash(canonical_url)
+        if not url_hash:
+            continue
+        indexed[url_hash] = {
+            "status": clean_text(article.get("status") or "unknown"),
+            "reason": clean_text(article.get("reason") or article.get("reject_reason") or article.get("duplicate_reason") or ""),
+            "title": compact(article.get("clean_title") or article.get("title"), max_chars=120),
+            "url": canonical_url or url,
+        }
+    return indexed
+
+
+def benchmark_handles(config: dict[str, object]) -> set[str]:
+    settings = story_review_config(config)
+    handles = settings.get("benchmark_handles")
+    if not isinstance(handles, list) or not handles:
+        telegram_settings = config.get("telegram_sources", {})
+        if isinstance(telegram_settings, dict):
+            handles = telegram_settings.get("candidate_source_handles")
+    return {
+        normalize_channel_handle(handle)
+        for handle in (handles if isinstance(handles, list) else [])
+        if normalize_channel_handle(handle)
+    }
+
+
+def message_reference_datetime(message: dict[str, object], timezone_name: str) -> datetime | None:
+    for key in ("posted_at", "collected_at", "edited_at"):
+        parsed = parse_datetime(message.get(key), timezone_name)
+        if parsed:
+            return parsed
+    return None
+
+
+def message_public_url(message: dict[str, object]) -> str:
+    url = str(message.get("message_url") or "").strip()
+    if url:
+        return url
+    handle = normalize_channel_handle(message.get("handle") or message.get("username") or message.get("channel_handle"))
+    message_id = str(message.get("telegram_message_id") or message.get("id") or "").strip()
+    if handle and message_id:
+        return f"https://t.me/{handle}/{message_id}"
+    return ""
+
+
+def benchmark_title_from_message(message: dict[str, object], url: str) -> str:
+    text = str(message.get("text") or message.get("normalized_text") or "")
+    text = re.sub(r"https?://\S+", " ", text)
+    for line in text.splitlines():
+        cleaned = compact(line, max_chars=120)
+        if len(cleaned) >= 8:
+            return cleaned
+    host = re.sub(r"^www\.", "", re.sub(r"^https?://", "", url).split("/", 1)[0])
+    return host or "Telegram shared URL"
+
+
+def build_benchmark_coverage(
+    stories: list[dict[str, object]],
+    state: dict[str, object],
+    config: dict[str, object],
+    start_at: datetime,
+    end_at: datetime,
+) -> dict[str, object]:
+    handles = benchmark_handles(config)
+    if not handles:
+        return {"enabled": False, "handles": [], "url_count": 0, "matched_count": 0, "missing_count": 0, "coverage_rate": 0.0, "missing": []}
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    story_hashes = story_url_hashes(stories)
+    status_index = article_status_index(state)
+    max_missing = int(story_review_config(config).get("benchmark_max_missing", 12))
+    observed: dict[str, dict[str, object]] = {}
+    channels_by_hash: dict[str, set[str]] = defaultdict(set)
+    messages_by_hash: dict[str, list[dict[str, object]]] = defaultdict(list)
+
+    for message in state.get("telegram_source_messages", []):
+        if not isinstance(message, dict) or message.get("deleted_at"):
+            continue
+        handle = normalize_channel_handle(message.get("handle") or message.get("username") or message.get("channel_handle"))
+        if handle not in handles:
+            continue
+        message_dt = message_reference_datetime(message, timezone_name)
+        if message_dt and not (start_at <= message_dt <= end_at):
+            continue
+        raw_url_value = message.get("urls")
+        if isinstance(raw_url_value, list):
+            raw_urls = [str(url) for url in raw_url_value if str(url).strip()]
+        elif isinstance(raw_url_value, str) and raw_url_value.strip():
+            raw_urls = [raw_url_value.strip()]
+        else:
+            raw_urls = []
+        if not raw_urls:
+            raw_urls = extract_urls(str(message.get("text") or message.get("normalized_text") or ""))
+        for raw_url in raw_urls:
+            canonical_url = canonicalize_telegram_url(str(raw_url or ""))
+            if not canonical_url or is_boilerplate_signal_url(canonical_url):
+                continue
+            url_hash = canonical_url_hash(canonical_url)
+            channel_name = clean_text(message.get("channel_title") or message.get("title") or handle)
+            channels_by_hash[url_hash].add(channel_name or handle)
+            messages_by_hash[url_hash].append(message)
+            row = observed.setdefault(
+                url_hash,
+                {
+                    "url_hash": url_hash,
+                    "url": canonical_url,
+                    "title": benchmark_title_from_message(message, canonical_url),
+                    "first_seen_at": message_dt.isoformat() if message_dt else "",
+                    "latest_seen_at": message_dt.isoformat() if message_dt else "",
+                    "source_message_url": message_public_url(message),
+                    "source_handle": handle,
+                    "source_channel": channel_name or handle,
+                    "status": "not_in_state",
+                    "reason": "",
+                },
+            )
+            if message_dt:
+                current_latest = parse_datetime(row.get("latest_seen_at"), timezone_name)
+                if not current_latest or message_dt > current_latest:
+                    row["latest_seen_at"] = message_dt.isoformat()
+                    row["source_message_url"] = message_public_url(message)
+                    row["source_handle"] = handle
+                    row["source_channel"] = channel_name or handle
+                    row["title"] = benchmark_title_from_message(message, canonical_url)
+
+    rows = list(observed.values())
+    for row in rows:
+        url_hash = str(row.get("url_hash") or "")
+        status = status_index.get(url_hash, {})
+        if status:
+            row["status"] = status.get("status") or "unknown"
+            row["reason"] = status.get("reason") or ""
+            if status.get("title"):
+                row["article_title"] = status.get("title")
+        row["channel_count"] = len(channels_by_hash[url_hash])
+        row["message_count"] = len(messages_by_hash[url_hash])
+        row["channels"] = sorted(channels_by_hash[url_hash])[:6]
+        row["matched"] = url_hash in story_hashes
+        row["latest_label"] = story_date_label(parse_datetime(row.get("latest_seen_at"), timezone_name), timezone_name)
+
+    missing = [row for row in rows if not row.get("matched")]
+    missing.sort(key=lambda item: str(item.get("latest_seen_at") or ""), reverse=True)
+    matched_count = len(rows) - len(missing)
+    coverage_rate = round((matched_count / len(rows)) * 100, 1) if rows else 0.0
+    return {
+        "enabled": True,
+        "handles": sorted(handles),
+        "url_count": len(rows),
+        "matched_count": matched_count,
+        "missing_count": len(missing),
+        "coverage_rate": coverage_rate,
+        "missing": missing[:max_missing],
+    }
+
+
 def story_for_review(story: dict[str, object], timezone_name: str) -> dict[str, object]:
     links = story.get("links") if isinstance(story.get("links"), list) else []
     return {
@@ -339,6 +520,7 @@ def build_story_review(
     start_at: datetime,
     end_at: datetime,
     date_id: str,
+    state: dict[str, object] | None = None,
 ) -> dict[str, object]:
     settings = story_review_config(config)
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
@@ -392,6 +574,7 @@ def build_story_review(
         "candidate_hash": candidate_hash,
         "page_url": story_review_public_url(config),
         "candidates": candidates,
+        "benchmark_coverage": build_benchmark_coverage(stories, state or {}, config, start_at, end_at),
         "access_token_hash": token_hash(story_review_access_token()),
     }
 
@@ -447,12 +630,62 @@ def render_candidate_card(candidate: dict[str, object]) -> str:
     """
 
 
+def render_benchmark_coverage(coverage: dict[str, object]) -> str:
+    if not bool(coverage.get("enabled")):
+        return ""
+    missing = coverage.get("missing") if isinstance(coverage.get("missing"), list) else []
+    handles = ", ".join(str(handle) for handle in coverage.get("handles", []) if handle) if isinstance(coverage.get("handles"), list) else ""
+    missing_items = "\n".join(
+        f"""
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>{escape(clean_text(item.get("latest_label") or ""))}</span>
+              <span>{escape(clean_text(item.get("source_channel") or item.get("source_handle") or ""))}</span>
+              <span>{escape(clean_text(item.get("status") or "not_in_state"))}</span>
+              <span>{escape(str(item.get("message_count") or 0))} mentions · {escape(str(item.get("channel_count") or 0))} channels</span>
+            </div>
+            <h3><a href="{escape(str(item.get("url") or ""), quote=True)}" target="_blank" rel="noopener">{escape(clean_text(item.get("article_title") or item.get("title") or item.get("url")))}</a></h3>
+            <p>{escape(clean_text(item.get("reason") or "Daily story에 반영되지 않은 benchmark 공유 URL입니다."))}</p>
+            <div class="benchmark-item__links">
+              <a href="{escape(str(item.get("source_message_url") or ""), quote=True)}" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>{escape(", ".join(str(channel) for channel in item.get("channels", []) if channel) if isinstance(item.get("channels"), list) else "")}</span>
+            </div>
+          </article>
+        """
+        for item in missing
+        if isinstance(item, dict)
+    )
+    if not missing_items:
+        missing_items = '<div class="empty benchmark-empty">benchmark 채널 공유 URL이 모두 데일리에 반영됐습니다.</div>'
+    return f"""
+      <section class="benchmark">
+        <div class="benchmark__head">
+          <div>
+            <h2>Benchmark 누락 점검</h2>
+            <p>기준 채널: {escape(handles or "-")}</p>
+          </div>
+          <div class="benchmark__stats">
+            <span>URL {escape(str(coverage.get("url_count") or 0))}건</span>
+            <span>반영 {escape(str(coverage.get("matched_count") or 0))}건</span>
+            <span>누락 {escape(str(coverage.get("missing_count") or 0))}건</span>
+            <span>커버리지 {escape(str(coverage.get("coverage_rate") or 0.0))}%</span>
+          </div>
+        </div>
+        <div class="benchmark__list">
+          {missing_items}
+        </div>
+      </section>
+    """
+
+
 def render_story_review_html(review: dict[str, object], *, logo_html: str = "") -> str:
     access_hash = str(review.get("access_token_hash") or "")
     candidates = review.get("candidates") if isinstance(review.get("candidates"), list) else []
     cards = "\n".join(render_candidate_card(candidate) for candidate in candidates if isinstance(candidate, dict))
     if not cards:
         cards = '<div class="empty">오늘은 우선 검토할 분리 후보가 없습니다.</div>'
+    benchmark_coverage = review.get("benchmark_coverage") if isinstance(review.get("benchmark_coverage"), dict) else {}
+    benchmark_html = render_benchmark_coverage(benchmark_coverage)
     data_json = json.dumps(
         {
             "accessTokenHash": access_hash,
@@ -488,6 +721,18 @@ def render_story_review_html(review: dict[str, object], *, logo_html: str = "") 
     .content {{ display:none; margin-top:26px; }}
     .content.is-open {{ display:block; }}
     .toolbar {{ display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid var(--line); padding:0 0 14px; margin-bottom:18px; }}
+    .benchmark {{ border:1px solid var(--line); background:#fff; margin:0 0 24px; padding:18px; }}
+    .benchmark__head {{ display:flex; justify-content:space-between; gap:16px; align-items:flex-start; border-bottom:1px solid var(--line); padding-bottom:14px; }}
+    .benchmark h2 {{ margin:0 0 6px; font-size:22px; }}
+    .benchmark p {{ margin:0; color:var(--muted); line-height:1.55; }}
+    .benchmark__stats {{ display:flex; flex-wrap:wrap; gap:7px; justify-content:flex-end; }}
+    .benchmark__stats span, .benchmark-item__meta span {{ border:1px solid var(--line); border-radius:999px; padding:6px 9px; color:#3b245f; font-size:12px; font-weight:850; background:var(--soft); }}
+    .benchmark__list {{ display:grid; gap:10px; margin-top:14px; }}
+    .benchmark-item {{ border-left:3px solid var(--accent); background:#fdfcff; padding:12px; }}
+    .benchmark-item__meta {{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }}
+    .benchmark-item h3 {{ margin:0 0 7px; font-size:17px; line-height:1.35; }}
+    .benchmark-item p {{ margin:0 0 8px; color:#4a4058; }}
+    .benchmark-item__links {{ display:flex; justify-content:space-between; gap:10px; color:var(--muted); font-size:12px; }}
     .candidate {{ border-top:3px solid var(--accent); background:#fff; margin:18px 0 26px; padding:18px; box-shadow:0 18px 45px rgba(80, 45, 130, .06); }}
     .candidate.is-done {{ opacity:.58; }}
     .candidate__head {{ display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }}
@@ -509,7 +754,7 @@ def render_story_review_html(review: dict[str, object], *, logo_html: str = "") 
     @media (max-width:760px) {{
       main {{ padding:20px 14px 60px; }}
       .candidate__stories {{ grid-template-columns:1fr; }}
-      .toolbar, .candidate__head {{ flex-direction:column; align-items:stretch; }}
+      .toolbar, .candidate__head, .benchmark__head, .benchmark-item__links {{ flex-direction:column; align-items:stretch; }}
       .story-mini h3 {{ font-size:18px; }}
     }}
   </style>
@@ -536,6 +781,7 @@ def render_story_review_html(review: dict[str, object], *, logo_html: str = "") 
     </section>
 
     <section class="content" id="content">
+      {benchmark_html}
       <div class="toolbar">
         <div>
           <strong>검토 후보</strong>
@@ -651,6 +897,29 @@ def write_story_review_files(
         for candidate in candidates[:3]
         if isinstance(candidate, dict)
     ]
+    benchmark = review.get("benchmark_coverage") if isinstance(review.get("benchmark_coverage"), dict) else {}
+    if benchmark:
+        missing = benchmark.get("missing") if isinstance(benchmark.get("missing"), list) else []
+        meta["benchmark_coverage"] = {
+            "enabled": bool(benchmark.get("enabled")),
+            "handles": benchmark.get("handles") if isinstance(benchmark.get("handles"), list) else [],
+            "url_count": int(benchmark.get("url_count") or 0),
+            "matched_count": int(benchmark.get("matched_count") or 0),
+            "missing_count": int(benchmark.get("missing_count") or 0),
+            "coverage_rate": float(benchmark.get("coverage_rate") or 0.0),
+            "missing": [
+                {
+                    "title": item.get("article_title") or item.get("title") or "",
+                    "url": item.get("url") or "",
+                    "source_message_url": item.get("source_message_url") or "",
+                    "source_channel": item.get("source_channel") or item.get("source_handle") or "",
+                    "status": item.get("status") or "not_in_state",
+                    "reason": item.get("reason") or "",
+                }
+                for item in missing[:5]
+                if isinstance(item, dict)
+            ],
+        }
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     return [page_path, meta_path]
 
@@ -660,9 +929,13 @@ def story_review_message(review: dict[str, object], config: dict[str, object]) -
     page_url = str(review.get("page_url") or story_review_public_url(config))
     access_url = page_url + ("&" if "?" in page_url else "?") + "token=" + quote(token, safe="")
     candidates = review.get("candidates") if isinstance(review.get("candidates"), list) else []
+    benchmark = review.get("benchmark_coverage") if isinstance(review.get("benchmark_coverage"), dict) else {}
+    benchmark_missing = int(benchmark.get("missing_count") or 0)
+    benchmark_total = int(benchmark.get("url_count") or 0)
+    benchmark_rate = float(benchmark.get("coverage_rate") or 0.0)
     lines = [
         "<b>묶음 후보 리뷰</b>",
-        f"{escape(str(review.get('date_id') or ''))} · 후보 {int(review.get('candidate_count') or 0)}건",
+        f"{escape(str(review.get('date_id') or ''))} · 분리 후보 {int(review.get('candidate_count') or 0)}건 · benchmark 누락 {benchmark_missing}/{benchmark_total}건 ({benchmark_rate:.1f}%)",
     ]
     for index, candidate in enumerate(candidates[:3], start=1):
         left = candidate.get("left") if isinstance(candidate.get("left"), dict) else {}
@@ -671,6 +944,16 @@ def story_review_message(review: dict[str, object], config: dict[str, object]) -
             f"{index}. {escape(compact(left.get('title'), 34))} ↔ {escape(compact(right.get('title'), 34))} "
             f"({escape(str(candidate.get('score') or ''))})"
         )
+    missing = benchmark.get("missing") if isinstance(benchmark.get("missing"), list) else []
+    if missing:
+        lines.append("")
+        lines.append("<b>Benchmark 누락 상위</b>")
+        for index, item in enumerate(missing[:3], start=1):
+            if not isinstance(item, dict):
+                continue
+            title = compact(item.get("title") or item.get("article_title") or item.get("url"), 44)
+            url = str(item.get("url") or "")
+            lines.append(f"{index}. {html_link(title, url) if url else escape(title)}")
     lines.append("")
     lines.append(html_link("관리자 페이지에서 후보 검토", access_url))
     return "\n".join(lines).strip()
@@ -696,7 +979,9 @@ def send_story_review(root: Path | None = None) -> dict[str, int]:
     latest = load_latest_review(project_root)
     if not latest:
         return {"story_review_sent": 0, "story_review_failed": 0, "story_review_skipped": 1}
-    if int(latest.get("candidate_count") or 0) <= 0 and not bool(story_review_config(config).get("send_empty", False)):
+    benchmark = latest.get("benchmark_coverage") if isinstance(latest.get("benchmark_coverage"), dict) else {}
+    benchmark_missing = int(benchmark.get("missing_count") or 0)
+    if int(latest.get("candidate_count") or 0) <= 0 and benchmark_missing <= 0 and not bool(story_review_config(config).get("send_empty", False)):
         return {"story_review_sent": 0, "story_review_failed": 0, "story_review_skipped": 1}
     if not story_review_access_token():
         return {"story_review_sent": 0, "story_review_failed": 0, "story_review_skipped": 1}

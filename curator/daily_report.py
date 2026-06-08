@@ -5825,7 +5825,7 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
     )
     telegram_html = render_telegram_daily_html(stories, state, config, start_at, end_at, date_id, report_url)
     search_html = render_search_html(config, start_at, end_at, date_id, report_url)
-    story_review = build_story_review(stories, config, start_at, end_at, date_id)
+    story_review = build_story_review(stories, config, start_at, end_at, date_id, state)
     return {
         "config": config,
         "date_id": date_id,

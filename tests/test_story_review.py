@@ -11,6 +11,7 @@ from curator.story_review import (
     text_has_encoding_damage,
     token_hash,
 )
+from curator.normalize import canonical_url_hash
 
 
 def story(title: str, source: str, url: str, now: datetime, summary: str = "") -> dict[str, object]:
@@ -152,6 +153,93 @@ def test_story_review_message_uses_tokenized_admin_link(monkeypatch) -> None:
     assert "묶음 후보 리뷰" in message
     assert "token=review-token" in message
     assert "관리자 페이지에서 후보 검토" in message
+
+
+def test_story_review_includes_benchmark_coverage_for_reference_channel() -> None:
+    now = datetime(2026, 6, 8, 8, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    start_at = now - timedelta(days=1)
+    config = {
+        "timezone": "Asia/Seoul",
+        "public_feed_url": "https://news.bside.ai/feed.xml",
+        "telegram_sources": {"candidate_source_handles": ["activistkorea"]},
+        "story_review": {"min_score": 90, "benchmark_max_missing": 5},
+    }
+    stories = [
+        story(
+            "Matched governance article",
+            "NEWS",
+            "https://example.com/matched?utm_source=feed",
+            now,
+        )
+    ]
+    state = {
+        "articles": [
+            {
+                "canonical_url": "https://example.com/missing",
+                "canonical_url_hash": canonical_url_hash("https://example.com/missing"),
+                "title": "Missing benchmark article",
+                "status": "rejected",
+                "reason": "low_relevance",
+            }
+        ],
+        "telegram_source_messages": [
+            {
+                "handle": "activistkorea",
+                "channel_title": "Activist Korea",
+                "telegram_message_id": 10,
+                "posted_at": (now - timedelta(hours=2)).isoformat(),
+                "text": "Matched governance article https://example.com/matched?utm_medium=tg",
+                "urls": ["https://example.com/matched?utm_medium=tg"],
+            },
+            {
+                "handle": "activistkorea",
+                "channel_title": "Activist Korea",
+                "telegram_message_id": 11,
+                "posted_at": (now - timedelta(hours=1)).isoformat(),
+                "text": "Missing benchmark article https://example.com/missing",
+                "urls": ["https://example.com/missing"],
+            },
+        ],
+    }
+
+    review = build_story_review(stories, config, start_at, now, "2026-06-08", state)
+    coverage = review["benchmark_coverage"]  # type: ignore[index]
+
+    assert coverage["url_count"] == 2  # type: ignore[index]
+    assert coverage["matched_count"] == 1  # type: ignore[index]
+    assert coverage["missing_count"] == 1  # type: ignore[index]
+    assert coverage["coverage_rate"] == 50.0  # type: ignore[index]
+    assert coverage["missing"][0]["status"] == "rejected"  # type: ignore[index]
+    assert coverage["missing"][0]["reason"] == "low_relevance"  # type: ignore[index]
+
+    html = render_story_review_html(review)
+    assert "Benchmark 누락 점검" in html
+    assert "Missing benchmark article" in html
+
+
+def test_story_review_message_mentions_benchmark_missing(monkeypatch) -> None:
+    monkeypatch.setenv("STORY_REVIEW_ACCESS_TOKEN", "review-token")
+    config = {"public_feed_url": "https://news.bside.ai/feed.xml"}
+    message = story_review_message(
+        {
+            "date_id": "2026-06-08",
+            "candidate_count": 0,
+            "page_url": "https://news.bside.ai/feed/story-review.html",
+            "candidates": [],
+            "benchmark_coverage": {
+                "url_count": 2,
+                "matched_count": 1,
+                "missing_count": 1,
+                "coverage_rate": 50.0,
+                "missing": [{"title": "Missing benchmark article", "url": "https://example.com/missing"}],
+            },
+        },
+        config,
+    )
+
+    assert "benchmark 누락 1/2건" in message
+    assert "Benchmark 누락 상위" in message
+    assert "Missing benchmark article" in message
 
 
 def test_story_review_skips_encoding_damaged_titles() -> None:
