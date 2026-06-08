@@ -1,124 +1,129 @@
 {
-  "date_id": "2026-06-08",
-  "generated_at": "2026-06-08T14:26:47.414093+09:00",
-  "start_at": "2026-06-07T14:24:47.978698+09:00",
-  "end_at": "2026-06-08T14:24:47.978698+09:00",
-  "start_label": "2026-06-07 14:24 KST",
-  "end_label": "2026-06-08 14:24 KST",
-  "candidate_count": 3,
-  "candidate_hash": "44419a8100cdcd18",
+  "date_id": "2026-06-09",
+  "generated_at": "2026-06-09T07:00:08.032714+09:00",
+  "start_at": "2026-06-08T06:56:06.001218+09:00",
+  "end_at": "2026-06-09T06:56:06.001218+09:00",
+  "start_label": "2026-06-08 06:56 KST",
+  "end_label": "2026-06-09 06:56 KST",
+  "candidate_count": 12,
+  "candidate_hash": "ea49ecb059f9e1c4",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "098868666735",
-      "score": 84.3,
+      "id": "1f3267558d87",
+      "score": 91.4,
       "left": {
-        "id": "story-10",
-        "title": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH",
-        "summary": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH - 한국경제 https://www.hankyung.com/amp/2026060822806",
+        "id": "story-37",
+        "title": "고려아연, 지배구조 핵심지표 모두 충족…상장사 최상위 수준",
+        "summary": "고려아연, 지배구조 핵심지표 모두 충족…\"상장사 최상위 수준\" - Daum https://v.daum.net/v/20260608152351544",
         "category": "밸류업·주주환원",
-        "datetime": "06.08 10:44",
-        "source_line": "HANKYUNG",
+        "datetime": "06.08 20:28",
+        "source_line": "다음뉴스",
         "link_count": 1,
-        "url": "https://www.hankyung.com/amp/2026060822806",
+        "url": "https://v.daum.net/v/20260608152351544",
         "links": [
           {
-            "source": "HANKYUNG",
-            "title": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH",
-            "url": "https://www.hankyung.com/amp/2026060822806"
+            "source": "다음뉴스",
+            "title": "고려아연, 지배구조 핵심지표 모두 충족…상장사 최상위 수준",
+            "url": "https://v.daum.net/v/20260608152351544"
           }
         ]
       },
       "right": {
-        "id": "story-18",
-        "title": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감",
-        "summary": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감 - 한국정경신문 https://kpenews.com/View.aspx?No=4103612",
+        "id": "story-39",
+        "title": "고려아연, 지배구조 핵심지표 만점… 주총·배당 보완해 주주가치 극대화",
+        "summary": "고려아연, 지배구조 핵심지표 '만점'… 주총·배당 보완해 주주가치 극대화 - 동아일보 https://www.donga.com/news/Economy/article/all/20260608/134072205/1",
         "category": "밸류업·주주환원",
-        "datetime": "06.08 09:00",
-        "source_line": "KPENEWS",
+        "datetime": "06.08 20:28",
+        "source_line": "DONGA",
         "link_count": 1,
-        "url": "https://kpenews.com/View.aspx?No=4103612",
+        "url": "https://www.donga.com/news/Economy/article/all/20260608/134072205/1",
         "links": [
           {
-            "source": "KPENEWS",
-            "title": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감",
-            "url": "https://kpenews.com/View.aspx?No=4103612"
+            "source": "DONGA",
+            "title": "고려아연, 지배구조 핵심지표 만점… 주총·배당 보완해 주주가치 극대화",
+            "url": "https://www.donga.com/news/Economy/article/all/20260608/134072205/1"
           }
         ]
       }
     },
     {
-      "id": "4b270d663cee",
-      "score": 83.3,
+      "id": "cff41a02e016",
+      "score": 90.3,
       "left": {
-        "id": "story-16",
-        "title": "밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)",
-        "summary": "밑 빠진 독에 '밸류업' 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑) https://www.ilovepc.co.kr/news/articleView.html?idxno=59610",
+        "id": "story-4",
+        "title": "스튜어드십 코드 10년 만에 손질…이억원 기관투자자, 자율과 책임 균형 이뤄야",
+        "summary": "스튜어드십 코드가 기관투자자의 책임투자 범위를 확대하고 이행 점검 체계를 도입하는 등 도입 10년 만에 전면적으로 개편된다. 기업가치 제고와 자본시장 선진화를 위해 기관투자자의 적극적인 주주활동을 뒷받침하겠다는 취지다. 8일 서울 여의도 한국거래소에서 열린 '스튜어드십 코드 개정 공청…",
         "category": "밸류업·주주환원",
-        "datetime": "06.08 10:44",
-        "source_line": "ILOVEPC",
-        "link_count": 1,
-        "url": "https://www.ilovepc.co.kr/news/articleView.html?idxno=59610",
+        "datetime": "06.08 18:07",
+        "source_line": "AJUNEWS · INEWS24",
+        "link_count": 2,
+        "url": "https://www.ajunews.com/view/20260608180548045",
         "links": [
           {
-            "source": "ILOVEPC",
-            "title": "밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)",
-            "url": "https://www.ilovepc.co.kr/news/articleView.html?idxno=59610"
+            "source": "AJUNEWS",
+            "title": "스튜어드십 코드 10년 만에 손질…이억원 기관투자자, 자율과 책임 균형 이뤄야",
+            "url": "https://www.ajunews.com/view/20260608180548045"
+          },
+          {
+            "source": "INEWS24",
+            "title": "스튜어드십 코드 최초 개정…수탁자 책임 강화",
+            "url": "https://www.inews24.com/view/1974730"
           }
         ]
       },
       "right": {
-        "id": "story-18",
-        "title": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감",
-        "summary": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감 - 한국정경신문 https://kpenews.com/View.aspx?No=4103612",
+        "id": "story-19",
+        "title": "기관투자자가 밸류업 핵심 파트너…스튜어드십 코드 10년 만에 대수술",
+        "summary": "\"기관투자자가 밸류업 핵심 파트너\"…스튜어드십 코드 10년 만에 대수술 우먼타임스",
         "category": "밸류업·주주환원",
-        "datetime": "06.08 09:00",
-        "source_line": "KPENEWS",
+        "datetime": "06.08 20:02",
+        "source_line": "우먼타임스",
         "link_count": 1,
-        "url": "https://kpenews.com/View.aspx?No=4103612",
+        "url": "https://news.google.com/rss/articles/CBMicEFVX3lxTFB2al9Ia3ozV2lHQV9xZk14bnhaVG1OeWZ4X3F6VnRpLXczZjBqZkVfb09UelNzRjRDdmlPakxMUkQyLVA3UHZwYUZTVTJQYzc5bjd3NjFrSFJmbXNMNVZ0Q1VzSURxX1pQVXQ1eFZhelHSAXRBVV95cUxQTUhnRDFVd3dlbmNZTjdPOWk3UUt3YldNcExqNTd0ZnlnVUFycDNQcVVwZWZTMWtMOExFa1ZpOUtNMWI2bGFPTGNMWV80UHR3WVpwVUVXTVBPV0ZNaDNEWDNZend4TzlPZXJ0amFsNjdsdzh5bQ?oc=5",
         "links": [
           {
-            "source": "KPENEWS",
-            "title": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감",
-            "url": "https://kpenews.com/View.aspx?No=4103612"
+            "source": "우먼타임스",
+            "title": "기관투자자가 밸류업 핵심 파트너…스튜어드십 코드 10년 만에 대수술",
+            "url": "https://news.google.com/rss/articles/CBMicEFVX3lxTFB2al9Ia3ozV2lHQV9xZk14bnhaVG1OeWZ4X3F6VnRpLXczZjBqZkVfb09UelNzRjRDdmlPakxMUkQyLVA3UHZwYUZTVTJQYzc5bjd3NjFrSFJmbXNMNVZ0Q1VzSURxX1pQVXQ1eFZhelHSAXRBVV95cUxQTUhnRDFVd3dlbmNZTjdPOWk3UUt3YldNcExqNTd0ZnlnVUFycDNQcVVwZWZTMWtMOExFa1ZpOUtNMWI2bGFPTGNMWV80UHR3WVpwVUVXTVBPV0ZNaDNEWDNZend4TzlPZXJ0amFsNjdsdzh5bQ?oc=5"
           }
         ]
       }
     },
     {
-      "id": "e62a73a75c3b",
-      "score": 82.6,
+      "id": "99bba4484446",
+      "score": 84.9,
       "left": {
-        "id": "story-10",
-        "title": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH",
-        "summary": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH - 한국경제 https://www.hankyung.com/amp/2026060822806",
+        "id": "story-35",
+        "title": "영풍, 고려아연 지배구조 개선 외쳤지만… 핵심지표준수율은 고려아연과 현격한 격차",
+        "summary": "영풍, 고려아연 지배구조 개선 외쳤지만… 핵심지표준수율은 고려아연과 현격한 격차 - S저널 https://www.s-journal.co.kr/news/articleView.html?idxno=41602",
         "category": "밸류업·주주환원",
-        "datetime": "06.08 10:44",
-        "source_line": "HANKYUNG",
+        "datetime": "06.08 22:26",
+        "source_line": "S-JOURNAL",
         "link_count": 1,
-        "url": "https://www.hankyung.com/amp/2026060822806",
+        "url": "https://www.s-journal.co.kr/news/articleView.html?idxno=41602",
         "links": [
           {
-            "source": "HANKYUNG",
-            "title": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH",
-            "url": "https://www.hankyung.com/amp/2026060822806"
+            "source": "S-JOURNAL",
+            "title": "영풍, 고려아연 지배구조 개선 외쳤지만… 핵심지표준수율은 고려아연과 현격한 격차",
+            "url": "https://www.s-journal.co.kr/news/articleView.html?idxno=41602"
           }
         ]
       },
       "right": {
-        "id": "story-16",
-        "title": "밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)",
-        "summary": "밑 빠진 독에 '밸류업' 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑) https://www.ilovepc.co.kr/news/articleView.html?idxno=59610",
+        "id": "story-39",
+        "title": "고려아연, 지배구조 핵심지표 만점… 주총·배당 보완해 주주가치 극대화",
+        "summary": "고려아연, 지배구조 핵심지표 '만점'… 주총·배당 보완해 주주가치 극대화 - 동아일보 https://www.donga.com/news/Economy/article/all/20260608/134072205/1",
         "category": "밸류업·주주환원",
-        "datetime": "06.08 10:44",
-        "source_line": "ILOVEPC",
+        "datetime": "06.08 20:28",
+        "source_line": "DONGA",
         "link_count": 1,
-        "url": "https://www.ilovepc.co.kr/news/articleView.html?idxno=59610",
+        "url": "https://www.donga.com/news/Economy/article/all/20260608/134072205/1",
         "links": [
           {
-            "source": "ILOVEPC",
-            "title": "밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)",
-            "url": "https://www.ilovepc.co.kr/news/articleView.html?idxno=59610"
+            "source": "DONGA",
+            "title": "고려아연, 지배구조 핵심지표 만점… 주총·배당 보완해 주주가치 극대화",
+            "url": "https://www.donga.com/news/Economy/article/all/20260608/134072205/1"
           }
         ]
       }
@@ -129,50 +134,50 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 110,
-    "matched_count": 34,
-    "missing_count": 76,
-    "coverage_rate": 30.9,
+    "url_count": 127,
+    "matched_count": 58,
+    "missing_count": 69,
+    "coverage_rate": 45.7,
     "missing": [
       {
-        "title": "기업가치 제고 공시 누적 731개사…밸류업 지수 사상 최고치 경신",
-        "url": "https://www.asiae.co.kr/article/2026060810543766317",
-        "source_message_url": "https://t.me/activistkorea/113167",
+        "title": "재팬 디스카운트 극복기…한국이 배울 것과 버릴 것 - 한경매거진&북",
+        "url": "https://magazine.hankyung.com/money/article/202605182522c",
+        "source_message_url": "https://t.me/activistkorea/113241",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "seen_title"
+        "status": "rejected",
+        "reason": "low_relevance"
       },
       {
-        "title": "밸류업 공시 731개사 돌파···지수 최고치·ETF 자금 유입 지속",
-        "url": "https://www.seoulfn.com/news/articleView.html?idxno=630583",
-        "source_message_url": "https://t.me/activistkorea/113165",
+        "title": "대통령·4부 요인 긴급 회동…투표용지 대란, 엄정 책임 물을 것 - 굿모닝충청",
+        "url": "https://www.goodmorningcc.com/news/articleView.html?idxno=447242",
+        "source_message_url": "https://t.me/activistkorea/113239",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "seen_title"
-      },
-      {
-        "title": "밸류업 지수, 지난달 사상 최고치 경신…코스피 수익률 크게 웃돌아",
-        "url": "https://news.nate.com/view/20260608n16399",
-        "source_message_url": "https://t.me/activistkorea/113166",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "seen_title"
+        "status": "rejected",
+        "reason": "low_relevance"
       },
       {
         "title": "밸류업 공시 731곳으로 확대…시총 83% 참여·지수도 사상 최고",
-        "url": "https://v.daum.net/v/20260608112321168",
-        "source_message_url": "https://t.me/activistkorea/113162",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "similar_title"
-      },
-      {
-        "title": "밸류업 공시 731곳 돌파…지난달 밸류업지수 사상 최고치 경신",
-        "url": "https://marketin.edaily.co.kr/News/ReadE?newsId=02955286645479752",
-        "source_message_url": "https://t.me/activistkorea/113163",
+        "url": "https://v.daum.net/v/4046ezV7lS",
+        "source_message_url": "https://t.me/activistkorea/113238",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "duplicate",
         "reason": "seen_title"
+      },
+      {
+        "title": "Welltower Inc (WELL) 주식 움직였습니다 하락 3.54%에 6월8일: 변동 원인",
+        "url": "https://www.tradingkey.com/kr/news/market-movers/261953610-market-movers-well-20260608",
+        "source_message_url": "https://t.me/activistkorea/113237",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "[리포트 브리핑]현대모비스, 아틀라스 핵심 공급사, 미국 액추에이터 공장 주목 목표가 ...",
+        "url": "https://www.newspim.com/news/view/20260608000089",
+        "source_message_url": "https://t.me/activistkorea/113235",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
       }
     ]
   }
