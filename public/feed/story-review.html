@@ -58,8 +58,8 @@
       <p class="lead">데일리 기사 중 “같은 이슈로 묶였어야 했는데 분리됐을 가능성이 있는 후보”를 자동으로 추립니다. 이 화면에서 후보를 확인하고, 필요한 경우 <code>data/story_rules.yaml</code> 또는 묶음 로직 보강 작업으로 이어갑니다.</p>
       <div class="meta">
         <span>2026-06-08</span>
-        <span>2026-06-07 06:17 KST - 2026-06-08 06:17 KST</span>
-        <span>후보 0건</span>
+        <span>2026-06-07 13:05 KST - 2026-06-08 13:05 KST</span>
+        <span>후보 3건</span>
       </div>
     </header>
 
@@ -79,11 +79,157 @@
         </div>
         <a href="latest.html">최신 데일리로 돌아가기</a>
       </div>
-      <div class="empty">오늘은 우선 검토할 분리 후보가 없습니다.</div>
+
+      <article class="candidate" data-candidate-id="098868666735">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 84.3</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 49.1</span>
+          <span>내용 54.4</span>
+          <span>회사 db손해보험</span>
+          <span>사건 com, https, 밸류업</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">밸류업·주주환원 · 06.08 10:44 · 1건</div>
+            <h3><a href="https://www.hankyung.com/amp/2026060822806" target="_blank" rel="noopener">DB손해보험, 고배당에 새 밸류업 정책 기대-NH</a></h3>
+            <p>DB손해보험, 고배당에 새 밸류업 정책 기대-NH - 한국경제 https://www.hankyung.com/amp/2026060822806</p>
+            <div class="story-mini__sources">HANKYUNG</div>
+            <ul><li><a href="https://www.hankyung.com/amp/2026060822806" target="_blank" rel="noopener">DB손해보험, 고배당에 새 밸류업 정책 기대-NH</a><span>HANKYUNG</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">밸류업·주주환원 · 06.08 09:00 · 1건</div>
+            <h3><a href="https://kpenews.com/View.aspx?No=4103612" target="_blank" rel="noopener">DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감</a></h3>
+            <p>DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감 - 한국정경신문 https://kpenews.com/View.aspx?No=4103612</p>
+            <div class="story-mini__sources">KPENEWS</div>
+            <ul><li><a href="https://kpenews.com/View.aspx?No=4103612" target="_blank" rel="noopener">DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감</a><span>KPENEWS</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_098868666735
+  tokens:
+    - com
+    - https
+    - 밸류업
+  require_any_groups:
+    - [db손해보험]
+    - [com, https, 밸류업]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
+
+      <article class="candidate" data-candidate-id="4b270d663cee">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 83.3</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 41.1</span>
+          <span>내용 43.7</span>
+          <span>회사 db손보, db손해보험</span>
+          <span>사건 db손보, https, 밸류업</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">밸류업·주주환원 · 06.08 10:44 · 1건</div>
+            <h3><a href="https://www.ilovepc.co.kr/news/articleView.html?idxno=59610" target="_blank" rel="noopener">밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)</a></h3>
+            <p>밑 빠진 독에 &#x27;밸류업&#x27; 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑) https://www.ilovepc.co.kr/news/articleView.html?idxno=59610</p>
+            <div class="story-mini__sources">ILOVEPC</div>
+            <ul><li><a href="https://www.ilovepc.co.kr/news/articleView.html?idxno=59610" target="_blank" rel="noopener">밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)</a><span>ILOVEPC</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">밸류업·주주환원 · 06.08 09:00 · 1건</div>
+            <h3><a href="https://kpenews.com/View.aspx?No=4103612" target="_blank" rel="noopener">DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감</a></h3>
+            <p>DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감 - 한국정경신문 https://kpenews.com/View.aspx?No=4103612</p>
+            <div class="story-mini__sources">KPENEWS</div>
+            <ul><li><a href="https://kpenews.com/View.aspx?No=4103612" target="_blank" rel="noopener">DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감</a><span>KPENEWS</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_4b270d663cee
+  tokens:
+    - db손보
+    - https
+    - 밸류업
+  require_any_groups:
+    - [db손보, db손해보험]
+    - [db손보, https, 밸류업]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
+
+      <article class="candidate" data-candidate-id="e62a73a75c3b">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 82.6</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 40.0</span>
+          <span>내용 39.8</span>
+          <span>회사 db손해보험</span>
+          <span>사건 https, www, 기대, 밸류업</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">밸류업·주주환원 · 06.08 10:44 · 1건</div>
+            <h3><a href="https://www.hankyung.com/amp/2026060822806" target="_blank" rel="noopener">DB손해보험, 고배당에 새 밸류업 정책 기대-NH</a></h3>
+            <p>DB손해보험, 고배당에 새 밸류업 정책 기대-NH - 한국경제 https://www.hankyung.com/amp/2026060822806</p>
+            <div class="story-mini__sources">HANKYUNG</div>
+            <ul><li><a href="https://www.hankyung.com/amp/2026060822806" target="_blank" rel="noopener">DB손해보험, 고배당에 새 밸류업 정책 기대-NH</a><span>HANKYUNG</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">밸류업·주주환원 · 06.08 10:44 · 1건</div>
+            <h3><a href="https://www.ilovepc.co.kr/news/articleView.html?idxno=59610" target="_blank" rel="noopener">밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)</a></h3>
+            <p>밑 빠진 독에 &#x27;밸류업&#x27; 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑) https://www.ilovepc.co.kr/news/articleView.html?idxno=59610</p>
+            <div class="story-mini__sources">ILOVEPC</div>
+            <ul><li><a href="https://www.ilovepc.co.kr/news/articleView.html?idxno=59610" target="_blank" rel="noopener">밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)</a><span>ILOVEPC</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_e62a73a75c3b
+  tokens:
+    - https
+    - www
+    - 기대
+  require_any_groups:
+    - [db손해보험]
+    - [https, www, 기대, 밸류업]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
     </section>
   </main>
   <script>
-    const REVIEW = {"accessTokenHash": "7bdf33924ae2f63973a383247e994a0681d0a288ca2df20d5f70c51a333def01", "candidateCount": 0, "candidateHash": "4f53cda18c2baa0c"};
+    const REVIEW = {"accessTokenHash": "7bdf33924ae2f63973a383247e994a0681d0a288ca2df20d5f70c51a333def01", "candidateCount": 3, "candidateHash": "44419a8100cdcd18"};
     const gate = document.getElementById('gate');
     const content = document.getElementById('content');
     const tokenInput = document.getElementById('tokenInput');

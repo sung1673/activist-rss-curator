@@ -1,12 +1,127 @@
 {
   "date_id": "2026-06-08",
-  "generated_at": "2026-06-08T06:18:48.018852+09:00",
-  "start_at": "2026-06-07T06:17:23.554391+09:00",
-  "end_at": "2026-06-08T06:17:23.554391+09:00",
-  "start_label": "2026-06-07 06:17 KST",
-  "end_label": "2026-06-08 06:17 KST",
-  "candidate_count": 0,
-  "candidate_hash": "4f53cda18c2baa0c",
+  "generated_at": "2026-06-08T13:06:44.776798+09:00",
+  "start_at": "2026-06-07T13:05:14.975562+09:00",
+  "end_at": "2026-06-08T13:05:14.975562+09:00",
+  "start_label": "2026-06-07 13:05 KST",
+  "end_label": "2026-06-08 13:05 KST",
+  "candidate_count": 3,
+  "candidate_hash": "44419a8100cdcd18",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": []
+  "candidates": [
+    {
+      "id": "098868666735",
+      "score": 84.3,
+      "left": {
+        "id": "story-7",
+        "title": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH",
+        "summary": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH - 한국경제 https://www.hankyung.com/amp/2026060822806",
+        "category": "밸류업·주주환원",
+        "datetime": "06.08 10:44",
+        "source_line": "HANKYUNG",
+        "link_count": 1,
+        "url": "https://www.hankyung.com/amp/2026060822806",
+        "links": [
+          {
+            "source": "HANKYUNG",
+            "title": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH",
+            "url": "https://www.hankyung.com/amp/2026060822806"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-13",
+        "title": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감",
+        "summary": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감 - 한국정경신문 https://kpenews.com/View.aspx?No=4103612",
+        "category": "밸류업·주주환원",
+        "datetime": "06.08 09:00",
+        "source_line": "KPENEWS",
+        "link_count": 1,
+        "url": "https://kpenews.com/View.aspx?No=4103612",
+        "links": [
+          {
+            "source": "KPENEWS",
+            "title": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감",
+            "url": "https://kpenews.com/View.aspx?No=4103612"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4b270d663cee",
+      "score": 83.3,
+      "left": {
+        "id": "story-12",
+        "title": "밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)",
+        "summary": "밑 빠진 독에 '밸류업' 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑) https://www.ilovepc.co.kr/news/articleView.html?idxno=59610",
+        "category": "밸류업·주주환원",
+        "datetime": "06.08 10:44",
+        "source_line": "ILOVEPC",
+        "link_count": 1,
+        "url": "https://www.ilovepc.co.kr/news/articleView.html?idxno=59610",
+        "links": [
+          {
+            "source": "ILOVEPC",
+            "title": "밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)",
+            "url": "https://www.ilovepc.co.kr/news/articleView.html?idxno=59610"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-13",
+        "title": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감",
+        "summary": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감 - 한국정경신문 https://kpenews.com/View.aspx?No=4103612",
+        "category": "밸류업·주주환원",
+        "datetime": "06.08 09:00",
+        "source_line": "KPENEWS",
+        "link_count": 1,
+        "url": "https://kpenews.com/View.aspx?No=4103612",
+        "links": [
+          {
+            "source": "KPENEWS",
+            "title": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감",
+            "url": "https://kpenews.com/View.aspx?No=4103612"
+          }
+        ]
+      }
+    },
+    {
+      "id": "e62a73a75c3b",
+      "score": 82.6,
+      "left": {
+        "id": "story-7",
+        "title": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH",
+        "summary": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH - 한국경제 https://www.hankyung.com/amp/2026060822806",
+        "category": "밸류업·주주환원",
+        "datetime": "06.08 10:44",
+        "source_line": "HANKYUNG",
+        "link_count": 1,
+        "url": "https://www.hankyung.com/amp/2026060822806",
+        "links": [
+          {
+            "source": "HANKYUNG",
+            "title": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH",
+            "url": "https://www.hankyung.com/amp/2026060822806"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-12",
+        "title": "밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)",
+        "summary": "밑 빠진 독에 '밸류업' 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑) https://www.ilovepc.co.kr/news/articleView.html?idxno=59610",
+        "category": "밸류업·주주환원",
+        "datetime": "06.08 10:44",
+        "source_line": "ILOVEPC",
+        "link_count": 1,
+        "url": "https://www.ilovepc.co.kr/news/articleView.html?idxno=59610",
+        "links": [
+          {
+            "source": "ILOVEPC",
+            "title": "밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)",
+            "url": "https://www.ilovepc.co.kr/news/articleView.html?idxno=59610"
+          }
+        ]
+      }
+    }
+  ]
 }
