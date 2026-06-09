@@ -1,129 +1,124 @@
 {
-  "date_id": "2026-06-09",
-  "generated_at": "2026-06-09T07:00:08.032714+09:00",
-  "start_at": "2026-06-08T06:56:06.001218+09:00",
-  "end_at": "2026-06-09T06:56:06.001218+09:00",
-  "start_label": "2026-06-08 06:56 KST",
-  "end_label": "2026-06-09 06:56 KST",
+  "date_id": "2026-06-10",
+  "generated_at": "2026-06-10T06:58:38.430473+09:00",
+  "start_at": "2026-06-09T06:54:12.201926+09:00",
+  "end_at": "2026-06-10T06:54:12.201926+09:00",
+  "start_label": "2026-06-09 06:54 KST",
+  "end_label": "2026-06-10 06:54 KST",
   "candidate_count": 12,
-  "candidate_hash": "ea49ecb059f9e1c4",
+  "candidate_hash": "5bb0080c11e3bc6e",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "1f3267558d87",
-      "score": 91.4,
+      "id": "eff928fae69b",
+      "score": 90.4,
       "left": {
-        "id": "story-37",
-        "title": "고려아연, 지배구조 핵심지표 모두 충족…상장사 최상위 수준",
-        "summary": "고려아연, 지배구조 핵심지표 모두 충족…\"상장사 최상위 수준\" - Daum https://v.daum.net/v/20260608152351544",
+        "id": "story-26",
+        "title": "KG그룹의 밸류업 카드, 핵심은 K Car 이후 모빌리티 재편",
+        "summary": "KG그룹의 밸류업 카드, 핵심은 K Car 이후 모빌리티 재편 - 프라임경제 https://m.newsprime.co.kr/section_view.html?no=736116&menu=index",
         "category": "밸류업·주주환원",
-        "datetime": "06.08 20:28",
-        "source_line": "다음뉴스",
+        "datetime": "06.09 21:17",
+        "source_line": "M",
         "link_count": 1,
-        "url": "https://v.daum.net/v/20260608152351544",
+        "url": "https://m.newsprime.co.kr/section_view.html?menu=index&no=736116",
         "links": [
           {
-            "source": "다음뉴스",
-            "title": "고려아연, 지배구조 핵심지표 모두 충족…상장사 최상위 수준",
-            "url": "https://v.daum.net/v/20260608152351544"
+            "source": "M",
+            "title": "KG그룹의 밸류업 카드, 핵심은 K Car 이후 모빌리티 재편",
+            "url": "https://m.newsprime.co.kr/section_view.html?menu=index&no=736116"
           }
         ]
       },
       "right": {
-        "id": "story-39",
-        "title": "고려아연, 지배구조 핵심지표 만점… 주총·배당 보완해 주주가치 극대화",
-        "summary": "고려아연, 지배구조 핵심지표 '만점'… 주총·배당 보완해 주주가치 극대화 - 동아일보 https://www.donga.com/news/Economy/article/all/20260608/134072205/1",
+        "id": "story-40",
+        "title": "KG그룹, 밸류업 로드맵 가동…K Car 시너지로 모빌리티 생태계 본격 구축",
+        "summary": "KG그룹, 밸류업 로드맵 가동…K Car 시너지로 모빌리티 생태계 본격 구축 | - 경인방송 뉴스 https://news.ifm.kr/news/articleViewAmp.html?idxno=472690",
         "category": "밸류업·주주환원",
-        "datetime": "06.08 20:28",
-        "source_line": "DONGA",
+        "datetime": "06.09 18:58",
+        "source_line": "NEWS",
         "link_count": 1,
-        "url": "https://www.donga.com/news/Economy/article/all/20260608/134072205/1",
+        "url": "https://news.ifm.kr/news/articleViewAmp.html?idxno=472690",
         "links": [
           {
-            "source": "DONGA",
-            "title": "고려아연, 지배구조 핵심지표 만점… 주총·배당 보완해 주주가치 극대화",
-            "url": "https://www.donga.com/news/Economy/article/all/20260608/134072205/1"
+            "source": "NEWS",
+            "title": "KG그룹, 밸류업 로드맵 가동…K Car 시너지로 모빌리티 생태계 본격 구축",
+            "url": "https://news.ifm.kr/news/articleViewAmp.html?idxno=472690"
           }
         ]
       }
     },
     {
-      "id": "cff41a02e016",
+      "id": "dc9a23b5b5f4",
       "score": 90.3,
       "left": {
-        "id": "story-4",
-        "title": "스튜어드십 코드 10년 만에 손질…이억원 기관투자자, 자율과 책임 균형 이뤄야",
-        "summary": "스튜어드십 코드가 기관투자자의 책임투자 범위를 확대하고 이행 점검 체계를 도입하는 등 도입 10년 만에 전면적으로 개편된다. 기업가치 제고와 자본시장 선진화를 위해 기관투자자의 적극적인 주주활동을 뒷받침하겠다는 취지다. 8일 서울 여의도 한국거래소에서 열린 '스튜어드십 코드 개정 공청…",
+        "id": "story-44",
+        "title": "KG그룹, 케이카 앞세워 모빌리티 밸류체인 강화…주주환원 50% 확대 | - 직썰",
+        "summary": "KG그룹, 케이카 앞세워 모빌리티 밸류체인 강화…주주환원 50% 확대 | - 직썰 https://www.ziksir.com/news/articleViewAmp.html?idxno=136271",
         "category": "밸류업·주주환원",
-        "datetime": "06.08 18:07",
-        "source_line": "AJUNEWS · INEWS24",
-        "link_count": 2,
-        "url": "https://www.ajunews.com/view/20260608180548045",
+        "datetime": "06.09 18:02",
+        "source_line": "ZIKSIR",
+        "link_count": 1,
+        "url": "https://www.ziksir.com/news/articleViewAmp.html?idxno=136271",
         "links": [
           {
-            "source": "AJUNEWS",
-            "title": "스튜어드십 코드 10년 만에 손질…이억원 기관투자자, 자율과 책임 균형 이뤄야",
-            "url": "https://www.ajunews.com/view/20260608180548045"
-          },
-          {
-            "source": "INEWS24",
-            "title": "스튜어드십 코드 최초 개정…수탁자 책임 강화",
-            "url": "https://www.inews24.com/view/1974730"
+            "source": "ZIKSIR",
+            "title": "KG그룹, 케이카 앞세워 모빌리티 밸류체인 강화…주주환원 50% 확대 | - 직썰",
+            "url": "https://www.ziksir.com/news/articleViewAmp.html?idxno=136271"
           }
         ]
       },
       "right": {
-        "id": "story-19",
-        "title": "기관투자자가 밸류업 핵심 파트너…스튜어드십 코드 10년 만에 대수술",
-        "summary": "\"기관투자자가 밸류업 핵심 파트너\"…스튜어드십 코드 10년 만에 대수술 우먼타임스",
+        "id": "story-45",
+        "title": "KG그룹, 100년 기업 청사진 공개...모빌리티 밸류체인·주주환원 강화 승부수 - 미디어펜",
+        "summary": "KG그룹, 100년 기업 청사진 공개...'모빌리티 밸류체인·주주환원 강화' 승부수 - 미디어펜 https://www.mediapen.com/news/view/1103422",
         "category": "밸류업·주주환원",
-        "datetime": "06.08 20:02",
-        "source_line": "우먼타임스",
+        "datetime": "06.09 15:55",
+        "source_line": "MEDIAPEN",
         "link_count": 1,
-        "url": "https://news.google.com/rss/articles/CBMicEFVX3lxTFB2al9Ia3ozV2lHQV9xZk14bnhaVG1OeWZ4X3F6VnRpLXczZjBqZkVfb09UelNzRjRDdmlPakxMUkQyLVA3UHZwYUZTVTJQYzc5bjd3NjFrSFJmbXNMNVZ0Q1VzSURxX1pQVXQ1eFZhelHSAXRBVV95cUxQTUhnRDFVd3dlbmNZTjdPOWk3UUt3YldNcExqNTd0ZnlnVUFycDNQcVVwZWZTMWtMOExFa1ZpOUtNMWI2bGFPTGNMWV80UHR3WVpwVUVXTVBPV0ZNaDNEWDNZend4TzlPZXJ0amFsNjdsdzh5bQ?oc=5",
+        "url": "https://www.mediapen.com/news/view/1103422",
         "links": [
           {
-            "source": "우먼타임스",
-            "title": "기관투자자가 밸류업 핵심 파트너…스튜어드십 코드 10년 만에 대수술",
-            "url": "https://news.google.com/rss/articles/CBMicEFVX3lxTFB2al9Ia3ozV2lHQV9xZk14bnhaVG1OeWZ4X3F6VnRpLXczZjBqZkVfb09UelNzRjRDdmlPakxMUkQyLVA3UHZwYUZTVTJQYzc5bjd3NjFrSFJmbXNMNVZ0Q1VzSURxX1pQVXQ1eFZhelHSAXRBVV95cUxQTUhnRDFVd3dlbmNZTjdPOWk3UUt3YldNcExqNTd0ZnlnVUFycDNQcVVwZWZTMWtMOExFa1ZpOUtNMWI2bGFPTGNMWV80UHR3WVpwVUVXTVBPV0ZNaDNEWDNZend4TzlPZXJ0amFsNjdsdzh5bQ?oc=5"
+            "source": "MEDIAPEN",
+            "title": "KG그룹, 100년 기업 청사진 공개...모빌리티 밸류체인·주주환원 강화 승부수 - 미디어펜",
+            "url": "https://www.mediapen.com/news/view/1103422"
           }
         ]
       }
     },
     {
-      "id": "99bba4484446",
-      "score": 84.9,
+      "id": "1d457622c4a7",
+      "score": 89.2,
       "left": {
-        "id": "story-35",
-        "title": "영풍, 고려아연 지배구조 개선 외쳤지만… 핵심지표준수율은 고려아연과 현격한 격차",
-        "summary": "영풍, 고려아연 지배구조 개선 외쳤지만… 핵심지표준수율은 고려아연과 현격한 격차 - S저널 https://www.s-journal.co.kr/news/articleView.html?idxno=41602",
+        "id": "story-38",
+        "title": "곽재선의 KG그룹, 주주환원 확대·케이카 시너지로 밸류업 시동",
+        "summary": "곽재선의 KG그룹, 주주환원 확대·케이카 시너지로 밸류업 시동 - 글로벌이코노믹 https://www.g-enews.com/article/Industry/2026/06/20260609135420605624debea800_1",
         "category": "밸류업·주주환원",
-        "datetime": "06.08 22:26",
-        "source_line": "S-JOURNAL",
+        "datetime": "06.09 18:58",
+        "source_line": "G-ENEWS",
         "link_count": 1,
-        "url": "https://www.s-journal.co.kr/news/articleView.html?idxno=41602",
+        "url": "https://www.g-enews.com/article/Industry/2026/06/20260609135420605624debea800_1",
         "links": [
           {
-            "source": "S-JOURNAL",
-            "title": "영풍, 고려아연 지배구조 개선 외쳤지만… 핵심지표준수율은 고려아연과 현격한 격차",
-            "url": "https://www.s-journal.co.kr/news/articleView.html?idxno=41602"
+            "source": "G-ENEWS",
+            "title": "곽재선의 KG그룹, 주주환원 확대·케이카 시너지로 밸류업 시동",
+            "url": "https://www.g-enews.com/article/Industry/2026/06/20260609135420605624debea800_1"
           }
         ]
       },
       "right": {
-        "id": "story-39",
-        "title": "고려아연, 지배구조 핵심지표 만점… 주총·배당 보완해 주주가치 극대화",
-        "summary": "고려아연, 지배구조 핵심지표 '만점'… 주총·배당 보완해 주주가치 극대화 - 동아일보 https://www.donga.com/news/Economy/article/all/20260608/134072205/1",
+        "id": "story-40",
+        "title": "KG그룹, 밸류업 로드맵 가동…K Car 시너지로 모빌리티 생태계 본격 구축",
+        "summary": "KG그룹, 밸류업 로드맵 가동…K Car 시너지로 모빌리티 생태계 본격 구축 | - 경인방송 뉴스 https://news.ifm.kr/news/articleViewAmp.html?idxno=472690",
         "category": "밸류업·주주환원",
-        "datetime": "06.08 20:28",
-        "source_line": "DONGA",
+        "datetime": "06.09 18:58",
+        "source_line": "NEWS",
         "link_count": 1,
-        "url": "https://www.donga.com/news/Economy/article/all/20260608/134072205/1",
+        "url": "https://news.ifm.kr/news/articleViewAmp.html?idxno=472690",
         "links": [
           {
-            "source": "DONGA",
-            "title": "고려아연, 지배구조 핵심지표 만점… 주총·배당 보완해 주주가치 극대화",
-            "url": "https://www.donga.com/news/Economy/article/all/20260608/134072205/1"
+            "source": "NEWS",
+            "title": "KG그룹, 밸류업 로드맵 가동…K Car 시너지로 모빌리티 생태계 본격 구축",
+            "url": "https://news.ifm.kr/news/articleViewAmp.html?idxno=472690"
           }
         ]
       }
@@ -134,47 +129,47 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 127,
-    "matched_count": 58,
-    "missing_count": 69,
-    "coverage_rate": 45.7,
+    "url_count": 121,
+    "matched_count": 66,
+    "missing_count": 55,
+    "coverage_rate": 54.5,
     "missing": [
       {
-        "title": "재팬 디스카운트 극복기…한국이 배울 것과 버릴 것 - 한경매거진&북",
-        "url": "https://magazine.hankyung.com/money/article/202605182522c",
-        "source_message_url": "https://t.me/activistkorea/113241",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "대통령·4부 요인 긴급 회동…투표용지 대란, 엄정 책임 물을 것 - 굿모닝충청",
-        "url": "https://www.goodmorningcc.com/news/articleView.html?idxno=447242",
-        "source_message_url": "https://t.me/activistkorea/113239",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "밸류업 공시 731곳으로 확대…시총 83% 참여·지수도 사상 최고",
-        "url": "https://v.daum.net/v/4046ezV7lS",
-        "source_message_url": "https://t.me/activistkorea/113238",
+        "title": "KG 곽재선 밸류업 가속페달…5년간 주주환원 50% 확대",
+        "url": "https://v.daum.net/v/WsKVlee4Xj?f=p",
+        "source_message_url": "https://t.me/activistkorea/113365",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "duplicate",
-        "reason": "seen_title"
+        "reason": "similar_title"
       },
       {
-        "title": "Welltower Inc (WELL) 주식 움직였습니다 하락 3.54%에 6월8일: 변동 원인",
-        "url": "https://www.tradingkey.com/kr/news/market-movers/261953610-market-movers-well-20260608",
-        "source_message_url": "https://t.me/activistkorea/113237",
+        "title": "임원만 아니면? 금융 중징계 CEO, 직급 바꿔 택갈이 재취업",
+        "url": "https://www.mt.co.kr/finance/2026/06/10/2026060920014988532",
+        "source_message_url": "https://t.me/activistkorea/113363",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "[리포트 브리핑]현대모비스, 아틀라스 핵심 공급사, 미국 액추에이터 공장 주목 목표가 ...",
-        "url": "https://www.newspim.com/news/view/20260608000089",
-        "source_message_url": "https://t.me/activistkorea/113235",
+        "title": "이억원 ACGA, 이례적 감사서한…韓자본시장 개혁성과 인정 - 연합뉴스 한민족센터",
+        "url": "https://www.koreancenter.or.kr/news/articleView.html?idxno=1364889",
+        "source_message_url": "https://t.me/activistkorea/113362",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "KG 곽재선 밸류업 가속페달…5년간 주주환원 50% 확대",
+        "url": "https://v.daum.net/v/WsKVlee4Xj",
+        "source_message_url": "https://t.me/activistkorea/113361",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "similar_title"
+      },
+      {
+        "title": "NH투자증권 차기 대표 선임 진통…현직 대표 부당 개입 의혹 파장",
+        "url": "https://news.einfomax.co.kr/news/articleView.html?idxno=4419106",
+        "source_message_url": "https://t.me/activistkorea/113360",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
