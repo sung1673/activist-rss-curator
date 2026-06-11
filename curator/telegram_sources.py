@@ -1047,6 +1047,8 @@ def telegram_candidate_articles(state: dict[str, object], config: dict[str, obje
                 "article_published_at": posted_iso or None,
                 "feed_name": f"Telegram:{handle}" if handle else "Telegram",
                 "feed_category": "telegram_reference",
+                "source_kind": "telegram_reference",
+                "original_resolution_status": "direct",
                 "telegram_candidate": True,
                 "telegram_source_handle": handle,
                 "telegram_source_title": message.get("channel_title") or "",

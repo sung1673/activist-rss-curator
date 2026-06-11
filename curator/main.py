@@ -9,7 +9,13 @@ from .cluster import cluster_articles
 from .config import article_domain_is_excluded, load_config
 from .dates import choose_publication_datetime, datetime_to_iso, get_timezone, is_too_old, now_in_timezone
 from .dedupe import dedupe_articles
-from .fetch import fetch_google_alerts_articles
+from .fetch import (
+    article_has_unresolved_google_news,
+    block_unresolved_google_news,
+    fetch_google_alerts_articles,
+    google_news_quality_summary,
+    resolve_google_news_originals_from_candidates,
+)
 from .priority import annotate_state_priorities, load_priority_overrides, priority_overrides_path
 from .relevance import relevance_details
 from .remote_api import sync_state_to_remote_api
@@ -83,6 +89,7 @@ def cluster_articles_allowed_by_policy(
         for article in list(cluster.get("articles", []))
         if not article_domain_is_excluded(article, config)
         and not article_is_before_previous_day(article, config, now)
+        and not (block_unresolved_google_news(config) and article_has_unresolved_google_news(article))
     ]
 
 
@@ -108,6 +115,17 @@ def prune_excluded_pending_articles(state: dict[str, object], config: dict[str, 
         state[state_key] = kept_clusters
 
 
+def state_resolution_candidate_articles(state: dict[str, object]) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    for key in ("articles", "rejected_articles"):
+        candidates.extend(article for article in list(state.get(key) or []) if isinstance(article, dict))
+    for cluster in list(state.get("pending_clusters") or []) + list(state.get("published_clusters") or []):
+        if not isinstance(cluster, dict):
+            continue
+        candidates.extend(article for article in list(cluster.get("articles") or []) if isinstance(article, dict))
+    return candidates
+
+
 def run(root: Path | None = None) -> dict[str, int]:
     project_root = root or PROJECT_ROOT
     config = load_config(project_root / "config.yaml")
@@ -121,14 +139,26 @@ def run(root: Path | None = None) -> dict[str, int]:
 
     fetched_articles = fetch_google_alerts_articles(config)
     fetched_articles.extend(telegram_candidate_articles(state, config, now))
+    fetched_articles = resolve_google_news_originals_from_candidates(
+        fetched_articles,
+        config,
+        extra_candidates=state_resolution_candidate_articles(state),
+    )
+    google_news_summary = google_news_quality_summary(fetched_articles)
     publish_levels = set(config.get("publish", {}).get("publish_levels", ["high", "medium"]))  # type: ignore[union-attr]
     max_age_days = int(config.get("date_filter", {}).get("max_article_age_days", 7))  # type: ignore[union-attr]
     allow_unknown = bool(config.get("date_filter", {}).get("allow_unknown_date", True))  # type: ignore[union-attr]
 
     candidates: list[dict[str, object]] = []
     rejected_count = 0
+    google_news_blocked = 0
     for raw_article in fetched_articles:
         article = prepare_article(raw_article, config)
+        if block_unresolved_google_news(config) and article_has_unresolved_google_news(article):
+            remember_rejected(state, article, now, "google_news_unresolved")
+            rejected_count += 1
+            google_news_blocked += 1
+            continue
         published_at, _ = choose_publication_datetime(
             article.get("article_published_at"),
             article.get("feed_published_at"),
@@ -186,6 +216,8 @@ def run(root: Path | None = None) -> dict[str, int]:
         "pending": len(state.get("pending_clusters", [])),
         "published_total": len(state.get("published_clusters", [])),
         "prioritized": priority_count,
+        "google_news_blocked": google_news_blocked,
+        **google_news_summary,
         **archive_summary,
         **telegram_source_summary,
         **telegram_summary,

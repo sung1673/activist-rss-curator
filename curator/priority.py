@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 import yaml
 
 from .dates import datetime_to_iso, parse_datetime
+from .fetch import article_has_unresolved_google_news, block_unresolved_google_news
 from .normalize import stable_hash
 
 
@@ -313,6 +314,24 @@ def priority_metadata(
     if hostname and hostname not in {"news.google.com", "www.google.com"}:
         score += 2
         reasons.append("direct_source_url")
+
+    source_kind = str(article.get("source_kind") or "").strip()
+    resolution_status = str(article.get("original_resolution_status") or "").strip()
+    if source_kind == "direct":
+        score += 4
+        reasons.append("source_direct")
+    elif source_kind == "telegram_reference":
+        score += 6
+        reasons.append("source_telegram_reference")
+    elif source_kind == "official":
+        score += 8
+        reasons.append("source_official")
+    elif source_kind == "google_discovery" and resolution_status in {"decoded", "title_matched"}:
+        score += 1
+        reasons.append(f"google_news_{resolution_status}")
+    if block_unresolved_google_news(config) and article_has_unresolved_google_news(article):
+        score -= 60
+        reasons.append("google_news_unresolved")
 
     story_key = story_key_for_article(article, cluster)
     suppress = reason in SUPPRESS_REASONS

@@ -7,13 +7,16 @@ from curator.fetch import (
     decode_google_news_links_in_state,
     fetch_google_alerts_articles,
     GoogleNewsDecodeResult,
+    article_has_unresolved_google_news,
     google_news_article_id,
     google_news_decoding_params,
     image_href,
     image_hrefs,
+    merge_image_candidates,
     image_url_from_entry,
     image_urls_from_entry,
     parse_google_news_batch_response,
+    resolve_google_news_originals_from_candidates,
     source_from_html,
     usable_image_url,
 )
@@ -46,6 +49,64 @@ def test_apply_decoded_google_news_url_replaces_canonical_link() -> None:
     assert decoded["canonical_url"] == "https://www.example.com/news/1"
     assert decoded["canonical_url_hash"] != "old"
     assert decoded["google_news_url"] == "https://news.google.com/rss/articles/CBMiABC"
+    assert decoded["original_resolution_status"] == "decoded"
+
+
+def test_title_fallback_resolves_google_news_from_same_source_candidate(config) -> None:  # type: ignore[no-untyped-def]
+    google_article = {
+        "title": "Shinhan chairman starts value-up IR in North America",
+        "clean_title": "Shinhan chairman starts value-up IR in North America",
+        "source": "Example News",
+        "canonical_url": "https://news.google.com/rss/articles/CBMiMATCH",
+        "canonical_url_hash": "old",
+        "feed_published_at": "2026-05-08T09:00:00+09:00",
+        "source_kind": "google_discovery",
+        "original_resolution_status": "unresolved",
+    }
+    direct_article = {
+        "title": "Shinhan chairman starts value-up IR in North America",
+        "clean_title": "Shinhan chairman starts value-up IR in North America",
+        "source": "Example News",
+        "canonical_url": "https://example.com/news/value-up-ir",
+        "canonical_url_hash": "origin",
+        "feed_published_at": "2026-05-08T09:03:00+09:00",
+        "image_url": "https://example.com/news/value-up-ir.jpg",
+    }
+
+    resolved = resolve_google_news_originals_from_candidates([google_article, direct_article], config)
+
+    assert resolved[0]["canonical_url"] == "https://example.com/news/value-up-ir"
+    assert resolved[0]["google_news_url"] == "https://news.google.com/rss/articles/CBMiMATCH"
+    assert resolved[0]["original_resolution_status"] == "title_matched"
+    assert resolved[0]["image_url"] == "https://example.com/news/value-up-ir.jpg"
+    assert not article_has_unresolved_google_news(resolved[0])
+
+
+def test_title_fallback_does_not_match_different_source(config) -> None:  # type: ignore[no-untyped-def]
+    google_article = {
+        "title": "Same looking headline about value-up",
+        "clean_title": "Same looking headline about value-up",
+        "source": "Example News",
+        "canonical_url": "https://news.google.com/rss/articles/CBMiMISS",
+        "canonical_url_hash": "old",
+        "feed_published_at": "2026-05-08T09:00:00+09:00",
+        "source_kind": "google_discovery",
+        "original_resolution_status": "unresolved",
+    }
+    other_source = {
+        "title": "Same looking headline about value-up",
+        "clean_title": "Same looking headline about value-up",
+        "source": "Other News",
+        "canonical_url": "https://other.example.com/news/value-up-ir",
+        "canonical_url_hash": "origin",
+        "feed_published_at": "2026-05-08T09:03:00+09:00",
+    }
+
+    resolved = resolve_google_news_originals_from_candidates([google_article, other_source], config)
+
+    assert resolved[0]["canonical_url"] == "https://news.google.com/rss/articles/CBMiMISS"
+    assert resolved[0]["original_resolution_status"] == "unresolved"
+    assert article_has_unresolved_google_news(resolved[0])
 
 
 def test_daum_page_source_is_extracted_from_site_name() -> None:
@@ -114,6 +175,17 @@ def test_usable_image_url_rejects_generic_or_pathless_images() -> None:
     assert not usable_image_url("https://image.edaily.co.kr/images/Photo/files/NP/S/2026/05/PS26051300123.jpg")
     assert not usable_image_url("https://www.edaily.co.kr/News/포토")
     assert usable_image_url("https://lh3.googleusercontent.com/proxy/real-image=s0-w300")
+
+
+def test_merge_image_candidates_keeps_existing_good_image_before_google_proxy() -> None:
+    article = {
+        "image_url": "https://publisher.example.com/images/article.jpg",
+        "image_candidates": ["https://publisher.example.com/images/article.jpg"],
+    }
+
+    merged = merge_image_candidates(article, ["https://lh3.googleusercontent.com/proxy/real-image=s0-w300-h170"])
+
+    assert merged[0] == "https://publisher.example.com/images/article.jpg"
 
 
 def test_fetch_respects_max_enrich_articles(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]

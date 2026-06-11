@@ -14,6 +14,7 @@ from .cluster import (
 )
 from .config import article_domain_is_excluded
 from .dates import format_kst, format_rfc822, parse_datetime
+from .fetch import article_has_unresolved_google_news, block_unresolved_google_news
 from .normalize import clean_title_text, strip_media_suffix
 from .relevance import relevance_details
 
@@ -142,6 +143,8 @@ def publishable_articles(cluster: dict[str, object], config: dict[str, object]) 
     )
     articles = []
     for article in list(cluster.get("articles", [])):
+        if block_unresolved_google_news(config) and article_has_unresolved_google_news(article):
+            continue
         if is_excluded_display_link(article, config):
             continue
         if article_current_relevance_level(article) not in publish_levels:

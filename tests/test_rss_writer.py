@@ -99,6 +99,48 @@ def test_google_news_fallback_uses_source_label_instead_of_news(config) -> None:
     assert article_source_label(article) == "한국경제"
 
 
+def test_unresolved_google_news_article_is_not_publishable(config, now) -> None:  # type: ignore[no-untyped-def]
+    state = {"pending_clusters": [], "published_clusters": []}
+    article = make_article(
+        "Google News unresolved article",
+        "https://news.google.com/rss/articles/CBMiUNRESOLVED",
+        source="Example News",
+        relevance_level="high",
+    )
+    article["source_kind"] = "google_discovery"
+    article["original_resolution_status"] = "unresolved"
+    article["google_news_url"] = article["canonical_url"]
+    cluster_articles([article], state, config, now)
+    cluster_articles([], state, config, now + timedelta(minutes=21))
+
+    rss = build_rss(state["published_clusters"], config, now + timedelta(minutes=21))
+
+    assert "<item>" not in rss
+    assert "news.google.com" not in rss
+
+
+def test_unresolved_google_news_block_can_be_disabled(config, now) -> None:  # type: ignore[no-untyped-def]
+    config.setdefault("fetch", {})["google_news_block_unresolved"] = False
+    config.setdefault("publish", {})["publish_levels"] = ["high", "medium", "low"]
+    state = {"pending_clusters": [], "published_clusters": []}
+    article = make_article(
+        "Google News unresolved article",
+        "https://news.google.com/rss/articles/CBMiUNRESOLVED",
+        source="Example News",
+        relevance_level="high",
+    )
+    article["source_kind"] = "google_discovery"
+    article["original_resolution_status"] = "unresolved"
+    article["google_news_url"] = article["canonical_url"]
+    cluster_articles([article], state, config, now)
+    cluster_articles([], state, config, now + timedelta(minutes=21))
+
+    rss = build_rss(state["published_clusters"], config, now + timedelta(minutes=21))
+
+    assert "<item>" in rss
+    assert "news.google.com" in rss
+
+
 def test_daum_article_uses_extracted_source_label(config) -> None:  # type: ignore[no-untyped-def]
     article = make_article(
         "금감원, 한화투자증권 검사",

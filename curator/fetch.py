@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import urljoin, urlsplit
@@ -20,6 +22,23 @@ from .relevance import relevance_details
 
 USER_AGENT = "activist-rss-curator/1.0 (+https://github.com/)"
 GOOGLE_NEWS_DECODE_ENDPOINT = "https://news.google.com/_/DotsSplashUi/data/batchexecute"
+GOOGLE_NEWS_HOST = "news.google.com"
+TITLE_MATCH_TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣]{2,}")
+TITLE_MATCH_STOPWORDS = {
+    "news",
+    "google",
+    "뉴스",
+    "기사",
+    "관련",
+    "보도",
+    "단독",
+    "종합",
+    "기획",
+    "속보",
+    "오늘",
+    "내일",
+    "이번",
+}
 
 
 @dataclass(frozen=True)
@@ -27,6 +46,15 @@ class GoogleNewsDecodeResult:
     decoded_url: str | None = None
     rate_limited: bool = False
     error: str = ""
+
+
+@dataclass(frozen=True)
+class OriginalUrlMatch:
+    article: dict[str, object]
+    score: int
+    title_score: int
+    overlap: int
+    reason: str
 
 
 def fetch_feed_xml(feed_url: str, timeout: float = 20.0) -> str:
@@ -57,6 +85,118 @@ def fetch_config_float(fetch_config: object, key: str, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def block_unresolved_google_news(config: dict[str, object]) -> bool:
+    fetch_config = config.get("fetch", {})
+    if not isinstance(fetch_config, dict):
+        return True
+    return bool(fetch_config.get("google_news_block_unresolved", True))
+
+
+def is_google_news_url(url: object) -> bool:
+    parsed = urlsplit(str(url or ""))
+    return (parsed.hostname or "").casefold() == GOOGLE_NEWS_HOST
+
+
+def source_kind_for_url(url: object, feed_meta: dict[str, str] | None = None) -> str:
+    if is_google_news_url(url):
+        return "google_discovery"
+    category = str((feed_meta or {}).get("category") or "").casefold()
+    if category == "telegram_reference":
+        return "telegram_reference"
+    if category in {"official", "disclosure", "dart", "krx"}:
+        return "official"
+    return "direct"
+
+
+def clean_source_key(value: object) -> str:
+    return re.sub(r"[^0-9a-z가-힣]+", "", str(value or "").casefold())
+
+
+def article_url(article: dict[str, object]) -> str:
+    return str(article.get("canonical_url") or article.get("link") or "")
+
+
+def article_source_domain(article: dict[str, object]) -> str:
+    return (urlsplit(article_url(article)).hostname or "").casefold().removeprefix("www.")
+
+
+def source_registry_entries(config: dict[str, object]) -> list[dict[str, object]]:
+    registry = config.get("source_registry", {})
+    if not isinstance(registry, dict) or not registry.get("enabled", True):
+        return []
+    entries = registry.get("sources", [])
+    return [entry for entry in entries if isinstance(entry, dict)]
+
+
+def source_registry_domains_for_label(label: object, config: dict[str, object]) -> set[str]:
+    label_key = clean_source_key(label)
+    if not label_key:
+        return set()
+    domains: set[str] = set()
+    for entry in source_registry_entries(config):
+        names = [entry.get("name")]
+        aliases = entry.get("aliases")
+        if isinstance(aliases, list):
+            names.extend(aliases)
+        if label_key not in {clean_source_key(name) for name in names if name}:
+            continue
+        raw_domains = entry.get("domains")
+        if isinstance(raw_domains, list):
+            domains.update(str(domain).casefold().removeprefix("www.") for domain in raw_domains if domain)
+    return domains
+
+
+def source_matches(article: dict[str, object], candidate: dict[str, object], config: dict[str, object]) -> bool:
+    article_source = clean_source_key(article.get("source"))
+    candidate_source = clean_source_key(candidate.get("source"))
+    if article_source and candidate_source and article_source == candidate_source:
+        return True
+    candidate_domain = article_source_domain(candidate)
+    if not candidate_domain:
+        return False
+    allowed_domains = source_registry_domains_for_label(article.get("source"), config)
+    return any(candidate_domain == domain or candidate_domain.endswith(f".{domain}") for domain in allowed_domains)
+
+
+def title_match_tokens(value: object) -> set[str]:
+    return {
+        token.casefold()
+        for token in TITLE_MATCH_TOKEN_PATTERN.findall(str(value or ""))
+        if token.casefold() not in TITLE_MATCH_STOPWORDS
+    }
+
+
+def title_similarity_score(left: object, right: object) -> int:
+    left_text = " ".join(str(left or "").split()).casefold()
+    right_text = " ".join(str(right or "").split()).casefold()
+    if not left_text or not right_text:
+        return 0
+    return int(round(SequenceMatcher(None, left_text, right_text).ratio() * 100))
+
+
+def article_resolution_datetime(article: dict[str, object], timezone_name: str):
+    for key in ("article_published_at", "feed_published_at", "published_at", "feed_updated_at", "seen_at"):
+        parsed = parse_datetime(article.get(key), timezone_name)
+        if parsed:
+            return parsed
+    return None
+
+
+def dates_are_near(
+    article: dict[str, object],
+    candidate: dict[str, object],
+    config: dict[str, object],
+) -> bool:
+    fetch_config = config.get("fetch", {})
+    window_days = fetch_config_int(fetch_config, "google_news_title_match_window_days", 7)
+    timezone_name = str(config.get("timezone") or "Asia/Seoul")
+    left_dt = article_resolution_datetime(article, timezone_name)
+    right_dt = article_resolution_datetime(candidate, timezone_name)
+    if not left_dt or not right_dt:
+        return True
+    return abs((left_dt - right_dt).total_seconds()) <= window_days * 86400
 
 
 def source_from_entry(entry: object, title_parts: dict[str, object], link: str) -> str:
@@ -119,6 +259,7 @@ def article_from_entry(
     summary = summary_text(str(getattr(entry, "summary", "") or ""))
     canonical = normalized_link
     image_candidates = image_urls_from_entry(entry, normalized_link)
+    source_kind = source_kind_for_url(normalized_link, feed_meta)
     article = {
         "title": raw_title,
         "clean_title": title_parts["clean_title"],
@@ -137,7 +278,11 @@ def article_from_entry(
         "article_published_at": None,
         "feed_name": feed_meta.get("name", ""),
         "feed_category": feed_meta.get("category", ""),
+        "source_kind": source_kind,
+        "original_resolution_status": "unresolved" if source_kind == "google_discovery" else "direct",
     }
+    if source_kind == "google_discovery":
+        article["google_news_url"] = normalized_link
     return article
 
 
@@ -349,6 +494,44 @@ def image_href_from_json_ld(soup: BeautifulSoup, base_url: str) -> str | None:
     return candidates[0] if candidates else None
 
 
+def image_quality_score(image_url: object) -> int:
+    url = str(image_url or "").strip()
+    if not usable_image_url(url):
+        return 100
+    lowered = url.casefold()
+    score = 0
+    if "googleusercontent.com" in lowered:
+        score += 12
+    if "logo" in lowered or "favicon" in lowered or "icon" in lowered:
+        score += 45
+    if "banner" in lowered or "promo" in lowered or "event" in lowered:
+        score += 35
+    if is_google_news_url(url):
+        score += 80
+    return score
+
+
+def merge_image_candidates(article: dict[str, object], new_candidates: Iterable[str]) -> list[str]:
+    ordered: list[str] = []
+    current_image = str(article.get("image_url") or "").strip()
+    if current_image:
+        ordered.append(current_image)
+    existing_candidates = article.get("image_candidates")
+    if isinstance(existing_candidates, list):
+        ordered.extend(str(value or "").strip() for value in existing_candidates)
+    ordered.extend(str(value or "").strip() for value in new_candidates)
+
+    unique_urls: list[str] = []
+    for image_url in ordered:
+        if (
+            image_url.startswith(("http://", "https://"))
+            and usable_image_url(image_url)
+            and image_url not in unique_urls
+        ):
+            unique_urls.append(image_url)
+    return sorted(unique_urls, key=lambda url: (image_quality_score(url), unique_urls.index(url)))
+
+
 def clean_page_source_name(value: object, base_url: str) -> str | None:
     text = " ".join(str(value or "").split()).strip()
     if not text:
@@ -503,6 +686,8 @@ def apply_decoded_google_news_url(article: dict[str, object], decoded_url: str |
     enriched["canonical_url"] = normalized_decoded
     enriched["canonical_url_hash"] = canonical_url_hash(normalized_decoded)
     enriched["google_news_decoded"] = True
+    enriched["original_resolution_status"] = "decoded"
+    enriched["original_resolution_score"] = 100
     return enriched
 
 
@@ -516,6 +701,160 @@ def should_decode_google_news_article(article: dict[str, object], config: dict[s
         str(article.get("summary") or ""),
     )
     return str(relevance.get("level") or "") in publish_levels
+
+
+def article_has_unresolved_google_news(article: dict[str, object]) -> bool:
+    url = article_url(article)
+    if not is_google_news_url(url):
+        return False
+    status = str(article.get("original_resolution_status") or "").strip()
+    if status in {"decoded", "title_matched"}:
+        return False
+    return not bool(article.get("google_news_decoded"))
+
+
+def title_fallback_candidate_score(
+    article: dict[str, object],
+    candidate: dict[str, object],
+    config: dict[str, object],
+) -> OriginalUrlMatch | None:
+    candidate_url = article_url(candidate)
+    if not candidate_url or is_google_news_url(candidate_url):
+        return None
+    if not source_matches(article, candidate, config):
+        return None
+    if not dates_are_near(article, candidate, config):
+        return None
+
+    article_title = article.get("clean_title") or article.get("title") or ""
+    candidate_title = candidate.get("clean_title") or candidate.get("title") or ""
+    title_score = title_similarity_score(article_title, candidate_title)
+    overlap = len(title_match_tokens(article_title) & title_match_tokens(candidate_title))
+    fetch_config = config.get("fetch", {})
+    threshold = fetch_config_int(fetch_config, "google_news_title_match_threshold", 86)
+    min_overlap = fetch_config_int(fetch_config, "google_news_title_match_min_overlap", 2)
+    if title_score < threshold:
+        return None
+    if overlap < min_overlap and title_score < 94:
+        return None
+    score = title_score + min(10, overlap * 2)
+    return OriginalUrlMatch(
+        article=candidate,
+        score=score,
+        title_score=title_score,
+        overlap=overlap,
+        reason=f"title:{title_score};overlap:{overlap};source_match",
+    )
+
+
+def best_title_fallback_match(
+    article: dict[str, object],
+    candidates: Iterable[dict[str, object]],
+    config: dict[str, object],
+) -> OriginalUrlMatch | None:
+    matches = [
+        match
+        for candidate in candidates
+        for match in [title_fallback_candidate_score(article, candidate, config)]
+        if match is not None
+    ]
+    if not matches:
+        return None
+    return max(matches, key=lambda match: (match.score, match.title_score, match.overlap))
+
+
+def apply_title_matched_original_url(article: dict[str, object], match: OriginalUrlMatch) -> dict[str, object]:
+    matched_article = match.article
+    matched_url = normalize_url(article_url(matched_article))
+    updated = dict(article)
+    google_url = article_url(article)
+    if is_google_news_url(google_url):
+        updated["google_news_url"] = google_url
+    updated["canonical_url"] = matched_url
+    updated["canonical_url_hash"] = canonical_url_hash(matched_url)
+    updated["original_resolution_status"] = "title_matched"
+    updated["original_resolution_score"] = match.score
+    updated["original_resolution_reason"] = match.reason
+    updated["source_kind"] = "google_discovery"
+    for key in ("source", "summary", "article_published_at", "feed_published_at", "feed_updated_at"):
+        if matched_article.get(key) and not updated.get(key):
+            updated[key] = matched_article.get(key)
+    if matched_article.get("source"):
+        updated["source"] = matched_article.get("source")
+    raw_candidates = matched_article.get("image_candidates")
+    matched_candidates = raw_candidates if isinstance(raw_candidates, list) else []
+    merged_images = merge_image_candidates(updated, [str(matched_article.get("image_url") or ""), *[str(value or "") for value in matched_candidates]])
+    if merged_images:
+        updated["image_candidates"] = merged_images
+        updated["image_url"] = merged_images[0]
+        updated["image_quality_score"] = image_quality_score(merged_images[0])
+    return updated
+
+
+def mark_unresolved_google_news(article: dict[str, object]) -> dict[str, object]:
+    if not is_google_news_url(article_url(article)):
+        return article
+    updated = dict(article)
+    updated.setdefault("google_news_url", article_url(article))
+    updated["source_kind"] = "google_discovery"
+    updated["original_resolution_status"] = "unresolved"
+    return updated
+
+
+def resolve_google_news_originals_from_candidates(
+    articles: list[dict[str, object]],
+    config: dict[str, object],
+    *,
+    extra_candidates: Iterable[dict[str, object]] | None = None,
+) -> list[dict[str, object]]:
+    fetch_config = config.get("fetch", {})
+    enabled = True
+    if isinstance(fetch_config, dict):
+        enabled = bool(fetch_config.get("google_news_title_fallback_enabled", True))
+    if not enabled:
+        return [mark_unresolved_google_news(article) for article in articles]
+
+    candidate_pool = [
+        candidate
+        for candidate in [*articles, *(list(extra_candidates or []))]
+        if isinstance(candidate, dict) and article_url(candidate) and not is_google_news_url(article_url(candidate))
+    ]
+    resolved: list[dict[str, object]] = []
+    for article in articles:
+        if not article_has_unresolved_google_news(article):
+            resolved.append(article)
+            continue
+        match = best_title_fallback_match(article, candidate_pool, config)
+        if match:
+            resolved.append(apply_title_matched_original_url(article, match))
+        else:
+            resolved.append(mark_unresolved_google_news(article))
+    return resolved
+
+
+def google_news_quality_summary(articles: Iterable[dict[str, object]]) -> dict[str, int]:
+    summary = {
+        "google_news_items": 0,
+        "google_news_decoded": 0,
+        "google_news_title_matched": 0,
+        "google_news_unresolved": 0,
+        "articles_with_image": 0,
+    }
+    for article in articles:
+        if article.get("image_url"):
+            summary["articles_with_image"] += 1
+        is_google_observation = bool(article.get("google_news_url")) or str(article.get("source_kind") or "") == "google_discovery" or is_google_news_url(article_url(article))
+        if not is_google_observation:
+            continue
+        summary["google_news_items"] += 1
+        status = str(article.get("original_resolution_status") or "")
+        if status == "decoded" or article.get("google_news_decoded"):
+            summary["google_news_decoded"] += 1
+        elif status == "title_matched":
+            summary["google_news_title_matched"] += 1
+        elif article_has_unresolved_google_news(article):
+            summary["google_news_unresolved"] += 1
+    return summary
 
 
 def decode_google_news_articles(
@@ -631,19 +970,11 @@ def enrich_article(
     enriched["article_published_at"] = datetime_to_iso(article_published)
     if source:
         enriched["source"] = source
-    merged_candidates: list[str] = []
-    existing_candidates = enriched.get("image_candidates")
-    for existing in existing_candidates if isinstance(existing_candidates, list) else []:
-        text = str(existing or "").strip()
-        if text.startswith(("http://", "https://")) and usable_image_url(text) and text not in merged_candidates:
-            merged_candidates.append(text)
-    for image in image_candidates:
-        normalized_image = normalize_url(image)
-        if normalized_image and normalized_image not in merged_candidates:
-            merged_candidates.append(normalized_image)
+    merged_candidates = merge_image_candidates(enriched, (normalize_url(image) for image in image_candidates))
     if merged_candidates:
         enriched["image_candidates"] = merged_candidates
         enriched["image_url"] = merged_candidates[0]
+        enriched["image_quality_score"] = image_quality_score(merged_candidates[0])
     return enriched
 
 
@@ -733,7 +1064,7 @@ def fetch_google_alerts_articles(config: dict[str, object]) -> list[dict[str, ob
     articles = decode_google_news_articles(articles, config, timeout=timeout, limits=limits, headers=headers)
 
     if not bool(fetch_config.get("enrich_pages", True)):  # type: ignore[union-attr]
-        return articles
+        return resolve_google_news_originals_from_candidates(articles, config)
 
     jobs = enrichment_jobs(
         articles,
@@ -757,7 +1088,7 @@ def fetch_google_alerts_articles(config: dict[str, object]) -> list[dict[str, ob
                     results[result_index] = result_article
                 except httpx.HTTPError:
                     results[index] = articles[index]
-        return [article for article in results if article is not None]
+        return resolve_google_news_originals_from_candidates([article for article in results if article is not None], config)
 
     enriched_articles: list[dict[str, object]] = []
     with httpx.Client(timeout=timeout, limits=limits, headers=headers) as client:
@@ -787,7 +1118,7 @@ def fetch_google_alerts_articles(config: dict[str, object]) -> list[dict[str, ob
                     decode_google_news=False,
                 )
             )
-    return enriched_articles
+    return resolve_google_news_originals_from_candidates(enriched_articles, config)
 
 
 def parse_feed_file(path: str | Path, config: dict[str, object]) -> list[dict[str, object]]:

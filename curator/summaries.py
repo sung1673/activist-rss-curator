@@ -12,6 +12,7 @@ from rapidfuzz import fuzz
 
 from .ai import ai_config, call_github_models
 from .dates import datetime_to_iso, format_kst, parse_datetime
+from .fetch import article_has_unresolved_google_news, block_unresolved_google_news
 from .rss_writer import (
     article_link,
     article_source_label,
@@ -889,6 +890,8 @@ def digest_entry_for_article(
     config: dict[str, object],
     seen_keys: set[str],
 ) -> dict[str, object] | None:
+    if block_unresolved_google_news(config) and article_has_unresolved_google_news(article):
+        return None
     url = article_link(article)
     identity_keys = digest_article_identity_keys(article)
     if not url or identity_keys & seen_keys:
@@ -908,13 +911,19 @@ def digest_entry_for_article(
     }
 
 
-def duplicate_record_candidates(record: dict[str, object]) -> list[dict[str, object]]:
+def duplicate_record_candidates(
+    record: dict[str, object],
+    config: dict[str, object] | None = None,
+) -> list[dict[str, object]]:
     candidates = [record]
     candidates.extend(match for match in list(record.get("duplicate_matches") or []) if isinstance(match, dict))
 
     articles: list[dict[str, object]] = []
     seen_urls: set[str] = set()
+    block_unresolved = True if config is None else block_unresolved_google_news(config)
     for candidate in candidates:
+        if block_unresolved and article_has_unresolved_google_news(candidate):
+            continue
         url = str(candidate.get("canonical_url") or candidate.get("link") or "")
         if not url or url in seen_urls:
             continue
@@ -951,7 +960,7 @@ def duplicate_candidate_score(article: dict[str, object], config: dict[str, obje
 
 
 def duplicate_record_representative(record: dict[str, object], config: dict[str, object]) -> dict[str, object] | None:
-    candidates = duplicate_record_candidates(record)
+    candidates = duplicate_record_candidates(record, config)
     if not candidates:
         return None
     return max(candidates, key=lambda article: duplicate_candidate_score(article, config))
@@ -968,9 +977,13 @@ def digest_entry_story_key(entry: dict[str, object]) -> str:
     return digest_article_story_key(article if isinstance(article, dict) else None)
 
 
-def duplicate_record_story_keys(record: dict[str, object], representative: dict[str, object] | None) -> set[str]:
+def duplicate_record_story_keys(
+    record: dict[str, object],
+    representative: dict[str, object] | None,
+    config: dict[str, object],
+) -> set[str]:
     keys = {digest_article_story_key(record), digest_article_story_key(representative)}
-    for candidate in duplicate_record_candidates(record):
+    for candidate in duplicate_record_candidates(record, config):
         keys.add(digest_article_story_key(candidate))
     return {key for key in keys if key}
 
@@ -992,7 +1005,7 @@ def add_duplicate_entries(
         article = duplicate_record_representative(record, config)
         if not article:
             continue
-        story_keys = duplicate_record_story_keys(record, article)
+        story_keys = duplicate_record_story_keys(record, article, config)
         if story_keys & seen_story_keys:
             continue
         entry = digest_entry_for_article(article, {}, config, seen_keys)
