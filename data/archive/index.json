@@ -2,9 +2,24 @@
   "archive_version": 1,
   "files": [
     {
+      "date": "2026-06-11",
+      "path": "articles/2026-06-11.jsonl",
+      "records": 578
+    },
+    {
+      "date": "2026-06-10",
+      "path": "articles/2026-06-10.jsonl",
+      "records": 874
+    },
+    {
+      "date": "2026-06-09",
+      "path": "articles/2026-06-09.jsonl",
+      "records": 805
+    },
+    {
       "date": "2026-06-08",
       "path": "articles/2026-06-08.jsonl",
-      "records": 608
+      "records": 859
     },
     {
       "date": "2026-06-07",
@@ -197,6 +212,6 @@
       "records": 157
     }
   ],
-  "generated_at": "2026-06-08T13:00:34.328562+09:00",
-  "total_records": 28091
+  "generated_at": "2026-06-11T09:22:40.728436+09:00",
+  "total_records": 30599
 }

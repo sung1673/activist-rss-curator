@@ -24,6 +24,18 @@
     .content { display:none; margin-top:26px; }
     .content.is-open { display:block; }
     .toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid var(--line); padding:0 0 14px; margin-bottom:18px; }
+    .benchmark { border:1px solid var(--line); background:#fff; margin:0 0 24px; padding:18px; }
+    .benchmark__head { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; border-bottom:1px solid var(--line); padding-bottom:14px; }
+    .benchmark h2 { margin:0 0 6px; font-size:22px; }
+    .benchmark p { margin:0; color:var(--muted); line-height:1.55; }
+    .benchmark__stats { display:flex; flex-wrap:wrap; gap:7px; justify-content:flex-end; }
+    .benchmark__stats span, .benchmark-item__meta span { border:1px solid var(--line); border-radius:999px; padding:6px 9px; color:#3b245f; font-size:12px; font-weight:850; background:var(--soft); }
+    .benchmark__list { display:grid; gap:10px; margin-top:14px; }
+    .benchmark-item { border-left:3px solid var(--accent); background:#fdfcff; padding:12px; }
+    .benchmark-item__meta { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+    .benchmark-item h3 { margin:0 0 7px; font-size:17px; line-height:1.35; }
+    .benchmark-item p { margin:0 0 8px; color:#4a4058; }
+    .benchmark-item__links { display:flex; justify-content:space-between; gap:10px; color:var(--muted); font-size:12px; }
     .candidate { border-top:3px solid var(--accent); background:#fff; margin:18px 0 26px; padding:18px; box-shadow:0 18px 45px rgba(80, 45, 130, .06); }
     .candidate.is-done { opacity:.58; }
     .candidate__head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
@@ -45,7 +57,7 @@
     @media (max-width:760px) {
       main { padding:20px 14px 60px; }
       .candidate__stories { grid-template-columns:1fr; }
-      .toolbar, .candidate__head { flex-direction:column; align-items:stretch; }
+      .toolbar, .candidate__head, .benchmark__head, .benchmark-item__links { flex-direction:column; align-items:stretch; }
       .story-mini h3 { font-size:18px; }
     }
   </style>
@@ -57,9 +69,9 @@
       <h1>묶음 후보 관리자</h1>
       <p class="lead">데일리 기사 중 “같은 이슈로 묶였어야 했는데 분리됐을 가능성이 있는 후보”를 자동으로 추립니다. 이 화면에서 후보를 확인하고, 필요한 경우 <code>data/story_rules.yaml</code> 또는 묶음 로직 보강 작업으로 이어갑니다.</p>
       <div class="meta">
-        <span>2026-06-08</span>
-        <span>2026-06-07 13:05 KST - 2026-06-08 13:05 KST</span>
-        <span>후보 3건</span>
+        <span>2026-06-11</span>
+        <span>2026-06-10 07:09 KST - 2026-06-11 07:09 KST</span>
+        <span>후보 12건</span>
       </div>
     </header>
 
@@ -72,6 +84,216 @@
     </section>
 
     <section class="content" id="content">
+
+      <section class="benchmark">
+        <div class="benchmark__head">
+          <div>
+            <h2>Benchmark 누락 점검</h2>
+            <p>기준 채널: activistkorea</p>
+          </div>
+          <div class="benchmark__stats">
+            <span>URL 96건</span>
+            <span>반영 61건</span>
+            <span>누락 35건</span>
+            <span>커버리지 63.5%</span>
+          </div>
+        </div>
+        <div class="benchmark__list">
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.11 06:13</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>rejected</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://www.iusm.co.kr/news/articleViewAmp.html?idxno=1063888" target="_blank" rel="noopener">고려아연, 글로벌 공급망 장벽 넘을 ESG 고도화 시동 | - 울산매일</a></h3>
+            <p>low_relevance</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113458" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.11 06:13</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>rejected</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://www.dailymedi.com/news/news_view.php?wr_id=937222" target="_blank" rel="noopener">오스코텍 라데팡스파트너스는 자문사 아니다 - 데일리메디</a></h3>
+            <p>low_relevance</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113459" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.11 05:11</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>rejected</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://www.taxtimes.co.kr/news/article.html?no=275478" target="_blank" rel="noopener">국세청, 불공정 자본거래 주요 사후검증 유형은?</a></h3>
+            <p>low_relevance</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113457" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.11 04:49</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>duplicate</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://news.nate.com/view/20260610n21858" target="_blank" rel="noopener">[크레버스 줌인]② 감액배당 앞세운 밸류업…본업 회복 관건</a></h3>
+            <p>seen_title</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113456" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.11 03:57</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>duplicate</span>
+              <span>2 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://news.einfomax.co.kr/news/articleViewAmp.html?idxno=4419210" target="_blank" rel="noopener">[KT&amp;G 밸류업] 작년·올해 공개서한 없었다</a></h3>
+            <p>seen_title</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113455" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.11 02:55</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>rejected</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://blog.naver.com/PostView.naver?blogId=dealsite&amp;logNo=224311856636&amp;redirect=Dlog" target="_blank" rel="noopener">저평가 해소 사활…곽재선 KG 회장 아들 위한 희생 안 해 : 네이버 블로그</a></h3>
+            <p>low_relevance</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113453" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.11 02:55</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>duplicate</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://www.bloter.net/news/articleView.html?idxno=665001" target="_blank" rel="noopener">[밸류업 2라운드]① KB금융, 초격차 동인은 자사주 수익률</a></h3>
+            <p>seen_title</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113454" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.11 02:55</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>rejected</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://v.daum.net/v/XRB7vIIkUh" target="_blank" rel="noopener">[삼성重은 지금] 결손금 1.5조, 멀어진 배당·기업가치 제고</a></h3>
+            <p>low_relevance</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113451" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.11 02:55</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>duplicate</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://news.nate.com/view/20260610n07927" target="_blank" rel="noopener">ACGA 한국, 기업지배구조 개혁 의미있는 진전 감사</a></h3>
+            <p>seen_title</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113448" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.11 02:55</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>duplicate</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://www.hankyung.com/amp/2026061090271" target="_blank" rel="noopener">亞기업지배구조협회, 한국 정부에 감사서한</a></h3>
+            <p>seen_title</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113449" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.11 01:23</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>rejected</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://www.ferrotimes.com/news/articleView.html?idxno=48464" target="_blank" rel="noopener">고려아연, 2026년 1차 지속가능경영추진위원회 개최 - 페로타임즈(FerroTimes)</a></h3>
+            <p>low_relevance</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113444" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+
+          <article class="benchmark-item">
+            <div class="benchmark-item__meta">
+              <span>06.10 23:16</span>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+              <span>rejected</span>
+              <span>1 mentions · 1 channels</span>
+            </div>
+            <h3><a href="https://www.nongmin.com/article/20260610500251" target="_blank" rel="noopener">만장굴 재개장…깨끗한 관광지 만들기 동참</a></h3>
+            <p>low_relevance</p>
+            <div class="benchmark-item__links">
+              <a href="https://t.me/activistkorea/113439" target="_blank" rel="noopener">Telegram 원문</a>
+              <span>[행동주의, 주주] 구글 뉴스</span>
+            </div>
+          </article>
+
+        </div>
+      </section>
+
       <div class="toolbar">
         <div>
           <strong>검토 후보</strong>
@@ -80,7 +302,252 @@
         <a href="latest.html">최신 데일리로 돌아가기</a>
       </div>
 
-      <article class="candidate" data-candidate-id="098868666735">
+      <article class="candidate" data-candidate-id="a16ff2803f94">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 88.5</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 56.0</span>
+          <span>내용 43.0</span>
+          <span>회사 삼성전자</span>
+          <span>사건 삼성전자, 성과급, 제동, 행동주의</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 06.10 17:34 · 1건</div>
+            <h3><a href="https://www.industrynews.co.kr/news/articleView.html?idxno=82021" target="_blank" rel="noopener">삼성전자 소액주주, N% 성과급 제동 본격화…결집력 부족은 딜레마</a></h3>
+            <p>... 주주 행동의 치명적인 약점으로 지목되고 있다. 소액 주주 플랫폼 &#x27;액트&#x27;는 ... 소액 주주 행동주의 대표 민경권 검증론까지 · 삼성전자 노사 극적 타결에도 ...</p>
+            <div class="story-mini__sources">INDUSTRYNEWS</div>
+            <ul><li><a href="https://www.industrynews.co.kr/news/articleView.html?idxno=82021" target="_blank" rel="noopener">삼성전자 소액주주, N% 성과급 제동 본격화…결집력 부족은 딜레마</a><span>INDUSTRYNEWS</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 06.10 16:42 · 1건</div>
+            <h3><a href="https://www.joongangenews.com/news/articleView.html?idxno=525078" target="_blank" rel="noopener">삼성전자 주주들 행동 나섰다...노조 영업이익 N% 성과급 요구에 제동</a></h3>
+            <p>시장에서는 이번 사태가 국내 행동주의 의 확장을 보여주는 동시에 노조의 과도한 성과급 요구에 대한 주주 들의 집단 반발이 본격화된 사례라는 평가도 나온다.</p>
+            <div class="story-mini__sources">JOONGANGENEWS</div>
+            <ul><li><a href="https://www.joongangenews.com/news/articleView.html?idxno=525078" target="_blank" rel="noopener">삼성전자 주주들 행동 나섰다...노조 영업이익 N% 성과급 요구에 제동</a><span>JOONGANGENEWS</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_a16ff2803f94
+  tokens:
+    - 삼성전자
+    - 성과급
+    - 제동
+  require_any_groups:
+    - [삼성전자]
+    - [삼성전자, 성과급, 제동, 행동주의]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
+
+      <article class="candidate" data-candidate-id="9717ed744525">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 88.3</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 45.9</span>
+          <span>내용 43.6</span>
+          <span>회사 삼성전자</span>
+          <span>사건 삼성전자, 성과급, 승인, 액트, 주주명부, 주총</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 06.10 17:01 · 1건</div>
+            <h3><a href="https://www.fnnews.com/news/202606101701163801" target="_blank" rel="noopener">액트, 삼전 소액주주 1.5만명 모았다…성과급 주총 승인 거쳐야</a></h3>
+            <p>(서울=뉴스1) 손엄지 기자 = 소액주주 플랫폼 액트는 삼성전자(005930)를 상대로 주주명부 열람·등사 가처분 소송에 착수했다고 10일 밝혔다.소액주주를 결집해 영업이익 N% 성과급 10년 협약에 대한 본격적인 주주권 행사에 돌입할 계획이다.액트 관계자는 &quot;이번 ...</p>
+            <div class="story-mini__sources">FNNEWS</div>
+            <ul><li><a href="https://www.fnnews.com/news/202606101701163801" target="_blank" rel="noopener">액트, 삼전 소액주주 1.5만명 모았다…성과급 주총 승인 거쳐야</a><span>FNNEWS</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 06.10 16:08 · 1건</div>
+            <h3><a href="https://news.google.com/rss/articles/CBMiZEFVX3lxTE5kWXJxZ2Jpc29zUGhMNkNHSlhRQ2lZeGRrRFhRN0VqZC1wdU8yZ2x5TjdCclBhQURLX2VhSkR2UWpRV3dfbW1oTmpkQk1tSERDM0JGSEIxdk1wdW9LSHZmTHRWMUc?oc=5" target="_blank" rel="noopener">액트, 삼성전자 상대 주주명부 소송 착수…성과급 주총 승인 의무화 추진</a></h3>
+            <p>액트, 삼성전자 상대 주주명부 소송 착수…“성과급 주총 승인 의무화 추진” 디지털데일리</p>
+            <div class="story-mini__sources">디지털데일리</div>
+            <ul><li><a href="https://news.google.com/rss/articles/CBMiZEFVX3lxTE5kWXJxZ2Jpc29zUGhMNkNHSlhRQ2lZeGRrRFhRN0VqZC1wdU8yZ2x5TjdCclBhQURLX2VhSkR2UWpRV3dfbW1oTmpkQk1tSERDM0JGSEIxdk1wdW9LSHZmTHRWMUc?oc=5" target="_blank" rel="noopener">액트, 삼성전자 상대 주주명부 소송 착수…성과급 주총 승인 의무화 추진</a><span>디지털데일리</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_9717ed744525
+  tokens:
+    - 삼성전자
+    - 성과급
+    - 승인
+  require_any_groups:
+    - [삼성전자]
+    - [삼성전자, 성과급, 승인, 액트, 주총]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
+
+      <article class="candidate" data-candidate-id="20781a6c9bff">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 86.2</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 49.3</span>
+          <span>내용 36.7</span>
+          <span>회사 삼성전자</span>
+          <span>사건 노사, 삼성전자, 성과급, 소액주주, 있다</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 06.10 17:34 · 1건</div>
+            <h3><a href="https://www.industrynews.co.kr/news/articleView.html?idxno=82021" target="_blank" rel="noopener">삼성전자 소액주주, N% 성과급 제동 본격화…결집력 부족은 딜레마</a></h3>
+            <p>... 주주 행동의 치명적인 약점으로 지목되고 있다. 소액 주주 플랫폼 &#x27;액트&#x27;는 ... 소액 주주 행동주의 대표 민경권 검증론까지 · 삼성전자 노사 극적 타결에도 ...</p>
+            <div class="story-mini__sources">INDUSTRYNEWS</div>
+            <ul><li><a href="https://www.industrynews.co.kr/news/articleView.html?idxno=82021" target="_blank" rel="noopener">삼성전자 소액주주, N% 성과급 제동 본격화…결집력 부족은 딜레마</a><span>INDUSTRYNEWS</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 06.10 14:13 · 1건</div>
+            <h3><a href="https://news.einfomax.co.kr/news/articleView.html?idxno=4419296" target="_blank" rel="noopener">삼성전자 소액주주 N%성과급 이의 제기에 정부까지 힘 보태나</a></h3>
+            <p>삼성전자[005930] 노사가 가까스로 파업 위기를 넘겼지만, 성과급 합의를 둘러싼 후폭풍은 오히려 커지고 있다.반도체 부문 영업이익의 일정 비율을 임직원 성과급 재원으로 배분하는 노사 합의에 소액주주들이 본격적인 법적 대응에 나선 데 이어, 정부도 이른바 &#x27;영업이익 n% 성과급&#x27;에…</p>
+            <div class="story-mini__sources">연합인포맥스</div>
+            <ul><li><a href="https://news.einfomax.co.kr/news/articleView.html?idxno=4419296" target="_blank" rel="noopener">삼성전자 소액주주 N%성과급 이의 제기에 정부까지 힘 보태나</a><span>연합인포맥스</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_20781a6c9bff
+  tokens:
+    - 노사
+    - 삼성전자
+    - 성과급
+  require_any_groups:
+    - [삼성전자]
+    - [노사, 삼성전자, 성과급, 소액주주]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
+
+      <article class="candidate" data-candidate-id="67aa0ea57a94">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 86.2</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 45.1</span>
+          <span>내용 43.7</span>
+          <span>회사 삼성전자</span>
+          <span>사건 노사, 둘러싼, 반도체, 삼성전자, 성과급, 소액주주, 영업이익, 정부도</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 06.10 16:36 · 1건</div>
+            <h3><a href="http://www.popcornnews.net/news/articleView.html?idxno=123504" target="_blank" rel="noopener">삼성전자, N% 성과급 후폭풍…소액주주 소송에 정부도 제도 정비 검토</a></h3>
+            <p>(팝콘뉴스=서한나 기자) 최근 삼성전자가 영업이익 연동 장기 성과급 제도를 둘러싼 논쟁의 중심에 섰다.특히 반도체 사업부 성과급 지급 방식을 둘러싼 노사 합의가 소액주주 반발과 정부 제도 검토로 이어지며 기업 지배구조 전반을 둘러싼 논쟁으로 번지는 양상이다.이는 단순한 보상 체계를 넘…</p>
+            <div class="story-mini__sources">POPCORNNEWS</div>
+            <ul><li><a href="http://www.popcornnews.net/news/articleView.html?idxno=123504" target="_blank" rel="noopener">삼성전자, N% 성과급 후폭풍…소액주주 소송에 정부도 제도 정비 검토</a><span>POPCORNNEWS</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 06.10 14:13 · 1건</div>
+            <h3><a href="https://news.einfomax.co.kr/news/articleView.html?idxno=4419296" target="_blank" rel="noopener">삼성전자 소액주주 N%성과급 이의 제기에 정부까지 힘 보태나</a></h3>
+            <p>삼성전자[005930] 노사가 가까스로 파업 위기를 넘겼지만, 성과급 합의를 둘러싼 후폭풍은 오히려 커지고 있다.반도체 부문 영업이익의 일정 비율을 임직원 성과급 재원으로 배분하는 노사 합의에 소액주주들이 본격적인 법적 대응에 나선 데 이어, 정부도 이른바 &#x27;영업이익 n% 성과급&#x27;에…</p>
+            <div class="story-mini__sources">연합인포맥스</div>
+            <ul><li><a href="https://news.einfomax.co.kr/news/articleView.html?idxno=4419296" target="_blank" rel="noopener">삼성전자 소액주주 N%성과급 이의 제기에 정부까지 힘 보태나</a><span>연합인포맥스</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_67aa0ea57a94
+  tokens:
+    - 노사
+    - 둘러싼
+    - 반도체
+  require_any_groups:
+    - [삼성전자]
+    - [노사, 둘러싼, 반도체, 삼성전자, 성과급, 소액주주]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
+
+      <article class="candidate" data-candidate-id="6033c1689618">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 85.1</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 45.9</span>
+          <span>내용 33.3</span>
+          <span>회사 삼성전자</span>
+          <span>사건 노사, 삼성전자, 성과급, 소액주주</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 06.10 17:34 · 1건</div>
+            <h3><a href="https://www.industrynews.co.kr/news/articleView.html?idxno=82021" target="_blank" rel="noopener">삼성전자 소액주주, N% 성과급 제동 본격화…결집력 부족은 딜레마</a></h3>
+            <p>... 주주 행동의 치명적인 약점으로 지목되고 있다. 소액 주주 플랫폼 &#x27;액트&#x27;는 ... 소액 주주 행동주의 대표 민경권 검증론까지 · 삼성전자 노사 극적 타결에도 ...</p>
+            <div class="story-mini__sources">INDUSTRYNEWS</div>
+            <ul><li><a href="https://www.industrynews.co.kr/news/articleView.html?idxno=82021" target="_blank" rel="noopener">삼성전자 소액주주, N% 성과급 제동 본격화…결집력 부족은 딜레마</a><span>INDUSTRYNEWS</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 06.10 16:36 · 1건</div>
+            <h3><a href="http://www.popcornnews.net/news/articleView.html?idxno=123504" target="_blank" rel="noopener">삼성전자, N% 성과급 후폭풍…소액주주 소송에 정부도 제도 정비 검토</a></h3>
+            <p>(팝콘뉴스=서한나 기자) 최근 삼성전자가 영업이익 연동 장기 성과급 제도를 둘러싼 논쟁의 중심에 섰다.특히 반도체 사업부 성과급 지급 방식을 둘러싼 노사 합의가 소액주주 반발과 정부 제도 검토로 이어지며 기업 지배구조 전반을 둘러싼 논쟁으로 번지는 양상이다.이는 단순한 보상 체계를 넘…</p>
+            <div class="story-mini__sources">POPCORNNEWS</div>
+            <ul><li><a href="http://www.popcornnews.net/news/articleView.html?idxno=123504" target="_blank" rel="noopener">삼성전자, N% 성과급 후폭풍…소액주주 소송에 정부도 제도 정비 검토</a><span>POPCORNNEWS</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_6033c1689618
+  tokens:
+    - 노사
+    - 삼성전자
+    - 성과급
+  require_any_groups:
+    - [삼성전자]
+    - [노사, 삼성전자, 성과급, 소액주주]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
+
+      <article class="candidate" data-candidate-id="aae8e7c0c3c1">
         <div class="candidate__head">
           <div>
             <span class="candidate__score">점수 84.3</span>
@@ -89,96 +556,98 @@
           <label><input type="checkbox" data-review-done> 확인 완료</label>
         </div>
         <div class="candidate__signals">
-          <span>제목 49.1</span>
-          <span>내용 54.4</span>
-          <span>회사 db손해보험</span>
-          <span>사건 com, https, 밸류업</span>
+          <span>제목 49.4</span>
+          <span>내용 37.1</span>
+          <span>회사 삼성전자</span>
+          <span>사건 나온다, 삼성전자, 성과급, 영업이익</span>
         </div>
         <div class="candidate__stories">
 
           <section class="story-mini">
-            <div class="story-mini__meta">밸류업·주주환원 · 06.08 10:44 · 1건</div>
-            <h3><a href="https://www.hankyung.com/amp/2026060822806" target="_blank" rel="noopener">DB손해보험, 고배당에 새 밸류업 정책 기대-NH</a></h3>
-            <p>DB손해보험, 고배당에 새 밸류업 정책 기대-NH - 한국경제 https://www.hankyung.com/amp/2026060822806</p>
-            <div class="story-mini__sources">HANKYUNG</div>
-            <ul><li><a href="https://www.hankyung.com/amp/2026060822806" target="_blank" rel="noopener">DB손해보험, 고배당에 새 밸류업 정책 기대-NH</a><span>HANKYUNG</span></li></ul>
+            <div class="story-mini__meta">주주행동·경영권 · 06.10 16:42 · 1건</div>
+            <h3><a href="https://www.joongangenews.com/news/articleView.html?idxno=525078" target="_blank" rel="noopener">삼성전자 주주들 행동 나섰다...노조 영업이익 N% 성과급 요구에 제동</a></h3>
+            <p>시장에서는 이번 사태가 국내 행동주의 의 확장을 보여주는 동시에 노조의 과도한 성과급 요구에 대한 주주 들의 집단 반발이 본격화된 사례라는 평가도 나온다.</p>
+            <div class="story-mini__sources">JOONGANGENEWS</div>
+            <ul><li><a href="https://www.joongangenews.com/news/articleView.html?idxno=525078" target="_blank" rel="noopener">삼성전자 주주들 행동 나섰다...노조 영업이익 N% 성과급 요구에 제동</a><span>JOONGANGENEWS</span></li></ul>
           </section>
 
 
           <section class="story-mini">
-            <div class="story-mini__meta">밸류업·주주환원 · 06.08 09:00 · 1건</div>
-            <h3><a href="https://kpenews.com/View.aspx?No=4103612" target="_blank" rel="noopener">DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감</a></h3>
-            <p>DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감 - 한국정경신문 https://kpenews.com/View.aspx?No=4103612</p>
-            <div class="story-mini__sources">KPENEWS</div>
-            <ul><li><a href="https://kpenews.com/View.aspx?No=4103612" target="_blank" rel="noopener">DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감</a><span>KPENEWS</span></li></ul>
+            <div class="story-mini__meta">주주행동·경영권 · 06.10 16:36 · 1건</div>
+            <h3><a href="http://www.popcornnews.net/news/articleView.html?idxno=123504" target="_blank" rel="noopener">삼성전자, N% 성과급 후폭풍…소액주주 소송에 정부도 제도 정비 검토</a></h3>
+            <p>(팝콘뉴스=서한나 기자) 최근 삼성전자가 영업이익 연동 장기 성과급 제도를 둘러싼 논쟁의 중심에 섰다.특히 반도체 사업부 성과급 지급 방식을 둘러싼 노사 합의가 소액주주 반발과 정부 제도 검토로 이어지며 기업 지배구조 전반을 둘러싼 논쟁으로 번지는 양상이다.이는 단순한 보상 체계를 넘…</p>
+            <div class="story-mini__sources">POPCORNNEWS</div>
+            <ul><li><a href="http://www.popcornnews.net/news/articleView.html?idxno=123504" target="_blank" rel="noopener">삼성전자, N% 성과급 후폭풍…소액주주 소송에 정부도 제도 정비 검토</a><span>POPCORNNEWS</span></li></ul>
           </section>
 
         </div>
         <details class="rule">
           <summary>story_rules.yaml 초안 보기</summary>
-          <pre>- id: review_098868666735
+          <pre>- id: review_aae8e7c0c3c1
   tokens:
-    - com
-    - https
-    - 밸류업
+    - 나온다
+    - 삼성전자
+    - 성과급
   require_any_groups:
-    - [db손해보험]
-    - [com, https, 밸류업]</pre>
+    - [삼성전자]
+    - [나온다, 삼성전자, 성과급, 영업이익]</pre>
           <button type="button" data-copy-rule>규칙 초안 복사</button>
         </details>
       </article>
 
 
-      <article class="candidate" data-candidate-id="4b270d663cee">
+      <article class="candidate" data-candidate-id="7f3c03b4996b">
         <div class="candidate__head">
           <div>
-            <span class="candidate__score">점수 83.3</span>
+            <span class="candidate__score">점수 82.7</span>
             <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
           </div>
           <label><input type="checkbox" data-review-done> 확인 완료</label>
         </div>
         <div class="candidate__signals">
-          <span>제목 41.1</span>
-          <span>내용 43.7</span>
-          <span>회사 db손보, db손해보험</span>
-          <span>사건 db손보, https, 밸류업</span>
+          <span>제목 45.1</span>
+          <span>내용 48.1</span>
+          <span>회사 한화, 한화솔루션</span>
+          <span>사건 규모, 유상증자, 한화솔루션, 확정</span>
         </div>
         <div class="candidate__stories">
 
           <section class="story-mini">
-            <div class="story-mini__meta">밸류업·주주환원 · 06.08 10:44 · 1건</div>
-            <h3><a href="https://www.ilovepc.co.kr/news/articleView.html?idxno=59610" target="_blank" rel="noopener">밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)</a></h3>
-            <p>밑 빠진 독에 &#x27;밸류업&#x27; 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑) https://www.ilovepc.co.kr/news/articleView.html?idxno=59610</p>
-            <div class="story-mini__sources">ILOVEPC</div>
-            <ul><li><a href="https://www.ilovepc.co.kr/news/articleView.html?idxno=59610" target="_blank" rel="noopener">밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)</a><span>ILOVEPC</span></li></ul>
+            <div class="story-mini__meta">자본시장 제도·공시 · 06.11 05:00 · 6건</div>
+            <h3><a href="https://news.google.com/rss/articles/CBMiZ0FVX3lxTFA1S1FfbmRQal85YXFlZVBkdDY1NS1ZWnNmeUtjakFhczRxZzgwVHdDTUhNSkNjUXRZdG9HY1dESEwtZXhFSy0ydmxlTmw1N0JLTnpUOFZINk9GcTZrWkZfajh6Rjgyek0?oc=5" target="_blank" rel="noopener">2.4조→1.7조 한화솔루션 유증, 3차례 제동 끝에 금감원 문턱 넘었다</a></h3>
+            <p>&#x27;2.4조→1.7조&#x27; 한화솔루션 유증, 3차례 제동 끝에 금감원 문턱 넘었다 한경매거진&amp;북</p>
+            <div class="story-mini__sources">한경매거진&amp;북 · 뉴데일리 · Chosunbiz · 연합뉴스 · 뉴시스</div>
+            <ul><li><a href="https://news.google.com/rss/articles/CBMiZ0FVX3lxTFA1S1FfbmRQal85YXFlZVBkdDY1NS1ZWnNmeUtjakFhczRxZzgwVHdDTUhNSkNjUXRZdG9HY1dESEwtZXhFSy0ydmxlTmw1N0JLTnpUOFZINk9GcTZrWkZfajh6Rjgyek0?oc=5" target="_blank" rel="noopener">2.4조→1.7조 한화솔루션 유증, 3차례 제동 끝에 금감원 문턱 넘었다</a><span>한경매거진&amp;북</span></li>
+<li><a href="https://news.google.com/rss/articles/CBMie0FVX3lxTE00ZFNhV0xyUWxiZWRxOWdybDB0YkVEWDN4RGNhMjhZNlRsWnNCc3pMVXRyb2Jwbm1Tc1lQN0xzc25RMFBCb2ZUZGVqM09PQ0I0UjdzY3l0Mi1EQTdfNi1zN1dYSVQ3MmhMTmJKQm9BeVhJc2lHTnZJZkdtTdIBgAFBVV95cUxNY2J0V25KR3kweTF2NWx4UENScGlycmlfZVVQSzZjRVNhazZOd25iZTJlbFkzcnI3MXlrT2xzT3l6Z052VGtHXzAzREhGSmMwYk1JeFFCamNUbXQwUTUtRXV4VVRuOFRUMlhXVFZIN0dvTXBhVVRIYWI5Y0FaYVBYWA?oc=5" target="_blank" rel="noopener">한화솔루션 유증, 세 번의 정정 거쳐 금감원 심사 최종 통과</a><span>뉴데일리</span></li>
+<li><a href="https://news.google.com/rss/articles/CBMihgFBVV95cUxQNjBMellRYm1yT1k2RXVBVE5acmJUdnR3YzBycV85bFB6bjl1ZDRxU19uMnY5d1gtT1BTZno5U0p5djB4VWtzb0trVHJOWDRwU0paT0hGOHUtTnFjSlJpQXhjTXVKbDJwSF9ua20wbTBjc3plSy0xQ2tNbnpON1hkVW9meVR3UdIBmgFBVV95cUxPeE1xMWhkb19DWDZPWUlzRzNZeW1OWGp6SS1nc3dtZFFMdEZoM2VuaUo3amJMT3dnbHB6YkxDTXBoWW5DTUF6aXB0Y0lZLXRKNVQ2QXVObHBJNjJ5dEpOV0N3QW1NaThjQ19KeGdkZ0VFcWE4alJZZVR6UW1Od0NISFdxSFhUTWYxdlpJRDdxYnNxLWZYT3hpd0Nn?oc=5" target="_blank" rel="noopener">한화솔루션 유상증자, 세 차례 정정 끝에 1조7000억원 규모 확정</a><span>Chosunbiz</span></li></ul>
           </section>
 
 
           <section class="story-mini">
-            <div class="story-mini__meta">밸류업·주주환원 · 06.08 09:00 · 1건</div>
-            <h3><a href="https://kpenews.com/View.aspx?No=4103612" target="_blank" rel="noopener">DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감</a></h3>
-            <p>DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감 - 한국정경신문 https://kpenews.com/View.aspx?No=4103612</p>
-            <div class="story-mini__sources">KPENEWS</div>
-            <ul><li><a href="https://kpenews.com/View.aspx?No=4103612" target="_blank" rel="noopener">DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감</a><span>KPENEWS</span></li></ul>
+            <div class="story-mini__meta">자본시장 제도·공시 · 06.11 00:23 · 1건</div>
+            <h3><a href="https://news.google.com/rss/articles/CBMiZEFVX3lxTFBpSXFBN0xBczgtWXQ5SjNIbTF1S2ZjbGx1QTI4ZGdPS0hUcGhYNHFFdVhnUjNsS1ZjOGZMaHVSQ3NjbnIwX1lzQlhKNUtCcFZac2hxMFY5OUgzcU9wQ0Z0MDlVUVc?oc=5" target="_blank" rel="noopener">한화솔루션, 3수 끝 유상증자 1조 7000억 규모 확정</a></h3>
+            <p>한화솔루션, 3수 끝 유상증자 1조 7000억 규모 확정 뉴스1</p>
+            <div class="story-mini__sources">뉴스1</div>
+            <ul><li><a href="https://news.google.com/rss/articles/CBMiZEFVX3lxTFBpSXFBN0xBczgtWXQ5SjNIbTF1S2ZjbGx1QTI4ZGdPS0hUcGhYNHFFdVhnUjNsS1ZjOGZMaHVSQ3NjbnIwX1lzQlhKNUtCcFZac2hxMFY5OUgzcU9wQ0Z0MDlVUVc?oc=5" target="_blank" rel="noopener">한화솔루션, 3수 끝 유상증자 1조 7000억 규모 확정</a><span>뉴스1</span></li></ul>
           </section>
 
         </div>
         <details class="rule">
           <summary>story_rules.yaml 초안 보기</summary>
-          <pre>- id: review_4b270d663cee
+          <pre>- id: review_7f3c03b4996b
   tokens:
-    - db손보
-    - https
-    - 밸류업
+    - 규모
+    - 유상증자
+    - 한화솔루션
   require_any_groups:
-    - [db손보, db손해보험]
-    - [db손보, https, 밸류업]</pre>
+    - [한화, 한화솔루션]
+    - [규모, 유상증자, 한화솔루션, 확정]</pre>
           <button type="button" data-copy-rule>규칙 초안 복사</button>
         </details>
       </article>
 
 
-      <article class="candidate" data-candidate-id="e62a73a75c3b">
+      <article class="candidate" data-candidate-id="e2177698c12a">
         <div class="candidate__head">
           <div>
             <span class="candidate__score">점수 82.6</span>
@@ -187,41 +656,239 @@
           <label><input type="checkbox" data-review-done> 확인 완료</label>
         </div>
         <div class="candidate__signals">
-          <span>제목 40.0</span>
-          <span>내용 39.8</span>
-          <span>회사 db손해보험</span>
-          <span>사건 https, www, 기대, 밸류업</span>
+          <span>제목 52.2</span>
+          <span>내용 17.8</span>
+          <span>회사 kg그룹</span>
+          <span>사건 50, 5년간, kg그룹, 주주환원</span>
         </div>
         <div class="candidate__stories">
 
           <section class="story-mini">
-            <div class="story-mini__meta">밸류업·주주환원 · 06.08 10:44 · 1건</div>
-            <h3><a href="https://www.hankyung.com/amp/2026060822806" target="_blank" rel="noopener">DB손해보험, 고배당에 새 밸류업 정책 기대-NH</a></h3>
-            <p>DB손해보험, 고배당에 새 밸류업 정책 기대-NH - 한국경제 https://www.hankyung.com/amp/2026060822806</p>
-            <div class="story-mini__sources">HANKYUNG</div>
-            <ul><li><a href="https://www.hankyung.com/amp/2026060822806" target="_blank" rel="noopener">DB손해보험, 고배당에 새 밸류업 정책 기대-NH</a><span>HANKYUNG</span></li></ul>
+            <div class="story-mini__meta">밸류업·주주환원 · 06.10 15:10 · 2건</div>
+            <h3><a href="https://www.fetv.co.kr/news/articleView.html?idxno=304027" target="_blank" rel="noopener">KG파이낸셜, KG그룹 첫 밸류업 실행안…주주환원율 50% 명문화</a></h3>
+            <p>[FETV=임종현 기자] KG파이낸셜이 KG그룹 계열사 가운데 처음으로 중장기 주주환원 정책을 공시했다. 향후 5년간 주주환원율 50% 이상을 유지하며 배당 확대와 자사주 매입·소각을 통해 주주가치 제고에 나선다는 계획이다. KG파이낸셜은 10일 공시를 통해 2026년 사업연도 결산…</p>
+            <div class="story-mini__sources">FETV · 데일리안</div>
+            <ul><li><a href="https://www.fetv.co.kr/news/articleView.html?idxno=304027" target="_blank" rel="noopener">KG파이낸셜, KG그룹 첫 밸류업 실행안…주주환원율 50% 명문화</a><span>FETV</span></li>
+<li><a href="https://www.dailian.co.kr/news/view/1654457/%EC%88%9C%EC%9D%B4%EC%9D%B5-50-%ED%99%98%EC%9B%90-%EB%92%A4-%EB%AF%B8%ED%99%95%EC%A0%95-%EA%B3%B5%EC%8B%9CKG-2026" target="_blank" rel="noopener">순이익 50% 환원 뒤 미확정 공시…KG그룹 밸류업 실행안 관건</a><span>데일리안</span></li></ul>
           </section>
 
 
           <section class="story-mini">
-            <div class="story-mini__meta">밸류업·주주환원 · 06.08 10:44 · 1건</div>
-            <h3><a href="https://www.ilovepc.co.kr/news/articleView.html?idxno=59610" target="_blank" rel="noopener">밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)</a></h3>
-            <p>밑 빠진 독에 &#x27;밸류업&#x27; 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑) https://www.ilovepc.co.kr/news/articleView.html?idxno=59610</p>
-            <div class="story-mini__sources">ILOVEPC</div>
-            <ul><li><a href="https://www.ilovepc.co.kr/news/articleView.html?idxno=59610" target="_blank" rel="noopener">밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)</a><span>ILOVEPC</span></li></ul>
+            <div class="story-mini__meta">밸류업·주주환원 · 06.11 02:55 · 1건</div>
+            <h3><a href="https://blog.naver.com/PostView.naver?blogId=dealsite&amp;logNo=224311797734&amp;redirect=Dlog" target="_blank" rel="noopener">KG그룹, 5년간 총주주환원율 50% 역점 : 네이버 블로그</a></h3>
+            <p>KG그룹, 5년간 총주주환원율 50% 역점 : 네이버 블로그 https://blog.naver.com/PostView.naver?blogId=dealsite&amp;logNo=224311797734&amp;redirect=Dlog</p>
+            <div class="story-mini__sources">BLOG</div>
+            <ul><li><a href="https://blog.naver.com/PostView.naver?blogId=dealsite&amp;logNo=224311797734&amp;redirect=Dlog" target="_blank" rel="noopener">KG그룹, 5년간 총주주환원율 50% 역점 : 네이버 블로그</a><span>BLOG</span></li></ul>
           </section>
 
         </div>
         <details class="rule">
           <summary>story_rules.yaml 초안 보기</summary>
-          <pre>- id: review_e62a73a75c3b
+          <pre>- id: review_e2177698c12a
+  tokens:
+    - 50
+    - 5년간
+    - kg그룹
+  require_any_groups:
+    - [kg그룹]
+    - [50, 5년간, kg그룹, 주주환원]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
+
+      <article class="candidate" data-candidate-id="3f7448b61f36">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 82.6</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 44.4</span>
+          <span>내용 31.5</span>
+          <span>회사 삼성전자</span>
+          <span>사건 삼성전자, 성과급, 영업이익</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 06.10 16:42 · 1건</div>
+            <h3><a href="https://www.joongangenews.com/news/articleView.html?idxno=525078" target="_blank" rel="noopener">삼성전자 주주들 행동 나섰다...노조 영업이익 N% 성과급 요구에 제동</a></h3>
+            <p>시장에서는 이번 사태가 국내 행동주의 의 확장을 보여주는 동시에 노조의 과도한 성과급 요구에 대한 주주 들의 집단 반발이 본격화된 사례라는 평가도 나온다.</p>
+            <div class="story-mini__sources">JOONGANGENEWS</div>
+            <ul><li><a href="https://www.joongangenews.com/news/articleView.html?idxno=525078" target="_blank" rel="noopener">삼성전자 주주들 행동 나섰다...노조 영업이익 N% 성과급 요구에 제동</a><span>JOONGANGENEWS</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 06.10 14:13 · 1건</div>
+            <h3><a href="https://news.einfomax.co.kr/news/articleView.html?idxno=4419296" target="_blank" rel="noopener">삼성전자 소액주주 N%성과급 이의 제기에 정부까지 힘 보태나</a></h3>
+            <p>삼성전자[005930] 노사가 가까스로 파업 위기를 넘겼지만, 성과급 합의를 둘러싼 후폭풍은 오히려 커지고 있다.반도체 부문 영업이익의 일정 비율을 임직원 성과급 재원으로 배분하는 노사 합의에 소액주주들이 본격적인 법적 대응에 나선 데 이어, 정부도 이른바 &#x27;영업이익 n% 성과급&#x27;에…</p>
+            <div class="story-mini__sources">연합인포맥스</div>
+            <ul><li><a href="https://news.einfomax.co.kr/news/articleView.html?idxno=4419296" target="_blank" rel="noopener">삼성전자 소액주주 N%성과급 이의 제기에 정부까지 힘 보태나</a><span>연합인포맥스</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_3f7448b61f36
+  tokens:
+    - 삼성전자
+    - 성과급
+    - 영업이익
+  require_any_groups:
+    - [삼성전자]
+    - [삼성전자, 성과급, 영업이익]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
+
+      <article class="candidate" data-candidate-id="9916002f5735">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 82.3</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 41.2</span>
+          <span>내용 35.4</span>
+          <span>회사 삼성전자</span>
+          <span>사건 005930, 본격적인, 삼성전자, 성과급, 소액주주, 영업이익</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 06.10 17:01 · 1건</div>
+            <h3><a href="https://www.fnnews.com/news/202606101701163801" target="_blank" rel="noopener">액트, 삼전 소액주주 1.5만명 모았다…성과급 주총 승인 거쳐야</a></h3>
+            <p>(서울=뉴스1) 손엄지 기자 = 소액주주 플랫폼 액트는 삼성전자(005930)를 상대로 주주명부 열람·등사 가처분 소송에 착수했다고 10일 밝혔다.소액주주를 결집해 영업이익 N% 성과급 10년 협약에 대한 본격적인 주주권 행사에 돌입할 계획이다.액트 관계자는 &quot;이번 ...</p>
+            <div class="story-mini__sources">FNNEWS</div>
+            <ul><li><a href="https://www.fnnews.com/news/202606101701163801" target="_blank" rel="noopener">액트, 삼전 소액주주 1.5만명 모았다…성과급 주총 승인 거쳐야</a><span>FNNEWS</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">주주행동·경영권 · 06.10 14:13 · 1건</div>
+            <h3><a href="https://news.einfomax.co.kr/news/articleView.html?idxno=4419296" target="_blank" rel="noopener">삼성전자 소액주주 N%성과급 이의 제기에 정부까지 힘 보태나</a></h3>
+            <p>삼성전자[005930] 노사가 가까스로 파업 위기를 넘겼지만, 성과급 합의를 둘러싼 후폭풍은 오히려 커지고 있다.반도체 부문 영업이익의 일정 비율을 임직원 성과급 재원으로 배분하는 노사 합의에 소액주주들이 본격적인 법적 대응에 나선 데 이어, 정부도 이른바 &#x27;영업이익 n% 성과급&#x27;에…</p>
+            <div class="story-mini__sources">연합인포맥스</div>
+            <ul><li><a href="https://news.einfomax.co.kr/news/articleView.html?idxno=4419296" target="_blank" rel="noopener">삼성전자 소액주주 N%성과급 이의 제기에 정부까지 힘 보태나</a><span>연합인포맥스</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_9916002f5735
+  tokens:
+    - 005930
+    - 본격적인
+    - 삼성전자
+  require_any_groups:
+    - [삼성전자]
+    - [005930, 본격적인, 삼성전자, 성과급, 소액주주]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
+
+      <article class="candidate" data-candidate-id="b4195df62b00">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 82.0</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 50.0</span>
+          <span>내용 16.9</span>
+          <span>회사 kg그룹</span>
+          <span>사건 kg그룹, 주주환원, 주주환원율</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">밸류업·주주환원 · 06.10 15:10 · 2건</div>
+            <h3><a href="https://www.fetv.co.kr/news/articleView.html?idxno=304027" target="_blank" rel="noopener">KG파이낸셜, KG그룹 첫 밸류업 실행안…주주환원율 50% 명문화</a></h3>
+            <p>[FETV=임종현 기자] KG파이낸셜이 KG그룹 계열사 가운데 처음으로 중장기 주주환원 정책을 공시했다. 향후 5년간 주주환원율 50% 이상을 유지하며 배당 확대와 자사주 매입·소각을 통해 주주가치 제고에 나선다는 계획이다. KG파이낸셜은 10일 공시를 통해 2026년 사업연도 결산…</p>
+            <div class="story-mini__sources">FETV · 데일리안</div>
+            <ul><li><a href="https://www.fetv.co.kr/news/articleView.html?idxno=304027" target="_blank" rel="noopener">KG파이낸셜, KG그룹 첫 밸류업 실행안…주주환원율 50% 명문화</a><span>FETV</span></li>
+<li><a href="https://www.dailian.co.kr/news/view/1654457/%EC%88%9C%EC%9D%B4%EC%9D%B5-50-%ED%99%98%EC%9B%90-%EB%92%A4-%EB%AF%B8%ED%99%95%EC%A0%95-%EA%B3%B5%EC%8B%9CKG-2026" target="_blank" rel="noopener">순이익 50% 환원 뒤 미확정 공시…KG그룹 밸류업 실행안 관건</a><span>데일리안</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">밸류업·주주환원 · 06.10 15:28 · 1건</div>
+            <h3><a href="https://www.safetimes.co.kr/news/articleViewAmp.html?idxno=243351" target="_blank" rel="noopener">KG그룹 주주환원율 확대 … K Car 축 모빌리티 밸류체인 구축</a></h3>
+            <p>KG그룹 주주환원율 확대 … K Car 축 모빌리티 밸류체인 구축 | - 세이프타임즈 https://www.safetimes.co.kr/news/articleViewAmp.html?idxno=243351</p>
+            <div class="story-mini__sources">SAFETIMES</div>
+            <ul><li><a href="https://www.safetimes.co.kr/news/articleViewAmp.html?idxno=243351" target="_blank" rel="noopener">KG그룹 주주환원율 확대 … K Car 축 모빌리티 밸류체인 구축</a><span>SAFETIMES</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_b4195df62b00
+  tokens:
+    - kg그룹
+    - 주주환원
+    - 주주환원율
+  require_any_groups:
+    - [kg그룹]
+    - [kg그룹, 주주환원, 주주환원율]</pre>
+          <button type="button" data-copy-rule>규칙 초안 복사</button>
+        </details>
+      </article>
+
+
+      <article class="candidate" data-candidate-id="f0bce08e7f20">
+        <div class="candidate__head">
+          <div>
+            <span class="candidate__score">점수 81.3</span>
+            <strong>같은 story key · 회사명 겹침 · 사건 토큰 겹침</strong>
+          </div>
+          <label><input type="checkbox" data-review-done> 확인 완료</label>
+        </div>
+        <div class="candidate__signals">
+          <span>제목 43.5</span>
+          <span>내용 39.8</span>
+          <span>회사 kg그룹</span>
+          <span>사건 https, kg그룹, 주주환원</span>
+        </div>
+        <div class="candidate__stories">
+
+          <section class="story-mini">
+            <div class="story-mini__meta">밸류업·주주환원 · 06.10 15:28 · 1건</div>
+            <h3><a href="https://www.safetimes.co.kr/news/articleViewAmp.html?idxno=243351" target="_blank" rel="noopener">KG그룹 주주환원율 확대 … K Car 축 모빌리티 밸류체인 구축</a></h3>
+            <p>KG그룹 주주환원율 확대 … K Car 축 모빌리티 밸류체인 구축 | - 세이프타임즈 https://www.safetimes.co.kr/news/articleViewAmp.html?idxno=243351</p>
+            <div class="story-mini__sources">SAFETIMES</div>
+            <ul><li><a href="https://www.safetimes.co.kr/news/articleViewAmp.html?idxno=243351" target="_blank" rel="noopener">KG그룹 주주환원율 확대 … K Car 축 모빌리티 밸류체인 구축</a><span>SAFETIMES</span></li></ul>
+          </section>
+
+
+          <section class="story-mini">
+            <div class="story-mini__meta">밸류업·주주환원 · 06.11 02:55 · 1건</div>
+            <h3><a href="https://blog.naver.com/PostView.naver?blogId=dealsite&amp;logNo=224311797734&amp;redirect=Dlog" target="_blank" rel="noopener">KG그룹, 5년간 총주주환원율 50% 역점 : 네이버 블로그</a></h3>
+            <p>KG그룹, 5년간 총주주환원율 50% 역점 : 네이버 블로그 https://blog.naver.com/PostView.naver?blogId=dealsite&amp;logNo=224311797734&amp;redirect=Dlog</p>
+            <div class="story-mini__sources">BLOG</div>
+            <ul><li><a href="https://blog.naver.com/PostView.naver?blogId=dealsite&amp;logNo=224311797734&amp;redirect=Dlog" target="_blank" rel="noopener">KG그룹, 5년간 총주주환원율 50% 역점 : 네이버 블로그</a><span>BLOG</span></li></ul>
+          </section>
+
+        </div>
+        <details class="rule">
+          <summary>story_rules.yaml 초안 보기</summary>
+          <pre>- id: review_f0bce08e7f20
   tokens:
     - https
-    - www
-    - 기대
+    - kg그룹
+    - 주주환원
   require_any_groups:
-    - [db손해보험]
-    - [https, www, 기대, 밸류업]</pre>
+    - [kg그룹]
+    - [https, kg그룹, 주주환원]</pre>
           <button type="button" data-copy-rule>규칙 초안 복사</button>
         </details>
       </article>
@@ -229,7 +896,7 @@
     </section>
   </main>
   <script>
-    const REVIEW = {"accessTokenHash": "7bdf33924ae2f63973a383247e994a0681d0a288ca2df20d5f70c51a333def01", "candidateCount": 3, "candidateHash": "44419a8100cdcd18"};
+    const REVIEW = {"accessTokenHash": "7bdf33924ae2f63973a383247e994a0681d0a288ca2df20d5f70c51a333def01", "candidateCount": 12, "candidateHash": "81558bced80e0c09"};
     const gate = document.getElementById('gate');
     const content = document.getElementById('content');
     const tokenInput = document.getElementById('tokenInput');

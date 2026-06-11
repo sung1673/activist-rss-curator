@@ -1,127 +1,179 @@
 {
-  "date_id": "2026-06-08",
-  "generated_at": "2026-06-08T13:06:44.776798+09:00",
-  "start_at": "2026-06-07T13:05:14.975562+09:00",
-  "end_at": "2026-06-08T13:05:14.975562+09:00",
-  "start_label": "2026-06-07 13:05 KST",
-  "end_label": "2026-06-08 13:05 KST",
-  "candidate_count": 3,
-  "candidate_hash": "44419a8100cdcd18",
+  "date_id": "2026-06-11",
+  "generated_at": "2026-06-11T07:13:28.832892+09:00",
+  "start_at": "2026-06-10T07:09:04.566878+09:00",
+  "end_at": "2026-06-11T07:09:04.566878+09:00",
+  "start_label": "2026-06-10 07:09 KST",
+  "end_label": "2026-06-11 07:09 KST",
+  "candidate_count": 12,
+  "candidate_hash": "81558bced80e0c09",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "098868666735",
-      "score": 84.3,
+      "id": "a16ff2803f94",
+      "score": 88.5,
       "left": {
-        "id": "story-7",
-        "title": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH",
-        "summary": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH - 한국경제 https://www.hankyung.com/amp/2026060822806",
-        "category": "밸류업·주주환원",
-        "datetime": "06.08 10:44",
-        "source_line": "HANKYUNG",
+        "id": "story-11",
+        "title": "삼성전자 소액주주, N% 성과급 제동 본격화…결집력 부족은 딜레마",
+        "summary": "... 주주 행동의 치명적인 약점으로 지목되고 있다. 소액 주주 플랫폼 '액트'는 ... 소액 주주 행동주의 대표 민경권 검증론까지 · 삼성전자 노사 극적 타결에도 ...",
+        "category": "주주행동·경영권",
+        "datetime": "06.10 17:34",
+        "source_line": "INDUSTRYNEWS",
         "link_count": 1,
-        "url": "https://www.hankyung.com/amp/2026060822806",
+        "url": "https://www.industrynews.co.kr/news/articleView.html?idxno=82021",
         "links": [
           {
-            "source": "HANKYUNG",
-            "title": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH",
-            "url": "https://www.hankyung.com/amp/2026060822806"
+            "source": "INDUSTRYNEWS",
+            "title": "삼성전자 소액주주, N% 성과급 제동 본격화…결집력 부족은 딜레마",
+            "url": "https://www.industrynews.co.kr/news/articleView.html?idxno=82021"
           }
         ]
       },
       "right": {
         "id": "story-13",
-        "title": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감",
-        "summary": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감 - 한국정경신문 https://kpenews.com/View.aspx?No=4103612",
-        "category": "밸류업·주주환원",
-        "datetime": "06.08 09:00",
-        "source_line": "KPENEWS",
+        "title": "삼성전자 주주들 행동 나섰다...노조 영업이익 N% 성과급 요구에 제동",
+        "summary": "시장에서는 이번 사태가 국내 행동주의 의 확장을 보여주는 동시에 노조의 과도한 성과급 요구에 대한 주주 들의 집단 반발이 본격화된 사례라는 평가도 나온다.",
+        "category": "주주행동·경영권",
+        "datetime": "06.10 16:42",
+        "source_line": "JOONGANGENEWS",
         "link_count": 1,
-        "url": "https://kpenews.com/View.aspx?No=4103612",
+        "url": "https://www.joongangenews.com/news/articleView.html?idxno=525078",
         "links": [
           {
-            "source": "KPENEWS",
-            "title": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감",
-            "url": "https://kpenews.com/View.aspx?No=4103612"
+            "source": "JOONGANGENEWS",
+            "title": "삼성전자 주주들 행동 나섰다...노조 영업이익 N% 성과급 요구에 제동",
+            "url": "https://www.joongangenews.com/news/articleView.html?idxno=525078"
           }
         ]
       }
     },
     {
-      "id": "4b270d663cee",
-      "score": 83.3,
+      "id": "9717ed744525",
+      "score": 88.3,
       "left": {
-        "id": "story-12",
-        "title": "밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)",
-        "summary": "밑 빠진 독에 '밸류업' 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑) https://www.ilovepc.co.kr/news/articleView.html?idxno=59610",
-        "category": "밸류업·주주환원",
-        "datetime": "06.08 10:44",
-        "source_line": "ILOVEPC",
+        "id": "story-18",
+        "title": "액트, 삼전 소액주주 1.5만명 모았다…성과급 주총 승인 거쳐야",
+        "summary": "(서울=뉴스1) 손엄지 기자 = 소액주주 플랫폼 액트는 삼성전자(005930)를 상대로 주주명부 열람·등사 가처분 소송에 착수했다고 10일 밝혔다.소액주주를 결집해 영업이익 N% 성과급 10년 협약에 대한 본격적인 주주권 행사에 돌입할 계획이다.액트 관계자는 \"이번 ...",
+        "category": "주주행동·경영권",
+        "datetime": "06.10 17:01",
+        "source_line": "FNNEWS",
         "link_count": 1,
-        "url": "https://www.ilovepc.co.kr/news/articleView.html?idxno=59610",
+        "url": "https://www.fnnews.com/news/202606101701163801",
         "links": [
           {
-            "source": "ILOVEPC",
-            "title": "밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)",
-            "url": "https://www.ilovepc.co.kr/news/articleView.html?idxno=59610"
+            "source": "FNNEWS",
+            "title": "액트, 삼전 소액주주 1.5만명 모았다…성과급 주총 승인 거쳐야",
+            "url": "https://www.fnnews.com/news/202606101701163801"
           }
         ]
       },
       "right": {
-        "id": "story-13",
-        "title": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감",
-        "summary": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감 - 한국정경신문 https://kpenews.com/View.aspx?No=4103612",
-        "category": "밸류업·주주환원",
-        "datetime": "06.08 09:00",
-        "source_line": "KPENEWS",
+        "id": "story-37",
+        "title": "액트, 삼성전자 상대 주주명부 소송 착수…성과급 주총 승인 의무화 추진",
+        "summary": "액트, 삼성전자 상대 주주명부 소송 착수…“성과급 주총 승인 의무화 추진” 디지털데일리",
+        "category": "주주행동·경영권",
+        "datetime": "06.10 16:08",
+        "source_line": "디지털데일리",
         "link_count": 1,
-        "url": "https://kpenews.com/View.aspx?No=4103612",
+        "url": "https://news.google.com/rss/articles/CBMiZEFVX3lxTE5kWXJxZ2Jpc29zUGhMNkNHSlhRQ2lZeGRrRFhRN0VqZC1wdU8yZ2x5TjdCclBhQURLX2VhSkR2UWpRV3dfbW1oTmpkQk1tSERDM0JGSEIxdk1wdW9LSHZmTHRWMUc?oc=5",
         "links": [
           {
-            "source": "KPENEWS",
-            "title": "DB손보, 실적 부진에도 배당은 늘린다..밸류업 기대감",
-            "url": "https://kpenews.com/View.aspx?No=4103612"
+            "source": "디지털데일리",
+            "title": "액트, 삼성전자 상대 주주명부 소송 착수…성과급 주총 승인 의무화 추진",
+            "url": "https://news.google.com/rss/articles/CBMiZEFVX3lxTE5kWXJxZ2Jpc29zUGhMNkNHSlhRQ2lZeGRrRFhRN0VqZC1wdU8yZ2x5TjdCclBhQURLX2VhSkR2UWpRV3dfbW1oTmpkQk1tSERDM0JGSEIxdk1wdW9LSHZmTHRWMUc?oc=5"
           }
         ]
       }
     },
     {
-      "id": "e62a73a75c3b",
-      "score": 82.6,
+      "id": "20781a6c9bff",
+      "score": 86.2,
       "left": {
-        "id": "story-7",
-        "title": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH",
-        "summary": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH - 한국경제 https://www.hankyung.com/amp/2026060822806",
-        "category": "밸류업·주주환원",
-        "datetime": "06.08 10:44",
-        "source_line": "HANKYUNG",
+        "id": "story-11",
+        "title": "삼성전자 소액주주, N% 성과급 제동 본격화…결집력 부족은 딜레마",
+        "summary": "... 주주 행동의 치명적인 약점으로 지목되고 있다. 소액 주주 플랫폼 '액트'는 ... 소액 주주 행동주의 대표 민경권 검증론까지 · 삼성전자 노사 극적 타결에도 ...",
+        "category": "주주행동·경영권",
+        "datetime": "06.10 17:34",
+        "source_line": "INDUSTRYNEWS",
         "link_count": 1,
-        "url": "https://www.hankyung.com/amp/2026060822806",
+        "url": "https://www.industrynews.co.kr/news/articleView.html?idxno=82021",
         "links": [
           {
-            "source": "HANKYUNG",
-            "title": "DB손해보험, 고배당에 새 밸류업 정책 기대-NH",
-            "url": "https://www.hankyung.com/amp/2026060822806"
+            "source": "INDUSTRYNEWS",
+            "title": "삼성전자 소액주주, N% 성과급 제동 본격화…결집력 부족은 딜레마",
+            "url": "https://www.industrynews.co.kr/news/articleView.html?idxno=82021"
           }
         ]
       },
       "right": {
-        "id": "story-12",
-        "title": "밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)",
-        "summary": "밑 빠진 독에 '밸류업' 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑) https://www.ilovepc.co.kr/news/articleView.html?idxno=59610",
-        "category": "밸류업·주주환원",
-        "datetime": "06.08 10:44",
-        "source_line": "ILOVEPC",
+        "id": "story-20",
+        "title": "삼성전자 소액주주 N%성과급 이의 제기에 정부까지 힘 보태나",
+        "summary": "삼성전자[005930] 노사가 가까스로 파업 위기를 넘겼지만, 성과급 합의를 둘러싼 후폭풍은 오히려 커지고 있다.반도체 부문 영업이익의 일정 비율을 임직원 성과급 재원으로 배분하는 노사 합의에 소액주주들이 본격적인 법적 대응에 나선 데 이어, 정부도 이른바 '영업이익 n% 성과급'에…",
+        "category": "주주행동·경영권",
+        "datetime": "06.10 14:13",
+        "source_line": "연합인포맥스",
         "link_count": 1,
-        "url": "https://www.ilovepc.co.kr/news/articleView.html?idxno=59610",
+        "url": "https://news.einfomax.co.kr/news/articleView.html?idxno=4419296",
         "links": [
           {
-            "source": "ILOVEPC",
-            "title": "밑 빠진 독에 밸류업 붓기… DB손보株 기대 어렵다 - 디지털포스트(PC사랑)",
-            "url": "https://www.ilovepc.co.kr/news/articleView.html?idxno=59610"
+            "source": "연합인포맥스",
+            "title": "삼성전자 소액주주 N%성과급 이의 제기에 정부까지 힘 보태나",
+            "url": "https://news.einfomax.co.kr/news/articleView.html?idxno=4419296"
           }
         ]
       }
     }
-  ]
+  ],
+  "benchmark_coverage": {
+    "enabled": true,
+    "handles": [
+      "activistkorea"
+    ],
+    "url_count": 96,
+    "matched_count": 61,
+    "missing_count": 35,
+    "coverage_rate": 63.5,
+    "missing": [
+      {
+        "title": "고려아연, 글로벌 공급망 장벽 넘을 ESG 고도화 시동 | - 울산매일",
+        "url": "https://www.iusm.co.kr/news/articleViewAmp.html?idxno=1063888",
+        "source_message_url": "https://t.me/activistkorea/113458",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "오스코텍 라데팡스파트너스는 자문사 아니다 - 데일리메디",
+        "url": "https://www.dailymedi.com/news/news_view.php?wr_id=937222",
+        "source_message_url": "https://t.me/activistkorea/113459",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "국세청, 불공정 자본거래 주요 사후검증 유형은?",
+        "url": "https://www.taxtimes.co.kr/news/article.html?no=275478",
+        "source_message_url": "https://t.me/activistkorea/113457",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "[크레버스 줌인]② 감액배당 앞세운 밸류업…본업 회복 관건",
+        "url": "https://news.nate.com/view/20260610n21858",
+        "source_message_url": "https://t.me/activistkorea/113456",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_title"
+      },
+      {
+        "title": "[KT&G 밸류업] 작년·올해 공개서한 없었다",
+        "url": "https://news.einfomax.co.kr/news/articleViewAmp.html?idxno=4419210",
+        "source_message_url": "https://t.me/activistkorea/113455",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_title"
+      }
+    ]
+  }
 }
