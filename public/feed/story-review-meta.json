@@ -1,124 +1,144 @@
 {
-  "date_id": "2026-06-11",
-  "generated_at": "2026-06-11T07:13:28.832892+09:00",
-  "start_at": "2026-06-10T07:09:04.566878+09:00",
-  "end_at": "2026-06-11T07:09:04.566878+09:00",
-  "start_label": "2026-06-10 07:09 KST",
-  "end_label": "2026-06-11 07:09 KST",
-  "candidate_count": 12,
-  "candidate_hash": "81558bced80e0c09",
+  "date_id": "2026-06-12",
+  "generated_at": "2026-06-12T07:12:39.662964+09:00",
+  "start_at": "2026-06-11T07:09:45.065511+09:00",
+  "end_at": "2026-06-12T07:09:45.065511+09:00",
+  "start_label": "2026-06-11 07:09 KST",
+  "end_label": "2026-06-12 07:09 KST",
+  "candidate_count": 3,
+  "candidate_hash": "2892e6fe28a0bb36",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "a16ff2803f94",
-      "score": 88.5,
+      "id": "64be7502941a",
+      "score": 81.3,
       "left": {
-        "id": "story-11",
-        "title": "삼성전자 소액주주, N% 성과급 제동 본격화…결집력 부족은 딜레마",
-        "summary": "... 주주 행동의 치명적인 약점으로 지목되고 있다. 소액 주주 플랫폼 '액트'는 ... 소액 주주 행동주의 대표 민경권 검증론까지 · 삼성전자 노사 극적 타결에도 ...",
+        "id": "story-1",
+        "title": "고려아연 소액주주연대, 최윤범 회장 등 업무상 배임 혐의 검찰 고발 - 뉴스퀘스트",
+        "summary": "현재 상법은 소액 주주 들이 연대하여 지분을 합산함으로써 경영진과 대주주를 견제할 수 있도록 설계돼 있다. 실제로 국내외 자본시장에서 주주행동주의 와 소액 ...",
         "category": "주주행동·경영권",
-        "datetime": "06.10 17:34",
-        "source_line": "INDUSTRYNEWS",
-        "link_count": 1,
-        "url": "https://www.industrynews.co.kr/news/articleView.html?idxno=82021",
+        "datetime": "06.11 14:25",
+        "source_line": "NEWSQUEST · ILYOSISA · NEWSROAD · NEWSFC",
+        "link_count": 4,
+        "url": "https://www.newsquest.co.kr/news/articleView.html?idxno=267674",
         "links": [
           {
-            "source": "INDUSTRYNEWS",
-            "title": "삼성전자 소액주주, N% 성과급 제동 본격화…결집력 부족은 딜레마",
-            "url": "https://www.industrynews.co.kr/news/articleView.html?idxno=82021"
+            "source": "NEWSQUEST",
+            "title": "고려아연 소액주주연대, 최윤범 회장 등 업무상 배임 혐의 검찰 고발 - 뉴스퀘스트",
+            "url": "https://www.newsquest.co.kr/news/articleView.html?idxno=267674"
+          },
+          {
+            "source": "ILYOSISA",
+            "title": "고려아연 소액주주연대, 최윤범 회장·이사회 전원 검찰 고발",
+            "url": "https://www.ilyosisa.co.kr/news/article.html?no=256376"
+          },
+          {
+            "source": "NEWSROAD",
+            "title": "307억 있어야 사외이사 추천 고려아연소액주주연대, 최윤범 회장 및 이사회 전원 검찰 고발",
+            "url": "http://www.newsroad.co.kr/news/articleView.html?idxno=60305"
+          },
+          {
+            "source": "NEWSFC",
+            "title": "고려아연 소액주주연대, 최윤범 회장 및 이사회 전원 검찰 고발",
+            "url": "http://www.newsfc.co.kr/news/articleView.html?idxno=79202"
           }
         ]
       },
       "right": {
-        "id": "story-13",
-        "title": "삼성전자 주주들 행동 나섰다...노조 영업이익 N% 성과급 요구에 제동",
-        "summary": "시장에서는 이번 사태가 국내 행동주의 의 확장을 보여주는 동시에 노조의 과도한 성과급 요구에 대한 주주 들의 집단 반발이 본격화된 사례라는 평가도 나온다.",
+        "id": "story-10",
+        "title": "돈 없으면 배제? 고려아연 해명 지분 연합 막은 적 없다, 전문성 검증용",
+        "summary": "고려아연 소액주주연대가 최윤범 고려아연 회장과 고려아연 이사회 구성원 전원을 검찰에 고발했다고 11일 밝혔다. 이에 대해 고려아연측는 고발의 전제인 '주주연대에 의한 사외이사 후보 추천'을 막은 적이 없다고 맞섰다. 소액주주연대는 11일 배포한 보도자료를 통해 최 회장과 이사회 전원을…",
         "category": "주주행동·경영권",
-        "datetime": "06.10 16:42",
-        "source_line": "JOONGANGENEWS",
+        "datetime": "06.11 09:23",
+        "source_line": "JOSEILBO",
         "link_count": 1,
-        "url": "https://www.joongangenews.com/news/articleView.html?idxno=525078",
+        "url": "https://www.joseilbo.com/news/htmls/2026/06/20260611569887.html",
         "links": [
           {
-            "source": "JOONGANGENEWS",
-            "title": "삼성전자 주주들 행동 나섰다...노조 영업이익 N% 성과급 요구에 제동",
-            "url": "https://www.joongangenews.com/news/articleView.html?idxno=525078"
+            "source": "JOSEILBO",
+            "title": "돈 없으면 배제? 고려아연 해명 지분 연합 막은 적 없다, 전문성 검증용",
+            "url": "https://www.joseilbo.com/news/htmls/2026/06/20260611569887.html"
           }
         ]
       }
     },
     {
-      "id": "9717ed744525",
-      "score": 88.3,
+      "id": "5c805098f92d",
+      "score": 78.0,
       "left": {
-        "id": "story-18",
-        "title": "액트, 삼전 소액주주 1.5만명 모았다…성과급 주총 승인 거쳐야",
-        "summary": "(서울=뉴스1) 손엄지 기자 = 소액주주 플랫폼 액트는 삼성전자(005930)를 상대로 주주명부 열람·등사 가처분 소송에 착수했다고 10일 밝혔다.소액주주를 결집해 영업이익 N% 성과급 10년 협약에 대한 본격적인 주주권 행사에 돌입할 계획이다.액트 관계자는 \"이번 ...",
-        "category": "주주행동·경영권",
-        "datetime": "06.10 17:01",
-        "source_line": "FNNEWS",
+        "id": "story-35",
+        "title": "KG그룹, K카 품고 모빌리티 밸류체인 완성…주주환원율 50% 확대 - 뉴스케이프",
+        "summary": "KG그룹, K카 품고 모빌리티 밸류체인 완성…주주환원율 50% 확대 - 뉴스케이프 https://www.newscape.co.kr/news/articleView.html?idxno=122658",
+        "category": "밸류업·주주환원",
+        "datetime": "06.11 11:54",
+        "source_line": "NEWSCAPE",
         "link_count": 1,
-        "url": "https://www.fnnews.com/news/202606101701163801",
+        "url": "https://www.newscape.co.kr/news/articleView.html?idxno=122658",
         "links": [
           {
-            "source": "FNNEWS",
-            "title": "액트, 삼전 소액주주 1.5만명 모았다…성과급 주총 승인 거쳐야",
-            "url": "https://www.fnnews.com/news/202606101701163801"
+            "source": "NEWSCAPE",
+            "title": "KG그룹, K카 품고 모빌리티 밸류체인 완성…주주환원율 50% 확대 - 뉴스케이프",
+            "url": "https://www.newscape.co.kr/news/articleView.html?idxno=122658"
           }
         ]
       },
       "right": {
-        "id": "story-37",
-        "title": "액트, 삼성전자 상대 주주명부 소송 착수…성과급 주총 승인 의무화 추진",
-        "summary": "액트, 삼성전자 상대 주주명부 소송 착수…“성과급 주총 승인 의무화 추진” 디지털데일리",
-        "category": "주주행동·경영권",
-        "datetime": "06.10 16:08",
-        "source_line": "디지털데일리",
+        "id": "story-42",
+        "title": "KG그룹, 곽재선 회장의 깜짝 주주환원에 분주해진 계열사",
+        "summary": "[FETV=임종현 기자] 곽재선 KG그룹 회장이 \"순이익의 50%를 주주에게 환원하겠다\"는 메시지를 내놓은 이후 계열사들의 움직임이 분주해지고 있다. 지난 9일 열린 '2026 KG그룹 미래비전·밸류업 미디어 컨퍼런스'에서 해당 방침이 공개된 뒤 그룹 상장 계열사들은 잇따라 주주환원…",
+        "category": "밸류업·주주환원",
+        "datetime": "06.11 09:42",
+        "source_line": "FETV",
         "link_count": 1,
-        "url": "https://news.google.com/rss/articles/CBMiZEFVX3lxTE5kWXJxZ2Jpc29zUGhMNkNHSlhRQ2lZeGRrRFhRN0VqZC1wdU8yZ2x5TjdCclBhQURLX2VhSkR2UWpRV3dfbW1oTmpkQk1tSERDM0JGSEIxdk1wdW9LSHZmTHRWMUc?oc=5",
+        "url": "https://www.fetv.co.kr/news/articleView.html?idxno=304069",
         "links": [
           {
-            "source": "디지털데일리",
-            "title": "액트, 삼성전자 상대 주주명부 소송 착수…성과급 주총 승인 의무화 추진",
-            "url": "https://news.google.com/rss/articles/CBMiZEFVX3lxTE5kWXJxZ2Jpc29zUGhMNkNHSlhRQ2lZeGRrRFhRN0VqZC1wdU8yZ2x5TjdCclBhQURLX2VhSkR2UWpRV3dfbW1oTmpkQk1tSERDM0JGSEIxdk1wdW9LSHZmTHRWMUc?oc=5"
+            "source": "FETV",
+            "title": "KG그룹, 곽재선 회장의 깜짝 주주환원에 분주해진 계열사",
+            "url": "https://www.fetv.co.kr/news/articleView.html?idxno=304069"
           }
         ]
       }
     },
     {
-      "id": "20781a6c9bff",
-      "score": 86.2,
+      "id": "f7dfe9821d39",
+      "score": 76.9,
       "left": {
-        "id": "story-11",
-        "title": "삼성전자 소액주주, N% 성과급 제동 본격화…결집력 부족은 딜레마",
-        "summary": "... 주주 행동의 치명적인 약점으로 지목되고 있다. 소액 주주 플랫폼 '액트'는 ... 소액 주주 행동주의 대표 민경권 검증론까지 · 삼성전자 노사 극적 타결에도 ...",
+        "id": "story-2",
+        "title": "고려아연, 공정위 심사 오른 해외순환 출자…경영권 분쟁 영향無",
+        "summary": "[FETV=박인철 기자] 공정거래위원회가 영풍 측의 의결권 행사를 제한했다는 의혹을 받는 고려아연에 심사보고서를 발송한 것으로 알려졌다. 고려아연 측은 호주 자회사의 영풍 지분 취득과 상호주 형성 과정에 문제가 없다는 법원의 판단이 나온 만큼 공정거래법상 제재를 받더라도 경영권 분쟁에…",
         "category": "주주행동·경영권",
-        "datetime": "06.10 17:34",
-        "source_line": "INDUSTRYNEWS",
-        "link_count": 1,
-        "url": "https://www.industrynews.co.kr/news/articleView.html?idxno=82021",
+        "datetime": "06.11 17:41",
+        "source_line": "FETV · EZYECONOMY",
+        "link_count": 2,
+        "url": "https://www.fetv.co.kr/news/articleView.html?idxno=304081",
         "links": [
           {
-            "source": "INDUSTRYNEWS",
-            "title": "삼성전자 소액주주, N% 성과급 제동 본격화…결집력 부족은 딜레마",
-            "url": "https://www.industrynews.co.kr/news/articleView.html?idxno=82021"
+            "source": "FETV",
+            "title": "고려아연, 공정위 심사 오른 해외순환 출자…경영권 분쟁 영향無",
+            "url": "https://www.fetv.co.kr/news/articleView.html?idxno=304081"
+          },
+          {
+            "source": "EZYECONOMY",
+            "title": "고려아연, 공정위 심의대 오른다…해외 순환출자 위법 판단 변수",
+            "url": "https://www.ezyeconomy.com/news/articleView.html?idxno=236256"
           }
         ]
       },
       "right": {
-        "id": "story-20",
-        "title": "삼성전자 소액주주 N%성과급 이의 제기에 정부까지 힘 보태나",
-        "summary": "삼성전자[005930] 노사가 가까스로 파업 위기를 넘겼지만, 성과급 합의를 둘러싼 후폭풍은 오히려 커지고 있다.반도체 부문 영업이익의 일정 비율을 임직원 성과급 재원으로 배분하는 노사 합의에 소액주주들이 본격적인 법적 대응에 나선 데 이어, 정부도 이른바 '영업이익 n% 성과급'에…",
+        "id": "story-6",
+        "title": "승자 없었다…고려아연·영풍, 증선위 철퇴에 나란히 커진 고민",
+        "summary": "경영권 분쟁 중인 고려아연과 영풍이 금융당국으로부터 사실상 회계 처리를 성실히 하지 않았다는 지적을 받아들게 됐다. 결과 확정까지는 추후 절차가 남아있지만 고려아연과 영풍 모두에 적지 않은 타격이 될 것이란 ...",
         "category": "주주행동·경영권",
-        "datetime": "06.10 14:13",
-        "source_line": "연합인포맥스",
+        "datetime": "06.11 11:21",
+        "source_line": "NEWS",
         "link_count": 1,
-        "url": "https://news.einfomax.co.kr/news/articleView.html?idxno=4419296",
+        "url": "https://news.bizwatch.co.kr/article/industry/2026/06/11/0009",
         "links": [
           {
-            "source": "연합인포맥스",
-            "title": "삼성전자 소액주주 N%성과급 이의 제기에 정부까지 힘 보태나",
-            "url": "https://news.einfomax.co.kr/news/articleView.html?idxno=4419296"
+            "source": "NEWS",
+            "title": "승자 없었다…고려아연·영풍, 증선위 철퇴에 나란히 커진 고민",
+            "url": "https://news.bizwatch.co.kr/article/industry/2026/06/11/0009"
           }
         ]
       }
@@ -129,50 +149,50 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 96,
-    "matched_count": 61,
-    "missing_count": 35,
-    "coverage_rate": 63.5,
+    "url_count": 97,
+    "matched_count": 47,
+    "missing_count": 50,
+    "coverage_rate": 48.5,
     "missing": [
       {
-        "title": "고려아연, 글로벌 공급망 장벽 넘을 ESG 고도화 시동 | - 울산매일",
-        "url": "https://www.iusm.co.kr/news/articleViewAmp.html?idxno=1063888",
-        "source_message_url": "https://t.me/activistkorea/113458",
+        "title": "스페이스X로 10배 차익…현대엘리, 수천억 배당 쏜다",
+        "url": "https://v.daum.net/v/20260611142957026",
+        "source_message_url": "https://t.me/activistkorea/113559",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "오스코텍 라데팡스파트너스는 자문사 아니다 - 데일리메디",
-        "url": "https://www.dailymedi.com/news/news_view.php?wr_id=937222",
-        "source_message_url": "https://t.me/activistkorea/113459",
+        "title": "이마트-신세계, SSG닷컴 재무적 투자자 지분 전량 인수",
+        "url": "https://www.donga.com/news/amp/all/20260611/134095500/2",
+        "source_message_url": "https://t.me/activistkorea/113558",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "국세청, 불공정 자본거래 주요 사후검증 유형은?",
-        "url": "https://www.taxtimes.co.kr/news/article.html?no=275478",
-        "source_message_url": "https://t.me/activistkorea/113457",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "[크레버스 줌인]② 감액배당 앞세운 밸류업…본업 회복 관건",
-        "url": "https://news.nate.com/view/20260610n21858",
-        "source_message_url": "https://t.me/activistkorea/113456",
+        "title": "[기업지배구조 톺아보기] 신일전자, 전자투표·집중투표제 모두 외면 90% 소액주주 들러리",
+        "url": "http://www.hansbiz.co.kr/news/articleViewAmp.html?idxno=843681",
+        "source_message_url": "https://t.me/activistkorea/113555",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "duplicate",
         "reason": "seen_title"
       },
       {
-        "title": "[KT&G 밸류업] 작년·올해 공개서한 없었다",
-        "url": "https://news.einfomax.co.kr/news/articleViewAmp.html?idxno=4419210",
-        "source_message_url": "https://t.me/activistkorea/113455",
+        "title": "롯데쇼핑, 2년 연속 중간배당 실시...주당 1300원 지급",
+        "url": "http://www.popcornnews.net/news/articleView.html?idxno=123637",
+        "source_message_url": "https://t.me/activistkorea/113554",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "seen_title"
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "중기중앙회, 올해 첫 ESG위원회 개최…환경 규제 대응 방안 논의",
+        "url": "http://www.e2news.com/news/articleViewAmp.html?idxno=331273",
+        "source_message_url": "https://t.me/activistkorea/113546",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
       }
     ]
   }
