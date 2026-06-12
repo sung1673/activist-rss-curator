@@ -1,144 +1,134 @@
 {
-  "date_id": "2026-06-12",
-  "generated_at": "2026-06-12T07:12:39.662964+09:00",
-  "start_at": "2026-06-11T07:09:45.065511+09:00",
-  "end_at": "2026-06-12T07:09:45.065511+09:00",
-  "start_label": "2026-06-11 07:09 KST",
-  "end_label": "2026-06-12 07:09 KST",
-  "candidate_count": 3,
-  "candidate_hash": "2892e6fe28a0bb36",
+  "date_id": "2026-06-13",
+  "generated_at": "2026-06-13T06:54:09.906004+09:00",
+  "start_at": "2026-06-12T06:51:03.340263+09:00",
+  "end_at": "2026-06-13T06:51:03.340263+09:00",
+  "start_label": "2026-06-12 06:51 KST",
+  "end_label": "2026-06-13 06:51 KST",
+  "candidate_count": 4,
+  "candidate_hash": "c6e6bc0924ffc813",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "64be7502941a",
-      "score": 81.3,
+      "id": "ed24ffd80638",
+      "score": 88.8,
       "left": {
-        "id": "story-1",
-        "title": "고려아연 소액주주연대, 최윤범 회장 등 업무상 배임 혐의 검찰 고발 - 뉴스퀘스트",
-        "summary": "현재 상법은 소액 주주 들이 연대하여 지분을 합산함으로써 경영진과 대주주를 견제할 수 있도록 설계돼 있다. 실제로 국내외 자본시장에서 주주행동주의 와 소액 ...",
-        "category": "주주행동·경영권",
-        "datetime": "06.11 14:25",
-        "source_line": "NEWSQUEST · ILYOSISA · NEWSROAD · NEWSFC",
-        "link_count": 4,
-        "url": "https://www.newsquest.co.kr/news/articleView.html?idxno=267674",
+        "id": "story-28",
+        "title": "현대지에프홀딩스, 현대백화점 지분 4만주 추가 확보... 지배구조 안정화",
+        "summary": "현대지에프홀딩스, 현대백화점 지분 4만주 추가 확보... 지배구조 안정화 - 데이터투자 https://m.datatooza.com/view.php?ud=20260612165909318152ef35480d_80",
+        "category": "밸류업·주주환원",
+        "datetime": "06.13 00:17",
+        "source_line": "M",
+        "link_count": 1,
+        "url": "https://m.datatooza.com/view.php?ud=20260612165909318152ef35480d_80",
         "links": [
           {
-            "source": "NEWSQUEST",
-            "title": "고려아연 소액주주연대, 최윤범 회장 등 업무상 배임 혐의 검찰 고발 - 뉴스퀘스트",
-            "url": "https://www.newsquest.co.kr/news/articleView.html?idxno=267674"
-          },
-          {
-            "source": "ILYOSISA",
-            "title": "고려아연 소액주주연대, 최윤범 회장·이사회 전원 검찰 고발",
-            "url": "https://www.ilyosisa.co.kr/news/article.html?no=256376"
-          },
-          {
-            "source": "NEWSROAD",
-            "title": "307억 있어야 사외이사 추천 고려아연소액주주연대, 최윤범 회장 및 이사회 전원 검찰 고발",
-            "url": "http://www.newsroad.co.kr/news/articleView.html?idxno=60305"
-          },
-          {
-            "source": "NEWSFC",
-            "title": "고려아연 소액주주연대, 최윤범 회장 및 이사회 전원 검찰 고발",
-            "url": "http://www.newsfc.co.kr/news/articleView.html?idxno=79202"
+            "source": "M",
+            "title": "현대지에프홀딩스, 현대백화점 지분 4만주 추가 확보... 지배구조 안정화",
+            "url": "https://m.datatooza.com/view.php?ud=20260612165909318152ef35480d_80"
           }
         ]
       },
       "right": {
-        "id": "story-10",
-        "title": "돈 없으면 배제? 고려아연 해명 지분 연합 막은 적 없다, 전문성 검증용",
-        "summary": "고려아연 소액주주연대가 최윤범 고려아연 회장과 고려아연 이사회 구성원 전원을 검찰에 고발했다고 11일 밝혔다. 이에 대해 고려아연측는 고발의 전제인 '주주연대에 의한 사외이사 후보 추천'을 막은 적이 없다고 맞섰다. 소액주주연대는 11일 배포한 보도자료를 통해 최 회장과 이사회 전원을…",
-        "category": "주주행동·경영권",
-        "datetime": "06.11 09:23",
-        "source_line": "JOSEILBO",
+        "id": "story-36",
+        "title": "금강레저산업, 티비에이치글로벌 5000주 추가 확보…지배구조 안정화 지속",
+        "summary": "금강레저산업, 티비에이치글로벌 5000주 추가 확보…지배구조 안정화 지속 - 데이터투자 https://www.datatooza.com/article/20260612114459435052ef3916e8_80",
+        "category": "밸류업·주주환원",
+        "datetime": "06.12 12:16",
+        "source_line": "DATATOOZA",
         "link_count": 1,
-        "url": "https://www.joseilbo.com/news/htmls/2026/06/20260611569887.html",
+        "url": "https://www.datatooza.com/article/20260612114459435052ef3916e8_80",
         "links": [
           {
-            "source": "JOSEILBO",
-            "title": "돈 없으면 배제? 고려아연 해명 지분 연합 막은 적 없다, 전문성 검증용",
-            "url": "https://www.joseilbo.com/news/htmls/2026/06/20260611569887.html"
+            "source": "DATATOOZA",
+            "title": "금강레저산업, 티비에이치글로벌 5000주 추가 확보…지배구조 안정화 지속",
+            "url": "https://www.datatooza.com/article/20260612114459435052ef3916e8_80"
           }
         ]
       }
     },
     {
-      "id": "5c805098f92d",
-      "score": 78.0,
+      "id": "c2ccb0ba7526",
+      "score": 86.1,
       "left": {
-        "id": "story-35",
-        "title": "KG그룹, K카 품고 모빌리티 밸류체인 완성…주주환원율 50% 확대 - 뉴스케이프",
-        "summary": "KG그룹, K카 품고 모빌리티 밸류체인 완성…주주환원율 50% 확대 - 뉴스케이프 https://www.newscape.co.kr/news/articleView.html?idxno=122658",
+        "id": "story-21",
+        "title": "밸류업 모범생 키움증권, 감액배당으로 주주 환원 극대화",
+        "summary": "'밸류업 모범생' 키움증권, '감액배당'으로 주주 환원 극대화 | - 연합인포맥스 https://news.einfomax.co.kr/news/articleViewAmp.html?idxno=4419738",
         "category": "밸류업·주주환원",
-        "datetime": "06.11 11:54",
-        "source_line": "NEWSCAPE",
-        "link_count": 1,
-        "url": "https://www.newscape.co.kr/news/articleView.html?idxno=122658",
+        "datetime": "06.13 01:49",
+        "source_line": "연합인포맥스 · FETV",
+        "link_count": 2,
+        "url": "https://news.einfomax.co.kr/news/articleViewAmp.html?idxno=4419738",
         "links": [
           {
-            "source": "NEWSCAPE",
-            "title": "KG그룹, K카 품고 모빌리티 밸류체인 완성…주주환원율 50% 확대 - 뉴스케이프",
-            "url": "https://www.newscape.co.kr/news/articleView.html?idxno=122658"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-42",
-        "title": "KG그룹, 곽재선 회장의 깜짝 주주환원에 분주해진 계열사",
-        "summary": "[FETV=임종현 기자] 곽재선 KG그룹 회장이 \"순이익의 50%를 주주에게 환원하겠다\"는 메시지를 내놓은 이후 계열사들의 움직임이 분주해지고 있다. 지난 9일 열린 '2026 KG그룹 미래비전·밸류업 미디어 컨퍼런스'에서 해당 방침이 공개된 뒤 그룹 상장 계열사들은 잇따라 주주환원…",
-        "category": "밸류업·주주환원",
-        "datetime": "06.11 09:42",
-        "source_line": "FETV",
-        "link_count": 1,
-        "url": "https://www.fetv.co.kr/news/articleView.html?idxno=304069",
-        "links": [
+            "source": "연합인포맥스",
+            "title": "밸류업 모범생 키움증권, 감액배당으로 주주 환원 극대화",
+            "url": "https://news.einfomax.co.kr/news/articleViewAmp.html?idxno=4419738"
+          },
           {
             "source": "FETV",
-            "title": "KG그룹, 곽재선 회장의 깜짝 주주환원에 분주해진 계열사",
-            "url": "https://www.fetv.co.kr/news/articleView.html?idxno=304069"
+            "title": "[주주환원 성적표] 위메이드, 2년 만에 환원 재개 밸류업 본격화",
+            "url": "https://www.fetv.co.kr/news/articleView.html?idxno=304036"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-23",
+        "title": "키움증권, 감액배당 추진…밸류업 우수기업 굳히기",
+        "summary": "키움증권, 감액배당 추진…밸류업 우수기업 '굳히기' - Daum https://v.daum.net/v/GAMhSWWITW",
+        "category": "밸류업·주주환원",
+        "datetime": "06.13 02:36",
+        "source_line": "다음뉴스",
+        "link_count": 1,
+        "url": "https://v.daum.net/v/GAMhSWWITW",
+        "links": [
+          {
+            "source": "다음뉴스",
+            "title": "키움증권, 감액배당 추진…밸류업 우수기업 굳히기",
+            "url": "https://v.daum.net/v/GAMhSWWITW"
           }
         ]
       }
     },
     {
-      "id": "f7dfe9821d39",
-      "score": 76.9,
+      "id": "983ea0bb4c74",
+      "score": 85.0,
       "left": {
         "id": "story-2",
-        "title": "고려아연, 공정위 심사 오른 해외순환 출자…경영권 분쟁 영향無",
-        "summary": "[FETV=박인철 기자] 공정거래위원회가 영풍 측의 의결권 행사를 제한했다는 의혹을 받는 고려아연에 심사보고서를 발송한 것으로 알려졌다. 고려아연 측은 호주 자회사의 영풍 지분 취득과 상호주 형성 과정에 문제가 없다는 법원의 판단이 나온 만큼 공정거래법상 제재를 받더라도 경영권 분쟁에…",
+        "title": "한화솔루션 유상증자 금감원 통과에도 소액주주 반발 지속",
+        "summary": "뉴스1에 따르면 주주행동주의 플랫폼 액트(ACT)에 글을 올린 한화솔루션 주주 대표는 고려아연 지분 매각이라는 합리적인 방안에 응답하지 않는 경영진의 ...",
         "category": "주주행동·경영권",
-        "datetime": "06.11 17:41",
-        "source_line": "FETV · EZYECONOMY",
-        "link_count": 2,
-        "url": "https://www.fetv.co.kr/news/articleView.html?idxno=304081",
+        "datetime": "06.12 17:11",
+        "source_line": "2NEWS",
+        "link_count": 1,
+        "url": "https://www.2news.co.kr/news/articleView.html?idxno=10453",
         "links": [
           {
-            "source": "FETV",
-            "title": "고려아연, 공정위 심사 오른 해외순환 출자…경영권 분쟁 영향無",
-            "url": "https://www.fetv.co.kr/news/articleView.html?idxno=304081"
-          },
-          {
-            "source": "EZYECONOMY",
-            "title": "고려아연, 공정위 심의대 오른다…해외 순환출자 위법 판단 변수",
-            "url": "https://www.ezyeconomy.com/news/articleView.html?idxno=236256"
+            "source": "2NEWS",
+            "title": "한화솔루션 유상증자 금감원 통과에도 소액주주 반발 지속",
+            "url": "https://www.2news.co.kr/news/articleView.html?idxno=10453"
           }
         ]
       },
       "right": {
-        "id": "story-6",
-        "title": "승자 없었다…고려아연·영풍, 증선위 철퇴에 나란히 커진 고민",
-        "summary": "경영권 분쟁 중인 고려아연과 영풍이 금융당국으로부터 사실상 회계 처리를 성실히 하지 않았다는 지적을 받아들게 됐다. 결과 확정까지는 추후 절차가 남아있지만 고려아연과 영풍 모두에 적지 않은 타격이 될 것이란 ...",
+        "id": "story-5",
+        "title": "1.7조 유증 앞둔 한화솔루션 소액주주들 고려아연 지분 매각 재차 촉구 - 데일리머니",
+        "summary": "하지만 소액 주주 연대는 유상증자 강행에 반발하며 고려아연 지분 매각을 재차 요구했다.12일 주주행동주의 플랫폼 액트(ACT)에 따르면 한화솔루션 주주 ...",
         "category": "주주행동·경영권",
-        "datetime": "06.11 11:21",
-        "source_line": "NEWS",
-        "link_count": 1,
-        "url": "https://news.bizwatch.co.kr/article/industry/2026/06/11/0009",
+        "datetime": "06.12 18:36",
+        "source_line": "THEDAILYMONEY · 뉴스1",
+        "link_count": 2,
+        "url": "http://www.thedailymoney.com/news/articleView.html?idxno=1141472",
         "links": [
           {
-            "source": "NEWS",
-            "title": "승자 없었다…고려아연·영풍, 증선위 철퇴에 나란히 커진 고민",
-            "url": "https://news.bizwatch.co.kr/article/industry/2026/06/11/0009"
+            "source": "THEDAILYMONEY",
+            "title": "1.7조 유증 앞둔 한화솔루션 소액주주들 고려아연 지분 매각 재차 촉구 - 데일리머니",
+            "url": "http://www.thedailymoney.com/news/articleView.html?idxno=1141472"
+          },
+          {
+            "source": "뉴스1",
+            "title": "1.7조 유증 앞둔 한화솔루션 소액주주들 고려아연 지분 매각 재차 촉구",
+            "url": "https://v.daum.net/v/20260612170947866"
           }
         ]
       }
@@ -149,47 +139,47 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 97,
-    "matched_count": 47,
-    "missing_count": 50,
-    "coverage_rate": 48.5,
+    "url_count": 119,
+    "matched_count": 50,
+    "missing_count": 69,
+    "coverage_rate": 42.0,
     "missing": [
       {
-        "title": "스페이스X로 10배 차익…현대엘리, 수천억 배당 쏜다",
-        "url": "https://v.daum.net/v/20260611142957026",
-        "source_message_url": "https://t.me/activistkorea/113559",
+        "title": "브레마 호텔&리조트, 자문계약 종료·자체경영 전환..연 2,500만 달러 비용 절감 - 매일경제 마켓",
+        "url": "https://stock.mk.co.kr/news/view/1103728",
+        "source_message_url": "https://t.me/activistkorea/113682",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "이마트-신세계, SSG닷컴 재무적 투자자 지분 전량 인수",
-        "url": "https://www.donga.com/news/amp/all/20260611/134095500/2",
-        "source_message_url": "https://t.me/activistkorea/113558",
+        "title": "스페이스X 사장 테슬라 합병시 머스크 편해지고 시너지 있지만",
+        "url": "https://www.yna.co.kr/amp/view/AKR20260613003900091",
+        "source_message_url": "https://t.me/activistkorea/113681",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "[기업지배구조 톺아보기] 신일전자, 전자투표·집중투표제 모두 외면 90% 소액주주 들러리",
-        "url": "http://www.hansbiz.co.kr/news/articleViewAmp.html?idxno=843681",
-        "source_message_url": "https://t.me/activistkorea/113555",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "seen_title"
-      },
-      {
-        "title": "롯데쇼핑, 2년 연속 중간배당 실시...주당 1300원 지급",
-        "url": "http://www.popcornnews.net/news/articleView.html?idxno=123637",
-        "source_message_url": "https://t.me/activistkorea/113554",
+        "title": "100% 공공성 강요하면서 지원은 0 땜질 끝내고 의민정 특위 신설",
+        "url": "http://www.newsmp.com/news/articleView.html?idxno=254581",
+        "source_message_url": "https://t.me/activistkorea/113679",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "중기중앙회, 올해 첫 ESG위원회 개최…환경 규제 대응 방안 논의",
-        "url": "http://www.e2news.com/news/articleViewAmp.html?idxno=331273",
-        "source_message_url": "https://t.me/activistkorea/113546",
+        "title": "산림조합 중앙회장도 직선제 추진",
+        "url": "https://www.agrinet.co.kr/news/articleView.html?idxno=404949",
+        "source_message_url": "https://t.me/activistkorea/113676",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "SBI인베스트먼트, 포트폴리오 기업 협업 위한 K-Beauty Connect 개최",
+        "url": "https://www.fetv.co.kr/news/articleView.html?idxno=304192",
+        "source_message_url": "https://t.me/activistkorea/113674",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
