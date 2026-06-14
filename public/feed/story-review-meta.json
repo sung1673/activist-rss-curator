@@ -1,102 +1,63 @@
 {
-  "date_id": "2026-06-14",
-  "generated_at": "2026-06-14T06:24:37.244878+09:00",
-  "start_at": "2026-06-13T06:22:35.475873+09:00",
-  "end_at": "2026-06-14T06:22:35.475873+09:00",
-  "start_label": "2026-06-13 06:22 KST",
-  "end_label": "2026-06-14 06:22 KST",
-  "candidate_count": 1,
-  "candidate_hash": "5189de298df6f527",
+  "date_id": "2026-06-15",
+  "generated_at": "2026-06-15T06:22:01.057057+09:00",
+  "start_at": "2026-06-14T06:20:18.440373+09:00",
+  "end_at": "2026-06-15T06:20:18.440373+09:00",
+  "start_label": "2026-06-14 06:20 KST",
+  "end_label": "2026-06-15 06:20 KST",
+  "candidate_count": 0,
+  "candidate_hash": "4f53cda18c2baa0c",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": [
-    {
-      "id": "c2ccb0ba7526",
-      "score": 86.7,
-      "left": {
-        "id": "story-9",
-        "title": "키움증권, 감액배당 추진…밸류업 우수기업 굳히기",
-        "summary": "키움증권, 감액배당 추진…밸류업 우수기업 '굳히기' - Daum https://v.daum.net/v/GAMhSWWITW",
-        "category": "밸류업·주주환원",
-        "datetime": "06.13 02:36",
-        "source_line": "다음뉴스",
-        "link_count": 1,
-        "url": "https://v.daum.net/v/GAMhSWWITW",
-        "links": [
-          {
-            "source": "다음뉴스",
-            "title": "키움증권, 감액배당 추진…밸류업 우수기업 굳히기",
-            "url": "https://v.daum.net/v/GAMhSWWITW"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-14",
-        "title": "밸류업 모범생 키움증권, 감액배당으로 주주 환원 극대화",
-        "summary": "'밸류업 모범생' 키움증권, '감액배당'으로 주주 환원 극대화 | - 연합인포맥스 https://news.einfomax.co.kr/news/articleViewAmp.html?idxno=4419738",
-        "category": "밸류업·주주환원",
-        "datetime": "06.13 01:49",
-        "source_line": "연합인포맥스",
-        "link_count": 1,
-        "url": "https://news.einfomax.co.kr/news/articleViewAmp.html?idxno=4419738",
-        "links": [
-          {
-            "source": "연합인포맥스",
-            "title": "밸류업 모범생 키움증권, 감액배당으로 주주 환원 극대화",
-            "url": "https://news.einfomax.co.kr/news/articleViewAmp.html?idxno=4419738"
-          }
-        ]
-      }
-    }
-  ],
+  "candidates": [],
   "benchmark_coverage": {
     "enabled": true,
     "handles": [
       "activistkorea"
     ],
-    "url_count": 55,
-    "matched_count": 16,
-    "missing_count": 39,
-    "coverage_rate": 29.1,
+    "url_count": 74,
+    "matched_count": 14,
+    "missing_count": 60,
+    "coverage_rate": 18.9,
     "missing": [
       {
-        "title": "상위 대형 로펌 변호사 600명 돌파…리걸테크·전문인력 확보 경쟁이 중소형 로펌 입지 좁힌다",
-        "url": "http://knpp.co.kr/news/510814",
-        "source_message_url": "https://t.me/activistkorea/113738",
+        "title": "[박종면칼럼] 새만금 가는 현대차, 목적지는 보스턴다이내믹스",
+        "url": "https://www.bloter.net/news/articleView.html?idxno=665383",
+        "source_message_url": "https://t.me/activistkorea/113812",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "바카라 5만원으로 산업에서의 역할: 현재와 미래의 중요성 - 성공을 위한 로드맵",
-        "url": "https://www.kmrk.ru?GameID=2026-06-10%2Fmqpzjd.html",
-        "source_message_url": "https://t.me/activistkorea/113735",
+        "title": "[IB토마토]콜마그룹, 한국콜마 쏠림 더 커졌다…미국 공장 정상화 숙제",
+        "url": "https://www.newstomato.com/ReadNews.aspx?no=1303657",
+        "source_message_url": "https://t.me/activistkorea/113810",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "SBI인베스트먼트, K-뷰티 포트폴리오 밸류업 나선다",
-        "url": "https://www.msn.com/ko-kr/news/other/sbi%EC%9D%B8%EB%B2%A0%EC%8A%A4%ED%8A%B8%EB%A8%BC%ED%8A%B8-k-%EB%B7%B0%ED%8B%B0-%ED%8F%AC%ED%8A%B8%ED%8F%B4%EB%A6%AC%EC%98%A4-%EB%B0%B8%EB%A5%98%EC%97%85-%EB%82%98%EC%84%A0%EB%8B%A4/ar-AA25qSeu",
-        "source_message_url": "https://t.me/activistkorea/113736",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "excluded_domain"
-      },
-      {
-        "title": "Commonwealth Financial Network는 투자자의 역량 강화를 위해 교육과 전략 공유를 병행하며 ...",
-        "url": "https://x.com/search?q=Commonwealth+Financial+Network%EB%8A%94+%ED%88%AC%EC%9E%90%EC%9E%90%EC%9D%98+%EC%97%AD%EB%9F%89+%EA%B0%95%ED%99%94%EB%A5%BC+%EC%9C%84%ED%95%B4+%EA%B5%90%EC%9C%A1%EA%B3%BC+%EC%A0%84%EB%9E%B5+%EA%B3%B5%EC%9C%A0%EB%A5%BC+%EB%B3%91%ED%96%89%ED%95%98%EB%A9%B0+Commonwealth+Financial+Network%EB%8A%94+%ED%88%AC%EC%9E%90+%EA%B3%BC%EC%A0%95%EC%97%90+%EB%8C%80%ED%95%9C+%EC%9D%B4%ED%95%B4%EB%8F%84%EB%A5%BC+%EB%86%92%EC%9D%B4%EB%8A%94+%EB%8D%B0+%EC%A4%91%EC%A0%90%EC%9D%84+%EB%91%94%EB%8B%A4.+Commonwealth+Financial+Network%EB%8A%94+%EC%9D%B4%EB%A5%BC+%ED%86%B5%ED%95%B4+%ED%88%AC%EC%9E%90%EC%9E%90%EA%B0%80+%EC%8A%A4%EC%8A%A4%EB%A1%9C+%EC%A0%84%EB%9E%B5%EC%9D%84+%EC%8B%A4%ED%96%89%ED%95%A0+%EC%88%98+%EC%9E%88%EB%8A%94+%EA%B8%B0%EB%B0%98%EC%9D%84+%EB%A7%88%EB%A0%A8%ED%95%9C%EB%8B%A4..tzw&src=video",
-        "source_message_url": "https://t.me/activistkorea/113733",
+        "title": "주주가치 훼손 우려 한화에어로, ESG 등급 강등 수순",
+        "url": "https://dealsite.co.kr/articles/163463/068021",
+        "source_message_url": "https://t.me/activistkorea/113808",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "석유공사·광해광업공단, 감사역량 강화·청렴문화 확산 맞손",
-        "url": "https://www.msn.com/ko-kr/news/other/%EC%84%9D%EC%9C%A0%EA%B3%B5%EC%82%AC-%EA%B4%91%ED%95%B4%EA%B4%91%EC%97%85%EA%B3%B5%EB%8B%A8-%EA%B0%90%EC%82%AC%EC%97%AD%EB%9F%89-%EA%B0%95%ED%99%94-%EC%B2%AD%EB%A0%B4%EB%AC%B8%ED%99%94-%ED%99%95%EC%82%B0-%EB%A7%9E%EC%86%90/ar-AA25hhTj",
-        "source_message_url": "https://t.me/activistkorea/113734",
+        "title": "[The Numbers] 할리스커피, 2025년 매출 0원 기현상 속 국세청 특별세무조사… 특수관계자 ...",
+        "url": "https://www.newsspace.kr/news/article.html?no=13996",
+        "source_message_url": "https://t.me/activistkorea/113809",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
-        "reason": "excluded_domain"
+        "reason": "low_relevance"
+      },
+      {
+        "title": "ESG 경영 고도화 나서는 제약업계…핵심 키워드 그룹 통합 - 메디칼타임즈",
+        "url": "https://www.medicaltimes.com/Mobile/News/NewsView.html?ID=1169228",
+        "source_message_url": "https://t.me/activistkorea/113806",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
       }
     ]
   }
