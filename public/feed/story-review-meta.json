@@ -1,63 +1,183 @@
 {
-  "date_id": "2026-06-15",
-  "generated_at": "2026-06-15T06:22:01.057057+09:00",
-  "start_at": "2026-06-14T06:20:18.440373+09:00",
-  "end_at": "2026-06-15T06:20:18.440373+09:00",
-  "start_label": "2026-06-14 06:20 KST",
-  "end_label": "2026-06-15 06:20 KST",
-  "candidate_count": 0,
-  "candidate_hash": "4f53cda18c2baa0c",
+  "date_id": "2026-06-16",
+  "generated_at": "2026-06-16T07:31:00.861175+09:00",
+  "start_at": "2026-06-15T07:26:57.692911+09:00",
+  "end_at": "2026-06-16T07:26:57.692911+09:00",
+  "start_label": "2026-06-15 07:26 KST",
+  "end_label": "2026-06-16 07:26 KST",
+  "candidate_count": 4,
+  "candidate_hash": "035b517cceca59d2",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": [],
+  "candidates": [
+    {
+      "id": "60098c4c499c",
+      "score": 87.4,
+      "left": {
+        "id": "story-18",
+        "title": "현대모비스, 중장기 밸류업 전략 가속…주주가치 획기적 제고",
+        "summary": "현대모비스, 중장기 밸류업 전략 가속…\"주주가치 획기적 제고\" - 네이트 뉴스 https://news.nate.com/view/20260615n12818",
+        "category": "밸류업·주주환원",
+        "datetime": "06.15 11:55",
+        "source_line": "네이트뉴스 · DIZZOTV",
+        "link_count": 2,
+        "url": "https://news.nate.com/view/20260615n12818",
+        "links": [
+          {
+            "source": "네이트뉴스",
+            "title": "현대모비스, 중장기 밸류업 전략 가속…주주가치 획기적 제고",
+            "url": "https://news.nate.com/view/20260615n12818"
+          },
+          {
+            "source": "DIZZOTV",
+            "title": "현대모비스, 기술투자·주주환원 투트랙…밸류업 드라이브",
+            "url": "https://www.dizzotv.com/site/data/html_dir/2026/06/15/2026061580027.html"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-58",
+        "title": "현대모비스, 매출 61조 돌파와 함께 주주가치 제고 총력",
+        "summary": "현대모비스, 매출 61조 돌파와 함께 주주가치 제고 총력 - 에너지뉴스 https://www.2news.co.kr/news/articleView.html?idxno=10801",
+        "category": "밸류업·주주환원",
+        "datetime": "06.16 03:41",
+        "source_line": "2NEWS",
+        "link_count": 1,
+        "url": "https://www.2news.co.kr/news/articleView.html?idxno=10801",
+        "links": [
+          {
+            "source": "2NEWS",
+            "title": "현대모비스, 매출 61조 돌파와 함께 주주가치 제고 총력",
+            "url": "https://www.2news.co.kr/news/articleView.html?idxno=10801"
+          }
+        ]
+      }
+    },
+    {
+      "id": "ff9605da8b7d",
+      "score": 81.1,
+      "left": {
+        "id": "story-34",
+        "title": "[창간14주년-반도체 그후] 현대차의 미래, 지배구조 과거 고리 풀까",
+        "summary": "[창간14주년-반도체 그후] 현대차의 '미래', 지배구조 '과거 고리' 풀까 - 스트레이트뉴스 https://www.straightnews.co.kr/news/articleView.html?idxno=304813",
+        "category": "밸류업·주주환원",
+        "datetime": "06.15 17:34",
+        "source_line": "STRAIGHTNEWS",
+        "link_count": 1,
+        "url": "https://www.straightnews.co.kr/news/articleView.html?idxno=304813",
+        "links": [
+          {
+            "source": "STRAIGHTNEWS",
+            "title": "[창간14주년-반도체 그후] 현대차의 미래, 지배구조 과거 고리 풀까",
+            "url": "https://www.straightnews.co.kr/news/articleView.html?idxno=304813"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-57",
+        "title": "현대차 랠리 소외됐는데…그룹 지배구조 개편서 주목받는 현대제철",
+        "summary": "현대차 랠리 소외됐는데…그룹 지배구조 개편서 주목받는 현대제철 - 인베스트조선 https://www.investchosun.com/site/data/html_dir/2026/06/15/2026061580139.html",
+        "category": "밸류업·주주환원",
+        "datetime": "06.16 07:09",
+        "source_line": "INVESTCHOSUN",
+        "link_count": 1,
+        "url": "https://www.investchosun.com/site/data/html_dir/2026/06/15/2026061580139.html",
+        "links": [
+          {
+            "source": "INVESTCHOSUN",
+            "title": "현대차 랠리 소외됐는데…그룹 지배구조 개편서 주목받는 현대제철",
+            "url": "https://www.investchosun.com/site/data/html_dir/2026/06/15/2026061580139.html"
+          }
+        ]
+      }
+    },
+    {
+      "id": "a5c12f766871",
+      "score": 78.5,
+      "left": {
+        "id": "story-17",
+        "title": "통신 3사 지배구조 핵심지표 준수율 보니… SKT 100%, LGU+ 93.3%, KT 86.7%",
+        "summary": "통신 3사 지배구조 핵심지표 준수율 보니… SKT 100%, LGU+ 93.3%, KT 86.7% - 조선비즈 https://biz.chosun.com/it-science/ict/2026/06/15/TUHQPM4TVVAC5NZR265RV7XRPQ/",
+        "category": "밸류업·주주환원",
+        "datetime": "06.15 16:13",
+        "source_line": "BIZ",
+        "link_count": 1,
+        "url": "https://biz.chosun.com/it-science/ict/2026/06/15/TUHQPM4TVVAC5NZR265RV7XRPQ",
+        "links": [
+          {
+            "source": "BIZ",
+            "title": "통신 3사 지배구조 핵심지표 준수율 보니… SKT 100%, LGU+ 93.3%, KT 86.7%",
+            "url": "https://biz.chosun.com/it-science/ict/2026/06/15/TUHQPM4TVVAC5NZR265RV7XRPQ"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-33",
+        "title": "[기업지배구조 보고서 톺아보기] KT, 이통3사 중 준수율 최하...소유분산기업의 숙제",
+        "summary": "[기업지배구조 보고서 톺아보기] KT, 이통3사 중 준수율 최하...'소유분산기업'의 숙제 | http://www.hansbiz.co.kr/news/articleViewAmp.html?idxno=843439",
+        "category": "밸류업·주주환원",
+        "datetime": "06.15 18:57",
+        "source_line": "HANSBIZ",
+        "link_count": 1,
+        "url": "http://www.hansbiz.co.kr/news/articleViewAmp.html?idxno=843439",
+        "links": [
+          {
+            "source": "HANSBIZ",
+            "title": "[기업지배구조 보고서 톺아보기] KT, 이통3사 중 준수율 최하...소유분산기업의 숙제",
+            "url": "http://www.hansbiz.co.kr/news/articleViewAmp.html?idxno=843439"
+          }
+        ]
+      }
+    }
+  ],
   "benchmark_coverage": {
     "enabled": true,
     "handles": [
       "activistkorea"
     ],
-    "url_count": 74,
-    "matched_count": 14,
-    "missing_count": 60,
-    "coverage_rate": 18.9,
+    "url_count": 134,
+    "matched_count": 55,
+    "missing_count": 79,
+    "coverage_rate": 41.0,
     "missing": [
       {
-        "title": "[박종면칼럼] 새만금 가는 현대차, 목적지는 보스턴다이내믹스",
-        "url": "https://www.bloter.net/news/articleView.html?idxno=665383",
-        "source_message_url": "https://t.me/activistkorea/113812",
+        "title": "코스피 상장사로 지배구조 공시 확대 첫해…평균 준수율 47.8%",
+        "url": "https://www.yna.co.kr/amp/view/AKR20260615117600003",
+        "source_message_url": "https://t.me/activistkorea/113955",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_title"
+      },
+      {
+        "title": "코스피 상장사로 지배구조 공시 확대 첫해…평균 준수율 47.8%",
+        "url": "https://v.daum.net/v/20260616061000127",
+        "source_message_url": "https://t.me/activistkorea/113954",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_title"
+      },
+      {
+        "title": "기업지배구조 공시 평균 준수율 47.8%…포스코홀딩스 1위",
+        "url": "https://mobile.newsis.com/view/NISX20260615_0003669978",
+        "source_message_url": "https://t.me/activistkorea/113952",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "same_title"
+      },
+      {
+        "title": "투자보다 구조를 고쳤다, 소유-분리 가르는 대웅제약",
+        "url": "https://www.hitnews.co.kr/news/articleView.html?idxno=76872",
+        "source_message_url": "https://t.me/activistkorea/113953",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "[IB토마토]콜마그룹, 한국콜마 쏠림 더 커졌다…미국 공장 정상화 숙제",
-        "url": "https://www.newstomato.com/ReadNews.aspx?no=1303657",
-        "source_message_url": "https://t.me/activistkorea/113810",
+        "title": "지배구조 공시 첫해 평균 준수율 47.8%…포스코홀딩스 1위",
+        "url": "https://www.news1.kr/industry/general-industry/6197861",
+        "source_message_url": "https://t.me/activistkorea/113950",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "주주가치 훼손 우려 한화에어로, ESG 등급 강등 수순",
-        "url": "https://dealsite.co.kr/articles/163463/068021",
-        "source_message_url": "https://t.me/activistkorea/113808",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "[The Numbers] 할리스커피, 2025년 매출 0원 기현상 속 국세청 특별세무조사… 특수관계자 ...",
-        "url": "https://www.newsspace.kr/news/article.html?no=13996",
-        "source_message_url": "https://t.me/activistkorea/113809",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "ESG 경영 고도화 나서는 제약업계…핵심 키워드 그룹 통합 - 메디칼타임즈",
-        "url": "https://www.medicaltimes.com/Mobile/News/NewsView.html?ID=1169228",
-        "source_message_url": "https://t.me/activistkorea/113806",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
+        "status": "duplicate",
+        "reason": "similar_title"
       }
     ]
   }
