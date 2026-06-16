@@ -1,129 +1,111 @@
 {
-  "date_id": "2026-06-16",
-  "generated_at": "2026-06-16T07:31:00.861175+09:00",
-  "start_at": "2026-06-15T07:26:57.692911+09:00",
-  "end_at": "2026-06-16T07:26:57.692911+09:00",
-  "start_label": "2026-06-15 07:26 KST",
-  "end_label": "2026-06-16 07:26 KST",
-  "candidate_count": 4,
-  "candidate_hash": "035b517cceca59d2",
+  "date_id": "2026-06-17",
+  "generated_at": "2026-06-17T07:24:06.593252+09:00",
+  "start_at": "2026-06-16T07:19:06.086151+09:00",
+  "end_at": "2026-06-17T07:19:06.086151+09:00",
+  "start_label": "2026-06-16 07:19 KST",
+  "end_label": "2026-06-17 07:19 KST",
+  "candidate_count": 2,
+  "candidate_hash": "898ebf2b41e50dea",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "60098c4c499c",
-      "score": 87.4,
+      "id": "b065de2ba74a",
+      "score": 81.7,
       "left": {
-        "id": "story-18",
-        "title": "현대모비스, 중장기 밸류업 전략 가속…주주가치 획기적 제고",
-        "summary": "현대모비스, 중장기 밸류업 전략 가속…\"주주가치 획기적 제고\" - 네이트 뉴스 https://news.nate.com/view/20260615n12818",
-        "category": "밸류업·주주환원",
-        "datetime": "06.15 11:55",
-        "source_line": "네이트뉴스 · DIZZOTV",
-        "link_count": 2,
-        "url": "https://news.nate.com/view/20260615n12818",
+        "id": "story-22",
+        "title": "우리금융 동양생명 편입 8월 넘길듯…소액주주 반발에 금감원 공정성 요구",
+        "summary": "[서울=뉴스핌] 채송무 기자 = 우리금융그룹의 동양생명 자회사 편입 프로젝트가 금융감독원의 '제동'과 소액주주들의 강력 반발이라는 이중고 속에 8월 내 완료라는 기존 스케쥴을 지킬 수 없을 것으로 보인다. 당국은 합병 비율의 공정성을 입증하기 위한 추 ...",
+        "category": "자본시장 제도·공시",
+        "datetime": "06.16 17:37",
+        "source_line": "NEWSPIM",
+        "link_count": 1,
+        "url": "https://www.newspim.com/news/view/20260616001123",
         "links": [
           {
-            "source": "네이트뉴스",
-            "title": "현대모비스, 중장기 밸류업 전략 가속…주주가치 획기적 제고",
-            "url": "https://news.nate.com/view/20260615n12818"
+            "source": "NEWSPIM",
+            "title": "우리금융 동양생명 편입 8월 넘길듯…소액주주 반발에 금감원 공정성 요구",
+            "url": "https://www.newspim.com/news/view/20260616001123"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-51",
+        "title": "우리금융 주주환원정책, 동양생명 소액주주 복병",
+        "summary": "우리금융그룹이 올해 보통주자본(CET1) 비율에 기반한 주주환원정책을 추진 중인 가운에 동양생명 완전 자회사화가 예상치 못한 복병으로 등장했다. 16일 금융권에 따르면 동양생명은 오는 22일 주주간담회를 개최할 예정이다. 주주간담회에는 동양생명 주주들이 참석하며 우리금융과 동양생명 간…",
+        "category": "밸류업·주주환원",
+        "datetime": "06.16 16:00",
+        "source_line": "SISAON",
+        "link_count": 1,
+        "url": "https://www.sisaon.co.kr/news/articleView.html?idxno=201873",
+        "links": [
+          {
+            "source": "SISAON",
+            "title": "우리금융 주주환원정책, 동양생명 소액주주 복병",
+            "url": "https://www.sisaon.co.kr/news/articleView.html?idxno=201873"
+          }
+        ]
+      }
+    },
+    {
+      "id": "26162fe325cc",
+      "score": 73.2,
+      "left": {
+        "id": "story-3",
+        "title": "코스피 상장사로 획대된 지배구조보고서 평균 준수율 47.8% .... 기존 기업 58.9%",
+        "summary": "코스피 상장사로 획대된 지배구조보고서 평균 준수율 47.8% .... 기존 기업 58.9% - 워크투데이 http://www.worktoday.co.kr/news/articleView.html?idxno=85670",
+        "category": "자본시장 제도·공시",
+        "datetime": "06.17 00:24",
+        "source_line": "WORKTODAY · 다음뉴스 · SAFETIMES · LEADERSFACT · INEWS24",
+        "link_count": 13,
+        "url": "http://www.worktoday.co.kr/news/articleView.html?idxno=85670",
+        "links": [
+          {
+            "source": "WORKTODAY",
+            "title": "코스피 상장사로 획대된 지배구조보고서 평균 준수율 47.8% .... 기존 기업 58.9%",
+            "url": "http://www.worktoday.co.kr/news/articleView.html?idxno=85670"
           },
           {
-            "source": "DIZZOTV",
-            "title": "현대모비스, 기술투자·주주환원 투트랙…밸류업 드라이브",
-            "url": "https://www.dizzotv.com/site/data/html_dir/2026/06/15/2026061580027.html"
+            "source": "다음뉴스",
+            "title": "코스피 전체로 확대한 지배구조보고서…상장사 준수율 47.8% 그쳐",
+            "url": "https://v.daum.net/v/ZqqwJnnQHJ"
+          },
+          {
+            "source": "SAFETIMES",
+            "title": "코스피 상장사 지배구조 핵심지표 준수율 47.8%",
+            "url": "https://www.safetimes.co.kr/news/articleViewAmp.html?idxno=243522"
+          },
+          {
+            "source": "LEADERSFACT",
+            "title": "코스피 지배구조 공시 전면 확대 첫해, 평균 준수율 47.8%…포스코홀딩스 6년 평균 1위",
+            "url": "https://www.leadersfact.co.kr/news/articleView.html?idxno=23146"
+          },
+          {
+            "source": "INEWS24",
+            "title": "코스피 지배구조 공시 확대 첫해…평균 준수율 47.8%",
+            "url": "https://www.inews24.com/view/1976899"
           }
         ]
       },
       "right": {
-        "id": "story-58",
-        "title": "현대모비스, 매출 61조 돌파와 함께 주주가치 제고 총력",
-        "summary": "현대모비스, 매출 61조 돌파와 함께 주주가치 제고 총력 - 에너지뉴스 https://www.2news.co.kr/news/articleView.html?idxno=10801",
+        "id": "story-19",
+        "title": "낙제점 수두룩한데⋯ 포스코홀딩스, 지배구조 준수율 압도적 1위",
+        "summary": "'낙제점 수두룩한데'⋯ 포스코홀딩스, 지배구조 준수율 '압도적 1위' - 브릿지경제 https://www.viva100.com/article/20260616500389",
         "category": "밸류업·주주환원",
-        "datetime": "06.16 03:41",
-        "source_line": "2NEWS",
-        "link_count": 1,
-        "url": "https://www.2news.co.kr/news/articleView.html?idxno=10801",
+        "datetime": "06.16 15:12",
+        "source_line": "VIVA100 · BNTNEWS",
+        "link_count": 2,
+        "url": "https://www.viva100.com/article/20260616500389",
         "links": [
           {
-            "source": "2NEWS",
-            "title": "현대모비스, 매출 61조 돌파와 함께 주주가치 제고 총력",
-            "url": "https://www.2news.co.kr/news/articleView.html?idxno=10801"
-          }
-        ]
-      }
-    },
-    {
-      "id": "ff9605da8b7d",
-      "score": 81.1,
-      "left": {
-        "id": "story-34",
-        "title": "[창간14주년-반도체 그후] 현대차의 미래, 지배구조 과거 고리 풀까",
-        "summary": "[창간14주년-반도체 그후] 현대차의 '미래', 지배구조 '과거 고리' 풀까 - 스트레이트뉴스 https://www.straightnews.co.kr/news/articleView.html?idxno=304813",
-        "category": "밸류업·주주환원",
-        "datetime": "06.15 17:34",
-        "source_line": "STRAIGHTNEWS",
-        "link_count": 1,
-        "url": "https://www.straightnews.co.kr/news/articleView.html?idxno=304813",
-        "links": [
+            "source": "VIVA100",
+            "title": "낙제점 수두룩한데⋯ 포스코홀딩스, 지배구조 준수율 압도적 1위",
+            "url": "https://www.viva100.com/article/20260616500389"
+          },
           {
-            "source": "STRAIGHTNEWS",
-            "title": "[창간14주년-반도체 그후] 현대차의 미래, 지배구조 과거 고리 풀까",
-            "url": "https://www.straightnews.co.kr/news/articleView.html?idxno=304813"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-57",
-        "title": "현대차 랠리 소외됐는데…그룹 지배구조 개편서 주목받는 현대제철",
-        "summary": "현대차 랠리 소외됐는데…그룹 지배구조 개편서 주목받는 현대제철 - 인베스트조선 https://www.investchosun.com/site/data/html_dir/2026/06/15/2026061580139.html",
-        "category": "밸류업·주주환원",
-        "datetime": "06.16 07:09",
-        "source_line": "INVESTCHOSUN",
-        "link_count": 1,
-        "url": "https://www.investchosun.com/site/data/html_dir/2026/06/15/2026061580139.html",
-        "links": [
-          {
-            "source": "INVESTCHOSUN",
-            "title": "현대차 랠리 소외됐는데…그룹 지배구조 개편서 주목받는 현대제철",
-            "url": "https://www.investchosun.com/site/data/html_dir/2026/06/15/2026061580139.html"
-          }
-        ]
-      }
-    },
-    {
-      "id": "a5c12f766871",
-      "score": 78.5,
-      "left": {
-        "id": "story-17",
-        "title": "통신 3사 지배구조 핵심지표 준수율 보니… SKT 100%, LGU+ 93.3%, KT 86.7%",
-        "summary": "통신 3사 지배구조 핵심지표 준수율 보니… SKT 100%, LGU+ 93.3%, KT 86.7% - 조선비즈 https://biz.chosun.com/it-science/ict/2026/06/15/TUHQPM4TVVAC5NZR265RV7XRPQ/",
-        "category": "밸류업·주주환원",
-        "datetime": "06.15 16:13",
-        "source_line": "BIZ",
-        "link_count": 1,
-        "url": "https://biz.chosun.com/it-science/ict/2026/06/15/TUHQPM4TVVAC5NZR265RV7XRPQ",
-        "links": [
-          {
-            "source": "BIZ",
-            "title": "통신 3사 지배구조 핵심지표 준수율 보니… SKT 100%, LGU+ 93.3%, KT 86.7%",
-            "url": "https://biz.chosun.com/it-science/ict/2026/06/15/TUHQPM4TVVAC5NZR265RV7XRPQ"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-33",
-        "title": "[기업지배구조 보고서 톺아보기] KT, 이통3사 중 준수율 최하...소유분산기업의 숙제",
-        "summary": "[기업지배구조 보고서 톺아보기] KT, 이통3사 중 준수율 최하...'소유분산기업'의 숙제 | http://www.hansbiz.co.kr/news/articleViewAmp.html?idxno=843439",
-        "category": "밸류업·주주환원",
-        "datetime": "06.15 18:57",
-        "source_line": "HANSBIZ",
-        "link_count": 1,
-        "url": "http://www.hansbiz.co.kr/news/articleViewAmp.html?idxno=843439",
-        "links": [
-          {
-            "source": "HANSBIZ",
-            "title": "[기업지배구조 보고서 톺아보기] KT, 이통3사 중 준수율 최하...소유분산기업의 숙제",
-            "url": "http://www.hansbiz.co.kr/news/articleViewAmp.html?idxno=843439"
+            "source": "BNTNEWS",
+            "title": "포스코홀딩스, 지배구조 1위…준수율 97.8%",
+            "url": "https://www.bntnews.co.kr/article/view/bnt202606160024"
           }
         ]
       }
@@ -134,50 +116,50 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 134,
-    "matched_count": 55,
-    "missing_count": 79,
-    "coverage_rate": 41.0,
+    "url_count": 130,
+    "matched_count": 86,
+    "missing_count": 44,
+    "coverage_rate": 66.2,
     "missing": [
       {
-        "title": "코스피 상장사로 지배구조 공시 확대 첫해…평균 준수율 47.8%",
-        "url": "https://www.yna.co.kr/amp/view/AKR20260615117600003",
-        "source_message_url": "https://t.me/activistkorea/113955",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "seen_title"
-      },
-      {
-        "title": "코스피 상장사로 지배구조 공시 확대 첫해…평균 준수율 47.8%",
-        "url": "https://v.daum.net/v/20260616061000127",
-        "source_message_url": "https://t.me/activistkorea/113954",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "seen_title"
-      },
-      {
-        "title": "기업지배구조 공시 평균 준수율 47.8%…포스코홀딩스 1위",
-        "url": "https://mobile.newsis.com/view/NISX20260615_0003669978",
-        "source_message_url": "https://t.me/activistkorea/113952",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "same_title"
-      },
-      {
-        "title": "투자보다 구조를 고쳤다, 소유-분리 가르는 대웅제약",
-        "url": "https://www.hitnews.co.kr/news/articleView.html?idxno=76872",
-        "source_message_url": "https://t.me/activistkorea/113953",
+        "title": "농협개혁추진단, 2차 개혁안 속도…중앙회 권한 분산·경제사업 혁신 추진",
+        "url": "https://www.industrynews.co.kr/news/articleView.html?idxno=82200",
+        "source_message_url": "https://t.me/activistkorea/114089",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "지배구조 공시 첫해 평균 준수율 47.8%…포스코홀딩스 1위",
-        "url": "https://www.news1.kr/industry/general-industry/6197861",
-        "source_message_url": "https://t.me/activistkorea/113950",
+        "title": "유한양행 100년의 버팀목…소유-경영 분리가 이끈 혁신 - 데일리팜",
+        "url": "https://dailypharm.com/user/news/339388",
+        "source_message_url": "https://t.me/activistkorea/114090",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "콜렉티브 마이닝, 경영진 추천 이사 5명 99.4% 찬성률로 선임 | 뉴스 - 초이스스탁",
+        "url": "https://www.choicestock.co.kr/stock/news_view/153206?bu=",
+        "source_message_url": "https://t.me/activistkorea/114088",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "코스피 지배구조 공시 확대 첫해…평균 준수율 47.8%",
+        "url": "https://www.sentv.co.kr/article/view/sentv202606160010",
+        "source_message_url": "https://t.me/activistkorea/114085",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "duplicate",
-        "reason": "similar_title"
+        "reason": "seen_title"
+      },
+      {
+        "title": "6만전자 쓸어담은 한국의 버핏…향후 10년은 금반지 시대 [한국의 위대한 투자자]",
+        "url": "https://www.mk.co.kr/news/stock/12075729",
+        "source_message_url": "https://t.me/activistkorea/114086",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
       }
     ]
   }
