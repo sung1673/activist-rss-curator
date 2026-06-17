@@ -1,111 +1,48 @@
 {
-  "date_id": "2026-06-17",
-  "generated_at": "2026-06-17T07:24:06.593252+09:00",
-  "start_at": "2026-06-16T07:19:06.086151+09:00",
-  "end_at": "2026-06-17T07:19:06.086151+09:00",
-  "start_label": "2026-06-16 07:19 KST",
-  "end_label": "2026-06-17 07:19 KST",
-  "candidate_count": 2,
-  "candidate_hash": "898ebf2b41e50dea",
+  "date_id": "2026-06-18",
+  "generated_at": "2026-06-18T07:14:56.716051+09:00",
+  "start_at": "2026-06-17T07:11:56.885778+09:00",
+  "end_at": "2026-06-18T07:11:56.885778+09:00",
+  "start_label": "2026-06-17 07:11 KST",
+  "end_label": "2026-06-18 07:11 KST",
+  "candidate_count": 1,
+  "candidate_hash": "1fb5979ddb2b44c6",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "b065de2ba74a",
-      "score": 81.7,
+      "id": "8e34baba40e6",
+      "score": 87.2,
       "left": {
-        "id": "story-22",
-        "title": "우리금융 동양생명 편입 8월 넘길듯…소액주주 반발에 금감원 공정성 요구",
-        "summary": "[서울=뉴스핌] 채송무 기자 = 우리금융그룹의 동양생명 자회사 편입 프로젝트가 금융감독원의 '제동'과 소액주주들의 강력 반발이라는 이중고 속에 8월 내 완료라는 기존 스케쥴을 지킬 수 없을 것으로 보인다. 당국은 합병 비율의 공정성을 입증하기 위한 추 ...",
-        "category": "자본시장 제도·공시",
-        "datetime": "06.16 17:37",
-        "source_line": "NEWSPIM",
+        "id": "story-36",
+        "title": "포스코홀딩스 기업지배구조 준수율 1위 - 코리아리포트",
+        "summary": "포스코홀딩스 기업지배구조 준수율 '1위' - 코리아리포트 https://www.koreareport.co.kr/news/articleView.html?idxno=50931",
+        "category": "밸류업·주주환원",
+        "datetime": "06.17 11:09",
+        "source_line": "KOREAREPORT",
         "link_count": 1,
-        "url": "https://www.newspim.com/news/view/20260616001123",
+        "url": "https://www.koreareport.co.kr/news/articleView.html?idxno=50931",
         "links": [
           {
-            "source": "NEWSPIM",
-            "title": "우리금융 동양생명 편입 8월 넘길듯…소액주주 반발에 금감원 공정성 요구",
-            "url": "https://www.newspim.com/news/view/20260616001123"
+            "source": "KOREAREPORT",
+            "title": "포스코홀딩스 기업지배구조 준수율 1위 - 코리아리포트",
+            "url": "https://www.koreareport.co.kr/news/articleView.html?idxno=50931"
           }
         ]
       },
       "right": {
-        "id": "story-51",
-        "title": "우리금융 주주환원정책, 동양생명 소액주주 복병",
-        "summary": "우리금융그룹이 올해 보통주자본(CET1) 비율에 기반한 주주환원정책을 추진 중인 가운에 동양생명 완전 자회사화가 예상치 못한 복병으로 등장했다. 16일 금융권에 따르면 동양생명은 오는 22일 주주간담회를 개최할 예정이다. 주주간담회에는 동양생명 주주들이 참석하며 우리금융과 동양생명 간…",
-        "category": "밸류업·주주환원",
-        "datetime": "06.16 16:00",
-        "source_line": "SISAON",
-        "link_count": 1,
-        "url": "https://www.sisaon.co.kr/news/articleView.html?idxno=201873",
-        "links": [
-          {
-            "source": "SISAON",
-            "title": "우리금융 주주환원정책, 동양생명 소액주주 복병",
-            "url": "https://www.sisaon.co.kr/news/articleView.html?idxno=201873"
-          }
-        ]
-      }
-    },
-    {
-      "id": "26162fe325cc",
-      "score": 73.2,
-      "left": {
-        "id": "story-3",
-        "title": "코스피 상장사로 획대된 지배구조보고서 평균 준수율 47.8% .... 기존 기업 58.9%",
-        "summary": "코스피 상장사로 획대된 지배구조보고서 평균 준수율 47.8% .... 기존 기업 58.9% - 워크투데이 http://www.worktoday.co.kr/news/articleView.html?idxno=85670",
+        "id": "story-38",
+        "title": "코스피 지배구조 공시 전면확대 첫해…포스코홀딩스 준수율 98%, 1위",
+        "summary": "코스피 지배구조 공시 전면확대 첫해…포스코홀딩스 준수율 98%, 1위 - 신아일보 https://www.shinailbo.co.kr/news/articleView.html?idxno=5030901",
         "category": "자본시장 제도·공시",
-        "datetime": "06.17 00:24",
-        "source_line": "WORKTODAY · 다음뉴스 · SAFETIMES · LEADERSFACT · INEWS24",
-        "link_count": 13,
-        "url": "http://www.worktoday.co.kr/news/articleView.html?idxno=85670",
+        "datetime": "06.17 09:24",
+        "source_line": "SHINAILBO",
+        "link_count": 1,
+        "url": "https://www.shinailbo.co.kr/news/articleView.html?idxno=5030901",
         "links": [
           {
-            "source": "WORKTODAY",
-            "title": "코스피 상장사로 획대된 지배구조보고서 평균 준수율 47.8% .... 기존 기업 58.9%",
-            "url": "http://www.worktoday.co.kr/news/articleView.html?idxno=85670"
-          },
-          {
-            "source": "다음뉴스",
-            "title": "코스피 전체로 확대한 지배구조보고서…상장사 준수율 47.8% 그쳐",
-            "url": "https://v.daum.net/v/ZqqwJnnQHJ"
-          },
-          {
-            "source": "SAFETIMES",
-            "title": "코스피 상장사 지배구조 핵심지표 준수율 47.8%",
-            "url": "https://www.safetimes.co.kr/news/articleViewAmp.html?idxno=243522"
-          },
-          {
-            "source": "LEADERSFACT",
-            "title": "코스피 지배구조 공시 전면 확대 첫해, 평균 준수율 47.8%…포스코홀딩스 6년 평균 1위",
-            "url": "https://www.leadersfact.co.kr/news/articleView.html?idxno=23146"
-          },
-          {
-            "source": "INEWS24",
-            "title": "코스피 지배구조 공시 확대 첫해…평균 준수율 47.8%",
-            "url": "https://www.inews24.com/view/1976899"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-19",
-        "title": "낙제점 수두룩한데⋯ 포스코홀딩스, 지배구조 준수율 압도적 1위",
-        "summary": "'낙제점 수두룩한데'⋯ 포스코홀딩스, 지배구조 준수율 '압도적 1위' - 브릿지경제 https://www.viva100.com/article/20260616500389",
-        "category": "밸류업·주주환원",
-        "datetime": "06.16 15:12",
-        "source_line": "VIVA100 · BNTNEWS",
-        "link_count": 2,
-        "url": "https://www.viva100.com/article/20260616500389",
-        "links": [
-          {
-            "source": "VIVA100",
-            "title": "낙제점 수두룩한데⋯ 포스코홀딩스, 지배구조 준수율 압도적 1위",
-            "url": "https://www.viva100.com/article/20260616500389"
-          },
-          {
-            "source": "BNTNEWS",
-            "title": "포스코홀딩스, 지배구조 1위…준수율 97.8%",
-            "url": "https://www.bntnews.co.kr/article/view/bnt202606160024"
+            "source": "SHINAILBO",
+            "title": "코스피 지배구조 공시 전면확대 첫해…포스코홀딩스 준수율 98%, 1위",
+            "url": "https://www.shinailbo.co.kr/news/articleView.html?idxno=5030901"
           }
         ]
       }
@@ -116,47 +53,47 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 130,
-    "matched_count": 86,
-    "missing_count": 44,
-    "coverage_rate": 66.2,
+    "url_count": 123,
+    "matched_count": 66,
+    "missing_count": 57,
+    "coverage_rate": 53.7,
     "missing": [
       {
-        "title": "농협개혁추진단, 2차 개혁안 속도…중앙회 권한 분산·경제사업 혁신 추진",
-        "url": "https://www.industrynews.co.kr/news/articleView.html?idxno=82200",
-        "source_message_url": "https://t.me/activistkorea/114089",
+        "title": "[기획] 유일한 정신으로 빚어낸 유한양행 100년 상생의 기적",
+        "url": "http://www.yakup.com/news/index.html?cat=12&mode=view&nid=328652",
+        "source_message_url": "https://t.me/activistkorea/114212",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "유한양행 100년의 버팀목…소유-경영 분리가 이끈 혁신 - 데일리팜",
-        "url": "https://dailypharm.com/user/news/339388",
-        "source_message_url": "https://t.me/activistkorea/114090",
+        "title": "[한화 KAI 인수]독점적 2대주주 지위, 종착지는 수은 보유 지분",
+        "url": "https://www.bloter.net/news/articleView.html?idxno=665732",
+        "source_message_url": "https://t.me/activistkorea/114206",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "콜렉티브 마이닝, 경영진 추천 이사 5명 99.4% 찬성률로 선임 | 뉴스 - 초이스스탁",
-        "url": "https://www.choicestock.co.kr/stock/news_view/153206?bu=",
-        "source_message_url": "https://t.me/activistkorea/114088",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "코스피 지배구조 공시 확대 첫해…평균 준수율 47.8%",
-        "url": "https://www.sentv.co.kr/article/view/sentv202606160010",
-        "source_message_url": "https://t.me/activistkorea/114085",
+        "title": "월덱스, 2600억 투자·배당 확대 담은 밸류업 계획 발표…성장 투자와 주주환원 병행",
+        "url": "https://v.daum.net/v/0zjynllwoC",
+        "source_message_url": "https://t.me/activistkorea/114204",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "duplicate",
         "reason": "seen_title"
       },
       {
-        "title": "6만전자 쓸어담은 한국의 버핏…향후 10년은 금반지 시대 [한국의 위대한 투자자]",
-        "url": "https://www.mk.co.kr/news/stock/12075729",
-        "source_message_url": "https://t.me/activistkorea/114086",
+        "title": "월덱스, 2600억 투자·배당 확대 담은 밸류업 계획 발표…성장 투자와 주주환원 병행",
+        "url": "https://core.asiae.co.kr/article/2026061713502610817",
+        "source_message_url": "https://t.me/activistkorea/114195",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_title"
+      },
+      {
+        "title": "AI 콘텐츠 스타트업 투자 유치…경기콘텐츠진흥원이 돕는다",
+        "url": "https://www.hankyung.com/article/2026061724701",
+        "source_message_url": "https://t.me/activistkorea/114192",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
