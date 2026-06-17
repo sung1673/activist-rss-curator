@@ -4,7 +4,7 @@
     {
       "date": "2026-06-17",
       "path": "articles/2026-06-17.jsonl",
-      "records": 489
+      "records": 533
     },
     {
       "date": "2026-06-16",
@@ -242,6 +242,6 @@
       "records": 157
     }
   ],
-  "generated_at": "2026-06-17T07:12:26.328053+09:00",
-  "total_records": 35549
+  "generated_at": "2026-06-17T09:23:10.978025+09:00",
+  "total_records": 35593
 }
