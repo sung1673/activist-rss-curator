@@ -1,102 +1,63 @@
 {
-  "date_id": "2026-06-18",
-  "generated_at": "2026-06-18T07:14:56.716051+09:00",
-  "start_at": "2026-06-17T07:11:56.885778+09:00",
-  "end_at": "2026-06-18T07:11:56.885778+09:00",
-  "start_label": "2026-06-17 07:11 KST",
-  "end_label": "2026-06-18 07:11 KST",
-  "candidate_count": 1,
-  "candidate_hash": "1fb5979ddb2b44c6",
+  "date_id": "2026-06-19",
+  "generated_at": "2026-06-19T07:19:18.879253+09:00",
+  "start_at": "2026-06-18T07:16:14.443815+09:00",
+  "end_at": "2026-06-19T07:16:14.443815+09:00",
+  "start_label": "2026-06-18 07:16 KST",
+  "end_label": "2026-06-19 07:16 KST",
+  "candidate_count": 0,
+  "candidate_hash": "4f53cda18c2baa0c",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": [
-    {
-      "id": "8e34baba40e6",
-      "score": 87.2,
-      "left": {
-        "id": "story-36",
-        "title": "포스코홀딩스 기업지배구조 준수율 1위 - 코리아리포트",
-        "summary": "포스코홀딩스 기업지배구조 준수율 '1위' - 코리아리포트 https://www.koreareport.co.kr/news/articleView.html?idxno=50931",
-        "category": "밸류업·주주환원",
-        "datetime": "06.17 11:09",
-        "source_line": "KOREAREPORT",
-        "link_count": 1,
-        "url": "https://www.koreareport.co.kr/news/articleView.html?idxno=50931",
-        "links": [
-          {
-            "source": "KOREAREPORT",
-            "title": "포스코홀딩스 기업지배구조 준수율 1위 - 코리아리포트",
-            "url": "https://www.koreareport.co.kr/news/articleView.html?idxno=50931"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-38",
-        "title": "코스피 지배구조 공시 전면확대 첫해…포스코홀딩스 준수율 98%, 1위",
-        "summary": "코스피 지배구조 공시 전면확대 첫해…포스코홀딩스 준수율 98%, 1위 - 신아일보 https://www.shinailbo.co.kr/news/articleView.html?idxno=5030901",
-        "category": "자본시장 제도·공시",
-        "datetime": "06.17 09:24",
-        "source_line": "SHINAILBO",
-        "link_count": 1,
-        "url": "https://www.shinailbo.co.kr/news/articleView.html?idxno=5030901",
-        "links": [
-          {
-            "source": "SHINAILBO",
-            "title": "코스피 지배구조 공시 전면확대 첫해…포스코홀딩스 준수율 98%, 1위",
-            "url": "https://www.shinailbo.co.kr/news/articleView.html?idxno=5030901"
-          }
-        ]
-      }
-    }
-  ],
+  "candidates": [],
   "benchmark_coverage": {
     "enabled": true,
     "handles": [
       "activistkorea"
     ],
-    "url_count": 123,
-    "matched_count": 66,
-    "missing_count": 57,
-    "coverage_rate": 53.7,
+    "url_count": 113,
+    "matched_count": 48,
+    "missing_count": 65,
+    "coverage_rate": 42.5,
     "missing": [
       {
-        "title": "[기획] 유일한 정신으로 빚어낸 유한양행 100년 상생의 기적",
-        "url": "http://www.yakup.com/news/index.html?cat=12&mode=view&nid=328652",
-        "source_message_url": "https://t.me/activistkorea/114212",
+        "title": "한화그룹, KAI 2대주주 자리 꿰찼지만…인수까진 갈 길 멀어 - CEOSCOREDAILY",
+        "url": "https://m.ceoscoredaily.com/page/view/2026061812490567943",
+        "source_message_url": "https://t.me/activistkorea/114330",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "[한화 KAI 인수]독점적 2대주주 지위, 종착지는 수은 보유 지분",
-        "url": "https://www.bloter.net/news/articleView.html?idxno=665732",
-        "source_message_url": "https://t.me/activistkorea/114206",
+        "title": "콘탱고 오어, 2027년 임기 신임 이사진 7명 선임 - 매일경제 마켓",
+        "url": "https://stock.mk.co.kr/news/view/1107173",
+        "source_message_url": "https://t.me/activistkorea/114328",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "월덱스, 2600억 투자·배당 확대 담은 밸류업 계획 발표…성장 투자와 주주환원 병행",
-        "url": "https://v.daum.net/v/0zjynllwoC",
-        "source_message_url": "https://t.me/activistkorea/114204",
+        "title": "흑백요리사·왕사남 성공도 중앙그룹 유동성 위기 못 막았다 - 미디어오늘",
+        "url": "https://www.mediatoday.co.kr/news/articleView.html?idxno=335263",
+        "source_message_url": "https://t.me/activistkorea/114329",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "행동주의펀드와 백기사의 시대[투데이 窓/반영은]",
+        "url": "https://www.mt.co.kr/amp/opinion/2026/06/19/2026061809392710882",
+        "source_message_url": "https://t.me/activistkorea/114326",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "duplicate",
         "reason": "seen_title"
       },
       {
-        "title": "월덱스, 2600억 투자·배당 확대 담은 밸류업 계획 발표…성장 투자와 주주환원 병행",
-        "url": "https://core.asiae.co.kr/article/2026061713502610817",
-        "source_message_url": "https://t.me/activistkorea/114195",
+        "title": "건코 쉬핑(GNK) 이사회 전원 재선… 주주 90% 지지로 디아나 압박 차단 - 토큰포스트",
+        "url": "https://www.tokenpost.kr/amp/news/economy/370906",
+        "source_message_url": "https://t.me/activistkorea/114327",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "duplicate",
-        "reason": "seen_title"
-      },
-      {
-        "title": "AI 콘텐츠 스타트업 투자 유치…경기콘텐츠진흥원이 돕는다",
-        "url": "https://www.hankyung.com/article/2026061724701",
-        "source_message_url": "https://t.me/activistkorea/114192",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
+        "reason": "same_title"
       }
     ]
   }
