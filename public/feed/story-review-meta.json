@@ -1,63 +1,218 @@
 {
-  "date_id": "2026-06-19",
-  "generated_at": "2026-06-19T07:19:18.879253+09:00",
-  "start_at": "2026-06-18T07:16:14.443815+09:00",
-  "end_at": "2026-06-19T07:16:14.443815+09:00",
-  "start_label": "2026-06-18 07:16 KST",
-  "end_label": "2026-06-19 07:16 KST",
-  "candidate_count": 0,
-  "candidate_hash": "4f53cda18c2baa0c",
+  "date_id": "2026-06-20",
+  "generated_at": "2026-06-20T06:21:57.798836+09:00",
+  "start_at": "2026-06-19T06:19:00.410132+09:00",
+  "end_at": "2026-06-20T06:19:00.410132+09:00",
+  "start_label": "2026-06-19 06:19 KST",
+  "end_label": "2026-06-20 06:19 KST",
+  "candidate_count": 5,
+  "candidate_hash": "45842f38045a32bb",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": [],
+  "candidates": [
+    {
+      "id": "190fa5c71512",
+      "score": 86.9,
+      "left": {
+        "id": "story-2",
+        "title": "대신증권 밸류업 공시 이행 - 뉴스클레임",
+        "summary": "대신증권 밸류업 공시 이행 - 뉴스클레임 https://www.newsclaim.co.kr/news/articleView.html?idxno=3067095",
+        "category": "밸류업·주주환원",
+        "datetime": "06.20 00:49",
+        "source_line": "NEWSCLAIM · JOONGANGENEWS · HANKYUNG · 네이트뉴스 · ETODAY",
+        "link_count": 6,
+        "url": "https://www.newsclaim.co.kr/news/articleView.html?idxno=3067095",
+        "links": [
+          {
+            "source": "NEWSCLAIM",
+            "title": "대신증권 밸류업 공시 이행 - 뉴스클레임",
+            "url": "https://www.newsclaim.co.kr/news/articleView.html?idxno=3067095"
+          },
+          {
+            "source": "JOONGANGENEWS",
+            "title": "대신증권, 자사주 50만주 임직원 보상·255만주 소각…밸류업 공시 이행",
+            "url": "https://www.joongangenews.com/news/articleView.html?idxno=527073"
+          },
+          {
+            "source": "HANKYUNG",
+            "title": "대신증권, 밸류업 공시 이행...ESOP·자사주 소각 실시",
+            "url": "https://www.hankyung.com/article/202606197276P"
+          },
+          {
+            "source": "네이트뉴스",
+            "title": "대신증권, 665억 자사주 소각…초대형 IB·밸류업 속도",
+            "url": "https://news.nate.com/view/20260619n27229"
+          },
+          {
+            "source": "ETODAY",
+            "title": "대신증권, ESOP 시행·자사주 255만주 소각",
+            "url": "https://www.etoday.co.kr/news/view/2595512"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-5",
+        "title": "대신증권, 밸류업 정책 이행…임직원 주식보상제 시행·자사주 소각 · 달라지는 점은? - 서플",
+        "summary": "대신증권, 밸류업 정책 이행…임직원 주식보상제 시행·자사주 소각 · 달라지는 점은? - 서플 https://supple.kr/news/cmqkpc81i0018x6amcwxyfua6",
+        "category": "밸류업·주주환원",
+        "datetime": "06.19 20:52",
+        "source_line": "SUPPLE · M · ASIAE · NEWSPIM · 네이트뉴스",
+        "link_count": 6,
+        "url": "https://supple.kr/news/cmqkpc81i0018x6amcwxyfua6",
+        "links": [
+          {
+            "source": "SUPPLE",
+            "title": "대신증권, 밸류업 정책 이행…임직원 주식보상제 시행·자사주 소각 · 달라지는 점은? - 서플",
+            "url": "https://supple.kr/news/cmqkpc81i0018x6amcwxyfua6"
+          },
+          {
+            "source": "M",
+            "title": "대신증권, 밸류업 정책 본격 이행…ESOP 시행·자사주 255만주 소각",
+            "url": "https://m.megaeconomy.co.kr/news/amp.html?ncode=1065599701222032"
+          },
+          {
+            "source": "ASIAE",
+            "title": "대신증권, 255만주 자사주 소각…밸류업 정책 속도",
+            "url": "https://www.asiae.co.kr/article/2026061920114084348"
+          },
+          {
+            "source": "NEWSPIM",
+            "title": "대신증권, 자사주 255만주 소각·50만주 ESOP 시행",
+            "url": "https://www.newspim.com/news/view/20260619000916"
+          },
+          {
+            "source": "네이트뉴스",
+            "title": "대신증권, ESOP·자사주 소각 실시…밸류업 정책 이행",
+            "url": "https://news.nate.com/view/20260619n26780"
+          }
+        ]
+      }
+    },
+    {
+      "id": "9dcb65e9ccb0",
+      "score": 83.1,
+      "left": {
+        "id": "story-22",
+        "title": "현대차그룹, 보스턴다이내믹스 100% 자회사로 … 로봇 넘어 지배구조 개편 재원 만든다",
+        "summary": "현대차그룹, 보스턴다이내믹스 100% 자회사로 … 로봇 넘어 지배구조 개편 재원 만든다 https://biz.newdaily.co.kr/site/data/html/2026/06/19/2026061900239.html",
+        "category": "밸류업·주주환원",
+        "datetime": "06.20 01:12",
+        "source_line": "뉴데일리경제",
+        "link_count": 1,
+        "url": "https://biz.newdaily.co.kr/site/data/html/2026/06/19/2026061900239.html",
+        "links": [
+          {
+            "source": "뉴데일리경제",
+            "title": "현대차그룹, 보스턴다이내믹스 100% 자회사로 … 로봇 넘어 지배구조 개편 재원 만든다",
+            "url": "https://biz.newdaily.co.kr/site/data/html/2026/06/19/2026061900239.html"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-30",
+        "title": "높아지는 현대차그룹 기업가치, 지배구조 개편으로 이어질까",
+        "summary": "높아지는 현대차그룹 기업가치, 지배구조 개편으로 이어질까 - PRESS9 http://www.press9.kr/news/articleView.html?idxno=78142",
+        "category": "밸류업·주주환원",
+        "datetime": "06.19 11:15",
+        "source_line": "PRESS9",
+        "link_count": 1,
+        "url": "http://www.press9.kr/news/articleView.html?idxno=78142",
+        "links": [
+          {
+            "source": "PRESS9",
+            "title": "높아지는 현대차그룹 기업가치, 지배구조 개편으로 이어질까",
+            "url": "http://www.press9.kr/news/articleView.html?idxno=78142"
+          }
+        ]
+      }
+    },
+    {
+      "id": "e5f5f641f561",
+      "score": 79.9,
+      "left": {
+        "id": "story-19",
+        "title": "한화오션, 지배구조 핵심지표 준수율 67→87% 껑충",
+        "summary": "한화오션, 지배구조 핵심지표 준수율 '67→87%' 껑충 - 톱데일리 https://www.topdaily.kr/articles/110626",
+        "category": "밸류업·주주환원",
+        "datetime": "06.20 01:12",
+        "source_line": "톱데일리",
+        "link_count": 1,
+        "url": "https://www.topdaily.kr/articles/110626",
+        "links": [
+          {
+            "source": "톱데일리",
+            "title": "한화오션, 지배구조 핵심지표 준수율 67→87% 껑충",
+            "url": "https://www.topdaily.kr/articles/110626"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-34",
+        "title": "한화, REC실리콘 대출 또 연장…지배구조 개편 사실상 마무리 - 더구루",
+        "summary": "한화, REC실리콘 대출 '또' 연장…지배구조 개편 사실상 마무리 - 더구루 https://www.theguru.co.kr/mobile/article.html?no=103279",
+        "category": "밸류업·주주환원",
+        "datetime": "06.19 09:23",
+        "source_line": "THEGURU",
+        "link_count": 1,
+        "url": "https://www.theguru.co.kr/mobile/article.html?no=103279",
+        "links": [
+          {
+            "source": "THEGURU",
+            "title": "한화, REC실리콘 대출 또 연장…지배구조 개편 사실상 마무리 - 더구루",
+            "url": "https://www.theguru.co.kr/mobile/article.html?no=103279"
+          }
+        ]
+      }
+    }
+  ],
   "benchmark_coverage": {
     "enabled": true,
     "handles": [
       "activistkorea"
     ],
-    "url_count": 113,
-    "matched_count": 48,
-    "missing_count": 65,
-    "coverage_rate": 42.5,
+    "url_count": 86,
+    "matched_count": 43,
+    "missing_count": 43,
+    "coverage_rate": 50.0,
     "missing": [
       {
-        "title": "한화그룹, KAI 2대주주 자리 꿰찼지만…인수까진 갈 길 멀어 - CEOSCOREDAILY",
-        "url": "https://m.ceoscoredaily.com/page/view/2026061812490567943",
-        "source_message_url": "https://t.me/activistkorea/114330",
+        "title": "종근당홀딩스, 600억 회사채…종근당 지분 확대 실탄 확보 - 데일리팜",
+        "url": "https://dailypharm.com/user/news/339617",
+        "source_message_url": "https://t.me/activistkorea/114411",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "콘탱고 오어, 2027년 임기 신임 이사진 7명 선임 - 매일경제 마켓",
-        "url": "https://stock.mk.co.kr/news/view/1107173",
-        "source_message_url": "https://t.me/activistkorea/114328",
+        "title": "Monolithic Power Systems Inc (MPWR) 주식 움직였습니다 상승 7.97%에 6월19일: 핵심 원인 공개",
+        "url": "https://www.tradingkey.com/kr/news/market-movers/261978391-market-movers-mpwr-20260619",
+        "source_message_url": "https://t.me/activistkorea/114409",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "흑백요리사·왕사남 성공도 중앙그룹 유동성 위기 못 막았다 - 미디어오늘",
-        "url": "https://www.mediatoday.co.kr/news/articleView.html?idxno=335263",
-        "source_message_url": "https://t.me/activistkorea/114329",
+        "title": "TYM, 재생에너지 사용량 확대···고객 초청행사 3회 개최 성과",
+        "url": "https://www.agrinet.co.kr/news/articleView.html?idxno=405092",
+        "source_message_url": "https://t.me/activistkorea/114410",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "행동주의펀드와 백기사의 시대[투데이 窓/반영은]",
-        "url": "https://www.mt.co.kr/amp/opinion/2026/06/19/2026061809392710882",
-        "source_message_url": "https://t.me/activistkorea/114326",
+        "title": "머니무브에 흔들리는 은행…고객 락인 총력",
+        "url": "https://news.mtn.co.kr/news-detail/2026061916152266349",
+        "source_message_url": "https://t.me/activistkorea/114407",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "seen_title"
+        "status": "rejected",
+        "reason": "low_relevance"
       },
       {
-        "title": "건코 쉬핑(GNK) 이사회 전원 재선… 주주 90% 지지로 디아나 압박 차단 - 토큰포스트",
-        "url": "https://www.tokenpost.kr/amp/news/economy/370906",
-        "source_message_url": "https://t.me/activistkorea/114327",
+        "title": "현대車, 보스턴다이내믹스 100% 품다…美증시 상장 속도낼듯",
+        "url": "https://v.daum.net/v/20260619173601935",
+        "source_message_url": "https://t.me/activistkorea/114408",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "same_title"
+        "status": "rejected",
+        "reason": "low_relevance"
       }
     ]
   }
