@@ -1,10 +1,10 @@
 {
-  "date_id": "2026-06-21",
-  "generated_at": "2026-06-21T06:28:37.041382+09:00",
-  "start_at": "2026-06-20T06:27:00.013036+09:00",
-  "end_at": "2026-06-21T06:27:00.013036+09:00",
-  "start_label": "2026-06-20 06:27 KST",
-  "end_label": "2026-06-21 06:27 KST",
+  "date_id": "2026-06-22",
+  "generated_at": "2026-06-22T06:24:25.871071+09:00",
+  "start_at": "2026-06-21T06:22:42.791706+09:00",
+  "end_at": "2026-06-22T06:22:42.791706+09:00",
+  "start_label": "2026-06-21 06:22 KST",
+  "end_label": "2026-06-22 06:22 KST",
   "candidate_count": 0,
   "candidate_hash": "4f53cda18c2baa0c",
   "page_url": "https://news.bside.ai/feed/story-review.html",
@@ -14,47 +14,47 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 68,
-    "matched_count": 21,
-    "missing_count": 47,
-    "coverage_rate": 30.9,
+    "url_count": 75,
+    "matched_count": 19,
+    "missing_count": 56,
+    "coverage_rate": 25.3,
     "missing": [
       {
-        "title": "중앙그룹이 그리던 콘텐츠 제국의 몰락 - 브런치",
-        "url": "https://brunch.co.kr/@tommyhslee/167",
-        "source_message_url": "https://t.me/activistkorea/114479",
+        "title": "L3Harris Technologies Inc (LHX) 주식 마감했습니다 하락 5.86%에 6월21일: 변동을 뒷받침하는 사실",
+        "url": "https://www.tradingkey.com/kr/news/market-movers/261979967-market-movers-lhx-20260621",
+        "source_message_url": "https://t.me/activistkorea/114555",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "영화 디스클로저 데이로 본 내부고발자 보호제도 - 브런치",
-        "url": "https://brunch.co.kr/@lucybaba/71",
-        "source_message_url": "https://t.me/activistkorea/114478",
+        "title": "스페이스X, 상장 직전 ESG 최하등급 받아",
+        "url": "https://www.g-enews.com/article/Securities/2026/06/2026062123510334989a1f309431_1",
+        "source_message_url": "https://t.me/activistkorea/114554",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "[콘텐츠 인사이트] 정보유출 쿠팡플레이, MAU 900만 회복 배경",
-        "url": "https://www.bloter.net/news/articleView.html?idxno=665792",
-        "source_message_url": "https://t.me/activistkorea/114476",
+        "title": "[글로벌 비즈 브리핑] 머스크 xAI는 실패작 外",
+        "url": "https://v.daum.net/v/20260622044500829",
+        "source_message_url": "https://t.me/activistkorea/114551",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "청년미래적금에 기대감…은행권 청년 고객 접점 넓힌다",
-        "url": "https://www.bloter.net/news/articleView.html?idxno=665955",
-        "source_message_url": "https://t.me/activistkorea/114477",
+        "title": "하이닉스 합병 뉴스에도 급락 … 널뛰는 주가 대신 봐야 할 지표는?",
+        "url": "https://www.mk.co.kr/news/stock/12079470",
+        "source_message_url": "https://t.me/activistkorea/114552",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "지속가능경영의 핵심, R&D: 전통 제약사들의 신약 개발 전략 - 유스연합",
-        "url": "https://www.youthassembly.kr/news/964829",
-        "source_message_url": "https://t.me/activistkorea/114475",
+        "title": "에이비엘바이오·올릭스·씨젠 편입…7곳→10곳 - 데일리메디",
+        "url": "https://www.dailymedi.com/news/news_view.php?ca_id=22&wr_id=937576",
+        "source_message_url": "https://t.me/activistkorea/114550",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
