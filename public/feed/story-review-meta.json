@@ -1,60 +1,175 @@
 {
-  "date_id": "2026-06-22",
-  "generated_at": "2026-06-22T06:24:25.871071+09:00",
-  "start_at": "2026-06-21T06:22:42.791706+09:00",
-  "end_at": "2026-06-22T06:22:42.791706+09:00",
-  "start_label": "2026-06-21 06:22 KST",
-  "end_label": "2026-06-22 06:22 KST",
-  "candidate_count": 0,
-  "candidate_hash": "4f53cda18c2baa0c",
+  "date_id": "2026-06-23",
+  "generated_at": "2026-06-23T07:15:33.304806+09:00",
+  "start_at": "2026-06-22T07:11:29.116674+09:00",
+  "end_at": "2026-06-23T07:11:29.116674+09:00",
+  "start_label": "2026-06-22 07:11 KST",
+  "end_label": "2026-06-23 07:11 KST",
+  "candidate_count": 6,
+  "candidate_hash": "d9a012ec8282bacc",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": [],
+  "candidates": [
+    {
+      "id": "fc7e8a060b80",
+      "score": 85.5,
+      "left": {
+        "id": "story-23",
+        "title": "[포커스] 종합금융그룹 완성한 우리금융, 밸류업 증명할 시간",
+        "summary": "[포커스] 종합금융그룹 완성한 우리금융, 밸류업 증명할 시간 - 오늘경제 https://www.startuptoday.co.kr/news/articleView.html?idxno=804236",
+        "category": "밸류업·주주환원",
+        "datetime": "06.22 23:05",
+        "source_line": "STARTUPTODAY",
+        "link_count": 1,
+        "url": "https://www.startuptoday.co.kr/news/articleView.html?idxno=804236",
+        "links": [
+          {
+            "source": "STARTUPTODAY",
+            "title": "[포커스] 종합금융그룹 완성한 우리금융, 밸류업 증명할 시간",
+            "url": "https://www.startuptoday.co.kr/news/articleView.html?idxno=804236"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-47",
+        "title": "우리금융 임종룡, 日·대만 투자자에 밸류업 홍보",
+        "summary": "우리금융 임종룡, 日·대만 투자자에 밸류업 홍보 - 포쓰저널 https://www.4th.kr/news/articleView.html?idxno=2113488",
+        "category": "밸류업·주주환원",
+        "datetime": "06.23 03:07",
+        "source_line": "4TH",
+        "link_count": 1,
+        "url": "https://www.4th.kr/news/articleView.html?idxno=2113488",
+        "links": [
+          {
+            "source": "4TH",
+            "title": "우리금융 임종룡, 日·대만 투자자에 밸류업 홍보",
+            "url": "https://www.4th.kr/news/articleView.html?idxno=2113488"
+          }
+        ]
+      }
+    },
+    {
+      "id": "5d7c7a1f3fd9",
+      "score": 84.9,
+      "left": {
+        "id": "story-21",
+        "title": "금융지주 지배구조 개편 임박…회장 연임 문턱 높이나",
+        "summary": "금융지주 지배구조 개편 임박…회장 연임 문턱 높이나 | - DFT 대한금융신문 https://www.kbanker.co.kr/news/articleViewAmp.html?idxno=225257",
+        "category": "밸류업·주주환원",
+        "datetime": "06.23 01:12",
+        "source_line": "KBANKER",
+        "link_count": 1,
+        "url": "https://www.kbanker.co.kr/news/articleViewAmp.html?idxno=225257",
+        "links": [
+          {
+            "source": "KBANKER",
+            "title": "금융지주 지배구조 개편 임박…회장 연임 문턱 높이나",
+            "url": "https://www.kbanker.co.kr/news/articleViewAmp.html?idxno=225257"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-31",
+        "title": "글로벌 큰 손 모신다 해외IR 나선 금융지주 회장…밸류업 총력전",
+        "summary": "\"글로벌 큰 손 모신다\" 해외IR 나선 금융지주 회장…밸류업 총력전 - 대한데일리 http://www.dhdaily.co.kr/news/articleView.html?idxno=26589",
+        "category": "밸류업·주주환원",
+        "datetime": "06.22 20:58",
+        "source_line": "DHDAILY",
+        "link_count": 1,
+        "url": "http://www.dhdaily.co.kr/news/articleView.html?idxno=26589",
+        "links": [
+          {
+            "source": "DHDAILY",
+            "title": "글로벌 큰 손 모신다 해외IR 나선 금융지주 회장…밸류업 총력전",
+            "url": "http://www.dhdaily.co.kr/news/articleView.html?idxno=26589"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4792f3f74799",
+      "score": 84.6,
+      "left": {
+        "id": "story-19",
+        "title": "이찬진 금융지주 지배구조 개선안, 7월 3일 이전 발표…자본시장 위법 행위 엄단 예고",
+        "summary": "이찬진 `금융지주 지배구조 개선안, 7월 3일 이전 발표`…자본시장 위법 행위 `엄단` 예고 https://www.imaeil.com/page/view/2026062218081170063",
+        "category": "밸류업·주주환원",
+        "datetime": "06.23 01:12",
+        "source_line": "IMAEIL",
+        "link_count": 1,
+        "url": "https://www.imaeil.com/page/view/2026062218081170063",
+        "links": [
+          {
+            "source": "IMAEIL",
+            "title": "이찬진 금융지주 지배구조 개선안, 7월 3일 이전 발표…자본시장 위법 행위 엄단 예고",
+            "url": "https://www.imaeil.com/page/view/2026062218081170063"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-21",
+        "title": "금융지주 지배구조 개편 임박…회장 연임 문턱 높이나",
+        "summary": "금융지주 지배구조 개편 임박…회장 연임 문턱 높이나 | - DFT 대한금융신문 https://www.kbanker.co.kr/news/articleViewAmp.html?idxno=225257",
+        "category": "밸류업·주주환원",
+        "datetime": "06.23 01:12",
+        "source_line": "KBANKER",
+        "link_count": 1,
+        "url": "https://www.kbanker.co.kr/news/articleViewAmp.html?idxno=225257",
+        "links": [
+          {
+            "source": "KBANKER",
+            "title": "금융지주 지배구조 개편 임박…회장 연임 문턱 높이나",
+            "url": "https://www.kbanker.co.kr/news/articleViewAmp.html?idxno=225257"
+          }
+        ]
+      }
+    }
+  ],
   "benchmark_coverage": {
     "enabled": true,
     "handles": [
       "activistkorea"
     ],
-    "url_count": 75,
-    "matched_count": 19,
-    "missing_count": 56,
-    "coverage_rate": 25.3,
+    "url_count": 116,
+    "matched_count": 59,
+    "missing_count": 57,
+    "coverage_rate": 50.9,
     "missing": [
       {
-        "title": "L3Harris Technologies Inc (LHX) 주식 마감했습니다 하락 5.86%에 6월21일: 변동을 뒷받침하는 사실",
-        "url": "https://www.tradingkey.com/kr/news/market-movers/261979967-market-movers-lhx-20260621",
-        "source_message_url": "https://t.me/activistkorea/114555",
+        "title": "아틀라스 기업 지분 100% 품는 현대차그룹…완전 자회사 나선 배경은?[산업이(異)면]",
+        "url": "https://www.khan.co.kr/article/202606230600061",
+        "source_message_url": "https://t.me/activistkorea/114679",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "스페이스X, 상장 직전 ESG 최하등급 받아",
-        "url": "https://www.g-enews.com/article/Securities/2026/06/2026062123510334989a1f309431_1",
-        "source_message_url": "https://t.me/activistkorea/114554",
+        "title": "일본 증시의 밸류업 프로그램 - 브런치",
+        "url": "https://brunch.co.kr/@kid008/1188",
+        "source_message_url": "https://t.me/activistkorea/114675",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "[글로벌 비즈 브리핑] 머스크 xAI는 실패작 外",
-        "url": "https://v.daum.net/v/20260622044500829",
-        "source_message_url": "https://t.me/activistkorea/114551",
+        "title": "이찬진 지배구조 개선안, 7월 KB회장 숏리스트 전 발표 예정",
+        "url": "https://v.daum.net/v/20260622150140014",
+        "source_message_url": "https://t.me/activistkorea/114673",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "similar_title"
+      },
+      {
+        "title": "코스닥 특례상장 유지하려면 기업가치 제고 공시 이행해야",
+        "url": "https://v.daum.net/v/20260622174804568",
+        "source_message_url": "https://t.me/activistkorea/114672",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "하이닉스 합병 뉴스에도 급락 … 널뛰는 주가 대신 봐야 할 지표는?",
-        "url": "https://www.mk.co.kr/news/stock/12079470",
-        "source_message_url": "https://t.me/activistkorea/114552",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "에이비엘바이오·올릭스·씨젠 편입…7곳→10곳 - 데일리메디",
-        "url": "https://www.dailymedi.com/news/news_view.php?ca_id=22&wr_id=937576",
-        "source_message_url": "https://t.me/activistkorea/114550",
+        "title": "코스닥 프리미엄 70 도입… 바이오 투자 지도 다시 그린다",
+        "url": "https://www.biotimes.co.kr/news/articleView.html?idxno=32582",
+        "source_message_url": "https://t.me/activistkorea/114666",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
