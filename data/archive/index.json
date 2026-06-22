@@ -2,6 +2,11 @@
   "archive_version": 1,
   "files": [
     {
+      "date": "2026-06-23",
+      "path": "articles/2026-06-23.jsonl",
+      "records": 407
+    },
+    {
       "date": "2026-06-22",
       "path": "articles/2026-06-22.jsonl",
       "records": 768
@@ -267,6 +272,6 @@
       "records": 157
     }
   ],
-  "generated_at": "2026-06-22T21:35:27.204999+09:00",
-  "total_records": 39540
+  "generated_at": "2026-06-23T02:17:45.196372+09:00",
+  "total_records": 39947
 }
