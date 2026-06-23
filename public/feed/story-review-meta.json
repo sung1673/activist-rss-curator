@@ -1,36 +1,36 @@
 {
-  "date_id": "2026-06-23",
-  "generated_at": "2026-06-23T07:15:33.304806+09:00",
-  "start_at": "2026-06-22T07:11:29.116674+09:00",
-  "end_at": "2026-06-23T07:11:29.116674+09:00",
-  "start_label": "2026-06-22 07:11 KST",
-  "end_label": "2026-06-23 07:11 KST",
-  "candidate_count": 6,
-  "candidate_hash": "d9a012ec8282bacc",
+  "date_id": "2026-06-24",
+  "generated_at": "2026-06-24T06:57:41.627528+09:00",
+  "start_at": "2026-06-23T06:54:14.243255+09:00",
+  "end_at": "2026-06-24T06:54:14.243255+09:00",
+  "start_label": "2026-06-23 06:54 KST",
+  "end_label": "2026-06-24 06:54 KST",
+  "candidate_count": 8,
+  "candidate_hash": "19e8855a78618ba5",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "fc7e8a060b80",
-      "score": 85.5,
+      "id": "866f7ca62611",
+      "score": 90.8,
       "left": {
-        "id": "story-23",
-        "title": "[포커스] 종합금융그룹 완성한 우리금융, 밸류업 증명할 시간",
-        "summary": "[포커스] 종합금융그룹 완성한 우리금융, 밸류업 증명할 시간 - 오늘경제 https://www.startuptoday.co.kr/news/articleView.html?idxno=804236",
+        "id": "story-50",
+        "title": "임종룡 회장, 해외 투자자 직접 만난다…우리금융 밸류업 행보 강화 - 이코노미사이언스",
+        "summary": "임종룡 회장, 해외 투자자 직접 만난다…우리금융 밸류업 행보 강화 - 이코노미사이언스 https://www.e-science.co.kr/news/articleView.html?idxno=130863",
         "category": "밸류업·주주환원",
-        "datetime": "06.22 23:05",
-        "source_line": "STARTUPTODAY",
+        "datetime": "06.23 08:52",
+        "source_line": "E-SCIENCE",
         "link_count": 1,
-        "url": "https://www.startuptoday.co.kr/news/articleView.html?idxno=804236",
+        "url": "https://www.e-science.co.kr/news/articleView.html?idxno=130863",
         "links": [
           {
-            "source": "STARTUPTODAY",
-            "title": "[포커스] 종합금융그룹 완성한 우리금융, 밸류업 증명할 시간",
-            "url": "https://www.startuptoday.co.kr/news/articleView.html?idxno=804236"
+            "source": "E-SCIENCE",
+            "title": "임종룡 회장, 해외 투자자 직접 만난다…우리금융 밸류업 행보 강화 - 이코노미사이언스",
+            "url": "https://www.e-science.co.kr/news/articleView.html?idxno=130863"
           }
         ]
       },
       "right": {
-        "id": "story-47",
+        "id": "story-60",
         "title": "우리금융 임종룡, 日·대만 투자자에 밸류업 홍보",
         "summary": "우리금융 임종룡, 日·대만 투자자에 밸류업 홍보 - 포쓰저널 https://www.4th.kr/news/articleView.html?idxno=2113488",
         "category": "밸류업·주주환원",
@@ -48,77 +48,82 @@
       }
     },
     {
-      "id": "5d7c7a1f3fd9",
-      "score": 84.9,
+      "id": "bb7e0da93504",
+      "score": 90.3,
       "left": {
-        "id": "story-21",
-        "title": "금융지주 지배구조 개편 임박…회장 연임 문턱 높이나",
-        "summary": "금융지주 지배구조 개편 임박…회장 연임 문턱 높이나 | - DFT 대한금융신문 https://www.kbanker.co.kr/news/articleViewAmp.html?idxno=225257",
+        "id": "story-32",
+        "title": "지배구조 개선안 임박···KB금융 회장·5대은행장 선임 새 룰 적용받나",
+        "summary": "지배구조 개선안 임박···KB금융 회장·5대은행장 선임 '새 룰' 적용받나 - 서울파이낸스 https://www.seoulfn.com/news/articleView.html?idxno=631770",
         "category": "밸류업·주주환원",
-        "datetime": "06.23 01:12",
-        "source_line": "KBANKER",
+        "datetime": "06.23 18:48",
+        "source_line": "서울파이낸스",
         "link_count": 1,
-        "url": "https://www.kbanker.co.kr/news/articleViewAmp.html?idxno=225257",
+        "url": "https://www.seoulfn.com/news/articleView.html?idxno=631770",
         "links": [
           {
-            "source": "KBANKER",
-            "title": "금융지주 지배구조 개편 임박…회장 연임 문턱 높이나",
-            "url": "https://www.kbanker.co.kr/news/articleViewAmp.html?idxno=225257"
+            "source": "서울파이낸스",
+            "title": "지배구조 개선안 임박···KB금융 회장·5대은행장 선임 새 룰 적용받나",
+            "url": "https://www.seoulfn.com/news/articleView.html?idxno=631770"
           }
         ]
       },
       "right": {
-        "id": "story-31",
-        "title": "글로벌 큰 손 모신다 해외IR 나선 금융지주 회장…밸류업 총력전",
-        "summary": "\"글로벌 큰 손 모신다\" 해외IR 나선 금융지주 회장…밸류업 총력전 - 대한데일리 http://www.dhdaily.co.kr/news/articleView.html?idxno=26589",
+        "id": "story-34",
+        "title": "금융당국, 지배구조 개편안 조기 공개…KB금융 차기 회장 선임 변수되나 - 르몽드디플로마티크",
+        "summary": "금융당국, 지배구조 개편안 조기 공개…KB금융 차기 회장 선임 변수되나 - 르몽드디플로마티크 https://www.ilemonde.com/news/articleView.html?idxno=30217",
         "category": "밸류업·주주환원",
-        "datetime": "06.22 20:58",
-        "source_line": "DHDAILY",
+        "datetime": "06.23 18:48",
+        "source_line": "ILEMONDE",
         "link_count": 1,
-        "url": "http://www.dhdaily.co.kr/news/articleView.html?idxno=26589",
+        "url": "https://www.ilemonde.com/news/articleView.html?idxno=30217",
         "links": [
           {
-            "source": "DHDAILY",
-            "title": "글로벌 큰 손 모신다 해외IR 나선 금융지주 회장…밸류업 총력전",
-            "url": "http://www.dhdaily.co.kr/news/articleView.html?idxno=26589"
+            "source": "ILEMONDE",
+            "title": "금융당국, 지배구조 개편안 조기 공개…KB금융 차기 회장 선임 변수되나 - 르몽드디플로마티크",
+            "url": "https://www.ilemonde.com/news/articleView.html?idxno=30217"
           }
         ]
       }
     },
     {
-      "id": "4792f3f74799",
-      "score": 84.6,
+      "id": "785587bc9fd0",
+      "score": 83.0,
       "left": {
-        "id": "story-19",
-        "title": "이찬진 금융지주 지배구조 개선안, 7월 3일 이전 발표…자본시장 위법 행위 엄단 예고",
-        "summary": "이찬진 `금융지주 지배구조 개선안, 7월 3일 이전 발표`…자본시장 위법 행위 `엄단` 예고 https://www.imaeil.com/page/view/2026062218081170063",
+        "id": "story-21",
+        "title": "7년째 B+에 초강수... 신영증권, 이사회 혁신·자사주 소각 지배구조 쇄신 박차",
+        "summary": "'7년째 B+에 초강수'... 신영증권, 이사회 혁신·자사주 소각 '지배구조 쇄신' 박차 - 시장경제 https://www.meconomynews.com/news/articleView.html?idxno=132041",
         "category": "밸류업·주주환원",
-        "datetime": "06.23 01:12",
-        "source_line": "IMAEIL",
-        "link_count": 1,
-        "url": "https://www.imaeil.com/page/view/2026062218081170063",
+        "datetime": "06.23 18:48",
+        "source_line": "MECONOMYNEWS · INEWS24",
+        "link_count": 2,
+        "url": "https://www.meconomynews.com/news/articleView.html?idxno=132041",
         "links": [
           {
-            "source": "IMAEIL",
-            "title": "이찬진 금융지주 지배구조 개선안, 7월 3일 이전 발표…자본시장 위법 행위 엄단 예고",
-            "url": "https://www.imaeil.com/page/view/2026062218081170063"
+            "source": "MECONOMYNEWS",
+            "title": "7년째 B+에 초강수... 신영증권, 이사회 혁신·자사주 소각 지배구조 쇄신 박차",
+            "url": "https://www.meconomynews.com/news/articleView.html?idxno=132041"
+          },
+          {
+            "source": "INEWS24",
+            "title": "신영증권, 연내 자사주 62.5% 소각",
+            "url": "https://www.inews24.com/view/1978882"
           }
         ]
       },
       "right": {
-        "id": "story-21",
-        "title": "금융지주 지배구조 개편 임박…회장 연임 문턱 높이나",
-        "summary": "금융지주 지배구조 개편 임박…회장 연임 문턱 높이나 | - DFT 대한금융신문 https://www.kbanker.co.kr/news/articleViewAmp.html?idxno=225257",
+        "id": "story-45",
+        "title": "자사주 부자 신영증권, 밸류업 대열 합류…알맹이 채울 로드맵은 과제",
+        "summary": "'자사주 부자' 신영증권, 밸류업 대열 합류…'알맹이' 채울 로드맵은 과제 https://www.s-econ.kr/news/articleView.html?idxno=4002054",
         "category": "밸류업·주주환원",
-        "datetime": "06.23 01:12",
-        "source_line": "KBANKER",
+        "datetime": "06.23 13:50",
+        "source_line": "S-ECON",
         "link_count": 1,
-        "url": "https://www.kbanker.co.kr/news/articleViewAmp.html?idxno=225257",
+        "url": "https://www.s-econ.kr/news/articleView.html?idxno=4002054",
         "links": [
           {
-            "source": "KBANKER",
-            "title": "금융지주 지배구조 개편 임박…회장 연임 문턱 높이나",
-            "url": "https://www.kbanker.co.kr/news/articleViewAmp.html?idxno=225257"
+            "source": "S-ECON",
+            "title": "자사주 부자 신영증권, 밸류업 대열 합류…알맹이 채울 로드맵은 과제",
+            "url": "https://www.s-econ.kr/news/articleView.html?idxno=4002054"
           }
         ]
       }
@@ -129,47 +134,47 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 116,
-    "matched_count": 59,
+    "url_count": 118,
+    "matched_count": 61,
     "missing_count": 57,
-    "coverage_rate": 50.9,
+    "coverage_rate": 51.7,
     "missing": [
       {
-        "title": "아틀라스 기업 지분 100% 품는 현대차그룹…완전 자회사 나선 배경은?[산업이(異)면]",
-        "url": "https://www.khan.co.kr/article/202606230600061",
-        "source_message_url": "https://t.me/activistkorea/114679",
+        "title": "NVE, 베이커 대표 은퇴·이임스 신임 CEO 선임 | 뉴스 - 초이스스탁US",
+        "url": "https://www.choicestock.co.kr/stock/news_view/155014",
+        "source_message_url": "https://t.me/activistkorea/114799",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "일본 증시의 밸류업 프로그램 - 브런치",
-        "url": "https://brunch.co.kr/@kid008/1188",
-        "source_message_url": "https://t.me/activistkorea/114675",
+        "title": "심평원 울산경남본부, 국민참여 ESG경영위원회 본격 운영",
+        "url": "https://www.esnews.kr/news/articleView.html?idxno=4637",
+        "source_message_url": "https://t.me/activistkorea/114796",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "이찬진 지배구조 개선안, 7월 KB회장 숏리스트 전 발표 예정",
-        "url": "https://v.daum.net/v/20260622150140014",
-        "source_message_url": "https://t.me/activistkorea/114673",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "similar_title"
-      },
-      {
-        "title": "코스닥 특례상장 유지하려면 기업가치 제고 공시 이행해야",
-        "url": "https://v.daum.net/v/20260622174804568",
-        "source_message_url": "https://t.me/activistkorea/114672",
+        "title": "독·프, 지상 방산 거인 KNDS 상장 임박…양국 정부 40%씩 동등 지분 합의",
+        "url": "https://www.g-enews.com/article/Global-Biz/2026/06/202606230904256471e8b8a793f7_1",
+        "source_message_url": "https://t.me/activistkorea/114794",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "코스닥 프리미엄 70 도입… 바이오 투자 지도 다시 그린다",
-        "url": "https://www.biotimes.co.kr/news/articleView.html?idxno=32582",
-        "source_message_url": "https://t.me/activistkorea/114666",
+        "title": "코스피 1년새 3배 뛰며 9000 뚫었는데...상장사 주주친화度 뒷걸음",
+        "url": "https://www.esgeconomy.com/news/articleView.html?idxno=15827",
+        "source_message_url": "https://t.me/activistkorea/114795",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "상장사 565곳, 아직 장부 가치에도 못 미치는 저평가",
+        "url": "https://www.chosun.com/economy/money/2026/06/24/CSJNASO6VJB3LGKU2L6IXULCA4",
+        "source_message_url": "https://t.me/activistkorea/114792",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
