@@ -1,129 +1,154 @@
 {
-  "date_id": "2026-06-24",
-  "generated_at": "2026-06-24T06:57:41.627528+09:00",
-  "start_at": "2026-06-23T06:54:14.243255+09:00",
-  "end_at": "2026-06-24T06:54:14.243255+09:00",
-  "start_label": "2026-06-23 06:54 KST",
-  "end_label": "2026-06-24 06:54 KST",
-  "candidate_count": 8,
-  "candidate_hash": "19e8855a78618ba5",
+  "date_id": "2026-06-25",
+  "generated_at": "2026-06-25T06:37:27.874844+09:00",
+  "start_at": "2026-06-24T06:33:35.052863+09:00",
+  "end_at": "2026-06-25T06:33:35.052863+09:00",
+  "start_label": "2026-06-24 06:33 KST",
+  "end_label": "2026-06-25 06:33 KST",
+  "candidate_count": 3,
+  "candidate_hash": "b3eba5aac2424241",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "866f7ca62611",
-      "score": 90.8,
+      "id": "e7223a744059",
+      "score": 88.2,
       "left": {
-        "id": "story-50",
-        "title": "임종룡 회장, 해외 투자자 직접 만난다…우리금융 밸류업 행보 강화 - 이코노미사이언스",
-        "summary": "임종룡 회장, 해외 투자자 직접 만난다…우리금융 밸류업 행보 강화 - 이코노미사이언스 https://www.e-science.co.kr/news/articleView.html?idxno=130863",
+        "id": "story-22",
+        "title": "카카오, 지속가능성 보고서 공개…지배구조 이행률 93%",
+        "summary": "카카오, 지속가능성 보고서 공개…지배구조 이행률 93% - 아시아경제 https://view.asiae.co.kr/article/2026062414280515493",
         "category": "밸류업·주주환원",
-        "datetime": "06.23 08:52",
-        "source_line": "E-SCIENCE",
-        "link_count": 1,
-        "url": "https://www.e-science.co.kr/news/articleView.html?idxno=130863",
+        "datetime": "06.24 16:16",
+        "source_line": "VIEW · BIZ · KOREANCENTER · 연합뉴스",
+        "link_count": 4,
+        "url": "https://view.asiae.co.kr/article/2026062414280515493",
         "links": [
           {
-            "source": "E-SCIENCE",
-            "title": "임종룡 회장, 해외 투자자 직접 만난다…우리금융 밸류업 행보 강화 - 이코노미사이언스",
-            "url": "https://www.e-science.co.kr/news/articleView.html?idxno=130863"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-60",
-        "title": "우리금융 임종룡, 日·대만 투자자에 밸류업 홍보",
-        "summary": "우리금융 임종룡, 日·대만 투자자에 밸류업 홍보 - 포쓰저널 https://www.4th.kr/news/articleView.html?idxno=2113488",
-        "category": "밸류업·주주환원",
-        "datetime": "06.23 03:07",
-        "source_line": "4TH",
-        "link_count": 1,
-        "url": "https://www.4th.kr/news/articleView.html?idxno=2113488",
-        "links": [
-          {
-            "source": "4TH",
-            "title": "우리금융 임종룡, 日·대만 투자자에 밸류업 홍보",
-            "url": "https://www.4th.kr/news/articleView.html?idxno=2113488"
-          }
-        ]
-      }
-    },
-    {
-      "id": "bb7e0da93504",
-      "score": 90.3,
-      "left": {
-        "id": "story-32",
-        "title": "지배구조 개선안 임박···KB금융 회장·5대은행장 선임 새 룰 적용받나",
-        "summary": "지배구조 개선안 임박···KB금융 회장·5대은행장 선임 '새 룰' 적용받나 - 서울파이낸스 https://www.seoulfn.com/news/articleView.html?idxno=631770",
-        "category": "밸류업·주주환원",
-        "datetime": "06.23 18:48",
-        "source_line": "서울파이낸스",
-        "link_count": 1,
-        "url": "https://www.seoulfn.com/news/articleView.html?idxno=631770",
-        "links": [
-          {
-            "source": "서울파이낸스",
-            "title": "지배구조 개선안 임박···KB금융 회장·5대은행장 선임 새 룰 적용받나",
-            "url": "https://www.seoulfn.com/news/articleView.html?idxno=631770"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-34",
-        "title": "금융당국, 지배구조 개편안 조기 공개…KB금융 차기 회장 선임 변수되나 - 르몽드디플로마티크",
-        "summary": "금융당국, 지배구조 개편안 조기 공개…KB금융 차기 회장 선임 변수되나 - 르몽드디플로마티크 https://www.ilemonde.com/news/articleView.html?idxno=30217",
-        "category": "밸류업·주주환원",
-        "datetime": "06.23 18:48",
-        "source_line": "ILEMONDE",
-        "link_count": 1,
-        "url": "https://www.ilemonde.com/news/articleView.html?idxno=30217",
-        "links": [
-          {
-            "source": "ILEMONDE",
-            "title": "금융당국, 지배구조 개편안 조기 공개…KB금융 차기 회장 선임 변수되나 - 르몽드디플로마티크",
-            "url": "https://www.ilemonde.com/news/articleView.html?idxno=30217"
-          }
-        ]
-      }
-    },
-    {
-      "id": "785587bc9fd0",
-      "score": 83.0,
-      "left": {
-        "id": "story-21",
-        "title": "7년째 B+에 초강수... 신영증권, 이사회 혁신·자사주 소각 지배구조 쇄신 박차",
-        "summary": "'7년째 B+에 초강수'... 신영증권, 이사회 혁신·자사주 소각 '지배구조 쇄신' 박차 - 시장경제 https://www.meconomynews.com/news/articleView.html?idxno=132041",
-        "category": "밸류업·주주환원",
-        "datetime": "06.23 18:48",
-        "source_line": "MECONOMYNEWS · INEWS24",
-        "link_count": 2,
-        "url": "https://www.meconomynews.com/news/articleView.html?idxno=132041",
-        "links": [
-          {
-            "source": "MECONOMYNEWS",
-            "title": "7년째 B+에 초강수... 신영증권, 이사회 혁신·자사주 소각 지배구조 쇄신 박차",
-            "url": "https://www.meconomynews.com/news/articleView.html?idxno=132041"
+            "source": "VIEW",
+            "title": "카카오, 지속가능성 보고서 공개…지배구조 이행률 93%",
+            "url": "https://view.asiae.co.kr/article/2026062414280515493"
           },
           {
+            "source": "BIZ",
+            "title": "카카오 지배구조 이행률 93%…적극 소통할 것",
+            "url": "https://biz.sbs.co.kr/amp/article/20000318569"
+          },
+          {
+            "source": "KOREANCENTER",
+            "title": "카카오 ESG 성적표 공개…지배구조 이행률 93% - 연합뉴스 한민족센터",
+            "url": "https://www.koreancenter.or.kr/news/articleView.html?idxno=1372193"
+          },
+          {
+            "source": "연합뉴스",
+            "title": "카카오 ESG 성적표 공개…지배구조 이행률 93%",
+            "url": "https://www.yna.co.kr/view/AKR20260624087100017?section=esg%2Fcorporation"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-41",
+        "title": "카카오 지배구조 이행률 93%⋯안산 데이터센터 온실가스 4753톤 감축 효과",
+        "summary": "카카오 \"지배구조 이행률 93%⋯안산 데이터센터 온실가스 4753톤 감축 효과\" - 아이뉴스24 http://www.inews24.com/view/1979287",
+        "category": "밸류업·주주환원",
+        "datetime": "06.24 16:16",
+        "source_line": "INEWS24",
+        "link_count": 1,
+        "url": "http://www.inews24.com/view/1979287",
+        "links": [
+          {
             "source": "INEWS24",
-            "title": "신영증권, 연내 자사주 62.5% 소각",
-            "url": "https://www.inews24.com/view/1978882"
+            "title": "카카오 지배구조 이행률 93%⋯안산 데이터센터 온실가스 4753톤 감축 효과",
+            "url": "http://www.inews24.com/view/1979287"
+          }
+        ]
+      }
+    },
+    {
+      "id": "bcf2de8052b1",
+      "score": 84.2,
+      "left": {
+        "id": "story-41",
+        "title": "카카오 지배구조 이행률 93%⋯안산 데이터센터 온실가스 4753톤 감축 효과",
+        "summary": "카카오 \"지배구조 이행률 93%⋯안산 데이터센터 온실가스 4753톤 감축 효과\" - 아이뉴스24 http://www.inews24.com/view/1979287",
+        "category": "밸류업·주주환원",
+        "datetime": "06.24 16:16",
+        "source_line": "INEWS24",
+        "link_count": 1,
+        "url": "http://www.inews24.com/view/1979287",
+        "links": [
+          {
+            "source": "INEWS24",
+            "title": "카카오 지배구조 이행률 93%⋯안산 데이터센터 온실가스 4753톤 감축 효과",
+            "url": "http://www.inews24.com/view/1979287"
           }
         ]
       },
       "right": {
         "id": "story-45",
-        "title": "자사주 부자 신영증권, 밸류업 대열 합류…알맹이 채울 로드맵은 과제",
-        "summary": "'자사주 부자' 신영증권, 밸류업 대열 합류…'알맹이' 채울 로드맵은 과제 https://www.s-econ.kr/news/articleView.html?idxno=4002054",
+        "title": "카카오, 계열사 147개→94개로 축소…지배구조 효율화",
+        "summary": "카카오, 계열사 147개→94개로 축소…지배구조 효율화 - 데일리안 https://www.dailian.co.kr/news/view/1659358/",
         "category": "밸류업·주주환원",
-        "datetime": "06.23 13:50",
-        "source_line": "S-ECON",
+        "datetime": "06.24 11:54",
+        "source_line": "데일리안",
         "link_count": 1,
-        "url": "https://www.s-econ.kr/news/articleView.html?idxno=4002054",
+        "url": "https://www.dailian.co.kr/news/view/1659358",
         "links": [
           {
-            "source": "S-ECON",
-            "title": "자사주 부자 신영증권, 밸류업 대열 합류…알맹이 채울 로드맵은 과제",
-            "url": "https://www.s-econ.kr/news/articleView.html?idxno=4002054"
+            "source": "데일리안",
+            "title": "카카오, 계열사 147개→94개로 축소…지배구조 효율화",
+            "url": "https://www.dailian.co.kr/news/view/1659358"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c02744051ea2",
+      "score": 83.8,
+      "left": {
+        "id": "story-22",
+        "title": "카카오, 지속가능성 보고서 공개…지배구조 이행률 93%",
+        "summary": "카카오, 지속가능성 보고서 공개…지배구조 이행률 93% - 아시아경제 https://view.asiae.co.kr/article/2026062414280515493",
+        "category": "밸류업·주주환원",
+        "datetime": "06.24 16:16",
+        "source_line": "VIEW · BIZ · KOREANCENTER · 연합뉴스",
+        "link_count": 4,
+        "url": "https://view.asiae.co.kr/article/2026062414280515493",
+        "links": [
+          {
+            "source": "VIEW",
+            "title": "카카오, 지속가능성 보고서 공개…지배구조 이행률 93%",
+            "url": "https://view.asiae.co.kr/article/2026062414280515493"
+          },
+          {
+            "source": "BIZ",
+            "title": "카카오 지배구조 이행률 93%…적극 소통할 것",
+            "url": "https://biz.sbs.co.kr/amp/article/20000318569"
+          },
+          {
+            "source": "KOREANCENTER",
+            "title": "카카오 ESG 성적표 공개…지배구조 이행률 93% - 연합뉴스 한민족센터",
+            "url": "https://www.koreancenter.or.kr/news/articleView.html?idxno=1372193"
+          },
+          {
+            "source": "연합뉴스",
+            "title": "카카오 ESG 성적표 공개…지배구조 이행률 93%",
+            "url": "https://www.yna.co.kr/view/AKR20260624087100017?section=esg%2Fcorporation"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-45",
+        "title": "카카오, 계열사 147개→94개로 축소…지배구조 효율화",
+        "summary": "카카오, 계열사 147개→94개로 축소…지배구조 효율화 - 데일리안 https://www.dailian.co.kr/news/view/1659358/",
+        "category": "밸류업·주주환원",
+        "datetime": "06.24 11:54",
+        "source_line": "데일리안",
+        "link_count": 1,
+        "url": "https://www.dailian.co.kr/news/view/1659358",
+        "links": [
+          {
+            "source": "데일리안",
+            "title": "카카오, 계열사 147개→94개로 축소…지배구조 효율화",
+            "url": "https://www.dailian.co.kr/news/view/1659358"
           }
         ]
       }
@@ -134,47 +159,47 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 118,
-    "matched_count": 61,
-    "missing_count": 57,
-    "coverage_rate": 51.7,
+    "url_count": 116,
+    "matched_count": 67,
+    "missing_count": 49,
+    "coverage_rate": 57.8,
     "missing": [
       {
-        "title": "NVE, 베이커 대표 은퇴·이임스 신임 CEO 선임 | 뉴스 - 초이스스탁US",
-        "url": "https://www.choicestock.co.kr/stock/news_view/155014",
-        "source_message_url": "https://t.me/activistkorea/114799",
+        "title": "SLL중앙 티빙 지분 매각, 웨이브 합병 변수 되나",
+        "url": "https://www.topdaily.kr/articles/110659",
+        "source_message_url": "https://t.me/activistkorea/114920",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "심평원 울산경남본부, 국민참여 ESG경영위원회 본격 운영",
-        "url": "https://www.esnews.kr/news/articleView.html?idxno=4637",
-        "source_message_url": "https://t.me/activistkorea/114796",
+        "title": "두산그룹 내부거래 급증 투명·공정성 확보 의문 | - 세이프타임즈",
+        "url": "https://www.safetimes.co.kr/news/articleViewAmp.html?idxno=243710",
+        "source_message_url": "https://t.me/activistkorea/114921",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "독·프, 지상 방산 거인 KNDS 상장 임박…양국 정부 40%씩 동등 지분 합의",
-        "url": "https://www.g-enews.com/article/Global-Biz/2026/06/202606230904256471e8b8a793f7_1",
-        "source_message_url": "https://t.me/activistkorea/114794",
+        "title": "지배구조 효율화에 4조 태웠다…다시 고개든 넥슨 매각설",
+        "url": "https://v.daum.net/v/bdA2x6LxgG",
+        "source_message_url": "https://t.me/activistkorea/114919",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_title"
+      },
+      {
+        "title": "[어닝콜] 브룩필드인프라스트럭, 2026년 연례 주주총회 개최 | 뉴스 - 초이스스탁",
+        "url": "https://www.choicestock.co.kr/stock/news_view/155742?bu=",
+        "source_message_url": "https://t.me/activistkorea/114914",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "코스피 1년새 3배 뛰며 9000 뚫었는데...상장사 주주친화度 뒷걸음",
-        "url": "https://www.esgeconomy.com/news/articleView.html?idxno=15827",
-        "source_message_url": "https://t.me/activistkorea/114795",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "상장사 565곳, 아직 장부 가치에도 못 미치는 저평가",
-        "url": "https://www.chosun.com/economy/money/2026/06/24/CSJNASO6VJB3LGKU2L6IXULCA4",
-        "source_message_url": "https://t.me/activistkorea/114792",
+        "title": "GC 2026 GC 지속가능경영보고서 발간 - MEDI:GATE NEWS",
+        "url": "https://www.medigatenews.com/news/1263436839",
+        "source_message_url": "https://t.me/activistkorea/114911",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
