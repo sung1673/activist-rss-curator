@@ -1,154 +1,124 @@
 {
-  "date_id": "2026-06-25",
-  "generated_at": "2026-06-25T06:37:27.874844+09:00",
-  "start_at": "2026-06-24T06:33:35.052863+09:00",
-  "end_at": "2026-06-25T06:33:35.052863+09:00",
-  "start_label": "2026-06-24 06:33 KST",
-  "end_label": "2026-06-25 06:33 KST",
+  "date_id": "2026-06-26",
+  "generated_at": "2026-06-26T06:57:03.400907+09:00",
+  "start_at": "2026-06-25T06:53:09.186999+09:00",
+  "end_at": "2026-06-26T06:53:09.186999+09:00",
+  "start_label": "2026-06-25 06:53 KST",
+  "end_label": "2026-06-26 06:53 KST",
   "candidate_count": 3,
-  "candidate_hash": "b3eba5aac2424241",
+  "candidate_hash": "e3e01ea111823782",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "e7223a744059",
-      "score": 88.2,
+      "id": "1c6686589f81",
+      "score": 91.7,
       "left": {
-        "id": "story-22",
-        "title": "카카오, 지속가능성 보고서 공개…지배구조 이행률 93%",
-        "summary": "카카오, 지속가능성 보고서 공개…지배구조 이행률 93% - 아시아경제 https://view.asiae.co.kr/article/2026062414280515493",
+        "id": "story-36",
+        "title": "금융권 지배구조 개편안 10월 시행, 양종희 KB금융회장 연임 구도에 변수?",
+        "summary": "금융권 지배구조 개편안 10월 시행, 양종희 KB금융회장 연임 구도에 변수? | - 엠투데이 https://www.autodaily.co.kr/news/articleViewAmp.html?idxno=545200",
         "category": "밸류업·주주환원",
-        "datetime": "06.24 16:16",
-        "source_line": "VIEW · BIZ · KOREANCENTER · 연합뉴스",
-        "link_count": 4,
-        "url": "https://view.asiae.co.kr/article/2026062414280515493",
+        "datetime": "06.25 18:20",
+        "source_line": "AUTODAILY",
+        "link_count": 1,
+        "url": "https://www.autodaily.co.kr/news/articleViewAmp.html?idxno=545200",
         "links": [
           {
-            "source": "VIEW",
-            "title": "카카오, 지속가능성 보고서 공개…지배구조 이행률 93%",
-            "url": "https://view.asiae.co.kr/article/2026062414280515493"
-          },
-          {
-            "source": "BIZ",
-            "title": "카카오 지배구조 이행률 93%…적극 소통할 것",
-            "url": "https://biz.sbs.co.kr/amp/article/20000318569"
-          },
-          {
-            "source": "KOREANCENTER",
-            "title": "카카오 ESG 성적표 공개…지배구조 이행률 93% - 연합뉴스 한민족센터",
-            "url": "https://www.koreancenter.or.kr/news/articleView.html?idxno=1372193"
-          },
-          {
-            "source": "연합뉴스",
-            "title": "카카오 ESG 성적표 공개…지배구조 이행률 93%",
-            "url": "https://www.yna.co.kr/view/AKR20260624087100017?section=esg%2Fcorporation"
+            "source": "AUTODAILY",
+            "title": "금융권 지배구조 개편안 10월 시행, 양종희 KB금융회장 연임 구도에 변수?",
+            "url": "https://www.autodaily.co.kr/news/articleViewAmp.html?idxno=545200"
           }
         ]
       },
       "right": {
-        "id": "story-41",
-        "title": "카카오 지배구조 이행률 93%⋯안산 데이터센터 온실가스 4753톤 감축 효과",
-        "summary": "카카오 \"지배구조 이행률 93%⋯안산 데이터센터 온실가스 4753톤 감축 효과\" - 아이뉴스24 http://www.inews24.com/view/1979287",
+        "id": "story-38",
+        "title": "KB금융 회장 연임 절차 돌입···금융권 지배구조 개편 시험대 | - 뉴스프리존",
+        "summary": "KB금융 회장 연임 절차 돌입···금융권 지배구조 개편 시험대 | - 뉴스프리존 https://www.newsfreezone.co.kr/news/articleViewAmp.html?idxno=696395",
         "category": "밸류업·주주환원",
-        "datetime": "06.24 16:16",
-        "source_line": "INEWS24",
+        "datetime": "06.25 18:20",
+        "source_line": "NEWSFREEZONE",
         "link_count": 1,
-        "url": "http://www.inews24.com/view/1979287",
+        "url": "https://www.newsfreezone.co.kr/news/articleViewAmp.html?idxno=696395",
         "links": [
           {
-            "source": "INEWS24",
-            "title": "카카오 지배구조 이행률 93%⋯안산 데이터센터 온실가스 4753톤 감축 효과",
-            "url": "http://www.inews24.com/view/1979287"
+            "source": "NEWSFREEZONE",
+            "title": "KB금융 회장 연임 절차 돌입···금융권 지배구조 개편 시험대 | - 뉴스프리존",
+            "url": "https://www.newsfreezone.co.kr/news/articleViewAmp.html?idxno=696395"
           }
         ]
       }
     },
     {
-      "id": "bcf2de8052b1",
-      "score": 84.2,
+      "id": "6180b9681195",
+      "score": 87.8,
       "left": {
-        "id": "story-41",
-        "title": "카카오 지배구조 이행률 93%⋯안산 데이터센터 온실가스 4753톤 감축 효과",
-        "summary": "카카오 \"지배구조 이행률 93%⋯안산 데이터센터 온실가스 4753톤 감축 효과\" - 아이뉴스24 http://www.inews24.com/view/1979287",
+        "id": "story-38",
+        "title": "KB금융 회장 연임 절차 돌입···금융권 지배구조 개편 시험대 | - 뉴스프리존",
+        "summary": "KB금융 회장 연임 절차 돌입···금융권 지배구조 개편 시험대 | - 뉴스프리존 https://www.newsfreezone.co.kr/news/articleViewAmp.html?idxno=696395",
         "category": "밸류업·주주환원",
-        "datetime": "06.24 16:16",
-        "source_line": "INEWS24",
+        "datetime": "06.25 18:20",
+        "source_line": "NEWSFREEZONE",
         "link_count": 1,
-        "url": "http://www.inews24.com/view/1979287",
+        "url": "https://www.newsfreezone.co.kr/news/articleViewAmp.html?idxno=696395",
         "links": [
           {
-            "source": "INEWS24",
-            "title": "카카오 지배구조 이행률 93%⋯안산 데이터센터 온실가스 4753톤 감축 효과",
-            "url": "http://www.inews24.com/view/1979287"
+            "source": "NEWSFREEZONE",
+            "title": "KB금융 회장 연임 절차 돌입···금융권 지배구조 개편 시험대 | - 뉴스프리존",
+            "url": "https://www.newsfreezone.co.kr/news/articleViewAmp.html?idxno=696395"
           }
         ]
       },
       "right": {
-        "id": "story-45",
-        "title": "카카오, 계열사 147개→94개로 축소…지배구조 효율화",
-        "summary": "카카오, 계열사 147개→94개로 축소…지배구조 효율화 - 데일리안 https://www.dailian.co.kr/news/view/1659358/",
+        "id": "story-49",
+        "title": "양종희 실적은 합격점…KB금융 차기 회장 변수는 지배구조 - 코리아리포트",
+        "summary": "양종희 실적은 합격점…KB금융 차기 회장 변수는 지배구조 - 코리아리포트 https://www.koreareport.co.kr/news/articleView.html?idxno=51075",
         "category": "밸류업·주주환원",
-        "datetime": "06.24 11:54",
-        "source_line": "데일리안",
+        "datetime": "06.25 10:29",
+        "source_line": "KOREAREPORT",
         "link_count": 1,
-        "url": "https://www.dailian.co.kr/news/view/1659358",
+        "url": "https://www.koreareport.co.kr/news/articleView.html?idxno=51075",
         "links": [
           {
-            "source": "데일리안",
-            "title": "카카오, 계열사 147개→94개로 축소…지배구조 효율화",
-            "url": "https://www.dailian.co.kr/news/view/1659358"
+            "source": "KOREAREPORT",
+            "title": "양종희 실적은 합격점…KB금융 차기 회장 변수는 지배구조 - 코리아리포트",
+            "url": "https://www.koreareport.co.kr/news/articleView.html?idxno=51075"
           }
         ]
       }
     },
     {
-      "id": "c02744051ea2",
-      "score": 83.8,
+      "id": "3503916cf684",
+      "score": 85.3,
       "left": {
-        "id": "story-22",
-        "title": "카카오, 지속가능성 보고서 공개…지배구조 이행률 93%",
-        "summary": "카카오, 지속가능성 보고서 공개…지배구조 이행률 93% - 아시아경제 https://view.asiae.co.kr/article/2026062414280515493",
+        "id": "story-36",
+        "title": "금융권 지배구조 개편안 10월 시행, 양종희 KB금융회장 연임 구도에 변수?",
+        "summary": "금융권 지배구조 개편안 10월 시행, 양종희 KB금융회장 연임 구도에 변수? | - 엠투데이 https://www.autodaily.co.kr/news/articleViewAmp.html?idxno=545200",
         "category": "밸류업·주주환원",
-        "datetime": "06.24 16:16",
-        "source_line": "VIEW · BIZ · KOREANCENTER · 연합뉴스",
-        "link_count": 4,
-        "url": "https://view.asiae.co.kr/article/2026062414280515493",
+        "datetime": "06.25 18:20",
+        "source_line": "AUTODAILY",
+        "link_count": 1,
+        "url": "https://www.autodaily.co.kr/news/articleViewAmp.html?idxno=545200",
         "links": [
           {
-            "source": "VIEW",
-            "title": "카카오, 지속가능성 보고서 공개…지배구조 이행률 93%",
-            "url": "https://view.asiae.co.kr/article/2026062414280515493"
-          },
-          {
-            "source": "BIZ",
-            "title": "카카오 지배구조 이행률 93%…적극 소통할 것",
-            "url": "https://biz.sbs.co.kr/amp/article/20000318569"
-          },
-          {
-            "source": "KOREANCENTER",
-            "title": "카카오 ESG 성적표 공개…지배구조 이행률 93% - 연합뉴스 한민족센터",
-            "url": "https://www.koreancenter.or.kr/news/articleView.html?idxno=1372193"
-          },
-          {
-            "source": "연합뉴스",
-            "title": "카카오 ESG 성적표 공개…지배구조 이행률 93%",
-            "url": "https://www.yna.co.kr/view/AKR20260624087100017?section=esg%2Fcorporation"
+            "source": "AUTODAILY",
+            "title": "금융권 지배구조 개편안 10월 시행, 양종희 KB금융회장 연임 구도에 변수?",
+            "url": "https://www.autodaily.co.kr/news/articleViewAmp.html?idxno=545200"
           }
         ]
       },
       "right": {
-        "id": "story-45",
-        "title": "카카오, 계열사 147개→94개로 축소…지배구조 효율화",
-        "summary": "카카오, 계열사 147개→94개로 축소…지배구조 효율화 - 데일리안 https://www.dailian.co.kr/news/view/1659358/",
+        "id": "story-49",
+        "title": "양종희 실적은 합격점…KB금융 차기 회장 변수는 지배구조 - 코리아리포트",
+        "summary": "양종희 실적은 합격점…KB금융 차기 회장 변수는 지배구조 - 코리아리포트 https://www.koreareport.co.kr/news/articleView.html?idxno=51075",
         "category": "밸류업·주주환원",
-        "datetime": "06.24 11:54",
-        "source_line": "데일리안",
+        "datetime": "06.25 10:29",
+        "source_line": "KOREAREPORT",
         "link_count": 1,
-        "url": "https://www.dailian.co.kr/news/view/1659358",
+        "url": "https://www.koreareport.co.kr/news/articleView.html?idxno=51075",
         "links": [
           {
-            "source": "데일리안",
-            "title": "카카오, 계열사 147개→94개로 축소…지배구조 효율화",
-            "url": "https://www.dailian.co.kr/news/view/1659358"
+            "source": "KOREAREPORT",
+            "title": "양종희 실적은 합격점…KB금융 차기 회장 변수는 지배구조 - 코리아리포트",
+            "url": "https://www.koreareport.co.kr/news/articleView.html?idxno=51075"
           }
         ]
       }
@@ -159,50 +129,50 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 116,
-    "matched_count": 67,
-    "missing_count": 49,
-    "coverage_rate": 57.8,
+    "url_count": 109,
+    "matched_count": 54,
+    "missing_count": 55,
+    "coverage_rate": 49.5,
     "missing": [
       {
-        "title": "SLL중앙 티빙 지분 매각, 웨이브 합병 변수 되나",
-        "url": "https://www.topdaily.kr/articles/110659",
-        "source_message_url": "https://t.me/activistkorea/114920",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "두산그룹 내부거래 급증 투명·공정성 확보 의문 | - 세이프타임즈",
-        "url": "https://www.safetimes.co.kr/news/articleViewAmp.html?idxno=243710",
-        "source_message_url": "https://t.me/activistkorea/114921",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "지배구조 효율화에 4조 태웠다…다시 고개든 넥슨 매각설",
-        "url": "https://v.daum.net/v/bdA2x6LxgG",
-        "source_message_url": "https://t.me/activistkorea/114919",
+        "title": "임박한 지배구조 개선안, 5대 은행장 인사 흔들까",
+        "url": "https://m.seoul.co.kr/news/2026/06/26/20260626030004",
+        "source_message_url": "https://t.me/activistkorea/115030",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "duplicate",
         "reason": "seen_title"
       },
       {
-        "title": "[어닝콜] 브룩필드인프라스트럭, 2026년 연례 주주총회 개최 | 뉴스 - 초이스스탁",
-        "url": "https://www.choicestock.co.kr/stock/news_view/155742?bu=",
-        "source_message_url": "https://t.me/activistkorea/114914",
+        "title": "자본시장 선진화 외치더니… 관치 투자 역주행 논란",
+        "url": "https://www.chosun.com/economy/industry-company/2026/06/26/WGH2IESNXFAUXAJ43DHGDXFU74",
+        "source_message_url": "https://t.me/activistkorea/115028",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "GC 2026 GC 지속가능경영보고서 발간 - MEDI:GATE NEWS",
-        "url": "https://www.medigatenews.com/news/1263436839",
-        "source_message_url": "https://t.me/activistkorea/114911",
+        "title": "대림통상 한국카본 신기술사업금융사와 미주 거점 활용 글로벌 신사업 공조",
+        "url": "https://www.sentv.co.kr/article/view/sentv202606250064",
+        "source_message_url": "https://t.me/activistkorea/115023",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
+      },
+      {
+        "title": "닥터블릿, 자본잠식 넥스트립 무리한 인수···왜?④",
+        "url": "https://www.greened.kr/news/articleView.html?idxno=343054",
+        "source_message_url": "https://t.me/activistkorea/115021",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "노사갈등 삼전닉스 성과급 후폭풍 … 지배구조 쟁점 부상 | - 세이프타임즈",
+        "url": "https://www.safetimes.co.kr/news/articleViewAmp.html?idxno=243729",
+        "source_message_url": "https://t.me/activistkorea/115020",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_title"
       }
     ]
   }
