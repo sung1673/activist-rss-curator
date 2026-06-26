@@ -1,124 +1,86 @@
 {
-  "date_id": "2026-06-26",
-  "generated_at": "2026-06-26T06:57:03.400907+09:00",
-  "start_at": "2026-06-25T06:53:09.186999+09:00",
-  "end_at": "2026-06-26T06:53:09.186999+09:00",
-  "start_label": "2026-06-25 06:53 KST",
-  "end_label": "2026-06-26 06:53 KST",
-  "candidate_count": 3,
-  "candidate_hash": "e3e01ea111823782",
+  "date_id": "2026-06-27",
+  "generated_at": "2026-06-27T06:32:35.922937+09:00",
+  "start_at": "2026-06-26T06:29:35.894856+09:00",
+  "end_at": "2026-06-27T06:29:35.894856+09:00",
+  "start_label": "2026-06-26 06:29 KST",
+  "end_label": "2026-06-27 06:29 KST",
+  "candidate_count": 2,
+  "candidate_hash": "df518a780c3da74b",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "1c6686589f81",
-      "score": 91.7,
+      "id": "c24ba7b25053",
+      "score": 80.3,
       "left": {
-        "id": "story-36",
-        "title": "금융권 지배구조 개편안 10월 시행, 양종희 KB금융회장 연임 구도에 변수?",
-        "summary": "금융권 지배구조 개편안 10월 시행, 양종희 KB금융회장 연임 구도에 변수? | - 엠투데이 https://www.autodaily.co.kr/news/articleViewAmp.html?idxno=545200",
-        "category": "밸류업·주주환원",
-        "datetime": "06.25 18:20",
-        "source_line": "AUTODAILY",
+        "id": "story-4",
+        "title": "스튜어드십 코드 실효성 높이려면…5%룰 손질해야",
+        "summary": "한국기업거버넌스포럼은 26일 스튜어드십 코드(기관투자자의 수탁자 책임 원칙) 개정 실효성을 높이기 위해 자본시장법상 대량보유 보고제도(5%룰)를 정비해야 한다고 촉구했다. 현행 5%룰이 기관투자자 간 협력적 주주활동을 제약하고 있는 만큼 관련 규정 개정이 병행돼야 ...",
+        "category": "자본시장 제도·공시",
+        "datetime": "06.26 11:22",
+        "source_line": "EDAILY",
         "link_count": 1,
-        "url": "https://www.autodaily.co.kr/news/articleViewAmp.html?idxno=545200",
+        "url": "https://www.edaily.co.kr/News/Read?newsId=03840886645485656",
         "links": [
           {
-            "source": "AUTODAILY",
-            "title": "금융권 지배구조 개편안 10월 시행, 양종희 KB금융회장 연임 구도에 변수?",
-            "url": "https://www.autodaily.co.kr/news/articleViewAmp.html?idxno=545200"
+            "source": "EDAILY",
+            "title": "스튜어드십 코드 실효성 높이려면…5%룰 손질해야",
+            "url": "https://www.edaily.co.kr/News/Read?newsId=03840886645485656"
           }
         ]
       },
       "right": {
-        "id": "story-38",
-        "title": "KB금융 회장 연임 절차 돌입···금융권 지배구조 개편 시험대 | - 뉴스프리존",
-        "summary": "KB금융 회장 연임 절차 돌입···금융권 지배구조 개편 시험대 | - 뉴스프리존 https://www.newsfreezone.co.kr/news/articleViewAmp.html?idxno=696395",
+        "id": "story-12",
+        "title": "의미 없는 인증제도 전락 우려…스튜어드십 코드 실효성 확보해야",
+        "summary": "포럼은 26일 논평을 통해 \"영국과 같은 기관투자자들 사이의 강력한 상호 평가 문화가 없는 우리나라에서 스튜어드십 코드는 자칫 서류와 제도만 갖추면 좋은 평가를 받는 형식적 제도로 전락할 위험이 크다\"며 이같이 밝혔다.",
         "category": "밸류업·주주환원",
-        "datetime": "06.25 18:20",
-        "source_line": "NEWSFREEZONE",
+        "datetime": "06.26 11:23",
+        "source_line": "ASIAE",
         "link_count": 1,
-        "url": "https://www.newsfreezone.co.kr/news/articleViewAmp.html?idxno=696395",
+        "url": "https://www.asiae.co.kr/article/2026062611232048168",
         "links": [
           {
-            "source": "NEWSFREEZONE",
-            "title": "KB금융 회장 연임 절차 돌입···금융권 지배구조 개편 시험대 | - 뉴스프리존",
-            "url": "https://www.newsfreezone.co.kr/news/articleViewAmp.html?idxno=696395"
+            "source": "ASIAE",
+            "title": "의미 없는 인증제도 전락 우려…스튜어드십 코드 실효성 확보해야",
+            "url": "https://www.asiae.co.kr/article/2026062611232048168"
           }
         ]
       }
     },
     {
-      "id": "6180b9681195",
-      "score": 87.8,
+      "id": "2f1fdd9d5452",
+      "score": 73.0,
       "left": {
-        "id": "story-38",
-        "title": "KB금융 회장 연임 절차 돌입···금융권 지배구조 개편 시험대 | - 뉴스프리존",
-        "summary": "KB금융 회장 연임 절차 돌입···금융권 지배구조 개편 시험대 | - 뉴스프리존 https://www.newsfreezone.co.kr/news/articleViewAmp.html?idxno=696395",
+        "id": "story-8",
+        "title": "금융지주 지배구조 개선안 임박…KB 경영승계 변수 되나",
+        "summary": "금융지주 지배구조 개선안 임박…KB 경영승계 변수 되나 - 알파경제 https://www.alphabiz.co.kr/news/articleView.html?idxno=161644",
         "category": "밸류업·주주환원",
-        "datetime": "06.25 18:20",
-        "source_line": "NEWSFREEZONE",
+        "datetime": "06.27 02:45",
+        "source_line": "알파경제",
         "link_count": 1,
-        "url": "https://www.newsfreezone.co.kr/news/articleViewAmp.html?idxno=696395",
+        "url": "https://www.alphabiz.co.kr/news/articleView.html?idxno=161644",
         "links": [
           {
-            "source": "NEWSFREEZONE",
-            "title": "KB금융 회장 연임 절차 돌입···금융권 지배구조 개편 시험대 | - 뉴스프리존",
-            "url": "https://www.newsfreezone.co.kr/news/articleViewAmp.html?idxno=696395"
+            "source": "알파경제",
+            "title": "금융지주 지배구조 개선안 임박…KB 경영승계 변수 되나",
+            "url": "https://www.alphabiz.co.kr/news/articleView.html?idxno=161644"
           }
         ]
       },
       "right": {
-        "id": "story-49",
-        "title": "양종희 실적은 합격점…KB금융 차기 회장 변수는 지배구조 - 코리아리포트",
-        "summary": "양종희 실적은 합격점…KB금융 차기 회장 변수는 지배구조 - 코리아리포트 https://www.koreareport.co.kr/news/articleView.html?idxno=51075",
+        "id": "story-28",
+        "title": "국경 넘는 K-금융 밸류업…금융지주 수장들, 외인 사수 각개전투",
+        "summary": "국경 넘는 K-금융 '밸류업'…금융지주 수장들, '외인 사수' 각개전투 - Daum https://v.daum.net/v/20260626145403448",
         "category": "밸류업·주주환원",
-        "datetime": "06.25 10:29",
-        "source_line": "KOREAREPORT",
+        "datetime": "06.27 00:30",
+        "source_line": "다음뉴스",
         "link_count": 1,
-        "url": "https://www.koreareport.co.kr/news/articleView.html?idxno=51075",
+        "url": "https://v.daum.net/v/20260626145403448",
         "links": [
           {
-            "source": "KOREAREPORT",
-            "title": "양종희 실적은 합격점…KB금융 차기 회장 변수는 지배구조 - 코리아리포트",
-            "url": "https://www.koreareport.co.kr/news/articleView.html?idxno=51075"
-          }
-        ]
-      }
-    },
-    {
-      "id": "3503916cf684",
-      "score": 85.3,
-      "left": {
-        "id": "story-36",
-        "title": "금융권 지배구조 개편안 10월 시행, 양종희 KB금융회장 연임 구도에 변수?",
-        "summary": "금융권 지배구조 개편안 10월 시행, 양종희 KB금융회장 연임 구도에 변수? | - 엠투데이 https://www.autodaily.co.kr/news/articleViewAmp.html?idxno=545200",
-        "category": "밸류업·주주환원",
-        "datetime": "06.25 18:20",
-        "source_line": "AUTODAILY",
-        "link_count": 1,
-        "url": "https://www.autodaily.co.kr/news/articleViewAmp.html?idxno=545200",
-        "links": [
-          {
-            "source": "AUTODAILY",
-            "title": "금융권 지배구조 개편안 10월 시행, 양종희 KB금융회장 연임 구도에 변수?",
-            "url": "https://www.autodaily.co.kr/news/articleViewAmp.html?idxno=545200"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-49",
-        "title": "양종희 실적은 합격점…KB금융 차기 회장 변수는 지배구조 - 코리아리포트",
-        "summary": "양종희 실적은 합격점…KB금융 차기 회장 변수는 지배구조 - 코리아리포트 https://www.koreareport.co.kr/news/articleView.html?idxno=51075",
-        "category": "밸류업·주주환원",
-        "datetime": "06.25 10:29",
-        "source_line": "KOREAREPORT",
-        "link_count": 1,
-        "url": "https://www.koreareport.co.kr/news/articleView.html?idxno=51075",
-        "links": [
-          {
-            "source": "KOREAREPORT",
-            "title": "양종희 실적은 합격점…KB금융 차기 회장 변수는 지배구조 - 코리아리포트",
-            "url": "https://www.koreareport.co.kr/news/articleView.html?idxno=51075"
+            "source": "다음뉴스",
+            "title": "국경 넘는 K-금융 밸류업…금융지주 수장들, 외인 사수 각개전투",
+            "url": "https://v.daum.net/v/20260626145403448"
           }
         ]
       }
@@ -129,50 +91,50 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 109,
-    "matched_count": 54,
-    "missing_count": 55,
-    "coverage_rate": 49.5,
+    "url_count": 71,
+    "matched_count": 33,
+    "missing_count": 38,
+    "coverage_rate": 46.5,
     "missing": [
       {
-        "title": "임박한 지배구조 개선안, 5대 은행장 인사 흔들까",
-        "url": "https://m.seoul.co.kr/news/2026/06/26/20260626030004",
-        "source_message_url": "https://t.me/activistkorea/115030",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "seen_title"
-      },
-      {
-        "title": "자본시장 선진화 외치더니… 관치 투자 역주행 논란",
-        "url": "https://www.chosun.com/economy/industry-company/2026/06/26/WGH2IESNXFAUXAJ43DHGDXFU74",
-        "source_message_url": "https://t.me/activistkorea/115028",
+        "title": "[CEO풍향계] 뚝심 경영 최태원…역사인식 교육 정용진",
+        "url": "https://www.yna.co.kr/amp/view/MYH20260626011000038",
+        "source_message_url": "https://t.me/activistkorea/115104",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "대림통상 한국카본 신기술사업금융사와 미주 거점 활용 글로벌 신사업 공조",
-        "url": "https://www.sentv.co.kr/article/view/sentv202606250064",
-        "source_message_url": "https://t.me/activistkorea/115023",
+        "title": "LX하우시스, 작년 온실가스 배출량 10.2만t…9% 감축 - 연합뉴스 한민족센터",
+        "url": "https://www.koreancenter.or.kr/news/articleView.html?idxno=1373318",
+        "source_message_url": "https://t.me/activistkorea/115102",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "닥터블릿, 자본잠식 넥스트립 무리한 인수···왜?④",
-        "url": "https://www.greened.kr/news/articleView.html?idxno=343054",
-        "source_message_url": "https://t.me/activistkorea/115021",
+        "title": "현대로템, 에코바디스 ESG 평가서 실버 등급 최초 획득",
+        "url": "https://www.g-enews.com/article/Industry/2026/06/202606260932456981ea14faf6f5_1",
+        "source_message_url": "https://t.me/activistkorea/115103",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "노사갈등 삼전닉스 성과급 후폭풍 … 지배구조 쟁점 부상 | - 세이프타임즈",
-        "url": "https://www.safetimes.co.kr/news/articleViewAmp.html?idxno=243729",
-        "source_message_url": "https://t.me/activistkorea/115020",
+        "title": "IPARK현대산업개발, 서스틴베스트 ESG 베스트 컴퍼니 선정",
+        "url": "http://www.opinionnews.co.kr/news/articleView.html?idxno=140680",
+        "source_message_url": "https://t.me/activistkorea/115101",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "seen_title"
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "SK 주식 분할 여부 가려진다…내달 24일 선고",
+        "url": "https://v.daum.net/v/20260626154615645",
+        "source_message_url": "https://t.me/activistkorea/115100",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
       }
     ]
   }
