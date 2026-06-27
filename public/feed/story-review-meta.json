@@ -1,137 +1,60 @@
 {
-  "date_id": "2026-06-27",
-  "generated_at": "2026-06-27T06:32:35.922937+09:00",
-  "start_at": "2026-06-26T06:29:35.894856+09:00",
-  "end_at": "2026-06-27T06:29:35.894856+09:00",
-  "start_label": "2026-06-26 06:29 KST",
-  "end_label": "2026-06-27 06:29 KST",
-  "candidate_count": 2,
-  "candidate_hash": "df518a780c3da74b",
+  "date_id": "2026-06-28",
+  "generated_at": "2026-06-28T06:15:22.851808+09:00",
+  "start_at": "2026-06-27T06:13:50.481993+09:00",
+  "end_at": "2026-06-28T06:13:50.481993+09:00",
+  "start_label": "2026-06-27 06:13 KST",
+  "end_label": "2026-06-28 06:13 KST",
+  "candidate_count": 0,
+  "candidate_hash": "4f53cda18c2baa0c",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": [
-    {
-      "id": "c24ba7b25053",
-      "score": 80.3,
-      "left": {
-        "id": "story-4",
-        "title": "스튜어드십 코드 실효성 높이려면…5%룰 손질해야",
-        "summary": "한국기업거버넌스포럼은 26일 스튜어드십 코드(기관투자자의 수탁자 책임 원칙) 개정 실효성을 높이기 위해 자본시장법상 대량보유 보고제도(5%룰)를 정비해야 한다고 촉구했다. 현행 5%룰이 기관투자자 간 협력적 주주활동을 제약하고 있는 만큼 관련 규정 개정이 병행돼야 ...",
-        "category": "자본시장 제도·공시",
-        "datetime": "06.26 11:22",
-        "source_line": "EDAILY",
-        "link_count": 1,
-        "url": "https://www.edaily.co.kr/News/Read?newsId=03840886645485656",
-        "links": [
-          {
-            "source": "EDAILY",
-            "title": "스튜어드십 코드 실효성 높이려면…5%룰 손질해야",
-            "url": "https://www.edaily.co.kr/News/Read?newsId=03840886645485656"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-12",
-        "title": "의미 없는 인증제도 전락 우려…스튜어드십 코드 실효성 확보해야",
-        "summary": "포럼은 26일 논평을 통해 \"영국과 같은 기관투자자들 사이의 강력한 상호 평가 문화가 없는 우리나라에서 스튜어드십 코드는 자칫 서류와 제도만 갖추면 좋은 평가를 받는 형식적 제도로 전락할 위험이 크다\"며 이같이 밝혔다.",
-        "category": "밸류업·주주환원",
-        "datetime": "06.26 11:23",
-        "source_line": "ASIAE",
-        "link_count": 1,
-        "url": "https://www.asiae.co.kr/article/2026062611232048168",
-        "links": [
-          {
-            "source": "ASIAE",
-            "title": "의미 없는 인증제도 전락 우려…스튜어드십 코드 실효성 확보해야",
-            "url": "https://www.asiae.co.kr/article/2026062611232048168"
-          }
-        ]
-      }
-    },
-    {
-      "id": "2f1fdd9d5452",
-      "score": 73.0,
-      "left": {
-        "id": "story-8",
-        "title": "금융지주 지배구조 개선안 임박…KB 경영승계 변수 되나",
-        "summary": "금융지주 지배구조 개선안 임박…KB 경영승계 변수 되나 - 알파경제 https://www.alphabiz.co.kr/news/articleView.html?idxno=161644",
-        "category": "밸류업·주주환원",
-        "datetime": "06.27 02:45",
-        "source_line": "알파경제",
-        "link_count": 1,
-        "url": "https://www.alphabiz.co.kr/news/articleView.html?idxno=161644",
-        "links": [
-          {
-            "source": "알파경제",
-            "title": "금융지주 지배구조 개선안 임박…KB 경영승계 변수 되나",
-            "url": "https://www.alphabiz.co.kr/news/articleView.html?idxno=161644"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-28",
-        "title": "국경 넘는 K-금융 밸류업…금융지주 수장들, 외인 사수 각개전투",
-        "summary": "국경 넘는 K-금융 '밸류업'…금융지주 수장들, '외인 사수' 각개전투 - Daum https://v.daum.net/v/20260626145403448",
-        "category": "밸류업·주주환원",
-        "datetime": "06.27 00:30",
-        "source_line": "다음뉴스",
-        "link_count": 1,
-        "url": "https://v.daum.net/v/20260626145403448",
-        "links": [
-          {
-            "source": "다음뉴스",
-            "title": "국경 넘는 K-금융 밸류업…금융지주 수장들, 외인 사수 각개전투",
-            "url": "https://v.daum.net/v/20260626145403448"
-          }
-        ]
-      }
-    }
-  ],
+  "candidates": [],
   "benchmark_coverage": {
     "enabled": true,
     "handles": [
       "activistkorea"
     ],
     "url_count": 71,
-    "matched_count": 33,
-    "missing_count": 38,
-    "coverage_rate": 46.5,
+    "matched_count": 13,
+    "missing_count": 58,
+    "coverage_rate": 18.3,
     "missing": [
       {
-        "title": "[CEO풍향계] 뚝심 경영 최태원…역사인식 교육 정용진",
-        "url": "https://www.yna.co.kr/amp/view/MYH20260626011000038",
-        "source_message_url": "https://t.me/activistkorea/115104",
+        "title": "동양생명, 지속가능경영보고서 발간…우리금융 ESG 전략 연계성 강화",
+        "url": "https://www.apnews.kr/news/articleViewAmp.html?idxno=3049340",
+        "source_message_url": "https://t.me/activistkorea/115171",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "LX하우시스, 작년 온실가스 배출량 10.2만t…9% 감축 - 연합뉴스 한민족센터",
-        "url": "https://www.koreancenter.or.kr/news/articleView.html?idxno=1373318",
-        "source_message_url": "https://t.me/activistkorea/115102",
+        "title": "청주흥덕경찰서·한국가스안전공사 충북지역본부·청소년하임, 청소년 범죄예방 고보라이트 설치 맞손",
+        "url": "https://www.newstnt.com/news/articleView.html?idxno=708005",
+        "source_message_url": "https://t.me/activistkorea/115170",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "현대로템, 에코바디스 ESG 평가서 실버 등급 최초 획득",
-        "url": "https://www.g-enews.com/article/Industry/2026/06/202606260932456981ea14faf6f5_1",
-        "source_message_url": "https://t.me/activistkorea/115103",
+        "title": "카카오모빌리티, 매각 논란 일단락…노-사, 지속 성장 협의체 구성 합의",
+        "url": "https://mobile.joynews24.com/v/mrlted/1503987",
+        "source_message_url": "https://t.me/activistkorea/115168",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "IPARK현대산업개발, 서스틴베스트 ESG 베스트 컴퍼니 선정",
-        "url": "http://www.opinionnews.co.kr/news/articleView.html?idxno=140680",
-        "source_message_url": "https://t.me/activistkorea/115101",
+        "title": "토큰화 기업 시큐리타이즈, 다음주 뉴욕증시 상장 - 이코노미블록",
+        "url": "https://economybloc.com/article/112840",
+        "source_message_url": "https://t.me/activistkorea/115169",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "SK 주식 분할 여부 가려진다…내달 24일 선고",
-        "url": "https://v.daum.net/v/20260626154615645",
-        "source_message_url": "https://t.me/activistkorea/115100",
+        "title": "친환경부터 사회적 책임까지…SK하이닉스, ESG 경영 광폭행보",
+        "url": "https://www.youthdaily.co.kr/news/article.html?no=221713",
+        "source_message_url": "https://t.me/activistkorea/115167",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
