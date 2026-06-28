@@ -1,10 +1,10 @@
 {
-  "date_id": "2026-06-28",
-  "generated_at": "2026-06-28T06:15:22.851808+09:00",
-  "start_at": "2026-06-27T06:13:50.481993+09:00",
-  "end_at": "2026-06-28T06:13:50.481993+09:00",
-  "start_label": "2026-06-27 06:13 KST",
-  "end_label": "2026-06-28 06:13 KST",
+  "date_id": "2026-06-29",
+  "generated_at": "2026-06-29T06:13:34.448075+09:00",
+  "start_at": "2026-06-28T06:11:44.651738+09:00",
+  "end_at": "2026-06-29T06:11:44.651738+09:00",
+  "start_label": "2026-06-28 06:11 KST",
+  "end_label": "2026-06-29 06:11 KST",
   "candidate_count": 0,
   "candidate_hash": "4f53cda18c2baa0c",
   "page_url": "https://news.bside.ai/feed/story-review.html",
@@ -14,47 +14,47 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 71,
-    "matched_count": 13,
-    "missing_count": 58,
-    "coverage_rate": 18.3,
+    "url_count": 66,
+    "matched_count": 12,
+    "missing_count": 54,
+    "coverage_rate": 18.2,
     "missing": [
       {
-        "title": "동양생명, 지속가능경영보고서 발간…우리금융 ESG 전략 연계성 강화",
-        "url": "https://www.apnews.kr/news/articleViewAmp.html?idxno=3049340",
-        "source_message_url": "https://t.me/activistkorea/115171",
+        "title": "현대로템 ESG 경영 세계적으로도 인정받았다",
+        "url": "https://www.idomin.com/news/articleView.html?idxno=2008803",
+        "source_message_url": "https://t.me/activistkorea/115236",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "청주흥덕경찰서·한국가스안전공사 충북지역본부·청소년하임, 청소년 범죄예방 고보라이트 설치 맞손",
-        "url": "https://www.newstnt.com/news/articleView.html?idxno=708005",
-        "source_message_url": "https://t.me/activistkorea/115170",
+        "title": "국민연금, 56개사와 대화…산업안전 등 경영개선 요구",
+        "url": "https://news.nate.com/view/20260628n13265",
+        "source_message_url": "https://t.me/activistkorea/115233",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_title"
+      },
+      {
+        "title": "국민연금, 56개사와 대화…산업안전 등 경영개선 요구",
+        "url": "https://www.mk.co.kr/news/economy/12085055",
+        "source_message_url": "https://t.me/activistkorea/115234",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_title"
+      },
+      {
+        "title": "[심층분석] 韓 증시 좁았던 SK하이닉스, 나스닥서 제값 받는다 - 데일리연합",
+        "url": "https://dailyan.com/news/article.html?no=771965",
+        "source_message_url": "https://t.me/activistkorea/115232",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "카카오모빌리티, 매각 논란 일단락…노-사, 지속 성장 협의체 구성 합의",
-        "url": "https://mobile.joynews24.com/v/mrlted/1503987",
-        "source_message_url": "https://t.me/activistkorea/115168",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "토큰화 기업 시큐리타이즈, 다음주 뉴욕증시 상장 - 이코노미블록",
-        "url": "https://economybloc.com/article/112840",
-        "source_message_url": "https://t.me/activistkorea/115169",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "친환경부터 사회적 책임까지…SK하이닉스, ESG 경영 광폭행보",
-        "url": "https://www.youthdaily.co.kr/news/article.html?no=221713",
-        "source_message_url": "https://t.me/activistkorea/115167",
+        "title": "2200억 차입 승부수 던진 동양레저…골프장 인수 후폭풍 - 세종의소리",
+        "url": "https://www.sjsori.com/news/articleView.html?idxno=87115",
+        "source_message_url": "https://t.me/activistkorea/115231",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
