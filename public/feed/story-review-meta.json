@@ -1,60 +1,190 @@
 {
-  "date_id": "2026-06-29",
-  "generated_at": "2026-06-29T06:13:34.448075+09:00",
-  "start_at": "2026-06-28T06:11:44.651738+09:00",
-  "end_at": "2026-06-29T06:11:44.651738+09:00",
-  "start_label": "2026-06-28 06:11 KST",
-  "end_label": "2026-06-29 06:11 KST",
-  "candidate_count": 0,
-  "candidate_hash": "4f53cda18c2baa0c",
+  "date_id": "2026-06-30",
+  "generated_at": "2026-06-30T06:41:45.961932+09:00",
+  "start_at": "2026-06-29T06:38:00.753868+09:00",
+  "end_at": "2026-06-30T06:38:00.753868+09:00",
+  "start_label": "2026-06-29 06:38 KST",
+  "end_label": "2026-06-30 06:38 KST",
+  "candidate_count": 11,
+  "candidate_hash": "8ac305b79d32634e",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": [],
+  "candidates": [
+    {
+      "id": "2837e24d66be",
+      "score": 86.7,
+      "left": {
+        "id": "story-6",
+        "title": "금감원 CEO 승계도 참호 구축 … 은행지주 지배구조 정조준",
+        "summary": "금감원 \"CEO 승계도 참호 구축\" … 은행지주 지배구조 정조준 - 뉴데일리 경제 https://biz.newdaily.co.kr/site/data/html/2026/06/29/2026062900296.html",
+        "category": "밸류업·주주환원",
+        "datetime": "06.29 17:58",
+        "source_line": "뉴데일리경제",
+        "link_count": 1,
+        "url": "https://biz.newdaily.co.kr/site/data/html/2026/06/29/2026062900296.html",
+        "links": [
+          {
+            "source": "뉴데일리경제",
+            "title": "금감원 CEO 승계도 참호 구축 … 은행지주 지배구조 정조준",
+            "url": "https://biz.newdaily.co.kr/site/data/html/2026/06/29/2026062900296.html"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-10",
+        "title": "금감원 은행 지주 지배구조 형식적…경영진 참호구축 악용",
+        "summary": "금감원 “은행 지주 지배구조 형식적…경영진 참호구축 악용” - 동아일보 https://www.donga.com/news/Economy/article/all/20260629/134201903/1",
+        "category": "밸류업·주주환원",
+        "datetime": "06.29 20:37",
+        "source_line": "DONGA · FOECONOMY · BIZ",
+        "link_count": 3,
+        "url": "https://www.donga.com/news/Economy/article/all/20260629/134201903/1",
+        "links": [
+          {
+            "source": "DONGA",
+            "title": "금감원 은행 지주 지배구조 형식적…경영진 참호구축 악용",
+            "url": "https://www.donga.com/news/Economy/article/all/20260629/134201903/1"
+          },
+          {
+            "source": "FOECONOMY",
+            "title": "금감원 은행지주 지배구조 모범관행, 경영진 참호 구축에 악용",
+            "url": "https://www.foeconomy.co.kr/news/view.php?no=8667"
+          },
+          {
+            "source": "BIZ",
+            "title": "금감원 은행지주 지배구조 보니…경영진 참호 구축 편법 확인",
+            "url": "https://biz.sbs.co.kr/amp/article/20000319429"
+          }
+        ]
+      }
+    },
+    {
+      "id": "7878532a9d6e",
+      "score": 86.7,
+      "left": {
+        "id": "story-21",
+        "title": "금융위, 지배구조 개선안 내달 공개…금융지주 CEO 연임 손질",
+        "summary": "금융위, 지배구조 개선안 내달 공개…금융지주 CEO 연임 손질 - 컨슈머타임스 https://www.cstimes.com/news/articleView.html?idxno=711404",
+        "category": "밸류업·주주환원",
+        "datetime": "06.29 09:52",
+        "source_line": "CSTIMES",
+        "link_count": 1,
+        "url": "https://www.cstimes.com/news/articleView.html?idxno=711404",
+        "links": [
+          {
+            "source": "CSTIMES",
+            "title": "금융위, 지배구조 개선안 내달 공개…금융지주 CEO 연임 손질",
+            "url": "https://www.cstimes.com/news/articleView.html?idxno=711404"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-22",
+        "title": "참호 구축 금융지주 지배구조 손질한다 - 코리아리포트",
+        "summary": "'참호 구축' 금융지주 지배구조 손질한다 - 코리아리포트 https://www.koreareport.co.kr/news/articleView.html?idxno=51162",
+        "category": "밸류업·주주환원",
+        "datetime": "06.29 15:55",
+        "source_line": "KOREAREPORT",
+        "link_count": 2,
+        "url": "https://www.koreareport.co.kr/news/articleView.html?idxno=51162",
+        "links": [
+          {
+            "source": "KOREAREPORT",
+            "title": "참호 구축 금융지주 지배구조 손질한다 - 코리아리포트",
+            "url": "https://www.koreareport.co.kr/news/articleView.html?idxno=51162"
+          },
+          {
+            "source": "KOREAREPORT",
+            "title": "은행장 인사도 지배구조가 변수 - 코리아리포트",
+            "url": "https://www.koreareport.co.kr/news/articleView.html?idxno=51139"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c48c774b3731",
+      "score": 86.6,
+      "left": {
+        "id": "story-6",
+        "title": "금감원 CEO 승계도 참호 구축 … 은행지주 지배구조 정조준",
+        "summary": "금감원 \"CEO 승계도 참호 구축\" … 은행지주 지배구조 정조준 - 뉴데일리 경제 https://biz.newdaily.co.kr/site/data/html/2026/06/29/2026062900296.html",
+        "category": "밸류업·주주환원",
+        "datetime": "06.29 17:58",
+        "source_line": "뉴데일리경제",
+        "link_count": 1,
+        "url": "https://biz.newdaily.co.kr/site/data/html/2026/06/29/2026062900296.html",
+        "links": [
+          {
+            "source": "뉴데일리경제",
+            "title": "금감원 CEO 승계도 참호 구축 … 은행지주 지배구조 정조준",
+            "url": "https://biz.newdaily.co.kr/site/data/html/2026/06/29/2026062900296.html"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-30",
+        "title": "은행지주 지배구조 꼼수 운영 무더기 적발…CEO 견제 무력화",
+        "summary": "은행지주 지배구조 '꼼수 운영' 무더기 적발…CEO 견제 무력화 - 쿠키뉴스 https://www.kukinews.com/article/view/kuk202606290150",
+        "category": "밸류업·주주환원",
+        "datetime": "06.29 17:58",
+        "source_line": "KUKINEWS",
+        "link_count": 1,
+        "url": "https://www.kukinews.com/article/view/kuk202606290150",
+        "links": [
+          {
+            "source": "KUKINEWS",
+            "title": "은행지주 지배구조 꼼수 운영 무더기 적발…CEO 견제 무력화",
+            "url": "https://www.kukinews.com/article/view/kuk202606290150"
+          }
+        ]
+      }
+    }
+  ],
   "benchmark_coverage": {
     "enabled": true,
     "handles": [
       "activistkorea"
     ],
-    "url_count": 66,
-    "matched_count": 12,
-    "missing_count": 54,
-    "coverage_rate": 18.2,
+    "url_count": 102,
+    "matched_count": 55,
+    "missing_count": 47,
+    "coverage_rate": 53.9,
     "missing": [
       {
-        "title": "현대로템 ESG 경영 세계적으로도 인정받았다",
-        "url": "https://www.idomin.com/news/articleView.html?idxno=2008803",
-        "source_message_url": "https://t.me/activistkorea/115236",
+        "title": "실적 합격점인데 변수 따로 있다…5대 시중은행장 연임 셈법 복잡 : 네이버 블로그",
+        "url": "https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224331123216&redirect=Dlog",
+        "source_message_url": "https://t.me/activistkorea/115343",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "국민연금, 56개사와 대화…산업안전 등 경영개선 요구",
-        "url": "https://news.nate.com/view/20260628n13265",
-        "source_message_url": "https://t.me/activistkorea/115233",
+        "title": "금감원 은행 지주 지배구조 형식적… 경영진 참호구축 악용",
+        "url": "https://www.donga.com/news/Economy/article/all/20260629/134204323/2",
+        "source_message_url": "https://t.me/activistkorea/115342",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "seen_title"
+        "status": "accepted",
+        "reason": ""
       },
       {
-        "title": "국민연금, 56개사와 대화…산업안전 등 경영개선 요구",
-        "url": "https://www.mk.co.kr/news/economy/12085055",
-        "source_message_url": "https://t.me/activistkorea/115234",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "seen_title"
-      },
-      {
-        "title": "[심층분석] 韓 증시 좁았던 SK하이닉스, 나스닥서 제값 받는다 - 데일리연합",
-        "url": "https://dailyan.com/news/article.html?no=771965",
-        "source_message_url": "https://t.me/activistkorea/115232",
+        "title": "백종원이 눈독 들인 지역? - YTN",
+        "url": "https://m.ytn.co.kr/news_view.amp.php?version=1%C2%B6m%3D0519_202606291015229693",
+        "source_message_url": "https://t.me/activistkorea/115339",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "2200억 차입 승부수 던진 동양레저…골프장 인수 후폭풍 - 세종의소리",
-        "url": "https://www.sjsori.com/news/articleView.html?idxno=87115",
-        "source_message_url": "https://t.me/activistkorea/115231",
+        "title": "농협 수뇌부 겨눈다…국세청, 130명 투입 이례적 세무조사",
+        "url": "https://www.koreadaily.com/article/20260629022602032",
+        "source_message_url": "https://t.me/activistkorea/115338",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "신동주, 롯데홀딩스 복귀 12번째 좌절 | - 세이프타임즈",
+        "url": "https://www.safetimes.co.kr/news/articleViewAmp.html?idxno=243811",
+        "source_message_url": "https://t.me/activistkorea/115331",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
