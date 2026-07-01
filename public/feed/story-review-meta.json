@@ -1,149 +1,154 @@
 {
-  "date_id": "2026-07-01",
-  "generated_at": "2026-07-01T06:44:52.304125+09:00",
-  "start_at": "2026-06-30T06:40:23.821268+09:00",
-  "end_at": "2026-07-01T06:40:23.821268+09:00",
-  "start_label": "2026-06-30 06:40 KST",
-  "end_label": "2026-07-01 06:40 KST",
-  "candidate_count": 4,
-  "candidate_hash": "0d419a2405ad23a0",
+  "date_id": "2026-07-02",
+  "generated_at": "2026-07-02T06:44:55.832507+09:00",
+  "start_at": "2026-07-01T06:41:18.264348+09:00",
+  "end_at": "2026-07-02T06:41:18.264348+09:00",
+  "start_label": "2026-07-01 06:41 KST",
+  "end_label": "2026-07-02 06:41 KST",
+  "candidate_count": 12,
+  "candidate_hash": "7be8c26f72ea8b3d",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "664f8cf553d8",
-      "score": 89.1,
+      "id": "9a7d3fb585bc",
+      "score": 88.5,
       "left": {
         "id": "story-1",
-        "title": "곽재선 회장, KG그룹 계열사 주주 밸류업 시동 | - 주간한국",
-        "summary": "곽재선 회장, KG그룹 계열사 주주 밸류업 시동 | - 주간한국 https://weekly.hankooki.com/news/articleViewAmp.html?idxno=7172227",
+        "title": "트러스톤, 태광산업 밸류업 계획 비판…2022년 양치기 공약 재탕",
+        "summary": "트러스톤운용 \"태광산업 밸류업 계획, 2022년 '12조 투자' 공약 재탕\"…공개주주서한 예고 https://v.daum.net/v/20260701143653765",
         "category": "주주행동·경영권",
-        "datetime": "07.01 06:09",
-        "source_line": "WEEKLY · NGETNEWS · G-ENEWS · FERROTIMES · SHINAILBO",
-        "link_count": 15,
-        "url": "https://weekly.hankooki.com/news/articleViewAmp.html?idxno=7172227",
+        "datetime": "07.01 17:31",
+        "source_line": "다음뉴스 · 연합인포맥스 · MARKETIN",
+        "link_count": 3,
+        "url": "https://news.einfomax.co.kr/news/articleView.html?idxno=4422817",
         "links": [
           {
-            "source": "WEEKLY",
-            "title": "곽재선 회장, KG그룹 계열사 주주 밸류업 시동 | - 주간한국",
-            "url": "https://weekly.hankooki.com/news/articleViewAmp.html?idxno=7172227"
+            "source": "다음뉴스",
+            "title": "트러스톤운용 태광산업 밸류업 계획, 2022년 12조 투자 공약 재탕…공개주주서한 예고",
+            "url": "https://v.daum.net/v/20260701143653765"
           },
           {
-            "source": "NGETNEWS",
-            "title": "곽재선 KG그룹 회장, 계열사 자사주 매입…밸류업 전략 본격화 - 뉴스저널리즘",
-            "url": "https://www.ngetnews.com/news/articleView.html?idxno=551172"
+            "source": "연합인포맥스",
+            "title": "트러스톤, 태광산업 밸류업 계획 비판…2022년 양치기 공약 재탕",
+            "url": "https://news.einfomax.co.kr/news/articleView.html?idxno=4422817"
           },
           {
-            "source": "G-ENEWS",
-            "title": "곽재선의 KG그룹, 계열사 자사주 매입…밸류업 실행 속도",
-            "url": "https://www.g-enews.com/article/Industry/2026/06/20260630151430320924debea800_1"
-          },
-          {
-            "source": "FERROTIMES",
-            "title": "곽재선 회장, KG그룹 밸류업 본격화…KG케미칼·KG이니시스 자사주 매입",
-            "url": "https://www.ferrotimes.com/news/articleView.html?idxno=48855"
-          },
-          {
-            "source": "SHINAILBO",
-            "title": "KG그룹 곽재선, 밸류업 드라이브…KG케미칼·KG이니시스 자사주 매입",
-            "url": "https://www.shinailbo.co.kr/news/articleView.html?idxno=5035871"
+            "source": "MARKETIN",
+            "title": "트러스톤 태광산업 밸류업 계획 부실…이사회에 전면 재검토 요구",
+            "url": "https://marketin.edaily.co.kr/News/ReadE?newsId=03876966645510256"
           }
         ]
       },
       "right": {
-        "id": "story-31",
-        "title": "곽재선 KG그룹 회장, 자사주 20만주 매입…밸류업 시동",
-        "summary": "곽재선 KG그룹 회장, 자사주 20만주 매입…밸류업 시동 | - SR타임스 http://www.srtimes.kr/news/articleViewAmp.html?idxno=206439",
-        "category": "밸류업·주주환원",
-        "datetime": "07.01 04:30",
-        "source_line": "SRTIMES",
-        "link_count": 1,
-        "url": "http://www.srtimes.kr/news/articleViewAmp.html?idxno=206439",
-        "links": [
-          {
-            "source": "SRTIMES",
-            "title": "곽재선 KG그룹 회장, 자사주 20만주 매입…밸류업 시동",
-            "url": "http://www.srtimes.kr/news/articleViewAmp.html?idxno=206439"
-          }
-        ]
-      }
-    },
-    {
-      "id": "8bfde3a4c7f0",
-      "score": 88.6,
-      "left": {
-        "id": "story-24",
-        "title": "금융지주 지배구조 개편 임박…KB금융 회장·5대 은행장 연임 시험대",
-        "summary": "금융지주 '지배구조 개편' 임박…KB금융 회장·5대 은행장 연임 시험대 - 대한데일리 https://www.dhdaily.co.kr/news/articleView.html?idxno=26655",
-        "category": "밸류업·주주환원",
-        "datetime": "06.30 21:24",
-        "source_line": "DHDAILY · 뉴시스",
+        "id": "story-2",
+        "title": "트러스톤, 태광산업 밸류업 정조준…자사주 소각·정량목표 다시 짜야",
+        "summary": "트러스톤, 태광산업 밸류업 정조준…“자사주 소각·정량목표 다시 짜야” - 파이낸셜투데이 http://www.ftoday.co.kr/news/articleView.html?idxno=361444",
+        "category": "주주행동·경영권",
+        "datetime": "07.01 18:38",
+        "source_line": "FTODAY · FNNEWS",
         "link_count": 2,
-        "url": "https://www.dhdaily.co.kr/news/articleView.html?idxno=26655",
+        "url": "http://www.ftoday.co.kr/news/articleView.html?idxno=361444",
         "links": [
           {
-            "source": "DHDAILY",
-            "title": "금융지주 지배구조 개편 임박…KB금융 회장·5대 은행장 연임 시험대",
-            "url": "https://www.dhdaily.co.kr/news/articleView.html?idxno=26655"
+            "source": "FTODAY",
+            "title": "트러스톤, 태광산업 밸류업 정조준…자사주 소각·정량목표 다시 짜야",
+            "url": "http://www.ftoday.co.kr/news/articleView.html?idxno=361444"
           },
           {
-            "source": "뉴시스",
-            "title": "지배구조 개선안 초읽기…금융지주 회장·은행장 연임 시험대",
-            "url": "https://www.newsis.com/view/NISX20260630_0003689473"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-40",
-        "title": "KB금융 겨냥 지배구조 개편안 발표 임박…연말 금융권 인사 판도 바뀌나",
-        "summary": "'KB금융 겨냥' 지배구조 개편안 발표 임박…연말 금융권 인사 판도 바뀌나 - 주주경제신문 https://www.s-econ.kr/news/articleView.html?idxno=4002063",
-        "category": "밸류업·주주환원",
-        "datetime": "06.30 15:22",
-        "source_line": "S-ECON",
-        "link_count": 1,
-        "url": "https://www.s-econ.kr/news/articleView.html?idxno=4002063",
-        "links": [
-          {
-            "source": "S-ECON",
-            "title": "KB금융 겨냥 지배구조 개편안 발표 임박…연말 금융권 인사 판도 바뀌나",
-            "url": "https://www.s-econ.kr/news/articleView.html?idxno=4002063"
+            "source": "FNNEWS",
+            "title": "트러스톤 태광산업 밸류업, 2022년 12조 투자 공약 판박이…주주환원 또 뒷전",
+            "url": "https://www.fnnews.com/news/202607011339583224"
           }
         ]
       }
     },
     {
-      "id": "e01b80c661fa",
-      "score": 83.3,
+      "id": "462b6b0bd2b8",
+      "score": 87.3,
       "left": {
-        "id": "story-38",
-        "title": "[2026 지배구조 준수율｜식음료] KT&G 100% vs 보해양조·한성기업·동원수산 13.3%",
-        "summary": "[2026 지배구조 준수율｜식음료] KT&G 100% vs 보해양조·한성기업·동원수산 13.3% https://www.leadersfact.co.kr/news/articleView.html?idxno=23184",
+        "id": "story-22",
+        "title": "금융지주 목줄 쥔 지배구조 개편안···밥그릇 싸움에 7월 넘기나",
+        "summary": "금융지주 목줄 쥔 '지배구조 개편안'···밥그릇 싸움에 7월 넘기나 - 뉴스웨이 https://www.newsway.co.kr/news/view?ud=2026070113345516524",
         "category": "밸류업·주주환원",
-        "datetime": "06.30 21:24",
-        "source_line": "LEADERSFACT",
-        "link_count": 1,
-        "url": "https://www.leadersfact.co.kr/news/articleView.html?idxno=23184",
+        "datetime": "07.01 19:17",
+        "source_line": "NEWSWAY · 다음뉴스",
+        "link_count": 2,
+        "url": "https://www.newsway.co.kr/news/view?ud=2026070113345516524",
         "links": [
           {
-            "source": "LEADERSFACT",
-            "title": "[2026 지배구조 준수율｜식음료] KT&G 100% vs 보해양조·한성기업·동원수산 13.3%",
-            "url": "https://www.leadersfact.co.kr/news/articleView.html?idxno=23184"
+            "source": "NEWSWAY",
+            "title": "금융지주 목줄 쥔 지배구조 개편안···밥그릇 싸움에 7월 넘기나",
+            "url": "https://www.newsway.co.kr/news/view?ud=2026070113345516524"
+          },
+          {
+            "source": "다음뉴스",
+            "title": "금융지주 지배구조 개편안, 당국 입장차에 7월 넘기나",
+            "url": "https://v.daum.net/v/20260701143301484"
           }
         ]
       },
       "right": {
-        "id": "story-41",
-        "title": "KT&G, ESG 지배구조 혁신 담은 지속가능경영 보고서 발간",
-        "summary": "KT&G, ESG 지배구조 혁신 담은 지속가능경영 보고서 발간 - PRESS9 http://www.press9.kr/news/articleView.html?idxno=78602",
+        "id": "story-47",
+        "title": "KB금융 숏리스트 임박…금융지주 지배구조 개편안 초읽기",
+        "summary": "\"KB금융 숏리스트 임박\"…금융지주 지배구조 개편안 초읽기 - 중앙이코노미뉴스 https://www.joongangenews.com/news/articleView.html?idxno=529561",
         "category": "밸류업·주주환원",
-        "datetime": "06.30 15:22",
-        "source_line": "PRESS9",
+        "datetime": "07.01 11:15",
+        "source_line": "JOONGANGENEWS",
         "link_count": 1,
-        "url": "http://www.press9.kr/news/articleView.html?idxno=78602",
+        "url": "https://www.joongangenews.com/news/articleView.html?idxno=529561",
         "links": [
           {
-            "source": "PRESS9",
-            "title": "KT&G, ESG 지배구조 혁신 담은 지속가능경영 보고서 발간",
-            "url": "http://www.press9.kr/news/articleView.html?idxno=78602"
+            "source": "JOONGANGENEWS",
+            "title": "KB금융 숏리스트 임박…금융지주 지배구조 개편안 초읽기",
+            "url": "https://www.joongangenews.com/news/articleView.html?idxno=529561"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c3b2a12c5d7b",
+      "score": 86.7,
+      "left": {
+        "id": "story-1",
+        "title": "트러스톤, 태광산업 밸류업 계획 비판…2022년 양치기 공약 재탕",
+        "summary": "트러스톤운용 \"태광산업 밸류업 계획, 2022년 '12조 투자' 공약 재탕\"…공개주주서한 예고 https://v.daum.net/v/20260701143653765",
+        "category": "주주행동·경영권",
+        "datetime": "07.01 17:31",
+        "source_line": "다음뉴스 · 연합인포맥스 · MARKETIN",
+        "link_count": 3,
+        "url": "https://news.einfomax.co.kr/news/articleView.html?idxno=4422817",
+        "links": [
+          {
+            "source": "다음뉴스",
+            "title": "트러스톤운용 태광산업 밸류업 계획, 2022년 12조 투자 공약 재탕…공개주주서한 예고",
+            "url": "https://v.daum.net/v/20260701143653765"
+          },
+          {
+            "source": "연합인포맥스",
+            "title": "트러스톤, 태광산업 밸류업 계획 비판…2022년 양치기 공약 재탕",
+            "url": "https://news.einfomax.co.kr/news/articleView.html?idxno=4422817"
+          },
+          {
+            "source": "MARKETIN",
+            "title": "트러스톤 태광산업 밸류업 계획 부실…이사회에 전면 재검토 요구",
+            "url": "https://marketin.edaily.co.kr/News/ReadE?newsId=03876966645510256"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-11",
+        "title": "건전한 재무상태에도 배당은 쥐꼬리…트러스톤, 태광산업 부실 밸류업 직격",
+        "summary": "건전한 재무상태에도 배당은 '쥐꼬리'…트러스톤, 태광산업 부실 밸류업 직격 - 에너지경제신문 https://www.ekn.kr/web/view.php?key=20260701028078353",
+        "category": "주주행동·경영권",
+        "datetime": "07.01 21:19",
+        "source_line": "EKN",
+        "link_count": 1,
+        "url": "https://www.ekn.kr/web/view.php?key=20260701028078353",
+        "links": [
+          {
+            "source": "EKN",
+            "title": "건전한 재무상태에도 배당은 쥐꼬리…트러스톤, 태광산업 부실 밸류업 직격",
+            "url": "https://www.ekn.kr/web/view.php?key=20260701028078353"
           }
         ]
       }
@@ -154,47 +159,47 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 127,
-    "matched_count": 71,
-    "missing_count": 56,
-    "coverage_rate": 55.9,
+    "url_count": 115,
+    "matched_count": 60,
+    "missing_count": 55,
+    "coverage_rate": 52.2,
     "missing": [
       {
-        "title": "KG 케미칼·이니시스, 자사주 총 20만 주 매입…곽재선 회장 주주가치, 기업 경영 최우선",
-        "url": "https://www.infostockdaily.co.kr/news/articleView.html?idxno=216558",
-        "source_message_url": "https://t.me/activistkorea/115469",
+        "title": "[남부발전 소식] 사회적기업 판로개척 우수기관 선정...고용부 장관상 外",
+        "url": "https://www.busan.com/view/busan/view.php?code=2026070122150344302",
+        "source_message_url": "https://t.me/activistkorea/115589",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "[AD] 현대차, 2026년 지속가능성 보고서 발간",
-        "url": "https://www.topdaily.kr/articles/110759",
-        "source_message_url": "https://t.me/activistkorea/115467",
+        "title": "워크아웃 한국 중앙일보 경영권 팔린다",
+        "url": "http://www.koreatimes.com/article/20260701/1619652",
+        "source_message_url": "https://t.me/activistkorea/115586",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "KT, 2026년 ESG보고서 발간",
-        "url": "https://www.yna.co.kr/amp/view/PYH20260630016200013",
-        "source_message_url": "https://t.me/activistkorea/115468",
+        "title": "비츠로셀, 밸류업 2년차 성과 가시화...우량기업 자리매김",
+        "url": "https://www.hankyung.com/amp/202607018284h",
+        "source_message_url": "https://t.me/activistkorea/115584",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_title"
+      },
+      {
+        "title": "해성디에스, 2050 넷제로 로드맵 담은 지속가능경영보고서 발간 - 헬로티",
+        "url": "https://www.hellot.net/news/article.html?no=113547",
+        "source_message_url": "https://t.me/activistkorea/115582",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "셀트리온, ESG 성과 담은 지속가능경영보고서 발간 - 약사공론",
-        "url": "https://www.kpanews.co.kr/news/articleView.html?idxno=537746",
-        "source_message_url": "https://t.me/activistkorea/115466",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "AI가 ESG도 바꿨다··· 카카오페이, AI 중심 지속가능경영 청사진 공개 - 그린포스트코리아",
-        "url": "https://www.greenpostkorea.co.kr/news/articleViewAmp.html?idxno=307013",
-        "source_message_url": "https://t.me/activistkorea/115464",
+        "title": "신뢰를 지키는 방식은 ESG…KB국민카드, 지속가능경영의 새 표준을 묻다 - 비즈체크",
+        "url": "https://www.bizcheck.co.kr/news/articleView.html?idxno=3633817",
+        "source_message_url": "https://t.me/activistkorea/115579",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
