@@ -1,154 +1,124 @@
 {
-  "date_id": "2026-07-02",
-  "generated_at": "2026-07-02T06:44:55.832507+09:00",
-  "start_at": "2026-07-01T06:41:18.264348+09:00",
-  "end_at": "2026-07-02T06:41:18.264348+09:00",
-  "start_label": "2026-07-01 06:41 KST",
-  "end_label": "2026-07-02 06:41 KST",
-  "candidate_count": 12,
-  "candidate_hash": "7be8c26f72ea8b3d",
+  "date_id": "2026-07-03",
+  "generated_at": "2026-07-03T06:24:26.352377+09:00",
+  "start_at": "2026-07-02T06:20:31.172278+09:00",
+  "end_at": "2026-07-03T06:20:31.172278+09:00",
+  "start_label": "2026-07-02 06:20 KST",
+  "end_label": "2026-07-03 06:20 KST",
+  "candidate_count": 4,
+  "candidate_hash": "e8e62c835b2fffa8",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "9a7d3fb585bc",
-      "score": 88.5,
+      "id": "87fa999323fb",
+      "score": 87.9,
       "left": {
-        "id": "story-1",
-        "title": "트러스톤, 태광산업 밸류업 계획 비판…2022년 양치기 공약 재탕",
-        "summary": "트러스톤운용 \"태광산업 밸류업 계획, 2022년 '12조 투자' 공약 재탕\"…공개주주서한 예고 https://v.daum.net/v/20260701143653765",
-        "category": "주주행동·경영권",
-        "datetime": "07.01 17:31",
-        "source_line": "다음뉴스 · 연합인포맥스 · MARKETIN",
-        "link_count": 3,
-        "url": "https://news.einfomax.co.kr/news/articleView.html?idxno=4422817",
+        "id": "story-36",
+        "title": "KB금융, 차기 회장 숏리스트 D-1…금융권 지배구조 선진화 고민",
+        "summary": "KB금융, 차기 회장 숏리스트 D-1…금융권 지배구조 선진화 고민 - 신아일보 https://www.shinailbo.co.kr/news/articleView.html?idxno=5036723",
+        "category": "밸류업·주주환원",
+        "datetime": "07.02 18:17",
+        "source_line": "SHINAILBO",
+        "link_count": 1,
+        "url": "https://www.shinailbo.co.kr/news/articleView.html?idxno=5036723",
         "links": [
           {
-            "source": "다음뉴스",
-            "title": "트러스톤운용 태광산업 밸류업 계획, 2022년 12조 투자 공약 재탕…공개주주서한 예고",
-            "url": "https://v.daum.net/v/20260701143653765"
-          },
-          {
-            "source": "연합인포맥스",
-            "title": "트러스톤, 태광산업 밸류업 계획 비판…2022년 양치기 공약 재탕",
-            "url": "https://news.einfomax.co.kr/news/articleView.html?idxno=4422817"
-          },
-          {
-            "source": "MARKETIN",
-            "title": "트러스톤 태광산업 밸류업 계획 부실…이사회에 전면 재검토 요구",
-            "url": "https://marketin.edaily.co.kr/News/ReadE?newsId=03876966645510256"
+            "source": "SHINAILBO",
+            "title": "KB금융, 차기 회장 숏리스트 D-1…금융권 지배구조 선진화 고민",
+            "url": "https://www.shinailbo.co.kr/news/articleView.html?idxno=5036723"
           }
         ]
       },
       "right": {
-        "id": "story-2",
-        "title": "트러스톤, 태광산업 밸류업 정조준…자사주 소각·정량목표 다시 짜야",
-        "summary": "트러스톤, 태광산업 밸류업 정조준…“자사주 소각·정량목표 다시 짜야” - 파이낸셜투데이 http://www.ftoday.co.kr/news/articleView.html?idxno=361444",
-        "category": "주주행동·경영권",
-        "datetime": "07.01 18:38",
-        "source_line": "FTODAY · FNNEWS",
-        "link_count": 2,
-        "url": "http://www.ftoday.co.kr/news/articleView.html?idxno=361444",
+        "id": "story-62",
+        "title": "KB금융 숏리스트 오늘 공개…먼저 나온다던 지배구조 개선안은 감감",
+        "summary": "KB금융 숏리스트 오늘 공개…\"먼저 나온다\"던 지배구조 개선안은 '감감' - 뉴스1 https://www.news1.kr/finance/general-finance/6216125",
+        "category": "밸류업·주주환원",
+        "datetime": "07.03 05:20",
+        "source_line": "NEWS1",
+        "link_count": 1,
+        "url": "https://www.news1.kr/finance/general-finance/6216125",
         "links": [
           {
-            "source": "FTODAY",
-            "title": "트러스톤, 태광산업 밸류업 정조준…자사주 소각·정량목표 다시 짜야",
-            "url": "http://www.ftoday.co.kr/news/articleView.html?idxno=361444"
-          },
-          {
-            "source": "FNNEWS",
-            "title": "트러스톤 태광산업 밸류업, 2022년 12조 투자 공약 판박이…주주환원 또 뒷전",
-            "url": "https://www.fnnews.com/news/202607011339583224"
+            "source": "NEWS1",
+            "title": "KB금융 숏리스트 오늘 공개…먼저 나온다던 지배구조 개선안은 감감",
+            "url": "https://www.news1.kr/finance/general-finance/6216125"
           }
         ]
       }
     },
     {
-      "id": "462b6b0bd2b8",
-      "score": 87.3,
+      "id": "3c090e7c8974",
+      "score": 87.9,
       "left": {
-        "id": "story-22",
-        "title": "금융지주 목줄 쥔 지배구조 개편안···밥그릇 싸움에 7월 넘기나",
-        "summary": "금융지주 목줄 쥔 '지배구조 개편안'···밥그릇 싸움에 7월 넘기나 - 뉴스웨이 https://www.newsway.co.kr/news/view?ud=2026070113345516524",
+        "id": "story-39",
+        "title": "재가 막힌 금융지주 지배구조 개편…KB 회장 선임 기존 룰 가나 | 더트래커",
+        "summary": "재가 막힌 금융지주 지배구조 개편…KB 회장 선임 '기존 룰' 가나 | 더트래커 https://thetracker.co.kr/View.aspx?No=4134623",
         "category": "밸류업·주주환원",
-        "datetime": "07.01 19:17",
-        "source_line": "NEWSWAY · 다음뉴스",
-        "link_count": 2,
-        "url": "https://www.newsway.co.kr/news/view?ud=2026070113345516524",
+        "datetime": "07.02 17:22",
+        "source_line": "THETRACKER",
+        "link_count": 1,
+        "url": "https://thetracker.co.kr/View.aspx?No=4134623",
         "links": [
           {
-            "source": "NEWSWAY",
-            "title": "금융지주 목줄 쥔 지배구조 개편안···밥그릇 싸움에 7월 넘기나",
-            "url": "https://www.newsway.co.kr/news/view?ud=2026070113345516524"
-          },
-          {
-            "source": "다음뉴스",
-            "title": "금융지주 지배구조 개편안, 당국 입장차에 7월 넘기나",
-            "url": "https://v.daum.net/v/20260701143301484"
+            "source": "THETRACKER",
+            "title": "재가 막힌 금융지주 지배구조 개편…KB 회장 선임 기존 룰 가나 | 더트래커",
+            "url": "https://thetracker.co.kr/View.aspx?No=4134623"
           }
         ]
       },
       "right": {
-        "id": "story-47",
-        "title": "KB금융 숏리스트 임박…금융지주 지배구조 개편안 초읽기",
-        "summary": "\"KB금융 숏리스트 임박\"…금융지주 지배구조 개편안 초읽기 - 중앙이코노미뉴스 https://www.joongangenews.com/news/articleView.html?idxno=529561",
+        "id": "story-45",
+        "title": "KB 회장 숏리스트 확정 임박에도…금융지주 지배구조 방안은 또 지연",
+        "summary": "KB 회장 숏리스트 확정 임박에도…금융지주 지배구조 방안은 또 지연 - 헤럴드경제 https://biz.heraldcorp.com/article/10795594",
         "category": "밸류업·주주환원",
-        "datetime": "07.01 11:15",
-        "source_line": "JOONGANGENEWS",
+        "datetime": "07.02 10:18",
+        "source_line": "BIZ",
         "link_count": 1,
-        "url": "https://www.joongangenews.com/news/articleView.html?idxno=529561",
+        "url": "https://biz.heraldcorp.com/article/10795594",
         "links": [
           {
-            "source": "JOONGANGENEWS",
-            "title": "KB금융 숏리스트 임박…금융지주 지배구조 개편안 초읽기",
-            "url": "https://www.joongangenews.com/news/articleView.html?idxno=529561"
+            "source": "BIZ",
+            "title": "KB 회장 숏리스트 확정 임박에도…금융지주 지배구조 방안은 또 지연",
+            "url": "https://biz.heraldcorp.com/article/10795594"
           }
         ]
       }
     },
     {
-      "id": "c3b2a12c5d7b",
-      "score": 86.7,
+      "id": "471745e428b9",
+      "score": 84.4,
       "left": {
-        "id": "story-1",
-        "title": "트러스톤, 태광산업 밸류업 계획 비판…2022년 양치기 공약 재탕",
-        "summary": "트러스톤운용 \"태광산업 밸류업 계획, 2022년 '12조 투자' 공약 재탕\"…공개주주서한 예고 https://v.daum.net/v/20260701143653765",
-        "category": "주주행동·경영권",
-        "datetime": "07.01 17:31",
-        "source_line": "다음뉴스 · 연합인포맥스 · MARKETIN",
-        "link_count": 3,
-        "url": "https://news.einfomax.co.kr/news/articleView.html?idxno=4422817",
+        "id": "story-32",
+        "title": "[이슈] 금융지주 지배구조안 반년째 공전 KB 인사 코앞",
+        "summary": "[이슈] 금융지주 지배구조안 반년째 공전 KB 인사 코앞 - 자본시장뉴스 https://www.jabon.co.kr/news/articleView.html?idxno=4590",
+        "category": "밸류업·주주환원",
+        "datetime": "07.03 00:16",
+        "source_line": "JABON",
+        "link_count": 1,
+        "url": "https://www.jabon.co.kr/news/articleView.html?idxno=4590",
         "links": [
           {
-            "source": "다음뉴스",
-            "title": "트러스톤운용 태광산업 밸류업 계획, 2022년 12조 투자 공약 재탕…공개주주서한 예고",
-            "url": "https://v.daum.net/v/20260701143653765"
-          },
-          {
-            "source": "연합인포맥스",
-            "title": "트러스톤, 태광산업 밸류업 계획 비판…2022년 양치기 공약 재탕",
-            "url": "https://news.einfomax.co.kr/news/articleView.html?idxno=4422817"
-          },
-          {
-            "source": "MARKETIN",
-            "title": "트러스톤 태광산업 밸류업 계획 부실…이사회에 전면 재검토 요구",
-            "url": "https://marketin.edaily.co.kr/News/ReadE?newsId=03876966645510256"
+            "source": "JABON",
+            "title": "[이슈] 금융지주 지배구조안 반년째 공전 KB 인사 코앞",
+            "url": "https://www.jabon.co.kr/news/articleView.html?idxno=4590"
           }
         ]
       },
       "right": {
-        "id": "story-11",
-        "title": "건전한 재무상태에도 배당은 쥐꼬리…트러스톤, 태광산업 부실 밸류업 직격",
-        "summary": "건전한 재무상태에도 배당은 '쥐꼬리'…트러스톤, 태광산업 부실 밸류업 직격 - 에너지경제신문 https://www.ekn.kr/web/view.php?key=20260701028078353",
-        "category": "주주행동·경영권",
-        "datetime": "07.01 21:19",
-        "source_line": "EKN",
+        "id": "story-39",
+        "title": "재가 막힌 금융지주 지배구조 개편…KB 회장 선임 기존 룰 가나 | 더트래커",
+        "summary": "재가 막힌 금융지주 지배구조 개편…KB 회장 선임 '기존 룰' 가나 | 더트래커 https://thetracker.co.kr/View.aspx?No=4134623",
+        "category": "밸류업·주주환원",
+        "datetime": "07.02 17:22",
+        "source_line": "THETRACKER",
         "link_count": 1,
-        "url": "https://www.ekn.kr/web/view.php?key=20260701028078353",
+        "url": "https://thetracker.co.kr/View.aspx?No=4134623",
         "links": [
           {
-            "source": "EKN",
-            "title": "건전한 재무상태에도 배당은 쥐꼬리…트러스톤, 태광산업 부실 밸류업 직격",
-            "url": "https://www.ekn.kr/web/view.php?key=20260701028078353"
+            "source": "THETRACKER",
+            "title": "재가 막힌 금융지주 지배구조 개편…KB 회장 선임 기존 룰 가나 | 더트래커",
+            "url": "https://thetracker.co.kr/View.aspx?No=4134623"
           }
         ]
       }
@@ -159,47 +129,47 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 115,
+    "url_count": 95,
     "matched_count": 60,
-    "missing_count": 55,
-    "coverage_rate": 52.2,
+    "missing_count": 35,
+    "coverage_rate": 63.2,
     "missing": [
       {
-        "title": "[남부발전 소식] 사회적기업 판로개척 우수기관 선정...고용부 장관상 外",
-        "url": "https://www.busan.com/view/busan/view.php?code=2026070122150344302",
-        "source_message_url": "https://t.me/activistkorea/115589",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "워크아웃 한국 중앙일보 경영권 팔린다",
-        "url": "http://www.koreatimes.com/article/20260701/1619652",
-        "source_message_url": "https://t.me/activistkorea/115586",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "비츠로셀, 밸류업 2년차 성과 가시화...우량기업 자리매김",
-        "url": "https://www.hankyung.com/amp/202607018284h",
-        "source_message_url": "https://t.me/activistkorea/115584",
+        "title": "기술특례상장 상폐 요건 밸류업 공시 조건부 개편",
+        "url": "https://v.daum.net/v/yVw4b5PKvv",
+        "source_message_url": "https://t.me/activistkorea/115687",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "duplicate",
         "reason": "seen_title"
       },
       {
-        "title": "해성디에스, 2050 넷제로 로드맵 담은 지속가능경영보고서 발간 - 헬로티",
-        "url": "https://www.hellot.net/news/article.html?no=113547",
-        "source_message_url": "https://t.me/activistkorea/115582",
+        "title": "태광산업 밸류업 맹공 나선 트러스톤…행동주의 통할까",
+        "url": "https://v.daum.net/v/20260702152715724",
+        "source_message_url": "https://t.me/activistkorea/115681",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_url"
+      },
+      {
+        "title": "코스닥, 동전주 퇴출·특례상장 꼼수 끝…50곳 상장폐지 예상",
+        "url": "https://v.daum.net/v/20260702203616055",
+        "source_message_url": "https://t.me/activistkorea/115679",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "similar_title"
+      },
+      {
+        "title": "고려아연, 서스틴베스트 ESG종합평가 A등급 상향 | - 울산매일",
+        "url": "https://www.iusm.co.kr/news/articleViewAmp.html?idxno=1064849",
+        "source_message_url": "https://t.me/activistkorea/115678",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "신뢰를 지키는 방식은 ESG…KB국민카드, 지속가능경영의 새 표준을 묻다 - 비즈체크",
-        "url": "https://www.bizcheck.co.kr/news/articleView.html?idxno=3633817",
-        "source_message_url": "https://t.me/activistkorea/115579",
+        "title": "수출 신기록의 착시… 외신과 글로벌 리포트가 짚은 韓 경제의 세 가지 구조 리스크",
+        "url": "https://www.polinews.co.kr/news/articleView.html?idxno=735837",
+        "source_message_url": "https://t.me/activistkorea/115673",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
