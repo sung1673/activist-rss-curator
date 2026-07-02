@@ -82,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
 
     steps:
       - name: Checkout
@@ -264,7 +264,33 @@ jobs:
       - name: Deploy to GitHub Pages
         if: vars.ENABLE_PAGES == 'true'
         id: deployment
+        continue-on-error: true
         uses: actions/deploy-pages@v4
+        with:
+          timeout: 900000
+
+      - name: Wait before retrying Pages deployment
+        if: ${{ vars.ENABLE_PAGES == 'true' && steps.deployment.outcome == 'failure' }}
+        run: sleep 60
+
+      - name: Retry GitHub Pages deployment
+        if: ${{ vars.ENABLE_PAGES == 'true' && steps.deployment.outcome == 'failure' }}
+        id: deployment_retry
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+        with:
+          timeout: 900000
+
+      - name: Verify GitHub Pages deployment
+        if: vars.ENABLE_PAGES == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.deployment.outcome }}" == "success" || "${{ steps.deployment_retry.outcome }}" == "success" ]]; then
+            exit 0
+          fi
+          echo "GitHub Pages deployment failed after retry."
+          exit 1
 
       - name: Send daily report message
         if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]')) }}
