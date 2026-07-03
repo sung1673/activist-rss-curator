@@ -266,20 +266,16 @@ jobs:
         id: deployment
         continue-on-error: true
         uses: actions/deploy-pages@v4
-        with:
-          timeout: 900000
 
       - name: Wait before retrying Pages deployment
         if: ${{ vars.ENABLE_PAGES == 'true' && steps.deployment.outcome == 'failure' }}
-        run: sleep 60
+        run: sleep 180
 
       - name: Retry GitHub Pages deployment
         if: ${{ vars.ENABLE_PAGES == 'true' && steps.deployment.outcome == 'failure' }}
         id: deployment_retry
         continue-on-error: true
         uses: actions/deploy-pages@v4
-        with:
-          timeout: 900000
 
       - name: Verify GitHub Pages deployment
         if: vars.ENABLE_PAGES == 'true'
