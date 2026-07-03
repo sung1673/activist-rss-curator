@@ -1,10 +1,10 @@
 {
   "date_id": "2026-07-03",
-  "generated_at": "2026-07-03T06:24:26.352377+09:00",
-  "start_at": "2026-07-02T06:20:31.172278+09:00",
-  "end_at": "2026-07-03T06:20:31.172278+09:00",
-  "start_label": "2026-07-02 06:20 KST",
-  "end_label": "2026-07-03 06:20 KST",
+  "generated_at": "2026-07-03T09:02:54.516364+09:00",
+  "start_at": "2026-07-02T08:58:48.904889+09:00",
+  "end_at": "2026-07-03T08:58:48.904889+09:00",
+  "start_label": "2026-07-02 08:58 KST",
+  "end_label": "2026-07-03 08:58 KST",
   "candidate_count": 4,
   "candidate_hash": "e8e62c835b2fffa8",
   "page_url": "https://news.bside.ai/feed/story-review.html",
@@ -13,7 +13,7 @@
       "id": "87fa999323fb",
       "score": 87.9,
       "left": {
-        "id": "story-36",
+        "id": "story-34",
         "title": "KB금융, 차기 회장 숏리스트 D-1…금융권 지배구조 선진화 고민",
         "summary": "KB금융, 차기 회장 숏리스트 D-1…금융권 지배구조 선진화 고민 - 신아일보 https://www.shinailbo.co.kr/news/articleView.html?idxno=5036723",
         "category": "밸류업·주주환원",
@@ -30,7 +30,7 @@
         ]
       },
       "right": {
-        "id": "story-62",
+        "id": "story-56",
         "title": "KB금융 숏리스트 오늘 공개…먼저 나온다던 지배구조 개선안은 감감",
         "summary": "KB금융 숏리스트 오늘 공개…\"먼저 나온다\"던 지배구조 개선안은 '감감' - 뉴스1 https://www.news1.kr/finance/general-finance/6216125",
         "category": "밸류업·주주환원",
@@ -51,7 +51,7 @@
       "id": "3c090e7c8974",
       "score": 87.9,
       "left": {
-        "id": "story-39",
+        "id": "story-37",
         "title": "재가 막힌 금융지주 지배구조 개편…KB 회장 선임 기존 룰 가나 | 더트래커",
         "summary": "재가 막힌 금융지주 지배구조 개편…KB 회장 선임 '기존 룰' 가나 | 더트래커 https://thetracker.co.kr/View.aspx?No=4134623",
         "category": "밸류업·주주환원",
@@ -68,7 +68,7 @@
         ]
       },
       "right": {
-        "id": "story-45",
+        "id": "story-43",
         "title": "KB 회장 숏리스트 확정 임박에도…금융지주 지배구조 방안은 또 지연",
         "summary": "KB 회장 숏리스트 확정 임박에도…금융지주 지배구조 방안은 또 지연 - 헤럴드경제 https://biz.heraldcorp.com/article/10795594",
         "category": "밸류업·주주환원",
@@ -89,7 +89,7 @@
       "id": "471745e428b9",
       "score": 84.4,
       "left": {
-        "id": "story-32",
+        "id": "story-30",
         "title": "[이슈] 금융지주 지배구조안 반년째 공전 KB 인사 코앞",
         "summary": "[이슈] 금융지주 지배구조안 반년째 공전 KB 인사 코앞 - 자본시장뉴스 https://www.jabon.co.kr/news/articleView.html?idxno=4590",
         "category": "밸류업·주주환원",
@@ -106,7 +106,7 @@
         ]
       },
       "right": {
-        "id": "story-39",
+        "id": "story-37",
         "title": "재가 막힌 금융지주 지배구조 개편…KB 회장 선임 기존 룰 가나 | 더트래커",
         "summary": "재가 막힌 금융지주 지배구조 개편…KB 회장 선임 '기존 룰' 가나 | 더트래커 https://thetracker.co.kr/View.aspx?No=4134623",
         "category": "밸류업·주주환원",
@@ -129,10 +129,10 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 95,
-    "matched_count": 60,
-    "missing_count": 35,
-    "coverage_rate": 63.2,
+    "url_count": 87,
+    "matched_count": 56,
+    "missing_count": 31,
+    "coverage_rate": 64.4,
     "missing": [
       {
         "title": "기술특례상장 상폐 요건 밸류업 공시 조건부 개편",
