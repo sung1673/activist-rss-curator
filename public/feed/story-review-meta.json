@@ -1,215 +1,60 @@
 {
-  "date_id": "2026-07-04",
-  "generated_at": "2026-07-04T06:18:18.303848+09:00",
-  "start_at": "2026-07-03T06:14:58.070023+09:00",
-  "end_at": "2026-07-04T06:14:58.070023+09:00",
-  "start_label": "2026-07-03 06:14 KST",
-  "end_label": "2026-07-04 06:14 KST",
-  "candidate_count": 4,
-  "candidate_hash": "9a08f88d17c8eb1b",
+  "date_id": "2026-07-05",
+  "generated_at": "2026-07-05T06:11:21.687090+09:00",
+  "start_at": "2026-07-04T06:09:50.032828+09:00",
+  "end_at": "2026-07-05T06:09:50.032828+09:00",
+  "start_label": "2026-07-04 06:09 KST",
+  "end_label": "2026-07-05 06:09 KST",
+  "candidate_count": 0,
+  "candidate_hash": "4f53cda18c2baa0c",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": [
-    {
-      "id": "6d26396f74a7",
-      "score": 85.2,
-      "left": {
-        "id": "story-4",
-        "title": "한미그룹 차남 임종훈, 모녀 연합 복귀…경영권 분쟁 새 국면",
-        "summary": "[더팩트ㅣ조성은 기자] 한미그룹 창업주 일가의 차남인 임종훈 한미정밀화학 대표가 지주사 한미사이언스 지분 일부를 모녀 측 우호 투자자에게 매각하고 가족 연합에 전격 복귀했다. 이로써 고(故) 임성기 회장 별세 이후 지속되던 '모녀(송영숙·임주현) 대 형제(임종윤·임종훈)'의 갈등 구도…",
-        "category": "주주행동·경영권",
-        "datetime": "07.03 19:19",
-        "source_line": "NEWS",
-        "link_count": 1,
-        "url": "https://news.tf.co.kr/read/economy/2339604.htm",
-        "links": [
-          {
-            "source": "NEWS",
-            "title": "한미그룹 차남 임종훈, 모녀 연합 복귀…경영권 분쟁 새 국면",
-            "url": "https://news.tf.co.kr/read/economy/2339604.htm"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-6",
-        "title": "흔들린 캐스팅보트…한미그룹 분쟁 모녀 판정승 굳어지나",
-        "summary": "창업주 차남 한미사이언스 지분 2.5% 매각 캐스팅보트 역할 축소…가족 지지 의사 밝혀 지난한 경영권 분쟁…오너 일가 모녀로 기우나 창업주 차남인 임종훈 한미정밀화학 대표가 한미그룹 지주사인 한미사이언스 지분 일부를 나우IB에 매각한다. 그동안 경영권 분쟁의 캐스팅보트로 꼽혀 온 임…",
-        "category": "주주행동·경영권",
-        "datetime": "07.03 15:14",
-        "source_line": "INEWS24",
-        "link_count": 1,
-        "url": "https://www.inews24.com/view/1982210",
-        "links": [
-          {
-            "source": "INEWS24",
-            "title": "흔들린 캐스팅보트…한미그룹 분쟁 모녀 판정승 굳어지나",
-            "url": "https://www.inews24.com/view/1982210"
-          }
-        ]
-      }
-    },
-    {
-      "id": "9260a37386b5",
-      "score": 80.8,
-      "left": {
-        "id": "story-11",
-        "title": "KB금융 숏리스트 나왔는데…지배구조 개편안 또 연기",
-        "summary": "KB금융 숏리스트 나왔는데…지배구조 개편안 또 연기 - 쿠키뉴스 https://www.kukinews.com/article/view/kuk202607030121",
-        "category": "밸류업·주주환원",
-        "datetime": "07.03 23:20",
-        "source_line": "KUKINEWS · 네이트뉴스 · DAILYBRIEF · BIZ · NEWS1",
-        "link_count": 5,
-        "url": "https://www.kukinews.com/article/view/kuk202607030121",
-        "links": [
-          {
-            "source": "KUKINEWS",
-            "title": "KB금융 숏리스트 나왔는데…지배구조 개편안 또 연기",
-            "url": "https://www.kukinews.com/article/view/kuk202607030121"
-          },
-          {
-            "source": "네이트뉴스",
-            "title": "KB금융 숏리스트 오늘 공개…지배구조 개선안 발표는 또 미뤄져",
-            "url": "https://news.nate.com/view/20260703n24252"
-          },
-          {
-            "source": "DAILYBRIEF",
-            "title": "금융 지배구조 개편 또 연기...KB금융 숏리스트 오늘 확정",
-            "url": "https://www.dailybrief.co.kr/news/articleView.html?idxno=6242"
-          },
-          {
-            "source": "BIZ",
-            "title": "KB회장 숏리스트 확정 임박…금융지주 지배구조 방안 또 지연",
-            "url": "https://biz.heraldcorp.com/article/10795825"
-          },
-          {
-            "source": "NEWS1",
-            "title": "KB금융 숏리스트 오늘 공개…먼저 나온다던 지배구조 개선안은 감감",
-            "url": "https://www.news1.kr/finance/general-finance/6216125"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-18",
-        "title": "KB금융 차기 회장은 누구?...지배구조 변수 속 양종희 연임 주목 - 디지털투데이 (DigitalToday)",
-        "summary": "KB금융 차기 회장은 누구?...지배구조 변수 속 양종희 연임 주목 - 디지털투데이 (DigitalToday) https://www.digitaltoday.co.kr/news/articleView.html?idxno=681321",
-        "category": "밸류업·주주환원",
-        "datetime": "07.03 23:20",
-        "source_line": "디지털투데이",
-        "link_count": 1,
-        "url": "https://www.digitaltoday.co.kr/news/articleView.html?idxno=681321",
-        "links": [
-          {
-            "source": "디지털투데이",
-            "title": "KB금융 차기 회장은 누구?...지배구조 변수 속 양종희 연임 주목 - 디지털투데이 (DigitalToday)",
-            "url": "https://www.digitaltoday.co.kr/news/articleView.html?idxno=681321"
-          }
-        ]
-      }
-    },
-    {
-      "id": "a324fe3307c4",
-      "score": 77.4,
-      "left": {
-        "id": "story-11",
-        "title": "KB금융 숏리스트 나왔는데…지배구조 개편안 또 연기",
-        "summary": "KB금융 숏리스트 나왔는데…지배구조 개편안 또 연기 - 쿠키뉴스 https://www.kukinews.com/article/view/kuk202607030121",
-        "category": "밸류업·주주환원",
-        "datetime": "07.03 23:20",
-        "source_line": "KUKINEWS · 네이트뉴스 · DAILYBRIEF · BIZ · NEWS1",
-        "link_count": 5,
-        "url": "https://www.kukinews.com/article/view/kuk202607030121",
-        "links": [
-          {
-            "source": "KUKINEWS",
-            "title": "KB금융 숏리스트 나왔는데…지배구조 개편안 또 연기",
-            "url": "https://www.kukinews.com/article/view/kuk202607030121"
-          },
-          {
-            "source": "네이트뉴스",
-            "title": "KB금융 숏리스트 오늘 공개…지배구조 개선안 발표는 또 미뤄져",
-            "url": "https://news.nate.com/view/20260703n24252"
-          },
-          {
-            "source": "DAILYBRIEF",
-            "title": "금융 지배구조 개편 또 연기...KB금융 숏리스트 오늘 확정",
-            "url": "https://www.dailybrief.co.kr/news/articleView.html?idxno=6242"
-          },
-          {
-            "source": "BIZ",
-            "title": "KB회장 숏리스트 확정 임박…금융지주 지배구조 방안 또 지연",
-            "url": "https://biz.heraldcorp.com/article/10795825"
-          },
-          {
-            "source": "NEWS1",
-            "title": "KB금융 숏리스트 오늘 공개…먼저 나온다던 지배구조 개선안은 감감",
-            "url": "https://www.news1.kr/finance/general-finance/6216125"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-40",
-        "title": "대한민국 금융 밸류업의 절대 지배자, 철옹성 자본 제국 - KB금융 - 네이버 프리미엄콘텐츠",
-        "summary": "대한민국 금융 밸류업의 절대 지배자, 철옹성 자본 제국 - KB금융 - 네이버 프리미엄콘텐츠 https://contents.premium.naver.com/emoneyai/aisignal/contents/260703083319986nq",
-        "category": "밸류업·주주환원",
-        "datetime": "07.04 01:21",
-        "source_line": "CONTENTS",
-        "link_count": 1,
-        "url": "https://contents.premium.naver.com/emoneyai/aisignal/contents/260703083319986nq",
-        "links": [
-          {
-            "source": "CONTENTS",
-            "title": "대한민국 금융 밸류업의 절대 지배자, 철옹성 자본 제국 - KB금융 - 네이버 프리미엄콘텐츠",
-            "url": "https://contents.premium.naver.com/emoneyai/aisignal/contents/260703083319986nq"
-          }
-        ]
-      }
-    }
-  ],
+  "candidates": [],
   "benchmark_coverage": {
     "enabled": true,
     "handles": [
       "activistkorea"
     ],
-    "url_count": 86,
-    "matched_count": 38,
-    "missing_count": 48,
-    "coverage_rate": 44.2,
+    "url_count": 60,
+    "matched_count": 13,
+    "missing_count": 47,
+    "coverage_rate": 21.7,
     "missing": [
       {
-        "title": "KB금융 회장 후보 6명 압축… 양종희·이재근·이창권·이환주·권광석 등 경쟁",
-        "url": "https://www.chosun.com/economy/economy_general/2026/07/03/NHOLQS4NQJEUJAZBQNKCAAHE24",
-        "source_message_url": "https://t.me/activistkorea/115773",
+        "title": "제조 AX로 밸류업…대동금속, 정밀주조·첨단소재기업 전환 가속",
+        "url": "https://www.msn.com/ko-kr/entertainment/games/%EC%A0%9C%EC%A1%B0-ax%EB%A1%9C-%EB%B0%B8%EB%A5%98%EC%97%85-%EB%8C%80%EB%8F%99%EA%B8%88%EC%86%8D-%EC%A0%95%EB%B0%80%EC%A3%BC%EC%A1%B0-%EC%B2%A8%EB%8B%A8%EC%86%8C%EC%9E%AC%EA%B8%B0%EC%97%85-%EC%A0%84%ED%99%98-%EA%B0%80%EC%86%8D/ar-AA271HYB",
+        "source_message_url": "https://t.me/activistkorea/115834",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "excluded_domain"
+      },
+      {
+        "title": "오너 아들 예술활동 논란 의식했나…KCC 3세 정명선, SNS 돌연 삭제",
+        "url": "https://www.abcn.kr/news/articleViewAmp.html?idxno=89125",
+        "source_message_url": "https://t.me/activistkorea/115833",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "LIG D&A, ESG 보고서 발간…2050년 넷제로 달성 목표",
-        "url": "http://www.joseilbo.com/news/htmls/2026/07/20260703571244.html",
-        "source_message_url": "https://t.me/activistkorea/115772",
+        "title": "델 주가가 하루 만에 7% 하락했다. AI로 인한 마진 악화에 대한 우려는 현실인가, 아니면 매수 기회인가?",
+        "url": "https://www.tikr.com/ko/blog/dell-stock-fell-7-in-a-day-is-the-ai-margin-fear-real-or-an-opening",
+        "source_message_url": "https://t.me/activistkorea/115832",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "위메이드맥스, 지배구조 격변 속 핵심 개발축으로…미르5·나이트 크로우W 등 총력",
-        "url": "https://v.daum.net/v/bftTXnvmcy",
-        "source_message_url": "https://t.me/activistkorea/115770",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "seen_title"
-      },
-      {
-        "title": "[한스경제] 삼성전기, 투명경영 합격점…배당 예측가능성은 과제 #Shorts",
-        "url": "https://www.youtube.com/watch?v=_g8ur-AVc14",
-        "source_message_url": "https://t.me/activistkorea/115771",
+        "title": "KB금융지주 회장, 6명으로 압축? 레이스는 처음부터 양종희 1명이었다",
+        "url": "https://www.the-economy.co.kr/news/articleView.html?idxno=5935",
+        "source_message_url": "https://t.me/activistkorea/115830",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "라운드 피규어 저항선 돌파 매매기법",
-        "url": "https://contents.premium.naver.com/richstory/toryeight/contents/260701164338564tq",
-        "source_message_url": "https://t.me/activistkorea/115766",
+        "title": "27회 여성창업경진대회 시상식...대상 황민지 이너마음 대표 - 지디넷",
+        "url": "https://zdnet.co.kr/view?no=20260704110443",
+        "source_message_url": "https://t.me/activistkorea/115829",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
