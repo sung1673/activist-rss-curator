@@ -1,63 +1,107 @@
 {
-  "date_id": "2026-07-05",
-  "generated_at": "2026-07-05T06:11:21.687090+09:00",
-  "start_at": "2026-07-04T06:09:50.032828+09:00",
-  "end_at": "2026-07-05T06:09:50.032828+09:00",
-  "start_label": "2026-07-04 06:09 KST",
-  "end_label": "2026-07-05 06:09 KST",
-  "candidate_count": 0,
-  "candidate_hash": "4f53cda18c2baa0c",
+  "date_id": "2026-07-06",
+  "generated_at": "2026-07-06T06:14:07.785985+09:00",
+  "start_at": "2026-07-05T06:12:20.202131+09:00",
+  "end_at": "2026-07-06T06:12:20.202131+09:00",
+  "start_label": "2026-07-05 06:12 KST",
+  "end_label": "2026-07-06 06:12 KST",
+  "candidate_count": 1,
+  "candidate_hash": "d0b6fb2376fafa82",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": [],
+  "candidates": [
+    {
+      "id": "1fc64184dd30",
+      "score": 85.4,
+      "left": {
+        "id": "story-3",
+        "title": "지배구조 개선안 지연에… 양종희 KB금융 회장 연임하나",
+        "summary": "지배구조 개선안 지연에… 양종희 KB금융 회장 연임하나 - 서울신문 https://www.seoul.co.kr/news/economy/finance/2026/07/06/20260706031005",
+        "category": "밸류업·주주환원",
+        "datetime": "07.06 02:25",
+        "source_line": "SEOUL",
+        "link_count": 2,
+        "url": "https://www.seoul.co.kr/news/economy/finance/2026/07/06/20260706031005",
+        "links": [
+          {
+            "source": "SEOUL",
+            "title": "지배구조 개선안 지연에… 양종희 KB금융 회장 연임하나",
+            "url": "https://www.seoul.co.kr/news/economy/finance/2026/07/06/20260706031005"
+          },
+          {
+            "source": "SEOUL",
+            "title": "늦어지는 금융지주 지배구조안… 힘받는 양종희 연임론",
+            "url": "https://www.seoul.co.kr/news/economy/2026/07/05/20260705500070"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-5",
+        "title": "KB금융 인선 시작됐는데…당국 지배구조 개편안 실종",
+        "summary": "KB금융 인선 시작됐는데…당국 지배구조 개편안 '실종' - Daum https://v.daum.net/v/20260705152118570",
+        "category": "밸류업·주주환원",
+        "datetime": "07.05 18:20",
+        "source_line": "다음뉴스",
+        "link_count": 1,
+        "url": "https://v.daum.net/v/20260705152118570",
+        "links": [
+          {
+            "source": "다음뉴스",
+            "title": "KB금융 인선 시작됐는데…당국 지배구조 개편안 실종",
+            "url": "https://v.daum.net/v/20260705152118570"
+          }
+        ]
+      }
+    }
+  ],
   "benchmark_coverage": {
     "enabled": true,
     "handles": [
       "activistkorea"
     ],
-    "url_count": 60,
-    "matched_count": 13,
-    "missing_count": 47,
-    "coverage_rate": 21.7,
+    "url_count": 81,
+    "matched_count": 10,
+    "missing_count": 71,
+    "coverage_rate": 12.3,
     "missing": [
       {
-        "title": "제조 AX로 밸류업…대동금속, 정밀주조·첨단소재기업 전환 가속",
-        "url": "https://www.msn.com/ko-kr/entertainment/games/%EC%A0%9C%EC%A1%B0-ax%EB%A1%9C-%EB%B0%B8%EB%A5%98%EC%97%85-%EB%8C%80%EB%8F%99%EA%B8%88%EC%86%8D-%EC%A0%95%EB%B0%80%EC%A3%BC%EC%A1%B0-%EC%B2%A8%EB%8B%A8%EC%86%8C%EC%9E%AC%EA%B8%B0%EC%97%85-%EC%A0%84%ED%99%98-%EA%B0%80%EC%86%8D/ar-AA271HYB",
-        "source_message_url": "https://t.me/activistkorea/115834",
+        "title": "지배구조 개선안 지연에…양종희 KB금융 회장 연임하나",
+        "url": "https://news.nate.com/view/20260706n01244?mid=n1101",
+        "source_message_url": "https://t.me/activistkorea/115915",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "accepted",
+        "reason": ""
+      },
+      {
+        "title": "이재용 회장, 억만장자 여름캠프 美선밸리 컨퍼런스 참석",
+        "url": "https://zdnet.co.kr/view?no=20260705160950",
+        "source_message_url": "https://t.me/activistkorea/115913",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "AI가 투자 결정한 펀드 수익률, 초기에만 반짝⋯ 인간보다 우월하지 않았다",
+        "url": "https://www.chosun.com/economy/weeklybiz/2026/07/06/WH4LOZARVFDQ5D4OO5XRR5ZWWU",
+        "source_message_url": "https://t.me/activistkorea/115914",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "광명시, 7월 바이소셜 캠페인…사회적기업 제품·서비스 우선 소비 확산",
+        "url": "https://m.etnews.com/20260705000084?obj=Tzo4OiJzdGRDbGFzcyI6Mjp7czo3OiJyZWZlcmVyIjtOO3M6NzoiZm9yd2FyZCI7czoxMzoid2ViIHRvIG1vYmlsZSI7fQ%3D%3D",
+        "source_message_url": "https://t.me/activistkorea/115912",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "[기자의눈] 코리아 디스카운트 넘으려면 기업이 달라져야 한다",
+        "url": "https://www.msn.com/ko-kr/news/other/%EA%B8%B0%EC%9E%90%EC%9D%98%EB%88%88-%EC%BD%94%EB%A6%AC%EC%95%84-%EB%94%94%EC%8A%A4%EC%B9%B4%EC%9A%B4%ED%8A%B8-%EB%84%98%EC%9C%BC%EB%A0%A4%EB%A9%B4-%EA%B8%B0%EC%97%85%EC%9D%B4-%EB%8B%AC%EB%9D%BC%EC%A0%B8%EC%95%BC-%ED%95%9C%EB%8B%A4/ar-AA26XE71",
+        "source_message_url": "https://t.me/activistkorea/115910",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "excluded_domain"
-      },
-      {
-        "title": "오너 아들 예술활동 논란 의식했나…KCC 3세 정명선, SNS 돌연 삭제",
-        "url": "https://www.abcn.kr/news/articleViewAmp.html?idxno=89125",
-        "source_message_url": "https://t.me/activistkorea/115833",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "델 주가가 하루 만에 7% 하락했다. AI로 인한 마진 악화에 대한 우려는 현실인가, 아니면 매수 기회인가?",
-        "url": "https://www.tikr.com/ko/blog/dell-stock-fell-7-in-a-day-is-the-ai-margin-fear-real-or-an-opening",
-        "source_message_url": "https://t.me/activistkorea/115832",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "KB금융지주 회장, 6명으로 압축? 레이스는 처음부터 양종희 1명이었다",
-        "url": "https://www.the-economy.co.kr/news/articleView.html?idxno=5935",
-        "source_message_url": "https://t.me/activistkorea/115830",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "27회 여성창업경진대회 시상식...대상 황민지 이너마음 대표 - 지디넷",
-        "url": "https://zdnet.co.kr/view?no=20260704110443",
-        "source_message_url": "https://t.me/activistkorea/115829",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
       }
     ]
   }
