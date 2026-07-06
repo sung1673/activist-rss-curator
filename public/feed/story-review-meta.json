@@ -1,53 +1,139 @@
 {
-  "date_id": "2026-07-06",
-  "generated_at": "2026-07-06T06:14:07.785985+09:00",
-  "start_at": "2026-07-05T06:12:20.202131+09:00",
-  "end_at": "2026-07-06T06:12:20.202131+09:00",
-  "start_label": "2026-07-05 06:12 KST",
-  "end_label": "2026-07-06 06:12 KST",
-  "candidate_count": 1,
-  "candidate_hash": "d0b6fb2376fafa82",
+  "date_id": "2026-07-07",
+  "generated_at": "2026-07-07T06:52:34.830634+09:00",
+  "start_at": "2026-07-06T06:49:44.138872+09:00",
+  "end_at": "2026-07-07T06:49:44.138872+09:00",
+  "start_label": "2026-07-06 06:49 KST",
+  "end_label": "2026-07-07 06:49 KST",
+  "candidate_count": 5,
+  "candidate_hash": "c810aebc920d16e8",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "1fc64184dd30",
-      "score": 85.4,
+      "id": "dc27eefd9992",
+      "score": 81.2,
       "left": {
-        "id": "story-3",
-        "title": "지배구조 개선안 지연에… 양종희 KB금융 회장 연임하나",
-        "summary": "지배구조 개선안 지연에… 양종희 KB금융 회장 연임하나 - 서울신문 https://www.seoul.co.kr/news/economy/finance/2026/07/06/20260706031005",
+        "id": "story-12",
+        "title": "포용금융, 지원 넘어 제도화로…금융위, 면책·지배구조 손본다",
+        "summary": "포용금융, 지원 넘어 제도화로…금융위, 면책·지배구조 손본다 - 디지털데일리 https://www.ddaily.co.kr/page/view/2026070617463822886",
         "category": "밸류업·주주환원",
-        "datetime": "07.06 02:25",
-        "source_line": "SEOUL",
-        "link_count": 2,
-        "url": "https://www.seoul.co.kr/news/economy/finance/2026/07/06/20260706031005",
+        "datetime": "07.06 20:22",
+        "source_line": "DDAILY",
+        "link_count": 1,
+        "url": "https://www.ddaily.co.kr/page/view/2026070617463822886",
         "links": [
           {
-            "source": "SEOUL",
-            "title": "지배구조 개선안 지연에… 양종희 KB금융 회장 연임하나",
-            "url": "https://www.seoul.co.kr/news/economy/finance/2026/07/06/20260706031005"
-          },
-          {
-            "source": "SEOUL",
-            "title": "늦어지는 금융지주 지배구조안… 힘받는 양종희 연임론",
-            "url": "https://www.seoul.co.kr/news/economy/2026/07/05/20260705500070"
+            "source": "DDAILY",
+            "title": "포용금융, 지원 넘어 제도화로…금융위, 면책·지배구조 손본다",
+            "url": "https://www.ddaily.co.kr/page/view/2026070617463822886"
           }
         ]
       },
       "right": {
-        "id": "story-5",
-        "title": "KB금융 인선 시작됐는데…당국 지배구조 개편안 실종",
-        "summary": "KB금융 인선 시작됐는데…당국 지배구조 개편안 '실종' - Daum https://v.daum.net/v/20260705152118570",
+        "id": "story-23",
+        "title": "은행 이자장사 초과수익 포용금융 환원위해 지배구조 개편 시동…CIFO 도입 논의",
+        "summary": "은행 이자장사 초과수익 포용금융 환원위해 지배구조 개편 시동…CIFO 도입 논의 - 대한경제 https://www.dnews.co.kr/uhtml/view.jsp?idxno=202607061412388750092",
         "category": "밸류업·주주환원",
-        "datetime": "07.05 18:20",
-        "source_line": "다음뉴스",
+        "datetime": "07.06 20:21",
+        "source_line": "DNEWS",
         "link_count": 1,
-        "url": "https://v.daum.net/v/20260705152118570",
+        "url": "https://www.dnews.co.kr/uhtml/view.jsp?idxno=202607061412388750092",
         "links": [
           {
-            "source": "다음뉴스",
-            "title": "KB금융 인선 시작됐는데…당국 지배구조 개편안 실종",
-            "url": "https://v.daum.net/v/20260705152118570"
+            "source": "DNEWS",
+            "title": "은행 이자장사 초과수익 포용금융 환원위해 지배구조 개편 시동…CIFO 도입 논의",
+            "url": "https://www.dnews.co.kr/uhtml/view.jsp?idxno=202607061412388750092"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c31f402329c3",
+      "score": 81.0,
+      "left": {
+        "id": "story-7",
+        "title": "금융위, 포용금융 최고책임자 도입 추진…지배구조 내재화 - 미디어펜",
+        "summary": "금융위, 포용금융 최고책임자 도입 추진…지배구조 내재화 - 미디어펜 https://www.mediapen.com/news/view/1108445",
+        "category": "자본시장 제도·공시",
+        "datetime": "07.06 20:22",
+        "source_line": "MEDIAPEN · M · BIZ",
+        "link_count": 4,
+        "url": "https://www.mediapen.com/news/view/1108445",
+        "links": [
+          {
+            "source": "MEDIAPEN",
+            "title": "금융위, 포용금융 최고책임자 도입 추진…지배구조 내재화 - 미디어펜",
+            "url": "https://www.mediapen.com/news/view/1108445"
+          },
+          {
+            "source": "M",
+            "title": "포용금융 지배구조에 내재화…최고책임자 도입 논의",
+            "url": "http://m.fnnews.com/news/202607061745374601"
+          },
+          {
+            "source": "BIZ",
+            "title": "금융위, 포용금융최고책임자 도입 추진…지배구조 내재화",
+            "url": "https://biz.sbs.co.kr/amp/article/20000320833"
+          },
+          {
+            "source": "BIZ",
+            "title": "금융위, 포용금융최고책임자 도입 검토… 내부통제 반영 방안도 논의",
+            "url": "https://biz.chosun.com/stock/finance/2026/07/06/3YASK2REKFBNDATDXXEIRRZFLU"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-23",
+        "title": "은행 이자장사 초과수익 포용금융 환원위해 지배구조 개편 시동…CIFO 도입 논의",
+        "summary": "은행 이자장사 초과수익 포용금융 환원위해 지배구조 개편 시동…CIFO 도입 논의 - 대한경제 https://www.dnews.co.kr/uhtml/view.jsp?idxno=202607061412388750092",
+        "category": "밸류업·주주환원",
+        "datetime": "07.06 20:21",
+        "source_line": "DNEWS",
+        "link_count": 1,
+        "url": "https://www.dnews.co.kr/uhtml/view.jsp?idxno=202607061412388750092",
+        "links": [
+          {
+            "source": "DNEWS",
+            "title": "은행 이자장사 초과수익 포용금융 환원위해 지배구조 개편 시동…CIFO 도입 논의",
+            "url": "https://www.dnews.co.kr/uhtml/view.jsp?idxno=202607061412388750092"
+          }
+        ]
+      }
+    },
+    {
+      "id": "06178c0a984f",
+      "score": 79.4,
+      "left": {
+        "id": "story-35",
+        "title": "포용금융 전략 추진단 감독총괄분과 첫 회의 개최 - 금융위원회",
+        "summary": "「포용금융 전략 추진단」 감독총괄분과 첫 회의 개최 - 금융위원회 https://www.fsc.go.kr/no010101/87265?srchCtgry=&curPage=&srchKey=&srchText=&srchBeginDt=&srchEndDt=",
+        "category": "자본시장 제도·공시",
+        "datetime": "07.06 20:22",
+        "source_line": "FSC",
+        "link_count": 1,
+        "url": "https://www.fsc.go.kr/no010101/87265?curPage=&srchBeginDt=&srchCtgry=&srchEndDt=&srchKey=&srchText=",
+        "links": [
+          {
+            "source": "FSC",
+            "title": "포용금융 전략 추진단 감독총괄분과 첫 회의 개최 - 금융위원회",
+            "url": "https://www.fsc.go.kr/no010101/87265?curPage=&srchBeginDt=&srchCtgry=&srchEndDt=&srchKey=&srchText="
+          }
+        ]
+      },
+      "right": {
+        "id": "story-36",
+        "title": "담보·고신용 쏠림 바꾼다…금융위, 한국형 포용금융 제도화 By EBN",
+        "summary": "담보·고신용 쏠림 바꾼다…금융위, 한국형 포용금융 제도화 By EBN - Investing.com https://kr.investing.com/news/stock-market-news/article-2005315",
+        "category": "자본시장 제도·공시",
+        "datetime": "07.07 00:16",
+        "source_line": "KR",
+        "link_count": 1,
+        "url": "https://kr.investing.com/news/stock-market-news/article-2005315",
+        "links": [
+          {
+            "source": "KR",
+            "title": "담보·고신용 쏠림 바꾼다…금융위, 한국형 포용금융 제도화 By EBN",
+            "url": "https://kr.investing.com/news/stock-market-news/article-2005315"
           }
         ]
       }
@@ -58,50 +144,50 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 81,
-    "matched_count": 10,
-    "missing_count": 71,
-    "coverage_rate": 12.3,
+    "url_count": 98,
+    "matched_count": 38,
+    "missing_count": 60,
+    "coverage_rate": 38.8,
     "missing": [
       {
-        "title": "지배구조 개선안 지연에…양종희 KB금융 회장 연임하나",
-        "url": "https://news.nate.com/view/20260706n01244?mid=n1101",
-        "source_message_url": "https://t.me/activistkorea/115915",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "accepted",
-        "reason": ""
-      },
-      {
-        "title": "이재용 회장, 억만장자 여름캠프 美선밸리 컨퍼런스 참석",
-        "url": "https://zdnet.co.kr/view?no=20260705160950",
-        "source_message_url": "https://t.me/activistkorea/115913",
+        "title": "한탑, 여대생 청부살인 악몽 지웠나?…창업주 횡령 유죄 뒤 복귀 논란 [유교경영리포트]",
+        "url": "https://www.cfnews.kr/news/article.html?no=109833",
+        "source_message_url": "https://t.me/activistkorea/116015",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "AI가 투자 결정한 펀드 수익률, 초기에만 반짝⋯ 인간보다 우월하지 않았다",
-        "url": "https://www.chosun.com/economy/weeklybiz/2026/07/06/WH4LOZARVFDQ5D4OO5XRR5ZWWU",
-        "source_message_url": "https://t.me/activistkorea/115914",
+        "title": "HDFC Bank Ltd (HDB) 주식 움직였습니다 상승 6.21%에 7월6일: 어떤 신호인가요?",
+        "url": "https://www.tradingkey.com/kr/news/market-movers/262013924-market-movers-hdb-20260706",
+        "source_message_url": "https://t.me/activistkorea/116016",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "광명시, 7월 바이소셜 캠페인…사회적기업 제품·서비스 우선 소비 확산",
-        "url": "https://m.etnews.com/20260705000084?obj=Tzo4OiJzdGRDbGFzcyI6Mjp7czo3OiJyZWZlcmVyIjtOO3M6NzoiZm9yd2FyZCI7czoxMzoid2ViIHRvIG1vYmlsZSI7fQ%3D%3D",
-        "source_message_url": "https://t.me/activistkorea/115912",
+        "title": "에스에너지, 자사주 86만주 전량 소각…밸류업ㆍ주주환원 본격화",
+        "url": "https://v.daum.net/v/20260706092103765",
+        "source_message_url": "https://t.me/activistkorea/116014",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_title"
+      },
+      {
+        "title": "KB금융, 차기 회장 레이스 본격화…양종희 회장 연임 여부 주목",
+        "url": "https://www.dailyenews.co.kr/news/articleView.html?idxno=51942",
+        "source_message_url": "https://t.me/activistkorea/116013",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "[기자의눈] 코리아 디스카운트 넘으려면 기업이 달라져야 한다",
-        "url": "https://www.msn.com/ko-kr/news/other/%EA%B8%B0%EC%9E%90%EC%9D%98%EB%88%88-%EC%BD%94%EB%A6%AC%EC%95%84-%EB%94%94%EC%8A%A4%EC%B9%B4%EC%9A%B4%ED%8A%B8-%EB%84%98%EC%9C%BC%EB%A0%A4%EB%A9%B4-%EA%B8%B0%EC%97%85%EC%9D%B4-%EB%8B%AC%EB%9D%BC%EC%A0%B8%EC%95%BC-%ED%95%9C%EB%8B%A4/ar-AA26XE71",
-        "source_message_url": "https://t.me/activistkorea/115910",
+        "title": "오리온, 창사 첫 분기배당 실시…주주환원 드라이브",
+        "url": "https://www.asiatoday.co.kr/kn/view.php?key=20260706010002141",
+        "source_message_url": "https://t.me/activistkorea/116007",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "excluded_domain"
+        "status": "duplicate",
+        "reason": "seen_title"
       }
     ]
   }
