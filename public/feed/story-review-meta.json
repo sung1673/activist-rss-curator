@@ -1,139 +1,86 @@
 {
-  "date_id": "2026-07-07",
-  "generated_at": "2026-07-07T06:52:34.830634+09:00",
-  "start_at": "2026-07-06T06:49:44.138872+09:00",
-  "end_at": "2026-07-07T06:49:44.138872+09:00",
-  "start_label": "2026-07-06 06:49 KST",
-  "end_label": "2026-07-07 06:49 KST",
-  "candidate_count": 5,
-  "candidate_hash": "c810aebc920d16e8",
+  "date_id": "2026-07-08",
+  "generated_at": "2026-07-08T06:39:57.600515+09:00",
+  "start_at": "2026-07-07T06:37:04.242061+09:00",
+  "end_at": "2026-07-08T06:37:04.242061+09:00",
+  "start_label": "2026-07-07 06:37 KST",
+  "end_label": "2026-07-08 06:37 KST",
+  "candidate_count": 2,
+  "candidate_hash": "0e042049b042865b",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "dc27eefd9992",
-      "score": 81.2,
+      "id": "ed810345f2f4",
+      "score": 84.2,
       "left": {
-        "id": "story-12",
-        "title": "포용금융, 지원 넘어 제도화로…금융위, 면책·지배구조 손본다",
-        "summary": "포용금융, 지원 넘어 제도화로…금융위, 면책·지배구조 손본다 - 디지털데일리 https://www.ddaily.co.kr/page/view/2026070617463822886",
-        "category": "밸류업·주주환원",
-        "datetime": "07.06 20:22",
-        "source_line": "DDAILY",
+        "id": "story-4",
+        "title": "한양증권 500억 3자 유증 법정 대립…가처분 결과 내일 결정",
+        "summary": "이규선 기자 = 과거 행동주의 를 표방했던 사모펀드 KCGI가 인수한 한양증권의 500억 원 규모 제3자 배정 유상증자를 두고 일반 주주 와 회사 측이 법정에서 ...",
+        "category": "주주행동·경영권",
+        "datetime": "07.07 13:15",
+        "source_line": "KBTHINK",
         "link_count": 1,
-        "url": "https://www.ddaily.co.kr/page/view/2026070617463822886",
+        "url": "https://kbthink.com/news-list/view.html?newsId=20260707131513776",
         "links": [
           {
-            "source": "DDAILY",
-            "title": "포용금융, 지원 넘어 제도화로…금융위, 면책·지배구조 손본다",
-            "url": "https://www.ddaily.co.kr/page/view/2026070617463822886"
+            "source": "KBTHINK",
+            "title": "한양증권 500억 3자 유증 법정 대립…가처분 결과 내일 결정",
+            "url": "https://kbthink.com/news-list/view.html?newsId=20260707131513776"
           }
         ]
       },
       "right": {
-        "id": "story-23",
-        "title": "은행 이자장사 초과수익 포용금융 환원위해 지배구조 개편 시동…CIFO 도입 논의",
-        "summary": "은행 이자장사 초과수익 포용금융 환원위해 지배구조 개편 시동…CIFO 도입 논의 - 대한경제 https://www.dnews.co.kr/uhtml/view.jsp?idxno=202607061412388750092",
-        "category": "밸류업·주주환원",
-        "datetime": "07.06 20:21",
-        "source_line": "DNEWS",
+        "id": "story-6",
+        "title": "장외파생 라이선스 어쩌나...한양증권 500억 유증 스톱 위기?",
+        "summary": "한양증권이 장외파생상품 시장 진출을 위해 추진 중인 500억원 규모 유상증자가 법원 판단에 따라 무산될 위기에 놓였다. 소액주주들이 제기한 신주발행금지 가처분 신청 결과가 이르면 8일 나올 예정이어서, 한양증권 자본 확충 계획이 분수령을 맞이할 전망이다. 7일 금융투자업계에 따르면 서…",
+        "category": "주주행동·경영권",
+        "datetime": "07.07 17:07",
+        "source_line": "ETODAY",
         "link_count": 1,
-        "url": "https://www.dnews.co.kr/uhtml/view.jsp?idxno=202607061412388750092",
+        "url": "https://www.etoday.co.kr/news/view/2601030",
         "links": [
           {
-            "source": "DNEWS",
-            "title": "은행 이자장사 초과수익 포용금융 환원위해 지배구조 개편 시동…CIFO 도입 논의",
-            "url": "https://www.dnews.co.kr/uhtml/view.jsp?idxno=202607061412388750092"
+            "source": "ETODAY",
+            "title": "장외파생 라이선스 어쩌나...한양증권 500억 유증 스톱 위기?",
+            "url": "https://www.etoday.co.kr/news/view/2601030"
           }
         ]
       }
     },
     {
-      "id": "c31f402329c3",
-      "score": 81.0,
+      "id": "e8c272742c16",
+      "score": 73.3,
       "left": {
-        "id": "story-7",
-        "title": "금융위, 포용금융 최고책임자 도입 추진…지배구조 내재화 - 미디어펜",
-        "summary": "금융위, 포용금융 최고책임자 도입 추진…지배구조 내재화 - 미디어펜 https://www.mediapen.com/news/view/1108445",
-        "category": "자본시장 제도·공시",
-        "datetime": "07.06 20:22",
-        "source_line": "MEDIAPEN · M · BIZ",
-        "link_count": 4,
-        "url": "https://www.mediapen.com/news/view/1108445",
-        "links": [
-          {
-            "source": "MEDIAPEN",
-            "title": "금융위, 포용금융 최고책임자 도입 추진…지배구조 내재화 - 미디어펜",
-            "url": "https://www.mediapen.com/news/view/1108445"
-          },
-          {
-            "source": "M",
-            "title": "포용금융 지배구조에 내재화…최고책임자 도입 논의",
-            "url": "http://m.fnnews.com/news/202607061745374601"
-          },
-          {
-            "source": "BIZ",
-            "title": "금융위, 포용금융최고책임자 도입 추진…지배구조 내재화",
-            "url": "https://biz.sbs.co.kr/amp/article/20000320833"
-          },
-          {
-            "source": "BIZ",
-            "title": "금융위, 포용금융최고책임자 도입 검토… 내부통제 반영 방안도 논의",
-            "url": "https://biz.chosun.com/stock/finance/2026/07/06/3YASK2REKFBNDATDXXEIRRZFLU"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-23",
-        "title": "은행 이자장사 초과수익 포용금융 환원위해 지배구조 개편 시동…CIFO 도입 논의",
-        "summary": "은행 이자장사 초과수익 포용금융 환원위해 지배구조 개편 시동…CIFO 도입 논의 - 대한경제 https://www.dnews.co.kr/uhtml/view.jsp?idxno=202607061412388750092",
+        "id": "story-33",
+        "title": "오리온, 창사 첫 분기배당 실시…주주환원 강화로 밸류업 속도",
+        "summary": "오리온, 창사 첫 분기배당 실시…주주환원 강화로 밸류업 속도 - 중앙이코노미뉴스 https://www.joongangenews.com/news/articleView.html?idxno=530788",
         "category": "밸류업·주주환원",
-        "datetime": "07.06 20:21",
-        "source_line": "DNEWS",
+        "datetime": "07.07 05:10",
+        "source_line": "JOONGANGENEWS",
         "link_count": 1,
-        "url": "https://www.dnews.co.kr/uhtml/view.jsp?idxno=202607061412388750092",
+        "url": "https://www.joongangenews.com/news/articleView.html?idxno=530788",
         "links": [
           {
-            "source": "DNEWS",
-            "title": "은행 이자장사 초과수익 포용금융 환원위해 지배구조 개편 시동…CIFO 도입 논의",
-            "url": "https://www.dnews.co.kr/uhtml/view.jsp?idxno=202607061412388750092"
-          }
-        ]
-      }
-    },
-    {
-      "id": "06178c0a984f",
-      "score": 79.4,
-      "left": {
-        "id": "story-35",
-        "title": "포용금융 전략 추진단 감독총괄분과 첫 회의 개최 - 금융위원회",
-        "summary": "「포용금융 전략 추진단」 감독총괄분과 첫 회의 개최 - 금융위원회 https://www.fsc.go.kr/no010101/87265?srchCtgry=&curPage=&srchKey=&srchText=&srchBeginDt=&srchEndDt=",
-        "category": "자본시장 제도·공시",
-        "datetime": "07.06 20:22",
-        "source_line": "FSC",
-        "link_count": 1,
-        "url": "https://www.fsc.go.kr/no010101/87265?curPage=&srchBeginDt=&srchCtgry=&srchEndDt=&srchKey=&srchText=",
-        "links": [
-          {
-            "source": "FSC",
-            "title": "포용금융 전략 추진단 감독총괄분과 첫 회의 개최 - 금융위원회",
-            "url": "https://www.fsc.go.kr/no010101/87265?curPage=&srchBeginDt=&srchCtgry=&srchEndDt=&srchKey=&srchText="
+            "source": "JOONGANGENEWS",
+            "title": "오리온, 창사 첫 분기배당 실시…주주환원 강화로 밸류업 속도",
+            "url": "https://www.joongangenews.com/news/articleView.html?idxno=530788"
           }
         ]
       },
       "right": {
-        "id": "story-36",
-        "title": "담보·고신용 쏠림 바꾼다…금융위, 한국형 포용금융 제도화 By EBN",
-        "summary": "담보·고신용 쏠림 바꾼다…금융위, 한국형 포용금융 제도화 By EBN - Investing.com https://kr.investing.com/news/stock-market-news/article-2005315",
-        "category": "자본시장 제도·공시",
-        "datetime": "07.07 00:16",
-        "source_line": "KR",
+        "id": "story-37",
+        "title": "오리온, 창사 첫 중간배당 실시... 자사주 소각 이어 주주환원 강화",
+        "summary": "오리온, 창사 첫 중간배당 실시... 자사주 소각 이어 주주환원 강화 - 더퍼스트미디어 https://www.thefirstmedia.net/news/articleView.html?idxno=203129",
+        "category": "밸류업·주주환원",
+        "datetime": "07.07 03:14",
+        "source_line": "THEFIRSTMEDIA",
         "link_count": 1,
-        "url": "https://kr.investing.com/news/stock-market-news/article-2005315",
+        "url": "https://www.thefirstmedia.net/news/articleView.html?idxno=203129",
         "links": [
           {
-            "source": "KR",
-            "title": "담보·고신용 쏠림 바꾼다…금융위, 한국형 포용금융 제도화 By EBN",
-            "url": "https://kr.investing.com/news/stock-market-news/article-2005315"
+            "source": "THEFIRSTMEDIA",
+            "title": "오리온, 창사 첫 중간배당 실시... 자사주 소각 이어 주주환원 강화",
+            "url": "https://www.thefirstmedia.net/news/articleView.html?idxno=203129"
           }
         ]
       }
@@ -144,50 +91,50 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 98,
-    "matched_count": 38,
-    "missing_count": 60,
-    "coverage_rate": 38.8,
+    "url_count": 80,
+    "matched_count": 49,
+    "missing_count": 31,
+    "coverage_rate": 61.3,
     "missing": [
       {
-        "title": "한탑, 여대생 청부살인 악몽 지웠나?…창업주 횡령 유죄 뒤 복귀 논란 [유교경영리포트]",
-        "url": "https://www.cfnews.kr/news/article.html?no=109833",
-        "source_message_url": "https://t.me/activistkorea/116015",
+        "title": "삼성전자 우선주, 보통주와 54% 격차, 역대 최대∙∙∙하반기엔 좁혀질까",
+        "url": "https://www.leadeconomy.co.kr/news/articleView.html?idxno=8496",
+        "source_message_url": "https://t.me/activistkorea/116097",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "HDFC Bank Ltd (HDB) 주식 움직였습니다 상승 6.21%에 7월6일: 어떤 신호인가요?",
-        "url": "https://www.tradingkey.com/kr/news/market-movers/262013924-market-movers-hdb-20260706",
-        "source_message_url": "https://t.me/activistkorea/116016",
+        "title": "체질 개선 나선 게임사들 앞다퉈 ESG 보고서",
+        "url": "https://www.kmib.co.kr/article/view_amp.asp?arcid=1783324691",
+        "source_message_url": "https://t.me/activistkorea/116095",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "에스에너지, 자사주 86만주 전량 소각…밸류업ㆍ주주환원 본격화",
-        "url": "https://v.daum.net/v/20260706092103765",
-        "source_message_url": "https://t.me/activistkorea/116014",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "seen_title"
-      },
-      {
-        "title": "KB금융, 차기 회장 레이스 본격화…양종희 회장 연임 여부 주목",
-        "url": "https://www.dailyenews.co.kr/news/articleView.html?idxno=51942",
-        "source_message_url": "https://t.me/activistkorea/116013",
+        "title": "2026 삼정KPMG 프로페서에 김갑순·김선미·신일항·조승현 교수 위촉",
+        "url": "https://v.daum.net/v/20260707162436009",
+        "source_message_url": "https://t.me/activistkorea/116094",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "오리온, 창사 첫 분기배당 실시…주주환원 드라이브",
-        "url": "https://www.asiatoday.co.kr/kn/view.php?key=20260706010002141",
-        "source_message_url": "https://t.me/activistkorea/116007",
+        "title": "무협, 차세대 글로벌 CEO 과정 신설…新통상 인재 육성",
+        "url": "https://www.g-enews.com/article/Industry/2026/07/20260707141924274624debea800_1",
+        "source_message_url": "https://t.me/activistkorea/116092",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "duplicate",
-        "reason": "seen_title"
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "국부펀드 KIC, 6번째 해외거점은 일본 - 매일경제 마켓",
+        "url": "https://stock.mk.co.kr/news/view/1117108",
+        "source_message_url": "https://t.me/activistkorea/116088",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
       }
     ]
   }
