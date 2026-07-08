@@ -1,137 +1,60 @@
 {
-  "date_id": "2026-07-08",
-  "generated_at": "2026-07-08T06:39:57.600515+09:00",
-  "start_at": "2026-07-07T06:37:04.242061+09:00",
-  "end_at": "2026-07-08T06:37:04.242061+09:00",
-  "start_label": "2026-07-07 06:37 KST",
-  "end_label": "2026-07-08 06:37 KST",
-  "candidate_count": 2,
-  "candidate_hash": "0e042049b042865b",
+  "date_id": "2026-07-09",
+  "generated_at": "2026-07-09T06:24:57.974254+09:00",
+  "start_at": "2026-07-08T06:21:22.014094+09:00",
+  "end_at": "2026-07-09T06:21:22.014094+09:00",
+  "start_label": "2026-07-08 06:21 KST",
+  "end_label": "2026-07-09 06:21 KST",
+  "candidate_count": 0,
+  "candidate_hash": "4f53cda18c2baa0c",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": [
-    {
-      "id": "ed810345f2f4",
-      "score": 84.2,
-      "left": {
-        "id": "story-4",
-        "title": "한양증권 500억 3자 유증 법정 대립…가처분 결과 내일 결정",
-        "summary": "이규선 기자 = 과거 행동주의 를 표방했던 사모펀드 KCGI가 인수한 한양증권의 500억 원 규모 제3자 배정 유상증자를 두고 일반 주주 와 회사 측이 법정에서 ...",
-        "category": "주주행동·경영권",
-        "datetime": "07.07 13:15",
-        "source_line": "KBTHINK",
-        "link_count": 1,
-        "url": "https://kbthink.com/news-list/view.html?newsId=20260707131513776",
-        "links": [
-          {
-            "source": "KBTHINK",
-            "title": "한양증권 500억 3자 유증 법정 대립…가처분 결과 내일 결정",
-            "url": "https://kbthink.com/news-list/view.html?newsId=20260707131513776"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-6",
-        "title": "장외파생 라이선스 어쩌나...한양증권 500억 유증 스톱 위기?",
-        "summary": "한양증권이 장외파생상품 시장 진출을 위해 추진 중인 500억원 규모 유상증자가 법원 판단에 따라 무산될 위기에 놓였다. 소액주주들이 제기한 신주발행금지 가처분 신청 결과가 이르면 8일 나올 예정이어서, 한양증권 자본 확충 계획이 분수령을 맞이할 전망이다. 7일 금융투자업계에 따르면 서…",
-        "category": "주주행동·경영권",
-        "datetime": "07.07 17:07",
-        "source_line": "ETODAY",
-        "link_count": 1,
-        "url": "https://www.etoday.co.kr/news/view/2601030",
-        "links": [
-          {
-            "source": "ETODAY",
-            "title": "장외파생 라이선스 어쩌나...한양증권 500억 유증 스톱 위기?",
-            "url": "https://www.etoday.co.kr/news/view/2601030"
-          }
-        ]
-      }
-    },
-    {
-      "id": "e8c272742c16",
-      "score": 73.3,
-      "left": {
-        "id": "story-33",
-        "title": "오리온, 창사 첫 분기배당 실시…주주환원 강화로 밸류업 속도",
-        "summary": "오리온, 창사 첫 분기배당 실시…주주환원 강화로 밸류업 속도 - 중앙이코노미뉴스 https://www.joongangenews.com/news/articleView.html?idxno=530788",
-        "category": "밸류업·주주환원",
-        "datetime": "07.07 05:10",
-        "source_line": "JOONGANGENEWS",
-        "link_count": 1,
-        "url": "https://www.joongangenews.com/news/articleView.html?idxno=530788",
-        "links": [
-          {
-            "source": "JOONGANGENEWS",
-            "title": "오리온, 창사 첫 분기배당 실시…주주환원 강화로 밸류업 속도",
-            "url": "https://www.joongangenews.com/news/articleView.html?idxno=530788"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-37",
-        "title": "오리온, 창사 첫 중간배당 실시... 자사주 소각 이어 주주환원 강화",
-        "summary": "오리온, 창사 첫 중간배당 실시... 자사주 소각 이어 주주환원 강화 - 더퍼스트미디어 https://www.thefirstmedia.net/news/articleView.html?idxno=203129",
-        "category": "밸류업·주주환원",
-        "datetime": "07.07 03:14",
-        "source_line": "THEFIRSTMEDIA",
-        "link_count": 1,
-        "url": "https://www.thefirstmedia.net/news/articleView.html?idxno=203129",
-        "links": [
-          {
-            "source": "THEFIRSTMEDIA",
-            "title": "오리온, 창사 첫 중간배당 실시... 자사주 소각 이어 주주환원 강화",
-            "url": "https://www.thefirstmedia.net/news/articleView.html?idxno=203129"
-          }
-        ]
-      }
-    }
-  ],
+  "candidates": [],
   "benchmark_coverage": {
     "enabled": true,
     "handles": [
       "activistkorea"
     ],
-    "url_count": 80,
-    "matched_count": 49,
-    "missing_count": 31,
-    "coverage_rate": 61.3,
+    "url_count": 128,
+    "matched_count": 53,
+    "missing_count": 75,
+    "coverage_rate": 41.4,
     "missing": [
       {
-        "title": "삼성전자 우선주, 보통주와 54% 격차, 역대 최대∙∙∙하반기엔 좁혀질까",
-        "url": "https://www.leadeconomy.co.kr/news/articleView.html?idxno=8496",
-        "source_message_url": "https://t.me/activistkorea/116097",
+        "title": "신용보증기금, 중소벤처기업부 장관 표창 수상",
+        "url": "https://www.todaymild.com/news/articleView.html?idxno=35429",
+        "source_message_url": "https://t.me/activistkorea/116226",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "체질 개선 나선 게임사들 앞다퉈 ESG 보고서",
-        "url": "https://www.kmib.co.kr/article/view_amp.asp?arcid=1783324691",
-        "source_message_url": "https://t.me/activistkorea/116095",
+        "title": "분산투자 원칙 깨진 ETF…가치주ETF마저 절반이 닉스퀘어 - 코스피",
+        "url": "https://stock.mk.co.kr/news/view/1117836",
+        "source_message_url": "https://t.me/activistkorea/116225",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "2026 삼정KPMG 프로페서에 김갑순·김선미·신일항·조승현 교수 위촉",
-        "url": "https://v.daum.net/v/20260707162436009",
-        "source_message_url": "https://t.me/activistkorea/116094",
+        "title": "신용보증기금, 전주기 지원 성과... 장관 표창 | - 뉴스워커",
+        "url": "http://www.newsworker.co.kr/news/articleViewAmp.html?idxno=435178",
+        "source_message_url": "https://t.me/activistkorea/116224",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "무협, 차세대 글로벌 CEO 과정 신설…新통상 인재 육성",
-        "url": "https://www.g-enews.com/article/Industry/2026/07/20260707141924274624debea800_1",
-        "source_message_url": "https://t.me/activistkorea/116092",
+        "title": "최대 4조 분할되나…권혁빈 이혼재판 4년 만에 1심 결론 수순",
+        "url": "https://v.daum.net/v/20260709000230984",
+        "source_message_url": "https://t.me/activistkorea/116222",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "국부펀드 KIC, 6번째 해외거점은 일본 - 매일경제 마켓",
-        "url": "https://stock.mk.co.kr/news/view/1117108",
-        "source_message_url": "https://t.me/activistkorea/116088",
+        "title": "[기자의 눈] ESG 경쟁력은 보고서의 두께가 아니다 - 데일리팜",
+        "url": "https://www.dailypharm.com/user/news/340195",
+        "source_message_url": "https://t.me/activistkorea/116223",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
