@@ -1,60 +1,99 @@
 {
-  "date_id": "2026-07-09",
-  "generated_at": "2026-07-09T06:24:57.974254+09:00",
-  "start_at": "2026-07-08T06:21:22.014094+09:00",
-  "end_at": "2026-07-09T06:21:22.014094+09:00",
-  "start_label": "2026-07-08 06:21 KST",
-  "end_label": "2026-07-09 06:21 KST",
-  "candidate_count": 0,
-  "candidate_hash": "4f53cda18c2baa0c",
+  "date_id": "2026-07-10",
+  "generated_at": "2026-07-10T06:38:52.727194+09:00",
+  "start_at": "2026-07-09T06:36:34.193656+09:00",
+  "end_at": "2026-07-10T06:36:34.193656+09:00",
+  "start_label": "2026-07-09 06:36 KST",
+  "end_label": "2026-07-10 06:36 KST",
+  "candidate_count": 1,
+  "candidate_hash": "fe7268be86c776df",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": [],
+  "candidates": [
+    {
+      "id": "c9afa36ebe45",
+      "score": 75.1,
+      "left": {
+        "id": "story-36",
+        "title": "④셀프 개혁만 남은 이사회… 거버넌스 리스크는 그대로 [표류하는 새KT] | - IT조선",
+        "summary": "④셀프 개혁만 남은 이사회… 거버넌스 리스크는 그대로 [표류하는 새KT] | - IT조선 https://it.chosun.com/news/articleViewAmp.html?idxno=2023092165346",
+        "category": "밸류업·주주환원",
+        "datetime": "07.09 09:34",
+        "source_line": "IT",
+        "link_count": 1,
+        "url": "https://it.chosun.com/news/articleViewAmp.html?idxno=2023092165346",
+        "links": [
+          {
+            "source": "IT",
+            "title": "④셀프 개혁만 남은 이사회… 거버넌스 리스크는 그대로 [표류하는 새KT] | - IT조선",
+            "url": "https://it.chosun.com/news/articleViewAmp.html?idxno=2023092165346"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-37",
+        "title": "[지배구조 분석 A+]⑥KT&G, 지배구조 경쟁력 입증",
+        "summary": "[지배구조 분석 A+]⑥KT&G, 지배구조 경쟁력 입증 - 한스경제 https://www.hansbiz.co.kr/news/articleView.html?idxno=849162",
+        "category": "밸류업·주주환원",
+        "datetime": "07.09 07:18",
+        "source_line": "HANSBIZ",
+        "link_count": 1,
+        "url": "https://www.hansbiz.co.kr/news/articleView.html?idxno=849162",
+        "links": [
+          {
+            "source": "HANSBIZ",
+            "title": "[지배구조 분석 A+]⑥KT&G, 지배구조 경쟁력 입증",
+            "url": "https://www.hansbiz.co.kr/news/articleView.html?idxno=849162"
+          }
+        ]
+      }
+    }
+  ],
   "benchmark_coverage": {
     "enabled": true,
     "handles": [
       "activistkorea"
     ],
-    "url_count": 128,
-    "matched_count": 53,
-    "missing_count": 75,
-    "coverage_rate": 41.4,
+    "url_count": 89,
+    "matched_count": 42,
+    "missing_count": 47,
+    "coverage_rate": 47.2,
     "missing": [
       {
-        "title": "신용보증기금, 중소벤처기업부 장관 표창 수상",
-        "url": "https://www.todaymild.com/news/articleView.html?idxno=35429",
-        "source_message_url": "https://t.me/activistkorea/116226",
+        "title": "앤트로픽, 노벨상 버냉키 前연준의장 독립 지배기구 위원 위촉",
+        "url": "https://www.koreadaily.com/article/20260709132407847",
+        "source_message_url": "https://t.me/activistkorea/116317",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "분산투자 원칙 깨진 ETF…가치주ETF마저 절반이 닉스퀘어 - 코스피",
-        "url": "https://stock.mk.co.kr/news/view/1117836",
-        "source_message_url": "https://t.me/activistkorea/116225",
+        "title": "지큐티코리아, 특구 글로벌 PoC 사업으로 BTQ서 10억 원 투자받아",
+        "url": "https://zdnet.co.kr/view?no=20260709162157",
+        "source_message_url": "https://t.me/activistkorea/116316",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "신용보증기금, 전주기 지원 성과... 장관 표창 | - 뉴스워커",
-        "url": "http://www.newsworker.co.kr/news/articleViewAmp.html?idxno=435178",
-        "source_message_url": "https://t.me/activistkorea/116224",
+        "title": "특구재단, 딥테크 기업 글로벌 영토 확장 진두지휘",
+        "url": "http://www.ccnnews.co.kr/news/articleView.html?idxno=411874",
+        "source_message_url": "https://t.me/activistkorea/116314",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "최대 4조 분할되나…권혁빈 이혼재판 4년 만에 1심 결론 수순",
-        "url": "https://v.daum.net/v/20260709000230984",
-        "source_message_url": "https://t.me/activistkorea/116222",
+        "title": "최태원 말고 고승범에게...SK하닉 관련 2가지 질문 [전문] - 데일리브리프",
+        "url": "https://www.dailybrief.co.kr/news/articleView.html?idxno=6289",
+        "source_message_url": "https://t.me/activistkorea/116315",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "[기자의 눈] ESG 경쟁력은 보고서의 두께가 아니다 - 데일리팜",
-        "url": "https://www.dailypharm.com/user/news/340195",
-        "source_message_url": "https://t.me/activistkorea/116223",
+        "title": "IR은 비용인가 투자인가 ... 바이오 기업 가치 높이는 핵심 해법은 지속적 소통",
+        "url": "https://www.hkn24.com/news/articleView.html?idxno=350320",
+        "source_message_url": "https://t.me/activistkorea/116312",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
