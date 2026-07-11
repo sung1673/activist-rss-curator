@@ -1,10 +1,10 @@
 {
-  "date_id": "2026-07-11",
-  "generated_at": "2026-07-11T06:22:47.245943+09:00",
-  "start_at": "2026-07-10T06:19:57.603795+09:00",
-  "end_at": "2026-07-11T06:19:57.603795+09:00",
-  "start_label": "2026-07-10 06:19 KST",
-  "end_label": "2026-07-11 06:19 KST",
+  "date_id": "2026-07-12",
+  "generated_at": "2026-07-12T06:04:09.094239+09:00",
+  "start_at": "2026-07-11T06:02:22.489353+09:00",
+  "end_at": "2026-07-12T06:02:22.489353+09:00",
+  "start_label": "2026-07-11 06:02 KST",
+  "end_label": "2026-07-12 06:02 KST",
   "candidate_count": 0,
   "candidate_hash": "4f53cda18c2baa0c",
   "page_url": "https://news.bside.ai/feed/story-review.html",
@@ -14,47 +14,47 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 95,
-    "matched_count": 27,
-    "missing_count": 68,
-    "coverage_rate": 28.4,
+    "url_count": 60,
+    "matched_count": 13,
+    "missing_count": 47,
+    "coverage_rate": 21.7,
     "missing": [
       {
-        "title": "사조산업, 오너 배당 집중 논란…저배당 탈피 시험대",
-        "url": "https://www.speconomy.com/news/articleView.html?idxno=415946",
-        "source_message_url": "https://t.me/activistkorea/116414",
+        "title": "SK하이닉스의 뉴욕 가격표…시험대 오른 코리아 디스카운트 - 플래텀",
+        "url": "https://platum.kr/archives/290755",
+        "source_message_url": "https://t.me/activistkorea/116469",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "중앙그룹 수사 이뤄지나… 회생 신청 5일 전 채권 판매",
-        "url": "https://www.lawtimes.co.kr/news/articleView.html?idxno=223432",
-        "source_message_url": "https://t.me/activistkorea/116412",
+        "title": "최태원 회장, SK하이닉스 나스닥 상장…미국 증권시장의 역사적인 순간",
+        "url": "https://www.ejanews.co.kr/news/articleView.html?idxno=334416",
+        "source_message_url": "https://t.me/activistkorea/116467",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "SK하이닉스, 오늘부터 나스닥 거래…코리아 디스카운트 깨나",
-        "url": "https://www.g-enews.com/article/Securities/2026/07/202607101410586938e250e8e188_1",
-        "source_message_url": "https://t.me/activistkorea/116410",
+        "title": "결의안 10-NQ/TW는 고품질 외국인직접투자(FDI) 유입에 탄력을 불어넣을 것입니다.",
+        "url": "https://www.vietnam.vn/ko/nghi-quyet-10-nq-tw-se-tao-luc-day-cho-dong-von-fdi-chat-luong-cao",
+        "source_message_url": "https://t.me/activistkorea/116465",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "교황이 던진 AI 시대 인간 존엄에 대한 질문 - 대학지성 In&Out",
-        "url": "https://www.unipress.co.kr/news/articleView.html?idxno=14888",
-        "source_message_url": "https://t.me/activistkorea/116411",
+        "title": "에이치엘사이언스: B2C 브랜드사에서 B2B 제조 전문 기업으로 전환 중, 마케팅 비용 통제 과제",
+        "url": "https://contents.premium.naver.com/psythinktank/thinktank/contents/260711144946603ov",
+        "source_message_url": "https://t.me/activistkorea/116466",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "닉소아, 오린 히치먼 14.55% 지분 확보..레스메드는 1.95%로 축소 | 뉴스 - 초이스스탁",
-        "url": "https://www.choicestock.co.kr/stock/news_view/160436",
-        "source_message_url": "https://t.me/activistkorea/116409",
+        "title": "LG·GS 사업 재편 수개월째 공전...기싸움에 여수 불안 - KBC광주방송",
+        "url": "https://www.ikbc.co.kr/article/view/kbc202607110035",
+        "source_message_url": "https://t.me/activistkorea/116464",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
