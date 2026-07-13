@@ -1,184 +1,134 @@
 {
-  "date_id": "2026-07-13",
-  "generated_at": "2026-07-13T05:59:59.773562+09:00",
-  "start_at": "2026-07-12T05:58:03.692219+09:00",
-  "end_at": "2026-07-13T05:58:03.692219+09:00",
-  "start_label": "2026-07-12 05:58 KST",
-  "end_label": "2026-07-13 05:58 KST",
-  "candidate_count": 4,
-  "candidate_hash": "fe0f9c671991e31f",
+  "date_id": "2026-07-14",
+  "generated_at": "2026-07-14T06:09:08.190832+09:00",
+  "start_at": "2026-07-13T06:06:24.935610+09:00",
+  "end_at": "2026-07-14T06:06:24.935610+09:00",
+  "start_label": "2026-07-13 06:06 KST",
+  "end_label": "2026-07-14 06:06 KST",
+  "candidate_count": 12,
+  "candidate_hash": "3b23b16f7858053d",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "0bdd514373ad",
-      "score": 82.7,
+      "id": "26802f9514a8",
+      "score": 91.0,
       "left": {
-        "id": "story-7",
-        "title": "신한지주, 영국서 IR…글로벌 거버넌스 갖출 것",
-        "summary": "신한지주, 영국서 IR…“글로벌 거버넌스 갖출 것” | 서울경제 https://www.sedaily.com/article/20066690",
+        "id": "story-18",
+        "title": "고려아연 정기주총 적법성 대법이 인정…의결권 제한 위자료 판결, 지배구조 영향無",
+        "summary": "고려아연 \"정기주총 적법성 대법이 인정…의결권 제한 위자료 판결, 지배구조 영향無\" - 뉴시스 https://www.newsis.com/view/NISX20260713_0003707499",
         "category": "밸류업·주주환원",
-        "datetime": "07.12 18:47",
-        "source_line": "SEDAILY",
+        "datetime": "07.13 18:59",
+        "source_line": "뉴시스",
         "link_count": 1,
-        "url": "https://www.sedaily.com/article/20066690",
+        "url": "https://www.newsis.com/view/NISX20260713_0003707499",
         "links": [
           {
-            "source": "SEDAILY",
-            "title": "신한지주, 영국서 IR…글로벌 거버넌스 갖출 것",
-            "url": "https://www.sedaily.com/article/20066690"
+            "source": "뉴시스",
+            "title": "고려아연 정기주총 적법성 대법이 인정…의결권 제한 위자료 판결, 지배구조 영향無",
+            "url": "https://www.newsis.com/view/NISX20260713_0003707499"
           }
         ]
       },
       "right": {
-        "id": "story-9",
-        "title": "신한지주, 글로벌 지배구조 리더십 확보...해외 투자자와 소통 정례화 - 아시아에이",
-        "summary": "신한지주, 글로벌 지배구조 리더십 확보...해외 투자자와 소통 정례화 - 아시아에이 https://www.asiaa.co.kr/news/articleViewAmp.html?idxno=254945",
+        "id": "story-28",
+        "title": "영풍 박기덕 대표 불법행위 첫 인정 vs 고려아연 지배구조 적법성 영향 無",
+        "summary": "영풍 \"박기덕 대표 불법행위 첫 인정\" vs 고려아연 \"지배구조 적법성 영향 無\" - 톱데일리 https://www.topdaily.kr/articles/110963",
         "category": "밸류업·주주환원",
-        "datetime": "07.12 15:47",
-        "source_line": "ASIAA",
+        "datetime": "07.13 18:59",
+        "source_line": "톱데일리",
         "link_count": 1,
-        "url": "https://www.asiaa.co.kr/news/articleViewAmp.html?idxno=254945",
+        "url": "https://www.topdaily.kr/articles/110963",
         "links": [
           {
-            "source": "ASIAA",
-            "title": "신한지주, 글로벌 지배구조 리더십 확보...해외 투자자와 소통 정례화 - 아시아에이",
-            "url": "https://www.asiaa.co.kr/news/articleViewAmp.html?idxno=254945"
+            "source": "톱데일리",
+            "title": "영풍 박기덕 대표 불법행위 첫 인정 vs 고려아연 지배구조 적법성 영향 無",
+            "url": "https://www.topdaily.kr/articles/110963"
           }
         ]
       }
     },
     {
-      "id": "75fb5b94cb3f",
-      "score": 82.2,
+      "id": "76015873e0fe",
+      "score": 87.5,
       "left": {
-        "id": "story-1",
-        "title": "해외 IR 나선 신한금융 이사회 의장…글로벌 스탠다드 거버넌스로 밸류업 뒷받침",
-        "summary": "해외 IR 나선 신한금융 이사회 의장…“글로벌 스탠다드 거버넌스로 밸류업 뒷받침” | https://www.getnews.co.kr/news/articleViewAmp.html?idxno=874806",
-        "category": "밸류업·주주환원",
-        "datetime": "07.13 03:58",
-        "source_line": "GETNEWS · 블로터 · PUBLIC25 · NEWSWORKS · STRAIGHTNEWS",
-        "link_count": 22,
-        "url": "https://www.getnews.co.kr/news/articleViewAmp.html?idxno=874806",
-        "links": [
-          {
-            "source": "GETNEWS",
-            "title": "해외 IR 나선 신한금융 이사회 의장…글로벌 스탠다드 거버넌스로 밸류업 뒷받침",
-            "url": "https://www.getnews.co.kr/news/articleViewAmp.html?idxno=874806"
-          },
-          {
-            "source": "블로터",
-            "title": "신한금융, 경영진·이사회 해외 IR 투트랙…밸류업 신뢰 강화",
-            "url": "https://www.bloter.net/news/articleView.html?idxno=667886"
-          },
-          {
-            "source": "PUBLIC25",
-            "title": "신한지주 이사회 곽수근 의장, 영국서 해외 IR…글로벌 스탠다드 거버넌스로 기업가치 높인다",
-            "url": "https://www.public25.com/news/articleView.html?idxno=50401"
-          },
-          {
-            "source": "NEWSWORKS",
-            "title": "신한금융 이사회, 해외 IR 정례화…거버넌스 밸류업 속도 - 뉴스웍스",
-            "url": "https://www.newsworks.co.kr/news/articleViewAmp.html?idxno=846881"
-          },
-          {
-            "source": "STRAIGHTNEWS",
-            "title": "신한지주 해외IR, 곽수근 이사회 의장 직접 나서",
-            "url": "https://www.straightnews.co.kr/news/articleView.html?idxno=306879"
-          }
-        ]
-      },
-      "right": {
         "id": "story-7",
-        "title": "신한지주, 영국서 IR…글로벌 거버넌스 갖출 것",
-        "summary": "신한지주, 영국서 IR…“글로벌 거버넌스 갖출 것” | 서울경제 https://www.sedaily.com/article/20066690",
-        "category": "밸류업·주주환원",
-        "datetime": "07.12 18:47",
-        "source_line": "SEDAILY",
-        "link_count": 1,
-        "url": "https://www.sedaily.com/article/20066690",
-        "links": [
-          {
-            "source": "SEDAILY",
-            "title": "신한지주, 영국서 IR…글로벌 거버넌스 갖출 것",
-            "url": "https://www.sedaily.com/article/20066690"
-          }
-        ]
-      }
-    },
-    {
-      "id": "3884d935cd90",
-      "score": 79.8,
-      "left": {
-        "id": "story-1",
-        "title": "해외 IR 나선 신한금융 이사회 의장…글로벌 스탠다드 거버넌스로 밸류업 뒷받침",
-        "summary": "해외 IR 나선 신한금융 이사회 의장…“글로벌 스탠다드 거버넌스로 밸류업 뒷받침” | https://www.getnews.co.kr/news/articleViewAmp.html?idxno=874806",
-        "category": "밸류업·주주환원",
-        "datetime": "07.13 03:58",
-        "source_line": "GETNEWS · 블로터 · PUBLIC25 · NEWSWORKS · STRAIGHTNEWS",
-        "link_count": 22,
-        "url": "https://www.getnews.co.kr/news/articleViewAmp.html?idxno=874806",
-        "links": [
-          {
-            "source": "GETNEWS",
-            "title": "해외 IR 나선 신한금융 이사회 의장…글로벌 스탠다드 거버넌스로 밸류업 뒷받침",
-            "url": "https://www.getnews.co.kr/news/articleViewAmp.html?idxno=874806"
-          },
-          {
-            "source": "블로터",
-            "title": "신한금융, 경영진·이사회 해외 IR 투트랙…밸류업 신뢰 강화",
-            "url": "https://www.bloter.net/news/articleView.html?idxno=667886"
-          },
-          {
-            "source": "PUBLIC25",
-            "title": "신한지주 이사회 곽수근 의장, 영국서 해외 IR…글로벌 스탠다드 거버넌스로 기업가치 높인다",
-            "url": "https://www.public25.com/news/articleView.html?idxno=50401"
-          },
-          {
-            "source": "NEWSWORKS",
-            "title": "신한금융 이사회, 해외 IR 정례화…거버넌스 밸류업 속도 - 뉴스웍스",
-            "url": "https://www.newsworks.co.kr/news/articleViewAmp.html?idxno=846881"
-          },
-          {
-            "source": "STRAIGHTNEWS",
-            "title": "신한지주 해외IR, 곽수근 이사회 의장 직접 나서",
-            "url": "https://www.straightnews.co.kr/news/articleView.html?idxno=306879"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-4",
-        "title": "신한금융 곽수근 의장, 영국서 글로벌 투자자와 기업가치·거버넌스 소통",
-        "summary": "신한금융 곽수근 의장, 영국서 글로벌 투자자와 '기업가치·거버넌스' 소통 - 베타뉴스 https://www.betanews.net/article/view/beta202607120014",
+        "title": "영풍 의결권 제한 위법…고려아연 지배구조 영향 없다 정면충돌",
+        "summary": "영풍 \"의결권 제한 위법\"…고려아연 \"지배구조 영향 없다\" 정면충돌 - 뉴스투데이 https://www.news2day.co.kr/article/20260713500213",
         "category": "주주행동·경영권",
-        "datetime": "07.13 00:43",
-        "source_line": "BETANEWS · ASIATODAY · TTLNEWS · AJUNEWS · BUSINESSPOST",
-        "link_count": 5,
-        "url": "https://www.betanews.net/article/view/beta202607120014",
+        "datetime": "07.13 18:59",
+        "source_line": "뉴스투데이 · FIELDNEWS",
+        "link_count": 2,
+        "url": "https://www.news2day.co.kr/article/20260713500213",
         "links": [
           {
-            "source": "BETANEWS",
-            "title": "신한금융 곽수근 의장, 영국서 글로벌 투자자와 기업가치·거버넌스 소통",
-            "url": "https://www.betanews.net/article/view/beta202607120014"
+            "source": "뉴스투데이",
+            "title": "영풍 의결권 제한 위법…고려아연 지배구조 영향 없다 정면충돌",
+            "url": "https://www.news2day.co.kr/article/20260713500213"
           },
           {
-            "source": "ASIATODAY",
-            "title": "신한금융 이사회, 영국서 글로벌 IR…기업가치 제고 전략 공유",
-            "url": "https://www.asiatoday.co.kr/kn/view.php?key=20260712010004267"
+            "source": "FIELDNEWS",
+            "title": "임시주총서 영풍 의결권 제한은 불법…고려아연 현재 지배구조에 영향 없다",
+            "url": "https://www.fieldnews.kr/news/articleView.html?idxno=29939"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-12",
+        "title": "고려아연 임시주총 의결권 제한 판결, 현 지배구조와 무관… 영풍·MBK 침소봉대",
+        "summary": "고려아연 “임시주총 의결권 제한 판결, 현 지배구조와 무관… 영풍·MBK 침소봉대” https://biz.chosun.com/industry/company/2026/07/13/FZDX3XD7TVEWTPBZNBCLNO3AKM/",
+        "category": "주주행동·경영권",
+        "datetime": "07.13 18:59",
+        "source_line": "BIZ",
+        "link_count": 1,
+        "url": "https://biz.chosun.com/industry/company/2026/07/13/FZDX3XD7TVEWTPBZNBCLNO3AKM",
+        "links": [
+          {
+            "source": "BIZ",
+            "title": "고려아연 임시주총 의결권 제한 판결, 현 지배구조와 무관… 영풍·MBK 침소봉대",
+            "url": "https://biz.chosun.com/industry/company/2026/07/13/FZDX3XD7TVEWTPBZNBCLNO3AKM"
+          }
+        ]
+      }
+    },
+    {
+      "id": "7b2167d9d622",
+      "score": 86.5,
+      "left": {
+        "id": "story-7",
+        "title": "영풍 의결권 제한 위법…고려아연 지배구조 영향 없다 정면충돌",
+        "summary": "영풍 \"의결권 제한 위법\"…고려아연 \"지배구조 영향 없다\" 정면충돌 - 뉴스투데이 https://www.news2day.co.kr/article/20260713500213",
+        "category": "주주행동·경영권",
+        "datetime": "07.13 18:59",
+        "source_line": "뉴스투데이 · FIELDNEWS",
+        "link_count": 2,
+        "url": "https://www.news2day.co.kr/article/20260713500213",
+        "links": [
+          {
+            "source": "뉴스투데이",
+            "title": "영풍 의결권 제한 위법…고려아연 지배구조 영향 없다 정면충돌",
+            "url": "https://www.news2day.co.kr/article/20260713500213"
           },
           {
-            "source": "TTLNEWS",
-            "title": "곽수근 의장, 영국서 글로벌 투자자 대상 IR 진행…기업가치·지배구조 설명",
-            "url": "https://www.ttlnews.com/news/articleView.html?idxno=3124705"
-          },
+            "source": "FIELDNEWS",
+            "title": "임시주총서 영풍 의결권 제한은 불법…고려아연 현재 지배구조에 영향 없다",
+            "url": "https://www.fieldnews.kr/news/articleView.html?idxno=29939"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-28",
+        "title": "영풍 박기덕 대표 불법행위 첫 인정 vs 고려아연 지배구조 적법성 영향 無",
+        "summary": "영풍 \"박기덕 대표 불법행위 첫 인정\" vs 고려아연 \"지배구조 적법성 영향 無\" - 톱데일리 https://www.topdaily.kr/articles/110963",
+        "category": "밸류업·주주환원",
+        "datetime": "07.13 18:59",
+        "source_line": "톱데일리",
+        "link_count": 1,
+        "url": "https://www.topdaily.kr/articles/110963",
+        "links": [
           {
-            "source": "AJUNEWS",
-            "title": "신한금융 이사회, 영국서 글로벌 IR…기업가치 제고 - 아주경제 AMP",
-            "url": "https://www.ajunews.com/amp/20260712103936227"
-          },
-          {
-            "source": "BUSINESSPOST",
-            "title": "신한금융 이사회 의장 영국서 투자설명회, 글로벌 투자자와 소통 강화",
-            "url": "https://www.businesspost.co.kr/BP?command=article_view&num=442127"
+            "source": "톱데일리",
+            "title": "영풍 박기덕 대표 불법행위 첫 인정 vs 고려아연 지배구조 적법성 영향 無",
+            "url": "https://www.topdaily.kr/articles/110963"
           }
         ]
       }
@@ -189,47 +139,47 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 91,
-    "matched_count": 43,
-    "missing_count": 48,
-    "coverage_rate": 47.3,
+    "url_count": 127,
+    "matched_count": 53,
+    "missing_count": 74,
+    "coverage_rate": 41.7,
     "missing": [
       {
-        "title": "신한지주, 에든버러·런던서 해외 IR...글로벌 투자자 소통 확대",
-        "url": "https://www.youthdaily.co.kr/news/article.html?no=222799",
-        "source_message_url": "https://t.me/activistkorea/116565",
+        "title": "위라이드, 홍콩거래소 가중투표권 가족신탁 이관 면제 승인 - 매일경제 마켓",
+        "url": "https://stock.mk.co.kr/news/view/1120289",
+        "source_message_url": "https://t.me/activistkorea/116696",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "글로벌 투자자 신뢰 잡는다…신한지주 곽수근 의장, 유럽서 기업가치 제고 IR | - 더페어",
-        "url": "https://www.thefairnews.co.kr/news/articleViewAmp.html?idxno=81882",
-        "source_message_url": "https://t.me/activistkorea/116566",
+        "title": "[핀포인트] [텔콘RF제약] 순환지배로 버틴 3사, 자본 재편 약발 다했나",
+        "url": "https://news.dealsitetv.com/articles/172794",
+        "source_message_url": "https://t.me/activistkorea/116695",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "연금학회, 학술지원사업 연구과제 선정 - 보험신보",
-        "url": "https://www.insweek.co.kr/news/articleView.html?idxno=71658",
-        "source_message_url": "https://t.me/activistkorea/116562",
+        "title": "박지성 혁신위원장 차기 축구협회장 60일 이내 선거 규정 손볼 것",
+        "url": "https://news.kbs.co.kr/news/view.do?ncd=8609395",
+        "source_message_url": "https://t.me/activistkorea/116694",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "일본 통합보고서 1200개 돌파...투자자 신뢰받은 성공요인은",
-        "url": "https://www.impacton.net/news/articleView.html?idxno=19557",
-        "source_message_url": "https://t.me/activistkorea/116559",
+        "title": "인콘, 휴마시스 지분 추가 확보 나선다…계열사 영향력 확대 행보",
+        "url": "https://www.koreadaily.com/article/20260713023548107",
+        "source_message_url": "https://t.me/activistkorea/116692",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "갈등 깊은 3C 사회 한국... 기업들 인력 투자 두려워 해",
-        "url": "https://www.sedaily.com/article/20066339",
-        "source_message_url": "https://t.me/activistkorea/116556",
+        "title": "[기획] SK하이닉스 본주, ADR 상장 기대로 8~18% 주가 효과 전망 - 데일리연합",
+        "url": "https://dailyan.com/news/article.html?no=773193",
+        "source_message_url": "https://t.me/activistkorea/116691",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
