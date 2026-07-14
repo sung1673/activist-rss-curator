@@ -1,134 +1,214 @@
 {
-  "date_id": "2026-07-14",
-  "generated_at": "2026-07-14T06:09:08.190832+09:00",
-  "start_at": "2026-07-13T06:06:24.935610+09:00",
-  "end_at": "2026-07-14T06:06:24.935610+09:00",
-  "start_label": "2026-07-13 06:06 KST",
-  "end_label": "2026-07-14 06:06 KST",
+  "date_id": "2026-07-15",
+  "generated_at": "2026-07-15T06:21:58.521704+09:00",
+  "start_at": "2026-07-14T06:17:21.177023+09:00",
+  "end_at": "2026-07-15T06:17:21.177023+09:00",
+  "start_label": "2026-07-14 06:17 KST",
+  "end_label": "2026-07-15 06:17 KST",
   "candidate_count": 12,
-  "candidate_hash": "3b23b16f7858053d",
+  "candidate_hash": "66939cd871de8e3e",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "26802f9514a8",
-      "score": 91.0,
+      "id": "72e6a90e1390",
+      "score": 89.7,
       "left": {
-        "id": "story-18",
-        "title": "고려아연 정기주총 적법성 대법이 인정…의결권 제한 위자료 판결, 지배구조 영향無",
-        "summary": "고려아연 \"정기주총 적법성 대법이 인정…의결권 제한 위자료 판결, 지배구조 영향無\" - 뉴시스 https://www.newsis.com/view/NISX20260713_0003707499",
-        "category": "밸류업·주주환원",
-        "datetime": "07.13 18:59",
-        "source_line": "뉴시스",
-        "link_count": 1,
-        "url": "https://www.newsis.com/view/NISX20260713_0003707499",
+        "id": "story-2",
+        "title": "얼라인, JB·BNK 합병 검토 공개 제안…8월 7일까지 검토 여부 밝혀달라 - 아주경제 AMP",
+        "summary": "얼라인, JB·BNK 합병 검토 공개 제안…\"8월 7일까지 검토 여부 밝혀달라\" - 아주경제 AMP https://www.ajunews.com/amp/20260714140736397",
+        "category": "주주행동·경영권",
+        "datetime": "07.15 00:17",
+        "source_line": "AJUNEWS · 매일경제 · S-ECON · FNTIMES · STOCK",
+        "link_count": 12,
+        "url": "https://www.ajunews.com/amp/20260714140736397",
         "links": [
           {
-            "source": "뉴시스",
-            "title": "고려아연 정기주총 적법성 대법이 인정…의결권 제한 위자료 판결, 지배구조 영향無",
-            "url": "https://www.newsis.com/view/NISX20260713_0003707499"
+            "source": "AJUNEWS",
+            "title": "얼라인, JB·BNK 합병 검토 공개 제안…8월 7일까지 검토 여부 밝혀달라 - 아주경제 AMP",
+            "url": "https://www.ajunews.com/amp/20260714140736397"
+          },
+          {
+            "source": "매일경제",
+            "title": "얼라인, JB·BNK 지주에 지주사 합병 검토 요청",
+            "url": "https://www.mk.co.kr/news/stock/12098199"
+          },
+          {
+            "source": "S-ECON",
+            "title": "얼라인파트너스, JB·BNK 합병 검토 공개 제안…장기적 존립 위한 유일 해법",
+            "url": "https://www.s-econ.kr/news/articleView.html?idxno=4002097"
+          },
+          {
+            "source": "FNTIMES",
+            "title": "얼라인파트너스 JB·BNK 지방금융지주 합병 검토해야…양사에 공개 제안",
+            "url": "https://www.fntimes.com/html/view.php?ud=202607141222105509179ad43907_18"
+          },
+          {
+            "source": "STOCK",
+            "title": "얼라인파트너스 JB금융지주·BNK금융지주 합병 공개 제안",
+            "url": "https://stock.mk.co.kr/news/view/1120675"
           }
         ]
       },
       "right": {
-        "id": "story-28",
-        "title": "영풍 박기덕 대표 불법행위 첫 인정 vs 고려아연 지배구조 적법성 영향 無",
-        "summary": "영풍 \"박기덕 대표 불법행위 첫 인정\" vs 고려아연 \"지배구조 적법성 영향 無\" - 톱데일리 https://www.topdaily.kr/articles/110963",
-        "category": "밸류업·주주환원",
-        "datetime": "07.13 18:59",
-        "source_line": "톱데일리",
-        "link_count": 1,
-        "url": "https://www.topdaily.kr/articles/110963",
+        "id": "story-6",
+        "title": "얼라인, JB·BNK금융에 합병 검토 제안…업계선 가능성 희박",
+        "summary": "행동주의 펀드 얼라인파트너스자산운용(이하 얼라인파트너스)이 JB금융지주 ... 이창환 얼라인파트너스 대표는 \" 주주 행동이 단순히 배당을 늘리라는 ...",
+        "category": "주주행동·경영권",
+        "datetime": "07.14 20:02",
+        "source_line": "KBANKER · 뉴스투데이",
+        "link_count": 2,
+        "url": "https://www.kbanker.co.kr/news/articleView.html?idxno=225425",
         "links": [
           {
-            "source": "톱데일리",
-            "title": "영풍 박기덕 대표 불법행위 첫 인정 vs 고려아연 지배구조 적법성 영향 無",
-            "url": "https://www.topdaily.kr/articles/110963"
+            "source": "KBANKER",
+            "title": "얼라인, JB·BNK금융에 합병 검토 제안…업계선 가능성 희박",
+            "url": "https://www.kbanker.co.kr/news/articleView.html?idxno=225425"
+          },
+          {
+            "source": "뉴스투데이",
+            "title": "얼라인 JB·BNK 합병 검토해야…양사 주주제안 절차대로 검토",
+            "url": "https://www.news2day.co.kr/article/20260714500163"
           }
         ]
       }
     },
     {
-      "id": "76015873e0fe",
-      "score": 87.5,
+      "id": "30de101ccb59",
+      "score": 89.3,
       "left": {
-        "id": "story-7",
-        "title": "영풍 의결권 제한 위법…고려아연 지배구조 영향 없다 정면충돌",
-        "summary": "영풍 \"의결권 제한 위법\"…고려아연 \"지배구조 영향 없다\" 정면충돌 - 뉴스투데이 https://www.news2day.co.kr/article/20260713500213",
+        "id": "story-2",
+        "title": "얼라인, JB·BNK 합병 검토 공개 제안…8월 7일까지 검토 여부 밝혀달라 - 아주경제 AMP",
+        "summary": "얼라인, JB·BNK 합병 검토 공개 제안…\"8월 7일까지 검토 여부 밝혀달라\" - 아주경제 AMP https://www.ajunews.com/amp/20260714140736397",
         "category": "주주행동·경영권",
-        "datetime": "07.13 18:59",
-        "source_line": "뉴스투데이 · FIELDNEWS",
-        "link_count": 2,
-        "url": "https://www.news2day.co.kr/article/20260713500213",
+        "datetime": "07.15 00:17",
+        "source_line": "AJUNEWS · 매일경제 · S-ECON · FNTIMES · STOCK",
+        "link_count": 12,
+        "url": "https://www.ajunews.com/amp/20260714140736397",
         "links": [
           {
-            "source": "뉴스투데이",
-            "title": "영풍 의결권 제한 위법…고려아연 지배구조 영향 없다 정면충돌",
-            "url": "https://www.news2day.co.kr/article/20260713500213"
+            "source": "AJUNEWS",
+            "title": "얼라인, JB·BNK 합병 검토 공개 제안…8월 7일까지 검토 여부 밝혀달라 - 아주경제 AMP",
+            "url": "https://www.ajunews.com/amp/20260714140736397"
           },
           {
-            "source": "FIELDNEWS",
-            "title": "임시주총서 영풍 의결권 제한은 불법…고려아연 현재 지배구조에 영향 없다",
-            "url": "https://www.fieldnews.kr/news/articleView.html?idxno=29939"
+            "source": "매일경제",
+            "title": "얼라인, JB·BNK 지주에 지주사 합병 검토 요청",
+            "url": "https://www.mk.co.kr/news/stock/12098199"
+          },
+          {
+            "source": "S-ECON",
+            "title": "얼라인파트너스, JB·BNK 합병 검토 공개 제안…장기적 존립 위한 유일 해법",
+            "url": "https://www.s-econ.kr/news/articleView.html?idxno=4002097"
+          },
+          {
+            "source": "FNTIMES",
+            "title": "얼라인파트너스 JB·BNK 지방금융지주 합병 검토해야…양사에 공개 제안",
+            "url": "https://www.fntimes.com/html/view.php?ud=202607141222105509179ad43907_18"
+          },
+          {
+            "source": "STOCK",
+            "title": "얼라인파트너스 JB금융지주·BNK금융지주 합병 공개 제안",
+            "url": "https://stock.mk.co.kr/news/view/1120675"
           }
         ]
       },
       "right": {
-        "id": "story-12",
-        "title": "고려아연 임시주총 의결권 제한 판결, 현 지배구조와 무관… 영풍·MBK 침소봉대",
-        "summary": "고려아연 “임시주총 의결권 제한 판결, 현 지배구조와 무관… 영풍·MBK 침소봉대” https://biz.chosun.com/industry/company/2026/07/13/FZDX3XD7TVEWTPBZNBCLNO3AKM/",
+        "id": "story-3",
+        "title": "얼라인파트너스, JB·BNK 합병 제안 - 행동주의펀드, 배당에서 산업재편으로",
+        "summary": "[더이코노미=송혜림기자] 얼라인파트너스자산운용이 14일 JB금융지주와 BNK금융지주 이사회에 합병 타당성 검토를 요구하는 공개 주주 서한을 보냈다.",
         "category": "주주행동·경영권",
-        "datetime": "07.13 18:59",
-        "source_line": "BIZ",
-        "link_count": 1,
-        "url": "https://biz.chosun.com/industry/company/2026/07/13/FZDX3XD7TVEWTPBZNBCLNO3AKM",
+        "datetime": "07.14 22:45",
+        "source_line": "THE-ECONOMY · STOCK · 매일경제 · SISAON · M",
+        "link_count": 10,
+        "url": "http://www.the-economy.co.kr/news/articleView.html?idxno=5973",
         "links": [
           {
-            "source": "BIZ",
-            "title": "고려아연 임시주총 의결권 제한 판결, 현 지배구조와 무관… 영풍·MBK 침소봉대",
-            "url": "https://biz.chosun.com/industry/company/2026/07/13/FZDX3XD7TVEWTPBZNBCLNO3AKM"
+            "source": "THE-ECONOMY",
+            "title": "얼라인파트너스, JB·BNK 합병 제안 - 행동주의펀드, 배당에서 산업재편으로",
+            "url": "http://www.the-economy.co.kr/news/articleView.html?idxno=5973"
+          },
+          {
+            "source": "STOCK",
+            "title": "행동주의펀드 얼라인 … JB·BNK지주 합쳐라 - 매일경제 마켓",
+            "url": "https://stock.mk.co.kr/news/view/1120889"
+          },
+          {
+            "source": "매일경제",
+            "title": "행동주의펀드 얼라인 … JB·BNK지주 합쳐라",
+            "url": "https://www.mk.co.kr/news/stock/12098511"
+          },
+          {
+            "source": "SISAON",
+            "title": "얼라인파트너스, 칼 빼들었다…JB·BNK금융지주 합병 검토 제안 - 시사오늘",
+            "url": "https://www.sisaon.co.kr/news/articleView.html?idxno=202682"
+          },
+          {
+            "source": "M",
+            "title": "행동주의 펀드 얼라인 JB금융·BNK금융 합병 공개 제안",
+            "url": "https://m.etnews.com/20260714000394"
           }
         ]
       }
     },
     {
-      "id": "7b2167d9d622",
-      "score": 86.5,
+      "id": "3dc32c265cea",
+      "score": 88.5,
       "left": {
-        "id": "story-7",
-        "title": "영풍 의결권 제한 위법…고려아연 지배구조 영향 없다 정면충돌",
-        "summary": "영풍 \"의결권 제한 위법\"…고려아연 \"지배구조 영향 없다\" 정면충돌 - 뉴스투데이 https://www.news2day.co.kr/article/20260713500213",
+        "id": "story-3",
+        "title": "얼라인파트너스, JB·BNK 합병 제안 - 행동주의펀드, 배당에서 산업재편으로",
+        "summary": "[더이코노미=송혜림기자] 얼라인파트너스자산운용이 14일 JB금융지주와 BNK금융지주 이사회에 합병 타당성 검토를 요구하는 공개 주주 서한을 보냈다.",
         "category": "주주행동·경영권",
-        "datetime": "07.13 18:59",
-        "source_line": "뉴스투데이 · FIELDNEWS",
-        "link_count": 2,
-        "url": "https://www.news2day.co.kr/article/20260713500213",
+        "datetime": "07.14 22:45",
+        "source_line": "THE-ECONOMY · STOCK · 매일경제 · SISAON · M",
+        "link_count": 10,
+        "url": "http://www.the-economy.co.kr/news/articleView.html?idxno=5973",
         "links": [
           {
-            "source": "뉴스투데이",
-            "title": "영풍 의결권 제한 위법…고려아연 지배구조 영향 없다 정면충돌",
-            "url": "https://www.news2day.co.kr/article/20260713500213"
+            "source": "THE-ECONOMY",
+            "title": "얼라인파트너스, JB·BNK 합병 제안 - 행동주의펀드, 배당에서 산업재편으로",
+            "url": "http://www.the-economy.co.kr/news/articleView.html?idxno=5973"
           },
           {
-            "source": "FIELDNEWS",
-            "title": "임시주총서 영풍 의결권 제한은 불법…고려아연 현재 지배구조에 영향 없다",
-            "url": "https://www.fieldnews.kr/news/articleView.html?idxno=29939"
+            "source": "STOCK",
+            "title": "행동주의펀드 얼라인 … JB·BNK지주 합쳐라 - 매일경제 마켓",
+            "url": "https://stock.mk.co.kr/news/view/1120889"
+          },
+          {
+            "source": "매일경제",
+            "title": "행동주의펀드 얼라인 … JB·BNK지주 합쳐라",
+            "url": "https://www.mk.co.kr/news/stock/12098511"
+          },
+          {
+            "source": "SISAON",
+            "title": "얼라인파트너스, 칼 빼들었다…JB·BNK금융지주 합병 검토 제안 - 시사오늘",
+            "url": "https://www.sisaon.co.kr/news/articleView.html?idxno=202682"
+          },
+          {
+            "source": "M",
+            "title": "행동주의 펀드 얼라인 JB금융·BNK금융 합병 공개 제안",
+            "url": "https://m.etnews.com/20260714000394"
           }
         ]
       },
       "right": {
-        "id": "story-28",
-        "title": "영풍 박기덕 대표 불법행위 첫 인정 vs 고려아연 지배구조 적법성 영향 無",
-        "summary": "영풍 \"박기덕 대표 불법행위 첫 인정\" vs 고려아연 \"지배구조 적법성 영향 無\" - 톱데일리 https://www.topdaily.kr/articles/110963",
-        "category": "밸류업·주주환원",
-        "datetime": "07.13 18:59",
-        "source_line": "톱데일리",
-        "link_count": 1,
-        "url": "https://www.topdaily.kr/articles/110963",
+        "id": "story-6",
+        "title": "얼라인, JB·BNK금융에 합병 검토 제안…업계선 가능성 희박",
+        "summary": "행동주의 펀드 얼라인파트너스자산운용(이하 얼라인파트너스)이 JB금융지주 ... 이창환 얼라인파트너스 대표는 \" 주주 행동이 단순히 배당을 늘리라는 ...",
+        "category": "주주행동·경영권",
+        "datetime": "07.14 20:02",
+        "source_line": "KBANKER · 뉴스투데이",
+        "link_count": 2,
+        "url": "https://www.kbanker.co.kr/news/articleView.html?idxno=225425",
         "links": [
           {
-            "source": "톱데일리",
-            "title": "영풍 박기덕 대표 불법행위 첫 인정 vs 고려아연 지배구조 적법성 영향 無",
-            "url": "https://www.topdaily.kr/articles/110963"
+            "source": "KBANKER",
+            "title": "얼라인, JB·BNK금융에 합병 검토 제안…업계선 가능성 희박",
+            "url": "https://www.kbanker.co.kr/news/articleView.html?idxno=225425"
+          },
+          {
+            "source": "뉴스투데이",
+            "title": "얼라인 JB·BNK 합병 검토해야…양사 주주제안 절차대로 검토",
+            "url": "https://www.news2day.co.kr/article/20260714500163"
           }
         ]
       }
@@ -139,47 +219,47 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 127,
-    "matched_count": 53,
-    "missing_count": 74,
-    "coverage_rate": 41.7,
+    "url_count": 140,
+    "matched_count": 81,
+    "missing_count": 59,
+    "coverage_rate": 57.9,
     "missing": [
       {
-        "title": "위라이드, 홍콩거래소 가중투표권 가족신탁 이관 면제 승인 - 매일경제 마켓",
-        "url": "https://stock.mk.co.kr/news/view/1120289",
-        "source_message_url": "https://t.me/activistkorea/116696",
+        "title": "현대차, 보스턴다이내믹스 지분 전량 인수…완전 자회사 편입 초읽기",
+        "url": "https://www.g-enews.com/article/Global-Biz/2026/07/202607142019062652bd56fbc3c_1",
+        "source_message_url": "https://t.me/activistkorea/116838",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "[핀포인트] [텔콘RF제약] 순환지배로 버틴 3사, 자본 재편 약발 다했나",
-        "url": "https://news.dealsitetv.com/articles/172794",
-        "source_message_url": "https://t.me/activistkorea/116695",
+        "title": "주주 배고픈데 곳간 넘쳐나는 영원무역",
+        "url": "https://v.daum.net/v/20260714210307014",
+        "source_message_url": "https://t.me/activistkorea/116837",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "박지성 혁신위원장 차기 축구협회장 60일 이내 선거 규정 손볼 것",
-        "url": "https://news.kbs.co.kr/news/view.do?ncd=8609395",
-        "source_message_url": "https://t.me/activistkorea/116694",
+        "title": "트러스톤, 태광산업에 밸류업 재검토 촉구 배당 인상·액면분할 - 아시아경제 CORE",
+        "url": "https://core.asiae.co.kr/article/2026071410412493456",
+        "source_message_url": "https://t.me/activistkorea/116835",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
+        "status": "duplicate",
+        "reason": "seen_url"
       },
       {
-        "title": "인콘, 휴마시스 지분 추가 확보 나선다…계열사 영향력 확대 행보",
-        "url": "https://www.koreadaily.com/article/20260713023548107",
-        "source_message_url": "https://t.me/activistkorea/116692",
+        "title": "행동주의 타깃 된 에이플러스에셋, 70억원 규모 자사주 매입",
+        "url": "https://v.daum.net/v/UN4wTwkLyJ?f=p",
+        "source_message_url": "https://t.me/activistkorea/116836",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
+        "status": "duplicate",
+        "reason": "seen_title"
       },
       {
-        "title": "[기획] SK하이닉스 본주, ADR 상장 기대로 8~18% 주가 효과 전망 - 데일리연합",
-        "url": "https://dailyan.com/news/article.html?no=773193",
-        "source_message_url": "https://t.me/activistkorea/116691",
+        "title": "LG화학, 日 도요타 양극재 직납 시작…첨단소재사업 확대 시동 - 디일렉",
+        "url": "https://www.thelec.kr/news/articleView.html?idxno=59541",
+        "source_message_url": "https://t.me/activistkorea/116833",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
