@@ -1,86 +1,164 @@
 {
-  "date_id": "2026-07-16",
-  "generated_at": "2026-07-16T06:19:50.255734+09:00",
-  "start_at": "2026-07-15T06:16:46.893791+09:00",
-  "end_at": "2026-07-16T06:16:46.893791+09:00",
-  "start_label": "2026-07-15 06:16 KST",
-  "end_label": "2026-07-16 06:16 KST",
-  "candidate_count": 2,
-  "candidate_hash": "205e037ea62876e5",
+  "date_id": "2026-07-17",
+  "generated_at": "2026-07-17T06:18:10.291759+09:00",
+  "start_at": "2026-07-16T06:14:41.105156+09:00",
+  "end_at": "2026-07-17T06:14:41.105156+09:00",
+  "start_label": "2026-07-16 06:14 KST",
+  "end_label": "2026-07-17 06:14 KST",
+  "candidate_count": 3,
+  "candidate_hash": "63145fe28798d814",
   "page_url": "https://news.bside.ai/feed/story-review.html",
   "candidates": [
     {
-      "id": "908ebe8df428",
-      "score": 82.1,
+      "id": "96db09b0f046",
+      "score": 90.6,
       "left": {
-        "id": "story-22",
-        "title": "한화, 인적분할 주총 통과…김동관 중심 지배구조 재편 본격화",
-        "summary": "한화, 인적분할 주총 통과…'김동관 중심' 지배구조 재편 본격화 - 포인트데일리 https://www.pointdaily.co.kr/news/articleView.html?idxno=312076",
-        "category": "밸류업·주주환원",
-        "datetime": "07.15 23:11",
-        "source_line": "POINTDAILY",
-        "link_count": 1,
-        "url": "https://www.pointdaily.co.kr/news/articleView.html?idxno=312076",
+        "id": "story-2",
+        "title": "삼성전자 40조 성과급 주총 승인 받아라…소액주주들, 국민연금 압박",
+        "summary": "삼성전자 반도체 부문의 특별경영성과급 지급 방안을 둘러싸고 소액주주들이 국민연금에 적극적인 주주권 행사를 촉구하고 나섰다. 노사가 합의한 성과급 지급안은 주주총회 승인을 거쳐야 하는 사안이라며 주요 주주인 국민연금의 수탁자 책임 이행을 요구한 것이다. 16일 소액주주 플랫폼 '액트(A…",
+        "category": "주주행동·경영권",
+        "datetime": "07.16 21:37",
+        "source_line": "전자신문 · 매일경제 · INEWS24 · 연합뉴스 · 뉴시스",
+        "link_count": 5,
+        "url": "https://www.etnews.com/20260716000343",
         "links": [
           {
-            "source": "POINTDAILY",
-            "title": "한화, 인적분할 주총 통과…김동관 중심 지배구조 재편 본격화",
-            "url": "https://www.pointdaily.co.kr/news/articleView.html?idxno=312076"
+            "source": "전자신문",
+            "title": "삼성전자 40조 성과급 주총 승인 받아라…소액주주들, 국민연금 압박",
+            "url": "https://www.etnews.com/20260716000343"
+          },
+          {
+            "source": "매일경제",
+            "title": "삼성전자 소액주주 40조 성과급, 주총 승인 받아라",
+            "url": "https://www.mk.co.kr/news/economy/12100333"
+          },
+          {
+            "source": "INEWS24",
+            "title": "삼성전자 소액주주, 성과급 주총 승인 거쳐야...국민연금에도 주주권 행사 요구",
+            "url": "http://www.inews24.com/view/1986098"
+          },
+          {
+            "source": "연합뉴스",
+            "title": "삼전 소액주주, 국민연금에 성과급, 주총승인 거쳐야 서한",
+            "url": "https://www.yna.co.kr/view/AKR20260716035900003"
+          },
+          {
+            "source": "뉴시스",
+            "title": "삼성전자 소액주주들 성과급, 주총 판단 받아야…국민연금 압박",
+            "url": "https://www.newsis.com/view/NISX20260716_0003711435"
           }
         ]
       },
       "right": {
-        "id": "story-27",
-        "title": "한화그룹 지배구조 개편, 오너 3형제 독립경영 체제 공식화",
-        "summary": "한화그룹 지배구조 개편, 오너 3형제 독립경영 체제 공식화 https://www.m-economynews.com/news/article.html?no=68780",
-        "category": "밸류업·주주환원",
-        "datetime": "07.15 14:12",
-        "source_line": "M-ECONOMYNEWS",
+        "id": "story-26",
+        "title": "삼성전자, 소액주주 집단행동…성과급 구조 두고 국민연금 압박 확대",
+        "summary": "(팝콘뉴스=서한나 기자) 삼성전자 소액주주들이 성과급 지급 구조를 둘러싼 문제를 제기하며 집단 행동에 나섰다. 특히 주가 하락으로 손실은 주주가 떠안는 반면, 임직원은 영업이익에 연동된 성과급을 받는 구조가 유지되면서 '위험은 주주, 보상은 임직원'이라는 불만이 확산되는 분위기다.16…",
+        "category": "주주행동·경영권",
+        "datetime": "07.16 17:00",
+        "source_line": "POPCORNNEWS",
         "link_count": 1,
-        "url": "https://www.m-economynews.com/news/article.html?no=68780",
+        "url": "http://www.popcornnews.net/news/articleView.html?idxno=126890",
         "links": [
           {
-            "source": "M-ECONOMYNEWS",
-            "title": "한화그룹 지배구조 개편, 오너 3형제 독립경영 체제 공식화",
-            "url": "https://www.m-economynews.com/news/article.html?no=68780"
+            "source": "POPCORNNEWS",
+            "title": "삼성전자, 소액주주 집단행동…성과급 구조 두고 국민연금 압박 확대",
+            "url": "http://www.popcornnews.net/news/articleView.html?idxno=126890"
           }
         ]
       }
     },
     {
-      "id": "1330343a54e5",
-      "score": 75.9,
+      "id": "d20765e30e88",
+      "score": 85.9,
       "left": {
-        "id": "story-3",
-        "title": "BNK 합병 제기한 얼라인, JB금융 약해진 지배력 파고들었다",
-        "summary": "한 금융권 관계자는 \"(JB금융의) 주주 환원이 최대 주주 의 지배력에는 부담으로 돌아오고 있는 양상\"이라며 \" 행동주의 펀드 입장에서는 활동 공간이 넓어지고 있는 ...",
+        "id": "story-2",
+        "title": "삼성전자 40조 성과급 주총 승인 받아라…소액주주들, 국민연금 압박",
+        "summary": "삼성전자 반도체 부문의 특별경영성과급 지급 방안을 둘러싸고 소액주주들이 국민연금에 적극적인 주주권 행사를 촉구하고 나섰다. 노사가 합의한 성과급 지급안은 주주총회 승인을 거쳐야 하는 사안이라며 주요 주주인 국민연금의 수탁자 책임 이행을 요구한 것이다. 16일 소액주주 플랫폼 '액트(A…",
         "category": "주주행동·경영권",
-        "datetime": "07.15 14:26",
-        "source_line": "NEWSTOPKOREA",
-        "link_count": 1,
-        "url": "https://www.newstopkorea.com/news/articleView.html?idxno=46281",
+        "datetime": "07.16 21:37",
+        "source_line": "전자신문 · 매일경제 · INEWS24 · 연합뉴스 · 뉴시스",
+        "link_count": 5,
+        "url": "https://www.etnews.com/20260716000343",
         "links": [
           {
-            "source": "NEWSTOPKOREA",
-            "title": "BNK 합병 제기한 얼라인, JB금융 약해진 지배력 파고들었다",
-            "url": "https://www.newstopkorea.com/news/articleView.html?idxno=46281"
+            "source": "전자신문",
+            "title": "삼성전자 40조 성과급 주총 승인 받아라…소액주주들, 국민연금 압박",
+            "url": "https://www.etnews.com/20260716000343"
+          },
+          {
+            "source": "매일경제",
+            "title": "삼성전자 소액주주 40조 성과급, 주총 승인 받아라",
+            "url": "https://www.mk.co.kr/news/economy/12100333"
+          },
+          {
+            "source": "INEWS24",
+            "title": "삼성전자 소액주주, 성과급 주총 승인 거쳐야...국민연금에도 주주권 행사 요구",
+            "url": "http://www.inews24.com/view/1986098"
+          },
+          {
+            "source": "연합뉴스",
+            "title": "삼전 소액주주, 국민연금에 성과급, 주총승인 거쳐야 서한",
+            "url": "https://www.yna.co.kr/view/AKR20260716035900003"
+          },
+          {
+            "source": "뉴시스",
+            "title": "삼성전자 소액주주들 성과급, 주총 판단 받아야…국민연금 압박",
+            "url": "https://www.newsis.com/view/NISX20260716_0003711435"
           }
         ]
       },
       "right": {
-        "id": "story-4",
-        "title": "234조 메가 지방은행 득인가 실인가…BNK·JB 소액주주들 셈법 복잡",
-        "summary": "행동주의 펀드 얼라인파트너스자산운용이 BNK금융과 JB금융에 합병을 제안하면서 소액 주주 들의 셈법이 복잡해지고 있다. 합병 성사 시 자산 234조원 규모의 ...",
+        "id": "story-14",
+        "title": "삼성전자 주주들 성과급도 주총 안건으로…국민연금에 서한 예고",
+        "summary": "[mdtoday = 유정민 기자] 삼성전자 소액주주들이 회사의 성과급 지급 체계에 제동을 걸기 위해 최대 주주인 국민연금공단을 상대로 본격적인 압박에 나섰다. 16일 관련 업계에 따르면, 소액주주 플랫폼 ‘액트(ACT)’는 삼성전자의 성과급 지급안을 주주총회 승인 사항으로 전환할 것을…",
         "category": "주주행동·경영권",
-        "datetime": "07.15 13:34",
-        "source_line": "S-ECON",
+        "datetime": "07.16 10:41",
+        "source_line": "MDTODAY",
         "link_count": 1,
-        "url": "https://www.s-econ.kr/news/articleView.html?idxno=4002100",
+        "url": "https://www.mdtoday.co.kr/news/articleView.html?idxno=605135",
         "links": [
           {
-            "source": "S-ECON",
-            "title": "234조 메가 지방은행 득인가 실인가…BNK·JB 소액주주들 셈법 복잡",
-            "url": "https://www.s-econ.kr/news/articleView.html?idxno=4002100"
+            "source": "MDTODAY",
+            "title": "삼성전자 주주들 성과급도 주총 안건으로…국민연금에 서한 예고",
+            "url": "https://www.mdtoday.co.kr/news/articleView.html?idxno=605135"
+          }
+        ]
+      }
+    },
+    {
+      "id": "11ca011ee9d6",
+      "score": 79.8,
+      "left": {
+        "id": "story-14",
+        "title": "삼성전자 주주들 성과급도 주총 안건으로…국민연금에 서한 예고",
+        "summary": "[mdtoday = 유정민 기자] 삼성전자 소액주주들이 회사의 성과급 지급 체계에 제동을 걸기 위해 최대 주주인 국민연금공단을 상대로 본격적인 압박에 나섰다. 16일 관련 업계에 따르면, 소액주주 플랫폼 ‘액트(ACT)’는 삼성전자의 성과급 지급안을 주주총회 승인 사항으로 전환할 것을…",
+        "category": "주주행동·경영권",
+        "datetime": "07.16 10:41",
+        "source_line": "MDTODAY",
+        "link_count": 1,
+        "url": "https://www.mdtoday.co.kr/news/articleView.html?idxno=605135",
+        "links": [
+          {
+            "source": "MDTODAY",
+            "title": "삼성전자 주주들 성과급도 주총 안건으로…국민연금에 서한 예고",
+            "url": "https://www.mdtoday.co.kr/news/articleView.html?idxno=605135"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-26",
+        "title": "삼성전자, 소액주주 집단행동…성과급 구조 두고 국민연금 압박 확대",
+        "summary": "(팝콘뉴스=서한나 기자) 삼성전자 소액주주들이 성과급 지급 구조를 둘러싼 문제를 제기하며 집단 행동에 나섰다. 특히 주가 하락으로 손실은 주주가 떠안는 반면, 임직원은 영업이익에 연동된 성과급을 받는 구조가 유지되면서 '위험은 주주, 보상은 임직원'이라는 불만이 확산되는 분위기다.16…",
+        "category": "주주행동·경영권",
+        "datetime": "07.16 17:00",
+        "source_line": "POPCORNNEWS",
+        "link_count": 1,
+        "url": "http://www.popcornnews.net/news/articleView.html?idxno=126890",
+        "links": [
+          {
+            "source": "POPCORNNEWS",
+            "title": "삼성전자, 소액주주 집단행동…성과급 구조 두고 국민연금 압박 확대",
+            "url": "http://www.popcornnews.net/news/articleView.html?idxno=126890"
           }
         ]
       }
@@ -91,47 +169,47 @@
     "handles": [
       "activistkorea"
     ],
-    "url_count": 84,
-    "matched_count": 47,
-    "missing_count": 37,
-    "coverage_rate": 56.0,
+    "url_count": 122,
+    "matched_count": 69,
+    "missing_count": 53,
+    "coverage_rate": 56.6,
     "missing": [
       {
-        "title": "1.5% 대출총량 그대로...하반기 돈 빌릴 길 더 좁아진다",
-        "url": "https://www.ekn.kr/web/view.php?key=20260715025222712",
-        "source_message_url": "https://t.me/activistkorea/116922",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "배당만으론 부족 KCGI운용, 배당성장으로 밸류업 수혜 정조준",
-        "url": "http://m.fnnews.com/news/202607141413215085",
-        "source_message_url": "https://t.me/activistkorea/116920",
+        "title": "펀웨어, 행동주의 주주 골든와이즈 요구에 반박 성명 발표…2.0 전략 지속 추진 - 데이터투자",
+        "url": "https://m.datatooza.com/article/20260717050912814cd1e7b4d31_80",
+        "source_message_url": "https://t.me/activistkorea/117047",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "duplicate",
-        "reason": "seen_title"
+        "reason": "same_title"
       },
       {
-        "title": "가스공사, 석유공사·한수원과 감사 인프라 공유",
-        "url": "https://www.gasnews.com/news/articleViewAmp.html?idxno=126083",
-        "source_message_url": "https://t.me/activistkorea/116918",
+        "title": "현대차그룹, 아틀라스 보스턴다이내믹스 100% 품었다",
+        "url": "https://www.kmib.co.kr/article/view_amp.asp?arcid=1784190744",
+        "source_message_url": "https://t.me/activistkorea/117044",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "트러스톤, 밸류업 정책 재검토 요구 태광산업에 공개주주서한 보내",
-        "url": "https://www.msn.com/ko-kr/news/other/%ED%8A%B8%EB%9F%AC%EC%8A%A4%ED%86%A4-%EB%B0%B8%EB%A5%98%EC%97%85-%EC%A0%95%EC%B1%85-%EC%9E%AC%EA%B2%80%ED%86%A0-%EC%9A%94%EA%B5%AC-%ED%83%9C%EA%B4%91%EC%82%B0%EC%97%85%EC%97%90-%EA%B3%B5%EA%B0%9C%EC%A3%BC%EC%A3%BC%EC%84%9C%ED%95%9C-%EB%B3%B4%EB%82%B4/ar-AA27QGkI",
-        "source_message_url": "https://t.me/activistkorea/116917",
+        "title": "[ESG보고서 돋보기] 하나금융, ESG를 금융의 본업으로…생산적금융·포용금융으로 지속가능성 입증",
+        "url": "https://www.dailyenews.co.kr/news/articleView.html?idxno=52136",
+        "source_message_url": "https://t.me/activistkorea/117043",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
-        "reason": "excluded_domain"
+        "reason": "low_relevance"
       },
       {
-        "title": "첨단산업엔 200조, 증시엔 구조개혁…금융사 CEO 연임절차 이달 손본다",
-        "url": "https://www.investchosun.com/site/data/html_dir/2026/07/15/2026071580125.html",
-        "source_message_url": "https://t.me/activistkorea/116911",
+        "title": "이혼 뒤 오른 SK 주가도 나누나… 최태원·노소영 세기의 재산분할 쟁점은",
+        "url": "https://biz.chosun.com/topics/law_firm/2026/07/16/NSUSJSWAENAE3FP6XXWYGINPPY",
+        "source_message_url": "https://t.me/activistkorea/117039",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "rejected",
+        "reason": "low_relevance"
+      },
+      {
+        "title": "대구백화점, 지분 25.8% 세경인베스트·아람코리아에 넘긴다",
+        "url": "https://www.kmnanews.com/news/articleView.html?idxno=10629",
+        "source_message_url": "https://t.me/activistkorea/117037",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
