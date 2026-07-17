@@ -17,7 +17,7 @@ import httpx
 
 from .cluster import cluster_articles
 from .config import article_domain_is_excluded, configured_feeds, load_config
-from .dates import choose_publication_datetime, datetime_to_iso, get_timezone, now_in_timezone, parse_datetime
+from .dates import choose_publication_datetime, datetime_to_iso, get_timezone, now_in_timezone
 from .dedupe import dedupe_articles
 from .fetch import fetch_google_alerts_articles
 from .main import PROJECT_ROOT, prepare_article

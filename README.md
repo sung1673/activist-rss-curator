@@ -1,332 +1,182 @@
-# 한국어 뉴스 큐레이션용 정제 RSS 생성기
+# BSIDE Governance Intelligence
 
-Google Alerts RSS를 주기적으로 가져와 오래된 기사, 중복 기사, 관련도 낮은 기사를 제거하고 유사 기사들을 하나의 묶음으로 만든 뒤 `public/feed.xml`을 생성합니다. 선택적으로 Telegram Bot API를 사용해 정제된 묶음을 채널에 직접 발행할 수 있습니다.
+BSIDE는 한국 기업의 거버넌스 사건을 **공식 공시, 당사자 주장, 보도, 결과, 후속 이행**까지 연결해 확인할 수 있게 만드는 공개 기록 시스템이다. 뉴스의 양보다 사건 단위 정리, 원문 보존, 근거 추적, 정정 이력과 안정적인 전달을 우선한다.
 
-## 구조
+이 저장소는 기존 Python 수집기, PHP/MySQL API, GitHub Pages를 유지하면서 거버넌스 데이터 모델과 `/api/v1`, 공식 공시 수집, 이용권한 통제, 편집 검수, DeliveryOutbox, 공개 UI를 단계적으로 전환하는 구현 브랜치다. 현재 구현 범위와 운영 전 필수 작업은 [구현 상태와 전환 체크리스트](docs/implementation-status.md)에 정리했다.
 
-기존 구조:
+## 제품 원칙
 
-```text
-Google Alerts RSS -> rss2tg_bot -> Telegram channel
-```
+- MySQL을 운영 데이터의 단일 기준으로 사용한다.
+- DART·KIND와 당사자 공식 자료를 일차 근거로 삼고 뉴스와 허가된 Telegram은 발견·맥락 보강에 사용한다.
+- 제목과 본문은 원문 언어를 보존한다. 화면 메뉴와 상태·분류 필드만 한국어·영어를 병기한다.
+- Telegram-only 정보는 `signal`로 남기며 공식 또는 독립 근거가 생기기 전 핵심 사건으로 자동 공개하지 않는다.
+- 상위·시장 민감 사건은 편집자 승인 전 공개하지 않는다.
+- 주주인증, 공동보유, 위임·투표, 종목 추천 기능은 구현하지 않는다.
 
-변경 구조:
-
-```text
-Google Alerts RSS -> GitHub Actions 정제 -> GitHub Pages feed.xml -> rss2tg_bot -> Telegram channel
-```
-
-직접 발행 구조:
+## 구성
 
 ```text
-Google Alerts RSS -> GitHub Actions 정제 -> Telegram Bot API -> Telegram channel
+DART / KIND / official statements
+                 |
+licensed Telegram + media discovery
+                 |
+          normalize and link
+                 |
+     MySQL governance entities
+                 |
+   editorial review + DeliveryOutbox
+                 |
+  /api/v1 + Pages UI + RSS/CSV/JSON
 ```
 
-AI 데일리 리뷰 구조:
+주요 구현은 다음 위치에 있다.
 
-```text
-Google Alerts/Google News RSS -> GitHub Actions 정제 -> GitHub Models daily digest -> Telegram Bot API -> Telegram channel
-```
+- `curator/governance.py`: 회사, 문서, 사건, 캠페인, 근거, 투표, 약속·이행 모델
+- `curator/official_ingest.py`, `curator/official_sources.py`: DART·KIND 증분 수집
+- `curator/source_rights.py`: 수집·AI·재배포 권한의 fail-closed 판정
+- `curator/governance_publisher.py`, `curator/publish_outbox.py`: 공개 승인 사건의 멱등 발송과 재시도
+- `deploy/activist/governance_v1.php`, `deploy/activist/openapi.yaml`: 공개·관리 API 계약
+- `public/governance/`: 접근 가능한 공개 UI
+- `.github/workflows/`: 수집, 링크 해결, 발행, 일일 배포, 감시, CI 분리
 
-RSS item 1개가 cluster 1개이며, item description 안에 유사 기사 여러 링크가 들어갑니다. 직접 발행을 켜면 Telegram 메시지는 HTML 링크 서식을 사용해 긴 기사 URL 대신 클릭 가능한 기사 제목으로 표시합니다. 한 실행에서 여러 cluster가 발행될 때는 개별 메시지로 흩뿌리지 않고 digest 스타일의 `주주·자본시장 브리핑` 한 묶음으로 발행합니다.
+## 로컬 준비와 검증
 
-## 설치
+Python 3.12를 기준으로 한다.
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+pytest -q
+python -m curator.governance_ui --root .
 ```
 
-## 로컬 실행
+공개 UI는 Node.js 22와 Chromium으로 실제 주요 흐름을 검증한다.
 
 ```bash
-python -m curator.main
+npm ci
+npx playwright install chromium
+npm run test:ui
 ```
 
-실행 후 아래 파일이 갱신됩니다.
+UI E2E는 데스크톱·모바일 사용자 여정, 역할·라벨 기반 WCAG 2.2 AA 자동 검사, 원문 언어 표시, 비공개 피드백, 250KB 전송 예산과 LCP 2.5초·INP 200ms·CLS 0.1 예산을 확인한다. 로컬 synthetic 측정은 회귀 차단용이며 정식 공개 전환에는 production RUM/가용성 증빙을 별도로 제출한다.
 
-- `public/feed.xml`
-- `public/index.html`
-- `public/404.html`
-- `public/feed/latest.html`
-- `public/feed/<YYYY-MM-DD>.html`
-- `data/state.json`
-- `data/archive/articles/<YYYY-MM-DD>.jsonl`
-- `data/archive/index.json`
-
-테스트는 다음처럼 실행합니다.
+품질 게이트는 GitHub Actions에서 실패를 허용하지 않는다.
 
 ```bash
-pytest
+ruff check curator tests
+mypy curator/governance.py curator/governance_ui.py curator/source_rights.py curator/link_discovery.py curator/editorial_ingest.py curator/governance_publisher.py curator/release_gate.py --ignore-missing-imports --follow-imports=skip --check-untyped-defs --disallow-untyped-defs --no-implicit-optional --warn-redundant-casts --warn-unused-ignores
+pip-audit --requirement requirements.txt
 ```
 
-## 설정
+타입 검사는 신규 거버넌스 핵심 모듈부터 강제하고 있으며, 기존 수집기 전체는 동작 변경 없이 점진적으로 범위를 넓힌다.
 
-`config.yaml`에서 날짜 필터, clustering buffer, 중복 기준, 발행 개수를 조정합니다.
+## 운영 설정
 
-Google Alerts RSS URL은 public repo에 직접 저장하지 말고 GitHub Actions Secret으로 관리하는 것을 권장합니다.
-`feed.xml`의 channel link에는 원본 Alert URL을 쓰지 않고, 필요하면 `public_feed_url`에 GitHub Pages의 공개 feed URL만 넣습니다.
-`config.yaml`의 `feeds`에는 공개되어도 괜찮은 Google News 보조 RSS를 둘 수 있습니다. `CURATOR_FEEDS` Secret이 있어도 보조 RSS는 함께 수집되며, 비공개 Google Alerts RSS가 먼저 처리됩니다.
-
-Secret 이름:
+민감값은 저장소에 넣지 않는다. 주요 GitHub Secret은 다음과 같다.
 
 ```text
+ACTIVIST_API_URL
+ACTIVIST_API_SECRET
+DART_API_KEY
+KIND_API_KEY
 CURATOR_FEEDS
 TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID
+TELEGRAM_ADMIN_CHAT_ID
+STORY_REVIEW_ACCESS_TOKEN
+TELEGRAM_ADMIN_ACCESS_TOKEN
 TELEGRAM_API_ID
 TELEGRAM_API_HASH
-TELEGRAM_SESSION
 TELEGRAM_SESSION_STRING
-ACTIVIST_API_URL
-ACTIVIST_API_SECRET
-STORY_REVIEW_ACCESS_TOKEN
 ```
 
-여러 Google Alerts RSS URL은 쉼표 또는 줄바꿈으로 구분합니다.
+`KIND_API_KEY`는 내부 KIND 어댑터가 인증을 요구할 때만 추가하는 선택 Secret이다.
 
-```text
-https://www.google.com/alerts/feeds/...
-https://www.google.com/alerts/feeds/...
-```
+`TELEGRAM_ADMIN_CHAT_ID`는 검수 링크 전용 비공개 1:1 사용자의 양수 numeric ID이며 공개 발송용 `TELEGRAM_CHAT_ID`와 달라야 한다. 누락되거나 형식이 다르거나 두 값이 같으면 토큰 포함 관리자 알림은 fail-closed한다.
 
-Telegram 직접 발행을 사용할 때 bot token은 절대 `config.yaml`이나 workflow 파일에 직접 쓰지 말고 `TELEGRAM_BOT_TOKEN` Secret에 저장합니다. 채널 username을 공개해도 괜찮다면 `config.yaml`의 `telegram.chat_id`를 사용할 수 있고, 숨기고 싶다면 `TELEGRAM_CHAT_ID` Secret에 `@channel_username` 또는 numeric chat id를 저장합니다.
+주요 Repository variable은 `ACTIVIST_PUBLIC_API_URL`, `GOVERNANCE_API_BASE_URL`, `KIND_DISCLOSURE_ENDPOINT`, `ENABLE_PAGES`와 단계별 전환 플래그다. 신규 파이프라인은 `ENABLE_GOVERNANCE_SHADOW`, `ENABLE_GOVERNANCE_PAGES`, `ENABLE_GOVERNANCE_DELIVERY`를 각각 명시적으로 `true`로 바꾸기 전에는 예약 실행·공개 배포·발송을 하지 않는다. 전체 목록과 예약 시각은 [운영 자동화 문서](docs/operations-automation.md)를 따른다.
 
-`STORY_REVIEW_ACCESS_TOKEN`은 “묶였어야 했는데 분리된 후보” 관리자 페이지 접근 링크에 쓰는 선택 Secret입니다. 설정하지 않으면 workflow가 `TELEGRAM_BOT_TOKEN`에서 별도 review token을 파생해 사용합니다. GitHub Pages는 정적 호스팅이므로 이 token gate는 운영 편의용 접근 제한입니다. 후보 데이터 자체가 민감해지는 경우에는 PHP API에서 token을 서버 측 검증하는 방식으로 분리해야 합니다.
+### 미디어 발견 피드 범위
 
-선택적으로 PHP/MySQL 하이브리드 저장소를 사용할 수 있습니다. `ACTIVIST_API_URL`에는 PHP API URL을, `ACTIVIST_API_SECRET`에는 서버 `_private/config.php`와 동일한 HMAC secret을 저장합니다. 이 값이 없으면 기존처럼 `state.json`과 `data/archive`만 사용하며, 값이 있으면 GitHub Actions가 수집 결과와 데일리 리포트 메타데이터를 PHP API로 동기화합니다. DB 비밀번호는 GitHub에 저장하지 않고 PHP 서버의 비공개 config에만 둡니다. 기사 hot row에는 화면·검색·중복 판단에 필요한 scalar 필드만 저장하고, 원본/debug payload는 PHP API의 `article_raw` 테이블에 gzip 압축 형태로 분리 저장합니다.
+운영 뉴스 수집은 네트워크 요청 전에 fail-closed 범위 정책을 적용한다. `korean_governance` 또는 `korean_governance_context`로 승인되지 않은 거시경제·산업·STO/ISA/IB·비한국 해외 행동주의 피드는 가져오지 않는다. Google News는 계속 발견 큐로만 사용하고 원문 제목과 언어를 바꾸지 않는다. 분류 기준과 비공개 피드 JSON 형식은 [미디어 발견 피드 범위 정책](docs/media-source-scope-policy.md)에 있다.
 
-브라우저에서 읽기 API를 직접 쓰는 기능은 별도 repository variable `ACTIVIST_PUBLIC_API_URL`이 있을 때만 HTML에 주입됩니다. 이 URL은 브라우저 개발자 도구에서 보이는 공개 정보이므로 secret이 아니라 variable로 관리합니다. 쓰기 API는 URL이 알려져도 HMAC 서명 없이는 `401`로 거부됩니다.
+### Telegram 이용권한
 
-데일리 HTML은 static-first로 동작하지만, `ACTIVIST_PUBLIC_API_URL`이 있으면 브라우저에서 `reports`, `latest_snapshot`, `articles`, `telegram_dashboard`, `search` read API를 호출해 다른 일자 목록, `이슈 레이더`, 기사별 `관련 기사 보기`, 별도 `시장 이슈 검색` 페이지를 보강합니다. 검색은 `/feed/search.html`에서 `action=search` 통합 API를 먼저 사용해 기사·이슈·Telegram 공개 채널 신호, 이벤트 분류, 확산도, 리스크 플래그, 타임라인, 투자자용 “왜 중요한가” 설명을 한 화면에 모아 보여줍니다. 통합 검색 API가 아직 배포되지 않았거나 실패하면 기존 `articles`/`latest_snapshot`/`telegram_dashboard` 조합으로 자동 전환합니다. 데일리 페이지 본문에는 검색 UI를 직접 넣지 않습니다. `관련 기사 보기`는 현재 묶음 링크와 같은 story 또는 제목 토큰 기반 관련 기사를 한 곳에 모아 매체 확산과 최근 흐름을 보여줍니다. API가 실패해도 정적 기사 페이지는 그대로 표시됩니다.
+`config.yaml`의 `telegram:activistkorea` 레코드는 형식과 차단 동작을 보여 주는 **`pending` 자리표시자**다. 증빙이 없으므로 수집, AI 입력, 재배포에 사용할 수 없다. 이를 `active`로 바꾸거나 임의 증빙을 넣어 우회하지 않는다.
 
-Telegram 공개 채널 기반 시장 언급 보강은 `telegram_sources.enabled`를 켰을 때만 동작합니다. MTProto 읽기 계정의 `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING`은 Secret으로만 주입하고, 수집 대상은 username이 있는 공개 broadcast 채널로 제한합니다. 수동 등록·비활성화는 `python -m curator.telegram_sources add|enable|disable|list`로 관리할 수 있습니다. 이미 읽기 계정이 가입한 공개 채널은 `python -m curator.telegram_sources import-joined --dry-run`으로 먼저 확인한 뒤 `--enable`로 수집 대상에 올립니다. 유사 채널 후보는 `discover`로 pending 후보에만 저장하고 자동 입장은 기본 비활성화입니다. 과거 수집은 Windows 로컬에서 `backfill-messages --days 180`로 실행할 수 있습니다. 운영 점검용 `/feed/telegram-admin.html`은 `TELEGRAM_ADMIN_ACCESS_TOKEN` 기반 승인 링크로 열며, 링크는 `python -m curator.telegram_dashboard send-access`로 Telegram 채널에 발송합니다. 자세한 운영 정책은 [`docs/telegram-public-channels.md`](docs/telegram-public-channels.md)를 참고합니다.
+운영 권한의 기준은 MySQL `SourceRight`와 역할이 제한된 `POST /api/v1/admin/source-rights`다. 권한 범위, 증빙 참조·해시, 유효기간, 철회일, AI·재배포 허용 여부를 등록한 뒤에만 처리한다. 원격 권한 레코드는 실행 시 로컬 자리표시자보다 우선하며, 만료·철회된 소스와 파생 공개 데이터는 차단된다.
 
-Telegram 채널 품질은 채널명 키워드만으로 고정하지 않고, 수집 후 실제 성과로 보정합니다. 운영 대시보드는 기본 품질 점수와 별도로 `signal_quality_score`를 계산해 메시지 수, 기사 URL 직접 매칭, 키워드 추정 매칭, 매칭률, 리스크성 문구 비율을 함께 보여줍니다. 이 점수는 투자 추천이 아니라 “이 채널이 기사/이슈 보강에 얼마나 도움이 되는지”를 보는 운영 지표입니다.
+구두 승인은 [Telegram 채널 정보 이용 구두 승인 사실 확인서](docs/telegram-channel-verbal-permission-confirmation-ko.md)로 채널·허락자·범위·유효기간·철회 방법을 기록한다. 작성 완료본은 비공개 증빙 보관소에 두고 URI 또는 SHA-256만 `SourceRight`에 등록한다.
 
-`config.yaml`에는 공개 가능한 Google News 보조 RSS를 두 축으로 추가할 수 있습니다.
+## 공식 공시 증분 수집과 백필
 
-- 국내: 주주제안, 행동주의 주주, 소액주주연대, 지배구조, 밸류업, 자사주 소각, 자사주 취득 후 소각, 상법 개정, 일반주주 의결권, 스튜어드십, 금융회사 지배구조, 사외이사, 성과보상, 자본시장법/상법, 상장폐지, 상장적격성 실질심사, 거래정지 개선기간, 의무공개매수, CB/EB, 전환사채 리픽싱, STO 제도화, 증권사 IB, 임원보수 공시, 코너스톤 투자자, ETF 의결권, 해외부동산펀드 위험설명서 등
-- 해외: `South Korea Value-up Program`, `Korea discount`, `shareholder activism`, `proxy fight`, `activist investor campaign`, `open letter`, `universal proxy` 등
-
-보조 RSS 검색어는 개별 기업명이나 특정 펀드명보다 이벤트와 제도 키워드 중심으로 구성합니다. 기업명 후보 목록은 검색용이 아니라 이미 수집된 기사들을 묶기 위한 내부 규칙으로만 사용합니다.
-
-유사 텔레그램 채널은 기사 원문을 재게시하기 위한 소스가 아니라, 반복적으로 등장하는 자본시장 이슈를 포착하는 레이더로 사용합니다. 1차 확장 키워드는 자사주 제도, 상법/공시, 일반주주 의결권, 경영권 분쟁, 스튜어드십, 밸류업 지수/ETF, CB/EB, STO, 증권사 IB처럼 기사형 뉴스로 이어질 가능성이 높은 항목부터 좁혀 반영합니다.
-
-Digest의 기사 개수 관련 설정값은 `0`이면 무제한으로 처리합니다. 텔레그램 API의 메시지 길이 제한은 피할 수 없으므로, 전체 digest가 길어지면 여러 메시지로 나누어 전송합니다. 이때 단순 글자 수가 아니라 `주주행동·거버넌스`, `자본시장·공시·상장`, `영문` 같은 큰 카테고리와 기사 묶음 단위로 분할합니다. 중복으로 걸러진 기사는 여러 매체 링크를 펼치지 않고 대표 기사 1개만 골라 일반 기사처럼 표시합니다.
-
-## 우선순위와 아카이브
-
-`state.json`은 운영 캐시이고, 장기 기사 관리는 `data/archive`와 선택적 MySQL 저장소가 담당합니다. 매 실행마다 수집·중복·거절된 기사에 `priority_score`, `priority_level`, `priority_reasons`, `story_key`를 붙인 뒤 `data/archive/articles/YYYY-MM-DD.jsonl`에 upsert합니다. PHP API가 설정되어 있으면 같은 데이터를 `activist_` prefix 테이블에도 동기화해 날짜별 재생성, 과거 중복 판단, 검색/필터 API 확장에 사용할 수 있습니다. MySQL 저장소에서는 `articles` 테이블의 `payload_json` 신규 저장을 중단하고, raw/debug 정보는 `article_raw`에 압축 저장해 공개 read API와 hot query가 불필요한 JSON을 읽지 않도록 합니다.
-
-우선순위 레벨은 다음처럼 사용합니다.
-
-- `top`: 당일 상단 배치 또는 수동 확인이 필요한 핵심 기사
-- `watch`: 후속 기사 추적 대상
-- `normal`: 일반 발행 대상
-- `archive`: 보관은 하지만 우선 노출하지 않는 기사
-- `suppress`: 보관만 하고 우선순위 표면에서는 제외
-
-수동 조정은 `data/priority_overrides.yaml`에서 관리합니다. 공개 repo에 올라가도 되는 편집 규칙만 넣고, 민감한 메모나 비공개 판단 근거는 넣지 않습니다. 예를 들어 특정 URL hash, story key, 제목 키워드에 `score_delta`, `level`, `suppress`, `reasons`를 지정할 수 있습니다.
-
-## 로컬 6개월 백필
-
-과거 관련 기사 기반을 빠르게 채우려면 GitHub Actions가 아니라 Windows 로컬에서 전용 백필 스크립트를 실행하는 것을 권장합니다. 백필은 Telegram 발송과 RSS 생성을 하지 않고, Google News 검색 RSS를 기간별로 쪼개 수집한 뒤 PHP/MySQL API에만 동기화합니다.
-
-먼저 `.env.api`에 다음 값을 넣습니다. 이 파일은 `.gitignore`에 포함되어 커밋되지 않습니다.
-
-```text
-ACTIVIST_API_URL=https://alignpe.gabia.io/activist/api.php
-ACTIVIST_API_SECRET=...
-```
-
-PowerShell 실행 예시는 다음과 같습니다.
+단일 증분 실행은 운영 workflow가 담당한다. 2021년 이후 백필은 먼저 짧은 dry-run으로 확인한 뒤 고정된 날짜 범위로 실행한다.
 
 ```powershell
-cd C:\BSIDE\codex\260525_텔레그램_행동주의_채널\activist-rss-curator
-.\.venv\Scripts\python.exe -m curator.backfill --days 180
+.\.venv\Scripts\python.exe -m curator.official_backfill `
+  --from-date 2021-01-01 --to-date 2021-01-15 `
+  --source dart --chunk-days 7 --max-chunks 1 --dry-run
+
+.\.venv\Scripts\python.exe -m curator.official_backfill `
+  --from-date 2021-01-01 --to-date 2026-01-01 `
+  --source both --chunk-days 14 --max-pages 100 --max-chunks 10
 ```
 
-기본값은 7일 단위 chunk, RSS 병렬 24개, 기사 보강 병렬 12개, feed당 최대 100개 기사, chunk당 최대 1000개 기사 페이지 보강입니다. Google News redirect는 기본적으로 최대한 원문 URL로 복원합니다. 실행 중에는 chunk 번호, 기간, feed 수, 수집/채택/중복/거절 건수, DB 동기화 건수, chunk 소요 시간, 전체 ETA가 계속 출력됩니다.
+완료 청크만 체크포인트에 기록되며 같은 명령을 다시 실행하면 이어서 처리한다. 페이지 상한 때문에 결과가 잘리면 성공으로 간주하지 않는다. 세부 계약은 [공식 공시 백필과 품질 릴리스 게이트](docs/official-backfill-and-quality-gates.md)에 있다.
 
-중간에 끊기면 같은 명령을 다시 실행하면 됩니다. 진행 상태는 `data/backfill_progress.json`, 중복 판단용 임시 state는 `data/backfill_state.json`에 저장되며 둘 다 커밋되지 않습니다. 처음부터 다시 하려면 `--restart`를 붙입니다.
+## 편집 엔터티 입력과 검수
 
-Google News가 일시적으로 429 rate limit을 반환하면 원문 URL 복원이 중단될 수 있습니다. 이 경우 DB에 남은 `news.google.com` URL은 별도 보정 스크립트로 천천히 재처리합니다. 먼저 dry-run으로 확인합니다.
+행동주주·기관, 캠페인, 주장·반론, 의안 표결, 약속·이행, 타임라인은 UTF-8 JSON bundle로 검증한 뒤 HMAC API에 입력한다. 입력 단계에서는 actor와 관계가 `inactive/pending`, 나머지 엔터티가 `pending/draft`로 강제되며 공개 가능한 근거 문서 ID가 필요하다. 제목·주장·요구·설명은 번역하거나 공백을 정규화하지 않고, DB 한도를 넘는 문자열은 자르지 않고 거부한다.
 
 ```powershell
-.\.venv\Scripts\python.exe -m curator.google_news_repair --limit 20 --sleep 2
+.\.venv\Scripts\python.exe -m curator.editorial_ingest `
+  --bundle data/editorial/campaign-example.json --dry-run
+
+.\.venv\Scripts\python.exe -m curator.editorial_ingest `
+  --bundle data/editorial/campaign-example.json --chunk-size 100
 ```
 
-디코딩이 성공하는 상태가 확인되면 `--apply`를 붙입니다. 성공한 기사만 `canonical_url`, `canonical_url_hash`, `source`, `image_url`을 갱신하고, Google에서 다시 429를 반환하면 DB를 건드리지 않고 해당 실행을 멈춥니다.
+입력 형식은 [편집 bundle JSON Schema](docs/schemas/editorial-ingest-bundle.schema.json)에 고정돼 있다. 서버는 청크 멱등성을 확인하고, 역할이 제한된 검수 API에서 근거와 이용권한을 다시 확인한 뒤 승인된 엔터티만 공개한다.
+
+## 사람 라벨 품질 게이트
+
+정식 전환에는 실제 사람 라벨의 article pair 500개 이상과 사건 300개 이상이 필요하다.
 
 ```powershell
-.\.venv\Scripts\python.exe -m curator.google_news_repair --limit 100 --sleep 2 --apply
+$revision = (git rev-parse HEAD).Trim()
+.\.venv\Scripts\python.exe -m curator.quality_benchmark `
+  --same-story data/benchmarks/same_story_pairs.jsonl `
+  --relevance data/benchmarks/relevance_events.jsonl `
+  --environment production `
+  --code-revision $revision
 ```
 
-Windows에서 상태 확인과 작은 배치를 반복하려면 래퍼 스크립트를 사용할 수 있습니다. `stats`는 DB에 남은 Google News URL 수만 확인하고 Google에 요청하지 않습니다.
+기본 릴리스 기준은 동일 사건 묶음 precision 0.97 이상, 핵심 사건 relevance recall 0.95 이상이다. 저장소의 작은 fixture는 CLI와 스키마 검증용이며 릴리스 증빙으로 사용할 수 없다.
 
-```powershell
-.\scripts\repair_google_news_windows.ps1 -Mode stats
-.\scripts\repair_google_news_windows.ps1 -Mode dry-run -Limit 5 -SleepSeconds 20
-.\scripts\repair_google_news_windows.ps1 -Mode apply -Limit 10 -SleepSeconds 20 -SleepMaxSeconds 45 -Repeat 3 -PauseMinutes 60
-```
+최종 공개 전환은 benchmark만으로 결정하지 않는다. [Shadow 비교와 공개 전환 게이트](docs/release-transition-gate.md)가 14일 비교, 최근 7일 운영·성능 지표, 같은 코드 리비전의 사람 라벨 결과를 함께 fail-closed 판정한다.
 
-동일 기능은 Python으로 직접 실행할 수도 있습니다.
+## API와 공개 화면
 
-```powershell
-.\.venv\Scripts\python.exe .\scripts\repair_google_news_windows.py --mode stats
-.\.venv\Scripts\python.exe .\scripts\repair_google_news_windows.py --mode apply --limit 10 --sleep-seconds 20 --sleep-max-seconds 45
-```
+공개 API는 회사, 사건, 캠페인, 문서, 캘린더, 검색, Atom, CSV·JSON, 비공개 피드백 접수를 제공한다. 관리자 API는 서버 측 역할 토큰을 요구한다. 기존 `?action=search|articles|reports|telegram_dashboard`와 `feed.xml`은 전환 뒤 90일 동안 어댑터로 유지한다.
 
-`SleepSeconds`는 기사 1건 처리 후 대기 시간입니다. `SleepMaxSeconds`를 함께 주면 각 건마다 `SleepSeconds`~`SleepMaxSeconds` 사이에서 랜덤하게 쉽니다. Google News가 `rate_limited=1`을 반환하면 스크립트는 다음 batch를 진행하지 않고 멈춥니다.
+- [API 운영 계약](docs/governance-api-v1.md)
+- [OpenAPI 문서](deploy/activist/openapi.yaml)
+- [공개 UI](public/governance/index.html)
 
-작게 시험하려면 다음처럼 dry-run을 먼저 돌립니다.
+Pages는 `main`에 생성 HTML, `state.json`, 아카이브를 커밋하지 않고 artifact로 배포한다. 운영 장애 시 이전 Pages artifact로 되돌리되 신규 DB 데이터는 보존한다.
 
-```powershell
-.\.venv\Scripts\python.exe -m curator.backfill --days 14 --max-queries 8 --dry-run
-```
+## 문서
 
-고성능 네트워크에서 더 공격적으로 돌리려면 다음처럼 조정할 수 있습니다.
+- [구현 상태와 전환 체크리스트](docs/implementation-status.md)
+- [운영 자동화](docs/operations-automation.md)
+- [공식 공시 백필과 품질 릴리스 게이트](docs/official-backfill-and-quality-gates.md)
+- [KIND 연동 결정과 외부 선행조건](docs/kind-integration-decision-2026-07-16.md)
+- [KRX KIND 공시 데이터 이용 문의 초안](docs/krx-kind-data-inquiry-ko.md)
+- [Shadow 비교와 공개 전환 게이트](docs/release-transition-gate.md)
+- [Governance API v1 운영 계약](docs/governance-api-v1.md)
+- [Telegram 공개 채널 운영 정책](docs/telegram-public-channels.md)
+- [2026-07-16 운영 기반 반영 기록](docs/production-foundation-deployment-2026-07-16.md)
 
-```powershell
-.\.venv\Scripts\python.exe -m curator.backfill `
-  --days 180 `
-  --chunk-days 7 `
-  --feed-workers 32 `
-  --enrich-workers 16 `
-  --max-enrich-articles 1600 `
-  --google-news-decode-sleep 0.5 `
-  --sleep 0.5
-```
+## 안전 경계
 
-관련 기사 보기 품질을 위해 백필은 `config.yaml`의 모든 Google News 키워드와 별도 broad backfill 키워드를 함께 사용합니다. `--config-only`를 붙이면 `config.yaml`의 키워드만 사용합니다. 백필 후에는 `https://news.bside.ai/feed/latest.html`과 `https://news.bside.ai/feed/search.html`을 새로고침하면 `관련 기사 보기`, 시장 이슈 검색, 이슈 레이더가 DB에 축적된 과거 기사 기반으로 더 풍부하게 표시됩니다.
-
-Telegram 메시지는 로컬 `state.json`이 지나치게 커지지 않도록 `telegram_sources.message_retention_days`와 `telegram_sources.local_state_message_limit`로 보존 범위를 제한합니다. 기본값은 365일, 8만 건이며 DB는 장기 분석 저장소 역할을 맡고 GitHub Pages는 최신 정적 페이지와 공개-safe 대시보드를 유지합니다.
-
-## GitHub Actions
-
-`.github/workflows/build-feed.yml`은 다음을 수행합니다.
-
-- KST 08:05~00:35에는 30분마다 실행 (`:05`, `:35`)
-- KST 01:00~06:00 야간 구간은 03:35, 05:00 두 번으로 나누어 묶음 발행
-- KST 05:00 실행에서 데일리 페이지를 만들고 Telegram 데일리 링크를 발송
-- KST 07:00대 실행은 건너뜀
-- Python 3.12 설치
-- `requirements.txt` 설치
-- 필요할 때만 `python -m curator.main` 실행
-- `ACTIVIST_API_URL`과 `ACTIVIST_API_SECRET`이 있으면 PHP API에 수집 결과를 HMAC 서명으로 동기화
-- `public/feed.xml`, `public/index.html`, `public/404.html`, `public/feed`, `data/state.json`, `data/archive` 변경 시 commit & push
-
-Push 실행은 변경 파일을 보고 자동으로 모드를 나눕니다.
-
-- `full`: 기사 수집, 중복 제거, 묶음화, RSS/Telegram 업데이트를 모두 실행합니다. `config.yaml`, `requirements.txt`, 수집/분류/중복/발송 관련 `curator/*.py`, 관련 테스트가 바뀐 경우에만 사용합니다.
-- `page_only`: 기존 `data/state.json`을 기반으로 데일리 HTML과 Pages 산출물만 다시 만듭니다. `curator/daily_report.py`, `tests/test_daily_report.py`, `public/404.html` 같은 레이아웃/템플릿 변경은 기사 수집을 건너뜁니다.
-
-수동 실행의 `run_mode`에서 `full` 또는 `page_only`를 직접 고를 수 있습니다. 기본 `auto`는 수동 실행에서는 기존 운영과 동일하게 full로 처리됩니다. 커밋 메시지에 `[page-only]`를 넣으면 강제로 page-only, `[force-collect]` 또는 `[send-regular-update]`를 넣으면 강제로 full로 실행합니다.
-
-GitHub Models를 사용하는 daily digest는 workflow의 `models: read` 권한과 자동 제공되는 `GITHUB_TOKEN`을 사용합니다. 별도 OpenAI API key는 필요하지 않으며, 호출이 실패하면 fallback 리뷰로 계속 실행됩니다.
-
-수동 실행도 `workflow_dispatch`로 가능합니다. 수동 실행 화면에서 `Send a Telegram smoke-test message`를 켜면 실제 뉴스 발행과 별개로 테스트 메시지 1건을 채널에 보내 bot token과 채널 관리자 권한을 확인할 수 있습니다.
-`Send a daily digest preview message`를 켜면 최근 24시간 기준 daily digest 미리보기를 채널에 전송합니다. `Digest preview prefix`에 `NONE`을 넣으면 미리보기 접두어 없이 재발송할 수 있습니다.
-
-## GitHub Pages
-
-Repository Settings의 Pages 메뉴에서 배포 source를 설정합니다. GitHub Pages가 repository root 기준 폴더 선택을 지원하는 경우 `public` 폴더를 source로 지정합니다. 환경에 따라 root 또는 `docs`만 선택 가능한 저장소라면 Pages 설정에 맞게 공개 폴더를 조정하거나 `public` 결과물을 별도 배포 workflow로 publishing하면 됩니다.
-
-배포 후 정제 RSS와 데일리 페이지 URL은 다음 형식입니다.
-
-```text
-https://news.bside.ai/feed.xml
-https://news.bside.ai/feed/latest.html
-```
-
-### Custom domain
-
-`news.bside.ai` 같은 하위 도메인을 쓰려면 GitHub Pages의 Custom domain에 `news.bside.ai`를 등록하고, DNS 제공자에서 다음 CNAME을 설정합니다.
-
-```text
-news CNAME <owner>.github.io
-```
-
-GitHub Actions 기반 Pages 배포에서는 GitHub Pages Settings의 Custom domain과 DNS가 기준입니다. 이 저장소는 배포 산출물에 `public/CNAME`도 함께 포함해 `news.bside.ai` 설정이 유지되도록 합니다. DNS 전파와 HTTPS 인증서 발급에는 시간이 걸릴 수 있으며, 가능하면 GitHub 계정에서 `bside.ai` 도메인을 먼저 verify 해 두는 것을 권장합니다.
-
-공개 repo에는 bot token, API key, 비공개 채널 ID, PHP API secret, DB 비밀번호 같은 값을 커밋하지 않습니다. 이 프로젝트는 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `CURATOR_FEEDS`, `ACTIVIST_API_URL`, `ACTIVIST_API_SECRET`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING`을 GitHub Actions Secrets에서만 읽도록 운영합니다. `public/`과 `data/state.json`에는 공개 가능한 기사 URL, 제목, 처리 상태, 공개 Telegram 채널의 메시지 메타데이터만 남는 구조를 유지합니다.
-
-## rss2tg_bot 등록
-
-`rss2tg_bot`에서 GitHub Pages에 공개된 `feed.xml` URL을 구독 URL로 등록합니다.
-
-```text
-https://news.bside.ai/feed.xml
-```
-
-`rss2tg_bot`은 RSS item 단위로 메시지를 발행하므로, 이 프로젝트는 묶음 1개를 RSS item 1개로 만듭니다.
-
-권장 설정:
-
-- output format: `full article (experimental)`
-- `disable web page previews`: 활성화
-- `show the source name`: 선택 사항
-
-RSS 본문에는 기사 1건을 한 줄로 표시합니다. rss2tg_bot이 본문 HTML 링크를 보존하지 않는 경우가 있어, 기사 목록에는 `mk.co.kr` 같은 도메인 대신 `매일경제` 같은 출처명을 표시합니다. RSS item link에는 GitHub Pages 중간 링크가 아니라 원문 기사 URL을 사용합니다. `msn.com`처럼 원문 확인이 어려운 중계 링크는 수집 단계에서 제외합니다.
-
-## Telegram 직접 발행
-
-직접 발행을 사용하면 `rss2tg_bot` 없이 이 프로젝트가 Telegram Bot API로 채널에 메시지를 보냅니다. 메시지는 긴 URL을 직접 노출하지 않고 HTML 링크로 표시합니다. 키워드 기반 섹션 라벨은 오분류 가능성이 있어 메시지에 표시하지 않으며, 내부 분류값이나 기준시각, 대표기사보기 링크도 표시하지 않습니다. 단일 기사 업데이트는 제목 링크만 짧게 표시하고 Telegram 웹페이지 preview가 표시되도록 전송합니다.
-
-한 실행에서 발행할 cluster가 2개 이상이면 별도 제목줄 없이 요약과 기사 링크만 묶어서 전송합니다. 이 묶음 메시지는 GitHub Models의 `openai/gpt-4.1`을 사용해 2~3개 bullet 요약을 만들고, 국문/영문 기사 링크를 digest처럼 정리합니다. 요약은 `임박`, `부각`, `지속`처럼 짧은 명사형으로 끝나도록 후처리합니다. AI 호출이 실패하면 규칙 기반 fallback 요약으로 계속 발행합니다.
-
-묶음 판단은 규칙 기반을 기본으로 하되, 제목 유사도뿐 아니라 회사명, 사건 토큰, 규제기관/절차 표현을 함께 보는 story signature를 사용합니다. 자주 반복되는 사건 패턴은 `data/story_rules.yaml`에 추가할 수 있으며, 운영 메모는 `docs/story-grouping.md`에 정리되어 있습니다. 같은 회사와 넓은 키워드 때문에 애매하게 붙을 수 있는 기사 pair는 GitHub Models를 보수적 심판으로 사용합니다. AI는 `same_story`, `related_but_different`, `different` 중 하나만 판단하며, `same_story`이고 confidence가 기준값 이상일 때만 묶음을 허용합니다. 기본 설정은 실행당 최대 8회만 확인하므로 quota를 과도하게 쓰지 않습니다.
-
-매일 데일리 페이지를 생성할 때 `/feed/story-review.html`도 함께 생성합니다. 이 페이지는 데일리에서 서로 다른 이슈 카드로 남았지만 회사명, 사건 토큰, 제목/요약 유사도가 높아 “묶였어야 했을 가능성”이 있는 후보를 보여줍니다. 오전 데일리 발송 workflow가 끝나면 bot이 token 포함 관리자 링크를 채널로 보내며, 페이지에서는 후보별 확인 완료 표시와 `data/story_rules.yaml` 초안 복사를 할 수 있습니다.
-
-중복으로 걸러진 기사는 시간당 업데이트에 따로 표시하지 않습니다. 중복 기사 기록은 state에 남겨 두고, 데일리 리뷰에서는 별도 `중복 기사` 섹션을 만들지 않고 유사한 일반 기사 묶음 안에 함께 표시합니다.
-
-필수 조건:
-
-- BotFather에서 만든 bot token을 `TELEGRAM_BOT_TOKEN` Secret에 저장
-- bot을 채널 관리자에 추가
-- `config.yaml`의 `telegram.chat_id` 또는 `TELEGRAM_CHAT_ID` Secret 설정
-
-처음 Secret을 연결한 실행에서는 기존 published cluster를 발송하지 않도록 기준선으로만 저장합니다. 이후 새로 published 되는 cluster부터 전송합니다. 전송한 guid는 `data/state.json`의 `telegram_sent_cluster_guids`에 저장되어 중복 발송을 막습니다.
-
-bot 연결만 즉시 확인하려면 Actions의 `Build curated RSS feed` 수동 실행에서 `Send a Telegram smoke-test message` 옵션을 켭니다.
-
-## AI 데일리 리뷰
-
-일반 단일 기사 메시지는 AI를 호출하지 않고 제목 링크만 발행합니다. 여러 기사 묶음과 매일 아침 리뷰는 GitHub Models를 사용할 수 있으며, 기본 모델은 `openai/gpt-4.1`입니다.
-
-일반 업데이트는 KST 08:05~00:35에는 매시 `:05`, `:35`에 실행하고, KST 01:00~06:00 구간은 03:35와 05:00 두 번으로 나누어 전송합니다. 03:35 발송은 01:00 이후, 05:00 발송은 03:30 이후 수집분을 묶습니다. 05:00 실행에서는 데일리 페이지와 Telegram 데일리 링크도 함께 발행합니다. GitHub Actions schedule은 혼잡 시간대에 지연될 수 있으므로, 데일리 발행은 06:00 도착 여유를 두기 위해 05:00에 예약합니다. 비슷한 제목과 핵심 토큰을 가진 기사는 대표 제목 아래 여러 언론사 링크로 묶어 보여줍니다.
-
-데일리 HTML은 텔레그램 메시지보다 먼저 생성되고 GitHub Pages 배포 후 메시지가 발송됩니다. 텔레그램 데일리 메시지는 수집 기사 수, 이슈 수, 매체 수, 메인 기사 일부와 데일리 링크만 간결하게 표시합니다.
-
-## 운영 정책
-
-- 새 cluster는 pending 상태로 시작합니다.
-- 기본 45분 buffer 후 묶음으로 발행합니다.
-- high relevance cluster는 20분 후 발행 가능합니다.
-- pending 상태가 3시간을 넘으면 강제 발행합니다.
-- article published date 기준 7일 초과 기사는 제외합니다.
-- 기본 설정에서는 발송일 기준 전일보다 오래된 기사도 제외합니다.
-- 발행 대상은 high, medium relevance입니다.
-- low relevance 기사는 `state.json`의 `rejected_articles`에 저장합니다.
-- 모든 수집 기사는 우선순위 점수와 함께 `data/archive/articles/YYYY-MM-DD.jsonl`에 보관합니다.
-- 우선순위 override는 `data/priority_overrides.yaml`에서 수동 관리합니다.
-- `msn.com` 같은 중계 링크는 기본적으로 제외합니다.
-- 이미 published된 cluster에 유사 기사가 나중에 들어오면 기존 item을 수정하지 않고 `[추가 N건] ...` follow-up cluster로 새 guid를 발행합니다.
-- `feed.xml`에는 최근 published cluster 50개만 유지합니다.
-- Telegram 직접 발행은 전송 성공한 cluster guid를 state에 저장하고, 이미 보낸 cluster는 다시 보내지 않습니다.
-- 중복 언급은 최근 30일 안의 기존 기사만 참고합니다.
-- state 보관 상한은 기본 60일입니다. `articles`, `rejected_articles`, `published_clusters`, Telegram/Digest 전송 기록은 이 범위를 기준으로 정리됩니다.
-- archive 보관 상한은 기본 365일입니다. GitHub 저장소 용량이 커지면 `archive.retention_days`를 줄이거나 외부 DB로 이전합니다.
-- MySQL의 `article_raw`는 상태별 보존 기간을 다르게 둡니다. `published/top/watch` 성격의 raw는 길게, 명확한 `old_article`·`before_previous_day`·`low_relevance` rejected raw는 짧게 보존하도록 PHP API가 `retained_until`을 함께 저장합니다.
-
-## 한계
-
-- `rss2tg_bot`이 메시지 렌더링을 최종 결정하므로 정확한 표시 형식은 bot 설정에 따라 달라질 수 있습니다.
-- 너무 긴 description은 텔레그램에서 분할될 수 있습니다. 기본 제한은 3500자입니다.
-- 이미 발행된 텔레그램 메시지를 RSS만으로 안정적으로 수정하는 것은 기대하지 않습니다.
-- GitHub Actions 기반 Telegram 발행은 대화형 봇이 아니라 예약 실행형 발행 봇입니다. 채널에 명령어를 보내 즉시 설정을 바꾸는 용도에는 맞지 않습니다.
-- GitHub Models 호출 한도나 권한 문제로 daily digest 또는 AI 묶음 심판이 실패할 수 있으며, 이 경우 규칙 기반 로직으로 계속 실행합니다.
-- 기업명 추정은 단순 규칙 기반입니다. `extract_company_candidates()`를 확장해 개선할 수 있습니다.
+이 서비스는 사실·근거·상태를 기록하며 매수·매도 권고, 목표가, 종목 추천을 제공하지 않는다. 공개 전 법률 검토가 필요한 투자 권고 경계, 이해상충, 저작권·이용허가, 정정·당사자 답변 절차는 별도 운영 정책과 함께 승인해야 한다.

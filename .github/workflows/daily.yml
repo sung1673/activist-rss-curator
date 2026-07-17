@@ -1,0 +1,238 @@
+name: Daily pages and briefing
+
+on:
+  schedule:
+    # KST 05:45: generate and deploy the daily pages (UTC 20:45).
+    - cron: "45 20 * * *"
+    # KST 06:05: send the already deployed daily briefing (UTC 21:05).
+    - cron: "5 21 * * *"
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Daily operation to run
+        required: true
+        type: choice
+        default: both
+        options:
+          - generate
+          - send
+          - both
+      send_telegram_admin_access:
+        description: Send the Telegram administrator approval link
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  models: read
+
+concurrency:
+  group: daily-pages-and-briefing-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    if: >-
+      (github.event_name == 'schedule' &&
+       github.event.schedule == '45 20 * * *' &&
+       vars.ENABLE_GOVERNANCE_SHADOW == 'true') ||
+      (github.event_name == 'workflow_dispatch' &&
+       (inputs.operation == 'generate' || inputs.operation == 'both'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      models: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate data configuration
+        env:
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+        run: bash .github/scripts/require-env.sh ACTIVIST_API_URL ACTIVIST_API_SECRET
+
+      - name: Validate mutually exclusive Pages ownership
+        if: vars.ENABLE_GOVERNANCE_PAGES == 'true' && vars.ENABLE_PAGES == 'true'
+        run: |
+          echo "::error::ENABLE_PAGES and ENABLE_GOVERNANCE_PAGES are mutually exclusive."
+          exit 1
+
+      - name: Generate pages from the MySQL source of truth
+        env:
+          CURATOR_DATA_SOURCE: mysql
+          CURATOR_DAILY_REPORT_WRITE_ONLY: "1"
+          GITHUB_TOKEN: ${{ github.token }}
+          STORY_REVIEW_ACCESS_TOKEN: ${{ secrets.STORY_REVIEW_ACCESS_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+          ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
+        run: python -m curator.daily_report
+
+      - name: Configure public governance UI
+        env:
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
+        run: python -m curator.governance_ui --root .
+
+      - name: Preserve rollback artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-${{ github.run_id }}-${{ github.run_attempt }}
+          path: public
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Configure Pages
+        if: vars.ENABLE_GOVERNANCE_PAGES == 'true' && vars.ENABLE_PAGES != 'true'
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload Pages artifact
+        if: vars.ENABLE_GOVERNANCE_PAGES == 'true' && vars.ENABLE_PAGES != 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+      - name: Deploy to GitHub Pages
+        if: vars.ENABLE_GOVERNANCE_PAGES == 'true' && vars.ENABLE_PAGES != 'true'
+        id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+
+      - name: Retry GitHub Pages deployment
+        if: vars.ENABLE_GOVERNANCE_PAGES == 'true' && vars.ENABLE_PAGES != 'true' && steps.deployment.outcome == 'failure'
+        id: deployment_retry
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+
+      - name: Verify GitHub Pages deployment
+        if: vars.ENABLE_GOVERNANCE_PAGES == 'true' && vars.ENABLE_PAGES != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.deployment.outcome }}" == "success" || "${{ steps.deployment_retry.outcome }}" == "success" ]]; then
+            exit 0
+          fi
+          echo "::error::GitHub Pages deployment failed after retry."
+          exit 1
+
+      - name: Create daily deployment marker
+        if: vars.ENABLE_GOVERNANCE_PAGES == 'true' && vars.ENABLE_PAGES != 'true'
+        id: deployment_marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          kst_date="$(TZ=Asia/Seoul date +%F)"
+          mkdir -p .deployment-marker
+          printf '{"kst_date":"%s","run_id":"%s","revision":"%s"}\n' \
+            "$kst_date" "$GITHUB_RUN_ID" "$GITHUB_SHA" \
+            > .deployment-marker/deployment.json
+          echo "kst_date=$kst_date" >> "$GITHUB_OUTPUT"
+
+      - name: Publish daily deployment marker
+        if: vars.ENABLE_GOVERNANCE_PAGES == 'true' && vars.ENABLE_PAGES != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: governance-pages-ready-${{ steps.deployment_marker.outputs.kst_date }}
+          path: .deployment-marker/deployment.json
+          if-no-files-found: error
+          retention-days: 3
+
+  send:
+    needs:
+      - generate
+    if: >-
+      always() &&
+      vars.ENABLE_GOVERNANCE_SHADOW == 'true' &&
+      vars.ENABLE_GOVERNANCE_PAGES == 'true' &&
+      vars.ENABLE_PAGES != 'true' &&
+      vars.ENABLE_GOVERNANCE_DELIVERY == 'true' &&
+      (
+        (github.event_name == 'schedule' && github.event.schedule == '5 21 * * *') ||
+        (github.event_name == 'workflow_dispatch' && inputs.operation == 'send') ||
+        (github.event_name == 'workflow_dispatch' && inputs.operation == 'both' && needs.generate.result == 'success')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      models: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Verify the successful 05:45 pages deployment
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'send')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python .github/scripts/verify-daily-pages-artifact.py
+
+      - name: Validate briefing configuration
+        env:
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: >-
+          bash .github/scripts/require-env.sh
+          ACTIVIST_API_URL ACTIVIST_API_SECRET
+          TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID
+
+      - name: Send daily report message
+        env:
+          CURATOR_DATA_SOURCE: mysql
+          CURATOR_DELIVERY_MODE: outbox-enqueue
+          GITHUB_TOKEN: ${{ github.token }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+          ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$(python -m curator.daily_report)"
+          printf '%s\n' "$output"
+          if ! grep -q 'daily_report_queued=1' <<<"$output"; then
+            echo "::error::Daily report was not accepted by the delivery outbox."
+            exit 1
+          fi
+
+      - name: Send Telegram administrator approval link
+        if: github.event_name == 'workflow_dispatch' && inputs.send_telegram_admin_access
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          TELEGRAM_ADMIN_ACCESS_TOKEN: ${{ secrets.TELEGRAM_ADMIN_ACCESS_TOKEN }}
+        run: python -m curator.telegram_dashboard send-access --strict

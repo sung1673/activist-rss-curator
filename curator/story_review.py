@@ -16,11 +16,17 @@ from rapidfuzz import fuzz
 
 from .cluster import extract_company_candidates
 from .config import load_config
-from .dates import format_kst, now_in_timezone, parse_datetime
+from .dates import format_kst, parse_datetime
 from .normalize import canonical_url_hash
 from .story_signature import event_tokens_for_text, story_signature_decision
 from .summaries import digest_tokens_from_text
-from .telegram_publisher import html_link, send_telegram_message, telegram_bot_token, telegram_chat_id, telegram_is_configured
+from .telegram_publisher import (
+    html_link,
+    send_telegram_message,
+    telegram_admin_chat_id,
+    telegram_admin_destination_error,
+    telegram_bot_token,
+)
 from .telegram_sources import canonicalize_telegram_url, extract_urls, is_boilerplate_signal_url, normalize_channel_handle
 
 
@@ -819,13 +825,13 @@ def render_story_review_html(review: dict[str, object], *, logo_html: str = "") 
       localStorage.setItem('storyReviewToken', rawToken);
       gate.style.display = 'none';
       content.classList.add('is-open');
-      if (location.search.includes('token=')) {{
-        history.replaceState(null, '', location.pathname);
+      if (location.hash.includes('token=')) {{
+        history.replaceState(null, '', `${{location.pathname}}${{location.search}}`);
       }}
       return true;
     }}
 
-    const params = new URLSearchParams(location.search);
+    const params = new URLSearchParams(location.hash.replace(/^#/, ''));
     const urlToken = params.get('token');
     const storedToken = localStorage.getItem('storyReviewToken');
     if (urlToken || storedToken || !REVIEW.accessTokenHash) {{
@@ -927,7 +933,7 @@ def write_story_review_files(
 def story_review_message(review: dict[str, object], config: dict[str, object]) -> str:
     token = story_review_access_token()
     page_url = str(review.get("page_url") or story_review_public_url(config))
-    access_url = page_url + ("&" if "?" in page_url else "?") + "token=" + quote(token, safe="")
+    access_url = page_url.split("#", 1)[0] + "#token=" + quote(token, safe="")
     candidates = review.get("candidates") if isinstance(review.get("candidates"), list) else []
     benchmark = review.get("benchmark_coverage") if isinstance(review.get("benchmark_coverage"), dict) else {}
     benchmark_missing = int(benchmark.get("missing_count") or 0)
@@ -971,7 +977,7 @@ def load_latest_review(root: Path | None = None) -> dict[str, object]:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def send_story_review(root: Path | None = None) -> dict[str, int]:
+def send_story_review(root: Path | None = None) -> dict[str, object]:
     project_root = root or PROJECT_ROOT
     config = load_config(project_root / "config.yaml")
     if not story_review_enabled(config):
@@ -985,11 +991,17 @@ def send_story_review(root: Path | None = None) -> dict[str, int]:
         return {"story_review_sent": 0, "story_review_failed": 0, "story_review_skipped": 1}
     if not story_review_access_token():
         return {"story_review_sent": 0, "story_review_failed": 0, "story_review_skipped": 1}
-    if not telegram_is_configured(config):
-        return {"story_review_sent": 0, "story_review_failed": 0, "story_review_skipped": 1}
+    destination_error = telegram_admin_destination_error(config)
+    if destination_error:
+        return {
+            "story_review_sent": 0,
+            "story_review_failed": 1,
+            "story_review_skipped": 0,
+            "story_review_error": destination_error,
+        }
     response = send_telegram_message(
         telegram_bot_token(),
-        telegram_chat_id(config),
+        telegram_admin_chat_id(),
         story_review_message(latest, config),
         config,
         disable_web_page_preview=True,
@@ -1009,7 +1021,7 @@ def cli_main(argv: list[str] | None = None) -> int:
     if args.command == "send":
         summary = send_story_review()
         print("Story review send finished: " + ", ".join(f"{key}={value}" for key, value in summary.items()))
-        return 0
+        return 1 if int(summary.get("story_review_failed") or 0) else 0
     parser.print_help()
     return 2
 

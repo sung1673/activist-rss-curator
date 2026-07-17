@@ -33,7 +33,12 @@ from .telegram_publisher import (
     telegram_config,
     unsent_telegram_clusters,
 )
-from .story_judge import judge_same_story, judgement_allows_same_story, story_judge_auto_accept_title_score
+from .story_judge import (
+    judge_same_story,
+    judgement_allows_same_story,
+    story_judge_auto_accept_title_score,
+    story_judge_fail_closed_required,
+)
 from .story_signature import (
     contextual_event_token_universe,
     event_tokens_for_text,
@@ -1113,7 +1118,11 @@ def digest_entries_are_same_story(
         local_reason=local_reason,
         context="digest_group",
     )
-    return judgement_allows_same_story(judgement, config, fallback=True)
+    return judgement_allows_same_story(
+        judgement,
+        config,
+        fallback=not story_judge_fail_closed_required(config),
+    )
 
 
 def group_digest_entries(entries: list[dict[str, object]], config: dict[str, object] | None = None) -> list[list[dict[str, object]]]:

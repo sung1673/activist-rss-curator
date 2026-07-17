@@ -1,0 +1,85 @@
+name: Publish delivery outbox
+
+on:
+  workflow_run:
+    workflows:
+      - Ingest official sources
+      - Ingest media sources
+      - Daily pages and briefing
+    types:
+      - completed
+  schedule:
+    # Retry transient failures and detect stuck delivery within ten minutes.
+    - cron: "2,12,22,32,42,52 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-outbox
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      vars.ENABLE_GOVERNANCE_DELIVERY == 'true' &&
+      (github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        id: setup_python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        id: install
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate delivery configuration
+        id: validate
+        env:
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: >-
+          bash .github/scripts/require-env.sh
+          ACTIVIST_API_URL ACTIVIST_API_SECRET
+          TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID
+
+      - name: Enqueue published governance events
+        env:
+          CURATOR_DATA_SOURCE: mysql
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
+        run: python -m curator.governance_publisher
+
+      - name: Claim and publish delivery outbox
+        if: >-
+          !cancelled() &&
+          steps.checkout.outcome == 'success' &&
+          steps.setup_python.outcome == 'success' &&
+          steps.install.outcome == 'success' &&
+          steps.validate.outcome == 'success'
+        env:
+          CURATOR_DATA_SOURCE: mysql
+          # Each remote claim contains one item. Keep enough time for getChat,
+          # sendMessage and an idempotent acknowledgement retry.
+          DELIVERY_LEASE_SECONDS: "900"
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m curator.publish_outbox --root . --limit 5

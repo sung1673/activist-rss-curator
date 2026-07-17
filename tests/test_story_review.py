@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from curator.story_review import (
     build_story_review,
     render_story_review_html,
+    send_story_review,
     story_review_access_token,
     story_review_message,
     text_has_encoding_damage,
@@ -151,7 +152,7 @@ def test_story_review_message_uses_tokenized_admin_link(monkeypatch) -> None:
     )
 
     assert "묶음 후보 리뷰" in message
-    assert "token=review-token" in message
+    assert "#token=review-token" in message
     assert "관리자 페이지에서 후보 검토" in message
 
 
@@ -240,6 +241,77 @@ def test_story_review_message_mentions_benchmark_missing(monkeypatch) -> None:
     assert "benchmark 누락 1/2건" in message
     assert "Benchmark 누락 상위" in message
     assert "Missing benchmark article" in message
+
+
+def test_story_review_send_uses_dedicated_private_admin_chat(monkeypatch) -> None:
+    from curator import story_review as story_review_module
+
+    sent: dict[str, object] = {}
+    monkeypatch.setenv("STORY_REVIEW_ACCESS_TOKEN", "review-token")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:secret")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "@public_channel")
+    monkeypatch.setenv("TELEGRAM_ADMIN_CHAT_ID", "424242")
+    monkeypatch.setattr(
+        story_review_module,
+        "load_config",
+        lambda _path: {
+            "public_feed_url": "https://news.bside.ai/feed.xml",
+            "story_review": {"enabled": True},
+            "telegram": {"enabled": True},
+        },
+    )
+    monkeypatch.setattr(
+        story_review_module,
+        "load_latest_review",
+        lambda _root: {
+            "date_id": "2026-07-16",
+            "candidate_count": 1,
+            "candidate_hash": "candidate-1",
+            "page_url": "https://news.bside.ai/feed/story-review.html",
+            "candidates": [],
+        },
+    )
+
+    def fake_send(_token, chat_id, text, _config, **_kwargs):  # type: ignore[no-untyped-def]
+        sent.update({"chat_id": chat_id, "text": text})
+        return {"ok": True, "message_id": 7}
+
+    monkeypatch.setattr(story_review_module, "send_telegram_message", fake_send)
+
+    summary = send_story_review()
+
+    assert summary["story_review_sent"] == 1
+    assert sent["chat_id"] == "424242"
+    assert "#token=review-token" in str(sent["text"])
+
+
+def test_story_review_send_rejects_public_admin_destination(monkeypatch) -> None:
+    from curator import story_review as story_review_module
+
+    monkeypatch.setenv("STORY_REVIEW_ACCESS_TOKEN", "review-token")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:secret")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "424242")
+    monkeypatch.setenv("TELEGRAM_ADMIN_CHAT_ID", "424242")
+    monkeypatch.setattr(
+        story_review_module,
+        "load_config",
+        lambda _path: {"story_review": {"enabled": True}, "telegram": {"enabled": True}},
+    )
+    monkeypatch.setattr(
+        story_review_module,
+        "load_latest_review",
+        lambda _root: {"date_id": "2026-07-16", "candidate_count": 1, "candidates": []},
+    )
+    monkeypatch.setattr(
+        story_review_module,
+        "send_telegram_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not send")),
+    )
+
+    summary = send_story_review()
+
+    assert summary["story_review_failed"] == 1
+    assert summary["story_review_error"] == "telegram_admin_chat_matches_public_destination"
 
 
 def test_story_review_skips_encoding_damaged_titles() -> None:

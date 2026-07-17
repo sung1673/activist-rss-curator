@@ -1,4 +1,66 @@
 feed_url: ""
+media_feed_policy:
+  # Production media ingestion is fail-closed: a feed must map to one of
+  # these Korean-governance scopes before any network request is made.
+  enforce: true
+  default_scope: "unclassified"
+  allowed_scopes:
+    - "korean_governance"
+    - "korean_governance_context"
+  category_scopes:
+    core: "korean_governance"
+    supplemental: "korean_governance"
+  feed_scopes:
+    "google-news-임원보수 성과연계 주식보상 공시": "korean_governance"
+    "google-news-상장회사 임원 책임성 주주권익 보호": "korean_governance"
+    "google-news-상장폐지 소액주주 투자자 보호": "korean_governance"
+    "google-news-금융회사 지배구조 사외이사": "korean_governance"
+    "google-news-사외이사 경영진 견제": "korean_governance"
+    "google-news-성과보상 지배구조": "korean_governance"
+    "google-news-상장적격성 실질심사": "korean_governance"
+    "google-news-거래정지 개선기간": "korean_governance"
+    "google-news-의무공개매수 일반주주": "korean_governance"
+    "google-news-금융투자회사 성과급": "korean_governance_context"
+    "google-news-기업 밸류업 프로그램 자본시장": "korean_governance"
+    "google-news-자사주 취득 1년 이내 소각": "korean_governance"
+    "google-news-상법 개정 자사주 일반주주": "korean_governance"
+    "google-news-주가누르기 방지법": "korean_governance_context"
+    "google-news-일반주주 의결권 상법": "korean_governance"
+    "google-news-발행가능주식 확대 경영권 분쟁": "korean_governance"
+    "google-news-경영권 분쟁 법정관리": "korean_governance"
+    "google-news-스튜어드십 코드 이행력 강화": "korean_governance_context"
+    "google-news-CB 발행 주주가치": "korean_governance"
+    "google-news-EB 권리행사 자사주": "korean_governance"
+    "google-news-전환사채 리픽싱 일반주주": "korean_governance"
+    "google-news-공개매수 일반주주 경영권": "korean_governance"
+    "google-news-합병비율 주식매수청구권": "korean_governance"
+    "google-news-분할합병 지배구조 주주보호": "korean_governance"
+    "google-news-제3자배정 유상증자 경영권": "korean_governance"
+    "google-news-전환사채 콜옵션 리픽싱 주주가치": "korean_governance"
+    "google-news-감사의견 거절 상장폐지": "korean_governance"
+    "google-news-불성실공시 공시번복 거래소": "korean_governance"
+    "google-news-en-korea-value-up-foreign-investors": "korean_governance_context"
+    "google-news-en-korea-governance-activism": "korean_governance_context"
+    "google-news-en-korea-commercial-act-fiduciary-duty": "korean_governance_context"
+    "google-news-en-korea-nps-stewardship": "korean_governance_context"
+    "google-news-en-korean-chaebol-governance": "korean_governance_context"
+    "google-news-en-korea-buyback-cancellation": "korean_governance_context"
+    "google-news-en-korea-capital-market-reform": "korean_governance_context"
+    "google-news-en-bloomberg-korea-valueup-governance": "korean_governance_context"
+    "google-news-en-cnbc-korea-discount-governance": "korean_governance_context"
+    "google-news-en-forbes-korea-shareholder-value": "korean_governance_context"
+    "google-news-en-reuters-korea-governance-reform": "korean_governance_context"
+    "google-news-en-ft-korea-market-reform": "korean_governance_context"
+    "google-news-en-wsj-korea-market-reform": "korean_governance_context"
+    "google-news-en-nikkei-korea-valueup-governance": "korean_governance_context"
+    "google-news-en-economist-korea-capital-markets": "korean_governance_context"
+    "google-news-en-barrons-korea-market-reform": "korean_governance_context"
+    "google-news-en-marketwatch-korea-shareholder-returns": "korean_governance_context"
+    "google-news-en-institutional-investor-korea-stewardship": "korean_governance_context"
+    "google-news-en-pionline-korea-nps-stewardship": "korean_governance_context"
+    "google-news-en-major-outlets-korea-valueup": "korean_governance_context"
+    "google-news-en-major-outlets-korea-activism": "korean_governance_context"
+    "google-news-en-korea-nps-global-coverage": "korean_governance_context"
 feeds:
   - name: "google-news-행동주의"
     category: "core"
@@ -302,12 +364,36 @@ fetch:
   feed_fetch_workers: 8
   page_timeout_seconds: 6
   enrich_workers: 6
-  google_news_decode_limit: 10
+  google_news_decode_limit: 0
   google_news_decoded_enrich_limit: 180
-  google_news_decode_sleep_seconds: 25
+  google_news_decode_sleep_seconds: 0
   google_news_decode_stop_on_rate_limit: true
   google_news_decode_publish_levels_only: true
   state_google_news_decode_limit: 0
+  google_news_block_unresolved: false
+
+source_rights:
+  enforce: true
+  records:
+    - source_right_id: "telegram:activistkorea"
+      source_category: "authorized_telegram"
+      source_identity: "activistkorea"
+      scope: "collection,ai,event-context,redistribution"
+      evidence_ref: ""
+      valid_from: "2021-01-01"
+      expires_at:
+      revoked_at:
+      allow_ai: true
+      allow_redistribution: true
+      status: "pending"
+
+official_ingest:
+  dart_enabled: true
+  kind_enabled: true
+  lookback_days: 2
+  page_count: 100
+  max_pages: 100
+  backfill_start: "2021-01-01"
 
 display:
   exclude_link_domains:
@@ -475,7 +561,7 @@ ai:
 digest:
   enabled: false
   send_hour: 6
-  send_minute: 30
+  send_minute: 5
   send_window_minutes: 120
   window_hours: 24
   max_clusters: 0

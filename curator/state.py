@@ -134,6 +134,9 @@ def article_record(article: dict[str, object], status: str, now: datetime, reaso
         "image_candidates": article.get("image_candidates") or [],
         "feed_name": article.get("feed_name") or None,
         "feed_category": article.get("feed_category") or None,
+        "source_kind": article.get("source_kind") or None,
+        "source_right_id": article.get("source_right_id") or None,
+        "telegram_source_handle": article.get("telegram_source_handle") or None,
         "relevance_keywords": article.get("relevance_keywords") or [],
     }
     duplicate_matches = clean_duplicate_matches(article)

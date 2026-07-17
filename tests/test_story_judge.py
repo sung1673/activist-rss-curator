@@ -5,6 +5,7 @@ from curator.story_judge import (
     judgement_allows_same_story,
     parse_story_judgement,
     should_consult_story_judge,
+    story_judge_fail_closed_required,
 )
 
 
@@ -28,6 +29,7 @@ def test_judgement_requires_same_story_and_confidence(config) -> None:  # type: 
     assert judgement_allows_same_story(StoryJudgement("same_story", 0.8), config)
     assert not judgement_allows_same_story(StoryJudgement("same_story", 0.5), config)
     assert not judgement_allows_same_story(StoryJudgement("related_but_different", 0.95), config)
+    assert not judgement_allows_same_story(None, config)
     assert judgement_allows_same_story(None, config, fallback=True)
 
 
@@ -39,5 +41,6 @@ def test_story_judge_consultation_needs_token_and_ambiguous_title(config, monkey
     assert not should_consult_story_judge(72, config)
 
     monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    assert story_judge_fail_closed_required(config)
     assert should_consult_story_judge(72, config)
     assert not should_consult_story_judge(95, config)

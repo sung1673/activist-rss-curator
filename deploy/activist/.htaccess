@@ -1,0 +1,11 @@
+# Gabia's PHP-FPM bridge drops the standard Authorization header unless it is
+# explicitly copied into the CGI environment. This keeps the documented Bearer
+# authentication contract working for the role-scoped /api/v1 endpoints.
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+
+Options -Indexes
+
+<FilesMatch "^(config|schema|.*\.sql|.*\.bak|.*\.env)$">
+  Require all denied
+  Deny from all
+</FilesMatch>

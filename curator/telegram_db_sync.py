@@ -10,7 +10,13 @@ from typing import Any
 
 from .dates import parse_datetime
 from .state import load_state
-from .telegram_sources import ensure_telegram_state, load_env_files, message_key, risk_flags_for_text
+from .telegram_sources import (
+    canonicalize_telegram_channels,
+    ensure_telegram_state,
+    load_env_files,
+    message_key,
+    risk_flags_for_text,
+)
 
 
 def table_name(name: str) -> str:
@@ -66,6 +72,7 @@ def create_schema(conn: Any) -> None:
     messages = table_name("telegram_messages")
     matches = table_name("telegram_article_matches")
     signals = table_name("telegram_issue_signals")
+    outbox = table_name("delivery_outbox")
     with conn.cursor() as cur:
         cur.execute(
             f"""
@@ -157,10 +164,42 @@ def create_schema(conn: Any) -> None:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
         )
+        cur.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {outbox} (
+              delivery_id VARCHAR(96) NOT NULL,
+              event_id VARCHAR(96) DEFAULT NULL,
+              delivery_channel VARCHAR(40) NOT NULL DEFAULT 'telegram',
+              destination VARCHAR(191) NOT NULL,
+              idempotency_key VARCHAR(191) NOT NULL,
+              payload_json MEDIUMTEXT NOT NULL,
+              status VARCHAR(24) NOT NULL DEFAULT 'pending',
+              attempt_count INT NOT NULL DEFAULT 0,
+              next_attempt_at DATETIME DEFAULT NULL,
+              lease_token VARCHAR(64) DEFAULT NULL,
+              locked_by VARCHAR(96) DEFAULT NULL,
+              locked_at DATETIME DEFAULT NULL,
+              lease_expires_at DATETIME DEFAULT NULL,
+              external_message_id VARCHAR(191) DEFAULT NULL,
+              last_error TEXT DEFAULT NULL,
+              delivered_at DATETIME DEFAULT NULL,
+              dead_lettered_at DATETIME DEFAULT NULL,
+              created_at DATETIME NOT NULL,
+              updated_at DATETIME NOT NULL,
+              PRIMARY KEY (delivery_id),
+              UNIQUE KEY uq_delivery_idempotency (delivery_channel, destination, idempotency_key),
+              KEY idx_delivery_ready (status, next_attempt_at),
+              KEY idx_delivery_lease (status, lease_expires_at),
+              KEY idx_delivery_event (event_id),
+              KEY idx_delivery_dead_letter (dead_lettered_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
     conn.commit()
 
 
 def channel_rows(state: dict[str, object], timezone_name: str) -> list[dict[str, object]]:
+    canonicalize_telegram_channels(state)
     rows: list[dict[str, object]] = []
     for channel in state.get("telegram_source_channels", []):
         if not isinstance(channel, dict):
@@ -280,6 +319,158 @@ def signal_rows(state: dict[str, object], timezone_name: str) -> list[dict[str, 
     return rows
 
 
+def outbox_rows(state: dict[str, object], timezone_name: str) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for entry in state.get("telegram_delivery_outbox", []):
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("status") or "") == "remote_queued":
+            # The API-owned row already exists.  Re-upserting it from ephemeral
+            # local state could reset a delivered/processing row to pending.
+            continue
+        outbox_id = compact_text(entry.get("outbox_id"), 96)
+        destination = compact_text(entry.get("destination"), 191)
+        payload_text = str(entry.get("payload_text") or "")
+        if not outbox_id or not destination or not payload_text:
+            continue
+        rows.append(
+            {
+                "delivery_id": outbox_id,
+                "event_id": compact_text(entry.get("event_id"), 96) or None,
+                "delivery_channel": compact_text(entry.get("channel") or "telegram", 40),
+                "destination": destination,
+                "idempotency_key": compact_text(entry.get("cluster_guid") or outbox_id, 191),
+                "payload_json": json.dumps(
+                    {
+                        "text": payload_text,
+                        "disable_web_page_preview": bool(entry.get("disable_web_page_preview", True)),
+                        "cluster_guid": entry.get("cluster_guid"),
+                        "source_kind": entry.get("source_kind"),
+                        "source_right_id": entry.get("source_right_id"),
+                        "source_kinds": entry.get("source_kinds") or [],
+                        "rights_lineage_complete": isinstance(entry.get("source_right_ids"), list)
+                        and isinstance(entry.get("article_sources"), list),
+                        "source_right_ids": entry.get("source_right_ids") or [],
+                        "article_sources": entry.get("article_sources") or [],
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                "status": compact_text(entry.get("status") or "pending", 24),
+                "attempt_count": int(entry.get("attempt_count") or 0),
+                "next_attempt_at": mysql_datetime(entry.get("next_attempt_at"), timezone_name),
+                "lease_token": compact_text(entry.get("lease_token"), 64) or None,
+                "locked_by": compact_text(entry.get("locked_by"), 96) or None,
+                "locked_at": mysql_datetime(entry.get("locked_at"), timezone_name),
+                "lease_expires_at": mysql_datetime(entry.get("lease_expires_at"), timezone_name),
+                "external_message_id": compact_text(entry.get("external_message_id"), 191) or None,
+                "last_error": compact_text(entry.get("last_error"), 500) or None,
+                "delivered_at": mysql_datetime(entry.get("delivered_at"), timezone_name),
+                "dead_lettered_at": mysql_datetime(entry.get("dead_lettered_at"), timezone_name),
+                "created_at": mysql_datetime(entry.get("created_at"), timezone_name) or now_text,
+                "updated_at": now_text,
+            }
+        )
+    return rows
+
+
+def reconcile_db_channel_identities(conn: Any, rows: list[dict[str, object]]) -> int:
+    """Remove stale handle aliases before upserting the canonical channel row."""
+
+    removed = 0
+    table = table_name("telegram_channels")
+    with conn.cursor() as cur:
+        for row in rows:
+            channel_id = str(row.get("telegram_channel_id") or "")
+            handle = str(row.get("handle") or "")
+            if not channel_id or not handle:
+                continue
+            removed += int(
+                cur.execute(
+                    f"DELETE FROM {table} WHERE telegram_channel_id=%s AND handle<>%s",
+                    (channel_id, handle),
+                )
+            )
+    return removed
+
+
+def reconcile_db_message_identities(conn: Any, rows: list[dict[str, object]]) -> int:
+    """Rewrite handle-keyed message rows to the authoritative channel-ID key."""
+
+    migrated = 0
+    table = table_name("telegram_messages")
+    with conn.cursor() as cur:
+        for row in rows:
+            channel_id = str(row.get("telegram_channel_id") or "")
+            handle = str(row.get("handle") or "")
+            if not channel_id or not handle:
+                continue
+            # If both an old alias and a canonical row already exist, retain the
+            # canonical row before rewriting the remaining aliases.
+            cur.execute(
+                f"""
+                DELETE stale FROM {table} AS stale
+                INNER JOIN {table} AS canonical
+                  ON canonical.message_key=CONCAT('id:', %s, ':', stale.telegram_message_id)
+                WHERE stale.message_key<>canonical.message_key
+                  AND (stale.channel_handle=%s OR stale.telegram_channel_id=%s)
+                """,
+                (channel_id, handle, channel_id),
+            )
+            migrated += int(
+                cur.execute(
+                    f"""
+                    UPDATE {table}
+                    SET message_key=CONCAT('id:', %s, ':', telegram_message_id),
+                        channel_handle=%s,
+                        telegram_channel_id=%s
+                    WHERE channel_handle=%s OR telegram_channel_id=%s
+                    """,
+                    (channel_id, handle, channel_id, handle, channel_id),
+                )
+            )
+    return migrated
+
+
+def reconcile_db_match_identities(conn: Any, rows: list[dict[str, object]]) -> int:
+    """Rewrite article-match foreign keys after a handle-only channel gains an ID."""
+
+    migrated = 0
+    table = table_name("telegram_article_matches")
+    with conn.cursor() as cur:
+        for row in rows:
+            channel_id = str(row.get("telegram_channel_id") or "")
+            handle = str(row.get("handle") or "")
+            if not channel_id or not handle:
+                continue
+            cur.execute(
+                f"""
+                DELETE stale FROM {table} AS stale
+                INNER JOIN {table} AS canonical
+                  ON canonical.article_id=stale.article_id
+                 AND canonical.match_type=stale.match_type
+                 AND canonical.message_key=CONCAT('id:', %s, ':', stale.telegram_message_id)
+                WHERE stale.message_key<>canonical.message_key
+                  AND stale.channel_handle=%s
+                """,
+                (channel_id, handle),
+            )
+            migrated += int(
+                cur.execute(
+                    f"""
+                    UPDATE {table}
+                    SET message_key=CONCAT('id:', %s, ':', telegram_message_id),
+                        channel_handle=%s
+                    WHERE channel_handle=%s AND telegram_message_id IS NOT NULL
+                    """,
+                    (channel_id, handle, handle),
+                )
+            )
+    return migrated
+
+
 def executemany_upsert(conn: Any, table: str, rows: list[dict[str, object]], update_columns: list[str]) -> int:
     if not rows:
         return 0
@@ -330,7 +521,11 @@ def sync_state_to_db(
         message_key_set = {str(row["message_key"]) for row in messages}
         matches = match_rows(state, message_key_set if limit else None)
         signals = signal_rows(state, timezone_name)
+        outbox = outbox_rows(state, timezone_name)
         deleted_matches = delete_existing_match_rows(conn, message_key_set, replace_all=not limit) if replace_matches else 0
+        migrated_channels = reconcile_db_channel_identities(conn, channels)
+        migrated_messages = reconcile_db_message_identities(conn, channels)
+        migrated_matches = reconcile_db_match_identities(conn, channels)
         channel_count = executemany_upsert(
             conn,
             table_name("telegram_channels"),
@@ -358,6 +553,8 @@ def sync_state_to_db(
             table_name("telegram_messages"),
             messages,
             [
+                "channel_handle",
+                "telegram_channel_id",
                 "posted_at",
                 "edited_at",
                 "deleted_at",
@@ -394,13 +591,38 @@ def sync_state_to_db(
                 "updated_at",
             ],
         )
+        outbox_count = executemany_upsert(
+            conn,
+            table_name("delivery_outbox"),
+            outbox,
+            [
+                "destination",
+                "payload_json",
+                "status",
+                "attempt_count",
+                "next_attempt_at",
+                "lease_token",
+                "locked_by",
+                "locked_at",
+                "lease_expires_at",
+                "delivered_at",
+                "dead_lettered_at",
+                "external_message_id",
+                "last_error",
+                "updated_at",
+            ],
+        )
         conn.commit()
         return {
             "telegram_db_channels": channel_count,
+            "telegram_db_channels_migrated": migrated_channels,
+            "telegram_db_messages_migrated": migrated_messages,
             "telegram_db_messages": message_count,
             "telegram_db_matches": match_count,
+            "telegram_db_matches_migrated": migrated_matches,
             "telegram_db_matches_deleted": deleted_matches,
             "telegram_db_signals": signal_count,
+            "telegram_db_outbox": outbox_count,
         }
     except Exception:
         conn.rollback()
@@ -414,13 +636,19 @@ def db_counts() -> dict[str, int]:
     try:
         with conn.cursor() as cur:
             counts: dict[str, int] = {}
-            for key in ("telegram_channels", "telegram_messages", "telegram_article_matches", "telegram_issue_signals"):
+            for key in (
+                "telegram_channels",
+                "telegram_messages",
+                "telegram_article_matches",
+                "telegram_issue_signals",
+                "delivery_outbox",
+            ):
                 table = table_name(key)
-                cur.execute(f"SHOW TABLES LIKE %s", (table,))
+                cur.execute("SHOW TABLES LIKE %s", (table,))
                 if not cur.fetchone():
                     counts[key] = 0
                     continue
-                cur.execute(f"SELECT COUNT(*) FROM {table}")
+                cur.execute("SELECT COUNT(*) FROM " + table)
                 counts[key] = int(cur.fetchone()[0])
             return counts
     finally:

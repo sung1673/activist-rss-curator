@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python tests and PHP syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install runtime dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Compile Python sources
+        run: python -m compileall -q curator tests
+
+      - name: Validate governance UI build and budgets
+        run: python -m curator.governance_ui --root .
+
+      - name: Run Python tests
+        run: pytest -q
+
+      - name: Validate PHP API syntax
+        shell: bash
+        run: find deploy -type f -name '*.php' -print0 | xargs -0 -r -n1 php -l
+
+      - name: Run PHP API contract tests
+        run: php tests/php_contracts.php
+
+  quality:
+    name: Lint, types, and dependency security
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install quality tools
+        run: python -m pip install "ruff==0.12.2" "mypy==1.16.1" "pip-audit==2.9.0"
+
+      - name: Lint
+        run: ruff check curator tests --output-format=github
+
+      - name: Type check governance core
+        run: >-
+          mypy
+          curator/governance.py
+          curator/governance_ui.py
+          curator/source_rights.py
+          curator/link_discovery.py
+          curator/editorial_ingest.py
+          curator/governance_publisher.py
+          curator/release_gate.py
+          --ignore-missing-imports
+          --follow-imports=skip
+          --check-untyped-defs
+          --disallow-untyped-defs
+          --no-implicit-optional
+          --warn-redundant-casts
+          --warn-unused-ignores
+          --show-error-codes
+
+      - name: Audit Python dependencies
+        run: pip-audit --requirement requirements.txt
+
+  ui-e2e:
+    name: Browser journeys, accessibility, and mobile budgets
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install browser test dependencies
+        run: npm ci
+
+      - name: Audit browser test dependencies
+        run: npm audit --audit-level=high
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run governance UI journeys and WCAG checks
+        run: npm run test:ui
+
+      - name: Preserve failed browser traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: governance-ui-playwright-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 14

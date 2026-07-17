@@ -18,8 +18,10 @@ from .config import load_config
 from .dates import format_kst, now_in_timezone, parse_datetime
 from .fetch import USER_AGENT, image_hrefs, usable_image_url
 from .normalize import canonical_url_hash
+from .pages_compat import write_legacy_pages_adapter
 from .rss_writer import article_link, article_source_label, compact_text, display_article_title
-from .remote_api import sync_report_to_remote_api
+from .remote_api import post_remote_action, remote_api_configured, sync_report_to_remote_api
+from .remote_state import hydrate_runtime_state
 from .state import load_state
 from .story_review import build_story_review, write_story_review_files
 from .telegram_sources import risk_flags_for_text
@@ -27,7 +29,6 @@ from .summaries import (
     digest_article_identity_keys,
     digest_article_entries,
     digest_category_label_for_group,
-    digest_config,
     digest_context,
     digest_group_title,
     digest_representative_entry,
@@ -5799,6 +5800,7 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
     end_at = now or now_in_timezone(timezone_name)
     start_at = end_at - timedelta(hours=report_hours())
     state = load_state(project_root / "data" / "state.json")
+    hydrate_runtime_state(state, config, end_at)
     clusters = digest_clusters_in_window(state, config, start_at, end_at)
     duplicate_records = duplicate_records_in_window(state, config, start_at, end_at)
     stories = build_report_stories(clusters, duplicate_records, config)
@@ -5840,6 +5842,11 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
         "report_url": report_url,
         "stats": report_stats(stories, clusters, duplicate_records),
         "clusters": clusters,
+        "rss_clusters": [
+            cluster
+            for cluster in state.get("published_clusters", [])
+            if isinstance(cluster, dict)
+        ],
         "duplicate_records": duplicate_records,
     }
 
@@ -5877,7 +5884,17 @@ def write_report_files(report: dict[str, object], root: Path | None = None) -> l
             stale_path.unlink()
     index_path.write_text(render_report_index(feed_dir), encoding="utf-8", newline="\n")
     refreshed_paths = refresh_existing_report_archive_links(feed_dir, date_id)
-    return [dated_path, latest_path, telegram_path, search_path, index_path, *review_paths, *refreshed_paths]
+    compatibility_paths = write_legacy_pages_adapter(report, project_root)
+    return [
+        dated_path,
+        latest_path,
+        telegram_path,
+        search_path,
+        index_path,
+        *review_paths,
+        *refreshed_paths,
+        *compatibility_paths,
+    ]
 
 
 def render_report_archive_links(feed_dir: Path, current_date_id: str, *, link_prefix: str = "", max_items: int = 20) -> str:
@@ -6048,16 +6065,102 @@ def build_report_telegram_message(report: dict[str, object]) -> str:
     return "\n".join(lines).strip()
 
 
-def send_daily_report(root: Path | None = None) -> dict[str, int]:
-    project_root = root or PROJECT_ROOT
-    report = build_daily_report(project_root)
-    write_report_files(report, project_root)
-    remote_summary = sync_report_to_remote_api(report)
-    config = report["config"] if isinstance(report.get("config"), dict) else load_config(project_root / "config.yaml")
-    if daily_report_write_only():
-        return {"daily_report_written": 1, "daily_report_sent": 0, "daily_report_failed": 0, **remote_summary}
-    if not telegram_is_configured(config):
-        return {"daily_report_written": 1, "daily_report_sent": 0, "daily_report_failed": 0, **remote_summary}
+def report_source_right_ids(report: dict[str, object]) -> list[str]:
+    """Return the immutable rights lineage used to build a daily briefing."""
+
+    right_ids: set[str] = set()
+    for collection_name in ("clusters", "duplicate_records"):
+        records = report.get(collection_name)
+        if not isinstance(records, list):
+            continue
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            values = record.get("source_right_ids")
+            if isinstance(values, list):
+                right_ids.update(str(value).strip() for value in values if str(value).strip())
+            direct = str(record.get("source_right_id") or "").strip()
+            if direct:
+                right_ids.add(direct)
+            articles = record.get("articles")
+            if not isinstance(articles, list):
+                continue
+            for article in articles:
+                if not isinstance(article, dict):
+                    continue
+                article_right = str(article.get("source_right_id") or "").strip()
+                if article_right:
+                    right_ids.add(article_right)
+    return sorted(right_ids)
+
+
+def daily_report_delivery_mode() -> str:
+    """Return the single delivery path selected for this report invocation."""
+
+    if os.environ.get("CURATOR_DISABLE_TELEGRAM_SEND", "").strip().casefold() in {"1", "true", "yes", "on"}:
+        return "disabled"
+    raw_mode = os.environ.get("CURATOR_DELIVERY_MODE", "").strip().casefold()
+    aliases = {
+        "direct": "legacy-direct",
+        "legacy": "legacy-direct",
+        "outbox": "outbox-enqueue",
+        "enqueue": "outbox-enqueue",
+        "ingest-only": "disabled",
+        "none": "disabled",
+    }
+    mode = aliases.get(raw_mode, raw_mode)
+    if mode:
+        if mode not in {"legacy-direct", "outbox-enqueue", "disabled"}:
+            raise ValueError(f"unsupported CURATOR_DELIVERY_MODE: {raw_mode}")
+        return mode
+    return "outbox-enqueue" if remote_api_configured() else "legacy-direct"
+
+
+def enqueue_daily_report(
+    report: dict[str, object],
+    config: dict[str, object],
+) -> dict[str, int]:
+    """Enqueue one daily briefing without consuming the durable MySQL outbox.
+
+    The date-stable delivery ID makes delayed retries idempotent.  Only the
+    dedicated publish workflow is allowed to claim and deliver this row.
+    """
+
+    if not remote_api_configured():
+        return {"daily_report_queued": 0, "daily_report_sent": 0, "daily_report_failed": 1}
+    date_id = str(report.get("date_id") or "").strip()
+    destination = telegram_chat_id(config)
+    if not date_id or not destination:
+        return {"daily_report_queued": 0, "daily_report_sent": 0, "daily_report_failed": 1}
+    delivery_id = f"daily:{date_id}"
+    response = post_remote_action(
+        "enqueue_delivery_outbox",
+        {
+            "deliveries": [
+                {
+                    "delivery_id": delivery_id,
+                    "channel": "telegram",
+                    "destination": destination,
+                    "idempotency_key": delivery_id,
+                    "payload": {
+                        "text": build_report_telegram_message(report),
+                        "disable_web_page_preview": False,
+                        "report_date": date_id,
+                        "rights_lineage_complete": True,
+                        "source_right_ids": report_source_right_ids(report),
+                    },
+                }
+            ]
+        },
+    )
+    if not response.get("ok") or int(response.get("accepted") or 0) != 1:
+        return {"daily_report_queued": 0, "daily_report_sent": 0, "daily_report_failed": 1}
+    return {"daily_report_queued": 1, "daily_report_sent": 0, "daily_report_failed": 0}
+
+
+def deliver_daily_report_direct(report: dict[str, object], config: dict[str, object]) -> dict[str, int]:
+    """Preserve the legacy direct-send behavior without touching remote outbox."""
+
     response = send_telegram_message(
         telegram_bot_token(),
         telegram_chat_id(config),
@@ -6066,9 +6169,38 @@ def send_daily_report(root: Path | None = None) -> dict[str, int]:
         disable_web_page_preview=False,
     )
     return {
-        "daily_report_written": 1,
+        "daily_report_queued": 0,
         "daily_report_sent": 1 if response.get("ok") else 0,
         "daily_report_failed": 0 if response.get("ok") else 1,
+    }
+
+
+def send_daily_report(root: Path | None = None) -> dict[str, int]:
+    project_root = root or PROJECT_ROOT
+    report = build_daily_report(project_root)
+    write_report_files(report, project_root)
+    remote_summary = sync_report_to_remote_api(report)
+    config = report["config"] if isinstance(report.get("config"), dict) else load_config(project_root / "config.yaml")
+    if daily_report_write_only():
+        return {"daily_report_written": 1, "daily_report_sent": 0, "daily_report_failed": 0, **remote_summary}
+    delivery_mode = daily_report_delivery_mode()
+    if delivery_mode == "disabled":
+        return {
+            "daily_report_written": 1,
+            "daily_report_queued": 0,
+            "daily_report_sent": 0,
+            "daily_report_failed": 0,
+            **remote_summary,
+        }
+    if not telegram_is_configured(config):
+        return {"daily_report_written": 1, "daily_report_sent": 0, "daily_report_failed": 1, **remote_summary}
+    if delivery_mode == "legacy-direct":
+        delivery_summary = deliver_daily_report_direct(report, config)
+    else:
+        delivery_summary = enqueue_daily_report(report, config)
+    return {
+        "daily_report_written": 1,
+        **delivery_summary,
         **remote_summary,
     }
 
@@ -6079,6 +6211,8 @@ def main() -> None:
         "Daily report finished: "
         + ", ".join(f"{key}={value}" for key, value in summary.items())
     )
+    if int(summary.get("daily_report_failed") or 0):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,15 @@ import yaml
 DEFAULT_CONFIG: dict[str, Any] = {
     "feed_url": "",
     "feeds": [],
+    # Legacy configurations remain permissive. Production can opt into the
+    # fail-closed scope allowlist used by config.yaml.
+    "media_feed_policy": {
+        "enforce": False,
+        "default_scope": "unclassified",
+        "allowed_scopes": [],
+        "category_scopes": {},
+        "feed_scopes": {},
+    },
     "public_feed_url": "",
     "timezone": "Asia/Seoul",
     "fetch": {
@@ -21,15 +31,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "feed_fetch_workers": 8,
         "page_timeout_seconds": 6,
         "enrich_workers": 6,
-        "google_news_decode_limit": 180,
+        # Google News is a discovery source. URL resolution runs in a separate
+        # worker so it cannot stall official/media ingestion.
+        "google_news_decode_limit": 0,
         "google_news_decoded_enrich_limit": 80,
-        "google_news_decode_sleep_seconds": 0.35,
+        "google_news_decode_sleep_seconds": 0.0,
         "google_news_decode_stop_on_rate_limit": True,
         "google_news_title_fallback_enabled": True,
         "google_news_title_match_threshold": 86,
         "google_news_title_match_window_days": 7,
         "google_news_title_match_min_overlap": 2,
-        "google_news_block_unresolved": True,
+        "google_news_block_unresolved": False,
         "state_google_news_decode_limit": 0,
     },
     "source_registry": {
@@ -55,6 +67,32 @@ DEFAULT_CONFIG: dict[str, Any] = {
             {"name": "dailian", "domains": ["dailian.co.kr"], "aliases": ["데일리안"]},
             {"name": "thebell", "domains": ["thebell.co.kr"], "aliases": ["더벨"]},
         ],
+    },
+    "source_rights": {
+        "enforce": True,
+        "records": [
+            {
+                "source_right_id": "telegram:activistkorea",
+                "source_category": "authorized_telegram",
+                "source_identity": "activistkorea",
+                "scope": "collection,ai,event-context,redistribution",
+                "evidence_ref": "",
+                "valid_from": "2021-01-01",
+                "expires_at": None,
+                "revoked_at": None,
+                "allow_ai": True,
+                "allow_redistribution": True,
+                "status": "pending",
+            }
+        ],
+    },
+    "official_ingest": {
+        "dart_enabled": True,
+        "kind_enabled": True,
+        "lookback_days": 2,
+        "page_count": 100,
+        "max_pages": 100,
+        "backfill_start": "2021-01-01",
     },
     "display": {
         "exclude_link_domains": ["msn.com"],
@@ -206,7 +244,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "digest": {
         "enabled": False,
         "send_hour": 6,
-        "send_minute": 30,
+        "send_minute": 5,
         "send_window_minutes": 120,
         "window_hours": 24,
         "max_clusters": 0,
@@ -227,29 +265,107 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+def config_bool(value: object, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+    return bool(value)
+
+
+def media_feed_scope(feed: dict[str, Any], config: dict[str, Any]) -> str:
+    explicit_scope = str(feed.get("scope") or "").strip()
+    if explicit_scope:
+        return explicit_scope
+
+    policy = config.get("media_feed_policy", {})
+    if not isinstance(policy, dict):
+        return ""
+
+    name = str(feed.get("name") or "").strip()
+    feed_scopes = policy.get("feed_scopes", {})
+    if isinstance(feed_scopes, dict):
+        named_scope = str(feed_scopes.get(name) or "").strip()
+        if named_scope:
+            return named_scope
+
+    category = str(feed.get("category") or "").strip()
+    category_scopes = policy.get("category_scopes", {})
+    if isinstance(category_scopes, dict):
+        category_scope = str(category_scopes.get(category) or "").strip()
+        if category_scope:
+            return category_scope
+
+    if config_bool(policy.get("enforce"), default=False):
+        return str(policy.get("default_scope") or "").strip()
+    return ""
+
+
+def media_feed_is_enabled(feed: dict[str, Any], config: dict[str, Any]) -> bool:
+    if not config_bool(feed.get("enabled"), default=True):
+        return False
+
+    policy = config.get("media_feed_policy", {})
+    if not isinstance(policy, dict) or not config_bool(policy.get("enforce"), default=False):
+        return True
+
+    allowed_values = policy.get("allowed_scopes", [])
+    if not isinstance(allowed_values, list):
+        return False
+    allowed_scopes = {str(value).strip() for value in allowed_values if str(value).strip()}
+    if not allowed_scopes:
+        return False
+    return media_feed_scope(feed, config) in allowed_scopes
+
+
 def configured_feeds(config: dict[str, Any]) -> list[dict[str, str]]:
     feeds = config.get("feeds")
     normalized: list[dict[str, str]] = []
     if isinstance(feeds, list) and feeds:
         for index, feed in enumerate(feeds, start=1):
             if isinstance(feed, str):
-                normalized.append({"name": f"feed-{index}", "url": feed, "category": ""})
+                feed_record: dict[str, Any] = {"name": f"feed-{index}", "url": feed, "category": ""}
             elif isinstance(feed, dict) and feed.get("url"):
-                normalized.append(
-                    {
-                        "name": str(feed.get("name") or f"feed-{index}"),
-                        "url": str(feed["url"]),
-                        "category": str(feed.get("category") or ""),
-                    }
-                )
-    elif config.get("feed_url"):
-        normalized.append(
-            {
-                "name": str(config.get("feed_name") or "google-alert"),
-                "url": str(config["feed_url"]),
-                "category": str(config.get("feed_category") or ""),
+                feed_record = dict(feed)
+                feed_record["name"] = str(feed.get("name") or f"feed-{index}")
+                feed_record["url"] = str(feed["url"])
+                feed_record["category"] = str(feed.get("category") or "")
+            else:
+                continue
+            if not media_feed_is_enabled(feed_record, config):
+                continue
+            normalized_feed = {
+                "name": str(feed_record["name"]),
+                "url": str(feed_record["url"]),
+                "category": str(feed_record.get("category") or ""),
             }
-        )
+            scope = media_feed_scope(feed_record, config)
+            if scope:
+                normalized_feed["scope"] = scope
+            normalized.append(normalized_feed)
+    elif config.get("feed_url"):
+        feed_record = {
+            "name": str(config.get("feed_name") or "google-alert"),
+            "url": str(config["feed_url"]),
+            "category": str(config.get("feed_category") or ""),
+            "scope": str(config.get("feed_scope") or ""),
+        }
+        if media_feed_is_enabled(feed_record, config):
+            normalized_feed = {
+                "name": str(feed_record["name"]),
+                "url": str(feed_record["url"]),
+                "category": str(feed_record["category"]),
+            }
+            scope = media_feed_scope(feed_record, config)
+            if scope:
+                normalized_feed["scope"] = scope
+            normalized.append(normalized_feed)
     return normalized
 
 
@@ -299,11 +415,29 @@ def apply_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
     feeds_value = os.environ.get("CURATOR_FEEDS")
     if feeds_value:
         existing_feeds = config.get("feeds") if isinstance(config.get("feeds"), list) else []
-        feeds = []
-        for index, raw_url in enumerate(feeds_value.replace("\n", ",").split(","), start=1):
-            url = raw_url.strip()
-            if url:
-                feeds.append({"name": f"env-feed-{index}", "category": "env", "url": url})
+        feeds: list[dict[str, Any]] = []
+        try:
+            structured_feeds = json.loads(feeds_value)
+        except json.JSONDecodeError:
+            structured_feeds = None
+        if isinstance(structured_feeds, list):
+            for index, feed in enumerate(structured_feeds, start=1):
+                if not isinstance(feed, dict) or not str(feed.get("url") or "").strip():
+                    continue
+                feeds.append(
+                    {
+                        "name": str(feed.get("name") or f"env-feed-{index}"),
+                        "category": str(feed.get("category") or "env"),
+                        "url": str(feed["url"]).strip(),
+                        "scope": str(feed.get("scope") or ""),
+                        "enabled": feed.get("enabled", True),
+                    }
+                )
+        else:
+            for index, raw_url in enumerate(feeds_value.replace("\n", ",").split(","), start=1):
+                url = raw_url.strip()
+                if url:
+                    feeds.append({"name": f"env-feed-{index}", "category": "env", "url": url})
         if feeds:
             config["feeds"] = feeds + list(existing_feeds)
             config["feed_url"] = feeds[0]["url"]

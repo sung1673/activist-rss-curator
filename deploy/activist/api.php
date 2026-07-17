@@ -15,27 +15,45 @@ if (!is_file($configPath)) {
     respond(500, array('ok' => false, 'error' => 'config_missing'));
 }
 $config = require $configPath;
+require_once __DIR__ . '/governance_v1.php';
+$v1Path = v1_request_path();
 
-$origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
-$allowedOrigin = isset($config['allowed_origin']) ? (string)$config['allowed_origin'] : '';
-if ($origin !== '' && $allowedOrigin !== '' && hash_equals($allowedOrigin, $origin)) {
-    header('Access-Control-Allow-Origin: ' . $allowedOrigin);
+$origin = isset($_SERVER['HTTP_ORIGIN']) ? trim((string)$_SERVER['HTTP_ORIGIN']) : '';
+$allowedOrigin = isset($config['allowed_origin']) ? trim((string)$config['allowed_origin']) : '';
+$corsOrigin = '';
+if (valid_cors_origin($origin) && valid_cors_origin($allowedOrigin) && hash_equals($allowedOrigin, $origin)) {
+    $corsOrigin = $allowedOrigin;
+} elseif (valid_cors_origin($origin) && $v1Path !== null && strpos($v1Path, '/ops/') !== 0 && strpos($v1Path, '/admin/') !== 0) {
+    $publicOrigins = isset($config['public_api_cors_origins']) && is_array($config['public_api_cors_origins'])
+        ? $config['public_api_cors_origins'] : array();
+    if (in_array('*', $publicOrigins, true)) {
+        $corsOrigin = '*';
+    } elseif (in_array($origin, array_filter($publicOrigins, 'valid_cors_origin'), true)) {
+        $corsOrigin = $origin;
+    }
+}
+if ($corsOrigin !== '') {
+    header('Access-Control-Allow-Origin: ' . $corsOrigin);
     header('Vary: Origin');
     header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, X-Activist-Timestamp, X-Activist-Nonce, X-Activist-Signature, X-Telegram-Admin-Token');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Request-ID, X-Activist-Timestamp, X-Activist-Nonce, X-Activist-Signature, X-Telegram-Admin-Token');
+    header('Access-Control-Max-Age: 600');
 }
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
     exit;
 }
 
-$action = isset($_GET['action']) ? (string)$_GET['action'] : 'health';
 $method = $_SERVER['REQUEST_METHOD'];
 
 try {
-    if ($method === 'GET') {
+    if ($v1Path !== null) {
+        handle_v1_request($method, $v1Path, $config);
+    } elseif ($method === 'GET') {
+        $action = isset($_GET['action']) ? (string)$_GET['action'] : 'health';
         handle_read($action, $config);
     } elseif ($method === 'POST') {
+        $action = isset($_GET['action']) ? (string)$_GET['action'] : 'health';
         handle_write($action, $config);
     } else {
         respond(405, array('ok' => false, 'error' => 'method_not_allowed'));
@@ -46,9 +64,31 @@ try {
 }
 
 function respond(int $status, array $payload): void {
+    $encoded = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($encoded === false) {
+        $status = 500;
+        $encoded = '{"ok":false,"error":"json_encoding_failed"}';
+    }
+    $budget = defined('V1_RESPONSE_BUDGET_BYTES') ? V1_RESPONSE_BUDGET_BYTES : 256000;
+    if (strlen($encoded) > $budget) {
+        $status = 500;
+        $encoded = json_encode(array('ok' => false, 'error' => 'response_budget_exceeded', 'max_bytes' => $budget));
+    }
+    header('X-Response-Bytes: ' . strlen((string)$encoded));
     http_response_code($status);
-    echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    echo $encoded;
     exit;
+}
+
+function valid_cors_origin($origin): bool {
+    if (!is_string($origin) || $origin === '' || strlen($origin) > 2048 || preg_match('/[\r\n]/', $origin)) { return false; }
+    $parts = parse_url($origin);
+    if (!is_array($parts) || !isset($parts['scheme'], $parts['host'])) { return false; }
+    if (!in_array(strtolower((string)$parts['scheme']), array('http', 'https'), true)) { return false; }
+    foreach (array('user', 'pass', 'query', 'fragment') as $key) {
+        if (isset($parts[$key])) { return false; }
+    }
+    return !isset($parts['path']) || $parts['path'] === '';
 }
 
 function table_name(array $config, string $name): string {
@@ -68,6 +108,9 @@ function pdo_conn(array $config): PDO {
     $port = (int)$config['db_port'];
     $name = (string)$config['db_name'];
     $charset = isset($config['db_charset']) ? (string)$config['db_charset'] : 'utf8mb4';
+    if (!preg_match('/^[A-Za-z0-9_]{1,32}$/', $charset)) {
+        respond(500, array('ok' => false, 'error' => 'invalid_db_charset'));
+    }
     $dsn = 'mysql:host=' . $host . ';port=' . $port . ';dbname=' . $name . ';charset=' . $charset;
     $pdo = new PDO($dsn, (string)$config['db_user'], (string)$config['db_password'], array(
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
@@ -121,6 +164,7 @@ function ensure_schema(PDO $pdo, array $config): void {
         priority_score INT NOT NULL DEFAULT 0,
         priority_level VARCHAR(40) NULL,
         story_key VARCHAR(120) NULL,
+        source_right_id VARCHAR(64) NULL,
         payload_json MEDIUMTEXT NULL,
         sort_at DATETIME NULL,
         updated_at DATETIME NOT NULL,
@@ -129,6 +173,7 @@ function ensure_schema(PDO $pdo, array $config): void {
         INDEX idx_seen_at (seen_at),
         INDEX idx_published_at (published_at),
         INDEX idx_story_key (story_key),
+        INDEX idx_article_source_right (source_right_id),
         INDEX idx_priority (priority_score)
     ) ENGINE=InnoDB' . $charset);
     $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'stories') . ' (
@@ -141,6 +186,7 @@ function ensure_schema(PDO $pdo, array $config): void {
         status VARCHAR(40) NULL,
         article_count INT NOT NULL DEFAULT 0,
         priority_score INT NOT NULL DEFAULT 0,
+        source_right_id VARCHAR(64) NULL,
         published_at DATETIME NULL,
         last_article_seen_at DATETIME NULL,
         payload_json MEDIUMTEXT NULL,
@@ -149,6 +195,7 @@ function ensure_schema(PDO $pdo, array $config): void {
         INDEX idx_guid (guid),
         INDEX idx_published_at (published_at),
         INDEX idx_priority (priority_score),
+        INDEX idx_story_source_right (source_right_id),
         INDEX idx_theme_group (theme_group)
     ) ENGINE=InnoDB' . $charset);
     $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'article_raw') . ' (
@@ -259,13 +306,414 @@ function ensure_schema(PDO $pdo, array $config): void {
     ) ENGINE=InnoDB' . $charset);
     $pdo->exec('DELETE FROM ' . table_name($config, 'api_nonces') . ' WHERE seen_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY)');
     ensure_column($pdo, $config, 'articles', 'sort_at', 'DATETIME NULL');
+    ensure_column($pdo, $config, 'articles', 'source_right_id', 'VARCHAR(64) NULL');
     ensure_column($pdo, $config, 'stories', 'sort_at', 'DATETIME NULL');
+    ensure_column($pdo, $config, 'stories', 'source_right_id', 'VARCHAR(64) NULL');
     ensure_index($pdo, $config, 'articles', 'idx_sort_at', 'sort_at');
     ensure_index($pdo, $config, 'articles', 'idx_status_sort', 'status, sort_at');
+    ensure_index($pdo, $config, 'articles', 'idx_article_source_right', 'source_right_id');
     ensure_index($pdo, $config, 'stories', 'idx_sort_at', 'sort_at');
+    ensure_index($pdo, $config, 'stories', 'idx_story_source_right', 'source_right_id');
     $pdo->exec('UPDATE ' . table_name($config, 'articles') . ' SET sort_at = COALESCE(published_at, seen_at, updated_at) WHERE sort_at IS NULL');
     $pdo->exec('UPDATE ' . table_name($config, 'stories') . ' SET sort_at = COALESCE(published_at, last_article_seen_at, updated_at) WHERE sort_at IS NULL');
     $pdo->exec('DELETE FROM ' . table_name($config, 'article_raw') . ' WHERE retained_until < UTC_TIMESTAMP()');
+    ensure_governance_schema($pdo, $config);
+}
+
+/**
+ * Governance intelligence schema v1.
+ *
+ * Runtime creation is intentionally additive so an API deployment can be
+ * rolled out before a separate migration job. The matching reviewed SQL
+ * migration lives in deploy/activist/migrations/001_governance_v1.sql.
+ */
+function ensure_governance_schema(PDO $pdo, array $config): void {
+    $charset = ' DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'companies') . ' (
+        company_id CHAR(8) NOT NULL PRIMARY KEY,
+        stock_code VARCHAR(12) NULL,
+        market VARCHAR(40) NULL,
+        legal_name VARCHAR(255) NOT NULL,
+        legal_name_en VARCHAR(255) NULL,
+        short_name VARCHAR(255) NULL,
+        aliases_json TEXT NULL,
+        homepage_url TEXT NULL,
+        record_status VARCHAR(24) NOT NULL DEFAULT \'active\',
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        UNIQUE KEY uq_company_stock_code (stock_code),
+        INDEX idx_company_name (legal_name),
+        INDEX idx_company_market_status (market, record_status)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'actors') . ' (
+        actor_id VARCHAR(64) NOT NULL PRIMARY KEY,
+        actor_type VARCHAR(40) NOT NULL,
+        display_name VARCHAR(255) NOT NULL,
+        display_name_en VARCHAR(255) NULL,
+        company_id CHAR(8) NULL,
+        country_code CHAR(2) NULL,
+        aliases_json TEXT NULL,
+        homepage_url TEXT NULL,
+        review_status VARCHAR(24) NOT NULL DEFAULT \'pending\',
+        record_status VARCHAR(24) NOT NULL DEFAULT \'inactive\',
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        INDEX idx_actor_name (display_name),
+        INDEX idx_actor_review (review_status, updated_at),
+        INDEX idx_actor_type_status (actor_type, record_status),
+        INDEX idx_actor_company (company_id)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'source_rights') . ' (
+        source_right_id VARCHAR(64) NOT NULL PRIMARY KEY,
+        source_type VARCHAR(40) NOT NULL,
+        source_key VARCHAR(191) NOT NULL,
+        source_name VARCHAR(255) NOT NULL,
+        permission_scope TEXT NOT NULL,
+        evidence_uri TEXT NULL,
+        evidence_hash CHAR(64) NULL,
+        valid_from DATETIME NOT NULL,
+        valid_until DATETIME NULL,
+        revoked_at DATETIME NULL,
+        ai_allowed TINYINT(1) NOT NULL DEFAULT 0,
+        redistribution_allowed TINYINT(1) NOT NULL DEFAULT 0,
+        status VARCHAR(24) NOT NULL DEFAULT \'pending\',
+        notes TEXT NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        UNIQUE KEY uq_source_right_key (source_type, source_key),
+        INDEX idx_source_right_validity (status, valid_from, valid_until, revoked_at)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'documents') . ' (
+        document_id VARCHAR(96) NOT NULL PRIMARY KEY,
+        company_id CHAR(8) NULL,
+        source_right_id VARCHAR(64) NULL,
+        source_class VARCHAR(40) NOT NULL,
+        external_id VARCHAR(191) NOT NULL,
+        document_type VARCHAR(80) NULL,
+        original_language VARCHAR(16) NOT NULL,
+        title VARCHAR(700) NOT NULL,
+        body_text MEDIUMTEXT NULL,
+        original_url TEXT NOT NULL,
+        content_hash CHAR(64) NOT NULL,
+        collection_key VARCHAR(96) NULL,
+        correction_of_document_id VARCHAR(96) NULL,
+        version_no INT NOT NULL DEFAULT 1,
+        published_at DATETIME NULL,
+        retrieved_at DATETIME NOT NULL,
+        verification_status VARCHAR(24) NOT NULL DEFAULT \'unverified\',
+        publication_status VARCHAR(24) NOT NULL DEFAULT \'draft\',
+        payload_json MEDIUMTEXT NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        UNIQUE KEY uq_document_external_version (source_class, external_id, version_no),
+        INDEX idx_document_company_published (company_id, published_at),
+        INDEX idx_document_source_right (source_right_id),
+        INDEX idx_document_collection (company_id, source_class, collection_key, version_no),
+        INDEX idx_document_correction (correction_of_document_id),
+        INDEX idx_document_publication (publication_status, published_at)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'governance_events') . ' (
+        event_id VARCHAR(96) NOT NULL PRIMARY KEY,
+        company_id CHAR(8) NOT NULL,
+        event_type VARCHAR(64) NOT NULL,
+        title VARCHAR(700) NOT NULL,
+        original_language VARCHAR(16) NOT NULL DEFAULT \'ko\',
+        summary MEDIUMTEXT NULL,
+        occurred_at DATETIME NOT NULL,
+        deadline_at DATETIME NULL,
+        importance VARCHAR(24) NOT NULL DEFAULT \'medium\',
+        verification_status VARCHAR(24) NOT NULL DEFAULT \'signal\',
+        review_status VARCHAR(24) NOT NULL DEFAULT \'pending\',
+        publication_status VARCHAR(24) NOT NULL DEFAULT \'draft\',
+        collection_key VARCHAR(96) NULL,
+        payload_json MEDIUMTEXT NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        INDEX idx_event_company_occurred (company_id, occurred_at),
+        INDEX idx_event_type_occurred (event_type, occurred_at),
+        INDEX idx_event_deadline (deadline_at),
+        INDEX idx_event_public (publication_status, occurred_at),
+        INDEX idx_event_review (review_status, importance, occurred_at)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'campaigns') . ' (
+        campaign_id VARCHAR(96) NOT NULL PRIMARY KEY,
+        company_id CHAR(8) NOT NULL,
+        lead_actor_id VARCHAR(64) NULL,
+        title VARCHAR(700) NOT NULL,
+        original_language VARCHAR(16) NOT NULL DEFAULT \'ko\',
+        demand_text MEDIUMTEXT NULL,
+        stage VARCHAR(40) NOT NULL,
+        outcome VARCHAR(40) NULL,
+        started_at DATETIME NOT NULL,
+        ended_at DATETIME NULL,
+        review_status VARCHAR(24) NOT NULL DEFAULT \'pending\',
+        publication_status VARCHAR(24) NOT NULL DEFAULT \'draft\',
+        payload_json MEDIUMTEXT NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        INDEX idx_campaign_company_stage (company_id, stage),
+        INDEX idx_campaign_actor (lead_actor_id),
+        INDEX idx_campaign_public (publication_status, started_at)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'event_documents') . ' (
+        event_id VARCHAR(96) NOT NULL,
+        document_id VARCHAR(96) NOT NULL,
+        relation_type VARCHAR(40) NOT NULL DEFAULT \'evidence\',
+        position_no INT NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL,
+        PRIMARY KEY (event_id, document_id, relation_type),
+        INDEX idx_event_document_document (document_id)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'campaign_documents') . ' (
+        campaign_id VARCHAR(96) NOT NULL,
+        document_id VARCHAR(96) NOT NULL,
+        relation_type VARCHAR(40) NOT NULL DEFAULT \'evidence\',
+        position_no INT NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL,
+        PRIMARY KEY (campaign_id, document_id, relation_type),
+        INDEX idx_campaign_document_document (document_id)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'event_actors') . ' (
+        event_id VARCHAR(96) NOT NULL,
+        actor_id VARCHAR(64) NOT NULL,
+        actor_role VARCHAR(40) NOT NULL,
+        review_status VARCHAR(24) NOT NULL DEFAULT \'pending\',
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        PRIMARY KEY (event_id, actor_id, actor_role),
+        INDEX idx_event_actor_review (review_status, updated_at),
+        INDEX idx_event_actor_actor (actor_id)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'claim_evidence') . ' (
+        claim_id VARCHAR(96) NOT NULL PRIMARY KEY,
+        event_id VARCHAR(96) NOT NULL,
+        campaign_id VARCHAR(96) NULL,
+        actor_id VARCHAR(64) NULL,
+        document_id VARCHAR(96) NOT NULL,
+        claim_type VARCHAR(40) NOT NULL,
+        claim_text MEDIUMTEXT NOT NULL,
+        original_language VARCHAR(16) NOT NULL,
+        evidence_locator VARCHAR(500) NULL,
+        editorial_status VARCHAR(24) NOT NULL DEFAULT \'pending\',
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        INDEX idx_claim_event_type (event_id, claim_type),
+        INDEX idx_claim_campaign (campaign_id),
+        INDEX idx_claim_document (document_id),
+        INDEX idx_claim_editorial (editorial_status)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'proposal_votes') . ' (
+        proposal_vote_id VARCHAR(96) NOT NULL PRIMARY KEY,
+        event_id VARCHAR(96) NULL,
+        campaign_id VARCHAR(96) NULL,
+        company_id CHAR(8) NOT NULL,
+        proposer_actor_id VARCHAR(64) NULL,
+        agenda_no VARCHAR(40) NULL,
+        agenda_title VARCHAR(700) NOT NULL,
+        original_language VARCHAR(16) NOT NULL DEFAULT \'ko\',
+        meeting_at DATETIME NOT NULL,
+        recommendation VARCHAR(40) NULL,
+        recommendation_source VARCHAR(255) NULL,
+        result VARCHAR(24) NOT NULL DEFAULT \'pending\',
+        votes_for DECIMAL(7,4) NULL,
+        votes_against DECIMAL(7,4) NULL,
+        votes_abstain DECIMAL(7,4) NULL,
+        evidence_document_id VARCHAR(96) NULL,
+        review_status VARCHAR(24) NOT NULL DEFAULT \'pending\',
+        publication_status VARCHAR(24) NOT NULL DEFAULT \'draft\',
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        INDEX idx_vote_company_meeting (company_id, meeting_at),
+        INDEX idx_vote_event (event_id),
+        INDEX idx_vote_campaign (campaign_id),
+        INDEX idx_vote_review (review_status, meeting_at),
+        INDEX idx_vote_public (publication_status, meeting_at)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'commitment_outcomes') . ' (
+        commitment_id VARCHAR(96) NOT NULL PRIMARY KEY,
+        event_id VARCHAR(96) NULL,
+        campaign_id VARCHAR(96) NULL,
+        company_id CHAR(8) NOT NULL,
+        commitment_text MEDIUMTEXT NOT NULL,
+        original_language VARCHAR(16) NOT NULL DEFAULT \'ko\',
+        target_at DATETIME NULL,
+        actual_action MEDIUMTEXT NULL,
+        status VARCHAR(32) NOT NULL DEFAULT \'announced\',
+        target_metrics_json TEXT NULL,
+        actual_metrics_json TEXT NULL,
+        evidence_document_id VARCHAR(96) NULL,
+        review_status VARCHAR(24) NOT NULL DEFAULT \'pending\',
+        publication_status VARCHAR(24) NOT NULL DEFAULT \'draft\',
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        INDEX idx_commitment_company_status (company_id, status),
+        INDEX idx_commitment_target (target_at),
+        INDEX idx_commitment_review (review_status, target_at),
+        INDEX idx_commitment_public (publication_status, target_at)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'timeline_entries') . ' (
+        timeline_entry_id VARCHAR(96) NOT NULL PRIMARY KEY,
+        event_id VARCHAR(96) NULL,
+        campaign_id VARCHAR(96) NULL,
+        document_id VARCHAR(96) NULL,
+        occurred_at DATETIME NOT NULL,
+        entry_type VARCHAR(40) NOT NULL,
+        title VARCHAR(700) NOT NULL,
+        description MEDIUMTEXT NULL,
+        original_language VARCHAR(16) NOT NULL DEFAULT \'ko\',
+        review_status VARCHAR(24) NOT NULL DEFAULT \'pending\',
+        publication_status VARCHAR(24) NOT NULL DEFAULT \'draft\',
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        INDEX idx_timeline_event_time (event_id, occurred_at),
+        INDEX idx_timeline_campaign_time (campaign_id, occurred_at),
+        INDEX idx_timeline_review (review_status, occurred_at),
+        INDEX idx_timeline_public_time (publication_status, occurred_at)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'editorial_revisions') . ' (
+        revision_id VARCHAR(96) NOT NULL PRIMARY KEY,
+        entity_type VARCHAR(40) NOT NULL,
+        entity_id VARCHAR(96) NOT NULL,
+        field_name VARCHAR(80) NULL,
+        previous_value MEDIUMTEXT NULL,
+        revised_value MEDIUMTEXT NULL,
+        reason TEXT NOT NULL,
+        revision_status VARCHAR(24) NOT NULL DEFAULT \'pending\',
+        requested_by VARCHAR(191) NULL,
+        reviewed_by VARCHAR(191) NULL,
+        reviewed_at DATETIME NULL,
+        published_at DATETIME NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        INDEX idx_revision_entity (entity_type, entity_id),
+        INDEX idx_revision_status_created (revision_status, created_at)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'editorial_ingest_chunks') . ' (
+        chunk_id VARCHAR(96) NOT NULL PRIMARY KEY,
+        bundle_sha256 CHAR(64) NOT NULL,
+        chunk_index INT NOT NULL,
+        chunk_count INT NOT NULL,
+        entity_type VARCHAR(40) NOT NULL,
+        payload_sha256 CHAR(64) NOT NULL,
+        accepted_json TEXT NOT NULL,
+        created_at DATETIME NOT NULL,
+        UNIQUE KEY uq_editorial_bundle_chunk (bundle_sha256, chunk_index),
+        INDEX idx_editorial_chunk_created (created_at)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'delivery_outbox') . ' (
+        delivery_id VARCHAR(96) NOT NULL PRIMARY KEY,
+        event_id VARCHAR(96) NULL,
+        delivery_channel VARCHAR(40) NOT NULL,
+        destination VARCHAR(191) NOT NULL,
+        idempotency_key VARCHAR(191) NOT NULL,
+        payload_json MEDIUMTEXT NOT NULL,
+        status VARCHAR(24) NOT NULL DEFAULT \'pending\',
+        attempt_count INT NOT NULL DEFAULT 0,
+        next_attempt_at DATETIME NULL,
+        lease_token VARCHAR(64) NULL,
+        locked_by VARCHAR(96) NULL,
+        locked_at DATETIME NULL,
+        lease_expires_at DATETIME NULL,
+        external_message_id VARCHAR(191) NULL,
+        last_error TEXT NULL,
+        delivered_at DATETIME NULL,
+        dead_lettered_at DATETIME NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        UNIQUE KEY uq_delivery_idempotency (delivery_channel, destination, idempotency_key),
+        INDEX idx_delivery_ready (status, next_attempt_at),
+        INDEX idx_delivery_lease (status, lease_expires_at),
+        INDEX idx_delivery_event (event_id),
+        INDEX idx_delivery_dead_letter (dead_lettered_at)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'feedback') . ' (
+        feedback_id VARCHAR(64) NOT NULL PRIMARY KEY,
+        feedback_type VARCHAR(32) NOT NULL,
+        entity_type VARCHAR(40) NULL,
+        entity_id VARCHAR(96) NULL,
+        submitter_name VARCHAR(191) NULL,
+        submitter_contact VARCHAR(320) NULL,
+        message TEXT NOT NULL,
+        evidence_urls_json TEXT NULL,
+        status VARCHAR(24) NOT NULL DEFAULT \'pending\',
+        is_public TINYINT(1) NOT NULL DEFAULT 0,
+        review_note TEXT NULL,
+        reviewed_by VARCHAR(191) NULL,
+        reviewed_at DATETIME NULL,
+        ip_hash CHAR(64) NOT NULL,
+        user_agent_hash CHAR(64) NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        INDEX idx_feedback_status_created (status, created_at),
+        INDEX idx_feedback_rate (ip_hash, created_at),
+        INDEX idx_feedback_entity (entity_type, entity_id)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'collection_runs') . ' (
+        run_id VARCHAR(96) NOT NULL PRIMARY KEY,
+        pipeline VARCHAR(64) NOT NULL,
+        source_key VARCHAR(191) NULL,
+        status VARCHAR(24) NOT NULL,
+        started_at DATETIME NOT NULL,
+        finished_at DATETIME NULL,
+        fetched_count INT NOT NULL DEFAULT 0,
+        resolved_count INT NOT NULL DEFAULT 0,
+        accepted_count INT NOT NULL DEFAULT 0,
+        error_count INT NOT NULL DEFAULT 0,
+        lag_seconds_p95 INT NULL,
+        metrics_json MEDIUMTEXT NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        INDEX idx_collection_pipeline_finished (pipeline, finished_at),
+        INDEX idx_collection_status_finished (status, finished_at),
+        INDEX idx_collection_source_finished (source_key, finished_at)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'link_discoveries') . ' (
+        discovery_id VARCHAR(96) NOT NULL PRIMARY KEY,
+        discovered_url TEXT NOT NULL,
+        discovered_url_hash CHAR(64) NOT NULL,
+        source VARCHAR(191) NULL,
+        title VARCHAR(700) NULL,
+        status VARCHAR(24) NOT NULL DEFAULT \'discovered\',
+        resolved_url TEXT NULL,
+        attempt_count INT NOT NULL DEFAULT 0,
+        next_attempt_at DATETIME NULL,
+        lease_token VARCHAR(64) NULL,
+        locked_by VARCHAR(96) NULL,
+        locked_at DATETIME NULL,
+        lease_expires_at DATETIME NULL,
+        last_error TEXT NULL,
+        discovered_at DATETIME NOT NULL,
+        resolved_at DATETIME NULL,
+        expired_at DATETIME NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        UNIQUE KEY uq_discovered_url_hash (discovered_url_hash),
+        INDEX idx_link_discovery_ready (status, next_attempt_at),
+        INDEX idx_link_discovery_lease (status, lease_expires_at),
+        INDEX idx_link_discovery_resolved (resolved_at)
+    ) ENGINE=InnoDB' . $charset);
+    ensure_column($pdo, $config, 'delivery_outbox', 'lease_token', 'VARCHAR(64) NULL');
+    ensure_column($pdo, $config, 'delivery_outbox', 'locked_by', 'VARCHAR(96) NULL');
+    ensure_column($pdo, $config, 'delivery_outbox', 'lease_expires_at', 'DATETIME NULL');
+    ensure_index($pdo, $config, 'delivery_outbox', 'idx_delivery_lease', 'status, lease_expires_at');
+    ensure_column($pdo, $config, 'feedback', 'review_note', 'TEXT NULL');
+    ensure_column($pdo, $config, 'feedback', 'reviewed_by', 'VARCHAR(191) NULL');
+    ensure_column($pdo, $config, 'feedback', 'reviewed_at', 'DATETIME NULL');
+    ensure_column($pdo, $config, 'documents', 'collection_key', 'VARCHAR(96) NULL');
+    ensure_index($pdo, $config, 'documents', 'idx_document_collection', 'company_id, source_class, collection_key, version_no');
+    ensure_column($pdo, $config, 'actors', 'review_status', 'VARCHAR(24) NOT NULL DEFAULT \'pending\'');
+    ensure_index($pdo, $config, 'actors', 'idx_actor_review', 'review_status, updated_at');
+    ensure_column($pdo, $config, 'event_actors', 'review_status', 'VARCHAR(24) NOT NULL DEFAULT \'pending\'');
+    ensure_column($pdo, $config, 'event_actors', 'updated_at', 'DATETIME NULL');
+    $pdo->exec('UPDATE ' . table_name($config, 'event_actors') . ' SET updated_at=created_at WHERE updated_at IS NULL');
+    ensure_index($pdo, $config, 'event_actors', 'idx_event_actor_review', 'review_status, updated_at');
+    ensure_column($pdo, $config, 'proposal_votes', 'review_status', 'VARCHAR(24) NOT NULL DEFAULT \'pending\'');
+    ensure_index($pdo, $config, 'proposal_votes', 'idx_vote_review', 'review_status, meeting_at');
+    ensure_column($pdo, $config, 'commitment_outcomes', 'review_status', 'VARCHAR(24) NOT NULL DEFAULT \'pending\'');
+    ensure_index($pdo, $config, 'commitment_outcomes', 'idx_commitment_review', 'review_status, target_at');
+    ensure_column($pdo, $config, 'timeline_entries', 'review_status', 'VARCHAR(24) NOT NULL DEFAULT \'pending\'');
+    ensure_index($pdo, $config, 'timeline_entries', 'idx_timeline_review', 'review_status, occurred_at');
+    ensure_column($pdo, $config, 'editorial_ingest_chunks', 'payload_sha256', 'CHAR(64) NOT NULL');
 }
 
 function column_exists(PDO $pdo, array $config, string $table, string $column): bool {
@@ -295,6 +743,68 @@ function ensure_index(PDO $pdo, array $config, string $table, string $index, str
     }
 }
 
+/**
+ * A SourceRight is publishable only while its evidence-backed grant is active.
+ * Keep this predicate in one place so legacy endpoints cannot accidentally
+ * apply a weaker interpretation than /api/v1 documents.
+ */
+function source_right_redistribution_sql(string $rightsAlias): string {
+    return '(' . $rightsAlias . '.source_right_id IS NOT NULL'
+        . ' AND ' . $rightsAlias . '.status = \'active\''
+        . ' AND ' . $rightsAlias . '.redistribution_allowed = 1'
+        . ' AND ' . $rightsAlias . '.valid_from <= UTC_TIMESTAMP()'
+        . ' AND (' . $rightsAlias . '.valid_until IS NULL OR ' . $rightsAlias . '.valid_until > UTC_TIMESTAMP())'
+        . ' AND ' . $rightsAlias . '.revoked_at IS NULL'
+        . ' AND (NULLIF(TRIM(' . $rightsAlias . '.evidence_uri), \'\') IS NOT NULL'
+        . ' OR NULLIF(TRIM(' . $rightsAlias . '.evidence_hash), \'\') IS NOT NULL))';
+}
+
+function legacy_article_visibility_sql(string $articleAlias, string $rightsAlias): string {
+    $isTelegram = '(LOWER(COALESCE(' . $articleAlias . '.feed_category,\'\')) LIKE \'telegram%\''
+        . ' OR LOWER(COALESCE(' . $articleAlias . '.source,\'\')) LIKE \'telegram%\''
+        . ' OR LOWER(COALESCE(' . $articleAlias . '.feed_name,\'\')) LIKE \'telegram:%\')';
+    return '((' . $articleAlias . '.source_right_id IS NULL AND NOT ' . $isTelegram . ')'
+        . ' OR (' . $articleAlias . '.source_right_id IS NOT NULL AND ' . source_right_redistribution_sql($rightsAlias) . '))';
+}
+
+function legacy_story_visibility_sql(array $config, string $storyAlias): string {
+    return 'EXISTS (SELECT 1 FROM ' . table_name($config, 'story_articles') . ' rights_sa'
+        . ' JOIN ' . table_name($config, 'articles') . ' rights_a ON rights_a.record_id = rights_sa.article_id'
+        . ' LEFT JOIN ' . table_name($config, 'source_rights') . ' rights_sr ON rights_sr.source_right_id = rights_a.source_right_id'
+        . ' WHERE rights_sa.story_key = ' . $storyAlias . '.story_key'
+        . ' AND rights_sa.position_no = 0'
+        . ' AND rights_a.canonical_url = ' . $storyAlias . '.representative_url'
+        . ' AND rights_a.source_right_id <=> ' . $storyAlias . '.source_right_id AND '
+        . legacy_article_visibility_sql('rights_a', 'rights_sr') . ')';
+}
+
+function telegram_signal_visibility_sql(array $config, string $signalAlias): string {
+    return 'EXISTS (SELECT 1 FROM ' . table_name($config, 'source_rights') . ' signal_sr'
+        . ' WHERE LOWER(signal_sr.source_type) LIKE \'%telegram%\''
+        . ' AND ' . source_right_redistribution_sql('signal_sr')
+        . ' AND JSON_VALID(' . $signalAlias . '.payload_json)'
+        . ' AND JSON_CONTAINS(' . $signalAlias . '.payload_json, JSON_QUOTE(signal_sr.source_key), \'$.top_channels\'))';
+}
+
+function telegram_message_visibility_sql(array $config, string $messageAlias): string {
+    return 'EXISTS (SELECT 1 FROM ' . table_name($config, 'source_rights') . ' message_sr'
+        . ' WHERE message_sr.source_key = ' . $messageAlias . '.channel_handle'
+        . ' AND LOWER(message_sr.source_type) LIKE \'%telegram%\''
+        . ' AND ' . source_right_redistribution_sql('message_sr') . ')';
+}
+
+function active_telegram_source_keys(PDO $pdo, array $config): array {
+    $sql = 'SELECT source_key FROM ' . table_name($config, 'source_rights') . ' sr'
+        . ' WHERE LOWER(sr.source_type) LIKE \'%telegram%\' AND ' . source_right_redistribution_sql('sr');
+    $stmt = $pdo->prepare($sql); $stmt->execute();
+    $keys = array();
+    foreach ($stmt->fetchAll() as $row) {
+        $key = mb_strtolower(normalize_handle_value((string)$row['source_key']), 'UTF-8');
+        if ($key !== '') { $keys[$key] = true; }
+    }
+    return $keys;
+}
+
 function read_body(array $config): string {
     $max = isset($config['max_body_bytes']) ? (int)$config['max_body_bytes'] : 2097152;
     $len = isset($_SERVER['CONTENT_LENGTH']) ? (int)$_SERVER['CONTENT_LENGTH'] : 0;
@@ -313,8 +823,8 @@ function read_body(array $config): string {
 
 function require_signature(string $body, array $config): string {
     $secret = isset($config['api_secret']) ? (string)$config['api_secret'] : '';
-    if ($secret === '') {
-        respond(500, array('ok' => false, 'error' => 'secret_missing'));
+    if (strlen($secret) < 32) {
+        respond(500, array('ok' => false, 'error' => 'secret_missing_or_too_short'));
     }
     $timestamp = isset($_SERVER['HTTP_X_ACTIVIST_TIMESTAMP']) ? (string)$_SERVER['HTTP_X_ACTIVIST_TIMESTAMP'] : '';
     $nonce = isset($_SERVER['HTTP_X_ACTIVIST_NONCE']) ? (string)$_SERVER['HTTP_X_ACTIVIST_NONCE'] : '';
@@ -344,11 +854,24 @@ function remember_nonce(PDO $pdo, array $config, string $nonce): void {
         $stmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'api_nonces') . ' (nonce, seen_at) VALUES (?, UTC_TIMESTAMP())');
         $stmt->execute(array($nonce));
     } catch (PDOException $e) {
-        if ($e->getCode() === '23000') {
+        if ((string)$e->getCode() === '23000') {
             respond(409, array('ok' => false, 'error' => 'nonce_reused'));
         }
         throw $e;
     }
+}
+
+function legacy_adapter_headers(array $config, string $action): void {
+    $legacyActions = array('search', 'articles', 'reports', 'report', 'latest_snapshot', 'telegram_reactions', 'telegram_dashboard');
+    if (!in_array($action, $legacyActions, true)) { return; }
+    $configured = isset($config['legacy_api_sunset_at']) ? trim((string)$config['legacy_api_sunset_at']) : '2026-10-14T00:00:00Z';
+    $sunsetTimestamp = strtotime($configured);
+    if ($sunsetTimestamp === false) { $sunsetTimestamp = strtotime('2026-10-14T00:00:00Z'); }
+    header('Deprecation: true');
+    header('Sunset: ' . gmdate('D, d M Y H:i:s', (int)$sunsetTimestamp) . ' GMT');
+    header('Link: </api/v1/openapi.yaml>; rel="successor-version"; type="application/yaml"');
+    header('Warning: 299 BSIDE "Legacy API adapter; migrate to /api/v1"');
+    header('X-BSIDE-Legacy-Adapter: true');
 }
 
 function decode_json_body(string $body): array {
@@ -360,15 +883,7 @@ function decode_json_body(string $body): array {
 }
 
 function mysql_dt($value): ?string {
-    if (!is_string($value) || trim($value) === '') {
-        return null;
-    }
-    try {
-        $dt = new DateTime($value);
-        return $dt->format('Y-m-d H:i:s');
-    } catch (Throwable $e) {
-        return null;
-    }
+    return v1_mysql_datetime_utc($value);
 }
 
 function first_mysql_dt(array $row, array $keys, string $fallback): string {
@@ -801,11 +1316,15 @@ function telegram_company_signal_overview(array $rows): array {
     );
 }
 
-function public_telegram_signal(array $row): array {
+function public_telegram_signal(array $row, ?array $allowedHandles = null): array {
     $payload = decode_json_array(isset($row['payload_json']) ? (string)$row['payload_json'] : null);
     $messages = array();
     foreach ((isset($payload['top_related_messages']) && is_array($payload['top_related_messages'])) ? $payload['top_related_messages'] : array() as $message) {
         if (!is_array($message)) {
+            continue;
+        }
+        $messageHandle = mb_strtolower(normalize_handle_value(isset($message['channel_handle']) ? $message['channel_handle'] : ''), 'UTF-8');
+        if ($allowedHandles !== null && ($messageHandle === '' || !isset($allowedHandles[$messageHandle]))) {
             continue;
         }
         $messages[] = array(
@@ -821,20 +1340,42 @@ function public_telegram_signal(array $row): array {
             'reason' => isset($message['reason']) ? (string)$message['reason'] : '',
         );
     }
+    $topChannels = (isset($payload['top_channels']) && is_array($payload['top_channels'])) ? $payload['top_channels'] : array();
+    if ($allowedHandles !== null) {
+        $topChannels = array_values(array_filter($topChannels, function ($handle) use ($allowedHandles) {
+            $key = mb_strtolower(normalize_handle_value($handle), 'UTF-8');
+            return $key !== '' && isset($allowedHandles[$key]);
+        }));
+    }
+    $channelKeys = array();
+    foreach ($messages as $message) {
+        $key = mb_strtolower(normalize_handle_value(isset($message['channel_handle']) ? $message['channel_handle'] : ''), 'UTF-8');
+        if ($key !== '') { $channelKeys[$key] = true; }
+    }
+    foreach ($topChannels as $handle) {
+        $key = mb_strtolower(normalize_handle_value($handle), 'UTF-8');
+        if ($key !== '') { $channelKeys[$key] = true; }
+    }
+    $publicMessageCount = $allowedHandles === null
+        ? (isset($row['related_telegram_count']) ? (int)$row['related_telegram_count'] : 0)
+        : count($messages);
+    $publicChannelCount = $allowedHandles === null
+        ? (isset($row['related_telegram_channels_count']) ? (int)$row['related_telegram_channels_count'] : 0)
+        : count($channelKeys);
     return array(
         'article_id' => isset($row['article_id']) ? (string)$row['article_id'] : '',
         'signal_type' => isset($payload['signal_type']) ? (string)$payload['signal_type'] : 'article_match',
         'signal_title' => isset($payload['signal_title']) ? text_excerpt((string)$payload['signal_title'], 120) : (isset($row['article_id']) ? (string)$row['article_id'] : ''),
-        'related_telegram_count' => isset($row['related_telegram_count']) ? (int)$row['related_telegram_count'] : 0,
-        'related_telegram_channels_count' => isset($row['related_telegram_channels_count']) ? (int)$row['related_telegram_channels_count'] : 0,
+        'related_telegram_count' => $publicMessageCount,
+        'related_telegram_channels_count' => $publicChannelCount,
         'direct_url_count' => isset($payload['direct_url_count']) ? (int)$payload['direct_url_count'] : 0,
         'keyword_match_count' => isset($payload['keyword_match_count']) ? (int)$payload['keyword_match_count'] : 0,
         'first_seen_at' => isset($row['first_seen_at']) ? (string)$row['first_seen_at'] : '',
         'latest_seen_at' => isset($row['latest_seen_at']) ? (string)$row['latest_seen_at'] : '',
         'confidence_score' => isset($row['confidence_score']) ? (float)$row['confidence_score'] : 0,
         'signal_summary' => isset($payload['signal_summary']) ? text_excerpt((string)$payload['signal_summary'], 120) : '',
-        'top_channels' => (isset($payload['top_channels']) && is_array($payload['top_channels'])) ? array_slice($payload['top_channels'], 0, 8) : array(),
-        'top_channel_counts' => (isset($payload['top_channel_counts']) && is_array($payload['top_channel_counts'])) ? array_slice($payload['top_channel_counts'], 0, 8) : array(),
+        'top_channels' => array_slice($topChannels, 0, 8),
+        'top_channel_counts' => $allowedHandles === null && isset($payload['top_channel_counts']) && is_array($payload['top_channel_counts']) ? array_slice($payload['top_channel_counts'], 0, 8) : array(),
         'top_keywords' => (isset($payload['top_keywords']) && is_array($payload['top_keywords'])) ? array_slice($payload['top_keywords'], 0, 8) : array(),
         'risk_flags' => (isset($payload['risk_flags']) && is_array($payload['risk_flags'])) ? array_slice($payload['risk_flags'], 0, 8) : array(),
         'top_related_messages' => array_slice($messages, 0, 5),
@@ -1229,7 +1770,22 @@ function handle_telegram_dashboard(PDO $pdo, array $config): void {
 }
 
 function handle_write(string $action, array $config): void {
-    $allowed = array('upsert_snapshot', 'upsert_report', 'upsert_telegram_snapshot', 'schema');
+    $allowed = array(
+        'upsert_snapshot',
+        'upsert_report',
+        'upsert_telegram_snapshot',
+        'upsert_governance_snapshot',
+        'upsert_editorial_snapshot',
+        'enqueue_delivery_outbox',
+        'claim_delivery_outbox',
+        'ack_delivery_outbox',
+        'fail_delivery_outbox',
+        'export_runtime_state',
+        'enqueue_link_discoveries',
+        'claim_link_discoveries',
+        'resolve_link_discovery',
+        'schema',
+    );
     if (!in_array($action, $allowed, true)) {
         respond(404, array('ok' => false, 'error' => 'unknown_action'));
     }
@@ -1252,6 +1808,36 @@ function handle_write(string $action, array $config): void {
     if ($action === 'upsert_telegram_snapshot') {
         upsert_telegram_snapshot($pdo, $config, $payload);
     }
+    if ($action === 'upsert_governance_snapshot') {
+        upsert_governance_snapshot($pdo, $config, $payload);
+    }
+    if ($action === 'upsert_editorial_snapshot') {
+        upsert_editorial_snapshot($pdo, $config, $payload);
+    }
+    if ($action === 'enqueue_delivery_outbox') {
+        enqueue_delivery_outbox($pdo, $config, $payload);
+    }
+    if ($action === 'claim_delivery_outbox') {
+        claim_delivery_outbox($pdo, $config, $payload);
+    }
+    if ($action === 'ack_delivery_outbox') {
+        ack_delivery_outbox($pdo, $config, $payload);
+    }
+    if ($action === 'fail_delivery_outbox') {
+        fail_delivery_outbox($pdo, $config, $payload);
+    }
+    if ($action === 'export_runtime_state') {
+        export_runtime_state($pdo, $config, $payload);
+    }
+    if ($action === 'enqueue_link_discoveries') {
+        enqueue_link_discoveries($pdo, $config, $payload);
+    }
+    if ($action === 'claim_link_discoveries') {
+        claim_link_discoveries($pdo, $config, $payload);
+    }
+    if ($action === 'resolve_link_discovery') {
+        resolve_link_discovery($pdo, $config, $payload);
+    }
     respond(404, array('ok' => false, 'error' => 'unknown_action'));
 }
 
@@ -1269,13 +1855,13 @@ function upsert_snapshot(PDO $pdo, array $config, array $payload): void {
         $articleStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'articles') . ' (
             record_id, canonical_url_hash, title_hash, canonical_url, title, normalized_title, summary, source, feed_name,
             feed_category, image_url, published_at, seen_at, status, reason, relevance_level, priority_score,
-            priority_level, story_key, sort_at, updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            priority_level, story_key, source_right_id, sort_at, updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON DUPLICATE KEY UPDATE canonical_url_hash=VALUES(canonical_url_hash), title_hash=VALUES(title_hash), canonical_url=VALUES(canonical_url),
             title=VALUES(title), normalized_title=VALUES(normalized_title), summary=VALUES(summary), source=VALUES(source), feed_name=VALUES(feed_name),
             feed_category=VALUES(feed_category), image_url=VALUES(image_url), published_at=VALUES(published_at), seen_at=VALUES(seen_at),
             status=VALUES(status), reason=VALUES(reason), relevance_level=VALUES(relevance_level), priority_score=VALUES(priority_score),
-            priority_level=VALUES(priority_level), story_key=VALUES(story_key), sort_at=VALUES(sort_at), updated_at=VALUES(updated_at)');
+            priority_level=VALUES(priority_level), story_key=VALUES(story_key), source_right_id=VALUES(source_right_id), sort_at=VALUES(sort_at), updated_at=VALUES(updated_at)');
         foreach ($articles as $article) {
             if (!is_array($article)) { continue; }
             $recordId = str_value($article, 'record_id', 96);
@@ -1302,6 +1888,7 @@ function upsert_snapshot(PDO $pdo, array $config, array $payload): void {
                 int_value($article, 'priority_score'),
                 str_value($article, 'priority_level', 40),
                 str_value($article, 'story_key', 120),
+                str_value($article, 'source_right_id', 64),
                 $publishedAt !== null ? $publishedAt : ($seenAt !== null ? $seenAt : $now),
                 $now,
             ));
@@ -1341,11 +1928,11 @@ function upsert_snapshot(PDO $pdo, array $config, array $payload): void {
 
         $storyStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'stories') . ' (
             story_key, guid, representative_title, representative_url, relevance_level, theme_group, status,
-            article_count, priority_score, published_at, last_article_seen_at, sort_at, updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            article_count, priority_score, source_right_id, published_at, last_article_seen_at, sort_at, updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON DUPLICATE KEY UPDATE guid=VALUES(guid), representative_title=VALUES(representative_title), representative_url=VALUES(representative_url),
             relevance_level=VALUES(relevance_level), theme_group=VALUES(theme_group), status=VALUES(status), article_count=VALUES(article_count),
-            priority_score=VALUES(priority_score), published_at=VALUES(published_at), last_article_seen_at=VALUES(last_article_seen_at),
+            priority_score=VALUES(priority_score), source_right_id=VALUES(source_right_id), published_at=VALUES(published_at), last_article_seen_at=VALUES(last_article_seen_at),
             sort_at=VALUES(sort_at), updated_at=VALUES(updated_at)');
         $linkStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'story_articles') . ' (story_key, article_id, position_no, updated_at) VALUES (?,?,?,?)
             ON DUPLICATE KEY UPDATE position_no=VALUES(position_no), updated_at=VALUES(updated_at)');
@@ -1365,6 +1952,7 @@ function upsert_snapshot(PDO $pdo, array $config, array $payload): void {
                 str_value($story, 'status', 40),
                 int_value($story, 'article_count'),
                 int_value($story, 'priority_score'),
+                str_value($story, 'source_right_id', 64),
                 $publishedAt,
                 $lastSeenAt,
                 $publishedAt !== null ? $publishedAt : ($lastSeenAt !== null ? $lastSeenAt : $now),
@@ -1434,16 +2022,20 @@ function upsert_telegram_snapshot(PDO $pdo, array $config, array $payload): void
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON DUPLICATE KEY UPDATE telegram_channel_id=VALUES(telegram_channel_id), title=VALUES(title), description=VALUES(description),
             joined=VALUES(joined), enabled=VALUES(enabled), source=VALUES(source), source_type=VALUES(source_type),
-            is_public_channel=VALUES(is_public_channel), quality_score=VALUES(quality_score), last_message_id=VALUES(last_message_id),
+            is_public_channel=VALUES(is_public_channel), quality_score=VALUES(quality_score), last_message_id=GREATEST(last_message_id,VALUES(last_message_id)),
             last_collected_at=VALUES(last_collected_at), last_recommendation_checked_at=VALUES(last_recommendation_checked_at),
             last_error=VALUES(last_error), payload_json=VALUES(payload_json), updated_at=VALUES(updated_at)');
         foreach ($channels as $channel) {
             if (!is_array($channel)) { continue; }
             $handle = normalize_handle_value(isset($channel['handle']) ? $channel['handle'] : (isset($channel['username']) ? $channel['username'] : ''));
             if ($handle === '') { continue; }
+            $telegramChannelId = str_value($channel, 'telegram_channel_id', 64);
+            if ($telegramChannelId !== null && $telegramChannelId !== '') {
+                migrate_telegram_channel_identity($pdo, $config, $handle, $telegramChannelId);
+            }
             $channelStmt->execute(array(
                 $handle,
-                str_value($channel, 'telegram_channel_id', 64),
+                $telegramChannelId,
                 str_value($channel, 'title', 255),
                 str_value($channel, 'description', 65535),
                 bool_int($channel, 'joined'),
@@ -1465,7 +2057,8 @@ function upsert_telegram_snapshot(PDO $pdo, array $config, array $payload): void
             message_key, channel_handle, telegram_channel_id, telegram_message_id, posted_at, edited_at, deleted_at, collected_at,
             text, normalized_text, views, forwards, replies_count, message_url, urls_json, risk_flags_json, raw_json, updated_at
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON DUPLICATE KEY UPDATE posted_at=VALUES(posted_at), edited_at=VALUES(edited_at), deleted_at=VALUES(deleted_at),
+        ON DUPLICATE KEY UPDATE channel_handle=VALUES(channel_handle), telegram_channel_id=VALUES(telegram_channel_id),
+            posted_at=VALUES(posted_at), edited_at=VALUES(edited_at), deleted_at=VALUES(deleted_at),
             collected_at=VALUES(collected_at), text=VALUES(text), normalized_text=VALUES(normalized_text), views=VALUES(views),
             forwards=VALUES(forwards), replies_count=VALUES(replies_count), message_url=VALUES(message_url), urls_json=VALUES(urls_json),
             risk_flags_json=VALUES(risk_flags_json), raw_json=VALUES(raw_json), updated_at=VALUES(updated_at)');
@@ -1975,8 +2568,8 @@ function search_public_article_row(array $row, string $query, string $sort): arr
     return $row;
 }
 
-function search_public_telegram_row(array $row, string $query, string $sort): array {
-    $signal = public_telegram_signal($row);
+function search_public_telegram_row(array $row, string $query, string $sort, array $allowedHandles): array {
+    $signal = public_telegram_signal($row, $allowedHandles);
     $signal['event_type'] = search_classify_event($signal);
     $signal['risk_flags'] = search_row_risk_flags($signal);
     $signal['why_matters'] = search_why_matters($signal, 'telegram');
@@ -2100,21 +2693,22 @@ function handle_search(PDO $pdo, array $config): void {
         respond(400, array('ok' => false, 'error' => 'query_too_short'));
     }
     $articleWhere = array(
-        'canonical_url IS NOT NULL',
-        'title IS NOT NULL',
-        '(status IS NULL OR status NOT IN ("rejected", "duplicate"))',
-        'sort_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY)',
+        'a.canonical_url IS NOT NULL',
+        'a.title IS NOT NULL',
+        '(a.status IS NULL OR a.status NOT IN ("rejected", "duplicate"))',
+        'a.sort_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY)',
+        legacy_article_visibility_sql('a', 'article_sr'),
     );
     $articleParams = array();
     foreach ($tokens as $token) {
         $like = '%' . $token . '%';
-        $articleWhere[] = '(title LIKE ? OR normalized_title LIKE ? OR summary LIKE ? OR source LIKE ? OR feed_name LIKE ? OR feed_category LIKE ?)';
+        $articleWhere[] = '(a.title LIKE ? OR a.normalized_title LIKE ? OR a.summary LIKE ? OR a.source LIKE ? OR a.feed_name LIKE ? OR a.feed_category LIKE ?)';
         array_push($articleParams, $like, $like, $like, $like, $like, $like);
     }
-    $articleSql = 'SELECT record_id, canonical_url, title, summary, source, feed_name, feed_category, image_url, published_at, seen_at, status, reason, relevance_level, priority_score, priority_level, story_key, sort_at FROM '
-        . table_name($config, 'articles')
+    $articleSql = 'SELECT a.record_id, a.canonical_url, a.title, a.summary, a.source, a.feed_name, a.feed_category, a.image_url, a.published_at, a.seen_at, a.status, a.reason, a.relevance_level, a.priority_score, a.priority_level, a.story_key, a.source_right_id, a.sort_at FROM '
+        . table_name($config, 'articles') . ' a LEFT JOIN ' . table_name($config, 'source_rights') . ' article_sr ON article_sr.source_right_id = a.source_right_id'
         . ' WHERE ' . implode(' AND ', $articleWhere)
-        . ' ORDER BY sort_at DESC, priority_score DESC LIMIT ' . min(120, $limit * 3);
+        . ' ORDER BY a.sort_at DESC, a.priority_score DESC LIMIT ' . min(120, $limit * 3);
     $stmt = $pdo->prepare($articleSql);
     $stmt->execute($articleParams);
     $articles = array();
@@ -2122,17 +2716,21 @@ function handle_search(PDO $pdo, array $config): void {
         $articles[] = search_public_article_row($row, $query, $sort);
     }
 
-    $storyWhere = array('representative_title IS NOT NULL', 'sort_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY)');
+    $storyWhere = array(
+        's.representative_title IS NOT NULL',
+        's.sort_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY)',
+        legacy_story_visibility_sql($config, 's'),
+    );
     $storyParams = array();
     foreach ($tokens as $token) {
         $like = '%' . $token . '%';
-        $storyWhere[] = '(representative_title LIKE ? OR theme_group LIKE ? OR relevance_level LIKE ?)';
+        $storyWhere[] = '(s.representative_title LIKE ? OR s.theme_group LIKE ? OR s.relevance_level LIKE ?)';
         array_push($storyParams, $like, $like, $like);
     }
-    $storySql = 'SELECT story_key, guid, representative_title, representative_url, relevance_level, theme_group, status, article_count, priority_score, published_at, last_article_seen_at, sort_at FROM '
-        . table_name($config, 'stories')
+    $storySql = 'SELECT s.story_key, s.guid, s.representative_title, s.representative_url, s.relevance_level, s.theme_group, s.status, s.article_count, s.priority_score, s.source_right_id, s.published_at, s.last_article_seen_at, s.sort_at FROM '
+        . table_name($config, 'stories') . ' s'
         . ' WHERE ' . implode(' AND ', $storyWhere)
-        . ' ORDER BY sort_at DESC, priority_score DESC LIMIT ' . min(80, $limit * 2);
+        . ' ORDER BY s.sort_at DESC, s.priority_score DESC LIMIT ' . min(80, $limit * 2);
     $stmt = $pdo->prepare($storySql);
     $stmt->execute($storyParams);
     $stories = array();
@@ -2141,15 +2739,17 @@ function handle_search(PDO $pdo, array $config): void {
     }
 
     $signalsTable = table_name($config, 'telegram_issue_signals');
-    $signalSql = 'SELECT article_id, related_telegram_count, related_telegram_channels_count, first_seen_at, latest_seen_at, confidence_score, payload_json, updated_at FROM '
-        . $signalsTable
-        . ' WHERE latest_seen_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY)'
-        . ' ORDER BY related_telegram_channels_count DESC, related_telegram_count DESC, latest_seen_at DESC LIMIT 160';
+    $signalSql = 'SELECT sig.article_id, sig.related_telegram_count, sig.related_telegram_channels_count, sig.first_seen_at, sig.latest_seen_at, sig.confidence_score, sig.payload_json, sig.updated_at FROM '
+        . $signalsTable . ' sig'
+        . ' WHERE sig.latest_seen_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY)'
+        . ' AND ' . telegram_signal_visibility_sql($config, 'sig')
+        . ' ORDER BY sig.related_telegram_channels_count DESC, sig.related_telegram_count DESC, sig.latest_seen_at DESC LIMIT 160';
     $stmt = $pdo->prepare($signalSql);
     $stmt->execute();
     $telegram = array();
+    $allowedTelegramHandles = active_telegram_source_keys($pdo, $config);
     foreach ($stmt->fetchAll() as $row) {
-        $signal = search_public_telegram_row($row, $query, $sort);
+        $signal = search_public_telegram_row($row, $query, $sort, $allowedTelegramHandles);
         $text = mb_strtolower(search_text_blob($signal), 'UTF-8');
         $matches = false;
         foreach ($tokens as $token) {
@@ -2195,6 +2795,7 @@ function handle_read(string $action, array $config): void {
     if (!in_array($action, array('reports', 'report', 'latest_snapshot', 'articles', 'telegram_reactions', 'telegram_dashboard', 'search'), true)) {
         respond(404, array('ok' => false, 'error' => 'unknown_action'));
     }
+    legacy_adapter_headers($config, $action);
     $pdo = pdo_conn($config);
     ensure_schema($pdo, $config);
     if ($action === 'search') {
@@ -2224,7 +2825,8 @@ function handle_read(string $action, array $config): void {
     }
     if ($action === 'latest_snapshot') {
         $limit = isset($_GET['limit']) ? max(1, min(100, (int)$_GET['limit'])) : 50;
-        $stmt = $pdo->prepare('SELECT story_key, guid, representative_title, representative_url, relevance_level, theme_group, status, article_count, priority_score, published_at, last_article_seen_at FROM ' . table_name($config, 'stories') . ' ORDER BY sort_at DESC LIMIT ' . $limit);
+        $stmt = $pdo->prepare('SELECT s.story_key, s.guid, s.representative_title, s.representative_url, s.relevance_level, s.theme_group, s.status, s.article_count, s.priority_score, s.source_right_id, s.published_at, s.last_article_seen_at FROM '
+            . table_name($config, 'stories') . ' s WHERE ' . legacy_story_visibility_sql($config, 's') . ' ORDER BY s.sort_at DESC LIMIT ' . $limit);
         $stmt->execute();
         respond(200, array('ok' => true, 'stories' => $stmt->fetchAll()));
     }
@@ -2236,7 +2838,9 @@ function handle_read(string $action, array $config): void {
         $messagesByKey = array();
         $articleIds = array();
         if ($url !== '' && preg_match('/^https?:\/\//i', $url)) {
-            $stmt = $pdo->prepare('SELECT record_id FROM ' . table_name($config, 'articles') . ' WHERE canonical_url = ? LIMIT 10');
+            $stmt = $pdo->prepare('SELECT a.record_id FROM ' . table_name($config, 'articles') . ' a LEFT JOIN '
+                . table_name($config, 'source_rights') . ' article_sr ON article_sr.source_right_id=a.source_right_id'
+                . ' WHERE a.canonical_url = ? AND ' . legacy_article_visibility_sql('a', 'article_sr') . ' LIMIT 10');
             $stmt->execute(array($url));
             foreach ($stmt->fetchAll() as $row) {
                 $articleIds[] = (string)$row['record_id'];
@@ -2249,6 +2853,7 @@ function handle_read(string $action, array $config): void {
                 . 'JOIN ' . table_name($config, 'telegram_messages') . ' m ON m.message_key = tm.message_key '
                 . 'LEFT JOIN ' . table_name($config, 'telegram_channels') . ' c ON c.handle = m.channel_handle '
                 . 'WHERE tm.article_id IN (' . $placeholders . ') AND m.deleted_at IS NULL '
+                . 'AND ' . telegram_message_visibility_sql($config, 'm') . ' '
                 . 'AND (tm.match_type IN ("exact_url","canonical_url") OR tm.score >= 0.5300) '
                 . 'ORDER BY tm.score DESC, m.posted_at DESC LIMIT ' . $limit;
             $stmt = $pdo->prepare($sql);
@@ -2262,6 +2867,7 @@ function handle_read(string $action, array $config): void {
                 . 'FROM ' . table_name($config, 'telegram_messages') . ' m '
                 . 'LEFT JOIN ' . table_name($config, 'telegram_channels') . ' c ON c.handle = m.channel_handle '
                 . 'WHERE m.deleted_at IS NULL AND m.urls_json LIKE ? AND m.posted_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY) '
+                . 'AND ' . telegram_message_visibility_sql($config, 'm') . ' '
                 . 'ORDER BY m.posted_at DESC LIMIT ' . $limit);
             $stmt->execute(array('%' . $url . '%'));
             foreach ($stmt->fetchAll() as $row) {
@@ -2271,7 +2877,11 @@ function handle_read(string $action, array $config): void {
         if ($query !== '' && count($messagesByKey) < $limit) {
             $tokens = array_slice(search_tokens($query), 0, 5);
             if (telegram_query_fallback_allowed($tokens)) {
-                $where = array('m.deleted_at IS NULL', 'm.posted_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY)');
+                $where = array(
+                    'm.deleted_at IS NULL',
+                    'm.posted_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY)',
+                    telegram_message_visibility_sql($config, 'm'),
+                );
                 $params = array();
                 foreach ($tokens as $token) {
                     $where[] = 'm.normalized_text LIKE ?';
@@ -2299,10 +2909,11 @@ function handle_read(string $action, array $config): void {
             respond(400, array('ok' => false, 'error' => 'query_too_short'));
         }
         $where = array(
-            'canonical_url IS NOT NULL',
-            'title IS NOT NULL',
-            '(status IS NULL OR status NOT IN ("rejected", "duplicate"))',
-            'sort_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY)',
+            'a.canonical_url IS NOT NULL',
+            'a.title IS NOT NULL',
+            '(a.status IS NULL OR a.status NOT IN ("rejected", "duplicate"))',
+            'a.sort_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY)',
+            legacy_article_visibility_sql('a', 'article_sr'),
         );
         $params = array();
         if ($query !== '') {
@@ -2312,7 +2923,7 @@ function handle_read(string $action, array $config): void {
             }
             foreach ($tokens as $token) {
                 $like = '%' . $token . '%';
-                $where[] = '(title LIKE ? OR normalized_title LIKE ? OR summary LIKE ? OR source LIKE ? OR feed_name LIKE ? OR feed_category LIKE ?)';
+                $where[] = '(a.title LIKE ? OR a.normalized_title LIKE ? OR a.summary LIKE ? OR a.source LIKE ? OR a.feed_name LIKE ? OR a.feed_category LIKE ?)';
                 array_push($params, $like, $like, $like, $like, $like, $like);
             }
         }
@@ -2320,13 +2931,13 @@ function handle_read(string $action, array $config): void {
             if (!preg_match('/^[A-Za-z0-9_:\\-]{1,120}$/', $storyKey)) {
                 respond(400, array('ok' => false, 'error' => 'invalid_story_key'));
             }
-            $where[] = 'story_key = ?';
+            $where[] = 'a.story_key = ?';
             $params[] = $storyKey;
         }
-        $sql = 'SELECT record_id, canonical_url, title, summary, source, feed_name, feed_category, image_url, published_at, seen_at, status, reason, relevance_level, priority_score, priority_level, story_key, sort_at FROM '
-            . table_name($config, 'articles')
+        $sql = 'SELECT a.record_id, a.canonical_url, a.title, a.summary, a.source, a.feed_name, a.feed_category, a.image_url, a.published_at, a.seen_at, a.status, a.reason, a.relevance_level, a.priority_score, a.priority_level, a.story_key, a.source_right_id, a.sort_at FROM '
+            . table_name($config, 'articles') . ' a LEFT JOIN ' . table_name($config, 'source_rights') . ' article_sr ON article_sr.source_right_id=a.source_right_id'
             . ' WHERE ' . implode(' AND ', $where)
-            . ' ORDER BY sort_at DESC, priority_score DESC LIMIT ' . $limit;
+            . ' ORDER BY a.sort_at DESC, a.priority_score DESC LIMIT ' . $limit;
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $rows = array();

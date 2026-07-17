@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://news.bside.ai/schemas/official-backfill-checkpoint.schema.json",
+  "title": "BSIDE official-disclosure backfill checkpoint",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "job",
+    "created_at",
+    "updated_at",
+    "company_master_synced",
+    "completed_windows",
+    "failed_windows"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "job": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "range_start",
+        "range_end_exclusive",
+        "chunk_days",
+        "sources",
+        "page_count",
+        "max_pages",
+        "sync_company_master",
+        "fingerprint"
+      ],
+      "properties": {
+        "range_start": { "type": "string", "format": "date" },
+        "range_end_exclusive": { "type": "string", "format": "date" },
+        "chunk_days": { "type": "integer", "minimum": 1 },
+        "sources": {
+          "type": "array",
+          "items": { "enum": ["dart", "kind"] },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "page_count": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "max_pages": { "type": "integer", "minimum": 1 },
+        "sync_company_master": { "type": "boolean" },
+        "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "company_master_synced": { "type": "boolean" },
+    "completed_windows": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/windowResult" }
+    },
+    "failed_windows": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/windowResult" }
+    }
+  },
+  "$defs": {
+    "windowResult": {
+      "type": "object",
+      "required": [
+        "window_start",
+        "window_end_exclusive",
+        "source_end_inclusive",
+        "idempotency_key",
+        "attempt",
+        "status",
+        "finished_at"
+      ],
+      "properties": {
+        "window_start": { "type": "string", "format": "date" },
+        "window_end_exclusive": { "type": "string", "format": "date" },
+        "source_end_inclusive": { "type": "string", "format": "date" },
+        "idempotency_key": { "type": "string", "pattern": "^official-backfill-v1:[0-9a-f]{32}$" },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "status": { "enum": ["succeeded", "failed"] },
+        "finished_at": { "type": "string", "format": "date-time" },
+        "summary": { "type": "object", "additionalProperties": { "type": "integer" } },
+        "error": { "type": "string" }
+      }
+    }
+  }
+}

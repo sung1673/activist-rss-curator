@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#112c2d">
+  <meta name="description" content="한국 기업의 거버넌스 사건과 공식 근거, 당사자 주장, 결과, 후속 이행을 연결한 공개 기록입니다.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https:; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <title>BSIDE 거버넌스 인텔리전스</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./config.js" defer></script>
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#app">본문으로 이동 / Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="#/today" aria-label="BSIDE 거버넌스 인텔리전스 홈">
+        <span class="brand-mark" aria-hidden="true">B</span>
+        <span><strong>BSIDE</strong><small>Governance Intelligence</small></span>
+      </a>
+      <nav class="primary-nav" aria-label="주요 메뉴 / Primary navigation">
+        <a href="#/today" data-nav="today">오늘 <span lang="en">Today</span></a>
+        <a href="#/companies" data-nav="companies">기업 <span lang="en">Companies</span></a>
+        <a href="#/calendar" data-nav="calendar">캘린더 <span lang="en">Calendar</span></a>
+        <a href="#/search" data-nav="search">검색 <span lang="en">Search</span></a>
+        <a href="#/feedback" data-nav="feedback">정정·답변 <span lang="en">Feedback</span></a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="utility-bar">
+    <div class="utility-inner">
+      <p>공시와 공식 근거를 우선하는 공개 기록 / <span lang="en">Evidence-first public record</span></p>
+      <div class="utility-links" aria-label="데이터 내보내기 / Data exports">
+        <a data-api-link="/feeds/events.atom" href="/api/v1/feeds/events.atom">Atom</a>
+        <a data-api-link="/exports/events.csv" href="/api/v1/exports/events.csv">CSV</a>
+        <a data-api-link="/exports/events.json" href="/api/v1/exports/events.json">JSON</a>
+      </div>
+    </div>
+  </div>
+
+  <main id="app" tabindex="-1" aria-live="off">
+    <section class="loading-state" aria-label="불러오는 중 / Loading">
+      <p class="eyebrow">GOVERNANCE RECORD</p>
+      <h1>기록을 불러오고 있습니다.</h1>
+      <p lang="en">Loading verified governance records.</p>
+    </section>
+  </main>
+
+  <div id="announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <footer class="site-footer">
+    <div>
+      <strong>BSIDE Governance Intelligence</strong>
+      <p>투자 권고가 아닌 사실·근거 기록입니다. 원문 제목과 본문은 번역하지 않습니다.</p>
+      <p lang="en">A factual record, not investment advice. Source titles and text are never translated.</p>
+    </div>
+    <nav aria-label="보조 메뉴 / Secondary navigation">
+      <a href="#/feedback">정정·답변 제출</a>
+      <a data-api-link="/openapi.yaml" href="/api/v1/openapi.yaml">OpenAPI</a>
+      <a href="../feed.xml">기존 RSS</a>
+    </nav>
+  </footer>
+
+  <noscript>
+    <p class="noscript">이 공개 기록을 검색하려면 JavaScript가 필요합니다. / JavaScript is required to search this public record.</p>
+  </noscript>
+</body>
+</html>

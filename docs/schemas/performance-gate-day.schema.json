@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://news.bside.ai/schemas/performance-gate-day.schema.json",
+  "title": "BSIDE production page performance release evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "date",
+    "environment",
+    "evidence_source",
+    "is_synthetic",
+    "collected_at",
+    "code_revision",
+    "metrics"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "date": {"type": "string", "format": "date"},
+    "environment": {"const": "production"},
+    "evidence_source": {"type": "string", "minLength": 1},
+    "is_synthetic": {"const": false},
+    "collected_at": {"type": "string", "format": "date-time"},
+    "code_revision": {"type": "string", "pattern": "^[0-9a-fA-F]{7,64}$"},
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "availability_rate",
+        "mobile_lcp_p75_seconds",
+        "mobile_inp_p75_ms",
+        "mobile_cls_p75"
+      ],
+      "properties": {
+        "availability_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "mobile_lcp_p75_seconds": {"type": "number", "minimum": 0},
+        "mobile_inp_p75_ms": {"type": "number", "minimum": 0},
+        "mobile_cls_p75": {"type": "number", "minimum": 0}
+      }
+    }
+  }
+}

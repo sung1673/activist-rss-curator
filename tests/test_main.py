@@ -3,7 +3,15 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from curator.main import article_is_before_previous_day, prune_excluded_pending_articles
+import pytest
+
+from curator.main import (
+    article_is_before_previous_day,
+    main,
+    prune_excluded_pending_articles,
+    publish_telegram_for_run,
+    telegram_delivery_mode,
+)
 
 from conftest import make_article
 
@@ -59,3 +67,130 @@ def test_prune_excluded_pending_articles_removes_old_articles_from_state(config)
     assert state["pending_clusters"][0]["articles"] == [fresh_article]
     assert state["pending_clusters"][0]["article_count"] == 1
     assert state["published_clusters"] == []
+
+
+def test_prune_removes_revoked_telegram_lineage_and_refreshes_mixed_cluster(config) -> None:  # type: ignore[no-untyped-def]
+    # Date-only rights boundaries are UTC midnight; 10:00 KST is safely after
+    # the 2026-04-28 revocation boundary.
+    now = datetime(2026, 4, 28, 10, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    config["source_rights"] = {
+        "enforce": True,
+        "records": [
+            {
+                "source_right_id": "telegram:revoked",
+                "source_category": "authorized_telegram",
+                "source_identity": "revoked",
+                "scope": "collection,ai,redistribution",
+                "evidence_ref": "evidence://test/revoked",
+                "valid_from": "2021-01-01",
+                "revoked_at": "2026-04-28",
+                "allow_ai": True,
+                "allow_redistribution": True,
+                "status": "active",
+            }
+        ],
+    }
+    telegram_article = make_article(
+        "철회된 Telegram 주장",
+        "https://example.com/telegram",
+        published_at="2026-04-28T07:00:00+09:00",
+    )
+    telegram_article.update(
+        {
+            "source_kind": "telegram_reference",
+            "source_right_id": "telegram:revoked",
+            "telegram_source_handle": "revoked",
+        }
+    )
+    direct_article = make_article(
+        "공식 근거가 있는 독립 기사",
+        "https://example.com/direct",
+        published_at="2026-04-28T07:10:00+09:00",
+    )
+    direct_article["source_kind"] = "direct"
+    state = {
+        "pending_clusters": [
+            {
+                "articles": [telegram_article, direct_article],
+                "article_count": 2,
+                "representative_title": telegram_article["title"],
+                "representative_url": telegram_article["canonical_url"],
+                "source_kind": "telegram_reference",
+                "source_right_id": "telegram:revoked",
+            }
+        ],
+        "published_clusters": [{"articles": [telegram_article], "article_count": 1}],
+    }
+
+    prune_excluded_pending_articles(state, config, now)
+
+    mixed = state["pending_clusters"][0]
+    assert mixed["articles"] == [direct_article]
+    assert mixed["representative_title"] == direct_article["clean_title"]
+    assert mixed["representative_url"] == direct_article["canonical_url"]
+    assert mixed["source_kind"] == "direct"
+    assert "source_right_id" not in mixed
+    assert state["published_clusters"] == []
+
+
+def test_main_exits_nonzero_when_operational_failure_is_reported(monkeypatch) -> None:
+    monkeypatch.setattr("curator.main.run", lambda: {"telegram_sent": 0, "telegram_outbox_enqueue_failed": 1})
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 1
+
+
+def test_main_exits_nonzero_when_telegram_remote_sync_is_partial(monkeypatch) -> None:
+    monkeypatch.setattr("curator.main.run", lambda: {"telegram_remote_failed": 1})
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 1
+
+
+def test_legacy_direct_delivery_never_enqueues_remote_outbox(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("CURATOR_DELIVERY_MODE", "legacy-direct")
+    monkeypatch.delenv("CURATOR_DISABLE_TELEGRAM_SEND", raising=False)
+    calls: list[str] = []
+
+    def fake_direct(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        calls.append("direct")
+        return {"telegram_sent": 1, "telegram_failed": 0}
+
+    def fail_enqueue(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("legacy-direct must not enqueue the remote outbox")
+
+    monkeypatch.setattr("curator.main.publish_hourly_telegram_update", fake_direct)
+    monkeypatch.setattr("curator.main.enqueue_unsent_telegram_clusters_to_remote", fail_enqueue)
+
+    summary = publish_telegram_for_run({}, config, now, [], {"remote_api_failed": 0})
+
+    assert calls == ["direct"]
+    assert summary["telegram_sent"] == 1
+    assert summary["telegram_outbox_enqueue_skipped"] == 1
+
+
+def test_ingest_disabled_delivery_neither_sends_nor_enqueues(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("CURATOR_DELIVERY_MODE", "disabled")
+    monkeypatch.delenv("CURATOR_DISABLE_TELEGRAM_SEND", raising=False)
+
+    def fail_transport(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("ingest-only mode must not invoke any Telegram transport")
+
+    monkeypatch.setattr("curator.main.publish_hourly_telegram_update", fail_transport)
+    monkeypatch.setattr("curator.main.enqueue_unsent_telegram_clusters_to_remote", fail_transport)
+
+    summary = publish_telegram_for_run({}, config, now, [], {"remote_api_failed": 0})
+
+    assert summary == {
+        "telegram_sent": 0,
+        "telegram_failed": 0,
+        "telegram_outbox_enqueue_failed": 0,
+        "telegram_outbox_enqueue_skipped": 1,
+    }
+
+
+def test_historical_disable_flag_overrides_outbox_mode(monkeypatch) -> None:
+    monkeypatch.setenv("CURATOR_DELIVERY_MODE", "outbox-enqueue")
+    monkeypatch.setenv("CURATOR_DISABLE_TELEGRAM_SEND", "1")
+
+    assert telegram_delivery_mode() == "disabled"

@@ -9,17 +9,23 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from html import escape
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import quote
 
 from .cluster import extract_company_candidates
 from .dates import datetime_to_iso, parse_datetime
 from .remote_api import remote_api_url
-from .telegram_publisher import html_link, send_telegram_message, telegram_bot_token, telegram_chat_id
+from .source_rights import source_is_authorized
+from .telegram_publisher import (
+    html_link,
+    send_telegram_message,
+    telegram_admin_chat_id,
+    telegram_admin_destination_error,
+    telegram_bot_token,
+)
 from .telegram_sources import (
     channel_quality_metrics,
     ensure_telegram_state,
     is_collectable_public_channel,
-    message_key,
     ordered_message_tokens,
     risk_flags_for_text,
     telegram_issue_signals,
@@ -358,13 +364,34 @@ def company_signal_rows(messages: list[dict[str, object]], timezone_name: str, n
 def telegram_dashboard_model(state: dict[str, object], config: dict[str, object], now: datetime) -> dict[str, object]:
     ensure_telegram_state(state)
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
-    channels = [channel for channel in state.get("telegram_source_channels", []) if isinstance(channel, dict)]
+    all_channels = [channel for channel in state.get("telegram_source_channels", []) if isinstance(channel, dict)]
+    channels = [
+        channel
+        for channel in all_channels
+        if source_is_authorized(
+            {"source_kind": "telegram", "handle": channel.get("handle"), "source_right_id": channel.get("source_right_id")},
+            config,
+            now,
+            purpose="public",
+        )
+    ]
     collectable_channels = [channel for channel in channels if is_collectable_public_channel(channel)]
     enabled_channels = [channel for channel in collectable_channels if bool(channel.get("enabled", True))]
     messages = [
         message
         for message in state.get("telegram_source_messages", [])
-        if isinstance(message, dict) and not message.get("deleted_at")
+        if isinstance(message, dict)
+        and not message.get("deleted_at")
+        and source_is_authorized(
+            {
+                "source_kind": message.get("source_kind") or "telegram",
+                "handle": message.get("handle") or message.get("channel_handle"),
+                "source_right_id": message.get("source_right_id"),
+            },
+            config,
+            now,
+            purpose="public",
+        )
     ]
     matches = [match for match in state.get("telegram_article_matches", []) if isinstance(match, dict)]
     candidates = [candidate for candidate in state.get("telegram_channel_candidates", []) if isinstance(candidate, dict)]
@@ -452,7 +479,9 @@ def telegram_dashboard_model(state: dict[str, object], config: dict[str, object]
             quality_bands["0-39"] += 1
     return {
         "generated_at": datetime_to_iso(now),
-        "channels_total": len(channels),
+        "channels_total": len(all_channels),
+        "channels_authorized": len(channels),
+        "channels_rights_blocked": len(all_channels) - len(channels),
         "channels_collectable": len(collectable_channels),
         "channels_enabled": len(enabled_channels),
         "channels_failed": len([channel for channel in enabled_channels if channel.get("last_error")]),
@@ -539,25 +568,25 @@ def telegram_admin_public_url(config: dict[str, object], token: str | None = Non
     path = "feed/telegram-admin.html"
     url = f"{base_url}/{path}" if base_url else path
     if token:
-        return f"{url}?{urlencode({'token': token})}"
+        return f"{url}#token={quote(token, safe='')}"
     return url
 
 
 def _locked_fallback_model(model: dict[str, object], token_hash: str) -> dict[str, object]:
-    if not token_hash:
-        return model
-    return {
+    # Static Pages artifacts never embed signal/message arrays. Authorized
+    # administrators retrieve paginated data from the API after unlocking.
+    compact = {
         "generated_at": model.get("generated_at"),
-        "channels_total": 0,
-        "channels_collectable": 0,
-        "channels_enabled": 0,
-        "channels_failed": 0,
-        "messages_total": 0,
-        "messages_24h": 0,
-        "messages_14d": 0,
-        "matches_total": 0,
-        "candidates_total": 0,
-        "candidate_pending": 0,
+        "channels_total": 0 if token_hash else model.get("channels_total", 0),
+        "channels_collectable": 0 if token_hash else model.get("channels_collectable", 0),
+        "channels_enabled": 0 if token_hash else model.get("channels_enabled", 0),
+        "channels_failed": 0 if token_hash else model.get("channels_failed", 0),
+        "messages_total": 0 if token_hash else model.get("messages_total", 0),
+        "messages_24h": 0 if token_hash else model.get("messages_24h", 0),
+        "messages_14d": 0 if token_hash else model.get("messages_14d", 0),
+        "matches_total": 0 if token_hash else model.get("matches_total", 0),
+        "candidates_total": 0 if token_hash else model.get("candidates_total", 0),
+        "candidate_pending": 0 if token_hash else model.get("candidate_pending", 0),
         "top_channels": [],
         "type_counts": [],
         "day_counts": [],
@@ -570,7 +599,7 @@ def _locked_fallback_model(model: dict[str, object], token_hash: str) -> dict[st
             "risk_watch": 0,
             "confirmed_reactions": 0,
             "velocity_ratio": 0,
-            "velocity_label": "locked",
+            "velocity_label": "locked" if token_hash else "api_required",
         },
         "new_rising_signals": [],
         "watchlist_candidates": [],
@@ -597,6 +626,7 @@ def _locked_fallback_model(model: dict[str, object], token_hash: str) -> dict[st
             "yearly_mb": 0,
         },
     }
+    return compact
 
 
 def build_telegram_admin_access_message(config: dict[str, object], now: datetime) -> str:
@@ -618,14 +648,14 @@ def send_telegram_admin_access_message(
 ) -> dict[str, object]:
     token = telegram_admin_access_token()
     bot_token = telegram_bot_token()
-    chat_id = telegram_chat_id(config)
     if not token:
         return {"ok": False, "error": "telegram_admin_access_token_missing"}
-    if not bot_token or not chat_id:
-        return {"ok": False, "error": "telegram_not_configured"}
+    destination_error = telegram_admin_destination_error(config)
+    if destination_error:
+        return {"ok": False, "error": destination_error}
     return send_telegram_message(
         bot_token,
-        chat_id,
+        telegram_admin_chat_id(),
         build_telegram_admin_access_message(config, now),
         config,
         disable_web_page_preview=True,
@@ -1207,12 +1237,12 @@ async function sha256Hex(text) {{
   return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }}
 function tokenFromUrl() {{
-  const params = new URLSearchParams(window.location.search);
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
   const token = params.get("token") || "";
   if (token) {{
     params.delete("token");
-    const nextQuery = params.toString();
-    const nextUrl = `${{window.location.pathname}}${{nextQuery ? `?${{nextQuery}}` : ""}}${{window.location.hash}}`;
+    const nextHash = params.toString();
+    const nextUrl = `${{window.location.pathname}}${{window.location.search}}${{nextHash ? `#${{nextHash}}` : ""}}`;
     window.history.replaceState(null, "", nextUrl);
   }}
   return token;

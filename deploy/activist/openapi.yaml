@@ -1,0 +1,758 @@
+openapi: 3.1.0
+info:
+  title: BSIDE Governance Intelligence API
+  version: 1.1.0
+  description: >-
+    Public, read-only governance event records and role-gated operations APIs.
+    Document title and body fields preserve their original language; the API
+    never translates source text.
+x-changelog:
+  - version: 1.1.0
+    date: '2026-07-16'
+    changes:
+      - Added the seven-entity incremental editorial HMAC upsert contract with atomic chunk idempotency.
+      - Added evidence-gated actor, event-party, campaign, claim, vote, commitment and timeline review routes.
+      - Added optimistic review concurrency and fail-closed public/delivery visibility after evidence or rights changes.
+  - version: 1.0.0
+    date: '2026-07-16'
+    changes:
+      - Added stable DART company identifiers and governance event resources.
+      - Added rights-gated documents, campaigns, calendar, exports and Atom.
+      - Added private feedback, editorial review and operations health contracts.
+x-compatibility:
+  legacy-query-actions: [search, articles, reports, telegram_dashboard]
+  legacy-feed: /feed.xml
+  minimum-adapter-period-days: 90
+servers:
+  - url: https://news.bside.ai/api/v1
+tags:
+  - name: Public
+  - name: Feedback
+  - name: Operations
+  - name: Administration
+paths:
+  /companies:
+    get:
+      tags: [Public]
+      summary: List companies
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - {name: q, in: query, schema: {type: string, minLength: 2, maxLength: 100}}
+        - {name: market, in: query, schema: {type: string, maxLength: 40}}
+      responses:
+        '200': {$ref: '#/components/responses/CompanyList'}
+  /companies/{company_id}:
+    get:
+      tags: [Public]
+      summary: Get a company, its campaigns, timeline and commitments
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200': {description: Company detail}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /events:
+    get:
+      tags: [Public]
+      summary: List published governance events
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - {name: company_id, in: query, schema: {$ref: '#/components/schemas/CompanyId'}}
+        - {name: event_type, in: query, schema: {$ref: '#/components/schemas/EventType'}}
+        - {name: verification_status, in: query, schema: {$ref: '#/components/schemas/VerificationStatus'}}
+        - {name: importance, in: query, schema: {$ref: '#/components/schemas/Importance'}}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
+      responses:
+        '200': {$ref: '#/components/responses/EventList'}
+  /events/{event_id}:
+    get:
+      tags: [Public]
+      summary: Get an event with parties, claims, evidence and revisions
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '200': {description: Event detail}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /campaigns/{campaign_id}:
+    get:
+      tags: [Public]
+      summary: Get a campaign and its progress, votes and outcomes
+      parameters:
+        - {name: campaign_id, in: path, required: true, schema: {$ref: '#/components/schemas/EntityId'}}
+      responses:
+        '200': {description: Campaign detail}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /documents/{document_id}:
+    get:
+      tags: [Public]
+      summary: Get a rights-cleared source document
+      description: >-
+        licensed_telegram documents are unavailable unless SourceRight is
+        active, unrevoked, in its validity period and permits redistribution.
+      parameters:
+        - {name: document_id, in: path, required: true, schema: {$ref: '#/components/schemas/EntityId'}}
+        - {name: include, in: query, schema: {type: string, enum: [body]}}
+      responses:
+        '200': {description: Document detail, capped to the API response budget}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /calendar:
+    get:
+      tags: [Public]
+      summary: List event deadlines and proposal meeting dates
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - {name: from, in: query, schema: {type: string, format: date}}
+        - {name: to, in: query, schema: {type: string, format: date}}
+      responses:
+        '200': {description: Calendar page; date range is at most 366 days}
+  /search:
+    get:
+      tags: [Public]
+      summary: Search companies, actors, events, campaigns and documents
+      parameters:
+        - {name: q, in: query, required: true, schema: {type: string, minLength: 2, maxLength: 100}}
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': {$ref: '#/components/responses/SearchResults'}
+  /exports/events.json:
+    get:
+      tags: [Public]
+      summary: Export one page of events as JSON
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': {$ref: '#/components/responses/EventList'}
+  /exports/events.csv:
+    get:
+      tags: [Public]
+      summary: Export one page of events as UTF-8 CSV
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: CSV with pagination metadata in X-Has-More and X-Next-Page
+          content:
+            text/csv: {schema: {type: string}}
+  /feeds/events.atom:
+    get:
+      tags: [Public]
+      summary: Latest published events as Atom
+      responses:
+        '200':
+          description: Atom 1.0 feed
+          content:
+            application/atom+xml: {schema: {type: string}}
+  /feedback:
+    post:
+      tags: [Feedback]
+      summary: Submit a correction or right-of-reply request
+      description: Every submission remains private and pending until editorial review.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FeedbackRequest'}
+      responses:
+        '202':
+          description: Privately queued; never auto-published
+        '429': {description: At most five submissions per source address per hour}
+  /ops/health:
+    get:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: Watchdog state
+      responses:
+        '200':
+          description: Last successful run and delivery queue health
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [last_success_at, pending_outbox, oldest_pending_at, dead_letter_count]
+                properties:
+                  last_success_at: {type: [string, 'null'], format: date-time}
+                  pending_outbox: {type: integer}
+                  oldest_pending_at: {type: [string, 'null'], format: date-time}
+                  dead_letter_count: {type: integer}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /ops/runtime-state:
+    get:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: Hydrate a fresh runner from MySQL source-of-truth state
+      parameters:
+        - {name: resource, in: query, required: true, schema: {type: string, enum: [runs, articles, stories, reports, telegram_channels, telegram_messages, telegram_article_matches, telegram_issue_signals, delivery_outbox, companies, source_rights, collection_runs, governance_events, documents]}}
+        - {name: after, in: query, schema: {type: string, maxLength: 512}}
+        - {name: since, in: query, schema: {type: string, format: date-time}, description: Optional incremental lower time bound}
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': {description: Cursor page capped below 250KB}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /admin/review-queue:
+    get:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: List all events and editorial entities awaiting human review
+      responses:
+        '200': {description: Editor review queue}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /admin/events/{event_id}/review:
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Record a human decision and publish only approved events
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EditorialReviewRequest'}
+      responses:
+        '200': {description: Review recorded in EditorialRevision}
+        '409': {description: Stale review, invalid evidence, or unmet approval dependency}
+  /admin/event-actors/{event_id}/{actor_id}/{actor_role}/review:
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Review one event-party role relation
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+        - {name: actor_id, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_.:-]{1,64}$'}}
+        - {name: actor_role, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_.:-]{1,40}$'}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EditorialReviewRequest'}
+      responses:
+        '200': {description: Relation review recorded in EditorialRevision}
+        '409': {description: Stale review or unmet actor/evidence dependency}
+  /admin/actors/{actor_id}/review:
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Review an actor record
+      parameters:
+        - {name: actor_id, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_.:-]{1,64}$'}}
+      requestBody: {$ref: '#/components/requestBodies/EditorialReview'}
+      responses: {'200': {description: Review recorded}, '409': {description: Stale review or publishable evidence missing}}
+  /admin/campaigns/{campaign_id}/review:
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Review a campaign
+      parameters:
+        - {name: campaign_id, in: path, required: true, schema: {$ref: '#/components/schemas/EntityId'}}
+      requestBody: {$ref: '#/components/requestBodies/EditorialReview'}
+      responses: {'200': {description: Review recorded}, '409': {description: Stale review or approval dependency missing}}
+  /admin/claims/{claim_id}/review:
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Review claim evidence
+      parameters:
+        - {name: claim_id, in: path, required: true, schema: {$ref: '#/components/schemas/EntityId'}}
+      requestBody: {$ref: '#/components/requestBodies/EditorialReview'}
+      responses: {'200': {description: Review recorded}, '409': {description: Stale review or publishable evidence missing}}
+  /admin/proposal-votes/{proposal_vote_id}/review:
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Review a proposal vote
+      parameters:
+        - {name: proposal_vote_id, in: path, required: true, schema: {$ref: '#/components/schemas/EntityId'}}
+      requestBody: {$ref: '#/components/requestBodies/EditorialReview'}
+      responses: {'200': {description: Review recorded}, '409': {description: Stale review or publishable evidence missing}}
+  /admin/commitments/{commitment_id}/review:
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Review a commitment outcome
+      parameters:
+        - {name: commitment_id, in: path, required: true, schema: {$ref: '#/components/schemas/EntityId'}}
+      requestBody: {$ref: '#/components/requestBodies/EditorialReview'}
+      responses: {'200': {description: Review recorded}, '409': {description: Stale review or publishable evidence missing}}
+  /admin/timeline-entries/{timeline_entry_id}/review:
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Review a timeline entry
+      parameters:
+        - {name: timeline_entry_id, in: path, required: true, schema: {$ref: '#/components/schemas/EntityId'}}
+      requestBody: {$ref: '#/components/requestBodies/EditorialReview'}
+      responses: {'200': {description: Review recorded}, '409': {description: Stale review or publishable evidence missing}}
+  /admin/source-rights:
+    get:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: List source permissions
+      responses:
+        '200': {description: Role-gated source-right records}
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Create or update a source permission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SourceRight'}
+      responses:
+        '200': {description: Source right upserted}
+  /admin/editorial-revisions:
+    get:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: List correction history
+      responses:
+        '200': {description: Role-gated revision list}
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Queue a revision for review
+      responses:
+        '201': {description: Revision remains pending}
+  /admin/feedback:
+    get:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: List private correction and right-of-reply submissions
+      parameters:
+        - {name: status, in: query, schema: {type: string, enum: [pending, reviewing, resolved, rejected], default: pending}}
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': {description: Editor-only feedback queue; source IP hashes are never returned}
+  /admin/feedback/{feedback_id}/review:
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Record private feedback disposition without publishing it
+      parameters:
+        - {name: feedback_id, in: path, required: true, schema: {$ref: '#/components/schemas/EntityId'}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status, review_note]
+              properties:
+                status: {type: string, enum: [reviewing, resolved, rejected]}
+                review_note: {type: string, minLength: 5}
+      responses:
+        '200': {description: Feedback remains private with is_public=false}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-role-token
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema: {type: integer, minimum: 1, default: 1}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 25}
+    CompanyId:
+      name: company_id
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/CompanyId'}
+    EventId:
+      name: event_id
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/EntityId'}
+  requestBodies:
+    EditorialReview:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/EditorialReviewRequest'}
+  schemas:
+    EntityId:
+      type: string
+      pattern: '^[A-Za-z0-9_.:-]{1,96}$'
+    CompanyId:
+      type: string
+      pattern: '^\d{8}$'
+      description: OpenDART corp_code
+    EventType:
+      type: string
+      enum: [five_percent_holding, shareholder_proposal, general_meeting, board, executive_compensation, dividend, treasury_shares, merger, split, duplicate_listing, rights_issue, convertible_bond, bond_with_warrant, exchangeable_bond, tender_offer, delisting, trading_suspension, value_up, other]
+    Importance:
+      type: string
+      enum: [low, medium, high, critical]
+    VerificationStatus:
+      type: string
+      enum: [signal, unverified, corroborated, official, confirmed, disputed, corrected, withdrawn]
+    PublicationStatus:
+      type: string
+      enum: [draft, published, withdrawn]
+    ReviewStatus:
+      type: string
+      enum: [pending, not_required, changes_requested, approved, rejected]
+    EditorialReviewRequest:
+      type: object
+      additionalProperties: false
+      required: [decision, reason, expected_updated_at]
+      properties:
+        decision: {type: string, enum: [approve, reject, changes_requested]}
+        reason: {type: string, minLength: 5}
+        expected_updated_at:
+          type: string
+          format: date-time
+          description: UTC concurrency token returned by the review queue; mismatches return 409 stale_review.
+    SourceClass:
+      type: string
+      enum: [official_disclosure, company_statement, activist_statement, media_report, authorized_telegram, licensed_telegram, editorial_analysis]
+      x-labels-ko:
+        official_disclosure: 공식 공시
+        company_statement: 회사 입장
+        activist_statement: 행동주주 입장
+        media_report: 언론 보도
+        authorized_telegram: 허가된 Telegram
+        licensed_telegram: 허가된 Telegram (호환 값)
+        editorial_analysis: 편집 분석
+    ClaimType:
+      type: string
+      enum: [actor_claim, company_response, official_fact, media_report, editorial_interpretation]
+      x-labels-ko: [당사자 주장, 회사 반론, 공식 사실, 보도, 편집 해석]
+    CampaignStage:
+      type: string
+      enum: [initial_signal, private_engagement, public_letter, public_campaign, shareholder_proposal, proxy_vote, resolution, implementation_tracking, closed]
+      x-labels-ko: [초기 신호, 비공개 관여, 공개서한·질의, 공개 캠페인, 주주제안, 위임·표결, 합의·철회·가결·부결, 이행 추적, 종료]
+    Company:
+      type: object
+      required: [company_id, legal_name]
+      properties:
+        company_id: {$ref: '#/components/schemas/CompanyId'}
+        stock_code: {type: [string, 'null']}
+        market: {type: [string, 'null']}
+        legal_name: {type: string}
+        legal_name_en: {type: [string, 'null']}
+        aliases: {type: array, items: {type: string}}
+    GovernanceEvent:
+      type: object
+      required: [event_id, company_id, event_type, title, original_language, occurred_at, importance, verification_status]
+      properties:
+        event_id: {$ref: '#/components/schemas/EntityId'}
+        company_id: {$ref: '#/components/schemas/CompanyId'}
+        event_type: {$ref: '#/components/schemas/EventType'}
+        title: {type: string, description: Original-language title}
+        original_language: {type: string}
+        occurred_at: {type: string, format: date-time}
+        deadline_at: {type: [string, 'null'], format: date-time}
+        importance: {$ref: '#/components/schemas/Importance'}
+        verification_status: {$ref: '#/components/schemas/VerificationStatus'}
+        review_status: {$ref: '#/components/schemas/ReviewStatus'}
+        publication_status: {$ref: '#/components/schemas/PublicationStatus'}
+    Actor:
+      type: object
+      required: [actor_id, actor_type, display_name]
+      properties:
+        actor_id: {$ref: '#/components/schemas/EntityId'}
+        actor_type:
+          type: string
+          enum: [company, activist_shareholder, institution, shareholder_coalition, regulator, advisor]
+        display_name: {type: string, maxLength: 255}
+        display_name_en: {type: [string, 'null'], maxLength: 255}
+        company_id: {anyOf: [{$ref: '#/components/schemas/CompanyId'}, {type: 'null'}]}
+        country_code: {type: [string, 'null'], pattern: '^[A-Z]{2}$'}
+        aliases: {type: array, maxItems: 20, items: {type: string, maxLength: 255}}
+        review_status: {$ref: '#/components/schemas/ReviewStatus'}
+        record_status: {type: string, enum: [inactive, active]}
+    Document:
+      type: object
+      required: [document_id, source_class, external_id, original_language, title, original_url, content_hash, version_no]
+      properties:
+        document_id: {$ref: '#/components/schemas/EntityId'}
+        company_id: {anyOf: [{$ref: '#/components/schemas/CompanyId'}, {type: 'null'}]}
+        source_right_id: {anyOf: [{$ref: '#/components/schemas/EntityId'}, {type: 'null'}]}
+        source_class: {$ref: '#/components/schemas/SourceClass'}
+        external_id: {type: string, maxLength: 191, description: DART receipt number or source-stable identifier}
+        document_type: {type: [string, 'null'], maxLength: 80}
+        original_language: {type: string, maxLength: 16}
+        title: {type: string, maxLength: 700, description: Source title, never automatically translated}
+        body_text: {type: [string, 'null'], description: Source text, never automatically translated}
+        original_url: {type: string, format: uri}
+        content_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        correction_of_document_id: {anyOf: [{$ref: '#/components/schemas/EntityId'}, {type: 'null'}]}
+        version_no: {type: integer, minimum: 1}
+        published_at: {type: [string, 'null'], format: date-time}
+        retrieved_at: {type: string, format: date-time}
+        verification_status: {$ref: '#/components/schemas/VerificationStatus'}
+        publication_status: {$ref: '#/components/schemas/PublicationStatus'}
+    Campaign:
+      type: object
+      required: [campaign_id, company_id, title, original_language, stage, started_at]
+      properties:
+        campaign_id: {$ref: '#/components/schemas/EntityId'}
+        company_id: {$ref: '#/components/schemas/CompanyId'}
+        lead_actor_id: {anyOf: [{$ref: '#/components/schemas/EntityId'}, {type: 'null'}]}
+        title: {type: string, maxLength: 700}
+        original_language: {type: string, maxLength: 16}
+        demand_text: {type: [string, 'null']}
+        stage: {$ref: '#/components/schemas/CampaignStage'}
+        outcome: {type: [string, 'null'], enum: [null, settled, withdrawn, passed, failed]}
+        started_at: {type: string, format: date-time}
+        ended_at: {type: [string, 'null'], format: date-time}
+        review_status: {$ref: '#/components/schemas/ReviewStatus'}
+        publication_status: {$ref: '#/components/schemas/PublicationStatus'}
+    ClaimEvidence:
+      type: object
+      required: [claim_id, event_id, document_id, claim_type, claim_text, original_language]
+      properties:
+        claim_id: {$ref: '#/components/schemas/EntityId'}
+        event_id: {$ref: '#/components/schemas/EntityId'}
+        campaign_id: {anyOf: [{$ref: '#/components/schemas/EntityId'}, {type: 'null'}]}
+        actor_id: {anyOf: [{$ref: '#/components/schemas/EntityId'}, {type: 'null'}]}
+        document_id: {$ref: '#/components/schemas/EntityId'}
+        claim_type: {$ref: '#/components/schemas/ClaimType'}
+        claim_text: {type: string, description: Original-language claim or editorial interpretation}
+        original_language: {type: string, maxLength: 16}
+        evidence_locator: {type: [string, 'null'], maxLength: 500}
+        editorial_status: {type: string, enum: [pending, changes_requested, approved, rejected]}
+    ProposalVote:
+      type: object
+      required: [proposal_vote_id, company_id, agenda_title, original_language, meeting_at, result, evidence_document_id]
+      properties:
+        proposal_vote_id: {$ref: '#/components/schemas/EntityId'}
+        event_id: {anyOf: [{$ref: '#/components/schemas/EntityId'}, {type: 'null'}]}
+        campaign_id: {anyOf: [{$ref: '#/components/schemas/EntityId'}, {type: 'null'}]}
+        company_id: {$ref: '#/components/schemas/CompanyId'}
+        proposer_actor_id: {anyOf: [{$ref: '#/components/schemas/EntityId'}, {type: 'null'}]}
+        agenda_no: {type: [string, 'null'], maxLength: 40}
+        agenda_title: {type: string, maxLength: 700}
+        original_language: {type: string, maxLength: 16}
+        meeting_at: {type: string, format: date-time}
+        recommendation: {type: [string, 'null'], description: Third-party recommendation; never a BSIDE buy/sell recommendation}
+        recommendation_source: {type: [string, 'null']}
+        result: {type: string, enum: [pending, passed, failed, withdrawn]}
+        votes_for: {type: [number, 'null'], minimum: 0, maximum: 100}
+        votes_against: {type: [number, 'null'], minimum: 0, maximum: 100}
+        votes_abstain: {type: [number, 'null'], minimum: 0, maximum: 100}
+        evidence_document_id: {$ref: '#/components/schemas/EntityId'}
+        review_status: {$ref: '#/components/schemas/ReviewStatus'}
+        publication_status: {$ref: '#/components/schemas/PublicationStatus'}
+    CommitmentOutcome:
+      type: object
+      required: [commitment_id, company_id, commitment_text, original_language, status, evidence_document_id]
+      properties:
+        commitment_id: {$ref: '#/components/schemas/EntityId'}
+        event_id: {anyOf: [{$ref: '#/components/schemas/EntityId'}, {type: 'null'}]}
+        campaign_id: {anyOf: [{$ref: '#/components/schemas/EntityId'}, {type: 'null'}]}
+        company_id: {$ref: '#/components/schemas/CompanyId'}
+        commitment_text: {type: string}
+        original_language: {type: string, maxLength: 16}
+        target_at: {type: [string, 'null'], format: date-time}
+        actual_action: {type: [string, 'null']}
+        status: {type: string, enum: [planned, announced, in_progress, met, partially_met, missed, cancelled]}
+        target_metrics: {type: [object, 'null'], additionalProperties: true}
+        actual_metrics: {type: [object, 'null'], additionalProperties: true}
+        evidence_document_id: {$ref: '#/components/schemas/EntityId'}
+        review_status: {$ref: '#/components/schemas/ReviewStatus'}
+        publication_status: {$ref: '#/components/schemas/PublicationStatus'}
+    TimelineEntry:
+      type: object
+      required: [timeline_entry_id, document_id, occurred_at, entry_type, title, original_language]
+      properties:
+        timeline_entry_id: {$ref: '#/components/schemas/EntityId'}
+        event_id: {anyOf: [{$ref: '#/components/schemas/EntityId'}, {type: 'null'}]}
+        campaign_id: {anyOf: [{$ref: '#/components/schemas/EntityId'}, {type: 'null'}]}
+        document_id: {$ref: '#/components/schemas/EntityId'}
+        occurred_at: {type: string, format: date-time}
+        entry_type: {type: string, maxLength: 40}
+        title: {type: string, maxLength: 700}
+        description: {type: [string, 'null']}
+        original_language: {type: string, maxLength: 16}
+        review_status: {$ref: '#/components/schemas/ReviewStatus'}
+        publication_status: {$ref: '#/components/schemas/PublicationStatus'}
+    EditorialRevision:
+      type: object
+      required: [revision_id, entity_type, entity_id, reason, revision_status]
+      properties:
+        revision_id: {$ref: '#/components/schemas/EntityId'}
+        entity_type: {type: string, enum: [company, event, actor, event_actor, campaign, document, claim, proposal_vote, commitment, timeline]}
+        entity_id: {$ref: '#/components/schemas/EntityId'}
+        field_name: {type: [string, 'null'], maxLength: 80}
+        previous_value: {type: [string, 'null']}
+        revised_value: {type: [string, 'null']}
+        reason: {type: string}
+        revision_status: {type: string, enum: [pending, approved, rejected, published]}
+        reviewed_at: {type: [string, 'null'], format: date-time}
+        published_at: {type: [string, 'null'], format: date-time}
+    DeliveryOutbox:
+      type: object
+      required: [delivery_id, delivery_channel, destination, idempotency_key, payload, status, attempt_count]
+      properties:
+        delivery_id: {$ref: '#/components/schemas/EntityId'}
+        event_id: {anyOf: [{$ref: '#/components/schemas/EntityId'}, {type: 'null'}]}
+        delivery_channel: {type: string, enum: [telegram, atom, webhook, email]}
+        destination: {type: string, maxLength: 191}
+        idempotency_key: {type: string, maxLength: 191}
+        payload: {type: object, additionalProperties: true}
+        status: {type: string, enum: [pending, remote_queued, processing, retry, delivered, dead_letter, cancelled]}
+        attempt_count: {type: integer, minimum: 0}
+        next_attempt_at: {type: [string, 'null'], format: date-time}
+        external_message_id: {type: [string, 'null'], maxLength: 191}
+        delivered_at: {type: [string, 'null'], format: date-time}
+        dead_lettered_at: {type: [string, 'null'], format: date-time}
+    SourceRight:
+      type: object
+      required: [source_type, source_key, source_name, permission_scope, valid_from, ai_allowed, redistribution_allowed, status]
+      properties:
+        source_right_id: {$ref: '#/components/schemas/EntityId'}
+        source_type: {type: string}
+        source_key: {type: string, maxLength: 191}
+        source_name: {type: string, maxLength: 255}
+        permission_scope: {type: string}
+        evidence_uri: {type: [string, 'null'], format: uri}
+        evidence_hash: {type: [string, 'null'], pattern: '^[a-f0-9]{64}$'}
+        valid_from: {type: string, format: date-time}
+        valid_until: {type: [string, 'null'], format: date-time}
+        revoked_at: {type: [string, 'null'], format: date-time}
+        ai_allowed: {type: boolean}
+        redistribution_allowed: {type: boolean}
+        status: {type: string, enum: [pending, active, expired, revoked]}
+    FeedbackRequest:
+      type: object
+      required: [feedback_type, message]
+      properties:
+        feedback_type: {type: string, enum: [correction, right_of_reply, source_rights, general]}
+        entity_type: {type: string, enum: [company, event, campaign, document]}
+        entity_id: {$ref: '#/components/schemas/EntityId'}
+        submitter_name: {type: string, maxLength: 191}
+        submitter_contact: {type: string, maxLength: 320}
+        message: {type: string, minLength: 10, maxLength: 10000}
+        evidence_urls: {type: array, maxItems: 10, items: {type: string, format: uri}}
+    SearchResult:
+      type: object
+      required: [kind, entity_id, title]
+      properties:
+        kind: {type: string, enum: [company, actor, event, campaign, document]}
+        entity_id: {$ref: '#/components/schemas/EntityId'}
+        title: {type: string}
+        subtitle: {type: [string, 'null']}
+        company_id: {anyOf: [{$ref: '#/components/schemas/CompanyId'}, {type: 'null'}]}
+        occurred_at: {type: [string, 'null'], format: date-time}
+        sort_at: {type: [string, 'null'], format: date-time}
+  responses:
+    CompanyList:
+      description: Paginated companies
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: {type: array, items: {$ref: '#/components/schemas/Company'}}
+    EventList:
+      description: Paginated events, at most 100 and 250KB per response
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: {type: array, items: {$ref: '#/components/schemas/GovernanceEvent'}}
+    SearchResults:
+      description: Paginated unified results including companies and governance actors
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              ok: {type: boolean}
+              query: {type: string}
+              data: {type: array, items: {$ref: '#/components/schemas/SearchResult'}}
+              pagination: {type: object}
+    NotFound:
+      description: Resource not found or not publicly visible
+    Unauthorized:
+      description: Valid Bearer token required
+    Forbidden:
+      description: Token does not have the required role
+x-hmac-actions:
+  description: >-
+    Existing api.php HMAC authentication (timestamp, nonce, body signature) is
+    reused for server-to-server writes. Every action is POSTed as
+    ?action={action}; these routes are not accessible with public Bearer tokens.
+  actions:
+    - upsert_governance_snapshot
+    - upsert_editorial_snapshot
+    - enqueue_delivery_outbox
+    - claim_delivery_outbox
+    - ack_delivery_outbox
+    - fail_delivery_outbox
+    - export_runtime_state
+    - enqueue_link_discoveries
+    - claim_link_discoveries
+    - resolve_link_discovery
+  delivery-outbox-contract:
+    claim:
+      max_items: 1
+      default_lease_seconds: 900
+      min_lease_seconds: 300
+      max_lease_seconds: 1800
+      semantics: >-
+        A worker must claim, externally send, and durably acknowledge one row
+        before claiming the next. This prevents later items in a large batch
+        from reaching lease expiry before their send starts.
+    acknowledgement:
+      external_message_id_required: true
+      idempotent_when_external_message_id_matches: true
+      ambiguous_send_outcome: dead_letter
+      semantics: >-
+        Telegram transport failures after sendMessage begins are not retried
+        automatically because the Bot API offers no caller-supplied idempotency
+        key. Rows with an unknown outcome require reconciliation.
+    rights_lineage_complete:
+      required: true
+      const: true
+    source_right_ids:
+      required: true
+      type: array
+      items:
+        type: string
+    enforcement: >-
+      Missing or malformed lineage is rejected at enqueue. Every listed right
+      is revalidated at claim time, and an inactive or missing right moves the
+      delivery to dead_letter before any external send.
+  editorial-snapshot-contract:
+    semantics: incremental-upsert
+    description: >-
+      Incremental governed editorial upsert; omission never deletes an existing record.
+      Every accepted record is revalidated server-side and enters inactive, pending,
+      or draft state unless identical reviewed content already exists.
+    schema_version: 1
+    max_records_per_chunk: 500
+    chunk_id_format: 'editorial:{first-32-lowercase-bundle-sha256}:{1-based-index-4-digits}'
+    arrays:
+      - actors
+      - event_actors
+      - campaigns
+      - claim_evidence
+      - proposal_votes
+      - commitment_outcomes
+      - timeline_entries
+    invariants:
+      - All seven arrays are required and exactly one is non-empty.
+      - Source-language text is stored byte-for-byte without trimming, translation, or silent truncation.
+      - Timestamps require an explicit timezone offset and are stored in UTC.
+      - A chunk commit includes entity writes, evidence links, and its payload hash atomically.
+      - Replaying an identical chunk returns rejected=0 and exact accepted counts; changed payload under the same chunk identity returns 409.
+    success_response_example:
+      ok: true
+      accepted: {campaigns: 25}
+      rejected: 0
+      idempotent: false

@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from .config import load_config
-from .dates import now_in_timezone, parse_datetime
+from .dates import parse_datetime
 from .state import load_state
 from .telegram_publisher import (
     build_telegram_message,

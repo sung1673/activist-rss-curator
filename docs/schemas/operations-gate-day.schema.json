@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://news.bside.ai/schemas/operations-gate-day.schema.json",
+  "title": "BSIDE production operations release evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "date",
+    "environment",
+    "evidence_source",
+    "is_synthetic",
+    "collected_at",
+    "code_revision",
+    "metrics"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "date": {"type": "string", "format": "date"},
+    "environment": {"const": "production"},
+    "evidence_source": {"type": "string", "minLength": 1},
+    "is_synthetic": {"const": false},
+    "collected_at": {"type": "string", "format": "date-time"},
+    "code_revision": {"type": "string", "pattern": "^[0-9a-fA-F]{7,64}$"},
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "official_ingest_success_rate",
+        "official_lag_p95_minutes",
+        "delivery_success_rate",
+        "delivery_failure_detection_p95_minutes",
+        "official_evidence_link_rate",
+        "same_story_precision",
+        "same_story_evaluated_pair_count",
+        "top_sensitive_human_review_rate",
+        "original_language_preservation_rate",
+        "valid_source_right_rate"
+      ],
+      "properties": {
+        "official_ingest_success_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "official_lag_p95_minutes": {"type": "number", "minimum": 0},
+        "delivery_success_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "delivery_failure_detection_p95_minutes": {"type": "number", "minimum": 0},
+        "official_evidence_link_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "same_story_precision": {"type": "number", "minimum": 0, "maximum": 1},
+        "same_story_evaluated_pair_count": {"type": "integer", "minimum": 0},
+        "top_sensitive_human_review_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "original_language_preservation_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "valid_source_right_rate": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    }
+  }
+}
