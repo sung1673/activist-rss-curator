@@ -18,7 +18,7 @@
 | 품질 평가 | 사람 라벨 JSONL 스키마, benchmark CLI, 표본 수와 precision/recall 게이트 | 실제 article pair 500개와 사건 300개 라벨링 |
 | 전환 판정 | 14일 shadow 비교 보고서, 7일 운영·성능 증빙, benchmark를 같은 코드 리비전으로 검증하는 fail-closed CLI와 수동 workflow | 실제 production export artifact와 사람 승인 |
 
-2026-07-16 로컬 구현 스냅샷은 Python 회귀 테스트 527개, Ruff·엄격 MyPy·compileall, PHP 계약 정적 테스트, OpenAPI·workflow·JSON Schema 파싱을 통과했다. Playwright는 데스크톱·모바일 주요 여정, WCAG 2.2 AA, 반응형 레이아웃, 로컬 성능 예산을 통과했다. UI 생성 결과는 초기 HTML 3,538 bytes, JS·CSS·설정 gzip 합계 18,385 bytes였고, Python·npm 의존성 감사에서 알려진 취약점은 발견되지 않았다. 이전 운영 PHP 배포본은 PHP 7.3 web probe로 파싱했지만 최종 로컬 outbox 안전 패치는 아직 운영에 재배포하지 않았으므로 PR CI의 `php -l`과 검증된 SSH host key 기반 재배포가 남아 있다. 이 결과는 로컬 계약 검증이며 아래 운영 게이트를 대체하지 않는다.
+2026-07-16 로컬 구현 스냅샷은 Python 회귀 테스트 527개, Ruff·엄격 MyPy·compileall, PHP 계약 정적 테스트, OpenAPI·workflow·JSON Schema 파싱을 통과했다. Playwright는 데스크톱·모바일 주요 여정, WCAG 2.2 AA, 반응형 레이아웃, 로컬 성능 예산을 통과했다. UI 생성 결과는 초기 HTML 3,538 bytes, JS·CSS·설정 gzip 합계 18,385 bytes였고, Python·npm 의존성 감사에서 알려진 취약점은 발견되지 않았다. PR CI의 `php -l`도 통과했으며 2026-07-17 SSH host key 고정과 HTTPS 문서 루트 교차 검증으로 운영 접속 신뢰성을 확인했다. 최종 로컬 outbox 안전 패치는 아직 운영에 재배포하지 않았으므로 명시적인 운영 배포 승인 뒤 백업·PHP 7.3 web probe·원자 교체·smoke test가 남아 있다. 이 결과는 로컬 계약 검증이며 아래 운영 게이트를 대체하지 않는다.
 
 ## 2026-07-16 운영 반영 현황
 

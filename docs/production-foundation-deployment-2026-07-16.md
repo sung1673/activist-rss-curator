@@ -34,9 +34,12 @@
 #### 최종 감사 후 배포 보류
 
 - 로컬 `governance_v1.php`는 만료된 `processing` lease를 자동 재claim하지 않고 `delivery_lease_expired_outcome_unknown` dead-letter로 격리하도록 추가 보강했다. SHA-256은 `fcecce0b5ce1fe7d7942096f4a15c49c0863833b0c65e0450b4a0adbdb38ef57`이다.
-- 운영 SSH host key의 독립 검증 지문이 로컬 `known_hosts`에 없었고, 서버 FTP는 `AUTH TLS`를 제공하지 않았다. 따라서 host key를 임의 신뢰하거나 평문 FTP로 우회하지 않고 이 추가 PHP 배포는 보류했다.
+- 최초 감사 시 운영 SSH host key의 독립 검증 지문이 로컬 `known_hosts`에 없었고, 서버 FTP도 `AUTH TLS`를 제공하지 않아 추가 PHP 배포를 보류했다.
+- 2026-07-17 `alignpartnerscap.com:22`의 SSH 비밀번호 인증에 성공했다. 서버가 제시한 `ssh-rsa` 2048-bit host key 지문은 `SHA256:4Y2J13Nis0NOKupLJCOnr2w5X2UdBZH78TkZMVJCVLo`이다.
+- 동일 SSH 세션으로 무작위 일회성 파일을 `/www_root/activist`에 생성하고, 유효한 TLS 연결의 `https://alignpe.gabia.io/activist/`에서 정확히 같은 난수를 읽은 뒤 원격 파일을 즉시 삭제했다. 이 교차 프로토콜 검증으로 접속한 SSH endpoint가 실제 운영 HTTPS 문서 루트를 제어함을 확인했다.
+- SSH에서 다시 읽은 운영 `governance_v1.php` SHA-256은 `a050a0982af8f9854cc2585984596cdfcd5edb8bbe87f71154ce4561d828335e`로 기존 배포 기록과 일치했다. 검증 과정에서는 운영 PHP를 변경하지 않았다.
 - 현재 운영에는 위에 기록한 이전 검증본 `a050a0...`이 유지된다. `ENABLE_GOVERNANCE_DELIVERY=false`이므로 신규 outbox consumer는 실행되지 않는다.
-- `ENABLE_GOVERNANCE_DELIVERY=true` 전환 전 Gabia 관리 화면 또는 호스팅 사업자가 제공한 SSH host key fingerprint를 독립 확인한 뒤 로컬 최종본을 재배포하고 smoke test 및 새 배포 로그를 남겨야 한다.
+- 명시적인 운영 배포 승인 후 위 지문을 고정해 로컬 최종본을 백업·임시 업로드·PHP 7.3 parser 검증·원자 교체하고, smoke test와 새 배포 로그를 남겨야 한다. `ENABLE_GOVERNANCE_DELIVERY=true` 전환은 이 배포와 분리해 품질 게이트 통과 후에만 수행한다.
 
 ### Telegram 이용권한
 
