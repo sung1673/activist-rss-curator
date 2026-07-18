@@ -1,175 +1,60 @@
 {
-  "date_id": "2026-07-18",
-  "generated_at": "2026-07-18T06:09:13.459542+09:00",
-  "start_at": "2026-07-17T06:06:37.714324+09:00",
-  "end_at": "2026-07-18T06:06:37.714324+09:00",
-  "start_label": "2026-07-17 06:06 KST",
-  "end_label": "2026-07-18 06:06 KST",
-  "candidate_count": 3,
-  "candidate_hash": "639b7ea4df5665f0",
+  "date_id": "2026-07-19",
+  "generated_at": "2026-07-19T06:00:03.936503+09:00",
+  "start_at": "2026-07-18T05:58:19.484063+09:00",
+  "end_at": "2026-07-19T05:58:19.484063+09:00",
+  "start_label": "2026-07-18 05:58 KST",
+  "end_label": "2026-07-19 05:58 KST",
+  "candidate_count": 0,
+  "candidate_hash": "4f53cda18c2baa0c",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": [
-    {
-      "id": "47662edc1257",
-      "score": 99.2,
-      "left": {
-        "id": "story-12",
-        "title": "[빗썸 지배구조 분수령] 지배구조가 누른 빗썸 몸값…재평가 기대 솔솔 : 네이버 블로그",
-        "summary": "[빗썸 지배구조 분수령] 지배구조가 누른 빗썸 몸값…재평가 기대 '솔솔' : 네이버 블로그 https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348680256&redirect=Dlog",
-        "category": "밸류업·주주환원",
-        "datetime": "07.17 11:08",
-        "source_line": "BLOG",
-        "link_count": 1,
-        "url": "https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348680256&redirect=Dlog",
-        "links": [
-          {
-            "source": "BLOG",
-            "title": "[빗썸 지배구조 분수령] 지배구조가 누른 빗썸 몸값…재평가 기대 솔솔 : 네이버 블로그",
-            "url": "https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348680256&redirect=Dlog"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-13",
-        "title": "[빗썸 지배구조 분수령] 비덴트 넘은 이정훈…남은 지배구조 숙제 : 네이버 블로그",
-        "summary": "[빗썸 지배구조 분수령] 비덴트 넘은 이정훈…남은 지배구조 숙제 : 네이버 블로그 https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348673889&redirect=Dlog",
-        "category": "밸류업·주주환원",
-        "datetime": "07.17 11:08",
-        "source_line": "BLOG",
-        "link_count": 1,
-        "url": "https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348673889&redirect=Dlog",
-        "links": [
-          {
-            "source": "BLOG",
-            "title": "[빗썸 지배구조 분수령] 비덴트 넘은 이정훈…남은 지배구조 숙제 : 네이버 블로그",
-            "url": "https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348673889&redirect=Dlog"
-          }
-        ]
-      }
-    },
-    {
-      "id": "1f4d8467a265",
-      "score": 72.6,
-      "left": {
-        "id": "story-13",
-        "title": "[빗썸 지배구조 분수령] 비덴트 넘은 이정훈…남은 지배구조 숙제 : 네이버 블로그",
-        "summary": "[빗썸 지배구조 분수령] 비덴트 넘은 이정훈…남은 지배구조 숙제 : 네이버 블로그 https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348673889&redirect=Dlog",
-        "category": "밸류업·주주환원",
-        "datetime": "07.17 11:08",
-        "source_line": "BLOG",
-        "link_count": 1,
-        "url": "https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348673889&redirect=Dlog",
-        "links": [
-          {
-            "source": "BLOG",
-            "title": "[빗썸 지배구조 분수령] 비덴트 넘은 이정훈…남은 지배구조 숙제 : 네이버 블로그",
-            "url": "https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348673889&redirect=Dlog"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-27",
-        "title": "[빗썸 지배구조 분수령] 지배구조 다음은 신뢰…빗썸의 남은 과제 : 네이버 블로그",
-        "summary": "[빗썸 지배구조 분수령] 지배구조 다음은 신뢰…빗썸의 남은 과제 : 네이버 블로그 https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348684043&redirect=Dlog",
-        "category": "자본시장 제도·공시",
-        "datetime": "07.17 11:08",
-        "source_line": "BLOG",
-        "link_count": 1,
-        "url": "https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348684043&redirect=Dlog",
-        "links": [
-          {
-            "source": "BLOG",
-            "title": "[빗썸 지배구조 분수령] 지배구조 다음은 신뢰…빗썸의 남은 과제 : 네이버 블로그",
-            "url": "https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348684043&redirect=Dlog"
-          }
-        ]
-      }
-    },
-    {
-      "id": "310af26da335",
-      "score": 72.3,
-      "left": {
-        "id": "story-12",
-        "title": "[빗썸 지배구조 분수령] 지배구조가 누른 빗썸 몸값…재평가 기대 솔솔 : 네이버 블로그",
-        "summary": "[빗썸 지배구조 분수령] 지배구조가 누른 빗썸 몸값…재평가 기대 '솔솔' : 네이버 블로그 https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348680256&redirect=Dlog",
-        "category": "밸류업·주주환원",
-        "datetime": "07.17 11:08",
-        "source_line": "BLOG",
-        "link_count": 1,
-        "url": "https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348680256&redirect=Dlog",
-        "links": [
-          {
-            "source": "BLOG",
-            "title": "[빗썸 지배구조 분수령] 지배구조가 누른 빗썸 몸값…재평가 기대 솔솔 : 네이버 블로그",
-            "url": "https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348680256&redirect=Dlog"
-          }
-        ]
-      },
-      "right": {
-        "id": "story-27",
-        "title": "[빗썸 지배구조 분수령] 지배구조 다음은 신뢰…빗썸의 남은 과제 : 네이버 블로그",
-        "summary": "[빗썸 지배구조 분수령] 지배구조 다음은 신뢰…빗썸의 남은 과제 : 네이버 블로그 https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348684043&redirect=Dlog",
-        "category": "자본시장 제도·공시",
-        "datetime": "07.17 11:08",
-        "source_line": "BLOG",
-        "link_count": 1,
-        "url": "https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348684043&redirect=Dlog",
-        "links": [
-          {
-            "source": "BLOG",
-            "title": "[빗썸 지배구조 분수령] 지배구조 다음은 신뢰…빗썸의 남은 과제 : 네이버 블로그",
-            "url": "https://blog.naver.com/PostView.naver?blogId=dealsite&logNo=224348684043&redirect=Dlog"
-          }
-        ]
-      }
-    }
-  ],
+  "candidates": [],
   "benchmark_coverage": {
     "enabled": true,
     "handles": [
       "activistkorea"
     ],
-    "url_count": 75,
-    "matched_count": 24,
-    "missing_count": 51,
-    "coverage_rate": 32.0,
+    "url_count": 40,
+    "matched_count": 9,
+    "missing_count": 31,
+    "coverage_rate": 22.5,
     "missing": [
       {
-        "title": "대한민국 ESG 교양 시리즈 CHAPTER 1 ESG의 이해 9 ESG를 가장 쉽게 이해하는 방법",
-        "url": "https://www.eanews.kr/news/977261",
-        "source_message_url": "https://t.me/activistkorea/117123",
+        "title": "마시모(Masimo) 인수와 바이오프로세싱 부문의 강점이 다나허(DHR)의 진단 사업 중심 성장 ...",
+        "url": "https://simplywall.st/ko/stocks/us/pharmaceuticals-biotech/nyse-dhr/danaher/news/1b1f26070d9995b4",
+        "source_message_url": "https://t.me/activistkorea/117166",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "[특별기고] 지속가능성공시, 방향·속도 신중하지 않으면 천문학 비용 - 서플",
-        "url": "https://supple.kr/news/cmrod59420000oj93iiaafje5",
-        "source_message_url": "https://t.me/activistkorea/117124",
+        "title": "초기 우버 투자자 비트코인 최대 변수, 스트래티지 영향력 - 디지털투데이 (DigitalToday)",
+        "url": "https://www.digitaltoday.co.kr/news/articleView.html?idxno=685035",
+        "source_message_url": "https://t.me/activistkorea/117165",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "브룩필드 리인슈어런스, 기업 구조 단순화 거래 주주 승인 - 매일경제 마켓",
-        "url": "https://stock.mk.co.kr/news/view/1122875",
-        "source_message_url": "https://t.me/activistkorea/117120",
+        "title": "집유보다 아픈 과징금…로펌들 검사말고 경제부처 전관 모셔라",
+        "url": "https://www.mk.co.kr/news/society/12101287",
+        "source_message_url": "https://t.me/activistkorea/117162",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "AI 투자 확대가 드러낸 글로벌 경제의 균열과 복원력",
-        "url": "https://www.kairnews.com/news/505109",
-        "source_message_url": "https://t.me/activistkorea/117121",
+        "title": "프리덤 홀딩(FRHC)은 3억 달러 규모의 자본 조달을 통해 지배 구조를 강화할 것인가, 아니면 ...",
+        "url": "https://simplywall.st/ko/stocks/us/diversified-financials/nasdaq-frhc/freedom-holding/news/e706d821c481122b",
+        "source_message_url": "https://t.me/activistkorea/117163",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "[유한양행 차기 대표는 누구?①] 세 후보 3色 성장 전략...렉라자 이후 누가 이끌까",
-        "url": "https://www.startuptoday.co.kr/news/articleView.html?idxno=806872",
-        "source_message_url": "https://t.me/activistkorea/117122",
+        "title": "농협중앙회장 조합원 직선제 도입하면…축산경제대표도?",
+        "url": "https://www.fnnews.com/news/202607181752029952",
+        "source_message_url": "https://t.me/activistkorea/117164",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
