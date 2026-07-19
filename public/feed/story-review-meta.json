@@ -1,60 +1,99 @@
 {
-  "date_id": "2026-07-19",
-  "generated_at": "2026-07-19T06:00:03.936503+09:00",
-  "start_at": "2026-07-18T05:58:19.484063+09:00",
-  "end_at": "2026-07-19T05:58:19.484063+09:00",
-  "start_label": "2026-07-18 05:58 KST",
-  "end_label": "2026-07-19 05:58 KST",
-  "candidate_count": 0,
-  "candidate_hash": "4f53cda18c2baa0c",
+  "date_id": "2026-07-20",
+  "generated_at": "2026-07-20T06:02:23.214123+09:00",
+  "start_at": "2026-07-19T06:00:35.868272+09:00",
+  "end_at": "2026-07-20T06:00:35.868272+09:00",
+  "start_label": "2026-07-19 06:00 KST",
+  "end_label": "2026-07-20 06:00 KST",
+  "candidate_count": 1,
+  "candidate_hash": "efd28c44cb7a705d",
   "page_url": "https://news.bside.ai/feed/story-review.html",
-  "candidates": [],
+  "candidates": [
+    {
+      "id": "e92bdec0e0f6",
+      "score": 84.5,
+      "left": {
+        "id": "story-1",
+        "title": "배당 압박하던 행동주의 펀드, 독립이사회로 타깃 변경",
+        "summary": "국내 행동주의 펀드들의 전선이 배당 확대와 자사주 소각을 넘어 '독립이사회'로 빠르게 이동하고 있다. 얼라인파트너스가 금융지주에 독립이사회 체제 도입을 요구한 데 이어 트러스톤자산운용도 태광산업 이사회에 \"경영진의 거수기에서 벗어나라\"고 공개 압박하면서..",
+        "category": "주주행동·경영권",
+        "datetime": "07.19 18:17",
+        "source_line": "FNNEWS",
+        "link_count": 1,
+        "url": "https://www.fnnews.com/news/202607191817016913",
+        "links": [
+          {
+            "source": "FNNEWS",
+            "title": "배당 압박하던 행동주의 펀드, 독립이사회로 타깃 변경",
+            "url": "https://www.fnnews.com/news/202607191817016913"
+          }
+        ]
+      },
+      "right": {
+        "id": "story-6",
+        "title": "행동주의 2라운드는 독립이사회?…얼라인·트러스톤이 던진 화두 [fn마켓워치]",
+        "summary": "국내 행동주의 펀드들의 전선이 배당 확대와 자사주 소각을 넘어 '독립이사회'로 빠르게 이동하고 있다. 얼라인파트너스가 금융지주에 독립이사회 체제 도입을 요구한 데 이어 트러스톤자산운용도 태광산업 이사회에 \"경영진의 거수기에서 벗어나라\"고 공개 압박..",
+        "category": "주주행동·경영권",
+        "datetime": "07.19 12:55",
+        "source_line": "FNNEWS",
+        "link_count": 1,
+        "url": "https://www.fnnews.com/news/202607190056591122",
+        "links": [
+          {
+            "source": "FNNEWS",
+            "title": "행동주의 2라운드는 독립이사회?…얼라인·트러스톤이 던진 화두 [fn마켓워치]",
+            "url": "https://www.fnnews.com/news/202607190056591122"
+          }
+        ]
+      }
+    }
+  ],
   "benchmark_coverage": {
     "enabled": true,
     "handles": [
       "activistkorea"
     ],
-    "url_count": 40,
-    "matched_count": 9,
-    "missing_count": 31,
-    "coverage_rate": 22.5,
+    "url_count": 61,
+    "matched_count": 12,
+    "missing_count": 49,
+    "coverage_rate": 19.7,
     "missing": [
       {
-        "title": "마시모(Masimo) 인수와 바이오프로세싱 부문의 강점이 다나허(DHR)의 진단 사업 중심 성장 ...",
-        "url": "https://simplywall.st/ko/stocks/us/pharmaceuticals-biotech/nyse-dhr/danaher/news/1b1f26070d9995b4",
-        "source_message_url": "https://t.me/activistkorea/117166",
+        "title": "배당 압박하던 행동주의 펀드, 독립이사회로 타깃 변경",
+        "url": "https://news.nate.com/view/20260719n12464",
+        "source_message_url": "https://t.me/activistkorea/117227",
+        "source_channel": "[행동주의, 주주] 구글 뉴스",
+        "status": "duplicate",
+        "reason": "seen_url"
+      },
+      {
+        "title": "JB금융지주·BNK금융지주 합병 검토하라",
+        "url": "https://www.jjan.kr/articleAmp/20260719500360",
+        "source_message_url": "https://t.me/activistkorea/117226",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "초기 우버 투자자 비트코인 최대 변수, 스트래티지 영향력 - 디지털투데이 (DigitalToday)",
-        "url": "https://www.digitaltoday.co.kr/news/articleView.html?idxno=685035",
-        "source_message_url": "https://t.me/activistkorea/117165",
+        "title": "뇌 이식 뉴럴링크, K-기술 리더십이 주도",
+        "url": "https://m.fntimes.com/html/view.php?ud=202607162304368031dd55077bc2_18",
+        "source_message_url": "https://t.me/activistkorea/117223",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "집유보다 아픈 과징금…로펌들 검사말고 경제부처 전관 모셔라",
-        "url": "https://www.mk.co.kr/news/society/12101287",
-        "source_message_url": "https://t.me/activistkorea/117162",
+        "title": "대구백화점, 창업 82년 만에 새 주인 맞는다",
+        "url": "https://www.hidomin.com/news/articleView.html?idxno=713815",
+        "source_message_url": "https://t.me/activistkorea/117221",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
       },
       {
-        "title": "프리덤 홀딩(FRHC)은 3억 달러 규모의 자본 조달을 통해 지배 구조를 강화할 것인가, 아니면 ...",
-        "url": "https://simplywall.st/ko/stocks/us/diversified-financials/nasdaq-frhc/freedom-holding/news/e706d821c481122b",
-        "source_message_url": "https://t.me/activistkorea/117163",
-        "source_channel": "[행동주의, 주주] 구글 뉴스",
-        "status": "rejected",
-        "reason": "low_relevance"
-      },
-      {
-        "title": "농협중앙회장 조합원 직선제 도입하면…축산경제대표도?",
-        "url": "https://www.fnnews.com/news/202607181752029952",
-        "source_message_url": "https://t.me/activistkorea/117164",
+        "title": "전문가들은 금값이 계속 하락하여 다음 주에는 4,000달러 아래로 떨어질 것으로 예측하고 있다.",
+        "url": "https://www.vietnam.vn/ko/chuyen-gia-du-bao-gia-vang-con-giam-de-mat-moc-4-000-usd-tuan-toi",
+        "source_message_url": "https://t.me/activistkorea/117222",
         "source_channel": "[행동주의, 주주] 구글 뉴스",
         "status": "rejected",
         "reason": "low_relevance"
