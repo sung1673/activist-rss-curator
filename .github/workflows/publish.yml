@@ -8,6 +8,8 @@ on:
       - Daily pages and briefing
     types:
       - completed
+    branches:
+      - main
   schedule:
     # Retry transient failures and detect stuck delivery within ten minutes.
     - cron: "2,12,22,32,42,52 * * * *"
@@ -25,17 +27,18 @@ jobs:
     if: >-
       vars.ENABLE_GOVERNANCE_DELIVERY == 'true' &&
       (github.event_name != 'workflow_run' ||
-      github.event.workflow_run.conclusion == 'success')
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
         id: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
         id: setup_python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip

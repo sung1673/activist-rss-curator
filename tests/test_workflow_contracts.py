@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -97,6 +98,7 @@ def test_media_resolver_and_publisher_are_independent() -> None:
     assert "curator.main" not in resolver
     assert "workflow_run:" in publisher
     assert "ENABLE_GOVERNANCE_DELIVERY" in publisher
+    assert "github.event.workflow_run.head_repository.full_name == github.repository" in publisher
     assert "curator.publish_outbox" in publisher
     assert 'DELIVERY_LEASE_SECONDS: "900"' in publisher
     assert "curator.publish_outbox --root . --limit 5" in publisher
@@ -104,6 +106,8 @@ def test_media_resolver_and_publisher_are_independent() -> None:
     assert "steps.validate.outcome == 'success'" in publisher
     assert "curator.main" not in publisher
     assert "Daily pages and briefing" in publisher
+    publisher_payload = yaml.load(publisher, Loader=yaml.BaseLoader)
+    assert publisher_payload["on"]["workflow_run"]["branches"] == ["main"]
     outbox_consumers = [
         path.name
         for path in WORKFLOWS.glob("*.yml")
@@ -127,8 +131,8 @@ def test_daily_generation_and_delivery_use_requested_kst_boundaries() -> None:
     assert "TELEGRAM_ADMIN_ACCESS_TOKEN: ${{ secrets.TELEGRAM_ADMIN_ACCESS_TOKEN }}" in workflow
     assert "require-env.sh TELEGRAM_ADMIN_ACCESS_TOKEN ACTIVIST_PUBLIC_API_URL" in workflow
     assert "python -m curator.telegram_dashboard write" in workflow
-    assert "actions/upload-pages-artifact@v4" in workflow
-    assert "actions/deploy-pages@v4" in workflow
+    assert "actions/upload-pages-artifact@v5" in workflow
+    assert "actions/deploy-pages@v5" in workflow
     assert "ENABLE_GOVERNANCE_PAGES" in workflow
     assert "vars.ENABLE_PAGES != 'true'" in workflow
     assert "ENABLE_PAGES and ENABLE_GOVERNANCE_PAGES are mutually exclusive" in workflow
@@ -181,8 +185,11 @@ def test_pages_deployment_retries_one_immutable_artifact_three_times(
     job = payload["jobs"][job_name]
     steps = job["steps"]
 
-    uploads = [step for step in steps if step.get("uses") == "actions/upload-pages-artifact@v4"]
-    deployments = [step for step in steps if step.get("uses") == "actions/deploy-pages@v4"]
+    uploads = [step for step in steps if step.get("uses") == "actions/upload-pages-artifact@v5"]
+    deployments = [step for step in steps if step.get("uses") == "actions/deploy-pages@v5"]
+    configuration = next(step for step in steps if step.get("uses") == "actions/configure-pages@v6")
+    assert "enablement" not in configuration.get("with", {})
+    assert "token" not in configuration.get("with", {})
     assert len(uploads) == 1
     assert uploads[0]["with"]["name"] == "github-pages"
     assert len(deployments) == 3
@@ -277,6 +284,37 @@ def test_ci_audits_python_and_browser_dependencies() -> None:
     assert "npm audit --audit-level=high" in workflow
 
 
+def test_workflows_use_current_node24_official_action_majors() -> None:
+    workflows = "\n".join(path.read_text(encoding="utf-8") for path in WORKFLOWS.glob("*.yml"))
+    expected_actions = {
+        "actions/checkout@v7",
+        "actions/setup-python@v7",
+        "actions/setup-node@v7",
+        "actions/github-script@v9",
+        "actions/configure-pages@v6",
+        "actions/deploy-pages@v5",
+        "actions/upload-pages-artifact@v5",
+        "actions/upload-artifact@v7",
+        "actions/download-artifact@v8",
+    }
+    assert set(re.findall(r"uses:\s+(actions/[^\s]+)", workflows)) == expected_actions
+    assert "pip-install" not in workflows
+    assert "always-auth" not in workflows
+    assert "require('@actions/github')" not in workflows
+    assert "require(\"@actions/github\")" not in workflows
+    assert not re.search(r"\b(?:const|let)\s+getOctokit\b", workflows)
+    assert "ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION" not in workflows
+
+    ci = yaml.load(workflow_text("ci.yml"), Loader=yaml.BaseLoader)
+    setup_node = next(
+        step
+        for step in ci["jobs"]["ui-e2e"]["steps"]
+        if step.get("uses") == "actions/setup-node@v7"
+    )
+    assert setup_node["with"] == {"node-version": "22", "cache": "npm"}
+    assert not [path for path in (ROOT / "public").rglob(".*") if path.is_file()]
+
+
 def test_watchdog_contract_and_issue_permission() -> None:
     workflow = workflow_text("watchdog.yml")
     script = (ROOT / ".github" / "scripts" / "watchdog.py").read_text(encoding="utf-8")
@@ -292,9 +330,23 @@ def test_watchdog_contract_and_issue_permission() -> None:
 
 def test_release_gate_uses_cross_run_evidence_and_checked_out_revision() -> None:
     workflow = workflow_text("release-gate.yml")
+    payload = yaml.load(workflow, Loader=yaml.BaseLoader)
     assert "workflow_dispatch:" in workflow
     assert "actions: read" in workflow
-    assert "actions/download-artifact@v4" in workflow
+    assert "actions/download-artifact@v8" in workflow
+    assert "digest-mismatch: error" in workflow
+    download = next(
+        step
+        for step in payload["jobs"]["evaluate"]["steps"]
+        if step.get("uses") == "actions/download-artifact@v8"
+    )
+    assert download["with"] == {
+        "name": "${{ inputs.evidence_artifact_name }}",
+        "path": "evidence",
+        "github-token": "${{ github.token }}",
+        "run-id": "${{ inputs.evidence_run_id }}",
+        "digest-mismatch": "error",
+    }
     assert "Validate production evidence run provenance" in workflow
     assert 'MAX_RUN_AGE_HOURS: "72"' in workflow
     assert "Evidence workflow run revision does not match" in workflow
@@ -302,5 +354,5 @@ def test_release_gate_uses_cross_run_evidence_and_checked_out_revision() -> None
     assert "python -m curator.release_gate" in workflow
     assert "--expected-revision ${{ github.sha }}" in workflow
     assert "--evidence-as-of ${{ steps.evidence_run.outputs.created_at }}" in workflow
-    assert "actions/upload-artifact@v4" in workflow
+    assert "actions/upload-artifact@v7" in workflow
     assert "Governance release transition gate did not pass" in workflow

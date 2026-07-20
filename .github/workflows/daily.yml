@@ -46,7 +46,7 @@ jobs:
       url: ${{ steps.pages_deployment_result.outputs.page_url }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Determine Pages deployment eligibility
         id: pages_mode
@@ -67,7 +67,7 @@ jobs:
           echo "deploy_pages=$deploy_pages" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -116,7 +116,7 @@ jobs:
         run: python -m curator.governance_ui --root .
 
       - name: Preserve rollback artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pages-${{ github.run_id }}-${{ github.run_attempt }}
           path: public
@@ -125,14 +125,12 @@ jobs:
 
       - name: Configure Pages
         if: steps.pages_mode.outputs.deploy_pages == 'true'
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
+        uses: actions/configure-pages@v6
 
       - name: Upload Pages artifact
         if: steps.pages_mode.outputs.deploy_pages == 'true'
         id: pages_artifact
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5
         with:
           name: github-pages
           path: public
@@ -141,7 +139,7 @@ jobs:
         if: steps.pages_mode.outputs.deploy_pages == 'true'
         id: deployment
         continue-on-error: true
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
         with:
           artifact_name: github-pages
 
@@ -153,7 +151,7 @@ jobs:
         if: steps.pages_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure'
         id: deployment_retry
         continue-on-error: true
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
         with:
           artifact_name: github-pages
 
@@ -165,7 +163,7 @@ jobs:
         if: steps.pages_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' && steps.deployment_retry.outcome == 'failure'
         id: deployment_retry_final
         continue-on-error: true
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
         with:
           artifact_name: github-pages
 
@@ -235,7 +233,7 @@ jobs:
 
       - name: Publish daily deployment marker
         if: steps.pages_mode.outputs.deploy_pages == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: governance-pages-ready-${{ steps.deployment_marker.outputs.kst_date }}
           path: .deployment-marker/deployment.json
@@ -265,10 +263,10 @@ jobs:
       actions: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip

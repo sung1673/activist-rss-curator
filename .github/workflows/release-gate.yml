@@ -27,10 +27,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout evaluated revision
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -80,12 +80,13 @@ jobs:
           echo "created_at=$created_at" >> "$GITHUB_OUTPUT"
 
       - name: Download production evidence
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.evidence_artifact_name }}
           path: evidence
           github-token: ${{ github.token }}
           run-id: ${{ inputs.evidence_run_id }}
+          digest-mismatch: error
 
       - name: Verify evidence bundle
         shell: bash
@@ -114,7 +115,7 @@ jobs:
 
       - name: Preserve release decision and shadow report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: governance-release-decision-${{ github.run_id }}
           path: release-report
