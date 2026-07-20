@@ -76,9 +76,10 @@ jobs:
   build-feed:
     if: vars.ENABLE_LEGACY_PIPELINE != 'false'
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
+      url: ${{ steps.pages_deployment_result.outputs.page_url }}
 
     steps:
       - name: Checkout
@@ -94,6 +95,8 @@ jobs:
           EVENT_BEFORE: ${{ github.event.before }}
           COMMIT_MESSAGE: ${{ github.event.head_commit.message || '' }}
           DISPATCH_MODE: ${{ github.event.inputs.run_mode || 'auto' }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           LEGACY_PAGES_ENABLED: ${{ vars.ENABLE_PAGES }}
           GOVERNANCE_PAGES_ENABLED: ${{ vars.ENABLE_GOVERNANCE_PAGES }}
         run: |
@@ -159,8 +162,10 @@ jobs:
           fi
 
           deploy_pages=false
-          if [[ "$LEGACY_PAGES_ENABLED" == "true" && "$GOVERNANCE_PAGES_ENABLED" != "true" && ( "$full_run" == "true" || "$page_run" == "true" ) ]]; then
+          if [[ "$REF_NAME" == "$DEFAULT_BRANCH" && "$LEGACY_PAGES_ENABLED" == "true" && "$GOVERNANCE_PAGES_ENABLED" != "true" && ( "$full_run" == "true" || "$page_run" == "true" ) ]]; then
             deploy_pages=true
+          elif [[ "$REF_NAME" != "$DEFAULT_BRANCH" && "$LEGACY_PAGES_ENABLED" == "true" && ( "$full_run" == "true" || "$page_run" == "true" ) ]]; then
+            echo "::notice::Pages deployment is restricted to the default branch ($DEFAULT_BRANCH)."
           fi
           echo "full=$full_run" >> "$GITHUB_OUTPUT"
           echo "page=$page_run" >> "$GITHUB_OUTPUT"
@@ -257,8 +262,10 @@ jobs:
 
       - name: Upload Pages artifact
         if: steps.run_mode.outputs.deploy_pages == 'true'
-        uses: actions/upload-pages-artifact@v3
+        id: pages_artifact
+        uses: actions/upload-pages-artifact@v4
         with:
+          name: github-pages
           path: public
 
       - name: Deploy to GitHub Pages
@@ -266,27 +273,92 @@ jobs:
         id: deployment
         continue-on-error: true
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages
 
-      - name: Wait before retrying Pages deployment
+      - name: Wait before first Pages retry
         if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' }}
         run: sleep 180
 
-      - name: Retry GitHub Pages deployment
+      - name: Retry GitHub Pages deployment (2/3)
         if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' }}
         id: deployment_retry
         continue-on-error: true
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages
+
+      - name: Wait before final Pages retry
+        if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' && steps.deployment_retry.outcome == 'failure' }}
+        run: sleep 300
+
+      - name: Retry GitHub Pages deployment (3/3)
+        if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' && steps.deployment_retry.outcome == 'failure' }}
+        id: deployment_retry_final
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages
 
       - name: Verify GitHub Pages deployment
-        if: steps.run_mode.outputs.deploy_pages == 'true'
+        if: ${{ !cancelled() && steps.run_mode.outputs.deploy_pages == 'true' }}
+        id: pages_deployment_result
         shell: bash
+        env:
+          DEPLOYMENT_OUTCOME_1: ${{ steps.deployment.outcome }}
+          DEPLOYMENT_OUTCOME_2: ${{ steps.deployment_retry.outcome }}
+          DEPLOYMENT_OUTCOME_3: ${{ steps.deployment_retry_final.outcome }}
+          DEPLOYMENT_URL_1: ${{ steps.deployment.outputs.page_url }}
+          DEPLOYMENT_URL_2: ${{ steps.deployment_retry.outputs.page_url }}
+          DEPLOYMENT_URL_3: ${{ steps.deployment_retry_final.outputs.page_url }}
+          PAGES_ARTIFACT_ID: ${{ steps.pages_artifact.outputs.artifact_id }}
         run: |
           set -euo pipefail
-          if [[ "${{ steps.deployment.outcome }}" == "success" || "${{ steps.deployment_retry.outcome }}" == "success" ]]; then
-            exit 0
+
+          selected_attempt=""
+          selected_url=""
+          if [[ "$DEPLOYMENT_OUTCOME_1" == "success" && -n "$DEPLOYMENT_URL_1" ]]; then
+            selected_attempt="1"
+            selected_url="$DEPLOYMENT_URL_1"
+          elif [[ "$DEPLOYMENT_OUTCOME_2" == "success" && -n "$DEPLOYMENT_URL_2" ]]; then
+            selected_attempt="2"
+            selected_url="$DEPLOYMENT_URL_2"
+          elif [[ "$DEPLOYMENT_OUTCOME_3" == "success" && -n "$DEPLOYMENT_URL_3" ]]; then
+            selected_attempt="3"
+            selected_url="$DEPLOYMENT_URL_3"
           fi
-          echo "GitHub Pages deployment failed after retry."
-          exit 1
+
+          {
+            echo "### GitHub Pages deployment"
+            echo ""
+            echo "| Attempt | Outcome |"
+            echo "|---:|---|"
+            echo "| 1 | ${DEPLOYMENT_OUTCOME_1:-not-run} |"
+            echo "| 2 | ${DEPLOYMENT_OUTCOME_2:-not-run} |"
+            echo "| 3 | ${DEPLOYMENT_OUTCOME_3:-not-run} |"
+            echo ""
+            echo "Artifact: \`github-pages\` (ID: ${PAGES_ARTIFACT_ID:-unavailable})"
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ -z "$selected_attempt" ]]; then
+            echo "::error::GitHub Pages deployment failed after three attempts."
+            exit 1
+          fi
+
+          echo "page_url=$selected_url" >> "$GITHUB_OUTPUT"
+          echo "attempt=$selected_attempt" >> "$GITHUB_OUTPUT"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Succeeded on attempt $selected_attempt: $selected_url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve failed Pages artifact
+        if: ${{ !cancelled() && steps.run_mode.outputs.deploy_pages == 'true' && steps.pages_deployment_result.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-failed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: public
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Send daily report message
         if: ${{ vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && ((github.event_name == 'schedule' && github.event.schedule == '0 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]'))) }}

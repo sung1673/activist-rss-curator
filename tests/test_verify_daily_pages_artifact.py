@@ -106,8 +106,8 @@ def test_github_token_fallback_and_manual_run_are_allowed(monkeypatch) -> None: 
     ("artifact_changes", "expected"),
     [
         ({"expired": True}, "no unexpired"),
-        ({"created_at": "2026-07-15T20:39:59Z"}, "05:40-06:05"),
-        ({"created_at": "2026-07-15T21:05:01Z"}, "05:40-06:05"),
+        ({"created_at": "2026-07-15T20:39:59Z"}, "05:40-07:00"),
+        ({"created_at": "2026-07-15T22:00:01Z"}, "05:40-07:00"),
         ({"workflow_run": None}, "no workflow run"),
     ],
 )
@@ -169,6 +169,21 @@ def test_workflow_metadata_must_match_daily_yml(monkeypatch) -> None:  # type: i
             token="secret",
             kst_date=date(2026, 7, 16),
         )
+
+
+def test_recovered_deployment_marker_is_accepted_at_0630_kst(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    verifier = load_verifier()
+    responses = success_responses("governance-pages-ready-2026-07-16")
+    responses["/actions/artifacts"]["artifacts"][0]["created_at"] = "2026-07-15T21:30:00Z"
+    install_fake_api(monkeypatch, verifier, responses)
+
+    result = verifier.verify_daily_pages_marker(
+        repository="owner/repository",
+        token="secret",
+        kst_date=date(2026, 7, 16),
+    )
+
+    assert result["artifact_id"] == 321
 
 
 def test_invalid_configuration_fails_without_disclosing_token(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]

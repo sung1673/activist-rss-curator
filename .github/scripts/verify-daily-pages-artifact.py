@@ -106,7 +106,10 @@ def normalize_workflow_path(value: object) -> str:
 
 def artifact_window(kst_date: date) -> tuple[datetime, datetime]:
     start = datetime.combine(kst_date, time(hour=5, minute=40), tzinfo=KST)
-    end = datetime.combine(kst_date, time(hour=6, minute=5), tzinfo=KST)
+    # A 05:45 generation may spend up to 38 minutes in three Pages deployment
+    # attempts and progressive backoff. Keep the marker valid long enough for
+    # the queued 06:05 delivery run to consume a successfully recovered deploy.
+    end = datetime.combine(kst_date, time(hour=7), tzinfo=KST)
     return start.astimezone(timezone.utc), end.astimezone(timezone.utc)
 
 
@@ -184,7 +187,7 @@ def verify_daily_pages_marker(
 
     if not candidates:
         raise VerificationError(
-            f"no unexpired {marker_name} artifact exists in the 05:40-06:05 KST window"
+            f"no unexpired {marker_name} artifact exists in the 05:40-07:00 KST window"
         )
 
     failures: list[str] = []

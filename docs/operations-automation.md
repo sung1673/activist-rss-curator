@@ -13,6 +13,7 @@
 | `publish.yml` | 원격 `DeliveryOutbox` claim·발송·ack/fail | 수집 완료 직후, 10분 재시도 |
 | `daily.yml` | 일일 페이지 생성·Pages 배포, 일일 Telegram 발송 | KST 05:45, 06:05 |
 | `watchdog.yml` | 수집 최신성·outbox·dead letter 감시 | 5분 |
+| `pages-deployment-incident.yml` | Pages 최종 검증 실패·회복 이슈 조정 | Pages workflow 완료 직후 |
 | `release-gate.yml` | production 증빙 artifact의 14일 shadow·7일 운영·성능·benchmark 전환 판정 | 운영자 수동 실행 |
 
 `ci.yml`의 테스트와 품질 job은 모두 필수다. 린트, 신규 거버넌스 핵심 모듈 타입 검사, `requirements.txt` 의존성 취약점 감사 중 하나라도 실패하면 CI가 실패한다. 기존 수집기 전체에 일괄 예외를 두지 않고 typed-core 범위를 점진적으로 넓힌다.
@@ -73,7 +74,11 @@ Watchdog은 `/api/v1/ops/health` 응답의 `last_success_at`, `pending_outbox`, 
 
 Incident가 발생하면 `[ops/incident] Governance pipeline unhealthy` 이슈를 만들거나 기존 열린 이슈 본문을 최신 진단으로 갱신한다. 정상 회복을 확인하면 같은 이슈에 회복 기록을 남기고 닫는다.
 
-Pages 생성 결과는 `pages-<run_id>-<attempt>` artifact로 30일 보존한다. 배포 문제가 발생하면 GitHub Actions의 정상 artifact를 내려받아 `daily.yml`을 수동 실행해 재배포한다. DB의 신규 데이터와 outbox는 롤백하지 않는다.
+Pages artifact는 한 번만 업로드한 뒤 같은 immutable artifact를 최대 세 번 순차 배포한다. 첫 실패 후 180초, 두 번째 실패 후 300초를 기다리며, 성공한 시도의 URL만 최종 Pages environment URL로 확정한다. 세 번 모두 실패하면 workflow가 실패하고 `[ops/incident] GitHub Pages deployment unhealthy` 이슈를 별도로 생성·갱신한다. 다음 실제 Pages 검증 성공 때 회복 기록을 남기고 닫으며, Pages를 실행하지 않은 workflow 성공은 이 이슈를 닫지 않는다. Incident listener는 기본 브랜치의 완료된 workflow에서 최종 검증 step만 읽고, triggering revision을 checkout하거나 artifact·운영 Secret을 실행하지 않는다.
+
+Governance Pages 생성 결과는 `pages-<run_id>-<attempt>` artifact로 30일 보존한다. Legacy Pages는 최종 배포 실패본을 `pages-failed-<run_id>-<attempt>` artifact로 7일 보존한다. 배포 문제가 발생하면 GitHub Actions의 정상 artifact를 내려받아 `daily.yml`을 수동 실행해 재배포한다. DB의 신규 데이터와 outbox는 롤백하지 않는다.
+
+운영 Pages 배포는 저장소 기본 브랜치에서만 허용한다. `github-pages` environment의 branch policy와 workflow 내부 기본 브랜치 gate를 함께 유지하며, 기능 브랜치 수동 실행은 페이지 생성·검증 artifact까지만 만들 수 있다. 05:45 생성이 Pages 재시도로 늦어질 수 있으므로 06:05 발송 검증은 당일 05:40~07:00 KST에 생성된 성공 marker를 허용한다. workflow 경로, 실행 성공 여부, 당일 artifact 검증은 그대로 fail-closed로 유지한다.
 
 `daily.yml`의 생성 단계는 `python -m curator.governance_ui`를 실행해 `public/governance/config.js`에 공개 API 기준 URL만 기록하고 HTML·JS·CSS 성능 예산을 검사한다. 인증값이나 운영 Secret은 브라우저 자산에 포함하지 않는다.
 

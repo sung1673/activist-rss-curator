@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -126,7 +127,7 @@ def test_daily_generation_and_delivery_use_requested_kst_boundaries() -> None:
     assert "TELEGRAM_ADMIN_ACCESS_TOKEN: ${{ secrets.TELEGRAM_ADMIN_ACCESS_TOKEN }}" in workflow
     assert "require-env.sh TELEGRAM_ADMIN_ACCESS_TOKEN ACTIVIST_PUBLIC_API_URL" in workflow
     assert "python -m curator.telegram_dashboard write" in workflow
-    assert "actions/upload-pages-artifact@v3" in workflow
+    assert "actions/upload-pages-artifact@v4" in workflow
     assert "actions/deploy-pages@v4" in workflow
     assert "ENABLE_GOVERNANCE_PAGES" in workflow
     assert "vars.ENABLE_PAGES != 'true'" in workflow
@@ -163,6 +164,111 @@ def test_workflow_permissions_are_scoped_to_the_jobs_that_need_them() -> None:
         "actions": "read",
     }
     assert official["permissions"] == {"contents": "read"}
+
+
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name"),
+    [
+        ("build-feed.yml", "build-feed"),
+        ("daily.yml", "generate"),
+    ],
+)
+def test_pages_deployment_retries_one_immutable_artifact_three_times(
+    workflow_name: str,
+    job_name: str,
+) -> None:
+    payload = yaml.load(workflow_text(workflow_name), Loader=yaml.BaseLoader)
+    job = payload["jobs"][job_name]
+    steps = job["steps"]
+
+    uploads = [step for step in steps if step.get("uses") == "actions/upload-pages-artifact@v4"]
+    deployments = [step for step in steps if step.get("uses") == "actions/deploy-pages@v4"]
+    assert len(uploads) == 1
+    assert uploads[0]["with"]["name"] == "github-pages"
+    assert len(deployments) == 3
+    assert [step["id"] for step in deployments] == [
+        "deployment",
+        "deployment_retry",
+        "deployment_retry_final",
+    ]
+    for deployment in deployments:
+        assert deployment["continue-on-error"] == "true"
+        assert deployment["with"]["artifact_name"] == "github-pages"
+
+    waits = {step["name"]: step for step in steps if step["name"].startswith("Wait before")}
+    assert waits["Wait before first Pages retry"]["run"] == "sleep 180"
+    assert waits["Wait before final Pages retry"]["run"] == "sleep 300"
+    assert "steps.deployment.outcome == 'failure'" in deployments[1]["if"]
+    assert "steps.deployment.outcome == 'failure'" in deployments[2]["if"]
+    assert "steps.deployment_retry.outcome == 'failure'" in deployments[2]["if"]
+
+    verifier = next(step for step in steps if step["name"] == "Verify GitHub Pages deployment")
+    assert verifier["id"] == "pages_deployment_result"
+    assert "!cancelled()" in verifier["if"]
+    assert "DEPLOYMENT_OUTCOME_3" in verifier["env"]
+    assert "DEPLOYMENT_URL_3" in verifier["env"]
+    assert verifier["env"]["PAGES_ARTIFACT_ID"] == "${{ steps.pages_artifact.outputs.artifact_id }}"
+    assert 'echo "page_url=$selected_url" >> "$GITHUB_OUTPUT"' in verifier["run"]
+    assert "failed after three attempts" in verifier["run"]
+    assert job["environment"]["url"] == "${{ steps.pages_deployment_result.outputs.page_url }}"
+
+    if workflow_name == "daily.yml":
+        assert int(job["timeout-minutes"]) >= 60
+        marker_index = next(
+            index for index, step in enumerate(steps) if step["name"] == "Create daily deployment marker"
+        )
+        assert marker_index > steps.index(verifier)
+    else:
+        assert int(job["timeout-minutes"]) == 75
+        failure_artifact = next(
+            step for step in steps if step["name"] == "Preserve failed Pages artifact"
+        )
+        assert "steps.pages_deployment_result.outcome == 'failure'" in failure_artifact["if"]
+        assert failure_artifact["with"]["retention-days"] == "7"
+
+
+def test_pages_deployment_is_default_branch_only() -> None:
+    legacy = workflow_text("build-feed.yml")
+    daily = workflow_text("daily.yml")
+    assert 'REF_NAME: ${{ github.ref_name }}' in legacy
+    assert 'DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}' in legacy
+    assert '"$REF_NAME" == "$DEFAULT_BRANCH"' in legacy
+    assert "Determine Pages deployment eligibility" in daily
+    assert '"$REF_NAME" == "$DEFAULT_BRANCH"' in daily
+    assert "github.ref_name == github.event.repository.default_branch" in daily
+
+
+def test_pages_incident_listener_is_isolated_and_minimally_privileged() -> None:
+    workflow = workflow_text("pages-deployment-incident.yml")
+    payload = yaml.load(workflow, Loader=yaml.BaseLoader)
+    listener = payload["jobs"]["reconcile"]
+    assert payload["permissions"] == {}
+    assert listener["permissions"] == {"actions": "read", "issues": "write"}
+    assert "github.event.workflow_run.head_repository.full_name == github.repository" in listener["if"]
+    assert payload["on"]["workflow_run"]["workflows"] == [
+        "Build curated RSS feed",
+        "Daily pages and briefing",
+    ]
+    assert payload["on"]["workflow_run"]["branches"] == ["main"]
+    assert "/attempts/{attempt_number}/jobs" in workflow
+    assert 'verificationName = "Verify GitHub Pages deployment"' in workflow
+    assert "No completed Pages verification step; incident state is unchanged." in workflow
+    assert "[ops/incident] GitHub Pages deployment unhealthy" in workflow
+    assert "state_reason: \"completed\"" in workflow
+    assert "state: \"open\"" in workflow
+    assert 'incident.state === "closed"' in workflow
+    assert "createComment" in workflow
+    assert "actions/checkout" not in workflow
+    assert "secrets." not in workflow
+    assert "pull_request_target" not in workflow
+
+
+def test_official_ingest_serializes_overlapping_scheduled_runs() -> None:
+    payload = yaml.load(workflow_text("ingest-official.yml"), Loader=yaml.BaseLoader)
+    assert payload["concurrency"] == {
+        "group": "ingest-official-${{ github.ref_name }}",
+        "cancel-in-progress": "false",
+    }
 
 
 def test_ci_audits_python_and_browser_dependencies() -> None:
