@@ -76,6 +76,10 @@ Watchdog은 `/api/v1/ops/health` 응답의 `last_success_at`, `pending_outbox`, 
 
 Incident가 발생하면 `[ops/incident] Governance pipeline unhealthy` 이슈를 만들거나 기존 열린 이슈 본문을 최신 진단으로 갱신한다. 정상 회복을 확인하면 같은 이슈에 회복 기록을 남기고 닫는다.
 
+Legacy Pages는 배포 전에 같은 저장소·기본 브랜치·legacy workflow의 직전 성공 artifact를 찾고, artifact digest를 검증한 뒤 2026-05-01 이후 날짜형 `feed/YYYY-MM-DD.html`만 복원한다. 날짜가 끊기거나 필수 호환 경계인 2026-07-20보다 일찍 끝나면 과거 Telegram 링크를 지우지 않도록 workflow를 fail-closed한다. 최근 Pages artifact가 만료된 경우에는 매일 05:00 실행에서 30일 보존하는 `legacy-pages-archive-seed`를 사용한다. seed도 없으면 운영자가 정상 artifact를 확인해 다시 만들기 전에는 배포하지 않는다.
+
+그 뒤 별도 임시 디렉터리를 만들고 루트의 `CNAME`, `404.html`, `feed.xml`, `index.html`과 `feed/`의 고정 공개 페이지·유효한 날짜 페이지만 명시적으로 복사한다. 따라서 신규 `public/governance/`, 예상하지 않은 루트 파일, `feed/` 내부의 debug·JSON·하위 디렉터리는 `ENABLE_GOVERNANCE_PAGES=false`인 동안 legacy artifact에 들어가지 않는다. 정적 `story-review.html` 또는 검수 메타데이터가 남아 있거나 필수 공개 파일이 없거나 심볼릭 링크가 발견되면 staging과 workflow를 fail-closed한다.
+
 Pages artifact는 한 번만 업로드한 뒤 같은 immutable artifact를 최대 세 번 순차 배포한다. 첫 실패 후 180초, 두 번째 실패 후 300초를 기다리며, 성공한 시도의 URL만 최종 Pages environment URL로 확정한다. 세 번 모두 실패하면 workflow가 실패하고 `[ops/incident] GitHub Pages deployment unhealthy` 이슈를 별도로 생성·갱신한다. 다음 실제 Pages 검증 성공 때 회복 기록을 남기고 닫으며, Pages를 실행하지 않은 workflow 성공은 이 이슈를 닫지 않는다. Incident listener는 기본 브랜치의 완료된 workflow에서 최종 검증 step만 읽고, triggering revision을 checkout하거나 artifact·운영 Secret을 실행하지 않는다.
 
 Governance Pages 생성 결과는 `pages-<run_id>-<attempt>` artifact로 30일 보존한다. Legacy Pages는 최종 배포 실패본을 `pages-failed-<run_id>-<attempt>` artifact로 7일 보존한다. 배포 문제가 발생하면 GitHub Actions의 정상 artifact를 내려받아 `daily.yml`을 수동 실행해 재배포한다. DB의 신규 데이터와 outbox는 롤백하지 않는다.

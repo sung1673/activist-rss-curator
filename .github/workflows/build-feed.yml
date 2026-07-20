@@ -6,12 +6,15 @@ on:
       - main
     paths:
       - ".github/workflows/build-feed.yml"
+      - ".github/scripts/prepare-legacy-pages.py"
+      - ".github/scripts/restore-legacy-pages-archive.py"
       - "config.yaml"
       - "requirements.txt"
       - "curator/**"
       - "deploy/activist/api.php"
       - "tests/**"
       - "public/404.html"
+      - "public/CNAME"
       - "data/priority_overrides.yaml"
   schedule:
     # KST 08:05-00:35 every 30 minutes.
@@ -61,8 +64,14 @@ on:
         required: false
         type: boolean
         default: false
+      preserve_legacy_archive_seed:
+        description: "Preserve a sanitized rolling archive seed for recovery"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
+  actions: read
   contents: read
   models: read
   pages: write
@@ -145,7 +154,7 @@ jobs:
               cat changed_files.txt
 
               collection_regex='^(config\.yaml|requirements\.txt|data/priority_overrides\.yaml|curator/(ai|archive|cluster|config|dates|dedupe|fetch|main|normalize|priority|relevance|remote_api|rss_writer|state|story_judge|summaries|telegram_dashboard|telegram_publisher|telegram_resend|telegram_resend_digest|telegram_smoke_test|telegram_sources)\.py|tests/(conftest|test_archive|test_cluster|test_config|test_dates|test_dedupe|test_fetch|test_main|test_normalize|test_priority|test_relevance|test_remote_api|test_rss_writer|test_state|test_story_judge|test_summaries|test_telegram_dashboard|test_telegram_publisher|test_telegram_resend_digest|test_telegram_sources)\.py)$'
-              page_regex='^(\.github/workflows/build-feed\.yml|curator/(daily_report|story_review)\.py|tests/(test_daily_report|test_story_review)\.py|public/404\.html)$'
+              page_regex='^(\.github/(workflows/build-feed\.yml|scripts/(prepare-legacy-pages|restore-legacy-pages-archive)\.py)|curator/(daily_report|story_review)\.py|tests/(test_daily_report|test_story_review|test_prepare_legacy_pages|test_restore_legacy_pages_archive|test_workflow_contracts)\.py|public/(404\.html|CNAME))$'
 
               if grep -Eq "$collection_regex" changed_files.txt; then
                 full_run=true
@@ -183,6 +192,73 @@ jobs:
       - name: Run tests
         run: pytest
 
+      - name: Resolve previous legacy Pages artifact
+        if: steps.run_mode.outputs.deploy_pages == 'true'
+        id: previous_legacy_pages
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const expectedWorkflowPath = ".github/workflows/build-feed.yml";
+            const candidates = [
+              { name: "github-pages", kind: "rolling" },
+              { name: "legacy-pages-archive-seed", kind: "seed" },
+            ];
+
+            for (const candidate of candidates) {
+              const artifacts = await github.paginate(
+                github.rest.actions.listArtifactsForRepo,
+                {
+                  ...context.repo,
+                  name: candidate.name,
+                  per_page: 100,
+                },
+              );
+              artifacts.sort((left, right) => right.id - left.id);
+
+              for (const artifact of artifacts) {
+                const sourceRunId = Number(artifact.workflow_run?.id || 0);
+                if (artifact.expired || !sourceRunId || sourceRunId === Number(context.runId)) {
+                  continue;
+                }
+                const { data: sourceRun } = await github.rest.actions.getWorkflowRun({
+                  ...context.repo,
+                  run_id: sourceRunId,
+                });
+                if (
+                  sourceRun.conclusion !== "success" ||
+                  sourceRun.head_branch !== context.payload.repository.default_branch ||
+                  sourceRun.path !== expectedWorkflowPath ||
+                  sourceRun.head_repository?.full_name !== `${context.repo.owner}/${context.repo.repo}`
+                ) {
+                  continue;
+                }
+
+                core.setOutput("artifact_id", String(artifact.id));
+                core.setOutput("artifact_kind", candidate.kind);
+                core.setOutput("run_id", String(sourceRunId));
+                core.info(
+                  `Using ${candidate.kind} legacy Pages artifact ${artifact.id} from run ${sourceRunId}.`,
+                );
+                return;
+              }
+            }
+
+            core.setFailed(
+              "No unexpired successful legacy Pages artifact is available; refusing to remove historical report URLs.",
+            );
+
+      - name: Download previous legacy Pages artifact
+        if: steps.run_mode.outputs.deploy_pages == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ steps.previous_legacy_pages.outputs.artifact_id }}
+          path: ${{ runner.temp }}/previous-legacy-pages
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.previous_legacy_pages.outputs.run_id }}
+          merge-multiple: true
+          digest-mismatch: error
+
       - name: Send Telegram smoke test
         if: ${{ vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && github.event_name == 'workflow_dispatch' && inputs.send_telegram_test }}
         env:
@@ -211,6 +287,13 @@ jobs:
           ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
           ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
         run: python -m curator.main
+
+      - name: Restore validated legacy dated reports
+        if: steps.run_mode.outputs.deploy_pages == 'true'
+        run: >-
+          python .github/scripts/restore-legacy-pages-archive.py
+          --archive "${{ runner.temp }}/previous-legacy-pages"
+          --destination-feed public/feed
 
       - name: Build daily report page
         if: ${{ steps.run_mode.outputs.full == 'true' || steps.run_mode.outputs.page == 'true' }}
@@ -254,6 +337,19 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m curator.telegram_resend
 
+      - name: Prepare allowlisted legacy Pages artifact
+        if: steps.run_mode.outputs.deploy_pages == 'true'
+        id: legacy_pages_artifact
+        shell: bash
+        env:
+          LEGACY_PAGES_ARTIFACT_PATH: ${{ runner.temp }}/legacy-pages-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          python .github/scripts/prepare-legacy-pages.py \
+            --source public \
+            --destination "$LEGACY_PAGES_ARTIFACT_PATH"
+          echo "path=$LEGACY_PAGES_ARTIFACT_PATH" >> "$GITHUB_OUTPUT"
+
       - name: Configure Pages
         if: steps.run_mode.outputs.deploy_pages == 'true'
         uses: actions/configure-pages@v6
@@ -264,7 +360,16 @@ jobs:
         uses: actions/upload-pages-artifact@v5
         with:
           name: github-pages
-          path: public
+          path: ${{ steps.legacy_pages_artifact.outputs.path }}
+
+      - name: Preserve sanitized legacy archive seed
+        if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '0 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.preserve_legacy_archive_seed)) }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: legacy-pages-archive-seed
+          path: ${{ steps.legacy_pages_artifact.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Deploy to GitHub Pages
         if: steps.run_mode.outputs.deploy_pages == 'true'
@@ -350,11 +455,11 @@ jobs:
           echo "Succeeded on attempt $selected_attempt: $selected_url" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Preserve failed Pages artifact
-        if: ${{ !cancelled() && steps.run_mode.outputs.deploy_pages == 'true' && steps.pages_deployment_result.outcome == 'failure' }}
+        if: ${{ !cancelled() && steps.run_mode.outputs.deploy_pages == 'true' && steps.legacy_pages_artifact.outcome == 'success' && steps.pages_deployment_result.outcome == 'failure' }}
         uses: actions/upload-artifact@v7
         with:
           name: pages-failed-${{ github.run_id }}-${{ github.run_attempt }}
-          path: public
+          path: ${{ steps.legacy_pages_artifact.outputs.path }}
           if-no-files-found: error
           retention-days: 7
 

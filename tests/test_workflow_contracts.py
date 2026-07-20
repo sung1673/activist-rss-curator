@@ -34,6 +34,15 @@ def test_legacy_shadow_baseline_does_not_commit_generated_files() -> None:
     assert "steps.run_mode.outputs.full == 'true' || steps.run_mode.outputs.page == 'true'" in legacy
     assert "deploy_pages=$deploy_pages" in legacy
     assert "ENABLE_PAGES and ENABLE_GOVERNANCE_PAGES are mutually exclusive" in legacy
+    assert "Prepare allowlisted legacy Pages artifact" in legacy
+    assert "python .github/scripts/prepare-legacy-pages.py" in legacy
+    assert "python .github/scripts/restore-legacy-pages-archive.py" in legacy
+    assert '".github/scripts/prepare-legacy-pages.py"' in legacy
+    assert '".github/scripts/restore-legacy-pages-archive.py"' in legacy
+    assert "scripts/(prepare-legacy-pages|restore-legacy-pages-archive)\\.py" in legacy
+    assert '"public/CNAME"' in legacy
+    assert "path: ${{ steps.legacy_pages_artifact.outputs.path }}" in legacy
+    assert "path: public" not in legacy
     for step_name in (
         "Send Telegram smoke test",
         "Resend last Telegram briefing",
@@ -227,11 +236,71 @@ def test_pages_deployment_retries_one_immutable_artifact_three_times(
         assert marker_index > steps.index(verifier)
     else:
         assert int(job["timeout-minutes"]) == 75
+        assert payload["permissions"]["actions"] == "read"
+        restore = next(
+            step for step in steps if step["name"] == "Restore validated legacy dated reports"
+        )
+        prepare = next(
+            step for step in steps if step["name"] == "Prepare allowlisted legacy Pages artifact"
+        )
+        daily_report = next(
+            step for step in steps if step["name"] == "Build daily report page"
+        )
+        pages_upload = uploads[0]
+        assert (
+            steps.index(restore)
+            < steps.index(daily_report)
+            < steps.index(prepare)
+            < steps.index(pages_upload)
+        )
+        assert "restore-legacy-pages-archive.py" in restore["run"]
+        assert "previous-legacy-pages" in restore["run"]
+        assert pages_upload["with"]["path"] == "${{ steps.legacy_pages_artifact.outputs.path }}"
         failure_artifact = next(
             step for step in steps if step["name"] == "Preserve failed Pages artifact"
         )
         assert "steps.pages_deployment_result.outcome == 'failure'" in failure_artifact["if"]
+        assert "steps.legacy_pages_artifact.outcome == 'success'" in failure_artifact["if"]
+        assert failure_artifact["with"]["path"] == "${{ steps.legacy_pages_artifact.outputs.path }}"
         assert failure_artifact["with"]["retention-days"] == "7"
+
+
+def test_legacy_pages_archive_download_and_seed_are_fail_closed() -> None:
+    payload = yaml.load(workflow_text("build-feed.yml"), Loader=yaml.BaseLoader)
+    job = payload["jobs"]["build-feed"]
+    steps = job["steps"]
+    resolver = next(
+        step for step in steps if step["name"] == "Resolve previous legacy Pages artifact"
+    )
+    download = next(
+        step for step in steps if step["name"] == "Download previous legacy Pages artifact"
+    )
+    seed = next(
+        step for step in steps if step["name"] == "Preserve sanitized legacy archive seed"
+    )
+
+    assert resolver["uses"] == "actions/github-script@v9"
+    assert "sourceRun.conclusion !== \"success\"" in resolver["with"]["script"]
+    assert "artifact.expired" in resolver["with"]["script"]
+    assert "sourceRunId === Number(context.runId)" in resolver["with"]["script"]
+    assert "sourceRun.path !== expectedWorkflowPath" in resolver["with"]["script"]
+    assert "sourceRun.head_repository?.full_name" in resolver["with"]["script"]
+    assert "core.setFailed" in resolver["with"]["script"]
+    assert download["uses"] == "actions/download-artifact@v8"
+    assert download["with"] == {
+        "artifact-ids": "${{ steps.previous_legacy_pages.outputs.artifact_id }}",
+        "path": "${{ runner.temp }}/previous-legacy-pages",
+        "github-token": "${{ github.token }}",
+        "repository": "${{ github.repository }}",
+        "run-id": "${{ steps.previous_legacy_pages.outputs.run_id }}",
+        "merge-multiple": "true",
+        "digest-mismatch": "error",
+    }
+    assert seed["uses"] == "actions/upload-artifact@v7"
+    assert seed["with"]["name"] == "legacy-pages-archive-seed"
+    assert seed["with"]["path"] == "${{ steps.legacy_pages_artifact.outputs.path }}"
+    assert seed["with"]["retention-days"] == "30"
+    assert "preserve_legacy_archive_seed" in seed["if"]
 
 
 def test_pages_deployment_is_default_branch_only() -> None:
@@ -282,6 +351,8 @@ def test_ci_audits_python_and_browser_dependencies() -> None:
     workflow = workflow_text("ci.yml")
     assert "pip-audit --requirement requirements.txt" in workflow
     assert "npm audit --audit-level=high" in workflow
+    assert ".github/scripts/prepare-legacy-pages.py" in workflow
+    assert ".github/scripts/restore-legacy-pages-archive.py" in workflow
 
 
 def test_workflows_use_current_node24_official_action_majors() -> None:
