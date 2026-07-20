@@ -20,6 +20,7 @@ from .config import load_config
 from .dates import datetime_to_iso, parse_datetime
 from .normalize import canonical_url_hash, hostname_from_url, normalize_title, normalize_title_parts, normalize_url, stable_hash
 from .remote_api import post_remote_action, remote_api_configured
+from .source_rights import apply_channel_source_rights, source_is_authorized
 from .state import load_state, save_state
 
 
@@ -489,6 +490,156 @@ def channel_key(channel: dict[str, object]) -> str:
     return f"handle:{normalize_channel_handle(channel.get('handle') or channel.get('username'))}"
 
 
+def channel_identity_matches(left: dict[str, object], right: dict[str, object]) -> bool:
+    """Return whether two channel records refer to the same Telegram entity.
+
+    Telegram usernames are case-insensitive and can change.  A numeric channel ID is
+    therefore authoritative when available, while a matching username bridges the
+    common migration from a handle-only record to an ID-backed record.
+    """
+
+    left_id = str(left.get("telegram_channel_id") or left.get("channel_id") or "").strip()
+    right_id = str(right.get("telegram_channel_id") or right.get("channel_id") or "").strip()
+    if left_id and right_id:
+        return left_id == right_id
+    left_handle = normalize_channel_handle(left.get("handle") or left.get("username")).casefold()
+    right_handle = normalize_channel_handle(right.get("handle") or right.get("username")).casefold()
+    return bool(left_handle and right_handle and left_handle == right_handle)
+
+
+def _merge_channel_record(target: dict[str, object], incoming: dict[str, object]) -> None:
+    target["last_message_id"] = max(
+        int(target.get("last_message_id") or 0),
+        int(incoming.get("last_message_id") or 0),
+    )
+    for name, value in incoming.items():
+        if name == "last_message_id":
+            continue
+        if value not in (None, ""):
+            target[name] = value
+    target["handle"] = normalize_channel_handle(target.get("handle") or target.get("username"))
+    target["telegram_channel_id"] = target.get("telegram_channel_id") or target.get("channel_id") or None
+
+
+def _migrate_channel_references(
+    state: dict[str, object],
+    channel: dict[str, object],
+    aliases: list[dict[str, object]],
+) -> None:
+    canonical_id = str(channel.get("telegram_channel_id") or "").strip()
+    canonical_handle = normalize_channel_handle(channel.get("handle") or channel.get("username"))
+    alias_ids = {
+        str(alias.get("telegram_channel_id") or alias.get("channel_id") or "").strip()
+        for alias in aliases
+        if str(alias.get("telegram_channel_id") or alias.get("channel_id") or "").strip()
+    }
+    alias_handles = {
+        normalize_channel_handle(alias.get("handle") or alias.get("username")).casefold()
+        for alias in aliases
+        if normalize_channel_handle(alias.get("handle") or alias.get("username"))
+    }
+
+    key_changes: dict[str, str] = {}
+    migrated_messages: list[dict[str, object]] = []
+    messages_by_key: dict[str, dict[str, object]] = {}
+    for message in state.get("telegram_source_messages", []):
+        if not isinstance(message, dict):
+            continue
+        old_key = message_key(message)
+        message_id = str(message.get("telegram_channel_id") or message.get("channel_id") or "").strip()
+        message_handle = normalize_channel_handle(message.get("handle") or message.get("username"))
+        identity_match = (
+            message_id in alias_ids
+            if message_id
+            else bool(message_handle and message_handle.casefold() in alias_handles)
+        )
+        if identity_match:
+            if canonical_id:
+                message["telegram_channel_id"] = canonical_id
+            if canonical_handle:
+                message["handle"] = canonical_handle
+            new_key = message_key(message)
+            key_changes[old_key] = new_key
+        else:
+            new_key = old_key
+        existing = messages_by_key.get(new_key)
+        if existing is None:
+            messages_by_key[new_key] = message
+            migrated_messages.append(message)
+            continue
+        for name, value in message.items():
+            if value not in (None, ""):
+                existing[name] = value
+    state["telegram_source_messages"] = migrated_messages
+
+    migrated_matches: list[dict[str, object]] = []
+    matches_by_key: dict[tuple[str, str, str], dict[str, object]] = {}
+    for match in state.get("telegram_article_matches", []):
+        if not isinstance(match, dict):
+            continue
+        old_key = str(match.get("telegram_message_key") or "")
+        if old_key in key_changes:
+            match["telegram_message_key"] = key_changes[old_key]
+            if canonical_handle:
+                match["channel_handle"] = canonical_handle
+        identity = (
+            str(match.get("article_id") or ""),
+            str(match.get("telegram_message_key") or ""),
+            str(match.get("match_type") or ""),
+        )
+        if not all(identity):
+            migrated_matches.append(match)
+            continue
+        existing_match = matches_by_key.get(identity)
+        if existing_match is None:
+            matches_by_key[identity] = match
+            migrated_matches.append(match)
+        elif float(match.get("score") or 0) > float(existing_match.get("score") or 0):
+            existing_match.update(match)
+    state["telegram_article_matches"] = migrated_matches
+
+    cursors = state.get("telegram_remote_sync_cursors")
+    if isinstance(cursors, dict):
+        cursor_value = 0
+        for alias in aliases:
+            cursor_value = max(cursor_value, int(cursors.pop(channel_key(alias), 0) or 0))
+        if cursor_value:
+            cursors[channel_key(channel)] = max(int(cursors.get(channel_key(channel), 0) or 0), cursor_value)
+
+
+def canonicalize_telegram_channels(state: dict[str, object]) -> int:
+    """Collapse pre-existing duplicate channel rows and migrate their references."""
+
+    raw_channels = [channel for channel in state.get("telegram_source_channels", []) if isinstance(channel, dict)]
+    if not raw_channels:
+        state["telegram_source_channels"] = []
+        return 0
+    canonical: list[dict[str, object]] = []
+    aliases_by_record: dict[int, list[dict[str, object]]] = {}
+    removed = 0
+    for raw in raw_channels:
+        matches = [record for record in canonical if channel_identity_matches(record, raw)]
+        if not matches:
+            record = dict(raw)
+            record["handle"] = normalize_channel_handle(record.get("handle") or record.get("username"))
+            canonical.append(record)
+            aliases_by_record[id(record)] = [raw]
+            continue
+        target = matches[0]
+        _merge_channel_record(target, raw)
+        aliases_by_record[id(target)].append(raw)
+        removed += 1
+        for duplicate in matches[1:]:
+            _merge_channel_record(target, duplicate)
+            aliases_by_record[id(target)].extend(aliases_by_record.pop(id(duplicate), [duplicate]))
+            canonical.remove(duplicate)
+            removed += 1
+    state["telegram_source_channels"] = canonical
+    for record in canonical:
+        _migrate_channel_references(state, record, aliases_by_record.get(id(record), [record]))
+    return removed
+
+
 def configured_channels(config: dict[str, object]) -> list[dict[str, object]]:
     channels = telegram_sources_config(config).get("channels", [])
     if not isinstance(channels, list):
@@ -516,6 +667,8 @@ def configured_channels(config: dict[str, object]) -> list[dict[str, object]]:
 
 
 def is_collectable_public_channel(channel: dict[str, object]) -> bool:
+    if bool(channel.get("source_right_blocked")):
+        return False
     handle = normalize_channel_handle(channel.get("handle") or channel.get("username"))
     if not handle:
         return False
@@ -542,16 +695,43 @@ def ensure_telegram_state(state: dict[str, object]) -> None:
     ):
         if not isinstance(state.get(key), list):
             state[key] = []
+    if not isinstance(state.get("telegram_remote_sync_cursors"), dict):
+        state["telegram_remote_sync_cursors"] = {}
 
 
 def upsert_telegram_channel(state: dict[str, object], channel: dict[str, object]) -> dict[str, object]:
     ensure_telegram_state(state)
-    key = channel_key(channel)
     channels = state["telegram_source_channels"]  # type: ignore[index]
-    for existing in channels:
-        if isinstance(existing, dict) and channel_key(existing) == key:
-            existing.update({name: value for name, value in channel.items() if value not in (None, "")})
-            return existing
+    matches = [
+        existing
+        for existing in channels
+        if isinstance(existing, dict) and channel_identity_matches(existing, channel)
+    ]
+    authoritative_ids = {
+        str(existing.get("telegram_channel_id") or existing.get("channel_id") or "").strip()
+        for existing in matches
+        if str(existing.get("telegram_channel_id") or existing.get("channel_id") or "").strip()
+    }
+    if len(authoritative_ids) > 1:
+        incoming_id = str(channel.get("telegram_channel_id") or channel.get("channel_id") or "").strip()
+        if incoming_id:
+            matches = [
+                existing
+                for existing in matches
+                if str(existing.get("telegram_channel_id") or existing.get("channel_id") or "").strip() == incoming_id
+            ]
+        else:
+            matches = [max(matches, key=lambda existing: int(existing.get("last_message_id") or 0))]
+    if matches:
+        existing = matches[0]
+        aliases = [dict(existing), dict(channel)]
+        _merge_channel_record(existing, channel)
+        for duplicate in matches[1:]:
+            aliases.append(dict(duplicate))
+            _merge_channel_record(existing, duplicate)
+            channels.remove(duplicate)
+        _migrate_channel_references(state, existing, aliases)
+        return existing
     record = {
         "handle": normalize_channel_handle(channel.get("handle") or channel.get("username")),
         "telegram_channel_id": channel.get("telegram_channel_id") or channel.get("channel_id") or None,
@@ -569,10 +749,12 @@ def upsert_telegram_channel(state: dict[str, object], channel: dict[str, object]
         "last_error": channel.get("last_error") or None,
     }
     channels.append(record)
+    _migrate_channel_references(state, record, [record])
     return record
 
 
 def register_configured_channels(state: dict[str, object], config: dict[str, object]) -> int:
+    canonicalize_telegram_channels(state)
     before = len(state.get("telegram_source_channels", []) if isinstance(state.get("telegram_source_channels"), list) else [])
     for channel in configured_channels(config):
         upsert_telegram_channel(state, channel)
@@ -681,6 +863,8 @@ def normalize_telegram_message(channel: dict[str, object], raw_message: dict[str
         "handle": normalize_channel_handle(channel.get("handle") or channel.get("username")),
         "telegram_channel_id": channel.get("telegram_channel_id") or channel.get("channel_id") or None,
         "channel_title": channel.get("title") or "",
+        "source_kind": "authorized_telegram",
+        "source_right_id": channel.get("source_right_id") or None,
         "source_type": "public_channel",
         "is_public_channel": True,
         "telegram_message_id": message_id,
@@ -707,7 +891,19 @@ def upsert_telegram_message(state: dict[str, object], message: dict[str, object]
         if not isinstance(existing, dict) or message_key(existing) != key:
             continue
         changed = False
-        for field in ("text", "normalized_text", "edited_at", "deleted_at", "views", "forwards", "replies_count", "urls", "raw_json"):
+        for field in (
+            "text",
+            "normalized_text",
+            "edited_at",
+            "deleted_at",
+            "views",
+            "forwards",
+            "replies_count",
+            "urls",
+            "raw_json",
+            "source_kind",
+            "source_right_id",
+        ):
             if message.get(field) != existing.get(field):
                 existing[field] = message.get(field)
                 changed = True
@@ -1014,6 +1210,8 @@ def telegram_candidate_articles(state: dict[str, object], config: dict[str, obje
     ]
     messages.sort(key=lambda item: str(item.get("posted_at") or item.get("collected_at") or ""), reverse=True)
     for message in messages:
+        if not source_is_authorized(message, config, now, purpose="ai"):
+            continue
         handle = normalize_channel_handle(message.get("handle") or message.get("username"))
         if allowed_handles and handle not in allowed_handles:
             continue
@@ -1048,6 +1246,7 @@ def telegram_candidate_articles(state: dict[str, object], config: dict[str, obje
                 "feed_name": f"Telegram:{handle}" if handle else "Telegram",
                 "feed_category": "telegram_reference",
                 "source_kind": "telegram_reference",
+                "source_right_id": message.get("source_right_id") or None,
                 "original_resolution_status": "direct",
                 "telegram_candidate": True,
                 "telegram_source_handle": handle,
@@ -1063,6 +1262,8 @@ def telegram_candidate_articles(state: dict[str, object], config: dict[str, obje
 
 def telegram_signal_message_payload(message: dict[str, object]) -> dict[str, object]:
     return {
+        "source_kind": "telegram_signal",
+        "source_right_id": message.get("source_right_id") or None,
         "message_url": message.get("message_url") or "",
         "channel_title": message.get("channel_title") or "",
         "channel_handle": message.get("handle") or "",
@@ -1371,12 +1572,20 @@ def risk_flags_for_text(text: str) -> list[str]:
     return flags
 
 
-def telegram_article_match_signals(state: dict[str, object]) -> list[dict[str, object]]:
+def telegram_article_match_signals(
+    state: dict[str, object],
+    config: dict[str, object] | None = None,
+    *,
+    now: datetime | None = None,
+) -> list[dict[str, object]]:
     ensure_telegram_state(state)
+    rights_config = config or {}
     messages_by_key = {
         message_key(message): message
         for message in state.get("telegram_source_messages", [])
-        if isinstance(message, dict) and not message.get("deleted_at")
+        if isinstance(message, dict)
+        and not message.get("deleted_at")
+        and source_is_authorized(message, rights_config, now, purpose="ai")
     }
     grouped: dict[str, list[dict[str, object]]] = {}
     for match in state.get("telegram_article_matches", []):
@@ -1394,6 +1603,13 @@ def telegram_article_match_signals(state: dict[str, object]) -> list[dict[str, o
         if not related_messages:
             continue
         channels = {str(message.get("handle") or message.get("telegram_channel_id") or "") for message in related_messages}
+        source_right_ids = sorted(
+            {
+                str(message.get("source_right_id") or "")
+                for message in related_messages
+                if message.get("source_right_id")
+            }
+        )
         dates = sorted(str(message.get("posted_at") or "") for message in related_messages if message.get("posted_at"))
         keyword_counter: Counter[str] = Counter()
         channel_counter: Counter[str] = Counter()
@@ -1434,6 +1650,8 @@ def telegram_article_match_signals(state: dict[str, object]) -> list[dict[str, o
             {
                 "article_id": article,
                 "signal_type": "article_match",
+                "source_kind": "telegram_signal",
+                "source_right_ids": source_right_ids,
                 "signal_key": article,
                 "signal_title": f"기사 매칭 {article[:10]}",
                 "related_telegram_count": len(related_messages),
@@ -1488,6 +1706,13 @@ def telegram_url_burst_signals(
     signals: list[dict[str, object]] = []
     for canonical, related_messages in grouped.items():
         channels = {str(message.get("handle") or message.get("telegram_channel_id") or "") for message in related_messages}
+        source_right_ids = sorted(
+            {
+                str(message.get("source_right_id") or "")
+                for message in related_messages
+                if message.get("source_right_id")
+            }
+        )
         if len(related_messages) < min_messages or len(channels) < min_channels:
             continue
         dates = sorted(str(message.get("posted_at") or "") for message in related_messages if message.get("posted_at"))
@@ -1505,6 +1730,8 @@ def telegram_url_burst_signals(
             {
                 "article_id": "telegram-url:" + stable_hash(canonical, 24),
                 "signal_type": "url_burst",
+                "source_kind": "telegram_signal",
+                "source_right_ids": source_right_ids,
                 "signal_key": canonical,
                 "signal_title": title,
                 "related_telegram_count": len(related_messages),
@@ -1555,6 +1782,13 @@ def telegram_topic_burst_signals(
         unique_by_key = {message_key(message): message for message in related_messages}
         related_messages = list(unique_by_key.values())
         channels = {str(message.get("handle") or message.get("telegram_channel_id") or "") for message in related_messages}
+        source_right_ids = sorted(
+            {
+                str(message.get("source_right_id") or "")
+                for message in related_messages
+                if message.get("source_right_id")
+            }
+        )
         enough_single_channel_volume = len(related_messages) >= max(min_messages * 2, 5)
         if len(related_messages) < min_messages:
             continue
@@ -1579,6 +1813,8 @@ def telegram_topic_burst_signals(
             {
                 "article_id": "telegram-topic:" + stable_hash(f"{entity}|{event_label}", 24),
                 "signal_type": "topic_burst",
+                "source_kind": "telegram_signal",
+                "source_right_ids": source_right_ids,
                 "signal_key": f"{entity}|{event_label}",
                 "signal_title": title,
                 "related_telegram_count": len(related_messages),
@@ -1622,7 +1858,9 @@ def telegram_issue_signals(
     messages = [
         message
         for message in state.get("telegram_source_messages", [])
-        if isinstance(message, dict) and not message.get("deleted_at")
+        if isinstance(message, dict)
+        and not message.get("deleted_at")
+        and source_is_authorized(message, config or {}, now, purpose="ai")
     ]
     reference_time = now or latest_signal_reference_time(messages, timezone_name)
     recent_messages = messages
@@ -1633,7 +1871,7 @@ def telegram_issue_signals(
             for message in messages
             if (parse_datetime(message.get("posted_at"), timezone_name) or reference_time) >= window_start
         ]
-    signals = telegram_article_match_signals(state)
+    signals = telegram_article_match_signals(state, config, now=reference_time or now)
     signals.extend(
         telegram_url_burst_signals(
             recent_messages,
@@ -1887,38 +2125,86 @@ async def _collect_with_client(
 ) -> dict[str, int]:
     settings = telegram_sources_config(config)
     backfill_limit = int(settings.get("backfill_limit", 100))
-    incremental_limit = int(settings.get("incremental_limit", 200))
+    incremental_limit = max(1, int(settings.get("incremental_limit", 200)))
+    incremental_max_pages = max(0, int(settings.get("incremental_max_pages", 0)))
     inserted = updated = unchanged = failed = matches_inserted = 0
+    pages_fetched = 0
     match_context = build_article_match_context(state, config)
 
     for channel in enabled_channels(state):
         try:
             info = await client.get_channel_info(channel)
-            channel.update(info)
-            min_id = int(channel.get("last_message_id") or 0)
-            limit = incremental_limit if min_id else backfill_limit
-            raw_messages = await client.iter_messages(channel, min_id=min_id, limit=limit)
+            stored_id = str(channel.get("telegram_channel_id") or channel.get("channel_id") or "").strip()
+            resolved_id = str(info.get("telegram_channel_id") or info.get("channel_id") or "").strip()
+            if stored_id and resolved_id and stored_id != resolved_id:
+                channel["enabled"] = False
+                channel["last_error"] = "channel_identity_reassigned"
+                channel = upsert_telegram_channel(
+                    state,
+                    {
+                        **info,
+                        "enabled": True,
+                        "source": channel.get("source") or "resolved",
+                    },
+                )
+            else:
+                channel = upsert_telegram_channel(state, {**channel, **info})
         except Exception as exc:  # noqa: BLE001 - channel failures should not stop the whole run.
             wait = flood_wait_seconds(exc)
             channel["last_error"] = f"flood_wait_{wait}s" if wait else exc.__class__.__name__
             failed += 1
             continue
-        max_message_id = int(channel.get("last_message_id") or 0)
-        for raw_message in raw_messages:
-            message = normalize_telegram_message(channel, raw_message, now)
-            if not message.get("telegram_message_id"):
-                continue
-            status = upsert_telegram_message(state, message)
-            inserted += int(status == "inserted")
-            updated += int(status == "updated")
-            unchanged += int(status == "unchanged")
-            max_message_id = max(max_message_id, int(message.get("telegram_message_id") or 0))
-            for match in match_message_to_articles(state, message, config, match_context):
-                if upsert_article_match(state, match) == "inserted":
-                    matches_inserted += 1
-        channel["last_message_id"] = max_message_id
+
+        initial_min_id = int(channel.get("last_message_id") or 0)
+        page_min_id = initial_min_id
+        page_number = 0
+        page_failed = False
+        while True:
+            limit = incremental_limit if initial_min_id else max(1, backfill_limit)
+            try:
+                raw_messages = await client.iter_messages(channel, min_id=page_min_id, limit=limit)
+            except Exception as exc:  # noqa: BLE001 - retain the page cursor so the next run resumes safely.
+                wait = flood_wait_seconds(exc)
+                channel["last_error"] = f"flood_wait_{wait}s" if wait else exc.__class__.__name__
+                failed += 1
+                page_failed = True
+                break
+            page_number += 1
+            pages_fetched += 1
+            max_message_id = page_min_id
+            for raw_message in raw_messages:
+                message = normalize_telegram_message(channel, raw_message, now)
+                if not message.get("telegram_message_id"):
+                    continue
+                status = upsert_telegram_message(state, message)
+                inserted += int(status == "inserted")
+                updated += int(status == "updated")
+                unchanged += int(status == "unchanged")
+                max_message_id = max(max_message_id, int(message.get("telegram_message_id") or 0))
+                for match in match_message_to_articles(state, message, config, match_context):
+                    if upsert_article_match(state, match) == "inserted":
+                        matches_inserted += 1
+
+            channel["last_message_id"] = max(int(channel.get("last_message_id") or 0), max_message_id)
+            # The first collection remains an intentionally bounded backfill.  Once a
+            # cursor exists, however, keep paging until Telegram is exhausted so a
+            # burst larger than 500/1,000 messages cannot create a permanent gap.
+            if not initial_min_id or len(raw_messages) < limit:
+                break
+            if max_message_id <= page_min_id:
+                channel["last_error"] = "incremental_cursor_stalled"
+                failed += 1
+                page_failed = True
+                break
+            page_min_id = max_message_id
+            if incremental_max_pages and page_number >= incremental_max_pages:
+                channel["last_error"] = "incremental_page_limit_reached"
+                failed += 1
+                page_failed = True
+                break
         channel["last_collected_at"] = datetime_to_iso(now)
-        channel["last_error"] = None
+        if not page_failed:
+            channel["last_error"] = None
 
     prune_summary = prune_telegram_state(state, config, now)
     state["telegram_issue_signals"] = telegram_issue_signals(state, config, now=now)
@@ -1930,6 +2216,7 @@ async def _collect_with_client(
         "telegram_messages_unchanged": unchanged,
         "telegram_matches_inserted": matches_inserted,
         "telegram_channel_failed": failed,
+        "telegram_incremental_pages": pages_fetched,
         **prune_summary,
     }
 
@@ -2257,14 +2544,41 @@ def make_telegram_session_string(config: dict[str, object]) -> str:
 def telegram_snapshot_payload(state: dict[str, object], config: dict[str, object]) -> dict[str, object]:
     ensure_telegram_state(state)
     settings = telegram_sources_config(config)
-    max_messages = int(settings.get("max_remote_messages", 500))
+    max_messages = max(0, int(settings.get("max_remote_messages", 0)))
+    messages = list(state.get("telegram_source_messages", []))
+    matches = list(state.get("telegram_article_matches", []))
+    if max_messages:
+        messages = messages[-max_messages:]
+        message_keys = {message_key(message) for message in messages if isinstance(message, dict)}
+        matches = [
+            match
+            for match in matches
+            if isinstance(match, dict) and str(match.get("telegram_message_key") or "") in message_keys
+        ]
     return {
         "channels": list(state.get("telegram_source_channels", [])),
-        "messages": list(state.get("telegram_source_messages", []))[-max_messages:],
-        "article_matches": list(state.get("telegram_article_matches", []))[-max_messages:],
+        "messages": messages,
+        "article_matches": matches,
         "issue_signals": list(state.get("telegram_issue_signals", [])),
         "channel_candidates": list(state.get("telegram_channel_candidates", [])),
     }
+
+
+def pending_remote_messages(state: dict[str, object]) -> list[dict[str, object]]:
+    """Return every locally stored message newer than its acknowledged remote cursor."""
+
+    ensure_telegram_state(state)
+    cursors = state["telegram_remote_sync_cursors"]  # type: ignore[index]
+    pending = [
+        message
+        for message in state.get("telegram_source_messages", [])
+        if isinstance(message, dict)
+        and int(message.get("telegram_message_id") or 0) > int(cursors.get(channel_key(message), 0) or 0)  # type: ignore[union-attr]
+    ]
+    return sorted(
+        pending,
+        key=lambda message: (channel_key(message), int(message.get("telegram_message_id") or 0)),
+    )
 
 
 def remote_response_error(response: dict[str, Any]) -> str:
@@ -2281,18 +2595,24 @@ def remote_response_error(response: dict[str, Any]) -> str:
 def sync_telegram_to_remote_api(state: dict[str, object], config: dict[str, object]) -> dict[str, object]:
     if not remote_api_configured():
         return {"telegram_remote_synced": 0, "telegram_remote_failed": 0, "telegram_remote_skipped": 1}
-    try:
-        response = post_remote_action("upsert_telegram_snapshot", telegram_snapshot_payload(state, config))
-    except Exception as exc:  # noqa: BLE001
-        return {"telegram_remote_synced": 0, "telegram_remote_failed": 1, "telegram_remote_last_error": error_label(exc)}
-    if response.get("ok"):
-        return {
-            "telegram_remote_synced": 1,
-            "telegram_remote_failed": 0,
-            "telegram_remote_messages": int(response.get("messages") or 0),
-            "telegram_remote_matches": int(response.get("article_matches") or 0),
-        }
-    return {"telegram_remote_synced": 0, "telegram_remote_failed": 1, "telegram_remote_last_error": remote_response_error(response)}
+    messages = pending_remote_messages(state)
+    if not messages:
+        return {"telegram_remote_synced": 0, "telegram_remote_failed": 0, "telegram_remote_pending": 0}
+    message_keys = {message_key(message) for message in messages}
+    matches = [
+        match
+        for match in state.get("telegram_article_matches", [])
+        if isinstance(match, dict) and str(match.get("telegram_message_key") or "") in message_keys
+    ]
+    result = sync_telegram_batch_to_remote_api(
+        state,
+        config,
+        messages=messages,
+        matches=matches,
+        advance_cursors=True,
+    )
+    result["telegram_remote_pending"] = len(pending_remote_messages(state))
+    return result
 
 
 def sync_telegram_batch_to_remote_api(
@@ -2301,6 +2621,7 @@ def sync_telegram_batch_to_remote_api(
     *,
     messages: list[dict[str, object]],
     matches: list[dict[str, object]],
+    advance_cursors: bool = False,
 ) -> dict[str, object]:
     if not messages:
         return {}
@@ -2317,8 +2638,33 @@ def sync_telegram_batch_to_remote_api(
     relevant_matches = [
         match for match in matches if isinstance(match, dict) and str(match.get("telegram_message_key") or "") in message_keys
     ]
-    for index in range(0, len(messages), batch_size):
-        chunk = messages[index : index + batch_size]
+    ordered_messages = sorted(
+        messages,
+        key=lambda message: (channel_key(message), int(message.get("telegram_message_id") or 0)),
+    )
+    cursors = state.get("telegram_remote_sync_cursors")
+    if not isinstance(cursors, dict):
+        cursors = {}
+        state["telegram_remote_sync_cursors"] = cursors
+    for index in range(0, len(ordered_messages), batch_size):
+        chunk = ordered_messages[index : index + batch_size]
+        chunk_cursor_by_channel: dict[str, int] = {}
+        for message in chunk:
+            identity = channel_key(message)
+            chunk_cursor_by_channel[identity] = max(
+                chunk_cursor_by_channel.get(identity, 0),
+                int(message.get("telegram_message_id") or 0),
+            )
+        chunk_channels: list[dict[str, object]] = []
+        for channel in channels:
+            if not isinstance(channel, dict):
+                continue
+            identity = channel_key(channel)
+            if identity not in chunk_cursor_by_channel:
+                continue
+            channel_snapshot = dict(channel)
+            channel_snapshot["last_message_id"] = chunk_cursor_by_channel[identity]
+            chunk_channels.append(channel_snapshot)
         chunk_keys = {message_key(message) for message in chunk}
         chunk_matches = [
             match
@@ -2329,7 +2675,7 @@ def sync_telegram_batch_to_remote_api(
             response = post_remote_action(
                 "upsert_telegram_snapshot",
                 {
-                    "channels": channels,
+                    "channels": chunk_channels,
                     "messages": chunk,
                     "article_matches": chunk_matches,
                     "issue_signals": signals,
@@ -2339,14 +2685,29 @@ def sync_telegram_batch_to_remote_api(
         except Exception as exc:  # noqa: BLE001
             failed += 1
             last_error = error_label(exc)
-            continue
+            # A later acknowledgement must never advance beyond an unpersisted
+            # earlier chunk; stop here and resume from the stored cursor next run.
+            break
         if response.get("ok"):
+            acknowledged = response.get("messages")
+            if acknowledged is not None and int(acknowledged or 0) < len(chunk):
+                failed += 1
+                last_error = "remote_partial_message_ack"
+                break
             synced += 1
             remote_messages += int(response.get("messages") or len(chunk))
             remote_matches += int(response.get("article_matches") or len(chunk_matches))
+            if advance_cursors:
+                for message in chunk:
+                    identity = channel_key(message)
+                    cursors[identity] = max(
+                        int(cursors.get(identity, 0) or 0),
+                        int(message.get("telegram_message_id") or 0),
+                    )
         else:
             failed += 1
             last_error = remote_response_error(response)
+            break
     result: dict[str, object] = {
         "telegram_remote_synced": synced,
         "telegram_remote_failed": failed,
@@ -2366,10 +2727,14 @@ def collect_telegram_sources(
 ) -> dict[str, int]:
     ensure_telegram_state(state)
     registered = register_configured_channels(state, config)
+    rights_blocked = apply_channel_source_rights(state, config, now)
     if not telegram_sources_enabled(config):
-        return {"telegram_source_channels_registered": registered, "telegram_source_skipped": 1}
+        return {
+            "telegram_source_channels_registered": registered,
+            "telegram_source_rights_blocked": rights_blocked,
+            "telegram_source_skipped": 1,
+        }
 
-    owns_client = client is None
     if client is None:
         try:
             adapter = TelethonClientAdapter(config)
@@ -2402,7 +2767,8 @@ def collect_telegram_sources(
         summary = asyncio.run(run_with_client())
 
     summary["telegram_source_channels_registered"] = registered
-    if summary.get("telegram_messages_inserted") or summary.get("telegram_messages_updated") or summary.get("telegram_matches_inserted"):
+    summary["telegram_source_rights_blocked"] = rights_blocked
+    if pending_remote_messages(state):
         summary.update(sync_telegram_to_remote_api(state, config))
     state.setdefault("telegram_source_runs", [])
     state["telegram_source_runs"].append(telegram_run_record(now, "collect", summary))  # type: ignore[index, union-attr]
@@ -3065,7 +3431,8 @@ def cli_main(argv: list[str] | None = None) -> int:
             target_config["telegram_sources"] = telegram_settings
         checkpoint_callback = None
         if not args.dry_run and not args.no_checkpoint:
-            checkpoint_callback = lambda: save_state(state_path, target_state)
+            def checkpoint_callback() -> None:
+                save_state(state_path, target_state)
         now = now_in_timezone(str(config.get("timezone") or "Asia/Seoul"))
         summary = backfill_telegram_messages(
             target_state,

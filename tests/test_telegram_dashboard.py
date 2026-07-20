@@ -3,14 +3,16 @@ from __future__ import annotations
 import hashlib
 
 from curator.telegram_dashboard import (
-    build_telegram_admin_access_message,
+    telegram_admin_access_token,
     telegram_admin_access_token_hash,
     telegram_dashboard_model,
     write_telegram_dashboard,
 )
 
 
-def test_telegram_dashboard_writes_public_safe_status_page(tmp_path, config, now) -> None:  # type: ignore[no-untyped-def]
+def test_telegram_dashboard_without_token_fails_closed(tmp_path, config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.delenv("TELEGRAM_ADMIN_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("ACTIVIST_PUBLIC_API_URL", raising=False)
     state = {
         "telegram_source_channels": [
             {
@@ -43,7 +45,9 @@ def test_telegram_dashboard_writes_public_safe_status_page(tmp_path, config, now
 
     assert "Telegram 시장 시그널 대시보드" in html
     assert "공개 broadcast 채널" in html
-    assert "marketnews" in html
+    # Static Pages contains aggregate status only; channel/message details are
+    # fetched from the authenticated, paginated API after unlock.
+    assert "marketnews" not in html
     assert "매칭 품질" in html
     assert "시장 시그널 분석" in html
     assert "New/Rising" in html
@@ -54,6 +58,10 @@ def test_telegram_dashboard_writes_public_safe_status_page(tmp_path, config, now
     assert "company_signal_overview" in html
     assert "signal_quality_score" in html
     assert "TELEGRAM_API_HASH" not in html
+    assert '"channels_total":0' in html
+    assert "관리자 인증이 설정되지 않았습니다" in html
+    assert 'document.getElementById("access-token-input").disabled = true' in html
+    assert "await unlockDashboard(\"\")" not in html
 
 
 def test_telegram_dashboard_model_builds_investor_signal_sections(config, now) -> None:  # type: ignore[no-untyped-def]
@@ -106,6 +114,22 @@ def test_telegram_dashboard_model_builds_investor_signal_sections(config, now) -
         "signal_min_channels": 2,
         "signal_limit": 10,
     }
+    config["source_rights"] = {
+        "enforce": True,
+        "records": [
+            {
+                "source_right_id": f"telegram:{handle}",
+                "source_category": "authorized_telegram",
+                "source_identity": handle,
+                "scope": "collection,ai,redistribution",
+                "evidence_ref": f"evidence://telegram/{handle}",
+                "valid_from": "2021-01-01",
+                "allow_ai": True,
+                "allow_redistribution": True,
+            }
+            for handle in ("first", "second")
+        ],
+    }
 
     model = telegram_dashboard_model(state, config, now)
 
@@ -123,6 +147,7 @@ def test_telegram_dashboard_model_builds_investor_signal_sections(config, now) -
 
 def test_telegram_dashboard_requires_token_without_embedding_data(tmp_path, config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("TELEGRAM_ADMIN_ACCESS_TOKEN", "admin-secret-token")
+    monkeypatch.setenv("ACTIVIST_PUBLIC_API_URL", "https://public.example.test/api.php")
     state = {
         "telegram_source_channels": [
             {
@@ -148,13 +173,19 @@ def test_telegram_dashboard_requires_token_without_embedding_data(tmp_path, conf
     assert expected_hash in html
     assert "admin-secret-token" not in html
     assert "sensitivechannel" not in html
+    assert "https://public.example.test/api.php" in html
+    assert "token을 직접 입력" in html
+    assert "window.sessionStorage.setItem(telegramAdminStorageKey, token)" in html
+    assert "tokenFromUrl" not in html
+    assert "#token=" not in html
+    assert 'id="lock-dashboard"' in html
+    assert "window.location.reload()" in html
 
 
-def test_telegram_admin_access_message_contains_token_link(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setenv("TELEGRAM_ADMIN_ACCESS_TOKEN", "admin-secret-token")
+def test_telegram_admin_access_token_never_derives_from_bot_token(monkeypatch) -> None:
+    monkeypatch.delenv("TELEGRAM_ADMIN_ACCESS_TOKEN", raising=False)
+    monkeypatch.setenv("STORY_REVIEW_ACCESS_TOKEN", "different-review-token")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:secret")
 
-    message = build_telegram_admin_access_message(config, now)
-
-    assert "Telegram admin" in message
-    assert "telegram-admin.html?token=admin-secret-token" in message
-    assert telegram_admin_access_token_hash() == hashlib.sha256(b"admin-secret-token").hexdigest()
+    assert telegram_admin_access_token() == ""
+    assert telegram_admin_access_token_hash() == ""

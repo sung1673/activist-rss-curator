@@ -1,6 +1,9 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.pytest-tmp/
+.mypy_cache/
+.ruff_cache/
 .venv/
 venv/
 .env
@@ -10,4 +13,16 @@ venv/
 .env.telegram
 *.session
 data/backfill_*.json
+data/state.json
+data/archive/*
+!data/archive/.gitkeep
+public/feed.xml
+public/index.html
+public/feed/
+node_modules/
+test-results/
+playwright-report/
+.watchdog-report.md
+release-report/
+evidence/
 .DS_Store

@@ -253,6 +253,47 @@ def test_daily_digest_skips_after_send_window(config, now, monkeypatch) -> None:
     }
 
 
+def test_daily_digest_0605_start_is_inclusive_and_0805_end_is_exclusive(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    config["digest"]["enabled"] = True  # type: ignore[index]
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주주권 이슈 지속")
+    monkeypatch.setattr(
+        summaries,
+        "send_telegram_message",
+        lambda *_args, **_kwargs: {"ok": True, "message_id": 805, "chat_id": -100},
+    )
+
+    send_start = datetime(2026, 4, 26, 6, 5, tzinfo=ZoneInfo("Asia/Seoul"))
+    start_cluster = published_cluster(config, now)
+    start_cluster["published_at"] = (send_start - timedelta(minutes=30)).isoformat()
+    start_state = {
+        "published_clusters": [start_cluster],
+        "pending_clusters": [],
+        "daily_digest_sent_dates": [],
+        "daily_digest_records": [],
+    }
+    assert publish_daily_digest_if_due(start_state, config, send_start) == {
+        "daily_digest_sent": 1,
+        "daily_digest_failed": 0,
+    }
+
+    send_end = datetime(2026, 4, 26, 8, 5, tzinfo=ZoneInfo("Asia/Seoul"))
+    end_cluster = published_cluster(config, now)
+    end_cluster["published_at"] = (send_end - timedelta(minutes=30)).isoformat()
+    end_state = {
+        "published_clusters": [end_cluster],
+        "pending_clusters": [],
+        "daily_digest_sent_dates": [],
+        "daily_digest_records": [],
+    }
+    assert publish_daily_digest_if_due(end_state, config, send_end) == {
+        "daily_digest_sent": 0,
+        "daily_digest_failed": 0,
+    }
+
+
 def test_daily_digest_tolerates_delayed_github_schedule(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import summaries
 

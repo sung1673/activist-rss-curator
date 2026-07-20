@@ -31,6 +31,11 @@ def story_judge_enabled(config: dict[str, object]) -> bool:
     return bool(settings.get("enabled", True)) and bool(settings.get("story_judge_enabled", False))
 
 
+def story_judge_fail_closed_required(config: dict[str, object]) -> bool:
+    """Whether this run has declared AI judgement as an available control."""
+    return story_judge_enabled(config) and bool(github_models_token())
+
+
 def story_judge_auto_accept_title_score(config: dict[str, object]) -> float:
     settings = story_judge_settings(config)
     return float(settings.get("story_judge_auto_accept_title_score", 88))
@@ -181,7 +186,13 @@ def judge_same_story(
     return judgement
 
 
-def judgement_allows_same_story(judgement: StoryJudgement | None, config: dict[str, object], *, fallback: bool = True) -> bool:
+def judgement_allows_same_story(judgement: StoryJudgement | None, config: dict[str, object], *, fallback: bool = False) -> bool:
+    """Accept an ambiguous merge only after a positive judgement.
+
+    Callers may still explicitly opt into a legacy fallback, but production
+    clustering is fail-closed when the model times out, exhausts its budget, or
+    returns malformed output.
+    """
     if judgement is None:
         return fallback
     return judgement.relationship == "same_story" and judgement.confidence >= story_judge_confidence_threshold(config)

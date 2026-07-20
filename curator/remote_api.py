@@ -16,6 +16,7 @@ from .archive import compact_archive_record
 from .dates import datetime_to_iso
 from .normalize import stable_hash
 from .priority import article_hash_key
+from .source_rights import source_is_authorized
 
 
 MAX_SNAPSHOT_BYTES = 1_750_000
@@ -33,6 +34,9 @@ ARTICLE_PUBLIC_KEYS = (
     "source",
     "feed_name",
     "feed_category",
+    "source_kind",
+    "source_right_id",
+    "telegram_source_handle",
     "image_url",
     "published_at",
     "seen_at",
@@ -184,6 +188,18 @@ def cluster_story_record(
     if not story_key.startswith("story:"):
         story_key = f"story:{stable_hash(story_key, length=24)}"
 
+    representative = articles[0] if articles else {}
+    source_kinds = sorted(
+        {str(article.get("source_kind") or "").strip() for article in articles if article.get("source_kind")}
+    )
+    source_right_ids = sorted(
+        {
+            str(article.get("source_right_id") or "").strip()
+            for article in articles
+            if article.get("source_right_id")
+        }
+    )
+
     return (
         {
             "story_key": story_key,
@@ -197,6 +213,10 @@ def cluster_story_record(
             "priority_score": int(cluster.get("priority_score") or 0),
             "published_at": cluster.get("published_at") or None,
             "last_article_seen_at": cluster.get("last_article_seen_at") or None,
+            "source_kind": representative.get("source_kind") or cluster.get("source_kind") or None,
+            "source_right_id": representative.get("source_right_id") or cluster.get("source_right_id") or None,
+            "source_kinds": source_kinds or cluster.get("source_kinds") or [],
+            "source_right_ids": source_right_ids or cluster.get("source_right_ids") or [],
             "article_ids": article_ids,
         },
         extra_articles,
@@ -211,7 +231,11 @@ def snapshot_payload(
 ) -> dict[str, object]:
     article_limit = record_limit_from_env("ACTIVIST_API_MAX_ARTICLES", DEFAULT_MAX_ARTICLES)
     story_limit = record_limit_from_env("ACTIVIST_API_MAX_STORIES", DEFAULT_MAX_STORIES)
-    source_articles = [article for article in list(state.get("articles") or []) if isinstance(article, dict)][-article_limit:]
+    source_articles = [
+        article
+        for article in list(state.get("articles") or [])
+        if isinstance(article, dict) and source_is_authorized(article, config, now, purpose="public")
+    ][-article_limit:]
     article_id_lookup: dict[str, str] = {}
     articles_by_id: dict[str, dict[str, object]] = {}
     raw_records_by_id: dict[str, dict[str, object]] = {}
@@ -225,11 +249,48 @@ def snapshot_payload(
         raw_records_by_id[record_id] = raw_record_payload(archived, now)
         article_id_lookup[article_hash_key(article)] = record_id
 
-    clusters = [
+    source_clusters = [
         cluster
         for cluster in list(state.get("published_clusters") or []) + list(state.get("pending_clusters") or [])
         if isinstance(cluster, dict)
     ][-story_limit:]
+    clusters: list[dict[str, object]] = []
+    for cluster in source_clusters:
+        original_articles = [article for article in list(cluster.get("articles") or []) if isinstance(article, dict)]
+        allowed_articles = [
+            article
+            for article in original_articles
+            if source_is_authorized(article, config, now, purpose="public")
+        ]
+        if original_articles and not allowed_articles:
+            continue
+        if not original_articles and not source_is_authorized(cluster, config, now, purpose="public"):
+            continue
+        public_cluster = dict(cluster)
+        if allowed_articles:
+            representative = allowed_articles[0]
+            public_cluster["articles"] = allowed_articles
+            public_cluster["article_count"] = len(allowed_articles)
+            public_cluster["representative_title"] = representative.get("clean_title") or representative.get("title") or ""
+            public_cluster["representative_title_normalized"] = representative.get("normalized_title") or ""
+            public_cluster["representative_url"] = representative.get("canonical_url") or representative.get("link") or ""
+            public_cluster["source_kind"] = representative.get("source_kind") or None
+            public_cluster["source_right_id"] = representative.get("source_right_id") or None
+            public_cluster["source_kinds"] = sorted(
+                {
+                    str(article.get("source_kind") or "").strip()
+                    for article in allowed_articles
+                    if article.get("source_kind")
+                }
+            )
+            public_cluster["source_right_ids"] = sorted(
+                {
+                    str(article.get("source_right_id") or "").strip()
+                    for article in allowed_articles
+                    if article.get("source_right_id")
+                }
+            )
+        clusters.append(public_cluster)
     stories: list[dict[str, object]] = []
     for cluster in clusters:
         story, extra_articles = cluster_story_record(cluster, config, now, article_id_lookup)

@@ -7,7 +7,6 @@ from curator.story_review import (
     build_story_review,
     render_story_review_html,
     story_review_access_token,
-    story_review_message,
     text_has_encoding_damage,
     token_hash,
 )
@@ -108,15 +107,13 @@ def test_story_review_detects_duplicate_listing_policy_split_candidate() -> None
     assert any("중복상장" in candidate["left"]["title"] and "중복상장" in candidate["right"]["title"] for candidate in review["candidates"])  # type: ignore[index]
 
 
-def test_story_review_token_falls_back_to_derived_bot_token(monkeypatch) -> None:
+def test_story_review_token_requires_explicit_secret(monkeypatch) -> None:
     monkeypatch.delenv("STORY_REVIEW_ACCESS_TOKEN", raising=False)
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:secret")
 
     token = story_review_access_token()
 
-    assert token
-    assert token != "123456:secret"
-    assert token == story_review_access_token()
+    assert token == ""
 
 
 def test_render_story_review_html_contains_token_gate() -> None:
@@ -135,24 +132,9 @@ def test_render_story_review_html_contains_token_gate() -> None:
     assert "접근 token 확인" in html
     assert token_hash("review-token") in html
     assert "오늘은 우선 검토할 분리 후보가 없습니다" in html
-
-
-def test_story_review_message_uses_tokenized_admin_link(monkeypatch) -> None:
-    monkeypatch.setenv("STORY_REVIEW_ACCESS_TOKEN", "review-token")
-    config = {"public_feed_url": "https://news.bside.ai/feed.xml"}
-    message = story_review_message(
-        {
-            "date_id": "2026-05-10",
-            "candidate_count": 0,
-            "page_url": "https://news.bside.ai/feed/story-review.html",
-            "candidates": [],
-        },
-        config,
-    )
-
-    assert "묶음 후보 리뷰" in message
-    assert "token=review-token" in message
-    assert "관리자 페이지에서 후보 검토" in message
+    assert "관리자 token을 직접 입력" in html
+    assert "sessionStorage.setItem('storyReviewToken'" in html
+    assert "URLSearchParams(location.hash" not in html
 
 
 def test_story_review_includes_benchmark_coverage_for_reference_channel() -> None:
@@ -215,31 +197,6 @@ def test_story_review_includes_benchmark_coverage_for_reference_channel() -> Non
     html = render_story_review_html(review)
     assert "Benchmark 누락 점검" in html
     assert "Missing benchmark article" in html
-
-
-def test_story_review_message_mentions_benchmark_missing(monkeypatch) -> None:
-    monkeypatch.setenv("STORY_REVIEW_ACCESS_TOKEN", "review-token")
-    config = {"public_feed_url": "https://news.bside.ai/feed.xml"}
-    message = story_review_message(
-        {
-            "date_id": "2026-06-08",
-            "candidate_count": 0,
-            "page_url": "https://news.bside.ai/feed/story-review.html",
-            "candidates": [],
-            "benchmark_coverage": {
-                "url_count": 2,
-                "matched_count": 1,
-                "missing_count": 1,
-                "coverage_rate": 50.0,
-                "missing": [{"title": "Missing benchmark article", "url": "https://example.com/missing"}],
-            },
-        },
-        config,
-    )
-
-    assert "benchmark 누락 1/2건" in message
-    assert "Benchmark 누락 상위" in message
-    assert "Missing benchmark article" in message
 
 
 def test_story_review_skips_encoding_damaged_titles() -> None:

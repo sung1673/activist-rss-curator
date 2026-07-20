@@ -278,6 +278,7 @@ def article_from_entry(
         "article_published_at": None,
         "feed_name": feed_meta.get("name", ""),
         "feed_category": feed_meta.get("category", ""),
+        "feed_scope": feed_meta.get("scope", ""),
         "source_kind": source_kind,
         "original_resolution_status": "unresolved" if source_kind == "google_discovery" else "direct",
     }

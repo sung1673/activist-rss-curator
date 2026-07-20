@@ -1,0 +1,80 @@
+name: Operations watchdog
+
+on:
+  schedule:
+    # A five-minute probe with a five-minute queue budget keeps designed
+    # delivery-failure detection within ten minutes.
+    - cron: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: operations-watchdog
+  cancel-in-progress: true
+
+jobs:
+  health:
+    if: github.event_name == 'workflow_dispatch' || vars.ENABLE_GOVERNANCE_SHADOW == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Inspect ingest freshness and delivery queue
+        id: health
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          WATCHDOG_MAX_INGEST_AGE_MINUTES: "90"
+          WATCHDOG_MAX_OUTBOX_AGE_MINUTES: "5"
+        run: python .github/scripts/watchdog.py
+
+      - name: Create, update, or resolve the incident issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          INCIDENT: ${{ steps.health.outputs.incident }}
+          REPORT_PATH: ${{ steps.health.outputs.report_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh label create "ops/incident" \
+            --repo "$GH_REPO" \
+            --color "B60205" \
+            --description "Automated production pipeline incident" \
+            --force
+
+          issue_number="$(
+            gh issue list \
+              --repo "$GH_REPO" \
+              --state open \
+              --label "ops/incident" \
+              --search '"Governance pipeline unhealthy" in:title' \
+              --json number \
+              --jq '.[0].number // empty'
+          )"
+
+          if [[ "$INCIDENT" == "true" ]]; then
+            if [[ -n "$issue_number" ]]; then
+              gh issue edit "$issue_number" --repo "$GH_REPO" --body-file "$REPORT_PATH"
+            else
+              gh issue create \
+                --repo "$GH_REPO" \
+                --title "[ops/incident] Governance pipeline unhealthy" \
+                --label "ops/incident" \
+                --body-file "$REPORT_PATH"
+            fi
+          elif [[ -n "$issue_number" ]]; then
+            gh issue comment "$issue_number" --repo "$GH_REPO" --body-file "$REPORT_PATH"
+            gh issue close "$issue_number" --repo "$GH_REPO" --reason completed
+          fi
+
+      - name: Fail the workflow when an incident is active
+        if: steps.health.outputs.incident == 'true'
+        run: |
+          echo "::error::Operations watchdog detected an active incident."
+          exit 1

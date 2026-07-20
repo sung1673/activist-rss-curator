@@ -9,7 +9,12 @@ from .dates import datetime_to_iso, hours_between, parse_datetime
 from .normalize import stable_hash
 from .relevance import topic_keywords_for_article
 from .story_signature import event_tokens_for_text, story_signature_decision
-from .story_judge import judge_same_story, judgement_allows_same_story, story_judge_auto_accept_title_score
+from .story_judge import (
+    judge_same_story,
+    judgement_allows_same_story,
+    story_judge_auto_accept_title_score,
+    story_judge_fail_closed_required,
+)
 
 
 KNOWN_COMPANIES = [
@@ -414,6 +419,46 @@ def primary_theme_group(value: dict[str, object]) -> str:
     return str(theme_groups[0]) if theme_groups else ""
 
 
+def refresh_cluster_source_lineage(cluster: dict[str, object]) -> None:
+    """Derive public source lineage from the cluster's current articles.
+
+    The representative fields make the common single-source case easy to
+    query, while the plural fields retain provenance for mixed-source stories.
+    Recomputing this after every membership change prevents a revoked source
+    from surviving as stale cluster metadata.
+    """
+    articles = [article for article in list(cluster.get("articles") or []) if isinstance(article, dict)]
+    representative = articles[0] if articles else {}
+    source_kinds = sorted(
+        {str(article.get("source_kind") or "").strip() for article in articles if article.get("source_kind")}
+    )
+    source_right_ids = sorted(
+        {
+            str(article.get("source_right_id") or "").strip()
+            for article in articles
+            if article.get("source_right_id")
+        }
+    )
+    representative_kind = str(representative.get("source_kind") or "").strip()
+    representative_right = str(representative.get("source_right_id") or "").strip()
+    if representative_kind:
+        cluster["source_kind"] = representative_kind
+    else:
+        cluster.pop("source_kind", None)
+    if representative_right:
+        cluster["source_right_id"] = representative_right
+    else:
+        cluster.pop("source_right_id", None)
+    if source_kinds:
+        cluster["source_kinds"] = source_kinds
+    else:
+        cluster.pop("source_kinds", None)
+    if source_right_ids:
+        cluster["source_right_ids"] = source_right_ids
+    else:
+        cluster.pop("source_right_ids", None)
+
+
 def make_cluster_key(article: dict[str, object]) -> str:
     return stable_hash(cluster_base_string(article), length=16)
 
@@ -441,7 +486,7 @@ def create_cluster(
     enriched = enrich_article_for_clustering(article)
     key = cluster_key or make_cluster_key(enriched)
     article_dt = article_datetime(enriched, now)
-    return {
+    cluster = {
         "cluster_key": key,
         "sequence": next_sequence_for_key(state, key),
         "status": "pending",
@@ -463,6 +508,8 @@ def create_cluster(
         "articles": [enriched],
         "article_count": 1,
     }
+    refresh_cluster_source_lineage(cluster)
+    return cluster
 
 
 def article_already_in_cluster(article: dict[str, object], cluster: dict[str, object]) -> bool:
@@ -498,6 +545,7 @@ def add_article_to_cluster(article: dict[str, object], cluster: dict[str, object
             primary_theme_group(cluster),
             list(cluster.get("companies", [])),
         )
+    refresh_cluster_source_lineage(cluster)
 
 
 def shared_specific_keywords(article: dict[str, object], cluster: dict[str, object]) -> set[str]:
@@ -556,7 +604,11 @@ def ai_guard_allows_join(
         local_reason=local_reason,
         context="cluster",
     )
-    return judgement_allows_same_story(judgement, config, fallback=True)
+    return judgement_allows_same_story(
+        judgement,
+        config,
+        fallback=not story_judge_fail_closed_required(config),
+    )
 
 
 def within_cluster_window(
@@ -698,6 +750,7 @@ def reconcile_pending_clusters(state: dict[str, object], config: dict[str, objec
         articles = [enrich_article_for_clustering(article) for article in list(cluster.get("articles", []))]
         cluster["articles"] = articles
         cluster["article_count"] = len(articles)
+        refresh_cluster_source_lineage(cluster)
         cluster["keywords"] = sorted(set(cluster.get("keywords", [])) | {keyword for article in articles for keyword in article.get("topic_keywords", [])})
         cluster["companies"] = sorted(set(cluster.get("companies", [])) | {company for article in articles for company in article.get("company_candidates", [])})
         cluster["theme_groups"] = sorted(set(cluster.get("theme_groups", [])) | {theme for article in articles for theme in article.get("theme_groups", [])})

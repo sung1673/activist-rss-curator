@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .archive import archive_state
-from .cluster import cluster_articles
+from .cluster import cluster_articles, refresh_cluster_source_lineage
 from .config import article_domain_is_excluded, load_config
 from .dates import choose_publication_datetime, datetime_to_iso, get_timezone, is_too_old, now_in_timezone
 from .dedupe import dedupe_articles
@@ -16,20 +16,55 @@ from .fetch import (
     google_news_quality_summary,
     resolve_google_news_originals_from_candidates,
 )
+from .link_discovery import enqueue_link_discoveries, partition_link_discoveries
 from .priority import annotate_state_priorities, load_priority_overrides, priority_overrides_path
 from .relevance import relevance_details
-from .remote_api import sync_state_to_remote_api
+from .remote_api import remote_api_configured, sync_state_to_remote_api
+from .remote_state import hydrate_runtime_state
 from .rss_writer import write_feed, write_index
 from .state import compact_state, load_state, remember_article, remember_rejected, save_state
 from .summaries import publish_hourly_telegram_update
 from .telegram_publisher import (
+    enqueue_unsent_telegram_clusters_to_remote,
     initialize_telegram_state,
 )
+from .source_rights import apply_channel_source_rights, partition_authorized_records, source_is_authorized
 from .telegram_sources import collect_telegram_sources, telegram_candidate_articles
 from .telegram_dashboard import write_telegram_dashboard
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+TRUE_VALUES = {"1", "true", "yes", "on"}
+DELIVERY_MODES = {"legacy-direct", "outbox-enqueue", "disabled"}
+
+
+def telegram_delivery_mode() -> str:
+    """Select one mutually exclusive Telegram delivery path for this run.
+
+    Workflows set this explicitly during the legacy/governance transition.  The
+    fallback preserves command-line compatibility: a configured remote API uses
+    the durable outbox, while a local-only run sends through the legacy path.
+    The historical disable flag always wins so an ingest-only run cannot enqueue
+    merely because remote credentials are present.
+    """
+
+    if os.environ.get("CURATOR_DISABLE_TELEGRAM_SEND", "").strip().casefold() in TRUE_VALUES:
+        return "disabled"
+    raw_mode = os.environ.get("CURATOR_DELIVERY_MODE", "").strip().casefold()
+    aliases = {
+        "direct": "legacy-direct",
+        "legacy": "legacy-direct",
+        "outbox": "outbox-enqueue",
+        "enqueue": "outbox-enqueue",
+        "ingest-only": "disabled",
+        "none": "disabled",
+    }
+    mode = aliases.get(raw_mode, raw_mode)
+    if mode:
+        if mode not in DELIVERY_MODES:
+            raise ValueError(f"unsupported CURATOR_DELIVERY_MODE: {raw_mode}")
+        return mode
+    return "outbox-enqueue" if remote_api_configured() else "legacy-direct"
 
 
 def prepare_article(article: dict[str, object], config: dict[str, object]) -> dict[str, object]:
@@ -90,6 +125,7 @@ def cluster_articles_allowed_by_policy(
         if not article_domain_is_excluded(article, config)
         and not article_is_before_previous_day(article, config, now)
         and not (block_unresolved_google_news(config) and article_has_unresolved_google_news(article))
+        and source_is_authorized(article, config, now, purpose="public")
     ]
 
 
@@ -100,6 +136,7 @@ def refresh_cluster_representative(cluster: dict[str, object], articles: list[di
     cluster["representative_title"] = representative.get("clean_title") or representative.get("title") or ""
     cluster["representative_title_normalized"] = representative.get("normalized_title") or ""
     cluster["representative_url"] = representative.get("canonical_url") or representative.get("link") or ""
+    refresh_cluster_source_lineage(cluster)
 
 
 def prune_excluded_pending_articles(state: dict[str, object], config: dict[str, object], now: datetime) -> None:
@@ -126,16 +163,68 @@ def state_resolution_candidate_articles(state: dict[str, object]) -> list[dict[s
     return candidates
 
 
+def publish_telegram_for_run(
+    state: dict[str, object],
+    config: dict[str, object],
+    now: datetime,
+    duplicates: list[dict[str, object]],
+    remote_summary: dict[str, int],
+) -> dict[str, int]:
+    """Execute exactly one direct, enqueue-only, or disabled delivery path."""
+
+    delivery_mode = telegram_delivery_mode()
+    if delivery_mode == "legacy-direct":
+        return {
+            **publish_hourly_telegram_update(state, config, now, duplicates),
+            "telegram_outbox_enqueue_failed": 0,
+            "telegram_outbox_enqueue_skipped": 1,
+        }
+    if delivery_mode == "outbox-enqueue" and remote_api_configured() and not int(
+        remote_summary.get("remote_api_failed") or 0
+    ):
+        outbox_summary = enqueue_unsent_telegram_clusters_to_remote(state, config, now)
+        return {"telegram_sent": 0, "telegram_failed": 0, **outbox_summary}
+    if delivery_mode == "outbox-enqueue" and remote_api_configured():
+        return {
+            "telegram_sent": 0,
+            "telegram_failed": 0,
+            "telegram_outbox_enqueue_failed": 1,
+            "telegram_outbox_enqueue_skipped": 1,
+        }
+    if delivery_mode == "disabled":
+        return {
+            "telegram_sent": 0,
+            "telegram_failed": 0,
+            "telegram_outbox_enqueue_failed": 0,
+            "telegram_outbox_enqueue_skipped": 1,
+        }
+    return {
+        "telegram_sent": 0,
+        "telegram_failed": 0,
+        "telegram_outbox_enqueue_failed": 1,
+        "telegram_outbox_enqueue_skipped": 1,
+    }
+
+
 def run(root: Path | None = None) -> dict[str, int]:
     project_root = root or PROJECT_ROOT
     config = load_config(project_root / "config.yaml")
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
     now = now_in_timezone(timezone_name)
+    ingest_scope = os.environ.get("CURATOR_INGEST_SCOPE", "all").strip().casefold() or "all"
+    if ingest_scope == "official":
+        from .official_ingest import run as run_official_ingest
+
+        return run_official_ingest(project_root, now=now)
+    if ingest_scope not in {"all", "media"}:
+        raise ValueError(f"unsupported CURATOR_INGEST_SCOPE: {ingest_scope}")
     state_path = project_root / "data" / "state.json"
     state = load_state(state_path)
+    runtime_summary = hydrate_runtime_state(state, config, now)
     prune_excluded_pending_articles(state, config, now)
     initialize_telegram_state(state, config, now)
     telegram_source_summary = collect_telegram_sources(state, config, now)
+    source_rights_blocked_channels = apply_channel_source_rights(state, config, now)
 
     fetched_articles = fetch_google_alerts_articles(config)
     fetched_articles.extend(telegram_candidate_articles(state, config, now))
@@ -145,13 +234,29 @@ def run(root: Path | None = None) -> dict[str, int]:
         extra_candidates=state_resolution_candidate_articles(state),
     )
     google_news_summary = google_news_quality_summary(fetched_articles)
+    fetched_count = len(fetched_articles)
+    fetched_articles, discoveries = partition_link_discoveries(fetched_articles, now)
+    discovery_summary = enqueue_link_discoveries(discoveries, state, config)
+    fetched_articles, source_rights_blocked_records = partition_authorized_records(
+        fetched_articles,
+        config,
+        now,
+        purpose="ai",
+    )
     publish_levels = set(config.get("publish", {}).get("publish_levels", ["high", "medium"]))  # type: ignore[union-attr]
     max_age_days = int(config.get("date_filter", {}).get("max_article_age_days", 7))  # type: ignore[union-attr]
     allow_unknown = bool(config.get("date_filter", {}).get("allow_unknown_date", True))  # type: ignore[union-attr]
 
     candidates: list[dict[str, object]] = []
-    rejected_count = 0
+    rejected_count = len(source_rights_blocked_records)
     google_news_blocked = 0
+    for blocked_article in source_rights_blocked_records:
+        remember_rejected(
+            state,
+            blocked_article,
+            now,
+            str(blocked_article.get("source_right_status") or "source_right_denied"),
+        )
     for raw_article in fetched_articles:
         article = prepare_article(raw_article, config)
         if block_unresolved_google_news(config) and article_has_unresolved_google_news(article):
@@ -193,7 +298,13 @@ def run(root: Path | None = None) -> dict[str, int]:
     for article in unique_articles:
         remember_article(state, article, "accepted", now)
 
-    published_now = cluster_articles(unique_articles, state, config, now)
+    publishable_articles, source_rights_public_blocked_records = partition_authorized_records(
+        unique_articles,
+        config,
+        now,
+        purpose="public",
+    )
+    published_now = cluster_articles(publishable_articles, state, config, now)
     state["last_run_at"] = datetime_to_iso(now)
     overrides = load_priority_overrides(priority_overrides_path(project_root, config))
     priority_count = annotate_state_priorities(state, config, now, overrides)
@@ -203,12 +314,8 @@ def run(root: Path | None = None) -> dict[str, int]:
     write_feed(project_root / "public" / "feed.xml", published_clusters, config, now)
     write_index(project_root / "public" / "index.html", state, config, now)
     write_telegram_dashboard(project_root, state, config, now)
-    if os.environ.get("CURATOR_DISABLE_TELEGRAM_SEND", "").casefold() in {"1", "true", "yes", "on"}:
-        telegram_summary = {"telegram_sent": 0, "telegram_failed": 0}
-    else:
-        telegram_summary = publish_hourly_telegram_update(state, config, now, duplicates)
-    run_summary = {
-        "fetched": len(fetched_articles),
+    base_run_summary = {
+        "fetched": fetched_count,
         "accepted": len(unique_articles),
         "duplicates": len(duplicates),
         "rejected": rejected_count,
@@ -217,12 +324,18 @@ def run(root: Path | None = None) -> dict[str, int]:
         "published_total": len(state.get("published_clusters", [])),
         "prioritized": priority_count,
         "google_news_blocked": google_news_blocked,
+        "source_rights_blocked": len(source_rights_blocked_records),
+        "source_rights_public_blocked": len(source_rights_public_blocked_records),
+        "source_rights_blocked_channels": source_rights_blocked_channels,
         **google_news_summary,
+        **discovery_summary,
+        **runtime_summary,
         **archive_summary,
         **telegram_source_summary,
-        **telegram_summary,
     }
-    remote_summary = sync_state_to_remote_api(state, config, now, run_summary)
+    remote_summary = sync_state_to_remote_api(state, config, now, base_run_summary)
+    telegram_summary = publish_telegram_for_run(state, config, now, duplicates, remote_summary)
+    run_summary = {**base_run_summary, **telegram_summary}
     save_state(state_path, state)
 
     return {
@@ -237,6 +350,17 @@ def main() -> None:
         "RSS curator finished: "
         + ", ".join(f"{key}={value}" for key, value in summary.items())
     )
+    failure_keys = (
+        "official_failed",
+        "telegram_failed",
+        "telegram_dead_letter",
+        "telegram_outbox_enqueue_failed",
+        "telegram_remote_failed",
+        "link_discoveries_failed",
+        "remote_api_failed",
+    )
+    if any(int(summary.get(key) or 0) > 0 for key in failure_keys):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

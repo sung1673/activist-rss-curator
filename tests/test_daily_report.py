@@ -159,6 +159,8 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     stale_variant_dir.mkdir(parents=True)
     (stale_variant_dir / "forbes.html").write_text("stale", encoding="utf-8")
     (stale_variant_dir / "social.html").write_text("stale", encoding="utf-8")
+    (stale_variant_dir.parent / "story-review.html").write_text("private candidates", encoding="utf-8")
+    (stale_variant_dir.parent / "story-review-meta.json").write_text("{}", encoding="utf-8")
 
     report = build_daily_report(tmp_path, now)
     paths = write_report_files(report, tmp_path)
@@ -170,6 +172,11 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert (tmp_path / "public" / "feed" / "telegram.html").exists()
     assert not (tmp_path / "public" / "feed" / "workbench.html").exists()
     assert (tmp_path / "public" / "feed" / "search.html").exists()
+    assert not (tmp_path / "public" / "feed" / "story-review.html").exists()
+    assert not (tmp_path / "public" / "feed" / "story-review-meta.json").exists()
+    assert all(path.name not in {"story-review.html", "story-review-meta.json"} for path in paths)
+    assert (tmp_path / "public" / "index.html").exists()
+    assert (tmp_path / "public" / "feed.xml").exists()
     assert not (tmp_path / "public" / "feed" / "variants" / "memo.html").exists()
     assert not (tmp_path / "public" / "feed" / "variants" / "board.html").exists()
     assert not (tmp_path / "public" / "feed" / "variants" / "pulse.html").exists()
@@ -472,9 +479,130 @@ def test_daily_report_write_only_writes_page_before_send(tmp_path, monkeypatch) 
     def fail_send(*_args, **_kwargs):  # type: ignore[no-untyped-def]
         raise AssertionError("write-only mode must not send Telegram messages")
 
-    monkeypatch.setattr(daily_report, "send_telegram_message", fail_send)
+    monkeypatch.setattr(daily_report, "enqueue_daily_report", fail_send)
+    monkeypatch.setattr(daily_report, "deliver_daily_report_direct", fail_send)
 
     summary = daily_report.send_daily_report(tmp_path)
 
     assert summary == {"daily_report_written": 1, "daily_report_sent": 0, "daily_report_failed": 0}
     assert (tmp_path / "public" / "feed" / "latest.html").exists()
+
+
+def test_daily_report_non_write_only_fails_when_transport_is_not_configured(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    now = datetime(2026, 5, 1, 10, 20, tzinfo=ZoneInfo("Asia/Seoul"))
+    (tmp_path / "data").mkdir()
+    (tmp_path / "config.yaml").write_text("report:\n  image_enrich_limit: 0\n", encoding="utf-8")
+    (tmp_path / "data" / "state.json").write_text(
+        json.dumps({"published_clusters": [], "pending_clusters": [], "articles": []}),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("CURATOR_DAILY_REPORT_WRITE_ONLY", raising=False)
+    monkeypatch.setattr(daily_report, "now_in_timezone", lambda _timezone: now)
+    monkeypatch.setattr(daily_report, "telegram_is_configured", lambda _config: False)
+
+    summary = daily_report.send_daily_report(tmp_path)
+
+    assert summary["daily_report_written"] == 1
+    assert summary["daily_report_sent"] == 0
+    assert summary["daily_report_failed"] == 1
+
+
+def test_daily_report_enqueue_uses_idempotent_remote_outbox_without_consuming(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    now = datetime(2026, 7, 16, 6, 5, tzinfo=ZoneInfo("Asia/Seoul"))
+    report = {
+        "date_id": "2026-07-16",
+        "end_at": now,
+        "report_url": "https://news.bside.ai/feed/2026-07-16.html",
+        "stories": [],
+        "stats": {"stories": 0, "articles": 0, "sources": 0},
+    }
+    config = {"timezone": "Asia/Seoul", "telegram": {"chat_id": "@bside"}}
+    posted: list[tuple[str, dict[str, object]]] = []
+
+    monkeypatch.setattr(daily_report, "remote_api_configured", lambda: True)
+    monkeypatch.setattr(daily_report, "telegram_chat_id", lambda _config: "@bside")
+
+    def fake_post(action: str, payload: dict[str, object]) -> dict[str, object]:
+        posted.append((action, payload))
+        return {"ok": True, "accepted": 1, "rejected": 0}
+
+    monkeypatch.setattr(daily_report, "post_remote_action", fake_post)
+    summary = daily_report.enqueue_daily_report(report, config)
+
+    assert summary == {"daily_report_queued": 1, "daily_report_sent": 0, "daily_report_failed": 0}
+    assert posted[0][0] == "enqueue_delivery_outbox"
+    delivery = posted[0][1]["deliveries"][0]  # type: ignore[index]
+    assert delivery["delivery_id"] == "daily:2026-07-16"  # type: ignore[index]
+    assert delivery["idempotency_key"] == "daily:2026-07-16"  # type: ignore[index]
+
+
+def test_daily_report_outbox_carries_all_source_right_lineage(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    now = datetime(2026, 7, 16, 6, 5, tzinfo=ZoneInfo("Asia/Seoul"))
+    report = {
+        "date_id": "2026-07-16",
+        "end_at": now,
+        "report_url": "https://news.bside.ai/feed/2026-07-16.html",
+        "stories": [],
+        "stats": {"stories": 0, "articles": 0, "sources": 0},
+        "clusters": [
+            {
+                "source_right_ids": ["telegram:licensed-b"],
+                "articles": [
+                    {"source_right_id": "telegram:licensed-a"},
+                    {"source_right_id": "telegram:licensed-b"},
+                ],
+            }
+        ],
+        "duplicate_records": [{"source_right_id": "official:dart"}],
+    }
+    config = {"timezone": "Asia/Seoul", "telegram": {"chat_id": "@bside"}}
+    posted: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(daily_report, "remote_api_configured", lambda: True)
+    monkeypatch.setattr(daily_report, "telegram_chat_id", lambda _config: "@bside")
+
+    def fake_post(action: str, payload: dict[str, object]) -> dict[str, object]:
+        posted.append((action, payload))
+        return {"ok": True, "accepted": 1, "rejected": 0}
+
+    monkeypatch.setattr(daily_report, "post_remote_action", fake_post)
+    assert daily_report.enqueue_daily_report(report, config)["daily_report_queued"] == 1
+    payload = posted[0][1]["deliveries"][0]["payload"]  # type: ignore[index]
+    assert payload["rights_lineage_complete"] is True  # type: ignore[index]
+    assert payload["source_right_ids"] == [  # type: ignore[index]
+        "official:dart",
+        "telegram:licensed-a",
+        "telegram:licensed-b",
+    ]
+
+
+def test_legacy_daily_delivery_sends_directly_without_outbox(monkeypatch) -> None:
+    report = {
+        "date_id": "2026-07-16",
+        "report_url": "https://news.bside.ai/feed/2026-07-16.html",
+        "stories": [],
+        "stats": {"stories": 0, "articles": 0, "sources": 0},
+    }
+    config = {"telegram": {"chat_id": "@bside"}}
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(daily_report, "telegram_bot_token", lambda: "token")
+    monkeypatch.setattr(daily_report, "telegram_chat_id", lambda _config: "@bside")
+
+    def fake_send(token, destination, _text, _config, **_kwargs):  # type: ignore[no-untyped-def]
+        sent.append((token, destination))
+        return {"ok": True, "message_id": 123}
+
+    monkeypatch.setattr(daily_report, "send_telegram_message", fake_send)
+
+    summary = daily_report.deliver_daily_report_direct(report, config)
+
+    assert sent == [("token", "@bside")]
+    assert summary == {"daily_report_queued": 0, "daily_report_sent": 1, "daily_report_failed": 0}
+
+
+def test_daily_delivery_mode_does_not_claim_outbox(monkeypatch) -> None:
+    monkeypatch.setenv("CURATOR_DELIVERY_MODE", "outbox-enqueue")
+    monkeypatch.delenv("CURATOR_DISABLE_TELEGRAM_SEND", raising=False)
+
+    assert daily_report.daily_report_delivery_mode() == "outbox-enqueue"
+    source = (daily_report.PROJECT_ROOT / "curator" / "daily_report.py").read_text(encoding="utf-8")
+    assert "process_remote_delivery_outbox" not in source

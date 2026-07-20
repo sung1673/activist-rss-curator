@@ -251,6 +251,69 @@ def test_parallel_feed_fetch_preserves_configured_feed_order(config, monkeypatch
     assert [article["canonical_url"] for article in articles] == ["https://example.com/a", "https://example.com/b"]
 
 
+def test_media_scope_filter_runs_before_fetch_and_preserves_google_discovery_language(
+    config, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    from curator import fetch
+
+    config["media_feed_policy"] = {
+        "enforce": True,
+        "default_scope": "unclassified",
+        "allowed_scopes": ["korean_governance"],
+    }
+    config["feeds"] = [
+        {
+            "name": "korea-governance",
+            "category": "core",
+            "scope": "korean_governance",
+            "url": "https://example.com/governance.xml",
+        },
+        {
+            "name": "semiconductor-macro",
+            "category": "sector",
+            "scope": "broad_market",
+            "url": "https://example.com/semiconductor.xml",
+        },
+        {
+            "name": "emergency-off",
+            "category": "core",
+            "scope": "korean_governance",
+            "enabled": False,
+            "url": "https://example.com/off.xml",
+        },
+    ]
+    config["fetch"]["enrich_pages"] = False
+    config["fetch"]["feed_fetch_workers"] = 3
+    config["fetch"]["google_news_decode_limit"] = 0
+    requested_urls: list[str] = []
+    original_title = "Samsung Electronics shareholder proposal 원문 제목"
+    xml = f"""
+    <rss><channel>
+      <item>
+        <title><![CDATA[{original_title}]]></title>
+        <link>https://news.google.com/rss/articles/CBMiSCOPE?oc=5</link>
+      </item>
+    </channel></rss>
+    """
+
+    def fake_fetch(url, **_kwargs):  # type: ignore[no-untyped-def]
+        requested_urls.append(url)
+        return xml
+
+    monkeypatch.setattr(fetch, "fetch_feed_xml", fake_fetch)
+
+    articles = fetch_google_alerts_articles(config)
+
+    assert requested_urls == ["https://example.com/governance.xml"]
+    assert len(articles) == 1
+    assert articles[0]["title"] == original_title
+    assert articles[0]["clean_title"] == original_title
+    assert articles[0]["feed_scope"] == "korean_governance"
+    assert articles[0]["source_kind"] == "google_discovery"
+    assert articles[0]["original_resolution_status"] == "unresolved"
+    assert str(articles[0]["canonical_url"]).startswith("https://news.google.com/")
+
+
 def test_parallel_enrichment_preserves_article_order(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import fetch
 

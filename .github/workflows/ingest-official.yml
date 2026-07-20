@@ -1,0 +1,96 @@
+name: Ingest official sources
+
+on:
+  schedule:
+    # KST 07:00-08:45 every 15 minutes (UTC 22:00-23:45).
+    - cron: "0,15,30,45 22-23 * * *"
+    # KST 09:00-23:45 every 15 minutes (UTC 00:00-14:45).
+    - cron: "0,15,30,45 0-14 * * *"
+    # KST 00:00-06:00 hourly (UTC 15:00-21:00).
+    - cron: "0 15-21 * * *"
+    # Weekly DART company-master refresh (KST Monday 05:30).
+    - cron: "30 20 * * 0"
+  workflow_dispatch:
+    inputs:
+      sync_company_master:
+        description: Refresh the complete DART company master
+        required: false
+        type: boolean
+        default: false
+      include_kind:
+        description: Require the deploy-configured KIND JSON adapter (leave off for DART-only smoke/shadow)
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ingest-official-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    if: github.event_name == 'workflow_dispatch' || vars.ENABLE_GOVERNANCE_SHADOW == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate operational configuration
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          DART_SYNC_COMPANY_MASTER: ${{ github.event.schedule == '30 20 * * 0' || inputs.sync_company_master }}
+          KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
+          KIND_API_KEY: ${{ secrets.KIND_API_KEY }}
+          CURATOR_ENABLE_KIND: ${{ github.event_name == 'schedule' && '1' || inputs.include_kind && '1' || '0' }}
+          CURATOR_REQUIRE_KIND: ${{ github.event_name == 'schedule' && '1' || inputs.include_kind && '1' || '0' }}
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash .github/scripts/require-env.sh \
+            DART_API_KEY ACTIVIST_API_URL ACTIVIST_API_SECRET
+          if [[ "$CURATOR_REQUIRE_KIND" == "1" && -z "$KIND_DISCLOSURE_ENDPOINT" ]]; then
+            echo "::error::KIND_DISCLOSURE_ENDPOINT is required for the official ingest workflow."
+            exit 1
+          fi
+
+      - name: Validate KIND adapter contract
+        if: github.event_name == 'schedule' || inputs.include_kind
+        env:
+          KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
+          KIND_API_KEY: ${{ secrets.KIND_API_KEY }}
+        run: python .github/scripts/validate-kind-adapter.py
+
+      - name: Ingest selected official sources
+        env:
+          CURATOR_INGEST_SCOPE: official
+          CURATOR_DATA_SOURCE: mysql
+          CURATOR_DISABLE_TELEGRAM_SEND: "1"
+          CURATOR_DELIVERY_MODE: disabled
+          CURATOR_EVENT_SCHEDULE: ${{ github.event.schedule }}
+          CURATOR_REQUIRE_REMOTE_API: "1"
+          CURATOR_ENABLE_KIND: ${{ github.event_name == 'schedule' && '1' || inputs.include_kind && '1' || '0' }}
+          CURATOR_REQUIRE_KIND: ${{ github.event_name == 'schedule' && '1' || inputs.include_kind && '1' || '0' }}
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          DART_SYNC_COMPANY_MASTER: ${{ github.event.schedule == '30 20 * * 0' || inputs.sync_company_master }}
+          KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
+          KIND_API_KEY: ${{ secrets.KIND_API_KEY }}
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+          ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -m curator.main

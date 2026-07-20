@@ -1,0 +1,313 @@
+name: Daily pages and briefing
+
+on:
+  schedule:
+    # KST 05:45: generate and deploy the daily pages (UTC 20:45).
+    - cron: "45 20 * * *"
+    # KST 06:05: send the already deployed daily briefing (UTC 21:05).
+    - cron: "5 21 * * *"
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Daily operation to run
+        required: true
+        type: choice
+        default: both
+        options:
+          - generate
+          - send
+          - both
+
+permissions:
+  contents: read
+  models: read
+
+concurrency:
+  group: daily-pages-and-briefing-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    if: >-
+      (github.event_name == 'schedule' &&
+       github.event.schedule == '45 20 * * *' &&
+       vars.ENABLE_GOVERNANCE_SHADOW == 'true') ||
+      (github.event_name == 'workflow_dispatch' &&
+       (inputs.operation == 'generate' || inputs.operation == 'both'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      models: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.pages_deployment_result.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Determine Pages deployment eligibility
+        id: pages_mode
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GOVERNANCE_PAGES_ENABLED: ${{ vars.ENABLE_GOVERNANCE_PAGES }}
+          LEGACY_PAGES_ENABLED: ${{ vars.ENABLE_PAGES }}
+        run: |
+          set -euo pipefail
+          deploy_pages=false
+          if [[ "$REF_NAME" == "$DEFAULT_BRANCH" && "$GOVERNANCE_PAGES_ENABLED" == "true" && "$LEGACY_PAGES_ENABLED" != "true" ]]; then
+            deploy_pages=true
+          elif [[ "$REF_NAME" != "$DEFAULT_BRANCH" && "$GOVERNANCE_PAGES_ENABLED" == "true" ]]; then
+            echo "::notice::Pages deployment is restricted to the default branch ($DEFAULT_BRANCH)."
+          fi
+          echo "deploy_pages=$deploy_pages" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate data configuration
+        env:
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+        run: bash .github/scripts/require-env.sh ACTIVIST_API_URL ACTIVIST_API_SECRET
+
+      - name: Validate mutually exclusive Pages ownership
+        if: vars.ENABLE_GOVERNANCE_PAGES == 'true' && vars.ENABLE_PAGES == 'true'
+        run: |
+          echo "::error::ENABLE_PAGES and ENABLE_GOVERNANCE_PAGES are mutually exclusive."
+          exit 1
+
+      - name: Generate pages from the MySQL source of truth
+        env:
+          CURATOR_DATA_SOURCE: mysql
+          CURATOR_DAILY_REPORT_WRITE_ONLY: "1"
+          GITHUB_TOKEN: ${{ github.token }}
+          STORY_REVIEW_ACCESS_TOKEN: ${{ secrets.STORY_REVIEW_ACCESS_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+          ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
+        run: python -m curator.daily_report
+
+      - name: Build token-gated Telegram admin shell
+        env:
+          TELEGRAM_ADMIN_ACCESS_TOKEN: ${{ secrets.TELEGRAM_ADMIN_ACCESS_TOKEN }}
+          ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash .github/scripts/require-env.sh TELEGRAM_ADMIN_ACCESS_TOKEN ACTIVIST_PUBLIC_API_URL
+          python -m curator.telegram_dashboard write
+
+      - name: Configure public governance UI
+        env:
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
+        run: python -m curator.governance_ui --root .
+
+      - name: Preserve rollback artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: pages-${{ github.run_id }}-${{ github.run_attempt }}
+          path: public
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Configure Pages
+        if: steps.pages_mode.outputs.deploy_pages == 'true'
+        uses: actions/configure-pages@v6
+
+      - name: Upload Pages artifact
+        if: steps.pages_mode.outputs.deploy_pages == 'true'
+        id: pages_artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          name: github-pages
+          path: public
+
+      - name: Deploy to GitHub Pages
+        if: steps.pages_mode.outputs.deploy_pages == 'true'
+        id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+        with:
+          artifact_name: github-pages
+
+      - name: Wait before first Pages retry
+        if: steps.pages_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure'
+        run: sleep 180
+
+      - name: Retry GitHub Pages deployment (2/3)
+        if: steps.pages_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure'
+        id: deployment_retry
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+        with:
+          artifact_name: github-pages
+
+      - name: Wait before final Pages retry
+        if: steps.pages_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' && steps.deployment_retry.outcome == 'failure'
+        run: sleep 300
+
+      - name: Retry GitHub Pages deployment (3/3)
+        if: steps.pages_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' && steps.deployment_retry.outcome == 'failure'
+        id: deployment_retry_final
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+        with:
+          artifact_name: github-pages
+
+      - name: Verify GitHub Pages deployment
+        if: ${{ !cancelled() && steps.pages_mode.outputs.deploy_pages == 'true' }}
+        id: pages_deployment_result
+        shell: bash
+        env:
+          DEPLOYMENT_OUTCOME_1: ${{ steps.deployment.outcome }}
+          DEPLOYMENT_OUTCOME_2: ${{ steps.deployment_retry.outcome }}
+          DEPLOYMENT_OUTCOME_3: ${{ steps.deployment_retry_final.outcome }}
+          DEPLOYMENT_URL_1: ${{ steps.deployment.outputs.page_url }}
+          DEPLOYMENT_URL_2: ${{ steps.deployment_retry.outputs.page_url }}
+          DEPLOYMENT_URL_3: ${{ steps.deployment_retry_final.outputs.page_url }}
+          PAGES_ARTIFACT_ID: ${{ steps.pages_artifact.outputs.artifact_id }}
+        run: |
+          set -euo pipefail
+
+          selected_attempt=""
+          selected_url=""
+          if [[ "$DEPLOYMENT_OUTCOME_1" == "success" && -n "$DEPLOYMENT_URL_1" ]]; then
+            selected_attempt="1"
+            selected_url="$DEPLOYMENT_URL_1"
+          elif [[ "$DEPLOYMENT_OUTCOME_2" == "success" && -n "$DEPLOYMENT_URL_2" ]]; then
+            selected_attempt="2"
+            selected_url="$DEPLOYMENT_URL_2"
+          elif [[ "$DEPLOYMENT_OUTCOME_3" == "success" && -n "$DEPLOYMENT_URL_3" ]]; then
+            selected_attempt="3"
+            selected_url="$DEPLOYMENT_URL_3"
+          fi
+
+          {
+            echo "### GitHub Pages deployment"
+            echo ""
+            echo "| Attempt | Outcome |"
+            echo "|---:|---|"
+            echo "| 1 | ${DEPLOYMENT_OUTCOME_1:-not-run} |"
+            echo "| 2 | ${DEPLOYMENT_OUTCOME_2:-not-run} |"
+            echo "| 3 | ${DEPLOYMENT_OUTCOME_3:-not-run} |"
+            echo ""
+            echo "Artifact: \`github-pages\` (ID: ${PAGES_ARTIFACT_ID:-unavailable})"
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ -z "$selected_attempt" ]]; then
+            echo "::error::GitHub Pages deployment failed after three attempts."
+            exit 1
+          fi
+
+          echo "page_url=$selected_url" >> "$GITHUB_OUTPUT"
+          echo "attempt=$selected_attempt" >> "$GITHUB_OUTPUT"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Succeeded on attempt $selected_attempt: $selected_url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create daily deployment marker
+        if: steps.pages_mode.outputs.deploy_pages == 'true'
+        id: deployment_marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          kst_date="$(TZ=Asia/Seoul date +%F)"
+          mkdir -p .deployment-marker
+          printf '{"kst_date":"%s","run_id":"%s","revision":"%s"}\n' \
+            "$kst_date" "$GITHUB_RUN_ID" "$GITHUB_SHA" \
+            > .deployment-marker/deployment.json
+          echo "kst_date=$kst_date" >> "$GITHUB_OUTPUT"
+
+      - name: Publish daily deployment marker
+        if: steps.pages_mode.outputs.deploy_pages == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: governance-pages-ready-${{ steps.deployment_marker.outputs.kst_date }}
+          path: .deployment-marker/deployment.json
+          if-no-files-found: error
+          retention-days: 3
+
+  send:
+    needs:
+      - generate
+    if: >-
+      always() &&
+      github.ref_name == github.event.repository.default_branch &&
+      vars.ENABLE_GOVERNANCE_SHADOW == 'true' &&
+      vars.ENABLE_GOVERNANCE_PAGES == 'true' &&
+      vars.ENABLE_PAGES != 'true' &&
+      vars.ENABLE_GOVERNANCE_DELIVERY == 'true' &&
+      (
+        (github.event_name == 'schedule' && github.event.schedule == '5 21 * * *') ||
+        (github.event_name == 'workflow_dispatch' && inputs.operation == 'send') ||
+        (github.event_name == 'workflow_dispatch' && inputs.operation == 'both' && needs.generate.result == 'success')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      models: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Verify the successful 05:45 pages deployment
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'send')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python .github/scripts/verify-daily-pages-artifact.py
+
+      - name: Validate briefing configuration
+        env:
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: >-
+          bash .github/scripts/require-env.sh
+          ACTIVIST_API_URL ACTIVIST_API_SECRET
+          TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID
+
+      - name: Send daily report message
+        env:
+          CURATOR_DATA_SOURCE: mysql
+          CURATOR_DELIVERY_MODE: outbox-enqueue
+          GITHUB_TOKEN: ${{ github.token }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+          ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$(python -m curator.daily_report)"
+          printf '%s\n' "$output"
+          if ! grep -q 'daily_report_queued=1' <<<"$output"; then
+            echo "::error::Daily report was not accepted by the delivery outbox."
+            exit 1
+          fi

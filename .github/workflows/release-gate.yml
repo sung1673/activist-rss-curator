@@ -1,0 +1,133 @@
+name: Governance release transition gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      evidence_run_id:
+        description: Workflow run ID containing the production evidence artifact
+        required: true
+        type: string
+      evidence_artifact_name:
+        description: Artifact containing shadow.jsonl, operations.jsonl, performance.jsonl, benchmark.json
+        required: true
+        default: governance-release-evidence
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: governance-release-transition-gate
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout evaluated revision
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate production evidence run provenance
+        id: evidence_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+          EXPECTED_SHA: ${{ github.sha }}
+          MAX_RUN_AGE_HOURS: "72"
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$EVIDENCE_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::evidence_run_id must contain digits only."
+            exit 1
+          fi
+          IFS=$'\t' read -r conclusion head_sha created_at < <(
+            gh api "repos/$GH_REPO/actions/runs/$EVIDENCE_RUN_ID" \
+              --jq '[.conclusion, .head_sha, .created_at] | @tsv'
+          )
+          if [[ "$conclusion" != "success" ]]; then
+            echo "::error::Evidence workflow run did not conclude successfully."
+            exit 1
+          fi
+          if [[ "${head_sha,,}" != "${EXPECTED_SHA,,}" ]]; then
+            echo "::error::Evidence workflow run revision does not match the evaluated revision."
+            exit 1
+          fi
+          EVIDENCE_CREATED_AT="$created_at" python - <<'PY'
+          import os
+          from datetime import datetime, timezone
+
+          created = datetime.fromisoformat(os.environ["EVIDENCE_CREATED_AT"].replace("Z", "+00:00"))
+          age_hours = (datetime.now(timezone.utc) - created.astimezone(timezone.utc)).total_seconds() / 3600
+          maximum = float(os.environ["MAX_RUN_AGE_HOURS"])
+          if age_hours < -0.1 or age_hours > maximum:
+              raise SystemExit(
+                  f"evidence workflow run age {age_hours:.1f}h is outside the 0-{maximum:.0f}h release window"
+              )
+          PY
+          echo "created_at=$created_at" >> "$GITHUB_OUTPUT"
+
+      - name: Download production evidence
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.evidence_artifact_name }}
+          path: evidence
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.evidence_run_id }}
+          digest-mismatch: error
+
+      - name: Verify evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in shadow.jsonl operations.jsonl performance.jsonl benchmark.json; do
+            test -s "evidence/$file" || {
+              echo "::error::Missing or empty evidence/$file"
+              exit 1
+            }
+          done
+
+      - name: Evaluate release transition gate
+        id: release_gate
+        continue-on-error: true
+        run: >-
+          python -m curator.release_gate
+          --shadow evidence/shadow.jsonl
+          --operations evidence/operations.jsonl
+          --performance evidence/performance.jsonl
+          --benchmark evidence/benchmark.json
+          --expected-revision ${{ github.sha }}
+          --evidence-as-of ${{ steps.evidence_run.outputs.created_at }}
+          --output release-report/release-gate.json
+          --shadow-output release-report/shadow-comparison.json
+
+      - name: Preserve release decision and shadow report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: governance-release-decision-${{ github.run_id }}
+          path: release-report
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Enforce release decision
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.release_gate.outcome }}" != "success" ]]; then
+            echo "::error::Governance release transition gate did not pass."
+            exit 1
+          fi

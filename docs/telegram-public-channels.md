@@ -205,28 +205,28 @@ PHP API 업데이트 전에도 DB 적재 병목을 줄이려면 로컬에서 직
 
 GitHub Pages가 공개 페이지이므로 비밀값, session, raw_json 전문, 관리자 쓰기 기능은 노출하지 않습니다. `telegram-admin.html`은 관리자 token gate를 통과하기 전까지 정적 fallback 데이터도 비운 상태로 렌더링합니다. PHP API도 대시보드 응답에서는 집계값, 채널별 건수, 공개-safe 이슈 신호만 반환하고 메시지 전문이나 raw_json을 반환하지 않습니다. 채널 승인/비활성화/백필 실행은 CLI 또는 내부 API에서만 수행합니다.
 
-### telegram-admin 접근 승인
+### telegram-admin 접근
 
-`public/feed/telegram-admin.html`은 정적 GitHub Pages에 배포되므로 서버 세션 기반 로그인은 사용할 수 없습니다. 대신 운영 페이지는 관리자 token gate를 먼저 통과해야 내용을 렌더링하고, Telegram bot이 승인 링크를 채널에 발송하는 방식으로 접근을 제한합니다.
+`public/feed/telegram-admin.html`은 정적 GitHub Pages에 배포되므로 서버 세션 기반 로그인은 사용할 수 없습니다. 운영 페이지는 고정 URL로만 안내하고 관리자 token gate를 통과한 뒤에만 내용을 렌더링합니다. 비공개 Telegram 관리자 채팅, Telegram을 통한 승인 링크 발송, token이 포함된 URL은 사용하지 않습니다.
 
 권장 설정:
 
 - GitHub Secret `TELEGRAM_ADMIN_ACCESS_TOKEN`에 충분히 긴 임의 token을 저장합니다.
-- workflow 수동 실행에서 `send_telegram_admin_access`를 켜거나 매일 정기 실행 시 bot이 승인 링크를 채널에 발송합니다.
+- `TELEGRAM_ADMIN_CHAT_ID`는 등록하지 않으며 workflow에도 관리자 채팅 발송 입력을 두지 않습니다.
+- 관리자는 고정 URL `https://news.bside.ai/feed/telegram-admin.html`을 직접 열고 `TELEGRAM_ADMIN_ACCESS_TOKEN`을 입력합니다. token은 query string, URL fragment, Telegram 메시지, Actions 로그, artifact, job summary에 넣지 않습니다.
+- legacy·신규 Pages workflow는 배포 전에 token-gated 관리자 셸을 생성하며 `TELEGRAM_ADMIN_ACCESS_TOKEN` 또는 `ACTIVIST_PUBLIC_API_URL`이 없으면 배포를 실패시킵니다. 코드 수준에서도 token hash가 없으면 정적 데이터는 0건으로 비우고 화면을 잠근 상태로 유지합니다.
 - PHP API 서버의 `_private/config.php`에는 같은 token의 SHA-256 값인 `telegram_admin_access_token_hash`를 넣으면 `telegram_dashboard` API도 token 없이는 403을 반환합니다.
 - `telegram_admin_access_token_hash`가 서버에 없으면 안전을 위해 `telegram_dashboard` API는 닫힌 상태로 응답합니다. 서버 배포 후 `_private/config.php`에 token hash를 반드시 설정해야 DB 기반 관리자 대시보드가 열립니다.
+- 브라우저는 token을 영구 저장하지 않고 현재 탭의 session storage에만 보관하며, 잠금 또는 탭 종료 시 제거합니다.
+- 정적 `story-review.html`과 관련 메타데이터는 인증된 서버 측 편집 UI가 마련될 때까지 공개 Pages artifact에서 제외합니다.
 
-로컬/수동 발송:
-
-```powershell
-.\.venv\Scripts\python.exe -m curator.telegram_dashboard send-access
-```
+공개 콘텐츠 발송은 이 관리자 접근 정책과 별개입니다. `TELEGRAM_BOT_TOKEN`과 `TELEGRAM_CHAT_ID`를 사용하는 공개 채널 발송은 계속 유지합니다.
 
 보안 한계:
 
 - GitHub Pages는 정적 호스팅이므로 진짜 계정 로그인/세션을 제공하지 않습니다.
 - API 서버에 `telegram_admin_access_token_hash`를 설정해야 DB 기반 대시보드 응답도 보호됩니다.
-- token 링크를 받은 채널 구성원은 해당 링크로 접근할 수 있으므로 token은 주기적으로 교체하는 것이 좋습니다.
+- 고정 URL 자체는 비밀이 아니며 접근 권한은 token과 API의 서버 측 검증으로 통제합니다. token은 충분히 긴 무작위 값으로 만들고 주기적으로 교체합니다.
 
 채널 품질 점수는 두 단계로 봅니다.
 

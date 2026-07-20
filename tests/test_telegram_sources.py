@@ -13,6 +13,7 @@ from curator.telegram_sources import (
     auto_join_candidates,
     backfill_telegram_messages,
     canonicalize_telegram_url,
+    canonicalize_telegram_channels,
     channel_quality_metrics,
     collect_telegram_sources,
     extract_urls,
@@ -25,6 +26,7 @@ from curator.telegram_sources import (
     normalize_telegram_message,
     ordered_message_tokens,
     parse_handle_list,
+    pending_remote_messages,
     rematch_telegram_articles,
     reconcile_recent_deletions,
     score_channel_candidate,
@@ -32,6 +34,7 @@ from curator.telegram_sources import (
     telegram_issue_signals,
     telegram_run_record,
     telegram_state_stats,
+    sync_telegram_to_remote_api,
     upsert_telegram_message,
 )
 
@@ -114,7 +117,43 @@ def telegram_config(config: dict[str, object]) -> dict[str, object]:
         "discover_enabled": False,
         "auto_join_enabled": False,
     }
+    config["source_rights"] = {
+        "enforce": True,
+        "records": [
+            {
+                "source_right_id": "telegram:marketnews",
+                "source_category": "authorized_telegram",
+                "source_identity": "marketnews",
+                "scope": "collection,ai,redistribution",
+                "evidence_ref": "evidence://test/marketnews",
+                "valid_from": "2021-01-01",
+                "allow_ai": True,
+                "allow_redistribution": True,
+                "status": "active",
+            }
+        ],
+    }
     return config
+
+
+def authorize_telegram_handles(config: dict[str, object], *handles: str) -> None:
+    config["source_rights"] = {
+        "enforce": True,
+        "records": [
+            {
+                "source_right_id": f"telegram:{handle}",
+                "source_category": "authorized_telegram",
+                "source_identity": handle,
+                "scope": "collection,ai,redistribution",
+                "evidence_ref": f"evidence://test/{handle}",
+                "valid_from": "2021-01-01",
+                "allow_ai": True,
+                "allow_redistribution": True,
+                "status": "active",
+            }
+            for handle in handles
+        ],
+    }
 
 
 def test_extract_urls_strips_trailing_punctuation() -> None:
@@ -150,8 +189,13 @@ def test_telegram_candidate_articles_promotes_reference_channel_urls(config, now
         "candidate_window_hours": 168,
         "candidate_limit_per_run": 10,
     }
+    authorize_telegram_handles(config, "activistkorea")
     message = normalize_telegram_message(
-        {"handle": "activistkorea", "title": "Activist Korea"},
+        {
+            "handle": "activistkorea",
+            "title": "Activist Korea",
+            "source_right_id": "telegram:activistkorea",
+        },
         {
             "id": 10,
             "date": now,
@@ -167,6 +211,7 @@ def test_telegram_candidate_articles_promotes_reference_channel_urls(config, now
     assert candidates[0]["canonical_url"] == "https://example.com/article"
     assert candidates[0]["telegram_candidate"] is True
     assert candidates[0]["feed_name"] == "Telegram:activistkorea"
+    assert candidates[0]["source_right_id"] == "telegram:activistkorea"
 
 
 def test_telegram_message_upsert_prevents_duplicates_and_tracks_edits(now) -> None:  # type: ignore[no-untyped-def]
@@ -180,6 +225,204 @@ def test_telegram_message_upsert_prevents_duplicates_and_tracks_edits(now) -> No
     assert upsert_telegram_message(state, edited) == "updated"
     assert len(state["telegram_source_messages"]) == 1  # type: ignore[index]
     assert state["telegram_source_messages"][0]["text"] == "수정 메시지"  # type: ignore[index]
+
+
+def test_channel_identity_migrates_handle_only_rows_messages_and_matches(now) -> None:  # type: ignore[no-untyped-def]
+    state: dict[str, object] = {
+        "telegram_source_channels": [
+            {"handle": "marketnews", "telegram_channel_id": "100", "last_message_id": 7},
+            {"handle": "MarketNews", "last_message_id": 4},
+        ],
+        "telegram_source_messages": [
+            normalize_telegram_message({"handle": "MarketNews"}, {"id": 7, "text": "message"}, now)
+        ],
+        "telegram_article_matches": [
+            {
+                "article_id": "a1",
+                "telegram_message_key": "handle:MarketNews:7",
+                "channel_handle": "MarketNews",
+            }
+        ],
+    }
+
+    removed = canonicalize_telegram_channels(state)
+
+    assert removed == 1
+    assert len(state["telegram_source_channels"]) == 1
+    channel = state["telegram_source_channels"][0]
+    assert channel["telegram_channel_id"] == "100"
+    assert channel["last_message_id"] == 7
+    assert message_key(state["telegram_source_messages"][0]) == "id:100:7"
+    assert state["telegram_article_matches"][0]["telegram_message_key"] == "id:100:7"
+
+
+def test_conflicting_authoritative_channel_ids_are_not_merged(now) -> None:  # type: ignore[no-untyped-def]
+    state: dict[str, object] = {
+        "telegram_source_channels": [
+            {"handle": "reused_handle", "telegram_channel_id": "100"},
+            {"handle": "reused_handle", "telegram_channel_id": "200"},
+        ],
+        "telegram_source_messages": [
+            normalize_telegram_message(
+                {"handle": "reused_handle", "telegram_channel_id": channel_id},
+                {"id": 1, "text": channel_id},
+                now,
+            )
+            for channel_id in ("100", "200")
+        ],
+    }
+
+    assert canonicalize_telegram_channels(state) == 0
+    assert len(state["telegram_source_channels"]) == 2
+    assert {message_key(message) for message in state["telegram_source_messages"]} == {"id:100:1", "id:200:1"}
+
+
+def test_reassigned_handle_disables_stale_channel_identity(config, now) -> None:  # type: ignore[no-untyped-def]
+    telegram_config(config)
+    state: dict[str, object] = {
+        "telegram_source_channels": [
+            {"handle": "marketnews", "telegram_channel_id": "old-id", "last_message_id": 1, "enabled": True}
+        ]
+    }
+    client = FakeTelegramClient({"marketnews": [{"id": 2, "text": "message"}]})
+
+    summary = collect_telegram_sources(state, config, now, client=client)
+
+    assert summary["telegram_messages_inserted"] == 1
+    stale = next(channel for channel in state["telegram_source_channels"] if channel["telegram_channel_id"] == "old-id")
+    current = next(
+        channel for channel in state["telegram_source_channels"] if channel["telegram_channel_id"] == "id-marketnews"
+    )
+    assert stale["enabled"] is False
+    assert stale["last_error"] == "channel_identity_reassigned"
+    assert current["enabled"] is True
+
+
+def test_incremental_collection_exhausts_more_than_one_thousand_messages(config, now) -> None:  # type: ignore[no-untyped-def]
+    telegram_config(config)
+    config["telegram_sources"]["incremental_limit"] = 200
+    state: dict[str, object] = {
+        "telegram_source_channels": [
+            {"handle": "marketnews", "telegram_channel_id": "id-marketnews", "last_message_id": 1, "enabled": True}
+        ]
+    }
+    client = FakeTelegramClient(
+        {"marketnews": [{"id": message_id, "text": f"message {message_id}"} for message_id in range(2, 1003)]}
+    )
+
+    summary = collect_telegram_sources(state, config, now, client=client)
+
+    assert summary["telegram_messages_inserted"] == 1001
+    assert summary["telegram_incremental_pages"] == 6
+    assert state["telegram_source_channels"][0]["last_message_id"] == 1002
+    assert len(state["telegram_source_messages"]) == 1001
+
+
+def test_remote_sync_batches_all_pending_messages_and_advances_cursor(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import telegram_sources
+
+    telegram_config(config)
+    config["telegram_sources"]["remote_batch_size"] = 300
+    channel = {"handle": "marketnews", "telegram_channel_id": "100"}
+    messages = [
+        normalize_telegram_message(channel, {"id": message_id, "text": f"message {message_id}"}, now)
+        for message_id in range(1, 1002)
+    ]
+    state: dict[str, object] = {"telegram_source_messages": messages}
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(telegram_sources, "remote_api_configured", lambda: True)
+
+    def fake_post(_action, payload):  # type: ignore[no-untyped-def]
+        calls.append(payload)
+        return {"ok": True, "messages": len(payload["messages"]), "article_matches": 0}
+
+    monkeypatch.setattr(telegram_sources, "post_remote_action", fake_post)
+
+    summary = sync_telegram_to_remote_api(state, config)
+
+    assert [len(payload["messages"]) for payload in calls] == [300, 300, 300, 101]
+    assert summary["telegram_remote_messages"] == 1001
+    assert summary["telegram_remote_pending"] == 0
+    assert pending_remote_messages(state) == []
+    assert state["telegram_remote_sync_cursors"]["id:100"] == 1001
+
+
+def test_remote_partial_ack_does_not_advance_cursor(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import telegram_sources
+
+    telegram_config(config)
+    channel = {"handle": "marketnews", "telegram_channel_id": "100"}
+    state: dict[str, object] = {
+        "telegram_source_messages": [
+            normalize_telegram_message(channel, {"id": message_id, "text": "message"}, now)
+            for message_id in range(1, 4)
+        ]
+    }
+    monkeypatch.setattr(telegram_sources, "remote_api_configured", lambda: True)
+    monkeypatch.setattr(
+        telegram_sources,
+        "post_remote_action",
+        lambda *_args, **_kwargs: {"ok": True, "messages": 2, "article_matches": 0},
+    )
+
+    summary = sync_telegram_to_remote_api(state, config)
+
+    assert summary["telegram_remote_failed"] == 1
+    assert summary["telegram_remote_last_error"] == "remote_partial_message_ack"
+    assert summary["telegram_remote_pending"] == 3
+    assert state["telegram_remote_sync_cursors"] == {}
+
+
+def test_remote_chunk_failure_advances_only_through_durable_channel_cursor(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import telegram_sources
+
+    telegram_config(config)
+    config["telegram_sources"]["remote_batch_size"] = 300
+    channel = {"handle": "marketnews", "telegram_channel_id": "100", "last_message_id": 400, "enabled": True}
+    state: dict[str, object] = {
+        "telegram_source_channels": [channel],
+        "telegram_source_messages": [
+            normalize_telegram_message(channel, {"id": message_id, "text": "message"}, now)
+            for message_id in range(1, 401)
+        ],
+    }
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(telegram_sources, "remote_api_configured", lambda: True)
+
+    def fake_post(_action, payload):  # type: ignore[no-untyped-def]
+        calls.append(payload)
+        if len(calls) == 2:
+            return {"ok": False, "error": "db_unavailable"}
+        return {"ok": True, "messages": len(payload["messages"]), "article_matches": 0}
+
+    monkeypatch.setattr(telegram_sources, "post_remote_action", fake_post)
+
+    summary = sync_telegram_to_remote_api(state, config)
+
+    assert summary["telegram_remote_failed"] == 1
+    assert state["telegram_remote_sync_cursors"]["id:100"] == 300
+    assert summary["telegram_remote_pending"] == 100
+    assert calls[0]["channels"][0]["last_message_id"] == 300
+    assert calls[1]["channels"][0]["last_message_id"] == 400
+
+
+def test_newly_registered_channel_is_rights_checked_before_client_access(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["telegram_sources"] = {
+        "enabled": True,
+        "channels": [{"handle": "unlicensed"}],
+        "discover_enabled": False,
+        "auto_join_enabled": False,
+    }
+    config["source_rights"] = {"enforce": True, "records": []}
+    client = FakeTelegramClient({"unlicensed": [{"id": 1, "text": "must not be collected"}]})
+    state: dict[str, object] = {}
+
+    summary = collect_telegram_sources(state, config, now, client=client)
+
+    assert summary["telegram_source_rights_blocked"] == 1
+    assert summary.get("telegram_messages_inserted", 0) == 0
+    assert state["telegram_source_channels"][0]["source_right_blocked"] is True
+    assert state["telegram_source_messages"] == []
 
 
 def test_article_url_direct_matching(config, now) -> None:  # type: ignore[no-untyped-def]
@@ -257,6 +500,7 @@ def test_telegram_issue_signals_include_topic_bursts(config, now) -> None:  # ty
         "signal_min_channels": 2,
         "signal_limit": 10,
     }  # type: ignore[index]
+    authorize_telegram_handles(config, "first", "second")
     state = {
         "telegram_source_messages": [
             normalize_telegram_message({"handle": "first"}, {"id": 1, "text": "삼성전자 자사주 소각 주주환원 이슈", "date": now}, now),
@@ -294,6 +538,7 @@ def test_telegram_topic_burst_does_not_treat_interface_board_as_governance(confi
         "signal_min_channels": 2,
         "signal_limit": 10,
     }  # type: ignore[index]
+    authorize_telegram_handles(config, "first", "second")
     state = {
         "telegram_source_messages": [
             normalize_telegram_message(
@@ -321,6 +566,7 @@ def test_telegram_topic_burst_ignores_disclosure_template_tokens(config, now) ->
         "signal_min_channels": 2,
         "signal_limit": 10,
     }  # type: ignore[index]
+    authorize_telegram_handles(config, "first", "second", "third")
     state = {
         "telegram_source_messages": [
             normalize_telegram_message(
@@ -367,6 +613,7 @@ def test_telegram_topic_burst_keeps_governance_board_context(config, now) -> Non
         "signal_min_channels": 2,
         "signal_limit": 10,
     }  # type: ignore[index]
+    authorize_telegram_handles(config, "first", "second")
     state = {
         "telegram_source_messages": [
             normalize_telegram_message(
@@ -394,6 +641,7 @@ def test_telegram_issue_signals_include_url_bursts(config, now) -> None:  # type
         "signal_min_channels": 2,
         "signal_limit": 10,
     }  # type: ignore[index]
+    authorize_telegram_handles(config, "first", "second")
     state = {
         "telegram_source_messages": [
             normalize_telegram_message({"handle": "first"}, {"id": 1, "text": "공유 https://example.com/a?utm_source=tg", "date": now}, now),
@@ -404,6 +652,35 @@ def test_telegram_issue_signals_include_url_bursts(config, now) -> None:  # type
     signals = telegram_issue_signals(state, config, now=now)
 
     assert any(signal.get("signal_type") == "url_burst" for signal in signals)
+
+
+def test_telegram_signals_keep_right_lineage_and_drop_revoked_inputs(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["telegram_sources"] = {
+        "signal_window_hours": 72,
+        "signal_min_messages": 2,
+        "signal_min_channels": 2,
+        "signal_limit": 10,
+    }
+    authorize_telegram_handles(config, "first", "second")
+    active_messages = [
+        normalize_telegram_message(
+            {"handle": handle, "source_right_id": f"telegram:{handle}"},
+            {"id": index, "text": f"공유 https://example.com/a?utm_source={handle}", "date": now},
+            now,
+        )
+        for index, handle in enumerate(("first", "second"), start=1)
+    ]
+
+    signals = telegram_issue_signals({"telegram_source_messages": active_messages}, config, now=now)
+    url_signal = next(signal for signal in signals if signal.get("signal_type") == "url_burst")
+    assert url_signal["source_kind"] == "telegram_signal"
+    assert url_signal["source_right_ids"] == ["telegram:first", "telegram:second"]
+    assert {
+        message["source_right_id"] for message in url_signal["top_related_messages"]
+    } == {"telegram:first", "telegram:second"}
+
+    config["source_rights"]["records"][1]["revoked_at"] = now.date().isoformat()  # type: ignore[index]
+    assert telegram_issue_signals({"telegram_source_messages": active_messages}, config, now=now) == []
 
 
 def test_channel_quality_metrics_uses_matches_and_risk_flags(now) -> None:  # type: ignore[no-untyped-def]
@@ -567,6 +844,21 @@ def test_floodwait_marks_channel_failure_and_continues(config, now) -> None:  # 
         "channels": [{"handle": "slow"}, {"handle": "marketnews"}],
         "backfill_limit": 100,
         "incremental_limit": 200,
+    }
+    config["source_rights"] = {
+        "enforce": True,
+        "records": [
+            {
+                "source_right_id": f"telegram:{handle}",
+                "source_category": "authorized_telegram",
+                "source_identity": handle,
+                "scope": "collection",
+                "evidence_ref": f"evidence://test/{handle}",
+                "valid_from": "2021-01-01",
+                "status": "active",
+            }
+            for handle in ("slow", "marketnews")
+        ],
     }
     state = {"articles": []}
     client = FakeTelegramClient({"marketnews": [{"id": 1, "text": "정상 메시지"}]}, fail_handles={"slow"})

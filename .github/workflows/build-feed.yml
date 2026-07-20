@@ -61,14 +61,9 @@ on:
         required: false
         type: boolean
         default: false
-      send_telegram_admin_access:
-        description: "Send a Telegram approval link for telegram-admin"
-        required: false
-        type: boolean
-        default: false
 
 permissions:
-  contents: write
+  contents: read
   models: read
   pages: write
   id-token: write
@@ -79,14 +74,16 @@ concurrency:
 
 jobs:
   build-feed:
+    if: vars.ENABLE_LEGACY_PIPELINE != 'false'
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
+      url: ${{ steps.pages_deployment_result.outputs.page_url }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 2
 
@@ -98,6 +95,10 @@ jobs:
           EVENT_BEFORE: ${{ github.event.before }}
           COMMIT_MESSAGE: ${{ github.event.head_commit.message || '' }}
           DISPATCH_MODE: ${{ github.event.inputs.run_mode || 'auto' }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          LEGACY_PAGES_ENABLED: ${{ vars.ENABLE_PAGES }}
+          GOVERNANCE_PAGES_ENABLED: ${{ vars.ENABLE_GOVERNANCE_PAGES }}
         run: |
           set -euo pipefail
 
@@ -120,7 +121,7 @@ jobs:
                 ;;
             esac
           elif [[ "$EVENT_NAME" == "push" ]]; then
-            if [[ "$COMMIT_MESSAGE" == *"[page-only]"* ]]; then
+            if [[ "$COMMIT_MESSAGE" == *"[page-only]"* || "$COMMIT_MESSAGE" == *"[send-daily-report]"* ]]; then
               page_run=true
             elif [[ "$COMMIT_MESSAGE" == *"[force-collect]"* || "$COMMIT_MESSAGE" == *"[send-regular-update]"* ]]; then
               full_run=true
@@ -155,23 +156,24 @@ jobs:
             fi
           fi
 
+          if [[ "$LEGACY_PAGES_ENABLED" == "true" && "$GOVERNANCE_PAGES_ENABLED" == "true" ]]; then
+            echo "::error::ENABLE_PAGES and ENABLE_GOVERNANCE_PAGES are mutually exclusive."
+            exit 1
+          fi
+
+          deploy_pages=false
+          if [[ "$REF_NAME" == "$DEFAULT_BRANCH" && "$LEGACY_PAGES_ENABLED" == "true" && "$GOVERNANCE_PAGES_ENABLED" != "true" && ( "$full_run" == "true" || "$page_run" == "true" ) ]]; then
+            deploy_pages=true
+          elif [[ "$REF_NAME" != "$DEFAULT_BRANCH" && "$LEGACY_PAGES_ENABLED" == "true" && ( "$full_run" == "true" || "$page_run" == "true" ) ]]; then
+            echo "::notice::Pages deployment is restricted to the default branch ($DEFAULT_BRANCH)."
+          fi
           echo "full=$full_run" >> "$GITHUB_OUTPUT"
           echo "page=$page_run" >> "$GITHUB_OUTPUT"
-          echo "Run mode: full=$full_run page=$page_run"
-
-      - name: Refresh checkout to latest branch head
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          branch="${GITHUB_REF#refs/heads/}"
-          git config --local --unset-all http.https://github.com/.extraheader || true
-          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git fetch --no-tags origin "$branch"
-          git reset --hard "origin/$branch"
+          echo "deploy_pages=$deploy_pages" >> "$GITHUB_OUTPUT"
+          echo "Run mode: full=$full_run page=$page_run deploy_pages=$deploy_pages"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -182,7 +184,7 @@ jobs:
         run: pytest
 
       - name: Send Telegram smoke test
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.send_telegram_test }}
+        if: ${{ vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && github.event_name == 'workflow_dispatch' && inputs.send_telegram_test }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -192,6 +194,9 @@ jobs:
         if: ${{ steps.run_mode.outputs.full == 'true' }}
         env:
           CURATOR_FEEDS: ${{ secrets.CURATOR_FEEDS }}
+          CURATOR_DATA_SOURCE: mysql
+          CURATOR_REQUIRE_REMOTE_API: "1"
+          CURATOR_DELIVERY_MODE: ${{ vars.ENABLE_GOVERNANCE_DELIVERY == 'true' && 'disabled' || 'legacy-direct' }}
           CURATOR_EVENT_SCHEDULE: ${{ github.event.schedule }}
           CURATOR_DISABLE_TELEGRAM_SEND: ${{ github.event_name == 'push' && ! contains(github.event.head_commit.message, '[send-regular-update]') && '1' || '' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -208,8 +213,10 @@ jobs:
         run: python -m curator.main
 
       - name: Build daily report page
-        if: ${{ steps.run_mode.outputs.page == 'true' || (github.event_name == 'schedule' && github.event.schedule == '0 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]')) }}
+        if: ${{ steps.run_mode.outputs.full == 'true' || steps.run_mode.outputs.page == 'true' }}
         env:
+          CURATOR_DATA_SOURCE: mysql
+          CURATOR_REQUIRE_REMOTE_API: "1"
           CURATOR_DAILY_REPORT_WRITE_ONLY: "1"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           STORY_REVIEW_ACCESS_TOKEN: ${{ secrets.STORY_REVIEW_ACCESS_TOKEN }}
@@ -219,8 +226,19 @@ jobs:
           ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
         run: python -m curator.daily_report
 
+      - name: Build token-gated Telegram admin shell
+        if: ${{ steps.run_mode.outputs.full == 'true' || steps.run_mode.outputs.page == 'true' }}
+        env:
+          TELEGRAM_ADMIN_ACCESS_TOKEN: ${{ secrets.TELEGRAM_ADMIN_ACCESS_TOKEN }}
+          ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash .github/scripts/require-env.sh TELEGRAM_ADMIN_ACCESS_TOKEN ACTIVIST_PUBLIC_API_URL
+          python -m curator.telegram_dashboard write
+
       - name: Resend last Telegram briefing
-        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.resend_last_briefing) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[resend-last-briefing]')) }}
+        if: ${{ vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && ((github.event_name == 'workflow_dispatch' && inputs.resend_last_briefing) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[resend-last-briefing]'))) }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -228,7 +246,7 @@ jobs:
         run: python -m curator.telegram_resend_digest
 
       - name: Resend recent Telegram articles
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.resend_recent_articles }}
+        if: ${{ vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && github.event_name == 'workflow_dispatch' && inputs.resend_recent_articles }}
         env:
           TELEGRAM_RESEND_COUNT: ${{ inputs.resend_recent_article_count }}
           TELEGRAM_RESEND_GUID: ${{ inputs.resend_cluster_guid }}
@@ -236,61 +254,116 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m curator.telegram_resend
 
-      - name: Commit generated files
-        run: |
-          bash .github/scripts/commit-generated-changes.sh \
-            "Update curated RSS feed" \
-            public/CNAME \
-            public/404.html \
-            public/feed.xml \
-            public/index.html \
-            public/feed \
-            data/state.json \
-            data/archive \
-            data/priority_overrides.yaml
-
       - name: Configure Pages
-        if: vars.ENABLE_PAGES == 'true'
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
+        if: steps.run_mode.outputs.deploy_pages == 'true'
+        uses: actions/configure-pages@v6
 
       - name: Upload Pages artifact
-        if: vars.ENABLE_PAGES == 'true'
-        uses: actions/upload-pages-artifact@v3
+        if: steps.run_mode.outputs.deploy_pages == 'true'
+        id: pages_artifact
+        uses: actions/upload-pages-artifact@v5
         with:
+          name: github-pages
           path: public
 
       - name: Deploy to GitHub Pages
-        if: vars.ENABLE_PAGES == 'true'
+        if: steps.run_mode.outputs.deploy_pages == 'true'
         id: deployment
         continue-on-error: true
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
+        with:
+          artifact_name: github-pages
 
-      - name: Wait before retrying Pages deployment
-        if: ${{ vars.ENABLE_PAGES == 'true' && steps.deployment.outcome == 'failure' }}
+      - name: Wait before first Pages retry
+        if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' }}
         run: sleep 180
 
-      - name: Retry GitHub Pages deployment
-        if: ${{ vars.ENABLE_PAGES == 'true' && steps.deployment.outcome == 'failure' }}
+      - name: Retry GitHub Pages deployment (2/3)
+        if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' }}
         id: deployment_retry
         continue-on-error: true
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
+        with:
+          artifact_name: github-pages
+
+      - name: Wait before final Pages retry
+        if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' && steps.deployment_retry.outcome == 'failure' }}
+        run: sleep 300
+
+      - name: Retry GitHub Pages deployment (3/3)
+        if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' && steps.deployment_retry.outcome == 'failure' }}
+        id: deployment_retry_final
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+        with:
+          artifact_name: github-pages
 
       - name: Verify GitHub Pages deployment
-        if: vars.ENABLE_PAGES == 'true'
+        if: ${{ !cancelled() && steps.run_mode.outputs.deploy_pages == 'true' }}
+        id: pages_deployment_result
         shell: bash
+        env:
+          DEPLOYMENT_OUTCOME_1: ${{ steps.deployment.outcome }}
+          DEPLOYMENT_OUTCOME_2: ${{ steps.deployment_retry.outcome }}
+          DEPLOYMENT_OUTCOME_3: ${{ steps.deployment_retry_final.outcome }}
+          DEPLOYMENT_URL_1: ${{ steps.deployment.outputs.page_url }}
+          DEPLOYMENT_URL_2: ${{ steps.deployment_retry.outputs.page_url }}
+          DEPLOYMENT_URL_3: ${{ steps.deployment_retry_final.outputs.page_url }}
+          PAGES_ARTIFACT_ID: ${{ steps.pages_artifact.outputs.artifact_id }}
         run: |
           set -euo pipefail
-          if [[ "${{ steps.deployment.outcome }}" == "success" || "${{ steps.deployment_retry.outcome }}" == "success" ]]; then
-            exit 0
+
+          selected_attempt=""
+          selected_url=""
+          if [[ "$DEPLOYMENT_OUTCOME_1" == "success" && -n "$DEPLOYMENT_URL_1" ]]; then
+            selected_attempt="1"
+            selected_url="$DEPLOYMENT_URL_1"
+          elif [[ "$DEPLOYMENT_OUTCOME_2" == "success" && -n "$DEPLOYMENT_URL_2" ]]; then
+            selected_attempt="2"
+            selected_url="$DEPLOYMENT_URL_2"
+          elif [[ "$DEPLOYMENT_OUTCOME_3" == "success" && -n "$DEPLOYMENT_URL_3" ]]; then
+            selected_attempt="3"
+            selected_url="$DEPLOYMENT_URL_3"
           fi
-          echo "GitHub Pages deployment failed after retry."
-          exit 1
+
+          {
+            echo "### GitHub Pages deployment"
+            echo ""
+            echo "| Attempt | Outcome |"
+            echo "|---:|---|"
+            echo "| 1 | ${DEPLOYMENT_OUTCOME_1:-not-run} |"
+            echo "| 2 | ${DEPLOYMENT_OUTCOME_2:-not-run} |"
+            echo "| 3 | ${DEPLOYMENT_OUTCOME_3:-not-run} |"
+            echo ""
+            echo "Artifact: \`github-pages\` (ID: ${PAGES_ARTIFACT_ID:-unavailable})"
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ -z "$selected_attempt" ]]; then
+            echo "::error::GitHub Pages deployment failed after three attempts."
+            exit 1
+          fi
+
+          echo "page_url=$selected_url" >> "$GITHUB_OUTPUT"
+          echo "attempt=$selected_attempt" >> "$GITHUB_OUTPUT"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Succeeded on attempt $selected_attempt: $selected_url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve failed Pages artifact
+        if: ${{ !cancelled() && steps.run_mode.outputs.deploy_pages == 'true' && steps.pages_deployment_result.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: pages-failed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: public
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Send daily report message
-        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]')) }}
+        if: ${{ vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && ((github.event_name == 'schedule' && github.event.schedule == '0 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]'))) }}
         env:
+          CURATOR_DATA_SOURCE: mysql
+          CURATOR_REQUIRE_REMOTE_API: "1"
+          CURATOR_DELIVERY_MODE: legacy-direct
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -298,19 +371,3 @@ jobs:
           ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
           ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
         run: python -m curator.daily_report
-
-      - name: Send story review message
-        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]')) }}
-        env:
-          STORY_REVIEW_ACCESS_TOKEN: ${{ secrets.STORY_REVIEW_ACCESS_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m curator.story_review send
-
-      - name: Send Telegram admin approval link
-        if: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.send_telegram_admin_access) }}
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_ADMIN_ACCESS_TOKEN: ${{ secrets.TELEGRAM_ADMIN_ACCESS_TOKEN }}
-        run: python -m curator.telegram_dashboard send-access

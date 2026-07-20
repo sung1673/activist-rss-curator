@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://news.bside.ai/schemas/same-story-pair.schema.json",
+  "title": "BSIDE same-story benchmark article pair",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task",
+    "pair_id",
+    "left",
+    "right",
+    "label",
+    "label_source",
+    "annotator_id",
+    "labeled_at"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "task": { "const": "same_story" },
+    "pair_id": { "type": "string", "minLength": 1 },
+    "left": { "$ref": "#/$defs/article" },
+    "right": { "$ref": "#/$defs/article" },
+    "label": {
+      "enum": ["same_story", "related_but_different", "different"]
+    },
+    "label_source": {
+      "description": "fixture is structural-test data and is rejected by release-gate mode.",
+      "enum": ["human", "adjudicated", "fixture"]
+    },
+    "annotator_id": { "type": "string", "minLength": 1 },
+    "labeled_at": { "type": "string", "format": "date-time" },
+    "notes": { "type": "string" }
+  },
+  "$defs": {
+    "article": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["article_id", "title", "published_at"],
+      "properties": {
+        "article_id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string" },
+        "published_at": { "type": "string", "format": "date-time" },
+        "canonical_url": { "type": "string", "format": "uri" },
+        "source": { "type": "string" },
+        "company_candidates": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "topic_keywords": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}
