@@ -33,28 +33,6 @@ def telegram_chat_id(config: dict[str, object]) -> str:
     return os.environ.get("TELEGRAM_CHAT_ID", "").strip() or str(telegram_config(config).get("chat_id") or "").strip()
 
 
-def telegram_admin_chat_id() -> str:
-    """Return the explicit private control-plane destination."""
-
-    return os.environ.get("TELEGRAM_ADMIN_CHAT_ID", "").strip()
-
-
-def telegram_admin_destination_error(config: dict[str, object]) -> str:
-    """Reject missing or public admin destinations without a fallback."""
-
-    admin_chat_id = telegram_admin_chat_id()
-    if not admin_chat_id:
-        return "telegram_admin_chat_id_missing"
-    if not admin_chat_id.isdigit() or int(admin_chat_id) <= 0:
-        return "telegram_admin_chat_id_must_be_private_user"
-    public_chat_id = telegram_chat_id(config)
-    if public_chat_id and admin_chat_id == public_chat_id:
-        return "telegram_admin_chat_matches_public_destination"
-    if not telegram_config(config).get("enabled", True) or not telegram_bot_token():
-        return "telegram_not_configured"
-    return ""
-
-
 def telegram_is_configured(config: dict[str, object]) -> bool:
     settings = telegram_config(config)
     return bool(settings.get("enabled", True) and telegram_bot_token() and telegram_chat_id(config))

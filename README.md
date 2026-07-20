@@ -82,7 +82,6 @@ KIND_API_KEY
 CURATOR_FEEDS
 TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID
-TELEGRAM_ADMIN_CHAT_ID
 STORY_REVIEW_ACCESS_TOKEN
 TELEGRAM_ADMIN_ACCESS_TOKEN
 TELEGRAM_API_ID
@@ -92,7 +91,7 @@ TELEGRAM_SESSION_STRING
 
 `KIND_API_KEY`는 내부 KIND 어댑터가 인증을 요구할 때만 추가하는 선택 Secret이다.
 
-`TELEGRAM_ADMIN_CHAT_ID`는 검수 링크 전용 비공개 1:1 사용자의 양수 numeric ID이며 공개 발송용 `TELEGRAM_CHAT_ID`와 달라야 한다. 누락되거나 형식이 다르거나 두 값이 같으면 토큰 포함 관리자 알림은 fail-closed한다.
+`TELEGRAM_CHAT_ID`는 공개 콘텐츠 발송 목적지로 계속 사용한다. 비공개 Telegram 관리자 채팅과 `TELEGRAM_ADMIN_CHAT_ID`는 사용하지 않으며, 관리자 token을 Telegram 메시지나 URL에 넣어 전달하지 않는다. 관리자는 고정 URL `https://news.bside.ai/feed/telegram-admin.html`을 열어 `TELEGRAM_ADMIN_ACCESS_TOKEN`을 직접 입력한다. 정적 `story-review.html`·메타데이터는 인증된 서버 측 편집 UI가 마련될 때까지 공개 Pages artifact에 포함하지 않는다.
 
 주요 Repository variable은 `ACTIVIST_PUBLIC_API_URL`, `GOVERNANCE_API_BASE_URL`, `KIND_DISCLOSURE_ENDPOINT`, `ENABLE_PAGES`와 단계별 전환 플래그다. 신규 파이프라인은 `ENABLE_GOVERNANCE_SHADOW`, `ENABLE_GOVERNANCE_PAGES`, `ENABLE_GOVERNANCE_DELIVERY`를 각각 명시적으로 `true`로 바꾸기 전에는 예약 실행·공개 배포·발송을 하지 않는다. 전체 목록과 예약 시각은 [운영 자동화 문서](docs/operations-automation.md)를 따른다.
 

@@ -23,7 +23,7 @@ from .rss_writer import article_link, article_source_label, compact_text, displa
 from .remote_api import post_remote_action, remote_api_configured, sync_report_to_remote_api
 from .remote_state import hydrate_runtime_state
 from .state import load_state
-from .story_review import build_story_review, write_story_review_files
+from .story_review import build_story_review
 from .telegram_sources import risk_flags_for_text
 from .summaries import (
     digest_article_identity_keys,
@@ -5873,11 +5873,12 @@ def write_report_files(report: dict[str, object], root: Path | None = None) -> l
     if workbench_path.exists():
         workbench_path.unlink()
     search_path.write_text(normalize_generated_html(str(report.get("search_html") or "")), encoding="utf-8", newline="\n")
-    review_paths = write_story_review_files(
-        report.get("story_review") if isinstance(report.get("story_review"), dict) else {},
-        project_root,
-        logo_html=bside_logo_html("bside-logo--top"),
-    )
+    # Candidate details must not be shipped in a static Pages artifact. The
+    # client-side token gate cannot protect data already embedded in HTML/JSON.
+    for private_review_name in ("story-review.html", "story-review-meta.json"):
+        private_review_path = feed_dir / private_review_name
+        if private_review_path.exists():
+            private_review_path.unlink()
     variant_dir = feed_dir / "variants"
     if variant_dir.exists():
         for stale_path in variant_dir.glob("*.html"):
@@ -5891,7 +5892,6 @@ def write_report_files(report: dict[str, object], root: Path | None = None) -> l
         telegram_path,
         search_path,
         index_path,
-        *review_paths,
         *refreshed_paths,
         *compatibility_paths,
     ]

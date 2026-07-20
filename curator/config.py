@@ -143,7 +143,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "min_score": 72,
         "max_candidates": 12,
         "benchmark_max_missing": 12,
-        "send_empty": False,
     },
     "archive": {
         "enabled": True,

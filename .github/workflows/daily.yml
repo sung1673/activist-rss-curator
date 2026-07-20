@@ -17,11 +17,6 @@ on:
           - generate
           - send
           - both
-      send_telegram_admin_access:
-        description: Send the Telegram administrator approval link
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -85,6 +80,16 @@ jobs:
           ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
           ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
         run: python -m curator.daily_report
+
+      - name: Build token-gated Telegram admin shell
+        env:
+          TELEGRAM_ADMIN_ACCESS_TOKEN: ${{ secrets.TELEGRAM_ADMIN_ACCESS_TOKEN }}
+          ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash .github/scripts/require-env.sh TELEGRAM_ADMIN_ACCESS_TOKEN ACTIVIST_PUBLIC_API_URL
+          python -m curator.telegram_dashboard write
 
       - name: Configure public governance UI
         env:
@@ -227,12 +232,3 @@ jobs:
             echo "::error::Daily report was not accepted by the delivery outbox."
             exit 1
           fi
-
-      - name: Send Telegram administrator approval link
-        if: github.event_name == 'workflow_dispatch' && inputs.send_telegram_admin_access
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
-          TELEGRAM_ADMIN_ACCESS_TOKEN: ${{ secrets.TELEGRAM_ADMIN_ACCESS_TOKEN }}
-        run: python -m curator.telegram_dashboard send-access --strict

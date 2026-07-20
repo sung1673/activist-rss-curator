@@ -59,9 +59,16 @@
 | `ENABLE_GOVERNANCE_PAGES` | `false` | 신규 Pages 공개 배포 중지 |
 | `ENABLE_GOVERNANCE_DELIVERY` | `false` | 신규 outbox·Telegram 발송 중지 |
 
-기존 필수 Secret 이름이 등록된 사실은 확인했지만 그 값은 이 문서나 저장소에 복사하지 않았다. 최종 보안 감사에서 새로 도입한 `TELEGRAM_ADMIN_CHAT_ID`는 추가 등록이 필요하다. `KIND_DISCLOSURE_ENDPOINT`는 검증된 JSON 어댑터가 없으므로 자리표시자를 넣지 않았다.
+기존 필수 Secret 이름이 등록된 사실은 확인했지만 그 값은 이 문서나 저장소에 복사하지 않았다. `KIND_DISCLOSURE_ENDPOINT`는 검증된 JSON 어댑터가 없으므로 자리표시자를 넣지 않았다.
 
-검수 토큰을 공개 발송 채널과 분리하기 위해 `TELEGRAM_ADMIN_CHAT_ID`를 추가했다. 값은 bot과 먼저 1:1 대화를 시작한 관리자의 양수 numeric user ID여야 하며 `TELEGRAM_CHAT_ID`와 같으면 발송이 차단된다. 신규 daily 경로에서는 story-review 직접 발송을 제거했고, 수동 관리자 링크와 legacy 검수 알림만 이 전용 목적지를 사용한다. token은 query string이 아니라 URL fragment로 전달한다.
+### 2026-07-20 관리자 접근 정책 변경
+
+- 비공개 Telegram 관리자 채팅을 사용하지 않기로 결정했으며 `TELEGRAM_ADMIN_CHAT_ID`를 등록하거나 요구하지 않는다.
+- `TELEGRAM_CHAT_ID`와 `TELEGRAM_BOT_TOKEN`은 공개 콘텐츠 채널 발송에만 계속 사용한다.
+- Telegram을 통한 관리자 링크·검수 알림·token 전달 경로를 제거한다. 관리자 대시보드는 고정 URL로 접속하고, 명시적으로 생성해 GitHub Secret과 PHP hash 설정에 등록한 `TELEGRAM_ADMIN_ACCESS_TOKEN`을 관리자가 직접 입력한다.
+- token은 query string이나 URL fragment에 넣지 않으며 Telegram 메시지, Actions 로그, artifact, job summary에도 기록하지 않는다.
+- 정적 `story-review.html`과 검수 메타데이터는 페이지 소스만으로 후보 내용이 노출될 수 있으므로, 인증된 서버 측 편집 UI가 마련될 때까지 공개 Pages artifact에 배포하지 않는다.
+- 이 변경은 공개 채널 발송을 중단하는 조치가 아니다. 기존 공개 `TELEGRAM_CHAT_ID` 발송과 `DeliveryOutbox`의 성공 응답·외부 message ID 확인 규칙은 유지한다.
 
 현재 `ENABLE_PAGES=true`이므로 `ENABLE_GOVERNANCE_PAGES`를 켜기 전에는 반드시 `ENABLE_PAGES=false`로 먼저 전환한다. 두 Pages 소유권이 동시에 켜지면 workflow가 실패한다.
 

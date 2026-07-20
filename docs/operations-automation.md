@@ -27,10 +27,9 @@ GitHub cron은 UTC로 해석된다. 일일 생성은 `45 20 * * *`(KST 05:45), �
 - `DART_API_KEY`: OpenDART 수집
 - `CURATOR_FEEDS`: 비공개 보조 발견 피드. 운영 범위 정책이 켜져 있으므로 단순 URL 문자열이 아니라 `name`, `url`, `scope`, `enabled`를 담은 JSON 배열로 등록한다. 세부 형식은 [미디어 발견 피드 범위 정책](media-source-scope-policy.md)을 따른다.
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`: 공개 발송
-- `TELEGRAM_ADMIN_CHAT_ID`: 검수·관리 링크 전용 비공개 1:1 사용자의 양수 numeric ID. 그룹·채널·공개 목적지면 발송 차단
 - `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING`: 허가 채널 수집
 - `BSIDE_API_BASE_URL`, `BSIDE_OPS_TOKEN`: watchdog의 `/api/v1/ops/health` 호출
-- `STORY_REVIEW_ACCESS_TOKEN`, `TELEGRAM_ADMIN_ACCESS_TOKEN`: 편집 검수 화면. 링크 토큰은 URL fragment로만 전달해 HTTP 요청·referrer에 포함하지 않음
+- `STORY_REVIEW_ACCESS_TOKEN`, `TELEGRAM_ADMIN_ACCESS_TOKEN`: 명시적으로 생성·등록하는 편집 검수 token. Telegram 메시지나 URL에는 넣지 않고 관리자가 고정된 관리자 URL에서 직접 입력
 
 Repository variable:
 
@@ -47,9 +46,9 @@ Repository variable:
 
 2026-07-16 안전 기본값은 `ENABLE_LEGACY_PIPELINE=true`, 나머지 세 신규 전환 플래그는 `false`다. 전환은 shadow → Pages → delivery 순서로 각각 별도 승인하고, 기존 pipeline 종료는 90일 호환 관측 뒤 결정한다.
 
-`ENABLE_PAGES`와 `ENABLE_GOVERNANCE_PAGES`는 동시에 `true`일 수 없다. 신규 Pages를 켜기 전에 기존 `ENABLE_PAGES=false`를 먼저 적용하며, 두 값이 모두 `true`이면 legacy와 신규 workflow가 모두 fail-closed한다. 코드/API만 바뀐 push에서 생성 단계가 하나도 선택되지 않으면 legacy workflow도 Pages artifact를 배포하지 않는다.
+`ENABLE_PAGES`와 `ENABLE_GOVERNANCE_PAGES`는 동시에 `true`일 수 없다. 신규 Pages를 켜기 전에 기존 `ENABLE_PAGES=false`를 먼저 적용하며, 두 값이 모두 `true`이면 legacy와 신규 workflow가 모두 fail-closed한다. 코드/API만 바뀐 push에서 생성 단계가 하나도 선택되지 않으면 legacy workflow도 Pages artifact를 배포하지 않는다. 두 Pages 경로 모두 artifact 업로드 전에 `telegram-admin.html` 셸을 생성하고 `TELEGRAM_ADMIN_ACCESS_TOKEN`과 `ACTIVIST_PUBLIC_API_URL`을 검증한다.
 
-전달 경로도 상호 배타적이다. 기존 호환 기간에는 legacy workflow가 MySQL 상태를 복원한 뒤 `legacy-direct`로 발송하고 신규 ingest는 `disabled`로 수집만 한다. 신규 전달을 승인하면 legacy 직접 발송과 수동 smoke·resend를 중단하고 일일 briefing과 공개 승인 사건을 `DeliveryOutbox`에 넣은 뒤 `publish.yml`만 공개 채널로 전송한다. 비공개 1:1 관리자 승인 링크는 사용자가 명시적으로 요청할 때만 실행되는 control-plane 예외이며 공개 콘텐츠 outbox에 token을 저장하지 않는다. publisher는 한 번에 1건을 900초 lease로 claim하고 한 실행에서 최대 5건만 처리한다. Telegram 응답이 불명확하거나 외부 message ID 저장 전후의 ACK가 실패하면 자동 재전송하지 않고 조정 대상 dead-letter로 격리한다. 실행이 중단되어 `processing` lease가 만료된 경우도 결과 불명으로 간주해 자동 재claim하지 않는다. 사건 enqueue 일부가 거절되더라도 이미 대기 중인 안전한 발송 건을 굶기지 않도록 outbox consumer는 별도로 계속 실행한다.
+전달 경로도 상호 배타적이다. 기존 호환 기간에는 legacy workflow가 MySQL 상태를 복원한 뒤 `legacy-direct`로 공개 채널에 발송하고 신규 ingest는 `disabled`로 수집만 한다. 신규 전달을 승인하면 legacy 직접 발송과 수동 smoke·resend를 중단하고 일일 briefing과 공개 승인 사건을 `DeliveryOutbox`에 넣은 뒤 `publish.yml`만 `TELEGRAM_CHAT_ID` 공개 채널로 전송한다. 비공개 1:1 관리자 채팅, 관리자 링크 발송, token이 포함된 Telegram 메시지는 사용하지 않으며 공개 콘텐츠 outbox에도 관리자 token을 저장하지 않는다. 관리자는 고정 URL에서 명시적으로 등록된 token을 직접 입력한다. 정적 `story-review.html`과 검수 메타데이터는 인증된 서버 측 편집 UI가 준비될 때까지 Pages artifact에서 제외한다. publisher는 한 번에 1건을 900초 lease로 claim하고 한 실행에서 최대 5건만 처리한다. Telegram 응답이 불명확하거나 외부 message ID 저장 전후의 ACK가 실패하면 자동 재전송하지 않고 조정 대상 dead-letter로 격리한다. 실행이 중단되어 `processing` lease가 만료된 경우도 결과 불명으로 간주해 자동 재claim하지 않는다. 사건 enqueue 일부가 거절되더라도 이미 대기 중인 안전한 발송 건을 굶기지 않도록 outbox consumer는 별도로 계속 실행한다.
 
 ## 소스 이용권한
 

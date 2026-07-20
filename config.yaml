@@ -444,7 +444,6 @@ story_review:
   min_score: 72
   max_candidates: 12
   benchmark_max_missing: 12
-  send_empty: false
 
 archive:
   enabled: true

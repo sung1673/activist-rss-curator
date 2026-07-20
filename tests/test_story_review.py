@@ -6,9 +6,7 @@ from zoneinfo import ZoneInfo
 from curator.story_review import (
     build_story_review,
     render_story_review_html,
-    send_story_review,
     story_review_access_token,
-    story_review_message,
     text_has_encoding_damage,
     token_hash,
 )
@@ -109,15 +107,13 @@ def test_story_review_detects_duplicate_listing_policy_split_candidate() -> None
     assert any("중복상장" in candidate["left"]["title"] and "중복상장" in candidate["right"]["title"] for candidate in review["candidates"])  # type: ignore[index]
 
 
-def test_story_review_token_falls_back_to_derived_bot_token(monkeypatch) -> None:
+def test_story_review_token_requires_explicit_secret(monkeypatch) -> None:
     monkeypatch.delenv("STORY_REVIEW_ACCESS_TOKEN", raising=False)
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:secret")
 
     token = story_review_access_token()
 
-    assert token
-    assert token != "123456:secret"
-    assert token == story_review_access_token()
+    assert token == ""
 
 
 def test_render_story_review_html_contains_token_gate() -> None:
@@ -136,24 +132,9 @@ def test_render_story_review_html_contains_token_gate() -> None:
     assert "접근 token 확인" in html
     assert token_hash("review-token") in html
     assert "오늘은 우선 검토할 분리 후보가 없습니다" in html
-
-
-def test_story_review_message_uses_tokenized_admin_link(monkeypatch) -> None:
-    monkeypatch.setenv("STORY_REVIEW_ACCESS_TOKEN", "review-token")
-    config = {"public_feed_url": "https://news.bside.ai/feed.xml"}
-    message = story_review_message(
-        {
-            "date_id": "2026-05-10",
-            "candidate_count": 0,
-            "page_url": "https://news.bside.ai/feed/story-review.html",
-            "candidates": [],
-        },
-        config,
-    )
-
-    assert "묶음 후보 리뷰" in message
-    assert "#token=review-token" in message
-    assert "관리자 페이지에서 후보 검토" in message
+    assert "관리자 token을 직접 입력" in html
+    assert "sessionStorage.setItem('storyReviewToken'" in html
+    assert "URLSearchParams(location.hash" not in html
 
 
 def test_story_review_includes_benchmark_coverage_for_reference_channel() -> None:
@@ -216,102 +197,6 @@ def test_story_review_includes_benchmark_coverage_for_reference_channel() -> Non
     html = render_story_review_html(review)
     assert "Benchmark 누락 점검" in html
     assert "Missing benchmark article" in html
-
-
-def test_story_review_message_mentions_benchmark_missing(monkeypatch) -> None:
-    monkeypatch.setenv("STORY_REVIEW_ACCESS_TOKEN", "review-token")
-    config = {"public_feed_url": "https://news.bside.ai/feed.xml"}
-    message = story_review_message(
-        {
-            "date_id": "2026-06-08",
-            "candidate_count": 0,
-            "page_url": "https://news.bside.ai/feed/story-review.html",
-            "candidates": [],
-            "benchmark_coverage": {
-                "url_count": 2,
-                "matched_count": 1,
-                "missing_count": 1,
-                "coverage_rate": 50.0,
-                "missing": [{"title": "Missing benchmark article", "url": "https://example.com/missing"}],
-            },
-        },
-        config,
-    )
-
-    assert "benchmark 누락 1/2건" in message
-    assert "Benchmark 누락 상위" in message
-    assert "Missing benchmark article" in message
-
-
-def test_story_review_send_uses_dedicated_private_admin_chat(monkeypatch) -> None:
-    from curator import story_review as story_review_module
-
-    sent: dict[str, object] = {}
-    monkeypatch.setenv("STORY_REVIEW_ACCESS_TOKEN", "review-token")
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:secret")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "@public_channel")
-    monkeypatch.setenv("TELEGRAM_ADMIN_CHAT_ID", "424242")
-    monkeypatch.setattr(
-        story_review_module,
-        "load_config",
-        lambda _path: {
-            "public_feed_url": "https://news.bside.ai/feed.xml",
-            "story_review": {"enabled": True},
-            "telegram": {"enabled": True},
-        },
-    )
-    monkeypatch.setattr(
-        story_review_module,
-        "load_latest_review",
-        lambda _root: {
-            "date_id": "2026-07-16",
-            "candidate_count": 1,
-            "candidate_hash": "candidate-1",
-            "page_url": "https://news.bside.ai/feed/story-review.html",
-            "candidates": [],
-        },
-    )
-
-    def fake_send(_token, chat_id, text, _config, **_kwargs):  # type: ignore[no-untyped-def]
-        sent.update({"chat_id": chat_id, "text": text})
-        return {"ok": True, "message_id": 7}
-
-    monkeypatch.setattr(story_review_module, "send_telegram_message", fake_send)
-
-    summary = send_story_review()
-
-    assert summary["story_review_sent"] == 1
-    assert sent["chat_id"] == "424242"
-    assert "#token=review-token" in str(sent["text"])
-
-
-def test_story_review_send_rejects_public_admin_destination(monkeypatch) -> None:
-    from curator import story_review as story_review_module
-
-    monkeypatch.setenv("STORY_REVIEW_ACCESS_TOKEN", "review-token")
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:secret")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "424242")
-    monkeypatch.setenv("TELEGRAM_ADMIN_CHAT_ID", "424242")
-    monkeypatch.setattr(
-        story_review_module,
-        "load_config",
-        lambda _path: {"story_review": {"enabled": True}, "telegram": {"enabled": True}},
-    )
-    monkeypatch.setattr(
-        story_review_module,
-        "load_latest_review",
-        lambda _root: {"date_id": "2026-07-16", "candidate_count": 1, "candidates": []},
-    )
-    monkeypatch.setattr(
-        story_review_module,
-        "send_telegram_message",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not send")),
-    )
-
-    summary = send_story_review()
-
-    assert summary["story_review_failed"] == 1
-    assert summary["story_review_error"] == "telegram_admin_chat_matches_public_destination"
 
 
 def test_story_review_skips_encoding_damaged_titles() -> None:

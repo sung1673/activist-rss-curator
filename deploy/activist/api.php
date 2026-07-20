@@ -1532,10 +1532,7 @@ function require_telegram_admin_access(array $config): void {
         respond(403, array('ok' => false, 'error' => 'admin_token_not_configured'));
     }
     $token = '';
-    if (isset($_GET['admin_token'])) {
-        $token = trim((string)$_GET['admin_token']);
-    }
-    if ($token === '' && isset($_SERVER['HTTP_X_TELEGRAM_ADMIN_TOKEN'])) {
+    if (isset($_SERVER['HTTP_X_TELEGRAM_ADMIN_TOKEN'])) {
         $token = trim((string)$_SERVER['HTTP_X_TELEGRAM_ADMIN_TOKEN']);
     }
     if ($token === '' || !hash_equals($expected, hash('sha256', $token))) {

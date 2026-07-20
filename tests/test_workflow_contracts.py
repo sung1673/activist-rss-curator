@@ -119,8 +119,13 @@ def test_daily_generation_and_delivery_use_requested_kst_boundaries() -> None:
     assert "daily_report_queued=1" in workflow
     assert "CURATOR_DELIVERY_MODE: outbox-enqueue" in workflow
     assert "curator.story_review send" not in workflow
-    assert "TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}" in workflow
-    assert "curator.telegram_dashboard send-access --strict" in workflow
+    assert "TELEGRAM_ADMIN_CHAT_ID" not in workflow
+    assert "send_telegram_admin_access" not in workflow
+    assert "curator.telegram_dashboard send-access" not in workflow
+    assert "Build token-gated Telegram admin shell" in workflow
+    assert "TELEGRAM_ADMIN_ACCESS_TOKEN: ${{ secrets.TELEGRAM_ADMIN_ACCESS_TOKEN }}" in workflow
+    assert "require-env.sh TELEGRAM_ADMIN_ACCESS_TOKEN ACTIVIST_PUBLIC_API_URL" in workflow
+    assert "python -m curator.telegram_dashboard write" in workflow
     assert "actions/upload-pages-artifact@v3" in workflow
     assert "actions/deploy-pages@v4" in workflow
     assert "ENABLE_GOVERNANCE_PAGES" in workflow
@@ -130,14 +135,16 @@ def test_daily_generation_and_delivery_use_requested_kst_boundaries() -> None:
     assert "verify-daily-pages-artifact.py" in workflow
 
 
-def test_admin_links_never_fall_back_to_public_telegram_destination() -> None:
+def test_workflows_do_not_send_private_admin_messages_or_token_links() -> None:
     legacy = workflow_text("build-feed.yml")
-    assert "TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}" in legacy
-    assert "Story review notification skipped until TELEGRAM_ADMIN_CHAT_ID is configured" in legacy
-    assert "curator.telegram_dashboard send-access --strict" in legacy
-    assert "github.event_name == 'schedule' && github.event.schedule == '0 20 * * *'" not in legacy[
-        legacy.index("- name: Send Telegram admin approval link") :
-    ]
+    daily = workflow_text("daily.yml")
+    for workflow in (legacy, daily):
+        assert "TELEGRAM_ADMIN_CHAT_ID" not in workflow
+        assert "send_telegram_admin_access" not in workflow
+        assert "curator.telegram_dashboard send-access" not in workflow
+        assert "curator.story_review send" not in workflow
+        assert "Build token-gated Telegram admin shell" in workflow
+        assert "python -m curator.telegram_dashboard write" in workflow
 
 
 def test_workflow_permissions_are_scoped_to_the_jobs_that_need_them() -> None:

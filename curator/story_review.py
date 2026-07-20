@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import os
@@ -9,24 +8,15 @@ from collections import defaultdict
 from datetime import datetime
 from html import escape, unescape
 from pathlib import Path
-from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from rapidfuzz import fuzz
 
 from .cluster import extract_company_candidates
-from .config import load_config
 from .dates import format_kst, parse_datetime
 from .normalize import canonical_url_hash
 from .story_signature import event_tokens_for_text, story_signature_decision
 from .summaries import digest_tokens_from_text
-from .telegram_publisher import (
-    html_link,
-    send_telegram_message,
-    telegram_admin_chat_id,
-    telegram_admin_destination_error,
-    telegram_bot_token,
-)
 from .telegram_sources import canonicalize_telegram_url, extract_urls, is_boilerplate_signal_url, normalize_channel_handle
 
 
@@ -82,13 +72,7 @@ def story_review_public_url(config: dict[str, object]) -> str:
 
 
 def story_review_access_token() -> str:
-    explicit = os.environ.get("STORY_REVIEW_ACCESS_TOKEN", "").strip()
-    if explicit:
-        return explicit
-    bot_token = telegram_bot_token()
-    if bot_token:
-        return hashlib.sha256(f"story-review:{bot_token}".encode("utf-8")).hexdigest()[:32]
-    return ""
+    return os.environ.get("STORY_REVIEW_ACCESS_TOKEN", "").strip()
 
 
 def token_hash(token: str) -> str:
@@ -780,7 +764,7 @@ def render_story_review_html(review: dict[str, object], *, logo_html: str = "") 
 
     <section class="gate" id="gate">
       <h2>접근 token 확인</h2>
-      <p class="notice">Telegram bot이 보낸 관리자 링크로 접근하면 자동으로 열립니다. 정적 GitHub Pages 특성상 이 token gate는 운영 편의용 제한이며, 강한 보안이 필요한 데이터는 PHP API 검증 방식으로 분리해야 합니다.</p>
+      <p class="notice">관리자 token을 직접 입력하세요. 이 정적 검수 화면은 인증 API 전환 전까지 공개 Pages 배포 대상에서 제외됩니다.</p>
       <input id="tokenInput" type="password" placeholder="관리자 token">
       <button type="button" id="tokenButton">열기</button>
       <p class="notice" id="tokenMessage"></p>
@@ -822,20 +806,15 @@ def render_story_review_html(review: dict[str, object], *, logo_html: str = "") 
         tokenMessage.textContent = 'token이 일치하지 않습니다.';
         return false;
       }}
-      localStorage.setItem('storyReviewToken', rawToken);
+      sessionStorage.setItem('storyReviewToken', rawToken);
       gate.style.display = 'none';
       content.classList.add('is-open');
-      if (location.hash.includes('token=')) {{
-        history.replaceState(null, '', `${{location.pathname}}${{location.search}}`);
-      }}
       return true;
     }}
 
-    const params = new URLSearchParams(location.hash.replace(/^#/, ''));
-    const urlToken = params.get('token');
-    const storedToken = localStorage.getItem('storyReviewToken');
-    if (urlToken || storedToken || !REVIEW.accessTokenHash) {{
-      unlock(urlToken || storedToken || '');
+    const storedToken = sessionStorage.getItem('storyReviewToken');
+    if (storedToken || !REVIEW.accessTokenHash) {{
+      unlock(storedToken || '');
     }}
     document.getElementById('tokenButton').addEventListener('click', () => unlock(tokenInput.value));
     tokenInput.addEventListener('keydown', (event) => {{
@@ -928,103 +907,3 @@ def write_story_review_files(
         }
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     return [page_path, meta_path]
-
-
-def story_review_message(review: dict[str, object], config: dict[str, object]) -> str:
-    token = story_review_access_token()
-    page_url = str(review.get("page_url") or story_review_public_url(config))
-    access_url = page_url.split("#", 1)[0] + "#token=" + quote(token, safe="")
-    candidates = review.get("candidates") if isinstance(review.get("candidates"), list) else []
-    benchmark = review.get("benchmark_coverage") if isinstance(review.get("benchmark_coverage"), dict) else {}
-    benchmark_missing = int(benchmark.get("missing_count") or 0)
-    benchmark_total = int(benchmark.get("url_count") or 0)
-    benchmark_rate = float(benchmark.get("coverage_rate") or 0.0)
-    lines = [
-        "<b>묶음 후보 리뷰</b>",
-        f"{escape(str(review.get('date_id') or ''))} · 분리 후보 {int(review.get('candidate_count') or 0)}건 · benchmark 누락 {benchmark_missing}/{benchmark_total}건 ({benchmark_rate:.1f}%)",
-    ]
-    for index, candidate in enumerate(candidates[:3], start=1):
-        left = candidate.get("left") if isinstance(candidate.get("left"), dict) else {}
-        right = candidate.get("right") if isinstance(candidate.get("right"), dict) else {}
-        lines.append(
-            f"{index}. {escape(compact(left.get('title'), 34))} ↔ {escape(compact(right.get('title'), 34))} "
-            f"({escape(str(candidate.get('score') or ''))})"
-        )
-    missing = benchmark.get("missing") if isinstance(benchmark.get("missing"), list) else []
-    if missing:
-        lines.append("")
-        lines.append("<b>Benchmark 누락 상위</b>")
-        for index, item in enumerate(missing[:3], start=1):
-            if not isinstance(item, dict):
-                continue
-            title = compact(item.get("title") or item.get("article_title") or item.get("url"), 44)
-            url = str(item.get("url") or "")
-            lines.append(f"{index}. {html_link(title, url) if url else escape(title)}")
-    lines.append("")
-    lines.append(html_link("관리자 페이지에서 후보 검토", access_url))
-    return "\n".join(lines).strip()
-
-
-def load_latest_review(root: Path | None = None) -> dict[str, object]:
-    project_root = root or PROJECT_ROOT
-    meta_path = project_root / FEED_DIR / REVIEW_META_NAME
-    if not meta_path.exists():
-        return {}
-    try:
-        loaded = json.loads(meta_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
-
-
-def send_story_review(root: Path | None = None) -> dict[str, object]:
-    project_root = root or PROJECT_ROOT
-    config = load_config(project_root / "config.yaml")
-    if not story_review_enabled(config):
-        return {"story_review_sent": 0, "story_review_failed": 0}
-    latest = load_latest_review(project_root)
-    if not latest:
-        return {"story_review_sent": 0, "story_review_failed": 0, "story_review_skipped": 1}
-    benchmark = latest.get("benchmark_coverage") if isinstance(latest.get("benchmark_coverage"), dict) else {}
-    benchmark_missing = int(benchmark.get("missing_count") or 0)
-    if int(latest.get("candidate_count") or 0) <= 0 and benchmark_missing <= 0 and not bool(story_review_config(config).get("send_empty", False)):
-        return {"story_review_sent": 0, "story_review_failed": 0, "story_review_skipped": 1}
-    if not story_review_access_token():
-        return {"story_review_sent": 0, "story_review_failed": 0, "story_review_skipped": 1}
-    destination_error = telegram_admin_destination_error(config)
-    if destination_error:
-        return {
-            "story_review_sent": 0,
-            "story_review_failed": 1,
-            "story_review_skipped": 0,
-            "story_review_error": destination_error,
-        }
-    response = send_telegram_message(
-        telegram_bot_token(),
-        telegram_admin_chat_id(),
-        story_review_message(latest, config),
-        config,
-        disable_web_page_preview=True,
-    )
-    return {
-        "story_review_sent": 1 if response.get("ok") else 0,
-        "story_review_failed": 0 if response.get("ok") else 1,
-        "story_review_skipped": 0,
-    }
-
-
-def cli_main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Build or send the split story review report.")
-    subparsers = parser.add_subparsers(dest="command")
-    subparsers.add_parser("send", help="Send the latest generated story review link to Telegram.")
-    args = parser.parse_args(argv)
-    if args.command == "send":
-        summary = send_story_review()
-        print("Story review send finished: " + ", ".join(f"{key}={value}" for key, value in summary.items()))
-        return 1 if int(summary.get("story_review_failed") or 0) else 0
-    parser.print_help()
-    return 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(cli_main())

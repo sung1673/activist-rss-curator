@@ -61,11 +61,6 @@ on:
         required: false
         type: boolean
         default: false
-      send_telegram_admin_access:
-        description: "Send a Telegram approval link for telegram-admin"
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -226,6 +221,17 @@ jobs:
           ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
         run: python -m curator.daily_report
 
+      - name: Build token-gated Telegram admin shell
+        if: ${{ steps.run_mode.outputs.full == 'true' || steps.run_mode.outputs.page == 'true' }}
+        env:
+          TELEGRAM_ADMIN_ACCESS_TOKEN: ${{ secrets.TELEGRAM_ADMIN_ACCESS_TOKEN }}
+          ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash .github/scripts/require-env.sh TELEGRAM_ADMIN_ACCESS_TOKEN ACTIVIST_PUBLIC_API_URL
+          python -m curator.telegram_dashboard write
+
       - name: Resend last Telegram briefing
         if: ${{ vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && ((github.event_name == 'workflow_dispatch' && inputs.resend_last_briefing) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[resend-last-briefing]'))) }}
         env:
@@ -295,27 +301,3 @@ jobs:
           ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
           ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
         run: python -m curator.daily_report
-
-      - name: Send story review message
-        if: ${{ vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && ((github.event_name == 'schedule' && github.event.schedule == '0 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]'))) }}
-        env:
-          STORY_REVIEW_ACCESS_TOKEN: ${{ secrets.STORY_REVIEW_ACCESS_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
-        shell: bash
-        run: |
-          if [[ -z "$TELEGRAM_ADMIN_CHAT_ID" ]]; then
-            echo "::warning::Story review notification skipped until TELEGRAM_ADMIN_CHAT_ID is configured."
-            exit 0
-          fi
-          python -m curator.story_review send
-
-      - name: Send Telegram admin approval link
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.send_telegram_admin_access }}
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
-          TELEGRAM_ADMIN_ACCESS_TOKEN: ${{ secrets.TELEGRAM_ADMIN_ACCESS_TOKEN }}
-        run: python -m curator.telegram_dashboard send-access --strict

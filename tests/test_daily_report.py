@@ -159,6 +159,8 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     stale_variant_dir.mkdir(parents=True)
     (stale_variant_dir / "forbes.html").write_text("stale", encoding="utf-8")
     (stale_variant_dir / "social.html").write_text("stale", encoding="utf-8")
+    (stale_variant_dir.parent / "story-review.html").write_text("private candidates", encoding="utf-8")
+    (stale_variant_dir.parent / "story-review-meta.json").write_text("{}", encoding="utf-8")
 
     report = build_daily_report(tmp_path, now)
     paths = write_report_files(report, tmp_path)
@@ -170,6 +172,9 @@ def test_daily_report_writes_techmeme_like_html(tmp_path) -> None:
     assert (tmp_path / "public" / "feed" / "telegram.html").exists()
     assert not (tmp_path / "public" / "feed" / "workbench.html").exists()
     assert (tmp_path / "public" / "feed" / "search.html").exists()
+    assert not (tmp_path / "public" / "feed" / "story-review.html").exists()
+    assert not (tmp_path / "public" / "feed" / "story-review-meta.json").exists()
+    assert all(path.name not in {"story-review.html", "story-review-meta.json"} for path in paths)
     assert (tmp_path / "public" / "index.html").exists()
     assert (tmp_path / "public" / "feed.xml").exists()
     assert not (tmp_path / "public" / "feed" / "variants" / "memo.html").exists()

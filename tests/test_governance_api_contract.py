@@ -208,6 +208,11 @@ def test_admin_and_ops_routes_use_role_bearer_tokens():
     assert "dead_letter_count" in V1
 
 
+def test_telegram_admin_token_is_header_only():
+    assert "HTTP_X_TELEGRAM_ADMIN_TOKEN" in API
+    assert "$_GET['admin_token']" not in API
+
+
 def test_shared_host_preserves_standard_authorization_header():
     assert 'SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1' in HTACCESS
     assert "Options -Indexes" in HTACCESS

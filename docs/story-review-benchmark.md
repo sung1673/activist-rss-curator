@@ -1,6 +1,6 @@
 # Story Review Benchmark 운영 메모
 
-`public/feed/story-review.html`은 관리자 token gate로 열리는 운영 검수 페이지입니다.
+Story Review 결과는 내부 편집 검수 데이터입니다. 정적 `public/feed/story-review.html`과 관련 메타데이터는 클라이언트 측 token gate만으로 후보 내용을 안전하게 보호할 수 없으므로 공개 Pages artifact에 배포하지 않습니다. 인증된 서버 측 편집 UI가 마련될 때까지 로컬 또는 접근 통제된 내부 환경에서만 확인합니다.
 
 ## 표시 항목
 
@@ -15,11 +15,9 @@ Benchmark 누락 항목에는 다음 정보가 표시됩니다.
 - state 처리 상태: `rejected`, `duplicate`, `accepted`, `not_in_state`
 - rejection 또는 duplicate reason이 있으면 해당 사유
 
-## Telegram 알림
+## 검수 접근
 
-매일 story-review Telegram 메시지는 분리 후보 수와 benchmark 누락률을 함께 요약합니다.
-
-분리 후보가 없어도 benchmark 누락 URL이 있으면 운영 메시지를 발송합니다. 이 메시지의 관리자 링크를 통해 `story-review.html`에 접근해 누락 URL과 묶음 후보를 함께 확인합니다.
+Story Review 알림과 관리자 링크를 Telegram 비공개 채팅으로 발송하지 않으며 token도 메시지나 URL로 전달하지 않습니다. 공개 Telegram 채널 발송은 별도 콘텐츠 경로로 유지됩니다. 검수자는 접근 통제된 내부 환경에서 명시적으로 등록된 token을 직접 입력해 분리 후보와 benchmark 누락 항목을 확인합니다.
 
 ## 운영 기준
 

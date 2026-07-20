@@ -9,19 +9,10 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from html import escape
 from pathlib import Path
-from urllib.parse import quote
 
 from .cluster import extract_company_candidates
 from .dates import datetime_to_iso, parse_datetime
-from .remote_api import remote_api_url
 from .source_rights import source_is_authorized
-from .telegram_publisher import (
-    html_link,
-    send_telegram_message,
-    telegram_admin_chat_id,
-    telegram_admin_destination_error,
-    telegram_bot_token,
-)
 from .telegram_sources import (
     channel_quality_metrics,
     ensure_telegram_state,
@@ -537,16 +528,13 @@ def _stat_card(label: str, value: object, note: str = "") -> str:
 
 
 def telegram_admin_access_token() -> str:
-    explicit = os.environ.get("TELEGRAM_ADMIN_ACCESS_TOKEN", "").strip()
-    if explicit:
-        return explicit
-    shared = os.environ.get("STORY_REVIEW_ACCESS_TOKEN", "").strip()
-    if shared:
-        return shared
-    bot_token = telegram_bot_token()
-    if bot_token:
-        return hashlib.sha256(f"telegram-admin:{bot_token}".encode("utf-8")).hexdigest()
-    return ""
+    return os.environ.get("TELEGRAM_ADMIN_ACCESS_TOKEN", "").strip()
+
+
+def telegram_dashboard_api_url() -> str:
+    """Return only the browser-safe public API endpoint."""
+
+    return os.environ.get("ACTIVIST_PUBLIC_API_URL", "").strip()
 
 
 def telegram_admin_access_token_hash(token: str | None = None) -> str:
@@ -556,37 +544,21 @@ def telegram_admin_access_token_hash(token: str | None = None) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _dashboard_public_base_url(config: dict[str, object]) -> str:
-    feed_url = str(config.get("public_feed_url") or "").strip()
-    if feed_url.endswith("/feed.xml"):
-        return feed_url[: -len("/feed.xml")]
-    return feed_url.rstrip("/")
-
-
-def telegram_admin_public_url(config: dict[str, object], token: str | None = None) -> str:
-    base_url = _dashboard_public_base_url(config)
-    path = "feed/telegram-admin.html"
-    url = f"{base_url}/{path}" if base_url else path
-    if token:
-        return f"{url}#token={quote(token, safe='')}"
-    return url
-
-
-def _locked_fallback_model(model: dict[str, object], token_hash: str) -> dict[str, object]:
+def _locked_fallback_model(model: dict[str, object]) -> dict[str, object]:
     # Static Pages artifacts never embed signal/message arrays. Authorized
     # administrators retrieve paginated data from the API after unlocking.
     compact = {
         "generated_at": model.get("generated_at"),
-        "channels_total": 0 if token_hash else model.get("channels_total", 0),
-        "channels_collectable": 0 if token_hash else model.get("channels_collectable", 0),
-        "channels_enabled": 0 if token_hash else model.get("channels_enabled", 0),
-        "channels_failed": 0 if token_hash else model.get("channels_failed", 0),
-        "messages_total": 0 if token_hash else model.get("messages_total", 0),
-        "messages_24h": 0 if token_hash else model.get("messages_24h", 0),
-        "messages_14d": 0 if token_hash else model.get("messages_14d", 0),
-        "matches_total": 0 if token_hash else model.get("matches_total", 0),
-        "candidates_total": 0 if token_hash else model.get("candidates_total", 0),
-        "candidate_pending": 0 if token_hash else model.get("candidate_pending", 0),
+        "channels_total": 0,
+        "channels_collectable": 0,
+        "channels_enabled": 0,
+        "channels_failed": 0,
+        "messages_total": 0,
+        "messages_24h": 0,
+        "messages_14d": 0,
+        "matches_total": 0,
+        "candidates_total": 0,
+        "candidate_pending": 0,
         "top_channels": [],
         "type_counts": [],
         "day_counts": [],
@@ -599,7 +571,7 @@ def _locked_fallback_model(model: dict[str, object], token_hash: str) -> dict[st
             "risk_watch": 0,
             "confirmed_reactions": 0,
             "velocity_ratio": 0,
-            "velocity_label": "locked" if token_hash else "api_required",
+            "velocity_label": "locked",
         },
         "new_rising_signals": [],
         "watchlist_candidates": [],
@@ -627,39 +599,6 @@ def _locked_fallback_model(model: dict[str, object], token_hash: str) -> dict[st
         },
     }
     return compact
-
-
-def build_telegram_admin_access_message(config: dict[str, object], now: datetime) -> str:
-    token = telegram_admin_access_token()
-    url = telegram_admin_public_url(config, token)
-    return "\n".join(
-        [
-            "<b>Telegram admin 승인 링크</b>",
-            "아래 링크로 Telegram 수집 운영 대시보드에 접근할 수 있습니다.",
-            f"생성시각: {escape(datetime_to_iso(now))}",
-            html_link("telegram-admin 열기", url),
-        ]
-    )
-
-
-def send_telegram_admin_access_message(
-    config: dict[str, object],
-    now: datetime,
-) -> dict[str, object]:
-    token = telegram_admin_access_token()
-    bot_token = telegram_bot_token()
-    if not token:
-        return {"ok": False, "error": "telegram_admin_access_token_missing"}
-    destination_error = telegram_admin_destination_error(config)
-    if destination_error:
-        return {"ok": False, "error": destination_error}
-    return send_telegram_message(
-        bot_token,
-        telegram_admin_chat_id(),
-        build_telegram_admin_access_message(config, now),
-        config,
-        disable_web_page_preview=True,
-    )
 
 
 def _signal_card(signal: dict[str, object]) -> str:
@@ -702,8 +641,8 @@ def _company_card(row: dict[str, object]) -> str:
 def write_telegram_dashboard(project_root: Path, state: dict[str, object], config: dict[str, object], now: datetime) -> Path:
     model = telegram_dashboard_model(state, config, now)
     access_hash = telegram_admin_access_token_hash()
-    model = _locked_fallback_model(model, access_hash)
-    api_url = remote_api_url()
+    model = _locked_fallback_model(model)
+    api_url = telegram_dashboard_api_url()
     fallback_model_json = json.dumps(model, ensure_ascii=False, separators=(",", ":"))
     access_hash_json = json.dumps(access_hash, ensure_ascii=False)
     api_url_json = json.dumps(api_url, ensure_ascii=False)
@@ -866,6 +805,7 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
     .access-form input {{ flex:1 1 280px; min-height:42px; border:1px solid var(--line); border-radius:8px; padding:0 12px; font-size:14px; }}
     .access-form button {{ min-height:42px; border:1px solid var(--accent); border-radius:999px; padding:0 18px; color:var(--accent); background:var(--paper); font-weight:800; cursor:pointer; }}
     .access-error {{ color:#a22828; font-size:13px; }}
+    .lock-button {{ float:right; min-height:36px; border:1px solid var(--line); border-radius:999px; padding:0 14px; color:var(--muted); background:var(--paper); font-weight:700; cursor:pointer; }}
     @media (max-width:900px) {{ .stats, .signal-stats {{ grid-template-columns:repeat(2,1fr); }} .grid, .signal-board {{ grid-template-columns:1fr; }} h1 {{ font-size:32px; }} }}
   </style>
 </head>
@@ -877,14 +817,16 @@ def write_telegram_dashboard(project_root: Path, state: dict[str, object], confi
   </header>
   <section class="access-gate" id="access-gate" hidden>
     <h1>Telegram admin 승인 필요</h1>
-    <p>이 페이지는 Telegram 채널로 발송된 승인 링크 또는 관리자 token이 있어야 열립니다.</p>
+    <p>고정된 관리자 페이지에서 발급된 token을 직접 입력하세요. token 링크는 Telegram이나 URL로 전달하지 않습니다.</p>
     <form class="access-form" id="access-form">
       <input id="access-token-input" type="password" autocomplete="one-time-code" placeholder="관리자 token">
-      <button type="submit">승인</button>
+      <button id="access-submit" type="submit">승인</button>
     </form>
     <p class="access-error" id="access-error" hidden>token이 올바르지 않습니다.</p>
+    <p class="access-error" id="access-config-error" hidden>관리자 인증이 설정되지 않았습니다. 운영자가 TELEGRAM_ADMIN_ACCESS_TOKEN을 등록해야 합니다.</p>
   </section>
   <div id="dashboard-content" hidden>
+  <button class="lock-button" id="lock-dashboard" type="button">잠금</button>
   <h1>Telegram 시장 시그널 대시보드</h1>
   <p>공개 broadcast 채널의 언급 확산, 기사 매칭, 다채널 반응, 위험 플래그를 함께 보며 시장 관심 흐름을 확인합니다. 개인 대화, 저장한 메시지, 그룹 대화는 수집 대상에서 제외됩니다.</p>
   <p class="status" id="data-status"><b>정적 fallback</b> DB API를 확인하는 중입니다.</p>
@@ -1236,17 +1178,6 @@ async function sha256Hex(text) {{
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }}
-function tokenFromUrl() {{
-  const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-  const token = params.get("token") || "";
-  if (token) {{
-    params.delete("token");
-    const nextHash = params.toString();
-    const nextUrl = `${{window.location.pathname}}${{window.location.search}}${{nextHash ? `#${{nextHash}}` : ""}}`;
-    window.history.replaceState(null, "", nextUrl);
-  }}
-  return token;
-}}
 function dashboardApiUrl() {{
   if (!telegramDashboardApiUrl) return "";
   const url = new URL(telegramDashboardApiUrl, window.location.href);
@@ -1268,15 +1199,19 @@ async function loadDashboard(token) {{
 }}
 async function unlockDashboard(rawToken) {{
   const token = String(rawToken || "").trim();
-  if (telegramAdminAccessHash) {{
-    if (!token || await sha256Hex(token) !== telegramAdminAccessHash) {{
-      document.getElementById("access-error").hidden = false;
-      document.getElementById("access-gate").hidden = false;
-      document.getElementById("dashboard-content").hidden = true;
-      return;
-    }}
-    window.localStorage.setItem(telegramAdminStorageKey, token);
+  if (!telegramAdminAccessHash) {{
+    document.getElementById("access-config-error").hidden = false;
+    document.getElementById("access-gate").hidden = false;
+    document.getElementById("dashboard-content").hidden = true;
+    return;
   }}
+  if (!token || await sha256Hex(token) !== telegramAdminAccessHash) {{
+    document.getElementById("access-error").hidden = false;
+    document.getElementById("access-gate").hidden = false;
+    document.getElementById("dashboard-content").hidden = true;
+    return;
+  }}
+  window.sessionStorage.setItem(telegramAdminStorageKey, token);
   document.getElementById("access-error").hidden = true;
   document.getElementById("access-gate").hidden = true;
   document.getElementById("dashboard-content").hidden = false;
@@ -1286,10 +1221,18 @@ document.getElementById("access-form").addEventListener("submit", (event) => {{
   event.preventDefault();
   unlockDashboard(document.getElementById("access-token-input").value);
 }});
+document.getElementById("lock-dashboard").addEventListener("click", () => {{
+  window.sessionStorage.removeItem(telegramAdminStorageKey);
+  window.location.reload();
+}});
 (async () => {{
-  const token = tokenFromUrl() || window.localStorage.getItem(telegramAdminStorageKey) || "";
+  const token = window.sessionStorage.getItem(telegramAdminStorageKey) || "";
   if (!telegramAdminAccessHash) {{
-    await unlockDashboard("");
+    document.getElementById("access-config-error").hidden = false;
+    document.getElementById("access-token-input").disabled = true;
+    document.getElementById("access-submit").disabled = true;
+    document.getElementById("access-gate").hidden = false;
+    document.getElementById("dashboard-content").hidden = true;
     return;
   }}
   if (token) {{
@@ -1313,17 +1256,10 @@ def main() -> None:
     from .state import load_state
 
     command = sys.argv[1] if len(sys.argv) > 1 else "write"
-    strict = "--strict" in sys.argv[2:]
     project_root = Path.cwd()
     config = load_config(project_root / "config.yaml")
     state = load_state(project_root / "data" / "state.json")
     now = now_in_timezone(str(config.get("timezone") or "Asia/Seoul"))
-    if command == "send-access":
-        response = send_telegram_admin_access_message(config, now)
-        print(json.dumps(response, ensure_ascii=False))
-        if strict and not response.get("ok"):
-            raise SystemExit(1)
-        return
     if command != "write":
         raise SystemExit(f"unknown command: {command}")
     path = write_telegram_dashboard(project_root, state, config, now)
