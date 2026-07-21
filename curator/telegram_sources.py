@@ -35,6 +35,7 @@ from .state import load_state, save_state
 URL_PATTERN = re.compile(r"https?://[^\s<>()\"']+", re.IGNORECASE)
 TRAILING_URL_CHARS = ".,;:!?)]}>\u3002"
 REMOTE_TELEGRAM_SIGNAL_BATCH_SIZE = 500
+REMOTE_TELEGRAM_CHANNEL_BATCH_SIZE = 20
 REMOTE_TELEGRAM_SAFE_PAYLOAD_BYTES = 1_750_000
 POSITIVE_CHANNEL_KEYWORDS = {
     "경제",
@@ -3621,6 +3622,99 @@ def sync_telegram_metadata_to_remote_api(
         ).encode("utf-8")
         signal_rebuild_token = hashlib.sha256(rebuild_body).hexdigest()
     payload_budget = telegram_remote_payload_budget(config)
+    if (
+        not replace_issue_signals
+        and len(channels) > REMOTE_TELEGRAM_CHANNEL_BATCH_SIZE
+    ):
+        # Channel rows contain runtime diagnostics and can be substantially
+        # larger than their count suggests. Persist them in bounded transactions
+        # before the independent signal payload so PHP/MySQL processing time,
+        # rather than only request bytes, cannot turn a routine metadata refresh
+        # into a client-side timeout.
+        batched_channels = 0
+        batched_signals = 0
+        batched_deleted = 0
+        batched_max_request_bytes = 0
+        for offset in range(0, len(channels), REMOTE_TELEGRAM_CHANNEL_BATCH_SIZE):
+            channel_batch = channels[
+                offset : offset + REMOTE_TELEGRAM_CHANNEL_BATCH_SIZE
+            ]
+            batch_cursors = {
+                channel_key(channel): int(
+                    cursors.get(channel_key(channel), 0) or 0
+                )
+                for channel in channel_batch
+            }
+            batch_result = sync_telegram_metadata_to_remote_api(
+                {
+                    "telegram_source_channels": channel_batch,
+                    "telegram_remote_sync_cursors": batch_cursors,
+                    "telegram_issue_signals": [],
+                },
+                config,
+                include_issue_signals=False,
+            )
+            batched_max_request_bytes = max(
+                batched_max_request_bytes,
+                int(batch_result.get("telegram_remote_max_request_bytes") or 0),
+            )
+            if int(batch_result.get("telegram_remote_failed") or 0):
+                failed_result = dict(batch_result)
+                failed_result["telegram_remote_channels"] = batched_channels + int(
+                    batch_result.get("telegram_remote_channels") or 0
+                )
+                failed_result["telegram_remote_signals"] = batched_signals
+                failed_result["telegram_remote_signals_deleted"] = batched_deleted
+                failed_result["telegram_remote_max_request_bytes"] = (
+                    batched_max_request_bytes
+                )
+                return failed_result
+            batched_channels += int(
+                batch_result.get("telegram_remote_channels") or 0
+            )
+
+        if include_issue_signals and signals:
+            signal_result = sync_telegram_metadata_to_remote_api(
+                {
+                    "telegram_source_channels": [],
+                    "telegram_remote_sync_cursors": {},
+                    "telegram_issue_signals": signals,
+                },
+                config,
+                include_issue_signals=True,
+            )
+            batched_max_request_bytes = max(
+                batched_max_request_bytes,
+                int(signal_result.get("telegram_remote_max_request_bytes") or 0),
+            )
+            if int(signal_result.get("telegram_remote_failed") or 0):
+                failed_result = dict(signal_result)
+                failed_result["telegram_remote_channels"] = batched_channels
+                failed_result["telegram_remote_signals"] = int(
+                    signal_result.get("telegram_remote_signals") or 0
+                )
+                failed_result["telegram_remote_signals_deleted"] = int(
+                    signal_result.get("telegram_remote_signals_deleted") or 0
+                )
+                failed_result["telegram_remote_max_request_bytes"] = (
+                    batched_max_request_bytes
+                )
+                return failed_result
+            batched_signals += int(
+                signal_result.get("telegram_remote_signals") or 0
+            )
+            batched_deleted += int(
+                signal_result.get("telegram_remote_signals_deleted") or 0
+            )
+        return {
+            "telegram_remote_metadata_synced": 1,
+            "telegram_remote_metadata_failed": 0,
+            "telegram_remote_failed": 0,
+            "telegram_remote_channels": batched_channels,
+            "telegram_remote_signals": batched_signals,
+            "telegram_remote_signals_deleted": batched_deleted,
+            "telegram_remote_max_request_bytes": batched_max_request_bytes,
+        }
     base_payload: dict[str, object] = {
         # An authoritative staging request is deliberately signal-only. Channel
         # canonicalization can rewrite message/match identities, so the API
@@ -3956,7 +4050,7 @@ def sync_telegram_batch_to_remote_api(
     settings = telegram_sources_config(config)
     batch_size = max(1, min(2500, int(settings.get("remote_batch_size", 300))))
     payload_budget = telegram_remote_payload_budget(config)
-    synced = failed = remote_messages = remote_matches = 0
+    synced = failed = remote_channels = remote_messages = remote_matches = 0
     last_error = ""
     last_status_code = 0
     max_request_bytes = 0
@@ -4104,6 +4198,7 @@ def sync_telegram_batch_to_remote_api(
             synced += 1
             remote_messages += len(chunk)
             remote_matches += expected_matches
+            remote_channels += expected_channels
             if advance_cursors:
                 for message in chunk:
                     identity = channel_key(message)
@@ -4122,6 +4217,7 @@ def sync_telegram_batch_to_remote_api(
         "telegram_remote_failed": failed,
         "telegram_remote_messages": remote_messages,
         "telegram_remote_matches": remote_matches,
+        "telegram_remote_channels": remote_channels,
         "telegram_remote_max_request_bytes": max_request_bytes,
     }
     if last_error:
@@ -4727,6 +4823,7 @@ async def _backfill_messages_with_client(
         page_messages: list[dict[str, object]] | None = None,
         page_matches: list[dict[str, object]] | None = None,
         resume_on_failure: int | None = None,
+        checkpoint_channel: dict[str, object] | None = None,
     ) -> None:
         nonlocal pages_checkpointed
         pages_checkpointed += int(bool(page_messages))
@@ -4741,6 +4838,11 @@ async def _backfill_messages_with_client(
                     "_checkpoint_messages": list(page_messages or []),
                     "_checkpoint_matches": list(page_matches or []),
                     "_checkpoint_resume_on_failure": resume_on_failure,
+                    "_checkpoint_channel_key": (
+                        channel_key(checkpoint_channel)
+                        if isinstance(checkpoint_channel, dict)
+                        else ""
+                    ),
                 }
             )
 
@@ -4788,7 +4890,7 @@ async def _backfill_messages_with_client(
                 "total": len(channels),
             }
             per_channel.append(failure_record)
-            emit_checkpoint(failure_record)
+            emit_checkpoint(failure_record, checkpoint_channel=selected_channel)
             continue
         fetch_elapsed_seconds += time.monotonic() - info_fetch_started
 
@@ -4819,7 +4921,7 @@ async def _backfill_messages_with_client(
                 "total": len(channels),
             }
             per_channel.append(failure_record)
-            emit_checkpoint(failure_record)
+            emit_checkpoint(failure_record, checkpoint_channel=selected_channel)
             continue
 
         previous_key = channel_key(selected_channel)
@@ -4899,7 +5001,7 @@ async def _backfill_messages_with_client(
                     "total": len(channels),
                 }
                 per_channel.append(failure_record)
-                emit_checkpoint(failure_record)
+                emit_checkpoint(failure_record, checkpoint_channel=channel)
                 break
             fetch_elapsed_seconds += time.monotonic() - page_fetch_started
 
@@ -4931,7 +5033,7 @@ async def _backfill_messages_with_client(
                     "total": len(channels),
                 }
                 per_channel.append(complete_record)
-                emit_checkpoint(complete_record)
+                emit_checkpoint(complete_record, checkpoint_channel=channel)
                 break
 
             positive_ids = [
@@ -4956,7 +5058,7 @@ async def _backfill_messages_with_client(
                     "total": len(channels),
                 }
                 per_channel.append(failure_record)
-                emit_checkpoint(failure_record)
+                emit_checkpoint(failure_record, checkpoint_channel=channel)
                 break
             next_max_id = min(positive_ids)
             if page_max_id and next_max_id >= page_max_id:
@@ -4976,7 +5078,7 @@ async def _backfill_messages_with_client(
                     "total": len(channels),
                 }
                 per_channel.append(failure_record)
-                emit_checkpoint(failure_record)
+                emit_checkpoint(failure_record, checkpoint_channel=channel)
                 break
 
             page_messages: list[dict[str, object]] = []
@@ -5031,6 +5133,17 @@ async def _backfill_messages_with_client(
                 len(raw_messages) < request_limit and not processing_timed_out
             )
             cap_reached = max_messages > 0 and seen >= max_messages and not page_is_last
+            if page_is_last:
+                # Persist completion metadata atomically with the last non-empty
+                # message page. Repair mode intentionally has no later global
+                # metadata write, so setting these fields after the ACK would
+                # leave MySQL with a permanent in-progress cursor.
+                channel_complete = True
+                channel["last_collected_at"] = datetime_to_iso(now)
+                channel["last_error"] = None
+                channel["last_backfill_before_message_id"] = None
+                completed_channels += 1
+                last_completed_handle = handle
             page_status = (
                 "ok" if page_is_last else "truncated" if cap_reached else "page"
             )
@@ -5054,6 +5167,7 @@ async def _backfill_messages_with_client(
                 page_messages,
                 page_matches,
                 resume_on_failure=page_max_id,
+                checkpoint_channel=channel,
             )
 
             if processing_timed_out:
@@ -5071,15 +5185,9 @@ async def _backfill_messages_with_client(
                     "resume_before_message_id": page_max_id,
                 }
                 per_channel.append(failure_record)
-                emit_checkpoint(failure_record)
+                emit_checkpoint(failure_record, checkpoint_channel=channel)
                 break
             if page_is_last:
-                channel_complete = True
-                channel["last_collected_at"] = datetime_to_iso(now)
-                channel["last_error"] = None
-                channel["last_backfill_before_message_id"] = None
-                completed_channels += 1
-                last_completed_handle = handle
                 per_channel.append(page_record)
                 break
             if cap_reached:
@@ -5218,6 +5326,19 @@ def backfill_telegram_messages(
         raise ValueError("finalize_signal_rebuild_empty_universe")
     if finalize_signal_rebuild and preflight_selection.channels:
         raise ValueError("finalize_signal_rebuild_requires_last_handle")
+    partial_backfill_scope = bool(
+        only_handles
+        or skip_handles
+        or normalize_channel_handle(start_after_handle)
+        or channel_limit > 0
+        or before_message_id > 0
+    )
+    repair_signal_mode = bool(
+        rebuild_remote_signals
+        or force_remote_resync
+        or finalize_signal_rebuild
+        or partial_backfill_scope
+    )
     started_selection_metrics: dict[str, object] = {
         "telegram_backfill_started_selection_fingerprint": (
             preflight_selection.fingerprint
@@ -5254,8 +5375,13 @@ def backfill_telegram_messages(
     remote_totals: dict[str, object] = {
         "telegram_remote_synced": 0,
         "telegram_remote_failed": 0,
+        "telegram_remote_channels": 0,
         "telegram_remote_messages": 0,
         "telegram_remote_matches": 0,
+        "telegram_remote_signals": 0,
+        "telegram_remote_signals_deleted": 0,
+        "telegram_remote_metadata_synced": 0,
+        "telegram_remote_metadata_failed": 0,
         "telegram_remote_pending": 0,
     }
 
@@ -5263,8 +5389,13 @@ def backfill_telegram_messages(
         for key in (
             "telegram_remote_synced",
             "telegram_remote_failed",
+            "telegram_remote_channels",
             "telegram_remote_messages",
             "telegram_remote_matches",
+            "telegram_remote_signals",
+            "telegram_remote_signals_deleted",
+            "telegram_remote_metadata_synced",
+            "telegram_remote_metadata_failed",
         ):
             remote_totals[key] = int(remote_totals.get(key) or 0) + int(
                 result.get(key) or 0
@@ -5294,6 +5425,9 @@ def backfill_telegram_messages(
         page_messages = public_record.pop("_checkpoint_messages", [])
         page_matches = public_record.pop("_checkpoint_matches", [])
         resume_on_failure = public_record.pop("_checkpoint_resume_on_failure", None)
+        checkpoint_channel_identity = str(
+            public_record.pop("_checkpoint_channel_key", "") or ""
+        )
         # Channel discovery can safely promote a handle-only row to an
         # authoritative Telegram ID. Checkpoint the resulting universe rather
         # than restoring the stale preflight fingerprint supplied by the inner
@@ -5329,11 +5463,57 @@ def backfill_telegram_messages(
                     advance_cursors=True,
                 )
             else:
-                remote_result = sync_telegram_metadata_to_remote_api(
-                    state,
-                    config,
-                    include_issue_signals=False,
-                )
+                metadata_state = state
+                if checkpoint_channel_identity:
+                    checkpoint_channels = [
+                        channel
+                        for channel in state.get("telegram_source_channels", [])
+                        if isinstance(channel, dict)
+                        and channel_key(channel) == checkpoint_channel_identity
+                    ]
+                    if len(checkpoint_channels) != 1:
+                        remote_result = {
+                            "telegram_remote_metadata_synced": 0,
+                            "telegram_remote_metadata_failed": 1,
+                            "telegram_remote_failed": 1,
+                            "telegram_remote_last_error": (
+                                "remote_checkpoint_channel_missing_or_ambiguous"
+                            ),
+                        }
+                    else:
+                        remote_cursors = state.get("telegram_remote_sync_cursors", {})
+                        if not isinstance(remote_cursors, dict):
+                            remote_cursors = {}
+                        metadata_state = {
+                            "telegram_source_channels": checkpoint_channels,
+                            "telegram_remote_sync_cursors": {
+                                checkpoint_channel_identity: int(
+                                    remote_cursors.get(
+                                        checkpoint_channel_identity, 0
+                                    )
+                                    or 0
+                                )
+                            },
+                            "telegram_issue_signals": [],
+                        }
+                        remote_result = sync_telegram_metadata_to_remote_api(
+                            metadata_state,
+                            config,
+                            include_issue_signals=False,
+                        )
+                elif repair_signal_mode:
+                    remote_result = {
+                        "telegram_remote_metadata_synced": 0,
+                        "telegram_remote_metadata_failed": 0,
+                        "telegram_remote_metadata_skipped": 1,
+                        "telegram_remote_failed": 0,
+                    }
+                else:
+                    remote_result = sync_telegram_metadata_to_remote_api(
+                        metadata_state,
+                        config,
+                        include_issue_signals=False,
+                    )
             current_remote_failed = int(
                 remote_result.get("telegram_remote_failed") or 0
             )
@@ -5497,6 +5677,10 @@ def backfill_telegram_messages(
         and preflight_selection.universe_count > 0
     )
     remote_pending = len(pending_remote_messages(state))
+    remote_totals["telegram_remote_pending"] = max(
+        int(remote_totals.get("telegram_remote_pending") or 0),
+        remote_pending,
+    )
     durable_complete = (
         int(summary.get("telegram_channel_failed") or 0) == 0
         and int(summary.get("telegram_backfill_truncated_channels") or 0) == 0
@@ -5520,9 +5704,6 @@ def backfill_telegram_messages(
     )
     if finalize_signal_rebuild and not signal_rebuild_authorized:
         raise RuntimeError("finalize_signal_rebuild_not_authorized")
-    repair_signal_mode = bool(
-        rebuild_remote_signals or force_remote_resync or finalize_signal_rebuild
-    )
     summary.update(
         {
             "telegram_signal_rebuild_requested": int(rebuild_remote_signals),
@@ -5556,7 +5737,8 @@ def backfill_telegram_messages(
         )
     refresh_channel_runtime_quality(state)
     metadata_summary: dict[str, object] = {}
-    if sync_remote:
+    should_sync_final_metadata = signal_rebuild_authorized or not repair_signal_mode
+    if sync_remote and should_sync_final_metadata:
         replace_since = None
         if signal_rebuild_authorized:
             window_hours = int(
@@ -5589,13 +5771,17 @@ def backfill_telegram_messages(
             ),
         )
         merge_remote_summary(metadata_summary)
+    elif sync_remote:
+        metadata_summary = {
+            "telegram_remote_metadata_skipped": 1,
+        }
     summary.update(remote_totals)
     summary.update(signal_window_summary)
     summary.update(
         {
             key: value
             for key, value in metadata_summary.items()
-            if key not in {"telegram_remote_failed", "telegram_remote_last_error"}
+            if key not in remote_totals
         }
     )
     summary.update(prune_telegram_state(state, config, now))
