@@ -269,6 +269,30 @@ def hydrate_telegram_signal_window(
     }
 
 
+def preflight_telegram_signal_runtime(
+    config: dict[str, object],
+    now: datetime,
+) -> dict[str, int]:
+    """Verify repair-only PHP resources before any Telegram history is read."""
+
+    if not mysql_runtime_enabled():
+        raise RuntimeError("telegram signal preflight requires MySQL runtime")
+    settings = config.get("telegram_sources")
+    if not isinstance(settings, dict):
+        settings = {}
+    window_hours = max(1, int(settings.get("signal_window_hours", 72)))
+    since = now - timedelta(hours=window_hours)
+    sampled = 0
+    for resource in ("telegram_signal_messages", "telegram_signal_matches"):
+        sampled += len(
+            fetch_runtime_resource(resource, since=since, max_records=1)
+        )
+    return {
+        "telegram_signal_runtime_preflight": 1,
+        "telegram_signal_runtime_samples": sampled,
+    }
+
+
 def _article(row: dict[str, object]) -> dict[str, object]:
     article = dict(row)
     url = str(article.get("canonical_url") or "")

@@ -38,7 +38,14 @@ def test_repair_hydrates_remote_state_before_backfill(config, now, monkeypatch) 
             "telegram_source_rights_blocked": 0,
         }
 
+    def fake_preflight(_config, _now):  # type: ignore[no-untyped-def]
+        calls.append("preflight")
+        return {"telegram_signal_runtime_preflight": 1}
+
     monkeypatch.setattr(telegram_repair, "hydrate_runtime_state", fake_hydrate)
+    monkeypatch.setattr(
+        telegram_repair, "preflight_telegram_signal_runtime", fake_preflight
+    )
     monkeypatch.setattr(telegram_repair, "backfill_telegram_messages", fake_backfill)
     monkeypatch.setattr(
         telegram_repair, "save_state", lambda *_args: calls.append("save")
@@ -46,10 +53,37 @@ def test_repair_hydrates_remote_state_before_backfill(config, now, monkeypatch) 
 
     summary = telegram_repair.run_repair(Path("."), days=365, limit_per_channel=3000)
 
-    assert calls == ["hydrate", "backfill", "save", "save"]
+    assert calls == ["hydrate", "preflight", "backfill", "save", "save"]
     assert summary["runtime_hydrated"] == 1
+    assert summary["telegram_signal_runtime_preflight"] == 1
     assert summary["telegram_backfill_messages_seen"] == 7
     assert summary["telegram_repair_checkpoints"] == 1
+
+
+def test_repair_preflight_failure_stops_before_backfill(
+    config, now, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(telegram_repair, "load_config", lambda _path: config)
+    monkeypatch.setattr(telegram_repair, "load_state", lambda _path: {})
+    monkeypatch.setattr(telegram_repair, "now_in_timezone", lambda _timezone: now)
+    monkeypatch.setattr(
+        telegram_repair, "hydrate_runtime_state", lambda *_args: {"runtime_hydrated": 1}
+    )
+    monkeypatch.setattr(
+        telegram_repair,
+        "preflight_telegram_signal_runtime",
+        lambda *_args: (_ for _ in ()).throw(
+            RuntimeError("invalid_runtime_resource")
+        ),
+    )
+    monkeypatch.setattr(
+        telegram_repair,
+        "backfill_telegram_messages",
+        lambda *_args, **_kwargs: pytest.fail("backfill must not start"),
+    )
+
+    with pytest.raises(RuntimeError, match="invalid_runtime_resource"):
+        telegram_repair.run_repair(Path("."), days=365, limit_per_channel=3000)
 
 
 @pytest.mark.parametrize(
