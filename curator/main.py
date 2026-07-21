@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+import json
 import os
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from .archive import archive_state
 from .cluster import cluster_articles, refresh_cluster_source_lineage
 from .config import article_domain_is_excluded, load_config
-from .dates import choose_publication_datetime, datetime_to_iso, get_timezone, is_too_old, now_in_timezone
+from .dates import (
+    choose_publication_datetime,
+    datetime_to_iso,
+    get_timezone,
+    is_too_old,
+    now_in_timezone,
+)
 from .dedupe import dedupe_articles
 from .fetch import (
     article_has_unresolved_google_news,
@@ -17,18 +25,32 @@ from .fetch import (
     resolve_google_news_originals_from_candidates,
 )
 from .link_discovery import enqueue_link_discoveries, partition_link_discoveries
-from .priority import annotate_state_priorities, load_priority_overrides, priority_overrides_path
+from .priority import (
+    annotate_state_priorities,
+    load_priority_overrides,
+    priority_overrides_path,
+)
 from .relevance import relevance_details
 from .remote_api import remote_api_configured, sync_state_to_remote_api
 from .remote_state import hydrate_runtime_state
 from .rss_writer import write_feed, write_index
-from .state import compact_state, load_state, remember_article, remember_rejected, save_state
+from .state import (
+    compact_state,
+    load_state,
+    remember_article,
+    remember_rejected,
+    save_state,
+)
 from .summaries import publish_hourly_telegram_update
 from .telegram_publisher import (
     enqueue_unsent_telegram_clusters_to_remote,
     initialize_telegram_state,
 )
-from .source_rights import apply_channel_source_rights, partition_authorized_records, source_is_authorized
+from .source_rights import (
+    apply_channel_source_rights,
+    partition_authorized_records,
+    source_is_authorized,
+)
 from .telegram_sources import collect_telegram_sources, telegram_candidate_articles
 from .telegram_dashboard import write_telegram_dashboard
 
@@ -36,6 +58,78 @@ from .telegram_dashboard import write_telegram_dashboard
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TRUE_VALUES = {"1", "true", "yes", "on"}
 DELIVERY_MODES = {"legacy-direct", "outbox-enqueue", "disabled"}
+FAILURE_KEYS = (
+    "official_failed",
+    "telegram_failed",
+    "telegram_dead_letter",
+    "telegram_outbox_enqueue_failed",
+    "telegram_remote_failed",
+    "telegram_channel_failed",
+    "telegram_backfill_truncated_channels",
+    "telegram_source_connect_failed",
+    "telegram_source_not_configured",
+    "link_discoveries_failed",
+    "remote_api_failed",
+)
+
+
+def log_stage(stage: str, started_at: float, **details: object) -> int:
+    elapsed_ms = max(0, round((time.monotonic() - started_at) * 1000))
+    print(
+        json.dumps(
+            {
+                "event": "curator_stage_complete",
+                "stage": stage,
+                "elapsed_ms": elapsed_ms,
+                **details,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    return elapsed_ms
+
+
+def summary_has_operational_failure(summary: dict[str, object]) -> bool:
+    return any(int(summary.get(key) or 0) > 0 for key in FAILURE_KEYS)
+
+
+def write_run_metrics(
+    summary: dict[str, object], *, ok: bool, error_type: str = ""
+) -> None:
+    destination = os.environ.get("CURATOR_RUN_METRICS_PATH", "").strip()
+    if not destination:
+        return
+    payload = {
+        **summary,
+        "ok": bool(ok),
+        "status": "complete" if ok else "failed",
+    }
+    if error_type:
+        payload["error_type"] = error_type
+    path = Path(destination)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                payload, ensure_ascii=False, indent=2, sort_keys=True, default=str
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        print(
+            json.dumps(
+                {
+                    "event": "curator_metrics_write_failed",
+                    "error_type": exc.__class__.__name__,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        raise RuntimeError("curator_run_metrics_write_failed") from exc
 
 
 def telegram_delivery_mode() -> str:
@@ -48,7 +142,10 @@ def telegram_delivery_mode() -> str:
     merely because remote credentials are present.
     """
 
-    if os.environ.get("CURATOR_DISABLE_TELEGRAM_SEND", "").strip().casefold() in TRUE_VALUES:
+    if (
+        os.environ.get("CURATOR_DISABLE_TELEGRAM_SEND", "").strip().casefold()
+        in TRUE_VALUES
+    ):
         return "disabled"
     raw_mode = os.environ.get("CURATOR_DELIVERY_MODE", "").strip().casefold()
     aliases = {
@@ -67,7 +164,9 @@ def telegram_delivery_mode() -> str:
     return "outbox-enqueue" if remote_api_configured() else "legacy-direct"
 
 
-def prepare_article(article: dict[str, object], config: dict[str, object]) -> dict[str, object]:
+def prepare_article(
+    article: dict[str, object], config: dict[str, object]
+) -> dict[str, object]:
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
     prepared = dict(article)
     published_at, date_status = choose_publication_datetime(
@@ -98,7 +197,9 @@ def article_is_before_previous_day(
     now: datetime,
 ) -> bool:
     date_filter = config.get("date_filter", {})
-    if not isinstance(date_filter, dict) or not date_filter.get("exclude_before_previous_day", False):
+    if not isinstance(date_filter, dict) or not date_filter.get(
+        "exclude_before_previous_day", False
+    ):
         return False
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
     published_at, _ = choose_publication_datetime(
@@ -124,22 +225,35 @@ def cluster_articles_allowed_by_policy(
         for article in list(cluster.get("articles", []))
         if not article_domain_is_excluded(article, config)
         and not article_is_before_previous_day(article, config, now)
-        and not (block_unresolved_google_news(config) and article_has_unresolved_google_news(article))
+        and not (
+            block_unresolved_google_news(config)
+            and article_has_unresolved_google_news(article)
+        )
         and source_is_authorized(article, config, now, purpose="public")
     ]
 
 
-def refresh_cluster_representative(cluster: dict[str, object], articles: list[dict[str, object]]) -> None:
+def refresh_cluster_representative(
+    cluster: dict[str, object], articles: list[dict[str, object]]
+) -> None:
     cluster["articles"] = articles
     cluster["article_count"] = len(articles)
     representative = articles[0]
-    cluster["representative_title"] = representative.get("clean_title") or representative.get("title") or ""
-    cluster["representative_title_normalized"] = representative.get("normalized_title") or ""
-    cluster["representative_url"] = representative.get("canonical_url") or representative.get("link") or ""
+    cluster["representative_title"] = (
+        representative.get("clean_title") or representative.get("title") or ""
+    )
+    cluster["representative_title_normalized"] = (
+        representative.get("normalized_title") or ""
+    )
+    cluster["representative_url"] = (
+        representative.get("canonical_url") or representative.get("link") or ""
+    )
     refresh_cluster_source_lineage(cluster)
 
 
-def prune_excluded_pending_articles(state: dict[str, object], config: dict[str, object], now: datetime) -> None:
+def prune_excluded_pending_articles(
+    state: dict[str, object], config: dict[str, object], now: datetime
+) -> None:
     for state_key in ("pending_clusters", "published_clusters"):
         kept_clusters: list[dict[str, object]] = []
         for cluster in list(state.get(state_key, [])):
@@ -152,14 +266,26 @@ def prune_excluded_pending_articles(state: dict[str, object], config: dict[str, 
         state[state_key] = kept_clusters
 
 
-def state_resolution_candidate_articles(state: dict[str, object]) -> list[dict[str, object]]:
+def state_resolution_candidate_articles(
+    state: dict[str, object],
+) -> list[dict[str, object]]:
     candidates: list[dict[str, object]] = []
     for key in ("articles", "rejected_articles"):
-        candidates.extend(article for article in list(state.get(key) or []) if isinstance(article, dict))
-    for cluster in list(state.get("pending_clusters") or []) + list(state.get("published_clusters") or []):
+        candidates.extend(
+            article
+            for article in list(state.get(key) or [])
+            if isinstance(article, dict)
+        )
+    for cluster in list(state.get("pending_clusters") or []) + list(
+        state.get("published_clusters") or []
+    ):
         if not isinstance(cluster, dict):
             continue
-        candidates.extend(article for article in list(cluster.get("articles") or []) if isinstance(article, dict))
+        candidates.extend(
+            article
+            for article in list(cluster.get("articles") or [])
+            if isinstance(article, dict)
+        )
     return candidates
 
 
@@ -179,8 +305,10 @@ def publish_telegram_for_run(
             "telegram_outbox_enqueue_failed": 0,
             "telegram_outbox_enqueue_skipped": 1,
         }
-    if delivery_mode == "outbox-enqueue" and remote_api_configured() and not int(
-        remote_summary.get("remote_api_failed") or 0
+    if (
+        delivery_mode == "outbox-enqueue"
+        and remote_api_configured()
+        and not int(remote_summary.get("remote_api_failed") or 0)
     ):
         outbox_summary = enqueue_unsent_telegram_clusters_to_remote(state, config, now)
         return {"telegram_sent": 0, "telegram_failed": 0, **outbox_summary}
@@ -207,25 +335,46 @@ def publish_telegram_for_run(
 
 
 def run(root: Path | None = None) -> dict[str, int]:
+    run_started = time.monotonic()
     project_root = root or PROJECT_ROOT
     config = load_config(project_root / "config.yaml")
     timezone_name = str(config.get("timezone") or "Asia/Seoul")
     now = now_in_timezone(timezone_name)
-    ingest_scope = os.environ.get("CURATOR_INGEST_SCOPE", "all").strip().casefold() or "all"
+    ingest_scope = (
+        os.environ.get("CURATOR_INGEST_SCOPE", "all").strip().casefold() or "all"
+    )
     if ingest_scope == "official":
         from .official_ingest import run as run_official_ingest
 
         return run_official_ingest(project_root, now=now)
     if ingest_scope not in {"all", "media"}:
         raise ValueError(f"unsupported CURATOR_INGEST_SCOPE: {ingest_scope}")
+    stage_metrics: dict[str, int] = {}
+    stage_started = time.monotonic()
     state_path = project_root / "data" / "state.json"
     state = load_state(state_path)
     runtime_summary = hydrate_runtime_state(state, config, now)
+    stage_metrics["stage_hydrate_ms"] = log_stage(
+        "hydrate_runtime_state",
+        stage_started,
+        runtime_hydrated=runtime_summary.get("runtime_hydrated", 0),
+    )
     prune_excluded_pending_articles(state, config, now)
     initialize_telegram_state(state, config, now)
+    stage_started = time.monotonic()
     telegram_source_summary = collect_telegram_sources(state, config, now)
+    stage_metrics["stage_telegram_collect_ms"] = log_stage(
+        "collect_telegram_sources",
+        stage_started,
+        inserted=telegram_source_summary.get("telegram_messages_inserted", 0),
+        pages=telegram_source_summary.get("telegram_incremental_pages", 0),
+        backlog_channels=telegram_source_summary.get(
+            "telegram_incremental_backlog_channels", 0
+        ),
+    )
     source_rights_blocked_channels = apply_channel_source_rights(state, config, now)
 
+    stage_started = time.monotonic()
     fetched_articles = fetch_google_alerts_articles(config)
     fetched_articles.extend(telegram_candidate_articles(state, config, now))
     fetched_articles = resolve_google_news_originals_from_candidates(
@@ -237,16 +386,25 @@ def run(root: Path | None = None) -> dict[str, int]:
     fetched_count = len(fetched_articles)
     fetched_articles, discoveries = partition_link_discoveries(fetched_articles, now)
     discovery_summary = enqueue_link_discoveries(discoveries, state, config)
+    stage_metrics["stage_media_fetch_ms"] = log_stage(
+        "fetch_and_resolve_media",
+        stage_started,
+        fetched=fetched_count,
+        discoveries=len(discoveries),
+    )
     fetched_articles, source_rights_blocked_records = partition_authorized_records(
         fetched_articles,
         config,
         now,
         purpose="ai",
     )
-    publish_levels = set(config.get("publish", {}).get("publish_levels", ["high", "medium"]))  # type: ignore[union-attr]
+    publish_levels = set(
+        config.get("publish", {}).get("publish_levels", ["high", "medium"])
+    )  # type: ignore[union-attr]
     max_age_days = int(config.get("date_filter", {}).get("max_article_age_days", 7))  # type: ignore[union-attr]
     allow_unknown = bool(config.get("date_filter", {}).get("allow_unknown_date", True))  # type: ignore[union-attr]
 
+    stage_started = time.monotonic()
     candidates: list[dict[str, object]] = []
     rejected_count = len(source_rights_blocked_records)
     google_news_blocked = 0
@@ -259,7 +417,9 @@ def run(root: Path | None = None) -> dict[str, int]:
         )
     for raw_article in fetched_articles:
         article = prepare_article(raw_article, config)
-        if block_unresolved_google_news(config) and article_has_unresolved_google_news(article):
+        if block_unresolved_google_news(config) and article_has_unresolved_google_news(
+            article
+        ):
             remember_rejected(state, article, now, "google_news_unresolved")
             rejected_count += 1
             google_news_blocked += 1
@@ -294,15 +454,23 @@ def run(root: Path | None = None) -> dict[str, int]:
 
     unique_articles, duplicates = dedupe_articles(candidates, state, config, now)
     for duplicate in duplicates:
-        remember_article(state, duplicate, "duplicate", now, str(duplicate.get("duplicate_reason") or "duplicate"))
+        remember_article(
+            state,
+            duplicate,
+            "duplicate",
+            now,
+            str(duplicate.get("duplicate_reason") or "duplicate"),
+        )
     for article in unique_articles:
         remember_article(state, article, "accepted", now)
 
-    publishable_articles, source_rights_public_blocked_records = partition_authorized_records(
-        unique_articles,
-        config,
-        now,
-        purpose="public",
+    publishable_articles, source_rights_public_blocked_records = (
+        partition_authorized_records(
+            unique_articles,
+            config,
+            now,
+            purpose="public",
+        )
     )
     published_now = cluster_articles(publishable_articles, state, config, now)
     state["last_run_at"] = datetime_to_iso(now)
@@ -314,6 +482,12 @@ def run(root: Path | None = None) -> dict[str, int]:
     write_feed(project_root / "public" / "feed.xml", published_clusters, config, now)
     write_index(project_root / "public" / "index.html", state, config, now)
     write_telegram_dashboard(project_root, state, config, now)
+    stage_metrics["stage_curate_publish_ms"] = log_stage(
+        "curate_and_render",
+        stage_started,
+        accepted=len(unique_articles),
+        published_now=len(published_now),
+    )
     base_run_summary = {
         "fetched": fetched_count,
         "accepted": len(unique_articles),
@@ -332,11 +506,35 @@ def run(root: Path | None = None) -> dict[str, int]:
         **runtime_summary,
         **archive_summary,
         **telegram_source_summary,
+        **stage_metrics,
     }
+    stage_started = time.monotonic()
     remote_summary = sync_state_to_remote_api(state, config, now, base_run_summary)
-    telegram_summary = publish_telegram_for_run(state, config, now, duplicates, remote_summary)
-    run_summary = {**base_run_summary, **telegram_summary}
+    remote_sync_ms = log_stage(
+        "sync_runtime_snapshot",
+        stage_started,
+        synced=remote_summary.get("remote_api_synced", 0),
+        failed=remote_summary.get("remote_api_failed", 0),
+    )
+    stage_started = time.monotonic()
+    telegram_summary = publish_telegram_for_run(
+        state, config, now, duplicates, remote_summary
+    )
+    delivery_ms = log_stage(
+        "delivery",
+        stage_started,
+        mode=telegram_delivery_mode(),
+        sent=telegram_summary.get("telegram_sent", 0),
+        failed=telegram_summary.get("telegram_failed", 0),
+    )
+    run_summary = {
+        **base_run_summary,
+        **telegram_summary,
+        "stage_remote_sync_ms": remote_sync_ms,
+        "stage_delivery_ms": delivery_ms,
+    }
     save_state(state_path, state)
+    run_summary["stage_total_ms"] = log_stage("run_total", run_started)
 
     return {
         **run_summary,
@@ -345,21 +543,18 @@ def run(root: Path | None = None) -> dict[str, int]:
 
 
 def main() -> None:
-    summary = run()
+    try:
+        summary = run()
+    except Exception as exc:
+        write_run_metrics({}, ok=False, error_type=exc.__class__.__name__)
+        raise
     print(
         "RSS curator finished: "
         + ", ".join(f"{key}={value}" for key, value in summary.items())
     )
-    failure_keys = (
-        "official_failed",
-        "telegram_failed",
-        "telegram_dead_letter",
-        "telegram_outbox_enqueue_failed",
-        "telegram_remote_failed",
-        "link_discoveries_failed",
-        "remote_api_failed",
-    )
-    if any(int(summary.get(key) or 0) > 0 for key in failure_keys):
+    failed = summary_has_operational_failure(summary)
+    write_run_metrics(summary, ok=not failed)
+    if failed:
         raise SystemExit(1)
 
 

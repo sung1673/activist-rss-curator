@@ -70,6 +70,14 @@
 - 정적 `story-review.html`과 검수 메타데이터는 페이지 소스만으로 후보 내용이 노출될 수 있으므로, 인증된 서버 측 편집 UI가 마련될 때까지 공개 Pages artifact에 배포하지 않는다.
 - 이 변경은 공개 채널 발송을 중단하는 조치가 아니다. 기존 공개 `TELEGRAM_CHAT_ID` 발송과 `DeliveryOutbox`의 성공 응답·외부 message ID 확인 규칙은 유지한다.
 
+### 2026-07-21 outbound Telegram delivery 중단
+
+이 절은 위 2026-07-20 기록 중 “공개 채널 발송을 계속 유지한다”는 문구를 대체한다. 기존 실행 기록은 변경 이력으로 보존하되, 2026-07-21 이후 운영 판단에는 아래 정책을 우선 적용한다.
+
+- 공개 콘텐츠를 포함해 Telegram 채팅으로 outbound 메시지를 발송하지 않는다.
+- `ENABLE_TELEGRAM_DELIVERY=false`, `config.yaml` `telegram.enabled=false`, 빈 `telegram.chat_id`를 함께 유지한다.
+- `TELEGRAM_API_ID`·`TELEGRAM_API_HASH`·`TELEGRAM_SESSION_STRING`을 사용하는 허가 공개 채널 읽기 수집은 outbound 발송과 분리해 계속한다.
+
 현재 `ENABLE_PAGES=true`이므로 `ENABLE_GOVERNANCE_PAGES`를 켜기 전에는 반드시 `ENABLE_PAGES=false`로 먼저 전환한다. 두 Pages 소유권이 동시에 켜지면 workflow가 실패한다.
 
 ## 검증 결과

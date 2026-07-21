@@ -11,17 +11,20 @@ permissions:
   models: read
 
 concurrency:
-  group: ingest-media-${{ github.ref_name }}
+  group: telegram-collection-${{ github.repository }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   ingest:
-    if: github.event_name == 'workflow_dispatch' || vars.ENABLE_GOVERNANCE_SHADOW == 'true'
+    if: github.ref_name == github.event.repository.default_branch && (github.event_name == 'workflow_dispatch' || vars.ENABLE_GOVERNANCE_SHADOW == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -63,6 +66,5 @@ jobs:
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           TELEGRAM_SESSION_STRING: ${{ secrets.TELEGRAM_SESSION_STRING }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GITHUB_TOKEN: ${{ github.token }}
         run: python -m curator.main
