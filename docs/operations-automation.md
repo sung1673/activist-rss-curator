@@ -7,7 +7,7 @@
 | 파일 | 역할 | 주기 |
 |---|---|---|
 | `ci.yml` | Python 테스트, PHP 구문 검사, 린트·타입·의존성 보안 검사 | PR, `main` 코드 push |
-| `ingest-official.yml` | DART·KIND·회사/행동주주 공식 자료 수집 | KST 07:00~23:45 15분, KST 00:00~06:00 1시간 |
+| `ingest-official.yml` | DART·KIND 공식 공시 자동 수집(회사/행동주주 공식 자료 connector는 미구현) | KST 07:00~23:45 15분, KST 00:00~06:00 1시간 |
 | `ingest-media.yml` | 허가된 Telegram·뉴스 발견 큐 수집 | 30분 |
 | `resolve-links.yml` | Google News 발견 URL 후처리 | 1시간 |
 | `publish.yml` | opt-in 시 원격 `DeliveryOutbox` claim·발송·ack/fail | 수집 완료 직후, 10분 재시도 |
@@ -63,10 +63,12 @@ Telegram 증분 수집은 채널별 한 페이지에서 durable checkpoint를 �
 
 1. 실행 전 GitHub repository의 `Settings → Environments`에 `telegram-history-repair` environment를 미리 만들고 deployment branch policy를 기본 브랜치 `main`만 허용한다. 이 environment가 없는 상태에서 workflow를 먼저 실행하지 않는다.
 2. `ENABLE_LEGACY_PIPELINE=false`, `ENABLE_GOVERNANCE_SHADOW=false`로 일반 수집을 일시 중지하고 진행 중인 `telegram-collection-*` run이 없는지 확인한다. `ENABLE_TELEGRAM_DELIVERY=false`는 전 과정에서 유지한다.
-3. 기본 브랜치에서 `Repair Telegram history`를 수동 실행한다. 실패나 timeout 후에는 임의로 DB cursor를 되돌리지 않는다. 채널 중간에서 멈춘 경우 metrics의 마지막 handle 하나만 `only_handles`에 넣고 `telegram_repair_resume_before_message_id`를 `before_message_id`로 전달한다. 해당 채널이 완료된 뒤 나머지는 `start_after`로 이어 간다. `start_after`는 metrics가 이전 모든 채널의 `remote_checkpoint_complete=1`을 입증할 때만 사용한다.
+3. 기본 브랜치에서 `Repair Telegram history`를 수동 실행한다. 실패나 timeout 후에는 임의로 DB cursor를 되돌리지 않는다. 채널 중간에서 멈춘 경우 metrics의 마지막 handle 하나만 `only_handles`에 넣고 `telegram_repair_resume_before_message_id`를 `before_message_id`로 전달한다. 해당 채널이 완료된 뒤 나머지는 `start_after`로 이어 간다. `start_after`는 canonical handle·Telegram ID의 안정 정렬에 적용되며, marker가 현재 선택 가능한 채널에 없으면 수집 전에 fail-closed한다. metrics가 이전 모든 채널의 `remote_checkpoint_complete=1`을 입증할 때만 사용한다.
 4. `telegram-repair-metrics-*` artifact에서 `ok=true`, `status=complete`, `telegram_channel_failed=0`, `telegram_remote_failed=0`, `telegram_remote_pending=0`, `telegram_backfill_truncated_channels=0`을 모두 확인한다. 실패 시에는 `telegram_remote_last_error`, `telegram_remote_last_status_code`, `telegram_remote_max_request_bytes`도 함께 확인한다. 하나라도 완료 조건을 만족하지 않으면 복구 완료로 판정하지 않는다.
 5. 성공 metrics 확인 후에만 `ENABLE_LEGACY_PIPELINE=true`로 바꾸고 `Build curated RSS feed`를 `run_mode=full`, `allow_pages_deploy=false`, `allow_telegram_delivery=false`로 즉시 실행한다. 이 safe-full이 성공하면 해당 값을 `true`로 유지해 정규 스케줄을 복구하고, 실패하면 즉시 `false`로 돌려 다음 예약 실행을 차단한다.
 6. 최종 상태는 `ENABLE_LEGACY_PIPELINE=true`, `ENABLE_PAGES=true`, `ENABLE_TELEGRAM_DELIVERY=false`, 세 거버넌스 전환 플래그 `false`다. safe-full은 Pages를 배포하지 않으므로 기존 검증된 Pages artifact는 롤백 경계로 남고, 신규 MySQL upsert 데이터는 삭제하지 않는다.
+
+2026-07-21에는 `Yeouido_Lab` 단일 채널 365일 카나리가 resume 실행까지 포함해 완료됐고, 최종 metrics에서 원격 실패·대기·잘림이 모두 0이었다. 이는 복구 프로토콜의 운영 검증일 뿐 전체 허가 채널 복구 완료를 뜻하지 않는다. 전체 복구 run과 후속 safe-full이 성공할 때까지 `ENABLE_LEGACY_PIPELINE=false`를 유지한다.
 
 PHP 배포 백업은 공개 파일 경로가 아니라 외부 접근이 차단된 `/www_root/activist/_private/deployment-backups/`에만 저장한다. `.htaccess`는 방어적으로 `.bak`과 `.bak.*` 접근도 거부하지만, 공개 경로의 차단 규칙을 백업 저장소로 간주하지 않는다. 배포는 후보 경로의 PHP 7.3·서명 인증·DB smoke test를 통과한 뒤 같은 파일시스템에서 원자적으로 교체하고, 실패하면 비공개 백업으로 복구한다.
 

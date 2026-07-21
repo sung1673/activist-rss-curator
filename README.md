@@ -32,7 +32,7 @@ licensed Telegram + media discovery
 주요 구현은 다음 위치에 있다.
 
 - `curator/governance.py`: 회사, 문서, 사건, 캠페인, 근거, 투표, 약속·이행 모델
-- `curator/official_ingest.py`, `curator/official_sources.py`: DART·KIND 증분 수집
+- `curator/official_ingest.py`, `curator/official_sources.py`: DART·KIND 증분 자동 수집. 회사·행동주주 공식 자료 connector는 후속 구현 대상
 - `curator/source_rights.py`: 수집·AI·재배포 권한의 fail-closed 판정
 - `curator/governance_publisher.py`, `curator/publish_outbox.py`: 공개 승인 사건의 멱등 발송과 재시도
 - `deploy/activist/governance_v1.php`, `deploy/activist/openapi.yaml`: 공개·관리 API 계약

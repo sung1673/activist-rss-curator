@@ -941,6 +941,78 @@ def enabled_channels(state: dict[str, object]) -> list[dict[str, object]]:
     ]
 
 
+def _select_backfill_channels(
+    state: dict[str, object],
+    *,
+    only_handles: set[str] | None,
+    skip_handles: set[str] | None,
+    start_after_handle: str,
+    channel_limit: int,
+) -> list[dict[str, object]]:
+    """Return a deterministic repair snapshot independent of DB row order."""
+
+    channels = sorted(
+        enabled_channels(state),
+        key=lambda channel: (
+            normalize_channel_handle(
+                channel.get("handle") or channel.get("username")
+            ).casefold(),
+            str(
+                channel.get("telegram_channel_id")
+                or channel.get("channel_id")
+                or ""
+            ).strip(),
+        ),
+    )
+    included = {
+        normalize_channel_handle(handle).casefold()
+        for handle in (only_handles or set())
+        if normalize_channel_handle(handle)
+    }
+    if included:
+        channels = [
+            channel
+            for channel in channels
+            if normalize_channel_handle(
+                channel.get("handle") or channel.get("username")
+            ).casefold()
+            in included
+        ]
+    skipped = {
+        normalize_channel_handle(handle).casefold()
+        for handle in (skip_handles or set())
+        if normalize_channel_handle(handle)
+    }
+    if skipped:
+        channels = [
+            channel
+            for channel in channels
+            if normalize_channel_handle(
+                channel.get("handle") or channel.get("username")
+            ).casefold()
+            not in skipped
+        ]
+    start_after = normalize_channel_handle(start_after_handle).casefold()
+    if start_after:
+        start_index = next(
+            (
+                index
+                for index, channel in enumerate(channels)
+                if normalize_channel_handle(
+                    channel.get("handle") or channel.get("username")
+                ).casefold()
+                == start_after
+            ),
+            None,
+        )
+        if start_index is None:
+            raise ValueError("start_after_handle_not_found")
+        channels = channels[start_index + 1 :]
+    if channel_limit > 0:
+        channels = channels[:channel_limit]
+    return channels
+
+
 def load_env_files(
     root: Path,
     names: tuple[str, ...] = (".env", ".env.local", ".env.api", ".env.telegram"),
@@ -3978,43 +4050,13 @@ async def _backfill_messages_with_client_legacy_batch(
         5.0, float(settings.get("backfill_channel_timeout_seconds", 60))
     )
     since = now - timedelta(days=max(1, days))
-    channels = enabled_channels(state)
-    only_handles = only_handles or set()
-    if only_handles:
-        channels = [
-            channel
-            for channel in channels
-            if normalize_channel_handle(
-                channel.get("handle") or channel.get("username")
-            )
-            in only_handles
-        ]
-    skip_handles = skip_handles or set()
-    if skip_handles:
-        channels = [
-            channel
-            for channel in channels
-            if normalize_channel_handle(
-                channel.get("handle") or channel.get("username")
-            )
-            not in skip_handles
-        ]
-    start_after = normalize_channel_handle(start_after_handle)
-    if start_after:
-        start_index = -1
-        for index, channel in enumerate(channels):
-            if (
-                normalize_channel_handle(
-                    channel.get("handle") or channel.get("username")
-                )
-                == start_after
-            ):
-                start_index = index
-                break
-        if start_index >= 0:
-            channels = channels[start_index + 1 :]
-    if channel_limit > 0:
-        channels = channels[:channel_limit]
+    channels = _select_backfill_channels(
+        state,
+        only_handles=only_handles,
+        skip_handles=skip_handles,
+        start_after_handle=start_after_handle,
+        channel_limit=channel_limit,
+    )
     worker_count = max(1, int(settings.get("backfill_channel_workers", 1)))
 
     inserted = updated = unchanged = failed = seen = outside_window = (
@@ -4446,40 +4488,13 @@ async def _backfill_messages_with_client(
         float(settings.get("backfill_processing_timeout_seconds", page_timeout)),
     )
     since = now - timedelta(days=max(1, days))
-    channels = enabled_channels(state)
-    only_handles = only_handles or set()
-    if only_handles:
-        channels = [
-            channel
-            for channel in channels
-            if normalize_channel_handle(
-                channel.get("handle") or channel.get("username")
-            )
-            in only_handles
-        ]
-    skip_handles = skip_handles or set()
-    if skip_handles:
-        channels = [
-            channel
-            for channel in channels
-            if normalize_channel_handle(
-                channel.get("handle") or channel.get("username")
-            )
-            not in skip_handles
-        ]
-    start_after = normalize_channel_handle(start_after_handle)
-    if start_after:
-        for index, channel in enumerate(channels):
-            if (
-                normalize_channel_handle(
-                    channel.get("handle") or channel.get("username")
-                )
-                == start_after
-            ):
-                channels = channels[index + 1 :]
-                break
-    if channel_limit > 0:
-        channels = channels[:channel_limit]
+    channels = _select_backfill_channels(
+        state,
+        only_handles=only_handles,
+        skip_handles=skip_handles,
+        start_after_handle=start_after_handle,
+        channel_limit=channel_limit,
+    )
 
     requested_workers = max(1, int(settings.get("backfill_channel_workers", 1)))
     page_size = max(1, int(limit_per_channel))

@@ -2133,6 +2133,92 @@ def test_backfill_global_cap_stops_at_channel_boundary_with_resume_metadata(
     }
 
 
+def test_backfill_resume_selection_is_stable_across_hydrated_channel_order(
+    config, now
+) -> None:  # type: ignore[no-untyped-def]
+    handles = ("alpha", "middle", "zulu")
+    config["telegram_sources"] = {"enabled": True, "channels": []}  # type: ignore[index]
+    authorize_telegram_handles(config, *handles)
+    snapshots = (
+        (
+            ("zulu", "2026-07-21T03:00:00+00:00"),
+            ("alpha", "2026-07-21T01:00:00+00:00"),
+            ("middle", "2026-07-21T02:00:00+00:00"),
+        ),
+        (
+            ("middle", "2026-07-21T06:00:00+00:00"),
+            ("zulu", "2026-07-21T04:00:00+00:00"),
+            ("alpha", "2026-07-21T05:00:00+00:00"),
+        ),
+    )
+
+    selected: list[list[str]] = []
+    for snapshot in snapshots:
+        state: dict[str, object] = {
+            "articles": [],
+            "telegram_source_channels": [
+                {
+                    "handle": handle,
+                    "telegram_channel_id": f"id-{handle}",
+                    "updated_at": updated_at,
+                }
+                for handle, updated_at in snapshot
+            ],
+        }
+        client = FakeTelegramClient(
+            {
+                handle: [{"id": 1, "text": handle, "date": now}]
+                for handle in handles
+            }
+        )
+
+        summary = backfill_telegram_messages(
+            state,
+            config,
+            now,
+            days=3,
+            limit_per_channel=100,
+            channel_limit=1,
+            start_after_handle="ALPHA",
+            client=client,
+            sync_remote=False,
+        )
+
+        assert summary["telegram_backfill_channels"] == 1
+        selected.append([str(call["handle"]) for call in client.iter_calls])
+
+    assert selected == [["middle"], ["middle"]]
+
+
+def test_backfill_missing_start_after_fails_before_collection(config, now) -> None:  # type: ignore[no-untyped-def]
+    config["telegram_sources"] = {"enabled": True, "channels": []}  # type: ignore[index]
+    authorize_telegram_handles(config, "alpha")
+    state: dict[str, object] = {
+        "articles": [],
+        "telegram_source_channels": [
+            {"handle": "alpha", "telegram_channel_id": "id-alpha"}
+        ],
+    }
+    client = FakeTelegramClient(
+        {"alpha": [{"id": 1, "text": "alpha", "date": now}]}
+    )
+
+    with pytest.raises(ValueError, match="start_after_handle_not_found"):
+        backfill_telegram_messages(
+            state,
+            config,
+            now,
+            days=3,
+            limit_per_channel=100,
+            channel_limit=1,
+            start_after_handle="missing",
+            client=client,
+            sync_remote=False,
+        )
+
+    assert client.iter_calls == []
+
+
 def test_backfill_resumes_a_truncated_channel_before_saved_message_id(
     config, now
 ) -> None:  # type: ignore[no-untyped-def]
