@@ -4,8 +4,8 @@
 
 ## 배포 순서
 
-1. 기존 DB 백업과 현재 `_private/config.php`를 보존한다.
-2. 기본 접두사 `activist_`를 사용하면 `deploy/activist/migrations/001_governance_v1.sql`을 적용한다. 다른 `table_prefix`를 사용하면 SQL의 접두사를 운영 값으로 치환한다.
+1. 기존 DB 백업과 현재 `_private/config.php`를 외부 접근이 차단된 `_private/deployment-backups/`에 보존한다.
+2. 기본 접두사 `activist_`를 사용하면 `deploy/activist/migrations/001_governance_v1.sql`부터 `004_telegram_signal_rebuild_staging.sql`까지 번호 순서대로 적용한다. 다른 `table_prefix`를 사용하면 SQL의 접두사를 운영 값으로 치환한다. `POST api.php?action=schema`도 누락 테이블·컬럼을 보완하지만, 명시적 migration 이력을 대신하지 않는다.
 3. `api.php`, `governance_v1.php`, `openapi.yaml`을 같은 디렉터리에 배포한다.
 4. `POST api.php?action=schema`를 기존 HMAC 방식으로 호출한다. 런타임 스키마 생성은 누락된 테이블·lease 컬럼을 추가하는 안전망이다.
 5. 웹 서버가 `/api/v1/events`를 `api.php/api/v1/events`로 전달하도록 rewrite한다. rewrite가 어려우면 `api.php/api/v1/events` 또는 `api.php?_route=/api/v1/events`도 동일하게 동작한다.

@@ -15,6 +15,13 @@ LINEAGE_MIGRATION = (
 EDITORIAL_MIGRATION = (
     ROOT / "deploy" / "activist" / "migrations" / "003_editorial_governance.sql"
 ).read_text(encoding="utf-8")
+SIGNAL_REBUILD_MIGRATION = (
+    ROOT
+    / "deploy"
+    / "activist"
+    / "migrations"
+    / "004_telegram_signal_rebuild_staging.sql"
+).read_text(encoding="utf-8")
 OPENAPI_PATH = ROOT / "deploy" / "activist" / "openapi.yaml"
 HTACCESS = (ROOT / "deploy" / "activist" / ".htaccess").read_text(encoding="utf-8")
 
@@ -184,14 +191,95 @@ def test_authoritative_signal_rebuild_removes_stale_rows_transactionally():
         )
     ]
     assert "replace_issue_signals" in snapshot
+    assert "deprecated_replacement_signal_ids" in snapshot
+    assert "signal_rebuild_token" in snapshot
+    assert "signal_rebuild_begin" in snapshot
+    assert "signal_rebuild_finalize" in snapshot
+    assert "issue_signals_staged" in snapshot
+    assert "signal_rebuild_finalized" in snapshot
+    assert "signal_rebuild_idempotent" in snapshot
+    assert "stale_signal_rebuild_token" in snapshot
+    assert "signal_rebuild_stage_requires_signals_only" in snapshot
+    assert "signal_rebuild_in_progress" in snapshot
+    assert "telegram_signal_rebuild_lease_seconds" in snapshot
+    assert "$signalRebuildLeaseExpired" in snapshot
+    assert "count($channels) > 0 || count($messages) > 0" in snapshot
     assert "invalid_issue_signals_replace_since" in snapshot
-    assert "invalid_replacement_signal" in snapshot
+    assert "telegram_signal_rebuild_state" in snapshot
+    assert "telegram_signal_rebuild_staging" in snapshot
+    assert "FOR UPDATE" in snapshot
     assert "DELETE FROM ' . table_name($config, 'telegram_issue_signals')" in snapshot
     assert "latest_seen_at >= ?" in snapshot
     assert "article_id NOT IN (" in snapshot
     assert snapshot.index("$pdo->beginTransaction()") < snapshot.index(
         "$deleteSignals->execute($deleteParams)"
     ) < snapshot.index("$pdo->commit()")
+
+
+def test_signal_rebuild_staging_schema_is_migrated_and_bootstrapped():
+    for table in (
+        "telegram_signal_rebuild_state",
+        "telegram_signal_rebuild_staging",
+    ):
+        assert f"'{table}'" in API
+        assert f"activist_{table}" in SIGNAL_REBUILD_MIGRATION
+    for column in (
+        "active_token CHAR(64)",
+        "finalized_token CHAR(64)",
+        "rebuild_token CHAR(64)",
+        "payload_json MEDIUMTEXT",
+    ):
+        assert column in API
+        assert column in SIGNAL_REBUILD_MIGRATION
+    assert "INSERT IGNORE INTO activist_telegram_signal_rebuild_state" in (
+        SIGNAL_REBUILD_MIGRATION
+    )
+
+
+def test_telegram_snapshot_capability_preflight_is_authenticated():
+    handler = API[API.index("function handle_write") : API.index("function upsert_snapshot")]
+    assert "'telegram_snapshot_capabilities'" in handler
+    assert handler.index("$nonce = require_signature") < handler.index(
+        "if ($action === 'telegram_snapshot_capabilities')"
+    )
+    assert "'signal_rebuild_protocol' => 'staging-v1'" in handler
+    assert "'max_payload_bytes'" in handler
+
+
+def test_timestamped_deployment_backups_are_denied_by_apache():
+    assert r".*\.bak(?:\..*)?" in HTACCESS
+
+
+def test_telegram_snapshot_rows_fail_closed_and_ack_actual_writes():
+    snapshot = API[
+        API.index("function upsert_telegram_snapshot") : API.index(
+            "function upsert_report"
+        )
+    ]
+    for error in (
+        "invalid_telegram_channel",
+        "invalid_telegram_channel_cursor",
+        "invalid_telegram_message",
+        "invalid_telegram_message_identity",
+        "invalid_telegram_article_match",
+        "invalid_telegram_article_match_identity",
+        "invalid_issue_signal",
+        "invalid_issue_signal_article_id",
+    ):
+        assert error in snapshot
+    for counter in (
+        "$channelsProcessed",
+        "$messagesProcessed",
+        "$matchesProcessed",
+        "$signalsProcessed",
+        "$signalsStaged",
+    ):
+        assert counter in snapshot
+    assert "'channels' => $channelsProcessed" in snapshot
+    assert "'messages' => $messagesProcessed" in snapshot
+    assert "'article_matches' => $matchesProcessed" in snapshot
+    assert "'issue_signals' => $signalsProcessed" in snapshot
+    assert snapshot.count("!is_string($channelId) && !is_int($channelId)") == 2
 
 
 def test_runtime_export_supports_newest_first_opaque_cursor():

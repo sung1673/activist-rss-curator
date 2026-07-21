@@ -8,7 +8,7 @@ from typing import Any
 from .normalize import normalize_title_parts
 from .remote_api import post_remote_action, remote_api_configured
 from .source_rights import find_source_right, source_is_authorized
-from .telegram_sources import channel_key
+from .telegram_sources import channel_key, telegram_remote_payload_budget
 
 
 def mysql_runtime_enabled() -> bool:
@@ -50,6 +50,26 @@ def _int_value(value: object, default: int = 0) -> int:
         except (TypeError, ValueError):
             return default
     return default
+
+
+def telegram_snapshot_capabilities(
+    config: dict[str, object],
+) -> dict[str, int]:
+    response = post_remote_action("telegram_snapshot_capabilities", {})
+    if not response.get("ok") or (
+        str(response.get("signal_rebuild_protocol") or "") != "staging-v1"
+    ):
+        raise RuntimeError("telegram signal staging protocol unavailable")
+    remote_max_payload_bytes = _int_value(response.get("max_payload_bytes"), -1)
+    if remote_max_payload_bytes < telegram_remote_payload_budget(config):
+        raise RuntimeError("telegram signal remote body limit is too small")
+    live_revision = _int_value(response.get("live_revision"), -1)
+    if live_revision < 0:
+        raise RuntimeError("telegram signal live revision unavailable")
+    return {
+        "telegram_signal_remote_max_payload_bytes": remote_max_payload_bytes,
+        "telegram_signal_live_revision": live_revision,
+    }
 
 
 def _merge_runtime_source_rights(
@@ -209,6 +229,10 @@ def hydrate_telegram_signal_window(
     max_rights = max(1, int(settings.get("signal_rebuild_max_source_rights", 3_000)))
     since = now - timedelta(hours=window_hours)
     all_time = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    # Capture the revision immediately before reading the authoritative input
+    # window. Rebuild begin will reject if any message, match, or live signal
+    # write commits while this snapshot is being fetched and derived.
+    capability_summary = telegram_snapshot_capabilities(config)
 
     # Fetch every resource before mutating state. A cap, malformed page, or API
     # failure therefore leaves the last valid signal inputs untouched.
@@ -262,6 +286,7 @@ def hydrate_telegram_signal_window(
     state["telegram_source_messages"] = messages
     state["telegram_article_matches"] = matches
     return {
+        **capability_summary,
         "telegram_signal_window_rebuilt": 1,
         "telegram_signal_window_hours": window_hours,
         "telegram_signal_window_messages": len(messages),
@@ -282,6 +307,7 @@ def preflight_telegram_signal_runtime(
         settings = {}
     window_hours = max(1, int(settings.get("signal_window_hours", 72)))
     since = now - timedelta(hours=window_hours)
+    capability_summary = telegram_snapshot_capabilities(config)
     sampled = 0
     for resource in ("telegram_signal_messages", "telegram_signal_matches"):
         sampled += len(
@@ -289,6 +315,8 @@ def preflight_telegram_signal_runtime(
         )
     return {
         "telegram_signal_runtime_preflight": 1,
+        "telegram_signal_staging_preflight": 1,
+        **capability_summary,
         "telegram_signal_runtime_samples": sampled,
     }
 

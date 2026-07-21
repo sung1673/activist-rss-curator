@@ -96,8 +96,7 @@ def run_repair(
         nonlocal checkpoint_count
         checkpoint_count += 1
         save_state(state_path, state)
-        write_metrics(
-            {
+        checkpoint_metrics: dict[str, object] = {
                 "status": "running",
                 **hydration,
                 "telegram_repair_checkpoints": checkpoint_count,
@@ -119,9 +118,15 @@ def run_repair(
                     "resume_before_message_id",
                     0,
                 ),
-            },
-            ok=False,
-        )
+            }
+        for key in (
+            "telegram_remote_last_error",
+            "telegram_remote_last_status_code",
+            "telegram_remote_max_request_bytes",
+        ):
+            if progress_record.get(key) not in (None, "", 0):
+                checkpoint_metrics[key] = progress_record[key]
+        write_metrics(checkpoint_metrics, ok=False)
 
     try:
         repair = backfill_telegram_messages(

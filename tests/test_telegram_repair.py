@@ -10,6 +10,7 @@ from curator import telegram_repair
 
 def test_repair_hydrates_remote_state_before_backfill(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     calls: list[str] = []
+    checkpoint_metrics: list[dict[str, object]] = []
 
     monkeypatch.setattr(telegram_repair, "load_config", lambda _path: config)
     monkeypatch.setattr(telegram_repair, "load_state", lambda _path: {})
@@ -30,7 +31,14 @@ def test_repair_hydrates_remote_state_before_backfill(config, now, monkeypatch) 
         assert kwargs["rebuild_remote_signals"] is True
         assert kwargs["before_message_id"] == 0
         kwargs["checkpoint_callback"](
-            {"handle": "licensed", "status": "ok", "remote_checkpoint_complete": 1}
+            {
+                "handle": "licensed",
+                "status": "ok",
+                "remote_checkpoint_complete": 1,
+                "telegram_remote_last_error": "payload_too_large",
+                "telegram_remote_last_status_code": 413,
+                "telegram_remote_max_request_bytes": 2_100_000,
+            }
         )
         return {
             "telegram_remote_failed": 0,
@@ -50,6 +58,11 @@ def test_repair_hydrates_remote_state_before_backfill(config, now, monkeypatch) 
     monkeypatch.setattr(
         telegram_repair, "save_state", lambda *_args: calls.append("save")
     )
+    monkeypatch.setattr(
+        telegram_repair,
+        "write_metrics",
+        lambda summary, **_kwargs: checkpoint_metrics.append(summary),
+    )
 
     summary = telegram_repair.run_repair(Path("."), days=365, limit_per_channel=3000)
 
@@ -58,6 +71,9 @@ def test_repair_hydrates_remote_state_before_backfill(config, now, monkeypatch) 
     assert summary["telegram_signal_runtime_preflight"] == 1
     assert summary["telegram_backfill_messages_seen"] == 7
     assert summary["telegram_repair_checkpoints"] == 1
+    assert checkpoint_metrics[0]["telegram_remote_last_error"] == "payload_too_large"
+    assert checkpoint_metrics[0]["telegram_remote_last_status_code"] == 413
+    assert checkpoint_metrics[0]["telegram_remote_max_request_bytes"] == 2_100_000
 
 
 def test_repair_preflight_failure_stops_before_backfill(

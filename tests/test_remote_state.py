@@ -51,11 +51,82 @@ def test_signal_runtime_preflight_checks_both_repair_resources(
 
     monkeypatch.setenv("CURATOR_DATA_SOURCE", "mysql")
     monkeypatch.setattr("curator.remote_state.fetch_runtime_resource", fake_fetch)
+    monkeypatch.setattr(
+        "curator.remote_state.post_remote_action",
+        lambda *_args, **_kwargs: {
+            "ok": True,
+            "signal_rebuild_protocol": "staging-v1",
+            "max_payload_bytes": 2_097_152,
+            "live_revision": 7,
+        },
+    )
 
     summary = preflight_telegram_signal_runtime(config, now)
 
     assert summary["telegram_signal_runtime_preflight"] == 1
+    assert summary["telegram_signal_staging_preflight"] == 1
+    assert summary["telegram_signal_live_revision"] == 7
     assert resources == ["telegram_signal_messages", "telegram_signal_matches"]
+
+
+def test_signal_runtime_preflight_fails_before_reads_without_staging_protocol(
+    config, now, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("CURATOR_DATA_SOURCE", "mysql")
+    monkeypatch.setattr(
+        "curator.remote_state.post_remote_action",
+        lambda *_args, **_kwargs: {"ok": True},
+    )
+    monkeypatch.setattr(
+        "curator.remote_state.fetch_runtime_resource",
+        lambda *_args, **_kwargs: pytest.fail("runtime reads must not begin"),
+    )
+
+    with pytest.raises(RuntimeError, match="staging protocol unavailable"):
+        preflight_telegram_signal_runtime(config, now)
+
+
+def test_signal_runtime_preflight_rejects_smaller_remote_body_limit(
+    config, now, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("CURATOR_DATA_SOURCE", "mysql")
+    monkeypatch.setattr(
+        "curator.remote_state.post_remote_action",
+        lambda *_args, **_kwargs: {
+            "ok": True,
+            "signal_rebuild_protocol": "staging-v1",
+            "max_payload_bytes": 65_536,
+            "live_revision": 0,
+        },
+    )
+    monkeypatch.setattr(
+        "curator.remote_state.fetch_runtime_resource",
+        lambda *_args, **_kwargs: pytest.fail("runtime reads must not begin"),
+    )
+
+    with pytest.raises(RuntimeError, match="body limit is too small"):
+        preflight_telegram_signal_runtime(config, now)
+
+
+def test_signal_runtime_preflight_requires_live_revision(
+    config, now, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("CURATOR_DATA_SOURCE", "mysql")
+    monkeypatch.setattr(
+        "curator.remote_state.post_remote_action",
+        lambda *_args, **_kwargs: {
+            "ok": True,
+            "signal_rebuild_protocol": "staging-v1",
+            "max_payload_bytes": 2_097_152,
+        },
+    )
+    monkeypatch.setattr(
+        "curator.remote_state.fetch_runtime_resource",
+        lambda *_args, **_kwargs: pytest.fail("runtime reads must not begin"),
+    )
+
+    with pytest.raises(RuntimeError, match="live revision unavailable"):
+        preflight_telegram_signal_runtime(config, now)
 
 
 def test_signal_window_hydration_is_atomic_and_rights_filtered(
@@ -125,12 +196,20 @@ def test_signal_window_hydration_is_atomic_and_rights_filtered(
 
     monkeypatch.setenv("CURATOR_DATA_SOURCE", "mysql")
     monkeypatch.setattr("curator.remote_state.fetch_runtime_resource", fake_fetch)
+    monkeypatch.setattr(
+        "curator.remote_state.telegram_snapshot_capabilities",
+        lambda _config: {
+            "telegram_signal_remote_max_payload_bytes": 2_097_152,
+            "telegram_signal_live_revision": 23,
+        },
+    )
 
     summary = hydrate_telegram_signal_window(state, config, now)
 
     assert summary["telegram_signal_window_rebuilt"] == 1
     assert summary["telegram_signal_window_messages"] == 1
     assert summary["telegram_signal_window_matches"] == 1
+    assert summary["telegram_signal_live_revision"] == 23
     assert state["telegram_source_messages"][0]["message_key"] == "id:100:1"  # type: ignore[index]
     assert state["telegram_article_matches"][0]["article_id"] == "article:1"  # type: ignore[index]
 
