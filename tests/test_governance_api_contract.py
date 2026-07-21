@@ -509,6 +509,8 @@ def test_telegram_identity_migration_uses_channel_id_message_keys():
     assert "OR (telegram_channel_id=? AND handle<>?)" in API
     assert "$identityInvalidations" in API
     assert "identity_migration_version=1" in API
+    assert "tmp_bside_canonical_messages.posted_at" in V1
+    assert "tmp_bside_canonical_matches.score" in V1
 
 
 def test_cancelled_disclosure_requires_human_review_with_lifecycle_history():
