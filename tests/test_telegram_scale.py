@@ -48,6 +48,7 @@ def test_four_thousand_messages_batch_linearly_and_do_not_resend_after_ack(
         payloads.append(payload)
         return {
             "ok": True,
+            "channels": len(payload["channels"]),  # type: ignore[arg-type]
             "messages": len(payload["messages"]),  # type: ignore[arg-type]
             "article_matches": 0,
         }

@@ -90,7 +90,7 @@
 
 ## 검증 결과
 
-- 전체 로컬 Python 회귀 테스트: 629개 통과, 2개 건너뜀
+- 전체 로컬 Python 회귀 테스트: 675개 통과, 2개 건너뜀
 - Ruff와 신규 typed-core MyPy: 통과
 - PHP 7.3/MySQL 8 통합 계약과 workflow·설정 validator·일일 배포 marker 계약 테스트: 통과
 - Playwright 주요 사용자 여정: 데스크톱·모바일 4개 통과
@@ -100,7 +100,7 @@
 ### Telegram 이력 복구 카나리
 
 - 2026-07-21 `Yeouido_Lab` 단일 채널의 365일 이력을 resume cursor로 나눠 복구했다. 앞선 3,000건 상한 run 두 건은 의도한 fail-closed 상태로 다음 cursor를 남겼고, [완료 run 29827367590](https://github.com/sung1673/activist-rss-curator/actions/runs/29827367590)에서 `ok=true`, `status=complete`를 확인했다.
-- 세 구간에서 메시지 9,685건을 처리했으며 마지막 완료 run은 3,685건이었다. 최종 metrics는 `telegram_channel_failed=0`, `telegram_remote_failed=0`, `telegram_remote_pending=0`, `telegram_backfill_truncated_channels=0`이고 최근 72시간 signal 40건도 staging/finalize 절차로 재구축했다.
+- 세 구간에서 메시지 9,685건을 처리했으며 마지막 완료 run은 3,685건이었다. 최종 metrics는 `telegram_channel_failed=0`, `telegram_remote_failed=0`, `telegram_remote_pending=0`, `telegram_backfill_truncated_channels=0`이었다. 당시 최근 72시간 signal 40건도 staging/finalize됐지만, 후속 검토에서 단일 채널·부분 실행의 signal 결과는 전체 universe의 권위 있는 결과가 될 수 없음을 확인했다. 해당 결과는 카나리 증빙으로만 보존하고, 전체 허가 채널 복구 뒤 signal-only 최종화로 교체한다.
 - 이는 단일 채널 카나리 성공이다. 전체 허가 채널 이력 복구와 후속 safe-full 검증은 아직 완료로 기록하지 않는다.
 
 ## 의도적으로 미실행

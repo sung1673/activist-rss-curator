@@ -207,6 +207,16 @@ def test_outbound_telegram_is_fail_closed_but_read_collection_remains_enabled() 
     assert (
         "one only_handles channel" in repair_inputs["before_message_id"]["description"]
     )
+    assert repair_inputs["expected_selection_fingerprint"]["default"] == ""
+    assert (
+        "Required for start_after/before>0"
+        in repair_inputs["expected_selection_fingerprint"]["description"]
+    )
+    assert "optional assertion for before=0" in (
+        repair_inputs["expected_selection_fingerprint"]["description"]
+    )
+    assert repair_inputs["finalize_signal_rebuild"]["type"] == "boolean"
+    assert repair_inputs["finalize_signal_rebuild"]["default"] == "false"
     assert "curator.telegram_repair" in repair
     assert "CURATOR_DATA_SOURCE: mysql" in repair
     assert "TELEGRAM_API_ID" in repair
@@ -214,6 +224,10 @@ def test_outbound_telegram_is_fail_closed_but_read_collection_remains_enabled() 
     assert "TELEGRAM_BOT_TOKEN" not in repair
     assert "TELEGRAM_CHAT_ID" not in repair
     assert '--before-message-id "$REPAIR_BEFORE_MESSAGE_ID"' in repair
+    assert (
+        '--expected-selection-fingerprint '
+        '"$REPAIR_EXPECTED_SELECTION_FINGERPRINT"' in repair
+    )
 
     repair_job = payload["jobs"]["repair"]
     assert (
@@ -230,12 +244,37 @@ def test_outbound_telegram_is_fail_closed_but_read_collection_remains_enabled() 
     publish = next(
         step for step in repair_job["steps"] if step["name"] == "Publish repair metrics"
     )
+    validate_telegram = next(
+        step
+        for step in repair_job["steps"]
+        if step["name"] == "Validate Telegram collection configuration"
+    )
+    collect = next(
+        step
+        for step in repair_job["steps"]
+        if step["name"] == "Backfill and reconcile Telegram history"
+    )
+    finalize = next(
+        step
+        for step in repair_job["steps"]
+        if step["name"] == "Finalize Telegram signal rebuild"
+    )
     assert initialize["env"]["CURATOR_RUN_METRICS_PATH"] == (
         "${{ runner.temp }}/telegram-repair-metrics.json"
     )
     assert '{"ok":false,"status":"started"}' in initialize["run"]
     assert publish["if"] == "always()"
     assert publish["with"]["if-no-files-found"] == "error"
+    assert validate_telegram["if"] == "${{ !inputs.finalize_signal_rebuild }}"
+    assert collect["if"] == "${{ !inputs.finalize_signal_rebuild }}"
+    assert finalize["if"] == "${{ inputs.finalize_signal_rebuild }}"
+    assert "TELEGRAM_API_ID" in collect["env"]
+    assert "TELEGRAM_API_HASH" in collect["env"]
+    assert "TELEGRAM_SESSION_STRING" in collect["env"]
+    assert "TELEGRAM_API_ID" not in finalize["env"]
+    assert "TELEGRAM_API_HASH" not in finalize["env"]
+    assert "TELEGRAM_SESSION_STRING" not in finalize["env"]
+    assert "--finalize-signal-rebuild" in finalize["run"]
 
 
 def test_telegram_collectors_share_one_non_cancelling_concurrency_group() -> None:

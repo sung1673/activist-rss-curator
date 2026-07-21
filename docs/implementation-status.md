@@ -18,7 +18,7 @@
 | 품질 평가 | 사람 라벨 JSONL 스키마, benchmark CLI, 표본 수와 precision/recall 게이트 | 실제 article pair 500개와 사건 300개 라벨링 |
 | 전환 판정 | 14일 shadow 비교 보고서, 7일 운영·성능 증빙, benchmark를 같은 코드 리비전으로 검증하는 fail-closed CLI와 수동 workflow | 실제 production export artifact와 사람 승인 |
 
-2026-07-21 기준 전체 로컬 Python 회귀 테스트는 629개 통과, 2개 건너뜀이고 Ruff·엄격 MyPy·compileall, PHP 7.3/MySQL 8 통합 계약, OpenAPI·workflow·JSON Schema, Playwright 사용자 여정·접근성·모바일 성능 예산을 통과했다. PR #5의 필수 CI와 병합 뒤 `main` CI도 모두 통과했다. 운영 서버에는 병합 커밋 `199737f1279426fd45c3205bb45cfb16fdfa917c`의 PHP API와 접근 차단 설정을 비공개 백업·후보 검증·원자 교체 절차로 배포했다. 이 결과는 코드·배포 계약 검증이며 아래 장기 운영 게이트를 대체하지 않는다.
+2026-07-21 기준 전체 로컬 Python 회귀 테스트는 675개 통과, 2개 건너뜀이고 Ruff·엄격 MyPy·compileall, OpenAPI·workflow·JSON Schema, Playwright 사용자 여정·접근성·모바일 성능 예산을 통과했다. PHP 7.3/MySQL 8 통합 계약은 GitHub Actions에서 검증한다. PR #5의 필수 CI와 병합 뒤 `main` CI도 모두 통과했다. 운영 서버에는 병합 커밋 `199737f1279426fd45c3205bb45cfb16fdfa917c`의 PHP API와 접근 차단 설정을 비공개 백업·후보 검증·원자 교체 절차로 배포했다. 이 결과는 코드·배포 계약 검증이며 아래 장기 운영 게이트를 대체하지 않는다.
 
 ## 2026-07-21 운영 반영 현황
 

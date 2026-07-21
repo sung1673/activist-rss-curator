@@ -38,6 +38,16 @@ on:
         required: false
         type: string
         default: "0"
+      expected_selection_fingerprint:
+        description: "Required for start_after/before>0; optional assertion for before=0"
+        required: false
+        type: string
+        default: ""
+      finalize_signal_rebuild:
+        description: "Finalize signals only after every segment artifact is verified successful"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -76,19 +86,26 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Validate repair configuration
+      - name: Validate remote repair configuration
         env:
           ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
           ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+        run: >-
+          bash .github/scripts/require-env.sh
+          ACTIVIST_API_URL ACTIVIST_API_SECRET
+
+      - name: Validate Telegram collection configuration
+        if: ${{ !inputs.finalize_signal_rebuild }}
+        env:
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           TELEGRAM_SESSION_STRING: ${{ secrets.TELEGRAM_SESSION_STRING }}
         run: >-
           bash .github/scripts/require-env.sh
-          ACTIVIST_API_URL ACTIVIST_API_SECRET
           TELEGRAM_API_ID TELEGRAM_API_HASH TELEGRAM_SESSION_STRING
 
       - name: Backfill and reconcile Telegram history
+        if: ${{ !inputs.finalize_signal_rebuild }}
         timeout-minutes: 105
         env:
           CURATOR_DATA_SOURCE: mysql
@@ -106,6 +123,7 @@ jobs:
           REPAIR_ONLY_HANDLES: ${{ inputs.only_handles }}
           REPAIR_START_AFTER: ${{ inputs.start_after }}
           REPAIR_BEFORE_MESSAGE_ID: ${{ inputs.before_message_id }}
+          REPAIR_EXPECTED_SELECTION_FINGERPRINT: ${{ inputs.expected_selection_fingerprint }}
         shell: bash
         run: |
           set -euo pipefail
@@ -117,7 +135,40 @@ jobs:
             --max-messages "$REPAIR_MAX_MESSAGES" \
             --only-handles "$REPAIR_ONLY_HANDLES" \
             --start-after "$REPAIR_START_AFTER" \
-            --before-message-id "$REPAIR_BEFORE_MESSAGE_ID"
+            --before-message-id "$REPAIR_BEFORE_MESSAGE_ID" \
+            --expected-selection-fingerprint "$REPAIR_EXPECTED_SELECTION_FINGERPRINT"
+
+      - name: Finalize Telegram signal rebuild
+        if: ${{ inputs.finalize_signal_rebuild }}
+        timeout-minutes: 105
+        env:
+          CURATOR_DATA_SOURCE: mysql
+          CURATOR_REQUIRE_REMOTE_API: "1"
+          CURATOR_RUN_METRICS_PATH: ${{ runner.temp }}/telegram-repair-metrics.json
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+          REPAIR_DAYS: ${{ inputs.days }}
+          REPAIR_LIMIT_PER_CHANNEL: ${{ inputs.limit_per_channel }}
+          REPAIR_CHANNEL_LIMIT: ${{ inputs.channel_limit }}
+          REPAIR_MAX_MESSAGES: ${{ inputs.max_messages }}
+          REPAIR_ONLY_HANDLES: ${{ inputs.only_handles }}
+          REPAIR_START_AFTER: ${{ inputs.start_after }}
+          REPAIR_BEFORE_MESSAGE_ID: ${{ inputs.before_message_id }}
+          REPAIR_EXPECTED_SELECTION_FINGERPRINT: ${{ inputs.expected_selection_fingerprint }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m curator.telegram_repair \
+            --root . \
+            --days "$REPAIR_DAYS" \
+            --limit-per-channel "$REPAIR_LIMIT_PER_CHANNEL" \
+            --channel-limit "$REPAIR_CHANNEL_LIMIT" \
+            --max-messages "$REPAIR_MAX_MESSAGES" \
+            --only-handles "$REPAIR_ONLY_HANDLES" \
+            --start-after "$REPAIR_START_AFTER" \
+            --before-message-id "$REPAIR_BEFORE_MESSAGE_ID" \
+            --expected-selection-fingerprint "$REPAIR_EXPECTED_SELECTION_FINGERPRINT" \
+            --finalize-signal-rebuild
 
       - name: Publish repair metrics
         if: always()

@@ -28,6 +28,7 @@ MAX_REPAIR_MESSAGES_PER_CHANNEL = 3000
 MAX_REPAIR_CHANNELS = 500
 MAX_REPAIR_MESSAGES = 300_000
 MAX_TELEGRAM_MESSAGE_ID = 9_223_372_036_854_775_807
+SELECTION_FINGERPRINT_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 
 def validate_repair_request(
@@ -39,6 +40,8 @@ def validate_repair_request(
     only_handles: set[str] | None,
     start_after_handle: str,
     before_message_id: int = 0,
+    expected_selection_fingerprint: str = "",
+    finalize_signal_rebuild: bool = False,
 ) -> None:
     bounds = {
         "days": (days, 1, MAX_REPAIR_DAYS),
@@ -62,6 +65,20 @@ def validate_repair_request(
         raise ValueError("before_message_id_out_of_bounds")
     if before_message_id and (len(handles) != 1 or start_after_handle):
         raise ValueError("before_message_id_requires_one_handle")
+    if finalize_signal_rebuild and not start_after_handle:
+        raise ValueError("finalize_signal_rebuild_requires_last_handle")
+    if finalize_signal_rebuild and (
+        handles or channel_limit > 0 or before_message_id > 0
+    ):
+        raise ValueError("finalize_signal_rebuild_requires_global_scope")
+    expected_fingerprint = str(expected_selection_fingerprint or "").strip()
+    if expected_fingerprint and not SELECTION_FINGERPRINT_PATTERN.fullmatch(
+        expected_fingerprint
+    ):
+        raise ValueError("expected_selection_fingerprint_invalid")
+    is_resume = bool(start_after_handle) or bool(before_message_id)
+    if is_resume and not expected_fingerprint:
+        raise ValueError("expected_selection_fingerprint_required")
 
 
 def run_repair(
@@ -74,6 +91,8 @@ def run_repair(
     only_handles: set[str] | None = None,
     start_after_handle: str = "",
     before_message_id: int = 0,
+    expected_selection_fingerprint: str = "",
+    finalize_signal_rebuild: bool = False,
 ) -> dict[str, object]:
     validate_repair_request(
         days=days,
@@ -83,6 +102,8 @@ def run_repair(
         only_handles=only_handles,
         start_after_handle=start_after_handle,
         before_message_id=before_message_id,
+        expected_selection_fingerprint=expected_selection_fingerprint,
+        finalize_signal_rebuild=finalize_signal_rebuild,
     )
     config = load_config(root / "config.yaml")
     now = now_in_timezone(str(config.get("timezone") or "Asia/Seoul"))
@@ -97,28 +118,58 @@ def run_repair(
         checkpoint_count += 1
         save_state(state_path, state)
         checkpoint_metrics: dict[str, object] = {
-                "status": "running",
-                **hydration,
-                "telegram_repair_checkpoints": checkpoint_count,
-                "telegram_remote_pending": progress_record.get(
-                    "telegram_remote_pending",
-                    len(pending_remote_messages(state)),
-                ),
-                "telegram_remote_failed": progress_record.get(
-                    "telegram_remote_failed",
-                    0,
-                ),
-                "telegram_repair_last_handle": progress_record.get("handle") or "",
-                "telegram_repair_last_status": progress_record.get("status") or "",
-                "telegram_repair_remote_checkpoint_complete": progress_record.get(
-                    "remote_checkpoint_complete",
-                    0,
-                ),
-                "telegram_repair_resume_before_message_id": progress_record.get(
-                    "resume_before_message_id",
-                    0,
-                ),
-            }
+            "status": "running",
+            **hydration,
+            "telegram_repair_checkpoints": checkpoint_count,
+            "telegram_remote_pending": progress_record.get(
+                "telegram_remote_pending",
+                len(pending_remote_messages(state)),
+            ),
+            "telegram_remote_failed": progress_record.get(
+                "telegram_remote_failed",
+                0,
+            ),
+            "telegram_repair_last_handle": progress_record.get("handle") or "",
+            "telegram_repair_last_status": progress_record.get("status") or "",
+            "telegram_repair_remote_checkpoint_complete": progress_record.get(
+                "remote_checkpoint_complete",
+                0,
+            ),
+            "telegram_repair_resume_before_message_id": progress_record.get(
+                "resume_before_message_id",
+                0,
+            ),
+            "telegram_backfill_selection_fingerprint": progress_record.get(
+                "telegram_backfill_selection_fingerprint",
+                "",
+            ),
+            "telegram_backfill_selection_count": progress_record.get(
+                "telegram_backfill_selection_count",
+                0,
+            ),
+            "telegram_backfill_universe_count": progress_record.get(
+                "telegram_backfill_universe_count",
+                0,
+            ),
+            "telegram_backfill_selected_count": progress_record.get(
+                "telegram_backfill_selected_count",
+                0,
+            ),
+            "telegram_backfill_started_selection_fingerprint": (
+                progress_record.get(
+                    "telegram_backfill_started_selection_fingerprint",
+                    "",
+                )
+            ),
+            "telegram_backfill_started_universe_count": progress_record.get(
+                "telegram_backfill_started_universe_count",
+                0,
+            ),
+            "telegram_backfill_started_selected_count": progress_record.get(
+                "telegram_backfill_started_selected_count",
+                0,
+            ),
+        }
         for key in (
             "telegram_remote_last_error",
             "telegram_remote_last_status_code",
@@ -141,10 +192,14 @@ def run_repair(
             only_handles=only_handles,
             start_after_handle=start_after_handle,
             before_message_id=before_message_id,
+            expected_selection_fingerprint=expected_selection_fingerprint,
             max_messages=max_messages,
             checkpoint_callback=checkpoint,
+            selection_checkpoint_callback=checkpoint,
             force_remote_resync=True,
             rebuild_remote_signals=True,
+            finalize_signal_rebuild=finalize_signal_rebuild,
+            require_unique_universe_handles=True,
         )
     finally:
         # A normal Python exception preserves the last channel locally. Hard job
@@ -198,6 +253,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--only-handles", default="")
     parser.add_argument("--start-after", default="")
     parser.add_argument("--before-message-id", type=int, default=0)
+    parser.add_argument("--expected-selection-fingerprint", default="")
+    parser.add_argument("--finalize-signal-rebuild", action="store_true")
     return parser
 
 
@@ -213,6 +270,8 @@ def main(argv: list[str] | None = None) -> None:
             only_handles=parse_handle_list(args.only_handles),
             start_after_handle=args.start_after,
             before_message_id=args.before_message_id,
+            expected_selection_fingerprint=args.expected_selection_fingerprint,
+            finalize_signal_rebuild=args.finalize_signal_rebuild,
         )
     except Exception as exc:
         write_metrics(

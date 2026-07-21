@@ -941,17 +941,72 @@ def enabled_channels(state: dict[str, object]) -> list[dict[str, object]]:
     ]
 
 
-def _select_backfill_channels(
-    state: dict[str, object],
-    *,
-    only_handles: set[str] | None,
-    skip_handles: set[str] | None,
-    start_after_handle: str,
-    channel_limit: int,
-) -> list[dict[str, object]]:
-    """Return a deterministic repair snapshot independent of DB row order."""
+TELEGRAM_BACKFILL_SELECTION_ORDER_VERSION = "handle-id-v1"
+TELEGRAM_BACKFILL_SELECTION_FINGERPRINT_PATTERN = re.compile(r"[0-9a-f]{64}")
 
-    channels = sorted(
+
+@dataclass(frozen=True)
+class TelegramBackfillChannelSelection:
+    channels: list[dict[str, object]]
+    fingerprint: str
+    universe_count: int
+
+
+def _backfill_channel_identity_record(
+    channel: dict[str, object],
+) -> dict[str, str]:
+    handle = normalize_channel_handle(
+        channel.get("handle") or channel.get("username")
+    ).casefold()
+    telegram_channel_id = str(
+        channel.get("telegram_channel_id") or channel.get("channel_id") or ""
+    ).strip()
+    return {
+        "identity": (
+            f"id:{telegram_channel_id}"
+            if telegram_channel_id
+            else f"handle:{handle}"
+        ),
+        "handle": handle,
+        "telegram_channel_id": telegram_channel_id,
+    }
+
+
+def _backfill_selection_fingerprint(
+    channels: list[dict[str, object]],
+) -> str:
+    records = [
+        json.dumps(
+            _backfill_channel_identity_record(channel),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        for channel in channels
+    ]
+    payload = (
+        TELEGRAM_BACKFILL_SELECTION_ORDER_VERSION
+        + "\x1e"
+        + "\x1e".join(records)
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _backfill_selection_metrics(
+    selection: TelegramBackfillChannelSelection,
+) -> dict[str, object]:
+    return {
+        "telegram_backfill_selection_fingerprint": selection.fingerprint,
+        "telegram_backfill_selection_count": selection.universe_count,
+        "telegram_backfill_universe_count": selection.universe_count,
+        "telegram_backfill_selected_count": len(selection.channels),
+    }
+
+
+def _backfill_channel_universe(
+    state: dict[str, object],
+) -> list[dict[str, object]]:
+    return sorted(
         enabled_channels(state),
         key=lambda channel: (
             normalize_channel_handle(
@@ -964,11 +1019,95 @@ def _select_backfill_channels(
             ).strip(),
         ),
     )
+
+
+def _current_backfill_selection_metrics(
+    state: dict[str, object],
+    *,
+    selected_count: int,
+) -> dict[str, object]:
+    universe = _backfill_channel_universe(state)
+    metrics = _backfill_selection_metrics(
+        TelegramBackfillChannelSelection(
+            channels=universe,
+            fingerprint=_backfill_selection_fingerprint(universe),
+            universe_count=len(universe),
+        )
+    )
+    metrics["telegram_backfill_selected_count"] = selected_count
+    return metrics
+
+
+def _duplicate_backfill_universe_handles(
+    state: dict[str, object],
+) -> list[str]:
+    counts: dict[str, int] = {}
+    for channel in _backfill_channel_universe(state):
+        handle = normalize_channel_handle(
+            channel.get("handle") or channel.get("username")
+        ).casefold()
+        if handle:
+            counts[handle] = counts.get(handle, 0) + 1
+    return sorted(handle for handle, count in counts.items() if count > 1)
+
+
+def _select_backfill_channels(
+    state: dict[str, object],
+    *,
+    only_handles: set[str] | None,
+    skip_handles: set[str] | None,
+    start_after_handle: str,
+    channel_limit: int,
+    before_message_id: int = 0,
+    expected_selection_fingerprint: str = "",
+) -> TelegramBackfillChannelSelection:
+    """Return a deterministic repair snapshot independent of DB row order."""
+
+    universe = _backfill_channel_universe(state)
+    fingerprint = _backfill_selection_fingerprint(universe)
+    expected_fingerprint = str(expected_selection_fingerprint or "").strip()
+    is_resume = bool(normalize_channel_handle(start_after_handle)) or bool(
+        before_message_id
+    )
+    if expected_fingerprint and not TELEGRAM_BACKFILL_SELECTION_FINGERPRINT_PATTERN.fullmatch(
+        expected_fingerprint
+    ):
+        raise ValueError("expected_selection_fingerprint_invalid")
+    if is_resume and not expected_fingerprint:
+        raise ValueError("expected_selection_fingerprint_required")
+    if expected_fingerprint and expected_fingerprint != fingerprint:
+        raise ValueError("selection_fingerprint_mismatch")
+
     included = {
         normalize_channel_handle(handle).casefold()
         for handle in (only_handles or set())
         if normalize_channel_handle(handle)
     }
+    if before_message_id and (
+        len(included) != 1 or normalize_channel_handle(start_after_handle)
+    ):
+        raise ValueError("before_message_id_requires_one_handle")
+    if included:
+        resolved_entity_ids: set[str] = set()
+        for requested_handle in sorted(included):
+            matches = [
+                channel
+                for channel in universe
+                if normalize_channel_handle(
+                    channel.get("handle") or channel.get("username")
+                ).casefold()
+                == requested_handle
+            ]
+            if not matches:
+                raise ValueError(f"only_handles_not_found:{requested_handle}")
+            if len(matches) != 1:
+                raise ValueError(f"only_handles_not_unique:{requested_handle}")
+            entity_id = _backfill_channel_identity_record(matches[0])["identity"]
+            if entity_id in resolved_entity_ids:
+                raise ValueError("only_handles_not_one_to_one")
+            resolved_entity_ids.add(entity_id)
+
+    channels = universe
     if included:
         channels = [
             channel
@@ -994,23 +1133,26 @@ def _select_backfill_channels(
         ]
     start_after = normalize_channel_handle(start_after_handle).casefold()
     if start_after:
-        start_index = next(
-            (
-                index
-                for index, channel in enumerate(channels)
-                if normalize_channel_handle(
-                    channel.get("handle") or channel.get("username")
-                ).casefold()
-                == start_after
-            ),
-            None,
-        )
-        if start_index is None:
+        start_indices = [
+            index
+            for index, channel in enumerate(channels)
+            if normalize_channel_handle(
+                channel.get("handle") or channel.get("username")
+            ).casefold()
+            == start_after
+        ]
+        if not start_indices:
             raise ValueError("start_after_handle_not_found")
-        channels = channels[start_index + 1 :]
+        if len(start_indices) > 1:
+            raise ValueError("start_after_handle_not_unique")
+        channels = channels[start_indices[0] + 1 :]
     if channel_limit > 0:
         channels = channels[:channel_limit]
-    return channels
+    return TelegramBackfillChannelSelection(
+        channels=channels,
+        fingerprint=fingerprint,
+        universe_count=len(universe),
+    )
 
 
 def load_env_files(
@@ -3399,11 +3541,12 @@ def sync_telegram_metadata_to_remote_api(
     state: dict[str, object],
     config: dict[str, object] | None = None,
     *,
+    include_issue_signals: bool = True,
     replace_issue_signals: bool = False,
     replace_issue_signals_since: datetime | None = None,
     signal_rebuild_base_revision: int | None = None,
 ) -> dict[str, object]:
-    """Persist channel review state and freshly derived signals without messages."""
+    """Persist channel state and, when requested, freshly derived signals."""
 
     if not remote_api_configured():
         return {
@@ -3426,11 +3569,17 @@ def sync_telegram_metadata_to_remote_api(
         # and a fresh runner will permanently skip the missing IDs.
         snapshot["last_message_id"] = int(cursors.get(channel_key(channel), 0) or 0)
         channels.append(snapshot)
-    signals = [
-        signal
-        for signal in state.get("telegram_issue_signals", [])
-        if isinstance(signal, dict)
-    ]
+    if replace_issue_signals and not include_issue_signals:
+        raise ValueError("signal_rebuild_requires_issue_signals")
+    signals = (
+        [
+            signal
+            for signal in state.get("telegram_issue_signals", [])
+            if isinstance(signal, dict)
+        ]
+        if include_issue_signals
+        else []
+    )
     if len(channels) > 1000:
         return {
             "telegram_remote_metadata_synced": 0,
@@ -3584,9 +3733,8 @@ def sync_telegram_metadata_to_remote_api(
                 ),
                 "telegram_remote_max_request_bytes": max_request_bytes,
             }
-        if "channels" not in response or int(response.get("channels") or 0) != len(
-            payload["channels"]
-        ):
+        acknowledged_channels = remote_ack_count(response, "channels")
+        if acknowledged_channels != len(payload["channels"]):
             return {
                 "telegram_remote_metadata_synced": 0,
                 "telegram_remote_metadata_failed": 1,
@@ -3696,6 +3844,20 @@ def sync_telegram_metadata_to_remote_api(
                 "telegram_remote_last_error": "signal_rebuild_finalize_ack_mismatch",
                 "telegram_remote_max_request_bytes": max_request_bytes,
             }
+        finalized_signals_ack = remote_ack_count(response, "issue_signals")
+        expected_finalized_signals = (
+            0 if response.get("signal_rebuild_idempotent") is True else remote_signals
+        )
+        if finalized_signals_ack != expected_finalized_signals:
+            return {
+                "telegram_remote_metadata_synced": 0,
+                "telegram_remote_metadata_failed": 1,
+                "telegram_remote_failed": 1,
+                "telegram_remote_last_error": (
+                    "signal_rebuild_finalize_signal_ack_mismatch"
+                ),
+                "telegram_remote_max_request_bytes": max_request_bytes,
+            }
         signals_deleted_ack = remote_ack_count(response, "issue_signals_deleted")
         if signals_deleted_ack is None:
             return {
@@ -3714,6 +3876,7 @@ def sync_telegram_metadata_to_remote_api(
                     "telegram_issue_signals": [],
                 },
                 config,
+                include_issue_signals=False,
             )
             max_request_bytes = max(
                 max_request_bytes,
@@ -3888,6 +4051,25 @@ def sync_telegram_batch_to_remote_api(
             )
             break
         chunk = ordered_messages[index:best_end]
+        chunk_channel_identities = {channel_key(message) for message in chunk}
+        payload_channels = best_payload["channels"]
+        payload_channel_identities = (
+            [
+                channel_key(channel)
+                for channel in payload_channels
+                if isinstance(channel, dict)
+            ]
+            if isinstance(payload_channels, list)
+            else []
+        )
+        if (
+            not isinstance(payload_channels, list)
+            or set(payload_channel_identities) != chunk_channel_identities
+            or len(payload_channel_identities) != len(set(payload_channel_identities))
+        ):
+            failed += 1
+            last_error = "remote_channel_snapshot_missing_or_ambiguous"
+            break
         request_bytes = remote_payload_bytes(best_payload)
         max_request_bytes = max(max_request_bytes, request_bytes)
         try:
@@ -3912,6 +4094,12 @@ def sync_telegram_batch_to_remote_api(
             if acknowledged_matches != expected_matches:
                 failed += 1
                 last_error = "remote_partial_match_ack"
+                break
+            acknowledged_channels = remote_ack_count(response, "channels")
+            expected_channels = len(best_payload["channels"])  # type: ignore[arg-type]
+            if acknowledged_channels != expected_channels:
+                failed += 1
+                last_error = "remote_partial_channel_ack"
                 break
             synced += 1
             remote_messages += len(chunk)
@@ -4040,6 +4228,7 @@ async def _backfill_messages_with_client_legacy_batch(
     only_handles: set[str] | None = None,
     skip_handles: set[str] | None = None,
     start_after_handle: str = "",
+    expected_selection_fingerprint: str = "",
     max_messages: int = 0,
     checkpoint_callback: Callable[[dict[str, object]], None] | None = None,
     force_remote_resync: bool = False,
@@ -4050,13 +4239,15 @@ async def _backfill_messages_with_client_legacy_batch(
         5.0, float(settings.get("backfill_channel_timeout_seconds", 60))
     )
     since = now - timedelta(days=max(1, days))
-    channels = _select_backfill_channels(
+    selection = _select_backfill_channels(
         state,
         only_handles=only_handles,
         skip_handles=skip_handles,
         start_after_handle=start_after_handle,
         channel_limit=channel_limit,
+        expected_selection_fingerprint=expected_selection_fingerprint,
     )
+    channels = selection.channels
     worker_count = max(1, int(settings.get("backfill_channel_workers", 1)))
 
     inserted = updated = unchanged = failed = seen = outside_window = (
@@ -4074,6 +4265,18 @@ async def _backfill_messages_with_client_legacy_batch(
     match_context = build_article_match_context(state, config)
     message_index = build_telegram_message_index(state)
     match_index = build_telegram_match_index(state)
+
+    def emit_checkpoint(progress_record: dict[str, object]) -> None:
+        if checkpoint_callback:
+            checkpoint_callback(
+                {
+                    **progress_record,
+                    **_current_backfill_selection_metrics(
+                        state,
+                        selected_count=len(channels),
+                    ),
+                }
+            )
 
     async def fetch_channel(
         index: int, channel: dict[str, object]
@@ -4262,8 +4465,7 @@ async def _backfill_messages_with_client_legacy_batch(
                     "total": len(channels),
                 }
                 per_channel.append(progress_record)
-                if checkpoint_callback:
-                    checkpoint_callback(progress_record)
+                emit_checkpoint(progress_record)
                 if progress:
                     print(
                         f"[{index}/{len(channels)}] @{channel.get('handle') or ''} failed={channel.get('last_error')} "
@@ -4300,8 +4502,7 @@ async def _backfill_messages_with_client_legacy_batch(
                     "total": len(channels),
                 }
                 per_channel.append(progress_record)
-                if checkpoint_callback:
-                    checkpoint_callback(progress_record)
+                emit_checkpoint(progress_record)
                 if progress:
                     print(
                         f"[{index}/{len(channels)}] @{resume_handle} truncated: "
@@ -4386,8 +4587,7 @@ async def _backfill_messages_with_client_legacy_batch(
                     f"fetch={fetch_result.fetch_elapsed_seconds}s elapsed={round(time.monotonic() - fetch_result.monotonic_started_at, 1)}s",
                     flush=True,
                 )
-            if checkpoint_callback:
-                checkpoint_callback(progress_record)
+            emit_checkpoint(progress_record)
             if not channel_failed:
                 completed_channels += 1
                 last_completed_handle = normalize_channel_handle(
@@ -4411,6 +4611,10 @@ async def _backfill_messages_with_client_legacy_batch(
                 break
 
     summary: dict[str, object] = {
+        **_current_backfill_selection_metrics(
+            state,
+            selected_count=len(channels),
+        ),
         "telegram_backfill_channels": len(channels),
         "telegram_backfill_days": max(1, days),
         "telegram_backfill_since": datetime_to_iso(since),
@@ -4468,6 +4672,7 @@ async def _backfill_messages_with_client(
     skip_handles: set[str] | None = None,
     start_after_handle: str = "",
     before_message_id: int = 0,
+    expected_selection_fingerprint: str = "",
     max_messages: int = 0,
     checkpoint_callback: Callable[[dict[str, object]], None] | None = None,
     force_remote_resync: bool = False,
@@ -4488,13 +4693,16 @@ async def _backfill_messages_with_client(
         float(settings.get("backfill_processing_timeout_seconds", page_timeout)),
     )
     since = now - timedelta(days=max(1, days))
-    channels = _select_backfill_channels(
+    selection = _select_backfill_channels(
         state,
         only_handles=only_handles,
         skip_handles=skip_handles,
         start_after_handle=start_after_handle,
         channel_limit=channel_limit,
+        before_message_id=before_message_id,
+        expected_selection_fingerprint=expected_selection_fingerprint,
     )
+    channels = selection.channels
 
     requested_workers = max(1, int(settings.get("backfill_channel_workers", 1)))
     page_size = max(1, int(limit_per_channel))
@@ -4526,6 +4734,10 @@ async def _backfill_messages_with_client(
             checkpoint_callback(
                 {
                     **progress_record,
+                    **_current_backfill_selection_metrics(
+                        state,
+                        selected_count=len(channels),
+                    ),
                     "_checkpoint_messages": list(page_messages or []),
                     "_checkpoint_matches": list(page_matches or []),
                     "_checkpoint_resume_on_failure": resume_on_failure,
@@ -4536,6 +4748,7 @@ async def _backfill_messages_with_client(
         handle = normalize_channel_handle(
             selected_channel.get("handle") or selected_channel.get("username")
         )
+        started_handle = handle
         if max_messages > 0 and seen >= max_messages:
             global_limit_reached = True
             truncated_channels = len(channels) - (channel_index - 1)
@@ -4615,6 +4828,18 @@ async def _backfill_messages_with_client(
         channel = upsert_telegram_channel(
             state, {**selected_channel, **channel_info, "last_error": None}
         )
+        resolved_handle = normalize_channel_handle(
+            channel.get("handle") or channel.get("username")
+        )
+        # A case-only canonicalization keeps the same deterministic sort marker.
+        # A real username rename can move the entity to another point in the
+        # ordered universe, so retaining the original marker makes a subsequent
+        # resume fail closed (the new fingerprint contains the rename while the
+        # old marker is no longer present) instead of skipping channels.
+        if resolved_handle and resolved_handle.casefold() == started_handle.casefold():
+            handle = resolved_handle
+        else:
+            handle = started_handle
         if (
             previous_key != channel_key(channel)
             or previous_message_count != len(state.get("telegram_source_messages", []))
@@ -4880,6 +5105,10 @@ async def _backfill_messages_with_client(
             continue
 
     summary: dict[str, object] = {
+        **_current_backfill_selection_metrics(
+            state,
+            selected_count=len(channels),
+        ),
         "telegram_backfill_channels": len(channels),
         "telegram_backfill_days": max(1, days),
         "telegram_backfill_since": datetime_to_iso(since),
@@ -4941,14 +5170,87 @@ def backfill_telegram_messages(
     skip_handles: set[str] | None = None,
     start_after_handle: str = "",
     before_message_id: int = 0,
+    expected_selection_fingerprint: str = "",
     max_messages: int = 0,
     checkpoint_callback: Callable[[dict[str, object]], None] | None = None,
+    selection_checkpoint_callback: Callable[[dict[str, object]], None] | None = None,
     force_remote_resync: bool = False,
     rebuild_remote_signals: bool = False,
+    finalize_signal_rebuild: bool = False,
+    require_unique_universe_handles: bool = False,
 ) -> dict[str, object]:
     ensure_telegram_state(state)
+    if rebuild_remote_signals and not sync_remote:
+        raise RuntimeError("telegram signal rebuild requires remote sync")
+    if finalize_signal_rebuild and not rebuild_remote_signals:
+        raise ValueError("finalize_signal_rebuild_requires_rebuild")
+    if finalize_signal_rebuild and (
+        only_handles
+        or skip_handles
+        or channel_limit > 0
+        or before_message_id > 0
+        or not normalize_channel_handle(start_after_handle)
+    ):
+        raise ValueError("finalize_signal_rebuild_requires_global_scope")
     registered = register_configured_channels(state, config)
     rights_blocked = apply_channel_source_rights(state, config, now)
+    # Resolve and guard the complete channel universe before a Telethon adapter
+    # is opened. This makes unknown/ambiguous explicit handles and stale resume
+    # fingerprints fail before any Telegram API call.
+    preflight_selection = _select_backfill_channels(
+        state,
+        only_handles=only_handles,
+        skip_handles=skip_handles,
+        start_after_handle=start_after_handle,
+        channel_limit=channel_limit,
+        before_message_id=before_message_id,
+        expected_selection_fingerprint=expected_selection_fingerprint,
+    )
+    duplicate_universe_handles = _duplicate_backfill_universe_handles(state)
+    if duplicate_universe_handles and (
+        require_unique_universe_handles or finalize_signal_rebuild
+    ):
+        raise ValueError(
+            "telegram_backfill_universe_handle_not_unique:"
+            + duplicate_universe_handles[0]
+        )
+    if finalize_signal_rebuild and preflight_selection.universe_count == 0:
+        raise ValueError("finalize_signal_rebuild_empty_universe")
+    if finalize_signal_rebuild and preflight_selection.channels:
+        raise ValueError("finalize_signal_rebuild_requires_last_handle")
+    started_selection_metrics: dict[str, object] = {
+        "telegram_backfill_started_selection_fingerprint": (
+            preflight_selection.fingerprint
+        ),
+        "telegram_backfill_started_universe_count": (
+            preflight_selection.universe_count
+        ),
+        "telegram_backfill_started_selected_count": len(
+            preflight_selection.channels
+        ),
+    }
+
+    def current_selection_metrics() -> dict[str, object]:
+        return {
+            **_current_backfill_selection_metrics(
+                state,
+                selected_count=len(preflight_selection.channels),
+            ),
+            **started_selection_metrics,
+        }
+
+    if selection_checkpoint_callback:
+        selection_checkpoint_callback(
+            {
+                **current_selection_metrics(),
+                "handle": "",
+                "status": "selection_validated",
+                "remote_checkpoint_complete": 0,
+                "resume_before_message_id": int(before_message_id or 0),
+                "telegram_remote_failed": 0,
+                "telegram_remote_pending": len(pending_remote_messages(state)),
+            }
+        )
     remote_totals: dict[str, object] = {
         "telegram_remote_synced": 0,
         "telegram_remote_failed": 0,
@@ -4992,6 +5294,12 @@ def backfill_telegram_messages(
         page_messages = public_record.pop("_checkpoint_messages", [])
         page_matches = public_record.pop("_checkpoint_matches", [])
         resume_on_failure = public_record.pop("_checkpoint_resume_on_failure", None)
+        # Channel discovery can safely promote a handle-only row to an
+        # authoritative Telegram ID. Checkpoint the resulting universe rather
+        # than restoring the stale preflight fingerprint supplied by the inner
+        # page loop. The preflight value remains available under the started_*
+        # keys for auditability.
+        public_record.update(current_selection_metrics())
         current_remote_failed = 0
         if sync_remote:
             if isinstance(page_messages, list) and page_messages:
@@ -5021,7 +5329,11 @@ def backfill_telegram_messages(
                     advance_cursors=True,
                 )
             else:
-                remote_result = sync_telegram_metadata_to_remote_api(state, config)
+                remote_result = sync_telegram_metadata_to_remote_api(
+                    state,
+                    config,
+                    include_issue_signals=False,
+                )
             current_remote_failed = int(
                 remote_result.get("telegram_remote_failed") or 0
             )
@@ -5070,7 +5382,35 @@ def backfill_telegram_messages(
             # channel idempotently on the next run.
             raise RuntimeError("telegram_remote_checkpoint_failed")
 
-    if client is None:
+    if finalize_signal_rebuild:
+        # The explicit finalizer proves that start_after is the current last
+        # unique handle and therefore selects zero channels. Run the normal
+        # summary path without opening Telethon; finalization reads the complete
+        # 72-hour window from MySQL below and needs no Telegram credentials.
+        finalize_client: Any = client if client is not None else object()
+
+        async def run_finalize_only() -> dict[str, object]:
+            return await _backfill_messages_with_client(
+                state,
+                config,
+                now,
+                finalize_client,
+                days=days,
+                limit_per_channel=limit_per_channel,
+                channel_limit=channel_limit,
+                progress=progress,
+                only_handles=only_handles,
+                skip_handles=skip_handles,
+                start_after_handle=start_after_handle,
+                before_message_id=before_message_id,
+                expected_selection_fingerprint=expected_selection_fingerprint,
+                max_messages=max_messages,
+                checkpoint_callback=durable_checkpoint,
+                force_remote_resync=force_remote_resync,
+            )
+
+        summary = asyncio.run(run_finalize_only())
+    elif client is None:
         adapter = TelethonClientAdapter(config)
 
         async def run_with_adapter() -> dict[str, object]:
@@ -5088,6 +5428,7 @@ def backfill_telegram_messages(
                     skip_handles=skip_handles,
                     start_after_handle=start_after_handle,
                     before_message_id=before_message_id,
+                    expected_selection_fingerprint=expected_selection_fingerprint,
                     max_messages=max_messages,
                     checkpoint_callback=durable_checkpoint,
                     force_remote_resync=force_remote_resync,
@@ -5110,6 +5451,7 @@ def backfill_telegram_messages(
                 skip_handles=skip_handles,
                 start_after_handle=start_after_handle,
                 before_message_id=before_message_id,
+                expected_selection_fingerprint=expected_selection_fingerprint,
                 max_messages=max_messages,
                 checkpoint_callback=durable_checkpoint,
                 force_remote_resync=force_remote_resync,
@@ -5117,10 +5459,15 @@ def backfill_telegram_messages(
 
         summary = asyncio.run(run_with_client())
 
-    # Covers a zero-channel repair or an unusual leftover hydrated row. Normal
-    # channel-level calls have already flushed and checkpointed their data.
-    if int(summary.get("telegram_backfill_channels") or 0) == 0 or (
-        sync_remote and pending_remote_messages(state)
+    # Covers a zero-channel ordinary backfill or an unusual leftover hydrated
+    # row. The explicit signal finalizer is intentionally signal-only: it must
+    # not mutate channel metadata and must fail before staging when any message
+    # still lacks a durable remote cursor.
+    if finalize_signal_rebuild and pending_remote_messages(state):
+        raise RuntimeError("finalize_signal_rebuild_pending_messages")
+    if not finalize_signal_rebuild and (
+        int(summary.get("telegram_backfill_channels") or 0) == 0
+        or (sync_remote and pending_remote_messages(state))
     ):
         durable_checkpoint({"handle": "", "status": "final"})
     summary["telegram_source_channels_registered"] = registered
@@ -5136,36 +5483,108 @@ def backfill_telegram_messages(
             int(message.get("telegram_message_id") or 0),
         ),
     )
+    summary.update(current_selection_metrics())
+    full_unfiltered_scope = (
+        not only_handles
+        and not skip_handles
+        and not normalize_channel_handle(start_after_handle)
+        and channel_limit == 0
+        and before_message_id == 0
+    )
+    explicit_finalize_scope = (
+        finalize_signal_rebuild
+        and not preflight_selection.channels
+        and preflight_selection.universe_count > 0
+    )
+    remote_pending = len(pending_remote_messages(state))
+    durable_complete = (
+        int(summary.get("telegram_channel_failed") or 0) == 0
+        and int(summary.get("telegram_backfill_truncated_channels") or 0) == 0
+        and int(summary.get("telegram_backfill_global_limit_reached") or 0) == 0
+        and int(summary.get("telegram_backfill_channels_completed") or 0)
+        == int(summary.get("telegram_backfill_channels") or 0)
+        and int(remote_totals.get("telegram_remote_failed") or 0) == 0
+        and int(remote_totals.get("telegram_remote_pending") or 0) == 0
+        and remote_pending == 0
+    )
+    automatic_full_rebuild = (
+        full_unfiltered_scope
+        and preflight_selection.universe_count > 0
+        and durable_complete
+    )
+    signal_rebuild_authorized = bool(
+        rebuild_remote_signals
+        and remote_api_configured()
+        and durable_complete
+        and (automatic_full_rebuild or explicit_finalize_scope)
+    )
+    if finalize_signal_rebuild and not signal_rebuild_authorized:
+        raise RuntimeError("finalize_signal_rebuild_not_authorized")
+    repair_signal_mode = bool(
+        rebuild_remote_signals or force_remote_resync or finalize_signal_rebuild
+    )
+    summary.update(
+        {
+            "telegram_signal_rebuild_requested": int(rebuild_remote_signals),
+            "telegram_signal_rebuild_authorized": int(signal_rebuild_authorized),
+            "telegram_signal_rebuild_skipped_partial": int(
+                rebuild_remote_signals and not signal_rebuild_authorized
+            ),
+            "telegram_signal_rebuild_finalize_mode": int(
+                finalize_signal_rebuild
+            ),
+            "telegram_signal_rebuild_full_scope": int(full_unfiltered_scope),
+            "telegram_signal_rebuild_durable_complete": int(durable_complete),
+        }
+    )
+
     signal_window_summary: dict[str, object] = {}
-    if rebuild_remote_signals:
-        if not sync_remote:
-            raise RuntimeError("telegram signal rebuild requires remote sync")
+    if signal_rebuild_authorized:
         # Lazy import avoids the remote_state -> telegram_sources module cycle.
         from .remote_state import hydrate_telegram_signal_window
 
         signal_window_summary = hydrate_telegram_signal_window(
             state, config, now
         )
-    # Derive and persist signals from the complete acknowledged repair window.
-    # Pruning first would silently limit signal aggregates to the local 5k cache.
-    state["telegram_issue_signals"] = telegram_issue_signals(state, config, now=now)
+    # Repair segments must not derive or upsert signals from an incomplete local
+    # slice. A complete unfiltered run, or the explicit zero-channel finalizer,
+    # first hydrates the full acknowledged 72-hour MySQL window. Non-repair
+    # callers retain the ordinary live signal refresh behavior.
+    if signal_rebuild_authorized or not repair_signal_mode:
+        state["telegram_issue_signals"] = telegram_issue_signals(
+            state, config, now=now
+        )
     refresh_channel_runtime_quality(state)
     metadata_summary: dict[str, object] = {}
     if sync_remote:
         replace_since = None
-        if rebuild_remote_signals:
+        if signal_rebuild_authorized:
             window_hours = int(
                 signal_window_summary.get("telegram_signal_window_hours") or 72
             )
             replace_since = now - timedelta(hours=max(1, window_hours))
+        metadata_state = state
+        if signal_rebuild_authorized:
+            # Every channel page was already ACKed by its durable message or
+            # channel-only checkpoint. Keep authoritative replacement strictly
+            # signal-only so a post-commit channel write cannot turn a completed
+            # signal generation into an ambiguous failure.
+            metadata_state = {
+                "telegram_source_channels": [],
+                "telegram_remote_sync_cursors": {},
+                "telegram_issue_signals": state.get("telegram_issue_signals", []),
+            }
         metadata_summary = sync_telegram_metadata_to_remote_api(
-            state,
+            metadata_state,
             config,
-            replace_issue_signals=rebuild_remote_signals,
+            include_issue_signals=(
+                signal_rebuild_authorized or not repair_signal_mode
+            ),
+            replace_issue_signals=signal_rebuild_authorized,
             replace_issue_signals_since=replace_since,
             signal_rebuild_base_revision=(
                 int(signal_window_summary["telegram_signal_live_revision"])
-                if rebuild_remote_signals
+                if signal_rebuild_authorized
                 else None
             ),
         )
@@ -5181,6 +5600,7 @@ def backfill_telegram_messages(
     )
     summary.update(prune_telegram_state(state, config, now))
     summary["telegram_prune_deferred"] = 0
+    summary.update(current_selection_metrics())
     state.setdefault("telegram_source_runs", [])
     state["telegram_source_runs"].append(telegram_run_record(now, "backfill", summary))  # type: ignore[index, union-attr]
     return summary
@@ -5537,6 +5957,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Resume after this channel handle in the enabled-channel order",
     )
     backfill_parser.add_argument(
+        "--expected-selection-fingerprint",
+        default="",
+        help="Optional channel-universe assertion; required with --start-after",
+    )
+    backfill_parser.add_argument(
         "--max-messages",
         type=int,
         default=0,
@@ -5832,6 +6257,7 @@ def cli_main(argv: list[str] | None = None) -> int:
             only_handles=parse_handle_list(args.only_handles),
             skip_handles=parse_handle_list(args.skip_handles),
             start_after_handle=args.start_after,
+            expected_selection_fingerprint=args.expected_selection_fingerprint,
             max_messages=max(0, int(args.max_messages)),
             checkpoint_callback=checkpoint_callback,
         )
