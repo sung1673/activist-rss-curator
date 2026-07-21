@@ -29,7 +29,19 @@ def test_repair_hydrates_remote_state_before_backfill(config, now, monkeypatch) 
         assert kwargs["sync_remote"] is True
         assert kwargs["force_remote_resync"] is True
         assert kwargs["rebuild_remote_signals"] is True
+        assert kwargs["finalize_signal_rebuild"] is False
+        assert kwargs["require_unique_universe_handles"] is True
         assert kwargs["before_message_id"] == 0
+        assert kwargs["expected_selection_fingerprint"] == ""
+        kwargs["selection_checkpoint_callback"](
+            {
+                "handle": "",
+                "status": "selection_validated",
+                "remote_checkpoint_complete": 0,
+                "telegram_backfill_selection_fingerprint": "a" * 64,
+                "telegram_backfill_selection_count": 97,
+            }
+        )
         kwargs["checkpoint_callback"](
             {
                 "handle": "licensed",
@@ -38,6 +50,8 @@ def test_repair_hydrates_remote_state_before_backfill(config, now, monkeypatch) 
                 "telegram_remote_last_error": "payload_too_large",
                 "telegram_remote_last_status_code": 413,
                 "telegram_remote_max_request_bytes": 2_100_000,
+                "telegram_backfill_selection_fingerprint": "a" * 64,
+                "telegram_backfill_selection_count": 97,
             }
         )
         return {
@@ -66,14 +80,28 @@ def test_repair_hydrates_remote_state_before_backfill(config, now, monkeypatch) 
 
     summary = telegram_repair.run_repair(Path("."), days=365, limit_per_channel=3000)
 
-    assert calls == ["hydrate", "preflight", "backfill", "save", "save"]
+    assert calls == [
+        "hydrate",
+        "preflight",
+        "backfill",
+        "save",
+        "save",
+        "save",
+    ]
     assert summary["runtime_hydrated"] == 1
     assert summary["telegram_signal_runtime_preflight"] == 1
     assert summary["telegram_backfill_messages_seen"] == 7
-    assert summary["telegram_repair_checkpoints"] == 1
-    assert checkpoint_metrics[0]["telegram_remote_last_error"] == "payload_too_large"
-    assert checkpoint_metrics[0]["telegram_remote_last_status_code"] == 413
-    assert checkpoint_metrics[0]["telegram_remote_max_request_bytes"] == 2_100_000
+    assert summary["telegram_repair_checkpoints"] == 2
+    assert checkpoint_metrics[0]["telegram_repair_last_status"] == (
+        "selection_validated"
+    )
+    assert checkpoint_metrics[1]["telegram_remote_last_error"] == "payload_too_large"
+    assert checkpoint_metrics[1]["telegram_remote_last_status_code"] == 413
+    assert checkpoint_metrics[1]["telegram_remote_max_request_bytes"] == 2_100_000
+    assert checkpoint_metrics[1]["telegram_backfill_selection_fingerprint"] == (
+        "a" * 64
+    )
+    assert checkpoint_metrics[1]["telegram_backfill_selection_count"] == 97
 
 
 def test_repair_preflight_failure_stops_before_backfill(
@@ -116,12 +144,40 @@ def test_repair_preflight_failure_stops_before_backfill(
         ({"before_message_id": -1}, "before_message_id_out_of_bounds"),
         ({"before_message_id": 42}, "before_message_id_requires_one_handle"),
         (
+            {"before_message_id": 42, "only_handles": {"licensed"}},
+            "expected_selection_fingerprint_required",
+        ),
+        (
+            {"start_after_handle": "licensed"},
+            "expected_selection_fingerprint_required",
+        ),
+        (
+            {
+                "start_after_handle": "licensed",
+                "expected_selection_fingerprint": "A" * 64,
+            },
+            "expected_selection_fingerprint_invalid",
+        ),
+        (
             {
                 "before_message_id": 42,
                 "only_handles": {"licensed"},
                 "start_after_handle": "licensed",
             },
             "before_message_id_requires_one_handle",
+        ),
+        (
+            {"finalize_signal_rebuild": True},
+            "finalize_signal_rebuild_requires_last_handle",
+        ),
+        (
+            {
+                "finalize_signal_rebuild": True,
+                "start_after_handle": "licensed",
+                "expected_selection_fingerprint": "a" * 64,
+                "only_handles": {"licensed"},
+            },
+            "finalize_signal_rebuild_requires_global_scope",
         ),
     ],
 )
@@ -134,11 +190,82 @@ def test_repair_request_is_bounded(overrides: dict[str, object], error: str) -> 
         "only_handles": set(),
         "start_after_handle": "",
         "before_message_id": 0,
+        "expected_selection_fingerprint": "",
+        "finalize_signal_rebuild": False,
     }
     request.update(overrides)
 
     with pytest.raises(ValueError, match=error):
         telegram_repair.validate_repair_request(**request)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "resume",
+    [
+        {"start_after_handle": "licensed"},
+        {"before_message_id": 42, "only_handles": {"licensed"}},
+    ],
+)
+def test_repair_request_accepts_lowercase_fingerprint_for_resume(
+    resume: dict[str, object],
+) -> None:
+    request: dict[str, object] = {
+        "days": 365,
+        "limit_per_channel": 3000,
+        "channel_limit": 0,
+        "max_messages": 300_000,
+        "only_handles": set(),
+        "start_after_handle": "",
+        "before_message_id": 0,
+        "expected_selection_fingerprint": "a" * 64,
+    }
+    request.update(resume)
+
+    telegram_repair.validate_repair_request(**request)  # type: ignore[arg-type]
+
+
+def test_repair_request_accepts_optional_fingerprint_without_resume() -> None:
+    telegram_repair.validate_repair_request(
+        days=365,
+        limit_per_channel=3000,
+        channel_limit=0,
+        max_messages=300_000,
+        only_handles={"licensed"},
+        start_after_handle="",
+        before_message_id=0,
+        expected_selection_fingerprint="a" * 64,
+    )
+
+
+def test_repair_request_accepts_pinned_zero_channel_signal_finalizer() -> None:
+    telegram_repair.validate_repair_request(
+        days=365,
+        limit_per_channel=3000,
+        channel_limit=0,
+        max_messages=300_000,
+        only_handles=set(),
+        start_after_handle="licensed",
+        before_message_id=0,
+        expected_selection_fingerprint="a" * 64,
+        finalize_signal_rebuild=True,
+    )
+
+
+def test_repair_cli_rejects_resume_without_selection_fingerprint(
+    tmp_path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    metrics_path = tmp_path / "repair-metrics.json"
+    monkeypatch.setenv("CURATOR_RUN_METRICS_PATH", str(metrics_path))
+
+    with pytest.raises(ValueError, match="expected_selection_fingerprint_required"):
+        telegram_repair.main(
+            ["--root", str(tmp_path), "--start-after", "licensed"]
+        )
+
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    assert metrics["ok"] is False
+    assert metrics["status"] == "failed"
+    assert metrics["error_type"] == "ValueError"
 
 
 def test_repair_exception_writes_failure_metrics(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]

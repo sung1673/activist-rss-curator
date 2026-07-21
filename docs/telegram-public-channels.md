@@ -122,13 +122,14 @@ DB에 실제 반영하려면 `--dry-run`을 제거합니다. 원격 DB API 동�
   --workers 3
 ```
 
-이미 앞 채널을 처리했다면 `--start-after`로 이어받을 수 있습니다.
+이미 앞 채널을 처리했다면 `--start-after`로 이어받을 수 있습니다. 이때 직전 실행 metrics의 `telegram_backfill_selection_fingerprint`를 반드시 함께 전달합니다. 해당 필드가 없는 구버전 metrics는 재개에 사용할 수 없으므로 `--start-after` 없이 처음부터 다시 실행합니다. `--start-after`가 없는 최초 페이지 재시도에서도 같은 fingerprint를 선택적 assertion으로 전달해 채널 universe 변경을 차단할 수 있습니다.
 
 ```powershell
 .\.venv\Scripts\python.exe -m curator.telegram_sources backfill-messages `
   --days 180 `
   --limit-per-channel 1000 `
   --start-after GoUpstock `
+  --expected-selection-fingerprint <직전-metrics의-64자리-SHA-256> `
   --workers 3
 ```
 
