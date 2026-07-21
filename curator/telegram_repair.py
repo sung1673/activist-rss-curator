@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .config import load_config
 from .dates import now_in_timezone
-from .remote_state import hydrate_runtime_state
+from .remote_state import hydrate_runtime_state, preflight_telegram_signal_runtime
 from .state import load_state, save_state
 from .telegram_sources import (
     backfill_telegram_messages,
@@ -89,6 +89,7 @@ def run_repair(
     state_path = root / "data" / "state.json"
     state = load_state(state_path)
     hydration = hydrate_runtime_state(state, config, now)
+    runtime_preflight = preflight_telegram_signal_runtime(config, now)
     checkpoint_count = 0
 
     def checkpoint(progress_record: dict[str, object]) -> None:
@@ -147,6 +148,7 @@ def run_repair(
         save_state(state_path, state)
     return {
         **hydration,
+        **runtime_preflight,
         **repair,
         "telegram_repair_checkpoints": checkpoint_count,
     }

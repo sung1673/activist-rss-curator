@@ -8,6 +8,7 @@ from curator.remote_state import (
     fetch_runtime_resource,
     hydrate_runtime_state,
     hydrate_telegram_signal_window,
+    preflight_telegram_signal_runtime,
 )
 from curator.telegram_sources import pending_remote_messages
 
@@ -36,6 +37,25 @@ def test_complete_runtime_resource_fails_instead_of_returning_a_capped_prefix(
             max_records=1,
             require_complete=True,
         )
+
+
+def test_signal_runtime_preflight_checks_both_repair_resources(
+    config, now, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    resources: list[str] = []
+
+    def fake_fetch(resource: str, **kwargs):  # type: ignore[no-untyped-def]
+        resources.append(resource)
+        assert kwargs["max_records"] == 1
+        return []
+
+    monkeypatch.setenv("CURATOR_DATA_SOURCE", "mysql")
+    monkeypatch.setattr("curator.remote_state.fetch_runtime_resource", fake_fetch)
+
+    summary = preflight_telegram_signal_runtime(config, now)
+
+    assert summary["telegram_signal_runtime_preflight"] == 1
+    assert resources == ["telegram_signal_messages", "telegram_signal_matches"]
 
 
 def test_signal_window_hydration_is_atomic_and_rights_filtered(
