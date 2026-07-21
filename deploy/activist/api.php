@@ -304,6 +304,31 @@ function ensure_schema(PDO $pdo, array $config): void {
         INDEX idx_signal_strength (related_telegram_channels_count, related_telegram_count),
         INDEX idx_latest_seen (latest_seen_at)
     ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'telegram_signal_rebuild_state') . ' (
+        state_key VARCHAR(16) NOT NULL PRIMARY KEY,
+        active_token CHAR(64) NULL,
+        started_at DATETIME NULL,
+        finalized_token CHAR(64) NULL,
+        finalized_at DATETIME NULL,
+        live_revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        updated_at DATETIME NOT NULL,
+        INDEX idx_signal_rebuild_active (active_token),
+        INDEX idx_signal_rebuild_finalized (finalized_at)
+    ) ENGINE=InnoDB' . $charset);
+    $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'telegram_signal_rebuild_staging') . ' (
+        rebuild_token CHAR(64) NOT NULL,
+        article_id VARCHAR(96) NOT NULL,
+        payload_json MEDIUMTEXT NOT NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        PRIMARY KEY (rebuild_token, article_id),
+        INDEX idx_signal_rebuild_staging_created (created_at)
+    ) ENGINE=InnoDB' . $charset);
+    ensure_column($pdo, $config, 'telegram_signal_rebuild_state', 'live_revision', 'BIGINT UNSIGNED NOT NULL DEFAULT 0');
+    $signalRebuildState = $pdo->prepare('INSERT IGNORE INTO ' . table_name($config, 'telegram_signal_rebuild_state') . ' (
+        state_key, active_token, started_at, finalized_token, finalized_at, live_revision, updated_at
+    ) VALUES (?,?,?,?,?,?,?)');
+    $signalRebuildState->execute(array('global', null, null, null, null, 0, gmdate('Y-m-d H:i:s')));
     $pdo->exec('DELETE FROM ' . table_name($config, 'api_nonces') . ' WHERE seen_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY)');
     ensure_column($pdo, $config, 'articles', 'sort_at', 'DATETIME NULL');
     ensure_column($pdo, $config, 'articles', 'source_right_id', 'VARCHAR(64) NULL');
@@ -911,6 +936,17 @@ function str_value(array $row, string $key, int $max = 65535): ?string {
 
 function int_value(array $row, string $key): int {
     return isset($row[$key]) ? (int)$row[$key] : 0;
+}
+
+function nonnegative_decimal_string($value): ?string {
+    if (is_int($value)) {
+        return $value >= 0 ? (string)$value : null;
+    }
+    if (!is_string($value) || !preg_match('/^[0-9]+$/', $value)) {
+        return null;
+    }
+    $normalized = ltrim($value, '0');
+    return $normalized === '' ? '0' : $normalized;
 }
 
 function raw_bytes(array $row): ?string {
@@ -1783,6 +1819,7 @@ function handle_write(string $action, array $config): void {
         'enqueue_link_discoveries',
         'claim_link_discoveries',
         'resolve_link_discovery',
+        'telegram_snapshot_capabilities',
         'schema',
     );
     if (!in_array($action, $allowed, true)) {
@@ -1797,6 +1834,20 @@ function handle_write(string $action, array $config): void {
 
     if ($action === 'schema') {
         respond(200, array('ok' => true, 'schema' => 'ready'));
+    }
+    if ($action === 'telegram_snapshot_capabilities') {
+        $signalRebuildState = $pdo->prepare('SELECT live_revision FROM ' . table_name($config, 'telegram_signal_rebuild_state') . ' WHERE state_key = ?');
+        $signalRebuildState->execute(array('global'));
+        $liveRevision = $signalRebuildState->fetchColumn();
+        if ($liveRevision === false) {
+            throw new RuntimeException('signal_rebuild_state_missing');
+        }
+        respond(200, array(
+            'ok' => true,
+            'signal_rebuild_protocol' => 'staging-v1',
+            'live_revision' => (int)$liveRevision,
+            'max_payload_bytes' => isset($config['max_body_bytes']) ? (int)$config['max_body_bytes'] : 2097152,
+        ));
     }
     if ($action === 'upsert_snapshot') {
         upsert_snapshot($pdo, $config, $payload);
@@ -2005,31 +2056,258 @@ function upsert_snapshot(PDO $pdo, array $config, array $payload): void {
 
 
 function upsert_telegram_snapshot(PDO $pdo, array $config, array $payload): void {
+    foreach (array('channels', 'messages', 'article_matches', 'issue_signals') as $arrayField) {
+        if (array_key_exists($arrayField, $payload) && !is_array($payload[$arrayField])) {
+            respond(400, array('ok' => false, 'error' => 'invalid_' . $arrayField));
+        }
+    }
     $channels = isset($payload['channels']) && is_array($payload['channels']) ? $payload['channels'] : array();
     $messages = isset($payload['messages']) && is_array($payload['messages']) ? $payload['messages'] : array();
     $matches = isset($payload['article_matches']) && is_array($payload['article_matches']) ? $payload['article_matches'] : array();
     $signals = isset($payload['issue_signals']) && is_array($payload['issue_signals']) ? $payload['issue_signals'] : array();
+
+    if (array_key_exists('replacement_signal_ids', $payload)) {
+        respond(400, array('ok' => false, 'error' => 'deprecated_replacement_signal_ids'));
+    }
+    foreach (array('signal_rebuild_begin', 'signal_rebuild_finalize') as $booleanField) {
+        if (array_key_exists($booleanField, $payload) && !is_bool($payload[$booleanField])) {
+            respond(400, array('ok' => false, 'error' => 'invalid_' . $booleanField));
+        }
+    }
+    $hasSignalRebuildToken = array_key_exists('signal_rebuild_token', $payload);
+    $signalRebuildToken = null;
+    if ($hasSignalRebuildToken) {
+        if (!is_string($payload['signal_rebuild_token']) || !preg_match('/^[a-f0-9]{64}$/', $payload['signal_rebuild_token'])) {
+            respond(400, array('ok' => false, 'error' => 'invalid_signal_rebuild_token'));
+        }
+        $signalRebuildToken = $payload['signal_rebuild_token'];
+    }
+    $signalRebuildBegin = array_key_exists('signal_rebuild_begin', $payload) && $payload['signal_rebuild_begin'] === true;
+    $signalRebuildFinalize = array_key_exists('signal_rebuild_finalize', $payload) && $payload['signal_rebuild_finalize'] === true;
+    if (($signalRebuildBegin || $signalRebuildFinalize) && $signalRebuildToken === null) {
+        respond(400, array('ok' => false, 'error' => 'signal_rebuild_token_required'));
+    }
+    if ($signalRebuildBegin && $signalRebuildFinalize) {
+        respond(400, array('ok' => false, 'error' => 'conflicting_signal_rebuild_phase'));
+    }
+    $signalRebuildBaseRevision = null;
+    if ($signalRebuildBegin) {
+        if (!array_key_exists('signal_rebuild_base_revision', $payload)) {
+            respond(400, array('ok' => false, 'error' => 'signal_rebuild_base_revision_required'));
+        }
+        $signalRebuildBaseRevision = nonnegative_decimal_string($payload['signal_rebuild_base_revision']);
+        if ($signalRebuildBaseRevision === null) {
+            respond(400, array('ok' => false, 'error' => 'invalid_signal_rebuild_base_revision'));
+        }
+    } elseif (array_key_exists('signal_rebuild_base_revision', $payload)) {
+        respond(400, array('ok' => false, 'error' => 'signal_rebuild_base_revision_requires_begin'));
+    }
+
     $replaceSignals = bool_int($payload, 'replace_issue_signals') === 1;
     $replaceSignalsSince = $replaceSignals ? mysql_dt(isset($payload['issue_signals_replace_since']) ? $payload['issue_signals_replace_since'] : null) : null;
     if (count($channels) > 1000 || count($messages) > 2500 || count($matches) > 10000 || count($signals) > 1000) {
         respond(413, array('ok' => false, 'error' => 'too_many_records'));
     }
-    if ($replaceSignals && $replaceSignalsSince === null) {
-        respond(400, array('ok' => false, 'error' => 'invalid_issue_signals_replace_since'));
+    if ($replaceSignals && !$signalRebuildFinalize) {
+        respond(400, array('ok' => false, 'error' => 'signal_rebuild_finalize_required'));
     }
-    $replacementSignalIds = array();
-    if ($replaceSignals) {
-        foreach ($signals as $signal) {
-            if (!is_array($signal)) { respond(400, array('ok' => false, 'error' => 'invalid_replacement_signal')); }
-            $replacementId = str_value($signal, 'article_id', 96);
-            if ($replacementId === null || $replacementId === '') { respond(400, array('ok' => false, 'error' => 'invalid_replacement_signal')); }
-            $replacementSignalIds[$replacementId] = true;
+    if ($signalRebuildFinalize) {
+        if (!$replaceSignals) {
+            respond(400, array('ok' => false, 'error' => 'signal_rebuild_finalize_requires_replace'));
+        }
+        if ($replaceSignalsSince === null) {
+            respond(400, array('ok' => false, 'error' => 'invalid_issue_signals_replace_since'));
+        }
+        if (count($signals) !== 0) {
+            respond(400, array('ok' => false, 'error' => 'signal_rebuild_finalize_requires_empty_signals'));
+        }
+        if (count($channels) !== 0 || count($messages) !== 0 || count($matches) !== 0) {
+            respond(400, array('ok' => false, 'error' => 'signal_rebuild_finalize_requires_metadata_only'));
         }
     }
+    if ($signalRebuildToken !== null && !$signalRebuildFinalize
+        && (count($channels) !== 0 || count($messages) !== 0 || count($matches) !== 0)) {
+        respond(400, array('ok' => false, 'error' => 'signal_rebuild_stage_requires_signals_only'));
+    }
+
+    foreach ($channels as $channel) {
+        if (!is_array($channel)) {
+            respond(400, array('ok' => false, 'error' => 'invalid_telegram_channel'));
+        }
+        $rawHandle = isset($channel['handle']) ? $channel['handle'] : (isset($channel['username']) ? $channel['username'] : null);
+        if (!is_string($rawHandle) || normalize_handle_value($rawHandle) === '') {
+            respond(400, array('ok' => false, 'error' => 'invalid_telegram_channel_identity'));
+        }
+        if (isset($channel['telegram_channel_id'])) {
+            $channelId = $channel['telegram_channel_id'];
+            if ((!is_string($channelId) && !is_int($channelId))
+                || trim((string)$channelId) === '' || mb_strlen((string)$channelId, 'UTF-8') > 64) {
+                respond(400, array('ok' => false, 'error' => 'invalid_telegram_channel_identity'));
+            }
+        }
+        if (array_key_exists('last_message_id', $channel)) {
+            $lastMessageId = $channel['last_message_id'];
+            $validLastMessageId = (is_int($lastMessageId) && $lastMessageId >= 0)
+                || (is_string($lastMessageId) && preg_match('/^[0-9]+$/', $lastMessageId));
+            if (!$validLastMessageId || (int)$lastMessageId < 0) {
+                respond(400, array('ok' => false, 'error' => 'invalid_telegram_channel_cursor'));
+            }
+        }
+    }
+    foreach ($messages as $message) {
+        if (!is_array($message)) {
+            respond(400, array('ok' => false, 'error' => 'invalid_telegram_message'));
+        }
+        if (!isset($message['handle']) || !is_string($message['handle'])) {
+            respond(400, array('ok' => false, 'error' => 'invalid_telegram_message_identity'));
+        }
+        if (isset($message['telegram_channel_id'])) {
+            $channelId = $message['telegram_channel_id'];
+            if ((!is_string($channelId) && !is_int($channelId))
+                || trim((string)$channelId) === '' || mb_strlen((string)$channelId, 'UTF-8') > 64) {
+                respond(400, array('ok' => false, 'error' => 'invalid_telegram_message_identity'));
+            }
+        }
+        $rawMessageId = isset($message['telegram_message_id']) ? $message['telegram_message_id'] : null;
+        $validMessageId = is_int($rawMessageId)
+            || (is_string($rawMessageId) && preg_match('/^[1-9][0-9]*$/', $rawMessageId));
+        if (!$validMessageId || (int)$rawMessageId <= 0) {
+            $rawMessageId = isset($message['id']) ? $message['id'] : null;
+            $validMessageId = is_int($rawMessageId)
+                || (is_string($rawMessageId) && preg_match('/^[1-9][0-9]*$/', $rawMessageId));
+        }
+        $handle = normalize_handle_value($message['handle']);
+        $messageId = $validMessageId ? (int)$rawMessageId : 0;
+        $messageKey = $messageId > 0 ? telegram_message_key_from_row($message) : '';
+        if ($handle === '' || $messageId <= 0 || mb_strlen($messageKey, 'UTF-8') > 180) {
+            respond(400, array('ok' => false, 'error' => 'invalid_telegram_message_identity'));
+        }
+    }
+    foreach ($matches as $match) {
+        if (!is_array($match)) {
+            respond(400, array('ok' => false, 'error' => 'invalid_telegram_article_match'));
+        }
+        $articleId = isset($match['article_id']) && is_string($match['article_id']) ? $match['article_id'] : null;
+        $messageKey = isset($match['telegram_message_key']) && is_string($match['telegram_message_key']) ? $match['telegram_message_key'] : null;
+        $matchType = isset($match['match_type']) && is_string($match['match_type']) ? $match['match_type'] : null;
+        if ($articleId === null || trim($articleId) === '' || mb_strlen($articleId, 'UTF-8') > 96
+            || $messageKey === null || trim($messageKey) === '' || mb_strlen($messageKey, 'UTF-8') > 180
+            || $matchType === null || trim($matchType) === '' || mb_strlen($matchType, 'UTF-8') > 40) {
+            respond(400, array('ok' => false, 'error' => 'invalid_telegram_article_match_identity'));
+        }
+    }
+    $authoritativeSignalIds = array();
+    foreach ($signals as $signal) {
+        if (!is_array($signal)) {
+            respond(400, array('ok' => false, 'error' => 'invalid_issue_signal'));
+        }
+        $articleId = isset($signal['article_id']) && is_string($signal['article_id']) ? $signal['article_id'] : null;
+        if ($articleId === null || trim($articleId) === '' || mb_strlen($articleId, 'UTF-8') > 96) {
+            respond(400, array('ok' => false, 'error' => 'invalid_issue_signal_article_id'));
+        }
+    }
+
     $now = gmdate('Y-m-d H:i:s');
+    $channelsProcessed = 0;
+    $messagesProcessed = 0;
+    $matchesProcessed = 0;
+    $signalsProcessed = 0;
+    $signalsStaged = 0;
     $signalsDeleted = 0;
+    $isSignalRebuildStage = $signalRebuildToken !== null && !$signalRebuildFinalize;
+    $hasFencedLiveInputs = $signalRebuildToken === null
+        && (count($channels) > 0 || count($messages) > 0 || count($matches) > 0 || count($signals) > 0);
+    $responseLiveRevision = null;
+    $signalRebuildStateTable = table_name($config, 'telegram_signal_rebuild_state');
+    $signalRebuildStagingTable = table_name($config, 'telegram_signal_rebuild_staging');
+    $signalRebuildLeaseSeconds = isset($config['telegram_signal_rebuild_lease_seconds'])
+        ? max(1, min(86400, (int)$config['telegram_signal_rebuild_lease_seconds'])) : 600;
     $pdo->beginTransaction();
     try {
+        if ($signalRebuildToken !== null || $hasFencedLiveInputs) {
+            $lockSignalRebuild = $pdo->prepare('SELECT active_token, finalized_token, live_revision, updated_at FROM ' . $signalRebuildStateTable . ' WHERE state_key = ? FOR UPDATE');
+            $lockSignalRebuild->execute(array('global'));
+            $signalRebuildState = $lockSignalRebuild->fetch();
+            if (!is_array($signalRebuildState)) {
+                throw new RuntimeException('signal_rebuild_state_missing');
+            }
+            $currentLiveRevision = nonnegative_decimal_string((string)$signalRebuildState['live_revision']);
+            if ($currentLiveRevision === null) {
+                throw new RuntimeException('invalid_signal_rebuild_live_revision');
+            }
+            $responseLiveRevision = (int)$currentLiveRevision;
+            $activeSignalRebuildToken = isset($signalRebuildState['active_token'])
+                ? (string)$signalRebuildState['active_token'] : '';
+            $signalRebuildLeaseTimestamp = isset($signalRebuildState['updated_at'])
+                ? strtotime((string)$signalRebuildState['updated_at'] . ' UTC') : false;
+            if ($activeSignalRebuildToken !== '' && $signalRebuildLeaseTimestamp === false) {
+                throw new RuntimeException('invalid_signal_rebuild_lease_timestamp');
+            }
+            $signalRebuildLeaseExpired = $activeSignalRebuildToken !== ''
+                && $signalRebuildLeaseTimestamp <= time() - $signalRebuildLeaseSeconds;
+            if ($signalRebuildBegin) {
+                if (!hash_equals($currentLiveRevision, (string)$signalRebuildBaseRevision)) {
+                    $pdo->rollBack();
+                    respond(409, array(
+                        'ok' => false,
+                        'error' => 'signal_rebuild_revision_conflict',
+                        'live_revision' => (int)$currentLiveRevision,
+                    ));
+                }
+                if ($activeSignalRebuildToken !== ''
+                    && !hash_equals($activeSignalRebuildToken, $signalRebuildToken)
+                    && !$signalRebuildLeaseExpired) {
+                    $pdo->rollBack();
+                    respond(409, array(
+                        'ok' => false,
+                        'error' => 'signal_rebuild_in_progress',
+                        'live_revision' => (int)$currentLiveRevision,
+                    ));
+                }
+                if ($activeSignalRebuildToken === ''
+                    || (!hash_equals($activeSignalRebuildToken, $signalRebuildToken)
+                        && $signalRebuildLeaseExpired)) {
+                    $pdo->exec('DELETE FROM ' . $signalRebuildStagingTable);
+                    $beginSignalRebuild = $pdo->prepare('UPDATE ' . $signalRebuildStateTable . '
+                        SET active_token = ?, started_at = ?, updated_at = ? WHERE state_key = ?');
+                    $beginSignalRebuild->execute(array($signalRebuildToken, $now, $now, 'global'));
+                }
+            } elseif ($signalRebuildFinalize
+                && $activeSignalRebuildToken === ''
+                && isset($signalRebuildState['finalized_token'])
+                && hash_equals((string)$signalRebuildState['finalized_token'], $signalRebuildToken)) {
+                $pdo->rollBack();
+                respond(200, array(
+                    'ok' => true,
+                    'channels' => 0,
+                    'messages' => 0,
+                    'article_matches' => 0,
+                    'issue_signals' => 0,
+                    'issue_signals_deleted' => 0,
+                    'signal_rebuild_finalized' => $signalRebuildToken,
+                    'signal_rebuild_idempotent' => true,
+                    'live_revision' => (int)$currentLiveRevision,
+                ));
+            } elseif ($signalRebuildToken !== null
+                && (!isset($signalRebuildState['active_token']) || !hash_equals((string)$signalRebuildState['active_token'], $signalRebuildToken))) {
+                $pdo->rollBack();
+                respond(409, array('ok' => false, 'error' => 'stale_signal_rebuild_token'));
+            } elseif ($hasFencedLiveInputs && $activeSignalRebuildToken !== '') {
+                if (!$signalRebuildLeaseExpired) {
+                    $pdo->rollBack();
+                    respond(409, array(
+                        'ok' => false,
+                        'error' => 'signal_rebuild_in_progress',
+                        'live_revision' => (int)$currentLiveRevision,
+                    ));
+                }
+                $pdo->exec('DELETE FROM ' . $signalRebuildStagingTable);
+                $clearExpiredSignalRebuild = $pdo->prepare('UPDATE ' . $signalRebuildStateTable . '
+                    SET active_token = NULL, started_at = NULL, updated_at = ? WHERE state_key = ?');
+                $clearExpiredSignalRebuild->execute(array($now, 'global'));
+            }
+        }
+
         $channelStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'telegram_channels') . ' (
             handle, telegram_channel_id, title, description, joined, enabled, source, source_type, is_public_channel,
             quality_score, last_message_id, last_collected_at, last_recommendation_checked_at, last_error, payload_json, updated_at
@@ -2040,9 +2318,7 @@ function upsert_telegram_snapshot(PDO $pdo, array $config, array $payload): void
             last_collected_at=VALUES(last_collected_at), last_recommendation_checked_at=VALUES(last_recommendation_checked_at),
             last_error=VALUES(last_error), payload_json=VALUES(payload_json), updated_at=VALUES(updated_at)');
         foreach ($channels as $channel) {
-            if (!is_array($channel)) { continue; }
             $handle = normalize_handle_value(isset($channel['handle']) ? $channel['handle'] : (isset($channel['username']) ? $channel['username'] : ''));
-            if ($handle === '') { continue; }
             $telegramChannelId = str_value($channel, 'telegram_channel_id', 64);
             if ($telegramChannelId !== null && $telegramChannelId !== '') {
                 migrate_telegram_channel_identity($pdo, $config, $handle, $telegramChannelId);
@@ -2065,6 +2341,7 @@ function upsert_telegram_snapshot(PDO $pdo, array $config, array $payload): void
                 json_value($channel),
                 $now,
             ));
+            $channelsProcessed += 1;
         }
 
         $messageStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'telegram_messages') . ' (
@@ -2077,11 +2354,9 @@ function upsert_telegram_snapshot(PDO $pdo, array $config, array $payload): void
             forwards=VALUES(forwards), replies_count=VALUES(replies_count), message_url=VALUES(message_url), urls_json=VALUES(urls_json),
             risk_flags_json=VALUES(risk_flags_json), raw_json=VALUES(raw_json), updated_at=VALUES(updated_at)');
         foreach ($messages as $message) {
-            if (!is_array($message)) { continue; }
             $handle = normalize_handle_value(isset($message['handle']) ? $message['handle'] : '');
             $messageId = int_value($message, 'telegram_message_id');
             if ($messageId <= 0) { $messageId = int_value($message, 'id'); }
-            if ($handle === '' || $messageId <= 0) { continue; }
             $text = str_value($message, 'text', 1048576) ?: '';
             $riskFlags = telegram_risk_flags($text);
             $rawJson = isset($message['raw_json']) && is_array($message['raw_json']) ? json_value($message['raw_json']) : null;
@@ -2105,6 +2380,7 @@ function upsert_telegram_snapshot(PDO $pdo, array $config, array $payload): void
                 $rawJson,
                 $now,
             ));
+            $messagesProcessed += 1;
         }
 
         $matchStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'telegram_article_matches') . ' (
@@ -2113,11 +2389,9 @@ function upsert_telegram_snapshot(PDO $pdo, array $config, array $payload): void
         ON DUPLICATE KEY UPDATE score=VALUES(score), reason=VALUES(reason), channel_handle=VALUES(channel_handle),
             telegram_message_id=VALUES(telegram_message_id), message_url=VALUES(message_url), updated_at=VALUES(updated_at)');
         foreach ($matches as $match) {
-            if (!is_array($match)) { continue; }
             $articleId = str_value($match, 'article_id', 96);
             $messageKey = str_value($match, 'telegram_message_key', 180);
             $matchType = str_value($match, 'match_type', 40);
-            if ($articleId === null || $articleId === '' || $messageKey === null || $messageKey === '' || $matchType === null || $matchType === '') { continue; }
             $matchStmt->execute(array(
                 $articleId,
                 $messageKey,
@@ -2129,6 +2403,7 @@ function upsert_telegram_snapshot(PDO $pdo, array $config, array $payload): void
                 str_value($match, 'message_url', 65535),
                 $now,
             ));
+            $matchesProcessed += 1;
         }
 
         $signalStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'telegram_issue_signals') . ' (
@@ -2138,38 +2413,138 @@ function upsert_telegram_snapshot(PDO $pdo, array $config, array $payload): void
         ON DUPLICATE KEY UPDATE related_telegram_count=VALUES(related_telegram_count), related_telegram_channels_count=VALUES(related_telegram_channels_count),
             first_seen_at=VALUES(first_seen_at), latest_seen_at=VALUES(latest_seen_at), confidence_score=VALUES(confidence_score),
             payload_json=VALUES(payload_json), updated_at=VALUES(updated_at)');
-        foreach ($signals as $signal) {
-            if (!is_array($signal)) { continue; }
-            $articleId = str_value($signal, 'article_id', 96);
-            if ($articleId === null || $articleId === '') { continue; }
-            $signalStmt->execute(array(
-                $articleId,
-                int_value($signal, 'related_telegram_count'),
-                int_value($signal, 'related_telegram_channels_count'),
-                mysql_dt(isset($signal['first_seen_at']) ? $signal['first_seen_at'] : null),
-                mysql_dt(isset($signal['latest_seen_at']) ? $signal['latest_seen_at'] : null),
-                isset($signal['confidence_score']) ? (float)$signal['confidence_score'] : 0,
-                json_value($signal),
-                $now,
-            ));
+
+        if ($isSignalRebuildStage) {
+            $stageSignal = $pdo->prepare('INSERT INTO ' . $signalRebuildStagingTable . ' (
+                rebuild_token, article_id, payload_json, created_at, updated_at
+            ) VALUES (?,?,?,?,?)
+            ON DUPLICATE KEY UPDATE payload_json=VALUES(payload_json), updated_at=VALUES(updated_at)');
+            foreach ($signals as $signal) {
+                $stageSignal->execute(array(
+                    $signalRebuildToken,
+                    str_value($signal, 'article_id', 96),
+                    json_value($signal),
+                    $now,
+                    $now,
+                ));
+                $signalsStaged += 1;
+            }
+        } elseif ($signalRebuildFinalize) {
+            $countStagedSignals = $pdo->prepare('SELECT COUNT(*) FROM ' . $signalRebuildStagingTable . ' WHERE rebuild_token = ?');
+            $countStagedSignals->execute(array($signalRebuildToken));
+            $stagedSignalCount = (int)$countStagedSignals->fetchColumn();
+            if ($stagedSignalCount > 10000) {
+                $pdo->rollBack();
+                respond(413, array('ok' => false, 'error' => 'too_many_staged_issue_signals'));
+            }
+            $loadStagedSignals = $pdo->prepare('SELECT article_id, payload_json FROM ' . $signalRebuildStagingTable . ' WHERE rebuild_token = ? ORDER BY article_id');
+            $loadStagedSignals->execute(array($signalRebuildToken));
+            while ($stagedSignalRow = $loadStagedSignals->fetch()) {
+                $signal = json_decode((string)$stagedSignalRow['payload_json'], true);
+                if (!is_array($signal)) {
+                    throw new RuntimeException('invalid_staged_issue_signal_json');
+                }
+                $articleId = str_value($signal, 'article_id', 0);
+                if ($articleId === null || !hash_equals((string)$stagedSignalRow['article_id'], $articleId)) {
+                    throw new RuntimeException('staged_issue_signal_identity_mismatch');
+                }
+                $signalStmt->execute(array(
+                    $articleId,
+                    int_value($signal, 'related_telegram_count'),
+                    int_value($signal, 'related_telegram_channels_count'),
+                    mysql_dt(isset($signal['first_seen_at']) ? $signal['first_seen_at'] : null),
+                    mysql_dt(isset($signal['latest_seen_at']) ? $signal['latest_seen_at'] : null),
+                    isset($signal['confidence_score']) ? (float)$signal['confidence_score'] : 0,
+                    json_value($signal),
+                    $now,
+                ));
+                $authoritativeSignalIds[$articleId] = true;
+                $signalsProcessed += 1;
+            }
+        } else {
+            foreach ($signals as $signal) {
+                $signalStmt->execute(array(
+                    str_value($signal, 'article_id', 96),
+                    int_value($signal, 'related_telegram_count'),
+                    int_value($signal, 'related_telegram_channels_count'),
+                    mysql_dt(isset($signal['first_seen_at']) ? $signal['first_seen_at'] : null),
+                    mysql_dt(isset($signal['latest_seen_at']) ? $signal['latest_seen_at'] : null),
+                    isset($signal['confidence_score']) ? (float)$signal['confidence_score'] : 0,
+                    json_value($signal),
+                    $now,
+                ));
+                $signalsProcessed += 1;
+            }
         }
-        if ($replaceSignals) {
+
+        if ($isSignalRebuildStage) {
+            $heartbeatSignalRebuild = $pdo->prepare('UPDATE ' . $signalRebuildStateTable . '
+                SET updated_at = UTC_TIMESTAMP() WHERE state_key = ? AND active_token = ?');
+            $heartbeatSignalRebuild->execute(array('global', $signalRebuildToken));
+        }
+        if ($signalRebuildFinalize) {
             $deleteSql = 'DELETE FROM ' . table_name($config, 'telegram_issue_signals') . ' WHERE latest_seen_at >= ?';
             $deleteParams = array($replaceSignalsSince);
-            if ($replacementSignalIds) {
-                $deleteSql .= ' AND article_id NOT IN (' . implode(',', array_fill(0, count($replacementSignalIds), '?')) . ')';
-                $deleteParams = array_merge($deleteParams, array_keys($replacementSignalIds));
+            if ($authoritativeSignalIds) {
+                $deleteSql .= ' AND article_id NOT IN (' . implode(',', array_fill(0, count($authoritativeSignalIds), '?')) . ')';
+                $deleteParams = array_merge($deleteParams, array_keys($authoritativeSignalIds));
             }
             $deleteSignals = $pdo->prepare($deleteSql);
             $deleteSignals->execute($deleteParams);
             $signalsDeleted = $deleteSignals->rowCount();
         }
+        if ($signalRebuildFinalize) {
+            $deleteStagedSignals = $pdo->prepare('DELETE FROM ' . $signalRebuildStagingTable . ' WHERE rebuild_token = ?');
+            $deleteStagedSignals->execute(array($signalRebuildToken));
+            $finalizeSignalRebuild = $pdo->prepare('UPDATE ' . $signalRebuildStateTable . '
+                SET active_token = NULL, started_at = NULL, finalized_token = ?, finalized_at = ?,
+                    live_revision = live_revision + 1, updated_at = ?
+                WHERE state_key = ? AND active_token = ?');
+            $finalizeSignalRebuild->execute(array($signalRebuildToken, $now, $now, 'global', $signalRebuildToken));
+            if ($finalizeSignalRebuild->rowCount() !== 1) {
+                throw new RuntimeException('signal_rebuild_finalize_state_conflict');
+            }
+        } elseif ($hasFencedLiveInputs) {
+            $incrementLiveRevision = $pdo->prepare('UPDATE ' . $signalRebuildStateTable . '
+                SET live_revision = live_revision + 1, updated_at = ? WHERE state_key = ?');
+            $incrementLiveRevision->execute(array($now, 'global'));
+            if ($incrementLiveRevision->rowCount() !== 1) {
+                throw new RuntimeException('signal_rebuild_revision_increment_failed');
+            }
+        }
+        if ($signalRebuildFinalize || $hasFencedLiveInputs) {
+            $readLiveRevision = $pdo->prepare('SELECT live_revision FROM ' . $signalRebuildStateTable . ' WHERE state_key = ?');
+            $readLiveRevision->execute(array('global'));
+            $updatedLiveRevision = $readLiveRevision->fetchColumn();
+            if ($updatedLiveRevision === false) {
+                throw new RuntimeException('signal_rebuild_state_missing');
+            }
+            $responseLiveRevision = (int)$updatedLiveRevision;
+        }
         $pdo->commit();
     } catch (Throwable $e) {
-        $pdo->rollBack();
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
         throw $e;
     }
-    respond(200, array('ok' => true, 'channels' => count($channels), 'messages' => count($messages), 'article_matches' => count($matches), 'issue_signals' => count($signals), 'issue_signals_deleted' => $signalsDeleted));
+    $response = array(
+        'ok' => true,
+        'channels' => $channelsProcessed,
+        'messages' => $messagesProcessed,
+        'article_matches' => $matchesProcessed,
+        'issue_signals' => $signalsProcessed,
+        'issue_signals_deleted' => $signalsDeleted,
+    );
+    if ($isSignalRebuildStage) {
+        $response['issue_signals_staged'] = $signalsStaged;
+        $response['signal_rebuild_token'] = $signalRebuildToken;
+    }
+    if ($signalRebuildFinalize) {
+        $response['signal_rebuild_finalized'] = $signalRebuildToken;
+    }
+    if ($responseLiveRevision !== null) {
+        $response['live_revision'] = $responseLiveRevision;
+    }
+    respond(200, $response);
 }
 
 function upsert_report(PDO $pdo, array $config, array $report): void {

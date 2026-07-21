@@ -18,7 +18,7 @@
 - 기존 PHP/MySQL 구조를 유지하면서 `/api/v1` 라우터, OpenAPI 문서와 서버 인증 보정을 배포했다.
 - Gabia 환경에서 제거되던 `Authorization` 헤더를 `.htaccess`에서 PHP로 전달하도록 보정했다.
 - 공개 health·회사 조회, 기존 reports 어댑터, OpenAPI, 잘못된 역할 토큰의 403, 정상 역할 토큰의 200, CORS를 staging과 운영에서 확인했다.
-- 배포 전 백업: `/www_root/activist/api.php.bak.20260716T135614Z`, `/www_root/activist/.htaccess.bak.20260716T135614Z`
+- 당시 배포 전 백업은 문서 루트에 생성했으나, 이후 보안 점검에서 `_private/deployment-backups/`로 이전했다. 후속 배포는 비공개 디렉터리에만 백업한다.
 - 서버 배포 기록: `/www_root/activist/_private/migrations/governance-api-20260716T135614Z.json`
 
 #### Outbox 안전성 보강 재배포

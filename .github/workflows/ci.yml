@@ -53,6 +53,110 @@ jobs:
       - name: Run PHP API contract tests
         run: php tests/php_contracts.php
 
+  php73:
+    name: Production PHP 7.3 compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      PHP73_CI_INSPECTION_TOKEN: php73-ci-local-inspection-token
+    services:
+      mysql:
+        image: mysql:8.0.42
+        env:
+          MYSQL_DATABASE: activist_ci
+          MYSQL_USER: activist_ci
+          MYSQL_PASSWORD: activist_ci_password
+          MYSQL_ROOT_PASSWORD: activist_ci_root_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent --host=127.0.0.1 --user=root --password=activist_ci_root_password"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up production-compatible PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: "7.3"
+          extensions: mbstring, pdo_mysql
+          tools: none
+          coverage: none
+        env:
+          fail-fast: true
+
+      - name: Verify PHP runtime and extensions
+        shell: bash
+        run: |
+          php -r 'if (PHP_MAJOR_VERSION !== 7 || PHP_MINOR_VERSION !== 3) { fwrite(STDERR, "Expected PHP 7.3\n"); exit(1); }'
+          php -r 'foreach (["mbstring", "pdo_mysql"] as $extension) { if (!extension_loaded($extension)) { fwrite(STDERR, "Missing extension: $extension\n"); exit(1); } }'
+
+      - name: Configure MySQL test user for PHP 7.3
+        shell: bash
+        env:
+          MYSQL_CONTAINER_ID: ${{ job.services.mysql.id }}
+        run: >-
+          docker exec "$MYSQL_CONTAINER_ID"
+          mysql --user=root --password=activist_ci_root_password
+          --execute="ALTER USER 'activist_ci'@'%' IDENTIFIED WITH mysql_native_password BY 'activist_ci_password';"
+
+      - name: Validate PHP API syntax on PHP 7.3
+        shell: bash
+        run: |
+          find deploy -type f -name '*.php' -print0 | xargs -0 -r -n1 php -l
+          php -l tests/php73_config.php
+          php -l tests/php73_router.php
+
+      - name: Run PHP API contract tests on PHP 7.3
+        run: php tests/php_contracts.php
+
+      - name: Install isolated PHP API test configuration
+        shell: bash
+        run: |
+          install -d -m 700 deploy/activist/_private
+          install -m 600 tests/php73_config.php deploy/activist/_private/config.php
+
+      - name: Run PHP 7.3 and MySQL Telegram staging smoke
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          php -S 127.0.0.1:8787 -t deploy/activist tests/php73_router.php >"$RUNNER_TEMP/php73-server.log" 2>&1 &
+          echo "$!" >"$RUNNER_TEMP/php73-server.pid"
+          python3 tests/php73_staging_smoke.py --base-url http://127.0.0.1:8787
+
+      - name: Collect PHP and MySQL diagnostics
+        if: failure()
+        shell: bash
+        env:
+          MYSQL_CONTAINER_ID: ${{ job.services.mysql.id }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/php73-server.log" ]]; then
+            cat "$RUNNER_TEMP/php73-server.log"
+          fi
+          docker logs "$MYSQL_CONTAINER_ID" >"$RUNNER_TEMP/php73-mysql.log" 2>&1 || true
+
+      - name: Preserve failed PHP and MySQL diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: php73-mysql-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/php73-server.log
+            ${{ runner.temp }}/php73-mysql.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Stop PHP integration server
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/php73-server.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/php73-server.pid")" 2>/dev/null || true
+          fi
+
   quality:
     name: Lint, types, and dependency security
     runs-on: ubuntu-latest

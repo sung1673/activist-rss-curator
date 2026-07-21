@@ -622,6 +622,34 @@ def test_ci_audits_python_and_browser_dependencies() -> None:
     assert ".github/scripts/restore-legacy-pages-archive.py" in workflow
 
 
+def test_ci_checks_production_php_73() -> None:
+    ci = yaml.load(workflow_text("ci.yml"), Loader=yaml.BaseLoader)
+    job = ci["jobs"]["php73"]
+    assert job["name"] == "Production PHP 7.3 compatibility"
+    assert job["runs-on"] == "ubuntu-24.04"
+    setup = next(
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("shivammathur/setup-php@")
+    )
+    assert setup["uses"] == (
+        "shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240"
+    )
+    assert setup["with"] == {
+        "php-version": "7.3",
+        "extensions": "mbstring, pdo_mysql",
+        "tools": "none",
+        "coverage": "none",
+    }
+    assert setup["env"] == {"fail-fast": "true"}
+    commands = "\n".join(str(step.get("run", "")) for step in job["steps"])
+    assert "PHP_MAJOR_VERSION !== 7" in commands
+    assert "PHP_MINOR_VERSION !== 3" in commands
+    assert "extension_loaded($extension)" in commands
+    assert "find deploy -type f -name '*.php'" in commands
+    assert "php tests/php_contracts.php" in commands
+
+
 def test_workflows_use_current_node24_official_action_majors() -> None:
     workflows = "\n".join(
         path.read_text(encoding="utf-8") for path in WORKFLOWS.glob("*.yml")
