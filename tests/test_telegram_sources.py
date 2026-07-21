@@ -659,6 +659,109 @@ def test_remote_sync_batches_all_pending_messages_and_advances_cursor(
     assert state["telegram_remote_sync_cursors"]["id:100"] == 1001
 
 
+def test_remote_sync_bounds_channel_identities_per_transaction(
+    config, now, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    from curator import telegram_sources
+
+    channels = [
+        {"handle": f"channel{index:02d}", "telegram_channel_id": f"id-{index}"}
+        for index in range(12)
+    ]
+    messages = [
+        normalize_telegram_message(
+            channel,
+            {"id": 1, "text": f"message {index}"},
+            now,
+        )
+        for index, channel in enumerate(channels)
+    ]
+    config["telegram_sources"] = {
+        "remote_batch_size": 300,
+        "remote_channel_batch_size": 5,
+    }
+    payloads: list[dict[str, object]] = []
+    monkeypatch.setattr(telegram_sources, "remote_api_configured", lambda: True)
+
+    def fake_post(_action, payload):  # type: ignore[no-untyped-def]
+        payloads.append(payload)
+        return remote_snapshot_ack(payload)
+
+    monkeypatch.setattr(telegram_sources, "post_remote_action", fake_post)
+
+    summary = sync_telegram_batch_to_remote_api(
+        {"telegram_source_channels": channels},
+        config,
+        messages=messages,
+        matches=[],
+    )
+
+    assert [len(payload["channels"]) for payload in payloads] == [5, 5, 2]
+    assert [len(payload["messages"]) for payload in payloads] == [5, 5, 2]
+    assert summary["telegram_remote_messages"] == 12
+    assert summary["telegram_remote_failed"] == 0
+
+
+def test_incremental_read_timeout_keeps_all_messages_pending_and_skips_metadata(
+    config, now, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    from curator import telegram_sources
+
+    telegram_config(config)
+    config["telegram_sources"].update(  # type: ignore[union-attr]
+        {
+            "incremental_limit": 530,
+            "incremental_max_pages": 1,
+            "remote_batch_size": 300,
+            "remote_channel_batch_size": 5,
+        }
+    )
+    channel = {
+        "handle": "marketnews",
+        "telegram_channel_id": "id-marketnews",
+        "last_message_id": 100,
+        "enabled": True,
+    }
+    state: dict[str, object] = {
+        "telegram_source_channels": [channel],
+        "telegram_remote_sync_cursors": {"id:id-marketnews": 100},
+    }
+    client = FakeTelegramClient(
+        {
+            "marketnews": [
+                {"id": message_id, "text": f"message {message_id}", "date": now}
+                for message_id in range(101, 631)
+            ]
+        }
+    )
+    payloads: list[dict[str, object]] = []
+    monkeypatch.setattr(telegram_sources, "remote_api_configured", lambda: True)
+
+    def timeout_post(_action, payload):  # type: ignore[no-untyped-def]
+        payloads.append(payload)
+        raise TimeoutError("remote transaction exceeded client timeout")
+
+    monkeypatch.setattr(telegram_sources, "post_remote_action", timeout_post)
+
+    summary = collect_telegram_sources(state, config, now, client=client)
+
+    assert len(payloads) == 1
+    assert len(payloads[0]["messages"]) == 300
+    assert summary["telegram_messages_inserted"] == 530
+    assert summary["telegram_remote_messages"] == 0
+    assert summary["telegram_remote_failed"] == 1
+    assert summary["telegram_remote_message_failed"] == 1
+    assert summary["telegram_remote_pending"] == 530
+    assert summary["telegram_remote_message_last_error"] == "timeout"
+    assert summary["telegram_remote_message_max_request_bytes"] > 0
+    assert summary["telegram_remote_metadata_skipped_due_pending"] == 1
+    assert summary["telegram_remote_metadata_failed"] == 0
+    assert summary["telegram_prune_deferred"] == 1
+    assert summary["telegram_messages_pruned"] == 0
+    assert state["telegram_remote_sync_cursors"]["id:id-marketnews"] == 100  # type: ignore[index]
+    assert len(pending_remote_messages(state)) == 530
+
+
 def test_remote_partial_ack_does_not_advance_cursor(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from curator import telegram_sources
 
@@ -1027,6 +1130,7 @@ def test_metadata_sync_batches_large_channel_sets_before_signals(
         f"id:id-{index}": index + 10 for index in range(len(channels))
     }
     signals = [{"article_id": "signal:1"}, {"article_id": "signal:2"}]
+    config["telegram_sources"]["remote_channel_batch_size"] = 20  # type: ignore[index]
     payloads: list[dict[str, object]] = []
     monkeypatch.setattr(telegram_sources, "remote_api_configured", lambda: True)
 
@@ -1094,7 +1198,7 @@ def test_metadata_channel_batch_failure_stops_before_later_batches(
     assert len(payloads) == 2
     assert summary["telegram_remote_failed"] == 1
     assert summary["telegram_remote_last_error"] == "remote_channel_ack_mismatch"
-    assert summary["telegram_remote_channels"] == 20
+    assert summary["telegram_remote_channels"] == 5
 
 
 def test_metadata_sync_marks_signal_rebuild_as_authoritative(

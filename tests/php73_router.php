@@ -83,7 +83,7 @@ try {
         . $table('telegram_signal_rebuild_staging') . ' ORDER BY rebuild_token, article_id'
     )->fetchAll();
     $channels = $pdo->query(
-        'SELECT handle, telegram_channel_id FROM '
+        'SELECT handle, telegram_channel_id, identity_migration_version FROM '
         . $table('telegram_channels') . ' ORDER BY handle'
     )->fetchAll();
     $messages = $pdo->query(

@@ -18,7 +18,7 @@
 | 품질 평가 | 사람 라벨 JSONL 스키마, benchmark CLI, 표본 수와 precision/recall 게이트 | 실제 article pair 500개와 사건 300개 라벨링 |
 | 전환 판정 | 14일 shadow 비교 보고서, 7일 운영·성능 증빙, benchmark를 같은 코드 리비전으로 검증하는 fail-closed CLI와 수동 workflow | 실제 production export artifact와 사람 승인 |
 
-2026-07-21 기준 전체 로컬 Python 회귀 테스트는 682개 통과, 2개 건너뜀이고 Ruff·엄격 MyPy·compileall, OpenAPI·workflow·JSON Schema, Playwright 사용자 여정·접근성·모바일 성능 예산을 통과했다. PHP 7.3/MySQL 8 통합 계약은 GitHub Actions에서 검증한다. PR #5의 필수 CI와 병합 뒤 `main` CI도 모두 통과했다. 운영 서버에는 병합 커밋 `199737f1279426fd45c3205bb45cfb16fdfa917c`의 PHP API와 접근 차단 설정을 비공개 백업·후보 검증·원자 교체 절차로 배포했다. 이 결과는 코드·배포 계약 검증이며 아래 장기 운영 게이트를 대체하지 않는다.
+2026-07-21 기준 전체 로컬 Python 회귀 테스트는 684개 통과, 2개 건너뜀이고 Ruff·엄격 MyPy·compileall, OpenAPI·workflow·JSON Schema, Playwright 사용자 여정·접근성·모바일 성능 예산을 통과했다. PHP 7.3/MySQL 8 통합 계약은 GitHub Actions에서 검증한다. PR #5의 필수 CI와 병합 뒤 `main` CI도 모두 통과했다. 운영 서버에는 병합 커밋 `199737f1279426fd45c3205bb45cfb16fdfa917c`의 PHP API와 접근 차단 설정을 비공개 백업·후보 검증·원자 교체 절차로 배포했다. 이 결과는 코드·배포 계약 검증이며 아래 장기 운영 게이트를 대체하지 않는다.
 
 ## 2026-07-21 운영 반영 현황
 
@@ -26,8 +26,9 @@
 - PHP 7.3 운영 서버에 PR #5 병합본의 `/api/v1`, OpenAPI, 역할 토큰 인증, Telegram 복구 staging 계약과 접근 차단 설정을 원자 배포하고 레거시 API를 함께 smoke test했다.
 - 운영 배포 백업은 `/www_root/activist/_private/deployment-backups/`에만 보관하며 공개 경로의 `.bak`·`.bak.*` 요청이 거부되는 것을 확인했다.
 - 실제 Telegram 수집 목록 97개를 하나의 물리 증빙 문서 번호에 연결해 `SourceRight`에 등록했다. 내부 수집·AI·사건 맥락 분석은 허용하되 Telegram 원문·파생 콘텐츠 재배포는 보수적으로 비활성화했다.
-- Telegram 365일 이력 복구는 단일 채널 카나리에서 완료 metrics를 확인했지만 전체 허가 채널 복구는 진행 중이다. 전체 완료 metrics와 후속 safe-full 성공 전에는 복구 완료로 판정하지 않는다.
-- 신규 shadow·Pages·발송 플래그는 모두 `false`다. 검증된 KIND JSON 어댑터, 운영 증빙과 사람 승인이 준비되기 전에는 신규 예약 실행이나 공개 전환이 일어나지 않는다.
+- Telegram 365일 이력 복구는 동일한 97채널 fingerprint 아래 97/97개 canonical 채널을 모두 완료했다. 분할·재시도를 포함한 durable ACK 처리량은 1,468,220건이며 실패·대기·잘림이 남은 구간은 0개다. 후속 signal-only run 29872608749도 최근 72시간 메시지 21,317건·매치 693건에서 signal 40건을 재구축하고 누락 17건을 삭제해 완료했다.
+- 첫 무배포·무발송 safe-full run 29873829199는 메시지 530건의 첫 원격 ACK 전 `ReadTimeout`과 후속 metadata timeout으로 실패했다. cursor·prune은 전진하지 않았고 Telegram 발송·Pages·보고서·배포 단계는 모두 실행되지 않았다. `ENABLE_LEGACY_PIPELINE=false`, `ENABLE_PAGES=false`로 되돌린 상태에서 채널 transaction 상한과 DB 인덱스를 보강한 뒤 재검증한다.
+- Telegram outbound와 세 거버넌스 전환 플래그도 모두 `false`다. 검증된 KIND JSON 어댑터, 장기 운영 증빙과 사람 승인이 준비되기 전에는 신규 거버넌스 예약 실행이나 공개 전환이 일어나지 않는다.
 - 상세 백업 해시, 서버 로그 위치와 다음 활성화 순서는 [운영 기반 반영 기록](production-foundation-deployment-2026-07-16.md)에 남겼다.
 
 ## 운영 데이터 전환 순서

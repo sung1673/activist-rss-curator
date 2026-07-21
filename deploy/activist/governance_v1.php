@@ -2768,12 +2768,13 @@ function migrate_telegram_channel_identity(PDO $pdo, array $config, string $hand
         $stableHandle = 'channel_' . substr(hash('sha256', $previousId), 0, 24);
         migrate_telegram_channel_identity($pdo, $config, $stableHandle, $previousId);
         $preserve = $pdo->prepare('INSERT INTO ' . $channelsTable . ' (handle, telegram_channel_id, title, description, joined, enabled, source, source_type, '
-            . 'is_public_channel, quality_score, last_message_id, last_collected_at, last_recommendation_checked_at, last_error, payload_json, updated_at) '
-            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE telegram_channel_id=VALUES(telegram_channel_id), title=VALUES(title), '
+            . 'is_public_channel, quality_score, last_message_id, last_collected_at, last_recommendation_checked_at, last_error, payload_json, '
+            . 'identity_migration_version, updated_at) '
+            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?) ON DUPLICATE KEY UPDATE telegram_channel_id=VALUES(telegram_channel_id), title=VALUES(title), '
             . 'description=VALUES(description), joined=VALUES(joined), enabled=VALUES(enabled), source=VALUES(source), source_type=VALUES(source_type), '
             . 'is_public_channel=VALUES(is_public_channel), quality_score=VALUES(quality_score), last_message_id=GREATEST(last_message_id,VALUES(last_message_id)), '
             . 'last_collected_at=COALESCE(VALUES(last_collected_at),last_collected_at), last_recommendation_checked_at=COALESCE(VALUES(last_recommendation_checked_at),last_recommendation_checked_at), '
-            . 'last_error=VALUES(last_error), payload_json=VALUES(payload_json), updated_at=VALUES(updated_at)');
+            . 'last_error=VALUES(last_error), payload_json=VALUES(payload_json), identity_migration_version=1, updated_at=VALUES(updated_at)');
         $preserve->execute(array(
             $stableHandle, $previousId, $conflict['title'], $conflict['description'], $conflict['joined'], $conflict['enabled'],
             $conflict['source'], $conflict['source_type'], $conflict['is_public_channel'], $conflict['quality_score'], $conflict['last_message_id'],
@@ -2788,6 +2789,16 @@ function migrate_telegram_channel_identity(PDO $pdo, array $config, string $hand
     $aliases = array($handle);
     foreach ($aliasStmt->fetchAll() as $row) { $aliases[] = (string)$row['handle']; }
     $aliases = array_values(array_unique(array_filter($aliases)));
+    $stableMappingStmt = $pdo->prepare('SELECT identity_migration_version FROM ' . $channelsTable
+        . ' WHERE handle = ? AND telegram_channel_id = ? LIMIT 1');
+    $stableMappingStmt->execute(array($handle, $channelId));
+    $identityMigrationVersion = $stableMappingStmt->fetchColumn();
+    $hasStableMapping = $identityMigrationVersion !== false;
+    // This mapping is written only after migration and the normal snapshot
+    // upsert commit in this API. Once no alias remains, rescanning an entire
+    // channel history on every incremental metadata refresh is redundant and
+    // grows linearly with the 365-day archive.
+    if ($hasStableMapping && (int)$identityMigrationVersion >= 1 && count($aliases) === 1) { return; }
     $needsChannelMerge = count($aliases) > 1;
     $messageCheck = $pdo->prepare('SELECT COUNT(*) FROM ' . $messagesTable . ' WHERE (telegram_channel_id = ? OR channel_handle = ?) '
         . 'AND (telegram_channel_id IS NULL OR telegram_channel_id <> ? OR channel_handle <> ? OR message_key NOT LIKE ?)');
@@ -2806,12 +2817,19 @@ function migrate_telegram_channel_identity(PDO $pdo, array $config, string $hand
         . 'SELECT CONCAT(\'id:\', ?, \':\', m.telegram_message_id), ?, ?, m.telegram_message_id, m.posted_at, m.edited_at, m.deleted_at, '
         . 'm.collected_at, m.text, m.normalized_text, m.views, m.forwards, m.replies_count, m.message_url, m.urls_json, m.risk_flags_json, m.raw_json, m.updated_at '
         . 'FROM ' . $messagesTable . ' m WHERE m.telegram_channel_id = ? OR m.channel_handle IN (' . $aliasMarks . ') ORDER BY m.updated_at ASC '
-        . 'ON DUPLICATE KEY UPDATE posted_at=COALESCE(VALUES(posted_at),posted_at), edited_at=COALESCE(VALUES(edited_at),edited_at), '
-        . 'deleted_at=VALUES(deleted_at), collected_at=COALESCE(VALUES(collected_at),collected_at), text=COALESCE(VALUES(text),text), '
-        . 'normalized_text=COALESCE(VALUES(normalized_text),normalized_text), views=GREATEST(views,VALUES(views)), forwards=GREATEST(forwards,VALUES(forwards)), '
-        . 'replies_count=GREATEST(replies_count,VALUES(replies_count)), message_url=COALESCE(VALUES(message_url),message_url), '
-        . 'urls_json=COALESCE(VALUES(urls_json),urls_json), risk_flags_json=COALESCE(VALUES(risk_flags_json),risk_flags_json), '
-        . 'raw_json=COALESCE(VALUES(raw_json),raw_json), updated_at=GREATEST(updated_at,VALUES(updated_at))';
+        . 'ON DUPLICATE KEY UPDATE posted_at=COALESCE(VALUES(posted_at),tmp_bside_canonical_messages.posted_at), '
+        . 'edited_at=COALESCE(VALUES(edited_at),tmp_bside_canonical_messages.edited_at), deleted_at=VALUES(deleted_at), '
+        . 'collected_at=COALESCE(VALUES(collected_at),tmp_bside_canonical_messages.collected_at), '
+        . 'text=COALESCE(VALUES(text),tmp_bside_canonical_messages.text), '
+        . 'normalized_text=COALESCE(VALUES(normalized_text),tmp_bside_canonical_messages.normalized_text), '
+        . 'views=GREATEST(tmp_bside_canonical_messages.views,VALUES(views)), '
+        . 'forwards=GREATEST(tmp_bside_canonical_messages.forwards,VALUES(forwards)), '
+        . 'replies_count=GREATEST(tmp_bside_canonical_messages.replies_count,VALUES(replies_count)), '
+        . 'message_url=COALESCE(VALUES(message_url),tmp_bside_canonical_messages.message_url), '
+        . 'urls_json=COALESCE(VALUES(urls_json),tmp_bside_canonical_messages.urls_json), '
+        . 'risk_flags_json=COALESCE(VALUES(risk_flags_json),tmp_bside_canonical_messages.risk_flags_json), '
+        . 'raw_json=COALESCE(VALUES(raw_json),tmp_bside_canonical_messages.raw_json), '
+        . 'updated_at=GREATEST(tmp_bside_canonical_messages.updated_at,VALUES(updated_at))';
     $messageParams = array_merge(array($channelId, $handle, $channelId, $channelId), $aliases);
     $messageStmt = $pdo->prepare($messageSql); $messageStmt->execute($messageParams);
 
@@ -2820,8 +2838,11 @@ function migrate_telegram_channel_identity(PDO $pdo, array $config, string $hand
         . 'COALESCE(tm.telegram_message_id,m.telegram_message_id), tm.message_url, tm.updated_at '
         . 'FROM ' . $matchesTable . ' tm JOIN ' . $messagesTable . ' m ON m.message_key = tm.message_key '
         . 'WHERE (m.telegram_channel_id = ? OR m.channel_handle IN (' . $aliasMarks . ')) AND COALESCE(tm.telegram_message_id,m.telegram_message_id) IS NOT NULL '
-        . 'ON DUPLICATE KEY UPDATE score=GREATEST(score,VALUES(score)), reason=COALESCE(VALUES(reason),reason), channel_handle=VALUES(channel_handle), '
-        . 'telegram_message_id=VALUES(telegram_message_id), message_url=COALESCE(VALUES(message_url),message_url), updated_at=GREATEST(updated_at,VALUES(updated_at))';
+        . 'ON DUPLICATE KEY UPDATE score=GREATEST(tmp_bside_canonical_matches.score,VALUES(score)), '
+        . 'reason=COALESCE(VALUES(reason),tmp_bside_canonical_matches.reason), channel_handle=VALUES(channel_handle), '
+        . 'telegram_message_id=VALUES(telegram_message_id), '
+        . 'message_url=COALESCE(VALUES(message_url),tmp_bside_canonical_matches.message_url), '
+        . 'updated_at=GREATEST(tmp_bside_canonical_matches.updated_at,VALUES(updated_at))';
     $matchParams = array_merge(array($channelId, $handle, $channelId), $aliases);
     $matchStmt = $pdo->prepare($matchSql); $matchStmt->execute($matchParams);
 

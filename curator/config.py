@@ -212,6 +212,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "candidate_limit_per_run": 50,
         "max_remote_messages": 500,
         "remote_batch_size": 300,
+        "remote_channel_batch_size": 5,
         "discover_enabled": False,
         "recommendation_limit": 20,
         "auto_join_enabled": False,

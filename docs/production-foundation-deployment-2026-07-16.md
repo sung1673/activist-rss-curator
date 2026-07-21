@@ -62,7 +62,9 @@
 
 | 변수 | 값 | 의미 |
 |---|---|---|
-| `ENABLE_LEGACY_PIPELINE` | `true` | 정상 시 기존 운영 유지(이력 복구 중에는 일시 `false`) |
+| `ENABLE_LEGACY_PIPELINE` | `false` | 전체 이력 복구·signal 최종화·safe-full 성공 전까지 정규 실행 중지; 성공 후 `true` |
+| `ENABLE_PAGES` | `false` | safe-full 성공 전까지 기존 Pages 재배포 중지 |
+| `ENABLE_TELEGRAM_DELIVERY` | `false` | 모든 outbound Telegram 경로 차단 |
 | `ENABLE_GOVERNANCE_SHADOW` | `false` | 신규 예약 수집·감시 중지 |
 | `ENABLE_GOVERNANCE_PAGES` | `false` | 신규 Pages 공개 배포 중지 |
 | `ENABLE_GOVERNANCE_DELIVERY` | `false` | 신규 outbox·Telegram 발송 중지 |
@@ -86,23 +88,41 @@
 - `ENABLE_TELEGRAM_DELIVERY=false`, `config.yaml` `telegram.enabled=false`, 빈 `telegram.chat_id`를 함께 유지한다.
 - `TELEGRAM_API_ID`·`TELEGRAM_API_HASH`·`TELEGRAM_SESSION_STRING`을 사용하는 허가 공개 채널 읽기 수집은 outbound 발송과 분리해 계속한다.
 
-현재 `ENABLE_PAGES=true`이므로 `ENABLE_GOVERNANCE_PAGES`를 켜기 전에는 반드시 `ENABLE_PAGES=false`로 먼저 전환한다. 두 Pages 소유권이 동시에 켜지면 workflow가 실패한다.
+현재 `ENABLE_PAGES=false`이며 safe-full 성공 뒤에만 legacy Pages를 다시 `true`로 복구한다. 향후 `ENABLE_GOVERNANCE_PAGES`를 켜기 전에도 반드시 `ENABLE_PAGES=false`를 먼저 확인한다. 두 Pages 소유권이 동시에 켜지면 workflow가 실패한다.
+
+safe-full 수정본 배포에서는 일반·복구·거버넌스 Telegram writer가 모두 정지했고 관련 Actions가 0건인 상태를 먼저 고정한다. 전체 DB 백업 뒤 migration 005를 적용하고 marker 무효화 로직이 포함된 병합 SHA의 PHP를 먼저 원자 배포한다. 그 다음 중복 channel ID, 비정규 message identity, orphan match가 각각 0건인지 감사한 뒤 불일치가 없는 현재 권위 채널만 하나의 조건부 UPDATE로 marker 1을 승인한다. 감사와 승인 수·소요시간은 이 문서에 기록하며, 구 PHP가 살아 있거나 writer 정지가 확인되지 않으면 marker를 승인하지 않는다.
 
 ## 검증 결과
 
-- 전체 로컬 Python 회귀 테스트: 682개 통과, 2개 건너뜀
+- 전체 로컬 Python 회귀 테스트: 684개 통과, 2개 건너뜀
 - Ruff와 신규 typed-core MyPy: 통과
 - PHP 7.3/MySQL 8 통합 계약과 workflow·설정 validator·일일 배포 marker 계약 테스트: 통과
 - Playwright 주요 사용자 여정: 데스크톱·모바일 4개 통과
 - `git diff --check`: 오류 없음
 - Python 및 npm 의존성 감사: 알려진 취약점 없음
 
-### Telegram 이력 복구 카나리
+### Telegram 이력 복구 진행 기록
 
 - 2026-07-21 `Yeouido_Lab` 단일 채널의 365일 이력을 resume cursor로 나눠 복구했다. 앞선 3,000건 상한 run 두 건은 의도한 fail-closed 상태로 다음 cursor를 남겼고, [완료 run 29827367590](https://github.com/sung1673/activist-rss-curator/actions/runs/29827367590)에서 `ok=true`, `status=complete`를 확인했다.
-- 세 구간에서 메시지 9,685건을 처리했으며 마지막 완료 run은 3,685건이었다. 최종 metrics는 `telegram_channel_failed=0`, `telegram_remote_failed=0`, `telegram_remote_pending=0`, `telegram_backfill_truncated_channels=0`이었다. 당시 최근 72시간 signal 40건도 staging/finalize됐지만, 후속 검토에서 단일 채널·부분 실행의 signal 결과는 전체 universe의 권위 있는 결과가 될 수 없음을 확인했다. 해당 결과는 카나리 증빙으로만 보존하고, 전체 허가 채널 복구 뒤 signal-only 최종화로 교체한다.
-- PR #6 병합 뒤 [전체 복구 재시작 run 29835701573](https://github.com/sung1673/activist-rss-curator/actions/runs/29835701573)은 새 97채널 fingerprint를 고정하고 `activistkorea` 35,371건을 12개 page checkpoint로 ACK 완료했다. 다음 `anyoungjin`의 메시지 없는 완료 checkpoint에서 97채널 metadata 344,321바이트를 다시 처리하던 API가 `ReadTimeout`을 내면서 workflow는 의도대로 실패했고, `telegram_remote_pending=0`이며 signal rebuild는 실행되지 않았다. 후속 수정은 메시지 없는 checkpoint를 canonical identity의 현재 채널 1개로 제한하고, 부분 실행 말미의 전체 metadata 재전송을 생략하며, 일반 metadata도 최대 20채널씩 분할한다.
-- 이는 단일 채널 카나리 성공이다. 전체 허가 채널 이력 복구와 후속 safe-full 검증은 아직 완료로 기록하지 않는다.
+- 세 구간에서 메시지 9,685건을 처리했으며 마지막 완료 run은 3,685건이었다. 최종 metrics는 `telegram_channel_failed=0`, `telegram_remote_failed=0`, `telegram_remote_pending=0`, `telegram_backfill_truncated_channels=0`이었다. 당시 최근 72시간 signal 40건도 staging/finalize됐지만, 후속 검토에서 단일 채널·부분 실행의 signal 결과는 전체 universe의 권위 있는 결과가 될 수 없음을 확인했다. 해당 결과는 카나리 증빙으로만 보존하고, 권위 있는 전체-universe signal 결과는 run 29872608749의 signal-only 최종화로 교체했다.
+- PR #6 병합 뒤 [전체 복구 재시작 run 29835701573](https://github.com/sung1673/activist-rss-curator/actions/runs/29835701573)은 새 97채널 fingerprint를 고정하고 `activistkorea` 35,371건을 12개 page checkpoint로 ACK 완료했다. 다음 `anyoungjin`의 메시지 없는 완료 checkpoint에서 97채널 metadata 344,321바이트를 다시 처리하던 API가 `ReadTimeout`을 내면서 workflow는 의도대로 실패했고, `telegram_remote_pending=0`이며 signal rebuild는 실행되지 않았다. 1차 후속 수정은 메시지 없는 checkpoint를 canonical identity의 현재 채널 1개로 제한하고, 부분 실행 말미의 전체 metadata 재전송을 생략하며, 일반 metadata를 최대 20채널씩 분할했다. 첫 safe-full 분석 뒤 최종 상한은 메시지·metadata 모두 5채널로 낮췄다.
+- [실패 지점 재시도 run 29839021277](https://github.com/sung1673/activist-rss-curator/actions/runs/29839021277)은 PR #7 병합 커밋 `a586b699d1b408d5173c99330a3312b332846aa7`에서 `only_handles=anyoungjin`, `before_message_id=0`, 동일한 97채널 fingerprint로 실행했다. 메시지 없는 채널의 완료 checkpoint는 현재 채널 metadata 1건·619바이트만 전송해 성공했다. artifact는 `ok=true`, `status=complete`, 선택·완료 채널 1개, `telegram_channel_failed=0`, `telegram_remote_failed=0`, `telegram_remote_pending=0`, `telegram_backfill_truncated_channels=0`, `telegram_remote_metadata_synced=1`, `telegram_remote_metadata_failed=0`, `telegram_repair_remote_checkpoint_complete=1`을 기록했다. 부분 실행이므로 signal 재구축은 의도대로 생략됐다(`telegram_signal_rebuild_skipped_partial=1`).
+- run 29835701573의 `activistkorea` 완료 checkpoint와 run 29839021277의 `anyoungjin` 재시도부터 마지막 `YuantaKoreaTech`까지 아래 체인이 동일한 fingerprint로 이어졌다. 97/97개 canonical 채널, durable ACK 처리량 1,468,220건, signal-only 최종화가 완료됐으며 마지막 무배포·무발송 safe-full의 성공 metrics까지 확인한 뒤 운영 복구를 확정한다.
+
+| 단계 | 실행/체인 경계 | 필수 완료 증빙 | 상태 |
+|---|---|---|---|
+| 후속 복구 구간 | [run 29839617110](https://github.com/sung1673/activist-rss-curator/actions/runs/29839617110): `anyoungjin` 이후, `companyreport` 완료 후 `dada_news2` cursor `3666236` | 300,000건 ACK, canonical 채널 11개 완료, remote/metadata failed·pending 0, checkpoint complete 1; 전역 상한으로 fail-closed | `dada_news2` 재개 |
+| 대형 채널 재개 | [run 29845058461](https://github.com/sung1673/activist-rss-curator/actions/runs/29845058461): `dada_news2` cursor `3666236` → `3366236` | 300,000건 ACK, remote/metadata failed·pending 0, checkpoint complete 1; 전역 상한으로 fail-closed | cursor 재개 |
+| 대형 채널 완료 | [run 29850951380](https://github.com/sung1673/activist-rss-curator/actions/runs/29850951380): `dada_news2` cursor `3366236` → 0 | 226,560건·76 page ACK, `ok=true`, truncated/remote/metadata failed·pending 0, checkpoint complete 1 | 누적 782,392건, 완료 |
+| 후속 복구 구간 | [run 29855338208](https://github.com/sung1673/activist-rss-curator/actions/runs/29855338208): `dada_news2` 이후 → `hyundaiindustirial` | 20채널·182,593건·71 page ACK, `ok=true`, truncated/remote/metadata failed·pending 0, checkpoint complete 1 | 완료 |
+| 후속 복구 구간 | [run 29859906644](https://github.com/sung1673/activist-rss-curator/actions/runs/29859906644): `hyundaiindustirial` 이후 → `kisthemacro` 완료, `kiwoom_semibat` 첫 checkpoint | 앞 10채널 durable ACK; `kiwoom_semibat` 313건 요청 `ReadTimeout`, pending 313·checkpoint complete 0으로 fail-closed | 단일 채널 재시도 |
+| 실패 지점 재시도 | [run 29862978883](https://github.com/sung1673/activist-rss-curator/actions/runs/29862978883): `kiwoom_semibat` | 1,213건·1 page ACK, `ok=true`, truncated/remote/metadata failed·pending 0, checkpoint complete 1 | 완료 |
+| 후속 복구 구간 | [run 29863762961](https://github.com/sung1673/activist-rss-curator/actions/runs/29863762961): `kiwoom_semibat` 이후 → `rassiro_channel` | 20채널·192,950건·77 page ACK, `ok=true`, truncated/remote/metadata failed·pending 0, checkpoint complete 1 | 완료 |
+| 후속 복구 구간 | [run 29868715163](https://github.com/sung1673/activist-rss-curator/actions/runs/29868715163): `rassiro_channel` 이후 → `stockinfo7` | 20채널·93,569건·45 page ACK, `ok=true`, truncated/remote/metadata failed·pending 0, checkpoint complete 1 | 완료, 85/97 |
+| 최종 복구 구간 | [run 29871166348](https://github.com/sung1673/activist-rss-curator/actions/runs/29871166348): `stockinfo7` 이후 → `YuantaKoreaTech` | 12채널·37,323건·20 page ACK, `ok=true`, truncated/remote/metadata failed·pending 0, checkpoint complete 1 | 완료, 97/97 |
+| signal-only 최종화 | [run 29872608749](https://github.com/sung1673/activist-rss-curator/actions/runs/29872608749): `YuantaKoreaTech` 이후 zero-channel tail, 동일한 97채널 fingerprint | 72시간 메시지 21,317건·매치 693건 → signal 40건, 삭제 17건; authorized/finalize/window_rebuilt 1, remote failed/pending 0 | 완료 |
+| 첫 safe-full | [run 29873829199](https://github.com/sung1673/activist-rss-curator/actions/runs/29873829199): `run_mode=full`, Pages/Telegram 모두 false | 14분 04초 뒤 실패; 530건 첫 ACK 전 `ReadTimeout`, pending 530, remote failed 2, metadata failed 1, sent 0; cursor·prune 전진 0, Pages·delivery 미실행 | fail-closed; legacy·Pages false 복구 |
+| safe-full 재시도 | migration 005와 bounded transaction 코드 운영 배포 뒤 같은 무배포·무발송 입력으로 실행 | `ok=true`, `status=complete`, failed/pending 0, sent 0, Pages·delivery 미실행 | 대기 |
 
 ## 의도적으로 미실행
 

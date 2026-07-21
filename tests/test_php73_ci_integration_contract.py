@@ -41,6 +41,19 @@ def test_php73_job_runs_isolated_mysql_http_staging_smoke() -> None:
     assert "tests/php73_router.php" in smoke["run"]
     assert "python3 tests/php73_staging_smoke.py" in smoke["run"]
 
+    identity_index = steps["Validate Telegram channel identity index migration"]
+    assert "DROP INDEX idx_telegram_channel_message_id" in identity_index["run"]
+    assert "005_telegram_channel_identity_index.sql" in identity_index["run"]
+    assert "sed 's/activist_/ci_/g'" in identity_index["run"]
+    assert "ci_telegram_messages" in identity_index["run"]
+    assert "telegram_channel_id,telegram_message_id" in identity_index["run"]
+    assert "DROP COLUMN identity_migration_version" in identity_index["run"]
+    assert "ci_telegram_channels" in identity_index["run"]
+    assert "version_columns" in identity_index["run"]
+    assert "accepted an incompatible marker column" in identity_index["run"]
+    assert "accepted an incompatible same-name index" in identity_index["run"]
+    assert "--verify-post-migration" in identity_index["run"]
+
     collect = steps["Collect PHP and MySQL diagnostics"]
     preserve = steps["Preserve failed PHP and MySQL diagnostics"]
     assert collect["if"] == "failure()"

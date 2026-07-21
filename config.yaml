@@ -534,6 +534,8 @@ telegram_sources:
   local_state_message_limit: 5000
   max_remote_messages: 500
   remote_batch_size: 300
+  # Keep each PHP/MySQL identity transaction bounded independently of bytes.
+  remote_channel_batch_size: 5
   # The API read_body guard accepts 2 MiB by default. Keep signed-request headroom.
   remote_max_payload_bytes: 1750000
   discover_enabled: false
