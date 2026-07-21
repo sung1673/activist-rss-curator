@@ -779,11 +779,13 @@ function legacy_story_visibility_sql(array $config, string $storyAlias): string 
 }
 
 function telegram_signal_visibility_sql(array $config, string $signalAlias): string {
-    return 'EXISTS (SELECT 1 FROM ' . table_name($config, 'source_rights') . ' signal_sr'
+    return '(JSON_VALID(' . $signalAlias . '.payload_json)'
+        . ' AND JSON_LENGTH(' . $signalAlias . '.payload_json, \'$.source_right_ids\') > 0'
+        . ' AND (SELECT COUNT(DISTINCT signal_sr.source_right_id) FROM ' . table_name($config, 'source_rights') . ' signal_sr'
         . ' WHERE LOWER(signal_sr.source_type) LIKE \'%telegram%\''
         . ' AND ' . source_right_redistribution_sql('signal_sr')
-        . ' AND JSON_VALID(' . $signalAlias . '.payload_json)'
-        . ' AND JSON_CONTAINS(' . $signalAlias . '.payload_json, JSON_QUOTE(signal_sr.source_key), \'$.top_channels\'))';
+        . ' AND JSON_CONTAINS(' . $signalAlias . '.payload_json, JSON_QUOTE(signal_sr.source_right_id), \'$.source_right_ids\'))'
+        . ' = JSON_LENGTH(' . $signalAlias . '.payload_json, \'$.source_right_ids\'))';
 }
 
 function telegram_message_visibility_sql(array $config, string $messageAlias): string {
@@ -2007,10 +2009,25 @@ function upsert_telegram_snapshot(PDO $pdo, array $config, array $payload): void
     $messages = isset($payload['messages']) && is_array($payload['messages']) ? $payload['messages'] : array();
     $matches = isset($payload['article_matches']) && is_array($payload['article_matches']) ? $payload['article_matches'] : array();
     $signals = isset($payload['issue_signals']) && is_array($payload['issue_signals']) ? $payload['issue_signals'] : array();
+    $replaceSignals = bool_int($payload, 'replace_issue_signals') === 1;
+    $replaceSignalsSince = $replaceSignals ? mysql_dt(isset($payload['issue_signals_replace_since']) ? $payload['issue_signals_replace_since'] : null) : null;
     if (count($channels) > 1000 || count($messages) > 2500 || count($matches) > 10000 || count($signals) > 1000) {
         respond(413, array('ok' => false, 'error' => 'too_many_records'));
     }
+    if ($replaceSignals && $replaceSignalsSince === null) {
+        respond(400, array('ok' => false, 'error' => 'invalid_issue_signals_replace_since'));
+    }
+    $replacementSignalIds = array();
+    if ($replaceSignals) {
+        foreach ($signals as $signal) {
+            if (!is_array($signal)) { respond(400, array('ok' => false, 'error' => 'invalid_replacement_signal')); }
+            $replacementId = str_value($signal, 'article_id', 96);
+            if ($replacementId === null || $replacementId === '') { respond(400, array('ok' => false, 'error' => 'invalid_replacement_signal')); }
+            $replacementSignalIds[$replacementId] = true;
+        }
+    }
     $now = gmdate('Y-m-d H:i:s');
+    $signalsDeleted = 0;
     $pdo->beginTransaction();
     try {
         $channelStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'telegram_channels') . ' (
@@ -2136,12 +2153,23 @@ function upsert_telegram_snapshot(PDO $pdo, array $config, array $payload): void
                 $now,
             ));
         }
+        if ($replaceSignals) {
+            $deleteSql = 'DELETE FROM ' . table_name($config, 'telegram_issue_signals') . ' WHERE latest_seen_at >= ?';
+            $deleteParams = array($replaceSignalsSince);
+            if ($replacementSignalIds) {
+                $deleteSql .= ' AND article_id NOT IN (' . implode(',', array_fill(0, count($replacementSignalIds), '?')) . ')';
+                $deleteParams = array_merge($deleteParams, array_keys($replacementSignalIds));
+            }
+            $deleteSignals = $pdo->prepare($deleteSql);
+            $deleteSignals->execute($deleteParams);
+            $signalsDeleted = $deleteSignals->rowCount();
+        }
         $pdo->commit();
     } catch (Throwable $e) {
         $pdo->rollBack();
         throw $e;
     }
-    respond(200, array('ok' => true, 'channels' => count($channels), 'messages' => count($messages), 'article_matches' => count($matches), 'issue_signals' => count($signals)));
+    respond(200, array('ok' => true, 'channels' => count($channels), 'messages' => count($messages), 'article_matches' => count($matches), 'issue_signals' => count($signals), 'issue_signals_deleted' => $signalsDeleted));
 }
 
 function upsert_report(PDO $pdo, array $config, array $report): void {

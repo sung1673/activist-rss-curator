@@ -93,7 +93,6 @@ jobs:
           CURATOR_DAILY_REPORT_WRITE_ONLY: "1"
           GITHUB_TOKEN: ${{ github.token }}
           STORY_REVIEW_ACCESS_TOKEN: ${{ secrets.STORY_REVIEW_ACCESS_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
           ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
           ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
@@ -249,6 +248,7 @@ jobs:
       vars.ENABLE_GOVERNANCE_SHADOW == 'true' &&
       vars.ENABLE_GOVERNANCE_PAGES == 'true' &&
       vars.ENABLE_PAGES != 'true' &&
+      vars.ENABLE_TELEGRAM_DELIVERY == 'true' &&
       vars.ENABLE_GOVERNANCE_DELIVERY == 'true' &&
       (
         (github.event_name == 'schedule' && github.event.schedule == '5 21 * * *') ||

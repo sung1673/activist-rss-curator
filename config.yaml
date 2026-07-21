@@ -457,8 +457,10 @@ publish:
     - medium
 
 telegram:
-  enabled: true
-  chat_id: "@o2fjwoei"
+  # Outbound Telegram chat delivery is disabled by product policy. Public
+  # channel collection below remains enabled for internal signal analysis.
+  enabled: false
+  chat_id: ""
   parse_mode: "HTML"
   disable_web_page_preview: true
   single_article_web_page_preview: true
@@ -502,6 +504,10 @@ telegram_sources:
       is_public_channel: true
   backfill_limit: 100
   incremental_limit: 200
+  # Checkpoint at most one page per channel and resume on the next scheduled
+  # run. This prevents a historical catch-up from blocking a 30-minute cycle.
+  incremental_max_pages: 1
+  incremental_channel_timeout_seconds: 60
   history_backfill_days: 180
   history_backfill_limit_per_channel: 3000
   history_backfill_channel_limit: 0
@@ -512,6 +518,9 @@ telegram_sources:
   weak_match_window_hours: 96
   weak_match_limit_per_message: 3
   signal_window_hours: 72
+  signal_rebuild_max_messages: 300000
+  signal_rebuild_max_matches: 1200000
+  signal_rebuild_max_source_rights: 3000
   signal_min_messages: 3
   signal_min_channels: 2
   signal_limit: 40

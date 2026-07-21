@@ -220,7 +220,7 @@ GitHub Pages가 공개 페이지이므로 비밀값, session, raw_json 전문, �
 - 브라우저는 token을 영구 저장하지 않고 현재 탭의 session storage에만 보관하며, 잠금 또는 탭 종료 시 제거합니다.
 - 정적 `story-review.html`과 관련 메타데이터는 인증된 서버 측 편집 UI가 마련될 때까지 공개 Pages artifact에서 제외합니다.
 
-공개 콘텐츠 발송은 이 관리자 접근 정책과 별개입니다. `TELEGRAM_BOT_TOKEN`과 `TELEGRAM_CHAT_ID`를 사용하는 공개 채널 발송은 계속 유지합니다.
+공개 콘텐츠의 Telegram 채팅 발송도 현재는 사용하지 않습니다. `ENABLE_TELEGRAM_DELIVERY=false`와 애플리케이션의 발송 비활성 설정을 함께 유지합니다. `TELEGRAM_API_ID`·`TELEGRAM_API_HASH`·`TELEGRAM_SESSION_STRING`을 사용하는 허가 공개 채널 읽기 수집은 outbound 발송과 별개로 계속 운영합니다.
 
 보안 한계:
 

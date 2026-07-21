@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -145,6 +146,41 @@ def test_main_exits_nonzero_when_telegram_remote_sync_is_partial(monkeypatch) ->
     with pytest.raises(SystemExit) as exc:
         main()
     assert exc.value.code == 1
+
+
+@pytest.mark.parametrize(
+    "failure_key",
+    ("telegram_channel_failed", "telegram_source_connect_failed", "telegram_source_not_configured"),
+)
+def test_main_exits_nonzero_when_telegram_collection_is_incomplete(failure_key: str, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr("curator.main.run", lambda: {failure_key: 1})
+
+    with pytest.raises(SystemExit) as exc:
+        main()
+
+    assert exc.value.code == 1
+
+
+def test_main_writes_complete_metrics_on_success(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    metrics_path = tmp_path / "curator-run-metrics.json"
+    monkeypatch.setenv("CURATOR_RUN_METRICS_PATH", str(metrics_path))
+    monkeypatch.setattr("curator.main.run", lambda: {"telegram_sent": 0})
+
+    main()
+
+    payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+    assert payload["ok"] is True
+    assert payload["status"] == "complete"
+
+
+def test_main_fails_when_run_metrics_cannot_be_written(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    metrics_path = tmp_path / "metrics-directory"
+    metrics_path.mkdir()
+    monkeypatch.setenv("CURATOR_RUN_METRICS_PATH", str(metrics_path))
+    monkeypatch.setattr("curator.main.run", lambda: {"telegram_sent": 0})
+
+    with pytest.raises(RuntimeError, match="curator_run_metrics_write_failed"):
+        main()
 
 
 def test_legacy_direct_delivery_never_enqueues_remote_outbox(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]

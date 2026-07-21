@@ -21,8 +21,8 @@ on:
     - cron: "5,35 0-15,23 * * *"
     # KST 03:35, covering the first half of the overnight 01:00-06:00 window.
     - cron: "35 18 * * *"
-    # KST 05:00, scheduled early so the daily report can still arrive near 06:00 if Actions is delayed.
-    - cron: "0 20 * * *"
+    # KST 05:45 daily generation (UTC 20:45), aligned with the daily workflow.
+    - cron: "45 20 * * *"
   workflow_dispatch:
     inputs:
       run_mode:
@@ -34,6 +34,16 @@ on:
           - auto
           - full
           - page_only
+      allow_pages_deploy:
+        description: "Explicitly allow a manual run to deploy GitHub Pages"
+        required: false
+        type: boolean
+        default: false
+      allow_telegram_delivery:
+        description: "Explicitly allow outbound Telegram delivery (also requires the repository opt-in)"
+        required: false
+        type: boolean
+        default: false
       send_telegram_test:
         description: "Send a Telegram smoke-test message"
         required: false
@@ -78,12 +88,13 @@ permissions:
   id-token: write
 
 concurrency:
-  group: curator-state-${{ github.ref }}
+  group: telegram-collection-${{ github.repository }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   build-feed:
-    if: vars.ENABLE_LEGACY_PIPELINE != 'false'
+    if: vars.ENABLE_LEGACY_PIPELINE == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 75
     environment:
@@ -108,6 +119,7 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           LEGACY_PAGES_ENABLED: ${{ vars.ENABLE_PAGES }}
           GOVERNANCE_PAGES_ENABLED: ${{ vars.ENABLE_GOVERNANCE_PAGES }}
+          ALLOW_PAGES_DEPLOY: ${{ github.event_name != 'workflow_dispatch' || inputs.allow_pages_deploy }}
         run: |
           set -euo pipefail
 
@@ -171,7 +183,7 @@ jobs:
           fi
 
           deploy_pages=false
-          if [[ "$REF_NAME" == "$DEFAULT_BRANCH" && "$LEGACY_PAGES_ENABLED" == "true" && "$GOVERNANCE_PAGES_ENABLED" != "true" && ( "$full_run" == "true" || "$page_run" == "true" ) ]]; then
+          if [[ "$REF_NAME" == "$DEFAULT_BRANCH" && "$LEGACY_PAGES_ENABLED" == "true" && "$GOVERNANCE_PAGES_ENABLED" != "true" && "$ALLOW_PAGES_DEPLOY" == "true" && ( "$full_run" == "true" || "$page_run" == "true" ) ]]; then
             deploy_pages=true
           elif [[ "$REF_NAME" != "$DEFAULT_BRANCH" && "$LEGACY_PAGES_ENABLED" == "true" && ( "$full_run" == "true" || "$page_run" == "true" ) ]]; then
             echo "::notice::Pages deployment is restricted to the default branch ($DEFAULT_BRANCH)."
@@ -180,6 +192,15 @@ jobs:
           echo "page=$page_run" >> "$GITHUB_OUTPUT"
           echo "deploy_pages=$deploy_pages" >> "$GITHUB_OUTPUT"
           echo "Run mode: full=$full_run page=$page_run deploy_pages=$deploy_pages"
+
+      - name: Initialize curator run metrics
+        if: ${{ steps.run_mode.outputs.full == 'true' }}
+        env:
+          CURATOR_RUN_METRICS_PATH: ${{ runner.temp }}/curator-run-metrics.json
+        shell: bash
+        run: >-
+          printf '%s\n' '{"ok":false,"status":"started"}'
+          > "$CURATOR_RUN_METRICS_PATH"
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -260,7 +281,7 @@ jobs:
           digest-mismatch: error
 
       - name: Send Telegram smoke test
-        if: ${{ vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && github.event_name == 'workflow_dispatch' && inputs.send_telegram_test }}
+        if: ${{ vars.ENABLE_TELEGRAM_DELIVERY == 'true' && vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && github.event_name == 'workflow_dispatch' && inputs.allow_telegram_delivery && inputs.send_telegram_test }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -268,16 +289,16 @@ jobs:
 
       - name: Build feed
         if: ${{ steps.run_mode.outputs.full == 'true' }}
+        timeout-minutes: 45
         env:
           CURATOR_FEEDS: ${{ secrets.CURATOR_FEEDS }}
           CURATOR_DATA_SOURCE: mysql
           CURATOR_REQUIRE_REMOTE_API: "1"
-          CURATOR_DELIVERY_MODE: ${{ vars.ENABLE_GOVERNANCE_DELIVERY == 'true' && 'disabled' || 'legacy-direct' }}
+          CURATOR_DELIVERY_MODE: disabled
           CURATOR_EVENT_SCHEDULE: ${{ github.event.schedule }}
-          CURATOR_DISABLE_TELEGRAM_SEND: ${{ github.event_name == 'push' && ! contains(github.event.head_commit.message, '[send-regular-update]') && '1' || '' }}
+          CURATOR_DISABLE_TELEGRAM_SEND: "1"
+          CURATOR_RUN_METRICS_PATH: ${{ runner.temp }}/curator-run-metrics.json
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_ADMIN_ACCESS_TOKEN: ${{ secrets.TELEGRAM_ADMIN_ACCESS_TOKEN }}
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
@@ -287,6 +308,26 @@ jobs:
           ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
           ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
         run: python -m curator.main
+
+      - name: Verify curator run metrics
+        if: ${{ success() && steps.run_mode.outputs.full == 'true' }}
+        env:
+          CURATOR_RUN_METRICS_PATH: ${{ runner.temp }}/curator-run-metrics.json
+        shell: bash
+        run: >-
+          python -c "import json, os, pathlib, sys;
+          payload = json.loads(pathlib.Path(os.environ['CURATOR_RUN_METRICS_PATH']).read_text(encoding='utf-8'));
+          sys.exit(0 if payload.get('ok') is True and payload.get('status') == 'complete'
+          else 'curator run metrics did not complete successfully')"
+
+      - name: Publish curator run metrics
+        if: ${{ always() && steps.run_mode.outputs.full == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: curator-run-metrics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/curator-run-metrics.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Restore validated legacy dated reports
         if: steps.run_mode.outputs.deploy_pages == 'true'
@@ -303,7 +344,6 @@ jobs:
           CURATOR_DAILY_REPORT_WRITE_ONLY: "1"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           STORY_REVIEW_ACCESS_TOKEN: ${{ secrets.STORY_REVIEW_ACCESS_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
           ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
           ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
@@ -321,7 +361,7 @@ jobs:
           python -m curator.telegram_dashboard write
 
       - name: Resend last Telegram briefing
-        if: ${{ vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && ((github.event_name == 'workflow_dispatch' && inputs.resend_last_briefing) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[resend-last-briefing]'))) }}
+        if: ${{ vars.ENABLE_TELEGRAM_DELIVERY == 'true' && vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && ((github.event_name == 'workflow_dispatch' && inputs.allow_telegram_delivery && inputs.resend_last_briefing) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[resend-last-briefing]'))) }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -329,7 +369,7 @@ jobs:
         run: python -m curator.telegram_resend_digest
 
       - name: Resend recent Telegram articles
-        if: ${{ vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && github.event_name == 'workflow_dispatch' && inputs.resend_recent_articles }}
+        if: ${{ vars.ENABLE_TELEGRAM_DELIVERY == 'true' && vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && github.event_name == 'workflow_dispatch' && inputs.allow_telegram_delivery && inputs.resend_recent_articles }}
         env:
           TELEGRAM_RESEND_COUNT: ${{ inputs.resend_recent_article_count }}
           TELEGRAM_RESEND_GUID: ${{ inputs.resend_cluster_guid }}
@@ -363,7 +403,7 @@ jobs:
           path: ${{ steps.legacy_pages_artifact.outputs.path }}
 
       - name: Preserve sanitized legacy archive seed
-        if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '0 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.preserve_legacy_archive_seed)) }}
+        if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '45 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.preserve_legacy_archive_seed)) }}
         uses: actions/upload-artifact@v7
         with:
           name: legacy-pages-archive-seed
@@ -464,7 +504,7 @@ jobs:
           retention-days: 7
 
       - name: Send daily report message
-        if: ${{ vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && ((github.event_name == 'schedule' && github.event.schedule == '0 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]'))) }}
+        if: ${{ vars.ENABLE_TELEGRAM_DELIVERY == 'true' && vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && ((github.event_name == 'schedule' && github.event.schedule == '45 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.allow_telegram_delivery && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]'))) }}
         env:
           CURATOR_DATA_SOURCE: mysql
           CURATOR_REQUIRE_REMOTE_API: "1"

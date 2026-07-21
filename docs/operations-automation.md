@@ -10,10 +10,11 @@
 | `ingest-official.yml` | DART·KIND·회사/행동주주 공식 자료 수집 | KST 07:00~23:45 15분, KST 00:00~06:00 1시간 |
 | `ingest-media.yml` | 허가된 Telegram·뉴스 발견 큐 수집 | 30분 |
 | `resolve-links.yml` | Google News 발견 URL 후처리 | 1시간 |
-| `publish.yml` | 원격 `DeliveryOutbox` claim·발송·ack/fail | 수집 완료 직후, 10분 재시도 |
-| `daily.yml` | 일일 페이지 생성·Pages 배포, 일일 Telegram 발송 | KST 05:45, 06:05 |
+| `publish.yml` | opt-in 시 원격 `DeliveryOutbox` claim·발송·ack/fail | 수집 완료 직후, 10분 재시도 |
+| `daily.yml` | 일일 페이지 생성·Pages 배포, opt-in 시 일일 Telegram 발송 | KST 05:45, 06:05 |
 | `watchdog.yml` | 수집 최신성·outbox·dead letter 감시 | 5분 |
 | `pages-deployment-incident.yml` | Pages 최종 검증 실패·회복 이슈 조정 | Pages workflow 완료 직후 |
+| `repair-telegram-history.yml` | MySQL 상태를 먼저 복원한 뒤 허가 채널 이력을 멱등 백필 | 운영자 수동 실행만 |
 | `release-gate.yml` | production 증빙 artifact의 14일 shadow·7일 운영·성능·benchmark 전환 판정 | 운영자 수동 실행 |
 
 `ci.yml`의 테스트와 품질 job은 모두 필수다. 린트, 신규 거버넌스 핵심 모듈 타입 검사, `requirements.txt` 의존성 취약점 감사 중 하나라도 실패하면 CI가 실패한다. 기존 수집기 전체에 일괄 예외를 두지 않고 typed-core 범위를 점진적으로 넓힌다.
@@ -29,15 +30,16 @@ GitHub cron은 UTC로 해석된다. 일일 생성은 `45 20 * * *`(KST 05:45), �
 - `ACTIVIST_API_URL`, `ACTIVIST_API_SECRET`: 서명된 운영 API
 - `DART_API_KEY`: OpenDART 수집
 - `CURATOR_FEEDS`: 비공개 보조 발견 피드. 운영 범위 정책이 켜져 있으므로 단순 URL 문자열이 아니라 `name`, `url`, `scope`, `enabled`를 담은 JSON 배열로 등록한다. 세부 형식은 [미디어 발견 피드 범위 정책](media-source-scope-policy.md)을 따른다.
-- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`: 공개 발송
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`: 향후 outbound Telegram을 다시 승인할 때만 사용하는 선택 Secret. 현재 workflow는 발송하지 않는다.
 - `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING`: 허가 채널 수집
 - `BSIDE_API_BASE_URL`, `BSIDE_OPS_TOKEN`: watchdog의 `/api/v1/ops/health` 호출
 - `STORY_REVIEW_ACCESS_TOKEN`, `TELEGRAM_ADMIN_ACCESS_TOKEN`: 명시적으로 생성·등록하는 편집 검수 token. Telegram 메시지나 URL에는 넣지 않고 관리자가 고정된 관리자 URL에서 직접 입력
 
 Repository variable:
 
-- `ENABLE_LEGACY_PIPELINE=true`: 90일 호환 기간 동안 기존 수집·발송 workflow 유지
+- `ENABLE_LEGACY_PIPELINE=true`: 90일 호환 기간 동안 기존 수집·Pages workflow 유지
 - `ENABLE_PAGES=true`: 기존 workflow의 Pages artifact 배포 유지
+- `ENABLE_TELEGRAM_DELIVERY=false`: legacy direct, smoke/resend, 일일 briefing, 신규 outbox consumer를 모두 차단하는 최상위 발송 opt-in
 - `ENABLE_GOVERNANCE_SHADOW=false`: 신규 수집·링크 해결·watchdog 예약 실행 차단. 검증된 KIND 어댑터와 수동 smoke test 이후에만 `true`로 변경
 - `ENABLE_GOVERNANCE_PAGES=false`: 신규 일일 Pages 공개 배포 차단
 - `ENABLE_GOVERNANCE_DELIVERY=false`: 신규 outbox와 일일 Telegram 발송 차단
@@ -47,11 +49,24 @@ Repository variable:
 
 수동 `ingest-official`은 `include_kind=false`로 DART-only smoke/shadow를 실행할 수 있다. 예약 실행은 항상 KIND를 필수로 요구하므로 검증된 어댑터가 없는 상태에서 `ENABLE_GOVERNANCE_SHADOW=true`로 바꾸면 성공한 것처럼 건너뛰지 않고 실패한다.
 
-2026-07-16 안전 기본값은 `ENABLE_LEGACY_PIPELINE=true`, 나머지 세 신규 전환 플래그는 `false`다. 전환은 shadow → Pages → delivery 순서로 각각 별도 승인하고, 기존 pipeline 종료는 90일 호환 관측 뒤 결정한다.
+2026-07-21 안전 기본값은 `ENABLE_LEGACY_PIPELINE=true`, `ENABLE_PAGES=true`, `ENABLE_TELEGRAM_DELIVERY=false`, 세 거버넌스 전환 플래그는 `false`다. 전환은 shadow → Pages 순서로 각각 별도 승인하고, 기존 pipeline 종료는 90일 호환 관측 뒤 결정한다. Telegram 발송은 현재 제품 범위에서 승인하지 않는다.
 
 `ENABLE_PAGES`와 `ENABLE_GOVERNANCE_PAGES`는 동시에 `true`일 수 없다. 신규 Pages를 켜기 전에 기존 `ENABLE_PAGES=false`를 먼저 적용하며, 두 값이 모두 `true`이면 legacy와 신규 workflow가 모두 fail-closed한다. 코드/API만 바뀐 push에서 생성 단계가 하나도 선택되지 않으면 legacy workflow도 Pages artifact를 배포하지 않는다. 두 Pages 경로 모두 artifact 업로드 전에 `telegram-admin.html` 셸을 생성하고 `TELEGRAM_ADMIN_ACCESS_TOKEN`과 `ACTIVIST_PUBLIC_API_URL`을 검증한다.
 
-전달 경로도 상호 배타적이다. 기존 호환 기간에는 legacy workflow가 MySQL 상태를 복원한 뒤 `legacy-direct`로 공개 채널에 발송하고 신규 ingest는 `disabled`로 수집만 한다. 신규 전달을 승인하면 legacy 직접 발송과 수동 smoke·resend를 중단하고 일일 briefing과 공개 승인 사건을 `DeliveryOutbox`에 넣은 뒤 `publish.yml`만 `TELEGRAM_CHAT_ID` 공개 채널로 전송한다. 비공개 1:1 관리자 채팅, 관리자 링크 발송, token이 포함된 Telegram 메시지는 사용하지 않으며 공개 콘텐츠 outbox에도 관리자 token을 저장하지 않는다. 관리자는 고정 URL에서 명시적으로 등록된 token을 직접 입력한다. 정적 `story-review.html`과 검수 메타데이터는 인증된 서버 측 편집 UI가 준비될 때까지 Pages artifact에서 제외한다. publisher는 한 번에 1건을 900초 lease로 claim하고 한 실행에서 최대 5건만 처리한다. Telegram 응답이 불명확하거나 외부 message ID 저장 전후의 ACK가 실패하면 자동 재전송하지 않고 조정 대상 dead-letter로 격리한다. 실행이 중단되어 `processing` lease가 만료된 경우도 결과 불명으로 간주해 자동 재claim하지 않는다. 사건 enqueue 일부가 거절되더라도 이미 대기 중인 안전한 발송 건을 굶기지 않도록 outbox consumer는 별도로 계속 실행한다.
+정규 수집 job은 `CURATOR_DELIVERY_MODE=disabled`와 `CURATOR_DISABLE_TELEGRAM_SEND=1`로 고정하며 bot/chat Secret도 주입하지 않는다. 별도로 남아 있는 수동 smoke·resend, 일일 briefing, `publish.yml` outbox consumer도 `ENABLE_TELEGRAM_DELIVERY=true`라는 최상위 opt-in이 있어야 한다. 현재 값은 `false`이고 `config.yaml`의 발송 설정도 꺼져 있으므로 outbound 경로는 모두 실행되지 않는다. 허가 공개 채널의 읽기 수집은 별도 MTProto 자격증명을 사용하므로 계속 가능하다. 향후 발송 정책을 다시 승인하더라도 legacy와 outbox 전달 경로는 상호 배타적으로 유지하고, 외부 message ID가 저장된 뒤에만 delivered로 확정하는 기존 계약을 적용한다.
+
+`build-feed.yml`의 수동 `full` 실행은 `allow_pages_deploy=false`, `allow_telegram_delivery=false`가 기본값이다. 따라서 실제 MySQL 수집·동기화를 검증하면서도 Pages와 Telegram을 건드리지 않을 수 있다. Build 단계는 45분을 넘으면 중단되며, 단계별 시간과 처리량은 `curator-run-metrics-*` artifact로 14일 보존한다.
+
+Telegram 증분 수집은 채널별 한 페이지에서 durable checkpoint를 만들고 다음 예약 실행에서 이어 간다. 신규 메시지는 MySQL API의 전체 ACK가 확인된 뒤에만 로컬 5,000건 제한을 적용한다. `repair-telegram-history.yml`은 과거 누락 의심 구간을 복구할 때만 수동 실행하며 outbound bot/chat Secret을 전달받지 않는다. 이 작업은 기본 브랜치와 `telegram-history-repair` environment로 제한하고, 일반 Telegram 수집과 같은 최대 100건 대기열에서 직렬 실행한다. 입력은 최대 365일·페이지당 3,000건·500개 채널·전체 300,000건으로 제한하며, 각 채널은 요청 기간의 시작까지 페이지를 계속 순회한다. 과거 prune-before-sync 장애가 DB cursor를 실제 저장 범위보다 앞당겼을 수 있으므로 복구 실행은 선택 채널을 강제 재동기화한다. 각 페이지는 MySQL ACK가 확인된 뒤 다음 페이지로 넘어가며 metrics에 `telegram_repair_resume_before_message_id`를 저장한다. 전역 한도나 timeout으로 채널 중간에서 멈추면 `telegram_backfill_resume_handle`과 `telegram_backfill_resume_before_message_id`를 남겨 이미 ACK된 페이지보다 앞선 구간부터 재개한다. 마지막 단계에서는 MySQL의 최근 72시간 메시지와 매치를 `posted_at` 기준으로 끝까지 다시 읽어 signal을 재계산한다. 페이지가 불완전하거나 안전 상한을 넘으면 기존 signal을 덮지 않고 복구 작업을 실패시킨다.
+
+### Telegram 이력 복구 운영 절차
+
+1. 실행 전 GitHub repository의 `Settings → Environments`에 `telegram-history-repair` environment를 미리 만들고 deployment branch policy를 기본 브랜치 `main`만 허용한다. 이 environment가 없는 상태에서 workflow를 먼저 실행하지 않는다.
+2. `ENABLE_LEGACY_PIPELINE=false`, `ENABLE_GOVERNANCE_SHADOW=false`로 일반 수집을 일시 중지하고 진행 중인 `telegram-collection-*` run이 없는지 확인한다. `ENABLE_TELEGRAM_DELIVERY=false`는 전 과정에서 유지한다.
+3. 기본 브랜치에서 `Repair Telegram history`를 수동 실행한다. 실패나 timeout 후에는 임의로 DB cursor를 되돌리지 않는다. 채널 중간에서 멈춘 경우 metrics의 마지막 handle 하나만 `only_handles`에 넣고 `telegram_repair_resume_before_message_id`를 `before_message_id`로 전달한다. 해당 채널이 완료된 뒤 나머지는 `start_after`로 이어 간다. `start_after`는 metrics가 이전 모든 채널의 `remote_checkpoint_complete=1`을 입증할 때만 사용한다.
+4. `telegram-repair-metrics-*` artifact에서 `ok=true`, `status=complete`, `telegram_channel_failed=0`, `telegram_remote_failed=0`, `telegram_remote_pending=0`, `telegram_backfill_truncated_channels=0`을 모두 확인한다. 하나라도 만족하지 않으면 복구 완료로 판정하지 않는다.
+5. 성공 metrics 확인 후에만 `ENABLE_LEGACY_PIPELINE=true`로 바꾸고 `Build curated RSS feed`를 `run_mode=full`, `allow_pages_deploy=false`, `allow_telegram_delivery=false`로 즉시 실행한다. 이 safe-full이 성공하면 해당 값을 `true`로 유지해 정규 스케줄을 복구하고, 실패하면 즉시 `false`로 돌려 다음 예약 실행을 차단한다.
+6. 최종 상태는 `ENABLE_LEGACY_PIPELINE=true`, `ENABLE_PAGES=true`, `ENABLE_TELEGRAM_DELIVERY=false`, 세 거버넌스 전환 플래그 `false`다. safe-full은 Pages를 배포하지 않으므로 기존 검증된 Pages artifact는 롤백 경계로 남고, 신규 MySQL upsert 데이터는 삭제하지 않는다.
 
 ## 소스 이용권한
 
@@ -92,7 +107,7 @@ Governance Pages 생성 결과는 `pages-<run_id>-<attempt>` artifact로 30일 �
 
 1. PR의 `CI` 필수 테스트가 통과했는지 확인한다.
 2. 수동 `Ingest official sources`와 `Ingest media sources`를 한 번씩 실행한다.
-3. `Publish delivery outbox` 로그에서 external message ID가 저장된 ack를 확인한다.
+3. 현재는 `ENABLE_TELEGRAM_DELIVERY=false`와 모든 발송 workflow의 skip 상태를 확인한다.
 4. `Daily pages and briefing`을 `generate`로 실행해 Pages artifact와 실제 페이지를 확인한다.
 5. `Operations watchdog`을 실행해 건강 상태와 incident 자동 회복을 확인한다.
 6. 14일 shadow와 최근 7일 production 증빙 artifact를 준비해 `Governance release transition gate`를 실행하고, 통과 보고서와 사람 승인을 보존한다.

@@ -51,6 +51,13 @@ def test_operational_state_tables_and_leases_are_migrated():
     assert "last_message_id=GREATEST(last_message_id,VALUES(last_message_id))" in API
 
 
+def test_signal_rebuild_runtime_resources_use_message_posted_at():
+    assert "'telegram_signal_messages' => array(" in V1
+    assert "'telegram_signal_matches' => array(" in V1
+    assert "runtime_message.posted_at" in V1
+    assert ") runtime_data', 'posted_at')" in V1
+
+
 def test_legacy_lineage_migration_guards_optional_tables_on_fresh_database():
     for table in ("activist_articles", "activist_stories", "activist_documents"):
         guard = (
@@ -86,7 +93,9 @@ def test_v1_public_routes_and_exports_are_documented():
 
 def test_unified_search_includes_governance_actors():
     specification = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
-    kinds = specification["components"]["schemas"]["SearchResult"]["properties"]["kind"]["enum"]
+    kinds = specification["components"]["schemas"]["SearchResult"]["properties"][
+        "kind"
+    ]["enum"]
     assert "actor" in kinds
     assert "SELECT \\'actor\\', a.actor_id, a.display_name" in V1
     assert "a.aliases_json LIKE ?" in V1
@@ -125,7 +134,9 @@ def test_feedback_is_never_automatically_public():
 
 
 def test_source_rights_gate_telegram_and_public_documents():
-    assert "source_class NOT IN (\\'licensed_telegram\\',\\'authorized_telegram\\')" in V1
+    assert (
+        "source_class NOT IN (\\'licensed_telegram\\',\\'authorized_telegram\\')" in V1
+    )
     assert "redistribution_allowed = 1" in V1
     assert "revoked_at IS NULL" in V1
     assert "valid_until IS NULL" in V1
@@ -138,9 +149,11 @@ def test_legacy_public_surfaces_fail_closed_on_telegram_source_rights():
     assert "function telegram_message_visibility_sql" in API
     assert "function telegram_signal_visibility_sql" in API
     assert "NULLIF(TRIM(" in API
-    assert ".evidence_uri), \\\'\\') IS NOT NULL" in API
-    assert ".evidence_hash), \\\'\\') IS NOT NULL" in API
+    assert ".evidence_uri), \\'\\') IS NOT NULL" in API
+    assert ".evidence_hash), \\'\\') IS NOT NULL" in API
     assert "JSON_CONTAINS(" in API
+    assert "$.source_right_ids" in API
+    assert "COUNT(DISTINCT signal_sr.source_right_id)" in API
     assert "source_right_id=VALUES(source_right_id)" in API
     assert "idx_article_source_right" in API
     assert "idx_story_source_right" in API
@@ -148,10 +161,37 @@ def test_legacy_public_surfaces_fail_closed_on_telegram_source_rights():
     assert API.count("legacy_article_visibility_sql('a', 'article_sr')") >= 3
     assert API.count("telegram_message_visibility_sql($config, 'm')") >= 3
     assert "legacy_story_visibility_sql($config, 's')" in API
-    story_visibility = API[API.index("function legacy_story_visibility_sql") : API.index("function telegram_signal_visibility_sql")]
+    story_visibility = API[
+        API.index("function legacy_story_visibility_sql") : API.index(
+            "function telegram_signal_visibility_sql"
+        )
+    ]
     assert "rights_sa.position_no = 0" in story_visibility
-    assert "rights_a.canonical_url = ' . $storyAlias . '.representative_url" in story_visibility
-    assert "rights_a.source_right_id <=> ' . $storyAlias . '.source_right_id" in story_visibility
+    assert (
+        "rights_a.canonical_url = ' . $storyAlias . '.representative_url"
+        in story_visibility
+    )
+    assert (
+        "rights_a.source_right_id <=> ' . $storyAlias . '.source_right_id"
+        in story_visibility
+    )
+
+
+def test_authoritative_signal_rebuild_removes_stale_rows_transactionally():
+    snapshot = API[
+        API.index("function upsert_telegram_snapshot") : API.index(
+            "function upsert_report"
+        )
+    ]
+    assert "replace_issue_signals" in snapshot
+    assert "invalid_issue_signals_replace_since" in snapshot
+    assert "invalid_replacement_signal" in snapshot
+    assert "DELETE FROM ' . table_name($config, 'telegram_issue_signals')" in snapshot
+    assert "latest_seen_at >= ?" in snapshot
+    assert "article_id NOT IN (" in snapshot
+    assert snapshot.index("$pdo->beginTransaction()") < snapshot.index(
+        "$deleteSignals->execute($deleteParams)"
+    ) < snapshot.index("$pdo->commit()")
 
 
 def test_runtime_export_supports_newest_first_opaque_cursor():
@@ -168,7 +208,10 @@ def test_cross_window_corrections_use_collection_key():
     assert "idx_document_collection" in API
     assert "previousDocumentStmt" in V1
     assert "previousEventStmt" in V1
-    assert "correction_of_document_id=COALESCE(correction_of_document_id,VALUES(correction_of_document_id))" in V1
+    assert (
+        "correction_of_document_id=COALESCE(correction_of_document_id,VALUES(correction_of_document_id))"
+        in V1
+    )
     assert "version_no=GREATEST(version_no,VALUES(version_no))" in V1
     assert "correction_of_document_id=VALUES(correction_of_document_id)" not in V1
     assert "$existingDocumentLineageStmt" in V1
@@ -176,7 +219,11 @@ def test_cross_window_corrections_use_collection_key():
 
 
 def test_outbox_claim_can_target_one_delivery_and_blocks_invalid_rights():
-    claim = V1[V1.index("function claim_delivery_outbox") : V1.index("function ack_delivery_outbox")]
+    claim = V1[
+        V1.index("function claim_delivery_outbox") : V1.index(
+            "function ack_delivery_outbox"
+        )
+    ]
     assert "requestedDeliveryId" in claim
     assert "requested_status" in claim
     assert "external_message_id" in claim
@@ -188,9 +235,20 @@ def test_outbox_claim_can_target_one_delivery_and_blocks_invalid_rights():
     assert "source_right_inactive_or_missing" in claim
     assert "delivery_lease_expired_outcome_unknown" in claim
     assert "outcome_unknown_count" in claim
-    assert "OR (status = \\'processing\\' AND lease_expires_at < UTC_TIMESTAMP())" not in claim
-    enqueue = V1[V1.index("function enqueue_delivery_outbox") : V1.index("function delivery_payload_source_right_ids")]
-    lineage = V1[V1.index("function delivery_payload_source_right_ids") : V1.index("function delivery_source_rights_valid")]
+    assert (
+        "OR (status = \\'processing\\' AND lease_expires_at < UTC_TIMESTAMP())"
+        not in claim
+    )
+    enqueue = V1[
+        V1.index("function enqueue_delivery_outbox") : V1.index(
+            "function delivery_payload_source_right_ids"
+        )
+    ]
+    lineage = V1[
+        V1.index("function delivery_payload_source_right_ids") : V1.index(
+            "function delivery_source_rights_valid"
+        )
+    ]
     assert "delivery_source_rights_valid($pdo, $config, $contentJson)" in enqueue
     assert "rights_lineage_complete" in lineage
     assert "$decoded['rights_lineage_complete'] !== true" in lineage
@@ -258,7 +316,10 @@ def test_outbox_openapi_documents_singleton_lease_and_unknown_outcome_policy():
         "semantics": contract["claim"]["semantics"],
     }
     assert contract["acknowledgement"]["external_message_id_required"] is True
-    assert contract["acknowledgement"]["idempotent_when_external_message_id_matches"] is True
+    assert (
+        contract["acknowledgement"]["idempotent_when_external_message_id_matches"]
+        is True
+    )
     assert contract["acknowledgement"]["ambiguous_send_outcome"] == "dead_letter"
 
 
@@ -280,6 +341,12 @@ def test_runtime_state_can_rehydrate_operational_relations_incrementally():
         assert f"'{resource}' => array(" in V1
     assert "invalid_since" in V1
     assert "runtime_record_exceeds_response_budget" in V1
+    channel_resource = V1[
+        V1.index("'telegram_channels' => array(") : V1.index(
+            "'telegram_messages' => array("
+        )
+    ]
+    assert "payload_json" in channel_resource
 
 
 def test_link_discovery_state_machine_is_separate_from_articles():
@@ -312,7 +379,10 @@ def test_original_language_is_persisted_without_translation_fields():
 def test_telegram_identity_migration_uses_channel_id_message_keys():
     assert "function migrate_telegram_channel_identity" in V1
     assert "CONCAT(\\'id:\\', ?, \\':\\', m.telegram_message_id)" in V1
-    assert "migrate_telegram_channel_identity($pdo, $config, $handle, $telegramChannelId)" in API
+    assert (
+        "migrate_telegram_channel_identity($pdo, $config, $handle, $telegramChannelId)"
+        in API
+    )
     assert "telegram_channel_id <> ?" in V1
     assert "channel_' . substr(hash('sha256', $previousId)" in V1
 
@@ -321,16 +391,31 @@ def test_cancelled_disclosure_requires_human_review_with_lifecycle_history():
     assert "$isCancelled = !empty($event['is_cancelled'])" in V1
     assert "$verification = 'withdrawn'" in V1
     assert "$publication = $isEventFollowup ? 'draft'" in V1
-    assert "review_status=IF(payload_json<=>VALUES(payload_json),review_status,VALUES(review_status))" in V1
-    assert "publication_status=IF(payload_json<=>VALUES(payload_json),publication_status,VALUES(publication_status))" in V1
-    assert "review_status=IF(VALUES(verification_status)=\\'withdrawn\\',\\'pending\\'" not in V1
-    assert "publication_status=IF(VALUES(verification_status)=\\'withdrawn\\',\\'draft\\'" not in V1
+    assert (
+        "review_status=IF(payload_json<=>VALUES(payload_json),review_status,VALUES(review_status))"
+        in V1
+    )
+    assert (
+        "publication_status=IF(payload_json<=>VALUES(payload_json),publication_status,VALUES(publication_status))"
+        in V1
+    )
+    assert (
+        "review_status=IF(VALUES(verification_status)=\\'withdrawn\\',\\'pending\\'"
+        not in V1
+    )
+    assert (
+        "publication_status=IF(VALUES(verification_status)=\\'withdrawn\\',\\'draft\\'"
+        not in V1
+    )
     assert "entry_type, title, description" in V1
     assert "\\'cancellation\\'" in V1
     assert "\\'lifecycle_status\\'" in V1
     assert "Official cancellation disclosure:" in V1
     assert "$followupTimelineUnchanged" in V1
-    assert "review_status=IF(' . $followupTimelineUnchanged . ',review_status,\\'pending\\')" in V1
+    assert (
+        "review_status=IF(' . $followupTimelineUnchanged . ',review_status,\\'pending\\')"
+        in V1
+    )
 
 
 def test_cancelled_document_remains_public_as_verifiable_lifecycle_evidence():
@@ -342,15 +427,27 @@ def test_cancelled_document_remains_public_as_verifiable_lifecycle_evidence():
 
 
 def test_company_master_does_not_erase_non_empty_fields_with_partial_updates():
-    ingest = V1[V1.index("$companyStmt =") : V1.index("foreach ($companies as $company)")]
-    for field in ("stock_code", "market", "legal_name", "legal_name_en", "short_name", "homepage_url"):
+    ingest = V1[
+        V1.index("$companyStmt =") : V1.index("foreach ($companies as $company)")
+    ]
+    for field in (
+        "stock_code",
+        "market",
+        "legal_name",
+        "legal_name_en",
+        "short_name",
+        "homepage_url",
+    ):
         assert f"{field}=COALESCE(NULLIF(VALUES({field}),\\'\\'),{field})" in ingest
     assert "VALUES(aliases_json)=\\'[]\\'" in ingest
 
 
 def test_source_right_boolean_flags_are_parsed_strictly():
     assert "function v1_bool_int" in V1
-    assert "in_array(strtolower(trim($value)), array('1', 'true', 'yes', 'on'), true)" in V1
+    assert (
+        "in_array(strtolower(trim($value)), array('1', 'true', 'yes', 'on'), true)"
+        in V1
+    )
     source_right_section = V1[V1.index("function v1_admin_upsert_source_right") :]
     assert "!empty($payload['redistribution_allowed'])" not in source_right_section
 
@@ -383,7 +480,9 @@ def test_sql_identifiers_and_dynamic_pagination_are_bounded():
 
 
 def test_all_api_response_shapes_enforce_250kb_budget():
-    respond_section = API[API.index("function respond") : API.index("function table_name")]
+    respond_section = API[
+        API.index("function respond") : API.index("function table_name")
+    ]
     assert "V1_RESPONSE_BUDGET_BYTES" in respond_section
     assert "response_budget_exceeded" in respond_section
     assert "X-Response-Bytes" in respond_section
@@ -393,14 +492,21 @@ def test_all_api_response_shapes_enforce_250kb_budget():
 def test_legacy_query_adapters_publish_90_day_migration_headers():
     assert "function legacy_adapter_headers" in API
     assert "2026-10-14T00:00:00Z" in API
-    for header in ("Deprecation: true", "Sunset: ", "successor-version", "X-BSIDE-Legacy-Adapter: true"):
+    for header in (
+        "Deprecation: true",
+        "Sunset: ",
+        "successor-version",
+        "X-BSIDE-Legacy-Adapter: true",
+    ):
         assert header in API
     handle_read = API[API.index("function handle_read") :]
     assert "legacy_adapter_headers($config, $action)" in handle_read
 
 
 def test_feedback_rate_limit_uses_private_salt_and_retry_contract():
-    feedback = V1[V1.index("function v1_submit_feedback") : V1.index("function v1_ops_health")]
+    feedback = V1[
+        V1.index("function v1_submit_feedback") : V1.index("function v1_ops_health")
+    ]
     assert "strlen($salt) < 32" in feedback
     assert "feedback_rate_limit_not_configured" in feedback
     assert "Retry-After: 3600" in feedback
@@ -436,12 +542,18 @@ def test_public_events_and_linked_records_follow_source_right_revocation():
 
 
 def test_ingest_cannot_grant_telegram_rights_or_publish_telegram_only_events():
-    ingest = V1[V1.index("function upsert_governance_snapshot") : V1.index("function enqueue_delivery_outbox")]
+    ingest = V1[
+        V1.index("function upsert_governance_snapshot") : V1.index(
+            "function enqueue_delivery_outbox"
+        )
+    ]
     assert "$sourceType !== 'official_disclosure'" in ingest
     assert "strpos($id, 'official:') !== 0" in ingest
     assert "array('dart', 'kind')" in ingest
     assert "$telegramOnly = $hasTelegramEvidence && !$hasIndependentEvidence" in ingest
-    assert "$evidenceMissing = !$hasTelegramEvidence && !$hasIndependentEvidence" in ingest
+    assert (
+        "$evidenceMissing = !$hasTelegramEvidence && !$hasIndependentEvidence" in ingest
+    )
     assert "if ($telegramOnly) { $verification = 'signal'; }" in ingest
     assert "$requiresReview = $telegramOnly || $evidenceMissing ||" in ingest
 
@@ -452,7 +564,9 @@ def test_hmac_ingest_cannot_reactivate_or_overwrite_administered_source_rights()
             "function enqueue_delivery_outbox"
         )
     ]
-    right_upsert = ingest[ingest.index("$rightStmt =") : ingest.index("foreach ($rights as $right)")]
+    right_upsert = ingest[
+        ingest.index("$rightStmt =") : ingest.index("foreach ($rights as $right)")
+    ]
     assert "ON DUPLICATE KEY UPDATE source_right_id=source_right_id" in right_upsert
     for administered_field in (
         "evidence_uri",
@@ -475,7 +589,11 @@ def test_hmac_ingest_cannot_reactivate_or_overwrite_administered_source_rights()
 
 
 def test_runtime_governance_events_export_complete_source_right_lineage():
-    resources = V1[V1.index("function v1_runtime_resource") : V1.index("function v1_runtime_cursor_encode")]
+    resources = V1[
+        V1.index("function v1_runtime_resource") : V1.index(
+            "function v1_runtime_cursor_encode"
+        )
+    ]
     runtime_page = V1[V1.index("function runtime_state_page") :]
     assert "'governance_events' => array(" in resources
     assert "SELECT DISTINCT runtime_ed.event_id" in runtime_page
@@ -484,13 +602,20 @@ def test_runtime_governance_events_export_complete_source_right_lineage():
     assert "$row['source_right_ids'] = array_keys($lineage['rights'])" in runtime_page
     assert "invalid_governance_event_source_right_lineage" in runtime_page
     assert "$row['evidence_revision'] = hash('sha256'" in runtime_page
-    assert "$row['publishable_evidence_count'] = count($lineage['publishable'])" in runtime_page
+    assert (
+        "$row['publishable_evidence_count'] = count($lineage['publishable'])"
+        in runtime_page
+    )
     assert "v1_document_visibility_sql('runtime_d', 'runtime_sr')" in runtime_page
 
 
 def test_mysql_datetimes_are_normalized_to_utc_before_storage():
-    helper = V1[V1.index("function v1_mysql_datetime_utc") : V1.index("function v1_bool_int")]
-    mysql_helper = API[API.index("function mysql_dt") : API.index("function first_mysql_dt")]
+    helper = V1[
+        V1.index("function v1_mysql_datetime_utc") : V1.index("function v1_bool_int")
+    ]
+    mysql_helper = API[
+        API.index("function mysql_dt") : API.index("function first_mysql_dt")
+    ]
     assert "new DateTimeZone('UTC')" in helper
     assert "new DateTimeImmutable(trim($value), $utc)" in helper
     assert "setTimezone($utc)->format('Y-m-d H:i:s')" in helper
@@ -498,8 +623,15 @@ def test_mysql_datetimes_are_normalized_to_utc_before_storage():
 
 
 def test_editor_review_requires_verified_or_withdrawn_evidence_and_fresh_token():
-    review = V1[V1.index("function v1_admin_review_event") : V1.index("function v1_admin_review_feedback")]
-    assert "array('official', 'confirmed', 'corroborated', 'corrected', 'withdrawn')" in review
+    review = V1[
+        V1.index("function v1_admin_review_event") : V1.index(
+            "function v1_admin_review_feedback"
+        )
+    ]
+    assert (
+        "array('official', 'confirmed', 'corroborated', 'corrected', 'withdrawn')"
+        in review
+    )
     assert "verified_evidence_required_before_publication" in review
     assert "publishable_evidence_required_before_publication" in review
     assert "v1_document_visibility_sql('review_d', 'review_sr')" in review
@@ -586,7 +718,10 @@ def test_official_followups_are_bounded_unambiguous_and_preserve_canonical_event
     assert "count($candidates) !== 1" in ingest
     assert "count($eventCandidates) === 1" in ingest
     assert "$eventByIdStmt" in ingest
-    assert "$versionNo = max($versionNo, ((int)$previousDocument['version_no']) + 1)" in ingest
+    assert (
+        "$versionNo = max($versionNo, ((int)$previousDocument['version_no']) + 1)"
+        in ingest
+    )
     assert "$title = (string)$canonicalEvent['title']" in ingest
     assert "$occurred = (string)$canonicalEvent['occurred_at']" in ingest
     assert "ambiguous_independent" in ingest
