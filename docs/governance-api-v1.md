@@ -4,12 +4,14 @@
 
 ## 배포 순서
 
-1. 기존 DB 백업과 현재 `_private/config.php`를 외부 접근이 차단된 `_private/deployment-backups/`에 보존한다.
-2. 기본 접두사 `activist_`를 사용하면 `deploy/activist/migrations/001_governance_v1.sql`부터 `004_telegram_signal_rebuild_staging.sql`까지 번호 순서대로 적용한다. 다른 `table_prefix`를 사용하면 SQL의 접두사를 운영 값으로 치환한다. `POST api.php?action=schema`도 누락 테이블·컬럼을 보완하지만, 명시적 migration 이력을 대신하지 않는다.
-3. `api.php`, `governance_v1.php`, `openapi.yaml`을 같은 디렉터리에 배포한다.
-4. `POST api.php?action=schema`를 기존 HMAC 방식으로 호출한다. 런타임 스키마 생성은 누락된 테이블·lease 컬럼을 추가하는 안전망이다.
-5. 웹 서버가 `/api/v1/events`를 `api.php/api/v1/events`로 전달하도록 rewrite한다. rewrite가 어려우면 `api.php/api/v1/events` 또는 `api.php?_route=/api/v1/events`도 동일하게 동작한다.
-6. `/api/v1/health`, 공개 목록, 역할별 관리자 API, 실제 outbox claim/ack를 순서대로 확인한다.
+1. Telegram writer를 모두 중지하고 `ENABLE_LEGACY_PIPELINE=false`, 세 거버넌스 전환 플래그 `false`, 관련 Actions 실행 0건을 확인한다. 이 정지 구간은 marker 감사·승인이 끝날 때까지 유지한다.
+2. 기존 DB 백업과 현재 `_private/config.php`를 외부 접근이 차단된 `_private/deployment-backups/`에 보존한다.
+3. 장기 transaction·metadata lock 대기·가용 디스크를 사전 점검한 뒤, 기본 접두사 `activist_`를 사용하면 `deploy/activist/migrations/001_governance_v1.sql`부터 `005_telegram_channel_identity_index.sql`까지 번호 순서대로 적용한다. 다른 `table_prefix`를 사용하면 SQL의 접두사를 운영 값으로 치환한다. 대형 Telegram 메시지 인덱스와 identity migration marker는 API 요청 중 만들지 않으므로 005를 명시적으로 적용해야 한다. 005는 metadata lock 대기를 30초로 제한하고 MySQL의 `ALGORITHM=INPLACE, LOCK=NONE`을 요구하며, 동명 컬럼·인덱스의 정확한 형태가 다르면 성공 처리하지 않고 실패한다. 지원되지 않거나 시간 제한을 넘으면 PHP를 배포하지 않고 중단한다. `POST api.php?action=schema`도 그 밖의 누락 테이블·컬럼을 보완하지만, 명시적 migration 이력을 대신하지 않는다.
+4. marker 무효화 로직이 포함된 `api.php`와 `governance_v1.php`를 원자 배포하고 읽기·무변경 smoke를 통과시킨다. 구 PHP writer가 남아 있는 동안 marker를 1로 올리지 않는다.
+5. 기존 데이터의 marker는 0으로 생성된다. 새 PHP 배포 뒤 중복 channel ID, 비정규 message key·handle·channel ID, orphan match가 각각 0건인지 감사한다. 하나라도 0이 아니면 writer 정지를 유지하고 marker를 승인하지 않는다. 모두 0이면 동일 정지 구간에서 현재 권위 channel ID와 불일치 row가 없는 채널만 조건부 단일 SQL로 marker 1을 설정하고, 승인 수가 권위 채널 수와 일치하는지 재확인한다.
+6. `POST api.php?action=schema`를 기존 HMAC 방식으로 호출한다. 런타임 스키마 생성은 누락된 테이블·lease 컬럼을 추가하는 안전망이다.
+7. 웹 서버가 `/api/v1/events`를 `api.php/api/v1/events`로 전달하도록 rewrite한다. rewrite가 어려우면 `api.php/api/v1/events` 또는 `api.php?_route=/api/v1/events`도 동일하게 동작한다.
+8. `/api/v1/health`, 공개 목록, 역할별 관리자 API를 확인한다. outbox claim/ack는 delivery가 별도 승인된 환경에서만 검증하며 현재 Telegram outbound는 계속 비활성화한다.
 
 PHP API는 응답 한 건을 256,000바이트 미만으로 제한한다. 목록의 기본 크기는 25건, 최댓값은 100건이다. CSV와 JSON 내보내기도 같은 페이지 제한을 사용하며 다음 페이지는 `page`로 요청한다.
 

@@ -195,8 +195,10 @@ def run(base_url: str, inspection_token: str) -> None:
     require(channel_write.get("live_revision") == live_revision, repr(channel_write))
     state = client.state()
     require(
-        state["channels"]
-        == [{"handle": "ci_channel", "telegram_channel_id": str(CHANNEL_ID)}],
+        len(state["channels"]) == 1
+        and state["channels"][0]["handle"] == "ci_channel"
+        and state["channels"][0]["telegram_channel_id"] == str(CHANNEL_ID)
+        and int(state["channels"][0]["identity_migration_version"]) == 1,
         repr(state),
     )
     print("channels-only write: live_revision advanced", flush=True)
@@ -583,14 +585,193 @@ def run(base_url: str, inspection_token: str) -> None:
     require(capabilities_after_recovery.get("live_revision") == live_revision, repr(capabilities_after_recovery))
     print("expired rebuild lease: stale staging cleared and normal live write resumed", flush=True)
 
+    handle_only_key = "handle:ci_channel:46"
+    handle_only = client.post(
+        "upsert_telegram_snapshot",
+        {
+            "messages": [
+                {
+                    "handle": "ci_channel",
+                    "telegram_message_id": 46,
+                    "text": "handle-only message invalidates the stable identity marker",
+                }
+            ],
+            "article_matches": [
+                {
+                    "article_id": "ci-handle-only-article",
+                    "telegram_message_key": handle_only_key,
+                    "match_type": "exact_url",
+                    "score": 1.0,
+                    "channel_handle": "ci_channel",
+                    "telegram_message_id": 46,
+                }
+            ],
+        },
+    )
+    live_revision += 1
+    require(handle_only.get("messages") == 1, repr(handle_only))
+    require(handle_only.get("article_matches") == 1, repr(handle_only))
+    require(handle_only.get("live_revision") == live_revision, repr(handle_only))
+    state = client.state()
+    require(
+        int(state["channels"][0]["identity_migration_version"]) == 0,
+        f"handle-only write did not invalidate identity migration: {state!r}",
+    )
+    require(
+        handle_only_key in [row["message_key"] for row in state["messages"]],
+        f"handle-only message was not written for migration test: {state!r}",
+    )
+
+    remigrated = client.post(
+        "upsert_telegram_snapshot",
+        {
+            "channels": [
+                {
+                    "handle": "ci_channel",
+                    "telegram_channel_id": CHANNEL_ID,
+                    "title": "CI channel",
+                    "last_message_id": 46,
+                }
+            ]
+        },
+    )
+    live_revision += 1
+    require(remigrated.get("channels") == 1, repr(remigrated))
+    require(remigrated.get("live_revision") == live_revision, repr(remigrated))
+    state = client.state()
+    canonical_46 = f"id:{CHANNEL_ID}:46"
+    require(
+        int(state["channels"][0]["identity_migration_version"]) == 1,
+        f"authoritative metadata did not restore migration marker: {state!r}",
+    )
+    require(
+        canonical_46 in [row["message_key"] for row in state["messages"]]
+        and handle_only_key not in [row["message_key"] for row in state["messages"]],
+        f"handle-only message was not canonicalized: {state!r}",
+    )
+    require(
+        [
+            row["message_key"]
+            for row in state["matches"]
+            if row["article_id"] == "ci-handle-only-article"
+        ]
+        == [canonical_46],
+        f"handle-only match was not canonicalized: {state!r}",
+    )
+    print(
+        "identity marker: handle-only write invalidated and metadata remigrated it",
+        flush=True,
+    )
+
+    renamed_key = f"id:{CHANNEL_ID}:47"
+    renamed = client.post(
+        "upsert_telegram_snapshot",
+        {
+            "messages": [
+                {
+                    "handle": "ci_old_channel_handle",
+                    "telegram_channel_id": CHANNEL_ID,
+                    "telegram_message_id": 47,
+                    "text": "same channel ID observed under an old handle",
+                }
+            ]
+        },
+    )
+    live_revision += 1
+    require(renamed.get("messages") == 1, repr(renamed))
+    require(renamed.get("live_revision") == live_revision, repr(renamed))
+    state = client.state()
+    require(
+        int(state["channels"][0]["identity_migration_version"]) == 0,
+        f"renamed handle did not invalidate authoritative mapping: {state!r}",
+    )
+
+    renamed_remigrated = client.post(
+        "upsert_telegram_snapshot",
+        {
+            "channels": [
+                {
+                    "handle": "ci_channel",
+                    "telegram_channel_id": CHANNEL_ID,
+                    "title": "CI channel",
+                    "last_message_id": 47,
+                }
+            ]
+        },
+    )
+    live_revision += 1
+    require(renamed_remigrated.get("channels") == 1, repr(renamed_remigrated))
+    require(renamed_remigrated.get("live_revision") == live_revision, repr(renamed_remigrated))
+    state = client.state()
+    renamed_rows = [
+        row for row in state["messages"] if row["message_key"] == renamed_key
+    ]
+    require(
+        len(renamed_rows) == 1
+        and renamed_rows[0]["channel_handle"] == "ci_channel"
+        and int(state["channels"][0]["identity_migration_version"]) == 1,
+        f"renamed handle was not restored to the authoritative mapping: {state!r}",
+    )
+    print(
+        "identity marker: renamed handle invalidated and metadata remigrated it",
+        flush=True,
+    )
+
+
+def verify_post_migration(base_url: str, inspection_token: str) -> None:
+    """Exercise an existing channel row after migration 005 adds marker=0."""
+
+    client = Client(base_url, inspection_token)
+    client.wait_until_ready()
+    before = client.state()
+    require(len(before["channels"]) == 1, repr(before))
+    require(
+        int(before["channels"][0]["identity_migration_version"]) == 0,
+        f"migration 005 did not initialize the existing row to zero: {before!r}",
+    )
+    before_messages = before["messages"]
+    before_matches = before["matches"]
+    before_revision = int(before["state"]["live_revision"])
+
+    migrated = client.post(
+        "upsert_telegram_snapshot",
+        {
+            "channels": [
+                {
+                    "handle": "ci_channel",
+                    "telegram_channel_id": CHANNEL_ID,
+                    "title": "CI channel after migration 005",
+                    "last_message_id": 47,
+                }
+            ]
+        },
+    )
+    require(migrated.get("channels") == 1, repr(migrated))
+    require(migrated.get("live_revision") == before_revision + 1, repr(migrated))
+    after = client.state()
+    require(
+        int(after["channels"][0]["identity_migration_version"]) == 1,
+        f"first authoritative metadata did not promote marker to one: {after!r}",
+    )
+    require(after["messages"] == before_messages, f"migration changed messages: {after!r}")
+    require(after["matches"] == before_matches, f"migration changed matches: {after!r}")
+    print(
+        "post-migration existing row: marker 0 -> metadata audit -> marker 1",
+        flush=True,
+    )
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:8787")
+    parser.add_argument("--verify-post-migration", action="store_true")
     args = parser.parse_args()
     inspection_token = os.environ.get("PHP73_CI_INSPECTION_TOKEN", "")
     require(bool(inspection_token), "PHP73_CI_INSPECTION_TOKEN is required")
-    run(args.base_url, inspection_token)
+    if args.verify_post_migration:
+        verify_post_migration(args.base_url, inspection_token)
+    else:
+        run(args.base_url, inspection_token)
     print("PHP 7.3/MySQL Telegram staging smoke passed.", flush=True)
     return 0
 

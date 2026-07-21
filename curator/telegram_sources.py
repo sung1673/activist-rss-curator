@@ -35,7 +35,8 @@ from .state import load_state, save_state
 URL_PATTERN = re.compile(r"https?://[^\s<>()\"']+", re.IGNORECASE)
 TRAILING_URL_CHARS = ".,;:!?)]}>\u3002"
 REMOTE_TELEGRAM_SIGNAL_BATCH_SIZE = 500
-REMOTE_TELEGRAM_CHANNEL_BATCH_SIZE = 20
+REMOTE_TELEGRAM_MAX_CHANNEL_BATCH_SIZE = 20
+REMOTE_TELEGRAM_DEFAULT_CHANNEL_BATCH_SIZE = 5
 REMOTE_TELEGRAM_SAFE_PAYLOAD_BYTES = 1_750_000
 POSITIVE_CHANNEL_KEYWORDS = {
     "경제",
@@ -3538,6 +3539,24 @@ def telegram_remote_payload_budget(
     return max(65_536, min(REMOTE_TELEGRAM_SAFE_PAYLOAD_BYTES, configured))
 
 
+def telegram_remote_channel_batch_size(
+    config: dict[str, object] | None = None,
+) -> int:
+    """Bound identities per DB transaction independently of payload bytes."""
+
+    settings = telegram_sources_config(config or {})
+    try:
+        configured = int(
+            settings.get(
+                "remote_channel_batch_size",
+                REMOTE_TELEGRAM_DEFAULT_CHANNEL_BATCH_SIZE,
+            )
+        )
+    except (TypeError, ValueError):
+        configured = REMOTE_TELEGRAM_DEFAULT_CHANNEL_BATCH_SIZE
+    return max(1, min(REMOTE_TELEGRAM_MAX_CHANNEL_BATCH_SIZE, configured))
+
+
 def sync_telegram_metadata_to_remote_api(
     state: dict[str, object],
     config: dict[str, object] | None = None,
@@ -3622,10 +3641,8 @@ def sync_telegram_metadata_to_remote_api(
         ).encode("utf-8")
         signal_rebuild_token = hashlib.sha256(rebuild_body).hexdigest()
     payload_budget = telegram_remote_payload_budget(config)
-    if (
-        not replace_issue_signals
-        and len(channels) > REMOTE_TELEGRAM_CHANNEL_BATCH_SIZE
-    ):
+    channel_batch_size = telegram_remote_channel_batch_size(config)
+    if not replace_issue_signals and len(channels) > channel_batch_size:
         # Channel rows contain runtime diagnostics and can be substantially
         # larger than their count suggests. Persist them in bounded transactions
         # before the independent signal payload so PHP/MySQL processing time,
@@ -3635,10 +3652,8 @@ def sync_telegram_metadata_to_remote_api(
         batched_signals = 0
         batched_deleted = 0
         batched_max_request_bytes = 0
-        for offset in range(0, len(channels), REMOTE_TELEGRAM_CHANNEL_BATCH_SIZE):
-            channel_batch = channels[
-                offset : offset + REMOTE_TELEGRAM_CHANNEL_BATCH_SIZE
-            ]
+        for offset in range(0, len(channels), channel_batch_size):
+            channel_batch = channels[offset : offset + channel_batch_size]
             batch_cursors = {
                 channel_key(channel): int(
                     cursors.get(channel_key(channel), 0) or 0
@@ -4049,6 +4064,7 @@ def sync_telegram_batch_to_remote_api(
         }
     settings = telegram_sources_config(config)
     batch_size = max(1, min(2500, int(settings.get("remote_batch_size", 300))))
+    channel_batch_size = telegram_remote_channel_batch_size(config)
     payload_budget = telegram_remote_payload_budget(config)
     synced = failed = remote_channels = remote_messages = remote_matches = 0
     last_error = ""
@@ -4129,6 +4145,7 @@ def sync_telegram_batch_to_remote_api(
                 and len(candidate_matches) <= 10_000
                 and isinstance(candidate_channels, list)
                 and len(candidate_channels) <= 1000
+                and len(candidate_channels) <= channel_batch_size
             )
             if within_record_caps and candidate_size <= payload_budget:
                 best_end = middle
@@ -4284,12 +4301,40 @@ def collect_telegram_sources(
     summary["telegram_source_rights_blocked"] = rights_blocked
     if pending_remote_messages(state):
         summary.update(sync_telegram_to_remote_api(state, config))
-    metadata_summary = sync_telegram_metadata_to_remote_api(state, config)
+    message_remote_failed = int(summary.get("telegram_remote_failed") or 0)
+    message_remote_pending = int(summary.get("telegram_remote_pending") or 0)
+    summary["telegram_remote_message_failed"] = message_remote_failed
+    summary["telegram_remote_message_max_request_bytes"] = int(
+        summary.get("telegram_remote_max_request_bytes") or 0
+    )
+    if summary.get("telegram_remote_last_error"):
+        summary["telegram_remote_message_last_error"] = summary[
+            "telegram_remote_last_error"
+        ]
+    if remote_api_configured() and (
+        message_remote_failed or message_remote_pending
+    ):
+        # A timed-out request may still be finishing server-side. Do not pile a
+        # metadata transaction onto the same DB lock or overwrite the evidence
+        # from the first unacknowledged message chunk.
+        metadata_summary: dict[str, object] = {
+            "telegram_remote_metadata_synced": 0,
+            "telegram_remote_metadata_failed": 0,
+            "telegram_remote_metadata_skipped_due_pending": 1,
+            "telegram_remote_failed": 0,
+        }
+    else:
+        metadata_summary = sync_telegram_metadata_to_remote_api(state, config)
     summary["telegram_remote_failed"] = int(
         summary.get("telegram_remote_failed") or 0
     ) + int(metadata_summary.get("telegram_remote_failed") or 0)
     for key, value in metadata_summary.items():
-        if key != "telegram_remote_failed":
+        if key == "telegram_remote_max_request_bytes":
+            summary[key] = max(
+                int(summary.get(key) or 0),
+                int(value or 0),
+            )
+        elif key != "telegram_remote_failed":
             summary[key] = value  # type: ignore[assignment]
     remote_pending = int(summary.get("telegram_remote_pending") or 0)
     remote_failed = int(summary.get("telegram_remote_failed") or 0)

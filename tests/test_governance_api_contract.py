@@ -22,6 +22,13 @@ SIGNAL_REBUILD_MIGRATION = (
     / "migrations"
     / "004_telegram_signal_rebuild_staging.sql"
 ).read_text(encoding="utf-8")
+TELEGRAM_IDENTITY_INDEX_MIGRATION = (
+    ROOT
+    / "deploy"
+    / "activist"
+    / "migrations"
+    / "005_telegram_channel_identity_index.sql"
+).read_text(encoding="utf-8")
 OPENAPI_PATH = ROOT / "deploy" / "activist" / "openapi.yaml"
 HTACCESS = (ROOT / "deploy" / "activist" / ".htaccess").read_text(encoding="utf-8")
 
@@ -473,6 +480,35 @@ def test_telegram_identity_migration_uses_channel_id_message_keys():
     )
     assert "telegram_channel_id <> ?" in V1
     assert "channel_' . substr(hash('sha256', $previousId)" in V1
+    assert "idx_telegram_channel_message_id (telegram_channel_id, telegram_message_id)" in API
+    assert (
+        "idx_telegram_channel_message_id (telegram_channel_id, telegram_message_id)"
+        in TELEGRAM_IDENTITY_INDEX_MIGRATION
+    )
+    assert "identity_migration_version TINYINT UNSIGNED NOT NULL DEFAULT 0" in API
+    assert "identity_migration_version TINYINT UNSIGNED NOT NULL DEFAULT 0" in (
+        TELEGRAM_IDENTITY_INDEX_MIGRATION
+    )
+    assert "MAX(COLUMN_TYPE) = 'tinyint unsigned'" in (
+        TELEGRAM_IDENTITY_INDEX_MIGRATION
+    )
+    assert (
+        "GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) = "
+        "'telegram_channel_id,telegram_message_id'"
+        in TELEGRAM_IDENTITY_INDEX_MIGRATION
+    )
+    assert "MIN(NON_UNIQUE) = 1" in TELEGRAM_IDENTITY_INDEX_MIGRATION
+    assert "SET SESSION lock_wait_timeout = 30" in TELEGRAM_IDENTITY_INDEX_MIGRATION
+    assert "ALGORITHM=INPLACE, LOCK=NONE" in TELEGRAM_IDENTITY_INDEX_MIGRATION
+    assert (
+        "if ($hasStableMapping && (int)$identityMigrationVersion >= 1 "
+        "&& count($aliases) === 1) { return; }"
+        in V1
+    )
+    assert "SET identity_migration_version=0 WHERE handle=?" in API
+    assert "OR (telegram_channel_id=? AND handle<>?)" in API
+    assert "$identityInvalidations" in API
+    assert "identity_migration_version=1" in API
 
 
 def test_cancelled_disclosure_requires_human_review_with_lifecycle_history():

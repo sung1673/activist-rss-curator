@@ -127,6 +127,45 @@ jobs:
           echo "$!" >"$RUNNER_TEMP/php73-server.pid"
           python3 tests/php73_staging_smoke.py --base-url http://127.0.0.1:8787
 
+      - name: Validate Telegram channel identity index migration
+        shell: bash
+        env:
+          MYSQL_CONTAINER_ID: ${{ job.services.mysql.id }}
+        run: |
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="ALTER TABLE ci_telegram_messages DROP INDEX idx_telegram_channel_message_id;"
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="ALTER TABLE ci_telegram_channels DROP COLUMN identity_migration_version;"
+          sed 's/activist_/ci_/g' deploy/activist/migrations/005_telegram_channel_identity_index.sql \
+            > "$RUNNER_TEMP/005_telegram_channel_identity_index_ci.sql"
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="ALTER TABLE ci_telegram_channels ADD COLUMN identity_migration_version VARCHAR(8) NULL;"
+          if docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/005_telegram_channel_identity_index_ci.sql"; then
+            echo "migration 005 accepted an incompatible marker column" >&2
+            exit 1
+          fi
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="ALTER TABLE ci_telegram_channels DROP COLUMN identity_migration_version; ALTER TABLE ci_telegram_messages ADD INDEX idx_telegram_channel_message_id (telegram_message_id);"
+          if docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/005_telegram_channel_identity_index_ci.sql"; then
+            echo "migration 005 accepted an incompatible same-name index" >&2
+            exit 1
+          fi
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="ALTER TABLE ci_telegram_messages DROP INDEX idx_telegram_channel_message_id;"
+          docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/005_telegram_channel_identity_index_ci.sql"
+          docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/005_telegram_channel_identity_index_ci.sql"
+          columns="$(docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password \
+            --batch --skip-column-names activist_ci --execute="SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ci_telegram_messages' AND INDEX_NAME='idx_telegram_channel_message_id';")"
+          test "$columns" = "telegram_channel_id,telegram_message_id"
+          version_columns="$(docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password \
+            --batch --skip-column-names activist_ci --execute="SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ci_telegram_channels' AND COLUMN_NAME='identity_migration_version' AND DATA_TYPE='tinyint' AND IS_NULLABLE='NO' AND COLUMN_DEFAULT='0';")"
+          test "$version_columns" = "1"
+          python3 tests/php73_staging_smoke.py --base-url http://127.0.0.1:8787 --verify-post-migration
+
       - name: Collect PHP and MySQL diagnostics
         if: failure()
         shell: bash

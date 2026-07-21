@@ -236,6 +236,7 @@ function ensure_schema(PDO $pdo, array $config): void {
     $pdo->exec('CREATE TABLE IF NOT EXISTS ' . table_name($config, 'telegram_channels') . ' (
         handle VARCHAR(191) NOT NULL PRIMARY KEY,
         telegram_channel_id VARCHAR(64) NULL,
+        identity_migration_version TINYINT UNSIGNED NOT NULL DEFAULT 0,
         title VARCHAR(255) NULL,
         description TEXT NULL,
         joined TINYINT(1) NOT NULL DEFAULT 0,
@@ -273,6 +274,7 @@ function ensure_schema(PDO $pdo, array $config): void {
         raw_json MEDIUMTEXT NULL,
         updated_at DATETIME NOT NULL,
         UNIQUE KEY uq_channel_message (channel_handle, telegram_message_id),
+        INDEX idx_telegram_channel_message_id (telegram_channel_id, telegram_message_id),
         INDEX idx_posted_at (posted_at),
         INDEX idx_channel_posted (channel_handle, posted_at),
         INDEX idx_deleted_at (deleted_at)
@@ -2310,13 +2312,14 @@ function upsert_telegram_snapshot(PDO $pdo, array $config, array $payload): void
 
         $channelStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'telegram_channels') . ' (
             handle, telegram_channel_id, title, description, joined, enabled, source, source_type, is_public_channel,
-            quality_score, last_message_id, last_collected_at, last_recommendation_checked_at, last_error, payload_json, updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            quality_score, last_message_id, last_collected_at, last_recommendation_checked_at, last_error, payload_json,
+            identity_migration_version, updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)
         ON DUPLICATE KEY UPDATE telegram_channel_id=VALUES(telegram_channel_id), title=VALUES(title), description=VALUES(description),
             joined=VALUES(joined), enabled=VALUES(enabled), source=VALUES(source), source_type=VALUES(source_type),
             is_public_channel=VALUES(is_public_channel), quality_score=VALUES(quality_score), last_message_id=GREATEST(last_message_id,VALUES(last_message_id)),
             last_collected_at=VALUES(last_collected_at), last_recommendation_checked_at=VALUES(last_recommendation_checked_at),
-            last_error=VALUES(last_error), payload_json=VALUES(payload_json), updated_at=VALUES(updated_at)');
+            last_error=VALUES(last_error), payload_json=VALUES(payload_json), identity_migration_version=1, updated_at=VALUES(updated_at)');
         foreach ($channels as $channel) {
             $handle = normalize_handle_value(isset($channel['handle']) ? $channel['handle'] : (isset($channel['username']) ? $channel['username'] : ''));
             $telegramChannelId = str_value($channel, 'telegram_channel_id', 64);
@@ -2353,17 +2356,26 @@ function upsert_telegram_snapshot(PDO $pdo, array $config, array $payload): void
             collected_at=VALUES(collected_at), text=VALUES(text), normalized_text=VALUES(normalized_text), views=VALUES(views),
             forwards=VALUES(forwards), replies_count=VALUES(replies_count), message_url=VALUES(message_url), urls_json=VALUES(urls_json),
             risk_flags_json=VALUES(risk_flags_json), raw_json=VALUES(raw_json), updated_at=VALUES(updated_at)');
+        $invalidateHandleOnlyIdentity = $pdo->prepare('UPDATE ' . table_name($config, 'telegram_channels') . '
+            SET identity_migration_version=0 WHERE handle=? AND identity_migration_version<>0');
+        $invalidateMismatchedIdentity = $pdo->prepare('UPDATE ' . table_name($config, 'telegram_channels') . '
+            SET identity_migration_version=0 WHERE identity_migration_version<>0 AND (
+                (handle=? AND (telegram_channel_id IS NULL OR telegram_channel_id = \'\' OR telegram_channel_id <> ?))
+                OR (telegram_channel_id=? AND handle<>?)
+            )');
+        $identityInvalidations = array();
         foreach ($messages as $message) {
             $handle = normalize_handle_value(isset($message['handle']) ? $message['handle'] : '');
             $messageId = int_value($message, 'telegram_message_id');
             if ($messageId <= 0) { $messageId = int_value($message, 'id'); }
+            $messageChannelId = str_value($message, 'telegram_channel_id', 64);
             $text = str_value($message, 'text', 1048576) ?: '';
             $riskFlags = telegram_risk_flags($text);
             $rawJson = isset($message['raw_json']) && is_array($message['raw_json']) ? json_value($message['raw_json']) : null;
             $messageStmt->execute(array(
                 telegram_message_key_from_row($message),
                 $handle,
-                str_value($message, 'telegram_channel_id', 64),
+                $messageChannelId,
                 $messageId,
                 mysql_dt(isset($message['posted_at']) ? $message['posted_at'] : null),
                 mysql_dt(isset($message['edited_at']) ? $message['edited_at'] : null),
@@ -2380,7 +2392,22 @@ function upsert_telegram_snapshot(PDO $pdo, array $config, array $payload): void
                 $rawJson,
                 $now,
             ));
+            $identityInvalidations[$handle . "\n" . ($messageChannelId ?: '')] = array($handle, $messageChannelId);
             $messagesProcessed += 1;
+        }
+        // A later handle-only, conflicting, or renamed message invalidates the
+        // bounded fast path. Dedupe by channel identity so a large message
+        // payload adds at most one marker update per represented channel.
+        foreach ($identityInvalidations as $identityInvalidation) {
+            $handle = (string)$identityInvalidation[0];
+            $messageChannelId = $identityInvalidation[1];
+            if ($messageChannelId === null || $messageChannelId === '') {
+                $invalidateHandleOnlyIdentity->execute(array($handle));
+            } else {
+                $invalidateMismatchedIdentity->execute(array(
+                    $handle, $messageChannelId, $messageChannelId, $handle,
+                ));
+            }
         }
 
         $matchStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'telegram_article_matches') . ' (
