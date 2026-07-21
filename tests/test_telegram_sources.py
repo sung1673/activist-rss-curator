@@ -1010,6 +1010,93 @@ def test_metadata_channel_ack_must_be_present_exact_and_integer(
     assert summary["telegram_remote_last_error"] == "remote_channel_ack_mismatch"
 
 
+def test_metadata_sync_batches_large_channel_sets_before_signals(
+    config, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    from curator import telegram_sources
+
+    channels = [
+        {
+            "handle": f"channel{index:03d}",
+            "telegram_channel_id": f"id-{index}",
+            "last_message_id": index + 100,
+        }
+        for index in range(45)
+    ]
+    cursors = {
+        f"id:id-{index}": index + 10 for index in range(len(channels))
+    }
+    signals = [{"article_id": "signal:1"}, {"article_id": "signal:2"}]
+    payloads: list[dict[str, object]] = []
+    monkeypatch.setattr(telegram_sources, "remote_api_configured", lambda: True)
+
+    def fake_post(_action, payload):  # type: ignore[no-untyped-def]
+        payloads.append(payload)
+        return remote_snapshot_ack(payload)
+
+    monkeypatch.setattr(telegram_sources, "post_remote_action", fake_post)
+
+    summary = sync_telegram_metadata_to_remote_api(
+        {
+            "telegram_source_channels": channels,
+            "telegram_remote_sync_cursors": cursors,
+            "telegram_issue_signals": signals,
+        },
+        config,
+    )
+
+    assert [len(payload["channels"]) for payload in payloads] == [20, 20, 5, 0]
+    assert [len(payload["issue_signals"]) for payload in payloads] == [0, 0, 0, 2]
+    assert all(payload["messages"] == [] for payload in payloads)
+    assert all(payload["article_matches"] == [] for payload in payloads)
+    assert [
+        channel["last_message_id"]
+        for payload in payloads[:3]
+        for channel in payload["channels"]
+    ] == [index + 10 for index in range(45)]
+    assert summary["telegram_remote_failed"] == 0
+    assert summary["telegram_remote_channels"] == 45
+    assert summary["telegram_remote_signals"] == 2
+
+
+def test_metadata_channel_batch_failure_stops_before_later_batches(
+    config, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    from curator import telegram_sources
+
+    channels = [
+        {"handle": f"channel{index:03d}", "telegram_channel_id": f"id-{index}"}
+        for index in range(45)
+    ]
+    payloads: list[dict[str, object]] = []
+    monkeypatch.setattr(telegram_sources, "remote_api_configured", lambda: True)
+
+    def fake_post(_action, payload):  # type: ignore[no-untyped-def]
+        payloads.append(payload)
+        if len(payloads) == 2:
+            return {
+                "ok": True,
+                "channels": 0,
+                "issue_signals": 0,
+            }
+        return remote_snapshot_ack(payload)
+
+    monkeypatch.setattr(telegram_sources, "post_remote_action", fake_post)
+
+    summary = sync_telegram_metadata_to_remote_api(
+        {
+            "telegram_source_channels": channels,
+            "telegram_issue_signals": [{"article_id": "signal:1"}],
+        },
+        config,
+    )
+
+    assert len(payloads) == 2
+    assert summary["telegram_remote_failed"] == 1
+    assert summary["telegram_remote_last_error"] == "remote_channel_ack_mismatch"
+    assert summary["telegram_remote_channels"] == 20
+
+
 def test_metadata_sync_marks_signal_rebuild_as_authoritative(
     config, now, monkeypatch
 ) -> None:  # type: ignore[no-untyped-def]
@@ -3158,9 +3245,255 @@ def test_backfill_persists_freshly_recomputed_signals_without_pending_messages(
     assert intermediate["issue_signals"] == []
     assert stale_signal not in intermediate["issue_signals"]
     assert final["issue_signals"] == [expected_signal]
-    assert summary["telegram_remote_metadata_synced"] == 1
+    assert summary["telegram_remote_metadata_synced"] == 2
     assert summary["telegram_remote_channels"] >= 1
     assert summary["telegram_remote_signals"] == 1
+
+
+def test_repair_empty_checkpoint_syncs_only_current_channel_and_skips_final_metadata(
+    config, now, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    from curator import telegram_sources
+
+    handles = ["alpha", *(f"channel{index:03d}" for index in range(96))]
+    channel_rows = [
+        {
+            "handle": handle,
+            "telegram_channel_id": f"id-{handle}",
+            "enabled": True,
+            "description": "x" * 4000,
+        }
+        for handle in handles
+    ]
+    config["telegram_sources"] = {"enabled": True, "channels": []}  # type: ignore[index]
+    authorize_telegram_handles(config, *handles)
+    state: dict[str, object] = {
+        "articles": [],
+        "telegram_source_channels": channel_rows,
+        "telegram_issue_signals": [{"article_id": "telegram-topic:stale"}],
+    }
+    payloads: list[dict[str, object]] = []
+
+    class RenameClient(FakeTelegramClient):
+        async def get_channel_info(
+            self, channel: dict[str, object]
+        ) -> dict[str, object]:
+            self.info_calls.append(str(channel.get("handle") or ""))
+            return {
+                "handle": "zulu-renamed",
+                "telegram_channel_id": "id-alpha",
+                "title": "renamed",
+                "joined": True,
+            }
+
+    monkeypatch.setattr(telegram_sources, "remote_api_configured", lambda: True)
+    monkeypatch.setattr(
+        telegram_sources,
+        "telegram_issue_signals",
+        lambda *_args, **_kwargs: pytest.fail(
+            "a partial repair must not derive signals"
+        ),
+    )
+
+    def fake_post(_action, payload):  # type: ignore[no-untyped-def]
+        payloads.append(payload)
+        return remote_snapshot_ack(payload)
+
+    monkeypatch.setattr(telegram_sources, "post_remote_action", fake_post)
+
+    summary = backfill_telegram_messages(
+        state,
+        config,
+        now,
+        client=RenameClient(),
+        sync_remote=True,
+        only_handles={"alpha"},
+        require_unique_universe_handles=True,
+    )
+
+    assert summary["telegram_remote_failed"] == 0
+    assert summary["telegram_remote_metadata_skipped"] == 1
+    assert summary["telegram_remote_metadata_synced"] == 1
+    assert summary["telegram_remote_channels"] == 1
+    assert summary["telegram_signal_rebuild_authorized"] == 0
+    assert len(payloads) == 1
+    assert len(payloads[0]["channels"]) == 1
+    assert payloads[0]["channels"][0]["telegram_channel_id"] == "id-alpha"
+    assert payloads[0]["channels"][0]["handle"] == "zulu-renamed"
+    assert payloads[0]["issue_signals"] == []
+    assert remote_payload_bytes(payloads[0]) < 20_000
+
+
+def test_repair_last_nonempty_page_persists_completed_channel_metadata(
+    config, now, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    from curator import telegram_sources
+
+    config["telegram_sources"] = {"enabled": True, "channels": []}  # type: ignore[index]
+    authorize_telegram_handles(config, "alpha")
+    state: dict[str, object] = {
+        "articles": [],
+        "telegram_source_channels": [
+            {
+                "handle": "alpha",
+                "telegram_channel_id": "id-alpha",
+                "enabled": True,
+                "last_backfill_before_message_id": 99,
+                "last_error": "old-error",
+            }
+        ],
+    }
+    client = FakeTelegramClient(
+        {"alpha": [{"id": 1, "text": "one", "date": now}]}
+    )
+    payloads: list[dict[str, object]] = []
+    monkeypatch.setattr(telegram_sources, "remote_api_configured", lambda: True)
+
+    def fake_post(_action, payload):  # type: ignore[no-untyped-def]
+        payloads.append(payload)
+        return remote_snapshot_ack(payload)
+
+    monkeypatch.setattr(telegram_sources, "post_remote_action", fake_post)
+
+    summary = backfill_telegram_messages(
+        state,
+        config,
+        now,
+        limit_per_channel=100,
+        client=client,
+        sync_remote=True,
+        only_handles={"alpha"},
+        require_unique_universe_handles=True,
+    )
+
+    assert len(payloads) == 1
+    assert len(payloads[0]["messages"]) == 1
+    assert len(payloads[0]["channels"]) == 1
+    channel_payload = payloads[0]["channels"][0]
+    assert channel_payload["last_collected_at"]
+    assert channel_payload["last_backfill_before_message_id"] is None
+    assert channel_payload["last_error"] is None
+    assert summary["telegram_remote_channels"] == 1
+    assert summary["telegram_remote_metadata_skipped"] == 1
+
+
+@pytest.mark.parametrize("duplicate_identity", [False, True])
+def test_repair_empty_checkpoint_fails_closed_on_missing_or_ambiguous_identity(
+    config, now, monkeypatch, duplicate_identity: bool
+) -> None:  # type: ignore[no-untyped-def]
+    from curator import telegram_sources
+
+    config["telegram_sources"] = {"enabled": True, "channels": []}  # type: ignore[index]
+    authorize_telegram_handles(config, "alpha")
+    state: dict[str, object] = {
+        "articles": [],
+        "telegram_source_channels": [
+            {
+                "handle": "alpha",
+                "telegram_channel_id": "id-alpha",
+                "enabled": True,
+            }
+        ],
+    }
+    monkeypatch.setattr(telegram_sources, "remote_api_configured", lambda: True)
+    monkeypatch.setattr(
+        telegram_sources,
+        "post_remote_action",
+        lambda *_args, **_kwargs: pytest.fail(
+            "an invalid checkpoint identity must fail before a remote write"
+        ),
+    )
+
+    async def fake_backfill(*_args, **kwargs):  # type: ignore[no-untyped-def]
+        identity = "id:missing"
+        if duplicate_identity:
+            state["telegram_source_channels"].append(  # type: ignore[union-attr]
+                {
+                    "handle": "beta",
+                    "telegram_channel_id": "id-alpha",
+                    "enabled": True,
+                }
+            )
+            identity = "id:id-alpha"
+        kwargs["checkpoint_callback"](
+            {
+                "handle": "alpha",
+                "status": "ok",
+                "_checkpoint_messages": [],
+                "_checkpoint_matches": [],
+                "_checkpoint_channel_key": identity,
+            }
+        )
+        return {}
+
+    monkeypatch.setattr(
+        telegram_sources, "_backfill_messages_with_client", fake_backfill
+    )
+
+    with pytest.raises(RuntimeError, match="telegram_remote_checkpoint_failed"):
+        backfill_telegram_messages(
+            state,
+            config,
+            now,
+            client=object(),
+            sync_remote=True,
+            force_remote_resync=True,
+            rebuild_remote_signals=True,
+        )
+
+
+def test_repair_zero_channel_tail_never_resends_global_metadata(
+    config, now, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    from curator import telegram_sources
+
+    config["telegram_sources"] = {"enabled": True, "channels": []}  # type: ignore[index]
+    authorize_telegram_handles(config, "alpha")
+    state: dict[str, object] = {
+        "articles": [],
+        "telegram_source_channels": [
+            {
+                "handle": "alpha",
+                "telegram_channel_id": "id-alpha",
+                "enabled": True,
+            }
+        ],
+    }
+    fingerprint = _select_backfill_channels(
+        state,
+        only_handles=None,
+        skip_handles=None,
+        start_after_handle="",
+        channel_limit=0,
+    ).fingerprint
+    monkeypatch.setattr(telegram_sources, "remote_api_configured", lambda: True)
+    monkeypatch.setattr(
+        telegram_sources,
+        "post_remote_action",
+        lambda *_args, **_kwargs: pytest.fail(
+            "a zero-channel repair tail must not resend global metadata"
+        ),
+    )
+    client = FakeTelegramClient()
+
+    summary = backfill_telegram_messages(
+        state,
+        config,
+        now,
+        client=client,
+        sync_remote=True,
+        start_after_handle="alpha",
+        expected_selection_fingerprint=fingerprint,
+        force_remote_resync=True,
+        rebuild_remote_signals=True,
+        require_unique_universe_handles=True,
+    )
+
+    assert client.info_calls == []
+    assert client.iter_calls == []
+    assert summary["telegram_backfill_selected_count"] == 0
+    assert summary["telegram_remote_failed"] == 0
+    assert summary["telegram_remote_metadata_skipped"] == 1
 
 
 @pytest.mark.parametrize(
