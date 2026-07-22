@@ -49,7 +49,7 @@ Repository variable:
 
 수동 `ingest-official`은 `include_kind=false`로 DART-only smoke/shadow를 실행할 수 있다. 예약 실행은 항상 KIND를 필수로 요구하므로 검증된 어댑터가 없는 상태에서 `ENABLE_GOVERNANCE_SHADOW=true`로 바꾸면 성공한 것처럼 건너뛰지 않고 실패한다.
 
-2026-07-21 현재 첫 safe-full 실패 뒤의 fail-closed 값은 `ENABLE_LEGACY_PIPELINE=false`, `ENABLE_PAGES=false`, `ENABLE_TELEGRAM_DELIVERY=false`, 세 거버넌스 전환 플래그 `false`다. 수정본을 운영 배포한 뒤 무배포·무발송 safe-full이 성공할 때만 legacy pipeline과 기존 Pages를 순서대로 다시 켠다. Telegram 발송은 현재 제품 범위에서 승인하지 않는다.
+2026-07-22 timeout 보강본의 무배포·무발송 safe-full과 후속 Pages 전용 배포가 모두 성공했다. 현재 값은 `ENABLE_LEGACY_PIPELINE=true`, `ENABLE_PAGES=true`, `ENABLE_TELEGRAM_DELIVERY=false`, 세 거버넌스 전환 플래그 `false`다. 기존 읽기 수집과 Pages만 재개했으며 Telegram 발송은 현재 제품 범위에서 승인하지 않는다.
 
 `ENABLE_PAGES`와 `ENABLE_GOVERNANCE_PAGES`는 동시에 `true`일 수 없다. 신규 Pages를 켜기 전에 기존 `ENABLE_PAGES=false`를 먼저 적용하며, 두 값이 모두 `true`이면 legacy와 신규 workflow가 모두 fail-closed한다. 코드/API만 바뀐 push에서 생성 단계가 하나도 선택되지 않으면 legacy workflow도 Pages artifact를 배포하지 않는다. 두 Pages 경로 모두 artifact 업로드 전에 `telegram-admin.html` 셸을 생성하고 `TELEGRAM_ADMIN_ACCESS_TOKEN`과 `ACTIVIST_PUBLIC_API_URL`을 검증한다.
 
@@ -75,9 +75,21 @@ Telegram 증분 수집은 채널별 한 페이지에서 durable checkpoint를 �
 
 후속 signal-only run 29872608749는 zero-channel tail과 동일 fingerprint를 확인한 뒤 최근 72시간 메시지 21,317건·매치 693건에서 signal 40건을 원자 재구축하고 누락 17건을 삭제했다. 최종 metrics는 authorized·finalize·window rebuilt·durable complete가 모두 1이고 원격 실패·대기가 0이다. 전체 실행 ID와 구간별 ACK는 [운영 기반 반영 기록](production-foundation-deployment-2026-07-16.md)에 보존한다.
 
-첫 safe-full run 29873829199는 14분 04초 뒤 증분 메시지 530건의 원격 ACK 전 `ReadTimeout`으로 실패했고, 당시 구현은 실패 뒤 metadata도 호출해 두 번째 timeout을 만들었다. 실패 artifact는 pending 530, remote failed 2, metadata failed 1, sent 0, cursor·prune 전진 0을 기록했다. 이에 legacy pipeline과 Pages를 다시 `false`로 차단했다. 재시도 전에는 migration 005로 `(telegram_channel_id, telegram_message_id)` 인덱스와 채널별 identity migration marker를 명시 적용한다. 전체 복구 결과의 canonical mismatch가 0인지 한 번 감사한 뒤 현재 권위 채널만 marker 1로 승인하고, 메시지·metadata transaction을 최대 5채널로 제한하며, 메시지 pending 시 metadata를 생략하는 코드가 운영 배포돼야 한다. 이후 handle-only·충돌·handle 변경 메시지가 들어오면 해당 marker를 0으로 내려 다음 권위 metadata에서 다시 정규화한다.
+첫 safe-full run 29873829199는 14분 04초 뒤 증분 메시지 530건의 원격 ACK 전 `ReadTimeout`으로 실패했고, 당시 구현은 실패 뒤 metadata도 호출해 두 번째 timeout을 만들었다. 실패 artifact는 pending 530, remote failed 2, metadata failed 1, sent 0, cursor·prune 전진 0을 기록했다. 이에 legacy pipeline과 Pages를 다시 `false`로 차단했다. 이후 migration 005로 `(telegram_channel_id, telegram_message_id)` 인덱스와 채널별 identity migration marker를 명시 적용하고, 전체 canonical identity 감사와 97개 marker 승인을 완료했다. 메시지·metadata transaction을 최대 5채널로 제한하고 메시지 pending 시 metadata를 생략하는 PHP도 운영 배포했다. handle-only·충돌·handle 변경 메시지가 들어오면 해당 marker를 0으로 내려 다음 권위 metadata에서 다시 정규화한다.
 
 marker 승인 순서는 반드시 `모든 Telegram writer 정지 확인 → 장기 transaction·metadata lock·가용 디스크 preflight → migration 005 → marker 무효화가 포함된 새 PHP 원자 배포 → canonical mismatch 감사 0건 확인 → 조건부 단일 SQL로 현재 권위 채널 marker 승인`이다. migration은 lock 대기를 30초로 제한하고 `ALGORITHM=INPLACE, LOCK=NONE`을 요구하므로 지원되지 않거나 대기 제한을 넘으면 PHP를 배포하지 않는다. 구 PHP가 쓰기를 계속할 수 있는 상태나 audit와 marker UPDATE 사이에 writer가 열리는 상태에서는 승인하지 않는다. 새 PHP의 조건부 marker UPDATE와 message invalidation이 같은 채널 row lock을 사용하므로, 예상하지 못한 동시 write가 있더라도 나중 transaction이 marker를 0으로 되돌리게 하며 승인 직후 mismatch·marker 수를 다시 확인한다.
+
+### 2026-07-22 복구 완료 증빙
+
+- 운영 DB를 92개 테이블·1,940,943행 기준으로 전체 백업하고 압축본 SHA-256 `e851085b65060f4bb169e7032dc52ca9674299564d16e9ca46b797625844ea72`를 별도 보존했다.
+- migration 005를 작업 터미널 관측 9.141초에 적용했다. 97개 채널의 identity marker 컬럼과 1,524,369개 메시지 테이블의 `(telegram_channel_id, telegram_message_id)` 인덱스가 정의와 정확히 일치했다.
+- release `telegram-timeout-fix-1f8c2ac-20260722T091300KST`를 비공개 백업·후보 smoke test 뒤 원자 배포했다. 후보와 운영 smoke test는 합계 12/12 통과했고 배포 중 outbound Telegram은 실행하지 않았다.
+- marker 전 감사에서 canonical identity 누락·중복·mapping mismatch·bad live match·collision은 모두 0건이었다. 기존 orphan match 164건은 모두 원본이 없는 `truly_missing` 레거시 행이고 재연결 가능한 행은 0건이었다. 삭제 대신 감사 증빙을 보존했으며, 조건부 UPDATE 뒤 marker는 `0 → 1`로 97/97개 전환됐다.
+- [safe-full run 29880780637](https://github.com/sung1673/activist-rss-curator/actions/runs/29880780637)은 23분 19초에 성공했다. 메시지 1,175건·match 32건, failed/pending 0건, 최대 요청 456,875바이트, signal 40건, outbound 발송 0건이었다. metrics의 `telegram_messages_pruned`와 `telegram_matches_pruned`는 hydrate된 로컬 상태의 5,000건 상한 정리량이며 원격 MySQL 삭제량이 아니다.
+- 변수 복구 뒤 [Pages 전용 run 29882176705](https://github.com/sung1673/activist-rss-curator/actions/runs/29882176705)은 총 11분 26초, 페이지 생성 10분 27초에 성공했다. immutable `github-pages` artifact ID `8515364933`을 첫 시도에 배포했고 검증 URL은 [https://news.bside.ai/](https://news.bside.ai/)다. Telegram smoke·resend·daily send 단계는 모두 건너뛰었다.
+- 최종 상태는 `ENABLE_LEGACY_PIPELINE=true`, `ENABLE_PAGES=true`, `ENABLE_TELEGRAM_DELIVERY=false`, `ENABLE_GOVERNANCE_SHADOW=false`, `ENABLE_GOVERNANCE_PAGES=false`, `ENABLE_GOVERNANCE_DELIVERY=false`다.
+
+이번 marker 승인을 위해 사용한 일회성 운영 helper는 작업 뒤 로컬에서 제거했다. DB transport의 종단 서버 인증은 일회성 helper뿐 아니라 PHP/PDO 운영 경로까지 아직 별도 증빙이 필요한 hardening 항목이다. 따라서 같은 helper를 반복 사용하지 않으며, 향후 직접 MySQL 유지보수나 PHP DB 설정 변경 전에는 공급자 CA·고정 인증서 또는 공급자가 보장하는 private route를 확인하고 실제 연결의 TLS 협상·서버 인증을 검증해야 한다. 상세 endpoint와 검증 자료는 공개 문서가 아닌 비공개 운영 기록에 보존한다.
 
 PHP 배포 백업은 공개 파일 경로가 아니라 외부 접근이 차단된 `/www_root/activist/_private/deployment-backups/`에만 저장한다. `.htaccess`는 방어적으로 `.bak`과 `.bak.*` 접근도 거부하지만, 공개 경로의 차단 규칙을 백업 저장소로 간주하지 않는다. 배포는 후보 경로의 PHP 7.3·서명 인증·DB smoke test를 통과한 뒤 같은 파일시스템에서 원자적으로 교체하고, 실패하면 비공개 백업으로 복구한다.
 
