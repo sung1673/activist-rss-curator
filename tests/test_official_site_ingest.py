@@ -615,7 +615,10 @@ def test_official_site_workflow_is_shadow_live_only_and_atomically_applies_draft
     assert "BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}" in text
     assert "ENABLE_TELEGRAM_DELIVERY: \"false\"" in text
     assert "ENABLE_GOVERNANCE_DELIVERY: \"false\"" in text
-    assert "upload-artifact@v7" in text
+    assert (
+        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+        in text
+    )
     assert "retention-days: 90" in text
     assert "ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}" in text
     assert "--apply" in text

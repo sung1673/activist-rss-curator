@@ -1380,6 +1380,54 @@ def run(base_url: str, mysql_container_id: str) -> None:
     replay = transition(base_url, "preview", 1, "CI idempotently repeats preview state")
     require(replay.get("changed") is False and replay.get("state_version") == 1, repr(replay))
 
+    invalid_rights = transition(
+        base_url,
+        "live",
+        1,
+        "CI rejects cutover while a referenced SourceRight is currently revoked",
+        expected_status=409,
+    )
+    require(
+        invalid_rights.get("error") == "current_source_rights_invalid"
+        and invalid_rights.get("referenced_document_count") == 2
+        and invalid_rights.get("invalid_source_right_document_count") == 2,
+        repr(invalid_rights),
+    )
+    state_after_invalid_rights, _ = request_json(
+        base_url,
+        "api.php/api/v1/admin/release-state",
+        token=ADMIN_TOKEN,
+    )
+    require(
+        state_after_invalid_rights.get("release_state") == "preview"
+        and state_after_invalid_rights.get("state_version") == 1,
+        repr(state_after_invalid_rights),
+    )
+    restored_official_right, _ = request_json(
+        base_url,
+        "api.php/api/v1/admin/source-rights",
+        method="POST",
+        token=ADMIN_TOKEN,
+        payload={
+            "source_right_id": official_right_id,
+            "source_type": "company_statement",
+            "source_key": "company-site:00123456",
+            "source_name": "CI company official IR",
+            "permission_scope": "CI fixture: public redistribution and AI use permitted",
+            "evidence_hash": "8" * 64,
+            "valid_from": "2021-01-01T00:00:00Z",
+            "valid_until": None,
+            "ai_allowed": True,
+            "redistribution_allowed": True,
+            "status": "active",
+        },
+    )
+    require(
+        restored_official_right.get("source_right_id") == official_right_id
+        and restored_official_right.get("status") == "active",
+        repr(restored_official_right),
+    )
+
     live = transition(base_url, "live", 1, "CI promotes the reviewed preview state")
     require(live.get("changed") is True and live.get("state_version") == 2, repr(live))
     require(live.get("cutover_at") is not None and live.get("sunset_at") is not None, repr(live))

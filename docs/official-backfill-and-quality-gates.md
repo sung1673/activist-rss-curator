@@ -18,7 +18,7 @@
 ```powershell
 .\.venv\Scripts\python.exe -m curator.official_backfill `
   --from-date 2021-01-01 --to-date 2021-01-15 `
-  --source dart --chunk-days 7 --max-chunks 1 --dry-run
+  --source dart --chunk-days 1 --max-chunks 1 --dry-run
 ```
 
 실제 백필은 범위를 고정해 실행한다. `--max-pages`는 소스·청크별 API 페이지 상한이고, `--max-chunks`는 한 번의 실행에서 처리할 미완료 청크 수의 상한이다.
@@ -50,7 +50,7 @@ KIND의 일반 HTML 화면이나 오늘의 공시 RSS는 이 endpoint가 아니�
 ```powershell
 .\.venv\Scripts\python.exe -m curator.official_backfill `
   --from-date 2021-01-01 --to-date 2026-01-01 `
-  --source both --chunk-days 14 --max-pages 100 --max-chunks 10
+  --source dart --chunk-days 1 --max-pages 100 --max-chunks 10
 ```
 
 같은 명령을 다시 실행하면 완료된 청크를 건너뛰고 다음 청크부터 시작한다. 실패한 청크는 완료로 기록하지 않으며 기본값은 즉시 중단이다. 독립적인 오류를 모두 기록하려는 운영 실행에만 `--continue-on-error`를 사용한다. 최초 회사 마스터를 함께 적재할 때는 `--sync-company-master`를 한 번 지정한다.

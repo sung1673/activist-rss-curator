@@ -13,7 +13,7 @@
 | 데이터 모델 | Company, Actor, SourceRight, Document, GovernanceEvent, EventObservation, Campaign, ClaimEvidence, ProposalVote, CommitmentOutcome, TimelineEntry, EditorialRevision, 서버 계산 canonical identity와 운영 관측·증빙 | migration 001~010 운영 적용, 실제 데이터 대조와 보존 정책 검증 |
 | 이용권한 | 수집·AI·재배포 목적별 차단, 유효기간·철회·증빙 검사, KIND 사전 eligibility와 transaction 재검증, 관리자 API | 모든 소스의 실제 증빙 등록과 법률 검토 |
 | 사건 발행 | 공식/확인 사건 후보와 편집 승인, 불완전·충돌 identity 검수 큐, 고위험 자동 공개 차단 | 상위·시장 민감 사건 100% 편집 절차 훈련 |
-| 공개 제품 | `/api/v1`, OpenAPI, Today 서버 정렬, 회사·actor·사건·캠페인·캘린더·검색 UI, Atom·CSV·JSON, `closed|preview|live` 서버 release guard | migration 006~009, preview/admin/editor token hash, 운영 rewrite·CORS, 브라우저·접근성·성능 실측 |
+| 공개 제품 | `/api/v1`, OpenAPI, Today 서버 정렬, 회사·actor·사건·캠페인·캘린더·검색 UI, Atom·CSV·JSON, `closed|preview|live` 서버 release guard | migration 006~010, preview/admin/editor token hash, 운영 rewrite·CORS, 브라우저·접근성·성능 실측 |
 | 운영 자동화 | CI, 공식/미디어 수집, 링크 해결, 발행, 일일 Pages, watchdog 분리 | GitHub Environment·Secret·Variable, incident issue 권한 |
 | 품질 평가 | 사람 라벨 JSONL 스키마, benchmark CLI, 표본 수와 precision/recall 게이트 | 실제 article pair 500개와 사건 300개 라벨링 |
 | 전환 판정 | 14일 shadow 비교 보고서, 7일 운영·성능 증빙, 실제 KIND lag, benchmark를 같은 코드 리비전으로 검증하는 fail-closed API·CLI와 보호 workflow | 실제 production export artifact와 사람 승인 |
@@ -29,7 +29,7 @@
 - Telegram outbound는 계속 영구 비활성이고 PHP의 신규 enqueue·claim도 HTTP 410으로 차단한다. 정식 분배 게이트는 `distribution_mode=web_only`의 Pages/API 성공률과 실패 탐지로 판정한다.
 - cutover와 rollback은 원본 artifact ID·digest·파일 inventory를 검증한 전체 legacy 복구 bundle을 사용한다. 성공한 기본 브랜치 workflow가 같은 bundle을 매일 90일 artifact로 carry-forward해 전환 후에도 호환 피드와 전체 rollback 자산이 만료되지 않게 한다.
 
-2026-07-22 기준 이 기능 브랜치의 전체 로컬 Python 회귀 테스트는 1,036개 통과, 3개 건너뜀이고 Ruff·엄격 MyPy·compileall, OpenAPI·workflow·JSON Schema, Node 계약 10개, Playwright 사용자 여정 8개·접근성·모바일 성능 예산, npm high 취약점 감사를 통과했다. PHP 7.3/MySQL 8의 실제 migration·API 통합 계약은 draft PR의 GitHub Actions에서 최종 검증한다. 이전 운영 기반인 [PR #8](https://github.com/sung1673/activist-rss-curator/pull/8)의 필수 CI [run 29877517421](https://github.com/sung1673/activist-rss-curator/actions/runs/29877517421)과 병합 SHA `1f8c2acda354d006f15f927a3d9ab31d464ca831`의 [main CI run 29877648961](https://github.com/sung1673/activist-rss-curator/actions/runs/29877648961)은 각각 모든 job을 통과했다. 이 결과는 코드·배포 계약 검증이며 아래 장기 운영 게이트를 대체하지 않는다.
+2026-07-24 기준 이 기능 브랜치의 전체 로컬 Python 회귀 테스트는 1,133개 통과, 3개 건너뜀이고 Ruff·엄격 MyPy·compileall, OpenAPI·workflow·JSON Schema, Node 계약 10개, Playwright 사용자 여정 8개·접근성·모바일 성능 예산, Python과 npm high 취약점 감사를 통과했다. PHP 7.3/MySQL 8의 실제 migration·API 통합 계약은 draft PR의 GitHub Actions에서 최종 검증한다. 이전 운영 기반인 [PR #8](https://github.com/sung1673/activist-rss-curator/pull/8)의 필수 CI [run 29877517421](https://github.com/sung1673/activist-rss-curator/actions/runs/29877517421)과 병합 SHA `1f8c2acda354d006f15f927a3d9ab31d464ca831`의 [main CI run 29877648961](https://github.com/sung1673/activist-rss-curator/actions/runs/29877648961)은 각각 모든 job을 통과했다. 이 결과는 코드·배포 계약 검증이며 아래 장기 운영 게이트를 대체하지 않는다.
 
 ## 2026-07-22 운영 반영 현황
 

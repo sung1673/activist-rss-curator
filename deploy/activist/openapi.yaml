@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: BSIDE Governance Intelligence API
-  version: 1.9.0
+  version: 1.10.0
   description: >-
     Public, read-only governance event records and role-gated operations APIs.
     Document title and body fields preserve their original language; the API
@@ -10,6 +10,13 @@ info:
     while it is preview. Health and this specification remain public; the API
     root descriptor is a public data route and is therefore closed with 503.
 x-changelog:
+  - version: 1.10.0
+    date: '2026-07-24'
+    changes:
+      - Atom feeds now expose a canonical, normalized filtered self URL at the API origin and event alternate links at the public web origin.
+      - DeliveryOutbox enqueue and claim contracts are permanently disabled with HTTP 410; remaining records are audit and reconciliation data only.
+      - Preview-to-live promotion now rechecks every currently public-linked document SourceRight and fails closed on expiry or revocation.
+      - Release quality evidence uses one shared cumulative v2 document corpus across all public-approved event, campaign, claim, vote, commitment and timeline references.
   - version: 1.9.0
     date: '2026-07-23'
     changes:

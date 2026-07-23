@@ -3,8 +3,9 @@ from __future__ import annotations
 import copy
 import json
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -101,6 +102,29 @@ class MemoryCheckpointStore:
 
 def fixed_now() -> datetime:
     return datetime(2026, 7, 16, 0, 0, tzinfo=timezone.utc)
+
+
+def test_operational_defaults_are_one_day_and_dart_only(tmp_path: Path) -> None:
+    options = BackfillOptions(
+        start=date(2021, 1, 1),
+        end_exclusive=date(2021, 1, 2),
+        checkpoint_path=tmp_path / "official-checkpoint.json",
+    )
+
+    assert options.chunk_days == 1
+    assert options.sources == ("dart",)
+
+
+def test_backfill_rejects_future_empty_windows(tmp_path: Path) -> None:
+    tomorrow_kst = datetime.now(ZoneInfo("Asia/Seoul")).date() + timedelta(days=1)
+    options = BackfillOptions(
+        start=tomorrow_kst,
+        end_exclusive=tomorrow_kst + timedelta(days=1),
+        checkpoint_path=tmp_path / "official-checkpoint.json",
+    )
+
+    with pytest.raises(BackfillConfigurationError, match="tomorrow in KST"):
+        options.validate()
 
 
 def test_date_windows_are_half_open_and_connector_end_is_inclusive() -> None:
@@ -308,10 +332,10 @@ def test_failed_remote_sync_is_checkpointed_but_not_completed(tmp_path: Path) ->
     assert report["status"] == "failed"
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
     assert checkpoint["completed_windows"] == {}
-    assert list(checkpoint["failed_windows"]) == ["2021-01-01:2021-01-03"]
+    assert list(checkpoint["failed_windows"]) == ["2021-01-01:2021-01-02"]
     remote_checkpoint = next(iter(store.records.values()))[1]
     assert remote_checkpoint["completed_windows"] == {}
-    assert list(remote_checkpoint["failed_windows"]) == ["2021-01-01:2021-01-03"]
+    assert list(remote_checkpoint["failed_windows"]) == ["2021-01-01:2021-01-02"]
 
 
 def test_kind_rights_failure_is_checkpointed_but_never_completed(tmp_path: Path) -> None:

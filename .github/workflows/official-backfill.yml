@@ -119,7 +119,8 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           import os
-          from datetime import date
+          from datetime import date, datetime, timedelta
+          from zoneinfo import ZoneInfo
 
           try:
               start = date.fromisoformat(os.environ["FROM_DATE"])
@@ -131,6 +132,12 @@ jobs:
               raise SystemExit("from_date must be 2021-01-01 or later")
           if end <= start:
               raise SystemExit("to_date must be later than from_date (exclusive boundary)")
+          tomorrow_kst = datetime.now(ZoneInfo("Asia/Seoul")).date() + timedelta(days=1)
+          if end > tomorrow_kst:
+              raise SystemExit(
+                  "to_date cannot be later than tomorrow in KST; "
+                  "future empty windows must not be checkpointed"
+              )
           if not 1 <= max_windows <= 31:
               raise SystemExit("max_windows must be between 1 and 31")
           if os.environ["SYNC_COMPANY_MASTER"].lower() == "true" and os.environ["SOURCE"] == "kind":

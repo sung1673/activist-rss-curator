@@ -483,7 +483,7 @@ def _validate_candidate_bundle(
     relevance_by_id = _records_by_id(
         relevance_records, task="relevance", location="relevance candidates"
     )
-    process = {
+    process: dict[str, object] = {
         "candidate_manifest_sha256": _raw_file_sha256(manifest_path),
         "candidate_files": {
             "same_story": {
@@ -1194,6 +1194,7 @@ def build_release_report(
             "environment": environment,
             "evidence_source": "human_labeled_jsonl" if release_eligible else "fixture",
             "is_synthetic": not release_eligible,
+            "fixture_mode": fixture_mode,
             "collected_at": evaluated_at,
             "code_revision": code_revision.strip().casefold(),
             "release_eligible": release_eligible,

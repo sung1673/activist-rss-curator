@@ -69,8 +69,8 @@ class BackfillOptions:
     start: date
     end_exclusive: date
     checkpoint_path: Path
-    chunk_days: int = 14
-    sources: tuple[str, ...] = ("dart", "kind")
+    chunk_days: int = 1
+    sources: tuple[str, ...] = ("dart",)
     page_count: int = 100
     max_pages: int = 100
     max_chunks: int = 0
@@ -87,6 +87,12 @@ class BackfillOptions:
             )
         if self.end_exclusive <= self.start:
             raise BackfillConfigurationError("end_exclusive must be after start")
+        tomorrow_kst = datetime.now(ZoneInfo("Asia/Seoul")).date() + timedelta(days=1)
+        if self.end_exclusive > tomorrow_kst:
+            raise BackfillConfigurationError(
+                "end_exclusive cannot be later than tomorrow in KST; "
+                "future empty windows must never be checkpointed as complete"
+            )
         if self.chunk_days < 1:
             raise BackfillConfigurationError("chunk_days must be at least 1")
         if not 1 <= self.page_count <= 100:
@@ -627,8 +633,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", type=Path, default=PROJECT_ROOT, help="project root containing config.yaml")
     parser.add_argument("--from-date", type=_parse_date, help="inclusive start date (default: config backfill_start)")
     parser.add_argument("--to-date", type=_parse_date, help="exclusive end date (default: tomorrow in KST)")
-    parser.add_argument("--chunk-days", type=int, default=14)
-    parser.add_argument("--source", choices=("dart", "kind", "both"), default="both")
+    parser.add_argument(
+        "--chunk-days",
+        type=int,
+        default=1,
+        help="date-window size (operational backfills use the safe one-day default)",
+    )
+    parser.add_argument("--source", choices=("dart", "kind", "both"), default="dart")
     parser.add_argument("--page-count", type=int, default=100)
     parser.add_argument("--max-pages", type=int, default=100, help="maximum connector pages per source and chunk")
     parser.add_argument("--max-chunks", type=int, default=0, help="process at most N pending chunks (0 = unlimited)")

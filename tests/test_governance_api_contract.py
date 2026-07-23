@@ -286,7 +286,7 @@ def test_content_corpus_v2_keeps_every_public_object_document_reference_in_scope
     ):
         assert reference in corpus
     assert "UNION SELECT" in corpus
-    assert "public_document_refs.document_id=d.document_id" in corpus
+    assert "public_document_refs.document_id=d.document_id" in snapshot
     assert "d.source_class=\\'official_disclosure\\'" not in corpus
     assert "v1_document_visibility_sql" not in corpus
     assert corpus.count("publication_status=\\'published\\'") >= 5
