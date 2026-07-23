@@ -10,6 +10,8 @@
     "sample_id",
     "event_id",
     "article",
+    "stratum",
+    "linked_document_ids",
     "label",
     "label_source",
     "annotator_id",
@@ -25,6 +27,15 @@
       "minLength": 1
     },
     "article": { "$ref": "#/$defs/article" },
+    "stratum": {
+      "description": "official_event requires an explicit official document link; hard negatives are human-confirmed unrelated same-company samples.",
+      "enum": ["official_event", "non_governance_hard_negative"]
+    },
+    "linked_document_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
     "label": { "enum": ["relevant", "not_relevant"] },
     "label_source": {
       "description": "fixture is structural-test data and is rejected by release-gate mode.",
@@ -34,6 +45,16 @@
     "labeled_at": { "type": "string", "format": "date-time" },
     "notes": { "type": "string" }
   },
+  "allOf": [
+    {
+      "if": { "properties": { "stratum": { "const": "official_event" } } },
+      "then": { "properties": { "linked_document_ids": { "minItems": 1 } } }
+    },
+    {
+      "if": { "properties": { "stratum": { "const": "non_governance_hard_negative" } } },
+      "then": { "properties": { "linked_document_ids": { "maxItems": 0 } } }
+    }
+  ],
   "$defs": {
     "article": {
       "type": "object",

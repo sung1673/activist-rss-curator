@@ -29,6 +29,41 @@ TELEGRAM_IDENTITY_INDEX_MIGRATION = (
     / "migrations"
     / "005_telegram_channel_identity_index.sql"
 ).read_text(encoding="utf-8")
+RELEASE_GUARD_MIGRATION = (
+    ROOT
+    / "deploy"
+    / "activist"
+    / "migrations"
+    / "006_governance_release_guard.sql"
+).read_text(encoding="utf-8")
+IDENTITY_EVIDENCE_MIGRATION = (
+    ROOT
+    / "deploy"
+    / "activist"
+    / "migrations"
+    / "007_governance_identity_and_evidence.sql"
+).read_text(encoding="utf-8")
+OFFICIAL_SITE_MIGRATION = (
+    ROOT
+    / "deploy"
+    / "activist"
+    / "migrations"
+    / "008_official_site_snapshot_receipts.sql"
+).read_text(encoding="utf-8")
+DART_QUOTA_MIGRATION = (
+    ROOT
+    / "deploy"
+    / "activist"
+    / "migrations"
+    / "009_dart_global_quota_ledger.sql"
+).read_text(encoding="utf-8")
+SLOT_CLAIM_MIGRATION = (
+    ROOT
+    / "deploy"
+    / "activist"
+    / "migrations"
+    / "010_official_slot_claim_ledger.sql"
+).read_text(encoding="utf-8")
 OPENAPI_PATH = ROOT / "deploy" / "activist" / "openapi.yaml"
 HTACCESS = (ROOT / "deploy" / "activist" / ".htaccess").read_text(encoding="utf-8")
 
@@ -89,8 +124,11 @@ def test_v1_public_routes_and_exports_are_documented():
     expected = {
         "/companies",
         "/companies/{company_id}",
+        "/actors",
+        "/actors/{actor_id}",
         "/events",
         "/events/{event_id}",
+        "/today",
         "/campaigns/{campaign_id}",
         "/documents/{document_id}",
         "/calendar",
@@ -99,10 +137,565 @@ def test_v1_public_routes_and_exports_are_documented():
         "/exports/events.json",
         "/feeds/events.atom",
         "/feedback",
+        "/revisions",
+        "/metrics/web-vitals",
+        "/ops/availability-observations",
+        "/ops/web-distribution-observations",
+        "/ops/quality-observations",
+        "/ops/release-evidence",
+        "/ops/official-run-ledger",
+        "/ops/official-slot-claims",
+        "/ops/dart-quota",
+        "/ops/official-site-candidates",
+        "/ops/official-site-rights",
+        "/ops/backfill-checkpoints/{job_fingerprint}",
+        "/admin/shadow-discrepancies",
+        "/admin/official-slot-epoch",
     }
     assert expected <= paths.keys()
     assert "V1_MAX_PAGE_SIZE = 100" in V1
-    assert "V1_RESPONSE_BUDGET_BYTES = 256000" in V1
+    assert "V1_RESPONSE_BUDGET_BYTES = 250000" in V1
+    assert "V1_RESPONSE_BUDGET_BYTES : 250000" in API
+
+
+def test_release_guard_migration_is_explicit_fail_closed_and_idempotent():
+    for table in (
+        "activist_schema_migrations",
+        "activist_governance_release_state",
+        "activist_governance_release_audit",
+    ):
+        assert table in RELEASE_GUARD_MIGRATION
+    assert "'governance_v1', 'closed', 0" in RELEASE_GUARD_MIGRATION
+    assert "ON DUPLICATE KEY UPDATE state_key=VALUES(state_key)" in RELEASE_GUARD_MIGRATION
+    assert "UNIQUE KEY uq_governance_release_version" in RELEASE_GUARD_MIGRATION
+    assert "6, '006_governance_release_guard'" in RELEASE_GUARD_MIGRATION
+
+
+def test_identity_evidence_migration_covers_canonical_events_and_production_observations():
+    for column in (
+        "listing_status",
+        "master_modified_at",
+        "identity_action",
+        "identity_target",
+        "identity_actor_id",
+        "identity_effective_at",
+        "identity_deadline_at",
+        "identity_status",
+        "comparison_key",
+        "code_revision",
+        "first_observed_at",
+        "raw_count",
+        "acknowledged_count",
+    ):
+        assert column in IDENTITY_EVIDENCE_MIGRATION
+    for table in (
+        "activist_event_observations",
+        "activist_shadow_discrepancies",
+        "activist_shadow_run_observations",
+        "activist_availability_observations",
+        "activist_web_distribution_observations",
+        "activist_governance_quality_observations",
+        "activist_web_vital_observations",
+        "activist_official_backfill_checkpoints",
+        "activist_human_release_evidence_bundles",
+    ):
+        assert table in IDENTITY_EVIDENCE_MIGRATION
+    assert "UNIQUE KEY `uq_event_comparison_key`" in IDENTITY_EVIDENCE_MIGRATION
+    assert "workflow_run_attempt" in IDENTITY_EVIDENCE_MIGRATION
+    assert "uq_web_distribution_run_attempt_target" in IDENTITY_EVIDENCE_MIGRATION
+    assert "7, '007_governance_identity_and_evidence'" in IDENTITY_EVIDENCE_MIGRATION
+
+
+def test_identity_ingest_is_fail_closed_and_creates_event_observations():
+    ingest = V1[V1.index("function upsert_governance_snapshot") :]
+    assert "^eventcmp:v1:[a-f0-9]{64}$" in ingest
+    assert "invalid_complete_event_identity:" in ingest
+    assert "incomplete_event_identity_has_comparison_key:" in ingest
+    assert "event_identity_field_conflict:" in ingest
+    assert "$identityStatus !== 'complete'" in ingest
+    assert "event_observations" in ingest
+    assert "event_observation_document_missing:" in ingest
+    assert "acknowledged_count" in ingest
+    assert "code_revision" in ingest
+
+
+def test_ops_observation_checkpoint_and_evidence_contracts_are_private_and_bounded():
+    spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    for route in (
+        "/ops/availability-observations",
+        "/ops/release-evidence",
+        "/ops/backfill-checkpoints/{job_fingerprint}",
+    ):
+        assert spec["paths"][route]
+    dispatch = V1[V1.index("function handle_v1_request") : V1.index("function v1_serve_openapi")]
+    assert "v1_require_role($config, array('ops'))" in dispatch
+    assert "count($observations) > 10" in V1
+    assert "observation_id_conflict" in V1
+    assert "backfill_checkpoint_version_conflict" in V1
+    assert "expected_version" in V1[V1.index("function v1_ops_put_backfill_checkpoint") :]
+    assert "'evidence_source'=>'production_db_export'" in V1
+    assert "'is_synthetic'=>false" in V1
+    assert "'distribution_mode'=>'web_only'" in V1
+
+
+def test_release_evidence_is_kst_daily_build_scoped_and_never_synthesizes_missing_quality():
+    section = V1[V1.index("function v1_kst_observation_date") : V1.index("function v1_release_request_id")]
+    assert "Asia/Seoul" in section
+    assert "v1_evidence_utc_bounds" in section
+    assert "'observation_date'=>$day" in section
+    assert "'build_sha'=>$sha" in section
+    assert "'operations_days'=>$operationsDays" in section
+    assert "'shadow_days'=>$shadowDays" in section
+    assert "'web_distribution_days'=>$distributionDays" in section
+    assert "'quality_observations'=>$qualityRows" in section
+    assert "kind_observation_lag_p95_minutes" in section
+    assert "dart_success_poll_interval_p95_minutes" in section
+    assert "v1_kind_observation_stats_by_day($pdo,$config,$from,$to)" in section
+    assert "kind_observation_count" in section
+    assert "kind_lag_sample_count" in section
+    assert "content_snapshot_at" in section
+    assert "governance_corpus_2021_plus_kst_day_end_v2" in section
+    assert "same_story_evaluated_pair_count'=>null" not in section
+
+
+def test_content_corpus_v2_keeps_every_public_object_document_reference_in_scope():
+    corpus = V1[
+        V1.index("function v1_content_corpus_document_refs_sql")
+        : V1.index("function v1_content_corpus_document_refs_params")
+    ]
+    snapshot = V1[
+        V1.index("function v1_content_corpus_snapshot")
+        : V1.index("function v1_current_public_document_rights_guard")
+    ]
+    for table in (
+        "event_documents",
+        "campaign_documents",
+        "claim_evidence",
+        "proposal_votes",
+        "commitment_outcomes",
+        "timeline_entries",
+    ):
+        assert f"table_name($config,'{table}')" in corpus
+    for reference in (
+        "ed.document_id",
+        "cd.document_id",
+        "ce.document_id",
+        "v.evidence_document_id",
+        "co.evidence_document_id",
+        "tl.document_id",
+    ):
+        assert reference in corpus
+    assert "UNION SELECT" in corpus
+    assert "public_document_refs.document_id=d.document_id" in corpus
+    assert "d.source_class=\\'official_disclosure\\'" not in corpus
+    assert "v1_document_visibility_sql" not in corpus
+    assert corpus.count("publication_status=\\'published\\'") >= 5
+    assert corpus.count("review_status=\\'approved\\'") >= 5
+    assert "ce.editorial_status=\\'approved\\'" in corpus
+    assert "timeline_e.identity_status=\\'complete\\'" in corpus
+    assert "timeline_e.verification_status<>\\'signal\\'" in corpus
+    assert "timeline_cp.publication_status=\\'published\\'" in corpus
+    assert "timeline_cp.review_status=\\'approved\\'" in corpus
+    assert "tl.event_id IS NOT NULL" in corpus
+    assert "tl.campaign_id IS NOT NULL" in corpus
+    assert "governance_corpus_2021_plus_kst_day_end_v2" in snapshot
+
+    spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    evidence = spec["components"]["schemas"]["QualityObservationEvidence"]
+    assert (
+        evidence["properties"]["content_scope"]["const"]
+        == "governance_corpus_2021_plus_kst_day_end_v2"
+    )
+
+
+def test_preview_to_live_rechecks_current_v2_rights_under_one_lock_order():
+    guard = V1[
+        V1.index("function v1_current_public_document_rights_guard")
+        : V1.index("function v1_quality_observation_payload_hash")
+    ]
+    transition = V1[
+        V1.index("function v1_admin_update_release_state")
+        : V1.index("function v1_admin_upsert_source_right")
+    ]
+    right_writer = V1[
+        V1.index("function v1_admin_upsert_source_right")
+        : V1.index("function v1_admin_create_revision")
+    ]
+    ingest_writer = V1[
+        V1.index("function upsert_governance_snapshot")
+        : V1.index("function v1_editorial_reference_exists")
+    ]
+
+    assert "v1_content_corpus_document_refs_sql($config)" in guard
+    assert "v1_content_corpus_document_refs_params($checkedAt,$scopeStart)" in guard
+    assert "v1_content_document_right_valid_at($document,$checkedAt)" in guard
+    assert "$before = v1_release_state($pdo, $config, true)" in transition
+    assert "v1_current_public_document_rights_guard($pdo,$config)" in transition
+    assert transition.index("$before = v1_release_state") < transition.index(
+        "v1_current_public_document_rights_guard"
+    )
+    assert transition.index("v1_current_public_document_rights_guard") < transition.index(
+        "SET release_state = ?"
+    )
+    assert "current_source_rights_invalid" in transition
+    assert "invalid_source_right_document_count" in transition
+    assert right_writer.index("v1_release_state($pdo,$config,true)") < right_writer.index(
+        "INSERT INTO "
+    )
+    assert ingest_writer.index("v1_release_state($pdo,$config,true)") < ingest_writer.index(
+        "$rightStmt = $pdo->prepare"
+    )
+
+
+def test_availability_evidence_uses_exact_kst_minute01_slot_coverage():
+    spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    schema = spec["components"]["schemas"]["DailyRouteAvailabilityEvidence"]
+    assert schema["properties"]["cadence_id"]["const"] == "watchdog-v1-kst-5m-minute01"
+    assert schema["properties"]["expected_slot_count"]["const"] == 288
+    assert schema["properties"]["covered_slots_bitmap_hex"]["pattern"] == "^[0-9a-f]{72}$"
+
+    section = V1[V1.index("function v1_availability_cadence_bucket") : V1.index("function v1_release_request_id")]
+    assert "GOV_V1_AVAILABILITY_CADENCE_ID" in V1
+    assert "GOV_V1_AVAILABILITY_SLOTS_PER_DAY = 288" in V1
+    assert "$minuteOfDay === 0" in section
+    assert "$local->modify('-1 day')->format('Y-m-d')" in section
+    assert "v1_availability_utc_bounds($availabilityFrom,$to)" in section
+    assert "LIMIT 50001" in section
+    assert "availability_evidence_row_limit_exceeded" in section
+    for field in (
+        "cadence_id",
+        "expected_slot_count",
+        "covered_slot_count",
+        "missing_slot_count",
+        "duplicate_slot_count",
+        "off_cadence_count",
+        "covered_slots_bitmap_hex",
+        "first_observed_at",
+        "last_observed_at",
+        "actual_interval_seconds_p95",
+        "actual_max_gap_seconds",
+    ):
+        assert f"'{field}'" in section
+
+
+def test_release_evidence_prefers_each_official_source_submitted_raw_denominator():
+    section = V1[V1.index("function v1_ops_release_evidence") : V1.index("function v1_release_request_id")]
+    assert "$sourceRaw = $sourceOutcome['raw_count']" in section
+    assert "$sourceAck = $sourceOutcome['acknowledged_count']" in section
+    assert "$sourceRaw === $sourceAck" in section
+    assert "v1_official_run_ledger_row($run)" in section
+
+
+def test_shadow_run_snapshots_prove_zero_discrepancy_days_and_are_integrity_checked():
+    assert "/admin/shadow-runs" in yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))["paths"]
+    section = V1[V1.index("function v1_shadow_event_keys") : V1.index("function v1_admin_shadow_discrepancies")]
+    assert "legacy_events_sha256" in section
+    assert "candidate_events_sha256" in section
+    assert "shadow_run_integrity_error" in section
+    assert "duplicate_shadow_comparison_key" in section
+    assert "legacy_crosswalk" in section
+    assert "shadow_run_crosswalk_integrity_error" in section
+    for column in (
+        "legacy_eligible_record_count",
+        "legacy_crosswalked_record_count",
+        "legacy_unmatched_record_count",
+        "legacy_ambiguous_record_count",
+        "legacy_crosswalk_coverage_rate",
+        "legacy_crosswalk_sha256",
+    ):
+        assert column in IDENTITY_EVIDENCE_MIGRATION
+    assert "unchanged'=>true" in section
+
+
+def test_actual_distribution_and_quality_evidence_have_durable_idempotent_writers():
+    spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    assert "/ops/web-distribution-observations" in spec["paths"]
+    assert "/ops/quality-observations" in spec["paths"]
+    distribution = V1[V1.index("function v1_record_web_distribution_observations") : V1.index("function v1_record_quality_observations")]
+    quality = V1[V1.index("function v1_record_quality_observations") : V1.index("function v1_record_web_vitals")]
+    assert "workflow_run_id" in distribution
+    assert "workflow_run_attempt" in distribution
+    assert "failure_detected_at" in distribution
+    assert "count($items) > 50" in distribution
+    assert "web_distribution_observation_conflict" in distribution
+    assert "production_quality_job" in quality
+    assert "quality_numerator_exceeds_denominator" in quality
+    assert "payload_sha256" in quality
+    assert "quality_observation_conflict" in quality
+    assert "kind_observation_lag_not_actual" in quality
+    quality_schema = spec["components"]["schemas"]["QualityRawCounts"]
+    assert not any(name.startswith("same_story_") for name in quality_schema["properties"])
+
+
+def test_human_release_evidence_bundle_is_same_sha_append_only_and_canonical():
+    spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    assert "/admin/release-evidence-inputs" in spec["paths"]
+    validation = V1[
+        V1.index("function v1_validate_human_evidence_document") : V1.index(
+            "function v1_human_evidence_row_response"
+        )
+    ]
+    section = V1[
+        V1.index("function v1_admin_upsert_release_evidence_inputs") : V1.index(
+            "function v1_kst_observation_date"
+        )
+    ]
+    assert "benchmark','usability','release_approval" in section
+    assert "invalid_human_evidence_provenance" in validation
+    assert "human_release_evidence_version_conflict" in section
+    assert "INSERT INTO " in section and "human_release_evidence_bundles" in section
+    assert "UPDATE " not in section
+
+
+def test_cutover_metadata_is_atomic_audited_and_drives_legacy_headers():
+    assert "cutover_at" in IDENTITY_EVIDENCE_MIGRATION
+    assert "sunset_at" in IDENTITY_EVIDENCE_MIGRATION
+    transition = V1[V1.index("function v1_admin_update_release_state") : V1.index("function v1_admin_upsert_source_right")]
+    assert "$current === 'preview' && $target === 'live'" in transition
+    assert "time() + 90 * 86400" in transition
+    assert "cutover_at = ?, sunset_at = ?" in transition
+    assert "request_id, cutover_at, sunset_at" in transition
+    assert "cutover_at" in V1[V1.index("function v1_admin_release_state") : V1.index("function v1_assert_object_keys")]
+
+
+def test_ops_health_uses_stalest_dart_kind_success_not_media_maximum():
+    health = V1[V1.index("function v1_ops_health") : V1.index("function v1_admin_review_queue")]
+    assert "'dart'=>array" in health and "'kind'=>array" in health
+    assert "min($official['dart']['last_success_at'],$official['kind']['last_success_at'])" in health
+    assert "official_sources" in health
+    assert "table_name($config, 'runs')" not in health
+
+
+def test_atom_uses_filtered_api_self_link_and_public_site_alternate_link():
+    atom = V1[V1.index("function v1_events_atom") : V1.index("function v1_submit_feedback")]
+    assert "governance_api_base_url" in atom
+    assert "https://alignpe.gabia.io/activist/api.php/api/v1" in atom
+    assert "<link rel=\"self\"" in atom
+    assert "v1_event_feed_self_query($page)" in atom
+    assert "public_base_url" in atom
+    assert "https://news.bside.ai" in atom
+    assert "'/#/events/'" in atom
+
+
+def test_atom_self_query_normalizes_alias_dates_order_and_limit():
+    query = V1[
+        V1.index("function v1_event_feed_self_query") : V1.index("function v1_events_atom")
+    ]
+    assert "$verification = $status" in query
+    assert "mysql_dt($value)" in query
+    assert "Y-m-d\\TH:i:s\\Z" in query
+    assert "$query['limit']" in query
+    assert "ksort($query, SORT_STRING)" in query
+    assert "PHP_QUERY_RFC3986" in query
+
+
+def test_web_vitals_are_privacy_minimal_rate_limited_and_expire_after_30_days():
+    section = V1[V1.index("function v1_record_web_vitals") : V1.index("function v1_ops_get_backfill_checkpoint")]
+    assert "count($items) > 50" in section
+    assert "web_vitals_rate_limited" in section
+    assert "INTERVAL 30 DAY" in section
+    assert "stored_identifiers' => false" in section
+    for forbidden in ("REMOTE_ADDR", "HTTP_USER_AGENT", "query_string", "session_id", "user_id"):
+        assert forbidden not in section
+
+
+def test_public_revisions_and_large_document_paging_do_not_leak_internal_values():
+    revisions = V1[V1.index("function v1_public_revisions") : V1.index("function v1_admin_shadow_discrepancies")]
+    assert "revision_status = \\'published\\'" in revisions
+    assert "previous_value" not in revisions
+    assert "revised_value" not in revisions
+    assert "requested_by" not in revisions
+    document = V1[V1.index("function v1_get_document") : V1.index("function v1_date_bound")]
+    assert "body_limit_bytes" in document
+    assert "CAST(d.body_text AS BINARY)" in document
+    assert "body_truncated" in document
+    assert "body_next_offset" in document
+
+
+def test_common_public_event_filters_are_shared_by_search_calendar_exports_and_feed():
+    filters = V1[V1.index("function v1_event_query_parts") : V1.index("function v1_public_event_select")]
+    for field in ("company_id", "actor_id", "event_type", "verification_status", "status", "source_class", "evidence_document_id", "from", "to"):
+        assert field in filters
+    calendar = V1[V1.index("function v1_calendar_vote_filter_parts") : V1.index("function v1_like")]
+    assert "v1_event_query_parts($config, false)" in calendar
+    assert "v1_calendar_vote_filter_parts($config)" in calendar
+    assert "if (!v1_event_filter_requested(false))" not in calendar
+    for field in ("v.company_id = ?", "v.proposer_actor_id = ?", "'event_type'=>$eventType", "'verification_status'=>$verification", "vote_filter_d.source_class"):
+        assert field in calendar
+    assert "v1_event_query_parts($config)" in V1[V1.index("function v1_search") : V1.index("function v1_export_events_json")]
+    assert V1.count("v1_query_public_events($pdo, $config, $page)") >= 4
+
+
+def test_v1_uses_read_only_schema_version_guard_instead_of_request_time_ddl():
+    assert "const GOV_V1_SCHEMA_VERSION = 10" in V1
+    assert "function v1_require_schema_version" in V1
+    assert "schema_version_mismatch" in V1
+    assert "ensure_schema(" not in V1
+    assert "CREATE TABLE" not in V1
+    dispatch = V1[V1.index("function handle_v1_request") : V1.index("function v1_serve_openapi")]
+    assert dispatch.index("v1_require_schema_version($pdo, $config)") < dispatch.index("v1_list_companies($pdo, $config)")
+    assert "ensure_schema($pdo, $config)" in API  # signed writers remain compatible
+    handle_read = API[API.index("function handle_read") :]
+    assert "ensure_schema($pdo, $config)" not in handle_read
+    assert "v1_require_schema_version($pdo, $config)" in handle_read
+
+
+def test_release_state_gates_public_data_but_not_health_openapi_or_privileged_routes():
+    dispatch = V1[V1.index("function handle_v1_request") : V1.index("function v1_serve_openapi")]
+    assert dispatch.index("$path === '/health'") < dispatch.index("$pdo = pdo_conn($config)")
+    assert dispatch.index("$path === '/openapi.yaml'") < dispatch.index("$pdo = pdo_conn($config)")
+    assert dispatch.index("$pdo = pdo_conn($config)") < dispatch.index("if ($path === '/')")
+    assert dispatch.index("v1_require_public_release_access($pdo, $config)") < dispatch.index("if ($path === '/')")
+    assert "strpos($path, '/ops/') === 0 || strpos($path, '/admin/') === 0" in dispatch
+    assert "v1_require_public_release_access($pdo, $config)" in dispatch
+    assert "governance_release_closed" in V1
+    assert "preview_token_required" in V1
+    assert "invalid_preview_token" in V1
+    assert "Cache-Control: private, no-store" in V1
+    assert "Vary: Authorization" in V1
+
+
+def test_today_is_ranked_server_side_from_the_complete_public_event_set():
+    spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    assert "/today" in spec["paths"]
+    section = V1[V1.index("function v1_today_ranked_select") : V1.index("function v1_get_event")]
+    assert "verification_status <> \\'signal\\'" in section
+    assert "importance" in section and "official_disclosure" in section
+    assert "deadline_watch" in section
+    assert "LIMIT 5" in section and "LIMIT 10" in section
+    assert "v1_query_public_events" not in section
+    assert "archive_endpoint' => '/events'" in section
+
+
+def test_calendar_vote_filters_do_not_drop_the_vote_branch():
+    section = V1[V1.index("function v1_calendar_vote_filter_parts") : V1.index("function v1_like")]
+    assert "UNION ALL" in section
+    assert "v1_required_document_visibility_sql($config, 'v.evidence_document_id')" in section
+    assert "vote_filter_ea.actor_id=?" in section
+    assert "vote_filter_d.document_id=v.evidence_document_id" in section
+
+
+def test_official_site_candidates_are_private_bounded_and_deterministic():
+    spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    route = spec["paths"]["/ops/official-site-candidates"]["get"]
+    assert route["security"] == [{"bearerAuth": []}]
+    section = V1[V1.index("function v1_ops_official_site_candidates") : V1.index("function v1_admin_review_queue")]
+    assert "official_disclosure" in section
+    assert "LIMIT 20" in section and "LIMIT 10" in section
+    assert "ORDER BY raw_score DESC,event_count DESC,e.company_id ASC" in section
+    assert "ORDER BY raw_score DESC,event_count DESC,a.actor_id ASC" in section
+    for actor_type in ("activist_shareholder", "institution", "shareholder_coalition"):
+        assert actor_type in section
+    assert "body_text" not in section and "payload_json" not in section
+
+
+def test_kind_lag_uses_receipt_to_first_observation_without_fabricated_dates():
+    section = V1[
+        V1.index("function v1_kind_observation_stats_by_day") : V1.index(
+            "function v1_public_revisions"
+        )
+    ]
+    assert "eo.first_observed_at" in section
+    assert "eo.source_key=\\'kind\\'" in section
+    assert "$row['published_at'] === null" in section
+    assert "$firstEpoch < $receiptEpoch" in section
+    assert "$row['source_type'] !== 'official_disclosure'" in section
+    assert "$row['source_right_id'] !== 'official:kind'" in section
+    for forbidden in ("COALESCE(d.published_at", "DATE(d.published_at", "00:00:00"):
+        assert forbidden not in section
+
+
+def test_kind_source_right_is_preflighted_and_revalidated_inside_ingest_transaction():
+    spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    route = spec["paths"]["/ops/source-right-eligibility"]["get"]
+    assert route["security"] == [{"bearerAuth": []}]
+    section = V1[
+        V1.index("function v1_kind_source_right_eligibility") : V1.index(
+            "function v1_ops_official_site_candidates"
+        )
+    ]
+    assert "source_right_id=\\'official:kind\\'" in section
+    assert "FOR UPDATE" in section
+    assert "redistribution_not_allowed" in section
+    assert "ai_not_allowed" in section
+    assert "rights_revision" in section
+    ingest = V1[V1.index("function upsert_governance_snapshot") :]
+    assert ingest.index("v1_kind_source_right_eligibility($pdo,$config,true)") < ingest.index(
+        "$rightStmt = $pdo->prepare"
+    )
+
+
+def test_editor_identity_completion_recomputes_comparison_key_and_preserves_event_id():
+    spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    route = spec["paths"]["/admin/events/{event_id}/identity"]["post"]
+    assert route["security"] == [{"bearerAuth": []}]
+    section = V1[
+        V1.index("function v1_admin_complete_event_identity") : V1.index(
+            "function v1_admin_review_event"
+        )
+    ]
+    assert "v1_build_event_identity" in section
+    assert "WHERE event_id=? FOR UPDATE" in section
+    assert "event_comparison_key_conflict" in section
+    assert "identity_status=\\'complete\\'" in section
+    assert "SET event_id" not in section
+    assert "hash_equals($comparisonKey,$eventId)" not in V1.replace(" ", "")
+
+
+def test_hmac_cross_source_identity_reuses_the_locked_canonical_event_owner():
+    ingest = V1[V1.index("function upsert_governance_snapshot") : V1.index("function v1_editorial_reference_exists")]
+    assert "WHERE comparison_key=? LIMIT 1 FOR UPDATE" in ingest
+    assert "$eventId = (string)$comparisonOwner" in ingest
+    assert ingest.index("$eventComparisonOwnerStmt->execute") < ingest.index("$eventStmt->execute")
+    assert "hash_equals((string)$computedIdentity['comparison_key'],$comparisonKey)" in ingest
+    assert "array('high', 'market_sensitive', 'critical')" in ingest
+    assert "if ($importance === 'market_sensitive') { $importance = 'critical'; }" not in ingest
+
+
+def test_partial_company_disclosures_do_not_erase_company_master_listing_status():
+    section = V1[V1.index("$companyStmt = $pdo->prepare") : V1.index("$rightStmt = $pdo->prepare")]
+    assert "listing_status=listing_status" in section
+    assert "master_modified_at=master_modified_at" in section
+    assert "array_key_exists('listing_status',$company)" in section
+    assert "$companyMasterStmt->execute" in section
+
+
+def test_hmac_outbound_enqueue_and_claim_are_permanently_disabled_before_db_mutation():
+    enqueue = V1[
+        V1.index("function enqueue_delivery_outbox") : V1.index(
+            "function delivery_payload_source_right_ids"
+        )
+    ]
+    claim = V1[V1.index("function claim_delivery_outbox") : V1.index("function ack_delivery_outbox")]
+    for section, count_field in ((enqueue, "accepted"), (claim, "claimed")):
+        assert "respond(410" in section
+        assert "outbound_delivery_disabled" in section
+        assert "distribution_mode'=>'web_only'" in section
+        assert f"'{count_field}'=>0" in section
+    assert enqueue.index("respond(410") < enqueue.index("$pdo->prepare")
+    assert claim.index("respond(410") < claim.index("$pdo->beginTransaction")
+
+
+def test_release_state_admin_api_is_audited_and_optimistically_concurrent():
+    spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    route = spec["paths"]["/admin/release-state"]
+    assert {"get", "post"} <= route.keys()
+    assert "v1_admin_release_state($pdo, $config)" in V1
+    assert "v1_admin_update_release_state" in V1
+    assert "expected_version_required" in V1
+    assert "stale_release_state" in V1
+    assert "invalid_release_transition" in V1
+    assert "governance_release_audit" in V1
+    assert "preview_auth_configured" in V1
+    assert "preview_token_hash" not in str(route)
+
+
+def test_openapi_uses_the_deployed_api_origin_and_documents_release_gate():
+    spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    assert spec["servers"][0]["url"] == "https://alignpe.gabia.io/activist/api.php/api/v1"
+    assert spec["x-public-site"] == "https://news.bside.ai"
+    assert spec["x-release-gate"]["states"] == ["closed", "preview", "live"]
+    assert spec["x-release-gate"]["schema-version"] == 10
 
 
 def test_unified_search_includes_governance_actors():
@@ -147,10 +740,11 @@ def test_feedback_is_never_automatically_public():
     assert "feedback_rate_limited" in V1
 
 
-def test_source_rights_gate_telegram_and_public_documents():
-    assert (
-        "source_class NOT IN (\\'licensed_telegram\\',\\'authorized_telegram\\')" in V1
-    )
+def test_source_rights_gate_every_public_document_without_null_exceptions():
+    visibility = V1[V1.index("function v1_document_visibility_sql") : V1.index("function v1_event_visibility_sql")]
+    assert ".source_right_id IS NOT NULL" in visibility
+    assert ".source_right_id IS NULL" not in visibility
+    assert "source_class NOT IN" not in visibility
     assert "redistribution_allowed = 1" in V1
     assert "revoked_at IS NULL" in V1
     assert "valid_until IS NULL" in V1
@@ -302,7 +896,7 @@ def test_cross_window_corrections_use_collection_key():
     assert "collection_key VARCHAR(96) NULL" in MIGRATION
     assert "idx_document_collection" in API
     assert "previousDocumentStmt" in V1
-    assert "previousEventStmt" in V1
+    assert "previousEventStmt" not in V1
     assert (
         "correction_of_document_id=COALESCE(correction_of_document_id,VALUES(correction_of_document_id))"
         in V1
@@ -402,7 +996,21 @@ def test_delivery_confirmation_requires_external_message_id():
 
 def test_outbox_openapi_documents_singleton_lease_and_unknown_outcome_policy():
     specification = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
-    contract = specification["x-hmac-actions"]["delivery-outbox-contract"]
+    extension = specification["x-hmac-actions"]
+    contract = extension["delivery-outbox-contract"]
+    disabled = extension["permanently-disabled-actions"]
+    assert disabled == {
+        "distribution_mode": "web_only",
+        "http_status": 410,
+        "error": "outbound_delivery_disabled",
+        "actions": ["enqueue_delivery_outbox", "claim_delivery_outbox"],
+    }
+    assert contract["deprecated"] is True
+    assert contract["historical_schema_only"] is True
+    assert contract["new_enqueue_enabled"] is False
+    assert contract["new_claim_enabled"] is False
+    assert "enqueue_delivery_outbox" not in extension["actions"]
+    assert "claim_delivery_outbox" not in extension["actions"]
     assert contract["claim"] == {
         "max_items": 1,
         "default_lease_seconds": 900,
@@ -615,9 +1223,12 @@ def test_all_api_response_shapes_enforce_250kb_budget():
     assert "X-Response-Bytes" in V1[V1.index("function v1_export_events_csv") :]
 
 
-def test_legacy_query_adapters_publish_90_day_migration_headers():
+def test_legacy_query_adapters_publish_headers_only_after_recorded_cutover():
     assert "function legacy_adapter_headers" in API
-    assert "2026-10-14T00:00:00Z" in API
+    assert "governance_release_state" in API
+    assert "empty($release['cutover_at'])" in API
+    assert "time() < $cutoverTimestamp" in API
+    assert "legacy_api_sunset_at" not in API
     for header in (
         "Deprecation: true",
         "Sunset: ",
@@ -626,7 +1237,9 @@ def test_legacy_query_adapters_publish_90_day_migration_headers():
     ):
         assert header in API
     handle_read = API[API.index("function handle_read") :]
-    assert "legacy_adapter_headers($config, $action)" in handle_read
+    assert handle_read.index("v1_require_schema_version($pdo, $config)") < handle_read.index(
+        "legacy_adapter_headers($pdo, $config, $action)"
+    )
 
 
 def test_feedback_rate_limit_uses_private_salt_and_retry_contract():
@@ -658,6 +1271,12 @@ def test_public_events_and_linked_records_follow_source_right_revocation():
     ]
     assert "EXISTS (SELECT 1" in event_visibility
     assert "NOT EXISTS" not in event_visibility
+    assert "visibility_identity_ea.actor_id = " in event_visibility
+    assert ".identity_actor_id" in event_visibility
+    assert r"visibility_identity_ea.review_status = \'approved\'" in event_visibility
+    assert r"visibility_identity_a.review_status = \'approved\'" in event_visibility
+    assert r"visibility_identity_a.record_status = \'active\'" in event_visibility
+    assert r"NULLIF(TRIM(visibility_identity_a.display_name), \'\') IS NOT NULL" in event_visibility
     assert V1.count("v1_event_visibility_sql($config, 'e')") >= 6
     for expression in (
         "tl.document_id",
@@ -681,7 +1300,44 @@ def test_ingest_cannot_grant_telegram_rights_or_publish_telegram_only_events():
         "$evidenceMissing = !$hasTelegramEvidence && !$hasIndependentEvidence" in ingest
     )
     assert "if ($telegramOnly) { $verification = 'signal'; }" in ingest
-    assert "$requiresReview = $telegramOnly || $evidenceMissing ||" in ingest
+    assert "$requiresReview = $identityStatus !== 'complete' || $telegramOnly || $evidenceMissing" in ingest
+
+
+def test_official_ingest_never_auto_publishes_non_public_or_unidentified_company_events():
+    ingest = V1[
+        V1.index("function upsert_governance_snapshot") : V1.index(
+            "function enqueue_delivery_outbox"
+        )
+    ]
+    assert "SELECT stock_code,listing_status,record_status" in ingest
+    assert "array('listed','suspended')" in ingest
+    assert "$companyAutoPublishEligible" in ingest
+    assert "|| !$companyAutoPublishEligible || !$approvedIdentityActorRelation" in ingest
+    # This eligibility check is deliberately absent from manual review: an
+    # editor can publish a justified unlisted-company event after review.
+    review = V1[
+        V1.index("function v1_admin_review_event") : V1.index(
+            "function v1_admin_review_event_actor"
+        )
+    ]
+    assert "companyAutoPublishEligible" not in review
+
+
+def test_official_ingest_creates_only_pending_identifiable_filer_relations():
+    ingest = V1[
+        V1.index("function upsert_governance_snapshot") : V1.index(
+            "function enqueue_delivery_outbox"
+        )
+    ]
+    assert "isset($event['actor']) && is_array($event['actor'])" in ingest
+    assert "isset($event['event_actor']) && is_array($event['event_actor'])" in ingest
+    assert "$candidateDisplayName !== ''" in ingest
+    assert "$candidateRole === 'filer'" in ingest
+    assert "$candidateReviewStatus === 'pending'" in ingest
+    assert "$candidateRecordStatus === 'inactive'" in ingest
+    assert "$candidateRelationReview === 'pending'" in ingest
+    assert "VALUES (?,?,?,NULL,?,NULL,\\'[]\\',NULL,\\'pending\\',\\'inactive\\',?,?)" in ingest
+    assert "VALUES (?,?,\\'filer\\',\\'pending\\',?,?)" in ingest
 
 
 def test_hmac_ingest_cannot_reactivate_or_overwrite_administered_source_rights():
@@ -760,6 +1416,12 @@ def test_editor_review_requires_verified_or_withdrawn_evidence_and_fresh_token()
     )
     assert "verified_evidence_required_before_publication" in review
     assert "publishable_evidence_required_before_publication" in review
+    assert "approved_event_actor_required_before_publication" in review
+    assert "review_identity_ea.actor_id = ?" in review
+    assert r"review_identity_ea.review_status = \'approved\'" in review
+    assert r"review_identity_a.review_status = \'approved\'" in review
+    assert r"review_identity_a.record_status = \'active\'" in review
+    assert r"NULLIF(TRIM(review_identity_a.display_name), \'\') IS NOT NULL" in review
     assert "v1_document_visibility_sql('review_d', 'review_sr')" in review
     assert "expected_updated_at" in review
     assert "stale_review" in review
@@ -842,7 +1504,8 @@ def test_official_followups_are_bounded_unambiguous_and_preserve_canonical_event
     assert "V1_CORRECTION_LOOKBACK_DAYS" in ingest
     assert "LIMIT 2 FOR UPDATE" in ingest
     assert "count($candidates) !== 1" in ingest
-    assert "count($eventCandidates) === 1" in ingest
+    assert "$eventCandidates" not in ingest
+    assert "previousEventStmt" not in ingest
     assert "$eventByIdStmt" in ingest
     assert (
         "$versionNo = max($versionNo, ((int)$previousDocument['version_no']) + 1)"
@@ -877,3 +1540,144 @@ def test_editorial_enums_metrics_and_parent_companies_are_revalidated_server_sid
     ]
     assert "event_id/campaign_id: company mismatch" in references
     assert "company_id: parent company mismatch" in references
+
+
+def test_schema_manifest_is_exact_contiguous_and_covers_slot_claims():
+    manifest = V1[V1.index("function v1_expected_migration_manifest") : V1.index("function v1_require_schema_version")]
+    assert "009_dart_global_quota_ledger" in manifest
+    assert "010_official_slot_claim_ledger" in manifest
+    assert "migration_manifest_cardinality_mismatch" in manifest
+    assert "migration_manifest_entry_mismatch" in manifest
+    assert "migration_checksum" in manifest
+    assert "SELECT MAX(" not in manifest
+    assert "009_dart_global_quota_ledger" in DART_QUOTA_MIGRATION
+    assert "activist_official_site_snapshots" in OFFICIAL_SITE_MIGRATION
+    assert "activist_official_slot_claims" in SLOT_CLAIM_MIGRATION
+
+
+def test_schema_manifest_migrations_never_bless_preexisting_conflicts():
+    assert "activist_008_record_migration" in OFFICIAL_SITE_MIGRATION
+    assert "008 migration name conflict" in OFFICIAL_SITE_MIGRATION
+    assert "008 migration checksum conflict" in OFFICIAL_SITE_MIGRATION
+    assert "ON DUPLICATE KEY UPDATE migration_name=VALUES(migration_name)" not in OFFICIAL_SITE_MIGRATION
+    assert "ON DUPLICATE KEY UPDATE migration_checksum=VALUES(migration_checksum)" not in OFFICIAL_SITE_MIGRATION
+    assert "009 prerequisite migration manifest incomplete" in DART_QUOTA_MIGRATION
+    assert "009 migration manifest conflict" in DART_QUOTA_MIGRATION
+    assert "ON DUPLICATE KEY UPDATE" not in DART_QUOTA_MIGRATION
+    assert "010 prerequisite migration manifest incomplete" in SLOT_CLAIM_MIGRATION
+    assert "010 migration manifest conflict" in SLOT_CLAIM_MIGRATION
+    assert "information_schema.columns" in SLOT_CLAIM_MIGRATION
+    assert "information_schema.statistics" in SLOT_CLAIM_MIGRATION
+    assert "ON DUPLICATE KEY UPDATE" not in SLOT_CLAIM_MIGRATION
+
+
+def test_official_site_receipt_is_atomic_exact_and_never_downgrades_existing_content():
+    section = V1[V1.index("function v1_official_site_contract_error") : V1.index("function upsert_governance_snapshot")]
+    assert "v1_strict_canonical_json_encode($payloadCore" in section
+    assert "connector_total_count_mismatch" in section
+    assert "expected_ack_count" in section
+    assert "official_site_source_right_ineligible" in section
+    assert "v1_official_site_stable_id('site-doc',array($connectorId,$externalId,$contentHash),32)" in section
+    assert "SET retrieved_at=GREATEST(retrieved_at,?),updated_at=?" in section
+    assert "correction_of_document_id" in section and "$versionNo = $latest ? (int)$latest['version_no'] + 1 : 1" in section
+    assert "publication_status=VALUES(publication_status)" not in section
+    assert "official_site_event_identity_conflict" in section
+    assert "official_site_review_idempotency_conflict" in section
+    assert "official_site_tombstone_idempotency_conflict" in section
+    assert "connector_id, receipt_sha256" in OFFICIAL_SITE_MIGRATION
+    assert "idx_official_site_review_snapshot_entity" in OFFICIAL_SITE_MIGRATION
+    assert "uq_official_site_review_snapshot_entity" not in OFFICIAL_SITE_MIGRATION
+
+
+def test_official_site_source_text_and_identity_dates_are_not_silently_transformed():
+    section = V1[V1.index("function upsert_official_site_snapshot") : V1.index("function upsert_governance_snapshot")]
+    assert "$title = (string)($document['title'] ?? '')" in section
+    assert "$title = (string)($event['title'] ?? '')" in section
+    assert "mb_substr($document['title']" not in section
+    assert "mb_substr($event['title']" not in section
+    assert "v1_normalize_identity_datetime($event['occurred_at'] ?? null,false)" in section
+    assert "v1_normalize_identity_datetime($event['deadline_at'] ?? null,false)" in section
+    assert "identity_effective_at'],$occurredAt" in section
+    assert "identity_deadline_at'],$deadlineAt" in section
+
+
+def test_official_run_ledger_is_slot_attributed_and_python_digest_compatible():
+    section = V1[V1.index("function v1_official_run_metric") : V1.index("function v1_ops_release_evidence")]
+    assert "v1_strict_canonical_json_encode($row" in section
+    assert "trigger_created_at" in section
+    assert "v1_official_scheduled_run_matches" in section
+    assert "v1_kst_observation_date($sortAt)" in section
+    assert "modify('-1 day')" in section and "modify('+1 day')" in section
+    assert "scheduled_slot_at" in section and "_sort_at" in section
+    assert "$triggerTime < $nextSlot" not in section
+    assert "slot_claim_id" in section
+    assert "v1_official_next_cadence_slot" in section
+    assert "next_cadence_slot_at" in section
+    assert "claim_lag_seconds" in section
+    assert "in_array($source,$selectedSources,true)" in section
+
+
+def test_health_accepts_only_complete_acknowledged_scheduled_runs_and_reports_deployment():
+    section = V1[V1.index("function v1_ops_health") : V1.index("function v1_kind_source_right_eligibility")]
+    assert "v1_official_scheduled_run_matches($ledger)" in section
+    assert "(int)$ledger['raw_count'] === (int)$ledger['acknowledged_count']" in section
+    assert "$outcome['raw_count'] === $outcome['acknowledged_count']" in section
+    assert "last_scheduled_success_at" in section
+    assert "active_deployment_status" in section
+
+
+def test_dart_quota_is_global_kst_day_atomic_and_idempotent():
+    spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    assert {"get", "post"} <= spec["paths"]["/ops/dart-quota"].keys()
+    assert "activist_dart_quota_days" in DART_QUOTA_MIGRATION
+    assert "activist_dart_quota_attempts" in DART_QUOTA_MIGRATION
+    section = V1[V1.index("function v1_dart_quota_server_day") : V1.index("function v1_ops_official_site_candidates")]
+    assert "Asia/Seoul" in section
+    assert "used_count=used_count+1" in section
+    assert "used_count<limit_count" in section
+    assert "dart_quota_idempotency_conflict" in section
+    assert "opendart_status_020" in section
+    assert "COALESCE(blocked_until,?)" in section
+    assert "'accepted'=>$action === 'status' ? 0 : 1" in section
+
+
+def test_official_slot_claims_use_durable_global_oldest_identity_and_epoch_guard():
+    spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    assert {"get", "post"} <= spec["paths"]["/ops/official-slot-claims"].keys()
+    assert {"get", "post"} <= spec["paths"]["/admin/official-slot-epoch"].keys()
+    section = V1[
+        V1.index("function v1_official_slot_claim_error") : V1.index(
+            "function v1_official_run_ledger_row"
+        )
+    ]
+    assert "official_slot_claim_activated" in section
+    assert "modify('+1 day')->setTime(0,0,0)" in section
+    assert "foreach (array('0,15,30,45 22-23 * * *','0,15,30,45 0-14 * * *','0,30 15-21 * * *') as $family)" in section
+    assert "sort($dueSlots,SORT_STRING)" in section
+    assert "official_slot_repair_not_oldest" in section
+    assert "rerun_after_next_cadence" in section
+    assert "official_slot_epoch_reset_requires_closed_release" in section
+    assert "official_slot_epoch_version_conflict" in section
+    assert "claims_preserved'=>true" in section
+    evidence = V1[
+        V1.index("function v1_ops_release_evidence") : V1.index(
+            "function v1_release_request_id"
+        )
+    ]
+    assert "official_slot_epoch_boundary_in_evidence_range" in evidence
+
+
+def test_slot_claim_migration_has_canonical_checksum_and_exact_shape_guards():
+    assert "2b8be6264c8a4f3be038729fbf6bbe22e720457874f02c89c82d33db9dc78f51" in SLOT_CLAIM_MIGRATION
+    assert "slot claim ledger column shape mismatch" in SLOT_CLAIM_MIGRATION
+    assert "slot claim ledger index shape mismatch" in SLOT_CLAIM_MIGRATION
+    assert "slot claim epoch index shape mismatch" in SLOT_CLAIM_MIGRATION
+
+
+def test_canonical_route_and_csv_formula_guards_apply_before_dispatch():
+    request_path = V1[V1.index("function v1_canonical_route_path") : V1.index("function v1_respond")]
+    assert request_path.count("rawurldecode") == 1
+    assert "v1_request_path(); // canonicalized once for both CORS and dispatch" in API
+    csv = V1[V1.index("function v1_csv_export_cell") : V1.index("function v1_export_events_csv")]
+    assert "=+\\-@" in csv
+    assert "v1_csv_export_cell" in V1[V1.index("function v1_export_events_csv") : V1.index("function v1_events_atom")]

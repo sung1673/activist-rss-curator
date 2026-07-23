@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://news.bside.ai/schemas/release-approval.schema.json",
+  "title": "BSIDE protected release approval evidence",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "environment",
+    "evidence_source",
+    "is_synthetic",
+    "collected_at",
+    "code_revision",
+    "approved_revision",
+    "usability_dataset_sha256",
+    "same_story_dataset_sha256",
+    "relevance_dataset_sha256",
+    "approvals",
+    "release_approved"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "environment": {"const": "production"},
+    "evidence_source": {"type": "string", "minLength": 1},
+    "is_synthetic": {"const": false},
+    "collected_at": {"type": "string", "format": "date-time"},
+    "code_revision": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+    "approved_revision": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+    "usability_dataset_sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+    "same_story_dataset_sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+    "relevance_dataset_sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+    "approvals": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": [
+          "role",
+          "decision",
+          "decided_at",
+          "approver_reference",
+          "evidence_uri",
+          "evidence_sha256"
+        ],
+        "properties": {
+          "role": {"enum": ["legal", "editorial", "product"]},
+          "decision": {"enum": ["approved", "rejected"]},
+          "decided_at": {"type": "string", "format": "date-time"},
+          "approver_reference": {"type": "string", "minLength": 1},
+          "evidence_uri": {"type": "string", "minLength": 1},
+          "evidence_sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "release_approved": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

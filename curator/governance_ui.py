@@ -10,6 +10,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_API_BASE = "/api/v1"
+DEFAULT_WEB_BASE = "https://news.bside.ai"
+DEFAULT_BUILD_SHA = "development"
 HTML_BUDGET_BYTES = 250_000
 ASSET_GZIP_BUDGET_BYTES = 250_000
 
@@ -22,6 +24,26 @@ def configured_api_base(explicit: str | None = None) -> str:
         if value:
             return value
     return DEFAULT_API_BASE
+
+
+def configured_web_base(explicit: str | None = None) -> str:
+    if explicit is not None and explicit.strip():
+        return explicit.strip()
+    for name in ("GOVERNANCE_WEB_BASE_URL", "BSIDE_PUBLIC_WEB_URL"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return DEFAULT_WEB_BASE
+
+
+def configured_build_sha(explicit: str | None = None) -> str:
+    if explicit is not None and explicit.strip():
+        return explicit.strip()
+    for name in ("GOVERNANCE_BUILD_SHA", "GITHUB_SHA"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return DEFAULT_BUILD_SHA
 
 
 def normalize_api_base(value: str) -> str:
@@ -46,9 +68,35 @@ def normalize_api_base(value: str) -> str:
     return normalized or DEFAULT_API_BASE
 
 
-def config_javascript(api_base: str) -> str:
+def normalize_web_base(value: str) -> str:
+    raw = str(value or DEFAULT_WEB_BASE).strip()
+    parsed = urlsplit(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("governance web base must be an absolute http or https URL")
+    if parsed.query or parsed.fragment or parsed.username or parsed.password:
+        raise ValueError("governance web base must not contain credentials, a query, or a fragment")
+    path = parsed.path.rstrip("/")
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
+
+def normalize_build_sha(value: str) -> str:
+    raw = str(value or DEFAULT_BUILD_SHA).strip().lower()
+    if raw == DEFAULT_BUILD_SHA or (len(raw) in {40, 64} and all(char in "0123456789abcdef" for char in raw)):
+        return raw
+    raise ValueError("governance build SHA must be a 40- or 64-character hexadecimal digest")
+
+
+def config_javascript(
+    api_base: str,
+    web_base: str = DEFAULT_WEB_BASE,
+    build_sha: str | None = None,
+) -> str:
     payload = json.dumps(
-        {"apiBase": normalize_api_base(api_base)},
+        {
+            "apiBase": normalize_api_base(api_base),
+            "webBase": normalize_web_base(web_base),
+            "buildSha": normalize_build_sha(configured_build_sha(build_sha)),
+        },
         ensure_ascii=False,
         separators=(",", ":"),
     ).replace("</", "<\\/").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
@@ -75,25 +123,37 @@ def assert_asset_budget(governance_dir: Path) -> dict[str, int]:
     return budget
 
 
-def build_governance_ui(root: Path = PROJECT_ROOT, api_base: str | None = None) -> dict[str, object]:
+def build_governance_ui(
+    root: Path = PROJECT_ROOT,
+    api_base: str | None = None,
+    web_base: str | None = None,
+) -> dict[str, object]:
     governance_dir = root / "public" / "governance"
     governance_dir.mkdir(parents=True, exist_ok=True)
     normalized = normalize_api_base(configured_api_base(api_base))
+    normalized_web = normalize_web_base(configured_web_base(web_base))
+    normalized_build = normalize_build_sha(configured_build_sha())
     config_path = governance_dir / "config.js"
-    config_path.write_text(config_javascript(normalized), encoding="utf-8", newline="\n")
-    return {"api_base": normalized, **assert_asset_budget(governance_dir)}
+    config_path.write_text(config_javascript(normalized, normalized_web, normalized_build), encoding="utf-8", newline="\n")
+    return {
+        "api_base": normalized,
+        "web_base": normalized_web,
+        "build_sha": normalized_build,
+        **assert_asset_budget(governance_dir),
+    }
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Configure and validate the public governance intelligence UI.")
     parser.add_argument("--root", default=str(PROJECT_ROOT))
     parser.add_argument("--api-base", default=None)
+    parser.add_argument("--web-base", default=None)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
-    result = build_governance_ui(Path(args.root).resolve(), args.api_base)
+    result = build_governance_ui(Path(args.root).resolve(), args.api_base, args.web_base)
     print("Governance UI ready: " + ", ".join(f"{key}={value}" for key, value in result.items()))
     return 0
 

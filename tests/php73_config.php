@@ -13,6 +13,10 @@ return array(
     'api_secret' => 'php73-ci-only-hmac-key-00000000000000000000000000000000',
     'allowed_origin' => 'http://127.0.0.1:8787',
     'public_api_cors_origins' => array('http://127.0.0.1:8787'),
+    'role_token_hashes' => array(
+        'admin' => array('c8e80d02ecd972e840698ade74adc37d485b9c2077fe5fc1d1fde57f97de0a74'),
+    ),
+    'governance_preview_token_hash' => '39e7a8a5d3c11b6b631e0bb1bce952feca2e6960bae9aef6a409f4086c00fa93',
     'max_body_bytes' => 2097152,
     'telegram_signal_rebuild_lease_seconds' => 1,
 );

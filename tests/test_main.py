@@ -183,37 +183,22 @@ def test_main_fails_when_run_metrics_cannot_be_written(tmp_path, monkeypatch) ->
         main()
 
 
-def test_legacy_direct_delivery_never_enqueues_remote_outbox(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_legacy_direct_setting_cannot_reenable_delivery(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("CURATOR_DELIVERY_MODE", "legacy-direct")
     monkeypatch.delenv("CURATOR_DISABLE_TELEGRAM_SEND", raising=False)
     calls: list[str] = []
 
-    def fake_direct(*_args, **_kwargs):  # type: ignore[no-untyped-def]
-        calls.append("direct")
-        return {"telegram_sent": 1, "telegram_failed": 0}
-
-    def fail_enqueue(*_args, **_kwargs):  # type: ignore[no-untyped-def]
-        raise AssertionError("legacy-direct must not enqueue the remote outbox")
-
-    monkeypatch.setattr("curator.main.publish_hourly_telegram_update", fake_direct)
-    monkeypatch.setattr("curator.main.enqueue_unsent_telegram_clusters_to_remote", fail_enqueue)
-
     summary = publish_telegram_for_run({}, config, now, [], {"remote_api_failed": 0})
 
-    assert calls == ["direct"]
-    assert summary["telegram_sent"] == 1
+    assert calls == []
+    assert summary["telegram_sent"] == 0
+    assert summary["telegram_failed"] == 0
     assert summary["telegram_outbox_enqueue_skipped"] == 1
 
 
 def test_ingest_disabled_delivery_neither_sends_nor_enqueues(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("CURATOR_DELIVERY_MODE", "disabled")
     monkeypatch.delenv("CURATOR_DISABLE_TELEGRAM_SEND", raising=False)
-
-    def fail_transport(*_args, **_kwargs):  # type: ignore[no-untyped-def]
-        raise AssertionError("ingest-only mode must not invoke any Telegram transport")
-
-    monkeypatch.setattr("curator.main.publish_hourly_telegram_update", fail_transport)
-    monkeypatch.setattr("curator.main.enqueue_unsent_telegram_clusters_to_remote", fail_transport)
 
     summary = publish_telegram_for_run({}, config, now, [], {"remote_api_failed": 0})
 

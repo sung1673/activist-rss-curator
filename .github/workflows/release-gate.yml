@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       evidence_artifact_name:
-        description: Artifact containing shadow.jsonl, operations.jsonl, performance.jsonl, benchmark.json
+        description: Protected artifact containing all six production release-evidence files
         required: true
         default: governance-release-evidence
         type: string
@@ -27,10 +27,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout evaluated revision
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -45,6 +45,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
           EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
           EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_WORKFLOW_PATH: .github/workflows/release-evidence.yml
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           MAX_RUN_AGE_HOURS: "72"
         shell: bash
         run: |
@@ -53,9 +55,9 @@ jobs:
             echo "::error::evidence_run_id must contain digits only."
             exit 1
           fi
-          IFS=$'\t' read -r conclusion head_sha created_at < <(
+          IFS=$'\t' read -r conclusion head_sha created_at workflow_path head_branch < <(
             gh api "repos/$GH_REPO/actions/runs/$EVIDENCE_RUN_ID" \
-              --jq '[.conclusion, .head_sha, .created_at] | @tsv'
+              --jq '[.conclusion, .head_sha, .created_at, .path, .head_branch] | @tsv'
           )
           if [[ "$conclusion" != "success" ]]; then
             echo "::error::Evidence workflow run did not conclude successfully."
@@ -63,6 +65,14 @@ jobs:
           fi
           if [[ "${head_sha,,}" != "${EXPECTED_SHA,,}" ]]; then
             echo "::error::Evidence workflow run revision does not match the evaluated revision."
+            exit 1
+          fi
+          if [[ "$workflow_path" != "$EXPECTED_WORKFLOW_PATH" ]]; then
+            echo "::error::Evidence artifact was not produced by the protected release-evidence workflow."
+            exit 1
+          fi
+          if [[ "$head_branch" != "$DEFAULT_BRANCH" || "$GITHUB_REF_NAME" != "$DEFAULT_BRANCH" ]]; then
+            echo "::error::Release evaluation and its evidence are restricted to the default branch."
             exit 1
           fi
           EVIDENCE_CREATED_AT="$created_at" python - <<'PY'
@@ -80,7 +90,7 @@ jobs:
           echo "created_at=$created_at" >> "$GITHUB_OUTPUT"
 
       - name: Download production evidence
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ inputs.evidence_artifact_name }}
           path: evidence
@@ -92,7 +102,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for file in shadow.jsonl operations.jsonl performance.jsonl benchmark.json; do
+          for file in shadow.jsonl operations.jsonl performance.jsonl benchmark.json usability.json release-approval.json; do
             test -s "evidence/$file" || {
               echo "::error::Missing or empty evidence/$file"
               exit 1
@@ -108,6 +118,8 @@ jobs:
           --operations evidence/operations.jsonl
           --performance evidence/performance.jsonl
           --benchmark evidence/benchmark.json
+          --usability evidence/usability.json
+          --approval evidence/release-approval.json
           --expected-revision ${{ github.sha }}
           --evidence-as-of ${{ steps.evidence_run.outputs.created_at }}
           --output release-report/release-gate.json
@@ -115,7 +127,7 @@ jobs:
 
       - name: Preserve release decision and shadow report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: governance-release-decision-${{ github.run_id }}
           path: release-report

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -10,15 +11,34 @@ from zoneinfo import ZoneInfo
 
 from .config import load_config
 from .governance import stable_id
+from .dart_quota import (
+    durable_dart_quota_client,
+    durable_dart_quota_configured,
+    durable_dart_quota_required,
+)
 from .official_sources import (
     DartConnector,
+    DartQuotaExceededError,
     KindConnector,
     OfficialDisclosure,
     disclosure_payloads,
     parse_dart_disclosure,
     parse_kind_disclosure,
 )
+from .official_source_rights import (
+    OfficialSourceRightClient,
+    OfficialSourceRightEligibility,
+    OfficialSourceRightError,
+)
+from .official_schedule import (
+    COMPANY_MASTER_CRON_EXPRESSION,
+    INCREMENTAL_CRON_EXPRESSIONS,
+    next_incremental_slot,
+    slot_iso,
+    slot_matches_incremental_schedule,
+)
 from .remote_api import post_remote_action, remote_api_configured
+from .shadow_engine import write_candidate_snapshot_from_events
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +59,9 @@ def _date_env(name: str, default: date) -> date:
 
 
 def source_right_payloads(config: dict[str, object], *, include_kind: bool) -> list[dict[str, object]]:
+    # OpenDART's public metadata right is a repository-owned bootstrap record.
+    # KIND is deliberately absent: it must already be registered by an editor
+    # and pass the authenticated eligibility preflight before every ingest.
     records: list[dict[str, object]] = [
         {
             "source_right_id": "official:dart",
@@ -53,24 +76,9 @@ def source_right_payloads(config: dict[str, object], *, include_kind: bool) -> l
             "status": "active",
         }
     ]
-    if include_kind:
-        records.append(
-            {
-                "source_right_id": "official:kind",
-                "source_type": "official_disclosure",
-                "source_key": "kind",
-                "source_name": "KRX KIND",
-                "permission_scope": "public-disclosure metadata and source links",
-                "evidence_uri": "https://kind.krx.co.kr/",
-                "valid_from": "2021-01-01T00:00:00+00:00",
-                "ai_allowed": True,
-                "redistribution_allowed": True,
-                "status": "active",
-            }
-        )
     # Telegram and other licensed-source rights are operational records managed
-    # through the authenticated SourceRight API.  An official-disclosure run
-    # must never overwrite an editor-approved right with repository defaults.
+    # through the authenticated SourceRight API. An official-disclosure run
+    # must never create or overwrite an editor-approved right with defaults.
     return records
 
 
@@ -105,11 +113,216 @@ def _int_value(value: object, default: int = 0) -> int:
         return default
 
 
+def _code_revision() -> str | None:
+    value = (os.environ.get("GITHUB_SHA") or os.environ.get("CURATOR_CODE_REVISION") or "").strip().casefold()
+    if 7 <= len(value) <= 64 and all(character in "0123456789abcdef" for character in value):
+        return value
+    return None
+
+
+def _run_provenance(
+    *,
+    current: datetime,
+    idempotency_key: str | None,
+    company_master_sync: bool,
+) -> dict[str, object]:
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "").strip().casefold()
+    event_schedule = os.environ.get("CURATOR_EVENT_SCHEDULE", "").strip()
+    has_slot_claim = bool(
+        os.environ.get("CURATOR_OFFICIAL_SLOT_CLAIM_ID", "").strip()
+    )
+    if idempotency_key and idempotency_key.startswith("official-backfill-v1:"):
+        run_kind = "backfill"
+        claim_values: dict[str, object] = {
+            "scheduled_slot_at": None,
+            "trigger_created_at": None,
+            "slot_claim_id": None,
+            "github_run_id": None,
+            "github_run_attempt": None,
+            "slot_claimed_at": None,
+            "next_cadence_slot_at": None,
+            "trigger_lag_seconds": None,
+            "claim_lag_seconds": None,
+            "slot_claim_late": None,
+        }
+    elif company_master_sync or (
+        event_name == "schedule" and event_schedule == COMPANY_MASTER_CRON_EXPRESSION
+    ):
+        run_kind = "company_master"
+        claim_values = {
+            "scheduled_slot_at": None,
+            "trigger_created_at": None,
+            "slot_claim_id": None,
+            "github_run_id": None,
+            "github_run_attempt": None,
+            "slot_claimed_at": None,
+            "next_cadence_slot_at": None,
+            "trigger_lag_seconds": None,
+            "claim_lag_seconds": None,
+            "slot_claim_late": None,
+        }
+    elif event_name == "schedule" or has_slot_claim:
+        if event_schedule not in INCREMENTAL_CRON_EXPRESSIONS:
+            raise ValueError("scheduled official ingest has an unknown event schedule")
+        required = {
+            "slot_claim_id": os.environ.get("CURATOR_OFFICIAL_SLOT_CLAIM_ID", "").strip(),
+            "scheduled_slot_at": os.environ.get(
+                "CURATOR_OFFICIAL_SCHEDULED_SLOT_AT", ""
+            ).strip(),
+            "trigger_created_at": os.environ.get(
+                "CURATOR_GITHUB_RUN_CREATED_AT", ""
+            ).strip(),
+            "slot_claimed_at": os.environ.get(
+                "CURATOR_OFFICIAL_SLOT_CLAIMED_AT", ""
+            ).strip(),
+            "next_cadence_slot_at": os.environ.get(
+                "CURATOR_OFFICIAL_NEXT_CADENCE_SLOT_AT", ""
+            ).strip(),
+            "trigger_lag_seconds": os.environ.get(
+                "CURATOR_OFFICIAL_TRIGGER_LAG_SECONDS", ""
+            ).strip(),
+            "claim_lag_seconds": os.environ.get(
+                "CURATOR_OFFICIAL_CLAIM_LAG_SECONDS", ""
+            ).strip(),
+            "slot_claim_late": os.environ.get(
+                "CURATOR_OFFICIAL_SLOT_LATE", ""
+            ).strip(),
+            "github_run_id": os.environ.get("CURATOR_GITHUB_RUN_ID", "").strip(),
+            "github_run_attempt": os.environ.get(
+                "CURATOR_GITHUB_RUN_ATTEMPT", ""
+            ).strip(),
+        }
+        missing = sorted(key for key, value in required.items() if value == "")
+        if missing:
+            raise ValueError(
+                "scheduled official ingest requires durable slot claim fields: "
+                + ", ".join(missing)
+            )
+        claim_id = required["slot_claim_id"]
+        github_run_id = required["github_run_id"]
+        attempt_raw = required["github_run_attempt"]
+        if (
+            re.fullmatch(r"[0-9A-Za-z_.:-]{1,96}", claim_id) is None
+            or not github_run_id.isdigit()
+            or not attempt_raw.isdigit()
+            or int(attempt_raw) < 1
+            or github_run_id != os.environ.get("GITHUB_RUN_ID", "").strip()
+            or attempt_raw != os.environ.get("GITHUB_RUN_ATTEMPT", "").strip()
+        ):
+            raise ValueError("scheduled official ingest has an invalid durable claim identity")
+
+        def claim_timestamp(field: str) -> datetime:
+            raw = required[field]
+            try:
+                parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError(f"{field} must be an ISO timestamp") from exc
+            if parsed.tzinfo is None:
+                raise ValueError(f"{field} must include a timezone")
+            return parsed.astimezone(timezone.utc).replace(microsecond=0)
+
+        slot = claim_timestamp("scheduled_slot_at")
+        trigger = claim_timestamp("trigger_created_at")
+        claimed = claim_timestamp("slot_claimed_at")
+        next_slot = claim_timestamp("next_cadence_slot_at")
+        if not slot_matches_incremental_schedule(slot, event_schedule):
+            raise ValueError("durable slot claim does not belong to event schedule")
+        if next_slot != next_incremental_slot(slot) or trigger < slot or claimed < trigger:
+            raise ValueError("durable slot claim timestamps are inconsistent")
+        trigger_lag_raw = required["trigger_lag_seconds"]
+        claim_lag_raw = required["claim_lag_seconds"]
+        if not trigger_lag_raw.isdigit() or not claim_lag_raw.isdigit():
+            raise ValueError("durable slot claim lag fields must be non-negative integers")
+        trigger_lag = int(trigger_lag_raw)
+        claim_lag = int(claim_lag_raw)
+        late_raw = required["slot_claim_late"]
+        if late_raw not in {"0", "1"}:
+            raise ValueError("durable slot claim late field must be 0 or 1")
+        late = late_raw == "1"
+        if (
+            trigger_lag != int((trigger - slot).total_seconds())
+            or claim_lag != int((claimed - slot).total_seconds())
+            or late is not (claimed >= next_slot)
+        ):
+            raise ValueError("durable slot claim lag/late fields are inconsistent")
+        run_kind = "scheduled_incremental"
+        claim_values = {
+            "scheduled_slot_at": slot_iso(slot),
+            "trigger_created_at": slot_iso(trigger),
+            "slot_claim_id": claim_id,
+            "github_run_id": github_run_id,
+            "github_run_attempt": int(attempt_raw),
+            "slot_claimed_at": slot_iso(claimed),
+            "next_cadence_slot_at": slot_iso(next_slot),
+            "trigger_lag_seconds": trigger_lag,
+            "claim_lag_seconds": claim_lag,
+            "slot_claim_late": late,
+        }
+    else:
+        run_kind = "manual"
+        claim_values = {
+            "scheduled_slot_at": None,
+            "trigger_created_at": None,
+            "slot_claim_id": None,
+            "github_run_id": None,
+            "github_run_attempt": None,
+            "slot_claimed_at": None,
+            "next_cadence_slot_at": None,
+            "trigger_lag_seconds": None,
+            "claim_lag_seconds": None,
+            "slot_claim_late": None,
+        }
+    return {
+        "run_kind": run_kind,
+        "event_schedule": event_schedule or None,
+        **claim_values,
+        "company_master_sync": company_master_sync,
+    }
+
+
+def _document_source(document: dict[str, object]) -> str:
+    source_right_id = str(document.get("source_right_id") or "").strip().casefold()
+    return source_right_id.split(":", 1)[1] if source_right_id.startswith("official:") else "unknown"
+
+
 def _event_document_ids(event: dict[str, object]) -> set[str]:
     values = event.get("document_ids")
     if not isinstance(values, list):
         return set()
     return {str(value) for value in values if value}
+
+
+def _remote_acknowledges_payload(
+    response: dict[str, object],
+    payload: dict[str, object],
+) -> bool:
+    """Require the server to acknowledge every submitted governance row.
+
+    The write endpoint intentionally returns attempted upsert counts (including
+    idempotent updates).  Treat a syntactically successful response with missing
+    or partial counts as a failed batch so a backfill window is never checkpointed
+    after silent data loss.
+    """
+
+    if response.get("ok") is not True:
+        return False
+    upserted = response.get("upserted")
+    if not isinstance(upserted, dict):
+        return False
+    for key in ("companies", "documents", "events", "source_rights"):
+        if key not in upserted:
+            return False
+        expected = len(_payload_records(payload, key))
+        if _int_value(upserted.get(key), default=-1) != expected:
+            return False
+    run = payload.get("run")
+    expected_runs = 1 if isinstance(run, dict) and bool(run) else 0
+    if _int_value(upserted.get("runs"), default=-1) != expected_runs:
+        return False
+    return (
+        "source_rights_rejected" in upserted
+        and _int_value(upserted.get("source_rights_rejected"), default=-1) == 0
+    )
 
 
 def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object]) -> dict[str, int]:
@@ -124,13 +337,25 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
             "official_remote_skipped": 1,
             "official_remote_batches_attempted": 0,
             "official_remote_run_persisted": 0,
+            "official_remote_ack_mismatches": 0,
+            "official_remote_raw_count": len(documents),
+            "official_remote_ack_count": 0,
         }
 
     # Event/document chunks stay aligned by document_id. Company master-only
     # chunks are sent first so foreign keys are available for later batches.
     company_by_id = {str(row.get("company_id") or ""): row for row in companies}
     document_chunks = list(_chunks(documents)) or [[]]
-    synced = failed = attempted = 0
+    synced = failed = attempted = ack_mismatches = 0
+    acknowledged_documents = 0
+    selected_sources = {
+        value.strip().casefold()
+        for value in str(run.get("source_key") or "").split("+")
+        if value.strip().casefold() in {"dart", "kind"}
+    }
+    source_ack_counts: dict[str, int] = {
+        source: 0 for source in sorted(selected_sources)
+    }
     covered_companies: set[str] = set()
     for index, document_chunk in enumerate(document_chunks):
         document_ids = {str(row.get("document_id") or "") for row in document_chunk}
@@ -146,47 +371,63 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
         }
         covered_companies.update(company_ids)
         attempted += 1
+        submitted: dict[str, object] = {
+            "companies": [
+                company_by_id[company_id]
+                for company_id in sorted(company_ids)
+                if company_id in company_by_id
+            ],
+            "documents": document_chunk,
+            "events": event_chunk,
+            "source_rights": rights if index == 0 else [],
+            # The collection run is written only after every data chunk has
+            # returned, so an early partial failure cannot be hidden by a
+            # successful final data chunk.
+            "run": {},
+        }
         try:
             response = post_remote_action(
                 "upsert_governance_snapshot",
-                {
-                    "companies": [
-                        company_by_id[company_id]
-                        for company_id in sorted(company_ids)
-                        if company_id in company_by_id
-                    ],
-                    "documents": document_chunk,
-                    "events": event_chunk,
-                    "source_rights": rights if index == 0 else [],
-                    # The collection run is written only after every data chunk
-                    # has returned, so an early partial failure cannot be hidden
-                    # by a successful final data chunk.
-                    "run": {},
-                },
+                submitted,
                 timeout=45.0,
             )
         except Exception:  # noqa: BLE001 - continue so the final failed run can be persisted.
             response = {"ok": False}
-        if response.get("ok"):
+        if _remote_acknowledges_payload(response, submitted):
             synced += 1
+            acknowledged_documents += len(document_chunk)
+            for document in document_chunk:
+                source = _document_source(document)
+                source_ack_counts[source] = source_ack_counts.get(source, 0) + 1
         else:
             failed += 1
+            if response.get("ok") is True:
+                ack_mismatches += 1
 
     remaining = [row for company_id, row in company_by_id.items() if company_id not in covered_companies]
     for company_chunk in _chunks(remaining):
         attempted += 1
+        submitted = {
+            "companies": company_chunk,
+            "documents": [],
+            "events": [],
+            "source_rights": [],
+            "run": {},
+        }
         try:
             response = post_remote_action(
                 "upsert_governance_snapshot",
-                {"companies": company_chunk, "documents": [], "events": [], "source_rights": [], "run": {}},
+                submitted,
                 timeout=45.0,
             )
         except Exception:  # noqa: BLE001 - continue so the final failed run can be persisted.
             response = {"ok": False}
-        if response.get("ok"):
+        if _remote_acknowledges_payload(response, submitted):
             synced += 1
         else:
             failed += 1
+            if response.get("ok") is True:
+                ack_mismatches += 1
 
     final_run = dict(run)
     initial_error_count = _int_value(final_run.get("error_count"))
@@ -196,25 +437,40 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
     final_run["remote_data_batches_attempted"] = attempted
     final_run["remote_data_batches_succeeded"] = synced
     final_run["remote_data_batches_failed"] = failed
+    final_run["raw_count"] = _int_value(final_run.get("raw_count"), len(documents))
+    final_run["ack_count"] = acknowledged_documents
+    final_run["source_ack_counts"] = source_ack_counts
     run_persisted = 0
+    final_payload: dict[str, object] = {
+        "companies": [],
+        "documents": [],
+        "events": [],
+        "source_rights": [],
+        "run": final_run,
+    }
     try:
         run_response = post_remote_action(
             "upsert_governance_snapshot",
-            {"companies": [], "documents": [], "events": [], "source_rights": [], "run": final_run},
+            final_payload,
             timeout=45.0,
         )
     except Exception:  # noqa: BLE001 - the caller must fail when final status cannot be persisted.
         run_response = {"ok": False}
-    if run_response.get("ok"):
+    if _remote_acknowledges_payload(run_response, final_payload):
         run_persisted = 1
     else:
         failed += 1
+        if run_response.get("ok") is True:
+            ack_mismatches += 1
     return {
         "official_remote_synced": synced,
         "official_remote_failed": failed,
         "official_remote_skipped": 0,
         "official_remote_batches_attempted": attempted,
         "official_remote_run_persisted": run_persisted,
+        "official_remote_ack_mismatches": ack_mismatches,
+        "official_remote_raw_count": len(documents),
+        "official_remote_ack_count": acknowledged_documents,
     }
 
 
@@ -249,11 +505,38 @@ def run(
     else:
         current = current.astimezone(timezone.utc)
     current_kst_date = current.astimezone(ZoneInfo("Asia/Seoul")).date()
+    claimed_slot_raw = os.environ.get(
+        "CURATOR_OFFICIAL_SCHEDULED_SLOT_AT", ""
+    ).strip()
+    if claimed_slot_raw:
+        try:
+            claimed_slot = datetime.fromisoformat(
+                claimed_slot_raw.replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "CURATOR_OFFICIAL_SCHEDULED_SLOT_AT must be an ISO timestamp"
+            ) from exc
+        if claimed_slot.tzinfo is None:
+            raise ValueError(
+                "CURATOR_OFFICIAL_SCHEDULED_SLOT_AT must include a timezone"
+            )
+        # A GitHub rerun of the same durable claim must read the same date
+        # window even when it is executed on a later wall-clock day.
+        current_kst_date = claimed_slot.astimezone(ZoneInfo("Asia/Seoul")).date()
     window_end = end or _date_env("OFFICIAL_INGEST_END", current_kst_date)
     lookback = max(0, int(settings.get("lookback_days", 2)))
     window_start = start or _date_env("OFFICIAL_INGEST_START", window_end - timedelta(days=lookback))
     if window_start > window_end:
         raise ValueError("OFFICIAL_INGEST_START must not be after OFFICIAL_INGEST_END")
+    company_master_sync_requested = _truthy_env("DART_SYNC_COMPANY_MASTER") or bool(
+        settings.get("sync_company_master", False)
+    )
+    run_provenance = _run_provenance(
+        current=current,
+        idempotency_key=idempotency_key,
+        company_master_sync=company_master_sync_requested,
+    )
 
     api_key = os.environ.get("DART_API_KEY", "").strip()
     dart_enabled = bool(settings.get("dart_enabled", True))
@@ -263,18 +546,34 @@ def run(
     kind_requested = bool(settings.get("kind_enabled", True))
     kind_selected = kind_requested and _enabled_env("CURATOR_ENABLE_KIND")
     require_kind = _truthy_env("CURATOR_REQUIRE_KIND")
-    kind_enabled = kind_selected and bool(kind_endpoint)
+    kind_enabled = False
+    kind_rights: OfficialSourceRightEligibility | None = None
+    kind_configuration_error = int(
+        (kind_selected and not kind_endpoint) or (require_kind and not kind_selected)
+    )
     source_fetched = {"dart": 0, "kind": 0}
     source_rejected = {"dart": 0, "kind": 0}
     source_duplicates = {"dart": 0, "kind": 0}
     source_discarded = {"dart": 0, "kind": 0}
     source_errors = {
         "dart": int(dart_enabled and not api_key),
-        "kind": int(require_kind and not kind_enabled),
+        "kind": kind_configuration_error,
     }
     source_failure_kinds: dict[str, dict[str, int]] = {
-        "dart": {"configuration": source_errors["dart"], "connector": 0, "parse": 0, "conflict": 0},
-        "kind": {"configuration": source_errors["kind"], "connector": 0, "parse": 0, "conflict": 0},
+        "dart": {
+            "configuration": source_errors["dart"],
+            "connector": 0,
+            "quota": 0,
+            "parse": 0,
+            "conflict": 0,
+        },
+        "kind": {
+            "configuration": source_errors["kind"],
+            "rights": 0,
+            "connector": 0,
+            "parse": 0,
+            "conflict": 0,
+        },
     }
     source_metrics: dict[str, dict[str, int]] = {
         "dart": {"list_requests": 0, "pages_fetched": 0, "rows_fetched": 0, "elapsed_ms": 0},
@@ -284,7 +583,18 @@ def run(
     disclosures: list[OfficialDisclosure] = []
     company_master: list[dict[str, object]] = []
     if api_key and dart_enabled:
-        dart_connector = DartConnector(api_key)
+        shared_budget = settings.get("dart_request_budget")
+        if shared_budget is None and (
+            durable_dart_quota_required() or durable_dart_quota_configured()
+        ):
+            shared_budget = durable_dart_quota_client(
+                phase=os.environ.get("CURATOR_DART_QUOTA_PHASE", "official-ingest")
+            )
+        dart_connector = (
+            DartConnector(api_key, request_budget=shared_budget)
+            if shared_budget is not None
+            else DartConnector(api_key)
+        )
         source_started = time.perf_counter()
         source_buffer: list[OfficialDisclosure] = []
         try:
@@ -306,11 +616,11 @@ def run(
                     source_buffer.append(disclosure)
                 else:
                     source_rejected["dart"] += 1
-            if source_errors["dart"] == 0 and (
-                _truthy_env("DART_SYNC_COMPANY_MASTER")
-                or bool(settings.get("sync_company_master", False))
-            ):
+            if source_errors["dart"] == 0 and company_master_sync_requested:
                 company_master = list(dart_connector.fetch_company_master())
+        except DartQuotaExceededError:
+            source_errors["dart"] += 1
+            source_failure_kinds["dart"]["quota"] += 1
         except Exception:  # noqa: BLE001 - the source outcome records the failed contract.
             source_errors["dart"] += 1
             source_failure_kinds["dart"]["connector"] += 1
@@ -320,6 +630,7 @@ def run(
                 "pages_fetched": dart_connector.pages_fetched,
                 "rows_fetched": dart_connector.rows_fetched,
                 "elapsed_ms": max(0, round((time.perf_counter() - source_started) * 1000)),
+                "requests_made": getattr(dart_connector, "requests_made", 0),
             }
         if source_errors["dart"]:
             source_discarded["dart"] = len(source_buffer)
@@ -334,6 +645,15 @@ def run(
             else:
                 source_duplicates["dart"] = len(source_buffer) - len(normalized_source)
                 disclosures.extend(normalized_source)
+
+    if kind_selected and kind_endpoint:
+        try:
+            kind_rights = OfficialSourceRightClient().check_kind_ingest()
+        except OfficialSourceRightError:
+            source_errors["kind"] += 1
+            source_failure_kinds["kind"]["rights"] += 1
+        else:
+            kind_enabled = True
 
     if kind_enabled:
         kind_connector = KindConnector(kind_endpoint, api_key=os.environ.get("KIND_API_KEY", ""))
@@ -392,6 +712,11 @@ def run(
             "enabled": dart_enabled,
             "configured": bool(api_key),
             "fetched": source_fetched["dart"],
+            # ``fetched`` is connector volume, while ``raw_count`` is the
+            # deduplicated governance-document denominator actually submitted
+            # to MySQL.  Release evidence must compare ACKs against the latter;
+            # otherwise non-governance rows make a healthy write look lossy.
+            "raw_count": source_accepted["dart"],
             "accepted": source_accepted["dart"],
             "rejected_non_governance": source_rejected["dart"],
             "duplicate_count": source_duplicates["dart"],
@@ -406,7 +731,11 @@ def run(
             "enabled": kind_selected,
             "required": require_kind,
             "configured": bool(kind_endpoint),
+            "rights_checked": bool(kind_selected and kind_endpoint),
+            "rights_eligible": kind_rights is not None,
+            "rights_revision": kind_rights.rights_revision if kind_rights is not None else None,
             "fetched": source_fetched["kind"],
+            "raw_count": source_accepted["kind"],
             "accepted": source_accepted["kind"],
             "rejected_non_governance": source_rejected["kind"],
             "duplicate_count": source_duplicates["kind"],
@@ -433,13 +762,18 @@ def run(
         payload["companies"] = list(by_id.values())
     rights = source_right_payloads(config, include_kind=kind_enabled)
     payload["source_rights"] = rights
-    run_id = stable_id(
-        "run",
-        "ingest-official",
-        window_start.isoformat(),
-        window_end.isoformat(),
-        idempotency_key or current.isoformat(),
-        length=32,
+    slot_claim_id = str(run_provenance.get("slot_claim_id") or "")
+    run_id = (
+        stable_id("run", "ingest-official", slot_claim_id, length=32)
+        if slot_claim_id
+        else stable_id(
+            "run",
+            "ingest-official",
+            window_start.isoformat(),
+            window_end.isoformat(),
+            idempotency_key or current.isoformat(),
+            length=32,
+        )
     )
     run_record: dict[str, object] = {
         "run_id": run_id,
@@ -456,9 +790,17 @@ def run(
         "resolved_count": len(normalized),
         "accepted_count": len(payload["events"]),  # type: ignore[arg-type]
         "error_count": errors,
+        "code_revision": _code_revision(),
+        "first_observed_at": collection_started_at.isoformat(),
+        # The durable ACK contract covers submitted documents, not every row
+        # examined by a source connector.  Preserve connector volume in
+        # ``fetched_count`` and use the exact write denominator here.
+        "raw_count": len(payload["documents"]),  # type: ignore[arg-type]
+        "ack_count": 0,
         "window_start": window_start.isoformat(),
         "window_end": window_end.isoformat(),
         "idempotency_key": idempotency_key,
+        **run_provenance,
         # list.json exposes only a receipt date, not a stable receipt time.
         # Do not publish a fabricated p95 collection lag from midnight.
         "lag_seconds_p95": None,
@@ -468,6 +810,10 @@ def run(
             "window_start": window_start.isoformat(),
             "window_end": window_end.isoformat(),
             "retrieved_at": current.isoformat(),
+            "kind_rights_revision": (
+                kind_rights.rights_revision if kind_rights is not None else None
+            ),
+            **run_provenance,
         },
     }
     remote_summary = (
@@ -477,6 +823,9 @@ def run(
             "official_remote_skipped": 1,
             "official_remote_batches_attempted": 0,
             "official_remote_run_persisted": 0,
+            "official_remote_ack_mismatches": 0,
+            "official_remote_raw_count": len(payload["documents"]),  # type: ignore[arg-type]
+            "official_remote_ack_count": 0,
         }
         if dry_run
         else sync_governance_payload(payload, run=run_record)
@@ -485,6 +834,17 @@ def run(
     remote_failed = int(remote_summary.get("official_remote_failed") or 0)
     remote_skipped = int(remote_summary.get("official_remote_skipped") or 0)
     failed = errors + remote_failed + (1 if require_remote and remote_skipped and not dry_run else 0)
+    shadow_output_path = os.environ.get("CURATOR_SHADOW_ENGINE_OUTPUT_PATH", "").strip()
+    if shadow_output_path:
+        write_candidate_snapshot_from_events(
+            _payload_records(payload, "events"),
+            observation_date=current_kst_date,
+            status="failed" if failed else "succeeded",
+            output_path=shadow_output_path,
+            code_revision=_code_revision(),
+            source_run_id=run_id,
+            generated_at=current,
+        )
     return {
         "official_fetched": raw_fetched,
         "official_documents": len(payload["documents"]),  # type: ignore[arg-type]
@@ -500,10 +860,13 @@ def run(
         "official_dart_duplicates": source_duplicates["dart"],
         "official_dart_discarded": source_discarded["dart"],
         "official_dart_pages": source_metrics["dart"]["pages_fetched"],
+        "official_dart_requests": source_metrics["dart"].get("requests_made", 0),
         "official_dart_errors": source_errors["dart"],
+        "official_dart_quota_exhausted": source_failure_kinds["dart"]["quota"],
         "official_kind_required": int(require_kind),
         "official_kind_enabled": int(kind_selected),
         "official_kind_configured": int(bool(kind_endpoint)),
+        "official_kind_rights_verified": int(kind_rights is not None),
         "official_kind_fetched": source_fetched["kind"],
         "official_kind_accepted": source_accepted["kind"],
         "official_kind_rejected": source_rejected["kind"],

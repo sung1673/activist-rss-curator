@@ -40,6 +40,15 @@ expect_true(v1_bearer_token() === str_repeat('x', 24), 'valid Bearer tokens must
 $_SERVER['HTTP_AUTHORIZATION'] = 'Basic invalid';
 expect_true(v1_bearer_token() === '', 'non-Bearer authorization must be rejected');
 
+$previewToken = 'php-contract-preview-token-00000000000000';
+$previewConfig = array('governance_preview_token_hash' => hash('sha256', $previewToken));
+expect_true(v1_preview_auth_configured($previewConfig), 'a SHA-256 preview token hash must enable preview auth');
+expect_true(
+    v1_preview_token_hashes($previewConfig) === array(hash('sha256', $previewToken)),
+    'preview auth must retain only normalized token hashes'
+);
+expect_true(!v1_preview_auth_configured(array()), 'preview auth must fail closed without a token hash');
+
 expect_true(v1_xml('<company>&') === '&lt;company&gt;&amp;', 'Atom values must be XML escaped');
 
 expect_true(delivery_payload_source_right_ids('{}') === false, 'missing delivery rights lineage must fail closed');

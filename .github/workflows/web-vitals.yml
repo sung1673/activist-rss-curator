@@ -1,0 +1,94 @@
+name: Governance mobile Web Vitals
+
+on:
+  schedule:
+    # KST 23:00, leaving 95 minutes before the KST 00:35 evidence-input job.
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: governance-mobile-web-vitals-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  mobile-routes:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      vars.GOVERNANCE_PIPELINE_MODE == 'shadow' ||
+      vars.GOVERNANCE_PIPELINE_MODE == 'live' ||
+      (vars.GOVERNANCE_PIPELINE_MODE == '' && vars.ENABLE_GOVERNANCE_SHADOW == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: governance-runtime
+    steps:
+      - name: Checkout default-branch probe revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Require the default branch and capture its full revision
+        shell: bash
+        env:
+          REQUESTED_REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_REF" == "$DEFAULT_BRANCH" ]] || {
+            echo "::error::Production Web Vitals probes are restricted to the default branch."
+            exit 1
+          }
+          revision="$(git rev-parse HEAD)"
+          [[ "$revision" == "$GITHUB_SHA" ]] || {
+            echo "::error::Checked-out probe revision $revision does not match workflow revision $GITHUB_SHA."
+            exit 1
+          }
+          echo "PROBE_EXPECTED_BUILD_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Resolve fail-closed rollout mode
+        env:
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
+          GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          ENABLE_PAGES: ${{ vars.ENABLE_PAGES }}
+          ENABLE_GOVERNANCE_PAGES: ${{ vars.ENABLE_GOVERNANCE_PAGES }}
+          ENABLE_GOVERNANCE_SHADOW: ${{ vars.ENABLE_GOVERNANCE_SHADOW }}
+          ENABLE_TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          ENABLE_GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+        run: python -m curator.operation_mode
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install pinned browser dependencies
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Measure four real mobile SPA journeys and submit evidence
+        env:
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
+          ENABLE_TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          ENABLE_GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+        run: node .github/scripts/web-vitals-probe.mjs --summary web-vitals-run-summary.json
+
+      - name: Upload privacy-minimal run receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: governance-web-vitals-${{ github.run_id }}-${{ github.run_attempt }}
+          path: web-vitals-run-summary.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9

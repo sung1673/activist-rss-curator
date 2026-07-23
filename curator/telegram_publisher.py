@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from copy import deepcopy
+from datetime import datetime
 from html import escape
 from typing import Any
 
-import httpx
-
 from .cluster import refresh_cluster_source_lineage
-from .dates import datetime_to_iso, parse_datetime
-from .remote_api import post_remote_action, remote_api_configured
+from .dates import datetime_to_iso
 from .rss_writer import (
     article_link,
     article_source_label,
@@ -34,8 +32,9 @@ def telegram_chat_id(config: dict[str, object]) -> str:
 
 
 def telegram_is_configured(config: dict[str, object]) -> bool:
-    settings = telegram_config(config)
-    return bool(settings.get("enabled", True) and telegram_bot_token() and telegram_chat_id(config))
+    # Read-only Telethon collection is configured elsewhere. Bot delivery is
+    # permanently disabled for this product regardless of secrets or YAML.
+    return False
 
 
 def _telegram_error_response(
@@ -70,101 +69,30 @@ def _telegram_error_response(
     return result
 
 
-def fail_closed_telegram_delivery_outcome(response: dict[str, object]) -> dict[str, object]:
-    """Quarantine sendMessage responses whose external outcome is ambiguous."""
-
-    error = str(response.get("error") or "")
-    stage = str(response.get("delivery_stage") or "")
-    try:
-        status_code = int(response.get("status_code") or 0)
-    except (TypeError, ValueError):
-        status_code = 0
-    ambiguous = error in {
-        "telegram_request_failed",
-        "telegram_missing_external_message_id",
-    } or (stage == "send_message" and status_code >= 500)
-    if not ambiguous:
-        return response
-    return {
-        **response,
-        "ok": False,
-        "error": "telegram_delivery_outcome_unknown",
-        "description": error,
-        "retryable": False,
-    }
-
-
 def _post_telegram_method(
     bot_token: str,
     method: str,
     payload: dict[str, object],
     *,
     timeout: float,
-    client: httpx.Client | None,
+    client: object | None,
 ) -> dict[str, object]:
-    url = f"https://api.telegram.org/bot{bot_token}/{method}"
-    try:
-        if client is None:
-            with httpx.Client(timeout=timeout) as local_client:
-                response = local_client.post(url, json=payload)
-        else:
-            response = client.post(url, json=payload)
-        data = response.json()
-    except (httpx.HTTPError, ValueError):
-        return _telegram_error_response(error="telegram_request_failed")
-    if not isinstance(data, dict):
-        data = {}
-    if response.status_code >= 400:
-        return _telegram_error_response(
-            error="telegram_http_error",
-            status_code=response.status_code,
-            description=data.get("description"),
-            parameters=data.get("parameters"),
-        )
-    if not data.get("ok"):
-        try:
-            error_status = int(data.get("error_code") or response.status_code)
-        except (TypeError, ValueError):
-            error_status = response.status_code
-        return _telegram_error_response(
-            error="telegram_api_error",
-            status_code=error_status,
-            description=data.get("description"),
-            parameters=data.get("parameters"),
-        )
-    return {"ok": True, "result": data.get("result")}
+    """Reject every Bot API method before a client can be constructed or used."""
+
+    return _telegram_error_response(error="telegram_outbound_disabled")
 
 
 def validate_telegram_chat(
     bot_token: str,
     chat_id: str,
     config: dict[str, object],
-    client: httpx.Client | None = None,
+    client: object | None = None,
 ) -> dict[str, object]:
-    """Validate the destination with getChat before attempting a delivery."""
+    """Reject the historical getChat preflight under the web-only policy."""
 
-    settings = telegram_config(config)
-    if not settings.get("preflight_get_chat", True):
-        return {"ok": True, "chat_id": chat_id, "preflight_skipped": True}
-    response = _post_telegram_method(
-        bot_token,
-        "getChat",
-        {"chat_id": chat_id},
-        timeout=float(settings.get("timeout_seconds", 20)),
-        client=client,
-    )
-    if not response.get("ok"):
-        response["error"] = "telegram_chat_validation_failed"
-        return response
-    result = response.get("result") if isinstance(response.get("result"), dict) else {}
-    validated_chat_id = result.get("id")
-    if validated_chat_id in (None, ""):
-        return _telegram_error_response(error="telegram_chat_validation_failed", description="getChat response omitted chat id")
     return {
-        "ok": True,
-        "chat_id": validated_chat_id,
-        "username": result.get("username"),
-        "title": result.get("title"),
+        **_telegram_error_response(error="telegram_outbound_disabled"),
+        "delivery_stage": "policy",
     }
 
 
@@ -184,7 +112,8 @@ def authorized_cluster_for_delivery(
     config: dict[str, object],
     at: datetime | None = None,
 ) -> dict[str, object] | None:
-    articles = [article for article in list(cluster.get("articles") or []) if isinstance(article, dict)]
+    raw_articles = cluster.get("articles")
+    articles = [article for article in raw_articles if isinstance(article, dict)] if isinstance(raw_articles, list) else []
     allowed = [
         article
         for article in articles
@@ -204,26 +133,13 @@ def authorized_cluster_for_delivery(
     return public_cluster
 
 
-def cluster_source_lineage_payload(cluster: dict[str, object]) -> dict[str, object]:
-    articles = [article for article in list(cluster.get("articles") or []) if isinstance(article, dict)]
-    return {
-        "source_kind": cluster.get("source_kind") or None,
-        "source_right_id": cluster.get("source_right_id") or None,
-        "source_kinds": list(cluster.get("source_kinds") or []),
-        "source_right_ids": list(cluster.get("source_right_ids") or []),
-        "article_sources": [
-            {
-                "canonical_url_hash": article.get("canonical_url_hash") or None,
-                "source_kind": article.get("source_kind") or None,
-                "source_right_id": article.get("source_right_id") or None,
-            }
-            for article in articles
-        ],
-    }
-
-
 def article_group_label(article: dict[str, object]) -> str:
-    companies = [str(company).strip() for company in (article.get("company_candidates") or []) if str(company).strip()]
+    raw_companies = article.get("company_candidates")
+    companies = (
+        [str(company).strip() for company in raw_companies if str(company).strip()]
+        if isinstance(raw_companies, list)
+        else []
+    )
     if companies:
         return companies[0]
     return ""
@@ -269,13 +185,16 @@ def cluster_should_show_web_preview(cluster: dict[str, object], config: dict[str
 def initialize_telegram_state(state: dict[str, object], config: dict[str, object], now: datetime) -> None:
     if not telegram_is_configured(config) or state.get("telegram_initialized_at"):
         return
-    sent = set(state.get("telegram_sent_cluster_guids", []))
+    raw_sent = state.get("telegram_sent_cluster_guids")
+    sent = {str(value) for value in raw_sent} if isinstance(raw_sent, list) else set()
     if not telegram_config(config).get("send_old_on_first_run", False):
-        sent.update(
-            cluster_guid_value(cluster)
-            for cluster in state.get("published_clusters", [])
-            if cluster_guid_value(cluster)
-        )
+        raw_clusters = state.get("published_clusters")
+        if isinstance(raw_clusters, list):
+            sent.update(
+                cluster_guid_value(cluster)
+                for cluster in raw_clusters
+                if isinstance(cluster, dict) and cluster_guid_value(cluster)
+            )
     state["telegram_sent_cluster_guids"] = sorted(sent)
     state["telegram_initialized_at"] = datetime_to_iso(now)
 
@@ -292,9 +211,13 @@ def unsent_telegram_clusters(
         return []
     if not require_sender and (not settings.get("enabled", True) or not telegram_chat_id(config)):
         return []
-    sent = {str(guid) for guid in state.get("telegram_sent_cluster_guids", [])}
-    clusters = []
-    for cluster in state.get("published_clusters", []):
+    raw_sent = state.get("telegram_sent_cluster_guids")
+    sent = {str(guid) for guid in raw_sent} if isinstance(raw_sent, list) else set()
+    clusters: list[dict[str, object]] = []
+    raw_clusters = state.get("published_clusters")
+    for cluster in raw_clusters if isinstance(raw_clusters, list) else []:
+        if not isinstance(cluster, dict):
+            continue
         public_cluster = authorized_cluster_for_delivery(cluster, config, now)
         if public_cluster is None:
             continue
@@ -364,48 +287,14 @@ def send_telegram_message(
     chat_id: str,
     text: str,
     config: dict[str, object],
-    client: httpx.Client | None = None,
+    client: object | None = None,
     disable_web_page_preview: bool | None = None,
 ) -> dict[str, object]:
-    settings = telegram_config(config)
-    preflight = validate_telegram_chat(bot_token, chat_id, config, client=client)
-    if not preflight.get("ok"):
-        return {**preflight, "delivery_stage": "preflight"}
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": str(settings.get("parse_mode") or "HTML"),
-        "disable_web_page_preview": (
-            bool(settings.get("disable_web_page_preview", True))
-            if disable_web_page_preview is None
-            else disable_web_page_preview
-        ),
-    }
-    timeout = float(settings.get("timeout_seconds", 20))
-    response = _post_telegram_method(
-        bot_token,
-        "sendMessage",
-        payload,
-        timeout=timeout,
-        client=client,
-    )
-    if not response.get("ok"):
-        return {**response, "delivery_stage": "send_message"}
-    result = response.get("result") if isinstance(response.get("result"), dict) else {}
-    message_id = result.get("message_id")
-    if message_id in (None, ""):
-        return {
-            **_telegram_error_response(
-                error="telegram_missing_external_message_id",
-                description="sendMessage response omitted message_id",
-            ),
-            "delivery_stage": "send_message",
-        }
+    """Reject Telegram sends before validating, rendering, or contacting Telegram."""
+
     return {
-        "ok": True,
-        "message_id": message_id,
-        "chat_id": (result.get("chat") or {}).get("id") if isinstance(result.get("chat"), dict) else None,
-        "validated_chat_id": preflight.get("chat_id"),
+        **_telegram_error_response(error="telegram_outbound_disabled"),
+        "delivery_stage": "policy",
     }
 
 
@@ -415,32 +304,16 @@ def mark_telegram_sent(
     now: datetime,
     response: dict[str, object],
 ) -> bool:
-    guid = cluster_guid_value(cluster)
-    if not guid or not response.get("ok") or response.get("message_id") in (None, ""):
-        return False
-    state.setdefault("telegram_sent_cluster_guids", [])
-    if guid not in state["telegram_sent_cluster_guids"]:  # type: ignore[operator]
-        state["telegram_sent_cluster_guids"].append(guid)  # type: ignore[index, union-attr]
-    state.setdefault("telegram_send_records", [])
-    state["telegram_send_records"].append(  # type: ignore[index, union-attr]
-        {
-            "guid": guid,
-            "sent_at": datetime_to_iso(now),
-            "message_id": response.get("message_id"),
-            "external_message_id": response.get("message_id"),
-            "chat_id": response.get("chat_id"),
-            "delivery_status": "delivered",
-        }
-    )
-    return True
+    """Preserve historical state without recording new delivery acknowledgements."""
+
+    return False
 
 
 def ensure_telegram_delivery_outbox(state: dict[str, object]) -> list[dict[str, object]]:
+    """Return a detached historical snapshot without creating or replacing a queue."""
+
     outbox = state.get("telegram_delivery_outbox")
-    if not isinstance(outbox, list):
-        outbox = []
-        state["telegram_delivery_outbox"] = outbox
-    return outbox
+    return deepcopy(outbox) if isinstance(outbox, list) else []
 
 
 def enqueue_telegram_delivery(
@@ -449,37 +322,9 @@ def enqueue_telegram_delivery(
     config: dict[str, object],
     now: datetime,
 ) -> dict[str, object] | None:
-    public_cluster = authorized_cluster_for_delivery(cluster, config, now)
-    if public_cluster is None:
-        return None
-    guid = cluster_guid_value(public_cluster)
-    if not guid:
-        return None
-    lineage = cluster_source_lineage_payload(public_cluster)
-    outbox = ensure_telegram_delivery_outbox(state)
-    for entry in outbox:
-        if isinstance(entry, dict) and str(entry.get("cluster_guid") or "") == guid:
-            entry.update(lineage)
-            entry["payload_text"] = build_telegram_message(public_cluster, config)
-            entry["disable_web_page_preview"] = not cluster_should_show_web_preview(public_cluster, config)
-            return entry
-    entry: dict[str, object] = {
-        "outbox_id": f"telegram:{guid}",
-        "channel": "telegram",
-        "cluster_guid": guid,
-        "destination": telegram_chat_id(config),
-        "payload_text": build_telegram_message(public_cluster, config),
-        "disable_web_page_preview": not cluster_should_show_web_preview(public_cluster, config),
-        **lineage,
-        "status": "pending",
-        "attempt_count": 0,
-        "created_at": datetime_to_iso(now),
-        "next_attempt_at": datetime_to_iso(now),
-        "external_message_id": None,
-        "last_error": None,
-    }
-    outbox.append(entry)
-    return entry
+    # Historical local outbox rows remain readable for audit purposes, but the
+    # web-only product policy forbids creating any new outbound delivery.
+    return None
 
 
 def enqueue_unsent_telegram_clusters(
@@ -487,10 +332,7 @@ def enqueue_unsent_telegram_clusters(
     config: dict[str, object],
     now: datetime,
 ) -> int:
-    before = len(ensure_telegram_delivery_outbox(state))
-    for cluster in unsent_telegram_clusters(state, config, now=now):
-        enqueue_telegram_delivery(state, cluster, config, now)
-    return max(0, len(ensure_telegram_delivery_outbox(state)) - before)
+    return 0
 
 
 def enqueue_unsent_telegram_clusters_to_remote(
@@ -498,108 +340,15 @@ def enqueue_unsent_telegram_clusters_to_remote(
     config: dict[str, object],
     now: datetime,
 ) -> dict[str, int]:
-    """Durably enqueue unsent clusters in the MySQL-backed remote outbox."""
+    """Refuse Telegram enqueue under the immutable web-only policy."""
 
-    settings = telegram_config(config)
-    if not settings.get("enabled", True) or not telegram_chat_id(config) or not remote_api_configured():
-        return {
-            "telegram_outbox_enqueued": 0,
-            "telegram_outbox_rejected": 0,
-            "telegram_outbox_enqueue_failed": 0,
-            "telegram_outbox_enqueue_skipped": 1,
-            "telegram_outbox_rights_blocked": 0,
-        }
-    for cluster in unsent_telegram_clusters(state, config, require_sender=False, now=now):
-        enqueue_telegram_delivery(state, cluster, config, now)
-    clusters_by_guid: dict[str, dict[str, object]] = {}
-    for cluster in state.get("published_clusters", []):
-        if not isinstance(cluster, dict):
-            continue
-        public_cluster = authorized_cluster_for_delivery(cluster, config, now)
-        if public_cluster is not None and cluster_guid_value(public_cluster):
-            clusters_by_guid[cluster_guid_value(public_cluster)] = public_cluster
-    entries: list[dict[str, object]] = []
-    rights_blocked = 0
-    for entry in ensure_telegram_delivery_outbox(state):
-        if (
-            not isinstance(entry, dict)
-            or str(entry.get("status") or "") not in {"pending", "retry", "remote_queued"}
-            or entry.get("external_message_id")
-        ):
-            continue
-        public_cluster = clusters_by_guid.get(str(entry.get("cluster_guid") or ""))
-        if public_cluster is None:
-            entry["status"] = "blocked_source_right"
-            entry["last_error"] = "source_right_inactive_or_scope_denied"
-            rights_blocked += 1
-            continue
-        entry.update(cluster_source_lineage_payload(public_cluster))
-        entry["payload_text"] = build_telegram_message(public_cluster, config)
-        entry["disable_web_page_preview"] = not cluster_should_show_web_preview(public_cluster, config)
-        entries.append(entry)
-    if not entries:
-        return {
-            "telegram_outbox_enqueued": 0,
-            "telegram_outbox_rejected": 0,
-            "telegram_outbox_enqueue_failed": 0,
-            "telegram_outbox_enqueue_skipped": 0,
-            "telegram_outbox_rights_blocked": rights_blocked,
-        }
-    deliveries = [
-        {
-            "channel": "telegram",
-            "destination": str(entry.get("destination") or telegram_chat_id(config)),
-            "idempotency_key": str(entry.get("cluster_guid") or entry.get("outbox_id") or "")[:191],
-            "payload": {
-                "text": str(entry.get("payload_text") or ""),
-                "disable_web_page_preview": bool(entry.get("disable_web_page_preview", True)),
-                "cluster_guid": entry.get("cluster_guid"),
-                "source_kind": entry.get("source_kind"),
-                "source_right_id": entry.get("source_right_id"),
-                "source_kinds": entry.get("source_kinds") or [],
-                "rights_lineage_complete": True,
-                "source_right_ids": entry.get("source_right_ids") or [],
-                "article_sources": entry.get("article_sources") or [],
-            },
-        }
-        for entry in entries
-    ]
-    try:
-        response = post_remote_action("enqueue_delivery_outbox", {"deliveries": deliveries})
-    except Exception:  # noqa: BLE001 - caller surfaces a nonzero operational summary.
-        response = {"ok": False}
-    accepted = int(response.get("accepted") or 0) if response.get("ok") else 0
-    rejected = int(response.get("rejected") or 0) if response.get("ok") else len(deliveries)
-    failed = int(not response.get("ok") or accepted < len(deliveries) or rejected > 0)
-    if not failed:
-        queued_at = datetime_to_iso(now)
-        for entry in entries:
-            entry["status"] = "remote_queued"
-            entry["remote_enqueued_at"] = queued_at
     return {
-        "telegram_outbox_enqueued": accepted,
-        "telegram_outbox_rejected": rejected,
-        "telegram_outbox_enqueue_failed": failed,
-        "telegram_outbox_enqueue_skipped": 0,
-        "telegram_outbox_rights_blocked": rights_blocked,
+        "telegram_outbox_enqueued": 0,
+        "telegram_outbox_rejected": 0,
+        "telegram_outbox_enqueue_failed": 0,
+        "telegram_outbox_enqueue_skipped": 1,
+        "telegram_outbox_rights_blocked": 0,
     }
-
-
-def _outbox_entry_due(entry: dict[str, object], now: datetime, timezone_name: str) -> bool:
-    if str(entry.get("status") or "") not in {"pending", "retry"}:
-        return False
-    next_attempt_at = parse_datetime(entry.get("next_attempt_at"), timezone_name)
-    return next_attempt_at is None or next_attempt_at <= now
-
-
-def _delivery_retry_delay(response: dict[str, object], attempt_count: int, config: dict[str, object]) -> int:
-    settings = telegram_config(config)
-    explicit = int(response.get("retry_after_seconds") or 0)
-    if explicit:
-        return explicit
-    base = max(1, int(settings.get("retry_base_seconds", 60)))
-    maximum = max(base, int(settings.get("retry_max_seconds", 3600)))
-    return min(maximum, base * (2 ** max(0, attempt_count - 1)))
 
 
 def process_telegram_delivery_outbox(
@@ -607,100 +356,18 @@ def process_telegram_delivery_outbox(
     config: dict[str, object],
     now: datetime,
     *,
-    client: httpx.Client | None = None,
+    client: object | None = None,
     max_items: int = 0,
 ) -> dict[str, int]:
-    """Process due deliveries and persist retry/dead-letter state.
+    """Preserve historical local outbox rows without processing or mutating them."""
 
-    A row is marked delivered only after Telegram returns both ``ok`` and a
-    concrete external ``message_id``.
-    """
-
-    if not telegram_is_configured(config):
-        return {
-            "telegram_outbox_processed": 0,
-            "telegram_sent": 0,
-            "telegram_failed": 0,
-            "telegram_retried": 0,
-            "telegram_dead_letter": 0,
-            "telegram_outbox_skipped": 1,
-        }
-    settings = telegram_config(config)
-    timezone_name = str(config.get("timezone") or "Asia/Seoul")
-    max_attempts = max(1, int(settings.get("max_delivery_attempts", 5)))
-    processed = sent = failed = retried = rights_blocked = 0
-    clusters: dict[str, dict[str, object]] = {}
-    for cluster in state.get("published_clusters", []):
-        if not isinstance(cluster, dict):
-            continue
-        public_cluster = authorized_cluster_for_delivery(cluster, config, now)
-        if public_cluster is not None and cluster_guid_value(public_cluster):
-            clusters[cluster_guid_value(public_cluster)] = public_cluster
-    for entry in ensure_telegram_delivery_outbox(state):
-        if not isinstance(entry, dict) or not _outbox_entry_due(entry, now, timezone_name):
-            continue
-        if max_items and processed >= max_items:
-            break
-        processed += 1
-        cluster = clusters.get(str(entry.get("cluster_guid") or ""))
-        if cluster is None:
-            entry["status"] = "blocked_source_right"
-            entry["last_error"] = "source_right_inactive_or_scope_denied"
-            entry["blocked_at"] = datetime_to_iso(now)
-            rights_blocked += 1
-            continue
-        entry.update(cluster_source_lineage_payload(cluster))
-        entry["payload_text"] = build_telegram_message(cluster, config)
-        entry["disable_web_page_preview"] = not cluster_should_show_web_preview(cluster, config)
-        entry["status"] = "sending"
-        entry["locked_at"] = datetime_to_iso(now)
-        response = send_telegram_message(
-            telegram_bot_token(),
-            str(entry.get("destination") or telegram_chat_id(config)),
-            str(entry.get("payload_text") or ""),
-            config,
-            client=client,
-            disable_web_page_preview=bool(entry.get("disable_web_page_preview", True)),
-        )
-        response = fail_closed_telegram_delivery_outcome(response)
-        if response.get("ok") and response.get("message_id") not in (None, ""):
-            entry["status"] = "delivered"
-            entry["delivered_at"] = datetime_to_iso(now)
-            entry["external_message_id"] = response.get("message_id")
-            entry["external_chat_id"] = response.get("chat_id")
-            entry["last_error"] = None
-            mark_telegram_sent(state, cluster, now, response)
-            sent += 1
-            continue
-
-        failed += 1
-        attempt_count = int(entry.get("attempt_count") or 0) + 1
-        entry["attempt_count"] = attempt_count
-        entry["last_attempt_at"] = datetime_to_iso(now)
-        entry["last_error"] = str(response.get("error") or response.get("description") or "telegram_delivery_failed")[:500]
-        entry["last_status_code"] = response.get("status_code")
-        retryable = bool(response.get("retryable"))
-        if retryable and attempt_count < max_attempts:
-            delay = _delivery_retry_delay(response, attempt_count, config)
-            entry["status"] = "retry"
-            entry["next_attempt_at"] = datetime_to_iso(now + timedelta(seconds=delay))
-            retried += 1
-        else:
-            entry["status"] = "dead_letter"
-            entry["dead_lettered_at"] = datetime_to_iso(now)
-    dead_letter_total = sum(
-        1
-        for entry in ensure_telegram_delivery_outbox(state)
-        if isinstance(entry, dict) and str(entry.get("status") or "") == "dead_letter"
-    )
     return {
-        "telegram_outbox_processed": processed,
-        "telegram_sent": sent,
-        "telegram_failed": failed,
-        "telegram_retried": retried,
-        "telegram_dead_letter": dead_letter_total,
-        "telegram_outbox_rights_blocked": rights_blocked,
-        "telegram_outbox_skipped": 0,
+        "telegram_outbox_processed": 0,
+        "telegram_sent": 0,
+        "telegram_failed": 0,
+        "telegram_retried": 0,
+        "telegram_dead_letter": 0,
+        "telegram_outbox_skipped": 1,
     }
 
 
@@ -709,11 +376,4 @@ def publish_unsent_telegram_clusters(
     config: dict[str, object],
     now: datetime,
 ) -> dict[str, int]:
-    if not telegram_is_configured(config):
-        return {"telegram_sent": 0, "telegram_failed": 0}
-    enqueue_unsent_telegram_clusters(state, config, now)
-    summary = process_telegram_delivery_outbox(state, config, now)
-    return {
-        "telegram_sent": int(summary.get("telegram_sent") or 0),
-        "telegram_failed": int(summary.get("telegram_failed") or 0),
-    }
+    return {"telegram_sent": 0, "telegram_failed": 0}

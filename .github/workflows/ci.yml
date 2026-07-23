@@ -21,10 +21,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -76,10 +76,10 @@ jobs:
           --health-retries=20
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up production-compatible PHP
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
         with:
           php-version: "7.3"
           extensions: mbstring, pdo_mysql
@@ -126,6 +126,116 @@ jobs:
           php -S 127.0.0.1:8787 -t deploy/activist tests/php73_router.php >"$RUNNER_TEMP/php73-server.log" 2>&1 &
           echo "$!" >"$RUNNER_TEMP/php73-server.pid"
           python3 tests/php73_staging_smoke.py --base-url http://127.0.0.1:8787
+
+      - name: Validate governance schema and release-state guard
+        timeout-minutes: 5
+        shell: bash
+        env:
+          MYSQL_CONTAINER_ID: ${{ job.services.mysql.id }}
+        run: |
+          status="$(curl --silent --output "$RUNNER_TEMP/pre-migration-v1.json" --write-out '%{http_code}' \
+            http://127.0.0.1:8787/api.php/api/v1/events)"
+          test "$status" = "503"
+          grep -q 'schema_version_mismatch' "$RUNNER_TEMP/pre-migration-v1.json"
+          legacy_status="$(curl --silent --output "$RUNNER_TEMP/pre-migration-legacy.json" --write-out '%{http_code}' \
+            'http://127.0.0.1:8787/api.php?action=reports')"
+          test "$legacy_status" = "503"
+          grep -q 'schema_version_mismatch' "$RUNNER_TEMP/pre-migration-legacy.json"
+          sed 's/activist_/ci_/g' deploy/activist/migrations/006_governance_release_guard.sql \
+            > "$RUNNER_TEMP/006_governance_release_guard_ci.sql"
+          sed 's/activist_/ci_/g' deploy/activist/migrations/007_governance_identity_and_evidence.sql \
+            > "$RUNNER_TEMP/007_governance_identity_and_evidence_ci.sql"
+          sed 's/activist_/ci_/g' deploy/activist/migrations/008_official_site_snapshot_receipts.sql \
+            > "$RUNNER_TEMP/008_official_site_snapshot_receipts_ci.sql"
+          sed 's/activist_/ci_/g' deploy/activist/migrations/009_dart_global_quota_ledger.sql \
+            > "$RUNNER_TEMP/009_dart_global_quota_ledger_ci.sql"
+          sed 's/activist_/ci_/g' deploy/activist/migrations/010_official_slot_claim_ledger.sql \
+            > "$RUNNER_TEMP/010_official_slot_claim_ledger_ci.sql"
+          migration_010_checksum="$(printf '%s' 'bside-governance-migration-v1:10:010_official_slot_claim_ledger' | sha256sum | cut -d ' ' -f1)"
+          test "$migration_010_checksum" = '2b8be6264c8a4f3be038729fbf6bbe22e720457874f02c89c82d33db9dc78f51'
+          docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/006_governance_release_guard_ci.sql"
+          docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/006_governance_release_guard_ci.sql"
+          docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/007_governance_identity_and_evidence_ci.sql"
+          docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/007_governance_identity_and_evidence_ci.sql"
+          docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/008_official_site_snapshot_receipts_ci.sql"
+          docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/008_official_site_snapshot_receipts_ci.sql"
+          docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/009_dart_global_quota_ledger_ci.sql"
+          docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/010_official_slot_claim_ledger_ci.sql"
+          docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/010_official_slot_claim_ledger_ci.sql"
+          docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/009_dart_global_quota_ledger_ci.sql"
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="UPDATE ci_schema_migrations SET migration_name='tampered-006' WHERE migration_version=6;"
+          if docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/008_official_site_snapshot_receipts_ci.sql"; then
+            echo "migration 008 overwrote a conflicting historical migration name" >&2
+            exit 1
+          fi
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="UPDATE ci_schema_migrations SET migration_name='006_governance_release_guard' WHERE migration_version=6;"
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="UPDATE ci_schema_migrations SET migration_checksum=REPEAT('0',64) WHERE migration_version=9;"
+          if docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/009_dart_global_quota_ledger_ci.sql"; then
+            echo "migration 009 overwrote a conflicting checksum" >&2
+            exit 1
+          fi
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="UPDATE ci_schema_migrations SET migration_checksum='9e60867847b7cc2b7d9166c73e395ae872d12a4e91aa62457049468017e5f94d' WHERE migration_version=9;"
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="UPDATE ci_schema_migrations SET migration_checksum=REPEAT('0',64) WHERE migration_version=10;"
+          if docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/010_official_slot_claim_ledger_ci.sql"; then
+            echo "migration 010 overwrote a conflicting checksum" >&2
+            exit 1
+          fi
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="UPDATE ci_schema_migrations SET migration_checksum='2b8be6264c8a4f3be038729fbf6bbe22e720457874f02c89c82d33db9dc78f51' WHERE migration_version=10;"
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="ALTER TABLE ci_official_slot_claims DROP INDEX uq_official_slot_pipeline_run, ADD UNIQUE INDEX uq_official_slot_pipeline_run (github_run_id,pipeline);"
+          if docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/010_official_slot_claim_ledger_ci.sql"; then
+            echo "migration 010 accepted an incompatible same-name run identity index" >&2
+            exit 1
+          fi
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="ALTER TABLE ci_official_slot_claims DROP INDEX uq_official_slot_pipeline_run, ADD UNIQUE INDEX uq_official_slot_pipeline_run (pipeline,github_run_id);"
+          docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/010_official_slot_claim_ledger_ci.sql"
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="ALTER TABLE ci_official_slot_claims MODIFY completion_ack_count BIGINT UNSIGNED NULL;"
+          if docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/010_official_slot_claim_ledger_ci.sql"; then
+            echo "migration 010 accepted an incompatible completion ACK column" >&2
+            exit 1
+          fi
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="ALTER TABLE ci_official_slot_claims MODIFY completion_ack_count INT UNSIGNED NULL;"
+          docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/010_official_slot_claim_ledger_ci.sql"
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="ALTER TABLE ci_documents DROP INDEX uq_document_right_external_version, ADD UNIQUE INDEX uq_document_right_external_version (source_right_id,version_no,external_id);"
+          if docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/008_official_site_snapshot_receipts_ci.sql"; then
+            echo "migration 008 accepted an incompatible same-name document version index" >&2
+            exit 1
+          fi
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="ALTER TABLE ci_documents DROP INDEX uq_document_right_external_version;"
+          docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            < "$RUNNER_TEMP/008_official_site_snapshot_receipts_ci.sql"
+          python3 tests/php73_release_state_smoke.py \
+            --base-url http://127.0.0.1:8787 \
+            --mysql-container-id "$MYSQL_CONTAINER_ID"
 
       - name: Validate Telegram channel identity index migration
         shell: bash
@@ -179,7 +289,7 @@ jobs:
 
       - name: Preserve failed PHP and MySQL diagnostics
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: php73-mysql-smoke-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -202,10 +312,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -231,7 +341,31 @@ jobs:
           curator/link_discovery.py
           curator/editorial_ingest.py
           curator/governance_publisher.py
+          curator/backfill_checkpoint_api.py
+          curator/benchmark_candidates.py
+          curator/dart_canary_sample.py
+          curator/dart_quota.py
+          curator/event_identity.py
+          curator/governance_site.py
+          curator/governance_site_config.py
+          curator/label_agreement.py
+          curator/legacy_feed_compat.py
+          curator/legacy_recovery_bundle.py
+          curator/official_source_rights.py
+          curator/official_schedule.py
+          curator/official_slot_claim.py
+          curator/official_slot_epoch.py
+          curator/official_ingest.py
+          curator/official_backfill.py
+          curator/official_site_ingest.py
+          curator/operation_mode.py
+          curator/quality_benchmark.py
+          curator/quality_snapshot.py
+          curator/release_evidence.py
+          curator/release_evidence_inputs.py
           curator/release_gate.py
+          curator/shadow_compare.py
+          curator/shadow_engine.py
           --ignore-missing-imports
           --follow-imports=skip
           --check-untyped-defs
@@ -251,10 +385,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: npm
@@ -268,12 +402,18 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
+      - name: Run production Web Vitals producer contracts
+        run: npm run test:web-vitals-probe
+
+      - name: Run rolling legacy recovery resolver contracts
+        run: npm run test:legacy-recovery-resolver
+
       - name: Run governance UI journeys and WCAG checks
         run: npm run test:ui
 
       - name: Preserve failed browser traces
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: governance-ui-playwright-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-results

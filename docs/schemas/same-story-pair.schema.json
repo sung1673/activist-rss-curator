@@ -10,6 +10,7 @@
     "pair_id",
     "left",
     "right",
+    "stratum",
     "label",
     "label_source",
     "annotator_id",
@@ -21,6 +22,10 @@
     "pair_id": { "type": "string", "minLength": 1 },
     "left": { "$ref": "#/$defs/article" },
     "right": { "$ref": "#/$defs/article" },
+    "stratum": {
+      "description": "Blind candidate stratum. It must be preserved unchanged through both reviewer files and the final benchmark.",
+      "enum": ["predicted_same", "hard_negative", "easy_negative"]
+    },
     "label": {
       "enum": ["same_story", "related_but_different", "different"]
     },

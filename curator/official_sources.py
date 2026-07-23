@@ -3,16 +3,25 @@ from __future__ import annotations
 import hashlib
 import io
 import re
+import time
 import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Iterable, Iterator, Mapping
+from typing import Callable, Iterable, Iterator, Mapping, Protocol
 from urllib.parse import urlencode, urlparse
 from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
 
 import httpx
 
+from .event_identity import (
+    EventIdentity,
+    EventIdentityMatch,
+    EventIdentityStatus,
+    compare_event_identities,
+    event_identity_from_mapping,
+    normalize_identity_text,
+)
 from .governance import GovernanceEventType, stable_id
 
 
@@ -24,6 +33,81 @@ KIND_VIEWER_URL = "https://kind.krx.co.kr/common/disclsviewer.do"
 
 class OfficialSourceError(RuntimeError):
     pass
+
+
+class DartQuotaExceededError(OfficialSourceError):
+    """OpenDART status 020; the caller must resume in a later quota period."""
+
+
+class DartRequestBudgetError(OfficialSourceError):
+    """The bounded per-process OpenDART request budget was exhausted."""
+
+
+class DartRequestQuota(Protocol):
+    limit: int
+    used: int
+
+    def consume(self, *, operation: str = "list") -> object: ...
+
+    def block_020(self, permit: object) -> None: ...
+
+
+def validate_kind_endpoint(endpoint: str) -> str:
+    """Return a credential-safe production KIND adapter URL.
+
+    Authentication is sent in an Authorization header, so plaintext HTTP,
+    URL credentials, and query/fragment secrets are rejected before a client
+    can make a request. Tests use an HTTPS origin with ``MockTransport``.
+    """
+
+    if not endpoint or endpoint != endpoint.strip() or any(ord(char) < 32 for char in endpoint):
+        raise ValueError("KIND endpoint must be a clean absolute HTTPS URL")
+    try:
+        parsed = urlparse(endpoint)
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError("KIND endpoint must be a valid absolute HTTPS URL") from exc
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or bool(parsed.params)
+        or bool(parsed.query)
+        or bool(parsed.fragment)
+    ):
+        raise ValueError(
+            "KIND endpoint must use HTTPS without URL credentials, parameters, query, or fragment"
+        )
+    return endpoint
+
+
+@dataclass
+class DartRequestBudget:
+    limit: int = 10_000
+    used: int = 0
+
+    def __post_init__(self) -> None:
+        if self.limit < 1:
+            raise ValueError("DART request budget must be at least 1")
+        if self.used < 0 or self.used > self.limit:
+            raise ValueError("DART request budget usage is invalid")
+
+    def consume(self, *, operation: str = "list") -> None:
+        if operation not in {"list", "corp_code"}:
+            raise ValueError("unsupported DART quota operation")
+        if self.used >= self.limit:
+            raise DartRequestBudgetError(
+                f"OpenDART request budget exhausted ({self.used}/{self.limit})"
+            )
+        self.used += 1
+
+    def block_020(self, permit: object) -> None:
+        # The local budget remains useful for unit tests and explicitly local
+        # development. Production workflows require the durable MySQL-backed
+        # implementation, which overrides this hook and records the day block.
+        del permit
 
 
 EVENT_PATTERNS: tuple[tuple[GovernanceEventType, tuple[str, ...]], ...] = (
@@ -394,6 +478,7 @@ class OfficialDisclosure:
     received_at: str
     original_url: str
     event_type: GovernanceEventType
+    identity: EventIdentity
     filer_name: str = ""
     remarks: str = ""
 
@@ -465,6 +550,8 @@ def parse_dart_disclosure(row: dict[str, object]) -> OfficialDisclosure | None:
         or not corp_name
     ):
         raise ValueError("invalid DART rcept_no or corp_code")
+    received_at = _dart_datetime(received_date)
+    filer_name = str(row.get("flr_nm") or "").strip()
     return OfficialDisclosure(
         source="DART",
         receipt_no=receipt_no,
@@ -473,10 +560,17 @@ def parse_dart_disclosure(row: dict[str, object]) -> OfficialDisclosure | None:
         stock_code=str(row.get("stock_code") or "").strip(),
         market=_compact_market(row.get("corp_cls")),
         title=title,
-        received_at=_dart_datetime(received_date),
+        received_at=received_at,
         original_url=dart_document_url(receipt_no),
         event_type=event_type,
-        filer_name=str(row.get("flr_nm") or "").strip(),
+        identity=event_identity_from_mapping(
+            row,
+            company_id=corp_code,
+            event_type=event_type,
+            default_action=event_type.value,
+            default_actor_name=filer_name,
+        ),
+        filer_name=filer_name,
         remarks=str(row.get("rm") or "").strip(),
     )
 
@@ -501,6 +595,7 @@ def parse_kind_disclosure(row: dict[str, object]) -> OfficialDisclosure | None:
         raise ValueError("KIND rows require a stable receipt number and DART corp_code")
     received = row.get("received_at") or row.get("rcept_dt") or row.get("date")
     received_at = normalize_kind_datetime(received)
+    filer_name = str(row.get("filer_name") or "").strip()
     return OfficialDisclosure(
         source="KIND",
         receipt_no=receipt_no,
@@ -512,7 +607,14 @@ def parse_kind_disclosure(row: dict[str, object]) -> OfficialDisclosure | None:
         received_at=received_at,
         original_url=_kind_original_url(row.get("original_url") or row.get("url"), receipt_no),
         event_type=event_type,
-        filer_name=str(row.get("filer_name") or "").strip(),
+        identity=event_identity_from_mapping(
+            row,
+            company_id=corp_code,
+            event_type=event_type,
+            default_action=event_type.value,
+            default_actor_name=filer_name or corp_name,
+        ),
+        filer_name=filer_name,
         remarks=str(row.get("remarks") or row.get("rm") or "").strip(),
     )
 
@@ -521,8 +623,12 @@ def parse_dart_list_payload(payload: dict[str, object]) -> tuple[list[dict[str, 
     status = str(payload.get("status") or "")
     if status == "013":
         return [], 0, 0
+    if status == "020":
+        raise DartQuotaExceededError(
+            "OpenDART request quota exhausted"
+        )
     if status != "000":
-        raise OfficialSourceError(f"OpenDART list failed: {status} {payload.get('message') or ''}".strip())
+        raise OfficialSourceError("OpenDART list returned a non-success status")
     rows = payload.get("list")
     if not isinstance(rows, list):
         raise OfficialSourceError("OpenDART success response omitted list")
@@ -550,7 +656,7 @@ def parse_kind_list_payload(payload: object) -> tuple[list[dict[str, object]], i
         if status in {"013", "no_data", "nodata", "empty"}:
             return [], 0, 0
         if status not in {"0", "000", "200", "ok", "success", "succeeded"}:
-            raise OfficialSourceError(f"KIND adapter reported status {raw_status}")
+            raise OfficialSourceError("KIND adapter reported a non-success status")
 
     data = payload.get("data")
     containers = [payload]
@@ -611,13 +717,30 @@ def parse_corp_code_zip(content: bytes) -> list[dict[str, object]]:
         corp_name = (item.findtext("corp_name") or "").strip()
         if not re.fullmatch(r"\d{8}", corp_code) or not corp_name:
             continue
+        stock_code = (item.findtext("stock_code") or "").strip()
+        modify_date = (item.findtext("modify_date") or "").strip()
+        master_modified_at: str | None = None
+        if modify_date:
+            try:
+                parsed_modify_date = datetime.strptime(modify_date, "%Y%m%d").date()
+            except ValueError as exc:
+                raise OfficialSourceError(
+                    f"OpenDART corp-code row {corp_code} has an invalid modify_date"
+                ) from exc
+            master_modified_at = f"{parsed_modify_date.isoformat()}T00:00:00+00:00"
+        listing_status = (
+            "listed"
+            if re.fullmatch(r"\d{6}", stock_code)
+            else ("unlisted" if not stock_code else "unknown")
+        )
         companies.append(
             {
                 "company_id": corp_code,
                 "legal_name": corp_name,
-                "stock_code": (item.findtext("stock_code") or "").strip(),
+                "stock_code": stock_code,
                 "market": "",
-                "modify_date": (item.findtext("modify_date") or "").strip(),
+                "listing_status": listing_status,
+                "master_modified_at": master_modified_at,
                 "aliases": [],
             }
         )
@@ -632,12 +755,24 @@ class DartConnector:
         client: httpx.Client | None = None,
         timeout: float = 20.0,
         governance_detail_codes: Iterable[str] | None = None,
+        request_budget: DartRequestQuota | None = None,
+        max_retries: int = 2,
+        backoff_seconds: float = 1.0,
+        sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
         if not api_key.strip():
             raise ValueError("DART API key is required")
         self.api_key = api_key.strip()
         self._client = client
         self.timeout = timeout
+        if max_retries < 0:
+            raise ValueError("DART max_retries cannot be negative")
+        if backoff_seconds < 0:
+            raise ValueError("DART backoff_seconds cannot be negative")
+        self.request_budget = request_budget or DartRequestBudget()
+        self.max_retries = max_retries
+        self.backoff_seconds = backoff_seconds
+        self._sleeper = sleeper
         requested_codes = DART_GOVERNANCE_DETAIL_CODES if governance_detail_codes is None else tuple(governance_detail_codes)
         normalized_codes = tuple(re.sub(r"[^0-9A-Za-z]", "", str(code)).upper() for code in requested_codes)
         unsupported = [code for code in normalized_codes if code not in DETAIL_TYPE_EVENTS]
@@ -645,16 +780,71 @@ class DartConnector:
             raise ValueError(f"unsupported governance DART detail codes: {', '.join(unsupported)}")
         self.governance_detail_codes = tuple(dict.fromkeys(normalized_codes))
         self.list_requests = 0
+        self.requests_made = 0
         self.pages_fetched = 0
         self.rows_fetched = 0
 
+    def _retry_delay(self, response: httpx.Response | None, attempt: int) -> float:
+        retry_after = response.headers.get("Retry-After", "") if response is not None else ""
+        try:
+            requested_delay = float(retry_after)
+        except ValueError:
+            requested_delay = 0.0
+        exponential = self.backoff_seconds * (2**attempt)
+        return min(30.0, max(exponential, requested_delay, 0.0))
+
     def _get(self, url: str, params: dict[str, str | int]) -> httpx.Response:
-        if self._client is not None:
-            response = self._client.get(url, params=params)
-        else:
-            response = httpx.get(url, params=params, timeout=self.timeout, follow_redirects=True)
-        response.raise_for_status()
-        return response
+        operation = "corp_code" if url == DART_CORP_CODE_URL else "list"
+        for attempt in range(self.max_retries + 1):
+            # The durable implementation returns an acknowledged permit. No
+            # physical DART request is made if the quota API times out, returns
+            # an incomplete ACK, or reports that the KST day is blocked/full.
+            permit = self.request_budget.consume(operation=operation)
+            self.requests_made += 1
+            try:
+                if self._client is not None:
+                    response = self._client.get(url, params=params)
+                else:
+                    response = httpx.get(
+                        url,
+                        params=params,
+                        timeout=self.timeout,
+                        follow_redirects=True,
+                    )
+            except httpx.TransportError:
+                if attempt >= self.max_retries:
+                    raise
+                self._sleeper(self._retry_delay(None, attempt))
+                continue
+
+            retryable_status = response.status_code == 429 or 500 <= response.status_code <= 599
+            if retryable_status and attempt < self.max_retries:
+                self._sleeper(self._retry_delay(response, attempt))
+                continue
+            if response.status_code >= 400:
+                # httpx's default exception renders the full request URL,
+                # including OpenDART's crtfc_key query parameter. Never let a
+                # provider secret or response body reach Actions logs.
+                raise OfficialSourceError(f"OpenDART HTTP {response.status_code}")
+
+            # Status 020 is a daily OpenDART quota boundary.  It deliberately
+            # fails immediately so the durable backfill checkpoint resumes in a
+            # later quota period instead of burning more requests in this run.
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            if isinstance(payload, dict) and str(payload.get("status") or "") == "020":
+                # block_020 must itself be durably acknowledged. If it cannot
+                # be recorded, its error propagates and the workflow fails;
+                # the existing non-cancelling official-ingest lock and
+                # backfill checkpoint remain additional race protection.
+                self.request_budget.block_020(permit)
+                raise DartQuotaExceededError(
+                    "OpenDART request quota exhausted; resume from the checkpoint later"
+                )
+            return response
+        raise AssertionError("unreachable DART request retry state")
 
     def _iter_list_rows(
         self,
@@ -823,9 +1013,7 @@ class KindConnector:
     """
 
     def __init__(self, endpoint: str, *, api_key: str = "", client: httpx.Client | None = None, timeout: float = 20.0) -> None:
-        if not endpoint.startswith(("https://", "http://")):
-            raise ValueError("KIND endpoint must be HTTP(S)")
-        self.endpoint = endpoint
+        self.endpoint = validate_kind_endpoint(endpoint)
         self.api_key = api_key
         self._client = client
         self.timeout = timeout
@@ -857,7 +1045,10 @@ class KindConnector:
                     timeout=self.timeout,
                     follow_redirects=True,
                 )
-            response.raise_for_status()
+            if response.status_code >= 400:
+                # The adapter token is carried in Authorization. Keep both
+                # headers and potentially hostile response bodies out of logs.
+                raise OfficialSourceError(f"KIND HTTP {response.status_code}")
             raw_payload = response.json()
             rows, current_page, total_pages = parse_kind_list_payload(raw_payload)
             self.pages_fetched += 1
@@ -929,42 +1120,120 @@ class KindConnector:
             page += 1
 
 
+def disclosure_storage_collection_key(disclosure: OfficialDisclosure) -> str:
+    """Return a canonical-event key that cannot merge incomplete identities.
+
+    Give the compatibility adapter the cross-source comparison key only for a
+    complete identity. Otherwise isolate the event observation by receipt so a
+    title cannot trigger an unsafe fallback merge.
+    """
+
+    if disclosure.identity.comparison_key:
+        return disclosure.identity.comparison_key
+    return stable_id("eventobs", disclosure.source, disclosure.receipt_no, length=48)
+
+
+def disclosure_document_collection_key(disclosure: OfficialDisclosure) -> str:
+    """Return a source-specific document chain key.
+
+    DART and KIND can observe the same canonical event, but a correction in one
+    system must never name a document from the other system as its predecessor.
+    """
+
+    if disclosure.identity.comparison_key:
+        return stable_id(
+            "docchain",
+            disclosure.source,
+            disclosure.identity.comparison_key,
+            length=48,
+        )
+    return stable_id("docobs", disclosure.source, disclosure.receipt_no, length=48)
+
+
 def link_correction_versions(disclosures: Iterable[OfficialDisclosure]) -> list[tuple[OfficialDisclosure, str | None, int, str]]:
-    """Link only revisions with exactly one predecessor chain in this batch.
+    """Link only revisions with exactly one strict-identity predecessor.
 
     Corrections and explicit withdrawal/cancellation receipts both advance a
-    chain. A DART row whose ``rm=철`` marks that same row as withdrawn remains a
-    standalone version when no unique predecessor receipt exists.
+    chain. Similar titles and shared collection themes are candidate discovery
+    only; a missing or conflicting identity never authorizes a link. A DART row
+    whose ``rm=철`` marks that same row as withdrawn remains a standalone
+    version when no unique predecessor receipt exists.
     """
-    candidates_by_collection: dict[str, list[tuple[str, int, str]]] = {}
+    candidates_by_collection: dict[str, list[tuple[str, int, str, EventIdentity]]] = {}
     linked: list[tuple[OfficialDisclosure, str | None, int, str]] = []
     ordered = sorted(disclosures, key=lambda item: (item.received_at, item.receipt_no))
     for disclosure in ordered:
         candidates = candidates_by_collection.setdefault(disclosure.collection_key, [])
         correction_of: str | None = None
         version_no = 1
-        event_id = stable_id("event", disclosure.source, disclosure.receipt_no, length=32)
-        linked_to_unique_chain = disclosure.is_revision and len(candidates) == 1
+        event_id = disclosure.identity.comparison_key or stable_id(
+            "event", disclosure.source, disclosure.receipt_no, length=32
+        )
+        matching_candidates = [
+            candidate
+            for candidate in candidates
+            if compare_event_identities(disclosure.identity, candidate[3]).same_event
+        ]
+        linked_to_unique_chain = disclosure.is_revision and len(matching_candidates) == 1
         if linked_to_unique_chain:
-            correction_of, previous_version, event_id = candidates[0]
+            correction_of, previous_version, event_id, _ = matching_candidates[0]
             version_no = previous_version + 1
         linked.append((disclosure, correction_of, version_no, event_id))
-        current = (disclosure.document_id, version_no, event_id)
+        current = (disclosure.document_id, version_no, event_id, disclosure.identity)
         if linked_to_unique_chain:
-            candidates[0] = current
+            candidates[candidates.index(matching_candidates[0])] = current
         else:
-            # A second independent filing with the same key makes every later
-            # correction ambiguous. Keep all candidates instead of guessing.
+            # Keep incomplete, conflicting, and duplicate candidates. A later
+            # correction may link only if exactly one complete identity agrees.
             candidates.append(current)
     return linked
 
 
+def cross_source_identity_conflicts(
+    disclosures: Iterable[OfficialDisclosure],
+) -> dict[tuple[str, str], tuple[str, ...]]:
+    """Flag near-identical DART/KIND identities that disagree on one fact.
+
+    A complete identity with a different comparison key is normally a distinct
+    event.  When two official systems agree on six of the seven canonical
+    dimensions and disagree on exactly one, however, publishing both without a
+    review would hide an official-source mismatch.  Keep both observations
+    isolated and attach the conflicting field to the editorial queue.
+    """
+
+    rows = list(disclosures)
+    conflicts: dict[tuple[str, str], set[str]] = {}
+    for index, left in enumerate(rows):
+        if left.identity.status is not EventIdentityStatus.COMPLETE:
+            continue
+        for right in rows[index + 1 :]:
+            if right.identity.status is not EventIdentityStatus.COMPLETE:
+                continue
+            if left.source.casefold() == right.source.casefold():
+                continue
+            if {left.source.casefold(), right.source.casefold()} != {"dart", "kind"}:
+                continue
+            if left.corp_code != right.corp_code or left.event_type != right.event_type:
+                continue
+            decision = compare_event_identities(left.identity, right.identity)
+            if decision.outcome is not EventIdentityMatch.DIFFERENT:
+                continue
+            if len(decision.conflicting_fields) != 1:
+                continue
+            field = decision.conflicting_fields[0]
+            conflicts.setdefault((left.source, left.receipt_no), set()).add(field)
+            conflicts.setdefault((right.source, right.receipt_no), set()).add(field)
+    return {key: tuple(sorted(fields)) for key, fields in conflicts.items()}
+
+
 def disclosure_payloads(disclosures: Iterable[OfficialDisclosure], *, retrieved_at: datetime | None = None) -> dict[str, list[dict[str, object]]]:
     retrieved = (retrieved_at or datetime.now(timezone.utc)).isoformat()
+    disclosure_rows = list(disclosures)
+    cross_source_conflicts = cross_source_identity_conflicts(disclosure_rows)
     companies_by_id: dict[str, dict[str, object]] = {}
     documents: list[dict[str, object]] = []
     events: list[dict[str, object]] = []
-    for disclosure, correction_of, version_no, event_id in link_correction_versions(disclosures):
+    for disclosure, correction_of, version_no, event_id in link_correction_versions(disclosure_rows):
         companies_by_id[disclosure.corp_code] = {
             "company_id": disclosure.corp_code,
             "legal_name": disclosure.corp_name,
@@ -973,6 +1242,17 @@ def disclosure_payloads(disclosures: Iterable[OfficialDisclosure], *, retrieved_
             "aliases": [],
         }
         language = original_language(disclosure.title)
+        storage_collection_key = disclosure_storage_collection_key(disclosure)
+        document_collection_key = disclosure_document_collection_key(disclosure)
+        identity_payload = disclosure.identity.to_payload()
+        conflict_fields = cross_source_conflicts.get((disclosure.source, disclosure.receipt_no), ())
+        identity_review_reasons = [
+            *disclosure.identity.review_reasons,
+            *(f"cross_source_conflict_{field}" for field in conflict_fields),
+        ]
+        if conflict_fields:
+            identity_payload["identity_status"] = EventIdentityStatus.NEEDS_REVIEW.value
+            identity_payload["identity_review_reasons"] = identity_review_reasons
         documents.append(
             {
                 "document_id": disclosure.document_id,
@@ -991,10 +1271,13 @@ def disclosure_payloads(disclosures: Iterable[OfficialDisclosure], *, retrieved_
                 "retrieved_at": retrieved,
                 "verification_status": "official",
                 "publication_status": "withdrawn" if disclosure.is_cancelled else "published",
-                "collection_key": disclosure.collection_key,
+                "collection_key": document_collection_key,
                 "remarks": disclosure.remarks,
                 "has_later_correction": disclosure.has_later_correction,
                 "is_withdrawn_by_remark": disclosure.is_withdrawn_by_remark,
+                "event_comparison_key": disclosure.identity.comparison_key,
+                "event_identity_status": identity_payload["identity_status"],
+                "event_identity_review_reasons": identity_review_reasons,
             }
         )
         market_sensitive = disclosure.event_type in {
@@ -1008,22 +1291,58 @@ def disclosure_payloads(disclosures: Iterable[OfficialDisclosure], *, retrieved_
             GovernanceEventType.DELISTING,
             GovernanceEventType.TRADING_SUSPENSION,
         }
-        events.append(
-            {
-                "event_id": event_id,
-                "company_id": disclosure.corp_code,
-                "event_type": disclosure.event_type.value,
-                "title": disclosure.title,
-                "original_language": language,
-                "summary": "",
-                "occurred_at": disclosure.received_at,
-                "importance": "market_sensitive" if market_sensitive else "normal",
-                "verification_status": "official",
-                "collection_key": disclosure.collection_key,
-                "document_ids": [disclosure.document_id],
-                "is_correction": disclosure.is_correction,
-                "is_cancelled": disclosure.is_cancelled,
-                "has_later_correction": disclosure.has_later_correction,
-            }
+        review_required = (
+            disclosure.identity.status is EventIdentityStatus.NEEDS_REVIEW
+            or bool(conflict_fields)
+            or market_sensitive
+            or (disclosure.is_revision and correction_of is None and not disclosure.identity.comparison_key)
         )
+        event_payload: dict[str, object] = {
+            "event_id": event_id,
+            "company_id": disclosure.corp_code,
+            "event_type": disclosure.event_type.value,
+            "title": disclosure.title,
+            "original_language": language,
+            "summary": "",
+            "occurred_at": disclosure.received_at,
+            "deadline_at": disclosure.identity.deadline_at or None,
+            "importance": "market_sensitive" if market_sensitive else "normal",
+            "verification_status": "official",
+            "collection_key": storage_collection_key,
+            "document_ids": [disclosure.document_id],
+            "is_correction": disclosure.is_correction,
+            "is_cancelled": disclosure.is_cancelled,
+            "has_later_correction": disclosure.has_later_correction,
+            "review_required": review_required,
+            "actor_id": disclosure.identity.actor_id or None,
+            "action": disclosure.identity.action,
+            "target": disclosure.identity.target,
+        }
+        # Preserve the source filer as a reviewable Actor instead of exposing
+        # only the opaque identity hash.  These nested candidates travel with
+        # the event through the existing governance-snapshot transport; the
+        # server stores both records as pending/inactive and requires explicit
+        # actor + relation approval before the event can be published.
+        actor_id = disclosure.identity.actor_id
+        filer_name = disclosure.filer_name
+        if actor_id and filer_name:
+            filer_is_company = normalize_identity_text(filer_name) == normalize_identity_text(
+                disclosure.corp_name
+            )
+            event_payload["actor"] = {
+                "actor_id": actor_id,
+                "actor_type": "company" if filer_is_company else "institution",
+                "display_name": filer_name,
+                "company_id": disclosure.corp_code if filer_is_company else None,
+                "review_status": "pending",
+                "record_status": "inactive",
+            }
+            event_payload["event_actor"] = {
+                "event_id": event_id,
+                "actor_id": actor_id,
+                "actor_role": "filer",
+                "review_status": "pending",
+            }
+        event_payload.update(identity_payload)
+        events.append(event_payload)
     return {"companies": list(companies_by_id.values()), "documents": documents, "events": events}

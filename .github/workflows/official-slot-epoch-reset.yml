@@ -1,0 +1,63 @@
+name: Reset official slot epoch
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_epoch_version:
+        description: Current durable epoch version (optimistic lock)
+        required: true
+        type: number
+      reason:
+        description: Audited reset reason (20-500 characters)
+        required: true
+        type: string
+      confirmation:
+        description: Type RESET_OFFICIAL_SLOT_EPOCH_AT_NEXT_KST_DAY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ingest-official-${{ github.ref_name }}
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    if: >-
+      github.ref_name == github.event.repository.default_branch &&
+      vars.GOVERNANCE_PIPELINE_MODE == 'off'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: governance-release
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Advance append-only epoch at next KST day
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
+          EXPECTED_EPOCH_VERSION: ${{ inputs.expected_epoch_version }}
+          RESET_REASON: ${{ inputs.reason }}
+          RESET_CONFIRMATION: ${{ inputs.confirmation }}
+        shell: bash
+        run: |
+          python -m curator.official_slot_epoch \
+            --expected-epoch-version "$EXPECTED_EPOCH_VERSION" \
+            --reason "$RESET_REASON" \
+            --confirmation "$RESET_CONFIRMATION"

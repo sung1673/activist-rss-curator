@@ -4,7 +4,7 @@ on:
   workflow_run:
     workflows:
       - Build curated RSS feed
-      - Daily pages and briefing
+      - Daily governance pages
     types:
       - completed
     branches:
@@ -26,7 +26,7 @@ jobs:
       issues: write
     steps:
       - name: Reconcile the Pages incident from the verification step
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const run = context.payload.workflow_run;

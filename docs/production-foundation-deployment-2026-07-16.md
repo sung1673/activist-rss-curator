@@ -193,5 +193,5 @@ safe-full 수정본 배포에서는 일반·복구·거버넌스 Telegram writer
 4. `ENABLE_GOVERNANCE_SHADOW=true`로 바꾸고 14일 비교와 7일 운영·성능 원시 증빙을 수집한다.
 5. 실제 원시 증빙 exporter를 연결하고 사람 라벨 benchmark, 편집 검수, 법률 검토와 사용자 평가를 마친다.
 6. 전환 게이트 통과 후 `ENABLE_GOVERNANCE_PAGES=true`를 먼저 승인한다.
-7. 공개 화면과 rollback을 확인한 뒤 `ENABLE_GOVERNANCE_DELIVERY=true`를 별도로 승인한다.
+7. 공개 화면과 rollback을 확인한 뒤에도 `ENABLE_GOVERNANCE_DELIVERY=false`를 유지한다. 배포는 web-only이며 outbound delivery는 제품 범위에서 영구 제외됐다.
 8. 기존 pipeline은 90일 호환 관측 뒤에만 종료한다.

@@ -27,15 +27,56 @@
       "additionalProperties": false,
       "required": [
         "availability_rate",
+        "availability_cadence_id",
+        "availability_actual_interval_seconds_p95",
+        "availability_actual_max_gap_seconds",
+        "availability_first_observed_at",
+        "availability_last_observed_at",
+        "availability_coverage_rate",
         "mobile_lcp_p75_seconds",
         "mobile_inp_p75_ms",
-        "mobile_cls_p75"
+        "mobile_cls_p75",
+        "raw_counts"
       ],
       "properties": {
         "availability_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "availability_cadence_id": {"const": "watchdog-v1-kst-5m-minute01"},
+        "availability_actual_interval_seconds_p95": {"type": "number", "minimum": 0, "maximum": 600},
+        "availability_actual_max_gap_seconds": {"type": "number", "minimum": 0, "maximum": 600},
+        "availability_first_observed_at": {"type": "string", "format": "date-time"},
+        "availability_last_observed_at": {"type": "string", "format": "date-time"},
+        "availability_coverage_rate": {"const": 1.0},
         "mobile_lcp_p75_seconds": {"type": "number", "minimum": 0},
         "mobile_inp_p75_ms": {"type": "number", "minimum": 0},
-        "mobile_cls_p75": {"type": "number", "minimum": 0}
+        "mobile_cls_p75": {"type": "number", "minimum": 0},
+        "raw_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "availability_attempted_count",
+            "availability_succeeded_count",
+            "availability_expected_slot_count",
+            "availability_covered_slot_count",
+            "availability_missing_slot_count",
+            "availability_duplicate_slot_count",
+            "availability_off_cadence_count",
+            "mobile_lcp_sample_count",
+            "mobile_inp_sample_count",
+            "mobile_cls_sample_count"
+          ],
+          "properties": {
+            "availability_attempted_count": {"type": "integer", "minimum": 1},
+            "availability_succeeded_count": {"type": "integer", "minimum": 0},
+            "availability_expected_slot_count": {"const": 1152},
+            "availability_covered_slot_count": {"const": 1152},
+            "availability_missing_slot_count": {"const": 0},
+            "availability_duplicate_slot_count": {"type": "integer", "minimum": 0},
+            "availability_off_cadence_count": {"const": 0},
+            "mobile_lcp_sample_count": {"type": "integer", "minimum": 20},
+            "mobile_inp_sample_count": {"type": "integer", "minimum": 20},
+            "mobile_cls_sample_count": {"type": "integer", "minimum": 20}
+          }
+        }
       }
     }
   }

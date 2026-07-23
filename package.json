@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:ui": "playwright test"
+    "test:ui": "playwright test",
+    "test:web-vitals-probe": "node --test tests/node/web-vitals-probe.test.mjs",
+    "test:legacy-recovery-resolver": "node --test tests/node/legacy-recovery-resolver.test.cjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.12.1",

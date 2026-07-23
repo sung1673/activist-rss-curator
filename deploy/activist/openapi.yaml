@@ -1,12 +1,66 @@
 openapi: 3.1.0
 info:
   title: BSIDE Governance Intelligence API
-  version: 1.1.0
+  version: 1.9.0
   description: >-
     Public, read-only governance event records and role-gated operations APIs.
     Document title and body fields preserve their original language; the API
-    never translates source text.
+    never translates source text. Public data routes return 503 while the
+    server-side release state is closed and require a preview Bearer token
+    while it is preview. Health and this specification remain public; the API
+    root descriptor is a public data route and is therefore closed with 503.
 x-changelog:
+  - version: 1.9.0
+    date: '2026-07-23'
+    changes:
+      - Added schema version 10 and a durable server-authoritative official-ingest slot claim ledger; delayed GitHub runs no longer infer slots from workflow creation timestamps.
+      - Added exact oldest-slot repair, immutable completion/terminal-failure evidence and an audited next-KST-day epoch reset that preserves prior claims.
+      - Release evidence now rejects ranges crossing an epoch boundary and reports claimed, late, incomplete and terminal-failure slot counts.
+      - Availability evidence now proves all 288 KST minute-01 watchdog slots per route and reports an exact bitmap, missing/duplicate counts and day-edge maximum gaps.
+  - version: 1.8.0
+    date: '2026-07-22'
+    changes:
+      - Added schema version 9 and a server-authoritative 10,000-request KST-day DART quota ledger shared by scheduled, canary and backfill jobs.
+      - Every physical DART HTTP attempt is consumed exactly once before dispatch; status 020 blocks all additional attempts until the next KST midnight.
+  - version: 1.7.0
+    date: '2026-07-22'
+    changes:
+      - Added schema version 8 atomic official-site snapshot receipts, identity-link history, review-only tombstones and an ops-only eligible-rights feed.
+      - Added a paged official-run ledger with Python-compatible canonical JSONL digest and KST scheduled-slot attribution.
+      - Health now reports only fully acknowledged scheduled official runs and the latest observed active web deployment.
+      - Every preview-to-live promotion starts a new audited 90-day compatibility epoch.
+  - version: 1.6.0
+    date: '2026-07-22'
+    changes:
+      - Added editor-only canonical event identity completion with server-side comparison-key recomputation and conflict review.
+      - Added fail-closed KIND SourceRight ingest eligibility preflight and a transaction-time rights recheck.
+      - Defined cumulative 2021+ KST day-end corpus evidence, true KIND no-disclosure N/A days and seven-day denominator gates.
+      - Required a non-empty lossless legacy crosswalk for every shadow day and permanently disabled outbound queue enqueue/claim actions.
+  - version: 1.5.0
+    date: '2026-07-22'
+    changes:
+      - Added complete-set server ranking for Today and deterministic official-site connector candidates.
+      - Applied company, actor, type, status and source filters to both calendar event and proposal-vote rows.
+      - Distinguished GitHub workflow rerun attempts in durable web-distribution observations.
+  - version: 1.4.0
+    date: '2026-07-22'
+    changes:
+      - Added KST day/build release evidence groups, immutable shadow run snapshots and separate DART/KIND freshness.
+      - Added durable web-distribution and quality observation writers plus immutable human evidence bundles.
+      - Recorded cutover and 90-day sunset timestamps atomically; legacy deprecation headers are absent before cutover.
+      - Required every public document to have an active, evidenced SourceRight and removed heuristic event-correction merging.
+  - version: 1.3.0
+    date: '2026-07-22'
+    changes:
+      - Added canonical event identity, document observations, source run ACK metadata and schema version 7.
+      - Added actors, public revisions, shadow review, production evidence, availability and privacy-minimal Web Vitals APIs.
+      - Added byte-aware document body paging and a durable optimistic MySQL backfill checkpoint contract.
+  - version: 1.2.0
+    date: '2026-07-22'
+    changes:
+      - Added a fail-closed closed/preview/live release gate for all public v1 data routes.
+      - Added an admin release-state transition API with optimistic concurrency and immutable audit history.
+      - Replaced request-time schema DDL with an explicit migration version guard at schema version 6.
   - version: 1.1.0
     date: '2026-07-16'
     changes:
@@ -24,7 +78,16 @@ x-compatibility:
   legacy-feed: /feed.xml
   minimum-adapter-period-days: 90
 servers:
-  - url: https://news.bside.ai/api/v1
+  - url: https://alignpe.gabia.io/activist/api.php/api/v1
+    description: Governance API origin
+x-public-site: https://news.bside.ai
+x-release-gate:
+  states: [closed, preview, live]
+  public-route-behavior:
+    closed: HTTP 503 governance_release_closed
+    preview: Bearer preview token required; responses are private and not cacheable
+    live: Public read access with short-lived caching
+  schema-version: 10
 tags:
   - name: Public
   - name: Feedback
@@ -42,6 +105,7 @@ paths:
         - {name: market, in: query, schema: {type: string, maxLength: 40}}
       responses:
         '200': {$ref: '#/components/responses/CompanyList'}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
   /companies/{company_id}:
     get:
       tags: [Public]
@@ -51,6 +115,30 @@ paths:
       responses:
         '200': {description: Company detail}
         '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
+  /actors:
+    get:
+      tags: [Public]
+      summary: List actors attached to public events or campaigns
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - {name: q, in: query, schema: {type: string, minLength: 2, maxLength: 100}}
+        - {name: actor_type, in: query, schema: {type: string, maxLength: 40}}
+        - {name: company_id, in: query, schema: {$ref: '#/components/schemas/CompanyId'}}
+      responses:
+        '200': {description: Paginated public actors}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
+  /actors/{actor_id}:
+    get:
+      tags: [Public]
+      summary: Get an actor and linked public events and campaigns
+      parameters:
+        - $ref: '#/components/parameters/ActorId'
+      responses:
+        '200': {description: Actor detail}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
   /events:
     get:
       tags: [Public]
@@ -59,13 +147,19 @@ paths:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
         - {name: company_id, in: query, schema: {$ref: '#/components/schemas/CompanyId'}}
+        - {name: actor_id, in: query, schema: {type: string, pattern: '^[A-Za-z0-9_.:-]{1,64}$'}}
         - {name: event_type, in: query, schema: {$ref: '#/components/schemas/EventType'}}
         - {name: verification_status, in: query, schema: {$ref: '#/components/schemas/VerificationStatus'}}
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/VerificationStatus'}, description: Alias of verification_status; conflicting values are rejected.}
+        - {name: identity_status, in: query, schema: {type: string, enum: [complete, needs_review]}}
         - {name: importance, in: query, schema: {$ref: '#/components/schemas/Importance'}}
+        - {name: source_class, in: query, schema: {$ref: '#/components/schemas/SourceClass'}}
+        - {name: evidence_document_id, in: query, schema: {$ref: '#/components/schemas/EntityId'}}
         - {name: from, in: query, schema: {type: string, format: date-time}}
         - {name: to, in: query, schema: {type: string, format: date-time}}
       responses:
         '200': {$ref: '#/components/responses/EventList'}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
   /events/{event_id}:
     get:
       tags: [Public]
@@ -75,6 +169,22 @@ paths:
       responses:
         '200': {description: Event detail}
         '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
+  /today:
+    get:
+      tags: [Public]
+      summary: Rank Top 5 and Watch from the complete public event set
+      description: >-
+        Excludes signal events. Ranking is deterministic for the database state
+        and uses importance, publishable official evidence, verification and
+        deadline urgency. The full archive remains the paginated /events route.
+      responses:
+        '200':
+          description: Server-ranked Top 5 and Watch lists; this response is not paginated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TodayResponse'}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
   /campaigns/{campaign_id}:
     get:
       tags: [Public]
@@ -84,6 +194,7 @@ paths:
       responses:
         '200': {description: Campaign detail}
         '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
   /documents/{document_id}:
     get:
       tags: [Public]
@@ -94,9 +205,12 @@ paths:
       parameters:
         - {name: document_id, in: path, required: true, schema: {$ref: '#/components/schemas/EntityId'}}
         - {name: include, in: query, schema: {type: string, enum: [body]}}
+        - {name: body_offset, in: query, schema: {type: integer, minimum: 0, maximum: 1000000000, default: 0}}
+        - {name: body_limit_bytes, in: query, schema: {type: integer, minimum: 1, maximum: 60000, default: 60000}}
       responses:
-        '200': {description: Document detail, capped to the API response budget}
+        '200': {description: Document detail with body_total_bytes, body_bytes_returned, body_truncated and body_next_offset}
         '404': {$ref: '#/components/responses/NotFound'}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
   /calendar:
     get:
       tags: [Public]
@@ -106,8 +220,18 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - {name: from, in: query, schema: {type: string, format: date}}
         - {name: to, in: query, schema: {type: string, format: date}}
+        - {name: company_id, in: query, schema: {$ref: '#/components/schemas/CompanyId'}}
+        - {name: actor_id, in: query, schema: {type: string, pattern: '^[A-Za-z0-9_.:-]{1,64}$'}}
+        - {name: event_type, in: query, schema: {$ref: '#/components/schemas/EventType'}}
+        - {name: verification_status, in: query, schema: {$ref: '#/components/schemas/VerificationStatus'}}
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/VerificationStatus'}}
+        - {name: identity_status, in: query, schema: {type: string, enum: [complete, needs_review]}}
+        - {name: importance, in: query, schema: {$ref: '#/components/schemas/Importance'}}
+        - {name: source_class, in: query, schema: {$ref: '#/components/schemas/SourceClass'}}
+        - {name: evidence_document_id, in: query, schema: {$ref: '#/components/schemas/EntityId'}}
       responses:
-        '200': {description: Calendar page; date range is at most 366 days}
+        '200': {description: Calendar page; filters apply to both event deadlines and proposal-vote meetings; date range is at most 366 days}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
   /search:
     get:
       tags: [Public]
@@ -116,8 +240,16 @@ paths:
         - {name: q, in: query, required: true, schema: {type: string, minLength: 2, maxLength: 100}}
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
+        - {name: company_id, in: query, schema: {$ref: '#/components/schemas/CompanyId'}}
+        - {name: actor_id, in: query, schema: {type: string, pattern: '^[A-Za-z0-9_.:-]{1,64}$'}}
+        - {name: event_type, in: query, schema: {$ref: '#/components/schemas/EventType'}}
+        - {name: source_class, in: query, schema: {$ref: '#/components/schemas/SourceClass'}}
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/VerificationStatus'}}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
       responses:
         '200': {$ref: '#/components/responses/SearchResults'}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
   /exports/events.json:
     get:
       tags: [Public]
@@ -125,8 +257,14 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
+        - {name: company_id, in: query, schema: {$ref: '#/components/schemas/CompanyId'}}
+        - {name: actor_id, in: query, schema: {type: string, pattern: '^[A-Za-z0-9_.:-]{1,64}$'}}
+        - {name: event_type, in: query, schema: {$ref: '#/components/schemas/EventType'}}
+        - {name: source_class, in: query, schema: {$ref: '#/components/schemas/SourceClass'}}
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/VerificationStatus'}}
       responses:
         '200': {$ref: '#/components/responses/EventList'}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
   /exports/events.csv:
     get:
       tags: [Public]
@@ -134,20 +272,53 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
+        - {name: company_id, in: query, schema: {$ref: '#/components/schemas/CompanyId'}}
+        - {name: actor_id, in: query, schema: {type: string, pattern: '^[A-Za-z0-9_.:-]{1,64}$'}}
+        - {name: event_type, in: query, schema: {$ref: '#/components/schemas/EventType'}}
+        - {name: source_class, in: query, schema: {$ref: '#/components/schemas/SourceClass'}}
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/VerificationStatus'}}
       responses:
         '200':
           description: CSV with pagination metadata in X-Has-More and X-Next-Page
           content:
             text/csv: {schema: {type: string}}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
   /feeds/events.atom:
     get:
       tags: [Public]
-      summary: Latest published events as Atom
+      summary: Latest published events as Atom with a canonical filtered self URL
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: company_id, in: query, schema: {$ref: '#/components/schemas/CompanyId'}}
+        - {name: actor_id, in: query, schema: {type: string, pattern: '^[A-Za-z0-9_.:-]{1,64}$'}}
+        - {name: event_type, in: query, schema: {$ref: '#/components/schemas/EventType'}}
+        - {name: verification_status, in: query, schema: {$ref: '#/components/schemas/VerificationStatus'}}
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/VerificationStatus'}, deprecated: true, description: Alias normalized to verification_status in the Atom self URL; conflicting values are rejected.}
+        - {name: identity_status, in: query, schema: {type: string, enum: [complete, needs_review]}}
+        - {name: importance, in: query, schema: {$ref: '#/components/schemas/Importance'}}
+        - {name: source_class, in: query, schema: {$ref: '#/components/schemas/SourceClass'}}
+        - {name: evidence_document_id, in: query, schema: {$ref: '#/components/schemas/EntityId'}}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
       responses:
         '200':
           description: Atom 1.0 feed
           content:
             application/atom+xml: {schema: {type: string}}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
+  /revisions:
+    get:
+      tags: [Public]
+      summary: List published correction metadata only
+      description: Internal values, request identities and unpublished approvals are never returned.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - {name: entity_type, in: query, schema: {type: string, enum: [company, event, campaign, document, actor]}}
+        - {name: entity_id, in: query, schema: {$ref: '#/components/schemas/EntityId'}}
+      responses:
+        '200': {description: Paginated published revisions}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
   /feedback:
     post:
       tags: [Feedback]
@@ -162,6 +333,32 @@ paths:
         '202':
           description: Privately queued; never auto-published
         '429': {description: At most five submissions per source address per hour}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
+  /metrics/web-vitals:
+    post:
+      tags: [Operations]
+      summary: Record privacy-minimal first-party Web Vitals
+      description: >-
+        Accepts one metric object or an observations array of at most 50. Only
+        route template, metric, value, device class, build SHA and measurement
+        time are stored; IP, URL query, user agent, session and user identifiers
+        are not stored. Rows expire after 30 days.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/WebVitalObservation'
+                - type: object
+                  additionalProperties: false
+                  required: [observations]
+                  properties:
+                    observations: {type: array, minItems: 1, maxItems: 50, items: {$ref: '#/components/schemas/WebVitalObservation'}}
+      responses:
+        '202': {description: Metrics accepted for 30-day retention}
+        '429': {description: Global telemetry ingest limit reached}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
   /ops/health:
     get:
       tags: [Operations]
@@ -174,12 +371,26 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [last_success_at, pending_outbox, oldest_pending_at, dead_letter_count]
+                required: [ok, status, last_success_at, official_sources, pending_outbox, oldest_pending_at, dead_letter_count, active_deployment, active_deployment_status, checked_at]
                 properties:
+                  ok: {type: boolean, const: true}
+                  status: {type: string, enum: [ok, degraded]}
                   last_success_at: {type: [string, 'null'], format: date-time}
+                  official_sources:
+                    type: object
+                    required: [dart, kind]
+                    properties:
+                      dart: {$ref: '#/components/schemas/OfficialSourceFreshness'}
+                      kind: {$ref: '#/components/schemas/OfficialSourceFreshness'}
                   pending_outbox: {type: integer}
                   oldest_pending_at: {type: [string, 'null'], format: date-time}
                   dead_letter_count: {type: integer}
+                  active_deployment:
+                    anyOf:
+                      - {$ref: '#/components/schemas/ActiveDeployment'}
+                      - {type: 'null'}
+                  active_deployment_status: {type: string, enum: [missing, observed, ambiguous, invalid]}
+                  checked_at: {type: string, format: date-time}
         '401': {$ref: '#/components/responses/Unauthorized'}
   /ops/runtime-state:
     get:
@@ -194,6 +405,413 @@ paths:
       responses:
         '200': {description: Cursor page capped below 250KB}
         '401': {$ref: '#/components/responses/Unauthorized'}
+  /ops/availability-observations:
+    post:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: Persist an idempotent watchdog observation batch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [observations]
+              properties:
+                observations: {type: array, minItems: 1, maxItems: 10, items: {$ref: '#/components/schemas/AvailabilityObservation'}}
+      responses:
+        '202': {description: Every row acknowledged; duplicates are counted separately}
+        '409': {description: An observation ID was reused with different values}
+        '429': {description: Global watchdog ingest limit reached}
+  /ops/web-distribution-observations:
+    post:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: Persist actual Pages/API deployment outcomes idempotently
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [observations]
+              properties:
+                observations: {type: array, minItems: 1, maxItems: 50, items: {$ref: '#/components/schemas/WebDistributionObservation'}}
+      responses:
+        '202': {description: Actual deployment observations acknowledged with exact accepted_count, inserted_count and duplicate_count}
+        '409': {description: Observation or workflow-run attempt target was reused with different values}
+  /ops/quality-observations:
+    post:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: Persist immutable, actual daily quality numerators and denominators
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [observations]
+              properties:
+                observations: {type: array, minItems: 1, maxItems: 10, items: {$ref: '#/components/schemas/QualityObservation'}}
+      responses:
+        '202': {description: Quality observations acknowledged; zero values remain zero and never become synthetic successes}
+        '409': {description: An immutable date/revision observation conflicts}
+  /ops/release-evidence:
+    get:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: Export production-only release evidence numerators and denominators
+      parameters:
+        - {name: from, in: query, schema: {type: string, format: date}}
+        - {name: to, in: query, schema: {type: string, format: date}}
+        - {name: code_revision, in: query, schema: {type: string, pattern: '^[a-f0-9]{40}$'}, description: Select the immutable same-SHA human evidence bundle.}
+      responses:
+        '200':
+          description: Up to 31 days of non-synthetic production DB evidence
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [official_schedule, availability]
+                properties:
+                  official_schedule: {$ref: '#/components/schemas/OfficialScheduleEvidence'}
+                  availability: {$ref: '#/components/schemas/AvailabilityEvidence'}
+                  operations_days:
+                    type: array
+                    items: {$ref: '#/components/schemas/QualityObservationEvidence'}
+        '400': {description: Invalid or excessive date range}
+  /ops/official-run-ledger:
+    get:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: Page exact official collection-run evidence without exceeding the API response budget
+      description: >-
+        Scheduled rows are attributed to the KST date of scheduled_slot_at;
+        manual, backfill and invalid-metadata rows use their observed completion date.
+        ledger_sha256 is SHA-256 over sorted-key compact UTF-8 JSON plus a newline for every row in the complete range.
+      parameters:
+        - {name: from, in: query, schema: {type: string, format: date}}
+        - {name: to, in: query, schema: {type: string, format: date}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 25}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 512}}
+      responses:
+        '200':
+          description: A page plus the complete-range row count and digest
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OfficialRunLedgerPage'}
+        '400': {description: Invalid cursor or date range}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /ops/dart-quota:
+    get:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: Read the current KST-day global OpenDART quota without mutation
+      parameters:
+        - {name: quota_day, in: query, required: true, schema: {type: string, format: date}}
+      responses:
+        '200': {description: Current used, remaining and 020-block state}
+        '400': {description: quota_day differs from the server current KST date}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: Atomically consume one physical DART request or block after status 020
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - {$ref: '#/components/schemas/DartQuotaConsumeRequest'}
+                - {$ref: '#/components/schemas/DartQuotaBlockRequest'}
+      responses:
+        '200':
+          description: Exact durable acknowledgement; callers must validate it before any DART HTTP request
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DartQuotaAcknowledgement'}
+        '400': {description: Exact request contract or KST day mismatch}
+        '409': {description: Day blocked by 020, missing cause attempt or idempotency conflict}
+        '429': {description: The 10,000-request KST-day limit is exhausted}
+  /ops/official-site-rights:
+    get:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: List currently eligible company and activist official-site rights
+      description: >-
+        Requires evidence and redistribution permission but does not require AI permission;
+        ai_allowed is returned so the connector can independently disable AI processing.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Paginated minimal connector rights
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OfficialSiteRightsPage'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /ops/source-right-eligibility:
+    get:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: Fail closed unless the approved KIND ingest right is currently eligible
+      parameters:
+        - {name: source_right_id, in: query, required: true, schema: {type: string, const: 'official:kind'}}
+        - {name: use, in: query, required: true, schema: {type: string, const: ingest}}
+      responses:
+        '200':
+          description: The KIND right is active, evidenced and permits AI plus redistribution
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SourceRightEligibility'}
+        '400': {description: Only official:kind ingest eligibility is supported}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409':
+          description: The right is missing, inactive, expired, revoked, unevidenced or insufficiently scoped
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SourceRightEligibility'}
+  /ops/official-site-candidates:
+    get:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: Rank private official-site connector allowlist candidates
+      description: >-
+        Returns only candidate identifiers, names, event counts, raw scores and
+        latest event timestamps. Rankings use publishable official evidence and
+        public or review-pending event metadata; no event bodies are exposed.
+      responses:
+        '200':
+          description: Deterministic company top 20 and approved actor top 10
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OfficialSiteCandidatesResponse'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /ops/backfill-checkpoints/{job_fingerprint}:
+    parameters:
+      - {name: job_fingerprint, in: path, required: true, schema: {type: string, pattern: '^[a-f0-9]{64}$'}}
+    get:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: Load the durable MySQL official-backfill checkpoint
+      responses:
+        '200': {description: Checkpoint, payload hash and optimistic version}
+        '404': {description: No checkpoint exists for this job fingerprint}
+    put:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: Create or replace a durable backfill checkpoint optimistically
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BackfillCheckpointUpdate'}
+      responses:
+        '200': {description: Existing checkpoint updated or identical payload acknowledged}
+        '201': {description: New version-1 checkpoint created}
+        '409': {description: expected_version does not match the current version}
+  /ops/official-slot-claims:
+    get:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: Page durable official-ingest slot claims and the active epoch
+      parameters:
+        - {name: from, in: query, schema: {type: string, format: date}}
+        - {name: to, in: query, schema: {type: string, format: date}}
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Claims attributed by the server without workflow timestamp flooring
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OfficialSlotClaimsPage'}
+        '400': {description: Invalid or longer-than-31-day range}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: Claim the oldest due slot, or repair the globally oldest exact unclaimed slot
+      description: >-
+        The first request activates collection only at the next complete KST day and returns 409
+        without assigning that run. A normal claim selects the oldest due unclaimed slot in the
+        immutable cron family. Repair accepts an operator-supplied exact slot only when it is the
+        globally oldest due unclaimed slot across all three cron families. Completed reruns are
+        immutable no-ops; post-boundary reruns become permanent failed claims.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OfficialSlotClaimRequest'}
+      responses:
+        '200':
+          description: Exact durable claim acknowledgement
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OfficialSlotClaimAcknowledgement'}
+        '400': {description: Invalid identity, schedule, timestamp or repair slot}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {description: Activation, not-active, not-due, not-oldest, idempotency or concurrency conflict}
+  /admin/official-slot-epoch:
+    get:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Read the active official-slot epoch and append-only epoch history
+      responses:
+        '200':
+          description: Current epoch state and at most 100 audit rows
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OfficialSlotEpochHistory'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Advance collection to a new audited epoch at the next complete KST day
+      description: >-
+        Requires admin authorization, closed release state, an optimistic epoch version and the
+        exact destructive-action confirmation. Existing claims and epoch history are preserved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OfficialSlotEpochReset'}
+      responses:
+        '200':
+          description: Epoch advanced with claims_preserved=true
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OfficialSlotEpochResetAcknowledgement'}
+        '400': {description: Invalid action, reason, revision or confirmation}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: Release is not closed, epoch is absent or expected version is stale}
+  /admin/release-state:
+    get:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Read the governance public release state and recent audit history
+      parameters:
+        - {name: history_limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+      responses:
+        '200':
+          description: Current state, schema version, preview-auth readiness and audit history
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReleaseState'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Transition the governance public release state
+      description: >-
+        Allowed transitions are closed to preview, preview to live or closed,
+        and live to closed. Repeating the current state is idempotent. A stale
+        expected_version returns 409 and every state change is audited.
+        Preview-to-live also rechecks the current SourceRight, AI-use,
+        redistribution and evidence eligibility of every v2 corpus document;
+        any invalid reference fails closed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReleaseStateUpdate'}
+      responses:
+        '200': {description: State transition committed, or an idempotent replay acknowledged}
+        '400': {description: Invalid state, version or reason}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: Stale version, disallowed transition, or current_source_rights_invalid cutover guard}
+        '503': {$ref: '#/components/responses/GovernanceUnavailable'}
+  /admin/shadow-discrepancies:
+    get:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: List candidate-versus-legacy discrepancies for human review
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - {name: review_status, in: query, schema: {type: string, enum: [pending, reviewed, resolved, dismissed]}}
+        - {name: discrepancy_type, in: query, schema: {type: string, maxLength: 40}}
+        - {name: code_revision, in: query, schema: {type: string, pattern: '^[a-f0-9]{7,64}$'}}
+        - {name: from, in: query, schema: {type: string, format: date}}
+        - {name: to, in: query, schema: {type: string, format: date}}
+      responses:
+        '200': {description: Paginated editor-only shadow discrepancies}
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Create or review one shadow discrepancy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ShadowDiscrepancyUpdate'}
+      responses:
+        '200': {description: Existing discrepancy updated}
+        '201': {description: New discrepancy created}
+        '409': {description: Missing or stale expected_updated_at}
+  /admin/shadow-runs:
+    get:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: List immutable daily legacy/candidate comparison snapshots
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - {name: code_revision, in: query, schema: {type: string, pattern: '^[a-f0-9]{7,64}$'}}
+        - {name: from, in: query, schema: {type: string, format: date}}
+        - {name: to, in: query, schema: {type: string, format: date}}
+      responses:
+        '200': {description: Integrity-checked snapshot pages}
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Create or optimistically replace one daily shadow snapshot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ShadowRunUpdate'}
+      responses:
+        '200': {description: Idempotent replay or version-matched replacement}
+        '201': {description: Snapshot created}
+        '409': {description: Missing or stale expected_updated_at}
+  /admin/release-evidence-inputs:
+    get:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Read the latest immutable human evidence bundle for a full SHA
+      parameters:
+        - {name: code_revision, in: query, required: true, schema: {type: string, pattern: '^[a-f0-9]{40}$'}}
+      responses:
+        '200': {description: Canonical benchmark, usability and release-approval documents with SHA-256 digests}
+        '404': {description: No bundle exists for the revision}
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Append one same-SHA human evidence bundle with optimistic versioning
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HumanReleaseEvidenceUpdate'}
+      responses:
+        '200': {description: Byte-equivalent replay acknowledged}
+        '201': {description: New immutable bundle version appended}
+        '409': {description: expected_version does not match the latest bundle}
   /admin/review-queue:
     get:
       tags: [Administration]
@@ -217,6 +835,31 @@ paths:
       responses:
         '200': {description: Review recorded in EditorialRevision}
         '409': {description: Stale review, invalid evidence, or unmet approval dependency}
+  /admin/events/{event_id}/identity:
+    post:
+      tags: [Administration]
+      security: [{bearerAuth: []}]
+      summary: Complete an event identity while preserving its stable event ID
+      description: >-
+        Normalizes all identity dimensions and recomputes comparison_key on the
+        server. Complete or published identities are immutable. A unique-key
+        collision returns 409 and remains in human review.
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EventIdentityCompletionRequest'}
+      responses:
+        '200':
+          description: Identity completed or an identical completion replay acknowledged
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EventIdentityCompletionResponse'}
+        '400': {description: Incomplete or invalid identity dimensions}
+        '404': {description: Event not found}
+        '409': {description: Stale, immutable, inactive-actor or comparison-key conflict}
   /admin/event-actors/{event_id}/{actor_id}/{actor_role}/review:
     post:
       tags: [Administration]
@@ -355,6 +998,10 @@ components:
       type: http
       scheme: bearer
       bearerFormat: opaque-role-token
+    previewBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-preview-token
   parameters:
     Page:
       name: page
@@ -374,6 +1021,11 @@ components:
       in: path
       required: true
       schema: {$ref: '#/components/schemas/EntityId'}
+    ActorId:
+      name: actor_id
+      in: path
+      required: true
+      schema: {type: string, pattern: '^[A-Za-z0-9_.:-]{1,64}$'}
   requestBodies:
     EditorialReview:
       required: true
@@ -393,7 +1045,7 @@ components:
       enum: [five_percent_holding, shareholder_proposal, general_meeting, board, executive_compensation, dividend, treasury_shares, merger, split, duplicate_listing, rights_issue, convertible_bond, bond_with_warrant, exchangeable_bond, tender_offer, delisting, trading_suspension, value_up, other]
     Importance:
       type: string
-      enum: [low, medium, high, critical]
+      enum: [low, medium, high, market_sensitive, critical]
     VerificationStatus:
       type: string
       enum: [signal, unverified, corroborated, official, confirmed, disputed, corrected, withdrawn]
@@ -403,6 +1055,213 @@ components:
     ReviewStatus:
       type: string
       enum: [pending, not_required, changes_requested, approved, rejected]
+    ReleaseStateName:
+      type: string
+      enum: [closed, preview, live]
+    ReleaseStateUpdate:
+      type: object
+      additionalProperties: false
+      required: [release_state, expected_version, reason]
+      properties:
+        release_state: {$ref: '#/components/schemas/ReleaseStateName'}
+        expected_version: {type: integer, minimum: 0}
+        reason: {type: string, minLength: 8, maxLength: 2000}
+    ReleaseState:
+      type: object
+      required: [ok, release_state, state_version, schema_version, preview_auth_configured, history]
+      properties:
+        ok: {type: boolean}
+        release_state: {$ref: '#/components/schemas/ReleaseStateName'}
+        state_version: {type: integer, minimum: 0}
+        schema_version: {type: integer, const: 10}
+        preview_auth_configured: {type: boolean}
+        updated_by: {type: string}
+        update_reason: {type: string}
+        cutover_at: {type: [string, 'null'], format: date-time, description: First protected preview-to-live cutover; null before cutover.}
+        sunset_at: {type: [string, 'null'], format: date-time, description: Exactly 90 days after cutover; null before cutover.}
+        updated_at: {type: string, format: date-time}
+        history:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [audit_id, state_version, new_state, changed_by, change_reason, created_at]
+            properties:
+              audit_id: {type: string}
+              state_version: {type: integer, minimum: 0}
+              previous_state: {anyOf: [{$ref: '#/components/schemas/ReleaseStateName'}, {type: 'null'}]}
+              new_state: {$ref: '#/components/schemas/ReleaseStateName'}
+              changed_by: {type: string}
+              change_reason: {type: string}
+              request_id: {type: [string, 'null']}
+              cutover_at: {type: [string, 'null'], format: date-time}
+              sunset_at: {type: [string, 'null'], format: date-time}
+              created_at: {type: string, format: date-time}
+    OfficialSlotClaimRequest:
+      type: object
+      additionalProperties: false
+      required: [action, pipeline, github_run_id, github_run_attempt, event_schedule, trigger_created_at, code_revision]
+      properties:
+        action: {type: string, enum: [claim, repair]}
+        pipeline: {type: string, const: ingest-official}
+        github_run_id: {type: string, pattern: '^[0-9]{1,64}$'}
+        github_run_attempt: {type: integer, minimum: 1}
+        event_schedule: {type: string, enum: ['0,15,30,45 22-23 * * *', '0,15,30,45 0-14 * * *', '0,30 15-21 * * *']}
+        trigger_created_at: {type: string, format: date-time, description: Immutable GitHub workflow_run.created_at provenance; never used to floor or invent a slot.}
+        code_revision: {type: string, pattern: '^[a-f0-9]{7,40}$'}
+        expected_slot_at: {type: string, format: date-time, description: Required only for repair and must name the globally oldest due unclaimed slot.}
+    OfficialSlotClaimAcknowledgement:
+      type: object
+      additionalProperties: false
+      required: [ok, accepted, claim_id, pipeline, github_run_id, github_run_attempt, event_schedule, scheduled_slot_at, trigger_created_at, claimed_at, next_cadence_slot_at, trigger_lag_seconds, claim_lag_seconds, late, status, terminal_reason, duplicate]
+      properties:
+        ok: {type: boolean, const: true}
+        accepted: {type: integer, const: 1}
+        claim_id: {$ref: '#/components/schemas/EntityId'}
+        pipeline: {type: string, const: ingest-official}
+        github_run_id: {type: string, pattern: '^[0-9]{1,64}$'}
+        github_run_attempt: {type: integer, minimum: 1}
+        event_schedule: {type: string, enum: ['0,15,30,45 22-23 * * *', '0,15,30,45 0-14 * * *', '0,30 15-21 * * *']}
+        scheduled_slot_at: {type: string, format: date-time}
+        trigger_created_at: {type: string, format: date-time}
+        claimed_at: {type: string, format: date-time}
+        next_cadence_slot_at: {type: string, format: date-time, description: Next boundary in the full 82-slot cadence.}
+        trigger_lag_seconds: {type: integer, minimum: 0}
+        claim_lag_seconds: {type: integer, minimum: 0}
+        late: {type: boolean, description: Immutable claim-time value; true exactly when claimed_at is at or after next_cadence_slot_at.}
+        status: {type: string, enum: [claimed, failed, completed]}
+        terminal_reason: {type: [string, 'null'], enum: [null, claim_after_next_cadence, completion_after_next_cadence, rerun_after_next_cadence], description: Non-null only when status is failed.}
+        duplicate: {type: boolean}
+    OfficialSlotClaimState:
+      type: object
+      additionalProperties: false
+      required: [pipeline, active_from, epoch_version, activated_at, activation_revision, change_reason, changed_by]
+      properties:
+        pipeline: {type: string, const: ingest-official}
+        active_from: {type: string, format: date-time}
+        epoch_version: {type: integer, minimum: 1}
+        activated_at: {type: string, format: date-time}
+        activation_revision: {type: string, pattern: '^[a-f0-9]{7,40}$'}
+        change_reason: {type: string, minLength: 20, maxLength: 500}
+        changed_by: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    OfficialSlotClaim:
+      type: object
+      additionalProperties: false
+      required: [claim_id, pipeline, epoch_version, scheduled_slot_at, event_schedule, github_run_id, github_run_attempt, trigger_created_at, claimed_at, next_cadence_slot_at, trigger_lag_seconds, claim_lag_seconds, late, code_revision, status, terminal_reason, failed_at, completed_run_id, completed_run_attempt, completion_raw_count, completion_ack_count, completion_sha256, completed_at, created_at, updated_at]
+      properties:
+        claim_id: {$ref: '#/components/schemas/EntityId'}
+        pipeline: {type: string, const: ingest-official}
+        epoch_version: {type: integer, minimum: 1}
+        scheduled_slot_at: {type: string, format: date-time}
+        event_schedule: {type: string, enum: ['0,15,30,45 22-23 * * *', '0,15,30,45 0-14 * * *', '0,30 15-21 * * *']}
+        github_run_id: {type: string, pattern: '^[0-9]{1,64}$'}
+        github_run_attempt: {type: integer, minimum: 1}
+        trigger_created_at: {type: string, format: date-time}
+        claimed_at: {type: string, format: date-time}
+        next_cadence_slot_at: {type: string, format: date-time}
+        trigger_lag_seconds: {type: integer, minimum: 0}
+        claim_lag_seconds: {type: integer, minimum: 0}
+        late: {type: boolean}
+        code_revision: {type: string, pattern: '^[a-f0-9]{7,40}$'}
+        status: {type: string, enum: [claimed, failed, completed]}
+        terminal_reason: {type: [string, 'null'], enum: [null, claim_after_next_cadence, completion_after_next_cadence, rerun_after_next_cadence]}
+        failed_at: {type: [string, 'null'], format: date-time}
+        completed_run_id: {type: [string, 'null']}
+        completed_run_attempt: {type: [integer, 'null'], minimum: 1}
+        completion_raw_count: {type: [integer, 'null'], minimum: 0}
+        completion_ack_count: {type: [integer, 'null'], minimum: 0}
+        completion_sha256: {type: [string, 'null'], pattern: '^[a-f0-9]{64}$'}
+        completed_at: {type: [string, 'null'], format: date-time}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    OfficialSlotClaimsPage:
+      type: object
+      required: [ok, state, range, data, pagination]
+      properties:
+        ok: {type: boolean, const: true}
+        state: {anyOf: [{$ref: '#/components/schemas/OfficialSlotClaimState'}, {type: 'null'}]}
+        range:
+          type: object
+          required: [from, to]
+          properties:
+            from: {type: string, format: date}
+            to: {type: string, format: date}
+        data: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/OfficialSlotClaim'}}
+        pagination: {type: object}
+    OfficialSlotEpoch:
+      type: object
+      required: [epoch_id, pipeline, epoch_version, change_type, previous_active_from, active_from, change_reason, code_revision, changed_by, created_at]
+      properties:
+        epoch_id: {$ref: '#/components/schemas/EntityId'}
+        pipeline: {type: string, const: ingest-official}
+        epoch_version: {type: integer, minimum: 1}
+        change_type: {type: string, enum: [activation, reset]}
+        previous_active_from: {type: [string, 'null'], format: date-time}
+        active_from: {type: string, format: date-time}
+        change_reason: {type: string, minLength: 20, maxLength: 500}
+        code_revision: {type: string, pattern: '^[a-f0-9]{7,40}$'}
+        changed_by: {type: string}
+        created_at: {type: string, format: date-time}
+    OfficialSlotEpochHistory:
+      type: object
+      required: [ok, state, history]
+      properties:
+        ok: {type: boolean, const: true}
+        state: {anyOf: [{$ref: '#/components/schemas/OfficialSlotClaimState'}, {type: 'null'}]}
+        history: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/OfficialSlotEpoch'}}
+    OfficialSlotEpochReset:
+      type: object
+      additionalProperties: false
+      required: [action, pipeline, expected_epoch_version, reason, code_revision, confirmation]
+      properties:
+        action: {type: string, const: reset}
+        pipeline: {type: string, const: ingest-official}
+        expected_epoch_version: {type: integer, minimum: 1}
+        reason: {type: string, minLength: 20, maxLength: 500}
+        code_revision: {type: string, pattern: '^[a-f0-9]{7,40}$'}
+        confirmation: {type: string, const: RESET_OFFICIAL_SLOT_EPOCH_AT_NEXT_KST_DAY}
+    OfficialSlotEpochResetAcknowledgement:
+      type: object
+      additionalProperties: false
+      required: [ok, pipeline, epoch_version, active_from, epoch_id, claims_preserved]
+      properties:
+        ok: {type: boolean, const: true}
+        pipeline: {type: string, const: ingest-official}
+        epoch_version: {type: integer, minimum: 2}
+        active_from: {type: string, format: date-time}
+        epoch_id: {$ref: '#/components/schemas/EntityId'}
+        claims_preserved: {type: boolean, const: true}
+    EventIdentityCompletionRequest:
+      type: object
+      additionalProperties: false
+      required: [identity_action, identity_target, identity_actor_id, identity_effective_at, identity_deadline_at, expected_updated_at, reason]
+      properties:
+        identity_action: {type: string, minLength: 1, maxLength: 255}
+        identity_target: {type: string, minLength: 1, maxLength: 700}
+        identity_actor_id: {$ref: '#/components/schemas/EntityId'}
+        identity_effective_at:
+          oneOf:
+            - {type: string, format: date}
+            - {type: string, format: date-time}
+        identity_deadline_at:
+          oneOf:
+            - {type: string, format: date}
+            - {type: string, format: date-time}
+        expected_updated_at: {type: string, format: date-time}
+        reason: {type: string, minLength: 5, maxLength: 2000}
+    EventIdentityCompletionResponse:
+      type: object
+      additionalProperties: false
+      required: [ok, event_id, identity_status, comparison_key, unchanged, updated_at]
+      properties:
+        ok: {const: true}
+        event_id: {$ref: '#/components/schemas/EntityId'}
+        identity_status: {type: string, const: complete}
+        comparison_key: {type: string, pattern: '^eventcmp:v1:[a-f0-9]{64}$'}
+        unchanged: {type: boolean}
+        updated_at: {type: string, format: date-time}
     EditorialReviewRequest:
       type: object
       additionalProperties: false
@@ -425,6 +1284,24 @@ components:
         authorized_telegram: 허가된 Telegram
         licensed_telegram: 허가된 Telegram (호환 값)
         editorial_analysis: 편집 분석
+    SourceRightEligibility:
+      type: object
+      additionalProperties: false
+      required: [ok, source_right_id, use, eligible, rights_revision, checked_at]
+      properties:
+        ok: {type: boolean}
+        error: {type: string, const: source_right_ineligible}
+        source_right_id: {type: string, const: 'official:kind'}
+        use: {type: string, const: ingest}
+        eligible: {type: boolean}
+        rights_revision:
+          type: [string, 'null']
+          pattern: '^[a-f0-9]{64}$'
+        reasons:
+          type: array
+          uniqueItems: true
+          items: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
+        checked_at: {type: string, format: date-time}
     ClaimType:
       type: string
       enum: [actor_claim, company_response, official_fact, media_report, editorial_interpretation]
@@ -443,6 +1320,8 @@ components:
         legal_name: {type: string}
         legal_name_en: {type: [string, 'null']}
         aliases: {type: array, items: {type: string}}
+        listing_status: {type: string, enum: [unknown, listed, unlisted, suspended, delisted]}
+        master_modified_at: {type: [string, 'null'], format: date-time}
     GovernanceEvent:
       type: object
       required: [event_id, company_id, event_type, title, original_language, occurred_at, importance, verification_status]
@@ -458,6 +1337,89 @@ components:
         verification_status: {$ref: '#/components/schemas/VerificationStatus'}
         review_status: {$ref: '#/components/schemas/ReviewStatus'}
         publication_status: {$ref: '#/components/schemas/PublicationStatus'}
+        identity_action: {type: [string, 'null'], maxLength: 255}
+        identity_target: {type: [string, 'null'], maxLength: 700}
+        identity_actor_id: {type: [string, 'null'], pattern: '^[A-Za-z0-9_.:-]{1,64}$'}
+        identity_effective_at: {type: [string, 'null'], format: date-time}
+        identity_deadline_at: {type: [string, 'null'], format: date-time}
+        identity_status: {type: string, enum: [complete, needs_review]}
+        comparison_key: {type: [string, 'null'], pattern: '^eventcmp:v1:[a-f0-9]{64}$'}
+    TodayRankedEvent:
+      allOf:
+        - $ref: '#/components/schemas/GovernanceEvent'
+        - type: object
+          required: [has_official_evidence, deadline_watch, ranking_score]
+          properties:
+            has_official_evidence: {type: boolean}
+            deadline_watch: {type: boolean}
+            ranking_score: {type: integer, minimum: 0}
+    TodayResponse:
+      type: object
+      additionalProperties: false
+      required: [ok, generated_at, ranking_policy, top, watch]
+      properties:
+        ok: {type: boolean, const: true}
+        generated_at: {type: string, format: date-time}
+        ranking_policy:
+          type: object
+          additionalProperties: false
+          required: [version, signal_excluded, top_limit, watch_limit, watch_deadline_window_days, archive_endpoint]
+          properties:
+            version: {type: string, const: today-v1}
+            signal_excluded: {type: boolean, const: true}
+            top_limit: {type: integer, const: 5}
+            watch_limit: {type: integer, const: 10}
+            watch_deadline_window_days:
+              type: object
+              additionalProperties: false
+              required: [past, future]
+              properties:
+                past: {type: integer, const: 2}
+                future: {type: integer, const: 45}
+            archive_endpoint: {type: string, const: /events}
+        top: {type: array, maxItems: 5, items: {$ref: '#/components/schemas/TodayRankedEvent'}}
+        watch: {type: array, maxItems: 10, items: {$ref: '#/components/schemas/TodayRankedEvent'}}
+    OfficialSiteCompanyCandidate:
+      type: object
+      additionalProperties: false
+      required: [company_id, company_name, event_count, raw_score, latest_event_at, rank]
+      properties:
+        company_id: {$ref: '#/components/schemas/CompanyId'}
+        company_name: {type: string}
+        event_count: {type: integer, minimum: 1}
+        raw_score: {type: integer, minimum: 1}
+        latest_event_at: {type: string, format: date-time}
+        rank: {type: integer, minimum: 1, maximum: 20}
+    OfficialSiteActorCandidate:
+      type: object
+      additionalProperties: false
+      required: [actor_id, actor_name, actor_type, event_count, raw_score, latest_event_at, rank]
+      properties:
+        actor_id: {$ref: '#/components/schemas/EntityId'}
+        actor_name: {type: string}
+        actor_type: {type: string, enum: [activist_shareholder, institution, shareholder_coalition]}
+        event_count: {type: integer, minimum: 1}
+        raw_score: {type: integer, minimum: 1}
+        latest_event_at: {type: string, format: date-time}
+        rank: {type: integer, minimum: 1, maximum: 10}
+    OfficialSiteCandidatesResponse:
+      type: object
+      additionalProperties: false
+      required: [ok, generated_at, score_version, selection, companies, actors]
+      properties:
+        ok: {type: boolean, const: true}
+        generated_at: {type: string, format: date-time}
+        score_version: {type: string, const: official-site-candidates-v1}
+        selection:
+          type: object
+          additionalProperties: false
+          required: [companies_limit, actors_limit, official_evidence_required]
+          properties:
+            companies_limit: {type: integer, const: 20}
+            actors_limit: {type: integer, const: 10}
+            official_evidence_required: {type: boolean, const: true}
+        companies: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/OfficialSiteCompanyCandidate'}}
+        actors: {type: array, maxItems: 10, items: {$ref: '#/components/schemas/OfficialSiteActorCandidate'}}
     Actor:
       type: object
       required: [actor_id, actor_type, display_name]
@@ -494,6 +1456,11 @@ components:
         retrieved_at: {type: string, format: date-time}
         verification_status: {$ref: '#/components/schemas/VerificationStatus'}
         publication_status: {$ref: '#/components/schemas/PublicationStatus'}
+        body_total_bytes: {type: integer, minimum: 0}
+        body_offset: {type: integer, minimum: 0}
+        body_bytes_returned: {type: integer, minimum: 0, maximum: 60000}
+        body_truncated: {type: boolean}
+        body_next_offset: {type: [integer, 'null'], minimum: 0}
     Campaign:
       type: object
       required: [campaign_id, company_id, title, original_language, stage, started_at]
@@ -595,6 +1562,11 @@ components:
         published_at: {type: [string, 'null'], format: date-time}
     DeliveryOutbox:
       type: object
+      deprecated: true
+      description: >-
+        Audit-only schema for rows created before web-only distribution. New
+        enqueue and claim operations are permanently disabled and return HTTP
+        410 outbound_delivery_disabled; this schema is not a sending contract.
       required: [delivery_id, delivery_channel, destination, idempotency_key, payload, status, attempt_count]
       properties:
         delivery_id: {$ref: '#/components/schemas/EntityId'}
@@ -631,12 +1603,400 @@ components:
       required: [feedback_type, message]
       properties:
         feedback_type: {type: string, enum: [correction, right_of_reply, source_rights, general]}
-        entity_type: {type: string, enum: [company, event, campaign, document]}
+        entity_type: {type: string, enum: [company, event, campaign, document, actor]}
         entity_id: {$ref: '#/components/schemas/EntityId'}
         submitter_name: {type: string, maxLength: 191}
         submitter_contact: {type: string, maxLength: 320}
         message: {type: string, minLength: 10, maxLength: 10000}
         evidence_urls: {type: array, maxItems: 10, items: {type: string, format: uri}}
+    AvailabilityObservation:
+      type: object
+      additionalProperties: false
+      required: [observation_id, route_template, observed_at, http_status, duration_ms, succeeded, build_sha, source]
+      properties:
+        observation_id: {$ref: '#/components/schemas/EntityId'}
+        route_template: {type: string, pattern: '^/[A-Za-z0-9_./:{}-]+$', maxLength: 191}
+        observed_at: {type: string, format: date-time}
+        http_status: {type: integer, minimum: 0, maximum: 599, description: Zero represents a transport failure before an HTTP response.}
+        duration_ms: {type: integer, minimum: 0, maximum: 600000}
+        succeeded: {type: boolean}
+        build_sha: {type: string, pattern: '^[a-f0-9]{7,64}$'}
+        source: {type: string, const: github_watchdog}
+        error_class: {type: [string, 'null'], pattern: '^[A-Za-z][A-Za-z0-9_.]{0,63}$', description: Validated but not persisted.}
+    AvailabilityEvidence:
+      type: object
+      additionalProperties: false
+      required: [raw_attempt_count, raw_success_count, raw_failure_count, success_rate_denominator, success_rate, duration_ms_p95, observation_interval_seconds_p95, daily_route_build_counts]
+      properties:
+        raw_attempt_count: {type: integer, minimum: 0}
+        raw_success_count: {type: integer, minimum: 0}
+        raw_failure_count: {type: integer, minimum: 0}
+        success_rate_denominator: {type: integer, minimum: 0}
+        success_rate: {type: [number, 'null'], minimum: 0, maximum: 1}
+        duration_ms_p95: {type: [number, 'null'], minimum: 0}
+        observation_interval_seconds_p95: {type: [number, 'null'], minimum: 0, description: Compatibility alias; daily actual_interval_seconds_p95 is authoritative.}
+        daily_route_build_counts:
+          type: array
+          items: {$ref: '#/components/schemas/DailyRouteAvailabilityEvidence'}
+    DailyRouteAvailabilityEvidence:
+      type: object
+      additionalProperties: false
+      required: [observation_date, route_template, build_sha, raw_attempt_count, raw_success_count, raw_failure_count, success_rate_denominator, success_rate, duration_ms_p95, cadence_id, expected_slot_count, covered_slot_count, missing_slot_count, duplicate_slot_count, off_cadence_count, covered_slots_bitmap_hex, first_observed_at, last_observed_at, actual_interval_seconds_p95, actual_max_gap_seconds, observation_interval_seconds_p95, failure_detection_seconds_p95]
+      properties:
+        observation_date: {type: string, format: date}
+        route_template: {type: string, pattern: '^/[A-Za-z0-9_./:{}-]+$', maxLength: 191}
+        build_sha: {type: string, pattern: '^[a-f0-9]{7,64}$'}
+        raw_attempt_count: {type: integer, minimum: 1}
+        raw_success_count: {type: integer, minimum: 0}
+        raw_failure_count: {type: integer, minimum: 0}
+        success_rate_denominator: {type: integer, minimum: 1}
+        success_rate: {type: number, minimum: 0, maximum: 1}
+        duration_ms_p95: {type: number, minimum: 0}
+        cadence_id: {type: string, const: watchdog-v1-kst-5m-minute01}
+        expected_slot_count: {type: integer, const: 288}
+        covered_slot_count: {type: integer, minimum: 0, maximum: 288}
+        missing_slot_count: {type: integer, minimum: 0, maximum: 288}
+        duplicate_slot_count: {type: integer, minimum: 0}
+        off_cadence_count: {type: integer, minimum: 0}
+        covered_slots_bitmap_hex: {type: string, pattern: '^[0-9a-f]{72}$'}
+        first_observed_at: {type: string, format: date-time}
+        last_observed_at: {type: string, format: date-time}
+        actual_interval_seconds_p95: {type: [number, 'null'], minimum: 0}
+        actual_max_gap_seconds: {type: number, minimum: 0}
+        observation_interval_seconds_p95: {type: [number, 'null'], minimum: 0, description: Compatibility alias for actual_interval_seconds_p95.}
+        failure_detection_seconds_p95: {type: [number, 'null'], minimum: 0}
+    OfficialSourceFreshness:
+      type: object
+      required: [last_attempt_at, last_success_at, last_scheduled_slot_at, last_scheduled_success_at, freshness_seconds, status]
+      properties:
+        last_attempt_at: {type: [string, 'null'], format: date-time}
+        last_success_at: {type: [string, 'null'], format: date-time}
+        last_scheduled_slot_at: {type: [string, 'null'], format: date-time}
+        last_scheduled_success_at: {type: [string, 'null'], format: date-time}
+        freshness_seconds: {type: [integer, 'null'], minimum: 0}
+        status: {type: string, enum: [observed, missing]}
+    ActiveDeployment:
+      type: object
+      additionalProperties: false
+      required: [build_sha, observed_at, distribution_target, workflow_run_id, workflow_run_attempt, source]
+      properties:
+        build_sha: {type: string, pattern: '^[a-f0-9]{40}$'}
+        observed_at: {type: string, format: date-time}
+        distribution_target: {type: string, enum: [pages, api]}
+        workflow_run_id: {type: integer, minimum: 1}
+        workflow_run_attempt: {type: integer, minimum: 1}
+        source: {type: string}
+    OfficialRunSourceOutcome:
+      type: object
+      additionalProperties: false
+      required: [status, raw_count, acknowledged_count]
+      properties:
+        status: {type: string}
+        raw_count: {type: [integer, 'null'], minimum: 0}
+        acknowledged_count: {type: [integer, 'null'], minimum: 0}
+    OfficialRunLedgerRow:
+      type: object
+      additionalProperties: false
+      required: [run_id, pipeline, source_key, code_revision, status, started_at, finished_at, first_observed_at, raw_count, acknowledged_count, run_kind, event_schedule, scheduled_slot_at, trigger_created_at, slot_claim_id, github_run_id, github_run_attempt, slot_claimed_at, next_cadence_slot_at, trigger_lag_seconds, claim_lag_seconds, slot_claim_late, slot_claim_status, slot_claim_terminal_reason, company_master_sync, source_outcomes]
+      properties:
+        run_id: {$ref: '#/components/schemas/EntityId'}
+        pipeline: {type: string}
+        source_key: {type: string, enum: [dart, kind, dart+kind, kind+dart]}
+        code_revision: {type: [string, 'null'], pattern: '^[a-f0-9]{7,40}$'}
+        status: {type: string}
+        started_at: {type: [string, 'null'], format: date-time}
+        finished_at: {type: [string, 'null'], format: date-time}
+        first_observed_at: {type: [string, 'null'], format: date-time}
+        raw_count: {type: integer, minimum: 0}
+        acknowledged_count: {type: integer, minimum: 0}
+        run_kind: {type: [string, 'null'], enum: [scheduled_incremental, manual, backfill, company_master, null]}
+        event_schedule: {type: [string, 'null']}
+        scheduled_slot_at: {type: [string, 'null'], format: date-time}
+        trigger_created_at: {type: [string, 'null'], format: date-time, description: Immutable GitHub workflow_run.created_at provenance joined to the server claim; it never derives a slot.}
+        slot_claim_id: {type: [string, 'null'], pattern: '^[A-Za-z0-9_.:-]{1,96}$'}
+        github_run_id: {type: [string, 'null'], pattern: '^[0-9]{1,64}$'}
+        github_run_attempt: {type: [integer, 'null'], minimum: 1}
+        slot_claimed_at: {type: [string, 'null'], format: date-time}
+        next_cadence_slot_at: {type: [string, 'null'], format: date-time}
+        trigger_lag_seconds: {type: [integer, 'null'], minimum: 0}
+        claim_lag_seconds: {type: [integer, 'null'], minimum: 0}
+        slot_claim_late: {type: [boolean, 'null']}
+        slot_claim_status: {type: [string, 'null'], enum: [null, claimed, failed, completed]}
+        slot_claim_terminal_reason: {type: [string, 'null'], enum: [null, claim_after_next_cadence, completion_after_next_cadence, rerun_after_next_cadence]}
+        company_master_sync: {type: boolean}
+        source_outcomes:
+          type: object
+          additionalProperties: false
+          properties:
+            dart: {$ref: '#/components/schemas/OfficialRunSourceOutcome'}
+            kind: {$ref: '#/components/schemas/OfficialRunSourceOutcome'}
+    OfficialRunLedgerPage:
+      type: object
+      additionalProperties: false
+      required: [ok, range, ledger_row_count, ledger_sha256, data, pagination, api_version]
+      properties:
+        ok: {type: boolean, const: true}
+        range:
+          type: object
+          required: [from, to]
+          properties:
+            from: {type: string, format: date}
+            to: {type: string, format: date}
+        ledger_row_count: {type: integer, minimum: 0}
+        ledger_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+        data: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/OfficialRunLedgerRow'}}
+        pagination:
+          type: object
+          additionalProperties: false
+          required: [limit, returned, has_more, next_cursor]
+          properties:
+            limit: {type: integer, minimum: 1, maximum: 100}
+            returned: {type: integer, minimum: 0, maximum: 100}
+            has_more: {type: boolean}
+            next_cursor: {type: [string, 'null'], maxLength: 512}
+        api_version: {type: string, const: v1}
+    OfficialScheduleEvidence:
+      type: object
+      additionalProperties: false
+      required: [contract_version, timezone, cadence_id, from, to, expected_slot_count, ledger_row_count, ledger_sha256, scheduled_run_count, claimed_slot_count, late_claim_count, incomplete_claim_count, terminal_failure_count, observed_slot_count, missing_slot_count, duplicate_slot_count, invalid_scheduled_run_count, invalid_run_metadata_count, dart_expected_count, dart_succeeded_count, dart_missing_count, dart_failed_count, kind_expected_count, kind_succeeded_count, kind_missing_count, kind_failed_count]
+      properties:
+        contract_version: {type: integer, const: 1}
+        timezone: {type: string, const: Asia/Seoul}
+        cadence_id: {type: string, const: official-v1-82-slots}
+        from: {type: string, format: date}
+        to: {type: string, format: date}
+        expected_slot_count: {type: integer, minimum: 82}
+        ledger_row_count: {type: integer, minimum: 0}
+        ledger_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+        scheduled_run_count: {type: integer, minimum: 0}
+        claimed_slot_count: {type: integer, minimum: 0}
+        late_claim_count: {type: integer, minimum: 0}
+        incomplete_claim_count: {type: integer, minimum: 0}
+        terminal_failure_count: {type: integer, minimum: 0}
+        observed_slot_count: {type: integer, minimum: 0}
+        missing_slot_count: {type: integer, minimum: 0}
+        duplicate_slot_count: {type: integer, minimum: 0}
+        invalid_scheduled_run_count: {type: integer, minimum: 0}
+        invalid_run_metadata_count: {type: integer, minimum: 0}
+        dart_expected_count: {type: integer, minimum: 82}
+        dart_succeeded_count: {type: integer, minimum: 0}
+        dart_missing_count: {type: integer, minimum: 0}
+        dart_failed_count: {type: integer, minimum: 0}
+        kind_expected_count: {type: integer, minimum: 82}
+        kind_succeeded_count: {type: integer, minimum: 0}
+        kind_missing_count: {type: integer, minimum: 0}
+        kind_failed_count: {type: integer, minimum: 0}
+    DartQuotaConsumeRequest:
+      type: object
+      additionalProperties: false
+      required: [action, attempt_id, quota_day, operation, code_revision]
+      properties:
+        action: {type: string, const: consume}
+        attempt_id: {$ref: '#/components/schemas/EntityId'}
+        quota_day: {type: string, format: date, description: Must equal the API server's current Asia/Seoul date.}
+        operation: {type: string, enum: [list, corp_code]}
+        code_revision: {type: string, pattern: '^[a-f0-9]{7,40}$'}
+    DartQuotaBlockRequest:
+      type: object
+      additionalProperties: false
+      required: [action, attempt_id, quota_day, reason, code_revision]
+      properties:
+        action: {type: string, const: block_020}
+        attempt_id: {$ref: '#/components/schemas/EntityId'}
+        quota_day: {type: string, format: date}
+        reason: {type: string, const: opendart_status_020}
+        code_revision: {type: string, pattern: '^[a-f0-9]{7,40}$'}
+    DartQuotaAcknowledgement:
+      type: object
+      required: [ok, action, attempt_id, quota_day, accepted, limit_count, used_count, remaining_count, duplicate, blocked_until, api_version]
+      properties:
+        ok: {type: boolean, const: true}
+        action: {type: string, enum: [consume, block_020]}
+        attempt_id: {$ref: '#/components/schemas/EntityId'}
+        quota_day: {type: string, format: date}
+        accepted: {type: integer, const: 1}
+        limit_count: {type: integer, const: 10000}
+        used_count: {type: integer, minimum: 1, maximum: 10000}
+        remaining_count: {type: integer, minimum: 0, maximum: 9999}
+        duplicate: {type: boolean}
+        blocked_until: {type: [string, 'null'], format: date-time}
+        api_version: {type: string, const: v1}
+    OfficialSiteRight:
+      type: object
+      additionalProperties: false
+      required: [source_right_id, source_type, source_key, source_name, permission_scope, valid_from, valid_until, ai_allowed, redistribution_allowed, status, evidence_present, rights_revision]
+      properties:
+        source_right_id: {$ref: '#/components/schemas/EntityId'}
+        source_type: {type: string, enum: [company_statement, activist_statement]}
+        source_key: {type: string, pattern: '^(company|activist)-site:[A-Za-z0-9_.:-]+$', maxLength: 64}
+        source_name: {type: string}
+        permission_scope: {type: string, maxLength: 2000}
+        valid_from: {type: string, format: date-time}
+        valid_until: {type: [string, 'null'], format: date-time}
+        ai_allowed: {type: boolean}
+        redistribution_allowed: {type: boolean, const: true}
+        status: {type: string, const: active}
+        evidence_present: {type: boolean, const: true}
+        rights_revision: {type: string, pattern: '^[a-f0-9]{64}$'}
+    OfficialSiteRightsPage:
+      type: object
+      required: [ok, checked_at, data, pagination, api_version]
+      properties:
+        ok: {type: boolean, const: true}
+        checked_at: {type: string, format: date-time}
+        data: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/OfficialSiteRight'}}
+        pagination: {type: object}
+        api_version: {type: string, const: v1}
+    WebDistributionObservation:
+      type: object
+      additionalProperties: false
+      required: [observation_id, observed_at, distribution_target, duration_ms, succeeded, build_sha, workflow_run_id, workflow_run_attempt, failure_detected_at, source]
+      properties:
+        observation_id: {$ref: '#/components/schemas/EntityId'}
+        observed_at: {type: string, format: date-time}
+        distribution_target: {type: string, enum: [pages, api]}
+        duration_ms: {type: integer, minimum: 0, maximum: 3600000}
+        succeeded: {type: boolean}
+        build_sha: {type: string, pattern: '^[a-f0-9]{40}$'}
+        workflow_run_id: {type: integer, minimum: 1}
+        workflow_run_attempt: {type: integer, minimum: 1, maximum: 10000}
+        failure_detected_at: {type: [string, 'null'], format: date-time, description: Required for a failed outcome and forbidden for success.}
+        source: {type: string, const: github_actions}
+    QualityRawCounts:
+      type: object
+      additionalProperties: false
+      description: >-
+        Daily production quality counts only; same-event precision is supplied exclusively by the protected human benchmark.
+        Content and rights totals use the v2 distinct-document corpus referenced by approved public events, campaigns,
+        claims, votes, commitments and timeline entries across every source class. A content or rights failure never
+        removes that referenced document from the denominator.
+      required: [official_evidence_total_count, official_evidence_linked_count, top_sensitive_total_count, top_sensitive_reviewed_count, original_language_total_count, original_language_preserved_count, source_right_total_count, valid_source_right_count]
+      properties:
+        official_evidence_total_count: {type: integer, minimum: 0}
+        official_evidence_linked_count: {type: integer, minimum: 0}
+        top_sensitive_total_count: {type: integer, minimum: 0}
+        top_sensitive_reviewed_count: {type: integer, minimum: 0}
+        original_language_total_count: {type: integer, minimum: 0}
+        original_language_preserved_count: {type: integer, minimum: 0}
+        source_right_total_count: {type: integer, minimum: 0}
+        valid_source_right_count: {type: integer, minimum: 0}
+    QualityObservationEvidence:
+      type: object
+      required: [observation_date, code_revision, content_snapshot_at, content_scope, raw_counts]
+      properties:
+        observation_date: {type: string, format: date}
+        code_revision: {type: string, pattern: '^[a-f0-9]{40}$'}
+        content_snapshot_at: {type: string, format: date-time}
+        content_scope: {type: string, const: governance_corpus_2021_plus_kst_day_end_v2}
+        raw_counts: {$ref: '#/components/schemas/QualityRawCounts'}
+    QualityObservation:
+      type: object
+      additionalProperties: false
+      required: [observation_id, observation_date, code_revision, dart_success_poll_interval_p95_minutes, kind_observation_lag_p95_minutes, raw_counts, source]
+      properties:
+        observation_id: {$ref: '#/components/schemas/EntityId'}
+        observation_date: {type: string, format: date}
+        code_revision: {type: string, pattern: '^[a-f0-9]{40}$'}
+        dart_success_poll_interval_p95_minutes: {type: number, minimum: 0, maximum: 10080}
+        kind_observation_lag_p95_minutes:
+          type: [number, 'null']
+          minimum: 0
+          maximum: 10080
+          description: Actual KIND receipt-to-first-observed p95; null when the source did not provide a real receipt timestamp.
+        raw_counts: {$ref: '#/components/schemas/QualityRawCounts'}
+        source: {type: string, const: production_quality_job}
+    WebVitalObservation:
+      type: object
+      additionalProperties: false
+      required: [route_template, metric, value, device_class, build_sha]
+      properties:
+        route_template: {type: string, pattern: '^/[A-Za-z0-9_./:{}-]+$', maxLength: 191}
+        measured_at: {type: string, format: date-time, description: Optional; server receipt time is used when absent.}
+        metric: {type: string, enum: [LCP, INP, CLS]}
+        value: {type: number, minimum: 0}
+        device_class: {type: string, enum: [mobile, desktop, tablet]}
+        build_sha: {type: string, pattern: '^[a-f0-9]{7,64}$'}
+        source: {type: string, const: first_party, default: first_party}
+    BackfillCheckpointUpdate:
+      type: object
+      additionalProperties: false
+      required: [expected_version, checkpoint]
+      properties:
+        expected_version: {type: integer, minimum: 0}
+        checkpoint:
+          type: object
+          required: [schema_version, job]
+          properties:
+            schema_version: {type: integer, minimum: 1}
+            job:
+              type: object
+              required: [fingerprint]
+              properties:
+                fingerprint: {type: string, pattern: '^[a-f0-9]{64}$'}
+          additionalProperties: true
+    ShadowDiscrepancyUpdate:
+      type: object
+      additionalProperties: false
+      required: [observation_date, code_revision, comparison_key, discrepancy_type]
+      properties:
+        discrepancy_id: {$ref: '#/components/schemas/EntityId'}
+        observation_date: {type: string, format: date}
+        code_revision: {type: string, pattern: '^[a-f0-9]{7,64}$'}
+        comparison_key: {type: string, minLength: 1, maxLength: 191}
+        discrepancy_type: {type: string, pattern: '^[A-Za-z0-9_.:-]{1,40}$'}
+        legacy_event: {type: [object, 'null'], additionalProperties: true}
+        candidate_event: {type: [object, 'null'], additionalProperties: true}
+        review_status: {type: string, enum: [pending, reviewed, resolved, dismissed], default: pending}
+        review_note: {type: string, maxLength: 5000}
+        expected_updated_at: {type: string, format: date-time, description: Required when updating an existing discrepancy.}
+    ShadowEngineRun:
+      type: object
+      additionalProperties: false
+      required: [status, events]
+      properties:
+        status: {type: string, enum: [succeeded, failed]}
+        events:
+          type: array
+          maxItems: 10000
+          items:
+            type: object
+            additionalProperties: false
+            required: [comparison_key]
+            properties:
+              comparison_key: {type: string, pattern: '^eventcmp:v1:[a-f0-9]{64}$'}
+    ShadowRunUpdate:
+      type: object
+      additionalProperties: false
+      required: [observation_date, code_revision, legacy_run, candidate_run, legacy_crosswalk]
+      properties:
+        observation_date: {type: string, format: date}
+        code_revision: {type: string, pattern: '^[a-f0-9]{7,64}$'}
+        legacy_run: {$ref: '#/components/schemas/ShadowEngineRun'}
+        candidate_run: {$ref: '#/components/schemas/ShadowEngineRun'}
+        legacy_crosswalk: {$ref: '#/components/schemas/LegacyCrosswalk'}
+        expected_updated_at: {type: string, format: date-time, description: Required only when replacing a different existing snapshot.}
+    LegacyCrosswalk:
+      type: object
+      additionalProperties: false
+      required: [schema_version, eligible_legacy_record_count, crosswalked_legacy_record_count, unmatched_legacy_record_count, ambiguous_legacy_record_count, coverage_rate, crosswalk_sha256]
+      properties:
+        schema_version: {type: integer, const: 1}
+        eligible_legacy_record_count: {type: integer, minimum: 1}
+        crosswalked_legacy_record_count: {type: integer, minimum: 1, description: Must equal eligible_legacy_record_count.}
+        unmatched_legacy_record_count: {type: integer, const: 0}
+        ambiguous_legacy_record_count: {type: integer, const: 0}
+        coverage_rate: {type: number, const: 1.0}
+        crosswalk_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+    HumanReleaseEvidenceUpdate:
+      type: object
+      additionalProperties: false
+      required: [code_revision, expected_version, benchmark, usability, release_approval]
+      properties:
+        code_revision: {type: string, pattern: '^[a-f0-9]{40}$'}
+        expected_version: {type: integer, minimum: 0}
+        benchmark: {type: object, additionalProperties: true}
+        usability: {type: object, additionalProperties: true}
+        release_approval: {type: object, additionalProperties: true}
     SearchResult:
       type: object
       required: [kind, entity_id, title]
@@ -682,6 +2042,11 @@ components:
       description: Valid Bearer token required
     Forbidden:
       description: Token does not have the required role
+    GovernanceUnavailable:
+      description: >-
+        Governance v1 schema migration 010 is not active, release state is
+        unavailable, or public access is intentionally closed. Retry-After is
+        supplied for retryable 503 responses.
 x-hmac-actions:
   description: >-
     Existing api.php HMAC authentication (timestamp, nonce, body signature) is
@@ -689,16 +2054,27 @@ x-hmac-actions:
     ?action={action}; these routes are not accessible with public Bearer tokens.
   actions:
     - upsert_governance_snapshot
+    - upsert_official_site_snapshot
     - upsert_editorial_snapshot
-    - enqueue_delivery_outbox
-    - claim_delivery_outbox
-    - ack_delivery_outbox
-    - fail_delivery_outbox
     - export_runtime_state
     - enqueue_link_discoveries
     - claim_link_discoveries
     - resolve_link_discovery
+  permanently-disabled-actions:
+    distribution_mode: web_only
+    http_status: 410
+    error: outbound_delivery_disabled
+    actions: [enqueue_delivery_outbox, claim_delivery_outbox]
+  historical-reconciliation-actions:
+    deprecated: true
+    description: Audit-only handling of pre-disable rows; never initiates delivery.
+    actions: [ack_delivery_outbox, fail_delivery_outbox]
   delivery-outbox-contract:
+    deprecated: true
+    distribution_mode: web_only
+    historical_schema_only: true
+    new_enqueue_enabled: false
+    new_claim_enabled: false
     claim:
       max_items: 1
       default_lease_seconds: 900
@@ -756,3 +2132,11 @@ x-hmac-actions:
       accepted: {campaigns: 25}
       rejected: 0
       idempotent: false
+  official-governance-ingest-contract:
+    schema_version: 10
+    canonical_identity:
+      complete_requires: [company_id, event_type, identity_action, identity_target, identity_actor_id, identity_effective_at, identity_deadline_at, comparison_key]
+      comparison_key_pattern: '^eventcmp:v1:[a-f0-9]{64}$'
+      failure_behavior: Reject conflicting complete identities atomically; incomplete identities remain draft and needs_review.
+    observations: Every accepted event-document evidence edge creates or refreshes one idempotent EventObservation.
+    run_metadata: [code_revision, first_observed_at, raw_count, acknowledged_count]

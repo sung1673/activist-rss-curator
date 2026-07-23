@@ -1,0 +1,186 @@
+name: Governance production evidence inputs
+
+on:
+  schedule:
+    # KST 00:35 for the completed previous KST calendar day (UTC 15:35).
+    - cron: "35 15 * * *"
+  workflow_dispatch:
+    inputs:
+      human_run_id:
+        description: Optional successful protected human-evidence workflow run ID
+        required: false
+        type: string
+      human_artifact_name:
+        description: Protected artifact containing exactly the three human evidence files
+        required: true
+        default: governance-human-evidence
+        type: string
+      through_date:
+        description: Optional final KST evidence date (YYYY-MM-DD; defaults to yesterday in KST)
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: governance-production-evidence-inputs-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      vars.GOVERNANCE_PIPELINE_MODE == 'shadow' ||
+      vars.GOVERNANCE_PIPELINE_MODE == 'live' ||
+      (vars.GOVERNANCE_PIPELINE_MODE == '' && vars.ENABLE_GOVERNANCE_SHADOW == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment:
+      name: governance-runtime
+    steps:
+      - name: Checkout evidence revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Enforce default-branch evidence revision
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]] || {
+            echo "::error::Production evidence input collection is restricted to the default branch."
+            exit 1
+          }
+
+      - name: Resolve protected same-revision human artifact
+        id: human_artifact
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REQUESTED_RUN_ID: ${{ inputs.human_run_id || '' }}
+          REQUESTED_ARTIFACT_NAME: ${{ inputs.human_artifact_name || 'governance-human-evidence' }}
+          EXPECTED_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          REQUIRED_WORKFLOW_PATH: .github/workflows/human-evidence-artifact.yml
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const requestedRunId = process.env.REQUESTED_RUN_ID.trim();
+            const artifactName = process.env.REQUESTED_ARTIFACT_NAME.trim();
+            const expectedSha = process.env.EXPECTED_SHA.toLowerCase();
+            const currentRunId = Number(process.env.CURRENT_RUN_ID);
+            if (artifactName !== "governance-human-evidence") {
+              core.setFailed("human_artifact_name must be governance-human-evidence");
+              return;
+            }
+            if (requestedRunId && !/^[0-9]+$/.test(requestedRunId)) {
+              core.setFailed("human_run_id must contain digits only");
+              return;
+            }
+            let artifacts;
+            if (requestedRunId) {
+              artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+                owner,
+                repo,
+                run_id: Number(requestedRunId),
+                per_page: 100,
+              });
+            } else {
+              artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
+                owner,
+                repo,
+                name: artifactName,
+                per_page: 100,
+              });
+            }
+            artifacts.sort((left, right) => right.id - left.id);
+            for (const artifact of artifacts) {
+              if (artifact.name !== artifactName || artifact.expired) continue;
+              const runId = Number(artifact.workflow_run?.id || requestedRunId || 0);
+              if (!runId || runId === currentRunId) continue;
+              const response = await github.rest.actions.getWorkflowRun({owner, repo, run_id: runId});
+              const run = response.data;
+              if (run.conclusion !== "success") continue;
+              if ((run.head_sha || "").toLowerCase() !== expectedSha) continue;
+              if (run.head_branch !== process.env.DEFAULT_BRANCH) continue;
+              if (run.path !== process.env.REQUIRED_WORKFLOW_PATH) continue;
+              if (!/^sha256:[0-9a-f]{64}$/i.test(artifact.digest || "")) continue;
+              core.setOutput("artifact_id", String(artifact.id));
+              core.setOutput("run_id", String(runId));
+              core.setOutput("digest", artifact.digest.toLowerCase());
+              core.info(`Using protected human artifact ${artifact.id} from run ${runId}.`);
+              return;
+            }
+            core.setFailed(
+              `No unexpired protected ${artifactName} artifact from the successful default-branch human-evidence workflow at ${expectedSha} was found.`,
+            );
+
+      - name: Download protected human evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.human_artifact.outputs.artifact_id }}
+          path: human-evidence
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.human_artifact.outputs.run_id }}
+          digest-mismatch: error
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Resolve fail-closed rollout mode
+        env:
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
+          GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          ENABLE_PAGES: ${{ vars.ENABLE_PAGES }}
+          ENABLE_GOVERNANCE_PAGES: ${{ vars.ENABLE_GOVERNANCE_PAGES }}
+          ENABLE_GOVERNANCE_SHADOW: ${{ vars.ENABLE_GOVERNANCE_SHADOW }}
+          ENABLE_TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          ENABLE_GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+        run: python -m curator.operation_mode
+
+      - name: Build actual production evidence inputs
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          EVIDENCE_THROUGH_DATE: ${{ inputs.through_date || '' }}
+        run: >-
+          python -m curator.release_evidence_inputs build
+          --human-dir human-evidence
+          --output-dir evidence-inputs
+          --expected-revision "$GITHUB_SHA"
+          --through-date "$EVIDENCE_THROUGH_DATE"
+
+      - name: Upload immutable evidence inputs
+        id: evidence_inputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: governance-release-evidence-inputs
+          path: evidence-inputs
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 9
+
+      - name: Record source and output artifact identities
+        shell: bash
+        env:
+          HUMAN_RUN_ID: ${{ steps.human_artifact.outputs.run_id }}
+          HUMAN_ARTIFACT_ID: ${{ steps.human_artifact.outputs.artifact_id }}
+          HUMAN_ARTIFACT_DIGEST: ${{ steps.human_artifact.outputs.digest }}
+          OUTPUT_ARTIFACT_ID: ${{ steps.evidence_inputs.outputs.artifact-id }}
+          OUTPUT_ARTIFACT_DIGEST: ${{ steps.evidence_inputs.outputs.digest }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Production evidence inputs"
+            echo "- revision: \`$GITHUB_SHA\`"
+            echo "- protected human run/artifact: \`$HUMAN_RUN_ID\` / \`$HUMAN_ARTIFACT_ID\`"
+            echo "- protected human digest: \`$HUMAN_ARTIFACT_DIGEST\`"
+            echo "- output artifact: \`$OUTPUT_ARTIFACT_ID\`"
+            echo "- output digest: \`$OUTPUT_ARTIFACT_DIGEST\`"
+          } >> "$GITHUB_STEP_SUMMARY"

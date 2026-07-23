@@ -1,0 +1,301 @@
+name: Governance daily shadow comparison
+
+on:
+  schedule:
+    # KST 00:20, before production evidence input collection at KST 00:35.
+    - cron: "20 15 * * *"
+  workflow_dispatch:
+    inputs:
+      observation_date:
+        description: Optional completed KST day (YYYY-MM-DD; defaults to yesterday)
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: governance-shadow-comparison-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  compare:
+    if: >-
+      github.ref_name == github.event.repository.default_branch &&
+      (vars.GOVERNANCE_PIPELINE_MODE == 'shadow' ||
+       vars.GOVERNANCE_PIPELINE_MODE == 'live')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: governance-runtime
+    steps:
+      - name: Checkout fixed release-candidate revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Enforce web-only fixed-SHA shadow mode
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          ENABLE_TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          ENABLE_GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::Shadow comparison requires a full 40-character release-candidate SHA."
+            exit 1
+          }
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_SHA" ]] || {
+            echo "::error::Checked-out revision does not match the release-candidate SHA."
+            exit 1
+          }
+          [[ "$GOVERNANCE_PIPELINE_MODE" == "shadow" || "$GOVERNANCE_PIPELINE_MODE" == "live" ]] || {
+            echo "::error::GOVERNANCE_PIPELINE_MODE must be shadow or live."
+            exit 1
+          }
+          [[ "$ENABLE_TELEGRAM_DELIVERY" != "true" && "$ENABLE_GOVERNANCE_DELIVERY" != "true" ]] || {
+            echo "::error::Telegram outbound delivery is permanently disabled."
+            exit 1
+          }
+
+      - name: Resolve successful same-SHA immutable engine artifacts
+        id: resolve
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REQUESTED_DATE: ${{ inputs.observation_date || '' }}
+          EXPECTED_SHA: ${{ github.sha }}
+          MANIFEST_PATH: ${{ runner.temp }}/shadow-artifacts.json
+        with:
+          script: |
+            const fs = require("fs");
+            const requested = (process.env.REQUESTED_DATE || "").trim();
+            const expectedSha = (process.env.EXPECTED_SHA || "").toLowerCase();
+            if (!/^[0-9a-f]{40}$/.test(expectedSha)) {
+              return core.setFailed("A full 40-character release-candidate SHA is required.");
+            }
+
+            const kstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+            const kstToday = kstNow.toISOString().slice(0, 10);
+            const yesterday = new Date(`${kstToday}T00:00:00Z`);
+            yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+            const observationDate = requested || yesterday.toISOString().slice(0, 10);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(observationDate) ||
+                new Date(`${observationDate}T00:00:00Z`).toISOString().slice(0, 10) !== observationDate) {
+              return core.setFailed("observation_date must be a real YYYY-MM-DD calendar date.");
+            }
+            if (observationDate >= kstToday) {
+              return core.setFailed("Only a completed KST observation day can be compared.");
+            }
+            const previousDay = new Date(`${observationDate}T00:00:00Z`);
+            previousDay.setUTCDate(previousDay.getUTCDate() - 1);
+            const previousDate = previousDay.toISOString().slice(0, 10);
+
+            const definitions = [
+              {
+                engine: "legacy",
+                prefix: `shadow-engine-legacy-${observationDate}-`,
+                workflowPath: ".github/workflows/build-feed.yml",
+              },
+              {
+                engine: "candidate",
+                prefix: `shadow-engine-candidate-${observationDate}-`,
+                workflowPath: ".github/workflows/ingest-official.yml",
+              },
+            ];
+            const allArtifacts = await github.paginate(
+              github.rest.actions.listArtifactsForRepo,
+              {...context.repo, per_page: 100},
+            );
+            const selected = [];
+            for (const definition of definitions) {
+              const candidates = allArtifacts.filter(
+                artifact => !artifact.expired && artifact.name.startsWith(definition.prefix),
+              );
+              const valid = [];
+              for (const artifact of candidates) {
+                const runId = Number(artifact.workflow_run?.id || 0);
+                if (!runId) continue;
+                const {data: sourceRun} = await github.rest.actions.getWorkflowRun({
+                  ...context.repo,
+                  run_id: runId,
+                });
+                if (
+                  sourceRun.conclusion !== "success" ||
+                  sourceRun.head_branch !== context.payload.repository.default_branch ||
+                  sourceRun.path !== definition.workflowPath ||
+                  sourceRun.head_repository?.full_name !== `${context.repo.owner}/${context.repo.repo}`
+                ) {
+                  continue;
+                }
+                const headSha = (sourceRun.head_sha || "").toLowerCase();
+                if (headSha !== expectedSha) {
+                  return core.setFailed(
+                    `${definition.engine} produced ${observationDate} output at mixed SHA ${headSha}; restart the 14-day window.`,
+                  );
+                }
+                if (!/^sha256:[0-9a-f]{64}$/i.test(artifact.digest || "")) {
+                  return core.setFailed(`Artifact ${artifact.id} omitted its SHA-256 digest.`);
+                }
+                valid.push({
+                  engine: definition.engine,
+                  artifact_id: Number(artifact.id),
+                  artifact_name: artifact.name,
+                  artifact_digest: artifact.digest.toLowerCase(),
+                  workflow_run_id: runId,
+                  workflow_path: definition.workflowPath,
+                  head_sha: headSha,
+                });
+              }
+              if (valid.length === 0) {
+                return core.setFailed(
+                  `No successful ${definition.engine} engine output exists for ${observationDate} at ${expectedSha}.`,
+                );
+              }
+              selected.push(...valid);
+            }
+            const previousName = `governance-shadow-comparison-${previousDate}-${expectedSha}`;
+            const previousCandidates = allArtifacts
+              .filter(artifact => !artifact.expired && artifact.name === previousName)
+              .sort((left, right) => Number(right.id) - Number(left.id));
+            let previousComparison = null;
+            for (const artifact of previousCandidates) {
+              const runId = Number(artifact.workflow_run?.id || 0);
+              if (!runId) continue;
+              const {data: sourceRun} = await github.rest.actions.getWorkflowRun({
+                ...context.repo,
+                run_id: runId,
+              });
+              if (
+                sourceRun.conclusion !== "success" ||
+                sourceRun.head_branch !== context.payload.repository.default_branch ||
+                sourceRun.path !== ".github/workflows/shadow-compare.yml" ||
+                sourceRun.head_repository?.full_name !== `${context.repo.owner}/${context.repo.repo}` ||
+                (sourceRun.head_sha || "").toLowerCase() !== expectedSha
+              ) {
+                continue;
+              }
+              if (!/^sha256:[0-9a-f]{64}$/i.test(artifact.digest || "")) {
+                return core.setFailed(`Previous comparison artifact ${artifact.id} omitted its SHA-256 digest.`);
+              }
+              previousComparison = {
+                artifact_id: Number(artifact.id),
+                artifact_name: artifact.name,
+                artifact_digest: artifact.digest.toLowerCase(),
+                workflow_run_id: runId,
+                workflow_path: ".github/workflows/shadow-compare.yml",
+                head_sha: expectedSha,
+                observation_date: previousDate,
+              };
+              break;
+            }
+            selected.sort((left, right) => left.artifact_id - right.artifact_id);
+            fs.writeFileSync(
+              process.env.MANIFEST_PATH,
+              JSON.stringify({
+                schema_version: 2,
+                observation_date: observationDate,
+                code_revision: expectedSha,
+                corpus_scope: "same_sha_cumulative_kst_day_end_v1",
+                artifacts: selected,
+                previous_comparison: previousComparison,
+              }, null, 2) + "\n",
+              {encoding: "utf8", mode: 0o600},
+            );
+            core.setOutput("observation_date", observationDate);
+            core.setOutput("artifact_count", String(selected.length + (previousComparison ? 1 : 0)));
+            core.info(
+              `Resolved ${selected.length} current engine artifacts and ` +
+              `${previousComparison ? "one previous cumulative receipt" : "no bootstrap receipt"} for ${observationDate}.`,
+            );
+
+      - name: Download immutable engine artifact archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANIFEST_PATH: ${{ runner.temp }}/shadow-artifacts.json
+          ARCHIVES_PATH: ${{ runner.temp }}/shadow-archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARCHIVES_PATH"
+          jq -r '.artifacts[].artifact_id, (.previous_comparison.artifact_id // empty)' "$MANIFEST_PATH" | while IFS= read -r artifact_id; do
+            [[ "$artifact_id" =~ ^[0-9]+$ ]] || exit 1
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
+              > "$ARCHIVES_PATH/$artifact_id.zip"
+          done
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install runtime dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Verify digests and safely extract engine outputs
+        run: >-
+          python -m curator.shadow_compare extract-artifacts
+          --manifest "${{ runner.temp }}/shadow-artifacts.json"
+          --archives "${{ runner.temp }}/shadow-archives"
+          --destination "${{ runner.temp }}/shadow-snapshots"
+
+      - name: Compare and persist the KST shadow day
+        env:
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_EDITOR_TOKEN: ${{ secrets.BSIDE_EDITOR_TOKEN }}
+          CURATOR_DISABLE_TELEGRAM_SEND: "1"
+          CURATOR_DELIVERY_MODE: disabled
+          ENABLE_TELEGRAM_DELIVERY: "false"
+          ENABLE_GOVERNANCE_DELIVERY: "false"
+        run: >-
+          python -m curator.shadow_compare compare
+          --manifest "${{ runner.temp }}/shadow-artifacts.json"
+          --snapshots-root "${{ runner.temp }}/shadow-snapshots"
+          --output "${{ runner.temp }}/shadow-comparison.json"
+
+      - name: Preserve immutable comparison receipt
+        id: receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: governance-shadow-comparison-${{ steps.resolve.outputs.observation_date }}-${{ github.sha }}
+          path: ${{ runner.temp }}/shadow-comparison.json
+          if-no-files-found: error
+          retention-days: 21
+
+      - name: Record comparison result
+        env:
+          REPORT: ${{ runner.temp }}/shadow-comparison.json
+          ARTIFACT_COUNT: ${{ steps.resolve.outputs.artifact_count }}
+          ARTIFACT_ID: ${{ steps.receipt.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.receipt.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          legacy_count="$(jq -r '.api_ack.legacy_event_count' "$REPORT")"
+          candidate_count="$(jq -r '.api_ack.candidate_event_count' "$REPORT")"
+          discrepancy_count="$(jq -r '.api_ack.discrepancy_count' "$REPORT")"
+          eligible_legacy_count="$(jq -r '.api_ack.legacy_crosswalk.eligible_legacy_record_count' "$REPORT")"
+          crosswalked_legacy_count="$(jq -r '.api_ack.legacy_crosswalk.crosswalked_legacy_record_count' "$REPORT")"
+          crosswalk_coverage="$(jq -r '.api_ack.legacy_crosswalk.coverage_rate' "$REPORT")"
+          crosswalk_digest="$(jq -r '.api_ack.legacy_crosswalk.crosswalk_sha256' "$REPORT")"
+          [[ "$eligible_legacy_count" =~ ^[1-9][0-9]*$ && "$crosswalked_legacy_count" == "$eligible_legacy_count" && "$crosswalk_coverage" == "1" && "$crosswalk_digest" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "::error::Legacy crosswalk receipt is incomplete."
+            exit 1
+          }
+          {
+            echo "### Governance shadow comparison"
+            echo "- KST day: `${{ steps.resolve.outputs.observation_date }}`"
+            echo "- release candidate: `${GITHUB_SHA}`"
+            echo "- source artifacts: `${ARTIFACT_COUNT}`"
+            echo "- legacy/candidate events: `${legacy_count}` / `${candidate_count}`"
+            echo "- legacy crosswalk: `${crosswalked_legacy_count}/${eligible_legacy_count}` (`100%`, `${crosswalk_digest}`)"
+            echo "- discrepancies awaiting or retaining human review: `${discrepancy_count}`"
+            echo "- receipt artifact: `${ARTIFACT_ID}` (`${ARTIFACT_DIGEST}`)"
+            echo "- distribution: `web_only`; Telegram outbound disabled"
+          } >> "$GITHUB_STEP_SUMMARY"

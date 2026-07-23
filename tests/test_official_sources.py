@@ -12,6 +12,9 @@ from curator.official_ingest import source_right_payloads
 from curator.official_sources import (
     DART_GOVERNANCE_DETAIL_CODES,
     DartConnector,
+    DartQuotaExceededError,
+    DartRequestBudget,
+    DartRequestBudgetError,
     KindConnector,
     OfficialSourceError,
     base_disclosure_title,
@@ -25,6 +28,7 @@ from curator.official_sources import (
     parse_dart_list_payload,
     parse_kind_disclosure,
     parse_kind_list_payload,
+    validate_kind_endpoint,
 )
 
 
@@ -42,6 +46,39 @@ def dart_row(**overrides: object) -> dict[str, object]:
     }
     row.update(overrides)
     return row
+
+
+def strict_identity(**overrides: object) -> dict[str, object]:
+    identity: dict[str, object] = {
+        "identity_target": "governance subject",
+        "identity_effective_at": "2026-07-16",
+        "identity_deadline_at": "2026-08-31",
+    }
+    identity.update(overrides)
+    return identity
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "http://kind.example/api",
+        "https://user:password@kind.example/api",
+        "https://kind.example/api?token=secret",
+        "https://kind.example/api#fragment",
+        "https://kind.example/api;parameter",
+        " https://kind.example/api",
+        "https://kind.example:invalid/api",
+        "//kind.example/api",
+    ],
+)
+def test_kind_endpoint_rejects_plaintext_or_credential_bearing_urls(endpoint: str) -> None:
+    with pytest.raises(ValueError, match="KIND endpoint"):
+        validate_kind_endpoint(endpoint)
+
+
+def test_kind_endpoint_accepts_clean_absolute_https_url() -> None:
+    endpoint = "https://kind.example:8443/v1/disclosures"
+    assert validate_kind_endpoint(endpoint) == endpoint
 
 
 def test_classifies_governance_scope_without_translating_title() -> None:
@@ -198,6 +235,87 @@ def test_dart_parser_preserves_receipt_title_language_and_official_url() -> None
     assert payload["documents"][0]["title"] == title
 
 
+def test_official_payload_preserves_filer_as_reviewable_actor_and_event_relation() -> None:
+    disclosure = parse_kind_disclosure(
+        {
+            "acptno": "20260716000998",
+            "dart_corp_code": "00126380",
+            "company_name": "Target Corp",
+            "stock_code": "005930",
+            "market": "KOSPI",
+            "title": "Outside director filing",
+            "date": "20260716",
+            "filer_name": "Alpha Capital LLC",
+            "metadata": {"disclosure_detail_code": "E005"},
+            **strict_identity(identity_target="board composition"),
+        }
+    )
+    assert disclosure is not None
+
+    event = disclosure_payloads([disclosure])["events"][0]
+    actor = event["actor"]
+    relation = event["event_actor"]
+    assert actor == {
+        "actor_id": disclosure.identity.actor_id,
+        "actor_type": "institution",
+        "display_name": "Alpha Capital LLC",
+        "company_id": None,
+        "review_status": "pending",
+        "record_status": "inactive",
+    }
+    assert relation == {
+        "event_id": event["event_id"],
+        "actor_id": disclosure.identity.actor_id,
+        "actor_role": "filer",
+        "review_status": "pending",
+    }
+
+
+def test_official_payload_does_not_invent_actor_display_name_when_filer_is_missing() -> None:
+    disclosure = parse_kind_disclosure(
+        {
+            "acptno": "20260716000997",
+            "dart_corp_code": "00126380",
+            "company_name": "Target Corp",
+            "stock_code": "005930",
+            "market": "KOSPI",
+            "title": "Outside director filing",
+            "date": "20260716",
+            "metadata": {"disclosure_detail_code": "E005"},
+            **strict_identity(identity_target="board composition"),
+        }
+    )
+    assert disclosure is not None
+    assert disclosure.identity.actor_id
+
+    event = disclosure_payloads([disclosure])["events"][0]
+    assert "actor" not in event
+    assert "event_actor" not in event
+
+
+def test_official_payload_links_company_filer_to_target_company() -> None:
+    disclosure = parse_kind_disclosure(
+        {
+            "acptno": "20260716000996",
+            "dart_corp_code": "00126380",
+            "company_name": "Target Corp",
+            "stock_code": "005930",
+            "market": "KOSPI",
+            "title": "Outside director filing",
+            "date": "20260716",
+            "filer_name": "  Target Corp  ",
+            "metadata": {"disclosure_detail_code": "E005"},
+            **strict_identity(identity_target="board composition"),
+        }
+    )
+    assert disclosure is not None
+
+    actor = disclosure_payloads([disclosure])["events"][0]["actor"]
+    assert actor["display_name"] == "Target Corp"
+    assert actor["actor_type"] == "company"
+    assert actor["company_id"] == "00126380"
+
+
 def test_official_parsers_reject_lossy_identifiers_and_missing_original_title() -> None:
     with pytest.raises(ValueError, match="DART report_nm is required"):
         parse_dart_disclosure(dart_row(report_nm="", pblntf_detail_ty="D001"))
@@ -216,12 +334,13 @@ def test_official_parsers_reject_lossy_identifiers_and_missing_original_title() 
 
 
 def test_correction_links_only_when_predecessor_is_present() -> None:
-    original = parse_dart_disclosure(dart_row())
+    original = parse_dart_disclosure(dart_row(**strict_identity(identity_target="treasury shares")))
     correction = parse_dart_disclosure(
         dart_row(
             report_nm="[정정]주요사항보고서(자기주식취득결정)",
             rcept_no="20260717000124",
             rcept_dt="20260717",
+            **strict_identity(identity_target="treasury shares"),
         )
     )
     assert original is not None and correction is not None
@@ -247,16 +366,26 @@ def test_collection_key_includes_filer_and_keeps_the_legacy_call_valid() -> None
 
 def test_correction_linking_fails_closed_when_multiple_predecessors_share_a_key() -> None:
     original_a = parse_dart_disclosure(
-        dart_row(report_nm="주식등의대량보유상황보고서", rcept_no="20260716000121")
+        dart_row(
+            report_nm="주식등의대량보유상황보고서",
+            rcept_no="20260716000121",
+            **strict_identity(identity_target="issuer shares"),
+        )
     )
     original_b = parse_dart_disclosure(
-        dart_row(report_nm="주식등의대량보유상황보고서", rcept_no="20260717000122", rcept_dt="20260717")
+        dart_row(
+            report_nm="주식등의대량보유상황보고서",
+            rcept_no="20260717000122",
+            rcept_dt="20260717",
+            **strict_identity(identity_target="issuer shares"),
+        )
     )
     correction = parse_dart_disclosure(
         dart_row(
             report_nm="[정정]주식등의대량보유상황보고서",
             rcept_no="20260718000123",
             rcept_dt="20260718",
+            **strict_identity(identity_target="issuer shares"),
         )
     )
     assert original_a is not None and original_b is not None and correction is not None
@@ -264,7 +393,7 @@ def test_correction_linking_fails_closed_when_multiple_predecessors_share_a_key(
     linked = link_correction_versions([correction, original_b, original_a])
     assert [correction_of for _, correction_of, _, _ in linked] == [None, None, None]
     assert [version_no for _, _, version_no, _ in linked] == [1, 1, 1]
-    assert len({event_id for _, _, _, event_id in linked}) == 3
+    assert len({event_id for _, _, _, event_id in linked}) == 1
 
 
 def test_correction_linking_uses_filer_to_disambiguate_repeated_reports() -> None:
@@ -273,6 +402,7 @@ def test_correction_linking_uses_filer_to_disambiguate_repeated_reports() -> Non
             report_nm="주식등의대량보유상황보고서",
             flr_nm="Alpha Fund",
             rcept_no="20260716000121",
+            **strict_identity(identity_target="issuer shares"),
         )
     )
     original_beta = parse_dart_disclosure(
@@ -280,6 +410,7 @@ def test_correction_linking_uses_filer_to_disambiguate_repeated_reports() -> Non
             report_nm="주식등의대량보유상황보고서",
             flr_nm="Beta Fund",
             rcept_no="20260716000122",
+            **strict_identity(identity_target="issuer shares"),
         )
     )
     correction_alpha = parse_dart_disclosure(
@@ -288,6 +419,7 @@ def test_correction_linking_uses_filer_to_disambiguate_repeated_reports() -> Non
             flr_nm="Alpha Fund",
             rcept_no="20260717000123",
             rcept_dt="20260717",
+            **strict_identity(identity_target="issuer shares"),
         )
     )
     assert original_alpha is not None and original_beta is not None and correction_alpha is not None
@@ -338,6 +470,7 @@ def test_withdrawal_receipt_advances_a_unique_document_and_event_chain() -> None
         dart_row(
             report_nm="주요사항보고서(유상증자결정)",
             rcept_no="20260716000121",
+            **strict_identity(identity_target="new shares"),
         )
     )
     withdrawn = parse_dart_disclosure(
@@ -345,6 +478,7 @@ def test_withdrawal_receipt_advances_a_unique_document_and_event_chain() -> None
             report_nm="[철회]주요사항보고서(유상증자결정)",
             rcept_no="20260717000122",
             rcept_dt="20260717",
+            **strict_identity(identity_target="new shares"),
         )
     )
     assert original is not None and withdrawn is not None
@@ -480,6 +614,139 @@ def test_dart_connector_paginates_until_total_page() -> None:
             )
         )
     assert [row["rcept_no"] for row in rows] == ["20260716000121", "20260716000122"]
+
+
+def test_dart_connector_retries_429_and_5xx_with_bounded_backoff() -> None:
+    statuses = iter((429, 503, 200))
+    sleeps: list[float] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        status = next(statuses)
+        if status != 200:
+            return httpx.Response(status, headers={"Retry-After": "2"})
+        return httpx.Response(
+            200,
+            json={"status": "000", "page_no": 1, "total_page": 1, "list": [dart_row()]},
+        )
+
+    budget = DartRequestBudget(3)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = DartConnector(
+            "x" * 40,
+            client=client,
+            governance_detail_codes=(),
+            request_budget=budget,
+            max_retries=2,
+            backoff_seconds=1,
+            sleeper=sleeps.append,
+        )
+        rows = list(connector.iter_disclosure_rows(date(2026, 7, 15), date(2026, 7, 16)))
+
+    assert len(rows) == 1
+    assert sleeps == [2.0, 2.0]
+    assert connector.requests_made == 3
+    assert budget.used == 3
+
+
+def test_dart_connector_fails_fast_on_daily_quota_status_020() -> None:
+    requests = 0
+    sleeps: list[float] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        return httpx.Response(200, json={"status": "020", "message": "quota exceeded"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = DartConnector(
+            "x" * 40,
+            client=client,
+            governance_detail_codes=(),
+            max_retries=2,
+            sleeper=sleeps.append,
+        )
+        with pytest.raises(DartQuotaExceededError, match="resume from the checkpoint later"):
+            list(connector.iter_disclosure_rows(date(2026, 7, 15), date(2026, 7, 16)))
+
+    assert requests == 1
+    assert sleeps == []
+
+
+def test_dart_connector_enforces_shared_physical_request_budget() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503)
+
+    budget = DartRequestBudget(1)
+    sleeps: list[float] = []
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = DartConnector(
+            "x" * 40,
+            client=client,
+            governance_detail_codes=(),
+            request_budget=budget,
+            max_retries=2,
+            sleeper=sleeps.append,
+        )
+        with pytest.raises(DartRequestBudgetError, match="1/1"):
+            list(connector.iter_disclosure_rows(date(2026, 7, 15), date(2026, 7, 16)))
+
+    assert connector.requests_made == 1
+    assert budget.used == 1
+
+
+def test_dart_http_error_never_exposes_api_key_or_response_body() -> None:
+    secret = "dart-secret-key-that-must-not-leak"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["crtfc_key"] == secret
+        return httpx.Response(401, json={"message": secret})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = DartConnector(
+            secret,
+            client=client,
+            governance_detail_codes=(),
+            max_retries=0,
+        )
+        with pytest.raises(OfficialSourceError) as captured:
+            list(connector.iter_disclosure_rows(date(2026, 7, 15), date(2026, 7, 15)))
+
+    rendered = str(captured.value)
+    assert rendered == "OpenDART HTTP 401"
+    assert secret not in rendered
+    assert "crtfc_key" not in rendered
+
+
+def test_dart_and_kind_success_http_status_errors_do_not_echo_hostile_body() -> None:
+    secret = "provider-secret-in-hostile-body"
+    with pytest.raises(OfficialSourceError) as dart_error:
+        parse_dart_list_payload({"status": secret, "message": secret})
+    with pytest.raises(OfficialSourceError) as kind_error:
+        parse_kind_list_payload({"status": secret, "items": []})
+
+    assert secret not in str(dart_error.value)
+    assert secret not in str(kind_error.value)
+
+
+def test_kind_http_error_never_exposes_authorization_token_or_response_body() -> None:
+    secret = "kind-secret-token-that-must-not-leak"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == f"Bearer {secret}"
+        return httpx.Response(403, json={"error": secret})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = KindConnector(
+            "https://kind.example.test/disclosures",
+            api_key=secret,
+            client=client,
+        )
+        with pytest.raises(OfficialSourceError) as captured:
+            list(connector.iter_disclosure_rows(date(2026, 7, 15), date(2026, 7, 15)))
+
+    rendered = str(captured.value)
+    assert rendered == "KIND HTTP 403"
+    assert secret not in rendered
 
 
 def test_dart_connector_annotates_detail_queries_and_deduplicates_broad_results() -> None:
@@ -767,6 +1034,26 @@ def test_company_master_zip_and_source_right_payload_contract(config: dict[str, 
         archive.writestr("CORPCODE.xml", xml)
     companies = parse_corp_code_zip(buffer.getvalue())
     assert companies[0]["company_id"] == "00126380"
+    assert companies[0]["listing_status"] == "listed"
+    assert companies[0]["master_modified_at"] == "2026-07-16T00:00:00+00:00"
     rights = source_right_payloads(config, include_kind=True)
-    assert {row["source_right_id"] for row in rights} == {"official:dart", "official:kind"}
+    assert {row["source_right_id"] for row in rights} == {"official:dart"}
+    assert all(row["source_key"] != "kind" for row in rights)
     assert all(row.get("evidence_uri") for row in rights)
+
+
+def test_company_master_marks_missing_stock_code_unlisted_and_rejects_bad_modify_date() -> None:
+    xml = b"""<?xml version='1.0' encoding='UTF-8'?><result><list><corp_code>00126380</corp_code><corp_name>Private</corp_name><stock_code></stock_code><modify_date>20260716</modify_date></list></result>"""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("CORPCODE.xml", xml)
+    companies = parse_corp_code_zip(buffer.getvalue())
+    assert companies[0]["stock_code"] == ""
+    assert companies[0]["listing_status"] == "unlisted"
+
+    invalid = xml.replace(b"20260716", b"20260231")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("CORPCODE.xml", invalid)
+    with pytest.raises(OfficialSourceError, match="invalid modify_date"):
+        parse_corp_code_zip(buffer.getvalue())

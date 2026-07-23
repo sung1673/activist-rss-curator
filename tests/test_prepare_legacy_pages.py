@@ -42,7 +42,8 @@ def build_source(root: Path) -> Path:
         filename = f"{cursor.isoformat()}.html"
         (feed / filename).write_text(filename, encoding="utf-8")
         cursor += timedelta(days=1)
-    (governance / "index.html").write_text("must not ship", encoding="utf-8")
+    for filename in ("app.js", "config.js", "index.html", "styles.css"):
+        (governance / filename).write_text(f"preview {filename}", encoding="utf-8")
     (source / "unexpected.txt").write_text("must not ship", encoding="utf-8")
     return source
 
@@ -59,6 +60,47 @@ def test_preparer_copies_only_the_legacy_allowlist(tmp_path: Path) -> None:
     assert (destination / "feed" / "telegram-admin.html").exists()
     assert not (destination / "governance").exists()
     assert not (destination / "unexpected.txt").exists()
+
+
+def test_preparer_can_mount_only_the_public_governance_preview_subpath(tmp_path: Path) -> None:
+    preparer = load_preparer()
+    source = build_source(tmp_path)
+    destination = tmp_path / "artifact"
+
+    result = preparer.prepare_legacy_pages(
+        source,
+        destination,
+        governance_preview=source / "governance",
+    )
+
+    assert result["root_paths"] == [
+        "404.html",
+        "CNAME",
+        "feed",
+        "feed.xml",
+        "governance",
+        "index.html",
+    ]
+    assert result["file_count"] == 95
+    assert sorted(path.name for path in (destination / "governance").iterdir()) == [
+        "app.js",
+        "config.js",
+        "index.html",
+        "styles.css",
+    ]
+
+
+def test_preparer_rejects_unexpected_governance_preview_assets(tmp_path: Path) -> None:
+    preparer = load_preparer()
+    source = build_source(tmp_path)
+    (source / "governance" / "admin.html").write_text("private", encoding="utf-8")
+
+    with pytest.raises(preparer.PreparationError, match="only its four public assets"):
+        preparer.prepare_legacy_pages(
+            source,
+            tmp_path / "artifact",
+            governance_preview=source / "governance",
+        )
 
 
 @pytest.mark.parametrize("filename", ["story-review.html", "story-review-meta.json"])
