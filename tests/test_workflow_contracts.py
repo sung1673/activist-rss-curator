@@ -944,7 +944,19 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     job = payload["jobs"]["backfill"]
     assert job["if"] == "github.ref_name == github.event.repository.default_branch"
     assert int(job["timeout-minutes"]) == 360
+    for runtime_path in (
+        "BACKFILL_REPORT",
+        "BACKFILL_LOG",
+        "DART_CANARY_REPORT",
+    ):
+        assert runtime_path not in job["env"]
     steps = job["steps"]
+    initialize = next(step for step in steps if step["name"] == "Initialize backfill evidence")
+    assert initialize["env"] == {
+        "BACKFILL_REPORT": "${{ runner.temp }}/official-backfill-report.json",
+        "BACKFILL_LOG": "${{ runner.temp }}/official-backfill.stderr.log",
+        "DART_CANARY_REPORT": "${{ runner.temp }}/dart-canary-sample-report.json",
+    }
     checkout = next(step for step in steps if step["name"] == "Checkout immutable dispatch revision")
     assert checkout["with"]["ref"] == "${{ github.sha }}"
     revision_guard = next(step for step in steps if step["name"] == "Verify immutable dispatch revision")
@@ -983,6 +995,9 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert "remaining_request_budget=" not in canary["run"]
     assert canary["env"]["DART_API_KEY"] == "${{ secrets.DART_API_KEY }}"
     assert canary["env"]["BSIDE_OPS_TOKEN"] == "${{ secrets.BSIDE_OPS_TOKEN }}"
+    assert canary["env"]["DART_CANARY_REPORT"] == (
+        "${{ runner.temp }}/dart-canary-sample-report.json"
+    )
     assert canary["env"]["CURATOR_REQUIRE_DURABLE_DART_QUOTA"] == "1"
     assert canary["env"]["CURATOR_DART_QUOTA_PHASE"] == "dart-canary"
     assert "TELEGRAM_BOT_TOKEN" not in workflow
@@ -996,7 +1011,11 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert all(step["if"] == "always()" for step in uploads)
     assert all(step["with"]["if-no-files-found"] == "error" for step in uploads)
     report_upload = next(step for step in uploads if step["name"] == "Preserve backfill report")
-    assert "${{ env.DART_CANARY_REPORT }}" in report_upload["with"]["path"]
+    assert report_upload["with"]["path"].splitlines() == [
+        "${{ runner.temp }}/official-backfill-report.json",
+        "${{ runner.temp }}/official-backfill.stderr.log",
+        "${{ runner.temp }}/dart-canary-sample-report.json",
+    ]
     checkpoint = next(step for step in uploads if step["name"] == "Preserve resumable checkpoint")
     assert checkpoint["with"]["name"] == "${{ env.CHECKPOINT_ARTIFACT_NAME }}"
     resolver = next(step for step in steps if step["name"] == "Resolve previous matching checkpoint")

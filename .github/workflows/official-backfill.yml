@@ -58,13 +58,14 @@ jobs:
     environment:
       name: governance-runtime
     env:
-      BACKFILL_REPORT: ${{ runner.temp }}/official-backfill-report.json
-      BACKFILL_LOG: ${{ runner.temp }}/official-backfill.stderr.log
-      DART_CANARY_REPORT: ${{ runner.temp }}/dart-canary-sample-report.json
       CHECKPOINT_PATH: data/backfill_official_checkpoint.json
       CHECKPOINT_ARTIFACT_NAME: official-backfill-checkpoint-${{ inputs.mode }}-${{ inputs.source }}-${{ inputs.from_date }}-${{ inputs.to_date }}-${{ inputs.sync_company_master }}
     steps:
       - name: Initialize backfill evidence
+        env:
+          BACKFILL_REPORT: ${{ runner.temp }}/official-backfill-report.json
+          BACKFILL_LOG: ${{ runner.temp }}/official-backfill.stderr.log
+          DART_CANARY_REPORT: ${{ runner.temp }}/dart-canary-sample-report.json
         shell: bash
         run: |
           set -euo pipefail
@@ -194,6 +195,7 @@ jobs:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          DART_CANARY_REPORT: ${{ runner.temp }}/dart-canary-sample-report.json
           CURATOR_REQUIRE_DURABLE_DART_QUOTA: "1"
           CURATOR_DART_QUOTA_PHASE: dart-canary
         shell: bash
@@ -286,6 +288,8 @@ jobs:
           BACKFILL_TO_DATE: ${{ inputs.to_date }}
           BACKFILL_MAX_WINDOWS: ${{ inputs.max_windows }}
           BACKFILL_SYNC_COMPANY_MASTER: ${{ inputs.sync_company_master }}
+          BACKFILL_REPORT: ${{ runner.temp }}/official-backfill-report.json
+          BACKFILL_LOG: ${{ runner.temp }}/official-backfill.stderr.log
           CURATOR_INGEST_SCOPE: official
           CURATOR_DATA_SOURCE: mysql
           CURATOR_DISABLE_TELEGRAM_SEND: "1"
@@ -358,9 +362,9 @@ jobs:
         with:
           name: official-backfill-report-${{ github.run_id }}
           path: |
-            ${{ env.BACKFILL_REPORT }}
-            ${{ env.BACKFILL_LOG }}
-            ${{ env.DART_CANARY_REPORT }}
+            ${{ runner.temp }}/official-backfill-report.json
+            ${{ runner.temp }}/official-backfill.stderr.log
+            ${{ runner.temp }}/dart-canary-sample-report.json
           if-no-files-found: error
           retention-days: 90
 
