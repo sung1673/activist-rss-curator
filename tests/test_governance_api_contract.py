@@ -347,6 +347,34 @@ def test_preview_to_live_rechecks_current_v2_rights_under_one_lock_order():
     )
 
 
+def test_canonical_json_encode_calls_supply_explicit_failure_context():
+    compact = "".join(V1.split())
+    expected_calls = (
+        (
+            "$revisionPayload,'kind_source_right_revision_encode_failed'",
+            "v1_kind_source_right_eligibility",
+        ),
+        (
+            "$revisionPayload,'official_site_right_revision_encode_failed'",
+            "v1_ops_official_site_rights",
+        ),
+        (
+            "$previousIdentity,'event_previous_identity_encode_failed'",
+            "v1_admin_complete_event_identity",
+        ),
+        (
+            "$identity,'event_identity_encode_failed'",
+            "v1_admin_complete_event_identity",
+        ),
+    )
+    for arguments, function_name in expected_calls:
+        assert f"v1_canonical_json_encode({arguments})" in compact, function_name
+
+    assert "v1_canonical_json_encode($revisionPayload)" not in compact
+    assert "v1_canonical_json_encode($previousIdentity)" not in compact
+    assert "v1_canonical_json_encode($identity)" not in compact
+
+
 def test_availability_evidence_uses_exact_kst_minute01_slot_coverage():
     spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
     schema = spec["components"]["schemas"]["DailyRouteAvailabilityEvidence"]

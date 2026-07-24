@@ -1625,7 +1625,9 @@ function v1_kind_source_right_eligibility(PDO $pdo, array $config, bool $forUpda
         'status'=>(string)$row['status'],'updated_at'=>(string)$row['updated_at'],
     );
     return array('eligible'=>count($reasons) === 0,
-        'rights_revision'=>hash('sha256',v1_canonical_json_encode($revisionPayload)),'reasons'=>$reasons);
+        'rights_revision'=>hash('sha256',v1_canonical_json_encode(
+            $revisionPayload,'kind_source_right_revision_encode_failed'
+        )),'reasons'=>$reasons);
 }
 
 function v1_ops_source_right_eligibility(PDO $pdo, array $config): void {
@@ -1674,7 +1676,9 @@ function v1_ops_official_site_rights(PDO $pdo, array $config): void {
             'permission_scope'=>mb_substr((string)$row['permission_scope'],0,2000,'UTF-8'),
             'valid_from'=>v1_release_iso_time($row['valid_from']),'valid_until'=>v1_release_iso_time($row['valid_until']),
             'ai_allowed'=>(int)$row['ai_allowed'] === 1,'redistribution_allowed'=>true,'status'=>'active',
-            'evidence_present'=>true,'rights_revision'=>hash('sha256',v1_canonical_json_encode($revisionPayload)),
+            'evidence_present'=>true,'rights_revision'=>hash('sha256',v1_canonical_json_encode(
+                $revisionPayload,'official_site_right_revision_encode_failed'
+            )),
         );
     }
     $offset = (int)$page['offset']; $slice = array_slice($eligible,$offset,(int)$page['limit']+1);
@@ -4781,8 +4785,9 @@ function v1_admin_complete_event_identity(PDO $pdo, array $config, string $event
             . ' (revision_id,entity_type,entity_id,field_name,previous_value,revised_value,reason,revision_status,requested_by,'
             . 'reviewed_by,reviewed_at,published_at,created_at,updated_at) VALUES (?,\'event\',?,\'event_identity\',?,?,?,\'published\','
             . '\'identity_completion_api\',?,UTC_TIMESTAMP(),UTC_TIMESTAMP(),UTC_TIMESTAMP(),UTC_TIMESTAMP())');
-        $revision->execute(array($revisionId,$eventId,v1_canonical_json_encode($previousIdentity),
-            v1_canonical_json_encode($identity),$reason,'api_role:' . $role));
+        $revision->execute(array($revisionId,$eventId,
+            v1_canonical_json_encode($previousIdentity,'event_previous_identity_encode_failed'),
+            v1_canonical_json_encode($identity,'event_identity_encode_failed'),$reason,'api_role:' . $role));
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) { $pdo->rollBack(); }
