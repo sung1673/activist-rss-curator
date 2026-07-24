@@ -1413,6 +1413,53 @@ def run(base_url: str, mysql_container_id: str) -> None:
     observed_at = f"{kst_date}T12:00:00+09:00"
     next_kst_date = (datetime.fromisoformat(kst_date) + timedelta(days=1)).date().isoformat()
     last_slot_observed_at = f"{next_kst_date}T00:00:59+09:00"
+    revision = "c" * 40
+    # Release evidence intentionally omits operation days that have no durable
+    # collection run. Seed this historical fixture through the production HMAC
+    # write path instead of relying on the unrelated current-slot claim above.
+    evidence_run = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        {
+            "companies": [],
+            "documents": [],
+            "events": [],
+            "source_rights": [],
+            "run": {
+                "run_id": stable_id(
+                    "run", "release-evidence-smoke", kst_date, length=32
+                ),
+                "pipeline": "ingest-official",
+                "source_key": "dart",
+                "code_revision": revision,
+                "status": "succeeded",
+                "started_at": observed_at,
+                "finished_at": observed_at,
+                "first_observed_at": observed_at,
+                "raw_count": 0,
+                "acknowledged_count": 0,
+                "fetched_count": 0,
+                "resolved_count": 0,
+                "accepted_count": 0,
+                "error_count": 0,
+                "run_kind": "manual",
+                "company_master_sync": False,
+                "source_ack_counts": {"dart": 0},
+                "source_outcomes": {
+                    "dart": {
+                        "status": "succeeded",
+                        "raw_count": 0,
+                        "acknowledged_count": 0,
+                    }
+                },
+            },
+        },
+        expected_status=200,
+    )
+    require(
+        evidence_run.get("upserted", {}).get("runs") == 1,
+        repr(evidence_run),
+    )
     # Promote the two company-statement documents into one approved public
     # event, then corrupt one stored title and revoke their otherwise complete
     # SourceRight. Both documents must remain in the quality denominator even
@@ -1485,7 +1532,6 @@ def run(base_url: str, mysql_container_id: str) -> None:
     )
     require(availability.get("accepted_count") == 2, repr(availability))
 
-    revision = "c" * 40
     distribution_payload = {
         "observations": [
             {
