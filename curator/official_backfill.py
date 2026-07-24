@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -38,6 +39,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MIN_BACKFILL_DATE = date(2021, 1, 1)
 DEFAULT_CHECKPOINT_PATH = Path("data/backfill_official_checkpoint.json")
 CHECKPOINT_SCHEMA_VERSION = 1
+_CODE_REVISION_RE = re.compile(r"^[a-f0-9]{7,40}$")
 
 
 class BackfillConfigurationError(ValueError):
@@ -46,6 +48,15 @@ class BackfillConfigurationError(ValueError):
 
 class CheckpointError(RuntimeError):
     pass
+
+
+def _completed_kst_end_exclusive(now: datetime | None = None) -> date:
+    """Return the exclusive boundary that contains completed KST dates only."""
+
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        raise BackfillConfigurationError("backfill clock must be timezone-aware")
+    return current.astimezone(ZoneInfo("Asia/Seoul")).date()
 
 
 @dataclass(frozen=True)
@@ -87,11 +98,12 @@ class BackfillOptions:
             )
         if self.end_exclusive <= self.start:
             raise BackfillConfigurationError("end_exclusive must be after start")
-        tomorrow_kst = datetime.now(ZoneInfo("Asia/Seoul")).date() + timedelta(days=1)
-        if self.end_exclusive > tomorrow_kst:
+        completed_kst_end_exclusive = _completed_kst_end_exclusive()
+        if self.end_exclusive > completed_kst_end_exclusive:
             raise BackfillConfigurationError(
-                "end_exclusive cannot be later than tomorrow in KST; "
-                "future empty windows must never be checkpointed as complete"
+                "end_exclusive cannot be later than the current KST date as an "
+                "exclusive boundary; current or future KST dates must never be "
+                "checkpointed as complete"
             )
         if self.chunk_days < 1:
             raise BackfillConfigurationError("chunk_days must be at least 1")
@@ -187,6 +199,19 @@ def _timestamp(now_provider: Callable[[], datetime]) -> str:
     return value.astimezone(timezone.utc).isoformat()
 
 
+def _code_revision() -> str:
+    revision = (
+        os.environ.get("GITHUB_SHA", "")
+        or os.environ.get("CURATOR_CODE_REVISION", "")
+    ).strip().casefold()
+    if _CODE_REVISION_RE.fullmatch(revision) is None:
+        raise BackfillConfigurationError(
+            "applied backfill requires GITHUB_SHA or CURATOR_CODE_REVISION "
+            "(7-40 lowercase hexadecimal characters)"
+        )
+    return revision
+
+
 def new_checkpoint(
     job: dict[str, object],
     fingerprint: str,
@@ -261,6 +286,10 @@ def validate_checkpoint(
                 reconstructed_key != window_key
                 or result.get("status") != expected_status
                 or attempt < 1
+                or _CODE_REVISION_RE.fullmatch(
+                    str(result.get("code_revision") or "")
+                )
+                is None
                 or not str(result.get("idempotency_key") or "").startswith(
                     "official-backfill-v1:"
                 )
@@ -319,6 +348,17 @@ def validate_runtime(options: BackfillOptions) -> None:
         missing.append("ACTIVIST_API_URL/ACTIVIST_API_SECRET")
     if not options.dry_run and not checkpoint_api_configured():
         missing.append("BSIDE_API_BASE_URL/BSIDE_OPS_TOKEN")
+    backend_binding_id = os.environ.get("BSIDE_BACKEND_BINDING_ID", "").strip()
+    if not options.dry_run and (
+        len(backend_binding_id) != 64
+        or any(character not in "0123456789abcdef" for character in backend_binding_id)
+    ):
+        missing.append("BSIDE_BACKEND_BINDING_ID")
+    if not options.dry_run:
+        try:
+            _code_revision()
+        except BackfillConfigurationError:
+            missing.append("GITHUB_SHA/CURATOR_CODE_REVISION")
     if missing:
         raise BackfillConfigurationError("missing required runtime configuration: " + ", ".join(missing))
 
@@ -409,6 +449,7 @@ def run_backfill(
     """
 
     options.validate()
+    code_revision = None if options.dry_run else _code_revision()
     job = job_contract(options)
     fingerprint = job_fingerprint(job)
     remote_version = 0
@@ -515,6 +556,8 @@ def run_backfill(
             "idempotency_key": window_idempotency_key(fingerprint, window),
             "attempt": previous_attempts + 1,
         }
+        if code_revision is not None:
+            result["code_revision"] = code_revision
         try:
             summary = ingest_runner(
                 project_root,
@@ -596,6 +639,7 @@ def run_backfill(
         "schema_version": 1,
         "status": "failed" if invocation_failures else "succeeded",
         "dry_run": options.dry_run,
+        "code_revision": code_revision,
         "job_fingerprint": fingerprint,
         "range_start": options.start.isoformat(),
         "range_end_exclusive": options.end_exclusive.isoformat(),
@@ -632,7 +676,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--root", type=Path, default=PROJECT_ROOT, help="project root containing config.yaml")
     parser.add_argument("--from-date", type=_parse_date, help="inclusive start date (default: config backfill_start)")
-    parser.add_argument("--to-date", type=_parse_date, help="exclusive end date (default: tomorrow in KST)")
+    parser.add_argument(
+        "--to-date",
+        type=_parse_date,
+        help="exclusive end date (default: current KST date, so only completed dates are included)",
+    )
     parser.add_argument(
         "--chunk-days",
         type=int,
@@ -663,8 +711,7 @@ def options_from_args(args: argparse.Namespace) -> tuple[Path, BackfillOptions]:
     settings = config.get("official_ingest", {})
     configured_start = str(settings.get("backfill_start") or MIN_BACKFILL_DATE.isoformat()) if isinstance(settings, dict) else MIN_BACKFILL_DATE.isoformat()
     start = args.from_date or _parse_date(configured_start)
-    tomorrow_kst = datetime.now(ZoneInfo("Asia/Seoul")).date() + timedelta(days=1)
-    end_exclusive = args.to_date or tomorrow_kst
+    end_exclusive = args.to_date or _completed_kst_end_exclusive()
     checkpoint = args.checkpoint if args.checkpoint.is_absolute() else project_root / args.checkpoint
     return project_root, BackfillOptions(
         start=start,

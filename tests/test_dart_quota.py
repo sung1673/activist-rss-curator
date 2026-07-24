@@ -16,6 +16,7 @@ from curator.official_sources import DartConnector
 
 
 REVISION = "a" * 40
+BINDING_ID = "b" * 64
 NOW = datetime(2026, 7, 23, 3, 0, tzinfo=timezone.utc)  # 2026-07-23 KST
 
 
@@ -25,6 +26,7 @@ def _ack(body: dict[str, object], *, used: int, duplicate: bool = False) -> dict
         "action": body["action"],
         "attempt_id": body["attempt_id"],
         "quota_day": body["quota_day"],
+        "backend_binding_id": BINDING_ID,
         "accepted": 1,
         "limit_count": 10_000,
         "used_count": used,
@@ -40,6 +42,7 @@ def _client(handler, **overrides: object) -> DartQuotaClient:
     return DartQuotaClient(
         base_url="https://api.example.test/activist/api.php/api/v1",
         token="ops-token",
+        backend_binding_id=BINDING_ID,
         code_revision=REVISION,
         phase="test",
         transport=httpx.MockTransport(handler),
@@ -71,6 +74,7 @@ def test_consume_retries_lost_ack_with_same_attempt_id() -> None:
         "quota_day": "2026-07-23",
         "operation": "list",
         "code_revision": REVISION,
+        "expected_backend_binding_id": BINDING_ID,
     }
     assert permit.attempt_id == bodies[0]["attempt_id"]
     assert permit.duplicate is True
@@ -150,6 +154,42 @@ def test_quota_api_failure_prevents_physical_dart_request() -> None:
     assert quota.used == 0
 
 
+@pytest.mark.parametrize("remote_binding_id", ("c" * 64, "한" * 64))
+def test_backend_binding_mismatch_prevents_physical_dart_request(
+    remote_binding_id: str,
+) -> None:
+    dart_calls = 0
+
+    def quota_handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        payload = _ack(body, used=1)
+        payload["backend_binding_id"] = remote_binding_id
+        return httpx.Response(200, json=payload)
+
+    def dart_handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal dart_calls
+        dart_calls += 1
+        return httpx.Response(200, json={"status": "013"})
+
+    quota = _client(quota_handler)
+    with httpx.Client(transport=httpx.MockTransport(dart_handler)) as dart_http:
+        connector = DartConnector(
+            "x" * 40,
+            client=dart_http,
+            governance_detail_codes=(),
+            request_budget=quota,
+        )
+        with pytest.raises(DartQuotaLedgerError, match="backend binding"):
+            list(
+                connector.iter_disclosure_rows(
+                    datetime(2026, 7, 22).date(), datetime(2026, 7, 22).date()
+                )
+            )
+
+    assert dart_calls == 0
+    assert quota.used == 0
+
+
 def test_status_020_must_receive_durable_block_ack() -> None:
     actions: list[str] = []
 
@@ -210,6 +250,7 @@ def test_generated_attempt_id_always_fits_server_column(
     quota = DartQuotaClient(
         base_url="https://api.example.test/api/v1",
         token="ops-token",
+        backend_binding_id=BINDING_ID,
         code_revision=REVISION,
         phase="very-long-phase-" * 8,
         transport=httpx.MockTransport(handler),
@@ -237,6 +278,7 @@ def test_restarted_client_in_same_github_job_gets_a_new_process_nonce(
     kwargs = {
         "base_url": "https://api.example.test/api/v1",
         "token": "ops-token",
+        "backend_binding_id": BINDING_ID,
         "code_revision": REVISION,
         "phase": "official-ingest",
         "transport": httpx.MockTransport(handler),
@@ -262,6 +304,10 @@ def test_github_actions_and_partial_api_config_force_durable_fail_closed_policy(
     monkeypatch.setenv("BSIDE_OPS_TOKEN", "partial-config")
     assert durable_dart_quota_configured() is True
 
+    monkeypatch.delenv("BSIDE_OPS_TOKEN", raising=False)
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", BINDING_ID)
+    assert durable_dart_quota_configured() is True
+
 
 @pytest.mark.parametrize(
     "base_url",
@@ -269,12 +315,27 @@ def test_github_actions_and_partial_api_config_force_durable_fail_closed_policy(
         "http://api.example.test/api/v1",
         "https://user:secret@api.example.test/api/v1",
         "https://api.example.test/api/v1?token=secret",
+        "https://api.example.test/api/v1%2f..",
+        "https://api.example.test\\api\\v1",
+        "https://api.example.test/other",
     ),
 )
 def test_quota_url_must_be_credential_safe_https(base_url: str) -> None:
-    with pytest.raises(DartQuotaLedgerError, match="absolute HTTPS"):
+    with pytest.raises(DartQuotaLedgerError, match="base URL"):
         DartQuotaClient(
             base_url=base_url,
             token="ops-token",
+            backend_binding_id=BINDING_ID,
+            code_revision=REVISION,
+        )
+
+
+@pytest.mark.parametrize("binding_id", ("not-a-binding", "B" * 64))
+def test_quota_backend_binding_id_must_be_exact_sha256_hex(binding_id: str) -> None:
+    with pytest.raises(DartQuotaLedgerError, match="64 lowercase hexadecimal"):
+        DartQuotaClient(
+            base_url="https://api.example.test/api/v1",
+            token="ops-token",
+            backend_binding_id=binding_id,
             code_revision=REVISION,
         )

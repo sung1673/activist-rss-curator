@@ -330,6 +330,7 @@ jobs:
           tests
           .github/scripts/prepare-legacy-pages.py
           .github/scripts/restore-legacy-pages-archive.py
+          .github/scripts/validate-api-base-urls.py
           --output-format=github
 
       - name: Type check governance core
@@ -345,6 +346,7 @@ jobs:
           curator/benchmark_candidates.py
           curator/dart_canary_sample.py
           curator/dart_quota.py
+          curator/dart_review_sample.py
           curator/event_identity.py
           curator/governance_site.py
           curator/governance_site_config.py
@@ -366,6 +368,7 @@ jobs:
           curator/release_gate.py
           curator/shadow_compare.py
           curator/shadow_engine.py
+          .github/scripts/validate-api-base-urls.py
           --ignore-missing-imports
           --follow-imports=skip
           --check-untyped-defs

@@ -65,6 +65,7 @@
         "source_end_inclusive",
         "idempotency_key",
         "attempt",
+        "code_revision",
         "status",
         "finished_at"
       ],
@@ -74,6 +75,7 @@
         "source_end_inclusive": { "type": "string", "format": "date" },
         "idempotency_key": { "type": "string", "pattern": "^official-backfill-v1:[0-9a-f]{32}$" },
         "attempt": { "type": "integer", "minimum": 1 },
+        "code_revision": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
         "status": { "enum": ["succeeded", "failed"] },
         "finished_at": { "type": "string", "format": "date-time" },
         "summary": { "type": "object", "additionalProperties": { "type": "integer" } },

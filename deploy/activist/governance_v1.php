@@ -445,7 +445,7 @@ function handle_v1_request(string $method, string $path, array $config): void {
     }
 
     $preauthorizedRole = null;
-    $opsReadPaths = array('/ops/health', '/ops/runtime-state', '/ops/release-evidence', '/ops/official-run-ledger', '/ops/official-slot-claims', '/ops/dart-quota',
+    $opsReadPaths = array('/ops/health', '/ops/runtime-state', '/ops/release-evidence', '/ops/official-run-ledger', '/ops/dart-review-corpus', '/ops/official-slot-claims', '/ops/dart-quota',
         '/ops/official-site-candidates', '/ops/official-site-rights', '/ops/source-right-eligibility');
     if ($method === 'GET' && in_array($path, $opsReadPaths, true)) {
         $preauthorizedRole = v1_require_role($config, array('ops'));
@@ -506,6 +506,7 @@ function handle_v1_request(string $method, string $path, array $config): void {
         if ($path === '/ops/runtime-state') { v1_runtime_state_route($pdo, $config); }
         if ($path === '/ops/release-evidence') { v1_ops_release_evidence($pdo, $config); }
         if ($path === '/ops/official-run-ledger') { v1_ops_official_run_ledger($pdo, $config); }
+        if ($path === '/ops/dart-review-corpus') { v1_ops_dart_review_corpus($pdo, $config); }
         if ($path === '/ops/official-slot-claims') { v1_ops_official_slot_claims($pdo, $config); }
         if ($path === '/ops/dart-quota') { v1_ops_dart_quota_status($pdo, $config); }
         if ($path === '/ops/official-site-candidates') { v1_ops_official_site_candidates($pdo, $config); }
@@ -1747,13 +1748,28 @@ function v1_dart_quota_error(int $status, string $code, ?string $detail = null):
     v1_respond($status,array('ok'=>false,'error'=>$error,'server_kst_date'=>v1_dart_quota_server_day()));
 }
 
-function v1_dart_quota_payload(array $row, string $action, ?string $attemptId, bool $duplicate): array {
+function v1_backend_binding_id(PDO $pdo, array $config): string {
+    $row = $pdo->query('SELECT @@server_uuid AS server_uuid,DATABASE() AS database_name')->fetch();
+    $prefix = isset($config['table_prefix']) ? (string)$config['table_prefix'] : 'activist_';
+    if (!is_array($row)
+        || preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/',
+            strtolower((string)($row['server_uuid'] ?? ''))) !== 1
+        || trim((string)($row['database_name'] ?? '')) === '' || preg_match('/^[A-Za-z0-9_]+$/',$prefix) !== 1) {
+        v1_respond(503,array('ok'=>false,'error'=>'backend_binding_unavailable'));
+    }
+    return hash('sha256',"mysql8\n" . strtolower((string)$row['server_uuid']) . "\n"
+        . (string)$row['database_name'] . "\n" . $prefix);
+}
+
+function v1_dart_quota_payload(array $row, string $action, ?string $attemptId, bool $duplicate,
+    string $backendBindingId): array {
     $limit = (int)$row['limit_count']; $used = (int)$row['used_count'];
     return array(
         'ok'=>true,'action'=>$action,'attempt_id'=>$attemptId,'quota_day'=>(string)$row['quota_day'],
         'accepted'=>$action === 'status' ? 0 : 1,'limit_count'=>$limit,'used_count'=>$used,
         'remaining_count'=>max(0,$limit-$used),'duplicate'=>$duplicate,
         'blocked_until'=>(int)$row['blocked'] === 1 ? v1_release_iso_time($row['blocked_until']) : null,
+        'backend_binding_id'=>$backendBindingId,
     );
 }
 
@@ -1768,6 +1784,7 @@ function v1_dart_quota_validate_day($value): string {
 /** Read-only current-KST-day quota status for watchdogs and operators. */
 function v1_ops_dart_quota_status(PDO $pdo, array $config): void {
     $day = v1_dart_quota_validate_day($_GET['quota_day'] ?? '');
+    $backendBindingId = v1_backend_binding_id($pdo,$config);
     $stmt = $pdo->prepare('SELECT quota_day,limit_count,used_count,blocked,block_reason,blocked_until,blocked_by_attempt_id,'
         . 'blocked_at,updated_at FROM ' . table_name($config,'dart_quota_days') . ' WHERE quota_day=? LIMIT 1');
     $stmt->execute(array($day)); $row = $stmt->fetch();
@@ -1775,7 +1792,7 @@ function v1_ops_dart_quota_status(PDO $pdo, array $config): void {
         $row = array('quota_day'=>$day,'limit_count'=>10000,'used_count'=>0,'blocked'=>0,'block_reason'=>null,
             'blocked_until'=>null,'blocked_by_attempt_id'=>null,'blocked_at'=>null,'updated_at'=>null);
     }
-    $payload = v1_dart_quota_payload($row,'status',null,false);
+    $payload = v1_dart_quota_payload($row,'status',null,false,$backendBindingId);
     $payload['server_kst_date'] = v1_dart_quota_server_day();
     $payload['block_reason'] = $row['block_reason'];
     $payload['blocked_by_attempt_id'] = $row['blocked_by_attempt_id'];
@@ -1789,13 +1806,23 @@ function v1_ops_dart_quota_write(PDO $pdo, array $config): void {
     $payload = v1_admin_json_body($config);
     $action = isset($payload['action']) ? trim((string)$payload['action']) : '';
     $required = $action === 'consume'
-        ? array('action','attempt_id','quota_day','operation','code_revision')
-        : ($action === 'block_020' ? array('action','attempt_id','quota_day','reason','code_revision') : array());
+        ? array('action','attempt_id','quota_day','operation','code_revision','expected_backend_binding_id')
+        : ($action === 'block_020'
+            ? array('action','attempt_id','quota_day','reason','code_revision','expected_backend_binding_id')
+            : array());
     $keys = array_keys($payload); sort($keys,SORT_STRING); $expectedKeys = $required; sort($expectedKeys,SORT_STRING);
     if (!$required || $keys !== $expectedKeys) { v1_dart_quota_error(400,'invalid_request','exact_fields_required'); }
     $attemptId = trim((string)$payload['attempt_id']);
     $quotaDay = v1_dart_quota_validate_day($payload['quota_day']);
     $revision = strtolower(trim((string)$payload['code_revision']));
+    $expectedBackendBindingId = trim((string)$payload['expected_backend_binding_id']);
+    if (preg_match('/^[a-f0-9]{64}$/',$expectedBackendBindingId) !== 1) {
+        v1_dart_quota_error(400,'backend_binding_required');
+    }
+    $backendBindingId = v1_backend_binding_id($pdo,$config);
+    if (!hash_equals($backendBindingId,$expectedBackendBindingId)) {
+        v1_dart_quota_error(409,'backend_binding_mismatch');
+    }
     if (!v1_valid_entity_id($attemptId,96) || preg_match('/^[a-f0-9]{7,40}$/',$revision) !== 1) {
         v1_dart_quota_error(400,'invalid_request','attempt_or_revision');
     }
@@ -1831,7 +1858,7 @@ function v1_ops_dart_quota_write(PDO $pdo, array $config): void {
                     || !hash_equals((string)$attempt['consume_request_sha256'],$requestHash)) {
                     $pdo->rollBack(); v1_dart_quota_error(409,'dart_quota_idempotency_conflict');
                 }
-                $pdo->commit(); v1_respond(200,v1_dart_quota_payload($day,'consume',$attemptId,true));
+                $pdo->commit(); v1_respond(200,v1_dart_quota_payload($day,'consume',$attemptId,true,$backendBindingId));
             }
             if ((int)$day['blocked'] === 1) {
                 $retry = max(1,(int)(strtotime((string)$day['blocked_until'] . ' UTC')-time()));
@@ -1850,7 +1877,7 @@ function v1_ops_dart_quota_write(PDO $pdo, array $config): void {
             $update->execute(array($now,$quotaDay));
             if ($update->rowCount() !== 1) { throw new RuntimeException('dart_quota_atomic_consume_failed'); }
             $dayLookup->execute(array($quotaDay)); $day = $dayLookup->fetch();
-            $pdo->commit(); v1_respond(200,v1_dart_quota_payload($day,'consume',$attemptId,false));
+            $pdo->commit(); v1_respond(200,v1_dart_quota_payload($day,'consume',$attemptId,false,$backendBindingId));
         }
 
         if (!$attempt || (string)$attempt['quota_day'] !== $quotaDay || (string)$attempt['code_revision'] !== $revision
@@ -1864,7 +1891,7 @@ function v1_ops_dart_quota_write(PDO $pdo, array $config): void {
             if ((int)$day['blocked'] !== 1 || $day['blocked_until'] === null) {
                 throw new RuntimeException('dart_quota_block_integrity_error');
             }
-            $pdo->commit(); v1_respond(200,v1_dart_quota_payload($day,'block_020',$attemptId,true));
+            $pdo->commit(); v1_respond(200,v1_dart_quota_payload($day,'block_020',$attemptId,true,$backendBindingId));
         }
         $attemptUpdate = $pdo->prepare('UPDATE ' . table_name($config,'dart_quota_attempts')
             . ' SET block_request_sha256=?,status=\'blocked_020\',blocked_at=?,updated_at=? WHERE attempt_id=? AND block_request_sha256 IS NULL');
@@ -1876,7 +1903,7 @@ function v1_ops_dart_quota_write(PDO $pdo, array $config): void {
             . 'blocked_at=COALESCE(blocked_at,?),updated_at=? WHERE quota_day=?');
         $dayUpdate->execute(array($blockUntil,$attemptId,$now,$now,$quotaDay));
         $dayLookup->execute(array($quotaDay)); $day = $dayLookup->fetch();
-        $pdo->commit(); v1_respond(200,v1_dart_quota_payload($day,'block_020',$attemptId,false));
+        $pdo->commit(); v1_respond(200,v1_dart_quota_payload($day,'block_020',$attemptId,false,$backendBindingId));
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) { $pdo->rollBack(); }
         throw $e;
@@ -4050,6 +4077,312 @@ function v1_ops_official_run_ledger(PDO $pdo, array $config): void {
     ));
 }
 
+function v1_dart_review_corpus_cursor_encode(string $from, string $to, string $publishedAt,
+    string $documentId, string $eventId): string {
+    $raw = implode("\x1f",array('dart-review-corpus-v1',$from,$to,$publishedAt,$documentId,$eventId));
+    return rtrim(strtr(base64_encode($raw),'+/','-_'),'=');
+}
+
+function v1_dart_review_corpus_cursor_decode(string $cursor, string $from, string $to): ?array {
+    if ($cursor === '' || strlen($cursor) > 512 || preg_match('/^[A-Za-z0-9_-]+$/',$cursor) !== 1) { return null; }
+    $padding = strlen($cursor) % 4;
+    if ($padding !== 0) { $cursor .= str_repeat('=',4-$padding); }
+    $decoded = base64_decode(strtr($cursor,'-_','+/'),true);
+    if (!is_string($decoded)) { return null; }
+    $parts = explode("\x1f",$decoded);
+    if (count($parts) !== 6 || $parts[0] !== 'dart-review-corpus-v1' || $parts[1] !== $from || $parts[2] !== $to
+        || preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/',$parts[3]) !== 1
+        || preg_match('/^dart:[0-9]{14}$/',$parts[4]) !== 1 || !v1_valid_entity_id($parts[5],96)) {
+        return null;
+    }
+    return array($parts[3],$parts[4],$parts[5]);
+}
+
+function v1_dart_review_corpus_required_text(string $value, int $maxLength): bool {
+    return $value !== '' && mb_check_encoding($value,'UTF-8')
+        && mb_strlen($value,'UTF-8') <= $maxLength && preg_match('/\S/u',$value) === 1;
+}
+
+function v1_dart_review_corpus_token(string $value): bool {
+    return preg_match('/^[a-z][a-z0-9_.:\-]{0,63}$/',$value) === 1;
+}
+
+function v1_dart_review_corpus_https_url(string $value): bool {
+    if ($value === '' || strlen($value) > 65535 || preg_match('/[\x00-\x20\x7f]/',$value) === 1) {
+        return false;
+    }
+    $parts = parse_url($value);
+    return is_array($parts) && isset($parts['scheme'],$parts['host'])
+        && strtolower((string)$parts['scheme']) === 'https' && trim((string)$parts['host']) !== ''
+        && !isset($parts['user']) && !isset($parts['pass']) && !isset($parts['fragment']);
+}
+
+function v1_dart_review_corpus_item(array $row): array {
+    $externalId = (string)$row['external_id']; $documentId = (string)$row['document_id'];
+    $eventId = (string)$row['event_id']; $companyId = (string)$row['company_id'];
+    $companyName = (string)$row['company_name']; $eventType = (string)$row['event_type'];
+    $title = (string)$row['title']; $originalLanguage = (string)$row['original_language'];
+    $originalUrl = (string)$row['original_url'];
+    $eventVerification = (string)$row['event_verification_status'];
+    $documentVerification = (string)$row['document_verification_status'];
+    $documentPublication = (string)$row['document_publication_status'];
+    $identityStatus = (string)$row['identity_status']; $reviewStatus = (string)$row['review_status'];
+    $importance = (string)$row['importance'];
+    $publishedAt = v1_release_iso_time($row['published_at']);
+    $receiptDate = DateTimeImmutable::createFromFormat('!Ymd',substr($externalId,0,8),new DateTimeZone('UTC'));
+    if (preg_match('/^[0-9]{14}$/',$externalId) !== 1 || $documentId !== 'dart:' . $externalId
+        || !v1_valid_entity_id($eventId,96) || preg_match('/^[0-9]{8}$/',$companyId) !== 1 || $publishedAt === null
+        || !$receiptDate || $receiptDate->format('Ymd') !== substr($externalId,0,8)
+        || str_replace('-','',substr($publishedAt,0,10)) !== substr($externalId,0,8)
+        || (string)$row['source_right_id'] !== 'official:dart') {
+        throw new RuntimeException('dart_review_corpus_identity_error');
+    }
+    foreach (array($eventType,$eventVerification,$documentVerification,$documentPublication,
+        $identityStatus,$reviewStatus,$importance) as $token) {
+        if (!v1_dart_review_corpus_token($token)) {
+            throw new RuntimeException('dart_review_corpus_metadata_error');
+        }
+    }
+    if (!v1_dart_review_corpus_required_text($companyName,255)
+        || !v1_dart_review_corpus_required_text($title,700)
+        || preg_match('/^[a-z]{2,3}(?:-[A-Z]{2})?$/',$originalLanguage) !== 1
+        || !v1_dart_review_corpus_https_url($originalUrl)) {
+        throw new RuntimeException('dart_review_corpus_metadata_error');
+    }
+    $correctionOf = trim((string)($row['correction_of_document_id'] ?? ''));
+    if ($correctionOf !== '' && (preg_match('/^dart:[0-9]{14}$/',$correctionOf) !== 1
+        || $correctionOf === $documentId)) {
+        throw new RuntimeException('dart_review_corpus_lineage_error');
+    }
+    $versionNo = (int)$row['version_no'];
+    $hasLaterCorrection = (int)$row['has_later_correction'] === 1;
+    $hasSuccessor = (int)$row['has_successor'] === 1;
+    if ($versionNo < 1 || ($correctionOf !== '' && $versionNo < 2)
+        || ($correctionOf === '' && $versionNo !== 1)) {
+        throw new RuntimeException('dart_review_corpus_lineage_error');
+    }
+    $isCorrection = (int)$row['event_is_correction'] === 1 || $correctionOf !== '' || $versionNo > 1;
+    $isCancelled = (int)$row['event_is_cancelled'] === 1
+        || (string)$row['event_verification_status'] === 'withdrawn'
+        || (string)$row['document_verification_status'] === 'withdrawn'
+        || (string)$row['document_publication_status'] === 'withdrawn';
+    if ($isCancelled) {
+        $revisionStatus = $correctionOf !== '' ? 'withdrawal_linked' : 'withdrawal_unlinked';
+    } elseif ($isCorrection) {
+        $revisionStatus = $correctionOf !== '' ? 'correction_linked' : 'correction_unlinked';
+    } else {
+        $revisionStatus = ($hasLaterCorrection || $hasSuccessor) ? 'original_superseded' : 'current';
+    }
+    return array(
+        'document_id'=>$documentId,
+        'event_id'=>$eventId,
+        'company_id'=>$companyId,
+        'company_name'=>$companyName,
+        'event_type'=>$eventType,
+        'revision_status'=>$revisionStatus,
+        'external_id'=>$externalId,
+        'title'=>$title,
+        'original_language'=>$originalLanguage,
+        'original_url'=>$originalUrl,
+        'published_at'=>$publishedAt,
+        'source_right_id'=>(string)$row['source_right_id'],
+        'correction_of_document_id'=>$correctionOf === '' ? null : $correctionOf,
+        'version_no'=>$versionNo,
+        'has_later_correction'=>$hasLaterCorrection,
+        'has_successor'=>$hasSuccessor,
+        'is_correction'=>$isCorrection,
+        'is_cancelled'=>$isCancelled,
+        'event_verification_status'=>$eventVerification,
+        'document_verification_status'=>$documentVerification,
+        'document_publication_status'=>$documentPublication,
+        'identity_status'=>$identityStatus,
+        'review_status'=>$reviewStatus,
+        'importance'=>$importance,
+    );
+}
+
+/**
+ * Export the exact OpenDART review population without making it public.
+ *
+ * The full-range digest is independent of cursor and limit. Every target
+ * document must have exactly one event link and a matching company row;
+ * otherwise the complete corpus is rejected rather than silently sampled.
+ */
+function v1_ops_dart_review_corpus(PDO $pdo, array $config): void {
+    header('Cache-Control: private, no-store');
+    header('Vary: Authorization');
+    if (!isset($_GET['from']) || !isset($_GET['to'])) {
+        v1_respond(400,array('ok'=>false,'error'=>'dart_review_corpus_range_required'));
+    }
+    $from = v1_date_bound('from',''); $to = v1_date_bound('to','');
+    $kst = new DateTimeZone('Asia/Seoul'); $utc = new DateTimeZone('UTC');
+    $fromDate = new DateTimeImmutable($from,$kst); $toDate = new DateTimeImmutable($to,$kst);
+    $serverDate = (new DateTimeImmutable('now',$kst))->format('Y-m-d');
+    $rangeDays = (int)$fromDate->diff($toDate)->days;
+    if ($fromDate >= $toDate || $rangeDays < 1 || $rangeDays > 31) {
+        v1_respond(400,array('ok'=>false,'error'=>'dart_review_corpus_range_exceeds_31_days'));
+    }
+    if ($to > $serverDate) {
+        v1_respond(400,array('ok'=>false,'error'=>'dart_review_corpus_future_range'));
+    }
+    $limit = 100;
+    if (isset($_GET['limit'])) {
+        $rawLimit = trim((string)$_GET['limit']);
+        if (preg_match('/^[1-9][0-9]{0,2}$/',$rawLimit) !== 1 || (int)$rawLimit > 100) {
+            v1_respond(400,array('ok'=>false,'error'=>'invalid_limit'));
+        }
+        $limit = (int)$rawLimit;
+    }
+    $cursor = isset($_GET['cursor']) ? trim((string)$_GET['cursor']) : '';
+    $decodedCursor = $cursor === '' ? null : v1_dart_review_corpus_cursor_decode($cursor,$from,$to);
+    if ($cursor !== '' && $decodedCursor === null) {
+        v1_respond(400,array('ok'=>false,'error'=>'invalid_cursor'));
+    }
+    $startUtc = $fromDate->setTime(0,0,0)->setTimezone($utc)->format('Y-m-d H:i:s');
+    $endUtc = $toDate->setTime(0,0,0)->setTimezone($utc)->format('Y-m-d H:i:s');
+    $documents = table_name($config,'documents'); $eventDocuments = table_name($config,'event_documents');
+    $events = table_name($config,'governance_events'); $companies = table_name($config,'companies');
+    $params = array('official:dart','official_disclosure',$startUtc,$endUtc);
+    $backendBindingId = v1_backend_binding_id($pdo,$config);
+
+    $pdo->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+    $pdo->exec('SET TRANSACTION READ ONLY');
+    $pdo->beginTransaction();
+    try {
+        $integrity = $pdo->prepare('SELECT d.document_id,COUNT(ed.document_id) AS link_count,'
+            . 'SUM(CASE WHEN e.event_id IS NOT NULL THEN 1 ELSE 0 END) AS event_count,'
+            . 'SUM(CASE WHEN c.company_id IS NOT NULL THEN 1 ELSE 0 END) AS company_count,'
+            . 'SUM(CASE WHEN d.company_id=e.company_id THEN 1 ELSE 0 END) AS company_match_count '
+            . 'FROM ' . $documents . ' d LEFT JOIN ' . $eventDocuments . ' ed ON ed.document_id=d.document_id '
+            . 'LEFT JOIN ' . $events . ' e ON e.event_id=ed.event_id '
+            . 'LEFT JOIN ' . $companies . ' c ON c.company_id=e.company_id '
+            . 'WHERE d.source_right_id=? AND d.source_class=? AND d.published_at>=? AND d.published_at<? '
+            . 'GROUP BY d.document_id HAVING link_count<>1 OR event_count<>1 OR company_count<>1 OR company_match_count<>1 LIMIT 1');
+        $integrity->execute($params);
+        if ($integrity->fetch()) {
+            $pdo->rollBack();
+            v1_respond(503,array('ok'=>false,'error'=>'dart_review_corpus_integrity_error'));
+        }
+        $lineageIntegrity = $pdo->prepare('WITH RECURSIVE target_chain AS ('
+            . 'SELECT d.document_id,d.correction_of_document_id,d.company_id,d.source_right_id,d.source_class,'
+            . 'd.collection_key,d.version_no,d.external_id,d.published_at,d.retrieved_at,0 AS depth,'
+            . 'CAST(CONCAT(\',\',d.document_id,\',\') AS CHAR(8192)) AS lineage_path,0 AS cycle_detected '
+            . 'FROM ' . $documents . ' d WHERE d.source_right_id=? AND d.source_class=? '
+            . 'AND d.published_at>=? AND d.published_at<? UNION ALL '
+            . 'SELECT predecessor.document_id,predecessor.correction_of_document_id,predecessor.company_id,'
+            . 'predecessor.source_right_id,predecessor.source_class,predecessor.collection_key,'
+            . 'predecessor.version_no,predecessor.external_id,predecessor.published_at,predecessor.retrieved_at,'
+            . 'chain.depth+1,CONCAT(chain.lineage_path,predecessor.document_id,\',\'),'
+            . 'IF(LOCATE(CONCAT(\',\',predecessor.document_id,\',\'),chain.lineage_path)>0,1,0) '
+            . 'FROM ' . $documents . ' predecessor JOIN target_chain chain '
+            . 'ON predecessor.document_id=chain.correction_of_document_id '
+            . 'WHERE chain.correction_of_document_id IS NOT NULL AND chain.correction_of_document_id<>\'\' '
+            . 'AND chain.depth<64 AND chain.cycle_detected=0) '
+            . 'SELECT chain.document_id FROM target_chain chain '
+            . 'LEFT JOIN ' . $documents . ' predecessor ON predecessor.document_id=chain.correction_of_document_id '
+            . 'WHERE chain.cycle_detected=1 '
+            . 'OR (chain.depth>=64 AND chain.correction_of_document_id IS NOT NULL '
+            . 'AND chain.correction_of_document_id<>\'\') '
+            . 'OR (SELECT COUNT(*) FROM ' . $eventDocuments . ' current_link '
+            . 'WHERE current_link.document_id=chain.document_id)<>1 '
+            . 'OR (SELECT COUNT(*) FROM ' . $documents . ' successor '
+            . 'WHERE successor.correction_of_document_id=chain.document_id)>1 '
+            . 'OR (chain.correction_of_document_id IS NOT NULL AND chain.correction_of_document_id<>\'\' AND ('
+            . 'predecessor.document_id IS NULL OR predecessor.source_right_id<>chain.source_right_id '
+            . 'OR predecessor.source_class<>chain.source_class '
+            . 'OR NOT (predecessor.company_id<=>chain.company_id) '
+            . 'OR NOT (predecessor.collection_key<=>chain.collection_key) '
+            . 'OR predecessor.version_no+1<>chain.version_no '
+            . 'OR predecessor.external_id NOT REGEXP \'^[0-9]{14}$\' '
+            . 'OR chain.external_id NOT REGEXP \'^[0-9]{14}$\' '
+            . 'OR BINARY predecessor.external_id>=BINARY chain.external_id '
+            . 'OR COALESCE(predecessor.published_at,predecessor.retrieved_at)>'
+            . 'COALESCE(chain.published_at,chain.retrieved_at) '
+            . 'OR (SELECT COUNT(*) FROM ' . $documents . ' successor '
+            . 'WHERE successor.correction_of_document_id=predecessor.document_id)<>1 '
+            . 'OR NOT EXISTS(SELECT 1 FROM ' . $eventDocuments . ' current_link '
+            . 'JOIN ' . $eventDocuments . ' predecessor_link ON predecessor_link.event_id=current_link.event_id '
+            . 'WHERE current_link.document_id=chain.document_id '
+            . 'AND predecessor_link.document_id=predecessor.document_id))) LIMIT 1');
+        $lineageIntegrity->execute($params);
+        if ($lineageIntegrity->fetch()) {
+            $pdo->rollBack();
+            v1_respond(503,array('ok'=>false,'error'=>'dart_review_corpus_lineage_error'));
+        }
+        $stmt = $pdo->prepare('SELECT d.document_id,d.external_id,d.title,d.original_language,d.original_url,d.published_at,'
+            . 'd.source_right_id,d.correction_of_document_id,d.version_no,d.verification_status AS document_verification_status,'
+            . 'd.publication_status AS document_publication_status,ed.event_id,e.company_id,c.legal_name AS company_name,'
+            . 'e.event_type,e.verification_status AS event_verification_status,e.identity_status,e.review_status,e.importance,'
+            . 'CASE WHEN JSON_TYPE(JSON_EXTRACT(IF(JSON_VALID(d.payload_json),d.payload_json,\'{}\'),'
+            . '\'$.has_later_correction\'))=\'BOOLEAN\' AND JSON_UNQUOTE(JSON_EXTRACT('
+            . 'IF(JSON_VALID(d.payload_json),d.payload_json,\'{}\'),\'$.has_later_correction\'))=\'true\' '
+            . 'THEN 1 ELSE 0 END AS has_later_correction,'
+            . 'CASE WHEN JSON_TYPE(JSON_EXTRACT(IF(JSON_VALID(e.payload_json),e.payload_json,\'{}\'),'
+            . '\'$.is_correction\'))=\'BOOLEAN\' AND JSON_UNQUOTE(JSON_EXTRACT('
+            . 'IF(JSON_VALID(e.payload_json),e.payload_json,\'{}\'),\'$.is_correction\'))=\'true\' '
+            . 'THEN 1 ELSE 0 END AS event_is_correction,'
+            . 'CASE WHEN JSON_TYPE(JSON_EXTRACT(IF(JSON_VALID(e.payload_json),e.payload_json,\'{}\'),'
+            . '\'$.is_cancelled\'))=\'BOOLEAN\' AND JSON_UNQUOTE(JSON_EXTRACT('
+            . 'IF(JSON_VALID(e.payload_json),e.payload_json,\'{}\'),\'$.is_cancelled\'))=\'true\' '
+            . 'THEN 1 ELSE 0 END AS event_is_cancelled,'
+            . 'EXISTS(SELECT 1 FROM ' . $documents . ' successor WHERE successor.source_right_id=\'official:dart\' '
+            . 'AND successor.source_class=\'official_disclosure\' AND successor.document_id<>d.document_id '
+            . 'AND successor.correction_of_document_id=d.document_id) AS has_successor '
+            . 'FROM ' . $documents . ' d JOIN ' . $eventDocuments . ' ed ON ed.document_id=d.document_id '
+            . 'JOIN ' . $events . ' e ON e.event_id=ed.event_id JOIN ' . $companies . ' c ON c.company_id=e.company_id '
+            . 'WHERE d.source_right_id=? AND d.source_class=? AND d.published_at>=? AND d.published_at<? '
+            . 'ORDER BY d.published_at ASC,BINARY d.document_id ASC,BINARY e.event_id ASC');
+        $stmt->execute($params);
+        $hash = hash_init('sha256'); $populationCount = 0; $eligibleCount = 0; $pageItems = array();
+        foreach ($stmt as $row) {
+            $item = v1_dart_review_corpus_item($row); $populationCount++;
+            hash_update($hash,v1_strict_canonical_json_encode($item,'dart_review_corpus_encode_failed') . "\n");
+            $afterCursor = $decodedCursor === null || (string)$row['published_at'] > $decodedCursor[0]
+                || ((string)$row['published_at'] === $decodedCursor[0] && strcmp((string)$row['document_id'],$decodedCursor[1]) > 0)
+                || ((string)$row['published_at'] === $decodedCursor[0] && (string)$row['document_id'] === $decodedCursor[1]
+                    && strcmp((string)$row['event_id'],$decodedCursor[2]) > 0);
+            if (!$afterCursor) { continue; }
+            $eligibleCount++;
+            if (count($pageItems) < $limit) {
+                $item['_cursor_published_at'] = (string)$row['published_at'];
+                $pageItems[] = $item;
+            }
+        }
+        $corpusSha = hash_final($hash); $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        if (strpos($e->getMessage(),'dart_review_corpus_') === 0) {
+            v1_respond(503,array('ok'=>false,'error'=>$e->getMessage()));
+        }
+        throw $e;
+    }
+
+    do {
+        $hasMore = $eligibleCount > count($pageItems); $nextCursor = null;
+        if ($hasMore && count($pageItems) > 0) {
+            $last = $pageItems[count($pageItems)-1];
+            $nextCursor = v1_dart_review_corpus_cursor_encode($from,$to,$last['_cursor_published_at'],
+                (string)$last['document_id'],(string)$last['event_id']);
+        }
+        $items = array();
+        foreach ($pageItems as $item) { unset($item['_cursor_published_at']); $items[] = $item; }
+        $payload = array('ok'=>true,'contract_version'=>'dart-review-corpus-v1','range'=>array('from'=>$from,'to'=>$to),
+            'population_count'=>$populationCount,'corpus_sha256'=>$corpusSha,'backend_binding_id'=>$backendBindingId,
+            'items'=>$items,'next_cursor'=>$nextCursor);
+        $sized = $payload; $sized['api_version'] = 'v1';
+        $encoded = json_encode($sized,JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_string($encoded)) {
+            v1_respond(503,array('ok'=>false,'error'=>'dart_review_corpus_response_encode_failed'));
+        }
+        if (strlen($encoded) <= V1_RESPONSE_BUDGET_BYTES) { break; }
+        array_pop($pageItems);
+    } while (count($pageItems) > 0);
+    if ($eligibleCount > 0 && count($pageItems) === 0 && strlen($encoded) > V1_RESPONSE_BUDGET_BYTES) {
+        v1_respond(503,array('ok'=>false,'error'=>'dart_review_corpus_item_budget_exceeded'));
+    }
+    v1_respond(200,$payload);
+}
+
 function v1_ops_release_evidence(PDO $pdo, array $config): void {
     $kstNow = new DateTimeImmutable('now',new DateTimeZone('Asia/Seoul'));
     $to = v1_date_bound('to',$kstNow->format('Y-m-d'));
@@ -5869,7 +6202,7 @@ function upsert_official_site_snapshot(PDO $pdo, array $config, array $payload, 
 
 /**
  * HMAC action contract: ?action=upsert_governance_snapshot
- * payload={companies,documents,events,source_rights,run}.
+ * payload={companies,documents,events,source_rights,run,expected_backend_binding_id}.
  */
 function v1_official_completion_semantic_sha(array $run): string {
     $semantic = $run;
@@ -5953,6 +6286,15 @@ function v1_governance_snapshot_identity_conflict_code(Throwable $error): ?strin
 }
 
 function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): void {
+    $expectedBackendBindingId = isset($payload['expected_backend_binding_id'])
+        ? trim((string)$payload['expected_backend_binding_id']) : '';
+    if (preg_match('/^[a-f0-9]{64}$/',$expectedBackendBindingId) !== 1) {
+        respond(400,array('ok'=>false,'error'=>'backend_binding_required'));
+    }
+    $backendBindingId = v1_backend_binding_id($pdo,$config);
+    if (!hash_equals($backendBindingId,$expectedBackendBindingId)) {
+        respond(409,array('ok'=>false,'error'=>'backend_binding_mismatch'));
+    }
     $companies = isset($payload['companies']) && is_array($payload['companies']) ? $payload['companies'] : array();
     $documents = isset($payload['documents']) && is_array($payload['documents']) ? $payload['documents'] : array();
     $events = isset($payload['events']) && is_array($payload['events']) ? $payload['events'] : array();
@@ -6695,7 +7037,11 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
     if ($terminalCompletionFailure) {
         respond(409,array('ok'=>false,'error'=>'official_slot_completion_terminal_failure','upserted'=>$counts));
     }
-    respond(200, array('ok' => true, 'upserted' => $counts));
+    respond(200, array(
+        'ok' => true,
+        'upserted' => $counts,
+        'backend_binding_id' => $backendBindingId,
+    ));
 }
 
 function v1_editorial_reference_exists(PDO $pdo, array $config, string $table, string $primary, string $value): bool {

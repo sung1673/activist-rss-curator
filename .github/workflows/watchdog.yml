@@ -21,6 +21,7 @@ jobs:
       github.ref_name == github.event.repository.default_branch &&
       (
         github.event_name == 'workflow_dispatch' ||
+        vars.GOVERNANCE_PIPELINE_MODE == 'dart_canary' ||
         vars.GOVERNANCE_PIPELINE_MODE == 'shadow' ||
         vars.GOVERNANCE_PIPELINE_MODE == 'live' ||
         (vars.GOVERNANCE_PIPELINE_MODE == '' && vars.ENABLE_GOVERNANCE_SHADOW == 'true')
@@ -30,12 +31,30 @@ jobs:
     environment:
       name: governance-runtime
     steps:
+      - name: Initialize generic incident evidence
+        id: incident_evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/watchdog-generic-incident-report.md"
+          echo "report_path=$report" >> "$GITHUB_OUTPUT"
+          cat > "$report" <<'EOF'
+          # Governance pipeline watchdog
+
+          **INCIDENT**
+
+          The watchdog could not complete one or more setup, routing, or health checks.
+          Inspect this workflow run; no configured URL or credential was written to this report.
+          EOF
+
       - name: Checkout
+        id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
 
       - name: Verify immutable workflow revision
+        id: revision_guard
         shell: bash
         run: |
           set -euo pipefail
@@ -57,22 +76,43 @@ jobs:
           ENABLE_GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
         run: python -m curator.operation_mode --github-output "$GITHUB_OUTPUT"
 
+      - name: Validate operational API routing
+        id: api_routing
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/watchdog-routing-report.md"
+          echo "report_path=$report" >> "$GITHUB_OUTPUT"
+          cat > "$report" <<'EOF'
+          # Governance pipeline watchdog
+
+          **INCIDENT**
+
+          The watchdog could not complete its operational API routing or execution checks.
+          Inspect this workflow run; no configured URL or credential was written to this report.
+          EOF
+          python .github/scripts/validate-api-base-urls.py --github-env "$GITHUB_ENV"
+
       - name: Inspect ingest freshness and web availability
         id: health
         env:
-          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL }}
           BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
           WATCHDOG_MAX_INGEST_AGE_MINUTES: "90"
           WATCHDOG_GOVERNANCE_PAGES: ${{ steps.rollout.outputs.scheduled_governance_enabled }}
+          WATCHDOG_EXPECTED_OFFICIAL_SOURCES: ${{ steps.rollout.outputs.governance_pipeline_mode == 'dart_canary' && 'dart' || 'dart,kind' }}
         run: python .github/scripts/watchdog.py
 
       - name: Create, update, or resolve the incident issue
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          INCIDENT: ${{ steps.health.outputs.incident }}
-          REPORT_PATH: ${{ steps.health.outputs.report_path }}
+          INCIDENT: ${{ (steps.checkout.outcome == 'failure' || steps.revision_guard.outcome == 'failure' || steps.rollout.outcome == 'failure' || steps.api_routing.outcome == 'failure' || steps.health.outcome == 'failure' || steps.health.outputs.incident == 'true') && 'true' || 'false' }}
+          REPORT_PATH: ${{ steps.health.outputs.report_path || steps.api_routing.outputs.report_path || steps.incident_evidence.outputs.report_path }}
         shell: bash
         run: |
           set -euo pipefail
@@ -108,7 +148,16 @@ jobs:
           fi
 
       - name: Fail the workflow when an incident is active
-        if: steps.health.outputs.incident == 'true'
+        if: >-
+          always() &&
+          (
+            steps.api_routing.outcome == 'failure' ||
+            steps.checkout.outcome == 'failure' ||
+            steps.revision_guard.outcome == 'failure' ||
+            steps.rollout.outcome == 'failure' ||
+            steps.health.outcome == 'failure' ||
+            steps.health.outputs.incident == 'true'
+          )
         run: |
           echo "::error::Operations watchdog detected an active incident."
           exit 1

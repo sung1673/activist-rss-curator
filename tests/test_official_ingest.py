@@ -7,6 +7,9 @@ import pytest
 from curator import official_ingest
 
 
+BACKEND_BINDING_ID = "b" * 64
+
+
 def _set_scheduled_claim_env(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -43,11 +46,13 @@ def test_remote_sync_persists_one_final_failed_run_after_all_data_chunks(
     def fake_post(action: str, payload: dict[str, object], *, timeout: float) -> dict[str, object]:
         assert action == "upsert_governance_snapshot"
         assert timeout == 45.0
+        assert payload["expected_backend_binding_id"] == BACKEND_BINDING_ID
         calls.append(payload)
         if len(calls) == 2:
             return {"ok": False}
         return {
             "ok": True,
+            "backend_binding_id": BACKEND_BINDING_ID,
             "upserted": {
                 key: len(payload[key])
                 for key in ("companies", "documents", "events", "source_rights")
@@ -58,6 +63,7 @@ def test_remote_sync_persists_one_final_failed_run_after_all_data_chunks(
             },
         }
 
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", BACKEND_BINDING_ID)
     monkeypatch.setattr(official_ingest, "remote_api_configured", lambda: True)
     monkeypatch.setattr(official_ingest, "post_remote_action", fake_post)
     payload: dict[str, object] = {
@@ -111,9 +117,11 @@ def test_remote_sync_persists_explicit_zero_ack_for_selected_empty_sources(
         _action: str, payload: dict[str, object], *, timeout: float
     ) -> dict[str, object]:
         assert timeout == 45.0
+        assert payload["expected_backend_binding_id"] == BACKEND_BINDING_ID
         calls.append(payload)
         return {
             "ok": True,
+            "backend_binding_id": BACKEND_BINDING_ID,
             "upserted": {
                 key: len(payload[key])
                 for key in ("companies", "documents", "events", "source_rights")
@@ -121,6 +129,7 @@ def test_remote_sync_persists_explicit_zero_ack_for_selected_empty_sources(
             | {"source_rights_rejected": 0, "runs": int(bool(payload["run"]))},
         }
 
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", BACKEND_BINDING_ID)
     monkeypatch.setattr(official_ingest, "remote_api_configured", lambda: True)
     monkeypatch.setattr(official_ingest, "post_remote_action", fake_post)
 
@@ -163,9 +172,14 @@ def test_remote_sync_fails_closed_on_partial_or_rejected_ack(
         assert timeout == 45.0
         call_count += 1
         if call_count == 1:
-            return {"ok": True, "upserted": bad_upserted}
+            return {
+                "ok": True,
+                "backend_binding_id": BACKEND_BINDING_ID,
+                "upserted": bad_upserted,
+            }
         return {
             "ok": True,
+            "backend_binding_id": BACKEND_BINDING_ID,
             "upserted": {
                 "companies": 0,
                 "documents": 0,
@@ -176,6 +190,7 @@ def test_remote_sync_fails_closed_on_partial_or_rejected_ack(
             },
         }
 
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", BACKEND_BINDING_ID)
     monkeypatch.setattr(official_ingest, "remote_api_configured", lambda: True)
     monkeypatch.setattr(official_ingest, "post_remote_action", fake_post)
     summary = official_ingest.sync_governance_payload(
@@ -192,6 +207,106 @@ def test_remote_sync_fails_closed_on_partial_or_rejected_ack(
     assert summary["official_remote_failed"] == 1
     assert summary["official_remote_ack_mismatches"] == 1
     assert summary["official_remote_run_persisted"] == 1
+
+
+@pytest.mark.parametrize(
+    "acknowledged_binding_id",
+    (None, "c" * 64, "한" * 64),
+)
+def test_remote_governance_ack_requires_matching_backend_binding(
+    monkeypatch: pytest.MonkeyPatch,
+    acknowledged_binding_id: str | None,
+) -> None:
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", BACKEND_BINDING_ID)
+    payload: dict[str, object] = {
+        "companies": [],
+        "documents": [],
+        "events": [],
+        "source_rights": [],
+        "run": {},
+        "expected_backend_binding_id": BACKEND_BINDING_ID,
+    }
+    response: dict[str, object] = {
+        "ok": True,
+        "upserted": {
+            "companies": 0,
+            "documents": 0,
+            "events": 0,
+            "source_rights": 0,
+            "source_rights_rejected": 0,
+            "runs": 0,
+        },
+    }
+    if acknowledged_binding_id is not None:
+        response["backend_binding_id"] = acknowledged_binding_id
+
+    assert official_ingest._remote_acknowledges_payload(response, payload) is False
+
+
+def test_remote_sync_stops_after_backend_binding_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_post(
+        _action: str,
+        payload: dict[str, object],
+        *,
+        timeout: float,
+    ) -> dict[str, object]:
+        assert timeout == 45.0
+        calls.append(payload)
+        return {"ok": False, "error": "backend_binding_mismatch"}
+
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", BACKEND_BINDING_ID)
+    monkeypatch.setattr(official_ingest, "remote_api_configured", lambda: True)
+    monkeypatch.setattr(official_ingest, "post_remote_action", fake_post)
+
+    summary = official_ingest.sync_governance_payload(
+        {
+            "companies": [],
+            "documents": [
+                {"document_id": f"dart:{index}"}
+                for index in range(3_001)
+            ],
+            "events": [],
+            "source_rights": [],
+        },
+        run={"run_id": "run:binding-rejection", "status": "succeeded"},
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["expected_backend_binding_id"] == BACKEND_BINDING_ID
+    assert summary["official_remote_batches_attempted"] == 1
+    assert summary["official_remote_failed"] == 1
+    assert summary["official_remote_run_persisted"] == 0
+    assert summary["official_remote_ack_count"] == 0
+
+
+def test_remote_sync_rejects_invalid_backend_binding_before_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", "INVALID")
+    monkeypatch.setattr(official_ingest, "remote_api_configured", lambda: True)
+
+    def unexpected_post(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("invalid backend binding must block the network request")
+
+    monkeypatch.setattr(official_ingest, "post_remote_action", unexpected_post)
+
+    with pytest.raises(
+        official_ingest.GovernanceBackendBindingError,
+        match="64 lowercase hexadecimal",
+    ):
+        official_ingest.sync_governance_payload(
+            {
+                "companies": [],
+                "documents": [],
+                "events": [],
+                "source_rights": [],
+            },
+            run={"run_id": "run:invalid-binding", "status": "succeeded"},
+        )
 
 
 def test_required_kind_without_endpoint_fails_and_records_source_outcome(
@@ -773,6 +888,37 @@ def test_scheduled_run_without_durable_claim_fails_closed(
     monkeypatch.delenv("CURATOR_GITHUB_RUN_CREATED_AT", raising=False)
 
     with pytest.raises(ValueError, match="durable slot claim fields"):
+        official_ingest._run_provenance(
+            current=datetime(2026, 7, 16, tzinfo=timezone.utc),
+            idempotency_key=None,
+            company_master_sync=False,
+        )
+
+
+def test_unrelated_scheduled_workflow_without_official_cadence_is_manual(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "schedule")
+    monkeypatch.delenv("CURATOR_EVENT_SCHEDULE", raising=False)
+    monkeypatch.delenv("CURATOR_OFFICIAL_SLOT_CLAIM_ID", raising=False)
+
+    provenance = official_ingest._run_provenance(
+        current=datetime(2026, 7, 16, tzinfo=timezone.utc),
+        idempotency_key=None,
+        company_master_sync=False,
+    )
+
+    assert provenance["run_kind"] == "manual"
+    assert provenance["event_schedule"] is None
+
+
+def test_unknown_explicit_official_schedule_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "schedule")
+    monkeypatch.setenv("CURATOR_EVENT_SCHEDULE", "5,35 0-15,23 * * *")
+
+    with pytest.raises(ValueError, match="unknown event schedule"):
         official_ingest._run_provenance(
             current=datetime(2026, 7, 16, tzinfo=timezone.utc),
             idempotency_key=None,

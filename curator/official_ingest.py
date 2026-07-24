@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import re
@@ -42,6 +43,53 @@ from .shadow_engine import write_candidate_snapshot_from_events
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_BACKEND_BINDING_RE = re.compile(r"^[a-f0-9]{64}$")
+_BACKEND_BINDING_ERROR_CODES = {
+    "backend_binding_required",
+    "backend_binding_mismatch",
+    "backend_binding_unavailable",
+}
+
+
+class GovernanceBackendBindingError(RuntimeError):
+    """The signed write target cannot be bound to the expected MySQL backend."""
+
+
+def _required_backend_binding_id() -> str:
+    binding_id = os.environ.get("BSIDE_BACKEND_BINDING_ID", "").strip()
+    if _BACKEND_BINDING_RE.fullmatch(binding_id) is None:
+        raise GovernanceBackendBindingError(
+            "BSIDE_BACKEND_BINDING_ID must be 64 lowercase hexadecimal characters"
+        )
+    return binding_id
+
+
+def _response_binding_matches(
+    response: dict[str, object],
+    expected_binding_id: str,
+) -> bool:
+    acknowledged = response.get("backend_binding_id")
+    return bool(
+        isinstance(acknowledged, str)
+        and _BACKEND_BINDING_RE.fullmatch(acknowledged) is not None
+        and hmac.compare_digest(acknowledged, expected_binding_id)
+    )
+
+
+def _response_has_terminal_binding_failure(
+    response: dict[str, object],
+    expected_binding_id: str,
+) -> bool:
+    error = response.get("error")
+    error_code = (
+        str(error.get("code") or "")
+        if isinstance(error, dict)
+        else str(error or "")
+    )
+    return error_code in _BACKEND_BINDING_ERROR_CODES or (
+        response.get("ok") is True
+        and not _response_binding_matches(response, expected_binding_id)
+    )
 
 
 def _truthy_env(name: str) -> bool:
@@ -161,7 +209,11 @@ def _run_provenance(
             "claim_lag_seconds": None,
             "slot_claim_late": None,
         }
-    elif event_name == "schedule" or has_slot_claim:
+    # GITHUB_EVENT_NAME is job-wide ambient context. Other scheduled
+    # workflows (for example the legacy feed build) import and test this
+    # module without being an official-ingest invocation. Only the explicit
+    # official cadence or a durable slot claim may enter scheduled provenance.
+    elif (event_name == "schedule" and event_schedule != "") or has_slot_claim:
         if event_schedule not in INCREMENTAL_CRON_EXPRESSIONS:
             raise ValueError("scheduled official ingest has an unknown event schedule")
         required = {
@@ -304,7 +356,16 @@ def _remote_acknowledges_payload(
     after silent data loss.
     """
 
-    if response.get("ok") is not True:
+    expected_binding_id = os.environ.get("BSIDE_BACKEND_BINDING_ID", "").strip()
+    submitted_binding_id = payload.get("expected_backend_binding_id")
+    if (
+        response.get("ok") is not True
+        or _BACKEND_BINDING_RE.fullmatch(expected_binding_id) is None
+        or not isinstance(submitted_binding_id, str)
+        or _BACKEND_BINDING_RE.fullmatch(submitted_binding_id) is None
+        or not hmac.compare_digest(submitted_binding_id, expected_binding_id)
+        or not _response_binding_matches(response, expected_binding_id)
+    ):
         return False
     upserted = response.get("upserted")
     if not isinstance(upserted, dict):
@@ -341,6 +402,7 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
             "official_remote_raw_count": len(documents),
             "official_remote_ack_count": 0,
         }
+    expected_backend_binding_id = _required_backend_binding_id()
 
     # Event/document chunks stay aligned by document_id. Company master-only
     # chunks are sent first so foreign keys are available for later batches.
@@ -357,6 +419,7 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
         source: 0 for source in sorted(selected_sources)
     }
     covered_companies: set[str] = set()
+    terminal_binding_failure = False
     for index, document_chunk in enumerate(document_chunks):
         document_ids = {str(row.get("document_id") or "") for row in document_chunk}
         event_chunk = [
@@ -384,6 +447,10 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
             # returned, so an early partial failure cannot be hidden by a
             # successful final data chunk.
             "run": {},
+            # This value is inside the HMAC-signed JSON body. The PHP endpoint
+            # compares it with its own MySQL identity before beginTransaction,
+            # preventing a same-secret routing error from mutating another DB.
+            "expected_backend_binding_id": expected_backend_binding_id,
         }
         try:
             response = post_remote_action(
@@ -403,31 +470,45 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
             failed += 1
             if response.get("ok") is True:
                 ack_mismatches += 1
+            if _response_has_terminal_binding_failure(
+                response,
+                expected_backend_binding_id,
+            ):
+                terminal_binding_failure = True
+                break
 
     remaining = [row for company_id, row in company_by_id.items() if company_id not in covered_companies]
-    for company_chunk in _chunks(remaining):
-        attempted += 1
-        submitted = {
-            "companies": company_chunk,
-            "documents": [],
-            "events": [],
-            "source_rights": [],
-            "run": {},
-        }
-        try:
-            response = post_remote_action(
-                "upsert_governance_snapshot",
-                submitted,
-                timeout=45.0,
-            )
-        except Exception:  # noqa: BLE001 - continue so the final failed run can be persisted.
-            response = {"ok": False}
-        if _remote_acknowledges_payload(response, submitted):
-            synced += 1
-        else:
-            failed += 1
-            if response.get("ok") is True:
-                ack_mismatches += 1
+    if not terminal_binding_failure:
+        for company_chunk in _chunks(remaining):
+            attempted += 1
+            submitted = {
+                "companies": company_chunk,
+                "documents": [],
+                "events": [],
+                "source_rights": [],
+                "run": {},
+                "expected_backend_binding_id": expected_backend_binding_id,
+            }
+            try:
+                response = post_remote_action(
+                    "upsert_governance_snapshot",
+                    submitted,
+                    timeout=45.0,
+                )
+            except Exception:  # noqa: BLE001 - continue so the final failed run can be persisted.
+                response = {"ok": False}
+            if _remote_acknowledges_payload(response, submitted):
+                synced += 1
+            else:
+                failed += 1
+                if response.get("ok") is True:
+                    ack_mismatches += 1
+                if _response_has_terminal_binding_failure(
+                    response,
+                    expected_backend_binding_id,
+                ):
+                    terminal_binding_failure = True
+                    break
 
     final_run = dict(run)
     initial_error_count = _int_value(final_run.get("error_count"))
@@ -447,21 +528,23 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
         "events": [],
         "source_rights": [],
         "run": final_run,
+        "expected_backend_binding_id": expected_backend_binding_id,
     }
-    try:
-        run_response = post_remote_action(
-            "upsert_governance_snapshot",
-            final_payload,
-            timeout=45.0,
-        )
-    except Exception:  # noqa: BLE001 - the caller must fail when final status cannot be persisted.
-        run_response = {"ok": False}
-    if _remote_acknowledges_payload(run_response, final_payload):
-        run_persisted = 1
-    else:
-        failed += 1
-        if run_response.get("ok") is True:
-            ack_mismatches += 1
+    if not terminal_binding_failure:
+        try:
+            run_response = post_remote_action(
+                "upsert_governance_snapshot",
+                final_payload,
+                timeout=45.0,
+            )
+        except Exception:  # noqa: BLE001 - the caller must fail when final status cannot be persisted.
+            run_response = {"ok": False}
+        if _remote_acknowledges_payload(run_response, final_payload):
+            run_persisted = 1
+        else:
+            failed += 1
+            if run_response.get("ok") is True:
+                ack_mismatches += 1
     return {
         "official_remote_synced": synced,
         "official_remote_failed": failed,

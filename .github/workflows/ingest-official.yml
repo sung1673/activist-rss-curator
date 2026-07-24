@@ -175,13 +175,14 @@ jobs:
           BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          BSIDE_BACKEND_BINDING_ID: ${{ vars.BSIDE_BACKEND_BINDING_ID }}
           CURATOR_REQUIRE_DURABLE_DART_QUOTA: "1"
         shell: bash
         run: |
           set -euo pipefail
           bash .github/scripts/require-env.sh \
             DART_API_KEY ACTIVIST_API_URL ACTIVIST_API_SECRET \
-            BSIDE_API_BASE_URL BSIDE_OPS_TOKEN
+            BSIDE_API_BASE_URL BSIDE_OPS_TOKEN BSIDE_BACKEND_BINDING_ID
           if [[ "$GITHUB_EVENT_NAME" == "schedule" || -n "${CURATOR_OFFICIAL_SLOT_REPAIR_EXPECTED_AT:-}" ]]; then
             bash .github/scripts/require-env.sh \
               CURATOR_GITHUB_RUN_CREATED_AT CURATOR_EVENT_SCHEDULE
@@ -190,6 +191,7 @@ jobs:
             bash .github/scripts/require-env.sh \
               KIND_DISCLOSURE_ENDPOINT BSIDE_API_BASE_URL BSIDE_OPS_TOKEN
           fi
+          python .github/scripts/validate-api-base-urls.py --github-env "$GITHUB_ENV"
 
       - name: Claim oldest due official-ingest slot
         if: >-
@@ -222,6 +224,7 @@ jobs:
           BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          BSIDE_BACKEND_BINDING_ID: ${{ vars.BSIDE_BACKEND_BINDING_ID }}
           ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
           GITHUB_TOKEN: ${{ github.token }}
           CURATOR_SHADOW_ENGINE_OUTPUT_PATH: ${{ runner.temp }}/candidate-shadow/engine-output.json

@@ -731,6 +731,17 @@ def test_dart_and_kind_success_http_status_errors_do_not_echo_hostile_body() -> 
     assert secret not in str(kind_error.value)
 
 
+def test_dart_validated_error_status_never_echoes_hostile_message() -> None:
+    secret = "provider-secret-in-hostile-message"
+
+    with pytest.raises(OfficialSourceError) as captured:
+        parse_dart_list_payload({"status": "010", "message": secret})
+
+    rendered = str(captured.value)
+    assert rendered == "OpenDART list returned non-success status 010"
+    assert secret not in rendered
+
+
 def test_kind_http_error_never_exposes_authorization_token_or_response_body() -> None:
     secret = "kind-secret-token-that-must-not-leak"
 
