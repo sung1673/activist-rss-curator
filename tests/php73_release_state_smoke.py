@@ -2533,6 +2533,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
         "quota_day": quota_day,
         "reason": "opendart_status_020",
         "code_revision": "c" * 40,
+        "expected_backend_binding_id": expected_backend_binding,
     }
     blocked, _ = request_json(
         base_url,
