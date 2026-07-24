@@ -1407,9 +1407,10 @@ def run(base_url: str, mysql_container_id: str) -> None:
     )
     require(stale_checkpoint.get("error") == "backfill_checkpoint_version_conflict", repr(stale_checkpoint))
 
-    # Keep the synthetic evidence day clear of both the current claim boundary and
-    # the epoch reset boundary, including runs that straddle KST midnight.
-    kst_date = ((datetime.now(timezone.utc) + timedelta(hours=9)).date() - timedelta(days=2)).isoformat()
+    # Use the immediately preceding complete KST date so both observations stay
+    # safely inside the API's 48-hour acceptance window.  The next civil day's
+    # 00:00:59 observation is attributed to this date's final 23:56 cadence slot.
+    kst_date = ((datetime.now(timezone.utc) + timedelta(hours=9)).date() - timedelta(days=1)).isoformat()
     observed_at = f"{kst_date}T12:00:00+09:00"
     next_kst_date = (datetime.fromisoformat(kst_date) + timedelta(days=1)).date().isoformat()
     last_slot_observed_at = f"{next_kst_date}T00:00:59+09:00"
