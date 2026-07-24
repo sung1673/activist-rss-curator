@@ -217,6 +217,13 @@ def test_identity_ingest_is_fail_closed_and_creates_event_observations():
     assert "event_observation_document_missing:" in ingest
     assert "acknowledged_count" in ingest
     assert "code_revision" in ingest
+    assert "expected_backend_binding_id" in ingest
+    assert "backend_binding_required" in ingest
+    assert "backend_binding_mismatch" in ingest
+    assert ingest.index("hash_equals($backendBindingId,$expectedBackendBindingId)") < ingest.index(
+        "$pdo->beginTransaction()"
+    )
+    assert "'backend_binding_id' => $backendBindingId" in ingest
 
 
 def test_ops_observation_checkpoint_and_evidence_contracts_are_private_and_bounded():
@@ -1745,6 +1752,140 @@ def test_official_run_ledger_is_slot_attributed_and_python_digest_compatible():
     assert "in_array($source,$selectedSources,true)" in section
 
 
+def test_dart_review_corpus_is_private_exact_bounded_and_digest_compatible():
+    spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    assert spec["info"]["version"] == "1.11.0"
+    assert spec["x-changelog"][0]["version"] == "1.11.0"
+    route = spec["paths"]["/ops/dart-review-corpus"]["get"]
+    assert route["security"] == [{"bearerAuth": []}]
+    response = spec["components"]["schemas"]["DartReviewCorpusPage"]
+    assert response["additionalProperties"] is False
+    assert set(response["required"]) == {
+        "ok",
+        "contract_version",
+        "range",
+        "population_count",
+        "corpus_sha256",
+        "backend_binding_id",
+        "items",
+        "next_cursor",
+        "api_version",
+    }
+    assert set(response["properties"]) == set(response["required"])
+    item = spec["components"]["schemas"]["DartReviewCorpusItem"]
+    expected_item_keys = {
+        "document_id",
+        "event_id",
+        "company_id",
+        "company_name",
+        "event_type",
+        "revision_status",
+        "external_id",
+        "title",
+        "original_language",
+        "original_url",
+        "published_at",
+        "source_right_id",
+        "correction_of_document_id",
+        "version_no",
+        "has_later_correction",
+        "has_successor",
+        "is_correction",
+        "is_cancelled",
+        "event_verification_status",
+        "document_verification_status",
+        "document_publication_status",
+        "identity_status",
+        "review_status",
+        "importance",
+    }
+    assert item["additionalProperties"] is False
+    assert set(item["required"]) == expected_item_keys
+    assert set(item["properties"]) == expected_item_keys
+    assert item["properties"]["source_right_id"]["const"] == "official:dart"
+    assert item["properties"]["company_name"]["pattern"] == r".*\S.*"
+    assert item["properties"]["title"]["pattern"] == r".*\S.*"
+    assert (
+        item["properties"]["original_language"]["pattern"]
+        == r"^[a-z]{2,3}(?:-[A-Z]{2})?$"
+    )
+    assert item["properties"]["original_url"]["pattern"].endswith("://")
+    for field in (
+        "event_type",
+        "event_verification_status",
+        "document_verification_status",
+        "document_publication_status",
+        "identity_status",
+        "review_status",
+        "importance",
+    ):
+        assert item["properties"][field]["pattern"] == r"^[a-z][a-z0-9_.:\-]{0,63}$"
+
+    dispatch = V1[
+        V1.index("function handle_v1_request") : V1.index("function v1_serve_openapi")
+    ]
+    assert "'/ops/dart-review-corpus'" in dispatch
+    assert dispatch.index("$preauthorizedRole = v1_require_role") < dispatch.index(
+        "$privileged = strpos($path, '/ops/')"
+    )
+    section = V1[
+        V1.index("function v1_dart_review_corpus_cursor_encode")
+        : V1.index("function v1_ops_release_evidence")
+    ]
+    assert "source_right_id=?" in section
+    assert "array('official:dart','official_disclosure',$startUtc,$endUtc)" in section
+    assert "d.published_at>=? AND d.published_at<?" in section
+    assert "ORDER BY d.published_at ASC,BINARY d.document_id ASC,BINARY e.event_id ASC" in section
+    assert "COUNT(ed.document_id) AS link_count" in section
+    assert "company_match_count<>1" in section
+    assert "dart_review_corpus_integrity_error" in section
+    assert "WITH RECURSIVE target_chain" in section
+    assert "dart_review_corpus_lineage_error" in section
+    assert "predecessor.version_no+1<>chain.version_no" in section
+    assert "predecessor.collection_key<=>chain.collection_key" in section
+    assert "successor.correction_of_document_id=predecessor.document_id" in section
+    assert "chain.cycle_detected=1" in section
+    assert "v1_strict_canonical_json_encode($item" in section
+    assert "hash_update($hash" in section and ' . "\\n"' in section
+    assert "V1_RESPONSE_BUDGET_BYTES" in section
+    assert "dart-review-corpus-v1" in section
+    assert "Asia/Seoul" in section
+    assert "$to > $serverDate" in section
+    assert "$rangeDays > 31" in section
+    assert "JSON_VALID(d.payload_json)" in section
+    assert "$.has_later_correction" in section
+    assert "JSON_VALID(e.payload_json)" in section
+    assert "$.is_correction" in section
+    assert "$.is_cancelled" in section
+    assert "'payload_json'=>" not in section
+    assert "'has_later_correction'=>$hasLaterCorrection" in section
+    assert "'has_successor'=>$hasSuccessor" in section
+    assert "$isCorrection = (int)$row['event_is_correction'] === 1" in section
+    assert "$isCancelled = (int)$row['event_is_cancelled'] === 1" in section
+    assert "$correctionOf === $documentId" in section
+    assert "successor.document_id<>d.document_id" in section
+    assert "createFromFormat('!Ymd',substr($externalId,0,8)" in section
+    assert "str_replace('-','',substr($publishedAt,0,10))" in section
+    assert "v1_dart_review_corpus_required_text($companyName,255)" in section
+    assert "v1_dart_review_corpus_required_text($title,700)" in section
+    assert "/^[a-z]{2,3}(?:-[A-Z]{2})?$/" in section
+    assert "v1_dart_review_corpus_https_url($originalUrl)" in section
+    assert "v1_dart_review_corpus_token($token)" in section
+    assert "dart_review_corpus_metadata_error" in section
+    assert "Cache-Control: private, no-store" in section
+    assert "'backend_binding_id'=>$backendBindingId" in section
+    assert response["properties"]["backend_binding_id"]["pattern"] == "^[a-f0-9]{64}$"
+    for status in (
+        "withdrawal_linked",
+        "withdrawal_unlinked",
+        "correction_linked",
+        "correction_unlinked",
+        "original_superseded",
+        "current",
+    ):
+        assert status in section
+
+
 def test_health_accepts_only_complete_acknowledged_scheduled_runs_and_reports_deployment():
     section = V1[V1.index("function v1_ops_health") : V1.index("function v1_kind_source_right_eligibility")]
     assert "v1_official_scheduled_run_matches($ledger)" in section
@@ -1757,6 +1898,19 @@ def test_health_accepts_only_complete_acknowledged_scheduled_runs_and_reports_de
 def test_dart_quota_is_global_kst_day_atomic_and_idempotent():
     spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
     assert {"get", "post"} <= spec["paths"]["/ops/dart-quota"].keys()
+    assert (
+        "expected_backend_binding_id"
+        in spec["components"]["schemas"]["DartQuotaConsumeRequest"]["required"]
+    )
+    assert (
+        "expected_backend_binding_id"
+        in spec["components"]["schemas"]["DartQuotaBlockRequest"]["required"]
+    )
+    assert "backend_binding_id" in spec["components"]["schemas"]["DartQuotaStatus"]["required"]
+    assert (
+        "backend_binding_id"
+        in spec["components"]["schemas"]["DartQuotaAcknowledgement"]["required"]
+    )
     assert "activist_dart_quota_days" in DART_QUOTA_MIGRATION
     assert "activist_dart_quota_attempts" in DART_QUOTA_MIGRATION
     section = V1[V1.index("function v1_dart_quota_server_day") : V1.index("function v1_ops_official_site_candidates")]
@@ -1767,6 +1921,18 @@ def test_dart_quota_is_global_kst_day_atomic_and_idempotent():
     assert "opendart_status_020" in section
     assert "COALESCE(blocked_until,?)" in section
     assert "'accepted'=>$action === 'status' ? 0 : 1" in section
+    assert "SELECT @@server_uuid AS server_uuid,DATABASE() AS database_name" in section
+    assert '"mysql8\\n"' in section
+    binding_check = section.index(
+        "if (!hash_equals($backendBindingId,$expectedBackendBindingId))"
+    )
+    transaction_start = section.index("$pdo->beginTransaction()")
+    assert binding_check < transaction_start
+    assert "backend_binding_required" in section
+    assert "backend_binding_mismatch" in section
+    assert "'backend_binding_id'=>$backendBindingId" in section
+    assert "'server_uuid'=>" not in section
+    assert "'database_name'=>" not in section
 
 
 def test_official_slot_claims_use_durable_global_oldest_identity_and_epoch_guard():

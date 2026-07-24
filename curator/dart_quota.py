@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -19,7 +20,13 @@ import httpx
 KST = ZoneInfo("Asia/Seoul")
 DART_DAILY_LIMIT = 10_000
 _REVISION_RE = re.compile(r"^[0-9a-f]{7,40}$")
+_BACKEND_BINDING_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_COMPONENT_RE = re.compile(r"[^0-9A-Za-z_.-]+")
+_DNS_HOST_RE = re.compile(
+    r"(?=.{1,253}\Z)"
+    r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
+    r"[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?"
+)
 
 
 class DartQuotaLedgerError(RuntimeError):
@@ -43,22 +50,43 @@ def _validated_api_base_url(raw: str) -> str:
     value = raw.strip()
     if not value:
         return ""
-    parsed = urlsplit(value)
     if (
-        parsed.scheme != "https"
-        or not parsed.netloc
+        any(ord(character) <= 32 or ord(character) == 127 for character in value)
+        or "\\" in value
+        or "%" in value
+    ):
+        raise DartQuotaLedgerError(
+            "DART quota API base URL contains an unsafe URL character"
+        )
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise DartQuotaLedgerError("DART quota API base URL is invalid") from exc
+    hostname = (parsed.hostname or "").casefold()
+    if (
+        parsed.scheme.casefold() != "https"
+        or not hostname
         or parsed.username is not None
         or parsed.password is not None
         or parsed.query
         or parsed.fragment
+        or _DNS_HOST_RE.fullmatch(hostname) is None
+        or port not in (None, 443)
     ):
         raise DartQuotaLedgerError(
-            "DART quota API base URL must be absolute HTTPS without credentials, query, or fragment"
+            "DART quota API base URL must use credential-free canonical HTTPS"
         )
     path = parsed.path.rstrip("/")
-    if not path.endswith("/api/v1"):
-        path += "/api/v1"
-    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+    segments = path.split("/")
+    if (
+        not path.startswith("/")
+        or not path.endswith("/api/v1")
+        or "//" in path
+        or any(segment in {".", ".."} for segment in segments)
+    ):
+        raise DartQuotaLedgerError("DART quota API base URL must end with /api/v1")
+    return urlunsplit(("https", hostname, path, "", ""))
 
 
 def dart_quota_api_base_url() -> str:
@@ -70,6 +98,10 @@ def dart_quota_api_base_url() -> str:
 
 def dart_quota_api_token() -> str:
     return os.environ.get("BSIDE_OPS_TOKEN", "").strip()
+
+
+def dart_quota_backend_binding_id() -> str:
+    return os.environ.get("BSIDE_BACKEND_BINDING_ID", "").strip()
 
 
 def durable_dart_quota_required() -> bool:
@@ -90,6 +122,7 @@ def durable_dart_quota_configured() -> bool:
         os.environ.get("BSIDE_API_BASE_URL", "").strip()
         or os.environ.get("GOVERNANCE_API_BASE_URL", "").strip()
         or os.environ.get("BSIDE_OPS_TOKEN", "").strip()
+        or os.environ.get("BSIDE_BACKEND_BINDING_ID", "").strip()
     )
 
 
@@ -151,6 +184,7 @@ class DartQuotaClient:
         *,
         base_url: str | None = None,
         token: str | None = None,
+        backend_binding_id: str | None = None,
         code_revision: str | None = None,
         phase: str = "official-ingest",
         timeout: float = 10.0,
@@ -166,16 +200,29 @@ class DartQuotaClient:
             base_url if base_url is not None else dart_quota_api_base_url()
         ).rstrip("/")
         self.token = (token if token is not None else dart_quota_api_token()).strip()
-        revision = (code_revision if code_revision is not None else _code_revision()).strip().casefold()
-        if not self.base_url or not self.token:
+        binding_id = (
+            backend_binding_id
+            if backend_binding_id is not None
+            else dart_quota_backend_binding_id()
+        ).strip()
+        revision = (
+            code_revision if code_revision is not None else _code_revision()
+        ).strip().casefold()
+        if not self.base_url or not self.token or not binding_id:
             raise DartQuotaLedgerError(
-                "durable DART quota requires BSIDE_API_BASE_URL and BSIDE_OPS_TOKEN"
+                "durable DART quota requires BSIDE_API_BASE_URL, BSIDE_OPS_TOKEN, "
+                "and BSIDE_BACKEND_BINDING_ID"
+            )
+        if not _BACKEND_BINDING_RE.fullmatch(binding_id):
+            raise DartQuotaLedgerError(
+                "BSIDE_BACKEND_BINDING_ID must be 64 lowercase hexadecimal characters"
             )
         if not _REVISION_RE.fullmatch(revision):
             raise DartQuotaLedgerError("DART quota code_revision must be 7-40 lowercase hex")
         if timeout <= 0 or max_ack_retries < 0 or backoff_seconds < 0:
             raise ValueError("invalid DART quota retry configuration")
         self.code_revision = revision
+        self.backend_binding_id = binding_id
         self.phase = _clean_component(phase, fallback="dart")
         self.timeout = timeout
         self.max_ack_retries = max_ack_retries
@@ -284,6 +331,7 @@ class DartQuotaClient:
         action: str,
         attempt_id: str,
         quota_day: str,
+        backend_binding_id: str,
         require_blocked_until: bool,
     ) -> DartQuotaPermit:
         if payload.get("ok") is not True or payload.get("accepted") != 1:
@@ -294,6 +342,15 @@ class DartQuotaClient:
             raise DartQuotaLedgerError("DART quota API acknowledged a different attempt_id")
         if payload.get("quota_day") != quota_day:
             raise DartQuotaLedgerError("DART quota API acknowledged a different quota_day")
+        acknowledged_binding_id = payload.get("backend_binding_id")
+        if (
+            not isinstance(acknowledged_binding_id, str)
+            or _BACKEND_BINDING_RE.fullmatch(acknowledged_binding_id) is None
+            or not hmac.compare_digest(acknowledged_binding_id, backend_binding_id)
+        ):
+            raise DartQuotaLedgerError(
+                "DART quota API backend binding acknowledgment does not match"
+            )
         limit = payload.get("limit_count")
         used = payload.get("used_count")
         remaining = payload.get("remaining_count")
@@ -333,6 +390,7 @@ class DartQuotaClient:
             "quota_day": quota_day,
             "operation": operation,
             "code_revision": self.code_revision,
+            "expected_backend_binding_id": self.backend_binding_id,
         }
         payload = self._post_with_idempotent_retry(body)
         permit = self._validate_ack(
@@ -340,6 +398,7 @@ class DartQuotaClient:
             action="consume",
             attempt_id=attempt_id,
             quota_day=quota_day,
+            backend_binding_id=self.backend_binding_id,
             require_blocked_until=False,
         )
         self.used += 1
@@ -354,6 +413,7 @@ class DartQuotaClient:
             "quota_day": permit.quota_day,
             "reason": "opendart_status_020",
             "code_revision": self.code_revision,
+            "expected_backend_binding_id": self.backend_binding_id,
         }
         payload = self._post_with_idempotent_retry(body)
         self._validate_ack(
@@ -361,6 +421,7 @@ class DartQuotaClient:
             action="block_020",
             attempt_id=permit.attempt_id,
             quota_day=permit.quota_day,
+            backend_binding_id=self.backend_binding_id,
             require_blocked_until=True,
         )
 

@@ -20,6 +20,7 @@ ADMIN_TOKEN = "php73-ci-admin-token-00000000000000000000"
 PREVIEW_TOKEN = "php73-ci-preview-token-000000000000000000"
 API_SECRET = b"php73-ci-only-hmac-key-00000000000000000000000000000000"
 KST = timezone(timedelta(hours=9))
+EXPECTED_BACKEND_BINDING_ID = ""
 
 
 class SmokeFailure(RuntimeError):
@@ -65,6 +66,16 @@ def mysql_execute(container_id: str, sql: str) -> str:
         text=True,
     )
     return result.stdout.strip()
+
+
+def mysql_backend_binding_id(container_id: str) -> str:
+    server_uuid, database_name = mysql_execute(
+        container_id,
+        "SELECT LOWER(@@server_uuid),DATABASE()",
+    ).split("\t")
+    return hashlib.sha256(
+        f"mysql8\n{server_uuid}\n{database_name}\nci_".encode()
+    ).hexdigest()
 
 
 def official_slots_for_kst_day(local_day: datetime) -> list[datetime]:
@@ -330,7 +341,21 @@ def request_hmac_action(
     *,
     expected_status: int,
 ) -> dict[str, Any]:
-    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    signed_payload = dict(payload)
+    if action == "upsert_governance_snapshot":
+        require(
+            len(EXPECTED_BACKEND_BINDING_ID) == 64,
+            "CI backend binding must be initialized before governance HMAC writes",
+        )
+        signed_payload.setdefault(
+            "expected_backend_binding_id",
+            EXPECTED_BACKEND_BINDING_ID,
+        )
+    body = json.dumps(
+        signed_payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
     timestamp = str(int(time.time()))
     nonce = f"release-smoke-{action}-{time.time_ns()}"
     signature = hmac.new(
@@ -797,6 +822,13 @@ def event_identity_comparison_key(
 def exercise_event_identity_datetime_storage(
     base_url: str, mysql_container_id: str
 ) -> None:
+    server_uuid, database_name = mysql_execute(
+        mysql_container_id,
+        "SELECT LOWER(@@server_uuid),DATABASE()",
+    ).split("\t", 1)
+    expected_backend_binding = hashlib.sha256(
+        f"mysql8\n{server_uuid}\n{database_name}\nci_".encode()
+    ).hexdigest()
     company_id = "00999991"
     event_type = "shareholder_proposal"
     action = "submit"
@@ -955,6 +987,7 @@ def exercise_event_identity_datetime_storage(
     )
     require(
         first.get("ok") is True
+        and first.get("backend_binding_id") == expected_backend_binding
         and first.get("upserted", {}).get("events") == 1
         and first.get("upserted", {}).get("event_observations") == 1,
         repr(first),
@@ -964,6 +997,7 @@ def exercise_event_identity_datetime_storage(
     )
     require(
         replay.get("ok") is True
+        and replay.get("backend_binding_id") == expected_backend_binding
         and replay.get("upserted", {}).get("events") == 1
         and replay.get("upserted", {}).get("event_observations") == 1,
         repr(replay),
@@ -1133,7 +1167,480 @@ def exercise_event_identity_datetime_storage(
     )
 
 
+def exercise_dart_review_corpus(base_url: str, mysql_container_id: str) -> None:
+    company_id = "00999992"
+    server_uuid, database_name = mysql_execute(
+        mysql_container_id, "SELECT LOWER(@@server_uuid),DATABASE()"
+    ).split("\t")
+    expected_backend_binding = hashlib.sha256(
+        f"mysql8\n{server_uuid}\n{database_name}\nci_".encode()
+    ).hexdigest()
+    to_day = datetime.now(KST).date()
+    from_day = to_day - timedelta(days=1)
+    receipt_date = from_day.strftime("%Y%m%d")
+    external_ids = tuple(
+        f"{receipt_date}{999101 + index:06d}"
+        for index in range(5)
+    )
+    document_ids = tuple(
+        ("dart:" if index < 4 else "kind:") + external_id
+        for index, external_id in enumerate(external_ids)
+    )
+    event_ids = (
+        "event:dart-corpus-original",
+        "event:dart-corpus-correction",
+        "event:dart-corpus-withdrawal",
+        "event:dart-corpus-unlinked-correction",
+        "event:dart-corpus-kind-control",
+    )
+    from_text = from_day.isoformat()
+    to_text = to_day.isoformat()
+    published = [
+        datetime.combine(from_day, datetime.min.time(), KST)
+        .replace(hour=10 + index)
+        .astimezone(timezone.utc)
+        .strftime("%Y-%m-%d %H:%M:%S")
+        for index in range(5)
+    ]
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    sql = (
+        "DELETE FROM ci_event_documents WHERE event_id IN "
+        f"('{event_ids[0]}','{event_ids[1]}','{event_ids[2]}','{event_ids[3]}',"
+        f"'{event_ids[4]}');"
+        "DELETE FROM ci_documents WHERE document_id IN "
+        f"('{document_ids[0]}','{document_ids[1]}','{document_ids[2]}',"
+        f"'{document_ids[3]}','{document_ids[4]}');"
+        "DELETE FROM ci_governance_events WHERE event_id IN "
+        f"('{event_ids[0]}','{event_ids[1]}','{event_ids[2]}','{event_ids[3]}',"
+        f"'{event_ids[4]}');"
+        f"DELETE FROM ci_companies WHERE company_id='{company_id}';"
+        "INSERT INTO ci_companies "
+        "(company_id,stock_code,market,legal_name,record_status,listing_status,created_at,updated_at) VALUES "
+        f"('{company_id}','999992','KOSDAQ','CI DART Corpus Corp','active','listed','{now}','{now}');"
+    )
+    for index, event_id in enumerate(event_ids):
+        source = "kind" if index == 4 else "dart"
+        event_payload = json.dumps(
+            {
+                "is_correction": index in {1, 3},
+                "is_cancelled": index == 2,
+            },
+            separators=(",", ":"),
+        )
+        sql += (
+            "INSERT INTO ci_governance_events "
+            "(event_id,company_id,event_type,title,original_language,occurred_at,importance,"
+            "verification_status,review_status,publication_status,collection_key,identity_status,"
+            "payload_json,created_at,updated_at) VALUES "
+            f"('{event_id}','{company_id}','shareholder_proposal','CI {source} corpus event',"
+            f"'ko','{published[index]}','normal','official','pending','draft','ci-corpus','complete',"
+            f"'{event_payload}','{now}','{now}');"
+        )
+    titles = (
+        "CI original filing",
+        "CI linked corrected filing",
+        "CI withdrawn filing",
+        "CI unlinked corrected filing",
+        "CI KIND control filing",
+    )
+    for index, document_id in enumerate(document_ids):
+        source_right = "official:kind" if index == 4 else "official:dart"
+        source_url = "kind" if index == 4 else "dart"
+        correction = (
+            f"'{document_ids[0]}'" if index == 1 else "NULL"
+        )
+        version = 2 if index == 1 else 1
+        document_payload = json.dumps(
+            {"has_later_correction": index in {0, 1}},
+            separators=(",", ":"),
+        )
+        content_hash = hashlib.sha256(
+            f"{titles[index]}:{external_ids[index]}".encode("utf-8")
+        ).hexdigest()
+        sql += (
+            "INSERT INTO ci_documents "
+            "(document_id,company_id,source_right_id,source_class,external_id,document_type,"
+            "original_language,title,original_url,content_hash,collection_key,"
+            "correction_of_document_id,version_no,published_at,retrieved_at,verification_status,"
+            "publication_status,payload_json,created_at,updated_at) VALUES "
+            f"('{document_id}','{company_id}','{source_right}','official_disclosure',"
+            f"'{external_ids[index]}','shareholder_proposal','ko','{titles[index]}',"
+            f"'https://example.com/{source_url}/{external_ids[index]}','{content_hash}',"
+            f"'ci-corpus',{correction},{version},'{published[index]}','{now}',"
+            f"'official','published','{document_payload}','{now}','{now}');"
+        )
+        sql += (
+            "INSERT INTO ci_event_documents "
+            "(event_id,document_id,relation_type,position_no,created_at) VALUES "
+            f"('{event_ids[0] if index == 1 else event_ids[index]}',"
+            f"'{document_id}','evidence',0,'{now}');"
+        )
+    mysql_execute(mysql_container_id, sql)
+
+    path = (
+        "api.php/api/v1/ops/dart-review-corpus?"
+        + urllib.parse.urlencode({"from": from_text, "to": to_text, "limit": 100})
+    )
+    unauthorized, _ = request_json(base_url, path, expected_status=401)
+    require(unauthorized.get("error") == "bearer_token_required", repr(unauthorized))
+    full, headers = request_json(base_url, path, token=ADMIN_TOKEN)
+    expected_top_keys = {
+        "ok",
+        "contract_version",
+        "range",
+        "population_count",
+        "corpus_sha256",
+        "backend_binding_id",
+        "items",
+        "next_cursor",
+        "api_version",
+    }
+    expected_item_keys = {
+        "document_id",
+        "event_id",
+        "company_id",
+        "company_name",
+        "event_type",
+        "revision_status",
+        "external_id",
+        "title",
+        "original_language",
+        "original_url",
+        "published_at",
+        "source_right_id",
+        "correction_of_document_id",
+        "version_no",
+        "has_later_correction",
+        "has_successor",
+        "is_correction",
+        "is_cancelled",
+        "event_verification_status",
+        "document_verification_status",
+        "document_publication_status",
+        "identity_status",
+        "review_status",
+        "importance",
+    }
+    items = full.get("items")
+    require(set(full) == expected_top_keys, repr(full))
+    require(
+        full.get("ok") is True
+        and full.get("contract_version") == "dart-review-corpus-v1"
+        and full.get("api_version") == "v1"
+        and full.get("range") == {"from": from_text, "to": to_text}
+        and full.get("population_count") == 4
+        and full.get("backend_binding_id") == expected_backend_binding
+        and isinstance(items, list)
+        and len(items) == 4
+        and full.get("next_cursor") is None,
+        repr(full),
+    )
+    require(
+        int(headers.get("X-Response-Bytes", "250001")) <= 250000,
+        repr(headers),
+    )
+    require(
+        "no-store" in headers.get("Cache-Control", "").lower(),
+        repr(headers),
+    )
+    require(
+        all(
+            set(item) == expected_item_keys
+            and item.get("source_right_id") == "official:dart"
+            and str(item.get("document_id", "")).startswith("dart:")
+            for item in items
+        ),
+        repr(items),
+    )
+    ordered = sorted(
+        items,
+        key=lambda item: (
+            str(item["published_at"]),
+            str(item["document_id"]),
+            str(item["event_id"]),
+        ),
+    )
+    require(items == ordered, repr(items))
+    statuses = {str(item["document_id"]): item["revision_status"] for item in items}
+    require(
+        statuses
+        == {
+            document_ids[0]: "original_superseded",
+            document_ids[1]: "correction_linked",
+            document_ids[2]: "withdrawal_unlinked",
+            document_ids[3]: "correction_unlinked",
+        },
+        repr(statuses),
+    )
+    require(
+        items[0]["has_later_correction"] is True
+        and items[0]["has_successor"] is True
+        and items[1]["has_later_correction"] is True
+        and items[1]["has_successor"] is False
+        and items[1]["is_correction"] is True
+        and items[2]["is_cancelled"] is True
+        and items[3]["is_correction"] is True
+        and items[3]["correction_of_document_id"] is None,
+        repr(items),
+    )
+    digest = hashlib.sha256()
+    for item in items:
+        digest.update(
+            json.dumps(
+                item,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            + b"\n"
+        )
+    require(full.get("corpus_sha256") == digest.hexdigest(), repr(full))
+
+    first_path = (
+        "api.php/api/v1/ops/dart-review-corpus?"
+        + urllib.parse.urlencode({"from": from_text, "to": to_text, "limit": 2})
+    )
+    first, _ = request_json(base_url, first_path, token=ADMIN_TOKEN)
+    require(
+        len(first.get("items", [])) == 2
+        and isinstance(first.get("next_cursor"), str)
+        and first.get("corpus_sha256") == full.get("corpus_sha256")
+        and first.get("backend_binding_id") == expected_backend_binding,
+        repr(first),
+    )
+    second_path = (
+        "api.php/api/v1/ops/dart-review-corpus?"
+        + urllib.parse.urlencode(
+            {
+                "from": from_text,
+                "to": to_text,
+                "limit": 2,
+                "cursor": first["next_cursor"],
+            }
+        )
+    )
+    second, _ = request_json(base_url, second_path, token=ADMIN_TOKEN)
+    require(
+        len(second.get("items", [])) == 2
+        and second.get("next_cursor") is None
+        and first["items"] + second["items"] == items
+        and second.get("corpus_sha256") == full.get("corpus_sha256")
+        and second.get("backend_binding_id") == expected_backend_binding,
+        repr(second),
+    )
+    wrong_range_path = (
+        "api.php/api/v1/ops/dart-review-corpus?"
+        + urllib.parse.urlencode(
+            {
+                "from": (from_day - timedelta(days=1)).isoformat(),
+                "to": to_text,
+                "limit": 2,
+                "cursor": first["next_cursor"],
+            }
+        )
+    )
+    invalid_cursor, _ = request_json(
+        base_url,
+        wrong_range_path,
+        token=ADMIN_TOKEN,
+        expected_status=400,
+    )
+    require(invalid_cursor.get("error") == "invalid_cursor", repr(invalid_cursor))
+
+    metadata_mutations = (
+        (
+            f"UPDATE ci_companies SET legal_name='   ' WHERE company_id='{company_id}'",
+            "UPDATE ci_companies SET legal_name='CI DART Corpus Corp' "
+            f"WHERE company_id='{company_id}'",
+        ),
+        (
+            f"UPDATE ci_documents SET title='   ' WHERE document_id='{document_ids[3]}'",
+            f"UPDATE ci_documents SET title='{titles[3]}' "
+            f"WHERE document_id='{document_ids[3]}'",
+        ),
+        (
+            f"UPDATE ci_documents SET original_language='KO' "
+            f"WHERE document_id='{document_ids[3]}'",
+            f"UPDATE ci_documents SET original_language='ko' "
+            f"WHERE document_id='{document_ids[3]}'",
+        ),
+        (
+            f"UPDATE ci_documents SET original_url='http://example.com/unsafe' "
+            f"WHERE document_id='{document_ids[3]}'",
+            f"UPDATE ci_documents "
+            f"SET original_url='https://example.com/dart/{external_ids[3]}' "
+            f"WHERE document_id='{document_ids[3]}'",
+        ),
+        (
+            f"UPDATE ci_governance_events SET event_type='Bad Type' "
+            f"WHERE event_id='{event_ids[3]}'",
+            f"UPDATE ci_governance_events SET event_type='shareholder_proposal' "
+            f"WHERE event_id='{event_ids[3]}'",
+        ),
+    )
+    for invalid_sql, restore_sql in metadata_mutations:
+        mysql_execute(mysql_container_id, invalid_sql)
+        invalid_metadata, _ = request_json(
+            base_url,
+            path,
+            token=ADMIN_TOKEN,
+            expected_status=503,
+        )
+        require(
+            invalid_metadata.get("error") == "dart_review_corpus_metadata_error",
+            repr(invalid_metadata),
+        )
+        mysql_execute(mysql_container_id, restore_sql)
+
+    mismatched_published = (
+        datetime.combine(from_day, datetime.min.time(), KST)
+        .replace(minute=30)
+        .astimezone(timezone.utc)
+        .strftime("%Y-%m-%d %H:%M:%S")
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_documents "
+        f"SET published_at='{mismatched_published}' "
+        f"WHERE document_id='{document_ids[3]}'",
+    )
+    receipt_mismatch, _ = request_json(
+        base_url,
+        path,
+        token=ADMIN_TOKEN,
+        expected_status=503,
+    )
+    require(
+        receipt_mismatch.get("error") == "dart_review_corpus_identity_error",
+        repr(receipt_mismatch),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_documents "
+        f"SET published_at='{published[3]}' "
+        f"WHERE document_id='{document_ids[3]}'",
+    )
+
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_documents SET correction_of_document_id=document_id,version_no=2 "
+        f"WHERE document_id='{document_ids[0]}'",
+    )
+    self_lineage, _ = request_json(
+        base_url,
+        path,
+        token=ADMIN_TOKEN,
+        expected_status=503,
+    )
+    require(
+        self_lineage.get("error") == "dart_review_corpus_lineage_error",
+        repr(self_lineage),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_documents SET correction_of_document_id=NULL,version_no=1 "
+        f"WHERE document_id='{document_ids[0]}'",
+    )
+
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_documents "
+        f"SET correction_of_document_id='dart:{receipt_date}000001' "
+        f"WHERE document_id='{document_ids[1]}'",
+    )
+    dangling_lineage, _ = request_json(
+        base_url,
+        path,
+        token=ADMIN_TOKEN,
+        expected_status=503,
+    )
+    require(
+        dangling_lineage.get("error") == "dart_review_corpus_lineage_error",
+        repr(dangling_lineage),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_documents "
+        f"SET correction_of_document_id='{document_ids[0]}' "
+        f"WHERE document_id='{document_ids[1]}'",
+    )
+
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_documents SET collection_key='ci-other-chain' "
+        f"WHERE document_id='{document_ids[0]}'",
+    )
+    cross_collection_lineage, _ = request_json(
+        base_url,
+        path,
+        token=ADMIN_TOKEN,
+        expected_status=503,
+    )
+    require(
+        cross_collection_lineage.get("error")
+        == "dart_review_corpus_lineage_error",
+        repr(cross_collection_lineage),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_documents SET collection_key='ci-corpus' "
+        f"WHERE document_id='{document_ids[0]}'",
+    )
+
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_documents "
+        f"SET correction_of_document_id='{document_ids[0]}',version_no=2 "
+        f"WHERE document_id='{document_ids[3]}';"
+        "UPDATE ci_event_documents "
+        f"SET event_id='{event_ids[0]}' WHERE document_id='{document_ids[3]}'",
+    )
+    branching_lineage, _ = request_json(
+        base_url,
+        path,
+        token=ADMIN_TOKEN,
+        expected_status=503,
+    )
+    require(
+        branching_lineage.get("error") == "dart_review_corpus_lineage_error",
+        repr(branching_lineage),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_documents SET correction_of_document_id=NULL,version_no=1 "
+        f"WHERE document_id='{document_ids[3]}';"
+        "UPDATE ci_event_documents "
+        f"SET event_id='{event_ids[3]}' WHERE document_id='{document_ids[3]}'",
+    )
+
+    mysql_execute(
+        mysql_container_id,
+        "INSERT INTO ci_event_documents "
+        "(event_id,document_id,relation_type,position_no,created_at) VALUES "
+        f"('{event_ids[1]}','{document_ids[0]}','secondary',1,'{now}')",
+    )
+    ambiguous, _ = request_json(
+        base_url,
+        path,
+        token=ADMIN_TOKEN,
+        expected_status=503,
+    )
+    require(
+        ambiguous.get("error") == "dart_review_corpus_integrity_error",
+        repr(ambiguous),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "DELETE FROM ci_event_documents "
+        f"WHERE event_id='{event_ids[1]}' AND document_id='{document_ids[0]}' "
+        "AND relation_type='secondary'",
+    )
+
+
 def run(base_url: str, mysql_container_id: str) -> None:
+    global EXPECTED_BACKEND_BINDING_ID
+    EXPECTED_BACKEND_BINDING_ID = mysql_backend_binding_id(mysql_container_id)
+
     root, _ = request_json(base_url, "api.php/api/v1/health")
     require(root.get("ok") is True, repr(root))
 
@@ -1165,6 +1672,42 @@ def run(base_url: str, mysql_container_id: str) -> None:
     require(initial.get("preview_auth_configured") is True, repr(initial))
     require("preview_token_hash" not in initial, repr(initial))
     require(initial.get("cutover_at") is None and initial.get("sunset_at") is None, repr(initial))
+
+    wrong_binding = (
+        "0" * 64
+        if EXPECTED_BACKEND_BINDING_ID != "0" * 64
+        else "1" * 64
+    )
+    rejected_binding = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        {
+            "companies": [
+                {
+                    "company_id": "00999991",
+                    "legal_name": "Must not reach the wrong backend",
+                }
+            ],
+            "documents": [],
+            "events": [],
+            "source_rights": [],
+            "run": {},
+            "expected_backend_binding_id": wrong_binding,
+        },
+        expected_status=409,
+    )
+    require(
+        rejected_binding.get("error") == "backend_binding_mismatch",
+        repr(rejected_binding),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_companies WHERE company_id='00999991'",
+        )
+        == "0",
+        "backend binding mismatch must fail before the first governance mutation",
+    )
 
     exercise_official_slot_claims(base_url, mysql_container_id)
 
@@ -1889,6 +2432,12 @@ def run(base_url: str, mysql_container_id: str) -> None:
     require(legacy_headers.get("Deprecation") == "true" and "Sunset" in legacy_headers, repr(legacy_headers))
 
     quota_day = (datetime.now(timezone.utc) + timedelta(hours=9)).date().isoformat()
+    server_uuid, database_name = mysql_execute(
+        mysql_container_id, "SELECT LOWER(@@server_uuid),DATABASE()"
+    ).split("\t")
+    expected_backend_binding = hashlib.sha256(
+        f"mysql8\n{server_uuid}\n{database_name}\nci_".encode()
+    ).hexdigest()
     quota_status, _ = request_json(
         base_url,
         f"api.php/api/v1/ops/dart-quota?quota_day={quota_day}",
@@ -1899,7 +2448,8 @@ def run(base_url: str, mysql_container_id: str) -> None:
         and quota_status.get("accepted") == 0
         and quota_status.get("limit_count") == 10000
         and quota_status.get("used_count") == 0
-        and quota_status.get("remaining_count") == 10000,
+        and quota_status.get("remaining_count") == 10000
+        and quota_status.get("backend_binding_id") == expected_backend_binding,
         repr(quota_status),
     )
     attempt_id = "dart-list-smoke-attempt-0001"
@@ -1909,7 +2459,28 @@ def run(base_url: str, mysql_container_id: str) -> None:
         "quota_day": quota_day,
         "operation": "list",
         "code_revision": "c" * 40,
+        "expected_backend_binding_id": expected_backend_binding,
     }
+    wrong_binding_payload = dict(consume_payload)
+    wrong_binding_payload["expected_backend_binding_id"] = "f" * 64
+    rejected_quota_binding, _ = request_json(
+        base_url,
+        "api.php/api/v1/ops/dart-quota",
+        method="POST",
+        token=ADMIN_TOKEN,
+        payload=wrong_binding_payload,
+        expected_status=409,
+    )
+    require(
+        rejected_quota_binding.get("error", {}).get("code") == "backend_binding_mismatch",
+        repr(rejected_quota_binding),
+    )
+    quota_after_rejection, _ = request_json(
+        base_url,
+        f"api.php/api/v1/ops/dart-quota?quota_day={quota_day}",
+        token=ADMIN_TOKEN,
+    )
+    require(quota_after_rejection.get("used_count") == 0, repr(quota_after_rejection))
     consumed, _ = request_json(
         base_url,
         "api.php/api/v1/ops/dart-quota",
@@ -1925,7 +2496,8 @@ def run(base_url: str, mysql_container_id: str) -> None:
         and consumed.get("used_count") == 1
         and consumed.get("remaining_count") == 9999
         and consumed.get("duplicate") is False
-        and consumed.get("blocked_until") is None,
+        and consumed.get("blocked_until") is None
+        and consumed.get("backend_binding_id") == expected_backend_binding,
         repr(consumed),
     )
     consumed_replay, _ = request_json(
@@ -1937,7 +2509,8 @@ def run(base_url: str, mysql_container_id: str) -> None:
     )
     require(
         consumed_replay.get("duplicate") is True
-        and consumed_replay.get("used_count") == 1,
+        and consumed_replay.get("used_count") == 1
+        and consumed_replay.get("backend_binding_id") == expected_backend_binding,
         repr(consumed_replay),
     )
     conflicting_consume = dict(consume_payload)
@@ -1973,7 +2546,8 @@ def run(base_url: str, mysql_container_id: str) -> None:
         and blocked.get("accepted") == 1
         and blocked.get("used_count") == 1
         and blocked.get("duplicate") is False
-        and isinstance(blocked.get("blocked_until"), str),
+        and isinstance(blocked.get("blocked_until"), str)
+        and blocked.get("backend_binding_id") == expected_backend_binding,
         repr(blocked),
     )
     blocked_replay, _ = request_json(
@@ -1983,7 +2557,11 @@ def run(base_url: str, mysql_container_id: str) -> None:
         token=ADMIN_TOKEN,
         payload=block_payload,
     )
-    require(blocked_replay.get("duplicate") is True, repr(blocked_replay))
+    require(
+        blocked_replay.get("duplicate") is True
+        and blocked_replay.get("backend_binding_id") == expected_backend_binding,
+        repr(blocked_replay),
+    )
     blocked_new, _ = request_json(
         base_url,
         "api.php/api/v1/ops/dart-quota",
@@ -1997,6 +2575,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
     )
     require(blocked_new.get("error", {}).get("code") == "dart_quota_blocked", repr(blocked_new))
     exercise_event_identity_datetime_storage(base_url, mysql_container_id)
+    exercise_dart_review_corpus(base_url, mysql_container_id)
     print("PHP 7.3 governance release-state smoke passed.", flush=True)
 
 

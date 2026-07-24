@@ -5,11 +5,9 @@ import json
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
-
 import pytest
 
-from curator import official_ingest
+from curator import official_backfill, official_ingest
 from curator.backfill_checkpoint_api import (
     RemoteCheckpointConflictError,
     RemoteCheckpointSnapshot,
@@ -21,12 +19,24 @@ from curator.official_backfill import (
     BackfillConfigurationError,
     BackfillOptions,
     CheckpointError,
+    _completed_kst_end_exclusive,
+    build_parser,
     build_date_windows,
     load_checkpoint,
+    options_from_args,
     run_backfill,
     validate_runtime,
 )
 from curator.official_sources import DartRequestBudget
+
+
+CODE_REVISION = "a" * 40
+
+
+@pytest.fixture(autouse=True)
+def applied_backfill_revision(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_SHA", CODE_REVISION)
+    monkeypatch.delenv("CURATOR_CODE_REVISION", raising=False)
 
 
 def successful_summary(*, dry_run: bool = False) -> dict[str, int]:
@@ -115,16 +125,60 @@ def test_operational_defaults_are_one_day_and_dart_only(tmp_path: Path) -> None:
     assert options.sources == ("dart",)
 
 
-def test_backfill_rejects_future_empty_windows(tmp_path: Path) -> None:
-    tomorrow_kst = datetime.now(ZoneInfo("Asia/Seoul")).date() + timedelta(days=1)
+def test_completed_kst_boundary_is_the_current_kst_date() -> None:
+    before_midnight_utc = datetime(2026, 7, 15, 14, 59, 59, tzinfo=timezone.utc)
+    after_midnight_utc = datetime(2026, 7, 15, 15, 0, tzinfo=timezone.utc)
+
+    assert _completed_kst_end_exclusive(before_midnight_utc) == date(2026, 7, 15)
+    assert _completed_kst_end_exclusive(after_midnight_utc) == date(2026, 7, 16)
+
+
+def test_backfill_accepts_only_completed_kst_dates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    today_kst = date(2026, 7, 16)
+    monkeypatch.setattr(
+        official_backfill,
+        "_completed_kst_end_exclusive",
+        lambda: today_kst,
+    )
+    BackfillOptions(
+        start=today_kst - timedelta(days=1),
+        end_exclusive=today_kst,
+        checkpoint_path=tmp_path / "completed.json",
+    ).validate()
+
     options = BackfillOptions(
-        start=tomorrow_kst,
-        end_exclusive=tomorrow_kst + timedelta(days=1),
-        checkpoint_path=tmp_path / "official-checkpoint.json",
+        start=today_kst,
+        end_exclusive=today_kst + timedelta(days=1),
+        checkpoint_path=tmp_path / "current-or-future.json",
     )
 
-    with pytest.raises(BackfillConfigurationError, match="tomorrow in KST"):
+    with pytest.raises(BackfillConfigurationError, match="current KST date"):
         options.validate()
+
+
+def test_cli_defaults_to_completed_kst_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    today_kst = date(2026, 7, 16)
+    monkeypatch.setattr(
+        official_backfill,
+        "_completed_kst_end_exclusive",
+        lambda: today_kst,
+    )
+    args = build_parser().parse_args(
+        [
+            "--root",
+            str(Path(__file__).resolve().parents[1]),
+            "--from-date",
+            "2026-07-15",
+        ]
+    )
+
+    _, options = options_from_args(args)
+
+    assert options.end_exclusive == today_kst
 
 
 def test_date_windows_are_half_open_and_connector_end_is_inclusive() -> None:
@@ -198,6 +252,9 @@ def test_backfill_resumes_completed_chunks_and_keeps_stable_idempotency_keys(tmp
     completed = checkpoint["completed_windows"]
     assert isinstance(completed, dict) and len(completed) == 3
     assert [completed[key]["idempotency_key"] for key in list(completed)[:2]] == first_keys  # type: ignore[index]
+    assert {
+        completed[key]["code_revision"] for key in completed  # type: ignore[index]
+    } == {CODE_REVISION}
     assert first["checkpoint_source"] == "mysql_remote"
     assert second["checkpoint_version"] == 4
 
@@ -280,7 +337,12 @@ def test_checkpoint_fingerprint_rejects_changed_job_without_restart(tmp_path: Pa
         )
 
 
-def test_dry_run_reads_and_normalizes_without_checkpoint_or_remote_success(tmp_path: Path) -> None:
+def test_dry_run_reads_and_normalizes_without_checkpoint_or_remote_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GITHUB_SHA")
+    monkeypatch.delenv("CURATOR_CODE_REVISION", raising=False)
     checkpoint_path = tmp_path / "must-not-exist.json"
     checkpoint_path.write_text("local evidence must remain unchanged", encoding="utf-8")
     store = MemoryCheckpointStore()
@@ -305,6 +367,7 @@ def test_dry_run_reads_and_normalizes_without_checkpoint_or_remote_success(tmp_p
         checkpoint_store=store,
     )
     assert report["status"] == "succeeded"
+    assert report["code_revision"] is None
     assert seen[0]["dry_run"] is True
     assert report["checkpoint_path"] is None
     assert checkpoint_path.read_text(encoding="utf-8") == "local evidence must remain unchanged"
@@ -413,6 +476,55 @@ def test_dart_only_dry_run_does_not_require_source_right_ops_token(
     )
 
     validate_runtime(options)
+
+
+def test_apply_requires_exact_backend_binding_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("DART_API_KEY", "dart-key")
+    monkeypatch.setenv("ACTIVIST_API_URL", "https://example.test/api.php")
+    monkeypatch.setenv("ACTIVIST_API_SECRET", "secret")
+    monkeypatch.setenv("BSIDE_API_BASE_URL", "https://example.test/api.php/api/v1")
+    monkeypatch.setenv("BSIDE_OPS_TOKEN", "ops-token")
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", "INVALID")
+    options = BackfillOptions(
+        start=date(2021, 1, 1),
+        end_exclusive=date(2021, 1, 2),
+        checkpoint_path=tmp_path / "unused.json",
+        sources=("dart",),
+        dry_run=False,
+    )
+
+    with pytest.raises(BackfillConfigurationError, match="BSIDE_BACKEND_BINDING_ID"):
+        validate_runtime(options)
+
+
+def test_apply_requires_exact_code_revision(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("DART_API_KEY", "dart-key")
+    monkeypatch.setenv("ACTIVIST_API_URL", "https://example.test/api.php")
+    monkeypatch.setenv("ACTIVIST_API_SECRET", "secret")
+    monkeypatch.setenv("BSIDE_API_BASE_URL", "https://example.test/api.php/api/v1")
+    monkeypatch.setenv("BSIDE_OPS_TOKEN", "ops-token")
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", "b" * 64)
+    monkeypatch.delenv("GITHUB_SHA")
+    monkeypatch.setenv("CURATOR_CODE_REVISION", "not-a-revision")
+    options = BackfillOptions(
+        start=date(2021, 1, 1),
+        end_exclusive=date(2021, 1, 2),
+        checkpoint_path=tmp_path / "unused.json",
+        sources=("dart",),
+        dry_run=False,
+    )
+
+    with pytest.raises(
+        BackfillConfigurationError,
+        match="GITHUB_SHA/CURATOR_CODE_REVISION",
+    ):
+        validate_runtime(options)
 
 
 def test_dart_020_blocks_same_kst_day_and_resumes_same_checkpoint_next_day(
@@ -669,6 +781,48 @@ def test_request_budget_change_keeps_the_same_logical_job_checkpoint(tmp_path: P
     )
     assert first_report["job_fingerprint"] == second_report["job_fingerprint"]
     assert second_report["windows_attempted"] == 0
+
+
+def test_revision_change_does_not_change_job_fingerprint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = MemoryCheckpointStore()
+    checkpoint_path = tmp_path / "official-checkpoint.json"
+    first_options = BackfillOptions(
+        start=date(2021, 1, 1),
+        end_exclusive=date(2021, 1, 3),
+        checkpoint_path=checkpoint_path,
+        sources=("dart",),
+        max_chunks=1,
+    )
+    first_report = run_backfill(
+        tmp_path,
+        first_options,
+        ingest_runner=lambda *_args, **_kwargs: successful_summary(),
+        now_provider=fixed_now,
+        checkpoint_store=store,
+    )
+
+    next_revision = "b" * 40
+    monkeypatch.setenv("GITHUB_SHA", next_revision.upper())
+    second_report = run_backfill(
+        tmp_path,
+        replace(first_options, max_chunks=0),
+        ingest_runner=lambda *_args, **_kwargs: successful_summary(),
+        now_provider=fixed_now,
+        checkpoint_store=store,
+    )
+
+    assert first_report["job_fingerprint"] == second_report["job_fingerprint"]
+    checkpoint = load_checkpoint(checkpoint_path)
+    assert checkpoint is not None
+    completed = checkpoint["completed_windows"]
+    assert isinstance(completed, dict)
+    assert [row["code_revision"] for row in completed.values()] == [
+        CODE_REVISION,
+        next_revision,
+    ]
 
 
 def test_company_master_sync_requires_dart_source(tmp_path: Path) -> None:

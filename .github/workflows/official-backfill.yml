@@ -25,7 +25,7 @@ on:
         required: true
         type: string
       to_date:
-        description: Exclusive end date (YYYY-MM-DD)
+        description: Exclusive end date (YYYY-MM-DD, no later than the current KST date)
         required: true
         type: string
       max_windows:
@@ -66,11 +66,18 @@ jobs:
           BACKFILL_REPORT: ${{ runner.temp }}/official-backfill-report.json
           BACKFILL_LOG: ${{ runner.temp }}/official-backfill.stderr.log
           DART_CANARY_REPORT: ${{ runner.temp }}/dart-canary-sample-report.json
+          DART_REVIEW_SAMPLE_JSONL: ${{ runner.temp }}/dart-review-sample.jsonl
+          DART_REVIEW_SAMPLE_CSV: ${{ runner.temp }}/dart-review-sample.csv
+          DART_REVIEW_SAMPLE_MANIFEST: ${{ runner.temp }}/dart-review-sample-manifest.json
         shell: bash
         run: |
           set -euo pipefail
           printf '%s\n' '{"status":"not_started"}' > "$BACKFILL_REPORT"
           printf '%s\n' '{"status":"not_applicable"}' > "$DART_CANARY_REPORT"
+          : > "$DART_REVIEW_SAMPLE_JSONL"
+          : > "$DART_REVIEW_SAMPLE_CSV"
+          printf '%s\n' '{"status":"not_applicable","release_eligible":false}' \
+            > "$DART_REVIEW_SAMPLE_MANIFEST"
           : > "$BACKFILL_LOG"
 
       - name: Checkout immutable dispatch revision
@@ -120,7 +127,7 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           import os
-          from datetime import date, datetime, timedelta
+          from datetime import date, datetime
           from zoneinfo import ZoneInfo
 
           try:
@@ -133,11 +140,11 @@ jobs:
               raise SystemExit("from_date must be 2021-01-01 or later")
           if end <= start:
               raise SystemExit("to_date must be later than from_date (exclusive boundary)")
-          tomorrow_kst = datetime.now(ZoneInfo("Asia/Seoul")).date() + timedelta(days=1)
-          if end > tomorrow_kst:
+          completed_kst_end_exclusive = datetime.now(ZoneInfo("Asia/Seoul")).date()
+          if end > completed_kst_end_exclusive:
               raise SystemExit(
-                  "to_date cannot be later than tomorrow in KST; "
-                  "future empty windows must not be checkpointed"
+                  "to_date cannot be later than the current KST date as an "
+                  "exclusive boundary; current or future KST dates must not be checkpointed"
               )
           if not 1 <= max_windows <= 31:
               raise SystemExit("max_windows must be between 1 and 31")
@@ -156,26 +163,29 @@ jobs:
           BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          BSIDE_BACKEND_BINDING_ID: ${{ vars.BSIDE_BACKEND_BINDING_ID }}
         shell: bash
         run: |
           set -euo pipefail
           required=()
           if [[ "$SOURCE" == "dart" || "$SOURCE" == "both" ]]; then
-            required+=(DART_API_KEY BSIDE_API_BASE_URL BSIDE_OPS_TOKEN)
+            required+=(DART_API_KEY BSIDE_API_BASE_URL BSIDE_OPS_TOKEN BSIDE_BACKEND_BINDING_ID)
           fi
           if [[ "$SOURCE" == "kind" || "$SOURCE" == "both" ]]; then
-            required+=(KIND_DISCLOSURE_ENDPOINT BSIDE_API_BASE_URL BSIDE_OPS_TOKEN)
+            required+=(KIND_DISCLOSURE_ENDPOINT BSIDE_API_BASE_URL BSIDE_OPS_TOKEN BSIDE_BACKEND_BINDING_ID)
           fi
           if [[ "$MODE" == "apply" ]]; then
             required+=(ACTIVIST_API_URL ACTIVIST_API_SECRET BSIDE_OPS_TOKEN)
           fi
           bash .github/scripts/require-env.sh "${required[@]}"
+          python .github/scripts/validate-api-base-urls.py --github-env "$GITHUB_ENV"
 
       - name: Verify KIND SourceRight before adapter network access
         if: inputs.source == 'kind' || inputs.source == 'both'
         env:
           BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          BSIDE_BACKEND_BINDING_ID: ${{ vars.BSIDE_BACKEND_BINDING_ID }}
         shell: bash
         run: |
           set -euo pipefail
@@ -195,6 +205,7 @@ jobs:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          BSIDE_BACKEND_BINDING_ID: ${{ vars.BSIDE_BACKEND_BINDING_ID }}
           DART_CANARY_REPORT: ${{ runner.temp }}/dart-canary-sample-report.json
           CURATOR_REQUIRE_DURABLE_DART_QUOTA: "1"
           CURATOR_DART_QUOTA_PHASE: dart-canary
@@ -307,6 +318,7 @@ jobs:
           BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          BSIDE_BACKEND_BINDING_ID: ${{ vars.BSIDE_BACKEND_BINDING_ID }}
           CURATOR_REQUIRE_DURABLE_DART_QUOTA: "1"
           CURATOR_DART_QUOTA_PHASE: official-backfill
         shell: bash
@@ -337,6 +349,63 @@ jobs:
             exit "$exit_code"
           fi
 
+      - name: Build deterministic 30-day DART review sample
+        if: inputs.mode == 'apply' && inputs.source != 'kind'
+        env:
+          BACKFILL_REPORT: ${{ runner.temp }}/official-backfill-report.json
+          BACKFILL_CHECKPOINT: ${{ env.CHECKPOINT_PATH }}
+          BACKFILL_FROM_DATE: ${{ inputs.from_date }}
+          BACKFILL_TO_DATE: ${{ inputs.to_date }}
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          BSIDE_BACKEND_BINDING_ID: ${{ vars.BSIDE_BACKEND_BINDING_ID }}
+          DART_REVIEW_SAMPLE_JSONL: ${{ runner.temp }}/dart-review-sample.jsonl
+          DART_REVIEW_SAMPLE_CSV: ${{ runner.temp }}/dart-review-sample.csv
+          DART_REVIEW_SAMPLE_MANIFEST: ${{ runner.temp }}/dart-review-sample-manifest.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          eligible="$(
+            python - <<'PY'
+          import json
+          import os
+          from datetime import date
+          from pathlib import Path
+
+          start = date.fromisoformat(os.environ["BACKFILL_FROM_DATE"])
+          end = date.fromisoformat(os.environ["BACKFILL_TO_DATE"])
+          report = json.loads(Path(os.environ["BACKFILL_REPORT"]).read_text(encoding="utf-8"))
+          exact_range = (end - start).days == 30
+          complete = (
+              report.get("status") == "succeeded"
+              and report.get("dry_run") is False
+              and report.get("range_start") == start.isoformat()
+              and report.get("range_end_exclusive") == end.isoformat()
+              and report.get("windows_total") == 30
+              and report.get("windows_remaining") == 0
+              and report.get("windows_failed") == 0
+          )
+          print("true" if exact_range and complete else "false")
+          PY
+          )"
+          if [[ "$eligible" != "true" ]]; then
+            echo "The requested apply range is not a completed exact 30-day DART corpus; review sampling is not applicable."
+            exit 0
+          fi
+          python .github/scripts/validate-api-base-urls.py
+          python -m curator.dart_review_sample \
+            --from-date "$BACKFILL_FROM_DATE" \
+            --to-date "$BACKFILL_TO_DATE" \
+            --sample-size 100 \
+            --seed 20260724 \
+            --backfill-report "$BACKFILL_REPORT" \
+            --checkpoint "$BACKFILL_CHECKPOINT" \
+            --jsonl-output "$DART_REVIEW_SAMPLE_JSONL" \
+            --csv-output "$DART_REVIEW_SAMPLE_CSV" \
+            --manifest-output "$DART_REVIEW_SAMPLE_MANIFEST" \
+            --code-revision "$GITHUB_SHA"
+
       - name: Prepare checkpoint evidence
         if: always()
         env:
@@ -365,6 +434,9 @@ jobs:
             ${{ runner.temp }}/official-backfill-report.json
             ${{ runner.temp }}/official-backfill.stderr.log
             ${{ runner.temp }}/dart-canary-sample-report.json
+            ${{ runner.temp }}/dart-review-sample.jsonl
+            ${{ runner.temp }}/dart-review-sample.csv
+            ${{ runner.temp }}/dart-review-sample-manifest.json
           if-no-files-found: error
           retention-days: 90
 

@@ -101,11 +101,8 @@ def test_official_ingest_and_backfill_use_non_dropping_shared_queue() -> None:
 
 def test_backfill_shell_never_interpolates_dispatch_text_directly() -> None:
     workflow = workflow_text("official-backfill.yml")
-    block = workflow[
-        workflow.index("- name: Run one-day official backfill windows") : workflow.index(
-            "- name: Prepare checkpoint evidence"
-        )
-    ]
+    payload = yaml.load(workflow, Loader=yaml.BaseLoader)
+    steps = payload["jobs"]["backfill"]["steps"]
     for input_name in (
         "mode",
         "source",
@@ -114,7 +111,11 @@ def test_backfill_shell_never_interpolates_dispatch_text_directly() -> None:
         "max_windows",
         "sync_company_master",
     ):
-        assert f"${{{{ inputs.{input_name} }}}}" not in block.split("run: |", 1)[1]
+        for step in steps:
+            assert f"${{{{ inputs.{input_name} }}}}" not in str(step.get("run", ""))
+    run_step = next(
+        step for step in steps if step["name"] == "Run one-day official backfill windows"
+    )
     for env_name in (
         "BACKFILL_MODE",
         "BACKFILL_SOURCE",
@@ -123,7 +124,7 @@ def test_backfill_shell_never_interpolates_dispatch_text_directly() -> None:
         "BACKFILL_MAX_WINDOWS",
         "BACKFILL_SYNC_COMPANY_MASTER",
     ):
-        assert env_name in block
+        assert env_name in run_step["env"]
 
 
 def test_kind_preflight_reuses_https_only_endpoint_validation() -> None:
@@ -244,7 +245,15 @@ def test_official_ingest_has_day_and_night_kst_schedules() -> None:
     assert validation["env"]["BSIDE_API_BASE_URL"] == (
         "${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}"
     )
+    assert validation["env"]["GOVERNANCE_API_BASE_URL"] == (
+        "${{ vars.GOVERNANCE_API_BASE_URL }}"
+    )
     assert validation["env"]["BSIDE_OPS_TOKEN"] == "${{ secrets.BSIDE_OPS_TOKEN }}"
+    assert validation["env"]["BSIDE_BACKEND_BINDING_ID"] == (
+        "${{ vars.BSIDE_BACKEND_BINDING_ID }}"
+    )
+    assert "BSIDE_BACKEND_BINDING_ID" in validation["run"]
+    assert "python .github/scripts/validate-api-base-urls.py" in validation["run"]
     ingest = next(
         step for step in job["steps"] if step["name"] == "Ingest selected official sources"
     )
@@ -261,6 +270,9 @@ def test_official_ingest_has_day_and_night_kst_schedules() -> None:
     assert "exit 0" in ingest_script
     assert ingest["env"]["BSIDE_API_BASE_URL"] == validation["env"]["BSIDE_API_BASE_URL"]
     assert ingest["env"]["BSIDE_OPS_TOKEN"] == validation["env"]["BSIDE_OPS_TOKEN"]
+    assert ingest["env"]["BSIDE_BACKEND_BINDING_ID"] == (
+        validation["env"]["BSIDE_BACKEND_BINDING_ID"]
+    )
 
 
 def test_official_slot_repair_and_epoch_reset_are_operator_gated() -> None:
@@ -934,6 +946,15 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     }
     assert dispatch["mode"]["options"] == ["dry-run", "apply"]
     assert dispatch["source"]["options"] == ["dart", "kind", "both"]
+    input_validation = next(
+        step
+        for step in payload["jobs"]["backfill"]["steps"]
+        if step["name"] == "Validate bounded backfill inputs"
+    )
+    assert "completed_kst_end_exclusive" in input_validation["run"]
+    assert "end > completed_kst_end_exclusive" in input_validation["run"]
+    assert "tomorrow_kst" not in input_validation["run"]
+    assert "timedelta(days=1)" not in input_validation["run"]
     assert payload["concurrency"] == {
         "group": "ingest-official-${{ github.ref_name }}",
         "queue": "max",
@@ -956,6 +977,11 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
         "BACKFILL_REPORT": "${{ runner.temp }}/official-backfill-report.json",
         "BACKFILL_LOG": "${{ runner.temp }}/official-backfill.stderr.log",
         "DART_CANARY_REPORT": "${{ runner.temp }}/dart-canary-sample-report.json",
+        "DART_REVIEW_SAMPLE_JSONL": "${{ runner.temp }}/dart-review-sample.jsonl",
+        "DART_REVIEW_SAMPLE_CSV": "${{ runner.temp }}/dart-review-sample.csv",
+        "DART_REVIEW_SAMPLE_MANIFEST": (
+            "${{ runner.temp }}/dart-review-sample-manifest.json"
+        ),
     }
     checkout = next(step for step in steps if step["name"] == "Checkout immutable dispatch revision")
     assert checkout["with"]["ref"] == "${{ github.sha }}"
@@ -974,6 +1000,9 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert run_step["env"]["ENABLE_TELEGRAM_DELIVERY"] == "false"
     assert run_step["env"]["ENABLE_GOVERNANCE_DELIVERY"] == "false"
     assert run_step["env"]["BSIDE_OPS_TOKEN"] == "${{ secrets.BSIDE_OPS_TOKEN }}"
+    assert run_step["env"]["BSIDE_BACKEND_BINDING_ID"] == (
+        "${{ vars.BSIDE_BACKEND_BINDING_ID }}"
+    )
     assert run_step["env"]["BSIDE_API_BASE_URL"] == (
         "${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}"
     )
@@ -981,7 +1010,12 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert run_step["env"]["CURATOR_DART_QUOTA_PHASE"] == "official-backfill"
     validation = next(step for step in steps if step["name"] == "Validate operational configuration")
     assert "BSIDE_OPS_TOKEN" in validation["run"]
+    assert "BSIDE_BACKEND_BINDING_ID" in validation["run"]
     assert "KIND_DISCLOSURE_ENDPOINT BSIDE_API_BASE_URL BSIDE_OPS_TOKEN" in validation["run"]
+    assert "python .github/scripts/validate-api-base-urls.py" in validation["run"]
+    assert validation["env"]["GOVERNANCE_API_BASE_URL"] == (
+        "${{ vars.GOVERNANCE_API_BASE_URL }}"
+    )
     canary = next(
         step
         for step in steps
@@ -995,11 +1029,38 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert "remaining_request_budget=" not in canary["run"]
     assert canary["env"]["DART_API_KEY"] == "${{ secrets.DART_API_KEY }}"
     assert canary["env"]["BSIDE_OPS_TOKEN"] == "${{ secrets.BSIDE_OPS_TOKEN }}"
+    assert canary["env"]["BSIDE_BACKEND_BINDING_ID"] == (
+        "${{ vars.BSIDE_BACKEND_BINDING_ID }}"
+    )
     assert canary["env"]["DART_CANARY_REPORT"] == (
         "${{ runner.temp }}/dart-canary-sample-report.json"
     )
     assert canary["env"]["CURATOR_REQUIRE_DURABLE_DART_QUOTA"] == "1"
     assert canary["env"]["CURATOR_DART_QUOTA_PHASE"] == "dart-canary"
+    review_sample = next(
+        step
+        for step in steps
+        if step["name"] == "Build deterministic 30-day DART review sample"
+    )
+    assert review_sample["if"] == "inputs.mode == 'apply' && inputs.source != 'kind'"
+    assert "python -m curator.dart_review_sample" in review_sample["run"]
+    assert "report.get(\"windows_total\") == 30" in review_sample["run"]
+    assert "report.get(\"windows_remaining\") == 0" in review_sample["run"]
+    assert "--sample-size 100" in review_sample["run"]
+    assert "--backfill-report \"$BACKFILL_REPORT\"" in review_sample["run"]
+    assert "--checkpoint \"$BACKFILL_CHECKPOINT\"" in review_sample["run"]
+    assert "--code-revision \"$GITHUB_SHA\"" in review_sample["run"]
+    assert "python .github/scripts/validate-api-base-urls.py" in review_sample["run"]
+    assert review_sample["env"]["BSIDE_API_BASE_URL"] == (
+        "${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}"
+    )
+    assert review_sample["env"]["GOVERNANCE_API_BASE_URL"] == (
+        "${{ vars.GOVERNANCE_API_BASE_URL }}"
+    )
+    assert review_sample["env"]["BSIDE_OPS_TOKEN"] == "${{ secrets.BSIDE_OPS_TOKEN }}"
+    assert review_sample["env"]["BSIDE_BACKEND_BINDING_ID"] == (
+        "${{ vars.BSIDE_BACKEND_BINDING_ID }}"
+    )
     assert "TELEGRAM_BOT_TOKEN" not in workflow
     assert "TELEGRAM_CHAT_ID" not in workflow
 
@@ -1015,6 +1076,9 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
         "${{ runner.temp }}/official-backfill-report.json",
         "${{ runner.temp }}/official-backfill.stderr.log",
         "${{ runner.temp }}/dart-canary-sample-report.json",
+        "${{ runner.temp }}/dart-review-sample.jsonl",
+        "${{ runner.temp }}/dart-review-sample.csv",
+        "${{ runner.temp }}/dart-review-sample-manifest.json",
     ]
     checkpoint = next(step for step in uploads if step["name"] == "Preserve resumable checkpoint")
     assert checkpoint["with"]["name"] == "${{ env.CHECKPOINT_ARTIFACT_NAME }}"
@@ -1144,6 +1208,7 @@ def test_workflows_pin_verified_node24_action_commits() -> None:
 
 def test_watchdog_contract_and_issue_permission() -> None:
     workflow = workflow_text("watchdog.yml")
+    payload = yaml.load(workflow, Loader=yaml.BaseLoader)
     script = (ROOT / ".github" / "scripts" / "watchdog.py").read_text(encoding="utf-8")
     assert "issues: write" in workflow
     assert "BSIDE_API_BASE_URL" in workflow
@@ -1152,10 +1217,69 @@ def test_watchdog_contract_and_issue_permission() -> None:
     assert 'cron: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *"' in workflow
     assert "BSIDE_PUBLIC_WEB_URL" in workflow
     assert "WATCHDOG_GOVERNANCE_PAGES" in workflow
+    assert "vars.GOVERNANCE_PIPELINE_MODE == 'dart_canary'" in payload["jobs"]["health"]["if"]
+    incident_evidence = next(
+        step
+        for step in payload["jobs"]["health"]["steps"]
+        if step["name"] == "Initialize generic incident evidence"
+    )
+    assert incident_evidence["id"] == "incident_evidence"
+    assert "no configured URL or credential" in incident_evidence["run"]
+    checkout = next(
+        step
+        for step in payload["jobs"]["health"]["steps"]
+        if step["name"] == "Checkout"
+    )
+    revision_guard = next(
+        step
+        for step in payload["jobs"]["health"]["steps"]
+        if step["name"] == "Verify immutable workflow revision"
+    )
+    assert checkout["id"] == "checkout"
+    assert revision_guard["id"] == "revision_guard"
+    routing = next(
+        step
+        for step in payload["jobs"]["health"]["steps"]
+        if step["name"] == "Validate operational API routing"
+    )
+    assert routing["env"]["BSIDE_API_BASE_URL"] == (
+        "${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}"
+    )
+    assert routing["env"]["GOVERNANCE_API_BASE_URL"] == (
+        "${{ vars.GOVERNANCE_API_BASE_URL }}"
+    )
+    assert (
+        "validate-api-base-urls.py --github-env \"$GITHUB_ENV\"" in routing["run"]
+    )
+    assert "report_path=$report" in routing["run"]
+    health = next(
+        step
+        for step in payload["jobs"]["health"]["steps"]
+        if step["name"] == "Inspect ingest freshness and web availability"
+    )
+    assert health["run"] == "python .github/scripts/watchdog.py"
+    assert health["env"]["WATCHDOG_EXPECTED_OFFICIAL_SOURCES"] == (
+        "${{ steps.rollout.outputs.governance_pipeline_mode == 'dart_canary' && "
+        "'dart' || 'dart,kind' }}"
+    )
+    incident = next(
+        step
+        for step in payload["jobs"]["health"]["steps"]
+        if step["name"] == "Create, update, or resolve the incident issue"
+    )
+    assert "always()" in incident["if"]
+    assert "steps.api_routing.outcome == 'failure'" in incident["env"]["INCIDENT"]
+    assert "steps.checkout.outcome == 'failure'" in incident["env"]["INCIDENT"]
+    assert "steps.revision_guard.outcome == 'failure'" in incident["env"]["INCIDENT"]
+    assert "steps.rollout.outcome == 'failure'" in incident["env"]["INCIDENT"]
+    assert incident["env"]["REPORT_PATH"] == (
+        "${{ steps.health.outputs.report_path || steps.api_routing.outputs.report_path || steps.incident_evidence.outputs.report_path }}"
+    )
     assert 'api_endpoint(base_url, "/ops/health")' in script
     assert "/ops/availability-observations" in script
     assert "active_deployment_sha(payload)" in script
     assert 'source_state.get("last_scheduled_success_at")' in script
+    assert "parse_expected_official_sources" in script
     assert 'os.environ.get("GITHUB_SHA"' not in script
     assert "dead_letter_count" not in script
 

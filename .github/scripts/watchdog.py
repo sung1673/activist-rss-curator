@@ -19,6 +19,11 @@ USER_AGENT = "bside-governance-watchdog/2.0"
 CONFIG_PATTERN = re.compile(
     r"^window\.__BSIDE_GOVERNANCE_CONFIG__=Object\.freeze\((\{.*\})\);\s*$"
 )
+OFFICIAL_SOURCES = ("dart", "kind")
+VALID_EXPECTED_OFFICIAL_SOURCE_SETS = {
+    frozenset(("dart",)),
+    frozenset(("dart", "kind")),
+}
 
 
 @dataclass(frozen=True)
@@ -54,6 +59,28 @@ def integer(value: object, default: int = 0) -> int:
         return int(str(value))
     except (TypeError, ValueError):
         return default
+
+
+def parse_expected_official_sources(value: object) -> tuple[str, ...]:
+    text = str(value or "")
+    if not text:
+        raise ValueError("WATCHDOG_EXPECTED_OFFICIAL_SOURCES is required")
+    parts = text.split(",")
+    if any(not part or part != part.strip() for part in parts):
+        raise ValueError(
+            "WATCHDOG_EXPECTED_OFFICIAL_SOURCES must be a comma-separated source set"
+        )
+    if len(parts) != len(set(parts)):
+        raise ValueError("WATCHDOG_EXPECTED_OFFICIAL_SOURCES contains a duplicate source")
+    unknown = set(parts).difference(OFFICIAL_SOURCES)
+    if unknown:
+        raise ValueError("WATCHDOG_EXPECTED_OFFICIAL_SOURCES contains an unsupported source")
+    configured = frozenset(parts)
+    if configured not in VALID_EXPECTED_OFFICIAL_SOURCE_SETS:
+        raise ValueError(
+            "WATCHDOG_EXPECTED_OFFICIAL_SOURCES must select DART or DART and KIND"
+        )
+    return tuple(source for source in OFFICIAL_SOURCES if source in configured)
 
 
 def unwrap_payload(payload: object) -> dict[str, Any]:
@@ -264,6 +291,13 @@ def main() -> int:
     reasons: list[str] = []
     payload: dict[str, Any] = {}
     observations: list[AvailabilityObservation] = []
+    try:
+        expected_official_sources = parse_expected_official_sources(
+            os.environ.get("WATCHDOG_EXPECTED_OFFICIAL_SOURCES")
+        )
+    except ValueError as exc:
+        expected_official_sources = ()
+        reasons.append(f"Invalid official source configuration: {exc}")
 
     missing = [
         name
@@ -280,8 +314,11 @@ def main() -> int:
         reasons.append("BSIDE_API_BASE_URL must be a credential-free, query-free HTTPS URL")
     if web_base_url and not _valid_https_url(web_base_url):
         reasons.append("BSIDE_PUBLIC_WEB_URL must be a credential-free, query-free HTTPS URL")
-    operational_config_valid = not missing and _valid_https_url(base_url) and _valid_https_url(
-        web_base_url
+    operational_config_valid = (
+        not missing
+        and bool(expected_official_sources)
+        and _valid_https_url(base_url)
+        and _valid_https_url(web_base_url)
     )
     if operational_config_valid:
         try:
@@ -349,7 +386,7 @@ def main() -> int:
         if not isinstance(official_sources, dict):
             reasons.append("The health response has no source-specific official ingest state")
         else:
-            for source in ("dart", "kind"):
+            for source in expected_official_sources:
                 source_state = official_sources.get(source)
                 if not isinstance(source_state, dict):
                     reasons.append(f"The health response has no {source.upper()} ingest state")

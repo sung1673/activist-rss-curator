@@ -11,6 +11,9 @@
 - DART 수집: `DART_API_KEY`
 - KIND 수집: `KIND_DISCLOSURE_ENDPOINT`와 필요 시 `KIND_API_KEY`. 어댑터 키는 URL query가 아니라 `Authorization: Bearer` 헤더로 전달한다.
 - 실제 적재: `ACTIVIST_API_URL`, `ACTIVIST_API_SECRET`
+- 운영 체크포인트·quota·SourceRight API: `BSIDE_API_BASE_URL`, `BSIDE_OPS_TOKEN`
+- 적재 대상 고정: 배포된 PHP가 반환하는 값과 같은 `BSIDE_BACKEND_BINDING_ID`
+- 로컬에서 DART를 실제 호출할 때도 `CURATOR_REQUIRE_DURABLE_DART_QUOTA=1`을 지정한다. 중앙 MySQL quota 원장이 준비되지 않으면 호출하지 않고 실패한다.
 - `.env`, `.env.local`, `.env.api`는 이 순서로 읽으며 이미 설정된 환경변수를 덮어쓰지 않는다.
 
 먼저 한 청크를 읽고 정규화만 검증한다. dry-run은 원격 API와 체크포인트를 전혀 변경하지 않는다.
@@ -57,16 +60,27 @@ KIND의 일반 HTML 화면이나 오늘의 공시 RSS는 이 endpoint가 아니�
 
 ### 체크포인트 계약
 
-기본 경로는 `data/backfill_official_checkpoint.json`이며 Git 추적 대상이 아니다. JSON Schema는 [`schemas/official-backfill-checkpoint.schema.json`](schemas/official-backfill-checkpoint.schema.json)에 있다.
+실행 여부를 결정하는 단일 기준은 운영 MySQL의 원격 체크포인트다. 기본 경로
+`data/backfill_official_checkpoint.json`은 각 원격 쓰기 ACK 뒤에 갱신되는
+증빙·복구 사본일 뿐이며, 이 로컬 파일만으로 완료 창을 건너뛰지 않는다. 이
+파일은 Git 추적 대상이 아니고 JSON Schema는
+[`schemas/official-backfill-checkpoint.schema.json`](schemas/official-backfill-checkpoint.schema.json)에 있다.
 
 - `schema_version`: 현재 `1`
 - `job`: 요청 범위, 청크 크기, 소스, 페이지 한도, 회사 마스터 옵션과 이 값들의 SHA-256 `fingerprint`
 - `completed_windows`: 원격 MySQL 동기화까지 성공한 청크만 기록
 - `failed_windows`: 오류, 시도 횟수, 수집 요약을 기록하고 다음 성공 시 제거
+- `code_revision`: apply 청크를 실행한 7~40자 Git revision. 작업 fingerprint에는
+  포함하지 않지만 30일 사람 검수 증빙은 모든 청크의 revision이 같아야 한다.
 - `idempotency_key`: 작업 fingerprint와 날짜 청크로 만든 안정 키
 - `company_master_synced`: 회사 마스터 적재가 완료되었는지 표시
 
-체크포인트는 각 청크 후 임시 파일을 같은 디렉터리에 쓴 다음 원자적으로 교체한다. 범위·소스·페이지 한도 중 하나라도 달라지면 fingerprint 불일치로 중단한다. 다른 작업을 시작할 때만 `--restart`로 체크포인트를 명시적으로 교체한다. 공시 접수번호 기반 `Document` ID, 안정적인 사건 ID, 청크별 결정적 실행 ID를 사용하므로 동일 청크의 재시도는 신규 row 생성이 아니라 업서트다.
+체크포인트는 먼저 운영 MySQL에 optimistic version으로 기록하고 정확한 ACK를
+받은 뒤, 로컬 증빙 사본을 임시 파일로 써 원자 교체한다. 범위·소스·페이지
+한도 중 하나라도 달라지면 fingerprint 불일치로 중단한다. 다른 작업을 시작할
+때만 `--restart`로 원격 체크포인트를 명시적으로 교체한다. 공시 접수번호 기반
+`Document` ID, 안정적인 사건 ID, 청크별 결정적 실행 ID를 사용하므로 동일
+청크의 재시도는 신규 row 생성이 아니라 업서트다.
 
 실패 창의 `attempt`는 재시도마다 증가하며 성공하면 실패 맵에서 제거된다. 완료·실패 맵에 같은 창이 있거나, 키와 내부 날짜·상태·시도 횟수가 맞지 않는 손상 체크포인트는 자동으로 건너뛰지 않고 중단한다. 청크의 안정 `idempotency_key`가 동일 실행 ID를 보장하므로 `retrieved_at`과 수집 실행시각은 실제 재시도 시각을 기록한다.
 

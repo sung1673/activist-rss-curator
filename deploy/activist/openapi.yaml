@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: BSIDE Governance Intelligence API
-  version: 1.10.0
+  version: 1.11.0
   description: >-
     Public, read-only governance event records and role-gated operations APIs.
     Document title and body fields preserve their original language; the API
@@ -10,6 +10,12 @@ info:
     while it is preview. Health and this specification remain public; the API
     root descriptor is a public data route and is therefore closed with 503.
 x-changelog:
+  - version: 1.11.0
+    date: '2026-07-24'
+    changes:
+      - Added the ops-only, paginated DART human-review corpus with a deterministic full-corpus digest and strict correction-chain integrity checks.
+      - Bound DART quota, review corpus, and HMAC governance writes to the same MySQL server, database, and table-prefix identity; quota and HMAC writes reject a mismatched expected binding before opening a transaction.
+      - Governance HMAC writes now carry an expected backend binding inside the signed body and reject mismatches before opening a transaction.
   - version: 1.10.0
     date: '2026-07-24'
     changes:
@@ -513,6 +519,44 @@ paths:
               schema: {$ref: '#/components/schemas/OfficialRunLedgerPage'}
         '400': {description: Invalid cursor or date range}
         '401': {$ref: '#/components/responses/Unauthorized'}
+  /ops/dart-review-corpus:
+    get:
+      tags: [Operations]
+      security: [{bearerAuth: []}]
+      summary: Export the exact OpenDART document-event review corpus
+      description: >-
+        Available while the public release state is closed. The half-open KST
+        date range is [from,to), is limited to 31 days, and to cannot be later
+        than the API server's current Asia/Seoul date. Only official:dart
+        official_disclosure documents are included. Every document must have
+        exactly one event link and a matching company or the request fails
+        closed. The receipt date encoded in the first eight external_id digits
+        must equal the UTC published_at date. corpus_sha256 is SHA-256 over
+        sorted-key compact UTF-8 JSON plus a newline for every item in the
+        complete range, ordered by published_at, document_id and event_id.
+        has_later_correction is the boolean OpenDART
+        source flag stored with the document, while has_successor reports an
+        actual correction_of_document_id successor in the database.
+        is_correction and is_cancelled use the linked event's persisted source
+        flags with safe lineage and lifecycle fallbacks. Source payloads are
+        read only for these booleans and no payload_json field is exposed.
+        backend_binding_id binds the page and full-corpus digest to the serving
+        MySQL database and table namespace without disclosing either value.
+      parameters:
+        - {name: from, in: query, required: true, schema: {type: string, format: date}}
+        - {name: to, in: query, required: true, schema: {type: string, format: date}, description: Exclusive upper KST date, no later than the current KST date.}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 512}}
+      responses:
+        '200':
+          description: A page plus the complete-range population count and canonical digest
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DartReviewCorpusPage'}
+        '400': {description: Missing or invalid range, limit, or range-bound cursor}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '503': {description: Ambiguous linkage, malformed DART identity or metadata, unavailable backend binding, or response item over budget}
   /ops/dart-quota:
     get:
       tags: [Operations]
@@ -521,9 +565,14 @@ paths:
       parameters:
         - {name: quota_day, in: query, required: true, schema: {type: string, format: date}}
       responses:
-        '200': {description: Current used, remaining and 020-block state}
+        '200':
+          description: Current used, remaining and 020-block state, bound to the serving MySQL backend
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DartQuotaStatus'}
         '400': {description: quota_day differs from the server current KST date}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {description: The serving MySQL backend identity cannot be derived safely}
     post:
       tags: [Operations]
       security: [{bearerAuth: []}]
@@ -545,6 +594,7 @@ paths:
         '400': {description: Exact request contract or KST day mismatch}
         '409': {description: Day blocked by 020, missing cause attempt or idempotency conflict}
         '429': {description: The 10,000-request KST-day limit is exhausted}
+        '503': {description: The serving MySQL backend identity cannot be derived safely}
   /ops/official-site-rights:
     get:
       tags: [Operations]
@@ -1762,6 +1812,55 @@ components:
             has_more: {type: boolean}
             next_cursor: {type: [string, 'null'], maxLength: 512}
         api_version: {type: string, const: v1}
+    DartReviewCorpusItem:
+      type: object
+      additionalProperties: false
+      required: [document_id, event_id, company_id, company_name, event_type, revision_status, external_id, title, original_language, original_url, published_at, source_right_id, correction_of_document_id, version_no, has_later_correction, has_successor, is_correction, is_cancelled, event_verification_status, document_verification_status, document_publication_status, identity_status, review_status, importance]
+      properties:
+        document_id: {type: string, pattern: '^dart:[0-9]{14}$'}
+        event_id: {$ref: '#/components/schemas/EntityId'}
+        company_id: {type: string, pattern: '^[0-9]{8}$'}
+        company_name: {type: string, minLength: 1, maxLength: 255, pattern: '.*\S.*'}
+        event_type: {type: string, pattern: '^[a-z][a-z0-9_.:\-]{0,63}$'}
+        revision_status: {type: string, enum: [withdrawal_linked, withdrawal_unlinked, correction_linked, correction_unlinked, original_superseded, current]}
+        external_id: {type: string, pattern: '^[0-9]{14}$'}
+        title: {type: string, minLength: 1, maxLength: 700, pattern: '.*\S.*'}
+        original_language: {type: string, pattern: '^[a-z]{2,3}(?:-[A-Z]{2})?$'}
+        original_url: {type: string, format: uri, maxLength: 65535, pattern: '^[Hh][Tt][Tt][Pp][Ss]://', description: Credentials and fragments are rejected.}
+        published_at: {type: string, format: date-time}
+        source_right_id: {type: string, const: 'official:dart'}
+        correction_of_document_id: {type: [string, 'null'], pattern: '^dart:[0-9]{14}$'}
+        version_no: {type: integer, minimum: 1}
+        has_later_correction: {type: boolean, description: OpenDART source flag persisted on this document.}
+        has_successor: {type: boolean, description: Whether a DART document actually names this document in correction_of_document_id.}
+        is_correction: {type: boolean, description: Linked event source flag with document-lineage fallback.}
+        is_cancelled: {type: boolean, description: Linked event source flag with withdrawn lifecycle fallback.}
+        event_verification_status: {type: string, pattern: '^[a-z][a-z0-9_.:\-]{0,63}$'}
+        document_verification_status: {type: string, pattern: '^[a-z][a-z0-9_.:\-]{0,63}$'}
+        document_publication_status: {type: string, pattern: '^[a-z][a-z0-9_.:\-]{0,63}$'}
+        identity_status: {type: string, pattern: '^[a-z][a-z0-9_.:\-]{0,63}$'}
+        review_status: {type: string, pattern: '^[a-z][a-z0-9_.:\-]{0,63}$'}
+        importance: {type: string, pattern: '^[a-z][a-z0-9_.:\-]{0,63}$'}
+    DartReviewCorpusPage:
+      type: object
+      additionalProperties: false
+      required: [ok, contract_version, range, population_count, corpus_sha256, backend_binding_id, items, next_cursor, api_version]
+      properties:
+        ok: {type: boolean, const: true}
+        contract_version: {type: string, const: dart-review-corpus-v1}
+        range:
+          type: object
+          additionalProperties: false
+          required: [from, to]
+          properties:
+            from: {type: string, format: date}
+            to: {type: string, format: date, description: Exclusive Asia/Seoul upper bound.}
+        population_count: {type: integer, minimum: 0}
+        corpus_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+        backend_binding_id: {type: string, pattern: '^[a-f0-9]{64}$'}
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DartReviewCorpusItem'}}
+        next_cursor: {type: [string, 'null'], maxLength: 512}
+        api_version: {type: string, const: v1}
     OfficialScheduleEvidence:
       type: object
       additionalProperties: false
@@ -1796,26 +1895,60 @@ components:
     DartQuotaConsumeRequest:
       type: object
       additionalProperties: false
-      required: [action, attempt_id, quota_day, operation, code_revision]
+      required: [action, attempt_id, quota_day, operation, code_revision, expected_backend_binding_id]
       properties:
         action: {type: string, const: consume}
         attempt_id: {$ref: '#/components/schemas/EntityId'}
         quota_day: {type: string, format: date, description: Must equal the API server's current Asia/Seoul date.}
         operation: {type: string, enum: [list, corp_code]}
         code_revision: {type: string, pattern: '^[a-f0-9]{7,40}$'}
+        expected_backend_binding_id:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: Must match the serving MySQL binding before any quota row is mutated.
     DartQuotaBlockRequest:
       type: object
       additionalProperties: false
-      required: [action, attempt_id, quota_day, reason, code_revision]
+      required: [action, attempt_id, quota_day, reason, code_revision, expected_backend_binding_id]
       properties:
         action: {type: string, const: block_020}
         attempt_id: {$ref: '#/components/schemas/EntityId'}
         quota_day: {type: string, format: date}
         reason: {type: string, const: opendart_status_020}
         code_revision: {type: string, pattern: '^[a-f0-9]{7,40}$'}
+        expected_backend_binding_id:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: Must match the serving MySQL binding before any quota row is mutated.
+    DartQuotaStatus:
+      type: object
+      additionalProperties: false
+      required: [ok, action, attempt_id, quota_day, accepted, limit_count, used_count, remaining_count, duplicate, blocked_until, backend_binding_id, server_kst_date, block_reason, blocked_by_attempt_id, blocked_at, updated_at, api_version]
+      properties:
+        ok: {type: boolean, const: true}
+        action: {type: string, const: status}
+        attempt_id: {type: 'null'}
+        quota_day: {type: string, format: date}
+        accepted: {type: integer, const: 0}
+        limit_count: {type: integer, const: 10000}
+        used_count: {type: integer, minimum: 0, maximum: 10000}
+        remaining_count: {type: integer, minimum: 0, maximum: 10000}
+        duplicate: {type: boolean, const: false}
+        blocked_until: {type: [string, 'null'], format: date-time}
+        backend_binding_id: {type: string, pattern: '^[a-f0-9]{64}$'}
+        server_kst_date: {type: string, format: date}
+        block_reason: {type: [string, 'null']}
+        blocked_by_attempt_id:
+          anyOf:
+            - {$ref: '#/components/schemas/EntityId'}
+            - {type: 'null'}
+        blocked_at: {type: [string, 'null'], format: date-time}
+        updated_at: {type: [string, 'null'], format: date-time}
+        api_version: {type: string, const: v1}
     DartQuotaAcknowledgement:
       type: object
-      required: [ok, action, attempt_id, quota_day, accepted, limit_count, used_count, remaining_count, duplicate, blocked_until, api_version]
+      additionalProperties: false
+      required: [ok, action, attempt_id, quota_day, accepted, limit_count, used_count, remaining_count, duplicate, blocked_until, backend_binding_id, api_version]
       properties:
         ok: {type: boolean, const: true}
         action: {type: string, enum: [consume, block_020]}
@@ -1827,6 +1960,7 @@ components:
         remaining_count: {type: integer, minimum: 0, maximum: 9999}
         duplicate: {type: boolean}
         blocked_until: {type: [string, 'null'], format: date-time}
+        backend_binding_id: {type: string, pattern: '^[a-f0-9]{64}$'}
         api_version: {type: string, const: v1}
     OfficialSiteRight:
       type: object
@@ -2141,6 +2275,13 @@ x-hmac-actions:
       idempotent: false
   official-governance-ingest-contract:
     schema_version: 10
+    backend_binding:
+      request_field: expected_backend_binding_id
+      request_pattern: '^[a-f0-9]{64}$'
+      signed_body_required: true
+      verified_before_transaction: true
+      mismatch_http_status: 409
+      success_ack_field: backend_binding_id
     canonical_identity:
       complete_requires: [company_id, event_type, identity_action, identity_target, identity_actor_id, identity_effective_at, identity_deadline_at, comparison_key]
       comparison_key_pattern: '^eventcmp:v1:[a-f0-9]{64}$'

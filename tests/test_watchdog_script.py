@@ -28,6 +28,21 @@ def test_parse_timestamp_normalizes_utc() -> None:
     assert watchdog.parse_timestamp("not-a-date") is None
 
 
+def test_expected_official_sources_are_a_closed_set() -> None:
+    watchdog = load_watchdog()
+
+    assert watchdog.parse_expected_official_sources("dart") == ("dart",)
+    assert watchdog.parse_expected_official_sources("kind,dart") == ("dart", "kind")
+    with pytest.raises(ValueError, match="required"):
+        watchdog.parse_expected_official_sources(None)
+    with pytest.raises(ValueError, match="duplicate"):
+        watchdog.parse_expected_official_sources("dart,dart")
+    with pytest.raises(ValueError, match="unsupported"):
+        watchdog.parse_expected_official_sources("dart,telegram")
+    with pytest.raises(ValueError, match="DART or DART and KIND"):
+        watchdog.parse_expected_official_sources("kind")
+
+
 def test_missing_configuration_emits_incident_output(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     watchdog = load_watchdog()
     output_path = tmp_path / "github-output.txt"
@@ -145,6 +160,7 @@ def test_future_timestamps_fail_closed(tmp_path: Path, monkeypatch) -> None:  # 
     monkeypatch.setenv("BSIDE_OPS_TOKEN", "token")
     monkeypatch.setenv("GITHUB_SHA", "a" * 40)
     monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
+    monkeypatch.setenv("WATCHDOG_EXPECTED_OFFICIAL_SOURCES", "dart,kind")
     monkeypatch.setattr(
         watchdog,
         "fetch_health",
@@ -187,7 +203,7 @@ def test_future_timestamps_fail_closed(tmp_path: Path, monkeypatch) -> None:  # 
     assert "timestamp is" in report and "in the future" in report
 
 
-def test_one_fresh_source_cannot_hide_missing_other_official_source(
+def test_shadow_requires_kind_when_dart_is_fresh(
     tmp_path: Path, monkeypatch
 ) -> None:  # type: ignore[no-untyped-def]
     watchdog = load_watchdog()
@@ -199,6 +215,7 @@ def test_one_fresh_source_cannot_hide_missing_other_official_source(
     monkeypatch.setenv("BSIDE_OPS_TOKEN", "token")
     monkeypatch.setenv("GITHUB_SHA", "a" * 40)
     monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
+    monkeypatch.setenv("WATCHDOG_EXPECTED_OFFICIAL_SOURCES", "dart,kind")
     monkeypatch.setattr(
         watchdog,
         "fetch_health",
@@ -241,6 +258,92 @@ def test_one_fresh_source_cannot_hide_missing_other_official_source(
     assert "KIND has no successful ingest timestamp" in report
 
 
+def test_dart_canary_ignores_absent_kind_state(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    watchdog = load_watchdog()
+    output_path = tmp_path / "github-output.txt"
+    now = datetime.now(timezone.utc)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("BSIDE_API_BASE_URL", "https://api.example.test")
+    monkeypatch.setenv("BSIDE_PUBLIC_WEB_URL", "https://www.example.test")
+    monkeypatch.setenv("BSIDE_OPS_TOKEN", "token")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
+    monkeypatch.setenv("WATCHDOG_EXPECTED_OFFICIAL_SOURCES", "dart")
+    monkeypatch.setattr(
+        watchdog,
+        "fetch_health",
+        lambda *_args: {
+            "last_success_at": now.isoformat(),
+            "active_deployment_status": "observed",
+            "active_deployment": {
+                "build_sha": "b" * 40,
+                "observed_at": now.isoformat(),
+                "distribution_target": "api",
+            },
+            "official_sources": {
+                "dart": {"last_scheduled_success_at": now.isoformat()},
+            },
+        },
+    )
+    monkeypatch.setattr(
+        watchdog,
+        "probe_url",
+        lambda *, url, route_template, build_sha: watchdog.AvailabilityObservation(
+            observation_id="availability:" + route_template,
+            route_template=route_template,
+            observed_at=now.isoformat(),
+            http_status=200,
+            duration_ms=1,
+            succeeded=True,
+            build_sha=build_sha,
+        ),
+    )
+    monkeypatch.setattr(
+        watchdog,
+        "submit_availability",
+        lambda _base, _token, observations: {"accepted_count": len(observations)},
+    )
+
+    assert watchdog.main() == 0
+    output = output_path.read_text(encoding="utf-8")
+    assert "incident=false" in output
+    report = (tmp_path / ".watchdog-report.md").read_text(encoding="utf-8")
+    assert "HEALTHY" in report
+    assert "KIND" not in report
+
+
+@pytest.mark.parametrize(
+    "configured_sources",
+    [None, "dart,dart", "dart,telegram"],
+    ids=["missing", "duplicate", "unsupported"],
+)
+def test_invalid_expected_source_configuration_is_an_incident_without_network(
+    configured_sources: str | None,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    watchdog = load_watchdog()
+    output_path = tmp_path / "github-output.txt"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("BSIDE_API_BASE_URL", "https://api.example.test")
+    monkeypatch.setenv("BSIDE_PUBLIC_WEB_URL", "https://www.example.test")
+    monkeypatch.setenv("BSIDE_OPS_TOKEN", "token")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
+    if configured_sources is None:
+        monkeypatch.delenv("WATCHDOG_EXPECTED_OFFICIAL_SOURCES", raising=False)
+    else:
+        monkeypatch.setenv("WATCHDOG_EXPECTED_OFFICIAL_SOURCES", configured_sources)
+
+    def unexpected_fetch(*_args):  # type: ignore[no-untyped-def]
+        raise AssertionError("invalid source configuration must block network access")
+
+    monkeypatch.setattr(watchdog, "fetch_health", unexpected_fetch)
+
+    assert watchdog.main() == 0
+    assert "incident=true" in output_path.read_text(encoding="utf-8")
+    report = (tmp_path / ".watchdog-report.md").read_text(encoding="utf-8")
+    assert "Invalid official source configuration" in report
+
+
 def test_sha_mismatch_still_submits_observations_for_authenticated_active_build(
     tmp_path: Path, monkeypatch
 ) -> None:  # type: ignore[no-untyped-def]
@@ -255,6 +358,7 @@ def test_sha_mismatch_still_submits_observations_for_authenticated_active_build(
     monkeypatch.setenv("WATCHDOG_GOVERNANCE_PAGES", "true")
     monkeypatch.setenv("GITHUB_SHA", "f" * 40)
     monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
+    monkeypatch.setenv("WATCHDOG_EXPECTED_OFFICIAL_SOURCES", "dart,kind")
     monkeypatch.setattr(
         watchdog,
         "fetch_health",
