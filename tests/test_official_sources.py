@@ -588,6 +588,8 @@ def test_kind_adapter_envelope_requires_explicit_failure_and_pagination_contract
 
 def test_dart_no_data_is_empty_and_errors_are_not_silenced() -> None:
     assert parse_dart_list_payload({"status": "013", "message": "조회된 데이타가 없습니다."}) == ([], 0, 0)
+    with pytest.raises(OfficialSourceError, match=r"non-success status 010"):
+        parse_dart_list_payload({"status": "010", "message": "등록되지 않은 키입니다."})
     with pytest.raises(OfficialSourceError):
         parse_dart_list_payload({"status": "020", "message": "요청 제한 초과"})
     with pytest.raises(OfficialSourceError, match="omitted list"):
@@ -724,6 +726,7 @@ def test_dart_and_kind_success_http_status_errors_do_not_echo_hostile_body() -> 
     with pytest.raises(OfficialSourceError) as kind_error:
         parse_kind_list_payload({"status": secret, "items": []})
 
+    assert str(dart_error.value) == "OpenDART list returned non-success status invalid"
     assert secret not in str(dart_error.value)
     assert secret not in str(kind_error.value)
 
