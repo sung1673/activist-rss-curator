@@ -59,7 +59,7 @@ def test_php73_job_runs_isolated_mysql_http_staging_smoke() -> None:
     assert collect["if"] == "failure()"
     assert "docker logs" in collect["run"]
     assert preserve["if"] == "failure()"
-    assert preserve["uses"] == "actions/upload-artifact@v7"
+    assert preserve["uses"] == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
 
 
 def test_php73_fixture_contains_no_repository_secret_reference() -> None:

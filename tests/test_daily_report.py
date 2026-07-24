@@ -474,7 +474,6 @@ def test_daily_report_write_only_writes_page_before_send(tmp_path, monkeypatch) 
     )
     monkeypatch.setenv("CURATOR_DAILY_REPORT_WRITE_ONLY", "1")
     monkeypatch.setattr(daily_report, "now_in_timezone", lambda _timezone: now)
-    monkeypatch.setattr(daily_report, "telegram_is_configured", lambda _config: True)
 
     def fail_send(*_args, **_kwargs):  # type: ignore[no-untyped-def]
         raise AssertionError("write-only mode must not send Telegram messages")
@@ -488,7 +487,7 @@ def test_daily_report_write_only_writes_page_before_send(tmp_path, monkeypatch) 
     assert (tmp_path / "public" / "feed" / "latest.html").exists()
 
 
-def test_daily_report_non_write_only_fails_when_transport_is_not_configured(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_daily_report_non_write_only_stays_web_only_without_transport(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     now = datetime(2026, 5, 1, 10, 20, tzinfo=ZoneInfo("Asia/Seoul"))
     (tmp_path / "data").mkdir()
     (tmp_path / "config.yaml").write_text("report:\n  image_enrich_limit: 0\n", encoding="utf-8")
@@ -498,16 +497,15 @@ def test_daily_report_non_write_only_fails_when_transport_is_not_configured(tmp_
     )
     monkeypatch.delenv("CURATOR_DAILY_REPORT_WRITE_ONLY", raising=False)
     monkeypatch.setattr(daily_report, "now_in_timezone", lambda _timezone: now)
-    monkeypatch.setattr(daily_report, "telegram_is_configured", lambda _config: False)
 
     summary = daily_report.send_daily_report(tmp_path)
 
     assert summary["daily_report_written"] == 1
     assert summary["daily_report_sent"] == 0
-    assert summary["daily_report_failed"] == 1
+    assert summary["daily_report_failed"] == 0
 
 
-def test_daily_report_enqueue_uses_idempotent_remote_outbox_without_consuming(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_daily_report_enqueue_is_permanently_disabled() -> None:
     now = datetime(2026, 7, 16, 6, 5, tzinfo=ZoneInfo("Asia/Seoul"))
     report = {
         "date_id": "2026-07-16",
@@ -517,26 +515,17 @@ def test_daily_report_enqueue_uses_idempotent_remote_outbox_without_consuming(mo
         "stats": {"stories": 0, "articles": 0, "sources": 0},
     }
     config = {"timezone": "Asia/Seoul", "telegram": {"chat_id": "@bside"}}
-    posted: list[tuple[str, dict[str, object]]] = []
-
-    monkeypatch.setattr(daily_report, "remote_api_configured", lambda: True)
-    monkeypatch.setattr(daily_report, "telegram_chat_id", lambda _config: "@bside")
-
-    def fake_post(action: str, payload: dict[str, object]) -> dict[str, object]:
-        posted.append((action, payload))
-        return {"ok": True, "accepted": 1, "rejected": 0}
-
-    monkeypatch.setattr(daily_report, "post_remote_action", fake_post)
     summary = daily_report.enqueue_daily_report(report, config)
 
-    assert summary == {"daily_report_queued": 1, "daily_report_sent": 0, "daily_report_failed": 0}
-    assert posted[0][0] == "enqueue_delivery_outbox"
-    delivery = posted[0][1]["deliveries"][0]  # type: ignore[index]
-    assert delivery["delivery_id"] == "daily:2026-07-16"  # type: ignore[index]
-    assert delivery["idempotency_key"] == "daily:2026-07-16"  # type: ignore[index]
+    assert summary == {
+        "daily_report_queued": 0,
+        "daily_report_sent": 0,
+        "daily_report_failed": 0,
+        "outbound_delivery_disabled": 1,
+    }
 
 
-def test_daily_report_outbox_carries_all_source_right_lineage(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_daily_report_source_right_lineage_remains_available_for_audit() -> None:
     now = datetime(2026, 7, 16, 6, 5, tzinfo=ZoneInfo("Asia/Seoul"))
     report = {
         "date_id": "2026-07-16",
@@ -556,26 +545,15 @@ def test_daily_report_outbox_carries_all_source_right_lineage(monkeypatch) -> No
         "duplicate_records": [{"source_right_id": "official:dart"}],
     }
     config = {"timezone": "Asia/Seoul", "telegram": {"chat_id": "@bside"}}
-    posted: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr(daily_report, "remote_api_configured", lambda: True)
-    monkeypatch.setattr(daily_report, "telegram_chat_id", lambda _config: "@bside")
-
-    def fake_post(action: str, payload: dict[str, object]) -> dict[str, object]:
-        posted.append((action, payload))
-        return {"ok": True, "accepted": 1, "rejected": 0}
-
-    monkeypatch.setattr(daily_report, "post_remote_action", fake_post)
-    assert daily_report.enqueue_daily_report(report, config)["daily_report_queued"] == 1
-    payload = posted[0][1]["deliveries"][0]["payload"]  # type: ignore[index]
-    assert payload["rights_lineage_complete"] is True  # type: ignore[index]
-    assert payload["source_right_ids"] == [  # type: ignore[index]
+    assert daily_report.enqueue_daily_report(report, config)["daily_report_queued"] == 0
+    assert daily_report.report_source_right_ids(report) == [
         "official:dart",
         "telegram:licensed-a",
         "telegram:licensed-b",
     ]
 
 
-def test_legacy_daily_delivery_sends_directly_without_outbox(monkeypatch) -> None:
+def test_legacy_daily_delivery_helper_is_permanently_disabled() -> None:
     report = {
         "date_id": "2026-07-16",
         "report_url": "https://news.bside.ai/feed/2026-07-16.html",
@@ -583,26 +561,23 @@ def test_legacy_daily_delivery_sends_directly_without_outbox(monkeypatch) -> Non
         "stats": {"stories": 0, "articles": 0, "sources": 0},
     }
     config = {"telegram": {"chat_id": "@bside"}}
-    sent: list[tuple[str, str]] = []
-    monkeypatch.setattr(daily_report, "telegram_bot_token", lambda: "token")
-    monkeypatch.setattr(daily_report, "telegram_chat_id", lambda _config: "@bside")
-
-    def fake_send(token, destination, _text, _config, **_kwargs):  # type: ignore[no-untyped-def]
-        sent.append((token, destination))
-        return {"ok": True, "message_id": 123}
-
-    monkeypatch.setattr(daily_report, "send_telegram_message", fake_send)
 
     summary = daily_report.deliver_daily_report_direct(report, config)
 
-    assert sent == [("token", "@bside")]
-    assert summary == {"daily_report_queued": 0, "daily_report_sent": 1, "daily_report_failed": 0}
+    assert summary == {"daily_report_queued": 0, "daily_report_sent": 0, "daily_report_failed": 0}
 
 
 def test_daily_delivery_mode_does_not_claim_outbox(monkeypatch) -> None:
     monkeypatch.setenv("CURATOR_DELIVERY_MODE", "outbox-enqueue")
     monkeypatch.delenv("CURATOR_DISABLE_TELEGRAM_SEND", raising=False)
 
-    assert daily_report.daily_report_delivery_mode() == "outbox-enqueue"
+    assert daily_report.daily_report_delivery_mode() == "disabled"
     source = (daily_report.PROJECT_ROOT / "curator" / "daily_report.py").read_text(encoding="utf-8")
-    assert "process_remote_delivery_outbox" not in source
+    for forbidden in (
+        "process_remote_delivery_outbox",
+        "send_telegram_message",
+        "telegram_is_configured",
+        "enqueue_delivery_outbox",
+        "post_remote_action",
+    ):
+        assert forbidden not in source

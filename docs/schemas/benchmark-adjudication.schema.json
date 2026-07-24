@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://news.bside.ai/schemas/benchmark-adjudication.schema.json",
+  "title": "BSIDE benchmark disagreement adjudication",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task",
+    "item_id",
+    "reviewer_a_label",
+    "reviewer_b_label",
+    "final_label",
+    "decision_mode",
+    "decided_by",
+    "reason",
+    "decided_at",
+    "unresolved"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "task": {"enum": ["same_story", "relevance"]},
+    "item_id": {"type": "string", "minLength": 1},
+    "reviewer_a_label": {
+      "enum": ["same_story", "related_but_different", "different", "relevant", "not_relevant"]
+    },
+    "reviewer_b_label": {
+      "enum": ["same_story", "related_but_different", "different", "relevant", "not_relevant"]
+    },
+    "final_label": {
+      "enum": ["same_story", "related_but_different", "different", "relevant", "not_relevant"]
+    },
+    "decision_mode": {"enum": ["reviewer_consensus", "product_owner"]},
+    "decided_by": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "reason": {"type": "string", "minLength": 5},
+    "decided_at": {"type": "string", "format": "date-time"},
+    "unresolved": {"const": false}
+  }
+}

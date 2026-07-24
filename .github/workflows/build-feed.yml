@@ -15,6 +15,7 @@ on:
       - "tests/**"
       - "public/404.html"
       - "public/CNAME"
+      - "public/governance/**"
       - "data/priority_overrides.yaml"
   schedule:
     # KST 08:05-00:35 every 30 minutes.
@@ -36,41 +37,6 @@ on:
           - page_only
       allow_pages_deploy:
         description: "Explicitly allow a manual run to deploy GitHub Pages"
-        required: false
-        type: boolean
-        default: false
-      allow_telegram_delivery:
-        description: "Explicitly allow outbound Telegram delivery (also requires the repository opt-in)"
-        required: false
-        type: boolean
-        default: false
-      send_telegram_test:
-        description: "Send a Telegram smoke-test message"
-        required: false
-        type: boolean
-        default: false
-      resend_last_briefing:
-        description: "Resend the latest periodic Telegram briefing with current formatting"
-        required: false
-        type: boolean
-        default: false
-      resend_recent_articles:
-        description: "Resend recently sent Telegram article clusters with current formatting"
-        required: false
-        type: boolean
-        default: false
-      resend_recent_article_count:
-        description: "Number of recent sent article clusters to resend"
-        required: false
-        type: string
-        default: "1"
-      resend_cluster_guid:
-        description: "Optional exact cluster guid to resend"
-        required: false
-        type: string
-        default: ""
-      send_daily_report:
-        description: "Build a 24-hour HTML daily report and send a Telegram briefing link"
         required: false
         type: boolean
         default: false
@@ -97,13 +63,20 @@ jobs:
     if: vars.ENABLE_LEGACY_PIPELINE == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 75
+    concurrency:
+      group: >-
+        ${{ vars.PAGES_OWNER == 'legacy' &&
+            format('bside-pages-deployment-{0}', github.repository) ||
+            format('bside-pages-nondeploy-legacy-{0}-{1}', github.repository, github.run_id) }}
+      cancel-in-progress: false
+      queue: max
     environment:
       name: github-pages
       url: ${{ steps.pages_deployment_result.outputs.page_url }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
 
@@ -117,14 +90,66 @@ jobs:
           DISPATCH_MODE: ${{ github.event.inputs.run_mode || 'auto' }}
           REF_NAME: ${{ github.ref_name }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
           LEGACY_PAGES_ENABLED: ${{ vars.ENABLE_PAGES }}
           GOVERNANCE_PAGES_ENABLED: ${{ vars.ENABLE_GOVERNANCE_PAGES }}
+          GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          LEGACY_GOVERNANCE_SHADOW: ${{ vars.ENABLE_GOVERNANCE_SHADOW }}
+          TELEGRAM_DELIVERY_ENABLED: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          GOVERNANCE_DELIVERY_ENABLED: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
           ALLOW_PAGES_DEPLOY: ${{ github.event_name != 'workflow_dispatch' || inputs.allow_pages_deploy }}
         run: |
           set -euo pipefail
 
           full_run=false
           page_run=false
+          governance_preview=false
+
+          if [[ "$TELEGRAM_DELIVERY_ENABLED" == "true" || "$GOVERNANCE_DELIVERY_ENABLED" == "true" ]]; then
+            echo "::error::Outbound Telegram delivery is permanently disabled; set both delivery variables to false."
+            exit 1
+          fi
+
+          case "$PAGES_OWNER" in
+            legacy)
+              if [[ "$GOVERNANCE_PAGES_ENABLED" == "true" ]]; then
+                echo "::error::PAGES_OWNER=legacy conflicts with ENABLE_GOVERNANCE_PAGES=true."
+                exit 1
+              fi
+              LEGACY_PAGES_ENABLED=true
+              GOVERNANCE_PAGES_ENABLED=false
+              ;;
+            governance)
+              if [[ "$LEGACY_PAGES_ENABLED" == "true" ]]; then
+                echo "::error::PAGES_OWNER=governance conflicts with ENABLE_PAGES=true."
+                exit 1
+              fi
+              LEGACY_PAGES_ENABLED=false
+              GOVERNANCE_PAGES_ENABLED=true
+              ;;
+            "")
+              ;;
+            *)
+              echo "::error::PAGES_OWNER must be legacy or governance when set."
+              exit 1
+              ;;
+          esac
+
+          case "$GOVERNANCE_PIPELINE_MODE" in
+            off|dart_canary|shadow|live|"")
+              ;;
+            *)
+              echo "::error::GOVERNANCE_PIPELINE_MODE must be off, dart_canary, shadow, or live."
+              exit 1
+              ;;
+          esac
+          if [[ "$LEGACY_GOVERNANCE_SHADOW" == "true" && ( "$GOVERNANCE_PIPELINE_MODE" == "off" || "$GOVERNANCE_PIPELINE_MODE" == "dart_canary" ) ]]; then
+            echo "::error::ENABLE_GOVERNANCE_SHADOW=true conflicts with GOVERNANCE_PIPELINE_MODE=$GOVERNANCE_PIPELINE_MODE."
+            exit 1
+          fi
+          if [[ "$LEGACY_PAGES_ENABLED" == "true" && ( "$GOVERNANCE_PIPELINE_MODE" == "shadow" || "$GOVERNANCE_PIPELINE_MODE" == "live" || ( -z "$GOVERNANCE_PIPELINE_MODE" && "$LEGACY_GOVERNANCE_SHADOW" == "true" ) ) ]]; then
+            governance_preview=true
+          fi
 
           if [[ "$EVENT_NAME" == "schedule" ]]; then
             full_run=true
@@ -142,9 +167,9 @@ jobs:
                 ;;
             esac
           elif [[ "$EVENT_NAME" == "push" ]]; then
-            if [[ "$COMMIT_MESSAGE" == *"[page-only]"* || "$COMMIT_MESSAGE" == *"[send-daily-report]"* ]]; then
+            if [[ "$COMMIT_MESSAGE" == *"[page-only]"* ]]; then
               page_run=true
-            elif [[ "$COMMIT_MESSAGE" == *"[force-collect]"* || "$COMMIT_MESSAGE" == *"[send-regular-update]"* ]]; then
+            elif [[ "$COMMIT_MESSAGE" == *"[force-collect]"* ]]; then
               full_run=true
             else
               base="$EVENT_BEFORE"
@@ -166,7 +191,7 @@ jobs:
               cat changed_files.txt
 
               collection_regex='^(config\.yaml|requirements\.txt|data/priority_overrides\.yaml|curator/(ai|archive|cluster|config|dates|dedupe|fetch|main|normalize|priority|relevance|remote_api|rss_writer|state|story_judge|summaries|telegram_dashboard|telegram_publisher|telegram_resend|telegram_resend_digest|telegram_smoke_test|telegram_sources)\.py|tests/(conftest|test_archive|test_cluster|test_config|test_dates|test_dedupe|test_fetch|test_main|test_normalize|test_priority|test_relevance|test_remote_api|test_rss_writer|test_state|test_story_judge|test_summaries|test_telegram_dashboard|test_telegram_publisher|test_telegram_resend_digest|test_telegram_sources)\.py)$'
-              page_regex='^(\.github/(workflows/build-feed\.yml|scripts/(prepare-legacy-pages|restore-legacy-pages-archive)\.py)|curator/(daily_report|story_review)\.py|tests/(test_daily_report|test_story_review|test_prepare_legacy_pages|test_restore_legacy_pages_archive|test_workflow_contracts)\.py|public/(404\.html|CNAME))$'
+              page_regex='^(\.github/(workflows/build-feed\.yml|scripts/(prepare-legacy-pages|restore-legacy-pages-archive)\.py)|curator/(daily_report|governance_ui|story_review)\.py|tests/(test_daily_report|test_governance_ui|test_story_review|test_prepare_legacy_pages|test_restore_legacy_pages_archive|test_workflow_contracts)\.py|public/(404\.html|CNAME|governance/.*))$'
 
               if grep -Eq "$collection_regex" changed_files.txt; then
                 full_run=true
@@ -191,7 +216,8 @@ jobs:
           echo "full=$full_run" >> "$GITHUB_OUTPUT"
           echo "page=$page_run" >> "$GITHUB_OUTPUT"
           echo "deploy_pages=$deploy_pages" >> "$GITHUB_OUTPUT"
-          echo "Run mode: full=$full_run page=$page_run deploy_pages=$deploy_pages"
+          echo "governance_preview=$governance_preview" >> "$GITHUB_OUTPUT"
+          echo "Run mode: full=$full_run page=$page_run deploy_pages=$deploy_pages governance_preview=$governance_preview"
 
       - name: Initialize curator run metrics
         if: ${{ steps.run_mode.outputs.full == 'true' }}
@@ -203,7 +229,7 @@ jobs:
           > "$CURATOR_RUN_METRICS_PATH"
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
@@ -216,7 +242,7 @@ jobs:
       - name: Resolve previous legacy Pages artifact
         if: steps.run_mode.outputs.deploy_pages == 'true'
         id: previous_legacy_pages
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const expectedWorkflowPath = ".github/workflows/build-feed.yml";
@@ -270,7 +296,7 @@ jobs:
 
       - name: Download previous legacy Pages artifact
         if: steps.run_mode.outputs.deploy_pages == 'true'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           artifact-ids: ${{ steps.previous_legacy_pages.outputs.artifact_id }}
           path: ${{ runner.temp }}/previous-legacy-pages
@@ -281,11 +307,8 @@ jobs:
           digest-mismatch: error
 
       - name: Send Telegram smoke test
-        if: ${{ vars.ENABLE_TELEGRAM_DELIVERY == 'true' && vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && github.event_name == 'workflow_dispatch' && inputs.allow_telegram_delivery && inputs.send_telegram_test }}
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m curator.telegram_smoke_test
+        if: ${{ false }} # Permanent web-only distribution policy.
+        run: echo "Telegram outbound delivery is permanently disabled."
 
       - name: Build feed
         if: ${{ steps.run_mode.outputs.full == 'true' }}
@@ -320,9 +343,42 @@ jobs:
           sys.exit(0 if payload.get('ok') is True and payload.get('status') == 'complete'
           else 'curator run metrics did not complete successfully')"
 
+      - name: Snapshot actual legacy engine output for shadow comparison
+        id: legacy_shadow
+        if: >-
+          success() && steps.run_mode.outputs.full == 'true' &&
+          (vars.GOVERNANCE_PIPELINE_MODE == 'shadow' ||
+           vars.GOVERNANCE_PIPELINE_MODE == 'live' ||
+           (vars.GOVERNANCE_PIPELINE_MODE == '' && vars.ENABLE_GOVERNANCE_SHADOW == 'true'))
+        env:
+          SHADOW_OUTPUT: ${{ runner.temp }}/legacy-shadow/engine-output.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m curator.shadow_engine snapshot-legacy-state \
+            --state data/state.json \
+            --output "$SHADOW_OUTPUT" \
+            --expected-revision "$GITHUB_SHA" \
+            --source-run-id "github:$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT"
+          observation_date="$(python -c 'import json, os, pathlib; value=json.loads(pathlib.Path(os.environ["SHADOW_OUTPUT"]).read_text(encoding="utf-8")); print(value["observation_date"])')"
+          [[ "$observation_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || {
+            echo "::error::Legacy shadow output omitted a valid KST observation date."
+            exit 1
+          }
+          echo "observation_date=$observation_date" >> "$GITHUB_OUTPUT"
+
+      - name: Preserve immutable legacy shadow engine output
+        if: steps.legacy_shadow.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shadow-engine-legacy-${{ steps.legacy_shadow.outputs.observation_date }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/legacy-shadow/engine-output.json
+          if-no-files-found: error
+          retention-days: 21
+
       - name: Publish curator run metrics
         if: ${{ always() && steps.run_mode.outputs.full == 'true' }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: curator-run-metrics-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/curator-run-metrics.json
@@ -361,21 +417,23 @@ jobs:
           python -m curator.telegram_dashboard write
 
       - name: Resend last Telegram briefing
-        if: ${{ vars.ENABLE_TELEGRAM_DELIVERY == 'true' && vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && ((github.event_name == 'workflow_dispatch' && inputs.allow_telegram_delivery && inputs.resend_last_briefing) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[resend-last-briefing]'))) }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m curator.telegram_resend_digest
+        if: ${{ false }} # Permanent web-only distribution policy.
+        run: echo "Telegram outbound delivery is permanently disabled."
 
       - name: Resend recent Telegram articles
-        if: ${{ vars.ENABLE_TELEGRAM_DELIVERY == 'true' && vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && github.event_name == 'workflow_dispatch' && inputs.allow_telegram_delivery && inputs.resend_recent_articles }}
+        if: ${{ false }} # Permanent web-only distribution policy.
+        run: echo "Telegram outbound delivery is permanently disabled."
+
+      - name: Configure token-gated governance shadow preview
+        if: steps.run_mode.outputs.deploy_pages == 'true' && steps.run_mode.outputs.governance_preview == 'true'
         env:
-          TELEGRAM_RESEND_COUNT: ${{ inputs.resend_recent_article_count }}
-          TELEGRAM_RESEND_GUID: ${{ inputs.resend_cluster_guid }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m curator.telegram_resend
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash .github/scripts/require-env.sh GOVERNANCE_API_BASE_URL BSIDE_PUBLIC_WEB_URL
+          python -m curator.governance_ui --root .
 
       - name: Prepare allowlisted legacy Pages artifact
         if: steps.run_mode.outputs.deploy_pages == 'true'
@@ -383,39 +441,65 @@ jobs:
         shell: bash
         env:
           LEGACY_PAGES_ARTIFACT_PATH: ${{ runner.temp }}/legacy-pages-${{ github.run_id }}-${{ github.run_attempt }}
+          GOVERNANCE_PREVIEW_ENABLED: ${{ steps.run_mode.outputs.governance_preview }}
         run: |
           set -euo pipefail
-          python .github/scripts/prepare-legacy-pages.py \
-            --source public \
+          arguments=(
+            --source public
             --destination "$LEGACY_PAGES_ARTIFACT_PATH"
+          )
+          if [[ "$GOVERNANCE_PREVIEW_ENABLED" == "true" ]]; then
+            arguments+=(--governance-preview-source public/governance)
+          fi
+          python .github/scripts/prepare-legacy-pages.py "${arguments[@]}"
           echo "path=$LEGACY_PAGES_ARTIFACT_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Revalidate legacy ownership at the deployment boundary
+        if: steps.run_mode.outputs.deploy_pages == 'true'
+        env:
+          PAGES_OWNER_SNAPSHOT: ${{ vars.PAGES_OWNER }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PAGES_OWNER_SNAPSHOT" == "legacy" ]] || {
+            echo "::error::This run did not start with legacy Pages ownership; deployment is blocked."
+            exit 1
+          }
 
       - name: Configure Pages
         if: steps.run_mode.outputs.deploy_pages == 'true'
-        uses: actions/configure-pages@v6
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Upload Pages artifact
         if: steps.run_mode.outputs.deploy_pages == 'true'
         id: pages_artifact
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           name: github-pages
           path: ${{ steps.legacy_pages_artifact.outputs.path }}
 
       - name: Preserve sanitized legacy archive seed
         if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && ((github.event_name == 'schedule' && github.event.schedule == '45 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.preserve_legacy_archive_seed)) }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: legacy-pages-archive-seed
           path: ${{ steps.legacy_pages_artifact.outputs.path }}
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
+
+      - name: Capture shadow preview Pages distribution start
+        if: >-
+          ${{ steps.run_mode.outputs.deploy_pages == 'true' &&
+              steps.run_mode.outputs.governance_preview == 'true' }}
+        id: pages_distribution_start
+        shell: bash
+        run: echo "observed_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
       - name: Deploy to GitHub Pages
         if: steps.run_mode.outputs.deploy_pages == 'true'
         id: deployment
         continue-on-error: true
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
         with:
           artifact_name: github-pages
 
@@ -427,7 +511,7 @@ jobs:
         if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' }}
         id: deployment_retry
         continue-on-error: true
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
         with:
           artifact_name: github-pages
 
@@ -439,7 +523,7 @@ jobs:
         if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' && steps.deployment_retry.outcome == 'failure' }}
         id: deployment_retry_final
         continue-on-error: true
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
         with:
           artifact_name: github-pages
 
@@ -494,9 +578,35 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Succeeded on attempt $selected_attempt: $selected_url" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Record final shadow preview Pages distribution outcome
+        if: >-
+          ${{ always() && !cancelled() &&
+              steps.run_mode.outputs.deploy_pages == 'true' &&
+              steps.run_mode.outputs.governance_preview == 'true' &&
+              steps.pages_distribution_start.outcome == 'success' &&
+              (steps.deployment.outcome == 'success' || steps.deployment.outcome == 'failure') }}
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          DISTRIBUTION_OBSERVED_AT: ${{ steps.pages_distribution_start.outputs.observed_at }}
+          VERIFICATION_OUTCOME: ${{ steps.pages_deployment_result.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERIFICATION_OUTCOME" == "success" || "$VERIFICATION_OUTCOME" == "failure" ]]
+          succeeded=false
+          if [[ "$VERIFICATION_OUTCOME" == "success" ]]; then
+            succeeded=true
+          fi
+          python .github/scripts/record-web-distribution.py \
+            --target pages \
+            --operation legacy-shadow-preview \
+            --succeeded "$succeeded" \
+            --observed-at "$DISTRIBUTION_OBSERVED_AT"
+
       - name: Preserve failed Pages artifact
         if: ${{ !cancelled() && steps.run_mode.outputs.deploy_pages == 'true' && steps.legacy_pages_artifact.outcome == 'success' && steps.pages_deployment_result.outcome == 'failure' }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pages-failed-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ steps.legacy_pages_artifact.outputs.path }}
@@ -504,15 +614,5 @@ jobs:
           retention-days: 7
 
       - name: Send daily report message
-        if: ${{ vars.ENABLE_TELEGRAM_DELIVERY == 'true' && vars.ENABLE_GOVERNANCE_DELIVERY != 'true' && ((github.event_name == 'schedule' && github.event.schedule == '45 20 * * *') || (github.event_name == 'workflow_dispatch' && inputs.allow_telegram_delivery && inputs.send_daily_report) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[send-daily-report]'))) }}
-        env:
-          CURATOR_DATA_SOURCE: mysql
-          CURATOR_REQUIRE_REMOTE_API: "1"
-          CURATOR_DELIVERY_MODE: legacy-direct
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
-          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
-          ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
-        run: python -m curator.daily_report
+        if: ${{ false }} # Permanent web-only distribution policy.
+        run: echo "Telegram outbound delivery is permanently disabled."

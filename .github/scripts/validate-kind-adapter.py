@@ -14,7 +14,6 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Mapping
-from urllib.parse import urlsplit
 
 import httpx
 
@@ -27,6 +26,7 @@ from curator.official_sources import (  # noqa: E402
     OfficialSourceError,
     normalize_kind_datetime,
     parse_kind_list_payload,
+    validate_kind_endpoint,
 )
 
 
@@ -53,11 +53,11 @@ def _first_text(row: Mapping[str, object], fields: tuple[str, ...]) -> str:
 
 def validate_endpoint(endpoint: str) -> None:
     try:
-        parsed = urlsplit(endpoint)
+        validate_kind_endpoint(endpoint)
     except ValueError as exc:
-        raise ValidationError("KIND_DISCLOSURE_ENDPOINT must be an HTTP(S) URL") from exc
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValidationError("KIND_DISCLOSURE_ENDPOINT must be an HTTP(S) URL")
+        raise ValidationError(
+            "KIND_DISCLOSURE_ENDPOINT must be an absolute credential-free HTTPS URL"
+        ) from exc
 
 
 def validate_payload(payload: object) -> int:

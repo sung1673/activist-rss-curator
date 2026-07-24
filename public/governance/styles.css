@@ -501,6 +501,12 @@ h3 { line-height: 1.28; }
   gap: 18px;
 }
 
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+}
+
 .field { display: grid; gap: .38rem; }
 .field--full { grid-column: 1 / -1; }
 
@@ -572,6 +578,30 @@ dd { margin: 0; font-size: .88rem; }
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.body-page-status {
+  margin: 1rem 0 0;
+  color: var(--ink-soft);
+  font-size: .8rem;
+  font-weight: 700;
+}
+
+.revision-row {
+  padding: 20px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.revision-row:first-child { border-top: 1px solid var(--line); }
+.revision-row h3 { margin: .55rem 0 .35rem; }
+
+.revision-change {
+  padding: .7rem .85rem;
+  margin: .65rem 0;
+  background: #f0f2ef;
+  border-left: 3px solid var(--line-dark);
+}
+
+.revision-change p { margin: .25rem 0 0; }
 
 .claim-card h3,
 .commitment-card h3,

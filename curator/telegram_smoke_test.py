@@ -15,9 +15,9 @@ def build_smoke_test_message(config: dict[str, object]) -> str:
     now = now_in_timezone(timezone_name)
     return "\n".join(
         [
-            "<b>행동주의 뉴스 봇 테스트</b>",
+            "<b>Telegram outbound disabled</b>",
             "",
-            "GitHub Actions에서 Telegram 직접 발행 권한을 확인했습니다.",
+            "BSIDE는 web-only 배포 정책을 사용하며 이 메시지는 전송할 수 없습니다.",
             f"기준시각: {format_kst(now, timezone_name)}",
         ]
     )
@@ -26,7 +26,9 @@ def build_smoke_test_message(config: dict[str, object]) -> str:
 def main() -> None:
     config = load_config(PROJECT_ROOT / "config.yaml")
     if not telegram_is_configured(config):
-        raise SystemExit("Telegram is not configured. Set TELEGRAM_BOT_TOKEN and chat id.")
+        raise SystemExit(
+            "Telegram outbound is permanently disabled; only read-only channel collection is supported."
+        )
 
     response = send_telegram_message(
         telegram_bot_token(),

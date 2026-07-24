@@ -14,6 +14,7 @@
     "code_revision",
     "legacy_run",
     "candidate_run",
+    "legacy_crosswalk",
     "discrepancies_reviewed"
   ],
   "properties": {
@@ -26,6 +27,7 @@
     "code_revision": {"type": "string", "pattern": "^[0-9a-fA-F]{7,64}$"},
     "legacy_run": {"$ref": "#/$defs/engineRun"},
     "candidate_run": {"$ref": "#/$defs/engineRun"},
+    "legacy_crosswalk": {"$ref": "#/$defs/legacyCrosswalk"},
     "discrepancies_reviewed": {"type": "boolean"}
   },
   "$defs": {
@@ -46,6 +48,28 @@
             "additionalProperties": true
           }
         }
+      }
+    },
+    "legacyCrosswalk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "eligible_legacy_record_count",
+        "crosswalked_legacy_record_count",
+        "unmatched_legacy_record_count",
+        "ambiguous_legacy_record_count",
+        "coverage_rate",
+        "crosswalk_sha256"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "eligible_legacy_record_count": {"type": "integer", "minimum": 1},
+        "crosswalked_legacy_record_count": {"type": "integer", "minimum": 1},
+        "unmatched_legacy_record_count": {"const": 0},
+        "ambiguous_legacy_record_count": {"const": 0},
+        "coverage_rate": {"const": 1.0},
+        "crosswalk_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     }
   }

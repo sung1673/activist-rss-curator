@@ -1,0 +1,374 @@
+name: Official disclosure backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Fetch-only validation or durable remote upsert
+        required: true
+        type: choice
+        options:
+          - dry-run
+          - apply
+        default: dry-run
+      source:
+        description: Official source selection
+        required: true
+        type: choice
+        options:
+          - dart
+          - kind
+          - both
+        default: dart
+      from_date:
+        description: Inclusive start date (YYYY-MM-DD, no earlier than 2021-01-01)
+        required: true
+        type: string
+      to_date:
+        description: Exclusive end date (YYYY-MM-DD)
+        required: true
+        type: string
+      max_windows:
+        description: Maximum pending one-day windows to process (1-31)
+        required: true
+        type: number
+        default: 1
+      sync_company_master:
+        description: Refresh the DART company master once after a successful DART window
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+# Backfill and scheduled official ingest share one non-cancelling lock. This
+# prevents overlapping DART/KIND pagination and remote upserts on main.
+concurrency:
+  group: ingest-official-${{ github.ref_name }}
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment:
+      name: governance-runtime
+    env:
+      BACKFILL_REPORT: ${{ runner.temp }}/official-backfill-report.json
+      BACKFILL_LOG: ${{ runner.temp }}/official-backfill.stderr.log
+      DART_CANARY_REPORT: ${{ runner.temp }}/dart-canary-sample-report.json
+      CHECKPOINT_PATH: data/backfill_official_checkpoint.json
+      CHECKPOINT_ARTIFACT_NAME: official-backfill-checkpoint-${{ inputs.mode }}-${{ inputs.source }}-${{ inputs.from_date }}-${{ inputs.to_date }}-${{ inputs.sync_company_master }}
+    steps:
+      - name: Initialize backfill evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' '{"status":"not_started"}' > "$BACKFILL_REPORT"
+          printf '%s\n' '{"status":"not_applicable"}' > "$DART_CANARY_REPORT"
+          : > "$BACKFILL_LOG"
+
+      - name: Checkout immutable dispatch revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Verify immutable dispatch revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          [[ "$actual" == "$GITHUB_SHA" ]] || {
+            echo "::error::Checked-out backfill revision $actual does not match dispatch revision $GITHUB_SHA."
+            exit 1
+          }
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Resolve fail-closed rollout mode
+        env:
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
+          GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          ENABLE_PAGES: ${{ vars.ENABLE_PAGES }}
+          ENABLE_GOVERNANCE_PAGES: ${{ vars.ENABLE_GOVERNANCE_PAGES }}
+          ENABLE_GOVERNANCE_SHADOW: ${{ vars.ENABLE_GOVERNANCE_SHADOW }}
+          ENABLE_TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          ENABLE_GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+        run: python -m curator.operation_mode
+
+      - name: Validate bounded backfill inputs
+        env:
+          FROM_DATE: ${{ inputs.from_date }}
+          TO_DATE: ${{ inputs.to_date }}
+          MAX_WINDOWS: ${{ inputs.max_windows }}
+          SOURCE: ${{ inputs.source }}
+          SYNC_COMPANY_MASTER: ${{ inputs.sync_company_master }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from datetime import date, datetime, timedelta
+          from zoneinfo import ZoneInfo
+
+          try:
+              start = date.fromisoformat(os.environ["FROM_DATE"])
+              end = date.fromisoformat(os.environ["TO_DATE"])
+              max_windows = int(os.environ["MAX_WINDOWS"])
+          except (KeyError, TypeError, ValueError) as exc:
+              raise SystemExit(f"invalid backfill input: {exc}") from exc
+          if start < date(2021, 1, 1):
+              raise SystemExit("from_date must be 2021-01-01 or later")
+          if end <= start:
+              raise SystemExit("to_date must be later than from_date (exclusive boundary)")
+          tomorrow_kst = datetime.now(ZoneInfo("Asia/Seoul")).date() + timedelta(days=1)
+          if end > tomorrow_kst:
+              raise SystemExit(
+                  "to_date cannot be later than tomorrow in KST; "
+                  "future empty windows must not be checkpointed"
+              )
+          if not 1 <= max_windows <= 31:
+              raise SystemExit("max_windows must be between 1 and 31")
+          if os.environ["SYNC_COMPANY_MASTER"].lower() == "true" and os.environ["SOURCE"] == "kind":
+              raise SystemExit("sync_company_master requires source=dart or source=both")
+          PY
+
+      - name: Validate operational configuration
+        env:
+          MODE: ${{ inputs.mode }}
+          SOURCE: ${{ inputs.source }}
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=()
+          if [[ "$SOURCE" == "dart" || "$SOURCE" == "both" ]]; then
+            required+=(DART_API_KEY BSIDE_API_BASE_URL BSIDE_OPS_TOKEN)
+          fi
+          if [[ "$SOURCE" == "kind" || "$SOURCE" == "both" ]]; then
+            required+=(KIND_DISCLOSURE_ENDPOINT BSIDE_API_BASE_URL BSIDE_OPS_TOKEN)
+          fi
+          if [[ "$MODE" == "apply" ]]; then
+            required+=(ACTIVIST_API_URL ACTIVIST_API_SECRET BSIDE_OPS_TOKEN)
+          fi
+          bash .github/scripts/require-env.sh "${required[@]}"
+
+      - name: Verify KIND SourceRight before adapter network access
+        if: inputs.source == 'kind' || inputs.source == 'both'
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -c 'from curator.official_source_rights import OfficialSourceRightClient; OfficialSourceRightClient().check_kind_ingest()'
+
+      - name: Validate KIND adapter contract
+        if: inputs.source == 'kind' || inputs.source == 'both'
+        env:
+          KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
+          KIND_API_KEY: ${{ secrets.KIND_API_KEY }}
+        run: python .github/scripts/validate-kind-adapter.py
+
+      - name: Dry-run completed-day and revision DART canary
+        if: inputs.mode == 'dry-run' && inputs.source != 'kind'
+        id: dart_canary
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          CURATOR_REQUIRE_DURABLE_DART_QUOTA: "1"
+          CURATOR_DART_QUOTA_PHASE: dart-canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m curator.dart_canary_sample \
+            --lookback-days 365 \
+            --scan-chunk-days 7 \
+            --sample-limit-per-kind 5 \
+            --request-budget 10000 \
+            --report "$DART_CANARY_REPORT"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(Path(os.environ["DART_CANARY_REPORT"]).read_text(encoding="utf-8"))
+          if report.get("status") != "succeeded" or report.get("dry_run") is not True:
+              raise SystemExit("DART canary did not produce successful dry-run evidence")
+          used = int(report.get("requests_used", -1))
+          if used < 0 or used > 10_000:
+              raise SystemExit("DART canary returned invalid request usage")
+          PY
+
+      - name: Resolve previous matching checkpoint
+        if: inputs.mode == 'apply'
+        id: previous_checkpoint
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          EXPECTED_ARTIFACT_NAME: ${{ env.CHECKPOINT_ARTIFACT_NAME }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner,
+              repo,
+              workflow_id: "official-backfill.yml",
+              branch: context.payload.repository.default_branch,
+              status: "completed",
+              per_page: 100,
+            });
+            for (const run of runs) {
+              if (Number(run.id) === Number(context.runId)) continue;
+              if (run.head_repository?.full_name !== `${owner}/${repo}`) continue;
+              const artifacts = await github.paginate(
+                github.rest.actions.listWorkflowRunArtifacts,
+                { owner, repo, run_id: run.id, per_page: 100 },
+              );
+              const artifact = artifacts.find((item) =>
+                item.name === process.env.EXPECTED_ARTIFACT_NAME && !item.expired
+              );
+              if (!artifact) continue;
+              core.setOutput("found", "true");
+              core.setOutput("run_id", String(run.id));
+              core.setOutput("artifact_id", String(artifact.id));
+              return;
+            }
+            core.setOutput("found", "false");
+
+      - name: Download previous matching checkpoint
+        if: inputs.mode == 'apply' && steps.previous_checkpoint.outputs.found == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.previous_checkpoint.outputs.artifact_id }}
+          path: ${{ runner.temp }}/previous-official-backfill
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.previous_checkpoint.outputs.run_id }}
+          merge-multiple: true
+          digest-mismatch: error
+
+      - name: Restore previous matching checkpoint
+        if: inputs.mode == 'apply' && steps.previous_checkpoint.outputs.found == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          restored="$(find "${{ runner.temp }}/previous-official-backfill" -type f -name 'backfill_official_checkpoint.json' -print -quit)"
+          if [[ -z "$restored" ]]; then
+            echo "::error::The matching checkpoint artifact does not contain a resumable checkpoint."
+            exit 1
+          fi
+          mkdir -p "$(dirname "$CHECKPOINT_PATH")"
+          cp "$restored" "$CHECKPOINT_PATH"
+
+      - name: Run one-day official backfill windows
+        env:
+          BACKFILL_MODE: ${{ inputs.mode }}
+          BACKFILL_SOURCE: ${{ inputs.source }}
+          BACKFILL_FROM_DATE: ${{ inputs.from_date }}
+          BACKFILL_TO_DATE: ${{ inputs.to_date }}
+          BACKFILL_MAX_WINDOWS: ${{ inputs.max_windows }}
+          BACKFILL_SYNC_COMPANY_MASTER: ${{ inputs.sync_company_master }}
+          CURATOR_INGEST_SCOPE: official
+          CURATOR_DATA_SOURCE: mysql
+          CURATOR_DISABLE_TELEGRAM_SEND: "1"
+          CURATOR_DELIVERY_MODE: disabled
+          ENABLE_TELEGRAM_DELIVERY: "false"
+          ENABLE_GOVERNANCE_DELIVERY: "false"
+          CURATOR_REQUIRE_REMOTE_API: ${{ inputs.mode == 'apply' && '1' || '0' }}
+          CURATOR_ENABLE_KIND: ${{ inputs.source == 'dart' && '0' || '1' }}
+          CURATOR_REQUIRE_KIND: ${{ inputs.source == 'dart' && '0' || '1' }}
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
+          KIND_API_KEY: ${{ secrets.KIND_API_KEY }}
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          CURATOR_REQUIRE_DURABLE_DART_QUOTA: "1"
+          CURATOR_DART_QUOTA_PHASE: official-backfill
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            --from-date "$BACKFILL_FROM_DATE"
+            --to-date "$BACKFILL_TO_DATE"
+            --source "$BACKFILL_SOURCE"
+            --chunk-days 1
+            --max-chunks "$BACKFILL_MAX_WINDOWS"
+            --request-budget 10000
+            --checkpoint "$CHECKPOINT_PATH"
+          )
+          if [[ "$BACKFILL_MODE" == "dry-run" ]]; then
+            args+=(--dry-run)
+          fi
+          if [[ "$BACKFILL_SYNC_COMPANY_MASTER" == "true" ]]; then
+            args+=(--sync-company-master)
+          fi
+
+          temporary_report="${BACKFILL_REPORT}.tmp"
+          if python -m curator.official_backfill "${args[@]}" > "$temporary_report" 2> >(tee "$BACKFILL_LOG" >&2); then
+            mv "$temporary_report" "$BACKFILL_REPORT"
+          else
+            exit_code=$?
+            printf '{"status":"failed","exit_code":%d}\n' "$exit_code" > "$BACKFILL_REPORT"
+            exit "$exit_code"
+          fi
+
+      - name: Prepare checkpoint evidence
+        if: always()
+        env:
+          MODE: ${{ inputs.mode }}
+          SOURCE: ${{ inputs.source }}
+          FROM_DATE: ${{ inputs.from_date }}
+          TO_DATE: ${{ inputs.to_date }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="${{ runner.temp }}/official-backfill-checkpoint"
+          mkdir -p "$evidence_dir"
+          if [[ -f "$CHECKPOINT_PATH" ]]; then
+            cp "$CHECKPOINT_PATH" "$evidence_dir/backfill_official_checkpoint.json"
+          fi
+          printf '{"mode":"%s","source":"%s","from_date":"%s","to_date":"%s","checkpoint_present":%s}\n' \
+            "$MODE" "$SOURCE" "$FROM_DATE" "$TO_DATE" "$([[ -f "$CHECKPOINT_PATH" ]] && echo true || echo false)" \
+            > "$evidence_dir/checkpoint-metadata.json"
+
+      - name: Preserve backfill report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: official-backfill-report-${{ github.run_id }}
+          path: |
+            ${{ env.BACKFILL_REPORT }}
+            ${{ env.BACKFILL_LOG }}
+            ${{ env.DART_CANARY_REPORT }}
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Preserve resumable checkpoint
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.CHECKPOINT_ARTIFACT_NAME }}
+          path: ${{ runner.temp }}/official-backfill-checkpoint
+          if-no-files-found: error
+          retention-days: 90

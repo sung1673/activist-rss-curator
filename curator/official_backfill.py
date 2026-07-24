@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -8,11 +9,28 @@ import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Mapping
+from typing import Callable, Mapping, Protocol
 from zoneinfo import ZoneInfo
 
+from .backfill_checkpoint_api import (
+    RemoteCheckpointClient,
+    RemoteCheckpointError,
+    RemoteCheckpointSnapshot,
+    RemoteCheckpointWrite,
+    checkpoint_api_configured,
+)
+from .dart_quota import (
+    durable_dart_quota_client,
+    durable_dart_quota_configured,
+    durable_dart_quota_required,
+)
 from .config import load_config
 from .official_ingest import run as run_official_ingest
+from .official_source_rights import (
+    OfficialSourceRightError,
+    source_right_api_configured,
+)
+from .official_sources import DartRequestBudget
 from .remote_api import remote_api_configured
 
 
@@ -51,11 +69,12 @@ class BackfillOptions:
     start: date
     end_exclusive: date
     checkpoint_path: Path
-    chunk_days: int = 14
-    sources: tuple[str, ...] = ("dart", "kind")
+    chunk_days: int = 1
+    sources: tuple[str, ...] = ("dart",)
     page_count: int = 100
     max_pages: int = 100
     max_chunks: int = 0
+    request_budget: int = 10_000
     dry_run: bool = False
     restart: bool = False
     continue_on_error: bool = False
@@ -68,6 +87,12 @@ class BackfillOptions:
             )
         if self.end_exclusive <= self.start:
             raise BackfillConfigurationError("end_exclusive must be after start")
+        tomorrow_kst = datetime.now(ZoneInfo("Asia/Seoul")).date() + timedelta(days=1)
+        if self.end_exclusive > tomorrow_kst:
+            raise BackfillConfigurationError(
+                "end_exclusive cannot be later than tomorrow in KST; "
+                "future empty windows must never be checkpointed as complete"
+            )
         if self.chunk_days < 1:
             raise BackfillConfigurationError("chunk_days must be at least 1")
         if not 1 <= self.page_count <= 100:
@@ -76,6 +101,8 @@ class BackfillOptions:
             raise BackfillConfigurationError("max_pages must be at least 1")
         if self.max_chunks < 0:
             raise BackfillConfigurationError("max_chunks cannot be negative")
+        if self.request_budget < 1 or self.request_budget > 10_000:
+            raise BackfillConfigurationError("request_budget must be between 1 and 10000")
         if not self.sources or set(self.sources) - {"dart", "kind"}:
             raise BackfillConfigurationError("sources must contain dart and/or kind")
         if self.sync_company_master and "dart" not in self.sources:
@@ -83,6 +110,18 @@ class BackfillOptions:
 
 
 IngestRunner = Callable[..., dict[str, int]]
+
+
+class CheckpointStore(Protocol):
+    def get(self, fingerprint: str) -> RemoteCheckpointSnapshot: ...
+
+    def put(
+        self,
+        fingerprint: str,
+        *,
+        expected_version: int,
+        checkpoint: dict[str, object],
+    ) -> RemoteCheckpointWrite: ...
 
 
 def build_date_windows(start: date, end_exclusive: date, chunk_days: int) -> list[DateWindow]:
@@ -161,37 +200,44 @@ def new_checkpoint(
         "created_at": created_at,
         "updated_at": created_at,
         "company_master_synced": False,
+        "dart_quota_blocked_until": None,
         "completed_windows": {},
         "failed_windows": {},
     }
 
 
-def load_checkpoint(path: Path) -> dict[str, object] | None:
-    if not path.exists():
-        return None
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise CheckpointError(f"cannot read checkpoint {path}: {exc}") from exc
+def validate_checkpoint(
+    value: object,
+    *,
+    label: str,
+) -> dict[str, object]:
     if not isinstance(value, dict):
-        raise CheckpointError(f"checkpoint {path} must contain a JSON object")
+        raise CheckpointError(f"checkpoint {label} must contain a JSON object")
     if value.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
         raise CheckpointError(
-            f"checkpoint {path} schema_version must be {CHECKPOINT_SCHEMA_VERSION}; use --restart"
+            f"checkpoint {label} schema_version must be {CHECKPOINT_SCHEMA_VERSION}; use --restart"
         )
     if not isinstance(value.get("job"), dict):
-        raise CheckpointError(f"checkpoint {path} is missing job metadata")
+        raise CheckpointError(f"checkpoint {label} is missing job metadata")
     if not isinstance(value.get("company_master_synced"), bool):
-        raise CheckpointError(f"checkpoint {path} company_master_synced must be boolean")
+        raise CheckpointError(f"checkpoint {label} company_master_synced must be boolean")
+    blocked_until = value.get("dart_quota_blocked_until")
+    if blocked_until is not None:
+        try:
+            date.fromisoformat(str(blocked_until))
+        except ValueError as exc:
+            raise CheckpointError(
+                f"checkpoint {label} dart_quota_blocked_until must be an ISO date or null"
+            ) from exc
     if not isinstance(value.get("completed_windows"), dict) or not isinstance(value.get("failed_windows"), dict):
-        raise CheckpointError(f"checkpoint {path} window maps are invalid")
+        raise CheckpointError(f"checkpoint {label} window maps are invalid")
     completed = value["completed_windows"]
     failed = value["failed_windows"]
     assert isinstance(completed, dict) and isinstance(failed, dict)
     overlap = set(completed) & set(failed)
     if overlap:
         raise CheckpointError(
-            f"checkpoint {path} contains windows in both completed and failed maps"
+            f"checkpoint {label} contains windows in both completed and failed maps"
         )
     for map_name, records, expected_status in (
         ("completed_windows", completed, "succeeded"),
@@ -200,7 +246,7 @@ def load_checkpoint(path: Path) -> dict[str, object] | None:
         for window_key, result in records.items():
             if not isinstance(result, dict):
                 raise CheckpointError(
-                    f"checkpoint {path} {map_name}.{window_key} must be an object"
+                    f"checkpoint {label} {map_name}.{window_key} must be an object"
                 )
             reconstructed_key = (
                 f"{result.get('window_start')}:{result.get('window_end_exclusive')}"
@@ -209,7 +255,7 @@ def load_checkpoint(path: Path) -> dict[str, object] | None:
                 attempt = int(result.get("attempt") or 0)
             except (TypeError, ValueError) as exc:
                 raise CheckpointError(
-                    f"checkpoint {path} {map_name}.{window_key} has invalid attempt"
+                    f"checkpoint {label} {map_name}.{window_key} has invalid attempt"
                 ) from exc
             if (
                 reconstructed_key != window_key
@@ -220,9 +266,27 @@ def load_checkpoint(path: Path) -> dict[str, object] | None:
                 )
             ):
                 raise CheckpointError(
-                    f"checkpoint {path} {map_name}.{window_key} is inconsistent"
+                    f"checkpoint {label} {map_name}.{window_key} is inconsistent"
+                )
+            summary = result.get("summary")
+            if expected_status == "succeeded" and (
+                not isinstance(summary, dict)
+                or not _summary_succeeded(summary, dry_run=False)
+            ):
+                raise CheckpointError(
+                    f"checkpoint {label} {map_name}.{window_key} lacks an exact remote ACK"
                 )
     return value
+
+
+def load_checkpoint(path: Path) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CheckpointError(f"cannot read checkpoint {path}: {exc}") from exc
+    return validate_checkpoint(value, label=str(path))
 
 
 def save_checkpoint(path: Path, checkpoint: dict[str, object]) -> None:
@@ -241,8 +305,20 @@ def validate_runtime(options: BackfillOptions) -> None:
         missing.append("DART_API_KEY")
     if "kind" in options.sources and not os.environ.get("KIND_DISCLOSURE_ENDPOINT", "").strip():
         missing.append("KIND_DISCLOSURE_ENDPOINT")
+    if "kind" in options.sources:
+        try:
+            rights_api_configured = source_right_api_configured()
+        except OfficialSourceRightError as exc:
+            raise BackfillConfigurationError(str(exc)) from exc
+        if not rights_api_configured:
+            missing.append(
+                "BSIDE_API_BASE_URL (or GOVERNANCE_API_BASE_URL/ACTIVIST_API_URL)"
+                "/BSIDE_OPS_TOKEN for KIND SourceRight preflight"
+            )
     if not options.dry_run and not remote_api_configured():
         missing.append("ACTIVIST_API_URL/ACTIVIST_API_SECRET")
+    if not options.dry_run and not checkpoint_api_configured():
+        missing.append("BSIDE_API_BASE_URL/BSIDE_OPS_TOKEN")
     if missing:
         raise BackfillConfigurationError("missing required runtime configuration: " + ", ".join(missing))
 
@@ -256,10 +332,22 @@ def _summary_int(summary: Mapping[str, object], key: str) -> int:
 
 
 def _summary_succeeded(summary: Mapping[str, object], *, dry_run: bool) -> bool:
-    if _summary_int(summary, "official_failed") or _summary_int(summary, "official_skipped"):
+    if (
+        _summary_int(summary, "official_failed")
+        or _summary_int(summary, "official_skipped")
+        or _summary_int(summary, "official_remote_ack_mismatches")
+    ):
         return False
     if dry_run:
         return True
+    if _summary_int(summary, "official_remote_run_persisted") != 1:
+        return False
+    if "official_remote_raw_count" not in summary or "official_remote_ack_count" not in summary:
+        return False
+    if _summary_int(summary, "official_remote_raw_count") != _summary_int(
+        summary, "official_remote_ack_count"
+    ):
+        return False
     return not (
         _summary_int(summary, "official_remote_failed")
         or _summary_int(summary, "official_remote_skipped")
@@ -276,6 +364,8 @@ def _summary_totals(results: list[dict[str, object]]) -> dict[str, int]:
         "official_source_rights",
         "official_remote_synced",
         "official_remote_failed",
+        "official_remote_ack_mismatches",
+        "official_dart_requests",
         "official_dart_fetched",
         "official_dart_accepted",
         "official_dart_rejected",
@@ -283,6 +373,7 @@ def _summary_totals(results: list[dict[str, object]]) -> dict[str, int]:
         "official_dart_discarded",
         "official_dart_pages",
         "official_dart_errors",
+        "official_dart_quota_exhausted",
         "official_kind_fetched",
         "official_kind_accepted",
         "official_kind_rejected",
@@ -307,30 +398,70 @@ def run_backfill(
     *,
     ingest_runner: IngestRunner = run_official_ingest,
     now_provider: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    checkpoint_store: CheckpointStore | None = None,
 ) -> dict[str, object]:
-    """Run pending chunks and persist a checkpoint after each attempted window.
+    """Run pending chunks against the authoritative remote checkpoint.
 
-    A normal run resumes only when the checkpoint fingerprint exactly matches
-    the requested range and connector limits.  A dry run deliberately ignores
-    and never mutates the checkpoint, while still fetching and normalizing the
-    selected windows.
+    Apply mode reads progress only from MySQL through the ops checkpoint API.
+    The local JSON is overwritten after each acknowledged remote update solely
+    as an evidence/recovery artifact and is never used to decide what to run.
+    A dry run performs no checkpoint reads or writes, local or remote.
     """
 
     options.validate()
     job = job_contract(options)
     fingerprint = job_fingerprint(job)
-    checkpoint = None if options.dry_run or options.restart else load_checkpoint(options.checkpoint_path)
-    if checkpoint is not None:
+    remote_version = 0
+    store: CheckpointStore | None = None
+    if options.dry_run:
+        checkpoint = new_checkpoint(job, fingerprint, now_provider=now_provider)
+    else:
+        store = checkpoint_store or RemoteCheckpointClient()
+        snapshot = store.get(fingerprint)
+        remote_version = snapshot.version
+        checkpoint = (
+            new_checkpoint(job, fingerprint, now_provider=now_provider)
+            if options.restart or snapshot.checkpoint is None
+            else validate_checkpoint(snapshot.checkpoint, label="remote MySQL checkpoint")
+        )
         checkpoint_job = checkpoint.get("job")
         checkpoint_fingerprint = (
             str(checkpoint_job.get("fingerprint") or "") if isinstance(checkpoint_job, dict) else ""
         )
-        if checkpoint_fingerprint != fingerprint:
+        checkpoint_contract = (
+            {key: value for key, value in checkpoint_job.items() if key != "fingerprint"}
+            if isinstance(checkpoint_job, dict)
+            else {}
+        )
+        if (
+            checkpoint_fingerprint != fingerprint
+            or checkpoint_contract != job
+            or job_fingerprint(checkpoint_contract) != fingerprint
+        ):
             raise CheckpointError(
-                "checkpoint job fingerprint does not match the requested range/options; use --restart"
+                "remote checkpoint job fingerprint does not match the requested range/options; use --restart"
             )
-    else:
-        checkpoint = new_checkpoint(job, fingerprint, now_provider=now_provider)
+        if options.restart or snapshot.checkpoint is None:
+            write = store.put(
+                fingerprint,
+                expected_version=remote_version,
+                checkpoint=checkpoint,
+            )
+            remote_version = write.version
+        save_checkpoint(options.checkpoint_path, checkpoint)
+
+        blocked_until_text = checkpoint.get("dart_quota_blocked_until")
+        if "dart" in options.sources and blocked_until_text:
+            blocked_until = date.fromisoformat(str(blocked_until_text))
+            current_time = now_provider()
+            if current_time.tzinfo is None:
+                current_time = current_time.replace(tzinfo=timezone.utc)
+            today_kst = current_time.astimezone(ZoneInfo("Asia/Seoul")).date()
+            if today_kst < blocked_until:
+                raise BackfillConfigurationError(
+                    "OpenDART status 020 already exhausted this KST quota day; "
+                    f"resume from the same MySQL checkpoint on or after {blocked_until.isoformat()}"
+                )
 
     completed_windows = checkpoint["completed_windows"]
     failed_windows = checkpoint["failed_windows"]
@@ -352,9 +483,15 @@ def run_backfill(
     selected = pending[: options.max_chunks] if options.max_chunks else pending
     results: list[dict[str, object]] = []
     invocation_failures = 0
-
-    if options.restart and not options.dry_run:
-        save_checkpoint(options.checkpoint_path, checkpoint)
+    dart_request_budget = None
+    if "dart" in options.sources:
+        dart_request_budget = (
+            durable_dart_quota_client(
+                phase=os.environ.get("CURATOR_DART_QUOTA_PHASE", "official-backfill")
+            )
+            if durable_dart_quota_required() or durable_dart_quota_configured()
+            else DartRequestBudget(options.request_budget)
+        )
 
     for window in selected:
         previous_failure = failed_windows.get(window.key)
@@ -369,6 +506,8 @@ def run_backfill(
             "max_pages": options.max_pages,
             "sync_company_master": master_sync_needed,
         }
+        if dart_request_budget is not None:
+            overrides["dart_request_budget"] = dart_request_budget
         result: dict[str, object] = {
             "window_start": window.start.isoformat(),
             "window_end_exclusive": window.end_exclusive.isoformat(),
@@ -410,17 +549,44 @@ def run_backfill(
                     break
             continue
 
-        checkpoint["updated_at"] = result["finished_at"]
+        candidate = copy.deepcopy(checkpoint)
+        candidate_completed = candidate["completed_windows"]
+        candidate_failed = candidate["failed_windows"]
+        assert isinstance(candidate_completed, dict) and isinstance(candidate_failed, dict)
+        candidate["updated_at"] = result["finished_at"]
+        quota_exhausted = False
         if succeeded:
-            completed_windows[window.key] = result
-            failed_windows.pop(window.key, None)
+            candidate_completed[window.key] = result
+            candidate_failed.pop(window.key, None)
+            candidate["dart_quota_blocked_until"] = None
             if master_sync_needed:
-                checkpoint["company_master_synced"] = True
+                candidate["company_master_synced"] = True
         else:
             invocation_failures += 1
-            failed_windows[window.key] = result
+            candidate_failed[window.key] = result
+            failed_summary = result.get("summary")
+            quota_exhausted = isinstance(failed_summary, dict) and _summary_int(
+                failed_summary, "official_dart_quota_exhausted"
+            ) > 0
+            if quota_exhausted:
+                failed_at = now_provider()
+                if failed_at.tzinfo is None:
+                    failed_at = failed_at.replace(tzinfo=timezone.utc)
+                candidate["dart_quota_blocked_until"] = (
+                    failed_at.astimezone(ZoneInfo("Asia/Seoul")).date() + timedelta(days=1)
+                ).isoformat()
+        assert store is not None
+        write = store.put(
+            fingerprint,
+            expected_version=remote_version,
+            checkpoint=candidate,
+        )
+        remote_version = write.version
+        checkpoint = candidate
+        completed_windows = candidate_completed
+        failed_windows = candidate_failed
         save_checkpoint(options.checkpoint_path, checkpoint)
-        if not succeeded and not options.continue_on_error:
+        if not succeeded and (quota_exhausted or not options.continue_on_error):
             break
 
     remaining = 0 if options.dry_run else len(
@@ -442,6 +608,8 @@ def run_backfill(
         "windows_failed": invocation_failures,
         "windows_remaining": remaining,
         "checkpoint_path": None if options.dry_run else str(options.checkpoint_path),
+        "checkpoint_source": None if options.dry_run else "mysql_remote",
+        "checkpoint_version": None if options.dry_run else remote_version,
         "totals": _summary_totals(results),
         "window_results": results,
     }
@@ -465,11 +633,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", type=Path, default=PROJECT_ROOT, help="project root containing config.yaml")
     parser.add_argument("--from-date", type=_parse_date, help="inclusive start date (default: config backfill_start)")
     parser.add_argument("--to-date", type=_parse_date, help="exclusive end date (default: tomorrow in KST)")
-    parser.add_argument("--chunk-days", type=int, default=14)
-    parser.add_argument("--source", choices=("dart", "kind", "both"), default="both")
+    parser.add_argument(
+        "--chunk-days",
+        type=int,
+        default=1,
+        help="date-window size (operational backfills use the safe one-day default)",
+    )
+    parser.add_argument("--source", choices=("dart", "kind", "both"), default="dart")
     parser.add_argument("--page-count", type=int, default=100)
     parser.add_argument("--max-pages", type=int, default=100, help="maximum connector pages per source and chunk")
     parser.add_argument("--max-chunks", type=int, default=0, help="process at most N pending chunks (0 = unlimited)")
+    parser.add_argument(
+        "--request-budget",
+        type=int,
+        default=10_000,
+        help="maximum physical OpenDART requests for this invocation (max 10000)",
+    )
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT_PATH)
     parser.add_argument("--dry-run", action="store_true", help="fetch/normalize but do not sync or mutate checkpoint")
     parser.add_argument("--restart", action="store_true", help="replace the checkpoint for this requested job")
@@ -496,6 +675,7 @@ def options_from_args(args: argparse.Namespace) -> tuple[Path, BackfillOptions]:
         page_count=args.page_count,
         max_pages=args.max_pages,
         max_chunks=args.max_chunks,
+        request_budget=args.request_budget,
         dry_run=args.dry_run,
         restart=args.restart,
         continue_on_error=args.continue_on_error,
@@ -512,7 +692,13 @@ def main(argv: list[str] | None = None) -> None:
         options.validate()
         validate_runtime(options)
         report = run_backfill(project_root, options)
-    except (BackfillConfigurationError, CheckpointError, OSError, ValueError) as exc:
+    except (
+        BackfillConfigurationError,
+        CheckpointError,
+        RemoteCheckpointError,
+        OSError,
+        ValueError,
+    ) as exc:
         print(json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         raise SystemExit(2) from exc
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))

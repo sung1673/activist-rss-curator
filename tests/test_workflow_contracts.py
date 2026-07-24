@@ -15,6 +15,26 @@ def workflow_text(name: str) -> str:
     return (WORKFLOWS / name).read_text(encoding="utf-8")
 
 
+def _contains_secret_expression(value: object) -> bool:
+    if isinstance(value, str):
+        return "${{ secrets." in value
+    if isinstance(value, dict):
+        return any(_contains_secret_expression(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_secret_expression(item) for item in value)
+    return False
+
+
+def _environment_name(job: dict[str, object]) -> str | None:
+    environment = job.get("environment")
+    if isinstance(environment, str):
+        return environment
+    if isinstance(environment, dict):
+        name = environment.get("name")
+        return name if isinstance(name, str) else None
+    return None
+
+
 def test_all_workflows_are_valid_yaml() -> None:
     paths = sorted(WORKFLOWS.glob("*.yml"))
     assert paths
@@ -26,15 +46,110 @@ def test_all_workflows_are_valid_yaml() -> None:
         assert "jobs" in payload, path
 
 
+def test_dispatch_jobs_with_repository_secrets_use_main_only_environments() -> None:
+    runtime_jobs = {
+        ("governance-cutover.yml", "activate"),
+        ("governance-cutover.yml", "recover_close"),
+        ("governance-cutover.yml", "recover_owner"),
+        ("ingest-media.yml", "ingest"),
+        ("ingest-official.yml", "ingest"),
+        ("kind-adapter-preflight.yml", "preflight"),
+        ("official-backfill.yml", "backfill"),
+        ("release-evidence-inputs.yml", "collect"),
+        ("resolve-links.yml", "resolve"),
+        ("shadow-compare.yml", "compare"),
+        ("watchdog.yml", "health"),
+        ("web-vitals.yml", "mobile-routes"),
+    }
+    observed_runtime_jobs: set[tuple[str, str]] = set()
+    allowed_protected_environments = {
+        "github-pages",
+        "governance-release",
+        "governance-runtime",
+        "telegram-history-repair",
+    }
+
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        workflow = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+        triggers = workflow.get("on")
+        if not isinstance(triggers, dict) or "workflow_dispatch" not in triggers:
+            continue
+        for job_name, job in workflow["jobs"].items():
+            if not isinstance(job, dict) or not _contains_secret_expression(job):
+                continue
+            environment_name = _environment_name(job)
+            assert environment_name in allowed_protected_environments, (
+                path.name,
+                job_name,
+                environment_name,
+            )
+            identity = (path.name, str(job_name))
+            if identity in runtime_jobs:
+                assert environment_name == "governance-runtime"
+                observed_runtime_jobs.add(identity)
+
+    assert observed_runtime_jobs == runtime_jobs
+
+
+def test_official_ingest_and_backfill_use_non_dropping_shared_queue() -> None:
+    for name in ("ingest-official.yml", "official-backfill.yml"):
+        workflow = yaml.load(workflow_text(name), Loader=yaml.BaseLoader)
+        assert workflow["concurrency"]["group"] == "ingest-official-${{ github.ref_name }}"
+        assert workflow["concurrency"]["queue"] == "max"
+        assert workflow["concurrency"]["cancel-in-progress"] == "false"
+
+
+def test_backfill_shell_never_interpolates_dispatch_text_directly() -> None:
+    workflow = workflow_text("official-backfill.yml")
+    block = workflow[
+        workflow.index("- name: Run one-day official backfill windows") : workflow.index(
+            "- name: Prepare checkpoint evidence"
+        )
+    ]
+    for input_name in (
+        "mode",
+        "source",
+        "from_date",
+        "to_date",
+        "max_windows",
+        "sync_company_master",
+    ):
+        assert f"${{{{ inputs.{input_name} }}}}" not in block.split("run: |", 1)[1]
+    for env_name in (
+        "BACKFILL_MODE",
+        "BACKFILL_SOURCE",
+        "BACKFILL_FROM_DATE",
+        "BACKFILL_TO_DATE",
+        "BACKFILL_MAX_WINDOWS",
+        "BACKFILL_SYNC_COMPANY_MASTER",
+    ):
+        assert env_name in block
+
+
+def test_kind_preflight_reuses_https_only_endpoint_validation() -> None:
+    validator = (ROOT / ".github" / "scripts" / "validate-kind-adapter.py").read_text(
+        encoding="utf-8"
+    )
+    assert "validate_kind_endpoint(endpoint)" in validator
+    assert 'parsed.scheme not in {"http", "https"}' not in validator
+
+
 def test_legacy_shadow_baseline_does_not_commit_generated_files() -> None:
     legacy = workflow_text("build-feed.yml")
     assert "ENABLE_LEGACY_PIPELINE == 'true'" in legacy
     assert "CURATOR_DATA_SOURCE: mysql" in legacy
-    assert "vars.ENABLE_TELEGRAM_DELIVERY == 'true'" in legacy
+    assert "Permanent web-only distribution policy" in legacy
+    assert "TELEGRAM_BOT_TOKEN" not in legacy
+    assert "TELEGRAM_CHAT_ID" not in legacy
     assert "CURATOR_DELIVERY_MODE: disabled" in legacy
     assert 'CURATOR_DISABLE_TELEGRAM_SEND: "1"' in legacy
     assert "allow_pages_deploy:" in legacy
-    assert "allow_telegram_delivery:" in legacy
+    assert "allow_telegram_delivery:" not in legacy
+    assert "send_telegram_test:" not in legacy
+    assert "resend_last_briefing:" not in legacy
+    assert "resend_recent_articles:" not in legacy
+    assert "resend_cluster_guid:" not in legacy
+    assert "send_daily_report:" not in legacy
     assert "default: false" in legacy
     assert '"$ALLOW_PAGES_DEPLOY" == "true"' in legacy
     assert (
@@ -59,9 +174,8 @@ def test_legacy_shadow_baseline_does_not_commit_generated_files() -> None:
     ):
         block = legacy[legacy.index(f"- name: {step_name}") :]
         block = block[: block.index("\n      - name:")]
-        assert "ENABLE_TELEGRAM_DELIVERY == 'true'" in block
-        assert "ENABLE_GOVERNANCE_DELIVERY != 'true'" in block
-        assert "inputs.allow_telegram_delivery" in block
+        assert "if: ${{ false }}" in block
+        assert "permanently disabled" in block
     all_workflows = "\n".join(
         path.read_text(encoding="utf-8") for path in WORKFLOWS.glob("*.yml")
     )
@@ -97,16 +211,21 @@ def test_official_ingest_has_day_and_night_kst_schedules() -> None:
     workflow = workflow_text("ingest-official.yml")
     assert 'cron: "0,15,30,45 22-23 * * *"' in workflow
     assert 'cron: "0,15,30,45 0-14 * * *"' in workflow
-    assert 'cron: "0 15-21 * * *"' in workflow
+    assert 'cron: "0,30 15-21 * * *"' in workflow
+    assert 'cron: "40 21 * * 0"' in workflow
     assert "CURATOR_INGEST_SCOPE: official" in workflow
     assert "inputs.include_kind" in workflow
     assert "leave off for DART-only smoke/shadow" in workflow
-    assert (
-        "CURATOR_ENABLE_KIND: ${{ github.event_name == 'schedule' && '1' || inputs.include_kind && '1' || '0' }}"
-        in workflow
-    )
-    assert "KIND_DISCLOSURE_ENDPOINT is required" in workflow
-    assert "validate-kind-adapter.py" in workflow
+    assert "vars.GOVERNANCE_PIPELINE_MODE == 'dart_canary'" in workflow
+    assert "steps.rollout.outputs.governance_pipeline_mode == 'shadow'" in workflow
+    assert "steps.rollout.outputs.governance_pipeline_mode == 'live'" in workflow
+    assert "python -m curator.operation_mode --github-output \"$GITHUB_OUTPUT\"" in workflow
+    assert "KIND_DISCLOSURE_ENDPOINT BSIDE_API_BASE_URL BSIDE_OPS_TOKEN" in workflow
+    assert "DART_API_KEY ACTIVIST_API_URL ACTIVIST_API_SECRET" in workflow
+    assert "CURATOR_REQUIRE_DURABLE_DART_QUOTA" in workflow
+    assert "CURATOR_GITHUB_RUN_CREATED_AT" in workflow
+    assert "github.rest.actions.getWorkflowRun" in workflow
+    assert "validate-kind-adapter.py" not in workflow
     assert "ENABLE_GOVERNANCE_SHADOW" in workflow
     assert "CURATOR_DISABLE_TELEGRAM_SEND" in workflow
     assert "CURATOR_DELIVERY_MODE: disabled" in workflow
@@ -115,7 +234,67 @@ def test_official_ingest_has_day_and_night_kst_schedules() -> None:
     job = payload["jobs"]["ingest"]
     assert "github.ref_name == github.event.repository.default_branch" in job["if"]
     checkout = next(step for step in job["steps"] if step["name"] == "Checkout")
-    assert checkout["with"]["ref"] == "${{ github.event.repository.default_branch }}"
+    # Pin the exact workflow revision so the candidate artifact and its
+    # declared full SHA cannot drift if main advances during the run. The job
+    # condition above still restricts dispatch to the default-branch ref.
+    assert checkout["with"]["ref"] == "${{ github.sha }}"
+    validation = next(
+        step for step in job["steps"] if step["name"] == "Validate operational configuration"
+    )
+    assert validation["env"]["BSIDE_API_BASE_URL"] == (
+        "${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}"
+    )
+    assert validation["env"]["BSIDE_OPS_TOKEN"] == "${{ secrets.BSIDE_OPS_TOKEN }}"
+    ingest = next(
+        step for step in job["steps"] if step["name"] == "Ingest selected official sources"
+    )
+    claim = next(
+        step
+        for step in job["steps"]
+        if step["name"] == "Claim oldest due official-ingest slot"
+    )
+    assert job["steps"].index(claim) < job["steps"].index(ingest)
+    ingest_script = str(ingest["run"])
+    assert ingest_script.index("CURATOR_OFFICIAL_SLOT_TERMINAL_NOOP") < ingest_script.index(
+        "python -m curator.main"
+    )
+    assert "exit 0" in ingest_script
+    assert ingest["env"]["BSIDE_API_BASE_URL"] == validation["env"]["BSIDE_API_BASE_URL"]
+    assert ingest["env"]["BSIDE_OPS_TOKEN"] == validation["env"]["BSIDE_OPS_TOKEN"]
+
+
+def test_official_slot_repair_and_epoch_reset_are_operator_gated() -> None:
+    ingest_workflow = workflow_text("ingest-official.yml")
+    ingest_payload = yaml.load(ingest_workflow, Loader=yaml.BaseLoader)
+    dispatch_inputs = ingest_payload["on"]["workflow_dispatch"]["inputs"]
+    assert "repair_event_schedule" in dispatch_inputs
+    assert "repair_expected_slot_at" in dispatch_inputs
+    assert ingest_payload["concurrency"] == {
+        "group": "ingest-official-${{ github.ref_name }}",
+        "queue": "max",
+        "cancel-in-progress": "false",
+    }
+    assert "CURATOR_OFFICIAL_SLOT_REPAIR_EXPECTED_AT" in ingest_workflow
+    assert "inputs.repair_expected_slot_at != ''" in ingest_workflow
+
+    reset_workflow = workflow_text("official-slot-epoch-reset.yml")
+    reset_payload = yaml.load(reset_workflow, Loader=yaml.BaseLoader)
+    reset_job = reset_payload["jobs"]["reset"]
+    assert reset_payload["concurrency"] == ingest_payload["concurrency"]
+    assert reset_job["environment"] == {"name": "governance-release"}
+    assert "vars.GOVERNANCE_PIPELINE_MODE == 'off'" in reset_job["if"]
+    reset_step = next(
+        step
+        for step in reset_job["steps"]
+        if step["name"] == "Advance append-only epoch at next KST day"
+    )
+    assert reset_step["env"]["BSIDE_ADMIN_TOKEN"] == "${{ secrets.BSIDE_ADMIN_TOKEN }}"
+    assert reset_step["env"]["RESET_REASON"] == "${{ inputs.reason }}"
+    assert reset_step["env"]["RESET_CONFIRMATION"] == "${{ inputs.confirmation }}"
+    reset_script = str(reset_step["run"])
+    assert "${{ inputs." not in reset_script
+    assert '"$RESET_REASON"' in reset_script
+    assert '"$RESET_CONFIRMATION"' in reset_script
 
 
 def test_media_resolver_and_publisher_are_independent() -> None:
@@ -138,47 +317,34 @@ def test_media_resolver_and_publisher_are_independent() -> None:
     media_checkout = next(
         step for step in media_job["steps"] if step["name"] == "Checkout"
     )
-    assert (
-        media_checkout["with"]["ref"] == "${{ github.event.repository.default_branch }}"
+    assert media_checkout["with"]["ref"] == "${{ github.sha }}"
+    assert any(
+        step["name"] == "Verify immutable workflow revision"
+        for step in media_job["steps"]
     )
     assert 'cron: "22 * * * *"' in resolver
     assert "curator.resolve_links" in resolver
     assert "claim_link_discoveries" not in resolver  # encapsulated by the resolver CLI
     assert "curator.main" not in resolver
-    assert "workflow_run:" in publisher
-    assert "ENABLE_GOVERNANCE_DELIVERY" in publisher
-    assert "ENABLE_TELEGRAM_DELIVERY" in publisher
-    assert (
-        "github.event.workflow_run.head_repository.full_name == github.repository"
-        in publisher
-    )
-    assert "curator.publish_outbox" in publisher
-    assert 'DELIVERY_LEASE_SECONDS: "900"' in publisher
-    assert "curator.publish_outbox --root . --limit 5" in publisher
-    assert "!cancelled()" in publisher
-    assert "steps.validate.outcome == 'success'" in publisher
+    assert "workflow_run:" not in publisher
+    assert "schedule:" not in publisher
+    assert "workflow_dispatch:" in publisher
+    assert "if: ${{ false }}" in publisher
+    assert "permanently disabled" in publisher
+    assert "TELEGRAM_BOT_TOKEN" not in publisher
+    assert "TELEGRAM_CHAT_ID" not in publisher
+    assert "curator.publish_outbox" not in publisher
     assert "curator.main" not in publisher
-    assert "Daily pages and briefing" in publisher
     publisher_payload = yaml.load(publisher, Loader=yaml.BaseLoader)
-    assert publisher_payload["on"]["workflow_run"]["branches"] == ["main"]
+    assert set(publisher_payload["on"]) == {"workflow_dispatch"}
     publisher_job = publisher_payload["jobs"]["publish"]
-    assert (
-        "github.ref_name == github.event.repository.default_branch"
-        in publisher_job["if"]
-    )
-    publisher_checkout = next(
-        step for step in publisher_job["steps"] if step["name"] == "Checkout"
-    )
-    assert (
-        publisher_checkout["with"]["ref"]
-        == "${{ github.event.repository.default_branch }}"
-    )
+    assert publisher_job["if"] == "${{ false }}"
     outbox_consumers = [
         path.name
         for path in WORKFLOWS.glob("*.yml")
         if "python -m curator.publish_outbox" in path.read_text(encoding="utf-8")
     ]
-    assert outbox_consumers == ["publish.yml"]
+    assert outbox_consumers == []
 
 
 def test_outbound_telegram_is_fail_closed_but_read_collection_remains_enabled() -> None:
@@ -235,7 +401,11 @@ def test_outbound_telegram_is_fail_closed_but_read_collection_remains_enabled() 
     )
     assert repair_job["environment"] == "telegram-history-repair"
     checkout = next(step for step in repair_job["steps"] if step["name"] == "Checkout")
-    assert checkout["with"]["ref"] == "${{ github.event.repository.default_branch }}"
+    assert checkout["with"]["ref"] == "${{ github.sha }}"
+    assert any(
+        step["name"] == "Verify immutable workflow revision"
+        for step in repair_job["steps"]
+    )
     initialize = next(
         step
         for step in repair_job["steps"]
@@ -297,7 +467,6 @@ def test_telegram_collectors_share_one_non_cancelling_concurrency_group() -> Non
     (
         ("ingest-official.yml", "ingest"),
         ("ingest-media.yml", "ingest"),
-        ("publish.yml", "publish"),
         ("repair-telegram-history.yml", "repair"),
         ("resolve-links.yml", "resolve"),
         ("watchdog.yml", "health"),
@@ -311,7 +480,13 @@ def test_secret_bearing_manual_jobs_run_default_branch_code_only(
 
     assert "github.ref_name == github.event.repository.default_branch" in job["if"]
     checkout = next(step for step in job["steps"] if step["name"] == "Checkout")
-    assert checkout["with"]["ref"] == "${{ github.event.repository.default_branch }}"
+    assert checkout["with"]["ref"] == "${{ github.sha }}"
+    if workflow_name != "ingest-official.yml":
+        guard = next(
+            step for step in job["steps"] if step["name"] == "Verify immutable workflow revision"
+        )
+        assert "git rev-parse HEAD" in guard["run"]
+        assert '"$actual" == "$GITHUB_SHA"' in guard["run"]
 
 
 def test_every_workflow_step_exposing_telegram_delivery_secrets_is_opted_in() -> None:
@@ -324,7 +499,6 @@ def test_every_workflow_step_exposing_telegram_delivery_secrets_is_opted_in() ->
     for path in sorted(WORKFLOWS.glob("*.yml")):
         payload = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         for job_name, job in payload["jobs"].items():
-            job_gate = str(job.get("if", ""))
             for step in job.get("steps", []):
                 rendered_step = yaml.safe_dump(step, allow_unicode=True)
                 if not any(secret in rendered_step for secret in delivery_secrets):
@@ -333,46 +507,111 @@ def test_every_workflow_step_exposing_telegram_delivery_secrets_is_opted_in() ->
                 exposed_steps.append(
                     f"{path.name}:{job_name}:{step.get('name', '<unnamed>')}"
                 )
-                combined_gate = f"{job_gate}\n{step.get('if', '')}"
-                assert "vars.ENABLE_TELEGRAM_DELIVERY == 'true'" in combined_gate, (
-                    f"{exposed_steps[-1]} exposes Telegram delivery credentials without "
-                    "the repository delivery opt-in"
-                )
-
-    assert exposed_steps
+    assert exposed_steps == []
 
 
-def test_daily_generation_and_delivery_use_requested_kst_boundaries() -> None:
+def test_daily_generation_uses_requested_kst_boundary_and_has_no_delivery_job() -> None:
     workflow = workflow_text("daily.yml")
     assert 'cron: "45 20 * * *"' in workflow
-    assert 'cron: "5 21 * * *"' in workflow
+    assert 'cron: "5 21 * * *"' not in workflow
     assert 'CURATOR_DAILY_REPORT_WRITE_ONLY: "1"' in workflow
-    assert "daily_report_queued=1" in workflow
-    assert "CURATOR_DELIVERY_MODE: outbox-enqueue" in workflow
-    assert "ENABLE_TELEGRAM_DELIVERY" in workflow
+    assert "daily_report_queued=1" not in workflow
+    assert "CURATOR_DELIVERY_MODE: outbox-enqueue" not in workflow
+    assert "TELEGRAM_BOT_TOKEN" not in workflow
+    assert "TELEGRAM_CHAT_ID" not in workflow
     assert "curator.story_review send" not in workflow
     assert "TELEGRAM_ADMIN_CHAT_ID" not in workflow
     assert "send_telegram_admin_access" not in workflow
     assert "curator.telegram_dashboard send-access" not in workflow
-    assert "Build token-gated Telegram admin shell" in workflow
-    assert (
-        "TELEGRAM_ADMIN_ACCESS_TOKEN: ${{ secrets.TELEGRAM_ADMIN_ACCESS_TOKEN }}"
-        in workflow
-    )
-    assert (
-        "require-env.sh TELEGRAM_ADMIN_ACCESS_TOKEN ACTIVIST_PUBLIC_API_URL" in workflow
-    )
-    assert "python -m curator.telegram_dashboard write" in workflow
-    assert "actions/upload-pages-artifact@v5" in workflow
-    assert "actions/deploy-pages@v5" in workflow
-    assert "ENABLE_GOVERNANCE_PAGES" in workflow
-    assert "vars.ENABLE_PAGES != 'true'" in workflow
-    assert "ENABLE_PAGES and ENABLE_GOVERNANCE_PAGES are mutually exclusive" in workflow
+    assert "Build token-gated Telegram admin shell" not in workflow
+    assert "TELEGRAM_ADMIN_ACCESS_TOKEN" not in workflow
+    assert "python -m curator.telegram_dashboard write" not in workflow
+    assert "python -m curator.governance_site" in workflow
+    assert "--output governance-pages-artifact" in workflow
+    assert '--legacy-root "$LEGACY_COMPATIBILITY_ROOT"' in workflow
+    assert "python -m curator.legacy_recovery_bundle prepare" in workflow
+    assert "python -m curator.legacy_recovery_bundle verify" in workflow
+    assert "resolve-legacy-recovery.cjs" in workflow
+    assert "LEGACY_ROLLBACK_RUN_ID" in workflow
+    assert "LEGACY_ROLLBACK_ARTIFACT_NAME" in workflow
+    assert "LEGACY_ROLLBACK_CODE_REVISION" in workflow
+    assert "LEGACY_ROLLBACK_ARTIFACT_DIGEST" in workflow
+    assert "/actions/artifacts/$LEGACY_ARTIFACT_ID/zip" in workflow
+    assert "--proto '=https'" in workflow
+    assert "path: governance-pages-artifact" in workflow
+    assert ".governance-pages" not in workflow
+    assert ".deployment-marker" not in workflow
+    assert "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9" in workflow
+    assert "actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128" in workflow
+    assert "PAGES_OWNER" in workflow
+    assert "python -m curator.operation_mode" in workflow
     assert (
         "governance-pages-ready-${{ steps.deployment_marker.outputs.kst_date }}"
         in workflow
     )
-    assert "verify-daily-pages-artifact.py" in workflow
+    payload = yaml.load(workflow, Loader=yaml.BaseLoader)
+    assert set(payload["jobs"]) == {"generate"}
+
+
+def test_daily_legacy_recovery_is_digest_pinned_and_rolled_only_from_trusted_runs() -> None:
+    payload = yaml.load(workflow_text("daily.yml"), Loader=yaml.BaseLoader)
+    steps = payload["jobs"]["generate"]["steps"]
+    resolver = next(
+        step
+        for step in steps
+        if step["name"] == "Resolve rolling legacy recovery source"
+    )
+    assert resolver["uses"] == "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3"
+    assert resolver["env"] == {
+        "LEGACY_RUN_ID": "${{ vars.LEGACY_ROLLBACK_RUN_ID }}",
+        "LEGACY_ARTIFACT_NAME": "${{ vars.LEGACY_ROLLBACK_ARTIFACT_NAME }}",
+        "LEGACY_CODE_REVISION": "${{ vars.LEGACY_ROLLBACK_CODE_REVISION }}",
+        "LEGACY_ARTIFACT_DIGEST": "${{ vars.LEGACY_ROLLBACK_ARTIFACT_DIGEST }}",
+        "DEFAULT_BRANCH": "${{ github.event.repository.default_branch }}",
+    }
+    resolver_script = resolver["with"]["script"]
+    assert "resolve-legacy-recovery.cjs" in resolver_script
+    module = (ROOT / ".github" / "scripts" / "resolve-legacy-recovery.cjs").read_text(
+        encoding="utf-8"
+    )
+    assert 'run.conclusion !== "success"' in module
+    assert "run.head_branch === defaultBranch" in module
+    assert '".github/workflows/build-feed.yml"' in module
+    assert "run.head_sha || \"\"" in module
+    assert "pin.artifactDigest" in module
+    assert "matches.length !== 1" in module
+    assert "!item.expired" in module
+    assert '".github/workflows/daily.yml"' in module
+    assert '".github/workflows/governance-cutover.yml"' in module
+
+    download = next(
+        step
+        for step in steps
+        if step["name"] == "Download immutable legacy seed archive"
+    )
+    assert "actions/artifacts/$LEGACY_ARTIFACT_ID/zip" in download["run"]
+    assert "--proto '=https'" in download["run"]
+    assert download["env"]["GH_TOKEN"] == "${{ github.token }}"
+
+    prepare = next(
+        step
+        for step in steps
+        if step["name"] == "Prepare or verify rolling legacy recovery bundle"
+    )
+    assert "python -m curator.legacy_recovery_bundle prepare" in prepare["run"]
+    assert "python -m curator.legacy_recovery_bundle verify" in prepare["run"]
+    assert "--source-artifact-digest \"$LEGACY_ARTIFACT_DIGEST\"" in prepare["run"]
+    carry_download = next(
+        step for step in steps if step["name"] == "Download rolling legacy recovery bundle"
+    )
+    assert carry_download["with"]["digest-mismatch"] == "error"
+    carry_upload = next(
+        step
+        for step in steps
+        if step["name"] == "Refresh verified legacy recovery bundle retention"
+    )
+    assert carry_upload["with"]["name"] == "legacy-recovery-carry-forward"
+    assert carry_upload["with"]["retention-days"] == "90"
 
 
 def test_workflows_do_not_send_private_admin_messages_or_token_links() -> None:
@@ -383,8 +622,10 @@ def test_workflows_do_not_send_private_admin_messages_or_token_links() -> None:
         assert "send_telegram_admin_access" not in workflow
         assert "curator.telegram_dashboard send-access" not in workflow
         assert "curator.story_review send" not in workflow
-        assert "Build token-gated Telegram admin shell" in workflow
-        assert "python -m curator.telegram_dashboard write" in workflow
+    assert "Build token-gated Telegram admin shell" in legacy
+    assert "python -m curator.telegram_dashboard write" in legacy
+    assert "Build token-gated Telegram admin shell" not in daily
+    assert "python -m curator.telegram_dashboard write" not in daily
 
 
 def test_workflow_permissions_are_scoped_to_the_jobs_that_need_them() -> None:
@@ -392,17 +633,41 @@ def test_workflow_permissions_are_scoped_to_the_jobs_that_need_them() -> None:
     official = yaml.load(workflow_text("ingest-official.yml"), Loader=yaml.BaseLoader)
     assert daily["permissions"] == {"contents": "read", "models": "read"}
     assert daily["jobs"]["generate"]["permissions"] == {
+        "actions": "read",
         "contents": "read",
         "models": "read",
         "pages": "write",
         "id-token": "write",
     }
-    assert daily["jobs"]["send"]["permissions"] == {
-        "contents": "read",
-        "models": "read",
-        "actions": "read",
-    }
-    assert official["permissions"] == {"contents": "read"}
+    assert "send" not in daily["jobs"]
+    assert official["permissions"] == {"contents": "read", "actions": "read"}
+
+
+def test_daily_governance_pages_deploy_only_after_authenticated_live_state() -> None:
+    payload = yaml.load(workflow_text("daily.yml"), Loader=yaml.BaseLoader)
+    steps = payload["jobs"]["generate"]["steps"]
+    eligibility = next(
+        step for step in steps if step["name"] == "Determine Pages deployment eligibility"
+    )
+    assert eligibility["env"]["BSIDE_ADMIN_TOKEN"] == "${{ secrets.BSIDE_ADMIN_TOKEN }}"
+    assert eligibility["env"]["GOVERNANCE_PIPELINE_MODE"] == (
+        "${{ steps.rollout.outputs.governance_pipeline_mode }}"
+    )
+    assert "/admin/release-state" in eligibility["run"]
+    assert '[[ "$release_state" == "live" ]]' in eligibility["run"]
+    assert '"$GOVERNANCE_PIPELINE_MODE" == "live"' in eligibility["run"]
+    assert "deploy_pages=false" in eligibility["run"]
+    boundary = next(
+        step
+        for step in steps
+        if step["name"] == "Revalidate live governance ownership at the deployment boundary"
+    )
+    assert boundary["env"]["GOVERNANCE_PIPELINE_MODE_SNAPSHOT"] == (
+        "${{ steps.rollout.outputs.governance_pipeline_mode }}"
+    )
+    assert '"$GOVERNANCE_PIPELINE_MODE_SNAPSHOT" == "live"' in boundary["run"]
+    rollback_artifact = next(step for step in steps if step["name"] == "Preserve rollback artifact")
+    assert rollback_artifact["with"]["retention-days"] == "90"
 
 
 @pytest.mark.parametrize(
@@ -421,13 +686,13 @@ def test_pages_deployment_retries_one_immutable_artifact_three_times(
     steps = job["steps"]
 
     uploads = [
-        step for step in steps if step.get("uses") == "actions/upload-pages-artifact@v5"
+        step for step in steps if step.get("uses") == "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9"
     ]
     deployments = [
-        step for step in steps if step.get("uses") == "actions/deploy-pages@v5"
+        step for step in steps if step.get("uses") == "actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128"
     ]
     configuration = next(
-        step for step in steps if step.get("uses") == "actions/configure-pages@v6"
+        step for step in steps if step.get("uses") == "actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d"
     )
     assert "enablement" not in configuration.get("with", {})
     assert "token" not in configuration.get("with", {})
@@ -511,7 +776,7 @@ def test_pages_deployment_retries_one_immutable_artifact_three_times(
             step for step in steps if step["name"] == "Publish curator run metrics"
         )
         assert "always()" in metrics["if"]
-        assert metrics["uses"] == "actions/upload-artifact@v7"
+        assert metrics["uses"] == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
         assert metrics["with"]["if-no-files-found"] == "error"
         assert (
             steps.index(build_feed) < steps.index(verify_metrics) < steps.index(metrics)
@@ -580,14 +845,14 @@ def test_legacy_pages_archive_download_and_seed_are_fail_closed() -> None:
         if step["name"] == "Preserve sanitized legacy archive seed"
     )
 
-    assert resolver["uses"] == "actions/github-script@v9"
+    assert resolver["uses"] == "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3"
     assert 'sourceRun.conclusion !== "success"' in resolver["with"]["script"]
     assert "artifact.expired" in resolver["with"]["script"]
     assert "sourceRunId === Number(context.runId)" in resolver["with"]["script"]
     assert "sourceRun.path !== expectedWorkflowPath" in resolver["with"]["script"]
     assert "sourceRun.head_repository?.full_name" in resolver["with"]["script"]
     assert "core.setFailed" in resolver["with"]["script"]
-    assert download["uses"] == "actions/download-artifact@v8"
+    assert download["uses"] == "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
     assert download["with"] == {
         "artifact-ids": "${{ steps.previous_legacy_pages.outputs.artifact_id }}",
         "path": "${{ runner.temp }}/previous-legacy-pages",
@@ -597,10 +862,10 @@ def test_legacy_pages_archive_download_and_seed_are_fail_closed() -> None:
         "merge-multiple": "true",
         "digest-mismatch": "error",
     }
-    assert seed["uses"] == "actions/upload-artifact@v7"
+    assert seed["uses"] == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
     assert seed["with"]["name"] == "legacy-pages-archive-seed"
     assert seed["with"]["path"] == "${{ steps.legacy_pages_artifact.outputs.path }}"
-    assert seed["with"]["retention-days"] == "30"
+    assert seed["with"]["retention-days"] == "90"
     assert "preserve_legacy_archive_seed" in seed["if"]
 
 
@@ -612,7 +877,8 @@ def test_pages_deployment_is_default_branch_only() -> None:
     assert '"$REF_NAME" == "$DEFAULT_BRANCH"' in legacy
     assert "Determine Pages deployment eligibility" in daily
     assert '"$REF_NAME" == "$DEFAULT_BRANCH"' in daily
-    assert "github.ref_name == github.event.repository.default_branch" in daily
+    assert "REF_NAME: ${{ github.ref_name }}" in daily
+    assert "DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}" in daily
 
 
 def test_pages_incident_listener_is_isolated_and_minimally_privileged() -> None:
@@ -627,7 +893,7 @@ def test_pages_incident_listener_is_isolated_and_minimally_privileged() -> None:
     )
     assert payload["on"]["workflow_run"]["workflows"] == [
         "Build curated RSS feed",
-        "Daily pages and briefing",
+        "Daily governance pages",
     ]
     assert payload["on"]["workflow_run"]["branches"] == ["main"]
     assert "/attempts/{attempt_number}/jobs" in workflow
@@ -649,8 +915,94 @@ def test_official_ingest_serializes_overlapping_scheduled_runs() -> None:
     payload = yaml.load(workflow_text("ingest-official.yml"), Loader=yaml.BaseLoader)
     assert payload["concurrency"] == {
         "group": "ingest-official-${{ github.ref_name }}",
+        "queue": "max",
         "cancel-in-progress": "false",
     }
+
+
+def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> None:
+    workflow = workflow_text("official-backfill.yml")
+    payload = yaml.load(workflow, Loader=yaml.BaseLoader)
+    dispatch = payload["on"]["workflow_dispatch"]["inputs"]
+    assert set(dispatch) == {
+        "mode",
+        "source",
+        "from_date",
+        "to_date",
+        "max_windows",
+        "sync_company_master",
+    }
+    assert dispatch["mode"]["options"] == ["dry-run", "apply"]
+    assert dispatch["source"]["options"] == ["dart", "kind", "both"]
+    assert payload["concurrency"] == {
+        "group": "ingest-official-${{ github.ref_name }}",
+        "queue": "max",
+        "cancel-in-progress": "false",
+    }
+    assert payload["permissions"] == {"contents": "read", "actions": "read"}
+
+    job = payload["jobs"]["backfill"]
+    assert job["if"] == "github.ref_name == github.event.repository.default_branch"
+    assert int(job["timeout-minutes"]) == 360
+    steps = job["steps"]
+    checkout = next(step for step in steps if step["name"] == "Checkout immutable dispatch revision")
+    assert checkout["with"]["ref"] == "${{ github.sha }}"
+    revision_guard = next(step for step in steps if step["name"] == "Verify immutable dispatch revision")
+    assert "git rev-parse HEAD" in revision_guard["run"]
+    assert '"$actual" == "$GITHUB_SHA"' in revision_guard["run"]
+    run_step = next(step for step in steps if step["name"] == "Run one-day official backfill windows")
+    assert "--chunk-days 1" in run_step["run"]
+    assert '--max-chunks "$BACKFILL_MAX_WINDOWS"' in run_step["run"]
+    assert '${{ inputs.max_windows }}' not in run_step["run"]
+    assert run_step["env"]["BACKFILL_MAX_WINDOWS"] == "${{ inputs.max_windows }}"
+    assert "--request-budget 10000" in run_step["run"]
+    assert "DART_REQUEST_BUDGET" not in run_step["env"]
+    assert run_step["env"]["CURATOR_DISABLE_TELEGRAM_SEND"] == "1"
+    assert run_step["env"]["CURATOR_DELIVERY_MODE"] == "disabled"
+    assert run_step["env"]["ENABLE_TELEGRAM_DELIVERY"] == "false"
+    assert run_step["env"]["ENABLE_GOVERNANCE_DELIVERY"] == "false"
+    assert run_step["env"]["BSIDE_OPS_TOKEN"] == "${{ secrets.BSIDE_OPS_TOKEN }}"
+    assert run_step["env"]["BSIDE_API_BASE_URL"] == (
+        "${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}"
+    )
+    assert run_step["env"]["CURATOR_REQUIRE_DURABLE_DART_QUOTA"] == "1"
+    assert run_step["env"]["CURATOR_DART_QUOTA_PHASE"] == "official-backfill"
+    validation = next(step for step in steps if step["name"] == "Validate operational configuration")
+    assert "BSIDE_OPS_TOKEN" in validation["run"]
+    assert "KIND_DISCLOSURE_ENDPOINT BSIDE_API_BASE_URL BSIDE_OPS_TOKEN" in validation["run"]
+    canary = next(
+        step
+        for step in steps
+        if step["name"] == "Dry-run completed-day and revision DART canary"
+    )
+    assert canary["if"] == "inputs.mode == 'dry-run' && inputs.source != 'kind'"
+    assert "python -m curator.dart_canary_sample" in canary["run"]
+    assert "--lookback-days 365" in canary["run"]
+    assert "--request-budget 10000" in canary["run"]
+    assert "10_000 - used" not in canary["run"]
+    assert "remaining_request_budget=" not in canary["run"]
+    assert canary["env"]["DART_API_KEY"] == "${{ secrets.DART_API_KEY }}"
+    assert canary["env"]["BSIDE_OPS_TOKEN"] == "${{ secrets.BSIDE_OPS_TOKEN }}"
+    assert canary["env"]["CURATOR_REQUIRE_DURABLE_DART_QUOTA"] == "1"
+    assert canary["env"]["CURATOR_DART_QUOTA_PHASE"] == "dart-canary"
+    assert "TELEGRAM_BOT_TOKEN" not in workflow
+    assert "TELEGRAM_CHAT_ID" not in workflow
+
+    uploads = [step for step in steps if step.get("uses") == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"]
+    assert {step["name"] for step in uploads} == {
+        "Preserve backfill report",
+        "Preserve resumable checkpoint",
+    }
+    assert all(step["if"] == "always()" for step in uploads)
+    assert all(step["with"]["if-no-files-found"] == "error" for step in uploads)
+    report_upload = next(step for step in uploads if step["name"] == "Preserve backfill report")
+    assert "${{ env.DART_CANARY_REPORT }}" in report_upload["with"]["path"]
+    checkpoint = next(step for step in uploads if step["name"] == "Preserve resumable checkpoint")
+    assert checkpoint["with"]["name"] == "${{ env.CHECKPOINT_ARTIFACT_NAME }}"
+    resolver = next(step for step in steps if step["name"] == "Resolve previous matching checkpoint")
+    assert resolver["uses"] == "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3"
+    assert "official-backfill.yml" in resolver["with"]["script"]
+    assert "!item.expired" in resolver["with"]["script"]
 
 
 def test_ci_audits_python_and_browser_dependencies() -> None:
@@ -659,6 +1011,41 @@ def test_ci_audits_python_and_browser_dependencies() -> None:
     assert "npm audit --audit-level=high" in workflow
     assert ".github/scripts/prepare-legacy-pages.py" in workflow
     assert ".github/scripts/restore-legacy-pages-archive.py" in workflow
+
+
+def test_ci_type_checks_every_release_critical_governance_module() -> None:
+    ci = yaml.load(workflow_text("ci.yml"), Loader=yaml.BaseLoader)
+    type_step = next(
+        step
+        for step in ci["jobs"]["quality"]["steps"]
+        if step.get("name") == "Type check governance core"
+    )
+    command = str(type_step["run"])
+    required_modules = {
+        "curator/backfill_checkpoint_api.py",
+        "curator/benchmark_candidates.py",
+        "curator/dart_canary_sample.py",
+        "curator/dart_quota.py",
+        "curator/event_identity.py",
+        "curator/governance_site.py",
+        "curator/governance_site_config.py",
+        "curator/label_agreement.py",
+        "curator/legacy_feed_compat.py",
+        "curator/legacy_recovery_bundle.py",
+        "curator/official_schedule.py",
+        "curator/official_slot_claim.py",
+        "curator/official_slot_epoch.py",
+        "curator/operation_mode.py",
+        "curator/quality_benchmark.py",
+        "curator/quality_snapshot.py",
+        "curator/release_evidence.py",
+        "curator/release_evidence_inputs.py",
+        "curator/shadow_compare.py",
+        "curator/shadow_engine.py",
+    }
+    assert all(module in command for module in required_modules)
+    assert "--disallow-untyped-defs" in command
+    assert "--no-implicit-optional" in command
 
 
 def test_ci_checks_production_php_73() -> None:
@@ -689,22 +1076,36 @@ def test_ci_checks_production_php_73() -> None:
     assert "php tests/php_contracts.php" in commands
 
 
-def test_workflows_use_current_node24_official_action_majors() -> None:
+def test_workflows_pin_verified_node24_action_commits() -> None:
     workflows = "\n".join(
         path.read_text(encoding="utf-8") for path in WORKFLOWS.glob("*.yml")
     )
-    expected_actions = {
-        "actions/checkout@v7",
-        "actions/setup-python@v7",
-        "actions/setup-node@v7",
-        "actions/github-script@v9",
-        "actions/configure-pages@v6",
-        "actions/deploy-pages@v5",
-        "actions/upload-pages-artifact@v5",
-        "actions/upload-artifact@v7",
-        "actions/download-artifact@v8",
+    pinned_actions = {
+        "actions/checkout": ("3d3c42e5aac5ba805825da76410c181273ba90b1", "v7.0.1"),
+        "actions/setup-python": ("5fda3b95a4ea91299a34e894583c3862153e4b97", "v7.0.0"),
+        "actions/setup-node": ("820762786026740c76f36085b0efc47a31fe5020", "v7.0.0"),
+        "actions/github-script": ("3a2844b7e9c422d3c10d287c895573f7108da1b3", "v9.0.0"),
+        "actions/configure-pages": ("45bfe0192ca1faeb007ade9deae92b16b8254a0d", "v6.0.0"),
+        "actions/deploy-pages": ("cd2ce8fcbc39b97be8ca5fce6e763baed58fa128", "v5.0.0"),
+        "actions/upload-pages-artifact": ("fc324d3547104276b827a68afc52ff2a11cc49c9", "v5.0.0"),
+        "actions/upload-artifact": ("043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", "v7.0.1"),
+        "actions/download-artifact": ("3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", "v8.0.1"),
+        "shivammathur/setup-php": ("f3e473d116dcccaddc5834248c87452386958240", "v2.37.2"),
     }
-    assert set(re.findall(r"uses:\s+(actions/[^\s]+)", workflows)) == expected_actions
+    expected_refs = {f"{action}@{sha}" for action, (sha, _version) in pinned_actions.items()}
+    expected_lines = {
+        f"uses: {action}@{sha} # {version}"
+        for action, (sha, version) in pinned_actions.items()
+    }
+    action_lines = [
+        line.strip()
+        for line in workflows.splitlines()
+        if line.lstrip().startswith("uses:")
+    ]
+    assert action_lines
+    assert set(action_lines) == expected_lines
+    assert set(re.findall(r"uses:\s+([^\s]+)", workflows)) == expected_refs
+    assert not re.search(r"uses:\s+[^@\s]+@v\d+", workflows)
     assert "pip-install" not in workflows
     assert "always-auth" not in workflows
     assert "require('@actions/github')" not in workflows
@@ -716,7 +1117,7 @@ def test_workflows_use_current_node24_official_action_majors() -> None:
     setup_node = next(
         step
         for step in ci["jobs"]["ui-e2e"]["steps"]
-        if step.get("uses") == "actions/setup-node@v7"
+        if step.get("uses") == "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
     )
     assert setup_node["with"] == {"node-version": "22", "cache": "npm"}
     assert not [path for path in (ROOT / "public").rglob(".*") if path.is_file()]
@@ -730,9 +1131,14 @@ def test_watchdog_contract_and_issue_permission() -> None:
     assert "BSIDE_OPS_TOKEN" in workflow
     assert '"90"' in workflow
     assert 'cron: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *"' in workflow
-    assert 'WATCHDOG_MAX_OUTBOX_AGE_MINUTES: "5"' in workflow
-    assert "/api/v1/ops/health" in script
-    assert "dead_letter_count" in script
+    assert "BSIDE_PUBLIC_WEB_URL" in workflow
+    assert "WATCHDOG_GOVERNANCE_PAGES" in workflow
+    assert 'api_endpoint(base_url, "/ops/health")' in script
+    assert "/ops/availability-observations" in script
+    assert "active_deployment_sha(payload)" in script
+    assert 'source_state.get("last_scheduled_success_at")' in script
+    assert 'os.environ.get("GITHUB_SHA"' not in script
+    assert "dead_letter_count" not in script
 
 
 def test_release_gate_uses_cross_run_evidence_and_checked_out_revision() -> None:
@@ -740,12 +1146,12 @@ def test_release_gate_uses_cross_run_evidence_and_checked_out_revision() -> None
     payload = yaml.load(workflow, Loader=yaml.BaseLoader)
     assert "workflow_dispatch:" in workflow
     assert "actions: read" in workflow
-    assert "actions/download-artifact@v8" in workflow
+    assert "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" in workflow
     assert "digest-mismatch: error" in workflow
     download = next(
         step
         for step in payload["jobs"]["evaluate"]["steps"]
-        if step.get("uses") == "actions/download-artifact@v8"
+        if step.get("uses") == "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
     )
     assert download["with"] == {
         "name": "${{ inputs.evidence_artifact_name }}",
@@ -757,9 +1163,12 @@ def test_release_gate_uses_cross_run_evidence_and_checked_out_revision() -> None
     assert "Validate production evidence run provenance" in workflow
     assert 'MAX_RUN_AGE_HOURS: "72"' in workflow
     assert "Evidence workflow run revision does not match" in workflow
+    assert "EXPECTED_WORKFLOW_PATH: .github/workflows/release-evidence.yml" in workflow
+    assert "Evidence artifact was not produced by the protected release-evidence workflow" in workflow
+    assert '"$head_branch" != "$DEFAULT_BRANCH"' in workflow
     assert "run-id: ${{ inputs.evidence_run_id }}" in workflow
     assert "python -m curator.release_gate" in workflow
     assert "--expected-revision ${{ github.sha }}" in workflow
     assert "--evidence-as-of ${{ steps.evidence_run.outputs.created_at }}" in workflow
-    assert "actions/upload-artifact@v7" in workflow
+    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in workflow
     assert "Governance release transition gate did not pass" in workflow

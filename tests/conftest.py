@@ -10,6 +10,15 @@ from curator.config import DEFAULT_CONFIG
 from curator.normalize import canonical_url_hash, normalize_title_parts
 
 
+@pytest.fixture(autouse=True)
+def isolate_inherited_github_actions_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Require tests to opt into GitHub Actions runtime semantics explicitly."""
+
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+
+
 @pytest.fixture
 def config() -> dict[str, object]:
     return deepcopy(DEFAULT_CONFIG)

@@ -31,7 +31,7 @@ from .priority import (
     priority_overrides_path,
 )
 from .relevance import relevance_details
-from .remote_api import remote_api_configured, sync_state_to_remote_api
+from .remote_api import sync_state_to_remote_api
 from .remote_state import hydrate_runtime_state
 from .rss_writer import write_feed, write_index
 from .state import (
@@ -41,9 +41,7 @@ from .state import (
     remember_rejected,
     save_state,
 )
-from .summaries import publish_hourly_telegram_update
 from .telegram_publisher import (
-    enqueue_unsent_telegram_clusters_to_remote,
     initialize_telegram_state,
 )
 from .source_rights import (
@@ -57,7 +55,6 @@ from .telegram_dashboard import write_telegram_dashboard
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TRUE_VALUES = {"1", "true", "yes", "on"}
-DELIVERY_MODES = {"legacy-direct", "outbox-enqueue", "disabled"}
 FAILURE_KEYS = (
     "official_failed",
     "telegram_failed",
@@ -133,35 +130,14 @@ def write_run_metrics(
 
 
 def telegram_delivery_mode() -> str:
-    """Select one mutually exclusive Telegram delivery path for this run.
+    """Return the immutable web-only distribution policy.
 
-    Workflows set this explicitly during the legacy/governance transition.  The
-    fallback preserves command-line compatibility: a configured remote API uses
-    the durable outbox, while a local-only run sends through the legacy path.
-    The historical disable flag always wins so an ingest-only run cannot enqueue
-    merely because remote credentials are present.
+    Telegram remains an authorized read-only signal source, but this product no
+    longer has an outbound Telegram mode. Environment variables deliberately
+    cannot opt back into either the historical direct sender or its outbox.
     """
 
-    if (
-        os.environ.get("CURATOR_DISABLE_TELEGRAM_SEND", "").strip().casefold()
-        in TRUE_VALUES
-    ):
-        return "disabled"
-    raw_mode = os.environ.get("CURATOR_DELIVERY_MODE", "").strip().casefold()
-    aliases = {
-        "direct": "legacy-direct",
-        "legacy": "legacy-direct",
-        "outbox": "outbox-enqueue",
-        "enqueue": "outbox-enqueue",
-        "ingest-only": "disabled",
-        "none": "disabled",
-    }
-    mode = aliases.get(raw_mode, raw_mode)
-    if mode:
-        if mode not in DELIVERY_MODES:
-            raise ValueError(f"unsupported CURATOR_DELIVERY_MODE: {raw_mode}")
-        return mode
-    return "outbox-enqueue" if remote_api_configured() else "legacy-direct"
+    return "disabled"
 
 
 def prepare_article(
@@ -296,40 +272,12 @@ def publish_telegram_for_run(
     duplicates: list[dict[str, object]],
     remote_summary: dict[str, int],
 ) -> dict[str, int]:
-    """Execute exactly one direct, enqueue-only, or disabled delivery path."""
+    """Return the immutable web-only outcome without inspecting transports."""
 
-    delivery_mode = telegram_delivery_mode()
-    if delivery_mode == "legacy-direct":
-        return {
-            **publish_hourly_telegram_update(state, config, now, duplicates),
-            "telegram_outbox_enqueue_failed": 0,
-            "telegram_outbox_enqueue_skipped": 1,
-        }
-    if (
-        delivery_mode == "outbox-enqueue"
-        and remote_api_configured()
-        and not int(remote_summary.get("remote_api_failed") or 0)
-    ):
-        outbox_summary = enqueue_unsent_telegram_clusters_to_remote(state, config, now)
-        return {"telegram_sent": 0, "telegram_failed": 0, **outbox_summary}
-    if delivery_mode == "outbox-enqueue" and remote_api_configured():
-        return {
-            "telegram_sent": 0,
-            "telegram_failed": 0,
-            "telegram_outbox_enqueue_failed": 1,
-            "telegram_outbox_enqueue_skipped": 1,
-        }
-    if delivery_mode == "disabled":
-        return {
-            "telegram_sent": 0,
-            "telegram_failed": 0,
-            "telegram_outbox_enqueue_failed": 0,
-            "telegram_outbox_enqueue_skipped": 1,
-        }
     return {
         "telegram_sent": 0,
         "telegram_failed": 0,
-        "telegram_outbox_enqueue_failed": 1,
+        "telegram_outbox_enqueue_failed": 0,
         "telegram_outbox_enqueue_skipped": 1,
     }
 

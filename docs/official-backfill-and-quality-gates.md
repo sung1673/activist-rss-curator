@@ -18,7 +18,7 @@
 ```powershell
 .\.venv\Scripts\python.exe -m curator.official_backfill `
   --from-date 2021-01-01 --to-date 2021-01-15 `
-  --source dart --chunk-days 7 --max-chunks 1 --dry-run
+  --source dart --chunk-days 1 --max-chunks 1 --dry-run
 ```
 
 실제 백필은 범위를 고정해 실행한다. `--max-pages`는 소스·청크별 API 페이지 상한이고, `--max-chunks`는 한 번의 실행에서 처리할 미완료 청크 수의 상한이다.
@@ -35,7 +35,7 @@ DART와 KIND 모두 요청한 페이지와 응답 페이지가 다르거나, 전
 
 KIND는 공개된 범용 JSON API 계약이 없으므로 `KIND_DISCLOSURE_ENDPOINT` 앞의 어댑터가 아래 계약을 충족해야 한다.
 
-KIND의 일반 HTML 화면이나 오늘의 공시 RSS는 이 endpoint가 아니다. 운영 어댑터가 준비되기 전에는 수동 workflow의 `include_kind=false`로 DART-only smoke/shadow만 실행할 수 있으며, 예약 실행은 KIND를 필수로 요구해 fail-closed된다.
+KIND의 일반 HTML 화면이나 오늘의 공시 RSS는 이 endpoint가 아니다. 운영 어댑터가 준비되기 전에는 수동 workflow의 `include_kind=false`로 DART-only smoke/shadow만 실행할 수 있으며, 예약 실행은 KIND를 필수로 요구해 fail-closed된다. KIND 선택 시에는 dry-run을 포함해 운영 DB에 편집 승인된 `official:kind` SourceRight가 있어야 하며, 상세 계약은 [KIND SourceRight 수집 사전검증](kind-source-right-preflight.md)을 따른다.
 
 - 응답은 전체 범위를 담은 최상위 JSON 배열이거나 JSON 객체다.
 - 객체의 행 배열은 최상위 또는 `data` 안의 `items`, `list`, `results` 중 하나다.
@@ -50,7 +50,7 @@ KIND의 일반 HTML 화면이나 오늘의 공시 RSS는 이 endpoint가 아니�
 ```powershell
 .\.venv\Scripts\python.exe -m curator.official_backfill `
   --from-date 2021-01-01 --to-date 2026-01-01 `
-  --source both --chunk-days 14 --max-pages 100 --max-chunks 10
+  --source dart --chunk-days 1 --max-pages 100 --max-chunks 10
 ```
 
 같은 명령을 다시 실행하면 완료된 청크를 건너뛰고 다음 청크부터 시작한다. 실패한 청크는 완료로 기록하지 않으며 기본값은 즉시 중단이다. 독립적인 오류를 모두 기록하려는 운영 실행에만 `--continue-on-error`를 사용한다. 최초 회사 마스터를 함께 적재할 때는 `--sync-company-master`를 한 번 지정한다.
@@ -102,7 +102,7 @@ KIND의 일반 HTML 화면이나 오늘의 공시 RSS는 이 endpoint가 아니�
 기본 게이트는 계획의 정량 목표를 그대로 적용한다.
 
 - same-story: 서로 다른 `pair_id` 500개 이상, 양성·음성 모두 포함, precision 0.97 이상
-- relevance: 서로 다른 실제 `event_id` 300개 이상, 양성·음성 모두 포함, recall 0.95 이상
+- relevance: 공식 문서가 연결된 서로 다른 실제 `event_id` 300개 이상, 사람이 확인한 비관련 hard-negative 120개 이상, 양성·음성 모두 포함, precision 0.90·recall 0.95 이상
 - 두 작업 모두 precision, recall, F1, accuracy와 confusion matrix를 출력한다.
 
 라벨 데이터가 준비되면 다음과 같이 실행한다.

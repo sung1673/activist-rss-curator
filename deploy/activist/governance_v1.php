@@ -8,17 +8,30 @@
  * api.php and keep their original response shapes.
  */
 
-const V1_RESPONSE_BUDGET_BYTES = 256000;
+const V1_RESPONSE_BUDGET_BYTES = 250000;
 const V1_DEFAULT_PAGE_SIZE = 25;
 const V1_MAX_PAGE_SIZE = 100;
 const V1_CORRECTION_LOOKBACK_DAYS = 730;
+const GOV_V1_SCHEMA_VERSION = 10;
+const GOV_V1_RELEASE_STATE_KEY = 'governance_v1';
+const GOV_V1_AVAILABILITY_CADENCE_ID = 'watchdog-v1-kst-5m-minute01';
+const GOV_V1_AVAILABILITY_SLOTS_PER_DAY = 288;
+
+/** Decode and normalize a route exactly once before both CORS and dispatch. */
+function v1_canonical_route_path(string $value): string {
+    $decoded = rawurldecode($value);
+    if (preg_match('/[\x00-\x1f\x7f\\\\]/', $decoded) === 1) {
+        return '/__invalid_route__';
+    }
+    return '/' . trim($decoded, '/');
+}
 
 function v1_request_path(): ?string {
     if (isset($_GET['_route'])) {
-        $route = trim((string)$_GET['_route']);
+        $route = v1_canonical_route_path(trim((string)$_GET['_route']));
         if (strpos($route, '/api/v1') === 0) {
             $rest = substr($route, strlen('/api/v1'));
-            return $rest === '' ? '/' : '/' . ltrim($rest, '/');
+            return $rest === '' ? '/' : '/' . trim($rest, '/');
         }
     }
     $candidates = array();
@@ -32,6 +45,7 @@ function v1_request_path(): ?string {
         }
     }
     foreach ($candidates as $candidate) {
+        $candidate = v1_canonical_route_path($candidate);
         $marker = '/api/v1';
         $position = strpos($candidate, $marker);
         if ($position === false) {
@@ -41,7 +55,7 @@ function v1_request_path(): ?string {
         if ($rest !== '' && substr($rest, 0, 1) !== '/') {
             continue;
         }
-        return $rest === '' ? '/' : $rest;
+        return $rest === '' ? '/' : '/' . trim($rest, '/');
     }
     return null;
 }
@@ -190,18 +204,239 @@ function v1_require_role(array $config, array $allowedRoles): string {
     v1_respond(403, array('ok' => false, 'error' => 'insufficient_role'));
 }
 
-function handle_v1_request(string $method, string $path, array $config): void {
-    $path = '/' . trim(rawurldecode($path), '/');
-    if ($method === 'GET' && strpos($path, '/ops/') !== 0 && strpos($path, '/admin/') !== 0) {
-        header('Cache-Control: public, max-age=60, stale-while-revalidate=300');
+/** Normalize identity text using the same conservative profile as the Python engine. */
+function v1_normalize_identity_text($value): string {
+    $text = is_string($value) || is_numeric($value) ? (string)$value : '';
+    if (class_exists('Normalizer')) {
+        $normalized = Normalizer::normalize($text, Normalizer::FORM_KC);
+        if (is_string($normalized)) { $text = $normalized; }
     }
-    if ($path === '/') {
-        v1_respond(200, array(
-            'ok' => true,
-            'service' => 'bside-governance-intelligence',
-            'documentation' => '/api/v1/openapi.yaml',
+    $collapsed = preg_replace('/\s+/u', ' ', $text);
+    if (is_string($collapsed)) { $text = $collapsed; }
+    return mb_strtolower(trim($text), 'UTF-8');
+}
+
+/**
+ * Return the canonical comparison value and MySQL UTC storage value.
+ * Date-only inputs remain date-only in the hash. Naive timestamps are accepted
+ * only while validating values already read from a UTC DATETIME column.
+ */
+function v1_normalize_identity_datetime($value, bool $allowMysqlUtc = false): ?array {
+    if (!is_string($value) && !is_numeric($value)) { return null; }
+    $text = trim((string)$value);
+    if (preg_match('/^(\d{4})(\d{2})(\d{2})$/', $text, $parts) === 1) {
+        $text = $parts[1] . '-' . $parts[2] . '-' . $parts[3];
+    }
+    if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $text, $parts) === 1) {
+        if (!checkdate((int)$parts[2], (int)$parts[3], (int)$parts[1])) { return null; }
+        return array('canonical'=>$text, 'mysql'=>$text . ' 00:00:00');
+    }
+    if ($allowMysqlUtc && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $text) === 1) {
+        $mysql = v1_mysql_datetime_utc($text);
+    } else {
+        if (preg_match('/(?:Z|[+-][0-9]{2}:[0-9]{2})$/i', $text) !== 1) { return null; }
+        $mysql = v1_mysql_datetime_utc($text);
+    }
+    if ($mysql === null) { return null; }
+    return array('canonical'=>str_replace(' ', 'T', $mysql) . '+00:00', 'mysql'=>$mysql);
+}
+
+/** Build, normalize and hash all seven event identity dimensions server-side. */
+function v1_build_event_identity(string $companyId, string $eventType, $action, $target, $actorId,
+    $effectiveAt, $deadlineAt, bool $allowMysqlUtc = false): ?array {
+    $company = trim($companyId);
+    $type = str_replace('-', '_', v1_normalize_identity_text($eventType));
+    $normalizedAction = v1_normalize_identity_text($action);
+    $normalizedTarget = v1_normalize_identity_text($target);
+    $normalizedActor = v1_normalize_identity_text($actorId);
+    $effective = v1_normalize_identity_datetime($effectiveAt, $allowMysqlUtc);
+    $deadline = v1_normalize_identity_datetime($deadlineAt, $allowMysqlUtc);
+    if (preg_match('/^[0-9]{8}$/', $company) !== 1
+        || preg_match('/^[a-z][a-z0-9_]{0,63}$/', $type) !== 1
+        || $normalizedAction === '' || mb_strlen($normalizedAction, 'UTF-8') > 255
+        || $normalizedTarget === '' || mb_strlen($normalizedTarget, 'UTF-8') > 700
+        || !v1_valid_entity_id($normalizedActor, 64) || $effective === null || $deadline === null) {
+        return null;
+    }
+    $values = array($company,$type,$normalizedAction,$normalizedTarget,$normalizedActor,
+        (string)$effective['canonical'],(string)$deadline['canonical']);
+    $comparisonKey = 'eventcmp:v1:' . hash('sha256', implode("\x1f", array_merge(array('governance-event-identity-v1'),$values)));
+    return array(
+        'company_id'=>$company,'event_type'=>$type,'identity_action'=>$normalizedAction,'identity_target'=>$normalizedTarget,
+        'identity_actor_id'=>$normalizedActor,'identity_effective_at'=>(string)$effective['mysql'],
+        'identity_deadline_at'=>(string)$deadline['mysql'],'comparison_key'=>$comparisonKey,
+    );
+}
+
+/**
+ * Recover the canonical identity represented by a stored MySQL DATETIME pair.
+ *
+ * DATETIME loses whether midnight originated as a date-only value or as an
+ * explicit UTC timestamp. The stored comparison key disambiguates those two
+ * representations without coercing a real midnight timestamp to date-only.
+ */
+function v1_resolve_stored_event_identity(string $companyId, string $eventType, $action, $target, $actorId,
+    $effectiveAt, $deadlineAt, $comparisonKey): ?array {
+    $storedKey = is_string($comparisonKey) ? $comparisonKey : '';
+    if (preg_match('/^eventcmp:v1:[a-f0-9]{64}$/',$storedKey) !== 1) { return null; }
+    if (!is_string($effectiveAt) || !is_string($deadlineAt)
+        || preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/',$effectiveAt) !== 1
+        || preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/',$deadlineAt) !== 1) {
+        return null;
+    }
+    $storedTuple = array((string)$companyId,(string)$eventType,(string)$action,(string)$target,(string)$actorId,
+        $effectiveAt,$deadlineAt);
+    $candidateSets = array();
+    foreach (array($effectiveAt,$deadlineAt) as $value) {
+        $mysql = (string)$value;
+        $candidates = array($mysql);
+        if (preg_match('/^(\d{4}-\d{2}-\d{2}) 00:00:00$/',$mysql,$parts) === 1) {
+            array_unshift($candidates,$parts[1]);
+        }
+        $candidateSets[] = array_values(array_unique($candidates));
+    }
+    $matches = array();
+    foreach ($candidateSets[0] as $effectiveCandidate) {
+        foreach ($candidateSets[1] as $deadlineCandidate) {
+            $identity = v1_build_event_identity($companyId,$eventType,$action,$target,$actorId,
+                $effectiveCandidate,$deadlineCandidate,true);
+            if ($identity !== null && hash_equals($storedKey,(string)$identity['comparison_key'])) {
+                $normalizedTuple = array((string)$identity['company_id'],(string)$identity['event_type'],
+                    (string)$identity['identity_action'],(string)$identity['identity_target'],
+                    (string)$identity['identity_actor_id'],(string)$identity['identity_effective_at'],
+                    (string)$identity['identity_deadline_at']);
+                if ($normalizedTuple === $storedTuple) { $matches[] = $identity; }
+            }
+        }
+    }
+    return count($matches) === 1 ? $matches[0] : null;
+}
+
+function v1_expected_migration_manifest(): array {
+    return array(
+        1=>array('001_governance_v1','2f1f03aa62d733339b79b5bca50e1c480b4f706a5823fd3490bd799421e93afd'),
+        2=>array('002_legacy_source_right_lineage','fdcb2d634a787c7bbe534bd3892470a13aef11254dd75cec1afb54a9f2b61051'),
+        3=>array('003_editorial_governance','906a0071bc11b595eae388a17074bd955f1ebb25f8a7453e3e89534e42ba4f25'),
+        4=>array('004_telegram_signal_rebuild_staging','de64071e117fae70d6849f8191be7267a885e75bf3d498ab7488fa616348fb7f'),
+        5=>array('005_telegram_channel_identity_index','cf1245fe562e583707d821f126562a6f10aa9c8db5e0c9b20afa8ff267d1d903'),
+        6=>array('006_governance_release_guard','f7f7a46f86118316dc21a67bb5b547668d64978b9fe4054b4c86104b85d7ced7'),
+        7=>array('007_governance_identity_and_evidence','074bbb5f066d5f3a20e3b894762ae356fa0a102c61546634fc16be05400f2ebe'),
+        8=>array('008_official_site_snapshot_receipts','b12e5e5290a5901192ddb4c8ec999719aa3dc25596c6c46d16ac383f3be74376'),
+        9=>array('009_dart_global_quota_ledger','9e60867847b7cc2b7d9166c73e395ae872d12a4e91aa62457049468017e5f94d'),
+        10=>array('010_official_slot_claim_ledger','2b8be6264c8a4f3be038729fbf6bbe22e720457874f02c89c82d33db9dc78f51'),
+    );
+}
+
+function v1_schema_manifest_status(PDO $pdo, array $config): array {
+    try {
+        $stmt = $pdo->query('SELECT migration_version,migration_name,migration_checksum FROM '
+            . table_name($config,'schema_migrations') . ' ORDER BY migration_version');
+        $rows = $stmt->fetchAll();
+    } catch (PDOException $e) {
+        return array('valid'=>false,'highest_version'=>null,'error'=>'migration_manifest_unavailable');
+    }
+    $expected = v1_expected_migration_manifest(); $highest = null;
+    foreach ($rows as $row) {
+        if (isset($row['migration_version']) && is_numeric($row['migration_version'])) {
+            $highest = max((int)($highest === null ? 0 : $highest),(int)$row['migration_version']);
+        }
+    }
+    if (count($rows) !== count($expected)) {
+        return array('valid'=>false,'highest_version'=>$highest,'error'=>'migration_manifest_cardinality_mismatch');
+    }
+    foreach ($rows as $index => $row) {
+        $version = $index + 1;
+        if ((int)$row['migration_version'] !== $version || !isset($expected[$version])
+            || !hash_equals($expected[$version][0],(string)$row['migration_name'])
+            || !hash_equals($expected[$version][1],strtolower((string)$row['migration_checksum']))) {
+            return array('valid'=>false,'highest_version'=>$highest,'error'=>'migration_manifest_entry_mismatch',
+                'invalid_version'=>$version);
+        }
+    }
+    return array('valid'=>true,'highest_version'=>GOV_V1_SCHEMA_VERSION,'error'=>null);
+}
+
+function v1_current_schema_version(PDO $pdo, array $config): ?int {
+    $manifest = v1_schema_manifest_status($pdo,$config);
+    return $manifest['valid'] === true ? GOV_V1_SCHEMA_VERSION : null;
+}
+
+function v1_require_schema_version(PDO $pdo, array $config): int {
+    $manifest = v1_schema_manifest_status($pdo,$config);
+    if ($manifest['valid'] !== true) {
+        header('Retry-After: 300');
+        v1_respond(503, array(
+            'ok' => false,
+            'error' => 'schema_version_mismatch',
+            'expected_schema_version' => GOV_V1_SCHEMA_VERSION,
+            'actual_schema_version' => $manifest['highest_version'],
+            'schema_manifest_error' => $manifest['error'],
         ));
     }
+    return GOV_V1_SCHEMA_VERSION;
+}
+
+function v1_preview_token_hashes(array $config): array {
+    $hashes = v1_role_hashes($config, 'preview');
+    if (isset($config['governance_preview_token_hash'])
+        && preg_match('/^[a-f0-9]{64}$/i', (string)$config['governance_preview_token_hash'])) {
+        $hashes[] = strtolower((string)$config['governance_preview_token_hash']);
+    }
+    return array_values(array_unique($hashes));
+}
+
+function v1_preview_auth_configured(array $config): bool {
+    return count(v1_preview_token_hashes($config)) > 0;
+}
+
+function v1_require_preview_token(array $config): void {
+    $token = v1_bearer_token();
+    if ($token === '') {
+        header('WWW-Authenticate: Bearer realm="BSIDE governance preview", charset="UTF-8"');
+        v1_respond(401, array('ok' => false, 'error' => 'preview_token_required'));
+    }
+    $candidate = hash('sha256', $token);
+    foreach (v1_preview_token_hashes($config) as $expected) {
+        if (hash_equals($expected, $candidate)) { return; }
+    }
+    v1_respond(403, array('ok' => false, 'error' => 'invalid_preview_token'));
+}
+
+function v1_release_state(PDO $pdo, array $config, bool $forUpdate = false): ?array {
+    $sql = 'SELECT release_state, state_version, updated_by, update_reason, cutover_at, sunset_at, updated_at FROM '
+        . table_name($config, 'governance_release_state') . ' WHERE state_key = ?'
+        . ($forUpdate ? ' FOR UPDATE' : '');
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute(array(GOV_V1_RELEASE_STATE_KEY));
+    $row = $stmt->fetch();
+    return is_array($row) ? $row : null;
+}
+
+function v1_require_public_release_access(PDO $pdo, array $config): string {
+    $row = v1_release_state($pdo, $config);
+    $state = is_array($row) && isset($row['release_state']) ? (string)$row['release_state'] : '';
+    if (!in_array($state, array('closed', 'preview', 'live'), true)) {
+        header('Retry-After: 300');
+        v1_respond(503, array('ok' => false, 'error' => 'release_state_unavailable'));
+    }
+    if ($state === 'closed') {
+        header('Retry-After: 300');
+        v1_respond(503, array('ok' => false, 'error' => 'governance_release_closed'));
+    }
+    if ($state === 'preview') {
+        v1_require_preview_token($config);
+        header('Cache-Control: private, no-store');
+        header('Vary: Authorization');
+        return $state;
+    }
+    header('Cache-Control: public, max-age=60, stale-while-revalidate=300');
+    return $state;
+}
+
+function handle_v1_request(string $method, string $path, array $config): void {
+    // v1_request_path already canonicalized the path used by CORS. Avoid a
+    // second decode that could classify an encoded privileged path as public.
+    $path = '/' . trim($path, '/');
     if ($method === 'GET' && $path === '/health') {
         v1_respond(200, array('ok' => true, 'service' => 'bside-governance-intelligence', 'time' => gmdate('c')));
     }
@@ -209,35 +444,91 @@ function handle_v1_request(string $method, string $path, array $config): void {
         v1_serve_openapi($path);
     }
 
-    if ($method === 'GET' && ($path === '/ops/health' || $path === '/ops/runtime-state')) {
-        v1_require_role($config, array('ops'));
+    $preauthorizedRole = null;
+    $opsReadPaths = array('/ops/health', '/ops/runtime-state', '/ops/release-evidence', '/ops/official-run-ledger', '/ops/official-slot-claims', '/ops/dart-quota',
+        '/ops/official-site-candidates', '/ops/official-site-rights', '/ops/source-right-eligibility');
+    if ($method === 'GET' && in_array($path, $opsReadPaths, true)) {
+        $preauthorizedRole = v1_require_role($config, array('ops'));
+    } elseif (preg_match('#^/ops/backfill-checkpoints/[a-f0-9]{64}$#', $path) === 1 && in_array($method, array('GET','PUT'), true)) {
+        $preauthorizedRole = v1_require_role($config, array('ops'));
+    } elseif ($method === 'POST' && in_array($path,array('/ops/availability-observations','/ops/web-distribution-observations','/ops/official-slot-claims','/ops/dart-quota'),true)) {
+        $preauthorizedRole = v1_require_role($config, array('ops'));
+    } elseif ($method === 'POST' && $path === '/ops/quality-observations') {
+        $preauthorizedRole = v1_require_role($config, array('ops','editor'));
+    } elseif ($path === '/admin/release-state') {
+        $preauthorizedRole = v1_require_role($config, array('admin'));
+    } elseif ($path === '/admin/official-slot-epoch') {
+        $preauthorizedRole = v1_require_role($config, array('admin'));
+    } elseif ($path === '/admin/shadow-discrepancies' || $path === '/admin/shadow-runs'
+        || $path === '/admin/release-evidence-inputs') {
+        $preauthorizedRole = v1_require_role($config, array('editor'));
     } elseif (strpos($path, '/admin/') === 0) {
         if ($method !== 'GET' && $method !== 'POST') {
             header('Allow: GET, POST');
             v1_respond(405, array('ok' => false, 'error' => 'method_not_allowed'));
         }
-    } elseif ($method !== 'GET' && !($method === 'POST' && $path === '/feedback')) {
+    } elseif ($method !== 'GET' && !($method === 'POST' && in_array($path, array('/feedback', '/metrics/web-vitals'), true))) {
         header('Allow: GET, POST');
         v1_respond(405, array('ok' => false, 'error' => 'method_not_allowed'));
     }
 
     $pdo = pdo_conn($config);
-    ensure_schema($pdo, $config);
+    v1_require_schema_version($pdo, $config);
+    $privileged = strpos($path, '/ops/') === 0 || strpos($path, '/admin/') === 0;
+    if (!$privileged) {
+        v1_require_public_release_access($pdo, $config);
+    }
 
     if ($method === 'GET') {
+        if ($path === '/') {
+            v1_respond(200, array(
+                'ok' => true,
+                'service' => 'bside-governance-intelligence',
+                'documentation' => '/api/v1/openapi.yaml',
+            ));
+        }
         if ($path === '/companies') { v1_list_companies($pdo, $config); }
         if (preg_match('#^/companies/([0-9]{8})$#', $path, $m)) { v1_get_company($pdo, $config, $m[1]); }
+        if ($path === '/actors') { v1_list_actors($pdo, $config); }
+        if (preg_match('#^/actors/([A-Za-z0-9_.:\-]{1,64})$#', $path, $m)) { v1_get_actor($pdo, $config, $m[1]); }
         if ($path === '/events') { v1_list_events($pdo, $config); }
+        if ($path === '/today') { v1_today($pdo, $config); }
         if (preg_match('#^/events/([A-Za-z0-9_.:\-]{1,96})$#', $path, $m)) { v1_get_event($pdo, $config, $m[1]); }
         if (preg_match('#^/campaigns/([A-Za-z0-9_.:\-]{1,96})$#', $path, $m)) { v1_get_campaign($pdo, $config, $m[1]); }
         if (preg_match('#^/documents/([A-Za-z0-9_.:\-]{1,96})$#', $path, $m)) { v1_get_document($pdo, $config, $m[1]); }
         if ($path === '/calendar') { v1_calendar($pdo, $config); }
         if ($path === '/search') { v1_search($pdo, $config); }
+        if ($path === '/revisions') { v1_public_revisions($pdo, $config); }
         if ($path === '/exports/events.json') { v1_export_events_json($pdo, $config); }
         if ($path === '/exports/events.csv') { v1_export_events_csv($pdo, $config); }
         if ($path === '/feeds/events.atom') { v1_events_atom($pdo, $config); }
         if ($path === '/ops/health') { v1_ops_health($pdo, $config); }
         if ($path === '/ops/runtime-state') { v1_runtime_state_route($pdo, $config); }
+        if ($path === '/ops/release-evidence') { v1_ops_release_evidence($pdo, $config); }
+        if ($path === '/ops/official-run-ledger') { v1_ops_official_run_ledger($pdo, $config); }
+        if ($path === '/ops/official-slot-claims') { v1_ops_official_slot_claims($pdo, $config); }
+        if ($path === '/ops/dart-quota') { v1_ops_dart_quota_status($pdo, $config); }
+        if ($path === '/ops/official-site-candidates') { v1_ops_official_site_candidates($pdo, $config); }
+        if ($path === '/ops/official-site-rights') { v1_ops_official_site_rights($pdo, $config); }
+        if ($path === '/ops/source-right-eligibility') { v1_ops_source_right_eligibility($pdo, $config); }
+        if (preg_match('#^/ops/backfill-checkpoints/([a-f0-9]{64})$#', $path, $m)) {
+            v1_ops_get_backfill_checkpoint($pdo, $config, $m[1]);
+        }
+        if ($path === '/admin/release-state') {
+            v1_admin_release_state($pdo, $config);
+        }
+        if ($path === '/admin/official-slot-epoch') {
+            v1_admin_official_slot_epoch($pdo, $config);
+        }
+        if ($path === '/admin/shadow-discrepancies') {
+            v1_admin_shadow_discrepancies($pdo, $config);
+        }
+        if ($path === '/admin/shadow-runs') {
+            v1_admin_shadow_runs($pdo, $config);
+        }
+        if ($path === '/admin/release-evidence-inputs') {
+            v1_admin_release_evidence_inputs($pdo, $config);
+        }
         if ($path === '/admin/review-queue') {
             v1_require_role($config, array('editor'));
             v1_admin_review_queue($pdo, $config);
@@ -257,6 +548,33 @@ function handle_v1_request(string $method, string $path, array $config): void {
     }
     if ($method === 'POST') {
         if ($path === '/feedback') { v1_submit_feedback($pdo, $config); }
+        if ($path === '/metrics/web-vitals') { v1_record_web_vitals($pdo, $config); }
+        if ($path === '/ops/availability-observations') {
+            v1_record_availability_observations($pdo, $config, (string)$preauthorizedRole);
+        }
+        if ($path === '/ops/web-distribution-observations') {
+            v1_record_web_distribution_observations($pdo, $config, (string)$preauthorizedRole);
+        }
+        if ($path === '/ops/quality-observations') {
+            v1_record_quality_observations($pdo, $config, (string)$preauthorizedRole);
+        }
+        if ($path === '/ops/dart-quota') { v1_ops_dart_quota_write($pdo, $config); }
+        if ($path === '/ops/official-slot-claims') { v1_ops_official_slot_claim_write($pdo, $config); }
+        if ($path === '/admin/release-state') {
+            v1_admin_update_release_state($pdo, $config, (string)$preauthorizedRole);
+        }
+        if ($path === '/admin/official-slot-epoch') {
+            v1_admin_reset_official_slot_epoch($pdo, $config, (string)$preauthorizedRole);
+        }
+        if ($path === '/admin/shadow-discrepancies') {
+            v1_admin_upsert_shadow_discrepancy($pdo, $config, (string)$preauthorizedRole);
+        }
+        if ($path === '/admin/shadow-runs') {
+            v1_admin_upsert_shadow_run($pdo, $config, (string)$preauthorizedRole);
+        }
+        if ($path === '/admin/release-evidence-inputs') {
+            v1_admin_upsert_release_evidence_inputs($pdo, $config, (string)$preauthorizedRole);
+        }
         if ($path === '/admin/source-rights') {
             $role = v1_require_role($config, array('rights'));
             v1_admin_upsert_source_right($pdo, $config, $role);
@@ -268,6 +586,10 @@ function handle_v1_request(string $method, string $path, array $config): void {
         if (preg_match('#^/admin/events/([A-Za-z0-9_.:\-]{1,96})/review$#', $path, $m)) {
             $role = v1_require_role($config, array('editor'));
             v1_admin_review_event($pdo, $config, $m[1], $role);
+        }
+        if (preg_match('#^/admin/events/([A-Za-z0-9_.:\-]{1,96})/identity$#', $path, $m)) {
+            $role = v1_require_role($config, array('editor'));
+            v1_admin_complete_event_identity($pdo, $config, $m[1], $role);
         }
         if (preg_match('#^/admin/event-actors/([A-Za-z0-9_.:\-]{1,96})/([A-Za-z0-9_.:\-]{1,64})/([A-Za-z0-9_.:\-]{1,40})/review$#', $path, $m)) {
             $role = v1_require_role($config, array('editor'));
@@ -292,6 +614,9 @@ function handle_v1_request(string $method, string $path, array $config): void {
             v1_admin_review_feedback($pdo, $config, $m[1], $role);
         }
     }
+    if ($method === 'PUT' && preg_match('#^/ops/backfill-checkpoints/([a-f0-9]{64})$#', $path, $m)) {
+        v1_ops_put_backfill_checkpoint($pdo, $config, $m[1], (string)$preauthorizedRole);
+    }
     v1_respond(404, array('ok' => false, 'error' => 'not_found'));
 }
 
@@ -311,15 +636,15 @@ function v1_serve_openapi(string $path): void {
 
 function v1_document_visibility_sql(string $documentAlias = 'd', string $rightsAlias = 'sr'): string {
     return '(' . $documentAlias . '.publication_status = \'published\' AND ('
-        . '(' . $documentAlias . '.source_right_id IS NULL AND ' . $documentAlias . '.source_class NOT IN (\'licensed_telegram\',\'authorized_telegram\'))'
-        . ' OR (' . $rightsAlias . '.source_right_id IS NOT NULL'
+        . $documentAlias . '.source_right_id IS NOT NULL'
+        . ' AND ' . $rightsAlias . '.source_right_id IS NOT NULL'
         . ' AND ' . $rightsAlias . '.status = \'active\''
         . ' AND ' . $rightsAlias . '.redistribution_allowed = 1'
         . ' AND ' . $rightsAlias . '.valid_from <= UTC_TIMESTAMP()'
         . ' AND (' . $rightsAlias . '.valid_until IS NULL OR ' . $rightsAlias . '.valid_until > UTC_TIMESTAMP())'
         . ' AND ' . $rightsAlias . '.revoked_at IS NULL'
         . ' AND (NULLIF(TRIM(' . $rightsAlias . '.evidence_uri), \'\') IS NOT NULL'
-        . ' OR NULLIF(TRIM(' . $rightsAlias . '.evidence_hash), \'\') IS NOT NULL))'
+        . ' OR NULLIF(TRIM(' . $rightsAlias . '.evidence_hash), \'\') IS NOT NULL)'
         . '))';
 }
 
@@ -328,10 +653,22 @@ function v1_event_visibility_sql(array $config, string $eventAlias = 'e'): strin
     $links = table_name($config, 'event_documents');
     $documents = table_name($config, 'documents');
     $rights = table_name($config, 'source_rights');
+    $eventActors = table_name($config, 'event_actors');
+    $actors = table_name($config, 'actors');
     return '(' . $eventAlias . '.publication_status = \'published\''
+        . ' AND ' . $eventAlias . '.identity_status = \'complete\''
         . ' AND ' . $eventAlias . '.review_status IN (\'approved\',\'not_required\')'
         . ' AND (' . $eventAlias . '.importance NOT IN (\'high\',\'critical\',\'market_sensitive\') OR ' . $eventAlias . '.review_status = \'approved\')'
         . ' AND (' . $eventAlias . '.verification_status <> \'withdrawn\' OR ' . $eventAlias . '.review_status = \'approved\')'
+        . ' AND (NULLIF(TRIM(' . $eventAlias . '.identity_actor_id), \'\') IS NULL OR EXISTS ('
+        . 'SELECT 1 FROM ' . $eventActors . ' visibility_identity_ea'
+        . ' JOIN ' . $actors . ' visibility_identity_a ON visibility_identity_a.actor_id = visibility_identity_ea.actor_id'
+        . ' WHERE visibility_identity_ea.event_id = ' . $eventAlias . '.event_id'
+        . ' AND visibility_identity_ea.actor_id = ' . $eventAlias . '.identity_actor_id'
+        . ' AND visibility_identity_ea.review_status = \'approved\''
+        . ' AND visibility_identity_a.review_status = \'approved\''
+        . ' AND visibility_identity_a.record_status = \'active\''
+        . ' AND NULLIF(TRIM(visibility_identity_a.display_name), \'\') IS NOT NULL))'
         . ' AND EXISTS (SELECT 1 FROM ' . $links . ' visibility_ed'
         . ' JOIN ' . $documents . ' visibility_d ON visibility_d.document_id = visibility_ed.document_id'
         . ' LEFT JOIN ' . $rights . ' visibility_sr ON visibility_sr.source_right_id = visibility_d.source_right_id'
@@ -367,6 +704,23 @@ function v1_required_document_visibility_sql(array $config, string $documentIdEx
         . v1_document_visibility_sql('required_d', 'required_sr') . '))';
 }
 
+function v1_actor_visibility_sql(array $config, string $actorAlias = 'a'): string {
+    return '(' . $actorAlias . '.review_status = \'approved\' AND ' . $actorAlias . '.record_status = \'active\' AND ('
+        . 'EXISTS (SELECT 1 FROM ' . table_name($config, 'event_actors') . ' visible_ea'
+        . ' JOIN ' . table_name($config, 'governance_events') . ' visible_actor_event ON visible_actor_event.event_id = visible_ea.event_id'
+        . ' WHERE visible_ea.actor_id = ' . $actorAlias . '.actor_id AND visible_ea.review_status = \'approved\' AND '
+        . v1_event_visibility_sql($config, 'visible_actor_event') . ')'
+        . ' OR EXISTS (SELECT 1 FROM ' . table_name($config, 'campaigns') . ' visible_actor_campaign'
+        . ' WHERE visible_actor_campaign.lead_actor_id = ' . $actorAlias . '.actor_id AND '
+        . v1_campaign_visibility_sql($config, 'visible_actor_campaign') . ')))';
+}
+
+function v1_company_has_public_event_sql(array $config, string $companyAlias = 'c'): string {
+    return 'EXISTS (SELECT 1 FROM ' . table_name($config, 'governance_events') . ' visible_company_event'
+        . ' WHERE visible_company_event.company_id = ' . $companyAlias . '.company_id AND '
+        . v1_event_visibility_sql($config, 'visible_company_event') . ')';
+}
+
 function v1_list_companies(PDO $pdo, array $config): void {
     $page = v1_list_params();
     $query = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
@@ -374,7 +728,7 @@ function v1_list_companies(PDO $pdo, array $config): void {
     if ($query !== '' && mb_strlen($query, 'UTF-8') < 2) {
         v1_respond(400, array('ok' => false, 'error' => 'query_too_short'));
     }
-    $where = array('c.record_status = \'active\'');
+    $where = array('c.record_status = \'active\'', v1_company_has_public_event_sql($config, 'c'));
     $params = array();
     if ($query !== '') {
         $like = '%' . mb_substr($query, 0, 100, 'UTF-8') . '%';
@@ -388,7 +742,7 @@ function v1_list_companies(PDO $pdo, array $config): void {
         $where[] = 'c.market = ?';
         $params[] = $market;
     }
-    $sql = 'SELECT c.company_id, c.stock_code, c.market, c.legal_name, c.legal_name_en, c.short_name, c.aliases_json, c.homepage_url, '
+    $sql = 'SELECT c.company_id, c.stock_code, c.market, c.legal_name, c.legal_name_en, c.short_name, c.aliases_json, c.homepage_url, c.listing_status, c.master_modified_at, '
         . '(SELECT COUNT(*) FROM ' . table_name($config, 'governance_events') . ' e WHERE e.company_id = c.company_id AND ' . v1_event_visibility_sql($config, 'e') . ') AS event_count, '
         . '(SELECT COUNT(*) FROM ' . table_name($config, 'campaigns') . ' cp WHERE cp.company_id = c.company_id AND ' . v1_campaign_visibility_sql($config, 'cp') . ' AND cp.ended_at IS NULL) AS active_campaign_count '
         . 'FROM ' . table_name($config, 'companies') . ' c WHERE ' . implode(' AND ', $where)
@@ -407,8 +761,9 @@ function v1_list_companies(PDO $pdo, array $config): void {
 }
 
 function v1_get_company(PDO $pdo, array $config, string $companyId): void {
-    $stmt = $pdo->prepare('SELECT company_id, stock_code, market, legal_name, legal_name_en, short_name, aliases_json, homepage_url, updated_at '
-        . 'FROM ' . table_name($config, 'companies') . ' WHERE company_id = ? AND record_status = \'active\' LIMIT 1');
+    $stmt = $pdo->prepare('SELECT c.company_id, c.stock_code, c.market, c.legal_name, c.legal_name_en, c.short_name, c.aliases_json, c.homepage_url, '
+        . 'c.listing_status, c.master_modified_at, c.updated_at FROM ' . table_name($config, 'companies') . ' c '
+        . 'WHERE c.company_id = ? AND c.record_status = \'active\' AND ' . v1_company_has_public_event_sql($config, 'c') . ' LIMIT 1');
     $stmt->execute(array($companyId));
     $company = $stmt->fetch();
     if (!$company) {
@@ -440,30 +795,126 @@ function v1_get_company(PDO $pdo, array $config, string $companyId): void {
     ));
 }
 
-function v1_event_query_parts(array $config): array {
+function v1_list_actors(PDO $pdo, array $config): void {
+    $page = v1_list_params();
+    $query = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
+    $actorType = isset($_GET['actor_type']) ? trim((string)$_GET['actor_type']) : '';
+    $companyId = isset($_GET['company_id']) ? trim((string)$_GET['company_id']) : '';
+    $where = array(v1_actor_visibility_sql($config, 'a'));
+    $params = array();
+    if ($query !== '') {
+        if (mb_strlen($query, 'UTF-8') < 2) { v1_respond(400, array('ok' => false, 'error' => 'query_too_short')); }
+        $like = v1_like(mb_substr($query, 0, 100, 'UTF-8'));
+        $where[] = '(a.display_name LIKE ? OR a.display_name_en LIKE ? OR a.aliases_json LIKE ?)';
+        array_push($params, $like, $like, $like);
+    }
+    if ($actorType !== '') {
+        if (!preg_match('/^[A-Za-z0-9_.:\-]{1,40}$/', $actorType)) { v1_respond(400, array('ok' => false, 'error' => 'invalid_actor_type')); }
+        $where[] = 'a.actor_type = ?'; $params[] = $actorType;
+    }
+    if ($companyId !== '') {
+        if (!preg_match('/^[0-9]{8}$/', $companyId)) { v1_respond(400, array('ok' => false, 'error' => 'invalid_company_id')); }
+        $where[] = 'a.company_id = ?'; $params[] = $companyId;
+    }
+    $sql = 'SELECT a.actor_id, a.actor_type, a.display_name, a.display_name_en, a.company_id, a.country_code, '
+        . 'a.aliases_json, a.homepage_url, a.updated_at FROM ' . table_name($config, 'actors') . ' a WHERE '
+        . implode(' AND ', $where) . ' ORDER BY a.display_name ASC, a.actor_id ASC LIMIT '
+        . ((int)$page['limit'] + 1) . ' OFFSET ' . (int)$page['offset'];
+    $stmt = $pdo->prepare($sql); $stmt->execute($params);
+    list($rows, $hasMore) = v1_fetch_page($stmt, $page);
+    foreach ($rows as &$row) {
+        $row['aliases'] = decode_json_array(isset($row['aliases_json']) ? $row['aliases_json'] : null);
+        unset($row['aliases_json']);
+    }
+    unset($row);
+    v1_respond(200, array('ok' => true, 'data' => $rows, 'pagination' => v1_page_meta($page, count($rows), $hasMore)));
+}
+
+function v1_get_actor(PDO $pdo, array $config, string $actorId): void {
+    $stmt = $pdo->prepare('SELECT a.actor_id, a.actor_type, a.display_name, a.display_name_en, a.company_id, a.country_code, '
+        . 'a.aliases_json, a.homepage_url, a.updated_at FROM ' . table_name($config, 'actors') . ' a WHERE a.actor_id = ? AND '
+        . v1_actor_visibility_sql($config, 'a') . ' LIMIT 1');
+    $stmt->execute(array($actorId));
+    $actor = $stmt->fetch();
+    if (!$actor) { v1_respond(404, array('ok' => false, 'error' => 'actor_not_found')); }
+    $actor['aliases'] = decode_json_array(isset($actor['aliases_json']) ? $actor['aliases_json'] : null);
+    unset($actor['aliases_json']);
+    $events = $pdo->prepare(v1_public_event_select($config)
+        . 'JOIN ' . table_name($config, 'event_actors') . ' actor_detail_ea ON actor_detail_ea.event_id = e.event_id '
+        . 'WHERE actor_detail_ea.actor_id = ? AND actor_detail_ea.review_status = \'approved\' AND '
+        . v1_event_visibility_sql($config, 'e') . ' ORDER BY e.occurred_at DESC LIMIT 50');
+    $events->execute(array($actorId));
+    $campaigns = $pdo->prepare('SELECT cp.campaign_id, cp.company_id, c.legal_name AS company_name, cp.title, cp.original_language, '
+        . 'cp.stage, cp.outcome, cp.started_at, cp.ended_at FROM ' . table_name($config, 'campaigns') . ' cp '
+        . 'JOIN ' . table_name($config, 'companies') . ' c ON c.company_id = cp.company_id '
+        . 'WHERE cp.lead_actor_id = ? AND ' . v1_campaign_visibility_sql($config, 'cp') . ' ORDER BY cp.started_at DESC LIMIT 50');
+    $campaigns->execute(array($actorId));
+    v1_respond(200, array('ok' => true, 'data' => array(
+        'actor' => $actor,
+        'events' => $events->fetchAll(),
+        'campaigns' => $campaigns->fetchAll(),
+    )));
+}
+
+function v1_event_query_parts(array $config, bool $includeDateFilters = true): array {
     $where = array(v1_event_visibility_sql($config, 'e'));
     $params = array();
     $companyId = isset($_GET['company_id']) ? trim((string)$_GET['company_id']) : '';
+    $actorId = isset($_GET['actor_id']) ? trim((string)$_GET['actor_id']) : '';
     $eventType = isset($_GET['event_type']) ? trim((string)$_GET['event_type']) : '';
     $verification = isset($_GET['verification_status']) ? trim((string)$_GET['verification_status']) : '';
+    $status = isset($_GET['status']) ? trim((string)$_GET['status']) : '';
+    $identityStatus = isset($_GET['identity_status']) ? trim((string)$_GET['identity_status']) : '';
     $importance = isset($_GET['importance']) ? trim((string)$_GET['importance']) : '';
+    $sourceClass = isset($_GET['source_class']) ? trim((string)$_GET['source_class']) : '';
+    $evidenceDocumentId = isset($_GET['evidence_document_id']) ? trim((string)$_GET['evidence_document_id']) : '';
     $from = isset($_GET['from']) ? trim((string)$_GET['from']) : '';
     $to = isset($_GET['to']) ? trim((string)$_GET['to']) : '';
     if ($companyId !== '') {
         if (!preg_match('/^[0-9]{8}$/', $companyId)) { v1_respond(400, array('ok' => false, 'error' => 'invalid_company_id')); }
         $where[] = 'e.company_id = ?'; $params[] = $companyId;
     }
-    foreach (array('event_type' => $eventType, 'verification_status' => $verification, 'importance' => $importance) as $field => $value) {
+    if ($actorId !== '') {
+        if (!v1_valid_entity_id($actorId, 64)) { v1_respond(400, array('ok' => false, 'error' => 'invalid_actor_id')); }
+        $where[] = '(e.identity_actor_id = ? OR EXISTS (SELECT 1 FROM ' . table_name($config, 'event_actors')
+            . ' filter_ea WHERE filter_ea.event_id = e.event_id AND filter_ea.actor_id = ? AND filter_ea.review_status = \'approved\'))';
+        $params[] = $actorId; $params[] = $actorId;
+    }
+    if ($status !== '') {
+        if ($verification !== '' && $verification !== $status) {
+            v1_respond(400, array('ok' => false, 'error' => 'conflicting_status_filters'));
+        }
+        $verification = $status;
+    }
+    foreach (array('event_type' => $eventType, 'verification_status' => $verification, 'identity_status' => $identityStatus, 'importance' => $importance) as $field => $value) {
         if ($value === '') { continue; }
         if (!preg_match('/^[A-Za-z0-9_.:\-]{1,64}$/', $value)) { v1_respond(400, array('ok' => false, 'error' => 'invalid_' . $field)); }
         $where[] = 'e.' . $field . ' = ?'; $params[] = $value;
     }
-    if ($from !== '') {
+    if ($sourceClass !== '') {
+        if (!preg_match('/^[A-Za-z0-9_.:\-]{1,40}$/', $sourceClass)) { v1_respond(400, array('ok' => false, 'error' => 'invalid_source_class')); }
+        $where[] = 'EXISTS (SELECT 1 FROM ' . table_name($config, 'event_documents') . ' filter_ed '
+            . 'JOIN ' . table_name($config, 'documents') . ' filter_d ON filter_d.document_id = filter_ed.document_id '
+            . 'LEFT JOIN ' . table_name($config, 'source_rights') . ' filter_sr ON filter_sr.source_right_id = filter_d.source_right_id '
+            . 'WHERE filter_ed.event_id = e.event_id AND filter_d.source_class = ? AND '
+            . v1_document_visibility_sql('filter_d', 'filter_sr') . ')';
+        $params[] = $sourceClass;
+    }
+    if ($evidenceDocumentId !== '') {
+        if (!v1_valid_entity_id($evidenceDocumentId)) { v1_respond(400, array('ok' => false, 'error' => 'invalid_evidence_document_id')); }
+        $where[] = 'EXISTS (SELECT 1 FROM ' . table_name($config, 'event_documents') . ' evidence_ed '
+            . 'JOIN ' . table_name($config, 'documents') . ' evidence_d ON evidence_d.document_id = evidence_ed.document_id '
+            . 'LEFT JOIN ' . table_name($config, 'source_rights') . ' evidence_sr ON evidence_sr.source_right_id = evidence_d.source_right_id '
+            . 'WHERE evidence_ed.event_id = e.event_id AND evidence_ed.document_id = ? AND '
+            . v1_document_visibility_sql('evidence_d', 'evidence_sr') . ')';
+        $params[] = $evidenceDocumentId;
+    }
+    if ($includeDateFilters && $from !== '') {
         $dt = mysql_dt($from);
         if ($dt === null) { v1_respond(400, array('ok' => false, 'error' => 'invalid_from')); }
         $where[] = 'e.occurred_at >= ?'; $params[] = $dt;
     }
-    if ($to !== '') {
+    if ($includeDateFilters && $to !== '') {
         $dt = mysql_dt($to);
         if ($dt === null) { v1_respond(400, array('ok' => false, 'error' => 'invalid_to')); }
         $where[] = 'e.occurred_at <= ?'; $params[] = $dt;
@@ -471,9 +922,20 @@ function v1_event_query_parts(array $config): array {
     return array($where, $params);
 }
 
+function v1_event_filter_requested(bool $includeDates = true): bool {
+    $keys = array('company_id','actor_id','event_type','verification_status','status','identity_status','importance','source_class','evidence_document_id');
+    if ($includeDates) { $keys = array_merge($keys, array('from','to')); }
+    foreach ($keys as $key) {
+        if (isset($_GET[$key]) && trim((string)$_GET[$key]) !== '') { return true; }
+    }
+    return false;
+}
+
 function v1_public_event_select(array $config): string {
     return 'SELECT e.event_id, e.company_id, c.stock_code, c.market, c.legal_name AS company_name, e.event_type, '
-        . 'e.title, e.original_language, e.occurred_at, e.deadline_at, e.importance, e.verification_status, e.updated_at '
+        . 'e.title, e.original_language, e.occurred_at, e.deadline_at, e.importance, e.verification_status, '
+        . 'e.identity_action, e.identity_target, e.identity_actor_id, e.identity_effective_at, e.identity_deadline_at, '
+        . 'e.identity_status, e.comparison_key, e.updated_at '
         . 'FROM ' . table_name($config, 'governance_events') . ' e '
         . 'JOIN ' . table_name($config, 'companies') . ' c ON c.company_id = e.company_id ';
 }
@@ -492,6 +954,84 @@ function v1_list_events(PDO $pdo, array $config): void {
     $page = v1_list_params();
     list($rows, $hasMore) = v1_query_public_events($pdo, $config, $page);
     v1_respond(200, array('ok' => true, 'data' => $rows, 'pagination' => v1_page_meta($page, count($rows), $hasMore)));
+}
+
+/**
+ * Rank the complete public event set for the Today page.  This must remain a
+ * server-side query: ranking a recent client page silently drops older high
+ * importance events and near-term deadlines.
+ */
+function v1_today_ranked_select(array $config): string {
+    $officialEvidence = 'EXISTS (SELECT 1 FROM ' . table_name($config, 'event_documents') . ' today_ed '
+        . 'JOIN ' . table_name($config, 'documents') . ' today_d ON today_d.document_id=today_ed.document_id '
+        . 'LEFT JOIN ' . table_name($config, 'source_rights') . ' today_sr ON today_sr.source_right_id=today_d.source_right_id '
+        . 'WHERE today_ed.event_id=e.event_id AND today_d.source_class=\'official_disclosure\' AND '
+        . v1_document_visibility_sql('today_d', 'today_sr') . ')';
+    $deadlineWatch = '(e.deadline_at IS NOT NULL AND e.deadline_at BETWEEN DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 DAY) '
+        . 'AND DATE_ADD(UTC_TIMESTAMP(), INTERVAL 45 DAY))';
+    $importanceScore = '(CASE e.importance WHEN \'critical\' THEN 500 WHEN \'market_sensitive\' THEN 450 '
+        . 'WHEN \'high\' THEN 400 WHEN \'medium\' THEN 200 WHEN \'low\' THEN 100 ELSE 0 END)';
+    $verificationScore = '(CASE e.verification_status WHEN \'official\' THEN 60 WHEN \'confirmed\' THEN 55 '
+        . 'WHEN \'corroborated\' THEN 45 WHEN \'corrected\' THEN 30 WHEN \'disputed\' THEN 20 '
+        . 'WHEN \'withdrawn\' THEN 15 ELSE 0 END)';
+    $deadlineScore = '(CASE WHEN e.deadline_at BETWEEN UTC_TIMESTAMP() AND DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 DAY) THEN 120 '
+        . 'WHEN e.deadline_at BETWEEN DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 DAY) AND UTC_TIMESTAMP() THEN 100 '
+        . 'WHEN e.deadline_at BETWEEN UTC_TIMESTAMP() AND DATE_ADD(UTC_TIMESTAMP(), INTERVAL 45 DAY) THEN 70 ELSE 0 END)';
+    return 'SELECT e.event_id,e.company_id,c.stock_code,c.market,c.legal_name AS company_name,e.event_type,e.title,e.original_language,'
+        . 'e.occurred_at,e.deadline_at,e.importance,e.verification_status,e.identity_action,e.identity_target,e.identity_actor_id,'
+        . 'e.identity_effective_at,e.identity_deadline_at,e.identity_status,e.comparison_key,e.updated_at,'
+        . $officialEvidence . ' AS has_official_evidence,' . $deadlineWatch . ' AS deadline_watch,'
+        . '(' . $importanceScore . '+' . $verificationScore . '+(CASE WHEN ' . $officialEvidence . ' THEN 80 ELSE 0 END)+'
+        . $deadlineScore . ') AS ranking_score '
+        . 'FROM ' . table_name($config, 'governance_events') . ' e '
+        . 'JOIN ' . table_name($config, 'companies') . ' c ON c.company_id=e.company_id '
+        . 'WHERE ' . v1_event_visibility_sql($config, 'e') . ' AND e.verification_status <> \'signal\'';
+}
+
+function v1_today(PDO $pdo, array $config): void {
+    $ranked = v1_today_ranked_select($config);
+    $topStmt = $pdo->prepare('SELECT * FROM (' . $ranked . ') today_ranked '
+        . 'ORDER BY ranking_score DESC, occurred_at DESC, event_id ASC LIMIT 5');
+    $topStmt->execute(); $top = $topStmt->fetchAll();
+    $topIds = array(); foreach ($top as $row) { $topIds[] = (string)$row['event_id']; }
+
+    $watchWhere = '(verification_status IN (\'unverified\',\'disputed\',\'corrected\') OR deadline_watch=1)';
+    $params = array();
+    if (count($topIds) > 0) {
+        $watchWhere .= ' AND event_id NOT IN (' . implode(',', array_fill(0, count($topIds), '?')) . ')';
+        $params = $topIds;
+    }
+    $watchStmt = $pdo->prepare('SELECT * FROM (' . $ranked . ') today_watch WHERE ' . $watchWhere
+        . ' ORDER BY CASE WHEN deadline_watch=1 THEN 0 ELSE 1 END ASC, '
+        . 'CASE WHEN deadline_at >= UTC_TIMESTAMP() THEN deadline_at ELSE DATE_ADD(UTC_TIMESTAMP(), INTERVAL 100 YEAR) END ASC, '
+        . 'ranking_score DESC, occurred_at DESC, event_id ASC LIMIT 10');
+    $watchStmt->execute($params); $watch = $watchStmt->fetchAll();
+    foreach ($top as &$row) {
+        $row['has_official_evidence'] = (int)$row['has_official_evidence'] === 1;
+        $row['deadline_watch'] = (int)$row['deadline_watch'] === 1;
+        $row['ranking_score'] = (int)$row['ranking_score'];
+    }
+    unset($row);
+    foreach ($watch as &$row) {
+        $row['has_official_evidence'] = (int)$row['has_official_evidence'] === 1;
+        $row['deadline_watch'] = (int)$row['deadline_watch'] === 1;
+        $row['ranking_score'] = (int)$row['ranking_score'];
+    }
+    unset($row);
+    v1_respond(200, array(
+        'ok' => true,
+        'generated_at' => gmdate('c'),
+        'ranking_policy' => array(
+            'version' => 'today-v1',
+            'signal_excluded' => true,
+            'top_limit' => 5,
+            'watch_limit' => 10,
+            'watch_deadline_window_days' => array('past' => 2, 'future' => 45),
+            'archive_endpoint' => '/events',
+        ),
+        'top' => $top,
+        'watch' => $watch,
+    ));
 }
 
 function v1_get_event(PDO $pdo, array $config, string $eventId): void {
@@ -571,9 +1111,31 @@ function v1_get_campaign(PDO $pdo, array $config, string $campaignId): void {
     )));
 }
 
+function v1_utf8_byte_prefix(string $bytes, int $maxBytes): string {
+    $candidate = substr($bytes, 0, $maxBytes);
+    while ($candidate !== '' && !mb_check_encoding($candidate, 'UTF-8')) {
+        $candidate = substr($candidate, 0, -1);
+    }
+    return $candidate;
+}
+
 function v1_get_document(PDO $pdo, array $config, string $documentId): void {
     $includeBody = isset($_GET['include']) && (string)$_GET['include'] === 'body';
-    $bodyField = $includeBody ? 'LEFT(d.body_text, 100000) AS body_text,' : 'LEFT(d.body_text, 4000) AS body_excerpt,';
+    $bodyOffset = isset($_GET['body_offset']) ? (int)$_GET['body_offset'] : 0;
+    $bodyLimit = isset($_GET['body_limit_bytes']) ? (int)$_GET['body_limit_bytes']
+        : (isset($_GET['body_limit']) ? (int)$_GET['body_limit'] : 60000);
+    if (isset($_GET['body_limit_bytes']) && isset($_GET['body_limit']) && (int)$_GET['body_limit_bytes'] !== (int)$_GET['body_limit']) {
+        v1_respond(400, array('ok' => false, 'error' => 'conflicting_body_limit'));
+    }
+    if ($bodyOffset < 0 || $bodyOffset > 1000000000 || $bodyLimit < 1 || $bodyLimit > 60000) {
+        v1_respond(400, array('ok' => false, 'error' => 'invalid_body_page'));
+    }
+    if (!$includeBody && (isset($_GET['body_offset']) || isset($_GET['body_limit']) || isset($_GET['body_limit_bytes']))) {
+        v1_respond(400, array('ok' => false, 'error' => 'include_body_required_for_paging'));
+    }
+    $bodyField = $includeBody
+        ? 'SUBSTRING(CAST(d.body_text AS BINARY), ' . ($bodyOffset + 1) . ', ' . ($bodyLimit + 4) . ') AS body_page_bytes, OCTET_LENGTH(d.body_text) AS body_total_bytes,'
+        : 'LEFT(d.body_text, 4000) AS body_excerpt, OCTET_LENGTH(d.body_text) AS body_total_bytes,';
     $sql = 'SELECT d.document_id, d.company_id, c.legal_name AS company_name, d.source_class, d.external_id, d.document_type, '
         . 'd.original_language, d.title, ' . $bodyField . ' d.original_url, d.content_hash, d.correction_of_document_id, '
         . 'd.version_no, d.published_at, d.retrieved_at, d.verification_status '
@@ -584,6 +1146,25 @@ function v1_get_document(PDO $pdo, array $config, string $documentId): void {
     $stmt = $pdo->prepare($sql); $stmt->execute(array($documentId));
     $document = $stmt->fetch();
     if (!$document) { v1_respond(404, array('ok' => false, 'error' => 'document_not_found')); }
+    $totalBytes = isset($document['body_total_bytes']) && $document['body_total_bytes'] !== null ? (int)$document['body_total_bytes'] : 0;
+    $document['body_total_bytes'] = $totalBytes;
+    if ($includeBody) {
+        $raw = isset($document['body_page_bytes']) && is_string($document['body_page_bytes']) ? $document['body_page_bytes'] : '';
+        unset($document['body_page_bytes']);
+        if ($raw !== '' && $bodyOffset > 0 && (ord($raw[0]) & 0xC0) === 0x80) {
+            v1_respond(400, array('ok' => false, 'error' => 'body_offset_not_utf8_boundary'));
+        }
+        $pageBody = v1_utf8_byte_prefix($raw, $bodyLimit);
+        $returnedBytes = strlen($pageBody);
+        $nextOffset = $bodyOffset + $returnedBytes;
+        $document['body_text'] = $pageBody;
+        $document['body_offset'] = $bodyOffset;
+        $document['body_bytes_returned'] = $returnedBytes;
+        $document['body_truncated'] = $nextOffset < $totalBytes;
+        $document['body_next_offset'] = $nextOffset < $totalBytes ? $nextOffset : null;
+    } else {
+        $document['body_truncated'] = $totalBytes > strlen(isset($document['body_excerpt']) ? (string)$document['body_excerpt'] : '');
+    }
     v1_respond(200, array('ok' => true, 'data' => $document));
 }
 
@@ -599,6 +1180,71 @@ function v1_date_bound(string $key, string $fallback): string {
     return $value;
 }
 
+/** Apply the public event filter vocabulary to proposal-vote calendar rows. */
+function v1_calendar_vote_filter_parts(array $config): array {
+    $where = array(
+        'v.review_status = \'approved\'',
+        'v.publication_status = \'published\'',
+        v1_required_document_visibility_sql($config, 'v.evidence_document_id'),
+    );
+    $params = array();
+    $companyId = isset($_GET['company_id']) ? trim((string)$_GET['company_id']) : '';
+    $actorId = isset($_GET['actor_id']) ? trim((string)$_GET['actor_id']) : '';
+    $eventType = isset($_GET['event_type']) ? trim((string)$_GET['event_type']) : '';
+    $verification = isset($_GET['verification_status']) ? trim((string)$_GET['verification_status']) : '';
+    $status = isset($_GET['status']) ? trim((string)$_GET['status']) : '';
+    $identityStatus = isset($_GET['identity_status']) ? trim((string)$_GET['identity_status']) : '';
+    $importance = isset($_GET['importance']) ? trim((string)$_GET['importance']) : '';
+    $sourceClass = isset($_GET['source_class']) ? trim((string)$_GET['source_class']) : '';
+    $evidenceDocumentId = isset($_GET['evidence_document_id']) ? trim((string)$_GET['evidence_document_id']) : '';
+    if ($companyId !== '') {
+        if (preg_match('/^[0-9]{8}$/', $companyId) !== 1) { v1_respond(400, array('ok'=>false,'error'=>'invalid_company_id')); }
+        $where[] = 'v.company_id = ?'; $params[] = $companyId;
+    }
+    if ($actorId !== '') {
+        if (!v1_valid_entity_id($actorId, 64)) { v1_respond(400, array('ok'=>false,'error'=>'invalid_actor_id')); }
+        $where[] = '(v.proposer_actor_id = ? OR EXISTS (SELECT 1 FROM ' . table_name($config,'event_actors')
+            . ' vote_filter_ea WHERE vote_filter_ea.event_id=v.event_id AND vote_filter_ea.actor_id=? '
+            . 'AND vote_filter_ea.review_status=\'approved\'))';
+        $params[] = $actorId; $params[] = $actorId;
+    }
+    if ($status !== '') {
+        if ($verification !== '' && $verification !== $status) {
+            v1_respond(400,array('ok'=>false,'error'=>'conflicting_status_filters'));
+        }
+        $verification = $status;
+    }
+    $eventFields = array('event_type'=>$eventType,'verification_status'=>$verification,'identity_status'=>$identityStatus,'importance'=>$importance);
+    foreach ($eventFields as $field => $value) {
+        if ($value === '') { continue; }
+        if (preg_match('/^[A-Za-z0-9_.:\-]{1,64}$/',$value) !== 1) {
+            v1_respond(400,array('ok'=>false,'error'=>'invalid_'.$field));
+        }
+        $where[] = 'EXISTS (SELECT 1 FROM ' . table_name($config,'governance_events') . ' vote_filter_e '
+            . 'WHERE vote_filter_e.event_id=v.event_id AND vote_filter_e.' . $field . '=? AND '
+            . v1_event_visibility_sql($config,'vote_filter_e') . ')';
+        $params[] = $value;
+    }
+    if ($sourceClass !== '') {
+        if (preg_match('/^[A-Za-z0-9_.:\-]{1,40}$/',$sourceClass) !== 1) {
+            v1_respond(400,array('ok'=>false,'error'=>'invalid_source_class'));
+        }
+        $where[] = 'EXISTS (SELECT 1 FROM ' . table_name($config,'documents') . ' vote_filter_d '
+            . 'LEFT JOIN ' . table_name($config,'source_rights') . ' vote_filter_sr '
+            . 'ON vote_filter_sr.source_right_id=vote_filter_d.source_right_id '
+            . 'WHERE vote_filter_d.document_id=v.evidence_document_id AND vote_filter_d.source_class=? AND '
+            . v1_document_visibility_sql('vote_filter_d','vote_filter_sr') . ')';
+        $params[] = $sourceClass;
+    }
+    if ($evidenceDocumentId !== '') {
+        if (!v1_valid_entity_id($evidenceDocumentId)) {
+            v1_respond(400,array('ok'=>false,'error'=>'invalid_evidence_document_id'));
+        }
+        $where[] = 'v.evidence_document_id = ?'; $params[] = $evidenceDocumentId;
+    }
+    return array($where,$params);
+}
+
 function v1_calendar(PDO $pdo, array $config): void {
     $defaultFrom = gmdate('Y-m-d');
     $defaultTo = gmdate('Y-m-d', time() + 90 * 86400);
@@ -612,20 +1258,27 @@ function v1_calendar(PDO $pdo, array $config): void {
     $page = v1_list_params();
     $start = $from . ' 00:00:00';
     $end = $to . ' 23:59:59';
+    list($eventWhere, $eventParams) = v1_event_query_parts($config, false);
+    $eventWhere[] = 'COALESCE(e.deadline_at, e.occurred_at) BETWEEN ? AND ?';
+    $eventParams[] = $start; $eventParams[] = $end;
+    list($voteWhere, $voteParams) = v1_calendar_vote_filter_parts($config);
+    $voteWhere[] = 'v.meeting_at BETWEEN ? AND ?';
+    $voteParams[] = $start; $voteParams[] = $end;
     $sql = 'SELECT * FROM ('
         . 'SELECT CONCAT(\'event:\', e.event_id) AS calendar_id, \'event\' AS item_type, e.event_id AS entity_id, e.company_id, '
         . 'c.legal_name AS company_name, COALESCE(e.deadline_at, e.occurred_at) AS scheduled_at, e.title, e.original_language, e.event_type AS category '
         . 'FROM ' . table_name($config, 'governance_events') . ' e JOIN ' . table_name($config, 'companies') . ' c ON c.company_id = e.company_id '
-        . 'WHERE ' . v1_event_visibility_sql($config, 'e') . ' AND COALESCE(e.deadline_at, e.occurred_at) BETWEEN ? AND ? '
-        . 'UNION ALL '
+        . 'WHERE ' . implode(' AND ', $eventWhere) . ' ';
+    $params = $eventParams;
+    $sql .= 'UNION ALL '
         . 'SELECT CONCAT(\'vote:\', v.proposal_vote_id), \'proposal_vote\', v.proposal_vote_id, v.company_id, c.legal_name, '
         . 'v.meeting_at, v.agenda_title, v.original_language, \'proposal_vote\' '
         . 'FROM ' . table_name($config, 'proposal_votes') . ' v JOIN ' . table_name($config, 'companies') . ' c ON c.company_id = v.company_id '
-        . 'WHERE v.review_status = \'approved\' AND v.publication_status = \'published\' AND v.meeting_at BETWEEN ? AND ? AND '
-        . v1_required_document_visibility_sql($config, 'v.evidence_document_id')
-        . ') calendar_items ORDER BY scheduled_at ASC, calendar_id ASC LIMIT ' . ((int)$page['limit'] + 1)
+        . 'WHERE ' . implode(' AND ', $voteWhere);
+    $params = array_merge($params,$voteParams);
+    $sql .= ') calendar_items ORDER BY scheduled_at ASC, calendar_id ASC LIMIT ' . ((int)$page['limit'] + 1)
         . ' OFFSET ' . (int)$page['offset'];
-    $stmt = $pdo->prepare($sql); $stmt->execute(array($start, $end, $start, $end));
+    $stmt = $pdo->prepare($sql); $stmt->execute($params);
     list($rows, $hasMore) = v1_fetch_page($stmt, $page);
     v1_respond(200, array(
         'ok' => true,
@@ -648,14 +1301,26 @@ function v1_search(PDO $pdo, array $config): void {
     $query = mb_substr($query, 0, 100, 'UTF-8');
     $page = v1_list_params();
     $like = v1_like($query);
+    if (v1_event_filter_requested(true)) {
+        list($eventWhere, $eventParams) = v1_event_query_parts($config);
+        $eventWhere[] = '(e.title LIKE ? OR e.summary LIKE ?)';
+        $eventParams[] = $like; $eventParams[] = $like;
+        $stmt = $pdo->prepare('SELECT \'event\' AS kind, e.event_id AS entity_id, e.title, e.event_type AS subtitle, '
+            . 'e.company_id, e.occurred_at, e.occurred_at AS sort_at FROM ' . table_name($config, 'governance_events')
+            . ' e WHERE ' . implode(' AND ', $eventWhere) . ' ORDER BY sort_at DESC, entity_id ASC LIMIT '
+            . ((int)$page['limit'] + 1) . ' OFFSET ' . (int)$page['offset']);
+        $stmt->execute($eventParams); list($rows, $hasMore) = v1_fetch_page($stmt, $page);
+        v1_respond(200, array('ok'=>true,'query'=>$query,'filters_scope'=>'events','data'=>$rows,
+            'pagination'=>v1_page_meta($page,count($rows),$hasMore)));
+    }
     $sql = 'SELECT * FROM ('
         . 'SELECT \'company\' AS kind, c.company_id AS entity_id, c.legal_name AS title, c.legal_name_en AS subtitle, '
         . 'NULL AS company_id, NULL AS occurred_at, c.updated_at AS sort_at '
-        . 'FROM ' . table_name($config, 'companies') . ' c WHERE c.record_status = \'active\' '
+        . 'FROM ' . table_name($config, 'companies') . ' c WHERE c.record_status = \'active\' AND ' . v1_company_has_public_event_sql($config, 'c') . ' '
         . 'AND (c.legal_name LIKE ? OR c.legal_name_en LIKE ? OR c.short_name LIKE ? OR c.stock_code = ?) '
         . 'UNION ALL '
         . 'SELECT \'actor\', a.actor_id, a.display_name, a.actor_type, a.company_id, NULL, a.updated_at '
-        . 'FROM ' . table_name($config, 'actors') . ' a WHERE a.review_status = \'approved\' AND a.record_status = \'active\' '
+        . 'FROM ' . table_name($config, 'actors') . ' a WHERE ' . v1_actor_visibility_sql($config, 'a') . ' '
         . 'AND (a.display_name LIKE ? OR a.display_name_en LIKE ? OR a.aliases_json LIKE ?) '
         . 'UNION ALL '
         . 'SELECT \'event\', e.event_id, e.title, e.event_type, e.company_id, e.occurred_at, e.occurred_at '
@@ -692,6 +1357,15 @@ function v1_export_events_json(PDO $pdo, array $config): void {
     ));
 }
 
+/** Neutralize spreadsheet formula execution in CSV without changing stored data. */
+function v1_csv_export_cell($value): string {
+    $text = $value === null ? '' : (string)$value;
+    if (preg_match('/^[\x00-\x20]*[=+\-@]/', $text) === 1) {
+        return "'" . $text;
+    }
+    return $text;
+}
+
 function v1_export_events_csv(PDO $pdo, array $config): void {
     $page = v1_list_params();
     list($rows, $hasMore) = v1_query_public_events($pdo, $config, $page);
@@ -699,11 +1373,11 @@ function v1_export_events_csv(PDO $pdo, array $config): void {
     if ($stream === false) { v1_respond(500, array('ok' => false, 'error' => 'export_failed')); }
     fputcsv($stream, array('event_id', 'company_id', 'stock_code', 'market', 'company_name', 'event_type', 'title', 'original_language', 'occurred_at', 'deadline_at', 'importance', 'verification_status', 'updated_at'));
     foreach ($rows as $row) {
-        fputcsv($stream, array(
+        fputcsv($stream, array_map('v1_csv_export_cell', array(
             $row['event_id'], $row['company_id'], $row['stock_code'], $row['market'], $row['company_name'],
             $row['event_type'], $row['title'], $row['original_language'], $row['occurred_at'], $row['deadline_at'],
             $row['importance'], $row['verification_status'], $row['updated_at'],
-        ));
+        )));
     }
     rewind($stream);
     $csv = stream_get_contents($stream);
@@ -725,21 +1399,63 @@ function v1_xml(string $value): string {
     return htmlspecialchars($value, ENT_QUOTES | ENT_XML1, 'UTF-8');
 }
 
+function v1_event_feed_self_query(array $page): string {
+    $query = array();
+    $verification = isset($_GET['verification_status']) ? trim((string)$_GET['verification_status']) : '';
+    $status = isset($_GET['status']) ? trim((string)$_GET['status']) : '';
+    if ($verification === '') { $verification = $status; }
+    foreach (array(
+        'company_id', 'actor_id', 'event_type', 'identity_status', 'importance',
+        'source_class', 'evidence_document_id'
+    ) as $key) {
+        $value = isset($_GET[$key]) ? trim((string)$_GET[$key]) : '';
+        if ($value !== '') { $query[$key] = $value; }
+    }
+    if ($verification !== '') { $query['verification_status'] = $verification; }
+    foreach (array('from', 'to') as $key) {
+        $value = isset($_GET[$key]) ? trim((string)$_GET[$key]) : '';
+        if ($value === '') { continue; }
+        $normalized = mysql_dt($value);
+        if ($normalized !== null) {
+            $query[$key] = gmdate('Y-m-d\TH:i:s\Z', strtotime($normalized . ' UTC'));
+        }
+    }
+    $query['limit'] = (int)$page['limit'];
+    ksort($query, SORT_STRING);
+    return http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+}
+
 function v1_events_atom(PDO $pdo, array $config): void {
     $_GET['limit'] = isset($_GET['limit']) ? min(100, (int)$_GET['limit']) : 50;
     $_GET['page'] = 1;
     $page = v1_list_params();
     list($rows) = v1_query_public_events($pdo, $config, $page);
-    $base = isset($config['public_base_url']) ? rtrim((string)$config['public_base_url'], '/') : '';
+    $apiBase = isset($config['governance_api_base_url'])
+        ? rtrim((string)$config['governance_api_base_url'],'/')
+        : 'https://alignpe.gabia.io/activist/api.php/api/v1';
+    if (filter_var($apiBase,FILTER_VALIDATE_URL) === false || stripos($apiBase,'https://') !== 0
+        || parse_url($apiBase,PHP_URL_QUERY) !== null || parse_url($apiBase,PHP_URL_FRAGMENT) !== null) {
+        v1_respond(500,array('ok'=>false,'error'=>'invalid_governance_api_base_url'));
+    }
+    $selfQuery = v1_event_feed_self_query($page);
+    $selfUrl = $apiBase . '/feeds/events.atom' . ($selfQuery === '' ? '' : '?' . $selfQuery);
+    $publicBase = isset($config['public_base_url'])
+        ? rtrim((string)$config['public_base_url'],'/')
+        : 'https://news.bside.ai';
+    if (filter_var($publicBase,FILTER_VALIDATE_URL) === false || stripos($publicBase,'https://') !== 0
+        || parse_url($publicBase,PHP_URL_QUERY) !== null || parse_url($publicBase,PHP_URL_FRAGMENT) !== null) {
+        v1_respond(500,array('ok'=>false,'error'=>'invalid_public_base_url'));
+    }
     $updated = $rows ? (string)$rows[0]['updated_at'] : gmdate('Y-m-d H:i:s');
     $updatedIso = gmdate('c', strtotime($updated . ' UTC'));
     $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
     $xml .= '<feed xmlns="http://www.w3.org/2005/Atom">' . "\n";
-    $xml .= '<id>' . v1_xml(($base !== '' ? $base : 'urn:bside') . '/api/v1/feeds/events.atom') . '</id>' . "\n";
+    $xml .= '<id>' . v1_xml($selfUrl) . '</id>' . "\n";
     $xml .= '<title>BSIDE Governance Events</title>' . "\n";
     $xml .= '<updated>' . v1_xml($updatedIso) . '</updated>' . "\n";
+    $xml .= '<link rel="self" href="' . v1_xml($selfUrl) . '" type="application/atom+xml" />' . "\n";
     foreach ($rows as $row) {
-        $eventUrl = ($base !== '' ? $base : '') . '/api/v1/events/' . rawurlencode((string)$row['event_id']);
+        $eventUrl = $publicBase . '/#/events/' . rawurlencode((string)$row['event_id']);
         $publishedIso = gmdate('c', strtotime((string)$row['occurred_at'] . ' UTC'));
         $entryUpdated = gmdate('c', strtotime((string)$row['updated_at'] . ' UTC'));
         $xml .= '<entry>' . "\n";
@@ -785,7 +1501,7 @@ function v1_submit_feedback(PDO $pdo, array $config): void {
     if (($entityType === '') !== ($entityId === '')) {
         v1_respond(400, array('ok' => false, 'error' => 'entity_type_and_id_required_together'));
     }
-    if ($entityType !== '' && (!in_array($entityType, array('company', 'event', 'campaign', 'document'), true) || !v1_valid_entity_id($entityId))) {
+    if ($entityType !== '' && (!in_array($entityType, array('company', 'event', 'campaign', 'document', 'actor'), true) || !v1_valid_entity_id($entityId))) {
         v1_respond(400, array('ok' => false, 'error' => 'invalid_entity_reference'));
     }
     $evidence = isset($payload['evidence_urls']) && is_array($payload['evidence_urls']) ? array_slice($payload['evidence_urls'], 0, 10) : array();
@@ -820,25 +1536,406 @@ function v1_submit_feedback(PDO $pdo, array $config): void {
 }
 
 function v1_ops_health(PDO $pdo, array $config): void {
-    $lastStmt = $pdo->query('SELECT MAX(finished_at) FROM ' . table_name($config, 'collection_runs') . ' WHERE status IN (\'succeeded\',\'success\')');
-    $lastSuccess = $lastStmt->fetchColumn();
-    if (!$lastSuccess) {
-        $fallback = $pdo->query('SELECT MAX(finished_at) FROM ' . table_name($config, 'runs') . ' WHERE finished_at IS NOT NULL');
-        $lastSuccess = $fallback->fetchColumn();
+    $officialStmt = $pdo->query('SELECT run_id,pipeline,source_key,code_revision,status,started_at,finished_at,first_observed_at,'
+        . 'raw_count,acknowledged_count,metrics_json FROM ' . table_name($config, 'collection_runs')
+        . ' WHERE source_key IN (\'dart\',\'kind\',\'dart+kind\',\'kind+dart\') ORDER BY COALESCE(finished_at,started_at) DESC LIMIT 5000');
+    $official = array(
+        'dart'=>array('last_attempt_at'=>null,'last_success_at'=>null,'last_scheduled_slot_at'=>null,'last_scheduled_success_at'=>null),
+        'kind'=>array('last_attempt_at'=>null,'last_success_at'=>null,'last_scheduled_slot_at'=>null,'last_scheduled_success_at'=>null),
+    );
+    $healthClaimStmt = $pdo->query('SELECT * FROM ' . table_name($config,'official_slot_claims')
+        . ' ORDER BY scheduled_slot_at DESC LIMIT 5000');
+    $healthClaims = array();
+    foreach ($healthClaimStmt->fetchAll() as $claim) { $healthClaims[(string)$claim['claim_id']] = $claim; }
+    foreach ($officialStmt->fetchAll() as $run) {
+        $ledger = v1_official_run_ledger_row($run);
+        $claimId = isset($ledger['slot_claim_id']) && is_string($ledger['slot_claim_id']) ? $ledger['slot_claim_id'] : '';
+        if ($claimId !== '' && isset($healthClaims[$claimId])
+            && v1_official_claim_matches_ledger_run($healthClaims[$claimId],$ledger,$run)) {
+            $ledger['slot_claim_status'] = (string)$healthClaims[$claimId]['status'];
+            $ledger['slot_claim_terminal_reason'] = $healthClaims[$claimId]['terminal_reason'] === null
+                ? null : (string)$healthClaims[$claimId]['terminal_reason'];
+        }
+        if (!v1_official_scheduled_run_matches($ledger)) { continue; }
+        $scheduledSlot = v1_mysql_datetime_utc($ledger['scheduled_slot_at']);
+        if ($scheduledSlot === null) { continue; }
+        foreach ($ledger['source_outcomes'] as $source => $outcome) {
+            if (!isset($official[$source])) { continue; }
+            if ($official[$source]['last_scheduled_slot_at'] === null || $scheduledSlot > $official[$source]['last_scheduled_slot_at']) {
+                $official[$source]['last_scheduled_slot_at'] = $scheduledSlot;
+                $official[$source]['last_attempt_at'] = $scheduledSlot;
+            }
+            $sourceStatus = strtolower((string)$outcome['status']);
+            $topStatus = strtolower((string)$ledger['status']);
+            $completeAck = in_array($topStatus,array('success','succeeded'),true)
+                && (int)$ledger['raw_count'] === (int)$ledger['acknowledged_count']
+                && $ledger['slot_claim_status'] === 'completed'
+                && $ledger['slot_claim_late'] === false
+                && (!isset($ledger['slot_claim_terminal_reason']) || $ledger['slot_claim_terminal_reason'] === null)
+                && is_int($outcome['raw_count']) && is_int($outcome['acknowledged_count'])
+                && $outcome['raw_count'] === $outcome['acknowledged_count'];
+            if ($completeAck && in_array($sourceStatus,array('success','succeeded'),true)
+                && ($official[$source]['last_scheduled_success_at'] === null || $scheduledSlot > $official[$source]['last_scheduled_success_at'])) {
+                $official[$source]['last_scheduled_success_at'] = $scheduledSlot;
+                $official[$source]['last_success_at'] = $scheduledSlot;
+            }
+        }
     }
+    $lastSuccess = $official['dart']['last_success_at'] !== null && $official['kind']['last_success_at'] !== null
+        ? min($official['dart']['last_success_at'],$official['kind']['last_success_at']) : null;
+    $nowEpoch = time();
+    foreach ($official as &$sourceState) {
+        $lastEpoch = $sourceState['last_success_at'] !== null ? strtotime($sourceState['last_success_at'] . ' UTC') : false;
+        $sourceState['freshness_seconds'] = $lastEpoch !== false ? max(0,$nowEpoch-$lastEpoch) : null;
+        $sourceState['last_attempt_at'] = v1_release_iso_time($sourceState['last_attempt_at']);
+        $sourceState['last_success_at'] = v1_release_iso_time($sourceState['last_success_at']);
+        $sourceState['last_scheduled_slot_at'] = v1_release_iso_time($sourceState['last_scheduled_slot_at']);
+        $sourceState['last_scheduled_success_at'] = v1_release_iso_time($sourceState['last_scheduled_success_at']);
+        $sourceState['status'] = $lastEpoch === false ? 'missing' : 'observed';
+    }
+    unset($sourceState);
     $pending = scalar_int($pdo, 'SELECT COUNT(*) FROM ' . table_name($config, 'delivery_outbox') . ' WHERE status IN (\'pending\',\'retry\',\'remote_queued\',\'processing\')');
     $oldestStmt = $pdo->query('SELECT MIN(created_at) FROM ' . table_name($config, 'delivery_outbox') . ' WHERE status IN (\'pending\',\'retry\',\'remote_queued\',\'processing\')');
     $oldestPending = $oldestStmt->fetchColumn();
     $dead = scalar_int($pdo, 'SELECT COUNT(*) FROM ' . table_name($config, 'delivery_outbox') . ' WHERE status = \'dead_letter\'');
-    $status = $lastSuccess ? 'ok' : 'degraded';
+    $deploymentStmt = $pdo->query('SELECT observation_id,observed_at,distribution_target,build_sha,workflow_run_id,'
+        . 'workflow_run_attempt,source FROM ' . table_name($config,'web_distribution_observations')
+        . ' WHERE succeeded=1 ORDER BY observed_at DESC,created_at DESC,observation_id DESC LIMIT 2');
+    $deploymentRows = $deploymentStmt->fetchAll();
+    $activeDeployment = null; $activeDeploymentStatus = 'missing';
+    if (count($deploymentRows) > 0) {
+        $latest = $deploymentRows[0]; $activeDeploymentStatus = 'observed';
+        if (isset($deploymentRows[1]) && (string)$deploymentRows[1]['observed_at'] === (string)$latest['observed_at']
+            && (string)$deploymentRows[1]['build_sha'] !== (string)$latest['build_sha']) {
+            $activeDeploymentStatus = 'ambiguous';
+        } elseif (v1_valid_build_sha($latest['build_sha']) === null) {
+            $activeDeploymentStatus = 'invalid';
+        } else {
+            $activeDeployment = array(
+                'build_sha'=>strtolower((string)$latest['build_sha']),
+                'observed_at'=>v1_release_iso_time($latest['observed_at']),
+                'distribution_target'=>(string)$latest['distribution_target'],
+                'workflow_run_id'=>(int)$latest['workflow_run_id'],
+                'workflow_run_attempt'=>(int)$latest['workflow_run_attempt'],
+                'source'=>(string)$latest['source'],
+            );
+        }
+    }
+    $status = $lastSuccess !== null && $activeDeployment !== null ? 'ok' : 'degraded';
     v1_respond(200, array(
         'ok' => true,
         'status' => $status,
-        'last_success_at' => $lastSuccess ?: null,
+        'last_success_at' => v1_release_iso_time($lastSuccess),
+        'official_sources' => $official,
         'pending_outbox' => $pending,
         'oldest_pending_at' => $oldestPending ?: null,
         'dead_letter_count' => $dead,
+        'active_deployment' => $activeDeployment,
+        'active_deployment_status' => $activeDeploymentStatus,
         'checked_at' => gmdate('c'),
+    ));
+}
+
+/** Evaluate the separately approved KIND right without exposing its evidence reference. */
+function v1_kind_source_right_eligibility(PDO $pdo, array $config, bool $forUpdate = false): array {
+    $sql = 'SELECT source_right_id,source_type,source_key,permission_scope,evidence_uri,evidence_hash,valid_from,valid_until,'
+        . 'revoked_at,ai_allowed,redistribution_allowed,status,updated_at FROM ' . table_name($config,'source_rights')
+        . ' WHERE source_right_id=\'official:kind\'' . ($forUpdate ? ' FOR UPDATE' : '');
+    $row = $pdo->query($sql)->fetch();
+    if (!is_array($row)) {
+        return array('eligible'=>false,'rights_revision'=>null,'reasons'=>array('source_right_missing'));
+    }
+    $reasons = array();
+    if ((string)$row['source_type'] !== 'official_disclosure' || (string)$row['source_key'] !== 'kind') {
+        $reasons[] = 'source_identity_mismatch';
+    }
+    if ((string)$row['status'] !== 'active') { $reasons[] = 'source_right_inactive'; }
+    $now = gmdate('Y-m-d H:i:s');
+    if ((string)$row['valid_from'] > $now) { $reasons[] = 'source_right_not_yet_valid'; }
+    if ($row['valid_until'] !== null && (string)$row['valid_until'] <= $now) { $reasons[] = 'source_right_expired'; }
+    if ($row['revoked_at'] !== null) { $reasons[] = 'source_right_revoked'; }
+    if (trim((string)$row['permission_scope']) === '') { $reasons[] = 'permission_scope_missing'; }
+    if (trim((string)$row['evidence_uri']) === '' && preg_match('/^[a-f0-9]{64}$/',(string)$row['evidence_hash']) !== 1) {
+        $reasons[] = 'evidence_missing';
+    }
+    if ((int)$row['ai_allowed'] !== 1) { $reasons[] = 'ai_not_allowed'; }
+    if ((int)$row['redistribution_allowed'] !== 1) { $reasons[] = 'redistribution_not_allowed'; }
+    $revisionPayload = array(
+        'source_right_id'=>(string)$row['source_right_id'],'source_type'=>(string)$row['source_type'],
+        'source_key'=>(string)$row['source_key'],'permission_scope_sha256'=>hash('sha256',(string)$row['permission_scope']),
+        'evidence_present'=>trim((string)$row['evidence_uri']) !== '' || trim((string)$row['evidence_hash']) !== '',
+        'valid_from'=>(string)$row['valid_from'],'valid_until'=>$row['valid_until'],'revoked_at'=>$row['revoked_at'],
+        'ai_allowed'=>(int)$row['ai_allowed'],'redistribution_allowed'=>(int)$row['redistribution_allowed'],
+        'status'=>(string)$row['status'],'updated_at'=>(string)$row['updated_at'],
+    );
+    return array('eligible'=>count($reasons) === 0,
+        'rights_revision'=>hash('sha256',v1_canonical_json_encode(
+            $revisionPayload,'kind_source_right_revision_encode_failed'
+        )),'reasons'=>$reasons);
+}
+
+function v1_ops_source_right_eligibility(PDO $pdo, array $config): void {
+    $sourceRightId = isset($_GET['source_right_id']) ? trim((string)$_GET['source_right_id']) : '';
+    $use = isset($_GET['use']) ? trim((string)$_GET['use']) : '';
+    if ($sourceRightId !== 'official:kind' || $use !== 'ingest') {
+        v1_respond(400,array('ok'=>false,'error'=>'unsupported_source_right_eligibility_query'));
+    }
+    $result = v1_kind_source_right_eligibility($pdo,$config,false);
+    if (!$result['eligible']) {
+        v1_respond(409,array('ok'=>false,'error'=>'source_right_ineligible','source_right_id'=>$sourceRightId,'use'=>$use,
+            'eligible'=>false,'rights_revision'=>$result['rights_revision'],'reasons'=>$result['reasons'],'checked_at'=>gmdate('c')));
+    }
+    v1_respond(200,array('ok'=>true,'source_right_id'=>$sourceRightId,'use'=>$use,'eligible'=>true,
+        'rights_revision'=>$result['rights_revision'],'checked_at'=>gmdate('c')));
+}
+
+/** Minimal ops view for allowlisted company/activist official-site connectors. */
+function v1_ops_official_site_rights(PDO $pdo, array $config): void {
+    $page = v1_list_params(); $now = gmdate('Y-m-d H:i:s');
+    $stmt = $pdo->prepare('SELECT source_right_id,source_type,source_key,source_name,permission_scope,evidence_uri,evidence_hash,'
+        . 'valid_from,valid_until,ai_allowed,redistribution_allowed,status,updated_at FROM '
+        . table_name($config,'source_rights') . ' WHERE source_type IN (\'company_statement\',\'activist_statement\')'
+        . ' AND status=\'active\' AND valid_from<=? AND (valid_until IS NULL OR valid_until>?) AND revoked_at IS NULL'
+        . ' AND redistribution_allowed=1 AND permission_scope<>\'\' AND (evidence_uri IS NOT NULL OR evidence_hash IS NOT NULL)'
+        . ' ORDER BY source_right_id');
+    $stmt->execute(array($now,$now)); $eligible = array();
+    foreach ($stmt->fetchAll() as $row) {
+        $type = (string)$row['source_type']; $key = (string)$row['source_key'];
+        $identityValid = ($type === 'company_statement' && preg_match('/^company-site:[0-9]{8}$/',$key) === 1)
+            || ($type === 'activist_statement' && strlen($key) <= 64
+                && preg_match('/^activist-site:[A-Za-z0-9_.:\-]+$/',$key) === 1);
+        $evidencePresent = trim((string)$row['evidence_uri']) !== ''
+            || preg_match('/^[a-f0-9]{64}$/i',(string)$row['evidence_hash']) === 1;
+        if (!$identityValid || !$evidencePresent) { continue; }
+        $revisionPayload = array(
+            'source_right_id'=>(string)$row['source_right_id'],'source_type'=>$type,'source_key'=>$key,
+            'permission_scope_sha256'=>hash('sha256',(string)$row['permission_scope']),'evidence_present'=>true,
+            'valid_from'=>(string)$row['valid_from'],'valid_until'=>$row['valid_until'],
+            'ai_allowed'=>(int)$row['ai_allowed'],'redistribution_allowed'=>(int)$row['redistribution_allowed'],
+            'status'=>(string)$row['status'],'updated_at'=>(string)$row['updated_at'],
+        );
+        $eligible[] = array(
+            'source_right_id'=>(string)$row['source_right_id'],'source_type'=>$type,'source_key'=>$key,
+            'source_name'=>(string)$row['source_name'],
+            'permission_scope'=>mb_substr((string)$row['permission_scope'],0,2000,'UTF-8'),
+            'valid_from'=>v1_release_iso_time($row['valid_from']),'valid_until'=>v1_release_iso_time($row['valid_until']),
+            'ai_allowed'=>(int)$row['ai_allowed'] === 1,'redistribution_allowed'=>true,'status'=>'active',
+            'evidence_present'=>true,'rights_revision'=>hash('sha256',v1_canonical_json_encode(
+                $revisionPayload,'official_site_right_revision_encode_failed'
+            )),
+        );
+    }
+    $offset = (int)$page['offset']; $slice = array_slice($eligible,$offset,(int)$page['limit']+1);
+    $hasMore = count($slice) > (int)$page['limit']; if ($hasMore) { $slice = array_slice($slice,0,(int)$page['limit']); }
+    v1_respond(200,array('ok'=>true,'checked_at'=>gmdate('c'),'data'=>$slice,
+        'pagination'=>v1_page_meta($page,count($slice),$hasMore)));
+}
+
+function v1_dart_quota_server_day(): string {
+    return (new DateTimeImmutable('now',new DateTimeZone('Asia/Seoul')))->format('Y-m-d');
+}
+
+function v1_dart_quota_block_until_utc(): string {
+    $kst = new DateTimeZone('Asia/Seoul');
+    return (new DateTimeImmutable('tomorrow',$kst))->setTime(0,0,0)
+        ->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+}
+
+function v1_dart_quota_error(int $status, string $code, ?string $detail = null): void {
+    $error = array('code'=>$code);
+    if ($detail !== null) { $error['detail']=$detail; }
+    v1_respond($status,array('ok'=>false,'error'=>$error,'server_kst_date'=>v1_dart_quota_server_day()));
+}
+
+function v1_dart_quota_payload(array $row, string $action, ?string $attemptId, bool $duplicate): array {
+    $limit = (int)$row['limit_count']; $used = (int)$row['used_count'];
+    return array(
+        'ok'=>true,'action'=>$action,'attempt_id'=>$attemptId,'quota_day'=>(string)$row['quota_day'],
+        'accepted'=>$action === 'status' ? 0 : 1,'limit_count'=>$limit,'used_count'=>$used,
+        'remaining_count'=>max(0,$limit-$used),'duplicate'=>$duplicate,
+        'blocked_until'=>(int)$row['blocked'] === 1 ? v1_release_iso_time($row['blocked_until']) : null,
+    );
+}
+
+function v1_dart_quota_validate_day($value): string {
+    $day = is_string($value) ? trim($value) : '';
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/',$day) !== 1 || $day !== v1_dart_quota_server_day()) {
+        v1_dart_quota_error(400,'quota_date_mismatch');
+    }
+    return $day;
+}
+
+/** Read-only current-KST-day quota status for watchdogs and operators. */
+function v1_ops_dart_quota_status(PDO $pdo, array $config): void {
+    $day = v1_dart_quota_validate_day($_GET['quota_day'] ?? '');
+    $stmt = $pdo->prepare('SELECT quota_day,limit_count,used_count,blocked,block_reason,blocked_until,blocked_by_attempt_id,'
+        . 'blocked_at,updated_at FROM ' . table_name($config,'dart_quota_days') . ' WHERE quota_day=? LIMIT 1');
+    $stmt->execute(array($day)); $row = $stmt->fetch();
+    if (!$row) {
+        $row = array('quota_day'=>$day,'limit_count'=>10000,'used_count'=>0,'blocked'=>0,'block_reason'=>null,
+            'blocked_until'=>null,'blocked_by_attempt_id'=>null,'blocked_at'=>null,'updated_at'=>null);
+    }
+    $payload = v1_dart_quota_payload($row,'status',null,false);
+    $payload['server_kst_date'] = v1_dart_quota_server_day();
+    $payload['block_reason'] = $row['block_reason'];
+    $payload['blocked_by_attempt_id'] = $row['blocked_by_attempt_id'];
+    $payload['blocked_at'] = v1_release_iso_time($row['blocked_at']);
+    $payload['updated_at'] = v1_release_iso_time($row['updated_at']);
+    v1_respond(200,$payload);
+}
+
+/** Atomically consume one physical DART HTTP attempt or record a 020 block. */
+function v1_ops_dart_quota_write(PDO $pdo, array $config): void {
+    $payload = v1_admin_json_body($config);
+    $action = isset($payload['action']) ? trim((string)$payload['action']) : '';
+    $required = $action === 'consume'
+        ? array('action','attempt_id','quota_day','operation','code_revision')
+        : ($action === 'block_020' ? array('action','attempt_id','quota_day','reason','code_revision') : array());
+    $keys = array_keys($payload); sort($keys,SORT_STRING); $expectedKeys = $required; sort($expectedKeys,SORT_STRING);
+    if (!$required || $keys !== $expectedKeys) { v1_dart_quota_error(400,'invalid_request','exact_fields_required'); }
+    $attemptId = trim((string)$payload['attempt_id']);
+    $quotaDay = v1_dart_quota_validate_day($payload['quota_day']);
+    $revision = strtolower(trim((string)$payload['code_revision']));
+    if (!v1_valid_entity_id($attemptId,96) || preg_match('/^[a-f0-9]{7,40}$/',$revision) !== 1) {
+        v1_dart_quota_error(400,'invalid_request','attempt_or_revision');
+    }
+    if ($action === 'consume' && !in_array($payload['operation'],array('list','corp_code'),true)) {
+        v1_dart_quota_error(400,'invalid_request','operation');
+    }
+    if ($action === 'block_020' && $payload['reason'] !== 'opendart_status_020') {
+        v1_dart_quota_error(400,'invalid_request','reason');
+    }
+    $requestHash = hash('sha256',v1_strict_canonical_json_encode($payload,'dart_quota_request_encode_failed'));
+    $now = gmdate('Y-m-d H:i:s'); $blockUntil = v1_dart_quota_block_until_utc();
+    $pdo->beginTransaction();
+    try {
+        $dayInsert = $pdo->prepare('INSERT IGNORE INTO ' . table_name($config,'dart_quota_days')
+            . ' (quota_day,limit_count,used_count,blocked,block_reason,blocked_until,blocked_by_attempt_id,blocked_at,created_at,updated_at)'
+            . ' VALUES (?,10000,0,0,NULL,NULL,NULL,NULL,?,?)');
+        $dayInsert->execute(array($quotaDay,$now,$now));
+        $dayLookup = $pdo->prepare('SELECT quota_day,limit_count,used_count,blocked,block_reason,blocked_until,'
+            . 'blocked_by_attempt_id,blocked_at,updated_at FROM ' . table_name($config,'dart_quota_days') . ' WHERE quota_day=? FOR UPDATE');
+        $dayLookup->execute(array($quotaDay)); $day = $dayLookup->fetch();
+        if (!$day || (int)$day['limit_count'] !== 10000 || (int)$day['used_count'] > 10000) {
+            throw new RuntimeException('dart_quota_day_integrity_error');
+        }
+        $attemptLookup = $pdo->prepare('SELECT attempt_id,quota_day,operation,code_revision,consume_request_sha256,'
+            . 'block_request_sha256,status,consumed_units FROM ' . table_name($config,'dart_quota_attempts')
+            . ' WHERE attempt_id=? FOR UPDATE');
+        $attemptLookup->execute(array($attemptId)); $attempt = $attemptLookup->fetch();
+
+        if ($action === 'consume') {
+            if ($attempt) {
+                if ((string)$attempt['quota_day'] !== $quotaDay || (string)$attempt['operation'] !== (string)$payload['operation']
+                    || (string)$attempt['code_revision'] !== $revision || (int)$attempt['consumed_units'] !== 1
+                    || !hash_equals((string)$attempt['consume_request_sha256'],$requestHash)) {
+                    $pdo->rollBack(); v1_dart_quota_error(409,'dart_quota_idempotency_conflict');
+                }
+                $pdo->commit(); v1_respond(200,v1_dart_quota_payload($day,'consume',$attemptId,true));
+            }
+            if ((int)$day['blocked'] === 1) {
+                $retry = max(1,(int)(strtotime((string)$day['blocked_until'] . ' UTC')-time()));
+                header('Retry-After: ' . $retry); $pdo->rollBack(); v1_dart_quota_error(409,'dart_quota_blocked');
+            }
+            if ((int)$day['used_count'] >= 10000) {
+                $retry = max(1,(int)(strtotime($blockUntil . ' UTC')-time()));
+                header('Retry-After: ' . $retry); $pdo->rollBack(); v1_dart_quota_error(429,'dart_quota_exhausted');
+            }
+            $insert = $pdo->prepare('INSERT INTO ' . table_name($config,'dart_quota_attempts')
+                . ' (attempt_id,quota_day,operation,code_revision,consume_request_sha256,block_request_sha256,status,consumed_units,'
+                . 'consumed_at,blocked_at,updated_at) VALUES (?,?,?,?,?,NULL,\'consumed\',1,?,NULL,?)');
+            $insert->execute(array($attemptId,$quotaDay,(string)$payload['operation'],$revision,$requestHash,$now,$now));
+            $update = $pdo->prepare('UPDATE ' . table_name($config,'dart_quota_days')
+                . ' SET used_count=used_count+1,updated_at=? WHERE quota_day=? AND blocked=0 AND used_count<limit_count');
+            $update->execute(array($now,$quotaDay));
+            if ($update->rowCount() !== 1) { throw new RuntimeException('dart_quota_atomic_consume_failed'); }
+            $dayLookup->execute(array($quotaDay)); $day = $dayLookup->fetch();
+            $pdo->commit(); v1_respond(200,v1_dart_quota_payload($day,'consume',$attemptId,false));
+        }
+
+        if (!$attempt || (string)$attempt['quota_day'] !== $quotaDay || (string)$attempt['code_revision'] !== $revision
+            || (int)$attempt['consumed_units'] !== 1) {
+            $pdo->rollBack(); v1_dart_quota_error(409,'invalid_request','consumed_attempt_required');
+        }
+        if ($attempt['block_request_sha256'] !== null) {
+            if (!hash_equals((string)$attempt['block_request_sha256'],$requestHash)) {
+                $pdo->rollBack(); v1_dart_quota_error(409,'dart_quota_idempotency_conflict');
+            }
+            if ((int)$day['blocked'] !== 1 || $day['blocked_until'] === null) {
+                throw new RuntimeException('dart_quota_block_integrity_error');
+            }
+            $pdo->commit(); v1_respond(200,v1_dart_quota_payload($day,'block_020',$attemptId,true));
+        }
+        $attemptUpdate = $pdo->prepare('UPDATE ' . table_name($config,'dart_quota_attempts')
+            . ' SET block_request_sha256=?,status=\'blocked_020\',blocked_at=?,updated_at=? WHERE attempt_id=? AND block_request_sha256 IS NULL');
+        $attemptUpdate->execute(array($requestHash,$now,$now,$attemptId));
+        if ($attemptUpdate->rowCount() !== 1) { throw new RuntimeException('dart_quota_atomic_block_failed'); }
+        $dayUpdate = $pdo->prepare('UPDATE ' . table_name($config,'dart_quota_days')
+            . ' SET blocked=1,block_reason=COALESCE(block_reason,\'opendart_status_020\'),'
+            . 'blocked_until=COALESCE(blocked_until,?),blocked_by_attempt_id=COALESCE(blocked_by_attempt_id,?),'
+            . 'blocked_at=COALESCE(blocked_at,?),updated_at=? WHERE quota_day=?');
+        $dayUpdate->execute(array($blockUntil,$attemptId,$now,$now,$quotaDay));
+        $dayLookup->execute(array($quotaDay)); $day = $dayLookup->fetch();
+        $pdo->commit(); v1_respond(200,v1_dart_quota_payload($day,'block_020',$attemptId,false));
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        throw $e;
+    }
+}
+
+/** Candidate metadata for the private official-site connector allowlist job. */
+function v1_ops_official_site_candidates(PDO $pdo, array $config): void {
+    $officialEvidence = 'EXISTS (SELECT 1 FROM ' . table_name($config,'event_documents') . ' candidate_ed '
+        . 'JOIN ' . table_name($config,'documents') . ' candidate_d ON candidate_d.document_id=candidate_ed.document_id '
+        . 'LEFT JOIN ' . table_name($config,'source_rights') . ' candidate_sr ON candidate_sr.source_right_id=candidate_d.source_right_id '
+        . 'WHERE candidate_ed.event_id=e.event_id AND candidate_d.source_class=\'official_disclosure\' AND '
+        . v1_document_visibility_sql('candidate_d','candidate_sr') . ')';
+    $eligibleEvent = '(e.review_status IN (\'pending\',\'changes_requested\',\'approved\',\'not_required\') '
+        . 'AND e.publication_status IN (\'draft\',\'published\') AND e.verification_status NOT IN (\'signal\',\'withdrawn\') '
+        . 'AND ' . $officialEvidence . ')';
+    $weight = '(CASE e.importance WHEN \'critical\' THEN 100 WHEN \'market_sensitive\' THEN 90 '
+        . 'WHEN \'high\' THEN 80 WHEN \'medium\' THEN 40 WHEN \'low\' THEN 20 ELSE 10 END)';
+
+    $companySql = 'SELECT e.company_id,c.legal_name AS company_name,COUNT(DISTINCT e.event_id) AS event_count,'
+        . 'SUM(' . $weight . ') AS raw_score,MAX(e.occurred_at) AS latest_event_at '
+        . 'FROM ' . table_name($config,'governance_events') . ' e '
+        . 'JOIN ' . table_name($config,'companies') . ' c ON c.company_id=e.company_id '
+        . 'WHERE c.record_status=\'active\' AND ' . $eligibleEvent . ' GROUP BY e.company_id,c.legal_name '
+        . 'ORDER BY raw_score DESC,event_count DESC,e.company_id ASC LIMIT 20';
+    $companyRows = $pdo->query($companySql)->fetchAll();
+
+    $actorPairs = '(SELECT candidate_ea.event_id,candidate_ea.actor_id FROM ' . table_name($config,'event_actors')
+        . ' candidate_ea WHERE candidate_ea.review_status=\'approved\' UNION '
+        . 'SELECT candidate_identity.event_id,candidate_identity.identity_actor_id FROM ' . table_name($config,'governance_events')
+        . ' candidate_identity WHERE candidate_identity.identity_actor_id IS NOT NULL)';
+    $actorSql = 'SELECT a.actor_id,a.display_name AS actor_name,a.actor_type,COUNT(DISTINCT e.event_id) AS event_count,'
+        . 'SUM(' . $weight . ') AS raw_score,MAX(e.occurred_at) AS latest_event_at FROM ' . $actorPairs . ' candidate_pair '
+        . 'JOIN ' . table_name($config,'governance_events') . ' e ON e.event_id=candidate_pair.event_id '
+        . 'JOIN ' . table_name($config,'actors') . ' a ON a.actor_id=candidate_pair.actor_id '
+        . 'WHERE a.review_status=\'approved\' AND a.record_status=\'active\' '
+        . 'AND a.actor_type IN (\'activist_shareholder\',\'institution\',\'shareholder_coalition\') AND '
+        . $eligibleEvent . ' GROUP BY a.actor_id,a.display_name,a.actor_type '
+        . 'ORDER BY raw_score DESC,event_count DESC,a.actor_id ASC LIMIT 10';
+    $actorRows = $pdo->query($actorSql)->fetchAll();
+
+    $rank = 0;
+    foreach ($companyRows as &$row) {
+        $row['rank'] = ++$rank; $row['event_count'] = (int)$row['event_count']; $row['raw_score'] = (int)$row['raw_score'];
+        $row['latest_event_at'] = v1_release_iso_time($row['latest_event_at']);
+    }
+    unset($row); $rank = 0;
+    foreach ($actorRows as &$row) {
+        $row['rank'] = ++$rank; $row['event_count'] = (int)$row['event_count']; $row['raw_score'] = (int)$row['raw_score'];
+        $row['latest_event_at'] = v1_release_iso_time($row['latest_event_at']);
+    }
+    unset($row);
+    v1_respond(200,array(
+        'ok'=>true,
+        'generated_at'=>gmdate('c'),
+        'score_version'=>'official-site-candidates-v1',
+        'selection'=>array('companies_limit'=>20,'actors_limit'=>10,'official_evidence_required'=>true),
+        'companies'=>$companyRows,
+        'actors'=>$actorRows,
     ));
 }
 
@@ -865,7 +1962,13 @@ function v1_admin_review_queue(PDO $pdo, array $config): void {
         . 'UNION ALL SELECT \'timeline\', tl.timeline_entry_id, COALESCE(e.company_id,cp.company_id), tl.title, \'medium\', tl.review_status, tl.created_at, tl.updated_at, '
         . 'tl.event_id, NULL, NULL FROM ' . table_name($config, 'timeline_entries') . ' tl '
         . 'LEFT JOIN ' . table_name($config, 'governance_events') . ' e ON e.event_id=tl.event_id LEFT JOIN ' . table_name($config, 'campaigns') . ' cp ON cp.campaign_id=tl.campaign_id '
-        . 'WHERE tl.review_status IN (\'pending\',\'changes_requested\')'
+        . 'WHERE tl.review_status IN (\'pending\',\'changes_requested\') '
+        . 'UNION ALL SELECT \'official_site_review\', osr.review_item_id, IF(osr.entity_type=\'company\',osr.entity_id,NULL), '
+        . 'LEFT(osr.reason,700), \'medium\', osr.review_status, osr.created_at, osr.updated_at, NULL, NULL, NULL FROM '
+        . table_name($config,'official_site_review_items') . ' osr WHERE osr.review_status IN (\'pending\',\'changes_requested\') '
+        . 'UNION ALL SELECT \'official_site_tombstone\', ost.tombstone_id, IF(ost.entity_type=\'company\',ost.entity_id,NULL), '
+        . 'CONCAT(\'Delete signal: \',LEFT(ost.external_id,620)), \'high\', ost.review_status, ost.created_at, ost.updated_at, NULL, NULL, NULL FROM '
+        . table_name($config,'official_site_tombstones') . ' ost WHERE ost.review_status IN (\'pending\',\'changes_requested\')'
         . ') review_items LEFT JOIN ' . table_name($config, 'companies') . ' c ON c.company_id=review_items.company_id ORDER BY '
         . 'CASE review_items.importance WHEN \'critical\' THEN 0 WHEN \'market_sensitive\' THEN 0 WHEN \'high\' THEN 1 ELSE 2 END, '
         . 'review_items.created_at ASC, review_items.entity_type ASC, review_items.entity_id ASC LIMIT ' . ((int)$page['limit'] + 1) . ' OFFSET ' . (int)$page['offset'];
@@ -949,6 +2052,2631 @@ function v1_admin_json_body(array $config): array {
     return decode_json_body(read_body($config));
 }
 
+function v1_release_iso_time($value): ?string {
+    if (!is_string($value) || preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $value) !== 1) {
+        return null;
+    }
+    return str_replace(' ', 'T', $value) . 'Z';
+}
+
+function v1_admin_release_state(PDO $pdo, array $config): void {
+    $row = v1_release_state($pdo, $config);
+    if ($row === null || !in_array((string)$row['release_state'], array('closed', 'preview', 'live'), true)) {
+        v1_respond(503, array('ok' => false, 'error' => 'release_state_unavailable'));
+    }
+    $historyLimit = isset($_GET['history_limit']) ? (int)$_GET['history_limit'] : 20;
+    $historyLimit = max(1, min(50, $historyLimit));
+    $historyStmt = $pdo->prepare('SELECT audit_id, state_version, previous_state, new_state, changed_by, change_reason, request_id, cutover_at, sunset_at, created_at FROM '
+        . table_name($config, 'governance_release_audit') . ' WHERE state_key = ? ORDER BY state_version DESC LIMIT ' . $historyLimit);
+    $historyStmt->execute(array(GOV_V1_RELEASE_STATE_KEY));
+    $history = $historyStmt->fetchAll();
+    foreach ($history as &$entry) {
+        $entry['state_version'] = (int)$entry['state_version'];
+        $entry['cutover_at'] = v1_release_iso_time(isset($entry['cutover_at']) ? $entry['cutover_at'] : null);
+        $entry['sunset_at'] = v1_release_iso_time(isset($entry['sunset_at']) ? $entry['sunset_at'] : null);
+        $entry['created_at'] = v1_release_iso_time(isset($entry['created_at']) ? $entry['created_at'] : null);
+    }
+    unset($entry);
+    v1_respond(200, array(
+        'ok' => true,
+        'release_state' => (string)$row['release_state'],
+        'state_version' => (int)$row['state_version'],
+        'updated_by' => (string)$row['updated_by'],
+        'update_reason' => (string)$row['update_reason'],
+        'cutover_at' => v1_release_iso_time(isset($row['cutover_at']) ? $row['cutover_at'] : null),
+        'sunset_at' => v1_release_iso_time(isset($row['sunset_at']) ? $row['sunset_at'] : null),
+        'updated_at' => v1_release_iso_time($row['updated_at']),
+        'schema_version' => GOV_V1_SCHEMA_VERSION,
+        'preview_auth_configured' => v1_preview_auth_configured($config),
+        'history' => $history,
+    ));
+}
+
+function v1_assert_object_keys(array $value, array $allowed, string $location): void {
+    $allowedMap = array_fill_keys($allowed, true);
+    foreach (array_keys($value) as $key) {
+        if (!is_string($key) || !isset($allowedMap[$key])) {
+            v1_respond(400, array('ok' => false, 'error' => 'unexpected_field', 'field' => $location . '.' . (string)$key));
+        }
+    }
+}
+
+function v1_valid_route_template($value): ?string {
+    if (!is_string($value)) { return null; }
+    $value = trim($value);
+    if (strlen($value) < 1 || strlen($value) > 191 || substr($value, 0, 1) !== '/'
+        || preg_match('/[?#\s]/', $value) === 1
+        || preg_match('#^/[A-Za-z0-9_./:{}\-]+$#', $value) !== 1) {
+        return null;
+    }
+    return $value;
+}
+
+function v1_valid_build_sha($value): ?string {
+    if (!is_string($value)) { return null; }
+    $value = strtolower(trim($value));
+    return preg_match('/^[a-f0-9]{7,64}$/', $value) === 1 ? $value : null;
+}
+
+function v1_percentile(array $values, float $percentile): ?float {
+    if (!$values) { return null; }
+    sort($values, SORT_NUMERIC);
+    $index = (int)ceil($percentile * count($values)) - 1;
+    $index = max(0, min(count($values) - 1, $index));
+    return (float)$values[$index];
+}
+
+/**
+ * Compute KIND receipt-to-first-observed lag only from timestamped document
+ * observations. Missing publication timestamps are deliberately omitted;
+ * collection dates or midnight defaults must never stand in for receipt time.
+ */
+function v1_kind_observation_stats_by_day(PDO $pdo, array $config, string $from, string $to): array {
+    list($start,$end) = v1_evidence_utc_bounds($from,$to);
+    $stmt = $pdo->prepare('SELECT eo.observation_id,eo.first_observed_at,d.published_at,d.source_right_id,sr.source_type,sr.source_key FROM '
+        . table_name($config,'event_observations') . ' eo JOIN ' . table_name($config,'documents')
+        . ' d ON d.document_id=eo.document_id LEFT JOIN ' . table_name($config,'source_rights')
+        . ' sr ON sr.source_right_id=d.source_right_id WHERE eo.first_observed_at BETWEEN ? AND ? '
+        . 'AND eo.source_key=\'kind\' '
+        . 'ORDER BY eo.first_observed_at,eo.observation_id');
+    $stmt->execute(array($start,$end)); $stats = array();
+    foreach ($stmt->fetchAll() as $row) {
+        $day = v1_kst_observation_date((string)$row['first_observed_at']);
+        if ($day === null) { continue; }
+        if (!isset($stats[$day])) { $stats[$day] = array('observation_count'=>0,'lag_sample_count'=>0,'lag_seconds'=>array()); }
+        $stats[$day]['observation_count']++;
+        if ((string)$row['source_right_id'] !== 'official:kind' || (string)$row['source_type'] !== 'official_disclosure'
+            || (string)$row['source_key'] !== 'kind' || $row['published_at'] === null) { continue; }
+        $firstEpoch = strtotime((string)$row['first_observed_at'] . ' UTC');
+        $receiptEpoch = strtotime((string)$row['published_at'] . ' UTC');
+        if ($firstEpoch === false || $receiptEpoch === false || $firstEpoch < $receiptEpoch) { continue; }
+        $stats[$day]['lag_sample_count']++;
+        $stats[$day]['lag_seconds'][] = (float)($firstEpoch-$receiptEpoch);
+    }
+    return $stats;
+}
+
+function v1_kind_observation_lags_by_day(PDO $pdo, array $config, string $from, string $to): array {
+    $stats = v1_kind_observation_stats_by_day($pdo,$config,$from,$to); $byDay = array();
+    foreach ($stats as $day => $values) { $byDay[$day] = $values['lag_seconds']; }
+    return $byDay;
+}
+
+function v1_kind_observation_lag_p95_minutes(PDO $pdo, array $config, string $date): ?float {
+    $stats = v1_kind_observation_stats_by_day($pdo,$config,$date,$date);
+    $seconds = isset($stats[$date]) ? v1_percentile($stats[$date]['lag_seconds'],0.95) : null;
+    return $seconds === null ? null : $seconds/60.0;
+}
+
+function v1_public_revisions(PDO $pdo, array $config): void {
+    $page = v1_list_params();
+    $entityType = isset($_GET['entity_type']) ? trim((string)$_GET['entity_type']) : '';
+    $entityId = isset($_GET['entity_id']) ? trim((string)$_GET['entity_id']) : '';
+    if ($entityType !== '' && !in_array($entityType, array('company','event','campaign','document','actor'), true)) {
+        v1_respond(400, array('ok' => false, 'error' => 'invalid_entity_type'));
+    }
+    if ($entityId !== '' && !v1_valid_entity_id($entityId)) {
+        v1_respond(400, array('ok' => false, 'error' => 'invalid_entity_id'));
+    }
+    $where = array('er.revision_status = \'published\'', 'er.published_at IS NOT NULL');
+    $params = array();
+    if ($entityType !== '') { $where[] = 'er.entity_type = ?'; $params[] = $entityType; }
+    if ($entityId !== '') { $where[] = 'er.entity_id = ?'; $params[] = $entityId; }
+    $where[] = '('
+        . '(er.entity_type = \'event\' AND EXISTS (SELECT 1 FROM ' . table_name($config, 'governance_events') . ' e '
+        . 'WHERE e.event_id = er.entity_id AND ' . v1_event_visibility_sql($config, 'e') . ')) OR '
+        . '(er.entity_type = \'campaign\' AND EXISTS (SELECT 1 FROM ' . table_name($config, 'campaigns') . ' cp '
+        . 'WHERE cp.campaign_id = er.entity_id AND ' . v1_campaign_visibility_sql($config, 'cp') . ')) OR '
+        . '(er.entity_type = \'company\' AND EXISTS (SELECT 1 FROM ' . table_name($config, 'companies') . ' c '
+        . 'WHERE c.company_id = er.entity_id AND ' . v1_company_has_public_event_sql($config, 'c') . ')) OR '
+        . '(er.entity_type = \'actor\' AND EXISTS (SELECT 1 FROM ' . table_name($config, 'actors') . ' a '
+        . 'WHERE a.actor_id = er.entity_id AND ' . v1_actor_visibility_sql($config, 'a') . ')) OR '
+        . '(er.entity_type = \'document\' AND EXISTS (SELECT 1 FROM ' . table_name($config, 'documents') . ' d '
+        . 'LEFT JOIN ' . table_name($config, 'source_rights') . ' sr ON sr.source_right_id = d.source_right_id '
+        . 'WHERE d.document_id = er.entity_id AND ' . v1_document_visibility_sql('d', 'sr') . '))'
+        . ')';
+    $sql = 'SELECT er.revision_id, er.entity_type, er.entity_id, er.field_name, er.reason, er.published_at, er.updated_at '
+        . 'FROM ' . table_name($config, 'editorial_revisions') . ' er WHERE ' . implode(' AND ', $where)
+        . ' ORDER BY er.published_at DESC, er.revision_id DESC LIMIT ' . ((int)$page['limit'] + 1)
+        . ' OFFSET ' . (int)$page['offset'];
+    $stmt = $pdo->prepare($sql); $stmt->execute($params);
+    list($rows, $hasMore) = v1_fetch_page($stmt, $page);
+    v1_respond(200, array('ok' => true, 'data' => $rows, 'pagination' => v1_page_meta($page, count($rows), $hasMore)));
+}
+
+function v1_shadow_event_keys($run, string $field): array {
+    if (!is_array($run)) {
+        v1_respond(400, array('ok'=>false,'error'=>'invalid_shadow_run','field'=>$field));
+    }
+    v1_assert_object_keys($run, array('status','events'), $field);
+    $status = isset($run['status']) ? trim((string)$run['status']) : '';
+    $events = isset($run['events']) && is_array($run['events']) ? $run['events'] : null;
+    if (!in_array($status, array('succeeded','failed'), true) || $events === null || count($events) > 10000) {
+        v1_respond(400, array('ok'=>false,'error'=>'invalid_shadow_run','field'=>$field));
+    }
+    $keys = array(); $seen = array();
+    foreach ($events as $index => $event) {
+        if (!is_array($event)) {
+            v1_respond(400, array('ok'=>false,'error'=>'invalid_shadow_event','field'=>$field,'index'=>$index));
+        }
+        v1_assert_object_keys($event, array('comparison_key'), $field . '.events[' . $index . ']');
+        $key = isset($event['comparison_key']) ? strtolower(trim((string)$event['comparison_key'])) : '';
+        if (preg_match('/^eventcmp:v1:[a-f0-9]{64}$/', $key) !== 1 || isset($seen[$key])) {
+            v1_respond(400, array('ok'=>false,'error'=>isset($seen[$key]) ? 'duplicate_shadow_comparison_key' : 'invalid_shadow_comparison_key',
+                'field'=>$field,'index'=>$index));
+        }
+        $seen[$key] = true; $keys[] = $key;
+    }
+    sort($keys, SORT_STRING);
+    return array($status, $keys);
+}
+
+/** Require a non-empty, lossless legacy-to-canonical crosswalk for every shadow day. */
+function v1_shadow_legacy_crosswalk($value): array {
+    if (!is_array($value)) {
+        v1_respond(400,array('ok'=>false,'error'=>'invalid_legacy_crosswalk'));
+    }
+    $fields = array('schema_version','eligible_legacy_record_count','crosswalked_legacy_record_count',
+        'unmatched_legacy_record_count','ambiguous_legacy_record_count','coverage_rate','crosswalk_sha256');
+    v1_assert_object_keys($value,$fields,'legacy_crosswalk');
+    foreach ($fields as $field) {
+        if (!array_key_exists($field,$value)) {
+            v1_respond(400,array('ok'=>false,'error'=>'invalid_legacy_crosswalk','field'=>$field));
+        }
+    }
+    $schemaVersion = $value['schema_version'];
+    $eligible = $value['eligible_legacy_record_count'];
+    $crosswalked = $value['crosswalked_legacy_record_count'];
+    $unmatched = $value['unmatched_legacy_record_count'];
+    $ambiguous = $value['ambiguous_legacy_record_count'];
+    $coverage = $value['coverage_rate'];
+    $sha = is_string($value['crosswalk_sha256']) ? strtolower(trim($value['crosswalk_sha256'])) : '';
+    if (!is_int($schemaVersion) || $schemaVersion !== 1 || !is_int($eligible) || $eligible < 1
+        || !is_int($crosswalked) || $crosswalked !== $eligible || !is_int($unmatched) || $unmatched !== 0
+        || !is_int($ambiguous) || $ambiguous !== 0 || (!is_int($coverage) && !is_float($coverage))
+        || !is_finite((float)$coverage) || abs((float)$coverage - 1.0) > 0.000001
+        || preg_match('/^[a-f0-9]{64}$/',$sha) !== 1) {
+        v1_respond(400,array('ok'=>false,'error'=>'invalid_legacy_crosswalk'));
+    }
+    return array('schema_version'=>1,'eligible_legacy_record_count'=>$eligible,
+        'crosswalked_legacy_record_count'=>$crosswalked,'unmatched_legacy_record_count'=>0,
+        'ambiguous_legacy_record_count'=>0,'coverage_rate'=>1.0,'crosswalk_sha256'=>$sha);
+}
+
+function v1_shadow_crosswalk_response(array $row): array {
+    $required = array('legacy_crosswalk_schema_version','legacy_eligible_record_count',
+        'legacy_crosswalked_record_count','legacy_unmatched_record_count','legacy_ambiguous_record_count',
+        'legacy_crosswalk_coverage_rate','legacy_crosswalk_sha256');
+    foreach ($required as $field) {
+        if (!array_key_exists($field,$row) || $row[$field] === null) {
+            v1_respond(503,array('ok'=>false,'error'=>'shadow_run_crosswalk_integrity_error',
+                'observation_date'=>$row['observation_date'] ?? null,'code_revision'=>$row['code_revision'] ?? null));
+        }
+    }
+    $eligible = (int)$row['legacy_eligible_record_count'];
+    $crosswalked = (int)$row['legacy_crosswalked_record_count'];
+    $unmatched = (int)$row['legacy_unmatched_record_count'];
+    $ambiguous = (int)$row['legacy_ambiguous_record_count'];
+    $coverage = (float)$row['legacy_crosswalk_coverage_rate'];
+    $sha = strtolower((string)$row['legacy_crosswalk_sha256']);
+    if ((int)$row['legacy_crosswalk_schema_version'] !== 1 || $eligible < 1 || $crosswalked !== $eligible
+        || $unmatched !== 0 || $ambiguous !== 0 || abs($coverage - 1.0) > 0.000001
+        || preg_match('/^[a-f0-9]{64}$/',$sha) !== 1) {
+        v1_respond(503,array('ok'=>false,'error'=>'shadow_run_crosswalk_integrity_error',
+            'observation_date'=>$row['observation_date'] ?? null,'code_revision'=>$row['code_revision'] ?? null));
+    }
+    return array('schema_version'=>1,'eligible_legacy_record_count'=>$eligible,
+        'crosswalked_legacy_record_count'=>$crosswalked,'unmatched_legacy_record_count'=>$unmatched,
+        'ambiguous_legacy_record_count'=>$ambiguous,'coverage_rate'=>1.0,'crosswalk_sha256'=>$sha);
+}
+
+function v1_shadow_keys_json(array $keys): string {
+    $encoded = json_encode(array_values($keys), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (!is_string($encoded)) { throw new RuntimeException('shadow_keys_json_encode_failed'); }
+    return $encoded;
+}
+
+function v1_shadow_events_response(string $encoded): array {
+    $keys = json_decode($encoded, true);
+    if (!is_array($keys)) { throw new RuntimeException('shadow_keys_json_invalid'); }
+    $events = array();
+    foreach ($keys as $key) { $events[] = array('comparison_key'=>(string)$key); }
+    return $events;
+}
+
+function v1_admin_shadow_runs(PDO $pdo, array $config): void {
+    $page = v1_list_params(); $where = array('1=1'); $params = array();
+    $revision = isset($_GET['code_revision']) ? v1_valid_build_sha($_GET['code_revision']) : null;
+    if (isset($_GET['code_revision']) && $revision === null) { v1_respond(400, array('ok'=>false,'error'=>'invalid_code_revision')); }
+    if ($revision !== null) { $where[] = 'code_revision=?'; $params[] = $revision; }
+    foreach (array('from'=>'>=','to'=>'<=') as $key => $operator) {
+        if (!isset($_GET[$key]) || trim((string)$_GET[$key]) === '') { continue; }
+        $date = trim((string)$_GET[$key]);
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1) { v1_respond(400, array('ok'=>false,'error'=>'invalid_'.$key)); }
+        $where[] = 'observation_date ' . $operator . ' ?'; $params[] = $date;
+    }
+    $stmt = $pdo->prepare('SELECT observation_date,code_revision,legacy_status,candidate_status,legacy_comparison_keys_json,'
+        . 'candidate_comparison_keys_json,legacy_event_count,candidate_event_count,legacy_events_sha256,candidate_events_sha256,'
+        . 'legacy_crosswalk_schema_version,legacy_eligible_record_count,legacy_crosswalked_record_count,'
+        . 'legacy_unmatched_record_count,legacy_ambiguous_record_count,legacy_crosswalk_coverage_rate,legacy_crosswalk_sha256,'
+        . 'created_by,updated_by,created_at,updated_at FROM ' . table_name($config, 'shadow_run_observations')
+        . ' WHERE ' . implode(' AND ', $where) . ' ORDER BY observation_date DESC,code_revision DESC LIMIT '
+        . ((int)$page['limit'] + 1) . ' OFFSET ' . (int)$page['offset']);
+    $stmt->execute($params); list($rows,$hasMore) = v1_fetch_page($stmt,$page); $data = array();
+    foreach ($rows as $row) {
+        $legacyEvents = v1_shadow_events_response((string)$row['legacy_comparison_keys_json']);
+        $candidateEvents = v1_shadow_events_response((string)$row['candidate_comparison_keys_json']);
+        if (count($legacyEvents) !== (int)$row['legacy_event_count']
+            || count($candidateEvents) !== (int)$row['candidate_event_count']
+            || hash('sha256',(string)$row['legacy_comparison_keys_json']) !== (string)$row['legacy_events_sha256']
+            || hash('sha256',(string)$row['candidate_comparison_keys_json']) !== (string)$row['candidate_events_sha256']) {
+            v1_respond(503, array('ok'=>false,'error'=>'shadow_run_integrity_error','observation_date'=>$row['observation_date'],
+                'code_revision'=>$row['code_revision']));
+        }
+        $legacyCrosswalk = v1_shadow_crosswalk_response($row);
+        $data[] = array('observation_date'=>(string)$row['observation_date'],'code_revision'=>(string)$row['code_revision'],
+            'legacy_run'=>array('status'=>(string)$row['legacy_status'],'events'=>$legacyEvents,'event_count'=>(int)$row['legacy_event_count'],
+                'events_sha256'=>(string)$row['legacy_events_sha256']),
+            'candidate_run'=>array('status'=>(string)$row['candidate_status'],'events'=>$candidateEvents,'event_count'=>(int)$row['candidate_event_count'],
+                'events_sha256'=>(string)$row['candidate_events_sha256']),
+            'legacy_crosswalk'=>$legacyCrosswalk,
+            'created_by'=>(string)$row['created_by'],'updated_by'=>(string)$row['updated_by'],
+            'created_at'=>v1_release_iso_time($row['created_at']),'updated_at'=>v1_release_iso_time($row['updated_at']));
+    }
+    v1_respond(200,array('ok'=>true,'data'=>$data,'pagination'=>v1_page_meta($page,count($data),$hasMore)));
+}
+
+function v1_admin_upsert_shadow_run(PDO $pdo, array $config, string $role): void {
+    $payload = v1_admin_json_body($config);
+    v1_assert_object_keys($payload,array('observation_date','code_revision','legacy_run','candidate_run','legacy_crosswalk','expected_updated_at'),'body');
+    $date = isset($payload['observation_date']) ? trim((string)$payload['observation_date']) : '';
+    $revision = isset($payload['code_revision']) ? v1_valid_build_sha($payload['code_revision']) : null;
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/',$date) !== 1 || $revision === null) {
+        v1_respond(400,array('ok'=>false,'error'=>'invalid_shadow_run_identity'));
+    }
+    list($legacyStatus,$legacyKeys) = v1_shadow_event_keys(isset($payload['legacy_run']) ? $payload['legacy_run'] : null,'legacy_run');
+    list($candidateStatus,$candidateKeys) = v1_shadow_event_keys(isset($payload['candidate_run']) ? $payload['candidate_run'] : null,'candidate_run');
+    $legacyCrosswalk = v1_shadow_legacy_crosswalk($payload['legacy_crosswalk'] ?? null);
+    $legacyJson = v1_shadow_keys_json($legacyKeys); $candidateJson = v1_shadow_keys_json($candidateKeys);
+    $legacyHash = hash('sha256',$legacyJson); $candidateHash = hash('sha256',$candidateJson);
+    $expected = isset($payload['expected_updated_at']) ? v1_editorial_datetime_utc($payload['expected_updated_at']) : null;
+    $now = gmdate('Y-m-d H:i:s');
+    if (scalar_int($pdo,'SELECT COUNT(*) FROM ' . table_name($config,'shadow_run_observations')
+        . ' WHERE updated_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 MINUTE)') >= 120) {
+        header('Retry-After: 60'); v1_respond(429,array('ok'=>false,'error'=>'shadow_run_write_rate_limited'));
+    }
+    $pdo->beginTransaction();
+    try {
+        $lookup = $pdo->prepare('SELECT legacy_status,candidate_status,legacy_events_sha256,candidate_events_sha256,'
+            . 'legacy_crosswalk_schema_version,legacy_eligible_record_count,legacy_crosswalked_record_count,'
+            . 'legacy_unmatched_record_count,legacy_ambiguous_record_count,legacy_crosswalk_coverage_rate,legacy_crosswalk_sha256,updated_at FROM '
+            . table_name($config,'shadow_run_observations') . ' WHERE observation_date=? AND code_revision=? LIMIT 1 FOR UPDATE');
+        $lookup->execute(array($date,$revision)); $existing = $lookup->fetch();
+        if ($existing) {
+            $identical = (string)$existing['legacy_status'] === $legacyStatus
+                && (string)$existing['candidate_status'] === $candidateStatus
+                && hash_equals((string)$existing['legacy_events_sha256'],$legacyHash)
+                && hash_equals((string)$existing['candidate_events_sha256'],$candidateHash)
+                && (int)$existing['legacy_crosswalk_schema_version'] === 1
+                && (int)$existing['legacy_eligible_record_count'] === $legacyCrosswalk['eligible_legacy_record_count']
+                && (int)$existing['legacy_crosswalked_record_count'] === $legacyCrosswalk['crosswalked_legacy_record_count']
+                && (int)$existing['legacy_unmatched_record_count'] === 0
+                && (int)$existing['legacy_ambiguous_record_count'] === 0
+                && abs((float)$existing['legacy_crosswalk_coverage_rate'] - 1.0) <= 0.000001
+                && hash_equals((string)$existing['legacy_crosswalk_sha256'],$legacyCrosswalk['crosswalk_sha256']);
+            if ($identical && ($expected === null || (string)$existing['updated_at'] === $expected)) {
+                $pdo->commit();
+                v1_respond(200,array('ok'=>true,'unchanged'=>true,'observation_date'=>$date,'code_revision'=>$revision,
+                    'legacy_crosswalk'=>$legacyCrosswalk,
+                    'updated_at'=>v1_release_iso_time($existing['updated_at'])));
+            }
+            if ($expected === null || (string)$existing['updated_at'] !== $expected) {
+                $pdo->rollBack(); v1_respond(409,array('ok'=>false,'error'=>'shadow_run_version_conflict'));
+            }
+            $stmt = $pdo->prepare('UPDATE ' . table_name($config,'shadow_run_observations')
+                . ' SET legacy_status=?,candidate_status=?,legacy_comparison_keys_json=?,candidate_comparison_keys_json=?,'
+                . 'legacy_event_count=?,candidate_event_count=?,legacy_events_sha256=?,candidate_events_sha256=?,'
+                . 'legacy_crosswalk_schema_version=?,legacy_eligible_record_count=?,legacy_crosswalked_record_count=?,'
+                . 'legacy_unmatched_record_count=?,legacy_ambiguous_record_count=?,legacy_crosswalk_coverage_rate=?,legacy_crosswalk_sha256=?,'
+                . 'updated_by=?,updated_at=? '
+                . 'WHERE observation_date=? AND code_revision=?');
+            $stmt->execute(array($legacyStatus,$candidateStatus,$legacyJson,$candidateJson,count($legacyKeys),count($candidateKeys),
+                $legacyHash,$candidateHash,1,$legacyCrosswalk['eligible_legacy_record_count'],$legacyCrosswalk['crosswalked_legacy_record_count'],
+                0,0,1.0,$legacyCrosswalk['crosswalk_sha256'],$role,$now,$date,$revision));
+        } else {
+            if (isset($payload['expected_updated_at'])) {
+                $pdo->rollBack(); v1_respond(409,array('ok'=>false,'error'=>'shadow_run_missing'));
+            }
+            $stmt = $pdo->prepare('INSERT INTO ' . table_name($config,'shadow_run_observations')
+                . ' (observation_date,code_revision,legacy_status,candidate_status,legacy_comparison_keys_json,candidate_comparison_keys_json,'
+                . 'legacy_event_count,candidate_event_count,legacy_events_sha256,candidate_events_sha256,legacy_crosswalk_schema_version,'
+                . 'legacy_eligible_record_count,legacy_crosswalked_record_count,legacy_unmatched_record_count,legacy_ambiguous_record_count,'
+                . 'legacy_crosswalk_coverage_rate,legacy_crosswalk_sha256,created_by,updated_by,created_at,updated_at) '
+                . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+            $stmt->execute(array($date,$revision,$legacyStatus,$candidateStatus,$legacyJson,$candidateJson,count($legacyKeys),count($candidateKeys),
+                $legacyHash,$candidateHash,1,$legacyCrosswalk['eligible_legacy_record_count'],$legacyCrosswalk['crosswalked_legacy_record_count'],
+                0,0,1.0,$legacyCrosswalk['crosswalk_sha256'],$role,$role,$now,$now));
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        throw $e;
+    }
+    v1_respond($existing ? 200 : 201,array('ok'=>true,'unchanged'=>false,'observation_date'=>$date,'code_revision'=>$revision,
+        'legacy_event_count'=>count($legacyKeys),'candidate_event_count'=>count($candidateKeys),
+        'legacy_crosswalk'=>$legacyCrosswalk,'updated_at'=>str_replace(' ','T',$now).'Z'));
+}
+
+function v1_admin_shadow_discrepancies(PDO $pdo, array $config): void {
+    $page = v1_list_params();
+    $where = array('1=1'); $params = array();
+    foreach (array('review_status' => 24, 'discrepancy_type' => 40) as $field => $max) {
+        $value = isset($_GET[$field]) ? trim((string)$_GET[$field]) : '';
+        if ($value === '') { continue; }
+        if (preg_match('/^[A-Za-z0-9_.:\-]{1,' . $max . '}$/', $value) !== 1) {
+            v1_respond(400, array('ok' => false, 'error' => 'invalid_' . $field));
+        }
+        $where[] = 'sd.' . $field . ' = ?'; $params[] = $value;
+    }
+    $revision = isset($_GET['code_revision']) ? v1_valid_build_sha($_GET['code_revision']) : null;
+    if (isset($_GET['code_revision']) && $revision === null) { v1_respond(400, array('ok' => false, 'error' => 'invalid_code_revision')); }
+    if ($revision !== null) { $where[] = 'sd.code_revision = ?'; $params[] = $revision; }
+    foreach (array('from' => '>=', 'to' => '<=') as $key => $operator) {
+        if (!isset($_GET[$key]) || trim((string)$_GET[$key]) === '') { continue; }
+        $date = trim((string)$_GET[$key]);
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1) { v1_respond(400, array('ok' => false, 'error' => 'invalid_' . $key)); }
+        $where[] = 'sd.observation_date ' . $operator . ' ?'; $params[] = $date;
+    }
+    $stmt = $pdo->prepare('SELECT sd.discrepancy_id, sd.observation_date, sd.code_revision, sd.comparison_key, sd.discrepancy_type, '
+        . 'sd.legacy_event_json, sd.candidate_event_json, sd.review_status, sd.review_note, sd.reviewed_by, sd.reviewed_at, sd.created_at, sd.updated_at '
+        . 'FROM ' . table_name($config, 'shadow_discrepancies') . ' sd WHERE ' . implode(' AND ', $where)
+        . ' ORDER BY sd.observation_date DESC, sd.updated_at DESC, sd.discrepancy_id DESC LIMIT ' . ((int)$page['limit'] + 1)
+        . ' OFFSET ' . (int)$page['offset']);
+    $stmt->execute($params); list($rows, $hasMore) = v1_fetch_page($stmt, $page);
+    foreach ($rows as &$row) {
+        $row['legacy_event'] = isset($row['legacy_event_json']) && $row['legacy_event_json'] !== null ? json_decode((string)$row['legacy_event_json'], true) : null;
+        $row['candidate_event'] = isset($row['candidate_event_json']) && $row['candidate_event_json'] !== null ? json_decode((string)$row['candidate_event_json'], true) : null;
+        unset($row['legacy_event_json'], $row['candidate_event_json']);
+    }
+    unset($row);
+    v1_respond(200, array('ok' => true, 'data' => $rows, 'pagination' => v1_page_meta($page, count($rows), $hasMore)));
+}
+
+function v1_admin_upsert_shadow_discrepancy(PDO $pdo, array $config, string $role): void {
+    $payload = v1_admin_json_body($config);
+    v1_assert_object_keys($payload, array('discrepancy_id','observation_date','code_revision','comparison_key','discrepancy_type',
+        'legacy_event','candidate_event','review_status','review_note','expected_updated_at'), 'body');
+    $date = isset($payload['observation_date']) ? trim((string)$payload['observation_date']) : '';
+    $revision = isset($payload['code_revision']) ? v1_valid_build_sha($payload['code_revision']) : null;
+    $comparisonKey = isset($payload['comparison_key']) ? trim((string)$payload['comparison_key']) : '';
+    $type = isset($payload['discrepancy_type']) ? trim((string)$payload['discrepancy_type']) : '';
+    $status = isset($payload['review_status']) ? trim((string)$payload['review_status']) : 'pending';
+    $note = isset($payload['review_note']) ? trim((string)$payload['review_note']) : '';
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1 || $revision === null
+        || $comparisonKey === '' || strlen($comparisonKey) > 191
+        || preg_match('/^[A-Za-z0-9_.:\-]{1,40}$/', $type) !== 1
+        || !in_array($status, array('pending','reviewed','resolved','dismissed'), true)
+        || mb_strlen($note, 'UTF-8') > 5000 || ($status !== 'pending' && $note === '')) {
+        v1_respond(400, array('ok' => false, 'error' => 'invalid_shadow_discrepancy'));
+    }
+    foreach (array('legacy_event','candidate_event') as $field) {
+        if (isset($payload[$field]) && !is_array($payload[$field])) { v1_respond(400, array('ok' => false, 'error' => 'invalid_' . $field)); }
+    }
+    $legacyJson = array_key_exists('legacy_event', $payload) ? json_value($payload['legacy_event']) : null;
+    $candidateJson = array_key_exists('candidate_event', $payload) ? json_value($payload['candidate_event']) : null;
+    if (($legacyJson !== null && strlen($legacyJson) > 1000000) || ($candidateJson !== null && strlen($candidateJson) > 1000000)) {
+        v1_respond(413, array('ok' => false, 'error' => 'shadow_payload_too_large'));
+    }
+    $id = isset($payload['discrepancy_id']) ? trim((string)$payload['discrepancy_id']) : '';
+    if ($id === '') { $id = v1_stable_id('shadow', $date . '|' . $revision . '|' . $comparisonKey . '|' . $type); }
+    if (!v1_valid_entity_id($id)) { v1_respond(400, array('ok' => false, 'error' => 'invalid_discrepancy_id')); }
+    $expected = isset($payload['expected_updated_at']) ? v1_editorial_datetime_utc($payload['expected_updated_at']) : null;
+    $now = gmdate('Y-m-d H:i:s');
+    if (scalar_int($pdo, 'SELECT COUNT(*) FROM ' . table_name($config, 'shadow_discrepancies') . ' WHERE updated_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 MINUTE)') >= 300) {
+        header('Retry-After: 60'); v1_respond(429, array('ok' => false, 'error' => 'shadow_write_rate_limited'));
+    }
+    $pdo->beginTransaction();
+    try {
+        $existingStmt = $pdo->prepare('SELECT updated_at FROM ' . table_name($config, 'shadow_discrepancies') . ' WHERE discrepancy_id=? LIMIT 1 FOR UPDATE');
+        $existingStmt->execute(array($id)); $existing = $existingStmt->fetch();
+        if ($existing) {
+            if ($expected === null || (string)$existing['updated_at'] !== $expected) { $pdo->rollBack(); v1_respond(409, array('ok' => false, 'error' => 'shadow_discrepancy_version_conflict')); }
+            $stmt = $pdo->prepare('UPDATE ' . table_name($config, 'shadow_discrepancies') . ' SET observation_date=?, code_revision=?, comparison_key=?, discrepancy_type=?, '
+                . 'legacy_event_json=?, candidate_event_json=?, review_status=?, review_note=?, reviewed_by=?, reviewed_at=?, updated_at=? WHERE discrepancy_id=?');
+            $stmt->execute(array($date,$revision,$comparisonKey,$type,$legacyJson,$candidateJson,$status,$note ?: null,
+                $status === 'pending' ? null : $role,$status === 'pending' ? null : $now,$now,$id));
+        } else {
+            if (isset($payload['expected_updated_at'])) { $pdo->rollBack(); v1_respond(409, array('ok' => false, 'error' => 'shadow_discrepancy_missing')); }
+            $stmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'shadow_discrepancies') . ' (discrepancy_id,observation_date,code_revision,comparison_key,discrepancy_type,'
+                . 'legacy_event_json,candidate_event_json,review_status,review_note,reviewed_by,reviewed_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
+            $stmt->execute(array($id,$date,$revision,$comparisonKey,$type,$legacyJson,$candidateJson,$status,$note ?: null,
+                $status === 'pending' ? null : $role,$status === 'pending' ? null : $now,$now,$now));
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        throw $e;
+    }
+    v1_respond($existing ? 200 : 201, array('ok' => true, 'discrepancy_id' => $id, 'review_status' => $status, 'updated_at' => str_replace(' ', 'T', $now) . 'Z'));
+}
+
+function v1_record_availability_observations(PDO $pdo, array $config, string $role): void {
+    $payload = v1_admin_json_body($config);
+    v1_assert_object_keys($payload, array('observations'), 'body');
+    $observations = isset($payload['observations']) && is_array($payload['observations']) ? $payload['observations'] : null;
+    if ($observations === null || count($observations) < 1 || count($observations) > 10) {
+        v1_respond(400, array('ok' => false, 'error' => 'invalid_observation_batch'));
+    }
+    if (scalar_int($pdo, 'SELECT COUNT(*) FROM ' . table_name($config, 'availability_observations') . ' WHERE created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 MINUTE)') >= 3000) {
+        header('Retry-After: 60'); v1_respond(429, array('ok' => false, 'error' => 'availability_rate_limited'));
+    }
+    $normalized = array(); $seen = array(); $nowEpoch = time();
+    foreach ($observations as $index => $item) {
+        if (!is_array($item)) { v1_respond(400, array('ok' => false, 'error' => 'invalid_observation', 'index' => $index)); }
+        v1_assert_object_keys($item, array('observation_id','route_template','observed_at','http_status','duration_ms','succeeded','build_sha','source','error_class'), 'observations[' . $index . ']');
+        $id = isset($item['observation_id']) ? trim((string)$item['observation_id']) : '';
+        $route = isset($item['route_template']) ? v1_valid_route_template($item['route_template']) : null;
+        $observed = isset($item['observed_at']) ? v1_editorial_datetime_utc($item['observed_at']) : null;
+        $sha = isset($item['build_sha']) ? v1_valid_build_sha($item['build_sha']) : null;
+        $source = isset($item['source']) ? trim((string)$item['source']) : '';
+        $httpStatus = isset($item['http_status']) && is_int($item['http_status']) ? $item['http_status'] : -1;
+        $duration = isset($item['duration_ms']) && is_int($item['duration_ms']) ? $item['duration_ms'] : -1;
+        $succeeded = isset($item['succeeded']) && is_bool($item['succeeded']) ? ($item['succeeded'] ? 1 : 0) : -1;
+        $observedEpoch = $observed !== null ? strtotime($observed . ' UTC') : false;
+        $errorClass = array_key_exists('error_class', $item) && $item['error_class'] !== null ? trim((string)$item['error_class']) : '';
+        if (!v1_valid_entity_id($id) || isset($seen[$id]) || $route === null || $observed === null || $observedEpoch === false
+            || $observedEpoch < $nowEpoch - 172800 || $observedEpoch > $nowEpoch + 300 || !(($httpStatus >= 100 && $httpStatus <= 599) || $httpStatus === 0)
+            || $duration < 0 || $duration > 600000 || $succeeded < 0 || $sha === null || $source !== 'github_watchdog'
+            || ($errorClass !== '' && preg_match('/^[A-Za-z][A-Za-z0-9_.]{0,63}$/', $errorClass) !== 1)
+            || (($httpStatus >= 200 && $httpStatus < 400) ? 1 : 0) !== $succeeded) {
+            v1_respond(400, array('ok' => false, 'error' => 'invalid_observation', 'index' => $index));
+        }
+        $seen[$id] = true;
+        $normalized[] = array($id,$observed,$route,$httpStatus,$duration,$succeeded,$sha,$source);
+    }
+    $now = gmdate('Y-m-d H:i:s'); $inserted = 0;
+    $pdo->beginTransaction();
+    try {
+        $lookup = $pdo->prepare('SELECT observed_at,route_template,http_status,duration_ms,succeeded,build_sha,source FROM '
+            . table_name($config, 'availability_observations') . ' WHERE observation_id=? LIMIT 1 FOR UPDATE');
+        $insert = $pdo->prepare('INSERT INTO ' . table_name($config, 'availability_observations')
+            . ' (observation_id,observed_at,route_template,http_status,duration_ms,succeeded,build_sha,source,created_at) VALUES (?,?,?,?,?,?,?,?,?)');
+        foreach ($normalized as $row) {
+            $lookup->execute(array($row[0])); $existing = $lookup->fetch();
+            if ($existing) {
+                $existingValues = array((string)$existing['observed_at'],(string)$existing['route_template'],(int)$existing['http_status'],
+                    (int)$existing['duration_ms'],(int)$existing['succeeded'],(string)$existing['build_sha'],(string)$existing['source']);
+                if ($existingValues !== array_slice($row, 1)) { throw new RuntimeException('availability_observation_conflict:' . $row[0]); }
+                continue;
+            }
+            $insert->execute(array_merge($row, array($now))); $inserted++;
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        if (strpos($e->getMessage(), 'availability_observation_conflict:') === 0) {
+            v1_respond(409, array('ok' => false, 'error' => 'observation_id_conflict'));
+        }
+        throw $e;
+    }
+    v1_respond(202, array('ok' => true, 'accepted_count' => count($normalized), 'inserted_count' => $inserted,
+        'duplicate_count' => count($normalized) - $inserted, 'role' => $role));
+}
+
+function v1_record_web_distribution_observations(PDO $pdo, array $config, string $role): void {
+    $payload = v1_admin_json_body($config); v1_assert_object_keys($payload,array('observations'),'body');
+    $items = isset($payload['observations']) && is_array($payload['observations']) ? $payload['observations'] : null;
+    if ($items === null || count($items) < 1 || count($items) > 50) {
+        v1_respond(400,array('ok'=>false,'error'=>'invalid_web_distribution_batch'));
+    }
+    $normalized = array(); $seen = array(); $nowEpoch = time();
+    foreach ($items as $index => $item) {
+        if (!is_array($item)) { v1_respond(400,array('ok'=>false,'error'=>'invalid_web_distribution_observation','index'=>$index)); }
+        v1_assert_object_keys($item,array('observation_id','observed_at','distribution_target','duration_ms','succeeded','build_sha',
+            'workflow_run_id','workflow_run_attempt','failure_detected_at','source'),'observations['.$index.']');
+        $id = isset($item['observation_id']) ? trim((string)$item['observation_id']) : '';
+        $observed = isset($item['observed_at']) ? v1_editorial_datetime_utc($item['observed_at']) : null;
+        $target = isset($item['distribution_target']) ? trim((string)$item['distribution_target']) : '';
+        $duration = isset($item['duration_ms']) && is_int($item['duration_ms']) ? $item['duration_ms'] : -1;
+        $succeeded = isset($item['succeeded']) && is_bool($item['succeeded']) ? ($item['succeeded'] ? 1 : 0) : -1;
+        $sha = isset($item['build_sha']) ? strtolower(trim((string)$item['build_sha'])) : '';
+        $runId = isset($item['workflow_run_id']) && is_int($item['workflow_run_id']) ? $item['workflow_run_id'] : 0;
+        $runAttempt = isset($item['workflow_run_attempt']) && is_int($item['workflow_run_attempt']) ? $item['workflow_run_attempt'] : 0;
+        $failureDetected = array_key_exists('failure_detected_at',$item) && $item['failure_detected_at'] !== null
+            ? v1_editorial_datetime_utc($item['failure_detected_at']) : null;
+        $source = isset($item['source']) ? trim((string)$item['source']) : '';
+        $observedEpoch = $observed !== null ? strtotime($observed . ' UTC') : false;
+        $failureEpoch = $failureDetected !== null ? strtotime($failureDetected . ' UTC') : false;
+        if (!array_key_exists('failure_detected_at',$item) || !v1_valid_entity_id($id) || isset($seen[$id])
+            || $observedEpoch === false || $observedEpoch < $nowEpoch-604800
+            || $observedEpoch > $nowEpoch+300 || !in_array($target,array('pages','api'),true) || $duration < 0 || $duration > 3600000
+            || $succeeded < 0 || preg_match('/^[a-f0-9]{40}$/',$sha) !== 1 || $runId < 1 || $runAttempt < 1
+            || $runAttempt > 10000 || $source !== 'github_actions'
+            || ($succeeded === 1 && $failureDetected !== null)
+            || ($succeeded === 0 && ($failureEpoch === false || $failureEpoch < $observedEpoch || $failureEpoch > $nowEpoch+300))) {
+            v1_respond(400,array('ok'=>false,'error'=>'invalid_web_distribution_observation','index'=>$index));
+        }
+        $seen[$id] = true;
+        $normalized[] = array($id,$observed,$target,$duration,$succeeded,$sha,$runId,$runAttempt,$failureDetected,$source);
+    }
+    $now = gmdate('Y-m-d H:i:s'); $inserted = 0; $pdo->beginTransaction();
+    try {
+        $lookup = $pdo->prepare('SELECT observed_at,distribution_target,duration_ms,succeeded,build_sha,workflow_run_id,workflow_run_attempt,failure_detected_at,source FROM '
+            . table_name($config,'web_distribution_observations') . ' WHERE observation_id=? LIMIT 1 FOR UPDATE');
+        $insert = $pdo->prepare('INSERT INTO ' . table_name($config,'web_distribution_observations')
+            . ' (observation_id,observed_at,distribution_target,duration_ms,succeeded,build_sha,workflow_run_id,workflow_run_attempt,failure_detected_at,source,created_at) '
+            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+        foreach ($normalized as $row) {
+            $lookup->execute(array($row[0])); $existing = $lookup->fetch();
+            if ($existing) {
+                $existingValues = array((string)$existing['observed_at'],(string)$existing['distribution_target'],(int)$existing['duration_ms'],
+                    (int)$existing['succeeded'],(string)$existing['build_sha'],(int)$existing['workflow_run_id'],
+                    (int)$existing['workflow_run_attempt'],
+                    $existing['failure_detected_at'] !== null ? (string)$existing['failure_detected_at'] : null,(string)$existing['source']);
+                if ($existingValues !== array_slice($row,1)) { throw new RuntimeException('web_distribution_observation_conflict'); }
+                continue;
+            }
+            $insert->execute(array_merge($row,array($now))); $inserted++;
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        if (strpos($e->getMessage(),'web_distribution_observation_conflict') === 0 || (string)$e->getCode() === '23000') {
+            v1_respond(409,array('ok'=>false,'error'=>'web_distribution_observation_conflict'));
+        }
+        throw $e;
+    }
+    v1_respond(202,array('ok'=>true,'accepted_count'=>count($normalized),'inserted_count'=>$inserted,
+        'duplicate_count'=>count($normalized)-$inserted,'role'=>$role));
+}
+
+/** The shared v2 denominator: distinct document IDs referenced by 2021+ public-approved objects. */
+function v1_content_corpus_document_refs_sql(array $config): string {
+    return 'SELECT ed.document_id FROM ' . table_name($config,'event_documents') . ' ed '
+        . 'JOIN ' . table_name($config,'governance_events') . ' e ON e.event_id=ed.event_id '
+        . 'WHERE e.publication_status=\'published\' AND e.review_status=\'approved\' AND e.identity_status=\'complete\' '
+        . 'AND e.verification_status<>\'signal\' AND e.created_at<=? AND ed.created_at<=? AND e.occurred_at>=? '
+        . 'UNION SELECT cd.document_id FROM ' . table_name($config,'campaign_documents') . ' cd '
+        . 'JOIN ' . table_name($config,'campaigns') . ' cp ON cp.campaign_id=cd.campaign_id '
+        . 'WHERE cp.publication_status=\'published\' AND cp.review_status=\'approved\' '
+        . 'AND cp.created_at<=? AND cd.created_at<=? AND cp.started_at>=? '
+        . 'UNION SELECT ce.document_id FROM ' . table_name($config,'claim_evidence') . ' ce '
+        . 'JOIN ' . table_name($config,'governance_events') . ' claim_e ON claim_e.event_id=ce.event_id '
+        . 'WHERE ce.editorial_status=\'approved\' AND claim_e.publication_status=\'published\' '
+        . 'AND claim_e.review_status=\'approved\' AND claim_e.identity_status=\'complete\' '
+        . 'AND claim_e.verification_status<>\'signal\' AND ce.created_at<=? AND claim_e.created_at<=? AND claim_e.occurred_at>=? '
+        . 'UNION SELECT v.evidence_document_id AS document_id FROM ' . table_name($config,'proposal_votes') . ' v '
+        . 'WHERE v.evidence_document_id IS NOT NULL AND v.publication_status=\'published\' AND v.review_status=\'approved\' '
+        . 'AND v.created_at<=? AND v.meeting_at>=? '
+        . 'UNION SELECT co.evidence_document_id AS document_id FROM ' . table_name($config,'commitment_outcomes') . ' co '
+        . 'WHERE co.evidence_document_id IS NOT NULL AND co.publication_status=\'published\' AND co.review_status=\'approved\' '
+        . 'AND co.created_at<=? AND COALESCE(co.target_at,co.created_at)>=? '
+        . 'UNION SELECT tl.document_id FROM ' . table_name($config,'timeline_entries') . ' tl '
+        . 'WHERE tl.document_id IS NOT NULL AND tl.publication_status=\'published\' AND tl.review_status=\'approved\' '
+        . 'AND tl.created_at<=? AND tl.occurred_at>=? AND ('
+        . '(tl.event_id IS NOT NULL AND EXISTS (SELECT 1 FROM ' . table_name($config,'governance_events') . ' timeline_e '
+        . 'WHERE timeline_e.event_id=tl.event_id AND timeline_e.publication_status=\'published\' '
+        . 'AND timeline_e.review_status=\'approved\' AND timeline_e.identity_status=\'complete\' '
+        . 'AND timeline_e.verification_status<>\'signal\' AND timeline_e.created_at<=?)) OR '
+        . '(tl.campaign_id IS NOT NULL AND EXISTS (SELECT 1 FROM ' . table_name($config,'campaigns') . ' timeline_cp '
+        . 'WHERE timeline_cp.campaign_id=tl.campaign_id AND timeline_cp.publication_status=\'published\' '
+        . 'AND timeline_cp.review_status=\'approved\' AND timeline_cp.created_at<=?)))';
+}
+
+function v1_content_corpus_document_refs_params(string $snapshotAt, string $scopeStart): array {
+    return array(
+        $snapshotAt,$snapshotAt,$scopeStart,
+        $snapshotAt,$snapshotAt,$scopeStart,
+        $snapshotAt,$snapshotAt,$scopeStart,
+        $snapshotAt,$scopeStart,
+        $snapshotAt,$scopeStart,
+        $snapshotAt,$scopeStart,$snapshotAt,$snapshotAt,
+    );
+}
+
+function v1_content_document_right_valid_at(array $document, string $at): bool {
+    return (string)$document['right_status'] === 'active' && (int)$document['ai_allowed'] === 1
+        && (int)$document['redistribution_allowed'] === 1
+        && (string)$document['valid_from'] <= $at
+        && ($document['valid_until'] === null || (string)$document['valid_until'] > $at)
+        && ($document['revoked_at'] === null || (string)$document['revoked_at'] > $at)
+        && (trim((string)$document['evidence_uri']) !== ''
+            || preg_match('/^[a-f0-9]{64}$/',(string)$document['evidence_hash']) === 1);
+}
+
+/** Measure the actual 2021+ in-scope corpus as it stood at one completed KST day end. */
+function v1_content_corpus_snapshot(PDO $pdo, array $config, string $date): array {
+    list($_dayStart,$snapshotAt) = v1_evidence_utc_bounds($date,$date);
+    $scopeStart = '2020-12-31 15:00:00'; // 2021-01-01 00:00:00 KST
+    $eventSql = 'SELECT COUNT(*) AS official_evidence_total_count,'
+        . 'COALESCE(SUM(EXISTS(SELECT 1 FROM ' . table_name($config,'event_documents') . ' snapshot_ed JOIN '
+        . table_name($config,'documents') . ' snapshot_d ON snapshot_d.document_id=snapshot_ed.document_id '
+        . 'WHERE snapshot_ed.event_id=e.event_id AND snapshot_d.source_class=\'official_disclosure\' '
+        . 'AND snapshot_d.created_at<=?)),0) AS official_evidence_linked_count,'
+        . 'COALESCE(SUM(e.importance IN (\'high\',\'critical\',\'market_sensitive\',\'top\')),0) AS top_sensitive_total_count,'
+        . 'COALESCE(SUM(e.importance IN (\'high\',\'critical\',\'market_sensitive\',\'top\') '
+        . 'AND e.review_status IN (\'approved\',\'reviewed\')),0) AS top_sensitive_reviewed_count '
+        . 'FROM ' . table_name($config,'governance_events') . ' e WHERE e.created_at<=? AND e.occurred_at>=? '
+        . 'AND e.verification_status<>\'signal\'';
+    $eventStmt = $pdo->prepare($eventSql); $eventStmt->execute(array($snapshotAt,$snapshotAt,$scopeStart));
+    $eventCounts = $eventStmt->fetch();
+    $counts = array(
+        'official_evidence_total_count'=>(int)$eventCounts['official_evidence_total_count'],
+        'official_evidence_linked_count'=>(int)$eventCounts['official_evidence_linked_count'],
+        'top_sensitive_total_count'=>(int)$eventCounts['top_sensitive_total_count'],
+        'top_sensitive_reviewed_count'=>(int)$eventCounts['top_sensitive_reviewed_count'],
+        'original_language_total_count'=>0,'original_language_preserved_count'=>0,
+        'source_right_total_count'=>0,'valid_source_right_count'=>0,
+    );
+    // The content/rights denominator is the immutable public-object reference
+    // corpus, not the subset of documents that still passes today's visibility
+    // predicate. A linked document therefore remains in scope after content
+    // drift, right expiry or revocation, so those failures cannot shrink the
+    // denominator and make the release gate pass.
+    $publicDocumentRefs = v1_content_corpus_document_refs_sql($config);
+    $documentStmt = $pdo->prepare('SELECT d.retrieved_at,d.original_language,d.title,d.body_text,d.payload_json,'
+        . 'sr.status AS right_status,sr.valid_from,sr.valid_until,sr.revoked_at,sr.ai_allowed,sr.redistribution_allowed,'
+        . 'sr.evidence_uri,sr.evidence_hash FROM '
+        . table_name($config,'documents') . ' d JOIN (' . $publicDocumentRefs . ') public_document_refs '
+        . 'ON public_document_refs.document_id=d.document_id LEFT JOIN ' . table_name($config,'source_rights')
+        . ' sr ON sr.source_right_id=d.source_right_id WHERE d.created_at<=? ORDER BY d.document_id');
+    $documentParams = v1_content_corpus_document_refs_params($snapshotAt,$scopeStart);
+    $documentParams[] = $snapshotAt; $documentStmt->execute($documentParams);
+    while ($document = $documentStmt->fetch()) {
+        $counts['original_language_total_count']++; $counts['source_right_total_count']++;
+        $payload = json_decode((string)$document['payload_json'],true); $preserved = is_array($payload);
+        if ($preserved) {
+            $rawTitlePresent = array_key_exists('title',$payload) || array_key_exists('report_nm',$payload);
+            $rawLanguagePresent = array_key_exists('original_language',$payload) || array_key_exists('language',$payload);
+            $rawTitle = array_key_exists('title',$payload) ? (string)$payload['title'] : (string)($payload['report_nm'] ?? '');
+            $rawLanguage = (string)($payload['original_language'] ?? ($payload['language'] ?? ''));
+            $rawBodyPresent = array_key_exists('body_text',$payload) || array_key_exists('content',$payload);
+            $rawBody = array_key_exists('body_text',$payload) ? (string)$payload['body_text'] : (string)($payload['content'] ?? '');
+            $storedBodyPresent = $document['body_text'] !== null && (string)$document['body_text'] !== '';
+            $preserved = $rawTitlePresent && $rawLanguagePresent && $rawTitle === (string)$document['title']
+                && $rawLanguage === (string)$document['original_language']
+                && ($rawBodyPresent ? $rawBody === (string)($document['body_text'] ?? '') : !$storedBodyPresent);
+        }
+        if ($preserved) { $counts['original_language_preserved_count']++; }
+        if (v1_content_document_right_valid_at($document,$snapshotAt)) { $counts['valid_source_right_count']++; }
+    }
+    return array('snapshot_at'=>$snapshotAt,'snapshot_at_iso'=>v1_release_iso_time($snapshotAt),
+        'content_scope'=>'governance_corpus_2021_plus_kst_day_end_v2','raw_counts'=>$counts);
+}
+
+/**
+ * Re-check all v2 corpus rights at cutover time.
+ *
+ * The caller holds the release-state row first. Every in-process SourceRight
+ * writer takes that same lock before changing rights, which serializes this
+ * current read without introducing a rights-row -> state-row lock inversion.
+ */
+function v1_current_public_document_rights_guard(PDO $pdo, array $config): array {
+    $checkedAt = gmdate('Y-m-d H:i:s');
+    $scopeStart = '2020-12-31 15:00:00';
+    $refs = v1_content_corpus_document_refs_sql($config);
+    $stmt = $pdo->prepare('SELECT d.document_id,sr.status AS right_status,sr.valid_from,sr.valid_until,sr.revoked_at,'
+        . 'sr.ai_allowed,sr.redistribution_allowed,sr.evidence_uri,sr.evidence_hash FROM '
+        . table_name($config,'documents') . ' d JOIN (' . $refs . ') current_public_document_refs '
+        . 'ON current_public_document_refs.document_id=d.document_id LEFT JOIN ' . table_name($config,'source_rights')
+        . ' sr ON sr.source_right_id=d.source_right_id WHERE d.created_at<=? ORDER BY d.document_id');
+    $params = v1_content_corpus_document_refs_params($checkedAt,$scopeStart);
+    $params[] = $checkedAt; $stmt->execute($params);
+    $total = 0; $invalid = 0;
+    while ($document = $stmt->fetch()) {
+        $total++;
+        if (!v1_content_document_right_valid_at($document,$checkedAt)) { $invalid++; }
+    }
+    return array('checked_at'=>$checkedAt,'total_count'=>$total,'invalid_count'=>$invalid);
+}
+
+function v1_quality_observation_payload_hash(string $date, string $revision, float $dartPoll, ?float $kindLag,
+    int $kindObservationCount, int $kindLagSampleCount, string $contentSnapshotAt, string $contentScope,
+    array $counts, string $source): string {
+    $canonical = json_encode(array('observation_date'=>$date,'code_revision'=>$revision,
+        'dart_success_poll_interval_p95_minutes'=>$dartPoll,'kind_observation_lag_p95_minutes'=>$kindLag,
+        'kind_observation_count'=>$kindObservationCount,'kind_lag_sample_count'=>$kindLagSampleCount,
+        'content_snapshot_at'=>$contentSnapshotAt,'content_scope'=>$contentScope,'raw_counts'=>$counts,'source'=>$source),
+        JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PRESERVE_ZERO_FRACTION);
+    if (!is_string($canonical)) { throw new RuntimeException('quality_observation_json_encode_failed'); }
+    return hash('sha256',$canonical);
+}
+
+function v1_record_quality_observations(PDO $pdo, array $config, string $role): void {
+    $payload = v1_admin_json_body($config); v1_assert_object_keys($payload,array('observations'),'body');
+    $items = isset($payload['observations']) && is_array($payload['observations']) ? $payload['observations'] : null;
+    if ($items === null || count($items) < 1 || count($items) > 10) {
+        v1_respond(400,array('ok'=>false,'error'=>'invalid_quality_observation_batch'));
+    }
+    $countFields = array('official_evidence_total_count','official_evidence_linked_count','top_sensitive_total_count','top_sensitive_reviewed_count',
+        'original_language_total_count','original_language_preserved_count','source_right_total_count','valid_source_right_count');
+    $databaseCountFields = array('official_evidence_total_count','official_evidence_linked_count','same_story_evaluated_pair_count',
+        'same_story_predicted_same_count','same_story_true_positive_count','top_sensitive_total_count','top_sensitive_reviewed_count',
+        'original_language_total_count','original_language_preserved_count','source_right_total_count','valid_source_right_count');
+    $normalized = array(); $seen = array();
+    foreach ($items as $index => $item) {
+        if (!is_array($item)) { v1_respond(400,array('ok'=>false,'error'=>'invalid_quality_observation','index'=>$index)); }
+        v1_assert_object_keys($item,array('observation_id','observation_date','code_revision','dart_success_poll_interval_p95_minutes',
+            'kind_observation_lag_p95_minutes','raw_counts','source'),'observations['.$index.']');
+        $id = isset($item['observation_id']) ? trim((string)$item['observation_id']) : '';
+        $date = isset($item['observation_date']) ? trim((string)$item['observation_date']) : '';
+        $sha = isset($item['code_revision']) ? strtolower(trim((string)$item['code_revision'])) : '';
+        $dartPoll = $item['dart_success_poll_interval_p95_minutes'] ?? null;
+        $kindLag = $item['kind_observation_lag_p95_minutes'] ?? null;
+        $counts = isset($item['raw_counts']) && is_array($item['raw_counts']) ? $item['raw_counts'] : null;
+        $source = isset($item['source']) ? trim((string)$item['source']) : '';
+        $parsedDate = DateTimeImmutable::createFromFormat('!Y-m-d',$date,new DateTimeZone('UTC'));
+        if (!array_key_exists('kind_observation_lag_p95_minutes',$item) || !v1_valid_entity_id($id) || isset($seen[$id])
+            || preg_match('/^\d{4}-\d{2}-\d{2}$/',$date) !== 1
+            || !$parsedDate || $parsedDate->format('Y-m-d') !== $date
+            || preg_match('/^[a-f0-9]{40}$/',$sha) !== 1 || (!is_int($dartPoll) && !is_float($dartPoll))
+            || ($kindLag !== null && !is_int($kindLag) && !is_float($kindLag)) || !is_finite((float)$dartPoll)
+            || ($kindLag !== null && !is_finite((float)$kindLag))
+            || (float)$dartPoll < 0 || ($kindLag !== null && (float)$kindLag < 0) || (float)$dartPoll > 10080
+            || ($kindLag !== null && (float)$kindLag > 10080)
+            || $counts === null || $source !== 'production_quality_job') {
+            v1_respond(400,array('ok'=>false,'error'=>'invalid_quality_observation','index'=>$index));
+        }
+        $todayKst = (new DateTimeImmutable('now',new DateTimeZone('Asia/Seoul')))->format('Y-m-d');
+        if ($date >= $todayKst) {
+            v1_respond(400,array('ok'=>false,'error'=>'completed_kst_day_required','index'=>$index));
+        }
+        v1_assert_object_keys($counts,$countFields,'observations['.$index.'].raw_counts');
+        $orderedCounts = array();
+        foreach ($countFields as $field) {
+            if (!array_key_exists($field,$counts) || !is_int($counts[$field]) || $counts[$field] < 0) {
+                v1_respond(400,array('ok'=>false,'error'=>'invalid_quality_count','field'=>$field,'index'=>$index));
+            }
+            $orderedCounts[$field] = $counts[$field];
+        }
+        foreach (array(array('official_evidence_linked_count','official_evidence_total_count'),
+            array('top_sensitive_reviewed_count','top_sensitive_total_count'),
+            array('original_language_preserved_count','original_language_total_count'),
+            array('valid_source_right_count','source_right_total_count')) as $pair) {
+            if ($orderedCounts[$pair[0]] > $orderedCounts[$pair[1]]) {
+                v1_respond(400,array('ok'=>false,'error'=>'quality_numerator_exceeds_denominator','field'=>$pair[0],'index'=>$index));
+            }
+        }
+        $snapshot = v1_content_corpus_snapshot($pdo,$config,$date);
+        if ($orderedCounts !== $snapshot['raw_counts']) {
+            v1_respond(409,array('ok'=>false,'error'=>'quality_counts_not_actual','index'=>$index,
+                'content_snapshot_at'=>$snapshot['snapshot_at_iso'],'actual_raw_counts'=>$snapshot['raw_counts']));
+        }
+        $kindStatsByDay = v1_kind_observation_stats_by_day($pdo,$config,$date,$date);
+        $kindStats = isset($kindStatsByDay[$date]) ? $kindStatsByDay[$date]
+            : array('observation_count'=>0,'lag_sample_count'=>0,'lag_seconds'=>array());
+        $kindObservationCount = (int)$kindStats['observation_count'];
+        $kindLagSampleCount = (int)$kindStats['lag_sample_count'];
+        $actualKindSeconds = v1_percentile($kindStats['lag_seconds'],0.95);
+        $actualKindLag = $actualKindSeconds === null ? null : $actualKindSeconds/60.0;
+        if ($kindObservationCount === 0 && ($kindLag !== null || $kindLagSampleCount !== 0)) {
+            v1_respond(409,array('ok'=>false,'error'=>'kind_no_disclosure_day_requires_null_lag','index'=>$index));
+        }
+        if ($kindObservationCount > 0 && $kindLagSampleCount !== $kindObservationCount) {
+            v1_respond(409,array('ok'=>false,'error'=>'kind_observation_timestamp_incomplete','index'=>$index,
+                'kind_observation_count'=>$kindObservationCount,'kind_lag_sample_count'=>$kindLagSampleCount));
+        }
+        if ($kindObservationCount > 0 && ($kindLag === null || $actualKindLag === null
+            || abs((float)$kindLag-$actualKindLag) > 0.0001)) {
+            v1_respond(409,array('ok'=>false,'error'=>'kind_observation_lag_not_actual','index'=>$index,
+                'actual_kind_observation_lag_p95_minutes'=>$actualKindLag));
+        }
+        // Match the DECIMAL(12,4) storage representation before hashing so a
+        // successful write cannot fail its own later integrity check.
+        $dartPollValue = round((float)$dartPoll,4);
+        $kindLagValue = $kindLag === null ? null : round((float)$kindLag,4);
+        $seen[$id] = true; $normalized[] = array($id,$date,$sha,$dartPollValue,$kindLagValue,$kindObservationCount,
+            $kindLagSampleCount,(string)$snapshot['snapshot_at'],(string)$snapshot['content_scope'],$orderedCounts,$source,
+            v1_quality_observation_payload_hash($date,$sha,$dartPollValue,$kindLagValue,$kindObservationCount,$kindLagSampleCount,
+                (string)$snapshot['snapshot_at'],(string)$snapshot['content_scope'],$orderedCounts,$source));
+    }
+    $now = gmdate('Y-m-d H:i:s'); $inserted = 0; $pdo->beginTransaction();
+    try {
+        $lookup = $pdo->prepare('SELECT payload_sha256 FROM ' . table_name($config,'governance_quality_observations')
+            . ' WHERE observation_id=? LIMIT 1 FOR UPDATE');
+        $insert = $pdo->prepare('INSERT INTO ' . table_name($config,'governance_quality_observations')
+            . ' (observation_id,observation_date,code_revision,dart_success_poll_interval_p95_minutes,kind_observation_lag_p95_minutes,'
+            . 'kind_observation_count,kind_lag_sample_count,content_snapshot_at,content_scope,'
+            . implode(',',$databaseCountFields) . ',source,payload_sha256,created_by,created_at) VALUES (' . implode(',',array_fill(0,24,'?')) . ')');
+        foreach ($normalized as $row) {
+            $lookup->execute(array($row[0])); $existing = $lookup->fetch();
+            if ($existing) {
+                if (!hash_equals((string)$existing['payload_sha256'],$row[11])) { throw new RuntimeException('quality_observation_conflict'); }
+                continue;
+            }
+            $values = array($row[0],$row[1],$row[2],$row[3],$row[4],$row[5],$row[6],$row[7],$row[8]);
+            foreach ($databaseCountFields as $field) {
+                $values[] = strpos($field,'same_story_') === 0 ? 0 : $row[9][$field];
+            }
+            $values[] = $row[10]; $values[] = $row[11]; $values[] = $role; $values[] = $now;
+            $insert->execute($values); $inserted++;
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        if (strpos($e->getMessage(),'quality_observation_conflict') === 0 || (string)$e->getCode() === '23000') {
+            v1_respond(409,array('ok'=>false,'error'=>'quality_observation_conflict'));
+        }
+        throw $e;
+    }
+    v1_respond(202,array('ok'=>true,'accepted_count'=>count($normalized),'inserted_count'=>$inserted,
+        'duplicate_count'=>count($normalized)-$inserted,'role'=>$role));
+}
+
+function v1_record_web_vitals(PDO $pdo, array $config): void {
+    $payload = v1_admin_json_body($config);
+    $singleFields = array('route_template','measured_at','metric_name','metric_value','metric','value','device_class','build_sha','source');
+    if (isset($payload['observations'])) {
+        v1_assert_object_keys($payload, array('observations'), 'body');
+        $items = is_array($payload['observations']) ? $payload['observations'] : null;
+    } else {
+        v1_assert_object_keys($payload, $singleFields, 'body');
+        $items = array($payload);
+    }
+    if ($items === null || count($items) < 1 || count($items) > 50) { v1_respond(400, array('ok' => false, 'error' => 'invalid_web_vital_batch')); }
+    if (scalar_int($pdo, 'SELECT COUNT(*) FROM ' . table_name($config, 'web_vital_observations') . ' WHERE created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 MINUTE)') >= 2000) {
+        header('Retry-After: 60'); v1_respond(429, array('ok' => false, 'error' => 'web_vitals_rate_limited'));
+    }
+    $normalized = array(); $nowEpoch = time();
+    foreach ($items as $index => $item) {
+        if (!is_array($item)) { v1_respond(400, array('ok' => false, 'error' => 'invalid_web_vital', 'index' => $index)); }
+        v1_assert_object_keys($item, $singleFields, 'observations[' . $index . ']');
+        $route = isset($item['route_template']) ? v1_valid_route_template($item['route_template']) : null;
+        $measured = isset($item['measured_at']) ? v1_editorial_datetime_utc($item['measured_at']) : gmdate('Y-m-d H:i:s');
+        $metricValue = array_key_exists('metric_name', $item) ? $item['metric_name'] : (isset($item['metric']) ? $item['metric'] : '');
+        $metric = strtoupper(trim((string)$metricValue));
+        $rawValue = array_key_exists('metric_value', $item) ? $item['metric_value'] : (array_key_exists('value', $item) ? $item['value'] : null);
+        $value = is_int($rawValue) || is_float($rawValue) ? (float)$rawValue : -1;
+        $device = isset($item['device_class']) ? trim((string)$item['device_class']) : '';
+        $sha = isset($item['build_sha']) ? v1_valid_build_sha($item['build_sha']) : null;
+        $source = isset($item['source']) ? trim((string)$item['source']) : 'first_party';
+        $measuredEpoch = $measured !== null ? strtotime($measured . ' UTC') : false;
+        $maxValue = $metric === 'CLS' ? 100 : 600000;
+        if ($route === null || $measured === null || $measuredEpoch === false || $measuredEpoch < $nowEpoch - 86400 || $measuredEpoch > $nowEpoch + 300
+            || !in_array($metric, array('LCP','INP','CLS'), true) || !is_finite($value) || $value < 0 || $value > $maxValue
+            || !in_array($device, array('mobile','desktop','tablet'), true) || $sha === null || $source !== 'first_party') {
+            v1_respond(400, array('ok' => false, 'error' => 'invalid_web_vital', 'index' => $index));
+        }
+        $normalized[] = array('wv_' . bin2hex(random_bytes(16)),$measured,$route,$metric,$value,$device,$sha,$source);
+    }
+    $now = gmdate('Y-m-d H:i:s');
+    $pdo->beginTransaction();
+    try {
+        $pdo->exec('DELETE FROM ' . table_name($config, 'web_vital_observations') . ' WHERE expires_at <= UTC_TIMESTAMP() LIMIT 5000');
+        $stmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'web_vital_observations')
+            . ' (metric_id,measured_at,route_template,metric_name,metric_value,device_class,build_sha,source,expires_at,created_at) '
+            . 'VALUES (?,?,?,?,?,?,?,?,DATE_ADD(?, INTERVAL 30 DAY),?)');
+        foreach ($normalized as $row) { $stmt->execute(array_merge($row, array($row[1],$now))); }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        throw $e;
+    }
+    v1_respond(202, array('ok' => true, 'accepted_count' => count($normalized), 'retention_days' => 30, 'stored_identifiers' => false));
+}
+
+function v1_ops_get_backfill_checkpoint(PDO $pdo, array $config, string $fingerprint): void {
+    $stmt = $pdo->prepare('SELECT job_fingerprint,checkpoint_version,checkpoint_json,payload_hash,updated_at FROM '
+        . table_name($config, 'official_backfill_checkpoints') . ' WHERE job_fingerprint=? LIMIT 1');
+    $stmt->execute(array($fingerprint)); $row = $stmt->fetch();
+    if (!$row) { v1_respond(404, array('ok'=>false,'error'=>'backfill_checkpoint_not_found','job_fingerprint'=>$fingerprint)); }
+    $checkpoint = json_decode((string)$row['checkpoint_json']);
+    if (!is_object($checkpoint) || hash('sha256', (string)$row['checkpoint_json']) !== (string)$row['payload_hash']) {
+        v1_respond(503, array('ok'=>false,'error'=>'backfill_checkpoint_integrity_error','job_fingerprint'=>$fingerprint));
+    }
+    v1_respond(200, array('ok'=>true,'job_fingerprint'=>$fingerprint,'checkpoint_version'=>(int)$row['checkpoint_version'],
+        'payload_hash'=>(string)$row['payload_hash'],'updated_at'=>v1_release_iso_time($row['updated_at']),'checkpoint'=>$checkpoint));
+}
+
+function v1_json_object_body(array $config): object {
+    $contentType = isset($_SERVER['CONTENT_TYPE']) ? strtolower((string)$_SERVER['CONTENT_TYPE']) : '';
+    if (strpos($contentType, 'application/json') !== 0) { v1_respond(415, array('ok'=>false,'error'=>'application_json_required')); }
+    $decoded = json_decode(read_body($config));
+    if (!is_object($decoded) || json_last_error() !== JSON_ERROR_NONE) { v1_respond(400, array('ok'=>false,'error'=>'invalid_json_object')); }
+    return $decoded;
+}
+
+function v1_canonical_json_node($value) {
+    if (is_object($value)) {
+        $properties = get_object_vars($value);
+        ksort($properties, SORT_STRING);
+        $canonical = new stdClass();
+        foreach ($properties as $key => $child) { $canonical->{$key} = v1_canonical_json_node($child); }
+        return $canonical;
+    }
+    if (is_array($value)) {
+        $canonical = array();
+        foreach ($value as $child) { $canonical[] = v1_canonical_json_node($child); }
+        return $canonical;
+    }
+    return $value;
+}
+
+/**
+ * Canonical JSON for cross-runtime receipts.
+ *
+ * The older checkpoint canonicalizer intentionally treats every PHP array as
+ * a JSON list.  External Python producers, however, hash JSON objects with
+ * sorted keys.  Keep the checkpoint contract stable and use this stricter
+ * encoder only for new cross-runtime evidence/receipt contracts.
+ */
+function v1_strict_canonical_json_node($value) {
+    if (is_object($value)) {
+        $properties = get_object_vars($value);
+        ksort($properties, SORT_STRING);
+        $canonical = new stdClass();
+        foreach ($properties as $key => $child) { $canonical->{$key} = v1_strict_canonical_json_node($child); }
+        return $canonical;
+    }
+    if (is_array($value)) {
+        $keys = array_keys($value);
+        $isList = count($keys) === 0 || $keys === range(0, count($keys) - 1);
+        if ($isList) {
+            $canonical = array();
+            foreach ($value as $child) { $canonical[] = v1_strict_canonical_json_node($child); }
+            return $canonical;
+        }
+        ksort($value, SORT_STRING);
+        $canonical = new stdClass();
+        foreach ($value as $key => $child) { $canonical->{$key} = v1_strict_canonical_json_node($child); }
+        return $canonical;
+    }
+    return $value;
+}
+
+function v1_ops_put_backfill_checkpoint(PDO $pdo, array $config, string $fingerprint, string $role): void {
+    $payloadObject = v1_json_object_body($config);
+    $payload = get_object_vars($payloadObject);
+    v1_assert_object_keys($payload, array('expected_version','checkpoint'), 'body');
+    if (!isset($payload['expected_version']) || !is_int($payload['expected_version']) || $payload['expected_version'] < 0
+        || !isset($payload['checkpoint']) || !is_object($payload['checkpoint'])) {
+        v1_respond(400, array('ok'=>false,'error'=>'invalid_backfill_checkpoint_request'));
+    }
+    $checkpoint = $payload['checkpoint']; $checkpointValues = get_object_vars($checkpoint);
+    $job = isset($checkpointValues['job']) && is_object($checkpointValues['job']) ? get_object_vars($checkpointValues['job']) : array();
+    if (!isset($checkpointValues['schema_version']) || !is_int($checkpointValues['schema_version']) || $checkpointValues['schema_version'] < 1
+        || !$job || !isset($job['fingerprint']) || !hash_equals($fingerprint, (string)$job['fingerprint'])) {
+        v1_respond(400, array('ok'=>false,'error'=>'checkpoint_fingerprint_mismatch'));
+    }
+    foreach (array('completed_windows','failed_windows') as $mapField) {
+        if (!isset($checkpointValues[$mapField]) || !is_object($checkpointValues[$mapField])) {
+            v1_respond(400, array('ok'=>false,'error'=>'checkpoint_window_map_required','field'=>$mapField));
+        }
+    }
+    $canonicalCheckpoint = v1_canonical_json_node($checkpoint);
+    $encoded = json_encode($canonicalCheckpoint, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
+    if ($encoded === false || strlen($encoded) > 8000000) { v1_respond(413, array('ok'=>false,'error'=>'checkpoint_payload_too_large')); }
+    $hash = hash('sha256', $encoded); $expected = (int)$payload['expected_version']; $now = gmdate('Y-m-d H:i:s');
+    $pdo->beginTransaction();
+    try {
+        $lookup = $pdo->prepare('SELECT checkpoint_version,payload_hash FROM ' . table_name($config, 'official_backfill_checkpoints')
+            . ' WHERE job_fingerprint=? LIMIT 1 FOR UPDATE');
+        $lookup->execute(array($fingerprint)); $existing = $lookup->fetch();
+        $actual = $existing ? (int)$existing['checkpoint_version'] : 0;
+        if ($actual !== $expected) {
+            $pdo->rollBack();
+            v1_respond(409, array('ok'=>false,'error'=>'backfill_checkpoint_version_conflict','job_fingerprint'=>$fingerprint,
+                'expected_version'=>$expected,'actual_version'=>$actual));
+        }
+        if ($existing && hash_equals((string)$existing['payload_hash'], $hash)) {
+            $pdo->commit();
+            v1_respond(200, array('ok'=>true,'job_fingerprint'=>$fingerprint,'checkpoint_version'=>$actual,
+                'payload_hash'=>$hash,'unchanged'=>true,'updated_at'=>str_replace(' ','T',$now).'Z'));
+        }
+        $next = $actual + 1;
+        if ($existing) {
+            $stmt = $pdo->prepare('UPDATE ' . table_name($config, 'official_backfill_checkpoints')
+                . ' SET checkpoint_version=?,checkpoint_json=?,payload_hash=?,updated_by=?,updated_at=? WHERE job_fingerprint=?');
+            $stmt->execute(array($next,$encoded,$hash,$role,$now,$fingerprint));
+        } else {
+            $stmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'official_backfill_checkpoints')
+                . ' (job_fingerprint,checkpoint_version,checkpoint_json,payload_hash,updated_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?)');
+            $stmt->execute(array($fingerprint,$next,$encoded,$hash,$role,$now,$now));
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        throw $e;
+    }
+    v1_respond($existing ? 200 : 201, array('ok'=>true,'job_fingerprint'=>$fingerprint,'checkpoint_version'=>$next,
+        'payload_hash'=>$hash,'unchanged'=>false,'updated_at'=>str_replace(' ','T',$now).'Z'));
+}
+
+function v1_canonical_json_encode($value, string $error): string {
+    $encoded = json_encode(v1_canonical_json_node($value),
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
+    if (!is_string($encoded)) { throw new RuntimeException($error); }
+    return $encoded;
+}
+
+function v1_strict_canonical_json_encode($value, string $error): string {
+    $encoded = json_encode(v1_strict_canonical_json_node($value),
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
+    if (!is_string($encoded)) { throw new RuntimeException($error); }
+    return $encoded;
+}
+
+function v1_object_property(object $value, string $key) {
+    $properties = get_object_vars($value);
+    return array_key_exists($key,$properties) ? $properties[$key] : null;
+}
+
+function v1_validate_human_evidence_document(object $document, string $kind, string $expectedRevision): void {
+    $evidence = $kind === 'benchmark' ? v1_object_property($document,'evidence') : $document;
+    if (!is_object($evidence)) { v1_respond(400,array('ok'=>false,'error'=>'human_evidence_provenance_missing','kind'=>$kind)); }
+    $revision = strtolower(trim((string)v1_object_property($evidence,'code_revision')));
+    $environment = trim((string)v1_object_property($evidence,'environment'));
+    $source = strtolower(trim((string)v1_object_property($evidence,'evidence_source')));
+    $synthetic = v1_object_property($evidence,'is_synthetic');
+    if (!hash_equals($expectedRevision,$revision) || $environment !== 'production' || $synthetic !== false || $source === ''
+        || preg_match('/(?:fixture|synthetic|sample|test)/',$source) === 1) {
+        v1_respond(400,array('ok'=>false,'error'=>'invalid_human_evidence_provenance','kind'=>$kind));
+    }
+    if ($kind === 'release_approval') {
+        $approvedRevision = strtolower(trim((string)v1_object_property($document,'approved_revision')));
+        if (!hash_equals($expectedRevision,$approvedRevision) || !is_bool(v1_object_property($document,'release_approved'))) {
+            v1_respond(400,array('ok'=>false,'error'=>'invalid_release_approval_revision'));
+        }
+    }
+}
+
+function v1_human_evidence_row_response(array $row, bool $includeDocuments): array {
+    $bundleCanonical = v1_canonical_json_encode((object)array(
+        'benchmark_sha256'=>(string)$row['benchmark_sha256'],
+        'code_revision'=>(string)$row['code_revision'],
+        'release_approval_sha256'=>(string)$row['release_approval_sha256'],
+        'usability_sha256'=>(string)$row['usability_sha256'],
+    ),'human_evidence_bundle_hash_failed');
+    if (!hash_equals((string)$row['bundle_sha256'],hash('sha256',$bundleCanonical))) {
+        throw new RuntimeException('human_release_evidence_integrity_error:bundle');
+    }
+    $response = array('code_revision'=>(string)$row['code_revision'],'bundle_version'=>(int)$row['bundle_version'],
+        'bundle_sha256'=>(string)$row['bundle_sha256'],
+        'document_sha256'=>array('benchmark'=>(string)$row['benchmark_sha256'],'usability'=>(string)$row['usability_sha256'],
+            'release_approval'=>(string)$row['release_approval_sha256']),
+        'created_by'=>(string)$row['created_by'],'created_at'=>v1_release_iso_time($row['created_at']));
+    if ($includeDocuments) {
+        foreach (array('benchmark','usability','release_approval') as $kind) {
+            $decoded = json_decode((string)$row[$kind . '_json']);
+            if (!is_object($decoded) || hash('sha256',(string)$row[$kind . '_json']) !== (string)$row[$kind . '_sha256']) {
+                throw new RuntimeException('human_release_evidence_integrity_error:' . $kind);
+            }
+            $response[$kind] = $decoded;
+        }
+    }
+    return $response;
+}
+
+function v1_load_human_evidence_bundle(PDO $pdo, array $config, string $revision): ?array {
+    $stmt = $pdo->prepare('SELECT code_revision,bundle_version,bundle_sha256,benchmark_json,benchmark_sha256,usability_json,usability_sha256,'
+        . 'release_approval_json,release_approval_sha256,created_by,created_at FROM '
+        . table_name($config,'human_release_evidence_bundles') . ' WHERE code_revision=? ORDER BY bundle_version DESC LIMIT 1');
+    $stmt->execute(array($revision)); $row = $stmt->fetch();
+    return is_array($row) ? $row : null;
+}
+
+function v1_admin_release_evidence_inputs(PDO $pdo, array $config): void {
+    $revision = isset($_GET['code_revision']) ? strtolower(trim((string)$_GET['code_revision'])) : '';
+    if (preg_match('/^[a-f0-9]{40}$/',$revision) !== 1) {
+        v1_respond(400,array('ok'=>false,'error'=>'full_code_revision_required'));
+    }
+    $row = v1_load_human_evidence_bundle($pdo,$config,$revision);
+    if (!$row) { v1_respond(404,array('ok'=>false,'error'=>'human_release_evidence_not_found','code_revision'=>$revision)); }
+    try { $bundle = v1_human_evidence_row_response($row,true); }
+    catch (Throwable $e) { v1_respond(503,array('ok'=>false,'error'=>'human_release_evidence_integrity_error')); }
+    v1_respond(200,array('ok'=>true,'bundle'=>$bundle));
+}
+
+function v1_admin_upsert_release_evidence_inputs(PDO $pdo, array $config, string $role): void {
+    $payloadObject = v1_json_object_body($config); $payload = get_object_vars($payloadObject);
+    v1_assert_object_keys($payload,array('code_revision','expected_version','benchmark','usability','release_approval'),'body');
+    $revision = isset($payload['code_revision']) ? strtolower(trim((string)$payload['code_revision'])) : '';
+    $expected = isset($payload['expected_version']) && is_int($payload['expected_version']) ? $payload['expected_version'] : -1;
+    if (preg_match('/^[a-f0-9]{40}$/',$revision) !== 1 || $expected < 0
+        || !isset($payload['benchmark']) || !is_object($payload['benchmark'])
+        || !isset($payload['usability']) || !is_object($payload['usability'])
+        || !isset($payload['release_approval']) || !is_object($payload['release_approval'])) {
+        v1_respond(400,array('ok'=>false,'error'=>'invalid_human_release_evidence_bundle'));
+    }
+    v1_validate_human_evidence_document($payload['benchmark'],'benchmark',$revision);
+    v1_validate_human_evidence_document($payload['usability'],'usability',$revision);
+    v1_validate_human_evidence_document($payload['release_approval'],'release_approval',$revision);
+    $documents = array(); $hashes = array(); $totalBytes = 0;
+    foreach (array('benchmark','usability','release_approval') as $kind) {
+        $documents[$kind] = v1_canonical_json_encode($payload[$kind],'human_evidence_json_encode_failed:' . $kind);
+        $hashes[$kind] = hash('sha256',$documents[$kind]); $totalBytes += strlen($documents[$kind]);
+    }
+    if ($totalBytes > 220000) { v1_respond(413,array('ok'=>false,'error'=>'human_release_evidence_bundle_too_large','max_bytes'=>220000)); }
+    $bundleCanonical = v1_canonical_json_encode((object)array('benchmark_sha256'=>$hashes['benchmark'],
+        'code_revision'=>$revision,'release_approval_sha256'=>$hashes['release_approval'],'usability_sha256'=>$hashes['usability']),
+        'human_evidence_bundle_hash_failed');
+    $bundleHash = hash('sha256',$bundleCanonical); $now = gmdate('Y-m-d H:i:s');
+    $pdo->beginTransaction();
+    try {
+        $lookup = $pdo->prepare('SELECT bundle_version,bundle_sha256 FROM ' . table_name($config,'human_release_evidence_bundles')
+            . ' WHERE code_revision=? ORDER BY bundle_version DESC LIMIT 1 FOR UPDATE');
+        $lookup->execute(array($revision)); $existing = $lookup->fetch(); $actual = $existing ? (int)$existing['bundle_version'] : 0;
+        if ($actual !== $expected) {
+            $pdo->rollBack(); v1_respond(409,array('ok'=>false,'error'=>'human_release_evidence_version_conflict',
+                'expected_version'=>$expected,'actual_version'=>$actual));
+        }
+        if ($existing && hash_equals((string)$existing['bundle_sha256'],$bundleHash)) {
+            $pdo->commit(); v1_respond(200,array('ok'=>true,'unchanged'=>true,'code_revision'=>$revision,
+                'bundle_version'=>$actual,'bundle_sha256'=>$bundleHash));
+        }
+        $next = $actual + 1;
+        $insert = $pdo->prepare('INSERT INTO ' . table_name($config,'human_release_evidence_bundles')
+            . ' (code_revision,bundle_version,bundle_sha256,benchmark_json,benchmark_sha256,usability_json,usability_sha256,'
+            . 'release_approval_json,release_approval_sha256,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+        $insert->execute(array($revision,$next,$bundleHash,$documents['benchmark'],$hashes['benchmark'],$documents['usability'],$hashes['usability'],
+            $documents['release_approval'],$hashes['release_approval'],$role,$now));
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        throw $e;
+    }
+    v1_respond(201,array('ok'=>true,'unchanged'=>false,'code_revision'=>$revision,'bundle_version'=>$next,
+        'bundle_sha256'=>$bundleHash,'document_sha256'=>$hashes,'created_at'=>str_replace(' ','T',$now).'Z'));
+}
+
+function v1_kst_observation_date($utcValue): ?string {
+    if (!is_string($utcValue) || trim($utcValue) === '') { return null; }
+    try {
+        $utc = new DateTimeZone('UTC'); $kst = new DateTimeZone('Asia/Seoul');
+        return (new DateTimeImmutable($utcValue,$utc))->setTimezone($kst)->format('Y-m-d');
+    } catch (Throwable $e) { return null; }
+}
+
+function v1_evidence_utc_bounds(string $from, string $to): array {
+    $kst = new DateTimeZone('Asia/Seoul'); $utc = new DateTimeZone('UTC');
+    $start = (new DateTimeImmutable($from . ' 00:00:00',$kst))->setTimezone($utc);
+    $end = (new DateTimeImmutable($to . ' 00:00:00',$kst))->modify('+1 day')->modify('-1 second')->setTimezone($utc);
+    return array($start->format('Y-m-d H:i:s'),$end->format('Y-m-d H:i:s'));
+}
+
+/**
+ * Attribute an actual watchdog timestamp to the most recent KST minute-01
+ * five-minute slot.  The 23:56 slot owns 00:00:00..00:00:59 of the next
+ * civil day, so the resulting observation_date is the slot's KST date.
+ */
+function v1_availability_cadence_bucket($utcValue): ?array {
+    if (!is_string($utcValue) || trim($utcValue) === '') { return null; }
+    try {
+        $utc = new DateTimeZone('UTC'); $kst = new DateTimeZone('Asia/Seoul');
+        $instant = new DateTimeImmutable($utcValue,$utc);
+        $local = $instant->setTimezone($kst);
+        $minuteOfDay = ((int)$local->format('H')) * 60 + (int)$local->format('i');
+        if ($minuteOfDay === 0) {
+            $day = $local->modify('-1 day')->format('Y-m-d');
+            $slotIndex = GOV_V1_AVAILABILITY_SLOTS_PER_DAY - 1;
+        } else {
+            $day = $local->format('Y-m-d');
+            $slotIndex = intdiv($minuteOfDay - 1,5);
+        }
+        if ($slotIndex < 0 || $slotIndex >= GOV_V1_AVAILABILITY_SLOTS_PER_DAY) { return null; }
+        return array('observation_date'=>$day,'slot_index'=>$slotIndex,'epoch'=>$instant->getTimestamp());
+    } catch (Throwable $e) { return null; }
+}
+
+/** Exact raw timestamp window for KST minute-01 cadence days, inclusive. */
+function v1_availability_utc_bounds(string $from, string $to): array {
+    $kst = new DateTimeZone('Asia/Seoul'); $utc = new DateTimeZone('UTC');
+    $start = (new DateTimeImmutable($from . ' 00:01:00',$kst))->setTimezone($utc);
+    $end = (new DateTimeImmutable($to . ' 00:01:00',$kst))->modify('+1 day')->modify('-1 second')->setTimezone($utc);
+    return array($start->format('Y-m-d H:i:s'),$end->format('Y-m-d H:i:s'));
+}
+
+/** Encode chronological slot indexes as a fixed 288-bit (72 hex) bitmap. */
+function v1_availability_bitmap_hex(array $slotIndexes): string {
+    $bytes = array_fill(0,36,0);
+    foreach ($slotIndexes as $slotIndex) {
+        $slotIndex = (int)$slotIndex;
+        if ($slotIndex < 0 || $slotIndex >= GOV_V1_AVAILABILITY_SLOTS_PER_DAY) { continue; }
+        $byteIndex = intdiv($slotIndex,8); $bitIndex = 7 - ($slotIndex % 8);
+        $bytes[$byteIndex] = $bytes[$byteIndex] | (1 << $bitIndex);
+    }
+    $hex = '';
+    foreach ($bytes as $byte) { $hex .= str_pad(dechex($byte),2,'0',STR_PAD_LEFT); }
+    return $hex;
+}
+
+/** Return the UTC epoch edges [KST day 00:01, next day 00:01]. */
+function v1_availability_day_edges(string $day): array {
+    $kst = new DateTimeZone('Asia/Seoul');
+    $start = new DateTimeImmutable($day . ' 00:01:00',$kst);
+    return array($start->getTimestamp(),$start->modify('+1 day')->getTimestamp());
+}
+
+function v1_release_metric_value(array $metrics, string $key) {
+    if (array_key_exists($key,$metrics)) { return $metrics[$key]; }
+    if (isset($metrics['metrics']) && is_array($metrics['metrics']) && array_key_exists($key,$metrics['metrics'])) {
+        return $metrics['metrics'][$key];
+    }
+    return null;
+}
+
+function v1_release_metric_add(array &$group, string $field, $value): void {
+    if (!is_int($value) && !is_float($value)) { return; }
+    if (!isset($group[$field]) || $group[$field] === null) { $group[$field] = 0; }
+    $group[$field] += (int)$value;
+}
+
+function v1_official_run_metric(array $metrics, string $key) {
+    if (array_key_exists($key,$metrics)) { return $metrics[$key]; }
+    if (isset($metrics['metrics']) && is_array($metrics['metrics']) && array_key_exists($key,$metrics['metrics'])) {
+        return $metrics['metrics'][$key];
+    }
+    return null;
+}
+
+function v1_official_schedule_slot_matches($eventSchedule, $slot): bool {
+    if (!is_string($eventSchedule) || !is_string($slot) || trim($slot) === '') { return false; }
+    try {
+        // GitHub Actions cron expressions are UTC.  The slot is later assigned
+        // to a KST evidence date, but cron-family validation uses UTC fields.
+        $utcSlot = (new DateTimeImmutable($slot))->setTimezone(new DateTimeZone('UTC'));
+    } catch (Throwable $e) { return false; }
+    if ((int)$utcSlot->format('s') !== 0) { return false; }
+    $hour = (int)$utcSlot->format('G'); $minute = (int)$utcSlot->format('i');
+    if ($eventSchedule === '0,15,30,45 22-23 * * *') {
+        return $hour >= 22 && $hour <= 23 && in_array($minute,array(0,15,30,45),true);
+    }
+    if ($eventSchedule === '0,15,30,45 0-14 * * *') {
+        return $hour >= 0 && $hour <= 14 && in_array($minute,array(0,15,30,45),true);
+    }
+    if ($eventSchedule === '0,30 15-21 * * *') {
+        return $hour >= 15 && $hour <= 21 && in_array($minute,array(0,30),true);
+    }
+    return false;
+}
+
+function v1_official_slot_claim_error(int $status, string $code, array $extra = array()): void {
+    v1_respond($status,array_merge(array(
+        'ok'=>false,
+        'error'=>array('code'=>$code),
+    ),$extra));
+}
+
+/** The next boundary is in the complete 82-slot KST cadence, not one cron family. */
+function v1_official_next_cadence_slot(string $slot): ?string {
+    if (!v1_official_schedule_slot_matches('0,15,30,45 22-23 * * *',$slot)
+        && !v1_official_schedule_slot_matches('0,15,30,45 0-14 * * *',$slot)
+        && !v1_official_schedule_slot_matches('0,30 15-21 * * *',$slot)) { return null; }
+    try {
+        $kst = new DateTimeZone('Asia/Seoul');
+        $value = (new DateTimeImmutable($slot,new DateTimeZone('UTC')))->setTimezone($kst);
+    } catch (Throwable $e) { return null; }
+    $minutes = (int)$value->format('G') < 7 ? 30 : 15;
+    return $value->modify('+' . $minutes . ' minutes')->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+}
+
+/** Enumerate due slots in exactly one immutable GitHub cron family. */
+function v1_official_due_slots(string $eventSchedule, string $activeFrom, string $through): array {
+    if (!in_array($eventSchedule,array('0,15,30,45 22-23 * * *','0,15,30,45 0-14 * * *','0,30 15-21 * * *'),true)) {
+        return array();
+    }
+    $utc = new DateTimeZone('UTC');
+    try {
+        $start = (new DateTimeImmutable($activeFrom,$utc))->setTime(0,0,0);
+        $end = (new DateTimeImmutable($through,$utc))->setTime(0,0,0);
+    } catch (Throwable $e) { return array(); }
+    if ($end < $start) { return array(); }
+    if ($eventSchedule === '0,15,30,45 22-23 * * *') {
+        $hours = array(22,23); $minutes = array(0,15,30,45);
+    } elseif ($eventSchedule === '0,15,30,45 0-14 * * *') {
+        $hours = range(0,14); $minutes = array(0,15,30,45);
+    } else {
+        $hours = range(15,21); $minutes = array(0,30);
+    }
+    $rows = array();
+    for ($day = $start; $day <= $end; $day = $day->modify('+1 day')) {
+        foreach ($hours as $hour) {
+            foreach ($minutes as $minute) {
+                $candidate = $day->setTime((int)$hour,(int)$minute,0)->format('Y-m-d H:i:s');
+                if ($candidate >= $activeFrom && $candidate <= $through) { $rows[] = $candidate; }
+            }
+        }
+    }
+    return $rows;
+}
+
+function v1_official_slot_claim_identity(array $payload, string $trigger, ?string $expected): string {
+    return hash('sha256',v1_strict_canonical_json_encode(array(
+        'action'=>(string)$payload['action'],
+        'pipeline'=>(string)$payload['pipeline'],
+        'github_run_id'=>(string)$payload['github_run_id'],
+        'event_schedule'=>(string)$payload['event_schedule'],
+        'trigger_created_at'=>$trigger,
+        'code_revision'=>(string)$payload['code_revision'],
+        'expected_slot_at'=>$expected,
+    ),'official_slot_claim_identity_encode_failed'));
+}
+
+function v1_official_slot_claim_response(array $row, int $attempt, bool $duplicate): array {
+    return array(
+        'ok'=>true,
+        'accepted'=>1,
+        'claim_id'=>(string)$row['claim_id'],
+        'pipeline'=>(string)$row['pipeline'],
+        'github_run_id'=>(string)$row['github_run_id'],
+        'github_run_attempt'=>$attempt,
+        'event_schedule'=>(string)$row['event_schedule'],
+        'scheduled_slot_at'=>v1_release_iso_time($row['scheduled_slot_at']),
+        'trigger_created_at'=>v1_release_iso_time($row['trigger_created_at']),
+        'claimed_at'=>v1_release_iso_time($row['claimed_at']),
+        'next_cadence_slot_at'=>v1_release_iso_time($row['next_cadence_slot_at']),
+        'trigger_lag_seconds'=>(int)$row['trigger_lag_seconds'],
+        'claim_lag_seconds'=>(int)$row['claim_lag_seconds'],
+        'late'=>((int)$row['late'] === 1),
+        'status'=>(string)$row['status'],
+        'terminal_reason'=>$row['terminal_reason'] === null ? null : (string)$row['terminal_reason'],
+        'duplicate'=>$duplicate,
+    );
+}
+
+/**
+ * Atomically claim one oldest due slot. First contact only activates a clean
+ * next-KST-day epoch; it never attributes the ambiguous bootstrap invocation.
+ */
+function v1_ops_official_slot_claim_write(PDO $pdo, array $config): void {
+    $payload = v1_admin_json_body($config);
+    v1_assert_object_keys($payload,array('action','pipeline','github_run_id','github_run_attempt','event_schedule',
+        'trigger_created_at','code_revision','expected_slot_at'),'body');
+    $required = array('action','pipeline','github_run_id','github_run_attempt','event_schedule','trigger_created_at','code_revision');
+    foreach ($required as $field) {
+        if (!array_key_exists($field,$payload)) { v1_official_slot_claim_error(400,'official_slot_claim_invalid',array('field'=>$field)); }
+    }
+    $action = is_string($payload['action']) ? trim($payload['action']) : '';
+    $pipeline = is_string($payload['pipeline']) ? trim($payload['pipeline']) : '';
+    $runId = is_string($payload['github_run_id']) ? trim($payload['github_run_id']) : '';
+    $attempt = is_int($payload['github_run_attempt']) ? $payload['github_run_attempt'] : 0;
+    $schedule = is_string($payload['event_schedule']) ? trim($payload['event_schedule']) : '';
+    $trigger = v1_editorial_datetime_utc($payload['trigger_created_at']);
+    $revision = v1_valid_build_sha($payload['code_revision']);
+    $expected = array_key_exists('expected_slot_at',$payload) ? v1_editorial_datetime_utc($payload['expected_slot_at']) : null;
+    if (!in_array($action,array('claim','repair'),true) || $pipeline !== 'ingest-official'
+        || preg_match('/^[0-9]{1,64}$/',$runId) !== 1 || $attempt < 1
+        || !in_array($schedule,array('0,15,30,45 22-23 * * *','0,15,30,45 0-14 * * *','0,30 15-21 * * *'),true)
+        || $trigger === null || $revision === null || strlen($revision) > 40
+        || ($action === 'claim' && array_key_exists('expected_slot_at',$payload))
+        || ($action === 'repair' && ($expected === null || !v1_official_schedule_slot_matches($schedule,$expected)))) {
+        v1_official_slot_claim_error(400,'official_slot_claim_invalid');
+    }
+    $now = gmdate('Y-m-d H:i:s');
+    if ($trigger > $now) { v1_official_slot_claim_error(400,'official_slot_claim_future_trigger'); }
+    $identity = v1_official_slot_claim_identity($payload,$trigger,$expected);
+    $stateTable = table_name($config,'official_slot_claim_state');
+    $claimTable = table_name($config,'official_slot_claims');
+    $pdo->beginTransaction();
+    try {
+        $stateStmt = $pdo->prepare('SELECT active_from,epoch_version,activated_at,activation_revision,change_reason,changed_by FROM ' . $stateTable
+            . ' WHERE pipeline=? FOR UPDATE');
+        $stateStmt->execute(array($pipeline)); $state = $stateStmt->fetch();
+        if (!$state) {
+            $kst = new DateTimeZone('Asia/Seoul'); $utc = new DateTimeZone('UTC');
+            $activeFrom = (new DateTimeImmutable('now',$kst))->modify('+1 day')->setTime(0,0,0)->setTimezone($utc)->format('Y-m-d H:i:s');
+            $activationReason = 'Automatic first-contact activation at the next complete KST day boundary';
+            $activationActor = 'ops_claim_bootstrap';
+            $insertState = $pdo->prepare('INSERT INTO ' . $stateTable
+                . ' (pipeline,active_from,epoch_version,activated_at,activation_revision,change_reason,changed_by,created_at,updated_at) '
+                . 'VALUES (?,?,1,?,?,?,?,?,?)');
+            $insertState->execute(array($pipeline,$activeFrom,$now,$revision,$activationReason,$activationActor,$now,$now));
+            $epochInsert = $pdo->prepare('INSERT INTO ' . table_name($config,'official_slot_claim_epochs')
+                . ' (epoch_id,pipeline,epoch_version,change_type,previous_active_from,active_from,change_reason,code_revision,changed_by,created_at) '
+                . 'VALUES (?,?,1,\'activation\',NULL,?,?,?,?,?)');
+            $epochInsert->execute(array('official-epoch:' . substr(hash('sha256',$pipeline . '|1|' . $activeFrom),0,48),
+                $pipeline,$activeFrom,$activationReason,$revision,$activationActor,$now));
+            $pdo->commit();
+            v1_official_slot_claim_error(409,'official_slot_claim_activated',array('active_from'=>v1_release_iso_time($activeFrom)));
+        }
+        $activeFrom = (string)$state['active_from'];
+        if ($now < $activeFrom) {
+            $pdo->commit();
+            v1_official_slot_claim_error(409,'official_slot_claim_not_active',array('active_from'=>v1_release_iso_time($activeFrom)));
+        }
+        $existingStmt = $pdo->prepare('SELECT * FROM ' . $claimTable . ' WHERE pipeline=? AND github_run_id=? FOR UPDATE');
+        $existingStmt->execute(array($pipeline,$runId)); $existing = $existingStmt->fetch();
+        if ($existing) {
+            if (!hash_equals((string)$existing['identity_sha256'],$identity) || $attempt < (int)$existing['github_run_attempt']) {
+                $pdo->rollBack(); v1_official_slot_claim_error(409,'official_slot_claim_idempotency_conflict');
+            }
+            $terminalFailure = is_string($existing['terminal_reason'])
+                && (string)$existing['terminal_reason'] !== '';
+            $crossedBeforeRerun = (string)$existing['status'] !== 'completed'
+                && $attempt > (int)$existing['github_run_attempt']
+                && $now >= (string)$existing['next_cadence_slot_at'];
+            if ($crossedBeforeRerun) {
+                $terminalUpdate = $pdo->prepare('UPDATE ' . $claimTable
+                    . ' SET status=\'failed\',terminal_reason=\'rerun_after_next_cadence\',failed_at=?,updated_at=? WHERE claim_id=?');
+                $terminalUpdate->execute(array($now,$now,(string)$existing['claim_id']));
+                $existing['status'] = 'failed'; $existing['terminal_reason'] = 'rerun_after_next_cadence';
+                $existing['failed_at'] = $now; $existing['updated_at'] = $now;
+                $terminalFailure = true;
+            }
+            // A completed claim is immutable. A higher GitHub rerun attempt may
+            // receive the same claim and later prove a semantic no-op, but it
+            // must not rewrite the original attempt stored in the evidence row.
+            if ($attempt > (int)$existing['github_run_attempt'] && (string)$existing['status'] !== 'completed'
+                && !$terminalFailure) {
+                $updateAttempt = $pdo->prepare('UPDATE ' . $claimTable . ' SET github_run_attempt=?,updated_at=? WHERE claim_id=?');
+                $updateAttempt->execute(array($attempt,$now,(string)$existing['claim_id']));
+                $existing['github_run_attempt'] = $attempt; $existing['updated_at'] = $now;
+            }
+            $pdo->commit();
+            v1_respond(200,v1_official_slot_claim_response($existing,$attempt,true));
+        }
+        $claimedSql = 'SELECT scheduled_slot_at FROM ' . $claimTable
+            . ' WHERE pipeline=?' . ($action === 'repair' ? '' : ' AND event_schedule=?')
+            . ' AND scheduled_slot_at BETWEEN ? AND ? FOR UPDATE';
+        $claimedStmt = $pdo->prepare($claimedSql);
+        $claimedParams = $action === 'repair'
+            ? array($pipeline,$activeFrom,$trigger)
+            : array($pipeline,$schedule,$activeFrom,$trigger);
+        $claimedStmt->execute($claimedParams); $claimed = array();
+        foreach ($claimedStmt->fetchAll() as $row) { $claimed[(string)$row['scheduled_slot_at']] = true; }
+        $oldest = null;
+        if ($action === 'repair') {
+            $dueSlots = array();
+            foreach (array('0,15,30,45 22-23 * * *','0,15,30,45 0-14 * * *','0,30 15-21 * * *') as $family) {
+                $dueSlots = array_merge($dueSlots,v1_official_due_slots($family,$activeFrom,$trigger));
+            }
+            sort($dueSlots,SORT_STRING);
+        } else { $dueSlots = v1_official_due_slots($schedule,$activeFrom,$trigger); }
+        foreach ($dueSlots as $slot) {
+            if (!isset($claimed[$slot])) { $oldest = $slot; break; }
+        }
+        if ($oldest === null) {
+            $pdo->rollBack(); v1_official_slot_claim_error(409,'official_slot_claim_not_due');
+        }
+        if ($action === 'repair' && ($expected !== $oldest
+            || !v1_official_schedule_slot_matches($schedule,$oldest))) {
+            $pdo->rollBack(); v1_official_slot_claim_error(409,'official_slot_repair_not_oldest',array(
+                'oldest_due_slot_at'=>v1_release_iso_time($oldest),
+            ));
+        }
+        $nextSlot = v1_official_next_cadence_slot($oldest);
+        if ($nextSlot === null) { throw new RuntimeException('official_slot_claim_next_boundary_invalid'); }
+        $slotEpoch = strtotime($oldest . ' UTC'); $triggerEpoch = strtotime($trigger . ' UTC'); $nowEpoch = strtotime($now . ' UTC');
+        if ($slotEpoch === false || $triggerEpoch === false || $nowEpoch === false || $triggerEpoch < $slotEpoch) {
+            throw new RuntimeException('official_slot_claim_timestamp_invalid');
+        }
+        $late = $now >= $nextSlot ? 1 : 0;
+        if ($action === 'repair' && $late !== 1) {
+            $pdo->rollBack(); v1_official_slot_claim_error(409,'official_slot_repair_not_late');
+        }
+        $claimId = 'official-slot:' . substr(hash('sha256',$pipeline . '|' . $oldest),0,48);
+        $insert = $pdo->prepare('INSERT INTO ' . $claimTable
+            . ' (claim_id,pipeline,epoch_version,scheduled_slot_at,event_schedule,github_run_id,github_run_attempt,trigger_created_at,claimed_at,'
+            . 'next_cadence_slot_at,trigger_lag_seconds,claim_lag_seconds,late,code_revision,identity_sha256,status,created_at,updated_at) '
+            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,\'claimed\',?,?)');
+        $insert->execute(array($claimId,$pipeline,(int)$state['epoch_version'],$oldest,$schedule,$runId,$attempt,$trigger,$now,$nextSlot,
+            $triggerEpoch-$slotEpoch,$nowEpoch-$slotEpoch,$late,$revision,$identity,$now,$now));
+        $select = $pdo->prepare('SELECT * FROM ' . $claimTable . ' WHERE claim_id=?');
+        $select->execute(array($claimId)); $row = $select->fetch();
+        if (!$row) { throw new RuntimeException('official_slot_claim_insert_missing'); }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        if ((string)$e->getCode() === '23000') { v1_official_slot_claim_error(409,'official_slot_claim_concurrent_conflict'); }
+        throw $e;
+    }
+    v1_respond(200,v1_official_slot_claim_response($row,$attempt,false));
+}
+
+/** Ops audit feed includes claimed, failed, completed and permanently late slots. */
+function v1_ops_official_slot_claims(PDO $pdo, array $config): void {
+    $kstNow = new DateTimeImmutable('now',new DateTimeZone('Asia/Seoul'));
+    $to = v1_date_bound('to',$kstNow->format('Y-m-d'));
+    $from = v1_date_bound('from',$kstNow->modify('-6 days')->format('Y-m-d'));
+    $fromDate = new DateTimeImmutable($from,new DateTimeZone('Asia/Seoul'));
+    $toDate = new DateTimeImmutable($to,new DateTimeZone('Asia/Seoul'));
+    if ($toDate < $fromDate || $toDate->diff($fromDate)->days > 30) {
+        v1_official_slot_claim_error(400,'official_slot_claim_range_exceeds_31_days');
+    }
+    list($start,$end) = v1_evidence_utc_bounds($from,$to);
+    $page = v1_list_params();
+    $stmt = $pdo->prepare('SELECT claim_id,pipeline,epoch_version,scheduled_slot_at,event_schedule,github_run_id,github_run_attempt,'
+        . 'trigger_created_at,claimed_at,next_cadence_slot_at,trigger_lag_seconds,claim_lag_seconds,late,code_revision,status,'
+        . 'terminal_reason,failed_at,completed_run_id,completed_run_attempt,completion_raw_count,completion_ack_count,completion_sha256,completed_at,created_at,updated_at FROM '
+        . table_name($config,'official_slot_claims') . ' WHERE scheduled_slot_at BETWEEN ? AND ? ORDER BY scheduled_slot_at,claim_id LIMIT '
+        . ((int)$page['limit'] + 1) . ' OFFSET ' . (int)$page['offset']);
+    $stmt->execute(array($start,$end)); list($rows,$hasMore) = v1_fetch_page($stmt,$page);
+    foreach ($rows as &$row) {
+        foreach (array('scheduled_slot_at','trigger_created_at','claimed_at','next_cadence_slot_at','failed_at','completed_at','created_at','updated_at') as $field) {
+            $row[$field] = v1_release_iso_time(isset($row[$field]) ? $row[$field] : null);
+        }
+        foreach (array('epoch_version','github_run_attempt','trigger_lag_seconds','claim_lag_seconds','completed_run_attempt','completion_raw_count','completion_ack_count') as $field) {
+            $row[$field] = $row[$field] === null ? null : (int)$row[$field];
+        }
+        $row['late'] = (int)$row['late'] === 1;
+    }
+    unset($row);
+    $stateStmt = $pdo->prepare('SELECT pipeline,active_from,epoch_version,activated_at,activation_revision,change_reason,changed_by FROM '
+        . table_name($config,'official_slot_claim_state') . ' WHERE pipeline=?');
+    $stateStmt->execute(array('ingest-official')); $state = $stateStmt->fetch();
+    if ($state) {
+        $state['active_from'] = v1_release_iso_time($state['active_from']);
+        $state['activated_at'] = v1_release_iso_time($state['activated_at']);
+        $state['epoch_version'] = (int)$state['epoch_version'];
+    }
+    v1_respond(200,array('ok'=>true,'state'=>$state ?: null,'range'=>array('from'=>$from,'to'=>$to),'data'=>$rows,
+        'pagination'=>v1_page_meta($page,count($rows),$hasMore)));
+}
+
+function v1_admin_official_slot_epoch(PDO $pdo, array $config): void {
+    $stateStmt = $pdo->prepare('SELECT pipeline,active_from,epoch_version,activated_at,activation_revision,change_reason,changed_by,created_at,updated_at FROM '
+        . table_name($config,'official_slot_claim_state') . ' WHERE pipeline=?');
+    $stateStmt->execute(array('ingest-official')); $state = $stateStmt->fetch();
+    if ($state) {
+        foreach (array('active_from','activated_at','created_at','updated_at') as $field) {
+            $state[$field] = v1_release_iso_time($state[$field]);
+        }
+        $state['epoch_version'] = (int)$state['epoch_version'];
+    }
+    $historyStmt = $pdo->prepare('SELECT epoch_id,pipeline,epoch_version,change_type,previous_active_from,active_from,'
+        . 'change_reason,code_revision,changed_by,created_at FROM ' . table_name($config,'official_slot_claim_epochs')
+        . ' WHERE pipeline=? ORDER BY epoch_version DESC LIMIT 100');
+    $historyStmt->execute(array('ingest-official')); $history = $historyStmt->fetchAll();
+    foreach ($history as &$row) {
+        $row['epoch_version'] = (int)$row['epoch_version'];
+        foreach (array('previous_active_from','active_from','created_at') as $field) {
+            $row[$field] = v1_release_iso_time(isset($row[$field]) ? $row[$field] : null);
+        }
+    }
+    unset($row);
+    v1_respond(200,array('ok'=>true,'state'=>$state ?: null,'history'=>$history));
+}
+
+/** Admin-only, append-only epoch reset. Existing claims and history are untouched. */
+function v1_admin_reset_official_slot_epoch(PDO $pdo, array $config, string $role): void {
+    $payload = v1_admin_json_body($config);
+    v1_assert_object_keys($payload,array('action','pipeline','expected_epoch_version','reason','code_revision','confirmation'),'body');
+    $action = isset($payload['action']) && is_string($payload['action']) ? trim($payload['action']) : '';
+    $pipeline = isset($payload['pipeline']) && is_string($payload['pipeline']) ? trim($payload['pipeline']) : '';
+    $expected = isset($payload['expected_epoch_version']) && is_int($payload['expected_epoch_version'])
+        ? $payload['expected_epoch_version'] : 0;
+    $reason = isset($payload['reason']) && is_string($payload['reason']) ? trim($payload['reason']) : '';
+    $revision = isset($payload['code_revision']) ? v1_valid_build_sha($payload['code_revision']) : null;
+    $confirmation = isset($payload['confirmation']) && is_string($payload['confirmation'])
+        ? $payload['confirmation'] : '';
+    if ($action !== 'reset' || $pipeline !== 'ingest-official' || $expected < 1
+        || mb_strlen($reason,'UTF-8') < 20 || mb_strlen($reason,'UTF-8') > 500
+        || $revision === null || strlen($revision) > 40
+        || $confirmation !== 'RESET_OFFICIAL_SLOT_EPOCH_AT_NEXT_KST_DAY') {
+        v1_official_slot_claim_error(400,'official_slot_epoch_reset_invalid');
+    }
+    $stateTable = table_name($config,'official_slot_claim_state');
+    $epochTable = table_name($config,'official_slot_claim_epochs');
+    $now = gmdate('Y-m-d H:i:s');
+    $pdo->beginTransaction();
+    try {
+        $release = v1_release_state($pdo,$config,true);
+        if (!$release || (string)$release['release_state'] !== 'closed') {
+            $pdo->rollBack(); v1_official_slot_claim_error(409,'official_slot_epoch_reset_requires_closed_release');
+        }
+        $stmt = $pdo->prepare('SELECT * FROM ' . $stateTable . ' WHERE pipeline=? FOR UPDATE');
+        $stmt->execute(array($pipeline)); $state = $stmt->fetch();
+        if (!$state) {
+            $pdo->rollBack(); v1_official_slot_claim_error(409,'official_slot_epoch_not_activated');
+        }
+        if ((int)$state['epoch_version'] !== $expected) {
+            $pdo->rollBack(); v1_official_slot_claim_error(409,'official_slot_epoch_version_conflict',array(
+                'actual_epoch_version'=>(int)$state['epoch_version'],
+            ));
+        }
+        $kst = new DateTimeZone('Asia/Seoul'); $utc = new DateTimeZone('UTC');
+        $nowKst = new DateTimeImmutable('now',$kst);
+        $currentActiveKst = (new DateTimeImmutable((string)$state['active_from'],$utc))->setTimezone($kst);
+        $base = $nowKst > $currentActiveKst ? $nowKst : $currentActiveKst;
+        $activeFrom = $base->modify('+1 day')->setTime(0,0,0)->setTimezone($utc)->format('Y-m-d H:i:s');
+        $nextVersion = $expected + 1;
+        $update = $pdo->prepare('UPDATE ' . $stateTable
+            . ' SET active_from=?,epoch_version=?,activated_at=?,activation_revision=?,change_reason=?,changed_by=?,updated_at=? '
+            . 'WHERE pipeline=? AND epoch_version=?');
+        $update->execute(array($activeFrom,$nextVersion,$now,$revision,$reason,$role,$now,$pipeline,$expected));
+        if ($update->rowCount() !== 1) { throw new RuntimeException('official_slot_epoch_reset_lost_update'); }
+        $epochId = 'official-epoch:' . substr(hash('sha256',$pipeline . '|' . $nextVersion . '|' . $activeFrom),0,48);
+        $insert = $pdo->prepare('INSERT INTO ' . $epochTable
+            . ' (epoch_id,pipeline,epoch_version,change_type,previous_active_from,active_from,change_reason,code_revision,changed_by,created_at) '
+            . 'VALUES (?,?,?,\'reset\',?,?,?,?,?,?)');
+        $insert->execute(array($epochId,$pipeline,$nextVersion,(string)$state['active_from'],$activeFrom,$reason,$revision,$role,$now));
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        throw $e;
+    }
+    v1_respond(200,array('ok'=>true,'pipeline'=>$pipeline,'epoch_version'=>$nextVersion,'active_from'=>v1_release_iso_time($activeFrom),
+        'epoch_id'=>$epochId,'claims_preserved'=>true));
+}
+
+/** Normalize one durable official collection run into the paged ledger contract. */
+function v1_official_run_ledger_row(array $run): array {
+    $metrics = json_decode((string)$run['metrics_json'],true);
+    if (!is_array($metrics)) { $metrics = array(); }
+    $runKindValue = v1_official_run_metric($metrics,'run_kind');
+    $runKind = is_string($runKindValue) ? trim($runKindValue) : '';
+    $eventScheduleValue = v1_official_run_metric($metrics,'event_schedule');
+    $eventSchedule = is_string($eventScheduleValue) && trim($eventScheduleValue) !== '' ? trim($eventScheduleValue) : null;
+    $companyMaster = v1_bool_int(v1_official_run_metric($metrics,'company_master_sync')) === 1;
+    if (!in_array($runKind,array('scheduled_incremental','manual','backfill','company_master'),true)) { $runKind = null; }
+    $slotValue = v1_official_run_metric($metrics,'scheduled_slot_at');
+    $scheduledSlot = is_string($slotValue) ? v1_mysql_datetime_utc($slotValue) : null;
+    $triggerValue = v1_official_run_metric($metrics,'trigger_created_at');
+    $triggerCreated = is_string($triggerValue) ? v1_editorial_datetime_utc($triggerValue) : null;
+    $claimIdValue = v1_official_run_metric($metrics,'slot_claim_id');
+    $claimId = is_string($claimIdValue) && v1_valid_entity_id($claimIdValue) ? $claimIdValue : null;
+    $githubRunIdValue = v1_official_run_metric($metrics,'github_run_id');
+    $githubRunId = is_string($githubRunIdValue) && preg_match('/^[0-9]{1,64}$/',$githubRunIdValue) === 1
+        ? $githubRunIdValue : null;
+    $githubAttemptValue = v1_official_run_metric($metrics,'github_run_attempt');
+    $githubAttempt = is_int($githubAttemptValue) && $githubAttemptValue >= 1 ? $githubAttemptValue : null;
+    $claimedValue = v1_official_run_metric($metrics,'slot_claimed_at');
+    $slotClaimedAt = is_string($claimedValue) ? v1_editorial_datetime_utc($claimedValue) : null;
+    $nextValue = v1_official_run_metric($metrics,'next_cadence_slot_at');
+    $nextCadence = is_string($nextValue) ? v1_editorial_datetime_utc($nextValue) : null;
+    $triggerLagValue = v1_official_run_metric($metrics,'trigger_lag_seconds');
+    $triggerLag = is_int($triggerLagValue) && $triggerLagValue >= 0 ? $triggerLagValue : null;
+    $claimLagValue = v1_official_run_metric($metrics,'claim_lag_seconds');
+    $claimLag = is_int($claimLagValue) && $claimLagValue >= 0 ? $claimLagValue : null;
+    $lateValue = v1_official_run_metric($metrics,'slot_claim_late');
+    $slotLate = is_bool($lateValue) ? $lateValue : null;
+    $outcomesValue = v1_official_run_metric($metrics,'source_outcomes');
+    $outcomes = is_array($outcomesValue) ? $outcomesValue : array();
+    $ackValue = v1_official_run_metric($metrics,'source_ack_counts');
+    $ackCounts = is_array($ackValue) ? $ackValue : array();
+    $sourceOutcomes = array(); $sourceKey = strtolower((string)$run['source_key']);
+    foreach (array('dart','kind') as $source) {
+        $isNamed = in_array($source,explode('+',$sourceKey),true);
+        if (!$isNamed && !isset($outcomes[$source])) { continue; }
+        $outcome = isset($outcomes[$source]) && is_array($outcomes[$source]) ? $outcomes[$source] : array();
+        $raw = isset($outcome['raw_count']) && is_numeric($outcome['raw_count']) ? (int)$outcome['raw_count']
+            : (isset($outcome['fetched']) && is_numeric($outcome['fetched']) ? (int)$outcome['fetched'] : null);
+        $ack = isset($ackCounts[$source]) && is_numeric($ackCounts[$source]) ? (int)$ackCounts[$source]
+            : (isset($outcome['acknowledged_count']) && is_numeric($outcome['acknowledged_count'])
+                ? (int)$outcome['acknowledged_count'] : null);
+        $sourceOutcomes[$source] = array(
+            'status'=>isset($outcome['status']) ? strtolower(trim((string)$outcome['status'])) : 'missing',
+            'raw_count'=>$raw,
+            'acknowledged_count'=>$ack,
+        );
+    }
+    ksort($sourceOutcomes,SORT_STRING);
+    return array(
+        'run_id'=>(string)$run['run_id'],
+        'pipeline'=>(string)$run['pipeline'],
+        'source_key'=>$sourceKey,
+        'code_revision'=>v1_valid_build_sha($run['code_revision']),
+        'status'=>strtolower((string)$run['status']),
+        'started_at'=>v1_release_iso_time($run['started_at']),
+        'finished_at'=>v1_release_iso_time($run['finished_at']),
+        'first_observed_at'=>v1_release_iso_time($run['first_observed_at']),
+        'raw_count'=>(int)$run['raw_count'],
+        'acknowledged_count'=>(int)$run['acknowledged_count'],
+        'run_kind'=>$runKind,
+        'event_schedule'=>$eventSchedule,
+        'scheduled_slot_at'=>$scheduledSlot === null ? null : v1_release_iso_time($scheduledSlot),
+        'trigger_created_at'=>$triggerCreated === null ? null : v1_release_iso_time($triggerCreated),
+        'slot_claim_id'=>$claimId,
+        'github_run_id'=>$githubRunId,
+        'github_run_attempt'=>$githubAttempt,
+        'slot_claimed_at'=>$slotClaimedAt === null ? null : v1_release_iso_time($slotClaimedAt),
+        'next_cadence_slot_at'=>$nextCadence === null ? null : v1_release_iso_time($nextCadence),
+        'trigger_lag_seconds'=>$triggerLag,
+        'claim_lag_seconds'=>$claimLag,
+        'slot_claim_late'=>$slotLate,
+        'slot_claim_status'=>null,
+        'slot_claim_terminal_reason'=>null,
+        'company_master_sync'=>$companyMaster,
+        'source_outcomes'=>$sourceOutcomes,
+    );
+}
+
+function v1_official_scheduled_run_matches(array $row): bool {
+    if ($row['run_kind'] !== 'scheduled_incremental' || $row['scheduled_slot_at'] === null
+        || $row['trigger_created_at'] === null
+        || $row['slot_claim_id'] === null || $row['github_run_id'] === null || $row['github_run_attempt'] === null
+        || $row['slot_claimed_at'] === null || $row['next_cadence_slot_at'] === null
+        || $row['trigger_lag_seconds'] === null || $row['claim_lag_seconds'] === null
+        || $row['slot_claim_late'] === null || $row['slot_claim_status'] === null
+        || !v1_official_schedule_slot_matches($row['event_schedule'],$row['scheduled_slot_at'])) { return false; }
+    $slot = v1_mysql_datetime_utc($row['scheduled_slot_at']);
+    $trigger = v1_mysql_datetime_utc($row['trigger_created_at']);
+    $claimed = v1_mysql_datetime_utc($row['slot_claimed_at']);
+    $nextSlot = v1_official_next_cadence_slot((string)$row['scheduled_slot_at']);
+    $declaredNext = v1_mysql_datetime_utc($row['next_cadence_slot_at']);
+    if ($slot === null || $trigger === null || $claimed === null || $nextSlot === null || $declaredNext !== $nextSlot
+        || $trigger < $slot || $claimed < $trigger
+        || !in_array($row['slot_claim_status'],array('claimed','failed','completed'),true)) { return false; }
+    $slotEpoch = strtotime($slot . ' UTC'); $triggerEpoch = strtotime($trigger . ' UTC'); $claimedEpoch = strtotime($claimed . ' UTC');
+    if ($slotEpoch === false || $triggerEpoch === false || $claimedEpoch === false) { return false; }
+    return (int)$row['trigger_lag_seconds'] === $triggerEpoch-$slotEpoch
+        && (int)$row['claim_lag_seconds'] === $claimedEpoch-$slotEpoch
+        && (bool)$row['slot_claim_late'] === ($claimed >= $nextSlot);
+}
+
+function v1_official_claim_matches_ledger_run(array $claim, array $row, array $run): bool {
+    if ($row['slot_claim_id'] !== (string)$claim['claim_id']
+        || $row['pipeline'] !== (string)$claim['pipeline']
+        || $row['event_schedule'] !== (string)$claim['event_schedule']
+        || v1_mysql_datetime_utc($row['scheduled_slot_at']) !== (string)$claim['scheduled_slot_at']
+        || v1_mysql_datetime_utc($row['trigger_created_at']) !== (string)$claim['trigger_created_at']
+        || v1_mysql_datetime_utc($row['slot_claimed_at']) !== (string)$claim['claimed_at']
+        || v1_mysql_datetime_utc($row['next_cadence_slot_at']) !== (string)$claim['next_cadence_slot_at']
+        || $row['github_run_id'] !== (string)$claim['github_run_id']
+        || $row['github_run_attempt'] !== (int)$claim['github_run_attempt']
+        || $row['trigger_lag_seconds'] !== (int)$claim['trigger_lag_seconds']
+        || $row['claim_lag_seconds'] !== (int)$claim['claim_lag_seconds']
+        || $row['slot_claim_late'] !== ((int)$claim['late'] === 1)
+        || !is_string($row['code_revision']) || !hash_equals((string)$claim['code_revision'],$row['code_revision'])
+        || !in_array((string)$claim['status'],array('failed','completed'),true)
+        || (string)$claim['completed_run_id'] !== $row['run_id']
+        || (int)$claim['completed_run_attempt'] !== $row['github_run_attempt']
+        || (int)$claim['completion_raw_count'] !== $row['raw_count']
+        || (int)$claim['completion_ack_count'] !== $row['acknowledged_count']
+        || !is_string($claim['completion_sha256'])
+        || preg_match('/^[a-f0-9]{64}$/',(string)$claim['completion_sha256']) !== 1) { return false; }
+    $metrics = json_decode((string)$run['metrics_json'],true);
+    if (!is_array($metrics)) { return false; }
+    unset($metrics['server_correction_link_ambiguous'],$metrics['server_event_link_ambiguous']);
+    try { $digest = v1_official_completion_semantic_sha($metrics); }
+    catch (Throwable $e) { return false; }
+    if (!hash_equals((string)$claim['completion_sha256'],$digest)) { return false; }
+    $topSucceeded = in_array($row['status'],array('success','succeeded'),true)
+        && $row['raw_count'] === $row['acknowledged_count'];
+    if ((string)$claim['status'] === 'completed') {
+        return $topSucceeded && $claim['completed_at'] !== null && $claim['terminal_reason'] === null;
+    }
+    return $claim['completed_at'] === null;
+}
+
+function v1_official_claim_only_ledger_row(array $claim): array {
+    $sourceOutcomes = array(
+        'dart'=>array('status'=>'missing','raw_count'=>0,'acknowledged_count'=>0),
+        'kind'=>array('status'=>'missing','raw_count'=>0,'acknowledged_count'=>0),
+    );
+    return array(
+        'run_id'=>'slot-claim:' . (string)$claim['claim_id'],
+        'pipeline'=>(string)$claim['pipeline'],
+        'source_key'=>'dart+kind',
+        'code_revision'=>v1_valid_build_sha($claim['code_revision']),
+        'status'=>'incomplete',
+        'started_at'=>v1_release_iso_time($claim['claimed_at']),
+        'finished_at'=>v1_release_iso_time($claim['claimed_at']),
+        'first_observed_at'=>v1_release_iso_time($claim['claimed_at']),
+        'raw_count'=>0,
+        'acknowledged_count'=>0,
+        'run_kind'=>'scheduled_incremental',
+        'event_schedule'=>(string)$claim['event_schedule'],
+        'scheduled_slot_at'=>v1_release_iso_time($claim['scheduled_slot_at']),
+        'trigger_created_at'=>v1_release_iso_time($claim['trigger_created_at']),
+        'slot_claim_id'=>(string)$claim['claim_id'],
+        'github_run_id'=>(string)$claim['github_run_id'],
+        'github_run_attempt'=>(int)$claim['github_run_attempt'],
+        'slot_claimed_at'=>v1_release_iso_time($claim['claimed_at']),
+        'next_cadence_slot_at'=>v1_release_iso_time($claim['next_cadence_slot_at']),
+        'trigger_lag_seconds'=>(int)$claim['trigger_lag_seconds'],
+        'claim_lag_seconds'=>(int)$claim['claim_lag_seconds'],
+        'slot_claim_late'=>((int)$claim['late'] === 1),
+        'slot_claim_status'=>(string)$claim['status'],
+        'slot_claim_terminal_reason'=>$claim['terminal_reason'] === null ? null : (string)$claim['terminal_reason'],
+        'company_master_sync'=>false,
+        'source_outcomes'=>$sourceOutcomes,
+    );
+}
+
+function v1_official_run_ledger_rows(PDO $pdo, array $config, string $from, string $to): array {
+    list($start,$end) = v1_evidence_utc_bounds($from,$to);
+    // Include a one-day buffer because the authoritative date for a valid
+    // scheduled run is its KST scheduled slot, not its (possibly next-day)
+    // completion timestamp.
+    $queryStart = (new DateTimeImmutable($start,new DateTimeZone('UTC')))->modify('-1 day')->format('Y-m-d H:i:s');
+    $queryEnd = (new DateTimeImmutable($end,new DateTimeZone('UTC')))->modify('+1 day')->format('Y-m-d H:i:s');
+    $claimStmt = $pdo->prepare('SELECT * FROM ' . table_name($config,'official_slot_claims')
+        . ' WHERE scheduled_slot_at BETWEEN ? AND ? ORDER BY scheduled_slot_at,claim_id');
+    $claimStmt->execute(array($start,$end)); $claims = array();
+    foreach ($claimStmt->fetchAll() as $claim) { $claims[(string)$claim['claim_id']] = $claim; }
+    $stmt = $pdo->prepare('SELECT run_id,pipeline,source_key,code_revision,status,started_at,finished_at,first_observed_at,'
+        . 'raw_count,acknowledged_count,metrics_json FROM ' . table_name($config,'collection_runs')
+        . ' WHERE COALESCE(finished_at,started_at) BETWEEN ? AND ? AND source_key IN (\'dart\',\'kind\',\'dart+kind\',\'kind+dart\')'
+        . ' ORDER BY COALESCE(finished_at,started_at),run_id LIMIT 50000');
+    $stmt->execute(array($queryStart,$queryEnd)); $rows = array(); $seenClaims = array();
+    foreach ($stmt->fetchAll() as $run) {
+        $row = v1_official_run_ledger_row($run);
+        $claimId = isset($row['slot_claim_id']) && is_string($row['slot_claim_id']) ? $row['slot_claim_id'] : '';
+        if ($claimId !== '' && isset($claims[$claimId])
+            && v1_official_claim_matches_ledger_run($claims[$claimId],$row,$run)) {
+            $row['slot_claim_status'] = (string)$claims[$claimId]['status'];
+            $row['slot_claim_terminal_reason'] = $claims[$claimId]['terminal_reason'] === null
+                ? null : (string)$claims[$claimId]['terminal_reason'];
+            $seenClaims[$claimId] = true;
+        }
+        $scheduled = v1_official_scheduled_run_matches($row);
+        $sortAt = $scheduled ? v1_mysql_datetime_utc($row['scheduled_slot_at'])
+            : v1_mysql_datetime_utc($row['finished_at'] !== null ? $row['finished_at'] : $row['started_at']);
+        $day = $sortAt === null ? null : v1_kst_observation_date($sortAt);
+        if ($sortAt === null || $day === null || $day < $from || $day > $to) { continue; }
+        $row['_sort_at'] = $sortAt; $rows[] = $row;
+    }
+    foreach ($claims as $claimId => $claim) {
+        if (isset($seenClaims[$claimId])) { continue; }
+        $row = v1_official_claim_only_ledger_row($claim);
+        if (!v1_official_scheduled_run_matches($row)) { continue; }
+        $row['_sort_at'] = (string)$claim['scheduled_slot_at']; $rows[] = $row;
+    }
+    usort($rows,function (array $left, array $right): int {
+        $timeOrder = strcmp((string)$left['_sort_at'],(string)$right['_sort_at']);
+        return $timeOrder !== 0 ? $timeOrder : strcmp((string)$left['run_id'],(string)$right['run_id']);
+    });
+    foreach ($rows as &$row) { unset($row['_sort_at']); } unset($row);
+    return $rows;
+}
+
+function v1_official_run_ledger_sort_at(array $row): ?string {
+    if (v1_official_scheduled_run_matches($row)) {
+        return v1_mysql_datetime_utc($row['scheduled_slot_at']);
+    }
+    return v1_mysql_datetime_utc($row['finished_at'] !== null ? $row['finished_at'] : $row['started_at']);
+}
+
+function v1_official_run_ledger_hash(array $rows): string {
+    $context = hash_init('sha256');
+    foreach ($rows as $row) { hash_update($context,v1_strict_canonical_json_encode($row,'official_run_ledger_encode_failed') . "\n"); }
+    return hash_final($context);
+}
+
+function v1_official_schedule_summary(array $rows, string $from, string $to): array {
+    $fromDate = new DateTimeImmutable($from,new DateTimeZone('Asia/Seoul'));
+    $toDate = new DateTimeImmutable($to,new DateTimeZone('Asia/Seoul'));
+    $expectedSlots = ((int)$fromDate->diff($toDate)->days + 1) * 82;
+    $slotRuns = array(); $sourceObserved = array('dart'=>array(),'kind'=>array());
+    $sourceSucceeded = array('dart'=>array(),'kind'=>array()); $sourceFailed = array('dart'=>array(),'kind'=>array());
+    $invalidRows = 0; $invalidMetadata = 0; $lateClaims = 0; $incompleteClaims = 0; $terminalFailures = 0;
+    foreach ($rows as $row) {
+        if ($row['run_kind'] === null) { $invalidMetadata++; continue; }
+        if ($row['run_kind'] !== 'scheduled_incremental') { continue; }
+        $slot = isset($row['scheduled_slot_at']) && is_string($row['scheduled_slot_at']) ? $row['scheduled_slot_at'] : '';
+        if ($slot === '' || !v1_official_scheduled_run_matches($row)) {
+            $invalidRows++; continue;
+        }
+        if (!isset($slotRuns[$slot])) { $slotRuns[$slot] = 0; }
+        $slotRuns[$slot]++;
+        if ($row['slot_claim_late'] === true) { $lateClaims++; }
+        if ($row['slot_claim_status'] !== 'completed') { $incompleteClaims++; }
+        if (isset($row['slot_claim_terminal_reason']) && $row['slot_claim_terminal_reason'] !== null) { $terminalFailures++; }
+        $topSucceeded = in_array(strtolower((string)$row['status']),array('success','succeeded'),true)
+            && (int)$row['raw_count'] === (int)$row['acknowledged_count']
+            && $row['slot_claim_status'] === 'completed' && $row['slot_claim_late'] === false;
+        $selectedSources = explode('+',strtolower((string)$row['source_key']));
+        foreach (array('dart','kind') as $source) {
+            // Disabled outcomes are retained in the raw ledger for audit, but
+            // only sources selected by this run belong in its denominator.
+            if (!in_array($source,$selectedSources,true) || !isset($row['source_outcomes'][$source])) { continue; }
+            $sourceObserved[$source][$slot] = true;
+            $outcome = $row['source_outcomes'][$source];
+            $sourceStatus = strtolower((string)$outcome['status']);
+            if ($topSucceeded && in_array($sourceStatus,array('success','succeeded'),true)
+                && is_int($outcome['raw_count']) && is_int($outcome['acknowledged_count'])
+                && $outcome['raw_count'] === $outcome['acknowledged_count']) {
+                $sourceSucceeded[$source][$slot] = true; unset($sourceFailed[$source][$slot]);
+            } elseif (!isset($sourceSucceeded[$source][$slot])) { $sourceFailed[$source][$slot] = true; }
+        }
+    }
+    $duplicateSlots = 0;
+    foreach ($slotRuns as $count) { if ($count > 1) { $duplicateSlots += $count - 1; } }
+    $observedSlots = count($slotRuns);
+    return array(
+        'contract_version'=>1,
+        'timezone'=>'Asia/Seoul',
+        'cadence_id'=>'official-v1-82-slots',
+        'from'=>$from,
+        'to'=>$to,
+        'expected_slot_count'=>$expectedSlots,
+        'ledger_row_count'=>count($rows),
+        'ledger_sha256'=>v1_official_run_ledger_hash($rows),
+        'scheduled_run_count'=>array_sum($slotRuns),
+        'observed_slot_count'=>$observedSlots,
+        'claimed_slot_count'=>$observedSlots,
+        'missing_slot_count'=>max(0,$expectedSlots-$observedSlots),
+        'late_claim_count'=>$lateClaims,
+        'incomplete_claim_count'=>$incompleteClaims,
+        'terminal_failure_count'=>$terminalFailures,
+        'duplicate_slot_count'=>$duplicateSlots,
+        'invalid_scheduled_run_count'=>$invalidRows,
+        'invalid_run_metadata_count'=>$invalidMetadata,
+        'dart_expected_count'=>$expectedSlots,
+        'dart_succeeded_count'=>count($sourceSucceeded['dart']),
+        'dart_missing_count'=>max(0,$expectedSlots-count($sourceObserved['dart'])),
+        'dart_failed_count'=>count($sourceFailed['dart']),
+        'kind_expected_count'=>$expectedSlots,
+        'kind_succeeded_count'=>count($sourceSucceeded['kind']),
+        'kind_missing_count'=>max(0,$expectedSlots-count($sourceObserved['kind'])),
+        'kind_failed_count'=>count($sourceFailed['kind']),
+    );
+}
+
+function v1_ops_official_run_ledger(PDO $pdo, array $config): void {
+    $kstNow = new DateTimeImmutable('now',new DateTimeZone('Asia/Seoul'));
+    $to = v1_date_bound('to',$kstNow->format('Y-m-d'));
+    $from = v1_date_bound('from',$kstNow->modify('-6 days')->format('Y-m-d'));
+    $fromDate = new DateTimeImmutable($from,new DateTimeZone('Asia/Seoul'));
+    $toDate = new DateTimeImmutable($to,new DateTimeZone('Asia/Seoul'));
+    if ($toDate < $fromDate || $toDate->diff($fromDate)->days > 30) {
+        v1_respond(400,array('ok'=>false,'error'=>'ledger_range_exceeds_31_days'));
+    }
+    $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 25; $limit = max(1,min(100,$limit));
+    $cursor = isset($_GET['cursor']) ? trim((string)$_GET['cursor']) : '';
+    $decodedCursor = $cursor === '' ? null : v1_runtime_cursor_decode($cursor);
+    if ($cursor !== '' && $decodedCursor === null) { v1_respond(400,array('ok'=>false,'error'=>'invalid_cursor')); }
+    $rows = v1_official_run_ledger_rows($pdo,$config,$from,$to); $eligible = array();
+    foreach ($rows as $row) {
+        $sortMysql = v1_official_run_ledger_sort_at($row);
+        if ($sortMysql === null) { v1_respond(503,array('ok'=>false,'error'=>'official_run_ledger_integrity_error')); }
+        if ($decodedCursor !== null && !($sortMysql > $decodedCursor[0]
+            || ($sortMysql === $decodedCursor[0] && strcmp($row['run_id'],$decodedCursor[1]) > 0))) { continue; }
+        $row['_sort_at'] = $sortMysql; $eligible[] = $row;
+    }
+    $hasMore = count($eligible) > $limit; $pageRows = array_slice($eligible,0,$limit); $nextCursor = null;
+    if ($hasMore && count($pageRows) > 0) {
+        $last = $pageRows[count($pageRows)-1]; $nextCursor = v1_runtime_cursor_encode($last['_sort_at'],$last['run_id']);
+    }
+    foreach ($pageRows as &$row) { unset($row['_sort_at']); } unset($row);
+    v1_respond(200,array(
+        'ok'=>true,
+        'range'=>array('from'=>$from,'to'=>$to),
+        'ledger_row_count'=>count($rows),
+        'ledger_sha256'=>v1_official_run_ledger_hash($rows),
+        'data'=>$pageRows,
+        'pagination'=>array('limit'=>$limit,'returned'=>count($pageRows),'has_more'=>$hasMore,'next_cursor'=>$nextCursor),
+    ));
+}
+
+function v1_ops_release_evidence(PDO $pdo, array $config): void {
+    $kstNow = new DateTimeImmutable('now',new DateTimeZone('Asia/Seoul'));
+    $to = v1_date_bound('to',$kstNow->format('Y-m-d'));
+    $from = v1_date_bound('from',$kstNow->modify('-6 days')->format('Y-m-d'));
+    $fromDate = new DateTimeImmutable($from,new DateTimeZone('Asia/Seoul'));
+    $toDate = new DateTimeImmutable($to,new DateTimeZone('Asia/Seoul'));
+    if ($toDate < $fromDate || $toDate->diff($fromDate)->days > 30) {
+        v1_respond(400,array('ok'=>false,'error'=>'evidence_range_exceeds_31_days'));
+    }
+    list($start,$end) = v1_evidence_utc_bounds($from,$to);
+    $epochBoundaryStmt = $pdo->prepare('SELECT COUNT(*) FROM ' . table_name($config,'official_slot_claim_epochs')
+        . ' WHERE pipeline=? AND active_from > ? AND active_from <= ?');
+    $epochBoundaryStmt->execute(array('ingest-official',$start,$end));
+    if ((int)$epochBoundaryStmt->fetchColumn() > 0) {
+        v1_official_slot_claim_error(409,'official_slot_epoch_boundary_in_evidence_range');
+    }
+    $runQueryStart = (new DateTimeImmutable($start,new DateTimeZone('UTC')))->modify('-1 day')->format('Y-m-d H:i:s');
+    $runQueryEnd = (new DateTimeImmutable($end,new DateTimeZone('UTC')))->modify('+1 day')->format('Y-m-d H:i:s');
+
+    $rawRunStmt = $pdo->prepare('SELECT run_id,pipeline,source_key,code_revision,status,started_at,finished_at,first_observed_at,raw_count,'
+        . 'acknowledged_count,lag_seconds_p95,metrics_json FROM ' . table_name($config,'collection_runs')
+        . ' WHERE COALESCE(finished_at,started_at) BETWEEN ? AND ? AND source_key IN (\'dart\',\'kind\',\'dart+kind\',\'kind+dart\') '
+        . 'ORDER BY COALESCE(finished_at,started_at),run_id LIMIT 50000');
+    $rawRunStmt->execute(array($runQueryStart,$runQueryEnd)); $rawRuns = $rawRunStmt->fetchAll();
+    $releaseClaimStmt = $pdo->prepare('SELECT * FROM ' . table_name($config,'official_slot_claims')
+        . ' WHERE scheduled_slot_at BETWEEN ? AND ?');
+    $releaseClaimStmt->execute(array($runQueryStart,$runQueryEnd)); $releaseClaims = array();
+    foreach ($releaseClaimStmt->fetchAll() as $claim) { $releaseClaims[(string)$claim['claim_id']] = $claim; }
+    $runGroups = array(); $operations = array(); $runShas = array(); $lastOfficialSuccess = array();
+    foreach ($rawRuns as $run) {
+        $observedAt = (string)($run['finished_at'] ?: $run['started_at']);
+        $revision = v1_valid_build_sha($run['code_revision']);
+        $sourceKey = strtolower((string)$run['source_key']); $status = strtolower((string)$run['status']);
+        $ledgerRun = v1_official_run_ledger_row($run);
+        $claimId = isset($ledgerRun['slot_claim_id']) && is_string($ledgerRun['slot_claim_id']) ? $ledgerRun['slot_claim_id'] : '';
+        if ($claimId !== '' && isset($releaseClaims[$claimId])
+            && v1_official_claim_matches_ledger_run($releaseClaims[$claimId],$ledgerRun,$run)) {
+            $ledgerRun['slot_claim_status'] = (string)$releaseClaims[$claimId]['status'];
+            $ledgerRun['slot_claim_terminal_reason'] = $releaseClaims[$claimId]['terminal_reason'] === null
+                ? null : (string)$releaseClaims[$claimId]['terminal_reason'];
+        }
+        $scheduledIncremental = v1_official_scheduled_run_matches($ledgerRun);
+        $scheduledSlot = $scheduledIncremental ? (string)$ledgerRun['scheduled_slot_at'] : null;
+        $dateBasis = $scheduledIncremental ? v1_mysql_datetime_utc($scheduledSlot) : $observedAt;
+        $day = $dateBasis === null ? null : v1_kst_observation_date($dateBasis);
+        $succeeded = in_array($status,array('success','succeeded'),true)
+            && (int)$ledgerRun['raw_count'] === (int)$ledgerRun['acknowledged_count']
+            && (!$scheduledIncremental || ($ledgerRun['slot_claim_status'] === 'completed'
+                && $ledgerRun['slot_claim_late'] === false));
+        if ($day !== null && $day < $from && $scheduledIncremental && $revision !== null && $succeeded) {
+            // The one-day query buffer supplies the immediately preceding
+            // successful poll so the first in-range DART interval is actual,
+            // not silently dropped or synthesized from cron slots.
+            $epoch = strtotime($observedAt . ' UTC');
+            if ($epoch !== false) {
+                foreach ($ledgerRun['source_outcomes'] as $carrySource => $carryOutcome) {
+                    $carryStatus = strtolower((string)$carryOutcome['status']);
+                    if (in_array($carrySource,array('dart','kind'),true)
+                        && in_array($carryStatus,array('success','succeeded'),true)
+                        && is_int($carryOutcome['raw_count']) && is_int($carryOutcome['acknowledged_count'])
+                        && $carryOutcome['raw_count'] === $carryOutcome['acknowledged_count']) {
+                        $lastKey = $carrySource . '|' . $revision;
+                        if (!isset($lastOfficialSuccess[$lastKey]) || $epoch > $lastOfficialSuccess[$lastKey]) {
+                            $lastOfficialSuccess[$lastKey] = $epoch;
+                        }
+                    }
+                }
+            }
+        }
+        if ($day === null || $day < $from || $day > $to) { continue; }
+        $runKey = $day . '|' . $sourceKey . '|' . (string)$revision;
+        if (!isset($runGroups[$runKey])) {
+            $runGroups[$runKey] = array('observation_date'=>$day,'source_key'=>$sourceKey,'code_revision'=>$revision,
+                'attempt_count'=>0,'success_count'=>0,'raw_count'=>0,'acknowledged_count'=>0,'first_observed_at'=>null,'last_finished_at'=>null);
+        }
+        $runGroups[$runKey]['attempt_count']++;
+        if ($succeeded) { $runGroups[$runKey]['success_count']++; }
+        $runGroups[$runKey]['raw_count'] += (int)$run['raw_count'];
+        $runGroups[$runKey]['acknowledged_count'] += (int)$run['acknowledged_count'];
+        if ($run['first_observed_at'] !== null && ($runGroups[$runKey]['first_observed_at'] === null
+            || (string)$run['first_observed_at'] < $runGroups[$runKey]['first_observed_at'])) {
+            $runGroups[$runKey]['first_observed_at'] = (string)$run['first_observed_at'];
+        }
+        if ($run['finished_at'] !== null && ($runGroups[$runKey]['last_finished_at'] === null
+            || (string)$run['finished_at'] > $runGroups[$runKey]['last_finished_at'])) {
+            $runGroups[$runKey]['last_finished_at'] = (string)$run['finished_at'];
+        }
+        if ($revision === null) { continue; }
+        $runShas[$revision] = true; $opKey = $day . '|' . $revision;
+        if (!isset($operations[$opKey])) {
+            $operations[$opKey] = array('observation_date'=>$day,'code_revision'=>$revision,
+                'official_ingest_expected_count'=>0,'official_ingest_succeeded_count'=>0,
+                'dart_expected_count'=>0,'dart_succeeded_count'=>0,'dart_raw_count'=>0,'dart_acknowledged_count'=>0,
+                'kind_expected_count'=>0,'kind_succeeded_count'=>0,'kind_raw_count'=>0,'kind_acknowledged_count'=>0,
+                'scheduled_source_slots'=>array('dart'=>array(),'kind'=>array()),
+                'official_lag_values'=>array(),'dart_poll_intervals'=>array(),'kind_lag_values'=>array(),
+                'kind_observation_count'=>0,'kind_lag_sample_count'=>0,'content_snapshot_at'=>null,'content_scope'=>null,
+                'web_distribution_attempted_count'=>0,'web_distribution_succeeded_count'=>0,
+                'official_evidence_total_count'=>null,'official_evidence_linked_count'=>null,
+                'top_sensitive_total_count'=>null,'top_sensitive_reviewed_count'=>null,
+                'original_language_total_count'=>null,'original_language_preserved_count'=>null,
+                'source_right_total_count'=>null,'valid_source_right_count'=>null);
+        }
+        $metrics = json_decode((string)$run['metrics_json'],true); if (!is_array($metrics)) { $metrics = array(); }
+        $outcomes = isset($metrics['source_outcomes']) && is_array($metrics['source_outcomes']) ? $metrics['source_outcomes']
+            : (isset($metrics['metrics']['source_outcomes']) && is_array($metrics['metrics']['source_outcomes']) ? $metrics['metrics']['source_outcomes'] : array());
+        $sources = array();
+        foreach (array('dart','kind') as $officialSource) {
+            if (isset($outcomes[$officialSource]) && is_array($outcomes[$officialSource])) {
+                $outcomeStatus = strtolower(trim((string)($outcomes[$officialSource]['status'] ?? '')));
+                if ($outcomeStatus !== '' && $outcomeStatus !== 'disabled') { $sources[$officialSource] = $outcomeStatus; }
+            } elseif (in_array($officialSource,explode('+',$sourceKey),true)) { $sources[$officialSource] = $status; }
+        }
+        foreach ($sources as $officialSource => $sourceStatus) {
+            if (!$scheduledIncremental || isset($operations[$opKey]['scheduled_source_slots'][$officialSource][$scheduledSlot])) {
+                continue;
+            }
+            $operations[$opKey]['scheduled_source_slots'][$officialSource][$scheduledSlot] = true;
+            $sourceOutcome = isset($ledgerRun['source_outcomes'][$officialSource])
+                ? $ledgerRun['source_outcomes'][$officialSource] : array('raw_count'=>null,'acknowledged_count'=>null);
+            $sourceRaw = $sourceOutcome['raw_count']; $sourceAck = $sourceOutcome['acknowledged_count'];
+            $sourceSucceeded = $succeeded && in_array($sourceStatus,array('success','succeeded'),true)
+                && is_int($sourceRaw) && is_int($sourceAck) && $sourceRaw === $sourceAck;
+            $operations[$opKey]['official_ingest_expected_count']++;
+            $operations[$opKey][$officialSource . '_expected_count']++;
+            if ($sourceSucceeded) {
+                $operations[$opKey]['official_ingest_succeeded_count']++;
+                $operations[$opKey][$officialSource . '_succeeded_count']++;
+                // DART has no authoritative receipt timestamp; measure the
+                // interval between actual successful polls, never cron slots.
+                $epoch = strtotime($observedAt . ' UTC'); $lastKey = $officialSource . '|' . $revision;
+                if ($officialSource === 'dart' && $epoch !== false && isset($lastOfficialSuccess[$lastKey])) {
+                    $operations[$opKey]['dart_poll_intervals'][] = (float)max(0,$epoch-$lastOfficialSuccess[$lastKey]);
+                }
+                if ($epoch !== false) { $lastOfficialSuccess[$lastKey] = $epoch; }
+            }
+            if ($sourceRaw !== null) { $operations[$opKey][$officialSource . '_raw_count'] += $sourceRaw; }
+            if ($sourceAck !== null) { $operations[$opKey][$officialSource . '_acknowledged_count'] += $sourceAck; }
+        }
+        if ($scheduledIncremental && is_numeric($run['lag_seconds_p95'])) {
+            $operations[$opKey]['official_lag_values'][] = (float)$run['lag_seconds_p95'];
+        }
+        if (preg_match('/(?:^|[-_])(publish|pages-deploy|deploy-pages|web-distribution)(?:$|[-_])/',$run['pipeline']) === 1) {
+            $operations[$opKey]['web_distribution_attempted_count']++;
+            if ($succeeded) { $operations[$opKey]['web_distribution_succeeded_count']++; }
+        }
+    }
+
+    // Availability is a strict seven-day, four-route, 288-slot/day contract.
+    // Its day begins at KST 00:01 and the final 23:56 slot owns the next
+    // civil day's 00:00 minute.  Query those exact raw timestamp edges.
+    $availabilityFromDate = $toDate->modify('-6 days');
+    if ($availabilityFromDate < $fromDate) { $availabilityFromDate = $fromDate; }
+    $availabilityFrom = $availabilityFromDate->format('Y-m-d');
+    list($availabilityStart,$availabilityEnd) = v1_availability_utc_bounds($availabilityFrom,$to);
+    $availabilityStmt = $pdo->prepare('SELECT observation_id,observed_at,route_template,http_status,duration_ms,succeeded,build_sha,source FROM '
+        . table_name($config,'availability_observations') . ' WHERE observed_at BETWEEN ? AND ? ORDER BY observed_at,observation_id LIMIT 50001');
+    $availabilityStmt->execute(array($availabilityStart,$availabilityEnd)); $availability = $availabilityStmt->fetchAll();
+    if (count($availability) > 50000) { v1_respond(503,array('ok'=>false,'error'=>'availability_evidence_row_limit_exceeded')); }
+    $successCount = 0; $durations = array(); $intervals = array(); $availabilityShas = array(); $availabilityGroups = array();
+    foreach ($availability as $row) {
+        $success = (int)$row['succeeded'] === 1; if ($success) { $successCount++; }
+        $duration = (float)$row['duration_ms']; $durations[] = $duration; $sha = (string)$row['build_sha']; $availabilityShas[$sha] = true;
+        $bucket = v1_availability_cadence_bucket((string)$row['observed_at']);
+        if ($bucket === null) { v1_respond(503,array('ok'=>false,'error'=>'availability_observed_at_integrity_error')); }
+        $route = (string)$row['route_template']; $day = (string)$bucket['observation_date'];
+        if ($day < $availabilityFrom || $day > $to) {
+            v1_respond(503,array('ok'=>false,'error'=>'availability_cadence_window_integrity_error'));
+        }
+        $groupKey = $day . '|' . $route . '|' . $sha;
+        if (!isset($availabilityGroups[$groupKey])) {
+            $availabilityGroups[$groupKey] = array('observation_date'=>$day,'route_template'=>$route,'build_sha'=>$sha,
+                'raw_attempt_count'=>0,'raw_success_count'=>0,'raw_failure_count'=>0,'durations'=>array(),'intervals'=>array(),
+                'failure_intervals'=>array(),'slot_indexes'=>array(),'duplicate_slot_count'=>0,'off_cadence_count'=>0,
+                'epochs'=>array(),'first_observed_at'=>null,'last_observed_at'=>null,'last_epoch'=>null);
+        }
+        $group =& $availabilityGroups[$groupKey];
+        $group['raw_attempt_count']++;
+        $group[$success ? 'raw_success_count' : 'raw_failure_count']++;
+        $group['durations'][] = $duration;
+        $slotIndex = (int)$bucket['slot_index']; $epoch = (int)$bucket['epoch'];
+        if (isset($group['slot_indexes'][$slotIndex])) { $group['duplicate_slot_count']++; }
+        else { $group['slot_indexes'][$slotIndex] = true; }
+        if ($group['last_epoch'] !== null) {
+            $interval = (float)max(0,$epoch-(int)$group['last_epoch']);
+            $group['intervals'][] = $interval;
+            if (!$success) { $group['failure_intervals'][] = $interval; }
+        }
+        $group['last_epoch'] = $epoch; $group['epochs'][] = $epoch;
+        if ($group['first_observed_at'] === null) { $group['first_observed_at'] = (string)$row['observed_at']; }
+        $group['last_observed_at'] = (string)$row['observed_at'];
+        unset($group);
+    }
+    $availabilitySummary = array();
+    foreach ($availabilityGroups as $group) {
+        $attempted = (int)$group['raw_attempt_count']; $covered = count($group['slot_indexes']);
+        $missing = GOV_V1_AVAILABILITY_SLOTS_PER_DAY - $covered;
+        $groupIntervals = $group['intervals'];
+        foreach ($groupIntervals as $interval) { $intervals[] = $interval; }
+        $epochs = $group['epochs']; sort($epochs,SORT_NUMERIC);
+        list($dayStartEpoch,$dayEndEpoch) = v1_availability_day_edges((string)$group['observation_date']);
+        $edgeAndActualGaps = array();
+        if ($epochs) {
+            $edgeAndActualGaps[] = (float)max(0,$epochs[0]-$dayStartEpoch);
+            for ($index=1; $index<count($epochs); $index++) {
+                $edgeAndActualGaps[] = (float)max(0,$epochs[$index]-$epochs[$index-1]);
+            }
+            $edgeAndActualGaps[] = (float)max(0,$dayEndEpoch-$epochs[count($epochs)-1]);
+        } else { $edgeAndActualGaps[] = (float)($dayEndEpoch-$dayStartEpoch); }
+        $availabilitySummary[] = array('observation_date'=>$group['observation_date'],'route_template'=>$group['route_template'],'build_sha'=>$group['build_sha'],
+            'raw_attempt_count'=>$attempted,'raw_success_count'=>$group['raw_success_count'],'raw_failure_count'=>$group['raw_failure_count'],
+            'success_rate_denominator'=>$attempted,'success_rate'=>$attempted > 0 ? $group['raw_success_count']/$attempted : null,
+            'duration_ms_p95'=>v1_percentile($group['durations'],0.95),
+            'cadence_id'=>GOV_V1_AVAILABILITY_CADENCE_ID,
+            'expected_slot_count'=>GOV_V1_AVAILABILITY_SLOTS_PER_DAY,
+            'covered_slot_count'=>$covered,'missing_slot_count'=>$missing,
+            'duplicate_slot_count'=>(int)$group['duplicate_slot_count'],'off_cadence_count'=>(int)$group['off_cadence_count'],
+            'covered_slots_bitmap_hex'=>v1_availability_bitmap_hex(array_keys($group['slot_indexes'])),
+            'first_observed_at'=>v1_release_iso_time($group['first_observed_at']),
+            'last_observed_at'=>v1_release_iso_time($group['last_observed_at']),
+            'actual_interval_seconds_p95'=>v1_percentile($groupIntervals,0.95),
+            'actual_max_gap_seconds'=>max($edgeAndActualGaps),
+            // Compatibility alias; the actual_* fields above are authoritative.
+            'observation_interval_seconds_p95'=>v1_percentile($groupIntervals,0.95),
+            'failure_detection_seconds_p95'=>v1_percentile($group['failure_intervals'],0.95));
+    }
+    usort($availabilitySummary,function($a,$b) {
+        return strcmp($a['observation_date'].'|'.$a['route_template'].'|'.$a['build_sha'],
+            $b['observation_date'].'|'.$b['route_template'].'|'.$b['build_sha']);
+    });
+
+    $distributionStmt = $pdo->prepare('SELECT observed_at,distribution_target,duration_ms,succeeded,build_sha,workflow_run_id,failure_detected_at,source FROM '
+        . table_name($config,'web_distribution_observations') . ' WHERE observed_at BETWEEN ? AND ? ORDER BY observed_at,observation_id LIMIT 50000');
+    $distributionStmt->execute(array($start,$end)); $distributionGroups = array(); $distributionShas = array();
+    foreach ($distributionStmt->fetchAll() as $row) {
+        $day = v1_kst_observation_date((string)$row['observed_at']); if ($day === null) { continue; }
+        $sha = (string)$row['build_sha']; $distributionShas[$sha] = true; $key = $day . '|' . $sha;
+        if (!isset($distributionGroups[$key])) {
+            $distributionGroups[$key] = array('observation_date'=>$day,'code_revision'=>$sha,'raw_attempt_count'=>0,
+                'raw_success_count'=>0,'raw_failure_count'=>0,'targets'=>array(),'durations'=>array(),'failure_detection'=>array());
+        }
+        $succeeded = (int)$row['succeeded'] === 1; $distributionGroups[$key]['raw_attempt_count']++;
+        $distributionGroups[$key][$succeeded ? 'raw_success_count' : 'raw_failure_count']++;
+        $distributionGroups[$key]['targets'][(string)$row['distribution_target']] = true;
+        $distributionGroups[$key]['durations'][] = (float)$row['duration_ms'];
+        if (!$succeeded && $row['failure_detected_at'] !== null) {
+            $observedEpoch = strtotime((string)$row['observed_at'] . ' UTC');
+            $detectedEpoch = strtotime((string)$row['failure_detected_at'] . ' UTC');
+            if ($observedEpoch !== false && $detectedEpoch !== false) {
+                $distributionGroups[$key]['failure_detection'][] = (float)max(0,$detectedEpoch-$observedEpoch);
+            }
+        }
+    }
+    $distributionDays = array();
+    foreach ($distributionGroups as $key => $group) {
+        $attempted = $group['raw_attempt_count'];
+        $distributionDays[] = array('observation_date'=>$group['observation_date'],'code_revision'=>$group['code_revision'],
+            'raw_attempt_count'=>$attempted,'raw_success_count'=>$group['raw_success_count'],'raw_failure_count'=>$group['raw_failure_count'],
+            'success_rate_denominator'=>$attempted,'success_rate'=>$attempted > 0 ? $group['raw_success_count']/$attempted : null,
+            'distribution_targets'=>array_values(array_keys($group['targets'])),'duration_ms_p95'=>v1_percentile($group['durations'],0.95),
+            'failure_detection_seconds_p95'=>v1_percentile($group['failure_detection'],0.95));
+    }
+
+    $vitalsStmt = $pdo->prepare('SELECT measured_at,route_template,metric_name,metric_value,device_class,build_sha,source FROM '
+        . table_name($config,'web_vital_observations') . ' WHERE measured_at BETWEEN ? AND ? AND expires_at > UTC_TIMESTAMP() ORDER BY measured_at LIMIT 50000');
+    $vitalsStmt->execute(array($start,$end)); $vitals = $vitalsStmt->fetchAll(); $vitalGroups = array(); $vitalShas = array();
+    foreach ($vitals as $row) {
+        $day = v1_kst_observation_date((string)$row['measured_at']); if ($day === null) { continue; }
+        $sha = (string)$row['build_sha']; $vitalShas[$sha] = true;
+        $key = $day . '|' . (string)$row['route_template'] . '|' . (string)$row['metric_name'] . '|'
+            . (string)$row['device_class'] . '|' . $sha;
+        if (!isset($vitalGroups[$key])) {
+            $vitalGroups[$key] = array('observation_date'=>$day,'route_template'=>(string)$row['route_template'],
+                'metric_name'=>(string)$row['metric_name'],'device_class'=>(string)$row['device_class'],'build_sha'=>$sha,'values'=>array());
+        }
+        $vitalGroups[$key]['values'][] = (float)$row['metric_value'];
+    }
+    $vitalSummary = array();
+    foreach ($vitalGroups as $group) {
+        $vitalSummary[] = array('observation_date'=>$group['observation_date'],'route_template'=>$group['route_template'],
+            'metric_name'=>$group['metric_name'],'device_class'=>$group['device_class'],'build_sha'=>$group['build_sha'],
+            'sample_count'=>count($group['values']),'p75'=>v1_percentile($group['values'],0.75));
+    }
+
+    // Content quality is not a "rows created today" metric. The immutable
+    // quality writer verifies a full 2021+ corpus snapshot at KST day end;
+    // exporter fallback below computes the same DB snapshot only before that
+    // day's immutable observation exists.
+    $revisionsByDay = array();
+    foreach ($operations as $group) { $revisionsByDay[$group['observation_date']][$group['code_revision']] = true; }
+    $actualKindStatsByDay = v1_kind_observation_stats_by_day($pdo,$config,$from,$to);
+    $qualityStmt = $pdo->prepare('SELECT observation_id,observation_date,code_revision,dart_success_poll_interval_p95_minutes,'
+        . 'kind_observation_lag_p95_minutes,kind_observation_count,kind_lag_sample_count,content_snapshot_at,content_scope,'
+        . 'official_evidence_total_count,official_evidence_linked_count,same_story_evaluated_pair_count,'
+        . 'same_story_predicted_same_count,same_story_true_positive_count,top_sensitive_total_count,top_sensitive_reviewed_count,'
+        . 'original_language_total_count,original_language_preserved_count,source_right_total_count,valid_source_right_count,source,payload_sha256,created_at FROM '
+        . table_name($config,'governance_quality_observations') . ' WHERE observation_date BETWEEN ? AND ? ORDER BY observation_date,code_revision');
+    $qualityStmt->execute(array($from,$to)); $qualityRows = $qualityStmt->fetchAll(); $qualityByKey = array(); $qualityShas = array();
+    foreach ($qualityRows as $quality) {
+        $qualityCounts = array();
+        foreach (array('official_evidence_total_count','official_evidence_linked_count','top_sensitive_total_count','top_sensitive_reviewed_count',
+            'original_language_total_count','original_language_preserved_count','source_right_total_count','valid_source_right_count') as $field) {
+            $qualityCounts[$field] = (int)$quality[$field];
+        }
+        if ((int)$quality['same_story_evaluated_pair_count'] !== 0 || (int)$quality['same_story_predicted_same_count'] !== 0
+            || (int)$quality['same_story_true_positive_count'] !== 0) {
+            v1_respond(503,array('ok'=>false,'error'=>'quality_observation_reserved_field_error',
+                'observation_id'=>(string)$quality['observation_id']));
+        }
+        $qualityKindLag = $quality['kind_observation_lag_p95_minutes'] === null
+            ? null : (float)$quality['kind_observation_lag_p95_minutes'];
+        $qualityKindObservationCount = (int)$quality['kind_observation_count'];
+        $qualityKindLagSampleCount = (int)$quality['kind_lag_sample_count'];
+        $qualitySnapshotAt = (string)$quality['content_snapshot_at'];
+        $qualityScope = (string)$quality['content_scope'];
+        if (($qualityKindObservationCount === 0 && ($qualityKindLagSampleCount !== 0 || $qualityKindLag !== null))
+            || ($qualityKindObservationCount > 0 && ($qualityKindLagSampleCount !== $qualityKindObservationCount || $qualityKindLag === null))
+            || v1_release_iso_time($qualitySnapshotAt) === null
+            || $qualityScope !== 'governance_corpus_2021_plus_kst_day_end_v2') {
+            v1_respond(503,array('ok'=>false,'error'=>'quality_observation_scope_error',
+                'observation_id'=>(string)$quality['observation_id']));
+        }
+        $qualityHash = v1_quality_observation_payload_hash((string)$quality['observation_date'],(string)$quality['code_revision'],
+            (float)$quality['dart_success_poll_interval_p95_minutes'],$qualityKindLag,$qualityKindObservationCount,
+            $qualityKindLagSampleCount,$qualitySnapshotAt,$qualityScope,
+            $qualityCounts,(string)$quality['source']);
+        if (!hash_equals((string)$quality['payload_sha256'],$qualityHash)) {
+            v1_respond(503,array('ok'=>false,'error'=>'quality_observation_integrity_error',
+                'observation_id'=>(string)$quality['observation_id']));
+        }
+        $qualityByKey[(string)$quality['observation_date'].'|'.(string)$quality['code_revision']] = $quality;
+        $qualityShas[(string)$quality['code_revision']] = true;
+    }
+    foreach ($operations as &$group) {
+        $day = $group['observation_date']; $singleRevision = isset($revisionsByDay[$day]) && count($revisionsByDay[$day]) === 1;
+        $kindStats = $singleRevision && isset($actualKindStatsByDay[$day]) ? $actualKindStatsByDay[$day]
+            : array('observation_count'=>0,'lag_sample_count'=>0,'lag_seconds'=>array());
+        $group['kind_lag_values'] = $kindStats['lag_seconds'];
+        $group['kind_observation_count'] = (int)$kindStats['observation_count'];
+        $group['kind_lag_sample_count'] = (int)$kindStats['lag_sample_count'];
+        if ($singleRevision) {
+            $snapshot = v1_content_corpus_snapshot($pdo,$config,$day);
+            foreach ($snapshot['raw_counts'] as $field => $value) { $group[$field] = $value; }
+            $group['content_snapshot_at'] = $snapshot['snapshot_at_iso'];
+            $group['content_scope'] = $snapshot['content_scope'];
+            $group['content_metric_assignment'] = 'database_corpus_snapshot';
+        } else { $group['content_metric_assignment'] = 'ambiguous_multiple_revisions'; }
+        $qualityKey = $day . '|' . $group['code_revision'];
+        if (isset($qualityByKey[$qualityKey])) {
+            $quality = $qualityByKey[$qualityKey];
+            foreach (array('official_evidence_total_count','official_evidence_linked_count','top_sensitive_total_count','top_sensitive_reviewed_count',
+                'original_language_total_count','original_language_preserved_count','source_right_total_count','valid_source_right_count') as $field) {
+                $group[$field] = (int)$quality[$field];
+            }
+            $group['quality_observation_id'] = (string)$quality['observation_id'];
+            $group['quality_payload_sha256'] = (string)$quality['payload_sha256'];
+            $group['kind_observation_count'] = (int)$quality['kind_observation_count'];
+            $group['kind_lag_sample_count'] = (int)$quality['kind_lag_sample_count'];
+            $group['content_snapshot_at'] = v1_release_iso_time((string)$quality['content_snapshot_at']);
+            $group['content_scope'] = (string)$quality['content_scope'];
+            $group['content_metric_assignment'] = 'immutable_quality_observation';
+        }
+        // Only the three incremental cron schedules form the denominator.
+        // Manual, backfill and company-master runs remain in the raw ledger.
+        $group['dart_expected_count'] = 82;
+        $group['kind_expected_count'] = 82;
+        $group['official_ingest_expected_count'] = 164;
+        $group['dart_succeeded_count'] = min(82,(int)$group['dart_succeeded_count']);
+        $group['kind_succeeded_count'] = min(82,(int)$group['kind_succeeded_count']);
+        $group['official_ingest_succeeded_count'] = $group['dart_succeeded_count'] + $group['kind_succeeded_count'];
+        $group['official_ingest_failed_count'] = max(0,$group['official_ingest_expected_count']-$group['official_ingest_succeeded_count']);
+        $group['official_ingest_success_rate'] = $group['official_ingest_expected_count'] > 0
+            ? $group['official_ingest_succeeded_count']/$group['official_ingest_expected_count'] : null;
+        $group['dart_success_poll_interval_seconds_p95'] = v1_percentile($group['dart_poll_intervals'],0.95);
+        $group['kind_first_observed_lag_seconds_p95'] = v1_percentile($group['kind_lag_values'],0.95);
+        $group['official_lag_seconds_p95'] = v1_percentile(array_merge($group['official_lag_values'],$group['dart_poll_intervals']),0.95);
+        $group['dart_success_poll_interval_p95_minutes'] = $group['dart_success_poll_interval_seconds_p95'] !== null
+            ? $group['dart_success_poll_interval_seconds_p95']/60.0 : null;
+        $group['kind_observation_lag_p95_minutes'] = $group['kind_first_observed_lag_seconds_p95'] !== null
+            ? $group['kind_first_observed_lag_seconds_p95']/60.0 : null;
+        if (isset($qualityByKey[$qualityKey])) {
+            $group['dart_success_poll_interval_p95_minutes'] = (float)$qualityByKey[$qualityKey]['dart_success_poll_interval_p95_minutes'];
+            $group['kind_observation_lag_p95_minutes'] = $qualityByKey[$qualityKey]['kind_observation_lag_p95_minutes'] === null
+                ? null : (float)$qualityByKey[$qualityKey]['kind_observation_lag_p95_minutes'];
+        }
+        if (isset($distributionGroups[$qualityKey])) {
+            $distribution = $distributionGroups[$qualityKey];
+            $group['web_distribution_attempted_count'] = (int)$distribution['raw_attempt_count'];
+            $group['web_distribution_succeeded_count'] = (int)$distribution['raw_success_count'];
+        }
+        $group['web_distribution_success_rate'] = $group['web_distribution_attempted_count'] > 0
+            ? $group['web_distribution_succeeded_count']/$group['web_distribution_attempted_count'] : null;
+        $watchdogIntervals = array();
+        foreach ($availabilitySummary as $availabilityGroup) {
+            if ($availabilityGroup['observation_date'] === $day && $availabilityGroup['build_sha'] === $group['code_revision']
+                && $availabilityGroup['observation_interval_seconds_p95'] !== null) {
+                $watchdogIntervals[] = $availabilityGroup['observation_interval_seconds_p95'];
+            }
+        }
+        $group['web_failure_detection_observation_interval_seconds_p95'] = v1_percentile($watchdogIntervals,0.95);
+        $group['raw_counts'] = array(
+            'official_evidence_total_count'=>$group['official_evidence_total_count'],
+            'official_evidence_linked_count'=>$group['official_evidence_linked_count'],
+            'top_sensitive_total_count'=>$group['top_sensitive_total_count'],
+            'top_sensitive_reviewed_count'=>$group['top_sensitive_reviewed_count'],
+            'original_language_total_count'=>$group['original_language_total_count'],
+            'original_language_preserved_count'=>$group['original_language_preserved_count'],
+            'source_right_total_count'=>$group['source_right_total_count'],
+            'valid_source_right_count'=>$group['valid_source_right_count'],
+        );
+        unset($group['scheduled_source_slots'],$group['official_lag_values'],$group['dart_poll_intervals'],$group['kind_lag_values']);
+    }
+    unset($group);
+
+    $shadowStatusStmt = $pdo->prepare('SELECT observation_date,code_revision,review_status,COUNT(*) AS raw_count '
+        . 'FROM ' . table_name($config,'shadow_discrepancies') . ' WHERE observation_date BETWEEN ? AND ? '
+        . 'GROUP BY observation_date,code_revision,review_status ORDER BY observation_date,code_revision,review_status');
+    $shadowStatusStmt->execute(array($from,$to)); $shadowStatus = array(); $shadowOverall = array(); $shadowRows = array();
+    foreach ($shadowStatusStmt->fetchAll() as $row) {
+        $key = (string)$row['observation_date'] . '|' . (string)$row['code_revision'];
+        if (!isset($shadowStatus[$key])) { $shadowStatus[$key] = array('review_status_counts'=>array()); }
+        $count = (int)$row['raw_count']; $status = (string)$row['review_status'];
+        $shadowStatus[$key]['review_status_counts'][$status] = $count;
+        if (!isset($shadowOverall[$status])) { $shadowOverall[$status] = 0; } $shadowOverall[$status] += $count;
+        $shadowRows[] = array('observation_date'=>(string)$row['observation_date'],'code_revision'=>(string)$row['code_revision'],
+            'review_status'=>$status,'raw_count'=>$count);
+    }
+    $shadowRunStmt = $pdo->prepare('SELECT observation_date,code_revision,legacy_status,candidate_status,legacy_comparison_keys_json,'
+        . 'candidate_comparison_keys_json,legacy_event_count,candidate_event_count,legacy_events_sha256,candidate_events_sha256,'
+        . 'legacy_crosswalk_schema_version,legacy_eligible_record_count,legacy_crosswalked_record_count,'
+        . 'legacy_unmatched_record_count,legacy_ambiguous_record_count,legacy_crosswalk_coverage_rate,legacy_crosswalk_sha256,updated_at FROM '
+        . table_name($config,'shadow_run_observations') . ' WHERE observation_date BETWEEN ? AND ? ORDER BY observation_date,code_revision');
+    $shadowRunStmt->execute(array($from,$to)); $shadowDays = array(); $shadowShas = array();
+    foreach ($shadowRunStmt->fetchAll() as $row) {
+        $shadowShas[(string)$row['code_revision']] = true;
+        $legacyJson = (string)$row['legacy_comparison_keys_json']; $candidateJson = (string)$row['candidate_comparison_keys_json'];
+        $legacyKeys = json_decode($legacyJson,true); $candidateKeys = json_decode($candidateJson,true);
+        if (!is_array($legacyKeys) || !is_array($candidateKeys)
+            || count($legacyKeys) !== (int)$row['legacy_event_count'] || count($candidateKeys) !== (int)$row['candidate_event_count']
+            || hash('sha256',$legacyJson) !== (string)$row['legacy_events_sha256']
+            || hash('sha256',$candidateJson) !== (string)$row['candidate_events_sha256']) {
+            v1_respond(503,array('ok'=>false,'error'=>'shadow_run_integrity_error','observation_date'=>$row['observation_date'],'code_revision'=>$row['code_revision']));
+        }
+        $legacyCrosswalk = v1_shadow_crosswalk_response($row);
+        $key = (string)$row['observation_date'] . '|' . (string)$row['code_revision'];
+        $reviewCounts = isset($shadowStatus[$key]) ? $shadowStatus[$key]['review_status_counts'] : array();
+        $pending = isset($reviewCounts['pending']) ? (int)$reviewCounts['pending'] : 0; $total = array_sum($reviewCounts);
+        $legacyEvents = array(); foreach ($legacyKeys as $comparisonKey) { $legacyEvents[] = array('comparison_key'=>(string)$comparisonKey); }
+        $candidateEvents = array(); foreach ($candidateKeys as $comparisonKey) { $candidateEvents[] = array('comparison_key'=>(string)$comparisonKey); }
+        $shadowDays[] = array('observation_date'=>(string)$row['observation_date'],'code_revision'=>(string)$row['code_revision'],
+            'legacy_status'=>(string)$row['legacy_status'],'candidate_status'=>(string)$row['candidate_status'],
+            'legacy_events'=>$legacyEvents,'candidate_events'=>$candidateEvents,
+            'legacy_event_count'=>(int)$row['legacy_event_count'],'candidate_event_count'=>(int)$row['candidate_event_count'],
+            'legacy_events_sha256'=>(string)$row['legacy_events_sha256'],'candidate_events_sha256'=>(string)$row['candidate_events_sha256'],
+            'legacy_crosswalk'=>$legacyCrosswalk,
+            'discrepancy_count'=>$total,'reviewed_discrepancy_count'=>$total-$pending,'unreviewed_discrepancy_count'=>$pending,
+            'discrepancies_reviewed'=>$pending === 0,'review_status_counts'=>$reviewCounts,
+            'updated_at'=>v1_release_iso_time($row['updated_at']));
+    }
+
+    $release = v1_release_state($pdo,$config); $allShas = array_values(array_unique(array_merge(array_keys($runShas),array_keys($availabilityShas),
+        array_keys($vitalShas),array_keys($distributionShas),array_keys($qualityShas),array_keys($shadowShas))));
+    sort($allShas,SORT_STRING); $requestedRevision = isset($_GET['code_revision']) ? strtolower(trim((string)$_GET['code_revision'])) : '';
+    if ($requestedRevision !== '' && preg_match('/^[a-f0-9]{40}$/',$requestedRevision) !== 1) {
+        v1_respond(400,array('ok'=>false,'error'=>'invalid_code_revision'));
+    }
+    // Large human-labelled documents are returned only when the caller selects
+    // an exact full revision, keeping the default operational response below
+    // the 250 KiB API budget.
+    $humanRevision = $requestedRevision;
+    $humanEvidence = null;
+    if ($humanRevision !== '') {
+        $humanRow = v1_load_human_evidence_bundle($pdo,$config,$humanRevision);
+        if ($humanRow) {
+            // The ops export carries immutable hashes and release status only.
+            // Full labelled documents stay on the authenticated admin endpoint,
+            // keeping a 31-day evidence response inside the API size budget.
+            try { $humanEvidence = v1_human_evidence_row_response($humanRow,false); }
+            catch (Throwable $e) { v1_respond(503,array('ok'=>false,'error'=>'human_release_evidence_integrity_error')); }
+        }
+    }
+    $collectionRuns = array_values($runGroups); usort($collectionRuns,function($a,$b) {
+        return strcmp($a['observation_date'].'|'.$a['source_key'].'|'.(string)$a['code_revision'],$b['observation_date'].'|'.$b['source_key'].'|'.(string)$b['code_revision']);
+    });
+    $operationsDays = array_values($operations); usort($operationsDays,function($a,$b) {
+        return strcmp($a['observation_date'].'|'.$a['code_revision'],$b['observation_date'].'|'.$b['code_revision']);
+    });
+    $scheduleFrom = $toDate->modify('-6 days')->format('Y-m-d');
+    if ($scheduleFrom < $from) { $scheduleFrom = $from; }
+    $scheduleRows = v1_official_run_ledger_rows($pdo,$config,$scheduleFrom,$to);
+    $officialSchedule = v1_official_schedule_summary($scheduleRows,$scheduleFrom,$to);
+    v1_respond(200,array('ok'=>true,'evidence_source'=>'production_db_export','is_synthetic'=>false,'distribution_mode'=>'web_only',
+        'timezone'=>'Asia/Seoul','range'=>array('from'=>$from,'to'=>$to),'generated_at'=>gmdate('c'),'schema_version'=>GOV_V1_SCHEMA_VERSION,
+        'release_state'=>$release ? (string)$release['release_state'] : null,'code_revisions'=>$allShas,
+        'collection_runs'=>$collectionRuns,'official_schedule'=>$officialSchedule,
+        'operations_days'=>$operationsDays,'quality_observations'=>$qualityRows,
+        'web_distribution_days'=>$distributionDays,
+        'availability'=>array('raw_attempt_count'=>count($availability),'raw_success_count'=>$successCount,
+            'raw_failure_count'=>count($availability)-$successCount,'success_rate_denominator'=>count($availability),
+            'success_rate'=>count($availability)>0 ? $successCount/count($availability) : null,
+            'duration_ms_p95'=>v1_percentile($durations,0.95),'observation_interval_seconds_p95'=>v1_percentile($intervals,0.95),
+            'daily_route_build_counts'=>$availabilitySummary),
+        'web_vitals'=>array('raw_sample_count'=>count($vitals),'groups'=>$vitalSummary),
+        'shadow_discrepancies'=>$shadowRows,'shadow_discrepancy_review_status_counts'=>$shadowOverall,'shadow_days'=>$shadowDays,
+        'human_release_evidence'=>$humanEvidence,
+        'human_release_evidence_status'=>$humanEvidence !== null ? 'available' : ($humanRevision === '' ? 'code_revision_required' : 'missing')));
+}
+
+function v1_release_request_id(): ?string {
+    $value = isset($_SERVER['HTTP_X_REQUEST_ID']) ? trim((string)$_SERVER['HTTP_X_REQUEST_ID']) : '';
+    return preg_match('/^[A-Za-z0-9_.:\-]{1,96}$/', $value) === 1 ? $value : null;
+}
+
+function v1_admin_update_release_state(PDO $pdo, array $config, string $role): void {
+    $payload = v1_admin_json_body($config);
+    $target = isset($payload['release_state']) ? trim((string)$payload['release_state']) : '';
+    $reason = isset($payload['reason']) ? trim((string)$payload['reason']) : '';
+    if (!in_array($target, array('closed', 'preview', 'live'), true)) {
+        v1_respond(400, array('ok' => false, 'error' => 'invalid_release_state'));
+    }
+    if (!array_key_exists('expected_version', $payload) || !is_int($payload['expected_version']) || $payload['expected_version'] < 0) {
+        v1_respond(400, array('ok' => false, 'error' => 'expected_version_required'));
+    }
+    if (mb_strlen($reason, 'UTF-8') < 8 || mb_strlen($reason, 'UTF-8') > 2000) {
+        v1_respond(400, array('ok' => false, 'error' => 'invalid_release_reason'));
+    }
+    if ($target === 'preview' && !v1_preview_auth_configured($config)) {
+        v1_respond(503, array('ok' => false, 'error' => 'preview_auth_not_configured'));
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $before = v1_release_state($pdo, $config, true);
+        if ($before === null) {
+            $pdo->rollBack();
+            v1_respond(503, array('ok' => false, 'error' => 'release_state_unavailable'));
+        }
+        $current = (string)$before['release_state'];
+        $currentVersion = (int)$before['state_version'];
+        if ($currentVersion !== (int)$payload['expected_version']) {
+            $pdo->rollBack();
+            v1_respond(409, array(
+                'ok' => false,
+                'error' => 'stale_release_state',
+                'current_state' => $current,
+                'current_version' => $currentVersion,
+            ));
+        }
+        if ($target === $current) {
+            $pdo->commit();
+            v1_respond(200, array(
+                'ok' => true,
+                'changed' => false,
+                'release_state' => $current,
+                'state_version' => $currentVersion,
+                'cutover_at' => v1_release_iso_time(isset($before['cutover_at']) ? $before['cutover_at'] : null),
+                'sunset_at' => v1_release_iso_time(isset($before['sunset_at']) ? $before['sunset_at'] : null),
+            ));
+        }
+        $allowedTransitions = array(
+            'closed' => array('preview'),
+            'preview' => array('closed', 'live'),
+            'live' => array('closed'),
+        );
+        if (!isset($allowedTransitions[$current]) || !in_array($target, $allowedTransitions[$current], true)) {
+            $pdo->rollBack();
+            v1_respond(409, array(
+                'ok' => false,
+                'error' => 'invalid_release_transition',
+                'current_state' => $current,
+                'requested_state' => $target,
+            ));
+        }
+        if ($current === 'preview' && $target === 'live') {
+            $rightsGuard = v1_current_public_document_rights_guard($pdo,$config);
+            if ((int)$rightsGuard['invalid_count'] > 0) {
+                $pdo->rollBack();
+                v1_respond(409,array(
+                    'ok'=>false,
+                    'error'=>'current_source_rights_invalid',
+                    'checked_at'=>v1_release_iso_time((string)$rightsGuard['checked_at']),
+                    'referenced_document_count'=>(int)$rightsGuard['total_count'],
+                    'invalid_source_right_document_count'=>(int)$rightsGuard['invalid_count'],
+                ));
+            }
+        }
+        $nextVersion = $currentVersion + 1;
+        $changedBy = 'api_role:' . $role;
+        $cutoverAt = isset($before['cutover_at']) && $before['cutover_at'] !== null ? (string)$before['cutover_at'] : null;
+        $sunsetAt = isset($before['sunset_at']) && $before['sunset_at'] !== null ? (string)$before['sunset_at'] : null;
+        // Every protected preview-to-live promotion starts a fresh 90-day
+        // compatibility epoch; prior epochs remain immutable in the audit.
+        if ($current === 'preview' && $target === 'live') {
+            $cutoverAt = gmdate('Y-m-d H:i:s');
+            $sunsetAt = gmdate('Y-m-d H:i:s',time() + 90 * 86400);
+        }
+        $update = $pdo->prepare('UPDATE ' . table_name($config, 'governance_release_state')
+            . ' SET release_state = ?, state_version = ?, updated_by = ?, update_reason = ?, cutover_at = ?, sunset_at = ?, updated_at = UTC_TIMESTAMP()'
+            . ' WHERE state_key = ? AND state_version = ?');
+        $update->execute(array($target, $nextVersion, $changedBy, $reason, $cutoverAt, $sunsetAt, GOV_V1_RELEASE_STATE_KEY, $currentVersion));
+        if ($update->rowCount() !== 1) {
+            $pdo->rollBack();
+            v1_respond(409, array('ok' => false, 'error' => 'stale_release_state'));
+        }
+        $audit = $pdo->prepare('INSERT INTO ' . table_name($config, 'governance_release_audit')
+            . ' (audit_id, state_key, state_version, previous_state, new_state, changed_by, change_reason, request_id, cutover_at, sunset_at, created_at)'
+            . ' VALUES (?,?,?,?,?,?,?,?,?,?,UTC_TIMESTAMP())');
+        $audit->execute(array(
+            'release:' . bin2hex(random_bytes(16)), GOV_V1_RELEASE_STATE_KEY, $nextVersion,
+            $current, $target, $changedBy, $reason, v1_release_request_id(), $cutoverAt, $sunsetAt,
+        ));
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        throw $e;
+    }
+    v1_respond(200, array(
+        'ok' => true,
+        'changed' => true,
+        'previous_state' => $current,
+        'release_state' => $target,
+        'state_version' => $nextVersion,
+        'cutover_at' => v1_release_iso_time($cutoverAt),
+        'sunset_at' => v1_release_iso_time($sunsetAt),
+    ));
+}
+
 function v1_admin_upsert_source_right(PDO $pdo, array $config, string $role): void {
     $payload = v1_admin_json_body($config);
     $id = isset($payload['source_right_id']) ? trim((string)$payload['source_right_id']) : '';
@@ -979,20 +4707,33 @@ function v1_admin_upsert_source_right(PDO $pdo, array $config, string $role): vo
         v1_respond(400, array('ok' => false, 'error' => 'active_source_right_requires_evidence'));
     }
     $now = gmdate('Y-m-d H:i:s');
-    $stmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'source_rights') . ' (source_right_id, source_type, source_key, source_name, '
-        . 'permission_scope, evidence_uri, evidence_hash, valid_from, valid_until, revoked_at, ai_allowed, redistribution_allowed, status, notes, created_at, updated_at) '
-        . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE source_type=VALUES(source_type), source_key=VALUES(source_key), '
-        . 'source_name=VALUES(source_name), permission_scope=VALUES(permission_scope), evidence_uri=VALUES(evidence_uri), evidence_hash=VALUES(evidence_hash), '
-        . 'valid_from=VALUES(valid_from), valid_until=VALUES(valid_until), revoked_at=VALUES(revoked_at), ai_allowed=VALUES(ai_allowed), '
-        . 'redistribution_allowed=VALUES(redistribution_allowed), status=VALUES(status), notes=VALUES(notes), updated_at=VALUES(updated_at)');
-    $stmt->execute(array(
-        $id, $sourceType, mb_substr($sourceKey, 0, 191, 'UTF-8'), mb_substr($sourceName, 0, 255, 'UTF-8'), $scope,
-        $evidenceUri !== '' ? mb_substr($evidenceUri, 0, 65535, 'UTF-8') : null,
-        $evidenceHash ?: null, $validFrom, $validUntil, $revokedAt, v1_bool_int(isset($payload['ai_allowed']) ? $payload['ai_allowed'] : false),
-        v1_bool_int(isset($payload['redistribution_allowed']) ? $payload['redistribution_allowed'] : false), $status,
-        isset($payload['notes']) ? mb_substr((string)$payload['notes'], 0, 65535, 'UTF-8') : 'updated_by:' . $role,
-        $now, $now,
-    ));
+    $pdo->beginTransaction();
+    try {
+        // Global order is release-state row -> SourceRight rows. The cutover
+        // guard uses the same order, so a concurrent revocation cannot race the
+        // preview-to-live read or create a lock cycle.
+        if (v1_release_state($pdo,$config,true) === null) {
+            throw new RuntimeException('release_state_unavailable');
+        }
+        $stmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'source_rights') . ' (source_right_id, source_type, source_key, source_name, '
+            . 'permission_scope, evidence_uri, evidence_hash, valid_from, valid_until, revoked_at, ai_allowed, redistribution_allowed, status, notes, created_at, updated_at) '
+            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE source_type=VALUES(source_type), source_key=VALUES(source_key), '
+            . 'source_name=VALUES(source_name), permission_scope=VALUES(permission_scope), evidence_uri=VALUES(evidence_uri), evidence_hash=VALUES(evidence_hash), '
+            . 'valid_from=VALUES(valid_from), valid_until=VALUES(valid_until), revoked_at=VALUES(revoked_at), ai_allowed=VALUES(ai_allowed), '
+            . 'redistribution_allowed=VALUES(redistribution_allowed), status=VALUES(status), notes=VALUES(notes), updated_at=VALUES(updated_at)');
+        $stmt->execute(array(
+            $id, $sourceType, mb_substr($sourceKey, 0, 191, 'UTF-8'), mb_substr($sourceName, 0, 255, 'UTF-8'), $scope,
+            $evidenceUri !== '' ? mb_substr($evidenceUri, 0, 65535, 'UTF-8') : null,
+            $evidenceHash ?: null, $validFrom, $validUntil, $revokedAt, v1_bool_int(isset($payload['ai_allowed']) ? $payload['ai_allowed'] : false),
+            v1_bool_int(isset($payload['redistribution_allowed']) ? $payload['redistribution_allowed'] : false), $status,
+            isset($payload['notes']) ? mb_substr((string)$payload['notes'], 0, 65535, 'UTF-8') : 'updated_by:' . $role,
+            $now, $now,
+        ));
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        throw $e;
+    }
     v1_respond(200, array('ok' => true, 'source_right_id' => $id, 'status' => $status));
 }
 
@@ -1027,6 +4768,82 @@ function v1_review_expected_updated_at(array $payload): string {
     return $normalized;
 }
 
+/** Complete an incomplete event identity without changing its stable event_id. */
+function v1_admin_complete_event_identity(PDO $pdo, array $config, string $eventId, string $role): void {
+    $payload = v1_admin_json_body($config);
+    v1_assert_object_keys($payload,array('identity_action','identity_target','identity_actor_id','identity_effective_at',
+        'identity_deadline_at','expected_updated_at','reason'),'event_identity');
+    $reason = isset($payload['reason']) ? trim((string)$payload['reason']) : '';
+    $expectedUpdatedAt = v1_review_expected_updated_at($payload);
+    if (mb_strlen($reason,'UTF-8') < 5) {
+        v1_respond(400,array('ok'=>false,'error'=>'event_identity_reason_required'));
+    }
+    $pdo->beginTransaction();
+    try {
+        $select = $pdo->prepare('SELECT event_id,company_id,event_type,identity_action,identity_target,identity_actor_id,'
+            . 'identity_effective_at,identity_deadline_at,identity_status,comparison_key,review_status,publication_status,updated_at FROM '
+            . table_name($config,'governance_events') . ' WHERE event_id=? FOR UPDATE');
+        $select->execute(array($eventId)); $before = $select->fetch();
+        if (!$before) { $pdo->rollBack(); v1_respond(404,array('ok'=>false,'error'=>'event_not_found')); }
+        if (!hash_equals((string)$before['updated_at'],$expectedUpdatedAt)) {
+            $pdo->rollBack(); v1_respond(409,array('ok'=>false,'error'=>'stale_event_identity'));
+        }
+        $identity = v1_build_event_identity((string)$before['company_id'],(string)$before['event_type'],
+            $payload['identity_action'] ?? null,$payload['identity_target'] ?? null,$payload['identity_actor_id'] ?? null,
+            $payload['identity_effective_at'] ?? null,$payload['identity_deadline_at'] ?? null,false);
+        if ($identity === null) {
+            $pdo->rollBack(); v1_respond(400,array('ok'=>false,'error'=>'invalid_complete_event_identity'));
+        }
+        $actor = $pdo->prepare('SELECT record_status FROM ' . table_name($config,'actors') . ' WHERE actor_id=?');
+        $actor->execute(array($identity['identity_actor_id']));
+        if ((string)($actor->fetchColumn() ?: '') !== 'active') {
+            $pdo->rollBack(); v1_respond(409,array('ok'=>false,'error'=>'active_identity_actor_required'));
+        }
+        if ((string)$before['identity_status'] === 'complete') {
+            if (hash_equals((string)$before['comparison_key'],(string)$identity['comparison_key'])) {
+                $pdo->commit();
+                v1_respond(200,array('ok'=>true,'event_id'=>$eventId,'identity_status'=>'complete',
+                    'comparison_key'=>(string)$identity['comparison_key'],'unchanged'=>true,'updated_at'=>v1_release_iso_time($before['updated_at'])));
+            }
+            $pdo->rollBack(); v1_respond(409,array('ok'=>false,'error'=>'complete_event_identity_is_immutable'));
+        }
+        if ((string)$before['publication_status'] === 'published' || (string)$before['review_status'] === 'approved') {
+            $pdo->rollBack(); v1_respond(409,array('ok'=>false,'error'=>'published_event_identity_is_immutable'));
+        }
+        $previousIdentity = array(
+            'identity_action'=>$before['identity_action'],'identity_target'=>$before['identity_target'],
+            'identity_actor_id'=>$before['identity_actor_id'],'identity_effective_at'=>v1_release_iso_time($before['identity_effective_at']),
+            'identity_deadline_at'=>v1_release_iso_time($before['identity_deadline_at']),
+            'identity_status'=>(string)$before['identity_status'],'comparison_key'=>$before['comparison_key'],
+        );
+        $update = $pdo->prepare('UPDATE ' . table_name($config,'governance_events')
+            . ' SET identity_action=?,identity_target=?,identity_actor_id=?,identity_effective_at=?,identity_deadline_at=?,'
+            . 'identity_status=\'complete\',comparison_key=?,review_status=\'pending\',publication_status=\'draft\','
+            . 'updated_at=GREATEST(UTC_TIMESTAMP(),DATE_ADD(updated_at,INTERVAL 1 SECOND)) WHERE event_id=?');
+        $update->execute(array($identity['identity_action'],$identity['identity_target'],$identity['identity_actor_id'],
+            $identity['identity_effective_at'],$identity['identity_deadline_at'],$identity['comparison_key'],$eventId));
+        $updated = $pdo->prepare('SELECT updated_at FROM ' . table_name($config,'governance_events') . ' WHERE event_id=?');
+        $updated->execute(array($eventId)); $updatedAt = (string)$updated->fetchColumn();
+        $revisionId = 'rev_' . bin2hex(random_bytes(16));
+        $revision = $pdo->prepare('INSERT INTO ' . table_name($config,'editorial_revisions')
+            . ' (revision_id,entity_type,entity_id,field_name,previous_value,revised_value,reason,revision_status,requested_by,'
+            . 'reviewed_by,reviewed_at,published_at,created_at,updated_at) VALUES (?,\'event\',?,\'event_identity\',?,?,?,\'published\','
+            . '\'identity_completion_api\',?,UTC_TIMESTAMP(),UTC_TIMESTAMP(),UTC_TIMESTAMP(),UTC_TIMESTAMP())');
+        $revision->execute(array($revisionId,$eventId,
+            v1_canonical_json_encode($previousIdentity,'event_previous_identity_encode_failed'),
+            v1_canonical_json_encode($identity,'event_identity_encode_failed'),$reason,'api_role:' . $role));
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        if ($e instanceof PDOException && (string)$e->getCode() === '23000') {
+            v1_respond(409,array('ok'=>false,'error'=>'event_comparison_key_conflict','review_required'=>true));
+        }
+        throw $e;
+    }
+    v1_respond(200,array('ok'=>true,'event_id'=>$eventId,'identity_status'=>'complete',
+        'comparison_key'=>(string)$identity['comparison_key'],'unchanged'=>false,'updated_at'=>v1_release_iso_time($updatedAt)));
+}
+
 function v1_admin_review_event(PDO $pdo, array $config, string $eventId, string $role): void {
     $payload = v1_admin_json_body($config);
     $decision = isset($payload['decision']) ? (string)$payload['decision'] : '';
@@ -1039,7 +4856,7 @@ function v1_admin_review_event(PDO $pdo, array $config, string $eventId, string 
     $publicationStatus = $decision === 'approve' ? 'published' : 'draft';
     $pdo->beginTransaction();
     try {
-        $select = $pdo->prepare('SELECT review_status, publication_status, verification_status, updated_at FROM ' . table_name($config, 'governance_events') . ' WHERE event_id = ? FOR UPDATE');
+        $select = $pdo->prepare('SELECT review_status, publication_status, verification_status, identity_actor_id, identity_status, comparison_key, updated_at FROM ' . table_name($config, 'governance_events') . ' WHERE event_id = ? FOR UPDATE');
         $select->execute(array($eventId)); $before = $select->fetch();
         if (!$before) { $pdo->rollBack(); v1_respond(404, array('ok' => false, 'error' => 'event_not_found')); }
         if (!hash_equals((string)$before['updated_at'], $expectedUpdatedAt)) {
@@ -1048,6 +4865,24 @@ function v1_admin_review_event(PDO $pdo, array $config, string $eventId, string 
         if ($decision === 'approve' && !in_array((string)$before['verification_status'], array('official', 'confirmed', 'corroborated', 'corrected', 'withdrawn'), true)) {
             $pdo->rollBack();
             v1_respond(409, array('ok' => false, 'error' => 'verified_evidence_required_before_publication'));
+        }
+        if ($decision === 'approve' && ((string)$before['identity_status'] !== 'complete'
+            || preg_match('/^eventcmp:v1:[a-f0-9]{64}$/', (string)$before['comparison_key']) !== 1)) {
+            $pdo->rollBack();
+            v1_respond(409, array('ok' => false, 'error' => 'complete_identity_required_before_publication'));
+        }
+        if ($decision === 'approve' && trim((string)$before['identity_actor_id']) !== '') {
+            $actorRelation = $pdo->prepare('SELECT COUNT(*) FROM ' . table_name($config, 'event_actors') . ' review_identity_ea'
+                . ' JOIN ' . table_name($config, 'actors') . ' review_identity_a ON review_identity_a.actor_id = review_identity_ea.actor_id'
+                . ' WHERE review_identity_ea.event_id = ? AND review_identity_ea.actor_id = ?'
+                . ' AND review_identity_ea.review_status = \'approved\''
+                . ' AND review_identity_a.review_status = \'approved\' AND review_identity_a.record_status = \'active\''
+                . ' AND NULLIF(TRIM(review_identity_a.display_name), \'\') IS NOT NULL');
+            $actorRelation->execute(array($eventId, (string)$before['identity_actor_id']));
+            if ((int)$actorRelation->fetchColumn() < 1) {
+                $pdo->rollBack();
+                v1_respond(409, array('ok' => false, 'error' => 'approved_event_actor_required_before_publication'));
+            }
         }
         if ($decision === 'approve') {
             $evidence = $pdo->prepare('SELECT COUNT(*) FROM ' . table_name($config, 'event_documents') . ' review_ed'
@@ -1538,10 +5373,585 @@ function v1_editorial_normalize_record(string $entity, array $record, int $index
         'publication_status' => v1_editorial_fail_closed($record, 'publication_status', 'draft', $location));
 }
 
+function v1_official_site_contract_error(string $detail): void {
+    respond(400,array('ok'=>false,'error'=>'invalid_official_site_snapshot','detail'=>$detail));
+}
+
+function v1_official_site_source_right(PDO $pdo, array $config, string $sourceRightId, string $sourceType,
+    string $sourceKey, bool $forUpdate): ?array {
+    $stmt = $pdo->prepare('SELECT source_right_id,source_type,source_key,permission_scope,evidence_uri,evidence_hash,'
+        . 'valid_from,valid_until,revoked_at,redistribution_allowed,status,updated_at FROM '
+        . table_name($config,'source_rights') . ' WHERE source_right_id=?' . ($forUpdate ? ' FOR UPDATE' : ''));
+    $stmt->execute(array($sourceRightId)); $row = $stmt->fetch();
+    if (!is_array($row) || (string)$row['source_type'] !== $sourceType || (string)$row['source_key'] !== $sourceKey) { return null; }
+    $now = gmdate('Y-m-d H:i:s');
+    $evidence = trim((string)$row['evidence_uri']) !== '' || preg_match('/^[a-f0-9]{64}$/i',(string)$row['evidence_hash']) === 1;
+    if ((string)$row['status'] !== 'active' || (string)$row['valid_from'] > $now
+        || ($row['valid_until'] !== null && (string)$row['valid_until'] <= $now) || $row['revoked_at'] !== null
+        || (int)$row['redistribution_allowed'] !== 1 || trim((string)$row['permission_scope']) === '' || !$evidence) {
+        return null;
+    }
+    return $row;
+}
+
+function v1_official_site_connector_id(string $entityType, string $entityId): ?string {
+    if ($entityType === 'company') {
+        return preg_match('/^[0-9]{8}$/',$entityId) === 1 ? 'company-site:' . $entityId : null;
+    }
+    if ($entityType !== 'actor' || !v1_valid_entity_id($entityId,96)) { return null; }
+    $readable = 'activist-site:' . $entityId;
+    if (strlen($readable) <= 64 && v1_valid_entity_id($readable,64)) { return $readable; }
+    return 'activist-site:' . substr(hash('sha256',$entityId),0,32);
+}
+
+function v1_official_site_source_right_id(string $connectorId): string {
+    $readable = 'right:' . $connectorId;
+    if (strlen($readable) <= 64 && v1_valid_entity_id($readable,64)) { return $readable; }
+    return 'right:official-site:' . substr(hash('sha256',$connectorId),0,32);
+}
+
+function v1_official_site_stable_id(string $prefix, array $parts, int $length): string {
+    $normalized = array();
+    foreach ($parts as $part) { $normalized[] = trim((string)$part); }
+    return $prefix . ':' . substr(hash('sha256',implode("\x1f",$normalized)),0,$length);
+}
+
+function v1_official_site_review_semantic_payload(array $payload): array {
+    if (isset($payload['draft_document']) && is_array($payload['draft_document'])) {
+        unset($payload['draft_document']['retrieved_at']);
+    }
+    return $payload;
+}
+
+/** HMAC-only atomic connector receipt for allowlisted official websites. */
+function upsert_official_site_snapshot(PDO $pdo, array $config, array $payload, object $payloadObject): void {
+    v1_assert_object_keys($payload,array('schema_version','snapshot_id','receipt_sha256','code_revision','collected_at',
+        'manifest_sha256','payload_sha256','connector','companies','documents','events','review_items','tombstones','expected'),'body');
+    if (!isset($payload['schema_version']) || $payload['schema_version'] !== 1) { v1_official_site_contract_error('schema_version'); }
+    $snapshotId = isset($payload['snapshot_id']) ? trim((string)$payload['snapshot_id']) : '';
+    $receiptSha = strtolower(trim((string)($payload['receipt_sha256'] ?? '')));
+    $manifestSha = strtolower(trim((string)($payload['manifest_sha256'] ?? '')));
+    $payloadSha = strtolower(trim((string)($payload['payload_sha256'] ?? '')));
+    $revision = v1_valid_build_sha($payload['code_revision'] ?? null);
+    $collectedAt = v1_editorial_datetime_utc($payload['collected_at'] ?? null);
+    $connector = isset($payload['connector']) && is_array($payload['connector']) ? $payload['connector'] : null;
+    if (!v1_valid_entity_id($snapshotId) || preg_match('/^official-site-snapshot:[a-f0-9]{64}$/',$snapshotId) !== 1
+        || preg_match('/^[a-f0-9]{64}$/',$receiptSha) !== 1 || preg_match('/^[a-f0-9]{64}$/',$manifestSha) !== 1
+        || preg_match('/^[a-f0-9]{64}$/',$payloadSha) !== 1 || $revision === null || $collectedAt === null || $connector === null) {
+        v1_official_site_contract_error('receipt_metadata');
+    }
+    $payloadCoreObject = clone $payloadObject;
+    unset($payloadCoreObject->snapshot_id,$payloadCoreObject->payload_sha256);
+    if (!hash_equals($payloadSha,hash('sha256',v1_strict_canonical_json_encode($payloadCoreObject,'official_site_payload_encode_failed')))) {
+        v1_official_site_contract_error('payload_sha256');
+    }
+    v1_assert_object_keys($connector,array('connector_id','entity_type','entity_id','source_class','source_right_id',
+        'pages_fetched','total_count','payload_sha256'),'connector');
+    $connectorId = trim((string)($connector['connector_id'] ?? ''));
+    $sourceRightId = trim((string)($connector['source_right_id'] ?? ''));
+    $sourceType = trim((string)($connector['source_class'] ?? ''));
+    $sourceKey = $connectorId;
+    $entityType = trim((string)($connector['entity_type'] ?? ''));
+    $entityId = trim((string)($connector['entity_id'] ?? ''));
+    $connectorPayloadSha = strtolower(trim((string)($connector['payload_sha256'] ?? '')));
+    $expectedConnectorId = v1_official_site_connector_id($entityType,$entityId);
+    $sourceIdentityValid = $expectedConnectorId !== null && hash_equals($expectedConnectorId,$sourceKey);
+    if (!v1_valid_entity_id($connectorId) || !v1_valid_entity_id($sourceRightId,64) || !$sourceIdentityValid
+        || !in_array($entityType,array('company','actor'),true) || !v1_valid_entity_id($entityId,96)
+        || ($entityType === 'company' && $sourceType !== 'company_statement')
+        || ($entityType === 'actor' && $sourceType !== 'activist_statement')
+        || !hash_equals(v1_official_site_source_right_id($connectorId),$sourceRightId)
+        || preg_match('/^[a-f0-9]{64}$/',$connectorPayloadSha) !== 1
+        || !isset($connector['pages_fetched'],$connector['total_count']) || !is_int($connector['pages_fetched'])
+        || !is_int($connector['total_count']) || $connector['pages_fetched'] < 1 || $connector['total_count'] < 0) {
+        v1_official_site_contract_error('connector_receipt');
+    }
+    $expectedSnapshotId = v1_official_site_stable_id('official-site-snapshot',array($connectorId,$receiptSha,$payloadSha),64);
+    if (!hash_equals($expectedSnapshotId,$snapshotId)) { v1_official_site_contract_error('snapshot_identity'); }
+    $companies = isset($payload['companies']) && is_array($payload['companies']) ? $payload['companies'] : null;
+    $documents = isset($payload['documents']) && is_array($payload['documents']) ? $payload['documents'] : null;
+    $events = isset($payload['events']) && is_array($payload['events']) ? $payload['events'] : null;
+    $reviewItems = isset($payload['review_items']) && is_array($payload['review_items']) ? $payload['review_items'] : null;
+    $tombstones = isset($payload['tombstones']) && is_array($payload['tombstones']) ? $payload['tombstones'] : null;
+    if ($companies === null || $documents === null || $events === null || $reviewItems === null || $tombstones === null
+        || count($companies) > 50 || count($documents) > 500 || count($events) > 500
+        || count($reviewItems) > 1000 || count($tombstones) > 500) {
+        v1_official_site_contract_error('record_arrays');
+    }
+
+    $normalizedCompanies = array(); $companyIds = array();
+    foreach ($companies as $index => $company) {
+        if (!is_array($company)) { v1_official_site_contract_error('companies['.$index.']'); }
+        $id = trim((string)($company['company_id'] ?? $company['corp_code'] ?? ''));
+        $name = trim((string)($company['legal_name'] ?? $company['corp_name'] ?? ''));
+        if (preg_match('/^[0-9]{8}$/',$id) !== 1 || $name === '' || isset($companyIds[$id])
+            || $entityType !== 'company' || $id !== $entityId
+            || trim((string)($company['record_status'] ?? '')) !== 'active') {
+            v1_official_site_contract_error('company_identity');
+        }
+        $companyIds[$id] = true; $normalizedCompanies[] = array('company_id'=>$id,'legal_name'=>$name,
+            'stock_code'=>trim((string)($company['stock_code'] ?? '')),'market'=>trim((string)($company['market'] ?? '')),
+            'homepage_url'=>trim((string)($company['homepage_url'] ?? '')));
+    }
+
+    $normalizedDocuments = array(); $documentIds = array();
+    foreach ($documents as $index => $document) {
+        if (!is_array($document)) { v1_official_site_contract_error('documents['.$index.']'); }
+        $id = trim((string)($document['document_id'] ?? '')); $companyId = trim((string)($document['company_id'] ?? ''));
+        $externalId = trim((string)($document['external_id'] ?? '')); $title = (string)($document['title'] ?? '');
+        $language = v1_editorial_language($document['original_language'] ?? null);
+        $collectionKey = trim((string)($document['collection_key'] ?? ''));
+        $url = trim((string)($document['original_url'] ?? '')); $contentHash = strtolower(trim((string)($document['content_hash'] ?? '')));
+        $publishedAt = array_key_exists('published_at',$document) && $document['published_at'] !== null
+            ? v1_editorial_datetime_utc($document['published_at']) : null;
+        $retrievedAt = v1_editorial_datetime_utc($document['retrieved_at'] ?? $payload['collected_at']);
+        $expectedDocumentId = v1_official_site_stable_id('site-doc',array($connectorId,$externalId,$contentHash),32);
+        $expectedCollectionKey = v1_official_site_stable_id('site-collection',array($connectorId,$externalId),32);
+        $bodyText = array_key_exists('body_text',$document) && is_string($document['body_text']) ? $document['body_text'] : null;
+        $expectedContentHash = $bodyText === null ? null : hash('sha256',$title . "\n" . $bodyText . "\n" . $url);
+        if (!v1_valid_entity_id($id) || isset($documentIds[$id]) || ($companyId !== '' && preg_match('/^[0-9]{8}$/',$companyId) !== 1)
+            || !hash_equals($expectedDocumentId,$id) || !hash_equals($expectedCollectionKey,$collectionKey)
+            || $externalId === '' || strlen($externalId) > 191
+            || trim($title) === '' || mb_strlen($title,'UTF-8') > 700 || $language === null || preg_match('#^https?://#i',$url) !== 1
+            || !array_key_exists('body_text',$document) || !is_string($document['body_text'])
+            || !v1_valid_entity_id($collectionKey)
+            || preg_match('/^[a-f0-9]{64}$/',$contentHash) !== 1 || $expectedContentHash === null
+            || !hash_equals($expectedContentHash,$contentHash) || $retrievedAt === null
+            || (array_key_exists('published_at',$document) && $document['published_at'] !== null && $publishedAt === null)
+            || trim((string)($document['source_right_id'] ?? '')) !== $sourceRightId
+            || trim((string)($document['source_class'] ?? '')) !== $sourceType
+            || ($document['version_no'] ?? null) !== 1
+            || trim((string)($document['verification_status'] ?? '')) !== 'unverified'
+            || trim((string)($document['publication_status'] ?? '')) !== 'draft') {
+            v1_official_site_contract_error('document_contract');
+        }
+        $documentIds[$id] = true; $normalizedDocuments[] = array('document_id'=>$id,'company_id'=>$companyId ?: null,
+            'external_id'=>$externalId,'document_type'=>trim((string)($document['document_type'] ?? '')) ?: null,
+            'original_language'=>$language,'title'=>$title,'body_text'=>$bodyText,'original_url'=>$url,'content_hash'=>$contentHash,
+            'collection_key'=>$collectionKey,'published_at'=>$publishedAt,'retrieved_at'=>$retrievedAt,'payload'=>$document);
+    }
+
+    $normalizedEvents = array(); $eventIds = array(); $expectedObservations = 0;
+    foreach ($events as $index => $event) {
+        if (!is_array($event)) { v1_official_site_contract_error('events['.$index.']'); }
+        $id = trim((string)($event['event_id'] ?? '')); $companyId = trim((string)($event['company_id'] ?? ''));
+        $externalId = trim((string)($event['collection_key'] ?? '')); $eventType = trim((string)($event['event_type'] ?? ''));
+        $title = (string)($event['title'] ?? ''); $language = v1_editorial_language($event['original_language'] ?? null);
+        $occurredDate = v1_normalize_identity_datetime($event['occurred_at'] ?? null,false);
+        $deadlineDate = v1_normalize_identity_datetime($event['deadline_at'] ?? null,false);
+        $occurredAt = $occurredDate === null ? null : (string)$occurredDate['mysql'];
+        $deadlineAt = $deadlineDate === null ? null : (string)$deadlineDate['mysql'];
+        $ids = isset($event['document_ids']) && is_array($event['document_ids']) ? array_values(array_unique(array_map('strval',$event['document_ids']))) : array();
+        $importance = trim((string)($event['importance'] ?? 'medium'));
+        $identity = v1_build_event_identity($companyId,$eventType,$event['identity_action'] ?? null,$event['identity_target'] ?? null,
+            $event['identity_actor_id'] ?? null,$event['identity_effective_at'] ?? null,$event['identity_deadline_at'] ?? null,false);
+        $comparisonKey = trim((string)($event['comparison_key'] ?? ''));
+        $eventRightIds = isset($event['source_right_ids']) && is_array($event['source_right_ids'])
+            ? array_values(array_unique(array_map('strval',$event['source_right_ids']))) : array();
+        if (!in_array($importance,array('low','medium','high','market_sensitive','critical'),true)) { v1_official_site_contract_error('event_importance'); }
+        if (!v1_valid_entity_id($id) || isset($eventIds[$id]) || preg_match('/^[0-9]{8}$/',$companyId) !== 1
+            || $externalId === '' || strlen($externalId) > 191
+            || preg_match('/^[A-Za-z0-9_.:\-]{1,64}$/',$eventType) !== 1 || trim($title) === '' || mb_strlen($title,'UTF-8') > 700 || $language === null
+            || $occurredAt === null || $deadlineAt === null
+            || trim((string)($event['identity_status'] ?? '')) !== 'complete' || $identity === null
+            || ($identity !== null && $eventType !== (string)$identity['event_type'])
+            || $comparisonKey === '' || $comparisonKey !== $id || !hash_equals((string)$identity['comparison_key'],$comparisonKey)
+            || !hash_equals((string)$identity['identity_effective_at'],$occurredAt)
+            || !hash_equals((string)$identity['identity_deadline_at'],$deadlineAt)
+            || $eventRightIds !== array($sourceRightId)
+            || trim((string)($event['verification_status'] ?? '')) !== 'unverified'
+            || trim((string)($event['review_status'] ?? '')) !== 'pending'
+            || trim((string)($event['publication_status'] ?? '')) !== 'draft'
+            || ($event['review_required'] ?? null) !== true
+            || count($ids) < 1) { v1_official_site_contract_error('event_contract'); }
+        foreach ($ids as $documentId) {
+            if (!v1_valid_entity_id($documentId) || !isset($documentIds[$documentId])) { v1_official_site_contract_error('event_document_scope'); }
+        }
+        $eventIds[$id] = true; $expectedObservations += count($ids);
+        $normalizedEvents[] = array('event_id'=>$id,'company_id'=>$companyId,'external_id'=>$externalId,'event_type'=>$eventType,
+            'title'=>$title,'original_language'=>$language,'summary'=>array_key_exists('summary',$event) ? (string)$event['summary'] : null,
+            'occurred_at'=>$occurredAt,'deadline_at'=>$deadlineAt,'importance'=>$importance,'document_ids'=>$ids,'payload'=>$event,
+            'identity_action'=>$identity['identity_action'],'identity_target'=>$identity['identity_target'],
+            'identity_actor_id'=>$identity['identity_actor_id'],'identity_effective_at'=>$identity['identity_effective_at'],
+            'identity_deadline_at'=>$identity['identity_deadline_at'],'comparison_key'=>$comparisonKey);
+    }
+
+    $normalizedReviews = array(); $reviewIds = array();
+    foreach ($reviewItems as $index => $item) {
+        if (!is_array($item)) { v1_official_site_contract_error('review_items['.$index.']'); }
+        $id = trim((string)($item['review_id'] ?? '')); $itemConnector = trim((string)($item['connector_id'] ?? ''));
+        $entityType = trim((string)($item['entity_type'] ?? '')); $entityId = trim((string)($item['entity_id'] ?? ''));
+        $reasons = isset($item['review_reasons']) && is_array($item['review_reasons']) ? $item['review_reasons'] : array();
+        $normalizedReasons = array(); foreach ($reasons as $reason) { $reason = trim((string)$reason); if ($reason !== '') { $normalizedReasons[] = $reason; } }
+        $reason = implode('; ',array_values(array_unique($normalizedReasons)));
+        $reviewExternalId = trim((string)($item['external_id'] ?? ''));
+        if (!v1_valid_entity_id($id) || isset($reviewIds[$id]) || $itemConnector !== $connectorId
+            || $entityType !== (string)$connector['entity_type'] || $entityId !== (string)$connector['entity_id']
+            || !v1_valid_entity_id($entityId,96) || $reason === '' || $reviewExternalId === '' || strlen($reviewExternalId) > 191
+            || trim((string)($item['source_class'] ?? '')) !== $sourceType
+            || trim((string)($item['source_right_id'] ?? '')) !== $sourceRightId
+            || trim((string)($item['action'] ?? '')) !== 'editor_identity_review_required'
+            || !hash_equals(v1_official_site_stable_id('site-review',array($connectorId,$reviewExternalId,
+                (string)($item['draft_document']['content_hash'] ?? '')),32),$id)
+            || !isset($item['draft_document']) || !is_array($item['draft_document'])
+            || !array_key_exists('proposed_identity',$item) || !is_array($item['proposed_identity'])) {
+            v1_official_site_contract_error('review_item_contract');
+        }
+        $reviewIds[$id] = true; $normalizedReviews[] = array('review_item_id'=>$id,'entity_type'=>$entityType,
+            'entity_id'=>$entityId,'reason'=>$reason,'payload'=>$item);
+    }
+
+    $normalizedTombstones = array(); $tombstoneIds = array();
+    foreach ($tombstones as $index => $item) {
+        if (!is_array($item)) { v1_official_site_contract_error('tombstones['.$index.']'); }
+        $id = trim((string)($item['tombstone_id'] ?? '')); $itemConnector = trim((string)($item['connector_id'] ?? ''));
+        $entityType = trim((string)($item['entity_type'] ?? ''));
+        $externalId = trim((string)($item['external_id'] ?? '')); $entityId = trim((string)($item['entity_id'] ?? ''));
+        $reason = 'Official-site delete signal; review only, no automatic delete';
+        $observedAt = v1_editorial_datetime_utc($item['deleted_at'] ?? null);
+        if (!v1_valid_entity_id($id) || isset($tombstoneIds[$id]) || $itemConnector !== $connectorId
+            || $entityType !== (string)$connector['entity_type'] || $entityId !== (string)$connector['entity_id']
+            || $externalId === '' || strlen($externalId) > 191 || !v1_valid_entity_id($entityId,96)
+            || trim((string)($item['source_class'] ?? '')) !== $sourceType
+            || trim((string)($item['source_right_id'] ?? '')) !== $sourceRightId
+            || !hash_equals(v1_official_site_stable_id('site-tombstone',array($connectorId,$externalId,
+                (string)($item['deleted_at'] ?? '')),32),$id)
+            || $observedAt === null || trim((string)($item['action'] ?? '')) !== 'review_only_no_automatic_delete') {
+            v1_official_site_contract_error('tombstone_contract');
+        }
+        $tombstoneIds[$id] = true; $normalizedTombstones[] = array('tombstone_id'=>$id,'entity_type'=>$entityType,
+            'external_id'=>$externalId,'entity_id'=>$entityId ?: null,'reason'=>$reason,'observed_at'=>$observedAt,'payload'=>$item);
+    }
+
+    $requestHash = hash('sha256',v1_strict_canonical_json_encode($payloadObject,'official_site_snapshot_encode_failed'));
+    $accepted = array('companies'=>count($normalizedCompanies),'documents'=>count($normalizedDocuments),'events'=>count($normalizedEvents),
+        'event_observations'=>$expectedObservations,'review_items'=>count($normalizedReviews),'tombstones'=>count($normalizedTombstones));
+    $expected = isset($payload['expected']) && is_array($payload['expected']) ? $payload['expected'] : null;
+    if ($expected === null || count($expected) !== count($accepted)) { v1_official_site_contract_error('expected_ack_contract'); }
+    foreach ($accepted as $field => $count) {
+        if (!array_key_exists($field,$expected) || !is_int($expected[$field]) || $expected[$field] !== $count) {
+            v1_official_site_contract_error('expected_ack_count');
+        }
+    }
+    if ((int)$connector['total_count'] !== $accepted['documents'] + $accepted['review_items'] + $accepted['tombstones']) {
+        v1_official_site_contract_error('connector_total_count_mismatch');
+    }
+    $now = gmdate('Y-m-d H:i:s'); $idempotent = false;
+    $pdo->beginTransaction();
+    try {
+        $snapshotLookup = $pdo->prepare('SELECT receipt_sha256,request_sha256,manifest_sha256,accepted_json,status FROM '
+            . table_name($config,'official_site_snapshots') . ' WHERE snapshot_id=? FOR UPDATE');
+        $snapshotLookup->execute(array($snapshotId)); $existingSnapshot = $snapshotLookup->fetch();
+        if ($existingSnapshot) {
+            $storedAccepted = json_decode((string)$existingSnapshot['accepted_json'],true);
+            if (!hash_equals((string)$existingSnapshot['receipt_sha256'],$receiptSha)
+                || !hash_equals((string)$existingSnapshot['request_sha256'],$requestHash)
+                || !hash_equals((string)$existingSnapshot['manifest_sha256'],$manifestSha)
+                || $storedAccepted !== $accepted || (string)$existingSnapshot['status'] !== 'succeeded') {
+                throw new RuntimeException('official_site_snapshot_idempotency_conflict');
+            }
+            $pdo->commit();
+            respond(200,array('ok'=>true,'snapshot_id'=>$snapshotId,'receipt_sha256'=>$receiptSha,
+                'accepted'=>$accepted,'rejected'=>0,'idempotent'=>true));
+        }
+        if (v1_official_site_source_right($pdo,$config,$sourceRightId,$sourceType,$sourceKey,true) === null) {
+            throw new RuntimeException('official_site_source_right_ineligible');
+        }
+
+        $companyStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'companies')
+            . ' (company_id,stock_code,market,legal_name,legal_name_en,short_name,aliases_json,homepage_url,record_status,listing_status,master_modified_at,created_at,updated_at)'
+            . ' VALUES (?,?,?, ?,NULL,NULL,\'[]\',?,\'active\',\'unknown\',NULL,?,?) ON DUPLICATE KEY UPDATE '
+            . 'stock_code=COALESCE(NULLIF(VALUES(stock_code),\'\'),stock_code),market=COALESCE(NULLIF(VALUES(market),\'\'),market),'
+            . 'legal_name=COALESCE(NULLIF(VALUES(legal_name),\'\'),legal_name),homepage_url=COALESCE(NULLIF(VALUES(homepage_url),\'\'),homepage_url),updated_at=VALUES(updated_at)');
+        foreach ($normalizedCompanies as $company) {
+            $companyStmt->execute(array($company['company_id'],$company['stock_code'] ?: null,$company['market'] ?: null,
+                mb_substr($company['legal_name'],0,255,'UTF-8'),$company['homepage_url'] ?: null,$now,$now));
+        }
+        $companyExists = $pdo->prepare('SELECT company_id FROM ' . table_name($config,'companies')
+            . ' WHERE company_id=? AND record_status=\'active\' LIMIT 1 FOR UPDATE');
+        $referencedCompanies = array();
+        foreach ($normalizedDocuments as $row) { if ($row['company_id'] !== null) { $referencedCompanies[$row['company_id']] = true; } }
+        foreach ($normalizedEvents as $row) { $referencedCompanies[$row['company_id']] = true; }
+        foreach (array_keys($referencedCompanies) as $companyId) {
+            $companyExists->execute(array($companyId));
+            if ($companyExists->fetchColumn() === false) { throw new RuntimeException('official_site_company_missing'); }
+        }
+
+        $documentExisting = $pdo->prepare('SELECT source_right_id,source_class,external_id,content_hash,collection_key,version_no,'
+            . 'correction_of_document_id,original_language,title,body_text,original_url,verification_status,publication_status,retrieved_at FROM '
+            . table_name($config,'documents') . ' WHERE document_id=? FOR UPDATE');
+        $documentStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'documents')
+            . ' (document_id,company_id,source_right_id,source_class,external_id,document_type,original_language,title,body_text,original_url,content_hash,'
+            . 'collection_key,correction_of_document_id,version_no,published_at,retrieved_at,verification_status,publication_status,payload_json,created_at,updated_at)'
+            . ' VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,\'unverified\',\'draft\',?,?,?)');
+        $documentLatest = $pdo->prepare('SELECT document_id,source_right_id,version_no FROM '
+            . table_name($config,'documents') . ' WHERE source_right_id=? AND source_class=? AND external_id=?'
+            . ' ORDER BY version_no DESC,created_at DESC,document_id DESC LIMIT 1 FOR UPDATE');
+        $documentRefresh = $pdo->prepare('UPDATE ' . table_name($config,'documents')
+            . ' SET retrieved_at=GREATEST(retrieved_at,?),updated_at=? WHERE document_id=?');
+        foreach ($normalizedDocuments as $document) {
+            $documentExisting->execute(array($document['document_id'])); $existing = $documentExisting->fetch();
+            if ($existing) {
+                if ((string)$existing['source_right_id'] !== $sourceRightId || (string)$existing['source_class'] !== $sourceType
+                    || (string)$existing['external_id'] !== $document['external_id'] || (string)$existing['content_hash'] !== $document['content_hash']
+                    || (string)$existing['collection_key'] !== $document['collection_key']
+                    || (string)$existing['original_language'] !== $document['original_language']
+                    || (string)$existing['title'] !== $document['title'] || (string)$existing['body_text'] !== $document['body_text']
+                    || (string)$existing['original_url'] !== $document['original_url']) {
+                    throw new RuntimeException('official_site_document_identity_conflict');
+                }
+                // Never downgrade or overwrite reviewed/published content. A
+                // same-content observation advances only retrieval metadata.
+                $documentRefresh->execute(array($document['retrieved_at'],$now,$document['document_id']));
+                continue;
+            }
+            $documentLatest->execute(array($sourceRightId,$sourceType,$document['external_id'])); $latest = $documentLatest->fetch();
+            if ($latest && (string)$latest['source_right_id'] !== $sourceRightId) {
+                throw new RuntimeException('official_site_document_lineage_conflict');
+            }
+            $versionNo = $latest ? (int)$latest['version_no'] + 1 : 1;
+            $correctionOf = $latest ? (string)$latest['document_id'] : null;
+            $documentStmt->execute(array($document['document_id'],$document['company_id'],$sourceRightId,$sourceType,$document['external_id'],
+                $document['document_type'],$document['original_language'],$document['title'],$document['body_text'],
+                $document['original_url'],$document['content_hash'],$document['collection_key'],$correctionOf,$versionNo,
+                $document['published_at'],$document['retrieved_at'],json_value($document['payload']),$now,$now));
+        }
+
+        $eventExisting = $pdo->prepare('SELECT company_id,event_type,identity_action,identity_target,identity_actor_id,'
+            . 'identity_effective_at,identity_deadline_at,identity_status,comparison_key,publication_status FROM '
+            . table_name($config,'governance_events') . ' WHERE event_id=? FOR UPDATE');
+        $eventStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'governance_events')
+            . ' (event_id,company_id,event_type,title,original_language,summary,occurred_at,deadline_at,importance,verification_status,review_status,'
+            . 'publication_status,collection_key,identity_action,identity_target,identity_actor_id,identity_effective_at,identity_deadline_at,identity_status,'
+            . 'comparison_key,payload_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,\'unverified\',\'pending\',\'draft\',?,?,?,?,?,?,\'complete\',?,?,?,?) '
+            );
+        $eventDocumentStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'event_documents')
+            . ' (event_id,document_id,relation_type,position_no,created_at) VALUES (?,?,\'evidence\',?,?) ON DUPLICATE KEY UPDATE position_no=VALUES(position_no)');
+        $documentObservation = $pdo->prepare('SELECT content_hash,retrieved_at FROM ' . table_name($config,'documents')
+            . ' WHERE document_id=? AND source_right_id=? LIMIT 1');
+        $observationStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'event_observations')
+            . ' (observation_id,event_id,document_id,source_class,source_key,first_observed_at,observed_at,payload_hash,payload_json,created_at,updated_at)'
+            . ' VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE first_observed_at=LEAST(first_observed_at,VALUES(first_observed_at)),'
+            . 'observed_at=GREATEST(observed_at,VALUES(observed_at)),payload_hash=VALUES(payload_hash),payload_json=VALUES(payload_json),updated_at=VALUES(updated_at)');
+        $priorEventLink = $pdo->prepare('SELECT entity_id FROM ' . table_name($config,'official_site_identity_links')
+            . ' WHERE connector_id=? AND entity_type=\'event\' AND external_id=? AND active=1 LIMIT 1 FOR UPDATE');
+        $oldEventObservationsDelete = $pdo->prepare('DELETE FROM ' . table_name($config,'event_observations')
+            . ' WHERE event_id=? AND source_key=? AND document_id=?');
+        $oldEventDocumentsDelete = $pdo->prepare('DELETE FROM ' . table_name($config,'event_documents')
+            . ' WHERE event_id=? AND document_id=?');
+        foreach ($normalizedEvents as $event) {
+            $eventExisting->execute(array($event['event_id'])); $existing = $eventExisting->fetch();
+            if ($existing) {
+                $storedIdentity = v1_resolve_stored_event_identity((string)$existing['company_id'],(string)$existing['event_type'],
+                    $existing['identity_action'],$existing['identity_target'],$existing['identity_actor_id'],
+                    $existing['identity_effective_at'],$existing['identity_deadline_at'],$existing['comparison_key']);
+                $sameIdentity = $storedIdentity !== null && (string)$existing['identity_status'] === 'complete'
+                    && hash_equals((string)$existing['comparison_key'],$event['comparison_key']);
+                foreach (array('company_id','event_type','identity_action','identity_target','identity_actor_id',
+                    'identity_effective_at','identity_deadline_at','comparison_key') as $field) {
+                    if (!$sameIdentity || (string)$storedIdentity[$field] !== (string)$event[$field]) { $sameIdentity = false; break; }
+                }
+                if (!$sameIdentity) { throw new RuntimeException('official_site_event_identity_conflict'); }
+                // A canonical DART/KIND/editorial event keeps its lifecycle and
+                // presentation fields.  This connector only adds evidence.
+            } else {
+                $eventStmt->execute(array($event['event_id'],$event['company_id'],$event['event_type'],$event['title'],
+                    $event['original_language'],$event['summary'],$event['occurred_at'],$event['deadline_at'],$event['importance'],
+                    mb_substr($event['external_id'],0,96,'UTF-8'),$event['identity_action'],$event['identity_target'],$event['identity_actor_id'],
+                    $event['identity_effective_at'],$event['identity_deadline_at'],$event['comparison_key'],json_value($event['payload']),$now,$now));
+            }
+            $priorEventLink->execute(array($connectorId,$event['external_id'])); $oldLink = $priorEventLink->fetch();
+            if ($oldLink && (string)$oldLink['entity_id'] !== $event['event_id']) {
+                $oldEventId = (string)$oldLink['entity_id'];
+                foreach ($event['document_ids'] as $changedDocumentId) {
+                    $oldEventObservationsDelete->execute(array($oldEventId,$sourceKey,$changedDocumentId));
+                    $oldEventDocumentsDelete->execute(array($oldEventId,$changedDocumentId));
+                }
+            }
+            foreach ($event['document_ids'] as $position => $documentId) {
+                $eventDocumentStmt->execute(array($event['event_id'],$documentId,$position,$now));
+                $documentObservation->execute(array($documentId,$sourceRightId)); $doc = $documentObservation->fetch();
+                if (!$doc) { throw new RuntimeException('official_site_observation_document_missing'); }
+                $observationAt = (string)$doc['retrieved_at'];
+                $observationStmt->execute(array(v1_stable_id('observation',$event['event_id'].'|'.$documentId.'|'.$sourceKey),
+                    $event['event_id'],$documentId,$sourceType,$sourceKey,$observationAt,$observationAt,(string)$doc['content_hash'],
+                    json_value(array('snapshot_id'=>$snapshotId,'identity_status'=>'complete','review_status'=>'pending')),$now,$now));
+            }
+        }
+
+        $linkLookup = $pdo->prepare('SELECT link_id,entity_id FROM ' . table_name($config,'official_site_identity_links')
+            . ' WHERE connector_id=? AND entity_type=? AND external_id=? AND active=1 FOR UPDATE');
+        $linkRetire = $pdo->prepare('UPDATE ' . table_name($config,'official_site_identity_links')
+            . ' SET active=0,retired_at=?,updated_at=? WHERE link_id=? AND active=1');
+        $linkInsert = $pdo->prepare('INSERT INTO ' . table_name($config,'official_site_identity_links')
+            . ' (link_id,connector_id,source_right_id,entity_type,external_id,entity_id,snapshot_id,active,retired_at,created_at,updated_at)'
+            . ' VALUES (?,?,?,?,?,?,?,1,NULL,?,?)');
+        $identityRows = array();
+        foreach ($normalizedDocuments as $row) { $identityRows[] = array('document',$row['external_id'],$row['document_id']); }
+        foreach ($normalizedEvents as $row) { $identityRows[] = array('event',$row['external_id'],$row['event_id']); }
+        foreach ($identityRows as $identity) {
+            $linkLookup->execute(array($connectorId,$identity[0],$identity[1])); $active = $linkLookup->fetch();
+            if ($active && (string)$active['entity_id'] === $identity[2]) { continue; }
+            if ($active) { $linkRetire->execute(array($collectedAt,$now,(string)$active['link_id'])); }
+            $linkInsert->execute(array(v1_stable_id('site-link',$snapshotId.'|'.$identity[0].'|'.$identity[1].'|'.$identity[2]),
+                $connectorId,$sourceRightId,$identity[0],$identity[1],$identity[2],$snapshotId,$now,$now));
+        }
+
+        $reviewExisting = $pdo->prepare('SELECT connector_id,entity_type,entity_id,reason,payload_json FROM '
+            . table_name($config,'official_site_review_items') . ' WHERE review_item_id=? FOR UPDATE');
+        $reviewStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'official_site_review_items')
+            . ' (review_item_id,snapshot_id,connector_id,entity_type,entity_id,reason,payload_json,review_status,reviewed_by,reviewed_at,created_at,updated_at)'
+            . ' VALUES (?,?,?,?,?,?,?,\'pending\',NULL,NULL,?,?)');
+        $reviewRefresh = $pdo->prepare('UPDATE ' . table_name($config,'official_site_review_items')
+            . ' SET snapshot_id=?,payload_json=?,updated_at=? WHERE review_item_id=?');
+        foreach ($normalizedReviews as $item) {
+            $reviewExisting->execute(array($item['review_item_id'])); $existing = $reviewExisting->fetch();
+            if ($existing) {
+                $storedPayload = json_decode((string)$existing['payload_json'],true);
+                $storedSemantic = is_array($storedPayload) ? v1_official_site_review_semantic_payload($storedPayload) : null;
+                $incomingSemantic = v1_official_site_review_semantic_payload($item['payload']);
+                if ((string)$existing['connector_id'] !== $connectorId || (string)$existing['entity_type'] !== $item['entity_type']
+                    || (string)$existing['entity_id'] !== $item['entity_id'] || (string)$existing['reason'] !== $item['reason']
+                    || $storedSemantic === null || !hash_equals(
+                        hash('sha256',v1_strict_canonical_json_encode($storedSemantic,'official_site_review_encode_failed')),
+                        hash('sha256',v1_strict_canonical_json_encode($incomingSemantic,'official_site_review_encode_failed')))) {
+                    throw new RuntimeException('official_site_review_idempotency_conflict');
+                }
+                $reviewRefresh->execute(array($snapshotId,json_value($item['payload']),$now,$item['review_item_id']));
+            } else {
+                $reviewStmt->execute(array($item['review_item_id'],$snapshotId,$connectorId,$item['entity_type'],$item['entity_id'],
+                    $item['reason'],json_value($item['payload']),$now,$now));
+            }
+        }
+        $tombstoneExisting = $pdo->prepare('SELECT connector_id,entity_type,external_id,entity_id,reason,observed_at,payload_json FROM '
+            . table_name($config,'official_site_tombstones') . ' WHERE tombstone_id=? FOR UPDATE');
+        $tombstoneStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'official_site_tombstones')
+            . ' (tombstone_id,snapshot_id,connector_id,entity_type,external_id,entity_id,reason,observed_at,payload_json,review_status,'
+            . 'reviewed_by,reviewed_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,\'pending\',NULL,NULL,?,?)');
+        $tombstoneRefresh = $pdo->prepare('UPDATE ' . table_name($config,'official_site_tombstones')
+            . ' SET snapshot_id=?,payload_json=?,updated_at=? WHERE tombstone_id=?');
+        foreach ($normalizedTombstones as $item) {
+            $tombstoneExisting->execute(array($item['tombstone_id'])); $existing = $tombstoneExisting->fetch();
+            if ($existing) {
+                $storedPayload = json_decode((string)$existing['payload_json'],true);
+                $storedHash = is_array($storedPayload)
+                    ? hash('sha256',v1_strict_canonical_json_encode($storedPayload,'official_site_tombstone_encode_failed')) : null;
+                $incomingHash = hash('sha256',v1_strict_canonical_json_encode($item['payload'],'official_site_tombstone_encode_failed'));
+                if ((string)$existing['connector_id'] !== $connectorId || (string)$existing['entity_type'] !== $item['entity_type']
+                    || (string)$existing['external_id'] !== $item['external_id'] || (string)($existing['entity_id'] ?? '') !== (string)($item['entity_id'] ?? '')
+                    || (string)$existing['reason'] !== $item['reason'] || (string)$existing['observed_at'] !== $item['observed_at']
+                    || $storedHash === null || !hash_equals($storedHash,$incomingHash)) {
+                    throw new RuntimeException('official_site_tombstone_idempotency_conflict');
+                }
+                $tombstoneRefresh->execute(array($snapshotId,json_value($item['payload']),$now,$item['tombstone_id']));
+            } else {
+                $tombstoneStmt->execute(array($item['tombstone_id'],$snapshotId,$connectorId,$item['entity_type'],$item['external_id'],
+                    $item['entity_id'],$item['reason'],$item['observed_at'],json_value($item['payload']),$now,$now));
+            }
+        }
+
+        $snapshotStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'official_site_snapshots')
+            . ' (snapshot_id,receipt_sha256,request_sha256,manifest_sha256,connector_id,source_right_id,source_type,source_key,connector_receipt_json,'
+            . 'code_revision,collected_at,accepted_json,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,\'succeeded\',?,?)');
+        $snapshotStmt->execute(array($snapshotId,$receiptSha,$requestHash,$manifestSha,$connectorId,$sourceRightId,$sourceType,$sourceKey,
+            v1_strict_canonical_json_encode($connector,'official_site_receipt_encode_failed'),$revision,$collectedAt,json_value($accepted),$now,$now));
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        if (strpos($e->getMessage(),'official_site_') === 0 || (string)$e->getCode() === '23000') {
+            respond(409,array('ok'=>false,'error'=>$e->getMessage()));
+        }
+        throw $e;
+    }
+    respond(200,array('ok'=>true,'snapshot_id'=>$snapshotId,'receipt_sha256'=>$receiptSha,
+        'accepted'=>$accepted,'rejected'=>0,'idempotent'=>$idempotent));
+}
+
 /**
  * HMAC action contract: ?action=upsert_governance_snapshot
  * payload={companies,documents,events,source_rights,run}.
  */
+function v1_official_completion_semantic_sha(array $run): string {
+    $semantic = $run;
+    foreach (array('github_run_attempt','started_at','finished_at','first_observed_at','metrics') as $volatile) {
+        unset($semantic[$volatile]);
+    }
+    if (isset($semantic['source_outcomes']) && is_array($semantic['source_outcomes'])) {
+        foreach ($semantic['source_outcomes'] as &$outcome) {
+            if (is_array($outcome)) { unset($outcome['elapsed_ms']); }
+        }
+        unset($outcome);
+    }
+    return hash('sha256',v1_strict_canonical_json_encode($semantic,'scheduled_slot_completion_encode_failed'));
+}
+
+function v1_lock_official_slot_claim_for_run(PDO $pdo, array $config, array $run, string $runId,
+    string $pipeline, ?string $codeRevision): ?array {
+    $runKind = v1_official_run_metric($run,'run_kind');
+    $claimId = v1_official_run_metric($run,'slot_claim_id');
+    if ($runKind !== 'scheduled_incremental') {
+        if ($claimId !== null && $claimId !== '') {
+            throw new RuntimeException('non_scheduled_run_has_slot_claim:' . $runId);
+        }
+        return null;
+    }
+    $schedule = v1_official_run_metric($run,'event_schedule');
+    $slot = v1_editorial_datetime_utc(v1_official_run_metric($run,'scheduled_slot_at'));
+    $trigger = v1_editorial_datetime_utc(v1_official_run_metric($run,'trigger_created_at'));
+    $claimedAt = v1_editorial_datetime_utc(v1_official_run_metric($run,'slot_claimed_at'));
+    $nextSlot = v1_editorial_datetime_utc(v1_official_run_metric($run,'next_cadence_slot_at'));
+    $githubRunId = v1_official_run_metric($run,'github_run_id');
+    $githubAttempt = v1_official_run_metric($run,'github_run_attempt');
+    $triggerLag = v1_official_run_metric($run,'trigger_lag_seconds');
+    $claimLag = v1_official_run_metric($run,'claim_lag_seconds');
+    $late = v1_official_run_metric($run,'slot_claim_late');
+    if (!is_string($claimId) || !v1_valid_entity_id($claimId) || !is_string($schedule)
+        || !is_string($githubRunId) || preg_match('/^[0-9]{1,64}$/',$githubRunId) !== 1
+        || !is_int($githubAttempt) || $githubAttempt < 1 || !is_int($triggerLag) || $triggerLag < 0
+        || !is_int($claimLag) || $claimLag < 0 || !is_bool($late)
+        || $slot === null || $trigger === null || $claimedAt === null || $nextSlot === null
+        || !v1_official_schedule_slot_matches($schedule,$slot) || $codeRevision === null) {
+        throw new RuntimeException('invalid_scheduled_slot_claim_provenance:' . $runId);
+    }
+    $stmt = $pdo->prepare('SELECT * FROM ' . table_name($config,'official_slot_claims') . ' WHERE claim_id=? FOR UPDATE');
+    $stmt->execute(array($claimId)); $claim = $stmt->fetch();
+    if (!$claim
+        || (string)$claim['pipeline'] !== $pipeline
+        || (string)$claim['event_schedule'] !== $schedule
+        || (string)$claim['scheduled_slot_at'] !== $slot
+        || (string)$claim['trigger_created_at'] !== $trigger
+        || (string)$claim['claimed_at'] !== $claimedAt
+        || (string)$claim['next_cadence_slot_at'] !== $nextSlot
+        || (string)$claim['github_run_id'] !== $githubRunId
+        || ((string)$claim['status'] === 'completed'
+            ? $githubAttempt < (int)$claim['github_run_attempt']
+            : $githubAttempt !== (int)$claim['github_run_attempt'])
+        || (int)$claim['trigger_lag_seconds'] !== $triggerLag
+        || (int)$claim['claim_lag_seconds'] !== $claimLag
+        || ((int)$claim['late'] === 1) !== $late
+        || !hash_equals((string)$claim['code_revision'],$codeRevision)
+        || !in_array((string)$claim['status'],array('claimed','failed','completed'),true)
+        || ((string)$claim['status'] === 'completed' && (string)$claim['completed_run_id'] !== $runId)) {
+        throw new RuntimeException('scheduled_slot_claim_conflict:' . $runId);
+    }
+    return $claim;
+}
+
+/** Map only caller-controlled event identity conflicts to stable HTTP 409 codes. */
+function v1_governance_snapshot_identity_conflict_code(Throwable $error): ?string {
+    $message = $error->getMessage();
+    foreach (array(
+        'followup_event_identity_conflict',
+        'invalid_complete_event_identity',
+        'incomplete_event_identity_has_comparison_key',
+        'event_identity_scope_conflict',
+        'event_identity_field_conflict',
+    ) as $code) {
+        if ($message === $code || strpos($message,$code . ':') === 0) { return $code; }
+    }
+    return null;
+}
+
 function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): void {
     $companies = isset($payload['companies']) && is_array($payload['companies']) ? $payload['companies'] : array();
     $documents = isset($payload['documents']) && is_array($payload['documents']) ? $payload['documents'] : array();
@@ -1551,12 +5961,26 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
     if (count($companies) > 2000 || count($documents) > 2500 || count($events) > 2500 || count($rights) > 1000) {
         respond(413, array('ok' => false, 'error' => 'too_many_records'));
     }
+    $containsKindDocument = false;
+    foreach ($documents as $document) {
+        if (!is_array($document)) { continue; }
+        $documentId = strtolower(trim((string)v1_first($document,array('document_id'),'')));
+        $declaredSource = strtolower(trim((string)v1_first($document,array('source','source_key'),'')));
+        $sourceRightId = strtolower(trim((string)v1_first($document,array('source_right_id'),'')));
+        $isKind = strpos($documentId,'kind:') === 0 || $declaredSource === 'kind' || $sourceRightId === 'official:kind';
+        if ($isKind && $sourceRightId !== 'official:kind') {
+            respond(409,array('ok'=>false,'error'=>'kind_document_requires_approved_source_right'));
+        }
+        if ($isKind) { $containsKindDocument = true; }
+    }
     $now = gmdate('Y-m-d H:i:s');
-    $counts = array('companies' => 0, 'documents' => 0, 'events' => 0, 'source_rights' => 0, 'source_rights_rejected' => 0,
-        'event_documents' => 0, 'timeline_entries' => 0, 'editorial_revisions' => 0, 'correction_link_ambiguous' => 0,
+    $counts = array('companies' => 0, 'documents' => 0, 'events' => 0, 'actors' => 0, 'event_actors' => 0,
+        'source_rights' => 0, 'source_rights_rejected' => 0,
+        'event_documents' => 0, 'event_observations' => 0, 'timeline_entries' => 0, 'editorial_revisions' => 0, 'correction_link_ambiguous' => 0,
         'event_link_ambiguous' => 0, 'runs' => 0);
     $followupDocumentIds = array();
     $documentSourceClasses = array();
+    $terminalCompletionFailure = false;
     foreach ($events as $event) {
         if (!is_array($event) || (empty($event['is_correction']) && empty($event['is_cancelled']))) { continue; }
         $documentIds = isset($event['document_ids']) && is_array($event['document_ids']) ? $event['document_ids'] : array();
@@ -1568,12 +5992,31 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
     }
     $pdo->beginTransaction();
     try {
-        $companyStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'companies') . ' (company_id, stock_code, market, legal_name, legal_name_en, short_name, aliases_json, homepage_url, record_status, created_at, updated_at) '
-            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE stock_code=COALESCE(NULLIF(VALUES(stock_code),\'\'),stock_code), '
+        // Match the cutover lock order before this payload can upsert any
+        // SourceRight: release-state row first, then rights/data rows.
+        if (v1_release_state($pdo,$config,true) === null) {
+            throw new RuntimeException('release_state_unavailable');
+        }
+        // This lock is intentionally acquired before processing source_rights
+        // from the HMAC payload. A collector cannot bootstrap its own KIND
+        // permission and use it in the same transaction.
+        if ($containsKindDocument) {
+            $kindEligibility = v1_kind_source_right_eligibility($pdo,$config,true);
+            if (!$kindEligibility['eligible']) {
+                $pdo->rollBack();
+                respond(409,array('ok'=>false,'error'=>'kind_source_right_ineligible','source_right_id'=>'official:kind',
+                    'eligible'=>false,'rights_revision'=>$kindEligibility['rights_revision'],'reasons'=>$kindEligibility['reasons']));
+            }
+        }
+        $companyStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'companies') . ' (company_id, stock_code, market, legal_name, legal_name_en, short_name, aliases_json, homepage_url, record_status, listing_status, master_modified_at, created_at, updated_at) '
+            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE stock_code=COALESCE(NULLIF(VALUES(stock_code),\'\'),stock_code), '
             . 'market=COALESCE(NULLIF(VALUES(market),\'\'),market), legal_name=COALESCE(NULLIF(VALUES(legal_name),\'\'),legal_name), '
             . 'legal_name_en=COALESCE(NULLIF(VALUES(legal_name_en),\'\'),legal_name_en), short_name=COALESCE(NULLIF(VALUES(short_name),\'\'),short_name), '
             . 'aliases_json=IF(VALUES(aliases_json) IS NULL OR VALUES(aliases_json)=\'[]\',aliases_json,VALUES(aliases_json)), '
-            . 'homepage_url=COALESCE(NULLIF(VALUES(homepage_url),\'\'),homepage_url), record_status=VALUES(record_status), updated_at=VALUES(updated_at)');
+            . 'homepage_url=COALESCE(NULLIF(VALUES(homepage_url),\'\'),homepage_url), record_status=VALUES(record_status), '
+            . 'listing_status=listing_status, master_modified_at=master_modified_at, updated_at=VALUES(updated_at)');
+        $companyMasterStmt = $pdo->prepare('UPDATE ' . table_name($config, 'companies')
+            . ' SET listing_status=IF(?=1,?,listing_status), master_modified_at=IF(?=1,?,master_modified_at) WHERE company_id=?');
         foreach ($companies as $company) {
             if (!is_array($company)) { continue; }
             $companyId = trim((string)v1_first($company, array('company_id', 'corp_code'), ''));
@@ -1584,6 +6027,14 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
                 $alias = mb_substr(trim((string)$alias), 0, 255, 'UTF-8');
                 if ($alias !== '') { $aliases[] = $alias; }
             }
+            $allowedListingStatuses = array('unknown','listed','unlisted','suspended','delisted');
+            $requestedListingStatus = trim((string)v1_first($company, array('listing_status'), ''));
+            $hasListingStatus = array_key_exists('listing_status',$company)
+                && in_array($requestedListingStatus,$allowedListingStatuses,true);
+            $listingStatus = $hasListingStatus ? $requestedListingStatus : 'unknown';
+            $masterModifiedAt = mysql_dt(v1_first($company, array('master_modified_at','modified_at'), null));
+            $hasMasterModifiedAt = (array_key_exists('master_modified_at',$company) || array_key_exists('modified_at',$company))
+                && $masterModifiedAt !== null;
             $companyStmt->execute(array(
                 $companyId,
                 mb_substr((string)v1_first($company, array('stock_code'), ''), 0, 12, 'UTF-8') ?: null,
@@ -1594,8 +6045,13 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
                 json_value(array_values(array_unique($aliases))),
                 (string)v1_first($company, array('homepage_url', 'hm_url'), '') ?: null,
                 in_array(v1_first($company, array('record_status'), 'active'), array('active', 'inactive', 'merged', 'delisted'), true) ? (string)v1_first($company, array('record_status'), 'active') : 'active',
+                $listingStatus, $masterModifiedAt,
                 $now, $now,
             ));
+            if ($hasListingStatus || $hasMasterModifiedAt) {
+                $companyMasterStmt->execute(array($hasListingStatus ? 1 : 0,$listingStatus,
+                    $hasMasterModifiedAt ? 1 : 0,$masterModifiedAt,$companyId));
+            }
             $counts['companies']++;
         }
 
@@ -1746,8 +6202,9 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
         }
 
         $eventStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'governance_events') . ' (event_id, company_id, event_type, title, original_language, summary, '
-            . 'occurred_at, deadline_at, importance, verification_status, review_status, publication_status, collection_key, payload_json, created_at, updated_at) '
-            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE company_id=VALUES(company_id), '
+            . 'occurred_at, deadline_at, importance, verification_status, review_status, publication_status, collection_key, identity_action, identity_target, '
+            . 'identity_actor_id, identity_effective_at, identity_deadline_at, identity_status, comparison_key, payload_json, created_at, updated_at) '
+            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE company_id=VALUES(company_id), '
             . 'event_type=IF(VALUES(verification_status)=\'withdrawn\',event_type,VALUES(event_type)), '
             . 'title=IF(VALUES(verification_status)=\'withdrawn\',title,VALUES(title)), '
             . 'original_language=IF(VALUES(verification_status)=\'withdrawn\',original_language,VALUES(original_language)), '
@@ -1756,19 +6213,24 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             . 'deadline_at=IF(VALUES(verification_status)=\'withdrawn\',deadline_at,VALUES(deadline_at)), '
             . 'importance=IF(VALUES(verification_status)=\'withdrawn\',importance,VALUES(importance)), '
             . 'verification_status=VALUES(verification_status), collection_key=VALUES(collection_key), '
+            . 'identity_action=COALESCE(VALUES(identity_action),identity_action), identity_target=COALESCE(VALUES(identity_target),identity_target), '
+            . 'identity_actor_id=COALESCE(VALUES(identity_actor_id),identity_actor_id), identity_effective_at=COALESCE(VALUES(identity_effective_at),identity_effective_at), '
+            . 'identity_deadline_at=COALESCE(VALUES(identity_deadline_at),identity_deadline_at), '
+            . 'identity_status=IF(identity_status=\'complete\',identity_status,VALUES(identity_status)), comparison_key=COALESCE(comparison_key,VALUES(comparison_key)), '
             . 'review_status=IF(payload_json<=>VALUES(payload_json),review_status,VALUES(review_status)), '
             . 'publication_status=IF(payload_json<=>VALUES(payload_json),publication_status,VALUES(publication_status)), '
             . 'updated_at=IF(payload_json<=>VALUES(payload_json),updated_at,GREATEST(VALUES(updated_at),DATE_ADD(updated_at, INTERVAL 1 SECOND))), '
             . 'payload_json=VALUES(payload_json)');
         $eventDocumentStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'event_documents') . ' (event_id, document_id, relation_type, position_no, created_at) '
             . 'VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE position_no=VALUES(position_no)');
-        $eventByIdStmt = $pdo->prepare('SELECT event_id, event_type, title, original_language, summary, occurred_at, deadline_at, importance, verification_status FROM '
+        $eventByIdStmt = $pdo->prepare('SELECT event_id, event_type, title, original_language, summary, occurred_at, deadline_at, importance, verification_status, '
+            . 'identity_action,identity_target,identity_actor_id,identity_effective_at,identity_deadline_at,identity_status,comparison_key FROM '
             . table_name($config, 'governance_events') . ' WHERE event_id=? AND company_id=? LIMIT 1 FOR UPDATE');
-        $previousEventStmt = $pdo->prepare('SELECT event_id, event_type, title, original_language, summary, occurred_at, deadline_at, importance, verification_status FROM '
-            . table_name($config, 'governance_events') . ' WHERE company_id=? AND collection_key=? AND event_id<>?'
-            . ' AND occurred_at BETWEEN DATE_SUB(?, INTERVAL ' . V1_CORRECTION_LOOKBACK_DAYS . ' DAY) AND DATE_ADD(?, INTERVAL 7 DAY)'
-            . ' ORDER BY occurred_at DESC, updated_at DESC, event_id DESC LIMIT 2 FOR UPDATE');
         $eventLifecycleStmt = $pdo->prepare('SELECT verification_status FROM ' . table_name($config, 'governance_events') . ' WHERE event_id=? LIMIT 1 FOR UPDATE');
+        $eventIdentityStmt = $pdo->prepare('SELECT company_id,event_type,identity_action,identity_target,identity_actor_id,identity_effective_at,identity_deadline_at,identity_status,comparison_key '
+            . 'FROM ' . table_name($config, 'governance_events') . ' WHERE event_id=? LIMIT 1 FOR UPDATE');
+        $eventComparisonOwnerStmt = $pdo->prepare('SELECT event_id FROM ' . table_name($config, 'governance_events')
+            . ' WHERE comparison_key=? LIMIT 1 FOR UPDATE');
         $followupTimelineUnchanged = '(document_id<=>VALUES(document_id) AND occurred_at<=>VALUES(occurred_at) '
             . 'AND title<=>VALUES(title) AND description<=>VALUES(description) AND original_language<=>VALUES(original_language))';
         $cancellationTimelineStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'timeline_entries') . ' (timeline_entry_id, event_id, campaign_id, document_id, '
@@ -1796,9 +6258,32 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             . 'VALUES (?,\'event\',?,\'lifecycle_status\',?,\'corrected\',?,\'published\',\'official_ingest\',\'official_ingest\',?,?,?,?) '
             . 'ON DUPLICATE KEY UPDATE revision_id=revision_id');
         $documentClassStmt = $pdo->prepare('SELECT source_class FROM ' . table_name($config, 'documents') . ' WHERE document_id=? LIMIT 1');
+        $documentObservationStmt = $pdo->prepare('SELECT d.source_class,COALESCE(NULLIF(sr.source_key,\'\'),d.source_class) AS source_key,d.content_hash,d.retrieved_at '
+            . 'FROM ' . table_name($config, 'documents') . ' d LEFT JOIN ' . table_name($config, 'source_rights') . ' sr ON sr.source_right_id=d.source_right_id '
+            . 'WHERE d.document_id=? LIMIT 1');
+        $eventObservationStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'event_observations')
+            . ' (observation_id,event_id,document_id,source_class,source_key,first_observed_at,observed_at,payload_hash,payload_json,created_at,updated_at) '
+            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE first_observed_at=LEAST(first_observed_at,VALUES(first_observed_at)), '
+            . 'observed_at=GREATEST(observed_at,VALUES(observed_at)), payload_hash=VALUES(payload_hash), payload_json=VALUES(payload_json), updated_at=VALUES(updated_at)');
+        $companyPublicationEligibilityStmt = $pdo->prepare('SELECT stock_code,listing_status,record_status FROM '
+            . table_name($config, 'companies') . ' WHERE company_id=? LIMIT 1');
+        $officialActorLookupStmt = $pdo->prepare('SELECT display_name FROM ' . table_name($config, 'actors')
+            . ' WHERE actor_id=? LIMIT 1 FOR UPDATE');
+        $officialActorStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'actors')
+            . ' (actor_id,actor_type,display_name,display_name_en,company_id,country_code,aliases_json,homepage_url,review_status,record_status,created_at,updated_at) '
+            . 'VALUES (?,?,?,NULL,?,NULL,\'[]\',NULL,\'pending\',\'inactive\',?,?) ON DUPLICATE KEY UPDATE actor_id=actor_id');
+        $officialEventActorStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'event_actors')
+            . ' (event_id,actor_id,actor_role,review_status,created_at,updated_at) '
+            . 'VALUES (?,?,\'filer\',\'pending\',?,?) ON DUPLICATE KEY UPDATE event_id=event_id');
+        $approvedIdentityActorRelationStmt = $pdo->prepare('SELECT COUNT(*) FROM ' . table_name($config, 'event_actors') . ' ingest_identity_ea'
+            . ' JOIN ' . table_name($config, 'actors') . ' ingest_identity_a ON ingest_identity_a.actor_id=ingest_identity_ea.actor_id'
+            . ' WHERE ingest_identity_ea.event_id=? AND ingest_identity_ea.actor_id=?'
+            . ' AND ingest_identity_ea.review_status=\'approved\' AND ingest_identity_a.review_status=\'approved\''
+            . ' AND ingest_identity_a.record_status=\'active\' AND NULLIF(TRIM(ingest_identity_a.display_name),\'\') IS NOT NULL');
         foreach ($events as $event) {
             if (!is_array($event)) { continue; }
             $eventId = trim((string)v1_first($event, array('event_id'), ''));
+            $submittedEventId = $eventId;
             $companyId = trim((string)v1_first($event, array('company_id', 'corp_code'), ''));
             $eventType = trim((string)v1_first($event, array('event_type'), ''));
             $title = trim((string)v1_first($event, array('title', 'action'), ''));
@@ -1811,16 +6296,48 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             $followupOccurred = $occurred;
             $followupLanguage = v1_language(v1_first($event, array('original_language', 'language'), 'ko'), 'ko');
             $followupDescription = (string)v1_first($event, array('summary', 'target'), '') ?: null;
+            $identityStatus = trim((string)v1_first($event, array('identity_status'), 'needs_review'));
+            if (!in_array($identityStatus, array('complete','needs_review'), true)) { $identityStatus = 'needs_review'; }
+            $identityAction = trim((string)v1_first($event, array('identity_action'), ''));
+            $identityTarget = trim((string)v1_first($event, array('identity_target'), ''));
+            $identityActorId = trim((string)v1_first($event, array('identity_actor_id','actor_id'), ''));
+            $identityEffectiveInput = v1_first($event, array('identity_effective_at'), null);
+            $identityDeadlineInput = v1_first($event, array('identity_deadline_at'), null);
+            $identityEffectiveAt = mysql_dt($identityEffectiveInput);
+            $identityDeadlineAt = mysql_dt($identityDeadlineInput);
+            $comparisonKey = trim((string)v1_first($event, array('comparison_key'), ''));
             $canonicalEvent = null;
+            $canonicalStoredIdentity = null;
             if ($isEventFollowup && preg_match('/^[0-9]{8}$/', $companyId) && v1_valid_entity_id($eventId)) {
                 $eventByIdStmt->execute(array($eventId, $companyId));
                 $canonicalEvent = $eventByIdStmt->fetch();
-                if (!$canonicalEvent && $collectionKey !== '' && $occurred !== null) {
-                    $previousEventStmt->execute(array($companyId, $collectionKey, $eventId, $occurred, $occurred));
-                    $eventCandidates = $previousEventStmt->fetchAll();
-                    if (count($eventCandidates) === 1) { $canonicalEvent = $eventCandidates[0]; }
+                if ($canonicalEvent) {
+                    $submittedIdentity = $identityStatus === 'complete'
+                        ? v1_build_event_identity($companyId,$eventType,$identityAction,$identityTarget,$identityActorId,
+                            $identityEffectiveInput,$identityDeadlineInput,false)
+                        : null;
+                    $canonicalStoredIdentity = (string)$canonicalEvent['identity_status'] === 'complete'
+                        ? v1_resolve_stored_event_identity($companyId,(string)$canonicalEvent['event_type'],
+                            $canonicalEvent['identity_action'],$canonicalEvent['identity_target'],$canonicalEvent['identity_actor_id'],
+                            $canonicalEvent['identity_effective_at'],$canonicalEvent['identity_deadline_at'],
+                            $canonicalEvent['comparison_key'])
+                        : null;
+                    $followupIdentityMatches = $submittedIdentity !== null && $canonicalStoredIdentity !== null
+                        && preg_match('/^eventcmp:v1:[a-f0-9]{64}$/',$comparisonKey) === 1
+                        && hash_equals((string)$submittedIdentity['comparison_key'],$comparisonKey);
+                    foreach (array('company_id','event_type','identity_action','identity_target','identity_actor_id',
+                        'identity_effective_at','identity_deadline_at','comparison_key') as $identityField) {
+                        if (!$followupIdentityMatches
+                            || (string)$submittedIdentity[$identityField] !== (string)$canonicalStoredIdentity[$identityField]) {
+                            $followupIdentityMatches = false;
+                            break;
+                        }
+                    }
+                    if (!$followupIdentityMatches) {
+                        throw new RuntimeException('followup_event_identity_conflict:' . $submittedEventId);
+                    }
+                    $eventId = (string)$canonicalEvent['event_id'];
                 }
-                if ($canonicalEvent) { $eventId = (string)$canonicalEvent['event_id']; }
             }
             if ($isEventFollowup && !$canonicalEvent) {
                 $event['event_link_status'] = 'ambiguous_independent';
@@ -1829,8 +6346,7 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             if (!v1_valid_entity_id($eventId) || !preg_match('/^[0-9]{8}$/', $companyId) || !preg_match('/^[A-Za-z0-9_.:\-]{1,64}$/', $eventType) || $title === '' || $occurred === null) { continue; }
             $importance = (string)v1_first($event, array('importance'), 'medium');
             if ($importance === 'normal') { $importance = 'medium'; }
-            if ($importance === 'market_sensitive') { $importance = 'critical'; }
-            if (!in_array($importance, array('low', 'medium', 'high', 'critical'), true)) { $importance = 'medium'; }
+            if (!in_array($importance, array('low', 'medium', 'high', 'market_sensitive', 'critical'), true)) { $importance = 'medium'; }
             $language = v1_language(v1_first($event, array('original_language', 'language'), 'ko'), 'ko');
             $summary = (string)v1_first($event, array('summary', 'target'), '') ?: null;
             $deadline = mysql_dt(v1_first($event, array('deadline_at', 'deadline'), null));
@@ -1842,6 +6358,126 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
                 $occurred = (string)$canonicalEvent['occurred_at'];
                 $deadline = isset($canonicalEvent['deadline_at']) ? $canonicalEvent['deadline_at'] : null;
                 $importance = (string)$canonicalEvent['importance'];
+            }
+            if ($canonicalEvent) {
+                $identityAction = (string)$canonicalStoredIdentity['identity_action'];
+                $identityTarget = (string)$canonicalStoredIdentity['identity_target'];
+                $identityActorId = (string)$canonicalStoredIdentity['identity_actor_id'];
+                $identityEffectiveAt = (string)$canonicalStoredIdentity['identity_effective_at'];
+                $identityDeadlineAt = (string)$canonicalStoredIdentity['identity_deadline_at'];
+                $identityEffectiveInput = $identityEffectiveAt;
+                $identityDeadlineInput = $identityDeadlineAt;
+                $identityStatus = 'complete';
+                $comparisonKey = (string)$canonicalStoredIdentity['comparison_key'];
+            }
+            $computedIdentity = null;
+            if ($identityStatus === 'complete') {
+                $computedIdentity = $canonicalEvent
+                    ? $canonicalStoredIdentity
+                    : v1_build_event_identity($companyId,$eventType,$identityAction,$identityTarget,$identityActorId,
+                        $identityEffectiveInput,$identityDeadlineInput,false);
+            }
+            $completeIdentityValid = $computedIdentity !== null
+                && preg_match('/^eventcmp:v1:[a-f0-9]{64}$/', $comparisonKey) === 1
+                && hash_equals((string)$computedIdentity['comparison_key'],$comparisonKey);
+            if ($identityStatus === 'complete' && !$completeIdentityValid) {
+                throw new RuntimeException('invalid_complete_event_identity:' . $eventId);
+            }
+            if ($computedIdentity !== null) {
+                $identityAction = (string)$computedIdentity['identity_action'];
+                $identityTarget = (string)$computedIdentity['identity_target'];
+                $identityActorId = (string)$computedIdentity['identity_actor_id'];
+                $identityEffectiveAt = (string)$computedIdentity['identity_effective_at'];
+                $identityDeadlineAt = (string)$computedIdentity['identity_deadline_at'];
+            }
+            if ($identityStatus === 'needs_review' && $comparisonKey !== '') {
+                throw new RuntimeException('incomplete_event_identity_has_comparison_key:' . $eventId);
+            }
+            if ($identityStatus === 'needs_review') { $comparisonKey = ''; }
+            if ($comparisonKey !== '') {
+                // The unique comparison-key lookup also locks the absent-key gap
+                // in InnoDB, preventing ON DUPLICATE KEY from ever updating a
+                // different event row during a concurrent cross-source ingest.
+                $eventComparisonOwnerStmt->execute(array($comparisonKey));
+                $comparisonOwner = $eventComparisonOwnerStmt->fetchColumn();
+                if ($comparisonOwner !== false && (string)$comparisonOwner !== '') {
+                    $eventId = (string)$comparisonOwner;
+                }
+            }
+            $eventIdentityStmt->execute(array($eventId)); $storedIdentity = $eventIdentityStmt->fetch();
+            if ($storedIdentity) {
+                if ((string)$storedIdentity['company_id'] !== $companyId || (string)$storedIdentity['event_type'] !== $eventType) {
+                    throw new RuntimeException('event_identity_scope_conflict:' . $eventId);
+                }
+                $incomingIdentity = array($identityAction,$identityTarget,$identityActorId,$identityEffectiveAt,$identityDeadlineAt,$comparisonKey);
+                $storedIdentityValues = array((string)($storedIdentity['identity_action'] ?? ''),(string)($storedIdentity['identity_target'] ?? ''),
+                    (string)($storedIdentity['identity_actor_id'] ?? ''),(string)($storedIdentity['identity_effective_at'] ?? ''),
+                    (string)($storedIdentity['identity_deadline_at'] ?? ''),(string)($storedIdentity['comparison_key'] ?? ''));
+                foreach ($incomingIdentity as $identityIndex => $incomingValue) {
+                    if ((string)$incomingValue !== '' && $storedIdentityValues[$identityIndex] !== '' && (string)$incomingValue !== $storedIdentityValues[$identityIndex]) {
+                        throw new RuntimeException('event_identity_field_conflict:' . $eventId);
+                    }
+                }
+                if ((string)$storedIdentity['identity_status'] === 'complete') {
+                    $verifiedStoredIdentity = v1_resolve_stored_event_identity($companyId,$eventType,$storedIdentityValues[0],
+                        $storedIdentityValues[1],$storedIdentityValues[2],$storedIdentityValues[3],
+                        $storedIdentityValues[4],$storedIdentityValues[5]);
+                    if ($verifiedStoredIdentity === null) {
+                        throw new RuntimeException('stored_event_identity_integrity_error:' . $eventId);
+                    }
+                    list($identityAction,$identityTarget,$identityActorId,$identityEffectiveAt,$identityDeadlineAt,$comparisonKey) = $storedIdentityValues;
+                    $identityStatus = 'complete';
+                } else {
+                    $identityAction = $identityAction !== '' ? $identityAction : $storedIdentityValues[0];
+                    $identityTarget = $identityTarget !== '' ? $identityTarget : $storedIdentityValues[1];
+                    $identityActorId = $identityActorId !== '' ? $identityActorId : $storedIdentityValues[2];
+                    $identityEffectiveAt = $identityEffectiveAt !== null ? $identityEffectiveAt : ($storedIdentityValues[3] ?: null);
+                    $identityDeadlineAt = $identityDeadlineAt !== null ? $identityDeadlineAt : ($storedIdentityValues[4] ?: null);
+                }
+            }
+            $officialActorCandidateValid = false;
+            $officialActorDisplayName = '';
+            $officialActorType = '';
+            $officialActorCompanyId = null;
+            $actorCandidate = isset($event['actor']) && is_array($event['actor']) ? $event['actor'] : null;
+            $eventActorCandidate = isset($event['event_actor']) && is_array($event['event_actor']) ? $event['event_actor'] : null;
+            if ($identityActorId !== '' && $actorCandidate !== null && $eventActorCandidate !== null) {
+                $candidateActorId = v1_normalize_identity_text(v1_first($actorCandidate,array('actor_id'),''));
+                $candidateRelationActorId = v1_normalize_identity_text(v1_first($eventActorCandidate,array('actor_id'),''));
+                $candidateRelationEventId = trim((string)v1_first($eventActorCandidate,array('event_id'),''));
+                $candidateActorType = trim((string)v1_first($actorCandidate,array('actor_type'),''));
+                $candidateDisplayName = trim((string)v1_first($actorCandidate,array('display_name'),''));
+                $candidateCompanyId = trim((string)v1_first($actorCandidate,array('company_id'),''));
+                $candidateRole = trim((string)v1_first($eventActorCandidate,array('actor_role'),''));
+                $candidateReviewStatus = trim((string)v1_first($actorCandidate,array('review_status'),'pending'));
+                $candidateRecordStatus = trim((string)v1_first($actorCandidate,array('record_status'),'inactive'));
+                $candidateRelationReview = trim((string)v1_first($eventActorCandidate,array('review_status'),'pending'));
+                $candidateScopeValid = $candidateActorId === $identityActorId
+                    && $candidateRelationActorId === $identityActorId
+                    && ($candidateRelationEventId === $submittedEventId || $candidateRelationEventId === $eventId)
+                    && in_array($candidateActorType,array('company','institution'),true)
+                    && $candidateDisplayName !== '' && mb_strlen($candidateDisplayName,'UTF-8') <= 255
+                    && $candidateRole === 'filer' && $candidateReviewStatus === 'pending'
+                    && $candidateRecordStatus === 'inactive' && $candidateRelationReview === 'pending'
+                    && (($candidateActorType === 'company' && $candidateCompanyId === $companyId)
+                        || ($candidateActorType === 'institution' && $candidateCompanyId === ''));
+                if ($candidateScopeValid) {
+                    $officialActorLookupStmt->execute(array($identityActorId));
+                    $existingActorDisplayName = $officialActorLookupStmt->fetchColumn();
+                    $actorNameConsistent = $existingActorDisplayName === false
+                        || v1_normalize_identity_text((string)$existingActorDisplayName) === v1_normalize_identity_text($candidateDisplayName);
+                    if ($actorNameConsistent) {
+                        $officialActorDisplayName = $candidateDisplayName;
+                        $officialActorType = $candidateActorType;
+                        $officialActorCompanyId = $candidateActorType === 'company' ? $companyId : null;
+                        if ($existingActorDisplayName === false) {
+                            $officialActorStmt->execute(array($identityActorId,$officialActorType,$officialActorDisplayName,
+                                $officialActorCompanyId,$now,$now));
+                            $counts['actors']++;
+                        }
+                        $officialActorCandidateValid = true;
+                    }
+                }
             }
             $verification = (string)v1_first($event, array('verification_status', 'status'), 'signal');
             if ($verification === 'published') { $verification = 'confirmed'; }
@@ -1877,7 +6513,20 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             if ($telegramOnly) { $verification = 'signal'; }
             if ($evidenceMissing) { $verification = 'unverified'; }
             $isConfirmed = in_array($verification, array('official', 'confirmed', 'corroborated'), true);
-            $requiresReview = $telegramOnly || $evidenceMissing || in_array($importance, array('high', 'critical'), true)
+            $companyPublicationEligibilityStmt->execute(array($companyId));
+            $publicationCompany = $companyPublicationEligibilityStmt->fetch();
+            $companyAutoPublishEligible = is_array($publicationCompany)
+                && trim((string)($publicationCompany['stock_code'] ?? '')) !== ''
+                && in_array((string)($publicationCompany['listing_status'] ?? ''),array('listed','suspended'),true)
+                && (string)($publicationCompany['record_status'] ?? '') === 'active';
+            $approvedIdentityActorRelation = $identityActorId === '';
+            if ($identityActorId !== '') {
+                $approvedIdentityActorRelationStmt->execute(array($eventId,$identityActorId));
+                $approvedIdentityActorRelation = (int)$approvedIdentityActorRelationStmt->fetchColumn() > 0;
+            }
+            $requiresReview = $identityStatus !== 'complete' || $telegramOnly || $evidenceMissing
+                || !$companyAutoPublishEligible || !$approvedIdentityActorRelation
+                || in_array($importance, array('high', 'market_sensitive', 'critical'), true)
                 || !empty($event['review_required']) || $isEventFollowup;
             $previousLifecycle = 'active';
             if ($isCancelled) {
@@ -1897,16 +6546,30 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
                 $eventId, $companyId, $eventType, mb_substr($title, 0, 700, 'UTF-8'),
                 $language, $summary, $occurred,
                 $deadline, $importance, mb_substr($verification, 0, 24, 'UTF-8'),
-                $review, $publication, $collectionKey ?: null,
+                $review, $publication, $collectionKey ?: null, $identityAction ?: null, $identityTarget ?: null,
+                $identityActorId ?: null, $identityEffectiveAt, $identityDeadlineAt, $identityStatus, $comparisonKey ?: null,
                 json_value($event), $now, $now,
             ));
             $counts['events']++;
+            if ($officialActorCandidateValid) {
+                $officialEventActorStmt->execute(array($eventId,$identityActorId,$now,$now));
+                $counts['event_actors']++;
+            }
             $position = 0;
             foreach (array_values(array_unique($documentIds)) as $documentId) {
                 $documentId = trim((string)$documentId);
                 if (!v1_valid_entity_id($documentId)) { continue; }
                 $eventDocumentStmt->execute(array($eventId, $documentId, 'evidence', $position, $now));
-                $position++; $counts['event_documents']++;
+                $documentObservationStmt->execute(array($documentId)); $observationDocument = $documentObservationStmt->fetch();
+                if (!$observationDocument) { throw new RuntimeException('event_observation_document_missing:' . $documentId); }
+                $observationSource = mb_substr((string)$observationDocument['source_key'],0,191,'UTF-8');
+                $observationAt = (string)($observationDocument['retrieved_at'] ?: $now);
+                $observationHash = strtolower((string)$observationDocument['content_hash']);
+                if (preg_match('/^[a-f0-9]{64}$/', $observationHash) !== 1) { throw new RuntimeException('event_observation_hash_invalid:' . $documentId); }
+                $observationId = v1_stable_id('observation',$eventId . '|' . $documentId . '|' . $observationSource);
+                $eventObservationStmt->execute(array($observationId,$eventId,$documentId,(string)$observationDocument['source_class'],$observationSource,
+                    $observationAt,$observationAt,$observationHash,json_value(array('relation_type'=>'evidence','identity_status'=>$identityStatus)), $now,$now));
+                $position++; $counts['event_documents']++; $counts['event_observations']++;
             }
             if ($isCancelled) {
                 $cancellationDocumentId = $documentIds ? (string)$documentIds[0] : null;
@@ -1941,30 +6604,96 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
                 $runMetrics = $run;
                 $runMetrics['server_correction_link_ambiguous'] = $counts['correction_link_ambiguous'];
                 $runMetrics['server_event_link_ambiguous'] = $counts['event_link_ambiguous'];
-                $runStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'collection_runs') . ' (run_id, pipeline, source_key, status, started_at, finished_at, '
-                    . 'fetched_count, resolved_count, accepted_count, error_count, lag_seconds_p95, metrics_json, created_at, updated_at) '
-                    . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE pipeline=VALUES(pipeline), source_key=VALUES(source_key), status=VALUES(status), '
-                    . 'started_at=VALUES(started_at), finished_at=VALUES(finished_at), fetched_count=VALUES(fetched_count), resolved_count=VALUES(resolved_count), '
+                $codeRevision = v1_first($run, array('code_revision'), null);
+                if ($codeRevision !== null && $codeRevision !== '') {
+                    $codeRevision = v1_valid_build_sha($codeRevision);
+                    if ($codeRevision === null) { throw new RuntimeException('invalid_collection_run_code_revision:' . $runId); }
+                } else { $codeRevision = null; }
+                $runPipeline = mb_substr((string)v1_first($run, array('pipeline'), 'ingest-official'), 0, 64, 'UTF-8');
+                $slotClaim = v1_lock_official_slot_claim_for_run(
+                    $pdo,$config,$run,$runId,$runPipeline,$codeRevision
+                );
+                $startedAt = mysql_dt(v1_first($run, array('started_at'), $now)) ?: $now;
+                $finishedAt = mysql_dt(v1_first($run, array('finished_at'), $now));
+                $firstObservedAt = mysql_dt(v1_first($run, array('first_observed_at'), $startedAt)) ?: $startedAt;
+                $rawCount = (int)v1_first($run, array('raw_count'), (int)v1_first($run, array('fetched_count','fetched'), count($documents)));
+                $acknowledgedCount = (int)v1_first($run, array('acknowledged_count','ack_count'), (int)v1_first($run, array('accepted_count','accepted'), count($events)));
+                if ($rawCount < 0 || $acknowledgedCount < 0) { throw new RuntimeException('invalid_collection_run_counts:' . $runId); }
+                $terminalReason = null;
+                if ($slotClaim !== null) {
+                    if ((int)$slotClaim['late'] === 1) { $terminalReason = 'claim_after_next_cadence'; }
+                    elseif ($now >= (string)$slotClaim['next_cadence_slot_at']) {
+                        $terminalReason = 'completion_after_next_cadence';
+                    }
+                }
+                $incomingRunStatus = strtolower(trim((string)v1_first($run,array('status'),'failed')));
+                $incomingCompleted = in_array($incomingRunStatus,array('success','succeeded'),true)
+                    && $rawCount === $acknowledgedCount;
+                $completionDigest = $slotClaim === null ? null : v1_official_completion_semantic_sha($run);
+                if ($slotClaim !== null) {
+                    $terminalAttempt = $slotClaim['completed_run_attempt'] === null
+                        ? null : (int)$slotClaim['completed_run_attempt'];
+                    $sameTerminalAttempt = $terminalAttempt !== null
+                        && $terminalAttempt === (int)v1_official_run_metric($run,'github_run_attempt');
+                    if ((string)$slotClaim['status'] === 'completed' || $sameTerminalAttempt) {
+                        if ((string)$slotClaim['completed_run_id'] !== $runId
+                            || !is_string($slotClaim['completion_sha256'])
+                            || !hash_equals((string)$slotClaim['completion_sha256'],(string)$completionDigest)
+                            || (int)$slotClaim['completion_raw_count'] !== $rawCount
+                            || (int)$slotClaim['completion_ack_count'] !== $acknowledgedCount
+                            || ((string)$slotClaim['status'] === 'completed' && !$incomingCompleted)) {
+                            throw new RuntimeException('scheduled_slot_claim_completion_conflict:' . $runId);
+                        }
+                    }
+                }
+                $completedNoop = $slotClaim !== null && (string)$slotClaim['status'] === 'completed';
+                if (!$completedNoop) {
+                    $runStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'collection_runs') . ' (run_id, pipeline, source_key, code_revision, status, started_at, finished_at, '
+                    . 'first_observed_at, raw_count, acknowledged_count, fetched_count, resolved_count, accepted_count, error_count, lag_seconds_p95, metrics_json, created_at, updated_at) '
+                    . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE pipeline=VALUES(pipeline), source_key=VALUES(source_key), code_revision=VALUES(code_revision), status=VALUES(status), '
+                    . 'started_at=VALUES(started_at), finished_at=VALUES(finished_at), first_observed_at=LEAST(first_observed_at,VALUES(first_observed_at)), '
+                    . 'raw_count=VALUES(raw_count), acknowledged_count=VALUES(acknowledged_count), fetched_count=VALUES(fetched_count), resolved_count=VALUES(resolved_count), '
                     . 'accepted_count=VALUES(accepted_count), error_count=VALUES(error_count), lag_seconds_p95=VALUES(lag_seconds_p95), metrics_json=VALUES(metrics_json), updated_at=VALUES(updated_at)');
-                $runStmt->execute(array(
-                    $runId, mb_substr((string)v1_first($run, array('pipeline'), 'ingest-official'), 0, 64, 'UTF-8'),
+                    $runStmt->execute(array(
+                    $runId, $runPipeline,
                     mb_substr((string)v1_first($run, array('source_key'), ''), 0, 191, 'UTF-8') ?: null,
+                    $codeRevision,
                     mb_substr((string)v1_first($run, array('status'), 'succeeded'), 0, 24, 'UTF-8'),
-                    mysql_dt(v1_first($run, array('started_at'), $now)) ?: $now, mysql_dt(v1_first($run, array('finished_at'), $now)),
+                    $startedAt, $finishedAt, $firstObservedAt, $rawCount, $acknowledgedCount,
                     (int)v1_first($run, array('fetched_count', 'fetched'), count($documents)),
                     (int)v1_first($run, array('resolved_count', 'resolved'), count($documents)),
                     (int)v1_first($run, array('accepted_count', 'accepted'), count($events)),
                     (int)v1_first($run, array('error_count', 'errors'), 0),
                     v1_first($run, array('lag_seconds_p95'), null) !== null ? (int)$run['lag_seconds_p95'] : null,
                     json_value($runMetrics), $now, $now,
-                ));
+                    ));
+                    if ($slotClaim !== null) {
+                        $claimStatus = $incomingCompleted && $terminalReason === null ? 'completed' : 'failed';
+                        if ($terminalReason !== null) { $terminalCompletionFailure = true; }
+                        $githubAttempt = (int)v1_official_run_metric($run,'github_run_attempt');
+                        $claimUpdate = $pdo->prepare('UPDATE ' . table_name($config,'official_slot_claims')
+                            . ' SET status=?,terminal_reason=?,failed_at=?,completed_run_id=?,completed_run_attempt=?,completion_raw_count=?,completion_ack_count=?,completion_sha256=?,'
+                            . 'completed_at=?,updated_at=? WHERE claim_id=?');
+                        $claimUpdate->execute(array($claimStatus,$terminalReason,$terminalReason === null ? null : $now,
+                            $runId,$githubAttempt,$rawCount,$acknowledgedCount,$completionDigest,
+                            $claimStatus === 'completed' ? $now : null,$now,
+                            (string)$slotClaim['claim_id']));
+                    }
+                }
                 $counts['runs']++;
             }
         }
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        $identityConflictCode = v1_governance_snapshot_identity_conflict_code($e);
+        if ($identityConflictCode !== null) {
+            respond(409,array('ok'=>false,'error'=>$identityConflictCode));
+        }
         throw $e;
+    }
+    if ($terminalCompletionFailure) {
+        respond(409,array('ok'=>false,'error'=>'official_slot_completion_terminal_failure','upserted'=>$counts));
     }
     respond(200, array('ok' => true, 'upserted' => $counts));
 }
@@ -2231,6 +6960,10 @@ function delivery_event_is_publishable(PDO $pdo, array $config, string $eventId)
 }
 
 function enqueue_delivery_outbox(PDO $pdo, array $config, array $payload): void {
+    // Product invariant: governance distribution is web-only.  Keep historical
+    // rows auditable, but never permit any HMAC caller to create new outbound work.
+    respond(410,array('ok'=>false,'error'=>'outbound_delivery_disabled',
+        'distribution_mode'=>'web_only','accepted'=>0));
     $deliveries = isset($payload['deliveries']) && is_array($payload['deliveries']) ? $payload['deliveries'] : array();
     if (count($deliveries) > 500) { respond(413, array('ok' => false, 'error' => 'too_many_deliveries')); }
     $now = gmdate('Y-m-d H:i:s');
@@ -2295,6 +7028,10 @@ function delivery_source_rights_valid(PDO $pdo, array $config, string $payloadJs
 }
 
 function claim_delivery_outbox(PDO $pdo, array $config, array $payload): void {
+    // Product invariant: no worker may lease historical or newly submitted
+    // delivery rows while outbound delivery is permanently disabled.
+    respond(410,array('ok'=>false,'error'=>'outbound_delivery_disabled',
+        'distribution_mode'=>'web_only','claimed'=>0));
     $worker = trim((string)v1_first($payload, array('worker_id'), 'publisher'));
     if (!v1_valid_entity_id($worker, 96)) { respond(400, array('ok' => false, 'error' => 'invalid_worker_id')); }
     $channel = trim((string)v1_first($payload, array('channel', 'delivery_channel'), ''));
@@ -2508,7 +7245,7 @@ function v1_runtime_resource(array $config, string $resource): ?array {
         'source_rights' => array('source_right_id', 'SELECT source_right_id, source_type, source_key, source_name, permission_scope, evidence_uri, evidence_hash, valid_from, valid_until, revoked_at, ai_allowed, redistribution_allowed, status, notes, created_at, updated_at FROM ' . table_name($config, 'source_rights'), 'updated_at'),
         'collection_runs' => array('run_id', 'SELECT run_id, pipeline, source_key, status, started_at, finished_at, fetched_count, resolved_count, accepted_count, error_count, lag_seconds_p95, metrics_json, created_at, updated_at FROM ' . table_name($config, 'collection_runs'), 'updated_at'),
         'governance_events' => array('event_id', 'SELECT event_id, company_id, event_type, title, original_language, summary, occurred_at, deadline_at, importance, verification_status, review_status, publication_status, collection_key, updated_at FROM ' . table_name($config, 'governance_events'), 'updated_at'),
-        'documents' => array('document_id', 'SELECT document_id, company_id, source_right_id, source_class, external_id, document_type, original_language, title, original_url, content_hash, collection_key, correction_of_document_id, version_no, published_at, retrieved_at, verification_status, publication_status, updated_at FROM ' . table_name($config, 'documents'), 'updated_at'),
+        'documents' => array('document_id', 'SELECT document_id, company_id, source_right_id, source_class, external_id, document_type, original_language, title, SHA2(body_text,256) AS body_sha256, original_url, content_hash, collection_key, correction_of_document_id, version_no, published_at, retrieved_at, verification_status, publication_status, updated_at FROM ' . table_name($config, 'documents'), 'updated_at'),
     );
     return isset($resources[$resource]) ? $resources[$resource] : null;
 }

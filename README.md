@@ -24,7 +24,7 @@ licensed Telegram + media discovery
                  |
      MySQL governance entities
                  |
-   editorial review + DeliveryOutbox
+ editorial review + web-only release guard
                  |
   /api/v1 + Pages UI + RSS/CSV/JSON
 ```
@@ -32,9 +32,9 @@ licensed Telegram + media discovery
 주요 구현은 다음 위치에 있다.
 
 - `curator/governance.py`: 회사, 문서, 사건, 캠페인, 근거, 투표, 약속·이행 모델
-- `curator/official_ingest.py`, `curator/official_sources.py`: DART·KIND 증분 자동 수집. 회사·행동주주 공식 자료 connector는 후속 구현 대상
+- `curator/official_ingest.py`, `curator/official_sources.py`: DART·KIND 증분 자동 수집과 KIND 권한 preflight
 - `curator/source_rights.py`: 수집·AI·재배포 권한의 fail-closed 판정
-- `curator/governance_publisher.py`, `curator/publish_outbox.py`: 공개 승인 사건의 멱등 발송과 재시도
+- `curator/governance_publisher.py`, `curator/publish_outbox.py`: 과거 호환 surface를 유지하되 모든 outbound 경로를 web-only 정책으로 영구 차단
 - `deploy/activist/governance_v1.php`, `deploy/activist/openapi.yaml`: 공개·관리 API 계약
 - `public/governance/`: 접근 가능한 공개 UI
 - `.github/workflows/`: 수집, 링크 해결, 발행, 일일 배포, 감시, CI 분리
@@ -55,6 +55,7 @@ python -m curator.governance_ui --root .
 ```bash
 npm ci
 npx playwright install chromium
+npm run test:web-vitals-probe
 npm run test:ui
 ```
 
@@ -77,12 +78,15 @@ pip-audit --requirement requirements.txt
 ```text
 ACTIVIST_API_URL
 ACTIVIST_API_SECRET
+BSIDE_API_BASE_URL
+BSIDE_OPS_TOKEN
+BSIDE_ADMIN_TOKEN
+BSIDE_EDITOR_TOKEN
+GOVERNANCE_PREVIEW_TOKEN
 DART_API_KEY
 KIND_API_KEY
+OFFICIAL_SITE_ALLOWLIST_B64
 CURATOR_FEEDS
-# Outbound delivery is disabled; retain only if a future reviewed opt-in needs it.
-TELEGRAM_BOT_TOKEN
-TELEGRAM_CHAT_ID
 STORY_REVIEW_ACCESS_TOKEN
 TELEGRAM_ADMIN_ACCESS_TOKEN
 TELEGRAM_API_ID
@@ -90,11 +94,13 @@ TELEGRAM_API_HASH
 TELEGRAM_SESSION_STRING
 ```
 
-`KIND_API_KEY`는 내부 KIND 어댑터가 인증을 요구할 때만 추가하는 선택 Secret이다.
+`KIND_API_KEY`는 일반 수집에서는 내부 KIND 어댑터가 인증을 요구할 때만 쓰지만,
+승인 직후 실행하는 수동 `kind-adapter-preflight.yml`은 운영 설정 완전성을 확인하기
+위해 endpoint와 key를 모두 필수로 요구한다.
 
-현재 제품 정책은 Telegram 채팅으로 콘텐츠를 발송하지 않는 것이다. `ENABLE_TELEGRAM_DELIVERY=false`, `config.yaml`의 `telegram.enabled=false`, 빈 `telegram.chat_id`를 함께 유지하며, 수동 실행도 별도 허용 입력 없이는 발송하지 않는다. `TELEGRAM_API_ID`·`TELEGRAM_API_HASH`·`TELEGRAM_SESSION_STRING`을 이용한 허가 공개 채널 읽기 수집은 이 발송 정책과 분리되어 계속 운영한다. 비공개 Telegram 관리자 채팅과 `TELEGRAM_ADMIN_CHAT_ID`도 사용하지 않으며, 관리자는 고정 URL `https://news.bside.ai/feed/telegram-admin.html`에서 `TELEGRAM_ADMIN_ACCESS_TOKEN`을 직접 입력한다.
+현재 제품 정책은 Telegram 채팅으로 콘텐츠를 발송하지 않는 것이다. `ENABLE_TELEGRAM_DELIVERY=false`, `config.yaml`의 `telegram.enabled=false`, 빈 `telegram.chat_id`를 함께 유지하며, Python sender·로컬/원격 outbox·PHP enqueue/claim·Actions worker가 모두 코드 수준에서 거절하므로 runtime 값이나 수동 입력으로 재활성화할 수 없다. `TELEGRAM_API_ID`·`TELEGRAM_API_HASH`·`TELEGRAM_SESSION_STRING`을 이용한 허가 공개 채널 읽기 수집은 이 발송 정책과 분리되어 계속 운영한다. 비공개 Telegram 관리자 채팅과 `TELEGRAM_ADMIN_CHAT_ID`도 사용하지 않으며, 관리자는 고정 URL `https://news.bside.ai/feed/telegram-admin.html`에서 `TELEGRAM_ADMIN_ACCESS_TOKEN`을 직접 입력한다.
 
-주요 Repository variable은 `ACTIVIST_PUBLIC_API_URL`, `GOVERNANCE_API_BASE_URL`, `KIND_DISCLOSURE_ENDPOINT`, `ENABLE_PAGES`와 단계별 전환 플래그다. `ENABLE_TELEGRAM_DELIVERY`는 모든 outbound Telegram 경로의 최상위 opt-in이며 현재 `false`다. 신규 파이프라인은 `ENABLE_GOVERNANCE_SHADOW`, `ENABLE_GOVERNANCE_PAGES`, `ENABLE_GOVERNANCE_DELIVERY`를 각각 명시적으로 `true`로 바꾸기 전에는 예약 실행·공개 배포·outbox 처리를 하지 않는다. 전체 목록과 예약 시각은 [운영 자동화 문서](docs/operations-automation.md)를 따른다.
+주요 Repository variable은 `ACTIVIST_PUBLIC_API_URL`, `GOVERNANCE_API_BASE_URL`, `KIND_DISCLOSURE_ENDPOINT`, `PAGES_OWNER=legacy|governance`, `GOVERNANCE_PIPELINE_MODE=off|dart_canary|shadow|live`다. 이전 boolean은 전환기 어댑터로만 읽으며 충돌하면 fail-closed한다. `ENABLE_TELEGRAM_DELIVERY=false`와 `ENABLE_GOVERNANCE_DELIVERY=false`는 유지하지만 어떤 runtime 값도 outbound를 다시 활성화할 수 없다. 전체 목록과 예약 시각은 [운영 자동화 문서](docs/operations-automation.md)를 따른다.
 
 ### 미디어 발견 피드 범위
 
@@ -170,9 +176,12 @@ Pages는 `main`에 생성 HTML, `state.json`, 아카이브를 커밋하지 않�
 - [구현 상태와 전환 체크리스트](docs/implementation-status.md)
 - [운영 자동화](docs/operations-automation.md)
 - [공식 공시 백필과 품질 릴리스 게이트](docs/official-backfill-and-quality-gates.md)
+- [KIND SourceRight와 수동 adapter preflight](docs/kind-source-right-preflight.md)
+- [사용자·법률 검증 실행 가이드](docs/human-usability-and-legal-validation.md)
 - [KIND 연동 결정과 외부 선행조건](docs/kind-integration-decision-2026-07-16.md)
 - [KRX KIND 공시 데이터 이용 문의 초안](docs/krx-kind-data-inquiry-ko.md)
 - [Shadow 비교와 공개 전환 게이트](docs/release-transition-gate.md)
+- [레거시 Pages 90일 호환·복구 자산 보존](docs/legacy-recovery-retention.md)
 - [Governance API v1 운영 계약](docs/governance-api-v1.md)
 - [Telegram 공개 채널 운영 정책](docs/telegram-public-channels.md)
 - [2026-07-16 운영 기반 반영 기록](docs/production-foundation-deployment-2026-07-16.md)

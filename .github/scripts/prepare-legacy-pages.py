@@ -10,6 +10,7 @@ from pathlib import Path
 
 REQUIRED_ROOT_FILES = ("CNAME", "404.html", "feed.xml", "index.html")
 REQUIRED_DIRECTORIES = ("feed",)
+GOVERNANCE_PREVIEW_FILES = ("app.js", "config.js", "index.html", "styles.css")
 PRIVATE_FILENAMES = frozenset({"story-review.html", "story-review-meta.json"})
 REQUIRED_FEED_FILES = (
     "index.html",
@@ -121,7 +122,30 @@ def _collect_feed_files(feed_dir: Path) -> list[Path]:
     return sorted(allowed_files, key=lambda candidate: candidate.name)
 
 
-def prepare_legacy_pages(source: Path, destination: Path) -> dict[str, object]:
+def _copy_governance_preview(source: Path, destination: Path) -> None:
+    if source.is_symlink() or not source.is_dir():
+        raise PreparationError("governance preview source must be a regular directory")
+    _assert_no_symlinks(source)
+    actual = sorted(path.name for path in source.iterdir())
+    if actual != sorted(GOVERNANCE_PREVIEW_FILES):
+        raise PreparationError(
+            "governance preview must contain only its four public assets"
+        )
+    destination.mkdir()
+    for filename in GOVERNANCE_PREVIEW_FILES:
+        candidate = source / filename
+        if not candidate.is_file() or candidate.is_symlink():
+            raise PreparationError(
+                f"required governance preview file is missing or unsafe: {filename}"
+            )
+        shutil.copy2(candidate, destination / filename)
+
+
+def prepare_legacy_pages(
+    source: Path,
+    destination: Path,
+    governance_preview: Path | None = None,
+) -> dict[str, object]:
     if source.is_symlink():
         raise PreparationError("legacy Pages source directory must not be a symlink")
     if destination.is_symlink():
@@ -154,12 +178,20 @@ def prepare_legacy_pages(source: Path, destination: Path) -> dict[str, object]:
     destination_feed.mkdir()
     for source_file in feed_files:
         shutil.copy2(source_file, destination_feed / source_file.name)
+    if governance_preview is not None:
+        _copy_governance_preview(
+            governance_preview.resolve(),
+            destination / "governance",
+        )
 
     staged_names = sorted(path.name for path in destination.iterdir())
-    expected_names = sorted((*REQUIRED_ROOT_FILES, *REQUIRED_DIRECTORIES))
+    expected_names = sorted(
+        (*REQUIRED_ROOT_FILES, *REQUIRED_DIRECTORIES)
+        + (("governance",) if governance_preview is not None else ())
+    )
     if staged_names != expected_names:
         raise PreparationError("legacy Pages staging produced an unexpected root path")
-    if (destination / "governance").exists():
+    if governance_preview is None and (destination / "governance").exists():
         raise PreparationError("governance UI must not be present in the legacy Pages artifact")
     _assert_no_symlinks(destination)
 
@@ -175,13 +207,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Prepare the allowlisted legacy GitHub Pages artifact")
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--destination", type=Path, required=True)
+    parser.add_argument(
+        "--governance-preview-source",
+        type=Path,
+        help="Optional four-file public UI mounted only at /governance/ during shadow",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        result = prepare_legacy_pages(args.source, args.destination)
+        result = prepare_legacy_pages(
+            args.source,
+            args.destination,
+            governance_preview=args.governance_preview_source,
+        )
     except PreparationError as exc:
         print(f"legacy_pages_artifact_error={exc}", file=sys.stderr)
         return 1

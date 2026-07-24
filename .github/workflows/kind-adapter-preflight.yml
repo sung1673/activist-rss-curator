@@ -1,0 +1,70 @@
+name: Validate KIND adapter preflight
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kind-adapter-preflight-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: governance-runtime
+    env:
+      ENABLE_TELEGRAM_DELIVERY: "false"
+      ENABLE_GOVERNANCE_DELIVERY: "false"
+      CURATOR_DISABLE_TELEGRAM_SEND: "1"
+      CURATOR_DELIVERY_MODE: disabled
+    steps:
+      - name: Checkout exact default-branch revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate rollout mode with outbound forced off
+        env:
+          GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+        run: python -m curator.operation_mode
+
+      - name: Require KIND preflight configuration
+        env:
+          KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
+          KIND_API_KEY: ${{ secrets.KIND_API_KEY }}
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+        shell: bash
+        run: >-
+          bash .github/scripts/require-env.sh
+          KIND_DISCLOSURE_ENDPOINT KIND_API_KEY BSIDE_API_BASE_URL BSIDE_OPS_TOKEN
+
+      - name: Verify KIND SourceRight before adapter network access
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+        run: >-
+          python -c 'from curator.official_source_rights import OfficialSourceRightClient;
+          OfficialSourceRightClient().check_kind_ingest();
+          print("KIND SourceRight ingest eligibility verified.")'
+
+      - name: Validate KIND adapter contract exactly once
+        env:
+          KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
+          KIND_API_KEY: ${{ secrets.KIND_API_KEY }}
+        run: python .github/scripts/validate-kind-adapter.py

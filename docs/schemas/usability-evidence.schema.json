@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://news.bside.ai/schemas/usability-evidence.schema.json",
+  "title": "BSIDE protected usability release evidence",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "environment",
+    "evidence_source",
+    "is_synthetic",
+    "collected_at",
+    "code_revision",
+    "dataset_sha256",
+    "target_seconds",
+    "evaluator_count",
+    "succeeded_evaluator_count",
+    "success_rate",
+    "evaluations"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "environment": {"const": "production"},
+    "evidence_source": {"type": "string", "minLength": 1},
+    "is_synthetic": {"const": false},
+    "collected_at": {"type": "string", "format": "date-time"},
+    "code_revision": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+    "dataset_sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+    "target_seconds": {"type": "integer", "minimum": 1},
+    "evaluator_count": {"type": "integer", "minimum": 15},
+    "succeeded_evaluator_count": {"type": "integer", "minimum": 0},
+    "success_rate": {"type": "number", "minimum": 0, "maximum": 1},
+    "evaluations": {
+      "type": "array",
+      "minItems": 15,
+      "items": {
+        "type": "object",
+        "required": [
+          "evaluation_id",
+          "segment",
+          "completed_at",
+          "duration_seconds",
+          "identified_event",
+          "identified_actors",
+          "identified_official_evidence",
+          "identified_current_status",
+          "succeeded"
+        ],
+        "properties": {
+          "evaluation_id": {"type": "string", "minLength": 1},
+          "segment": {
+            "enum": ["institution", "high_net_worth", "international_institution"]
+          },
+          "completed_at": {"type": "string", "format": "date-time"},
+          "duration_seconds": {"type": "number", "minimum": 0},
+          "identified_event": {"type": "boolean"},
+          "identified_actors": {"type": "boolean"},
+          "identified_official_evidence": {"type": "boolean"},
+          "identified_current_status": {"type": "boolean"},
+          "succeeded": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

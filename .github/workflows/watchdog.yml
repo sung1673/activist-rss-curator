@@ -2,8 +2,8 @@ name: Operations watchdog
 
 on:
   schedule:
-    # A five-minute probe with a five-minute queue budget keeps designed
-    # delivery-failure detection within ten minutes.
+    # A five-minute probe records real Pages/API availability and keeps
+    # web-distribution failure detection within ten minutes.
     - cron: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *"
   workflow_dispatch:
 
@@ -17,22 +17,54 @@ concurrency:
 
 jobs:
   health:
-    if: github.ref_name == github.event.repository.default_branch && (github.event_name == 'workflow_dispatch' || vars.ENABLE_GOVERNANCE_SHADOW == 'true')
+    if: >-
+      github.ref_name == github.event.repository.default_branch &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        vars.GOVERNANCE_PIPELINE_MODE == 'shadow' ||
+        vars.GOVERNANCE_PIPELINE_MODE == 'live' ||
+        (vars.GOVERNANCE_PIPELINE_MODE == '' && vars.ENABLE_GOVERNANCE_SHADOW == 'true')
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    environment:
+      name: governance-runtime
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ github.sha }}
 
-      - name: Inspect ingest freshness and delivery queue
+      - name: Verify immutable workflow revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          [[ "$actual" == "$GITHUB_SHA" ]] || {
+            echo "::error::Checked-out revision $actual does not match workflow revision $GITHUB_SHA."
+            exit 1
+          }
+
+      - name: Resolve fail-closed rollout mode
+        id: rollout
+        env:
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
+          GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          ENABLE_PAGES: ${{ vars.ENABLE_PAGES }}
+          ENABLE_GOVERNANCE_PAGES: ${{ vars.ENABLE_GOVERNANCE_PAGES }}
+          ENABLE_GOVERNANCE_SHADOW: ${{ vars.ENABLE_GOVERNANCE_SHADOW }}
+          ENABLE_TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          ENABLE_GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+        run: python -m curator.operation_mode --github-output "$GITHUB_OUTPUT"
+
+      - name: Inspect ingest freshness and web availability
         id: health
         env:
           BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL }}
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
           WATCHDOG_MAX_INGEST_AGE_MINUTES: "90"
-          WATCHDOG_MAX_OUTBOX_AGE_MINUTES: "5"
+          WATCHDOG_GOVERNANCE_PAGES: ${{ steps.rollout.outputs.scheduled_governance_enabled }}
         run: python .github/scripts/watchdog.py
 
       - name: Create, update, or resolve the incident issue

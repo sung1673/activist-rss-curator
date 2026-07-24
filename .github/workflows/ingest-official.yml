@@ -6,10 +6,13 @@ on:
     - cron: "0,15,30,45 22-23 * * *"
     # KST 09:00-23:45 every 15 minutes (UTC 00:00-14:45).
     - cron: "0,15,30,45 0-14 * * *"
-    # KST 00:00-06:00 hourly (UTC 15:00-21:00).
-    - cron: "0 15-21 * * *"
-    # Weekly DART company-master refresh (KST Monday 05:30).
-    - cron: "30 20 * * 0"
+    # KST 00:00-06:30 every 30 minutes (UTC 15:00-21:30). Keeping every
+    # successful DART poll interval below 45 minutes makes the release SLO
+    # measurable even overnight instead of structurally failing at p95.
+    - cron: "0,30 15-21 * * *"
+    # Weekly DART company-master refresh (KST Monday 06:40), outside the
+    # incremental half-hour slot and serialized by the same source lock.
+    - cron: "40 21 * * 0"
   workflow_dispatch:
     inputs:
       sync_company_master:
@@ -22,27 +25,124 @@ on:
         required: false
         type: boolean
         default: false
+      repair_event_schedule:
+        description: Ops-only repair cron family; must accompany the exact oldest missing slot
+        required: false
+        type: string
+        default: ""
+      repair_expected_slot_at:
+        description: Exact oldest due unclaimed UTC slot (ISO 8601); repair is permanently late
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ingest-official-${{ github.ref_name }}
+  queue: max
   cancel-in-progress: false
 
 jobs:
   ingest:
-    if: github.ref_name == github.event.repository.default_branch && (github.event_name == 'workflow_dispatch' || vars.ENABLE_GOVERNANCE_SHADOW == 'true')
+    if: >-
+      github.ref_name == github.event.repository.default_branch &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        vars.GOVERNANCE_PIPELINE_MODE == 'dart_canary' ||
+        vars.GOVERNANCE_PIPELINE_MODE == 'shadow' ||
+        vars.GOVERNANCE_PIPELINE_MODE == 'live' ||
+        (vars.GOVERNANCE_PIPELINE_MODE == '' && vars.ENABLE_GOVERNANCE_SHADOW == 'true')
+      )
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
+    environment:
+      name: governance-runtime
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ github.sha }}
+
+      - name: Validate explicit repair inputs
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          REPAIR_EVENT_SCHEDULE: ${{ inputs.repair_event_schedule }}
+          REPAIR_EXPECTED_SLOT_AT: ${{ inputs.repair_expected_slot_at }}
+          SYNC_COMPANY_MASTER: ${{ inputs.sync_company_master }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$REPAIR_EVENT_SCHEDULE" || -n "$REPAIR_EXPECTED_SLOT_AT" ]]; then
+            [[ -n "$REPAIR_EVENT_SCHEDULE" && -n "$REPAIR_EXPECTED_SLOT_AT" ]] || {
+              echo "::error::Repair schedule and exact expected slot must be supplied together."
+              exit 1
+            }
+            [[ "$SYNC_COMPANY_MASTER" != "true" ]] || {
+              echo "::error::A slot repair cannot also refresh the company master."
+              exit 1
+            }
+          fi
+
+      - name: Capture immutable scheduled trigger identity
+        if: >-
+          github.event_name == 'schedule' ||
+          (github.event_name == 'workflow_dispatch' && inputs.repair_expected_slot_at != '')
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.sha }}
+          REPAIR_EVENT_SCHEDULE: ${{ inputs.repair_event_schedule }}
+          REPAIR_EXPECTED_SLOT_AT: ${{ inputs.repair_expected_slot_at }}
+        with:
+          script: |
+            const { data: run } = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            });
+            const repair = String(process.env.REPAIR_EXPECTED_SLOT_AT || "") !== "";
+            const expectedEvent = repair ? "workflow_dispatch" : "schedule";
+            if (run.event !== expectedEvent) {
+              core.setFailed(`Current workflow run event is ${run.event}, not ${expectedEvent}.`);
+              return;
+            }
+            if (String(run.head_sha || "").toLowerCase() !== process.env.EXPECTED_HEAD_SHA.toLowerCase()) {
+              core.setFailed("Current workflow run head SHA does not match github.sha.");
+              return;
+            }
+            const createdAt = String(run.created_at || "");
+            if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(createdAt) ||
+                new Date(createdAt).toISOString() !== createdAt.replace("Z", ".000Z")) {
+              core.setFailed("Current workflow run created_at is not a full UTC timestamp.");
+              return;
+            }
+            const eventSchedule = repair
+              ? String(process.env.REPAIR_EVENT_SCHEDULE || "")
+              : String(context.payload.schedule || "");
+            const allowed = new Set([
+              "0,15,30,45 22-23 * * *",
+              "0,15,30,45 0-14 * * *",
+              "0,30 15-21 * * *",
+              "40 21 * * 0",
+            ]);
+            if (!allowed.has(eventSchedule)) {
+              core.setFailed("Scheduled event supplied an unknown cron expression.");
+              return;
+            }
+            core.exportVariable("CURATOR_GITHUB_RUN_CREATED_AT", createdAt);
+            core.exportVariable("CURATOR_EVENT_SCHEDULE", eventSchedule);
+            if (repair) {
+              if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/.test(process.env.REPAIR_EXPECTED_SLOT_AT)) {
+                core.setFailed("Repair expected slot must be an exact timezone-aware ISO timestamp.");
+                return;
+              }
+              core.exportVariable("CURATOR_OFFICIAL_SLOT_REPAIR_EXPECTED_AT", process.env.REPAIR_EXPECTED_SLOT_AT);
+            }
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -50,49 +150,116 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
+      - name: Resolve fail-closed rollout mode
+        id: rollout
+        env:
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
+          GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          ENABLE_PAGES: ${{ vars.ENABLE_PAGES }}
+          ENABLE_GOVERNANCE_PAGES: ${{ vars.ENABLE_GOVERNANCE_PAGES }}
+          ENABLE_GOVERNANCE_SHADOW: ${{ vars.ENABLE_GOVERNANCE_SHADOW }}
+          ENABLE_TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          ENABLE_GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+        run: python -m curator.operation_mode --github-output "$GITHUB_OUTPUT"
+
       - name: Validate operational configuration
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
-          DART_SYNC_COMPANY_MASTER: ${{ github.event.schedule == '30 20 * * 0' || inputs.sync_company_master }}
+          DART_SYNC_COMPANY_MASTER: ${{ github.event.schedule == '40 21 * * 0' || inputs.sync_company_master }}
           KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
           KIND_API_KEY: ${{ secrets.KIND_API_KEY }}
-          CURATOR_ENABLE_KIND: ${{ github.event_name == 'schedule' && '1' || inputs.include_kind && '1' || '0' }}
-          CURATOR_REQUIRE_KIND: ${{ github.event_name == 'schedule' && '1' || inputs.include_kind && '1' || '0' }}
+          CURATOR_ENABLE_KIND: ${{ ((github.event_name == 'schedule' || inputs.repair_expected_slot_at != '') && (steps.rollout.outputs.governance_pipeline_mode == 'shadow' || steps.rollout.outputs.governance_pipeline_mode == 'live')) && '1' || inputs.include_kind && '1' || '0' }}
+          CURATOR_REQUIRE_KIND: ${{ ((github.event_name == 'schedule' || inputs.repair_expected_slot_at != '') && (steps.rollout.outputs.governance_pipeline_mode == 'shadow' || steps.rollout.outputs.governance_pipeline_mode == 'live')) && '1' || inputs.include_kind && '1' || '0' }}
           ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
           ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          CURATOR_REQUIRE_DURABLE_DART_QUOTA: "1"
         shell: bash
         run: |
           set -euo pipefail
           bash .github/scripts/require-env.sh \
-            DART_API_KEY ACTIVIST_API_URL ACTIVIST_API_SECRET
-          if [[ "$CURATOR_REQUIRE_KIND" == "1" && -z "$KIND_DISCLOSURE_ENDPOINT" ]]; then
-            echo "::error::KIND_DISCLOSURE_ENDPOINT is required for the official ingest workflow."
-            exit 1
+            DART_API_KEY ACTIVIST_API_URL ACTIVIST_API_SECRET \
+            BSIDE_API_BASE_URL BSIDE_OPS_TOKEN
+          if [[ "$GITHUB_EVENT_NAME" == "schedule" || -n "${CURATOR_OFFICIAL_SLOT_REPAIR_EXPECTED_AT:-}" ]]; then
+            bash .github/scripts/require-env.sh \
+              CURATOR_GITHUB_RUN_CREATED_AT CURATOR_EVENT_SCHEDULE
+          fi
+          if [[ "$CURATOR_ENABLE_KIND" == "1" ]]; then
+            bash .github/scripts/require-env.sh \
+              KIND_DISCLOSURE_ENDPOINT BSIDE_API_BASE_URL BSIDE_OPS_TOKEN
           fi
 
-      - name: Validate KIND adapter contract
-        if: github.event_name == 'schedule' || inputs.include_kind
+      - name: Claim oldest due official-ingest slot
+        if: >-
+          (github.event_name == 'schedule' && github.event.schedule != '40 21 * * 0') ||
+          (github.event_name == 'workflow_dispatch' && inputs.repair_expected_slot_at != '')
         env:
-          KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
-          KIND_API_KEY: ${{ secrets.KIND_API_KEY }}
-        run: python .github/scripts/validate-kind-adapter.py
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+        run: python -m curator.official_slot_claim --github-env "$GITHUB_ENV"
 
       - name: Ingest selected official sources
+        id: ingest_official
         env:
           CURATOR_INGEST_SCOPE: official
           CURATOR_DATA_SOURCE: mysql
           CURATOR_DISABLE_TELEGRAM_SEND: "1"
           CURATOR_DELIVERY_MODE: disabled
-          CURATOR_EVENT_SCHEDULE: ${{ github.event.schedule }}
+          CURATOR_EVENT_SCHEDULE: ${{ github.event.schedule || inputs.repair_event_schedule }}
+          CURATOR_REQUIRE_DURABLE_DART_QUOTA: "1"
+          CURATOR_DART_QUOTA_PHASE: official-ingest
           CURATOR_REQUIRE_REMOTE_API: "1"
-          CURATOR_ENABLE_KIND: ${{ github.event_name == 'schedule' && '1' || inputs.include_kind && '1' || '0' }}
-          CURATOR_REQUIRE_KIND: ${{ github.event_name == 'schedule' && '1' || inputs.include_kind && '1' || '0' }}
+          CURATOR_ENABLE_KIND: ${{ ((github.event_name == 'schedule' || inputs.repair_expected_slot_at != '') && (steps.rollout.outputs.governance_pipeline_mode == 'shadow' || steps.rollout.outputs.governance_pipeline_mode == 'live')) && '1' || inputs.include_kind && '1' || '0' }}
+          CURATOR_REQUIRE_KIND: ${{ ((github.event_name == 'schedule' || inputs.repair_expected_slot_at != '') && (steps.rollout.outputs.governance_pipeline_mode == 'shadow' || steps.rollout.outputs.governance_pipeline_mode == 'live')) && '1' || inputs.include_kind && '1' || '0' }}
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
-          DART_SYNC_COMPANY_MASTER: ${{ github.event.schedule == '30 20 * * 0' || inputs.sync_company_master }}
+          DART_SYNC_COMPANY_MASTER: ${{ github.event.schedule == '40 21 * * 0' || inputs.sync_company_master }}
           KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
           KIND_API_KEY: ${{ secrets.KIND_API_KEY }}
           ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
           ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
           ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: python -m curator.main
+          CURATOR_SHADOW_ENGINE_OUTPUT_PATH: ${{ runner.temp }}/candidate-shadow/engine-output.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${CURATOR_OFFICIAL_SLOT_TERMINAL_NOOP:-0}" == "1" ]]; then
+            echo "terminal_noop=true" >> "$GITHUB_OUTPUT"
+            echo "Terminal durable slot claim verified (completed or permanently failed); no collector or database write was executed."
+            exit 0
+          fi
+          echo "terminal_noop=false" >> "$GITHUB_OUTPUT"
+          python -m curator.main
+
+      - name: Validate candidate shadow engine output
+        id: candidate_shadow
+        if: >-
+          success() &&
+          steps.ingest_official.outputs.terminal_noop != 'true' &&
+          (steps.rollout.outputs.governance_pipeline_mode == 'shadow' ||
+           steps.rollout.outputs.governance_pipeline_mode == 'live')
+        env:
+          SHADOW_OUTPUT: ${{ runner.temp }}/candidate-shadow/engine-output.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          observation_date="$(python -c 'import json, os, pathlib; value=json.loads(pathlib.Path(os.environ["SHADOW_OUTPUT"]).read_text(encoding="utf-8")); print(value["observation_date"])')"
+          [[ "$observation_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || {
+            echo "::error::Candidate shadow output omitted a valid KST observation date."
+            exit 1
+          }
+          echo "observation_date=$observation_date" >> "$GITHUB_OUTPUT"
+
+      - name: Preserve immutable candidate shadow engine output
+        if: steps.candidate_shadow.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shadow-engine-candidate-${{ steps.candidate_shadow.outputs.observation_date }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/candidate-shadow/engine-output.json
+          if-no-files-found: error
+          retention-days: 21

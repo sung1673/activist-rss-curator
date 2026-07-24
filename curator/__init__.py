@@ -2,6 +2,8 @@
 
 __all__ = [
     "config",
+    "benchmark_candidates",
+    "event_identity",
     "fetch",
     "normalize",
     "dates",
@@ -13,6 +15,9 @@ __all__ = [
     "telegram_publisher",
     "publish_outbox",
     "governance_publisher",
+    "governance_site",
+    "operation_mode",
+    "label_agreement",
     "release_gate",
     "telegram_dashboard",
     "telegram_sources",

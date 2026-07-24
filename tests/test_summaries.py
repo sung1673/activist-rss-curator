@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -81,96 +82,6 @@ def test_daily_digest_disabled_by_default(config, now, monkeypatch) -> None:  # 
     }
 
 
-def test_daily_digest_sends_once_in_morning_window(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    from curator import summaries
-
-    config["digest"]["enabled"] = True  # type: ignore[index]
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
-    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "오늘의 리뷰\n- 주주환원 이슈 정리")
-
-    sent_messages = []
-
-    def fake_send(_bot_token, _chat_id, text, _config):  # type: ignore[no-untyped-def]
-        sent_messages.append(text)
-        return {"ok": True, "message_id": 77, "chat_id": -100}
-
-    monkeypatch.setattr(summaries, "send_telegram_message", fake_send)
-    cluster = published_cluster(config, now)
-    digest_now = datetime(2026, 4, 26, 6, 30, tzinfo=ZoneInfo("Asia/Seoul"))
-    cluster["published_at"] = (digest_now - timedelta(minutes=30)).isoformat()
-    state = {
-        "published_clusters": [cluster],
-        "pending_clusters": [],
-        "daily_digest_sent_dates": [],
-        "daily_digest_records": [],
-    }
-
-    first = publish_daily_digest_if_due(state, config, digest_now)
-    second = publish_daily_digest_if_due(state, config, digest_now + timedelta(minutes=15))
-
-    assert first == {"daily_digest_sent": 1, "daily_digest_failed": 0}
-    assert second == {"daily_digest_sent": 0, "daily_digest_failed": 0}
-    assert state["daily_digest_sent_dates"] == ["2026-04-26"]
-    assert state["daily_digest_records"][0]["message_ids"] == [77]
-    assert "오늘의 리뷰" in sent_messages[0]
-
-
-def test_daily_digest_uses_one_representative_for_duplicate_records(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    from curator import summaries
-
-    config["digest"]["enabled"] = True  # type: ignore[index]
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
-    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주주제안 이슈 지속")
-
-    sent_messages = []
-
-    def fake_send(_bot_token, _chat_id, text, _config):  # type: ignore[no-untyped-def]
-        sent_messages.append(text)
-        return {"ok": True, "message_id": 78, "chat_id": -100}
-
-    monkeypatch.setattr(summaries, "send_telegram_message", fake_send)
-    cluster = published_cluster(config, now)
-    digest_now = datetime(2026, 4, 26, 6, 30, tzinfo=ZoneInfo("Asia/Seoul"))
-    cluster["published_at"] = (digest_now - timedelta(minutes=30)).isoformat()
-    state = {
-        "published_clusters": [cluster],
-        "pending_clusters": [],
-        "articles": [
-            {
-                "status": "duplicate",
-                "title": "중복된 소액주주 기사",
-                "canonical_url": "https://example.com/duplicate",
-                "feed_name": "google-news-주주제안",
-                "feed_category": "core",
-                "published_at": "2026-04-26T06:00:00+09:00",
-                "seen_at": "2026-04-26T06:10:00+09:00",
-                "duplicate_matches": [
-                    {
-                        "title": "중복된 소액주주 기사",
-                        "canonical_url": "https://www.mk.co.kr/news/stock/1",
-                        "source": "매일경제",
-                        "published_at": "2026-04-26T05:50:00+09:00",
-                    }
-                ],
-            }
-        ],
-        "daily_digest_sent_dates": [],
-        "daily_digest_records": [],
-    }
-
-    assert publish_daily_digest_if_due(state, config, digest_now) == {
-        "daily_digest_sent": 2,
-        "daily_digest_failed": 0,
-    }
-    sent_text = "\n".join(sent_messages)
-    assert "<b>중복 기사</b>" not in sent_text
-    assert "(중복" not in sent_text
-    assert 'href="https://www.mk.co.kr/news/stock/1"' in sent_text
-    assert 'href="https://example.com/duplicate"' not in sent_text
-    assert "(2건)" not in sent_text
-    assert "①" not in sent_text
-    assert "②" not in sent_text
-    assert "수집키워드" not in sent_text
 
 
 def test_digest_skips_duplicate_record_when_story_already_present(config, now) -> None:  # type: ignore[no-untyped-def]
@@ -193,46 +104,6 @@ def test_digest_skips_duplicate_record_when_story_already_present(config, now) -
     assert "한화솔루션 유상증자 또 정정 요구" not in titles
 
 
-def test_daily_digest_single_duplicate_record_renders_as_single_link(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    from curator import summaries
-
-    config["digest"]["enabled"] = True  # type: ignore[index]
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
-    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주주제안 이슈 지속")
-
-    sent_messages = []
-
-    def fake_send(_bot_token, _chat_id, text, _config):  # type: ignore[no-untyped-def]
-        sent_messages.append(text)
-        return {"ok": True, "message_id": 81, "chat_id": -100}
-
-    monkeypatch.setattr(summaries, "send_telegram_message", fake_send)
-    digest_now = datetime(2026, 4, 26, 6, 30, tzinfo=ZoneInfo("Asia/Seoul"))
-    state = {
-        "published_clusters": [],
-        "pending_clusters": [],
-        "articles": [
-            {
-                "status": "duplicate",
-                "title": "소액주주 주주제안 관련 기사",
-                "canonical_url": "https://example.com/single-duplicate",
-                "published_at": "2026-04-26T06:00:00+09:00",
-                "seen_at": "2026-04-26T06:10:00+09:00",
-                "duplicate_matches": [],
-            }
-        ],
-        "daily_digest_sent_dates": [],
-        "daily_digest_records": [],
-    }
-
-    assert publish_daily_digest_if_due(state, config, digest_now) == {
-        "daily_digest_sent": 1,
-        "daily_digest_failed": 0,
-    }
-    assert 'href="https://example.com/single-duplicate"' in sent_messages[0]
-    assert "①" not in sent_messages[0]
-    assert "(1건)" not in sent_messages[0]
-    assert "중복 기사" not in sent_messages[0]
 
 
 def test_daily_digest_skips_after_send_window(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -253,109 +124,10 @@ def test_daily_digest_skips_after_send_window(config, now, monkeypatch) -> None:
     }
 
 
-def test_daily_digest_0605_start_is_inclusive_and_0805_end_is_exclusive(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    from curator import summaries
-
-    config["digest"]["enabled"] = True  # type: ignore[index]
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
-    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주주권 이슈 지속")
-    monkeypatch.setattr(
-        summaries,
-        "send_telegram_message",
-        lambda *_args, **_kwargs: {"ok": True, "message_id": 805, "chat_id": -100},
-    )
-
-    send_start = datetime(2026, 4, 26, 6, 5, tzinfo=ZoneInfo("Asia/Seoul"))
-    start_cluster = published_cluster(config, now)
-    start_cluster["published_at"] = (send_start - timedelta(minutes=30)).isoformat()
-    start_state = {
-        "published_clusters": [start_cluster],
-        "pending_clusters": [],
-        "daily_digest_sent_dates": [],
-        "daily_digest_records": [],
-    }
-    assert publish_daily_digest_if_due(start_state, config, send_start) == {
-        "daily_digest_sent": 1,
-        "daily_digest_failed": 0,
-    }
-
-    send_end = datetime(2026, 4, 26, 8, 5, tzinfo=ZoneInfo("Asia/Seoul"))
-    end_cluster = published_cluster(config, now)
-    end_cluster["published_at"] = (send_end - timedelta(minutes=30)).isoformat()
-    end_state = {
-        "published_clusters": [end_cluster],
-        "pending_clusters": [],
-        "daily_digest_sent_dates": [],
-        "daily_digest_records": [],
-    }
-    assert publish_daily_digest_if_due(end_state, config, send_end) == {
-        "daily_digest_sent": 0,
-        "daily_digest_failed": 0,
-    }
 
 
-def test_daily_digest_tolerates_delayed_github_schedule(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    from curator import summaries
-
-    config["digest"]["enabled"] = True  # type: ignore[index]
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
-    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주주권 이슈 지속")
-
-    sent_messages = []
-
-    def fake_send(_bot_token, _chat_id, text, _config):  # type: ignore[no-untyped-def]
-        sent_messages.append(text)
-        return {"ok": True, "message_id": 79, "chat_id": -100}
-
-    monkeypatch.setattr(summaries, "send_telegram_message", fake_send)
-    cluster = published_cluster(config, now)
-    digest_now = datetime(2026, 4, 26, 7, 31, tzinfo=ZoneInfo("Asia/Seoul"))
-    cluster["published_at"] = (digest_now - timedelta(minutes=30)).isoformat()
-    state = {
-        "published_clusters": [cluster],
-        "pending_clusters": [],
-        "daily_digest_sent_dates": [],
-        "daily_digest_records": [],
-    }
-
-    assert publish_daily_digest_if_due(state, config, digest_now) == {
-        "daily_digest_sent": 1,
-        "daily_digest_failed": 0,
-    }
-    assert "데일리 주주·자본시장 브리핑" in sent_messages[0]
 
 
-def test_daily_digest_forced_for_delayed_dedicated_schedule(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    from curator import summaries
-
-    config["digest"]["enabled"] = True  # type: ignore[index]
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "schedule")
-    monkeypatch.setenv("CURATOR_EVENT_SCHEDULE", "30 21 * * *")
-    monkeypatch.setattr(summaries, "generate_daily_digest_review", lambda *_args, **_kwargs: "- 주주권 이슈 지속")
-
-    sent_messages = []
-
-    def fake_send(_bot_token, _chat_id, text, _config):  # type: ignore[no-untyped-def]
-        sent_messages.append(text)
-        return {"ok": True, "message_id": 80, "chat_id": -100}
-
-    monkeypatch.setattr(summaries, "send_telegram_message", fake_send)
-    cluster = published_cluster(config, now)
-    digest_now = datetime(2026, 4, 26, 11, 0, tzinfo=ZoneInfo("Asia/Seoul"))
-    cluster["published_at"] = (digest_now - timedelta(minutes=30)).isoformat()
-    state = {
-        "published_clusters": [cluster],
-        "pending_clusters": [],
-        "daily_digest_sent_dates": [],
-        "daily_digest_records": [],
-    }
-
-    assert publish_daily_digest_if_due(state, config, digest_now) == {
-        "daily_digest_sent": 1,
-        "daily_digest_failed": 0,
-    }
-    assert "데일리 주주·자본시장 브리핑" in sent_messages[0]
 
 
 def test_daily_digest_lists_korean_and_english_article_links(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -1115,80 +887,6 @@ def test_hourly_update_excludes_duplicate_records_even_when_unrelated(config, no
     assert "신한금융 밸류업" in message
 
 
-def test_hourly_update_batches_single_multi_article_cluster_as_one_representative(config, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    from curator import summaries
-
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "@test_channel")
-    monkeypatch.setattr(summaries, "generate_hourly_digest_review", lambda *_args, **_kwargs: "- 신한금융 밸류업 IR 보도 지속")
-    now = datetime(2026, 5, 10, 18, 0, tzinfo=ZoneInfo("Asia/Seoul"))
-    article_specs = [
-        (
-            "진옥동 신한금융 회장, 북중미서 밸류업 2.0 IR…성장·주주환원 병행",
-            "https://www.etnews.com/20260508000144",
-            "전자신문",
-        ),
-        (
-            "진옥동 신한금융 회장, 북중미 IR 직접 나선다…밸류업 2.0 설득전",
-            "https://www.etoday.co.kr/news/view/2582829",
-            "이투데이",
-        ),
-        (
-            "북중미 IR 나선 진옥동 신한금융 회장 성장할수록 주주환원 확대",
-            "https://www.newspim.com/news/view/20260508000895",
-            "뉴스핌",
-        ),
-        (
-            "진옥동 성장할수록 주주환원 확대…신한금융 밸류업 2.0, 북중미서 통할까",
-            "https://www.betanews.net/article/view/beta202605100006",
-            "베타뉴스",
-        ),
-        (
-            "진옥동 신한금융 회장, 북중미서 밸류업 2.0 직접 알린다…성장할수록 주주환원 확대",
-            "https://www.todayeconomic.com/news/article.html?no=30506",
-            "투데이경제",
-        ),
-    ]
-    articles = [
-        make_article(
-            title,
-            url,
-            source=source,
-            published_at=(now - timedelta(minutes=index)).isoformat(),
-            summary="진옥동 신한금융 회장이 북중미 IR에서 밸류업 2.0과 주주환원 확대를 설명했다.",
-        )
-        for index, (title, url, source) in enumerate(article_specs)
-    ]
-    cluster = {
-        "guid": "cluster:shinhan-ir:20260510:1",
-        "representative_title": "신한금융 밸류업 2.0 북중미 IR",
-        "published_at": now.isoformat(),
-        "articles": articles,
-    }
-    state = {
-        "published_clusters": [cluster],
-        "pending_clusters": [],
-        "telegram_sent_cluster_guids": [],
-        "telegram_send_records": [],
-        "telegram_digest_records": [],
-    }
-    sent_messages = []
-
-    def fake_send(_bot_token, _chat_id, text, _config, **_kwargs):  # type: ignore[no-untyped-def]
-        sent_messages.append(text)
-        return {"ok": True, "message_id": 228, "chat_id": -100}
-
-    monkeypatch.setattr(summaries, "send_telegram_message", fake_send)
-
-    assert publish_hourly_telegram_update(state, config, now) == {"telegram_sent": 1, "telegram_failed": 0}
-    sent_text = sent_messages[0]
-    article_url_count = sum(url in sent_text for _title, url, _source in article_specs)
-
-    assert "<b>국문</b>" in sent_text
-    assert article_url_count == 1
-    assert "1. " not in sent_text
-    assert "2. " not in sent_text
-    assert state["telegram_digest_records"][0]["cluster_guids"] == ["cluster:shinhan-ir:20260510:1"]
 
 
 def test_hourly_update_window_is_thirty_minutes(config, now) -> None:  # type: ignore[no-untyped-def]
@@ -1216,39 +914,6 @@ def test_summary_bullet_lines_uses_concise_endings(config) -> None:  # type: ign
     ]
 
 
-def test_hourly_update_batches_multiple_clusters_and_marks_all(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    from curator import summaries
-
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "@test_channel")
-    monkeypatch.setattr(summaries, "generate_hourly_digest_review", lambda *_args, **_kwargs: "- 소액주주 이슈가 이어졌음")
-    first = published_cluster(config, now)
-    second = published_cluster(config, now)
-    second["guid"] = "cluster:second:20260425:1"
-    state = {
-        "published_clusters": [first, second],
-        "pending_clusters": [],
-        "telegram_sent_cluster_guids": [],
-        "telegram_send_records": [],
-        "telegram_digest_records": [],
-    }
-    sent_messages = []
-
-    def fake_send(_bot_token, _chat_id, text, _config, **_kwargs):  # type: ignore[no-untyped-def]
-        sent_messages.append(text)
-        return {"ok": True, "message_id": 88, "chat_id": -100}
-
-    monkeypatch.setattr(summaries, "send_telegram_message", fake_send)
-
-    summary = publish_hourly_telegram_update(state, config, now, [])
-
-    assert summary == {"telegram_sent": 2, "telegram_failed": 0}
-    assert len(sent_messages) == 1
-    assert sent_messages[0].startswith("수집: 04.25 09:00-09:30 KST")
-    assert "수집: 04.25 09:00-09:30 KST" in sent_messages[0]
-    assert "<b>요약</b>" in sent_messages[0]
-    assert set(state["telegram_sent_cluster_guids"]) == {first["guid"], second["guid"]}
-    assert state["telegram_digest_records"][0]["message_ids"] == [88]
 
 
 def test_hourly_update_includes_latest_daily_link(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -1322,3 +987,40 @@ def test_hourly_update_skips_configured_hours(config, now, monkeypatch) -> None:
         "telegram_failed": 0,
     }
     assert state["telegram_sent_cluster_guids"] == []
+
+
+def test_legacy_digest_publishers_are_permanent_read_only_noops(config, now, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from curator import summaries
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "real-looking-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "@real_looking_channel")
+    config["telegram"]["enabled"] = True
+    config["digest"]["enabled"] = True
+
+    def forbidden_send(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("Telegram transport must never be called")
+
+    monkeypatch.setattr(summaries, "send_telegram_message", forbidden_send)
+    cluster = published_cluster(config, now)
+    digest_now = datetime(2026, 4, 26, 6, 30, tzinfo=ZoneInfo("Asia/Seoul"))
+    cluster["published_at"] = (digest_now - timedelta(minutes=30)).isoformat()
+    state = {
+        "published_clusters": [cluster],
+        "pending_clusters": [],
+        "telegram_sent_cluster_guids": [],
+        "telegram_send_records": [],
+        "telegram_digest_records": [],
+        "daily_digest_sent_dates": [],
+        "daily_digest_records": [],
+    }
+    before = deepcopy(state)
+
+    assert publish_daily_digest_if_due(state, config, digest_now) == {
+        "daily_digest_sent": 0,
+        "daily_digest_failed": 0,
+    }
+    assert publish_hourly_telegram_update(state, config, digest_now, []) == {
+        "telegram_sent": 0,
+        "telegram_failed": 0,
+    }
+    assert state == before

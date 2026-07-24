@@ -120,9 +120,12 @@ def test_kind_validator_does_not_print_key_endpoint_or_response_body(
 ) -> None:
     validator = load_script("validate-kind-adapter.py", "validate_kind_adapter_redaction")
     secret = "super-secret-value"
+    # Credentials are forbidden in the endpoint itself; keep the secret in the
+    # authorization header and the invalid response body so this test reaches
+    # the contract error while still proving both values are redacted.
     monkeypatch.setenv(
         "KIND_DISCLOSURE_ENDPOINT",
-        f"https://kind-adapter.example.test/disclosures?token={secret}",
+        "https://kind-adapter.example.test/disclosures",
     )
     monkeypatch.setenv("KIND_API_KEY", secret)
 

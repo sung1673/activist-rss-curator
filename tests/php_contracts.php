@@ -40,6 +40,15 @@ expect_true(v1_bearer_token() === str_repeat('x', 24), 'valid Bearer tokens must
 $_SERVER['HTTP_AUTHORIZATION'] = 'Basic invalid';
 expect_true(v1_bearer_token() === '', 'non-Bearer authorization must be rejected');
 
+$previewToken = 'php-contract-preview-token-00000000000000';
+$previewConfig = array('governance_preview_token_hash' => hash('sha256', $previewToken));
+expect_true(v1_preview_auth_configured($previewConfig), 'a SHA-256 preview token hash must enable preview auth');
+expect_true(
+    v1_preview_token_hashes($previewConfig) === array(hash('sha256', $previewToken)),
+    'preview auth must retain only normalized token hashes'
+);
+expect_true(!v1_preview_auth_configured(array()), 'preview auth must fail closed without a token hash');
+
 expect_true(v1_xml('<company>&') === '&lt;company&gt;&amp;', 'Atom values must be XML escaped');
 
 expect_true(delivery_payload_source_right_ids('{}') === false, 'missing delivery rights lineage must fail closed');
@@ -59,6 +68,84 @@ $deduplicatedRights = delivery_payload_source_right_ids(
 expect_true(
     $deduplicatedRights === array('official:dart', 'telegram:licensed'),
     'delivery rights lineage must be validated and de-duplicated'
+);
+
+$dateOnlyIdentity = v1_build_event_identity(
+    '00126380', 'shareholder_proposal', 'submit', 'board seat', 'actor:test',
+    '2026-07-20', '2026-08-31'
+);
+$midnightIdentity = v1_build_event_identity(
+    '00126380', 'shareholder_proposal', 'submit', 'board seat', 'actor:test',
+    '2026-07-20T00:00:00Z', '2026-08-31T00:00:00Z'
+);
+expect_true(
+    is_array($dateOnlyIdentity) && is_array($midnightIdentity)
+        && $dateOnlyIdentity['identity_effective_at'] === $midnightIdentity['identity_effective_at']
+        && $dateOnlyIdentity['identity_deadline_at'] === $midnightIdentity['identity_deadline_at']
+        && $dateOnlyIdentity['comparison_key'] !== $midnightIdentity['comparison_key'],
+    'date-only and explicit midnight identities must keep distinct canonical keys in the same DATETIME storage'
+);
+$recoveredDateOnly = v1_resolve_stored_event_identity(
+    '00126380', 'shareholder_proposal', 'submit', 'board seat', 'actor:test',
+    '2026-07-20 00:00:00', '2026-08-31 00:00:00', $dateOnlyIdentity['comparison_key']
+);
+$recoveredMidnight = v1_resolve_stored_event_identity(
+    '00126380', 'shareholder_proposal', 'submit', 'board seat', 'actor:test',
+    '2026-07-20 00:00:00', '2026-08-31 00:00:00', $midnightIdentity['comparison_key']
+);
+expect_true(
+    is_array($recoveredDateOnly)
+        && $recoveredDateOnly['comparison_key'] === $dateOnlyIdentity['comparison_key'],
+    'stored date-only identity must be recovered by its canonical key'
+);
+expect_true(
+    is_array($recoveredMidnight)
+        && $recoveredMidnight['comparison_key'] === $midnightIdentity['comparison_key'],
+    'stored explicit midnight identity must be recovered by its canonical key'
+);
+$tamperedKey = substr($dateOnlyIdentity['comparison_key'],0,-1)
+    . (substr($dateOnlyIdentity['comparison_key'],-1) === '0' ? '1' : '0');
+expect_true(
+    v1_resolve_stored_event_identity(
+        '00126380', 'shareholder_proposal', 'submit', 'board seat', 'actor:test',
+        '2026-07-20 00:00:00', '2026-08-31 00:00:00', $tamperedKey
+    ) === null,
+    'a stored identity with a tampered canonical key must fail closed'
+);
+expect_true(
+    v1_resolve_stored_event_identity(
+        '00126380', 'shareholder_proposal', 'Submit', 'board seat', 'actor:test',
+        '2026-07-20 00:00:00', '2026-08-31 00:00:00', $dateOnlyIdentity['comparison_key']
+    ) === null,
+    'a noncanonical stored identity field must not be silently normalized'
+);
+expect_true(
+    v1_resolve_stored_event_identity(
+        '00126380', 'shareholder_proposal', 'submit', 'board seat', 'actor:test',
+        '2026-07-20', '2026-08-31 00:00:00', $dateOnlyIdentity['comparison_key']
+    ) === null,
+    'stored identity dates must use the exact MySQL DATETIME representation'
+);
+
+foreach (array(
+    'followup_event_identity_conflict',
+    'invalid_complete_event_identity',
+    'incomplete_event_identity_has_comparison_key',
+    'event_identity_scope_conflict',
+    'event_identity_field_conflict',
+) as $clientConflictCode) {
+    expect_true(
+        v1_governance_snapshot_identity_conflict_code(
+            new RuntimeException($clientConflictCode . ':sensitive-event-id')
+        ) === $clientConflictCode,
+        'caller-controlled identity conflicts must expose only a stable code'
+    );
+}
+expect_true(
+    v1_governance_snapshot_identity_conflict_code(
+        new RuntimeException('stored_event_identity_integrity_error:sensitive-event-id')
+    ) === null,
+    'stored identity corruption must remain an internal server failure'
 );
 
 fwrite(STDOUT, "PHP governance API contracts passed.\n");

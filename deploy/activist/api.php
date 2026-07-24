@@ -16,7 +16,7 @@ if (!is_file($configPath)) {
 }
 $config = require $configPath;
 require_once __DIR__ . '/governance_v1.php';
-$v1Path = v1_request_path();
+$v1Path = v1_request_path(); // canonicalized once for both CORS and dispatch
 
 $origin = isset($_SERVER['HTTP_ORIGIN']) ? trim((string)$_SERVER['HTTP_ORIGIN']) : '';
 $allowedOrigin = isset($config['allowed_origin']) ? trim((string)$config['allowed_origin']) : '';
@@ -35,7 +35,7 @@ if (valid_cors_origin($origin) && valid_cors_origin($allowedOrigin) && hash_equa
 if ($corsOrigin !== '') {
     header('Access-Control-Allow-Origin: ' . $corsOrigin);
     header('Vary: Origin');
-    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+    header('Access-Control-Allow-Methods: GET, POST, PUT, OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Request-ID, X-Activist-Timestamp, X-Activist-Nonce, X-Activist-Signature, X-Telegram-Admin-Token');
     header('Access-Control-Max-Age: 600');
 }
@@ -69,7 +69,7 @@ function respond(int $status, array $payload): void {
         $status = 500;
         $encoded = '{"ok":false,"error":"json_encoding_failed"}';
     }
-    $budget = defined('V1_RESPONSE_BUDGET_BYTES') ? V1_RESPONSE_BUDGET_BYTES : 256000;
+    $budget = defined('V1_RESPONSE_BUDGET_BYTES') ? V1_RESPONSE_BUDGET_BYTES : 250000;
     if (strlen($encoded) > $budget) {
         $status = 500;
         $encoded = json_encode(array('ok' => false, 'error' => 'response_budget_exceeded', 'max_bytes' => $budget));
@@ -432,7 +432,7 @@ function ensure_governance_schema(PDO $pdo, array $config): void {
         payload_json MEDIUMTEXT NULL,
         created_at DATETIME NOT NULL,
         updated_at DATETIME NOT NULL,
-        UNIQUE KEY uq_document_external_version (source_class, external_id, version_no),
+        UNIQUE KEY uq_document_right_external_version (source_right_id, external_id, version_no),
         INDEX idx_document_company_published (company_id, published_at),
         INDEX idx_document_source_right (source_right_id),
         INDEX idx_document_collection (company_id, source_class, collection_key, version_no),
@@ -890,12 +890,15 @@ function remember_nonce(PDO $pdo, array $config, string $nonce): void {
     }
 }
 
-function legacy_adapter_headers(array $config, string $action): void {
+function legacy_adapter_headers(PDO $pdo, array $config, string $action): void {
     $legacyActions = array('search', 'articles', 'reports', 'report', 'latest_snapshot', 'telegram_reactions', 'telegram_dashboard');
     if (!in_array($action, $legacyActions, true)) { return; }
-    $configured = isset($config['legacy_api_sunset_at']) ? trim((string)$config['legacy_api_sunset_at']) : '2026-10-14T00:00:00Z';
-    $sunsetTimestamp = strtotime($configured);
-    if ($sunsetTimestamp === false) { $sunsetTimestamp = strtotime('2026-10-14T00:00:00Z'); }
+    $stmt = $pdo->prepare('SELECT cutover_at,sunset_at FROM ' . table_name($config, 'governance_release_state') . ' WHERE state_key=? LIMIT 1');
+    $stmt->execute(array(GOV_V1_RELEASE_STATE_KEY)); $release = $stmt->fetch();
+    if (!is_array($release) || empty($release['cutover_at']) || empty($release['sunset_at'])) { return; }
+    $cutoverTimestamp = strtotime((string)$release['cutover_at'] . ' UTC');
+    $sunsetTimestamp = strtotime((string)$release['sunset_at'] . ' UTC');
+    if ($cutoverTimestamp === false || $sunsetTimestamp === false || time() < $cutoverTimestamp) { return; }
     header('Deprecation: true');
     header('Sunset: ' . gmdate('D, d M Y H:i:s', (int)$sunsetTimestamp) . ' GMT');
     header('Link: </api/v1/openapi.yaml>; rel="successor-version"; type="application/yaml"');
@@ -1812,6 +1815,7 @@ function handle_write(string $action, array $config): void {
         'upsert_report',
         'upsert_telegram_snapshot',
         'upsert_governance_snapshot',
+        'upsert_official_site_snapshot',
         'upsert_editorial_snapshot',
         'enqueue_delivery_outbox',
         'claim_delivery_outbox',
@@ -1861,7 +1865,16 @@ function handle_write(string $action, array $config): void {
         upsert_telegram_snapshot($pdo, $config, $payload);
     }
     if ($action === 'upsert_governance_snapshot') {
+        v1_require_schema_version($pdo, $config);
         upsert_governance_snapshot($pdo, $config, $payload);
+    }
+    if ($action === 'upsert_official_site_snapshot') {
+        v1_require_schema_version($pdo, $config);
+        $payloadObject = $body === '' ? null : json_decode($body);
+        if (!is_object($payloadObject)) {
+            respond(400, array('ok' => false, 'error' => 'invalid_json_object'));
+        }
+        upsert_official_site_snapshot($pdo, $config, $payload, $payloadObject);
     }
     if ($action === 'upsert_editorial_snapshot') {
         upsert_editorial_snapshot($pdo, $config, $payload);
@@ -3222,9 +3235,9 @@ function handle_read(string $action, array $config): void {
     if (!in_array($action, array('reports', 'report', 'latest_snapshot', 'articles', 'telegram_reactions', 'telegram_dashboard', 'search'), true)) {
         respond(404, array('ok' => false, 'error' => 'unknown_action'));
     }
-    legacy_adapter_headers($config, $action);
     $pdo = pdo_conn($config);
-    ensure_schema($pdo, $config);
+    v1_require_schema_version($pdo, $config);
+    legacy_adapter_headers($pdo, $config, $action);
     if ($action === 'search') {
         handle_search($pdo, $config);
     }

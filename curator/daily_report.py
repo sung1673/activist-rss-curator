@@ -20,7 +20,7 @@ from .fetch import USER_AGENT, image_hrefs, usable_image_url
 from .normalize import canonical_url_hash
 from .pages_compat import write_legacy_pages_adapter
 from .rss_writer import article_link, article_source_label, compact_text, display_article_title
-from .remote_api import post_remote_action, remote_api_configured, sync_report_to_remote_api
+from .remote_api import sync_report_to_remote_api
 from .remote_state import hydrate_runtime_state
 from .state import load_state
 from .story_review import build_story_review
@@ -36,13 +36,7 @@ from .summaries import (
     duplicate_records_in_window,
     group_digest_entries,
 )
-from .telegram_publisher import (
-    html_link,
-    send_telegram_message,
-    telegram_bot_token,
-    telegram_chat_id,
-    telegram_is_configured,
-)
+from .telegram_publisher import html_link
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -6095,83 +6089,34 @@ def report_source_right_ids(report: dict[str, object]) -> list[str]:
 
 
 def daily_report_delivery_mode() -> str:
-    """Return the single delivery path selected for this report invocation."""
+    """Return the immutable web-only distribution policy."""
 
-    if os.environ.get("CURATOR_DISABLE_TELEGRAM_SEND", "").strip().casefold() in {"1", "true", "yes", "on"}:
-        return "disabled"
-    raw_mode = os.environ.get("CURATOR_DELIVERY_MODE", "").strip().casefold()
-    aliases = {
-        "direct": "legacy-direct",
-        "legacy": "legacy-direct",
-        "outbox": "outbox-enqueue",
-        "enqueue": "outbox-enqueue",
-        "ingest-only": "disabled",
-        "none": "disabled",
-    }
-    mode = aliases.get(raw_mode, raw_mode)
-    if mode:
-        if mode not in {"legacy-direct", "outbox-enqueue", "disabled"}:
-            raise ValueError(f"unsupported CURATOR_DELIVERY_MODE: {raw_mode}")
-        return mode
-    return "outbox-enqueue" if remote_api_configured() else "legacy-direct"
+    return "disabled"
 
 
 def enqueue_daily_report(
     report: dict[str, object],
     config: dict[str, object],
 ) -> dict[str, int]:
-    """Enqueue one daily briefing without consuming the durable MySQL outbox.
+    """Keep the historical enqueue helper as a permanent web-only policy no-op."""
 
-    The date-stable delivery ID makes delayed retries idempotent.  Only the
-    dedicated publish workflow is allowed to claim and deliver this row.
-    """
-
-    if not remote_api_configured():
-        return {"daily_report_queued": 0, "daily_report_sent": 0, "daily_report_failed": 1}
-    date_id = str(report.get("date_id") or "").strip()
-    destination = telegram_chat_id(config)
-    if not date_id or not destination:
-        return {"daily_report_queued": 0, "daily_report_sent": 0, "daily_report_failed": 1}
-    delivery_id = f"daily:{date_id}"
-    response = post_remote_action(
-        "enqueue_delivery_outbox",
-        {
-            "deliveries": [
-                {
-                    "delivery_id": delivery_id,
-                    "channel": "telegram",
-                    "destination": destination,
-                    "idempotency_key": delivery_id,
-                    "payload": {
-                        "text": build_report_telegram_message(report),
-                        "disable_web_page_preview": False,
-                        "report_date": date_id,
-                        "rights_lineage_complete": True,
-                        "source_right_ids": report_source_right_ids(report),
-                    },
-                }
-            ]
-        },
-    )
-    if not response.get("ok") or int(response.get("accepted") or 0) != 1:
-        return {"daily_report_queued": 0, "daily_report_sent": 0, "daily_report_failed": 1}
-    return {"daily_report_queued": 1, "daily_report_sent": 0, "daily_report_failed": 0}
+    # Historical helper retained only for API compatibility. Outbound delivery
+    # is a product-level invariant and cannot be enabled by runtime credentials.
+    return {
+        "daily_report_queued": 0,
+        "daily_report_sent": 0,
+        "daily_report_failed": 0,
+        "outbound_delivery_disabled": 1,
+    }
 
 
 def deliver_daily_report_direct(report: dict[str, object], config: dict[str, object]) -> dict[str, int]:
-    """Preserve the legacy direct-send behavior without touching remote outbox."""
+    """Refuse the historical direct-send path under the web-only policy."""
 
-    response = send_telegram_message(
-        telegram_bot_token(),
-        telegram_chat_id(config),
-        build_report_telegram_message(report),
-        config,
-        disable_web_page_preview=False,
-    )
     return {
         "daily_report_queued": 0,
-        "daily_report_sent": 1 if response.get("ok") else 0,
-        "daily_report_failed": 0 if response.get("ok") else 1,
+        "daily_report_sent": 0,
+        "daily_report_failed": 0,
     }
 
 
@@ -6180,27 +6125,13 @@ def send_daily_report(root: Path | None = None) -> dict[str, int]:
     report = build_daily_report(project_root)
     write_report_files(report, project_root)
     remote_summary = sync_report_to_remote_api(report)
-    config = report["config"] if isinstance(report.get("config"), dict) else load_config(project_root / "config.yaml")
     if daily_report_write_only():
         return {"daily_report_written": 1, "daily_report_sent": 0, "daily_report_failed": 0, **remote_summary}
-    delivery_mode = daily_report_delivery_mode()
-    if delivery_mode == "disabled":
-        return {
-            "daily_report_written": 1,
-            "daily_report_queued": 0,
-            "daily_report_sent": 0,
-            "daily_report_failed": 0,
-            **remote_summary,
-        }
-    if not telegram_is_configured(config):
-        return {"daily_report_written": 1, "daily_report_sent": 0, "daily_report_failed": 1, **remote_summary}
-    if delivery_mode == "legacy-direct":
-        delivery_summary = deliver_daily_report_direct(report, config)
-    else:
-        delivery_summary = enqueue_daily_report(report, config)
     return {
         "daily_report_written": 1,
-        **delivery_summary,
+        "daily_report_queued": 0,
+        "daily_report_sent": 0,
+        "daily_report_failed": 0,
         **remote_summary,
     }
 

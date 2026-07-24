@@ -5,6 +5,32 @@
   const announcer = document.getElementById("announcer");
   if (!app || !announcer) return;
 
+  const PREVIEW_SESSION_KEY = "bside.governance.preview";
+
+  function capturePreviewToken() {
+    if (!window.location.hash.startsWith("#preview=")) return;
+    const fragment = new URLSearchParams(window.location.hash.slice(1));
+    const token = String(fragment.get("preview") || "");
+    try {
+      if (/^[A-Za-z0-9._~-]{32,512}$/.test(token)) sessionStorage.setItem(PREVIEW_SESSION_KEY, token);
+      else sessionStorage.removeItem(PREVIEW_SESSION_KEY);
+    } catch (_error) {
+      // A blocked session store must fail closed instead of leaving a token in the address bar.
+    }
+    history.replaceState(null, "", `${window.location.pathname}${window.location.search}#/today`);
+  }
+
+  function previewToken() {
+    try {
+      const token = String(sessionStorage.getItem(PREVIEW_SESSION_KEY) || "");
+      return /^[A-Za-z0-9._~-]{32,512}$/.test(token) ? token : "";
+    } catch (_error) {
+      return "";
+    }
+  }
+
+  capturePreviewToken();
+
   const config = window.__BSIDE_GOVERNANCE_CONFIG__ || {};
   const labels = {
     eventType: {
@@ -68,8 +94,6 @@
       company_statement: "회사 입장 / Company statement",
       activist_statement: "행동주주 입장 / Activist statement",
       media_report: "언론 보도 / Media report",
-      authorized_telegram: "허가된 Telegram / Authorized Telegram",
-      licensed_telegram: "허가된 Telegram / Licensed Telegram",
       editorial_analysis: "편집 분석 / Editorial analysis"
     },
     claimType: {
@@ -196,12 +220,16 @@
 
   async function request(path, options) {
     const settings = options || {};
+    const headers = settings.body ? { "Content-Type": "application/json", Accept: "application/json" } : { Accept: "application/json" };
+    const token = previewToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
     const response = await fetch(endpoint(path, settings.params), {
       method: settings.method || "GET",
-      headers: settings.body ? { "Content-Type": "application/json", Accept: "application/json" } : { Accept: "application/json" },
+      headers,
       body: settings.body ? JSON.stringify(settings.body) : undefined,
       credentials: "omit",
       cache: settings.method === "POST" ? "no-store" : "no-cache",
+      referrerPolicy: "no-referrer",
       signal: settings.signal
     });
     const contentType = response.headers.get("content-type") || "";
@@ -212,6 +240,91 @@
     }
     return payload;
   }
+
+  function metricRouteTemplate() {
+    const raw = window.location.hash.startsWith("#/") ? window.location.hash.slice(1).split("?", 1)[0] : "/today";
+    const segments = raw.split("/").filter(Boolean);
+    const first = segments[0] || "today";
+    const allowed = new Set(["today", "events", "companies", "actors", "campaigns", "documents", "calendar", "search", "revisions", "feedback"]);
+    if (!allowed.has(first)) return "/not-found";
+    if (segments.length > 1 && ["events", "companies", "actors", "campaigns", "documents"].includes(first)) return `/${first}/:id`;
+    return `/${first}`;
+  }
+
+  function installWebVitals() {
+    const buildSha = String(config.buildSha || "").toLowerCase();
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(buildSha) || typeof PerformanceObserver !== "function") return;
+    const routeTemplate = metricRouteTemplate();
+    const deviceClass = window.matchMedia("(max-width: 767px)").matches ? "mobile" : "desktop";
+    const values = { lcp: null, cls: 0, inp: null };
+    const supported = new Set(PerformanceObserver.supportedEntryTypes || []);
+    const observed = { lcp: false, cls: false, inp: false };
+    const sent = new Set();
+    const observers = [];
+
+    const observe = (type, callback, options) => {
+      if (!supported.has(type)) return false;
+      try {
+        const observer = new PerformanceObserver((list) => callback(list.getEntries()));
+        observer.observe({ type, buffered: true, ...(options || {}) });
+        observers.push({ observer, callback });
+        return true;
+      } catch (_error) {
+        // Unsupported observer options must not affect the public reading experience.
+        return false;
+      }
+    };
+
+    observe("largest-contentful-paint", (entries) => {
+      const latest = entries[entries.length - 1];
+      if (latest && Number.isFinite(latest.startTime)) {
+        values.lcp = latest.startTime;
+        observed.lcp = true;
+      }
+    });
+    observed.cls = observe("layout-shift", (entries) => {
+      entries.forEach((entry) => {
+        if (!entry.hadRecentInput && Number.isFinite(entry.value)) values.cls += entry.value;
+      });
+    });
+    observe("event", (entries) => {
+      entries.forEach((entry) => {
+        if (entry.interactionId > 0 && Number.isFinite(entry.duration)) {
+          values.inp = Math.max(values.inp || 0, entry.duration);
+          observed.inp = true;
+        }
+      });
+    }, { durationThreshold: 16 });
+
+    const flush = () => {
+      observers.forEach(({ observer, callback }) => {
+        const entries = observer.takeRecords();
+        if (entries.length) callback(entries);
+      });
+      Object.entries(values).forEach(([metric, rawValue]) => {
+        if (sent.has(metric) || !observed[metric] || !Number.isFinite(rawValue)) return;
+        const value = metric === "cls" ? Number(rawValue.toFixed(6)) : Number(rawValue.toFixed(3));
+        const headers = { "Content-Type": "application/json", Accept: "application/json" };
+        const token = previewToken();
+        if (token) headers.Authorization = `Bearer ${token}`;
+        sent.add(metric);
+        void fetch(endpoint("/metrics/web-vitals"), {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ route_template: routeTemplate, metric, value, device_class: deviceClass, build_sha: buildSha }),
+          credentials: "omit",
+          cache: "no-store",
+          keepalive: true,
+          referrerPolicy: "no-referrer"
+        }).catch(() => {});
+      });
+    };
+
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
+    window.addEventListener("pagehide", flush, { once: true });
+  }
+
+  installWebVitals();
 
   function validEntityId(value) { return /^[A-Za-z0-9_.:-]{1,96}$/.test(String(value || "")); }
   function validCompanyId(value) { return /^\d{8}$/.test(String(value || "")); }
@@ -295,6 +408,95 @@
     section.append(element("div", { className: "load-more" }, [button]));
   }
 
+  const PUBLIC_DOCUMENT_CLASSES = new Set([
+    "official_disclosure",
+    "company_statement",
+    "activist_statement",
+    "media_report",
+    "editorial_analysis"
+  ]);
+
+  function isPublicEvent(event) {
+    if (!event || String(event.verification_status || "") === "signal") return false;
+    if (event.publication_status && event.publication_status !== "published") return false;
+    if (event.review_status && !["approved", "not_required"].includes(event.review_status)) return false;
+    return true;
+  }
+
+  function isPublicDocument(documentItem) {
+    if (!documentItem || !PUBLIC_DOCUMENT_CLASSES.has(String(documentItem.source_class || ""))) return false;
+    if (documentItem.publication_status && documentItem.publication_status !== "published") return false;
+    return true;
+  }
+
+  function isPublicCampaign(campaign) {
+    if (!campaign || String(campaign.stage || "") === "initial_signal") return false;
+    if (campaign.publication_status && campaign.publication_status !== "published") return false;
+    if (campaign.review_status && campaign.review_status !== "approved") return false;
+    return true;
+  }
+
+  function eventFilterParams(query) {
+    const params = { page: 1, limit: 50 };
+    const allowed = ["company_id", "actor_id", "event_type", "source_class", "verification_status", "from", "to"];
+    allowed.forEach((name) => {
+      const value = String(query.get(name) || "").trim();
+      if (value) params[name] = value;
+    });
+    return params;
+  }
+
+  function eventFilterForm(query, destination) {
+    const company = element("input", { attrs: { id: "filter-company", name: "company_id", value: query.get("company_id") || "", inputmode: "numeric", maxlength: "8", pattern: "[0-9]{8}", placeholder: "DART corp_code" } });
+    const actor = element("input", { attrs: { id: "filter-actor", name: "actor_id", value: query.get("actor_id") || "", maxlength: "64", pattern: "[A-Za-z0-9_.:-]{1,64}", placeholder: "Actor ID" } });
+    const type = element("select", { attrs: { id: "filter-event-type", name: "event_type" } });
+    [["", "전체 유형 / All types"], ...Object.entries(labels.eventType)].forEach(([value, text]) => {
+      const option = element("option", { text, attrs: { value } });
+      if (value === String(query.get("event_type") || "")) option.selected = true;
+      type.append(option);
+    });
+    const source = element("select", { attrs: { id: "filter-source", name: "source_class" } });
+    [["", "전체 근거 / All evidence"], ...Object.entries(labels.sourceClass)].forEach(([value, text]) => {
+      const option = element("option", { text, attrs: { value } });
+      if (value === String(query.get("source_class") || "")) option.selected = true;
+      source.append(option);
+    });
+    const status = element("select", { attrs: { id: "filter-status", name: "verification_status" } });
+    [["", "전체 상태 / All statuses"], ...Object.entries(labels.verification).filter(([value]) => value !== "signal")].forEach(([value, text]) => {
+      const option = element("option", { text, attrs: { value } });
+      if (value === String(query.get("verification_status") || "")) option.selected = true;
+      status.append(option);
+    });
+    const from = element("input", { attrs: { id: "filter-from", type: "date", name: "from", value: query.get("from") || "" } });
+    const to = element("input", { attrs: { id: "filter-to", type: "date", name: "to", value: query.get("to") || "" } });
+    const form = element("form", { className: "filter-form", attrs: { "aria-label": "사건 필터 / Event filters" } }, [
+      element("div", { className: "filter-grid" }, [
+        element("div", { className: "field" }, [element("label", { text: "회사 / Company", attrs: { for: "filter-company" } }), company]),
+        element("div", { className: "field" }, [element("label", { text: "당사자 / Actor", attrs: { for: "filter-actor" } }), actor]),
+        element("div", { className: "field" }, [element("label", { text: "사건 유형 / Event type", attrs: { for: "filter-event-type" } }), type]),
+        element("div", { className: "field" }, [element("label", { text: "근거 / Evidence", attrs: { for: "filter-source" } }), source]),
+        element("div", { className: "field" }, [element("label", { text: "확인 상태 / Status", attrs: { for: "filter-status" } }), status]),
+        element("div", { className: "field" }, [element("label", { text: "시작 / From", attrs: { for: "filter-from" } }), from]),
+        element("div", { className: "field" }, [element("label", { text: "종료 / To", attrs: { for: "filter-to" } }), to])
+      ]),
+      element("div", { className: "form-actions" }, [
+        element("button", { text: "필터 적용 / Apply", attrs: { type: "submit" } }),
+        routeLink("초기화 / Reset", destination, { className: "text-link" })
+      ])
+    ]);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      const values = new URLSearchParams();
+      new FormData(form).forEach((value, name) => {
+        const text = String(value).trim();
+        if (text) values.set(name, text);
+      });
+      window.location.hash = `${destination}${values.toString() ? `?${values.toString()}` : ""}`;
+    });
+    return form;
+  }
+
   function eventCard(event, rank) {
     const titleLink = routeLink(event.title || "제목 없음", `#/events/${encodeURIComponent(event.event_id || "")}`, { lang: event.original_language });
     const company = event.company_id
@@ -337,30 +539,19 @@
     ]);
   }
 
-  function eventScore(event) {
-    const importance = { critical: 80, high: 55, medium: 25, low: 5 }[event.importance] || 0;
-    const verification = { withdrawn: 28, official: 26, confirmed: 24, corroborated: 15, corrected: 10, disputed: 8, signal: 3, unverified: 0 }[event.verification_status] || 0;
-    const date = normalizedDate(event.occurred_at);
-    return importance + verification + (date ? date.getTime() / 1e13 : 0);
-  }
-
-  function watchCandidate(event) {
-    if (["signal", "unverified", "disputed", "corrected"].includes(event.verification_status)) return true;
-    const deadline = normalizedDate(event.deadline_at);
-    if (!deadline) return false;
-    const days = (deadline.getTime() - Date.now()) / 86400000;
-    return days >= -2 && days <= 45;
-  }
-
   async function renderToday(signal) {
-    const payload = await request("/events", { params: { page: 1, limit: 50 }, signal });
-    const events = Array.isArray(payload.data) ? payload.data : [];
-    const top = [...events].sort((a, b) => eventScore(b) - eventScore(a)).slice(0, 5);
+    const [todayPayload, archivePayload] = await Promise.all([
+      request("/today", { signal }),
+      request("/events", { params: { page: 1, limit: 50 }, signal })
+    ]);
+    const top = (Array.isArray(todayPayload.top) ? todayPayload.top : []).filter(isPublicEvent).slice(0, 5);
     const topIds = new Set(top.map((item) => item.event_id));
-    const remaining = events.filter((item) => !topIds.has(item.event_id));
-    const watch = remaining.filter(watchCandidate).slice(0, 10);
+    const watch = (Array.isArray(todayPayload.watch) ? todayPayload.watch : [])
+      .filter((item) => isPublicEvent(item) && !topIds.has(item.event_id))
+      .slice(0, 10);
     const hiddenIds = new Set([...top, ...watch].map((item) => item.event_id));
-    const archive = remaining.filter((item) => !hiddenIds.has(item.event_id));
+    const archive = (Array.isArray(archivePayload.data) ? archivePayload.data : [])
+      .filter((item) => isPublicEvent(item) && !hiddenIds.has(item.event_id));
 
     const topList = element("div", { className: "card-list" }, top.map((item, index) => eventCard(item, index + 1)));
     const watchList = element("ul", { className: "compact-list" }, watch.map(compactEvent));
@@ -374,7 +565,7 @@
       archive.length ? archiveList : archiveEmpty
     ]);
 
-    const nextPage = payload.pagination && payload.pagination.next_page;
+    const nextPage = archivePayload.pagination && archivePayload.pagination.next_page;
     if (nextPage) {
       const button = element("button", { text: "더 보기 / Load more", attrs: { type: "button" } });
       let page = Number(nextPage);
@@ -382,7 +573,8 @@
         button.disabled = true;
         try {
           const more = await request("/events", { params: { page, limit: 50 } });
-          const rows = Array.isArray(more.data) ? more.data : [];
+          const rows = (Array.isArray(more.data) ? more.data : [])
+            .filter((item) => isPublicEvent(item) && !hiddenIds.has(item.event_id));
           if (rows.length && !archiveList.isConnected) archiveEmpty.replaceWith(archiveList);
           rows.forEach((item) => archiveList.append(archiveEvent(item)));
           page = more.pagination && more.pagination.next_page ? Number(more.pagination.next_page) : 0;
@@ -400,7 +592,7 @@
       pageHeader(
         "TODAY / 오늘",
         "거버넌스 사건을 근거와 결과까지 추적합니다.",
-        "중요 사건, 확인이 필요한 신호, 전체 기록을 한 화면에서 확인하세요.",
+        "중요 사건, 기한·정정 추적, 전체 공개 기록을 한 화면에서 확인하세요.",
         [
           routeLink("사건 검색 / Search", "#/search", { className: "text-link" }),
           externalLink("Atom feed", endpoint("/feeds/events.atom").toString(), "text-link")
@@ -419,10 +611,45 @@
             element("h2", { text: "Watch", attrs: { id: "watch-title" } }),
             element("p", { text: "추가 확인·기한 추적" })
           ]),
-          watch.length ? watchList : element("p", { text: "현재 추적 중인 신호가 없습니다." })
+          watch.length ? watchList : element("p", { text: "현재 추가 추적 중인 공개 사건이 없습니다." })
         ])
       ]),
       archiveSection
+    );
+  }
+
+  async function renderEvents(query, signal) {
+    const params = eventFilterParams(query);
+    const payload = await request("/events", { params, signal });
+    const events = (Array.isArray(payload.data) ? payload.data : []).filter(isPublicEvent);
+    const list = element("div", { className: "data-list", attrs: { id: "event-results" } }, events.map(archiveEvent));
+    const results = element("section", { className: "section-block", attrs: { "aria-labelledby": "event-results-title" } }, [
+      sectionHeading("공개 사건 / Public events", `${events.length}개 표시`, "event-results-title"),
+      events.length ? list : emptyState("조건에 맞는 사건이 없습니다.", "필터를 줄이거나 기간을 넓혀 다시 확인해 주세요.")
+    ]);
+    if (events.length) {
+      addLoadMore(results, payload.pagination, async (page) => {
+        const more = await request("/events", { params: { ...params, page } });
+        (Array.isArray(more.data) ? more.data : []).filter(isPublicEvent).forEach((item) => list.append(archiveEvent(item)));
+        return more.pagination;
+      });
+    }
+    const exportParams = { ...params };
+    delete exportParams.page;
+    delete exportParams.limit;
+    app.replaceChildren(
+      pageHeader(
+        "EVENTS / 사건",
+        "거버넌스 사건 전체 기록",
+        "회사·당사자·유형·근거·기간·상태 필터는 현재 주소에 보존되어 공유할 수 있습니다.",
+        [
+          externalLink("Atom", endpoint("/feeds/events.atom", exportParams).toString(), "text-link"),
+          externalLink("CSV", endpoint("/exports/events.csv", exportParams).toString(), "text-link"),
+          externalLink("JSON", endpoint("/exports/events.json", exportParams).toString(), "text-link")
+        ]
+      ),
+      eventFilterForm(query, "#/events"),
+      results
     );
   }
 
@@ -509,13 +736,32 @@
 
   async function renderCompany(companyId, signal) {
     if (!validCompanyId(companyId)) throw new ApiError("Invalid company ID", "invalid_company_id", 400);
-    const payload = await request(`/companies/${encodeURIComponent(companyId)}`, { signal });
+    const [payload, eventPayload] = await Promise.all([
+      request(`/companies/${encodeURIComponent(companyId)}`, { signal }),
+      request("/events", { params: { company_id: companyId, page: 1, limit: 50 }, signal })
+    ]);
     const data = payload.data || {};
     const company = data.company || {};
-    const events = Array.isArray(data.events) ? data.events.map((item) => ({ ...item, company_id: companyId, company_name: company.legal_name })) : [];
-    const campaigns = Array.isArray(data.campaigns) ? data.campaigns : [];
+    const events = (Array.isArray(eventPayload.data) ? eventPayload.data : [])
+      .filter(isPublicEvent)
+      .map((item) => ({ ...item, company_id: companyId, company_name: item.company_name || company.legal_name }));
+    const campaigns = (Array.isArray(data.campaigns) ? data.campaigns : []).filter(isPublicCampaign);
     const commitments = Array.isArray(data.commitments) ? data.commitments : [];
     const homepage = company.homepage_url ? externalLink("회사 웹사이트 / Website", company.homepage_url, "text-link") : null;
+    const timelineList = element("div", { className: "card-list", attrs: { id: "company-timeline" } }, events.map((item) => eventCard(item)));
+    const timelineSection = element("section", { className: "section-block", attrs: { "aria-labelledby": "timeline-title" } }, [
+      sectionHeading("거버넌스 타임라인 / Timeline", `${events.length}개 표시`, "timeline-title"),
+      events.length ? timelineList : emptyState("공개 사건이 없습니다.", "검수 완료된 사건이 추가되면 표시됩니다.")
+    ]);
+    if (events.length) {
+      addLoadMore(timelineSection, eventPayload.pagination, async (page) => {
+        const more = await request("/events", { params: { company_id: companyId, page, limit: 50 } });
+        (Array.isArray(more.data) ? more.data : []).filter(isPublicEvent).forEach((item) => {
+          timelineList.append(eventCard({ ...item, company_id: companyId, company_name: item.company_name || company.legal_name }));
+        });
+        return more.pagination;
+      });
+    }
     app.replaceChildren(
       pageHeader(
         `${company.market || "COMPANY"}${company.stock_code ? ` · ${company.stock_code}` : ""}`,
@@ -529,10 +775,7 @@
             sectionHeading("현재 캠페인 / Campaigns", `${campaigns.length}개`, "campaigns-title"),
             campaigns.length ? element("div", { className: "data-list" }, campaigns.map(campaignRow)) : emptyState("공개 캠페인이 없습니다.", "새 캠페인이 확인되면 표시됩니다.")
           ]),
-          element("section", { className: "section-block", attrs: { "aria-labelledby": "timeline-title" } }, [
-            sectionHeading("거버넌스 타임라인 / Timeline", `${events.length}개 사건`, "timeline-title"),
-            events.length ? element("div", { className: "card-list" }, events.map((item) => eventCard(item))) : emptyState("공개 사건이 없습니다.", "검수 완료된 사건이 추가되면 표시됩니다.")
-          ]),
+          timelineSection,
           element("section", { className: "section-block", attrs: { "aria-labelledby": "commitments-title" } }, [
             sectionHeading("밸류업 약속·이행 / Commitments", `${commitments.length}개`, "commitments-title"),
             commitments.length ? element("div", { className: "data-list" }, commitments.map(commitmentCard)) : emptyState("등록된 약속이 없습니다.", "회사 계획과 실제 이행이 연결되면 표시됩니다.")
@@ -546,6 +789,63 @@
             { label: "시장 / Market", value: company.market },
             { label: "약칭 / Short name", value: company.short_name },
             { label: "최종 갱신 / Updated", value: formatDate(company.updated_at, true) }
+          ])
+        ])
+      ])
+    );
+  }
+
+  async function renderActor(actorId, signal) {
+    if (!validEntityId(actorId)) throw new ApiError("Invalid actor ID", "invalid_actor_id", 400);
+    const [payload, eventPayload] = await Promise.all([
+      request(`/actors/${encodeURIComponent(actorId)}`, { signal }),
+      request("/events", { params: { actor_id: actorId, page: 1, limit: 50 }, signal })
+    ]);
+    const data = payload.data || {};
+    const actor = data.actor || data;
+    const campaigns = (Array.isArray(data.campaigns) ? data.campaigns : []).filter(isPublicCampaign);
+    const events = (Array.isArray(eventPayload.data) ? eventPayload.data : []).filter(isPublicEvent);
+    const eventList = element("div", { className: "card-list", attrs: { id: "actor-events" } }, events.map((item) => eventCard(item)));
+    const eventSection = element("section", { attrs: { "aria-labelledby": "actor-events-title" } }, [
+      sectionHeading("관련 사건 / Events", `${events.length}개 표시`, "actor-events-title"),
+      events.length ? eventList : emptyState("공개 사건이 없습니다.", "이 당사자와 연결된 검수 완료 사건이 표시됩니다.")
+    ]);
+    if (events.length) {
+      addLoadMore(eventSection, eventPayload.pagination, async (page) => {
+        const more = await request("/events", { params: { actor_id: actorId, page, limit: 50 } });
+        (Array.isArray(more.data) ? more.data : []).filter(isPublicEvent).forEach((item) => eventList.append(eventCard(item)));
+        return more.pagination;
+      });
+    }
+    const aliases = Array.isArray(actor.aliases) ? actor.aliases.join(", ") : "";
+    app.replaceChildren(
+      pageHeader(
+        label("actorType", actor.actor_type),
+        actor.display_name || actorId,
+        actor.display_name_en || "당사자별 공식 근거·사건·캠페인 기록",
+        [
+          actor.homepage_url ? externalLink("공식 웹사이트 / Website", actor.homepage_url, "text-link") : null,
+          routeLink("당사자 답변 / Right of reply", `#/feedback?feedback_type=right_of_reply&entity_type=actor&entity_id=${encodeURIComponent(actorId)}`, { className: "text-link" })
+        ].filter(Boolean),
+        actor.original_language
+      ),
+      element("div", { className: "detail-grid" }, [
+        element("div", {}, [
+          eventSection,
+          element("section", { className: "section-block", attrs: { "aria-labelledby": "actor-campaigns-title" } }, [
+            sectionHeading("관련 캠페인 / Campaigns", `${campaigns.length}개`, "actor-campaigns-title"),
+            campaigns.length ? element("div", { className: "data-list" }, campaigns.map(campaignRow)) : emptyState("공개 캠페인이 없습니다.", "검수 승인된 캠페인이 연결되면 표시됩니다.")
+          ])
+        ]),
+        element("aside", { className: "detail-sidebar", attrs: { "aria-label": "당사자 정보 / Actor information" } }, [
+          element("h2", { text: "당사자 정보 / Actor" }),
+          facts([
+            { label: "유형 / Type", value: label("actorType", actor.actor_type) },
+            { label: "Actor ID", value: actor.actor_id || actorId },
+            { label: "국가 / Country", value: actor.country_code },
+            { label: "별칭 / Aliases", value: aliases },
+            actor.company_id ? { label: "연결 회사 / Company", node: element("dd", {}, [routeLink(actor.company_name || actor.company_id, `#/companies/${encodeURIComponent(actor.company_id)}`)]) } : null,
+            { label: "최종 갱신 / Updated", value: formatDate(actor.updated_at, true) }
           ])
         ])
       ])
@@ -587,19 +887,114 @@
     ].filter(Boolean));
   }
 
+  function isPublicRevision(revision) {
+    if (!revision || revision.is_public === false) return false;
+    if (revision.visibility && revision.visibility !== "public") return false;
+    if (revision.publication_status && revision.publication_status !== "published") return false;
+    return true;
+  }
+
+  function revisionEntityRoute(revision) {
+    const type = String(revision.entity_type || "");
+    const id = String(revision.entity_id || "");
+    if (!validEntityId(id)) return "";
+    if (type === "company" && validCompanyId(id)) return `#/companies/${encodeURIComponent(id)}`;
+    if (["actor", "event", "campaign", "document"].includes(type)) return `#/${type === "actor" ? "actors" : `${type}s`}/${encodeURIComponent(id)}`;
+    return "";
+  }
+
+  function revisionRow(revision) {
+    const entityRoute = revisionEntityRoute(revision);
+    const title = revision.title || revision.reason || "공개 정정";
+    return element("article", { className: "revision-row" }, [
+      element("div", { className: "badge-row" }, [badge("corrected", "verification")]),
+      element("h3", {}, [entityRoute ? routeLink(title, entityRoute, { lang: revision.original_language }) : sourceNode("span", title, revision.original_language)]),
+      revision.reason ? sourceNode("p", revision.reason, revision.original_language) : null,
+      revision.before_value !== undefined && revision.before_value !== null ? element("div", { className: "revision-change" }, [
+        element("strong", { text: "변경 전 / Before" }),
+        sourceNode("p", revision.before_value, revision.original_language)
+      ]) : null,
+      revision.after_value !== undefined && revision.after_value !== null ? element("div", { className: "revision-change" }, [
+        element("strong", { text: "변경 후 / After" }),
+        sourceNode("p", revision.after_value, revision.original_language)
+      ]) : null,
+      metadata([
+        { value: revision.entity_type || "record" },
+        { value: revision.field_name || "record" },
+        { value: revision.company_name || revision.company_id || "" },
+        { value: formatDate(revision.published_at, true) }
+      ])
+    ].filter(Boolean));
+  }
+
+  async function renderRevisions(query, signal) {
+    const params = { page: 1, limit: 50 };
+    ["company_id", "entity_type", "from", "to"].forEach((name) => {
+      const value = String(query.get(name) || "").trim();
+      if (value) params[name] = value;
+    });
+    const payload = await request("/revisions", { params, signal });
+    const revisions = (Array.isArray(payload.data) ? payload.data : []).filter(isPublicRevision);
+    const list = element("div", { className: "data-list", attrs: { id: "public-revisions" } }, revisions.map(revisionRow));
+    const company = element("input", { attrs: { id: "revision-company", name: "company_id", value: query.get("company_id") || "", inputmode: "numeric", maxlength: "8", pattern: "[0-9]{8}", placeholder: "DART corp_code" } });
+    const entityType = element("select", { attrs: { id: "revision-entity", name: "entity_type" } });
+    [["", "전체 기록 / All records"], ["company", "기업 / Company"], ["actor", "당사자 / Actor"], ["event", "사건 / Event"], ["campaign", "캠페인 / Campaign"], ["document", "문서 / Document"]].forEach(([value, text]) => {
+      const option = element("option", { text, attrs: { value } });
+      if (value === String(query.get("entity_type") || "")) option.selected = true;
+      entityType.append(option);
+    });
+    const from = element("input", { attrs: { id: "revision-from", type: "date", name: "from", value: query.get("from") || "" } });
+    const to = element("input", { attrs: { id: "revision-to", type: "date", name: "to", value: query.get("to") || "" } });
+    const form = element("form", { className: "filter-form", attrs: { "aria-label": "정정 이력 필터 / Revision filters" } }, [
+      element("div", { className: "filter-grid" }, [
+        element("div", { className: "field" }, [element("label", { text: "회사 / Company", attrs: { for: "revision-company" } }), company]),
+        element("div", { className: "field" }, [element("label", { text: "기록 유형 / Record type", attrs: { for: "revision-entity" } }), entityType]),
+        element("div", { className: "field" }, [element("label", { text: "시작 / From", attrs: { for: "revision-from" } }), from]),
+        element("div", { className: "field" }, [element("label", { text: "종료 / To", attrs: { for: "revision-to" } }), to])
+      ]),
+      element("div", { className: "form-actions" }, [element("button", { text: "필터 적용 / Apply", attrs: { type: "submit" } }), routeLink("초기화 / Reset", "#/revisions", { className: "text-link" })])
+    ]);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      const values = new URLSearchParams();
+      new FormData(form).forEach((value, name) => { if (String(value).trim()) values.set(name, String(value).trim()); });
+      window.location.hash = `#/revisions${values.toString() ? `?${values.toString()}` : ""}`;
+    });
+    const results = element("section", { className: "section-block", attrs: { "aria-labelledby": "revision-results-title" } }, [
+      sectionHeading("공개 정정 / Published revisions", `${revisions.length}개 표시`, "revision-results-title"),
+      revisions.length ? list : emptyState("공개된 정정이 없습니다.", "편집 승인 후 공개된 정정만 이 목록에 나타납니다.")
+    ]);
+    if (revisions.length) {
+      addLoadMore(results, payload.pagination, async (page) => {
+        const more = await request("/revisions", { params: { ...params, page } });
+        (Array.isArray(more.data) ? more.data : []).filter(isPublicRevision).forEach((item) => list.append(revisionRow(item)));
+        return more.pagination;
+      });
+    }
+    app.replaceChildren(
+      pageHeader("REVISIONS / 정정 이력", "공개 정정 로그", "내부 승인·검수 기록은 제외하고, 공개된 사실 기록의 변경만 시간순으로 표시합니다."),
+      form,
+      results
+    );
+  }
+
   async function renderEvent(eventId, signal) {
     if (!validEntityId(eventId)) throw new ApiError("Invalid event ID", "invalid_event_id", 400);
     const payload = await request(`/events/${encodeURIComponent(eventId)}`, { signal });
     const data = payload.data || {};
     const event = data.event || {};
+    if (!isPublicEvent(event)) throw new ApiError("Signal events are not public", "event_not_found", 404);
     const actors = Array.isArray(data.actors) ? data.actors : [];
     const claims = Array.isArray(data.claims) ? data.claims : [];
-    const documents = Array.isArray(data.documents) ? data.documents : [];
+    const documents = (Array.isArray(data.documents) ? data.documents : []).filter(isPublicDocument);
     const entries = Array.isArray(data.timeline) ? data.timeline : [];
-    const revisions = Array.isArray(data.revisions) ? data.revisions : [];
+    const revisions = (Array.isArray(data.revisions) ? data.revisions : []).filter(isPublicRevision);
 
     const actorList = element("ul", { className: "compact-list" }, actors.map((actor) => element("li", { className: "compact-item" }, [
-      sourceNode("strong", actor.display_name, actor.original_language),
+      actor.actor_id
+        ? routeLink(actor.display_name || actor.actor_id, `#/actors/${encodeURIComponent(actor.actor_id)}`, { lang: actor.original_language })
+        : sourceNode("strong", actor.display_name, actor.original_language),
       element("p", { text: `${label("actorType", actor.actor_type)} · ${actor.actor_role || "participant"}` }),
       actor.display_name_en ? element("p", { text: actor.display_name_en, lang: "en" }) : null
     ].filter(Boolean))));
@@ -674,6 +1069,7 @@
     const payload = await request(`/campaigns/${encodeURIComponent(campaignId)}`, { signal });
     const data = payload.data || {};
     const campaign = data.campaign || {};
+    if (!isPublicCampaign(campaign)) throw new ApiError("Signal campaigns are not public", "campaign_not_found", 404);
     const entries = Array.isArray(data.timeline) ? data.timeline : [];
     const votes = Array.isArray(data.votes) ? data.votes : [];
     const commitments = Array.isArray(data.commitments) ? data.commitments : [];
@@ -711,7 +1107,7 @@
           element("div", { className: "badge-row" }, [badge(campaign.stage, "campaignStage"), campaign.outcome ? badge(campaign.outcome, "outcome") : null].filter(Boolean)),
           facts([
             { label: "대상 / Company", node: element("dd", {}, [routeLink(campaign.company_name || campaign.company_id, `#/companies/${encodeURIComponent(campaign.company_id || "")}`)]) },
-            { label: "제안 주체 / Lead", value: campaign.lead_actor_name },
+            campaign.lead_actor_id ? { label: "제안 주체 / Lead", node: element("dd", {}, [routeLink(campaign.lead_actor_name || campaign.lead_actor_id, `#/actors/${encodeURIComponent(campaign.lead_actor_id)}`)]) } : { label: "제안 주체 / Lead", value: campaign.lead_actor_name },
             { label: "시작 / Started", value: formatDate(campaign.started_at, false) },
             { label: "종료 / Ended", value: campaign.ended_at ? formatDate(campaign.ended_at, false) : "진행 중 / Active" },
             { label: "캠페인 ID", value: campaign.campaign_id || campaignId }
@@ -721,11 +1117,61 @@
     );
   }
 
+  const DOCUMENT_BODY_CHUNK_BYTES = 65_536;
+
+  function documentBodyPage(documentItem, requestedOffset) {
+    const body = String(documentItem.body_text || documentItem.body_excerpt || "");
+    const page = documentItem.body_page && typeof documentItem.body_page === "object" ? documentItem.body_page : {};
+    const truncated = Boolean(documentItem.body_truncated || page.has_more);
+    let nextOffset = Number(documentItem.body_next_offset ?? page.next_offset);
+    if (!Number.isFinite(nextOffset) || nextOffset <= requestedOffset) {
+      const returnedBytes = Number(documentItem.body_bytes_returned ?? page.returned_bytes);
+      const measuredBytes = typeof TextEncoder === "function" ? new TextEncoder().encode(body).byteLength : 0;
+      const increment = Number.isFinite(returnedBytes) && returnedBytes > 0 ? returnedBytes : measuredBytes;
+      nextOffset = truncated && increment > 0 ? requestedOffset + increment : 0;
+    }
+    return { body, truncated, nextOffset };
+  }
+
   async function renderDocument(documentId, signal) {
     if (!validEntityId(documentId)) throw new ApiError("Invalid document ID", "invalid_document_id", 400);
-    const payload = await request(`/documents/${encodeURIComponent(documentId)}`, { params: { include: "body" }, signal });
+    const payload = await request(`/documents/${encodeURIComponent(documentId)}`, { params: { include: "body", body_offset: 0, body_limit_bytes: DOCUMENT_BODY_CHUNK_BYTES }, signal });
     const documentItem = payload.data || {};
-    const body = documentItem.body_text || documentItem.body_excerpt || "본문이 공개되지 않았습니다. / Body not available.";
+    if (!isPublicDocument(documentItem)) throw new ApiError("Document is not public", "document_not_found", 404);
+    const firstPage = documentBodyPage(documentItem, 0);
+    const bodyNode = sourceNode("div", firstPage.body || "본문이 공개되지 않았습니다. / Body not available.", documentItem.original_language, "long-text");
+    const bodyStatus = element("p", {
+      text: firstPage.truncated ? "본문 일부를 표시하고 있습니다. / Body truncated; more is available." : "",
+      className: "body-page-status",
+      attrs: { role: "status", "aria-live": "polite" }
+    });
+    const bodySection = element("section", { attrs: { "aria-labelledby": "document-body" } }, [
+      element("h2", { text: "원문 / Source text", attrs: { id: "document-body" } }),
+      bodyNode,
+      bodyStatus
+    ]);
+    if (firstPage.truncated && firstPage.nextOffset > 0) {
+      let nextOffset = firstPage.nextOffset;
+      const button = element("button", { text: "다음 본문 불러오기 / Load next body page", attrs: { type: "button" } });
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        const requestedOffset = nextOffset;
+        try {
+          const more = await request(`/documents/${encodeURIComponent(documentId)}`, { params: { include: "body", body_offset: requestedOffset, body_limit_bytes: DOCUMENT_BODY_CHUNK_BYTES } });
+          const nextDocument = more.data || {};
+          const nextPage = documentBodyPage(nextDocument, requestedOffset);
+          if (nextPage.body) bodyNode.append(document.createTextNode(nextPage.body));
+          nextOffset = nextPage.nextOffset;
+          bodyStatus.textContent = nextPage.truncated ? "본문 일부를 표시하고 있습니다. / Body truncated; more is available." : "본문 전체를 불러왔습니다. / Complete body loaded.";
+          if (!nextPage.truncated || !nextOffset) button.remove();
+        } catch (error) {
+          bodyStatus.textContent = errorMessage(error && error.code);
+        } finally {
+          if (button.isConnected) button.disabled = false;
+        }
+      });
+      bodySection.append(element("div", { className: "load-more" }, [button]));
+    }
     app.replaceChildren(
       pageHeader(
         label("sourceClass", documentItem.source_class),
@@ -738,10 +1184,7 @@
         documentItem.original_language
       ),
       element("div", { className: "detail-grid" }, [
-        element("section", { attrs: { "aria-labelledby": "document-body" } }, [
-          element("h2", { text: "원문 / Source text", attrs: { id: "document-body" } }),
-          sourceNode("div", body, documentItem.original_language, "long-text")
-        ]),
+        bodySection,
         element("aside", { className: "detail-sidebar" }, [
           element("div", { className: "badge-row" }, [badge(documentItem.verification_status, "verification")]),
           facts([
@@ -749,6 +1192,7 @@
             { label: "외부 ID / External ID", value: documentItem.external_id },
             { label: "버전 / Version", value: documentItem.version_no },
             { label: "언어 / Language", value: documentItem.original_language },
+            { label: "본문 일부 / Truncated", value: firstPage.truncated ? "예 / Yes" : "아니오 / No" },
             { label: "수집 / Retrieved", value: formatDate(documentItem.retrieved_at, true) }
           ])
         ])
@@ -785,7 +1229,7 @@
     const from = /^\d{4}-\d{2}-\d{2}$/.test(query.get("from") || "") ? query.get("from") : isoDate(now);
     const to = /^\d{4}-\d{2}-\d{2}$/.test(query.get("to") || "") ? query.get("to") : isoDate(future);
     const payload = await request("/calendar", { params: { from, to, page: 1, limit: 100 }, signal });
-    const items = Array.isArray(payload.data) ? payload.data : [];
+    const items = (Array.isArray(payload.data) ? payload.data : []).filter((item) => item.verification_status !== "signal");
     const fromInput = element("input", { attrs: { id: "calendar-from", type: "date", name: "from", value: from, required: "required" } });
     const toInput = element("input", { attrs: { id: "calendar-to", type: "date", name: "to", value: to, required: "required" } });
     const form = element("form", { className: "field-grid" }, [
@@ -816,6 +1260,7 @@
 
   function resultRoute(item) {
     if (item.kind === "company") return `#/companies/${encodeURIComponent(item.entity_id || "")}`;
+    if (item.kind === "actor") return `#/actors/${encodeURIComponent(item.entity_id || "")}`;
     if (item.kind === "event") return `#/events/${encodeURIComponent(item.entity_id || "")}`;
     if (item.kind === "campaign") return `#/campaigns/${encodeURIComponent(item.entity_id || "")}`;
     if (item.kind === "document") return `#/documents/${encodeURIComponent(item.entity_id || "")}`;
@@ -825,8 +1270,8 @@
   function searchResult(item) {
     const route = resultRoute(item);
     const title = route
-      ? routeLink(item.title || item.entity_id || "결과", route)
-      : element("span", { text: item.title || item.entity_id || "결과" });
+      ? routeLink(item.title || item.entity_id || "결과", route, { lang: item.original_language })
+      : sourceNode("span", item.title || item.entity_id || "결과", item.original_language);
     const subtitle = item.kind === "actor" ? label("actorType", item.subtitle)
       : item.kind === "event" ? label("eventType", item.subtitle)
         : item.kind === "campaign" ? label("campaignStage", item.subtitle)
@@ -855,7 +1300,7 @@
     let resultPayload = null;
     if (q.length >= 2) {
       resultPayload = await request("/search", { params: { q, page: 1, limit: 50 }, signal });
-      results = Array.isArray(resultPayload.data) ? resultPayload.data : [];
+      results = (Array.isArray(resultPayload.data) ? resultPayload.data : []).filter((item) => item.kind !== "event" || item.verification_status !== "signal");
     }
     const resultList = element("div", { className: "data-list" }, results.map(searchResult));
     const resultSection = q.length >= 2 ? element("section", { className: "section-block" }, [
@@ -865,7 +1310,7 @@
     if (resultPayload && results.length) {
       addLoadMore(resultSection, resultPayload.pagination, async (page) => {
         const more = await request("/search", { params: { q, page, limit: 50 } });
-        (Array.isArray(more.data) ? more.data : []).forEach((item) => resultList.append(searchResult(item)));
+        (Array.isArray(more.data) ? more.data : []).filter((item) => item.kind !== "event" || item.verification_status !== "signal").forEach((item) => resultList.append(searchResult(item)));
         return more.pagination;
       });
     }
@@ -900,15 +1345,18 @@
   function renderFeedback(query) {
     const entityType = String(query.get("entity_type") || "");
     const entityId = String(query.get("entity_id") || "");
+    const requestedFeedbackType = String(query.get("feedback_type") || "");
+    const feedbackType = ["correction", "right_of_reply", "source_rights", "general"].includes(requestedFeedbackType) ? requestedFeedbackType : "correction";
     const typeField = selectField("접수 유형 / Request type", "feedback_type", [
       ["correction", "정정 요청 / Correction"],
       ["right_of_reply", "당사자 답변 / Right of reply"],
       ["source_rights", "소스 권한 / Source rights"],
       ["general", "일반 문의 / General"]
-    ], "correction");
+    ], feedbackType);
     const entityField = selectField("대상 유형 / Entity type", "entity_type", [
       ["", "선택 안 함 / None"],
       ["company", "기업 / Company"],
+      ["actor", "당사자 / Actor"],
       ["event", "사건 / Event"],
       ["campaign", "캠페인 / Campaign"],
       ["document", "문서 / Document"]
@@ -935,6 +1383,15 @@
       element("p", { text: "제출 내용은 자동 공개되지 않으며 편집 검수 전까지 비공개로 보관됩니다. / Submissions stay private pending editorial review.", className: "form-note" }),
       element("div", { className: "form-actions" }, [submit, status])
     ]);
+    const applyReplyRequirements = () => {
+      const required = form.elements.feedback_type.value === "right_of_reply";
+      nameInput.required = required;
+      contactInput.required = required;
+      nameInput.setAttribute("aria-required", String(required));
+      contactInput.setAttribute("aria-required", String(required));
+    };
+    form.elements.feedback_type.addEventListener("change", applyReplyRequirements);
+    applyReplyRequirements();
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (!form.reportValidity()) return;
@@ -962,6 +1419,7 @@
       try {
         const payload = await request("/feedback", { method: "POST", body });
         form.reset();
+        applyReplyRequirements();
         status.textContent = `접수되었습니다. 검수 상태: ${payload.status || "pending"} / Submitted for private review.`;
       } catch (error) {
         status.textContent = feedbackError(error.code);
@@ -987,6 +1445,7 @@
   function errorMessage(code) {
     const known = {
       company_not_found: "기업 기록을 찾을 수 없습니다. / Company not found.",
+      actor_not_found: "당사자 기록을 찾을 수 없습니다. / Actor not found.",
       event_not_found: "사건 기록을 찾을 수 없습니다. / Event not found.",
       campaign_not_found: "캠페인 기록을 찾을 수 없습니다. / Campaign not found.",
       document_not_found: "공개 가능한 문서를 찾을 수 없습니다. / Public document not found.",
@@ -1025,7 +1484,7 @@
 
   function activeNav(route) {
     const first = route.segments[0] || "today";
-    const active = first === "documents" || first === "events" || first === "campaigns" ? "today" : first;
+    const active = first === "documents" || first === "campaigns" || first === "actors" ? "events" : first;
     document.querySelectorAll("[data-nav]").forEach((link) => {
       if (link.dataset.nav === active) link.setAttribute("aria-current", "page");
       else link.removeAttribute("aria-current");
@@ -1071,10 +1530,13 @@
       else if (first === "companies" && second) await renderCompany(second, signal);
       else if (first === "companies") await renderCompanies(route.query, signal);
       else if (first === "events" && second) await renderEvent(second, signal);
+      else if (first === "events") await renderEvents(route.query, signal);
+      else if (first === "actors" && second) await renderActor(second, signal);
       else if (first === "campaigns" && second) await renderCampaign(second, signal);
       else if (first === "documents" && second) await renderDocument(second, signal);
       else if (first === "calendar") await renderCalendar(route.query, signal);
       else if (first === "search") await renderSearch(route.query, signal);
+      else if (first === "revisions") await renderRevisions(route.query, signal);
       else if (first === "feedback") renderFeedback(route.query);
       else renderNotFound();
       finishNavigation(route);

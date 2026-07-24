@@ -1,0 +1,86 @@
+name: Governance protected human evidence artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type UPLOAD_VALIDATED_HUMAN_EVIDENCE
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: governance-protected-human-evidence-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment:
+      name: governance-release
+    steps:
+      - name: Checkout approved revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Enforce protected default-branch upload
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]] || {
+            echo "::error::Human evidence must be uploaded against the default branch."
+            exit 1
+          }
+          [[ "$CONFIRMATION" == "UPLOAD_VALIDATED_HUMAN_EVIDENCE" ]] || {
+            echo "::error::The explicit upload confirmation did not match."
+            exit 1
+          }
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Materialize and validate one-use protected inputs
+        env:
+          GOVERNANCE_BENCHMARK_EVIDENCE_B64: ${{ secrets.GOVERNANCE_BENCHMARK_EVIDENCE_B64 }}
+          GOVERNANCE_USABILITY_EVIDENCE_B64: ${{ secrets.GOVERNANCE_USABILITY_EVIDENCE_B64 }}
+          GOVERNANCE_RELEASE_APPROVAL_B64: ${{ secrets.GOVERNANCE_RELEASE_APPROVAL_B64 }}
+        run: >-
+          python -m curator.release_evidence_inputs materialize-human
+          --output-dir human-evidence
+          --expected-revision "$GITHUB_SHA"
+
+      - name: Upload exact protected human artifact
+        id: human_artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: governance-human-evidence
+          path: |
+            human-evidence/benchmark.json
+            human-evidence/usability.json
+            human-evidence/release-approval.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 9
+
+      - name: Record immutable artifact identity and cleanup reminder
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ steps.human_artifact.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.human_artifact.outputs.digest }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Protected human evidence"
+            echo "- revision: \`$GITHUB_SHA\`"
+            echo "- artifact id: \`$ARTIFACT_ID\`"
+            echo "- artifact digest: \`$ARTIFACT_DIGEST\`"
+            echo "- operator action: delete all three temporary governance-release environment secrets now"
+          } >> "$GITHUB_STEP_SUMMARY"

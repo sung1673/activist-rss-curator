@@ -7,6 +7,13 @@ from datetime import date, datetime, timezone
 from enum import StrEnum
 from typing import Any, Iterable, cast
 
+from .event_identity import (
+    EventIdentity,
+    EventIdentityStatus,
+    build_event_identity,
+    compare_event_identities,
+)
+
 
 class SourceCategory(StrEnum):
     OFFICIAL_DISCLOSURE = "official_disclosure"
@@ -250,6 +257,44 @@ class GovernanceEvent(GovernanceRecord):
     target: str = ""
     document_ids: tuple[str, ...] = ()
     review_required: bool = False
+    identity_action: str = ""
+    identity_target: str = ""
+    identity_actor_id: str | None = None
+    identity_effective_at: str | None = None
+    identity_deadline_at: str | None = None
+    identity_status: EventIdentityStatus = EventIdentityStatus.NEEDS_REVIEW
+    comparison_key: str | None = None
+    identity_review_reasons: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        identity = build_event_identity(
+            company_id=self.company_id,
+            event_type=self.event_type,
+            action=self.identity_action or self.action,
+            target=self.identity_target or self.target,
+            actor_id=self.identity_actor_id or self.actor_id,
+            effective_at=self.identity_effective_at or self.occurred_at,
+            deadline_at=self.identity_deadline_at or self.deadline_at,
+        )
+        object.__setattr__(self, "identity_action", identity.action)
+        object.__setattr__(self, "identity_target", identity.target)
+        object.__setattr__(self, "identity_actor_id", identity.actor_id or None)
+        object.__setattr__(self, "identity_effective_at", identity.effective_at or None)
+        object.__setattr__(self, "identity_deadline_at", identity.deadline_at or None)
+        object.__setattr__(self, "identity_status", identity.status)
+        object.__setattr__(self, "comparison_key", identity.comparison_key)
+        object.__setattr__(self, "identity_review_reasons", identity.review_reasons)
+
+    def identity(self) -> EventIdentity:
+        return build_event_identity(
+            company_id=self.company_id,
+            event_type=self.event_type,
+            action=self.identity_action,
+            target=self.identity_target,
+            actor_id=self.identity_actor_id,
+            effective_at=self.identity_effective_at,
+            deadline_at=self.identity_deadline_at,
+        )
 
 
 @dataclass(frozen=True)
@@ -355,15 +400,7 @@ def event_fingerprint(
 
 
 def same_specific_event(left: GovernanceEvent, right: GovernanceEvent) -> bool:
-    if left.company_id != right.company_id or left.event_type != right.event_type:
-        return False
-    if (left.actor_id or "") != (right.actor_id or ""):
-        return False
-    if left.action.casefold().strip() != right.action.casefold().strip():
-        return False
-    if left.target.casefold().strip() != right.target.casefold().strip():
-        return False
-    return (left.deadline_at or "")[:10] == (right.deadline_at or "")[:10]
+    return compare_event_identities(left.identity(), right.identity()).same_event
 
 
 def requires_editorial_review(event: GovernanceEvent) -> bool:
