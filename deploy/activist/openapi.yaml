@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: BSIDE Governance Intelligence API
-  version: 1.11.0
+  version: 1.11.1
   description: >-
     Public, read-only governance event records and role-gated operations APIs.
     Document title and body fields preserve their original language; the API
@@ -10,6 +10,12 @@ info:
     while it is preview. Health and this specification remain public; the API
     root descriptor is a public data route and is therefore closed with 503.
 x-changelog:
+  - version: 1.11.1
+    date: '2026-07-24'
+    changes:
+      - Added rights-lineage-preserving resolved-link export so independently decoded Google News discoveries can re-enter media curation.
+      - Legacy web publication now rejects an empty daily report before writing files, syncing MySQL, or replacing the last good Pages artifact.
+      - Link rights lineage is monotonic across URL collisions, and the resolver now has 800-links/hour scheduled capacity.
   - version: 1.11.0
     date: '2026-07-24'
     changes:
@@ -411,7 +417,7 @@ paths:
       security: [{bearerAuth: []}]
       summary: Hydrate a fresh runner from MySQL source-of-truth state
       parameters:
-        - {name: resource, in: query, required: true, schema: {type: string, enum: [runs, articles, stories, reports, telegram_channels, telegram_messages, telegram_article_matches, telegram_issue_signals, delivery_outbox, companies, source_rights, collection_runs, governance_events, documents]}}
+        - {name: resource, in: query, required: true, schema: {type: string, enum: [runs, articles, stories, reports, telegram_channels, telegram_messages, telegram_article_matches, telegram_issue_signals, delivery_outbox, companies, source_rights, collection_runs, governance_events, documents, link_discoveries]}}
         - {name: after, in: query, schema: {type: string, maxLength: 512}}
         - {name: since, in: query, schema: {type: string, format: date-time}, description: Optional incremental lower time bound}
         - $ref: '#/components/parameters/Limit'

@@ -5,6 +5,8 @@ import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from conftest import make_article
 from curator import daily_report
 from curator.daily_report import build_daily_report, build_report_telegram_message, mobile_article_url, write_report_files
@@ -503,6 +505,44 @@ def test_daily_report_non_write_only_stays_web_only_without_transport(tmp_path, 
     assert summary["daily_report_written"] == 1
     assert summary["daily_report_sent"] == 0
     assert summary["daily_report_failed"] == 0
+
+
+def test_required_nonempty_daily_report_preserves_last_good_page_and_skips_sync(
+    tmp_path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    now = datetime(2026, 7, 24, 14, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    (tmp_path / "data").mkdir()
+    feed_dir = tmp_path / "public" / "feed"
+    feed_dir.mkdir(parents=True)
+    latest = feed_dir / "latest.html"
+    latest.write_text("last-good-page", encoding="utf-8")
+    (tmp_path / "config.yaml").write_text(
+        "report:\n  image_enrich_limit: 0\n", encoding="utf-8"
+    )
+    (tmp_path / "data" / "state.json").write_text(
+        json.dumps(
+            {
+                "published_clusters": [],
+                "pending_clusters": [],
+                "articles": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CURATOR_REQUIRE_NONEMPTY_DAILY_REPORT", "1")
+    monkeypatch.setattr(daily_report, "now_in_timezone", lambda _timezone: now)
+    monkeypatch.setattr(
+        daily_report,
+        "sync_report_to_remote_api",
+        lambda _report: (_ for _ in ()).throw(
+            AssertionError("empty report must not sync")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="daily_report_empty_publication"):
+        daily_report.send_daily_report(tmp_path)
+
+    assert latest.read_text(encoding="utf-8") == "last-good-page"
 
 
 def test_daily_report_enqueue_is_permanently_disabled() -> None:

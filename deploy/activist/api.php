@@ -700,6 +700,13 @@ function ensure_governance_schema(PDO $pdo, array $config): void {
         discovered_url_hash CHAR(64) NOT NULL,
         source VARCHAR(191) NULL,
         title VARCHAR(700) NULL,
+        summary TEXT NULL,
+        feed_name VARCHAR(191) NULL,
+        feed_category VARCHAR(64) NULL,
+        source_kind VARCHAR(40) NULL,
+        source_right_id VARCHAR(64) NULL,
+        lineage_version SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+        published_at DATETIME NULL,
         status VARCHAR(24) NOT NULL DEFAULT \'discovered\',
         resolved_url TEXT NULL,
         attempt_count INT NOT NULL DEFAULT 0,
@@ -719,6 +726,15 @@ function ensure_governance_schema(PDO $pdo, array $config): void {
         INDEX idx_link_discovery_lease (status, lease_expires_at),
         INDEX idx_link_discovery_resolved (resolved_at)
     ) ENGINE=InnoDB' . $charset);
+    ensure_column($pdo, $config, 'link_discoveries', 'summary', 'TEXT NULL');
+    ensure_column($pdo, $config, 'link_discoveries', 'feed_name', 'VARCHAR(191) NULL');
+    ensure_column($pdo, $config, 'link_discoveries', 'feed_category', 'VARCHAR(64) NULL');
+    ensure_column($pdo, $config, 'link_discoveries', 'source_kind', 'VARCHAR(40) NULL');
+    ensure_column($pdo, $config, 'link_discoveries', 'source_right_id', 'VARCHAR(64) NULL');
+    ensure_column($pdo, $config, 'link_discoveries', 'lineage_version', 'SMALLINT UNSIGNED NOT NULL DEFAULT 0');
+    ensure_column($pdo, $config, 'link_discoveries', 'published_at', 'DATETIME NULL');
+    ensure_index($pdo, $config, 'link_discoveries', 'idx_link_discovery_lineage', 'lineage_version, status, resolved_at');
+    ensure_index($pdo, $config, 'link_discoveries', 'idx_link_discovery_claim', 'lineage_version, status, discovered_at');
     ensure_column($pdo, $config, 'delivery_outbox', 'lease_token', 'VARCHAR(64) NULL');
     ensure_column($pdo, $config, 'delivery_outbox', 'locked_by', 'VARCHAR(96) NULL');
     ensure_column($pdo, $config, 'delivery_outbox', 'lease_expires_at', 'DATETIME NULL');

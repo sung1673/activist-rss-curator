@@ -1075,6 +1075,7 @@ def test_runtime_state_can_rehydrate_operational_relations_incrementally():
         "collection_runs",
         "governance_events",
         "documents",
+        "link_discoveries",
     ):
         assert f"'{resource}' => array(" in V1
     assert "invalid_since" in V1
@@ -1092,6 +1093,17 @@ def test_link_discovery_state_machine_is_separate_from_articles():
         assert status in V1
     enqueue_section = V1[V1.index("function enqueue_link_discoveries") :]
     assert "table_name($config, 'articles')" not in enqueue_section
+    assert "lineage_version" in enqueue_section
+    assert "source_right_id" in enqueue_section
+    assert "VALUES(lineage_version)>=lineage_version" in enqueue_section
+    assert "COALESCE(VALUES(title),title)" in enqueue_section
+    assert (
+        "CASE WHEN source_right_id IS NOT NULL THEN source_right_id "
+        "ELSE VALUES(source_right_id) END"
+    ) in enqueue_section
+    assert (
+        "ORDER BY lineage_version DESC, discovered_at DESC, discovery_id ASC"
+    ) in enqueue_section
 
 
 def test_legacy_read_actions_remain_available():
@@ -1754,8 +1766,8 @@ def test_official_run_ledger_is_slot_attributed_and_python_digest_compatible():
 
 def test_dart_review_corpus_is_private_exact_bounded_and_digest_compatible():
     spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
-    assert spec["info"]["version"] == "1.11.0"
-    assert spec["x-changelog"][0]["version"] == "1.11.0"
+    assert spec["info"]["version"] == "1.11.1"
+    assert spec["x-changelog"][0]["version"] == "1.11.1"
     route = spec["paths"]["/ops/dart-review-corpus"]["get"]
     assert route["security"] == [{"bearerAuth": []}]
     response = spec["components"]["schemas"]["DartReviewCorpusPage"]

@@ -656,6 +656,32 @@ def daily_report_write_only() -> bool:
     return value.casefold() in {"1", "true", "yes", "on"}
 
 
+def daily_report_requires_nonempty() -> bool:
+    value = os.environ.get("CURATOR_REQUIRE_NONEMPTY_DAILY_REPORT", "")
+    return value.casefold() in {"1", "true", "yes", "on"}
+
+
+def validate_daily_report_publication(report: dict[str, object]) -> None:
+    """Prevent a successful collection outage from replacing the last good page."""
+
+    if not daily_report_requires_nonempty():
+        return
+    stories = report.get("stories")
+    story_rows = (
+        [story for story in stories if isinstance(story, dict)]
+        if isinstance(stories, list)
+        else []
+    )
+    stats = report.get("stats")
+    stats_map = stats if isinstance(stats, dict) else {}
+    article_count = int(stats_map.get("articles") or 0)
+    if not story_rows or article_count <= 0:
+        raise RuntimeError(
+            "daily_report_empty_publication: refusing to write, sync, or deploy "
+            "a report without a public story and article"
+        )
+
+
 def build_report_stories(
     clusters: list[dict[str, object]],
     duplicate_records: list[dict[str, object]],
@@ -6123,6 +6149,7 @@ def deliver_daily_report_direct(report: dict[str, object], config: dict[str, obj
 def send_daily_report(root: Path | None = None) -> dict[str, int]:
     project_root = root or PROJECT_ROOT
     report = build_daily_report(project_root)
+    validate_daily_report_publication(report)
     write_report_files(report, project_root)
     remote_summary = sync_report_to_remote_api(report)
     if daily_report_write_only():
