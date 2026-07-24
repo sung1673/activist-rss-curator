@@ -334,8 +334,12 @@ def test_media_resolver_and_publisher_are_independent() -> None:
         step["name"] == "Verify immutable workflow revision"
         for step in media_job["steps"]
     )
-    assert 'cron: "22 * * * *"' in resolver
+    assert 'cron: "7,22,37,52 * * * *"' in resolver
+    assert "inputs.limit || 200" in resolver
+    assert "--max-runtime 1200" in resolver
     assert "curator.resolve_links" in resolver
+    assert "vars.PAGES_OWNER == 'legacy'" in resolver
+    assert "vars.ENABLE_LEGACY_PIPELINE == 'true'" in resolver
     assert "claim_link_discoveries" not in resolver  # encapsulated by the resolver CLI
     assert "curator.main" not in resolver
     assert "workflow_run:" not in publisher
@@ -527,6 +531,7 @@ def test_daily_generation_uses_requested_kst_boundary_and_has_no_delivery_job() 
     assert 'cron: "45 20 * * *"' in workflow
     assert 'cron: "5 21 * * *"' not in workflow
     assert 'CURATOR_DAILY_REPORT_WRITE_ONLY: "1"' in workflow
+    assert "CURATOR_REQUIRE_NONEMPTY_DAILY_REPORT" not in workflow
     assert "daily_report_queued=1" not in workflow
     assert "CURATOR_DELIVERY_MODE: outbox-enqueue" not in workflow
     assert "TELEGRAM_BOT_TOKEN" not in workflow

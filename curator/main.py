@@ -24,7 +24,11 @@ from .fetch import (
     google_news_quality_summary,
     resolve_google_news_originals_from_candidates,
 )
-from .link_discovery import enqueue_link_discoveries, partition_link_discoveries
+from .link_discovery import (
+    enqueue_link_discoveries,
+    partition_link_discoveries,
+    resolved_link_articles,
+)
 from .priority import (
     annotate_state_priorities,
     load_priority_overrides,
@@ -334,11 +338,15 @@ def run(root: Path | None = None) -> dict[str, int]:
     fetched_count = len(fetched_articles)
     fetched_articles, discoveries = partition_link_discoveries(fetched_articles, now)
     discovery_summary = enqueue_link_discoveries(discoveries, state, config)
+    resolved_articles = resolved_link_articles(config, now)
+    fetched_articles.extend(resolved_articles)
+    fetched_count += len(resolved_articles)
     stage_metrics["stage_media_fetch_ms"] = log_stage(
         "fetch_and_resolve_media",
         stage_started,
         fetched=fetched_count,
         discoveries=len(discoveries),
+        resolved_candidates=len(resolved_articles),
     )
     fetched_articles, source_rights_blocked_records = partition_authorized_records(
         fetched_articles,
@@ -439,6 +447,7 @@ def run(root: Path | None = None) -> dict[str, int]:
     base_run_summary = {
         "fetched": fetched_count,
         "accepted": len(unique_articles),
+        "public_candidates": len(publishable_articles),
         "duplicates": len(duplicates),
         "rejected": rejected_count,
         "published_now": len(published_now),
@@ -448,6 +457,7 @@ def run(root: Path | None = None) -> dict[str, int]:
         "google_news_blocked": google_news_blocked,
         "source_rights_blocked": len(source_rights_blocked_records),
         "source_rights_public_blocked": len(source_rights_public_blocked_records),
+        "resolved_link_candidates": len(resolved_articles),
         "source_rights_blocked_channels": source_rights_blocked_channels,
         **google_news_summary,
         **discovery_summary,

@@ -7592,6 +7592,7 @@ function v1_runtime_resource(array $config, string $resource): ?array {
         'collection_runs' => array('run_id', 'SELECT run_id, pipeline, source_key, status, started_at, finished_at, fetched_count, resolved_count, accepted_count, error_count, lag_seconds_p95, metrics_json, created_at, updated_at FROM ' . table_name($config, 'collection_runs'), 'updated_at'),
         'governance_events' => array('event_id', 'SELECT event_id, company_id, event_type, title, original_language, summary, occurred_at, deadline_at, importance, verification_status, review_status, publication_status, collection_key, updated_at FROM ' . table_name($config, 'governance_events'), 'updated_at'),
         'documents' => array('document_id', 'SELECT document_id, company_id, source_right_id, source_class, external_id, document_type, original_language, title, SHA2(body_text,256) AS body_sha256, original_url, content_hash, collection_key, correction_of_document_id, version_no, published_at, retrieved_at, verification_status, publication_status, updated_at FROM ' . table_name($config, 'documents'), 'updated_at'),
+        'link_discoveries' => array('discovery_id', 'SELECT discovery_id, discovered_url, resolved_url, source, title, summary, feed_name, feed_category, source_kind, source_right_id, lineage_version, published_at, status, attempt_count, discovered_at, resolved_at, expired_at, last_error, updated_at FROM ' . table_name($config, 'link_discoveries'), 'updated_at'),
     );
     return isset($resources[$resource]) ? $resources[$resource] : null;
 }
@@ -7730,9 +7731,20 @@ function enqueue_link_discoveries(PDO $pdo, array $config, array $payload): void
     $discoveries = isset($payload['discoveries']) && is_array($payload['discoveries']) ? $payload['discoveries'] : array();
     if (count($discoveries) > 2000) { respond(413, array('ok' => false, 'error' => 'too_many_discoveries')); }
     $now = gmdate('Y-m-d H:i:s');
-    $stmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'link_discoveries') . ' (discovery_id, discovered_url, discovered_url_hash, source, title, status, '
-        . 'attempt_count, discovered_at, created_at, updated_at) VALUES (?,?,?,?,?,\'discovered\',0,?,?,?) '
-        . 'ON DUPLICATE KEY UPDATE source=COALESCE(VALUES(source),source), title=COALESCE(VALUES(title),title), updated_at=VALUES(updated_at)');
+    $stmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'link_discoveries') . ' (discovery_id, discovered_url, discovered_url_hash, source, title, '
+        . 'summary, feed_name, feed_category, source_kind, source_right_id, lineage_version, published_at, status, attempt_count, discovered_at, created_at, updated_at) '
+        . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,\'discovered\',0,?,?,?) ON DUPLICATE KEY UPDATE '
+        . 'source=IF(VALUES(lineage_version)>=lineage_version,COALESCE(VALUES(source),source),source), '
+        . 'title=IF(VALUES(lineage_version)>=lineage_version,COALESCE(VALUES(title),title),title), '
+        . 'summary=IF(VALUES(lineage_version)>=lineage_version,COALESCE(VALUES(summary),summary),summary), '
+        . 'feed_name=IF(VALUES(lineage_version)>=lineage_version,COALESCE(VALUES(feed_name),feed_name),feed_name), '
+        . 'feed_category=IF(VALUES(lineage_version)>=lineage_version,COALESCE(VALUES(feed_category),feed_category),feed_category), '
+        . 'source_kind=CASE WHEN source_right_id IS NOT NULL THEN source_kind '
+        . 'WHEN VALUES(source_right_id) IS NOT NULL THEN COALESCE(VALUES(source_kind),source_kind) '
+        . 'WHEN VALUES(lineage_version)>=lineage_version THEN COALESCE(VALUES(source_kind),source_kind) ELSE source_kind END, '
+        . 'source_right_id=CASE WHEN source_right_id IS NOT NULL THEN source_right_id ELSE VALUES(source_right_id) END, '
+        . 'published_at=IF(VALUES(lineage_version)>=lineage_version,COALESCE(VALUES(published_at),published_at),published_at), '
+        . 'lineage_version=GREATEST(lineage_version,VALUES(lineage_version)), updated_at=VALUES(updated_at)');
     $accepted = 0; $rejected = 0;
     foreach ($discoveries as $discovery) {
         if (!is_array($discovery)) { $rejected++; continue; }
@@ -7743,10 +7755,23 @@ function enqueue_link_discoveries(PDO $pdo, array $config, array $payload): void
         if ($id === '') { $id = 'link:' . substr($hash, 0, 40); }
         if (!v1_valid_entity_id($id)) { $rejected++; continue; }
         $discoveredAt = mysql_dt(v1_first($discovery, array('discovered_at'), $now)) ?: $now;
+        $publishedAtRaw = trim((string)v1_first($discovery, array('published_at'), ''));
+        $publishedAt = $publishedAtRaw !== '' ? mysql_dt($publishedAtRaw) : null;
+        if ($publishedAtRaw !== '' && $publishedAt === null) { $rejected++; continue; }
+        $sourceRightId = trim((string)v1_first($discovery, array('source_right_id'), ''));
+        if ($sourceRightId !== '' && !v1_valid_entity_id($sourceRightId, 64)) { $rejected++; continue; }
+        $lineageVersion = max(0, min(1, (int)v1_first($discovery, array('lineage_version'), 0)));
         $stmt->execute(array(
             $id, $url, $hash,
             mb_substr((string)v1_first($discovery, array('source'), ''), 0, 191, 'UTF-8') ?: null,
             mb_substr((string)v1_first($discovery, array('title'), ''), 0, 700, 'UTF-8') ?: null,
+            mb_substr((string)v1_first($discovery, array('summary'), ''), 0, 4000, 'UTF-8') ?: null,
+            mb_substr((string)v1_first($discovery, array('feed_name'), ''), 0, 191, 'UTF-8') ?: null,
+            mb_substr((string)v1_first($discovery, array('feed_category'), ''), 0, 64, 'UTF-8') ?: null,
+            mb_substr((string)v1_first($discovery, array('source_kind'), ''), 0, 40, 'UTF-8') ?: null,
+            $sourceRightId !== '' ? $sourceRightId : null,
+            $lineageVersion,
+            $publishedAt,
             $discoveredAt, $now, $now,
         ));
         $accepted++;
@@ -7765,7 +7790,7 @@ function claim_link_discoveries(PDO $pdo, array $config, array $payload): void {
         $sql = 'SELECT discovery_id, discovered_url, source, title, attempt_count, discovered_at FROM ' . table_name($config, 'link_discoveries') . ' WHERE '
             . '((status = \'discovered\' AND (next_attempt_at IS NULL OR next_attempt_at <= UTC_TIMESTAMP())) '
             . 'OR (status = \'resolving\' AND lease_expires_at < UTC_TIMESTAMP())) '
-            . 'ORDER BY discovered_at ASC, discovery_id ASC LIMIT ' . $limit . ' FOR UPDATE';
+            . 'ORDER BY lineage_version DESC, discovered_at DESC, discovery_id ASC LIMIT ' . $limit . ' FOR UPDATE';
         $rows = $pdo->query($sql)->fetchAll();
         if ($rows) {
             $ids = array_map(function ($row) { return (string)$row['discovery_id']; }, $rows);
