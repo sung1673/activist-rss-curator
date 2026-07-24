@@ -29,7 +29,7 @@
 - Telegram outbound는 계속 영구 비활성이고 PHP의 신규 enqueue·claim도 HTTP 410으로 차단한다. 정식 분배 게이트는 `distribution_mode=web_only`의 Pages/API 성공률과 실패 탐지로 판정한다.
 - cutover와 rollback은 원본 artifact ID·digest·파일 inventory를 검증한 전체 legacy 복구 bundle을 사용한다. 성공한 기본 브랜치 workflow가 같은 bundle을 매일 90일 artifact로 carry-forward해 전환 후에도 호환 피드와 전체 rollback 자산이 만료되지 않게 한다.
 
-2026-07-24 기준 이 기능 브랜치의 전체 로컬 Python 회귀 테스트는 1,133개 통과, 3개 건너뜀이고 Ruff·엄격 MyPy·compileall, OpenAPI·workflow·JSON Schema, Node 계약 10개, Playwright 사용자 여정 8개·접근성·모바일 성능 예산, Python과 npm high 취약점 감사를 통과했다. PHP 7.3/MySQL 8의 실제 migration·API 통합 계약은 draft PR의 GitHub Actions에서 최종 검증한다. 이전 운영 기반인 [PR #8](https://github.com/sung1673/activist-rss-curator/pull/8)의 필수 CI [run 29877517421](https://github.com/sung1673/activist-rss-curator/actions/runs/29877517421)과 병합 SHA `1f8c2acda354d006f15f927a3d9ab31d464ca831`의 [main CI run 29877648961](https://github.com/sung1673/activist-rss-curator/actions/runs/29877648961)은 각각 모든 job을 통과했다. 이 결과는 코드·배포 계약 검증이며 아래 장기 운영 게이트를 대체하지 않는다.
+2026-07-24 기준 이 기능 브랜치의 전체 로컬 Python 회귀 테스트는 1,136개 통과, 3개 건너뜀이고 Ruff·엄격 MyPy·compileall, OpenAPI·workflow·JSON Schema, Node 계약 10개, Playwright 사용자 여정 8개·접근성·모바일 성능 예산, Python과 npm high 취약점 감사를 통과했다. PHP 7.3/MySQL 8의 실제 migration·API 통합 계약은 draft PR의 GitHub Actions에서 최종 검증한다. 이전 운영 기반인 [PR #8](https://github.com/sung1673/activist-rss-curator/pull/8)의 필수 CI [run 29877517421](https://github.com/sung1673/activist-rss-curator/actions/runs/29877517421)과 병합 SHA `1f8c2acda354d006f15f927a3d9ab31d464ca831`의 [main CI run 29877648961](https://github.com/sung1673/activist-rss-curator/actions/runs/29877648961)은 각각 모든 job을 통과했다. 이 결과는 코드·배포 계약 검증이며 아래 장기 운영 게이트를 대체하지 않는다.
 
 ## 2026-07-22 운영 반영 현황
 

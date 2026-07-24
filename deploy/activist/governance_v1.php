@@ -268,6 +268,50 @@ function v1_build_event_identity(string $companyId, string $eventType, $action, 
     );
 }
 
+/**
+ * Recover the canonical identity represented by a stored MySQL DATETIME pair.
+ *
+ * DATETIME loses whether midnight originated as a date-only value or as an
+ * explicit UTC timestamp. The stored comparison key disambiguates those two
+ * representations without coercing a real midnight timestamp to date-only.
+ */
+function v1_resolve_stored_event_identity(string $companyId, string $eventType, $action, $target, $actorId,
+    $effectiveAt, $deadlineAt, $comparisonKey): ?array {
+    $storedKey = is_string($comparisonKey) ? $comparisonKey : '';
+    if (preg_match('/^eventcmp:v1:[a-f0-9]{64}$/',$storedKey) !== 1) { return null; }
+    if (!is_string($effectiveAt) || !is_string($deadlineAt)
+        || preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/',$effectiveAt) !== 1
+        || preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/',$deadlineAt) !== 1) {
+        return null;
+    }
+    $storedTuple = array((string)$companyId,(string)$eventType,(string)$action,(string)$target,(string)$actorId,
+        $effectiveAt,$deadlineAt);
+    $candidateSets = array();
+    foreach (array($effectiveAt,$deadlineAt) as $value) {
+        $mysql = (string)$value;
+        $candidates = array($mysql);
+        if (preg_match('/^(\d{4}-\d{2}-\d{2}) 00:00:00$/',$mysql,$parts) === 1) {
+            array_unshift($candidates,$parts[1]);
+        }
+        $candidateSets[] = array_values(array_unique($candidates));
+    }
+    $matches = array();
+    foreach ($candidateSets[0] as $effectiveCandidate) {
+        foreach ($candidateSets[1] as $deadlineCandidate) {
+            $identity = v1_build_event_identity($companyId,$eventType,$action,$target,$actorId,
+                $effectiveCandidate,$deadlineCandidate,true);
+            if ($identity !== null && hash_equals($storedKey,(string)$identity['comparison_key'])) {
+                $normalizedTuple = array((string)$identity['company_id'],(string)$identity['event_type'],
+                    (string)$identity['identity_action'],(string)$identity['identity_target'],
+                    (string)$identity['identity_actor_id'],(string)$identity['identity_effective_at'],
+                    (string)$identity['identity_deadline_at']);
+                if ($normalizedTuple === $storedTuple) { $matches[] = $identity; }
+            }
+        }
+    }
+    return count($matches) === 1 ? $matches[0] : null;
+}
+
 function v1_expected_migration_manifest(): array {
     return array(
         1=>array('001_governance_v1','2f1f03aa62d733339b79b5bca50e1c480b4f706a5823fd3490bd799421e93afd'),
@@ -5698,11 +5742,11 @@ function upsert_official_site_snapshot(PDO $pdo, array $config, array $payload, 
         foreach ($normalizedEvents as $event) {
             $eventExisting->execute(array($event['event_id'])); $existing = $eventExisting->fetch();
             if ($existing) {
-                $storedIdentity = v1_build_event_identity((string)$existing['company_id'],(string)$existing['event_type'],
+                $storedIdentity = v1_resolve_stored_event_identity((string)$existing['company_id'],(string)$existing['event_type'],
                     $existing['identity_action'],$existing['identity_target'],$existing['identity_actor_id'],
-                    $existing['identity_effective_at'],$existing['identity_deadline_at'],true);
+                    $existing['identity_effective_at'],$existing['identity_deadline_at'],$existing['comparison_key']);
                 $sameIdentity = $storedIdentity !== null && (string)$existing['identity_status'] === 'complete'
-                    && (string)$existing['comparison_key'] === $event['comparison_key'];
+                    && hash_equals((string)$existing['comparison_key'],$event['comparison_key']);
                 foreach (array('company_id','event_type','identity_action','identity_target','identity_actor_id',
                     'identity_effective_at','identity_deadline_at','comparison_key') as $field) {
                     if (!$sameIdentity || (string)$storedIdentity[$field] !== (string)$event[$field]) { $sameIdentity = false; break; }
@@ -5891,6 +5935,21 @@ function v1_lock_official_slot_claim_for_run(PDO $pdo, array $config, array $run
         throw new RuntimeException('scheduled_slot_claim_conflict:' . $runId);
     }
     return $claim;
+}
+
+/** Map only caller-controlled event identity conflicts to stable HTTP 409 codes. */
+function v1_governance_snapshot_identity_conflict_code(Throwable $error): ?string {
+    $message = $error->getMessage();
+    foreach (array(
+        'followup_event_identity_conflict',
+        'invalid_complete_event_identity',
+        'incomplete_event_identity_has_comparison_key',
+        'event_identity_scope_conflict',
+        'event_identity_field_conflict',
+    ) as $code) {
+        if ($message === $code || strpos($message,$code . ':') === 0) { return $code; }
+    }
+    return null;
 }
 
 function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): void {
@@ -6237,11 +6296,48 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             $followupOccurred = $occurred;
             $followupLanguage = v1_language(v1_first($event, array('original_language', 'language'), 'ko'), 'ko');
             $followupDescription = (string)v1_first($event, array('summary', 'target'), '') ?: null;
+            $identityStatus = trim((string)v1_first($event, array('identity_status'), 'needs_review'));
+            if (!in_array($identityStatus, array('complete','needs_review'), true)) { $identityStatus = 'needs_review'; }
+            $identityAction = trim((string)v1_first($event, array('identity_action'), ''));
+            $identityTarget = trim((string)v1_first($event, array('identity_target'), ''));
+            $identityActorId = trim((string)v1_first($event, array('identity_actor_id','actor_id'), ''));
+            $identityEffectiveInput = v1_first($event, array('identity_effective_at'), null);
+            $identityDeadlineInput = v1_first($event, array('identity_deadline_at'), null);
+            $identityEffectiveAt = mysql_dt($identityEffectiveInput);
+            $identityDeadlineAt = mysql_dt($identityDeadlineInput);
+            $comparisonKey = trim((string)v1_first($event, array('comparison_key'), ''));
             $canonicalEvent = null;
+            $canonicalStoredIdentity = null;
             if ($isEventFollowup && preg_match('/^[0-9]{8}$/', $companyId) && v1_valid_entity_id($eventId)) {
                 $eventByIdStmt->execute(array($eventId, $companyId));
                 $canonicalEvent = $eventByIdStmt->fetch();
-                if ($canonicalEvent) { $eventId = (string)$canonicalEvent['event_id']; }
+                if ($canonicalEvent) {
+                    $submittedIdentity = $identityStatus === 'complete'
+                        ? v1_build_event_identity($companyId,$eventType,$identityAction,$identityTarget,$identityActorId,
+                            $identityEffectiveInput,$identityDeadlineInput,false)
+                        : null;
+                    $canonicalStoredIdentity = (string)$canonicalEvent['identity_status'] === 'complete'
+                        ? v1_resolve_stored_event_identity($companyId,(string)$canonicalEvent['event_type'],
+                            $canonicalEvent['identity_action'],$canonicalEvent['identity_target'],$canonicalEvent['identity_actor_id'],
+                            $canonicalEvent['identity_effective_at'],$canonicalEvent['identity_deadline_at'],
+                            $canonicalEvent['comparison_key'])
+                        : null;
+                    $followupIdentityMatches = $submittedIdentity !== null && $canonicalStoredIdentity !== null
+                        && preg_match('/^eventcmp:v1:[a-f0-9]{64}$/',$comparisonKey) === 1
+                        && hash_equals((string)$submittedIdentity['comparison_key'],$comparisonKey);
+                    foreach (array('company_id','event_type','identity_action','identity_target','identity_actor_id',
+                        'identity_effective_at','identity_deadline_at','comparison_key') as $identityField) {
+                        if (!$followupIdentityMatches
+                            || (string)$submittedIdentity[$identityField] !== (string)$canonicalStoredIdentity[$identityField]) {
+                            $followupIdentityMatches = false;
+                            break;
+                        }
+                    }
+                    if (!$followupIdentityMatches) {
+                        throw new RuntimeException('followup_event_identity_conflict:' . $submittedEventId);
+                    }
+                    $eventId = (string)$canonicalEvent['event_id'];
+                }
             }
             if ($isEventFollowup && !$canonicalEvent) {
                 $event['event_link_status'] = 'ambiguous_independent';
@@ -6263,35 +6359,24 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
                 $deadline = isset($canonicalEvent['deadline_at']) ? $canonicalEvent['deadline_at'] : null;
                 $importance = (string)$canonicalEvent['importance'];
             }
-            $identityStatus = trim((string)v1_first($event, array('identity_status'), 'needs_review'));
-            if (!in_array($identityStatus, array('complete','needs_review'), true)) { $identityStatus = 'needs_review'; }
-            $identityAction = trim((string)v1_first($event, array('identity_action'), ''));
-            $identityTarget = trim((string)v1_first($event, array('identity_target'), ''));
-            $identityActorId = trim((string)v1_first($event, array('identity_actor_id','actor_id'), ''));
-            $identityEffectiveInput = v1_first($event, array('identity_effective_at'), null);
-            $identityDeadlineInput = v1_first($event, array('identity_deadline_at'), null);
-            $identityEffectiveAt = mysql_dt($identityEffectiveInput);
-            $identityDeadlineAt = mysql_dt($identityDeadlineInput);
-            $comparisonKey = trim((string)v1_first($event, array('comparison_key'), ''));
-            $identityInputsFromMysql = false;
             if ($canonicalEvent) {
-                $identityAction = trim((string)($canonicalEvent['identity_action'] ?? $identityAction));
-                $identityTarget = trim((string)($canonicalEvent['identity_target'] ?? $identityTarget));
-                $identityActorId = trim((string)($canonicalEvent['identity_actor_id'] ?? $identityActorId));
-                $identityEffectiveAt = isset($canonicalEvent['identity_effective_at']) && $canonicalEvent['identity_effective_at'] !== null
-                    ? (string)$canonicalEvent['identity_effective_at'] : $identityEffectiveAt;
-                $identityDeadlineAt = isset($canonicalEvent['identity_deadline_at']) && $canonicalEvent['identity_deadline_at'] !== null
-                    ? (string)$canonicalEvent['identity_deadline_at'] : $identityDeadlineAt;
+                $identityAction = (string)$canonicalStoredIdentity['identity_action'];
+                $identityTarget = (string)$canonicalStoredIdentity['identity_target'];
+                $identityActorId = (string)$canonicalStoredIdentity['identity_actor_id'];
+                $identityEffectiveAt = (string)$canonicalStoredIdentity['identity_effective_at'];
+                $identityDeadlineAt = (string)$canonicalStoredIdentity['identity_deadline_at'];
                 $identityEffectiveInput = $identityEffectiveAt;
                 $identityDeadlineInput = $identityDeadlineAt;
-                $identityInputsFromMysql = true;
-                $identityStatus = isset($canonicalEvent['identity_status']) ? (string)$canonicalEvent['identity_status'] : $identityStatus;
-                $comparisonKey = trim((string)($canonicalEvent['comparison_key'] ?? $comparisonKey));
+                $identityStatus = 'complete';
+                $comparisonKey = (string)$canonicalStoredIdentity['comparison_key'];
             }
-            $computedIdentity = $identityStatus === 'complete'
-                ? v1_build_event_identity($companyId,$eventType,$identityAction,$identityTarget,$identityActorId,
-                    $identityEffectiveInput,$identityDeadlineInput,$identityInputsFromMysql)
-                : null;
+            $computedIdentity = null;
+            if ($identityStatus === 'complete') {
+                $computedIdentity = $canonicalEvent
+                    ? $canonicalStoredIdentity
+                    : v1_build_event_identity($companyId,$eventType,$identityAction,$identityTarget,$identityActorId,
+                        $identityEffectiveInput,$identityDeadlineInput,false);
+            }
             $completeIdentityValid = $computedIdentity !== null
                 && preg_match('/^eventcmp:v1:[a-f0-9]{64}$/', $comparisonKey) === 1
                 && hash_equals((string)$computedIdentity['comparison_key'],$comparisonKey);
@@ -6334,10 +6419,10 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
                     }
                 }
                 if ((string)$storedIdentity['identity_status'] === 'complete') {
-                    $verifiedStoredIdentity = v1_build_event_identity($companyId,$eventType,$storedIdentityValues[0],$storedIdentityValues[1],
-                        $storedIdentityValues[2],$storedIdentityValues[3],$storedIdentityValues[4],true);
-                    if ($verifiedStoredIdentity === null
-                        || !hash_equals((string)$verifiedStoredIdentity['comparison_key'],$storedIdentityValues[5])) {
+                    $verifiedStoredIdentity = v1_resolve_stored_event_identity($companyId,$eventType,$storedIdentityValues[0],
+                        $storedIdentityValues[1],$storedIdentityValues[2],$storedIdentityValues[3],
+                        $storedIdentityValues[4],$storedIdentityValues[5]);
+                    if ($verifiedStoredIdentity === null) {
                         throw new RuntimeException('stored_event_identity_integrity_error:' . $eventId);
                     }
                     list($identityAction,$identityTarget,$identityActorId,$identityEffectiveAt,$identityDeadlineAt,$comparisonKey) = $storedIdentityValues;
@@ -6601,6 +6686,10 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        $identityConflictCode = v1_governance_snapshot_identity_conflict_code($e);
+        if ($identityConflictCode !== null) {
+            respond(409,array('ok'=>false,'error'=>$identityConflictCode));
+        }
         throw $e;
     }
     if ($terminalCompletionFailure) {

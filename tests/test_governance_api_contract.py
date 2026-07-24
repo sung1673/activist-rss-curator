@@ -1545,6 +1545,65 @@ def test_official_followups_are_bounded_unambiguous_and_preserve_canonical_event
     assert "Official correction disclosure:" in ingest
 
 
+def test_official_followup_adopts_a_canonical_event_only_after_exact_raw_identity_match():
+    ingest = V1[
+        V1.index("function upsert_governance_snapshot") : V1.index(
+            "function upsert_editorial_snapshot"
+        )
+    ]
+    followup = ingest[
+        ingest.index(
+            "$identityStatus = trim((string)v1_first($event, array('identity_status')"
+        ) : ingest.index("if ($isEventFollowup && !$canonicalEvent)")
+    ]
+    assert "$submittedIdentity = $identityStatus === 'complete'" in followup
+    assert (
+        "v1_build_event_identity($companyId,$eventType,$identityAction,"
+        "$identityTarget,$identityActorId,"
+        in followup
+    )
+    assert "$identityEffectiveInput,$identityDeadlineInput,false)" in followup
+    assert "(string)$canonicalEvent['identity_status'] === 'complete'" in followup
+    assert "$canonicalStoredIdentity = " in followup
+    assert "v1_resolve_stored_event_identity(" in followup
+    assert "preg_match('/^eventcmp:v1:[a-f0-9]{64}$/',$comparisonKey)" in followup
+    assert "hash_equals((string)$submittedIdentity['comparison_key'],$comparisonKey)" in followup
+    for field in (
+        "company_id",
+        "event_type",
+        "identity_action",
+        "identity_target",
+        "identity_actor_id",
+        "identity_effective_at",
+        "identity_deadline_at",
+        "comparison_key",
+    ):
+        assert f"'{field}'" in followup
+    assert "(string)$submittedIdentity[$identityField]" in followup
+    assert "(string)$canonicalStoredIdentity[$identityField]" in followup
+    conflict = "throw new RuntimeException('followup_event_identity_conflict:'"
+    assert conflict in followup
+    assert ingest.index(conflict) < ingest.index(
+        "$eventType = (string)$canonicalEvent['event_type']"
+    )
+
+    classifier = V1[
+        V1.index("function v1_governance_snapshot_identity_conflict_code")
+        : V1.index("function upsert_governance_snapshot")
+    ]
+    for code in (
+        "followup_event_identity_conflict",
+        "invalid_complete_event_identity",
+        "incomplete_event_identity_has_comparison_key",
+        "event_identity_scope_conflict",
+        "event_identity_field_conflict",
+    ):
+        assert f"'{code}'" in classifier
+    assert "stored_event_identity_integrity_error" not in classifier
+    assert "respond(409,array('ok'=>false,'error'=>$identityConflictCode))" in ingest
+    assert "'error'=>$e->getMessage()" not in ingest
+
+
 def test_editorial_enums_metrics_and_parent_companies_are_revalidated_server_side():
     normalize = V1[
         V1.index("function v1_editorial_normalize_record") : V1.index(
@@ -1627,6 +1686,47 @@ def test_official_site_source_text_and_identity_dates_are_not_silently_transform
     assert "v1_normalize_identity_datetime($event['deadline_at'] ?? null,false)" in section
     assert "identity_effective_at'],$occurredAt" in section
     assert "identity_deadline_at'],$deadlineAt" in section
+
+
+def test_stored_event_identity_is_disambiguated_by_its_canonical_key():
+    helper = V1[
+        V1.index("function v1_resolve_stored_event_identity")
+        : V1.index("function v1_expected_migration_manifest")
+    ]
+    assert "preg_match('/^eventcmp:v1:[a-f0-9]{64}$/'" in helper
+    assert "!is_string($effectiveAt) || !is_string($deadlineAt)" in helper
+    assert helper.count(
+        "preg_match('/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/'"
+    ) == 2
+    assert "preg_match('/^(\\d{4}-\\d{2}-\\d{2}) 00:00:00$/'" in helper
+    assert "array_unshift($candidates,$parts[1])" in helper
+    assert "foreach ($candidateSets[0] as $effectiveCandidate)" in helper
+    assert "foreach ($candidateSets[1] as $deadlineCandidate)" in helper
+    assert "hash_equals($storedKey,(string)$identity['comparison_key'])" in helper
+    assert "$normalizedTuple === $storedTuple" in helper
+    assert "return count($matches) === 1 ? $matches[0] : null" in helper
+    assert V1.count("v1_resolve_stored_event_identity(") == 4
+
+    event_loop = V1[
+        V1.index("foreach ($normalizedEvents as $event)")
+        : V1.index("$priorEventLink->execute", V1.index("foreach ($normalizedEvents as $event)"))
+    ]
+    assert "$storedIdentity = v1_resolve_stored_event_identity" in event_loop
+    assert "(string)$existing['identity_status'] === 'complete'" in event_loop
+    assert "hash_equals((string)$existing['comparison_key'],$event['comparison_key'])" in event_loop
+
+    ingest = V1[V1.index("function upsert_governance_snapshot") :]
+    assert "$canonicalStoredIdentity = " in ingest
+    assert "? v1_resolve_stored_event_identity(" in ingest
+    assert "$verifiedStoredIdentity = v1_resolve_stored_event_identity" in ingest
+    assert "stored_event_identity_integrity_error" in ingest
+
+    datetime_normalizer = V1[
+        V1.index("function v1_normalize_identity_datetime")
+        : V1.index("function v1_build_event_identity")
+    ]
+    assert "return array('canonical'=>$text, 'mysql'=>$text . ' 00:00:00')" in datetime_normalizer
+    assert "'canonical'=>str_replace(' ', 'T', $mysql) . '+00:00'" in datetime_normalizer
 
 
 def test_official_run_ledger_is_slot_attributed_and_python_digest_compatible():

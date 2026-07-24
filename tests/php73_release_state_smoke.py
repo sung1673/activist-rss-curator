@@ -770,6 +770,369 @@ def exercise_official_slot_claims(base_url: str, mysql_container_id: str) -> Non
     )
 
 
+def event_identity_comparison_key(
+    company_id: str,
+    event_type: str,
+    action: str,
+    target: str,
+    actor_id: str,
+    effective_at: str,
+    deadline_at: str,
+) -> str:
+    values = (
+        company_id,
+        event_type,
+        action,
+        target,
+        actor_id,
+        effective_at,
+        deadline_at,
+    )
+    digest = hashlib.sha256(
+        "\x1f".join(("governance-event-identity-v1", *values)).encode("utf-8")
+    ).hexdigest()
+    return f"eventcmp:v1:{digest}"
+
+
+def exercise_event_identity_datetime_storage(
+    base_url: str, mysql_container_id: str
+) -> None:
+    company_id = "00999991"
+    event_type = "shareholder_proposal"
+    action = "submit"
+    target = "board seat"
+    actor_id = "actor:identity-precision-smoke"
+    effective_date = "2026-07-20"
+    deadline_date = "2026-08-31"
+    mysql_effective = f"{effective_date} 00:00:00"
+    mysql_deadline = f"{deadline_date} 00:00:00"
+    source_right_id = "official:dart-identity-precision-smoke"
+    original_document_id = "dart:20260724999001"
+    conflict_document_id = "dart:20260724999002"
+    midnight_document_id = "dart:20260724999003"
+    kind_document_id = "kind:20260724999004"
+
+    company = {
+        "company_id": company_id,
+        "stock_code": "999991",
+        "market": "KOSDAQ",
+        "legal_name": "CI Identity Precision Corp",
+        "record_status": "active",
+    }
+    dart_right = {
+        "source_right_id": source_right_id,
+        "source_type": "official_disclosure",
+        "source_key": "dart",
+        "source_name": "OpenDART identity precision smoke",
+        "permission_scope": "CI runtime identity precision fixture",
+        "evidence_hash": "7" * 64,
+        "valid_from": "2021-01-01T00:00:00Z",
+        "valid_until": None,
+        "ai_allowed": True,
+        "redistribution_allowed": True,
+        "status": "active",
+    }
+    kind_right = {
+        "source_right_id": "official:kind",
+        "source_type": "official_disclosure",
+        "source_key": "kind",
+        "source_name": "KIND",
+        "permission_scope": "CI approved historical, incremental, AI and public redistribution scope",
+        "evidence_hash": "9" * 64,
+        "valid_from": "2021-01-01T00:00:00Z",
+        "valid_until": None,
+        "ai_allowed": True,
+        "redistribution_allowed": True,
+        "status": "active",
+    }
+
+    def document(
+        document_id: str,
+        source: str,
+        source_right: str,
+        title: str,
+        *,
+        correction_of: str | None = None,
+        version_no: int = 1,
+    ) -> dict[str, Any]:
+        external_id = document_id.split(":", 1)[1]
+        url = f"https://example.com/{source}/{external_id}"
+        return {
+            "document_id": document_id,
+            "company_id": company_id,
+            "source": source,
+            "source_right_id": source_right,
+            "source_class": "official_disclosure",
+            "external_id": external_id,
+            "document_type": event_type,
+            "original_language": "ko",
+            "title": title,
+            "body_text": "",
+            "original_url": url,
+            "content_hash": hashlib.sha256(
+                f"{title}\n{url}\n{external_id}".encode("utf-8")
+            ).hexdigest(),
+            "collection_key": "identity-precision-date-chain",
+            "correction_of_document_id": correction_of,
+            "version_no": version_no,
+            "published_at": "2026-07-24T00:00:00Z",
+            "retrieved_at": "2026-07-24T00:05:00Z",
+            "verification_status": "official",
+            "publication_status": "published",
+            "is_correction": correction_of is not None,
+        }
+
+    def event(
+        event_id: str,
+        comparison_key: str,
+        document_id: str,
+        identity_target: str,
+        effective_at: str,
+        deadline_at: str,
+        *,
+        is_correction: bool = False,
+    ) -> dict[str, Any]:
+        return {
+            "event_id": event_id,
+            "company_id": company_id,
+            "event_type": event_type,
+            "title": "CI event identity precision smoke",
+            "original_language": "ko",
+            "summary": "",
+            "occurred_at": effective_at,
+            "deadline_at": deadline_at,
+            "importance": "normal",
+            "verification_status": "official",
+            "collection_key": "identity-precision-date-event",
+            "document_ids": [document_id],
+            "is_correction": is_correction,
+            "is_cancelled": False,
+            "review_required": True,
+            "actor_id": actor_id,
+            "action": action,
+            "target": identity_target,
+            "identity_action": action,
+            "identity_target": identity_target,
+            "identity_actor_id": actor_id,
+            "identity_effective_at": effective_at,
+            "identity_deadline_at": deadline_at,
+            "identity_status": "complete",
+            "comparison_key": comparison_key,
+        }
+
+    date_key = event_identity_comparison_key(
+        company_id,
+        event_type,
+        action,
+        target,
+        actor_id,
+        effective_date,
+        deadline_date,
+    )
+    original_document = document(
+        original_document_id,
+        "dart",
+        source_right_id,
+        "CI date-only identity filing",
+    )
+    original_event = event(
+        date_key,
+        date_key,
+        original_document_id,
+        target,
+        effective_date,
+        deadline_date,
+    )
+    original_payload = {
+        "companies": [company],
+        "documents": [original_document],
+        "events": [original_event],
+        "source_rights": [dart_right],
+        "run": {},
+    }
+    first = request_hmac_action(
+        base_url, "upsert_governance_snapshot", original_payload, expected_status=200
+    )
+    require(
+        first.get("ok") is True
+        and first.get("upserted", {}).get("events") == 1
+        and first.get("upserted", {}).get("event_observations") == 1,
+        repr(first),
+    )
+    replay = request_hmac_action(
+        base_url, "upsert_governance_snapshot", original_payload, expected_status=200
+    )
+    require(
+        replay.get("ok") is True
+        and replay.get("upserted", {}).get("events") == 1
+        and replay.get("upserted", {}).get("event_observations") == 1,
+        repr(replay),
+    )
+
+    conflict_target = "audit committee seat"
+    conflict_key = event_identity_comparison_key(
+        company_id,
+        event_type,
+        action,
+        conflict_target,
+        actor_id,
+        effective_date,
+        deadline_date,
+    )
+    conflict_payload = {
+        "companies": [company],
+        "documents": [
+            document(
+                conflict_document_id,
+                "dart",
+                source_right_id,
+                "Correction: conflicting identity must fail closed",
+                correction_of=original_document_id,
+                version_no=2,
+            )
+        ],
+        "events": [
+            event(
+                date_key,
+                conflict_key,
+                conflict_document_id,
+                conflict_target,
+                effective_date,
+                deadline_date,
+                is_correction=True,
+            )
+        ],
+        "source_rights": [dart_right],
+        "run": {},
+    }
+    conflict = request_hmac_action(
+        base_url, "upsert_governance_snapshot", conflict_payload, expected_status=409
+    )
+    require(
+        conflict.get("ok") is False
+        and error_code(conflict) == "followup_event_identity_conflict",
+        repr(conflict),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_documents "
+            f"WHERE document_id='{conflict_document_id}'",
+        )
+        == "0",
+        "conflicting correction must roll back its document",
+    )
+
+    midnight_effective = f"{effective_date}T00:00:00+00:00"
+    midnight_deadline = f"{deadline_date}T00:00:00+00:00"
+    midnight_key = event_identity_comparison_key(
+        company_id,
+        event_type,
+        action,
+        target,
+        actor_id,
+        midnight_effective,
+        midnight_deadline,
+    )
+    midnight_payload = {
+        "companies": [company],
+        "documents": [
+            document(
+                midnight_document_id,
+                "dart",
+                source_right_id,
+                "CI explicit UTC-midnight identity filing",
+            )
+        ],
+        "events": [
+            event(
+                midnight_key,
+                midnight_key,
+                midnight_document_id,
+                target,
+                "2026-07-20T00:00:00Z",
+                "2026-08-31T00:00:00Z",
+            )
+        ],
+        "source_rights": [dart_right],
+        "run": {},
+    }
+    midnight = request_hmac_action(
+        base_url, "upsert_governance_snapshot", midnight_payload, expected_status=200
+    )
+    require(midnight.get("ok") is True, repr(midnight))
+
+    kind_payload = {
+        "companies": [company],
+        "documents": [
+            document(
+                kind_document_id,
+                "kind",
+                "official:kind",
+                "CI KIND observation of the date-only identity",
+            )
+        ],
+        "events": [
+            event(
+                date_key,
+                date_key,
+                kind_document_id,
+                target,
+                effective_date,
+                deadline_date,
+            )
+        ],
+        "source_rights": [kind_right],
+        "run": {},
+    }
+    kind = request_hmac_action(
+        base_url, "upsert_governance_snapshot", kind_payload, expected_status=200
+    )
+    require(kind.get("ok") is True, repr(kind))
+
+    runtime_events, _ = request_json(
+        base_url,
+        "api.php/api/v1/ops/runtime-state?resource=governance_events&limit=100",
+        token=ADMIN_TOKEN,
+    )
+    company_events = {
+        str(row.get("event_id"))
+        for row in runtime_events.get("data", {}).get("records", [])
+        if row.get("company_id") == company_id
+    }
+    require(company_events == {date_key, midnight_key}, repr(runtime_events))
+
+    stored_rows = mysql_execute(
+        mysql_container_id,
+        "SELECT event_id,identity_effective_at,identity_deadline_at,comparison_key "
+        "FROM ci_governance_events "
+        f"WHERE company_id='{company_id}' ORDER BY event_id",
+    ).splitlines()
+    parsed_rows = [row.split("\t") for row in stored_rows if row]
+    require(len(parsed_rows) == 2, repr(parsed_rows))
+    require(
+        {row[0] for row in parsed_rows} == {date_key, midnight_key}
+        and all(
+            len(row) == 4
+            and row[1] == mysql_effective
+            and row[2] == mysql_deadline
+            and row[3] == row[0]
+            for row in parsed_rows
+        ),
+        repr(parsed_rows),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*),COUNT(DISTINCT source_key) "
+            "FROM ci_event_observations "
+            f"WHERE event_id='{date_key}'",
+        )
+        == "2\t2",
+        "DART and KIND must contribute two observations to one date-only event",
+    )
+
+
 def run(base_url: str, mysql_container_id: str) -> None:
     root, _ = request_json(base_url, "api.php/api/v1/health")
     require(root.get("ok") is True, repr(root))
@@ -1057,30 +1420,30 @@ def run(base_url: str, mysql_container_id: str) -> None:
     content_event_id = str(first_site_payload["events"][0]["event_id"])
     mysql_execute(
         mysql_container_id,
-        "INSERT INTO activist_actors "
+        "INSERT INTO ci_actors "
         "(actor_id,actor_type,display_name,display_name_en,company_id,country_code,aliases_json,homepage_url,"
         "review_status,record_status,created_at,updated_at) VALUES "
         "('actor:test','activist','CI Test Actor',NULL,NULL,'KR','[]',NULL,'approved','active',"
         "'2021-01-02 00:00:00','2021-01-02 00:00:00') "
         "ON DUPLICATE KEY UPDATE review_status='approved',record_status='active';"
-        f"INSERT INTO activist_event_actors "
+        f"INSERT INTO ci_event_actors "
         "(event_id,actor_id,actor_role,review_status,created_at,updated_at) VALUES "
         f"('{content_event_id}','actor:test','proposer','approved','2021-01-02 00:00:00','2021-01-02 00:00:00') "
         "ON DUPLICATE KEY UPDATE review_status='approved',updated_at=VALUES(updated_at);"
-        f"UPDATE activist_governance_events SET review_status='approved',publication_status='published',"
+        f"UPDATE ci_governance_events SET review_status='approved',publication_status='published',"
         f"verification_status='verified',created_at='2021-01-02 00:00:00' WHERE event_id='{content_event_id}';"
-        f"UPDATE activist_documents SET publication_status='published',created_at='2021-01-02 00:00:00' "
+        f"UPDATE ci_documents SET publication_status='published',created_at='2021-01-02 00:00:00' "
         f"WHERE document_id IN ('{first_document_id}','{changed_document_id}');"
-        f"UPDATE activist_event_documents SET created_at='2021-01-02 00:00:00' "
+        f"UPDATE ci_event_documents SET created_at='2021-01-02 00:00:00' "
         f"WHERE event_id='{content_event_id}' AND document_id IN ('{first_document_id}','{changed_document_id}');"
-        f"UPDATE activist_documents SET title=CONCAT(title,' [CI MUTATION]') WHERE document_id='{first_document_id}';"
-        "UPDATE activist_source_rights SET status='revoked',ai_allowed=1,redistribution_allowed=1,"
+        f"UPDATE ci_documents SET title=CONCAT(title,' [CI MUTATION]') WHERE document_id='{first_document_id}';"
+        "UPDATE ci_source_rights SET status='revoked',ai_allowed=1,redistribution_allowed=1,"
         "revoked_at='2021-02-01 00:00:00' WHERE source_right_id='right:company-site:00123456';",
     )
     require(
         mysql_execute(
             mysql_container_id,
-            f"SELECT COUNT(DISTINCT document_id) FROM activist_event_documents "
+            f"SELECT COUNT(DISTINCT document_id) FROM ci_event_documents "
             f"WHERE event_id='{content_event_id}' "
             f"AND document_id IN ('{first_document_id}','{changed_document_id}')",
         )
@@ -1586,6 +1949,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
         expected_status=409,
     )
     require(blocked_new.get("error", {}).get("code") == "dart_quota_blocked", repr(blocked_new))
+    exercise_event_identity_datetime_storage(base_url, mysql_container_id)
     print("PHP 7.3 governance release-state smoke passed.", flush=True)
 
 
