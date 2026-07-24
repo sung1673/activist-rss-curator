@@ -628,7 +628,10 @@ def parse_dart_list_payload(payload: dict[str, object]) -> tuple[list[dict[str, 
             "OpenDART request quota exhausted"
         )
     if status != "000":
-        raise OfficialSourceError("OpenDART list returned a non-success status")
+        safe_status = status if re.fullmatch(r"[0-9]{3}", status) else "invalid"
+        raise OfficialSourceError(
+            f"OpenDART list returned non-success status {safe_status}"
+        )
     rows = payload.get("list")
     if not isinstance(rows, list):
         raise OfficialSourceError("OpenDART success response omitted list")
