@@ -91,6 +91,9 @@ jobs:
               and (.files["migrations/011_global_terminal_v2.sql"] | test("^[0-9a-f]{64}$"))' \
             deploy/activist/deployment-manifest.json > /dev/null
 
+      - name: Install global connector smoke dependency
+        run: python3 -m pip install --disable-pip-version-check "httpx==0.27.2"
+
       - name: Set up production-compatible PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
         with:
