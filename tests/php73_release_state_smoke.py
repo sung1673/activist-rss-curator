@@ -838,7 +838,7 @@ def exercise_event_identity_datetime_storage(
     deadline_date = "2026-08-31"
     mysql_effective = f"{effective_date} 00:00:00"
     mysql_deadline = f"{deadline_date} 00:00:00"
-    source_right_id = "official:dart-identity-precision-smoke"
+    source_right_id = "official:dart"
     original_document_id = "dart:20260724999001"
     conflict_document_id = "dart:20260724999002"
     midnight_document_id = "dart:20260724999003"

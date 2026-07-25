@@ -77,3 +77,10 @@ def test_php73_fixture_contains_no_repository_secret_reference() -> None:
         in fixture
     )
     assert "'telegram_signal_rebuild_lease_seconds' => 1" in fixture
+
+
+def test_php73_release_fixture_preserves_canonical_dart_source_right_id() -> None:
+    smoke = (ROOT / "tests" / "php73_release_state_smoke.py").read_text(encoding="utf-8")
+
+    assert 'source_right_id = "official:dart"' in smoke
+    assert "official:dart-identity-precision-smoke" not in smoke
