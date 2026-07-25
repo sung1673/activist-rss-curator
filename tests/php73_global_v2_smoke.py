@@ -455,6 +455,25 @@ def empty_chunk_payload(
     }
 
 
+def attach_single_chunk_lifecycle_observations(
+    payload: dict[str, Any],
+    observations: list[dict[str, Any]],
+) -> None:
+    envelope = payload["envelope"]
+    chunk = envelope["chunk"]
+    require(
+        chunk["index"] == 1
+        and chunk["count"] == 1
+        and isinstance(envelope["records"], list),
+        repr(payload),
+    )
+    envelope["lifecycle_observations"] = observations
+    accepted_count = len(envelope["records"]) + len(observations)
+    envelope["raw_count"] = accepted_count
+    chunk["batch_raw_count"] = accepted_count
+    chunk["batch_acknowledged_count"] = accepted_count
+
+
 def transition(
     base_url: str,
     target: str,
@@ -2946,24 +2965,24 @@ def run(base_url: str, mysql_container_id: str) -> None:
         index=1,
         count=1,
     )
-    lifecycle_payload["envelope"]["lifecycle_observations"] = [
-        {
-            "observation_id": (
-                "globalobs:"
-                + hashlib.sha256(lifecycle_key.encode("utf-8")).hexdigest()[:40]
-            ),
-            "country_code": "US",
-            "source_key": SEC_SOURCE_KEY,
-            "external_id": reversion_records[0]["external_id"],
-            "parent_external_id": None,
-            "change_type": "corrected",
-            "observed_at": utc_text(now + timedelta(minutes=20)),
-            "metadata": {"fixture": "semantic lifecycle correction"},
-        }
-    ]
-    lifecycle_payload["envelope"]["chunk"][
-        "batch_acknowledged_count"
-    ] = 1
+    attach_single_chunk_lifecycle_observations(
+        lifecycle_payload,
+        [
+            {
+                "observation_id": (
+                    "globalobs:"
+                    + hashlib.sha256(lifecycle_key.encode("utf-8")).hexdigest()[:40]
+                ),
+                "country_code": "US",
+                "source_key": SEC_SOURCE_KEY,
+                "external_id": reversion_records[0]["external_id"],
+                "parent_external_id": None,
+                "change_type": "corrected",
+                "observed_at": utc_text(now + timedelta(minutes=20)),
+                "metadata": {"fixture": "semantic lifecycle correction"},
+            }
+        ],
+    )
     lifecycle_ingest, _ = request_json(
         base_url,
         "api.php/api/v2/ops/ingest",
@@ -3026,16 +3045,14 @@ def run(base_url: str, mysql_container_id: str) -> None:
         index=1,
         count=1,
     )
-    lifecycle_replay_payload["envelope"]["lifecycle_observations"] = (
+    attach_single_chunk_lifecycle_observations(
+        lifecycle_replay_payload,
         json.loads(
             json.dumps(
                 lifecycle_payload["envelope"]["lifecycle_observations"]
             )
-        )
+        ),
     )
-    lifecycle_replay_payload["envelope"]["chunk"][
-        "batch_acknowledged_count"
-    ] = 1
     lifecycle_replay, _ = request_json(
         base_url,
         "api.php/api/v2/ops/ingest",
@@ -3116,26 +3133,26 @@ def run(base_url: str, mysql_container_id: str) -> None:
         index=1,
         count=1,
     )
-    lifecycle_withdrawal_payload["envelope"]["lifecycle_observations"] = [
-        {
-            "observation_id": (
-                "globalobs:"
-                + hashlib.sha256(
-                    lifecycle_withdrawal_key.encode("utf-8")
-                ).hexdigest()[:40]
-            ),
-            "country_code": "US",
-            "source_key": SEC_SOURCE_KEY,
-            "external_id": reversion_records[0]["external_id"],
-            "parent_external_id": None,
-            "change_type": "withdrawn",
-            "observed_at": utc_text(now + timedelta(minutes=22)),
-            "metadata": {"fixture": "new lifecycle withdrawal"},
-        }
-    ]
-    lifecycle_withdrawal_payload["envelope"]["chunk"][
-        "batch_acknowledged_count"
-    ] = 1
+    attach_single_chunk_lifecycle_observations(
+        lifecycle_withdrawal_payload,
+        [
+            {
+                "observation_id": (
+                    "globalobs:"
+                    + hashlib.sha256(
+                        lifecycle_withdrawal_key.encode("utf-8")
+                    ).hexdigest()[:40]
+                ),
+                "country_code": "US",
+                "source_key": SEC_SOURCE_KEY,
+                "external_id": reversion_records[0]["external_id"],
+                "parent_external_id": None,
+                "change_type": "withdrawn",
+                "observed_at": utc_text(now + timedelta(minutes=22)),
+                "metadata": {"fixture": "new lifecycle withdrawal"},
+            }
+        ],
+    )
     lifecycle_withdrawal, _ = request_json(
         base_url,
         "api.php/api/v2/ops/ingest",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import runpy
 from pathlib import Path
 
 import yaml
@@ -115,3 +116,27 @@ def test_php73_global_fixture_refreshes_rights_revision_after_grant_mutation() -
     assert 'use": "collect"' in restored_grant
     assert "rights_revision = restored_eligibility.get" in restored_grant
     assert "rights_revision != stale_rights_revision" in restored_grant
+
+
+def test_lifecycle_fixture_keeps_raw_and_ack_counts_consistent() -> None:
+    module = runpy.run_path(
+        str(ROOT / "tests" / "php73_global_v2_smoke.py"),
+        run_name="php73_global_v2_smoke_contract",
+    )
+    payload = module["empty_chunk_payload"](
+        rights_revision="a" * 64,
+        idempotency_key="lifecycle-count-contract",
+        retrieved_at="2026-07-24T00:00:00Z",
+        batch_id="global-batch:" + ("b" * 64),
+        index=1,
+        count=1,
+    )
+    module["attach_single_chunk_lifecycle_observations"](
+        payload,
+        [{"observation_id": "globalobs:" + ("c" * 40)}],
+    )
+
+    envelope = payload["envelope"]
+    assert envelope["raw_count"] == 1
+    assert envelope["chunk"]["batch_raw_count"] == 1
+    assert envelope["chunk"]["batch_acknowledged_count"] == 1
