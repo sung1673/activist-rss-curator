@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SMOKE = ROOT / ".github" / "scripts" / "smoke-global-v2.py"
 REVISION = "a" * 40
 PREVIEW_TOKEN = "preview-contract-token-" + "x" * 32
+OPS_TOKEN = "ops-contract-token-" + "x" * 32
 
 
 class ContractHandler(BaseHTTPRequestHandler):
@@ -134,6 +135,36 @@ class ContractHandler(BaseHTTPRequestHandler):
                 ),
             )
             return
+        if path.endswith("/ops/release-state"):
+            authorization = self.headers.get("Authorization", "")
+            if self.failure == "authorization_stripped":
+                authorization = ""
+            if authorization != f"Bearer {OPS_TOKEN}":
+                self.send_payload(
+                    401,
+                    {
+                        "ok": False,
+                        "error": "bearer_token_required",
+                        "api_version": "v2",
+                    },
+                )
+                return
+            self.send_payload(
+                200,
+                {
+                    "ok": True,
+                    "data": {
+                        "release_state": (
+                            "live"
+                            if self.failure == "protected_wrong_state"
+                            else self.release_state
+                        ),
+                        "state_version": 0,
+                    },
+                    "api_version": "v2",
+                },
+            )
+            return
         if path.endswith("/redirected-events"):
             self.send_payload(
                 200,
@@ -212,8 +243,16 @@ def run_smoke(
     *,
     release_state: str = "closed",
     expected_sha: str = REVISION,
+    include_ops_token: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    environment = {**os.environ, "TEST_PREVIEW_TOKEN": PREVIEW_TOKEN}
+    environment = {
+        **os.environ,
+        "TEST_PREVIEW_TOKEN": PREVIEW_TOKEN,
+    }
+    if include_ops_token:
+        environment["TEST_OPS_TOKEN"] = OPS_TOKEN
+    else:
+        environment.pop("TEST_OPS_TOKEN", None)
     return subprocess.run(
         [
             sys.executable,
@@ -226,6 +265,8 @@ def run_smoke(
             release_state,
             "--preview-token-env",
             "TEST_PREVIEW_TOKEN",
+            "--privileged-token-env",
+            "TEST_OPS_TOKEN",
             "--allow-http",
             "--timeout",
             "2",
@@ -246,6 +287,8 @@ def test_smoke_accepts_exact_v2_contract(release_state: str) -> None:
     assert "Operational API v2 verified" in result.stdout
     assert PREVIEW_TOKEN not in result.stdout
     assert PREVIEW_TOKEN not in result.stderr
+    assert OPS_TOKEN not in result.stdout
+    assert OPS_TOKEN not in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -263,6 +306,14 @@ def test_smoke_accepts_exact_v2_contract(release_state: str) -> None:
         (
             "admin_accepts_invalid",
             "invalid bearer admin route: expected HTTP 401 or 403",
+        ),
+        (
+            "protected_wrong_state",
+            "authenticated protected route: expected the exact release state",
+        ),
+        (
+            "authorization_stripped",
+            "authenticated protected route: expected HTTP 200",
         ),
     ],
 )
@@ -284,11 +335,21 @@ def test_smoke_rejects_noncanonical_revision_before_network_access() -> None:
     assert "exactly 40 lowercase hexadecimal" in result.stderr
 
 
+def test_smoke_fails_closed_without_a_protected_token() -> None:
+    with contract_server() as base_url:
+        result = run_smoke(base_url, include_ops_token=False)
+    assert result.returncode == 1
+    assert "requires a protected token" in result.stderr
+    assert OPS_TOKEN not in result.stderr
+
+
 def test_preview_smoke_rejects_an_already_live_release() -> None:
     with contract_server(release_state="live") as base_url:
         result = run_smoke(base_url, release_state="preview")
     assert result.returncode == 1
-    assert "preview anonymous events: expected HTTP 401 or 403" in result.stderr
+    assert "authenticated protected route: expected the exact release state" in (
+        result.stderr
+    )
 
 
 def test_preview_smoke_never_follows_a_credentialed_redirect() -> None:
@@ -301,6 +362,8 @@ def test_preview_smoke_never_follows_a_credentialed_redirect() -> None:
     assert "redirects are forbidden" in result.stderr
     assert PREVIEW_TOKEN not in result.stdout
     assert PREVIEW_TOKEN not in result.stderr
+    assert OPS_TOKEN not in result.stdout
+    assert OPS_TOKEN not in result.stderr
 
 
 def test_php_and_openapi_expose_the_operational_identity_contract() -> None:
@@ -354,3 +417,9 @@ def test_workflows_reuse_the_same_operational_smoke() -> None:
     assert "--release-state closed" in ci
     for workflow in (deployment, backfill, preview, cutover, ci):
         assert ".github/scripts/smoke-global-v2.py" in workflow
+        assert "--privileged-token-env" in workflow
+    assert deployment.count("--privileged-token-env BSIDE_OPS_TOKEN") == 1
+    assert backfill.count("--privileged-token-env BSIDE_OPS_TOKEN") == 1
+    assert preview.count("--privileged-token-env BSIDE_OPS_TOKEN") == 1
+    assert cutover.count("--privileged-token-env BSIDE_ADMIN_TOKEN") >= 3
+    assert ci.count("--privileged-token-env PHP73_CI_OPS_TOKEN") == 1

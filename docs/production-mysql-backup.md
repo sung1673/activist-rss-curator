@@ -25,6 +25,44 @@ credentials, endpoints, or source data in logs.
 - Existing output files are never overwritten. A failed or interrupted run
   has no completed manifest and must not be used for migration.
 
+## Gabia legacy `ssh-rsa/SHA-1` exception
+
+Paramiko 5 rejects the legacy `ssh-rsa/SHA-1` host-signature algorithm by
+default. The backup and migration tools keep that default for every SSH host
+unless all of these settings are present:
+
+- explicit opt-in:
+  `SSH_ALLOW_LEGACY_RSA_SHA1=true` or
+  `--ssh-allow-legacy-rsa-sha1`;
+- an exact target:
+  `SSH_LEGACY_RSA_SHA1_HOST=alignpartnerscap.com` or
+  `--ssh-legacy-rsa-sha1-host alignpartnerscap.com`;
+- an exact SHA-256 host-key pin in `SSH_HOST_KEY_SHA256` or
+  `--ssh-host-key-sha256`.
+
+The target must match `SSH_HOST` after only case, trailing-dot, and IDNA
+normalization. It is not a wildcard or a DNS suffix. Missing opt-in, a missing
+target, a different target, an invalid pin, or a changed server key aborts
+before SSH password authentication. The exception changes only the host-key
+signature algorithm on that one Paramiko transport; it does not enable
+legacy public-key user authentication, ciphers, MACs, or key exchanges.
+
+The independently recorded Gabia identity is:
+
+```text
+SSH_HOST=alignpartnerscap.com
+SSH_LEGACY_RSA_SHA1_HOST=alignpartnerscap.com
+SSH_HOST_KEY_SHA256=SHA256:4Y2J13Nis0NOKupLJCOnr2w5X2UdBZH78TkZMVJCVLo
+SSH_ALLOW_LEGACY_RSA_SHA1=true
+```
+
+Reconfirm the fingerprint through the previously approved out-of-band record
+before each production operation. The fingerprint is not secret, but the SSH
+and database passwords are: load passwords from the protected environment
+file and never pass them as CLI arguments. CLI failure output intentionally
+does not print endpoints, pins, usernames, passwords, or underlying exception
+messages.
+
 ## Completion manifest
 
 The manifest records:

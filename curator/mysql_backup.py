@@ -67,6 +67,8 @@ class SshTunnelOptions:
     remote_port: int | None = None
     connect_timeout: int = 15
     auth_timeout: int = 15
+    allow_legacy_ssh_rsa_sha1: bool = False
+    legacy_ssh_rsa_sha1_host: str | None = None
 
 
 @dataclass(frozen=True)
@@ -254,7 +256,11 @@ def connection_options_from_args(
     )
 
 
-def _environment_flag(value: str | None) -> bool:
+def _environment_flag(
+    value: str | None,
+    *,
+    setting: str = "SSH tunnel enablement",
+) -> bool:
     if value is None:
         return False
     normalized = value.strip().casefold()
@@ -262,7 +268,7 @@ def _environment_flag(value: str | None) -> bool:
         return True
     if normalized in {"0", "false", "no", "off", ""}:
         return False
-    raise MySqlBackupError("SSH tunnel enablement must be a boolean")
+    raise MySqlBackupError(f"{setting} must be a boolean")
 
 
 def _optional_cli_or_env(
@@ -298,12 +304,135 @@ def verify_ssh_host_key(key_bytes: bytes, expected_sha256: str) -> None:
         raise MySqlBackupError("SSH server host key does not match the pinned SHA-256")
 
 
+def _canonical_ssh_host(value: str) -> str:
+    """Normalize only syntax that cannot change a host's identity."""
+
+    normalized = value.strip().rstrip(".").casefold()
+    if not normalized:
+        raise MySqlBackupError("SSH host must be non-empty")
+    try:
+        return normalized.encode("idna").decode("ascii")
+    except UnicodeError as error:
+        raise MySqlBackupError("SSH host is invalid") from error
+
+
+def legacy_ssh_rsa_sha1_is_allowed(options: SshTunnelOptions) -> bool:
+    """Validate and return the narrowly scoped legacy host-key exception."""
+
+    normalize_ssh_host_key_sha256(options.host_key_sha256)
+    target = options.legacy_ssh_rsa_sha1_host
+    if options.allow_legacy_ssh_rsa_sha1:
+        if target is None:
+            raise MySqlBackupError(
+                "legacy ssh-rsa/SHA-1 requires an explicit target host"
+            )
+        if _canonical_ssh_host(target) != _canonical_ssh_host(options.host):
+            raise MySqlBackupError(
+                "legacy ssh-rsa/SHA-1 target must match the SSH tunnel host"
+            )
+        return True
+    if target is not None:
+        raise MySqlBackupError(
+            "legacy ssh-rsa/SHA-1 target requires explicit opt-in"
+        )
+    return False
+
+
+def _enable_paramiko_legacy_ssh_rsa_sha1(
+    transport: Any,
+    paramiko_module: Any,
+) -> None:
+    """Enable only the legacy ssh-rsa host-signature algorithm on one transport."""
+
+    try:
+        from cryptography.hazmat.primitives import hashes
+
+        if str(paramiko_module.__version__).split(".", maxsplit=1)[0] != "5":
+            raise MySqlBackupError(
+                "legacy ssh-rsa/SHA-1 compatibility requires Paramiko 5"
+            )
+        base_rsa_key: Any = paramiko_module.RSAKey
+        legacy_host_key_class = type(
+            "_LegacySshRsaSha1HostKey",
+            (base_rsa_key,),
+            {
+                "HASHES": {
+                    **base_rsa_key.HASHES,
+                    "ssh-rsa": hashes.SHA1,
+                },
+            },
+        )
+        base_transport_class: Any = transport.__class__
+
+        def preferred_keys(instance: Any) -> tuple[str, ...]:
+            disabled_algorithms = (
+                getattr(instance, "disabled_algorithms", None) or {}
+            )
+            disabled = disabled_algorithms.get("keys", ())
+            filtered = tuple(
+                algorithm
+                for algorithm in instance._preferred_keys
+                if algorithm not in disabled
+            )
+            certificates = tuple(
+                f"{algorithm}-cert-v01@openssh.com"
+                for algorithm in filtered
+                if algorithm != "ssh-rsa"
+            )
+            return filtered + certificates
+
+        legacy_transport_class = type(
+            "_LegacySshRsaSha1Transport",
+            (base_transport_class,),
+            {"preferred_keys": property(preferred_keys)},
+        )
+        transport.__class__ = legacy_transport_class
+
+        transport._key_info = {
+            **transport._key_info,
+            "ssh-rsa": legacy_host_key_class,
+        }
+        transport._preferred_keys = tuple(
+            algorithm
+            for algorithm in transport._preferred_keys
+            if algorithm != "ssh-rsa"
+        ) + ("ssh-rsa",)
+        if "ssh-rsa-cert-v01@openssh.com" in transport.preferred_keys:
+            raise MySqlBackupError(
+                "legacy ssh-rsa/SHA-1 compatibility could not be isolated"
+            )
+    except (AttributeError, ImportError, TypeError) as error:
+        raise MySqlBackupError(
+            "legacy ssh-rsa/SHA-1 compatibility is unavailable"
+        ) from error
+
+
 def ssh_options_from_args(
     args: argparse.Namespace,
     *,
     environ: Mapping[str, str] | None = None,
 ) -> SshTunnelOptions | None:
     environment = os.environ if environ is None else environ
+    legacy_environment_opt_in = _environment_flag(
+        _first_env(
+            environment,
+            "SSH_ALLOW_LEGACY_RSA_SHA1",
+            "GABIA_SSH_ALLOW_LEGACY_RSA_SHA1",
+        ),
+        setting="legacy ssh-rsa/SHA-1 opt-in",
+    )
+    legacy_cli_opt_in = bool(
+        getattr(args, "ssh_allow_legacy_rsa_sha1", False)
+    )
+    allow_legacy_ssh_rsa_sha1 = (
+        legacy_cli_opt_in or legacy_environment_opt_in
+    )
+    legacy_ssh_rsa_sha1_host = _optional_cli_or_env(
+        getattr(args, "ssh_legacy_rsa_sha1_host", None),
+        environment,
+        "SSH_LEGACY_RSA_SHA1_HOST",
+        "GABIA_SSH_LEGACY_RSA_SHA1_HOST",
+    )
     requested = bool(args.ssh_tunnel) or _environment_flag(
         _first_env(environment, "DB_SSH_TUNNEL", "MYSQL_SSH_TUNNEL")
     )
@@ -312,7 +441,10 @@ def ssh_options_from_args(
         args.ssh_user,
         args.ssh_password,
         args.ssh_host_key_sha256,
+        legacy_ssh_rsa_sha1_host,
     )
+    if allow_legacy_ssh_rsa_sha1:
+        requested = True
     if not requested and any(value is not None for value in explicit_values):
         requested = True
     if not requested:
@@ -372,7 +504,7 @@ def ssh_options_from_args(
         remote_port is not None and not 1 <= remote_port <= 65535
     ):
         raise MySqlBackupError("SSH ports must be between 1 and 65535")
-    return SshTunnelOptions(
+    options = SshTunnelOptions(
         host=host,
         port=port,
         user=user,
@@ -382,7 +514,11 @@ def ssh_options_from_args(
         remote_port=remote_port,
         connect_timeout=args.ssh_connect_timeout,
         auth_timeout=args.ssh_auth_timeout,
+        allow_legacy_ssh_rsa_sha1=allow_legacy_ssh_rsa_sha1,
+        legacy_ssh_rsa_sha1_host=legacy_ssh_rsa_sha1_host or None,
     )
+    legacy_ssh_rsa_sha1_is_allowed(options)
+    return options
 
 
 class _DirectTcpipServer(socketserver.ThreadingTCPServer):
@@ -489,11 +625,27 @@ class SshDirectTcpipTunnel:
                 "Paramiko is required when the SSH tunnel is enabled"
             ) from error
         try:
+            allow_legacy_ssh_rsa_sha1 = legacy_ssh_rsa_sha1_is_allowed(
+                self.options
+            )
             self._socket = socket.create_connection(
                 (self.options.host, self.options.port),
                 timeout=self.options.connect_timeout,
             )
-            self._transport = paramiko.Transport(self._socket)
+            disabled_algorithms = (
+                None
+                if allow_legacy_ssh_rsa_sha1
+                else {"keys": ["ssh-rsa"]}
+            )
+            self._transport = paramiko.Transport(
+                self._socket,
+                disabled_algorithms=disabled_algorithms,
+            )
+            if allow_legacy_ssh_rsa_sha1:
+                _enable_paramiko_legacy_ssh_rsa_sha1(
+                    self._transport,
+                    paramiko,
+                )
             self._transport.auth_timeout = self.options.auth_timeout
             self._transport.start_client(timeout=self.options.connect_timeout)
             server_key = self._transport.get_remote_server_key()
@@ -1181,6 +1333,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ssh-user")
     parser.add_argument("--ssh-password")
     parser.add_argument("--ssh-host-key-sha256")
+    parser.add_argument(
+        "--ssh-allow-legacy-rsa-sha1",
+        action="store_true",
+        help=(
+            "Allow the legacy ssh-rsa/SHA-1 host-key algorithm only for the "
+            "explicitly pinned --ssh-legacy-rsa-sha1-host"
+        ),
+    )
+    parser.add_argument("--ssh-legacy-rsa-sha1-host")
     parser.add_argument("--ssh-remote-db-host")
     parser.add_argument("--ssh-remote-db-port", type=int)
     parser.add_argument("--ssh-connect-timeout", type=int, default=15)

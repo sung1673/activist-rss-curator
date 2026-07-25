@@ -47,6 +47,8 @@ jobs:
           python-version: "3.12"
 
       - name: Verify exact closed API v2 deployment
+        env:
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -54,4 +56,5 @@ jobs:
           python .github/scripts/smoke-global-v2.py \
             --base-url "${v1_api%/api/v1}/api/v2" \
             --expected-sha "$GITHUB_SHA" \
-            --release-state closed
+            --release-state closed \
+            --privileged-token-env BSIDE_OPS_TOKEN

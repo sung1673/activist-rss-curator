@@ -59,6 +59,7 @@ jobs:
     timeout-minutes: 18
     env:
       PHP73_CI_INSPECTION_TOKEN: php73-ci-local-inspection-token
+      PHP73_CI_OPS_TOKEN: php73-ci-ops-token-000000000000000000000
     services:
       mysql:
         image: mysql:8.0.42
@@ -87,7 +88,7 @@ jobs:
             --code-revision "$GITHUB_SHA" \
             --output deploy/activist/deployment-manifest.json
           jq -e --arg revision "$GITHUB_SHA" \
-            '.schema_version == 1 and .code_revision == $revision and (.files | length) == 6
+            '.schema_version == 1 and .code_revision == $revision and (.files | length) == 8
               and (.files["migrations/011_global_terminal_v2.sql"] | test("^[0-9a-f]{64}$"))' \
             deploy/activist/deployment-manifest.json > /dev/null
 
@@ -260,12 +261,16 @@ jobs:
           MYSQL_CONTAINER_ID: ${{ job.services.mysql.id }}
         run: |
           identity_backup="$RUNNER_TEMP/deployment-manifest.json"
+          htaccess_backup="$RUNNER_TEMP/activist.htaccess"
+          v1_openapi_backup="$RUNNER_TEMP/openapi.yaml"
           core_backup="$RUNNER_TEMP/openapi-v2.yaml"
           migration_backup="$RUNNER_TEMP/011_global_terminal_v2.sql"
           cp deploy/activist/deployment-manifest.json "$identity_backup"
+          cp deploy/activist/.htaccess "$htaccess_backup"
+          cp deploy/activist/openapi.yaml "$v1_openapi_backup"
           cp deploy/activist/openapi-v2.yaml "$core_backup"
           cp deploy/activist/migrations/011_global_terminal_v2.sql "$migration_backup"
-          trap 'cp "$identity_backup" deploy/activist/deployment-manifest.json; cp "$core_backup" deploy/activist/openapi-v2.yaml; cp "$migration_backup" deploy/activist/migrations/011_global_terminal_v2.sql' EXIT
+          trap 'cp "$identity_backup" deploy/activist/deployment-manifest.json; cp "$htaccess_backup" deploy/activist/.htaccess; cp "$v1_openapi_backup" deploy/activist/openapi.yaml; cp "$core_backup" deploy/activist/openapi-v2.yaml; cp "$migration_backup" deploy/activist/migrations/011_global_terminal_v2.sql' EXIT
           curl --fail-with-body --silent --show-error \
             http://127.0.0.1:8787/api.php/api/v2/health > "$RUNNER_TEMP/v2-health.json"
           jq -e --arg revision "$GITHUB_SHA" \
@@ -293,6 +298,24 @@ jobs:
           test "$mismatched_identity_status" = "503"
           grep -q 'deployment_core_hash_mismatch' "$RUNNER_TEMP/v2-health-mismatch.json"
           cp "$core_backup" deploy/activist/openapi-v2.yaml
+          curl --fail-with-body --silent --show-error \
+            http://127.0.0.1:8787/api.php/api/v2/health \
+            | jq -e --arg revision "$GITHUB_SHA" '.code_revision == $revision' > /dev/null
+
+          mv deploy/activist/.htaccess "$RUNNER_TEMP/activist.htaccess.missing"
+          missing_htaccess_status="$(curl --silent \
+            --output "$RUNNER_TEMP/v2-health-htaccess-missing.json" --write-out '%{http_code}' \
+            http://127.0.0.1:8787/api.php/api/v2/health)"
+          test "$missing_htaccess_status" = "503"
+          grep -q 'deployment_core_file_missing' "$RUNNER_TEMP/v2-health-htaccess-missing.json"
+          cp "$htaccess_backup" deploy/activist/.htaccess
+          printf '\n' >> deploy/activist/openapi.yaml
+          mismatched_v1_contract_status="$(curl --silent \
+            --output "$RUNNER_TEMP/v2-health-v1-contract-mismatch.json" --write-out '%{http_code}' \
+            http://127.0.0.1:8787/api.php/api/v2/health)"
+          test "$mismatched_v1_contract_status" = "503"
+          grep -q 'deployment_core_hash_mismatch' "$RUNNER_TEMP/v2-health-v1-contract-mismatch.json"
+          cp "$v1_openapi_backup" deploy/activist/openapi.yaml
           curl --fail-with-body --silent --show-error \
             http://127.0.0.1:8787/api.php/api/v2/health \
             | jq -e --arg revision "$GITHUB_SHA" '.code_revision == $revision' > /dev/null
@@ -414,6 +437,7 @@ jobs:
             --base-url http://127.0.0.1:8787/api.php/api/v2 \
             --expected-sha "$GITHUB_SHA" \
             --release-state closed \
+            --privileged-token-env PHP73_CI_OPS_TOKEN \
             --allow-http
 
       - name: Validate Telegram channel identity index migration
@@ -527,6 +551,7 @@ jobs:
           curator/dart_quota.py
           curator/dart_review_sample.py
           curator/deployment_manifest.py
+          curator/php_sftp_deploy.py
           curator/event_identity.py
           curator/global_alpha_monitor.py
           curator/global_alpha_pages_identity.py

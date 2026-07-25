@@ -558,7 +558,8 @@ jobs:
             --base-url "$v2_api" \
             --expected-sha "$GITHUB_SHA" \
             --release-state preview \
-            --preview-token-env GOVERNANCE_PREVIEW_TOKEN
+            --preview-token-env GOVERNANCE_PREVIEW_TOKEN \
+            --privileged-token-env BSIDE_ADMIN_TOKEN
 
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
@@ -753,6 +754,7 @@ jobs:
 
       - name: Smoke deployed root and both preview API boundaries
         env:
+          BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
           GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
           BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
@@ -780,7 +782,8 @@ jobs:
             --base-url "$v2_api" \
             --expected-sha "$GITHUB_SHA" \
             --release-state preview \
-            --preview-token-env GOVERNANCE_PREVIEW_TOKEN
+            --preview-token-env GOVERNANCE_PREVIEW_TOKEN \
+            --privileged-token-env BSIDE_ADMIN_TOKEN
           curl --fail --silent --show-error --output /dev/null "$v1_api/health"
           curl --fail --silent --show-error \
             -H "Authorization: Bearer $GOVERNANCE_PREVIEW_TOKEN" \
@@ -878,6 +881,7 @@ jobs:
 
       - name: Smoke public Production Alpha without preview credentials
         env:
+          BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
           BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
         shell: bash
@@ -889,7 +893,8 @@ jobs:
           python .github/scripts/smoke-global-v2.py \
             --base-url "$v2_api" \
             --expected-sha "$GITHUB_SHA" \
-            --release-state live
+            --release-state live \
+            --privileged-token-env BSIDE_ADMIN_TOKEN
           for path in / /governance/ /feed.xml; do
             curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
               --output /dev/null "$web$path"

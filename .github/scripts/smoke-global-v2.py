@@ -145,6 +145,7 @@ def verify_global_v2(
     base_url: str,
     expected_sha: str,
     release_state: str,
+    privileged_token: str,
     preview_token: str = "",
     timeout: float = 20.0,
     allow_http: bool = False,
@@ -167,6 +168,8 @@ def verify_global_v2(
         _fail("expected SHA must be exactly 40 lowercase hexadecimal characters")
     if release_state not in {"closed", "preview", "live"}:
         _fail("release state must be closed, preview, or live")
+    if len(privileged_token) < 32:
+        _fail("privileged release-state smoke requires a protected token")
     if release_state == "preview" and not preview_token:
         _fail("preview release-state smoke requires a preview token")
 
@@ -254,6 +257,31 @@ def verify_global_v2(
     ):
         _fail("invalid bearer admin route: unexpected v2 error envelope")
 
+    privileged_state = _request(
+        f"{base}/ops/release-state",
+        token=privileged_token,
+        timeout=timeout,
+        insecure=insecure,
+    )
+    _require_status(
+        privileged_state,
+        200,
+        label="authenticated protected route",
+    )
+    privileged_payload = _require_v2_json(
+        privileged_state,
+        label="authenticated protected route",
+    )
+    privileged_data = privileged_payload.get("data")
+    if (
+        privileged_payload.get("ok") is not True
+        or not isinstance(privileged_data, dict)
+        or privileged_data.get("release_state") != release_state
+    ):
+        _fail(
+            "authenticated protected route: expected the exact release state"
+        )
+
     if release_state == "preview":
         anonymous_events = _request(
             f"{base}/events?limit=1",
@@ -317,6 +345,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="environment variable containing the preview Bearer token",
     )
+    parser.add_argument(
+        "--privileged-token-env",
+        required=True,
+        help=(
+            "environment variable containing an ops or admin Bearer token; "
+            "the value is never printed"
+        ),
+    )
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument(
         "--allow-http",
@@ -338,11 +374,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.preview_token_env
         else ""
     )
+    privileged_token = os.environ.get(args.privileged_token_env, "")
     try:
         verify_global_v2(
             base_url=args.base_url,
             expected_sha=args.expected_sha,
             release_state=args.release_state,
+            privileged_token=privileged_token,
             preview_token=preview_token,
             timeout=args.timeout,
             allow_http=args.allow_http,

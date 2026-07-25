@@ -13,10 +13,12 @@ from typing import Mapping
 MANIFEST_SCHEMA_VERSION = 1
 MANIFEST_FILENAME = "deployment-manifest.json"
 CORE_API_FILES = (
+    ".htaccess",
     "api.php",
     "governance_v1.php",
     "governance_v2.php",
     "governance_v2_write.php",
+    "openapi.yaml",
     "openapi-v2.yaml",
     "migrations/011_global_terminal_v2.sql",
 )
