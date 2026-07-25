@@ -32,7 +32,6 @@ jobs:
     environment:
       name: governance-runtime
     env:
-      EVIDENCE_PATH: ${{ runner.temp }}/global-alpha-observation.json
       GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
       BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
       BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
@@ -44,6 +43,8 @@ jobs:
       - name: Initialize fail-closed observation evidence
         id: initialize
         shell: bash
+        env:
+          EVIDENCE_PATH: ${{ runner.temp }}/global-alpha-observation.json
         run: |
           set -euo pipefail
           python -c "import json,os,pathlib; pathlib.Path(os.environ['EVIDENCE_PATH']).write_text(json.dumps({'schema_version':1,'status':'not_started','pipeline_mode':os.environ.get('GOVERNANCE_PIPELINE_MODE',''),'workflow_revision':os.environ.get('GITHUB_SHA','')},sort_keys=True,indent=2)+'\n',encoding='utf-8')"
@@ -72,6 +73,8 @@ jobs:
 
       - name: Observe API, release, sources, and public build
         if: steps.rollout.outputs.global_alpha_observation_enabled == 'true'
+        env:
+          EVIDENCE_PATH: ${{ runner.temp }}/global-alpha-observation.json
         run: >-
           python -m curator.global_alpha_monitor
           --evidence "$EVIDENCE_PATH"
@@ -82,6 +85,6 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: global-alpha-observation-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.EVIDENCE_PATH }}
+          path: ${{ runner.temp }}/global-alpha-observation.json
           if-no-files-found: error
           retention-days: 30

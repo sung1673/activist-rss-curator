@@ -46,6 +46,68 @@ def test_all_workflows_are_valid_yaml() -> None:
         assert "jobs" in payload, path
 
 
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name", "producer_steps", "artifact_step", "path"),
+    (
+        (
+            "ingest-global.yml",
+            "ingest",
+            (
+                "Initialize fail-safe evidence",
+                "Collect and ingest official source",
+            ),
+            "Preserve global ingest evidence",
+            "${{ runner.temp }}/global-ingest-${{ matrix.country }}.json",
+        ),
+        (
+            "ingest-selected-markets.yml",
+            "ingest",
+            (
+                "Initialize fail-safe evidence",
+                "Validate and ingest approved manual metadata links",
+            ),
+            "Preserve manual official-link ingest evidence",
+            (
+                "${{ runner.temp }}/manual-official-link-ingest-"
+                "${{ matrix.country }}.json"
+            ),
+        ),
+        (
+            "global-alpha-watchdog.yml",
+            "observe",
+            (
+                "Initialize fail-closed observation evidence",
+                "Observe API, release, sources, and public build",
+            ),
+            "Preserve immutable observation evidence",
+            "${{ runner.temp }}/global-alpha-observation.json",
+        ),
+    ),
+)
+def test_runner_temp_evidence_paths_are_scoped_to_steps(
+    workflow_name: str,
+    job_name: str,
+    producer_steps: tuple[str, ...],
+    artifact_step: str,
+    path: str,
+) -> None:
+    workflow = yaml.load(
+        workflow_text(workflow_name),
+        Loader=yaml.BaseLoader,
+    )
+    job = workflow["jobs"][job_name]
+    assert "EVIDENCE_PATH" not in job.get("env", {})
+
+    steps = {
+        step["name"]: step
+        for step in job["steps"]
+        if isinstance(step, dict) and "name" in step
+    }
+    for step_name in producer_steps:
+        assert steps[step_name]["env"]["EVIDENCE_PATH"] == path
+    assert steps[artifact_step]["with"]["path"] == path
+
+
 def test_upload_artifact_v7_uses_the_declared_digest_output_name() -> None:
     upload_action = (
         "actions/upload-artifact@"
