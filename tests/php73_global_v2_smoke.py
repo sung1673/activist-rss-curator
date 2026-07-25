@@ -1845,7 +1845,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
         and checkpoint_data.get("cursor_json", {}).get("window_end_exclusive")
         == "2026-07-24"
         and checkpoint_data.get("cursor_json", {}).get("batch_id")
-        == ("global-batch:" + hashlib.sha256(b"php73-v2-sec-ingest-v2").hexdigest())
+        == complete_batch
         and checkpoint_data.get("code_revision") == CODE_REVISION,
         repr(checkpoint),
     )
