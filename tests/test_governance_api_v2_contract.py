@@ -1281,6 +1281,21 @@ def test_protected_cutover_requires_exact_authorizer_and_consumes_once_atomicall
     assert SPEC["paths"]["/ops/release-state"]["get"]["security"] == [
         {"OpsBearer": []}
     ]
+    smoke = (ROOT / "tests" / "php73_global_v2_smoke.py").read_text(
+        encoding="utf-8"
+    )
+    direct_v2 = smoke[
+        smoke.index("direct_v2_live, _ = request_json") : smoke.index(
+            "direct_v1_live, _ = request_json"
+        )
+    ]
+    direct_v1 = smoke[
+        smoke.index("direct_v1_live, _ = request_json") : smoke.index(
+            "admin_cannot_authorize, _ = request_json"
+        )
+    ]
+    assert '"expected_version": 1' in direct_v2
+    assert '"expected_version": v1_preview_version' in direct_v1
 
 
 def test_alpha_release_evidence_is_ops_only_and_database_derived():

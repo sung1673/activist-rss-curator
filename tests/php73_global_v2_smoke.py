@@ -2151,7 +2151,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
         token=ADMIN_TOKEN,
         payload={
             "release_state": "live",
-            "expected_version": v1_preview_version,
+            "expected_version": 1,
             "reason": "CI rejects direct v2 preview promotion.",
         },
         expected_status=409,
@@ -2167,7 +2167,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
         token=ADMIN_TOKEN,
         payload={
             "release_state": "live",
-            "expected_version": 1,
+            "expected_version": v1_preview_version,
             "reason": "CI rejects direct v1 preview promotion.",
         },
         expected_status=409,
