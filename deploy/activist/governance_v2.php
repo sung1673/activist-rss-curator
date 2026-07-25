@@ -23,10 +23,12 @@ require_once __DIR__ . '/governance_v2_write.php';
 
 function v2_deployment_core_files(): array {
     return array(
+        '.htaccess',
         'api.php',
         'governance_v1.php',
         'governance_v2.php',
         'governance_v2_write.php',
+        'openapi.yaml',
         'openapi-v2.yaml',
         'migrations/011_global_terminal_v2.sql',
     );

@@ -152,6 +152,8 @@ jobs:
           python .github/scripts/validate-api-base-urls.py --github-env "$GITHUB_ENV"
 
       - name: Verify exact closed API v2 deployment
+        env:
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -159,7 +161,8 @@ jobs:
           python .github/scripts/smoke-global-v2.py \
             --base-url "${v1_api%/api/v1}/api/v2" \
             --expected-sha "$GITHUB_SHA" \
-            --release-state closed
+            --release-state closed \
+            --privileged-token-env BSIDE_OPS_TOKEN
 
       - name: Run sequential one-day global backfill
         env:

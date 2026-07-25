@@ -13,9 +13,12 @@ import pytest
 from curator.mysql_backup import (
     ConnectionOptions,
     MySqlBackupError,
+    SshDirectTcpipTunnel,
+    SshTunnelOptions,
     build_arg_parser,
     connection_options_from_args,
     create_mysql_backup,
+    legacy_ssh_rsa_sha1_is_allowed,
     quote_identifier,
     ssh_host_key_sha256,
     ssh_options_from_args,
@@ -537,6 +540,306 @@ def test_ssh_options_require_and_normalize_a_pinned_host_key() -> None:
     verify_ssh_host_key(key_bytes, fingerprint)
     with pytest.raises(MySqlBackupError, match="does not match"):
         verify_ssh_host_key(b"different-key", fingerprint)
+
+
+def test_legacy_ssh_rsa_sha1_requires_opt_in_target_and_exact_pin() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        [
+            "--output",
+            "backup.sql.gz",
+            "--ssh-tunnel",
+            "--ssh-allow-legacy-rsa-sha1",
+        ]
+    )
+    key_bytes = b"gabia-public-host-key"
+    fingerprint = ssh_host_key_sha256(key_bytes)
+    base_environment = {
+        "SSH_HOST": "Legacy.Example.",
+        "SSH_USER": "ssh-user",
+        "SSH_PASSWORD": "ssh-secret",
+        "SSH_HOST_KEY_SHA256": fingerprint,
+    }
+
+    with pytest.raises(MySqlBackupError, match="explicit target host"):
+        ssh_options_from_args(args, environ=base_environment)
+
+    configured = ssh_options_from_args(
+        args,
+        environ={
+            **base_environment,
+            "SSH_LEGACY_RSA_SHA1_HOST": "legacy.example",
+        },
+    )
+    assert configured is not None
+    assert configured.allow_legacy_ssh_rsa_sha1 is True
+    assert legacy_ssh_rsa_sha1_is_allowed(configured) is True
+
+    environment_configured = ssh_options_from_args(
+        parser.parse_args(["--output", "backup.sql.gz", "--ssh-tunnel"]),
+        environ={
+            **base_environment,
+            "SSH_ALLOW_LEGACY_RSA_SHA1": "true",
+            "SSH_LEGACY_RSA_SHA1_HOST": "legacy.example",
+        },
+    )
+    assert environment_configured is not None
+    assert environment_configured.allow_legacy_ssh_rsa_sha1 is True
+
+    cli_configured = ssh_options_from_args(
+        parser.parse_args(
+            [
+                "--output",
+                "backup.sql.gz",
+                "--ssh-tunnel",
+                "--ssh-host",
+                "legacy.example",
+                "--ssh-user",
+                "ssh-user",
+                "--ssh-password",
+                "ssh-secret",
+                "--ssh-host-key-sha256",
+                fingerprint,
+                "--ssh-allow-legacy-rsa-sha1",
+                "--ssh-legacy-rsa-sha1-host",
+                "legacy.example",
+            ]
+        ),
+        environ={},
+    )
+    assert cli_configured is not None
+    assert cli_configured.allow_legacy_ssh_rsa_sha1 is True
+
+    with pytest.raises(MySqlBackupError, match="must match"):
+        ssh_options_from_args(
+            args,
+            environ={
+                **base_environment,
+                "SSH_LEGACY_RSA_SHA1_HOST": "different.example",
+            },
+        )
+
+    without_pin = dict(base_environment)
+    without_pin.pop("SSH_HOST_KEY_SHA256")
+    without_pin["SSH_LEGACY_RSA_SHA1_HOST"] = "legacy.example"
+    with pytest.raises(MySqlBackupError, match="missing connection setting"):
+        ssh_options_from_args(args, environ=without_pin)
+
+
+def test_legacy_ssh_rsa_sha1_target_without_opt_in_fails_closed() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(["--output", "backup.sql.gz", "--ssh-tunnel"])
+    fingerprint = ssh_host_key_sha256(b"host-key")
+
+    with pytest.raises(MySqlBackupError, match="requires explicit opt-in"):
+        ssh_options_from_args(
+            args,
+            environ={
+                "SSH_HOST": "ssh.example",
+                "SSH_USER": "ssh-user",
+                "SSH_PASSWORD": "ssh-secret",
+                "SSH_HOST_KEY_SHA256": fingerprint,
+                "SSH_LEGACY_RSA_SHA1_HOST": "ssh.example",
+            },
+        )
+
+    with pytest.raises(MySqlBackupError, match="must be a boolean"):
+        ssh_options_from_args(
+            args,
+            environ={
+                "SSH_ALLOW_LEGACY_RSA_SHA1": "sometimes",
+            },
+        )
+
+
+def test_paramiko_legacy_host_key_exception_is_per_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import paramiko
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    created: list[Any] = []
+    authenticated: list[tuple[str, str, bool]] = []
+    key_bytes = b"pinned-host-key"
+    fingerprint = ssh_host_key_sha256(key_bytes)
+    default_key_info = dict(paramiko.Transport._key_info)
+    default_preferred_keys = tuple(paramiko.Transport._preferred_keys)
+
+    class FakeSocket:
+        def close(self) -> None:
+            return None
+
+    class FakeServerKey:
+        def asbytes(self) -> bytes:
+            return key_bytes
+
+    class FakeTransport:
+        def __init__(
+            self,
+            _socket: object,
+            *,
+            disabled_algorithms: object,
+        ) -> None:
+            self.disabled_algorithms = disabled_algorithms
+            self._key_info = dict(default_key_info)
+            self._preferred_keys = tuple(default_preferred_keys)
+            self.auth_timeout = 0
+            created.append(self)
+
+        def start_client(self, *, timeout: int) -> None:
+            assert timeout == 15
+
+        def get_remote_server_key(self) -> FakeServerKey:
+            return FakeServerKey()
+
+        def auth_password(
+            self,
+            *,
+            username: str,
+            password: str,
+            fallback: bool,
+        ) -> None:
+            authenticated.append((username, password, fallback))
+
+        def is_authenticated(self) -> bool:
+            return True
+
+        def close(self) -> None:
+            return None
+
+    class FakeServer:
+        def __init__(self, *_args: object) -> None:
+            self.server_address = ("127.0.0.1", 33060)
+
+        def serve_forever(self, *, poll_interval: float) -> None:
+            assert poll_interval == 0.1
+
+        def shutdown(self) -> None:
+            return None
+
+        def server_close(self) -> None:
+            return None
+
+    monkeypatch.setattr("socket.create_connection", lambda *_args, **_kwargs: FakeSocket())
+    monkeypatch.setattr(paramiko, "Transport", FakeTransport)
+    monkeypatch.setattr("curator.mysql_backup._DirectTcpipServer", FakeServer)
+
+    default_options = SshTunnelOptions(
+        host="modern.example",
+        port=22,
+        user="ssh-user",
+        password="ssh-secret",
+        host_key_sha256=fingerprint,
+    )
+    with SshDirectTcpipTunnel(
+        default_options,
+        destination_host="private-db",
+        destination_port=3306,
+    ):
+        pass
+    assert created[0].disabled_algorithms == {"keys": ["ssh-rsa"]}
+    assert "ssh-rsa" not in created[0]._preferred_keys
+
+    legacy_options = SshTunnelOptions(
+        host="legacy.example",
+        port=22,
+        user="ssh-user",
+        password="ssh-secret",
+        host_key_sha256=fingerprint,
+        allow_legacy_ssh_rsa_sha1=True,
+        legacy_ssh_rsa_sha1_host="legacy.example",
+    )
+    with SshDirectTcpipTunnel(
+        legacy_options,
+        destination_host="private-db",
+        destination_port=3306,
+    ):
+        pass
+    assert created[1].disabled_algorithms is None
+    assert created[1]._preferred_keys[-1] == "ssh-rsa"
+    assert "ssh-rsa" in created[1].preferred_keys
+    assert "ssh-rsa-cert-v01@openssh.com" not in created[1].preferred_keys
+    assert "ssh-rsa" in created[1]._key_info
+    assert "ssh-rsa" in created[1]._key_info["ssh-rsa"].HASHES
+    signed_data = b"local-host-key-verification-fixture"
+    private_key = paramiko.RSAKey.generate(bits=1024)
+    signature = private_key.key.sign(
+        signed_data,
+        padding.PKCS1v15(),
+        hashes.SHA1(),
+    )
+    signature_message = paramiko.Message()
+    signature_message.add_string("ssh-rsa")
+    signature_message.add_string(signature)
+    legacy_public_key = created[1]._key_info["ssh-rsa"](
+        data=private_key.asbytes()
+    )
+    assert legacy_public_key.verify_ssh_sig(
+        signed_data,
+        paramiko.Message(signature_message.asbytes()),
+    )
+    assert authenticated == [
+        ("ssh-user", "ssh-secret", False),
+        ("ssh-user", "ssh-secret", False),
+    ]
+
+
+def test_wrong_pin_aborts_before_ssh_authentication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import paramiko
+
+    authenticated = False
+
+    class FakeSocket:
+        def close(self) -> None:
+            return None
+
+    class FakeServerKey:
+        def asbytes(self) -> bytes:
+            return b"unexpected-host-key"
+
+    class FakeTransport:
+        _key_info = dict(paramiko.Transport._key_info)
+        _preferred_keys = tuple(paramiko.Transport._preferred_keys)
+
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            self.auth_timeout = 0
+
+        def start_client(self, *, timeout: int) -> None:
+            return None
+
+        def get_remote_server_key(self) -> FakeServerKey:
+            return FakeServerKey()
+
+        def auth_password(self, **_kwargs: object) -> None:
+            nonlocal authenticated
+            authenticated = True
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("socket.create_connection", lambda *_args, **_kwargs: FakeSocket())
+    monkeypatch.setattr(paramiko, "Transport", FakeTransport)
+    options = SshTunnelOptions(
+        host="legacy.example",
+        port=22,
+        user="ssh-user",
+        password="ssh-secret",
+        host_key_sha256=ssh_host_key_sha256(b"expected-host-key"),
+        allow_legacy_ssh_rsa_sha1=True,
+        legacy_ssh_rsa_sha1_host="legacy.example",
+    )
+
+    with pytest.raises(MySqlBackupError, match="does not match"):
+        with SshDirectTcpipTunnel(
+            options,
+            destination_host="private-db",
+            destination_port=3306,
+        ):
+            pass
+    assert authenticated is False
 
 
 def test_ssh_tunnel_is_disabled_unless_requested() -> None:

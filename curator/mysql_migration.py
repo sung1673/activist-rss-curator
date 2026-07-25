@@ -559,6 +559,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ssh-user")
     parser.add_argument("--ssh-password")
     parser.add_argument("--ssh-host-key-sha256")
+    parser.add_argument(
+        "--ssh-allow-legacy-rsa-sha1",
+        action="store_true",
+        help=(
+            "Allow the legacy ssh-rsa/SHA-1 host-key algorithm only for the "
+            "explicitly pinned --ssh-legacy-rsa-sha1-host"
+        ),
+    )
+    parser.add_argument("--ssh-legacy-rsa-sha1-host")
     parser.add_argument("--ssh-remote-db-host")
     parser.add_argument("--ssh-remote-db-port", type=int)
     parser.add_argument("--ssh-connect-timeout", type=int, default=15)

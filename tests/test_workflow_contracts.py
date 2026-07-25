@@ -1272,6 +1272,10 @@ def test_global_backfill_is_bounded_serialized_and_preserves_daily_receipts() ->
     assert ".github/scripts/smoke-global-v2.py" in deployment_smoke["run"]
     assert '--expected-sha "$GITHUB_SHA"' in deployment_smoke["run"]
     assert "--release-state closed" in deployment_smoke["run"]
+    assert "--privileged-token-env BSIDE_OPS_TOKEN" in deployment_smoke["run"]
+    assert deployment_smoke["env"]["BSIDE_OPS_TOKEN"] == (
+        "${{ secrets.BSIDE_OPS_TOKEN }}"
+    )
 
     run_step = next(
         step

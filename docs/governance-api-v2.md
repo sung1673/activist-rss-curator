@@ -11,7 +11,7 @@
 - 스키마 버전: `11`
 - 기존 `/api/v1`과 레거시 피드는 호환 기간 동안 별도로 유지한다.
 
-`GET /api/v2/health`와 `GET /api/v2/openapi.yaml`은 release state와 무관하다. 다만 `health`는 `deployment-manifest.json`과 API 핵심 파일 6개의 SHA-256이 모두 일치할 때만 200을 반환하고, 응답의 `code_revision`에 정확한 40자리 Git SHA를 제공한다. manifest가 없거나 잘못됐거나 파일이 하나라도 다르면 503 `deployment_identity_unavailable`이다. 이 성공은 API 배포 신원만 증명하며 데이터베이스·공식 소스·공개 데이터 경로의 정상 상태까지 뜻하지는 않는다.
+`GET /api/v2/health`와 `GET /api/v2/openapi.yaml`은 release state와 무관하다. 다만 `health`는 `deployment-manifest.json`과 API 핵심 파일 8개의 SHA-256이 모두 일치할 때만 200을 반환하고, 응답의 `code_revision`에 정확한 40자리 Git SHA를 제공한다. manifest가 없거나 잘못됐거나 파일이 하나라도 다르면 503 `deployment_identity_unavailable`이다. 이 성공은 API 배포 신원만 증명하며 데이터베이스·공식 소스·공개 데이터 경로의 정상 상태까지 뜻하지는 않는다.
 
 API 배포 artifact는 다음 명령으로 checkout의 정확한 SHA를 고정한다.
 
@@ -22,7 +22,9 @@ python -m curator.deployment_manifest \
   --output deploy/activist/deployment-manifest.json
 ```
 
-`api.php`, `governance_v1.php`, `governance_v2.php`, `governance_v2_write.php`, `openapi-v2.yaml`, `migrations/011_global_terminal_v2.sql`, 생성된 `deployment-manifest.json`은 항상 하나의 배포 transaction으로 교체한다. 전송은 줄바꿈을 바꾸지 않는 binary/byte-preserving 방식이어야 한다. 디렉터리 단위 원자 교체가 불가능한 환경에서는 v2를 `closed`로 둔 채 핵심 파일을 먼저 올리고 manifest를 마지막 commit marker로 교체한다. 중간 상태의 health 503은 정상적인 fail-closed 동작이며, 이전 파일과 새 manifest를 섞어 200으로 우회해서는 안 된다. 롤백도 이전 핵심 파일 전체와 그 파일들에서 생성한 이전 manifest를 한 묶음으로 복원하고 manifest를 마지막에 교체한다. PHP OPcache를 사용하는 서버는 교체 transaction 직후 캐시를 무효화하거나 PHP 프로세스를 안전하게 reload한 다음 health를 확인해야 한다.
+`.htaccess`, `api.php`, `governance_v1.php`, `governance_v2.php`, `governance_v2_write.php`, `openapi.yaml`, `openapi-v2.yaml`, `migrations/011_global_terminal_v2.sql`, 생성된 `deployment-manifest.json`은 항상 하나의 배포 transaction으로 교체한다. 특히 Authorization 전달 규칙과 v1 계약도 v2 코드와 같은 배포 신원에 묶는다. 전송은 줄바꿈을 바꾸지 않는 binary/byte-preserving 방식이어야 한다. 디렉터리 단위 원자 교체가 불가능한 환경에서는 v2를 `closed`로 둔 채 핵심 파일을 먼저 올리고 manifest를 마지막 commit marker로 교체한다. 중간 상태의 health 503은 정상적인 fail-closed 동작이며, 이전 파일과 새 manifest를 섞어 200으로 우회해서는 안 된다. 롤백도 이전 핵심 파일 전체와 그 파일들에서 생성한 이전 manifest를 한 묶음으로 복원하고 manifest를 마지막에 교체한다. PHP OPcache를 사용하는 서버는 교체 transaction 직후 캐시를 무효화하거나 PHP 프로세스를 안전하게 reload한 다음 health를 확인해야 한다.
+
+운영 smoke는 잘못된 Bearer token이 거부되는지만 확인하지 않는다. 보호된 환경의 ops 또는 admin token으로 `GET /ops/release-state`가 HTTP 200을 반환하고 요청한 release state와 일치하는지 함께 확인한다. 따라서 웹 서버가 `Authorization` 헤더를 PHP로 전달하지 않는 구성은 배포 성공으로 판정될 수 없다. 토큰은 명령 인자가 아니라 지정한 환경변수에서만 읽으며 출력하지 않는다.
 
 Migration 011은 이름으로 만든 고정 checksum을 사용하지 않는다. 배포한 SQL 파일의 원본 바이트를 SHA-256으로 계산하고, 파일과 같은 MySQL 세션·같은 입력 stream에서 먼저 세션 변수를 설정한 뒤 파일 바이트를 그대로 적용한다. 예시는 다음과 같다.
 

@@ -121,6 +121,8 @@ def test_builder_refuses_to_write_a_manifest_outside_the_deployment_root(
 def test_php_health_is_fail_closed_on_manifest_or_hash_mismatch() -> None:
     php = (DEPLOYMENT_ROOT / "governance_v2.php").read_text(encoding="utf-8")
 
+    assert CORE_API_FILES[:2] == (".htaccess", "api.php")
+    assert "openapi.yaml" in CORE_API_FILES
     for relative_name in CORE_API_FILES:
         assert f"'{relative_name}'" in php
     assert "deployment-manifest.json" in php
@@ -161,7 +163,9 @@ def test_ci_builds_and_tamper_tests_the_checked_out_revision() -> None:
     assert "deployment_manifest_missing" in workflow
     assert "deployment_core_hash_mismatch" in workflow
     assert ".code_revision == $revision" in workflow
-    assert "(.files | length) == 6" in workflow
+    assert "(.files | length) == 8" in workflow
+    assert "v2-health-htaccess-missing.json" in workflow
+    assert "v2-health-v1-contract-mismatch.json" in workflow
     assert 'sha256sum "$migration_011_source"' in workflow
     assert "SET @bside_migration_011_sha256" in workflow
     assert "one-byte source change" in workflow

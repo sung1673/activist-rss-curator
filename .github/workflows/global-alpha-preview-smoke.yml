@@ -72,6 +72,7 @@ jobs:
 
       - name: Verify exact preview API v2 deployment
         env:
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
           GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
         shell: bash
         run: |
@@ -81,7 +82,8 @@ jobs:
             --base-url "${v1_api%/api/v1}/api/v2" \
             --expected-sha "$GITHUB_SHA" \
             --release-state preview \
-            --preview-token-env GOVERNANCE_PREVIEW_TOKEN
+            --preview-token-env GOVERNANCE_PREVIEW_TOKEN \
+            --privileged-token-env BSIDE_OPS_TOKEN
 
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
