@@ -2734,6 +2734,26 @@ def run(base_url: str, mysql_container_id: str) -> None:
         "updated_at=UTC_TIMESTAMP() "
         f"WHERE source_right_id='{SEC_RIGHT_ID}';",
     )
+    stale_rights_revision = rights_revision
+    restored_eligibility, _ = request_json(
+        base_url,
+        (
+            "api.php/api/v2/ops/source-right-eligibility?"
+            + urllib.parse.urlencode(
+                {"source_right_id": SEC_RIGHT_ID, "use": "collect"}
+            )
+        ),
+        token=OPS_TOKEN,
+    )
+    rights_revision = restored_eligibility.get("rights_revision")
+    require(
+        restored_eligibility.get("eligible") is True
+        and restored_eligibility.get("source_key") == SEC_SOURCE_KEY
+        and isinstance(rights_revision, str)
+        and len(rights_revision) == 64
+        and rights_revision != stale_rights_revision,
+        repr(restored_eligibility),
+    )
 
     pagination_ids = add_byte_pagination_fixture_events(
         mysql_container_id,
