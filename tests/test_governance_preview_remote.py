@@ -45,9 +45,24 @@ def test_remote_preview_workflow_is_manual_default_branch_runtime_only() -> None
     job = payload["jobs"]["preview-smoke"]
     assert job["if"] == "github.ref_name == github.event.repository.default_branch"
     assert job["environment"] == {"name": "governance-runtime"}
-    assert job["env"]["GOVERNANCE_PREVIEW_TOKEN"] == (
-        "${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}"
+    assert "GOVERNANCE_PREVIEW_TOKEN" not in job["env"]
+    secret_steps = {
+        step["name"]
+        for step in job["steps"]
+        if "GOVERNANCE_PREVIEW_TOKEN" in step.get("env", {})
+    }
+    assert secret_steps == {
+        "Verify exact preview API v2 deployment",
+        "Run three-viewport remote preview journeys",
+        "Remove preview credentials from browser artifacts",
+    }
+    upload = next(
+        step
+        for step in job["steps"]
+        if step["name"]
+        == "Preserve same-revision screenshots, traces, and receipts"
     )
+    assert "env" not in upload
     assert "GOVERNANCE_PIPELINE_MODE=shadow" in workflow
     assert "playwright.preview.config.mjs" in workflow
     assert "sanitize-preview-artifacts.py test-results/preview-remote" in workflow

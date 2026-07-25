@@ -533,9 +533,54 @@ function v2_serve_openapi(string $path): void {
         ));
     }
     header('Content-Type: application/yaml; charset=utf-8');
+    header('X-BSIDE-API-Version: v2');
     header('Cache-Control: public, max-age=300');
     readfile($file);
     exit;
+}
+
+function v2_path_is_defined(string $path): bool {
+    if (in_array($path, array(
+        '/',
+        '/health',
+        '/openapi.yaml',
+        '/openapi.json',
+        '/briefs/latest',
+        '/live',
+        '/events',
+        '/issuers',
+        '/calendar',
+        '/search',
+        '/sources/status',
+        '/ops/source-right-eligibility',
+        '/ops/alpha-release-evidence',
+        '/ops/release-state',
+        '/ops/ingest',
+        '/exports/events.json',
+        '/exports/events.csv',
+        '/feeds/events.atom',
+        '/admin/release-state',
+        '/admin/release-authorizations',
+        '/admin/cutover',
+        '/admin/connectors',
+        '/admin/review-queue',
+        '/admin/brief-candidates',
+        '/admin/briefs',
+    ), true)) {
+        return true;
+    }
+    foreach (array(
+        '#^/events/[A-Za-z0-9_.:\-]{1,96}$#',
+        '#^/issuers/[A-Za-z0-9_.:\-]{1,96}$#',
+        '#^/ops/connectors/connector:[a-z]{2}:[a-z0-9_.:\-]{1,64}/checkpoint$#',
+        '#^/admin/connectors/connector:[a-z]{2}:[a-z0-9_.:\-]{1,64}$#',
+        '#^/admin/events/[A-Za-z0-9_.:\-]{1,96}/review$#',
+    ) as $pattern) {
+        if (preg_match($pattern, $path) === 1) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function v2_valid_country($value, bool $allowGlobal = false): ?string {
@@ -3166,6 +3211,7 @@ function v2_alpha_global_connector_windows(
         if ($chunkCount < 1 || count($batchRows) !== $chunkCount) {
             throw new RuntimeException('alpha_evidence_batch_incomplete');
         }
+        $final = $batchRows[$chunkCount - 1];
         $raw = 0;
         $acknowledged = 0;
         $requests = 0;
@@ -3182,8 +3228,6 @@ function v2_alpha_global_connector_windows(
                 || (int)$row['batch_raw_count'] !== (int)$first['batch_raw_count']
                 || (int)$row['batch_acknowledged_count']
                     !== (int)$first['batch_acknowledged_count']
-                || (int)$row['batch_request_count']
-                    !== (int)$first['batch_request_count']
                 || (string)$row['code_revision'] !== $codeRevision
                 || preg_match(
                     '/^[a-f0-9]{64}$/D',
@@ -3217,7 +3261,7 @@ function v2_alpha_global_connector_windows(
         if (
             $raw !== (int)$first['batch_raw_count']
             || $acknowledged !== (int)$first['batch_acknowledged_count']
-            || $requests !== (int)$first['batch_request_count']
+            || $requests !== (int)$final['batch_request_count']
             || $raw < $acknowledged
         ) {
             throw new RuntimeException('alpha_evidence_receipt_totals_mismatch');
@@ -3625,11 +3669,15 @@ function handle_v2_request(string $method, string $path, array $config): void {
             'ok' => true,
             'service' => 'bside-global-market-terminal',
             'code_revision' => $identity['code_revision'],
+            'schema_version' => GOV_V2_SCHEMA_VERSION,
             'time' => gmdate('c'),
         ));
     }
     if ($method === 'GET' && ($path === '/openapi.yaml' || $path === '/openapi.json')) {
         v2_serve_openapi($path);
+    }
+    if (!v2_path_is_defined($path)) {
+        v2_respond(404, array('ok' => false, 'error' => 'not_found'));
     }
 
     $role = null;

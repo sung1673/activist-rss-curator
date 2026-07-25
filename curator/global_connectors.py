@@ -2560,7 +2560,6 @@ class CompaniesHouseFilingHistoryConnector(BaseGlobalConnector):
                         raise GlobalConnectorContractError(
                             "Companies House filing item must be an object"
                         )
-                    raw_count += 1
                     transaction_id = str(item.get("transaction_id") or "").strip()
                     filed_date = str(item.get("date") or "").strip()
                     category = str(item.get("category") or "").strip()
@@ -2593,6 +2592,9 @@ class CompaniesHouseFilingHistoryConnector(BaseGlobalConnector):
                         < request.window_end_exclusive
                     ):
                         continue
+                    # Historical replay identity covers the requested date
+                    # window, not newer pages scanned to reach that window.
+                    raw_count += 1
                     family = COMPANIES_HOUSE_FAMILIES.get(category)
                     if family is None:
                         continue

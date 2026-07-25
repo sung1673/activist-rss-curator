@@ -7,6 +7,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+import yaml
 
 import curator.global_ingest as global_ingest_module
 from curator.global_connectors import (
@@ -35,10 +36,14 @@ from curator.global_ingest import (
     coverage_unavailable_evidence,
     default_completed_window,
     execute_global_ingest,
+    execute_global_ingest_with_replay,
+    global_ingest_batch_id,
     global_ingest_execution_mode,
     global_ingest_chunk,
     main,
     parse_companies_house_allowlist,
+    replay_only_verification_evidence,
+    replay_verification_evidence,
     sec_completed_day_limit,
     select_completed_window,
     validate_window,
@@ -113,6 +118,7 @@ def _record(
 def _envelope(
     *,
     raw_count: int = 0,
+    request_count: int = 2,
     retrieved_at: str = NOW,
     records: tuple[GlobalDocumentRecord, ...] = (),
     lifecycle_observations: tuple[GlobalLifecycleObservation, ...] = (),
@@ -128,7 +134,7 @@ def _envelope(
         records=records,
         next_cursor=None,
         exhausted=True,
-        request_count=2,
+        request_count=request_count,
         raw_count=raw_count,
         lifecycle_observations=lifecycle_observations,
     )
@@ -233,6 +239,160 @@ def test_execution_preflights_rechecks_each_page_and_checks_before_post() -> Non
     assert ingest.key == result.idempotency_key
 
 
+class _ReplayIngest:
+    def __init__(self, *, replay_idempotent: bool = True) -> None:
+        self.submissions: list[tuple[str, str]] = []
+        self.replay_idempotent = replay_idempotent
+
+    def submit(
+        self,
+        *,
+        envelope: GlobalConnectorEnvelope,
+        chunk: GlobalIngestChunk,
+        idempotency_key: str,
+        code_revision: str,
+    ) -> GlobalIngestReceipt:
+        del chunk
+        assert code_revision == REVISION
+        self.submissions.append((idempotency_key, envelope.retrieved_at))
+        attempt = len(self.submissions)
+        return GlobalIngestReceipt(
+            ingest_id="global-ingest:exact-replay",
+            connector_id=envelope.connector_id,
+            raw_count=envelope.raw_count,
+            acknowledged_count=(
+                len(envelope.records)
+                + len(envelope.lifecycle_observations)
+            ),
+            idempotent=attempt > 1 and self.replay_idempotent,
+        )
+
+
+def test_exact_replay_fetches_source_once_and_requires_idempotent_api_ack() -> None:
+    connector = _PagedConnector()
+    ingest = _ReplayIngest()
+    initial, replay = execute_global_ingest_with_replay(
+        country_code="US",
+        connector=connector,
+        issuers=(),
+        window_start=date(2026, 7, 22),
+        window_end_exclusive=date(2026, 7, 24),
+        code_revision=REVISION,
+        rights_client=_Rights(),
+        ingest_client=ingest,
+    )
+
+    assert connector.provider_calls == 2
+    assert len(ingest.submissions) == 2
+    assert ingest.submissions[0] == ingest.submissions[1]
+    assert initial.idempotent is False
+    assert replay.idempotent is True
+    assert replay.idempotent_chunk_count == replay.chunk_count == 1
+    assert replay_verification_evidence(initial, replay) == {
+        "attempted": True,
+        "same_payload": True,
+        "idempotent": True,
+        "chunk_count": 1,
+        "idempotent_chunk_count": 1,
+        "idempotency_keys_match": True,
+        "ingest_ids_match": True,
+        "raw_count": 0,
+        "acknowledged_count": 0,
+    }
+
+
+def test_exact_replay_fails_when_second_api_ack_is_not_idempotent() -> None:
+    with pytest.raises(
+        GlobalIngestApiError,
+        match="global_ingest_replay_not_idempotent",
+    ):
+        execute_global_ingest_with_replay(
+            country_code="US",
+            connector=_PagedConnector(),
+            issuers=(),
+            window_start=date(2026, 7, 22),
+            window_end_exclusive=date(2026, 7, 24),
+            code_revision=REVISION,
+            rights_client=_Rights(),
+            ingest_client=_ReplayIngest(replay_idempotent=False),
+        )
+
+
+class _ReplayOnlyIngest:
+    def __init__(self, *, idempotent: bool = True) -> None:
+        self.idempotent = idempotent
+        self.replay_only_values: list[bool] = []
+
+    def submit(
+        self,
+        *,
+        envelope: GlobalConnectorEnvelope,
+        chunk: GlobalIngestChunk,
+        idempotency_key: str,
+        code_revision: str,
+        replay_only: bool = False,
+    ) -> GlobalIngestReceipt:
+        del chunk, idempotency_key
+        assert code_revision == REVISION
+        self.replay_only_values.append(replay_only)
+        return GlobalIngestReceipt(
+            ingest_id="global-ingest:read-only-replay",
+            connector_id=envelope.connector_id,
+            raw_count=envelope.raw_count,
+            acknowledged_count=(
+                len(envelope.records)
+                + len(envelope.lifecycle_observations)
+            ),
+            idempotent=self.idempotent,
+        )
+
+
+def test_replay_only_requires_preexisting_idempotent_receipts() -> None:
+    ingest = _ReplayOnlyIngest()
+    result = execute_global_ingest(
+        country_code="US",
+        connector=_PagedConnector(),
+        issuers=(),
+        window_start=date(2026, 7, 22),
+        window_end_exclusive=date(2026, 7, 24),
+        code_revision=REVISION,
+        rights_client=_Rights(),
+        ingest_client=ingest,
+        replay_only=True,
+    )
+
+    assert ingest.replay_only_values == [True]
+    assert result.idempotent is True
+    assert replay_only_verification_evidence(result) == {
+        "attempted": True,
+        "same_payload": True,
+        "idempotent": True,
+        "read_only": True,
+        "chunk_count": 1,
+        "idempotent_chunk_count": 1,
+        "idempotency_keys_match": True,
+        "ingest_ids_match": True,
+        "raw_count": 0,
+        "acknowledged_count": 0,
+    }
+
+    with pytest.raises(
+        GlobalIngestApiError,
+        match="global_ingest_replay_not_idempotent",
+    ):
+        execute_global_ingest(
+            country_code="US",
+            connector=_PagedConnector(),
+            issuers=(),
+            window_start=date(2026, 7, 22),
+            window_end_exclusive=date(2026, 7, 24),
+            code_revision=REVISION,
+            rights_client=_Rights(),
+            ingest_client=_ReplayOnlyIngest(idempotent=False),
+            replay_only=True,
+        )
+
+
 def test_content_idempotency_key_is_stable_for_exact_content() -> None:
     first = content_idempotency_key(
         envelope=_envelope(),
@@ -299,39 +459,54 @@ def test_chunk_raw_counts_partition_records_lifecycle_and_filtered_rows() -> Non
     assert sum(chunk.raw_count for chunk in chunks) == envelope.raw_count
 
 
-def test_idempotency_ignores_only_observation_time_fields() -> None:
-    first = content_idempotency_key(
-        envelope=_envelope(
-            raw_count=1,
-            retrieved_at="2026-07-24T07:30:00+00:00",
-            records=(
-                _record(
-                    1,
-                    first_observed_at="2026-07-24T07:30:00+00:00",
-                ),
+def test_idempotency_ignores_observation_time_and_request_telemetry() -> None:
+    first_envelope = _envelope(
+        raw_count=1,
+        request_count=2,
+        retrieved_at="2026-07-24T07:30:00+00:00",
+        records=(
+            _record(
+                1,
+                first_observed_at="2026-07-24T07:30:00+00:00",
             ),
         ),
+    )
+    retried_envelope = _envelope(
+        raw_count=1,
+        request_count=5,
+        retrieved_at="2026-07-24T08:00:00+00:00",
+        records=(
+            _record(
+                1,
+                first_observed_at="2026-07-24T08:00:00+00:00",
+            ),
+        ),
+    )
+    first = content_idempotency_key(
+        envelope=first_envelope,
         code_revision=REVISION,
         window_start=date(2026, 7, 23),
         window_end_exclusive=date(2026, 7, 24),
     )
     retried = content_idempotency_key(
-        envelope=_envelope(
-            raw_count=1,
-            retrieved_at="2026-07-24T08:00:00+00:00",
-            records=(
-                _record(
-                    1,
-                    first_observed_at="2026-07-24T08:00:00+00:00",
-                ),
-            ),
-        ),
+        envelope=retried_envelope,
         code_revision=REVISION,
         window_start=date(2026, 7, 23),
         window_end_exclusive=date(2026, 7, 24),
     )
 
     assert first == retried
+    assert global_ingest_batch_id(
+        envelope=first_envelope,
+        window_start=date(2026, 7, 23),
+        window_end_exclusive=date(2026, 7, 24),
+        code_revision=REVISION,
+    ) == global_ingest_batch_id(
+        envelope=retried_envelope,
+        window_start=date(2026, 7, 23),
+        window_end_exclusive=date(2026, 7, 24),
+        code_revision=REVISION,
+    )
 
 
 class _LargeConnector:
@@ -548,6 +723,41 @@ def test_v2_client_posts_exact_envelope_and_validates_counts() -> None:
     assert receipt.api_version == "v2"
     assert receipt.raw_count == 7
     assert receipt.acknowledged_count == 0
+    assert receipt.idempotent is True
+
+
+def test_v2_client_marks_replay_as_server_enforced_read_only() -> None:
+    envelope = _envelope(raw_count=7)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["ingest_mode"] == "replay"
+        return httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "api_version": "v2",
+                "data": {
+                    "ingest_id": "global-ingest:receipt",
+                    "connector_id": envelope.connector_id,
+                    "raw_count": 7,
+                    "acknowledged_count": 0,
+                    "idempotent": True,
+                },
+            },
+        )
+
+    receipt = V2GlobalIngestClient(
+        base_url="https://example.test/api/v2",
+        token="ops-secret",
+        transport=httpx.MockTransport(handler),
+    ).submit(
+        envelope=envelope,
+        chunk=_single_chunk(envelope),
+        idempotency_key="global-ingest-v2:us:" + "c" * 64,
+        code_revision=REVISION,
+        replay_only=True,
+    )
     assert receipt.idempotent is True
 
 
@@ -996,6 +1206,23 @@ def test_default_dates_and_validation_are_half_open() -> None:
         validate_window(date(2026, 7, 24), date(2026, 7, 24))
 
 
+def test_completed_day_connector_excludes_sec_intraday_atom() -> None:
+    environment = {
+        "SEC_EDGAR_USER_AGENT": "BSIDE-Test/1.0 support@bside.ai",
+    }
+    incremental, _ = build_connector(
+        "US",
+        environment=environment,
+    )
+    completed_day, _ = build_connector(
+        "US",
+        environment=environment,
+        completed_day_only=True,
+    )
+    assert isinstance(incremental, SecHybridConnector)
+    assert isinstance(completed_day, SecDailyIndexConnector)
+
+
 @pytest.mark.parametrize(
     ("observed", "expected"),
     [
@@ -1166,6 +1393,27 @@ def test_failure_evidence_never_contains_credentials_or_response_body(
 
 def test_workflow_is_matrixed_guarded_serial_and_never_uses_telegram() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
+    payload = yaml.load(workflow, Loader=yaml.BaseLoader)
+    job = payload["jobs"]["ingest"]
+    for secret_name in (
+        "BSIDE_API_BASE_URL",
+        "BSIDE_OPS_TOKEN",
+        "EDINET_API_KEY",
+        "COMPANIES_HOUSE_API_KEY",
+    ):
+        assert secret_name not in job["env"]
+    collect = next(
+        step
+        for step in job["steps"]
+        if step["name"] == "Collect and ingest official source"
+    )
+    assert set(collect["env"]).issuperset(
+        {
+            "BSIDE_OPS_TOKEN",
+            "EDINET_API_KEY",
+            "COMPANIES_HOUSE_API_KEY",
+        }
+    )
     assert "matrix:" in workflow
     for country in ("US", "JP", "GB"):
         assert f"- {country}" in workflow

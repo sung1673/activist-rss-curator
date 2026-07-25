@@ -309,17 +309,29 @@ function v2_global_document_content_hash(
  * Hash the logical ingest request, excluding only attempt-time observations.
  *
  * A retry may be assembled later than the original HTTP attempt, so
- * envelope.retrieved_at and each record.first_observed_at are deliberately
- * excluded. Rights, counts, cursor, records, content, and lifecycle fields
- * remain covered; changing any substantive field is still a conflict.
+ * envelope.retrieved_at, transport request counts, and each
+ * record.first_observed_at are deliberately excluded. Rights, source-row
+ * counts, cursor, records, content, and lifecycle fields remain covered;
+ * changing any substantive field is still a conflict.
  */
 function v2_write_ingest_idempotency_hash(array $payload): string {
     $semantic = $payload;
+    // Execution policy is not part of the source payload identity. A
+    // replay-only request must match the receipt created by the original
+    // apply request without being allowed to create a replacement receipt.
+    unset($semantic['ingest_mode']);
     if (
         isset($semantic['envelope'])
         && is_array($semantic['envelope'])
     ) {
         unset($semantic['envelope']['retrieved_at']);
+        unset($semantic['envelope']['request_count']);
+        if (
+            isset($semantic['envelope']['chunk'])
+            && is_array($semantic['envelope']['chunk'])
+        ) {
+            unset($semantic['envelope']['chunk']['batch_request_count']);
+        }
         if (
             isset($semantic['envelope']['records'])
             && is_array($semantic['envelope']['records'])
@@ -952,7 +964,7 @@ function v2_normalize_lifecycle_observation(
 function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): array {
     v2_write_assert_keys(
         $payload,
-        array('idempotency_key', 'code_revision', 'envelope'),
+        array('idempotency_key', 'code_revision', 'ingest_mode', 'envelope'),
         'payload'
     );
     $idempotencyKey = v2_write_code(
@@ -967,6 +979,14 @@ function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): a
         'payload',
         '/^[a-f0-9]{7,64}$/'
     );
+    $ingestMode = array_key_exists('ingest_mode', $payload)
+        ? v2_write_code(
+            $payload,
+            'ingest_mode',
+            'payload',
+            '/^(apply|replay)$/'
+        )
+        : 'apply';
     $envelope = isset($payload['envelope']) && is_array($payload['envelope'])
         && !v2_write_is_list($payload['envelope']) ? $payload['envelope'] : null;
     if ($envelope === null) {
@@ -1259,6 +1279,7 @@ function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): a
     return array(
         'idempotency_key' => $idempotencyKey,
         'code_revision' => $codeRevision,
+        'ingest_mode' => $ingestMode,
         'connector' => $connector,
         'right' => $right,
         'rights_revision' => $rightsRevision,
@@ -1975,8 +1996,6 @@ function v2_ingest_assert_batch_metadata(
             !== (int)$chunk['batch_raw_count']
         || (int)$row['batch_acknowledged_count']
             !== (int)$chunk['batch_acknowledged_count']
-        || (int)$row['batch_request_count']
-            !== (int)$chunk['batch_request_count']
         || (string)$row['code_revision']
             !== (string)$normalized['code_revision']
     ) {
@@ -2043,6 +2062,87 @@ function v2_ingest_assert_batch_complete(
     }
 }
 
+function v2_ingest_locked_checkpoint(array $connector): ?array {
+    $raw = isset($connector['cursor_json'])
+        ? trim((string)$connector['cursor_json']) : '';
+    if ($raw === '') {
+        return null;
+    }
+    $cursor = json_decode($raw, true);
+    if (
+        !is_array($cursor)
+        || !isset(
+            $cursor['schema_version'],
+            $cursor['window_end_exclusive'],
+            $cursor['batch_id']
+        )
+        || !in_array((int)$cursor['schema_version'], array(1, 2), true)
+        || !is_string($cursor['window_end_exclusive'])
+        || preg_match(
+            '/^\d{4}-\d{2}-\d{2}$/D',
+            (string)$cursor['window_end_exclusive']
+        ) !== 1
+        || !is_string($cursor['batch_id'])
+        || preg_match(
+            '/^global-batch:[a-f0-9]{64}$/D',
+            (string)$cursor['batch_id']
+        ) !== 1
+    ) {
+        throw new RuntimeException('global_connector_checkpoint_corrupt');
+    }
+    $expectedKeys = (int)$cursor['schema_version'] === 2
+        ? array(
+            'schema_version',
+            'window_end_exclusive',
+            'batch_id',
+            'source_cursor',
+        )
+        : array('schema_version', 'window_end_exclusive', 'batch_id');
+    if (!v2_exact_string_keys($cursor, $expectedKeys)) {
+        throw new RuntimeException('global_connector_checkpoint_corrupt');
+    }
+    $dateParts = array_map(
+        'intval',
+        explode('-', (string)$cursor['window_end_exclusive'])
+    );
+    if (
+        count($dateParts) !== 3
+        || !checkdate($dateParts[1], $dateParts[2], $dateParts[0])
+    ) {
+        throw new RuntimeException('global_connector_checkpoint_corrupt');
+    }
+    if ((int)$cursor['schema_version'] === 2) {
+        if (
+            !isset($cursor['source_cursor'])
+            || !is_string($cursor['source_cursor'])
+            || trim((string)$cursor['source_cursor']) === ''
+            || strlen((string)$cursor['source_cursor']) > 1000
+        ) {
+            throw new RuntimeException('global_connector_checkpoint_corrupt');
+        }
+    }
+    return $cursor;
+}
+
+function v2_ingest_checkpoint_should_advance(
+    ?array $existing,
+    array $normalized
+): bool {
+    if ($existing === null) {
+        return true;
+    }
+    $incomingEnd = (string)$normalized['chunk']['window_end_exclusive'];
+    $existingEnd = (string)$existing['window_end_exclusive'];
+    $comparison = strcmp($incomingEnd, $existingEnd);
+    if ($comparison > 0) {
+        return true;
+    }
+    // An incremental poll can advance its opaque source cursor without
+    // changing the completed-day boundary. Historical completed-day runs
+    // never replace an equal or newer durable checkpoint.
+    return $comparison === 0 && $normalized['next_cursor'] !== null;
+}
+
 function v2_ops_ingest(PDO $pdo, array $config): void {
     $payload = v2_json_body($config);
     try {
@@ -2052,6 +2152,21 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
             'ok' => false,
             'error' => 'global_ingest_validation_failed',
             'detail' => $error->getMessage(),
+        ));
+    }
+    $deploymentIdentity = v2_deployment_identity_status();
+    if (
+        $deploymentIdentity['valid'] !== true
+        || !isset($deploymentIdentity['code_revision'])
+        || !is_string($deploymentIdentity['code_revision'])
+        || !hash_equals(
+            (string)$deploymentIdentity['code_revision'],
+            (string)$normalized['code_revision']
+        )
+    ) {
+        v2_respond(409, array(
+            'ok' => false,
+            'error' => 'global_ingest_code_revision_mismatch',
         ));
     }
     $connector = $normalized['connector'];
@@ -2094,7 +2209,7 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
     try {
         $connectorLock = $pdo->prepare(
             'SELECT connector_id,country_code,source_key,source_type,'
-            . 'source_right_id,coverage_mode,connector_status FROM '
+            . 'source_right_id,coverage_mode,connector_status,cursor_json FROM '
             . table_name($config, 'source_connectors')
             . ' WHERE connector_id=? LIMIT 1 FOR UPDATE'
         );
@@ -2172,6 +2287,9 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
                     'idempotent' => true,
                 ),
             ));
+        }
+        if ($normalized['ingest_mode'] === 'replay') {
+            throw new RuntimeException('global_ingest_replay_missing');
         }
         $chunk = $normalized['chunk'];
         $batchRows = v2_ingest_batch_receipts(
@@ -2252,34 +2370,47 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
                 $completeRows,
                 $normalized
             );
-            $cursorPayload = array(
-                'schema_version' => 1,
-                'window_end_exclusive' => $chunk['window_end_exclusive'],
-                'batch_id' => $chunk['batch_id'],
-            );
-            if ($normalized['next_cursor'] !== null) {
-                $cursorPayload['schema_version'] = 2;
-                $cursorPayload['source_cursor'] = $normalized['next_cursor'];
+            $existingCursor = v2_ingest_locked_checkpoint($lockedConnector);
+            if (v2_ingest_checkpoint_should_advance(
+                $existingCursor,
+                $normalized
+            )) {
+                $cursorPayload = array(
+                    'schema_version' => 1,
+                    'window_end_exclusive' => $chunk['window_end_exclusive'],
+                    'batch_id' => $chunk['batch_id'],
+                );
+                if ($normalized['next_cursor'] !== null) {
+                    $cursorPayload['schema_version'] = 2;
+                    $cursorPayload['source_cursor'] = $normalized['next_cursor'];
+                } elseif (
+                    $existingCursor !== null
+                    && (int)$existingCursor['schema_version'] === 2
+                ) {
+                    $cursorPayload['schema_version'] = 2;
+                    $cursorPayload['source_cursor'] =
+                        $existingCursor['source_cursor'];
+                }
+                $cursorJson = json_value($cursorPayload);
+                $updateConnector = $pdo->prepare(
+                    'UPDATE ' . table_name($config, 'source_connectors')
+                    . ' SET connector_status=\'active\',cursor_json=?,last_checked_at=?,'
+                    . 'last_success_at=?,last_observed_at=?,last_raw_count=?,'
+                    . 'last_acknowledged_count=?,last_error_class=NULL,code_revision=?,'
+                    . 'updated_at=? WHERE connector_id=?'
+                );
+                $updateConnector->execute(array(
+                    $cursorJson,
+                    $completedAt,
+                    $completedAt,
+                    $normalized['retrieved_at'],
+                    $chunk['batch_raw_count'],
+                    $chunk['batch_acknowledged_count'],
+                    $normalized['code_revision'],
+                    $completedAt,
+                    $connector['connector_id'],
+                ));
             }
-            $cursorJson = json_value($cursorPayload);
-            $updateConnector = $pdo->prepare(
-                'UPDATE ' . table_name($config, 'source_connectors')
-                . ' SET connector_status=\'active\',cursor_json=?,last_checked_at=?,'
-                . 'last_success_at=?,last_observed_at=?,last_raw_count=?,'
-                . 'last_acknowledged_count=?,last_error_class=NULL,code_revision=?,'
-                . 'updated_at=? WHERE connector_id=?'
-            );
-            $updateConnector->execute(array(
-                $cursorJson,
-                $completedAt,
-                $completedAt,
-                $normalized['retrieved_at'],
-                $chunk['batch_raw_count'],
-                $chunk['batch_acknowledged_count'],
-                $normalized['code_revision'],
-                $completedAt,
-                $connector['connector_id'],
-            ));
         }
         $pdo->commit();
     } catch (Throwable $error) {
@@ -2321,9 +2452,11 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
         }
         $known = array(
             'global_connector_changed',
+            'global_connector_checkpoint_corrupt',
             'global_source_right_changed',
             'global_ingest_acknowledgment_mismatch',
             'global_ingest_idempotency_conflict',
+            'global_ingest_replay_missing',
             'global_ingest_chunk_out_of_order',
             'global_ingest_batch_metadata_conflict',
             'global_ingest_batch_receipt_corrupt',

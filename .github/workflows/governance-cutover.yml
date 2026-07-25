@@ -510,6 +510,16 @@ jobs:
       v1_state_version: ${{ steps.release_states.outputs.v1_state_version }}
       v2_state_version: ${{ steps.release_states.outputs.v2_state_version }}
     steps:
+      - name: Checkout exact release candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Python for exact deployment smoke
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
       - name: Require protected production configuration
         env:
           BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
@@ -544,14 +554,11 @@ jobs:
           v1_api="${GOVERNANCE_API_BASE_URL%/}"
           v2_api="${v1_api%/api/v1}/api/v2"
 
-          curl --fail-with-body --silent --show-error \
-            "$v2_api/health" > preflight-v2-health.json
-          jq -e --arg revision "$GITHUB_SHA" \
-            '.ok == true and .api_version == "v2" and .code_revision == $revision' \
-            preflight-v2-health.json > /dev/null || {
-            echo "::error::The deployed v2 API files do not match the cutover Git SHA."
-            exit 1
-          }
+          python .github/scripts/smoke-global-v2.py \
+            --base-url "$v2_api" \
+            --expected-sha "$GITHUB_SHA" \
+            --release-state preview \
+            --preview-token-env GOVERNANCE_PREVIEW_TOKEN
 
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
@@ -769,8 +776,12 @@ jobs:
             --expected-api-base "$GOVERNANCE_API_BASE_URL" \
             --expected-web-base "$BSIDE_PUBLIC_WEB_URL" \
             --expected-build-sha "$GITHUB_SHA"
+          python .github/scripts/smoke-global-v2.py \
+            --base-url "$v2_api" \
+            --expected-sha "$GITHUB_SHA" \
+            --release-state preview \
+            --preview-token-env GOVERNANCE_PREVIEW_TOKEN
           curl --fail --silent --show-error --output /dev/null "$v1_api/health"
-          curl --fail --silent --show-error --output /dev/null "$v2_api/health"
           curl --fail --silent --show-error \
             -H "Authorization: Bearer $GOVERNANCE_PREVIEW_TOKEN" \
             --output /dev/null "$v1_api/events?limit=1"
@@ -875,6 +886,10 @@ jobs:
           web="${BSIDE_PUBLIC_WEB_URL%/}"
           v1_api="${GOVERNANCE_API_BASE_URL%/}"
           v2_api="${v1_api%/api/v1}/api/v2"
+          python .github/scripts/smoke-global-v2.py \
+            --base-url "$v2_api" \
+            --expected-sha "$GITHUB_SHA" \
+            --release-state live
           for path in / /governance/ /feed.xml; do
             curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
               --output /dev/null "$web$path"

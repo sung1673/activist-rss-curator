@@ -131,8 +131,10 @@ paths:
       description: >-
         Public and independent of the release state and database schema
         manifest. A 200 response proves that every API core file matches the
-        generated deployment manifest and returns its exact Git revision. It
-        does not prove that data routes or source connectors are healthy.
+        generated deployment manifest and returns its exact Git revision and
+        the schema version required by that build. It does not prove that the
+        database schema or source connectors are healthy; a data-route smoke
+        check must verify that separately.
       responses:
         '200':
           description: API core files match one exact deployment revision
@@ -1482,7 +1484,7 @@ components:
           const: v2
     HealthEnvelope:
       type: object
-      required: [ok, service, code_revision, time, api_version]
+      required: [ok, service, code_revision, schema_version, time, api_version]
       properties:
         ok:
           const: true
@@ -1491,6 +1493,8 @@ components:
         code_revision:
           type: string
           pattern: '^[0-9a-f]{40}$'
+        schema_version:
+          const: 11
         time:
           type: string
           format: date-time
@@ -2471,6 +2475,15 @@ components:
           minLength: 7
           maxLength: 64
           pattern: '^[a-f0-9]+$'
+          description: Must equal the verified deployment manifest revision.
+        ingest_mode:
+          type: string
+          enum: [apply, replay]
+          default: apply
+          description: >-
+            replay is a server-enforced read-only check. Every exact receipt
+            must already exist with the same payload and deployment revision;
+            otherwise the request fails before any durable state is changed.
         envelope:
           $ref: '#/components/schemas/GlobalIngestPayload'
     GlobalIngestPayload:

@@ -681,6 +681,52 @@ def seed_alpha_automated_evidence(
             ingest_id = "alpha:" + digest[:80]
             idempotency_key = "alpha-evidence:" + digest
             completed = now.strftime("%Y-%m-%d %H:%M:%S")
+            if (
+                connector_id == "connector:gb:companies-house"
+                and index == 0
+            ):
+                for (
+                    chunk_index,
+                    request_count,
+                    raw_count,
+                    acknowledged_count,
+                    batch_request_count,
+                ) in (
+                    (1, 0, 1, 0, 2),
+                    (2, 3, 2, 1, 3),
+                ):
+                    chunk_digest = hashlib.sha256(
+                        f"{identity}:chunk:{chunk_index}".encode()
+                    ).hexdigest()
+                    receipt_values.append(
+                        "("
+                        + ",".join(
+                            (
+                                f"'alpha:{chunk_digest[:80]}'",
+                                f"'{connector_id}'",
+                                f"'alpha-evidence:{chunk_digest}'",
+                                f"'{chunk_digest}'",
+                                f"'{batch_id}'",
+                                str(chunk_index),
+                                "2",
+                                f"'{cursor.isoformat()}'",
+                                f"'{next_cursor.isoformat()}'",
+                                str(request_count),
+                                str(raw_count),
+                                str(acknowledged_count),
+                                "3",
+                                "1",
+                                str(batch_request_count),
+                                f"'{CODE_REVISION}'",
+                                f"'{completed}'",
+                                f"'{completed}'",
+                                f"'{completed}'",
+                            )
+                        )
+                        + ")"
+                    )
+                cursor = next_cursor
+                continue
             receipt_values.append(
                 "("
                 + ",".join(
@@ -1363,29 +1409,50 @@ def run(base_url: str, mysql_container_id: str) -> None:
     )
 
     # A valid two-chunk zero-record batch still uses the same completeness
-    # proof, and advances the checkpoint only after chunk 2 commits.
+    # proof, survives changed request telemetry after an interrupted attempt,
+    # and advances the checkpoint only after chunk 2 commits.
     complete_batch = (
         "global-batch:" + hashlib.sha256(b"php73-v2-complete-batch").hexdigest()
     )
     for chunk_index in (1, 2):
+        complete_payload = empty_chunk_payload(
+            rights_revision=rights_revision,
+            idempotency_key=(f"php73-v2-complete-chunk-{chunk_index}"),
+            retrieved_at=observed_at,
+            batch_id=complete_batch,
+            index=chunk_index,
+            count=2,
+        )
+        complete_payload["envelope"]["chunk"]["batch_request_count"] = (
+            2 if chunk_index == 1 else 3
+        )
+        if chunk_index == 2:
+            complete_payload["envelope"]["request_count"] = 3
         complete_chunk, _ = request_json(
             base_url,
             "api.php/api/v2/ops/ingest",
             method="POST",
             token=OPS_TOKEN,
-            payload=empty_chunk_payload(
-                rights_revision=rights_revision,
-                idempotency_key=(f"php73-v2-complete-chunk-{chunk_index}"),
-                retrieved_at=observed_at,
-                batch_id=complete_batch,
-                index=chunk_index,
-                count=2,
-            ),
+            payload=complete_payload,
         )
         require(
             complete_chunk.get("data", {}).get("acknowledged_count") == 0,
             repr(complete_chunk),
         )
+        if chunk_index == 1:
+            retried_first = json.loads(json.dumps(complete_payload))
+            retried_first["envelope"]["chunk"]["batch_request_count"] = 3
+            retried_chunk, _ = request_json(
+                base_url,
+                "api.php/api/v2/ops/ingest",
+                method="POST",
+                token=OPS_TOKEN,
+                payload=retried_first,
+            )
+            require(
+                retried_chunk.get("data", {}).get("idempotent") is True,
+                repr(retried_chunk),
+            )
         checkpoint_after_chunk, _ = request_json(
             base_url,
             (f"api.php/api/v2/ops/connectors/{SEC_CONNECTOR_ID}/checkpoint"),
@@ -1404,11 +1471,12 @@ def run(base_url: str, mysql_container_id: str) -> None:
         mysql_execute(
             mysql_container_id,
             "SELECT GROUP_CONCAT(chunk_index ORDER BY chunk_index),"
-            "SUM(raw_count),SUM(acknowledged_count),SUM(request_count) "
+            "SUM(raw_count),SUM(acknowledged_count),SUM(request_count),"
+            "GROUP_CONCAT(batch_request_count ORDER BY chunk_index) "
             "FROM ci_global_ingest_receipts "
             f"WHERE batch_id='{complete_batch}';",
         )
-        == "1,2\t0\t0\t0",
+        == "1,2\t0\t0\t3\t2,3",
         complete_batch,
     )
     next_revision = "b" * 40
@@ -1430,15 +1498,17 @@ def run(base_url: str, mysql_container_id: str) -> None:
             count=1,
             code_revision=next_revision,
         ),
+        expected_status=409,
     )
     require(
-        next_revision_ingest.get("data", {}).get("idempotent") is False
+        next_revision_ingest.get("error")
+        == "global_ingest_code_revision_mismatch"
         and mysql_execute(
             mysql_container_id,
-            "SELECT code_revision FROM ci_global_ingest_receipts "
+            "SELECT COUNT(*) FROM ci_global_ingest_receipts "
             f"WHERE batch_id='{next_revision_batch}';",
         )
-        == next_revision,
+        == "0",
         repr(next_revision_ingest),
     )
 
@@ -1454,6 +1524,35 @@ def run(base_url: str, mysql_container_id: str) -> None:
         idempotency_key="php73-v2-sec-ingest-v1",
         record=first_record,
         retrieved_at=observed_at,
+    )
+    replay_only_missing = json.loads(json.dumps(first_payload))
+    replay_only_missing["ingest_mode"] = "replay"
+    state_before_missing_replay = mysql_execute(
+        mysql_container_id,
+        "SELECT "
+        "(SELECT COUNT(*) FROM ci_global_ingest_receipts),"
+        "(SELECT COUNT(*) FROM ci_documents),"
+        "(SELECT COUNT(*) FROM ci_governance_events);",
+    )
+    missing_replay, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=replay_only_missing,
+        expected_status=409,
+    )
+    require(
+        missing_replay.get("error") == "global_ingest_replay_missing"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT "
+            "(SELECT COUNT(*) FROM ci_global_ingest_receipts),"
+            "(SELECT COUNT(*) FROM ci_documents),"
+            "(SELECT COUNT(*) FROM ci_governance_events);",
+        )
+        == state_before_missing_replay,
+        repr(missing_replay),
     )
     credential_url_payload = json.loads(json.dumps(first_payload))
     credential_url_payload["idempotency_key"] = "php73-v2-credential-url"
@@ -1494,6 +1593,42 @@ def run(base_url: str, mysql_container_id: str) -> None:
         and first_data.get("public_events_created") == 0
         and first_data.get("review_required") == 1,
         repr(first_ingest),
+    )
+    replay_only_payload = json.loads(json.dumps(first_payload))
+    replay_only_payload["ingest_mode"] = "replay"
+    state_before_read_only_replay = mysql_execute(
+        mysql_container_id,
+        "SELECT "
+        "(SELECT COUNT(*) FROM ci_global_ingest_receipts),"
+        "(SELECT COUNT(*) FROM ci_documents),"
+        "(SELECT COUNT(*) FROM ci_governance_events),"
+        "(SELECT CONCAT(COALESCE(cursor_json,''),'|',"
+        "COALESCE(last_success_at,''),'|',COALESCE(last_checked_at,'')) "
+        "FROM ci_source_connectors "
+        f"WHERE connector_id='{SEC_CONNECTOR_ID}');",
+    )
+    read_only_replay, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=replay_only_payload,
+    )
+    require(
+        read_only_replay.get("data", {}).get("idempotent") is True
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT "
+            "(SELECT COUNT(*) FROM ci_global_ingest_receipts),"
+            "(SELECT COUNT(*) FROM ci_documents),"
+            "(SELECT COUNT(*) FROM ci_governance_events),"
+            "(SELECT CONCAT(COALESCE(cursor_json,''),'|',"
+            "COALESCE(last_success_at,''),'|',COALESCE(last_checked_at,'')) "
+            "FROM ci_source_connectors "
+            f"WHERE connector_id='{SEC_CONNECTOR_ID}');",
+        )
+        == state_before_read_only_replay,
+        repr(read_only_replay),
     )
     event_id = "global-event:" + first_record["record_id"]
     draft_row = mysql_execute(
@@ -1539,6 +1674,28 @@ def run(base_url: str, mysql_container_id: str) -> None:
         retry.get("data", {}).get("idempotent") is True
         and retry.get("data", {}).get("acknowledged_count") == 1,
         repr(retry),
+    )
+    telemetry_retry_payload = json.loads(json.dumps(first_payload))
+    telemetry_retry_payload["envelope"]["request_count"] = 3
+    telemetry_retry_payload["envelope"]["chunk"]["batch_request_count"] = 3
+    telemetry_retry, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=telemetry_retry_payload,
+    )
+    require(
+        telemetry_retry.get("data", {}).get("idempotent") is True
+        and telemetry_retry.get("data", {}).get("acknowledged_count") == 1
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT request_count,batch_request_count "
+            "FROM ci_global_ingest_receipts "
+            "WHERE idempotency_key='php73-v2-sec-ingest-v1';",
+        )
+        == "1\t1",
+        repr(telemetry_retry),
     )
     conflicting_payload = json.loads(json.dumps(first_payload))
     conflicting_payload["envelope"]["raw_count"] = 2
@@ -1688,9 +1845,57 @@ def run(base_url: str, mysql_container_id: str) -> None:
         and checkpoint_data.get("cursor_json", {}).get("window_end_exclusive")
         == "2026-07-24"
         and checkpoint_data.get("cursor_json", {}).get("batch_id")
-        == ("global-batch:" + hashlib.sha256(b"php73-v2-sec-ingest-v2").hexdigest())
+        == complete_batch
         and checkpoint_data.get("code_revision") == CODE_REVISION,
         repr(checkpoint),
+    )
+    checkpoint_before_historical = mysql_execute(
+        mysql_container_id,
+        "SELECT CONCAT(cursor_json,'|',last_success_at,'|',last_checked_at,"
+        "'|',last_observed_at,'|',code_revision) "
+        "FROM ci_source_connectors "
+        f"WHERE connector_id='{SEC_CONNECTOR_ID}';",
+    )
+    historical_batch = (
+        "global-batch:"
+        + hashlib.sha256(b"php73-v2-historical-no-rewind").hexdigest()
+    )
+    historical_payload = empty_chunk_payload(
+        rights_revision=rights_revision,
+        idempotency_key="php73-v2-historical-no-rewind",
+        retrieved_at=utc_text(now + timedelta(seconds=2)),
+        batch_id=historical_batch,
+        index=1,
+        count=1,
+    )
+    historical_payload["envelope"]["chunk"]["window_start"] = "2026-07-20"
+    historical_payload["envelope"]["chunk"]["window_end_exclusive"] = (
+        "2026-07-21"
+    )
+    historical_ingest, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=historical_payload,
+    )
+    require(
+        historical_ingest.get("data", {}).get("idempotent") is False
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_global_ingest_receipts "
+            f"WHERE batch_id='{historical_batch}';",
+        )
+        == "1"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT(cursor_json,'|',last_success_at,'|',last_checked_at,"
+            "'|',last_observed_at,'|',code_revision) "
+            "FROM ci_source_connectors "
+            f"WHERE connector_id='{SEC_CONNECTOR_ID}';",
+        )
+        == checkpoint_before_historical,
+        repr(historical_ingest),
     )
     versions = mysql_execute(
         mysql_container_id,
@@ -2619,6 +2824,17 @@ def run(base_url: str, mysql_container_id: str) -> None:
     )
 
     seed_alpha_automated_evidence(mysql_container_id, now=now)
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT GROUP_CONCAT(batch_request_count ORDER BY chunk_index),"
+            "SUM(request_count) FROM ci_global_ingest_receipts "
+            "WHERE connector_id='connector:gb:companies-house' "
+            "AND chunk_count=2 GROUP BY batch_id;",
+        )
+        == "2,3\t3",
+        "interrupted Companies House receipt telemetry fixture is missing",
+    )
     automated_with_mutation, _ = request_json(
         base_url,
         (

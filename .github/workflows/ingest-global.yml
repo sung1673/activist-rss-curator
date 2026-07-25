@@ -58,13 +58,10 @@ jobs:
       name: governance-runtime
     env:
       GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
-      BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
-      BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+      GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
       SEC_EDGAR_USER_AGENT: ${{ vars.SEC_EDGAR_USER_AGENT }}
       EDINET_CONNECTOR_MODE: ${{ vars.EDINET_CONNECTOR_MODE || 'link-only' }}
-      EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
       COMPANIES_HOUSE_CONNECTOR_MODE: ${{ vars.COMPANIES_HOUSE_CONNECTOR_MODE || 'keyless' }}
-      COMPANIES_HOUSE_API_KEY: ${{ secrets.COMPANIES_HOUSE_API_KEY }}
       COMPANIES_HOUSE_ISSUERS_JSON: ${{ vars.COMPANIES_HOUSE_ISSUERS_JSON }}
 
     steps:
@@ -95,8 +92,16 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
+      - name: Validate the public and privileged API binding
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+        run: python .github/scripts/validate-api-base-urls.py --github-env "$GITHUB_ENV"
+
       - name: Collect and ingest official source
         env:
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          EDINET_API_KEY: ${{ matrix.country == 'JP' && secrets.EDINET_API_KEY || '' }}
+          COMPANIES_HOUSE_API_KEY: ${{ matrix.country == 'GB' && secrets.COMPANIES_HOUSE_API_KEY || '' }}
           FROM_DATE: ${{ inputs.from_date }}
           TO_DATE: ${{ inputs.to_date }}
           MAX_PAGES_INPUT: ${{ inputs.max_pages }}

@@ -195,12 +195,35 @@ def test_cutover_preflight_requires_the_current_api_revision() -> None:
     workflow = (ROOT / ".github" / "workflows" / "governance-cutover.yml").read_text(
         encoding="utf-8"
     )
-    health_probe = workflow.index('"$v2_api/health" > preflight-v2-health.json')
+    payload = yaml.load(workflow, Loader=yaml.BaseLoader)
+    preflight_steps = payload["jobs"]["preflight"]["steps"]
+    checkout = next(
+        step
+        for step in preflight_steps
+        if step["name"] == "Checkout exact release candidate"
+    )
+    assert checkout["with"]["ref"] == "${{ github.sha }}"
+    setup_python = next(
+        step
+        for step in preflight_steps
+        if step["name"] == "Set up Python for exact deployment smoke"
+    )
+    smoke_step = next(
+        step
+        for step in preflight_steps
+        if step["name"]
+        == "Require v1 and v2 preview states before Pages deployment"
+    )
+    assert preflight_steps.index(checkout) < preflight_steps.index(setup_python)
+    assert preflight_steps.index(setup_python) < preflight_steps.index(smoke_step)
+    health_probe = workflow.index(
+        "python .github/scripts/smoke-global-v2.py"
+    )
     state_probe = workflow.index(
         '"$v2_api/admin/release-state" > preflight-v2-state.json'
     )
 
     assert health_probe < state_probe
-    assert '--arg revision "$GITHUB_SHA"' in workflow
-    assert '.code_revision == $revision' in workflow
-    assert "do not match the cutover Git SHA" in workflow
+    assert '--expected-sha "$GITHUB_SHA"' in workflow
+    assert "--release-state preview" in workflow
+    assert "--preview-token-env GOVERNANCE_PREVIEW_TOKEN" in workflow
