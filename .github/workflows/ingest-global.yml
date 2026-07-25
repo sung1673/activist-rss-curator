@@ -57,7 +57,6 @@ jobs:
     environment:
       name: governance-runtime
     env:
-      EVIDENCE_PATH: ${{ runner.temp }}/global-ingest-${{ matrix.country }}.json
       GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
       BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
       BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
@@ -83,6 +82,8 @@ jobs:
       - name: Initialize fail-safe evidence
         id: initialize
         shell: bash
+        env:
+          EVIDENCE_PATH: ${{ runner.temp }}/global-ingest-${{ matrix.country }}.json
         run: >-
           python -c "import json,os,pathlib;
           pathlib.Path(os.environ['EVIDENCE_PATH']).write_text(
@@ -99,6 +100,7 @@ jobs:
           FROM_DATE: ${{ inputs.from_date }}
           TO_DATE: ${{ inputs.to_date }}
           MAX_PAGES_INPUT: ${{ inputs.max_pages }}
+          EVIDENCE_PATH: ${{ runner.temp }}/global-ingest-${{ matrix.country }}.json
         shell: bash
         run: |
           set -euo pipefail
@@ -123,6 +125,6 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: global-ingest-${{ matrix.country }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.EVIDENCE_PATH }}
+          path: ${{ runner.temp }}/global-ingest-${{ matrix.country }}.json
           if-no-files-found: error
           retention-days: 30
