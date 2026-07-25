@@ -2519,12 +2519,13 @@ function v2_merge_reviewed_event(
     }
     $moveActors = $pdo->prepare(
         'INSERT IGNORE INTO ' . table_name($config, 'event_actors')
-        . ' (event_id,actor_id,actor_role,review_status,created_at)'
-        . ' SELECT ?,actor_id,actor_role,review_status,created_at FROM '
+        . ' (event_id,actor_id,actor_role,review_status,created_at,updated_at)'
+        . ' SELECT ?,actor_id,actor_role,review_status,created_at,? FROM '
         . table_name($config, 'event_actors') . ' WHERE event_id=?'
     );
     $moveActors->execute(array(
         $canonicalEventId,
+        $now,
         (string)$sourceEvent['event_id'],
     ));
     $lifecycle = $pdo->prepare(
@@ -2976,11 +2977,18 @@ function v2_admin_review_event(
         ));
         $eventActor = $pdo->prepare(
             'INSERT INTO ' . table_name($config, 'event_actors')
-            . ' (event_id,actor_id,actor_role,review_status,created_at)'
-            . ' VALUES (?,?,?,\'approved\',?)'
-            . ' ON DUPLICATE KEY UPDATE review_status=\'approved\''
+            . ' (event_id,actor_id,actor_role,review_status,created_at,updated_at)'
+            . ' VALUES (?,?,?,\'approved\',?,?)'
+            . ' ON DUPLICATE KEY UPDATE actor_role=VALUES(actor_role),'
+            . 'review_status=\'approved\',updated_at=VALUES(updated_at)'
         );
-        $eventActor->execute(array($eventId, $actorId, $actorRole, $now));
+        $eventActor->execute(array(
+            $eventId,
+            $actorId,
+            $actorRole,
+            $now,
+            $now,
+        ));
         if (v2_publish_event_documents($pdo, $config, $eventId, $now) < 1) {
             throw new RuntimeException('event_official_evidence_required');
         }

@@ -557,6 +557,32 @@ def test_review_queue_updated_at_is_rfc3339_and_round_trips_unchanged():
             helper(invalid, "updated_at")
 
 
+def test_event_actor_review_and_merge_populate_required_updated_at():
+    merge = V2_WRITE[
+        V2_WRITE.index("function v2_merge_reviewed_event") : V2_WRITE.index(
+            "function v2_admin_review_queue"
+        )
+    ]
+    assert (
+        "' (event_id,actor_id,actor_role,review_status,created_at,updated_at)'"
+        in merge
+    )
+    assert "' SELECT ?,actor_id,actor_role,review_status,created_at,? FROM '" in merge
+    assert "$canonicalEventId,\n        $now," in merge
+
+    review = V2_WRITE[
+        V2_WRITE.index("function v2_admin_review_event") : V2_WRITE.index(
+            "function v2_admin_brief_candidates"
+        )
+    ]
+    assert (
+        "' (event_id,actor_id,actor_role,review_status,created_at,updated_at)'"
+        in review
+    )
+    assert "' VALUES (?,?,?,\\'approved\\',?,?)'" in review
+    assert ". 'review_status=\\'approved\\',updated_at=VALUES(updated_at)'" in review
+
+
 def test_public_event_and_release_state_timestamps_are_canonical_utc():
     utc_pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
     event = SPEC["components"]["schemas"]["Event"]
