@@ -2621,10 +2621,33 @@ def run(base_url: str, mysql_container_id: str) -> None:
     )
     mysql_execute(
         mysql_container_id,
-        "UPDATE ci_governance_events "
-        f"SET title='{second_title}',updated_at=UTC_TIMESTAMP() "
-        f"WHERE event_id='{event_id}';",
+        "UPDATE ci_governance_events e "
+        "JOIN ci_event_documents ed ON ed.event_id=e.event_id "
+        "JOIN ci_documents d ON d.document_id=ed.document_id "
+        "SET e.title=d.title,e.updated_at=UTC_TIMESTAMP() "
+        f"WHERE e.event_id='{event_id}' "
+        f"AND d.source_right_id='{SEC_RIGHT_ID}' "
+        f"AND d.external_id='{first_record['external_id']}' "
+        "AND d.version_no=("
+        "SELECT MAX(latest.version_no) FROM ci_documents latest "
+        f"WHERE latest.source_right_id='{SEC_RIGHT_ID}' "
+        f"AND latest.external_id='{first_record['external_id']}');",
     )
+    restored_source_title = mysql_execute(
+        mysql_container_id,
+        "SELECT COUNT(*) FROM ci_governance_events e "
+        "JOIN ci_event_documents ed ON ed.event_id=e.event_id "
+        "JOIN ci_documents d ON d.document_id=ed.document_id "
+        f"WHERE e.event_id='{event_id}' "
+        f"AND d.source_right_id='{SEC_RIGHT_ID}' "
+        f"AND d.external_id='{first_record['external_id']}' "
+        "AND d.version_no=("
+        "SELECT MAX(latest.version_no) FROM ci_documents latest "
+        f"WHERE latest.source_right_id='{SEC_RIGHT_ID}' "
+        f"AND latest.external_id='{first_record['external_id']}') "
+        "AND BINARY e.title=BINARY d.title;",
+    )
+    require(restored_source_title == "1", restored_source_title)
     automated_preserved, _ = request_json(
         base_url,
         (

@@ -90,3 +90,15 @@ def test_php73_release_fixture_preserves_canonical_dart_source_right_id() -> Non
     assert "DELETE FROM ci_event_observations " in identity_fixture
     assert "identity precision fixture must not leak into later corpus checks" in identity_fixture
     assert "official:dart-identity-precision-smoke" not in smoke
+
+
+def test_php73_global_fixture_restores_the_latest_source_title_from_mysql() -> None:
+    smoke = (ROOT / "tests" / "php73_global_v2_smoke.py").read_text(encoding="utf-8")
+    restoration = smoke[
+        smoke.index("automated_with_mutation") :
+        smoke.index("automated_preserved")
+    ]
+
+    assert "SET e.title=d.title" in restoration
+    assert "SELECT MAX(latest.version_no)" in restoration
+    assert "BINARY e.title=BINARY d.title" in restoration
