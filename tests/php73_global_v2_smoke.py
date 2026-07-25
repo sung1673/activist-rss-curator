@@ -13,13 +13,19 @@ import base64
 import hashlib
 import json
 import subprocess
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
-from curator.global_connectors import (
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from curator.global_connectors import (  # noqa: E402
     GlobalDocumentRecord,
     IssuerReference,
     global_document_content_hash,
