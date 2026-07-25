@@ -173,7 +173,7 @@ jobs:
           HUMAN_ARTIFACT_ID: ${{ steps.human_artifact.outputs.artifact_id }}
           HUMAN_ARTIFACT_DIGEST: ${{ steps.human_artifact.outputs.digest }}
           OUTPUT_ARTIFACT_ID: ${{ steps.evidence_inputs.outputs.artifact-id }}
-          OUTPUT_ARTIFACT_DIGEST: ${{ steps.evidence_inputs.outputs.digest }}
+          OUTPUT_ARTIFACT_DIGEST: ${{ steps.evidence_inputs.outputs.artifact-digest }}
         run: |
           set -euo pipefail
           {

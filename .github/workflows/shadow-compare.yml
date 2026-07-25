@@ -273,7 +273,7 @@ jobs:
           REPORT: ${{ runner.temp }}/shadow-comparison.json
           ARTIFACT_COUNT: ${{ steps.resolve.outputs.artifact_count }}
           ARTIFACT_ID: ${{ steps.receipt.outputs.artifact-id }}
-          ARTIFACT_DIGEST: ${{ steps.receipt.outputs.digest }}
+          ARTIFACT_DIGEST: ${{ steps.receipt.outputs.artifact-digest }}
         shell: bash
         run: |
           set -euo pipefail

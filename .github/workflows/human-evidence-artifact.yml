@@ -74,7 +74,7 @@ jobs:
         shell: bash
         env:
           ARTIFACT_ID: ${{ steps.human_artifact.outputs.artifact-id }}
-          ARTIFACT_DIGEST: ${{ steps.human_artifact.outputs.digest }}
+          ARTIFACT_DIGEST: ${{ steps.human_artifact.outputs.artifact-digest }}
         run: |
           set -euo pipefail
           {

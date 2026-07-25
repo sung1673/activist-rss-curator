@@ -1,4 +1,4 @@
-# 거버넌스 공개 전환과 롤백
+# Production Alpha 공개 전환과 롤백
 
 두 workflow는 자동 실행되지 않는다. `governance-release` environment의 승인 규칙을 통과한 기본 branch 수동 실행만 운영 상태를 변경한다. cutover와 rollback은 같은 non-cancelling concurrency lock을 사용하므로 동시에 진행할 수 없다. 무인 수집·품질 작업은 별도 `governance-runtime` environment를 사용한다.
 
@@ -6,22 +6,26 @@
 
 다음을 먼저 확인한다.
 
-- release candidate가 기본 branch에 있으며 14일 shadow 중 사용한 SHA와 같다.
-- 최근 72시간 이내 같은 SHA에서 생성된 `governance-release-evidence` artifact가 있다.
-- evidence에는 shadow, operations, performance, benchmark, usability, release approval 여섯 파일이 모두 있다.
-- usability는 기관·고액자산가·해외기관 각각 정확히 5명, 총 15명이며 12명 이상이 180초 안에 네 항목을 확인했다.
-- 법률·편집·제품 승인이 모두 `approved`이고 각 보관 문서 SHA-256이 등록됐다.
-- 같은 SHA의 `daily.yml` 성공 run에 `pages-<run_id>-<attempt>` governance artifact가 있다.
-- 서버 release state는 승인된 `preview`다.
+- release candidate가 기본 branch에 있으며 30일 수집·24시간 watchdog·사람 검수에 사용한 40자리 SHA와 같다.
+- 최근 48시간 이내 같은 SHA에서 생성된 `global-alpha-release-evidence` artifact가 있고, 전환 시점의 run 생성·`evidence_as_of`·관측 종료 시각은 모두 60분 이내다.
+- evidence에는 DB에서 다시 계산한 4개 공식 connector의 30일 수집 영수증, 최소 287개 watchdog 관측, 실제 사건 60건·동일 사건 후보 120쌍·Top 5 사람 검수, 화면·성능·롤백 훈련과 감독자·SourceRight 승인이 있다.
+- `KR/US/JP=market-wide`, `GB=official-register`, `CA/AU=link-only` 범위가 화면·API·증빙에서 일치한다. 캐나다 SEDAR+와 호주 ASX 전문을 수집하거나 저장하지 않는다.
+- 같은 SHA의 `daily.yml` 성공 run에 `pages-<run_id>-<attempt>` governance artifact가 있고, 그 exact run·attempt·artifact ID·이름·GitHub digest·전체 사이트 content digest가 Alpha evidence의 `pages-artifact-identity.json`에 고정돼 있다.
+- v1과 v2 서버 release state가 모두 승인된 `preview`이며 state version이 증빙 이후 바뀌지 않았다.
 - 승인된 로컬 운영자가 dispatch 직전에 `gh variable set PAGES_OWNER --body governance --repo sung1673/activist-rss-curator`를 실행하고 `gh variable get PAGES_OWNER --repo sung1673/activist-rss-curator` 결과가 `governance`인지 확인했다.
 - dispatch 시점에는 `GOVERNANCE_PIPELINE_MODE=shadow`다. cutover가 성공하고 익명 public smoke가 통과한 뒤 승인된 로컬 운영자가 `live`로 변경한다.
 - 전환 adapter boolean `ENABLE_PAGES`, `ENABLE_GOVERNANCE_PAGES`, `ENABLE_GOVERNANCE_SHADOW`는 모두 `false`다. 기존 legacy artifact는 boolean을 끈 뒤에도 그대로 서비스된다.
 - `ENABLE_TELEGRAM_DELIVERY=false`, `ENABLE_GOVERNANCE_DELIVERY=false`다.
-- 보호된 release 설정에 `BSIDE_ADMIN_TOKEN`, `GOVERNANCE_PREVIEW_TOKEN`이 있고 `GOVERNANCE_API_BASE_URL`이 실제 Gabia API base를 가리킨다.
+- 보호된 release 설정에 `BSIDE_ADMIN_TOKEN`, `BSIDE_RELEASE_AUTHORIZER_TOKEN`, `GOVERNANCE_PREVIEW_TOKEN`이 있고 `GOVERNANCE_API_BASE_URL`이 실제 Gabia API base를 가리킨다.
+- `BSIDE_RELEASE_AUTHORIZER_TOKEN`은 reviewer가 보호하는 `governance-release` environment에만 있고, PHP에는 평문이 아닌 정확한 `release_authorizer` 역할의 SHA-256으로 등록되어 있다. 일반 admin token은 승인 발급에 사용할 수 없다.
 
-`Governance protected cutover`에는 evidence run ID/name, governance Pages run ID/name, 8자 이상의 사유를 입력한다. workflow는 source run의 성공 여부, 기본 branch, exact SHA, 예상 workflow, artifact의 GitHub SHA-256과 만료 여부를 검증한다. 다운로드는 digest mismatch를 오류로 처리한다.
+`Governance protected cutover`에는 evidence run ID/name과 8자 이상의 사유만 입력한다. 별도 governance Pages run ID/name 입력은 받지 않는다. workflow는 evidence에 고정된 daily run·attempt·artifact ID·이름·GitHub SHA-256만 다시 조회해 다운로드하며, 같은 SHA의 다른 artifact도 거절한다. 다운로드 뒤 root와 `/governance`의 `index.html`, `config.js`, `app.js`, `styles.css`가 서로 byte-identical인지, 해당 terminal content identity가 24시간 watchdog 전 관측과 같은지, 전체 사이트 content digest가 evidence와 같은지 재계산한다. 하나라도 다르거나 digest mismatch가 발생하면 배포 전 fail-closed한다.
 
-검증된 artifact만 Pages에 올린 뒤 `/`, `/governance/`, `/feed.xml`, API health, preview events, JSON export를 확인한다. 그 다음 optimistic state version으로 `preview → live`를 수행하고 인증 헤더 없이 events·Atom·JSON·CSV export를 다시 검사한다. workflow는 dispatch 시점의 `PAGES_OWNER=governance`와 `GOVERNANCE_PIPELINE_MODE=shadow` snapshot을 검증하지만 repository variable을 직접 변경하지 않는다.
+검증된 artifact만 Pages에 올리기 전에 preview `/sources/status`에서 정확한 필수 6개 connector가 모두 `public_ready=true`인지 확인한다. 배포 뒤 `/`, `/governance/`, `/feed.xml`, API health, preview events, JSON export를 확인한다. 그 다음 보호 환경이 새 32바이트 nonce를 만들고 `BSIDE_RELEASE_AUTHORIZER_TOKEN`으로 candidate SHA, evidence artifact digest·run ID·artifact ID, v1·v2 state version과 10분 만료를 일회용 승인에 묶는다. workflow는 `BSIDE_ADMIN_TOKEN`으로 `POST /api/v2/admin/cutover`를 한 번 호출한다. 서버는 같은 MySQL transaction에서 승인, 두 release state, 필수 6개 connector와 그 SourceRight를 모두 잠근다. KR·US·JP·GB·CA·AU 중 공개 문서가 0건인 국가도 connector identity, active/error-free 상태, 실행 주기 기반 15~45분 최신 성공·확인 시각, SEC cursor UTC 시각, link-only 최근 관측·ACK, 증빙·유효·미철회 상태, 수집 및 공개 재배포 자격을 똑같이 재검사한다. 이어 기존 v1·v2 공개 문서 SourceRight guard까지 통과한 경우에만 v1과 v2를 함께 `live`로 바꾼다. nonce 원문은 로그에서 마스킹되고 DB에는 SHA-256만 저장된다.
+
+v1·v2의 일반 `POST /admin/release-state`는 직접 `preview → live`를 시도하면 409 `protected_atomic_cutover_required`를 반환한다. 만료·철회·재사용·SHA·digest·version 불일치와 필수 connector/권한·최신성 오류는 상태를 한 건도 바꾸지 않는다. 필수 소스 오류는 409 `required_alpha_sources_invalid`이며 해당 승인도 미소비 상태로 남는다. 성공 뒤에는 인증 헤더 없이 `/sources/status`의 정확한 필수 6개 준비 상태와 events·Atom·JSON·CSV export를 다시 검사한다. workflow는 dispatch 시점의 `PAGES_OWNER=governance`와 `GOVERNANCE_PIPELINE_MODE=shadow` snapshot을 검증하지만 repository variable을 직접 변경하지 않는다.
+
+이 24시간 경로는 범위를 투명하게 표시하는 Production Alpha 전환 전용이다. 정식 GA 선언에는 기존 14일 shadow, 300사건·500쌍 benchmark, 사용성·법률 승인 게이트를 별도로 적용한다.
 
 GitHub의 repository variable 수정 API는 별도 `Variables: write` 권한을 요구한다. 장기 PAT나 계획 밖의 광범위한 token을 workflow에 추가하지 않기 위해 소유권 변경은 이미 인증된 로컬 `gh` 세션을 가진 승인 운영자에게 둔다. workflow가 `PAGES_OWNER=governance`를 관측하지 못하면 artifact 배포 전에 fail-closed한다. 배포 또는 smoke가 live 전 실패하면 preview도 closed로 내리며, 운영자는 즉시 로컬 명령으로 `PAGES_OWNER=legacy`를 복구한다.
 
@@ -87,7 +91,7 @@ artifact가 만료되기 전에 새 정상 legacy artifact로 이 네 값을 함
 ## 권한 경계
 
 - `github-pages` environment는 검증된 정적 artifact 배포에만 사용한다.
-- `governance-release` environment는 evidence 승인과 release-state 변경을 보호하고 required reviewer를 둔다.
+- `governance-release` environment는 evidence 승인과 원자적 release 전환을 보호하고 required reviewer를 둔다. `BSIDE_RELEASE_AUTHORIZER_TOKEN`은 이 environment에만 둔다.
 - `governance-runtime` environment는 무인 수집·품질 증빙만 담당하며 release 전환 권한을 갖지 않는다.
 - artifact 조회는 `actions:read`, Pages 배포는 `pages:write`와 `id-token:write`만 사용한다. workflow에는 repository variable write 권한이나 별도 PAT를 부여하지 않는다.
 - 어떤 단계도 DB delete, truncate, schema rollback, SourceRight 복구를 실행하지 않는다.

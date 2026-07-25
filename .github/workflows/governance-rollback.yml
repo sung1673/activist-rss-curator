@@ -229,7 +229,7 @@ jobs:
             --expected-source-code-revision "$LEGACY_CODE_REVISION" \
             --expected-source-artifact-digest "$LEGACY_ARTIFACT_DIGEST"
 
-      - name: Close governance release state after acquiring Pages deployment lock
+      - name: Close v2 then v1 release states after acquiring Pages deployment lock
         env:
           BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
@@ -241,22 +241,60 @@ jobs:
             echo "::error::Protected admin token and governance API base URL are required."
             exit 1
           }
-          api="${GOVERNANCE_API_BASE_URL%/}"
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          [[ "$v1_api" == */api/v1 ]] || {
+            echo "::error::GOVERNANCE_API_BASE_URL must end in /api/v1."
+            exit 1
+          }
+          v2_api="${v1_api%/api/v1}/api/v2"
+
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
-            "$api/admin/release-state" > rollback-state-before.json
-          state="$(jq -r '.release_state' rollback-state-before.json)"
-          version="$(jq -r '.state_version' rollback-state-before.json)"
-          [[ "$version" =~ ^[0-9]+$ ]] || exit 1
-          if [[ "$state" != "closed" ]]; then
-            payload="$(jq -nc --argjson version "$version" --arg reason "$ROLLBACK_REASON" \
+            "$v2_api/admin/release-state" > rollback-v2-before.json
+          v2_state="$(jq -r '.data.release_state' rollback-v2-before.json)"
+          v2_version="$(jq -r '.data.state_version' rollback-v2-before.json)"
+          [[ "$v2_version" =~ ^[0-9]+$ ]] || exit 1
+          if [[ "$v2_state" != "closed" ]]; then
+            payload="$(jq -nc --argjson version "$v2_version" --arg reason "$ROLLBACK_REASON" \
               '{release_state:"closed",expected_version:$version,reason:$reason}')"
             curl --fail-with-body --silent --show-error \
               -X POST -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" -H "Content-Type: application/json" \
-              -H "X-Request-ID: rollback-close-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-              --data "$payload" "$api/admin/release-state" > rollback-state-closed.json
-            [[ "$(jq -r '.release_state' rollback-state-closed.json)" == "closed" ]] || exit 1
+              -H "X-Request-ID: rollback-close-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+              --data "$payload" "$v2_api/admin/release-state" > rollback-v2-closed.json
+            [[ "$(jq -r '.data.release_state' rollback-v2-closed.json)" == "closed" ]] || exit 1
           fi
+
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v1_api/admin/release-state" > rollback-v1-before.json
+          v1_state="$(jq -r '.release_state' rollback-v1-before.json)"
+          v1_version="$(jq -r '.state_version' rollback-v1-before.json)"
+          [[ "$v1_version" =~ ^[0-9]+$ ]] || exit 1
+          if [[ "$v1_state" != "closed" ]]; then
+            payload="$(jq -nc --argjson version "$v1_version" --arg reason "$ROLLBACK_REASON" \
+              '{release_state:"closed",expected_version:$version,reason:$reason}')"
+            curl --fail-with-body --silent --show-error \
+              -X POST -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" -H "Content-Type: application/json" \
+              -H "X-Request-ID: rollback-close-v1-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+              --data "$payload" "$v1_api/admin/release-state" > rollback-v1-closed.json
+            [[ "$(jq -r '.release_state' rollback-v1-closed.json)" == "closed" ]] || exit 1
+          fi
+
+      - name: Verify both release states closed before legacy deployment
+        env:
+          BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v2_api/admin/release-state" | jq -e '.data.release_state == "closed"'
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v1_api/admin/release-state" | jq -e '.release_state == "closed"'
 
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
@@ -310,7 +348,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Smoke restored legacy site and closed governance API
+      - name: Smoke restored legacy site and both closed API boundaries
         env:
           BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
@@ -323,17 +361,23 @@ jobs:
             exit 1
           }
           web="${BSIDE_PUBLIC_WEB_URL%/}"
-          api="${GOVERNANCE_API_BASE_URL%/}"
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
           legacy_api="${ACTIVIST_PUBLIC_API_URL%/}"
           for path in / /feed.xml; do
             curl --fail --silent --show-error --location --retry 12 --retry-delay 5 --retry-all-errors \
               --output /dev/null "$web$path"
           done
-          curl --fail --silent --show-error --output /dev/null "$api/health"
-          status="$(curl --silent --show-error --output rollback-closed-response.json \
-            --write-out '%{http_code}' "$api/events?limit=1")"
-          [[ "$status" == "503" ]]
-          [[ "$(jq -r '.error' rollback-closed-response.json)" == "governance_release_closed" ]]
+          curl --fail --silent --show-error --output /dev/null "$v1_api/health"
+          curl --fail --silent --show-error --output /dev/null "$v2_api/health"
+          v2_status="$(curl --silent --show-error --output rollback-v2-closed-response.json \
+            --write-out '%{http_code}' "$v2_api/events?limit=1")"
+          [[ "$v2_status" == "503" ]]
+          [[ "$(jq -r '.error' rollback-v2-closed-response.json)" == "global_terminal_release_closed" ]]
+          v1_status="$(curl --silent --show-error --output rollback-v1-closed-response.json \
+            --write-out '%{http_code}' "$v1_api/events?limit=1")"
+          [[ "$v1_status" == "503" ]]
+          [[ "$(jq -r '.error' rollback-v1-closed-response.json)" == "governance_release_closed" ]]
           curl --fail --silent --show-error --output /dev/null "$legacy_api?action=reports"
 
       - name: Verify protected ownership boundary and record rollback
@@ -350,10 +394,12 @@ jobs:
           [[ "$GOVERNANCE_PIPELINE_MODE_SNAPSHOT" == "shadow" ]]
           {
             echo "### Governance rollback deployment complete"
-            echo "- release state: \`closed\`"
+            echo "- v2 global terminal release state: \`closed\`"
+            echo "- v1 compatibility release state: \`closed\`"
             echo "- deployed Pages artifact: \`legacy\`"
             echo "- declared Pages owner remains: \`governance\`"
             echo "- pipeline mode: \`shadow\`"
+            echo "- rollback used a fail-closed compensating sequence, not an atomic DB transition"
             echo "- repository variables are not changed by this workflow"
             echo "- until the commands below succeed, legacy and governance scheduled deployers both remain fail-closed"
             echo "- database rows, SourceRight withdrawal history, and new governance data were preserved"

@@ -31,6 +31,7 @@ return array(
         'editor' => array('sha256-hex-without-prefix'),
         'rights' => array('sha256-hex-without-prefix'),
         'admin' => array('sha256-hex-without-prefix'),
+        'release_authorizer' => array('sha256-hex-without-prefix'),
     ),
     'governance_preview_token_hash' => 'sha256-hex-without-prefix',
     'feedback_ip_salt' => 'separate-random-secret',
@@ -40,7 +41,7 @@ return array(
 );
 ```
 
-`admin`은 모든 역할을 포함한다. `ops`는 watchdog과 runner 상태 복구, `editor`는 사건 검수·정정, `rights`는 이용권한 등록만 허용한다. 토큰은 32바이트 이상의 무작위 값으로 만들고 환경별로 분리한다.
+`admin`은 일반 운영 관리자 경로에 접근하지만 보호된 공개 승인 발급 권한을 포함하지 않는다. `ops`는 watchdog과 runner 상태 복구, `editor`는 사건 검수·정정, `rights`는 이용권한 등록만 허용한다. `release_authorizer`는 정확히 일치하는 별도 역할이며 보호된 `/api/v2/admin/release-authorizations`만 호출한다. 토큰은 32바이트 이상의 무작위 값으로 만들고 환경별로 분리한다.
 
 preview 평문 token은 GitHub Pages 자산, URL query, PHP 설정에 저장하지 않는다. 브라우저는 URL fragment에서 token을 받아 세션 저장소에만 보관하고 API 요청의 `Authorization: Bearer …` 헤더로 전달한다. PHP 설정에는 `GOVERNANCE_PREVIEW_TOKEN`의 SHA-256 hex만 `governance_preview_token_hash`로 기록한다.
 
@@ -62,7 +63,7 @@ preview 평문 token은 GitHub Pages 자산, URL query, PHP 설정에 저장하�
 }
 ```
 
-허용 전이는 `closed → preview`, `preview → live|closed`, `live → closed`다. 같은 상태 재요청은 멱등 응답이며 버전과 감사 로그를 늘리지 않는다. 다른 관리자가 먼저 변경했다면 `409 stale_release_state`를 반환한다. 모든 실제 변경은 요청 ID, 역할, 사유와 함께 `governance_release_audit`에 원자적으로 기록한다. 공개 응답에는 preview token이나 그 해시가 포함되지 않는다.
+허용 전이는 `closed → preview`, `preview → closed`, `live → closed`다. 직접 `preview → live`를 요청하면 409 `protected_atomic_cutover_required`를 반환하며, 보호된 `/api/v2/admin/release-authorizations`와 `/api/v2/admin/cutover`의 원자 전환만 두 API를 함께 공개할 수 있다. 같은 상태 재요청은 멱등 응답이며 버전과 감사 로그를 늘리지 않는다. 다른 관리자가 먼저 변경했다면 `409 stale_release_state`를 반환한다. 모든 실제 변경은 요청 ID, 역할, 사유와 함께 `governance_release_audit`에 원자적으로 기록한다. 공개 응답에는 preview token이나 그 해시가 포함되지 않는다.
 
 운영 `SourceRight`의 기준은 MySQL과 `POST /api/v1/admin/source-rights`다. 저장소 `config.yaml`의 `telegram:activistkorea` 레코드는 스키마 예시이자 차단 확인용 `pending` 자리표시자이며, 빈 `evidence_ref` 상태에서는 어떤 권한도 부여하지 않는다. 운영자는 설정 파일을 `active`로 수정해 승인 절차를 우회하지 않는다. KIND 수집기는 네트워크 요청 전에 ops/admin 인증의 `GET /api/v1/ops/source-right-eligibility?source_right_id=official:kind&use=ingest`를 호출하고 `eligible=true`와 64자리 `rights_revision`을 확인한다. 서버는 HMAC snapshot transaction 안에서도 같은 row를 `FOR UPDATE`로 다시 검증하므로 payload가 자신의 권한을 동시에 생성해 우회할 수 없다.
 
@@ -98,7 +99,7 @@ KIND 지연은 client가 만든 날짜·자정 추정값을 받지 않는다. �
 
 `GET /api/v1/ops/release-evidence`는 실제 DB 분자·분모와 동일 SHA의 immutable hash를 반환한다. availability는 최근 7일 동안 `watchdog-v1-kst-5m-minute01` cadence의 4개 route×일 288 slot을 반환하며, route별 72자리 coverage bitmap·missing·duplicate·off-cadence·첫/마지막 관측·실제 interval p95·일 경계 포함 최대 공백을 포함한다. 콘텐츠 품질은 `governance_corpus_2021_plus_kst_day_end_v2` 범위의 2021년 이후 누적 corpus를 각 KST 일자 종료 시점으로 고정해 계산한다. v2는 공개 승인 객체가 참조한 모든 source class의 고유 문서를 분모로 사용하며 원문 변형·권리 만료·철회 후에도 해당 문서를 분모에서 제거하지 않는다. 정확한 `code_revision`을 지정해도 사람 라벨 문서는 응답 크기 예산 때문에 hash·상태 metadata만 제공하며 전체 benchmark·사용성·승인 문서는 admin 전용 `GET /api/v1/admin/release-evidence-inputs`에서 확인한다.
 
-`preview → live` 전환은 일별 증빙만 신뢰하지 않고 같은 v2 문서 분모의 현재 SourceRight를 트랜잭션 안에서 다시 확인한다. 활성 상태·AI 허용·재배포 허용·유효기간·철회 여부·허가 증빙 중 하나라도 실패하면 `current_source_rights_invalid`로 409를 반환하고 release state와 version을 그대로 유지한다. SourceRight 쓰기와 cutover는 모두 release-state row를 먼저 잠그고 rights/data row를 나중에 처리해, cutover 직전 철회가 검사를 추월하거나 역순 잠금으로 교착되는 것을 막는다.
+보호된 `preview → live` 전환은 일별 증빙만 신뢰하지 않고 같은 v2 문서 분모의 현재 SourceRight를 단일 트랜잭션 안에서 다시 확인한다. 일회용 승인의 candidate SHA·evidence digest·run/artifact ID·v1/v2 예상 version·nonce·만료가 하나라도 맞지 않거나, 활성 상태·AI 허용·재배포 허용·유효기간·철회 여부·허가 증빙 중 하나라도 실패하면 409로 거절하고 두 release state와 version을 그대로 유지한다. SourceRight 쓰기와 cutover는 모두 release-state row를 먼저 잠그고 rights/data row를 나중에 처리해, cutover 직전 철회가 검사를 추월하거나 역순 잠금으로 교착되는 것을 막는다.
 
 ## 공식 수집 HMAC 계약
 

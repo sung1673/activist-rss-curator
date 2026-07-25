@@ -1,6 +1,6 @@
 # 공식 수집 durable slot claim
 
-정식 shadow와 release evidence는 DB의 성공 run 개수를 분모로 삼지 않고 `official-v1-82-slots` cadence를 사용한다. KST 00:00~06:30은 30분 간격 14개, 07:00~23:45은 15분 간격 68개로, DART와 KIND 각각 일 82개 slot이다.
+정식 GA shadow와 기존 release evidence는 DB의 성공 run 개수를 분모로 삼지 않고 `official-v1-82-slots` cadence를 사용한다. KST 00:00~06:30은 30분 간격 14개, 07:00~23:45은 15분 간격 68개다. DART는 항상 일 82개 slot이고, KIND는 `KIND_CONNECTOR_MODE=active`로 GA 수집을 연 기간에만 동일한 82개 source-slot 분모를 요구한다. Production Alpha의 기본 `off` 기간에는 KIND slot을 성공으로 합성하지 않는다.
 
 ## Claim 규칙과 identity
 

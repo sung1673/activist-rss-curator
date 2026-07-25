@@ -4,8 +4,40 @@
   const app = document.getElementById("app");
   const announcer = document.getElementById("announcer");
   if (!app || !announcer) return;
+  const drawerShell = document.getElementById("event-drawer-shell");
+  const drawer = document.getElementById("event-drawer");
+  const drawerContent = document.getElementById("drawer-content");
+  const drawerKicker = document.getElementById("drawer-kicker");
+  const globalSearchForm = document.getElementById("global-search-form");
+  const globalSearchInput = document.getElementById("global-search");
+  const globalCoverage = document.getElementById("global-source-coverage");
+  const mobileMenuToggle = document.getElementById("mobile-menu-toggle");
+  const mobileMenu = document.getElementById("mobile-menu");
 
   const PREVIEW_SESSION_KEY = "bside.governance.preview";
+  const MARKETS = new Set(["GLOBAL", "KR", "US", "JP", "GB", "CA", "AU"]);
+  let drawerTrigger = null;
+  let drawerController = null;
+  let filterSheetTrigger = null;
+
+  function closeMobileMenu(options) {
+    const settings = options || {};
+    if (!mobileMenu || !mobileMenuToggle || mobileMenu.hidden) return;
+    mobileMenu.hidden = true;
+    mobileMenuToggle.setAttribute("aria-expanded", "false");
+    if (settings.restoreFocus !== false) mobileMenuToggle.focus();
+  }
+
+  function toggleMobileMenu() {
+    if (!mobileMenu || !mobileMenuToggle) return;
+    const opening = mobileMenu.hidden;
+    mobileMenu.hidden = !opening;
+    mobileMenuToggle.setAttribute("aria-expanded", opening ? "true" : "false");
+    if (opening) {
+      const firstLink = mobileMenu.querySelector("a[href]");
+      if (firstLink) firstLink.focus();
+    }
+  }
 
   function capturePreviewToken() {
     if (!window.location.hash.startsWith("#preview=")) return;
@@ -32,34 +64,60 @@
   capturePreviewToken();
 
   const config = window.__BSIDE_GOVERNANCE_CONFIG__ || {};
+  const CANONICAL_EVENT_FAMILIES = new Set([
+    "large_ownership",
+    "meeting_and_vote",
+    "tender_offer_and_mna",
+    "capital_issuance",
+    "capital_return",
+    "board_and_compensation",
+    "listing_status",
+    "correction_and_withdrawal"
+  ]);
+  const TITLE_PROVENANCE_VALUES = new Set([
+    "source",
+    "generated_metadata",
+    "operator_metadata"
+  ]);
+  const UTC_DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+  const LEGACY_EVENT_FAMILY_MAP = Object.freeze({
+    five_percent_holding: "large_ownership",
+    shareholder_proposal: "meeting_and_vote",
+    general_meeting: "meeting_and_vote",
+    proposal_vote: "meeting_and_vote",
+    tender_offer: "tender_offer_and_mna",
+    merger: "tender_offer_and_mna",
+    split: "tender_offer_and_mna",
+    duplicate_listing: "tender_offer_and_mna",
+    rights_issue: "capital_issuance",
+    convertible_bond: "capital_issuance",
+    bond_with_warrant: "capital_issuance",
+    exchangeable_bond: "capital_issuance",
+    dividend: "capital_return",
+    treasury_shares: "capital_return",
+    board: "board_and_compensation",
+    executive_compensation: "board_and_compensation",
+    delisting: "listing_status",
+    trading_suspension: "listing_status"
+  });
   const labels = {
     eventType: {
-      five_percent_holding: "5% 보유 / 5% holding",
-      shareholder_proposal: "주주제안 / Shareholder proposal",
-      general_meeting: "주주총회 / General meeting",
-      board: "이사회 / Board",
-      executive_compensation: "임원보수 / Executive compensation",
-      dividend: "배당 / Dividend",
-      treasury_shares: "자사주 / Treasury shares",
-      merger: "합병 / Merger",
-      split: "분할 / Split",
-      duplicate_listing: "중복상장 / Duplicate listing",
-      rights_issue: "유상증자 / Rights issue",
-      convertible_bond: "전환사채 / Convertible bond",
-      bond_with_warrant: "신주인수권부사채 / Bond with warrant",
-      exchangeable_bond: "교환사채 / Exchangeable bond",
-      tender_offer: "공개매수 / Tender offer",
-      delisting: "상장폐지 / Delisting",
-      trading_suspension: "거래정지 / Trading suspension",
-      value_up: "기업가치 제고 / Value-up",
-      proposal_vote: "의안 표결 / Proposal vote",
-      other: "기타 / Other"
+      large_ownership: "대량보유·보유목적 변경 / Ownership",
+      meeting_and_vote: "주총·주주제안·의결 / Meetings & votes",
+      tender_offer_and_mna: "공개매수·M&A·합병·분할 / Tender offers & M&A",
+      capital_issuance: "증자·CB/BW/EB·자본 희석 / Capital issuance",
+      capital_return: "배당·자사주 매입·소각 / Capital return",
+      board_and_compensation: "이사·경영진·보수 / Board & compensation",
+      listing_status: "거래정지·상장상태 / Listing status",
+      correction_and_withdrawal: "정정·철회·취소 / Corrections & withdrawals"
     },
     importance: {
       critical: "시장 민감 / Market-sensitive",
+      market_sensitive: "시장 민감 / Market-sensitive",
       high: "높음 / High",
       medium: "보통 / Medium",
-      low: "낮음 / Low"
+      low: "낮음 / Low",
+      unknown: "미분류 / Unclassified"
     },
     verification: {
       signal: "신호 / Signal",
@@ -96,6 +154,12 @@
       media_report: "언론 보도 / Media report",
       editorial_analysis: "편집 분석 / Editorial analysis"
     },
+    titleProvenance: {
+      source: "원문 제목 / Source title",
+      generated_metadata: "공시 메타데이터 표제 / Filing metadata label",
+      operator_metadata: "운영자 등록 표제 / Operator-entered label",
+      unknown: "제목 출처 미확인 / Title source unavailable"
+    },
     claimType: {
       actor_claim: "당사자 주장 / Actor claim",
       company_response: "회사 반론 / Company response",
@@ -120,23 +184,45 @@
       regulator: "규제기관 / Regulator",
       advisor: "자문사 / Advisor"
     },
+    actorRole: {
+      issuer: "발행사 / Issuer",
+      target: "대상 / Target",
+      proponent: "제안자 / Proponent",
+      claimant: "주장 주체 / Claimant",
+      respondent: "대응 주체 / Respondent",
+      supporter: "지지 주체 / Supporter",
+      advisor: "자문사 / Advisor",
+      regulator: "규제기관 / Regulator",
+      participant: "참여자 / Participant"
+    },
     kind: {
       company: "기업 / Company",
       actor: "당사자 / Actor",
       event: "사건 / Event",
       campaign: "캠페인 / Campaign",
       document: "문서 / Document"
+    },
+    coverageMode: {
+      "market-wide": "시장 전체 / Market-wide",
+      "official-register": "공식 등록부 / Official register",
+      "selected-issuers": "선별 기업 / Selected issuers",
+      "link-only": "링크 전용·수동 메타데이터 / Link-only · manual metadata",
+      unavailable: "수집 범위 없음 / Unavailable",
+      official: "공식 근거 / Official evidence",
+      media_only: "보도 전용 / Media only",
+      partial: "일부 범위 / Partial"
     }
   };
 
   let routeController = null;
 
   class ApiError extends Error {
-    constructor(message, code, status) {
+    constructor(message, code, status, apiVersion) {
       super(message);
       this.name = "ApiError";
       this.code = code || "request_failed";
       this.status = status || 0;
+      this.apiVersion = apiVersion || "";
     }
   }
 
@@ -193,21 +279,30 @@
     return new Intl.DateTimeFormat("ko-KR", options).format(date);
   }
 
-  function apiBase() {
+  function apiBase(version) {
     try {
-      const url = new URL(String(config.apiBase || "/api/v1"), window.location.origin);
+      const configured = version === "v2" && config.apiV2Base
+        ? config.apiV2Base
+        : config.apiBase || "/api/v1";
+      const url = new URL(String(configured), window.location.origin);
       if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error("unsafe API base");
+      if (version === "v2" && !config.apiV2Base) {
+        if (/\/api\/v1\/?$/.test(url.pathname)) url.pathname = url.pathname.replace(/\/api\/v1\/?$/, "/api/v2");
+        else if (/\/api\.php\/api\/v1\/?$/.test(url.pathname)) url.pathname = url.pathname.replace(/\/api\.php\/api\/v1\/?$/, "/api.php/api/v2");
+        else url.pathname = `${url.pathname.replace(/\/$/, "")}/api/v2`;
+      }
       url.pathname = `${url.pathname.replace(/\/$/, "")}/`;
       return url;
     } catch (_error) {
-      return new URL("/api/v1/", window.location.origin);
+      return new URL(version === "v2" ? "/api/v2/" : "/api/v1/", window.location.origin);
     }
   }
 
-  const baseUrl = apiBase();
+  const baseUrl = apiBase("v1");
+  const v2BaseUrl = apiBase("v2");
 
-  function endpoint(path, params) {
-    const url = new URL(String(path || "").replace(/^\//, ""), baseUrl);
+  function endpoint(path, params, version) {
+    const url = new URL(String(path || "").replace(/^\//, ""), version === "v2" ? v2BaseUrl : baseUrl);
     Object.entries(params || {}).forEach(([name, value]) => {
       if (value !== undefined && value !== null && String(value) !== "") url.searchParams.set(name, String(value));
     });
@@ -215,39 +310,257 @@
   }
 
   document.querySelectorAll("[data-api-link]").forEach((anchor) => {
-    anchor.href = endpoint(anchor.dataset.apiLink).toString();
+    const version = anchor.dataset.apiVersion === "v2" ? "v2" : "v1";
+    anchor.href = endpoint(anchor.dataset.apiLink, {}, version).toString();
   });
 
-  async function request(path, options) {
+  async function fetchPayload(url, options) {
     const settings = options || {};
     const headers = settings.body ? { "Content-Type": "application/json", Accept: "application/json" } : { Accept: "application/json" };
     const token = previewToken();
     if (token) headers.Authorization = `Bearer ${token}`;
-    const response = await fetch(endpoint(path, settings.params), {
-      method: settings.method || "GET",
-      headers,
-      body: settings.body ? JSON.stringify(settings.body) : undefined,
-      credentials: "omit",
-      cache: settings.method === "POST" ? "no-store" : "no-cache",
-      referrerPolicy: "no-referrer",
-      signal: settings.signal
-    });
+    let response;
+    try {
+      response = await fetch(url, {
+        method: settings.method || "GET",
+        headers,
+        body: settings.body ? JSON.stringify(settings.body) : undefined,
+        credentials: "omit",
+        cache: settings.method === "POST" ? "no-store" : "no-cache",
+        referrerPolicy: "no-referrer",
+        signal: settings.signal
+      });
+    } catch (error) {
+      if (error && error.name === "AbortError") throw error;
+      throw new ApiError("API request failed", "network_error", 0);
+    }
     const contentType = response.headers.get("content-type") || "";
-    const payload = contentType.includes("application/json") ? await response.json() : null;
+    let payload = null;
+    if (contentType.includes("application/json")) {
+      try {
+        payload = await response.json();
+      } catch (_error) {
+        throw new ApiError("API returned invalid JSON", "invalid_json", response.status);
+      }
+    }
     if (!response.ok || !payload || payload.ok === false) {
       const code = payload && payload.error ? String(payload.error) : `http_${response.status}`;
-      throw new ApiError("API request failed", code, response.status);
+      const apiVersion = payload && typeof payload.api_version === "string" ? payload.api_version : "";
+      throw new ApiError("API request failed", code, response.status, apiVersion);
     }
     return payload;
+  }
+
+  async function request(path, options) {
+    const settings = options || {};
+    return fetchPayload(endpoint(path, settings.params), settings);
+  }
+
+  function shouldUseV1Fallback(error) {
+    if (!error || error.name === "AbortError") return false;
+    if (error.code === "unsupported_v2_contract") return true;
+    if (Number(error.status) === 200 && ["invalid_json", "http_200"].includes(String(error.code))) return true;
+    if ([405, 410, 501].includes(Number(error.status))) return true;
+    return Number(error.status) === 404
+      && (!error.apiVersion || ["not_found", "endpoint_not_found"].includes(String(error.code)));
+  }
+
+  function isRecord(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function isRecordArray(value) {
+    return Array.isArray(value) && value.every(isRecord);
+  }
+
+  function isUtcDateTime(value) {
+    return typeof value === "string" && UTC_DATE_TIME_PATTERN.test(value);
+  }
+
+  function isNullableUtcDateTime(value) {
+    return value === null || isUtcDateTime(value);
+  }
+
+  function isCoverageNotice(value) {
+    if (value === null) return true;
+    return (
+      isRecord(value)
+      && ["coverage_unavailable", "partial_coverage"].includes(String(value.reason || ""))
+      && ["blocking", "warning"].includes(String(value.scope || ""))
+      && typeof value.brief_id === "string"
+      && isNullableUtcDateTime(value.cutoff_at)
+      && isNullableUtcDateTime(value.published_at)
+      && Array.isArray(value.unavailable_countries)
+      && value.unavailable_countries.every((country) => typeof country === "string")
+      && Array.isArray(value.unavailable_sources)
+      && value.unavailable_sources.every((source) => typeof source === "string")
+    );
+  }
+
+  function isV2EventRecord(value) {
+    return (
+      isRecord(value)
+      && typeof value.event_id === "string"
+      && TITLE_PROVENANCE_VALUES.has(String(value.title_provenance || ""))
+      && isNullableUtcDateTime(value.occurred_at)
+      && isNullableUtcDateTime(value.filed_at)
+      && isNullableUtcDateTime(value.first_observed_at)
+      && isUtcDateTime(value.updated_at)
+      && isNullableUtcDateTime(value.deadline_at)
+      && (
+        value.actor_role === undefined
+        || value.actor_role === null
+        || typeof value.actor_role === "string"
+      )
+    );
+  }
+
+  function invalidV2Contract(path) {
+    return new ApiError(`Unsupported API v2 contract for ${path}`, "unsupported_v2_contract", 200, "");
+  }
+
+  function isV2PageMeta(value) {
+    return (
+      isRecord(value)
+      && Number.isInteger(value.offset)
+      && value.offset >= 0
+      && value.offset <= 10000
+      && (value.page === null
+        || (Number.isInteger(value.page) && value.page >= 1 && value.page <= 100))
+      && Number.isInteger(value.limit)
+      && value.limit >= 1
+      && value.limit <= 100
+      && Number.isInteger(value.returned)
+      && value.returned >= 0
+      && value.returned <= value.limit
+      && typeof value.has_more === "boolean"
+      && (value.next_page === null
+        || (Number.isInteger(value.next_page) && value.next_page >= 2 && value.next_page <= 100))
+      && (value.next_offset === null
+        || (Number.isInteger(value.next_offset)
+          && value.next_offset === value.offset + value.returned
+          && value.next_offset <= 10000))
+      && typeof value.continuation_limited === "boolean"
+      && (!value.has_more || value.next_offset !== null || value.continuation_limited)
+      && (!value.continuation_limited || (value.has_more && value.next_offset === null))
+      && (value.has_more || (value.next_page === null && value.next_offset === null))
+    );
+  }
+
+  function validateV2Payload(path, payload) {
+    if (!isRecord(payload) || payload.api_version !== "v2" || payload.ok !== true || !isRecord(payload.data)) {
+      throw invalidV2Contract(path);
+    }
+    const data = payload.data;
+    if (path === "/briefs/latest") {
+      if (
+        typeof data.edition !== "string"
+        || !isNullableUtcDateTime(data.cutoff_at)
+        || !isNullableUtcDateTime(data.published_at)
+        || !isNullableUtcDateTime(data.last_updated_at)
+        || typeof data.stale !== "boolean"
+        || !["", "no_approved_brief", "no_confirmed_material_events", "coverage_unavailable"].includes(String(data.empty_reason || ""))
+        || !isCoverageNotice(data.coverage_notice)
+        || !isRecordArray(data.top)
+        || !isRecordArray(data.watch)
+        || !isRecordArray(data.deadlines)
+        || !isRecordArray(data.source_status)
+        || !data.source_status.every((source) => (
+          isNullableUtcDateTime(source.last_success_at)
+          && isNullableUtcDateTime(source.last_checked_at)
+        ))
+        || ![...data.top, ...data.watch, ...data.deadlines].every(isV2EventRecord)
+      ) {
+        throw invalidV2Contract(path);
+      }
+      return payload;
+    }
+    if (path === "/live" || path === "/events" || path === "/calendar" || path === "/search") {
+      if (
+        !isRecordArray(data.items)
+        || !data.items.every(isV2EventRecord)
+        || (path === "/calendar" && !data.items.every((item) => typeof item.deadline_at === "string"))
+        || !isV2PageMeta(payload.meta)
+        || payload.meta.returned !== data.items.length
+      ) {
+        throw invalidV2Contract(path);
+      }
+      return payload;
+    }
+    if (path === "/sources/status") {
+      if (!isRecordArray(data.items) || !isRecord(payload.meta)) throw invalidV2Contract(path);
+      return payload;
+    }
+    if (path === "/issuers") {
+      if (
+        !isRecordArray(data.items)
+        || !data.items.every((item) => typeof item.issuer_id === "string")
+        || !isV2PageMeta(payload.meta)
+        || payload.meta.returned !== data.items.length
+      ) {
+        throw invalidV2Contract(path);
+      }
+      return payload;
+    }
+    if (/^\/events\/[A-Za-z0-9_.:%-]+$/.test(path)) {
+      if (
+        !isRecord(data.event)
+        || !isV2EventRecord(data.event)
+        || !isRecordArray(data.actors)
+        || !data.actors.every((actor) => typeof actor.actor_id === "string" && typeof actor.actor_role === "string")
+        || !isRecordArray(data.documents)
+        || !data.documents.every((documentItem) => (
+          isNullableUtcDateTime(documentItem.filed_at)
+          && isNullableUtcDateTime(documentItem.published_at)
+        ))
+        || !isRecordArray(data.observations)
+        || !data.observations.every((observation) => (
+          isUtcDateTime(observation.first_observed_at)
+          && isUtcDateTime(observation.observed_at)
+        ))
+      ) {
+        throw invalidV2Contract(path);
+      }
+      return payload;
+    }
+    if (/^\/issuers\/[A-Za-z0-9_.:%-]+$/.test(path)) {
+      if (
+        !isRecord(data.issuer)
+        || typeof data.issuer.issuer_id !== "string"
+        || !isRecordArray(data.identifiers)
+        || !isRecordArray(data.listings)
+        || !isRecordArray(data.events)
+        || !data.events.every(isV2EventRecord)
+      ) {
+        throw invalidV2Contract(path);
+      }
+      return payload;
+    }
+    throw invalidV2Contract(path);
+  }
+
+  async function terminalRequest(path, options) {
+    const settings = options || {};
+    try {
+      const payload = validateV2Payload(
+        path,
+        await fetchPayload(endpoint(path, settings.params, "v2"), settings)
+      );
+      return { payload, version: "v2" };
+    } catch (error) {
+      if (!settings.fallback || !shouldUseV1Fallback(error)) throw error;
+      const payload = await settings.fallback();
+      return { payload, version: "v1" };
+    }
   }
 
   function metricRouteTemplate() {
     const raw = window.location.hash.startsWith("#/") ? window.location.hash.slice(1).split("?", 1)[0] : "/today";
     const segments = raw.split("/").filter(Boolean);
     const first = segments[0] || "today";
-    const allowed = new Set(["today", "events", "companies", "actors", "campaigns", "documents", "calendar", "search", "revisions", "feedback"]);
+    const allowed = new Set(["today", "events", "companies", "issuers", "actors", "campaigns", "documents", "calendar", "search", "revisions", "feedback"]);
     if (!allowed.has(first)) return "/not-found";
-    if (segments.length > 1 && ["events", "companies", "actors", "campaigns", "documents"].includes(first)) return `/${first}/:id`;
+    if (segments.length > 1 && ["events", "companies", "issuers", "actors", "campaigns", "documents"].includes(first)) return `/${first}/:id`;
     return `/${first}`;
   }
 
@@ -334,8 +647,56 @@
       text,
       lang: options && options.lang,
       className: options && options.className,
-      attrs: { href: hash }
+      attrs: { href: hash, ...((options && options.attrs) || {}) },
+      dataset: (options && options.dataset) || {}
     });
+  }
+
+  function eventRouteLink(event, className) {
+    return routeLink(
+      event.title || "제목 없음",
+      `#/events/${encodeURIComponent(event.event_id || "")}`,
+      {
+        lang: event.original_language,
+        className,
+        dataset: { eventDrawer: event.event_id || "" },
+        attrs: { "aria-haspopup": "dialog" }
+      }
+    );
+  }
+
+  function issuerOrCompanyId(record) {
+    if (record && validEntityId(record.issuer_id)) {
+      return { kind: "issuer", id: String(record.issuer_id) };
+    }
+    if (record && validCompanyId(record.company_id)) {
+      return { kind: "company", id: String(record.company_id) };
+    }
+    return null;
+  }
+
+  function issuerOrCompanyName(record) {
+    return String(
+      (record && (record.issuer_name || record.company_name || record.legal_name))
+      || (record && (record.issuer_id || record.company_id))
+      || "—"
+    );
+  }
+
+  function issuerOrCompanyRoute(record) {
+    const identity = issuerOrCompanyId(record);
+    if (!identity) return "";
+    return identity.kind === "issuer"
+      ? `#/issuers/${encodeURIComponent(identity.id)}`
+      : `#/companies/${encodeURIComponent(identity.id)}`;
+  }
+
+  function issuerOrCompanyLink(record, text, options) {
+    const route = issuerOrCompanyRoute(record);
+    const labelText = text || issuerOrCompanyName(record);
+    return route
+      ? routeLink(labelText, route, options)
+      : element("span", { text: labelText, className: options && options.className });
   }
 
   function externalLink(text, href, className) {
@@ -390,22 +751,39 @@
   }
 
   function addLoadMore(section, pagination, loadPage) {
-    let page = pagination && pagination.next_page ? Number(pagination.next_page) : 0;
-    if (!page) return;
+    const nextCursor = (value) => {
+      if (value && Number.isInteger(value.next_offset) && value.next_offset >= 0) {
+        return { kind: "offset", value: value.next_offset };
+      }
+      if (value && Number.isInteger(value.next_page) && value.next_page > 0) {
+        return { kind: "page", value: value.next_page };
+      }
+      return null;
+    };
+    let cursor = nextCursor(pagination);
+    if (!cursor) return;
     const button = element("button", { text: "더 보기 / Load more", attrs: { type: "button" } });
     button.addEventListener("click", async () => {
       button.disabled = true;
       try {
-        const next = await loadPage(page);
-        page = next && next.next_page ? Number(next.next_page) : 0;
-        if (!page) button.remove();
+        const next = await loadPage(cursor.value, cursor.kind);
+        cursor = nextCursor(next);
+        if (!cursor) button.remove();
       } catch (error) {
         announceError(error);
       } finally {
-        if (page) button.disabled = false;
+        if (cursor) button.disabled = false;
       }
     });
     section.append(element("div", { className: "load-more" }, [button]));
+  }
+
+  function continuationParams(base, value, kind) {
+    const params = { ...base };
+    delete params.page;
+    delete params.offset;
+    params[kind === "offset" ? "offset" : "page"] = value;
+    return params;
   }
 
   const PUBLIC_DOCUMENT_CLASSES = new Set([
@@ -444,6 +822,99 @@
       if (value) params[name] = value;
     });
     return params;
+  }
+
+  function v2EventFilterParams(query) {
+    const params = { page: 1, limit: 50 };
+    const country = String(query.get("country") || query.get("market") || "").toUpperCase();
+    if (MARKETS.has(country) && country !== "GLOBAL") params.country = country;
+    const mappings = {
+      issuer_id: "issuer_id",
+      market_code: "market",
+      event_family: "event_family",
+      verification_status: "verification_status",
+      change_type: "change_type",
+      from: "from",
+      to: "to"
+    };
+    Object.entries(mappings).forEach(([queryName, apiName]) => {
+      const value = String(query.get(queryName) || "").trim();
+      if (value) params[apiName] = value;
+    });
+    const legacyEventType = String(query.get("event_type") || "").trim();
+    if (!params.event_family && legacyEventType) params.event_family = legacyEventType;
+    return params;
+  }
+
+  function v2EventFilterForm(query, destination) {
+    const country = element("select", { attrs: { id: "filter-country", name: "country" } });
+    [["", "전체 국가 / All countries"], ...[...MARKETS].filter((value) => value !== "GLOBAL").map((value) => [value, value])]
+      .forEach(([value, text]) => {
+        const option = element("option", { text, attrs: { value } });
+        if (value === String(query.get("country") || query.get("market") || "").toUpperCase()) option.selected = true;
+        country.append(option);
+      });
+    const issuer = element("input", {
+      attrs: {
+        id: "filter-issuer",
+        name: "issuer_id",
+        value: query.get("issuer_id") || "",
+        maxlength: "96",
+        pattern: "[A-Za-z0-9_.:-]{1,96}",
+        placeholder: "Global issuer ID"
+      }
+    });
+    const type = element("select", { attrs: { id: "filter-event-family", name: "event_family" } });
+    [["", "전체 유형 / All types"], ...Object.entries(labels.eventType)].forEach(([value, text]) => {
+      const option = element("option", { text, attrs: { value } });
+      if (value === String(query.get("event_family") || query.get("event_type") || "")) option.selected = true;
+      type.append(option);
+    });
+    const status = element("select", { attrs: { id: "filter-v2-status", name: "verification_status" } });
+    [["", "전체 상태 / All statuses"], ...Object.entries(labels.verification).filter(([value]) => value !== "signal")]
+      .forEach(([value, text]) => {
+        const option = element("option", { text, attrs: { value } });
+        if (value === String(query.get("verification_status") || "")) option.selected = true;
+        status.append(option);
+      });
+    const change = element("input", {
+      attrs: {
+        id: "filter-change-type",
+        name: "change_type",
+        value: query.get("change_type") || "",
+        maxlength: "24",
+        pattern: "[a-z][a-z0-9_]{1,23}",
+        placeholder: "new / updated / corrected"
+      }
+    });
+    const from = element("input", { attrs: { id: "filter-v2-from", type: "date", name: "from", value: query.get("from") || "" } });
+    const to = element("input", { attrs: { id: "filter-v2-to", type: "date", name: "to", value: query.get("to") || "" } });
+    const form = element("form", { className: "filter-form", attrs: { "aria-label": "글로벌 사건 필터 / Global event filters" } }, [
+      element("div", { className: "filter-grid" }, [
+        element("div", { className: "field" }, [element("label", { text: "국가 / Country", attrs: { for: "filter-country" } }), country]),
+        element("div", { className: "field" }, [element("label", { text: "발행사 / Issuer", attrs: { for: "filter-issuer" } }), issuer]),
+        element("div", { className: "field" }, [element("label", { text: "사건 유형 / Event family", attrs: { for: "filter-event-family" } }), type]),
+        element("div", { className: "field" }, [element("label", { text: "확인 상태 / Status", attrs: { for: "filter-v2-status" } }), status]),
+        element("div", { className: "field" }, [element("label", { text: "변경 유형 / Change", attrs: { for: "filter-change-type" } }), change]),
+        element("div", { className: "field" }, [element("label", { text: "시작 / From", attrs: { for: "filter-v2-from" } }), from]),
+        element("div", { className: "field" }, [element("label", { text: "종료 / To", attrs: { for: "filter-v2-to" } }), to])
+      ]),
+      element("div", { className: "form-actions" }, [
+        element("button", { text: "필터 적용 / Apply", attrs: { type: "submit" } }),
+        routeLink("초기화 / Reset", destination, { className: "text-link" })
+      ])
+    ]);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      const values = new URLSearchParams();
+      new FormData(form).forEach((value, name) => {
+        const text = String(value).trim();
+        if (text) values.set(name, text);
+      });
+      window.location.hash = `${destination}${values.toString() ? `?${values.toString()}` : ""}`;
+    });
+    return form;
   }
 
   function eventFilterForm(query, destination) {
@@ -497,11 +968,528 @@
     return form;
   }
 
+  function currentMarket(query) {
+    const value = String(query.get("market") || "GLOBAL").toUpperCase();
+    return MARKETS.has(value) ? value : "GLOBAL";
+  }
+
+  function marketCoverageDescription(market) {
+    const descriptions = {
+      GLOBAL: "KR·US·JP 시장 전체 / market-wide · GB 공식 등록부 / official register · CA·AU 링크 전용 / link-only",
+      KR: "OpenDART 시장 전체 / Market-wide",
+      US: "SEC EDGAR 시장 전체 / Market-wide",
+      JP: "EDINET 시장 전체 / Market-wide · TDnet 전문 제외",
+      GB: "Companies House 공식 등록부 / Official register · RNS 전문 제외",
+      CA: "링크 전용·수동 메타데이터 / Link-only · manual metadata · SEDAR+ 전문 제외",
+      AU: "ASIC 링크 전용·수동 메타데이터 / Link-only · manual metadata · ASX 전문 제외"
+    };
+    return `Production Alpha · ${descriptions[market] || descriptions.GLOBAL}`;
+  }
+
+  function marketForEvent(event) {
+    const explicit = String(
+      event.country
+      || event.country_code
+      || event.company_country_code
+      || event.exchange_country_code
+      || ""
+    ).toUpperCase();
+    if (MARKETS.has(explicit) && explicit !== "GLOBAL") return explicit;
+    const market = String(event.market || event.market_code || "").toUpperCase();
+    if (/KOSPI|KOSDAQ|KONEX|KRX/.test(market)) return "KR";
+    if (/NYSE|NASDAQ|AMEX|OTC|US/.test(market)) return "US";
+    if (/TSE|TOKYO|JP/.test(market)) return "JP";
+    if (/LSE|LONDON|GB|UK/.test(market)) return "GB";
+    if (/TSX|CSE|CA/.test(market)) return "CA";
+    if (/ASX|AU/.test(market)) return "AU";
+    return /^\d{8}$/.test(String(event.company_id || event.issuer_id || "")) ? "KR" : "";
+  }
+
+  function eventCoverageMode(event) {
+    const explicit = String(event.coverage_mode || "").trim();
+    if (explicit) return explicit;
+    const inferred = {
+      KR: "market-wide",
+      US: "market-wide",
+      JP: "market-wide",
+      GB: "official-register",
+      CA: "link-only",
+      AU: "link-only"
+    }[marketForEvent(event)];
+    if (inferred) return inferred;
+    if (Number(event.official_evidence_count || 0) > 0 || event.verification_status === "official") return "official";
+    return Number(event.media_count || 0) > 0 ? "media_only" : "unavailable";
+  }
+
+  function canonicalEventFamily(value, verificationStatus, changeType) {
+    const key = String(value || "").trim();
+    if (CANONICAL_EVENT_FAMILIES.has(key)) return key;
+    if (
+      ["corrected", "withdrawn"].includes(String(verificationStatus || ""))
+      || ["corrected", "withdrawn"].includes(String(changeType || ""))
+    ) {
+      return "correction_and_withdrawal";
+    }
+    return LEGACY_EVENT_FAMILY_MAP[key] || "";
+  }
+
+  function normalizeEvent(item) {
+    const event = item && typeof item === "object" ? item : {};
+    const eventFamily = canonicalEventFamily(
+      event.event_family || event.event_type || event.category,
+      event.verification_status,
+      event.change_type
+    );
+    return {
+      ...event,
+      event_id: event.event_id || (event.item_type === "event" ? event.entity_id : "") || event.id || "",
+      issuer_id: event.issuer_id || "",
+      company_id: event.company_id || "",
+      company_name: event.company_name || event.issuer_name || "",
+      issuer_name: event.issuer_name || "",
+      event_type: eventFamily,
+      event_family: eventFamily,
+      title: String(event.title || ""),
+      title_provenance: TITLE_PROVENANCE_VALUES.has(String(event.title_provenance || ""))
+        ? String(event.title_provenance)
+        : "unknown",
+      original_language: event.original_language || "",
+      occurred_at: event.occurred_at || event.filed_at || event.first_observed_at || event.updated_at || "",
+      verification_status: event.verification_status || "unverified",
+      importance: event.importance || "unknown",
+      market: event.market || "",
+      country: event.country || event.country_code || "",
+      change_summary: event.change_summary || event.summary || "",
+      current_status: event.current_status || event.status || "",
+      actor_name: event.actor_name || "",
+      actor_role: event.actor_role || "",
+      filed_at: event.filed_at || "",
+      first_observed_at: event.first_observed_at || "",
+      updated_at: event.updated_at || "",
+      deadline_at: event.deadline_at || event.scheduled_at || "",
+      official_evidence_count: Number(
+        event.official_evidence_count
+        || (event.has_official_evidence === true ? 1 : 0)
+      ),
+      media_count: Number(event.media_count || 0),
+      coverage_mode: event.coverage_mode || "",
+      source_url: event.source_url || ""
+    };
+  }
+
+  function terminalFilterParams(query) {
+    const params = {};
+    const eventType = String(query.get("event_type") || "").trim();
+    const verification = String(query.get("verification_status") || "").trim();
+    const q = String(query.get("q") || "").trim();
+    if (eventType) params.event_family = eventType;
+    if (verification) params.verification_status = verification;
+    if (q) params.q = q;
+    ["from", "to"].forEach((name) => {
+      const value = String(query.get(name) || "").trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) params[name] = value;
+    });
+    const market = currentMarket(query);
+    if (market !== "GLOBAL") params.country = market;
+    return params;
+  }
+
+  function matchesTerminalFilters(event, query) {
+    const market = currentMarket(query);
+    if (market !== "GLOBAL" && marketForEvent(event) !== market) return false;
+    const eventType = String(query.get("event_type") || "");
+    if (eventType && String(event.event_type || "") !== eventType) return false;
+    const verification = String(query.get("verification_status") || "");
+    if (verification && String(event.verification_status || "") !== verification) return false;
+    const eventDate = normalizedDate(event.occurred_at);
+    const from = String(query.get("from") || "");
+    const to = String(query.get("to") || "");
+    const hasFrom = /^\d{4}-\d{2}-\d{2}$/.test(from);
+    const hasTo = /^\d{4}-\d{2}-\d{2}$/.test(to);
+    if ((hasFrom || hasTo) && !eventDate) return false;
+    if (eventDate && hasFrom) {
+      const fromDate = normalizedDate(`${from}T00:00:00Z`);
+      if (fromDate && eventDate < fromDate) return false;
+    }
+    if (eventDate && hasTo) {
+      const toDate = normalizedDate(`${to}T23:59:59.999Z`);
+      if (toDate && eventDate > toDate) return false;
+    }
+    const q = String(query.get("q") || "").trim().toLocaleLowerCase();
+    if (q) {
+      const haystack = [
+        event.title,
+        event.company_name,
+        event.ticker,
+        event.actor_name,
+        event.change_summary
+      ].join(" ").toLocaleLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  }
+
+  function syncMarketTabs(query) {
+    const active = currentMarket(query);
+    document.querySelectorAll("[data-market]").forEach((link) => {
+      const market = String(link.dataset.market || "GLOBAL");
+      const next = new URLSearchParams(query);
+      next.set("market", market);
+      link.href = `#/today?${next.toString()}`;
+      if (market === active) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
+    });
+  }
+
+  function terminalFilterForm(query) {
+    const q = element("input", {
+      attrs: {
+        id: "terminal-filter-q",
+        name: "q",
+        type: "search",
+        value: query.get("q") || "",
+        maxlength: "100",
+        placeholder: "기업·당사자·제목"
+      }
+    });
+    const type = element("select", { attrs: { id: "terminal-filter-type", name: "event_type" } });
+    [["", "전체 사건"], ...Object.entries(labels.eventType)].forEach(([value, text]) => {
+      const option = element("option", { text, attrs: { value } });
+      if (value === String(query.get("event_type") || "")) option.selected = true;
+      type.append(option);
+    });
+    const verification = element("select", { attrs: { id: "terminal-filter-verification", name: "verification_status" } });
+    [
+      ["", "전체 근거"],
+      ["official", "공식 근거"],
+      ["confirmed", "복수 확인"],
+      ["corroborated", "추가 근거"],
+      ["corrected", "정정"]
+    ].forEach(([value, text]) => {
+      const option = element("option", { text, attrs: { value } });
+      if (value === String(query.get("verification_status") || "")) option.selected = true;
+      verification.append(option);
+    });
+    const from = element("input", {
+      attrs: {
+        id: "terminal-filter-from",
+        name: "from",
+        type: "date",
+        value: query.get("from") || ""
+      }
+    });
+    const to = element("input", {
+      attrs: {
+        id: "terminal-filter-to",
+        name: "to",
+        type: "date",
+        value: query.get("to") || ""
+      }
+    });
+    const validateDateRange = () => {
+      const invalid = Boolean(from.value && to.value && from.value > to.value);
+      to.setCustomValidity(invalid ? "종료일은 시작일보다 빠를 수 없습니다. / To must be on or after From." : "");
+      return !invalid;
+    };
+    from.addEventListener("input", validateDateRange);
+    to.addEventListener("input", validateDateRange);
+    const form = element("form", {
+      className: "terminal-filter-form",
+      attrs: { "aria-label": "오늘의 사건 필터 / Today event filters" }
+    }, [
+      element("div", { className: "field" }, [
+        element("label", { text: "검색 / Search", attrs: { for: "terminal-filter-q" } }),
+        q
+      ]),
+      element("div", { className: "field" }, [
+        element("label", { text: "사건 유형 / Event", attrs: { for: "terminal-filter-type" } }),
+        type
+      ]),
+      element("div", { className: "field" }, [
+        element("label", { text: "근거 상태 / Evidence", attrs: { for: "terminal-filter-verification" } }),
+        verification
+      ]),
+      element("div", { className: "field" }, [
+        element("label", { text: "시작 / From", attrs: { for: "terminal-filter-from" } }),
+        from
+      ]),
+      element("div", { className: "field" }, [
+        element("label", { text: "종료 / To", attrs: { for: "terminal-filter-to" } }),
+        to
+      ]),
+      element("div", { className: "form-actions" }, [
+        element("button", { text: "적용", attrs: { type: "submit" } }),
+        routeLink("초기화", `#/today?market=${currentMarket(query)}`, { className: "text-link" })
+      ])
+    ]);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      validateDateRange();
+      if (!form.reportValidity()) return;
+      const values = new URLSearchParams();
+      values.set("market", currentMarket(query));
+      new FormData(form).forEach((value, name) => {
+        const text = String(value).trim();
+        if (text) values.set(name, text);
+      });
+      window.location.hash = `#/today?${values.toString()}`;
+    });
+    return form;
+  }
+
+  function mobileTerminalTabs() {
+    const targets = [
+      ["오늘", "top-title"],
+      ["Live", "live-title"],
+      ["Watch", "mobile-watch-title"],
+      ["기한", "mobile-deadline-title"]
+    ];
+    return element("nav", {
+      className: "mobile-terminal-tabs",
+      attrs: { "aria-label": "오늘의 데이터 구간 / Daily terminal sections" }
+    }, [
+      ...targets.map(([text, target]) => element("button", {
+        text,
+        attrs: { type: "button", "data-scroll-target": target }
+      })),
+      element("button", {
+        text: "필터",
+        className: "mobile-filter-toggle",
+        attrs: {
+          type: "button",
+          "aria-controls": "terminal-filters",
+          "aria-expanded": "false"
+        }
+      })
+    ]);
+  }
+
+  function closeTerminalFilterSheet({ restoreFocus = true } = {}) {
+    const panel = document.getElementById("terminal-filters");
+    const trigger = document.querySelector(".mobile-filter-toggle");
+    if (!panel || !panel.classList.contains("is-open")) return;
+    panel.classList.remove("is-open");
+    panel.setAttribute("aria-hidden", "true");
+    panel.removeAttribute("role");
+    panel.removeAttribute("aria-modal");
+    document.body.classList.remove("filter-sheet-open");
+    if (trigger) trigger.setAttribute("aria-expanded", "false");
+    if (restoreFocus && filterSheetTrigger instanceof HTMLElement && filterSheetTrigger.isConnected) {
+      filterSheetTrigger.focus();
+    }
+    filterSheetTrigger = null;
+  }
+
+  function openTerminalFilterSheet(trigger) {
+    const panel = document.getElementById("terminal-filters");
+    if (!panel || !window.matchMedia("(max-width: 680px)").matches) return;
+    filterSheetTrigger = trigger instanceof HTMLElement ? trigger : null;
+    panel.classList.add("is-open");
+    panel.setAttribute("aria-hidden", "false");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    document.body.classList.add("filter-sheet-open");
+    if (trigger) trigger.setAttribute("aria-expanded", "true");
+    const firstControl = panel.querySelector("input, select, button, a[href]");
+    if (firstControl instanceof HTMLElement) firstControl.focus({ preventScroll: true });
+  }
+
+  function installTodayTerminalControls() {
+    const panel = document.getElementById("terminal-filters");
+    if (panel) {
+      if (window.matchMedia("(max-width: 680px)").matches) panel.setAttribute("aria-hidden", "true");
+      else {
+        panel.removeAttribute("aria-hidden");
+        panel.removeAttribute("role");
+        panel.removeAttribute("aria-modal");
+      }
+    }
+    document.querySelectorAll("[data-scroll-target]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const target = document.getElementById(String(button.dataset.scrollTarget || ""));
+        if (target) target.scrollIntoView({ block: "start", behavior: "smooth" });
+      });
+    });
+    const toggle = document.querySelector(".mobile-filter-toggle");
+    if (toggle) toggle.addEventListener("click", () => openTerminalFilterSheet(toggle));
+    document.querySelectorAll("[data-filter-sheet-close]").forEach((button) => {
+      button.addEventListener("click", () => closeTerminalFilterSheet());
+    });
+  }
+
+  function sourceCoverageBadge(event) {
+    const official = Math.max(0, Number(event.official_evidence_count || 0));
+    const media = Math.max(0, Number(event.media_count || 0));
+    const coverageMode = eventCoverageMode(event);
+    const parts = [label("coverageMode", coverageMode)];
+    if (official) parts.push(`공식 ${official}`);
+    else if (event.verification_status === "official") parts.push("공식 근거");
+    if (media) parts.push(`보도 ${media}`);
+    return element("span", {
+      text: parts.join(" · "),
+      className: "coverage-badge",
+      dataset: { coverage: coverageMode },
+      attrs: { "aria-label": `소스 커버리지: ${parts.join(", ")}` }
+    });
+  }
+
+  function eventActorSummary(event) {
+    const actorName = String(event.actor_name || "").trim();
+    if (!actorName) return "";
+    const actorRole = String(event.actor_role || "").trim();
+    return actorRole
+      ? `${actorName} · ${label("actorRole", actorRole)}`
+      : actorName;
+  }
+
+  function eventTimestampMetadata(event, withTime = true) {
+    return [
+      event.filed_at ? `접수 / Filed ${formatDate(event.filed_at, withTime)}` : "",
+      event.first_observed_at ? `최초 관측 / First seen ${formatDate(event.first_observed_at, withTime)}` : "",
+      event.updated_at ? `갱신 / Updated ${formatDate(event.updated_at, withTime)}` : ""
+    ].filter(Boolean);
+  }
+
+  function terminalEvent(event, rank) {
+    const eventLink = eventRouteLink(event);
+    const market = marketForEvent(event) || event.market || "—";
+    return element("li", {
+      className: "terminal-event",
+      dataset: { importance: event.importance || "unknown", eventId: event.event_id || "" }
+    }, [
+      element("div", {
+        text: String(rank).padStart(2, "0"),
+        className: "terminal-event__rank",
+        attrs: { "aria-label": `${rank}위` }
+      }),
+      element("div", { className: "terminal-event__body" }, [
+        element("div", { className: "terminal-event__overline" }, [
+          issuerOrCompanyLink(
+            event,
+            issuerOrCompanyName(event),
+            { className: "terminal-event__company" }
+          ),
+          event.ticker ? element("span", { text: `${event.ticker} · ${market}` }) : element("span", { text: market }),
+          element("span", { text: label("eventType", event.event_type) })
+        ]),
+        element("h3", {}, [eventLink]),
+        event.change_summary
+          ? sourceNode("p", event.change_summary, event.original_language, "terminal-event__summary")
+          : null,
+        element("div", { className: "terminal-event__footer" }, [
+          sourceCoverageBadge(event),
+          element("span", { text: label("titleProvenance", event.title_provenance) }),
+          eventActorSummary(event) ? element("span", { text: `당사자 / Actor ${eventActorSummary(event)}` }) : null,
+          event.current_status ? element("span", { text: event.current_status }) : null,
+          event.deadline_at ? element("span", { text: `기한 ${formatDate(event.deadline_at, false)}` }) : null,
+          ...eventTimestampMetadata(event).map((text) => element("span", { text }))
+        ].filter(Boolean))
+      ].filter(Boolean))
+    ]);
+  }
+
+  function liveEventRow(event) {
+    return element("li", { className: "live-row" }, [
+      element("time", {
+        text: formatDate(event.updated_at || event.occurred_at, true),
+        attrs: { datetime: event.updated_at || event.occurred_at || "" }
+      }),
+      element("div", {}, [
+        element("h3", {}, [eventRouteLink(event)]),
+        element("p", {
+          text: [
+            issuerOrCompanyName(event),
+            label("eventType", event.event_type),
+            label("titleProvenance", event.title_provenance),
+            eventActorSummary(event)
+          ].filter(Boolean).join(" · ")
+        }),
+        eventTimestampMetadata(event).length
+          ? element("p", { text: eventTimestampMetadata(event).join(" · "), className: "event-timestamps" })
+          : null
+      ]),
+      sourceCoverageBadge(event)
+    ]);
+  }
+
+  function deadlineItem(event) {
+    return element("li", { className: "deadline-item" }, [
+      element("time", {
+        text: formatDate(event.deadline_at || event.scheduled_at, false),
+        attrs: { datetime: event.deadline_at || event.scheduled_at || "" }
+      }),
+      element("div", {}, [
+        event.event_id
+          ? eventRouteLink(event)
+          : sourceNode("strong", event.title || "기한", event.original_language),
+        element("p", { text: `${issuerOrCompanyName(event)} · ${label("eventType", event.event_type)}` })
+      ])
+    ]);
+  }
+
+  function publicSourceState(source) {
+    const hasPublicContract = typeof source.public_status === "string"
+      || typeof source.public_ready === "boolean";
+    const status = String(
+      hasPublicContract ? source.public_status || "unknown" : source.status || "unknown"
+    ).toLowerCase();
+    const ready = hasPublicContract
+      ? source.public_ready === true
+      : source.fresh === true && ["healthy", "ok", "active"].includes(status);
+    return { status, ready };
+  }
+
+  function sourceStatusItem(source) {
+    const publicState = publicSourceState(source);
+    const status = publicState.status;
+    const publicNote = typeof source.public_note === "string"
+      ? source.public_note.trim()
+      : "";
+    const coverage = label("coverageMode", source.coverage_mode || "unavailable");
+    const lag = source.lag_minutes === null || source.lag_minutes === undefined || source.lag_minutes === ""
+      ? Number.NaN
+      : Number(source.lag_minutes);
+    const detail = Number.isFinite(lag)
+      ? `지연 ${Math.max(0, Math.round(lag))}분`
+      : `확인 ${formatDate(source.last_checked_at || source.last_success_at, true)}`;
+    return element("li", { className: "source-status-item", dataset: { status } }, [
+      element("span", { className: "status-dot", attrs: { "aria-hidden": "true" } }),
+      element("div", {}, [
+        sourceNode("strong", source.source_name || source.connector_id || "공식 소스", source.original_language),
+        element("p", { text: `${source.country || "GLOBAL"} · ${coverage} · ${status} · ${detail}` }),
+        publicNote ? element("p", { text: publicNote, className: "source-public-note" }) : null
+      ])
+    ]);
+  }
+
+  function updateSourceCoverage(sources, events) {
+    if (!globalCoverage) return;
+    const rows = Array.isArray(sources) ? sources : [];
+    const publicStates = rows.map(publicSourceState);
+    const healthy = publicStates.filter((item) => item.ready).length;
+    const linkOnly = rows.filter((item) => item.coverage_mode === "link-only").length;
+    const down = publicStates.filter((item) => [
+      "down", "error", "failed", "blocked_rights", "redistribution_blocked",
+      "excluded_source", "inactive", "stale"
+    ].includes(item.status)).length;
+    if (rows.length) {
+      globalCoverage.lastChild.textContent = `${healthy}/${rows.length} 소스 정상${linkOnly ? ` · 링크 전용 ${linkOnly}` : ""}`;
+      globalCoverage.dataset.health = down ? "down" : healthy < rows.length ? "degraded" : "healthy";
+      return;
+    }
+    const visible = Array.isArray(events) ? events : [];
+    const official = visible.filter((item) => Number(item.official_evidence_count || 0) > 0 || item.verification_status === "official").length;
+    globalCoverage.lastChild.textContent = `${official}/${visible.length || 0} 공식 근거 연결`;
+    globalCoverage.dataset.health = visible.length && official < visible.length ? "degraded" : "healthy";
+  }
+
+  function terminalEmpty(message) {
+    return element("p", { text: message, className: "terminal-empty" });
+  }
+
   function eventCard(event, rank) {
     const titleLink = routeLink(event.title || "제목 없음", `#/events/${encodeURIComponent(event.event_id || "")}`, { lang: event.original_language });
-    const company = event.company_id
-      ? routeLink(event.company_name || event.company_id, `#/companies/${encodeURIComponent(event.company_id)}`)
-      : element("span", { text: event.company_name || "—" });
+    const company = issuerOrCompanyLink(event);
     return element("article", {
       className: "event-card",
       dataset: { importance: event.importance || "unknown" }
@@ -512,18 +1500,31 @@
       ]),
       element("h3", {}, [titleLink]),
       metadata([
-        { node: company, value: event.company_name || event.company_id },
+        { node: company, value: issuerOrCompanyName(event) },
         { value: label("eventType", event.event_type) },
+        eventActorSummary(event) ? { value: `당사자 / Actor ${eventActorSummary(event)}` } : null,
+        { value: label("coverageMode", eventCoverageMode(event)) },
+        { value: label("titleProvenance", event.title_provenance) },
         { value: formatDate(event.occurred_at, false) },
+        ...eventTimestampMetadata(event, false).map((value) => ({ value })),
         event.deadline_at ? { value: `기한 / Deadline ${formatDate(event.deadline_at, false)}` } : null
       ])
     ]);
   }
 
   function compactEvent(event) {
+    const actor = eventActorSummary(event);
     return element("li", { className: "compact-item" }, [
       routeLink(event.title || "제목 없음", `#/events/${encodeURIComponent(event.event_id || "")}`, { lang: event.original_language }),
-      element("p", { text: `${event.company_name || event.company_id || "—"} · ${label("verification", event.verification_status)} · ${formatDate(event.occurred_at, false)}` })
+      element("p", {
+        text: [
+          issuerOrCompanyName(event),
+          actor ? `당사자 / Actor ${actor}` : "",
+          label("verification", event.verification_status),
+          label("titleProvenance", event.title_provenance),
+          ...eventTimestampMetadata(event, false)
+        ].filter(Boolean).join(" · ")
+      })
     ]);
   }
 
@@ -531,124 +1532,381 @@
     return element("article", { className: "archive-row" }, [
       element("h3", {}, [routeLink(event.title || "제목 없음", `#/events/${encodeURIComponent(event.event_id || "")}`, { lang: event.original_language })]),
       metadata([
-        { value: event.company_name || event.company_id },
+        { node: issuerOrCompanyLink(event), value: issuerOrCompanyName(event) },
         { value: label("eventType", event.event_type) },
+        eventActorSummary(event) ? { value: `당사자 / Actor ${eventActorSummary(event)}` } : null,
         { value: label("verification", event.verification_status) },
-        { value: formatDate(event.occurred_at, false) }
+        { value: label("coverageMode", eventCoverageMode(event)) },
+        { value: label("titleProvenance", event.title_provenance) },
+        { value: formatDate(event.occurred_at, false) },
+        ...eventTimestampMetadata(event, false).map((value) => ({ value }))
       ])
     ]);
   }
 
-  async function renderToday(signal) {
-    const [todayPayload, archivePayload] = await Promise.all([
-      request("/today", { signal }),
-      request("/events", { params: { page: 1, limit: 50 }, signal })
+  async function renderToday(query, signal) {
+    const market = currentMarket(query);
+    const params = terminalFilterParams(query);
+    const sourceParams = market === "GLOBAL" ? {} : { country: market };
+    const [briefResult, liveResult, sourceResult] = await Promise.all([
+      terminalRequest("/briefs/latest", {
+        params: { edition: market === "GLOBAL" ? "global" : market },
+        signal,
+        fallback: () => request("/today", { signal })
+      }),
+      terminalRequest("/live", {
+        params: { ...params, page: 1, limit: 50 },
+        signal,
+        fallback: () => request("/events", { params: { page: 1, limit: 50 }, signal })
+      }),
+      terminalRequest("/sources/status", {
+        params: sourceParams,
+        signal,
+        fallback: async () => ({ ok: true, data: { items: [] } })
+      })
     ]);
-    const top = (Array.isArray(todayPayload.top) ? todayPayload.top : []).filter(isPublicEvent).slice(0, 5);
+
+    const briefEnvelope = briefResult.payload || {};
+    const brief = briefResult.version === "v2" ? (briefEnvelope.data || {}) : briefEnvelope;
+    const liveEnvelope = liveResult.payload || {};
+    const liveData = liveResult.version === "v2" ? (liveEnvelope.data || {}) : liveEnvelope;
+    const sourceEnvelope = sourceResult.payload || {};
+    const sourceData = sourceResult.version === "v2" ? (sourceEnvelope.data || {}) : sourceEnvelope;
+
+    const top = (Array.isArray(brief.top) ? brief.top : [])
+      .map(normalizeEvent)
+      .filter((item) => (
+        isPublicEvent(item)
+        && Number(item.official_evidence_count || 0) > 0
+        && matchesTerminalFilters(item, query)
+      ))
+      .slice(0, 5);
     const topIds = new Set(top.map((item) => item.event_id));
-    const watch = (Array.isArray(todayPayload.watch) ? todayPayload.watch : [])
-      .filter((item) => isPublicEvent(item) && !topIds.has(item.event_id))
-      .slice(0, 10);
-    const hiddenIds = new Set([...top, ...watch].map((item) => item.event_id));
-    const archive = (Array.isArray(archivePayload.data) ? archivePayload.data : [])
-      .filter((item) => isPublicEvent(item) && !hiddenIds.has(item.event_id));
+    const watch = (Array.isArray(brief.watch) ? brief.watch : [])
+      .map(normalizeEvent)
+      .filter((item) => isPublicEvent(item) && matchesTerminalFilters(item, query) && !topIds.has(item.event_id));
+    const rawLive = Array.isArray(liveData.items)
+      ? liveData.items
+      : Array.isArray(liveData.data)
+        ? liveData.data
+        : Array.isArray(brief.recent)
+          ? brief.recent
+          : [];
+    const watchIds = new Set(watch.map((item) => item.event_id));
+    const live = rawLive.map(normalizeEvent)
+      .filter((item) => isPublicEvent(item) && matchesTerminalFilters(item, query) && !topIds.has(item.event_id))
+      .filter((item) => !watchIds.has(item.event_id))
+      .filter((item, index, rows) => rows.findIndex((candidate) => candidate.event_id === item.event_id) === index)
+      .slice(0, 30);
 
-    const topList = element("div", { className: "card-list" }, top.map((item, index) => eventCard(item, index + 1)));
-    const watchList = element("ul", { className: "compact-list" }, watch.map(compactEvent));
-    const archiveList = element("div", { className: "data-list", attrs: { id: "today-archive" } }, archive.map(archiveEvent));
-    const archiveEmpty = emptyState("아카이브가 비어 있습니다.", "공개 승인된 사건이 추가되면 여기에 표시됩니다.");
-    const archiveSection = element("section", { className: "section-block", attrs: { "aria-labelledby": "archive-title" } }, [
-      element("div", { className: "section-heading" }, [
-        element("h2", { text: "전체 아카이브 / Full archive", attrs: { id: "archive-title" } }),
-        element("p", { text: "최신 사건부터 시간순" })
-      ]),
-      archive.length ? archiveList : archiveEmpty
-    ]);
-
-    const nextPage = archivePayload.pagination && archivePayload.pagination.next_page;
-    if (nextPage) {
-      const button = element("button", { text: "더 보기 / Load more", attrs: { type: "button" } });
-      let page = Number(nextPage);
-      button.addEventListener("click", async () => {
-        button.disabled = true;
-        try {
-          const more = await request("/events", { params: { page, limit: 50 } });
-          const rows = (Array.isArray(more.data) ? more.data : [])
-            .filter((item) => isPublicEvent(item) && !hiddenIds.has(item.event_id));
-          if (rows.length && !archiveList.isConnected) archiveEmpty.replaceWith(archiveList);
-          rows.forEach((item) => archiveList.append(archiveEvent(item)));
-          page = more.pagination && more.pagination.next_page ? Number(more.pagination.next_page) : 0;
-          if (!page) button.remove();
-        } catch (error) {
-          announceError(error);
-          button.disabled = false;
-        }
-        if (page) button.disabled = false;
-      });
-      archiveSection.append(element("div", { className: "load-more" }, [button]));
+    let deadlines = (Array.isArray(brief.deadlines) ? brief.deadlines : [])
+      .map(normalizeEvent)
+      .filter((item) => isPublicEvent(item) && matchesTerminalFilters(item, query));
+    if (!deadlines.length && briefResult.version === "v1") {
+      const now = new Date();
+      const future = new Date(now.getTime() + 30 * 86400000);
+      try {
+        const calendarPayload = await request("/calendar", {
+          params: { from: isoDate(now), to: isoDate(future), page: 1, limit: 50 },
+          signal
+        });
+        deadlines = (Array.isArray(calendarPayload.data) ? calendarPayload.data : [])
+          .map(normalizeEvent)
+          .filter((item) => item.verification_status !== "signal" && matchesTerminalFilters(item, query));
+      } catch (error) {
+        if (error && error.name === "AbortError") throw error;
+      }
     }
+    if (!deadlines.length) {
+      deadlines = [...top, ...live].filter((item) => item.deadline_at);
+    }
+    deadlines = deadlines
+      .filter((item, index, rows) => rows.findIndex((candidate) => candidate.event_id === item.event_id) === index)
+      .sort((a, b) => {
+        const left = normalizedDate(a.deadline_at || a.scheduled_at);
+        const right = normalizedDate(b.deadline_at || b.scheduled_at);
+        return (left ? left.getTime() : Number.MAX_SAFE_INTEGER) - (right ? right.getTime() : Number.MAX_SAFE_INTEGER);
+      })
+      .slice(0, 8);
+
+    const sources = (Array.isArray(sourceData.items) ? sourceData.items : Array.isArray(brief.source_status) ? brief.source_status : [])
+      .filter((item) => market === "GLOBAL" || !item.country || String(item.country).toUpperCase() === market)
+      .slice(0, 12);
+    const allVisibleEvents = [...top, ...live];
+    updateSourceCoverage(sources, allVisibleEvents);
+    syncMarketTabs(query);
+
+    const publishedAt = brief.last_updated_at || brief.published_at || brief.cutoff_at || "";
+    const rawCoverageNotice = isRecord(brief.coverage_notice) ? brief.coverage_notice : null;
+    const noticeCountries = rawCoverageNotice && Array.isArray(rawCoverageNotice.unavailable_countries)
+      ? rawCoverageNotice.unavailable_countries.map((country) => String(country).toUpperCase())
+      : [];
+    const coverageNotice = (
+      rawCoverageNotice
+      && !(
+        rawCoverageNotice.scope === "warning"
+        && market !== "GLOBAL"
+        && noticeCountries.length > 0
+        && !noticeCountries.includes(market)
+      )
+    ) ? rawCoverageNotice : null;
+    const coverageBlocking = coverageNotice && coverageNotice.scope === "blocking";
+    const sourceUnavailable = brief.empty_reason === "coverage_unavailable"
+      || coverageBlocking
+      || (sources.length > 0 && !sources.some((item) => publicSourceState(item).ready));
+    const topEmptyMessage = sourceUnavailable
+      ? "공식 소스 수집 상태를 확인할 수 없습니다. 소스 상태를 먼저 확인해 주세요."
+      : "오늘 확인된 중요 사건 없음";
+    const unavailableCountries = coverageNotice && Array.isArray(coverageNotice.unavailable_countries)
+      ? coverageNotice.unavailable_countries.join(" · ")
+      : "";
+    const noticeTimestamp = coverageNotice
+      ? coverageNotice.cutoff_at || coverageNotice.published_at || brief.cutoff_at
+      : brief.cutoff_at;
+    const coverageAlert = coverageNotice ? element("section", {
+      className: `coverage-alert coverage-alert--${coverageBlocking ? "blocking" : "warning"}`,
+      attrs: {
+        role: coverageBlocking ? "alert" : "status",
+        "aria-live": coverageBlocking ? "assertive" : "polite"
+      },
+      dataset: { coverageScope: coverageBlocking ? "blocking" : "warning" }
+    }, [
+      element("strong", {
+        text: coverageBlocking
+          ? "공식 소스 수집 장애 / Source coverage unavailable"
+          : "일부 공식 소스 지연 / Partial source coverage"
+      }),
+      element("p", {
+        text: coverageBlocking
+          ? "최신 발행본의 수집 범위를 확인할 수 없어 Top 5를 공개하지 않습니다."
+          : "확인 가능한 공식 소스의 사건은 계속 표시하지만 일부 시장 정보가 누락될 수 있습니다."
+      }),
+      element("p", {
+        text: [
+          unavailableCountries ? `영향 국가 ${unavailableCountries}` : "",
+          noticeTimestamp ? `기준 ${formatDate(noticeTimestamp, true)}` : ""
+        ].filter(Boolean).join(" · "),
+        className: "coverage-alert__meta"
+      })
+    ]) : null;
+    const staleAlert = brief.stale === true ? element("section", {
+      className: "coverage-alert coverage-alert--stale",
+      attrs: { role: "status" },
+      dataset: { briefStale: "true" }
+    }, [
+      element("strong", { text: "과거 브리프 스냅샷 / Stale brief snapshot" }),
+      element("p", {
+        text: `이 발행본은 36시간보다 오래되었습니다. 기준 ${formatDate(brief.cutoff_at, true)}`
+      })
+    ]) : null;
+    const topSection = element("section", {
+      className: "terminal-panel",
+      attrs: { "aria-labelledby": "top-title" }
+    }, [
+      element("div", { className: "terminal-panel__header" }, [
+        element("h2", { text: "Top 5", attrs: { id: "top-title" } }),
+        element("p", { text: "공식 근거·시장 영향 기준" })
+      ]),
+      top.length
+        ? element("ol", { className: "terminal-top-list" }, top.map((item, index) => terminalEvent(item, index + 1)))
+        : terminalEmpty(topEmptyMessage)
+    ]);
+    const liveSection = element("section", {
+      className: "terminal-panel",
+      attrs: { id: "terminal-live", "aria-labelledby": "live-title" }
+    }, [
+      element("div", { className: "terminal-panel__header" }, [
+        element("h2", { text: "Live / 최신 변화", attrs: { id: "live-title" } }),
+        element("p", { text: `${live.length}건` })
+      ]),
+      live.length
+        ? element("ul", { className: "live-list" }, live.map(liveEventRow))
+        : terminalEmpty("새로 확인된 공개 변화가 없습니다.")
+    ]);
+    const filterPanel = element("aside", {
+      className: "terminal-panel terminal-filters",
+      attrs: {
+        id: "terminal-filters",
+        "aria-labelledby": "terminal-filter-title",
+        "data-filter-sheet": "true"
+      }
+    }, [
+      element("div", { className: "terminal-panel__header" }, [
+        element("h2", { text: "필터 / Filters", attrs: { id: "terminal-filter-title" } }),
+        element("p", { text: "URL에 저장" }),
+        element("button", {
+          text: "닫기",
+          className: "filter-sheet-close",
+          attrs: { type: "button", "data-filter-sheet-close": "true" }
+        })
+      ]),
+      terminalFilterForm(query)
+    ]);
+    const deadlinePanel = element("section", {
+      className: "terminal-panel desktop-rail-panel",
+      attrs: { "aria-labelledby": "deadline-title" }
+    }, [
+      element("div", { className: "terminal-panel__header" }, [
+        element("h2", { text: "주요 기한 / Deadlines", attrs: { id: "deadline-title" } }),
+        routeLink("전체", "#/calendar", { className: "field-hint" })
+      ]),
+      deadlines.length
+        ? element("ul", { className: "deadline-list" }, deadlines.map(deadlineItem))
+        : terminalEmpty("30일 내 공개 기한이 없습니다.")
+    ]);
+    const watchPanel = element("section", {
+      className: "terminal-panel desktop-rail-panel",
+      attrs: { "aria-labelledby": "watch-title" }
+    }, [
+      element("div", { className: "terminal-panel__header" }, [
+        element("h2", { text: "Watch / 주시", attrs: { id: "watch-title" } }),
+        element("p", { text: `${watch.length}건` })
+      ]),
+      watch.length
+        ? element("ul", { className: "live-list" }, watch.slice(0, 8).map(liveEventRow))
+        : terminalEmpty("현재 공개된 주시 사건이 없습니다.")
+    ]);
+    const mobileWatchPanel = element("section", {
+      className: "terminal-panel mobile-terminal-panel",
+      attrs: { "aria-labelledby": "mobile-watch-title" }
+    }, [
+      element("div", { className: "terminal-panel__header" }, [
+        element("h2", { text: "Watch / 새로 바뀐 사건", attrs: { id: "mobile-watch-title" } }),
+        element("p", { text: `${watch.length}건` })
+      ]),
+      watch.length
+        ? element("ul", { className: "live-list" }, watch.slice(0, 8).map(liveEventRow))
+        : terminalEmpty("새로 바뀐 주시 사건이 없습니다.")
+    ]);
+    const mobileDeadlinePanel = element("section", {
+      className: "terminal-panel mobile-terminal-panel",
+      attrs: { "aria-labelledby": "mobile-deadline-title" }
+    }, [
+      element("div", { className: "terminal-panel__header" }, [
+        element("h2", { text: "임박 기한 / Deadlines", attrs: { id: "mobile-deadline-title" } }),
+        routeLink("전체", "#/calendar", { className: "field-hint" })
+      ]),
+      deadlines.length
+        ? element("ul", { className: "deadline-list" }, deadlines.map(deadlineItem))
+        : terminalEmpty("30일 내 공개 기한이 없습니다.")
+    ]);
+    const sourcePanel = element("section", {
+      className: "terminal-panel",
+      attrs: { "aria-labelledby": "source-status-title" }
+    }, [
+      element("div", { className: "terminal-panel__header" }, [
+        element("h2", { text: "소스 상태 / Sources", attrs: { id: "source-status-title" } }),
+        element("p", { text: sources.length ? `${sources.length}개` : "근거 연결" })
+      ]),
+      sources.length
+        ? element("ul", { className: "source-status-list" }, sources.map(sourceStatusItem))
+        : terminalEmpty("공식 근거 배지로 사건별 커버리지를 확인하세요.")
+    ]);
 
     app.replaceChildren(
-      pageHeader(
-        "TODAY / 오늘",
-        "거버넌스 사건을 근거와 결과까지 추적합니다.",
-        "중요 사건, 기한·정정 추적, 전체 공개 기록을 한 화면에서 확인하세요.",
-        [
-          routeLink("사건 검색 / Search", "#/search", { className: "text-link" }),
-          externalLink("Atom feed", endpoint("/feeds/events.atom").toString(), "text-link")
-        ]
-      ),
-      element("div", { className: "today-grid" }, [
-        element("section", { className: "section-block", attrs: { "aria-labelledby": "top-title" } }, [
-          element("div", { className: "section-heading" }, [
-            element("h2", { text: "Top 5", attrs: { id: "top-title" } }),
-            element("p", { text: "중요도·근거 상태 기준" })
-          ]),
-          top.length ? topList : emptyState("공개된 사건이 없습니다.", "검수 완료된 사건이 추가되면 표시됩니다.")
+      element("header", { className: "terminal-header" }, [
+        element("div", { className: "terminal-header__title" }, [
+          element("h1", { text: "주주·자본시장 데일리" }),
+          element("p", { text: `${market} · 공시와 공식자료 우선` })
         ]),
-        element("aside", { className: "watch-panel", attrs: { "aria-labelledby": "watch-title" } }, [
-          element("div", { className: "section-heading" }, [
-            element("h2", { text: "Watch", attrs: { id: "watch-title" } }),
-            element("p", { text: "추가 확인·기한 추적" })
-          ]),
-          watch.length ? watchList : element("p", { text: "현재 추가 추적 중인 공개 사건이 없습니다." })
+        element("time", {
+          text: publishedAt ? `업데이트 ${formatDate(publishedAt, true)}` : "최신 공개 기록",
+          className: "edition-time",
+          attrs: { datetime: publishedAt }
+        })
+      ]),
+      fragment([coverageAlert, staleAlert]),
+      element("p", {
+        text: marketCoverageDescription(market),
+        className: "coverage-scope-note",
+        attrs: { "data-market-coverage": market }
+      }),
+      mobileTerminalTabs(),
+      element("div", { className: "terminal-grid" }, [
+        element("div", { className: "terminal-main" }, [
+          topSection,
+          mobileWatchPanel,
+          mobileDeadlinePanel,
+          liveSection
+        ]),
+        filterPanel,
+        element("aside", { className: "terminal-rail rail-stack", attrs: { "aria-label": "기한과 소스 상태 / Deadlines and source status" } }, [
+          deadlinePanel,
+          watchPanel,
+          sourcePanel
         ])
       ]),
-      archiveSection
+      element("button", {
+        className: "filter-sheet-backdrop",
+        attrs: {
+          type: "button",
+          "data-filter-sheet-close": "true",
+          "aria-label": "필터 닫기 / Close filters"
+        }
+      })
     );
+    installTodayTerminalControls();
   }
 
   async function renderEvents(query, signal) {
-    const params = eventFilterParams(query);
-    const payload = await request("/events", { params, signal });
-    const events = (Array.isArray(payload.data) ? payload.data : []).filter(isPublicEvent);
+    const v2Params = v2EventFilterParams(query);
+    const v1Params = eventFilterParams(query);
+    const result = await terminalRequest("/events", {
+      params: v2Params,
+      signal,
+      fallback: () => request("/events", { params: v1Params, signal })
+    });
+    const payload = result.payload;
+    const rawEvents = result.version === "v2"
+      ? payload.data.items
+      : Array.isArray(payload.data) ? payload.data : [];
+    const events = rawEvents.map(normalizeEvent).filter(isPublicEvent);
     const list = element("div", { className: "data-list", attrs: { id: "event-results" } }, events.map(archiveEvent));
     const results = element("section", { className: "section-block", attrs: { "aria-labelledby": "event-results-title" } }, [
       sectionHeading("공개 사건 / Public events", `${events.length}개 표시`, "event-results-title"),
       events.length ? list : emptyState("조건에 맞는 사건이 없습니다.", "필터를 줄이거나 기간을 넓혀 다시 확인해 주세요.")
     ]);
+    const pagination = result.version === "v2" ? payload.meta : payload.pagination;
     if (events.length) {
-      addLoadMore(results, payload.pagination, async (page) => {
-        const more = await request("/events", { params: { ...params, page } });
-        (Array.isArray(more.data) ? more.data : []).filter(isPublicEvent).forEach((item) => list.append(archiveEvent(item)));
+      addLoadMore(results, pagination, async (cursor, cursorKind) => {
+        if (result.version === "v2") {
+          const moreResult = await terminalRequest("/events", {
+            params: continuationParams(v2Params, cursor, cursorKind)
+          });
+          moreResult.payload.data.items
+            .map(normalizeEvent)
+            .filter(isPublicEvent)
+            .forEach((item) => list.append(archiveEvent(item)));
+          return moreResult.payload.meta;
+        }
+        const more = await request("/events", { params: { ...v1Params, page: cursor } });
+        (Array.isArray(more.data) ? more.data : [])
+          .map(normalizeEvent)
+          .filter(isPublicEvent)
+          .forEach((item) => list.append(archiveEvent(item)));
         return more.pagination;
       });
     }
-    const exportParams = { ...params };
+    const exportParams = { ...(result.version === "v2" ? v2Params : v1Params) };
     delete exportParams.page;
     delete exportParams.limit;
+    const exportVersion = result.version === "v2" ? "v2" : "v1";
     app.replaceChildren(
       pageHeader(
         "EVENTS / 사건",
-        "거버넌스 사건 전체 기록",
-        "회사·당사자·유형·근거·기간·상태 필터는 현재 주소에 보존되어 공유할 수 있습니다.",
+        result.version === "v2" ? "글로벌 자본시장 사건 전체 기록" : "거버넌스 사건 전체 기록",
+        result.version === "v2"
+          ? "국가·발행사·사건 유형·근거·기간·상태 필터는 현재 주소에 보존되어 공유할 수 있습니다."
+          : "회사·당사자·유형·근거·기간·상태 필터는 현재 주소에 보존되어 공유할 수 있습니다.",
         [
-          externalLink("Atom", endpoint("/feeds/events.atom", exportParams).toString(), "text-link"),
-          externalLink("CSV", endpoint("/exports/events.csv", exportParams).toString(), "text-link"),
-          externalLink("JSON", endpoint("/exports/events.json", exportParams).toString(), "text-link")
+          externalLink("Atom", endpoint("/feeds/events.atom", exportParams, exportVersion).toString(), "text-link"),
+          externalLink("CSV", endpoint("/exports/events.csv", exportParams, exportVersion).toString(), "text-link"),
+          externalLink("JSON", endpoint("/exports/events.json", exportParams, exportVersion).toString(), "text-link")
         ]
       ),
-      eventFilterForm(query, "#/events"),
+      result.version === "v2"
+        ? v2EventFilterForm(query, "#/events")
+        : eventFilterForm(query, "#/events"),
       results
     );
   }
@@ -701,6 +1959,174 @@
       pageHeader("COMPANIES / 기업", "기업별 거버넌스 기록", "DART corp_code를 기준으로 사건, 캠페인, 약속과 이행을 연결합니다."),
       element("section", { className: "filter-form", attrs: { "aria-label": "기업 검색" } }, [form]),
       resultsSection
+    );
+  }
+
+  function issuerRow(issuer) {
+    const title = issuer.legal_name || issuer.short_name || issuer.issuer_id || "—";
+    return element("article", { className: "company-row" }, [
+      element("h3", {}, [
+        routeLink(title, `#/issuers/${encodeURIComponent(issuer.issuer_id || "")}`, {
+          lang: issuer.original_language
+        })
+      ]),
+      metadata([
+        { value: issuer.ticker || "" },
+        { value: issuer.market || "" },
+        { value: issuer.country_code || "" },
+        { value: `사건 ${Number(issuer.event_count || 0)} / Events` }
+      ]),
+      issuer.legal_name_en && issuer.legal_name_en !== title
+        ? element("p", { text: issuer.legal_name_en, lang: "en", className: "field-hint" })
+        : null
+    ].filter(Boolean));
+  }
+
+  async function renderIssuers(query, signal) {
+    const q = String(query.get("q") || "").trim();
+    const country = String(query.get("country") || "").toUpperCase();
+    const params = { page: 1, limit: 50 };
+    if (q.length >= 2) params.q = q;
+    if (MARKETS.has(country) && country !== "GLOBAL") params.country = country;
+    const result = await terminalRequest("/issuers", { params, signal });
+    const payload = result.payload;
+    const issuers = payload.data.items;
+    const input = element("input", {
+      attrs: {
+        type: "search",
+        name: "q",
+        value: q,
+        minlength: "2",
+        maxlength: "100",
+        placeholder: "발행사명 / Issuer name",
+        "aria-label": "발행사 검색 / Search issuers"
+      }
+    });
+    const countrySelect = element("select", { attrs: { name: "country", "aria-label": "국가 / Country" } });
+    [["", "전체 국가 / All countries"], ...[...MARKETS].filter((value) => value !== "GLOBAL").map((value) => [value, value])]
+      .forEach(([value, text]) => {
+        const option = element("option", { text, attrs: { value } });
+        if (value === country) option.selected = true;
+        countrySelect.append(option);
+      });
+    const form = element("form", { className: "inline-form", attrs: { role: "search" } }, [
+      input,
+      countrySelect,
+      element("button", { text: "찾기 / Find", attrs: { type: "submit" } })
+    ]);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      const values = new URLSearchParams();
+      if (input.value.trim()) values.set("q", input.value.trim());
+      if (countrySelect.value) values.set("country", countrySelect.value);
+      window.location.hash = `#/issuers${values.toString() ? `?${values.toString()}` : ""}`;
+    });
+    const list = element("div", { className: "data-list" }, issuers.map(issuerRow));
+    const results = element("section", { className: "section-block", attrs: { "aria-labelledby": "issuer-results-title" } }, [
+      sectionHeading(q ? `“${q}” 검색 결과` : "글로벌 발행사 / Global issuers", `${issuers.length}개 표시`, "issuer-results-title"),
+      issuers.length ? list : emptyState("발행사를 찾지 못했습니다.", "발행사명 또는 국가 조건을 다시 확인해 주세요.")
+    ]);
+    if (issuers.length) {
+      addLoadMore(results, payload.meta, async (cursor, cursorKind) => {
+        const more = await terminalRequest("/issuers", {
+          params: continuationParams(params, cursor, cursorKind)
+        });
+        more.payload.data.items.forEach((item) => list.append(issuerRow(item)));
+        return more.payload.meta;
+      });
+    }
+    app.replaceChildren(
+      pageHeader(
+        "ISSUERS / 발행사",
+        "글로벌 발행사별 자본시장 기록",
+        "국가별 공식 식별자와 상장 정보, 공개 사건을 하나의 발행사 기록으로 연결합니다."
+      ),
+      element("section", { className: "filter-form", attrs: { "aria-label": "발행사 검색" } }, [form]),
+      results
+    );
+  }
+
+  function identifierRow(identifier) {
+    return element("article", { className: "archive-row" }, [
+      element("h3", { text: identifier.identifier_value || "—" }),
+      metadata([
+        { value: identifier.identifier_type || "" },
+        { value: identifier.market || "" },
+        Number(identifier.is_primary) === 1 ? { value: "Primary" } : null
+      ])
+    ]);
+  }
+
+  function listingRow(listing) {
+    return element("article", { className: "archive-row" }, [
+      element("h3", { text: [listing.ticker, listing.market].filter(Boolean).join(" · ") || listing.listing_id || "—" }),
+      metadata([
+        { value: listing.country_code || "" },
+        { value: listing.isin || "" },
+        { value: listing.currency_code || "" },
+        { value: listing.listing_status || "" }
+      ])
+    ]);
+  }
+
+  async function renderIssuer(issuerId, signal) {
+    if (!validEntityId(issuerId)) throw new ApiError("Invalid issuer ID", "invalid_issuer_id", 400);
+    const path = `/issuers/${encodeURIComponent(issuerId)}`;
+    const result = await terminalRequest(path, { signal });
+    const data = result.payload.data;
+    const issuer = data.issuer;
+    const identifiers = data.identifiers;
+    const listings = data.listings;
+    const events = data.events.map(normalizeEvent).filter(isPublicEvent);
+    const homepage = issuer.homepage_url
+      ? externalLink("발행사 웹사이트 / Website", issuer.homepage_url, "text-link")
+      : null;
+    const timelineList = element("div", { className: "card-list" }, events.map((item) => eventCard(item)));
+    app.replaceChildren(
+      pageHeader(
+        `${issuer.country_code || "GLOBAL"} · ${issuer.listing_status || "issuer"}`,
+        issuer.legal_name || issuer.short_name || issuerId,
+        [issuer.legal_name_en, listings[0] && listings[0].ticker, listings[0] && listings[0].market]
+          .filter(Boolean)
+          .join(" · "),
+        [
+          homepage,
+          routeLink("전체 사건 / All events", `#/events?issuer_id=${encodeURIComponent(issuerId)}`, { className: "text-link" })
+        ].filter(Boolean),
+        issuer.original_language
+      ),
+      element("div", { className: "detail-grid" }, [
+        element("div", {}, [
+          element("section", { attrs: { "aria-labelledby": "issuer-timeline-title" } }, [
+            sectionHeading("자본시장 타임라인 / Timeline", `${events.length}개 표시`, "issuer-timeline-title"),
+            events.length
+              ? timelineList
+              : emptyState("공개 사건이 없습니다.", "공식 근거와 검수가 완료된 사건만 표시됩니다.")
+          ])
+        ]),
+        element("aside", { className: "detail-sidebar", attrs: { "aria-label": "발행사 식별 정보 / Issuer identity" } }, [
+          facts([
+            { label: "발행사 ID / Issuer ID", value: issuer.issuer_id },
+            { label: "국가 / Country", value: issuer.country_code },
+            { label: "상장 상태 / Listing", value: issuer.listing_status },
+            { label: "기준 언어 / Language", value: issuer.original_language },
+            { label: "마스터 갱신 / Master updated", value: issuer.master_modified_at ? formatDate(issuer.master_modified_at, true) : "" }
+          ]),
+          element("section", { className: "section-block" }, [
+            sectionHeading("공식 식별자 / Identifiers", `${identifiers.length}개`),
+            identifiers.length
+              ? element("div", { className: "data-list" }, identifiers.map(identifierRow))
+              : element("p", { text: "공개된 식별자가 없습니다." })
+          ]),
+          element("section", { className: "section-block" }, [
+            sectionHeading("상장 정보 / Listings", `${listings.length}개`),
+            listings.length
+              ? element("div", { className: "data-list" }, listings.map(listingRow))
+              : element("p", { text: "공개된 상장 정보가 없습니다." })
+          ])
+        ])
+      ])
     );
   }
 
@@ -981,9 +2407,14 @@
 
   async function renderEvent(eventId, signal) {
     if (!validEntityId(eventId)) throw new ApiError("Invalid event ID", "invalid_event_id", 400);
-    const payload = await request(`/events/${encodeURIComponent(eventId)}`, { signal });
+    const path = `/events/${encodeURIComponent(eventId)}`;
+    const result = await terminalRequest(path, {
+      signal,
+      fallback: () => request(path, { signal })
+    });
+    const payload = result.payload;
     const data = payload.data || {};
-    const event = data.event || {};
+    const event = normalizeEvent(data.event || {});
     if (!isPublicEvent(event)) throw new ApiError("Signal events are not public", "event_not_found", 404);
     const actors = Array.isArray(data.actors) ? data.actors : [];
     const claims = Array.isArray(data.claims) ? data.claims : [];
@@ -1003,9 +2434,11 @@
       pageHeader(
         label("eventType", event.event_type),
         event.title || eventId,
-        `${event.company_name || event.company_id || ""} · ${formatDate(event.occurred_at, true)}`,
+        `${issuerOrCompanyName(event)} · ${formatDate(event.occurred_at, true)}`,
         [
-          event.company_id ? routeLink("기업 기록 / Company", `#/companies/${encodeURIComponent(event.company_id)}`, { className: "text-link" }) : null,
+          issuerOrCompanyRoute(event)
+            ? routeLink("발행사 기록 / Issuer", issuerOrCompanyRoute(event), { className: "text-link" })
+            : null,
           routeLink("정정·답변 / Feedback", `#/feedback?entity_type=event&entity_id=${encodeURIComponent(eventId)}`, { className: "text-link" })
         ].filter(Boolean),
         event.original_language
@@ -1035,11 +2468,21 @@
         element("aside", { className: "detail-sidebar", attrs: { "aria-label": "사건 상태 / Event status" } }, [
           element("div", { className: "badge-row" }, [badge(event.importance, "importance"), badge(event.verification_status, "verification")]),
           facts([
-            { label: "회사 / Company", node: element("dd", {}, [routeLink(event.company_name || event.company_id, `#/companies/${encodeURIComponent(event.company_id || "")}`)]) },
+            {
+              label: "발행사 / Issuer",
+              value: issuerOrCompanyName(event),
+              node: element("dd", {}, [issuerOrCompanyLink(event)])
+            },
             { label: "발생 / Occurred", value: formatDate(event.occurred_at, true) },
+            { label: "대표 당사자 / Representative actor", value: eventActorSummary(event) },
+            { label: "접수 / Filed", value: event.filed_at ? formatDate(event.filed_at, true) : "—" },
+            { label: "최초 관측 / First observed", value: event.first_observed_at ? formatDate(event.first_observed_at, true) : "—" },
+            { label: "마지막 변경 / Last updated", value: event.updated_at ? formatDate(event.updated_at, true) : "—" },
             { label: "기한 / Deadline", value: event.deadline_at ? formatDate(event.deadline_at, true) : "—" },
             { label: "사건 ID / Event ID", value: event.event_id || eventId },
-            { label: "언어 / Language", value: event.original_language || "—" }
+            { label: "언어 / Language", value: event.original_language || "—" },
+            { label: "제목 출처 / Title source", value: label("titleProvenance", event.title_provenance) },
+            { label: "수집 범위 / Coverage", value: label("coverageMode", eventCoverageMode(event)) }
           ]),
           element("section", { className: "section-block" }, [
             element("h2", { text: "당사자 / Parties" }),
@@ -1204,6 +2647,18 @@
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   }
 
+  function normalizeCalendarItem(item, version) {
+    if (version !== "v2") return item;
+    const event = normalizeEvent(item);
+    return {
+      ...event,
+      item_type: "event",
+      entity_id: event.event_id,
+      category: event.event_family,
+      scheduled_at: event.deadline_at
+    };
+  }
+
   function calendarItem(item) {
     const date = normalizedDate(item.scheduled_at);
     const dateLabel = date ? new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric", weekday: "short", timeZone: "Asia/Seoul" }).format(date) : "—";
@@ -1216,7 +2671,7 @@
         element("div", { className: "badge-row" }, [badge(item.category, "eventType")]),
         element("h3", {}, [title]),
         metadata([
-          { node: routeLink(item.company_name || item.company_id, `#/companies/${encodeURIComponent(item.company_id || "")}`), value: item.company_name || item.company_id },
+          { node: issuerOrCompanyLink(item), value: issuerOrCompanyName(item) },
           { value: formatDate(item.scheduled_at, true) }
         ])
       ])
@@ -1228,8 +2683,20 @@
     const future = new Date(now.getTime() + 90 * 86400000);
     const from = /^\d{4}-\d{2}-\d{2}$/.test(query.get("from") || "") ? query.get("from") : isoDate(now);
     const to = /^\d{4}-\d{2}-\d{2}$/.test(query.get("to") || "") ? query.get("to") : isoDate(future);
-    const payload = await request("/calendar", { params: { from, to, page: 1, limit: 100 }, signal });
-    const items = (Array.isArray(payload.data) ? payload.data : []).filter((item) => item.verification_status !== "signal");
+    const v2Params = { ...v2EventFilterParams(query), from, to, page: 1, limit: 100 };
+    const v1Params = { from, to, page: 1, limit: 100 };
+    const result = await terminalRequest("/calendar", {
+      params: v2Params,
+      signal,
+      fallback: () => request("/calendar", { params: v1Params, signal })
+    });
+    const payload = result.payload;
+    const rawItems = result.version === "v2"
+      ? payload.data.items
+      : Array.isArray(payload.data) ? payload.data : [];
+    const items = rawItems
+      .map((item) => normalizeCalendarItem(item, result.version))
+      .filter((item) => item.verification_status !== "signal");
     const fromInput = element("input", { attrs: { id: "calendar-from", type: "date", name: "from", value: from, required: "required" } });
     const toInput = element("input", { attrs: { id: "calendar-to", type: "date", name: "to", value: to, required: "required" } });
     const form = element("form", { className: "field-grid" }, [
@@ -1239,7 +2706,10 @@
     ]);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      window.location.hash = `#/calendar?from=${encodeURIComponent(fromInput.value)}&to=${encodeURIComponent(toInput.value)}`;
+      const values = new URLSearchParams(query);
+      values.set("from", fromInput.value);
+      values.set("to", toInput.value);
+      window.location.hash = `#/calendar?${values.toString()}`;
     });
     const groups = new Map();
     items.forEach((item) => {
@@ -1251,15 +2721,43 @@
       element("h2", { text: month }),
       element("div", { className: "data-list" }, values.map(calendarItem))
     ]));
+    const calendarResults = element("div", { attrs: { id: "calendar-results" } }, groupNodes);
+    const pagination = result.version === "v2" ? payload.meta : payload.pagination;
+    if (items.length) {
+      addLoadMore(calendarResults, pagination, async (cursor, cursorKind) => {
+        let moreItems;
+        let morePagination;
+        if (result.version === "v2") {
+          const more = await terminalRequest("/calendar", {
+            params: continuationParams(v2Params, cursor, cursorKind)
+          });
+          moreItems = more.payload.data.items.map((item) => normalizeCalendarItem(item, "v2"));
+          morePagination = more.payload.meta;
+        } else {
+          const more = await request("/calendar", { params: { ...v1Params, page: cursor } });
+          moreItems = (Array.isArray(more.data) ? more.data : []).map((item) => normalizeCalendarItem(item, "v1"));
+          morePagination = more.pagination;
+        }
+        moreItems
+          .filter((item) => item.verification_status !== "signal")
+          .forEach((item) => calendarResults.append(calendarItem(item)));
+        return morePagination;
+      });
+    }
     app.replaceChildren(
-      pageHeader("CALENDAR / 캘린더", "주총·공개매수·주요 기한", "사건 기한과 의안 표결 일정을 시간순으로 확인합니다."),
+      pageHeader(
+        "CALENDAR / 캘린더",
+        result.version === "v2" ? "글로벌 주총·공개매수·주요 기한" : "주총·공개매수·주요 기한",
+        "사건 기한과 의안 표결 일정을 시간순으로 확인합니다."
+      ),
       element("section", { className: "filter-form", attrs: { "aria-label": "캘린더 기간" } }, [form]),
-      items.length ? fragment(groupNodes) : emptyState("해당 기간의 일정이 없습니다.", "기간을 넓혀 다시 확인해 주세요.")
+      items.length ? calendarResults : emptyState("해당 기간의 일정이 없습니다.", "기간을 넓혀 다시 확인해 주세요.")
     );
   }
 
   function resultRoute(item) {
     if (item.kind === "company") return `#/companies/${encodeURIComponent(item.entity_id || "")}`;
+    if (item.kind === "issuer") return `#/issuers/${encodeURIComponent(item.entity_id || "")}`;
     if (item.kind === "actor") return `#/actors/${encodeURIComponent(item.entity_id || "")}`;
     if (item.kind === "event") return `#/events/${encodeURIComponent(item.entity_id || "")}`;
     if (item.kind === "campaign") return `#/campaigns/${encodeURIComponent(item.entity_id || "")}`;
@@ -1282,10 +2780,32 @@
       element("h3", {}, [title]),
       metadata([
         { value: subtitle || "" },
-        { value: item.company_id || "" },
+        { value: item.issuer_id || item.company_id || "" },
         { value: formatDate(item.occurred_at || item.sort_at, false) }
       ])
     ]);
+  }
+
+  function normalizeSearchResult(item, version) {
+    if (version !== "v2") {
+      if (!item || item.kind !== "event") return item;
+      return {
+        ...item,
+        subtitle: canonicalEventFamily(
+          item.subtitle || item.event_family || item.event_type,
+          item.verification_status,
+          item.change_type
+        )
+      };
+    }
+    const event = normalizeEvent(item);
+    return {
+      ...event,
+      kind: "event",
+      entity_id: event.event_id,
+      subtitle: event.event_family,
+      sort_at: event.updated_at || event.occurred_at
+    };
   }
 
   async function renderSearch(query, signal) {
@@ -1298,9 +2818,21 @@
     });
     let results = [];
     let resultPayload = null;
+    let resultVersion = "";
     if (q.length >= 2) {
-      resultPayload = await request("/search", { params: { q, page: 1, limit: 50 }, signal });
-      results = (Array.isArray(resultPayload.data) ? resultPayload.data : []).filter((item) => item.kind !== "event" || item.verification_status !== "signal");
+      const result = await terminalRequest("/search", {
+        params: { q, page: 1, limit: 50 },
+        signal,
+        fallback: () => request("/search", { params: { q, page: 1, limit: 50 }, signal })
+      });
+      resultPayload = result.payload;
+      resultVersion = result.version;
+      const rawResults = resultVersion === "v2"
+        ? resultPayload.data.items
+        : Array.isArray(resultPayload.data) ? resultPayload.data : [];
+      results = rawResults
+        .map((item) => normalizeSearchResult(item, resultVersion))
+        .filter((item) => item.kind !== "event" || item.verification_status !== "signal");
     }
     const resultList = element("div", { className: "data-list" }, results.map(searchResult));
     const resultSection = q.length >= 2 ? element("section", { className: "section-block" }, [
@@ -1308,10 +2840,20 @@
       results.length ? resultList : emptyState("검색 결과가 없습니다.", "다른 회사명, 사건명 또는 공시 제목을 입력해 주세요.")
     ]) : emptyState("검색어를 입력해 주세요.", "두 글자 이상 입력하면 공개 기록 전체를 검색합니다.");
     if (resultPayload && results.length) {
-      addLoadMore(resultSection, resultPayload.pagination, async (page) => {
-        const more = await request("/search", { params: { q, page, limit: 50 } });
-        (Array.isArray(more.data) ? more.data : []).filter((item) => item.kind !== "event" || item.verification_status !== "signal").forEach((item) => resultList.append(searchResult(item)));
-        return more.pagination;
+      addLoadMore(resultSection, resultVersion === "v2" ? resultPayload.meta : resultPayload.pagination, async (cursor, cursorKind) => {
+        const moreResult = await terminalRequest("/search", {
+          params: continuationParams({ q, page: 1, limit: 50 }, cursor, cursorKind),
+          fallback: () => request("/search", { params: { q, page: cursor, limit: 50 } })
+        });
+        const morePayload = moreResult.payload;
+        const moreItems = moreResult.version === "v2"
+          ? morePayload.data.items
+          : Array.isArray(morePayload.data) ? morePayload.data : [];
+        moreItems
+          .map((item) => normalizeSearchResult(item, moreResult.version))
+          .filter((item) => item.kind !== "event" || item.verification_status !== "signal")
+          .forEach((item) => resultList.append(searchResult(item)));
+        return moreResult.version === "v2" ? morePayload.meta : morePayload.pagination;
       });
     }
     app.replaceChildren(
@@ -1433,6 +2975,255 @@
     );
   }
 
+  function closeEventDrawer() {
+    if (!drawerShell || drawerShell.hidden) return;
+    if (drawerController) drawerController.abort();
+    drawerController = null;
+    drawerShell.hidden = true;
+    document.body.classList.remove("drawer-open");
+    if (drawerTrigger && drawerTrigger.isConnected) drawerTrigger.focus();
+    drawerTrigger = null;
+    announcer.textContent = "사건 상세를 닫았습니다.";
+  }
+
+  function drawerDocuments(documents) {
+    const publicDocuments = (Array.isArray(documents) ? documents : []).filter(isPublicDocument).slice(0, 10);
+    if (!publicDocuments.length) return null;
+    return element("section", { className: "drawer-section", attrs: { "aria-labelledby": "drawer-sources" } }, [
+      element("h3", { text: "공식 근거·보도 / Sources", attrs: { id: "drawer-sources" } }),
+      element("div", { className: "data-list" }, publicDocuments.map(documentRow))
+    ]);
+  }
+
+  function drawerClaims(claims) {
+    const rows = Array.isArray(claims) ? claims.slice(0, 10) : [];
+    if (!rows.length) return null;
+    return element("section", { className: "drawer-section", attrs: { "aria-labelledby": "drawer-claims" } }, [
+      element("h3", { text: "주장·반론·공식 사실 / Claims", attrs: { id: "drawer-claims" } }),
+      element("div", { className: "data-list" }, rows.map(claimCard))
+    ]);
+  }
+
+  async function openEventDrawer(eventId, trigger) {
+    if (!drawerShell || !drawer || !drawerContent || !drawerKicker || !validEntityId(eventId)) return;
+    if (drawerController) drawerController.abort();
+    drawerController = new AbortController();
+    drawerTrigger = trigger || document.activeElement;
+    drawerShell.hidden = false;
+    document.body.classList.add("drawer-open");
+    drawerKicker.textContent = "공식 근거를 불러오는 중입니다.";
+    drawerContent.replaceChildren(
+      element("h2", { text: "사건 상세를 불러오고 있습니다.", attrs: { id: "drawer-title" } }),
+      element("p", { text: "원문 제목과 근거 상태를 확인하고 있습니다.", className: "drawer-summary" })
+    );
+    drawer.focus({ preventScroll: true });
+    try {
+      const result = await terminalRequest(`/events/${encodeURIComponent(eventId)}`, {
+        signal: drawerController.signal,
+        fallback: () => request(`/events/${encodeURIComponent(eventId)}`, { signal: drawerController.signal })
+      });
+      const envelope = result.payload || {};
+      const data = envelope.data || {};
+      const detail = data.event ? data : { event: data };
+      const event = normalizeEvent(detail.event || {});
+      if (!isPublicEvent(event)) throw new ApiError("Signal events are not public", "event_not_found", 404);
+      drawerKicker.textContent = `${issuerOrCompanyName(event)} · ${label("eventType", event.event_type)}`;
+      const sourceAction = event.source_url
+        ? externalLink("원문 근거 / Open source", event.source_url, "text-link")
+        : null;
+      const heading = sourceNode("h2", event.title || eventId, event.original_language);
+      heading.id = "drawer-title";
+      drawerContent.replaceChildren(
+        element("div", { className: "badge-row" }, [
+          badge(event.verification_status, "verification"),
+          sourceCoverageBadge(event)
+        ]),
+        heading,
+        event.change_summary
+          ? sourceNode("p", event.change_summary, event.original_language, "drawer-summary")
+          : element("p", { text: "확인된 사실과 연결 근거를 아래에서 확인하세요.", className: "drawer-summary" }),
+        facts([
+          {
+            label: "발행사 / Issuer",
+            value: issuerOrCompanyName(event),
+            node: element("dd", {}, [issuerOrCompanyLink(event)])
+          },
+          { label: "시장 / Market", value: [event.ticker, event.market || marketForEvent(event)].filter(Boolean).join(" · ") },
+          { label: "당사자·역할 / Actor & role", value: eventActorSummary(event) },
+          { label: "현재 상태 / Status", value: event.current_status },
+          { label: "발생 / Occurred", value: formatDate(event.occurred_at, true) },
+          { label: "접수 / Filed", value: event.filed_at ? formatDate(event.filed_at, true) : "—" },
+          { label: "최초 관측 / First observed", value: event.first_observed_at ? formatDate(event.first_observed_at, true) : "—" },
+          { label: "마지막 변경 / Last updated", value: event.updated_at ? formatDate(event.updated_at, true) : "—" },
+          { label: "기한 / Deadline", value: event.deadline_at ? formatDate(event.deadline_at, true) : "—" },
+          { label: "언어 / Language", value: event.original_language || "—" },
+          { label: "제목 출처 / Title source", value: label("titleProvenance", event.title_provenance) },
+          { label: "수집 범위 / Coverage", value: label("coverageMode", eventCoverageMode(event)) }
+        ]),
+        element("div", { className: "drawer-actions" }, [
+          routeLink("전체 사건 기록 / Full record", `#/events/${encodeURIComponent(eventId)}`, { className: "button" }),
+          sourceAction,
+          routeLink("정정·답변 / Feedback", `#/feedback?entity_type=event&entity_id=${encodeURIComponent(eventId)}`, { className: "text-link" })
+        ].filter(Boolean)),
+        drawerClaims(detail.claims),
+        drawerDocuments(detail.documents)
+      );
+      announcer.textContent = `${event.title || "사건"} 상세를 열었습니다.`;
+    } catch (error) {
+      if (error && error.name === "AbortError") return;
+      drawerKicker.textContent = "DATA UNAVAILABLE";
+      drawerContent.replaceChildren(
+        element("h2", { text: "사건 상세를 불러오지 못했습니다.", attrs: { id: "drawer-title" } }),
+        element("p", { text: errorMessage(error && error.code), className: "drawer-summary" }),
+        routeLink("전체 사건 기록으로 이동", `#/events/${encodeURIComponent(eventId)}`, { className: "text-link" })
+      );
+    }
+  }
+
+  function visibleEventLinks() {
+    return [...document.querySelectorAll("[data-event-drawer]")]
+      .filter((link) => link.dataset.eventDrawer && link.getClientRects().length > 0);
+  }
+
+  function isTypingTarget(target) {
+    return target instanceof HTMLInputElement
+      || target instanceof HTMLTextAreaElement
+      || target instanceof HTMLSelectElement
+      || (target instanceof HTMLElement && target.isContentEditable);
+  }
+
+  function installTerminalInteractions() {
+    if (mobileMenuToggle && mobileMenu) {
+      mobileMenuToggle.addEventListener("click", toggleMobileMenu);
+      mobileMenu.addEventListener("click", (event) => {
+        if (event.target instanceof Element && event.target.closest("a[href]")) {
+          closeMobileMenu({ restoreFocus: false });
+        }
+      });
+    }
+    if (globalSearchForm && globalSearchInput) {
+      globalSearchForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const value = globalSearchInput.value.trim();
+        if (value.length >= 2) window.location.hash = `#/search?q=${encodeURIComponent(value)}`;
+      });
+    }
+    document.addEventListener("click", (event) => {
+      const liveLink = event.target instanceof Element
+        ? event.target.closest("[data-nav='live']")
+        : null;
+      if (
+        liveLink
+        && !event.defaultPrevented
+        && event.button === 0
+        && !event.metaKey
+        && !event.ctrlKey
+        && !event.shiftKey
+        && !event.altKey
+      ) {
+        event.preventDefault();
+        const destination = `#/today?market=${encodeURIComponent(currentMarket(parseRoute().query))}&view=live`;
+        if (window.location.hash === destination) {
+          const liveSection = document.getElementById("terminal-live");
+          if (liveSection) liveSection.scrollIntoView({ block: "start", behavior: "smooth" });
+        } else {
+          window.location.hash = destination;
+        }
+        return;
+      }
+      const link = event.target instanceof Element ? event.target.closest("[data-event-drawer]") : null;
+      if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const eventId = String(link.dataset.eventDrawer || "");
+      if (!validEntityId(eventId)) return;
+      event.preventDefault();
+      void openEventDrawer(eventId, link);
+    });
+    document.querySelectorAll("[data-drawer-close]").forEach((button) => {
+      button.addEventListener("click", closeEventDrawer);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && mobileMenu && !mobileMenu.hidden) {
+        event.preventDefault();
+        closeMobileMenu();
+        return;
+      }
+      if (event.key === "Escape" && drawerShell && !drawerShell.hidden) {
+        event.preventDefault();
+        closeEventDrawer();
+        return;
+      }
+      if (event.key === "Escape" && document.body.classList.contains("filter-sheet-open")) {
+        event.preventDefault();
+        closeTerminalFilterSheet();
+        return;
+      }
+      if (event.key === "Tab" && document.body.classList.contains("filter-sheet-open")) {
+        const filterPanel = document.getElementById("terminal-filters");
+        if (!filterPanel) return;
+        const focusable = [...filterPanel.querySelectorAll("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])")]
+          .filter((node) => node.getClientRects().length > 0);
+        if (!focusable.length) {
+          event.preventDefault();
+          filterPanel.focus();
+          return;
+        }
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+        return;
+      }
+      if (event.key === "Tab" && drawerShell && !drawerShell.hidden && drawer) {
+        const focusable = [...drawer.querySelectorAll("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])")]
+          .filter((node) => node.getClientRects().length > 0);
+        if (!focusable.length) {
+          event.preventDefault();
+          drawer.focus();
+          return;
+        }
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+        return;
+      }
+      if (isTypingTarget(event.target)) return;
+      if (event.key === "/" && globalSearchInput) {
+        event.preventDefault();
+        globalSearchInput.focus();
+        globalSearchInput.select();
+        return;
+      }
+      if (!["j", "J", "k", "K", "Enter"].includes(event.key)) return;
+      const links = visibleEventLinks();
+      if (!links.length) return;
+      const current = links.indexOf(document.activeElement);
+      if (event.key === "Enter" && current >= 0) {
+        event.preventDefault();
+        links[current].click();
+        return;
+      }
+      if (!["j", "J", "k", "K"].includes(event.key)) return;
+      event.preventDefault();
+      const direction = event.key.toLowerCase() === "j" ? 1 : -1;
+      const nextIndex = current < 0
+        ? direction > 0 ? 0 : links.length - 1
+        : (current + direction + links.length) % links.length;
+      links[nextIndex].focus({ preventScroll: true });
+      links[nextIndex].scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }
+
   function renderNotFound() {
     app.replaceChildren(element("section", { className: "error-state" }, [
       element("p", { text: "404", className: "eyebrow" }),
@@ -1445,6 +3236,7 @@
   function errorMessage(code) {
     const known = {
       company_not_found: "기업 기록을 찾을 수 없습니다. / Company not found.",
+      issuer_not_found: "발행사 기록을 찾을 수 없습니다. / Issuer not found.",
       actor_not_found: "당사자 기록을 찾을 수 없습니다. / Actor not found.",
       event_not_found: "사건 기록을 찾을 수 없습니다. / Event not found.",
       campaign_not_found: "캠페인 기록을 찾을 수 없습니다. / Campaign not found.",
@@ -1484,7 +3276,11 @@
 
   function activeNav(route) {
     const first = route.segments[0] || "today";
-    const active = first === "documents" || first === "campaigns" || first === "actors" ? "events" : first;
+    const active = first === "today" && route.query.get("view") === "live"
+      ? "live"
+      : first === "documents" || first === "campaigns" || first === "actors"
+        ? "events"
+        : first === "issuers" ? "companies" : first;
     document.querySelectorAll("[data-nav]").forEach((link) => {
       if (link.dataset.nav === active) link.setAttribute("aria-current", "page");
       else link.removeAttribute("aria-current");
@@ -1505,13 +3301,22 @@
     activeNav(route);
     const heading = app.querySelector("h1");
     const title = heading ? heading.textContent : "거버넌스 인텔리전스";
-    document.title = `${title} | BSIDE Governance Intelligence`;
+    document.title = `${title} | BSIDE Market Intelligence`;
     announcer.textContent = `${title} 페이지를 열었습니다.`;
     if (heading) {
       heading.setAttribute("tabindex", "-1");
       heading.focus({ preventScroll: true });
     }
     window.scrollTo({ top: 0, behavior: "auto" });
+    if (
+      route.segments[0] === "today"
+      && route.query.get("view") === "live"
+    ) {
+      const liveSection = document.getElementById("terminal-live");
+      if (liveSection) {
+        liveSection.scrollIntoView({ block: "start", behavior: "auto" });
+      }
+    }
   }
 
   async function navigate() {
@@ -1520,13 +3325,18 @@
       return;
     }
     if (routeController) routeController.abort();
+    if (drawerShell && !drawerShell.hidden) closeEventDrawer();
+    closeMobileMenu({ restoreFocus: false });
+    closeTerminalFilterSheet({ restoreFocus: false });
     routeController = new AbortController();
     const signal = routeController.signal;
     const route = parseRoute();
     renderLoading();
     try {
       const [first, second] = route.segments;
-      if (!first || first === "today") await renderToday(signal);
+      if (!first || first === "today") await renderToday(route.query, signal);
+      else if (first === "issuers" && second) await renderIssuer(second, signal);
+      else if (first === "issuers") await renderIssuers(route.query, signal);
       else if (first === "companies" && second) await renderCompany(second, signal);
       else if (first === "companies") await renderCompanies(route.query, signal);
       else if (first === "events" && second) await renderEvent(second, signal);
@@ -1547,6 +3357,7 @@
     }
   }
 
+  installTerminalInteractions();
   window.addEventListener("hashchange", navigate);
   navigate();
 })();

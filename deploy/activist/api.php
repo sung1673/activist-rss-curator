@@ -16,14 +16,17 @@ if (!is_file($configPath)) {
 }
 $config = require $configPath;
 require_once __DIR__ . '/governance_v1.php';
+require_once __DIR__ . '/governance_v2.php';
 $v1Path = v1_request_path(); // canonicalized once for both CORS and dispatch
+$v2Path = v2_request_path();
+$versionedPath = $v2Path !== null ? $v2Path : $v1Path;
 
 $origin = isset($_SERVER['HTTP_ORIGIN']) ? trim((string)$_SERVER['HTTP_ORIGIN']) : '';
 $allowedOrigin = isset($config['allowed_origin']) ? trim((string)$config['allowed_origin']) : '';
 $corsOrigin = '';
 if (valid_cors_origin($origin) && valid_cors_origin($allowedOrigin) && hash_equals($allowedOrigin, $origin)) {
     $corsOrigin = $allowedOrigin;
-} elseif (valid_cors_origin($origin) && $v1Path !== null && strpos($v1Path, '/ops/') !== 0 && strpos($v1Path, '/admin/') !== 0) {
+} elseif (valid_cors_origin($origin) && $versionedPath !== null && strpos($versionedPath, '/ops/') !== 0 && strpos($versionedPath, '/admin/') !== 0) {
     $publicOrigins = isset($config['public_api_cors_origins']) && is_array($config['public_api_cors_origins'])
         ? $config['public_api_cors_origins'] : array();
     if (in_array('*', $publicOrigins, true)) {
@@ -47,7 +50,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 $method = $_SERVER['REQUEST_METHOD'];
 
 try {
-    if ($v1Path !== null) {
+    if ($v2Path !== null) {
+        handle_v2_request($method, $v2Path, $config);
+    } elseif ($v1Path !== null) {
         handle_v1_request($method, $v1Path, $config);
     } elseif ($method === 'GET') {
         $action = isset($_GET['action']) ? (string)$_GET['action'] : 'health';
@@ -794,12 +799,14 @@ function ensure_index(PDO $pdo, array $config, string $table, string $index, str
 function source_right_redistribution_sql(string $rightsAlias): string {
     return '(' . $rightsAlias . '.source_right_id IS NOT NULL'
         . ' AND ' . $rightsAlias . '.status = \'active\''
+        . ' AND NULLIF(TRIM(' . $rightsAlias . '.permission_scope), \'\') IS NOT NULL'
         . ' AND ' . $rightsAlias . '.redistribution_allowed = 1'
         . ' AND ' . $rightsAlias . '.valid_from <= UTC_TIMESTAMP()'
         . ' AND (' . $rightsAlias . '.valid_until IS NULL OR ' . $rightsAlias . '.valid_until > UTC_TIMESTAMP())'
         . ' AND ' . $rightsAlias . '.revoked_at IS NULL'
         . ' AND (NULLIF(TRIM(' . $rightsAlias . '.evidence_uri), \'\') IS NOT NULL'
-        . ' OR NULLIF(TRIM(' . $rightsAlias . '.evidence_hash), \'\') IS NOT NULL))';
+        . ' OR ' . $rightsAlias . '.evidence_hash'
+        . ' REGEXP \'^[A-Fa-f0-9]{64}$\'))';
 }
 
 function legacy_article_visibility_sql(string $articleAlias, string $rightsAlias): string {

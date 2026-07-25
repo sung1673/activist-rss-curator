@@ -1,0 +1,386 @@
+name: Production Alpha immutable release evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      input_run_id:
+        description: Successful protected Alpha evidence-input run at this exact SHA
+        required: true
+        type: string
+      input_artifact_name:
+        description: Exact protected Alpha evidence-input artifact
+        required: true
+        default: global-alpha-release-inputs
+        type: string
+      governance_pages_run_id:
+        description: Exact successful daily run whose Pages artifact was observed
+        required: true
+        type: string
+      governance_pages_artifact_name:
+        description: Exact immutable daily Pages artifact observed for 24 hours
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: global-alpha-release-evidence-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: governance-release
+    steps:
+      - name: Checkout the exact release candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Enforce protected default-branch evaluation
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]] || {
+            echo "::error::Production Alpha release evidence is restricted to the default branch."
+            exit 1
+          }
+
+      - name: Resolve exact same-SHA protected input artifact
+        id: protected_inputs
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REQUESTED_RUN_ID: ${{ inputs.input_run_id }}
+          REQUESTED_ARTIFACT_NAME: ${{ inputs.input_artifact_name }}
+          EXPECTED_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          REQUIRED_WORKFLOW_PATH: .github/workflows/global-alpha-evidence-inputs.yml
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const runText = process.env.REQUESTED_RUN_ID.trim();
+            const artifactName = process.env.REQUESTED_ARTIFACT_NAME.trim();
+            if (!/^[1-9][0-9]*$/.test(runText)) {
+              core.setFailed("input_run_id must be a positive integer");
+              return;
+            }
+            if (artifactName !== "global-alpha-release-inputs") {
+              core.setFailed("input_artifact_name must be global-alpha-release-inputs");
+              return;
+            }
+            const runId = Number(runText);
+            if (runId === Number(process.env.CURRENT_RUN_ID)) {
+              core.setFailed("The evidence source cannot be the current run");
+              return;
+            }
+            const response = await github.rest.actions.getWorkflowRun({owner, repo, run_id: runId});
+            const run = response.data;
+            const ageHours = (Date.now() - Date.parse(run.created_at)) / 3600000;
+            if (
+              run.conclusion !== "success" ||
+              (run.head_sha || "").toLowerCase() !== process.env.EXPECTED_SHA.toLowerCase() ||
+              run.head_branch !== process.env.DEFAULT_BRANCH ||
+              run.path !== process.env.REQUIRED_WORKFLOW_PATH ||
+              ageHours < -0.1 ||
+              ageHours > 72
+            ) {
+              core.setFailed("Protected Alpha inputs failed the success, same-SHA, workflow, branch, or freshness contract");
+              return;
+            }
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner, repo, run_id: runId, per_page: 100,
+            });
+            const matches = artifacts.filter(
+              (item) => item.name === artifactName && !item.expired,
+            );
+            if (matches.length !== 1 || !/^sha256:[0-9a-f]{64}$/i.test(matches[0].digest || "")) {
+              core.setFailed("Exactly one immutable protected Alpha input artifact is required");
+              return;
+            }
+            core.setOutput("artifact_id", String(matches[0].id));
+            core.setOutput("run_id", String(runId));
+            core.setOutput("digest", matches[0].digest.toLowerCase());
+
+      - name: Download protected Alpha inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.protected_inputs.outputs.artifact_id }}
+          path: protected-inputs
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.protected_inputs.outputs.run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
+      - name: Resolve exact same-SHA daily Pages artifact
+        id: pages_artifact
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REQUESTED_RUN_ID: ${{ inputs.governance_pages_run_id }}
+          REQUESTED_ARTIFACT_NAME: ${{ inputs.governance_pages_artifact_name }}
+          EXPECTED_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const runText = process.env.REQUESTED_RUN_ID.trim();
+            const artifactName = process.env.REQUESTED_ARTIFACT_NAME.trim();
+            if (!/^[1-9][0-9]*$/.test(runText)) {
+              core.setFailed("governance_pages_run_id must be a positive integer");
+              return;
+            }
+            const runId = Number(runText);
+            if (runId === Number(process.env.CURRENT_RUN_ID)) {
+              core.setFailed("The daily Pages source cannot be the current run");
+              return;
+            }
+            const response = await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: runId,
+            });
+            const run = response.data;
+            const expectedName = `pages-${run.id}-${run.run_attempt}`;
+            const ageHours = (Date.now() - Date.parse(run.created_at)) / 3600000;
+            if (
+              run.conclusion !== "success" ||
+              (run.head_sha || "").toLowerCase() !== process.env.EXPECTED_SHA.toLowerCase() ||
+              run.head_branch !== process.env.DEFAULT_BRANCH ||
+              run.path !== ".github/workflows/daily.yml" ||
+              ageHours < -0.1 ||
+              ageHours > 72
+            ) {
+              core.setFailed("Daily Pages artifact failed the success, same-SHA, workflow, branch, or freshness contract");
+              return;
+            }
+            if (artifactName !== expectedName) {
+              core.setFailed(`governance_pages_artifact_name must be exactly ${expectedName}`);
+              return;
+            }
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner, repo, run_id: runId, per_page: 100},
+            );
+            const matches = artifacts.filter(
+              (item) => item.name === expectedName && !item.expired,
+            );
+            if (
+              matches.length !== 1 ||
+              !/^sha256:[0-9a-f]{64}$/i.test(matches[0].digest || "")
+            ) {
+              core.setFailed("Exactly one immutable daily Pages artifact is required");
+              return;
+            }
+            core.setOutput("artifact_id", String(matches[0].id));
+            core.setOutput("artifact_name", expectedName);
+            core.setOutput("artifact_digest", matches[0].digest.toLowerCase());
+            core.setOutput("run_id", String(run.id));
+            core.setOutput("run_attempt", String(run.run_attempt));
+
+      - name: Download exact daily Pages artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.pages_artifact.outputs.artifact_id }}
+          path: candidate-pages
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.pages_artifact.outputs.run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
+      - name: Resolve and download 24-hour same-SHA watchdog evidence
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          ARCHIVE_ROOT: ${{ runner.temp }}/global-alpha-observation-archives
+          MANIFEST_PATH: ${{ runner.temp }}/global-alpha-observation-manifest.json
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const crypto = require("crypto");
+            const {owner, repo} = context.repo;
+            const expectedSha = process.env.EXPECTED_SHA.toLowerCase();
+            const cutoff = Date.now() - 30 * 3600000;
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner,
+              repo,
+              workflow_id: "global-alpha-watchdog.yml",
+              branch: process.env.DEFAULT_BRANCH,
+              status: "completed",
+              per_page: 100,
+            });
+            const selected = [];
+            for (const run of runs) {
+              const created = Date.parse(run.created_at);
+              if (
+                created < cutoff ||
+                (run.head_sha || "").toLowerCase() !== expectedSha ||
+                run.head_branch !== process.env.DEFAULT_BRANCH ||
+                run.path !== ".github/workflows/global-alpha-watchdog.yml"
+              ) continue;
+              if (!["success", "failure"].includes(run.conclusion)) {
+                throw new Error(
+                  `Watchdog run ${run.id} ended as ${run.conclusion}; observation continuity is invalid`,
+                );
+              }
+              const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+                owner, repo, run_id: run.id, per_page: 100,
+              });
+              const expectedName = `global-alpha-observation-${run.id}-${run.run_attempt}`;
+              const matches = artifacts.filter(
+                (item) => item.name === expectedName && !item.expired,
+              );
+              if (matches.length !== 1 || !/^sha256:[0-9a-f]{64}$/i.test(matches[0].digest || "")) {
+                throw new Error(`Watchdog run ${run.id} has no unique immutable observation artifact`);
+              }
+              selected.push({run, artifact: matches[0]});
+            }
+            if (selected.length < 287) {
+              throw new Error(`Only ${selected.length} same-SHA watchdog artifacts were found; at least 287 are required`);
+            }
+            selected.sort((left, right) => Date.parse(left.run.created_at) - Date.parse(right.run.created_at));
+            fs.mkdirSync(process.env.ARCHIVE_ROOT, {recursive: true});
+            const manifest = [];
+            for (const {run, artifact} of selected) {
+              const response = await github.rest.actions.downloadArtifact({
+                owner, repo, artifact_id: artifact.id, archive_format: "zip",
+              });
+              const archive = Buffer.from(response.data);
+              const digest = `sha256:${crypto.createHash("sha256").update(archive).digest("hex")}`;
+              if (digest.toLowerCase() !== artifact.digest.toLowerCase()) {
+                throw new Error(`Watchdog artifact ${artifact.id} failed its immutable digest`);
+              }
+              const archiveName = `${artifact.id}.zip`;
+              fs.writeFileSync(path.join(process.env.ARCHIVE_ROOT, archiveName), archive);
+              manifest.push({
+                run_id: String(run.id),
+                run_attempt: run.run_attempt,
+                run_conclusion: run.conclusion,
+                run_created_at: run.created_at,
+                artifact_id: String(artifact.id),
+                artifact_name: artifact.name,
+                artifact_digest: artifact.digest.toLowerCase(),
+                archive_name: archiveName,
+                code_revision: expectedSha,
+              });
+            }
+            fs.writeFileSync(process.env.MANIFEST_PATH, JSON.stringify(manifest, null, 2) + "\n");
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Bind exact daily artifact and terminal content bytes
+        env:
+          PAGES_RUN_ID: ${{ steps.pages_artifact.outputs.run_id }}
+          PAGES_RUN_ATTEMPT: ${{ steps.pages_artifact.outputs.run_attempt }}
+          PAGES_ARTIFACT_ID: ${{ steps.pages_artifact.outputs.artifact_id }}
+          PAGES_ARTIFACT_NAME: ${{ steps.pages_artifact.outputs.artifact_name }}
+          PAGES_ARTIFACT_DIGEST: ${{ steps.pages_artifact.outputs.artifact_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m curator.global_alpha_pages_identity create \
+            --site candidate-pages \
+            --code-revision "$GITHUB_SHA" \
+            --producer-run-id "$PAGES_RUN_ID" \
+            --producer-run-attempt "$PAGES_RUN_ATTEMPT" \
+            --artifact-id "$PAGES_ARTIFACT_ID" \
+            --artifact-name "$PAGES_ARTIFACT_NAME" \
+            --artifact-digest "$PAGES_ARTIFACT_DIGEST" \
+            --output global-alpha-evidence/pages-artifact-identity.json
+
+      - name: Compile the exact candidate observation window
+        run: >-
+          python -m curator.global_alpha_release_gate compile-observations
+          --archive-dir "${{ runner.temp }}/global-alpha-observation-archives"
+          --manifest "${{ runner.temp }}/global-alpha-observation-manifest.json"
+          --output global-alpha-evidence/observations.jsonl
+          --expected-revision "$GITHUB_SHA"
+
+      - name: Evaluate the separate Production Alpha gate
+        id: alpha_gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_as_of="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "evidence_as_of=$evidence_as_of" >> "$GITHUB_OUTPUT"
+          python -m curator.global_alpha_release_gate evaluate \
+            --observations global-alpha-evidence/observations.jsonl \
+            --pages-artifact-identity global-alpha-evidence/pages-artifact-identity.json \
+            --connector-idempotency protected-inputs/connector-idempotency.json \
+            --human-review protected-inputs/human-review.json \
+            --content-integrity protected-inputs/content-integrity.json \
+            --experience protected-inputs/experience.json \
+            --approval protected-inputs/approval.json \
+            --expected-revision "$GITHUB_SHA" \
+            --evidence-as-of "$evidence_as_of" \
+            --output global-alpha-evidence/production-alpha-release-report.json
+
+      - name: Assemble immutable evidence and provenance
+        shell: bash
+        env:
+          INPUT_RUN_ID: ${{ steps.protected_inputs.outputs.run_id }}
+          INPUT_ARTIFACT_ID: ${{ steps.protected_inputs.outputs.artifact_id }}
+          INPUT_ARTIFACT_DIGEST: ${{ steps.protected_inputs.outputs.digest }}
+          EVIDENCE_AS_OF: ${{ steps.alpha_gate.outputs.evidence_as_of }}
+        run: |
+          set -euo pipefail
+          cp protected-inputs/*.json global-alpha-evidence/
+          cp "${{ runner.temp }}/global-alpha-observation-manifest.json" \
+            global-alpha-evidence/observation-artifacts.json
+          jq -n \
+            --arg code_revision "$GITHUB_SHA" \
+            --arg evidence_as_of "$EVIDENCE_AS_OF" \
+            --arg input_run_id "$INPUT_RUN_ID" \
+            --arg input_artifact_id "$INPUT_ARTIFACT_ID" \
+            --arg input_artifact_digest "$INPUT_ARTIFACT_DIGEST" \
+            --slurpfile pages global-alpha-evidence/pages-artifact-identity.json \
+            '{
+              schema_version: 1,
+              kind: "bside-global-production-alpha-artifact-provenance",
+              code_revision: $code_revision,
+              evidence_as_of: $evidence_as_of,
+              protected_input: {
+                workflow: ".github/workflows/global-alpha-evidence-inputs.yml",
+                run_id: $input_run_id,
+                artifact_id: $input_artifact_id,
+                artifact_digest: $input_artifact_digest
+              },
+              pages_artifact: $pages[0],
+              observation_workflow: ".github/workflows/global-alpha-watchdog.yml",
+              release_workflow: ".github/workflows/global-alpha-release-evidence.yml"
+            }' > global-alpha-evidence/artifact-provenance.json
+
+      - name: Upload immutable Production Alpha release evidence
+        id: release_evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-release-evidence
+          path: global-alpha-evidence
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 9
+
+      - name: Record bounded Alpha result
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ steps.release_evidence.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.release_evidence.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Production Alpha evidence passed"
+            echo "- revision: \`$GITHUB_SHA\`"
+            echo "- artifact id: \`$ARTIFACT_ID\`"
+            echo "- artifact digest: \`$ARTIFACT_DIGEST\`"
+            echo "- this is a bounded Production Alpha decision, not final recall or same-event precision certification"
+          } >> "$GITHUB_STEP_SUMMARY"

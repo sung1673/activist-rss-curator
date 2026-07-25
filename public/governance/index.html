@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <meta name="theme-color" content="#112c2d">
-  <meta name="description" content="한국 기업의 거버넌스 사건과 공식 근거, 당사자 주장, 결과, 후속 이행을 연결한 공개 기록입니다.">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="description" content="국가별 공식 데이터 범위를 투명하게 표시하며 주주·자본시장 사건을 근거, 당사자, 기한, 후속 이행까지 연결하는 Production Alpha 데이터 터미널입니다.">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https:; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'">
-  <title>BSIDE 거버넌스 인텔리전스</title>
+  <title>BSIDE Market Intelligence</title>
   <link rel="stylesheet" href="./styles.css">
   <script src="./config.js" defer></script>
   <script src="./app.js" defer></script>
@@ -16,53 +16,103 @@
   <a class="skip-link" href="#app">본문으로 이동 / Skip to content</a>
   <header class="site-header">
     <div class="header-inner">
-      <a class="brand" href="#/today" aria-label="BSIDE 거버넌스 인텔리전스 홈">
+      <a class="brand" href="#/today" aria-label="BSIDE 마켓 인텔리전스 홈">
         <span class="brand-mark" aria-hidden="true">B</span>
-        <span><strong>BSIDE</strong><small>Governance Intelligence</small></span>
+        <span><strong>BSIDE</strong><small>MARKET INTELLIGENCE</small></span>
+        <span class="alpha-label">PRODUCTION ALPHA</span>
       </a>
       <nav class="primary-nav" aria-label="주요 메뉴 / Primary navigation">
         <a href="#/today" data-nav="today">오늘 <span lang="en">Today</span></a>
+        <a href="#/today?view=live" data-nav="live">변경 <span lang="en">Live</span></a>
         <a href="#/events" data-nav="events">사건 <span lang="en">Events</span></a>
-        <a href="#/companies" data-nav="companies">기업 <span lang="en">Companies</span></a>
+        <a href="#/issuers" data-nav="companies">기업 <span lang="en">Companies</span></a>
         <a href="#/calendar" data-nav="calendar">캘린더 <span lang="en">Calendar</span></a>
-        <a href="#/search" data-nav="search">검색 <span lang="en">Search</span></a>
-        <a href="#/revisions" data-nav="revisions">정정 이력 <span lang="en">Revisions</span></a>
-        <a href="#/feedback" data-nav="feedback">정정·답변 <span lang="en">Feedback</span></a>
+        <a href="#/revisions" data-nav="revisions">정정 <span lang="en">Revisions</span></a>
       </nav>
+      <form class="header-search" id="global-search-form" role="search">
+        <label class="sr-only" for="global-search">통합 검색 / Global search</label>
+        <span aria-hidden="true">⌕</span>
+        <input id="global-search" type="search" name="q" minlength="2" maxlength="100" placeholder="기업·당사자·사건 검색" autocomplete="off">
+        <kbd aria-hidden="true">/</kbd>
+      </form>
+      <button class="mobile-menu-toggle" id="mobile-menu-toggle" type="button"
+        aria-expanded="false" aria-controls="mobile-menu">메뉴 <span lang="en">Menu</span></button>
     </div>
   </header>
+  <nav class="mobile-menu" id="mobile-menu" aria-label="모바일 메뉴 / Mobile menu" hidden>
+    <a href="#/today" data-nav="today">오늘 <span lang="en">Today</span></a>
+    <a href="#/today?view=live" data-nav="live">변경 <span lang="en">Live</span></a>
+    <a href="#/events" data-nav="events">사건 <span lang="en">Events</span></a>
+    <a href="#/issuers" data-nav="companies">기업 <span lang="en">Companies</span></a>
+    <a href="#/calendar" data-nav="calendar">캘린더 <span lang="en">Calendar</span></a>
+    <a href="#/revisions" data-nav="revisions">정정 <span lang="en">Revisions</span></a>
+  </nav>
 
-  <div class="utility-bar">
-    <div class="utility-inner">
-      <p>공시와 공식 근거를 우선하는 공개 기록 / <span lang="en">Evidence-first public record</span></p>
-      <div class="utility-links" aria-label="데이터 내보내기 / Data exports">
-        <a data-api-link="/feeds/events.atom" href="/api/v1/feeds/events.atom">Atom</a>
-        <a data-api-link="/exports/events.csv" href="/api/v1/exports/events.csv">CSV</a>
-        <a data-api-link="/exports/events.json" href="/api/v1/exports/events.json">JSON</a>
-      </div>
+  <nav class="market-nav" aria-label="시장 선택 / Market selection">
+    <div class="market-nav__inner">
+      <a href="#/today?market=GLOBAL" data-market="GLOBAL">Global</a>
+      <a href="#/today?market=KR" data-market="KR">KR</a>
+      <a href="#/today?market=US" data-market="US">US</a>
+      <a href="#/today?market=JP" data-market="JP">JP</a>
+      <a href="#/today?market=GB" data-market="GB">GB</a>
+      <a href="#/today?market=CA" data-market="CA">CA</a>
+      <a href="#/today?market=AU" data-market="AU">AU</a>
+      <span class="market-nav__spacer" aria-hidden="true"></span>
+      <span class="source-health" id="global-source-coverage" role="status">
+        <span class="status-dot" aria-hidden="true"></span>
+        소스 상태 확인 중
+      </span>
+      <span class="shortcut-hint" aria-hidden="true"><kbd>J</kbd><kbd>K</kbd> 이동 · <kbd>Enter</kbd> 열기 · <kbd>Esc</kbd> 닫기</span>
     </div>
-  </div>
+  </nav>
 
   <main id="app" tabindex="-1" aria-live="off">
     <section class="loading-state" aria-label="불러오는 중 / Loading">
-      <p class="eyebrow">GOVERNANCE RECORD</p>
-      <h1>기록을 불러오고 있습니다.</h1>
-      <p lang="en">Loading verified governance records.</p>
+      <p class="eyebrow">MARKET INTELLIGENCE</p>
+      <h1>공개 기록을 불러오고 있습니다.</h1>
+      <p lang="en">Loading verified market records.</p>
     </section>
   </main>
 
   <div id="announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 
+  <div class="drawer-shell" id="event-drawer-shell" hidden>
+    <button class="drawer-backdrop" type="button" data-drawer-close aria-label="사건 상세 닫기 / Close event detail"></button>
+    <aside class="event-drawer" id="event-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" tabindex="-1">
+      <header class="drawer-header">
+        <div>
+          <p class="eyebrow">EVENT RECORD / 사건 기록</p>
+          <p class="drawer-kicker" id="drawer-kicker">공식 근거를 불러오는 중입니다.</p>
+        </div>
+        <button class="icon-button" type="button" data-drawer-close aria-label="사건 상세 닫기 / Close event detail">×</button>
+      </header>
+      <div class="drawer-content" id="drawer-content">
+        <h2 id="drawer-title">사건 상세를 불러오고 있습니다.</h2>
+      </div>
+    </aside>
+  </div>
+
+  <nav class="mobile-bottom-nav" aria-label="모바일 메뉴 / Mobile navigation">
+    <a href="#/today" data-nav="today"><span aria-hidden="true">●</span>오늘</a>
+    <a href="#/today?view=live" data-nav="live"><span aria-hidden="true">≋</span>Live</a>
+    <a href="#/search" data-nav="search"><span aria-hidden="true">⌕</span>검색</a>
+    <a href="#/calendar" data-nav="calendar"><span aria-hidden="true">□</span>캘린더</a>
+  </nav>
+
   <footer class="site-footer">
     <div>
-      <strong>BSIDE Governance Intelligence</strong>
+      <strong>BSIDE Market Intelligence</strong>
       <p>투자 권고가 아닌 사실·근거 기록입니다. 원문 제목과 본문은 번역하지 않습니다.</p>
+      <p>국가별 범위: KR·US·JP 시장 전체, GB 공식 등록부, CA·AU 링크 전용·수동 메타데이터. SEDAR+·ASX 전문은 저장하지 않습니다.</p>
       <p lang="en">A factual record, not investment advice. Source titles and text are never translated.</p>
     </div>
     <nav aria-label="보조 메뉴 / Secondary navigation">
       <a href="#/revisions">공개 정정 이력</a>
       <a href="#/feedback">정정·답변 제출</a>
-      <a data-api-link="/openapi.yaml" href="/api/v1/openapi.yaml">OpenAPI</a>
+      <a data-api-link="/feeds/events.atom" data-api-version="v2" href="/api/v2/feeds/events.atom">Atom</a>
+      <a data-api-link="/exports/events.csv" data-api-version="v2" href="/api/v2/exports/events.csv">CSV</a>
+      <a data-api-link="/exports/events.json" data-api-version="v2" href="/api/v2/exports/events.json">JSON</a>
+      <a data-api-link="/openapi.yaml" data-api-version="v2" href="/api/v2/openapi.yaml">OpenAPI</a>
       <a href="../feed.xml">기존 RSS</a>
     </nav>
   </footer>

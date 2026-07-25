@@ -107,6 +107,14 @@ x-release-gate:
     preview: Bearer preview token required; responses are private and not cacheable
     live: Public read access with short-lived caching
   schema-version: 10
+  protected-live-transition: >-
+    POST /admin/release-state never promotes preview to live. Production
+    promotion is the protected v2 POST /admin/cutover operation, which consumes
+    one short-lived authorization and changes governance_v1 and
+    global_terminal_v2 in the same transaction only after locking and
+    revalidating all six required Production Alpha connector/SourceRight pairs
+    plus every currently published document SourceRight. Document-empty
+    countries are not exempt.
 tags:
   - name: Public
   - name: Feedback
@@ -780,12 +788,15 @@ paths:
       security: [{bearerAuth: []}]
       summary: Transition the governance public release state
       description: >-
-        Allowed transitions are closed to preview, preview to live or closed,
-        and live to closed. Repeating the current state is idempotent. A stale
-        expected_version returns 409 and every state change is audited.
-        Preview-to-live also rechecks the current SourceRight, AI-use,
-        redistribution and evidence eligibility of every v2 corpus document;
-        any invalid reference fails closed.
+        Allowed transitions on this endpoint are closed to preview, preview to
+        closed, and live to closed. Repeating the current state is idempotent.
+        A stale expected_version returns 409 and every state change is audited.
+        Preview to live always returns protected_atomic_cutover_required.
+        Production promotion must use POST /api/v2/admin/cutover, which binds
+        the exact candidate SHA and release-evidence digest, revalidates the six
+        required connector/SourceRight pairs independently of document count,
+        preserves the existing published-document rights guard, and promotes v1
+        and v2 atomically.
       requestBody:
         required: true
         content:
@@ -796,7 +807,7 @@ paths:
         '400': {description: Invalid state, version or reason}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
-        '409': {description: Stale version, disallowed transition, or current_source_rights_invalid cutover guard}
+        '409': {description: Stale version, disallowed transition, or protected_atomic_cutover_required}
         '503': {$ref: '#/components/responses/GovernanceUnavailable'}
   /admin/shadow-discrepancies:
     get:
@@ -1012,6 +1023,11 @@ paths:
             schema: {$ref: '#/components/schemas/SourceRight'}
       responses:
         '200': {description: Source right upserted}
+        '409':
+          description: >-
+            The source_right_id already exists with a different source_type or
+            source_key. Source identity is immutable; register a new
+            source_right_id instead.
   /admin/editorial-revisions:
     get:
       tags: [Administration]
@@ -1646,11 +1662,15 @@ components:
         dead_lettered_at: {type: [string, 'null'], format: date-time}
     SourceRight:
       type: object
+      description: >-
+        An evidence-backed source grant. Once source_right_id exists,
+        source_type and source_key are immutable; later updates may only change
+        the grant metadata, validity, permissions, evidence, and status.
       required: [source_type, source_key, source_name, permission_scope, valid_from, ai_allowed, redistribution_allowed, status]
       properties:
         source_right_id: {$ref: '#/components/schemas/EntityId'}
-        source_type: {type: string}
-        source_key: {type: string, maxLength: 191}
+        source_type: {type: string, description: Immutable for an existing source_right_id.}
+        source_key: {type: string, maxLength: 191, description: Immutable for an existing source_right_id.}
         source_name: {type: string, maxLength: 255}
         permission_scope: {type: string}
         evidence_uri: {type: [string, 'null'], format: uri}

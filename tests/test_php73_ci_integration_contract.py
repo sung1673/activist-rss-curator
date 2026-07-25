@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import runpy
 from pathlib import Path
 
 import yaml
@@ -14,7 +15,10 @@ def test_php73_job_runs_isolated_mysql_http_staging_smoke() -> None:
     )
     job = workflow["jobs"]["php73"]
 
-    assert int(job["timeout-minutes"]) < 15
+    # The v2 schema/lifecycle smoke adds a bounded seven-minute integration
+    # stage to the existing PHP 7.3 + MySQL checks. Keep the whole job bounded
+    # without forcing a timeout shorter than its explicit child stages.
+    assert int(job["timeout-minutes"]) <= 20
     mysql = job["services"]["mysql"]
     assert mysql["image"].startswith("mysql:8.0.")
     assert mysql["env"] == {
@@ -68,4 +72,71 @@ def test_php73_fixture_contains_no_repository_secret_reference() -> None:
     assert "${{ secrets." not in fixture
     assert "activist_ci" in fixture
     assert "php73-ci-only-hmac-key" in fixture
+    assert "'release_authorizer' => array(" in fixture
+    assert (
+        "83a00f2797d3a214080e86809cb2eba45e0163581c1612ee7699055fa109ecb7"
+        in fixture
+    )
     assert "'telegram_signal_rebuild_lease_seconds' => 1" in fixture
+
+
+def test_php73_release_fixture_preserves_canonical_dart_source_right_id() -> None:
+    smoke = (ROOT / "tests" / "php73_release_state_smoke.py").read_text(encoding="utf-8")
+    identity_fixture = smoke[
+        smoke.index("def exercise_event_identity_datetime_storage") :
+        smoke.index("def exercise_dart_review_corpus")
+    ]
+
+    assert 'source_right_id = "official:dart"' in identity_fixture
+    assert "DELETE FROM ci_event_observations " in identity_fixture
+    assert "identity precision fixture must not leak into later corpus checks" in identity_fixture
+    assert "official:dart-identity-precision-smoke" not in smoke
+
+
+def test_php73_global_fixture_restores_the_latest_source_title_from_mysql() -> None:
+    smoke = (ROOT / "tests" / "php73_global_v2_smoke.py").read_text(encoding="utf-8")
+    restoration = smoke[
+        smoke.index("automated_with_mutation") :
+        smoke.index("automated_preserved")
+    ]
+
+    assert "SET e.title=d.title" in restoration
+    assert "SELECT MAX(latest.version_no)" in restoration
+    assert "BINARY e.title=BINARY d.title" in restoration
+
+
+def test_php73_global_fixture_refreshes_rights_revision_after_grant_mutation() -> None:
+    smoke = (ROOT / "tests" / "php73_global_v2_smoke.py").read_text(encoding="utf-8")
+    restored_grant = smoke[
+        smoke.index("stale_rights_revision = rights_revision") :
+        smoke.index("pagination_ids = add_byte_pagination_fixture_events")
+    ]
+
+    assert "restored_eligibility" in restored_grant
+    assert 'use": "collect"' in restored_grant
+    assert "rights_revision = restored_eligibility.get" in restored_grant
+    assert "rights_revision != stale_rights_revision" in restored_grant
+
+
+def test_lifecycle_fixture_keeps_raw_and_ack_counts_consistent() -> None:
+    module = runpy.run_path(
+        str(ROOT / "tests" / "php73_global_v2_smoke.py"),
+        run_name="php73_global_v2_smoke_contract",
+    )
+    payload = module["empty_chunk_payload"](
+        rights_revision="a" * 64,
+        idempotency_key="lifecycle-count-contract",
+        retrieved_at="2026-07-24T00:00:00Z",
+        batch_id="global-batch:" + ("b" * 64),
+        index=1,
+        count=1,
+    )
+    module["attach_single_chunk_lifecycle_observations"](
+        payload,
+        [{"observation_id": "globalobs:" + ("c" * 40)}],
+    )
+
+    envelope = payload["envelope"]
+    assert envelope["raw_count"] == 1
+    assert envelope["chunk"]["batch_raw_count"] == 1
+    assert envelope["chunk"]["batch_acknowledged_count"] == 1

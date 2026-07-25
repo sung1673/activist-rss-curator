@@ -233,6 +233,9 @@ def test_dart_parser_preserves_receipt_title_language_and_official_url() -> None
     payload = disclosure_payloads([disclosure], retrieved_at=datetime(2026, 7, 16, tzinfo=timezone.utc))
     assert payload["documents"][0]["original_language"] == "ko"
     assert payload["documents"][0]["title"] == title
+    assert payload["documents"][0]["metadata"] == {"title_provenance": "source"}
+    assert payload["events"][0]["title"] == title
+    assert payload["events"][0]["metadata"] == {"title_provenance": "source"}
 
 
 def test_official_payload_preserves_filer_as_reviewable_actor_and_event_relation() -> None:

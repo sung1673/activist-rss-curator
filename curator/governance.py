@@ -17,6 +17,8 @@ from .event_identity import (
 
 class SourceCategory(StrEnum):
     OFFICIAL_DISCLOSURE = "official_disclosure"
+    OFFICIAL_REGISTER = "official_register"
+    OFFICIAL_ISSUER = "official_issuer"
     COMPANY_STATEMENT = "company_statement"
     ACTIVIST_STATEMENT = "activist_statement"
     MEDIA_REPORT = "media_report"

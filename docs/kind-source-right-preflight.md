@@ -59,5 +59,12 @@ KIND가 실제 선택되는 `ingest-official` 및 `official-backfill`도 다음 
 일반 수집 adapter가 인증을 요구하지 않는 계약이라면 그 경로에서 `KIND_API_KEY`는
 선택값일 수 있지만, 승인 직후 수동 preflight에서는 운영 설정 누락을 허용하지 않는다.
 
+예약 `ingest-official`의 기본값은 Repository variable `KIND_CONNECTOR_MODE=off`다.
+이 상태에서는 `shadow|live`여도 DART만 실행하고 KIND endpoint·key·freshness를
+요구하지 않는다. `active`로 전환한 뒤에는 예약 실행이 KIND를 반드시 선택하며,
+endpoint·SourceRight·수집 계약 중 하나라도 없거나 실패하면 기존처럼 fail-closed한다.
+수동 `include_kind=true`와 이 문서의 preflight는 예약 토글과 별개인 명시적 검증이다.
+`off|active` 이외의 값은 수집 전에 거절한다.
+
 KIND dry-run도 실제 권한 상태를 확인한다. 설정이 하나라도 없으면 adapter contract
 검사나 네트워크 수집 전에 workflow가 종료된다.

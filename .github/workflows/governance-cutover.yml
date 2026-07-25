@@ -4,21 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       evidence_run_id:
-        description: Successful release-evidence workflow run at the current SHA
+        description: Successful Production Alpha evidence workflow run at the current SHA
         required: true
         type: string
       evidence_artifact_name:
-        description: Protected release evidence artifact
+        description: Protected immutable Production Alpha evidence artifact
         required: true
-        default: governance-release-evidence
-        type: string
-      governance_pages_run_id:
-        description: Successful daily workflow run containing the immutable governance Pages artifact
-        required: true
-        type: string
-      governance_pages_artifact_name:
-        description: Immutable governance Pages source artifact
-        required: true
+        default: global-alpha-release-evidence
         type: string
       reason:
         description: Auditable reason for the public cutover
@@ -44,10 +36,11 @@ jobs:
       name: governance-release
     outputs:
       evidence_artifact_id: ${{ steps.resolve.outputs.evidence_artifact_id }}
+      evidence_artifact_digest: ${{ steps.resolve.outputs.evidence_artifact_digest }}
       evidence_run_id: ${{ steps.resolve.outputs.evidence_run_id }}
       evidence_created_at: ${{ steps.resolve.outputs.evidence_created_at }}
-      pages_artifact_id: ${{ steps.resolve.outputs.pages_artifact_id }}
-      pages_run_id: ${{ steps.resolve.outputs.pages_run_id }}
+      pages_artifact_id: ${{ steps.pages_binding.outputs.pages_artifact_id }}
+      pages_run_id: ${{ steps.pages_binding.outputs.pages_run_id }}
     steps:
       - name: Checkout release candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,6 +57,7 @@ jobs:
           ENABLE_GOVERNANCE_SHADOW: ${{ vars.ENABLE_GOVERNANCE_SHADOW }}
           ENABLE_TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
           ENABLE_GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+          BSIDE_RELEASE_AUTHORIZER_TOKEN: ${{ secrets.BSIDE_RELEASE_AUTHORIZER_TOKEN }}
           CUTOVER_REASON: ${{ inputs.reason }}
         run: |
           set -euo pipefail
@@ -90,6 +84,10 @@ jobs:
             echo "::error::Cutover reason must contain at least eight characters."
             exit 1
           }
+          [[ ${#BSIDE_RELEASE_AUTHORIZER_TOKEN} -ge 32 ]] || {
+            echo "::error::The protected release-authorizer token is missing or too short."
+            exit 1
+          }
 
       - name: Cancel stale Pages producer runs before protected deployment
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -107,14 +105,12 @@ jobs:
               }
             }
 
-      - name: Resolve same-SHA evidence and governance artifacts
+      - name: Resolve same-SHA Production Alpha evidence artifact
         id: resolve
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
           EVIDENCE_ARTIFACT_NAME: ${{ inputs.evidence_artifact_name }}
-          PAGES_RUN_ID: ${{ inputs.governance_pages_run_id }}
-          PAGES_ARTIFACT_NAME: ${{ inputs.governance_pages_artifact_name }}
           EXPECTED_SHA: ${{ github.sha }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           CURRENT_RUN_ID: ${{ github.run_id }}
@@ -157,33 +153,28 @@ jobs:
               return {run, artifact};
             }
             try {
+              if (process.env.EVIDENCE_ARTIFACT_NAME !== "global-alpha-release-evidence") {
+                throw new Error(
+                  "Production Alpha evidence artifact name must be global-alpha-release-evidence",
+                );
+              }
               const evidence = await resolve(
                 process.env.EVIDENCE_RUN_ID,
                 process.env.EVIDENCE_ARTIFACT_NAME,
-                "release-evidence.yml",
-                "evidence",
+                "global-alpha-release-evidence.yml",
+                "Production Alpha evidence",
               );
               const ageHours = (Date.now() - Date.parse(evidence.run.data.created_at)) / 3600000;
-              if (ageHours < -0.1 || ageHours > 72) {
-                throw new Error(`evidence run age ${ageHours.toFixed(1)}h is outside the 0-72h window`);
-              }
-              const pages = await resolve(
-                process.env.PAGES_RUN_ID,
-                process.env.PAGES_ARTIFACT_NAME,
-                "daily.yml",
-                "governance Pages",
-              );
-              const expectedPagesArtifactName = `pages-${pages.run.data.id}-${pages.run.data.run_attempt}`;
-              if (process.env.PAGES_ARTIFACT_NAME !== expectedPagesArtifactName) {
-                throw new Error(
-                  `governance Pages artifact name must be exactly ${expectedPagesArtifactName}`,
-                );
+              if (ageHours < -0.1 || ageHours > 48) {
+                throw new Error(`Production Alpha evidence run age ${ageHours.toFixed(1)}h is outside the 0-48h window`);
               }
               core.setOutput("evidence_artifact_id", String(evidence.artifact.id));
+              core.setOutput(
+                "evidence_artifact_digest",
+                (evidence.artifact.digest || "").toLowerCase(),
+              );
               core.setOutput("evidence_run_id", String(evidence.run.data.id));
               core.setOutput("evidence_created_at", evidence.run.data.created_at);
-              core.setOutput("pages_artifact_id", String(pages.artifact.id));
-              core.setOutput("pages_run_id", String(pages.run.data.id));
             } catch (error) {
               core.setFailed(error instanceof Error ? error.message : String(error));
             }
@@ -210,15 +201,108 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ steps.resolve.outputs.evidence_run_id }}
           digest-mismatch: error
+          merge-multiple: true
+
+      - name: Resolve evidence-bound daily Pages artifact
+        id: pages_binding
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        with:
+          script: |
+            const fs = require("fs");
+            const {owner, repo} = context.repo;
+            const stable = (value) => {
+              if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+              if (value && typeof value === "object") {
+                return `{${Object.keys(value).sort().map(
+                  (key) => `${JSON.stringify(key)}:${stable(value[key])}`,
+                ).join(",")}}`;
+              }
+              return JSON.stringify(value);
+            };
+            const binding = JSON.parse(
+              fs.readFileSync("evidence/pages-artifact-identity.json", "utf8"),
+            );
+            const report = JSON.parse(
+              fs.readFileSync("evidence/production-alpha-release-report.json", "utf8"),
+            );
+            const provenance = JSON.parse(
+              fs.readFileSync("evidence/artifact-provenance.json", "utf8"),
+            );
+            if (
+              binding.schema_version !== 1 ||
+              binding.kind !== "bside-global-alpha-pages-artifact-binding" ||
+              binding.code_revision !== process.env.EXPECTED_SHA.toLowerCase() ||
+              binding.producer_workflow !== ".github/workflows/daily.yml" ||
+              !Number.isInteger(binding.producer_run_id) ||
+              binding.producer_run_id < 1 ||
+              !Number.isInteger(binding.producer_run_attempt) ||
+              binding.producer_run_attempt < 1 ||
+              !Number.isInteger(binding.artifact_id) ||
+              binding.artifact_id < 1 ||
+              !/^sha256:[0-9a-f]{64}$/.test(binding.artifact_digest || "") ||
+              binding.artifact_name !==
+                `pages-${binding.producer_run_id}-${binding.producer_run_attempt}`
+            ) {
+              core.setFailed("Production Alpha evidence has an invalid daily Pages binding");
+              return;
+            }
+            if (
+              stable(report.pages_artifact) !== stable(binding) ||
+              stable(provenance.pages_artifact) !== stable(binding)
+            ) {
+              core.setFailed("Release report and provenance do not agree on the exact daily Pages artifact");
+              return;
+            }
+            const runResponse = await github.rest.actions.getWorkflowRun({
+              owner,
+              repo,
+              run_id: binding.producer_run_id,
+            });
+            const run = runResponse.data;
+            if (
+              run.conclusion !== "success" ||
+              (run.head_sha || "").toLowerCase() !== process.env.EXPECTED_SHA.toLowerCase() ||
+              run.head_branch !== process.env.DEFAULT_BRANCH ||
+              run.path !== binding.producer_workflow ||
+              run.run_attempt !== binding.producer_run_attempt
+            ) {
+              core.setFailed("Evidence-bound daily Pages run no longer matches its immutable provenance");
+              return;
+            }
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner, repo, run_id: run.id, per_page: 100},
+            );
+            const matches = artifacts.filter(
+              (item) =>
+                item.id === binding.artifact_id &&
+                item.name === binding.artifact_name &&
+                !item.expired,
+            );
+            if (
+              matches.length !== 1 ||
+              (matches[0].digest || "").toLowerCase() !== binding.artifact_digest
+            ) {
+              core.setFailed("Only the exact evidence-bound daily Pages artifact may be cut over");
+              return;
+            }
+            core.setOutput("pages_artifact_id", String(binding.artifact_id));
+            core.setOutput("pages_run_id", String(binding.producer_run_id));
+            core.setOutput("pages_artifact_name", binding.artifact_name);
+            core.setOutput("pages_artifact_digest", binding.artifact_digest);
 
       - name: Download immutable governance Pages source
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          artifact-ids: ${{ steps.resolve.outputs.pages_artifact_id }}
+          artifact-ids: ${{ steps.pages_binding.outputs.pages_artifact_id }}
           path: candidate-pages
           github-token: ${{ github.token }}
-          run-id: ${{ steps.resolve.outputs.pages_run_id }}
+          run-id: ${{ steps.pages_binding.outputs.pages_run_id }}
           digest-mismatch: error
+          merge-multiple: true
 
       - name: Download rolling legacy recovery bundle
         if: steps.legacy_recovery.outputs.mode == 'carry'
@@ -287,6 +371,15 @@ jobs:
             --expected-web-base "$BSIDE_PUBLIC_WEB_URL" \
             --expected-build-sha "$GITHUB_SHA"
 
+      - name: Verify evidence-bound full-site and terminal content identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m curator.global_alpha_pages_identity verify \
+            --site candidate-pages \
+            --binding evidence/pages-artifact-identity.json \
+            --expected-revision "$GITHUB_SHA"
+
       - name: Prepare or verify rolling legacy recovery bundle
         id: recovery_bundle
         shell: bash
@@ -342,19 +435,52 @@ jobs:
             --expected-source-code-revision "$LEGACY_CODE_REVISION" \
             --expected-source-artifact-digest "$LEGACY_ARTIFACT_DIGEST"
 
-      - name: Evaluate all six release evidence files
-        run: >-
-          python -m curator.release_gate
-          --shadow evidence/shadow.jsonl
-          --operations evidence/operations.jsonl
-          --performance evidence/performance.jsonl
-          --benchmark evidence/benchmark.json
-          --usability evidence/usability.json
-          --approval evidence/release-approval.json
-          --expected-revision ${{ github.sha }}
-          --evidence-as-of ${{ steps.resolve.outputs.evidence_created_at }}
-          --output release-report/release-gate.json
-          --shadow-output release-report/shadow-comparison.json
+      - name: Evaluate immutable Production Alpha evidence
+        shell: bash
+        env:
+          EVIDENCE_RUN_CREATED_AT: ${{ steps.resolve.outputs.evidence_created_at }}
+        run: |
+          set -euo pipefail
+          test "$(jq -r '.kind' evidence/production-alpha-release-report.json)" = \
+            "bside-global-production-alpha-release-report"
+          test "$(jq -r '.release_tier' evidence/production-alpha-release-report.json)" = \
+            "production-alpha"
+          test "$(jq -r '.ga_certification_claimed' evidence/production-alpha-release-report.json)" = \
+            "false"
+          evidence_as_of="$(jq -er '.evidence_as_of' \
+            evidence/production-alpha-release-report.json)"
+          observation_ended_at="$(jq -er '.observation.ended_at' \
+            evidence/production-alpha-release-report.json)"
+          now_epoch="$(date -u +%s)"
+          for evidence_time in \
+            "$EVIDENCE_RUN_CREATED_AT" "$evidence_as_of" "$observation_ended_at"; do
+            evidence_epoch="$(date -u -d "$evidence_time" +%s)" || {
+              echo "::error::Production Alpha evidence has an invalid timestamp."
+              exit 1
+            }
+            evidence_age="$((now_epoch - evidence_epoch))"
+            [[ "$evidence_age" -ge -60 && "$evidence_age" -le 3600 ]] || {
+              echo "::error::Production Alpha evidence creation/cutoff is outside the 0-60 minute cutover window."
+              exit 1
+            }
+          done
+          python -m curator.global_alpha_release_gate evaluate \
+            --observations evidence/observations.jsonl \
+            --pages-artifact-identity evidence/pages-artifact-identity.json \
+            --connector-idempotency evidence/connector-idempotency.json \
+            --human-review evidence/human-review.json \
+            --content-integrity evidence/content-integrity.json \
+            --experience evidence/experience.json \
+            --approval evidence/approval.json \
+            --expected-revision "$GITHUB_SHA" \
+            --evidence-as-of "$evidence_as_of" \
+            --output release-report/production-alpha-release-report.json
+          cmp --silent \
+            evidence/production-alpha-release-report.json \
+            release-report/production-alpha-release-report.json || {
+            echo "::error::Production Alpha report did not reproduce byte-for-byte."
+            exit 1
+          }
 
       - name: Preserve protected cutover validation
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -372,8 +498,130 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-  deploy_pages:
+  preflight:
     needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: governance-runtime
+    permissions:
+      contents: read
+    outputs:
+      v1_state_version: ${{ steps.release_states.outputs.v1_state_version }}
+      v2_state_version: ${{ steps.release_states.outputs.v2_state_version }}
+    steps:
+      - name: Require protected production configuration
+        env:
+          BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
+          GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in BSIDE_ADMIN_TOKEN GOVERNANCE_PREVIEW_TOKEN GOVERNANCE_API_BASE_URL BSIDE_PUBLIC_WEB_URL; do
+            [[ -n "${!name:-}" ]] || {
+              echo "::error::$name is required for the protected release."
+              exit 1
+            }
+          done
+          [[ "${GOVERNANCE_API_BASE_URL%/}" == */api/v1 ]] || {
+            echo "::error::GOVERNANCE_API_BASE_URL must end in /api/v1 so the independent v2 boundary is unambiguous."
+            exit 1
+          }
+
+      - name: Require v1 and v2 preview states before Pages deployment
+        id: release_states
+        env:
+          BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
+          GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          EXPECTED_V1_SCHEMA_VERSION: "10"
+          EXPECTED_V2_SCHEMA_VERSION: "11"
+        shell: bash
+        run: |
+          set -euo pipefail
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
+
+          curl --fail-with-body --silent --show-error \
+            "$v2_api/health" > preflight-v2-health.json
+          jq -e --arg revision "$GITHUB_SHA" \
+            '.ok == true and .api_version == "v2" and .code_revision == $revision' \
+            preflight-v2-health.json > /dev/null || {
+            echo "::error::The deployed v2 API files do not match the cutover Git SHA."
+            exit 1
+          }
+
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v1_api/admin/release-state" > preflight-v1-state.json
+          [[ "$(jq -r '.release_state' preflight-v1-state.json)" == "preview" ]] || {
+            echo "::error::v1 governance must already be in preview."
+            exit 1
+          }
+          [[ "$(jq -r '.schema_version' preflight-v1-state.json)" == "$EXPECTED_V1_SCHEMA_VERSION" ]] || {
+            echo "::error::v1 governance schema must be exactly $EXPECTED_V1_SCHEMA_VERSION."
+            exit 1
+          }
+          [[ "$(jq -r '.preview_auth_configured' preflight-v1-state.json)" == "true" ]] || {
+            echo "::error::v1 preview authentication is not configured."
+            exit 1
+          }
+
+          curl --fail-with-body --silent --show-error --dump-header preflight-v2-headers.txt \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v2_api/admin/release-state" > preflight-v2-state.json
+          grep -Eiq '^X-BSIDE-API-Version:[[:space:]]*v2' preflight-v2-headers.txt || {
+            echo "::error::The v2 release-state response did not identify the v2 API."
+            exit 1
+          }
+          [[ "$(jq -r '.data.release_state' preflight-v2-state.json)" == "preview" ]] || {
+            echo "::error::v2 global terminal must already be in preview."
+            exit 1
+          }
+          [[ "$(jq -r '.data.preview_auth_configured' preflight-v2-state.json)" == "true" ]] || {
+            echo "::error::v2 preview authentication is not configured."
+            exit 1
+          }
+          # The protected v2 endpoint executes v2_require_schema_version before routing.
+          # A 200 response from the schema-11 build therefore proves an exact manifest match.
+          [[ "$EXPECTED_V2_SCHEMA_VERSION" == "11" ]]
+
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $GOVERNANCE_PREVIEW_TOKEN" \
+            "$v2_api/sources/status" > preflight-v2-sources.json
+          jq -e '
+            def required: [
+              "connector:kr:dart", "connector:us:sec-edgar",
+              "connector:jp:edinet", "connector:gb:companies-house",
+              "connector:ca:issuer-ir", "connector:au:asic-register"
+            ];
+            .ok == true
+            and .data.all_required_ready == true
+            and ((.data.required_source_ready | keys | sort) == (required | sort))
+            and all(.data.required_source_ready[]; . == true)
+            and (([.data.items[].connector_id] | sort) == (required | sort))
+            and all(.data.items[];
+              .public_ready == true
+              and .public_status == "active"
+              and (.freshness_limit_minutes <= 45))
+          ' preflight-v2-sources.json > /dev/null || {
+            echo "::error::All six exact Production Alpha sources must be currently public-ready."
+            exit 1
+          }
+
+          v1_version="$(jq -r '.state_version' preflight-v1-state.json)"
+          v2_version="$(jq -r '.data.state_version' preflight-v2-state.json)"
+          [[ "$v1_version" =~ ^[0-9]+$ && "$v2_version" =~ ^[0-9]+$ ]] || {
+            echo "::error::Both release states require numeric optimistic versions."
+            exit 1
+          }
+          echo "v1_state_version=$v1_version" >> "$GITHUB_OUTPUT"
+          echo "v2_state_version=$v2_version" >> "$GITHUB_OUTPUT"
+
+  deploy_pages:
+    needs: [validate, preflight]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -455,11 +703,11 @@ jobs:
             --observed-at "$DISTRIBUTION_OBSERVED_AT"
 
   activate:
-    needs: [validate, deploy_pages]
+    needs: [validate, preflight, deploy_pages]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
-      name: governance-runtime
+      name: governance-release
     permissions:
       contents: read
     steps:
@@ -468,52 +716,35 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
-      - name: Require protected production configuration
-        env:
-          BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
-          GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
-          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
-          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          for name in BSIDE_ADMIN_TOKEN GOVERNANCE_PREVIEW_TOKEN GOVERNANCE_API_BASE_URL BSIDE_PUBLIC_WEB_URL; do
-            [[ -n "${!name:-}" ]] || {
-              echo "::error::$name is required for the protected release."
-              exit 1
-            }
-          done
-
       - name: Set up deployed-config verifier Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
-      - name: Verify protected preview release state
-        id: preview_state
+      - name: Revalidate both protected preview versions
         env:
           BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          EXPECTED_V1_VERSION: ${{ needs.preflight.outputs.v1_state_version }}
+          EXPECTED_V2_VERSION: ${{ needs.preflight.outputs.v2_state_version }}
         shell: bash
         run: |
           set -euo pipefail
-          api="${GOVERNANCE_API_BASE_URL%/}"
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
-            "$api/admin/release-state" > release-state-before.json
-          [[ "$(jq -r '.release_state' release-state-before.json)" == "preview" ]] || {
-            echo "::error::Cutover requires an already reviewed preview release state."
-            exit 1
-          }
-          [[ "$(jq -r '.preview_auth_configured' release-state-before.json)" == "true" ]] || {
-            echo "::error::Preview authentication is not configured."
-            exit 1
-          }
-          version="$(jq -r '.state_version' release-state-before.json)"
-          [[ "$version" =~ ^[0-9]+$ ]] || exit 1
-          echo "state_version=$version" >> "$GITHUB_OUTPUT"
+            "$v1_api/admin/release-state" > activation-v1-preview.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v2_api/admin/release-state" > activation-v2-preview.json
+          [[ "$(jq -r '.release_state' activation-v1-preview.json)" == "preview" ]]
+          [[ "$(jq -r '.schema_version' activation-v1-preview.json)" == "10" ]]
+          [[ "$(jq -r '.state_version' activation-v1-preview.json)" == "$EXPECTED_V1_VERSION" ]]
+          [[ "$(jq -r '.data.release_state' activation-v2-preview.json)" == "preview" ]]
+          [[ "$(jq -r '.data.state_version' activation-v2-preview.json)" == "$EXPECTED_V2_VERSION" ]]
 
-      - name: Smoke deployed root governance feed API and export
+      - name: Smoke deployed root and both preview API boundaries
         env:
           GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
@@ -522,7 +753,8 @@ jobs:
         run: |
           set -euo pipefail
           web="${BSIDE_PUBLIC_WEB_URL%/}"
-          api="${GOVERNANCE_API_BASE_URL%/}"
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
           for path in / /governance/ /feed.xml; do
             curl --fail --silent --show-error --location --retry 12 --retry-delay 5 --retry-all-errors \
               --output /dev/null "$web$path"
@@ -537,46 +769,148 @@ jobs:
             --expected-api-base "$GOVERNANCE_API_BASE_URL" \
             --expected-web-base "$BSIDE_PUBLIC_WEB_URL" \
             --expected-build-sha "$GITHUB_SHA"
-          curl --fail --silent --show-error --output /dev/null "$api/health"
-          for path in '/events?limit=1' '/exports/events.json?limit=1'; do
-            curl --fail --silent --show-error \
+          curl --fail --silent --show-error --output /dev/null "$v1_api/health"
+          curl --fail --silent --show-error --output /dev/null "$v2_api/health"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GOVERNANCE_PREVIEW_TOKEN" \
+            --output /dev/null "$v1_api/events?limit=1"
+          for path in \
+            '/briefs/latest?edition=global' \
+            '/live?limit=1' \
+            '/events?limit=1' \
+            '/sources/status' \
+            '/exports/events.json?limit=1' \
+            '/exports/events.csv?limit=1' \
+            '/feeds/events.atom?limit=1'; do
+            curl --fail-with-body --silent --show-error \
               -H "Authorization: Bearer $GOVERNANCE_PREVIEW_TOKEN" \
-              --output /dev/null "$api$path"
+              --output /dev/null "$v2_api$path"
           done
 
-      - name: Promote reviewed preview state to live
-        id: release_live
+      - name: Authorize and atomically activate both API versions
+        id: atomic_release_live
         env:
           BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
+          BSIDE_RELEASE_AUTHORIZER_TOKEN: ${{ secrets.BSIDE_RELEASE_AUTHORIZER_TOKEN }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
-          EXPECTED_VERSION: ${{ steps.preview_state.outputs.state_version }}
+          EVIDENCE_ARTIFACT_DIGEST: ${{ needs.validate.outputs.evidence_artifact_digest }}
+          EVIDENCE_RUN_ID: ${{ needs.validate.outputs.evidence_run_id }}
+          EVIDENCE_ARTIFACT_ID: ${{ needs.validate.outputs.evidence_artifact_id }}
+          EXPECTED_V1_VERSION: ${{ needs.preflight.outputs.v1_state_version }}
+          EXPECTED_V2_VERSION: ${{ needs.preflight.outputs.v2_state_version }}
           CUTOVER_REASON: ${{ inputs.reason }}
         shell: bash
         run: |
           set -euo pipefail
-          api="${GOVERNANCE_API_BASE_URL%/}"
-          payload="$(jq -nc --argjson version "$EXPECTED_VERSION" --arg reason "$CUTOVER_REASON" \
-            '{release_state:"live",expected_version:$version,reason:$reason}')"
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
+          [[ -n "$BSIDE_RELEASE_AUTHORIZER_TOKEN" ]] || {
+            echo "::error::BSIDE_RELEASE_AUTHORIZER_TOKEN is required in the protected governance-release environment."
+            exit 1
+          }
+          [[ "$EVIDENCE_ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$EVIDENCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$EVIDENCE_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$EXPECTED_V1_VERSION" =~ ^[0-9]+$ ]]
+          [[ "$EXPECTED_V2_VERSION" =~ ^[0-9]+$ ]]
+          release_nonce="$(openssl rand -hex 32)"
+          [[ "$release_nonce" =~ ^[0-9a-f]{64}$ ]]
+          echo "::add-mask::$release_nonce"
+          expires_at="$(date -u -d '+10 minutes' '+%Y-%m-%dT%H:%M:%SZ')"
+          authorization_payload="$(jq -nc \
+            --arg sha "$GITHUB_SHA" \
+            --arg digest "$EVIDENCE_ARTIFACT_DIGEST" \
+            --arg nonce "$release_nonce" \
+            --arg expires "$expires_at" \
+            --arg reason "$CUTOVER_REASON" \
+            --argjson evidence_run_id "$EVIDENCE_RUN_ID" \
+            --argjson evidence_artifact_id "$EVIDENCE_ARTIFACT_ID" \
+            --argjson v1_version "$EXPECTED_V1_VERSION" \
+            --argjson v2_version "$EXPECTED_V2_VERSION" \
+            '{candidate_sha:$sha,evidence_artifact_digest:$digest,
+              evidence_run_id:$evidence_run_id,evidence_artifact_id:$evidence_artifact_id,
+              release_nonce:$nonce,expected_v1_state_version:$v1_version,
+              expected_v2_state_version:$v2_version,expires_at:$expires,reason:$reason}')"
+          curl --fail-with-body --silent --show-error \
+            -X POST -H "Authorization: Bearer $BSIDE_RELEASE_AUTHORIZER_TOKEN" \
+            -H "Content-Type: application/json" \
+            -H "X-Request-ID: authorize-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --data "$authorization_payload" \
+            "$v2_api/admin/release-authorizations" > activation-authorization.json
+          [[ "$(jq -r '.ok' activation-authorization.json)" == "true" ]]
+          [[ "$(jq -r '.data.candidate_sha' activation-authorization.json)" == "$GITHUB_SHA" ]]
+          [[ "$(jq -r '.data.evidence_artifact_digest' activation-authorization.json)" == "$EVIDENCE_ARTIFACT_DIGEST" ]]
+          [[ "$(jq -r '.data.expected_v1_state_version' activation-authorization.json)" == "$EXPECTED_V1_VERSION" ]]
+          [[ "$(jq -r '.data.expected_v2_state_version' activation-authorization.json)" == "$EXPECTED_V2_VERSION" ]]
+          cutover_payload="$(jq -nc \
+            --arg sha "$GITHUB_SHA" \
+            --arg digest "$EVIDENCE_ARTIFACT_DIGEST" \
+            --arg nonce "$release_nonce" \
+            --arg reason "$CUTOVER_REASON" \
+            --argjson v1_version "$EXPECTED_V1_VERSION" \
+            --argjson v2_version "$EXPECTED_V2_VERSION" \
+            '{candidate_sha:$sha,evidence_artifact_digest:$digest,release_nonce:$nonce,
+              expected_v1_state_version:$v1_version,
+              expected_v2_state_version:$v2_version,reason:$reason}')"
           curl --fail-with-body --silent --show-error \
             -X POST -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
-            -H "Content-Type: application/json" -H "X-Request-ID: cutover-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-            --data "$payload" "$api/admin/release-state" > release-state-live.json
-          [[ "$(jq -r '.release_state' release-state-live.json)" == "live" ]] || exit 1
+            -H "Content-Type: application/json" \
+            -H "X-Request-ID: atomic-cutover-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --data "$cutover_payload" "$v2_api/admin/cutover" > activation-live.json
+          [[ "$(jq -r '.ok' activation-live.json)" == "true" ]]
+          [[ "$(jq -r '.data.states.governance_v1.release_state' activation-live.json)" == "live" ]]
+          [[ "$(jq -r '.data.states.global_terminal_v2.release_state' activation-live.json)" == "live" ]]
+          [[ "$(jq -r '.data.states.governance_v1.state_version' activation-live.json)" == "$((EXPECTED_V1_VERSION + 1))" ]]
+          [[ "$(jq -r '.data.states.global_terminal_v2.state_version' activation-live.json)" == "$((EXPECTED_V2_VERSION + 1))" ]]
+          [[ "$(jq -r '.data.evidence_artifact_digest' activation-live.json)" == "$EVIDENCE_ARTIFACT_DIGEST" ]]
+          unset release_nonce authorization_payload cutover_payload
 
-      - name: Smoke public live API without preview credentials
+      - name: Smoke public Production Alpha without preview credentials
         env:
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
         shell: bash
         run: |
           set -euo pipefail
-          api="${GOVERNANCE_API_BASE_URL%/}"
+          web="${BSIDE_PUBLIC_WEB_URL%/}"
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
+          for path in / /governance/ /feed.xml; do
+            curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+              --output /dev/null "$web$path"
+          done
+          curl --fail-with-body --silent --show-error \
+            --output /dev/null "$v1_api/events?limit=1"
+          curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
+            "$v2_api/sources/status" > public-v2-sources.json
+          jq -e '
+            def required: [
+              "connector:kr:dart", "connector:us:sec-edgar",
+              "connector:jp:edinet", "connector:gb:companies-house",
+              "connector:ca:issuer-ir", "connector:au:asic-register"
+            ];
+            .ok == true
+            and .data.all_required_ready == true
+            and ((.data.required_source_ready | keys | sort) == (required | sort))
+            and all(.data.required_source_ready[]; . == true)
+            and (([.data.items[].connector_id] | sort) == (required | sort))
+            and all(.data.items[];
+              .public_ready == true
+              and .public_status == "active"
+              and (.freshness_limit_minutes <= 45))
+          ' public-v2-sources.json > /dev/null || {
+            echo "::error::Post-cutover source readiness verification failed."
+            exit 1
+          }
           for path in \
+            '/briefs/latest?edition=global' \
+            '/live?limit=1' \
             '/events?limit=1' \
-            '/feeds/events.atom?limit=1' \
             '/exports/events.json?limit=1' \
-            '/exports/events.csv?limit=1'; do
+            '/exports/events.csv?limit=1' \
+            '/feeds/events.atom?limit=1'; do
             curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
-              --output /dev/null "$api$path"
+              --output /dev/null "$v2_api$path"
           done
 
       - name: Record verified governance ownership
@@ -589,9 +923,11 @@ jobs:
           [[ "$PAGES_OWNER_SNAPSHOT" == "governance" ]]
           [[ "$GOVERNANCE_PIPELINE_MODE_SNAPSHOT" == "shadow" ]]
           {
-            echo "### Governance cutover complete"
-            echo "- release state: \`live\`"
+            echo "### Governance Production Alpha cutover complete"
+            echo "- v2 global terminal release state: \`live\`"
+            echo "- v1 compatibility release state: \`live\`"
             echo "- Pages owner: \`governance\`"
+            echo "- v1 and v2 were activated in one atomic DB transaction using a protected, one-time release authorization"
             echo "- repository variables are not changed by this workflow"
             echo "- until the commands below succeed, legacy and governance scheduled deployers both remain fail-closed"
             echo "- Telegram and governance outbound delivery remained disabled"
@@ -605,7 +941,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Close governance API if any activation step fails
+      - name: Close v2 then v1 if any activation step fails
         if: failure()
         env:
           BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
@@ -613,25 +949,41 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          api="${GOVERNANCE_API_BASE_URL%/}"
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
-            "$api/admin/release-state" > release-state-activation-failed.json
-          state="$(jq -r '.release_state' release-state-activation-failed.json)"
-          if [[ "$state" != "closed" ]]; then
-            version="$(jq -r '.state_version' release-state-activation-failed.json)"
-            payload="$(jq -nc --argjson version "$version" \
+            "$v2_api/admin/release-state" > activation-failed-v2-before.json
+          v2_state="$(jq -r '.data.release_state' activation-failed-v2-before.json)"
+          v2_version="$(jq -r '.data.state_version' activation-failed-v2-before.json)"
+          if [[ "$v2_state" != "closed" ]]; then
+            payload="$(jq -nc --argjson version "$v2_version" \
+              '{release_state:"closed",expected_version:$version,reason:"Cutover activation failed; close v2 before v1 compatibility"}')"
+            curl --fail-with-body --silent --show-error \
+              -X POST -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" -H "Content-Type: application/json" \
+              -H "X-Request-ID: cutover-failed-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+              --data "$payload" "$v2_api/admin/release-state" > activation-failed-v2-closed.json
+            [[ "$(jq -r '.data.release_state' activation-failed-v2-closed.json)" == "closed" ]]
+          fi
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v1_api/admin/release-state" > activation-failed-v1-before.json
+          v1_state="$(jq -r '.release_state' activation-failed-v1-before.json)"
+          v1_version="$(jq -r '.state_version' activation-failed-v1-before.json)"
+          if [[ "$v1_state" != "closed" ]]; then
+            payload="$(jq -nc --argjson version "$v1_version" \
               '{release_state:"closed",expected_version:$version,reason:"Cutover activation failed; automatic legacy recovery started"}')"
             curl --fail-with-body --silent --show-error \
               -X POST -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" -H "Content-Type: application/json" \
-              -H "X-Request-ID: cutover-activation-failed-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-              --data "$payload" "$api/admin/release-state" > release-state-activation-closed.json
+              -H "X-Request-ID: cutover-failed-v1-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+              --data "$payload" "$v1_api/admin/release-state" > activation-failed-v1-closed.json
+            [[ "$(jq -r '.release_state' activation-failed-v1-closed.json)" == "closed" ]]
           fi
 
   recover_close:
-    needs: [validate, deploy_pages, activate]
+    needs: [validate, preflight, deploy_pages, activate]
     if: >-
-      ${{ always() && needs.validate.result == 'success' &&
+      ${{ always() && needs.validate.result == 'success' && needs.preflight.result == 'success' &&
           (needs.deploy_pages.result != 'success' || needs.activate.result != 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -658,27 +1010,49 @@ jobs:
               }
             }
 
-      - name: Close governance API before automatic legacy recovery
+      - name: Close v2 then v1 before automatic legacy recovery
         env:
           BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
         shell: bash
         run: |
           set -euo pipefail
-          api="${GOVERNANCE_API_BASE_URL%/}"
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
-            "$api/admin/release-state" > recovery-state-before.json
-          state="$(jq -r '.release_state' recovery-state-before.json)"
-          if [[ "$state" != "closed" ]]; then
-            version="$(jq -r '.state_version' recovery-state-before.json)"
-            payload="$(jq -nc --argjson version "$version" \
+            "$v2_api/admin/release-state" > recovery-v2-before.json
+          v2_state="$(jq -r '.data.release_state' recovery-v2-before.json)"
+          v2_version="$(jq -r '.data.state_version' recovery-v2-before.json)"
+          if [[ "$v2_state" != "closed" ]]; then
+            payload="$(jq -nc --argjson version "$v2_version" \
+              '{release_state:"closed",expected_version:$version,reason:"Protected cutover failed; close v2 before v1"}')"
+            curl --fail-with-body --silent --show-error \
+              -X POST -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" -H "Content-Type: application/json" \
+              -H "X-Request-ID: recovery-close-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+              --data "$payload" "$v2_api/admin/release-state" > recovery-v2-closed.json
+            [[ "$(jq -r '.data.release_state' recovery-v2-closed.json)" == "closed" ]]
+          fi
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v1_api/admin/release-state" > recovery-v1-before.json
+          v1_state="$(jq -r '.release_state' recovery-v1-before.json)"
+          v1_version="$(jq -r '.state_version' recovery-v1-before.json)"
+          if [[ "$v1_state" != "closed" ]]; then
+            payload="$(jq -nc --argjson version "$v1_version" \
               '{release_state:"closed",expected_version:$version,reason:"Protected cutover failed; restoring pinned legacy artifact"}')"
             curl --fail-with-body --silent --show-error \
               -X POST -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" -H "Content-Type: application/json" \
-              -H "X-Request-ID: cutover-recovery-close-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-              --data "$payload" "$api/admin/release-state" > recovery-state-closed.json
+              -H "X-Request-ID: recovery-close-v1-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+              --data "$payload" "$v1_api/admin/release-state" > recovery-v1-closed.json
+            [[ "$(jq -r '.release_state' recovery-v1-closed.json)" == "closed" ]]
           fi
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v2_api/admin/release-state" | jq -e '.data.release_state == "closed"'
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v1_api/admin/release-state" | jq -e '.release_state == "closed"'
 
   recover_pages:
     needs: [validate, recover_close]
@@ -750,9 +1124,9 @@ jobs:
           artifact_name: github-pages
 
   recover_owner:
-    needs: [validate, deploy_pages, activate, recover_pages]
+    needs: [validate, preflight, deploy_pages, activate, recover_pages]
     if: >-
-      ${{ always() && needs.validate.result == 'success' &&
+      ${{ always() && needs.validate.result == 'success' && needs.preflight.result == 'success' &&
           (needs.deploy_pages.result != 'success' || needs.activate.result != 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -772,24 +1146,19 @@ jobs:
             echo "::error::Pinned legacy artifact was not restored; ownership will remain fail-closed."
             exit 1
           }
-          api="${GOVERNANCE_API_BASE_URL%/}"
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
           curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
             -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
-            "$api/admin/release-state" > recovery-final-state.json
-          state="$(jq -r '.release_state' recovery-final-state.json)"
-          if [[ "$state" != "closed" ]]; then
-            version="$(jq -r '.state_version' recovery-final-state.json)"
-            payload="$(jq -nc --argjson version "$version" \
-              '{release_state:"closed",expected_version:$version,reason:"Final automatic cutover recovery close"}')"
-            curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
-              -X POST -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" -H "Content-Type: application/json" \
-              -H "X-Request-ID: cutover-recovery-final-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-              --data "$payload" "$api/admin/release-state" > recovery-final-closed.json
-            [[ "$(jq -r '.release_state' recovery-final-closed.json)" == "closed" ]]
-          fi
+            "$v2_api/admin/release-state" | jq -e '.data.release_state == "closed"'
+          curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v1_api/admin/release-state" | jq -e '.release_state == "closed"'
           {
             echo "### Automatic cutover recovery complete"
-            echo "- the pinned legacy artifact was restored and the governance API is closed"
+            echo "- the pinned legacy artifact was restored"
+            echo "- v2 global terminal and v1 compatibility APIs were verified closed"
+            echo "- recovery was a fail-closed compensating sequence, not an atomic DB transition"
             echo "- repository variables were not changed by this workflow"
             echo "- until the commands below succeed, legacy and governance scheduled deployers both remain fail-closed"
             echo ""

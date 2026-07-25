@@ -46,11 +46,33 @@ def test_all_workflows_are_valid_yaml() -> None:
         assert "jobs" in payload, path
 
 
+def test_upload_artifact_v7_uses_the_declared_digest_output_name() -> None:
+    upload_action = (
+        "actions/upload-artifact@"
+        "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+    )
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        workflow = yaml.load(text, Loader=yaml.BaseLoader)
+        for job in workflow["jobs"].values():
+            if not isinstance(job, dict):
+                continue
+            for step in job.get("steps", []):
+                if (
+                    not isinstance(step, dict)
+                    or step.get("uses") != upload_action
+                    or not isinstance(step.get("id"), str)
+                ):
+                    continue
+                step_id = step["id"]
+                assert f"steps.{step_id}.outputs.digest" not in text, (
+                    path.name,
+                    step_id,
+                )
+
+
 def test_dispatch_jobs_with_repository_secrets_use_main_only_environments() -> None:
     runtime_jobs = {
-        ("governance-cutover.yml", "activate"),
-        ("governance-cutover.yml", "recover_close"),
-        ("governance-cutover.yml", "recover_owner"),
         ("ingest-media.yml", "ingest"),
         ("ingest-official.yml", "ingest"),
         ("kind-adapter-preflight.yml", "preflight"),
@@ -220,6 +242,8 @@ def test_official_ingest_has_day_and_night_kst_schedules() -> None:
     assert "vars.GOVERNANCE_PIPELINE_MODE == 'dart_canary'" in workflow
     assert "steps.rollout.outputs.governance_pipeline_mode == 'shadow'" in workflow
     assert "steps.rollout.outputs.governance_pipeline_mode == 'live'" in workflow
+    assert "KIND_CONNECTOR_MODE: ${{ vars.KIND_CONNECTOR_MODE }}" in workflow
+    assert "steps.rollout.outputs.kind_connector_enabled == 'true'" in workflow
     assert "python -m curator.operation_mode --github-output \"$GITHUB_OUTPUT\"" in workflow
     assert "KIND_DISCLOSURE_ENDPOINT BSIDE_API_BASE_URL BSIDE_OPS_TOKEN" in workflow
     assert "DART_API_KEY ACTIVIST_API_URL ACTIVIST_API_SECRET" in workflow
@@ -257,6 +281,18 @@ def test_official_ingest_has_day_and_night_kst_schedules() -> None:
     ingest = next(
         step for step in job["steps"] if step["name"] == "Ingest selected official sources"
     )
+    expected_kind_selection = (
+        "${{ (((github.event_name == 'schedule' || "
+        "inputs.repair_expected_slot_at != '') && "
+        "(steps.rollout.outputs.governance_pipeline_mode == 'shadow' || "
+        "steps.rollout.outputs.governance_pipeline_mode == 'live') && "
+        "steps.rollout.outputs.kind_connector_enabled == 'true') || "
+        "inputs.include_kind) && '1' || '0' }}"
+    )
+    assert validation["env"]["CURATOR_ENABLE_KIND"] == expected_kind_selection
+    assert validation["env"]["CURATOR_REQUIRE_KIND"] == expected_kind_selection
+    assert ingest["env"]["CURATOR_ENABLE_KIND"] == expected_kind_selection
+    assert ingest["env"]["CURATOR_REQUIRE_KIND"] == expected_kind_selection
     claim = next(
         step
         for step in job["steps"]
@@ -544,6 +580,10 @@ def test_daily_generation_uses_requested_kst_boundary_and_has_no_delivery_job() 
     assert "TELEGRAM_ADMIN_ACCESS_TOKEN" not in workflow
     assert "python -m curator.telegram_dashboard write" not in workflow
     assert "python -m curator.governance_site" in workflow
+    assert (
+        "BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || "
+        "'https://news.bside.ai' }}"
+    ) in workflow
     assert "--output governance-pages-artifact" in workflow
     assert '--legacy-root "$LEGACY_COMPATIBILITY_ROOT"' in workflow
     assert "python -m curator.legacy_recovery_bundle prepare" in workflow
@@ -666,11 +706,13 @@ def test_daily_governance_pages_deploy_only_after_authenticated_live_state() -> 
     eligibility = next(
         step for step in steps if step["name"] == "Determine Pages deployment eligibility"
     )
-    assert eligibility["env"]["BSIDE_ADMIN_TOKEN"] == "${{ secrets.BSIDE_ADMIN_TOKEN }}"
+    assert eligibility["env"]["BSIDE_OPS_TOKEN"] == "${{ secrets.BSIDE_OPS_TOKEN }}"
+    assert "BSIDE_ADMIN_TOKEN" not in eligibility["env"]
     assert eligibility["env"]["GOVERNANCE_PIPELINE_MODE"] == (
         "${{ steps.rollout.outputs.governance_pipeline_mode }}"
     )
-    assert "/admin/release-state" in eligibility["run"]
+    assert "/ops/release-state" in eligibility["run"]
+    assert ".data.release_state" in eligibility["run"]
     assert '[[ "$release_state" == "live" ]]' in eligibility["run"]
     assert '"$GOVERNANCE_PIPELINE_MODE" == "live"' in eligibility["run"]
     assert "deploy_pages=false" in eligibility["run"]
@@ -682,6 +724,9 @@ def test_daily_governance_pages_deploy_only_after_authenticated_live_state() -> 
     assert boundary["env"]["GOVERNANCE_PIPELINE_MODE_SNAPSHOT"] == (
         "${{ steps.rollout.outputs.governance_pipeline_mode }}"
     )
+    assert boundary["env"]["BSIDE_OPS_TOKEN"] == "${{ secrets.BSIDE_OPS_TOKEN }}"
+    assert "BSIDE_ADMIN_TOKEN" not in boundary["env"]
+    assert "/ops/release-state" in boundary["run"]
     assert '"$GOVERNANCE_PIPELINE_MODE_SNAPSHOT" == "live"' in boundary["run"]
     rollback_artifact = next(step for step in steps if step["name"] == "Preserve rollback artifact")
     assert rollback_artifact["with"]["retention-days"] == "90"
@@ -1115,6 +1160,7 @@ def test_ci_type_checks_every_release_critical_governance_module() -> None:
         "curator/dart_canary_sample.py",
         "curator/dart_quota.py",
         "curator/event_identity.py",
+        "curator/global_alpha_pages_identity.py",
         "curator/governance_site.py",
         "curator/governance_site_config.py",
         "curator/label_agreement.py",
@@ -1264,9 +1310,16 @@ def test_watchdog_contract_and_issue_permission() -> None:
     )
     assert health["run"] == "python .github/scripts/watchdog.py"
     assert health["env"]["WATCHDOG_EXPECTED_OFFICIAL_SOURCES"] == (
-        "${{ steps.rollout.outputs.governance_pipeline_mode == 'dart_canary' && "
+        "${{ (steps.rollout.outputs.governance_pipeline_mode == 'dart_canary' || "
+        "steps.rollout.outputs.kind_connector_enabled != 'true') && "
         "'dart' || 'dart,kind' }}"
     )
+    rollout = next(
+        step
+        for step in payload["jobs"]["health"]["steps"]
+        if step["name"] == "Resolve fail-closed rollout mode"
+    )
+    assert rollout["env"]["KIND_CONNECTOR_MODE"] == "${{ vars.KIND_CONNECTOR_MODE }}"
     incident = next(
         step
         for step in payload["jobs"]["health"]["steps"]

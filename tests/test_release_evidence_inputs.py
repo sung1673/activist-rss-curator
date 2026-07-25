@@ -31,7 +31,7 @@ REVISION = "a" * 40
 THROUGH = date(2026, 7, 14)
 ROOT = Path(__file__).resolve().parents[1]
 AVAILABILITY_ROUTES = ("/", "/governance/", "/feed.xml", "/api/v1/health")
-WEB_VITAL_ROUTES = ("/today", "/events", "/companies", "/calendar")
+WEB_VITAL_ROUTES = ("/today", "/events", "/issuers", "/calendar")
 
 
 def _human_reports() -> dict[str, dict[str, object]]:

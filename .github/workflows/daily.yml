@@ -166,23 +166,24 @@ jobs:
           GOVERNANCE_PAGES_ENABLED: ${{ steps.rollout.outputs.governance_pages_enabled }}
           GOVERNANCE_PIPELINE_MODE: ${{ steps.rollout.outputs.governance_pipeline_mode }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
-          BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
         run: |
           set -euo pipefail
           deploy_pages=false
           release_state=not-checked
           if [[ "$REF_NAME" == "$DEFAULT_BRANCH" && "$GOVERNANCE_PAGES_ENABLED" == "true" && "$GOVERNANCE_PIPELINE_MODE" == "live" ]]; then
             release_state=unavailable
-            if [[ -z "$GOVERNANCE_API_BASE_URL" || -z "$BSIDE_ADMIN_TOKEN" ]]; then
+            if [[ -z "$GOVERNANCE_API_BASE_URL" || -z "$BSIDE_OPS_TOKEN" ]]; then
               echo "::warning::Governance Pages deployment is blocked because the protected live-state check is not configured."
             else
               api="${GOVERNANCE_API_BASE_URL%/}"
-              [[ "$api" == */api/v1 ]] || api="$api/api/v1"
+              [[ "$api" == */api/v1 ]] && api="${api%/api/v1}/api/v2"
+              [[ "$api" == */api/v2 ]] || api="$api/api/v2"
               status="$(curl --silent --show-error --output release-state-for-pages.json \
-                --write-out '%{http_code}' -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
-                "$api/admin/release-state" || true)"
+                --write-out '%{http_code}' -H "Authorization: Bearer $BSIDE_OPS_TOKEN" \
+                "$api/ops/release-state" || true)"
               if [[ "$status" == "200" ]]; then
-                release_state="$(jq -r '.release_state // "invalid"' release-state-for-pages.json)"
+                release_state="$(jq -r '.data.release_state // "invalid"' release-state-for-pages.json)"
                 if [[ "$release_state" == "live" ]]; then
                   deploy_pages=true
                 else
@@ -220,6 +221,7 @@ jobs:
       - name: Configure public governance UI
         env:
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
           ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
         run: python -m curator.governance_ui --root .
 
@@ -249,7 +251,7 @@ jobs:
           PAGES_OWNER_SNAPSHOT: ${{ vars.PAGES_OWNER }}
           GOVERNANCE_PIPELINE_MODE_SNAPSHOT: ${{ steps.rollout.outputs.governance_pipeline_mode }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
-          BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -262,10 +264,11 @@ jobs:
             exit 1
           }
           api="${GOVERNANCE_API_BASE_URL%/}"
-          [[ "$api" == */api/v1 ]] || api="$api/api/v1"
+          [[ "$api" == */api/v1 ]] && api="${api%/api/v1}/api/v2"
+          [[ "$api" == */api/v2 ]] || api="$api/api/v2"
           state="$(curl --fail-with-body --silent --show-error \
-            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
-            "$api/admin/release-state" | jq -r '.release_state')"
+            -H "Authorization: Bearer $BSIDE_OPS_TOKEN" \
+            "$api/ops/release-state" | jq -r '.data.release_state')"
           [[ "$state" == "live" ]] || {
             echo "::error::Governance release state changed to $state; deployment is blocked."
             exit 1
