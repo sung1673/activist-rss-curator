@@ -32,6 +32,21 @@ from curator.global_connectors import (  # noqa: E402
 )
 
 
+def _deployed_code_revision() -> str:
+    manifest_path = (
+        REPOSITORY_ROOT / "deploy" / "activist" / "deployment-manifest.json"
+    )
+    if not manifest_path.is_file():
+        return "a" * 40
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    revision = str(manifest.get("code_revision", "")).strip().lower()
+    if len(revision) != 40 or any(
+        character not in "0123456789abcdef" for character in revision
+    ):
+        raise RuntimeError("deployment manifest code_revision is invalid")
+    return revision
+
+
 ADMIN_TOKEN = "php73-ci-admin-token-00000000000000000000"
 EDITOR_TOKEN = "php73-ci-editor-token-0000000000000000000"
 OPS_TOKEN = "php73-ci-ops-token-000000000000000000000"
@@ -40,7 +55,7 @@ PREVIEW_TOKEN = "php73-ci-preview-token-000000000000000000"
 MYSQL_ROOT_PASSWORD = "activist_ci_root_password"
 DATABASE = "activist_ci"
 TABLE_PREFIX = "ci_"
-CODE_REVISION = "a" * 40
+CODE_REVISION = _deployed_code_revision()
 EVIDENCE_ARTIFACT_DIGEST = "sha256:" + ("b" * 64)
 SEC_RIGHT_ID = "official:sec-edgar"
 SEC_CONNECTOR_ID = "connector:us:sec-edgar"

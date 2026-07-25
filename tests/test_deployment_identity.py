@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import runpy
 from pathlib import Path
 
 import pytest
@@ -166,6 +167,28 @@ def test_ci_builds_and_tamper_tests_the_checked_out_revision() -> None:
     assert "one-byte source change" in workflow
     assert "overwrote a conflicting byte checksum" in workflow
     assert 'ln -s "$RUNNER_TEMP/migrations-real" deploy/activist/migrations' in workflow
+
+
+def test_php_smoke_binds_release_data_to_the_built_manifest(
+    tmp_path: Path,
+) -> None:
+    smoke_path = ROOT / "tests" / "php73_global_v2_smoke.py"
+    namespace = runpy.run_path(str(smoke_path))
+    revision_loader = namespace["_deployed_code_revision"]
+    revision_loader.__globals__["REPOSITORY_ROOT"] = tmp_path
+    manifest_path = (
+        tmp_path / "deploy" / "activist" / "deployment-manifest.json"
+    )
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(
+        json.dumps({"schema_version": 1, "code_revision": REVISION}),
+        encoding="utf-8",
+    )
+
+    assert revision_loader() == REVISION
+    smoke = smoke_path.read_text(encoding="utf-8")
+    assert "CODE_REVISION = _deployed_code_revision()" in smoke
+    assert '"candidate_sha": CODE_REVISION' in smoke
 
 
 def test_cutover_preflight_requires_the_current_api_revision() -> None:
