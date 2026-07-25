@@ -69,6 +69,7 @@ jobs:
         env:
           PAGES_OWNER: ${{ vars.PAGES_OWNER }}
           GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          KIND_CONNECTOR_MODE: ${{ vars.KIND_CONNECTOR_MODE }}
           ENABLE_PAGES: ${{ vars.ENABLE_PAGES }}
           ENABLE_GOVERNANCE_PAGES: ${{ vars.ENABLE_GOVERNANCE_PAGES }}
           ENABLE_GOVERNANCE_SHADOW: ${{ vars.ENABLE_GOVERNANCE_SHADOW }}
@@ -103,7 +104,7 @@ jobs:
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
           WATCHDOG_MAX_INGEST_AGE_MINUTES: "90"
           WATCHDOG_GOVERNANCE_PAGES: ${{ steps.rollout.outputs.scheduled_governance_enabled }}
-          WATCHDOG_EXPECTED_OFFICIAL_SOURCES: ${{ steps.rollout.outputs.governance_pipeline_mode == 'dart_canary' && 'dart' || 'dart,kind' }}
+          WATCHDOG_EXPECTED_OFFICIAL_SOURCES: ${{ (steps.rollout.outputs.governance_pipeline_mode == 'dart_canary' || steps.rollout.outputs.kind_connector_enabled != 'true') && 'dart' || 'dart,kind' }}
         run: python .github/scripts/watchdog.py
 
       - name: Create, update, or resolve the incident issue

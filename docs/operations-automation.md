@@ -7,11 +7,13 @@
 | 파일 | 역할 | 주기 |
 |---|---|---|
 | `ci.yml` | Python 테스트, PHP 구문 검사, 린트·타입·의존성 보안 검사 | PR, `main` 코드 push |
-| `ingest-official.yml` | DART·KIND 공식 공시 자동 수집 | KST 07:00~23:45 15분, KST 00:00~06:30 30분 |
+| `ingest-official.yml` | DART 공식 공시 자동 수집. `KIND_CONNECTOR_MODE=active`에서만 KIND도 같은 예약 실행에 포함 | KST 07:00~23:45 15분, KST 00:00~06:30 30분 |
 | `ingest-global.yml` | SEC EDGAR Latest Filings Atom 당일 증분+일일 인덱스 대조·EDINET·Companies House를 v2 비공개 검수 큐에 적재 | 매시 17분·47분 |
 | `ingest-selected-markets.yml` | 캐나다·호주 수동 승인 공식 링크 metadata를 URL 요청·본문 저장 없이 `link-only`로 v2 검수 큐에 적재 | 매시 07분·37분 |
 | `global-brief.yml` | 사람 검수용 후보 artifact 생성, 승인된 동일 SHA payload 수동 발행 | KST 05:45 후보 생성, 발행은 수동 |
-| `global-alpha-watchdog.yml` | Production Alpha API·release state·source freshness·공개 루트 관측 | 5분 |
+| `global-alpha-review-candidates.yml` | 실제 Preview API에서 무라벨 60사건·120문서쌍·Top 5 검수 artifact 생성 | 기본 브랜치에서 운영자 수동 실행 |
+| `global-alpha-preview-smoke.yml` | 실제 PHP v2·운영 DB의 Today·사건·발행사·검색·캘린더와 3개 viewport 증빙 검증 | Preview 배포 뒤 운영자 수동 실행 |
+| `global-alpha-watchdog.yml` | `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`인 Production Alpha의 API·release state·source freshness·공개 루트 관측 | 5분 |
 | `kind-adapter-preflight.yml` | 운영 SourceRight 확인 후 KIND adapter 실제 계약을 1회 검증 | 승인 후 운영자 수동 실행만 |
 | `ingest-media.yml` | 허가된 Telegram·뉴스 발견 큐 수집 | 30분 |
 | `resolve-links.yml` | Google News 발견 URL 후처리 | 1시간 |
@@ -31,7 +33,7 @@
 
 GitHub cron은 UTC로 해석된다. 일일 생성은 `45 20 * * *`(KST 05:45), 발송은 `5 21 * * *`(KST 06:05)이다. GitHub Actions 예약 실행은 지연될 수 있으므로 애플리케이션은 실행 시각이 아니라 DB cursor와 idempotency key를 기준으로 처리해야 한다.
 
-모바일 운영 성능 수집은 KST 23:00에 시작해 다음 날 KST 00:35 evidence input 수집 전에 완료한다. `/today`, `/events`, `/companies`, `/calendar`를 각각 5회 실제 Chromium journey로 측정하며, 상세 fail-closed 계약은 [운영 모바일 Web Vitals 수집](web-vitals-production-probe.md)을 따른다.
+모바일 운영 성능 수집은 KST 23:00에 시작해 다음 날 KST 00:35 evidence input 수집 전에 완료한다. `/today`, `/events`, `/issuers`, `/calendar`를 각각 5회 실제 Chromium journey로 측정하며, 상세 fail-closed 계약은 [운영 모바일 Web Vitals 수집](web-vitals-production-probe.md)을 따른다.
 
 배포 workflow는 Pages/API 결과를 `/api/v1/ops/web-distribution-observations`에 최대 50건씩 적재한다. full 40자 build SHA와 GitHub run ID·run attempt·target 조합을 사용하고, 같은 조합의 재전송만 멱등이다. 실패 관측에는 실제 탐지 시각을 기록하며 시도 0건을 성공으로 계산하지 않는다. KIND 지연은 공시 문서의 실제 `published_at`과 최초 `EventObservation.first_observed_at`이 모두 있는 경우에만 서버가 계산한다. 날짜만 있는 자료에 자정을 합성하지 않는다. 실제 관측이 0건인 무공시일만 표본 0·지연 `null`의 N/A를 허용하고, 최근 7일 창 전체에는 실제 KIND 관측과 완전한 시각 표본이 1건 이상 있어야 한다.
 
@@ -41,7 +43,7 @@ GitHub cron은 UTC로 해석된다. 일일 생성은 `45 20 * * *`(KST 05:45), �
 
 - `ACTIVIST_API_URL`, `ACTIVIST_API_SECRET`: 서명된 운영 API
 - `DART_API_KEY`: OpenDART 수집
-- `KIND_API_KEY`: 승인 직후 수동 adapter preflight에서는 필수. 일반 수집에서는 승인된 adapter 인증 계약에 따라 사용
+- `KIND_API_KEY`: 승인 직후 수동 adapter preflight에서는 필수. 일반 예약 수집에서는 `KIND_CONNECTOR_MODE=active`이고 승인된 adapter가 인증을 요구할 때만 사용
 - `CURATOR_FEEDS`: 비공개 보조 발견 피드. 운영 범위 정책이 켜져 있으므로 단순 URL 문자열이 아니라 `name`, `url`, `scope`, `enabled`를 담은 JSON 배열로 등록한다. 세부 형식은 [미디어 발견 피드 범위 정책](media-source-scope-policy.md)을 따른다.
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`: 등록하지 않는다. 과거 값이 남아 있으면 삭제하며, 현재 코드와 workflow에서는 outbound Telegram을 재활성화할 수 없다.
 - `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING`: 허가 채널 수집
@@ -57,7 +59,9 @@ GitHub cron은 UTC로 해석된다. 일일 생성은 `45 20 * * *`(KST 05:45), �
 Repository variable의 단일 기준:
 
 - `PAGES_OWNER=legacy|governance`: 한 번에 하나의 Pages 소유자만 선택
-- `GOVERNANCE_PIPELINE_MODE=off|dart_canary|shadow|live`: 공식 수집과 후보 파이프라인 단계. KIND 없이 허용되는 값은 `dart_canary`까지이며 정식 증빙·공개는 `shadow|live`에서 KIND를 필수로 요구
+- `GOVERNANCE_PIPELINE_MODE=off|dart_canary|shadow|live`: 공식 수집과 후보 파이프라인 단계
+- `KIND_CONNECTOR_MODE=off|active`: 기본 `off`. `off`에서는 `shadow|live` 예약 실행도 DART만 수집하고 일반 watchdog도 KIND 설정·freshness를 요구하지 않는다. `active`에서는 기존처럼 KIND endpoint·SourceRight·수집 최신성을 fail-closed로 요구한다. 수동 `include_kind=true`와 `kind-adapter-preflight.yml`은 이 예약 토글과 별개인 명시적 검증 경로다.
+- `GLOBAL_ALPHA_OBSERVATION_ENABLED=false|true`: 기본 `false`. `false` 또는 빈 값에서는 5분 Alpha 관측 job을 만들지 않는다. 소스·preview·동일 SHA가 준비된 뒤 `true`로 바꾸며, 다른 값은 관측 run을 실패시킨다.
 - `ENABLE_TELEGRAM_DELIVERY=false`, `ENABLE_GOVERNANCE_DELIVERY=false`: 영구 비활성. `true`이면 workflow가 fail-closed
 - `ACTIVIST_PUBLIC_API_URL`: 브라우저에서 읽는 공개 API URL
 - `GOVERNANCE_API_BASE_URL`: 공개 거버넌스 UI의 `/api/v1` 기준 URL. 비어 있으면 `ACTIVIST_PUBLIC_API_URL` 뒤에 `/api/v1`을 붙여 사용
@@ -106,7 +110,7 @@ Production Alpha의 배포·관측 분모는 Pages/API뿐이다. Telegram outbou
 
 - `ENABLE_LEGACY_PIPELINE=true`: 90일 호환 기간 동안 기존 수집·Pages workflow 유지
 - `ENABLE_PAGES=true`: 기존 workflow의 Pages artifact 배포 유지
-- `GOVERNANCE_PIPELINE_MODE=off`: 신규 governance 예약 실행 차단. DART canary는 `dart_canary`, KIND가 준비된 비교 운영은 `shadow`, 공개 후에는 `live`
+- `GOVERNANCE_PIPELINE_MODE=off`: 신규 governance 예약 실행 차단. DART canary는 `dart_canary`, 비교 운영은 `shadow`, 공개 후에는 `live`. KIND는 이 단계와 분리된 `KIND_CONNECTOR_MODE`로만 예약 활성화
 - `PAGES_OWNER=legacy`: 기존 Pages만 배포. 보호된 전환 직전 `governance`로 바꾸며 workflow가 직접 Repository Variables를 수정하지 않음
 
 거버넌스 v1 공개 데이터 경로는 repository variable이 아니라 MySQL의 서버 측 release state로 최종 제어한다. migration 001~010을 순서대로 적용한 요구 schema version은 10이며, 공개 상태는 006이 만든 `closed`를 유지한다. 서버는 최댓값이 아니라 1~10의 정확한 버전·이름·체크섬 manifest를 검증한다. DART canary와 백필은 `closed`에서도 HMAC writer로 적재할 수 있지만 API 안내 루트를 포함한 공개 데이터 조회는 503이다. 검수자는 관리자가 `preview`로 전환한 동안에만 preview Bearer token으로 접근하고, 실제 승인 전에는 `closed`로 되돌린다. v1·v2 `POST /admin/release-state`는 `preview → live`를 409 `protected_atomic_cutover_required`로 거절한다. `live` 승격은 아래 보호된 v2 원자 전환만 사용하고, `live → closed` 긴급 차단은 각 관리자 API의 optimistic version과 감사 로그를 사용한다.
@@ -126,7 +130,7 @@ Alpha evidence workflow는 exact `daily.yml` run의 `pages-<run_id>-<attempt>` a
 
 승인은 일회용이며 새 승인 발급 시 이전 미사용 승인은 철회된다. 만료는 410, replay·잘못된 SHA·digest·state version·이미 소비된 nonce는 409로 거절한다. 전환 도중 오류가 나면 두 상태 모두 바뀌지 않는다. 공개 뒤 장애가 발생하면 기존 절차대로 v1·v2를 `closed`로 긴급 차단하고 legacy artifact를 복구한다. 이 롤백은 소비된 승인을 되살리지 않으며 재전환에는 새 증빙·새 nonce·새 승인이 필요하다.
 
-수동 `ingest-official`과 backfill은 `GOVERNANCE_PIPELINE_MODE=dart_canary`, `include_kind=false`로 DART-only smoke를 실행할 수 있다. `shadow|live` 예약 실행은 항상 KIND를 필수로 요구하므로 검증된 어댑터가 없으면 성공한 것처럼 건너뛰지 않고 실패한다.
+예약 `ingest-official`은 `KIND_CONNECTOR_MODE=off`가 기본이므로 `shadow|live`에서도 DART-only로 실행된다. `active`로 전환하면 KIND 설정·SourceRight·수집 실패를 건너뛰지 않고 기존처럼 전체 workflow를 실패시킨다. 수동 실행의 `include_kind=true`는 토글이 `off`여도 KIND를 명시적으로 검증하며, `include_kind=false`는 DART-only smoke다.
 
 모든 DART list·회사 master HTTP 시도는 전역 MySQL 쿼터 ledger의 `POST /api/v1/ops/dart-quota` consume ACK를 먼저 받아야 한다. 서버 기준 KST 날짜, 10,000건 한도, `used_count + remaining_count = limit_count`와 attempt ID 일치를 클라이언트가 검증하지 못하면 외부 요청을 보내지 않는다. OpenDART `020`은 같은 attempt로 `block_020`을 기록하며 그 KST 날짜의 다른 workflow도 즉시 멈춘다. 사용하지 않은 예약량을 반환하거나 완료 처리하는 별도 모델은 두지 않는다.
 
@@ -192,7 +196,7 @@ PHP 배포 백업은 공개 파일 경로가 아니라 외부 접근이 차단�
 
 Watchdog은 `/api/v1/ops/health`의 공식 수집 최신성을 확인하고 실제 공개 route를 KST 매시 01·06·11·16·21·26·31·36·41·46·51·56분에 측정해 `/api/v1/ops/availability-observations`에 적재한다. release evidence는 `watchdog-v1-kst-5m-minute01`의 route당 일 288개 slot을 raw `observed_at`으로 재구성하며, 4개 route 일 1,152개와 7일 8,064개가 모두 덮이지 않으면 실패한다. 중복 관측은 missing을 상쇄하지 않고, interval p95와 일 경계 포함 최대 공백이 모두 600초 이하여야 한다. Telegram outbox는 발송이 영구 비활성인 현재 release gate의 분모가 아니다.
 
-Production Alpha의 `global-alpha-watchdog.yml`은 `BSIDE_OPS_TOKEN`으로 읽기 전용 `GET /api/v2/ops/release-state`를 호출한다. 이 job에는 `BSIDE_ADMIN_TOKEN`과 `BSIDE_RELEASE_AUTHORIZER_TOKEN`을 주입하지 않는다. 따라서 주기 관측 코드가 탈취되거나 오작동해도 release state 변경이나 일회용 공개 승인 발급 권한을 갖지 않는다.
+Production Alpha의 `global-alpha-watchdog.yml`은 `GOVERNANCE_PIPELINE_MODE=shadow|live`와 `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`가 모두 충족될 때만 `BSIDE_OPS_TOKEN`으로 읽기 전용 `GET /api/v2/ops/release-state`를 호출한다. 빈 값과 `false`는 관측 시작 전 안전한 기본값이며, `true|false` 이외의 값은 fail-closed한다. 이 job에는 `BSIDE_ADMIN_TOKEN`과 `BSIDE_RELEASE_AUTHORIZER_TOKEN`을 주입하지 않는다. 따라서 주기 관측 코드가 탈취되거나 오작동해도 release state 변경이나 일회용 공개 승인 발급 권한을 갖지 않는다.
 
 - 마지막 정상 수집이 90분을 넘으면 incident
 - 루트, feed, 활성화된 governance Pages 또는 API health 중 하나라도 실패하면 incident

@@ -12,7 +12,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "web-vitals.yml"
 
 def test_probe_uses_real_mobile_event_timing_without_secret_urls() -> None:
     source = SCRIPT.read_text(encoding="utf-8")
-    assert 'Object.freeze(["/today", "/events", "/companies", "/calendar"])' in source
+    assert 'Object.freeze(["/today", "/events", "/issuers", "/calendar"])' in source
     assert "RUNS_PER_ROUTE = 5" in source
     assert 'devices["Pixel 5"]' in source
     assert 'install("largest-contentful-paint"' in source

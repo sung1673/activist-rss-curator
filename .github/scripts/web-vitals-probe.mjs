@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { chromium, devices } from "playwright";
 
 
-export const ROUTE_TEMPLATES = Object.freeze(["/today", "/events", "/companies", "/calendar"]);
+export const ROUTE_TEMPLATES = Object.freeze(["/today", "/events", "/issuers", "/calendar"]);
 export const METRIC_NAMES = Object.freeze(["LCP", "INP", "CLS"]);
 export const RUNS_PER_ROUTE = 5;
 export const MAX_API_BATCH = 50;
@@ -252,7 +252,7 @@ function interactionDestination(routeTemplate) {
   const destinations = {
     "/today": "events",
     "/events": "companies",
-    "/companies": "calendar",
+    "/issuers": "calendar",
     "/calendar": "today",
   };
   return destinations[routeTemplate];

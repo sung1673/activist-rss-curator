@@ -605,6 +605,12 @@ def test_workflow_is_default_branch_only_non_cancelling_and_preserves_evidence()
     assert "github.ref_name == github.event.repository.default_branch" in text
     assert "vars.GOVERNANCE_PIPELINE_MODE == 'shadow'" in text
     assert "vars.GOVERNANCE_PIPELINE_MODE == 'live'" in text
+    assert "vars.GLOBAL_ALPHA_OBSERVATION_ENABLED == 'true'" in text
+    assert "vars.GLOBAL_ALPHA_OBSERVATION_ENABLED != 'false'" in text
+    assert "GLOBAL_ALPHA_OBSERVATION_ENABLED: ${{ vars.GLOBAL_ALPHA_OBSERVATION_ENABLED }}" in text
+    assert "KIND_CONNECTOR_MODE: ${{ vars.KIND_CONNECTOR_MODE }}" in text
+    assert "python -m curator.operation_mode --github-output \"$GITHUB_OUTPUT\"" in text
+    assert "steps.rollout.outputs.global_alpha_observation_enabled == 'true'" in text
     assert "timeout-minutes: 8" in text
     assert "cancel-in-progress: false" in text
     assert "if: always() && steps.initialize.outcome == 'success'" in text

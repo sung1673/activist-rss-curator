@@ -155,6 +155,7 @@ jobs:
         env:
           PAGES_OWNER: ${{ vars.PAGES_OWNER }}
           GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          KIND_CONNECTOR_MODE: ${{ vars.KIND_CONNECTOR_MODE }}
           ENABLE_PAGES: ${{ vars.ENABLE_PAGES }}
           ENABLE_GOVERNANCE_PAGES: ${{ vars.ENABLE_GOVERNANCE_PAGES }}
           ENABLE_GOVERNANCE_SHADOW: ${{ vars.ENABLE_GOVERNANCE_SHADOW }}
@@ -168,8 +169,8 @@ jobs:
           DART_SYNC_COMPANY_MASTER: ${{ github.event.schedule == '40 21 * * 0' || inputs.sync_company_master }}
           KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
           KIND_API_KEY: ${{ secrets.KIND_API_KEY }}
-          CURATOR_ENABLE_KIND: ${{ ((github.event_name == 'schedule' || inputs.repair_expected_slot_at != '') && (steps.rollout.outputs.governance_pipeline_mode == 'shadow' || steps.rollout.outputs.governance_pipeline_mode == 'live')) && '1' || inputs.include_kind && '1' || '0' }}
-          CURATOR_REQUIRE_KIND: ${{ ((github.event_name == 'schedule' || inputs.repair_expected_slot_at != '') && (steps.rollout.outputs.governance_pipeline_mode == 'shadow' || steps.rollout.outputs.governance_pipeline_mode == 'live')) && '1' || inputs.include_kind && '1' || '0' }}
+          CURATOR_ENABLE_KIND: ${{ (((github.event_name == 'schedule' || inputs.repair_expected_slot_at != '') && (steps.rollout.outputs.governance_pipeline_mode == 'shadow' || steps.rollout.outputs.governance_pipeline_mode == 'live') && steps.rollout.outputs.kind_connector_enabled == 'true') || inputs.include_kind) && '1' || '0' }}
+          CURATOR_REQUIRE_KIND: ${{ (((github.event_name == 'schedule' || inputs.repair_expected_slot_at != '') && (steps.rollout.outputs.governance_pipeline_mode == 'shadow' || steps.rollout.outputs.governance_pipeline_mode == 'live') && steps.rollout.outputs.kind_connector_enabled == 'true') || inputs.include_kind) && '1' || '0' }}
           ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
           ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
           BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
@@ -213,8 +214,8 @@ jobs:
           CURATOR_REQUIRE_DURABLE_DART_QUOTA: "1"
           CURATOR_DART_QUOTA_PHASE: official-ingest
           CURATOR_REQUIRE_REMOTE_API: "1"
-          CURATOR_ENABLE_KIND: ${{ ((github.event_name == 'schedule' || inputs.repair_expected_slot_at != '') && (steps.rollout.outputs.governance_pipeline_mode == 'shadow' || steps.rollout.outputs.governance_pipeline_mode == 'live')) && '1' || inputs.include_kind && '1' || '0' }}
-          CURATOR_REQUIRE_KIND: ${{ ((github.event_name == 'schedule' || inputs.repair_expected_slot_at != '') && (steps.rollout.outputs.governance_pipeline_mode == 'shadow' || steps.rollout.outputs.governance_pipeline_mode == 'live')) && '1' || inputs.include_kind && '1' || '0' }}
+          CURATOR_ENABLE_KIND: ${{ (((github.event_name == 'schedule' || inputs.repair_expected_slot_at != '') && (steps.rollout.outputs.governance_pipeline_mode == 'shadow' || steps.rollout.outputs.governance_pipeline_mode == 'live') && steps.rollout.outputs.kind_connector_enabled == 'true') || inputs.include_kind) && '1' || '0' }}
+          CURATOR_REQUIRE_KIND: ${{ (((github.event_name == 'schedule' || inputs.repair_expected_slot_at != '') && (steps.rollout.outputs.governance_pipeline_mode == 'shadow' || steps.rollout.outputs.governance_pipeline_mode == 'live') && steps.rollout.outputs.kind_connector_enabled == 'true') || inputs.include_kind) && '1' || '0' }}
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           DART_SYNC_COMPANY_MASTER: ${{ github.event.schedule == '40 21 * * 0' || inputs.sync_company_master }}
           KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}

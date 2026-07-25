@@ -19,6 +19,13 @@ jobs:
       (
         vars.GOVERNANCE_PIPELINE_MODE == 'shadow' ||
         vars.GOVERNANCE_PIPELINE_MODE == 'live'
+      ) &&
+      (
+        vars.GLOBAL_ALPHA_OBSERVATION_ENABLED == 'true' ||
+        (
+          vars.GLOBAL_ALPHA_OBSERVATION_ENABLED != '' &&
+          vars.GLOBAL_ALPHA_OBSERVATION_ENABLED != 'false'
+        )
       )
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -51,7 +58,20 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Resolve fail-closed observation mode
+        id: rollout
+        env:
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
+          GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          KIND_CONNECTOR_MODE: ${{ vars.KIND_CONNECTOR_MODE }}
+          GLOBAL_ALPHA_OBSERVATION_ENABLED: ${{ vars.GLOBAL_ALPHA_OBSERVATION_ENABLED }}
+          ENABLE_PAGES: ${{ vars.ENABLE_PAGES }}
+          ENABLE_GOVERNANCE_PAGES: ${{ vars.ENABLE_GOVERNANCE_PAGES }}
+          ENABLE_GOVERNANCE_SHADOW: ${{ vars.ENABLE_GOVERNANCE_SHADOW }}
+        run: python -m curator.operation_mode --github-output "$GITHUB_OUTPUT"
+
       - name: Observe API, release, sources, and public build
+        if: steps.rollout.outputs.global_alpha_observation_enabled == 'true'
         run: >-
           python -m curator.global_alpha_monitor
           --evidence "$EVIDENCE_PATH"

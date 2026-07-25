@@ -903,6 +903,17 @@ def test_public_country_family_and_status_enums_are_fail_closed():
         V2.index("function v2_event_select") : V2.index("function v2_event_filters")
     ]
     assert "e.importance" in event_select
+    assert "AS actor_name" in event_select
+    assert "AS actor_role" in event_select
+    assert event_select.count(
+        "ORDER BY event_actor.actor_role,event_actor.actor_id LIMIT 1"
+    ) == 2
+    assert event_schema["properties"]["actor_role"] == {
+        "type": ["string", "null"],
+        "description": (
+            "Role of the representative approved actor returned in actor_name."
+        ),
+    }
     assert SPEC["components"]["schemas"]["ReviewQueueItem"]["properties"][
         "event_family"
     ] == {"$ref": "#/components/schemas/IngestEventFamily"}

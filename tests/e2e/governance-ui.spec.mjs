@@ -1,5 +1,50 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import { readFile } from "node:fs/promises";
+
+async function expectViewportPng(path, viewport) {
+  const png = await readFile(path);
+  expect(png.subarray(1, 4).toString("ascii")).toBe("PNG");
+  expect(png.subarray(12, 16).toString("ascii")).toBe("IHDR");
+  expect({
+    width: png.readUInt32BE(16),
+    height: png.readUInt32BE(20)
+  }).toEqual(viewport);
+}
+
+async function stabilizeViewportScreenshot(page) {
+  await page.mouse.move(1, 1);
+  const previous = await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    const root = document.documentElement;
+    const saved = {
+      value: root.style.getPropertyValue("scroll-behavior"),
+      priority: root.style.getPropertyPriority("scroll-behavior")
+    };
+    root.style.setProperty("scroll-behavior", "auto", "important");
+    root.scrollTop = 0;
+    document.body.scrollTop = 0;
+    window.scrollTo(0, 0);
+    return saved;
+  });
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  );
+  return async () => {
+    await page.evaluate((saved) => {
+      if (saved.value) {
+        document.documentElement.style.setProperty(
+          "scroll-behavior",
+          saved.value,
+          saved.priority
+        );
+      } else {
+        document.documentElement.style.removeProperty("scroll-behavior");
+      }
+    }, previous);
+  };
+}
 
 const events = [
   {
@@ -68,7 +113,10 @@ const v2Events = [
     change_summary: "회사가 자기주식 취득 계획과 주요 기한을 공시했다.",
     current_status: "이사회 결의",
     actor_name: "삼성전자",
+    actor_role: "issuer",
     occurred_at: "2026-07-24T00:30:00Z",
+    filed_at: "2026-07-24T00:31:00Z",
+    first_observed_at: "2026-07-24T00:33:00Z",
     updated_at: "2026-07-24T00:35:00Z",
     deadline_at: "2026-08-01T00:00:00Z",
     official_evidence_count: 2,
@@ -92,6 +140,7 @@ const v2Events = [
     change_summary: "The filing adds a vote deadline and the issuer response.",
     current_status: "Filed",
     actor_name: "Investor coalition",
+    actor_role: "proponent",
     occurred_at: "2026-07-24T01:00:00Z",
     updated_at: "2026-07-24T01:10:00Z",
     deadline_at: "2026-08-05T00:00:00Z",
@@ -115,6 +164,7 @@ const v2Events = [
     change_summary: "取締役候補者と株主総会の日程を開示した。",
     current_status: "開示",
     actor_name: "トヨタ自動車",
+    actor_role: "issuer",
     occurred_at: "2026-07-24T02:00:00Z",
     updated_at: "2026-07-24T02:05:00Z",
     deadline_at: "2026-08-12T00:00:00Z",
@@ -138,6 +188,7 @@ const v2Events = [
     change_summary: "Companies House recorded an updated statement of capital.",
     current_status: "Filed",
     actor_name: "Barclays",
+    actor_role: "issuer",
     occurred_at: "2026-07-23T22:00:00Z",
     updated_at: "2026-07-24T02:20:00Z",
     deadline_at: "2026-08-09T00:00:00Z",
@@ -160,6 +211,7 @@ const v2Events = [
     change_summary: "The company reported the first action against its capital allocation commitment.",
     current_status: "Implementation",
     actor_name: "Shopify",
+    actor_role: "issuer",
     occurred_at: "2026-07-23T21:00:00Z",
     updated_at: "2026-07-24T02:35:00Z",
     official_evidence_count: 1,
@@ -181,6 +233,7 @@ const v2Events = [
     change_summary: "ASIC register link metadata records a director appointment.",
     current_status: "Registered",
     actor_name: "BHP Group",
+    actor_role: "issuer",
     occurred_at: "2026-07-24T03:00:00Z",
     updated_at: "2026-07-24T03:05:00Z",
     deadline_at: null,
@@ -571,7 +624,7 @@ test.beforeEach(async ({ page }) => {
   await mockPublicApi(page);
 });
 
-test("today to evidence journey preserves source language and accessibility", async ({ page }) => {
+test("today to evidence journey preserves source language and accessibility @webkit-smoke", async ({ page }) => {
   await page.goto("#/today");
   const topPanel = page.locator(".terminal-main .terminal-panel").first();
   await expect(page.getByRole("heading", { name: "Top 5" })).toBeVisible();
@@ -583,6 +636,10 @@ test("today to evidence journey preserves source language and accessibility", as
   await expect(page.getByText("Unverified signal", { exact: true })).toHaveCount(0);
   await expect(topPanel.locator(".coverage-badge").first()).toContainText("시장 전체 / Market-wide");
   await expect(topPanel.locator(".coverage-badge").first()).toContainText("공식 2 · 보도 3");
+  await expect(topPanel.getByText("당사자 / Actor 삼성전자 · 발행사 / Issuer", { exact: true })).toBeVisible();
+  await expect(topPanel.getByText(/접수 \/ Filed/).first()).toBeVisible();
+  await expect(topPanel.getByText(/최초 관측 \/ First seen/).first()).toBeVisible();
+  await expect(topPanel.getByText(/갱신 \/ Updated/).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "소스 상태 / Sources" })).toBeVisible();
   await expect(page.locator(".source-status-item[data-status='redistribution_blocked']")).toContainText("EDINET");
   await expect(page.locator(".source-status-item").filter({ hasText: "Canadian issuer IR manual links" })).toContainText("링크 전용·수동 메타데이터 / Link-only · manual metadata");
@@ -610,6 +667,11 @@ test("today to evidence journey preserves source language and accessibility", as
   await expect(dialog.getByRole("heading", { name: "자기주식취득결정", exact: true }).first()).toHaveAttribute("lang", "ko");
   await expect(dialog.getByText("원문 제목 / Source title", { exact: true })).toBeVisible();
   await expect(dialog.getByText("시장 전체 / Market-wide", { exact: true }).first()).toBeVisible();
+  await expect(dialog.getByText("당사자·역할 / Actor & role", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("삼성전자 · 발행사 / Issuer", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("접수 / Filed", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("최초 관측 / First observed", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("마지막 변경 / Last updated", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "주장·반론·공식 사실 / Claims" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "공식 근거·보도 / Sources" })).toBeVisible();
   await expect(page.getByText("회사는 자기주식 취득을 결정했다.", { exact: true })).toHaveAttribute("lang", "ko");
@@ -699,7 +761,7 @@ test("canonical unavailable edition blocks Top and identifies stale snapshot", a
   await expect(page.getByText("공식 소스 수집 상태를 확인할 수 없습니다. 소스 상태를 먼저 확인해 주세요.", { exact: true })).toBeVisible();
 });
 
-test("market filters, URL state, keyboard shortcuts, and responsive terminal layout", async ({ page }, testInfo) => {
+test("market filters, URL state, keyboard shortcuts, and responsive terminal layout @webkit-smoke", async ({ page }, testInfo) => {
   await page.goto("#/today?market=US");
   const topPanel = page.locator(".terminal-main .terminal-panel").first();
   await expect(page.getByRole("link", { name: "US", exact: true })).toHaveAttribute("aria-current", "page");
@@ -715,16 +777,34 @@ test("market filters, URL state, keyboard shortcuts, and responsive terminal lay
 
   if (testInfo.project.name.includes("mobile")) {
     await expect(page.locator(".mobile-terminal-tabs")).toBeVisible();
-    await page.getByRole("button", { name: "필터", exact: true }).click();
-    await expect(page.locator("#terminal-filters")).toBeVisible();
-    await expect(page.getByRole("button", { name: "필터", exact: true })).toHaveAttribute("aria-expanded", "true");
+    const filterToggle = page.getByRole("button", { name: "필터", exact: true });
+    await filterToggle.click();
+    const filterDialog = page.getByRole("dialog", { name: "필터 / Filters" });
+    await expect(filterDialog).toBeVisible();
+    await expect(filterDialog).toHaveAttribute("aria-modal", "true");
+    await expect(filterToggle).toHaveAttribute("aria-expanded", "true");
+    const closeFilter = filterDialog.getByRole("button", { name: "닫기", exact: true });
+    await expect(closeFilter).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(filterDialog.getByRole("link", { name: "초기화", exact: true })).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(closeFilter).toBeFocused();
   }
   await page.getByLabel("검색 / Search").fill("Exxon");
   await page.getByLabel("사건 유형 / Event").selectOption("meeting_and_vote");
+  await page.getByLabel("시작 / From").fill("2026-07-25");
+  await page.getByLabel("종료 / To").fill("2026-07-24");
+  await page.getByRole("button", { name: "적용", exact: true }).click();
+  await expect(page).toHaveURL(/#\/today\?market=US$/);
+  await expect.poll(() => page.getByLabel("종료 / To").evaluate((input) => input.validationMessage)).not.toBe("");
+  await page.getByLabel("시작 / From").fill("2026-07-23");
+  await page.getByLabel("종료 / To").fill("2026-07-24");
   await page.getByRole("button", { name: "적용", exact: true }).click();
   await expect(page).toHaveURL(/market=US/);
   await expect(page).toHaveURL(/q=Exxon/);
   await expect(page).toHaveURL(/event_type=meeting_and_vote/);
+  await expect(page).toHaveURL(/from=2026-07-23/);
+  await expect(page).toHaveURL(/to=2026-07-24/);
   await expect(page.locator(".loading")).toHaveCount(0);
   await expect(topPanel.getByRole("link", { name: "Shareholder proposal filed on board accountability", exact: true })).toBeVisible();
 
@@ -756,6 +836,7 @@ test("market filters, URL state, keyboard shortcuts, and responsive terminal lay
     await expect(page.locator("#terminal-filters")).toBeVisible();
     await page.locator(".filter-sheet-close").click();
     await expect(page.locator("#terminal-filters")).toBeHidden();
+    await expect(page.getByRole("button", { name: "필터", exact: true })).toBeFocused();
   } else if (testInfo.project.name.includes("tablet")) {
     const positions = await page.evaluate(() => ({
       filtersLeft: document.querySelector(".terminal-filters").getBoundingClientRect().left,
@@ -777,6 +858,16 @@ test("market filters, URL state, keyboard shortcuts, and responsive terminal lay
     }));
     expect(positions.filters).toBeLessThan(positions.main);
     expect(positions.main).toBeLessThan(positions.rail);
+  }
+  if (testInfo.project.name.endsWith("-chromium")) {
+    const screenshotPath = testInfo.outputPath(`today-${testInfo.project.name}.png`);
+    const restoreScrollBehavior = await stabilizeViewportScreenshot(page);
+    try {
+      await page.screenshot({ path: screenshotPath });
+      await expectViewportPng(screenshotPath, testInfo.project.use.viewport);
+    } finally {
+      await restoreScrollBehavior();
+    }
   }
   const liveNavigation = page.locator("[data-nav='live']:visible").first();
   await expect(liveNavigation).toBeVisible();
@@ -877,7 +968,7 @@ test("real v2 release and authorization failures stay fail-closed", async ({ pag
   await expect.poll(() => v1Requests.some((url) => url.includes("/api/v1/events/event%3Atreasury"))).toBe(false);
 });
 
-test("global search and full event records use valid v2 contracts first", async ({ page }) => {
+test("global search and full event records use valid v2 contracts first @webkit-smoke", async ({ page }) => {
   const requests = [];
   page.on("request", (request) => requests.push(request.url()));
 
@@ -894,12 +985,12 @@ test("global search and full event records use valid v2 contracts first", async 
   expect(requests.some((url) => url.includes("/api/v1/events/event%3Atreasury"))).toBe(false);
 });
 
-test("global archive, issuer identity, and issuer detail use v2 without legacy company aliasing", async ({ page }, testInfo) => {
+test("global archive, issuer identity, and issuer detail use v2 without legacy company aliasing @webkit-smoke", async ({ page }, testInfo) => {
   const requests = [];
   page.on("request", (request) => requests.push(request.url()));
 
   await page.goto("#/today");
-  if (testInfo.project.name.includes("desktop")) {
+  if (["desktop-chromium", "webkit-smoke"].includes(testInfo.project.name)) {
     await page.locator(".primary-nav [data-nav='companies']").click();
   } else {
     await page.getByRole("button", { name: "메뉴 Menu", exact: true }).click();
@@ -966,7 +1057,7 @@ test("v2 load-more follows next_offset without skipping a byte-fitted row", asyn
   ))).toBe(true);
 });
 
-test("global calendar uses the v2 deadline contract and preserves issuer routes", async ({ page }) => {
+test("global calendar uses the v2 deadline contract and preserves issuer routes @webkit-smoke", async ({ page }) => {
   const requests = [];
   page.on("request", (request) => requests.push(request.url()));
 

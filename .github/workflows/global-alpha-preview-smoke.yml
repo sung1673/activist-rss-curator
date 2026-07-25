@@ -1,0 +1,101 @@
+name: Production Alpha remote preview smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: global-alpha-preview-smoke-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  preview-smoke:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: governance-runtime
+    env:
+      BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+      BSIDE_ALPHA_PREVIEW_WEB_URL: ${{ vars.BSIDE_ALPHA_PREVIEW_WEB_URL }}
+      BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+      GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+      GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
+      GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+      ENABLE_TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+      ENABLE_GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+      PREVIEW_EXPECTED_BUILD_SHA: ${{ github.sha }}
+
+    steps:
+      - name: Checkout immutable default-branch revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Require the default branch, shadow mode, and disabled outbound delivery
+        shell: bash
+        env:
+          REQUESTED_REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_REF" == "$DEFAULT_BRANCH" ]] || {
+            echo "::error::Remote preview smoke is restricted to the default branch."
+            exit 1
+          }
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] || {
+            echo "::error::Checked-out revision does not match the workflow revision."
+            exit 1
+          }
+          [[ "$GOVERNANCE_PIPELINE_MODE" == "shadow" ]] || {
+            echo "::error::Remote preview smoke requires GOVERNANCE_PIPELINE_MODE=shadow."
+            exit 1
+          }
+          [[ "$ENABLE_TELEGRAM_DELIVERY" == "false" ]] || {
+            echo "::error::Telegram delivery must remain disabled."
+            exit 1
+          }
+          [[ "$ENABLE_GOVERNANCE_DELIVERY" == "false" ]] || {
+            echo "::error::Governance delivery must remain disabled."
+            exit 1
+          }
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Validate the public and privileged API binding
+        run: python .github/scripts/validate-api-base-urls.py --github-env "$GITHUB_ENV"
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install the pinned browser runtime
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run three-viewport remote preview journeys
+        id: preview
+        run: npx playwright test --config playwright.preview.config.mjs
+
+      - name: Remove preview credentials from browser artifacts
+        id: sanitize
+        if: always() && steps.preview.outcome != 'skipped'
+        run: python .github/scripts/sanitize-preview-artifacts.py test-results/preview-remote
+
+      - name: Preserve same-revision screenshots, traces, and receipts
+        if: always() && steps.preview.outcome != 'skipped' && steps.sanitize.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-preview-smoke-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/preview-remote
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9

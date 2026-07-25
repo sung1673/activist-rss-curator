@@ -149,6 +149,8 @@ v2는 v1과 독립적인 `global_terminal_v2` release state를 사용한다.
 
 `from`과 `to`는 `occurred_at`에 적용한다. 검색어는 2~100자이며 사건 제목·요약·현재 상태·사건 유형, 회사 법인명·주 종목코드·시장·식별자, 승인된 활성 당사자 이름을 검색한다. 문서는 현재 재배포 권한이 유효한 비-Telegram 근거의 제목과 문서 유형만 검색하며, 검색 결과는 사건 형태로 반환한다.
 
+Event 응답의 `actor_name`은 승인된 대표 당사자이며 `actor_role`은 그 당사자의 nullable 역할이다. 화면은 기존 `filed_at`, `first_observed_at`, `updated_at`과 함께 이 값을 표시한다. 필드가 없는 기존 클라이언트와의 호환성을 위해 `actor_role`은 additive optional 필드로 유지한다.
+
 ### 운영과 관리
 
 - `GET /ops/source-right-eligibility?source_right_id=official:...&use=collect|public|ai`
@@ -247,7 +249,7 @@ Production Alpha를 실행하려면 `official:dart`, `official:sec-edgar`, `offi
 
 `.github/workflows/global-brief.yml`의 KST 05:45 예약 작업은 후보 bundle만 만들고 공개 brief를 쓰지 않는다. 사람 1명이 Top 5·근거·빈 결과 이유를 승인한 뒤 후보 작업의 `candidate_run_id`와 승인 JSON을 수동 `publish` 작업에 제출해야 한다. 발행 작업은 그 run이 같은 기본 브랜치·같은 code SHA에서 성공했는지, edition과 run ID에 정확히 묶인 후보 artifact가 하나뿐인지 확인한 뒤 bundle의 실제 `sha256(basis)`와 승인 hash·선택 사건 버전을 다시 대조한다. 후보 artifact는 30일, publication receipt는 90일 보존한다. 필요한 secret은 `BSIDE_EDITOR_TOKEN`, `GOVERNANCE_PREVIEW_TOKEN`, API 주소는 `BSIDE_API_BASE_URL` secret 또는 `GOVERNANCE_API_BASE_URL` variable이다.
 
-`.github/workflows/global-alpha-watchdog.yml`은 5분마다 release state, source 상태와 공개 루트를 관측하며 읽기 전용 `GET /ops/release-state`와 `BSIDE_OPS_TOKEN`, `GOVERNANCE_PREVIEW_TOKEN`, `BSIDE_PUBLIC_WEB_URL`을 사용한다. watchdog에는 `BSIDE_ADMIN_TOKEN`이나 `BSIDE_RELEASE_AUTHORIZER_TOKEN`을 제공하지 않는다. 이 Production Alpha의 공개 배포는 web-only다. Telegram은 허가된 내부 신호 읽기에만 남고 outbound는 영구 비활성이므로 `ENABLE_TELEGRAM_DELIVERY=false`와 `ENABLE_GOVERNANCE_DELIVERY=false`를 유지한다.
+`.github/workflows/global-alpha-watchdog.yml`은 `GOVERNANCE_PIPELINE_MODE=shadow|live`와 `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`가 모두 충족될 때만 5분마다 release state, source 상태와 공개 루트를 관측한다. 기본값은 `false`이며 preview·소스·동일 SHA 준비가 끝나기 전에는 관측 분모를 만들지 않는다. 다른 문자열은 fail-closed한다. 관측은 읽기 전용 `GET /ops/release-state`와 `BSIDE_OPS_TOKEN`, `GOVERNANCE_PREVIEW_TOKEN`, `BSIDE_PUBLIC_WEB_URL`을 사용한다. watchdog에는 `BSIDE_ADMIN_TOKEN`이나 `BSIDE_RELEASE_AUTHORIZER_TOKEN`을 제공하지 않는다. 이 Production Alpha의 공개 배포는 web-only다. Telegram은 허가된 내부 신호 읽기에만 남고 outbound는 영구 비활성이므로 `ENABLE_TELEGRAM_DELIVERY=false`와 `ENABLE_GOVERNANCE_DELIVERY=false`를 유지한다.
 
 ## 사건 검수
 

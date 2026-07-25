@@ -8,8 +8,9 @@
 
 검증된 어댑터가 준비될 때까지 다음 원칙을 적용한다.
 
-- 예약 공식 수집은 KIND를 필수로 요구하고 endpoint가 없거나 계약이 다르면 fail-closed한다.
-- 수동 workflow만 `include_kind=false`로 DART-only smoke/shadow를 허용한다.
+- Production Alpha 예약 공식 수집은 `KIND_CONNECTOR_MODE=off`를 기본으로 DART-only 실행한다.
+- KIND를 GA 범위에 편입할 때 `KIND_CONNECTOR_MODE=active`로 전환하며, 그때부터 예약 실행은 endpoint·권한·계약을 필수로 요구하고 하나라도 다르면 fail-closed한다.
+- 수동 workflow는 `include_kind=true`로 예약 토글과 별개인 KIND 검증을 실행하거나 `include_kind=false`로 DART-only smoke를 실행할 수 있다.
 - KIND 화면 scraping이나 비공식 사설 라이브러리를 운영 경로에 넣지 않는다.
 - 공개된 사실과 KRX 화면·데이터베이스의 자동수집·재배포 조건은 별도로 확인한다.
 

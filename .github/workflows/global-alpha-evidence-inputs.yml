@@ -7,8 +7,13 @@ on:
         description: Type UPLOAD_GLOBAL_ALPHA_EVIDENCE
         required: true
         type: string
+      review_candidate_run_id:
+        description: Successful immutable same-SHA review-candidate producer run
+        required: true
+        type: string
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -18,7 +23,7 @@ concurrency:
 jobs:
   materialize:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     environment:
       name: governance-release
     steps:
@@ -43,6 +48,79 @@ jobs:
             echo "::error::The explicit Production Alpha upload confirmation did not match."
             exit 1
           }
+
+      - name: Resolve exact immutable review-candidate producer
+        id: review_candidates
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REQUESTED_RUN_ID: ${{ inputs.review_candidate_run_id }}
+          EXPECTED_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          REQUIRED_WORKFLOW_PATH: .github/workflows/global-alpha-review-candidates.yml
+          EXPECTED_ARTIFACT_NAME: global-alpha-review-candidates-${{ github.sha }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const runText = process.env.REQUESTED_RUN_ID.trim();
+            if (!/^[1-9][0-9]*$/.test(runText)) {
+              core.setFailed("review_candidate_run_id must be a positive integer");
+              return;
+            }
+            const runId = Number(runText);
+            if (runId === Number(process.env.CURRENT_RUN_ID)) {
+              core.setFailed("The review-candidate source cannot be the current run");
+              return;
+            }
+            const response = await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: runId,
+            });
+            const run = response.data;
+            const ageHours = (Date.now() - Date.parse(run.created_at)) / 3600000;
+            if (
+              run.conclusion !== "success" ||
+              run.event !== "workflow_dispatch" ||
+              (run.head_sha || "").toLowerCase() !== process.env.EXPECTED_SHA.toLowerCase() ||
+              run.head_branch !== process.env.DEFAULT_BRANCH ||
+              run.path !== process.env.REQUIRED_WORKFLOW_PATH ||
+              ageHours < -0.1 ||
+              ageHours > 72
+            ) {
+              core.setFailed("Review candidates failed the success, same-SHA, workflow, branch, event, or freshness contract");
+              return;
+            }
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner, repo, run_id: runId, per_page: 100},
+            );
+            const matches = artifacts.filter(
+              (item) =>
+                item.name === process.env.EXPECTED_ARTIFACT_NAME &&
+                !item.expired,
+            );
+            if (
+              matches.length !== 1 ||
+              !/^sha256:[0-9a-f]{64}$/i.test(matches[0].digest || "")
+            ) {
+              core.setFailed("Exactly one immutable review-candidate artifact with a SHA-256 digest is required");
+              return;
+            }
+            core.setOutput("artifact_id", String(matches[0].id));
+            core.setOutput("artifact_name", matches[0].name);
+            core.setOutput("artifact_digest", matches[0].digest.toLowerCase());
+            core.setOutput("run_id", String(run.id));
+            core.setOutput("run_attempt", String(run.run_attempt));
+            core.setOutput("run_created_at", run.created_at);
+
+      - name: Download exact immutable review candidates
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.review_candidates.outputs.artifact_id }}
+          path: review-candidate-source
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.review_candidates.outputs.run_id }}
+          digest-mismatch: error
+          merge-multiple: true
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -78,6 +156,39 @@ jobs:
           --expected-revision "$GITHUB_SHA"
           --automated-evidence global-alpha-automated-evidence.json
 
+      - name: Bind materialized human review to immutable candidates
+        shell: bash
+        env:
+          PRODUCER_RUN_ID: ${{ steps.review_candidates.outputs.run_id }}
+          PRODUCER_RUN_ATTEMPT: ${{ steps.review_candidates.outputs.run_attempt }}
+          PRODUCER_RUN_CREATED_AT: ${{ steps.review_candidates.outputs.run_created_at }}
+          REVIEW_ARTIFACT_ID: ${{ steps.review_candidates.outputs.artifact_id }}
+          REVIEW_ARTIFACT_NAME: ${{ steps.review_candidates.outputs.artifact_name }}
+          REVIEW_ARTIFACT_DIGEST: ${{ steps.review_candidates.outputs.artifact_digest }}
+        run: |
+          set -euo pipefail
+          mapfile -t source_files < <(find review-candidate-source -type f -print)
+          [[ "${#source_files[@]}" -eq 1 ]] || {
+            echo "::error::The review-candidate artifact must contain exactly one file."
+            exit 1
+          }
+          [[ "${source_files[0]}" == "review-candidate-source/global-alpha-review-candidate-export.json" ]] || {
+            echo "::error::The review-candidate artifact contained an unexpected path."
+            exit 1
+          }
+          python -m curator.global_alpha_evidence_bundle \
+            verify-materialized-review \
+            --review-candidate-export "${source_files[0]}" \
+            --human-review global-alpha-inputs/human-review.json \
+            --expected-revision "$GITHUB_SHA" \
+            --producer-run-id "$PRODUCER_RUN_ID" \
+            --producer-run-attempt "$PRODUCER_RUN_ATTEMPT" \
+            --producer-run-created-at "$PRODUCER_RUN_CREATED_AT" \
+            --artifact-id "$REVIEW_ARTIFACT_ID" \
+            --artifact-name "$REVIEW_ARTIFACT_NAME" \
+            --artifact-digest "$REVIEW_ARTIFACT_DIGEST" \
+            --output global-alpha-inputs/review-candidate-provenance.json
+
       - name: Upload immutable protected inputs
         id: inputs_artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -93,13 +204,21 @@ jobs:
         env:
           ARTIFACT_ID: ${{ steps.inputs_artifact.outputs.artifact-id }}
           ARTIFACT_DIGEST: ${{ steps.inputs_artifact.outputs.artifact-digest }}
+          REVIEW_RUN_ID: ${{ steps.review_candidates.outputs.run_id }}
+          REVIEW_ARTIFACT_ID: ${{ steps.review_candidates.outputs.artifact_id }}
+          REVIEW_ARTIFACT_DIGEST: ${{ steps.review_candidates.outputs.artifact_digest }}
         run: |
           set -euo pipefail
+          provenance_digest="$(sha256sum global-alpha-inputs/review-candidate-provenance.json | cut -d ' ' -f1)"
           {
             echo "### Production Alpha protected inputs"
             echo "- revision: \`$GITHUB_SHA\`"
             echo "- artifact id: \`$ARTIFACT_ID\`"
             echo "- artifact digest: \`$ARTIFACT_DIGEST\`"
+            echo "- review producer run id: \`$REVIEW_RUN_ID\`"
+            echo "- review producer artifact id: \`$REVIEW_ARTIFACT_ID\`"
+            echo "- review producer artifact digest: \`$REVIEW_ARTIFACT_DIGEST\`"
+            echo "- review provenance file SHA-256: \`$provenance_digest\`"
             echo "- operator action: delete GLOBAL_ALPHA_RELEASE_INPUTS_GZIP_B64 now"
             echo "- human-review and approval records must have been written by the actual human reviewer"
           } >> "$GITHUB_STEP_SUMMARY"

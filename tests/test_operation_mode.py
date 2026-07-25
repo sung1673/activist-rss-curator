@@ -19,6 +19,9 @@ def test_current_legacy_variables_resolve_without_enabling_delivery() -> None:
     assert mode.governance_pipeline_mode == "off"
     assert mode.legacy_pages_enabled is True
     assert mode.scheduled_governance_enabled is False
+    assert mode.kind_connector_mode == "off"
+    assert mode.kind_connector_enabled is False
+    assert mode.global_alpha_observation_enabled is False
     assert mode.telegram_delivery_enabled is False
     assert mode.distribution_mode == "web_only"
 
@@ -38,6 +41,20 @@ def test_new_variables_take_over_when_stale_false_booleans_remain() -> None:
     assert mode.dart_canary_allowed is True
 
 
+def test_kind_and_alpha_observation_require_explicit_activation() -> None:
+    mode = resolve_operation_mode(
+        {
+            "GOVERNANCE_PIPELINE_MODE": "shadow",
+            "KIND_CONNECTOR_MODE": "active",
+            "GLOBAL_ALPHA_OBSERVATION_ENABLED": "true",
+        }
+    )
+
+    assert mode.kind_connector_mode == "active"
+    assert mode.kind_connector_enabled is True
+    assert mode.global_alpha_observation_enabled is True
+
+
 @pytest.mark.parametrize(
     "values",
     [
@@ -46,6 +63,8 @@ def test_new_variables_take_over_when_stale_false_booleans_remain() -> None:
         {"PAGES_OWNER": "legacy", "ENABLE_GOVERNANCE_PAGES": "true"},
         {"GOVERNANCE_PIPELINE_MODE": "off", "ENABLE_GOVERNANCE_SHADOW": "true"},
         {"GOVERNANCE_PIPELINE_MODE": "invalid"},
+        {"KIND_CONNECTOR_MODE": "enabled"},
+        {"GLOBAL_ALPHA_OBSERVATION_ENABLED": "yes"},
         {"ENABLE_TELEGRAM_DELIVERY": "true"},
         {"ENABLE_GOVERNANCE_DELIVERY": "true"},
     ],
@@ -66,5 +85,8 @@ def test_github_outputs_are_lowercase_and_explicit(tmp_path: Path) -> None:
     text = output.read_text(encoding="utf-8")
     assert "pages_owner=legacy\n" in text
     assert "dart_canary_allowed=true\n" in text
+    assert "kind_connector_mode=off\n" in text
+    assert "kind_connector_enabled=false\n" in text
+    assert "global_alpha_observation_enabled=false\n" in text
     assert "telegram_delivery_enabled=false\n" in text
     assert "distribution_mode=web_only\n" in text

@@ -1590,6 +1590,9 @@ components:
           type: [string, 'null']
         actor_name:
           type: [string, 'null']
+        actor_role:
+          type: [string, 'null']
+          description: Role of the representative approved actor returned in actor_name.
         occurred_at:
           type: [string, 'null']
           format: date-time

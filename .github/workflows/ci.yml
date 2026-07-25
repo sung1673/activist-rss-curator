@@ -525,6 +525,8 @@ jobs:
           curator/event_identity.py
           curator/global_alpha_monitor.py
           curator/global_alpha_pages_identity.py
+          curator/global_alpha_evidence_bundle.py
+          curator/global_alpha_review_export.py
           curator/global_alpha_release_gate.py
           curator/global_brief.py
           curator/global_connectors.py
@@ -585,8 +587,8 @@ jobs:
       - name: Audit browser test dependencies
         run: npm audit --audit-level=high
 
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install Chromium and WebKit
+        run: npx playwright install --with-deps chromium webkit
 
       - name: Run production Web Vitals producer contracts
         run: npm run test:web-vitals-probe
@@ -597,11 +599,11 @@ jobs:
       - name: Run governance UI journeys and WCAG checks
         run: npm run test:ui
 
-      - name: Preserve failed browser traces
-        if: failure()
+      - name: Preserve browser screenshots and failure traces
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: governance-ui-playwright-${{ github.run_id }}-${{ github.run_attempt }}
+          name: governance-ui-playwright-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-results
           if-no-files-found: ignore
           retention-days: 14

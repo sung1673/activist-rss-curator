@@ -19,6 +19,7 @@ from typing import Mapping, Sequence
 
 PAGES_OWNERS = {"legacy", "governance"}
 PIPELINE_MODES = {"off", "dart_canary", "shadow", "live"}
+KIND_CONNECTOR_MODES = {"off", "active"}
 
 
 class OperationModeError(ValueError):
@@ -38,6 +39,17 @@ def _legacy_bool(values: Mapping[str, str], key: str) -> bool:
     raise OperationModeError(f"{key} must be true or false when set")
 
 
+def _strict_bool(values: Mapping[str, str], key: str, *, default: bool = False) -> bool:
+    value = _text(values, key)
+    if not value:
+        return default
+    if value == "false":
+        return False
+    if value == "true":
+        return True
+    raise OperationModeError(f"{key} must be true or false when set")
+
+
 @dataclass(frozen=True)
 class OperationMode:
     pages_owner: str
@@ -46,6 +58,9 @@ class OperationMode:
     governance_pages_enabled: bool
     scheduled_governance_enabled: bool
     dart_canary_allowed: bool
+    kind_connector_mode: str
+    kind_connector_enabled: bool
+    global_alpha_observation_enabled: bool
     telegram_delivery_enabled: bool = False
     distribution_mode: str = "web_only"
 
@@ -84,6 +99,14 @@ def resolve_operation_mode(values: Mapping[str, str]) -> OperationMode:
     if _legacy_bool(values, "ENABLE_GOVERNANCE_DELIVERY"):
         raise OperationModeError("Governance outbound delivery is permanently disabled")
 
+    kind_connector_mode = _text(values, "KIND_CONNECTOR_MODE") or "off"
+    if kind_connector_mode not in KIND_CONNECTOR_MODES:
+        raise OperationModeError("KIND_CONNECTOR_MODE must be off or active")
+    global_alpha_observation_enabled = _strict_bool(
+        values,
+        "GLOBAL_ALPHA_OBSERVATION_ENABLED",
+    )
+
     return OperationMode(
         pages_owner=owner,
         governance_pipeline_mode=pipeline,
@@ -91,6 +114,9 @@ def resolve_operation_mode(values: Mapping[str, str]) -> OperationMode:
         governance_pages_enabled=owner == "governance",
         scheduled_governance_enabled=pipeline in {"shadow", "live"},
         dart_canary_allowed=pipeline in {"dart_canary", "shadow", "live"},
+        kind_connector_mode=kind_connector_mode,
+        kind_connector_enabled=kind_connector_mode == "active",
+        global_alpha_observation_enabled=global_alpha_observation_enabled,
     )
 
 

@@ -38,7 +38,7 @@ DART와 KIND 모두 요청한 페이지와 응답 페이지가 다르거나, 전
 
 KIND는 공개된 범용 JSON API 계약이 없으므로 `KIND_DISCLOSURE_ENDPOINT` 앞의 어댑터가 아래 계약을 충족해야 한다.
 
-KIND의 일반 HTML 화면이나 오늘의 공시 RSS는 이 endpoint가 아니다. 운영 어댑터가 준비되기 전에는 수동 workflow의 `include_kind=false`로 DART-only smoke/shadow만 실행할 수 있으며, 예약 실행은 KIND를 필수로 요구해 fail-closed된다. KIND 선택 시에는 dry-run을 포함해 운영 DB에 편집 승인된 `official:kind` SourceRight가 있어야 하며, 상세 계약은 [KIND SourceRight 수집 사전검증](kind-source-right-preflight.md)을 따른다.
+KIND의 일반 HTML 화면이나 오늘의 공시 RSS는 이 endpoint가 아니다. 운영 어댑터가 준비되기 전에는 `KIND_CONNECTOR_MODE=off`로 예약 DART-only 수집을 유지한다. `active`로 바꾼 뒤에는 예약 실행이 KIND를 필수로 요구해 fail-closed된다. 수동 workflow는 `include_kind=true|false`로 KIND 검증 또는 DART-only smoke를 명시한다. KIND 선택 시에는 dry-run을 포함해 운영 DB에 편집 승인된 `official:kind` SourceRight가 있어야 하며, 상세 계약은 [KIND SourceRight 수집 사전검증](kind-source-right-preflight.md)을 따른다.
 
 - 응답은 전체 범위를 담은 최상위 JSON 배열이거나 JSON 객체다.
 - 객체의 행 배열은 최상위 또는 `data` 안의 `items`, `list`, `results` 중 하나다.

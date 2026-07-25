@@ -268,6 +268,14 @@ def test_v2_ui_validates_actor_roles_and_uses_exact_offset_continuations() -> No
     assert "continuationParams(params, cursor, cursorKind)" in javascript
 
 
+def test_today_date_filters_reject_inverted_ranges_and_undated_records() -> None:
+    javascript = (UI / "app.js").read_text(encoding="utf-8")
+    assert 'const invalid = Boolean(from.value && to.value && from.value > to.value);' in javascript
+    assert 'to.setCustomValidity(invalid ? "종료일은 시작일보다 빠를 수 없습니다.' in javascript
+    assert "if ((hasFrom || hasTo) && !eventDate) return false;" in javascript
+    assert 'if (/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) params[name] = value;' in javascript
+
+
 def test_v2_ui_fails_closed_and_labels_title_provenance() -> None:
     javascript = (UI / "app.js").read_text(encoding="utf-8")
     assert "const TITLE_PROVENANCE_VALUES = new Set([" in javascript

@@ -4,7 +4,7 @@
 
 ## 측정 계약
 
-- HTML SPA journey는 `/today`, `/events`, `/companies`, `/calendar` 네 route template으로 고정한다. watchdog의 `/`, `/governance/`, `/feed.xml`, `/api/v1/health` availability route와 섞지 않는다.
+- HTML SPA journey는 `/today`, `/events`, `/issuers`, `/calendar` 네 route template으로 고정한다. watchdog의 `/`, `/governance/`, `/feed.xml`, `/api/v1/health` availability route와 섞지 않는다.
 - 각 route마다 새 Pixel 5 모바일 Chromium context를 5회 실행한다. 총 20회 journey에서 LCP·INP·CLS 60개 관측값을 얻는다.
 - LCP와 CLS는 route의 초기 렌더가 끝난 뒤 고정한다. 이어서 실제 primary-navigation 링크를 Playwright가 클릭하고 `PerformanceEventTiming.interactionId`가 있는 실제 Event Timing duration을 INP로 기록한다.
 - LCP, Layout Shift 또는 Event Timing observer가 없거나, LCP·INP 값이 생성되지 않거나, route가 API 오류 화면을 렌더하면 전체 실행을 실패시킨다. 누락 값을 0이나 임의 값으로 보완하지 않는다. CLS 0은 실제 layout shift가 없을 수 있으므로 유효하다.

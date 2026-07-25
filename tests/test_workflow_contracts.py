@@ -242,6 +242,8 @@ def test_official_ingest_has_day_and_night_kst_schedules() -> None:
     assert "vars.GOVERNANCE_PIPELINE_MODE == 'dart_canary'" in workflow
     assert "steps.rollout.outputs.governance_pipeline_mode == 'shadow'" in workflow
     assert "steps.rollout.outputs.governance_pipeline_mode == 'live'" in workflow
+    assert "KIND_CONNECTOR_MODE: ${{ vars.KIND_CONNECTOR_MODE }}" in workflow
+    assert "steps.rollout.outputs.kind_connector_enabled == 'true'" in workflow
     assert "python -m curator.operation_mode --github-output \"$GITHUB_OUTPUT\"" in workflow
     assert "KIND_DISCLOSURE_ENDPOINT BSIDE_API_BASE_URL BSIDE_OPS_TOKEN" in workflow
     assert "DART_API_KEY ACTIVIST_API_URL ACTIVIST_API_SECRET" in workflow
@@ -279,6 +281,18 @@ def test_official_ingest_has_day_and_night_kst_schedules() -> None:
     ingest = next(
         step for step in job["steps"] if step["name"] == "Ingest selected official sources"
     )
+    expected_kind_selection = (
+        "${{ (((github.event_name == 'schedule' || "
+        "inputs.repair_expected_slot_at != '') && "
+        "(steps.rollout.outputs.governance_pipeline_mode == 'shadow' || "
+        "steps.rollout.outputs.governance_pipeline_mode == 'live') && "
+        "steps.rollout.outputs.kind_connector_enabled == 'true') || "
+        "inputs.include_kind) && '1' || '0' }}"
+    )
+    assert validation["env"]["CURATOR_ENABLE_KIND"] == expected_kind_selection
+    assert validation["env"]["CURATOR_REQUIRE_KIND"] == expected_kind_selection
+    assert ingest["env"]["CURATOR_ENABLE_KIND"] == expected_kind_selection
+    assert ingest["env"]["CURATOR_REQUIRE_KIND"] == expected_kind_selection
     claim = next(
         step
         for step in job["steps"]
@@ -1296,9 +1310,16 @@ def test_watchdog_contract_and_issue_permission() -> None:
     )
     assert health["run"] == "python .github/scripts/watchdog.py"
     assert health["env"]["WATCHDOG_EXPECTED_OFFICIAL_SOURCES"] == (
-        "${{ steps.rollout.outputs.governance_pipeline_mode == 'dart_canary' && "
+        "${{ (steps.rollout.outputs.governance_pipeline_mode == 'dart_canary' || "
+        "steps.rollout.outputs.kind_connector_enabled != 'true') && "
         "'dart' || 'dart,kind' }}"
     )
+    rollout = next(
+        step
+        for step in payload["jobs"]["health"]["steps"]
+        if step["name"] == "Resolve fail-closed rollout mode"
+    )
+    assert rollout["env"]["KIND_CONNECTOR_MODE"] == "${{ vars.KIND_CONNECTOR_MODE }}"
     incident = next(
         step
         for step in payload["jobs"]["health"]["steps"]

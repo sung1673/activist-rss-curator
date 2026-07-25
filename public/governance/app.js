@@ -184,6 +184,17 @@
       regulator: "규제기관 / Regulator",
       advisor: "자문사 / Advisor"
     },
+    actorRole: {
+      issuer: "발행사 / Issuer",
+      target: "대상 / Target",
+      proponent: "제안자 / Proponent",
+      claimant: "주장 주체 / Claimant",
+      respondent: "대응 주체 / Respondent",
+      supporter: "지지 주체 / Supporter",
+      advisor: "자문사 / Advisor",
+      regulator: "규제기관 / Regulator",
+      participant: "참여자 / Participant"
+    },
     kind: {
       company: "기업 / Company",
       actor: "당사자 / Actor",
@@ -396,6 +407,11 @@
       && isNullableUtcDateTime(value.first_observed_at)
       && isUtcDateTime(value.updated_at)
       && isNullableUtcDateTime(value.deadline_at)
+      && (
+        value.actor_role === undefined
+        || value.actor_role === null
+        || typeof value.actor_role === "string"
+      )
     );
   }
 
@@ -1046,6 +1062,10 @@
       change_summary: event.change_summary || event.summary || "",
       current_status: event.current_status || event.status || "",
       actor_name: event.actor_name || "",
+      actor_role: event.actor_role || "",
+      filed_at: event.filed_at || "",
+      first_observed_at: event.first_observed_at || "",
+      updated_at: event.updated_at || "",
       deadline_at: event.deadline_at || event.scheduled_at || "",
       official_evidence_count: Number(
         event.official_evidence_count
@@ -1065,6 +1085,10 @@
     if (eventType) params.event_family = eventType;
     if (verification) params.verification_status = verification;
     if (q) params.q = q;
+    ["from", "to"].forEach((name) => {
+      const value = String(query.get(name) || "").trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) params[name] = value;
+    });
     const market = currentMarket(query);
     if (market !== "GLOBAL") params.country = market;
     return params;
@@ -1077,6 +1101,20 @@
     if (eventType && String(event.event_type || "") !== eventType) return false;
     const verification = String(query.get("verification_status") || "");
     if (verification && String(event.verification_status || "") !== verification) return false;
+    const eventDate = normalizedDate(event.occurred_at);
+    const from = String(query.get("from") || "");
+    const to = String(query.get("to") || "");
+    const hasFrom = /^\d{4}-\d{2}-\d{2}$/.test(from);
+    const hasTo = /^\d{4}-\d{2}-\d{2}$/.test(to);
+    if ((hasFrom || hasTo) && !eventDate) return false;
+    if (eventDate && hasFrom) {
+      const fromDate = normalizedDate(`${from}T00:00:00Z`);
+      if (fromDate && eventDate < fromDate) return false;
+    }
+    if (eventDate && hasTo) {
+      const toDate = normalizedDate(`${to}T23:59:59.999Z`);
+      if (toDate && eventDate > toDate) return false;
+    }
     const q = String(query.get("q") || "").trim().toLocaleLowerCase();
     if (q) {
       const haystack = [
@@ -1132,6 +1170,29 @@
       if (value === String(query.get("verification_status") || "")) option.selected = true;
       verification.append(option);
     });
+    const from = element("input", {
+      attrs: {
+        id: "terminal-filter-from",
+        name: "from",
+        type: "date",
+        value: query.get("from") || ""
+      }
+    });
+    const to = element("input", {
+      attrs: {
+        id: "terminal-filter-to",
+        name: "to",
+        type: "date",
+        value: query.get("to") || ""
+      }
+    });
+    const validateDateRange = () => {
+      const invalid = Boolean(from.value && to.value && from.value > to.value);
+      to.setCustomValidity(invalid ? "종료일은 시작일보다 빠를 수 없습니다. / To must be on or after From." : "");
+      return !invalid;
+    };
+    from.addEventListener("input", validateDateRange);
+    to.addEventListener("input", validateDateRange);
     const form = element("form", {
       className: "terminal-filter-form",
       attrs: { "aria-label": "오늘의 사건 필터 / Today event filters" }
@@ -1148,6 +1209,14 @@
         element("label", { text: "근거 상태 / Evidence", attrs: { for: "terminal-filter-verification" } }),
         verification
       ]),
+      element("div", { className: "field" }, [
+        element("label", { text: "시작 / From", attrs: { for: "terminal-filter-from" } }),
+        from
+      ]),
+      element("div", { className: "field" }, [
+        element("label", { text: "종료 / To", attrs: { for: "terminal-filter-to" } }),
+        to
+      ]),
       element("div", { className: "form-actions" }, [
         element("button", { text: "적용", attrs: { type: "submit" } }),
         routeLink("초기화", `#/today?market=${currentMarket(query)}`, { className: "text-link" })
@@ -1155,6 +1224,8 @@
     ]);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
+      validateDateRange();
+      if (!form.reportValidity()) return;
       const values = new URLSearchParams();
       values.set("market", currentMarket(query));
       new FormData(form).forEach((value, name) => {
@@ -1199,6 +1270,8 @@
     if (!panel || !panel.classList.contains("is-open")) return;
     panel.classList.remove("is-open");
     panel.setAttribute("aria-hidden", "true");
+    panel.removeAttribute("role");
+    panel.removeAttribute("aria-modal");
     document.body.classList.remove("filter-sheet-open");
     if (trigger) trigger.setAttribute("aria-expanded", "false");
     if (restoreFocus && filterSheetTrigger instanceof HTMLElement && filterSheetTrigger.isConnected) {
@@ -1213,6 +1286,8 @@
     filterSheetTrigger = trigger instanceof HTMLElement ? trigger : null;
     panel.classList.add("is-open");
     panel.setAttribute("aria-hidden", "false");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
     document.body.classList.add("filter-sheet-open");
     if (trigger) trigger.setAttribute("aria-expanded", "true");
     const firstControl = panel.querySelector("input, select, button, a[href]");
@@ -1223,7 +1298,11 @@
     const panel = document.getElementById("terminal-filters");
     if (panel) {
       if (window.matchMedia("(max-width: 680px)").matches) panel.setAttribute("aria-hidden", "true");
-      else panel.removeAttribute("aria-hidden");
+      else {
+        panel.removeAttribute("aria-hidden");
+        panel.removeAttribute("role");
+        panel.removeAttribute("aria-modal");
+      }
     }
     document.querySelectorAll("[data-scroll-target]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -1252,6 +1331,23 @@
       dataset: { coverage: coverageMode },
       attrs: { "aria-label": `소스 커버리지: ${parts.join(", ")}` }
     });
+  }
+
+  function eventActorSummary(event) {
+    const actorName = String(event.actor_name || "").trim();
+    if (!actorName) return "";
+    const actorRole = String(event.actor_role || "").trim();
+    return actorRole
+      ? `${actorName} · ${label("actorRole", actorRole)}`
+      : actorName;
+  }
+
+  function eventTimestampMetadata(event, withTime = true) {
+    return [
+      event.filed_at ? `접수 / Filed ${formatDate(event.filed_at, withTime)}` : "",
+      event.first_observed_at ? `최초 관측 / First seen ${formatDate(event.first_observed_at, withTime)}` : "",
+      event.updated_at ? `갱신 / Updated ${formatDate(event.updated_at, withTime)}` : ""
+    ].filter(Boolean);
   }
 
   function terminalEvent(event, rank) {
@@ -1283,9 +1379,10 @@
         element("div", { className: "terminal-event__footer" }, [
           sourceCoverageBadge(event),
           element("span", { text: label("titleProvenance", event.title_provenance) }),
+          eventActorSummary(event) ? element("span", { text: `당사자 / Actor ${eventActorSummary(event)}` }) : null,
           event.current_status ? element("span", { text: event.current_status }) : null,
           event.deadline_at ? element("span", { text: `기한 ${formatDate(event.deadline_at, false)}` }) : null,
-          element("time", { text: formatDate(event.updated_at || event.occurred_at, true), attrs: { datetime: event.updated_at || event.occurred_at || "" } })
+          ...eventTimestampMetadata(event).map((text) => element("span", { text }))
         ].filter(Boolean))
       ].filter(Boolean))
     ]);
@@ -1299,7 +1396,17 @@
       }),
       element("div", {}, [
         element("h3", {}, [eventRouteLink(event)]),
-        element("p", { text: `${issuerOrCompanyName(event)} · ${label("eventType", event.event_type)} · ${label("titleProvenance", event.title_provenance)}` })
+        element("p", {
+          text: [
+            issuerOrCompanyName(event),
+            label("eventType", event.event_type),
+            label("titleProvenance", event.title_provenance),
+            eventActorSummary(event)
+          ].filter(Boolean).join(" · ")
+        }),
+        eventTimestampMetadata(event).length
+          ? element("p", { text: eventTimestampMetadata(event).join(" · "), className: "event-timestamps" })
+          : null
       ]),
       sourceCoverageBadge(event)
     ]);
@@ -1395,18 +1502,29 @@
       metadata([
         { node: company, value: issuerOrCompanyName(event) },
         { value: label("eventType", event.event_type) },
+        eventActorSummary(event) ? { value: `당사자 / Actor ${eventActorSummary(event)}` } : null,
         { value: label("coverageMode", eventCoverageMode(event)) },
         { value: label("titleProvenance", event.title_provenance) },
         { value: formatDate(event.occurred_at, false) },
+        ...eventTimestampMetadata(event, false).map((value) => ({ value })),
         event.deadline_at ? { value: `기한 / Deadline ${formatDate(event.deadline_at, false)}` } : null
       ])
     ]);
   }
 
   function compactEvent(event) {
+    const actor = eventActorSummary(event);
     return element("li", { className: "compact-item" }, [
       routeLink(event.title || "제목 없음", `#/events/${encodeURIComponent(event.event_id || "")}`, { lang: event.original_language }),
-      element("p", { text: `${issuerOrCompanyName(event)} · ${label("verification", event.verification_status)} · ${label("titleProvenance", event.title_provenance)} · ${formatDate(event.occurred_at, false)}` })
+      element("p", {
+        text: [
+          issuerOrCompanyName(event),
+          actor ? `당사자 / Actor ${actor}` : "",
+          label("verification", event.verification_status),
+          label("titleProvenance", event.title_provenance),
+          ...eventTimestampMetadata(event, false)
+        ].filter(Boolean).join(" · ")
+      })
     ]);
   }
 
@@ -1416,10 +1534,12 @@
       metadata([
         { node: issuerOrCompanyLink(event), value: issuerOrCompanyName(event) },
         { value: label("eventType", event.event_type) },
+        eventActorSummary(event) ? { value: `당사자 / Actor ${eventActorSummary(event)}` } : null,
         { value: label("verification", event.verification_status) },
         { value: label("coverageMode", eventCoverageMode(event)) },
         { value: label("titleProvenance", event.title_provenance) },
-        { value: formatDate(event.occurred_at, false) }
+        { value: formatDate(event.occurred_at, false) },
+        ...eventTimestampMetadata(event, false).map((value) => ({ value }))
       ])
     ]);
   }
@@ -2354,6 +2474,10 @@
               node: element("dd", {}, [issuerOrCompanyLink(event)])
             },
             { label: "발생 / Occurred", value: formatDate(event.occurred_at, true) },
+            { label: "대표 당사자 / Representative actor", value: eventActorSummary(event) },
+            { label: "접수 / Filed", value: event.filed_at ? formatDate(event.filed_at, true) : "—" },
+            { label: "최초 관측 / First observed", value: event.first_observed_at ? formatDate(event.first_observed_at, true) : "—" },
+            { label: "마지막 변경 / Last updated", value: event.updated_at ? formatDate(event.updated_at, true) : "—" },
             { label: "기한 / Deadline", value: event.deadline_at ? formatDate(event.deadline_at, true) : "—" },
             { label: "사건 ID / Event ID", value: event.event_id || eventId },
             { label: "언어 / Language", value: event.original_language || "—" },
@@ -2925,9 +3049,12 @@
             node: element("dd", {}, [issuerOrCompanyLink(event)])
           },
           { label: "시장 / Market", value: [event.ticker, event.market || marketForEvent(event)].filter(Boolean).join(" · ") },
-          { label: "당사자 / Actor", value: event.actor_name },
+          { label: "당사자·역할 / Actor & role", value: eventActorSummary(event) },
           { label: "현재 상태 / Status", value: event.current_status },
           { label: "발생 / Occurred", value: formatDate(event.occurred_at, true) },
+          { label: "접수 / Filed", value: event.filed_at ? formatDate(event.filed_at, true) : "—" },
+          { label: "최초 관측 / First observed", value: event.first_observed_at ? formatDate(event.first_observed_at, true) : "—" },
+          { label: "마지막 변경 / Last updated", value: event.updated_at ? formatDate(event.updated_at, true) : "—" },
           { label: "기한 / Deadline", value: event.deadline_at ? formatDate(event.deadline_at, true) : "—" },
           { label: "언어 / Language", value: event.original_language || "—" },
           { label: "제목 출처 / Title source", value: label("titleProvenance", event.title_provenance) },
@@ -3028,6 +3155,27 @@
       if (event.key === "Escape" && document.body.classList.contains("filter-sheet-open")) {
         event.preventDefault();
         closeTerminalFilterSheet();
+        return;
+      }
+      if (event.key === "Tab" && document.body.classList.contains("filter-sheet-open")) {
+        const filterPanel = document.getElementById("terminal-filters");
+        if (!filterPanel) return;
+        const focusable = [...filterPanel.querySelectorAll("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])")]
+          .filter((node) => node.getClientRects().length > 0);
+        if (!focusable.length) {
+          event.preventDefault();
+          filterPanel.focus();
+          return;
+        }
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
         return;
       }
       if (event.key === "Tab" && drawerShell && !drawerShell.hidden && drawer) {

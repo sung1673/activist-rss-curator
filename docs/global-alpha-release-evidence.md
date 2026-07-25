@@ -18,6 +18,75 @@ DB export로 강제 교체된다. 배포 manifest SHA가 요청 SHA와 다르거
 누락·중복·공백·raw/ACK 불일치·DART checkpoint hash 불일치가 있으면 endpoint와
 materialization이 모두 fail-closed한다.
 
+## 검수 후보와 일회성 입력 생성
+
+`global-alpha-review-candidates.yml`은 기본 브랜치·`governance-runtime`에서만 수동 실행한다. 입력 확인 문구는 `EXPORT_GLOBAL_ALPHA_REVIEW_CANDIDATES`다. workflow는 Preview token을 URL이나 명령행에 넣지 않고 환경변수에서만 읽으며 다음을 모두 만족한 경우에만 `global-alpha-review-candidates-<SHA>` artifact를 만든다.
+
+- 작업 전후 `/api/v2/health`와 `/briefs/latest?edition=global`의 코드 SHA·brief ID·Top 5가 동일
+- 공식 HTTPS 근거가 있는 실제 사건 60건
+- `predicted_same`, `hard_negative`, `easy_negative` 각 40쌍으로 구성된 문서쌍 120개
+- 현재 발행본 Top 5 정확히 5건
+- Telegram·비공식 URL·중복·사람 결정·정답 라벨 0건
+
+첫 500개 공개 사건에 위 표본이 부족하면 수량을 합성하거나 임의 사건을 채우지 않고 실패한다. 사람이 artifact를 내려받아 원문·공식 링크를 확인한 뒤에만 결정 필드를 작성한다.
+
+보호 입력은 `curator.global_alpha_evidence_bundle`의 두 단계로 만든다. 먼저 운영 `/ops/alpha-release-evidence`의 JSON과 위 원본 후보 export를 같은 SHA로 고정해 빈 양식을 생성한다.
+
+```text
+python -m curator.global_alpha_evidence_bundle prepare \
+  --automated-evidence global-alpha-automated-evidence.json \
+  --review-candidate-export global-alpha-review-candidate-export.json \
+  --output-dir global-alpha-review-packet \
+  --expected-revision <RELEASE_SHA>
+```
+
+사람은 `human-review.json`, `approval.json`, `experience.json`의 승인·판정 칸을 직접 작성한다. 실제 최초 실행·동일 payload replay 결과는 `connector-idempotency.json`에 기록한다. `experience-artifact-manifest.json`에는 3개 screenshot, axe 보고서, Web Vitals, API 크기, 실패 탐지, rollback drill 원본 파일의 상대 경로와 SHA-256을 등록한다. `review-candidates.json`과 후보 ID·URL은 수정하지 않는다.
+
+작성 후 원본 후보 export, 동일 운영 evidence, 실제 경험 artifact를 다시 대조해 최종 secret 파일을 만든다.
+
+```text
+python -m curator.global_alpha_evidence_bundle finalize \
+  --input-dir global-alpha-review-packet \
+  --automated-evidence global-alpha-automated-evidence.json \
+  --review-candidate-export global-alpha-review-candidate-export.json \
+  --experience-artifact-root global-alpha-experience-artifacts \
+  --expected-revision <RELEASE_SHA> \
+  --evidence-as-of <TIMEZONE_INCLUDED_ISO8601> \
+  --output GLOBAL_ALPHA_RELEASE_INPUTS_GZIP_B64.txt
+
+python -m curator.global_alpha_evidence_bundle verify-encoded \
+  --encoded-file GLOBAL_ALPHA_RELEASE_INPUTS_GZIP_B64.txt \
+  --expected-revision <RELEASE_SHA>
+```
+
+`finalize`는 원본 후보 export의 canonical SHA-256과 결정적 60/120/5 선택을 다시 계산하므로 후보와 사람 검수 결과를 함께 바꾸는 우회도 거절한다. 경험 증빙 파일은 실제 바이트 해시로 확인한다. 최종 파일 내용만 `governance-release`의 일회성 `GLOBAL_ALPHA_RELEASE_INPUTS_GZIP_B64` secret으로 등록하고 `global-alpha-evidence-inputs.yml` 성공 직후 삭제한다. 후보 export, 운영 evidence, 검수 양식, 경험 artifact에는 토큰이나 자격정보를 넣지 않는다.
+
+`global-alpha-evidence-inputs.yml` 실행 시에는 원본 후보를 만든
+`review_candidate_run_id`를 반드시 입력한다. workflow는 GitHub Actions API로
+해당 run이 아래 조건을 모두 만족하는지 확인한 뒤 정확히 하나의 artifact만
+GitHub digest 검증과 함께 내려받는다.
+
+- `.github/workflows/global-alpha-review-candidates.yml`의 수동 실행
+- 현재 기본 브랜치와 정확히 같은 40자리 SHA
+- 성공 결론, 실행 후 72시간 이내
+- 이름이 정확히 `global-alpha-review-candidates-<SHA>`이고 만료되지 않은 artifact
+- GitHub가 제공한 `sha256:` artifact digest
+
+보호 secret을 materialize한 뒤 `verify-materialized-review`가 다운로드한 원본
+export에서 결정적 60개 사건·120개 문서쌍·Top 5를 다시 선택한다. 이어서
+`human-review.json`의 ID와 순서를 원본 선택과 정확히 대조하고, 실제 사람 라벨,
+사람 attestation, 60/120/5 gate도 함께 검증한다. 하나라도 다르면 보호 입력
+artifact를 만들지 않는다. 수동으로 준비한 다른 export를 이 단계에 대신 전달할
+수 없다.
+
+성공한 보호 입력 artifact에는 비밀이 아닌
+`review-candidate-provenance.json`이 추가된다. 여기에는 producer workflow,
+run ID·attempt·생성 시각, artifact ID·이름·GitHub digest, export와 사람 검수
+파일의 byte 수·파일 SHA-256·canonical JSON SHA-256, 결정적 선택과 검수
+identity의 canonical SHA-256, 60/120/5 건수가 기록된다. 따라서 이후 release
+evidence workflow가 고정하는 보호 입력 artifact에서 후보 생성 run까지 감사
+경로를 역추적할 수 있다.
+
 ## 입력 파일
 
 보호 입력 bundle은 다음 최상위 구조를 사용한다.
