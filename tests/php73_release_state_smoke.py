@@ -910,7 +910,7 @@ def exercise_event_identity_datetime_storage(
             "published_at": "2026-07-24T00:00:00Z",
             "retrieved_at": "2026-07-24T00:05:00Z",
             "verification_status": "official",
-            "publication_status": "draft",
+            "publication_status": "published",
             "is_correction": correction_of is not None,
         }
 
@@ -1164,6 +1164,36 @@ def exercise_event_identity_datetime_storage(
         )
         == "2\t2",
         "DART and KIND must contribute two observations to one date-only event",
+    )
+    event_ids = f"'{date_key}','{midnight_key}'"
+    document_ids = (
+        f"'{original_document_id}','{midnight_document_id}','{kind_document_id}'"
+    )
+    mysql_execute(
+        mysql_container_id,
+        "DELETE FROM ci_event_observations "
+        f"WHERE event_id IN ({event_ids});"
+        "DELETE FROM ci_event_documents "
+        f"WHERE event_id IN ({event_ids});"
+        "DELETE FROM ci_event_actors "
+        f"WHERE event_id IN ({event_ids});"
+        "DELETE FROM ci_documents "
+        f"WHERE document_id IN ({document_ids});"
+        "DELETE FROM ci_governance_events "
+        f"WHERE event_id IN ({event_ids});"
+        f"DELETE FROM ci_actors WHERE actor_id='{actor_id}';"
+        f"DELETE FROM ci_companies WHERE company_id='{company_id}';",
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT "
+            f"(SELECT COUNT(*) FROM ci_governance_events WHERE event_id IN ({event_ids})),"
+            f"(SELECT COUNT(*) FROM ci_documents WHERE document_id IN ({document_ids})),"
+            f"(SELECT COUNT(*) FROM ci_companies WHERE company_id='{company_id}')",
+        )
+        == "0\t0\t0",
+        "identity precision fixture must not leak into later corpus checks",
     )
 
 

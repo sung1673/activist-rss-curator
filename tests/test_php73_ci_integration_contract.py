@@ -87,5 +87,6 @@ def test_php73_release_fixture_preserves_canonical_dart_source_right_id() -> Non
     ]
 
     assert 'source_right_id = "official:dart"' in identity_fixture
-    assert '"publication_status": "draft"' in identity_fixture
+    assert "DELETE FROM ci_event_observations " in identity_fixture
+    assert "identity precision fixture must not leak into later corpus checks" in identity_fixture
     assert "official:dart-identity-precision-smoke" not in smoke
