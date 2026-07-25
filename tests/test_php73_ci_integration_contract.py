@@ -81,6 +81,11 @@ def test_php73_fixture_contains_no_repository_secret_reference() -> None:
 
 def test_php73_release_fixture_preserves_canonical_dart_source_right_id() -> None:
     smoke = (ROOT / "tests" / "php73_release_state_smoke.py").read_text(encoding="utf-8")
+    identity_fixture = smoke[
+        smoke.index("def exercise_event_identity_datetime_storage") :
+        smoke.index("def exercise_dart_review_corpus")
+    ]
 
-    assert 'source_right_id = "official:dart"' in smoke
+    assert 'source_right_id = "official:dart"' in identity_fixture
+    assert '"publication_status": "draft"' in identity_fixture
     assert "official:dart-identity-precision-smoke" not in smoke

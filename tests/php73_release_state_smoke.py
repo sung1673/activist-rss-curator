@@ -910,7 +910,7 @@ def exercise_event_identity_datetime_storage(
             "published_at": "2026-07-24T00:00:00Z",
             "retrieved_at": "2026-07-24T00:05:00Z",
             "verification_status": "official",
-            "publication_status": "published",
+            "publication_status": "draft",
             "is_correction": correction_of is not None,
         }
 
