@@ -32,6 +32,12 @@ credentials, endpoints, or source data in logs.
   the partial output. `UNLOCK TABLES` is attempted on every success and
   failure path, and closing the dedicated lock connection provides the final
   server-side release guarantee.
+- Explicit table locks cannot name an object that does not exist in the
+  preflight inventory. Scheduled writers, manual schema administration, and
+  every other DDL path must therefore remain quiescent for the complete backup
+  window. A transient object created and removed between inventory checks
+  cannot be detected; without the no-DDL operational gate, the fallback must
+  not be used and migration must not start.
 
 These rules follow the MySQL 8.0 lock semantics:
 [`FLUSH TABLES WITH READ LOCK`](https://dev.mysql.com/doc/refman/8.0/en/flush.html)
@@ -113,7 +119,8 @@ and expected table count before applying migration 011.
 
 ## Operational order
 
-1. Confirm no GitHub writer workflow is running and pause the legacy writer.
+1. Confirm no GitHub writer workflow is running, pause the legacy writer, and
+   establish a no-manual-DDL window through completion verification.
 2. Create a new private output directory outside the repository.
 3. Load the already-preserved local DB and SSH environment files without
    printing their values.
