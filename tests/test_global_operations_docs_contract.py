@@ -68,6 +68,10 @@ def test_global_source_secrets_and_variables_match_workflows():
         assert name in global_workflow
         assert name in README
         assert name in OPERATIONS
+    assert "SEC_API_KEY" not in global_workflow
+    assert "SEC_EDGAR_API_KEY" not in global_workflow
+    assert "SEC 공개 EDGAR 수집은 별도 API key를 사용하지 않는다" in OPERATIONS
+    assert "검색 결과 HTML이나 Full-Text Search 화면을 파싱하지 않는다" in API_DOCS
 
 
 def test_global_checkpoint_catch_up_and_company_limit_are_documented():

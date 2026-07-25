@@ -2,8 +2,10 @@
 
 OpenDART deliberately does not use this module.  Korea continues through the
 established official-ingest pipeline, while this runner sends the SEC
-current-filings Atom feed plus completed-day index reconciliation, EDINET, and
-explicitly scoped Companies House observations to the v2 review queue.
+current-filings Atom feed plus completed-day index reconciliation to the v2
+review queue.  EDINET and Companies House API collection must be explicitly
+activated.  Without their credentials, this runner records the narrower
+keyless/link-only coverage instead of scraping either public viewer.
 """
 
 from __future__ import annotations
@@ -50,6 +52,18 @@ MAX_COMPANIES_HOUSE_ISSUERS = 50
 MAX_AUTOMATIC_WINDOW_DAYS = 31
 AUTOMATIC_OVERLAP_DAYS = 1
 MIN_AUTOMATIC_CHECKPOINT_DATE = date(2015, 1, 1)
+EDINET_CONNECTOR_MODES = {"link-only", "active"}
+COMPANIES_HOUSE_CONNECTOR_MODES = {"keyless", "active"}
+
+
+@dataclass(frozen=True)
+class GlobalIngestExecutionMode:
+    country_code: str
+    mode: str
+    api_active: bool
+    coverage_mode: str
+    ingest_mode: str
+    reason: str | None
 
 
 class GlobalIngestError(RuntimeError):
@@ -718,12 +732,93 @@ def parse_companies_house_allowlist(raw: str) -> tuple[IssuerReference, ...]:
     return tuple(sorted(issuers, key=lambda issuer: issuer.value))
 
 
+def global_ingest_execution_mode(
+    country_code: str,
+    *,
+    environment: Mapping[str, str],
+) -> GlobalIngestExecutionMode:
+    """Resolve an explicit API mode without treating public HTML as an API.
+
+    Credentials alone never activate JP or GB API collection.  This prevents a
+    repository/environment secret from silently widening the declared source
+    coverage.  The keyless modes make no source request in this runner.
+    """
+
+    country = str(country_code or "").strip().upper()
+    if country == "US":
+        return GlobalIngestExecutionMode(
+            country_code=country,
+            mode="active",
+            api_active=True,
+            coverage_mode="market-wide",
+            ingest_mode="official-api",
+            reason=None,
+        )
+    if country == "JP":
+        mode = str(
+            environment.get("EDINET_CONNECTOR_MODE") or "link-only"
+        ).strip().casefold()
+        if mode not in EDINET_CONNECTOR_MODES:
+            raise GlobalIngestConfigurationError(
+                "invalid_edinet_connector_mode"
+            )
+        return GlobalIngestExecutionMode(
+            country_code=country,
+            mode=mode,
+            api_active=mode == "active",
+            coverage_mode=("market-wide" if mode == "active" else "link-only"),
+            ingest_mode=(
+                "official-api" if mode == "active" else "official-links-only"
+            ),
+            reason=(
+                None
+                if mode == "active"
+                else "edinet_api_key_required_html_scraping_prohibited"
+            ),
+        )
+    if country == "GB":
+        mode = str(
+            environment.get("COMPANIES_HOUSE_CONNECTOR_MODE") or "keyless"
+        ).strip().casefold()
+        if mode not in COMPANIES_HOUSE_CONNECTOR_MODES:
+            raise GlobalIngestConfigurationError(
+                "invalid_companies_house_connector_mode"
+            )
+        return GlobalIngestExecutionMode(
+            country_code=country,
+            mode=mode,
+            api_active=mode == "active",
+            coverage_mode=(
+                "official-register" if mode == "active" else "link-only"
+            ),
+            ingest_mode=(
+                "official-api"
+                if mode == "active"
+                else "official-bulk-basic-register-links"
+            ),
+            reason=(
+                None
+                if mode == "active"
+                else "companies_house_api_key_required_for_filing_history"
+            ),
+        )
+    raise GlobalIngestConfigurationError("unsupported_global_ingest_country")
+
+
 def build_connector(
     country_code: str,
     *,
     environment: Mapping[str, str],
 ) -> tuple[GlobalSourceConnector, tuple[IssuerReference, ...]]:
     country = str(country_code or "").strip().upper()
+    execution_mode = global_ingest_execution_mode(
+        country,
+        environment=environment,
+    )
+    if not execution_mode.api_active:
+        raise GlobalIngestConfigurationError(
+            f"{country.casefold()}_official_api_connector_not_active"
+        )
     if country == "US":
         user_agent = str(environment.get("SEC_EDGAR_USER_AGENT", "")).strip()
         if not user_agent:
@@ -1056,6 +1151,53 @@ def _api_configuration(
     return _validated_v2_base_url(base_url), token
 
 
+def coverage_unavailable_evidence(
+    *,
+    execution_mode: GlobalIngestExecutionMode,
+    code_revision: str,
+    started_at: str,
+) -> dict[str, object]:
+    """Describe a keyless source boundary without making a source request."""
+
+    if execution_mode.api_active or execution_mode.reason is None:
+        raise GlobalIngestConfigurationError(
+            "coverage_evidence_requires_inactive_connector"
+        )
+    keyless_capabilities = (
+        ["official_viewer_links"]
+        if execution_mode.country_code == "JP"
+        else [
+            "monthly_company_bulk_snapshot",
+            "daily_electronic_accounts_bulk",
+            "psc_snapshot",
+            "basic_company_uri",
+            "public_register_links",
+        ]
+    )
+    return {
+        "schema_version": 1,
+        "status": "coverage_unavailable",
+        "country_code": execution_mode.country_code,
+        "connector_mode": execution_mode.mode,
+        "coverage_mode": execution_mode.coverage_mode,
+        "ingest_mode": execution_mode.ingest_mode,
+        "reason": execution_mode.reason,
+        "code_revision": code_revision,
+        "api_connector_active": False,
+        "eligible_for_release": False,
+        "metadata_only": True,
+        "html_scraping": False,
+        "source_urls_requested": 0,
+        "record_count": 0,
+        "acknowledged_count": 0,
+        "keyless_capabilities": keyless_capabilities,
+        "started_at": started_at,
+        "completed_at": datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat(),
+    }
+
+
 def _failure_evidence(
     *,
     country_code: str,
@@ -1130,6 +1272,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         revision = _validate_code_revision(
             args.code_revision or os.environ.get("GITHUB_SHA", "")
         )
+        execution_mode = global_ingest_execution_mode(
+            args.country,
+            environment=os.environ,
+        )
+        if not execution_mode.api_active:
+            evidence = coverage_unavailable_evidence(
+                execution_mode=execution_mode,
+                code_revision=revision,
+                started_at=started_at,
+            )
+            write_evidence(args.evidence, evidence)
+            print(
+                _canonical_json(
+                    {
+                        "ok": False,
+                        "status": "coverage_unavailable",
+                        "country_code": execution_mode.country_code,
+                        "coverage_mode": execution_mode.coverage_mode,
+                    }
+                )
+            )
+            return 0
         connector, issuers = build_connector(
             args.country,
             environment=os.environ,

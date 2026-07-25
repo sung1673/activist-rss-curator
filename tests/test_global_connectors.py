@@ -100,7 +100,12 @@ def test_selected_issuer_coverage_fails_closed_without_scope() -> None:
 def test_sec_connector_preserves_source_title_and_is_idempotent() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["user-agent"] == "BSIDE test ops@example.com"
+        assert request.url.scheme == "https"
+        assert request.url.host == "data.sec.gov"
         assert request.url.path == "/submissions/CIK0000320193.json"
+        assert not request.url.query
+        assert "authorization" not in request.headers
+        assert "x-api-key" not in request.headers
         return httpx.Response(
             200,
             json={
@@ -246,9 +251,49 @@ def test_sec_connector_preserves_source_title_and_is_idempotent() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "user_agent",
+    (
+        "",
+        "ops@example.com",
+        "BSIDE",
+        "BSIDE ops@example",
+        "BSIDE ops@example.com\rInjected: value",
+        "BSIDE ops@example.com\x7f",
+    ),
+)
+@pytest.mark.parametrize(
+    "connector_class",
+    (
+        SecDailyIndexConnector,
+        SecCurrentFilingsConnector,
+        SecSubmissionsConnector,
+    ),
+)
+def test_sec_connectors_require_declared_service_and_contact_email(
+    connector_class: type[
+        SecDailyIndexConnector
+        | SecCurrentFilingsConnector
+        | SecSubmissionsConnector
+    ],
+    user_agent: str,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="service and contact email",
+    ):
+        connector_class(user_agent=user_agent)
+
+
 def test_sec_daily_index_connector_is_market_wide_and_filters_forms() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.scheme == "https"
+        assert request.url.host == "www.sec.gov"
         assert request.url.path.endswith("/2026/QTR3/master.20260724.idx")
+        assert not request.url.query
+        assert request.headers["user-agent"] == "BSIDE test ops@example.com"
+        assert "authorization" not in request.headers
+        assert "x-api-key" not in request.headers
         return httpx.Response(
             200,
             text=(
@@ -380,7 +425,19 @@ def test_sec_current_atom_is_cursor_driven_exact_and_preserves_source_fields() -
         assert request.url.params["action"] == "getcurrent"
         assert request.url.params["output"] == "atom"
         assert request.url.params["count"] == "100"
+        assert set(request.url.params) == {
+            "action",
+            "company",
+            "count",
+            "dateb",
+            "output",
+            "owner",
+            "start",
+            "type",
+        }
         assert request.headers["user-agent"] == "BSIDE test ops@example.com"
+        assert "authorization" not in request.headers
+        assert "x-api-key" not in request.headers
         return httpx.Response(200, content=atom.encode("iso-8859-1"))
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
@@ -465,6 +522,87 @@ def test_sec_current_pagination_observes_fair_access_rate_limit() -> None:
     assert result.request_count == 2
     assert result.raw_count == 100
     assert result.records == ()
+    assert sleeps == [pytest.approx(0.12)]
+
+
+def test_sec_submissions_observes_shared_fair_access_interval_and_budget() -> None:
+    clock_value = [0.0]
+    sleeps: list[float] = []
+    requests: list[httpx.Request] = []
+
+    def sleep(delay: float) -> None:
+        sleeps.append(delay)
+        clock_value[0] += delay
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        cik = request.url.path.removeprefix("/submissions/CIK").removesuffix(
+            ".json"
+        )
+        return httpx.Response(
+            200,
+            json={
+                "cik": cik,
+                "name": f"Issuer {cik}",
+                "filings": {
+                    "recent": {
+                        "accessionNumber": [],
+                        "filingDate": [],
+                        "acceptanceDateTime": [],
+                        "form": [],
+                        "primaryDocument": [],
+                        "primaryDocDescription": [],
+                        "items": [],
+                    }
+                },
+            },
+        )
+
+    scoped_request = GlobalConnectorRequest(
+        window_start=date(2026, 7, 24),
+        window_end_exclusive=date(2026, 7, 25),
+        issuers=(
+            IssuerReference(
+                namespace="US:CIK",
+                identifier_type="CIK",
+                value="1",
+            ),
+            IssuerReference(
+                namespace="US:CIK",
+                identifier_type="CIK",
+                value="2",
+            ),
+        ),
+        max_pages=2,
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = SecSubmissionsConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+            sleep=sleep,
+            clock=lambda: clock_value[0],
+        )
+        result = connector.fetch(
+            scoped_request,
+            eligibility=eligibility("official:sec-edgar", "sec-edgar"),
+            now=NOW,
+        )
+
+        with pytest.raises(
+            GlobalConnectorPaginationError,
+            match="issuer scope exceeds max_pages",
+        ):
+            connector.fetch(
+                replace(scoped_request, max_pages=1),
+                eligibility=eligibility(
+                    "official:sec-edgar",
+                    "sec-edgar",
+                ),
+                now=NOW,
+            )
+
+    assert result.request_count == 2
+    assert len(requests) == 2
     assert sleeps == [pytest.approx(0.12)]
 
 

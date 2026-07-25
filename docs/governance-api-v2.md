@@ -54,9 +54,9 @@ migration_sha256="$(sha256sum "$migration" | cut -d ' ' -f1)"
 - 한국: OpenDART의 8개 거버넌스 사건 유형, `market-wide`
 - 미국: SEC EDGAR 공식 Latest Filings Atom 당일 증분과 completed-day 일일 인덱스 대조의 대량보유·주총·공개매수/M&A 허용 서식, `market-wide`. Atom cursor가 없거나 마지막 hybrid 성공이 45분을 넘으면 `delayed`, `live_ready=false`로 공개·출시를 차단한다.
 
-SEC 당일 경로는 SEC가 [Latest Filings Search와 RSS feed](https://www.sec.gov/about/rss-feeds)로 공개한 `https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&output=atom`만 사용한다. 모든 요청은 연락 가능한 이메일이 든 `SEC_EDGAR_USER_AGENT`를 전송하고 redirect를 따르지 않는다. 같은 hybrid 실행의 daily index와 Atom 요청은 공통 120ms 최소 간격(초당 10회 미만)을 사용하고 실제 요청 수 합계가 `max_pages`를 넘으면 적재하지 않는다. 첫 요청 전에는 인위적 지연을 넣지 않는다. Atom 응답은 source title·acceptance timestamp·official filing-index URL을 보존한다. 8-K/8-K/A는 `unclassified` 비공개 검수 후보이며 관련 item을 사람이 확정하기 전 공개 사건이 되지 않는다.
-- 일본: EDINET의 대량보유·주총·공개매수/M&A·자본환원·정정/철회 허용 문서 유형, `market-wide`
-- 영국: 설정된 company number에 대한 Companies House 등록부 범위, `official-register`
+SEC 수집에는 API key나 EDGAR Next filer token을 사용하지 않는다. 당일 발견은 SEC가 [Latest Filings Search와 RSS feed](https://www.sec.gov/about/rss-feeds)로 공개한 `https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&output=atom`, 완료일 대조는 공식 `/Archives/edgar/daily-index`, 회사별 보강은 `https://data.sec.gov/submissions/CIK##########.json`, 원문 링크는 accession 기반 `/Archives/edgar/data`만 사용한다. 검색 결과 HTML이나 Full-Text Search 화면을 파싱하지 않는다. 모든 요청은 서비스명과 연락 가능한 이메일이 든 `SEC_EDGAR_USER_AGENT`를 전송하고 redirect를 따르지 않는다. 같은 실행의 SEC 요청은 공통 120ms 최소 간격(초당 10회 미만)을 사용하고 실제 요청 수 합계가 `max_pages`를 넘으면 적재하지 않는다. 첫 요청 전에는 인위적 지연을 넣지 않는다. Atom 응답은 source title·acceptance timestamp·official filing-index URL을 보존한다. 8-K/8-K/A는 `unclassified` 비공개 검수 후보이며 관련 item을 사람이 확정하기 전 공개 사건이 되지 않는다.
+- 일본: 기본 `link-only` 모드에서는 EDINET HTML/API 요청을 하지 않고 `coverage_unavailable`을 표시한다. `EDINET_CONNECTOR_MODE=active`와 EDINET 발급 자격정보가 있을 때만 허용 문서 유형을 `market-wide`로 수집한다.
+- 영국: 기본 `keyless` 모드에서는 filing-history API·공개 검색 HTML을 요청하지 않고 허용된 bulk/basic-register·공식 링크 경계만 표시한다. `COMPANIES_HOUSE_CONNECTOR_MODE=active`와 API 자격정보가 있을 때만 설정된 company number의 `official-register` filing history를 수집한다.
 - 캐나다: issuer 식별자와 별도 호스트 증빙에 묶인 회사 IR 링크 metadata, `link-only / manual-metadata`; SEDAR+ 전문 수집·재배포 제외
 - 호주: `asic.gov.au` 공식 호스트의 수동 등록부 링크 metadata, `link-only / manual-metadata`; ASX 공시 전문 수집·재배포 제외
 
@@ -224,8 +224,8 @@ OpenDART는 이 v2 수집 경로의 대상이 아니다. 한국 공시는 기존
 
 - 공통: `BSIDE_API_BASE_URL` secret 또는 `GOVERNANCE_API_BASE_URL` variable, `BSIDE_OPS_TOKEN` secret, `GOVERNANCE_PIPELINE_MODE` variable
 - SEC EDGAR: 연락 가능한 이메일을 포함한 `SEC_EDGAR_USER_AGENT` variable
-- EDINET: `EDINET_API_KEY` secret
-- Companies House: `COMPANIES_HOUSE_API_KEY` secret과 `COMPANIES_HOUSE_ISSUERS_JSON` variable
+- EDINET: 기본 `EDINET_CONNECTOR_MODE=link-only`; API 수집을 명시적으로 켤 때만 `active`와 `EDINET_API_KEY` secret
+- Companies House: 기본 `COMPANIES_HOUSE_CONNECTOR_MODE=keyless`; filing-history API를 명시적으로 켤 때만 `active`, `COMPANIES_HOUSE_API_KEY` secret과 `COMPANIES_HOUSE_ISSUERS_JSON` variable
 
 `COMPANIES_HOUSE_ISSUERS_JSON`은 빈 배열을 허용하지 않는 최대 50개 회사의 명시적 allowlist다. 각 항목은 `company_number`, `legal_name`을 필수로 하고 `market`, `ticker`만 선택적으로 허용한다. 캐나다·호주는 이 runner가 원문 수집하지 않는다.
 

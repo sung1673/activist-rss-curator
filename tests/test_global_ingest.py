@@ -8,7 +8,10 @@ from pathlib import Path
 import httpx
 import pytest
 
+import curator.global_ingest as global_ingest_module
 from curator.global_connectors import (
+    CompaniesHouseFilingHistoryConnector,
+    EdinetDocumentsConnector,
     GlobalConnectorEnvelope,
     GlobalConnectorRequest,
     GlobalDocumentRecord,
@@ -29,9 +32,12 @@ from curator.global_ingest import (
     build_connector,
     chunk_connector_envelope,
     content_idempotency_key,
+    coverage_unavailable_evidence,
     default_completed_window,
     execute_global_ingest,
+    global_ingest_execution_mode,
     global_ingest_chunk,
+    main,
     parse_companies_house_allowlist,
     sec_completed_day_limit,
     select_completed_window,
@@ -813,6 +819,170 @@ def test_us_builds_fail_closed_intraday_and_daily_hybrid() -> None:
     assert issuers == ()
 
 
+def test_jp_api_is_explicit_opt_in_and_keyless_mode_never_scrapes() -> None:
+    keyless = global_ingest_execution_mode("JP", environment={})
+    assert keyless.mode == "link-only"
+    assert keyless.api_active is False
+    assert keyless.coverage_mode == "link-only"
+    assert keyless.reason == (
+        "edinet_api_key_required_html_scraping_prohibited"
+    )
+    evidence = coverage_unavailable_evidence(
+        execution_mode=keyless,
+        code_revision=REVISION,
+        started_at=NOW,
+    )
+    assert evidence["html_scraping"] is False
+    assert evidence["source_urls_requested"] == 0
+    assert evidence["eligible_for_release"] is False
+    with pytest.raises(
+        GlobalIngestConfigurationError,
+        match="jp_official_api_connector_not_active",
+    ):
+        build_connector("JP", environment={})
+    with pytest.raises(
+        GlobalIngestConfigurationError,
+        match="missing_edinet_api_key",
+    ):
+        build_connector(
+            "JP",
+            environment={"EDINET_CONNECTOR_MODE": "active"},
+        )
+    connector, issuers = build_connector(
+        "JP",
+        environment={
+            "EDINET_CONNECTOR_MODE": "active",
+            "EDINET_API_KEY": "edinet-key",
+        },
+    )
+    assert isinstance(connector, EdinetDocumentsConnector)
+    assert issuers == ()
+
+
+def test_companies_house_keyless_mode_limits_itself_to_official_products() -> None:
+    keyless = global_ingest_execution_mode("GB", environment={})
+    assert keyless.mode == "keyless"
+    assert keyless.api_active is False
+    assert keyless.coverage_mode == "link-only"
+    evidence = coverage_unavailable_evidence(
+        execution_mode=keyless,
+        code_revision=REVISION,
+        started_at=NOW,
+    )
+    assert evidence["html_scraping"] is False
+    assert evidence["source_urls_requested"] == 0
+    assert evidence["keyless_capabilities"] == [
+        "monthly_company_bulk_snapshot",
+        "daily_electronic_accounts_bulk",
+        "psc_snapshot",
+        "basic_company_uri",
+        "public_register_links",
+    ]
+    with pytest.raises(
+        GlobalIngestConfigurationError,
+        match="gb_official_api_connector_not_active",
+    ):
+        build_connector(
+            "GB",
+            environment={"COMPANIES_HOUSE_API_KEY": "unused-key"},
+        )
+    connector, issuers = build_connector(
+        "GB",
+        environment={
+            "COMPANIES_HOUSE_CONNECTOR_MODE": "active",
+            "COMPANIES_HOUSE_API_KEY": "companies-house-key",
+            "COMPANIES_HOUSE_ISSUERS_JSON": json.dumps(
+                [
+                    {
+                        "company_number": "01234567",
+                        "legal_name": "Example Limited",
+                    }
+                ]
+            ),
+        },
+    )
+    assert isinstance(connector, CompaniesHouseFilingHistoryConnector)
+    assert [issuer.value for issuer in issuers] == ["01234567"]
+
+
+@pytest.mark.parametrize(
+    ("country", "variable", "value", "code"),
+    [
+        (
+            "JP",
+            "EDINET_CONNECTOR_MODE",
+            "scrape",
+            "invalid_edinet_connector_mode",
+        ),
+        (
+            "GB",
+            "COMPANIES_HOUSE_CONNECTOR_MODE",
+            "scrape",
+            "invalid_companies_house_connector_mode",
+        ),
+    ],
+)
+def test_keyless_mode_rejects_html_scraping_configuration(
+    country: str,
+    variable: str,
+    value: str,
+    code: str,
+) -> None:
+    with pytest.raises(GlobalIngestConfigurationError, match=code):
+        global_ingest_execution_mode(
+            country,
+            environment={variable: value},
+        )
+
+
+@pytest.mark.parametrize(
+    ("country", "expected_mode"),
+    [("JP", "official-links-only"), ("GB", "official-bulk-basic-register-links")],
+)
+def test_keyless_cli_writes_unavailable_evidence_without_api_configuration(
+    country: str,
+    expected_mode: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("BSIDE_API_BASE_URL", raising=False)
+    monkeypatch.delenv("GOVERNANCE_API_BASE_URL", raising=False)
+    monkeypatch.delenv("ACTIVIST_API_URL", raising=False)
+    monkeypatch.delenv("BSIDE_OPS_TOKEN", raising=False)
+    monkeypatch.delenv("EDINET_API_KEY", raising=False)
+    monkeypatch.delenv("COMPANIES_HOUSE_API_KEY", raising=False)
+    monkeypatch.setenv("EDINET_CONNECTOR_MODE", "link-only")
+    monkeypatch.setenv("COMPANIES_HOUSE_CONNECTOR_MODE", "keyless")
+    written: dict[str, object] = {}
+
+    def capture_evidence(
+        path: Path,
+        payload: dict[str, object],
+    ) -> None:
+        assert path == Path("keyless-evidence.json")
+        written.update(payload)
+
+    monkeypatch.setattr(
+        global_ingest_module,
+        "write_evidence",
+        capture_evidence,
+    )
+    assert main(
+        [
+            "--country",
+            country,
+            "--code-revision",
+            REVISION,
+            "--evidence",
+            "keyless-evidence.json",
+        ]
+    ) == 0
+    assert written["status"] == "coverage_unavailable"
+    assert written["ingest_mode"] == expected_mode
+    assert written["api_connector_active"] is False
+    assert written["html_scraping"] is False
+    assert written["source_urls_requested"] == 0
+
+
 def test_default_dates_and_validation_are_half_open() -> None:
     assert default_completed_window(today=date(2026, 7, 24)) == (
         date(2026, 7, 22),
@@ -1002,6 +1172,10 @@ def test_workflow_is_matrixed_guarded_serial_and_never_uses_telegram() -> None:
     assert "cancel-in-progress: false" in workflow
     assert "GOVERNANCE_PIPELINE_MODE" in workflow
     assert "--require-active-pipeline" in workflow
+    assert "EDINET_CONNECTOR_MODE" in workflow
+    assert "'link-only'" in workflow
+    assert "COMPANIES_HOUSE_CONNECTOR_MODE" in workflow
+    assert "'keyless'" in workflow
     assert "COMPANIES_HOUSE_ISSUERS_JSON" in workflow
     assert "if: always()" in workflow
     assert "TELEGRAM_" not in workflow

@@ -52,8 +52,8 @@ GitHub cron은 UTC로 해석된다. 일일 생성은 `45 20 * * *`(KST 05:45), �
 - `BSIDE_RELEASE_AUTHORIZER_TOKEN`: 보호된 `governance-release` environment에만 등록하는 32바이트 이상 token. 정확한 `release_authorizer` 역할로 `/api/v2/admin/release-authorizations`만 호출하며, 일반 repository/environment나 watchdog에는 제공하지 않는다. PHP에는 평문 대신 SHA-256을 별도 역할 hash로 등록
 - `BSIDE_EDITOR_TOKEN`: 사건·캠페인·정정·shadow discrepancy 검수와 v2 brief 후보·발행에 사용하는 32바이트 이상 token. PHP에는 평문 대신 SHA-256을 editor 역할 hash로 등록
 - `GOVERNANCE_PREVIEW_TOKEN`: 비공개 preview 조회용 32바이트 이상 token. PHP에는 평문 대신 `governance_preview_token_hash` SHA-256만 등록하고 Pages artifact·URL query에는 포함하지 않음
-- `EDINET_API_KEY`: 일본 EDINET documents API
-- `COMPANIES_HOUSE_API_KEY`: 영국 Companies House filing-history API
+- `EDINET_API_KEY`: `EDINET_CONNECTOR_MODE=active`일 때만 사용하는 일본 EDINET documents API 자격정보. 기본 `link-only` 모드에서는 요구하지 않음
+- `COMPANIES_HOUSE_API_KEY`: `COMPANIES_HOUSE_CONNECTOR_MODE=active`일 때만 사용하는 영국 Companies House filing-history API 자격정보. 기본 `keyless` 모드에서는 요구하지 않음
 - `STORY_REVIEW_ACCESS_TOKEN`, `TELEGRAM_ADMIN_ACCESS_TOKEN`: 명시적으로 생성·등록하는 편집 검수 token. Telegram 메시지나 URL에는 넣지 않고 관리자가 고정된 관리자 URL에서 직접 입력
 
 Repository variable의 단일 기준:
@@ -62,18 +62,20 @@ Repository variable의 단일 기준:
 - `GOVERNANCE_PIPELINE_MODE=off|dart_canary|shadow|live`: 공식 수집과 후보 파이프라인 단계
 - `KIND_CONNECTOR_MODE=off|active`: 기본 `off`. `off`에서는 `shadow|live` 예약 실행도 DART만 수집하고 일반 watchdog도 KIND 설정·freshness를 요구하지 않는다. `active`에서는 기존처럼 KIND endpoint·SourceRight·수집 최신성을 fail-closed로 요구한다. 수동 `include_kind=true`와 `kind-adapter-preflight.yml`은 이 예약 토글과 별개인 명시적 검증 경로다.
 - `GLOBAL_ALPHA_OBSERVATION_ENABLED=false|true`: 기본 `false`. `false` 또는 빈 값에서는 5분 Alpha 관측 job을 만들지 않는다. 소스·preview·동일 SHA가 준비된 뒤 `true`로 바꾸며, 다른 값은 관측 run을 실패시킨다.
+- `EDINET_CONNECTOR_MODE=link-only|active`: 기본 `link-only`. 기본값에서는 EDINET HTML/API 요청을 모두 하지 않고 공개 coverage가 준비되지 않았다는 증빙만 남긴다. `active`에서만 `EDINET_API_KEY`를 요구한다.
+- `COMPANIES_HOUSE_CONNECTOR_MODE=keyless|active`: 기본 `keyless`. 기본값에서는 filing-history API나 공개 검색 HTML을 요청하지 않고 허용된 bulk/basic-register 경계만 증빙한다. `active`에서만 API key와 issuer allowlist를 요구한다.
 - `ENABLE_TELEGRAM_DELIVERY=false`, `ENABLE_GOVERNANCE_DELIVERY=false`: 영구 비활성. `true`이면 workflow가 fail-closed
 - `ACTIVIST_PUBLIC_API_URL`: 브라우저에서 읽는 공개 API URL
 - `GOVERNANCE_API_BASE_URL`: 공개 거버넌스 UI의 `/api/v1` 기준 URL. 비어 있으면 `ACTIVIST_PUBLIC_API_URL` 뒤에 `/api/v1`을 붙여 사용
 - `BSIDE_PUBLIC_WEB_URL`: Production Alpha watchdog과 전환 smoke가 확인할 공개 루트. 기본값은 `https://news.bside.ai`
-- `SEC_EDGAR_USER_AGENT`: SEC 정책에 맞는 서비스명과 연락 가능한 이메일을 포함한 User-Agent
+- `SEC_EDGAR_USER_AGENT`: SEC 정책에 맞는 서비스명과 실제 연락 가능한 이메일을 포함한 User-Agent. SEC 공개 EDGAR 수집은 별도 API key를 사용하지 않는다.
 - `COMPANIES_HOUSE_ISSUERS_JSON`: Companies House 수집 대상의 명시적 JSON allowlist. `company_number`, `legal_name` 필수, `market`, `ticker` 선택
 - `CA_OFFICIAL_LINKS_JSON`, `AU_OFFICIAL_LINKS_JSON`: 승인된 캐나다·호주 수동 공식 링크 metadata의 닫힌 JSON object. 아래 Production Alpha 계약을 따른다.
 - `KIND_DISCLOSURE_ENDPOINT`: 이 저장소가 정의한 JSON·pagination 계약을 충족하는 검증된 KIND 어댑터 URL. 일반 KIND HTML 화면이나 임의 자리표시자 URL을 넣지 않으며, 값이 없거나 계약 검증에 실패하면 공식 수집 workflow가 fail-closed로 종료
 
 ## 글로벌 터미널 Production Alpha
 
-`/api/v2`와 신규 데이터 터미널은 국가별 접근권 차이를 공개하는 Production Alpha다. 미국·일본·영국 공식 수집과 캐나다·호주 `link-only / manual-metadata` 검증은 `GOVERNANCE_PIPELINE_MODE=shadow|live`에서만 예약 실행된다. OpenDART는 기존 `ingest-official.yml` 경로를 계속 사용하며 `ingest-global.yml`로 중복 적재하지 않는다.
+`/api/v2`와 신규 데이터 터미널은 국가별 접근권 차이를 공개하는 Production Alpha다. 미국 공식 수집, 일본·영국의 명시적 API active 모드 또는 keyless 경계 증빙, 캐나다·호주 `link-only / manual-metadata` 검증은 `GOVERNANCE_PIPELINE_MODE=shadow|live`에서만 예약 실행된다. OpenDART는 기존 `ingest-official.yml` 경로를 계속 사용하며 `ingest-global.yml`로 중복 적재하지 않는다.
 
 API v2 배포 manifest의 필수 파일에는 `migrations/011_global_terminal_v2.sql`도 포함된다. 운영 적용 시 이 파일을 binary/byte-preserving 방식으로 전송하고, 원본 바이트의 SHA-256을 계산해 같은 MySQL 연결의 같은 입력 stream에서 `SET @bside_migration_011_sha256 = '<64자리 소문자 SHA-256>';` 다음에 SQL 파일을 그대로 보낸다. 별도 연결에서 `SET`하거나 파일을 변환한 뒤 적용하지 않는다. 적용된 DB의 version 11 checksum, 배포 manifest의 SQL hash, 서버 파일의 실제 hash 중 하나라도 다르면 v2 schema gate가 503으로 차단한다. 정확한 명령과 원자 배포·롤백 순서는 [v2 API 운영 계약](governance-api-v2.md)을 따른다.
 

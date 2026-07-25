@@ -96,6 +96,10 @@ _DISALLOWED_HOST_SUFFIXES = (
 _CA_DISALLOWED_PORTAL_HOSTS = (
     "sedar.com",
     "sedarplus.ca",
+    "sedarplus.com",
+    "sedi.ca",
+    "tmx.com",
+    "tsx.com",
     "asx.com.au",
     "asic.gov.au",
     "data.gov.au",

@@ -855,6 +855,43 @@ SEC_8K_ITEM_FAMILIES = {
     "5.07": "meeting_and_vote",
 }
 
+SEC_CURRENT_FILINGS_ATOM_ENDPOINT = (
+    "https://www.sec.gov/cgi-bin/browse-edgar"
+)
+SEC_DAILY_INDEX_BASE_URL = (
+    "https://www.sec.gov/Archives/edgar/daily-index"
+)
+SEC_SUBMISSIONS_BASE_URL = "https://data.sec.gov/submissions"
+SEC_ARCHIVES_BASE_URL = "https://www.sec.gov/Archives"
+_SEC_USER_AGENT_EMAIL = re.compile(
+    r"(?<![A-Z0-9._%+-])"
+    r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,63}"
+    r"(?![A-Z0-9._%+-])",
+    re.IGNORECASE,
+)
+
+
+def _validated_sec_user_agent(value: str) -> str:
+    """Return a declared SEC bot User-Agent with service and contact email."""
+
+    user_agent = str(value or "").strip()
+    if (
+        not user_agent
+        or len(user_agent) > 255
+        or any(ord(character) < 32 or ord(character) == 127 for character in user_agent)
+    ):
+        raise ValueError(
+            "SEC User-Agent must identify a service and contact email"
+        )
+    contact = _SEC_USER_AGENT_EMAIL.search(user_agent)
+    service = user_agent[: contact.start()].strip(" ()[]<>;,:/") if contact else ""
+    if contact is None or not service:
+        raise ValueError(
+            "SEC User-Agent must identify a service and contact email"
+        )
+    return user_agent
+
+
 SEC_EDGAR_DESCRIPTOR = SourceConnectorRecord(
     connector_id="connector:us:sec-edgar",
     country_code="US",
@@ -907,14 +944,7 @@ class SecDailyIndexConnector(BaseGlobalConnector):
         minimum_request_interval: float = 0.12,
         _throttle: _SecRequestThrottle | None = None,
     ) -> None:
-        if (
-            not user_agent.strip()
-            or "@" not in user_agent
-            or "\r" in user_agent
-            or "\n" in user_agent
-        ):
-            raise ValueError("SEC User-Agent must identify a contact email")
-        self.user_agent = user_agent.strip()
+        self.user_agent = _validated_sec_user_agent(user_agent)
         self.client = client
         self.timeout = timeout
         self.throttle = _throttle or _SecRequestThrottle(
@@ -927,8 +957,8 @@ class SecDailyIndexConnector(BaseGlobalConnector):
         self.throttle.wait()
         quarter = ((day.month - 1) // 3) + 1
         url = (
-            "https://www.sec.gov/Archives/edgar/daily-index/"
-            f"{day.year}/QTR{quarter}/master.{day:%Y%m%d}.idx"
+            f"{SEC_DAILY_INDEX_BASE_URL}/{day.year}/QTR{quarter}/"
+            f"master.{day:%Y%m%d}.idx"
         )
         headers = {
             "User-Agent": self.user_agent,
@@ -1062,7 +1092,7 @@ class SecDailyIndexConnector(BaseGlobalConnector):
                             tzinfo=ZoneInfo("America/New_York"),
                         ).astimezone(timezone.utc),
                         retrieved_at=retrieved_at,
-                        original_url=f"https://www.sec.gov/Archives/{quote(filename)}",
+                        original_url=f"{SEC_ARCHIVES_BASE_URL}/{quote(filename)}",
                         change_type=(
                             "corrected" if form.endswith("/A") else "new"
                         ),
@@ -1181,7 +1211,7 @@ class SecCurrentFilingsConnector(BaseGlobalConnector):
     """Market-wide intraday discovery from the SEC's official Atom feed."""
 
     descriptor = SEC_EDGAR_DESCRIPTOR
-    endpoint = "https://www.sec.gov/cgi-bin/browse-edgar"
+    endpoint = SEC_CURRENT_FILINGS_ATOM_ENDPOINT
 
     def __init__(
         self,
@@ -1194,14 +1224,7 @@ class SecCurrentFilingsConnector(BaseGlobalConnector):
         minimum_request_interval: float = 0.12,
         _throttle: _SecRequestThrottle | None = None,
     ) -> None:
-        if (
-            not user_agent.strip()
-            or "@" not in user_agent
-            or "\r" in user_agent
-            or "\n" in user_agent
-        ):
-            raise ValueError("SEC User-Agent must identify a contact email")
-        self.user_agent = user_agent.strip()
+        self.user_agent = _validated_sec_user_agent(user_agent)
         self.client = client
         self.timeout = timeout
         self.throttle = _throttle or _SecRequestThrottle(
@@ -1614,19 +1637,34 @@ class SecSubmissionsConnector(BaseGlobalConnector):
         user_agent: str,
         client: httpx.Client | None = None,
         timeout: float = 20.0,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
+        minimum_request_interval: float = 0.12,
+        _throttle: _SecRequestThrottle | None = None,
     ) -> None:
-        if (
-            not user_agent.strip()
-            or "@" not in user_agent
-            or "\r" in user_agent
-            or "\n" in user_agent
-        ):
-            raise ValueError("SEC User-Agent must identify a contact email")
-        self.user_agent = user_agent.strip()
+        self.user_agent = _validated_sec_user_agent(user_agent)
         self.client = client
         self.timeout = timeout
+        self.throttle = _throttle or _SecRequestThrottle(
+            minimum_interval=minimum_request_interval,
+            sleep=sleep,
+            clock=clock,
+        )
 
     def _get(self, url: str) -> httpx.Response:
+        parsed = urlparse(url)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "data.sec.gov"
+            or not parsed.path.startswith("/submissions/CIK")
+            or not parsed.path.endswith(".json")
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise GlobalConnectorContractError(
+                "SEC submissions URL is not an official structured endpoint"
+            )
+        self.throttle.wait()
         headers = {
             "User-Agent": self.user_agent,
             "Accept-Encoding": "gzip, deflate",
@@ -1656,6 +1694,10 @@ class SecSubmissionsConnector(BaseGlobalConnector):
             raise GlobalConnectorContractError(
                 "SEC submissions connector requires an explicit issuer scope"
             )
+        if len(request.issuers) > request.max_pages:
+            raise GlobalConnectorPaginationError(
+                "SEC submissions issuer scope exceeds max_pages request budget"
+            )
         for issuer in request.issuers:
             rights_guard.assert_current()
             if issuer.identifier_type != "CIK":
@@ -1664,7 +1706,7 @@ class SecSubmissionsConnector(BaseGlobalConnector):
             if not digits or len(digits) > 10:
                 raise GlobalConnectorContractError("SEC CIK is invalid")
             cik = digits.zfill(10)
-            url = f"https://data.sec.gov/submissions/CIK{cik}.json"
+            url = f"{SEC_SUBMISSIONS_BASE_URL}/CIK{cik}.json"
             payload = self._get(url).json()
             request_count += 1
             if not isinstance(payload, dict):
@@ -1777,7 +1819,7 @@ class SecSubmissionsConnector(BaseGlobalConnector):
                     ).astimezone(timezone.utc)
                 accession_path = accession.replace("-", "")
                 source_url = (
-                    f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/"
+                    f"{SEC_ARCHIVES_BASE_URL}/edgar/data/{int(cik)}/"
                     f"{accession_path}/{quote(primary_document)}"
                 )
                 description = str(column_lists["primaryDocDescription"][index] or "").strip()

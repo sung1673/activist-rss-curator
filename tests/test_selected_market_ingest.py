@@ -524,6 +524,15 @@ def test_ca_approved_host_cannot_be_shared_across_issuers() -> None:
     (
         "sedarplus.ca",
         "www.sedarplus.ca",
+        "sedarplus.com",
+        "www.sedarplus.com",
+        "sedi.ca",
+        "www.sedi.ca",
+        "tmx.com",
+        "www.tmx.com",
+        "money.tmx.com",
+        "tsx.com",
+        "www.tsx.com",
         "asx.com.au",
         "www.asic.gov.au",
         "data.gov.au",
@@ -540,6 +549,24 @@ def test_ca_rejects_known_nonissuer_portal_hosts(hostname: str) -> None:
                 original_url=f"https://{hostname}/record",
             )
         )
+
+
+def test_ca_manual_link_path_has_no_source_network_client() -> None:
+    module = (
+        Path(__file__).resolve().parents[1]
+        / "curator"
+        / "selected_market_ingest.py"
+    ).read_text(encoding="utf-8")
+    for network_symbol in (
+        "urlopen(",
+        "requests.get(",
+        "httpx.get(",
+        "httpx.Client(",
+        "httpx.AsyncClient(",
+    ):
+        assert network_symbol not in module
+    assert '"source_urls_requested": 0' in module
+    assert "request_count=0" in module
 
 
 @pytest.mark.parametrize(

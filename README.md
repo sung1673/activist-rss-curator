@@ -97,6 +97,8 @@ TELEGRAM_API_HASH
 TELEGRAM_SESSION_STRING
 ```
 
+`EDINET_API_KEY`와 `COMPANIES_HOUSE_API_KEY`는 기본 keyless 운영에는 필요하지 않은 선택 Secret이다. 각 connector mode를 명시적으로 `active`로 바꾸는 경우에만 등록한다.
+
 `BSIDE_RELEASE_AUTHORIZER_TOKEN`은 repository 공용 Secret이 아니라 reviewer가 보호하는 `governance-release` environment에만 둔다. PHP에는 정확한 `release_authorizer` 역할의 SHA-256 hash로 등록하며, 일반 admin token은 승인 발급을 대신할 수 없다. 5분 `global-alpha-watchdog.yml`은 읽기 전용 `BSIDE_OPS_TOKEN`만 사용하고 admin·release-authorizer token을 받지 않는다.
 
 `KIND_API_KEY`는 일반 수집에서는 내부 KIND 어댑터가 인증을 요구할 때만 쓰지만,
@@ -105,15 +107,15 @@ TELEGRAM_SESSION_STRING
 
 현재 제품 정책은 Telegram 채팅으로 콘텐츠를 발송하지 않는 것이다. `ENABLE_TELEGRAM_DELIVERY=false`, `config.yaml`의 `telegram.enabled=false`, 빈 `telegram.chat_id`를 함께 유지하며, Python sender·로컬/원격 outbox·PHP enqueue/claim·Actions worker가 모두 코드 수준에서 거절하므로 runtime 값이나 수동 입력으로 재활성화할 수 없다. `TELEGRAM_API_ID`·`TELEGRAM_API_HASH`·`TELEGRAM_SESSION_STRING`을 이용한 허가 공개 채널 읽기 수집은 이 발송 정책과 분리되어 계속 운영한다. 비공개 Telegram 관리자 채팅과 `TELEGRAM_ADMIN_CHAT_ID`도 사용하지 않으며, 관리자는 고정 URL `https://news.bside.ai/feed/telegram-admin.html`에서 `TELEGRAM_ADMIN_ACCESS_TOKEN`을 직접 입력한다.
 
-주요 Repository variable은 `ACTIVIST_PUBLIC_API_URL`, `GOVERNANCE_API_BASE_URL`, `BSIDE_PUBLIC_WEB_URL`, `KIND_DISCLOSURE_ENDPOINT`, `SEC_EDGAR_USER_AGENT`, `COMPANIES_HOUSE_ISSUERS_JSON`, `CA_OFFICIAL_LINKS_JSON`, `AU_OFFICIAL_LINKS_JSON`, `PAGES_OWNER=legacy|governance`, `GOVERNANCE_PIPELINE_MODE=off|dart_canary|shadow|live`, `KIND_CONNECTOR_MODE=off|active`, `GLOBAL_ALPHA_OBSERVATION_ENABLED=false|true`다. KIND는 Production Alpha에서 기본 `off`이며 `active`로 명시한 경우에만 예약 DART 실행과 일반 watchdog이 KIND 설정·수집 최신성을 함께 요구한다. Alpha 24시간 관측도 기본 `false`이고 준비가 끝난 뒤에만 `true`로 연다. 잘못된 값과 이전 boolean 충돌은 fail-closed한다. `ENABLE_TELEGRAM_DELIVERY=false`와 `ENABLE_GOVERNANCE_DELIVERY=false`는 유지하지만 어떤 runtime 값도 outbound를 다시 활성화할 수 없다. 전체 목록과 예약 시각은 [운영 자동화 문서](docs/operations-automation.md)를 따른다.
+주요 Repository variable은 `ACTIVIST_PUBLIC_API_URL`, `GOVERNANCE_API_BASE_URL`, `BSIDE_PUBLIC_WEB_URL`, `KIND_DISCLOSURE_ENDPOINT`, `SEC_EDGAR_USER_AGENT`, `EDINET_CONNECTOR_MODE=link-only|active`, `COMPANIES_HOUSE_CONNECTOR_MODE=keyless|active`, `COMPANIES_HOUSE_ISSUERS_JSON`, `CA_OFFICIAL_LINKS_JSON`, `AU_OFFICIAL_LINKS_JSON`, `PAGES_OWNER=legacy|governance`, `GOVERNANCE_PIPELINE_MODE=off|dart_canary|shadow|live`, `KIND_CONNECTOR_MODE=off|active`, `GLOBAL_ALPHA_OBSERVATION_ENABLED=false|true`다. KIND는 Production Alpha에서 기본 `off`이며 `active`로 명시한 경우에만 예약 DART 실행과 일반 watchdog이 KIND 설정·수집 최신성을 함께 요구한다. EDINET과 Companies House도 각각 `active`를 명시한 경우에만 API 수집을 실행한다. Alpha 24시간 관측은 기본 `false`이고 준비가 끝난 뒤에만 `true`로 연다. 잘못된 값과 이전 boolean 충돌은 fail-closed한다. `ENABLE_TELEGRAM_DELIVERY=false`와 `ENABLE_GOVERNANCE_DELIVERY=false`는 유지하지만 어떤 runtime 값도 outbound를 다시 활성화할 수 없다. 전체 목록과 예약 시각은 [운영 자동화 문서](docs/operations-automation.md)를 따른다.
 
 ### 글로벌 터미널 Production Alpha
 
-글로벌 `/api/v2`와 신규 루트는 완성된 품질 인증판이 아니라 **Production Alpha**다. 한국·미국·일본은 허용된 공식 공시 범위, 영국은 Companies House 등록부 범위로 제공한다. 캐나다·호주는 자동 수집 범위가 아니라 승인된 공식 링크의 `link-only / manual-metadata` 범위다. SEDAR+·ASX 원문을 저장하거나 재배포하지 않으며 국가별 범위를 `/api/v2/sources/status`에 표시한다.
+글로벌 `/api/v2`와 신규 루트는 완성된 품질 인증판이 아니라 **Production Alpha**다. 한국은 OpenDART, 미국은 API key가 필요 없는 SEC 공식 Atom·index·JSON 경로를 사용한다. 일본 EDINET과 영국 Companies House의 API 수집은 각각 명시적 `active` 모드와 자격정보가 있을 때만 실행하며, 기본 keyless 모드에서는 공개 viewer를 scraping하지 않고 `coverage_unavailable`을 표시한다. 캐나다·호주는 승인된 공식 링크의 `link-only / manual-metadata` 범위다. SEDAR+·TMX·ASX 원문을 자동 수집·저장·재배포하지 않으며 국가별 실제 범위를 `/api/v2/sources/status`에 표시한다.
 
 신규 운영 workflow는 다음과 같다.
 
-- `ingest-global.yml`: SEC EDGAR Latest Filings Atom 당일 증분과 일일 인덱스 완결성 대조, EDINET, Companies House를 매시 17분·47분에 수집한다. 예약 request budget은 US 200, JP·GB 100이다. SEC 당일 feed나 durable source cursor가 유효하지 않으면 US는 `live_ready=false`로 fail-closed한다. 날짜 입력이 없으면 MySQL connector checkpoint에서 하루 overlap을 두고 최대 31일씩 누락 구간을 이어서 처리하며, Companies House allowlist는 최대 50개 회사다.
+- `ingest-global.yml`: 별도 API key 없이 SEC 공식 Latest Filings Atom·daily index·`data.sec.gov`·Archives만 사용해 미국 당일 증분과 완료일 완결성을 대조한다. SEC 요청에는 서비스명과 실제 연락 가능한 이메일을 담은 `SEC_EDGAR_USER_AGENT`가 필수다. 일본과 영국은 기본적으로 소스 요청 0건의 keyless 경계 증빙만 남기며, 각각 `EDINET_CONNECTOR_MODE=active`, `COMPANIES_HOUSE_CONNECTOR_MODE=active`를 명시하고 해당 자격정보를 등록한 경우에만 기존 API connector를 실행한다. SEC 당일 feed나 durable source cursor가 유효하지 않으면 US는 `live_ready=false`로 fail-closed한다. 날짜 입력이 없으면 MySQL connector checkpoint에서 하루 overlap을 두고 최대 31일씩 누락 구간을 이어서 처리하며, active Companies House allowlist는 최대 50개 회사다.
 - `ingest-selected-markets.yml`: `CA_OFFICIAL_LINKS_JSON`과 `AU_OFFICIAL_LINKS_JSON`의 수동 승인 링크 metadata를 매시 07분·37분에 검증·적재한다. 설정 URL에 네트워크 요청을 보내거나 본문을 저장하지 않는다. 캐나다는 issuer 식별자에 묶인 별도 호스트 증빙이 필요하고, 호주는 `asic.gov.au` 공식 호스트만 허용한다.
 - `global-brief.yml`: KST 05:45 예약 실행은 검수 후보 artifact만 만든다. 공개 brief는 사람이 승인한 동일 SHA payload를 `workflow_dispatch`의 `publish` 작업으로 전달할 때만 생성한다.
 - `global-alpha-review-candidates.yml`: 기본 브랜치의 실제 Preview API에서 공식 근거가 있는 사건 60건, 동일 사건 판단용 문서쌍 120개, 현재 Top 5를 사람 검수용 무라벨 artifact로 추출한다.
