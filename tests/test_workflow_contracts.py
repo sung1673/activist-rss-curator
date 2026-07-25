@@ -1148,6 +1148,8 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
         "${{ runner.temp }}/dart-canary-sample-report.json"
     )
     assert canary["env"]["CURATOR_REQUIRE_DURABLE_DART_QUOTA"] == "1"
+
+
     assert canary["env"]["CURATOR_DART_QUOTA_PHASE"] == "dart-canary"
     review_sample = next(
         step
@@ -1200,6 +1202,108 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert "!item.expired" in resolver["with"]["script"]
 
 
+def test_global_backfill_is_bounded_serialized_and_preserves_daily_receipts() -> None:
+    workflow = workflow_text("global-backfill.yml")
+    payload = yaml.load(workflow, Loader=yaml.BaseLoader)
+    dispatch = payload["on"]["workflow_dispatch"]["inputs"]
+    assert set(dispatch) == {
+        "source",
+        "from_date",
+        "to_date",
+        "mode",
+        "max_windows",
+    }
+    assert dispatch["source"]["options"] == ["all", "US", "JP", "GB"]
+    assert dispatch["mode"]["options"] == ["apply", "replay"]
+    assert payload["permissions"] == {"contents": "read"}
+    assert payload["concurrency"] == {
+        "group": "ingest-global-${{ github.ref_name }}",
+        "cancel-in-progress": "false",
+    }
+
+    job = payload["jobs"]["backfill"]
+    assert job["if"] == "github.ref_name == github.event.repository.default_branch"
+    assert int(job["timeout-minutes"]) == 360
+    assert job["environment"]["name"] == "governance-runtime"
+    for secret_name in (
+        "BSIDE_API_BASE_URL",
+        "BSIDE_OPS_TOKEN",
+        "EDINET_API_KEY",
+        "COMPANIES_HOUSE_API_KEY",
+    ):
+        assert secret_name not in job["env"]
+    steps = job["steps"]
+    checkout = next(
+        step
+        for step in steps
+        if step["name"] == "Checkout immutable dispatch revision"
+    )
+    assert checkout["with"]["ref"] == "${{ github.sha }}"
+    revision = next(
+        step
+        for step in steps
+        if step["name"] == "Verify immutable dispatch revision"
+    )
+    assert "git rev-parse HEAD" in revision["run"]
+    assert '"$actual" == "$GITHUB_SHA"' in revision["run"]
+
+    validation = next(
+        step
+        for step in steps
+        if step["name"] == "Validate source configuration"
+    )
+    expected_sec_identity = (
+        "BSIDE-Governance-Intelligence/1.0 support@bside.ai"
+    )
+    assert job["env"]["EXPECTED_SEC_EDGAR_USER_AGENT"] == expected_sec_identity
+    assert (
+        '"$SEC_EDGAR_USER_AGENT" == "$EXPECTED_SEC_EDGAR_USER_AGENT"'
+        in validation["run"]
+    )
+    assert "BSIDE_OPS_TOKEN" in validation["env"]
+    assert "EDINET_API_KEY" in validation["env"]
+    assert "COMPANIES_HOUSE_API_KEY" in validation["env"]
+
+    deployment_smoke = next(
+        step
+        for step in steps
+        if step["name"] == "Verify exact closed API v2 deployment"
+    )
+    assert ".github/scripts/smoke-global-v2.py" in deployment_smoke["run"]
+    assert '--expected-sha "$GITHUB_SHA"' in deployment_smoke["run"]
+    assert "--release-state closed" in deployment_smoke["run"]
+
+    run_step = next(
+        step
+        for step in steps
+        if step["name"] == "Run sequential one-day global backfill"
+    )
+    assert steps.index(deployment_smoke) < steps.index(run_step)
+    assert "python -m curator.global_backfill" in run_step["run"]
+    assert "--max-windows \"$BACKFILL_MAX_WINDOWS\"" in run_step["run"]
+    assert "--code-revision \"$GITHUB_SHA\"" in run_step["run"]
+    assert '${{ inputs.' not in run_step["run"]
+    assert run_step["env"]["BACKFILL_MODE"] == "${{ inputs.mode }}"
+    assert run_step["env"]["BACKFILL_FROM_DATE"] == "${{ inputs.from_date }}"
+    assert run_step["env"]["BACKFILL_TO_DATE"] == "${{ inputs.to_date }}"
+    assert run_step["env"]["BACKFILL_MAX_WINDOWS"] == (
+        "${{ inputs.max_windows }}"
+    )
+    assert "BSIDE_OPS_TOKEN" in run_step["env"]
+    assert "EDINET_API_KEY" in run_step["env"]
+    assert "COMPANIES_HOUSE_API_KEY" in run_step["env"]
+
+    preserve = next(
+        step
+        for step in steps
+        if step["name"] == "Preserve per-day receipts and summary"
+    )
+    assert preserve["if"] == "always()"
+    assert preserve["with"]["if-no-files-found"] == "error"
+    assert int(preserve["with"]["retention-days"]) == 30
+    assert "global-backfill-${{ matrix.country }}" in preserve["with"]["path"]
+
+
 def test_ci_audits_python_and_browser_dependencies() -> None:
     workflow = workflow_text("ci.yml")
     assert "pip-audit --requirement requirements.txt" in workflow
@@ -1223,9 +1327,11 @@ def test_ci_type_checks_every_release_critical_governance_module() -> None:
         "curator/dart_quota.py",
         "curator/event_identity.py",
         "curator/global_alpha_pages_identity.py",
+        "curator/global_backfill.py",
         "curator/governance_site.py",
         "curator/governance_site_config.py",
         "curator/label_agreement.py",
+        "curator/mysql_backup.py",
         "curator/legacy_feed_compat.py",
         "curator/legacy_recovery_bundle.py",
         "curator/official_schedule.py",

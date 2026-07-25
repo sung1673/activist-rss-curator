@@ -437,6 +437,8 @@ def test_automated_ingest_is_idempotent_and_never_publishes_events():
         "code_revision",
         "envelope",
     }
+    assert request["properties"]["ingest_mode"]["enum"] == ["apply", "replay"]
+    assert request["properties"]["ingest_mode"]["default"] == "apply"
     envelope = SPEC["components"]["schemas"]["GlobalIngestPayload"]
     assert envelope["properties"]["records"]["maxItems"] == 500
     assert envelope["properties"]["lifecycle_observations"]["maxItems"] == 500
@@ -468,6 +470,9 @@ def test_automated_ingest_is_idempotent_and_never_publishes_events():
     )
     assert "smaller than accepted entity count" in V2_WRITE
     assert "global_ingest_idempotency_conflict" in V2_WRITE
+    assert "global_ingest_code_revision_mismatch" in V2_WRITE
+    assert "global_ingest_replay_missing" in V2_WRITE
+    assert "unset($semantic['ingest_mode'])" in V2_WRITE
     record = SPEC["components"]["schemas"]["GlobalIngestRecord"]
     assert "metadata" in record["required"]
     assert (
@@ -1371,22 +1376,55 @@ def test_v2_public_documents_and_urls_always_exclude_telegram():
     assert "비-Telegram" in DOCS
 
 
-def test_ingest_idempotency_ignores_only_attempt_observation_times():
+def test_ingest_idempotency_ignores_attempt_and_transport_telemetry():
     helper = V2_WRITE[
         V2_WRITE.index("function v2_write_ingest_idempotency_hash") : V2_WRITE.index(
             "function v2_source_right_row"
         )
     ]
     assert "unset($semantic['envelope']['retrieved_at'])" in helper
+    assert "unset($semantic['envelope']['request_count'])" in helper
+    assert (
+        "unset($semantic['envelope']['chunk']['batch_request_count'])"
+        in helper
+    )
     assert "unset($record['first_observed_at'])" in helper
     for substantive_field in (
         "rights_revision",
         "raw_count",
-        "request_count",
         "lifecycle_observations",
     ):
         assert substantive_field not in helper
     assert "v2_write_ingest_idempotency_hash($payload)" in V2_WRITE
+
+
+def test_partial_batch_allows_request_telemetry_to_change_on_retry():
+    metadata = V2_WRITE[
+        V2_WRITE.index("function v2_ingest_assert_batch_metadata") : V2_WRITE.index(
+            "function v2_ingest_assert_batch_prefix"
+        )
+    ]
+    complete = V2_WRITE[
+        V2_WRITE.index("function v2_ingest_assert_batch_complete") : V2_WRITE.index(
+            "function v2_ingest_locked_checkpoint"
+        )
+    ]
+    assert "batch_request_count" not in metadata
+    assert (
+        "$requestTotal !== (int)$chunk['batch_request_count']"
+        in complete
+    )
+    exporter = V2[
+        V2.index("function v2_alpha_global_connector_windows") : V2.index(
+            "function v2_alpha_dart_windows"
+        )
+    ]
+    assert "$final = $batchRows[$chunkCount - 1]" in exporter
+    assert "$requests !== (int)$final['batch_request_count']" in exporter
+    assert (
+        "$requests !== (int)$first['batch_request_count']"
+        not in exporter
+    )
 
 
 def test_unchanged_overlap_observation_does_not_advance_live_timestamp():
@@ -1552,6 +1590,14 @@ def test_final_chunk_requires_a_complete_consistent_receipt_batch():
     )
     assert insert_position < completeness_position < checkpoint_position
     assert "$normalized['request_count']" in V2_WRITE
+    assert "function v2_ingest_checkpoint_should_advance" in V2_WRITE
+    checkpoint_helper = V2_WRITE[
+        V2_WRITE.index("function v2_ingest_checkpoint_should_advance") :
+        V2_WRITE.index("function v2_ops_ingest")
+    ]
+    assert "strcmp($incomingEnd, $existingEnd)" in checkpoint_helper
+    assert "$normalized['next_cursor'] !== null" in checkpoint_helper
+    assert "global_connector_checkpoint_corrupt" in V2_WRITE
 
 
 def test_unclassified_sec_and_edinet_candidates_preserve_source_fields():

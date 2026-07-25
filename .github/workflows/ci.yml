@@ -410,6 +410,11 @@ jobs:
           python3 tests/php73_global_v2_smoke.py \
             --base-url http://127.0.0.1:8787 \
             --mysql-container-id "$MYSQL_CONTAINER_ID"
+          python3 .github/scripts/smoke-global-v2.py \
+            --base-url http://127.0.0.1:8787/api.php/api/v2 \
+            --expected-sha "$GITHUB_SHA" \
+            --release-state closed \
+            --allow-http
 
       - name: Validate Telegram channel identity index migration
         shell: bash
@@ -528,6 +533,7 @@ jobs:
           curator/global_alpha_evidence_bundle.py
           curator/global_alpha_review_export.py
           curator/global_alpha_release_gate.py
+          curator/global_backfill.py
           curator/global_brief.py
           curator/global_connectors.py
           curator/global_ingest.py
@@ -537,6 +543,8 @@ jobs:
           curator/label_agreement.py
           curator/legacy_feed_compat.py
           curator/legacy_recovery_bundle.py
+          curator/mysql_backup.py
+          curator/mysql_migration.py
           curator/official_source_rights.py
           curator/official_schedule.py
           curator/official_slot_claim.py

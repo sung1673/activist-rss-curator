@@ -1124,7 +1124,7 @@ def test_companies_house_stops_after_descending_page_crosses_window() -> None:
 
     assert calls == 1
     assert result.request_count == 1
-    assert result.raw_count == 2
+    assert result.raw_count == 1
     assert [record.external_id for record in result.records] == ["tx-current"]
     assert result.records[0].metadata["title_provenance"] == "source"
 

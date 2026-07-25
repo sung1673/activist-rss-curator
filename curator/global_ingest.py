@@ -33,6 +33,7 @@ from .global_connectors import (
     GlobalConnectorRequest,
     GlobalSourceConnector,
     IssuerReference,
+    SecDailyIndexConnector,
     SecHybridConnector,
 )
 from .official_source_rights import (
@@ -100,6 +101,7 @@ class IngestApiClient(Protocol):
         chunk: "GlobalIngestChunk",
         idempotency_key: str,
         code_revision: str,
+        replay_only: bool = False,
     ) -> "GlobalIngestReceipt": ...
 
 
@@ -205,6 +207,46 @@ class GlobalIngestResult:
         }
 
 
+class _ExactReplayConnector:
+    """Fetch one source envelope and reuse it for one exact API replay."""
+
+    def __init__(self, connector: GlobalSourceConnector) -> None:
+        self._connector = connector
+        self.descriptor = connector.descriptor
+        self._request: GlobalConnectorRequest | None = None
+        self._envelope: GlobalConnectorEnvelope | None = None
+        self.fetch_calls = 0
+        self.source_fetches = 0
+
+    def fetch(
+        self,
+        request: GlobalConnectorRequest,
+        *,
+        eligibility: OfficialSourceRightEligibility,
+        eligibility_provider: (
+            Callable[[], OfficialSourceRightEligibility] | None
+        ) = None,
+        now: datetime | None = None,
+    ) -> GlobalConnectorEnvelope:
+        self.fetch_calls += 1
+        if self._envelope is not None:
+            if request != self._request:
+                raise GlobalIngestConfigurationError(
+                    "global_ingest_replay_request_changed"
+                )
+            return self._envelope
+        self.source_fetches += 1
+        envelope = self._connector.fetch(
+            request,
+            eligibility=eligibility,
+            eligibility_provider=eligibility_provider,
+            now=now,
+        )
+        self._request = request
+        self._envelope = envelope
+        return envelope
+
+
 def _canonical_json(value: object) -> str:
     return json.dumps(
         value,
@@ -228,6 +270,10 @@ def content_idempotency_key(
     revision = _validate_code_revision(code_revision)
     stable_envelope = envelope.to_payload()
     stable_envelope.pop("retrieved_at", None)
+    # Transport work can grow when a current-history endpoint gains newer
+    # pages. It is operational telemetry, not the identity of a completed-day
+    # source result.
+    stable_envelope.pop("request_count", None)
     raw_records = stable_envelope.get("records")
     if isinstance(raw_records, list):
         for record in raw_records:
@@ -258,6 +304,7 @@ def global_ingest_batch_id(
     revision = _validate_code_revision(code_revision)
     stable_envelope = envelope.to_payload()
     stable_envelope.pop("retrieved_at", None)
+    stable_envelope.pop("request_count", None)
     raw_records = stable_envelope.get("records")
     if isinstance(raw_records, list):
         for record in raw_records:
@@ -596,6 +643,7 @@ class V2GlobalIngestClient:
         chunk: GlobalIngestChunk,
         idempotency_key: str,
         code_revision: str,
+        replay_only: bool = False,
     ) -> GlobalIngestReceipt:
         revision = _validate_code_revision(code_revision)
         expected_acknowledged = (
@@ -609,6 +657,8 @@ class V2GlobalIngestClient:
                 "chunk": chunk.to_payload(),
             },
         }
+        if replay_only:
+            body["ingest_mode"] = "replay"
         try:
             with self.client_factory(
                 timeout=self.timeout,
@@ -809,6 +859,7 @@ def build_connector(
     country_code: str,
     *,
     environment: Mapping[str, str],
+    completed_day_only: bool = False,
 ) -> tuple[GlobalSourceConnector, tuple[IssuerReference, ...]]:
     country = str(country_code or "").strip().upper()
     execution_mode = global_ingest_execution_mode(
@@ -823,6 +874,8 @@ def build_connector(
         user_agent = str(environment.get("SEC_EDGAR_USER_AGENT", "")).strip()
         if not user_agent:
             raise GlobalIngestConfigurationError("missing_sec_user_agent")
+        if completed_day_only:
+            return SecDailyIndexConnector(user_agent=user_agent), ()
         return SecHybridConnector(user_agent=user_agent), ()
     if country == "JP":
         api_key = str(environment.get("EDINET_API_KEY", "")).strip()
@@ -966,6 +1019,7 @@ def execute_global_ingest(
     page_size: int = 100,
     max_pages: int = 100,
     source_cursor: str | None = None,
+    replay_only: bool = False,
 ) -> GlobalIngestResult:
     country = str(country_code or "").strip().upper()
     if country not in SUPPORTED_COUNTRIES or country == "KR":
@@ -1040,19 +1094,29 @@ def execute_global_ingest(
             window_end_exclusive=window_end_exclusive,
             chunk_index=chunk_index,
         )
-        receipt = ingest_client.submit(
-            envelope=chunk,
-            chunk=global_ingest_chunk(
-                envelope=envelope,
-                window_start=window_start,
-                window_end_exclusive=window_end_exclusive,
-                index=chunk_index,
-                count=len(chunks),
-                code_revision=revision,
-            ),
-            idempotency_key=key,
+        chunk_metadata = global_ingest_chunk(
+            envelope=envelope,
+            window_start=window_start,
+            window_end_exclusive=window_end_exclusive,
+            index=chunk_index,
+            count=len(chunks),
             code_revision=revision,
         )
+        if replay_only:
+            receipt = ingest_client.submit(
+                envelope=chunk,
+                chunk=chunk_metadata,
+                idempotency_key=key,
+                code_revision=revision,
+                replay_only=True,
+            )
+        else:
+            receipt = ingest_client.submit(
+                envelope=chunk,
+                chunk=chunk_metadata,
+                idempotency_key=key,
+                code_revision=revision,
+            )
         expected_chunk_ack = (
             len(chunk.records) + len(chunk.lifecycle_observations)
         )
@@ -1070,6 +1134,8 @@ def execute_global_ingest(
     acknowledged = sum(receipt.acknowledged_count for receipt in receipts)
     if acknowledged != expected_ack:
         raise GlobalIngestApiError("api_acknowledgment_mismatch")
+    if replay_only and not all(receipt.idempotent for receipt in receipts):
+        raise GlobalIngestApiError("global_ingest_replay_not_idempotent")
     if len(idempotency_keys) == 1:
         batch_key = idempotency_keys[0]
     else:
@@ -1101,6 +1167,116 @@ def execute_global_ingest(
             1 for receipt in receipts if receipt.idempotent
         ),
     )
+
+
+def execute_global_ingest_with_replay(
+    *,
+    country_code: str,
+    connector: GlobalSourceConnector,
+    issuers: tuple[IssuerReference, ...],
+    window_start: date,
+    window_end_exclusive: date,
+    code_revision: str,
+    rights_client: EligibilityClient,
+    ingest_client: IngestApiClient,
+    page_size: int = 100,
+    max_pages: int = 100,
+    source_cursor: str | None = None,
+) -> tuple[GlobalIngestResult, GlobalIngestResult]:
+    """Submit one fetched envelope twice and require an exact idempotent replay."""
+
+    replay_connector = _ExactReplayConnector(connector)
+    def execute() -> GlobalIngestResult:
+        return execute_global_ingest(
+            country_code=country_code,
+            connector=replay_connector,
+            issuers=issuers,
+            window_start=window_start,
+            window_end_exclusive=window_end_exclusive,
+            code_revision=code_revision,
+            rights_client=rights_client,
+            ingest_client=ingest_client,
+            page_size=page_size,
+            max_pages=max_pages,
+            source_cursor=source_cursor,
+        )
+
+    initial = execute()
+    replay = execute()
+    stable_fields = (
+        "country_code",
+        "connector_id",
+        "source_right_id",
+        "window_start",
+        "window_end_exclusive",
+        "idempotency_key",
+        "code_revision",
+        "request_count",
+        "raw_count",
+        "record_count",
+        "lifecycle_observation_count",
+        "acknowledged_count",
+        "ingest_id",
+        "api_version",
+        "chunk_count",
+        "idempotency_keys",
+        "ingest_ids",
+    )
+    if (
+        replay_connector.fetch_calls != 2
+        or replay_connector.source_fetches != 1
+        or any(
+            getattr(initial, field) != getattr(replay, field)
+            for field in stable_fields
+        )
+    ):
+        raise GlobalIngestApiError("global_ingest_replay_payload_mismatch")
+    if (
+        not replay.idempotent
+        or replay.idempotent_chunk_count != replay.chunk_count
+    ):
+        raise GlobalIngestApiError("global_ingest_replay_not_idempotent")
+    return initial, replay
+
+
+def replay_verification_evidence(
+    initial: GlobalIngestResult,
+    replay: GlobalIngestResult,
+) -> dict[str, object]:
+    """Return credential-free proof for an already validated exact replay."""
+
+    return {
+        "attempted": True,
+        "same_payload": True,
+        "idempotent": replay.idempotent,
+        "chunk_count": replay.chunk_count,
+        "idempotent_chunk_count": replay.idempotent_chunk_count,
+        "idempotency_keys_match": (
+            initial.idempotency_keys == replay.idempotency_keys
+        ),
+        "ingest_ids_match": initial.ingest_ids == replay.ingest_ids,
+        "raw_count": replay.raw_count,
+        "acknowledged_count": replay.acknowledged_count,
+    }
+
+
+def replay_only_verification_evidence(
+    result: GlobalIngestResult,
+) -> dict[str, object]:
+    """Return proof that the server accepted only pre-existing receipts."""
+
+    return {
+        "attempted": True,
+        "same_payload": True,
+        "idempotent": result.idempotent,
+        "read_only": True,
+        "chunk_count": result.chunk_count,
+        "idempotent_chunk_count": result.idempotent_chunk_count,
+        "idempotency_keys_match": True,
+        "ingest_ids_match": True,
+        "raw_count": result.raw_count,
+        "acknowledged_count": result.acknowledged_count,
+    }
 
 
 def write_evidence(path: Path, payload: Mapping[str, object]) -> None:
@@ -1250,6 +1426,31 @@ def _argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-pages", type=int, default=100)
     parser.add_argument("--code-revision", default="")
     parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument(
+        "--completed-day-only",
+        action="store_true",
+        help=(
+            "Use completed-day source material only. This is required for "
+            "deterministic one-day historical replay and requires explicit dates."
+        ),
+    )
+    parser.add_argument(
+        "--verify-replay",
+        action="store_true",
+        help=(
+            "Submit the exact in-memory completed-day payload a second time "
+            "and require every API chunk to return an idempotent receipt."
+        ),
+    )
+    parser.add_argument(
+        "--replay-only",
+        action="store_true",
+        help=(
+            "Require every exact receipt to exist already. The API rejects a "
+            "missing or changed receipt before any document, event, receipt, "
+            "or connector checkpoint can be written."
+        ),
+    )
     parser.add_argument("--require-active-pipeline", action="store_true")
     return parser
 
@@ -1272,6 +1473,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         revision = _validate_code_revision(
             args.code_revision or os.environ.get("GITHUB_SHA", "")
         )
+        if args.completed_day_only and (
+            not str(args.from_date).strip()
+            or not str(args.to_date).strip()
+        ):
+            raise GlobalIngestConfigurationError(
+                "completed_day_only_requires_explicit_window"
+            )
+        if args.verify_replay and not args.completed_day_only:
+            raise GlobalIngestConfigurationError(
+                "verify_replay_requires_completed_day_only"
+            )
+        if args.replay_only and not args.verify_replay:
+            raise GlobalIngestConfigurationError(
+                "replay_only_requires_verify_replay"
+            )
         execution_mode = global_ingest_execution_mode(
             args.country,
             environment=os.environ,
@@ -1297,6 +1513,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         connector, issuers = build_connector(
             args.country,
             environment=os.environ,
+            completed_day_only=args.completed_day_only,
         )
         base_url, token = _api_configuration(os.environ)
         rights_client = GlobalOfficialSourceRightClient(
@@ -1323,20 +1540,78 @@ def main(argv: Sequence[str] | None = None) -> int:
             checkpoint=checkpoint,
             today=completed_today,
         )
-        result = execute_global_ingest(
-            country_code=args.country,
-            connector=connector,
-            issuers=issuers,
-            window_start=start,
-            window_end_exclusive=end,
-            code_revision=revision,
-            rights_client=rights_client,
-            ingest_client=ingest_client,
-            page_size=args.page_size,
-            max_pages=args.max_pages,
-            source_cursor=checkpoint.source_cursor,
-        )
+        replay_result: GlobalIngestResult | None = None
+        if args.replay_only:
+            result = execute_global_ingest(
+                country_code=args.country,
+                connector=connector,
+                issuers=issuers,
+                window_start=start,
+                window_end_exclusive=end,
+                code_revision=revision,
+                rights_client=rights_client,
+                ingest_client=ingest_client,
+                page_size=args.page_size,
+                max_pages=args.max_pages,
+                source_cursor=(
+                    None
+                    if args.completed_day_only
+                    else checkpoint.source_cursor
+                ),
+                replay_only=True,
+            )
+            replay_result = result
+        elif args.verify_replay:
+            result, replay_result = execute_global_ingest_with_replay(
+                country_code=args.country,
+                connector=connector,
+                issuers=issuers,
+                window_start=start,
+                window_end_exclusive=end,
+                code_revision=revision,
+                rights_client=rights_client,
+                ingest_client=ingest_client,
+                page_size=args.page_size,
+                max_pages=args.max_pages,
+                source_cursor=(
+                    None
+                    if args.completed_day_only
+                    else checkpoint.source_cursor
+                ),
+            )
+        else:
+            result = execute_global_ingest(
+                country_code=args.country,
+                connector=connector,
+                issuers=issuers,
+                window_start=start,
+                window_end_exclusive=end,
+                code_revision=revision,
+                rights_client=rights_client,
+                ingest_client=ingest_client,
+                page_size=args.page_size,
+                max_pages=args.max_pages,
+                source_cursor=(
+                    None
+                    if args.completed_day_only
+                    else checkpoint.source_cursor
+                ),
+            )
         evidence = result.evidence()
+        evidence["collection_mode"] = (
+            "completed-day"
+            if args.completed_day_only
+            else "incremental"
+        )
+        if args.replay_only:
+            evidence["replay_verification"] = (
+                replay_only_verification_evidence(result)
+            )
+        elif replay_result is not None:
+            evidence["replay_verification"] = replay_verification_evidence(
+                result,
+                replay_result,
+            )
         evidence["started_at"] = started_at
         evidence["completed_at"] = datetime.now(timezone.utc).replace(
             microsecond=0
