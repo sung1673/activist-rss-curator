@@ -29,6 +29,10 @@ DEFAULT_BATCH_ROWS = 500
 DEFAULT_BATCH_BYTES = 1024 * 1024
 DEFAULT_FETCH_SIZE = 500
 SSH_SHA256_PATTERN = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
+MYSQL_GLOBAL_READ_LOCK_PRIVILEGE_ERROR = 1227
+READ_LOCK_STRATEGY_NONE = "none"
+READ_LOCK_STRATEGY_GLOBAL = "global_read_lock"
+READ_LOCK_STRATEGY_EXPLICIT = "explicit_table_read_locks"
 
 
 class MySqlBackupError(RuntimeError):
@@ -892,6 +896,93 @@ def _execute(connection: _Connection, statement: str) -> None:
         cursor.execute(statement)
 
 
+def _mysql_error_code(error: BaseException) -> int | None:
+    """Return an exact DB-API numeric error code without parsing messages."""
+
+    arguments = getattr(error, "args", ())
+    if not arguments:
+        return None
+    code = arguments[0]
+    if isinstance(code, bool) or not isinstance(code, int):
+        return None
+    return code
+
+
+def _sorted_table_inventory(
+    tables: Sequence[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """Normalize inventory order while preserving exact names and engines."""
+
+    result = sorted(
+        tables,
+        key=lambda item: (
+            item[0].casefold(),
+            item[0],
+            item[1].casefold(),
+            item[1],
+        ),
+    )
+    names = [name for name, _engine in result]
+    if len(names) != len(set(names)):
+        raise MySqlBackupError("database table metadata contains duplicate names")
+    return result
+
+
+def _explicit_table_read_lock_statement(
+    database: str,
+    tables: Sequence[tuple[str, str]],
+) -> str:
+    """Build a deterministic, fully quoted LOCK TABLES statement."""
+
+    quoted_database = quote_identifier(database)
+    inventory = _sorted_table_inventory(tables)
+    if not inventory:
+        raise MySqlBackupError("explicit table read lock requires at least one table")
+    targets = ", ".join(
+        f"{quoted_database}.{quote_identifier(name)} READ"
+        for name, _engine in inventory
+    )
+    return "LOCK TABLES " + targets
+
+
+def _acquire_backup_read_lock(
+    connection: _Connection,
+    *,
+    database: str,
+    tables: Sequence[tuple[str, str]],
+) -> str:
+    """Acquire the preferred global lock or its narrowly allowed fallback."""
+
+    try:
+        _execute(connection, "FLUSH TABLES WITH READ LOCK")
+    except Exception as error:
+        if _mysql_error_code(error) != MYSQL_GLOBAL_READ_LOCK_PRIVILEGE_ERROR:
+            raise
+        statement = _explicit_table_read_lock_statement(database, tables)
+        try:
+            _execute(connection, statement)
+        except Exception as fallback_error:
+            raise MySqlBackupError(
+                "explicit table read locks could not be acquired safely"
+            ) from fallback_error
+        return READ_LOCK_STRATEGY_EXPLICIT
+    return READ_LOCK_STRATEGY_GLOBAL
+
+
+def _assert_table_inventory_unchanged(
+    connection: _Connection,
+    database: str,
+    expected: Sequence[tuple[str, str]],
+    *,
+    phase: str,
+) -> None:
+    observed = _list_tables(connection, database)
+    if _sorted_table_inventory(observed) != _sorted_table_inventory(expected):
+        raise MySqlBackupError(
+            f"database table metadata changed {phase}"
+        )
+
+
 class _SqlWriter:
     def __init__(self, destination: Any) -> None:
         self.destination = destination
@@ -1131,7 +1222,9 @@ def create_mysql_backup(
     started_at = clock().astimezone(timezone.utc)
     dump_connection: _Connection | None = None
     lock_connection: _Connection | None = None
+    verification_connection: _Connection | None = None
     read_lock_held = False
+    read_lock_strategy = READ_LOCK_STRATEGY_NONE
     backup_partial: Path | None = None
     manifest_partial: Path | None = None
     output_committed = False
@@ -1147,13 +1240,18 @@ def create_mysql_backup(
         ]
         if nontransactional_tables:
             lock_connection = connect(options, True)
-            _execute(lock_connection, "FLUSH TABLES WITH READ LOCK")
+            read_lock_strategy = _acquire_backup_read_lock(
+                lock_connection,
+                database=options.database,
+                tables=tables,
+            )
             read_lock_held = True
-            locked_tables = _list_tables(dump_connection, options.database)
-            if locked_tables != tables:
-                raise MySqlBackupError(
-                    "database table metadata changed while acquiring the read lock"
-                )
+            _assert_table_inventory_unchanged(
+                dump_connection,
+                options.database,
+                tables,
+                phase="while acquiring the read lock",
+            )
             _assert_no_unsupported_schema_objects(
                 dump_connection,
                 options.database,
@@ -1204,6 +1302,7 @@ def create_mysql_backup(
                     definitions,
                     key=lambda definition: (definition.transactional, definition.name),
                 )
+                dumped_nontransactional_tables = 0
                 for definition in ordered_definitions:
                     table_manifest.append(
                         _dump_table(
@@ -1216,11 +1315,41 @@ def create_mysql_backup(
                             batch_bytes=batch_bytes,
                         )
                     )
-                    if (
-                        read_lock_held
-                        and definition
-                        is ordered_definitions[len(nontransactional_tables) - 1]
+                    if not definition.transactional:
+                        dumped_nontransactional_tables += 1
+                    if read_lock_held and (
+                        dumped_nontransactional_tables
+                        == len(nontransactional_tables)
                     ):
+                        verification_connection = connect(options, True)
+                        if (
+                            verification_connection is dump_connection
+                            or verification_connection is lock_connection
+                        ):
+                            raise MySqlBackupError(
+                                "final inventory verification requires "
+                                "an independent connection"
+                            )
+                        try:
+                            _assert_table_inventory_unchanged(
+                                verification_connection,
+                                options.database,
+                                tables,
+                                phase="while the read lock was held",
+                            )
+                            _assert_no_unsupported_schema_objects(
+                                verification_connection,
+                                options.database,
+                            )
+                        finally:
+                            try:
+                                verification_connection.close()
+                            except Exception as error:
+                                raise MySqlBackupError(
+                                    "final inventory verification connection "
+                                    "could not be closed safely"
+                                ) from error
+                            verification_connection = None
                         _execute(lock_connection, "UNLOCK TABLES")  # type: ignore[arg-type]
                         read_lock_held = False
                 if read_lock_held:
@@ -1257,8 +1386,25 @@ def create_mysql_backup(
             "consistency": {
                 "isolation": "REPEATABLE READ",
                 "consistent_snapshot": True,
-                "global_read_lock_used": bool(nontransactional_tables),
+                "read_lock_strategy": read_lock_strategy,
+                "global_read_lock_used": (
+                    read_lock_strategy == READ_LOCK_STRATEGY_GLOBAL
+                ),
+                "locked_table_count": (
+                    len(tables)
+                    if read_lock_strategy != READ_LOCK_STRATEGY_NONE
+                    else 0
+                ),
                 "locked_engines": sorted(
+                    (
+                        {engine for _, engine in tables}
+                        if read_lock_strategy != READ_LOCK_STRATEGY_NONE
+                        else set()
+                    ),
+                    key=str.casefold,
+                ),
+                "nontransactional_table_count": len(nontransactional_tables),
+                "nontransactional_engines": sorted(
                     {engine for _, engine in nontransactional_tables},
                     key=str.casefold,
                 ),
@@ -1282,6 +1428,11 @@ def create_mysql_backup(
             manifest=manifest,
         )
     finally:
+        if verification_connection is not None:
+            try:
+                verification_connection.close()
+            except Exception:
+                pass
         if read_lock_held and lock_connection is not None:
             try:
                 _execute(lock_connection, "UNLOCK TABLES")

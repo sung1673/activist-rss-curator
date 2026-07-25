@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import re
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -30,6 +31,10 @@ from curator.mysql_backup import (
 REVISION = "a" * 40
 
 
+class FakeMySqlOperationalError(Exception):
+    pass
+
+
 class FakeCursor:
     def __init__(self, connection: "FakeConnection") -> None:
         self.connection = connection
@@ -51,13 +56,19 @@ class FakeCursor:
         self.description = None
         self.rows = []
         self.position = 0
+        for prefix, error in self.connection.statement_errors.items():
+            if normalized.startswith(prefix):
+                raise error
         if normalized.startswith(
             "SELECT (SELECT COUNT(*) FROM information_schema.VIEWS"
         ):
             self.rows = [self.connection.object_counts]
             return
         if normalized.startswith("SELECT TABLE_NAME, ENGINE FROM information_schema"):
-            self.rows = list(self.connection.tables)
+            if self.connection.table_snapshots:
+                self.rows = list(self.connection.table_snapshots.pop(0))
+            else:
+                self.rows = list(self.connection.tables)
             return
         if normalized.startswith(
             "SELECT COLUMN_NAME, EXTRA, GENERATION_EXPRESSION "
@@ -113,6 +124,9 @@ class FakeConnection:
         fail_table: str | None = None,
         column_metadata: dict[str, list[tuple[str, str, str]]] | None = None,
         object_counts: tuple[int, int, int, int] = (0, 0, 0, 0),
+        statement_errors: dict[str, Exception] | None = None,
+        table_snapshots: list[list[tuple[str, str]]] | None = None,
+        close_errors: list[Exception] | None = None,
     ) -> None:
         self.name = name
         self.tables = tables
@@ -125,20 +139,30 @@ class FakeConnection:
         self.object_counts = object_counts
         self.log = log
         self.fail_table = fail_table
+        self.statement_errors = statement_errors or {}
+        self.table_snapshots = table_snapshots or []
+        self.close_errors = close_errors or []
         self.rolled_back = False
+        self.opened = False
         self.closed = False
+        self.close_calls = 0
 
     def cursor(self, *_args: object, **_kwargs: object) -> FakeCursor:
         return FakeCursor(self)
 
     def table_from_statement(self, statement: str) -> str:
-        quoted = statement.rsplit("`", 2)
-        return quoted[1].replace("``", "`")
+        quoted = re.findall(r"`((?:``|[^`])*)`", statement)
+        if not quoted:
+            raise AssertionError(f"statement has no quoted table: {statement}")
+        return quoted[-1].replace("``", "`")
 
     def rollback(self) -> None:
         self.rolled_back = True
 
     def close(self) -> None:
+        self.close_calls += 1
+        if self.close_errors:
+            raise self.close_errors.pop(0)
         self.closed = True
 
 
@@ -270,13 +294,51 @@ def fixture_connections(
             "legacy": [(column, "", "") for column in data["legacy"][0]],
         },
     )
-    connections = [dump, lock]
+    verify = FakeConnection(
+        "verify",
+        tables=tables,
+        creates=creates,
+        data=data,
+        log=log,
+        column_metadata={
+            "events": [
+                *(
+                    (
+                        column,
+                        "DEFAULT_GENERATED" if column == "created_at" else "",
+                        "",
+                    )
+                    for column in data["events"][0]
+                ),
+                (
+                    "identity_hash",
+                    "STORED GENERATED",
+                    "sha2(`title`,256)",
+                ),
+            ],
+            "legacy": [(column, "", "") for column in data["legacy"][0]],
+        },
+    )
+    connections = [dump, lock, verify]
+    autocommit_call = 0
 
     def connect(_options: ConnectionOptions, autocommit: bool) -> FakeConnection:
-        expected = connections[1] if autocommit else connections[0]
+        nonlocal autocommit_call
+        if autocommit:
+            autocommit_call += 1
+            expected = connections[autocommit_call]
+        else:
+            expected = connections[0]
+        expected.opened = True
         return expected
 
     return connections, log, connect
+
+
+def all_opened_connections_closed(
+    connections: list[FakeConnection],
+) -> bool:
+    return all(not connection.opened or connection.closed for connection in connections)
 
 
 def options() -> ConnectionOptions:
@@ -341,7 +403,11 @@ def test_backup_streams_restoreable_sql_and_writes_completed_manifest(
         "consistent_snapshot": True,
         "global_read_lock_used": True,
         "isolation": "REPEATABLE READ",
-        "locked_engines": ["MyISAM"],
+        "locked_engines": ["InnoDB", "MyISAM"],
+        "locked_table_count": 2,
+        "nontransactional_engines": ["MyISAM"],
+        "nontransactional_table_count": 1,
+        "read_lock_strategy": "global_read_lock",
     }
     assert (
         hashlib.sha256(output.read_bytes()).hexdigest() == manifest["backup"]["sha256"]
@@ -401,8 +467,298 @@ def test_backup_streams_restoreable_sql_and_writes_completed_manifest(
     )
     assert lock_index < snapshot_index < legacy_index < unlock_index < events_index
     assert connections[0].rolled_back is True
-    assert all(connection.closed for connection in connections)
+    assert all_opened_connections_closed(connections)
     assert "do-not-print" not in repr(options())
+
+
+def test_privilege_denied_global_lock_falls_back_to_sorted_quoted_table_locks(
+    tmp_path: Path,
+) -> None:
+    connections, log, connect = fixture_connections()
+    dump, lock, _verify = connections
+    dump.creates["z`legacy"] = dump.creates.pop("legacy")
+    dump.data["z`legacy"] = dump.data.pop("legacy")
+    dump.creates["alpha"] = (
+        "CREATE TABLE `alpha` (`id` int NOT NULL) ENGINE=MEMORY"
+    )
+    dump.data["alpha"] = (["id"], [(20,)])
+    for connection in connections:
+        connection.tables = [
+            ("z`legacy", "MyISAM"),
+            ("events", "InnoDB"),
+            ("alpha", "MEMORY"),
+        ]
+        connection.column_metadata["z`legacy"] = connection.column_metadata.pop(
+            "legacy"
+        )
+        connection.column_metadata["alpha"] = [("id", "", "")]
+    lock.statement_errors["FLUSH TABLES WITH READ LOCK"] = (
+        FakeMySqlOperationalError(
+            1227,
+            "access denied; requires FLUSH_TABLES or RELOAD",
+        )
+    )
+    configured = ConnectionOptions(
+        host="private.example",
+        port=3306,
+        user="backup-user",
+        password="do-not-print",
+        database="prod`uction",
+    )
+
+    result = create_mysql_backup(
+        configured,
+        output_path=tmp_path / "fallback.sql.gz",
+        code_revision=REVISION,
+        connect=connect,
+        stream_cursor_class=object(),
+    )
+
+    statements = [entry[1] for entry in log]
+    explicit_lock = (
+        "LOCK TABLES "
+        "`prod``uction`.`alpha` READ, "
+        "`prod``uction`.`events` READ, "
+        "`prod``uction`.`z``legacy` READ"
+    )
+    assert explicit_lock in statements
+    snapshot_index = statements.index("START TRANSACTION WITH CONSISTENT SNAPSHOT")
+    alpha_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.endswith(" FROM `alpha`")
+    )
+    legacy_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.endswith(" FROM `z``legacy`")
+    )
+    unlock_index = statements.index("UNLOCK TABLES")
+    events_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.endswith(" FROM `events`")
+    )
+    inventory_indexes = [
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith(
+            "SELECT TABLE_NAME, ENGINE FROM information_schema.TABLES"
+        )
+    ]
+    assert (
+        statements.index(explicit_lock)
+        < snapshot_index
+        < alpha_index
+        < legacy_index
+        < inventory_indexes[-1]
+        < unlock_index
+        < events_index
+    )
+    assert result.manifest["consistency"] == {
+        "consistent_snapshot": True,
+        "global_read_lock_used": False,
+        "isolation": "REPEATABLE READ",
+        "locked_engines": ["InnoDB", "MEMORY", "MyISAM"],
+        "locked_table_count": 3,
+        "nontransactional_engines": ["MEMORY", "MyISAM"],
+        "nontransactional_table_count": 2,
+        "read_lock_strategy": "explicit_table_read_locks",
+    }
+    assert all_opened_connections_closed(connections)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        (1044, "access denied; unrelated privilege error 1227"),
+        ("1227", "lookalike non-numeric error code"),
+    ],
+)
+def test_global_lock_fallback_rejects_every_error_except_exact_numeric_1227(
+    tmp_path: Path,
+    arguments: tuple[object, str],
+) -> None:
+    connections, log, connect = fixture_connections()
+    error = FakeMySqlOperationalError(*arguments)
+    connections[1].statement_errors["FLUSH TABLES WITH READ LOCK"] = error
+
+    with pytest.raises(FakeMySqlOperationalError) as raised:
+        create_mysql_backup(
+            options(),
+            output_path=tmp_path / f"unsupported-{arguments[0]}.sql.gz",
+            code_revision=REVISION,
+            connect=connect,
+        )
+
+    assert raised.value is error
+    assert not any(
+        statement.startswith("LOCK TABLES ")
+        for _connection, statement, _params in log
+    )
+    assert all_opened_connections_closed(connections)
+
+
+def test_explicit_table_lock_failure_aborts_without_completed_backup(
+    tmp_path: Path,
+) -> None:
+    connections, log, connect = fixture_connections()
+    connections[1].statement_errors.update(
+        {
+            "FLUSH TABLES WITH READ LOCK": FakeMySqlOperationalError(
+                1227,
+                "global lock privilege denied",
+            ),
+            "LOCK TABLES ": FakeMySqlOperationalError(
+                1142,
+                "LOCK TABLES denied",
+            ),
+        }
+    )
+    output = tmp_path / "lock-denied.sql.gz"
+
+    with pytest.raises(MySqlBackupError, match="could not be acquired safely"):
+        create_mysql_backup(
+            options(),
+            output_path=output,
+            code_revision=REVISION,
+            connect=connect,
+        )
+
+    assert not output.exists()
+    assert not (tmp_path / "lock-denied.manifest.json").exists()
+    assert "UNLOCK TABLES" not in [entry[1] for entry in log]
+    assert all_opened_connections_closed(connections)
+
+
+def test_fallback_read_locks_release_when_nontransactional_dump_fails(
+    tmp_path: Path,
+) -> None:
+    connections, log, connect = fixture_connections(fail_table="legacy")
+    connections[1].statement_errors["FLUSH TABLES WITH READ LOCK"] = (
+        FakeMySqlOperationalError(1227, "global lock privilege denied")
+    )
+
+    with pytest.raises(RuntimeError, match="synthetic"):
+        create_mysql_backup(
+            options(),
+            output_path=tmp_path / "fallback-failed.sql.gz",
+            code_revision=REVISION,
+            connect=connect,
+            stream_cursor_class=object(),
+        )
+
+    statements = [entry[1] for entry in log]
+    assert any(statement.startswith("LOCK TABLES ") for statement in statements)
+    assert "UNLOCK TABLES" in statements
+    assert not (tmp_path / "fallback-failed.sql.gz").exists()
+    assert not (tmp_path / "fallback-failed.manifest.json").exists()
+    assert all_opened_connections_closed(connections)
+
+
+@pytest.mark.parametrize(
+    "drifted_inventory",
+    [
+        [
+            ("events", "InnoDB"),
+            ("legacy", "MyISAM"),
+            ("new_table", "MyISAM"),
+        ],
+        [("events", "InnoDB"), ("legacy", "MEMORY")],
+    ],
+)
+def test_fallback_detects_table_or_engine_drift_before_unlock_and_commit(
+    tmp_path: Path,
+    drifted_inventory: list[tuple[str, str]],
+) -> None:
+    connections, log, connect = fixture_connections()
+    initial_inventory = list(connections[0].tables)
+    connections[0].table_snapshots = [
+        initial_inventory,
+        initial_inventory,
+    ]
+    connections[2].table_snapshots = [drifted_inventory]
+    connections[1].statement_errors["FLUSH TABLES WITH READ LOCK"] = (
+        FakeMySqlOperationalError(1227, "global lock privilege denied")
+    )
+    output = tmp_path / "schema-drift.sql.gz"
+
+    with pytest.raises(MySqlBackupError, match="metadata changed"):
+        create_mysql_backup(
+            options(),
+            output_path=output,
+            code_revision=REVISION,
+            connect=connect,
+            stream_cursor_class=object(),
+        )
+
+    statements = [entry[1] for entry in log]
+    legacy_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.endswith(" FROM `legacy`")
+    )
+    unlock_index = statements.index("UNLOCK TABLES")
+    assert legacy_index < unlock_index
+    assert not any(statement.endswith(" FROM `events`") for statement in statements)
+    assert not output.exists()
+    assert not (tmp_path / "schema-drift.manifest.json").exists()
+    assert not list(tmp_path.glob("*.partial"))
+    assert all_opened_connections_closed(connections)
+
+
+@pytest.mark.parametrize("failure_stage", ["connect", "query", "close"])
+def test_final_inventory_verifier_failure_unlocks_and_removes_partial_output(
+    tmp_path: Path,
+    failure_stage: str,
+) -> None:
+    connections, log, base_connect = fixture_connections()
+    connections[1].statement_errors["FLUSH TABLES WITH READ LOCK"] = (
+        FakeMySqlOperationalError(1227, "global lock privilege denied")
+    )
+    if failure_stage == "query":
+        connections[2].statement_errors[
+            "SELECT TABLE_NAME, ENGINE FROM information_schema.TABLES"
+        ] = RuntimeError("synthetic verifier query failure")
+    if failure_stage == "close":
+        connections[2].close_errors = [
+            RuntimeError("synthetic verifier close failure")
+        ]
+    autocommit_calls = 0
+
+    def connect(
+        configured: ConnectionOptions,
+        autocommit: bool,
+    ) -> FakeConnection:
+        nonlocal autocommit_calls
+        if autocommit:
+            autocommit_calls += 1
+            if failure_stage == "connect" and autocommit_calls == 2:
+                raise RuntimeError("synthetic verifier connect failure")
+        return base_connect(configured, autocommit)
+
+    output = tmp_path / f"verifier-{failure_stage}.sql.gz"
+    expected_error: type[Exception] = (
+        MySqlBackupError if failure_stage == "close" else RuntimeError
+    )
+    with pytest.raises(expected_error):
+        create_mysql_backup(
+            options(),
+            output_path=output,
+            code_revision=REVISION,
+            connect=connect,
+            stream_cursor_class=object(),
+        )
+
+    assert "UNLOCK TABLES" in [entry[1] for entry in log]
+    assert not output.exists()
+    assert not (
+        tmp_path / f"verifier-{failure_stage}.manifest.json"
+    ).exists()
+    assert not list(tmp_path.glob("*.partial"))
+    assert all_opened_connections_closed(connections)
+    if failure_stage == "close":
+        assert connections[2].close_calls == 2
 
 
 def test_failure_unlocks_myisam_and_never_marks_backup_completed(
@@ -425,7 +781,7 @@ def test_failure_unlocks_myisam_and_never_marks_backup_completed(
     assert not list(tmp_path.glob("*.partial"))
     assert "UNLOCK TABLES" in [entry[1] for entry in log]
     assert connections[0].rolled_back is True
-    assert all(connection.closed for connection in connections)
+    assert all_opened_connections_closed(connections)
 
 
 def test_innodb_only_backup_does_not_request_a_global_read_lock(
@@ -457,7 +813,16 @@ def test_innodb_only_backup_does_not_request_a_global_read_lock(
     )
 
     assert calls == [False]
-    assert result.manifest["consistency"]["global_read_lock_used"] is False
+    assert result.manifest["consistency"] == {
+        "consistent_snapshot": True,
+        "global_read_lock_used": False,
+        "isolation": "REPEATABLE READ",
+        "locked_engines": [],
+        "locked_table_count": 0,
+        "nontransactional_engines": [],
+        "nontransactional_table_count": 0,
+        "read_lock_strategy": "none",
+    }
     assert "FLUSH TABLES WITH READ LOCK" not in [entry[1] for entry in log]
 
 
