@@ -1508,6 +1508,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
     )
     conflicting_payload = json.loads(json.dumps(first_payload))
     conflicting_payload["envelope"]["raw_count"] = 2
+    conflicting_payload["envelope"]["chunk"]["batch_raw_count"] = 2
     conflict, _ = request_json(
         base_url,
         "api.php/api/v2/ops/ingest",
