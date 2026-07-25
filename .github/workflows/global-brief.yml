@@ -1,0 +1,243 @@
+name: Global brief candidate and human publication
+
+on:
+  schedule:
+    # 05:45 KST. This scheduled path creates an approval bundle only.
+    - cron: "45 20 * * *"
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Create candidates or publish an explicitly approved payload
+        required: true
+        type: choice
+        default: candidates
+        options:
+          - candidates
+          - publish
+      edition:
+        description: Brief edition
+        required: true
+        type: choice
+        default: global
+        options:
+          - global
+          - KR
+          - US
+          - JP
+          - GB
+          - CA
+          - AU
+      approval_json:
+        description: Approved JSON copied from the candidate artifact (publish only)
+        required: false
+        type: string
+        default: ""
+      approval_payload_base64:
+        description: Base64 of an approved JSON artifact (publish only)
+        required: false
+        type: string
+        default: ""
+      candidate_run_id:
+        description: Successful candidate workflow run ID for this exact revision
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: global-brief-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  candidates:
+    if: >-
+      github.ref_name == github.event.repository.default_branch &&
+      (github.event_name == 'schedule' ||
+       (github.event_name == 'workflow_dispatch' && inputs.operation == 'candidates')) &&
+      (vars.GOVERNANCE_PIPELINE_MODE == 'shadow' ||
+       vars.GOVERNANCE_PIPELINE_MODE == 'live')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: governance-runtime
+    env:
+      GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+      BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+      BSIDE_EDITOR_TOKEN: ${{ secrets.BSIDE_EDITOR_TOKEN }}
+      GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
+      BRIEF_EDITION: ${{ inputs.edition || 'global' }}
+      CANDIDATE_PATH: global-brief/candidate-bundle.json
+    steps:
+      - name: Checkout immutable candidate revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Generate secret-free human approval bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m curator.global_brief candidates \
+            --edition "$BRIEF_EDITION" \
+            --code-revision "$GITHUB_SHA" \
+            --output "$CANDIDATE_PATH"
+
+      - name: Preserve candidate bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-brief-candidates-${{ env.BRIEF_EDITION }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.CANDIDATE_PATH }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Record the required human action
+        shell: bash
+        run: |
+          {
+            echo "### Global brief candidate bundle"
+            echo "- edition: \`$BRIEF_EDITION\`"
+            echo "- revision: \`$GITHUB_SHA\`"
+            echo "- status: pending explicit human approval"
+            echo "- no public brief was written by this scheduled job"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    if: >-
+      github.ref_name == github.event.repository.default_branch &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'publish' &&
+      (vars.GOVERNANCE_PIPELINE_MODE == 'shadow' ||
+       vars.GOVERNANCE_PIPELINE_MODE == 'live')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: governance-release
+    env:
+      GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+      BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+      BSIDE_EDITOR_TOKEN: ${{ secrets.BSIDE_EDITOR_TOKEN }}
+      GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
+      BRIEF_EDITION: ${{ inputs.edition }}
+      GLOBAL_BRIEF_APPROVAL_JSON: ${{ inputs.approval_json }}
+      GLOBAL_BRIEF_APPROVAL_B64: ${{ inputs.approval_payload_base64 }}
+      CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+      CANDIDATE_DIR: global-brief/approved-candidate
+      CANDIDATE_PATH: global-brief/approved-candidate/candidate-bundle.json
+      RECEIPT_PATH: global-brief/publication-receipt.json
+    steps:
+      - name: Checkout the exact approved revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Verify candidate run provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "candidate_run_id must be a positive workflow run ID" >&2
+            exit 1
+          fi
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN_ID")"
+          jq -e \
+            --arg sha "$GITHUB_SHA" \
+            --arg branch "$DEFAULT_BRANCH" \
+            '.path == ".github/workflows/global-brief.yml"
+             and .status == "completed"
+             and .conclusion == "success"
+             and .head_sha == $sha
+             and .head_branch == $branch' \
+            <<<"$run_json" >/dev/null
+          run_attempt="$(
+            jq -er '.run_attempt | select(type == "number" and . >= 1)' \
+              <<<"$run_json"
+          )"
+          artifacts_json="$(
+            gh api \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN_ID/artifacts?per_page=100"
+          )"
+          expected_name="global-brief-candidates-${BRIEF_EDITION}-${CANDIDATE_RUN_ID}-${run_attempt}"
+          mapfile -t artifact_names < <(
+            jq -r \
+              --arg name "$expected_name" \
+              '.artifacts[]
+               | select(.expired == false and .name == $name)
+               | .name' \
+              <<<"$artifacts_json"
+          )
+          if [[ "${#artifact_names[@]}" -ne 1 ]]; then
+            echo "exactly one candidate artifact is required" >&2
+            exit 1
+          fi
+          if [[ "${artifact_names[0]}" != "$expected_name" ]]; then
+            echo "candidate artifact is not bound to the successful run attempt" >&2
+            exit 1
+          fi
+          echo "CANDIDATE_ARTIFACT_NAME=${artifact_names[0]}" >> "$GITHUB_ENV"
+
+      - name: Download the exact candidate artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ env.CANDIDATE_ARTIFACT_NAME }}
+          path: ${{ env.CANDIDATE_DIR }}
+          github-token: ${{ github.token }}
+          run-id: ${{ env.CANDIDATE_RUN_ID }}
+
+      - name: Verify candidate artifact contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' entries < <(find "$CANDIDATE_DIR" -mindepth 1 -print0)
+          if [[ "${#entries[@]}" -ne 1 ]] ||
+             [[ "${entries[0]}" != "$CANDIDATE_PATH" ]] ||
+             [[ ! -f "$CANDIDATE_PATH" ]] ||
+             [[ -L "$CANDIDATE_PATH" ]]; then
+            echo "candidate artifact must contain exactly one regular candidate-bundle.json" >&2
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Publish the human-approved immutable brief
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m curator.global_brief publish \
+            --edition "$BRIEF_EDITION" \
+            --code-revision "$GITHUB_SHA" \
+            --candidate-bundle-file "$CANDIDATE_PATH" \
+            --approval-json-env GLOBAL_BRIEF_APPROVAL_JSON \
+            --approval-base64-env GLOBAL_BRIEF_APPROVAL_B64 \
+            --output "$RECEIPT_PATH"
+
+      - name: Preserve exact publication receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-brief-publication-${{ env.BRIEF_EDITION }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.RECEIPT_PATH }}
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 9

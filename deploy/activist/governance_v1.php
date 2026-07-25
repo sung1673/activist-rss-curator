@@ -330,7 +330,8 @@ function v1_expected_migration_manifest(): array {
 function v1_schema_manifest_status(PDO $pdo, array $config): array {
     try {
         $stmt = $pdo->query('SELECT migration_version,migration_name,migration_checksum FROM '
-            . table_name($config,'schema_migrations') . ' ORDER BY migration_version');
+            . table_name($config,'schema_migrations') . ' WHERE migration_version<='
+            . GOV_V1_SCHEMA_VERSION . ' ORDER BY migration_version');
         $rows = $stmt->fetchAll();
     } catch (PDOException $e) {
         return array('valid'=>false,'highest_version'=>null,'error'=>'migration_manifest_unavailable');
@@ -635,17 +636,27 @@ function v1_serve_openapi(string $path): void {
     exit;
 }
 
-function v1_document_visibility_sql(string $documentAlias = 'd', string $rightsAlias = 'sr'): string {
-    return '(' . $documentAlias . '.publication_status = \'published\' AND ('
+function v1_document_visibility_sql(
+    string $documentAlias = 'd',
+    string $rightsAlias = 'sr',
+    bool $requireLegacyCompany = true
+): string {
+    return '(' . $documentAlias . '.publication_status = \'published\''
+        . ($requireLegacyCompany
+            ? ' AND ' . $documentAlias . '.company_id IS NOT NULL'
+            : ' AND ' . $documentAlias . '.issuer_id IS NOT NULL')
+        . ' AND ('
         . $documentAlias . '.source_right_id IS NOT NULL'
         . ' AND ' . $rightsAlias . '.source_right_id IS NOT NULL'
         . ' AND ' . $rightsAlias . '.status = \'active\''
+        . ' AND NULLIF(TRIM(' . $rightsAlias . '.permission_scope), \'\') IS NOT NULL'
         . ' AND ' . $rightsAlias . '.redistribution_allowed = 1'
         . ' AND ' . $rightsAlias . '.valid_from <= UTC_TIMESTAMP()'
         . ' AND (' . $rightsAlias . '.valid_until IS NULL OR ' . $rightsAlias . '.valid_until > UTC_TIMESTAMP())'
         . ' AND ' . $rightsAlias . '.revoked_at IS NULL'
         . ' AND (NULLIF(TRIM(' . $rightsAlias . '.evidence_uri), \'\') IS NOT NULL'
-        . ' OR NULLIF(TRIM(' . $rightsAlias . '.evidence_hash), \'\') IS NOT NULL)'
+        . ' OR ' . $rightsAlias . '.evidence_hash'
+        . ' REGEXP \'^[A-Fa-f0-9]{64}$\')'
         . '))';
 }
 
@@ -4957,17 +4968,11 @@ function v1_admin_update_release_state(PDO $pdo, array $config, string $role): v
             ));
         }
         if ($current === 'preview' && $target === 'live') {
-            $rightsGuard = v1_current_public_document_rights_guard($pdo,$config);
-            if ((int)$rightsGuard['invalid_count'] > 0) {
-                $pdo->rollBack();
-                v1_respond(409,array(
-                    'ok'=>false,
-                    'error'=>'current_source_rights_invalid',
-                    'checked_at'=>v1_release_iso_time((string)$rightsGuard['checked_at']),
-                    'referenced_document_count'=>(int)$rightsGuard['total_count'],
-                    'invalid_source_right_document_count'=>(int)$rightsGuard['invalid_count'],
-                ));
-            }
+            $pdo->rollBack();
+            v1_respond(409,array(
+                'ok'=>false,
+                'error'=>'protected_atomic_cutover_required',
+            ));
         }
         $nextVersion = $currentVersion + 1;
         $changedBy = 'api_role:' . $role;
@@ -5022,6 +5027,7 @@ function v1_admin_upsert_source_right(PDO $pdo, array $config, string $role): vo
     if (!preg_match('/^[A-Za-z0-9_.:\-]{1,40}$/', $sourceType) || $sourceKey === '' || $sourceName === '' || $scope === '') {
         v1_respond(400, array('ok' => false, 'error' => 'source_right_required_fields_missing'));
     }
+    $sourceKey = mb_substr($sourceKey, 0, 191, 'UTF-8');
     $validFrom = mysql_dt(isset($payload['valid_from']) ? $payload['valid_from'] : null);
     $validUntil = mysql_dt(isset($payload['valid_until']) ? $payload['valid_until'] : null);
     if ($validFrom === null) { v1_respond(400, array('ok' => false, 'error' => 'invalid_valid_from')); }
@@ -5048,14 +5054,37 @@ function v1_admin_upsert_source_right(PDO $pdo, array $config, string $role): vo
         if (v1_release_state($pdo,$config,true) === null) {
             throw new RuntimeException('release_state_unavailable');
         }
+        $identity = $pdo->prepare(
+            'SELECT source_type,source_key FROM '
+            . table_name($config, 'source_rights')
+            . ' WHERE source_right_id=? LIMIT 1 FOR UPDATE'
+        );
+        $identity->execute(array($id));
+        $existingIdentity = $identity->fetch();
+        if (
+            $existingIdentity
+            && (
+                (string)$existingIdentity['source_type'] !== $sourceType
+                || (string)$existingIdentity['source_key'] !== $sourceKey
+            )
+        ) {
+            $pdo->rollBack();
+            v1_respond(409, array(
+                'ok' => false,
+                'error' => 'source_right_identity_immutable',
+                'source_right_id' => $id,
+                'existing_source_type' => (string)$existingIdentity['source_type'],
+                'existing_source_key' => (string)$existingIdentity['source_key'],
+            ));
+        }
         $stmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'source_rights') . ' (source_right_id, source_type, source_key, source_name, '
             . 'permission_scope, evidence_uri, evidence_hash, valid_from, valid_until, revoked_at, ai_allowed, redistribution_allowed, status, notes, created_at, updated_at) '
-            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE source_type=VALUES(source_type), source_key=VALUES(source_key), '
+            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE '
             . 'source_name=VALUES(source_name), permission_scope=VALUES(permission_scope), evidence_uri=VALUES(evidence_uri), evidence_hash=VALUES(evidence_hash), '
             . 'valid_from=VALUES(valid_from), valid_until=VALUES(valid_until), revoked_at=VALUES(revoked_at), ai_allowed=VALUES(ai_allowed), '
             . 'redistribution_allowed=VALUES(redistribution_allowed), status=VALUES(status), notes=VALUES(notes), updated_at=VALUES(updated_at)');
         $stmt->execute(array(
-            $id, $sourceType, mb_substr($sourceKey, 0, 191, 'UTF-8'), mb_substr($sourceName, 0, 255, 'UTF-8'), $scope,
+            $id, $sourceType, $sourceKey, mb_substr($sourceName, 0, 255, 'UTF-8'), $scope,
             $evidenceUri !== '' ? mb_substr($evidenceUri, 0, 65535, 'UTF-8') : null,
             $evidenceHash ?: null, $validFrom, $validUntil, $revokedAt, v1_bool_int(isset($payload['ai_allowed']) ? $payload['ai_allowed'] : false),
             v1_bool_int(isset($payload['redistribution_allowed']) ? $payload['redistribution_allowed'] : false), $status,
@@ -6285,6 +6314,186 @@ function v1_governance_snapshot_identity_conflict_code(Throwable $error): ?strin
     return null;
 }
 
+/**
+ * Enable the additive DART -> global-terminal bridge only after the immutable
+ * v2 migration manifest is present.  Schema 10 production continues to use
+ * the original statements and never references v2-only tables or columns.
+ */
+function v1_global_dart_bridge_enabled(PDO $pdo, array $config): bool {
+    if (function_exists('v2_schema_manifest_status')) {
+        $manifest = v2_schema_manifest_status($pdo,$config);
+        return isset($manifest['valid'],$manifest['highest_version'])
+            && $manifest['valid'] === true
+            && (int)$manifest['highest_version'] >= 11;
+    }
+    return false;
+}
+
+/** Map the legacy Korean event taxonomy to the eight global terminal lanes. */
+function v1_global_event_family_for_legacy_type(string $eventType): ?string {
+    $families = array(
+        'five_percent_holding'=>'large_ownership',
+        'shareholder_proposal'=>'meeting_and_vote',
+        'general_meeting'=>'meeting_and_vote',
+        'tender_offer'=>'tender_offer_and_mna',
+        'merger'=>'tender_offer_and_mna',
+        'split'=>'tender_offer_and_mna',
+        'rights_issue'=>'capital_issuance',
+        'convertible_bond'=>'capital_issuance',
+        'bond_with_warrant'=>'capital_issuance',
+        'exchangeable_bond'=>'capital_issuance',
+        'dividend'=>'capital_return',
+        'treasury_shares'=>'capital_return',
+        'value_up'=>'capital_return',
+        'board'=>'board_and_compensation',
+        'executive_compensation'=>'board_and_compensation',
+        'trading_suspension'=>'listing_status',
+        'delisting'=>'listing_status',
+        'duplicate_listing'=>'listing_status',
+    );
+    return isset($families[$eventType]) ? $families[$eventType] : null;
+}
+
+function v1_global_dart_metric_count($value): ?int {
+    if (is_int($value) && $value >= 0 && $value <= 4294967295) { return $value; }
+    if (is_string($value) && strlen($value) <= 10
+        && preg_match('/^(0|[1-9][0-9]*)$/',$value) === 1) {
+        $normalized = (int)$value;
+        return $normalized >= 0 && $normalized <= 4294967295 ? $normalized : null;
+    }
+    return null;
+}
+
+function v1_global_dart_window_date($value): ?string {
+    if (!is_string($value)
+        || preg_match('/^(\d{4})-(\d{2})-(\d{2})$/',trim($value),$parts) !== 1
+        || !checkdate((int)$parts[2],(int)$parts[3],(int)$parts[1])) {
+        return null;
+    }
+    return trim($value);
+}
+
+/**
+ * Extract a source-scoped DART outcome.  A combined DART+KIND run may advance
+ * DART freshness when (and only when) DART itself succeeded and its exact
+ * document ACK denominator matches.  KIND-only and partial runs cannot pass.
+ */
+function v1_global_dart_run_outcome(array $run): array {
+    $sourceTokens = array_values(array_filter(array_map('trim',
+        explode('+',strtolower((string)v1_first($run,array('source_key'),''))))));
+    $selected = in_array('dart',$sourceTokens,true);
+    $outcomesValue = v1_official_run_metric($run,'source_outcomes');
+    $outcomes = is_array($outcomesValue) ? $outcomesValue : array();
+    $outcome = isset($outcomes['dart']) && is_array($outcomes['dart'])
+        ? $outcomes['dart'] : array();
+    $ackValue = v1_official_run_metric($run,'source_ack_counts');
+    $ackCounts = is_array($ackValue) ? $ackValue : array();
+    $raw = v1_global_dart_metric_count(isset($outcome['raw_count']) ? $outcome['raw_count'] : null);
+    $ack = v1_global_dart_metric_count(isset($ackCounts['dart']) ? $ackCounts['dart'] : null);
+    $errors = v1_global_dart_metric_count(isset($outcome['error_count']) ? $outcome['error_count'] : null);
+    $status = strtolower(trim((string)(isset($outcome['status']) ? $outcome['status'] : 'missing')));
+    $succeeded = $selected
+        && in_array($status,array('success','succeeded'),true)
+        && $raw !== null && $ack !== null && $raw === $ack
+        && $errors === 0;
+    $errorClass = !$selected ? null
+        : ($status === 'missing' ? 'dart_outcome_missing'
+            : (($raw === null || $ack === null) ? 'dart_ack_missing'
+                : ($raw !== $ack ? 'dart_ack_mismatch'
+                    : ($errors !== 0 ? 'dart_source_failed'
+                        : mb_substr('dart_source_' . $status,0,80,'UTF-8')))));
+    return array(
+        'selected'=>$selected,
+        'succeeded'=>$succeeded,
+        'raw_count'=>$raw,
+        'acknowledged_count'=>$ack,
+        'error_class'=>$errorClass,
+    );
+}
+
+/**
+ * Project a completed legacy DART run into the v2 connector registry.
+ *
+ * The connector row is locked and only a source-scoped, ACK-complete run with
+ * a durable window and code revision may advance last_success/cursor.  Failed,
+ * partial and older observations may update last_checked/error only; they
+ * never regress the last successful checkpoint.
+ */
+function v1_bridge_dart_connector_run(PDO $pdo, array $config, array $run, string $runId,
+    ?string $codeRevision, ?string $finishedAt, string $firstObservedAt, string $now,
+    bool $runCompletionValid): void {
+    $outcome = v1_global_dart_run_outcome($run);
+    if ($outcome['selected'] !== true) { return; }
+    $connectorStmt = $pdo->prepare('SELECT connector_id,cursor_json,last_checked_at,last_success_at FROM '
+        . table_name($config,'source_connectors')
+        . ' WHERE connector_id=? AND country_code=\'KR\' AND source_key=\'dart\' LIMIT 1 FOR UPDATE');
+    $connectorStmt->execute(array('connector:kr:dart'));
+    $connector = $connectorStmt->fetch();
+    if (!is_array($connector)) {
+        throw new RuntimeException('global_dart_connector_missing');
+    }
+    $checkedAt = $finishedAt !== null ? $finishedAt : $now;
+    $lastCheckedAt = isset($connector['last_checked_at']) && is_string($connector['last_checked_at'])
+        ? $connector['last_checked_at'] : null;
+    $isNewestCheck = $lastCheckedAt === null || strcmp($checkedAt,$lastCheckedAt) >= 0;
+    $windowStartValue = v1_official_run_metric($run,'window_start');
+    $windowEndValue = v1_official_run_metric($run,'window_end');
+    $windowStart = v1_global_dart_window_date($windowStartValue);
+    $windowEnd = v1_global_dart_window_date($windowEndValue);
+    $hasDurableWindow = $windowStart !== null && $windowEnd !== null
+        && $windowStart <= $windowEnd;
+    $canAdvance = $outcome['succeeded'] === true
+        && $runCompletionValid
+        && $finishedAt !== null && $codeRevision !== null && $hasDurableWindow;
+    if ($canAdvance) {
+        $lastSuccessAt = isset($connector['last_success_at']) && is_string($connector['last_success_at'])
+            ? $connector['last_success_at'] : null;
+        if ($lastSuccessAt !== null && strcmp($finishedAt,$lastSuccessAt) < 0) {
+            return;
+        }
+        $retrievedValue = v1_official_run_metric($run,'retrieved_at');
+        $observedAt = is_string($retrievedValue) ? v1_mysql_datetime_utc($retrievedValue) : null;
+        if ($observedAt === null) { $observedAt = $firstObservedAt; }
+        $cursorJson = json_value(array(
+            'schema_version'=>1,
+            'source_key'=>'dart',
+            'run_id'=>$runId,
+            'window_start'=>$windowStart,
+            'window_end_inclusive'=>$windowEnd,
+        ));
+        $storedCursor = isset($connector['cursor_json']) && is_string($connector['cursor_json'])
+            ? json_decode($connector['cursor_json'],true) : null;
+        $storedWindowEndValue = is_array($storedCursor)
+            ? (isset($storedCursor['window_end_exclusive'])
+                ? $storedCursor['window_end_exclusive']
+                : (isset($storedCursor['window_end_inclusive'])
+                    ? $storedCursor['window_end_inclusive'] : null))
+            : null;
+        $storedWindowEnd = v1_global_dart_window_date($storedWindowEndValue);
+        if ($storedWindowEnd !== null && $storedWindowEnd > $windowEnd) {
+            $cursorJson = (string)$connector['cursor_json'];
+        }
+        $update = $pdo->prepare('UPDATE ' . table_name($config,'source_connectors')
+            . ' SET connector_status=\'active\',cursor_json=?,last_checked_at=?,last_success_at=?,'
+            . 'last_observed_at=?,last_raw_count=?,last_acknowledged_count=?,last_error_class=NULL,'
+            . 'code_revision=?,updated_at=? WHERE connector_id=? AND country_code=\'KR\' AND source_key=\'dart\'');
+        $update->execute(array(
+            $cursorJson,$checkedAt,$finishedAt,$observedAt,(int)$outcome['raw_count'],
+            (int)$outcome['acknowledged_count'],$codeRevision,$now,'connector:kr:dart',
+        ));
+        return;
+    }
+    if ($isNewestCheck) {
+        $errorClass = is_string($outcome['error_class']) && $outcome['error_class'] !== ''
+            ? $outcome['error_class'] : 'dart_checkpoint_incomplete';
+        if ($outcome['succeeded'] === true) { $errorClass = 'dart_checkpoint_incomplete'; }
+        $failure = $pdo->prepare('UPDATE ' . table_name($config,'source_connectors')
+            . ' SET last_checked_at=?,last_error_class=?,updated_at=?'
+            . ' WHERE connector_id=? AND country_code=\'KR\' AND source_key=\'dart\'');
+        $failure->execute(array($checkedAt,$errorClass,$now,'connector:kr:dart'));
+    }
+}
+
 function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): void {
     $expectedBackendBindingId = isset($payload['expected_backend_binding_id'])
         ? trim((string)$payload['expected_backend_binding_id']) : '';
@@ -6303,6 +6512,7 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
     if (count($companies) > 2000 || count($documents) > 2500 || count($events) > 2500 || count($rights) > 1000) {
         respond(413, array('ok' => false, 'error' => 'too_many_records'));
     }
+    $globalDartBridgeEnabled = v1_global_dart_bridge_enabled($pdo,$config);
     $containsKindDocument = false;
     foreach ($documents as $document) {
         if (!is_array($document)) { continue; }
@@ -6322,6 +6532,7 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
         'event_link_ambiguous' => 0, 'runs' => 0);
     $followupDocumentIds = array();
     $documentSourceClasses = array();
+    $documentSourceRightIds = array();
     $terminalCompletionFailure = false;
     foreach ($events as $event) {
         if (!is_array($event) || (empty($event['is_correction']) && empty($event['is_cancelled']))) { continue; }
@@ -6359,6 +6570,42 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             . 'listing_status=listing_status, master_modified_at=master_modified_at, updated_at=VALUES(updated_at)');
         $companyMasterStmt = $pdo->prepare('UPDATE ' . table_name($config, 'companies')
             . ' SET listing_status=IF(?=1,?,listing_status), master_modified_at=IF(?=1,?,master_modified_at) WHERE company_id=?');
+        $globalIssuerStmt = null;
+        $globalIdentifierStmt = null;
+        $globalListingStmt = null;
+        if ($globalDartBridgeEnabled) {
+            $globalIssuerStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'issuers')
+                . ' (issuer_id,country_code,legal_name,legal_name_en,short_name,original_language,homepage_url,'
+                . 'listing_status,record_status,master_modified_at,payload_json,created_at,updated_at)'
+                . ' SELECT ?,\'KR\',c.legal_name,c.legal_name_en,c.short_name,\'ko\',c.homepage_url,'
+                . 'c.listing_status,c.record_status,c.master_modified_at,?,?,? FROM '
+                . table_name($config,'companies') . ' c WHERE c.company_id=?'
+                . ' ON DUPLICATE KEY UPDATE '
+                . 'country_code=\'KR\',legal_name=VALUES(legal_name),'
+                . 'legal_name_en=COALESCE(NULLIF(VALUES(legal_name_en),\'\'),legal_name_en),'
+                . 'short_name=COALESCE(NULLIF(VALUES(short_name),\'\'),short_name),'
+                . 'homepage_url=COALESCE(NULLIF(VALUES(homepage_url),\'\'),homepage_url),'
+                . 'listing_status=VALUES(listing_status),record_status=VALUES(record_status),'
+                . 'master_modified_at=COALESCE(VALUES(master_modified_at),master_modified_at),'
+                . 'payload_json=VALUES(payload_json),updated_at=VALUES(updated_at)');
+            $globalIdentifierStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'issuer_identifiers')
+                . ' (issuer_id,identifier_type,identifier_value,market,is_primary,valid_from,valid_until,created_at,updated_at)'
+                . ' VALUES (?,?,?,?,?,NULL,NULL,?,?) ON DUPLICATE KEY UPDATE '
+                . 'issuer_id=IF(issuer_id=VALUES(issuer_id),VALUES(issuer_id),issuer_id),'
+                . 'is_primary=IF(issuer_id=VALUES(issuer_id),VALUES(is_primary),is_primary),'
+                . 'updated_at=IF(issuer_id=VALUES(issuer_id),VALUES(updated_at),updated_at)');
+            $globalListingStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'issuer_listings')
+                . ' (listing_id,issuer_id,country_code,market,ticker,isin,currency_code,listing_status,is_primary,created_at,updated_at)'
+                . ' VALUES (?,?,\'KR\',?,?,NULL,\'KRW\',?,1,?,?) ON DUPLICATE KEY UPDATE '
+                . 'issuer_id=IF(listing_id=VALUES(listing_id),VALUES(issuer_id),issuer_id),'
+                . 'country_code=IF(listing_id=VALUES(listing_id),\'KR\',country_code),'
+                . 'market=IF(listing_id=VALUES(listing_id),VALUES(market),market),'
+                . 'ticker=IF(listing_id=VALUES(listing_id),VALUES(ticker),ticker),'
+                . 'listing_status=IF(listing_id=VALUES(listing_id)'
+                . ' AND VALUES(listing_status)<>\'unknown\',VALUES(listing_status),listing_status),'
+                . 'is_primary=IF(listing_id=VALUES(listing_id),1,is_primary),'
+                . 'updated_at=IF(listing_id=VALUES(listing_id),VALUES(updated_at),updated_at)');
+        }
         foreach ($companies as $company) {
             if (!is_array($company)) { continue; }
             $companyId = trim((string)v1_first($company, array('company_id', 'corp_code'), ''));
@@ -6393,6 +6640,31 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             if ($hasListingStatus || $hasMasterModifiedAt) {
                 $companyMasterStmt->execute(array($hasListingStatus ? 1 : 0,$listingStatus,
                     $hasMasterModifiedAt ? 1 : 0,$masterModifiedAt,$companyId));
+            }
+            if ($globalDartBridgeEnabled) {
+                $issuerId = 'issuer:kr:dart:' . $companyId;
+                $stockCode = mb_substr(trim((string)v1_first($company,array('stock_code'),'')),0,12,'UTF-8');
+                $market = mb_substr(trim((string)v1_first($company,array('market','corp_cls'),'')),0,40,'UTF-8');
+                if ($market === '') { $market = 'KRX'; }
+                $globalIssuerStmt->execute(array(
+                    $issuerId,json_value(array(
+                        'legacy_company_id'=>$companyId,
+                        'identity_namespace'=>'DART_CORP_CODE',
+                        'bridge'=>'v1_official_ingest',
+                    )),$now,$now,$companyId,
+                ));
+                $globalIdentifierStmt->execute(array(
+                    $issuerId,'DART_CORP_CODE',$companyId,'KRX',1,$now,$now,
+                ));
+                if ($stockCode !== '') {
+                    $globalIdentifierStmt->execute(array(
+                        $issuerId,'TICKER',$stockCode,$market,0,$now,$now,
+                    ));
+                    $globalListingStmt->execute(array(
+                        'listing:kr:' . $companyId,$issuerId,$market,$stockCode,
+                        $listingStatus,$now,$now,
+                    ));
+                }
             }
             $counts['companies']++;
         }
@@ -6459,6 +6731,12 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             . ' LIMIT 1 FOR UPDATE');
         $existingDocumentLineageStmt = $pdo->prepare('SELECT correction_of_document_id, version_no FROM '
             . table_name($config, 'documents') . ' WHERE document_id=? LIMIT 1 FOR UPDATE');
+        $globalDartDocumentStmt = null;
+        if ($globalDartBridgeEnabled) {
+            $globalDartDocumentStmt = $pdo->prepare('UPDATE ' . table_name($config,'documents')
+                . ' SET issuer_id=?,country_code=\'KR\',source_key=\'dart\',filed_at=COALESCE(filed_at,?)'
+                . ' WHERE document_id=? AND company_id=? AND source_right_id=\'official:dart\'');
+        }
         foreach ($documents as $document) {
             if (!is_array($document)) { continue; }
             $sourceClass = trim((string)v1_first($document, array('source_class', 'source_category'), 'official_disclosure'));
@@ -6471,7 +6749,33 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             $id = trim((string)v1_first($document, array('document_id'), ''));
             if ($id === '') { $id = v1_stable_id($sourceClass === 'official_disclosure' ? 'dart' : 'doc', $externalId); }
             if (!v1_valid_entity_id($id)) { continue; }
+            $sourceRightId = strtolower(trim((string)v1_first($document, array('source_right_id'), '')));
             $documentSourceClasses[$id] = $sourceClass;
+            $documentSourceRightIds[$id] = $sourceRightId;
+            if (
+                $globalDartBridgeEnabled
+                && $sourceClass === 'official_disclosure'
+                && $sourceRightId === 'official:dart'
+            ) {
+                if (
+                    isset($document['metadata'])
+                    && (
+                        !is_array($document['metadata'])
+                        || (
+                            isset($document['metadata']['title_provenance'])
+                            && $document['metadata']['title_provenance'] !== 'source'
+                        )
+                    )
+                ) {
+                    throw new RuntimeException(
+                        'dart_document_title_provenance_conflict:' . $id
+                    );
+                }
+                if (!isset($document['metadata'])) {
+                    $document['metadata'] = array();
+                }
+                $document['metadata']['title_provenance'] = 'source';
+            }
             $companyId = trim((string)v1_first($document, array('company_id', 'corp_code'), ''));
             if ($companyId !== '' && !preg_match('/^[0-9]{8}$/', $companyId)) { $companyId = ''; }
             $collectionKey = mb_substr(trim((string)v1_first($document, array('collection_key'), '')), 0, 96, 'UTF-8');
@@ -6540,6 +6844,13 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
                 $publishedAt, $retrievedAt, mb_substr($verification, 0, 24, 'UTF-8'),
                 in_array($publication, array('draft', 'published', 'withdrawn'), true) ? $publication : 'draft', json_value($document), $now, $now,
             ));
+            if ($globalDartBridgeEnabled
+                && $companyId !== ''
+                && strtolower(trim((string)v1_first($document,array('source_right_id'),''))) === 'official:dart') {
+                $globalDartDocumentStmt->execute(array(
+                    'issuer:kr:dart:' . $companyId,$publishedAt ?: $retrievedAt,$id,$companyId,
+                ));
+            }
             $counts['documents']++;
         }
 
@@ -6599,7 +6910,7 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             . 'previous_value, revised_value, reason, revision_status, requested_by, reviewed_by, reviewed_at, published_at, created_at, updated_at) '
             . 'VALUES (?,\'event\',?,\'lifecycle_status\',?,\'corrected\',?,\'published\',\'official_ingest\',\'official_ingest\',?,?,?,?) '
             . 'ON DUPLICATE KEY UPDATE revision_id=revision_id');
-        $documentClassStmt = $pdo->prepare('SELECT source_class FROM ' . table_name($config, 'documents') . ' WHERE document_id=? LIMIT 1');
+        $documentClassStmt = $pdo->prepare('SELECT source_class,source_right_id FROM ' . table_name($config, 'documents') . ' WHERE document_id=? LIMIT 1');
         $documentObservationStmt = $pdo->prepare('SELECT d.source_class,COALESCE(NULLIF(sr.source_key,\'\'),d.source_class) AS source_key,d.content_hash,d.retrieved_at '
             . 'FROM ' . table_name($config, 'documents') . ' d LEFT JOIN ' . table_name($config, 'source_rights') . ' sr ON sr.source_right_id=d.source_right_id '
             . 'WHERE d.document_id=? LIMIT 1');
@@ -6607,6 +6918,19 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             . ' (observation_id,event_id,document_id,source_class,source_key,first_observed_at,observed_at,payload_hash,payload_json,created_at,updated_at) '
             . 'VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE first_observed_at=LEAST(first_observed_at,VALUES(first_observed_at)), '
             . 'observed_at=GREATEST(observed_at,VALUES(observed_at)), payload_hash=VALUES(payload_hash), payload_json=VALUES(payload_json), updated_at=VALUES(updated_at)');
+        $globalDartEventStmt = null;
+        if ($globalDartBridgeEnabled) {
+            $globalDartEventStmt = $pdo->prepare('UPDATE ' . table_name($config,'governance_events') . ' bridge_event'
+                . ' SET bridge_event.issuer_id=?,bridge_event.country_code=\'KR\','
+                . 'bridge_event.global_event_family=?,'
+                . 'bridge_event.first_observed_at=COALESCE(bridge_event.first_observed_at,?)'
+                . ' WHERE bridge_event.event_id=? AND bridge_event.company_id=?'
+                . ' AND EXISTS (SELECT 1 FROM ' . table_name($config,'event_documents') . ' bridge_ed'
+                . ' JOIN ' . table_name($config,'documents') . ' bridge_d'
+                . ' ON bridge_d.document_id=bridge_ed.document_id'
+                . ' WHERE bridge_ed.event_id=bridge_event.event_id'
+                . ' AND bridge_d.source_right_id=\'official:dart\')');
+        }
         $companyPublicationEligibilityStmt = $pdo->prepare('SELECT stock_code,listing_status,record_status FROM '
             . table_name($config, 'companies') . ' WHERE company_id=? LIMIT 1');
         $officialActorLookupStmt = $pdo->prepare('SELECT display_name FROM ' . table_name($config, 'actors')
@@ -6836,13 +7160,24 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             $documentIds = array_keys($documentIdSet);
             $hasTelegramEvidence = false;
             $hasIndependentEvidence = false;
+            $hasOfficialDartEvidence = false;
             foreach ($documentIds as $evidenceDocumentId) {
                 $evidenceDocumentId = trim((string)$evidenceDocumentId);
                 if (!v1_valid_entity_id($evidenceDocumentId)) { continue; }
                 $evidenceClass = isset($documentSourceClasses[$evidenceDocumentId]) ? (string)$documentSourceClasses[$evidenceDocumentId] : '';
-                if ($evidenceClass === '') {
+                $evidenceSourceRightId = isset($documentSourceRightIds[$evidenceDocumentId]) ? (string)$documentSourceRightIds[$evidenceDocumentId] : '';
+                if ($evidenceClass === '' || $evidenceSourceRightId === '') {
                     $documentClassStmt->execute(array($evidenceDocumentId));
-                    $evidenceClass = (string)($documentClassStmt->fetchColumn() ?: '');
+                    $storedEvidence = $documentClassStmt->fetch();
+                    if (is_array($storedEvidence)) {
+                        if ($evidenceClass === '') { $evidenceClass = (string)($storedEvidence['source_class'] ?? ''); }
+                        if ($evidenceSourceRightId === '') {
+                            $evidenceSourceRightId = strtolower(trim((string)($storedEvidence['source_right_id'] ?? '')));
+                        }
+                    }
+                }
+                if ($evidenceClass === 'official_disclosure' && $evidenceSourceRightId === 'official:dart') {
+                    $hasOfficialDartEvidence = true;
                 }
                 if (in_array($evidenceClass, array('licensed_telegram', 'authorized_telegram'), true)) {
                     $hasTelegramEvidence = true;
@@ -6884,6 +7219,19 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             }
             $review = $isEventFollowup ? 'pending' : ($requiresReview ? 'pending' : ($isConfirmed ? 'not_required' : 'pending'));
             $publication = $isEventFollowup ? 'draft' : ((!$requiresReview && $isConfirmed) ? 'published' : 'draft');
+            if ($hasOfficialDartEvidence) {
+                if (isset($event['metadata']) && !is_array($event['metadata'])) {
+                    throw new RuntimeException('dart_event_metadata_invalid');
+                }
+                if (!isset($event['metadata'])) { $event['metadata'] = array(); }
+                $declaredTitleProvenance = trim((string)($event['metadata']['title_provenance'] ?? ''));
+                if ($declaredTitleProvenance !== '' && $declaredTitleProvenance !== 'source') {
+                    throw new RuntimeException('dart_title_provenance_conflict');
+                }
+                // The public v2 title gate may trust this value only after a
+                // linked official DART document has been verified above.
+                $event['metadata']['title_provenance'] = 'source';
+            }
             $eventStmt->execute(array(
                 $eventId, $companyId, $eventType, mb_substr($title, 0, 700, 'UTF-8'),
                 $language, $summary, $occurred,
@@ -6912,6 +7260,14 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
                 $eventObservationStmt->execute(array($observationId,$eventId,$documentId,(string)$observationDocument['source_class'],$observationSource,
                     $observationAt,$observationAt,$observationHash,json_value(array('relation_type'=>'evidence','identity_status'=>$identityStatus)), $now,$now));
                 $position++; $counts['event_documents']++; $counts['event_observations']++;
+            }
+            if ($globalDartBridgeEnabled) {
+                $globalEventFamily = v1_global_event_family_for_legacy_type($eventType);
+                if ($globalEventFamily !== null) {
+                    $globalDartEventStmt->execute(array(
+                        'issuer:kr:dart:' . $companyId,$globalEventFamily,$now,$eventId,$companyId,
+                    ));
+                }
             }
             if ($isCancelled) {
                 $cancellationDocumentId = $documentIds ? (string)$documentIds[0] : null;
@@ -7021,6 +7377,12 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
                             $claimStatus === 'completed' ? $now : null,$now,
                             (string)$slotClaim['claim_id']));
                     }
+                }
+                if ($globalDartBridgeEnabled) {
+                    v1_bridge_dart_connector_run(
+                        $pdo,$config,$run,$runId,$codeRevision,$finishedAt,$firstObservedAt,$now,
+                        $terminalReason === null
+                    );
                 }
                 $counts['runs']++;
             }

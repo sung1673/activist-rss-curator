@@ -14,7 +14,10 @@ def test_php73_job_runs_isolated_mysql_http_staging_smoke() -> None:
     )
     job = workflow["jobs"]["php73"]
 
-    assert int(job["timeout-minutes"]) < 15
+    # The v2 schema/lifecycle smoke adds a bounded seven-minute integration
+    # stage to the existing PHP 7.3 + MySQL checks. Keep the whole job bounded
+    # without forcing a timeout shorter than its explicit child stages.
+    assert int(job["timeout-minutes"]) <= 20
     mysql = job["services"]["mysql"]
     assert mysql["image"].startswith("mysql:8.0.")
     assert mysql["env"] == {
@@ -68,4 +71,9 @@ def test_php73_fixture_contains_no_repository_secret_reference() -> None:
     assert "${{ secrets." not in fixture
     assert "activist_ci" in fixture
     assert "php73-ci-only-hmac-key" in fixture
+    assert "'release_authorizer' => array(" in fixture
+    assert (
+        "83a00f2797d3a214080e86809cb2eba45e0163581c1612ee7699055fa109ecb7"
+        in fixture
+    )
     assert "'telegram_signal_rebuild_lease_seconds' => 1" in fixture

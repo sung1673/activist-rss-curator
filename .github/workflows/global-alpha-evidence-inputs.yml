@@ -1,0 +1,105 @@
+name: Production Alpha protected evidence inputs
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type UPLOAD_GLOBAL_ALPHA_EVIDENCE
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: global-alpha-protected-evidence-inputs-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment:
+      name: governance-release
+    steps:
+      - name: Checkout the exact release candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Enforce protected default-branch materialization
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]] || {
+            echo "::error::Production Alpha evidence must be bound to the default branch."
+            exit 1
+          }
+          [[ "$CONFIRMATION" == "UPLOAD_GLOBAL_ALPHA_EVIDENCE" ]] || {
+            echo "::error::The explicit Production Alpha upload confirmation did not match."
+            exit 1
+          }
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Export automated evidence from production MySQL
+        shell: bash
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$BSIDE_API_BASE_URL" && -n "$BSIDE_OPS_TOKEN" ]] || {
+            echo "::error::BSIDE_API_BASE_URL and BSIDE_OPS_TOKEN are required."
+            exit 1
+          }
+          v1_api="${BSIDE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
+          curl --fail-with-body --silent --show-error \
+            --retry 2 --retry-all-errors --max-time 60 \
+            -H "Authorization: Bearer $BSIDE_OPS_TOKEN" \
+            "$v2_api/ops/alpha-release-evidence?code_revision=$GITHUB_SHA" \
+            --output global-alpha-automated-evidence.json
+
+      - name: Materialize exact same-SHA protected evidence
+        env:
+          GLOBAL_ALPHA_RELEASE_INPUTS_GZIP_B64: ${{ secrets.GLOBAL_ALPHA_RELEASE_INPUTS_GZIP_B64 }}
+        run: >-
+          python -m curator.global_alpha_release_gate materialize-inputs
+          --encoded-env GLOBAL_ALPHA_RELEASE_INPUTS_GZIP_B64
+          --output-dir global-alpha-inputs
+          --expected-revision "$GITHUB_SHA"
+          --automated-evidence global-alpha-automated-evidence.json
+
+      - name: Upload immutable protected inputs
+        id: inputs_artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-release-inputs
+          path: global-alpha-inputs
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Record immutable identity and one-use secret cleanup
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ steps.inputs_artifact.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.inputs_artifact.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Production Alpha protected inputs"
+            echo "- revision: \`$GITHUB_SHA\`"
+            echo "- artifact id: \`$ARTIFACT_ID\`"
+            echo "- artifact digest: \`$ARTIFACT_DIGEST\`"
+            echo "- operator action: delete GLOBAL_ALPHA_RELEASE_INPUTS_GZIP_B64 now"
+            echo "- human-review and approval records must have been written by the actual human reviewer"
+          } >> "$GITHUB_STEP_SUMMARY"

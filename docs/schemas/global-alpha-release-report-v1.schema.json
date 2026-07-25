@@ -1,0 +1,287 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://news.bside.ai/schemas/global-alpha-release-report-v1.schema.json",
+  "title": "BSIDE Global Terminal Production Alpha release report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "release_tier",
+    "ga_certification_claimed",
+    "quality_statement",
+    "code_revision",
+    "evidence_as_of",
+    "evidence_sha256",
+    "observation",
+    "pages_artifact",
+    "connector_idempotency",
+    "human_review",
+    "content_integrity",
+    "experience",
+    "approval",
+    "gates",
+    "failed_gates",
+    "release_gate_passed"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "kind": {
+      "const": "bside-global-production-alpha-release-report"
+    },
+    "release_tier": {
+      "const": "production-alpha"
+    },
+    "ga_certification_claimed": {
+      "const": false
+    },
+    "quality_statement": {
+      "type": "string",
+      "minLength": 1
+    },
+    "code_revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "evidence_as_of": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "evidence_sha256": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observations",
+        "pages_artifact_identity",
+        "connector_idempotency",
+        "human_review",
+        "content_integrity",
+        "experience",
+        "approval"
+      ],
+      "properties": {
+        "observations": {
+          "$ref": "#/$defs/sha256"
+        },
+        "pages_artifact_identity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "connector_idempotency": {
+          "$ref": "#/$defs/sha256"
+        },
+        "human_review": {
+          "$ref": "#/$defs/sha256"
+        },
+        "content_integrity": {
+          "$ref": "#/$defs/sha256"
+        },
+        "experience": {
+          "$ref": "#/$defs/sha256"
+        },
+        "approval": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "observation": {
+      "type": "object"
+    },
+    "pages_artifact": {
+      "$ref": "#/$defs/pagesArtifactBinding"
+    },
+    "connector_idempotency": {
+      "type": "object"
+    },
+    "human_review": {
+      "type": "object"
+    },
+    "content_integrity": {
+      "type": "object"
+    },
+    "experience": {
+      "type": "object"
+    },
+    "approval": {
+      "type": "object"
+    },
+    "gates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "passed",
+          "required",
+          "actual"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "required": {},
+          "actual": {}
+        }
+      }
+    },
+    "failed_gates": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "release_gate_passed": {
+      "type": "boolean"
+    }
+  },
+  "$defs": {
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "terminalFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "byte_length", "sha256"],
+      "properties": {
+        "path": {
+          "enum": ["app.js", "config.js", "index.html", "styles.css"]
+        },
+        "byte_length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 250000
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "terminalIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "file_count", "total_bytes", "sha256", "files"],
+      "properties": {
+        "algorithm": {
+          "const": "sha256-canonical-file-manifest-v1"
+        },
+        "file_count": {
+          "const": 4
+        },
+        "total_bytes": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "files": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/terminalFile"
+          }
+        }
+      }
+    },
+    "pagesContentIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "kind", "algorithm", "site", "terminal"],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "bside-global-alpha-pages-content-identity"
+        },
+        "algorithm": {
+          "const": "sha256-canonical-file-manifest-v1"
+        },
+        "site": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file_count", "total_bytes", "sha256"],
+          "properties": {
+            "file_count": {
+              "$ref": "#/$defs/positiveInteger"
+            },
+            "total_bytes": {
+              "$ref": "#/$defs/positiveInteger"
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        },
+        "terminal": {
+          "$ref": "#/$defs/terminalIdentity"
+        }
+      }
+    },
+    "pagesArtifactBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "kind",
+        "code_revision",
+        "producer_workflow",
+        "producer_run_id",
+        "producer_run_attempt",
+        "artifact_id",
+        "artifact_name",
+        "artifact_digest",
+        "content_identity"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "bside-global-alpha-pages-artifact-binding"
+        },
+        "code_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "producer_workflow": {
+          "const": ".github/workflows/daily.yml"
+        },
+        "producer_run_id": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "producer_run_attempt": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "artifact_id": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "artifact_name": {
+          "type": "string",
+          "pattern": "^pages-[1-9][0-9]*-[1-9][0-9]*$"
+        },
+        "artifact_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "content_identity": {
+          "$ref": "#/$defs/pagesContentIdentity"
+        }
+      }
+    }
+  }
+}

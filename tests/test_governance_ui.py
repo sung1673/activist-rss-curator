@@ -119,7 +119,17 @@ def test_ui_uses_safe_rendering_and_all_public_api_contracts() -> None:
         assert unsafe not in javascript
     assert "textContent" in javascript
     assert "sourceNode" in javascript
+    assert 'importance: event.importance || "unknown"' in javascript
+    assert 'importance: event.importance || "medium"' not in javascript
     for route in (
+        'terminalRequest("/briefs/latest"',
+        'terminalRequest("/live"',
+        'terminalRequest("/sources/status"',
+        'terminalRequest("/events"',
+        'terminalRequest("/calendar"',
+        'terminalRequest("/issuers"',
+        'terminalRequest("/search"',
+        "terminalRequest(path",
         'request("/today"',
         'request("/events"',
         'request("/companies"',
@@ -151,7 +161,8 @@ def test_ui_fail_closed_public_content_preview_and_large_body_contracts() -> Non
     assert ".filter(isPublicEvent)" in javascript
     assert "eventScore" not in javascript
     assert "watchCandidate" not in javascript
-    assert "!hiddenIds.has(item.event_id)" in javascript
+    assert 'String(event.verification_status || "") === "signal"' in javascript
+    assert "topIds.has(item.event_id)" in javascript
     assert "new FormData(form)" in javascript
     assert '"actor_id", "event_type", "source_class", "verification_status", "from", "to"' in javascript
     assert "function installWebVitals" in javascript
@@ -161,6 +172,141 @@ def test_ui_fail_closed_public_content_preview_and_large_body_contracts() -> Non
     assert 'return `/${first}/:id`' in javascript
     assert "telegram" not in assets.casefold()
     assert "#/admin" not in assets.casefold()
+
+
+def test_terminal_v2_fallback_filters_drawer_and_keyboard_contracts() -> None:
+    javascript = (UI / "app.js").read_text(encoding="utf-8")
+    html = (UI / "index.html").read_text(encoding="utf-8")
+    css = (UI / "styles.css").read_text(encoding="utf-8")
+    assert 'const v2BaseUrl = apiBase("v2")' in javascript
+    assert 'anchor.dataset.apiVersion === "v2"' in javascript
+    assert html.count('data-api-version="v2"') == 4
+    for path in (
+        "/api/v2/feeds/events.atom",
+        "/api/v2/exports/events.csv",
+        "/api/v2/exports/events.json",
+        "/api/v2/openapi.yaml",
+    ):
+        assert path in html
+    assert "function publicSourceState(source)" in javascript
+    assert 'typeof source.public_status === "string"' in javascript
+    assert "source.public_ready === true" in javascript
+    assert "publicSourceState(item).ready" in javascript
+    assert '[405, 410, 501]' in javascript
+    assert "Number(error.status) === 404" in javascript
+    assert 'payload.api_version !== "v2"' in javascript
+    assert 'payload.ok !== true' in javascript
+    assert 'error.code === "unsupported_v2_contract"' in javascript
+    assert "error.status === 0" not in javascript
+    assert '["not_found", "endpoint_not_found"]' in javascript
+    assert 'terminalRequest("/search"' in javascript
+    assert 'terminalRequest("/events"' in javascript
+    assert 'terminalRequest("/calendar"' in javascript
+    assert 'terminalRequest("/issuers"' in javascript
+    assert "const result = await terminalRequest(path" in javascript
+    assert 'fallback: () => request("/today"' in javascript
+    assert 'fallback: () => request("/events"' in javascript
+    assert 'request("/calendar"' in javascript
+    assert 'values.set("market", currentMarket(query))' in javascript
+    assert 'dataset: { eventDrawer: event.event_id || "" }' in javascript
+    assert '["j", "J", "k", "K", "Enter"]' in javascript
+    assert 'event.key === "Escape"' in javascript
+    assert 'event.key === "/"' in javascript
+    for market in ("GLOBAL", "KR", "US", "JP", "GB", "CA", "AU"):
+        assert f'data-market="{market}"' in html
+    assert 'href="#/issuers" data-nav="companies"' in html
+    assert 'href="#/companies" data-nav="companies"' not in html
+    assert 'id="mobile-menu-toggle"' in html
+    assert 'id="mobile-menu"' in html
+    assert "function toggleMobileMenu()" in javascript
+    assert "closeMobileMenu({ restoreFocus: false })" in javascript
+    assert 'id="event-drawer"' in html
+    assert 'class="mobile-bottom-nav"' in html
+    assert 'href="#/today?view=live" data-nav="live"' in html
+    assert 'id: "terminal-live"' in javascript
+    assert 'route.query.get("view") === "live"' in javascript
+    assert 'event.target.closest("[data-nav=\'live\']")' in javascript
+    assert "currentMarket(parseRoute().query)" in javascript
+    assert "grid-template-areas: \"filters main rail\"" in css
+    assert "min-height: 44px" in css
+    assert "function mobileTerminalTabs" in javascript
+    assert "function openTerminalFilterSheet" in javascript
+    assert 'id: "terminal-filters"' in javascript
+    assert "filter-sheet-open" in css
+    assert "mobile-terminal-panel" in css
+    assert "Watch / 새로 바뀐 사건" in javascript
+
+
+def test_v2_issuer_identity_archive_and_calendar_never_alias_to_legacy_company() -> None:
+    javascript = (UI / "app.js").read_text(encoding="utf-8")
+    assert "function issuerOrCompanyRoute" in javascript
+    assert 'return identity.kind === "issuer"' in javascript
+    assert '`#/issuers/${encodeURIComponent(identity.id)}`' in javascript
+    assert "company_id: event.company_id || event.issuer_id" not in javascript
+    assert "company_id: event.company_id || \"\"" in javascript
+    assert "issuer_id: event.issuer_id || \"\"" in javascript
+    assert 'path === "/calendar"' in javascript
+    assert 'path === "/issuers"' in javascript
+    assert "/^\\/issuers\\/[A-Za-z0-9_.:%-]+$/.test(path)" in javascript
+    assert "async function renderIssuers" in javascript
+    assert "async function renderIssuer" in javascript
+    assert "function normalizeCalendarItem" in javascript
+    assert 'else if (first === "issuers" && second) await renderIssuer(second, signal)' in javascript
+    assert 'else if (first === "issuers") await renderIssuers(route.query, signal)' in javascript
+
+
+def test_v2_ui_validates_actor_roles_and_uses_exact_offset_continuations() -> None:
+    javascript = (UI / "app.js").read_text(encoding="utf-8")
+    assert "function isV2PageMeta(value)" in javascript
+    assert "value.next_offset === value.offset + value.returned" in javascript
+    assert "!isRecordArray(data.actors)" in javascript
+    assert 'typeof actor.actor_role === "string"' in javascript
+    assert 'return { kind: "offset", value: value.next_offset };' in javascript
+    assert "function continuationParams(base, value, kind)" in javascript
+    assert 'params[kind === "offset" ? "offset" : "page"] = value;' in javascript
+    assert "continuationParams(v2Params, cursor, cursorKind)" in javascript
+    assert "continuationParams(params, cursor, cursorKind)" in javascript
+
+
+def test_v2_ui_fails_closed_and_labels_title_provenance() -> None:
+    javascript = (UI / "app.js").read_text(encoding="utf-8")
+    assert "const TITLE_PROVENANCE_VALUES = new Set([" in javascript
+    assert 'generated_metadata: "공시 메타데이터 표제 / Filing metadata label"' in javascript
+    assert 'operator_metadata: "운영자 등록 표제 / Operator-entered label"' in javascript
+    assert 'unknown: "제목 출처 미확인 / Title source unavailable"' in javascript
+    assert "function isV2EventRecord(value)" in javascript
+    assert "TITLE_PROVENANCE_VALUES.has(String(value.title_provenance || \"\"))" in javascript
+    assert '? String(event.title_provenance)' in javascript
+    assert ': "unknown"' in javascript
+    assert 'label("titleProvenance", event.title_provenance)' in javascript
+    assert "title_provenance: \"source\"" not in javascript
+
+
+def test_terminal_uses_only_the_eight_canonical_v2_event_families() -> None:
+    javascript = (UI / "app.js").read_text(encoding="utf-8")
+    canonical = (
+        "large_ownership",
+        "meeting_and_vote",
+        "tender_offer_and_mna",
+        "capital_issuance",
+        "capital_return",
+        "board_and_compensation",
+        "listing_status",
+        "correction_and_withdrawal",
+    )
+    labels = javascript.split("eventType: {", 1)[1].split("},", 1)[0]
+    for event_family in canonical:
+        assert f"{event_family}:" in labels
+    for legacy in (
+        "five_percent_holding",
+        "shareholder_proposal",
+        "treasury_shares",
+        "tender_offer",
+        "value_up",
+    ):
+        assert f"{legacy}:" not in labels
+    assert "const CANONICAL_EVENT_FAMILIES = new Set([" in javascript
+    assert 'if (eventType) params.event_family = eventType' in javascript
 
 
 def test_ui_has_actor_public_revision_and_right_of_reply_flows() -> None:
@@ -188,6 +334,10 @@ def test_html_and_css_include_accessibility_and_language_policy() -> None:
     assert "prefers-reduced-motion" in css
     assert ":focus-visible" in css
     assert "min-height: 44px" in css
+    mobile = css.split("@media (max-width: 680px)", 1)[1]
+    assert ".market-nav { position: static; }" in mobile
+    assert ".mobile-terminal-tabs {" in mobile
+    assert "top: 0;" in mobile
 
 
 def test_daily_pages_configure_governance_api_without_secrets() -> None:

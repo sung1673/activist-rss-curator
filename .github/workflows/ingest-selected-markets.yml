@@ -1,0 +1,92 @@
+name: Ingest manual official-link metadata
+
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+    inputs:
+      market:
+        description: Manual link-metadata market to process
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - CA
+          - AU
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ingest-selected-markets-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    if: >-
+      github.ref_name == github.event.repository.default_branch &&
+      (
+        vars.GOVERNANCE_PIPELINE_MODE == 'shadow' ||
+        vars.GOVERNANCE_PIPELINE_MODE == 'live'
+      )
+    strategy:
+      fail-fast: false
+      matrix:
+        country: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.market != 'all' && format('["{0}"]', inputs.market) || '["CA","AU"]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: governance-runtime
+    env:
+      EVIDENCE_PATH: ${{ runner.temp }}/manual-official-link-ingest-${{ matrix.country }}.json
+      GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+      BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+      BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+      OFFICIAL_LINKS_JSON: ${{ matrix.country == 'CA' && vars.CA_OFFICIAL_LINKS_JSON || vars.AU_OFFICIAL_LINKS_JSON }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Initialize fail-safe evidence
+        id: initialize
+        shell: bash
+        run: >-
+          python -c "import json,os,pathlib;
+          pathlib.Path(os.environ['EVIDENCE_PATH']).write_text(
+          json.dumps({'schema_version':1,'status':'not_started',
+          'coverage_mode':'link-only','ingest_mode':'manual-metadata',
+          'country_code':'${{ matrix.country }}',
+          'code_revision':'${{ github.sha }}'},sort_keys=True,indent=2)+'\n',
+          encoding='utf-8')"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate and ingest approved manual metadata links
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m curator.selected_market_ingest \
+            --country "${{ matrix.country }}" \
+            --code-revision "$GITHUB_SHA" \
+            --evidence "$EVIDENCE_PATH" \
+            --require-active-pipeline
+
+      - name: Preserve manual official-link ingest evidence
+        if: always() && steps.initialize.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: manual-official-link-ingest-${{ matrix.country }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.EVIDENCE_PATH }}
+          if-no-files-found: error
+          retention-days: 30

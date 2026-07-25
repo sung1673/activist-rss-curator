@@ -56,7 +56,7 @@ jobs:
   php73:
     name: Production PHP 7.3 compatibility
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 18
     env:
       PHP73_CI_INSPECTION_TOKEN: php73-ci-local-inspection-token
     services:
@@ -77,6 +77,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build exact API deployment identity
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m curator.deployment_manifest \
+            --root deploy/activist \
+            --code-revision "$GITHUB_SHA" \
+            --output deploy/activist/deployment-manifest.json
+          jq -e --arg revision "$GITHUB_SHA" \
+            '.schema_version == 1 and .code_revision == $revision and (.files | length) == 6
+              and (.files["migrations/011_global_terminal_v2.sql"] | test("^[0-9a-f]{64}$"))' \
+            deploy/activist/deployment-manifest.json > /dev/null
 
       - name: Set up production-compatible PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
@@ -237,6 +250,164 @@ jobs:
             --base-url http://127.0.0.1:8787 \
             --mysql-container-id "$MYSQL_CONTAINER_ID"
 
+      - name: Validate global terminal v2 schema and HTTP lifecycle
+        timeout-minutes: 7
+        shell: bash
+        env:
+          MYSQL_CONTAINER_ID: ${{ job.services.mysql.id }}
+        run: |
+          identity_backup="$RUNNER_TEMP/deployment-manifest.json"
+          core_backup="$RUNNER_TEMP/openapi-v2.yaml"
+          migration_backup="$RUNNER_TEMP/011_global_terminal_v2.sql"
+          cp deploy/activist/deployment-manifest.json "$identity_backup"
+          cp deploy/activist/openapi-v2.yaml "$core_backup"
+          cp deploy/activist/migrations/011_global_terminal_v2.sql "$migration_backup"
+          trap 'cp "$identity_backup" deploy/activist/deployment-manifest.json; cp "$core_backup" deploy/activist/openapi-v2.yaml; cp "$migration_backup" deploy/activist/migrations/011_global_terminal_v2.sql' EXIT
+          curl --fail-with-body --silent --show-error \
+            http://127.0.0.1:8787/api.php/api/v2/health > "$RUNNER_TEMP/v2-health.json"
+          jq -e --arg revision "$GITHUB_SHA" \
+            '.ok == true and .api_version == "v2" and .code_revision == $revision' \
+            "$RUNNER_TEMP/v2-health.json" > /dev/null
+          mv deploy/activist/deployment-manifest.json "$RUNNER_TEMP/deployment-manifest.missing"
+          missing_identity_status="$(curl --silent \
+            --output "$RUNNER_TEMP/v2-health-missing.json" --write-out '%{http_code}' \
+            http://127.0.0.1:8787/api.php/api/v2/health)"
+          test "$missing_identity_status" = "503"
+          grep -q 'deployment_manifest_missing' "$RUNNER_TEMP/v2-health-missing.json"
+          cp "$identity_backup" deploy/activist/deployment-manifest.json
+
+          mv deploy/activist/openapi-v2.yaml "$RUNNER_TEMP/openapi-v2.missing"
+          missing_core_status="$(curl --silent \
+            --output "$RUNNER_TEMP/v2-health-core-missing.json" --write-out '%{http_code}' \
+            http://127.0.0.1:8787/api.php/api/v2/health)"
+          test "$missing_core_status" = "503"
+          grep -q 'deployment_core_file_missing' "$RUNNER_TEMP/v2-health-core-missing.json"
+          cp "$core_backup" deploy/activist/openapi-v2.yaml
+          printf '\n' >> deploy/activist/openapi-v2.yaml
+          mismatched_identity_status="$(curl --silent \
+            --output "$RUNNER_TEMP/v2-health-mismatch.json" --write-out '%{http_code}' \
+            http://127.0.0.1:8787/api.php/api/v2/health)"
+          test "$mismatched_identity_status" = "503"
+          grep -q 'deployment_core_hash_mismatch' "$RUNNER_TEMP/v2-health-mismatch.json"
+          cp "$core_backup" deploy/activist/openapi-v2.yaml
+          curl --fail-with-body --silent --show-error \
+            http://127.0.0.1:8787/api.php/api/v2/health \
+            | jq -e --arg revision "$GITHUB_SHA" '.code_revision == $revision' > /dev/null
+
+          printf ' ' >> deploy/activist/migrations/011_global_terminal_v2.sql
+          mismatched_migration_status="$(curl --silent \
+            --output "$RUNNER_TEMP/v2-health-migration-mismatch.json" --write-out '%{http_code}' \
+            http://127.0.0.1:8787/api.php/api/v2/health)"
+          test "$mismatched_migration_status" = "503"
+          grep -q 'deployment_core_hash_mismatch' "$RUNNER_TEMP/v2-health-migration-mismatch.json"
+          cp "$migration_backup" deploy/activist/migrations/011_global_terminal_v2.sql
+          curl --fail-with-body --silent --show-error \
+            http://127.0.0.1:8787/api.php/api/v2/health \
+            | jq -e --arg revision "$GITHUB_SHA" '.code_revision == $revision' > /dev/null
+
+          mv deploy/activist/migrations "$RUNNER_TEMP/migrations-real"
+          ln -s "$RUNNER_TEMP/migrations-real" deploy/activist/migrations
+          symlinked_parent_status="$(curl --silent \
+            --output "$RUNNER_TEMP/v2-health-symlinked-parent.json" --write-out '%{http_code}' \
+            http://127.0.0.1:8787/api.php/api/v2/health)"
+          test "$symlinked_parent_status" = "503"
+          grep -q 'deployment_core_file_missing' "$RUNNER_TEMP/v2-health-symlinked-parent.json"
+          rm deploy/activist/migrations
+          mv "$RUNNER_TEMP/migrations-real" deploy/activist/migrations
+          curl --fail-with-body --silent --show-error \
+            http://127.0.0.1:8787/api.php/api/v2/health \
+            | jq -e --arg revision "$GITHUB_SHA" '.code_revision == $revision' > /dev/null
+          trap - EXIT
+
+          status="$(curl --silent --output "$RUNNER_TEMP/pre-migration-v2.json" --write-out '%{http_code}' \
+            http://127.0.0.1:8787/api.php/api/v2/events)"
+          test "$status" = "503"
+          grep -q 'schema_version_mismatch' "$RUNNER_TEMP/pre-migration-v2.json"
+          migration_011_source="deploy/activist/migrations/011_global_terminal_v2.sql"
+          migration_011_checksum="$(sha256sum "$migration_011_source" | cut -d ' ' -f1)"
+          manifest_migration_checksum="$(jq -r '.files["migrations/011_global_terminal_v2.sql"]' \
+            deploy/activist/deployment-manifest.json)"
+          test "$manifest_migration_checksum" = "$migration_011_checksum"
+          apply_migration_011() {
+            {
+              printf "SET @bside_migration_011_sha256 = '%s';\n" "$migration_011_checksum"
+              sed 's/activist_/ci_/g' "$migration_011_source"
+            } | docker exec -i "$MYSQL_CONTAINER_ID" \
+              mysql --user=root --password=activist_ci_root_password activist_ci
+          }
+          if sed 's/activist_/ci_/g' "$migration_011_source" \
+            | docker exec -i "$MYSQL_CONTAINER_ID" \
+              mysql --user=root --password=activist_ci_root_password activist_ci; then
+            echo "migration 011 accepted a missing source byte checksum" >&2
+            exit 1
+          fi
+          apply_migration_011
+          initial_release="$(docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password \
+            --batch --skip-column-names activist_ci \
+            --execute="SELECT release_state,state_version,updated_by FROM ci_governance_release_state WHERE state_key='global_terminal_v2';")"
+          test "$initial_release" = $'closed\t0\tmigration:011'
+          initial_audit="$(docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password \
+            --batch --skip-column-names activist_ci \
+            --execute="SELECT previous_state IS NULL,new_state,state_version,changed_by FROM ci_governance_release_audit WHERE audit_id='release:global-terminal:initial:011';")"
+          test "$initial_audit" = $'1\tclosed\t0\tmigration:011'
+          apply_migration_011
+          tampered_migration="$RUNNER_TEMP/011_global_terminal_v2_one_byte_changed.sql"
+          cp "$migration_011_source" "$tampered_migration"
+          printf ' ' >> "$tampered_migration"
+          tampered_migration_checksum="$(sha256sum "$tampered_migration" | cut -d ' ' -f1)"
+          test "$tampered_migration_checksum" != "$migration_011_checksum"
+          if {
+            printf "SET @bside_migration_011_sha256 = '%s';\n" "$tampered_migration_checksum"
+            sed 's/activist_/ci_/g' "$tampered_migration"
+          } | docker exec -i "$MYSQL_CONTAINER_ID" \
+            mysql --user=root --password=activist_ci_root_password activist_ci; then
+            echo "migration 011 accepted a one-byte source change" >&2
+            exit 1
+          fi
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="UPDATE ci_schema_migrations SET migration_checksum=REPEAT('0',64) WHERE migration_version=11;"
+          tampered_checksum_status="$(curl --silent \
+            --output "$RUNNER_TEMP/tampered-v2-checksum.json" --write-out '%{http_code}' \
+            http://127.0.0.1:8787/api.php/api/v2/events)"
+          test "$tampered_checksum_status" = "503"
+          grep -q 'schema_version_mismatch' "$RUNNER_TEMP/tampered-v2-checksum.json"
+          if apply_migration_011; then
+            echo "migration 011 overwrote a conflicting byte checksum" >&2
+            exit 1
+          fi
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="UPDATE ci_schema_migrations SET migration_checksum='$migration_011_checksum' WHERE migration_version=11;"
+          apply_migration_011
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="UPDATE ci_schema_migrations SET migration_name='tampered-011' WHERE migration_version=11;"
+          tampered_status="$(curl --silent --output "$RUNNER_TEMP/tampered-v2.json" --write-out '%{http_code}' \
+            http://127.0.0.1:8787/api.php/api/v2/events)"
+          test "$tampered_status" = "503"
+          grep -q 'schema_version_mismatch' "$RUNNER_TEMP/tampered-v2.json"
+          if apply_migration_011; then
+            echo "migration 011 overwrote a conflicting manifest entry" >&2
+            exit 1
+          fi
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="UPDATE ci_schema_migrations SET migration_name='011_global_terminal_v2' WHERE migration_version=11;"
+          apply_migration_011
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="ALTER TABLE ci_brief_items MODIFY event_snapshot_json MEDIUMTEXT NULL;"
+          if apply_migration_011; then
+            echo "migration 011 accepted an incompatible frozen brief snapshot column" >&2
+            exit 1
+          fi
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="ALTER TABLE ci_brief_items MODIFY event_snapshot_json MEDIUMTEXT NOT NULL;"
+          apply_migration_011
+          manifest="$(docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password \
+            --batch --skip-column-names activist_ci \
+            --execute="SELECT migration_name,migration_checksum FROM ci_schema_migrations WHERE migration_version=11;")"
+          test "$manifest" = "$(printf '011_global_terminal_v2\t%s' "$migration_011_checksum")"
+          python3 tests/php73_global_v2_smoke.py \
+            --base-url http://127.0.0.1:8787 \
+            --mysql-container-id "$MYSQL_CONTAINER_ID"
+
       - name: Validate Telegram channel identity index migration
         shell: bash
         env:
@@ -347,7 +518,15 @@ jobs:
           curator/dart_canary_sample.py
           curator/dart_quota.py
           curator/dart_review_sample.py
+          curator/deployment_manifest.py
           curator/event_identity.py
+          curator/global_alpha_monitor.py
+          curator/global_alpha_pages_identity.py
+          curator/global_alpha_release_gate.py
+          curator/global_brief.py
+          curator/global_connectors.py
+          curator/global_ingest.py
+          curator/global_market.py
           curator/governance_site.py
           curator/governance_site_config.py
           curator/label_agreement.py
@@ -366,6 +545,7 @@ jobs:
           curator/release_evidence.py
           curator/release_evidence_inputs.py
           curator/release_gate.py
+          curator/selected_market_ingest.py
           curator/shadow_compare.py
           curator/shadow_engine.py
           .github/scripts/validate-api-base-urls.py

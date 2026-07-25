@@ -2333,18 +2333,16 @@ def run(base_url: str, mysql_container_id: str) -> None:
     replay = transition(base_url, "preview", 1, "CI idempotently repeats preview state")
     require(replay.get("changed") is False and replay.get("state_version") == 1, repr(replay))
 
-    invalid_rights = transition(
+    direct_live = transition(
         base_url,
         "live",
         1,
-        "CI rejects cutover while a referenced SourceRight is currently revoked",
+        "CI requires the protected atomic v1 and v2 cutover endpoint",
         expected_status=409,
     )
     require(
-        invalid_rights.get("error") == "current_source_rights_invalid"
-        and invalid_rights.get("referenced_document_count") == 2
-        and invalid_rights.get("invalid_source_right_document_count") == 2,
-        repr(invalid_rights),
+        direct_live.get("error") == "protected_atomic_cutover_required",
+        repr(direct_live),
     )
     state_after_invalid_rights, _ = request_json(
         base_url,
@@ -2381,32 +2379,23 @@ def run(base_url: str, mysql_container_id: str) -> None:
         repr(restored_official_right),
     )
 
-    live = transition(base_url, "live", 1, "CI promotes the reviewed preview state")
-    require(live.get("changed") is True and live.get("state_version") == 2, repr(live))
-    require(live.get("cutover_at") is not None and live.get("sunset_at") is not None, repr(live))
-    cutover_at = datetime.fromisoformat(str(live["cutover_at"]).replace("Z", "+00:00"))
-    sunset_at = datetime.fromisoformat(str(live["sunset_at"]).replace("Z", "+00:00"))
-    require(sunset_at - cutover_at == timedelta(days=90), repr(live))
-    live_events, live_headers = request_json(base_url, "api.php/api/v1/events")
-    require(live_events.get("ok") is True, repr(live_events))
-    require("public" in live_headers.get("Cache-Control", "").lower(), repr(live_headers))
-    legacy_after, legacy_after_headers = request_json(base_url, "api.php?action=reports")
-    require(legacy_after.get("ok") is True, repr(legacy_after))
-    require(legacy_after_headers.get("Deprecation") == "true", repr(legacy_after_headers))
-    require("Sunset" in legacy_after_headers, repr(legacy_after_headers))
-
-    stale = transition(base_url, "closed", 1, "CI stale transition must be rejected", expected_status=409)
+    stale = transition(base_url, "closed", 0, "CI stale transition must be rejected", expected_status=409)
     require(stale.get("error") == "stale_release_state", repr(stale))
 
     rollback = transition(
         base_url,
         "closed",
-        2,
-        "CI verifies the emergency close transition",
+        1,
+        "CI closes preview without bypassing protected atomic cutover",
         request_id="php73-release-close",
     )
-    require(rollback.get("changed") is True and rollback.get("state_version") == 3, repr(rollback))
-    require(rollback.get("cutover_at") == live.get("cutover_at") and rollback.get("sunset_at") == live.get("sunset_at"), repr(rollback))
+    require(
+        rollback.get("changed") is True
+        and rollback.get("state_version") == 2
+        and rollback.get("cutover_at") is None
+        and rollback.get("sunset_at") is None,
+        repr(rollback),
+    )
     closed_again, _ = request_json(
         base_url,
         "api.php/api/v1/events",
@@ -2421,15 +2410,11 @@ def run(base_url: str, mysql_container_id: str) -> None:
         token=ADMIN_TOKEN,
     )
     versions = [entry.get("state_version") for entry in final.get("history", [])]
-    require(versions[:4] == [3, 2, 1, 0], repr(final))
+    require(versions[:3] == [2, 1, 0], repr(final))
     require(
         any(entry.get("request_id") == "php73-release-preview" for entry in final.get("history", [])),
         repr(final),
     )
-
-    legacy, legacy_headers = request_json(base_url, "api.php?action=reports")
-    require(legacy.get("ok") is True, repr(legacy))
-    require(legacy_headers.get("Deprecation") == "true" and "Sunset" in legacy_headers, repr(legacy_headers))
 
     quota_day = (datetime.now(timezone.utc) + timedelta(hours=9)).date().isoformat()
     server_uuid, database_name = mysql_execute(

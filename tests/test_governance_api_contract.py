@@ -6,6 +6,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 API = (ROOT / "deploy" / "activist" / "api.php").read_text(encoding="utf-8")
 V1 = (ROOT / "deploy" / "activist" / "governance_v1.php").read_text(encoding="utf-8")
+V2 = (ROOT / "deploy" / "activist" / "governance_v2.php").read_text(encoding="utf-8")
 MIGRATION = (
     ROOT / "deploy" / "activist" / "migrations" / "001_governance_v1.sql"
 ).read_text(encoding="utf-8")
@@ -337,15 +338,22 @@ def test_preview_to_live_rechecks_current_v2_rights_under_one_lock_order():
     assert "v1_content_corpus_document_refs_params($checkedAt,$scopeStart)" in guard
     assert "v1_content_document_right_valid_at($document,$checkedAt)" in guard
     assert "$before = v1_release_state($pdo, $config, true)" in transition
-    assert "v1_current_public_document_rights_guard($pdo,$config)" in transition
-    assert transition.index("$before = v1_release_state") < transition.index(
-        "v1_current_public_document_rights_guard"
+    assert "'protected_atomic_cutover_required'" in transition
+    atomic_cutover = V2[
+        V2.index("function v2_admin_atomic_cutover") : V2.index(
+            "function v2_admin_update_release_state"
+        )
+    ]
+    assert atomic_cutover.index(
+        "v2_lock_current_public_source_rights($pdo, $config)"
+    ) < atomic_cutover.index(
+        "v1_current_public_document_rights_guard($pdo, $config)"
     )
-    assert transition.index("v1_current_public_document_rights_guard") < transition.index(
-        "SET release_state = ?"
-    )
-    assert "current_source_rights_invalid" in transition
-    assert "invalid_source_right_document_count" in transition
+    assert atomic_cutover.index(
+        "v1_current_public_document_rights_guard($pdo, $config)"
+    ) < atomic_cutover.index("release_state=\\'live\\'")
+    assert "current_source_rights_invalid" in atomic_cutover
+    assert "v1_invalid_source_right_document_count" in atomic_cutover
     assert right_writer.index("v1_release_state($pdo,$config,true)") < right_writer.index(
         "INSERT INTO "
     )
@@ -793,7 +801,8 @@ def test_legacy_public_surfaces_fail_closed_on_telegram_source_rights():
     assert "function telegram_signal_visibility_sql" in API
     assert "NULLIF(TRIM(" in API
     assert ".evidence_uri), \\'\\') IS NOT NULL" in API
-    assert ".evidence_hash), \\'\\') IS NOT NULL" in API
+    assert ".evidence_hash" in API
+    assert "REGEXP \\'^[A-Fa-f0-9]{64}$\\'" in API
     assert "JSON_CONTAINS(" in API
     assert "$.source_right_ids" in API
     assert "COUNT(DISTINCT signal_sr.source_right_id)" in API
@@ -1233,12 +1242,38 @@ def test_source_right_boolean_flags_are_parsed_strictly():
     assert "!empty($payload['redistribution_allowed'])" not in source_right_section
 
 
+def test_source_right_id_keeps_an_immutable_source_identity():
+    source_right_section = V1[
+        V1.index("function v1_admin_upsert_source_right")
+        : V1.index("function v1_admin_create_revision")
+    ]
+    assert "SELECT source_type,source_key FROM " in source_right_section
+    assert "WHERE source_right_id=? LIMIT 1 FOR UPDATE" in source_right_section
+    assert "(string)$existingIdentity['source_type'] !== $sourceType" in (
+        source_right_section
+    )
+    assert "(string)$existingIdentity['source_key'] !== $sourceKey" in (
+        source_right_section
+    )
+    assert "source_right_identity_immutable" in source_right_section
+    assert "source_type=VALUES(source_type)" not in source_right_section
+    assert "source_key=VALUES(source_key)" not in source_right_section
+
+    spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    operation = spec["paths"]["/admin/source-rights"]["post"]
+    assert "409" in operation["responses"]
+    source_right = spec["components"]["schemas"]["SourceRight"]
+    assert "immutable" in source_right["description"].lower()
+    assert "Immutable" in source_right["properties"]["source_type"]["description"]
+    assert "Immutable" in source_right["properties"]["source_key"]["description"]
+
+
 def test_cors_and_hmac_fail_closed_before_mutating_dispatch():
     assert "function valid_cors_origin" in API
     assert "preg_match('/[\\r\\n]/', $origin)" in API
     assert "Access-Control-Allow-Credentials" not in API
-    assert "strpos($v1Path, '/ops/') !== 0" in API
-    assert "strpos($v1Path, '/admin/') !== 0" in API
+    assert "strpos($versionedPath, '/ops/') !== 0" in API
+    assert "strpos($versionedPath, '/admin/') !== 0" in API
     assert "strlen($secret) < 32" in API
     assert "abs(time() - (int)$timestamp) > 300" in API
     assert "hash_equals($expected, strtolower($signature))" in API
@@ -1310,7 +1345,8 @@ def test_public_events_and_linked_records_follow_source_right_revocation():
     ]
     assert "NULLIF(TRIM(" in visibility
     assert ".evidence_uri), \\'\\') IS NOT NULL" in visibility
-    assert ".evidence_hash), \\'\\') IS NOT NULL" in visibility
+    assert ".evidence_hash" in visibility
+    assert "REGEXP \\'^[A-Fa-f0-9]{64}$\\'" in visibility
     event_visibility = V1[
         V1.index("function v1_event_visibility_sql") : V1.index(
             "function v1_optional_document_visibility_sql"

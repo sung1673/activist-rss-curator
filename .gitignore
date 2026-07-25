@@ -31,4 +31,5 @@ playwright-report/
 .watchdog-report.md
 release-report/
 evidence/
+deploy/activist/deployment-manifest.json
 .DS_Store

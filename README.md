@@ -81,10 +81,13 @@ ACTIVIST_API_SECRET
 BSIDE_API_BASE_URL
 BSIDE_OPS_TOKEN
 BSIDE_ADMIN_TOKEN
+BSIDE_RELEASE_AUTHORIZER_TOKEN
 BSIDE_EDITOR_TOKEN
 GOVERNANCE_PREVIEW_TOKEN
 DART_API_KEY
 KIND_API_KEY
+EDINET_API_KEY
+COMPANIES_HOUSE_API_KEY
 OFFICIAL_SITE_ALLOWLIST_B64
 CURATOR_FEEDS
 STORY_REVIEW_ACCESS_TOKEN
@@ -94,13 +97,35 @@ TELEGRAM_API_HASH
 TELEGRAM_SESSION_STRING
 ```
 
+`BSIDE_RELEASE_AUTHORIZER_TOKEN`은 repository 공용 Secret이 아니라 reviewer가 보호하는 `governance-release` environment에만 둔다. PHP에는 정확한 `release_authorizer` 역할의 SHA-256 hash로 등록하며, 일반 admin token은 승인 발급을 대신할 수 없다. 5분 `global-alpha-watchdog.yml`은 읽기 전용 `BSIDE_OPS_TOKEN`만 사용하고 admin·release-authorizer token을 받지 않는다.
+
 `KIND_API_KEY`는 일반 수집에서는 내부 KIND 어댑터가 인증을 요구할 때만 쓰지만,
 승인 직후 실행하는 수동 `kind-adapter-preflight.yml`은 운영 설정 완전성을 확인하기
 위해 endpoint와 key를 모두 필수로 요구한다.
 
 현재 제품 정책은 Telegram 채팅으로 콘텐츠를 발송하지 않는 것이다. `ENABLE_TELEGRAM_DELIVERY=false`, `config.yaml`의 `telegram.enabled=false`, 빈 `telegram.chat_id`를 함께 유지하며, Python sender·로컬/원격 outbox·PHP enqueue/claim·Actions worker가 모두 코드 수준에서 거절하므로 runtime 값이나 수동 입력으로 재활성화할 수 없다. `TELEGRAM_API_ID`·`TELEGRAM_API_HASH`·`TELEGRAM_SESSION_STRING`을 이용한 허가 공개 채널 읽기 수집은 이 발송 정책과 분리되어 계속 운영한다. 비공개 Telegram 관리자 채팅과 `TELEGRAM_ADMIN_CHAT_ID`도 사용하지 않으며, 관리자는 고정 URL `https://news.bside.ai/feed/telegram-admin.html`에서 `TELEGRAM_ADMIN_ACCESS_TOKEN`을 직접 입력한다.
 
-주요 Repository variable은 `ACTIVIST_PUBLIC_API_URL`, `GOVERNANCE_API_BASE_URL`, `KIND_DISCLOSURE_ENDPOINT`, `PAGES_OWNER=legacy|governance`, `GOVERNANCE_PIPELINE_MODE=off|dart_canary|shadow|live`다. 이전 boolean은 전환기 어댑터로만 읽으며 충돌하면 fail-closed한다. `ENABLE_TELEGRAM_DELIVERY=false`와 `ENABLE_GOVERNANCE_DELIVERY=false`는 유지하지만 어떤 runtime 값도 outbound를 다시 활성화할 수 없다. 전체 목록과 예약 시각은 [운영 자동화 문서](docs/operations-automation.md)를 따른다.
+주요 Repository variable은 `ACTIVIST_PUBLIC_API_URL`, `GOVERNANCE_API_BASE_URL`, `BSIDE_PUBLIC_WEB_URL`, `KIND_DISCLOSURE_ENDPOINT`, `SEC_EDGAR_USER_AGENT`, `COMPANIES_HOUSE_ISSUERS_JSON`, `CA_OFFICIAL_LINKS_JSON`, `AU_OFFICIAL_LINKS_JSON`, `PAGES_OWNER=legacy|governance`, `GOVERNANCE_PIPELINE_MODE=off|dart_canary|shadow|live`다. 이전 boolean은 전환기 어댑터로만 읽으며 충돌하면 fail-closed한다. `ENABLE_TELEGRAM_DELIVERY=false`와 `ENABLE_GOVERNANCE_DELIVERY=false`는 유지하지만 어떤 runtime 값도 outbound를 다시 활성화할 수 없다. 전체 목록과 예약 시각은 [운영 자동화 문서](docs/operations-automation.md)를 따른다.
+
+### 글로벌 터미널 Production Alpha
+
+글로벌 `/api/v2`와 신규 루트는 완성된 품질 인증판이 아니라 **Production Alpha**다. 한국·미국·일본은 허용된 공식 공시 범위, 영국은 Companies House 등록부 범위로 제공한다. 캐나다·호주는 자동 수집 범위가 아니라 승인된 공식 링크의 `link-only / manual-metadata` 범위다. SEDAR+·ASX 원문을 저장하거나 재배포하지 않으며 국가별 범위를 `/api/v2/sources/status`에 표시한다.
+
+신규 운영 workflow는 다음과 같다.
+
+- `ingest-global.yml`: SEC EDGAR Latest Filings Atom 당일 증분과 일일 인덱스 완결성 대조, EDINET, Companies House를 매시 17분·47분에 수집한다. 예약 request budget은 US 200, JP·GB 100이다. SEC 당일 feed나 durable source cursor가 유효하지 않으면 US는 `live_ready=false`로 fail-closed한다. 날짜 입력이 없으면 MySQL connector checkpoint에서 하루 overlap을 두고 최대 31일씩 누락 구간을 이어서 처리하며, Companies House allowlist는 최대 50개 회사다.
+- `ingest-selected-markets.yml`: `CA_OFFICIAL_LINKS_JSON`과 `AU_OFFICIAL_LINKS_JSON`의 수동 승인 링크 metadata를 매시 07분·37분에 검증·적재한다. 설정 URL에 네트워크 요청을 보내거나 본문을 저장하지 않는다. 캐나다는 issuer 식별자에 묶인 별도 호스트 증빙이 필요하고, 호주는 `asic.gov.au` 공식 호스트만 허용한다.
+- `global-brief.yml`: KST 05:45 예약 실행은 검수 후보 artifact만 만든다. 공개 brief는 사람이 승인한 동일 SHA payload를 `workflow_dispatch`의 `publish` 작업으로 전달할 때만 생성한다.
+- `global-alpha-watchdog.yml`: 5분마다 `BSIDE_OPS_TOKEN`과 읽기 전용 release-state 경로로 API 상태, source freshness와 공개 루트를 관측한다.
+- `governance-cutover.yml`, `governance-rollback.yml`: 보호된 `governance-release` 환경에서만 수동 전환·복구한다. Alpha evidence는 exact daily Pages run/artifact/digest와 전체 사이트·UI/config content identity를 고정하며, 24시간 preview 관측이 같은 terminal 바이트임을 증명한다. 전환은 evidence가 가리키는 그 artifact만 허용하고 exact SHA·evidence artifact digest·v1/v2 state version에 묶인 짧은 일회용 승인을 발급한 뒤 두 API state를 한 transaction에서 승격한다.
+
+Migration 011은 미국·일본·영국·캐나다·호주 권한을 `pending`으로만 만든다. 이것은 이용허가가 아니다. 공개 전 다음 6개 SourceRight가 실제 증빙·권한 범위·유효기간과 함께 등록되어야 한다.
+
+`official:dart`, `official:sec-edgar`, `official:edinet`, `official:companies-house`, `official:ca-issuer-ir`, `official:asic-register`
+
+공식 수집은 `collect` 자격을 실행 전과 실행 도중 다시 검사하며, 공개 검수·전환 시에는 재배포 가능한 현재 권한을 다시 확인한다. 캐나다·호주 수동 링크 metadata는 `collect`와 `public` 자격의 revision이 일치해야 하고 국가별 최대 50개 issuer만 허용한다. 캐나다의 SEDAR+·ASX·ASIC·data.gov 및 제3자 포털, 호주의 ASX·data.gov·issuer 임의 호스트는 승인 목록으로 가장할 수 없으며 모든 URL query를 거절한다. 빈 설정은 정상적인 무사건으로 위장하지 않고 `coverage_unavailable` 증빙을 남긴다.
+
+Production Alpha에서도 Telegram은 허가 채널의 내부 신호 수집에만 사용한다. 공개 화면·브리프·workflow 어디에서도 outbound Telegram 발송을 수행하지 않으며 `ENABLE_TELEGRAM_DELIVERY=false`, `ENABLE_GOVERNANCE_DELIVERY=false`를 계속 유지한다.
 
 ### 미디어 발견 피드 범위
 
