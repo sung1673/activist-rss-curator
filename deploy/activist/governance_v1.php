@@ -6927,7 +6927,8 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
         $globalIdentifierStmt = null;
         $globalListingStmt = null;
         if ($globalDartBridgeEnabled) {
-            $globalIssuerStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'issuers')
+            $globalIssuerTable = table_name($config,'issuers');
+            $globalIssuerStmt = $pdo->prepare('INSERT INTO ' . $globalIssuerTable
                 . ' (issuer_id,country_code,legal_name,legal_name_en,short_name,original_language,homepage_url,'
                 . 'listing_status,record_status,master_modified_at,payload_json,created_at,updated_at)'
                 . ' SELECT ?,\'KR\',c.legal_name,c.legal_name_en,c.short_name,\'ko\',c.homepage_url,'
@@ -6935,11 +6936,11 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
                 . table_name($config,'companies') . ' c WHERE c.company_id=?'
                 . ' ON DUPLICATE KEY UPDATE '
                 . 'country_code=\'KR\',legal_name=VALUES(legal_name),'
-                . 'legal_name_en=COALESCE(NULLIF(VALUES(legal_name_en),\'\'),legal_name_en),'
-                . 'short_name=COALESCE(NULLIF(VALUES(short_name),\'\'),short_name),'
-                . 'homepage_url=COALESCE(NULLIF(VALUES(homepage_url),\'\'),homepage_url),'
+                . 'legal_name_en=COALESCE(NULLIF(VALUES(legal_name_en),\'\'),' . $globalIssuerTable . '.legal_name_en),'
+                . 'short_name=COALESCE(NULLIF(VALUES(short_name),\'\'),' . $globalIssuerTable . '.short_name),'
+                . 'homepage_url=COALESCE(NULLIF(VALUES(homepage_url),\'\'),' . $globalIssuerTable . '.homepage_url),'
                 . 'listing_status=VALUES(listing_status),record_status=VALUES(record_status),'
-                . 'master_modified_at=COALESCE(VALUES(master_modified_at),master_modified_at),'
+                . 'master_modified_at=COALESCE(VALUES(master_modified_at),' . $globalIssuerTable . '.master_modified_at),'
                 . 'payload_json=VALUES(payload_json),updated_at=VALUES(updated_at)');
             $globalIdentifierStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'issuer_identifiers')
                 . ' (issuer_id,identifier_type,identifier_value,market,is_primary,valid_from,valid_until,created_at,updated_at)'
