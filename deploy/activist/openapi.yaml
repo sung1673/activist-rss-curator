@@ -112,8 +112,9 @@ x-release-gate:
     promotion is the protected v2 POST /admin/cutover operation, which consumes
     one short-lived authorization and changes governance_v1 and
     global_terminal_v2 in the same transaction only after locking and
-    revalidating all six required Production Alpha connector/SourceRight pairs
-    plus every currently published document SourceRight. Document-empty
+    revalidating the four required KR/US/CA/AU Production Alpha
+    connector/SourceRight pairs, the optional JP/GB connector identities, plus
+    every currently published document SourceRight. Document-empty required
     countries are not exempt.
 tags:
   - name: Public
@@ -793,10 +794,11 @@ paths:
         A stale expected_version returns 409 and every state change is audited.
         Preview to live always returns protected_atomic_cutover_required.
         Production promotion must use POST /api/v2/admin/cutover, which binds
-        the exact candidate SHA and release-evidence digest, revalidates the six
-        required connector/SourceRight pairs independently of document count,
-        preserves the existing published-document rights guard, and promotes v1
-        and v2 atomically.
+        the exact candidate SHA and release-evidence digest, revalidates the four
+        required KR/US/CA/AU connector/SourceRight pairs independently of
+        document count, verifies the optional JP/GB connector identities,
+        preserves the existing published-document rights guard, and promotes
+        v1 and v2 atomically.
       requestBody:
         required: true
         content:
@@ -1026,8 +1028,9 @@ paths:
         '409':
           description: >-
             The source_right_id already exists with a different source_type or
-            source_key. Source identity is immutable; register a new
-            source_right_id instead.
+            source_key, or the optional expected status/version is stale.
+            Source identity is immutable; register a new source_right_id
+            instead of changing its identity.
   /admin/editorial-revisions:
     get:
       tags: [Administration]
@@ -1666,6 +1669,9 @@ components:
         An evidence-backed source grant. Once source_right_id exists,
         source_type and source_key are immutable; later updates may only change
         the grant metadata, validity, permissions, evidence, and status.
+        Protected automation sends expected_status and expected_updated_at as
+        an optimistic concurrency guard; stale or unexpectedly created rows
+        return 409 without changing the grant.
       required: [source_type, source_key, source_name, permission_scope, valid_from, ai_allowed, redistribution_allowed, status]
       properties:
         source_right_id: {$ref: '#/components/schemas/EntityId'}
@@ -1681,6 +1687,18 @@ components:
         ai_allowed: {type: boolean}
         redistribution_allowed: {type: boolean}
         status: {type: string, enum: [pending, active, expired, revoked]}
+        expected_status:
+          type: string
+          enum: [missing, pending, active, expired, revoked]
+          description: >-
+            Optional compare-and-swap state. Use missing for a create and the
+            exact current status for an update.
+        expected_updated_at:
+          type: [string, 'null']
+          format: date-time
+          description: >-
+            Required with expected_status other than missing and must equal
+            the current row version.
     FeedbackRequest:
       type: object
       required: [feedback_type, message]

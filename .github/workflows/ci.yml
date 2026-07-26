@@ -584,6 +584,7 @@ jobs:
           curator/release_evidence_inputs.py
           curator/release_gate.py
           curator/selected_market_ingest.py
+          curator/source_right_bootstrap.py
           curator/shadow_compare.py
           curator/shadow_engine.py
           .github/scripts/validate-api-base-urls.py

@@ -28,7 +28,16 @@ REQUEST_TIMEOUT_SECONDS = 15
 OBSERVATION_WINDOW_HOURS = 24
 USER_AGENT = "bside-global-alpha-watchdog/1.0"
 COUNTRIES = ("KR", "US", "JP", "GB", "CA", "AU")
-MARKET_WIDE_COUNTRIES = frozenset(("KR", "US", "JP"))
+REQUIRED_ALPHA_SOURCE_POLICY = {
+    "KR": ("connector:kr:dart", "market-wide"),
+    "US": ("connector:us:sec-edgar", "market-wide"),
+    "CA": ("connector:ca:issuer-ir", "link-only"),
+    "AU": ("connector:au:asic-register", "link-only"),
+}
+OPTIONAL_ALPHA_SOURCE_POLICY = {
+    "JP": ("connector:jp:edinet", "link-only"),
+    "GB": ("connector:gb:companies-house", "link-only"),
+}
 ACTIVE_COVERAGE_MODES = frozenset(
     ("market-wide", "official-register", "selected-issuers")
 )
@@ -440,6 +449,8 @@ def _validate_sources(
         )
     )
     items = tuple(_normalize_source_item(item) for item in data["items"])
+    if len(items) != len(COUNTRIES):
+        raise MonitorContractError("source_country_row_count_mismatch")
     connector_ids = [
         str(item["connector_id"])
         for item in items
@@ -449,14 +460,51 @@ def _validate_sources(
         raise MonitorContractError("duplicate_source_connector")
     if {str(item["country"]) for item in items} != set(COUNTRIES):
         raise MonitorContractError("source_country_set_mismatch")
-    market_countries = {
-        str(item["country"])
-        for item in items
-        if item["coverage_mode"] == "market-wide"
-        and item["connector_id"] is not None
+    by_country = {str(item["country"]): item for item in items}
+    for country, (connector_id, coverage_mode) in (
+        REQUIRED_ALPHA_SOURCE_POLICY.items()
+    ):
+        item = by_country[country]
+        if (
+            item["connector_id"] != connector_id
+            or item["coverage_mode"] != coverage_mode
+        ):
+            raise MonitorContractError("required_source_policy_mismatch")
+    for country, (connector_id, coverage_mode) in (
+        OPTIONAL_ALPHA_SOURCE_POLICY.items()
+    ):
+        item = by_country[country]
+        if (
+            item["connector_id"] != connector_id
+            or item["coverage_mode"] != coverage_mode
+            or item["public_status"] != "coverage_unavailable"
+            or item["public_ready"] is not False
+            or item["raw_count"] != 0
+            or item["acknowledged_count"] != 0
+            or item["last_success_at"] is not None
+            or item["last_checked_at"] is not None
+        ):
+            raise MonitorContractError("optional_source_policy_mismatch")
+    required_ready = data.get("required_source_ready")
+    expected_required_ids = {
+        connector_id
+        for connector_id, _coverage in REQUIRED_ALPHA_SOURCE_POLICY.values()
     }
-    if not MARKET_WIDE_COUNTRIES.issubset(market_countries):
-        raise MonitorContractError("market_wide_connector_set_mismatch")
+    if (
+        not isinstance(required_ready, dict)
+        or set(required_ready) != expected_required_ids
+        or any(not isinstance(value, bool) for value in required_ready.values())
+        or data.get("all_required_ready")
+        != all(bool(value) for value in required_ready.values())
+    ):
+        raise MonitorContractError("required_source_readiness_contract")
+    for country, (connector_id, _coverage_mode) in (
+        REQUIRED_ALPHA_SOURCE_POLICY.items()
+    ):
+        if required_ready[connector_id] is not (
+            by_country[country]["public_ready"] is True
+        ):
+            raise MonitorContractError("required_source_readiness_mismatch")
     return _probe_evidence(probe, contract_valid=True), checked_at, items
 
 
@@ -607,7 +655,7 @@ def _validate_terminal_asset(
 
 def _source_is_unhealthy(item: Mapping[str, object]) -> bool:
     return (
-        item.get("coverage_mode") in ACTIVE_COVERAGE_MODES
+        item.get("country") in REQUIRED_ALPHA_SOURCE_POLICY
         and item.get("connector_id") is not None
         and (
             item.get("public_status") != "active"

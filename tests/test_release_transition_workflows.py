@@ -201,6 +201,13 @@ def test_cutover_switches_owner_deploys_smokes_activates_and_can_recover() -> No
         ".public_ready == true",
         ".public_status == \"active\"",
         ".freshness_limit_minutes <= 45",
+        "connector:ca:issuer-ir",
+        "connector:au:asic-register",
+        "connector:jp:edinet",
+        "connector:gb:companies-house",
+        ".public_status == \"coverage_unavailable\"",
+        ".raw_count == 0",
+        ".acknowledged_count == 0",
     ):
         assert contract in preview_source_gate["run"]
 
@@ -258,6 +265,13 @@ def test_cutover_switches_owner_deploys_smokes_activates_and_can_recover() -> No
         ".public_ready == true",
         ".public_status == \"active\"",
         ".freshness_limit_minutes <= 45",
+        "connector:ca:issuer-ir",
+        "connector:au:asic-register",
+        "connector:jp:edinet",
+        "connector:gb:companies-house",
+        ".public_status == \"coverage_unavailable\"",
+        ".raw_count == 0",
+        ".acknowledged_count == 0",
     ):
         assert contract in public_source_gate["run"]
     assert "${{ needs.preflight.outputs.v1_state_version }}" in text

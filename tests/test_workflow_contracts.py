@@ -1213,7 +1213,7 @@ def test_global_backfill_is_bounded_serialized_and_preserves_daily_receipts() ->
         "mode",
         "max_windows",
     }
-    assert dispatch["source"]["options"] == ["all", "US", "JP", "GB"]
+    assert dispatch["source"]["options"] == ["all", "US"]
     assert dispatch["mode"]["options"] == ["apply", "replay"]
     assert payload["permissions"] == {"contents": "read"}
     assert payload["concurrency"] == {
@@ -1261,8 +1261,8 @@ def test_global_backfill_is_bounded_serialized_and_preserves_daily_receipts() ->
         in validation["run"]
     )
     assert "BSIDE_OPS_TOKEN" in validation["env"]
-    assert "EDINET_API_KEY" in validation["env"]
-    assert "COMPANIES_HOUSE_API_KEY" in validation["env"]
+    assert "EDINET_API_KEY" not in workflow
+    assert "COMPANIES_HOUSE_API_KEY" not in workflow
 
     deployment_smoke = next(
         step
@@ -1294,8 +1294,8 @@ def test_global_backfill_is_bounded_serialized_and_preserves_daily_receipts() ->
         "${{ inputs.max_windows }}"
     )
     assert "BSIDE_OPS_TOKEN" in run_step["env"]
-    assert "EDINET_API_KEY" in run_step["env"]
-    assert "COMPANIES_HOUSE_API_KEY" in run_step["env"]
+    assert "EDINET_API_KEY" not in run_step["env"]
+    assert "COMPANIES_HOUSE_API_KEY" not in run_step["env"]
 
     preserve = next(
         step

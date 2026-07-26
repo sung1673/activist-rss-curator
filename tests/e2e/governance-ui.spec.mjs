@@ -270,8 +270,8 @@ const v2Events = [
 const sourceStatus = [
   { connector_id: "dart", country: "KR", source_name: "OpenDART", coverage_mode: "market-wide", status: "active", fresh: true, public_status: "active", public_ready: true, last_success_at: "2026-07-24T03:05:00Z", last_checked_at: "2026-07-24T03:10:00Z", lag_minutes: 5, error_class: null, public_note: "OpenDART governance disclosure scope" },
   { connector_id: "sec", country: "US", source_name: "SEC EDGAR", coverage_mode: "market-wide", status: "active", fresh: true, public_status: "active", public_ready: true, last_success_at: "2026-07-24T03:00:00Z", last_checked_at: "2026-07-24T03:10:00Z", lag_minutes: 10, error_class: null, public_note: "SEC Latest Filings Atom intraday discovery plus completed-day index reconciliation; allowlisted governance forms only" },
-  { connector_id: "jpx", country: "JP", source_name: "EDINET", coverage_mode: "market-wide", status: "active", fresh: true, public_status: "redistribution_blocked", public_ready: false, last_success_at: "2026-07-24T02:30:00Z", last_checked_at: "2026-07-24T03:10:00Z", lag_minutes: 40, error_class: null, public_note: "EDINET document-type allowlist; TDnet excluded" },
-  { connector_id: "companies-house", country: "GB", source_name: "Companies House", coverage_mode: "official-register", status: "active", fresh: true, public_status: "active", public_ready: true, last_success_at: "2026-07-24T02:55:00Z", last_checked_at: "2026-07-24T03:10:00Z", lag_minutes: 15, error_class: null, public_note: "Companies House configured company-number scope; RNS excluded" },
+  { connector_id: "jpx", country: "JP", source_name: "EDINET", coverage_mode: "link-only", status: "inactive", fresh: false, public_status: "coverage_unavailable", public_ready: false, last_success_at: null, last_checked_at: null, lag_minutes: null, error_class: null, public_note: "Production Alpha: link-only coverage unavailable; EDINET API credentials are not configured and HTML scraping is disabled." },
+  { connector_id: "companies-house", country: "GB", source_name: "Companies House", coverage_mode: "link-only", status: "inactive", fresh: false, public_status: "coverage_unavailable", public_ready: false, last_success_at: null, last_checked_at: null, lag_minutes: null, error_class: null, public_note: "Production Alpha: link-only coverage unavailable; Companies House API credentials are not configured and HTML scraping is disabled." },
   { connector_id: "ca-ir", country: "CA", source_name: "Canadian issuer IR manual links", coverage_mode: "link-only", status: "active", fresh: true, public_status: "active", public_ready: true, last_success_at: "2026-07-24T02:50:00Z", last_checked_at: "2026-07-24T03:10:00Z", lag_minutes: 20, error_class: null, public_note: "Manual issuer-controlled IR link metadata only; SEDAR+ excluded" },
   { connector_id: "asic", country: "AU", source_name: "ASIC manual register links", coverage_mode: "link-only", status: "pending_rights", fresh: false, public_status: "blocked_rights", public_ready: false, last_success_at: null, last_checked_at: "2026-07-24T03:10:00Z", lag_minutes: null, error_class: "source_right_required", public_note: "Manual asic.gov.au link metadata only; ASX excluded" }
 ];
@@ -641,18 +641,19 @@ test("today to evidence journey preserves source language and accessibility @web
   await expect(topPanel.getByText(/최초 관측 \/ First seen/).first()).toBeVisible();
   await expect(topPanel.getByText(/갱신 \/ Updated/).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "소스 상태 / Sources" })).toBeVisible();
-  await expect(page.locator(".source-status-item[data-status='redistribution_blocked']")).toContainText("EDINET");
+  await expect(page.locator(".source-status-item[data-status='coverage_unavailable']")).toContainText(["EDINET", "Companies House"]);
   await expect(page.locator(".source-status-item").filter({ hasText: "Canadian issuer IR manual links" })).toContainText("링크 전용·수동 메타데이터 / Link-only · manual metadata");
   await expect(page.locator(".source-public-note")).toContainText([
     "SEC Latest Filings Atom intraday discovery plus completed-day index reconciliation; allowlisted governance forms only",
-    "Companies House configured company-number scope; RNS excluded",
+    "Production Alpha: link-only coverage unavailable; EDINET API credentials are not configured and HTML scraping is disabled.",
+    "Production Alpha: link-only coverage unavailable; Companies House API credentials are not configured and HTML scraping is disabled.",
     "Manual issuer-controlled IR link metadata only; SEDAR+ excluded",
     "Manual asic.gov.au link metadata only; ASX excluded"
   ]);
-  await expect(page.locator("#global-source-coverage")).toContainText("4/6");
-  await expect(page.locator("#global-source-coverage")).toContainText("링크 전용 2");
+  await expect(page.locator("#global-source-coverage")).toContainText("3/6");
+  await expect(page.locator("#global-source-coverage")).toContainText("링크 전용 4");
   await expect(page.locator("[data-coverage-scope='warning']")).toContainText("일부 공식 소스 지연");
-  await expect(page.locator("[data-coverage-scope='warning']")).toContainText("JP · AU");
+  await expect(page.locator("[data-coverage-scope='warning']")).toContainText("JP · GB · AU");
   await expect(page.locator(".coverage-scope-note")).toContainText("CA·AU 링크 전용 / link-only");
   await expect(page.locator("a[data-api-link='/feeds/events.atom']")).toHaveAttribute("href", /\/api\/v2\/feeds\/events\.atom$/);
   await expect(page.locator("a[data-api-link='/exports/events.csv']")).toHaveAttribute("href", /\/api\/v2\/exports\/events\.csv$/);

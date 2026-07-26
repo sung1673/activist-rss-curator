@@ -11,8 +11,6 @@ on:
         options:
           - all
           - US
-          - JP
-          - GB
       from_date:
         description: Inclusive completed date (YYYY-MM-DD)
         required: true
@@ -49,7 +47,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        country: ${{ fromJSON(inputs.source != 'all' && format('["{0}"]', inputs.source) || '["US","JP","GB"]') }}
+        country: ${{ fromJSON(inputs.source != 'all' && format('["{0}"]', inputs.source) || '["US"]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     environment:
@@ -58,9 +56,6 @@ jobs:
       GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
       SEC_EDGAR_USER_AGENT: ${{ vars.SEC_EDGAR_USER_AGENT }}
       EXPECTED_SEC_EDGAR_USER_AGENT: BSIDE-Governance-Intelligence/1.0 support@bside.ai
-      EDINET_CONNECTOR_MODE: ${{ vars.EDINET_CONNECTOR_MODE || 'link-only' }}
-      COMPANIES_HOUSE_CONNECTOR_MODE: ${{ vars.COMPANIES_HOUSE_CONNECTOR_MODE || 'keyless' }}
-      COMPANIES_HOUSE_ISSUERS_JSON: ${{ vars.COMPANIES_HOUSE_ISSUERS_JSON }}
 
     steps:
       - name: Initialize global backfill evidence
@@ -115,8 +110,6 @@ jobs:
           BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
-          EDINET_API_KEY: ${{ matrix.country == 'JP' && secrets.EDINET_API_KEY || '' }}
-          COMPANIES_HOUSE_API_KEY: ${{ matrix.country == 'GB' && secrets.COMPANIES_HOUSE_API_KEY || '' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -128,20 +121,6 @@ jobs:
                 echo "::error::SEC_EDGAR_USER_AGENT must match the approved production identity."
                 exit 1
               }
-              ;;
-            JP)
-              [[ "$EDINET_CONNECTOR_MODE" == "active" ]] || {
-                echo "::error::EDINET_CONNECTOR_MODE must be active for JP backfill."
-                exit 1
-              }
-              required+=(EDINET_API_KEY)
-              ;;
-            GB)
-              [[ "$COMPANIES_HOUSE_CONNECTOR_MODE" == "active" ]] || {
-                echo "::error::COMPANIES_HOUSE_CONNECTOR_MODE must be active for GB backfill."
-                exit 1
-              }
-              required+=(COMPANIES_HOUSE_API_KEY COMPANIES_HOUSE_ISSUERS_JSON)
               ;;
             *)
               echo "::error::Unsupported global backfill country."
@@ -167,8 +146,6 @@ jobs:
       - name: Run sequential one-day global backfill
         env:
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
-          EDINET_API_KEY: ${{ matrix.country == 'JP' && secrets.EDINET_API_KEY || '' }}
-          COMPANIES_HOUSE_API_KEY: ${{ matrix.country == 'GB' && secrets.COMPANIES_HOUSE_API_KEY || '' }}
           BACKFILL_MODE: ${{ inputs.mode }}
           BACKFILL_FROM_DATE: ${{ inputs.from_date }}
           BACKFILL_TO_DATE: ${{ inputs.to_date }}
@@ -178,11 +155,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${{ matrix.country }}" == "US" ]]; then
-            max_pages="200"
-          else
-            max_pages="100"
-          fi
+          max_pages="200"
           python -m curator.global_backfill \
             --country "${{ matrix.country }}" \
             --mode "$BACKFILL_MODE" \

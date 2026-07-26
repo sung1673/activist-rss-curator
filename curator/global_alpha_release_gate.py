@@ -29,16 +29,16 @@ AUTOMATED_EVIDENCE_KIND = "bside-global-alpha-automated-evidence"
 EXPECTED_COUNTRY_COVERAGE = {
     "KR": "market-wide",
     "US": "market-wide",
-    "JP": "market-wide",
-    "GB": "official-register",
+    "JP": "link-only",
+    "GB": "link-only",
     "CA": "link-only",
     "AU": "link-only",
 }
+REQUIRED_ALPHA_COUNTRIES = frozenset(("KR", "US", "CA", "AU"))
+OPTIONAL_UNAVAILABLE_COUNTRIES = frozenset(("JP", "GB"))
 EXPECTED_CONNECTORS = {
     "dart": "KR",
     "sec-edgar": "US",
-    "edinet": "JP",
-    "companies-house": "GB",
 }
 MINIMUM_CONNECTOR_COVERAGE = timedelta(days=30)
 MAXIMUM_CONNECTOR_COVERAGE_END_AGE = timedelta(hours=24)
@@ -371,7 +371,7 @@ def _source_snapshot(
     value: object,
     *,
     location: str,
-) -> tuple[str, str, bool]:
+) -> tuple[str, str, str, bool, int, int]:
     item = _mapping(value, location)
     country = _text(item.get("country"), "country", location)
     coverage = _text(item.get("coverage_mode"), "coverage_mode", location)
@@ -391,7 +391,14 @@ def _source_snapshot(
         raise AlphaReleaseEvidenceError(
             f"{location}: acknowledged_count exceeds raw_count"
         )
-    return country, coverage, public_status == "active" and public_ready
+    return (
+        country,
+        coverage,
+        public_status,
+        public_status == "active" and public_ready,
+        raw_count,
+        acknowledged_count,
+    )
 
 
 def validate_observations(
@@ -605,9 +612,16 @@ def validate_observations(
         complete_probe_count += int(probes_ok)
 
         sources = _list(record.get("sources"), f"{location}.sources")
-        source_results: dict[str, tuple[str, bool]] = {}
+        source_results: dict[str, tuple[str, str, bool, int, int]] = {}
         for source_index, source in enumerate(sources):
-            country, coverage, ready = _source_snapshot(
+            (
+                country,
+                coverage,
+                public_status,
+                ready,
+                raw_count,
+                acknowledged_count,
+            ) = _source_snapshot(
                 source,
                 location=f"{location}.sources[{source_index}]",
             )
@@ -615,12 +629,29 @@ def validate_observations(
                 raise AlphaReleaseEvidenceError(
                     f"{location}: duplicate country source status"
                 )
-            source_results[country] = (coverage, ready)
+            source_results[country] = (
+                coverage,
+                public_status,
+                ready,
+                raw_count,
+                acknowledged_count,
+            )
         coverage_ok = set(source_results) == set(EXPECTED_COUNTRY_COVERAGE)
         coverage_ok = coverage_ok and all(
             source_results[country][0] == expected_coverage
-            and source_results[country][1]
             for country, expected_coverage in EXPECTED_COUNTRY_COVERAGE.items()
+        )
+        coverage_ok = coverage_ok and all(
+            source_results[country][1] == "active"
+            and source_results[country][2]
+            for country in REQUIRED_ALPHA_COUNTRIES
+        )
+        coverage_ok = coverage_ok and all(
+            source_results[country][1] == "coverage_unavailable"
+            and source_results[country][2] is False
+            and source_results[country][3] == 0
+            and source_results[country][4] == 0
+            for country in OPTIONAL_UNAVAILABLE_COUNTRIES
         )
         complete_coverage_count += int(coverage_ok)
 
@@ -1598,12 +1629,12 @@ def validate_approval(
         _gate(
             "approval.source_rights",
             roles.get("source-rights") is True
-            and right_countries == set(EXPECTED_COUNTRY_COVERAGE)
-            and rights_approved == len(EXPECTED_COUNTRY_COVERAGE)
+            and right_countries == set(REQUIRED_ALPHA_COUNTRIES)
+            and rights_approved == len(REQUIRED_ALPHA_COUNTRIES)
             and invalid_rights == 0,
             required={
                 "role": "source-rights",
-                "countries": sorted(EXPECTED_COUNTRY_COVERAGE),
+                "countries": sorted(REQUIRED_ALPHA_COUNTRIES),
                 "invalid_source_right_count": 0,
             },
             actual={

@@ -9,10 +9,7 @@ import httpx
 import pytest
 import yaml
 
-import curator.global_ingest as global_ingest_module
 from curator.global_connectors import (
-    CompaniesHouseFilingHistoryConnector,
-    EdinetDocumentsConnector,
     GlobalConnectorEnvelope,
     GlobalConnectorRequest,
     GlobalDocumentRecord,
@@ -1029,13 +1026,13 @@ def test_us_builds_fail_closed_intraday_and_daily_hybrid() -> None:
     assert issuers == ()
 
 
-def test_jp_api_is_explicit_opt_in_and_keyless_mode_never_scrapes() -> None:
+def test_jp_is_hard_disabled_and_never_scrapes_even_with_stale_secrets() -> None:
     keyless = global_ingest_execution_mode("JP", environment={})
-    assert keyless.mode == "link-only"
+    assert keyless.mode == "disabled"
     assert keyless.api_active is False
     assert keyless.coverage_mode == "link-only"
     assert keyless.reason == (
-        "edinet_api_key_required_html_scraping_prohibited"
+        "edinet_production_alpha_disabled_html_scraping_prohibited"
     )
     evidence = coverage_unavailable_evidence(
         execution_mode=keyless,
@@ -1050,28 +1047,21 @@ def test_jp_api_is_explicit_opt_in_and_keyless_mode_never_scrapes() -> None:
         match="jp_official_api_connector_not_active",
     ):
         build_connector("JP", environment={})
+    stale = {
+        "EDINET_CONNECTOR_MODE": "active",
+        "EDINET_API_KEY": "edinet-key",
+    }
+    assert global_ingest_execution_mode("JP", environment=stale) == keyless
     with pytest.raises(
         GlobalIngestConfigurationError,
-        match="missing_edinet_api_key",
+        match="jp_official_api_connector_not_active",
     ):
-        build_connector(
-            "JP",
-            environment={"EDINET_CONNECTOR_MODE": "active"},
-        )
-    connector, issuers = build_connector(
-        "JP",
-        environment={
-            "EDINET_CONNECTOR_MODE": "active",
-            "EDINET_API_KEY": "edinet-key",
-        },
-    )
-    assert isinstance(connector, EdinetDocumentsConnector)
-    assert issuers == ()
+        build_connector("JP", environment=stale)
 
 
-def test_companies_house_keyless_mode_limits_itself_to_official_products() -> None:
+def test_gb_is_hard_disabled_and_never_scrapes_even_with_stale_secrets() -> None:
     keyless = global_ingest_execution_mode("GB", environment={})
-    assert keyless.mode == "keyless"
+    assert keyless.mode == "disabled"
     assert keyless.api_active is False
     assert keyless.coverage_mode == "link-only"
     evidence = coverage_unavailable_evidence(
@@ -1096,23 +1086,17 @@ def test_companies_house_keyless_mode_limits_itself_to_official_products() -> No
             "GB",
             environment={"COMPANIES_HOUSE_API_KEY": "unused-key"},
         )
-    connector, issuers = build_connector(
-        "GB",
-        environment={
-            "COMPANIES_HOUSE_CONNECTOR_MODE": "active",
-            "COMPANIES_HOUSE_API_KEY": "companies-house-key",
-            "COMPANIES_HOUSE_ISSUERS_JSON": json.dumps(
-                [
-                    {
-                        "company_number": "01234567",
-                        "legal_name": "Example Limited",
-                    }
-                ]
-            ),
-        },
-    )
-    assert isinstance(connector, CompaniesHouseFilingHistoryConnector)
-    assert [issuer.value for issuer in issuers] == ["01234567"]
+    stale = {
+        "COMPANIES_HOUSE_CONNECTOR_MODE": "active",
+        "COMPANIES_HOUSE_API_KEY": "companies-house-key",
+        "COMPANIES_HOUSE_ISSUERS_JSON": "[]",
+    }
+    assert global_ingest_execution_mode("GB", environment=stale) == keyless
+    with pytest.raises(
+        GlobalIngestConfigurationError,
+        match="gb_official_api_connector_not_active",
+    ):
+        build_connector("GB", environment=stale)
 
 
 @pytest.mark.parametrize(
@@ -1122,36 +1106,34 @@ def test_companies_house_keyless_mode_limits_itself_to_official_products() -> No
             "JP",
             "EDINET_CONNECTOR_MODE",
             "scrape",
-            "invalid_edinet_connector_mode",
+            "disabled",
         ),
         (
             "GB",
             "COMPANIES_HOUSE_CONNECTOR_MODE",
             "scrape",
-            "invalid_companies_house_connector_mode",
+            "disabled",
         ),
     ],
 )
-def test_keyless_mode_rejects_html_scraping_configuration(
+def test_stale_mode_configuration_cannot_activate_optional_markets(
     country: str,
     variable: str,
     value: str,
     code: str,
 ) -> None:
-    with pytest.raises(GlobalIngestConfigurationError, match=code):
-        global_ingest_execution_mode(
-            country,
-            environment={variable: value},
-        )
+    mode = global_ingest_execution_mode(country, environment={variable: value})
+    assert mode.mode == code
+    assert mode.api_active is False
+    assert mode.coverage_mode == "link-only"
 
 
 @pytest.mark.parametrize(
-    ("country", "expected_mode"),
-    [("JP", "official-links-only"), ("GB", "official-bulk-basic-register-links")],
+    "country",
+    ["JP", "GB"],
 )
-def test_keyless_cli_writes_unavailable_evidence_without_api_configuration(
+def test_cli_does_not_accept_optional_markets(
     country: str,
-    expected_mode: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("BSIDE_API_BASE_URL", raising=False)
@@ -1162,35 +1144,17 @@ def test_keyless_cli_writes_unavailable_evidence_without_api_configuration(
     monkeypatch.delenv("COMPANIES_HOUSE_API_KEY", raising=False)
     monkeypatch.setenv("EDINET_CONNECTOR_MODE", "link-only")
     monkeypatch.setenv("COMPANIES_HOUSE_CONNECTOR_MODE", "keyless")
-    written: dict[str, object] = {}
-
-    def capture_evidence(
-        path: Path,
-        payload: dict[str, object],
-    ) -> None:
-        assert path == Path("keyless-evidence.json")
-        written.update(payload)
-
-    monkeypatch.setattr(
-        global_ingest_module,
-        "write_evidence",
-        capture_evidence,
-    )
-    assert main(
-        [
-            "--country",
-            country,
-            "--code-revision",
-            REVISION,
-            "--evidence",
-            "keyless-evidence.json",
-        ]
-    ) == 0
-    assert written["status"] == "coverage_unavailable"
-    assert written["ingest_mode"] == expected_mode
-    assert written["api_connector_active"] is False
-    assert written["html_scraping"] is False
-    assert written["source_urls_requested"] == 0
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "--country",
+                country,
+                "--code-revision",
+                REVISION,
+                "--evidence",
+                "keyless-evidence.json",
+            ]
+        )
 
 
 def test_default_dates_and_validation_are_half_open() -> None:
@@ -1407,27 +1371,21 @@ def test_workflow_is_matrixed_guarded_serial_and_never_uses_telegram() -> None:
         for step in job["steps"]
         if step["name"] == "Collect and ingest official source"
     )
-    assert set(collect["env"]).issuperset(
-        {
-            "BSIDE_OPS_TOKEN",
-            "EDINET_API_KEY",
-            "COMPANIES_HOUSE_API_KEY",
-        }
-    )
+    assert "BSIDE_OPS_TOKEN" in collect["env"]
+    assert "EDINET_API_KEY" not in workflow
+    assert "COMPANIES_HOUSE_API_KEY" not in workflow
     assert "matrix:" in workflow
-    for country in ("US", "JP", "GB"):
-        assert f"- {country}" in workflow
+    assert "- US" in workflow
+    assert "- JP" not in workflow
+    assert "- GB" not in workflow
     assert "cancel-in-progress: false" in workflow
     assert "GOVERNANCE_PIPELINE_MODE" in workflow
     assert "--require-active-pipeline" in workflow
-    assert "EDINET_CONNECTOR_MODE" in workflow
-    assert "'link-only'" in workflow
-    assert "COMPANIES_HOUSE_CONNECTOR_MODE" in workflow
-    assert "'keyless'" in workflow
-    assert "COMPANIES_HOUSE_ISSUERS_JSON" in workflow
+    assert "EDINET_CONNECTOR_MODE" not in workflow
+    assert "COMPANIES_HOUSE_CONNECTOR_MODE" not in workflow
+    assert "COMPANIES_HOUSE_ISSUERS_JSON" not in workflow
     assert "if: always()" in workflow
     assert "TELEGRAM_" not in workflow
     assert 'max_pages="200"' in workflow
-    assert 'max_pages="100"' in workflow
-    assert 'elif [[ "${{ matrix.country }}" == "US" ]]' in workflow
+    assert 'max_pages="100"' not in workflow
     assert '--max-pages "$max_pages"' in workflow

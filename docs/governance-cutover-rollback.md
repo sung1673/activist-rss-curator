@@ -8,8 +8,8 @@
 
 - release candidate가 기본 branch에 있으며 30일 수집·24시간 watchdog·사람 검수에 사용한 40자리 SHA와 같다.
 - 최근 48시간 이내 같은 SHA에서 생성된 `global-alpha-release-evidence` artifact가 있고, 전환 시점의 run 생성·`evidence_as_of`·관측 종료 시각은 모두 60분 이내다.
-- evidence에는 DB에서 다시 계산한 4개 공식 connector의 30일 수집 영수증, 최소 287개 watchdog 관측, 실제 사건 60건·동일 사건 후보 120쌍·Top 5 사람 검수, 화면·성능·롤백 훈련과 감독자·SourceRight 승인이 있다.
-- `KR/US/JP=market-wide`, `GB=official-register`, `CA/AU=link-only` 범위가 화면·API·증빙에서 일치한다. 캐나다 SEDAR+와 호주 ASX 전문을 수집하거나 저장하지 않는다.
+- evidence에는 DB에서 다시 계산한 DART·SEC 정확히 2개 실제 connector의 30일 수집 영수증, 최소 287개 watchdog 관측, 실제 사건 60건·동일 사건 후보 120쌍·Top 5 사람 검수, 화면·성능·롤백 훈련과 감독자·SourceRight 승인이 있다.
+- 필수 4개국 범위는 `KR/US=market-wide`, `CA/AU=link-only`다. JP·GB는 dormant identity이며 `link-only`, `coverage_unavailable`, `public_ready=false`, raw·ACK 0으로 표시된다. 캐나다 SEDAR+와 호주 ASX 전문, 일본 TDnet과 영국 RNS 전문을 수집하거나 저장하지 않는다.
 - 같은 SHA의 `daily.yml` 성공 run에 `pages-<run_id>-<attempt>` governance artifact가 있고, 그 exact run·attempt·artifact ID·이름·GitHub digest·전체 사이트 content digest가 Alpha evidence의 `pages-artifact-identity.json`에 고정돼 있다.
 - v1과 v2 서버 release state가 모두 승인된 `preview`이며 state version이 증빙 이후 바뀌지 않았다.
 - 승인된 로컬 운영자가 dispatch 직전에 `gh variable set PAGES_OWNER --body governance --repo sung1673/activist-rss-curator`를 실행하고 `gh variable get PAGES_OWNER --repo sung1673/activist-rss-curator` 결과가 `governance`인지 확인했다.
@@ -21,9 +21,37 @@
 
 `Governance protected cutover`에는 evidence run ID/name과 8자 이상의 사유만 입력한다. 별도 governance Pages run ID/name 입력은 받지 않는다. workflow는 evidence에 고정된 daily run·attempt·artifact ID·이름·GitHub SHA-256만 다시 조회해 다운로드하며, 같은 SHA의 다른 artifact도 거절한다. 다운로드 뒤 root와 `/governance`의 `index.html`, `config.js`, `app.js`, `styles.css`가 서로 byte-identical인지, 해당 terminal content identity가 24시간 watchdog 전 관측과 같은지, 전체 사이트 content digest가 evidence와 같은지 재계산한다. 하나라도 다르거나 digest mismatch가 발생하면 배포 전 fail-closed한다.
 
-검증된 artifact만 Pages에 올리기 전에 preview `/sources/status`에서 정확한 필수 6개 connector가 모두 `public_ready=true`인지 확인한다. 배포 뒤 `/`, `/governance/`, `/feed.xml`, API health, preview events, JSON export를 확인한다. 그 다음 보호 환경이 새 32바이트 nonce를 만들고 `BSIDE_RELEASE_AUTHORIZER_TOKEN`으로 candidate SHA, evidence artifact digest·run ID·artifact ID, v1·v2 state version과 10분 만료를 일회용 승인에 묶는다. workflow는 `BSIDE_ADMIN_TOKEN`으로 `POST /api/v2/admin/cutover`를 한 번 호출한다. 서버는 같은 MySQL transaction에서 승인, 두 release state, 필수 6개 connector와 그 SourceRight를 모두 잠근다. KR·US·JP·GB·CA·AU 중 공개 문서가 0건인 국가도 connector identity, active/error-free 상태, 실행 주기 기반 15~45분 최신 성공·확인 시각, SEC cursor UTC 시각, link-only 최근 관측·ACK, 증빙·유효·미철회 상태, 수집 및 공개 재배포 자격을 똑같이 재검사한다. 이어 기존 v1·v2 공개 문서 SourceRight guard까지 통과한 경우에만 v1과 v2를 함께 `live`로 바꾼다. nonce 원문은 로그에서 마스킹되고 DB에는 SHA-256만 저장된다.
+검증된 artifact만 Pages에 올리기 전에 preview `/sources/status`가 정확히 6개
+country row를 반환하는지 확인한다. 필수 4개 connector인 KR DART·US SEC·CA
+issuer IR link·AU ASIC link는 모두 `public_ready=true`여야 한다. JP
+EDINET·GB Companies House는 optional dormant identity로
+`link-only`, `coverage_unavailable`, `public_ready=false`, raw·ACK 0이어야 한다.
+배포 뒤 `/`, `/governance/`, `/feed.xml`, API health, preview events, JSON
+export를 확인한다. 그 다음 보호 환경이 새 32바이트 nonce를 만들고
+`BSIDE_RELEASE_AUTHORIZER_TOKEN`으로 candidate SHA, evidence artifact
+digest·run ID·artifact ID, v1·v2 state version과 10분 만료를 일회용 승인에
+묶는다. workflow는 `BSIDE_ADMIN_TOKEN`으로 `POST /api/v2/admin/cutover`를 한
+번 호출한다. 서버는 같은 MySQL transaction에서 승인, 두 release state와
+정확한 6개 connector identity를 `FOR UPDATE`로 잠근다. 필수 4개 connector와
+그 SourceRight에는 active/error-free 상태, 실행 주기 기반 15~45분 최신
+성공·확인 시각, SEC cursor UTC 시각, link-only 최근 관측·ACK,
+증빙·유효·미철회 상태, 수집 및 공개 재배포 자격을 검사한다. 공개 문서가
+0건이어도 이 검사를 생략하지 않는다. JP·GB는 configured/active로 전환되거나
+공개 준비 상태로 가장하지 않았는지 exact identity와 dormant 정책을 검사한다.
+이어 기존 v1·v2 공개 문서 SourceRight guard까지 통과한 경우에만 v1과 v2를
+함께 `live`로 바꾼다. nonce 원문은 로그에서 마스킹되고 DB에는 SHA-256만
+저장된다.
 
-v1·v2의 일반 `POST /admin/release-state`는 직접 `preview → live`를 시도하면 409 `protected_atomic_cutover_required`를 반환한다. 만료·철회·재사용·SHA·digest·version 불일치와 필수 connector/권한·최신성 오류는 상태를 한 건도 바꾸지 않는다. 필수 소스 오류는 409 `required_alpha_sources_invalid`이며 해당 승인도 미소비 상태로 남는다. 성공 뒤에는 인증 헤더 없이 `/sources/status`의 정확한 필수 6개 준비 상태와 events·Atom·JSON·CSV export를 다시 검사한다. workflow는 dispatch 시점의 `PAGES_OWNER=governance`와 `GOVERNANCE_PIPELINE_MODE=shadow` snapshot을 검증하지만 repository variable을 직접 변경하지 않는다.
+v1·v2의 일반 `POST /admin/release-state`는 직접 `preview → live`를 시도하면 409
+`protected_atomic_cutover_required`를 반환한다. 만료·철회·재사용·SHA·digest·version
+불일치, 필수 connector/권한·최신성 오류, JP·GB dormant identity 위반은 상태를
+한 건도 바꾸지 않는다. 필수 소스 또는 optional identity 오류는 409
+`required_alpha_sources_invalid`이며 해당 승인도 미소비 상태로 남는다. 성공
+뒤에는 인증 헤더 없이 `/sources/status`의 필수 4개 준비 상태와 JP·GB
+`coverage_unavailable` 상태, events·Atom·JSON·CSV export를 다시 검사한다.
+workflow는 dispatch 시점의 `PAGES_OWNER=governance`와
+`GOVERNANCE_PIPELINE_MODE=shadow` snapshot을 검증하지만 repository variable을
+직접 변경하지 않는다.
 
 이 24시간 경로는 범위를 투명하게 표시하는 Production Alpha 전환 전용이다. 정식 GA 선언에는 기존 14일 shadow, 300사건·500쌍 benchmark, 사용성·법률 승인 게이트를 별도로 적용한다.
 

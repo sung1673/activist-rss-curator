@@ -718,6 +718,14 @@ def test_execution_rechecks_rights_once_before_and_after_batch() -> None:
     envelope, key, code_revision = ingest.calls[0]
     assert envelope.connector_id == "connector:ca:issuer-ir"
     assert envelope.source_right_id == "official:ca-issuer-ir"
+    assert (
+        envelope.source_manifest_sha256
+        == links[0].approved_manifest_sha256
+    )
+    assert (
+        envelope.to_payload()["source_manifest_sha256"]
+        == links[0].approved_manifest_sha256
+    )
     assert envelope.coverage_mode.value == "link-only"
     assert envelope.request_count == 0
     assert envelope.public_allowed is True
@@ -820,6 +828,35 @@ def test_exact_config_has_a_stable_content_idempotency_key() -> None:
     assert first_ingest.calls[0][0].to_payload() == (
         second_ingest.calls[0][0].to_payload()
     )
+
+
+def test_manifest_digest_is_canonical_and_mixed_approval_is_rejected() -> None:
+    payload = _config(_link())
+    compact = parse_selected_official_links(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True),
+        country_code="CA",
+    )
+    pretty = parse_selected_official_links(
+        json.dumps(payload, indent=2, sort_keys=False),
+        country_code="CA",
+    )
+    assert (
+        compact[0].approved_manifest_sha256
+        == pretty[0].approved_manifest_sha256
+    )
+
+    other = _parse(_link(suffix="other"))
+    with pytest.raises(
+        SelectedMarketConfigurationError,
+        match="selected_market_manifest_mismatch",
+    ):
+        execute_selected_market_ingest(
+            country_code="CA",
+            links=(compact[0], other[0]),
+            code_revision=REVISION,
+            rights_client=_Rights(),
+            ingest_client=_Ingest(),
+        )
 
 
 def test_execution_rejects_public_metadata_denial() -> None:

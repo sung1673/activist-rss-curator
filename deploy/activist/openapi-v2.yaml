@@ -20,11 +20,13 @@ x-production-alpha-source-scope:
     coverage-mode: market-wide
     ingest-mode: official-disclosure
   JP:
-    coverage-mode: market-wide
-    ingest-mode: official-disclosure
+    coverage-mode: link-only
+    ingest-mode: coverage-unavailable
+    public-ready: false
   GB:
-    coverage-mode: official-register
-    ingest-mode: allowlisted-register
+    coverage-mode: link-only
+    ingest-mode: coverage-unavailable
+    public-ready: false
   CA:
     coverage-mode: link-only
     ingest-mode: manual-metadata
@@ -65,9 +67,9 @@ x-release-gate:
     live: Public data routes are readable without authentication.
   live-transition-guard: >-
     Protected atomic preview-to-live cutover locks both release-state rows,
-    validates the exact unexpired one-time authorization, and locks all six
-    required Production Alpha connector and SourceRight rows even when a
-    country has zero published documents. Every required connector must retain
+    validates the exact unexpired one-time authorization, and locks the four
+    required Production Alpha connector and SourceRight rows (KR, US, CA and
+    AU) even when a country has zero published documents. Every required connector must retain
     its exact country, source key/type, SourceRight id and coverage identity,
     including an exact immutable source identity match to its grant. Each
     connector must be active and error-free, and its latest successful and
@@ -76,6 +78,9 @@ x-release-gate:
     strictly decoded, fresh sec-current-v1 cursor; link-only connectors require
     a recent non-zero acknowledged observation. The grant must be active,
     evidenced, current, collectable and publicly redistributable. The existing
+    JP and GB connector identities are also locked and must remain exact, but
+    they stay link-only, coverage_unavailable and never public-ready; no
+    credential-free HTML fallback is permitted. The existing
     published v1/v2 document rights guard then runs before the authorization is
     consumed. Any failure rolls back both release states and leaves the
     authorization unconsumed.
@@ -669,12 +674,15 @@ paths:
       tags: [Operations]
       summary: Export database-derived Production Alpha evidence
       description: >-
-        Recomputes the latest contiguous 30-day official connector horizon
-        from durable MySQL receipts and DART checkpoints. It also compares
-        every currently public source-provenance event title byte-for-byte
-        with a linked eligible official document title. Operator-supplied
-        counts are not accepted. The requested revision must equal the
-        deployed manifest revision.
+        Recomputes exactly two latest contiguous 30-day collection horizons:
+        KR OpenDART from durable checkpoints and US SEC EDGAR from durable
+        MySQL receipts. JP and GB are dormant coverage-unavailable identities,
+        while CA and AU are link-only metadata sources, so none of those four
+        is represented as an automated 30-day connector horizon. It also
+        compares every currently public source-provenance event title
+        byte-for-byte with a linked eligible official document title.
+        Operator-supplied counts are not accepted. The requested revision
+        must equal the deployed manifest revision.
       security:
         - OpsBearer: []
       parameters:
@@ -727,11 +735,16 @@ paths:
         mismatch is rejected as a validation error, while a matching hash
         against different stored core fields is rejected as
         global_document_hash_contract_conflict.
-        connector:kr:dart is rejected because
-        OpenDART remains on the established official-ingest pipeline.
+        connector:kr:dart is rejected because OpenDART remains on the
+        established official-ingest pipeline. connector:jp:edinet and
+        connector:gb:companies-house return global_ingest_source_disabled
+        before normalization or any mutable write.
         Unclassified candidates remain private until an editor assigns one of
         the eight public event families.
-      x-rejected-connector-ids: [connector:kr:dart]
+      x-rejected-connector-ids:
+        - connector:kr:dart
+        - connector:jp:edinet
+        - connector:gb:companies-house
       security:
         - OpsBearer: []
       requestBody:
@@ -820,7 +833,9 @@ paths:
         Applies an optimistic connector-state transition. configured is
         accepted only when the referenced SourceRight is currently eligible
         for collection and its id, source type and source key match the
-        connector. inactive is allowed independently of SourceRight state.
+        connector. JP and GB configured transitions are rejected with
+        connector_disabled_by_alpha_policy regardless of stale credentials.
+        inactive is allowed independently of SourceRight state.
         Every accepted request creates an audit row, including an idempotent
         same-state request where changed is false.
       security:
@@ -852,7 +867,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: >-
-            stale_connector_update or connector_source_right_ineligible
+            stale_connector_update, connector_source_right_ineligible or
+            connector_disabled_by_alpha_policy
           content:
             application/json:
               schema:
@@ -1161,7 +1177,7 @@ paths:
         transaction that locks and promotes governance_v1 and
         global_terminal_v2. Candidate SHA, evidence artifact digest, nonce and
         both expected state versions must exactly match the authorization.
-        All six required Production Alpha connectors and their exact
+        The four required Production Alpha connectors and their exact
         SourceRights are locked and revalidated even if a country currently has
         zero published documents. Each grant must be active, evidenced,
         current, collectable and publicly redistributable; each connector must
@@ -1196,7 +1212,8 @@ paths:
         '409':
           description: >-
             Preview/version, candidate/evidence/nonce binding, authorization
-            lifecycle, required six-source registry/right eligibility, or
+            lifecycle, required four-source registry/right eligibility,
+            optional JP/GB identity policy, or
             current published-document SourceRight guard conflict
           content:
             application/json:
@@ -1929,6 +1946,7 @@ components:
             - error
             - blocked_rights
             - blocked_identity
+            - blocked_policy_activity
           description: >-
             Connector collection state after checking a current,
             evidence-backed SourceRight and exact connector-to-grant source
@@ -1944,10 +1962,12 @@ components:
             - error
             - blocked_rights
             - blocked_identity
+            - blocked_policy_activity
             - redistribution_blocked
             - excluded_source
             - stale
             - delayed
+            - coverage_unavailable
           description: >-
             Public delivery state after collection freshness, current
             SourceRight evidence, exact connector-to-grant source identity,
@@ -2042,12 +2062,13 @@ components:
               format: date-time
             required_source_ready:
               type: object
-              minProperties: 1
-              maxProperties: 6
+              minProperties: 0
+              maxProperties: 4
               additionalProperties:
                 type: boolean
               description: >-
-                Readiness by required Production Alpha connector after current
+                Readiness by the required KR, US, CA and AU Production Alpha
+                connectors after current
                 SourceRight, identity, run freshness, and connector-specific
                 observation gates.
             all_required_ready:
@@ -2319,10 +2340,34 @@ components:
           format: date-time
         connector_coverage:
           type: array
-          minItems: 4
-          maxItems: 4
+          minItems: 2
+          maxItems: 2
+          description: >-
+            Exactly one KR OpenDART horizon and one US SEC EDGAR horizon, in
+            exporter order. No dormant or link-only country is included.
           items:
             $ref: '#/components/schemas/AlphaConnectorCoverage'
+          allOf:
+            - contains:
+                type: object
+                required: [connector_family, country]
+                properties:
+                  connector_family:
+                    const: dart
+                  country:
+                    const: KR
+              minContains: 1
+              maxContains: 1
+            - contains:
+                type: object
+                required: [connector_family, country]
+                properties:
+                  connector_family:
+                    const: sec-edgar
+                  country:
+                    const: US
+              minContains: 1
+              maxContains: 1
         content_integrity:
           $ref: '#/components/schemas/AlphaContentIntegrity'
     AlphaConnectorCoverage:
@@ -2339,10 +2384,10 @@ components:
       properties:
         connector_family:
           type: string
-          enum: [dart, sec-edgar, edinet, companies-house]
+          enum: [dart, sec-edgar]
         country:
           type: string
-          enum: [KR, US, JP, GB]
+          enum: [KR, US]
         coverage_started_at:
           type: string
           format: date-time
@@ -2520,6 +2565,14 @@ components:
         rights_revision:
           type: string
           pattern: '^[a-f0-9]{64}$'
+        source_manifest_sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: >-
+            Required only for CA and AU link-only ingestion. It is the
+            canonical SHA-256 of the complete human-approved manifest and
+            must match the current SourceRight evidence_hash. It is rejected
+            for every other connector.
         retrieved_at:
           type: string
           format: date-time
@@ -3451,6 +3504,8 @@ components:
         - error
         - required_connector_count
         - invalid_required_connector_count
+        - optional_connector_count
+        - invalid_optional_connector_count
         - invalid_sources
         - api_version
       properties:
@@ -3460,11 +3515,18 @@ components:
           const: required_alpha_sources_invalid
         required_connector_count:
           type: integer
-          const: 6
+          const: 4
         invalid_required_connector_count:
           type: integer
-          minimum: 1
-          maximum: 6
+          minimum: 0
+          maximum: 4
+        optional_connector_count:
+          type: integer
+          const: 2
+        invalid_optional_connector_count:
+          type: integer
+          minimum: 0
+          maximum: 2
         invalid_sources:
           type: array
           minItems: 1
@@ -3486,6 +3548,7 @@ components:
                   enum:
                     - connector_missing
                     - connector_identity_mismatch
+                    - connector_policy_activity
                     - connector_not_active
                     - connector_has_error
                     - last_success_missing_or_stale
@@ -3495,6 +3558,8 @@ components:
                     - link_observation_not_acknowledged
                     - source_right_missing
                     - source_right_identity_mismatch
+                    - source_right_policy_active
+                    - source_right_policy_invalid
                     - collect_not_allowed
                     - public_redistribution_not_allowed
         api_version:

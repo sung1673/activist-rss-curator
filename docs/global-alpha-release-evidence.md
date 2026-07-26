@@ -122,11 +122,11 @@ evidence workflow가 고정하는 보호 입력 artifact에서 후보 생성 run
 
 | 파일 | `kind` | 필수 실제 증빙 |
 |---|---|---|
-| `connector-idempotency.json` | `bside-global-alpha-connector-idempotency` | 보호 입력에는 최초/동일 payload replay audit만 포함한다. 최초·replay 모두 raw·filtered-out·accepted·ACK 분할을 기록한다. DART·SEC EDGAR·EDINET·Companies House의 30일 window와 동일 분할·receipt hash는 운영 DB export가 덮어쓴다. |
+| `connector-idempotency.json` | `bside-global-alpha-connector-idempotency` | 보호 입력에는 최초/동일 payload replay audit만 포함한다. 최초·replay 모두 raw·filtered-out·accepted·ACK 분할을 기록한다. 실제 자동 백필 대상인 DART·SEC EDGAR의 30일 window와 동일 분할·receipt hash는 운영 DB export가 덮어쓴다. JP·GB·CA·AU를 자동 30일 connector로 기록하면 거절된다. |
 | `human-review.json` | `bside-global-alpha-human-review` | 고유 사건 60건 이상, 고유 동일사건 pair 120쌍 이상, 공개 Top 5 전체 사람 승인 |
 | `content-integrity.json` | `bside-global-alpha-content-integrity` | 보호 bundle의 값은 사용하지 않는다. 운영 DB exporter가 공개 사건 분모, 원문 언어·공식 URL, 제목 출처와 공식 문서 제목 byte 일치, Telegram 노출 수를 계산해 전체 파일을 교체한다. |
 | `experience.json` | `bside-global-alpha-experience` | 390×844·768×1024·1440×900 시각 회귀와 axe, Web Vitals 실제 sample, 공개 API 실제 byte, 실패 탐지와 rollback drill |
-| `approval.json` | `bside-global-alpha-release-approval` | 실제 감독자와 SourceRight 승인자, 6개국 유효 권한 범위, Production Alpha 범위 인정 |
+| `approval.json` | `bside-global-alpha-release-approval` | 실제 감독자와 SourceRight 승인자, 필수 4개국 KR·US·CA·AU의 유효 권한 범위, JP·GB가 dormant·`coverage_unavailable`이라는 Production Alpha 범위 인정 |
 
 `human-review.json`의 `raw_counts`는 배열 길이와 정확히 일치해야 한다. Top 5 분모가 0인 입력도 출시 증빙으로 인정하지 않는다. 중요한 사건이 없는 날의 빈 브리핑 정책은 제품 동작으로 허용되지만, Alpha 전환 자체는 사람이 검수한 실제 공개 Top 항목으로 검증한다.
 
@@ -158,8 +158,10 @@ Watchdog은 `BSIDE_OPS_TOKEN`과 읽기 전용 `GET /api/v2/ops/release-state`�
 - public root·health·release state·deployed build·source status·live·search probe 모두 HTTP 200 및 contract valid
 - live 사건이 있으면 같은 credential로 사건 상세를 실제 검증하고, 사건이 없고 소스가 정상일 때만 `event_detail={skipped:true, reason:no_live_event_available}`를 허용
 - incident·degraded·warning 없음
-- `KR/US/JP=market-wide`, `GB=official-register`, `CA/AU=link-only`
-- 각 국가 공개 상태가 `active`이고 `public_ready=true`
+- `KR/US=market-wide`, `CA/AU=link-only`, `JP/GB=link-only`
+- 필수 4개국 KR·US·CA·AU는 `public_status=active`,
+  `public_ready=true`이고 JP·GB는 정확히
+  `public_status=coverage_unavailable`, `public_ready=false`, raw·ACK 0
 
 누락 관측, 중복 ID/시각, 8분 초과 공백, 다른 candidate window, 소스 장애는 모두 전환을 차단한다.
 
@@ -191,7 +193,22 @@ Watchdog은 `BSIDE_OPS_TOKEN`과 읽기 전용 `GET /api/v2/ops/release-state`�
 
 `release_authorizer` 역할은 admin의 상위·하위 역할이 아니라 분리된 정확 일치 역할이다. 일반 `BSIDE_ADMIN_TOKEN`, ops, editor token으로 승인 발급 endpoint를 호출할 수 없다. 승인 API는 nonce 원문을 저장하거나 응답하지 않으며, 새 승인은 이전의 미사용 승인을 철회한다.
 
-그다음 workflow는 preview `/sources/status`에서 정확한 필수 6개 connector가 모두 `public_ready=true`인지 확인하고 `BSIDE_ADMIN_TOKEN`으로 `POST /api/v2/admin/cutover`를 한 번 호출한다. 서버는 같은 transaction에서 승인 nonce·candidate SHA·artifact digest·두 state version을 대조한다. 이어 공개 문서가 없는 국가도 포함해 KR DART·US SEC·JP EDINET·GB Companies House·CA issuer IR link·AU ASIC link의 필수 connector와 SourceRight를 모두 잠그고 exact identity, active/error-free 상태, 실행 주기에서 계산한 15~45분 최신 성공·확인 시각, SEC cursor UTC 시각, link-only 관측·ACK, 증빙·현재 유효·미철회, 수집 및 공개 재배포 자격을 검사한다. 기존 v1·v2 공개 문서 권한도 별도로 재검사한 뒤에만 `governance_v1`과 `global_terminal_v2`를 함께 `live`로 바꾼다. 필수 소스 오류는 409 `required_alpha_sources_invalid`이며 상태와 승인은 소비되지 않는다. 두 감사 row는 같은 `release_authorization_id`, `cutover_at`, `sunset_at`을 가진다. 두 개의 `/admin/release-state` 호출로 순차 승격하는 방식은 금지된다.
+그다음 workflow는 preview `/sources/status`에서 정확한 6개 국가 row를 확인한다.
+필수 4개 connector인 KR DART·US SEC·CA issuer IR link·AU ASIC link는 모두
+`public_ready=true`여야 한다. JP EDINET·GB Companies House는 optional dormant
+identity로만 잠그며 `link-only`, `coverage_unavailable`, `public_ready=false`,
+raw·ACK 0을 유지해야 한다. workflow는 `BSIDE_ADMIN_TOKEN`으로
+`POST /api/v2/admin/cutover`를 한 번 호출한다. 서버는 같은 transaction에서 승인
+nonce·candidate SHA·artifact digest·두 state version과 정확한 6개 identity를
+대조한다. 필수 4개 connector와 SourceRight에는 active/error-free 상태, 실행 주기에서
+계산한 15~45분 최신 성공·확인 시각, SEC cursor UTC 시각, link-only 최근
+관측·ACK, 증빙·현재 유효·미철회, 수집 및 공개 재배포 자격을 검사한다. JP·GB는
+configured 전환이나 공개 준비 상태로 가장할 수 없다. 기존 v1·v2 공개 문서
+권한도 별도로 재검사한 뒤에만 `governance_v1`과 `global_terminal_v2`를 함께
+`live`로 바꾼다. 필수 소스 또는 optional identity 오류는 409
+`required_alpha_sources_invalid`이며 상태와 승인은 소비되지 않는다. 두 감사
+row는 같은 `release_authorization_id`, `cutover_at`, `sunset_at`을 가진다. 두
+개의 `/admin/release-state` 호출로 순차 승격하는 방식은 금지된다.
 
 만료·철회·소비·replay·binding 불일치는 fail-closed하며 상태 변경은 0건이다. 긴급 롤백은 직접 `live → closed`를 허용하지만 이미 소비된 승인을 다시 쓸 수 없으므로 재전환에는 새 evidence digest·현재 state version·새 nonce에 묶인 승인이 필요하다.
 
@@ -199,8 +216,8 @@ Watchdog은 `BSIDE_OPS_TOKEN`과 읽기 전용 `GET /api/v2/ops/release-state`�
 
 ## 30일 수집 범위와 제목 출처 증빙
 
-운영 DB exporter가 만든 `connector-idempotency.json`의
-DART·SEC EDGAR·EDINET·Companies House 각 항목은
+운영 DB exporter가 만든 `connector-idempotency.json`에는 정확히 DART와
+SEC EDGAR 두 항목만 존재하며, 각 항목은
 `coverage_started_at`, `coverage_ended_at`, `successful_window_count`,
 `failed_window_count`, `completed_windows`를 포함해야 한다. 각 completed window는
 정확한 1일 반개구간, `raw_count`, `filtered_out_count`, `accepted_count`,

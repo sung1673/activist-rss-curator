@@ -40,6 +40,24 @@ def test_plan_is_exact_bounded_and_oldest_first() -> None:
     )
 
 
+@pytest.mark.parametrize("country", ["JP", "GB"])
+def test_optional_markets_are_not_supported_by_alpha_backfill(
+    country: str,
+) -> None:
+    with pytest.raises(
+        GlobalBackfillError,
+        match="unsupported_global_backfill_country",
+    ):
+        plan_global_backfill(
+            country_code=country,
+            mode="apply",
+            from_date="2026-07-01",
+            to_date="2026-07-02",
+            max_windows=1,
+            now=NOW,
+        )
+
+
 @pytest.mark.parametrize(
     ("overrides", "code"),
     [

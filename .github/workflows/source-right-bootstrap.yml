@@ -1,0 +1,125 @@
+name: Bootstrap protected metadata-only SourceRights
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_release_sha:
+        description: Exact 40-character deployed release SHA
+        required: true
+        type: string
+      reason:
+        description: Human-approved audit reason (20-500 characters)
+        required: true
+        type: string
+      confirmation:
+        description: Type BOOTSTRAP_DART_SEC_METADATA_RIGHTS_AT_EXACT_RELEASE_SHA
+        required: true
+        type: string
+      include_ca:
+        description: Also register the approved CA link-only allowlist
+        required: true
+        default: false
+        type: boolean
+      include_au:
+        description: Also register the approved AU link-only allowlist
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: governance-production-transition-${{ github.repository }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment:
+      name: governance-release
+    steps:
+      - name: Checkout the exact approved release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Enforce protected closed-state bootstrap
+        shell: bash
+        env:
+          EXPECTED_RELEASE_SHA: ${{ inputs.expected_release_sha }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
+          GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          GLOBAL_ALPHA_OBSERVATION_ENABLED: ${{ vars.GLOBAL_ALPHA_OBSERVATION_ENABLED }}
+          KIND_CONNECTOR_MODE: ${{ vars.KIND_CONNECTOR_MODE }}
+          ENABLE_TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          ENABLE_GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+        run: |
+          set -euo pipefail
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]] || {
+            echo "::error::SourceRight bootstrap must run on the default branch."
+            exit 1
+          }
+          [[ "$EXPECTED_RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || {
+            echo "::error::expected_release_sha must be a lowercase 40-character SHA."
+            exit 1
+          }
+          [[ "$EXPECTED_RELEASE_SHA" == "$GITHUB_SHA" ]] || {
+            echo "::error::The approved SHA does not match this workflow revision."
+            exit 1
+          }
+          [[ "$CONFIRMATION" == "BOOTSTRAP_DART_SEC_METADATA_RIGHTS_AT_EXACT_RELEASE_SHA" ]] || {
+            echo "::error::The explicit SourceRight confirmation did not match."
+            exit 1
+          }
+          [[ "$PAGES_OWNER" == "legacy" ]]
+          [[ "$GOVERNANCE_PIPELINE_MODE" == "off" ]]
+          [[ "$GLOBAL_ALPHA_OBSERVATION_ENABLED" == "false" ]]
+          [[ "$KIND_CONNECTOR_MODE" == "off" ]]
+          [[ "$ENABLE_TELEGRAM_DELIVERY" == "false" ]]
+          [[ "$ENABLE_GOVERNANCE_DELIVERY" == "false" ]]
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Register and verify approved metadata-only rights
+        shell: bash
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL }}
+          BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
+          EXPECTED_RELEASE_SHA: ${{ inputs.expected_release_sha }}
+          BOOTSTRAP_REASON: ${{ inputs.reason }}
+          BOOTSTRAP_CONFIRMATION: ${{ inputs.confirmation }}
+          INCLUDE_CA: ${{ inputs.include_ca }}
+          INCLUDE_AU: ${{ inputs.include_au }}
+          CA_OFFICIAL_LINKS_JSON: ${{ vars.CA_OFFICIAL_LINKS_JSON }}
+          AU_OFFICIAL_LINKS_JSON: ${{ vars.AU_OFFICIAL_LINKS_JSON }}
+        run: |
+          set -euo pipefail
+          [[ "${#BSIDE_ADMIN_TOKEN}" -ge 32 ]] || {
+            echo "::error::BSIDE_ADMIN_TOKEN is unavailable."
+            exit 1
+          }
+          [[ "$BSIDE_API_BASE_URL" == "https://alignpe.gabia.io/activist/api.php/api/v1" ]] || {
+            echo "::error::BSIDE_API_BASE_URL must be the protected production endpoint."
+            exit 1
+          }
+          args=(
+            --expected-release-sha "$EXPECTED_RELEASE_SHA"
+            --reason "$BOOTSTRAP_REASON"
+            --confirmation "$BOOTSTRAP_CONFIRMATION"
+          )
+          [[ "$INCLUDE_CA" == "true" ]] && args+=(--include-ca)
+          [[ "$INCLUDE_AU" == "true" ]] && args+=(--include-au)
+          python -m curator.source_right_bootstrap "${args[@]}"

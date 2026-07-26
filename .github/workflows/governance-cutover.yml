@@ -602,20 +602,31 @@ jobs:
           jq -e '
             def required: [
               "connector:kr:dart", "connector:us:sec-edgar",
-              "connector:jp:edinet", "connector:gb:companies-house",
               "connector:ca:issuer-ir", "connector:au:asic-register"
+            ];
+            def optional: [
+              "connector:jp:edinet", "connector:gb:companies-house"
             ];
             .ok == true
             and .data.all_required_ready == true
             and ((.data.required_source_ready | keys | sort) == (required | sort))
             and all(.data.required_source_ready[]; . == true)
-            and (([.data.items[].connector_id] | sort) == (required | sort))
-            and all(.data.items[];
-              .public_ready == true
-              and .public_status == "active"
-              and (.freshness_limit_minutes <= 45))
+            and (([.data.items[].connector_id] | sort) == ((required + optional) | sort))
+            and all(.data.items[] as $item;
+              if (required | index($item.connector_id)) != null then
+                $item.public_ready == true
+                and $item.public_status == "active"
+                and ($item.freshness_limit_minutes <= 45)
+              else
+                (optional | index($item.connector_id)) != null
+                and $item.coverage_mode == "link-only"
+                and $item.public_status == "coverage_unavailable"
+                and $item.public_ready == false
+                and $item.raw_count == 0
+                and $item.acknowledged_count == 0
+              end)
           ' preflight-v2-sources.json > /dev/null || {
-            echo "::error::All six exact Production Alpha sources must be currently public-ready."
+            echo "::error::Required Alpha sources must be ready and optional JP/GB coverage must stay unavailable."
             exit 1
           }
 
@@ -906,18 +917,29 @@ jobs:
           jq -e '
             def required: [
               "connector:kr:dart", "connector:us:sec-edgar",
-              "connector:jp:edinet", "connector:gb:companies-house",
               "connector:ca:issuer-ir", "connector:au:asic-register"
+            ];
+            def optional: [
+              "connector:jp:edinet", "connector:gb:companies-house"
             ];
             .ok == true
             and .data.all_required_ready == true
             and ((.data.required_source_ready | keys | sort) == (required | sort))
             and all(.data.required_source_ready[]; . == true)
-            and (([.data.items[].connector_id] | sort) == (required | sort))
-            and all(.data.items[];
-              .public_ready == true
-              and .public_status == "active"
-              and (.freshness_limit_minutes <= 45))
+            and (([.data.items[].connector_id] | sort) == ((required + optional) | sort))
+            and all(.data.items[] as $item;
+              if (required | index($item.connector_id)) != null then
+                $item.public_ready == true
+                and $item.public_status == "active"
+                and ($item.freshness_limit_minutes <= 45)
+              else
+                (optional | index($item.connector_id)) != null
+                and $item.coverage_mode == "link-only"
+                and $item.public_status == "coverage_unavailable"
+                and $item.public_ready == false
+                and $item.raw_count == 0
+                and $item.acknowledged_count == 0
+              end)
           ' public-v2-sources.json > /dev/null || {
             echo "::error::Post-cutover source readiness verification failed."
             exit 1

@@ -21,7 +21,7 @@ from .global_ingest import (
 )
 
 
-SUPPORTED_BACKFILL_COUNTRIES = ("US", "JP", "GB")
+SUPPORTED_BACKFILL_COUNTRIES = ("US",)
 SUPPORTED_BACKFILL_MODES = ("apply", "replay")
 MAX_BACKFILL_WINDOWS = 31
 _CODE_REVISION = re.compile(r"^[a-f0-9]{7,64}$")

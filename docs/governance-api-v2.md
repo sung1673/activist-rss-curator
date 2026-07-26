@@ -57,12 +57,12 @@ migration_sha256="$(sha256sum "$migration" | cut -d ' ' -f1)"
 - 미국: SEC EDGAR 공식 Latest Filings Atom 당일 증분과 completed-day 일일 인덱스 대조의 대량보유·주총·공개매수/M&A 허용 서식, `market-wide`. Atom cursor가 없거나 마지막 hybrid 성공이 45분을 넘으면 `delayed`, `live_ready=false`로 공개·출시를 차단한다.
 
 SEC 수집에는 API key나 EDGAR Next filer token을 사용하지 않는다. 당일 발견은 SEC가 [Latest Filings Search와 RSS feed](https://www.sec.gov/about/rss-feeds)로 공개한 `https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&output=atom`, 완료일 대조는 공식 `/Archives/edgar/daily-index`, 회사별 보강은 `https://data.sec.gov/submissions/CIK##########.json`, 원문 링크는 accession 기반 `/Archives/edgar/data`만 사용한다. 검색 결과 HTML이나 Full-Text Search 화면을 파싱하지 않는다. 모든 요청은 서비스명과 연락 가능한 이메일이 든 `SEC_EDGAR_USER_AGENT`를 전송하고 redirect를 따르지 않는다. 같은 실행의 SEC 요청은 공통 120ms 최소 간격(초당 10회 미만)을 사용하고 실제 요청 수 합계가 `max_pages`를 넘으면 적재하지 않는다. 첫 요청 전에는 인위적 지연을 넣지 않는다. Atom 응답은 source title·acceptance timestamp·official filing-index URL을 보존한다. 8-K/8-K/A는 `unclassified` 비공개 검수 후보이며 관련 item을 사람이 확정하기 전 공개 사건이 되지 않는다.
-- 일본: 기본 `link-only` 모드에서는 EDINET HTML/API 요청을 하지 않고 `coverage_unavailable`을 표시한다. `EDINET_CONNECTOR_MODE=active`와 EDINET 발급 자격정보가 있을 때만 허용 문서 유형을 `market-wide`로 수집한다.
-- 영국: 기본 `keyless` 모드에서는 filing-history API·공개 검색 HTML을 요청하지 않고 허용된 bulk/basic-register·공식 링크 경계만 표시한다. `COMPANIES_HOUSE_CONNECTOR_MODE=active`와 API 자격정보가 있을 때만 설정된 company number의 `official-register` filing history를 수집한다.
+- 일본: Production Alpha에서는 `link-only`, `coverage_unavailable`, `public_ready=false`로 고정한다. EDINET HTML/API 요청은 0건이며 과거 변수나 Secret이 남아 있어도 활성화되지 않는다.
+- 영국: Production Alpha에서는 `link-only`, `coverage_unavailable`, `public_ready=false`로 고정한다. Companies House API·공개 검색 HTML 요청은 0건이며 과거 변수나 Secret이 남아 있어도 활성화되지 않는다.
 - 캐나다: issuer 식별자와 별도 호스트 증빙에 묶인 회사 IR 링크 metadata, `link-only / manual-metadata`; SEDAR+ 전문 수집·재배포 제외
 - 호주: `asic.gov.au` 공식 호스트의 수동 등록부 링크 metadata, `link-only / manual-metadata`; ASX 공시 전문 수집·재배포 제외
 
-`GET /sources/status`는 수집 상태와 공개 준비 상태를 분리한다. `collect_status`와 `collect_fresh`는 현재 증빙이 등록된 SourceRight로 수집이 가능하고 마지막 성공·확인 시각이 `min(45분, max(15분, 실행 주기의 3배))` 이내인지 나타낸다. connector는 `active`이고 현재 오류가 없어야 한다. SEC는 `sec-current-v1:` 뒤의 canonical base64url JSON을 엄격히 해석해 `{schema_version: 1, updated_at}`의 UTC 시각도 같은 최신성 한도 안이어야 하며, CA/AU `link-only`는 같은 한도 안의 관측과 1건 이상의 raw/ACK가 모두 필요하다. `required_source_ready`와 `all_required_ready`는 이 동일한 계약을 필수 6개 connector에 적용한 결과다. connector의 `source_type`·`source_key`가 grant의 불변 identity와 대소문자까지 정확히 일치하지 않으면 `blocked_identity`로 차단한다. `public_status`와 `public_ready`는 여기에 현재 재배포 허용 여부와 공개 소스 정책까지 적용한 결과다. `status`와 `fresh`는 호환성을 위해 남긴 수집 상태 alias이며 brief 발행 판단에 사용하지 않는다. `public_ready=true`인 국가만 `no_confirmed_material_events` 발행이 가능하다. 수집은 최신이지만 재배포가 허용되지 않으면 `collect_fresh=true`, `public_status=redistribution_blocked`, `public_ready=false`가 된다. 사건이 0건인 것과 소스 장애·권한 대기·미지원은 서로 다른 상태다.
+`GET /sources/status`는 수집 상태와 공개 준비 상태를 분리한다. `collect_status`와 `collect_fresh`는 현재 증빙이 등록된 SourceRight로 수집이 가능하고 마지막 성공·확인 시각이 `min(45분, max(15분, 실행 주기의 3배))` 이내인지 나타낸다. connector는 `active`이고 현재 오류가 없어야 한다. SEC는 `sec-current-v1:` 뒤의 canonical base64url JSON을 엄격히 해석해 `{schema_version: 1, updated_at}`의 UTC 시각도 같은 최신성 한도 안이어야 하며, CA/AU `link-only`는 같은 한도 안의 관측과 1건 이상의 raw/ACK가 모두 필요하다. `required_source_ready`와 `all_required_ready`는 이 동일한 계약을 필수 4개 connector(KR·US·CA·AU)에 적용한 결과다. JP·GB는 6개국 UI에 계속 표시하지만 `link-only`, `coverage_unavailable`, `public_ready=false`, raw/ACK 0으로 고정한다. connector의 `source_type`·`source_key`가 등록 identity와 대소문자까지 정확히 일치하지 않으면 `blocked_identity`로 차단한다. `public_status`와 `public_ready`는 여기에 현재 재배포 허용 여부와 공개 소스 정책까지 적용한 결과다. `status`와 `fresh`는 호환성을 위해 남긴 수집 상태 alias이며 brief 발행 판단에 사용하지 않는다. 수집은 최신이지만 재배포가 허용되지 않으면 `collect_fresh=true`, `public_status=redistribution_blocked`, `public_ready=false`가 된다. 사건이 0건인 것과 소스 장애·권한 대기·미지원은 서로 다른 상태다.
 
 ## 공개 사건 기준
 
@@ -124,7 +124,7 @@ v2는 v1과 독립적인 `global_terminal_v2` release state를 사용한다.
 공개 승격은 보호된 `governance-release` workflow가 다음 두 단계를 연속 수행할 때만 가능하다.
 
 1. `POST /admin/release-authorizations`는 해당 보호 환경에만 둔 `BSIDE_RELEASE_AUTHORIZER_TOKEN`으로 호출한다. 토큰은 서버에서 정확한 `release_authorizer` 역할이어야 하며 `admin`, `editor`, `ops` 토큰으로 대체할 수 없다. 요청은 현재 배포 manifest의 40자리 candidate SHA, 검증한 GitHub release-evidence artifact의 `sha256:` digest·run ID·artifact ID, v1·v2 preview state version, 32바이트 난수 nonce와 서버 시각 기준 60~900초 유효기간을 함께 고정한다. 서버에는 nonce 원문 대신 SHA-256만 저장하고, 응답에도 nonce를 되돌려 주지 않는다. 새 승인은 이전의 미사용 승인을 철회한다.
-2. `POST /admin/cutover`는 `BSIDE_ADMIN_TOKEN`으로 호출하되 첫 단계에서 마스킹해 보관한 같은 nonce, candidate SHA, evidence digest와 두 state version을 모두 제출한다. 보호 workflow는 호출 전에 evidence run 생성 시각, 보고서 `evidence_as_of`, 관측 종료 시각이 모두 현재로부터 60분 이내인지 검증한다. 서버는 하나의 MySQL transaction 안에서 두 release state row와 승인을 잠근 다음, KR DART·US SEC EDGAR·JP EDINET·GB Companies House·CA issuer IR link·AU ASIC link의 필수 6개 connector row와 SourceRight row를 모두 `FOR UPDATE`로 잠근다. 현재 공개 문서가 0건인 국가도 예외가 아니다. connector는 등록된 국가·source key/type·SourceRight ID·coverage mode가 정확히 일치하고 `active`여야 하며, 마지막 성공·확인 시각과 SEC intraday cursor 또는 link-only 관측이 위 15~45분 최신성 계약을 만족해야 한다. SourceRight는 정확한 source identity, `active`, 증빙, 비어 있지 않은 permission scope, 유효기간·철회 상태, `collect` 및 공개 재배포 자격을 모두 충족해야 한다. 그 뒤 기존 v1·v2 공개 문서 SourceRight guard를 다시 실행하고, 모든 검사가 통과한 경우에만 `governance_v1`과 `global_terminal_v2`를 같은 `cutover_at`·`sunset_at`으로 함께 `live`로 바꾼다. 두 감사 row에는 같은 `release_authorization_id`가 기록된다.
+2. `POST /admin/cutover`는 `BSIDE_ADMIN_TOKEN`으로 호출하되 첫 단계에서 마스킹해 보관한 같은 nonce, candidate SHA, evidence digest와 두 state version을 모두 제출한다. 보호 workflow는 호출 전에 evidence run 생성 시각, 보고서 `evidence_as_of`, 관측 종료 시각이 모두 현재로부터 60분 이내인지 검증한다. 서버는 하나의 MySQL transaction 안에서 두 release state row와 승인을 잠근 다음, KR DART·US SEC EDGAR·CA issuer IR link·AU ASIC link의 필수 4개 connector row와 SourceRight row를 `FOR UPDATE`로 잠근다. 현재 공개 문서가 0건인 국가도 예외가 아니다. JP·GB connector는 권한·최신성 gate에는 포함하지 않지만 저장 identity를 별도로 잠그고 검증한다. connector는 등록된 국가·source key/type·SourceRight ID·coverage mode가 정확히 일치하고 `active`여야 하며, 마지막 성공·확인 시각과 SEC intraday cursor 또는 link-only 관측이 위 15~45분 최신성 계약을 만족해야 한다. SourceRight는 정확한 source identity, `active`, 증빙, 비어 있지 않은 permission scope, 유효기간·철회 상태, `collect` 및 공개 재배포 자격을 모두 충족해야 한다. 그 뒤 기존 v1·v2 공개 문서 SourceRight guard를 다시 실행하고, 모든 검사가 통과한 경우에만 `governance_v1`과 `global_terminal_v2`를 같은 `cutover_at`·`sunset_at`으로 함께 `live`로 바꾼다. 두 감사 row에는 같은 `release_authorization_id`가 기록된다.
 
 승인은 만료·철회·사용·candidate/evidence/version 불일치 중 하나라도 있으면 fail-closed한다. 필수 connector 또는 SourceRight 검사가 실패하면 HTTP 409 `required_alpha_sources_invalid`와 connector별 비민감 사유를 반환하고, 두 release state와 승인 소비 시각은 모두 변경하지 않는다. 소비된 nonce는 긴급 `live → closed` 롤백 뒤에도 다시 쓸 수 없다. 다시 공개하려면 새 증빙과 현재 두 state version에 묶인 새 nonce 승인을 받아야 한다. 반면 긴급 차단은 승인 발급 없이 기존 v1·v2 `POST /admin/release-state`에서 계속 가능하다.
 
@@ -186,11 +186,13 @@ scan 상한 초과는 409로 실패한다. 이 결과가 출시 workflow에서 �
 
 admin connector API는 SourceRight를 새로 승인하거나 수정하지 않는다. `GET /admin/connectors`는 전체 connector의 현재 상태와 collect eligibility를, detail GET은 해당 connector와 최근 감사 로그를 반환한다. collect eligibility에는 `eligible`, connector↔right의 `identity_match`, 불가 사유, rights revision·상태·유효기간·철회일·재배포·AI 허용값이 포함된다.
 
-`POST /admin/connectors/{connector_id}`는 정확히 `target_status`, `expected_updated_at`, `reason`만 받는다. 대상 상태는 `configured|inactive`, 사유는 8~1,000자다. `configured` 전환은 현재 `collect` 자격이 유효하고 connector와 SourceRight의 `source_right_id`, `source_type`, `source_key`가 모두 일치할 때만 허용한다. 권한 또는 identity가 맞지 않으면 `409 connector_source_right_ineligible`, 직전 조회 뒤 상태가 바뀌면 `409 stale_connector_update`다. `inactive` 전환은 권한과 무관하게 허용하고 `last_error_class=admin_inactive`로 남긴다. 같은 상태를 다시 요청해 `changed=false`가 되어도 모든 POST는 `previous_status`, 변경자, 사유를 `activist_global_connector_audit`에 기록하며 응답에 `audit_id`를 포함한다.
+`POST /admin/connectors/{connector_id}`는 정확히 `target_status`, `expected_updated_at`, `reason`만 받는다. 대상 상태는 `configured|inactive`, 사유는 8~1,000자다. `configured` 전환은 현재 `collect` 자격이 유효하고 connector와 SourceRight의 `source_right_id`, `source_type`, `source_key`가 모두 일치할 때만 허용한다. JP·GB는 권한이나 과거 Secret과 무관하게 `409 connector_disabled_by_alpha_policy`로 거절한다. 그 외 권한 또는 identity가 맞지 않으면 `409 connector_source_right_ineligible`, 직전 조회 뒤 상태가 바뀌면 `409 stale_connector_update`다. `inactive` 전환은 권한과 무관하게 허용하고 `last_error_class=admin_inactive`로 남긴다. 같은 상태를 다시 요청해 `changed=false`가 되어도 모든 성공 POST는 `previous_status`, 변경자, 사유를 `activist_global_connector_audit`에 기록하며 응답에 `audit_id`를 포함한다.
 
 ## 공식 수집 적용
 
 `POST /ops/ingest`는 등록된 connector가 만든 schema version 1 envelope만 받는다. 한 envelope에는 document record와 lifecycle observation을 각각 최대 500개까지 넣을 수 있다. 서버는 다음을 한 transaction에서 보장한다.
+
+JP·GB connector ID는 payload 정규화나 mutable write 전에 `409 global_ingest_source_disabled`로 거절한다. 따라서 workflow 외부에서 API를 직접 호출하거나 과거 자격정보가 남아 있어도 이 두 국가 수집을 다시 활성화할 수 없다.
 
 - connector의 국가·소스·coverage mode가 등록값과 정확히 일치함
 - 직전에 받은 64자리 `rights_revision`이 현재 SourceRight와 일치함
@@ -220,16 +222,13 @@ OpenDART는 이 v2 수집 경로의 대상이 아니다. 한국 공시는 기존
 
 ### 비한국 공식 소스 runner
 
-`.github/workflows/ingest-global.yml`은 기본 브랜치에서 `GOVERNANCE_PIPELINE_MODE=shadow|live`일 때 매시 17분·47분에 미국·일본·영국 connector를 병렬 실행한다. 수동 실행에서는 국가와 반개구간 날짜 범위도 지정할 수 있다. 기본 범위는 아직 끝난 최근 2개 UTC 날짜이며, 각 실행은 SourceRight를 첫 요청 전·각 페이지 전·API 전송 전에 확인하고 ACK가 실제 record와 lifecycle observation 합계와 다르면 실패한다. 실행 결과는 원문이나 자격정보를 넣지 않은 30일 보존 evidence artifact로 남긴다.
+`.github/workflows/ingest-global.yml`은 기본 브랜치에서 `GOVERNANCE_PIPELINE_MODE=shadow|live`일 때 매시 17분·47분에 미국 SEC connector만 실행한다. 수동 실행에서도 US만 선택할 수 있다. 기본 범위는 아직 끝난 최근 2개 UTC 날짜이며, 각 실행은 SourceRight를 첫 요청 전·각 페이지 전·API 전송 전에 확인하고 ACK가 실제 record와 lifecycle observation 합계와 다르면 실패한다. 실행 결과는 원문이나 자격정보를 넣지 않은 30일 보존 evidence artifact로 남긴다.
 
 필요한 설정은 다음과 같다.
 
 - 공통: `BSIDE_API_BASE_URL` secret 또는 `GOVERNANCE_API_BASE_URL` variable, `BSIDE_OPS_TOKEN` secret, `GOVERNANCE_PIPELINE_MODE` variable
 - SEC EDGAR: 연락 가능한 이메일을 포함한 `SEC_EDGAR_USER_AGENT` variable
-- EDINET: 기본 `EDINET_CONNECTOR_MODE=link-only`; API 수집을 명시적으로 켤 때만 `active`와 `EDINET_API_KEY` secret
-- Companies House: 기본 `COMPANIES_HOUSE_CONNECTOR_MODE=keyless`; filing-history API를 명시적으로 켤 때만 `active`, `COMPANIES_HOUSE_API_KEY` secret과 `COMPANIES_HOUSE_ISSUERS_JSON` variable
-
-`COMPANIES_HOUSE_ISSUERS_JSON`은 빈 배열을 허용하지 않는 최대 50개 회사의 명시적 allowlist다. 각 항목은 `company_number`, `legal_name`을 필수로 하고 `market`, `ticker`만 선택적으로 허용한다. 캐나다·호주는 이 runner가 원문 수집하지 않는다.
+- 일본·영국: Production Alpha runner 설정이 없다. `EDINET_API_KEY`, `COMPANIES_HOUSE_API_KEY`, 과거 connector mode·allowlist가 남아 있어도 읽지 않으며 EDINET·Companies House HTML/API를 요청하지 않는다. dormant connector schema의 회사 allowlist 상한은 최대 50개지만 Alpha 실행 경로에서는 사용되지 않는다. 캐나다·호주는 이 runner가 원문 수집하지 않는다.
 
 예약 실행처럼 `from_date`와 `to_date`가 모두 비어 있으면 runner는 `GET /ops/connectors/{connector_id}/checkpoint`에서 MySQL durable checkpoint를 읽는다. 완료된 `window_end_exclusive`의 하루 전부터 겹쳐 읽고 한 번에 최대 31일의 half-open window를 순서대로 처리해 긴 장애 뒤에도 날짜를 건너뛰지 않는다. 아직 checkpoint가 없으면 최근 완료 2일부터 시작한다. SEC는 completed-day 날짜 checkpoint와 별도로 `sec-current-v1` source cursor를 같은 schema v2 cursor에 저장하며, 90분 overlap으로 재관측한 Atom 항목은 content idempotency key와 DB upsert로 멱등 처리한다. 수동 범위에서도 SEC source cursor를 읽고, 다른 connector는 지정 범위만 처리한다. 둘 중 하나만 입력하면 `partial_explicit_window`로 fail-closed한다.
 
@@ -245,7 +244,7 @@ OpenDART는 이 v2 수집 경로의 대상이 아니다. 한국 공시는 기존
 
 수동 링크에서 허용하는 사건 유형은 migration 011의 현재 SourceCoverage와 정확히 같다. 캐나다는 `meeting_and_vote`, `tender_offer_and_mna`, `capital_return`, `board_and_compensation`, 호주는 `board_and_compensation`, `listing_status`다. 날짜 순서는 문자열이 아니라 timezone을 적용한 실제 UTC 시각으로 비교한다. 이 계약은 SEDAR+·ASX 전문 수집 또는 재배포 권한을 뜻하지 않는다.
 
-Production Alpha를 실행하려면 `official:dart`, `official:sec-edgar`, `official:edinet`, `official:companies-house`, `official:ca-issuer-ir`, `official:asic-register`의 6개국 SourceRight를 각각 실제 증빙과 permission scope, 유효기간으로 등록해야 한다. Migration 011의 비한국 `pending` row는 이용허가가 아니다. 보호된 cutover는 공개 문서 존재 여부와 무관하게 이 여섯 connector와 권한을 모두 잠그고 재검사하므로, 빈 문서 국가의 만료·철회·identity mismatch도 공개 승격을 차단한다.
+Production Alpha를 실행하려면 `official:dart`, `official:sec-edgar`, `official:ca-issuer-ir`, `official:asic-register`의 필수 4개 SourceRight를 각각 실제 증빙과 permission scope, 유효기간으로 등록해야 한다. Migration 011의 비한국 `pending` row는 이용허가가 아니다. `official:edinet`과 `official:companies-house`는 migration이 만든 선택적 dormant identity이며 Alpha에서 승인·활성화하지 않고 필수 권한으로 계산하지 않는다. 보호된 cutover는 공개 문서 존재 여부와 무관하게 필수 네 connector와 권한을 잠그고 재검사하며, JP·GB connector identity가 달라지면 공개 승격을 차단한다.
 
 ### 사람 감독 brief와 관측
 
@@ -279,7 +278,7 @@ Production Alpha를 실행하려면 `official:dart`, `official:sec-edgar`, `offi
 - Watch와 deadline은 각각 최대 50건이다.
 - 같은 event는 한 발행본에서 하나의 lane에만 들어갈 수 있다. Top·Watch·deadline 중복은 API와 DB unique constraint가 모두 거절한다.
 - Top이 0건이면 `empty_reason`이 필수다.
-- 국가 edition의 `no_confirmed_material_events`는 해당 국가에 `public_ready=true` connector가 하나 이상 있을 때만 승인된다. global edition에서는 6개국 각각에 `public_ready=true` connector가 하나 이상 있어야 한다. 그 조건을 충족하지 못하면 `coverage_unavailable`만 사용할 수 있다.
+- 국가 edition의 `no_confirmed_material_events`는 해당 국가에 `public_ready=true` connector가 하나 이상 있을 때만 승인된다. global edition에서는 필수 4개국 각각(KR·US·CA·AU)에 `public_ready=true` connector가 하나 이상 있어야 한다. JP·GB의 명시적 `coverage_unavailable`은 global brief를 막지 않는다. 그 조건을 충족하지 못하면 `coverage_unavailable`만 사용할 수 있다.
 - 반대로 필요한 모든 국가가 준비된 상태에서 `coverage_unavailable`을 발행할 수 없다.
 - 국가 edition에는 같은 국가 사건만 넣을 수 있다.
 - 각 item에는 선정 이유와 발행 시점 event snapshot을 저장한다.
@@ -340,6 +339,6 @@ v2가 공개하는 `event_family`는 다음 8개다.
 사람이 등록할 때 입력한 표제다.
 
 checkpoint가 없을 때 최근 2일에서 시작하는 자동 수집 계약은 그대로 유지한다.
-다만 Production Alpha 전환 게이트는 DART·SEC EDGAR·EDINET·Companies House
+다만 Production Alpha 전환 게이트는 DART·SEC EDGAR
 각각에서 동일 SHA의 최근 30일 이상 수집, 30개 이상 성공 window, 실패 window
 0개, 증빙 기준 시각 24시간 이내의 마지막 완료를 별도로 요구한다.
