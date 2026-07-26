@@ -18,18 +18,27 @@ import curator.php_sftp_deploy as php_deploy
 from curator.deployment_manifest import CORE_API_FILES, write_deployment_manifest
 from curator.mysql_backup import legacy_ssh_rsa_sha1_is_allowed
 from curator.php_sftp_deploy import (
+    CORE_RELEASE_CONFIRMATION_ENV,
+    CORE_ROLLBACK_CURRENT_SHA_ENV,
+    CORE_ROLLBACK_RELEASE_ID_ENV,
     DEFAULT_COMMIT_ORDER,
     DEFAULT_REMOTE_ROOT,
     DEPLOYMENT_MANIFEST_NAME,
+    GABIA_COMPATIBILITY_SSH_HOST,
+    GABIA_PRIVATE_DENY_REDIRECT,
+    GABIA_SSH_HOST_KEY_SHA256,
     HttpResponse,
     ParamikoPinnedSftpSession,
     PhpDeploymentError,
     build_local_deployment_plan,
+    confirm_production_release,
+    confirm_production_rollback,
     deploy_release,
     inspect_remote_deployment,
     load_remote_backup,
     local_plan_report,
     main,
+    prepare_gabia_core_compatibility,
     reset_opcache_with_ephemeral_probe,
     rollback_release,
     ssh_sftp_options_from_args,
@@ -65,6 +74,7 @@ class MemorySftp:
         self.directories: dict[str, int] = {"/": 0o755}
         self.symlinks: set[str] = set()
         self.mutations = 0
+        self.mkdir_calls: list[str] = []
 
     @staticmethod
     def _path(path: str) -> str:
@@ -102,6 +112,7 @@ class MemorySftp:
 
     def mkdir(self, path: str, mode: int = 0o777) -> None:
         normalized = self._path(path)
+        self.mkdir_calls.append(normalized)
         if (
             normalized in self.files
             or normalized in self.directories
@@ -182,8 +193,63 @@ class MemorySftp:
         self.modes[target] = self.modes.pop(source)
         self.mutations += 1
 
+    def rename(self, oldpath: str, newpath: str) -> None:
+        source = self._path(oldpath)
+        target = self._path(newpath)
+        if source not in self.files:
+            raise FileNotFoundError(2, "not found")
+        if (
+            target in self.files
+            or target in self.directories
+            or target in self.symlinks
+        ):
+            raise FileExistsError(17, "exists")
+        if posixpath.dirname(target) not in self.directories:
+            raise FileNotFoundError(2, "parent missing")
+        self.files[target] = self.files.pop(source)
+        self.modes[target] = self.modes.pop(source)
+        self.mutations += 1
+
     def close(self) -> None:
         return
+
+
+class _GabiaExclusiveHandle:
+    def __enter__(self) -> _GabiaExclusiveHandle:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return
+
+    def write(self, _content: bytes) -> int:
+        raise OSError("File not open for writing")
+
+    def flush(self) -> None:
+        return
+
+
+class GabiaMemorySftp(MemorySftp):
+    def open(self, path: str, mode: str = "r") -> object:
+        normalized = self._path(path)
+        if "x" not in mode:
+            return super().open(path, mode)
+        if (
+            normalized in self.files
+            or normalized in self.directories
+            or normalized in self.symlinks
+        ):
+            raise FileExistsError(17, "exists")
+        if posixpath.dirname(normalized) not in self.directories:
+            raise FileNotFoundError(2, "parent missing")
+        self.files[normalized] = b""
+        self.modes[normalized] = 0o644
+        self.mutations += 1
+        return _GabiaExclusiveHandle()
+
+
+class ReplacingRenameGabiaSftp(GabiaMemorySftp):
+    def rename(self, oldpath: str, newpath: str) -> None:
+        self.posix_rename(oldpath, newpath)
 
 
 class HttpRouter:
@@ -198,6 +264,7 @@ class HttpRouter:
         protected_release_state: str = "closed",
         private_canary_mode: str = "blocked",
         public_canary_mode: str = "mapped",
+        strict_opcache_action: str | None = None,
     ) -> None:
         self.sftp = sftp
         self.code_revision = code_revision
@@ -207,6 +274,7 @@ class HttpRouter:
         self.protected_release_state = protected_release_state
         self.private_canary_mode = private_canary_mode
         self.public_canary_mode = public_canary_mode
+        self.strict_opcache_action = strict_opcache_action
         self.calls: list[tuple[str, str]] = []
         self.probe_tokens: list[str] = []
         self.private_canary_paths: list[str] = []
@@ -282,6 +350,12 @@ class HttpRouter:
                     headers={"Location": "https://other.example/private"},
                     body=b"redirect",
                 )
+            if self.private_canary_mode == "gabia-redirect":
+                return HttpResponse(
+                    status=302,
+                    headers={"Location": GABIA_PRIVATE_DENY_REDIRECT},
+                    body=b"Gabia access-denied document",
+                )
             assert self.private_canary_mode == "blocked"
             return HttpResponse(
                 status=403,
@@ -298,6 +372,26 @@ class HttpRouter:
             assert hashlib.sha256(token.encode()).hexdigest().encode() in source
             if self.fail_probe:
                 return self._json(503, {"ok": False, "error": "failed"})
+            if self.strict_opcache_action is not None:
+                assert b"opcache_get_status(false)" in source
+                enabled = self.strict_opcache_action == "reset_verified"
+                return self._json(
+                    200,
+                    {
+                        "ok": True,
+                        "opcache_action": self.strict_opcache_action,
+                        "probe_id": match.group(1),
+                        "extension_loaded": True,
+                        "reset_function": True,
+                        "status_function": True,
+                        "status_available": True,
+                        "status_enabled": enabled,
+                        "ini_enable": "1",
+                        "validate_timestamps": "1",
+                        "revalidate_freq": "2",
+                        "reset_result": True if enabled else None,
+                    },
+                )
             return self._json(
                 200,
                 {
@@ -707,6 +801,624 @@ def _ssh_args(**overrides: object) -> argparse.Namespace:
     return argparse.Namespace(**values)
 
 
+def _gabia_options() -> object:
+    return ssh_sftp_options_from_args(
+        _ssh_args(
+            ssh_host=GABIA_COMPATIBILITY_SSH_HOST,
+            ssh_host_key_sha256=GABIA_SSH_HOST_KEY_SHA256,
+            ssh_allow_legacy_rsa_sha1=True,
+            ssh_legacy_rsa_sha1_host=GABIA_COMPATIBILITY_SSH_HOST,
+        ),
+        environ={"DEPLOY_PASSWORD": "never-print-this-password"},
+    )
+
+
+def _gabia_sftp() -> GabiaMemorySftp:
+    client = GabiaMemorySftp()
+    client.add_directory("/www_root")
+    client.add_directory(DEFAULT_REMOTE_ROOT)
+    client.add_directory(DEFAULT_REMOTE_ROOT + "/_private", 0o700)
+    client.add_directory(DEFAULT_REMOTE_ROOT + "/migrations")
+    client.add_file(
+        DEFAULT_REMOTE_ROOT + "/_private/.htaccess",
+        b"Gabia-current-private-deny-policy\n",
+        0o644,
+    )
+    client.add_file(DEFAULT_REMOTE_ROOT + "/.htaccess", b"old htaccess\n", 0o640)
+    client.add_file(DEFAULT_REMOTE_ROOT + "/api.php", b"old api\n", 0o640)
+    client.add_file(
+        DEFAULT_REMOTE_ROOT + "/governance_v1.php",
+        b"old v1\n",
+        0o644,
+    )
+    client.add_file(
+        DEFAULT_REMOTE_ROOT + "/openapi.yaml",
+        b"old openapi\n",
+        0o644,
+    )
+    client.mutations = 0
+    client.mkdir_calls.clear()
+    return client
+
+
+def _copy_sftp_state(
+    source: MemorySftp,
+    destination: MemorySftp,
+) -> None:
+    destination.files = dict(source.files)
+    destination.modes = dict(source.modes)
+    destination.directories = dict(source.directories)
+    destination.symlinks = set(source.symlinks)
+    destination.mutations = 0
+    destination.mkdir_calls.clear()
+
+
+def test_production_release_requires_argument_and_environment_confirmation() -> None:
+    with pytest.raises(PhpDeploymentError, match="does not match"):
+        confirm_production_release(
+            RELEASE_SHA,
+            RELEASE_SHA,
+            environ={},
+        )
+    with pytest.raises(PhpDeploymentError, match="does not match"):
+        confirm_production_release(
+            RELEASE_SHA,
+            "b" * 40,
+            environ={CORE_RELEASE_CONFIRMATION_ENV: RELEASE_SHA},
+        )
+
+    confirm_production_release(
+        RELEASE_SHA,
+        RELEASE_SHA,
+        environ={CORE_RELEASE_CONFIRMATION_ENV: RELEASE_SHA},
+    )
+
+
+def test_production_rollback_requires_backup_and_current_sha_confirmations() -> None:
+    environment = {
+        CORE_ROLLBACK_RELEASE_ID_ENV: RELEASE_ID,
+        CORE_ROLLBACK_CURRENT_SHA_ENV: RELEASE_SHA,
+    }
+    confirm_production_rollback(
+        RELEASE_ID,
+        RELEASE_ID,
+        RELEASE_SHA,
+        RELEASE_SHA,
+        environ=environment,
+    )
+
+    for bad_environment, release_confirmation, sha_confirmation in (
+        ({}, RELEASE_ID, RELEASE_SHA),
+        (environment, "other-release-id", RELEASE_SHA),
+        (environment, RELEASE_ID, "b" * 40),
+        (
+            {
+                **environment,
+                CORE_ROLLBACK_RELEASE_ID_ENV: "other-release-id",
+            },
+            RELEASE_ID,
+            RELEASE_SHA,
+        ),
+        (
+            {
+                **environment,
+                CORE_ROLLBACK_CURRENT_SHA_ENV: "b" * 40,
+            },
+            RELEASE_ID,
+            RELEASE_SHA,
+        ),
+    ):
+        with pytest.raises(PhpDeploymentError, match="does not match"):
+            confirm_production_rollback(
+                RELEASE_ID,
+                release_confirmation,
+                RELEASE_SHA,
+                sha_confirmation,
+                environ=bad_environment,
+            )
+
+
+def test_production_checkout_requires_repository_wide_clean_state(
+    local_plan: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = local_plan
+    repository = getattr(plan, "local_root").parents[1]
+    calls: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(
+        php_deploy,
+        "_find_repository_root",
+        lambda _path: repository,
+    )
+
+    def git_output(_repository: Path, arguments: object) -> bytes:
+        assert isinstance(arguments, tuple)
+        calls.append(arguments)
+        if arguments == ("rev-parse", "HEAD"):
+            return (RELEASE_SHA + "\n").encode()
+        if arguments == (
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+        ):
+            return b" M README.md\n"
+        raise AssertionError(arguments)
+
+    monkeypatch.setattr(php_deploy, "_git_output", git_output)
+
+    with pytest.raises(PhpDeploymentError, match="is not clean"):
+        php_deploy.verify_release_checkout(
+            plan,
+            require_repository_clean=True,
+        )
+
+    assert calls[-1] == (
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+    )
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"compatibility_host": "other.example"}, "target does not match"),
+        ({"remote_root": "/www_root/other"}, "target does not match"),
+        (
+            {"public_url_root": "https://alignpe.gabia.io/other"},
+            "target does not match",
+        ),
+        (
+            {
+                "api_v2_base_url": (
+                    "https://alignpe.gabia.io/other/api.php/api/v2"
+                )
+            },
+            "target does not match",
+        ),
+        (
+            {
+                "rollback_health_url": (
+                    "https://alignpe.gabia.io/other/api.php?action=health"
+                )
+            },
+            "target does not match",
+        ),
+        (
+            {"ssh_host_key_sha256": "SHA256:" + "A" * 43},
+            "security policy does not match",
+        ),
+    ],
+)
+def test_gabia_compatibility_is_exact_target_pinned(
+    override: dict[str, str],
+    message: str,
+) -> None:
+    client = _gabia_sftp()
+    options = _gabia_options()
+    values = {
+        "ssh_options": options,
+        "compatibility_host": GABIA_COMPATIBILITY_SSH_HOST,
+        "remote_root": DEFAULT_REMOTE_ROOT,
+        "public_url_root": PUBLIC_ROOT,
+        "api_v2_base_url": API_V2,
+        "rollback_health_url": ROLLBACK_HEALTH,
+    }
+    if "ssh_host_key_sha256" in override:
+        values["ssh_options"] = SimpleNamespace(
+            **{
+                **vars(options),
+                "host_key_sha256": override["ssh_host_key_sha256"],
+            }
+        )
+    else:
+        values.update(override)
+
+    with pytest.raises(PhpDeploymentError, match=message):
+        prepare_gabia_core_compatibility(
+            client,
+            **values,  # type: ignore[arg-type]
+        )
+
+    assert client.mutations == 0
+
+
+def test_gabia_core_deploy_uses_probed_exclusive_fallback_and_strict_opcache(
+    local_plan: object,
+) -> None:
+    client = _gabia_sftp()
+    private_policy = client.files[
+        DEFAULT_REMOTE_ROOT + "/_private/.htaccess"
+    ]
+    compatibility = prepare_gabia_core_compatibility(
+        client,
+        ssh_options=_gabia_options(),  # type: ignore[arg-type]
+        compatibility_host=GABIA_COMPATIBILITY_SSH_HOST,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+    )
+    http = HttpRouter(
+        client,
+        code_revision=RELEASE_SHA,
+        private_canary_mode="gabia-redirect",
+        strict_opcache_action="disabled_verified",
+    )
+
+    result = deploy_release(
+        client,
+        plan=local_plan,  # type: ignore[arg-type]
+        release_id=RELEASE_ID,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        protected_token=PROTECTED_TOKEN,
+        http_request=http,
+        gabia_compatibility=compatibility,
+    )
+
+    assert result["opcache_action"] == "disabled_verified"
+    assert result["opcache_reset"] is False
+    assert client.files[
+        DEFAULT_REMOTE_ROOT + "/_private/.htaccess"
+    ] == private_policy
+    assert client.mkdir_calls.count(
+        DEFAULT_REMOTE_ROOT + "/_private/deployment-lock"
+    ) == 1
+    assert not any(
+        ".bside-exclusive-" in path or ".bside-opcache-" in path
+        for path in (*client.files, *client.directories)
+    )
+
+
+def test_gabia_deploy_finally_rejects_private_policy_drift(
+    local_plan: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _gabia_sftp()
+    compatibility = prepare_gabia_core_compatibility(
+        client,
+        ssh_options=_gabia_options(),  # type: ignore[arg-type]
+        compatibility_host=GABIA_COMPATIBILITY_SSH_HOST,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+    )
+    original_release = php_deploy._release_deployment_lock
+
+    def release_then_drift(
+        locked_client: MemorySftp,
+        lock_path: str,
+        **kwargs: object,
+    ) -> None:
+        original_release(
+            locked_client,
+            lock_path,
+            **kwargs,  # type: ignore[arg-type]
+        )
+        policy_path = DEFAULT_REMOTE_ROOT + "/_private/.htaccess"
+        locked_client.files[policy_path] = b"unexpected-policy-drift\n"
+
+    monkeypatch.setattr(
+        php_deploy,
+        "_release_deployment_lock",
+        release_then_drift,
+    )
+
+    with pytest.raises(PhpDeploymentError, match="was not preserved"):
+        deploy_release(
+            client,
+            plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=HttpRouter(
+                client,
+                code_revision=RELEASE_SHA,
+                private_canary_mode="gabia-redirect",
+                strict_opcache_action="disabled_verified",
+            ),
+            gabia_compatibility=compatibility,
+        )
+
+    assert client.files[
+        DEFAULT_REMOTE_ROOT + "/deployment-manifest.json"
+    ] == _artifact_bytes(local_plan, "deployment-manifest.json")
+
+
+def test_gabia_prepare_rejects_current_sha_mismatch_before_probe(
+    local_plan: object,
+) -> None:
+    client = _gabia_sftp()
+    first_compatibility = prepare_gabia_core_compatibility(
+        client,
+        ssh_options=_gabia_options(),  # type: ignore[arg-type]
+        compatibility_host=GABIA_COMPATIBILITY_SSH_HOST,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+    )
+    deploy_release(
+        client,
+        plan=local_plan,  # type: ignore[arg-type]
+        release_id=RELEASE_ID,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        protected_token=PROTECTED_TOKEN,
+        http_request=HttpRouter(
+            client,
+            code_revision=RELEASE_SHA,
+            private_canary_mode="gabia-redirect",
+            strict_opcache_action="disabled_verified",
+        ),
+        gabia_compatibility=first_compatibility,
+    )
+    mutations_before = client.mutations
+
+    with pytest.raises(PhpDeploymentError, match="does not match"):
+        prepare_gabia_core_compatibility(
+            client,
+            ssh_options=_gabia_options(),  # type: ignore[arg-type]
+            compatibility_host=GABIA_COMPATIBILITY_SSH_HOST,
+            remote_root=DEFAULT_REMOTE_ROOT,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            expected_current_sha="b" * 40,
+        )
+
+    assert client.mutations == mutations_before
+
+
+def test_gabia_rollback_finally_rejects_private_policy_drift(
+    local_plan: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _gabia_sftp()
+    deploy_compatibility = prepare_gabia_core_compatibility(
+        client,
+        ssh_options=_gabia_options(),  # type: ignore[arg-type]
+        compatibility_host=GABIA_COMPATIBILITY_SSH_HOST,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+    )
+    deploy_release(
+        client,
+        plan=local_plan,  # type: ignore[arg-type]
+        release_id=RELEASE_ID,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        protected_token=PROTECTED_TOKEN,
+        http_request=HttpRouter(
+            client,
+            code_revision=RELEASE_SHA,
+            private_canary_mode="gabia-redirect",
+            strict_opcache_action="disabled_verified",
+        ),
+        gabia_compatibility=deploy_compatibility,
+    )
+    rollback_compatibility = prepare_gabia_core_compatibility(
+        client,
+        ssh_options=_gabia_options(),  # type: ignore[arg-type]
+        compatibility_host=GABIA_COMPATIBILITY_SSH_HOST,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        expected_current_sha=RELEASE_SHA,
+    )
+    original_release = php_deploy._release_deployment_lock
+
+    def release_then_drift(
+        locked_client: MemorySftp,
+        lock_path: str,
+        **kwargs: object,
+    ) -> None:
+        original_release(
+            locked_client,
+            lock_path,
+            **kwargs,  # type: ignore[arg-type]
+        )
+        policy_path = DEFAULT_REMOTE_ROOT + "/_private/.htaccess"
+        locked_client.modes[policy_path] = 0o600
+
+    monkeypatch.setattr(
+        php_deploy,
+        "_release_deployment_lock",
+        release_then_drift,
+    )
+
+    with pytest.raises(PhpDeploymentError, match="was not preserved"):
+        rollback_release(
+            client,
+            release_id=RELEASE_ID,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=HttpRouter(
+                client,
+                code_revision=RELEASE_SHA,
+                private_canary_mode="gabia-redirect",
+                strict_opcache_action="disabled_verified",
+            ),
+            gabia_compatibility=rollback_compatibility,
+            expected_current_sha=RELEASE_SHA,
+        )
+
+    assert DEFAULT_REMOTE_ROOT + "/deployment-manifest.json" not in client.files
+
+
+def test_gabia_rollback_rechecks_current_release_immediately_before_restore(
+    local_plan: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _gabia_sftp()
+    deploy_compatibility = prepare_gabia_core_compatibility(
+        client,
+        ssh_options=_gabia_options(),  # type: ignore[arg-type]
+        compatibility_host=GABIA_COMPATIBILITY_SSH_HOST,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+    )
+    deploy_release(
+        client,
+        plan=local_plan,  # type: ignore[arg-type]
+        release_id=RELEASE_ID,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        protected_token=PROTECTED_TOKEN,
+        http_request=HttpRouter(
+            client,
+            code_revision=RELEASE_SHA,
+            private_canary_mode="gabia-redirect",
+            strict_opcache_action="disabled_verified",
+        ),
+        gabia_compatibility=deploy_compatibility,
+    )
+    rollback_compatibility = prepare_gabia_core_compatibility(
+        client,
+        ssh_options=_gabia_options(),  # type: ignore[arg-type]
+        compatibility_host=GABIA_COMPATIBILITY_SSH_HOST,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        expected_current_sha=RELEASE_SHA,
+    )
+    manifest_path = DEFAULT_REMOTE_ROOT + "/deployment-manifest.json"
+    alternate_sha = "b" * 40
+    alternate_manifest = json.loads(client.files[manifest_path])
+    alternate_manifest["code_revision"] = alternate_sha
+    alternate_manifest_bytes = json.dumps(
+        alternate_manifest,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+    deployed_api = client.files[DEFAULT_REMOTE_ROOT + "/api.php"]
+    original_verify_snapshot = (
+        php_deploy.verify_remote_targets_match_snapshot
+    )
+    snapshot_checks = 0
+
+    def verify_then_switch_release(
+        checked_client: MemorySftp,
+        *,
+        snapshot: object,
+    ) -> None:
+        nonlocal snapshot_checks
+        original_verify_snapshot(
+            checked_client,
+            snapshot=snapshot,  # type: ignore[arg-type]
+        )
+        snapshot_checks += 1
+        if snapshot_checks == 1:
+            checked_client.files[manifest_path] = alternate_manifest_bytes
+
+    monkeypatch.setattr(
+        php_deploy,
+        "verify_remote_targets_match_snapshot",
+        verify_then_switch_release,
+    )
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="rollback stopped before mutation",
+    ):
+        rollback_release(
+            client,
+            release_id=RELEASE_ID,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=HttpRouter(
+                client,
+                code_revision=RELEASE_SHA,
+                private_canary_mode="gabia-redirect",
+                strict_opcache_action="disabled_verified",
+            ),
+            gabia_compatibility=rollback_compatibility,
+            expected_current_sha=RELEASE_SHA,
+        )
+
+    assert snapshot_checks == 1
+    assert client.files[manifest_path] == alternate_manifest_bytes
+    assert client.files[DEFAULT_REMOTE_ROOT + "/api.php"] == deployed_api
+
+
+def test_gabia_probe_rejects_replacing_standard_rename_without_residue() -> None:
+    baseline = _gabia_sftp()
+    client = ReplacingRenameGabiaSftp()
+    _copy_sftp_state(baseline, client)
+
+    with pytest.raises(PhpDeploymentError, match="can replace"):
+        prepare_gabia_core_compatibility(
+            client,
+            ssh_options=_gabia_options(),  # type: ignore[arg-type]
+            compatibility_host=GABIA_COMPATIBILITY_SSH_HOST,
+            remote_root=DEFAULT_REMOTE_ROOT,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+        )
+
+    assert not any(
+        ".bside-exclusive-" in path
+        or ".bside-cross-dir-" in path
+        for path in (*client.files, *client.directories)
+    )
+
+
+def test_gabia_strict_opcache_rejects_ambiguous_disabled_evidence(
+) -> None:
+    client = _gabia_sftp()
+    compatibility = prepare_gabia_core_compatibility(
+        client,
+        ssh_options=_gabia_options(),  # type: ignore[arg-type]
+        compatibility_host=GABIA_COMPATIBILITY_SSH_HOST,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+    )
+    http = HttpRouter(
+        client,
+        code_revision=RELEASE_SHA,
+        private_canary_mode="gabia-redirect",
+        strict_opcache_action="ambiguous",
+    )
+
+    with pytest.raises(PhpDeploymentError, match="action is invalid"):
+        reset_opcache_with_ephemeral_probe(
+            client,
+            remote_root=DEFAULT_REMOTE_ROOT,
+            public_url_root=PUBLIC_ROOT,
+            http_request=http,
+            exclusive_writer=compatibility.exclusive_writer,
+            require_strict_state=True,
+        )
+
+    assert not any(
+        ".bside-exclusive-" in path or ".bside-opcache-" in path
+        for path in (*client.files, *client.directories)
+    )
+
+
 def test_ssh_options_require_explicit_exact_legacy_host() -> None:
     environment = {"DEPLOY_PASSWORD": "never-print-this-password"}
 
@@ -1087,6 +1799,75 @@ def test_cli_unexpected_error_prints_only_generic_safe_line(
     for value in sensitive_values:
         assert value not in captured.out
         assert value not in captured.err
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        [
+            "deploy",
+            "--dry-run",
+            "--expected-sha",
+            RELEASE_SHA,
+            "--gabia-core-compatibility-host",
+            GABIA_COMPATIBILITY_SSH_HOST,
+        ],
+        [
+            "rollback",
+            "--dry-run",
+            "--release-id",
+            RELEASE_ID,
+            "--gabia-core-compatibility-host",
+            GABIA_COMPATIBILITY_SSH_HOST,
+        ],
+    ],
+)
+def test_cli_rejects_gabia_compatibility_dry_run_before_sftp(
+    arguments: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_options(_args: argparse.Namespace) -> object:
+        raise AssertionError("SFTP options must not be read")
+
+    monkeypatch.setattr(
+        php_deploy,
+        "ssh_sftp_options_from_args",
+        unexpected_options,
+    )
+
+    assert main(arguments) == 1
+
+
+def test_cli_rejects_unconfirmed_gabia_rollback_before_sftp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(CORE_ROLLBACK_RELEASE_ID_ENV, raising=False)
+    monkeypatch.delenv(CORE_ROLLBACK_CURRENT_SHA_ENV, raising=False)
+
+    def unexpected_options(_args: argparse.Namespace) -> object:
+        raise AssertionError("SFTP options must not be read")
+
+    monkeypatch.setattr(
+        php_deploy,
+        "ssh_sftp_options_from_args",
+        unexpected_options,
+    )
+
+    assert main(
+        [
+            "rollback",
+            "--release-id",
+            RELEASE_ID,
+            "--confirm-rollback-release-id",
+            RELEASE_ID,
+            "--expected-current-sha",
+            RELEASE_SHA,
+            "--confirm-rollback-current-sha",
+            RELEASE_SHA,
+            "--gabia-core-compatibility-host",
+            GABIA_COMPATIBILITY_SSH_HOST,
+        ]
+    ) == 1
 
 
 @pytest.mark.parametrize("canary_mode", ["exposed", "redirect"])

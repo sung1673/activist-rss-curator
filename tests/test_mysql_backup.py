@@ -4,6 +4,8 @@ import gzip
 import hashlib
 import json
 import re
+import socket
+import threading
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -11,6 +13,7 @@ from typing import Any
 
 import pytest
 
+import curator.mysql_backup as mysql_backup_module
 from curator.mysql_backup import (
     ConnectionOptions,
     MySqlBackupError,
@@ -784,6 +787,51 @@ def test_failure_unlocks_myisam_and_never_marks_backup_completed(
     assert all_opened_connections_closed(connections)
 
 
+def test_streaming_failure_is_not_masked_by_cursor_cleanup(
+    tmp_path: Path,
+) -> None:
+    connections, _log, connect = fixture_connections()
+    dump_connection = connections[0]
+    primary_error = FakeMySqlOperationalError(
+        2013,
+        "synthetic lost connection during streaming",
+    )
+    cleanup_error = AttributeError(
+        "synthetic SSCursor cleanup touched a missing socket"
+    )
+
+    class FailingStreamingCursor(FakeCursor):
+        def fetchmany(self, _size: int) -> list[object]:
+            raise primary_error
+
+        def close(self) -> None:
+            raise cleanup_error
+
+    def cursor(
+        *_args: object,
+        **_kwargs: object,
+    ) -> FailingStreamingCursor:
+        return FailingStreamingCursor(dump_connection)
+
+    dump_connection.cursor = cursor  # type: ignore[method-assign]
+    output = tmp_path / "stream-failed.sql.gz"
+
+    with pytest.raises(FakeMySqlOperationalError) as captured:
+        create_mysql_backup(
+            options(),
+            output_path=output,
+            code_revision=REVISION,
+            connect=connect,
+            stream_cursor_class=object(),
+        )
+
+    assert captured.value is primary_error
+    assert not output.exists()
+    assert not (tmp_path / "stream-failed.manifest.json").exists()
+    assert not list(tmp_path.glob("*.partial"))
+    assert all_opened_connections_closed(connections)
+
+
 def test_innodb_only_backup_does_not_request_a_global_read_lock(
     tmp_path: Path,
 ) -> None:
@@ -1050,6 +1098,7 @@ def test_paramiko_legacy_host_key_exception_is_per_transport(
             self._key_info = dict(default_key_info)
             self._preferred_keys = tuple(default_preferred_keys)
             self.auth_timeout = 0
+            self.keepalive_interval: int | None = None
             created.append(self)
 
         def start_client(self, *, timeout: int) -> None:
@@ -1069,6 +1118,9 @@ def test_paramiko_legacy_host_key_exception_is_per_transport(
 
         def is_authenticated(self) -> bool:
             return True
+
+        def set_keepalive(self, interval: int) -> None:
+            self.keepalive_interval = interval
 
         def close(self) -> None:
             return None
@@ -1105,6 +1157,10 @@ def test_paramiko_legacy_host_key_exception_is_per_transport(
         pass
     assert created[0].disabled_algorithms == {"keys": ["ssh-rsa"]}
     assert "ssh-rsa" not in created[0]._preferred_keys
+    assert (
+        created[0].keepalive_interval
+        == mysql_backup_module.SSH_KEEPALIVE_INTERVAL_SECONDS
+    )
 
     legacy_options = SshTunnelOptions(
         host="legacy.example",
@@ -1127,6 +1183,10 @@ def test_paramiko_legacy_host_key_exception_is_per_transport(
     assert "ssh-rsa-cert-v01@openssh.com" not in created[1].preferred_keys
     assert "ssh-rsa" in created[1]._key_info
     assert "ssh-rsa" in created[1]._key_info["ssh-rsa"].HASHES
+    assert (
+        created[1].keepalive_interval
+        == mysql_backup_module.SSH_KEEPALIVE_INTERVAL_SECONDS
+    )
     signed_data = b"local-host-key-verification-fixture"
     private_key = paramiko.RSAKey.generate(bits=1024)
     signature = private_key.key.sign(
@@ -1148,6 +1208,246 @@ def test_paramiko_legacy_host_key_exception_is_per_transport(
         ("ssh-user", "ssh-secret", False),
         ("ssh-user", "ssh-secret", False),
     ]
+
+
+def test_tunnel_forwarder_uses_backpressure_safe_io_timeout() -> None:
+    class FakeEndpoint:
+        def __init__(self) -> None:
+            self.timeouts: list[float] = []
+            self.closed = False
+            self.shutdown_called = False
+
+        def settimeout(self, value: float) -> None:
+            self.timeouts.append(value)
+
+        def recv(self, _size: int) -> bytes:
+            return b""
+
+        def send(self, content: bytes | memoryview) -> int:
+            return len(content)
+
+        def shutdown(self, _how: int) -> None:
+            self.shutdown_called = True
+
+        def close(self) -> None:
+            self.closed = True
+
+    request = FakeEndpoint()
+    channel = FakeEndpoint()
+
+    class FakeTransport:
+        def open_channel(
+            self,
+            kind: str,
+            destination: tuple[str, int],
+            source: tuple[str, int],
+        ) -> FakeEndpoint:
+            assert kind == "direct-tcpip"
+            assert destination == ("private-db", 3306)
+            assert source == ("127.0.0.1", 45123)
+            return channel
+
+    class FakeServer:
+        ssh_transport = FakeTransport()
+        remote_destination = ("private-db", 3306)
+
+    mysql_backup_module._DirectTcpipHandler(
+        request,
+        ("127.0.0.1", 45123),
+        FakeServer(),
+    )
+
+    expected = mysql_backup_module.SSH_FORWARD_IO_TIMEOUT_SECONDS
+    assert request.timeouts == [expected]
+    assert channel.timeouts == [expected]
+    assert request.shutdown_called is True
+    assert channel.closed is True
+
+
+def test_tunnel_forwarder_retries_only_the_unsent_suffix_after_timeout() -> None:
+    payload = b"abcdef"
+
+    class Source:
+        def __init__(self) -> None:
+            self.chunks = [payload, b""]
+
+        def recv(self, _size: int) -> bytes:
+            return self.chunks.pop(0)
+
+    class PartialDestination:
+        def __init__(self) -> None:
+            self.actions: list[int | Exception] = [
+                2,
+                socket.timeout("synthetic backpressure"),
+                4,
+            ]
+            self.attempts: list[bytes] = []
+            self.received = bytearray()
+
+        def send(self, content: bytes | memoryview) -> int:
+            remaining = bytes(content)
+            self.attempts.append(remaining)
+            action = self.actions.pop(0)
+            if isinstance(action, Exception):
+                raise action
+            sent = min(action, len(remaining))
+            self.received.extend(remaining[:sent])
+            return sent
+
+    source = Source()
+    destination = PartialDestination()
+    stop = threading.Event()
+
+    mysql_backup_module._DirectTcpipHandler._pump(
+        source,
+        destination,
+        stop,
+    )
+
+    assert destination.attempts == [payload, b"cdef", b"cdef"]
+    assert bytes(destination.received) == payload
+    assert stop.is_set()
+
+
+def test_tunnel_forwarder_bounds_consecutive_send_timeouts() -> None:
+    class StalledDestination:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def send(self, _content: bytes | memoryview) -> int:
+            self.calls += 1
+            raise socket.timeout("synthetic stalled destination")
+
+    destination = StalledDestination()
+
+    with pytest.raises(TimeoutError, match="no write progress"):
+        mysql_backup_module._DirectTcpipHandler._send_all(
+            destination,
+            b"payload",
+            threading.Event(),
+        )
+
+    assert (
+        destination.calls
+        == mysql_backup_module.SSH_FORWARD_MAX_CONSECUTIVE_TIMEOUTS
+    )
+
+
+def test_tunnel_forwarder_resets_send_timeout_budget_after_progress() -> None:
+    timeout_budget = (
+        mysql_backup_module.SSH_FORWARD_MAX_CONSECUTIVE_TIMEOUTS - 1
+    )
+
+    class RecoveringDestination:
+        def __init__(self) -> None:
+            self.actions: list[int | Exception] = [
+                *(
+                    socket.timeout("first backpressure")
+                    for _index in range(timeout_budget)
+                ),
+                1,
+                *(
+                    socket.timeout("second backpressure")
+                    for _index in range(timeout_budget)
+                ),
+                1,
+            ]
+            self.received = bytearray()
+
+        def send(self, content: bytes | memoryview) -> int:
+            action = self.actions.pop(0)
+            if isinstance(action, Exception):
+                raise action
+            remaining = bytes(content)
+            self.received.extend(remaining[:action])
+            return action
+
+    destination = RecoveringDestination()
+    mysql_backup_module._DirectTcpipHandler._send_all(
+        destination,
+        b"ab",
+        threading.Event(),
+    )
+
+    assert bytes(destination.received) == b"ab"
+    assert destination.actions == []
+
+
+def test_tunnel_forwarder_bounds_consecutive_receive_idle_timeouts() -> None:
+    class IdleSource:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def recv(self, _size: int) -> bytes:
+            self.calls += 1
+            raise socket.timeout("synthetic idle source")
+
+    class Destination:
+        def send(self, _content: bytes | memoryview) -> int:
+            raise AssertionError("idle source must not produce bytes")
+
+    source = IdleSource()
+    stop = threading.Event()
+    mysql_backup_module._DirectTcpipHandler._pump(
+        source,
+        Destination(),
+        stop,
+    )
+
+    assert (
+        source.calls
+        == mysql_backup_module.SSH_FORWARD_MAX_CONSECUTIVE_TIMEOUTS
+    )
+    assert stop.is_set()
+
+
+def test_tunnel_forwarder_resets_receive_idle_budget_after_progress() -> None:
+    timeout_budget = (
+        mysql_backup_module.SSH_FORWARD_MAX_CONSECUTIVE_TIMEOUTS - 1
+    )
+
+    class RecoveringSource:
+        def __init__(self) -> None:
+            self.actions: list[bytes | Exception] = [
+                *(
+                    socket.timeout("first idle period")
+                    for _index in range(timeout_budget)
+                ),
+                b"a",
+                *(
+                    socket.timeout("second idle period")
+                    for _index in range(timeout_budget)
+                ),
+                b"",
+            ]
+
+        def recv(self, _size: int) -> bytes:
+            action = self.actions.pop(0)
+            if isinstance(action, Exception):
+                raise action
+            return action
+
+    class Destination:
+        def __init__(self) -> None:
+            self.received = bytearray()
+
+        def send(self, content: bytes | memoryview) -> int:
+            chunk = bytes(content)
+            self.received.extend(chunk)
+            return len(chunk)
+
+    source = RecoveringSource()
+    destination = Destination()
+    stop = threading.Event()
+    mysql_backup_module._DirectTcpipHandler._pump(
+        source,
+        destination,
+        stop,
+    )
+
+    assert bytes(destination.received) == b"a"
+    assert source.actions == []
+    assert stop.is_set()
 
 
 def test_wrong_pin_aborts_before_ssh_authentication(

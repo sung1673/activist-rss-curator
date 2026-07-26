@@ -28,6 +28,9 @@ CODE_REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 DEFAULT_BATCH_ROWS = 500
 DEFAULT_BATCH_BYTES = 1024 * 1024
 DEFAULT_FETCH_SIZE = 500
+SSH_FORWARD_IO_TIMEOUT_SECONDS = 30.0
+SSH_FORWARD_MAX_CONSECUTIVE_TIMEOUTS = 10
+SSH_KEEPALIVE_INTERVAL_SECONDS = 30
 SSH_SHA256_PATTERN = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
 MYSQL_GLOBAL_READ_LOCK_PRIVILEGE_ERROR = 1227
 READ_LOCK_STRATEGY_NONE = "none"
@@ -544,16 +547,61 @@ class _DirectTcpipHandler(socketserver.BaseRequestHandler):
     server: Any
 
     @staticmethod
+    def _send_all(
+        destination: Any,
+        content: bytes,
+        stop: threading.Event,
+    ) -> None:
+        offset = 0
+        consecutive_timeouts = 0
+        while offset < len(content) and not stop.is_set():
+            remaining = content[offset:]
+            try:
+                sent = destination.send(remaining)
+            except (socket.timeout, TimeoutError):
+                # Backpressure is expected while a large unbuffered result is
+                # being consumed. Retry the exact unsent suffix so a timeout
+                # cannot drop or duplicate bytes in the tunnel, but stop
+                # after the bounded no-progress budget is exhausted.
+                consecutive_timeouts += 1
+                if (
+                    consecutive_timeouts
+                    >= SSH_FORWARD_MAX_CONSECUTIVE_TIMEOUTS
+                ):
+                    raise TimeoutError(
+                        "SSH tunnel destination made no write progress"
+                    )
+                continue
+            if (
+                not isinstance(sent, int)
+                or sent <= 0
+                or sent > len(remaining)
+            ):
+                raise ConnectionError("SSH tunnel destination stopped accepting data")
+            offset += sent
+            consecutive_timeouts = 0
+
+    @staticmethod
     def _pump(source: Any, destination: Any, stop: threading.Event) -> None:
+        consecutive_idle_timeouts = 0
         try:
             while not stop.is_set():
                 try:
                     chunk = source.recv(64 * 1024)
                 except (socket.timeout, TimeoutError):
+                    consecutive_idle_timeouts += 1
+                    if (
+                        consecutive_idle_timeouts
+                        >= SSH_FORWARD_MAX_CONSECUTIVE_TIMEOUTS
+                    ):
+                        raise TimeoutError(
+                            "SSH tunnel source made no read progress"
+                        )
                     continue
                 if not chunk:
                     break
-                destination.sendall(chunk)
+                consecutive_idle_timeouts = 0
+                _DirectTcpipHandler._send_all(destination, chunk, stop)
         except Exception:
             # Forwarding errors fail the DB connection itself; never echo
             # endpoint or transport details from a background thread.
@@ -570,8 +618,12 @@ class _DirectTcpipHandler(socketserver.BaseRequestHandler):
         if channel is None:
             return
         stop = threading.Event()
-        self.request.settimeout(0.5)
-        channel.settimeout(0.5)
+        # Both objects are used as a source in one pump and a destination in
+        # the other, so their timeout also governs send(). A sub-second
+        # timeout can tear down a healthy tunnel while a streaming MySQL
+        # consumer applies backpressure to a large result set.
+        self.request.settimeout(SSH_FORWARD_IO_TIMEOUT_SECONDS)
+        channel.settimeout(SSH_FORWARD_IO_TIMEOUT_SECONDS)
         pumps = [
             threading.Thread(
                 target=self._pump,
@@ -664,6 +716,7 @@ class SshDirectTcpipTunnel:
             )
             if not self._transport.is_authenticated():
                 raise MySqlBackupError("SSH authentication did not complete")
+            self._transport.set_keepalive(SSH_KEEPALIVE_INTERVAL_SECONDS)
             server = _DirectTcpipServer(
                 (self.local_host, 0),
                 _DirectTcpipHandler,
@@ -1050,6 +1103,44 @@ def _emit_insert_batch(
     )
 
 
+def _close_streaming_cursor(cursor: Any) -> None:
+    close = getattr(cursor, "close", None)
+    if not callable(close):
+        return
+    try:
+        close()
+    except Exception as error:
+        raise MySqlBackupError(
+            "streaming database cursor could not be closed safely"
+        ) from error
+
+
+def _abandon_failed_stream(connection: _Connection, cursor: Any) -> None:
+    """Best-effort cleanup that must never replace the primary stream error."""
+
+    # PyMySQL's SSCursor tries to drain an unfinished result during close().
+    # If the tunnel has already failed, that cleanup can raise an AttributeError
+    # from a missing socket and mask the OperationalError that caused the dump
+    # to fail. Close the owning connection first and detach the unbuffered
+    # result before invoking cursor cleanup.
+    try:
+        connection.close()
+    except Exception:
+        pass
+    for attribute in ("_result", "connection"):
+        try:
+            if hasattr(cursor, attribute):
+                setattr(cursor, attribute, None)
+        except Exception:
+            pass
+    close = getattr(cursor, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            pass
+
+
 def _dump_table(
     connection: _Connection,
     definition: TableDefinition,
@@ -1068,7 +1159,8 @@ def _dump_table(
     row_count = 0
     pending_rows: list[str] = []
     pending_bytes = 0
-    with connection.cursor(*cursor_args) as cursor:
+    cursor = connection.cursor(*cursor_args)
+    try:
         columns = list(definition.insert_columns)
         projection = (
             ",".join(quote_identifier(column) for column in columns) if columns else "1"
@@ -1116,6 +1208,11 @@ def _dump_table(
             columns=columns,
             rows=pending_rows,
         )
+    except BaseException:
+        _abandon_failed_stream(connection, cursor)
+        raise
+    else:
+        _close_streaming_cursor(cursor)
     table_writer.write("\n")
     return {
         "name": definition.name,

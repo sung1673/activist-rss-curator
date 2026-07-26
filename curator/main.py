@@ -92,8 +92,24 @@ def log_stage(stage: str, started_at: float, **details: object) -> int:
     return elapsed_ms
 
 
+def _summary_metric_int(value: object) -> int:
+    if value is None or value == "":
+        return 0
+    if isinstance(value, (str, bytes, bytearray, int, float)):
+        return int(value)
+    raise TypeError("run metric must be numeric")
+
+
+def _github_run_identity(environment_name: str) -> int | None:
+    value = os.environ.get(environment_name, "").strip()
+    if not value or not value.isascii() or not value.isdigit():
+        return None
+    identity = int(value)
+    return identity if identity > 0 else None
+
+
 def summary_has_operational_failure(summary: dict[str, object]) -> bool:
-    return any(int(summary.get(key) or 0) > 0 for key in FAILURE_KEYS)
+    return any(_summary_metric_int(summary.get(key)) > 0 for key in FAILURE_KEYS)
 
 
 def write_run_metrics(
@@ -102,8 +118,16 @@ def write_run_metrics(
     destination = os.environ.get("CURATOR_RUN_METRICS_PATH", "").strip()
     if not destination:
         return
+    failure_metrics = {
+        key: _summary_metric_int(summary.get(key))
+        for key in FAILURE_KEYS
+    }
     payload = {
         **summary,
+        **failure_metrics,
+        "code_revision": os.environ.get("GITHUB_SHA", "").strip(),
+        "github_run_id": _github_run_identity("GITHUB_RUN_ID"),
+        "github_run_attempt": _github_run_identity("GITHUB_RUN_ATTEMPT"),
         "ok": bool(ok),
         "status": "complete" if ok else "failed",
     }

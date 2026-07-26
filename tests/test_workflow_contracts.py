@@ -905,6 +905,13 @@ def test_pages_deployment_retries_one_immutable_artifact_three_times(
         assert (
             steps.index(build_feed) < steps.index(verify_metrics) < steps.index(metrics)
         )
+        daily_report = next(
+            step for step in steps if step["name"] == "Build daily report page"
+        )
+        assert daily_report["env"]["CURATOR_RUN_METRICS_PATH"] == (
+            "${{ runner.temp }}/curator-run-metrics.json"
+        )
+        assert steps.index(verify_metrics) < steps.index(daily_report)
         assert payload["permissions"]["actions"] == "read"
         restore = next(
             step

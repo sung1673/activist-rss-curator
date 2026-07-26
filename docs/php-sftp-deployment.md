@@ -241,6 +241,72 @@ rollback을 시작하기 직전의 현재 파일도 별도 `pre-rollback-*` emer
 emergency backup을 별도 recovery workspace에서 자동 복원한다. DB,
 SourceRight, 감사·정정 데이터는 삭제하거나 되돌리지 않는다.
 
+## Gabia 운영 호환 경로
+
+Gabia 운영 서버에서는 일반 SFTP exclusive-create가 빈 파일을 만든 뒤 쓰기 단계에서
+실패하는 것이 확인됐다. 운영 배포와 rollback에는 다음 explicit opt-in을 추가한다.
+
+```powershell
+$env:BSIDE_CORE_RELEASE_SHA = $releaseSha
+
+python scripts/deploy_php_sftp.py deploy `
+  --local-root deploy/activist `
+  --expected-sha $releaseSha `
+  --confirm-production-write $releaseSha `
+  --gabia-core-compatibility-host alignpartnerscap.com `
+  --remote-root /www_root/activist `
+  --public-url-root https://alignpe.gabia.io/activist `
+  --api-v2-base-url https://alignpe.gabia.io/activist/api.php/api/v2 `
+  --rollback-health-url 'https://alignpe.gabia.io/activist/api.php?action=health' `
+  --protected-token-env BSIDE_OPS_TOKEN
+```
+
+이 경로는 SSH host, pinned fingerprint, legacy RSA 예외 host, document root,
+public/API/rollback URL이 코드에 고정된 운영값과 모두 일치할 때만 활성화된다.
+또한 배포 checkout 전체가 clean이고 Git HEAD, manifest, `--expected-sha`,
+`--confirm-production-write`, `BSIDE_CORE_RELEASE_SHA`가 모두 같은 40자리 SHA여야
+한다. SHA는 코드에 하드코딩하지 않는다.
+
+활성화 전에 실제 서버에서 exclusive-create 실패 형태, mode `0700` private claim,
+write/readback, target-absent standard rename, 기존 target no-replace를 매번 다시
+검증한다. 기존 `_private/.htaccess`는 변경하지 않고 byte와 mode를 배포 전후에
+확인한다. Gabia의 private 차단 응답은 HTTP 403/404 또는 exact HTTP 302
+`Location: http://errdoc.gabia.io/403.html`만 허용한다.
+
+OPcache probe는 extension·함수·INI·status 타입을 검증한다. OPcache가 실제로
+비활성 상태이면 `disabled_verified`, 활성 상태에서 reset이 정확히 성공한 경우에만
+`reset_verified`를 기록한다. 이 호환 경로는 config 또는 token을 생성·회전하지
+않으며 기존 core `deployment-lock` 하나만 사용한다.
+
+실제 Gabia rollback은 복원할 backup ID와 현재 배포 SHA를 각각 명령행과 환경
+변수로 이중 확인한다.
+
+```powershell
+$rollbackReleaseId = '<verified-backup-release-id>'
+$currentReleaseSha = '<current-40-character-release-sha>'
+$env:BSIDE_CORE_ROLLBACK_RELEASE_ID = $rollbackReleaseId
+$env:BSIDE_CORE_ROLLBACK_CURRENT_SHA = $currentReleaseSha
+
+python scripts/deploy_php_sftp.py rollback `
+  --release-id $rollbackReleaseId `
+  --confirm-rollback-release-id $rollbackReleaseId `
+  --expected-current-sha $currentReleaseSha `
+  --confirm-rollback-current-sha $currentReleaseSha `
+  --gabia-core-compatibility-host alignpartnerscap.com `
+  --remote-root /www_root/activist `
+  --public-url-root https://alignpe.gabia.io/activist `
+  --api-v2-base-url https://alignpe.gabia.io/activist/api.php/api/v2 `
+  --rollback-health-url 'https://alignpe.gabia.io/activist/api.php?action=health' `
+  --protected-token-env BSIDE_OPS_TOKEN
+```
+
+확인값 불일치는 SSH 연결과 원격 capability probe 전에 중단한다. 확인값이 맞아도
+원격 manifest와 core 파일에서 검증한 현재 SHA가 다르면 probe와 rollback을 시작하지
+않는다. deploy와 rollback은 `finally`에서 기존 `_private/.htaccess`의 exact bytes와
+mode를 다시 검사하며 drift가 있으면 core 작업 자체가 성공했더라도 성공을 반환하지
+않는다. dry-run은 원격 capability probe를 만들지 않으므로 Gabia opt-in과 함께
+실행할 수 없다.
+
 ## 실패 후 운영 확인
 
 - stale `deployment-lock`을 자동으로 깨지 않는다. 실행 중인 배포가 없음을 별도

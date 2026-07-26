@@ -13,7 +13,7 @@ import stat
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
@@ -44,6 +44,9 @@ RELEASE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{7,95}$")
 ENVIRONMENT_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 OPCACHE_PROBE_NAME_PATTERN = re.compile(
     r"^\.bside-opcache-([0-9a-f]{64})\.php$"
+)
+EXCLUSIVE_CLAIM_NAME_PATTERN = re.compile(
+    r"^\.bside-exclusive-claim-([0-9a-f]{64})$"
 )
 PRIVATE_CANARY_NAME_PATTERN = re.compile(
     r"^\.bside-private-canary-([0-9a-f]{64})\.txt$"
@@ -79,6 +82,23 @@ STAGE_DENY_RULES = (
     b"</IfModule>\n"
 )
 PRIVATE_ROOT_DENY_RULES = STAGE_DENY_RULES
+MAX_PRIVATE_POLICY_BYTES = 256 * 1024
+CORE_RELEASE_CONFIRMATION_ENV = "BSIDE_CORE_RELEASE_SHA"
+CORE_ROLLBACK_RELEASE_ID_ENV = "BSIDE_CORE_ROLLBACK_RELEASE_ID"
+CORE_ROLLBACK_CURRENT_SHA_ENV = "BSIDE_CORE_ROLLBACK_CURRENT_SHA"
+GABIA_COMPATIBILITY_SSH_HOST = "alignpartnerscap.com"
+GABIA_SSH_HOST_KEY_SHA256 = (
+    "SHA256:4Y2J13Nis0NOKupLJCOnr2w5X2UdBZH78TkZMVJCVLo"
+)
+GABIA_REMOTE_ROOT = "/www_root/activist"
+GABIA_PUBLIC_URL_ROOT = "https://alignpe.gabia.io/activist"
+GABIA_API_V2_BASE_URL = (
+    "https://alignpe.gabia.io/activist/api.php/api/v2"
+)
+GABIA_ROLLBACK_HEALTH_URL = (
+    "https://alignpe.gabia.io/activist/api.php?action=health"
+)
+GABIA_PRIVATE_DENY_REDIRECT = "http://errdoc.gabia.io/403.html"
 
 
 class PhpDeploymentError(RuntimeError):
@@ -101,6 +121,8 @@ class SftpClient(Protocol):
     def remove(self, path: str) -> None: ...
 
     def rmdir(self, path: str) -> None: ...
+
+    def rename(self, oldpath: str, newpath: str) -> None: ...
 
     def posix_rename(self, oldpath: str, newpath: str) -> None: ...
 
@@ -168,6 +190,45 @@ HttpRequester = Callable[
     [str, str, Mapping[str, str], float],
     HttpResponse,
 ]
+
+
+class ExclusiveBytesWriter(Protocol):
+    def __call__(
+        self,
+        client: SftpClient,
+        path: str,
+        content: bytes,
+        *,
+        mode: int,
+    ) -> None: ...
+
+
+@dataclass(frozen=True)
+class GabiaCompatibilityEvidence:
+    exclusive_writer_incompatible: bool
+    private_mode_0700_directory: bool
+    write_readback_verified: bool
+    absent_target_rename_verified: bool
+    no_replace_collision_verified: bool
+    probe_residue_absent: bool
+
+
+@dataclass(frozen=True)
+class GabiaCoreCompatibility:
+    """Runtime-bound evidence for the one supported Gabia deployment."""
+
+    client: SftpClient
+    ssh_host: str
+    ssh_host_key_sha256: str
+    remote_root: str
+    public_url_root: str
+    api_v2_base_url: str
+    rollback_health_url: str
+    current_release_sha: str | None
+    private_policy: bytes = field(repr=False)
+    private_policy_mode: int
+    evidence: GabiaCompatibilityEvidence
+    exclusive_writer: ExclusiveBytesWriter
 
 
 def _safe_relative_path(value: str) -> str:
@@ -322,11 +383,24 @@ def _git_output(repository: Path, arguments: Sequence[str]) -> bytes:
     return completed.stdout
 
 
-def verify_release_checkout(plan: LocalDeploymentPlan) -> None:
+def verify_release_checkout(
+    plan: LocalDeploymentPlan,
+    *,
+    require_repository_clean: bool = False,
+) -> None:
     repository = _find_repository_root(plan.local_root)
     head = _git_output(repository, ("rev-parse", "HEAD")).decode("ascii").strip()
     if head != plan.code_revision:
         raise PhpDeploymentError("release checkout HEAD does not match the manifest")
+    if require_repository_clean:
+        status = _git_output(
+            repository,
+            ("status", "--porcelain=v1", "--untracked-files=all"),
+        )
+        if status:
+            raise PhpDeploymentError(
+                "production release checkout is not clean"
+            )
     relative_root = plan.local_root.relative_to(repository)
     tracked_paths = [
         (relative_root / artifact.relative_path).as_posix()
@@ -341,6 +415,61 @@ def verify_release_checkout(plan: LocalDeploymentPlan) -> None:
         raise PhpDeploymentError("release artifacts contain tracked modifications")
     for tracked_path in tracked_paths:
         _git_output(repository, ("ls-files", "--error-unmatch", "--", tracked_path))
+
+
+def confirm_production_release(
+    expected_sha: str,
+    confirmation: object,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> None:
+    """Require independent argument and environment confirmation."""
+
+    if SHA1_PATTERN.fullmatch(expected_sha) is None:
+        raise PhpDeploymentError("production release SHA is invalid")
+    environment = os.environ if environ is None else environ
+    environment_confirmation = environment.get(
+        CORE_RELEASE_CONFIRMATION_ENV
+    )
+    if (
+        not isinstance(confirmation, str)
+        or confirmation != expected_sha
+        or environment_confirmation != expected_sha
+    ):
+        raise PhpDeploymentError(
+            "production release confirmation does not match"
+        )
+
+
+def confirm_production_rollback(
+    release_id: str,
+    release_id_confirmation: object,
+    expected_current_sha: str,
+    current_sha_confirmation: object,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> None:
+    """Bind a mutating rollback to one backup and current release."""
+
+    safe_release_id = _validate_release_id(release_id)
+    if SHA1_PATTERN.fullmatch(expected_current_sha) is None:
+        raise PhpDeploymentError(
+            "rollback current release SHA is invalid"
+        )
+    environment = os.environ if environ is None else environ
+    if (
+        not isinstance(release_id_confirmation, str)
+        or release_id_confirmation != safe_release_id
+        or environment.get(CORE_ROLLBACK_RELEASE_ID_ENV)
+        != safe_release_id
+        or not isinstance(current_sha_confirmation, str)
+        or current_sha_confirmation != expected_current_sha
+        or environment.get(CORE_ROLLBACK_CURRENT_SHA_ENV)
+        != expected_current_sha
+    ):
+        raise PhpDeploymentError(
+            "production rollback confirmation does not match"
+        )
 
 
 def _boolean_environment(value: str | None, *, label: str) -> bool:
@@ -708,6 +837,626 @@ def _write_remote_exclusive_bytes(
     if isinstance(operation_error, PhpDeploymentError):
         raise operation_error
     raise PhpDeploymentError("exclusive remote upload failed") from operation_error
+
+
+def _regular_file_identity_matches(
+    client: SftpClient,
+    path: str,
+    content: bytes,
+    *,
+    mode: int,
+) -> bool:
+    attributes = _lstat_or_none(client, path)
+    if attributes is None:
+        return False
+    current_mode = _mode(attributes)
+    if (
+        stat.S_ISLNK(current_mode)
+        or not stat.S_ISREG(current_mode)
+        or stat.S_IMODE(current_mode) != mode
+    ):
+        return False
+    try:
+        actual = _read_remote_bytes(client, path)
+    except Exception:
+        return False
+    return secrets.compare_digest(
+        _sha256_bytes(actual),
+        _sha256_bytes(content),
+    )
+
+
+def _write_wb_and_verify(
+    client: SftpClient,
+    path: str,
+    content: bytes,
+    *,
+    mode: int,
+) -> None:
+    if _lstat_or_none(client, path) is not None:
+        raise PhpDeploymentError(
+            "compatibility staging target unexpectedly exists"
+        )
+    try:
+        with client.open(path, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+        client.chmod(path, mode)
+    except OSError as error:
+        raise PhpDeploymentError(
+            "compatibility staging write failed"
+        ) from error
+    if not _regular_file_identity_matches(
+        client,
+        path,
+        content,
+        mode=mode,
+    ):
+        raise PhpDeploymentError(
+            "compatibility staging readback did not match"
+        )
+
+
+def _standard_no_replace_rename(
+    client: SftpClient,
+    source: str,
+    target: str,
+) -> None:
+    rename = getattr(client, "rename", None)
+    if not callable(rename):
+        raise PhpDeploymentError(
+            "standard SFTP rename capability is unavailable"
+        )
+    try:
+        rename(source, target)
+    except OSError:
+        raise
+    except Exception as error:
+        raise PhpDeploymentError(
+            "standard SFTP rename capability failed"
+        ) from error
+
+
+def _claim_directory_path(parent: str) -> str:
+    filename = f".bside-exclusive-claim-{secrets.token_hex(32)}"
+    if EXCLUSIVE_CLAIM_NAME_PATTERN.fullmatch(filename) is None:
+        raise PhpDeploymentError(
+            "compatibility claim directory name is invalid"
+        )
+    return _remote_join(parent, filename)
+
+
+def _create_private_claim_directory(
+    client: SftpClient,
+    parent: str,
+) -> str:
+    safe_parent = _remote_absolute_path(parent, label="claim parent")
+    _require_remote_directory(client, safe_parent, create=False)
+    claim_path = _claim_directory_path(safe_parent)
+    if _lstat_or_none(client, claim_path) is not None:
+        raise PhpDeploymentError(
+            "compatibility claim directory unexpectedly exists"
+        )
+    try:
+        client.mkdir(claim_path, mode=PRIVATE_DIRECTORY_MODE)
+    except OSError as error:
+        raise PhpDeploymentError(
+            "compatibility claim directory creation failed"
+        ) from error
+    attributes = _lstat_or_none(client, claim_path)
+    if attributes is None:
+        raise PhpDeploymentError(
+            "compatibility claim directory was not created"
+        )
+    current_mode = _mode(attributes)
+    if (
+        stat.S_ISLNK(current_mode)
+        or not stat.S_ISDIR(current_mode)
+        or stat.S_IMODE(current_mode) != PRIVATE_DIRECTORY_MODE
+    ):
+        try:
+            client.rmdir(claim_path)
+        except OSError as error:
+            raise PhpDeploymentError(
+                "non-private compatibility claim cleanup failed"
+            ) from error
+        if _lstat_or_none(client, claim_path) is not None:
+            raise PhpDeploymentError(
+                "non-private compatibility claim cleanup was not durable"
+            )
+        raise PhpDeploymentError(
+            "compatibility claim directory is not private"
+        )
+    return claim_path
+
+
+def _remove_claim_file_if_present(
+    client: SftpClient,
+    *,
+    claim_path: str,
+    file_path: str,
+) -> None:
+    attributes = _lstat_or_none(client, file_path)
+    if attributes is None:
+        return
+    claim_attributes = _lstat_or_none(client, claim_path)
+    if claim_attributes is None:
+        raise PhpDeploymentError(
+            "compatibility claim ownership cannot be proven"
+        )
+    claim_mode = _mode(claim_attributes)
+    file_mode = _mode(attributes)
+    if (
+        stat.S_ISLNK(claim_mode)
+        or not stat.S_ISDIR(claim_mode)
+        or stat.S_IMODE(claim_mode) != PRIVATE_DIRECTORY_MODE
+        or stat.S_ISLNK(file_mode)
+        or not stat.S_ISREG(file_mode)
+        or posixpath.dirname(file_path) != claim_path
+    ):
+        raise PhpDeploymentError(
+            "compatibility staging ownership cannot be proven"
+        )
+    try:
+        client.remove(file_path)
+    except OSError as error:
+        raise PhpDeploymentError(
+            "compatibility staging cleanup failed"
+        ) from error
+    if _lstat_or_none(client, file_path) is not None:
+        raise PhpDeploymentError(
+            "compatibility staging cleanup was not durable"
+        )
+
+
+def _remove_claim_directory(
+    client: SftpClient,
+    claim_path: str,
+) -> None:
+    attributes = _lstat_or_none(client, claim_path)
+    if attributes is None:
+        return
+    current_mode = _mode(attributes)
+    if (
+        stat.S_ISLNK(current_mode)
+        or not stat.S_ISDIR(current_mode)
+        or stat.S_IMODE(current_mode) != PRIVATE_DIRECTORY_MODE
+    ):
+        raise PhpDeploymentError(
+            "compatibility claim ownership cannot be proven"
+        )
+    try:
+        client.rmdir(claim_path)
+    except OSError as error:
+        raise PhpDeploymentError(
+            "compatibility claim cleanup failed"
+        ) from error
+    if _lstat_or_none(client, claim_path) is not None:
+        raise PhpDeploymentError(
+            "compatibility claim cleanup was not durable"
+        )
+
+
+def _remove_exact_file_if_present(
+    client: SftpClient,
+    path: str,
+    content: bytes,
+    *,
+    mode: int,
+) -> None:
+    if _lstat_or_none(client, path) is None:
+        return
+    if not _regular_file_identity_matches(
+        client,
+        path,
+        content,
+        mode=mode,
+    ):
+        raise PhpDeploymentError(
+            "compatibility target ownership cannot be proven"
+        )
+    try:
+        client.remove(path)
+    except OSError as error:
+        raise PhpDeploymentError(
+            "compatibility target cleanup failed"
+        ) from error
+    if _lstat_or_none(client, path) is not None:
+        raise PhpDeploymentError(
+            "compatibility target cleanup was not durable"
+        )
+
+
+def _gabia_compatibility_writer(
+    bound_client: SftpClient,
+    *,
+    allowed_root: str,
+) -> ExclusiveBytesWriter:
+    safe_allowed_root = _remote_absolute_path(
+        allowed_root,
+        label="compatibility root",
+    )
+
+    def write(
+        client: SftpClient,
+        path: str,
+        content: bytes,
+        *,
+        mode: int,
+    ) -> None:
+        if client is not bound_client:
+            raise PhpDeploymentError(
+                "compatibility writer is bound to a different SFTP session"
+            )
+        if not isinstance(content, bytes) or mode < 0 or mode > 0o777:
+            raise PhpDeploymentError(
+                "compatibility writer input is invalid"
+            )
+        safe_path = _remote_absolute_path(path, label="exclusive target")
+        if not safe_path.startswith(safe_allowed_root + "/"):
+            raise PhpDeploymentError(
+                "compatibility target escapes the deployment root"
+            )
+        parent = posixpath.dirname(safe_path)
+        _require_remote_directory(client, parent, create=False)
+        if _lstat_or_none(client, safe_path) is not None:
+            raise PhpDeploymentError(
+                "exclusive remote target already exists"
+            )
+
+        claim_path = _create_private_claim_directory(client, parent)
+        stage_path = _remote_join(claim_path, "payload.blob")
+        committed = False
+        operation_error: BaseException | None = None
+        cleanup_errors: list[BaseException] = []
+        try:
+            _write_wb_and_verify(
+                client,
+                stage_path,
+                content,
+                mode=mode,
+            )
+            if _lstat_or_none(client, safe_path) is not None:
+                raise PhpDeploymentError(
+                    "exclusive remote target appeared before commit"
+                )
+            _standard_no_replace_rename(client, stage_path, safe_path)
+            committed = True
+            if _lstat_or_none(client, stage_path) is not None:
+                raise PhpDeploymentError(
+                    "compatibility rename left its staging file"
+                )
+            if not _regular_file_identity_matches(
+                client,
+                safe_path,
+                content,
+                mode=mode,
+            ):
+                raise PhpDeploymentError(
+                    "compatibility committed file did not match"
+                )
+            _remove_claim_directory(client, claim_path)
+            return
+        except BaseException as error:
+            operation_error = error
+
+        target_is_ours = (
+            committed
+            and _regular_file_identity_matches(
+                client,
+                safe_path,
+                content,
+                mode=mode,
+            )
+            and _lstat_or_none(client, stage_path) is None
+        )
+        if target_is_ours:
+            try:
+                _remove_exact_file_if_present(
+                    client,
+                    safe_path,
+                    content,
+                    mode=mode,
+                )
+            except BaseException as error:
+                cleanup_errors.append(error)
+        try:
+            _remove_claim_file_if_present(
+                client,
+                claim_path=claim_path,
+                file_path=stage_path,
+            )
+        except BaseException as error:
+            cleanup_errors.append(error)
+        try:
+            _remove_claim_directory(client, claim_path)
+        except BaseException as error:
+            cleanup_errors.append(error)
+        if cleanup_errors:
+            raise PhpDeploymentError(
+                "compatibility upload failed and cleanup did not complete"
+            ) from cleanup_errors[-1]
+        if isinstance(operation_error, PhpDeploymentError):
+            raise operation_error
+        raise PhpDeploymentError(
+            "compatibility exclusive upload failed"
+        ) from operation_error
+
+    return write
+
+
+def _is_confirmed_gabia_exclusive_writer_error(error: OSError) -> bool:
+    return (
+        type(error) is OSError
+        and getattr(error, "errno", None) is None
+        and getattr(error, "code", None) is None
+        and error.args == ("File not open for writing",)
+        and str(error) == "File not open for writing"
+    )
+
+
+def _probe_gabia_sftp_capabilities(
+    client: SftpClient,
+    *,
+    private_root: str,
+) -> GabiaCompatibilityEvidence:
+    safe_private_root = _remote_absolute_path(
+        private_root,
+        label="private root",
+    )
+    _require_remote_directory(client, safe_private_root, create=False)
+    probe_name = f".bside-exclusive-x-probe-{secrets.token_hex(32)}.blob"
+    probe_path = _remote_join(safe_private_root, probe_name)
+    probe_content = b"bside-exclusive-writer-capability-probe"
+    if _lstat_or_none(client, probe_path) is not None:
+        raise PhpDeploymentError(
+            "exclusive-writer probe path unexpectedly exists"
+        )
+    handle_opened = False
+    write_attempted = False
+    write_completed = False
+    operation_error: BaseException | None = None
+    try:
+        handle = client.open(probe_path, "x")
+        handle_opened = True
+        with handle:
+            write_attempted = True
+            handle.write(probe_content)
+            write_completed = True
+            handle.flush()
+        client.chmod(probe_path, PRIVATE_FILE_MODE)
+    except BaseException as error:
+        operation_error = error
+
+    exclusive_writer_incompatible = False
+    if handle_opened:
+        attributes = _lstat_or_none(client, probe_path)
+        if attributes is None:
+            raise PhpDeploymentError(
+                "exclusive-writer handle left no attributable probe file"
+            ) from operation_error
+        current_mode = _mode(attributes)
+        residue_matches_gabia = (
+            write_attempted
+            and not write_completed
+            and isinstance(operation_error, OSError)
+            and _is_confirmed_gabia_exclusive_writer_error(
+                operation_error
+            )
+            and not stat.S_ISLNK(current_mode)
+            and stat.S_ISREG(current_mode)
+            and getattr(attributes, "st_size", None) == 0
+            and stat.S_IMODE(current_mode) == DEFAULT_FILE_MODE
+            and _read_remote_bytes(
+                client,
+                probe_path,
+                maximum_bytes=1,
+            )
+            == b""
+        )
+        if residue_matches_gabia:
+            _remove_exact_file_if_present(
+                client,
+                probe_path,
+                b"",
+                mode=DEFAULT_FILE_MODE,
+            )
+            exclusive_writer_incompatible = True
+            operation_error = None
+        if operation_error is not None:
+            raise PhpDeploymentError(
+                "exclusive-writer capability probe failed"
+            ) from operation_error
+        if not exclusive_writer_incompatible:
+            _remove_exact_file_if_present(
+                client,
+                probe_path,
+                probe_content,
+                mode=PRIVATE_FILE_MODE,
+            )
+            raise PhpDeploymentError(
+                "exclusive-writer compatibility is not required"
+            )
+    if operation_error is not None:
+        raise PhpDeploymentError(
+            "exclusive-writer capability probe failed"
+        ) from operation_error
+    if not exclusive_writer_incompatible:
+        raise PhpDeploymentError(
+            "exclusive-writer incompatibility was not established"
+        )
+    if _lstat_or_none(client, probe_path) is not None:
+        raise PhpDeploymentError(
+            "exclusive-writer probe produced unattributed remote residue"
+        )
+
+    claim_path = _create_private_claim_directory(
+        client,
+        safe_private_root,
+    )
+    probe_identity = secrets.token_hex(32)
+    source_path = _remote_join(claim_path, "rename-source.blob")
+    target_path = _remote_join(
+        safe_private_root,
+        f".bside-cross-dir-target-{probe_identity}.blob",
+    )
+    collision_source = _remote_join(
+        claim_path,
+        "collision-source.blob",
+    )
+    collision_target = _remote_join(
+        safe_private_root,
+        f".bside-cross-dir-collision-{probe_identity}.blob",
+    )
+    source_content = b"bside-standard-rename-source"
+    collision_source_content = b"bside-collision-source"
+    collision_target_content = b"bside-collision-target"
+    capability_error: BaseException | None = None
+    cleanup_errors: list[BaseException] = []
+    evidence: GabiaCompatibilityEvidence | None = None
+    try:
+        try:
+            client.mkdir(claim_path, mode=PRIVATE_DIRECTORY_MODE)
+        except OSError:
+            pass
+        else:
+            raise PhpDeploymentError(
+                "claim directory creation is not exclusive"
+            )
+        _write_wb_and_verify(
+            client,
+            source_path,
+            source_content,
+            mode=PRIVATE_FILE_MODE,
+        )
+        _standard_no_replace_rename(client, source_path, target_path)
+        if (
+            _lstat_or_none(client, source_path) is not None
+            or not _regular_file_identity_matches(
+                client,
+                target_path,
+                source_content,
+                mode=PRIVATE_FILE_MODE,
+            )
+        ):
+            raise PhpDeploymentError(
+                "target-absent standard rename did not match"
+            )
+        _write_wb_and_verify(
+            client,
+            collision_source,
+            collision_source_content,
+            mode=PRIVATE_FILE_MODE,
+        )
+        _write_wb_and_verify(
+            client,
+            collision_target,
+            collision_target_content,
+            mode=PRIVATE_FILE_MODE,
+        )
+        try:
+            _standard_no_replace_rename(
+                client,
+                collision_source,
+                collision_target,
+            )
+        except OSError:
+            pass
+        else:
+            raise PhpDeploymentError(
+                "standard rename can replace an existing target"
+            )
+        if (
+            not _regular_file_identity_matches(
+                client,
+                collision_source,
+                collision_source_content,
+                mode=PRIVATE_FILE_MODE,
+            )
+            or not _regular_file_identity_matches(
+                client,
+                collision_target,
+                collision_target_content,
+                mode=PRIVATE_FILE_MODE,
+            )
+        ):
+            raise PhpDeploymentError(
+                "rename collision did not preserve both files"
+            )
+        evidence = GabiaCompatibilityEvidence(
+            exclusive_writer_incompatible=True,
+            private_mode_0700_directory=True,
+            write_readback_verified=True,
+            absent_target_rename_verified=True,
+            no_replace_collision_verified=True,
+            probe_residue_absent=True,
+        )
+    except BaseException as error:
+        capability_error = error
+    finally:
+        for claim_file in (source_path, collision_source):
+            try:
+                _remove_claim_file_if_present(
+                    client,
+                    claim_path=claim_path,
+                    file_path=claim_file,
+                )
+            except BaseException as error:
+                cleanup_errors.append(error)
+        for target, possible_contents in (
+            (target_path, (source_content,)),
+            (
+                collision_target,
+                (collision_target_content, collision_source_content),
+            ),
+        ):
+            try:
+                if _lstat_or_none(client, target) is None:
+                    continue
+                matching_content = next(
+                    (
+                        candidate
+                        for candidate in possible_contents
+                        if _regular_file_identity_matches(
+                            client,
+                            target,
+                            candidate,
+                            mode=PRIVATE_FILE_MODE,
+                        )
+                    ),
+                    None,
+                )
+                if matching_content is None:
+                    raise PhpDeploymentError(
+                        "SFTP capability probe target ownership is unclear"
+                    )
+                _remove_exact_file_if_present(
+                    client,
+                    target,
+                    matching_content,
+                    mode=PRIVATE_FILE_MODE,
+                )
+            except BaseException as error:
+                cleanup_errors.append(error)
+        try:
+            _remove_claim_directory(client, claim_path)
+        except BaseException as error:
+            cleanup_errors.append(error)
+    if cleanup_errors:
+        raise PhpDeploymentError(
+            "SFTP capability probe cleanup did not complete"
+        ) from cleanup_errors[-1]
+    if capability_error is not None:
+        if isinstance(capability_error, PhpDeploymentError):
+            raise capability_error
+        raise PhpDeploymentError(
+            "SFTP capability probe failed"
+        ) from capability_error
+    if evidence is None:
+        raise PhpDeploymentError(
+            "SFTP capability probe did not produce evidence"
+        )
+    return evidence
 
 
 def _remove_remote_file_if_present(client: SftpClient, path: str) -> None:
@@ -1323,7 +2072,12 @@ def _acquire_deployment_lock(
     return lock_path
 
 
-def _release_deployment_lock(client: SftpClient, lock_path: str) -> None:
+def _release_deployment_lock(
+    client: SftpClient,
+    lock_path: str,
+    *,
+    exclusive_writer: ExclusiveBytesWriter | None = None,
+) -> None:
     owner_path = _remote_join(lock_path, "owner.json")
     owner_attributes = _lstat_or_none(client, owner_path)
     if owner_attributes is None:
@@ -1341,7 +2095,12 @@ def _release_deployment_lock(client: SftpClient, lock_path: str) -> None:
         client.rmdir(lock_path)
     except OSError as error:
         try:
-            _write_remote_exclusive_bytes(
+            writer = (
+                _write_remote_exclusive_bytes
+                if exclusive_writer is None
+                else exclusive_writer
+            )
+            writer(
                 client,
                 owner_path,
                 owner_content,
@@ -1607,6 +2366,199 @@ def validate_http_endpoint_binding(
             )
 
 
+def _validate_gabia_core_binding(
+    compatibility: GabiaCoreCompatibility,
+    *,
+    client: SftpClient,
+    remote_root: str,
+    public_url_root: str,
+    api_v2_base_url: str,
+    rollback_health_url: str,
+) -> None:
+    evidence = compatibility.evidence
+    if (
+        compatibility.client is not client
+        or compatibility.ssh_host != GABIA_COMPATIBILITY_SSH_HOST
+        or compatibility.ssh_host_key_sha256
+        != GABIA_SSH_HOST_KEY_SHA256
+        or remote_root != GABIA_REMOTE_ROOT
+        or compatibility.remote_root != GABIA_REMOTE_ROOT
+        or public_url_root != GABIA_PUBLIC_URL_ROOT
+        or compatibility.public_url_root != GABIA_PUBLIC_URL_ROOT
+        or api_v2_base_url != GABIA_API_V2_BASE_URL
+        or compatibility.api_v2_base_url != GABIA_API_V2_BASE_URL
+        or rollback_health_url != GABIA_ROLLBACK_HEALTH_URL
+        or compatibility.rollback_health_url
+        != GABIA_ROLLBACK_HEALTH_URL
+        or (
+            compatibility.current_release_sha is not None
+            and SHA1_PATTERN.fullmatch(
+                compatibility.current_release_sha
+            )
+            is None
+        )
+        or compatibility.private_policy_mode < 0
+        or compatibility.private_policy_mode > 0o7777
+        or not compatibility.private_policy
+        or len(compatibility.private_policy) > MAX_PRIVATE_POLICY_BYTES
+        or not callable(compatibility.exclusive_writer)
+        or not all(
+            (
+                evidence.exclusive_writer_incompatible,
+                evidence.private_mode_0700_directory,
+                evidence.write_readback_verified,
+                evidence.absent_target_rename_verified,
+                evidence.no_replace_collision_verified,
+                evidence.probe_residue_absent,
+            )
+        )
+    ):
+        raise PhpDeploymentError(
+            "Gabia core compatibility binding does not match"
+        )
+
+
+def _verify_gabia_private_policy(
+    client: SftpClient,
+    compatibility: GabiaCoreCompatibility,
+) -> None:
+    deny_path = _remote_join(
+        _remote_join(compatibility.remote_root, "_private"),
+        ".htaccess",
+    )
+    if not _regular_file_identity_matches(
+        client,
+        deny_path,
+        compatibility.private_policy,
+        mode=compatibility.private_policy_mode,
+    ):
+        raise PhpDeploymentError(
+            "Gabia private HTTP policy preservation check failed"
+        )
+
+
+def prepare_gabia_core_compatibility(
+    client: SftpClient,
+    *,
+    ssh_options: SshTunnelOptions,
+    compatibility_host: str,
+    remote_root: str,
+    public_url_root: str,
+    api_v2_base_url: str,
+    rollback_health_url: str,
+    expected_current_sha: str | None = None,
+) -> GabiaCoreCompatibility:
+    """Probe the exact Gabia server and bind a fallback to this session."""
+
+    if (
+        compatibility_host != GABIA_COMPATIBILITY_SSH_HOST
+        or ssh_options.host != GABIA_COMPATIBILITY_SSH_HOST
+        or not secrets.compare_digest(
+            compatibility_host,
+            ssh_options.host,
+        )
+        or remote_root != GABIA_REMOTE_ROOT
+        or public_url_root != GABIA_PUBLIC_URL_ROOT
+        or api_v2_base_url != GABIA_API_V2_BASE_URL
+        or rollback_health_url != GABIA_ROLLBACK_HEALTH_URL
+    ):
+        raise PhpDeploymentError(
+            "Gabia core compatibility target does not match"
+        )
+    try:
+        fingerprint = normalize_ssh_host_key_sha256(
+            ssh_options.host_key_sha256
+        )
+        legacy_allowed = legacy_ssh_rsa_sha1_is_allowed(ssh_options)
+    except Exception as error:
+        raise PhpDeploymentError(
+            "pinned Gabia SSH security policy is invalid"
+        ) from error
+    if (
+        fingerprint != GABIA_SSH_HOST_KEY_SHA256
+        or ssh_options.host_key_sha256 != GABIA_SSH_HOST_KEY_SHA256
+        or legacy_allowed is not True
+        or ssh_options.allow_legacy_ssh_rsa_sha1 is not True
+        or ssh_options.legacy_ssh_rsa_sha1_host
+        != GABIA_COMPATIBILITY_SSH_HOST
+    ):
+        raise PhpDeploymentError(
+            "pinned Gabia SSH security policy does not match"
+        )
+    if (
+        expected_current_sha is not None
+        and SHA1_PATTERN.fullmatch(expected_current_sha) is None
+    ):
+        raise PhpDeploymentError(
+            "expected current Gabia release SHA is invalid"
+        )
+
+    private_root = _remote_join(GABIA_REMOTE_ROOT, "_private")
+    _require_remote_directory(client, GABIA_REMOTE_ROOT, create=False)
+    _require_remote_directory(client, private_root, create=False)
+    current_release_sha = verify_existing_remote_release_identity(
+        client,
+        remote_root=GABIA_REMOTE_ROOT,
+    )
+    if (
+        expected_current_sha is not None
+        and current_release_sha != expected_current_sha
+    ):
+        raise PhpDeploymentError(
+            "current Gabia release SHA does not match"
+        )
+    evidence = _probe_gabia_sftp_capabilities(
+        client,
+        private_root=private_root,
+    )
+    deny_path = _remote_join(private_root, ".htaccess")
+    deny_attributes = _lstat_or_none(client, deny_path)
+    if deny_attributes is None:
+        raise PhpDeploymentError(
+            "existing private HTTP policy is missing"
+        )
+    deny_mode = _mode(deny_attributes)
+    if stat.S_ISLNK(deny_mode) or not stat.S_ISREG(deny_mode):
+        raise PhpDeploymentError(
+            "existing private HTTP policy is not a regular file"
+        )
+    private_policy = _read_remote_bytes(
+        client,
+        deny_path,
+        maximum_bytes=MAX_PRIVATE_POLICY_BYTES,
+    )
+    if not private_policy:
+        raise PhpDeploymentError(
+            "existing private HTTP policy is empty"
+        )
+    compatibility = GabiaCoreCompatibility(
+        client=client,
+        ssh_host=ssh_options.host,
+        ssh_host_key_sha256=fingerprint,
+        remote_root=remote_root,
+        public_url_root=public_url_root,
+        api_v2_base_url=api_v2_base_url,
+        rollback_health_url=rollback_health_url,
+        current_release_sha=current_release_sha,
+        private_policy=private_policy,
+        private_policy_mode=stat.S_IMODE(deny_mode),
+        evidence=evidence,
+        exclusive_writer=_gabia_compatibility_writer(
+            client,
+            allowed_root=GABIA_REMOTE_ROOT,
+        ),
+    )
+    _validate_gabia_core_binding(
+        compatibility,
+        client=client,
+        remote_root=remote_root,
+        public_url_root=public_url_root,
+        api_v2_base_url=api_v2_base_url,
+        rollback_health_url=rollback_health_url,
+    )
+    return compatibility
+
+
 def ensure_private_root_http_protection(
     client: SftpClient,
     *,
@@ -1616,6 +2568,10 @@ def ensure_private_root_http_protection(
     http_request: HttpRequester | None = None,
     timeout: float = 20.0,
     allow_http: bool = False,
+    exclusive_writer: ExclusiveBytesWriter | None = None,
+    expected_policy: bytes | None = None,
+    expected_policy_mode: int | None = None,
+    allowed_private_redirect: str | None = None,
 ) -> None:
     """Prove that permanent private backups cannot be read over HTTP."""
 
@@ -1633,10 +2589,31 @@ def ensure_private_root_http_protection(
         )
     _require_remote_directory(client, safe_remote_root, create=False)
     _require_remote_directory(client, safe_private_root, create=False)
+    writer = (
+        _write_remote_exclusive_bytes
+        if exclusive_writer is None
+        else exclusive_writer
+    )
     deny_path = _remote_join(safe_private_root, ".htaccess")
     deny_attributes = _lstat_or_none(client, deny_path)
-    if deny_attributes is None:
-        _write_remote_exclusive_bytes(
+    if expected_policy is not None:
+        if (
+            not expected_policy
+            or len(expected_policy) > MAX_PRIVATE_POLICY_BYTES
+            or expected_policy_mode is None
+            or deny_attributes is None
+            or not _regular_file_identity_matches(
+                client,
+                deny_path,
+                expected_policy,
+                mode=expected_policy_mode,
+            )
+        ):
+            raise PhpDeploymentError(
+                "existing private HTTP policy changed"
+            )
+    elif deny_attributes is None:
+        writer(
             client,
             deny_path,
             PRIVATE_ROOT_DENY_RULES,
@@ -1673,13 +2650,13 @@ def ensure_private_root_http_protection(
     cleanup_error: BaseException | None = None
     request = _default_http_request if http_request is None else http_request
     try:
-        _write_remote_exclusive_bytes(
+        writer(
             client,
             public_canary_path,
             sentinel,
             mode=DEFAULT_FILE_MODE,
         )
-        _write_remote_exclusive_bytes(
+        writer(
             client,
             private_canary_path,
             sentinel,
@@ -1710,8 +2687,17 @@ def ensure_private_root_http_protection(
             },
             timeout,
         )
+        private_denied = private_response.status in {403, 404}
         if (
-            private_response.status not in {403, 404}
+            private_response.status == 302
+            and allowed_private_redirect is not None
+        ):
+            private_denied = secrets.compare_digest(
+                private_response.header("Location"),
+                allowed_private_redirect,
+            )
+        if (
+            not private_denied
             or sentinel in private_response.body
             or len(private_response.body) > 250000
         ):
@@ -1722,8 +2708,28 @@ def ensure_private_root_http_protection(
         operation_error = error
     finally:
         try:
-            _remove_remote_file_if_present(client, private_canary_path)
-            _remove_remote_file_if_present(client, public_canary_path)
+            if expected_policy is not None:
+                _remove_exact_file_if_present(
+                    client,
+                    private_canary_path,
+                    sentinel,
+                    mode=PRIVATE_FILE_MODE,
+                )
+                _remove_exact_file_if_present(
+                    client,
+                    public_canary_path,
+                    sentinel,
+                    mode=DEFAULT_FILE_MODE,
+                )
+            else:
+                _remove_remote_file_if_present(
+                    client,
+                    private_canary_path,
+                )
+                _remove_remote_file_if_present(
+                    client,
+                    public_canary_path,
+                )
             if (
                 _lstat_or_none(client, private_canary_path) is not None
                 or _lstat_or_none(client, public_canary_path) is not None
@@ -1743,6 +2749,15 @@ def ensure_private_root_http_protection(
         ) from cleanup_error
     if operation_error is not None:
         raise operation_error
+    if expected_policy is not None and not _regular_file_identity_matches(
+        client,
+        deny_path,
+        expected_policy,
+        mode=expected_policy_mode or -1,
+    ):
+        raise PhpDeploymentError(
+            "private HTTP policy changed during verification"
+        )
 
 
 def _default_http_request(
@@ -1877,6 +2892,87 @@ echo '{{"ok":true,"opcache_reset":true,"probe_id":"{probe_id}"}}';
     return source.encode("utf-8")
 
 
+def _strict_opcache_probe_source(
+    *,
+    token_hash: str,
+    probe_id: str,
+) -> bytes:
+    if SHA256_PATTERN.fullmatch(token_hash) is None:
+        raise PhpDeploymentError("OPcache token hash is invalid")
+    if SHA256_PATTERN.fullmatch(probe_id) is None:
+        raise PhpDeploymentError("OPcache probe ID is invalid")
+    source = f"""<?php
+declare(strict_types=1);
+ini_set('display_errors', '0');
+error_reporting(E_ALL);
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('X-Content-Type-Options: nosniff');
+$expected = '{token_hash}';
+$provided = isset($_SERVER['HTTP_X_BSIDE_OPCACHE_TOKEN'])
+    ? (string)$_SERVER['HTTP_X_BSIDE_OPCACHE_TOKEN'] : '';
+if ($_SERVER['REQUEST_METHOD'] !== 'POST'
+    || $provided === ''
+    || !hash_equals($expected, hash('sha256', $provided))) {{
+    http_response_code(404);
+    echo '{{"ok":false,"error":"not_found"}}';
+    exit;
+}}
+$extensionLoaded = extension_loaded('Zend OPcache');
+$resetFunction = function_exists('opcache_reset');
+$statusFunction = function_exists('opcache_get_status');
+$iniEnable = ini_get('opcache.enable');
+$validateTimestamps = ini_get('opcache.validate_timestamps');
+$revalidateFreq = ini_get('opcache.revalidate_freq');
+if (!$extensionLoaded
+    || !$resetFunction
+    || !$statusFunction
+    || $iniEnable !== '1'
+    || $validateTimestamps !== '1'
+    || $revalidateFreq !== '2') {{
+    http_response_code(503);
+    echo '{{"ok":false,"error":"opcache_contract_mismatch"}}';
+    exit;
+}}
+$status = opcache_get_status(false);
+if (!is_array($status)
+    || !array_key_exists('opcache_enabled', $status)
+    || !is_bool($status['opcache_enabled'])) {{
+    http_response_code(503);
+    echo '{{"ok":false,"error":"opcache_status_ambiguous"}}';
+    exit;
+}}
+$statusEnabled = $status['opcache_enabled'];
+$resetResult = null;
+$action = 'disabled_verified';
+if ($statusEnabled === true) {{
+    $resetResult = opcache_reset();
+    if ($resetResult !== true) {{
+        http_response_code(503);
+        echo '{{"ok":false,"error":"opcache_reset_failed"}}';
+        exit;
+    }}
+    $action = 'reset_verified';
+}}
+http_response_code(200);
+echo json_encode(array(
+    'ok' => true,
+    'opcache_action' => $action,
+    'probe_id' => '{probe_id}',
+    'extension_loaded' => $extensionLoaded,
+    'reset_function' => $resetFunction,
+    'status_function' => $statusFunction,
+    'status_available' => true,
+    'status_enabled' => $statusEnabled,
+    'ini_enable' => $iniEnable,
+    'validate_timestamps' => $validateTimestamps,
+    'revalidate_freq' => $revalidateFreq,
+    'reset_result' => $resetResult,
+));
+"""
+    return source.encode("ascii")
+
+
 def reset_opcache_with_ephemeral_probe(
     client: SftpClient,
     *,
@@ -1885,7 +2981,9 @@ def reset_opcache_with_ephemeral_probe(
     http_request: HttpRequester = _default_http_request,
     timeout: float = 20.0,
     allow_http: bool = False,
-) -> None:
+    exclusive_writer: ExclusiveBytesWriter | None = None,
+    require_strict_state: bool = False,
+) -> str:
     web_root = _validate_https_url(
         public_url_root,
         label="public URL root",
@@ -1898,16 +2996,29 @@ def reset_opcache_with_ephemeral_probe(
     if OPCACHE_PROBE_NAME_PATTERN.fullmatch(filename) is None:
         raise PhpDeploymentError("OPcache probe filename is invalid")
     remote_path = _remote_join(remote_root, filename)
-    probe_source = _opcache_probe_source(
-        token_hash=token_hash,
-        probe_id=probe_id,
+    probe_source = (
+        _strict_opcache_probe_source(
+            token_hash=token_hash,
+            probe_id=probe_id,
+        )
+        if require_strict_state
+        else _opcache_probe_source(
+            token_hash=token_hash,
+            probe_id=probe_id,
+        )
     )
     if token.encode("utf-8") in probe_source:
         raise PhpDeploymentError("OPcache probe source contains the raw token")
     operation_error: BaseException | None = None
     cleanup_error: BaseException | None = None
+    opcache_action: str | None = None
+    writer = (
+        _write_remote_bytes
+        if exclusive_writer is None
+        else exclusive_writer
+    )
     try:
-        _write_remote_bytes(
+        writer(
             client,
             remote_path,
             probe_source,
@@ -1929,22 +3040,81 @@ def reset_opcache_with_ephemeral_probe(
                     "OPcache reset probe did not return HTTP 200"
                 )
             payload = _json_response(response, label="OPcache reset probe")
-            if (
-                set(payload) != {"ok", "opcache_reset", "probe_id"}
-                or payload.get("ok") is not True
-                or payload.get("opcache_reset") is not True
-                or payload.get("probe_id") != probe_id
-            ):
-                raise PhpDeploymentError(
-                    "OPcache reset probe response is invalid"
-                )
+            if require_strict_state:
+                expected_keys = {
+                    "ok",
+                    "opcache_action",
+                    "probe_id",
+                    "extension_loaded",
+                    "reset_function",
+                    "status_function",
+                    "status_available",
+                    "status_enabled",
+                    "ini_enable",
+                    "validate_timestamps",
+                    "revalidate_freq",
+                    "reset_result",
+                }
+                if (
+                    set(payload) != expected_keys
+                    or payload.get("ok") is not True
+                    or payload.get("probe_id") != probe_id
+                    or payload.get("extension_loaded") is not True
+                    or payload.get("reset_function") is not True
+                    or payload.get("status_function") is not True
+                    or payload.get("status_available") is not True
+                    or payload.get("ini_enable") != "1"
+                    or payload.get("validate_timestamps") != "1"
+                    or payload.get("revalidate_freq") != "2"
+                ):
+                    raise PhpDeploymentError(
+                        "strict OPcache probe response is invalid"
+                    )
+                candidate_action = payload.get("opcache_action")
+                status_enabled = payload.get("status_enabled")
+                reset_result = payload.get("reset_result")
+                if candidate_action == "disabled_verified":
+                    if status_enabled is not False or reset_result is not None:
+                        raise PhpDeploymentError(
+                            "disabled OPcache evidence is invalid"
+                        )
+                    opcache_action = "disabled_verified"
+                elif candidate_action == "reset_verified":
+                    if status_enabled is not True or reset_result is not True:
+                        raise PhpDeploymentError(
+                            "reset OPcache evidence is invalid"
+                        )
+                    opcache_action = "reset_verified"
+                else:
+                    raise PhpDeploymentError(
+                        "strict OPcache action is invalid"
+                    )
+            else:
+                if (
+                    set(payload) != {"ok", "opcache_reset", "probe_id"}
+                    or payload.get("ok") is not True
+                    or payload.get("opcache_reset") is not True
+                    or payload.get("probe_id") != probe_id
+                ):
+                    raise PhpDeploymentError(
+                        "OPcache reset probe response is invalid"
+                    )
+                opcache_action = "reset_verified"
         except BaseException as error:
             operation_error = error
     except BaseException as error:
         operation_error = error
     finally:
         try:
-            _remove_remote_file_if_present(client, remote_path)
+            if require_strict_state:
+                _remove_exact_file_if_present(
+                    client,
+                    remote_path,
+                    probe_source,
+                    mode=PRIVATE_FILE_MODE,
+                )
+            else:
+                _remove_remote_file_if_present(client, remote_path)
             if _lstat_or_none(client, remote_path) is not None:
                 raise PhpDeploymentError(
                     "OPcache reset probe cleanup failed"
@@ -1961,6 +3131,11 @@ def reset_opcache_with_ephemeral_probe(
         ) from cleanup_error
     if operation_error is not None:
         raise operation_error
+    if opcache_action not in {"disabled_verified", "reset_verified"}:
+        raise PhpDeploymentError(
+            "OPcache verification produced no action"
+        )
+    return opcache_action
 
 
 def verify_closed_v2_api(
@@ -2186,6 +3361,7 @@ def deploy_release(
     http_request: HttpRequester = _default_http_request,
     http_timeout: float = 20.0,
     allow_http: bool = False,
+    gabia_compatibility: GabiaCoreCompatibility | None = None,
 ) -> Mapping[str, object]:
     _validated_protected_token(protected_token)
     validate_http_endpoint_binding(
@@ -2195,6 +3371,24 @@ def deploy_release(
         allow_http=allow_http,
     )
     root = _remote_absolute_path(remote_root, label="remote root")
+    if gabia_compatibility is not None:
+        if allow_http:
+            raise PhpDeploymentError(
+                "Gabia core compatibility requires HTTPS"
+            )
+        _validate_gabia_core_binding(
+            gabia_compatibility,
+            client=client,
+            remote_root=root,
+            public_url_root=public_url_root,
+            api_v2_base_url=api_v2_base_url,
+            rollback_health_url=rollback_health_url,
+        )
+    exclusive_writer = (
+        None
+        if gabia_compatibility is None
+        else gabia_compatibility.exclusive_writer
+    )
     private_root, safe_stage_root, safe_backup_root = _private_roots(
         root,
         stage_root,
@@ -2225,6 +3419,22 @@ def deploy_release(
         http_request=http_request,
         timeout=http_timeout,
         allow_http=allow_http,
+        exclusive_writer=exclusive_writer,
+        expected_policy=(
+            None
+            if gabia_compatibility is None
+            else gabia_compatibility.private_policy
+        ),
+        expected_policy_mode=(
+            None
+            if gabia_compatibility is None
+            else gabia_compatibility.private_policy_mode
+        ),
+        allowed_private_redirect=(
+            None
+            if gabia_compatibility is None
+            else GABIA_PRIVATE_DENY_REDIRECT
+        ),
     )
     lock_path = _acquire_deployment_lock(
         client,
@@ -2239,6 +3449,8 @@ def deploy_release(
     rollback_error: BaseException | None = None
     workspace_cleanup_error: BaseException | None = None
     lock_release_error: BaseException | None = None
+    policy_preservation_error: BaseException | None = None
+    opcache_action: str | None = None
     try:
         workspace = _create_private_workspace(
             client,
@@ -2283,13 +3495,15 @@ def deploy_release(
             staged=staged,
             remote_root=root,
         )
-        reset_opcache_with_ephemeral_probe(
+        opcache_action = reset_opcache_with_ephemeral_probe(
             client,
             remote_root=root,
             public_url_root=public_url_root,
             http_request=http_request,
             timeout=http_timeout,
             allow_http=allow_http,
+            exclusive_writer=exclusive_writer,
+            require_strict_state=gabia_compatibility is not None,
         )
         verify_closed_v2_api(
             base_url=api_v2_base_url,
@@ -2315,6 +3529,8 @@ def deploy_release(
                     http_request=http_request,
                     timeout=http_timeout,
                     allow_http=allow_http,
+                    exclusive_writer=exclusive_writer,
+                    require_strict_state=gabia_compatibility is not None,
                 )
                 verify_rollback_health(
                     url=rollback_health_url,
@@ -2335,9 +3551,21 @@ def deploy_release(
             except BaseException as error:
                 workspace_cleanup_error = error
         try:
-            _release_deployment_lock(client, lock_path)
+            _release_deployment_lock(
+                client,
+                lock_path,
+                exclusive_writer=exclusive_writer,
+            )
         except BaseException as error:
             lock_release_error = error
+        if gabia_compatibility is not None:
+            try:
+                _verify_gabia_private_policy(
+                    client,
+                    gabia_compatibility,
+                )
+            except BaseException as error:
+                policy_preservation_error = error
     if deployment_error is not None:
         if rollback_error is not None:
             raise PhpDeploymentRollbackError(
@@ -2347,22 +3575,32 @@ def deploy_release(
             if (
                 workspace_cleanup_error is not None
                 or lock_release_error is not None
+                or policy_preservation_error is not None
             ):
                 raise PhpDeploymentError(
                     "deployment stopped before commit, but private cleanup "
-                    "did not complete"
-                ) from (workspace_cleanup_error or lock_release_error)
+                    "or policy preservation did not complete"
+                ) from (
+                    workspace_cleanup_error
+                    or lock_release_error
+                    or policy_preservation_error
+                )
             raise PhpDeploymentError(
                 "deployment stopped before commit; remote targets were not changed"
             ) from deployment_error
         if (
             workspace_cleanup_error is not None
             or lock_release_error is not None
+            or policy_preservation_error is not None
         ):
             raise PhpDeploymentError(
                 "deployment failed and previous files were restored, "
-                "but private cleanup did not complete"
-            ) from (workspace_cleanup_error or lock_release_error)
+                "but private cleanup or policy preservation did not complete"
+            ) from (
+                workspace_cleanup_error
+                or lock_release_error
+                or policy_preservation_error
+            )
         raise PhpDeploymentError(
             "deployment failed safely; the previous files were restored"
         ) from deployment_error
@@ -2376,8 +3614,17 @@ def deploy_release(
             "deployment files were applied and verified, "
             "but deployment lock cleanup failed"
         ) from lock_release_error
+    if policy_preservation_error is not None:
+        raise PhpDeploymentError(
+            "deployment files were applied and verified, but the Gabia "
+            "private HTTP policy was not preserved"
+        ) from policy_preservation_error
     if backup is None:
         raise PhpDeploymentError("deployment completed without a durable backup")
+    if opcache_action not in {"disabled_verified", "reset_verified"}:
+        raise PhpDeploymentError(
+            "deployment completed without verified OPcache state"
+        )
     return {
         "ok": True,
         "operation": "deploy",
@@ -2391,7 +3638,8 @@ def deploy_release(
         ),
         "files_deployed": len(plan.artifacts),
         "manifest_committed_last": True,
-        "opcache_reset": True,
+        "opcache_action": opcache_action,
+        "opcache_reset": opcache_action == "reset_verified",
         "closed_smoke": True,
         "private_root_http_protected": True,
     }
@@ -2412,8 +3660,45 @@ def rollback_release(
     http_timeout: float = 20.0,
     allow_http: bool = False,
     dry_run: bool = False,
+    gabia_compatibility: GabiaCoreCompatibility | None = None,
+    expected_current_sha: str | None = None,
 ) -> Mapping[str, object]:
     root = _remote_absolute_path(remote_root, label="remote root")
+    if gabia_compatibility is not None:
+        if allow_http or dry_run:
+            raise PhpDeploymentError(
+                "Gabia core compatibility is invalid for this operation"
+            )
+        _validate_gabia_core_binding(
+            gabia_compatibility,
+            client=client,
+            remote_root=root,
+            public_url_root=public_url_root,
+            api_v2_base_url=api_v2_base_url,
+            rollback_health_url=rollback_health_url,
+        )
+        if (
+            expected_current_sha is None
+            or SHA1_PATTERN.fullmatch(expected_current_sha) is None
+            or gabia_compatibility.current_release_sha
+            != expected_current_sha
+        ):
+            raise PhpDeploymentError(
+                "Gabia rollback current release binding does not match"
+            )
+        current_release_sha = verify_existing_remote_release_identity(
+            client,
+            remote_root=root,
+        )
+        if current_release_sha != expected_current_sha:
+            raise PhpDeploymentError(
+                "current Gabia release SHA does not match"
+            )
+    exclusive_writer = (
+        None
+        if gabia_compatibility is None
+        else gabia_compatibility.exclusive_writer
+    )
     private_root, safe_stage_root, safe_backup_root = _private_roots(
         root,
         stage_root,
@@ -2458,6 +3743,22 @@ def rollback_release(
         http_request=http_request,
         timeout=http_timeout,
         allow_http=allow_http,
+        exclusive_writer=exclusive_writer,
+        expected_policy=(
+            None
+            if gabia_compatibility is None
+            else gabia_compatibility.private_policy
+        ),
+        expected_policy_mode=(
+            None
+            if gabia_compatibility is None
+            else gabia_compatibility.private_policy_mode
+        ),
+        allowed_private_redirect=(
+            None
+            if gabia_compatibility is None
+            else GABIA_PRIVATE_DENY_REDIRECT
+        ),
     )
     verify_protected_closed_state(
         base_url=api_v2_base_url,
@@ -2486,6 +3787,8 @@ def rollback_release(
     workspace_cleanup_error: BaseException | None = None
     recovery_cleanup_error: BaseException | None = None
     lock_release_error: BaseException | None = None
+    policy_preservation_error: BaseException | None = None
+    opcache_action: str | None = None
     try:
         workspace = _create_private_workspace(
             client,
@@ -2530,19 +3833,36 @@ def rollback_release(
             client,
             snapshot=emergency,
         )
+        if gabia_compatibility is not None:
+            final_current_release_sha = (
+                verify_existing_remote_release_identity(
+                    client,
+                    remote_root=root,
+                )
+            )
+            if final_current_release_sha != expected_current_sha:
+                raise PhpDeploymentError(
+                    "current Gabia release SHA changed before rollback"
+                )
+            verify_remote_targets_match_snapshot(
+                client,
+                snapshot=emergency,
+            )
         rollback_mutation_started = True
         restore_remote_backup(
             client,
             snapshot=target_snapshot,
             workspace=workspace,
         )
-        reset_opcache_with_ephemeral_probe(
+        opcache_action = reset_opcache_with_ephemeral_probe(
             client,
             remote_root=root,
             public_url_root=public_url_root,
             http_request=http_request,
             timeout=http_timeout,
             allow_http=allow_http,
+            exclusive_writer=exclusive_writer,
+            require_strict_state=gabia_compatibility is not None,
         )
         verify_rollback_health(
             url=rollback_health_url,
@@ -2581,6 +3901,8 @@ def rollback_release(
                     http_request=http_request,
                     timeout=http_timeout,
                     allow_http=allow_http,
+                    exclusive_writer=exclusive_writer,
+                    require_strict_state=gabia_compatibility is not None,
                 )
             except BaseException as error_during_recovery:
                 recovery_error = error_during_recovery
@@ -2600,23 +3922,37 @@ def rollback_release(
             except BaseException as error:
                 recovery_cleanup_error = error
         try:
-            _release_deployment_lock(client, lock_path)
+            _release_deployment_lock(
+                client,
+                lock_path,
+                exclusive_writer=exclusive_writer,
+            )
         except BaseException as error:
             lock_release_error = error
+        if gabia_compatibility is not None:
+            try:
+                _verify_gabia_private_policy(
+                    client,
+                    gabia_compatibility,
+                )
+            except BaseException as error:
+                policy_preservation_error = error
     if rollback_error is not None:
         if not rollback_mutation_started:
             if (
                 workspace_cleanup_error is not None
                 or recovery_cleanup_error is not None
                 or lock_release_error is not None
+                or policy_preservation_error is not None
             ):
                 raise PhpDeploymentError(
                     "rollback stopped before mutation, but private cleanup "
-                    "did not complete"
+                    "or policy preservation did not complete"
                 ) from (
                     workspace_cleanup_error
                     or recovery_cleanup_error
                     or lock_release_error
+                    or policy_preservation_error
                 )
             raise PhpDeploymentError(
                 "rollback stopped before mutation; current targets were not "
@@ -2630,14 +3966,16 @@ def rollback_release(
             workspace_cleanup_error is not None
             or recovery_cleanup_error is not None
             or lock_release_error is not None
+            or policy_preservation_error is not None
         ):
             raise PhpDeploymentError(
                 "rollback failed and pre-rollback files were restored, "
-                "but private cleanup did not complete"
+                "but private cleanup or policy preservation did not complete"
             ) from (
                 workspace_cleanup_error
                 or recovery_cleanup_error
                 or lock_release_error
+                or policy_preservation_error
             )
         raise PhpDeploymentError(
             "rollback failed safely; pre-rollback files were restored"
@@ -2653,6 +3991,15 @@ def rollback_release(
         raise PhpDeploymentError(
             "rollback was applied and verified, but lock cleanup failed"
         ) from lock_release_error
+    if policy_preservation_error is not None:
+        raise PhpDeploymentError(
+            "rollback was applied and verified, but the Gabia private "
+            "HTTP policy was not preserved"
+        ) from policy_preservation_error
+    if opcache_action not in {"disabled_verified", "reset_verified"}:
+        raise PhpDeploymentError(
+            "rollback completed without verified OPcache state"
+        )
     return {
         "ok": True,
         "operation": "rollback",
@@ -2663,7 +4010,8 @@ def rollback_release(
         "removed_new_files": sum(
             1 for item in target_snapshot.files if not item.existed
         ),
-        "opcache_reset": True,
+        "opcache_action": opcache_action,
+        "opcache_reset": opcache_action == "reset_verified",
         "rollback_smoke": True,
         "private_root_http_protected": True,
         "emergency_backup_release_id": (
@@ -2709,6 +4057,13 @@ def _add_sftp_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--remote-root", default=DEFAULT_REMOTE_ROOT)
     parser.add_argument("--stage-root")
     parser.add_argument("--backup-root")
+    parser.add_argument(
+        "--gabia-core-compatibility-host",
+        help=(
+            "Explicit exact-host opt-in for the probed Gabia SFTP "
+            "exclusive-create compatibility path"
+        ),
+    )
 
 
 def _add_http_arguments(parser: argparse.ArgumentParser) -> None:
@@ -2753,6 +4108,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     _add_http_arguments(deploy_parser)
     deploy_parser.add_argument("--release-id")
     deploy_parser.add_argument("--dry-run", action="store_true")
+    deploy_parser.add_argument(
+        "--confirm-production-write",
+        help="Must exactly match --expected-sha for a mutating deployment",
+    )
 
     rollback_parser = commands.add_parser(
         "rollback",
@@ -2762,6 +4121,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     _add_http_arguments(rollback_parser)
     rollback_parser.add_argument("--release-id", required=True)
     rollback_parser.add_argument("--dry-run", action="store_true")
+    rollback_parser.add_argument("--expected-current-sha")
+    rollback_parser.add_argument("--confirm-rollback-release-id")
+    rollback_parser.add_argument("--confirm-rollback-current-sha")
     return parser
 
 
@@ -2803,6 +4165,48 @@ def _protected_token_from_environment(
     return _validated_protected_token(value)
 
 
+def _prepare_cli_gabia_compatibility(
+    client: SftpClient,
+    *,
+    args: argparse.Namespace,
+    options: SshTunnelOptions,
+    expected_current_sha: str | None = None,
+) -> GabiaCoreCompatibility | None:
+    compatibility_host = getattr(
+        args,
+        "gabia_core_compatibility_host",
+        None,
+    )
+    if compatibility_host is None:
+        if options.host == GABIA_COMPATIBILITY_SSH_HOST:
+            raise PhpDeploymentError(
+                "Gabia core compatibility requires explicit exact-host opt-in"
+            )
+        return None
+    return prepare_gabia_core_compatibility(
+        client,
+        ssh_options=options,
+        compatibility_host=_required_cli_text(
+            compatibility_host,
+            label="Gabia core compatibility host",
+        ),
+        remote_root=args.remote_root,
+        public_url_root=_required_cli_text(
+            args.public_url_root,
+            label="public URL root",
+        ),
+        api_v2_base_url=_required_cli_text(
+            args.api_v2_base_url,
+            label="API v2 base URL",
+        ),
+        rollback_health_url=_required_cli_text(
+            args.rollback_health_url,
+            label="rollback health URL",
+        ),
+        expected_current_sha=expected_current_sha,
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     try:
@@ -2815,13 +4219,35 @@ def main(argv: Sequence[str] | None = None) -> int:
             _print_report(local_plan_report(plan))
             return 0
 
-        options = ssh_sftp_options_from_args(args)
         if args.command == "deploy":
+            if (
+                args.dry_run
+                and args.gabia_core_compatibility_host is not None
+            ):
+                raise PhpDeploymentError(
+                    "Gabia compatibility probe is not available in dry-run"
+                )
             plan = build_local_deployment_plan(
                 args.local_root,
                 expected_sha=args.expected_sha,
             )
-            verify_release_checkout(plan)
+            verify_release_checkout(
+                plan,
+                require_repository_clean=not args.dry_run,
+            )
+            if not args.dry_run:
+                confirm_production_release(
+                    plan.code_revision,
+                    args.confirm_production_write,
+                )
+            options = ssh_sftp_options_from_args(args)
+            protected_token = (
+                ""
+                if args.dry_run
+                else _protected_token_from_environment(
+                    args.protected_token_env
+                )
+            )
             with ParamikoPinnedSftpSession(options) as client:
                 if args.dry_run:
                     report = inspect_remote_deployment(
@@ -2830,8 +4256,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                         remote_root=args.remote_root,
                     )
                 else:
-                    protected_token = _protected_token_from_environment(
-                        args.protected_token_env
+                    compatibility = _prepare_cli_gabia_compatibility(
+                        client,
+                        args=args,
+                        options=options,
                     )
                     report = deploy_release(
                         client,
@@ -2855,16 +4283,50 @@ def main(argv: Sequence[str] | None = None) -> int:
                         protected_token=protected_token,
                         http_timeout=args.http_timeout,
                         allow_http=args.allow_http,
+                        gabia_compatibility=compatibility,
                     )
             _print_report(report)
             return 0
 
+        if (
+            args.dry_run
+            and args.gabia_core_compatibility_host is not None
+        ):
+            raise PhpDeploymentError(
+                "Gabia compatibility probe is not available in dry-run"
+            )
+        expected_current_sha: str | None = None
+        if (
+            not args.dry_run
+            and args.gabia_core_compatibility_host is not None
+        ):
+            expected_current_sha = _required_cli_text(
+                args.expected_current_sha,
+                label="expected current release SHA",
+            )
+            confirm_production_rollback(
+                args.release_id,
+                args.confirm_rollback_release_id,
+                expected_current_sha,
+                args.confirm_rollback_current_sha,
+            )
+        options = ssh_sftp_options_from_args(args)
+        protected_token = (
+            ""
+            if args.dry_run
+            else _protected_token_from_environment(
+                args.protected_token_env
+            )
+        )
         with ParamikoPinnedSftpSession(options) as client:
-            protected_token = (
-                ""
+            compatibility = (
+                None
                 if args.dry_run
-                else _protected_token_from_environment(
-                    args.protected_token_env
+                else _prepare_cli_gabia_compatibility(
+                    client,
+                    args=args,
+                    options=options,
+                    expected_current_sha=expected_current_sha,
                 )
             )
             report = rollback_release(
@@ -2901,6 +4363,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 http_timeout=args.http_timeout,
                 allow_http=args.allow_http,
                 dry_run=args.dry_run,
+                gabia_compatibility=compatibility,
+                expected_current_sha=expected_current_sha,
             )
         _print_report(report)
         return 0
