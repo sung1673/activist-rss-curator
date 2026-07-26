@@ -2909,7 +2909,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
     optional_activity_status, _ = request_json(
         base_url,
         "api.php/api/v2/sources/status?country=JP",
-        token=ADMIN_TOKEN,
+        token=PREVIEW_TOKEN,
     )
     optional_activity_items = optional_activity_status.get("data", {}).get(
         "items",
