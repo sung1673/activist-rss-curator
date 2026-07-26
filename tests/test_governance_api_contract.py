@@ -65,6 +65,13 @@ SLOT_CLAIM_MIGRATION = (
     / "migrations"
     / "010_official_slot_claim_ledger.sql"
 ).read_text(encoding="utf-8")
+DART_CREDENTIAL_POOL_MIGRATION = (
+    ROOT
+    / "deploy"
+    / "activist"
+    / "migrations"
+    / "012_dart_credential_pool.sql"
+).read_text(encoding="utf-8")
 OPENAPI_PATH = ROOT / "deploy" / "activist" / "openapi.yaml"
 HTACCESS = (ROOT / "deploy" / "activist" / ".htaccess").read_text(encoding="utf-8")
 
@@ -1817,8 +1824,8 @@ def test_official_run_ledger_is_slot_attributed_and_python_digest_compatible():
 
 def test_dart_review_corpus_is_private_exact_bounded_and_digest_compatible():
     spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
-    assert spec["info"]["version"] == "1.11.1"
-    assert spec["x-changelog"][0]["version"] == "1.11.1"
+    assert spec["info"]["version"] == "1.12.0"
+    assert spec["x-changelog"][0]["version"] == "1.12.0"
     route = spec["paths"]["/ops/dart-review-corpus"]["get"]
     assert route["security"] == [{"bearerAuth": []}]
     response = spec["components"]["schemas"]["DartReviewCorpusPage"]
@@ -1958,7 +1965,7 @@ def test_health_accepts_only_complete_acknowledged_scheduled_runs_and_reports_de
     assert "active_deployment_status" in section
 
 
-def test_dart_quota_is_global_kst_day_atomic_and_idempotent():
+def test_dart_quota_pool_is_global_kst_day_atomic_and_idempotent():
     spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
     assert {"get", "post"} <= spec["paths"]["/ops/dart-quota"].keys()
     assert (
@@ -1969,6 +1976,14 @@ def test_dart_quota_is_global_kst_day_atomic_and_idempotent():
         "expected_backend_binding_id"
         in spec["components"]["schemas"]["DartQuotaBlockRequest"]["required"]
     )
+    assert (
+        "credential_id"
+        in spec["components"]["schemas"]["DartQuotaConsumeRequest"]["required"]
+    )
+    assert (
+        "expected_backend_binding_id"
+        in spec["components"]["schemas"]["DartQuotaDisableRequest"]["required"]
+    )
     assert "backend_binding_id" in spec["components"]["schemas"]["DartQuotaStatus"]["required"]
     assert (
         "backend_binding_id"
@@ -1976,13 +1991,30 @@ def test_dart_quota_is_global_kst_day_atomic_and_idempotent():
     )
     assert "activist_dart_quota_days" in DART_QUOTA_MIGRATION
     assert "activist_dart_quota_attempts" in DART_QUOTA_MIGRATION
+    assert "activist_dart_quota_credentials" in DART_CREDENTIAL_POOL_MIGRATION
+    assert "activist_dart_quota_credential_days" in DART_CREDENTIAL_POOL_MIGRATION
+    assert "@bside_migration_012_sha256" in DART_CREDENTIAL_POOL_MIGRATION
+    assert "legacy-single" in DART_CREDENTIAL_POOL_MIGRATION
     section = V1[V1.index("function v1_dart_quota_server_day") : V1.index("function v1_ops_official_site_candidates")]
     assert "Asia/Seoul" in section
     assert "used_count=used_count+1" in section
     assert "used_count<limit_count" in section
     assert "dart_quota_idempotency_conflict" in section
     assert "opendart_status_020" in section
+    assert "opendart_status_901" in section
+    assert "dart_credential_blocked" in section
+    assert "dart_credential_disabled" in section
+    assert "GOV_V1_DART_GLOBAL_DAILY_LIMIT = 40000" in V1
     assert "COALESCE(blocked_until,?)" in section
+    assert "v1_dart_quota_block_until_utc($quotaDay)" in section
+    assert "$allowPreviousDay && $day === $today->modify('-1 day')->format('Y-m-d')" in section
+    assert "$action === 'block_020' || $action === 'disable_901'" in section
+    assert (
+        "if (!$attempt || (string)$attempt['quota_day'] !== $quotaDay"
+        in section
+    )
+    assert "|| (string)$attempt['credential_id'] !== $credentialId" in section
+    assert "|| (int)$attempt['consumed_units'] !== 1" in section
     assert "'accepted'=>$action === 'status' ? 0 : 1" in section
     assert "SELECT @@server_uuid AS server_uuid,DATABASE() AS database_name" in section
     assert '"mysql8\\n"' in section

@@ -47,6 +47,26 @@ def test_dart_companies_are_projected_to_stable_issuer_identity_and_listing_rows
     assert "'bridge'=>'v1_official_ingest'" in ingest
 
 
+def test_global_issuer_insert_select_qualifies_existing_target_columns():
+    ingest = _section(
+        "function upsert_governance_snapshot",
+        "function v1_editorial_reference_exists",
+    )
+    issuer_upsert = ingest[
+        ingest.index("$globalIssuerTable =")
+        : ingest.index("$globalIdentifierStmt = $pdo->prepare")
+    ]
+
+    assert "$globalIssuerTable = table_name($config,'issuers');" in issuer_upsert
+    for field in (
+        "legal_name_en",
+        "short_name",
+        "homepage_url",
+        "master_modified_at",
+    ):
+        assert "$globalIssuerTable . '." + field in issuer_upsert
+
+
 def test_only_official_dart_documents_receive_the_global_dart_projection():
     ingest = _section(
         "function upsert_governance_snapshot",

@@ -16,7 +16,7 @@ optional dormant identity이며 `link-only`, `coverage_unavailable`,
 
 출시 전 수동 적재는 `GOVERNANCE_PIPELINE_MODE=off`에서도 실행할 수 있다.
 대신 기본 브랜치의 보호된 `governance-runtime` 환경에서만 실행되며, 수집 전에
-운영 API가 정확한 dispatch SHA·schema 11·`closed` 상태인지 확인한다. 이
+운영 API가 정확한 dispatch SHA·schema 12·`closed` 상태인지 확인한다. 이
 검사가 실패하면 공식 소스 요청과 DB 쓰기를 시작하지 않는다.
 
 ## SEC 입력 계약
@@ -43,8 +43,14 @@ source cursor를 역사 receipt에 섞지 않는다. 공개 EDGAR 수집에는 A
 `to_date`, `max_windows=1..31`을 받는다. 먼저 `mode=dry-run`으로 정정·철회
 표본과 요청 예산을 검증한 뒤 `mode=apply`로 적재한다. 같은 범위를 다시
 `apply`하면 durable checkpoint와 idempotency key를 통해 문서·사건·checkpoint
-증가가 없어야 한다. OpenDART 제한 코드 `020`은 당일 반복하지 않고 다음 quota
-기간에 같은 checkpoint에서 재개한다.
+증가가 없어야 한다. 자격정보는 보호된 `governance-runtime`의
+`OPENDART_API_KEYS`에 줄바꿈 또는 쉼표로 구분한 중복 없는 소문자 40자리 hex
+pool로 등록한다. pool이 우선이며 `DART_API_KEY`는 pool이 없는 단일 키
+fallback이다. 모든 키 합산 KST 일일 원장은 40,000건, 단일 실행은 10,000건이다.
+OpenDART `020`은 해당 키만 다음 KST 자정까지 차단하고 다음 키로 계속한다.
+`901`은 해당 키를 durable disable한다. 모든 키가 사용할 수 없을 때만 같은
+checkpoint에서 중단하며, 키 원문과 요청 URL은 receipt·로그·artifact에 넣지
+않는다. GitHub Actions는 collector보다 먼저 각 키를 개별 mask한다.
 
 ## 실행 모드와 멱등성
 

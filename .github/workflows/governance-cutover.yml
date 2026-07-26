@@ -547,7 +547,7 @@ jobs:
           GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
           EXPECTED_V1_SCHEMA_VERSION: "10"
-          EXPECTED_V2_SCHEMA_VERSION: "11"
+          EXPECTED_V2_SCHEMA_VERSION: "12"
         shell: bash
         run: |
           set -euo pipefail
@@ -593,8 +593,8 @@ jobs:
             exit 1
           }
           # The protected v2 endpoint executes v2_require_schema_version before routing.
-          # A 200 response from the schema-11 build therefore proves an exact manifest match.
-          [[ "$EXPECTED_V2_SCHEMA_VERSION" == "11" ]]
+          # A 200 response from the schema-12 build therefore proves an exact manifest match.
+          [[ "$EXPECTED_V2_SCHEMA_VERSION" == "12" ]]
 
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer $GOVERNANCE_PREVIEW_TOKEN" \

@@ -22,12 +22,12 @@ from urllib.request import (
 
 
 EXPECTED_SERVICE = "bside-global-market-terminal"
-EXPECTED_SCHEMA_VERSION = 11
+EXPECTED_SCHEMA_VERSION = 12
 EXPECTED_API_HEADER = "v2"
 EXPECTED_OPENAPI_MARKERS = (
     "openapi: 3.1.0",
     "title: BSIDE Global Market Terminal API",
-    "x-schema-version: 11",
+    "x-schema-version: 12",
     "/health:",
 )
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")

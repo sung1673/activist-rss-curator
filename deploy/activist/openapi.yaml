@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: BSIDE Governance Intelligence API
-  version: 1.11.1
+  version: 1.12.0
   description: >-
     Public, read-only governance event records and role-gated operations APIs.
     Document title and body fields preserve their original language; the API
@@ -10,6 +10,12 @@ info:
     while it is preview. Health and this specification remain public; the API
     root descriptor is a public data route and is therefore closed with 503.
 x-changelog:
+  - version: 1.12.0
+    date: '2026-07-26'
+    changes:
+      - Raised the authoritative OpenDART KST-day hard ceiling to 40,000 physical attempts across the credential pool.
+      - Added SHA-256 credential identities, atomic global and per-credential accounting, credential-local status 020 blocks, and permanent fail-closed status 901 disablement.
+      - Migrated legacy single-key attempts without exposing or persisting API-key material.
   - version: 1.11.1
     date: '2026-07-24'
     changes:
@@ -576,22 +582,22 @@ paths:
     get:
       tags: [Operations]
       security: [{bearerAuth: []}]
-      summary: Read the current KST-day global OpenDART quota without mutation
+      summary: Read global and per-credential KST-day OpenDART quota state
       parameters:
         - {name: quota_day, in: query, required: true, schema: {type: string, format: date}}
       responses:
         '200':
-          description: Current used, remaining and 020-block state, bound to the serving MySQL backend
+          description: Current global usage and credential-local block or disable state, bound to the serving MySQL backend
           content:
             application/json:
               schema: {$ref: '#/components/schemas/DartQuotaStatus'}
         '400': {description: quota_day differs from the server current KST date}
         '401': {$ref: '#/components/responses/Unauthorized'}
-        '503': {description: The serving MySQL backend identity cannot be derived safely}
+        '503': {description: Migration 012 is unavailable or the serving MySQL backend identity cannot be derived safely}
     post:
       tags: [Operations]
       security: [{bearerAuth: []}]
-      summary: Atomically consume one physical DART request or block after status 020
+      summary: Atomically consume one physical DART request or quarantine one credential
       requestBody:
         required: true
         content:
@@ -600,6 +606,7 @@ paths:
               oneOf:
                 - {$ref: '#/components/schemas/DartQuotaConsumeRequest'}
                 - {$ref: '#/components/schemas/DartQuotaBlockRequest'}
+                - {$ref: '#/components/schemas/DartQuotaDisableRequest'}
       responses:
         '200':
           description: Exact durable acknowledgement; callers must validate it before any DART HTTP request
@@ -607,9 +614,9 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/DartQuotaAcknowledgement'}
         '400': {description: Exact request contract or KST day mismatch}
-        '409': {description: Day blocked by 020, missing cause attempt or idempotency conflict}
-        '429': {description: The 10,000-request KST-day limit is exhausted}
-        '503': {description: The serving MySQL backend identity cannot be derived safely}
+        '409': {description: Requested credential blocked by 020 or disabled by 901, missing cause attempt, backend mismatch, or idempotency conflict}
+        '429': {description: The global 40,000-request KST-day hard limit is exhausted}
+        '503': {description: Migration 012 is unavailable or the serving MySQL backend identity cannot be derived safely}
   /ops/official-site-rights:
     get:
       tags: [Operations]
@@ -1939,11 +1946,12 @@ components:
     DartQuotaConsumeRequest:
       type: object
       additionalProperties: false
-      required: [action, attempt_id, quota_day, operation, code_revision, expected_backend_binding_id]
+      required: [action, attempt_id, quota_day, credential_id, operation, code_revision, expected_backend_binding_id]
       properties:
         action: {type: string, const: consume}
         attempt_id: {$ref: '#/components/schemas/EntityId'}
         quota_day: {type: string, format: date, description: Must equal the API server's current Asia/Seoul date.}
+        credential_id: {$ref: '#/components/schemas/DartCredentialId'}
         operation: {type: string, enum: [list, corp_code]}
         code_revision: {type: string, pattern: '^[a-f0-9]{7,40}$'}
         expected_backend_binding_id:
@@ -1953,30 +1961,78 @@ components:
     DartQuotaBlockRequest:
       type: object
       additionalProperties: false
-      required: [action, attempt_id, quota_day, reason, code_revision, expected_backend_binding_id]
+      required: [action, attempt_id, quota_day, credential_id, reason, code_revision, expected_backend_binding_id]
       properties:
         action: {type: string, const: block_020}
         attempt_id: {$ref: '#/components/schemas/EntityId'}
         quota_day: {type: string, format: date}
+        credential_id: {$ref: '#/components/schemas/DartCredentialId'}
         reason: {type: string, const: opendart_status_020}
         code_revision: {type: string, pattern: '^[a-f0-9]{7,40}$'}
         expected_backend_binding_id:
           type: string
           pattern: '^[a-f0-9]{64}$'
           description: Must match the serving MySQL binding before any quota row is mutated.
+    DartQuotaDisableRequest:
+      type: object
+      additionalProperties: false
+      required: [action, attempt_id, quota_day, credential_id, reason, code_revision, expected_backend_binding_id]
+      properties:
+        action: {type: string, const: disable_901}
+        attempt_id: {$ref: '#/components/schemas/EntityId'}
+        quota_day: {type: string, format: date}
+        credential_id: {$ref: '#/components/schemas/DartCredentialId'}
+        reason: {type: string, const: opendart_status_901}
+        code_revision: {type: string, pattern: '^[a-f0-9]{7,40}$'}
+        expected_backend_binding_id:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: Must match the serving MySQL binding before any quota row is mutated.
+    DartCredentialId:
+      type: string
+      pattern: '^[a-f0-9]{64}$'
+      description: Full lowercase SHA-256 of API-key bytes; never the key itself or a positional label.
+    DartQuotaCredentialStatus:
+      type: object
+      additionalProperties: false
+      required: [credential_id, status, limit_count, used_count, remaining_count, blocked, block_reason, blocked_until, blocked_by_attempt_id, blocked_at, disable_reason, disabled_by_attempt_id, disabled_at, updated_at]
+      properties:
+        credential_id:
+          oneOf:
+            - {$ref: '#/components/schemas/DartCredentialId'}
+            - {type: string, const: legacy-single}
+        status: {type: string, enum: [active, disabled_901, legacy]}
+        limit_count: {type: integer, const: 40000}
+        used_count: {type: integer, minimum: 0, maximum: 40000}
+        remaining_count: {type: integer, minimum: 0, maximum: 40000}
+        blocked: {type: boolean}
+        block_reason: {type: [string, 'null'], enum: [opendart_status_020, null]}
+        blocked_until: {type: [string, 'null'], format: date-time}
+        blocked_by_attempt_id:
+          anyOf:
+            - {$ref: '#/components/schemas/EntityId'}
+            - {type: 'null'}
+        blocked_at: {type: [string, 'null'], format: date-time}
+        disable_reason: {type: [string, 'null'], enum: [opendart_status_901, null]}
+        disabled_by_attempt_id:
+          anyOf:
+            - {$ref: '#/components/schemas/EntityId'}
+            - {type: 'null'}
+        disabled_at: {type: [string, 'null'], format: date-time}
+        updated_at: {type: [string, 'null'], format: date-time}
     DartQuotaStatus:
       type: object
       additionalProperties: false
-      required: [ok, action, attempt_id, quota_day, accepted, limit_count, used_count, remaining_count, duplicate, blocked_until, backend_binding_id, server_kst_date, block_reason, blocked_by_attempt_id, blocked_at, updated_at, api_version]
+      required: [ok, action, attempt_id, quota_day, accepted, limit_count, used_count, remaining_count, duplicate, blocked_until, backend_binding_id, server_kst_date, block_reason, blocked_by_attempt_id, blocked_at, updated_at, credentials, api_version]
       properties:
         ok: {type: boolean, const: true}
         action: {type: string, const: status}
         attempt_id: {type: 'null'}
         quota_day: {type: string, format: date}
         accepted: {type: integer, const: 0}
-        limit_count: {type: integer, const: 10000}
-        used_count: {type: integer, minimum: 0, maximum: 10000}
-        remaining_count: {type: integer, minimum: 0, maximum: 10000}
+        limit_count: {type: integer, const: 40000}
+        used_count: {type: integer, minimum: 0, maximum: 40000}
+        remaining_count: {type: integer, minimum: 0, maximum: 40000}
         duplicate: {type: boolean, const: false}
         blocked_until: {type: [string, 'null'], format: date-time}
         backend_binding_id: {type: string, pattern: '^[a-f0-9]{64}$'}
@@ -1988,20 +2044,29 @@ components:
             - {type: 'null'}
         blocked_at: {type: [string, 'null'], format: date-time}
         updated_at: {type: [string, 'null'], format: date-time}
+        credentials:
+          type: array
+          items: {$ref: '#/components/schemas/DartQuotaCredentialStatus'}
         api_version: {type: string, const: v1}
     DartQuotaAcknowledgement:
       type: object
       additionalProperties: false
-      required: [ok, action, attempt_id, quota_day, accepted, limit_count, used_count, remaining_count, duplicate, blocked_until, backend_binding_id, api_version]
+      required: [ok, action, attempt_id, quota_day, credential_id, credential_status, accepted, limit_count, used_count, remaining_count, credential_limit_count, credential_used_count, credential_remaining_count, credential_blocked_until, duplicate, blocked_until, backend_binding_id, api_version]
       properties:
         ok: {type: boolean, const: true}
-        action: {type: string, enum: [consume, block_020]}
+        action: {type: string, enum: [consume, block_020, disable_901]}
         attempt_id: {$ref: '#/components/schemas/EntityId'}
         quota_day: {type: string, format: date}
+        credential_id: {$ref: '#/components/schemas/DartCredentialId'}
+        credential_status: {type: string, enum: [active, disabled_901]}
         accepted: {type: integer, const: 1}
-        limit_count: {type: integer, const: 10000}
-        used_count: {type: integer, minimum: 1, maximum: 10000}
-        remaining_count: {type: integer, minimum: 0, maximum: 9999}
+        limit_count: {type: integer, const: 40000}
+        used_count: {type: integer, minimum: 1, maximum: 40000}
+        remaining_count: {type: integer, minimum: 0, maximum: 39999}
+        credential_limit_count: {type: integer, const: 40000}
+        credential_used_count: {type: integer, minimum: 1, maximum: 40000}
+        credential_remaining_count: {type: integer, minimum: 0, maximum: 39999}
+        credential_blocked_until: {type: [string, 'null'], format: date-time}
         duplicate: {type: boolean}
         blocked_until: {type: [string, 'null'], format: date-time}
         backend_binding_id: {type: string, pattern: '^[a-f0-9]{64}$'}

@@ -8,10 +8,10 @@
 
 - 운영 API: `https://alignpe.gabia.io/activist/api.php/api/v2`
 - 공개 화면: `https://news.bside.ai`
-- 스키마 버전: `11`
+- 스키마 버전: `12`
 - 기존 `/api/v1`과 레거시 피드는 호환 기간 동안 별도로 유지한다.
 
-`GET /api/v2/health`와 `GET /api/v2/openapi.yaml`은 release state와 무관하다. 다만 `health`는 `deployment-manifest.json`과 API 핵심 파일 8개의 SHA-256이 모두 일치할 때만 200을 반환하고, 응답의 `code_revision`에 정확한 40자리 Git SHA를 제공한다. manifest가 없거나 잘못됐거나 파일이 하나라도 다르면 503 `deployment_identity_unavailable`이다. 이 성공은 API 배포 신원만 증명하며 데이터베이스·공식 소스·공개 데이터 경로의 정상 상태까지 뜻하지는 않는다.
+`GET /api/v2/health`와 `GET /api/v2/openapi.yaml`은 release state와 무관하다. 다만 `health`는 `deployment-manifest.json`과 API 핵심 파일 9개의 SHA-256이 모두 일치할 때만 200을 반환하고, 응답의 `code_revision`에 정확한 40자리 Git SHA를 제공한다. manifest가 없거나 잘못됐거나 파일이 하나라도 다르면 503 `deployment_identity_unavailable`이다. 이 성공은 API 배포 신원만 증명하며 데이터베이스·공식 소스·공개 데이터 경로의 정상 상태까지 뜻하지는 않는다.
 
 API 배포 artifact는 다음 명령으로 checkout의 정확한 SHA를 고정한다.
 
@@ -22,7 +22,7 @@ python -m curator.deployment_manifest \
   --output deploy/activist/deployment-manifest.json
 ```
 
-`.htaccess`, `api.php`, `governance_v1.php`, `governance_v2.php`, `governance_v2_write.php`, `openapi.yaml`, `openapi-v2.yaml`, `migrations/011_global_terminal_v2.sql`, 생성된 `deployment-manifest.json`은 항상 하나의 배포 transaction으로 교체한다. 특히 Authorization 전달 규칙과 v1 계약도 v2 코드와 같은 배포 신원에 묶는다. 전송은 줄바꿈을 바꾸지 않는 binary/byte-preserving 방식이어야 한다. 디렉터리 단위 원자 교체가 불가능한 환경에서는 v2를 `closed`로 둔 채 핵심 파일을 먼저 올리고 manifest를 마지막 commit marker로 교체한다. 중간 상태의 health 503은 정상적인 fail-closed 동작이며, 이전 파일과 새 manifest를 섞어 200으로 우회해서는 안 된다. 롤백도 이전 핵심 파일 전체와 그 파일들에서 생성한 이전 manifest를 한 묶음으로 복원하고 manifest를 마지막에 교체한다. PHP OPcache를 사용하는 서버는 교체 transaction 직후 캐시를 무효화하거나 PHP 프로세스를 안전하게 reload한 다음 health를 확인해야 한다.
+`.htaccess`, `api.php`, `governance_v1.php`, `governance_v2.php`, `governance_v2_write.php`, `openapi.yaml`, `openapi-v2.yaml`, `migrations/011_global_terminal_v2.sql`, `migrations/012_dart_credential_pool.sql`, 생성된 `deployment-manifest.json`은 항상 하나의 배포 transaction으로 교체한다. 특히 Authorization 전달 규칙과 v1 계약도 v2 코드와 같은 배포 신원에 묶는다. 전송은 줄바꿈을 바꾸지 않는 binary/byte-preserving 방식이어야 한다. 디렉터리 단위 원자 교체가 불가능한 환경에서는 v2를 `closed`로 둔 채 핵심 파일을 먼저 올리고 manifest를 마지막 commit marker로 교체한다. 중간 상태의 health 503은 정상적인 fail-closed 동작이며, 이전 파일과 새 manifest를 섞어 200으로 우회해서는 안 된다. 롤백도 이전 핵심 파일 전체와 그 파일들에서 생성한 이전 manifest를 한 묶음으로 복원하고 manifest를 마지막에 교체한다. PHP OPcache를 사용하는 서버는 교체 transaction 직후 캐시를 무효화하거나 PHP 프로세스를 안전하게 reload한 다음 health를 확인해야 한다.
 
 운영 smoke는 잘못된 Bearer token이 거부되는지만 확인하지 않는다. 보호된 환경의 ops 또는 admin token으로 `GET /ops/release-state`가 HTTP 200을 반환하고 요청한 release state와 일치하는지 함께 확인한다. 따라서 웹 서버가 `Authorization` 헤더를 PHP로 전달하지 않는 구성은 배포 성공으로 판정될 수 없다. 토큰은 명령 인자가 아니라 지정한 환경변수에서만 읽으며 출력하지 않는다.
 
@@ -38,6 +38,32 @@ migration_sha256="$(sha256sum "$migration" | cut -d ' ' -f1)"
 ```
 
 세션 변수가 없거나 소문자 64자리 SHA-256이 아니면 migration은 중단된다. 적용 후 `schema_migrations`의 version 11 checksum은 이 값과 정확히 같아야 한다. v2는 요청마다 검증된 deployment manifest의 `migrations/011_global_terminal_v2.sql` 해시와 DB row를 비교하므로, SQL 파일의 1바이트 변경·다른 세션에서의 `SET`·텍스트 모드 전송에 따른 줄바꿈 변경은 모두 fail-closed 503으로 이어진다. 따라서 실제 DB에 적용할 파일과 API artifact에 포함할 파일은 반드시 동일한 byte-preserving 복사본이어야 한다.
+
+Migration 012도 같은 exact-byte 계약을 사용한다. 운영에서는 다음 도구가
+`012_dart_credential_pool.sql` 원본 bytes의 SHA-256을 계산하고 같은 MySQL
+세션에 `@bside_migration_012_sha256`을 설정한 뒤 apply와 replay를 수행한다.
+
+최초 schema 11→12 전환 순서는
+`DART_OFFICIAL_INGEST_ENABLED=false → ingest-official·official-backfill
+queued/running 0건 → 새 PHP를 --schema-upgrade-from 11로 pending 배포 →
+migration 012 apply·replay → schema 12 strict closed smoke →
+DART_OFFICIAL_INGEST_ENABLED=true`로 고정한다.
+pending 배포는 새 코드의 schema 12 identity와 DB의 실제 schema 11 mismatch를
+HTTP 503으로 명시적으로 증명한다. migration 적용 뒤 구 PHP만 단독 복원하지
+않으며, 필요하면 writer 정지 상태에서 pre-migration DB backup을 먼저 복원한다.
+
+```bash
+python scripts/apply_migration_012.py \
+  --migration deploy/activist/migrations/012_dart_credential_pool.sql
+```
+
+version 12 DB checksum, deployment manifest hash, 서버의 migration 파일 hash가
+모두 같아야 한다. 키 pool·합산 KST 일 40,000건·키별 `020` 당일 block·키별
+`901` durable disable은 migration 012가 만든 원장에 의존한다. 단일 collector
+실행의 별도 상한은 10,000건이다. 자격정보는 `governance-runtime`의
+`OPENDART_API_KEYS`에 줄바꿈 또는 쉼표로 구분한 소문자 40자리 hex로 등록하고,
+pool이 없을 때만 `DART_API_KEY` fallback을 사용한다. Actions는 각 키를 개별
+mask하며 키 원문이나 키가 든 URL을 로그·artifact에 기록하지 않는다.
 
 ## Production Alpha의 공개 범위
 
@@ -95,7 +121,7 @@ v2는 v1과 독립적인 `global_terminal_v2` release state를 사용한다.
 | `preview` | preview Bearer token 필요, `Cache-Control: private, no-store` |
 | `live` | 인증 없이 공개, 짧은 public cache 허용 |
 
-`/health`, `/openapi.yaml`, `/openapi.json`은 이 상태를 통과하지 않는다. `/ops/*`와 `/admin/*`도 공개 release state를 통과하지 않지만, 정확한 migration manifest 1~11과 역할 토큰을 요구한다.
+`/health`, `/openapi.yaml`, `/openapi.json`은 이 상태를 통과하지 않는다. `/ops/*`와 `/admin/*`도 공개 release state를 통과하지 않지만, 정확한 migration manifest 1~12와 역할 토큰을 요구한다.
 
 - `/ops/source-right-eligibility`: `ops` 또는 `admin` Bearer token
 - `/ops/alpha-release-evidence`: `ops` 또는 `admin` Bearer token

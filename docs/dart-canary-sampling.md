@@ -30,12 +30,15 @@ KST 일자별 전역 OpenDART 요청 원장을 공유한다. 모든 물리 HTTP 
 `/api/v1/ops/dart-quota`가 정확히 1회를 원자적으로 승인·차감하며, 실패한 HTTP
 시도와 재시도도 각각 1회로 센다. quota API timeout·5xx·불완전 ACK가 발생하면
 DART 요청을 보내지 않고 workflow를 실패시킨다. 서로 다른 날짜 범위나 backfill
-fingerprint로 다시 실행해도 일 10,000회 제한을 우회할 수 없다.
+fingerprint로 다시 실행해도 모든 키를 합산한 KST 일 40,000회 제한을 우회할
+수 없다. Canary 한 실행의 별도 안전 예산은 계속 10,000회다.
 
-OpenDART 상태 `020`은 재시도 가능한 일반 오류로 취급하지 않는다. 원장에 다음
-KST 자정까지의 전역 차단이 ACK된 뒤 즉시 비정상 종료한다. ACK 실패도 workflow
-실패이며 DART 요청을 더 보내지 않는다. apply 백필은 기존 durable checkpoint에도
-차단일을 함께 남겨 다음 quota 기간에 같은 window에서 재개한다.
+OpenDART 상태 `020`은 일반 HTTP 재시도 오류로 취급하지 않는다. 원장에 해당
+credential만 다음 KST 자정까지 차단한 ACK를 남기고 pool의 다음 유효 키로
+동일한 논리 요청을 계속한다. `901`은 해당 credential을 durable disable하고
+다음 유효 키로 계속한다. ACK 실패 또는 사용 가능한 키가 없을 때만 workflow를
+실패시키며, 모든 키가 `020`으로 차단된 apply 백필은 기존 durable checkpoint에
+차단일을 남겨 다음 quota 기간에 같은 window에서 재개한다.
 
 ## 비변경 보장과 증빙
 
@@ -54,7 +57,7 @@ workflow artifact `official-backfill-report-<run_id>`에는 다음 파일이 함
 로컬에서 같은 canary만 실행하려면 다음 명령을 사용한다.
 
 ```powershell
-$env:DART_API_KEY = "<OpenDART key>"
+$env:OPENDART_API_KEYS = "<lowercase-40hex-key>,<lowercase-40hex-key>"
 python -m curator.dart_canary_sample `
   --lookback-days 365 `
   --scan-chunk-days 7 `
@@ -62,6 +65,11 @@ python -m curator.dart_canary_sample `
   --request-budget 10000 `
   --report dart-canary-sample-report.json
 ```
+
+`OPENDART_API_KEYS`는 줄바꿈 또는 쉼표 구분을 지원하며 pool이 우선이다.
+`DART_API_KEY`는 pool이 없는 단일 키 호환 fallback으로만 사용한다. 두 값을
+동시에 설정하면 fail-closed한다. GitHub Actions에서는 collector보다 먼저 각
+키를 개별 mask하며 키 원문과 요청 URL을 출력하지 않는다.
 
 성공 종료 코드는 `0`, 필수 표본 미확보는 `1`, 설정·connector·quota·예산 오류는
 `2`다.

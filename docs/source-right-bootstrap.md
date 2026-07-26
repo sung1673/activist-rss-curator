@@ -46,7 +46,14 @@ The protected API Secret must be exactly
 `https://alignpe.gabia.io/activist/api.php/api/v1`. There is no repository
 variable fallback. The client validates that exact hostname and path before it
 constructs any authenticated request. It also requires v2 health to report
-schema 11, service `bside-global-market-terminal`, and the exact approved SHA.
+schema 12, service `bside-global-market-terminal`, and the exact approved SHA.
+
+The deployed bundle must include the exact-byte
+`migrations/012_dart_credential_pool.sql` entry in its manifest, and the
+database version 12 checksum must equal the SHA-256 supplied in the same MySQL
+session as `@bside_migration_012_sha256`. Apply and idempotently replay it with
+`scripts/apply_migration_012.py` before this bootstrap. This workflow never
+reads, writes, or exports OpenDART key plaintext.
 
 ## Run
 

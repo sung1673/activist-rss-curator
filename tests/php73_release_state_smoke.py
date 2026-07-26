@@ -2461,17 +2461,33 @@ def run(base_url: str, mysql_container_id: str) -> None:
     require(
         quota_status.get("action") == "status"
         and quota_status.get("accepted") == 0
-        and quota_status.get("limit_count") == 10000
+        and quota_status.get("limit_count") == 40000
         and quota_status.get("used_count") == 0
-        and quota_status.get("remaining_count") == 10000
+        and quota_status.get("remaining_count") == 40000
+        and quota_status.get("credentials") == []
         and quota_status.get("backend_binding_id") == expected_backend_binding,
         repr(quota_status),
     )
+    previous_quota_day = (
+        datetime.now(KST).date() - timedelta(days=1)
+    ).isoformat()
+    previous_status, _ = request_json(
+        base_url,
+        f"api.php/api/v1/ops/dart-quota?quota_day={previous_quota_day}",
+        token=ADMIN_TOKEN,
+        expected_status=400,
+    )
+    require(
+        previous_status.get("error", {}).get("code") == "quota_date_mismatch",
+        repr(previous_status),
+    )
+    credential_id = "c" * 64
     attempt_id = "dart-list-smoke-attempt-0001"
     consume_payload = {
         "action": "consume",
         "attempt_id": attempt_id,
         "quota_day": quota_day,
+        "credential_id": credential_id,
         "operation": "list",
         "code_revision": "c" * 40,
         "expected_backend_binding_id": expected_backend_binding,
@@ -2509,7 +2525,10 @@ def run(base_url: str, mysql_container_id: str) -> None:
         and consumed.get("quota_day") == quota_day
         and consumed.get("accepted") == 1
         and consumed.get("used_count") == 1
-        and consumed.get("remaining_count") == 9999
+        and consumed.get("remaining_count") == 39999
+        and consumed.get("credential_id") == credential_id
+        and consumed.get("credential_used_count") == 1
+        and consumed.get("credential_remaining_count") == 39999
         and consumed.get("duplicate") is False
         and consumed.get("blocked_until") is None
         and consumed.get("backend_binding_id") == expected_backend_binding,
@@ -2546,6 +2565,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
         "action": "block_020",
         "attempt_id": attempt_id,
         "quota_day": quota_day,
+        "credential_id": credential_id,
         "reason": "opendart_status_020",
         "code_revision": "c" * 40,
         "expected_backend_binding_id": expected_backend_binding,
@@ -2589,7 +2609,190 @@ def run(base_url: str, mysql_container_id: str) -> None:
         },
         expected_status=409,
     )
-    require(blocked_new.get("error", {}).get("code") == "dart_quota_blocked", repr(blocked_new))
+    require(
+        blocked_new.get("error", {}).get("code") == "dart_credential_blocked",
+        repr(blocked_new),
+    )
+    second_credential = "d" * 64
+    second_consume = {
+        **consume_payload,
+        "attempt_id": "dart-list-smoke-attempt-0003",
+        "credential_id": second_credential,
+    }
+    second_consumed, _ = request_json(
+        base_url,
+        "api.php/api/v1/ops/dart-quota",
+        method="POST",
+        token=ADMIN_TOKEN,
+        payload=second_consume,
+    )
+    require(
+        second_consumed.get("used_count") == 2
+        and second_consumed.get("credential_used_count") == 1,
+        repr(second_consumed),
+    )
+    disable_payload = {
+        "action": "disable_901",
+        "attempt_id": second_consume["attempt_id"],
+        "quota_day": quota_day,
+        "credential_id": second_credential,
+        "reason": "opendart_status_901",
+        "code_revision": "c" * 40,
+        "expected_backend_binding_id": expected_backend_binding,
+    }
+    previous_consume = {
+        **consume_payload,
+        "attempt_id": "dart-prior-day-consume-must-fail",
+        "quota_day": previous_quota_day,
+    }
+    rejected_previous_consume, _ = request_json(
+        base_url,
+        "api.php/api/v1/ops/dart-quota",
+        method="POST",
+        token=ADMIN_TOKEN,
+        payload=previous_consume,
+        expected_status=400,
+    )
+    require(
+        rejected_previous_consume.get("error", {}).get("code")
+        == "quota_date_mismatch",
+        repr(rejected_previous_consume),
+    )
+    missing_previous_followup = {
+        "action": "block_020",
+        "attempt_id": "dart-prior-day-missing-attempt",
+        "quota_day": previous_quota_day,
+        "credential_id": "a" * 64,
+        "reason": "opendart_status_020",
+        "code_revision": "a" * 40,
+        "expected_backend_binding_id": expected_backend_binding,
+    }
+    rejected_previous_followup, _ = request_json(
+        base_url,
+        "api.php/api/v1/ops/dart-quota",
+        method="POST",
+        token=ADMIN_TOKEN,
+        payload=missing_previous_followup,
+        expected_status=409,
+    )
+    require(
+        rejected_previous_followup.get("error", {}).get("detail")
+        == "consumed_attempt_required",
+        repr(rejected_previous_followup),
+    )
+    disabled, _ = request_json(
+        base_url,
+        "api.php/api/v1/ops/dart-quota",
+        method="POST",
+        token=ADMIN_TOKEN,
+        payload=disable_payload,
+    )
+    require(
+        disabled.get("action") == "disable_901"
+        and disabled.get("credential_status") == "disabled_901",
+        repr(disabled),
+    )
+    disabled_new, _ = request_json(
+        base_url,
+        "api.php/api/v1/ops/dart-quota",
+        method="POST",
+        token=ADMIN_TOKEN,
+        payload={**second_consume, "attempt_id": "dart-list-smoke-attempt-0004"},
+        expected_status=409,
+    )
+    require(
+        disabled_new.get("error", {}).get("code") == "dart_credential_disabled",
+        repr(disabled_new),
+    )
+    previous_block_credential = "e" * 64
+    previous_disable_credential = "f" * 64
+    previous_block_attempt = "dart-prior-day-block-attempt"
+    previous_disable_attempt = "dart-prior-day-disable-attempt"
+    previous_block_revision = "e" * 40
+    previous_disable_revision = "f" * 40
+    prior_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    mysql_execute(
+        mysql_container_id,
+        "INSERT INTO ci_dart_quota_days "
+        "(quota_day,limit_count,used_count,blocked,block_reason,blocked_until,"
+        "blocked_by_attempt_id,blocked_at,created_at,updated_at) VALUES "
+        f"('{previous_quota_day}',40000,2,0,NULL,NULL,NULL,NULL,"
+        f"'{prior_now}','{prior_now}');"
+        "INSERT INTO ci_dart_quota_credentials "
+        "(credential_id,status,disable_reason,disabled_by_attempt_id,disabled_at,"
+        "created_at,updated_at) VALUES "
+        f"('{previous_block_credential}','active',NULL,NULL,NULL,"
+        f"'{prior_now}','{prior_now}'),"
+        f"('{previous_disable_credential}','active',NULL,NULL,NULL,"
+        f"'{prior_now}','{prior_now}');"
+        "INSERT INTO ci_dart_quota_credential_days "
+        "(quota_day,credential_id,limit_count,used_count,blocked,block_reason,"
+        "blocked_until,blocked_by_attempt_id,blocked_at,created_at,updated_at) VALUES "
+        f"('{previous_quota_day}','{previous_block_credential}',40000,1,0,NULL,"
+        f"NULL,NULL,NULL,'{prior_now}','{prior_now}'),"
+        f"('{previous_quota_day}','{previous_disable_credential}',40000,1,0,NULL,"
+        f"NULL,NULL,NULL,'{prior_now}','{prior_now}');"
+        "INSERT INTO ci_dart_quota_attempts "
+        "(attempt_id,quota_day,credential_id,operation,code_revision,"
+        "consume_request_sha256,block_request_sha256,disable_request_sha256,"
+        "status,consumed_units,consumed_at,blocked_at,disabled_at,updated_at) VALUES "
+        f"('{previous_block_attempt}','{previous_quota_day}',"
+        f"'{previous_block_credential}','list','{previous_block_revision}',"
+        f"'{hashlib.sha256(previous_block_attempt.encode()).hexdigest()}',"
+        f"NULL,NULL,'consumed',1,'{prior_now}',NULL,NULL,'{prior_now}'),"
+        f"('{previous_disable_attempt}','{previous_quota_day}',"
+        f"'{previous_disable_credential}','list','{previous_disable_revision}',"
+        f"'{hashlib.sha256(previous_disable_attempt.encode()).hexdigest()}',"
+        f"NULL,NULL,'consumed',1,'{prior_now}',NULL,NULL,'{prior_now}');",
+    )
+    previous_block_payload = {
+        "action": "block_020",
+        "attempt_id": previous_block_attempt,
+        "quota_day": previous_quota_day,
+        "credential_id": previous_block_credential,
+        "reason": "opendart_status_020",
+        "code_revision": previous_block_revision,
+        "expected_backend_binding_id": expected_backend_binding,
+    }
+    previous_blocked, _ = request_json(
+        base_url,
+        "api.php/api/v1/ops/dart-quota",
+        method="POST",
+        token=ADMIN_TOKEN,
+        payload=previous_block_payload,
+    )
+    expected_previous_block_until = (
+        datetime.fromisoformat(previous_quota_day)
+        .replace(tzinfo=KST)
+        .replace(hour=0, minute=0, second=0, microsecond=0)
+        + timedelta(days=1)
+    ).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    require(
+        previous_blocked.get("action") == "block_020"
+        and previous_blocked.get("blocked_until") == expected_previous_block_until,
+        repr(previous_blocked),
+    )
+    previous_disable_payload = {
+        "action": "disable_901",
+        "attempt_id": previous_disable_attempt,
+        "quota_day": previous_quota_day,
+        "credential_id": previous_disable_credential,
+        "reason": "opendart_status_901",
+        "code_revision": previous_disable_revision,
+        "expected_backend_binding_id": expected_backend_binding,
+    }
+    previous_disabled, _ = request_json(
+        base_url,
+        "api.php/api/v1/ops/dart-quota",
+        method="POST",
+        token=ADMIN_TOKEN,
+        payload=previous_disable_payload,
+    )
+    require(
+        previous_disabled.get("action") == "disable_901"
+        and previous_disabled.get("credential_status") == "disabled_901",
+        repr(previous_disabled),
+    )
     exercise_event_identity_datetime_storage(base_url, mysql_container_id)
     exercise_dart_review_corpus(base_url, mysql_container_id)
     print("PHP 7.3 governance release-state smoke passed.", flush=True)

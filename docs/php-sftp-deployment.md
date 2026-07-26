@@ -2,13 +2,13 @@
 
 `scripts/deploy_php_sftp.py`는 최종 Git SHA의 PHP API 묶음을 pinned SFTP로
 배포한다. FTP와 trust-on-first-use는 사용하지 않는다. 이 실행기는 DB 백업이나
-migration 실행을 대신하지 않는다. 운영 DB 백업, migration 001~011 검증·적용,
+migration 실행을 대신하지 않는다. 운영 DB 백업, migration 001~012 검증·적용,
 release state `closed` 확인이 먼저 완료돼야 한다.
 
 기존 v2 manifest가 있는 재배포에서는 실행기가 현재 manifest·파일 hash·API SHA와
 보호된 release state `closed`를 배포 시작 전과 첫 commit 직전에 다시 검증한다.
 최초 v2 배포에는 검증할 기존 v2 보호 경로가 없으므로, 이 시점의 `closed` 보장은
-사전에 완료한 migration 011 및 운영 DB release-state 검증에 의존한다. 신규 파일
+사전에 완료한 migration 011·012 및 운영 DB release-state 검증에 의존한다. 신규 파일
 설치 후에는 동일한 보호 API를 통해 다시 `closed`를 검증하며 실패하면 자동
 rollback한다.
 
@@ -18,7 +18,7 @@ rollback한다.
 
 ## 배포 대상과 commit 순서
 
-deployment manifest가 검증하는 핵심 파일은 정확히 다음 8개다.
+deployment manifest가 검증하는 핵심 파일은 정확히 다음 9개다.
 
 1. `.htaccess`
 2. `api.php`
@@ -28,13 +28,15 @@ deployment manifest가 검증하는 핵심 파일은 정확히 다음 8개다.
 6. `openapi.yaml`
 7. `openapi-v2.yaml`
 8. `migrations/011_global_terminal_v2.sql`
+9. `migrations/012_dart_credential_pool.sql`
 
-실제 전송에는 위 8개와 생성된 `deployment-manifest.json`이 포함된다. 설치는
+실제 전송에는 위 9개와 생성된 `deployment-manifest.json`이 포함된다. 설치는
 의존성을 먼저 두고 다음 순서로 수행한다.
 
 ```text
 .htaccess
 → migrations/011_global_terminal_v2.sql
+→ migrations/012_dart_credential_pool.sql
 → openapi-v2.yaml
 → openapi.yaml
 → governance_v2_write.php
@@ -93,12 +95,17 @@ python scripts/deploy_php_sftp.py plan `
   --expected-sha $releaseSha
 ```
 
+최초 schema 11→12 전환에서는 migration 012를 PHP보다 먼저 적용하지 않는다.
+구 PHP는 일 한도가 10,000이라고 가정하므로 DB만 먼저 40,000으로 바꾸면 새 PHP
+배포 실패 후 파일 롤백이 불가능해진다. 아래의 명시적 pending 전환 순서를
+사용한다. schema 12가 이미 검증된 이후의 일반 배포에는 이 예외가 없다.
+
 `plan`은 다음을 검증한다.
 
 - SHA가 현재 Git `HEAD`와 정확히 일치
 - 배포 대상 tracked file에 staged·unstaged 변경이 없음
 - symlink가 아닌 정규 파일
-- manifest의 8개 파일 집합과 각 SHA-256
+- manifest의 9개 파일 집합과 각 SHA-256
 - `api.php`와 manifest-last 순서
 
 JSON 출력에는 파일 경로·크기·hash·mode만 있고 비밀번호나 token은 없다.
@@ -117,14 +124,70 @@ dry-run은 SFTP host key와 인증을 검증한 뒤 현재 각 대상이
 `create|replace|unchanged`인지, 현재 mode와 hash가 무엇인지 출력한다. 원격
 stage, backup, lock, OPcache probe를 만들지 않는다.
 
-## 3. closed 배포
+## 3. schema 11→12 최초 전환과 closed 배포
 
-DB migration과 private PHP 설정을 별도로 검증한 뒤 실행한다.
+먼저 `DART_OFFICIAL_INGEST_ENABLED=false`를 설정하고 `ingest-official`과
+`official-backfill`의 queued·running 실행이 모두 0건인지 확인한다. 기존
+Pages와 레거시 수집은 계속 제공할 수 있지만 이 게이트는 migration과 smoke가
+끝날 때까지 다시 열지 않는다.
+
+새 PHP bundle을 schema 11 DB 위에 먼저 배포할 때만 다음 one-time bridge를
+사용한다.
+
+```powershell
+$env:BSIDE_CORE_RELEASE_SHA = $releaseSha
+python scripts/deploy_php_sftp.py deploy `
+  --local-root deploy/activist `
+  --expected-sha $releaseSha `
+  --confirm-production-write $releaseSha `
+  --schema-upgrade-from 11 `
+  --gabia-core-compatibility-host alignpartnerscap.com `
+  --remote-root /www_root/activist `
+  --public-url-root https://alignpe.gabia.io/activist `
+  --api-v2-base-url https://alignpe.gabia.io/activist/api.php/api/v2 `
+  --rollback-health-url 'https://alignpe.gabia.io/activist/api.php?action=health' `
+  --protected-token-env BSIDE_OPS_TOKEN
+```
+
+이 단계는 기존 release가 schema 11·`closed`임을 먼저 검증한다. 교체 뒤에는
+새 health와 OpenAPI가 schema 12·exact SHA이고 공개·보호 데이터 경로가 모두
+HTTP 503 `schema_version_mismatch`(`expected=12`, `actual=11`)인지 확인한다.
+성공 JSON의 `deployment_smoke_mode`가
+`pending_schema_upgrade_11_to_12`가 아니면 migration을 시작하지 않는다.
+
+그 다음에만 exact source bytes로 migration 012를 apply·replay한다.
+
+```powershell
+python scripts/apply_migration_012.py `
+  --migration deploy/activist/migrations/012_dart_credential_pool.sql
+```
+
+도구는 같은 MySQL 세션에서 `@bside_migration_012_sha256`을 설정하고 SQL 원본
+bytes를 적용한다. version 12 checksum과 manifest·서버 파일 hash가 모두
+일치해야 한다. 적용 직후 strict closed smoke를 실행한다.
+
+```powershell
+python .github/scripts/smoke-global-v2.py `
+  --base-url https://alignpe.gabia.io/activist/api.php/api/v2 `
+  --expected-sha $releaseSha `
+  --release-state closed `
+  --privileged-token-env BSIDE_OPS_TOKEN
+```
+
+strict smoke까지 성공한 뒤에만 `DART_OFFICIAL_INGEST_ENABLED=true`로 복원한다.
+PHP-first 단계가 실패하면 DB는 여전히 schema 11이므로 자동 파일 rollback이
+안전하다. migration 012가 적용된 뒤에는 구 PHP 파일만 단독 복원하지 않는다.
+구 release로 돌아가야 한다면 DART writer가 정지된 상태에서 pre-migration DB
+backup을 먼저 복원한 뒤 해당 PHP bundle을 복원한다.
+
+schema 12가 이미 운영 중인 이후의 일반 closed 배포는 bridge 인자 없이 다음과
+같이 실행한다.
 
 ```powershell
 python scripts/deploy_php_sftp.py deploy `
   --local-root deploy/activist `
   --expected-sha $releaseSha `
+  --confirm-production-write $releaseSha `
   --remote-root /www_root/activist `
   --public-url-root https://alignpe.gabia.io/activist `
   --api-v2-base-url https://alignpe.gabia.io/activist/api.php/api/v2 `
@@ -164,8 +227,8 @@ python scripts/deploy_php_sftp.py deploy `
 
 API smoke는 다음을 모두 요구한다.
 
-- `/health`: HTTP 200, `bside-global-market-terminal`, schema 11, exact SHA
-- `/openapi.yaml`: YAML, v2 header, schema 11
+- `/health`: HTTP 200, `bside-global-market-terminal`, schema 12, exact SHA
+- `/openapi.yaml`: YAML, v2 header, schema 12
 - 존재하지 않는 v2 경로: HTTP 404 `not_found`
 - `/events`: HTTP 503 `global_terminal_release_closed`
 - 인증 없는 `/admin/release-state`: HTTP 401 `bearer_token_required`

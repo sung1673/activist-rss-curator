@@ -7,8 +7,11 @@ import httpx
 import pytest
 
 from curator.dart_quota import (
+    DartCredentialUnavailableError,
+    DartGlobalQuotaExceededError,
     DartQuotaClient,
     DartQuotaLedgerError,
+    DartQuotaLedgerRejectedError,
     durable_dart_quota_configured,
     durable_dart_quota_required,
 )
@@ -17,6 +20,7 @@ from curator.official_sources import DartConnector
 
 REVISION = "a" * 40
 BINDING_ID = "b" * 64
+CREDENTIAL_ID = "c" * 64
 NOW = datetime(2026, 7, 23, 3, 0, tzinfo=timezone.utc)  # 2026-07-23 KST
 
 
@@ -26,11 +30,23 @@ def _ack(body: dict[str, object], *, used: int, duplicate: bool = False) -> dict
         "action": body["action"],
         "attempt_id": body["attempt_id"],
         "quota_day": body["quota_day"],
+        "credential_id": body["credential_id"],
         "backend_binding_id": BINDING_ID,
         "accepted": 1,
-        "limit_count": 10_000,
+        "limit_count": 40_000,
         "used_count": used,
-        "remaining_count": 10_000 - used,
+        "remaining_count": 40_000 - used,
+        "credential_limit_count": 40_000,
+        "credential_used_count": used,
+        "credential_remaining_count": 40_000 - used,
+        "credential_status": (
+            "disabled_901" if body["action"] == "disable_901" else "active"
+        ),
+        "credential_blocked_until": (
+            "2026-07-24T00:00:00+09:00"
+            if body["action"] == "block_020"
+            else None
+        ),
         "duplicate": duplicate,
         "blocked_until": (
             "2026-07-24T00:00:00+09:00" if body["action"] == "block_020" else None
@@ -43,6 +59,7 @@ def _client(handler, **overrides: object) -> DartQuotaClient:
         base_url="https://api.example.test/activist/api.php/api/v1",
         token="ops-token",
         backend_binding_id=BINDING_ID,
+        credential_id=CREDENTIAL_ID,
         code_revision=REVISION,
         phase="test",
         transport=httpx.MockTransport(handler),
@@ -72,6 +89,7 @@ def test_consume_retries_lost_ack_with_same_attempt_id() -> None:
         "action": "consume",
         "attempt_id": "gha-123-2-ingest-test-00000001",
         "quota_day": "2026-07-23",
+        "credential_id": CREDENTIAL_ID,
         "operation": "list",
         "code_revision": REVISION,
         "expected_backend_binding_id": BINDING_ID,
@@ -223,6 +241,91 @@ def test_status_020_must_receive_durable_block_ack() -> None:
     assert actions == ["consume", "block_020"]
 
 
+def test_status_901_permanently_disables_only_permit_credential() -> None:
+    bodies: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        bodies.append(body)
+        return httpx.Response(200, json=_ack(body, used=1))
+
+    quota = _client(handler)
+    permit = quota.consume(operation="list")
+    quota.disable_901(permit)
+
+    assert [body["action"] for body in bodies] == ["consume", "disable_901"]
+    assert bodies[1]["credential_id"] == CREDENTIAL_ID
+    assert bodies[1]["reason"] == "opendart_status_901"
+    assert bodies[1]["attempt_id"] == permit.attempt_id
+
+
+@pytest.mark.parametrize(
+    ("error_code", "reason"),
+    (
+        ("dart_credential_blocked", "blocked_020"),
+        ("dart_credential_disabled", "disabled_901"),
+    ),
+)
+def test_one_unavailable_credential_has_stable_skip_error(
+    error_code: str,
+    reason: str,
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            409,
+            json={
+                "ok": False,
+                "error": {
+                    "code": error_code,
+                    "credential_id": CREDENTIAL_ID,
+                    "credential_reason": reason,
+                },
+            },
+        )
+
+    with pytest.raises(DartCredentialUnavailableError) as caught:
+        _client(handler).consume()
+
+    assert caught.value.reason == reason
+    assert caught.value.credential_id == CREDENTIAL_ID
+
+
+def test_global_pool_exhaustion_is_not_a_credential_skip() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={"ok": False, "error": {"code": "dart_quota_exhausted"}},
+        )
+
+    with pytest.raises(DartGlobalQuotaExceededError) as caught:
+        _client(handler).consume()
+    assert not isinstance(caught.value, DartCredentialUnavailableError)
+
+
+def test_non_exhaustion_conflict_is_not_classified_as_global_quota() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            409,
+            json={"ok": False, "error": {"code": "backend_binding_mismatch"}},
+        )
+
+    with pytest.raises(DartQuotaLedgerRejectedError) as caught:
+        _client(handler).consume()
+    assert not isinstance(caught.value, DartGlobalQuotaExceededError)
+
+
+def test_per_call_credential_id_overrides_default_without_key_material() -> None:
+    selected = "d" * 64
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        payload = _ack(body, used=1)
+        return httpx.Response(200, json=payload)
+
+    permit = _client(handler).consume(credential_id=selected)
+    assert permit.credential_id == selected
+
+
 def test_incomplete_ack_fails_closed() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
@@ -232,6 +335,19 @@ def test_incomplete_ack_fails_closed() -> None:
 
     with pytest.raises(DartQuotaLedgerError, match="accepted=1"):
         _client(handler).consume(operation="corp_code")
+
+
+@pytest.mark.parametrize(
+    "credential_id",
+    ("", "legacy-single", "C" * 64, "f" * 63, "key-01"),
+)
+def test_new_physical_attempt_requires_full_lowercase_sha256_credential_id(
+    credential_id: str,
+) -> None:
+    with pytest.raises(DartQuotaLedgerError, match="credential_id"):
+        _client(lambda _request: httpx.Response(500)).consume(
+            credential_id=credential_id
+        )
 
 
 def test_generated_attempt_id_always_fits_server_column(
@@ -251,6 +367,7 @@ def test_generated_attempt_id_always_fits_server_column(
         base_url="https://api.example.test/api/v1",
         token="ops-token",
         backend_binding_id=BINDING_ID,
+        credential_id=CREDENTIAL_ID,
         code_revision=REVISION,
         phase="very-long-phase-" * 8,
         transport=httpx.MockTransport(handler),
@@ -279,6 +396,7 @@ def test_restarted_client_in_same_github_job_gets_a_new_process_nonce(
         "base_url": "https://api.example.test/api/v1",
         "token": "ops-token",
         "backend_binding_id": BINDING_ID,
+        "credential_id": CREDENTIAL_ID,
         "code_revision": REVISION,
         "phase": "official-ingest",
         "transport": httpx.MockTransport(handler),

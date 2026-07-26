@@ -19,12 +19,17 @@ from .dart_quota import (
 )
 from .official_sources import (
     DartConnector,
+    DartInvocationQuota,
     DartQuotaExceededError,
     KindConnector,
     OfficialDisclosure,
     disclosure_payloads,
     parse_dart_disclosure,
     parse_kind_disclosure,
+)
+from .opendart_credentials import (
+    OpenDartCredentialConfigurationError,
+    load_opendart_credentials,
 )
 from .official_source_rights import (
     OfficialSourceRightClient,
@@ -621,7 +626,15 @@ def run(
         company_master_sync=company_master_sync_requested,
     )
 
-    api_key = os.environ.get("DART_API_KEY", "").strip()
+    dart_credential_configuration_error = 0
+    try:
+        dart_credentials = load_opendart_credentials()
+    except OpenDartCredentialConfigurationError:
+        # Credential values and parser details are intentionally absent from
+        # run payloads. A bad or ambiguous pool is a failed source, never a
+        # silent legacy fallback.
+        dart_credentials = ()
+        dart_credential_configuration_error = 1
     dart_enabled = bool(settings.get("dart_enabled", True))
     page_count = min(100, max(1, int(settings.get("page_count", 100))))
     max_pages = max(1, int(settings.get("max_pages", 100)))
@@ -639,7 +652,10 @@ def run(
     source_duplicates = {"dart": 0, "kind": 0}
     source_discarded = {"dart": 0, "kind": 0}
     source_errors = {
-        "dart": int(dart_enabled and not api_key),
+        "dart": int(
+            dart_enabled
+            and (not dart_credentials or dart_credential_configuration_error)
+        ),
         "kind": kind_configuration_error,
     }
     source_failure_kinds: dict[str, dict[str, int]] = {
@@ -665,18 +681,24 @@ def run(
     raw_fetched = 0
     disclosures: list[OfficialDisclosure] = []
     company_master: list[dict[str, object]] = []
-    if api_key and dart_enabled:
+    if dart_credentials and dart_enabled and not dart_credential_configuration_error:
         shared_budget = settings.get("dart_request_budget")
         if shared_budget is None and (
             durable_dart_quota_required() or durable_dart_quota_configured()
         ):
-            shared_budget = durable_dart_quota_client(
-                phase=os.environ.get("CURATOR_DART_QUOTA_PHASE", "official-ingest")
+            shared_budget = DartInvocationQuota(
+                durable_dart_quota_client(
+                    phase=os.environ.get(
+                        "CURATOR_DART_QUOTA_PHASE",
+                        "official-ingest",
+                    )
+                ),
+                limit=10_000,
             )
         dart_connector = (
-            DartConnector(api_key, request_budget=shared_budget)
+            DartConnector(dart_credentials, request_budget=shared_budget)
             if shared_budget is not None
-            else DartConnector(api_key)
+            else DartConnector(dart_credentials)
         )
         source_started = time.perf_counter()
         source_buffer: list[OfficialDisclosure] = []
@@ -793,7 +815,9 @@ def run(
     source_outcomes = {
         "dart": {
             "enabled": dart_enabled,
-            "configured": bool(api_key),
+            "configured": bool(
+                dart_credentials and not dart_credential_configuration_error
+            ),
             "fetched": source_fetched["dart"],
             # ``fetched`` is connector volume, while ``raw_count`` is the
             # deduplicated governance-document denominator actually submitted

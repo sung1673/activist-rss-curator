@@ -60,7 +60,7 @@ class ContractHandler(BaseHTTPRequestHandler):
                 else "bside-global-market-terminal"
             )
             revision = "b" * 40 if self.failure == "wrong_sha" else REVISION
-            schema = 10 if self.failure == "wrong_schema" else 11
+            schema = 11 if self.failure == "wrong_schema" else 12
             self.send_payload(
                 200,
                 {
@@ -79,7 +79,7 @@ class ContractHandler(BaseHTTPRequestHandler):
                 "openapi: 3.1.0\n"
                 "info:\n"
                 "  title: BSIDE Global Market Terminal API\n"
-                "x-schema-version: 11\n"
+                "x-schema-version: 12\n"
                 "paths:\n"
                 "  /health:\n"
                 "    get: {}\n"
@@ -386,7 +386,7 @@ def test_php_and_openapi_expose_the_operational_identity_contract() -> None:
     )
     health = openapi["components"]["schemas"]["HealthEnvelope"]
     assert "schema_version" in health["required"]
-    assert health["properties"]["schema_version"] == {"const": 11}
+    assert health["properties"]["schema_version"] == {"const": 12}
 
 
 def test_workflows_reuse_the_same_operational_smoke() -> None:

@@ -31,7 +31,15 @@ from .official_source_rights import (
     OfficialSourceRightError,
     source_right_api_configured,
 )
-from .official_sources import DartRequestBudget
+from .official_sources import (
+    DartInvocationQuota,
+    DartRequestBudget,
+    DartRequestQuota,
+)
+from .opendart_credentials import (
+    OpenDartCredentialConfigurationError,
+    load_opendart_credentials,
+)
 from .remote_api import remote_api_configured
 
 
@@ -85,6 +93,8 @@ class BackfillOptions:
     page_count: int = 100
     max_pages: int = 100
     max_chunks: int = 0
+    # Per invocation; the durable credential-pool ledger owns the separate
+    # 40,000-request KST-day ceiling.
     request_budget: int = 10_000
     dry_run: bool = False
     restart: bool = False
@@ -330,8 +340,15 @@ def save_checkpoint(path: Path, checkpoint: dict[str, object]) -> None:
 
 def validate_runtime(options: BackfillOptions) -> None:
     missing: list[str] = []
-    if "dart" in options.sources and not os.environ.get("DART_API_KEY", "").strip():
-        missing.append("DART_API_KEY")
+    if "dart" in options.sources:
+        try:
+            dart_credentials = load_opendart_credentials()
+        except OpenDartCredentialConfigurationError as exc:
+            raise BackfillConfigurationError(
+                "OpenDART credential configuration is invalid"
+            ) from exc
+        if not dart_credentials:
+            missing.append("OPENDART_API_KEYS or DART_API_KEY")
     if "kind" in options.sources and not os.environ.get("KIND_DISCLOSURE_ENDPOINT", "").strip():
         missing.append("KIND_DISCLOSURE_ENDPOINT")
     if "kind" in options.sources:
@@ -524,15 +541,20 @@ def run_backfill(
     selected = pending[: options.max_chunks] if options.max_chunks else pending
     results: list[dict[str, object]] = []
     invocation_failures = 0
-    dart_request_budget = None
+    dart_request_budget: DartRequestQuota | None = None
     if "dart" in options.sources:
-        dart_request_budget = (
-            durable_dart_quota_client(
-                phase=os.environ.get("CURATOR_DART_QUOTA_PHASE", "official-backfill")
+        if durable_dart_quota_required() or durable_dart_quota_configured():
+            dart_request_budget = DartInvocationQuota(
+                durable_dart_quota_client(
+                    phase=os.environ.get(
+                        "CURATOR_DART_QUOTA_PHASE",
+                        "official-backfill",
+                    )
+                ),
+                limit=options.request_budget,
             )
-            if durable_dart_quota_required() or durable_dart_quota_configured()
-            else DartRequestBudget(options.request_budget)
-        )
+        else:
+            dart_request_budget = DartRequestBudget(options.request_budget)
 
     for window in selected:
         previous_failure = failed_windows.get(window.key)

@@ -52,7 +52,9 @@ concurrency:
 
 jobs:
   backfill:
-    if: github.ref_name == github.event.repository.default_branch
+    if: >-
+      vars.DART_OFFICIAL_INGEST_ENABLED == 'true' &&
+      github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     timeout-minutes: 360
     environment:
@@ -153,10 +155,12 @@ jobs:
           PY
 
       - name: Validate operational configuration
+        id: dart_credentials
         env:
           MODE: ${{ inputs.mode }}
           SOURCE: ${{ inputs.source }}
-          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          OPENDART_API_KEYS: ${{ secrets.OPENDART_API_KEYS }}
+          DART_API_KEY: ${{ secrets.OPENDART_API_KEYS == '' && secrets.DART_API_KEY || '' }}
           KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
           ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
           ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
@@ -169,7 +173,9 @@ jobs:
           set -euo pipefail
           required=()
           if [[ "$SOURCE" == "dart" || "$SOURCE" == "both" ]]; then
-            required+=(DART_API_KEY BSIDE_API_BASE_URL BSIDE_OPS_TOKEN BSIDE_BACKEND_BINDING_ID)
+            python .github/scripts/mask-opendart-credentials.py \
+              --github-output "$GITHUB_OUTPUT"
+            required+=(BSIDE_API_BASE_URL BSIDE_OPS_TOKEN BSIDE_BACKEND_BINDING_ID)
           fi
           if [[ "$SOURCE" == "kind" || "$SOURCE" == "both" ]]; then
             required+=(KIND_DISCLOSURE_ENDPOINT BSIDE_API_BASE_URL BSIDE_OPS_TOKEN BSIDE_BACKEND_BINDING_ID)
@@ -202,7 +208,8 @@ jobs:
         if: inputs.mode == 'dry-run' && inputs.source != 'kind'
         id: dart_canary
         env:
-          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          OPENDART_API_KEYS: ${{ secrets.OPENDART_API_KEYS }}
+          DART_API_KEY: ${{ secrets.OPENDART_API_KEYS == '' && secrets.DART_API_KEY || '' }}
           BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
           BSIDE_BACKEND_BINDING_ID: ${{ vars.BSIDE_BACKEND_BINDING_ID }}
@@ -226,9 +233,51 @@ jobs:
           report = json.loads(Path(os.environ["DART_CANARY_REPORT"]).read_text(encoding="utf-8"))
           if report.get("status") != "succeeded" or report.get("dry_run") is not True:
               raise SystemExit("DART canary did not produce successful dry-run evidence")
-          used = int(report.get("requests_used", -1))
-          if used < 0 or used > 10_000:
+          used = report.get("requests_used")
+          if type(used) is not int or used < 0 or used > 10_000:
               raise SystemExit("DART canary returned invalid request usage")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(f"requests_used={used}\n")
+          PY
+
+      - name: Resolve shared DART invocation budget
+        id: dart_budget
+        env:
+          BACKFILL_MODE: ${{ inputs.mode }}
+          BACKFILL_SOURCE: ${{ inputs.source }}
+          CANARY_REQUESTS_USED: ${{ steps.dart_canary.outputs.requests_used }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          mode = os.environ["BACKFILL_MODE"]
+          source = os.environ["BACKFILL_SOURCE"]
+          raw_used = os.environ.get("CANARY_REQUESTS_USED", "")
+          canary_required = mode == "dry-run" and source != "kind"
+
+          if canary_required:
+              if not raw_used.isascii() or not raw_used.isdecimal():
+                  raise SystemExit("DART canary request usage output is missing or invalid")
+              used = int(raw_used)
+          else:
+              if raw_used:
+                  raise SystemExit("unexpected DART canary request usage output")
+              used = 0
+
+          if used < 0 or used > 10_000:
+              raise SystemExit("DART canary request usage exceeds the invocation budget")
+          remaining = max(0, 10_000 - used)
+          if source != "kind" and remaining == 0:
+              raise SystemExit(
+                  "DART canary exhausted the shared 10,000-request invocation budget"
+              )
+
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(f"canary_requests_used={used}\n")
+              output.write(f"remaining_request_budget={remaining}\n")
           PY
 
       - name: Resolve previous matching checkpoint
@@ -310,7 +359,8 @@ jobs:
           CURATOR_REQUIRE_REMOTE_API: ${{ inputs.mode == 'apply' && '1' || '0' }}
           CURATOR_ENABLE_KIND: ${{ inputs.source == 'dart' && '0' || '1' }}
           CURATOR_REQUIRE_KIND: ${{ inputs.source == 'dart' && '0' || '1' }}
-          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          OPENDART_API_KEYS: ${{ secrets.OPENDART_API_KEYS }}
+          DART_API_KEY: ${{ secrets.OPENDART_API_KEYS == '' && secrets.DART_API_KEY || '' }}
           KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
           KIND_API_KEY: ${{ secrets.KIND_API_KEY }}
           ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
@@ -321,16 +371,25 @@ jobs:
           BSIDE_BACKEND_BINDING_ID: ${{ vars.BSIDE_BACKEND_BINDING_ID }}
           CURATOR_REQUIRE_DURABLE_DART_QUOTA: "1"
           CURATOR_DART_QUOTA_PHASE: official-backfill
+          DART_REQUEST_BUDGET: ${{ steps.dart_budget.outputs.remaining_request_budget }}
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$DART_REQUEST_BUDGET" =~ ^[0-9]+$ ]] || {
+            echo "::error::The shared DART invocation budget is missing or invalid."
+            exit 1
+          }
+          if (( DART_REQUEST_BUDGET < 1 || DART_REQUEST_BUDGET > 10000 )); then
+            echo "::error::The remaining DART invocation budget must be between 1 and 10000."
+            exit 1
+          fi
           args=(
             --from-date "$BACKFILL_FROM_DATE"
             --to-date "$BACKFILL_TO_DATE"
             --source "$BACKFILL_SOURCE"
             --chunk-days 1
             --max-chunks "$BACKFILL_MAX_WINDOWS"
-            --request-budget 10000
+            --request-budget "$DART_REQUEST_BUDGET"
             --checkpoint "$CHECKPOINT_PATH"
           )
           if [[ "$BACKFILL_MODE" == "dry-run" ]]; then

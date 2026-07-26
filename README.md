@@ -84,6 +84,7 @@ BSIDE_ADMIN_TOKEN
 BSIDE_RELEASE_AUTHORIZER_TOKEN
 BSIDE_EDITOR_TOKEN
 GOVERNANCE_PREVIEW_TOKEN
+OPENDART_API_KEYS
 DART_API_KEY
 KIND_API_KEY
 OFFICIAL_SITE_ALLOWLIST_B64
@@ -95,6 +96,17 @@ TELEGRAM_API_HASH
 TELEGRAM_SESSION_STRING
 ```
 
+OpenDART 운영 자격정보는 보호된 `governance-runtime` 환경의
+`OPENDART_API_KEYS`에 등록한다. 값은 줄바꿈 또는 쉼표로 구분한 중복 없는
+소문자 40자리 hex 키 목록이다. pool이 있으면 이를 우선 사용하고,
+`DART_API_KEY`는 pool이 없는 기존 단일 키 환경의 호환 fallback으로만
+사용한다. 두 Secret을 동시에 주입하지 않는다. GitHub Actions는 수집 전에 각
+키를 개별 `::add-mask::` 처리하며 키 원문, 키가 든 요청 URL, provider 응답
+본문을 로그나 artifact에 남기지 않는다. 모든 DART workflow는 KST 일자별
+durable 합산 40,000건 원장을 공유하고 단일 실행은 최대 10,000건으로 제한한다.
+`020`은 해당 키만 다음 KST 자정까지 차단하고 다음 키로 계속하며, `901`은 해당
+키를 durable disable하고 새 키로 교체할 때까지 다시 사용하지 않는다.
+
 Production Alpha는 `EDINET_API_KEY`와 `COMPANIES_HOUSE_API_KEY`를 사용하지 않는다. 일본·영국 connector는 서버에서 정책상 비활성화되며, 이전 Secret이나 variable이 남아 있어도 수집을 재활성화할 수 없다.
 
 `BSIDE_RELEASE_AUTHORIZER_TOKEN`은 repository 공용 Secret이 아니라 reviewer가 보호하는 `governance-release` environment에만 둔다. PHP에는 정확한 `release_authorizer` 역할의 SHA-256 hash로 등록하며, 일반 admin token은 승인 발급을 대신할 수 없다. 5분 `global-alpha-watchdog.yml`은 읽기 전용 `BSIDE_OPS_TOKEN`만 사용하고 admin·release-authorizer token을 받지 않는다.
@@ -105,7 +117,7 @@ Production Alpha는 `EDINET_API_KEY`와 `COMPANIES_HOUSE_API_KEY`를 사용하�
 
 현재 제품 정책은 Telegram 채팅으로 콘텐츠를 발송하지 않는 것이다. `ENABLE_TELEGRAM_DELIVERY=false`, `config.yaml`의 `telegram.enabled=false`, 빈 `telegram.chat_id`를 함께 유지하며, Python sender·로컬/원격 outbox·PHP enqueue/claim·Actions worker가 모두 코드 수준에서 거절하므로 runtime 값이나 수동 입력으로 재활성화할 수 없다. `TELEGRAM_API_ID`·`TELEGRAM_API_HASH`·`TELEGRAM_SESSION_STRING`을 이용한 허가 공개 채널 읽기 수집은 이 발송 정책과 분리되어 계속 운영한다. 비공개 Telegram 관리자 채팅과 `TELEGRAM_ADMIN_CHAT_ID`도 사용하지 않으며, 관리자는 고정 URL `https://news.bside.ai/feed/telegram-admin.html`에서 `TELEGRAM_ADMIN_ACCESS_TOKEN`을 직접 입력한다.
 
-주요 Repository variable은 `ACTIVIST_PUBLIC_API_URL`, `GOVERNANCE_API_BASE_URL`, `BSIDE_PUBLIC_WEB_URL`, `KIND_DISCLOSURE_ENDPOINT`, `SEC_EDGAR_USER_AGENT`, `CA_OFFICIAL_LINKS_JSON`, `AU_OFFICIAL_LINKS_JSON`, `PAGES_OWNER=legacy|governance`, `GOVERNANCE_PIPELINE_MODE=off|dart_canary|shadow|live`, `KIND_CONNECTOR_MODE=off|active`, `GLOBAL_ALPHA_OBSERVATION_ENABLED=false|true`다. KIND는 Production Alpha에서 기본 `off`이며 `active`로 명시한 경우에만 예약 DART 실행과 일반 watchdog이 KIND 설정·수집 최신성을 함께 요구한다. 일본·영국의 과거 mode·allowlist·Secret은 Alpha runtime이 읽지 않으며 관리 API로도 활성화할 수 없다. Alpha 24시간 관측은 기본 `false`이고 준비가 끝난 뒤에만 `true`로 연다. 잘못된 값과 이전 boolean 충돌은 fail-closed한다. `ENABLE_TELEGRAM_DELIVERY=false`와 `ENABLE_GOVERNANCE_DELIVERY=false`는 유지하지만 어떤 runtime 값도 outbound를 다시 활성화할 수 없다. 전체 목록과 예약 시각은 [운영 자동화 문서](docs/operations-automation.md)를 따른다.
+주요 Repository variable은 `ACTIVIST_PUBLIC_API_URL`, `GOVERNANCE_API_BASE_URL`, `BSIDE_PUBLIC_WEB_URL`, `KIND_DISCLOSURE_ENDPOINT`, `SEC_EDGAR_USER_AGENT`, `CA_OFFICIAL_LINKS_JSON`, `AU_OFFICIAL_LINKS_JSON`, `PAGES_OWNER=legacy|governance`, `GOVERNANCE_PIPELINE_MODE=off|dart_canary|shadow|live`, `DART_OFFICIAL_INGEST_ENABLED=false|true`, `KIND_CONNECTOR_MODE=off|active`, `GLOBAL_ALPHA_OBSERVATION_ENABLED=false|true`다. DART gate는 schema 12 PHP·MySQL exact smoke 전까지 `false`로 유지하며 예약 수집과 수동 공식 백필을 함께 차단한다. KIND는 Production Alpha에서 기본 `off`이며 `active`로 명시한 경우에만 예약 DART 실행과 일반 watchdog이 KIND 설정·수집 최신성을 함께 요구한다. 일본·영국의 과거 mode·allowlist·Secret은 Alpha runtime이 읽지 않으며 관리 API로도 활성화할 수 없다. Alpha 24시간 관측은 기본 `false`이고 준비가 끝난 뒤에만 `true`로 연다. 잘못된 값과 이전 boolean 충돌은 fail-closed한다. `ENABLE_TELEGRAM_DELIVERY=false`와 `ENABLE_GOVERNANCE_DELIVERY=false`는 유지하지만 어떤 runtime 값도 outbound를 다시 활성화할 수 없다. 전체 목록과 예약 시각은 [운영 자동화 문서](docs/operations-automation.md)를 따른다.
 
 ### 글로벌 터미널 Production Alpha
 

@@ -69,7 +69,7 @@ preview 평문 token은 GitHub Pages 자산, URL query, PHP 설정에 저장하�
 
 회사·행동주주 공식사이트 connector는 ops/admin 인증의 `GET /api/v1/ops/official-site-rights`에서 현재 유효하고 재배포가 허용된 allowlist만 받는다. `ai_allowed=false`여도 원문 저장·재배포 범위가 유효하면 수집할 수 있지만 AI 입력에는 사용할 수 없다. 수집 결과는 HMAC `upsert_official_site_snapshot` 한 요청으로 적용하며 snapshot·ACK·문서 버전·사건 관측을 한 transaction으로 확정한다. 같은 외부 ID의 동일 내용은 멱등이고 내용이 바뀌면 기존 문서를 덮지 않고 새 `version_no`와 `correction_of_document_id`를 만든다.
 
-DART를 호출하는 모든 workflow는 실제 HTTP 요청 직전에 ops/admin 인증의 `POST /api/v1/ops/dart-quota`로 1건을 소비한다. 요청은 `action=consume`, 고유 `attempt_id`, 현재 KST `quota_day`, `operation=list|corp_code`, 실행 `code_revision`만 포함한다. 같은 요청 재전송은 소비량을 늘리지 않으며 다른 payload로 같은 ID를 쓰면 409다. OpenDART 코드 `020`을 받으면 같은 attempt로 `action=block_020`, `reason=opendart_status_020`을 기록하고 다음 KST 자정까지 신규 소비를 차단한다. `GET /ops/dart-quota?quota_day=YYYY-MM-DD`는 읽기 전용 상태 조회다.
+DART를 호출하는 모든 workflow는 실제 HTTP 요청 직전에 ops 인증의 `POST /api/v1/ops/dart-quota`로 물리 요청 1건을 소비한다. `action=consume` 요청에는 고유 `attempt_id`, 현재 KST `quota_day`, 비밀이 아닌 소문자 SHA-256 `credential_id`, `operation=list|corp_code`, 실행 `code_revision`, 검증된 backend binding을 포함한다. 모든 키를 합산한 KST 일일 상한은 40,000건이며 각 실행의 별도 안전 상한은 10,000건이다. 같은 요청 재전송은 소비량을 늘리지 않으며 다른 payload로 같은 ID를 쓰면 409다. OpenDART 코드 `020`을 받으면 같은 attempt로 `action=block_020`, `reason=opendart_status_020`을 기록해 해당 키만 다음 KST 자정까지 차단하고 다른 유효 키로 계속한다. 코드 `901`은 `action=disable_901`, `reason=opendart_status_901`로 해당 키만 durable disable한다. `GET /ops/dart-quota?quota_day=YYYY-MM-DD`는 전역 사용량과 credential별 상태를 반환하는 읽기 전용 조회다. 키 원문은 API, DB, 로그, checkpoint, artifact에 기록하지 않는다.
 
 ## 공개 상태와 이용권한
 

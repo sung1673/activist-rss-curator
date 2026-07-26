@@ -88,8 +88,9 @@ jobs:
             --code-revision "$GITHUB_SHA" \
             --output deploy/activist/deployment-manifest.json
           jq -e --arg revision "$GITHUB_SHA" \
-            '.schema_version == 1 and .code_revision == $revision and (.files | length) == 8
-              and (.files["migrations/011_global_terminal_v2.sql"] | test("^[0-9a-f]{64}$"))' \
+            '.schema_version == 1 and .code_revision == $revision and (.files | length) == 9
+              and (.files["migrations/011_global_terminal_v2.sql"] | test("^[0-9a-f]{64}$"))
+              and (.files["migrations/012_dart_credential_pool.sql"] | test("^[0-9a-f]{64}$"))' \
             deploy/activist/deployment-manifest.json > /dev/null
 
       - name: Install global connector smoke dependency
@@ -250,10 +251,6 @@ jobs:
             --execute="ALTER TABLE ci_documents DROP INDEX uq_document_right_external_version;"
           docker exec -i "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
             < "$RUNNER_TEMP/008_official_site_snapshot_receipts_ci.sql"
-          python3 tests/php73_release_state_smoke.py \
-            --base-url http://127.0.0.1:8787 \
-            --mysql-container-id "$MYSQL_CONTAINER_ID"
-
       - name: Validate global terminal v2 schema and HTTP lifecycle
         timeout-minutes: 7
         shell: bash
@@ -264,13 +261,15 @@ jobs:
           htaccess_backup="$RUNNER_TEMP/activist.htaccess"
           v1_openapi_backup="$RUNNER_TEMP/openapi.yaml"
           core_backup="$RUNNER_TEMP/openapi-v2.yaml"
-          migration_backup="$RUNNER_TEMP/011_global_terminal_v2.sql"
+          migration_011_backup="$RUNNER_TEMP/011_global_terminal_v2.sql"
+          migration_012_backup="$RUNNER_TEMP/012_dart_credential_pool.sql"
           cp deploy/activist/deployment-manifest.json "$identity_backup"
           cp deploy/activist/.htaccess "$htaccess_backup"
           cp deploy/activist/openapi.yaml "$v1_openapi_backup"
           cp deploy/activist/openapi-v2.yaml "$core_backup"
-          cp deploy/activist/migrations/011_global_terminal_v2.sql "$migration_backup"
-          trap 'cp "$identity_backup" deploy/activist/deployment-manifest.json; cp "$htaccess_backup" deploy/activist/.htaccess; cp "$v1_openapi_backup" deploy/activist/openapi.yaml; cp "$core_backup" deploy/activist/openapi-v2.yaml; cp "$migration_backup" deploy/activist/migrations/011_global_terminal_v2.sql' EXIT
+          cp deploy/activist/migrations/011_global_terminal_v2.sql "$migration_011_backup"
+          cp deploy/activist/migrations/012_dart_credential_pool.sql "$migration_012_backup"
+          trap 'cp "$identity_backup" deploy/activist/deployment-manifest.json; cp "$htaccess_backup" deploy/activist/.htaccess; cp "$v1_openapi_backup" deploy/activist/openapi.yaml; cp "$core_backup" deploy/activist/openapi-v2.yaml; cp "$migration_011_backup" deploy/activist/migrations/011_global_terminal_v2.sql; cp "$migration_012_backup" deploy/activist/migrations/012_dart_credential_pool.sql' EXIT
           curl --fail-with-body --silent --show-error \
             http://127.0.0.1:8787/api.php/api/v2/health > "$RUNNER_TEMP/v2-health.json"
           jq -e --arg revision "$GITHUB_SHA" \
@@ -326,7 +325,7 @@ jobs:
             http://127.0.0.1:8787/api.php/api/v2/health)"
           test "$mismatched_migration_status" = "503"
           grep -q 'deployment_core_hash_mismatch' "$RUNNER_TEMP/v2-health-migration-mismatch.json"
-          cp "$migration_backup" deploy/activist/migrations/011_global_terminal_v2.sql
+          cp "$migration_011_backup" deploy/activist/migrations/011_global_terminal_v2.sql
           curl --fail-with-body --silent --show-error \
             http://127.0.0.1:8787/api.php/api/v2/health \
             | jq -e --arg revision "$GITHUB_SHA" '.code_revision == $revision' > /dev/null
@@ -430,6 +429,47 @@ jobs:
             --batch --skip-column-names activist_ci \
             --execute="SELECT migration_name,migration_checksum FROM ci_schema_migrations WHERE migration_version=11;")"
           test "$manifest" = "$(printf '011_global_terminal_v2\t%s' "$migration_011_checksum")"
+
+          migration_012_source="deploy/activist/migrations/012_dart_credential_pool.sql"
+          migration_012_checksum="$(sha256sum "$migration_012_source" | cut -d ' ' -f1)"
+          manifest_migration_012_checksum="$(jq -r '.files["migrations/012_dart_credential_pool.sql"]' \
+            deploy/activist/deployment-manifest.json)"
+          test "$manifest_migration_012_checksum" = "$migration_012_checksum"
+          apply_migration_012() {
+            {
+              printf "SET @bside_migration_012_sha256 = '%s';\n" "$migration_012_checksum"
+              sed 's/activist_/ci_/g' "$migration_012_source"
+            } | docker exec -i "$MYSQL_CONTAINER_ID" \
+              mysql --user=root --password=activist_ci_root_password activist_ci
+          }
+          if sed 's/activist_/ci_/g' "$migration_012_source" \
+            | docker exec -i "$MYSQL_CONTAINER_ID" \
+              mysql --user=root --password=activist_ci_root_password activist_ci; then
+            echo "migration 012 accepted a missing source byte checksum" >&2
+            exit 1
+          fi
+          apply_migration_012
+          apply_migration_012
+          migration_012_manifest="$(docker exec "$MYSQL_CONTAINER_ID" mysql \
+            --user=root --password=activist_ci_root_password --batch --skip-column-names \
+            activist_ci --execute="SELECT migration_name,migration_checksum FROM ci_schema_migrations WHERE migration_version=12;")"
+          test "$migration_012_manifest" = "$(printf '012_dart_credential_pool\t%s' "$migration_012_checksum")"
+          dart_limit="$(docker exec "$MYSQL_CONTAINER_ID" mysql \
+            --user=root --password=activist_ci_root_password --batch --skip-column-names \
+            activist_ci --execute="SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ci_dart_quota_days' AND COLUMN_NAME='limit_count';")"
+          test "$dart_limit" = "40000"
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="UPDATE ci_schema_migrations SET migration_checksum=REPEAT('0',64) WHERE migration_version=12;"
+          if apply_migration_012; then
+            echo "migration 012 overwrote a conflicting byte checksum" >&2
+            exit 1
+          fi
+          docker exec "$MYSQL_CONTAINER_ID" mysql --user=root --password=activist_ci_root_password activist_ci \
+            --execute="UPDATE ci_schema_migrations SET migration_checksum='$migration_012_checksum' WHERE migration_version=12;"
+          apply_migration_012
+          python3 tests/php73_release_state_smoke.py \
+            --base-url http://127.0.0.1:8787 \
+            --mysql-container-id "$MYSQL_CONTAINER_ID"
           python3 tests/php73_global_v2_smoke.py \
             --base-url http://127.0.0.1:8787 \
             --mysql-container-id "$MYSQL_CONTAINER_ID"
@@ -534,6 +574,7 @@ jobs:
           .github/scripts/prepare-legacy-pages.py
           .github/scripts/restore-legacy-pages-archive.py
           .github/scripts/validate-api-base-urls.py
+          .github/scripts/mask-opendart-credentials.py
           --output-format=github
 
       - name: Type check governance core
@@ -570,6 +611,8 @@ jobs:
           curator/legacy_recovery_bundle.py
           curator/mysql_backup.py
           curator/mysql_migration.py
+          curator/mysql_migration_012.py
+          curator/opendart_credentials.py
           curator/official_source_rights.py
           curator/official_schedule.py
           curator/official_slot_claim.py

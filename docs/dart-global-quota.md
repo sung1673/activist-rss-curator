@@ -2,7 +2,9 @@
 
 정기 수집, 회사 마스터, canary, dry-run, apply 백필은 실행별 메모리 예산이
 아니라 MySQL의 KST 일자별 전역 원장을 공유한다. 서로 다른 workflow dispatch,
-날짜 범위, checkpoint fingerprint로 재실행해도 하루 10,000회 제한은 하나다.
+날짜 범위, checkpoint fingerprint로 재실행해도 모든 키를 합산한 하루
+40,000회 제한은 하나다. 별도로 단일 실행은 최대 10,000회까지만 소비할 수
+있어 하나의 canary나 백필이 전역 일일 예산을 독점하지 못한다.
 
 각 물리 OpenDART HTTP 시도 직전에 클라이언트가
 `POST /api/v1/ops/dart-quota`의 `consume` ACK를 받는다. timeout, 5xx, 불완전
@@ -13,12 +15,20 @@ OpenDART 429/5xx 재시도도 이미 소비된 1회이며 반환하지 않는다
 단조 증가 counter로 구성한다. quota API ACK를 잃어 같은 consume을 재시도할
 때만 동일 ID를 사용한다. 다음 물리 HTTP 재시도와 새 프로세스는 새 ID를 쓴다.
 
-OpenDART 상태 `020`을 받으면 해당 consume의 `attempt_id`로 `block_020`을
-기록하며 다음 KST 자정까지 모든 실행을 차단한다. block ACK 실패도 workflow
-실패다. apply 백필은 같은 차단일을 durable checkpoint에도 기록한다.
+각 consume은 키 원문 대신 그 키 바이트의 전체 소문자 SHA-256
+`credential_id`에 묶인다. OpenDART 상태 `020`을 받으면 해당 consume의
+`attempt_id`로 그 credential만 다음 KST 자정까지 `block_020`하고, pool의
+다음 유효 키로 동일한 논리 요청을 계속한다. 상태 `901`은 해당 credential을
+`disable_901`로 durable disable하며 새 키로 교체할 때까지 다시 선택하지
+않는다. block·disable ACK 실패는 workflow 실패이고, 다른 유효 키가 없을 때만
+전체 DART 수집을 중단한다. 모든 물리 provider 요청은 성공 여부와 관계없이
+전역 40,000회와 credential별 원장에 각각 1회로 남는다.
 
 운영 workflow는 다음 설정을 필수화한다.
 
+- 보호된 `governance-runtime` 환경의 `OPENDART_API_KEYS`: 줄바꿈 또는 쉼표로
+  구분한 중복 없는 소문자 40자리 hex 키 목록
+- `DART_API_KEY`: pool이 없을 때만 허용하는 기존 단일 키 fallback
 - `CURATOR_REQUIRE_DURABLE_DART_QUOTA=1`
 - `BSIDE_API_BASE_URL`
 - `BSIDE_OPS_TOKEN`
@@ -48,6 +58,30 @@ HMAC `upsert_governance_snapshot`의 성공 ACK도 같은 값을 반환해야 �
 checkpoint의 acknowledged count에 포함하며, 바인딩 오류 뒤에는 다음 청크나
 최종 run 저장도 시도하지 않는다.
 
-Provider 오류 로그는 DART API key가 포함된 URL이나 응답 본문을 출력하지
-않는다. DART는 `OpenDART HTTP <status>`, KIND는 `KIND HTTP <status>` 형식의
-안전한 오류만 기록한다.
+GitHub Actions는 pool을 검증한 직후 각 키를 개별 `::add-mask::` 처리한다.
+Provider 오류 로그는 DART API key 원문, key가 포함된 URL 또는 응답 본문을
+출력하지 않는다. DART는 `OpenDART HTTP <status>`, KIND는
+`KIND HTTP <status>` 형식의 안전한 오류만 기록한다. 키 원문은 checkpoint,
+metrics, evidence artifact, `attempt_id`에도 들어가지 않는다.
+
+이 계약은 migration 012가 만든 credential·credential-day 원장과
+40,000건 전역 한도에 의존한다. `012_dart_credential_pool.sql`은 원본
+exact bytes의 SHA-256을 같은 MySQL 세션의
+`@bside_migration_012_sha256`에 설정한 뒤
+`scripts/apply_migration_012.py`로 apply·replay한다. schema 12와 배포
+manifest의 migration hash가 일치하지 않으면 API는 DART 요청 전에
+fail-closed한다.
+
+## schema 12 전환 게이트
+
+`.github/workflows/ingest-official.yml`의 schedule·수동 dispatch와
+`.github/workflows/official-backfill.yml`은 repository variable
+`DART_OFFICIAL_INGEST_ENABLED`가 정확히 `true`인 경우에만 시작한다. 변수가
+없거나 다른 값이면 job 전체가 skip된다. 이 게이트는 schema 12 클라이언트가 구
+PHP quota API를 호출하지 못하게 하는 배포용 안전장치다.
+
+전환은 `DART_OFFICIAL_INGEST_ENABLED=false` 설정, `ingest-official`과
+`official-backfill`의 queued·running run 0건 확인, pending-schema-upgrade
+PHP 배포, migration 012 apply·replay, schema 12 exact smoke,
+`DART_OFFICIAL_INGEST_ENABLED=true` 복원의 순서로만
+진행한다. 한 단계라도 실패하면 게이트를 다시 열지 않는다.
