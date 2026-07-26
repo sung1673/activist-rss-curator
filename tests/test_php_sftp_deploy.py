@@ -28,6 +28,7 @@ from curator.php_sftp_deploy import (
     GABIA_PRIVATE_DENY_REDIRECT,
     GABIA_SSH_HOST_KEY_SHA256,
     HttpResponse,
+    LEGACY_SCHEMA_11_CORE_API_FILES,
     ParamikoPinnedSftpSession,
     PhpDeploymentError,
     build_local_deployment_plan,
@@ -43,10 +44,12 @@ from curator.php_sftp_deploy import (
     rollback_release,
     ssh_sftp_options_from_args,
     verify_closed_v2_api,
+    verify_existing_remote_release_identity,
 )
 
 
 RELEASE_SHA = "a" * 40
+LEGACY_RELEASE_SHA = "b" * 40
 RELEASE_ID = "php-v2-aaaaaaaaaaaa-20260725t000000z-12345678"
 PUBLIC_ROOT = "https://alignpe.gabia.io/activist"
 API_V2 = PUBLIC_ROOT + "/api.php/api/v2"
@@ -502,6 +505,48 @@ class HttpRouter:
         raise AssertionError(f"unexpected request: {method} {url}")
 
 
+class SchemaBridgeHttpRouter:
+    def __init__(
+        self,
+        sftp: MemorySftp,
+        *,
+        private_canary_mode: str = "blocked",
+        strict_opcache_action: str | None = None,
+    ) -> None:
+        self.sftp = sftp
+        self.legacy = HttpRouter(
+            sftp,
+            code_revision=LEGACY_RELEASE_SHA,
+            schema_version=11,
+            private_canary_mode=private_canary_mode,
+            strict_opcache_action=strict_opcache_action,
+        )
+        self.candidate = HttpRouter(
+            sftp,
+            code_revision=RELEASE_SHA,
+            schema_version=12,
+            pending_actual_schema_version=11,
+            private_canary_mode=private_canary_mode,
+            strict_opcache_action=strict_opcache_action,
+        )
+
+    def __call__(
+        self,
+        method: str,
+        url: str,
+        headers: object,
+        timeout: float,
+    ) -> HttpResponse:
+        manifest_path = DEFAULT_REMOTE_ROOT + "/" + DEPLOYMENT_MANIFEST_NAME
+        manifest = json.loads(self.sftp.files[manifest_path])
+        revision = manifest["code_revision"]
+        if revision == LEGACY_RELEASE_SHA:
+            return self.legacy(method, url, headers, timeout)
+        if revision == RELEASE_SHA:
+            return self.candidate(method, url, headers, timeout)
+        raise AssertionError(f"unexpected deployed revision: {revision}")
+
+
 @pytest.fixture
 def local_plan(tmp_path: Path) -> object:
     root = tmp_path / "deploy" / "activist"
@@ -546,6 +591,47 @@ def _artifact_bytes(plan: object, relative_path: str) -> bytes:
     return artifact_by_path[relative_path].path.read_bytes()
 
 
+def _install_attested_release(
+    client: MemorySftp,
+    *,
+    code_revision: str,
+    core_files: tuple[str, ...],
+    file_overrides: dict[str, bytes] | None = None,
+) -> None:
+    hashes: dict[str, str] = {}
+    overrides = {} if file_overrides is None else file_overrides
+    for relative_path in core_files:
+        target = DEFAULT_REMOTE_ROOT + "/" + relative_path
+        content = overrides.get(
+            relative_path,
+            f"existing:{relative_path}\n".encode(),
+        )
+        client.files[target] = content
+        client.modes[target] = 0o644
+        hashes[relative_path] = hashlib.sha256(content).hexdigest()
+    for relative_path in set(CORE_API_FILES) - set(core_files):
+        target = DEFAULT_REMOTE_ROOT + "/" + relative_path
+        client.files.pop(target, None)
+        client.modes.pop(target, None)
+    manifest = {
+        "schema_version": 1,
+        "code_revision": code_revision,
+        "files": hashes,
+    }
+    client.files[
+        DEFAULT_REMOTE_ROOT + "/" + DEPLOYMENT_MANIFEST_NAME
+    ] = json.dumps(
+        manifest,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+    client.modes[
+        DEFAULT_REMOTE_ROOT + "/" + DEPLOYMENT_MANIFEST_NAME
+    ] = 0o644
+    client.mutations = 0
+
+
 def test_local_plan_attests_all_core_files_and_commits_manifest_last(
     local_plan: object,
 ) -> None:
@@ -557,6 +643,14 @@ def test_local_plan_attests_all_core_files_and_commits_manifest_last(
     assert paths == list(DEFAULT_COMMIT_ORDER)
     assert paths[-2:] == ["api.php", DEPLOYMENT_MANIFEST_NAME]
     assert report["mutated_remote"] is False
+
+
+def test_schema_11_manifest_shape_is_an_exact_one_file_predecessor() -> None:
+    assert len(LEGACY_SCHEMA_11_CORE_API_FILES) == 8
+    assert len(CORE_API_FILES) == 9
+    assert set(LEGACY_SCHEMA_11_CORE_API_FILES) | {
+        "migrations/012_dart_credential_pool.sql"
+    } == set(CORE_API_FILES)
 
 
 def test_deploy_creates_verified_backup_and_closed_release(
@@ -1722,39 +1816,17 @@ def test_schema_upgrade_bridge_requires_attested_existing_release(
 def test_schema_upgrade_bridge_verifies_old_then_pending_candidate(
     local_plan: object,
     production_sftp: MemorySftp,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    deploy_release(
+    _install_attested_release(
         production_sftp,
-        plan=local_plan,  # type: ignore[arg-type]
-        release_id=RELEASE_ID,
-        public_url_root=PUBLIC_ROOT,
-        api_v2_base_url=API_V2,
-        rollback_health_url=ROLLBACK_HEALTH,
-        protected_token=PROTECTED_TOKEN,
-        http_request=HttpRouter(
-            production_sftp,
-            code_revision=RELEASE_SHA,
-        ),
-    )
-    calls: list[tuple[int, int | None]] = []
-
-    def record_schema_smoke(**kwargs: object) -> None:
-        calls.append(
-            (
-                int(kwargs["expected_schema_version"]),
-                (
-                    None
-                    if kwargs.get("pending_actual_schema_version") is None
-                    else int(kwargs["pending_actual_schema_version"])
-                ),
+        code_revision=LEGACY_RELEASE_SHA,
+        core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+        file_overrides={
+            "migrations/011_global_terminal_v2.sql": _artifact_bytes(
+                local_plan,
+                "migrations/011_global_terminal_v2.sql",
             )
-        )
-
-    monkeypatch.setattr(
-        php_deploy,
-        "verify_closed_v2_api",
-        record_schema_smoke,
+        },
     )
     result = deploy_release(
         production_sftp,
@@ -1764,20 +1836,199 @@ def test_schema_upgrade_bridge_verifies_old_then_pending_candidate(
         api_v2_base_url=API_V2,
         rollback_health_url=ROLLBACK_HEALTH,
         protected_token=PROTECTED_TOKEN,
-        http_request=HttpRouter(
-            production_sftp,
-            code_revision=RELEASE_SHA,
-        ),
+        http_request=SchemaBridgeHttpRouter(production_sftp),
         schema_upgrade_from=11,
     )
 
-    assert calls == [(11, None), (11, None), (12, 11)]
+    manifest = json.loads(
+        production_sftp.files[
+            DEFAULT_REMOTE_ROOT + "/" + DEPLOYMENT_MANIFEST_NAME
+        ]
+    )
+    backup = json.loads(
+        production_sftp.files[str(result["backup_manifest"])]
+    )
+    assert set(manifest["files"]) == set(CORE_API_FILES)
+    assert manifest["code_revision"] == RELEASE_SHA
+    assert (
+        DEFAULT_REMOTE_ROOT + "/migrations/012_dart_credential_pool.sql"
+        in production_sftp.files
+    )
+    assert (
+        backup["files"]["migrations/012_dart_credential_pool.sql"]["existed"]
+        is False
+    )
     assert result["closed_smoke"] is False
     assert result["fail_closed_smoke"] is True
     assert result["deployment_smoke_mode"] == (
         "pending_schema_upgrade_11_to_12"
     )
     assert result["schema_upgrade_from"] == 11
+
+
+def test_schema_11_manifest_is_rejected_without_explicit_bridge(
+    local_plan: object,
+    production_sftp: MemorySftp,
+) -> None:
+    _install_attested_release(
+        production_sftp,
+        code_revision=LEGACY_RELEASE_SHA,
+        core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+    )
+    before_files = dict(production_sftp.files)
+    before_directories = dict(production_sftp.directories)
+    before_mutations = production_sftp.mutations
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="existing deployment manifest identity is invalid",
+    ):
+        deploy_release(
+            production_sftp,
+            plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=HttpRouter(
+                production_sftp,
+                code_revision=LEGACY_RELEASE_SHA,
+                schema_version=11,
+            ),
+        )
+
+    assert production_sftp.files == before_files
+    assert production_sftp.directories == before_directories
+    assert production_sftp.mutations == before_mutations
+
+
+def test_schema_11_bridge_rejects_changed_migration_011_before_mutation(
+    local_plan: object,
+    production_sftp: MemorySftp,
+) -> None:
+    _install_attested_release(
+        production_sftp,
+        code_revision=LEGACY_RELEASE_SHA,
+        core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+    )
+    before_files = dict(production_sftp.files)
+    before_directories = dict(production_sftp.directories)
+    before_mutations = production_sftp.mutations
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="requires unchanged migration 011 bytes",
+    ):
+        deploy_release(
+            production_sftp,
+            plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=HttpRouter(
+                production_sftp,
+                code_revision=LEGACY_RELEASE_SHA,
+                schema_version=11,
+            ),
+            schema_upgrade_from=11,
+        )
+
+    assert production_sftp.files == before_files
+    assert production_sftp.directories == before_directories
+    assert production_sftp.mutations == before_mutations
+
+
+def test_schema_11_bridge_rejects_stray_migration_012_before_mutation(
+    local_plan: object,
+    production_sftp: MemorySftp,
+) -> None:
+    _install_attested_release(
+        production_sftp,
+        code_revision=LEGACY_RELEASE_SHA,
+        core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+        file_overrides={
+            "migrations/011_global_terminal_v2.sql": _artifact_bytes(
+                local_plan,
+                "migrations/011_global_terminal_v2.sql",
+            )
+        },
+    )
+    stray_path = (
+        DEFAULT_REMOTE_ROOT + "/migrations/012_dart_credential_pool.sql"
+    )
+    production_sftp.files[stray_path] = b"partial previous deployment\n"
+    production_sftp.modes[stray_path] = 0o644
+    before_files = dict(production_sftp.files)
+    before_directories = dict(production_sftp.directories)
+    before_mutations = production_sftp.mutations
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="stray migration 012",
+    ):
+        deploy_release(
+            production_sftp,
+            plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=HttpRouter(
+                production_sftp,
+                code_revision=LEGACY_RELEASE_SHA,
+                schema_version=11,
+            ),
+            schema_upgrade_from=11,
+        )
+
+    assert production_sftp.files == before_files
+    assert production_sftp.directories == before_directories
+    assert production_sftp.mutations == before_mutations
+
+
+@pytest.mark.parametrize("drift", ["missing", "extra", "tampered"])
+def test_schema_11_bridge_rejects_manifest_or_byte_drift(
+    production_sftp: MemorySftp,
+    drift: str,
+) -> None:
+    _install_attested_release(
+        production_sftp,
+        code_revision=LEGACY_RELEASE_SHA,
+        core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+    )
+    manifest_path = DEFAULT_REMOTE_ROOT + "/" + DEPLOYMENT_MANIFEST_NAME
+    manifest = json.loads(production_sftp.files[manifest_path])
+    if drift == "missing":
+        del manifest["files"]["openapi-v2.yaml"]
+        production_sftp.files[manifest_path] = json.dumps(manifest).encode()
+    elif drift == "extra":
+        manifest["files"]["unexpected.php"] = "0" * 64
+        production_sftp.files[manifest_path] = json.dumps(manifest).encode()
+    else:
+        production_sftp.files[
+            DEFAULT_REMOTE_ROOT + "/openapi-v2.yaml"
+        ] += b"tampered"
+    before_mutations = production_sftp.mutations
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match=(
+            "existing deployment manifest identity is invalid"
+            if drift != "tampered"
+            else "existing deployment bytes do not match the manifest"
+        ),
+    ):
+        verify_existing_remote_release_identity(
+            production_sftp,
+            remote_root=DEFAULT_REMOTE_ROOT,
+            expected_core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+        )
+
+    assert production_sftp.mutations == before_mutations
 
 
 def test_deploy_parser_exposes_only_explicit_schema_11_bridge() -> None:
@@ -1803,6 +2054,53 @@ def test_deploy_parser_exposes_only_explicit_schema_11_bridge() -> None:
                 "10",
             ]
         )
+
+
+@pytest.mark.parametrize(
+    ("schema_upgrade_from", "expected_core_files"),
+    [
+        (11, LEGACY_SCHEMA_11_CORE_API_FILES),
+        (None, CORE_API_FILES),
+    ],
+)
+def test_cli_gabia_preflight_uses_exact_manifest_shape_for_bridge(
+    production_sftp: MemorySftp,
+    monkeypatch: pytest.MonkeyPatch,
+    schema_upgrade_from: int | None,
+    expected_core_files: tuple[str, ...],
+) -> None:
+    captured: dict[str, object] = {}
+    sentinel = object()
+
+    def capture_prepare(
+        _client: MemorySftp,
+        **kwargs: object,
+    ) -> object:
+        captured.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(
+        php_deploy,
+        "prepare_gabia_core_compatibility",
+        capture_prepare,
+    )
+    args = argparse.Namespace(
+        gabia_core_compatibility_host=GABIA_COMPATIBILITY_SSH_HOST,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        schema_upgrade_from=schema_upgrade_from,
+    )
+
+    result = php_deploy._prepare_cli_gabia_compatibility(
+        production_sftp,
+        args=args,
+        options=_gabia_options(),  # type: ignore[arg-type]
+    )
+
+    assert result is sentinel
+    assert captured["expected_core_files"] == expected_core_files
 
 
 @pytest.mark.parametrize(

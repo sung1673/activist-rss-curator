@@ -72,6 +72,20 @@ DEFAULT_COMMIT_ORDER = (
     DEPLOYMENT_MANIFEST_NAME,
 )
 
+# Exact manifest shape deployed by the schema 11 release. This literal must not
+# be derived from CORE_API_FILES: adding a future core file must not silently
+# widen the one-time schema 11 -> 12 bridge.
+LEGACY_SCHEMA_11_CORE_API_FILES = (
+    ".htaccess",
+    "api.php",
+    "governance_v1.php",
+    "governance_v2.php",
+    "governance_v2_write.php",
+    "openapi.yaml",
+    "openapi-v2.yaml",
+    "migrations/011_global_terminal_v2.sql",
+)
+
 STAGE_DENY_RULES = (
     b"Options -Indexes\n"
     b"<IfModule mod_authz_core.c>\n"
@@ -1900,10 +1914,33 @@ def verify_existing_remote_release_identity(
     client: SftpClient,
     *,
     remote_root: str,
+    expected_core_files: Sequence[str] = CORE_API_FILES,
 ) -> str | None:
     """Verify the current v2 manifest and bytes, or attest a first deploy."""
 
+    selected_core_files = tuple(expected_core_files)
+    if selected_core_files not in (
+        CORE_API_FILES,
+        LEGACY_SCHEMA_11_CORE_API_FILES,
+    ):
+        raise PhpDeploymentError(
+            "existing release core-file expectation is unsupported"
+        )
     root = _remote_absolute_path(remote_root, label="remote root")
+    if (
+        selected_core_files == LEGACY_SCHEMA_11_CORE_API_FILES
+        and _lstat_or_none(
+            client,
+            _remote_join(
+                root,
+                "migrations/012_dart_credential_pool.sql",
+            ),
+        )
+        is not None
+    ):
+        raise PhpDeploymentError(
+            "schema 11 release contains a stray migration 012 file"
+        )
     manifest_path = _remote_join(root, DEPLOYMENT_MANIFEST_NAME)
     attributes = _lstat_or_none(client, manifest_path)
     if attributes is None:
@@ -1936,12 +1973,12 @@ def verify_existing_remote_release_identity(
         or not isinstance(payload.get("code_revision"), str)
         or SHA1_PATTERN.fullmatch(payload["code_revision"]) is None
         or not isinstance(payload.get("files"), dict)
-        or set(payload["files"]) != set(CORE_API_FILES)
+        or set(payload["files"]) != set(selected_core_files)
     ):
         raise PhpDeploymentError(
             "existing deployment manifest identity is invalid"
         )
-    for relative_path in CORE_API_FILES:
+    for relative_path in selected_core_files:
         expected_digest = payload["files"].get(relative_path)
         if (
             not isinstance(expected_digest, str)
@@ -2449,6 +2486,7 @@ def prepare_gabia_core_compatibility(
     api_v2_base_url: str,
     rollback_health_url: str,
     expected_current_sha: str | None = None,
+    expected_core_files: Sequence[str] = CORE_API_FILES,
 ) -> GabiaCoreCompatibility:
     """Probe the exact Gabia server and bind a fallback to this session."""
 
@@ -2501,6 +2539,7 @@ def prepare_gabia_core_compatibility(
     current_release_sha = verify_existing_remote_release_identity(
         client,
         remote_root=GABIA_REMOTE_ROOT,
+        expected_core_files=expected_core_files,
     )
     if (
         expected_current_sha is not None
@@ -3489,14 +3528,37 @@ def deploy_release(
         release_id or _make_release_id(plan.code_revision)
     )
     _require_remote_directory(client, root, create=False)
+    existing_core_files = (
+        LEGACY_SCHEMA_11_CORE_API_FILES
+        if schema_upgrade_from == 11
+        else CORE_API_FILES
+    )
     existing_revision = verify_existing_remote_release_identity(
         client,
         remote_root=root,
+        expected_core_files=existing_core_files,
     )
     if schema_upgrade_from is not None and existing_revision is None:
         raise PhpDeploymentError(
             "schema upgrade deployment requires an attested existing release"
         )
+    if schema_upgrade_from == 11:
+        migration_path = "migrations/011_global_terminal_v2.sql"
+        migration_artifact = plan.artifact_by_path[migration_path]
+        existing_migration = _read_remote_bytes(
+            client,
+            _remote_join(root, migration_path),
+        )
+        if (
+            len(existing_migration) != migration_artifact.size
+            or not secrets.compare_digest(
+                _sha256_bytes(existing_migration),
+                migration_artifact.sha256,
+            )
+        ):
+            raise PhpDeploymentError(
+                "schema 11 upgrade requires unchanged migration 011 bytes"
+            )
     existing_schema_version = (
         12 if schema_upgrade_from is None else schema_upgrade_from
     )
@@ -4301,6 +4363,12 @@ def _prepare_cli_gabia_compatibility(
                 "Gabia core compatibility requires explicit exact-host opt-in"
             )
         return None
+    schema_upgrade_from = getattr(args, "schema_upgrade_from", None)
+    expected_core_files = (
+        LEGACY_SCHEMA_11_CORE_API_FILES
+        if schema_upgrade_from == 11
+        else CORE_API_FILES
+    )
     return prepare_gabia_core_compatibility(
         client,
         ssh_options=options,
@@ -4322,6 +4390,7 @@ def _prepare_cli_gabia_compatibility(
             label="rollback health URL",
         ),
         expected_current_sha=expected_current_sha,
+        expected_core_files=expected_core_files,
     )
 
 

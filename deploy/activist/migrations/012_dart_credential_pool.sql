@@ -236,15 +236,28 @@ WHERE @bside_012_first_install=1
   AND (used_count>0 OR blocked=1)
 ON DUPLICATE KEY UPDATE
   limit_count=40000,
-  used_count=GREATEST(used_count,VALUES(used_count)),
-  blocked=GREATEST(blocked,VALUES(blocked)),
-  block_reason=COALESCE(block_reason,VALUES(block_reason)),
-  blocked_until=COALESCE(blocked_until,VALUES(blocked_until)),
-  blocked_by_attempt_id=COALESCE(
-    blocked_by_attempt_id,VALUES(blocked_by_attempt_id)
+  used_count=GREATEST(
+    activist_dart_quota_credential_days.used_count,VALUES(used_count)
   ),
-  blocked_at=COALESCE(blocked_at,VALUES(blocked_at)),
-  updated_at=GREATEST(updated_at,VALUES(updated_at));
+  blocked=GREATEST(
+    activist_dart_quota_credential_days.blocked,VALUES(blocked)
+  ),
+  block_reason=COALESCE(
+    activist_dart_quota_credential_days.block_reason,VALUES(block_reason)
+  ),
+  blocked_until=COALESCE(
+    activist_dart_quota_credential_days.blocked_until,VALUES(blocked_until)
+  ),
+  blocked_by_attempt_id=COALESCE(
+    activist_dart_quota_credential_days.blocked_by_attempt_id,
+    VALUES(blocked_by_attempt_id)
+  ),
+  blocked_at=COALESCE(
+    activist_dart_quota_credential_days.blocked_at,VALUES(blocked_at)
+  ),
+  updated_at=GREATEST(
+    activist_dart_quota_credential_days.updated_at,VALUES(updated_at)
+  );
 
 ALTER TABLE activist_dart_quota_days
   MODIFY COLUMN limit_count INT UNSIGNED NOT NULL DEFAULT 40000;

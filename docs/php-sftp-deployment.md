@@ -135,11 +135,13 @@ Pages와 레거시 수집은 계속 제공할 수 있지만 이 게이트는 mig
 사용한다.
 
 ```powershell
+$env:BSIDE_CORE_RELEASE_SHA = $releaseSha
 python scripts/deploy_php_sftp.py deploy `
   --local-root deploy/activist `
   --expected-sha $releaseSha `
   --confirm-production-write $releaseSha `
   --schema-upgrade-from 11 `
+  --gabia-core-compatibility-host alignpartnerscap.com `
   --remote-root /www_root/activist `
   --public-url-root https://alignpe.gabia.io/activist `
   --api-v2-base-url https://alignpe.gabia.io/activist/api.php/api/v2 `

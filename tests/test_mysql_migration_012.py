@@ -143,6 +143,21 @@ def test_migration_requires_exact_per_credential_attempt_aggregate() -> None:
     assert "cd.used_count < a.consumed_units" not in migration
 
 
+def test_legacy_quota_copy_qualifies_duplicate_update_columns() -> None:
+    migration = DEFAULT_MIGRATION_PATH.read_text(encoding="utf-8")
+
+    assert (
+        "activist_dart_quota_credential_days.used_count,VALUES(used_count)"
+        in migration
+    )
+    assert (
+        "activist_dart_quota_credential_days.blocked,VALUES(blocked)"
+        in migration
+    )
+    assert "GREATEST(used_count,VALUES(used_count))" not in migration
+    assert "GREATEST(blocked,VALUES(blocked))" not in migration
+
+
 def test_prerequisite_verification_binds_exact_migration_011_bytes() -> None:
     checksum_012 = "a" * 64
     manifest = dict(PREREQUISITE_MIGRATIONS)
