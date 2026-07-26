@@ -661,25 +661,132 @@ def daily_report_requires_nonempty() -> bool:
     return value.casefold() in {"1", "true", "yes", "on"}
 
 
+def _empty_publication_error(reason: str) -> RuntimeError:
+    return RuntimeError(
+        "daily_report_empty_publication: refusing to write, sync, or deploy "
+        f"an unverified empty report ({reason})"
+    )
+
+
+def _publication_shape_error(reason: str) -> RuntimeError:
+    return RuntimeError(
+        "daily_report_invalid_publication: refusing to write, sync, or deploy "
+        f"a malformed report ({reason})"
+    )
+
+
+def _required_run_metric(payload: dict[str, object], key: str) -> int:
+    if key not in payload:
+        raise _empty_publication_error(f"missing_{key}")
+    value = payload[key]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise _empty_publication_error(f"invalid_{key}")
+    return value
+
+
+def _expected_github_run_identity(environment_name: str) -> int:
+    value = os.environ.get(environment_name, "").strip()
+    if not value or not value.isascii() or not value.isdigit():
+        raise _empty_publication_error(
+            f"invalid_expected_{environment_name.casefold()}"
+        )
+    identity = int(value)
+    if identity <= 0:
+        raise _empty_publication_error(
+            f"invalid_expected_{environment_name.casefold()}"
+        )
+    return identity
+
+
+def verified_empty_run_metrics() -> dict[str, object]:
+    """Return same-job evidence proving that an empty report is not an outage."""
+
+    metrics_destination = os.environ.get("CURATOR_RUN_METRICS_PATH", "").strip()
+    if not metrics_destination:
+        raise _empty_publication_error("missing_metrics_path")
+
+    expected_revision = os.environ.get("GITHUB_SHA", "").strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", expected_revision):
+        raise _empty_publication_error("invalid_expected_code_revision")
+
+    try:
+        raw_payload = json.loads(
+            Path(metrics_destination).read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise _empty_publication_error("unreadable_metrics") from exc
+    if not isinstance(raw_payload, dict):
+        raise _empty_publication_error("invalid_metrics_payload")
+    payload = {
+        str(key): value
+        for key, value in raw_payload.items()
+    }
+
+    if payload.get("ok") is not True or payload.get("status") != "complete":
+        raise _empty_publication_error("run_not_complete")
+    if payload.get("code_revision") != expected_revision:
+        raise _empty_publication_error("code_revision_mismatch")
+    expected_run_id = _expected_github_run_identity("GITHUB_RUN_ID")
+    expected_run_attempt = _expected_github_run_identity("GITHUB_RUN_ATTEMPT")
+    if _required_run_metric(payload, "github_run_id") != expected_run_id:
+        raise _empty_publication_error("github_run_id_mismatch")
+    if (
+        _required_run_metric(payload, "github_run_attempt")
+        != expected_run_attempt
+    ):
+        raise _empty_publication_error("github_run_attempt_mismatch")
+    if _required_run_metric(payload, "fetched") <= 0:
+        raise _empty_publication_error("empty_collection_denominator")
+    if _required_run_metric(payload, "public_candidates") != 0:
+        raise _empty_publication_error("public_candidates_not_zero")
+    if _required_run_metric(payload, "remote_api_synced") <= 0:
+        raise _empty_publication_error("remote_sync_not_confirmed")
+
+    # Importing here keeps the publication gate aligned with the collector's
+    # operational-failure contract without introducing a module import cycle.
+    from .main import FAILURE_KEYS
+
+    for key in FAILURE_KEYS:
+        if _required_run_metric(payload, key) != 0:
+            raise _empty_publication_error(f"operational_failure_{key}")
+    return payload
+
+
+def _required_report_stat(stats: dict[str, object], key: str) -> int:
+    if key not in stats:
+        raise _publication_shape_error(f"missing_stats_{key}")
+    value = stats[key]
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise _publication_shape_error(f"invalid_stats_{key}")
+    return value
+
+
 def validate_daily_report_publication(report: dict[str, object]) -> None:
     """Prevent a successful collection outage from replacing the last good page."""
 
+    stories = report.get("stories")
+    if not isinstance(stories, list):
+        raise _publication_shape_error("stories_not_list")
+    if any(not isinstance(story, dict) for story in stories):
+        raise _publication_shape_error("story_not_object")
+    story_rows = stories
+
+    stats = report.get("stats")
+    if not isinstance(stats, dict):
+        raise _publication_shape_error("stats_not_object")
+    story_count = _required_report_stat(stats, "stories")
+    article_count = _required_report_stat(stats, "articles")
+    _required_report_stat(stats, "sources")
+    if story_count != len(story_rows):
+        raise _publication_shape_error("story_count_mismatch")
+
     if not daily_report_requires_nonempty():
         return
-    stories = report.get("stories")
-    story_rows = (
-        [story for story in stories if isinstance(story, dict)]
-        if isinstance(stories, list)
-        else []
-    )
-    stats = report.get("stats")
-    stats_map = stats if isinstance(stats, dict) else {}
-    article_count = int(stats_map.get("articles") or 0)
-    if not story_rows or article_count <= 0:
-        raise RuntimeError(
-            "daily_report_empty_publication: refusing to write, sync, or deploy "
-            "a report without a public story and article"
-        )
+    if story_rows and article_count > 0:
+        return
+    if story_rows or article_count > 0:
+        raise _empty_publication_error("inconsistent_story_article_counts")
+    verified_empty_run_metrics()
 
 
 def build_report_stories(
@@ -1432,6 +1539,15 @@ def render_report_html(
     </section>
         """
     )
+    if not featured_stories:
+        featured_block_html = """
+    <section class="priority priority--verified-empty" aria-label="오늘의 중요 사건">
+      <div class="priority__head">
+        <h2>오늘 확인된 중요 사건 없음</h2>
+        <p>수집은 정상적으로 완료되었으며 공개 기준을 충족한 후보는 0건입니다.</p>
+      </div>
+    </section>
+        """
     category_sections = []
     for category in REPORT_CATEGORY_ORDER:
         category_stories = section_buckets.get(category, [])

@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from curator.main import (
+    FAILURE_KEYS,
     article_is_before_previous_day,
     main,
     prune_excluded_pending_articles,
@@ -163,7 +164,13 @@ def test_main_exits_nonzero_when_telegram_collection_is_incomplete(failure_key: 
 
 def test_main_writes_complete_metrics_on_success(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     metrics_path = tmp_path / "curator-run-metrics.json"
+    revision = "a" * 40
+    run_id = 30187532649
+    run_attempt = 3
     monkeypatch.setenv("CURATOR_RUN_METRICS_PATH", str(metrics_path))
+    monkeypatch.setenv("GITHUB_SHA", revision)
+    monkeypatch.setenv("GITHUB_RUN_ID", str(run_id))
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", str(run_attempt))
     monkeypatch.setattr("curator.main.run", lambda: {"telegram_sent": 0})
 
     main()
@@ -171,6 +178,10 @@ def test_main_writes_complete_metrics_on_success(tmp_path, monkeypatch) -> None:
     payload = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert payload["ok"] is True
     assert payload["status"] == "complete"
+    assert payload["code_revision"] == revision
+    assert payload["github_run_id"] == run_id
+    assert payload["github_run_attempt"] == run_attempt
+    assert all(payload[key] == 0 for key in FAILURE_KEYS)
 
 
 def test_main_fails_when_run_metrics_cannot_be_written(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]

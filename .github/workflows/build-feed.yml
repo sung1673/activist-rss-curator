@@ -400,6 +400,7 @@ jobs:
           CURATOR_REQUIRE_REMOTE_API: "1"
           CURATOR_DAILY_REPORT_WRITE_ONLY: "1"
           CURATOR_REQUIRE_NONEMPTY_DAILY_REPORT: "1"
+          CURATOR_RUN_METRICS_PATH: ${{ runner.temp }}/curator-run-metrics.json
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           STORY_REVIEW_ACCESS_TOKEN: ${{ secrets.STORY_REVIEW_ACCESS_TOKEN }}
           ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}

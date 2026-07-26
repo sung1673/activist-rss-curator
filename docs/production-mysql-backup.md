@@ -58,6 +58,12 @@ silently remove the protection and is prohibited.
   result. The tool never labels a table-only dump as a full database backup.
 - Existing output files are never overwritten. A failed or interrupted run
   has no completed manifest and must not be used for migration.
+- The SSH relay tolerates temporary consumer backpressure without dropping or
+  duplicating the unsent suffix. Each successful partial send or received
+  chunk resets the no-progress budget. Ten consecutive 30-second send
+  timeouts or receive-idle timeouts (about five minutes without progress)
+  terminate the relay; retries are never unbounded. The database stream then
+  fails and the backup cannot produce a completion manifest.
 
 ## Gabia legacy `ssh-rsa/SHA-1` exception
 

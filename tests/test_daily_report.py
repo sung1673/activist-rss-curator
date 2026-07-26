@@ -10,7 +10,40 @@ import pytest
 from conftest import make_article
 from curator import daily_report
 from curator.daily_report import build_daily_report, build_report_telegram_message, mobile_article_url, write_report_files
+from curator.main import FAILURE_KEYS, write_run_metrics
 from curator.normalize import canonical_url_hash
+
+
+VERIFIED_GITHUB_RUN_ID = 30187532649
+VERIFIED_GITHUB_RUN_ATTEMPT = 2
+
+
+def verified_empty_metrics(
+    revision: str,
+    *,
+    run_id: int = VERIFIED_GITHUB_RUN_ID,
+    run_attempt: int = VERIFIED_GITHUB_RUN_ATTEMPT,
+) -> dict[str, object]:
+    return {
+        **{key: 0 for key in FAILURE_KEYS},
+        "ok": True,
+        "status": "complete",
+        "code_revision": revision,
+        "github_run_id": run_id,
+        "github_run_attempt": run_attempt,
+        "fetched": 723,
+        "public_candidates": 0,
+        "remote_api_synced": 1,
+    }
+
+
+def set_verified_github_run_environment(monkeypatch, revision: str) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("GITHUB_SHA", revision)
+    monkeypatch.setenv("GITHUB_RUN_ID", str(VERIFIED_GITHUB_RUN_ID))
+    monkeypatch.setenv(
+        "GITHUB_RUN_ATTEMPT",
+        str(VERIFIED_GITHUB_RUN_ATTEMPT),
+    )
 
 
 def report_cluster(guid: str, now: datetime) -> dict[str, object]:
@@ -543,6 +576,250 @@ def test_required_nonempty_daily_report_preserves_last_good_page_and_skips_sync(
         daily_report.send_daily_report(tmp_path)
 
     assert latest.read_text(encoding="utf-8") == "last-good-page"
+
+
+def test_verified_empty_gate_accepts_collector_written_same_run_metrics(
+    tmp_path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    revision = "e" * 40
+    metrics_path = tmp_path / "curator-run-metrics.json"
+    monkeypatch.setenv("CURATOR_RUN_METRICS_PATH", str(metrics_path))
+    set_verified_github_run_environment(monkeypatch, revision)
+
+    write_run_metrics(
+        {
+            "fetched": 3,
+            "public_candidates": 0,
+            "remote_api_synced": 1,
+        },
+        ok=True,
+    )
+
+    payload = daily_report.verified_empty_run_metrics()
+
+    assert payload["code_revision"] == revision
+    assert payload["github_run_id"] == VERIFIED_GITHUB_RUN_ID
+    assert payload["github_run_attempt"] == VERIFIED_GITHUB_RUN_ATTEMPT
+
+
+def test_required_nonempty_daily_report_publishes_verified_empty_day(
+    tmp_path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    now = datetime(2026, 7, 26, 14, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    revision = "a" * 40
+    metrics_path = tmp_path / "curator-run-metrics.json"
+    metrics_path.write_text(
+        json.dumps(verified_empty_metrics(revision)),
+        encoding="utf-8",
+    )
+    (tmp_path / "data").mkdir()
+    (tmp_path / "config.yaml").write_text(
+        "report:\n  image_enrich_limit: 0\n", encoding="utf-8"
+    )
+    (tmp_path / "data" / "state.json").write_text(
+        json.dumps(
+            {
+                "published_clusters": [],
+                "pending_clusters": [],
+                "articles": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CURATOR_REQUIRE_NONEMPTY_DAILY_REPORT", "1")
+    monkeypatch.setenv("CURATOR_RUN_METRICS_PATH", str(metrics_path))
+    set_verified_github_run_environment(monkeypatch, revision)
+    monkeypatch.setattr(daily_report, "now_in_timezone", lambda _timezone: now)
+    monkeypatch.setattr(daily_report, "sync_report_to_remote_api", lambda _report: {})
+
+    summary = daily_report.send_daily_report(tmp_path)
+
+    latest_html = (tmp_path / "public" / "feed" / "latest.html").read_text(
+        encoding="utf-8"
+    )
+    assert summary["daily_report_written"] == 1
+    assert "오늘 확인된 중요 사건 없음" in latest_html
+    assert "수집은 정상적으로 완료되었으며 공개 기준을 충족한 후보는 0건입니다." in latest_html
+
+
+@pytest.mark.parametrize(
+    "invalid_case",
+    (
+        "missing",
+        "malformed",
+        "wrong_sha",
+        "wrong_run_id",
+        "wrong_run_attempt",
+        "string_run_id",
+        "string_run_attempt",
+        "missing_run_attempt",
+        "invalid_expected_run_id",
+        "invalid_expected_run_attempt",
+        "zero_denominator",
+        "noninteger_denominator",
+        "public_candidate",
+        "remote_not_synced",
+        "remote_failure",
+        "known_failure",
+        "missing_failure_metric",
+    ),
+)
+def test_required_nonempty_daily_report_rejects_unverified_empty_evidence(
+    tmp_path, monkeypatch, invalid_case
+) -> None:  # type: ignore[no-untyped-def]
+    revision = "b" * 40
+    metrics_path = tmp_path / "curator-run-metrics.json"
+    payload = verified_empty_metrics(revision)
+    if invalid_case == "malformed":
+        metrics_path.write_text("{", encoding="utf-8")
+    elif invalid_case != "missing":
+        if invalid_case == "wrong_sha":
+            payload["code_revision"] = "c" * 40
+        elif invalid_case == "wrong_run_id":
+            payload["github_run_id"] = VERIFIED_GITHUB_RUN_ID + 1
+        elif invalid_case == "wrong_run_attempt":
+            payload["github_run_attempt"] = VERIFIED_GITHUB_RUN_ATTEMPT + 1
+        elif invalid_case == "string_run_id":
+            payload["github_run_id"] = str(VERIFIED_GITHUB_RUN_ID)
+        elif invalid_case == "string_run_attempt":
+            payload["github_run_attempt"] = str(VERIFIED_GITHUB_RUN_ATTEMPT)
+        elif invalid_case == "missing_run_attempt":
+            payload.pop("github_run_attempt")
+        elif invalid_case == "zero_denominator":
+            payload["fetched"] = 0
+        elif invalid_case == "noninteger_denominator":
+            payload["fetched"] = "723"
+        elif invalid_case == "public_candidate":
+            payload["public_candidates"] = 1
+        elif invalid_case == "remote_not_synced":
+            payload["remote_api_synced"] = 0
+        elif invalid_case == "remote_failure":
+            payload["remote_api_failed"] = 1
+        elif invalid_case == "known_failure":
+            payload["telegram_channel_failed"] = 1
+        elif invalid_case == "missing_failure_metric":
+            payload.pop("official_failed")
+        metrics_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    monkeypatch.setenv("CURATOR_REQUIRE_NONEMPTY_DAILY_REPORT", "1")
+    monkeypatch.setenv("CURATOR_RUN_METRICS_PATH", str(metrics_path))
+    set_verified_github_run_environment(monkeypatch, revision)
+    if invalid_case == "invalid_expected_run_id":
+        monkeypatch.setenv("GITHUB_RUN_ID", "not-numeric")
+    elif invalid_case == "invalid_expected_run_attempt":
+        monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "0")
+    report = {
+        "stories": [],
+        "stats": {"stories": 0, "articles": 0, "sources": 0},
+    }
+
+    with pytest.raises(RuntimeError, match="daily_report_empty_publication"):
+        daily_report.validate_daily_report_publication(report)
+
+
+@pytest.mark.parametrize(
+    "invalid_shape",
+    (
+        "missing_stories",
+        "stories_none",
+        "stories_string",
+        "story_not_object",
+        "missing_stats",
+        "stats_none",
+        "stats_string",
+        "missing_stats_stories",
+        "missing_stats_articles",
+        "missing_stats_sources",
+        "stats_stories_none",
+        "stats_articles_string",
+        "stats_sources_float",
+        "stats_stories_negative",
+        "stats_articles_bool",
+        "story_count_mismatch",
+    ),
+)
+def test_daily_report_rejects_invalid_shape_even_with_valid_empty_evidence(
+    tmp_path, monkeypatch, invalid_shape
+) -> None:  # type: ignore[no-untyped-def]
+    revision = "d" * 40
+    metrics_path = tmp_path / "curator-run-metrics.json"
+    metrics_path.write_text(
+        json.dumps(verified_empty_metrics(revision)),
+        encoding="utf-8",
+    )
+    report: dict[str, object] = {
+        "stories": [{"title": "verified public story"}],
+        "stats": {"stories": 1, "articles": 1, "sources": 1},
+    }
+
+    if invalid_shape == "missing_stories":
+        report.pop("stories")
+    elif invalid_shape == "stories_none":
+        report["stories"] = None
+    elif invalid_shape == "stories_string":
+        report["stories"] = "not-a-list"
+    elif invalid_shape == "story_not_object":
+        report["stories"] = ["not-an-object"]
+    elif invalid_shape == "missing_stats":
+        report.pop("stats")
+    elif invalid_shape == "stats_none":
+        report["stats"] = None
+    elif invalid_shape == "stats_string":
+        report["stats"] = "not-an-object"
+    else:
+        stats = report["stats"]
+        assert isinstance(stats, dict)
+        if invalid_shape == "missing_stats_stories":
+            stats.pop("stories")
+        elif invalid_shape == "missing_stats_articles":
+            stats.pop("articles")
+        elif invalid_shape == "missing_stats_sources":
+            stats.pop("sources")
+        elif invalid_shape == "stats_stories_none":
+            stats["stories"] = None
+        elif invalid_shape == "stats_articles_string":
+            stats["articles"] = "1"
+        elif invalid_shape == "stats_sources_float":
+            stats["sources"] = 1.0
+        elif invalid_shape == "stats_stories_negative":
+            stats["stories"] = -1
+        elif invalid_shape == "stats_articles_bool":
+            stats["articles"] = True
+        elif invalid_shape == "story_count_mismatch":
+            stats["stories"] = 0
+
+    monkeypatch.setenv("CURATOR_REQUIRE_NONEMPTY_DAILY_REPORT", "1")
+    monkeypatch.setenv("CURATOR_RUN_METRICS_PATH", str(metrics_path))
+    set_verified_github_run_environment(monkeypatch, revision)
+
+    with pytest.raises(RuntimeError, match="daily_report_invalid_publication"):
+        daily_report.validate_daily_report_publication(report)
+
+
+def test_daily_report_shape_validation_cannot_be_disabled(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.delenv("CURATOR_REQUIRE_NONEMPTY_DAILY_REPORT", raising=False)
+
+    with pytest.raises(RuntimeError, match="daily_report_invalid_publication"):
+        daily_report.validate_daily_report_publication(
+            {
+                "stories": None,
+                "stats": {"stories": 0, "articles": 0, "sources": 0},
+            }
+        )
+
+
+def test_required_nonempty_daily_report_does_not_require_metrics_for_content(
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("CURATOR_REQUIRE_NONEMPTY_DAILY_REPORT", "1")
+    monkeypatch.delenv("CURATOR_RUN_METRICS_PATH", raising=False)
+
+    daily_report.validate_daily_report_publication(
+        {
+            "stories": [{"title": "public story"}],
+            "stats": {"stories": 1, "articles": 1, "sources": 1},
+        }
+    )
 
 
 def test_daily_report_enqueue_is_permanently_disabled() -> None:
