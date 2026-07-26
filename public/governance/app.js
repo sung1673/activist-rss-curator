@@ -16,6 +16,14 @@
 
   const PREVIEW_SESSION_KEY = "bside.governance.preview";
   const MARKETS = new Set(["GLOBAL", "KR", "US", "JP", "GB", "CA", "AU"]);
+  const ALPHA_MARKET_SCOPE = Object.freeze({
+    KR: Object.freeze({ coverage_mode: "market-wide", public_status: "active", public_ready: true }),
+    US: Object.freeze({ coverage_mode: "market-wide", public_status: "active", public_ready: true }),
+    JP: Object.freeze({ coverage_mode: "link-only", public_status: "coverage_unavailable", public_ready: false }),
+    GB: Object.freeze({ coverage_mode: "link-only", public_status: "coverage_unavailable", public_ready: false }),
+    CA: Object.freeze({ coverage_mode: "link-only", public_status: "active", public_ready: true }),
+    AU: Object.freeze({ coverage_mode: "link-only", public_status: "active", public_ready: true })
+  });
   let drawerTrigger = null;
   let drawerController = null;
   let filterSheetTrigger = null;
@@ -975,11 +983,11 @@
 
   function marketCoverageDescription(market) {
     const descriptions = {
-      GLOBAL: "KR·US·JP 시장 전체 / market-wide · GB 공식 등록부 / official register · CA·AU 링크 전용 / link-only",
+      GLOBAL: "KR·US 시장 전체 / market-wide · CA·AU 링크 전용 / link-only · JP·GB 링크 전용·현재 수집 불가 / coverage unavailable",
       KR: "OpenDART 시장 전체 / Market-wide",
       US: "SEC EDGAR 시장 전체 / Market-wide",
-      JP: "EDINET 시장 전체 / Market-wide · TDnet 전문 제외",
-      GB: "Companies House 공식 등록부 / Official register · RNS 전문 제외",
+      JP: "링크 전용·현재 수집 불가 / Link-only · coverage unavailable · 공개 준비 아님 / public_ready=false",
+      GB: "링크 전용·현재 수집 불가 / Link-only · coverage unavailable · 공개 준비 아님 / public_ready=false",
       CA: "링크 전용·수동 메타데이터 / Link-only · manual metadata · SEDAR+ 전문 제외",
       AU: "ASIC 링크 전용·수동 메타데이터 / Link-only · manual metadata · ASX 전문 제외"
     };
@@ -1006,16 +1014,11 @@
   }
 
   function eventCoverageMode(event) {
+    const policy = ALPHA_MARKET_SCOPE[marketForEvent(event)];
+    if (policy && policy.public_ready === false) return policy.coverage_mode;
     const explicit = String(event.coverage_mode || "").trim();
     if (explicit) return explicit;
-    const inferred = {
-      KR: "market-wide",
-      US: "market-wide",
-      JP: "market-wide",
-      GB: "official-register",
-      CA: "link-only",
-      AU: "link-only"
-    }[marketForEvent(event)];
+    const inferred = policy && policy.coverage_mode;
     if (inferred) return inferred;
     if (Number(event.official_evidence_count || 0) > 0 || event.verification_status === "official") return "official";
     return Number(event.media_count || 0) > 0 ? "media_only" : "unavailable";
@@ -1428,6 +1431,10 @@
   }
 
   function publicSourceState(source) {
+    const policy = ALPHA_MARKET_SCOPE[String(source.country || "").toUpperCase()];
+    if (policy && policy.public_ready === false) {
+      return { status: policy.public_status, ready: false };
+    }
     const hasPublicContract = typeof source.public_status === "string"
       || typeof source.public_ready === "boolean";
     const status = String(
@@ -1442,10 +1449,16 @@
   function sourceStatusItem(source) {
     const publicState = publicSourceState(source);
     const status = publicState.status;
+    const policy = ALPHA_MARKET_SCOPE[String(source.country || "").toUpperCase()];
     const publicNote = typeof source.public_note === "string"
       ? source.public_note.trim()
       : "";
-    const coverage = label("coverageMode", source.coverage_mode || "unavailable");
+    const coverage = label(
+      "coverageMode",
+      policy && policy.public_ready === false
+        ? policy.coverage_mode
+        : source.coverage_mode || "unavailable"
+    );
     const lag = source.lag_minutes === null || source.lag_minutes === undefined || source.lag_minutes === ""
       ? Number.NaN
       : Number(source.lag_minutes);

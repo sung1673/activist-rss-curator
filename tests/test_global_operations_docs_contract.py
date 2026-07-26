@@ -9,6 +9,15 @@ OPERATIONS = (ROOT / "docs" / "operations-automation.md").read_text(
 API_DOCS = (ROOT / "docs" / "governance-api-v2.md").read_text(
     encoding="utf-8"
 )
+ALPHA_EVIDENCE_DOCS = (
+    ROOT / "docs" / "global-alpha-release-evidence.md"
+).read_text(encoding="utf-8")
+GLOBAL_BACKFILL_DOCS = (
+    ROOT / "docs" / "global-official-backfill.md"
+).read_text(encoding="utf-8")
+CUTOVER_DOCS = (
+    ROOT / "docs" / "governance-cutover-rollback.md"
+).read_text(encoding="utf-8")
 MIGRATION = (
     ROOT
     / "deploy"
@@ -55,19 +64,24 @@ def test_global_source_secrets_and_variables_match_workflows():
     secret_names = {
         "BSIDE_API_BASE_URL",
         "BSIDE_OPS_TOKEN",
-        "EDINET_API_KEY",
-        "COMPANIES_HOUSE_API_KEY",
     }
     variable_names = {
         "GOVERNANCE_PIPELINE_MODE",
         "GOVERNANCE_API_BASE_URL",
         "SEC_EDGAR_USER_AGENT",
-        "COMPANIES_HOUSE_ISSUERS_JSON",
     }
     for name in secret_names | variable_names:
         assert name in global_workflow
         assert name in README
         assert name in OPERATIONS
+    for obsolete_name in (
+        "EDINET_API_KEY",
+        "COMPANIES_HOUSE_API_KEY",
+        "EDINET_CONNECTOR_MODE",
+        "COMPANIES_HOUSE_CONNECTOR_MODE",
+        "COMPANIES_HOUSE_ISSUERS_JSON",
+    ):
+        assert obsolete_name not in global_workflow
     assert "SEC_API_KEY" not in global_workflow
     assert "SEC_EDGAR_API_KEY" not in global_workflow
     assert "SEC 공개 EDGAR 수집은 별도 API key를 사용하지 않는다" in OPERATIONS
@@ -150,11 +164,13 @@ def test_admin_connector_activation_is_audited_and_fail_closed():
     assert "같은 상태 재요청도 포함해 모든 POST" in OPERATIONS
 
 
-def test_cutover_revalidates_six_sources_even_without_published_documents():
+def test_cutover_revalidates_required_sources_and_optional_identities():
     for document in (OPERATIONS, API_DOCS):
         assert "`FOR UPDATE`" in document
         assert "`required_alpha_sources_invalid`" in document
-        assert "필수 6개 connector" in document
+        assert "필수 4개 connector" in document
+        assert "JP·GB" in document
+        assert "identity" in document
         assert "공개 문서가 0건" in document
         assert "승인" in document
         assert "소비" in document
@@ -163,6 +179,26 @@ def test_cutover_revalidates_six_sources_even_without_published_documents():
         assert capability in API_DOCS
     assert "기존 v1·v2 공개 문서" in OPERATIONS
     assert "기존 v1·v2 공개 문서" in API_DOCS
+
+
+def test_alpha_evidence_backfill_and_cutover_docs_match_keyless_scope():
+    normalized_evidence = " ".join(ALPHA_EVIDENCE_DOCS.split())
+    normalized_backfill = " ".join(GLOBAL_BACKFILL_DOCS.split())
+    for document in (ALPHA_EVIDENCE_DOCS, CUTOVER_DOCS):
+        assert "필수 4개" in document
+        assert "JP·GB" in document
+        assert "`coverage_unavailable`" in document
+        assert "`public_ready=false`" in document
+    assert "정확히 DART와 SEC EDGAR 두 항목만" in normalized_evidence
+    assert "한국 DART와 미국 SEC EDGAR 두 소스뿐" in normalized_backfill
+    assert "`dart/KR`, `sec-edgar/US` 두 항목" in GLOBAL_BACKFILL_DOCS
+    for unsupported in (
+        "`source`: `US|JP|GB|all`",
+        "`EDINET_CONNECTOR_MODE=active`",
+        "`COMPANIES_HOUSE_CONNECTOR_MODE=active`",
+    ):
+        assert unsupported not in GLOBAL_BACKFILL_DOCS
+    assert "DART·SEC 정확히 2개 실제 connector" in CUTOVER_DOCS
 
 
 def test_human_brief_and_permanently_disabled_telegram_are_explicit():

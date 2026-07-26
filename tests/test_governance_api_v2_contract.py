@@ -426,6 +426,15 @@ def test_admin_connector_contract_is_closed_audited_and_rights_gated():
     assert "connector_update_validation_failed" in V2_WRITE
     assert "stale_connector_update" in V2_WRITE
     assert "connector_source_right_ineligible" in V2_WRITE
+    connector_update = V2_WRITE[
+        V2_WRITE.index("function v2_admin_update_connector") : V2_WRITE.index(
+            "function v2_global_issuer_id"
+        )
+    ]
+    assert "connector_disabled_by_alpha_policy" in connector_update
+    assert connector_update.index(
+        "connector_disabled_by_alpha_policy"
+    ) < connector_update.index("connector_source_right_ineligible")
     assert "global_connector_audit" in V2
     assert "global_connector_audit" in V2_WRITE
 
@@ -442,7 +451,16 @@ def test_automated_ingest_is_idempotent_and_never_publishes_events():
     envelope = SPEC["components"]["schemas"]["GlobalIngestPayload"]
     assert envelope["properties"]["records"]["maxItems"] == 500
     assert envelope["properties"]["lifecycle_observations"]["maxItems"] == 500
+    assert "source_manifest_sha256" in envelope["properties"]
     assert "chunk" in envelope["required"]
+    ops_ingest = V2_WRITE[V2_WRITE.index("function v2_ops_ingest") :]
+    assert "global_ingest_source_disabled" in ops_ingest
+    assert ops_ingest.index(
+        "global_ingest_source_disabled"
+    ) < ops_ingest.index("v2_normalize_ingest_payload")
+    assert "'source_manifest_sha256'" in V2_WRITE
+    assert "approved manifest mismatch" in V2_WRITE
+    assert "hash_equals(" in V2_WRITE
     assert envelope["properties"]["chunk"] == {
         "$ref": "#/components/schemas/GlobalIngestChunk"
     }
@@ -496,7 +514,11 @@ def test_automated_ingest_is_idempotent_and_never_publishes_events():
     assert "'public_events_created' => 0" in V2_WRITE
     assert "자동 수집은 사건을 직접 공개하지 않는다" in DOCS
     operation = SPEC["paths"]["/ops/ingest"]["post"]
-    assert operation["x-rejected-connector-ids"] == ["connector:kr:dart"]
+    assert operation["x-rejected-connector-ids"] == [
+        "connector:kr:dart",
+        "connector:jp:edinet",
+        "connector:gb:companies-house",
+    ]
     assert "connector:kr:dart" in V2_WRITE
     assert "OpenDART uses the established official-ingest pipeline" in V2_WRITE
     assert "한국 공시는 기존 `official-ingest` 파이프라인" in DOCS
@@ -675,8 +697,8 @@ def test_brief_publication_freezes_top_five_or_an_explicit_empty_reason():
     assert "coverage_unavailable" in V2_WRITE
     assert "event_snapshot_json" in V2_WRITE
     assert "brief_edition_conflict" in V2_WRITE
-    assert "array('KR', 'US', 'JP', 'GB', 'CA', 'AU')" in V2_WRITE
-    assert "global edition에서는 6개국 각각" in DOCS
+    assert "array('KR', 'US', 'CA', 'AU')" in V2_WRITE
+    assert "global edition에서는 필수 4개국 각각" in DOCS
     assert "Top은 최대 5건" in DOCS
 
 
@@ -1035,11 +1057,26 @@ def test_v2_source_right_identity_is_exactly_bound_on_every_public_gate():
     assert "one-time authorization" in live_transition_guard
 
 
-def test_atomic_cutover_locks_and_revalidates_all_six_required_sources():
+def test_atomic_cutover_requires_four_sources_and_locks_optional_identities():
     registry = V2[
         V2.index("function v2_required_alpha_source_identities") : V2.index(
-            "function v2_required_alpha_source_rights_guard"
+            "function v2_optional_alpha_source_identities"
         )
+    ]
+    optional_registry = V2[
+        V2.index("function v2_optional_alpha_source_identities") : V2.index(
+            "function v2_optional_alpha_source_identity_guard"
+        )
+    ]
+    optional_policy = V2[
+        V2.index(
+            "function v2_optional_alpha_source_policy_reasons"
+        ) : V2.index("function v2_source_status_data")
+    ]
+    optional_guard = V2[
+        V2.index(
+            "function v2_optional_alpha_source_identity_guard"
+        ) : V2.index("function v2_required_alpha_source_rights_guard")
     ]
     guard = V2[
         V2.index("function v2_required_alpha_source_rights_guard") : V2.index(
@@ -1064,22 +1101,6 @@ def test_atomic_cutover_locks_and_revalidates_all_six_required_sources():
             "market-wide",
         ),
         (
-            "connector:jp:edinet",
-            "JP",
-            "edinet",
-            "official_disclosure",
-            "official:edinet",
-            "market-wide",
-        ),
-        (
-            "connector:gb:companies-house",
-            "GB",
-            "companies-house",
-            "official_register",
-            "official:companies-house",
-            "official-register",
-        ),
-        (
             "connector:ca:issuer-ir",
             "CA",
             "issuer-ir",
@@ -1099,7 +1120,40 @@ def test_atomic_cutover_locks_and_revalidates_all_six_required_sources():
     for identity in expected:
         for value in identity:
             assert f"'{value}'" in registry
-    assert registry.count("'connector_id' =>") == 6
+    assert registry.count("'connector_id' =>") == 4
+    for value in (
+        "connector:jp:edinet",
+        "official:edinet",
+        "connector:gb:companies-house",
+        "official:companies-house",
+        "HTML scraping is disabled",
+    ):
+        assert value in optional_registry
+    assert optional_registry.count("'connector_id' =>") == 2
+    for field in (
+        "connector_status",
+        "last_success_at",
+        "last_checked_at",
+        "last_observed_at",
+        "cursor_json",
+        "last_raw_count",
+        "last_acknowledged_count",
+        "connector_right_status",
+        "connector_right_collect_eligible",
+    ):
+        assert field in optional_policy
+        assert field in optional_guard
+    for reason in (
+        "connector_policy_activity",
+        "source_right_missing",
+        "source_right_identity_mismatch",
+        "source_right_policy_active",
+        "source_right_policy_invalid",
+    ):
+        assert reason in optional_policy
+    assert "v2_optional_alpha_source_policy_reasons($connector)" in optional_guard
+    assert "LEFT JOIN " in optional_guard
+    assert "source_rights" in optional_guard
     assert "ORDER BY BINARY connector_id FOR UPDATE" in guard
     assert "ORDER BY BINARY sr.source_right_id FOR UPDATE" in guard
     for field in (
@@ -1129,7 +1183,8 @@ def test_atomic_cutover_locks_and_revalidates_all_six_required_sources():
     assert "collect_not_allowed" in guard
     assert "public_redistribution_not_allowed" in guard
     release_guard = SPEC["x-release-gate"]["live-transition-guard"]
-    assert "all six required Production Alpha connector" in release_guard
+    assert "four" in release_guard
+    assert "JP and GB connector identities" in release_guard
     assert "zero published documents" in release_guard
     conflict_schema = SPEC["paths"]["/admin/cutover"]["post"]["responses"]["409"][
         "content"
@@ -1141,24 +1196,28 @@ def test_atomic_cutover_locks_and_revalidates_all_six_required_sources():
         "#/components/schemas/ErrorEnvelope",
     }
     invalid_error = SPEC["components"]["schemas"]["RequiredAlphaSourcesInvalidError"]
-    assert invalid_error["properties"]["required_connector_count"]["const"] == 6
+    assert invalid_error["properties"]["required_connector_count"]["const"] == 4
+    assert invalid_error["properties"]["optional_connector_count"]["const"] == 2
     assert set(
         invalid_error["properties"]["invalid_sources"]["items"]["properties"][
             "reasons"
         ]["items"]["enum"]
     ) == {
-        "connector_missing",
-        "connector_identity_mismatch",
-        "connector_not_active",
+            "connector_missing",
+            "connector_identity_mismatch",
+            "connector_policy_activity",
+            "connector_not_active",
         "connector_has_error",
         "last_success_missing_or_stale",
         "last_checked_missing_or_stale",
         "intraday_cursor_missing_or_stale",
         "link_observation_missing_or_stale",
         "link_observation_not_acknowledged",
-        "source_right_missing",
-        "source_right_identity_mismatch",
-        "collect_not_allowed",
+            "source_right_missing",
+            "source_right_identity_mismatch",
+            "source_right_policy_active",
+            "source_right_policy_invalid",
+            "collect_not_allowed",
         "public_redistribution_not_allowed",
     }
 
@@ -1342,6 +1401,38 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
     assert "(string)$event['title'] === (string)$document['title']" in exporter
     assert "production_database_export" in exporter
     assert "LIMIT 10001" in exporter
+    assert "$definitions = array(" in exporter
+    assert "array('dart', 'KR', null)" in exporter
+    assert "array('sec-edgar', 'US', 'connector:us:sec-edgar')" in exporter
+    assert "array('edinet', 'JP'" not in exporter
+    assert "array('companies-house', 'GB'" not in exporter
+
+    evidence_schema = SPEC["components"]["schemas"]["AlphaAutomatedEvidence"]
+    connector_coverage = evidence_schema["properties"]["connector_coverage"]
+    assert connector_coverage["minItems"] == 2
+    assert connector_coverage["maxItems"] == 2
+    exact_pairs = {
+        (
+            rule["contains"]["properties"]["connector_family"]["const"],
+            rule["contains"]["properties"]["country"]["const"],
+            rule["minContains"],
+            rule["maxContains"],
+        )
+        for rule in connector_coverage["allOf"]
+    }
+    assert exact_pairs == {
+        ("dart", "KR", 1, 1),
+        ("sec-edgar", "US", 1, 1),
+    }
+    connector_schema = SPEC["components"]["schemas"]["AlphaConnectorCoverage"]
+    assert connector_schema["properties"]["connector_family"]["enum"] == [
+        "dart",
+        "sec-edgar",
+    ]
+    assert connector_schema["properties"]["country"]["enum"] == ["KR", "US"]
+    assert "exactly two latest contiguous 30-day collection horizons" in (
+        operation["description"]
+    )
 
     window_schema = SPEC["components"]["schemas"]["AlphaCompletedWindow"]
     assert set(window_schema["required"]) == {
@@ -1657,22 +1748,27 @@ def test_title_provenance_is_required_across_ingest_public_events_and_exports():
 def test_global_ingest_runner_contract_and_configuration_are_documented():
     assert "OpenDART deliberately does not use this module" in GLOBAL_INGEST
     assert "SecHybridConnector" in GLOBAL_INGEST
-    assert "EdinetDocumentsConnector" in GLOBAL_INGEST
-    assert "CompaniesHouseFilingHistoryConnector" in GLOBAL_INGEST
+    assert 'SUPPORTED_COUNTRIES = ("US",)' in GLOBAL_INGEST
+    assert "EdinetDocumentsConnector" not in GLOBAL_INGEST
+    assert "CompaniesHouseFilingHistoryConnector" not in GLOBAL_INGEST
     assert "default_completed_window" in GLOBAL_INGEST
     assert "source_right_changed_before_ingest" in GLOBAL_INGEST
-    for country in ("US", "JP", "GB"):
-        assert f"- {country}" in GLOBAL_INGEST_WORKFLOW
+    assert "- US" in GLOBAL_INGEST_WORKFLOW
+    assert "- JP" not in GLOBAL_INGEST_WORKFLOW
+    assert "- GB" not in GLOBAL_INGEST_WORKFLOW
     for setting in (
         "BSIDE_API_BASE_URL",
         "BSIDE_OPS_TOKEN",
         "SEC_EDGAR_USER_AGENT",
+    ):
+        assert setting in GLOBAL_INGEST_WORKFLOW
+        assert setting in DOCS
+    for setting in (
         "EDINET_API_KEY",
         "COMPANIES_HOUSE_API_KEY",
         "COMPANIES_HOUSE_ISSUERS_JSON",
     ):
-        assert setting in GLOBAL_INGEST_WORKFLOW
-        assert setting in DOCS
+        assert setting not in GLOBAL_INGEST_WORKFLOW
     assert "17,47 * * * *" in GLOBAL_INGEST_WORKFLOW
     assert "ACK가 실제 record와 lifecycle observation 합계" in DOCS
 
@@ -1705,8 +1801,17 @@ def test_machine_readable_alpha_scope_marks_ca_and_au_as_manual_links():
         "ingest-mode": "manual-metadata",
         "host-policy": "official-asic-hosts-only",
     }
-    assert scope["GB"]["coverage-mode"] == "official-register"
-    for country in ("KR", "US", "JP"):
+    assert scope["JP"] == {
+        "coverage-mode": "link-only",
+        "ingest-mode": "coverage-unavailable",
+        "public-ready": False,
+    }
+    assert scope["GB"] == {
+        "coverage-mode": "link-only",
+        "ingest-mode": "coverage-unavailable",
+        "public-ready": False,
+    }
+    for country in ("KR", "US"):
         assert scope[country]["coverage-mode"] == "market-wide"
 
 

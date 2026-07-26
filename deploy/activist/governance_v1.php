@@ -2034,6 +2034,20 @@ function v1_admin_source_rights(PDO $pdo, array $config): void {
         . 'LIMIT ' . ((int)$page['limit'] + 1) . ' OFFSET ' . (int)$page['offset']);
     $stmt->execute();
     list($rows, $hasMore) = v1_fetch_page($stmt, $page);
+    foreach ($rows as &$row) {
+        foreach (array(
+            'valid_from',
+            'valid_until',
+            'revoked_at',
+            'created_at',
+            'updated_at',
+        ) as $field) {
+            $row[$field] = v1_release_iso_time(
+                isset($row[$field]) ? $row[$field] : null
+            );
+        }
+    }
+    unset($row);
     v1_respond(200, array('ok' => true, 'data' => $rows, 'pagination' => v1_page_meta($page, count($rows), $hasMore)));
 }
 
@@ -5045,6 +5059,38 @@ function v1_admin_upsert_source_right(PDO $pdo, array $config, string $role): vo
     if ($status === 'active' && $evidenceUri === '' && ($evidenceHash === null || $evidenceHash === '')) {
         v1_respond(400, array('ok' => false, 'error' => 'active_source_right_requires_evidence'));
     }
+    $hasExpectedState = array_key_exists('expected_status', $payload);
+    $expectedStatus = $hasExpectedState
+        ? strtolower(trim((string)$payload['expected_status'])) : null;
+    if (
+        $hasExpectedState
+        && !in_array(
+            $expectedStatus,
+            array('missing', 'pending', 'active', 'expired', 'revoked'),
+            true
+        )
+    ) {
+        v1_respond(400, array(
+            'ok' => false,
+            'error' => 'invalid_expected_source_right_status',
+        ));
+    }
+    $expectedUpdatedAtRaw = isset($payload['expected_updated_at'])
+        ? trim((string)$payload['expected_updated_at']) : '';
+    $expectedUpdatedAt = $expectedUpdatedAtRaw !== ''
+        ? mysql_dt($expectedUpdatedAtRaw) : null;
+    if (
+        ($hasExpectedState && $expectedStatus !== 'missing'
+            && $expectedUpdatedAt === null)
+        || ($hasExpectedState && $expectedStatus === 'missing'
+            && $expectedUpdatedAtRaw !== '')
+        || (!$hasExpectedState && $expectedUpdatedAtRaw !== '')
+    ) {
+        v1_respond(400, array(
+            'ok' => false,
+            'error' => 'invalid_expected_source_right_version',
+        ));
+    }
     $now = gmdate('Y-m-d H:i:s');
     $pdo->beginTransaction();
     try {
@@ -5055,7 +5101,7 @@ function v1_admin_upsert_source_right(PDO $pdo, array $config, string $role): vo
             throw new RuntimeException('release_state_unavailable');
         }
         $identity = $pdo->prepare(
-            'SELECT source_type,source_key FROM '
+            'SELECT source_type,source_key,status,updated_at,revoked_at FROM '
             . table_name($config, 'source_rights')
             . ' WHERE source_right_id=? LIMIT 1 FOR UPDATE'
         );
@@ -5077,12 +5123,45 @@ function v1_admin_upsert_source_right(PDO $pdo, array $config, string $role): vo
                 'existing_source_key' => (string)$existingIdentity['source_key'],
             ));
         }
+        if ($hasExpectedState) {
+            $stale = (
+                ($expectedStatus === 'missing' && $existingIdentity)
+                || ($expectedStatus !== 'missing' && !$existingIdentity)
+                || (
+                    $existingIdentity
+                    && $expectedStatus !== 'missing'
+                    && (
+                        !hash_equals(
+                            (string)$expectedStatus,
+                            (string)$existingIdentity['status']
+                        )
+                        || !hash_equals(
+                            (string)$expectedUpdatedAt,
+                            (string)$existingIdentity['updated_at']
+                        )
+                    )
+                )
+            );
+            if ($stale) {
+                $pdo->rollBack();
+                v1_respond(409, array(
+                    'ok' => false,
+                    'error' => 'stale_source_right',
+                    'source_right_id' => $id,
+                ));
+            }
+        }
         $stmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'source_rights') . ' (source_right_id, source_type, source_key, source_name, '
             . 'permission_scope, evidence_uri, evidence_hash, valid_from, valid_until, revoked_at, ai_allowed, redistribution_allowed, status, notes, created_at, updated_at) '
-            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE '
-            . 'source_name=VALUES(source_name), permission_scope=VALUES(permission_scope), evidence_uri=VALUES(evidence_uri), evidence_hash=VALUES(evidence_hash), '
-            . 'valid_from=VALUES(valid_from), valid_until=VALUES(valid_until), revoked_at=VALUES(revoked_at), ai_allowed=VALUES(ai_allowed), '
-            . 'redistribution_allowed=VALUES(redistribution_allowed), status=VALUES(status), notes=VALUES(notes), updated_at=VALUES(updated_at)');
+            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+            . (
+                $hasExpectedState && $expectedStatus === 'missing'
+                ? ''
+                : ' ON DUPLICATE KEY UPDATE '
+                    . 'source_name=VALUES(source_name), permission_scope=VALUES(permission_scope), evidence_uri=VALUES(evidence_uri), evidence_hash=VALUES(evidence_hash), '
+                    . 'valid_from=VALUES(valid_from), valid_until=VALUES(valid_until), revoked_at=VALUES(revoked_at), ai_allowed=VALUES(ai_allowed), '
+                    . 'redistribution_allowed=VALUES(redistribution_allowed), status=VALUES(status), notes=VALUES(notes), updated_at=VALUES(updated_at)'
+            ));
         $stmt->execute(array(
             $id, $sourceType, $sourceKey, mb_substr($sourceName, 0, 255, 'UTF-8'), $scope,
             $evidenceUri !== '' ? mb_substr($evidenceUri, 0, 65535, 'UTF-8') : null,
@@ -5094,9 +5173,25 @@ function v1_admin_upsert_source_right(PDO $pdo, array $config, string $role): vo
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        if (
+            $hasExpectedState
+            && $expectedStatus === 'missing'
+            && (string)$e->getCode() === '23000'
+        ) {
+            v1_respond(409, array(
+                'ok' => false,
+                'error' => 'stale_source_right',
+                'source_right_id' => $id,
+            ));
+        }
         throw $e;
     }
-    v1_respond(200, array('ok' => true, 'source_right_id' => $id, 'status' => $status));
+    v1_respond(200, array(
+        'ok' => true,
+        'source_right_id' => $id,
+        'status' => $status,
+        'updated_at' => v1_release_iso_time($now),
+    ));
 }
 
 function v1_admin_create_revision(PDO $pdo, array $config, string $role): void {

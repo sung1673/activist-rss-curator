@@ -252,7 +252,7 @@ def test_collection_freshness_does_not_imply_public_brief_readiness() -> None:
     )
 
 
-def test_global_readiness_requires_all_six_countries() -> None:
+def test_global_readiness_requires_all_four_alpha_countries() -> None:
     statuses = [_source(country) for country in ("KR", "US", "JP", "GB", "CA")]
     bundle = _bundle(candidates=[], statuses=statuses, edition="global")
     readiness = bundle["basis"]["source_snapshot"]["readiness"]
@@ -261,6 +261,34 @@ def test_global_readiness_requires_all_six_countries() -> None:
     assert (
         bundle["approval_template"]["publication"]["empty_reason"]
         == "coverage_unavailable"
+    )
+
+
+def test_optional_jp_gb_coverage_unavailable_does_not_block_global_brief() -> None:
+    statuses = [_source(country) for country in ("KR", "US", "CA", "AU")]
+    for country in ("JP", "GB"):
+        item = _source(country, ready=False, public_ready=False)
+        item.update(
+            {
+                "coverage_mode": "link-only",
+                "status": "inactive",
+                "collect_status": "inactive",
+                "public_status": "coverage_unavailable",
+                "fresh": False,
+                "collect_fresh": False,
+                "public_ready": False,
+                "raw_count": 0,
+                "acknowledged_count": 0,
+            }
+        )
+        statuses.append(item)
+    bundle = _bundle(candidates=[], statuses=statuses, edition="global")
+    readiness = bundle["basis"]["source_snapshot"]["readiness"]
+    assert readiness["ready"] is True
+    assert readiness["required_countries"] == ["KR", "US", "CA", "AU"]
+    assert (
+        bundle["approval_template"]["publication"]["empty_reason"]
+        == "no_confirmed_material_events"
     )
 
 

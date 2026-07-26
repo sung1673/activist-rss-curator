@@ -237,6 +237,27 @@ def test_terminal_v2_fallback_filters_drawer_and_keyboard_contracts() -> None:
     assert "Watch / 새로 바뀐 사건" in javascript
 
 
+def test_production_alpha_ui_keeps_jp_and_gb_link_only_and_unavailable() -> None:
+    javascript = (UI / "app.js").read_text(encoding="utf-8")
+    html = (UI / "index.html").read_text(encoding="utf-8")
+    scope = javascript.split(
+        "const ALPHA_MARKET_SCOPE = Object.freeze({",
+        1,
+    )[1].split("\n  });", 1)[0]
+    for country in ("JP", "GB"):
+        assert (
+            f'{country}: Object.freeze({{ coverage_mode: "link-only", '
+            'public_status: "coverage_unavailable", public_ready: false })'
+        ) in scope
+    assert 'JP: "EDINET 시장 전체 / Market-wide' not in javascript
+    assert 'GB: "Companies House 공식 등록부 / Official register' not in javascript
+    assert "if (policy && policy.public_ready === false)" in javascript
+    assert "return { status: policy.public_status, ready: false };" in javascript
+    assert "JP·GB는 링크 전용·현재 수집 불가" in html
+    assert "JP·GB 시장 전체" not in html
+    assert "GB 공식 등록부" not in html
+
+
 def test_v2_issuer_identity_archive_and_calendar_never_alias_to_legacy_company() -> None:
     javascript = (UI / "app.js").read_text(encoding="utf-8")
     assert "function issuerOrCompanyRoute" in javascript

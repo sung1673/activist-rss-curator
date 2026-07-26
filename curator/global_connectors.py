@@ -176,6 +176,7 @@ class GlobalConnectorEnvelope:
     public_allowed: bool = False
     ai_allowed: bool = False
     lifecycle_observations: tuple[GlobalLifecycleObservation, ...] = ()
+    source_manifest_sha256: str | None = None
 
     def __post_init__(self) -> None:
         if self.schema_version != 1:
@@ -195,9 +196,17 @@ class GlobalConnectorEnvelope:
             raise GlobalConnectorContractError(
                 "connector returned duplicate lifecycle observations"
             )
+        if (
+            self.source_manifest_sha256 is not None
+            and re.fullmatch(r"[a-f0-9]{64}", self.source_manifest_sha256)
+            is None
+        ):
+            raise GlobalConnectorContractError(
+                "connector source manifest digest is invalid"
+            )
 
     def to_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "connector_id": self.connector_id,
             "country_code": self.country_code,
@@ -220,6 +229,9 @@ class GlobalConnectorEnvelope:
                 for observation in self.lifecycle_observations
             ],
         }
+        if self.source_manifest_sha256 is not None:
+            payload["source_manifest_sha256"] = self.source_manifest_sha256
+        return payload
 
     def to_public_payload(self) -> dict[str, Any]:
         if not self.public_allowed:

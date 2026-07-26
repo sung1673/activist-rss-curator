@@ -67,14 +67,23 @@ def provenance(kind: str) -> dict[str, object]:
 
 
 def source(country: str, coverage_mode: str) -> dict[str, object]:
+    connector_ids = {
+        "KR": "connector:kr:dart",
+        "US": "connector:us:sec-edgar",
+        "JP": "connector:jp:edinet",
+        "GB": "connector:gb:companies-house",
+        "CA": "connector:ca:issuer-ir",
+        "AU": "connector:au:asic-register",
+    }
+    optional = country in {"JP", "GB"}
     return {
-        "connector_id": f"connector:{country.casefold()}:official",
+        "connector_id": connector_ids[country],
         "country": country,
         "coverage_mode": coverage_mode,
-        "public_status": "active",
-        "public_ready": True,
-        "raw_count": 4,
-        "acknowledged_count": 4,
+        "public_status": "coverage_unavailable" if optional else "active",
+        "public_ready": not optional,
+        "raw_count": 0 if optional else 4,
+        "acknowledged_count": 0 if optional else 4,
     }
 
 
@@ -83,8 +92,8 @@ def observation(index: int) -> dict[str, object]:
     sources = [
         source("KR", "market-wide"),
         source("US", "market-wide"),
-        source("JP", "market-wide"),
-        source("GB", "official-register"),
+        source("JP", "link-only"),
+        source("GB", "link-only"),
         source("CA", "link-only"),
         source("AU", "link-only"),
     ]
@@ -154,20 +163,31 @@ def observations() -> list[dict[str, object]]:
 
 class MonitorIntegrationClient:
     def _source(self, country: str, coverage: str) -> dict[str, object]:
+        connector_ids = {
+            "KR": "connector:kr:dart",
+            "US": "connector:us:sec-edgar",
+            "JP": "connector:jp:edinet",
+            "GB": "connector:gb:companies-house",
+            "CA": "connector:ca:issuer-ir",
+            "AU": "connector:au:asic-register",
+        }
+        optional = country in {"JP", "GB"}
         return {
-            "connector_id": f"connector:{country.casefold()}:official",
+            "connector_id": connector_ids[country],
             "country": country,
             "coverage_mode": coverage,
-            "status": "active",
-            "fresh": True,
-            "public_status": "active",
-            "public_ready": True,
-            "lag_minutes": 5,
+            "status": "inactive" if optional else "active",
+            "fresh": not optional,
+            "public_status": (
+                "coverage_unavailable" if optional else "active"
+            ),
+            "public_ready": not optional,
+            "lag_minutes": None if optional else 5,
             "expected_cadence_minutes": 30,
-            "raw_count": 4,
-            "acknowledged_count": 4,
-            "last_success_at": START.isoformat(),
-            "last_checked_at": START.isoformat(),
+            "raw_count": 0 if optional else 4,
+            "acknowledged_count": 0 if optional else 4,
+            "last_success_at": None if optional else START.isoformat(),
+            "last_checked_at": None if optional else START.isoformat(),
         }
 
     def get_text(self, url: str) -> HttpProbe:
@@ -209,15 +229,26 @@ class MonitorIntegrationClient:
             items = [
                 self._source("KR", "market-wide"),
                 self._source("US", "market-wide"),
-                self._source("JP", "market-wide"),
-                self._source("GB", "official-register"),
+                self._source("JP", "link-only"),
+                self._source("GB", "link-only"),
                 self._source("CA", "link-only"),
                 self._source("AU", "link-only"),
             ]
+            required_ready = {
+                "connector:kr:dart": True,
+                "connector:us:sec-edgar": True,
+                "connector:ca:issuer-ir": True,
+                "connector:au:asic-register": True,
+            }
             payload = {
                 "ok": True,
                 "api_version": "v2",
-                "data": {"checked_at": START.isoformat(), "items": items},
+                "data": {
+                    "checked_at": START.isoformat(),
+                    "items": items,
+                    "required_source_ready": required_ready,
+                    "all_required_ready": True,
+                },
                 "meta": {"returned": len(items)},
             }
         elif path.endswith("/live"):
@@ -294,8 +325,6 @@ def connector_report() -> dict[str, object]:
         for family, country in (
             ("dart", "KR"),
             ("sec-edgar", "US"),
-            ("edinet", "JP"),
-            ("companies-house", "GB"),
         )
     ]
     return result
@@ -312,8 +341,6 @@ def automated_evidence_response(
     for family, country in (
         ("dart", "KR"),
         ("sec-edgar", "US"),
-        ("edinet", "JP"),
-        ("companies-house", "GB"),
     ):
         windows = []
         cursor = start
@@ -527,7 +554,7 @@ def approval_report() -> dict[str, object]:
                     "valid_source_right_count": 1,
                     "invalid_source_right_count": 0,
                 }
-                for country in ("KR", "US", "JP", "GB", "CA", "AU")
+                for country in ("KR", "US", "CA", "AU")
             ],
         }
     )

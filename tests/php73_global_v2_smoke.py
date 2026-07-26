@@ -67,8 +67,6 @@ TELEGRAM_URL = "https://t.me/ci_private_signal/42"
 REQUIRED_ALPHA_RIGHT_IDS = (
     "official:dart",
     "official:sec-edgar",
-    "official:edinet",
-    "official:companies-house",
     "official:ca-issuer-ir",
     "official:asic-register",
 )
@@ -634,8 +632,7 @@ def activate_required_alpha_cutover_sources(mysql_container_id: str) -> None:
         "last_raw_count=CASE WHEN coverage_mode='link-only' THEN 1 ELSE 0 END,"
         "last_acknowledged_count=CASE WHEN coverage_mode='link-only' THEN 1 ELSE 0 END,"
         "last_error_class=NULL,updated_at=UTC_TIMESTAMP() WHERE connector_id IN ("
-        "'connector:kr:dart','connector:us:sec-edgar','connector:jp:edinet',"
-        "'connector:gb:companies-house','connector:ca:issuer-ir',"
+        "'connector:kr:dart','connector:us:sec-edgar','connector:ca:issuer-ir',"
         "'connector:au:asic-register');",
     )
     set_sec_current_cursor(mysql_container_id, datetime.now(timezone.utc))
@@ -666,11 +663,7 @@ def seed_alpha_automated_evidence(
     end = now.date()
     start = end - timedelta(days=30)
     receipt_values: list[str] = []
-    connector_ids = (
-        "connector:us:sec-edgar",
-        "connector:jp:edinet",
-        "connector:gb:companies-house",
-    )
+    connector_ids = ("connector:us:sec-edgar",)
     for connector_id in connector_ids:
         cursor = start
         for index in range(30):
@@ -681,10 +674,7 @@ def seed_alpha_automated_evidence(
             ingest_id = "alpha:" + digest[:80]
             idempotency_key = "alpha-evidence:" + digest
             completed = now.strftime("%Y-%m-%d %H:%M:%S")
-            if (
-                connector_id == "connector:gb:companies-house"
-                and index == 0
-            ):
+            if connector_id == "connector:us:sec-edgar" and index == 0:
                 for (
                     chunk_index,
                     request_count,
@@ -1143,6 +1133,65 @@ def run(base_url: str, mysql_container_id: str) -> None:
         == f"official_disclosure:{SEC_SOURCE_KEY}",
         repr(identity_mutation),
     )
+
+    # A bootstrap that preflighted a pending grant cannot revive it after a
+    # concurrent revocation. The status/version comparison happens under the
+    # same SourceRight row lock as the write.
+    edinet_preflight_updated_at = mysql_execute(
+        mysql_container_id,
+        "SELECT updated_at FROM ci_source_rights "
+        "WHERE source_right_id='official:edinet';",
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_rights SET status='revoked',"
+        "revoked_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() "
+        "WHERE source_right_id='official:edinet';",
+    )
+    stale_right_activation, _ = request_json(
+        base_url,
+        "api.php/api/v1/admin/source-rights",
+        method="POST",
+        token=ADMIN_TOKEN,
+        payload={
+            "source_right_id": "official:edinet",
+            "source_type": "official_disclosure",
+            "source_key": "edinet",
+            "source_name": "EDINET",
+            "permission_scope": "CI metadata-only EDINET fixture",
+            "evidence_uri": (
+                "https://disclosure2.edinet-fsa.go.jp/guide/static/"
+                "disclosure/WZEK0090.html"
+            ),
+            "evidence_hash": None,
+            "valid_from": "2013-09-17T00:00:00Z",
+            "valid_until": None,
+            "revoked_at": None,
+            "ai_allowed": False,
+            "redistribution_allowed": True,
+            "status": "active",
+            "expected_status": "pending",
+            "expected_updated_at": edinet_preflight_updated_at,
+        },
+        expected_status=409,
+    )
+    require(
+        stale_right_activation.get("error") == "stale_source_right"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT status FROM ci_source_rights "
+            "WHERE source_right_id='official:edinet';",
+        )
+        == "revoked",
+        repr(stale_right_activation),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_rights SET status='pending',revoked_at=NULL,"
+        "updated_at=UTC_TIMESTAMP() "
+        "WHERE source_right_id='official:edinet';",
+    )
+
     connector_admin_denied, _ = request_json(
         base_url,
         "api.php/api/v2/admin/connectors",
@@ -1196,7 +1245,8 @@ def run(base_url: str, mysql_container_id: str) -> None:
         expected_status=409,
     )
     require(
-        unapproved_configured.get("error") == "connector_source_right_ineligible",
+        unapproved_configured.get("error")
+        == "connector_disabled_by_alpha_policy",
         repr(unapproved_configured),
     )
     inactive_without_rights, _ = request_json(
@@ -1280,6 +1330,143 @@ def run(base_url: str, mysql_container_id: str) -> None:
         and isinstance(rights_revision, str)
         and len(rights_revision) == 64,
         repr(eligibility),
+    )
+
+    optional_receipts_before = mysql_execute(
+        mysql_container_id,
+        "SELECT COUNT(*) FROM ci_global_ingest_receipts;",
+    )
+    optional_ingest_disabled, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload={
+            "idempotency_key": "php73-v2-gb-alpha-disabled",
+            "code_revision": CODE_REVISION,
+            "envelope": {
+                "connector_id": "connector:gb:companies-house",
+            },
+        },
+        expected_status=409,
+    )
+    require(
+        optional_ingest_disabled.get("error")
+        == "global_ingest_source_disabled"
+        and optional_ingest_disabled.get("connector_id")
+        == "connector:gb:companies-house"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_global_ingest_receipts;",
+        )
+        == optional_receipts_before,
+        repr(optional_ingest_disabled),
+    )
+
+    # CA/AU link-only ingestion is bound to the exact human-approved
+    # canonical manifest digest stored on the current SourceRight.
+    ca_manifest_sha256 = "c" * 64
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_rights SET "
+        "permission_scope='CI-approved Canadian issuer link metadata',"
+        "evidence_uri=NULL,evidence_hash='" + ca_manifest_sha256 + "',"
+        "valid_from='2015-01-01 00:00:00',valid_until=NULL,revoked_at=NULL,"
+        "ai_allowed=0,redistribution_allowed=1,status='active',"
+        "updated_at=UTC_TIMESTAMP() "
+        "WHERE source_right_id='official:ca-issuer-ir';"
+        "UPDATE ci_source_connectors SET connector_status='configured',"
+        "last_error_class=NULL,updated_at=UTC_TIMESTAMP() "
+        "WHERE connector_id='connector:ca:issuer-ir';",
+    )
+    ca_eligibility, _ = request_json(
+        base_url,
+        (
+            "api.php/api/v2/ops/source-right-eligibility?"
+            + urllib.parse.urlencode(
+                {
+                    "source_right_id": "official:ca-issuer-ir",
+                    "use": "collect",
+                }
+            )
+        ),
+        token=OPS_TOKEN,
+    )
+    ca_rights_revision = ca_eligibility.get("rights_revision")
+    require(
+        ca_eligibility.get("eligible") is True
+        and isinstance(ca_rights_revision, str)
+        and len(ca_rights_revision) == 64,
+        repr(ca_eligibility),
+    )
+
+    def ca_empty_payload(
+        *,
+        idempotency_key: str,
+        manifest_sha256: str | None,
+    ) -> dict[str, Any]:
+        payload = empty_chunk_payload(
+            rights_revision=ca_rights_revision,
+            idempotency_key=idempotency_key,
+            retrieved_at=utc_text(now),
+            batch_id=(
+                "global-batch:"
+                + hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+            ),
+            index=1,
+            count=1,
+        )
+        envelope = payload["envelope"]
+        envelope.update(
+            {
+                "connector_id": "connector:ca:issuer-ir",
+                "country_code": "CA",
+                "source_right_id": "official:ca-issuer-ir",
+                "coverage_mode": "link-only",
+                "ai_allowed": False,
+            }
+        )
+        if manifest_sha256 is not None:
+            envelope["source_manifest_sha256"] = manifest_sha256
+        return payload
+
+    for suffix, manifest_sha256 in (
+        ("missing", None),
+        ("mismatch", "d" * 64),
+    ):
+        rejected_manifest, _ = request_json(
+            base_url,
+            "api.php/api/v2/ops/ingest",
+            method="POST",
+            token=OPS_TOKEN,
+            payload=ca_empty_payload(
+                idempotency_key=f"php73-v2-ca-manifest-{suffix}",
+                manifest_sha256=manifest_sha256,
+            ),
+            expected_status=400,
+        )
+        require(
+            rejected_manifest.get("error") == "global_ingest_validation_failed"
+            and "approved manifest mismatch"
+            in str(rejected_manifest.get("detail")),
+            repr(rejected_manifest),
+        )
+    approved_manifest, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=ca_empty_payload(
+            idempotency_key="php73-v2-ca-manifest-approved",
+            manifest_sha256=ca_manifest_sha256,
+        ),
+    )
+    require(
+        approved_manifest.get("data", {}).get("connector_id")
+        == "connector:ca:issuer-ir"
+        and approved_manifest.get("data", {}).get("raw_count") == 0
+        and approved_manifest.get("data", {}).get("acknowledged_count") == 0,
+        repr(approved_manifest),
     )
 
     # OpenDART remains on the established v1 official-ingest path.
@@ -2513,7 +2700,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
     )
 
     # Required-source validation is independent of published documents. The
-    # five still-pending non-SEC grants must block cutover without consuming
+    # three still-pending non-SEC required grants block cutover without consuming
     # the otherwise valid one-time authorization.
     pending_sources = atomic_cutover(
         base_url,
@@ -2524,8 +2711,9 @@ def run(base_url: str, mysql_container_id: str) -> None:
     )
     require(
         pending_sources.get("error") == "required_alpha_sources_invalid"
-        and pending_sources.get("required_connector_count") == 6
-        and pending_sources.get("invalid_required_connector_count", 0) >= 5,
+        and pending_sources.get("required_connector_count") == 4
+        and pending_sources.get("optional_connector_count") == 2
+        and pending_sources.get("invalid_required_connector_count", 0) >= 3,
         repr(pending_sources),
     )
     require_cutover_not_consumed(
@@ -2669,6 +2857,148 @@ def run(base_url: str, mysql_container_id: str) -> None:
         "WHERE connector_id='connector:ca:issuer-ir';",
     )
 
+    # Optional JP remains unavailable, but its stored identity is still locked
+    # so a corrupted connector cannot masquerade as the declared keyless mode.
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_connectors SET source_key='edinet-corrupted',"
+        "updated_at=UTC_TIMESTAMP() "
+        "WHERE connector_id='connector:jp:edinet';",
+    )
+    optional_identity = atomic_cutover(
+        base_url,
+        nonce=release_nonce,
+        expected_v1_version=v1_preview_version,
+        expected_v2_version=1,
+        expected_status=409,
+    )
+    require(
+        optional_identity.get("error") == "required_alpha_sources_invalid"
+        and optional_identity.get("invalid_required_connector_count") == 0
+        and optional_identity.get("invalid_optional_connector_count") == 1
+        and any(
+            item.get("connector_id") == "connector:jp:edinet"
+            and "connector_identity_mismatch" in item.get("reasons", [])
+            for item in optional_identity.get("invalid_sources", [])
+            if isinstance(item, dict)
+        ),
+        repr(optional_identity),
+    )
+    require_cutover_not_consumed(
+        mysql_container_id,
+        authorization["authorization_id"],
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_connectors SET source_key='edinet',"
+        "updated_at=UTC_TIMESTAMP() "
+        "WHERE connector_id='connector:jp:edinet';",
+    )
+
+    # Optional countries must be truly dormant. Activity cannot be rewritten
+    # to zero and presented as an intentionally unavailable source.
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_connectors SET connector_status='active',"
+        "last_checked_at=UTC_TIMESTAMP(),last_success_at=UTC_TIMESTAMP(),"
+        "last_observed_at=UTC_TIMESTAMP(),cursor_json='unexpected-cursor',"
+        "last_raw_count=100,last_acknowledged_count=100,"
+        "updated_at=UTC_TIMESTAMP() "
+        "WHERE connector_id='connector:jp:edinet';",
+    )
+    optional_activity_status, _ = request_json(
+        base_url,
+        "api.php/api/v2/sources/status?country=JP",
+        token=PREVIEW_TOKEN,
+    )
+    optional_activity_items = optional_activity_status.get("data", {}).get(
+        "items",
+        [],
+    )
+    require(
+        len(optional_activity_items) == 1
+        and optional_activity_items[0].get("status")
+        == "blocked_policy_activity"
+        and optional_activity_items[0].get("collect_status")
+        == "blocked_policy_activity"
+        and optional_activity_items[0].get("public_status")
+        == "blocked_policy_activity"
+        and optional_activity_items[0].get("raw_count") == 100
+        and optional_activity_items[0].get("acknowledged_count") == 100
+        and optional_activity_items[0].get("last_success_at") is not None
+        and optional_activity_items[0].get("last_checked_at") is not None
+        and optional_activity_items[0].get("last_observed_at") is not None
+        and optional_activity_items[0].get("public_ready") is False,
+        repr(optional_activity_status),
+    )
+    optional_activity = atomic_cutover(
+        base_url,
+        nonce=release_nonce,
+        expected_v1_version=v1_preview_version,
+        expected_v2_version=1,
+        expected_status=409,
+    )
+    require(
+        optional_activity.get("error") == "required_alpha_sources_invalid"
+        and optional_activity.get("invalid_required_connector_count") == 0
+        and optional_activity.get("invalid_optional_connector_count") == 1
+        and any(
+            item.get("connector_id") == "connector:jp:edinet"
+            and "connector_policy_activity" in item.get("reasons", [])
+            for item in optional_activity.get("invalid_sources", [])
+            if isinstance(item, dict)
+        ),
+        repr(optional_activity),
+    )
+    require_cutover_not_consumed(
+        mysql_container_id,
+        authorization["authorization_id"],
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_connectors SET connector_status='pending_rights',"
+        "last_checked_at=NULL,last_success_at=NULL,last_observed_at=NULL,"
+        "cursor_json=NULL,last_raw_count=0,last_acknowledged_count=0,"
+        "last_error_class='source_right_required',updated_at=UTC_TIMESTAMP() "
+        "WHERE connector_id='connector:jp:edinet';",
+    )
+
+    # An active SourceRight also violates the declared dormant policy even if
+    # the connector itself has not emitted a receipt.
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_rights SET status='active',revoked_at=NULL,"
+        "updated_at=UTC_TIMESTAMP() "
+        "WHERE source_right_id='official:edinet';",
+    )
+    optional_right_active = atomic_cutover(
+        base_url,
+        nonce=release_nonce,
+        expected_v1_version=v1_preview_version,
+        expected_v2_version=1,
+        expected_status=409,
+    )
+    require(
+        optional_right_active.get("error") == "required_alpha_sources_invalid"
+        and any(
+            item.get("connector_id") == "connector:jp:edinet"
+            and "source_right_policy_active" in item.get("reasons", [])
+            for item in optional_right_active.get("invalid_sources", [])
+            if isinstance(item, dict)
+        ),
+        repr(optional_right_active),
+    )
+    require_cutover_not_consumed(
+        mysql_container_id,
+        authorization["authorization_id"],
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_rights SET status='pending',revoked_at=NULL,"
+        "updated_at=UTC_TIMESTAMP() "
+        "WHERE source_right_id='official:edinet';",
+    )
+
     # A revoked SourceRight for another document-empty link-only country must
     # fail the collect and public eligibility checks under the same locks.
     mysql_execute(
@@ -2708,7 +3038,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
     )
 
     # Keep the pre-existing document rights guard: a non-required public
-    # evidence grant can still block activation after all six sources pass.
+    # evidence grant can still block activation after required sources pass.
     mysql_execute(
         mysql_container_id,
         "UPDATE ci_source_rights SET source_key='sec-ci-alternate-corrupted',"
@@ -2829,11 +3159,11 @@ def run(base_url: str, mysql_container_id: str) -> None:
             mysql_container_id,
             "SELECT GROUP_CONCAT(batch_request_count ORDER BY chunk_index),"
             "SUM(request_count) FROM ci_global_ingest_receipts "
-            "WHERE connector_id='connector:gb:companies-house' "
+            "WHERE connector_id='connector:us:sec-edgar' "
             "AND chunk_count=2 GROUP BY batch_id;",
         )
         == "2,3\t3",
-        "interrupted Companies House receipt telemetry fixture is missing",
+        "interrupted SEC receipt telemetry fixture is missing",
     )
     automated_with_mutation, _ = request_json(
         base_url,
@@ -2900,13 +3230,18 @@ def run(base_url: str, mysql_container_id: str) -> None:
     ]
     require(
         preserved_data.get("evidence_source") == "production_database_export"
-        and len(preserved_data.get("connector_coverage", [])) == 4
+        and len(preserved_data.get("connector_coverage", [])) == 2
+        and {
+            connector.get("connector_family")
+            for connector in preserved_data.get("connector_coverage", [])
+        }
+        == {"dart", "sec-edgar"}
         and all(
             connector.get("successful_window_count") == 30
             and len(connector.get("completed_windows", [])) == 30
             for connector in preserved_data.get("connector_coverage", [])
         )
-        and len(evidence_windows) == 120
+        and len(evidence_windows) == 60
         and all(
             set(window) == {
                 "window_start",

@@ -34,6 +34,7 @@ APPROVAL_KIND = "bside-global-brief-human-approval"
 RECEIPT_KIND = "bside-global-brief-publication-receipt"
 ACTIVE_PIPELINE_MODES = frozenset({"shadow", "live"})
 EDITIONS = frozenset(("global", *GLOBAL_COUNTRIES))
+GLOBAL_ALPHA_REQUIRED_COUNTRIES = ("KR", "US", "CA", "AU")
 PUBLIC_VERIFICATION_STATUSES = frozenset(
     {"official", "confirmed", "corroborated", "corrected", "withdrawn"}
 )
@@ -63,6 +64,7 @@ PUBLIC_SOURCE_STATUSES = frozenset(
         "redistribution_blocked",
         "excluded_source",
         "stale",
+        "coverage_unavailable",
     }
 )
 COVERAGE_MODES = frozenset(
@@ -445,7 +447,7 @@ def source_readiness(
 ) -> dict[str, object]:
     normalized_edition = _validate_edition(edition)
     required = (
-        list(GLOBAL_COUNTRIES)
+        list(GLOBAL_ALPHA_REQUIRED_COUNTRIES)
         if normalized_edition == "global"
         else [normalized_edition]
     )

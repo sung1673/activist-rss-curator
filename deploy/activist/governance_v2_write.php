@@ -539,6 +539,25 @@ function v2_admin_update_connector(
                 'error' => 'connector_not_found',
             ));
         }
+        if (
+            $targetStatus === 'configured'
+            && in_array(
+                (string)$connector['connector_id'],
+                array(
+                    'connector:jp:edinet',
+                    'connector:gb:companies-house',
+                ),
+                true
+            )
+        ) {
+            $pdo->rollBack();
+            v2_respond(409, array(
+                'ok' => false,
+                'error' => 'connector_disabled_by_alpha_policy',
+                'connector_id' => (string)$connector['connector_id'],
+                'country' => (string)$connector['country_code'],
+            ));
+        }
         if ((string)$connector['updated_at'] !== $expectedUpdatedAt) {
             $pdo->rollBack();
             v2_respond(409, array(
@@ -997,6 +1016,7 @@ function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): a
         'rights_revision', 'retrieved_at', 'coverage_mode', 'records',
         'next_cursor', 'exhausted', 'request_count', 'raw_count',
         'public_allowed', 'ai_allowed', 'lifecycle_observations', 'chunk',
+        'source_manifest_sha256',
     ), 'envelope');
     if (!isset($envelope['schema_version']) || $envelope['schema_version'] !== 1) {
         v2_write_invalid('envelope.schema_version: must be 1');
@@ -1075,6 +1095,36 @@ function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): a
         || !hash_equals(v2_source_right_revision($right), (string)$rightsRevision)
     ) {
         v2_write_invalid('envelope.rights_revision: current server grant mismatch');
+    }
+    $sourceManifestSha256 = null;
+    if (array_key_exists('source_manifest_sha256', $envelope)) {
+        $sourceManifestSha256 = v2_write_code(
+            $envelope,
+            'source_manifest_sha256',
+            'envelope',
+            '/^[a-f0-9]{64}$/'
+        );
+    }
+    if (in_array($country, array('CA', 'AU'), true)) {
+        if (
+            $sourceManifestSha256 === null
+            || preg_match(
+                '/^[a-f0-9]{64}$/',
+                (string)$right['evidence_hash']
+            ) !== 1
+            || !hash_equals(
+                (string)$right['evidence_hash'],
+                (string)$sourceManifestSha256
+            )
+        ) {
+            v2_write_invalid(
+                'envelope.source_manifest_sha256: approved manifest mismatch'
+            );
+        }
+    } elseif ($sourceManifestSha256 !== null) {
+        v2_write_invalid(
+            'envelope.source_manifest_sha256: not permitted for this connector'
+        );
     }
     foreach (array('public_allowed', 'ai_allowed') as $rightsFlag) {
         if (
@@ -2145,6 +2195,26 @@ function v2_ingest_checkpoint_should_advance(
 
 function v2_ops_ingest(PDO $pdo, array $config): void {
     $payload = v2_json_body($config);
+    $requestedConnectorId = (
+        isset($payload['envelope'])
+        && is_array($payload['envelope'])
+        && isset($payload['envelope']['connector_id'])
+        && is_string($payload['envelope']['connector_id'])
+    ) ? trim((string)$payload['envelope']['connector_id']) : '';
+    if (in_array(
+        $requestedConnectorId,
+        array(
+            'connector:jp:edinet',
+            'connector:gb:companies-house',
+        ),
+        true
+    )) {
+        v2_respond(409, array(
+            'ok' => false,
+            'error' => 'global_ingest_source_disabled',
+            'connector_id' => $requestedConnectorId,
+        ));
+    }
     try {
         $normalized = v2_normalize_ingest_payload($pdo, $config, $payload);
     } catch (InvalidArgumentException $error) {
@@ -3464,7 +3534,7 @@ function v2_admin_publish_brief(
                 }
             }
             $requiredCountries = $edition === 'global'
-                ? array('KR', 'US', 'JP', 'GB', 'CA', 'AU')
+                ? array('KR', 'US', 'CA', 'AU')
                 : array((string)$edition);
             $ready = true;
             foreach ($requiredCountries as $requiredCountry) {

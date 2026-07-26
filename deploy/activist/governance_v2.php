@@ -672,6 +672,7 @@ function v2_current_source_right_sql(string $rightsAlias = 'sr'): string {
 
 function v2_event_visibility_sql(array $config, string $eventAlias = 'e'): string {
     return '(' . $eventAlias . '.issuer_id IS NOT NULL'
+        . ' AND ' . $eventAlias . '.country_code NOT IN (\'JP\',\'GB\')'
         . ' AND ' . $eventAlias . '.publication_status=\'published\''
         . ' AND ' . $eventAlias . '.identity_status=\'complete\''
         . ' AND ' . $eventAlias . '.global_event_family'
@@ -1307,6 +1308,87 @@ function v2_source_connector_readiness(array $connector): array {
     );
 }
 
+/**
+ * Optional JP/GB connectors are deliberately dormant in Production Alpha.
+ *
+ * Do not hide activity by rewriting it to zero. Both the public source status
+ * response and the atomic cutover guard use this predicate so an activated
+ * connector, a cursor, an observation, a non-zero receipt, or an active
+ * SourceRight fails closed.
+ */
+function v2_optional_alpha_source_policy_reasons(array $connector): array {
+    $reasons = array();
+    $connectorStatus = strtolower(trim(
+        (string)($connector['connector_status'] ?? '')
+    ));
+    if (!in_array($connectorStatus, array('pending_rights', 'inactive'), true)) {
+        $reasons[] = 'connector_policy_activity';
+    }
+    foreach (array(
+        'last_success_at',
+        'last_checked_at',
+        'last_observed_at',
+    ) as $field) {
+        if (
+            isset($connector[$field])
+            && trim((string)$connector[$field]) !== ''
+        ) {
+            $reasons[] = 'connector_policy_activity';
+            break;
+        }
+    }
+    if (
+        isset($connector['cursor_json'])
+        && trim((string)$connector['cursor_json']) !== ''
+    ) {
+        $reasons[] = 'connector_policy_activity';
+    }
+    if (
+        (int)($connector['last_raw_count'] ?? 0) !== 0
+        || (int)($connector['last_acknowledged_count'] ?? 0) !== 0
+    ) {
+        $reasons[] = 'connector_policy_activity';
+    }
+
+    $rightId = trim((string)(
+        $connector['connector_right_row_id'] ?? ''
+    ));
+    if ($rightId === '') {
+        $reasons[] = 'source_right_missing';
+    } elseif (
+        !hash_equals(
+            (string)($connector['connector_source_right_id'] ?? ''),
+            $rightId
+        )
+        || !hash_equals(
+            (string)($connector['connector_source_type'] ?? ''),
+            (string)($connector['connector_right_source_type'] ?? '')
+        )
+        || !hash_equals(
+            (string)($connector['connector_source_key'] ?? ''),
+            (string)($connector['connector_right_source_key'] ?? '')
+        )
+    ) {
+        $reasons[] = 'source_right_identity_mismatch';
+    }
+    $rightStatus = strtolower(trim(
+        (string)($connector['connector_right_status'] ?? '')
+    ));
+    if (
+        $rightStatus === 'active'
+        || (int)($connector['connector_right_collect_eligible'] ?? 0) === 1
+    ) {
+        $reasons[] = 'source_right_policy_active';
+    } elseif (!in_array(
+        $rightStatus,
+        array('pending', 'expired', 'revoked'),
+        true
+    )) {
+        $reasons[] = 'source_right_policy_invalid';
+    }
+    return array_values(array_unique($reasons));
+}
+
 function v2_source_status_data(PDO $pdo, array $config, string $country = ''): array {
     $where = array('j.record_status=\'active\'');
     $params = array();
@@ -1319,6 +1401,15 @@ function v2_source_status_data(PDO $pdo, array $config, string $country = ''): a
     $publicRights = '(' . source_right_redistribution_sql('sr')
         . ' AND LOWER(COALESCE(sr.source_type,\'\')) NOT LIKE \'%telegram%\')';
     $sql = 'SELECT sc.connector_id,j.country_code AS country,sc.source_name,sc.coverage_mode,'
+        . 'sc.country_code AS connector_country_code,sc.source_key AS connector_source_key,'
+        . 'sc.source_type AS connector_source_type,'
+        . 'sc.source_right_id AS connector_source_right_id,'
+        . 'sr.source_right_id AS connector_right_row_id,'
+        . 'sr.source_type AS connector_right_source_type,'
+        . 'sr.source_key AS connector_right_source_key,'
+        . 'sr.status AS connector_right_status,'
+        . 'CASE WHEN ' . $collectRights
+        . ' THEN 1 ELSE 0 END AS connector_right_collect_eligible,'
         . 'sc.connector_status,'
         . 'CASE WHEN sc.connector_id IS NULL THEN \'inactive\''
         . ' WHEN sc.source_right_id IS NULL OR sr.source_right_id IS NULL'
@@ -1353,6 +1444,10 @@ function v2_source_status_data(PDO $pdo, array $config, string $country = ''): a
     $statement = $pdo->prepare($sql);
     $statement->execute($params);
     $rows = $statement->fetchAll();
+    $optionalPolicies = array();
+    foreach (v2_optional_alpha_source_identities() as $optionalPolicy) {
+        $optionalPolicies[(string)$optionalPolicy['country_code']] = $optionalPolicy;
+    }
     foreach ($rows as &$row) {
         $readiness = v2_source_connector_readiness($row);
         $row['lag_minutes'] = $readiness['success_age_minutes'];
@@ -1387,6 +1482,64 @@ function v2_source_status_data(PDO $pdo, array $config, string $country = ''): a
         $row['raw_count'] = isset($row['last_raw_count']) ? (int)$row['last_raw_count'] : 0;
         $row['acknowledged_count'] = isset($row['last_acknowledged_count'])
             ? (int)$row['last_acknowledged_count'] : 0;
+        $rowCountry = (string)($row['country'] ?? '');
+        if (isset($optionalPolicies[$rowCountry])) {
+            $policy = $optionalPolicies[$rowCountry];
+            $identityMatchesPolicy = true;
+            foreach (array(
+                'connector_id' => 'connector_id',
+                'country_code' => 'connector_country_code',
+                'source_key' => 'connector_source_key',
+                'source_type' => 'connector_source_type',
+                'source_right_id' => 'connector_source_right_id',
+                'coverage_mode' => 'coverage_mode',
+            ) as $expectedField => $actualField) {
+                if (
+                    !isset($row[$actualField])
+                    || !hash_equals(
+                        (string)$policy[$expectedField],
+                        (string)$row[$actualField]
+                    )
+                ) {
+                    $identityMatchesPolicy = false;
+                    break;
+                }
+            }
+            $policyReasons = v2_optional_alpha_source_policy_reasons($row);
+            $row['coverage_mode'] = 'link-only';
+            $row['fresh'] = false;
+            $row['collect_fresh'] = false;
+            $row['public_ready'] = false;
+            $row['live_ready'] = false;
+            if (!$identityMatchesPolicy) {
+                $row['status'] = 'blocked_identity';
+                $row['collect_status'] = 'blocked_identity';
+                $row['public_status'] = 'blocked_identity';
+                $row['last_error_class'] = 'connector_identity_mismatch';
+                $row['public_note'] =
+                    'Connector identity mismatch; coverage is blocked.';
+            } elseif ($policyReasons) {
+                $row['status'] = 'blocked_policy_activity';
+                $row['collect_status'] = 'blocked_policy_activity';
+                $row['public_status'] = 'blocked_policy_activity';
+                $row['last_error_class'] = (string)$policyReasons[0];
+                $row['public_note'] =
+                    'Unexpected connector or SourceRight activity; '
+                    . 'Production Alpha coverage is blocked.';
+            } else {
+                $row['lag_minutes'] = null;
+                $row['last_success_at'] = null;
+                $row['last_checked_at'] = null;
+                $row['last_observed_at'] = null;
+                $row['raw_count'] = 0;
+                $row['acknowledged_count'] = 0;
+                $row['status'] = 'inactive';
+                $row['collect_status'] = 'inactive';
+                $row['public_status'] = 'coverage_unavailable';
+                $row['last_error_class'] = null;
+                $row['public_note'] = (string)$policy['public_note'];
+            }
+        }
         $row = v2_normalize_public_time_fields(
             $row,
             array('last_success_at', 'last_checked_at', 'last_observed_at')
@@ -1396,7 +1549,16 @@ function v2_source_status_data(PDO $pdo, array $config, string $country = ''): a
             $row['connector_status'],
             $row['last_raw_count'],
             $row['last_acknowledged_count'],
-            $row['cursor_json']
+            $row['cursor_json'],
+            $row['connector_country_code'],
+            $row['connector_source_key'],
+            $row['connector_source_type'],
+            $row['connector_source_right_id'],
+            $row['connector_right_row_id'],
+            $row['connector_right_source_type'],
+            $row['connector_right_source_key'],
+            $row['connector_right_status'],
+            $row['connector_right_collect_eligible']
         );
         if ($row['connector_id'] === null) {
             $row['source_name'] = null;
@@ -2221,7 +2383,7 @@ function v2_lock_current_public_source_rights(
 }
 
 /**
- * Exact connector identities required by the six-country Production Alpha.
+ * Exact connector identities required for Production Alpha cutover.
  *
  * This registry is deliberately server-side and independent of published
  * documents. A country with zero current documents must not escape the
@@ -2246,22 +2408,6 @@ function v2_required_alpha_source_identities(): array {
             'coverage_mode' => 'market-wide',
         ),
         array(
-            'connector_id' => 'connector:jp:edinet',
-            'country_code' => 'JP',
-            'source_key' => 'edinet',
-            'source_type' => 'official_disclosure',
-            'source_right_id' => 'official:edinet',
-            'coverage_mode' => 'market-wide',
-        ),
-        array(
-            'connector_id' => 'connector:gb:companies-house',
-            'country_code' => 'GB',
-            'source_key' => 'companies-house',
-            'source_type' => 'official_register',
-            'source_right_id' => 'official:companies-house',
-            'coverage_mode' => 'official-register',
-        ),
-        array(
             'connector_id' => 'connector:ca:issuer-ir',
             'country_code' => 'CA',
             'source_key' => 'issuer-ir',
@@ -2277,6 +2423,128 @@ function v2_required_alpha_source_identities(): array {
             'source_right_id' => 'official:asic-register',
             'coverage_mode' => 'link-only',
         ),
+    );
+}
+
+/**
+ * Optional country rows stay visible, but are never considered public-ready.
+ *
+ * The stored identities are retained for a future authenticated connector.
+ * Production Alpha does not call EDINET or Companies House without their
+ * official credentials and does not fall back to HTML scraping.
+ */
+function v2_optional_alpha_source_identities(): array {
+    return array(
+        array(
+            'connector_id' => 'connector:jp:edinet',
+            'country_code' => 'JP',
+            'source_key' => 'edinet',
+            'source_type' => 'official_disclosure',
+            'source_right_id' => 'official:edinet',
+            'coverage_mode' => 'market-wide',
+            'public_note' =>
+                'Production Alpha: link-only coverage unavailable; '
+                . 'EDINET API credentials are not configured and HTML scraping is disabled.',
+        ),
+        array(
+            'connector_id' => 'connector:gb:companies-house',
+            'country_code' => 'GB',
+            'source_key' => 'companies-house',
+            'source_type' => 'official_register',
+            'source_right_id' => 'official:companies-house',
+            'coverage_mode' => 'official-register',
+            'public_note' =>
+                'Production Alpha: link-only coverage unavailable; '
+                . 'Companies House API credentials are not configured and HTML scraping is disabled.',
+        ),
+    );
+}
+
+/**
+ * Optional rows are not readiness gates, but their stored identities must not
+ * drift. This keeps a corrupted connector from masquerading as an intentionally
+ * unavailable country during cutover.
+ */
+function v2_optional_alpha_source_identity_guard(
+    PDO $pdo,
+    array $config
+): array {
+    $expectedRows = v2_optional_alpha_source_identities();
+    $connectorIds = array();
+    foreach ($expectedRows as $expected) {
+        $connectorIds[] = (string)$expected['connector_id'];
+    }
+    sort($connectorIds, SORT_STRING);
+    $placeholders = implode(',', array_fill(0, count($connectorIds), '?'));
+    $statement = $pdo->prepare(
+        'SELECT sc.connector_id,sc.country_code,sc.source_key,sc.source_type,'
+        . 'sc.source_right_id,sc.coverage_mode,sc.connector_status,'
+        . 'sc.last_success_at,sc.last_checked_at,sc.last_observed_at,'
+        . 'sc.cursor_json,sc.last_raw_count,sc.last_acknowledged_count,'
+        . 'sc.country_code AS connector_country_code,'
+        . 'sc.source_key AS connector_source_key,'
+        . 'sc.source_type AS connector_source_type,'
+        . 'sc.source_right_id AS connector_source_right_id,'
+        . 'sr.source_right_id AS connector_right_row_id,'
+        . 'sr.source_type AS connector_right_source_type,'
+        . 'sr.source_key AS connector_right_source_key,'
+        . 'sr.status AS connector_right_status,'
+        . 'CASE WHEN ' . v2_current_source_right_sql('sr')
+        . ' THEN 1 ELSE 0 END AS connector_right_collect_eligible '
+        . 'FROM ' . table_name($config, 'source_connectors') . ' sc '
+        . 'LEFT JOIN ' . table_name($config, 'source_rights') . ' sr'
+        . ' ON sr.source_right_id=sc.source_right_id'
+        . ' WHERE sc.connector_id IN (' . $placeholders . ')'
+        . ' ORDER BY BINARY connector_id FOR UPDATE'
+    );
+    $statement->execute($connectorIds);
+    $connectors = array();
+    while ($connector = $statement->fetch()) {
+        $connectors[(string)$connector['connector_id']] = $connector;
+    }
+    $invalid = array();
+    foreach ($expectedRows as $expected) {
+        $connectorId = (string)$expected['connector_id'];
+        $connector = isset($connectors[$connectorId])
+            ? $connectors[$connectorId] : null;
+        $reasons = array();
+        if ($connector === null) {
+            $reasons[] = 'connector_missing';
+        } else {
+            foreach (array(
+                'country_code',
+                'source_key',
+                'source_type',
+                'source_right_id',
+                'coverage_mode',
+            ) as $field) {
+                if (
+                    !isset($connector[$field])
+                    || !hash_equals(
+                        (string)$expected[$field],
+                        (string)$connector[$field]
+                    )
+                ) {
+                    $reasons[] = 'connector_identity_mismatch';
+                    break;
+                }
+            }
+            $reasons = array_merge(
+                $reasons,
+                v2_optional_alpha_source_policy_reasons($connector)
+            );
+        }
+        if ($reasons) {
+            $invalid[] = array(
+                'connector_id' => $connectorId,
+                'reasons' => array_values(array_unique($reasons)),
+            );
+        }
+    }
+    return array(
+        'checked_count' => count($expectedRows),
+        'invalid_count' => count($invalid),
+        'invalid_sources' => $invalid,
     );
 }
 
@@ -2813,7 +3081,11 @@ function v2_admin_atomic_cutover(PDO $pdo, array $config, string $role): void {
             ));
         }
         $requiredSources = v2_required_alpha_source_rights_guard($pdo, $config);
-        if ((int)$requiredSources['invalid_count'] > 0) {
+        $optionalSources = v2_optional_alpha_source_identity_guard($pdo, $config);
+        if (
+            (int)$requiredSources['invalid_count'] > 0
+            || (int)$optionalSources['invalid_count'] > 0
+        ) {
             $pdo->rollBack();
             v2_respond(409, array(
                 'ok' => false,
@@ -2822,7 +3094,14 @@ function v2_admin_atomic_cutover(PDO $pdo, array $config, string $role): void {
                     (int)$requiredSources['checked_count'],
                 'invalid_required_connector_count' =>
                     (int)$requiredSources['invalid_count'],
-                'invalid_sources' => $requiredSources['invalid_sources'],
+                'optional_connector_count' =>
+                    (int)$optionalSources['checked_count'],
+                'invalid_optional_connector_count' =>
+                    (int)$optionalSources['invalid_count'],
+                'invalid_sources' => array_merge(
+                    $requiredSources['invalid_sources'],
+                    $optionalSources['invalid_sources']
+                ),
             ));
         }
         v2_lock_current_public_source_rights($pdo, $config);
@@ -3602,8 +3881,6 @@ function v2_ops_alpha_release_evidence(PDO $pdo, array $config): void {
         $definitions = array(
             array('dart', 'KR', null),
             array('sec-edgar', 'US', 'connector:us:sec-edgar'),
-            array('edinet', 'JP', 'connector:jp:edinet'),
-            array('companies-house', 'GB', 'connector:gb:companies-house'),
         );
         $coverage = array();
         foreach ($definitions as $definition) {

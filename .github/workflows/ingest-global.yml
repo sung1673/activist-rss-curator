@@ -14,8 +14,6 @@ on:
         options:
           - all
           - US
-          - JP
-          - GB
       from_date:
         description: Inclusive YYYY-MM-DD (both dates blank resume the durable checkpoint)
         required: false
@@ -51,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        country: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.market != 'all' && format('["{0}"]', inputs.market) || '["US","JP","GB"]') }}
+        country: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.market != 'all' && format('["{0}"]', inputs.market) || '["US"]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment:
@@ -60,9 +58,6 @@ jobs:
       GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
       GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
       SEC_EDGAR_USER_AGENT: ${{ vars.SEC_EDGAR_USER_AGENT }}
-      EDINET_CONNECTOR_MODE: ${{ vars.EDINET_CONNECTOR_MODE || 'link-only' }}
-      COMPANIES_HOUSE_CONNECTOR_MODE: ${{ vars.COMPANIES_HOUSE_CONNECTOR_MODE || 'keyless' }}
-      COMPANIES_HOUSE_ISSUERS_JSON: ${{ vars.COMPANIES_HOUSE_ISSUERS_JSON }}
 
     steps:
       - name: Checkout
@@ -100,8 +95,6 @@ jobs:
       - name: Collect and ingest official source
         env:
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
-          EDINET_API_KEY: ${{ matrix.country == 'JP' && secrets.EDINET_API_KEY || '' }}
-          COMPANIES_HOUSE_API_KEY: ${{ matrix.country == 'GB' && secrets.COMPANIES_HOUSE_API_KEY || '' }}
           FROM_DATE: ${{ inputs.from_date }}
           TO_DATE: ${{ inputs.to_date }}
           MAX_PAGES_INPUT: ${{ inputs.max_pages }}
@@ -111,10 +104,8 @@ jobs:
           set -euo pipefail
           if [[ -n "${MAX_PAGES_INPUT:-}" ]]; then
             max_pages="$MAX_PAGES_INPUT"
-          elif [[ "${{ matrix.country }}" == "US" ]]; then
-            max_pages="200"
           else
-            max_pages="100"
+            max_pages="200"
           fi
           python -m curator.global_ingest \
             --country "${{ matrix.country }}" \

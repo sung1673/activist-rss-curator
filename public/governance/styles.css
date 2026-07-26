@@ -1157,7 +1157,8 @@ kbd {
 .source-status-item[data-status="delayed"] .status-dot,
 .source-status-item[data-status="pending_rights"] .status-dot,
 .source-status-item[data-status="excluded_source"] .status-dot,
-.source-status-item[data-status="redistribution_blocked"] .status-dot { color: var(--amber); }
+.source-status-item[data-status="redistribution_blocked"] .status-dot,
+.source-status-item[data-status="coverage_unavailable"] .status-dot { color: var(--amber); }
 .source-status-item[data-status="down"] .status-dot,
 .source-status-item[data-status="error"] .status-dot,
 .source-status-item[data-status="failed"] .status-dot,

@@ -109,8 +109,6 @@ def automated_response(collected_at: datetime) -> dict[str, object]:
     for family, country in (
         ("dart", "KR"),
         ("sec-edgar", "US"),
-        ("edinet", "JP"),
-        ("companies-house", "GB"),
     ):
         windows = completed_windows(family, end=collected_at)
         coverage.append(
@@ -464,8 +462,6 @@ def test_prepare_generates_exact_blank_human_candidates(
     assert {item["connector_family"] for item in connector["connectors"]} == {
         "dart",
         "sec-edgar",
-        "edinet",
-        "companies-house",
     }
     assert connector["connectors"][0]["payload_sha256"] is None
 

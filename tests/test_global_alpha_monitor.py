@@ -24,6 +24,17 @@ REVISION = "a" * 40
 DEPLOYED = REVISION
 MISMATCHED_DEPLOYED = "b" * 40
 NOW = datetime(2026, 7, 24, 12, 0, tzinfo=timezone.utc)
+CONNECTOR_IDS = {
+    "KR": "connector:kr:dart",
+    "US": "connector:us:sec-edgar",
+    "JP": "connector:jp:edinet",
+    "GB": "connector:gb:companies-house",
+    "CA": "connector:ca:issuer-ir",
+    "AU": "connector:au:asic-register",
+}
+REQUIRED_CONNECTOR_IDS = {
+    CONNECTOR_IDS[country] for country in ("KR", "US", "CA", "AU")
+}
 
 
 def envelope(data: object) -> dict[str, object]:
@@ -38,6 +49,8 @@ def source(
     fresh: bool = True,
     public_status: str | None = None,
     public_ready: bool | None = None,
+    observed: bool = True,
+    raw_count: int = 3,
 ) -> dict[str, object]:
     effective_public_status = public_status or status
     effective_public_ready = (
@@ -46,22 +59,22 @@ def source(
         else effective_public_status == "active" and fresh
     )
     return {
-        "connector_id": f"connector:{country.casefold()}:official",
+        "connector_id": CONNECTOR_IDS[country],
         "country": country,
         "source_name": f"{country} official source",
         "coverage_mode": coverage_mode,
         "status": status,
         "public_status": effective_public_status,
         "public_ready": effective_public_ready,
-        "last_success_at": "2026-07-24T11:55:00Z",
-        "last_checked_at": "2026-07-24T11:56:00Z",
+        "last_success_at": "2026-07-24T11:55:00Z" if observed else None,
+        "last_checked_at": "2026-07-24T11:56:00Z" if observed else None,
         "last_error_class": None,
         "public_note": None,
-        "lag_minutes": 5,
+        "lag_minutes": 5 if observed else None,
         "expected_cadence_minutes": 30,
         "fresh": fresh,
-        "raw_count": 3,
-        "acknowledged_count": 3,
+        "raw_count": raw_count,
+        "acknowledged_count": raw_count,
     }
 
 
@@ -69,8 +82,26 @@ def healthy_sources() -> list[dict[str, object]]:
     return [
         source("KR", "market-wide"),
         source("US", "market-wide"),
-        source("JP", "market-wide"),
-        source("GB", "official-register"),
+        source(
+            "JP",
+            "link-only",
+            status="inactive",
+            fresh=False,
+            public_status="coverage_unavailable",
+            public_ready=False,
+            observed=False,
+            raw_count=0,
+        ),
+        source(
+            "GB",
+            "link-only",
+            status="inactive",
+            fresh=False,
+            public_status="coverage_unavailable",
+            public_ready=False,
+            observed=False,
+            raw_count=0,
+        ),
         source("CA", "link-only"),
         source("AU", "link-only"),
     ]
@@ -86,6 +117,11 @@ class FakeHttpClient:
         overrides: dict[str, HttpProbe] | None = None,
     ) -> None:
         source_items = healthy_sources() if sources is None else sources
+        ready_by_connector = {
+            str(item["connector_id"]): item.get("public_ready") is True
+            for item in source_items
+            if item.get("connector_id") in REQUIRED_CONNECTOR_IDS
+        }
         self.responses: dict[str, HttpProbe] = {
             "/health": HttpProbe(
                 200,
@@ -122,6 +158,8 @@ class FakeHttpClient:
                         {
                             "items": source_items,
                             "checked_at": "2026-07-24T12:00:00Z",
+                            "required_source_ready": ready_by_connector,
+                            "all_required_ready": all(ready_by_connector.values()),
                         }
                     ),
                     "meta": {"returned": len(source_items)},
@@ -309,7 +347,7 @@ def test_healthy_empty_stream_is_explicitly_no_events() -> None:
     assert evidence["source_summary"] == {
         "returned": 6,
         "unhealthy_count": 0,
-        "market_wide_count": 3,
+        "market_wide_count": 2,
         "unhealthy_market_wide_count": 0,
     }
     assert evidence["observation_window"]["duration_hours"] == 24
@@ -370,8 +408,8 @@ def test_live_event_detail_is_probed_with_the_same_public_credentials() -> None:
 
 def test_two_unhealthy_market_wide_connectors_fail_closed_and_mark_outage() -> None:
     items = healthy_sources()
-    items[1] = source("US", "market-wide", status="failed", fresh=False)
-    items[2] = source("JP", "market-wide", status="degraded", fresh=True)
+    items[0] = source("KR", "market-wide", status="failed", fresh=False)
+    items[1] = source("US", "market-wide", status="degraded", fresh=True)
     evidence = run_monitor(
         monitor_config(),
         client=FakeHttpClient(sources=items),
@@ -384,6 +422,19 @@ def test_two_unhealthy_market_wide_connectors_fail_closed_and_mark_outage() -> N
         "multiple_market_wide_connectors_unhealthy" in evidence["reasons"]
     )
     assert evidence["source_summary"]["unhealthy_market_wide_count"] == 2
+
+
+def test_optional_country_cannot_masquerade_as_ready_coverage() -> None:
+    items = healthy_sources()
+    items[2] = source("JP", "link-only")
+    evidence = run_monitor(
+        monitor_config(),
+        client=FakeHttpClient(sources=items),
+        now=NOW,
+    )
+
+    assert evidence["status"] == "incident"
+    assert "optional_source_policy_mismatch" in evidence["reasons"]
 
 
 def test_one_unhealthy_market_wide_connector_is_degraded_not_failed() -> None:

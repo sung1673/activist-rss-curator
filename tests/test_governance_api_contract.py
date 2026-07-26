@@ -1247,7 +1247,10 @@ def test_source_right_id_keeps_an_immutable_source_identity():
         V1.index("function v1_admin_upsert_source_right")
         : V1.index("function v1_admin_create_revision")
     ]
-    assert "SELECT source_type,source_key FROM " in source_right_section
+    assert (
+        "SELECT source_type,source_key,status,updated_at,revoked_at FROM "
+        in source_right_section
+    )
     assert "WHERE source_right_id=? LIMIT 1 FOR UPDATE" in source_right_section
     assert "(string)$existingIdentity['source_type'] !== $sourceType" in (
         source_right_section
@@ -1256,6 +1259,10 @@ def test_source_right_id_keeps_an_immutable_source_identity():
         source_right_section
     )
     assert "source_right_identity_immutable" in source_right_section
+    assert "stale_source_right" in source_right_section
+    assert "expected_status" in source_right_section
+    assert "expected_updated_at" in source_right_section
+    assert "hash_equals(" in source_right_section
     assert "source_type=VALUES(source_type)" not in source_right_section
     assert "source_key=VALUES(source_key)" not in source_right_section
 
@@ -1266,6 +1273,14 @@ def test_source_right_id_keeps_an_immutable_source_identity():
     assert "immutable" in source_right["description"].lower()
     assert "Immutable" in source_right["properties"]["source_type"]["description"]
     assert "Immutable" in source_right["properties"]["source_key"]["description"]
+    assert source_right["properties"]["expected_status"]["enum"] == [
+        "missing",
+        "pending",
+        "active",
+        "expired",
+        "revoked",
+    ]
+    assert source_right["properties"]["expected_updated_at"]["format"] == "date-time"
 
 
 def test_cors_and_hmac_fail_closed_before_mutating_dispatch():

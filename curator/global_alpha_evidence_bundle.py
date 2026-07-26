@@ -16,10 +16,10 @@ from typing import Mapping, Sequence
 from .global_alpha_release_gate import (
     AlphaReleaseEvidenceError,
     EXPECTED_CONNECTORS,
-    EXPECTED_COUNTRY_COVERAGE,
     EXPECTED_VIEWPORTS,
     INPUT_BUNDLE_KIND,
     INPUT_FILENAMES,
+    REQUIRED_ALPHA_COUNTRIES,
     SCHEMA_VERSION,
     materialize_input_bundle,
     validate_approval,
@@ -889,7 +889,7 @@ def _approval_candidate(*, revision: str) -> dict[str, object]:
                 "valid_source_right_count": None,
                 "invalid_source_right_count": None,
             }
-            for country in sorted(EXPECTED_COUNTRY_COVERAGE)
+            for country in sorted(REQUIRED_ALPHA_COUNTRIES)
         ],
     }
 

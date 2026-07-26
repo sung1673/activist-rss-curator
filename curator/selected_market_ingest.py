@@ -190,6 +190,7 @@ class SelectedOfficialLink:
     country_code: str
     issuer_reference: IssuerReference
     source_right_id: str
+    approved_manifest_sha256: str
     official_host: str
     host_evidence_sha256: str
     original_url: str
@@ -494,6 +495,14 @@ def parse_selected_official_links(
         raise SelectedMarketConfigurationError(
             "invalid_selected_market_json"
         )
+    approved_manifest_sha256 = hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
     raw_hosts = payload["approved_hosts"]
     raw_records = payload["records"]
     assert isinstance(raw_hosts, list)
@@ -785,6 +794,7 @@ def parse_selected_official_links(
                 country_code=country,
                 issuer_reference=issuer,
                 source_right_id=source_right_id,
+                approved_manifest_sha256=approved_manifest_sha256,
                 official_host=official_host,
                 host_evidence_sha256=approved_host.evidence_sha256,
                 original_url=original_url,
@@ -993,6 +1003,18 @@ def execute_selected_market_ingest(
         raise SelectedMarketConfigurationError(
             "selected_market_source_right_mismatch"
         )
+    manifest_hashes = {
+        link.approved_manifest_sha256
+        for link in links
+    }
+    if (
+        len(manifest_hashes) != 1
+        or _EVIDENCE_SHA256.fullmatch(next(iter(manifest_hashes), "")) is None
+    ):
+        raise SelectedMarketConfigurationError(
+            "selected_market_manifest_mismatch"
+        )
+    approved_manifest_sha256 = next(iter(manifest_hashes))
     if len({link.issuer_id for link in links}) > MAX_ISSUERS_PER_COUNTRY:
         raise SelectedMarketConfigurationError(
             "selected_market_issuer_limit_exceeded"
@@ -1043,6 +1065,7 @@ def execute_selected_market_ingest(
             raw_count=len(records),
             public_allowed=True,
             ai_allowed=False,
+            source_manifest_sha256=approved_manifest_sha256,
         )
         # One post-batch pair closes expiry/revocation races without making
         # eligibility HTTP calls proportional to the configured record count.

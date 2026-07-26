@@ -3,9 +3,9 @@
 OpenDART deliberately does not use this module.  Korea continues through the
 established official-ingest pipeline, while this runner sends the SEC
 current-filings Atom feed plus completed-day index reconciliation to the v2
-review queue.  EDINET and Companies House API collection must be explicitly
-activated.  Without their credentials, this runner records the narrower
-keyless/link-only coverage instead of scraping either public viewer.
+review queue. EDINET and Companies House are intentionally unavailable in
+Production Alpha. Stale environment variables cannot activate them, and this
+runner never falls back to scraping either public viewer.
 """
 
 from __future__ import annotations
@@ -27,8 +27,6 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from .global_connectors import (
-    CompaniesHouseFilingHistoryConnector,
-    EdinetDocumentsConnector,
     GlobalConnectorEnvelope,
     GlobalConnectorRequest,
     GlobalSourceConnector,
@@ -42,7 +40,7 @@ from .official_source_rights import (
 )
 
 
-SUPPORTED_COUNTRIES = ("US", "JP", "GB")
+SUPPORTED_COUNTRIES = ("US",)
 _CODE_REVISION = re.compile(r"^[a-f0-9]{7,64}$")
 _COMPANY_NUMBER = re.compile(r"^[A-Z0-9]{6,10}$")
 _CONNECTOR_ID = re.compile(r"^connector:[a-z]{2}:[a-z0-9_.:-]{1,64}$")
@@ -53,8 +51,6 @@ MAX_COMPANIES_HOUSE_ISSUERS = 50
 MAX_AUTOMATIC_WINDOW_DAYS = 31
 AUTOMATIC_OVERLAP_DAYS = 1
 MIN_AUTOMATIC_CHECKPOINT_DATE = date(2015, 1, 1)
-EDINET_CONNECTOR_MODES = {"link-only", "active"}
-COMPANIES_HOUSE_CONNECTOR_MODES = {"keyless", "active"}
 
 
 @dataclass(frozen=True)
@@ -789,9 +785,9 @@ def global_ingest_execution_mode(
 ) -> GlobalIngestExecutionMode:
     """Resolve an explicit API mode without treating public HTML as an API.
 
-    Credentials alone never activate JP or GB API collection.  This prevents a
-    repository/environment secret from silently widening the declared source
-    coverage.  The keyless modes make no source request in this runner.
+    JP and GB are hard-disabled for Production Alpha. Environment variables or
+    stale secrets cannot widen the declared source coverage, and no keyless
+    source request is made.
     """
 
     country = str(country_code or "").strip().upper()
@@ -805,51 +801,24 @@ def global_ingest_execution_mode(
             reason=None,
         )
     if country == "JP":
-        mode = str(
-            environment.get("EDINET_CONNECTOR_MODE") or "link-only"
-        ).strip().casefold()
-        if mode not in EDINET_CONNECTOR_MODES:
-            raise GlobalIngestConfigurationError(
-                "invalid_edinet_connector_mode"
-            )
         return GlobalIngestExecutionMode(
             country_code=country,
-            mode=mode,
-            api_active=mode == "active",
-            coverage_mode=("market-wide" if mode == "active" else "link-only"),
-            ingest_mode=(
-                "official-api" if mode == "active" else "official-links-only"
-            ),
-            reason=(
-                None
-                if mode == "active"
-                else "edinet_api_key_required_html_scraping_prohibited"
-            ),
+            mode="disabled",
+            api_active=False,
+            coverage_mode="link-only",
+            ingest_mode="coverage-unavailable",
+            reason="edinet_production_alpha_disabled_html_scraping_prohibited",
         )
     if country == "GB":
-        mode = str(
-            environment.get("COMPANIES_HOUSE_CONNECTOR_MODE") or "keyless"
-        ).strip().casefold()
-        if mode not in COMPANIES_HOUSE_CONNECTOR_MODES:
-            raise GlobalIngestConfigurationError(
-                "invalid_companies_house_connector_mode"
-            )
         return GlobalIngestExecutionMode(
             country_code=country,
-            mode=mode,
-            api_active=mode == "active",
-            coverage_mode=(
-                "official-register" if mode == "active" else "link-only"
-            ),
-            ingest_mode=(
-                "official-api"
-                if mode == "active"
-                else "official-bulk-basic-register-links"
-            ),
+            mode="disabled",
+            api_active=False,
+            coverage_mode="link-only",
+            ingest_mode="coverage-unavailable",
             reason=(
-                None
-                if mode == "active"
-                else "companies_house_api_key_required_for_filing_history"
+                "companies_house_production_alpha_disabled_"
+                "html_scraping_prohibited"
             ),
         )
     raise GlobalIngestConfigurationError("unsupported_global_ingest_country")
@@ -877,23 +846,6 @@ def build_connector(
         if completed_day_only:
             return SecDailyIndexConnector(user_agent=user_agent), ()
         return SecHybridConnector(user_agent=user_agent), ()
-    if country == "JP":
-        api_key = str(environment.get("EDINET_API_KEY", "")).strip()
-        if not api_key:
-            raise GlobalIngestConfigurationError("missing_edinet_api_key")
-        return EdinetDocumentsConnector(api_key=api_key), ()
-    if country == "GB":
-        api_key = str(
-            environment.get("COMPANIES_HOUSE_API_KEY", "")
-        ).strip()
-        if not api_key:
-            raise GlobalIngestConfigurationError(
-                "missing_companies_house_api_key"
-            )
-        issuers = parse_companies_house_allowlist(
-            str(environment.get("COMPANIES_HOUSE_ISSUERS_JSON", ""))
-        )
-        return CompaniesHouseFilingHistoryConnector(api_key=api_key), issuers
     # This also explicitly keeps KR/DART away from /api/v2/ops/ingest.
     raise GlobalIngestConfigurationError("unsupported_global_ingest_country")
 
