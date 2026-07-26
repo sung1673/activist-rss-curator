@@ -737,8 +737,11 @@ def verified_empty_run_metrics() -> dict[str, object]:
         raise _empty_publication_error("github_run_attempt_mismatch")
     if _required_run_metric(payload, "fetched") <= 0:
         raise _empty_publication_error("empty_collection_denominator")
-    if _required_run_metric(payload, "public_candidates") != 0:
-        raise _empty_publication_error("public_candidates_not_zero")
+    public_candidates = _required_run_metric(payload, "public_candidates")
+    if public_candidates < 0:
+        raise _empty_publication_error("invalid_public_candidates")
+    if _required_run_metric(payload, "published_now") != 0:
+        raise _empty_publication_error("published_now_not_zero")
     if _required_run_metric(payload, "remote_api_synced") <= 0:
         raise _empty_publication_error("remote_sync_not_confirmed")
 
@@ -749,6 +752,10 @@ def verified_empty_run_metrics() -> dict[str, object]:
     for key in FAILURE_KEYS:
         if _required_run_metric(payload, key) != 0:
             raise _empty_publication_error(f"operational_failure_{key}")
+
+    if public_candidates > 0:
+        if _required_run_metric(payload, "pending") <= 0:
+            raise _empty_publication_error("pending_only_not_confirmed")
     return payload
 
 
@@ -761,7 +768,9 @@ def _required_report_stat(stats: dict[str, object], key: str) -> int:
     return value
 
 
-def validate_daily_report_publication(report: dict[str, object]) -> None:
+def validate_daily_report_publication(
+    report: dict[str, object],
+) -> dict[str, object] | None:
     """Prevent a successful collection outage from replacing the last good page."""
 
     stories = report.get("stories")
@@ -781,12 +790,12 @@ def validate_daily_report_publication(report: dict[str, object]) -> None:
         raise _publication_shape_error("story_count_mismatch")
 
     if not daily_report_requires_nonempty():
-        return
+        return None
     if story_rows and article_count > 0:
-        return
+        return None
     if story_rows or article_count > 0:
         raise _empty_publication_error("inconsistent_story_article_counts")
-    verified_empty_run_metrics()
+    return verified_empty_run_metrics()
 
 
 def build_report_stories(
@@ -1495,6 +1504,7 @@ def render_report_html(
     archive_links_html: str = "",
     layout_variant: str = "standard",
     in_variant_dir: bool = False,
+    empty_publication_pending_processing: bool = False,
 ) -> str:
     _ = (layout_variant, in_variant_dir)
     stats = report_stats(stories, clusters, duplicate_records)
@@ -1540,14 +1550,20 @@ def render_report_html(
         """
     )
     if not featured_stories:
+        empty_publication_message = (
+            "수집은 정상적으로 완료되었으며 Watch 후보를 사건 단위로 "
+            "정리 중입니다. 처리가 완료된 사건부터 공개합니다."
+            if empty_publication_pending_processing
+            else "수집은 정상적으로 완료되었으며 공개 기준을 충족한 후보는 0건입니다."
+        )
         featured_block_html = """
     <section class="priority priority--verified-empty" aria-label="오늘의 중요 사건">
       <div class="priority__head">
         <h2>오늘 확인된 중요 사건 없음</h2>
-        <p>수집은 정상적으로 완료되었으며 공개 기준을 충족한 후보는 0건입니다.</p>
+        <p>{empty_publication_message}</p>
       </div>
     </section>
-        """
+        """.format(empty_publication_message=empty_publication_message)
     category_sections = []
     for category in REPORT_CATEGORY_ORDER:
         category_stories = section_buckets.get(category, [])
@@ -5947,6 +5963,18 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
     date_id = end_at.astimezone(ZoneInfo(timezone_name)).strftime("%Y-%m-%d")
     report_url = report_public_url(config, date_id)
     archive_links_html = render_report_archive_links(project_root / FEED_DIR, date_id)
+    stats = report_stats(stories, clusters, duplicate_records)
+    empty_metrics = validate_daily_report_publication(
+        {
+            "stories": stories,
+            "stats": stats,
+        }
+    )
+    empty_publication_pending_processing = False
+    if empty_metrics is not None:
+        empty_publication_pending_processing = (
+            _required_run_metric(empty_metrics, "public_candidates") > 0
+        )
     html = render_report_html(
         stories,
         review,
@@ -5960,6 +5988,7 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
         archive_links_html,
         "standard",
         False,
+        empty_publication_pending_processing,
     )
     telegram_html = render_telegram_daily_html(stories, state, config, start_at, end_at, date_id, report_url)
     search_html = render_search_html(config, start_at, end_at, date_id, report_url)
@@ -5976,7 +6005,7 @@ def build_daily_report(root: Path | None = None, now: datetime | None = None) ->
         "search_html": search_html,
         "story_review": story_review,
         "report_url": report_url,
-        "stats": report_stats(stories, clusters, duplicate_records),
+        "stats": stats,
         "clusters": clusters,
         "rss_clusters": [
             cluster
@@ -6265,7 +6294,6 @@ def deliver_daily_report_direct(report: dict[str, object], config: dict[str, obj
 def send_daily_report(root: Path | None = None) -> dict[str, int]:
     project_root = root or PROJECT_ROOT
     report = build_daily_report(project_root)
-    validate_daily_report_publication(report)
     write_report_files(report, project_root)
     remote_summary = sync_report_to_remote_api(report)
     if daily_report_write_only():

@@ -872,6 +872,11 @@ def test_pages_deployment_retries_one_immutable_artifact_three_times(
     )
     assert 'echo "page_url=$selected_url" >> "$GITHUB_OUTPUT"' in verifier["run"]
     assert "failed after three attempts" in verifier["run"]
+    assert "deployment_attempted=false" in verifier["run"]
+    assert (
+        "deployment was not attempted because an upstream step failed"
+        in verifier["run"]
+    )
     assert (
         job["environment"]["url"]
         == "${{ steps.pages_deployment_result.outputs.page_url }}"
@@ -972,6 +977,19 @@ def test_pages_deployment_retries_one_immutable_artifact_three_times(
             == "${{ steps.legacy_pages_artifact.outputs.path }}"
         )
         assert failure_artifact["with"]["retention-days"] == "7"
+
+
+def test_build_feed_test_only_paths_do_not_trigger_page_run() -> None:
+    workflow = workflow_text("build-feed.yml")
+    page_regex_match = re.search(
+        r"page_regex='(?P<regex>[^']+)'",
+        workflow,
+    )
+
+    assert page_regex_match is not None
+    page_regex = page_regex_match.group("regex")
+    assert "tests/" not in page_regex
+    assert "curator/(daily_report|governance_ui|story_review)\\.py" in page_regex
 
 
 def test_legacy_pages_archive_download_and_seed_are_fail_closed() -> None:

@@ -192,7 +192,7 @@ jobs:
               cat changed_files.txt
 
               collection_regex='^(\.github/workflows/resolve-links\.yml|config\.yaml|requirements\.txt|data/priority_overrides\.yaml|curator/(ai|archive|cluster|config|dates|dedupe|fetch|link_discovery|main|normalize|priority|relevance|remote_api|resolve_links|rss_writer|state|story_judge|summaries|telegram_dashboard|telegram_publisher|telegram_resend|telegram_resend_digest|telegram_smoke_test|telegram_sources)\.py|tests/(conftest|test_archive|test_cluster|test_config|test_dates|test_dedupe|test_fetch|test_link_discovery|test_main|test_normalize|test_priority|test_relevance|test_remote_api|test_rss_writer|test_state|test_story_judge|test_summaries|test_telegram_dashboard|test_telegram_publisher|test_telegram_resend_digest|test_telegram_sources)\.py)$'
-              page_regex='^(\.github/(workflows/build-feed\.yml|scripts/(prepare-legacy-pages|restore-legacy-pages-archive)\.py)|curator/(daily_report|governance_ui|story_review)\.py|tests/(test_daily_report|test_governance_ui|test_story_review|test_prepare_legacy_pages|test_restore_legacy_pages_archive|test_workflow_contracts)\.py|public/(404\.html|CNAME|governance/.*))$'
+              page_regex='^(\.github/(workflows/build-feed\.yml|scripts/(prepare-legacy-pages|restore-legacy-pages-archive)\.py)|curator/(daily_report|governance_ui|story_review)\.py|public/(404\.html|CNAME|governance/.*))$'
 
               if grep -Eq "$collection_regex" changed_files.txt; then
                 full_run=true
@@ -570,6 +570,22 @@ jobs:
             echo "Artifact: \`github-pages\` (ID: ${PAGES_ARTIFACT_ID:-unavailable})"
             echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          deployment_attempted=false
+          for outcome in \
+            "$DEPLOYMENT_OUTCOME_1" \
+            "$DEPLOYMENT_OUTCOME_2" \
+            "$DEPLOYMENT_OUTCOME_3"; do
+            if [[ "$outcome" == "success" || "$outcome" == "failure" ]]; then
+              deployment_attempted=true
+              break
+            fi
+          done
+
+          if [[ "$deployment_attempted" != "true" ]]; then
+            echo "::error::GitHub Pages deployment was not attempted because an upstream step failed; inspect preceding steps."
+            exit 1
+          fi
 
           if [[ -z "$selected_attempt" ]]; then
             echo "::error::GitHub Pages deployment failed after three attempts."
