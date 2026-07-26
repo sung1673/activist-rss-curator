@@ -23,6 +23,9 @@ def verified_empty_metrics(
     *,
     run_id: int = VERIFIED_GITHUB_RUN_ID,
     run_attempt: int = VERIFIED_GITHUB_RUN_ATTEMPT,
+    public_candidates: int = 0,
+    published_now: int = 0,
+    pending: int = 0,
 ) -> dict[str, object]:
     return {
         **{key: 0 for key in FAILURE_KEYS},
@@ -32,7 +35,9 @@ def verified_empty_metrics(
         "github_run_id": run_id,
         "github_run_attempt": run_attempt,
         "fetched": 723,
-        "public_candidates": 0,
+        "public_candidates": public_candidates,
+        "published_now": published_now,
+        "pending": pending,
         "remote_api_synced": 1,
     }
 
@@ -590,6 +595,8 @@ def test_verified_empty_gate_accepts_collector_written_same_run_metrics(
         {
             "fetched": 3,
             "public_candidates": 0,
+            "published_now": 0,
+            "pending": 0,
             "remote_api_synced": 1,
         },
         ok=True,
@@ -642,6 +649,71 @@ def test_required_nonempty_daily_report_publishes_verified_empty_day(
     assert "수집은 정상적으로 완료되었으며 공개 기준을 충족한 후보는 0건입니다." in latest_html
 
 
+def test_required_nonempty_daily_report_publishes_verified_pending_only_day(
+    tmp_path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    now = datetime(2026, 7, 26, 14, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    revision = "f" * 40
+    metrics_path = tmp_path / "curator-run-metrics.json"
+    metrics_path.write_text(
+        json.dumps(
+            verified_empty_metrics(
+                revision,
+                public_candidates=4,
+                published_now=0,
+                pending=3,
+            )
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "data").mkdir()
+    (tmp_path / "config.yaml").write_text(
+        "report:\n  image_enrich_limit: 0\n", encoding="utf-8"
+    )
+    (tmp_path / "data" / "state.json").write_text(
+        json.dumps(
+            {
+                "published_clusters": [],
+                "pending_clusters": [],
+                "articles": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CURATOR_REQUIRE_NONEMPTY_DAILY_REPORT", "1")
+    monkeypatch.setenv("CURATOR_RUN_METRICS_PATH", str(metrics_path))
+    set_verified_github_run_environment(monkeypatch, revision)
+    monkeypatch.setattr(daily_report, "now_in_timezone", lambda _timezone: now)
+    monkeypatch.setattr(daily_report, "sync_report_to_remote_api", lambda _report: {})
+    evidence_reads = 0
+    read_verified_evidence = daily_report.verified_empty_run_metrics
+
+    def count_evidence_read() -> dict[str, object]:
+        nonlocal evidence_reads
+        evidence_reads += 1
+        return read_verified_evidence()
+
+    monkeypatch.setattr(
+        daily_report,
+        "verified_empty_run_metrics",
+        count_evidence_read,
+    )
+
+    summary = daily_report.send_daily_report(tmp_path)
+
+    latest_html = (tmp_path / "public" / "feed" / "latest.html").read_text(
+        encoding="utf-8"
+    )
+    assert summary["daily_report_written"] == 1
+    assert "오늘 확인된 중요 사건 없음" in latest_html
+    assert "Watch 후보를 사건 단위로 정리 중입니다." in latest_html
+    assert "처리가 완료된 사건부터 공개합니다." in latest_html
+    assert "public_candidates" not in latest_html
+    assert "pending_clusters" not in latest_html
+    assert "Watch 후보 4건" not in latest_html
+    assert evidence_reads == 1
+
+
 @pytest.mark.parametrize(
     "invalid_case",
     (
@@ -657,7 +729,11 @@ def test_required_nonempty_daily_report_publishes_verified_empty_day(
         "invalid_expected_run_attempt",
         "zero_denominator",
         "noninteger_denominator",
-        "public_candidate",
+        "published_now_without_candidate",
+        "pending_only_missing_published_now",
+        "pending_only_published_now",
+        "pending_only_missing_pending",
+        "pending_only_zero_pending",
         "remote_not_synced",
         "remote_failure",
         "known_failure",
@@ -689,8 +765,24 @@ def test_required_nonempty_daily_report_rejects_unverified_empty_evidence(
             payload["fetched"] = 0
         elif invalid_case == "noninteger_denominator":
             payload["fetched"] = "723"
-        elif invalid_case == "public_candidate":
+        elif invalid_case == "published_now_without_candidate":
+            payload["published_now"] = 1
+        elif invalid_case == "pending_only_missing_published_now":
             payload["public_candidates"] = 1
+            payload.pop("published_now")
+            payload["pending"] = 1
+        elif invalid_case == "pending_only_published_now":
+            payload["public_candidates"] = 1
+            payload["published_now"] = 1
+            payload["pending"] = 1
+        elif invalid_case == "pending_only_missing_pending":
+            payload["public_candidates"] = 1
+            payload["published_now"] = 0
+            payload.pop("pending")
+        elif invalid_case == "pending_only_zero_pending":
+            payload["public_candidates"] = 1
+            payload["published_now"] = 0
+            payload["pending"] = 0
         elif invalid_case == "remote_not_synced":
             payload["remote_api_synced"] = 0
         elif invalid_case == "remote_failure":

@@ -365,6 +365,22 @@ jobs:
             echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           } >> "$GITHUB_STEP_SUMMARY"
 
+          deployment_attempted=false
+          for outcome in \
+            "$DEPLOYMENT_OUTCOME_1" \
+            "$DEPLOYMENT_OUTCOME_2" \
+            "$DEPLOYMENT_OUTCOME_3"; do
+            if [[ "$outcome" == "success" || "$outcome" == "failure" ]]; then
+              deployment_attempted=true
+              break
+            fi
+          done
+
+          if [[ "$deployment_attempted" != "true" ]]; then
+            echo "::error::GitHub Pages deployment was not attempted because an upstream step failed; inspect preceding steps."
+            exit 1
+          fi
+
           if [[ -z "$selected_attempt" ]]; then
             echo "::error::GitHub Pages deployment failed after three attempts."
             exit 1
