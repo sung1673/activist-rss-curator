@@ -208,6 +208,11 @@ jobs:
             exit 1
           fi
 
+          if [[ "$page_run" == "true" && "$full_run" != "true" && "$EVENT_NAME" == "push" && "$COMMIT_MESSAGE" != *"[page-only]"* ]]; then
+            echo "::notice::Promoting an automatic page-code push to a verified full run so publication metrics are produced in the same job."
+            full_run=true
+          fi
+
           deploy_pages=false
           if [[ "$REF_NAME" == "$DEFAULT_BRANCH" && "$LEGACY_PAGES_ENABLED" == "true" && "$GOVERNANCE_PAGES_ENABLED" != "true" && "$ALLOW_PAGES_DEPLOY" == "true" && ( "$full_run" == "true" || "$page_run" == "true" ) ]]; then
             deploy_pages=true
