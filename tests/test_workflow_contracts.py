@@ -992,6 +992,51 @@ def test_build_feed_test_only_paths_do_not_trigger_page_run() -> None:
     assert "curator/(daily_report|governance_ui|story_review)\\.py" in page_regex
 
 
+def test_build_feed_page_only_work_is_promoted_before_publication() -> None:
+    workflow = workflow_text("build-feed.yml")
+    promotion = (
+        'if [[ "$page_run" == "true" && "$full_run" != "true" '
+        '&& "$EVENT_NAME" == "push" '
+        '&& "$COMMIT_MESSAGE" != *"[page-only]"* ]]; then'
+    )
+    promotion_index = workflow.index(promotion)
+    deployment_index = workflow.index("          deploy_pages=false")
+
+    assert promotion_index < deployment_index
+    promoted_block = workflow[promotion_index:deployment_index]
+    assert "full_run=true" in promoted_block
+    assert "automatic page-code push" in promoted_block
+    assert "publication metrics are produced in the same job" in promoted_block
+
+
+def test_build_feed_explicit_page_only_modes_remain_collection_free() -> None:
+    workflow = workflow_text("build-feed.yml")
+    dispatch_block = workflow[
+        workflow.index('elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]'):
+        workflow.index('elif [[ "$EVENT_NAME" == "push" ]]')
+    ]
+    push_block = workflow[
+        workflow.index('elif [[ "$EVENT_NAME" == "push" ]]'):
+        workflow.index(
+            '          if [[ "$LEGACY_PAGES_ENABLED" == "true" '
+            '&& "$GOVERNANCE_PAGES_ENABLED" == "true" ]]'
+        )
+    ]
+
+    assert "page_only)" in dispatch_block
+    assert "page_run=true" in dispatch_block
+    assert "full_run=true" not in dispatch_block[
+        dispatch_block.index("page_only)"):
+        dispatch_block.index("full|auto")
+    ]
+    explicit_marker_block = push_block[
+        push_block.index('if [[ "$COMMIT_MESSAGE" == *"[page-only]"* ]]'):
+        push_block.index('elif [[ "$COMMIT_MESSAGE" == *"[force-collect]"* ]]')
+    ]
+    assert "page_run=true" in explicit_marker_block
+    assert "full_run=true" not in explicit_marker_block
+
+
 def test_legacy_pages_archive_download_and_seed_are_fail_closed() -> None:
     payload = yaml.load(workflow_text("build-feed.yml"), Loader=yaml.BaseLoader)
     job = payload["jobs"]["build-feed"]
