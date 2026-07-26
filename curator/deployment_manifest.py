@@ -21,6 +21,7 @@ CORE_API_FILES = (
     "openapi.yaml",
     "openapi-v2.yaml",
     "migrations/011_global_terminal_v2.sql",
+    "migrations/012_dart_credential_pool.sql",
 )
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 

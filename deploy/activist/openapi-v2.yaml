@@ -11,7 +11,7 @@ info:
     across jurisdictions. Source titles and original-language fields are
     preserved without automatic translation.
 x-production-stage: Production Alpha
-x-schema-version: 11
+x-schema-version: 12
 x-production-alpha-source-scope:
   KR:
     coverage-mode: market-wide
@@ -580,7 +580,7 @@ paths:
         Least-privilege, read-only view of the global terminal release state
         and recent audit history. This route exists so the five-minute
         watchdog never needs an administrator token. It bypasses the public
-        release state but still requires schema version 11.
+        release state but still requires schema version 12.
       security:
         - OpsBearer: []
       responses:
@@ -632,7 +632,7 @@ paths:
         Returns a revision hash only after checking current status, evidence,
         validity and the requested collection, public-redistribution or AI use.
         This endpoint bypasses the public release state but still requires
-        schema version 11.
+        schema version 12.
       security:
         - OpsBearer: []
       parameters:
@@ -1053,7 +1053,7 @@ paths:
     get:
       tags: [Administration]
       summary: Read the global terminal release state and audit history
-      description: Bypasses the public release state but requires schema version 11.
+      description: Bypasses the public release state but requires schema version 12.
       security:
         - AdminBearer: []
       responses:
@@ -1412,7 +1412,7 @@ components:
     Unavailable:
       description: >-
         Public release is closed, the release-state row is unavailable, or the
-        exact migration manifest through schema version 11 is unavailable.
+        exact migration manifest through schema version 12 is unavailable.
       headers:
         Retry-After:
           schema:
@@ -1511,7 +1511,7 @@ components:
           type: string
           pattern: '^[0-9a-f]{40}$'
         schema_version:
-          const: 11
+          const: 12
         time:
           type: string
           format: date-time

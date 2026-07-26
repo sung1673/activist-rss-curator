@@ -89,11 +89,15 @@ def test_builder_rejects_a_symlink_in_a_nested_core_path(tmp_path: Path) -> None
     copy_core_files(deployment)
     migration_dir = deployment / "migrations"
     (migration_dir / "011_global_terminal_v2.sql").unlink()
+    (migration_dir / "012_dart_credential_pool.sql").unlink()
     migration_dir.rmdir()
     outside = tmp_path / "outside-migrations"
     outside.mkdir()
     (outside / "011_global_terminal_v2.sql").write_bytes(
         (DEPLOYMENT_ROOT / "migrations" / "011_global_terminal_v2.sql").read_bytes()
+    )
+    (outside / "012_dart_credential_pool.sql").write_bytes(
+        (DEPLOYMENT_ROOT / "migrations" / "012_dart_credential_pool.sql").read_bytes()
     )
     try:
         migration_dir.symlink_to(outside, target_is_directory=True)
@@ -128,6 +132,7 @@ def test_php_health_is_fail_closed_on_manifest_or_hash_mismatch() -> None:
     assert "deployment-manifest.json" in php
     assert "function v2_deployment_core_file_path" in php
     assert "'migrations/011_global_terminal_v2.sql'" in php
+    assert "'migrations/012_dart_credential_pool.sql'" in php
     assert "hash_file('sha256', $resolved)" in php
     assert "'error' => 'deployment_identity_unavailable'" in php
     assert "'reason' => $identity['error']" in php
@@ -163,11 +168,13 @@ def test_ci_builds_and_tamper_tests_the_checked_out_revision() -> None:
     assert "deployment_manifest_missing" in workflow
     assert "deployment_core_hash_mismatch" in workflow
     assert ".code_revision == $revision" in workflow
-    assert "(.files | length) == 8" in workflow
+    assert "(.files | length) == 9" in workflow
     assert "v2-health-htaccess-missing.json" in workflow
     assert "v2-health-v1-contract-mismatch.json" in workflow
     assert 'sha256sum "$migration_011_source"' in workflow
+    assert 'sha256sum "$migration_012_source"' in workflow
     assert "SET @bside_migration_011_sha256" in workflow
+    assert "SET @bside_migration_012_sha256" in workflow
     assert "one-byte source change" in workflow
     assert "overwrote a conflicting byte checksum" in workflow
     assert 'ln -s "$RUNNER_TEMP/migrations-real" deploy/activist/migrations' in workflow

@@ -183,7 +183,7 @@ def test_cutover_switches_owner_deploys_smokes_activates_and_can_recover() -> No
     }
     preflight_names = step_names(preflight)
     assert "Require v1 and v2 preview states before Pages deployment" in preflight_names
-    assert 'EXPECTED_V2_SCHEMA_VERSION: "11"' in text
+    assert 'EXPECTED_V2_SCHEMA_VERSION: "12"' in text
     assert "jq -r '.data.release_state' preflight-v2-state.json" in text
     assert 'X-BSIDE-API-Version:[[:space:]]*v2' in text
     preview_source_gate = next(

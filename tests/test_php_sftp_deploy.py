@@ -265,6 +265,8 @@ class HttpRouter:
         private_canary_mode: str = "blocked",
         public_canary_mode: str = "mapped",
         strict_opcache_action: str | None = None,
+        schema_version: int = 12,
+        pending_actual_schema_version: int | None = None,
     ) -> None:
         self.sftp = sftp
         self.code_revision = code_revision
@@ -275,6 +277,8 @@ class HttpRouter:
         self.private_canary_mode = private_canary_mode
         self.public_canary_mode = public_canary_mode
         self.strict_opcache_action = strict_opcache_action
+        self.schema_version = schema_version
+        self.pending_actual_schema_version = pending_actual_schema_version
         self.calls: list[tuple[str, str]] = []
         self.probe_tokens: list[str] = []
         self.private_canary_paths: list[str] = []
@@ -409,7 +413,7 @@ class HttpRouter:
                     "ok": True,
                     "service": "bside-global-market-terminal",
                     "code_revision": self.code_revision,
-                    "schema_version": 11,
+                    "schema_version": self.schema_version,
                     "api_version": "v2",
                 },
             )
@@ -420,7 +424,10 @@ class HttpRouter:
                     "Content-Type": "application/yaml; charset=utf-8",
                     "X-BSIDE-API-Version": "v2",
                 },
-                body=b"openapi: 3.1.0\nx-schema-version: 11\n",
+                body=(
+                    "openapi: 3.1.0\n"
+                    f"x-schema-version: {self.schema_version}\n"
+                ).encode(),
             )
         if url == API_V2 + "/__bside_sftp_deploy_not_found__":
             return self._json(
@@ -428,6 +435,19 @@ class HttpRouter:
                 {"ok": False, "error": "not_found", "api_version": "v2"},
             )
         if url == API_V2 + "/events?limit=1":
+            if self.pending_actual_schema_version is not None:
+                return self._json(
+                    503,
+                    {
+                        "ok": False,
+                        "error": "schema_version_mismatch",
+                        "expected_schema_version": self.schema_version,
+                        "actual_schema_version": (
+                            self.pending_actual_schema_version
+                        ),
+                        "api_version": "v2",
+                    },
+                )
             return self._json(
                 503,
                 {
@@ -456,6 +476,19 @@ class HttpRouter:
                     },
                 )
             assert headers.get("Authorization") == "Bearer " + PROTECTED_TOKEN
+            if self.pending_actual_schema_version is not None:
+                return self._json(
+                    503,
+                    {
+                        "ok": False,
+                        "error": "schema_version_mismatch",
+                        "expected_schema_version": self.schema_version,
+                        "actual_schema_version": (
+                            self.pending_actual_schema_version
+                        ),
+                        "api_version": "v2",
+                    },
+                )
             return self._json(
                 200,
                 {
@@ -513,14 +546,14 @@ def _artifact_bytes(plan: object, relative_path: str) -> bytes:
     return artifact_by_path[relative_path].path.read_bytes()
 
 
-def test_local_plan_attests_all_eight_core_files_and_commits_manifest_last(
+def test_local_plan_attests_all_core_files_and_commits_manifest_last(
     local_plan: object,
 ) -> None:
     report = local_plan_report(local_plan)
     paths = [item["path"] for item in report["files"]]  # type: ignore[index]
 
     assert set(CORE_API_FILES) == set(DEFAULT_COMMIT_ORDER[:-1])
-    assert len(CORE_API_FILES) == 8
+    assert len(CORE_API_FILES) == 9
     assert paths == list(DEFAULT_COMMIT_ORDER)
     assert paths[-2:] == ["api.php", DEPLOYMENT_MANIFEST_NAME]
     assert report["mutated_remote"] is False
@@ -1599,6 +1632,176 @@ def test_closed_smoke_requires_forwarded_bearer_and_closed_protected_state(
             expected_sha=RELEASE_SHA,
             protected_token=PROTECTED_TOKEN,
             http_request=http,
+        )
+
+
+def test_closed_smoke_supports_attested_schema_11_release(
+    production_sftp: MemorySftp,
+) -> None:
+    verify_closed_v2_api(
+        base_url=API_V2,
+        expected_sha=RELEASE_SHA,
+        protected_token=PROTECTED_TOKEN,
+        http_request=HttpRouter(
+            production_sftp,
+            code_revision=RELEASE_SHA,
+            schema_version=11,
+        ),
+        expected_schema_version=11,
+    )
+
+
+def test_pending_schema_smoke_requires_exact_12_over_11_mismatch(
+    production_sftp: MemorySftp,
+) -> None:
+    verify_closed_v2_api(
+        base_url=API_V2,
+        expected_sha=RELEASE_SHA,
+        protected_token=PROTECTED_TOKEN,
+        http_request=HttpRouter(
+            production_sftp,
+            code_revision=RELEASE_SHA,
+            schema_version=12,
+            pending_actual_schema_version=11,
+        ),
+        expected_schema_version=12,
+        pending_actual_schema_version=11,
+    )
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="did not prove the pending schema upgrade",
+    ):
+        verify_closed_v2_api(
+            base_url=API_V2,
+            expected_sha=RELEASE_SHA,
+            protected_token=PROTECTED_TOKEN,
+            http_request=HttpRouter(
+                production_sftp,
+                code_revision=RELEASE_SHA,
+                schema_version=12,
+                pending_actual_schema_version=10,
+            ),
+            expected_schema_version=12,
+            pending_actual_schema_version=11,
+        )
+
+
+def test_schema_upgrade_bridge_requires_attested_existing_release(
+    local_plan: object,
+    production_sftp: MemorySftp,
+) -> None:
+    before_files = dict(production_sftp.files)
+    before_directories = dict(production_sftp.directories)
+    before_mutations = production_sftp.mutations
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="requires an attested existing release",
+    ):
+        deploy_release(
+            production_sftp,
+            plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=HttpRouter(
+                production_sftp,
+                code_revision=RELEASE_SHA,
+            ),
+            schema_upgrade_from=11,
+        )
+
+    assert production_sftp.files == before_files
+    assert production_sftp.directories == before_directories
+    assert production_sftp.mutations == before_mutations
+
+
+def test_schema_upgrade_bridge_verifies_old_then_pending_candidate(
+    local_plan: object,
+    production_sftp: MemorySftp,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deploy_release(
+        production_sftp,
+        plan=local_plan,  # type: ignore[arg-type]
+        release_id=RELEASE_ID,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        protected_token=PROTECTED_TOKEN,
+        http_request=HttpRouter(
+            production_sftp,
+            code_revision=RELEASE_SHA,
+        ),
+    )
+    calls: list[tuple[int, int | None]] = []
+
+    def record_schema_smoke(**kwargs: object) -> None:
+        calls.append(
+            (
+                int(kwargs["expected_schema_version"]),
+                (
+                    None
+                    if kwargs.get("pending_actual_schema_version") is None
+                    else int(kwargs["pending_actual_schema_version"])
+                ),
+            )
+        )
+
+    monkeypatch.setattr(
+        php_deploy,
+        "verify_closed_v2_api",
+        record_schema_smoke,
+    )
+    result = deploy_release(
+        production_sftp,
+        plan=local_plan,  # type: ignore[arg-type]
+        release_id="php-v2-schema-bridge-20260726t000000z-12345678",
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        protected_token=PROTECTED_TOKEN,
+        http_request=HttpRouter(
+            production_sftp,
+            code_revision=RELEASE_SHA,
+        ),
+        schema_upgrade_from=11,
+    )
+
+    assert calls == [(11, None), (11, None), (12, 11)]
+    assert result["closed_smoke"] is False
+    assert result["fail_closed_smoke"] is True
+    assert result["deployment_smoke_mode"] == (
+        "pending_schema_upgrade_11_to_12"
+    )
+    assert result["schema_upgrade_from"] == 11
+
+
+def test_deploy_parser_exposes_only_explicit_schema_11_bridge() -> None:
+    args = php_deploy.build_arg_parser().parse_args(
+        [
+            "deploy",
+            "--local-root",
+            "deploy/activist",
+            "--expected-sha",
+            RELEASE_SHA,
+            "--schema-upgrade-from",
+            "11",
+        ]
+    )
+    assert args.schema_upgrade_from == 11
+    with pytest.raises(SystemExit):
+        php_deploy.build_arg_parser().parse_args(
+            [
+                "deploy",
+                "--expected-sha",
+                RELEASE_SHA,
+                "--schema-upgrade-from",
+                "10",
+            ]
         )
 
 

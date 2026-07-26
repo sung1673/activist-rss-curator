@@ -12,6 +12,9 @@ OPENAPI_PATH = ROOT / "deploy" / "activist" / "openapi-v2.yaml"
 MIGRATION_PATH = (
     ROOT / "deploy" / "activist" / "migrations" / "011_global_terminal_v2.sql"
 )
+MIGRATION_012_PATH = (
+    ROOT / "deploy" / "activist" / "migrations" / "012_dart_credential_pool.sql"
+)
 DOCS_PATH = ROOT / "docs" / "governance-api-v2.md"
 GLOBAL_INGEST_PATH = ROOT / "curator" / "global_ingest.py"
 GLOBAL_INGEST_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "ingest-global.yml"
@@ -19,6 +22,7 @@ GLOBAL_INGEST_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "ingest-global.ym
 V2 = V2_PATH.read_text(encoding="utf-8")
 V2_WRITE = V2_WRITE_PATH.read_text(encoding="utf-8")
 MIGRATION = MIGRATION_PATH.read_text(encoding="utf-8")
+MIGRATION_012 = MIGRATION_012_PATH.read_text(encoding="utf-8")
 DOCS = DOCS_PATH.read_text(encoding="utf-8")
 GLOBAL_INGEST = GLOBAL_INGEST_PATH.read_text(encoding="utf-8")
 GLOBAL_INGEST_WORKFLOW = GLOBAL_INGEST_WORKFLOW_PATH.read_text(encoding="utf-8")
@@ -95,7 +99,7 @@ def test_v2_spec_identifies_the_production_alpha_and_exact_server():
     assert SPEC["openapi"] == "3.1.0"
     assert SPEC["info"]["version"] == "2.0.0-alpha.2"
     assert SPEC["x-production-stage"] == "Production Alpha"
-    assert SPEC["x-schema-version"] == 11
+    assert SPEC["x-schema-version"] == 12
     assert SPEC["servers"] == [
         {"url": PRODUCTION_SERVER, "description": "Production API origin"}
     ]
@@ -111,9 +115,10 @@ def test_all_local_openapi_references_resolve():
 
 
 def test_v2_schema_and_manifest_version_are_consistent():
-    assert "const GOV_V2_SCHEMA_VERSION = 11;" in V2
+    assert "const GOV_V2_SCHEMA_VERSION = 12;" in V2
     assert "const GOV_V2_RELEASE_STATE_KEY = 'global_terminal_v2';" in V2
     assert "'011_global_terminal_v2'" in V2
+    assert "'012_dart_credential_pool'" in V2
     assert "11,\n      '011_global_terminal_v2'" in MIGRATION
     assert "@bside_migration_011_sha256" in MIGRATION
     assert "011 source byte checksum missing or invalid" in MIGRATION
@@ -121,8 +126,12 @@ def test_v2_schema_and_manifest_version_are_consistent():
         "'f16556d6fdf1c63a74352d9c671953b70b5f45a0d219fb01798f3571649786cd'"
         not in MIGRATION
     )
-    assert "v2_expected_migration_manifest(string $migration011Checksum)" in V2
-    assert "$identity['files'][$migrationPath]" in V2
+    assert "string $migration011Checksum" in V2
+    assert "string $migration012Checksum" in V2
+    assert "$identity['files'][$migration011Path]" in V2
+    assert "$identity['files'][$migration012Path]" in V2
+    assert "@bside_migration_012_sha256" in MIGRATION_012
+    assert "012 source byte checksum missing or invalid" in MIGRATION_012
     assert "migration_deployment_identity_unavailable" in V2
     assert SPEC["x-release-gate"]["state-key"] == "global_terminal_v2"
 

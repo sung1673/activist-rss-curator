@@ -7,9 +7,12 @@ import pytest
 from curator import dart_canary_sample
 from curator.dart_canary_sample import (
     DartCanarySampleOptions,
+    MAX_DART_REQUEST_BUDGET,
     run_dart_canary_sample,
 )
+from curator.dart_quota import DART_DAILY_LIMIT
 from curator.official_sources import DartQuotaExceededError, DartRequestBudget
+from curator.opendart_credentials import load_opendart_credentials
 
 
 def dart_row(
@@ -209,7 +212,7 @@ def test_canary_propagates_status_020_and_uses_the_shared_bounded_budget() -> No
     assert budget.used == 1
 
 
-def test_canary_rejects_a_budget_over_the_daily_cap() -> None:
+def test_canary_rejects_a_budget_over_the_single_run_safety_cap() -> None:
     with pytest.raises(ValueError, match="cannot exceed 10000"):
         run_dart_canary_sample(
             "test-key",
@@ -218,11 +221,84 @@ def test_canary_rejects_a_budget_over_the_daily_cap() -> None:
         )
 
 
+def test_single_run_safety_budget_is_distinct_from_durable_daily_pool() -> None:
+    assert MAX_DART_REQUEST_BUDGET == 10_000
+    assert DART_DAILY_LIMIT == 40_000
+
+
+def test_canary_layers_10k_invocation_cap_over_40k_durable_budget() -> None:
+    observed_limits: list[int] = []
+
+    class DurableBudget:
+        limit = DART_DAILY_LIMIT
+        used = 0
+
+        def consume(self, *, operation: str, credential_id: str) -> object:
+            self.used += 1
+            return (operation, credential_id)
+
+        def block_020(self, permit: object) -> None:
+            del permit
+
+        def disable_901(self, permit: object) -> None:
+            del permit
+
+    class EmptyConnector:
+        requests_made = 0
+        pages_fetched = 0
+        rows_fetched = 0
+
+        def iter_disclosure_rows(
+            self,
+            *_args: object,
+            **_kwargs: object,
+        ):  # type: ignore[no-untyped-def]
+            return iter(())
+
+    def factory(_key: object, budget: object) -> EmptyConnector:
+        observed_limits.append(budget.limit)  # type: ignore[attr-defined]
+        return EmptyConnector()
+
+    report = run_dart_canary_sample(
+        "a" * 40,
+        now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+        options=DartCanarySampleOptions(lookback_days=2),
+        request_budget=DurableBudget(),
+        connector_factory=factory,  # type: ignore[arg-type]
+    )
+
+    assert report["status"] == "failed"
+    assert observed_limits == [MAX_DART_REQUEST_BUDGET]
+
+
+def test_canary_accepts_validated_pool_as_one_shared_connector_input() -> None:
+    credentials = load_opendart_credentials(
+        {"OPENDART_API_KEYS": f"{'a' * 40}\r\n{'b' * 40},{'c' * 40}"}
+    )
+    observed_ids: list[str] = []
+
+    def factory(pool: object, budget: DartRequestBudget) -> FakeConnector:
+        observed_ids.extend(
+            credential.credential_id for credential in tuple(pool)  # type: ignore[arg-type]
+        )
+        return FakeConnector(budget, [])
+
+    report = run_dart_canary_sample(
+        credentials,
+        now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+        options=DartCanarySampleOptions(lookback_days=2),
+        connector_factory=factory,
+    )
+
+    assert report["status"] == "failed"
+    assert len(observed_ids) == 3
+
+
 def test_cli_preserves_status_020_as_fail_closed_artifact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     written: list[dict[str, object]] = []
-    monkeypatch.setenv("DART_API_KEY", "test-key")
+    monkeypatch.setenv("DART_API_KEY", "a" * 40)
 
     def quota_failure(*_args: object, **_kwargs: object) -> dict[str, object]:
         raise DartQuotaExceededError("OpenDART request quota exhausted")

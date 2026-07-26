@@ -48,6 +48,7 @@ concurrency:
 jobs:
   ingest:
     if: >-
+      vars.DART_OFFICIAL_INGEST_ENABLED == 'true' &&
       github.ref_name == github.event.repository.default_branch &&
       (
         github.event_name == 'workflow_dispatch' ||
@@ -164,8 +165,10 @@ jobs:
         run: python -m curator.operation_mode --github-output "$GITHUB_OUTPUT"
 
       - name: Validate operational configuration
+        id: dart_credentials
         env:
-          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          OPENDART_API_KEYS: ${{ secrets.OPENDART_API_KEYS }}
+          DART_API_KEY: ${{ secrets.OPENDART_API_KEYS == '' && secrets.DART_API_KEY || '' }}
           DART_SYNC_COMPANY_MASTER: ${{ github.event.schedule == '40 21 * * 0' || inputs.sync_company_master }}
           KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
           KIND_API_KEY: ${{ secrets.KIND_API_KEY }}
@@ -181,8 +184,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python .github/scripts/mask-opendart-credentials.py \
+            --github-output "$GITHUB_OUTPUT"
           bash .github/scripts/require-env.sh \
-            DART_API_KEY ACTIVIST_API_URL ACTIVIST_API_SECRET \
+            ACTIVIST_API_URL ACTIVIST_API_SECRET \
             BSIDE_API_BASE_URL BSIDE_OPS_TOKEN BSIDE_BACKEND_BINDING_ID
           if [[ "$GITHUB_EVENT_NAME" == "schedule" || -n "${CURATOR_OFFICIAL_SLOT_REPAIR_EXPECTED_AT:-}" ]]; then
             bash .github/scripts/require-env.sh \
@@ -216,7 +221,8 @@ jobs:
           CURATOR_REQUIRE_REMOTE_API: "1"
           CURATOR_ENABLE_KIND: ${{ (((github.event_name == 'schedule' || inputs.repair_expected_slot_at != '') && (steps.rollout.outputs.governance_pipeline_mode == 'shadow' || steps.rollout.outputs.governance_pipeline_mode == 'live') && steps.rollout.outputs.kind_connector_enabled == 'true') || inputs.include_kind) && '1' || '0' }}
           CURATOR_REQUIRE_KIND: ${{ (((github.event_name == 'schedule' || inputs.repair_expected_slot_at != '') && (steps.rollout.outputs.governance_pipeline_mode == 'shadow' || steps.rollout.outputs.governance_pipeline_mode == 'live') && steps.rollout.outputs.kind_connector_enabled == 'true') || inputs.include_kind) && '1' || '0' }}
-          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          OPENDART_API_KEYS: ${{ secrets.OPENDART_API_KEYS }}
+          DART_API_KEY: ${{ secrets.OPENDART_API_KEYS == '' && secrets.DART_API_KEY || '' }}
           DART_SYNC_COMPANY_MASTER: ${{ github.event.schedule == '40 21 * * 0' || inputs.sync_company_master }}
           KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
           KIND_API_KEY: ${{ secrets.KIND_API_KEY }}

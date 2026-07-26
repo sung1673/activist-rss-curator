@@ -62,6 +62,7 @@ PUBLIC_CANARY_NAME_PATTERN = re.compile(
 DEFAULT_COMMIT_ORDER = (
     ".htaccess",
     "migrations/011_global_terminal_v2.sql",
+    "migrations/012_dart_credential_pool.sql",
     "openapi-v2.yaml",
     V1_OPENAPI_NAME,
     "governance_v2_write.php",
@@ -2216,6 +2217,7 @@ def _restore_order(snapshot: BackupSnapshot) -> tuple[str, ...]:
         "governance_v2_write.php",
         "openapi-v2.yaml",
         "migrations/011_global_terminal_v2.sql",
+        "migrations/012_dart_credential_pool.sql",
         DEPLOYMENT_MANIFEST_NAME,
     )
     if set(first_deploy_order) != set(DEFAULT_COMMIT_ORDER):
@@ -2857,6 +2859,51 @@ def verify_protected_closed_state(
         )
 
 
+def verify_protected_schema_mismatch(
+    *,
+    base_url: str,
+    protected_token: str,
+    expected_schema_version: int,
+    actual_schema_version: int,
+    http_request: HttpRequester = _default_http_request,
+    timeout: float = 20.0,
+    allow_http: bool = False,
+) -> None:
+    base = _validate_https_url(
+        base_url,
+        label="API v2 base URL",
+        allow_http=allow_http,
+    )
+    if not base.endswith("/api/v2"):
+        raise PhpDeploymentError("API v2 base URL must end with /api/v2")
+    token = _validated_protected_token(protected_token)
+    response = http_request(
+        "GET",
+        base + "/ops/release-state",
+        {
+            "Accept": "application/json",
+            "Authorization": "Bearer " + token,
+            "Cache-Control": "no-store",
+        },
+        timeout,
+    )
+    payload = _json_response(
+        response,
+        label="authenticated pending-schema route",
+    )
+    if (
+        response.status != 503
+        or payload.get("api_version") != "v2"
+        or payload.get("error") != "schema_version_mismatch"
+        or payload.get("expected_schema_version") != expected_schema_version
+        or payload.get("actual_schema_version") != actual_schema_version
+    ):
+        raise PhpDeploymentError(
+            "authenticated protected route did not prove the pending "
+            "schema upgrade"
+        )
+
+
 def _opcache_probe_source(*, token_hash: str, probe_id: str) -> bytes:
     if SHA256_PATTERN.fullmatch(token_hash) is None:
         raise PhpDeploymentError("OPcache token hash is invalid")
@@ -3146,7 +3193,19 @@ def verify_closed_v2_api(
     http_request: HttpRequester = _default_http_request,
     timeout: float = 20.0,
     allow_http: bool = False,
+    expected_schema_version: int = 12,
+    pending_actual_schema_version: int | None = None,
 ) -> None:
+    if expected_schema_version not in {11, 12}:
+        raise PhpDeploymentError("unsupported v2 schema smoke version")
+    if (
+        pending_actual_schema_version is not None
+        and (
+            expected_schema_version != 12
+            or pending_actual_schema_version != 11
+        )
+    ):
+        raise PhpDeploymentError("unsupported pending schema transition")
     base = _validate_https_url(
         base_url,
         label="API v2 base URL",
@@ -3167,7 +3226,7 @@ def verify_closed_v2_api(
         "ok": True,
         "service": "bside-global-market-terminal",
         "code_revision": expected_sha,
-        "schema_version": 11,
+        "schema_version": expected_schema_version,
         "api_version": "v2",
     }
     if any(health_payload.get(key) != value for key, value in expected_health.items()):
@@ -3187,7 +3246,10 @@ def verify_closed_v2_api(
             "application/yaml"
         )
         or openapi.header("x-bside-api-version") != "v2"
-        or b"x-schema-version: 11" not in openapi.body
+        or (
+            f"x-schema-version: {expected_schema_version}".encode()
+            not in openapi.body
+        )
     ):
         raise PhpDeploymentError("v2 OpenAPI smoke failed")
 
@@ -3212,12 +3274,25 @@ def verify_closed_v2_api(
         timeout,
     )
     events_payload = _json_response(events, label="v2 closed events")
-    if (
+    if pending_actual_schema_version is None:
+        if (
+            events.status != 503
+            or events_payload.get("api_version") != "v2"
+            or events_payload.get("error") != "global_terminal_release_closed"
+        ):
+            raise PhpDeploymentError("v2 public data is not fail-closed")
+    elif (
         events.status != 503
         or events_payload.get("api_version") != "v2"
-        or events_payload.get("error") != "global_terminal_release_closed"
+        or events_payload.get("error") != "schema_version_mismatch"
+        or events_payload.get("expected_schema_version")
+        != expected_schema_version
+        or events_payload.get("actual_schema_version")
+        != pending_actual_schema_version
     ):
-        raise PhpDeploymentError("v2 public data is not fail-closed")
+        raise PhpDeploymentError(
+            "v2 public data did not prove the pending schema upgrade"
+        )
 
     admin = http_request(
         "GET",
@@ -3232,13 +3307,24 @@ def verify_closed_v2_api(
         or admin_payload.get("error") != "bearer_token_required"
     ):
         raise PhpDeploymentError("v2 admin authentication smoke failed")
-    verify_protected_closed_state(
-        base_url=base,
-        protected_token=protected_token,
-        http_request=http_request,
-        timeout=timeout,
-        allow_http=allow_http,
-    )
+    if pending_actual_schema_version is None:
+        verify_protected_closed_state(
+            base_url=base,
+            protected_token=protected_token,
+            http_request=http_request,
+            timeout=timeout,
+            allow_http=allow_http,
+        )
+    else:
+        verify_protected_schema_mismatch(
+            base_url=base,
+            protected_token=protected_token,
+            expected_schema_version=expected_schema_version,
+            actual_schema_version=pending_actual_schema_version,
+            http_request=http_request,
+            timeout=timeout,
+            allow_http=allow_http,
+        )
 
 
 def verify_rollback_health(
@@ -3362,7 +3448,12 @@ def deploy_release(
     http_timeout: float = 20.0,
     allow_http: bool = False,
     gabia_compatibility: GabiaCoreCompatibility | None = None,
+    schema_upgrade_from: int | None = None,
 ) -> Mapping[str, object]:
+    if schema_upgrade_from not in {None, 11}:
+        raise PhpDeploymentError(
+            "only the explicit v2 schema 11 to 12 upgrade is supported"
+        )
     _validated_protected_token(protected_token)
     validate_http_endpoint_binding(
         public_url_root=public_url_root,
@@ -3402,6 +3493,13 @@ def deploy_release(
         client,
         remote_root=root,
     )
+    if schema_upgrade_from is not None and existing_revision is None:
+        raise PhpDeploymentError(
+            "schema upgrade deployment requires an attested existing release"
+        )
+    existing_schema_version = (
+        12 if schema_upgrade_from is None else schema_upgrade_from
+    )
     if existing_revision is not None:
         verify_closed_v2_api(
             base_url=api_v2_base_url,
@@ -3410,6 +3508,7 @@ def deploy_release(
             http_request=http_request,
             timeout=http_timeout,
             allow_http=allow_http,
+            expected_schema_version=existing_schema_version,
         )
     ensure_private_root_http_protection(
         client,
@@ -3483,6 +3582,7 @@ def deploy_release(
                 http_request=http_request,
                 timeout=http_timeout,
                 allow_http=allow_http,
+                expected_schema_version=existing_schema_version,
             )
             verify_remote_targets_match_snapshot(
                 client,
@@ -3512,6 +3612,8 @@ def deploy_release(
             http_request=http_request,
             timeout=http_timeout,
             allow_http=allow_http,
+            expected_schema_version=12,
+            pending_actual_schema_version=schema_upgrade_from,
         )
     except BaseException as error:
         deployment_error = error
@@ -3640,7 +3742,14 @@ def deploy_release(
         "manifest_committed_last": True,
         "opcache_action": opcache_action,
         "opcache_reset": opcache_action == "reset_verified",
-        "closed_smoke": True,
+        "closed_smoke": schema_upgrade_from is None,
+        "fail_closed_smoke": True,
+        "deployment_smoke_mode": (
+            "closed"
+            if schema_upgrade_from is None
+            else "pending_schema_upgrade_11_to_12"
+        ),
+        "schema_upgrade_from": schema_upgrade_from,
         "private_root_http_protected": True,
     }
 
@@ -4112,6 +4221,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--confirm-production-write",
         help="Must exactly match --expected-sha for a mutating deployment",
     )
+    deploy_parser.add_argument(
+        "--schema-upgrade-from",
+        type=int,
+        choices=(11,),
+        help=(
+            "Explicit one-time bridge that deploys schema-12 PHP while the "
+            "attested existing release and database remain on schema 11"
+        ),
+    )
 
     rollback_parser = commands.add_parser(
         "rollback",
@@ -4227,6 +4345,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise PhpDeploymentError(
                     "Gabia compatibility probe is not available in dry-run"
                 )
+            if args.dry_run and args.schema_upgrade_from is not None:
+                raise PhpDeploymentError(
+                    "schema upgrade bridge is not available in dry-run"
+                )
             plan = build_local_deployment_plan(
                 args.local_root,
                 expected_sha=args.expected_sha,
@@ -4284,6 +4406,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         http_timeout=args.http_timeout,
                         allow_http=args.allow_http,
                         gabia_compatibility=compatibility,
+                        schema_upgrade_from=args.schema_upgrade_from,
                     )
             _print_report(report)
             return 0

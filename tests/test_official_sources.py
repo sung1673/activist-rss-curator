@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import io
+import re
 import zipfile
 from datetime import date, datetime, timezone
 
 import httpx
 import pytest
 
+from curator.dart_quota import (
+    DartCredentialUnavailableError,
+    DartGlobalQuotaExceededError,
+)
 from curator.governance import GovernanceEventType
 from curator.official_ingest import source_right_payloads
+from curator.opendart_credentials import load_opendart_credentials
 from curator.official_sources import (
     DART_GOVERNANCE_DETAIL_CODES,
     DartConnector,
+    DartInvocationQuota,
     DartQuotaExceededError,
     DartRequestBudget,
     DartRequestBudgetError,
@@ -677,6 +684,329 @@ def test_dart_connector_fails_fast_on_daily_quota_status_020() -> None:
     assert sleeps == []
 
 
+def test_dart_pool_rotates_logical_requests_and_blocks_only_status_020_key() -> None:
+    key_a, key_b, key_c = "a" * 40, "b" * 40, "c" * 40
+    credentials = load_opendart_credentials(
+        {"OPENDART_API_KEYS": f"{key_a}\r\n{key_b},{key_c}"}
+    )
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        key = str(request.url.params["crtfc_key"])
+        requested.append(key)
+        if key == key_a:
+            return httpx.Response(200, json={"status": "020"})
+        return httpx.Response(
+            200,
+            json={
+                "status": "000",
+                "page_no": 1,
+                "total_page": 1,
+                "list": [dart_row()],
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = DartConnector(
+            credentials,
+            client=client,
+            governance_detail_codes=(),
+            quota_day_provider=lambda: date(2026, 7, 26),
+        )
+        for _ in range(3):
+            assert len(
+                list(
+                    connector.iter_disclosure_rows(
+                        date(2026, 7, 26),
+                        date(2026, 7, 26),
+                    )
+                )
+            ) == 1
+
+    assert requested == [key_a, key_b, key_c, key_b]
+    assert set(connector.credential_requests) == {
+        credential.credential_id for credential in credentials
+    }
+    assert all(key not in repr(connector.credential_requests) for key in requested)
+
+
+def test_dart_pool_disables_status_901_key_and_retries_same_logical_request() -> None:
+    key_a, key_b = "a" * 40, "b" * 40
+    credentials = load_opendart_credentials(
+        {"OPENDART_API_KEYS": f"{key_a}\n{key_b}"}
+    )
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        key = str(request.url.params["crtfc_key"])
+        requested.append(key)
+        if key == key_a:
+            return httpx.Response(
+                200,
+                json={"status": "901", "message": f"invalid {key_a}"},
+            )
+        return httpx.Response(
+            200,
+            json={
+                "status": "000",
+                "page_no": 1,
+                "total_page": 1,
+                "list": [dart_row()],
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = DartConnector(
+            credentials,
+            client=client,
+            governance_detail_codes=(),
+            quota_day_provider=lambda: date(2026, 7, 26),
+        )
+        rows = list(
+            connector.iter_disclosure_rows(
+                date(2026, 7, 26),
+                date(2026, 7, 26),
+            )
+        )
+
+    assert len(rows) == 1
+    assert requested == [key_a, key_b]
+
+
+def test_dart_pool_binds_durable_actions_to_sha256_credential_identity() -> None:
+    key_a, key_b = "a" * 40, "b" * 40
+    credentials = load_opendart_credentials(
+        {"OPENDART_API_KEYS": f"{key_a},{key_b}"}
+    )
+    actions: list[tuple[str, str]] = []
+
+    class RecordingQuota:
+        limit = 40_000
+        used = 0
+
+        def consume(self, *, operation: str, credential_id: str) -> object:
+            assert operation == "list"
+            self.used += 1
+            actions.append(("consume", credential_id))
+            return credential_id
+
+        def block_020(self, permit: object) -> None:
+            actions.append(("block_020", str(permit)))
+
+        def disable_901(self, permit: object) -> None:
+            actions.append(("disable_901", str(permit)))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        key = str(request.url.params["crtfc_key"])
+        if key == key_a:
+            return httpx.Response(200, json={"status": "020"})
+        return httpx.Response(
+            200,
+            json={
+                "status": "000",
+                "page_no": 1,
+                "total_page": 1,
+                "list": [dart_row()],
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = DartConnector(
+            credentials,
+            client=client,
+            governance_detail_codes=(),
+            request_budget=RecordingQuota(),
+            quota_day_provider=lambda: date(2026, 7, 26),
+        )
+        assert len(
+            list(
+                connector.iter_disclosure_rows(
+                    date(2026, 7, 26),
+                    date(2026, 7, 26),
+                )
+            )
+        ) == 1
+
+    first_id, second_id = (credential.credential_id for credential in credentials)
+    assert actions == [
+        ("consume", first_id),
+        ("block_020", first_id),
+        ("consume", second_id),
+    ]
+
+
+def test_dart_pool_skips_only_durably_unavailable_credential() -> None:
+    key_a, key_b = "a" * 40, "b" * 40
+    credentials = load_opendart_credentials(
+        {"OPENDART_API_KEYS": f"{key_a},{key_b}"}
+    )
+    rejected_id = credentials[0].credential_id
+    requested: list[str] = []
+
+    class PreblockedQuota:
+        limit = 40_000
+        used = 0
+
+        def consume(self, *, operation: str, credential_id: str) -> object:
+            assert operation == "list"
+            if credential_id == rejected_id:
+                raise DartCredentialUnavailableError(
+                    reason="blocked_020",
+                    credential_id=credential_id,
+                )
+            self.used += 1
+            return credential_id
+
+        def block_020(self, permit: object) -> None:
+            raise AssertionError(f"no provider response exists for {permit!r}")
+
+        def disable_901(self, permit: object) -> None:
+            raise AssertionError(f"no provider response exists for {permit!r}")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url.params["crtfc_key"]))
+        return httpx.Response(
+            200,
+            json={
+                "status": "000",
+                "page_no": 1,
+                "total_page": 1,
+                "list": [dart_row()],
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = DartConnector(
+            credentials,
+            client=client,
+            governance_detail_codes=(),
+            request_budget=PreblockedQuota(),
+            quota_day_provider=lambda: date(2026, 7, 26),
+        )
+        rows = list(
+            connector.iter_disclosure_rows(
+                date(2026, 7, 26),
+                date(2026, 7, 26),
+            )
+        )
+
+    assert len(rows) == 1
+    assert requested == [key_b]
+
+
+def test_dart_connector_classifies_global_ledger_exhaustion_as_quota_stop() -> None:
+    requests = 0
+
+    class ExhaustedGlobalLedger:
+        limit = 40_000
+        used = 40_000
+
+        def consume(self, *, operation: str, credential_id: str) -> object:
+            assert operation == "list"
+            assert re.fullmatch(r"[0-9a-f]{64}", credential_id)
+            raise DartGlobalQuotaExceededError("global daily limit exhausted")
+
+        def block_020(self, permit: object) -> None:
+            raise AssertionError(f"no provider response exists for {permit!r}")
+
+        def disable_901(self, permit: object) -> None:
+            raise AssertionError(f"no provider response exists for {permit!r}")
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        raise AssertionError("provider request must not be sent")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = DartConnector(
+            "a" * 40,
+            client=client,
+            governance_detail_codes=(),
+            request_budget=ExhaustedGlobalLedger(),
+            quota_day_provider=lambda: date(2026, 7, 26),
+        )
+        with pytest.raises(
+            DartQuotaExceededError,
+            match="global quota exhausted",
+        ):
+            list(
+                connector.iter_disclosure_rows(
+                    date(2026, 7, 26),
+                    date(2026, 7, 26),
+                )
+            )
+
+    assert requests == 0
+
+
+@pytest.mark.parametrize("status", ("020", "901"))
+def test_dart_company_master_rotates_on_bounded_xml_credential_status(
+    status: str,
+) -> None:
+    key_a, key_b = "a" * 40, "b" * 40
+    credentials = load_opendart_credentials(
+        {"OPENDART_API_KEYS": f"{key_a},{key_b}"}
+    )
+    requested: list[str] = []
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "CORPCODE.xml",
+            (
+                "<result><list><corp_code>00126380</corp_code>"
+                "<corp_name>Issuer</corp_name><stock_code>005930</stock_code>"
+                "<modify_date>20260726</modify_date></list></result>"
+            ),
+        )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        key = str(request.url.params["crtfc_key"])
+        requested.append(key)
+        if key == key_a:
+            return httpx.Response(
+                200,
+                content=f"<result><status>{status}</status><message>{key_a}</message></result>",
+            )
+        return httpx.Response(200, content=buffer.getvalue())
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = DartConnector(
+            credentials,
+            client=client,
+            quota_day_provider=lambda: date(2026, 7, 26),
+        )
+        companies = connector.fetch_company_master()
+
+    assert companies[0]["company_id"] == "00126380"
+    assert requested == [key_a, key_b]
+
+
+def test_dart_transport_error_is_sanitized_without_request_url_or_key() -> None:
+    secret = "a" * 40
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(f"failed {request.url}", request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = DartConnector(
+            secret,
+            client=client,
+            governance_detail_codes=(),
+            max_retries=0,
+        )
+        with pytest.raises(OfficialSourceError) as captured:
+            list(
+                connector.iter_disclosure_rows(
+                    date(2026, 7, 26),
+                    date(2026, 7, 26),
+                )
+            )
+
+    assert str(captured.value) == "OpenDART transport error"
+    assert secret not in str(captured.value)
+    assert captured.value.__cause__ is None
+
+
 def test_dart_connector_enforces_shared_physical_request_budget() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(503)
@@ -697,6 +1027,47 @@ def test_dart_connector_enforces_shared_physical_request_budget() -> None:
 
     assert connector.requests_made == 1
     assert budget.used == 1
+
+
+def test_invocation_quota_caps_durable_40k_ledger_without_losing_permit_actions() -> None:
+    actions: list[tuple[str, object]] = []
+
+    class DailyLedger:
+        limit = 40_000
+        used = 0
+
+        def consume(self, *, operation: str, credential_id: str) -> object:
+            self.used += 1
+            permit = (operation, credential_id, self.used)
+            actions.append(("consume", permit))
+            return permit
+
+        def block_020(self, permit: object) -> None:
+            actions.append(("block_020", permit))
+
+        def disable_901(self, permit: object) -> None:
+            actions.append(("disable_901", permit))
+
+    ledger = DailyLedger()
+    budget = DartInvocationQuota(ledger, limit=2)
+    credential_id = "d" * 64
+    first = budget.consume(operation="list", credential_id=credential_id)
+    second = budget.consume(operation="corp_code", credential_id=credential_id)
+    budget.block_020(first)
+    budget.disable_901(second)
+
+    with pytest.raises(DartRequestBudgetError, match=r"2/2"):
+        budget.consume(operation="list", credential_id=credential_id)
+
+    assert budget.limit == 2
+    assert budget.used == 2
+    assert ledger.used == 2
+    assert actions == [
+        ("consume", ("list", credential_id, 1)),
+        ("consume", ("corp_code", credential_id, 2)),
+        ("block_020", first),
+        ("disable_901", second),
+    ]
 
 
 def test_dart_http_error_never_exposes_api_key_or_response_body() -> None:

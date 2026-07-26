@@ -1,6 +1,6 @@
 # 구현 상태와 전환 체크리스트
 
-기준일: 2026-07-22
+기준일: 2026-07-26
 
 이 문서는 6개월 계획 중 저장소에 구현된 기반과 운영 환경에서 추가로 완료해야 하는 작업을 구분한다. 코드가 존재한다는 사실은 운영 목표 달성을 의미하지 않는다. 수집률, 지연, 정확도, 가용성은 실제 API·DB·Telegram·Pages 환경에서 관측한 뒤 승인한다.
 
@@ -9,8 +9,8 @@
 | 영역 | 저장소 구현 | 운영 활성화 전 확인 |
 |---|---|---|
 | 전달 신뢰성 | canonical channel identity, cursor 기반 증분 동기화, 과거 `DeliveryOutbox` 감사 보존, 신규 enqueue·claim 서버 측 HTTP 410 차단 | Pages/API 배포 성공률과 실패 탐지 7일 연속 검증 |
-| 공식 수집 | DART·KIND 자동 커넥터, 회사 마스터, KST 당일+2일 중첩 실행, 재시작 가능 백필, 정정·취소 정규화, 페이지·부분수집 fail-closed, 서버 전역 DART 일 10,000회 quota | 운영 key·KIND endpoint, contract 표본, 2021년 백필, 회사·행동주주 공식자료 allowlist 활성화 |
-| 데이터 모델 | Company, Actor, SourceRight, Document, GovernanceEvent, EventObservation, Campaign, ClaimEvidence, ProposalVote, CommitmentOutcome, TimelineEntry, EditorialRevision, 서버 계산 canonical identity와 운영 관측·증빙 | migration 001~010 운영 적용, 실제 데이터 대조와 보존 정책 검증 |
+| 공식 수집 | DART·KIND 자동 커넥터, 회사 마스터, KST 당일+2일 중첩 실행, 재시작 가능 백필, 정정·취소 정규화, 페이지·부분수집 fail-closed, OpenDART 키 풀 합산 KST 일 40,000회·단일 실행 10,000회 quota | 운영 key·KIND endpoint, contract 표본, 2021년 백필, 회사·행동주주 공식자료 allowlist 활성화 |
+| 데이터 모델 | Company, Actor, SourceRight, Document, GovernanceEvent, EventObservation, Campaign, ClaimEvidence, ProposalVote, CommitmentOutcome, TimelineEntry, EditorialRevision, 서버 계산 canonical identity와 운영 관측·증빙 | migration 001~011 운영 적용 확인, migration 012의 PHP-first 전환·실데이터 대조와 보존 정책 검증 |
 | 이용권한 | 수집·AI·재배포 목적별 차단, 유효기간·철회·증빙 검사, KIND 사전 eligibility와 transaction 재검증, 관리자 API | 모든 소스의 실제 증빙 등록과 법률 검토 |
 | 사건 발행 | 공식/확인 사건 후보와 편집 승인, 불완전·충돌 identity 검수 큐, 고위험 자동 공개 차단 | 상위·시장 민감 사건 100% 편집 절차 훈련 |
 | 공개 제품 | `/api/v1`, OpenAPI, Today 서버 정렬, 회사·actor·사건·캠페인·캘린더·검색 UI, Atom·CSV·JSON, `closed|preview|live` 서버 release guard | migration 006~010, preview/admin/editor token hash, 운영 rewrite·CORS, 브라우저·접근성·성능 실측 |

@@ -459,7 +459,7 @@ def test_dart_only_dry_run_does_not_require_source_right_ops_token(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("DART_API_KEY", "dart-key")
+    monkeypatch.setenv("DART_API_KEY", "a" * 40)
     for name in (
         "BSIDE_API_BASE_URL",
         "GOVERNANCE_API_BASE_URL",
@@ -478,11 +478,34 @@ def test_dart_only_dry_run_does_not_require_source_right_ops_token(
     validate_runtime(options)
 
 
+def test_backfill_rejects_conflicting_pool_and_legacy_key_without_secret(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    key_a, key_b = "a" * 40, "b" * 40
+    monkeypatch.setenv("OPENDART_API_KEYS", key_a)
+    monkeypatch.setenv("DART_API_KEY", key_b)
+    options = BackfillOptions(
+        start=date(2021, 1, 1),
+        end_exclusive=date(2021, 1, 2),
+        checkpoint_path=tmp_path / "unused.json",
+        sources=("dart",),
+        dry_run=True,
+    )
+
+    with pytest.raises(BackfillConfigurationError) as captured:
+        validate_runtime(options)
+
+    assert str(captured.value) == "OpenDART credential configuration is invalid"
+    assert key_a not in str(captured.value)
+    assert key_b not in str(captured.value)
+
+
 def test_apply_requires_exact_backend_binding_id(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("DART_API_KEY", "dart-key")
+    monkeypatch.setenv("DART_API_KEY", "a" * 40)
     monkeypatch.setenv("ACTIVIST_API_URL", "https://example.test/api.php")
     monkeypatch.setenv("ACTIVIST_API_SECRET", "secret")
     monkeypatch.setenv("BSIDE_API_BASE_URL", "https://example.test/api.php/api/v1")
@@ -504,7 +527,7 @@ def test_apply_requires_exact_code_revision(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("DART_API_KEY", "dart-key")
+    monkeypatch.setenv("DART_API_KEY", "a" * 40)
     monkeypatch.setenv("ACTIVIST_API_URL", "https://example.test/api.php")
     monkeypatch.setenv("ACTIVIST_API_SECRET", "secret")
     monkeypatch.setenv("BSIDE_API_BASE_URL", "https://example.test/api.php/api/v1")

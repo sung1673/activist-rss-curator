@@ -16,6 +16,7 @@ const GOV_V1_SCHEMA_VERSION = 10;
 const GOV_V1_RELEASE_STATE_KEY = 'governance_v1';
 const GOV_V1_AVAILABILITY_CADENCE_ID = 'watchdog-v1-kst-5m-minute01';
 const GOV_V1_AVAILABILITY_SLOTS_PER_DAY = 288;
+const GOV_V1_DART_GLOBAL_DAILY_LIMIT = 40000;
 
 /** Decode and normalize a route exactly once before both CORS and dispatch. */
 function v1_canonical_route_path(string $value): string {
@@ -377,6 +378,31 @@ function v1_require_schema_version(PDO $pdo, array $config): int {
     return GOV_V1_SCHEMA_VERSION;
 }
 
+/** Quota pooling depends on migration 012 even though the wider v1 API remains at schema 10. */
+function v1_require_dart_quota_schema(PDO $pdo, array $config): void {
+    if (!function_exists('v2_schema_manifest_status')) {
+        header('Retry-After: 300');
+        v1_respond(503,array(
+            'ok'=>false,
+            'error'=>'dart_quota_schema_unavailable',
+            'expected_schema_version'=>12,
+            'actual_schema_version'=>null,
+        ));
+    }
+    $manifest=v2_schema_manifest_status($pdo,$config);
+    if (!is_array($manifest) || ($manifest['valid'] ?? false) !== true
+        || (int)($manifest['highest_version'] ?? 0) !== 12) {
+        header('Retry-After: 300');
+        v1_respond(503,array(
+            'ok'=>false,
+            'error'=>'dart_quota_schema_unavailable',
+            'expected_schema_version'=>12,
+            'actual_schema_version'=>$manifest['highest_version'] ?? null,
+            'schema_manifest_error'=>$manifest['error'] ?? 'migration_manifest_unavailable',
+        ));
+    }
+}
+
 function v1_preview_token_hashes(array $config): array {
     $hashes = v1_role_hashes($config, 'preview');
     if (isset($config['governance_preview_token_hash'])
@@ -475,6 +501,9 @@ function handle_v1_request(string $method, string $path, array $config): void {
 
     $pdo = pdo_conn($config);
     v1_require_schema_version($pdo, $config);
+    if ($path === '/ops/dart-quota') {
+        v1_require_dart_quota_schema($pdo,$config);
+    }
     $privileged = strpos($path, '/ops/') === 0 || strpos($path, '/admin/') === 0;
     if (!$privileged) {
         v1_require_public_release_access($pdo, $config);
@@ -1747,16 +1776,31 @@ function v1_dart_quota_server_day(): string {
     return (new DateTimeImmutable('now',new DateTimeZone('Asia/Seoul')))->format('Y-m-d');
 }
 
-function v1_dart_quota_block_until_utc(): string {
+function v1_dart_quota_block_until_utc(string $quotaDay): string {
     $kst = new DateTimeZone('Asia/Seoul');
-    return (new DateTimeImmutable('tomorrow',$kst))->setTime(0,0,0)
+    return (new DateTimeImmutable($quotaDay . ' 00:00:00',$kst))->modify('+1 day')
         ->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
 }
 
-function v1_dart_quota_error(int $status, string $code, ?string $detail = null): void {
+function v1_dart_quota_error(
+    int $status,
+    string $code,
+    ?string $detail = null,
+    array $safeContext = array()
+): void {
     $error = array('code'=>$code);
     if ($detail !== null) { $error['detail']=$detail; }
-    v1_respond($status,array('ok'=>false,'error'=>$error,'server_kst_date'=>v1_dart_quota_server_day()));
+    foreach ($safeContext as $key=>$value) {
+        if (!in_array($key,array('credential_id','credential_reason'),true)) {
+            continue;
+        }
+        $error[$key]=$value;
+    }
+    v1_respond($status,array(
+        'ok'=>false,
+        'error'=>$error,
+        'server_kst_date'=>v1_dart_quota_server_day(),
+    ));
 }
 
 function v1_backend_binding_id(PDO $pdo, array $config): string {
@@ -1772,21 +1816,54 @@ function v1_backend_binding_id(PDO $pdo, array $config): string {
         . (string)$row['database_name'] . "\n" . $prefix);
 }
 
-function v1_dart_quota_payload(array $row, string $action, ?string $attemptId, bool $duplicate,
-    string $backendBindingId): array {
+function v1_dart_quota_payload(
+    array $row,
+    string $action,
+    ?string $attemptId,
+    bool $duplicate,
+    string $backendBindingId,
+    ?array $credentialRow = null
+): array {
     $limit = (int)$row['limit_count']; $used = (int)$row['used_count'];
-    return array(
+    $payload = array(
         'ok'=>true,'action'=>$action,'attempt_id'=>$attemptId,'quota_day'=>(string)$row['quota_day'],
         'accepted'=>$action === 'status' ? 0 : 1,'limit_count'=>$limit,'used_count'=>$used,
         'remaining_count'=>max(0,$limit-$used),'duplicate'=>$duplicate,
-        'blocked_until'=>(int)$row['blocked'] === 1 ? v1_release_iso_time($row['blocked_until']) : null,
+        'blocked_until'=>$credentialRow !== null && (int)$credentialRow['blocked'] === 1
+            ? v1_release_iso_time($credentialRow['blocked_until']) : null,
         'backend_binding_id'=>$backendBindingId,
     );
+    if ($credentialRow !== null) {
+        $credentialLimit = (int)$credentialRow['limit_count'];
+        $credentialUsed = (int)$credentialRow['used_count'];
+        $payload['credential_id']=(string)$credentialRow['credential_id'];
+        $payload['credential_status']=(string)$credentialRow['credential_status'];
+        $payload['credential_limit_count']=$credentialLimit;
+        $payload['credential_used_count']=$credentialUsed;
+        $payload['credential_remaining_count']=max(0,$credentialLimit-$credentialUsed);
+        $payload['credential_blocked_until']=(int)$credentialRow['blocked'] === 1
+            ? v1_release_iso_time($credentialRow['blocked_until']) : null;
+    }
+    return $payload;
 }
 
-function v1_dart_quota_validate_day($value): string {
+function v1_dart_quota_validate_credential_id($value): string {
+    $raw = is_string($value) ? $value : '';
+    $credentialId = trim($raw);
+    if ($raw !== $credentialId
+        || preg_match('/^[a-f0-9]{64}$/D',$credentialId) !== 1) {
+        v1_dart_quota_error(400,'invalid_request','credential_id');
+    }
+    return $credentialId;
+}
+
+function v1_dart_quota_validate_day($value, bool $allowPreviousDay = false): string {
     $day = is_string($value) ? trim($value) : '';
-    if (preg_match('/^\d{4}-\d{2}-\d{2}$/',$day) !== 1 || $day !== v1_dart_quota_server_day()) {
+    $kst = new DateTimeZone('Asia/Seoul');
+    $today = new DateTimeImmutable('today',$kst);
+    $isAllowedDay = $day === $today->format('Y-m-d')
+        || ($allowPreviousDay && $day === $today->modify('-1 day')->format('Y-m-d'));
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/',$day) !== 1 || !$isAllowedDay) {
         v1_dart_quota_error(400,'quota_date_mismatch');
     }
     return $day;
@@ -1800,7 +1877,7 @@ function v1_ops_dart_quota_status(PDO $pdo, array $config): void {
         . 'blocked_at,updated_at FROM ' . table_name($config,'dart_quota_days') . ' WHERE quota_day=? LIMIT 1');
     $stmt->execute(array($day)); $row = $stmt->fetch();
     if (!$row) {
-        $row = array('quota_day'=>$day,'limit_count'=>10000,'used_count'=>0,'blocked'=>0,'block_reason'=>null,
+        $row = array('quota_day'=>$day,'limit_count'=>GOV_V1_DART_GLOBAL_DAILY_LIMIT,'used_count'=>0,'blocked'=>0,'block_reason'=>null,
             'blocked_until'=>null,'blocked_by_attempt_id'=>null,'blocked_at'=>null,'updated_at'=>null);
     }
     $payload = v1_dart_quota_payload($row,'status',null,false,$backendBindingId);
@@ -1809,6 +1886,42 @@ function v1_ops_dart_quota_status(PDO $pdo, array $config): void {
     $payload['blocked_by_attempt_id'] = $row['blocked_by_attempt_id'];
     $payload['blocked_at'] = v1_release_iso_time($row['blocked_at']);
     $payload['updated_at'] = v1_release_iso_time($row['updated_at']);
+    $credentialStmt = $pdo->prepare(
+        'SELECT c.credential_id,c.status AS credential_status,c.disable_reason,'
+        . 'c.disabled_by_attempt_id,c.disabled_at,c.updated_at AS credential_updated_at,'
+        . 'COALESCE(cd.limit_count,?) AS limit_count,COALESCE(cd.used_count,0) AS used_count,'
+        . 'COALESCE(cd.blocked,0) AS blocked,cd.block_reason,cd.blocked_until,'
+        . 'cd.blocked_by_attempt_id,cd.blocked_at,cd.updated_at '
+        . 'FROM ' . table_name($config,'dart_quota_credentials') . ' c '
+        . 'LEFT JOIN ' . table_name($config,'dart_quota_credential_days')
+        . ' cd ON cd.credential_id=c.credential_id AND cd.quota_day=? '
+        . 'ORDER BY c.credential_id'
+    );
+    $credentialStmt->execute(array(GOV_V1_DART_GLOBAL_DAILY_LIMIT,$day));
+    $credentials = array();
+    foreach ($credentialStmt->fetchAll() as $credential) {
+        $credentialLimit=(int)$credential['limit_count'];
+        $credentialUsed=(int)$credential['used_count'];
+        $credentials[]=array(
+            'credential_id'=>(string)$credential['credential_id'],
+            'status'=>(string)$credential['credential_status'],
+            'limit_count'=>$credentialLimit,
+            'used_count'=>$credentialUsed,
+            'remaining_count'=>max(0,$credentialLimit-$credentialUsed),
+            'blocked'=>(int)$credential['blocked'] === 1,
+            'block_reason'=>$credential['block_reason'],
+            'blocked_until'=>v1_release_iso_time($credential['blocked_until']),
+            'blocked_by_attempt_id'=>$credential['blocked_by_attempt_id'],
+            'blocked_at'=>v1_release_iso_time($credential['blocked_at']),
+            'disable_reason'=>$credential['disable_reason'],
+            'disabled_by_attempt_id'=>$credential['disabled_by_attempt_id'],
+            'disabled_at'=>v1_release_iso_time($credential['disabled_at']),
+            'updated_at'=>v1_release_iso_time(
+                $credential['updated_at'] ?? $credential['credential_updated_at']
+            ),
+        );
+    }
+    $payload['credentials']=$credentials;
     v1_respond(200,$payload);
 }
 
@@ -1817,14 +1930,20 @@ function v1_ops_dart_quota_write(PDO $pdo, array $config): void {
     $payload = v1_admin_json_body($config);
     $action = isset($payload['action']) ? trim((string)$payload['action']) : '';
     $required = $action === 'consume'
-        ? array('action','attempt_id','quota_day','operation','code_revision','expected_backend_binding_id')
+        ? array('action','attempt_id','quota_day','credential_id','operation','code_revision','expected_backend_binding_id')
         : ($action === 'block_020'
-            ? array('action','attempt_id','quota_day','reason','code_revision','expected_backend_binding_id')
-            : array());
+            ? array('action','attempt_id','quota_day','credential_id','reason','code_revision','expected_backend_binding_id')
+            : ($action === 'disable_901'
+                ? array('action','attempt_id','quota_day','credential_id','reason','code_revision','expected_backend_binding_id')
+                : array()));
     $keys = array_keys($payload); sort($keys,SORT_STRING); $expectedKeys = $required; sort($expectedKeys,SORT_STRING);
     if (!$required || $keys !== $expectedKeys) { v1_dart_quota_error(400,'invalid_request','exact_fields_required'); }
     $attemptId = trim((string)$payload['attempt_id']);
-    $quotaDay = v1_dart_quota_validate_day($payload['quota_day']);
+    $quotaDay = v1_dart_quota_validate_day(
+        $payload['quota_day'],
+        $action === 'block_020' || $action === 'disable_901'
+    );
+    $credentialId = v1_dart_quota_validate_credential_id($payload['credential_id']);
     $revision = strtolower(trim((string)$payload['code_revision']));
     $expectedBackendBindingId = trim((string)$payload['expected_backend_binding_id']);
     if (preg_match('/^[a-f0-9]{64}$/',$expectedBackendBindingId) !== 1) {
@@ -1843,78 +1962,217 @@ function v1_ops_dart_quota_write(PDO $pdo, array $config): void {
     if ($action === 'block_020' && $payload['reason'] !== 'opendart_status_020') {
         v1_dart_quota_error(400,'invalid_request','reason');
     }
+    if ($action === 'disable_901' && $payload['reason'] !== 'opendart_status_901') {
+        v1_dart_quota_error(400,'invalid_request','reason');
+    }
     $requestHash = hash('sha256',v1_strict_canonical_json_encode($payload,'dart_quota_request_encode_failed'));
-    $now = gmdate('Y-m-d H:i:s'); $blockUntil = v1_dart_quota_block_until_utc();
+    $now = gmdate('Y-m-d H:i:s'); $blockUntil = v1_dart_quota_block_until_utc($quotaDay);
     $pdo->beginTransaction();
     try {
         $dayInsert = $pdo->prepare('INSERT IGNORE INTO ' . table_name($config,'dart_quota_days')
             . ' (quota_day,limit_count,used_count,blocked,block_reason,blocked_until,blocked_by_attempt_id,blocked_at,created_at,updated_at)'
-            . ' VALUES (?,10000,0,0,NULL,NULL,NULL,NULL,?,?)');
+            . ' VALUES (?,40000,0,0,NULL,NULL,NULL,NULL,?,?)');
         $dayInsert->execute(array($quotaDay,$now,$now));
         $dayLookup = $pdo->prepare('SELECT quota_day,limit_count,used_count,blocked,block_reason,blocked_until,'
             . 'blocked_by_attempt_id,blocked_at,updated_at FROM ' . table_name($config,'dart_quota_days') . ' WHERE quota_day=? FOR UPDATE');
         $dayLookup->execute(array($quotaDay)); $day = $dayLookup->fetch();
-        if (!$day || (int)$day['limit_count'] !== 10000 || (int)$day['used_count'] > 10000) {
+        if (!$day || (int)$day['limit_count'] !== GOV_V1_DART_GLOBAL_DAILY_LIMIT
+            || (int)$day['used_count'] > GOV_V1_DART_GLOBAL_DAILY_LIMIT
+            || (int)$day['blocked'] !== 0 || $day['block_reason'] !== null
+            || $day['blocked_until'] !== null || $day['blocked_by_attempt_id'] !== null
+            || $day['blocked_at'] !== null) {
             throw new RuntimeException('dart_quota_day_integrity_error');
         }
-        $attemptLookup = $pdo->prepare('SELECT attempt_id,quota_day,operation,code_revision,consume_request_sha256,'
-            . 'block_request_sha256,status,consumed_units FROM ' . table_name($config,'dart_quota_attempts')
+
+        $credentialInsert = $pdo->prepare(
+            'INSERT IGNORE INTO ' . table_name($config,'dart_quota_credentials')
+            . ' (credential_id,status,disable_reason,disabled_by_attempt_id,disabled_at,created_at,updated_at)'
+            . ' VALUES (?,\'active\',NULL,NULL,NULL,?,?)'
+        );
+        $credentialInsert->execute(array($credentialId,$now,$now));
+        $credentialLookup = $pdo->prepare(
+            'SELECT credential_id,status,disable_reason,disabled_by_attempt_id,disabled_at,updated_at '
+            . 'FROM ' . table_name($config,'dart_quota_credentials')
+            . ' WHERE credential_id=? FOR UPDATE'
+        );
+        $credentialLookup->execute(array($credentialId)); $credential = $credentialLookup->fetch();
+        if (!$credential || !in_array((string)$credential['status'],array('active','disabled_901'),true)) {
+            throw new RuntimeException('dart_quota_credential_integrity_error');
+        }
+        $credentialDayInsert = $pdo->prepare(
+            'INSERT IGNORE INTO ' . table_name($config,'dart_quota_credential_days')
+            . ' (quota_day,credential_id,limit_count,used_count,blocked,block_reason,blocked_until,'
+            . 'blocked_by_attempt_id,blocked_at,created_at,updated_at)'
+            . ' VALUES (?,?,40000,0,0,NULL,NULL,NULL,NULL,?,?)'
+        );
+        $credentialDayInsert->execute(array($quotaDay,$credentialId,$now,$now));
+        $credentialDayLookup = $pdo->prepare(
+            'SELECT quota_day,credential_id,limit_count,used_count,blocked,block_reason,blocked_until,'
+            . 'blocked_by_attempt_id,blocked_at,updated_at FROM '
+            . table_name($config,'dart_quota_credential_days')
+            . ' WHERE quota_day=? AND credential_id=? FOR UPDATE'
+        );
+        $credentialDayLookup->execute(array($quotaDay,$credentialId));
+        $credentialDay = $credentialDayLookup->fetch();
+        if (!$credentialDay
+            || (int)$credentialDay['limit_count'] !== GOV_V1_DART_GLOBAL_DAILY_LIMIT
+            || (int)$credentialDay['used_count'] > GOV_V1_DART_GLOBAL_DAILY_LIMIT) {
+            throw new RuntimeException('dart_quota_credential_day_integrity_error');
+        }
+        $credentialDay['credential_status']=(string)$credential['status'];
+
+        $attemptLookup = $pdo->prepare('SELECT attempt_id,quota_day,credential_id,operation,code_revision,consume_request_sha256,'
+            . 'block_request_sha256,disable_request_sha256,status,consumed_units FROM ' . table_name($config,'dart_quota_attempts')
             . ' WHERE attempt_id=? FOR UPDATE');
         $attemptLookup->execute(array($attemptId)); $attempt = $attemptLookup->fetch();
 
         if ($action === 'consume') {
             if ($attempt) {
-                if ((string)$attempt['quota_day'] !== $quotaDay || (string)$attempt['operation'] !== (string)$payload['operation']
+                if ((string)$attempt['quota_day'] !== $quotaDay
+                    || (string)$attempt['credential_id'] !== $credentialId
+                    || (string)$attempt['operation'] !== (string)$payload['operation']
                     || (string)$attempt['code_revision'] !== $revision || (int)$attempt['consumed_units'] !== 1
                     || !hash_equals((string)$attempt['consume_request_sha256'],$requestHash)) {
                     $pdo->rollBack(); v1_dart_quota_error(409,'dart_quota_idempotency_conflict');
                 }
-                $pdo->commit(); v1_respond(200,v1_dart_quota_payload($day,'consume',$attemptId,true,$backendBindingId));
+                $pdo->commit(); v1_respond(200,v1_dart_quota_payload(
+                    $day,'consume',$attemptId,true,$backendBindingId,$credentialDay
+                ));
             }
-            if ((int)$day['blocked'] === 1) {
-                $retry = max(1,(int)(strtotime((string)$day['blocked_until'] . ' UTC')-time()));
-                header('Retry-After: ' . $retry); $pdo->rollBack(); v1_dart_quota_error(409,'dart_quota_blocked');
+            if ((string)$credential['status'] === 'disabled_901') {
+                $pdo->rollBack(); v1_dart_quota_error(
+                    409,'dart_credential_disabled',null,
+                    array('credential_id'=>$credentialId,'credential_reason'=>'disabled_901')
+                );
             }
-            if ((int)$day['used_count'] >= 10000) {
+            if ((int)$credentialDay['blocked'] === 1) {
+                $retry = max(1,(int)(strtotime((string)$credentialDay['blocked_until'] . ' UTC')-time()));
+                header('Retry-After: ' . $retry); $pdo->rollBack(); v1_dart_quota_error(
+                    409,'dart_credential_blocked',null,
+                    array('credential_id'=>$credentialId,'credential_reason'=>'blocked_020')
+                );
+            }
+            if ((int)$day['used_count'] >= GOV_V1_DART_GLOBAL_DAILY_LIMIT) {
                 $retry = max(1,(int)(strtotime($blockUntil . ' UTC')-time()));
                 header('Retry-After: ' . $retry); $pdo->rollBack(); v1_dart_quota_error(429,'dart_quota_exhausted');
             }
             $insert = $pdo->prepare('INSERT INTO ' . table_name($config,'dart_quota_attempts')
-                . ' (attempt_id,quota_day,operation,code_revision,consume_request_sha256,block_request_sha256,status,consumed_units,'
-                . 'consumed_at,blocked_at,updated_at) VALUES (?,?,?,?,?,NULL,\'consumed\',1,?,NULL,?)');
-            $insert->execute(array($attemptId,$quotaDay,(string)$payload['operation'],$revision,$requestHash,$now,$now));
+                . ' (attempt_id,quota_day,credential_id,operation,code_revision,consume_request_sha256,'
+                . 'block_request_sha256,disable_request_sha256,status,consumed_units,consumed_at,blocked_at,disabled_at,updated_at)'
+                . ' VALUES (?,?,?,?,?,?,NULL,NULL,\'consumed\',1,?,NULL,NULL,?)');
+            $insert->execute(array(
+                $attemptId,$quotaDay,$credentialId,(string)$payload['operation'],
+                $revision,$requestHash,$now,$now,
+            ));
             $update = $pdo->prepare('UPDATE ' . table_name($config,'dart_quota_days')
-                . ' SET used_count=used_count+1,updated_at=? WHERE quota_day=? AND blocked=0 AND used_count<limit_count');
+                . ' SET used_count=used_count+1,updated_at=? WHERE quota_day=? AND used_count<limit_count');
             $update->execute(array($now,$quotaDay));
             if ($update->rowCount() !== 1) { throw new RuntimeException('dart_quota_atomic_consume_failed'); }
+            $credentialDayUpdate = $pdo->prepare(
+                'UPDATE ' . table_name($config,'dart_quota_credential_days')
+                . ' SET used_count=used_count+1,updated_at=? '
+                . 'WHERE quota_day=? AND credential_id=? AND blocked=0 AND used_count<limit_count'
+            );
+            $credentialDayUpdate->execute(array($now,$quotaDay,$credentialId));
+            if ($credentialDayUpdate->rowCount() !== 1) {
+                throw new RuntimeException('dart_quota_credential_atomic_consume_failed');
+            }
             $dayLookup->execute(array($quotaDay)); $day = $dayLookup->fetch();
-            $pdo->commit(); v1_respond(200,v1_dart_quota_payload($day,'consume',$attemptId,false,$backendBindingId));
+            $credentialDayLookup->execute(array($quotaDay,$credentialId));
+            $credentialDay=$credentialDayLookup->fetch();
+            $credentialDay['credential_status']=(string)$credential['status'];
+            $pdo->commit(); v1_respond(200,v1_dart_quota_payload(
+                $day,'consume',$attemptId,false,$backendBindingId,$credentialDay
+            ));
         }
 
-        if (!$attempt || (string)$attempt['quota_day'] !== $quotaDay || (string)$attempt['code_revision'] !== $revision
+        if (!$attempt || (string)$attempt['quota_day'] !== $quotaDay
+            || (string)$attempt['credential_id'] !== $credentialId
+            || (string)$attempt['code_revision'] !== $revision
             || (int)$attempt['consumed_units'] !== 1) {
             $pdo->rollBack(); v1_dart_quota_error(409,'invalid_request','consumed_attempt_required');
         }
-        if ($attempt['block_request_sha256'] !== null) {
-            if (!hash_equals((string)$attempt['block_request_sha256'],$requestHash)) {
+
+        if ($action === 'block_020') {
+            if ($attempt['block_request_sha256'] !== null) {
+                if (!hash_equals((string)$attempt['block_request_sha256'],$requestHash)) {
+                    $pdo->rollBack(); v1_dart_quota_error(409,'dart_quota_idempotency_conflict');
+                }
+                if ((int)$credentialDay['blocked'] !== 1 || $credentialDay['blocked_until'] === null) {
+                    throw new RuntimeException('dart_quota_credential_block_integrity_error');
+                }
+                $pdo->commit(); v1_respond(200,v1_dart_quota_payload(
+                    $day,'block_020',$attemptId,true,$backendBindingId,$credentialDay
+                ));
+            }
+            $attemptUpdate = $pdo->prepare('UPDATE ' . table_name($config,'dart_quota_attempts')
+                . ' SET block_request_sha256=?,status=\'blocked_020\',blocked_at=?,updated_at=? '
+                . 'WHERE attempt_id=? AND block_request_sha256 IS NULL');
+            $attemptUpdate->execute(array($requestHash,$now,$now,$attemptId));
+            if ($attemptUpdate->rowCount() !== 1) { throw new RuntimeException('dart_quota_atomic_block_failed'); }
+            $credentialDayUpdate = $pdo->prepare(
+                'UPDATE ' . table_name($config,'dart_quota_credential_days')
+                . ' SET blocked=1,block_reason=COALESCE(block_reason,\'opendart_status_020\'),'
+                . 'blocked_until=COALESCE(blocked_until,?),'
+                . 'blocked_by_attempt_id=COALESCE(blocked_by_attempt_id,?),'
+                . 'blocked_at=COALESCE(blocked_at,?),updated_at=? '
+                . 'WHERE quota_day=? AND credential_id=?'
+            );
+            $credentialDayUpdate->execute(array(
+                $blockUntil,$attemptId,$now,$now,$quotaDay,$credentialId,
+            ));
+            if ($credentialDayUpdate->rowCount() > 1) {
+                throw new RuntimeException('dart_quota_credential_atomic_block_failed');
+            }
+            $credentialDayLookup->execute(array($quotaDay,$credentialId));
+            $credentialDay=$credentialDayLookup->fetch();
+            $credentialDay['credential_status']=(string)$credential['status'];
+            $pdo->commit(); v1_respond(200,v1_dart_quota_payload(
+                $day,'block_020',$attemptId,false,$backendBindingId,$credentialDay
+            ));
+        }
+
+        if ($attempt['disable_request_sha256'] !== null) {
+            if (!hash_equals((string)$attempt['disable_request_sha256'],$requestHash)) {
                 $pdo->rollBack(); v1_dart_quota_error(409,'dart_quota_idempotency_conflict');
             }
-            if ((int)$day['blocked'] !== 1 || $day['blocked_until'] === null) {
-                throw new RuntimeException('dart_quota_block_integrity_error');
+            if ((string)$credential['status'] !== 'disabled_901') {
+                throw new RuntimeException('dart_quota_credential_disable_integrity_error');
             }
-            $pdo->commit(); v1_respond(200,v1_dart_quota_payload($day,'block_020',$attemptId,true,$backendBindingId));
+            $credentialDay['credential_status']='disabled_901';
+            $pdo->commit(); v1_respond(200,v1_dart_quota_payload(
+                $day,'disable_901',$attemptId,true,$backendBindingId,$credentialDay
+            ));
         }
-        $attemptUpdate = $pdo->prepare('UPDATE ' . table_name($config,'dart_quota_attempts')
-            . ' SET block_request_sha256=?,status=\'blocked_020\',blocked_at=?,updated_at=? WHERE attempt_id=? AND block_request_sha256 IS NULL');
+        $attemptUpdate = $pdo->prepare(
+            'UPDATE ' . table_name($config,'dart_quota_attempts')
+            . ' SET disable_request_sha256=?,status=\'disabled_901\',disabled_at=?,updated_at=? '
+            . 'WHERE attempt_id=? AND disable_request_sha256 IS NULL'
+        );
         $attemptUpdate->execute(array($requestHash,$now,$now,$attemptId));
-        if ($attemptUpdate->rowCount() !== 1) { throw new RuntimeException('dart_quota_atomic_block_failed'); }
-        $dayUpdate = $pdo->prepare('UPDATE ' . table_name($config,'dart_quota_days')
-            . ' SET blocked=1,block_reason=COALESCE(block_reason,\'opendart_status_020\'),'
-            . 'blocked_until=COALESCE(blocked_until,?),blocked_by_attempt_id=COALESCE(blocked_by_attempt_id,?),'
-            . 'blocked_at=COALESCE(blocked_at,?),updated_at=? WHERE quota_day=?');
-        $dayUpdate->execute(array($blockUntil,$attemptId,$now,$now,$quotaDay));
-        $dayLookup->execute(array($quotaDay)); $day = $dayLookup->fetch();
-        $pdo->commit(); v1_respond(200,v1_dart_quota_payload($day,'block_020',$attemptId,false,$backendBindingId));
+        if ($attemptUpdate->rowCount() !== 1) {
+            throw new RuntimeException('dart_quota_atomic_disable_failed');
+        }
+        $credentialUpdate = $pdo->prepare(
+            'UPDATE ' . table_name($config,'dart_quota_credentials')
+            . ' SET status=\'disabled_901\','
+            . 'disable_reason=COALESCE(disable_reason,\'opendart_status_901\'),'
+            . 'disabled_by_attempt_id=COALESCE(disabled_by_attempt_id,?),'
+            . 'disabled_at=COALESCE(disabled_at,?),updated_at=? '
+            . 'WHERE credential_id=? AND status IN (\'active\',\'disabled_901\')'
+        );
+        $credentialUpdate->execute(array($attemptId,$now,$now,$credentialId));
+        if ($credentialUpdate->rowCount() > 1) {
+            throw new RuntimeException('dart_quota_credential_atomic_disable_failed');
+        }
+        $credentialLookup->execute(array($credentialId)); $credential=$credentialLookup->fetch();
+        if (!$credential || (string)$credential['status'] !== 'disabled_901') {
+            throw new RuntimeException('dart_quota_credential_disable_integrity_error');
+        }
+        $credentialDay['credential_status']='disabled_901';
+        $pdo->commit(); v1_respond(200,v1_dart_quota_payload(
+            $day,'disable_901',$attemptId,false,$backendBindingId,$credentialDay
+        ));
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) { $pdo->rollBack(); }
         throw $e;

@@ -8,12 +8,17 @@
 
 필수 런타임 설정은 다음과 같다.
 
-- DART 수집: `DART_API_KEY`
+- DART 수집: 보호된 `governance-runtime`의 `OPENDART_API_KEYS`. 줄바꿈 또는
+  쉼표로 구분한 중복 없는 소문자 40자리 hex pool이 우선이며,
+  `DART_API_KEY`는 pool이 없을 때만 쓰는 단일 키 호환 fallback이다.
 - KIND 수집: `KIND_DISCLOSURE_ENDPOINT`와 필요 시 `KIND_API_KEY`. 어댑터 키는 URL query가 아니라 `Authorization: Bearer` 헤더로 전달한다.
 - 실제 적재: `ACTIVIST_API_URL`, `ACTIVIST_API_SECRET`
 - 운영 체크포인트·quota·SourceRight API: `BSIDE_API_BASE_URL`, `BSIDE_OPS_TOKEN`
 - 적재 대상 고정: 배포된 PHP가 반환하는 값과 같은 `BSIDE_BACKEND_BINDING_ID`
 - 로컬에서 DART를 실제 호출할 때도 `CURATOR_REQUIRE_DURABLE_DART_QUOTA=1`을 지정한다. 중앙 MySQL quota 원장이 준비되지 않으면 호출하지 않고 실패한다.
+- 모든 키 합산 KST 일일 durable 한도는 40,000건이고 단일 backfill 실행의
+  안전 예산은 10,000건이다. `020`은 해당 키만 당일 차단하고 다음 키로
+  계속하며, `901`은 해당 키를 durable disable한다.
 - `.env`, `.env.local`, `.env.api`는 이 순서로 읽으며 이미 설정된 환경변수를 덮어쓰지 않는다.
 
 먼저 한 청크를 읽고 정규화만 검증한다. dry-run은 원격 API와 체크포인트를 전혀 변경하지 않는다.
@@ -91,12 +96,16 @@ KIND의 일반 HTML 화면이나 오늘의 공시 RSS는 이 endpoint가 아니�
 ### 스테이징 계약 테스트가 필요한 항목
 
 - 실제 OpenDART 키로 상세유형 8개와 전체조회가 같은 접수번호를 안정적으로 반환하는지, `rm=정/철` 실제 표본의 의미가 위 계약과 맞는지 확인
+- 첫 키의 `020`·`901` 뒤 다음 키로 동일 요청이 이어지고, 다른 workflow에서도
+  키별 차단·disable 상태와 합산 40,000건이 유지되는지 확인
 - 실제 KIND 어댑터의 오류·데이터 없음·페이지·전체 건수 필드와 거래정지·상장심사 URL 변경 표본 확인
 - 조회 중 신규 공시가 들어와 전체 건수가 바뀔 때 실패 후 재시도가 완전한 날짜 창을 만드는지 확인
 - 429, 5xx, 연결 시간초과 후 다음 예약 실행과 체크포인트 백필이 누락 없이 복구하는지 확인
 - DB의 최초 관측시각으로 공식 소스 수집 지연 p95를 계산하고 `collection_runs.lag_seconds_p95`에 기록하는 운영 계약 확정
 
 종료 코드는 성공 `0`, 수집·동기화 청크 실패 `1`, 설정·체크포인트 오류 `2`다.
+GitHub Actions는 수집 전에 각 키를 개별 mask하고, 키 원문·키가 든 URL·응답
+본문을 backfill report나 stderr artifact에 기록하지 않는다.
 
 ## 품질 benchmark JSONL
 

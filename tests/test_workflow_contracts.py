@@ -308,7 +308,13 @@ def test_official_ingest_has_day_and_night_kst_schedules() -> None:
     assert "steps.rollout.outputs.kind_connector_enabled == 'true'" in workflow
     assert "python -m curator.operation_mode --github-output \"$GITHUB_OUTPUT\"" in workflow
     assert "KIND_DISCLOSURE_ENDPOINT BSIDE_API_BASE_URL BSIDE_OPS_TOKEN" in workflow
-    assert "DART_API_KEY ACTIVIST_API_URL ACTIVIST_API_SECRET" in workflow
+    assert "mask-opendart-credentials.py" in workflow
+    assert "OPENDART_API_KEYS: ${{ secrets.OPENDART_API_KEYS }}" in workflow
+    assert (
+        "DART_API_KEY: ${{ secrets.OPENDART_API_KEYS == '' "
+        "&& secrets.DART_API_KEY || '' }}"
+    ) in workflow
+    assert "DART_API_KEY ACTIVIST_API_URL ACTIVIST_API_SECRET" not in workflow
     assert "CURATOR_REQUIRE_DURABLE_DART_QUOTA" in workflow
     assert "CURATOR_GITHUB_RUN_CREATED_AT" in workflow
     assert "github.rest.actions.getWorkflowRun" in workflow
@@ -319,7 +325,13 @@ def test_official_ingest_has_day_and_night_kst_schedules() -> None:
     assert "curator.publish_outbox" not in workflow
     payload = yaml.load(workflow, Loader=yaml.BaseLoader)
     job = payload["jobs"]["ingest"]
-    assert "github.ref_name == github.event.repository.default_branch" in job["if"]
+    condition = job["if"]
+    assert condition.strip().startswith(
+        "vars.DART_OFFICIAL_INGEST_ENABLED == 'true' &&"
+    )
+    assert condition.count("vars.DART_OFFICIAL_INGEST_ENABLED") == 1
+    assert "github.ref_name == github.event.repository.default_branch" in condition
+    assert "github.event_name == 'workflow_dispatch'" in condition
     checkout = next(step for step in job["steps"] if step["name"] == "Checkout")
     # Pin the exact workflow revision so the candidate artifact and its
     # declared full SHA cannot drift if main advances during the run. The job
@@ -337,6 +349,10 @@ def test_official_ingest_has_day_and_night_kst_schedules() -> None:
     assert validation["env"]["BSIDE_OPS_TOKEN"] == "${{ secrets.BSIDE_OPS_TOKEN }}"
     assert validation["env"]["BSIDE_BACKEND_BINDING_ID"] == (
         "${{ vars.BSIDE_BACKEND_BINDING_ID }}"
+    )
+    assert validation["env"]["OPENDART_API_KEYS"] == "${{ secrets.OPENDART_API_KEYS }}"
+    assert validation["env"]["DART_API_KEY"] == (
+        "${{ secrets.OPENDART_API_KEYS == '' && secrets.DART_API_KEY || '' }}"
     )
     assert "BSIDE_BACKEND_BINDING_ID" in validation["run"]
     assert "python .github/scripts/validate-api-base-urls.py" in validation["run"]
@@ -371,6 +387,8 @@ def test_official_ingest_has_day_and_night_kst_schedules() -> None:
     assert ingest["env"]["BSIDE_BACKEND_BINDING_ID"] == (
         validation["env"]["BSIDE_BACKEND_BINDING_ID"]
     )
+    assert ingest["env"]["OPENDART_API_KEYS"] == validation["env"]["OPENDART_API_KEYS"]
+    assert ingest["env"]["DART_API_KEY"] == validation["env"]["DART_API_KEY"]
 
 
 def test_official_slot_repair_and_epoch_reset_are_operator_gated() -> None:
@@ -1082,7 +1100,10 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert payload["permissions"] == {"contents": "read", "actions": "read"}
 
     job = payload["jobs"]["backfill"]
-    assert job["if"] == "github.ref_name == github.event.repository.default_branch"
+    assert job["if"] == (
+        "vars.DART_OFFICIAL_INGEST_ENABLED == 'true' && "
+        "github.ref_name == github.event.repository.default_branch"
+    )
     assert int(job["timeout-minutes"]) == 360
     for runtime_path in (
         "BACKFILL_REPORT",
@@ -1112,8 +1133,12 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert '--max-chunks "$BACKFILL_MAX_WINDOWS"' in run_step["run"]
     assert '${{ inputs.max_windows }}' not in run_step["run"]
     assert run_step["env"]["BACKFILL_MAX_WINDOWS"] == "${{ inputs.max_windows }}"
-    assert "--request-budget 10000" in run_step["run"]
-    assert "DART_REQUEST_BUDGET" not in run_step["env"]
+    assert '--request-budget "$DART_REQUEST_BUDGET"' in run_step["run"]
+    assert run_step["env"]["DART_REQUEST_BUDGET"] == (
+        "${{ steps.dart_budget.outputs.remaining_request_budget }}"
+    )
+    assert '[[ "$DART_REQUEST_BUDGET" =~ ^[0-9]+$ ]]' in run_step["run"]
+    assert "DART_REQUEST_BUDGET < 1 || DART_REQUEST_BUDGET > 10000" in run_step["run"]
     assert run_step["env"]["CURATOR_DISABLE_TELEGRAM_SEND"] == "1"
     assert run_step["env"]["CURATOR_DELIVERY_MODE"] == "disabled"
     assert run_step["env"]["ENABLE_TELEGRAM_DELIVERY"] == "false"
@@ -1127,11 +1152,18 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     )
     assert run_step["env"]["CURATOR_REQUIRE_DURABLE_DART_QUOTA"] == "1"
     assert run_step["env"]["CURATOR_DART_QUOTA_PHASE"] == "official-backfill"
+    assert run_step["env"]["OPENDART_API_KEYS"] == "${{ secrets.OPENDART_API_KEYS }}"
+    assert run_step["env"]["DART_API_KEY"] == (
+        "${{ secrets.OPENDART_API_KEYS == '' && secrets.DART_API_KEY || '' }}"
+    )
     validation = next(step for step in steps if step["name"] == "Validate operational configuration")
     assert "BSIDE_OPS_TOKEN" in validation["run"]
     assert "BSIDE_BACKEND_BINDING_ID" in validation["run"]
     assert "KIND_DISCLOSURE_ENDPOINT BSIDE_API_BASE_URL BSIDE_OPS_TOKEN" in validation["run"]
     assert "python .github/scripts/validate-api-base-urls.py" in validation["run"]
+    assert "mask-opendart-credentials.py" in validation["run"]
+    assert "required+=(DART_API_KEY" not in validation["run"]
+    assert validation["env"]["OPENDART_API_KEYS"] == "${{ secrets.OPENDART_API_KEYS }}"
     assert validation["env"]["GOVERNANCE_API_BASE_URL"] == (
         "${{ vars.GOVERNANCE_API_BASE_URL }}"
     )
@@ -1144,9 +1176,12 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert "python -m curator.dart_canary_sample" in canary["run"]
     assert "--lookback-days 365" in canary["run"]
     assert "--request-budget 10000" in canary["run"]
-    assert "10_000 - used" not in canary["run"]
-    assert "remaining_request_budget=" not in canary["run"]
-    assert canary["env"]["DART_API_KEY"] == "${{ secrets.DART_API_KEY }}"
+    assert "type(used) is not int" in canary["run"]
+    assert 'output.write(f"requests_used={used}\\n")' in canary["run"]
+    assert canary["env"]["OPENDART_API_KEYS"] == "${{ secrets.OPENDART_API_KEYS }}"
+    assert canary["env"]["DART_API_KEY"] == (
+        "${{ secrets.OPENDART_API_KEYS == '' && secrets.DART_API_KEY || '' }}"
+    )
     assert canary["env"]["BSIDE_OPS_TOKEN"] == "${{ secrets.BSIDE_OPS_TOKEN }}"
     assert canary["env"]["BSIDE_BACKEND_BINDING_ID"] == (
         "${{ vars.BSIDE_BACKEND_BINDING_ID }}"
@@ -1158,6 +1193,23 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
 
 
     assert canary["env"]["CURATOR_DART_QUOTA_PHASE"] == "dart-canary"
+    dart_budget = next(
+        step
+        for step in steps
+        if step["name"] == "Resolve shared DART invocation budget"
+    )
+    assert dart_budget["id"] == "dart_budget"
+    assert dart_budget["env"] == {
+        "BACKFILL_MODE": "${{ inputs.mode }}",
+        "BACKFILL_SOURCE": "${{ inputs.source }}",
+        "CANARY_REQUESTS_USED": "${{ steps.dart_canary.outputs.requests_used }}",
+    }
+    assert 'raw_used.isascii()' in dart_budget["run"]
+    assert 'raw_used.isdecimal()' in dart_budget["run"]
+    assert "remaining = max(0, 10_000 - used)" in dart_budget["run"]
+    assert 'output.write(f"canary_requests_used={used}\\n")' in dart_budget["run"]
+    assert 'output.write(f"remaining_request_budget={remaining}\\n")' in dart_budget["run"]
+    assert "remaining == 0" in dart_budget["run"]
     review_sample = next(
         step
         for step in steps

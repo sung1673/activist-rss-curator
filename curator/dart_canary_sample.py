@@ -18,6 +18,7 @@ from .dart_quota import (
 )
 from .official_sources import (
     DartConnector,
+    DartInvocationQuota,
     DartQuotaExceededError,
     DartRequestBudget,
     DartRequestBudgetError,
@@ -27,9 +28,16 @@ from .official_sources import (
     disclosure_payloads,
     parse_dart_disclosure,
 )
+from .opendart_credentials import (
+    OpenDartCredential,
+    OpenDartCredentialConfigurationError,
+    load_opendart_credentials,
+)
 
 
 KST = ZoneInfo("Asia/Seoul")
+# This is a single-run blast-radius limit. The authoritative credential-pool
+# ledger separately allows up to 40,000 physical requests per KST day.
 MAX_DART_REQUEST_BUDGET = 10_000
 
 
@@ -52,7 +60,8 @@ class CanaryConnector(Protocol):
     ) -> Iterator[dict[str, object]]: ...
 
 
-ConnectorFactory = Callable[[str, DartRequestQuota], CanaryConnector]
+DartCredentialInput = str | tuple[OpenDartCredential, ...]
+ConnectorFactory = Callable[[DartCredentialInput, DartRequestQuota], CanaryConnector]
 
 
 @dataclass(frozen=True)
@@ -77,7 +86,7 @@ class DartCanarySampleOptions:
 
 
 def _default_connector_factory(
-    api_key: str,
+    api_key: DartCredentialInput,
     request_budget: DartRequestQuota,
 ) -> CanaryConnector:
     return DartConnector(api_key, request_budget=request_budget)
@@ -183,7 +192,7 @@ def _sample_row(
 
 
 def run_dart_canary_sample(
-    api_key: str,
+    api_key: DartCredentialInput,
     *,
     now: datetime | None = None,
     options: DartCanarySampleOptions | None = None,
@@ -197,18 +206,35 @@ def run_dart_canary_sample(
     All OpenDART calls share one bounded request budget.
     """
 
-    if not api_key.strip():
-        raise ValueError("DART_API_KEY is required")
+    if isinstance(api_key, str):
+        selected_credentials: DartCredentialInput = api_key.strip()
+        if not selected_credentials:
+            raise ValueError("OpenDART credentials are required")
+    else:
+        selected_credentials = tuple(api_key)
+        if not selected_credentials:
+            raise ValueError("OpenDART credentials are required")
     selected_options = options or DartCanarySampleOptions()
     selected_options.validate()
-    budget = request_budget or DartRequestBudget(MAX_DART_REQUEST_BUDGET)
-    if budget.limit > MAX_DART_REQUEST_BUDGET:
+    supplied_budget = request_budget or DartRequestBudget(MAX_DART_REQUEST_BUDGET)
+    if (
+        isinstance(supplied_budget, DartRequestBudget)
+        and supplied_budget.limit > MAX_DART_REQUEST_BUDGET
+    ):
         raise ValueError("DART canary request budget cannot exceed 10000")
+    budget: DartRequestQuota = (
+        DartInvocationQuota(
+            supplied_budget,
+            limit=MAX_DART_REQUEST_BUDGET,
+        )
+        if supplied_budget.limit > MAX_DART_REQUEST_BUDGET
+        else supplied_budget
+    )
 
     current = now or datetime.now(timezone.utc)
     recent_day = _completed_kst_day(current)
     history_start = recent_day - timedelta(days=selected_options.lookback_days - 1)
-    connector = connector_factory(api_key.strip(), budget)
+    connector = connector_factory(selected_credentials, budget)
     requests_before = budget.used
 
     recent_fetched, recent_disclosures = _collect_window(
@@ -348,7 +374,7 @@ def main(argv: list[str] | None = None) -> None:
             else DartRequestBudget(args.request_budget)
         )
         report = run_dart_canary_sample(
-            os.environ.get("DART_API_KEY", ""),
+            load_opendart_credentials(),
             options=DartCanarySampleOptions(
                 lookback_days=args.lookback_days,
                 scan_chunk_days=args.scan_chunk_days,
@@ -360,6 +386,7 @@ def main(argv: list[str] | None = None) -> None:
         )
     except (
         DartCanarySampleError,
+        OpenDartCredentialConfigurationError,
         DartQuotaLedgerError,
         DartQuotaExceededError,
         DartRequestBudgetError,

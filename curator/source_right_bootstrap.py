@@ -426,7 +426,7 @@ class _BootstrapClient:
         )
         if (
             payload.get("service") != "bside-global-market-terminal"
-            or payload.get("schema_version") != 11
+            or payload.get("schema_version") != 12
             or payload.get("code_revision") != expected_revision
         ):
             raise SourceRightBootstrapError(

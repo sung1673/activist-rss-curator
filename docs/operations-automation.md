@@ -43,7 +43,11 @@ GitHub cron은 UTC로 해석된다. 일일 생성은 `45 20 * * *`(KST 05:45), �
 운영 Secret:
 
 - `ACTIVIST_API_URL`, `ACTIVIST_API_SECRET`: 서명된 운영 API
-- `DART_API_KEY`: OpenDART 수집
+- `OPENDART_API_KEYS`: 보호된 `governance-runtime` 환경에 등록하는 OpenDART
+  키 pool. 줄바꿈 또는 쉼표로 구분한 중복 없는 소문자 40자리 hex만 허용한다.
+  GitHub Actions는 collector 실행 전에 각 키를 개별 mask한다.
+- `DART_API_KEY`: `OPENDART_API_KEYS`가 없는 기존 단일 키 환경에서만 사용하는
+  호환 fallback. pool과 동시에 주입하지 않는다.
 - `KIND_API_KEY`: 승인 직후 수동 adapter preflight에서는 필수. 일반 예약 수집에서는 `KIND_CONNECTOR_MODE=active`이고 승인된 adapter가 인증을 요구할 때만 사용
 - `CURATOR_FEEDS`: 비공개 보조 발견 피드. 운영 범위 정책이 켜져 있으므로 단순 URL 문자열이 아니라 `name`, `url`, `scope`, `enabled`를 담은 JSON 배열로 등록한다. 세부 형식은 [미디어 발견 피드 범위 정책](media-source-scope-policy.md)을 따른다.
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`: 등록하지 않는다. 과거 값이 남아 있으면 삭제하며, 현재 코드와 workflow에서는 outbound Telegram을 재활성화할 수 없다.
@@ -74,6 +78,13 @@ Repository variable의 단일 기준:
 `/api/v2`와 신규 데이터 터미널은 국가별 접근권 차이를 공개하는 Production Alpha다. 미국 공식 수집과 캐나다·호주 `link-only / manual-metadata` 검증은 `GOVERNANCE_PIPELINE_MODE=shadow|live`에서만 예약 실행된다. 일본·영국은 화면의 국가 범위를 유지하지만 `link-only`, `coverage_unavailable`, `public_ready=false`로 고정하며 EDINET·Companies House HTML/API를 요청하지 않는다. OpenDART는 기존 `ingest-official.yml` 경로를 계속 사용하며 `ingest-global.yml`로 중복 적재하지 않는다.
 
 API v2 배포 manifest의 필수 파일에는 `migrations/011_global_terminal_v2.sql`도 포함된다. 운영 적용 시 이 파일을 binary/byte-preserving 방식으로 전송하고, 원본 바이트의 SHA-256을 계산해 같은 MySQL 연결의 같은 입력 stream에서 `SET @bside_migration_011_sha256 = '<64자리 소문자 SHA-256>';` 다음에 SQL 파일을 그대로 보낸다. 별도 연결에서 `SET`하거나 파일을 변환한 뒤 적용하지 않는다. 적용된 DB의 version 11 checksum, 배포 manifest의 SQL hash, 서버 파일의 실제 hash 중 하나라도 다르면 v2 schema gate가 503으로 차단한다. 정확한 명령과 원자 배포·롤백 순서는 [v2 API 운영 계약](governance-api-v2.md)을 따른다.
+
+OpenDART credential pool 원장은
+`migrations/012_dart_credential_pool.sql`로 추가한다. 이 파일도 manifest에
+포함하며 exact bytes의 SHA-256을 같은 MySQL 세션의
+`@bside_migration_012_sha256`에 설정한 뒤 적용한다. 운영 적용과 멱등 replay는
+`python scripts/apply_migration_012.py ...`를 사용한다. DB version 12,
+manifest hash, 서버 파일 hash 중 하나라도 다르면 schema gate는 fail-closed한다.
 
 `ingest-global.yml`에서 `from_date`와 `to_date`가 모두 비어 있으면 SEC connector의 MySQL durable checkpoint를 읽어 완료된 끝 날짜의 하루 전부터 겹쳐 수집한다. 한 번의 half-open window는 최대 31일이며 오래된 누락 구간부터 순차 처리해 장애 기간을 건너뛰지 않는다. checkpoint가 아직 없으면 최근 완료 2일을 사용한다. SEC connector는 같은 실행에서 공식 Latest Filings Atom을 page budget 안에서 newest-first로 읽고 90분 overlap이 있는 source cursor를 checkpoint schema v2에 함께 저장한다. Atom은 매 실행 요청하되 completed-day index는 America/New_York 06:00 전까지 직전 날짜를 완료 범위에 넣지 않아 SEC 야간 생성 지연과 분리한다. Atom과 completed-day index 중 하나라도 실패하거나 Atom cursor가 없으면 US 공개 상태는 `delayed`, `live_ready=false`이며 45분 출시 gate를 통과하지 못한다. 일일 인덱스는 역사적 완결성 대조용이고 Atom source title·acceptance time·filing index URL이 중복 accession의 우선 관측이다. 두 날짜를 모두 지정한 수동 실행도 SEC source cursor 확인을 위해 checkpoint를 읽으며, 그 외 source는 지정 범위만 처리한다. 한쪽 날짜만 입력하면 fail-closed한다. batch ID는 code revision을 포함해 배포 SHA별로 분리한다. 각 receipt는 batch ID·chunk 순번·전체 chunk 수·window·chunk 요청 수·전체 batch 합계를 저장하고 `(connector_id, batch_id, chunk_index)` 중복을 거절한다. 서버는 1번부터 순서대로만 받아 final에서 1..N 완전성, 동일 revision·window·합계, chunk 합계의 정확한 일치를 확인한 뒤 checkpoint를 전진시킨다. final 선행·순서 역전·metadata/합계 불일치는 HTTP 409다.
 
@@ -130,9 +141,30 @@ Alpha evidence workflow는 exact `daily.yml` run의 `pages-<run_id>-<attempt>` a
 
 승인은 일회용이며 새 승인 발급 시 이전 미사용 승인은 철회된다. 만료는 410, replay·잘못된 SHA·digest·state version·이미 소비된 nonce는 409로 거절한다. 전환 도중 오류가 나면 두 상태 모두 바뀌지 않는다. 공개 뒤 장애가 발생하면 기존 절차대로 v1·v2를 `closed`로 긴급 차단하고 legacy artifact를 복구한다. 이 롤백은 소비된 승인을 되살리지 않으며 재전환에는 새 증빙·새 nonce·새 승인이 필요하다.
 
-예약 `ingest-official`은 `KIND_CONNECTOR_MODE=off`가 기본이므로 `shadow|live`에서도 DART-only로 실행된다. `active`로 전환하면 KIND 설정·SourceRight·수집 실패를 건너뛰지 않고 기존처럼 전체 workflow를 실패시킨다. 수동 실행의 `include_kind=true`는 토글이 `off`여도 KIND를 명시적으로 검증하며, `include_kind=false`는 DART-only smoke다.
+예약·수동 `ingest-official`과 수동 `official-backfill`은 repository variable
+`DART_OFFICIAL_INGEST_ENABLED`가 정확히 `true`일 때만 실행된다. 값이 없거나
+`false`이면 job 시작 전에 skip되며, 수동 입력으로 이 게이트를 우회할 수 없다.
+평상시에는 검증된 schema 12 PHP·MySQL 조합에서만 `true`를 유지한다.
+`KIND_CONNECTOR_MODE=off`가 기본이므로 `shadow|live`에서도 DART-only로
+실행된다. `active`로 전환하면 KIND 설정·SourceRight·수집 실패를 건너뛰지 않고
+기존처럼 전체 workflow를 실패시킨다. 수동 실행의 `include_kind=true`는 토글이
+`off`여도 KIND를 명시적으로 검증하며, `include_kind=false`는 DART-only smoke다.
 
-모든 DART list·회사 master HTTP 시도는 전역 MySQL 쿼터 ledger의 `POST /api/v1/ops/dart-quota` consume ACK를 먼저 받아야 한다. 서버 기준 KST 날짜, 10,000건 한도, `used_count + remaining_count = limit_count`와 attempt ID 일치를 클라이언트가 검증하지 못하면 외부 요청을 보내지 않는다. OpenDART `020`은 같은 attempt로 `block_020`을 기록하며 그 KST 날짜의 다른 workflow도 즉시 멈춘다. 사용하지 않은 예약량을 반환하거나 완료 처리하는 별도 모델은 두지 않는다.
+OpenDART credential pool과 schema 12를 배포할 때는 다음 순서를 바꾸지 않는다.
+
+1. `DART_OFFICIAL_INGEST_ENABLED=false`로 설정하고 `ingest-official`과
+   `official-backfill`의 queued·running run이 모두 0인지 확인한다.
+2. schema 11 DB를 명시적으로 허용하는 pending-schema-upgrade 모드로 새 PHP bundle을
+   먼저 배포한다.
+3. migration 012를 같은 세션의 exact checksum으로 apply·replay한다.
+4. schema 12, 배포 SHA, OpenAPI, closed 응답을 요구하는 exact smoke를 통과시킨다.
+5. 모든 검증이 끝난 뒤에만 `DART_OFFICIAL_INGEST_ENABLED=true`로 되돌린다.
+
+중간 단계가 실패하면 게이트를 `false`로 유지한다. migration 012 이후에는 구 PHP
+파일만 단독 복원하지 않으며, 기존 PHP로 되돌려야 한다면 writer가 정지된 상태에서
+사전 DB 백업을 먼저 복원한다.
+
+모든 DART list·회사 master HTTP 시도는 전역 MySQL 쿼터 ledger의 `POST /api/v1/ops/dart-quota` consume ACK를 먼저 받아야 한다. 서버 기준 KST 날짜의 모든 키 합산 한도는 40,000건이고 단일 실행의 안전 예산은 10,000건이다. `used_count + remaining_count = limit_count`, 비밀이 아닌 credential SHA-256 identity와 attempt ID 일치를 클라이언트가 검증하지 못하면 외부 요청을 보내지 않는다. OpenDART `020`은 같은 attempt로 해당 키만 다음 KST 자정까지 `block_020`하고 다른 유효 키로 계속한다. `901`은 해당 키를 `disable_901`로 durable disable하며 다른 유효 키가 없을 때만 전체 실행을 실패시킨다. 사용하지 않은 예약량을 반환하거나 완료 처리하는 별도 모델은 두지 않는다. 키 원문과 키가 든 URL·응답 본문은 로그·checkpoint·artifact에 기록하지 않는다.
 
 공식 수집 schedule 증빙은 `workflow_run.created_at`을 slot으로 내림하지 않는다. 예약·수동 repair run은 수집 전에 `/api/v1/ops/official-slot-claims`에서 MySQL의 가장 오래된 due/unclaimed slot을 원자적으로 claim하고, `trigger_created_at`은 불변 GitHub run 출처로만 저장한다. 첫 접촉은 다음 완전한 KST 날짜의 00:00 경계를 활성화하고 해당 run에 slot을 부여하지 않는다. repair는 세 cron family 전체의 전역 최고 due slot을 정확히 지정할 때만 허용한다. claim-time `late`는 불변이고, 다음 cadence 경계 후 완료·재실행은 `terminal_reason`이 있는 영구 실패로 남는다. 완료된 claim의 재실행은 외부 poll과 DB row 수정 없이 검증된 no-op로 종료한다. 각 소스는 `source_key`에 실제 선택됐고, 0건인 날도 명시적 0/0 ACK와 top-level/source raw·ACK 일치를 모두 만족해야 성공 denominator에 들어간다.
 

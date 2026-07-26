@@ -171,7 +171,7 @@ class BootstrapApi:
                 {
                     "ok": True,
                     "service": "bside-global-market-terminal",
-                    "schema_version": 11,
+                    "schema_version": 12,
                     "code_revision": self.release_sha,
                     "time": "2026-07-26T00:00:00+00:00",
                 },

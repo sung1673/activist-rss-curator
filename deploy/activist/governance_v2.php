@@ -12,7 +12,7 @@ const V2_DEFAULT_PAGE_SIZE = 25;
 const V2_MAX_PAGE_SIZE = 100;
 const V2_MAX_PAGE_NUMBER = 100;
 const V2_MAX_OFFSET = 10000;
-const GOV_V2_SCHEMA_VERSION = 11;
+const GOV_V2_SCHEMA_VERSION = 12;
 const GOV_V2_RELEASE_STATE_KEY = 'global_terminal_v2';
 const V2_DEPLOYMENT_MANIFEST_SCHEMA_VERSION = 1;
 const V2_DEPLOYMENT_MANIFEST_MAX_BYTES = 65536;
@@ -31,6 +31,7 @@ function v2_deployment_core_files(): array {
         'openapi.yaml',
         'openapi-v2.yaml',
         'migrations/011_global_terminal_v2.sql',
+        'migrations/012_dart_credential_pool.sql',
     );
 }
 
@@ -381,8 +382,14 @@ function v2_require_preview_token(array $config): void {
     v2_respond(403, array('ok' => false, 'error' => 'invalid_preview_token'));
 }
 
-function v2_expected_migration_manifest(string $migration011Checksum): array {
-    if (preg_match('/^[0-9a-f]{64}$/D', $migration011Checksum) !== 1) {
+function v2_expected_migration_manifest(
+    string $migration011Checksum,
+    string $migration012Checksum
+): array {
+    if (
+        preg_match('/^[0-9a-f]{64}$/D', $migration011Checksum) !== 1
+        || preg_match('/^[0-9a-f]{64}$/D', $migration012Checksum) !== 1
+    ) {
         return array();
     }
     $manifest = v1_expected_migration_manifest();
@@ -390,18 +397,25 @@ function v2_expected_migration_manifest(string $migration011Checksum): array {
         '011_global_terminal_v2',
         $migration011Checksum,
     );
+    $manifest[12] = array(
+        '012_dart_credential_pool',
+        $migration012Checksum,
+    );
     return $manifest;
 }
 
 function v2_schema_manifest_status(PDO $pdo, array $config): array {
     $identity = v2_deployment_identity_status();
-    $migrationPath = 'migrations/011_global_terminal_v2.sql';
+    $migration011Path = 'migrations/011_global_terminal_v2.sql';
+    $migration012Path = 'migrations/012_dart_credential_pool.sql';
     if (
         $identity['valid'] !== true
         || !isset($identity['files'])
         || !is_array($identity['files'])
-        || !isset($identity['files'][$migrationPath])
-        || !is_string($identity['files'][$migrationPath])
+        || !isset($identity['files'][$migration011Path])
+        || !is_string($identity['files'][$migration011Path])
+        || !isset($identity['files'][$migration012Path])
+        || !is_string($identity['files'][$migration012Path])
     ) {
         return array(
             'valid' => false,
@@ -410,7 +424,8 @@ function v2_schema_manifest_status(PDO $pdo, array $config): array {
         );
     }
     $expected = v2_expected_migration_manifest(
-        (string)$identity['files'][$migrationPath]
+        (string)$identity['files'][$migration011Path],
+        (string)$identity['files'][$migration012Path]
     );
     if (count($expected) !== GOV_V2_SCHEMA_VERSION) {
         return array(

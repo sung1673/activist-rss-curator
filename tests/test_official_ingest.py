@@ -613,7 +613,7 @@ def test_connector_failure_discards_partial_dart_window_before_remote_sync(
             "official_remote_run_persisted": 1,
         }
 
-    monkeypatch.setenv("DART_API_KEY", "x" * 40)
+    monkeypatch.setenv("DART_API_KEY", "a" * 40)
     monkeypatch.setattr(official_ingest, "DartConnector", PartialDartConnector)
     monkeypatch.setattr(official_ingest, "sync_governance_payload", fake_sync)
 
@@ -675,6 +675,157 @@ def test_enabled_dart_without_api_key_is_a_failed_source_not_a_skip(
     assert outcomes["dart"]["failure_kinds"]["configuration"] == 1
 
 
+def test_ingest_passes_validated_opendart_pool_without_serializing_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    key_a, key_b, key_c = "a" * 40, "b" * 40, "c" * 40
+    observed_ids: list[str] = []
+
+    class EmptyPoolConnector:
+        list_requests = 0
+        pages_fetched = 0
+        rows_fetched = 0
+        requests_made = 0
+
+        def __init__(self, credentials: object) -> None:
+            values = tuple(credentials)  # type: ignore[arg-type]
+            assert [credential.key for credential in values] == [key_a, key_b, key_c]
+            observed_ids.extend(credential.credential_id for credential in values)
+
+        def iter_disclosure_rows(self, *_args: object, **_kwargs: object):  # type: ignore[no-untyped-def]
+            return iter(())
+
+        def fetch_company_master(self) -> list[dict[str, object]]:
+            return []
+
+    monkeypatch.setenv(
+        "OPENDART_API_KEYS",
+        f"{key_a}\r\n{key_b},{key_c}",
+    )
+    monkeypatch.delenv("DART_API_KEY", raising=False)
+    monkeypatch.setattr(official_ingest, "DartConnector", EmptyPoolConnector)
+
+    summary = official_ingest.run(
+        now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+        start=date(2026, 7, 26),
+        end=date(2026, 7, 26),
+        settings_overrides={"kind_enabled": False},
+        dry_run=True,
+    )
+
+    assert summary["official_failed"] == 0
+    assert len(observed_ids) == 3
+    rendered = repr(summary)
+    assert key_a not in rendered
+    assert key_b not in rendered
+    assert key_c not in rendered
+
+
+def test_conflicting_pool_and_legacy_key_fail_closed_without_connector_or_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    key_a, key_b = "a" * 40, "b" * 40
+
+    class UnexpectedConnector:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            raise AssertionError("invalid credential configuration must not construct connector")
+
+    monkeypatch.setenv("OPENDART_API_KEYS", key_a)
+    monkeypatch.setenv("DART_API_KEY", key_b)
+    monkeypatch.setattr(official_ingest, "DartConnector", UnexpectedConnector)
+
+    summary = official_ingest.run(
+        now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+        start=date(2026, 7, 26),
+        end=date(2026, 7, 26),
+        settings_overrides={"kind_enabled": False},
+        dry_run=True,
+    )
+
+    assert summary["official_failed"] == 1
+    assert summary["official_dart_errors"] == 1
+    assert key_a not in repr(summary)
+    assert key_b not in repr(summary)
+
+
+def test_durable_official_ingest_keeps_a_ten_thousand_request_invocation_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DurableQuota:
+        limit = 40_000
+        used = 0
+
+        def consume(self, **_kwargs: object) -> object:
+            return object()
+
+        def block_020(self, _permit: object) -> None:
+            return None
+
+        def disable_901(self, _permit: object) -> None:
+            return None
+
+    durable = DurableQuota()
+    captured: list[object] = []
+
+    class EmptyConnector:
+        list_requests = 0
+        pages_fetched = 0
+        rows_fetched = 0
+        requests_made = 0
+
+        def __init__(
+            self,
+            _credentials: object,
+            *,
+            request_budget: object,
+        ) -> None:
+            captured.append(request_budget)
+
+        def iter_disclosure_rows(
+            self,
+            *_args: object,
+            **_kwargs: object,
+        ):  # type: ignore[no-untyped-def]
+            return iter(())
+
+        def fetch_company_master(self) -> list[dict[str, object]]:
+            return []
+
+    monkeypatch.setenv("OPENDART_API_KEYS", "a" * 40)
+    monkeypatch.delenv("DART_API_KEY", raising=False)
+    monkeypatch.setattr(
+        official_ingest,
+        "durable_dart_quota_configured",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        official_ingest,
+        "durable_dart_quota_required",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        official_ingest,
+        "durable_dart_quota_client",
+        lambda **_kwargs: durable,
+    )
+    monkeypatch.setattr(official_ingest, "DartConnector", EmptyConnector)
+
+    summary = official_ingest.run(
+        now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+        start=date(2026, 7, 26),
+        end=date(2026, 7, 26),
+        settings_overrides={"kind_enabled": False},
+        dry_run=True,
+    )
+
+    assert summary["official_failed"] == 0
+    assert len(captured) == 1
+    budget = captured[0]
+    assert isinstance(budget, official_ingest.DartInvocationQuota)
+    assert budget.limit == 10_000
+    assert budget.used == 0
+
+
 def test_dart_quota_exhaustion_is_exposed_to_the_durable_backfill_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -703,7 +854,7 @@ def test_dart_quota_exhaustion_is_exposed_to_the_durable_backfill_checkpoint(
             "official_remote_run_persisted": 1,
         }
 
-    monkeypatch.setenv("DART_API_KEY", "x" * 40)
+    monkeypatch.setenv("DART_API_KEY", "a" * 40)
     monkeypatch.setattr(official_ingest, "DartConnector", QuotaDartConnector)
     monkeypatch.setattr(official_ingest, "sync_governance_payload", fake_sync)
 
@@ -741,7 +892,7 @@ def test_default_incremental_window_uses_kst_date_before_utc_midnight_rollover(
         def fetch_company_master(self) -> list[dict[str, object]]:
             return []
 
-    monkeypatch.setenv("DART_API_KEY", "x" * 40)
+    monkeypatch.setenv("DART_API_KEY", "a" * 40)
     monkeypatch.delenv("OFFICIAL_INGEST_START", raising=False)
     monkeypatch.delenv("OFFICIAL_INGEST_END", raising=False)
     monkeypatch.setattr(official_ingest, "DartConnector", EmptyDartConnector)

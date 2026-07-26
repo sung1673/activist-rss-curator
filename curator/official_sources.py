@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import io
 import re
 import time
@@ -14,6 +15,10 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from .dart_quota import (
+    DartCredentialUnavailableError,
+    DartGlobalQuotaExceededError,
+)
 from .event_identity import (
     EventIdentity,
     EventIdentityMatch,
@@ -23,6 +28,11 @@ from .event_identity import (
     normalize_identity_text,
 )
 from .governance import GovernanceEventType, stable_id
+from .opendart_credentials import (
+    DartCredentialAvailability,
+    OpenDartCredential,
+    OpenDartCredentialPool,
+)
 
 
 DART_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
@@ -47,9 +57,16 @@ class DartRequestQuota(Protocol):
     limit: int
     used: int
 
-    def consume(self, *, operation: str = "list") -> object: ...
+    def consume(
+        self,
+        *,
+        operation: str = "list",
+        credential_id: str,
+    ) -> object: ...
 
     def block_020(self, permit: object) -> None: ...
+
+    def disable_901(self, permit: object) -> None: ...
 
 
 def validate_kind_endpoint(endpoint: str) -> str:
@@ -85,6 +102,8 @@ def validate_kind_endpoint(endpoint: str) -> str:
 
 @dataclass
 class DartRequestBudget:
+    """Per-invocation safety budget, distinct from the durable 40k KST-day pool."""
+
     limit: int = 10_000
     used: int = 0
 
@@ -94,9 +113,16 @@ class DartRequestBudget:
         if self.used < 0 or self.used > self.limit:
             raise ValueError("DART request budget usage is invalid")
 
-    def consume(self, *, operation: str = "list") -> None:
+    def consume(
+        self,
+        *,
+        operation: str = "list",
+        credential_id: str = "",
+    ) -> None:
         if operation not in {"list", "corp_code"}:
             raise ValueError("unsupported DART quota operation")
+        if credential_id and re.fullmatch(r"[0-9a-f]{64}", credential_id) is None:
+            raise ValueError("invalid DART credential identity")
         if self.used >= self.limit:
             raise DartRequestBudgetError(
                 f"OpenDART request budget exhausted ({self.used}/{self.limit})"
@@ -108,6 +134,46 @@ class DartRequestBudget:
         # development. Production workflows require the durable MySQL-backed
         # implementation, which overrides this hook and records the day block.
         del permit
+
+    def disable_901(self, permit: object) -> None:
+        del permit
+
+
+class DartInvocationQuota:
+    """Apply a smaller invocation cap in front of a durable daily ledger."""
+
+    def __init__(self, delegate: DartRequestQuota, *, limit: int) -> None:
+        if limit < 1:
+            raise ValueError("DART invocation request budget must be at least 1")
+        self._delegate = delegate
+        self.limit = limit
+        self.used = 0
+
+    def consume(
+        self,
+        *,
+        operation: str = "list",
+        credential_id: str,
+    ) -> object:
+        if self.used >= self.limit:
+            raise DartRequestBudgetError(
+                f"OpenDART request budget exhausted ({self.used}/{self.limit})"
+            )
+        permit = self._delegate.consume(
+            operation=operation,
+            credential_id=credential_id,
+        )
+        # Count only a durably acknowledged physical-request permit. A
+        # pre-blocked credential rejection therefore does not consume the
+        # invocation safety budget.
+        self.used += 1
+        return permit
+
+    def block_020(self, permit: object) -> None:
+        self._delegate.block_020(permit)
+
+    def disable_901(self, permit: object) -> None:
+        self._delegate.disable_901(permit)
 
 
 EVENT_PATTERNS: tuple[tuple[GovernanceEventType, tuple[str, ...]], ...] = (
@@ -750,22 +816,86 @@ def parse_corp_code_zip(content: bytes) -> list[dict[str, object]]:
     return companies
 
 
+def _dart_credential_rejection_reason(
+    error: DartCredentialUnavailableError,
+    *,
+    expected_credential_id: str,
+) -> str | None:
+    """Recognize only the durable ledger's credential-scoped rejection.
+
+    Class and two validated, non-secret attributes form the closed contract;
+    arbitrary quota failures are never swallowed.
+    """
+
+    credential_id = error.credential_id
+    reason = error.reason
+    if (
+        not isinstance(credential_id, str)
+        or re.fullmatch(r"[0-9a-f]{64}", credential_id) is None
+        or not hmac.compare_digest(credential_id, expected_credential_id)
+        or reason not in {"blocked_020", "disabled_901"}
+    ):
+        return None
+    return str(reason)
+
+
+def _opendart_provider_status(response: httpx.Response) -> str:
+    """Extract only a short provider status from JSON or bounded error XML."""
+
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        status = str(payload.get("status") or "")
+        return status if re.fullmatch(r"[0-9]{3}", status) else ""
+
+    content = response.content
+    if not content or len(content) > 8_192:
+        return ""
+    try:
+        root = ElementTree.fromstring(content)
+    except ElementTree.ParseError:
+        return ""
+    status = str(root.findtext(".//status") or root.findtext("status") or "").strip()
+    return status if re.fullmatch(r"[0-9]{3}", status) else ""
+
+
 class DartConnector:
     def __init__(
         self,
-        api_key: str,
+        api_key: str | Iterable[OpenDartCredential],
         *,
         client: httpx.Client | None = None,
         timeout: float = 20.0,
         governance_detail_codes: Iterable[str] | None = None,
         request_budget: DartRequestQuota | None = None,
+        credential_availability: DartCredentialAvailability | None = None,
+        quota_day_provider: Callable[[], date] | None = None,
         max_retries: int = 2,
         backoff_seconds: float = 1.0,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
-        if not api_key.strip():
-            raise ValueError("DART API key is required")
-        self.api_key = api_key.strip()
+        credentials: tuple[OpenDartCredential, ...]
+        if isinstance(api_key, str):
+            value = api_key.strip()
+            if not value:
+                raise ValueError("DART API key is required")
+            credentials = (OpenDartCredential(value, validate=False),)
+        else:
+            credentials = tuple(api_key)
+            if not credentials or any(
+                not isinstance(credential, OpenDartCredential)
+                for credential in credentials
+            ):
+                raise ValueError("DART credential pool is required")
+        self._credential_pool = OpenDartCredentialPool(
+            credentials,
+            availability=credential_availability,
+        )
+        self._quota_day_provider = quota_day_provider or (
+            lambda: datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Seoul")).date()
+        )
         self._client = client
         self.timeout = timeout
         if max_retries < 0:
@@ -774,7 +904,7 @@ class DartConnector:
             raise ValueError("DART backoff_seconds cannot be negative")
         self.request_budget = request_budget or DartRequestBudget()
         self.max_retries = max_retries
-        self.backoff_seconds = backoff_seconds
+        self.backoff_seconds: float = backoff_seconds
         self._sleeper = sleeper
         requested_codes = DART_GOVERNANCE_DETAIL_CODES if governance_detail_codes is None else tuple(governance_detail_codes)
         normalized_codes = tuple(re.sub(r"[^0-9A-Za-z]", "", str(code)).upper() for code in requested_codes)
@@ -786,68 +916,124 @@ class DartConnector:
         self.requests_made = 0
         self.pages_fetched = 0
         self.rows_fetched = 0
+        self.credential_requests: dict[str, int] = {
+            credential_id: 0
+            for credential_id in self._credential_pool.credential_ids
+        }
 
     def _retry_delay(self, response: httpx.Response | None, attempt: int) -> float:
-        retry_after = response.headers.get("Retry-After", "") if response is not None else ""
+        retry_after = (
+            str(response.headers.get("Retry-After", ""))
+            if response is not None
+            else ""
+        )
         try:
             requested_delay = float(retry_after)
         except ValueError:
             requested_delay = 0.0
         exponential = self.backoff_seconds * (2**attempt)
-        return min(30.0, max(exponential, requested_delay, 0.0))
+        return float(min(30.0, max(exponential, requested_delay, 0.0)))
 
     def _get(self, url: str, params: dict[str, str | int]) -> httpx.Response:
         operation = "corp_code" if url == DART_CORP_CODE_URL else "list"
-        for attempt in range(self.max_retries + 1):
-            # The durable implementation returns an acknowledged permit. No
-            # physical DART request is made if the quota API times out, returns
-            # an incomplete ACK, or reports that the KST day is blocked/full.
-            permit = self.request_budget.consume(operation=operation)
-            self.requests_made += 1
-            try:
-                if self._client is not None:
-                    response = self._client.get(url, params=params)
-                else:
-                    response = httpx.get(
-                        url,
-                        params=params,
-                        timeout=self.timeout,
-                        follow_redirects=True,
+        quota_day = self._quota_day_provider()
+        while True:
+            credential = self._credential_pool.next(quota_day)
+            if credential is None:
+                if self._credential_pool.unavailable_reason(quota_day) == "blocked_020":
+                    raise DartQuotaExceededError(
+                        "OpenDART quota exhausted: all credentials are unavailable for the "
+                        "current KST quota day; resume from the checkpoint later"
                     )
-            except httpx.TransportError:
-                if attempt >= self.max_retries:
+                raise OfficialSourceError("All OpenDART credentials are unavailable")
+
+            credential_id = credential.credential_id
+            request_params = dict(params)
+            request_params["crtfc_key"] = credential.key
+            retry_with_next_credential = False
+            for attempt in range(self.max_retries + 1):
+                # A permit is bound to the non-secret credential identity.
+                # Durable state rejection for one credential is skipped while
+                # global ledger failures remain fail-closed.
+                try:
+                    permit = self.request_budget.consume(
+                        operation=operation,
+                        credential_id=credential_id,
+                    )
+                except DartCredentialUnavailableError as exc:
+                    reason = _dart_credential_rejection_reason(
+                        exc,
+                        expected_credential_id=credential_id,
+                    )
+                    if reason == "blocked_020":
+                        self._credential_pool.block_for_day(credential_id, quota_day)
+                        retry_with_next_credential = True
+                        break
+                    if reason == "disabled_901":
+                        self._credential_pool.disable(credential_id)
+                        retry_with_next_credential = True
+                        break
                     raise
-                self._sleeper(self._retry_delay(None, attempt))
-                continue
+                except DartGlobalQuotaExceededError:
+                    # A global daily-ledger rejection is not a connector
+                    # transport failure. Surface the stable quota-exhausted
+                    # contract so ingestion checkpoints resume next quota day.
+                    raise DartQuotaExceededError(
+                        "OpenDART global quota exhausted; resume from the "
+                        "checkpoint in the next KST quota period"
+                    ) from None
 
-            retryable_status = response.status_code == 429 or 500 <= response.status_code <= 599
-            if retryable_status and attempt < self.max_retries:
-                self._sleeper(self._retry_delay(response, attempt))
-                continue
-            if response.status_code >= 400:
-                # httpx's default exception renders the full request URL,
-                # including OpenDART's crtfc_key query parameter. Never let a
-                # provider secret or response body reach Actions logs.
-                raise OfficialSourceError(f"OpenDART HTTP {response.status_code}")
+                self.requests_made += 1
+                self.credential_requests[credential_id] += 1
+                try:
+                    if self._client is not None:
+                        response = self._client.get(url, params=request_params)
+                    else:
+                        response = httpx.get(
+                            url,
+                            params=request_params,
+                            timeout=self.timeout,
+                            follow_redirects=True,
+                        )
+                except httpx.TransportError:
+                    if attempt >= self.max_retries:
+                        raise OfficialSourceError("OpenDART transport error") from None
+                    self._sleeper(self._retry_delay(None, attempt))
+                    continue
 
-            # Status 020 is a daily OpenDART quota boundary.  It deliberately
-            # fails immediately so the durable backfill checkpoint resumes in a
-            # later quota period instead of burning more requests in this run.
-            try:
-                payload = response.json()
-            except ValueError:
-                payload = None
-            if isinstance(payload, dict) and str(payload.get("status") or "") == "020":
-                # block_020 must itself be durably acknowledged. If it cannot
-                # be recorded, its error propagates and the workflow fails;
-                # the existing non-cancelling official-ingest lock and
-                # backfill checkpoint remain additional race protection.
-                self.request_budget.block_020(permit)
-                raise DartQuotaExceededError(
-                    "OpenDART request quota exhausted; resume from the checkpoint later"
+                retryable_status = (
+                    response.status_code == 429
+                    or 500 <= response.status_code <= 599
                 )
-            return response
-        raise AssertionError("unreachable DART request retry state")
+                if retryable_status and attempt < self.max_retries:
+                    self._sleeper(self._retry_delay(response, attempt))
+                    continue
+                if response.status_code >= 400:
+                    # httpx's default exception renders the full request URL,
+                    # including OpenDART's crtfc_key query parameter. Never let
+                    # a provider secret or response body reach Actions logs.
+                    raise OfficialSourceError(
+                        f"OpenDART HTTP {response.status_code}"
+                    )
+
+                provider_status = _opendart_provider_status(response)
+                if provider_status == "020":
+                    # The durable ACK is required before this process excludes
+                    # the credential and retries the exact logical request.
+                    self.request_budget.block_020(permit)
+                    self._credential_pool.block_for_day(credential_id, quota_day)
+                    retry_with_next_credential = True
+                    break
+                if provider_status == "901":
+                    self.request_budget.disable_901(permit)
+                    self._credential_pool.disable(credential_id)
+                    retry_with_next_credential = True
+                    break
+                return response
+
+            if retry_with_next_credential:
+                continue
+            raise AssertionError("unreachable DART request retry state")
 
     def _iter_list_rows(
         self,
@@ -864,7 +1050,6 @@ class DartConnector:
         expected_total_pages: int | None = None
         while page <= max(1, max_pages):
             params: dict[str, str | int] = {
-                "crtfc_key": self.api_key,
                 "bgn_de": start.strftime("%Y%m%d"),
                 "end_de": end.strftime("%Y%m%d"),
                 "last_reprt_at": "N",
@@ -1004,7 +1189,7 @@ class DartConnector:
             yield row
 
     def fetch_company_master(self) -> list[dict[str, object]]:
-        return parse_corp_code_zip(self._get(DART_CORP_CODE_URL, {"crtfc_key": self.api_key}).content)
+        return parse_corp_code_zip(self._get(DART_CORP_CODE_URL, {}).content)
 
 
 class KindConnector:
