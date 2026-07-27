@@ -50,11 +50,101 @@ from .shadow_engine import write_candidate_snapshot_from_events
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _BACKEND_BINDING_RE = re.compile(r"^[a-f0-9]{64}$")
+_DART_GUARDED_DOCUMENT_BATCH_SIZE = 40
+_REMOTE_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_REMOTE_EXCEPTION_CLASS_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,127}$")
+_REMOTE_SQLSTATE_RE = re.compile(r"^[0-9A-Z]{5}$")
 _BACKEND_BINDING_ERROR_CODES = {
     "backend_binding_required",
     "backend_binding_mismatch",
     "backend_binding_unavailable",
 }
+_TERMINAL_REMOTE_ERROR_CODES = {
+    *_BACKEND_BINDING_ERROR_CODES,
+    "auth_required",
+    "dart_connector_inactive",
+    "dart_connector_not_ready",
+    "dart_connector_unavailable",
+    "dart_deployment_revision_mismatch",
+    "dart_deployment_revision_required",
+    "dart_document_requires_approved_source_right",
+    "dart_global_bridge_unavailable",
+    "dart_guarded_action_required",
+    "dart_guarded_payload_required",
+    "dart_release_state_mismatch",
+    "dart_release_state_precondition_required",
+    "dart_source_right_ineligible_or_changed",
+    "dart_source_right_managed_out_of_band",
+    "dart_source_right_precondition_required",
+    "global_dart_connector_not_writable",
+    "global_release_state_guard_unavailable",
+    "invalid_signature",
+    "invalid_source_right_precondition",
+    "release_state_unavailable",
+    "secret_missing_or_too_short",
+    "timestamp_expired",
+}
+_REMOTE_ERROR_CODE_ALLOWLIST = {
+    *_BACKEND_BINDING_ERROR_CODES,
+    "auth_required",
+    "body_unreadable",
+    "dart_connector_inactive",
+    "dart_connector_not_ready",
+    "dart_connector_unavailable",
+    "dart_deployment_revision_mismatch",
+    "dart_deployment_revision_required",
+    "dart_document_requires_approved_source_right",
+    "dart_global_bridge_unavailable",
+    "dart_guarded_action_required",
+    "dart_guarded_payload_required",
+    "dart_release_state_mismatch",
+    "dart_release_state_precondition_required",
+    "dart_source_right_ineligible_or_changed",
+    "dart_source_right_managed_out_of_band",
+    "dart_source_right_precondition_required",
+    "governance_snapshot_persistence_failed",
+    "internal_error",
+    "invalid_json",
+    "invalid_json_response",
+    "invalid_signature",
+    "invalid_source_right_precondition",
+    "kind_document_requires_approved_source_right",
+    "kind_source_right_ineligible",
+    "nonce_reused",
+    "official_slot_completion_terminal_failure",
+    "payload_too_large",
+    "remote_ack_mismatch",
+    "remote_error_unclassified",
+    "remote_http_error",
+    "remote_transport_exception",
+    "secret_missing_or_too_short",
+    "timestamp_expired",
+    "too_many_lineage_candidates",
+    "too_many_records",
+}
+_REMOTE_VALIDATION_REASON_ALLOWLIST = {
+    "dart_event_metadata_invalid",
+    "dart_document_title_provenance_conflict",
+    "dart_title_provenance_conflict",
+    "document_lineage_conflict",
+    "event_identity_field_conflict",
+    "event_identity_scope_conflict",
+    "event_observation_document_missing",
+    "event_observation_hash_invalid",
+    "followup_event_identity_conflict",
+    "global_dart_connector_not_writable",
+    "global_release_state_guard_unavailable",
+    "incomplete_event_identity_has_comparison_key",
+    "invalid_scheduled_slot_claim_provenance",
+    "invalid_collection_run_code_revision",
+    "invalid_collection_run_counts",
+    "invalid_complete_event_identity",
+    "non_scheduled_run_has_slot_claim",
+    "release_state_unavailable",
+    "scheduled_slot_claim_conflict",
+    "scheduled_slot_claim_completion_conflict",
+}
+_REMOTE_ERROR_CODE_ALLOWLIST.update(_REMOTE_VALIDATION_REASON_ALLOWLIST)
 
 
 class GovernanceBackendBindingError(RuntimeError):
@@ -103,7 +193,7 @@ def _response_binding_matches(
     )
 
 
-def _response_has_terminal_binding_failure(
+def _response_has_terminal_remote_failure(
     response: dict[str, object],
     expected_binding_id: str,
 ) -> bool:
@@ -113,7 +203,7 @@ def _response_has_terminal_binding_failure(
         if isinstance(error, dict)
         else str(error or "")
     )
-    return error_code in _BACKEND_BINDING_ERROR_CODES or (
+    return error_code in _TERMINAL_REMOTE_ERROR_CODES or (
         response.get("ok") is True
         and not _response_binding_matches(response, expected_binding_id)
     )
@@ -354,6 +444,39 @@ def _event_document_ids(event: dict[str, object]) -> set[str]:
     return {str(value) for value in values if value}
 
 
+def _validate_guarded_dart_event_document_contract(
+    documents: list[dict[str, object]],
+    events: list[dict[str, object]],
+) -> None:
+    """Guarantee every guarded DART event is transported exactly once."""
+
+    document_ids = [str(row.get("document_id") or "") for row in documents]
+    if any(not document_id for document_id in document_ids):
+        raise OfficialSourceRightError("dart_guarded_document_identity_invalid")
+    if len(set(document_ids)) != len(document_ids):
+        raise OfficialSourceRightError("dart_guarded_document_identity_duplicate")
+    document_id_set = set(document_ids)
+    reference_counts = {document_id: 0 for document_id in document_ids}
+    for event in events:
+        referenced_document_ids = _event_document_ids(event)
+        if len(referenced_document_ids) != 1:
+            raise OfficialSourceRightError(
+                "dart_guarded_event_document_cardinality_invalid"
+            )
+        if not referenced_document_ids <= document_id_set:
+            raise OfficialSourceRightError(
+                "dart_guarded_event_document_reference_missing"
+            )
+        referenced_document_id = next(iter(referenced_document_ids))
+        reference_counts[referenced_document_id] += 1
+    if len(events) != len(documents) or any(
+        count != 1 for count in reference_counts.values()
+    ):
+        raise OfficialSourceRightError(
+            "dart_guarded_event_document_bijection_invalid"
+        )
+
+
 def _remote_acknowledges_payload(
     response: dict[str, object],
     payload: dict[str, object],
@@ -396,7 +519,158 @@ def _remote_acknowledges_payload(
     )
 
 
-def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object]) -> dict[str, int]:
+def _allowlisted_remote_code(value: object, allowlist: set[str]) -> str | None:
+    if not isinstance(value, str) or _REMOTE_ERROR_CODE_RE.fullmatch(value) is None:
+        return None
+    return value if value in allowlist else None
+
+
+def _remote_response_error_code(response: dict[str, object]) -> str | None:
+    error = response.get("error")
+    candidate = error.get("code") if isinstance(error, dict) else error
+    return _allowlisted_remote_code(candidate, _REMOTE_ERROR_CODE_ALLOWLIST)
+
+
+def _safe_remote_status(response: dict[str, object]) -> int | None:
+    value = response.get("status_code")
+    if isinstance(value, int) and not isinstance(value, bool):
+        status = value
+    elif isinstance(value, str) and value.isascii() and value.isdigit():
+        status = int(value)
+    else:
+        return None
+    return status if 100 <= status <= 599 else None
+
+
+def _safe_remote_body_bytes(response: dict[str, object]) -> int:
+    value = response.get("_response_body_bytes")
+    if isinstance(value, int) and not isinstance(value, bool):
+        byte_count = value
+    elif isinstance(value, str) and value.isascii() and value.isdigit():
+        byte_count = int(value)
+    else:
+        return 0
+    return max(0, byte_count)
+
+
+def _safe_remote_driver_code(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        driver_code = value
+    elif (
+        isinstance(value, str)
+        and value.isascii()
+        and value.removeprefix("-").isdigit()
+    ):
+        driver_code = int(value)
+    else:
+        return None
+    return driver_code if -(2**31) <= driver_code <= (2**31 - 1) else None
+
+
+def _post_remote_attempt(
+    action: str,
+    payload: dict[str, object],
+) -> tuple[dict[str, object], dict[str, object]]:
+    started = time.perf_counter()
+    exception_class: str | None = None
+    try:
+        response = post_remote_action(action, payload, timeout=45.0)
+    except Exception as exc:  # noqa: BLE001 - retain class only; never the message.
+        response = {"ok": False}
+        candidate = type(exc).__name__
+        exception_class = (
+            candidate
+            if _REMOTE_EXCEPTION_CLASS_RE.fullmatch(candidate) is not None
+            else "Exception"
+        )
+    elapsed_ms = max(0, round((time.perf_counter() - started) * 1000))
+    return response, {
+        "http_status": _safe_remote_status(response),
+        "response_body_bytes": _safe_remote_body_bytes(response),
+        "elapsed_ms": elapsed_ms,
+        "exception_class": exception_class,
+    }
+
+
+def _remote_failure_telemetry(
+    response: dict[str, object],
+    measurement: dict[str, object],
+    *,
+    scope: str,
+    batch_number: int | None,
+    ack_mismatch: bool,
+) -> dict[str, object]:
+    raw_error = response.get("error")
+    error_code = (
+        "remote_transport_exception"
+        if measurement.get("exception_class") is not None
+        else (
+            "remote_ack_mismatch"
+            if ack_mismatch
+            else (
+                _remote_response_error_code(response)
+                or (
+                    "remote_error_unclassified"
+                    if raw_error not in (None, "")
+                    else (
+                        "remote_http_error"
+                        if measurement.get("http_status") is not None
+                        and _int_value(measurement["http_status"]) >= 400
+                        else "remote_error_unclassified"
+                    )
+                )
+            )
+        )
+    )
+    detail: dict[str, object] = {
+        "scope": scope,
+        "batch_number": batch_number,
+        "http_status": measurement.get("http_status"),
+        "error_code": error_code,
+        "response_body_bytes": _int_value(
+            measurement.get("response_body_bytes")
+        ),
+        "elapsed_ms": _int_value(measurement.get("elapsed_ms")),
+        "exception_class": measurement.get("exception_class"),
+    }
+    sqlstate_class = response.get("sqlstate_class")
+    if (
+        isinstance(sqlstate_class, str)
+        and _REMOTE_SQLSTATE_RE.fullmatch(sqlstate_class) is not None
+    ):
+        detail["sqlstate_class"] = sqlstate_class
+    driver_code = _safe_remote_driver_code(response.get("driver_code"))
+    if driver_code is not None:
+        detail["driver_code"] = driver_code
+    validation_reason = _allowlisted_remote_code(
+        response.get("validation_reason"),
+        _REMOTE_VALIDATION_REASON_ALLOWLIST,
+    )
+    if validation_reason is not None:
+        detail["validation_reason"] = validation_reason
+    return detail
+
+
+def _remote_failure_summary(
+    details: list[dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "official_remote_failure_telemetry_count": len(details),
+        "official_remote_failure_response_body_bytes": sum(
+            _int_value(detail.get("response_body_bytes")) for detail in details
+        ),
+        "official_remote_failure_elapsed_ms": sum(
+            _int_value(detail.get("elapsed_ms")) for detail in details
+        ),
+        "official_remote_failure_details": details,
+    }
+
+
+def sync_governance_payload(
+    payload: dict[str, object],
+    *,
+    run: dict[str, object],
+) -> dict[str, object]:
     companies = _payload_records(payload, "companies")
     documents = _payload_records(payload, "documents")
     events = _payload_records(payload, "events")
@@ -455,14 +729,21 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
             "official_remote_ack_mismatches": 0,
             "official_remote_raw_count": len(documents),
             "official_remote_ack_count": 0,
+            **_remote_failure_summary([]),
         }
     expected_backend_binding_id = _required_backend_binding_id()
+    if guarded_dart_write:
+        _validate_guarded_dart_event_document_contract(documents, events)
 
     # Event/document chunks stay aligned by document_id. Company master-only
     # chunks are sent first so foreign keys are available for later batches.
     company_by_id = {str(row.get("company_id") or ""): row for row in companies}
-    document_chunks = list(_chunks(documents)) or [[]]
+    document_batch_size = (
+        _DART_GUARDED_DOCUMENT_BATCH_SIZE if guarded_dart_write else 1800
+    )
+    document_chunks = list(_chunks(documents, size=document_batch_size)) or [[]]
     synced = failed = attempted = ack_mismatches = 0
+    failure_details: list[dict[str, object]] = []
     acknowledged_documents = 0
     selected_sources = {
         value.strip().casefold()
@@ -473,7 +754,7 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
         source: 0 for source in sorted(selected_sources)
     }
     covered_companies: set[str] = set()
-    terminal_binding_failure = False
+    terminal_remote_failure = False
     for index, document_chunk in enumerate(document_chunks):
         document_ids = {str(row.get("document_id") or "") for row in document_chunk}
         event_chunk = [
@@ -507,14 +788,7 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
             # preventing a same-secret routing error from mutating another DB.
             "expected_backend_binding_id": expected_backend_binding_id,
         }
-        try:
-            response = post_remote_action(
-                remote_action,
-                submitted,
-                timeout=45.0,
-            )
-        except Exception:  # noqa: BLE001 - continue so the final failed run can be persisted.
-            response = {"ok": False}
+        response, measurement = _post_remote_attempt(remote_action, submitted)
         if _remote_acknowledges_payload(response, submitted):
             synced += 1
             acknowledged_documents += len(document_chunk)
@@ -523,18 +797,31 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
                 source_ack_counts[source] = source_ack_counts.get(source, 0) + 1
         else:
             failed += 1
-            if response.get("ok") is True:
+            ack_mismatch = response.get("ok") is True
+            if ack_mismatch:
                 ack_mismatches += 1
-            if _response_has_terminal_binding_failure(
+            failure_details.append(
+                _remote_failure_telemetry(
+                    response,
+                    measurement,
+                    scope="data_batch",
+                    batch_number=index + 1,
+                    ack_mismatch=ack_mismatch,
+                )
+            )
+            if _response_has_terminal_remote_failure(
                 response,
                 expected_backend_binding_id,
             ):
-                terminal_binding_failure = True
+                terminal_remote_failure = True
                 break
 
     remaining = [row for company_id, row in company_by_id.items() if company_id not in covered_companies]
-    if not terminal_binding_failure:
-        for company_chunk in _chunks(remaining):
+    if not terminal_remote_failure:
+        for company_batch_number, company_chunk in enumerate(
+            _chunks(remaining),
+            start=1,
+        ):
             attempted += 1
             submitted = {
                 "companies": company_chunk,
@@ -545,25 +832,28 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
                 "run": {},
                 "expected_backend_binding_id": expected_backend_binding_id,
             }
-            try:
-                response = post_remote_action(
-                    remote_action,
-                    submitted,
-                    timeout=45.0,
-                )
-            except Exception:  # noqa: BLE001 - continue so the final failed run can be persisted.
-                response = {"ok": False}
+            response, measurement = _post_remote_attempt(remote_action, submitted)
             if _remote_acknowledges_payload(response, submitted):
                 synced += 1
             else:
                 failed += 1
-                if response.get("ok") is True:
+                ack_mismatch = response.get("ok") is True
+                if ack_mismatch:
                     ack_mismatches += 1
-                if _response_has_terminal_binding_failure(
+                failure_details.append(
+                    _remote_failure_telemetry(
+                        response,
+                        measurement,
+                        scope="company_batch",
+                        batch_number=company_batch_number,
+                        ack_mismatch=ack_mismatch,
+                    )
+                )
+                if _response_has_terminal_remote_failure(
                     response,
                     expected_backend_binding_id,
                 ):
-                    terminal_binding_failure = True
+                    terminal_remote_failure = True
                     break
 
     final_run = dict(run)
@@ -577,6 +867,7 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
     final_run["raw_count"] = _int_value(final_run.get("raw_count"), len(documents))
     final_run["ack_count"] = acknowledged_documents
     final_run["source_ack_counts"] = source_ack_counts
+    final_run.update(_remote_failure_summary(failure_details))
     run_persisted = 0
     final_payload: dict[str, object] = {
         "companies": [],
@@ -587,21 +878,27 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
         "run": final_run,
         "expected_backend_binding_id": expected_backend_binding_id,
     }
-    if not terminal_binding_failure:
-        try:
-            run_response = post_remote_action(
-                remote_action,
-                final_payload,
-                timeout=45.0,
-            )
-        except Exception:  # noqa: BLE001 - the caller must fail when final status cannot be persisted.
-            run_response = {"ok": False}
+    if not terminal_remote_failure:
+        run_response, run_measurement = _post_remote_attempt(
+            remote_action,
+            final_payload,
+        )
         if _remote_acknowledges_payload(run_response, final_payload):
             run_persisted = 1
         else:
             failed += 1
-            if run_response.get("ok") is True:
+            ack_mismatch = run_response.get("ok") is True
+            if ack_mismatch:
                 ack_mismatches += 1
+            failure_details.append(
+                _remote_failure_telemetry(
+                    run_response,
+                    run_measurement,
+                    scope="final_run",
+                    batch_number=None,
+                    ack_mismatch=ack_mismatch,
+                )
+            )
     return {
         "official_remote_synced": synced,
         "official_remote_failed": failed,
@@ -611,6 +908,7 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
         "official_remote_ack_mismatches": ack_mismatches,
         "official_remote_raw_count": len(documents),
         "official_remote_ack_count": acknowledged_documents,
+        **_remote_failure_summary(failure_details),
     }
 
 
@@ -623,7 +921,7 @@ def run(
     settings_overrides: dict[str, object] | None = None,
     dry_run: bool = False,
     idempotency_key: str | None = None,
-) -> dict[str, int]:
+) -> dict[str, object]:
     """Collect and normalize one inclusive official-disclosure date window.
 
     ``start``/``end`` and ``settings_overrides`` are intentionally optional so
@@ -1082,13 +1380,14 @@ def run(
             "official_remote_ack_mismatches": 0,
             "official_remote_raw_count": len(payload["documents"]),  # type: ignore[arg-type]
             "official_remote_ack_count": 0,
+            **_remote_failure_summary([]),
         }
         if dry_run
         else sync_governance_payload(payload, run=run_record)
     )
     require_remote = _truthy_env("CURATOR_REQUIRE_REMOTE_API")
-    remote_failed = int(remote_summary.get("official_remote_failed") or 0)
-    remote_skipped = int(remote_summary.get("official_remote_skipped") or 0)
+    remote_failed = _int_value(remote_summary.get("official_remote_failed"))
+    remote_skipped = _int_value(remote_summary.get("official_remote_skipped"))
     failed = errors + remote_failed + (1 if require_remote and remote_skipped and not dry_run else 0)
     shadow_output_path = os.environ.get("CURATOR_SHADOW_ENGINE_OUTPUT_PATH", "").strip()
     if shadow_output_path:
@@ -1137,7 +1436,7 @@ def run(
 def main() -> None:
     summary = run()
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
-    if int(summary.get("official_failed") or 0):
+    if _int_value(summary.get("official_failed")):
         raise SystemExit(1)
 
 

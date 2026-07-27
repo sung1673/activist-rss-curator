@@ -165,6 +165,7 @@ def test_canary_scans_last_complete_day_and_exact_365_day_history() -> None:
     report = run_dart_canary_sample(
         "test-key",
         now=datetime(2026, 7, 16, 0, 0, tzinfo=timezone.utc),
+        options=DartCanarySampleOptions(sample_limit_per_kind=1),
         connector_factory=factory,
     )
 
@@ -570,7 +571,11 @@ def test_canary_selects_real_correction_and_withdrawal_without_changing_titles()
     report = run_dart_canary_sample(
         "test-key",
         now=datetime(2026, 7, 16, tzinfo=timezone.utc),
-        options=DartCanarySampleOptions(lookback_days=10, scan_chunk_days=3),
+        options=DartCanarySampleOptions(
+            lookback_days=10,
+            scan_chunk_days=3,
+            sample_limit_per_kind=1,
+        ),
         connector_factory=lambda _key, budget: FakeConnector(budget, rows),
     )
 
@@ -589,11 +594,43 @@ def test_canary_selects_real_correction_and_withdrawal_without_changing_titles()
     assert report["missing_sample_kinds"] == []
     history = report["history"]
     assert isinstance(history, dict)
-    assert history["full_range_scanned"] is True
-    assert history["early_stopped"] is False
-    assert history["calendar_days_scanned"] == 10
+    assert history["full_range_scanned"] is False
+    assert history["early_stopped"] is True
+    assert history["calendar_days_scanned"] == 4
     assert history["planned_base_windows"] == 3
-    assert history["completed_base_windows"] == 3
+    assert history["completed_base_windows"] == 1
+
+
+def test_canary_fails_closed_when_both_sample_kinds_are_underfilled() -> None:
+    rows = [
+        dart_row(
+            receipt_no="20260714000001",
+            received_date="20260714",
+            title="Correction Tender Offer",
+        ),
+        dart_row(
+            receipt_no="20260713000002",
+            received_date="20260713",
+            title="Withdrawal Tender Offer",
+        ),
+    ]
+
+    report = run_dart_canary_sample(
+        "test-key",
+        now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+        options=DartCanarySampleOptions(
+            lookback_days=10,
+            sample_limit_per_kind=5,
+        ),
+        connector_factory=lambda _key, budget: FakeConnector(budget, rows),
+    )
+
+    assert report["status"] == "failed"
+    assert report["missing_sample_kinds"] == ["correction", "withdrawal"]
+    samples = report["samples"]
+    assert isinstance(samples, dict)
+    assert samples["correction_count"] == 1
+    assert samples["withdrawal_count"] == 1
 
 
 def test_canary_fails_closed_when_a_required_sample_kind_is_absent() -> None:
@@ -607,7 +644,10 @@ def test_canary_fails_closed_when_a_required_sample_kind_is_absent() -> None:
     report = run_dart_canary_sample(
         "test-key",
         now=datetime(2026, 7, 16, tzinfo=timezone.utc),
-        options=DartCanarySampleOptions(lookback_days=10),
+        options=DartCanarySampleOptions(
+            lookback_days=10,
+            sample_limit_per_kind=1,
+        ),
         connector_factory=lambda _key, budget: FakeConnector(budget, rows),
     )
 

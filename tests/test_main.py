@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+import curator.main as main_module
 from curator.main import (
     FAILURE_KEYS,
     article_is_before_previous_day,
@@ -16,6 +17,34 @@ from curator.main import (
 )
 
 from conftest import make_article
+
+
+def test_official_scope_preserves_structured_failure_telemetry(
+    tmp_path,
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    structured_summary: dict[str, object] = {
+        "official_failed": 1,
+        "official_remote_failure_details": [
+            {
+                "scope": "data_batch",
+                "batch_number": 2,
+                "error_code": "internal_error",
+            }
+        ],
+    }
+    monkeypatch.setenv("CURATOR_INGEST_SCOPE", "official")
+    monkeypatch.setattr(
+        main_module,
+        "load_config",
+        lambda _path: {"timezone": "Asia/Seoul"},
+    )
+    monkeypatch.setattr(
+        "curator.official_ingest.run",
+        lambda *_args, **_kwargs: structured_summary,
+    )
+
+    assert main_module.run(tmp_path) is structured_summary
 
 
 def test_article_before_previous_day_filter(config) -> None:  # type: ignore[no-untyped-def]

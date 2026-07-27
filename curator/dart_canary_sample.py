@@ -411,9 +411,9 @@ def _run_dart_canary_sample(
     ]
 
     missing: list[str] = []
-    if not corrections:
+    if len(corrections) < selected_options.sample_limit_per_kind:
         missing.append("correction")
-    if not withdrawals:
+    if len(withdrawals) < selected_options.sample_limit_per_kind:
         missing.append("withdrawal")
     report: dict[str, object] = {
         "schema_version": 1,

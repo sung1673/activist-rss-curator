@@ -310,7 +310,7 @@ def publish_telegram_for_run(
     }
 
 
-def run(root: Path | None = None) -> dict[str, int]:
+def run(root: Path | None = None) -> dict[str, object]:
     run_started = time.monotonic()
     project_root = root or PROJECT_ROOT
     config = load_config(project_root / "config.yaml")

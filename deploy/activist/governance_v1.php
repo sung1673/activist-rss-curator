@@ -7079,6 +7079,127 @@ function v1_governance_snapshot_identity_conflict_code(Throwable $error): ?strin
 }
 
 /**
+ * Return only a stable, caller-actionable validation reason.
+ *
+ * Runtime exceptions may append a record identifier after a colon for local
+ * control flow.  The suffix is never copied into an HTTP response.
+ */
+function v1_governance_snapshot_validation_reason(Throwable $error): ?string {
+    if (!$error instanceof RuntimeException || $error instanceof PDOException) {
+        return null;
+    }
+    $message = $error->getMessage();
+    $separator = strpos($message,':');
+    $reason = $separator === false ? $message : substr($message,0,$separator);
+    if (preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$reason) !== 1) {
+        return null;
+    }
+    $allowed = array(
+        'dart_document_title_provenance_conflict',
+        'dart_event_metadata_invalid',
+        'dart_title_provenance_conflict',
+        'document_lineage_conflict',
+        'event_identity_field_conflict',
+        'event_identity_scope_conflict',
+        'event_observation_document_missing',
+        'event_observation_hash_invalid',
+        'followup_event_identity_conflict',
+        'global_dart_connector_not_writable',
+        'global_release_state_guard_unavailable',
+        'incomplete_event_identity_has_comparison_key',
+        'invalid_collection_run_code_revision',
+        'invalid_collection_run_counts',
+        'invalid_complete_event_identity',
+        'invalid_scheduled_slot_claim_provenance',
+        'non_scheduled_run_has_slot_claim',
+        'release_state_unavailable',
+        'scheduled_slot_claim_completion_conflict',
+        'scheduled_slot_claim_conflict',
+    );
+    return in_array($reason,$allowed,true) ? $reason : null;
+}
+
+/**
+ * Extract bounded PDO diagnostics without retaining SQL, messages or values.
+ *
+ * `sqlstate_class` keeps the complete five-character SQLSTATE so the remote
+ * collector can validate it without receiving a query or exception message.
+ *
+ * @return array{sqlstate_class:string,driver_code:int}|null
+ */
+function v1_governance_snapshot_persistence_diagnostic(Throwable $error): ?array {
+    $candidate = $error;
+    for ($depth=0; $depth<5; $depth++) {
+        if ($candidate instanceof PDOException) {
+            $errorInfo = isset($candidate->errorInfo) && is_array($candidate->errorInfo)
+                ? $candidate->errorInfo : array();
+            $sqlState = strtoupper((string)($errorInfo[0] ?? ''));
+            if (preg_match('/^[A-Z0-9]{5}$/D',$sqlState) !== 1) {
+                $sqlState = 'HY000';
+            }
+            $rawDriverCode = $errorInfo[1] ?? 0;
+            $driverCode = 0;
+            if (is_int($rawDriverCode)
+                && $rawDriverCode >= -2147483648
+                && $rawDriverCode <= 2147483647) {
+                $driverCode = $rawDriverCode;
+            } elseif (is_string($rawDriverCode)
+                && preg_match('/^-?(?:0|[1-9][0-9]{0,9})$/D',$rawDriverCode) === 1) {
+                $parsed = (int)$rawDriverCode;
+                if ($parsed >= -2147483648 && $parsed <= 2147483647) {
+                    $driverCode = $parsed;
+                }
+            }
+            return array(
+                'sqlstate_class'=>$sqlState,
+                'driver_code'=>$driverCode,
+            );
+        }
+        $previous = $candidate->getPrevious();
+        if (!$previous instanceof Throwable) {
+            break;
+        }
+        $candidate = $previous;
+    }
+    return null;
+}
+
+/**
+ * Build the complete safe HTTP result for a failed governance transaction.
+ *
+ * @return array{status:int,payload:array<string,mixed>}
+ */
+function v1_governance_snapshot_failure_response(Throwable $error): array {
+    $diagnostic = v1_governance_snapshot_persistence_diagnostic($error);
+    if ($diagnostic !== null) {
+        return array(
+            'status'=>503,
+            'payload'=>array(
+                'ok'=>false,
+                'error'=>'governance_snapshot_persistence_failed',
+                'sqlstate_class'=>$diagnostic['sqlstate_class'],
+                'driver_code'=>$diagnostic['driver_code'],
+            ),
+        );
+    }
+    $validationReason = v1_governance_snapshot_validation_reason($error);
+    if ($validationReason !== null) {
+        return array(
+            'status'=>409,
+            'payload'=>array(
+                'ok'=>false,
+                'error'=>$validationReason,
+                'validation_reason'=>$validationReason,
+            ),
+        );
+    }
+    return array(
+        'status'=>500,
+        'payload'=>array('ok'=>false,'error'=>'internal_error'),
+    );
+}
+
+/**
  * Enable the additive DART -> global-terminal bridge only after the immutable
  * v2 migration manifest and the DART credential-pool migration are present.
  * Older production schemas never reference v2-only tables or columns.
@@ -8785,12 +8906,16 @@ function upsert_governance_snapshot(
         }
         $pdo->commit();
     } catch (Throwable $e) {
-        if ($pdo->inTransaction()) { $pdo->rollBack(); }
-        $identityConflictCode = v1_governance_snapshot_identity_conflict_code($e);
-        if ($identityConflictCode !== null) {
-            respond(409,array('ok'=>false,'error'=>$identityConflictCode));
+        $failureError = $e;
+        try {
+            if ($pdo->inTransaction() && $pdo->rollBack() !== true) {
+                $failureError = new RuntimeException('governance_snapshot_rollback_failed');
+            }
+        } catch (Throwable $rollbackError) {
+            $failureError = $rollbackError;
         }
-        throw $e;
+        $failure = v1_governance_snapshot_failure_response($failureError);
+        respond($failure['status'],$failure['payload']);
     }
     if ($terminalCompletionFailure) {
         respond(409,array('ok'=>false,'error'=>'official_slot_completion_terminal_failure','upserted'=>$counts));

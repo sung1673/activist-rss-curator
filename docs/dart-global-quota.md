@@ -110,6 +110,10 @@ HMAC `upsert_governance_snapshot`의 성공 ACK도 같은 값을 반환해야 �
 중단한다. 클라이언트는 row별 ACK 수와 DB 바인딩이 모두 일치한 배치만
 checkpoint의 acknowledged count에 포함하며, 바인딩 오류 뒤에는 다음 청크나
 최종 run 저장도 시도하지 않는다.
+guarded OpenDART 데이터 쓰기는 문서 40건 이하로 나누며 각 배치의 사건·회사도
+그 문서 참조 집합에 맞춘다. 이 제한은 일반/KIND 쓰기나 회사 마스터 전용
+배치 크기를 변경하지 않는다. 중간 배치가 실패하면 성공한 다른 배치의 ACK만
+집계하고 날짜 checkpoint는 미완료 상태로 유지한다.
 
 GitHub Actions는 pool을 검증한 직후 각 키를 개별 `::add-mask::` 처리한다.
 Provider 오류 로그는 DART API key 원문, key가 포함된 URL 또는 응답 본문을

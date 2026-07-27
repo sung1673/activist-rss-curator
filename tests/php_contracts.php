@@ -148,4 +148,79 @@ expect_true(
     'stored identity corruption must remain an internal server failure'
 );
 
+$validationSecret = 'record-id-should-never-leak';
+$validationFailure = v1_governance_snapshot_failure_response(
+    new RuntimeException('event_observation_document_missing:' . $validationSecret)
+);
+expect_true(
+    $validationFailure === array(
+        'status'=>409,
+        'payload'=>array(
+            'ok'=>false,
+            'error'=>'event_observation_document_missing',
+            'validation_reason'=>'event_observation_document_missing',
+        ),
+    ),
+    'known snapshot validation failures must expose only their allowlisted prefix'
+);
+expect_true(
+    strpos(json_encode($validationFailure),$validationSecret) === false,
+    'snapshot validation responses must not expose record identifiers'
+);
+
+$pdoSecret = 'sql-message-api-key-should-never-leak';
+$pdoFailure = new PDOException($pdoSecret);
+$pdoFailure->errorInfo = array('23000','1062','duplicate value ' . $pdoSecret);
+$persistenceFailure = v1_governance_snapshot_failure_response($pdoFailure);
+expect_true(
+    $persistenceFailure === array(
+        'status'=>503,
+        'payload'=>array(
+            'ok'=>false,
+            'error'=>'governance_snapshot_persistence_failed',
+            'sqlstate_class'=>'23000',
+            'driver_code'=>1062,
+        ),
+    ),
+    'snapshot persistence failures must expose only validated numeric PDO diagnostics'
+);
+expect_true(
+    strpos(json_encode($persistenceFailure),$pdoSecret) === false,
+    'snapshot persistence responses must not expose SQL or exception messages'
+);
+
+$invalidPdoSecret = 'oversized-driver-and-unicode-sqlstate-secret';
+$invalidPdoFailure = new PDOException($invalidPdoSecret);
+$invalidPdoFailure->errorInfo = array(
+    '보안',
+    '999999999999999999999999',
+    $invalidPdoSecret,
+);
+$normalizedPdoFailure = v1_governance_snapshot_failure_response($invalidPdoFailure);
+expect_true(
+    $normalizedPdoFailure['payload']['sqlstate_class'] === 'HY000'
+        && $normalizedPdoFailure['payload']['driver_code'] === 0,
+    'invalid PDO diagnostics must normalize to bounded generic values'
+);
+expect_true(
+    strpos(json_encode($normalizedPdoFailure),$invalidPdoSecret) === false,
+    'invalid PDO diagnostics must not expose rejected values or messages'
+);
+
+$unknownSecret = 'https://secret.invalid/?token=never-log-this';
+$unknownFailure = v1_governance_snapshot_failure_response(
+    new RuntimeException('알수없는오류:' . $unknownSecret)
+);
+expect_true(
+    $unknownFailure === array(
+        'status'=>500,
+        'payload'=>array('ok'=>false,'error'=>'internal_error'),
+    ),
+    'unknown or non-ASCII snapshot failures must collapse to internal_error'
+);
+expect_true(
+    strpos(json_encode($unknownFailure),$unknownSecret) === false,
+    'unknown snapshot failures must not expose secret-bearing messages'
+);
+
 fwrite(STDOUT, "PHP governance API contracts passed.\n");
