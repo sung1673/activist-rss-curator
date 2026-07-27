@@ -22,6 +22,7 @@ from curator.official_sources import (
     DartConnector,
     DartInvocationQuota,
     DartQuotaExceededError,
+    DartResultTruncatedError,
     DartRequestBudget,
     DartRequestBudgetError,
     KindConnector,
@@ -1487,7 +1488,11 @@ def test_dart_connector_uses_all_governance_detail_filters_by_default() -> None:
 
 
 def test_dart_filtered_detail_query_truncation_fails_closed() -> None:
+    calls = 0
+
     def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
         page = int(request.url.params["page_no"])
         return httpx.Response(
             200,
@@ -1500,7 +1505,10 @@ def test_dart_filtered_detail_query_truncation_fails_closed() -> None:
         )
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(OfficialSourceError, match="detail D001 result truncated"):
+        with pytest.raises(
+            DartResultTruncatedError,
+            match="detail D001 result truncated",
+        ) as captured:
             list(
                 DartConnector(
                     "x" * 40,
@@ -1512,6 +1520,68 @@ def test_dart_filtered_detail_query_truncation_fails_closed() -> None:
                     max_pages=2,
                 )
             )
+
+    error = captured.value
+    assert isinstance(error, OfficialSourceError)
+    assert error.scope == "detail"
+    assert error.detail_code == "D001"
+    assert error.window_start == date(2026, 7, 15)
+    assert error.window_end == date(2026, 7, 16)
+    assert error.detected_at_page == error.current_page == error.page == 1
+    assert error.page_limit == 2
+    assert error.total_pages == 3
+    assert error.terminal_one_day is False
+    assert calls == 1
+
+
+def test_dart_page_limit_raises_typed_truncation_after_first_validated_page() -> None:
+    budget = DartRequestBudget(10)
+    calls = 0
+    target = date(2026, 7, 7)
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={
+                "status": "000",
+                "page_no": 1,
+                "total_page": 106,
+                "total_count": 10_600,
+                "list": [dart_row()],
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(
+            DartResultTruncatedError,
+            match=r"page 100 of 106; reduce the date window",
+        ) as captured:
+            list(
+                DartConnector(
+                    "x" * 40,
+                    client=client,
+                    governance_detail_codes=(),
+                    request_budget=budget,
+                ).iter_disclosure_rows(
+                    target,
+                    target,
+                    max_pages=100,
+                )
+            )
+
+    error = captured.value
+    assert isinstance(error, OfficialSourceError)
+    assert error.scope == "broad"
+    assert error.window_start == error.window_end == target
+    assert error.detected_at_page == error.current_page == error.page == 1
+    assert error.page_limit == 100
+    assert error.total_pages == 106
+    assert error.detail_code == ""
+    assert error.terminal_one_day is False
+    assert calls == 1
+    assert budget.used == 1
 
 
 def test_official_connectors_fail_closed_when_page_limit_truncates_results() -> None:

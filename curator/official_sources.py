@@ -54,6 +54,45 @@ class DartRequestBudgetError(OfficialSourceError):
     """The bounded per-process OpenDART request budget was exhausted."""
 
 
+class DartResultTruncatedError(OfficialSourceError):
+    """A typed, credential-free DART page-limit failure."""
+
+    def __init__(
+        self,
+        *,
+        start: date,
+        end: date,
+        detected_at_page: int,
+        total_pages: int,
+        page_limit: int,
+        detail_code: str,
+        terminal_one_day: bool = False,
+    ) -> None:
+        self.window_start = start
+        self.window_end = end
+        self.detected_at_page = detected_at_page
+        self.current_page = detected_at_page
+        self.page = detected_at_page
+        self.total_pages = total_pages
+        self.page_limit = page_limit
+        self.detail_code = detail_code
+        self.scope = "detail" if detail_code else "broad"
+        self.terminal_one_day = terminal_one_day
+        scope_label = f" detail {detail_code}" if detail_code else ""
+        if terminal_one_day:
+            message = (
+                f"OpenDART{scope_label} result truncated at page {page_limit} of "
+                f"{total_pages}; one-day window {start.isoformat()} cannot be "
+                "split without dropping results"
+            )
+        else:
+            message = (
+                f"OpenDART{scope_label} result truncated at page {page_limit} of "
+                f"{total_pages}; reduce the date window"
+            )
+        super().__init__(message)
+
+
 class DartRequestQuota(Protocol):
     limit: int
     used: int
@@ -1137,10 +1176,11 @@ class DartConnector:
         detail_code: str = "",
     ) -> Iterator[dict[str, object]]:
         page = 1
+        page_limit = max(1, max_pages)
         rows_seen = 0
         expected_total_count: int | None = None
         expected_total_pages: int | None = None
-        while page <= max(1, max_pages):
+        while page <= page_limit:
             params: dict[str, str | int] = {
                 "bgn_de": start.strftime("%Y%m%d"),
                 "end_de": end.strftime("%Y%m%d"),
@@ -1197,6 +1237,17 @@ class DartConnector:
                 raise OfficialSourceError(
                     f"OpenDART returned an empty page {page} with success status"
                 )
+            if total_pages > page_limit:
+                raise DartResultTruncatedError(
+                    start=start,
+                    end=end,
+                    # Preserve the historical public error shape while
+                    # splitting immediately after the first validated page.
+                    detected_at_page=current_page,
+                    total_pages=total_pages,
+                    page_limit=page_limit,
+                    detail_code=detail_code,
+                )
             next_rows_seen = rows_seen + len(rows)
             if current_page >= total_pages and expected_total_count is not None:
                 if next_rows_seen != expected_total_count:
@@ -1223,10 +1274,14 @@ class DartConnector:
             rows_seen = next_rows_seen
             if current_page >= total_pages:
                 return
-            if page >= max(1, max_pages):
-                scope = f" detail {detail_code}" if detail_code else ""
-                raise OfficialSourceError(
-                    f"OpenDART{scope} result truncated at page {page} of {total_pages}; reduce the date window"
+            if page >= page_limit:
+                raise DartResultTruncatedError(
+                    start=start,
+                    end=end,
+                    detected_at_page=current_page,
+                    total_pages=total_pages,
+                    page_limit=page_limit,
+                    detail_code=detail_code,
                 )
             page += 1
 
