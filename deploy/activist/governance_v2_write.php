@@ -396,6 +396,47 @@ function v2_source_right_revision(array $right): string {
     );
 }
 
+/**
+ * Stable semantic digest for an approved SourceRight contract.
+ *
+ * Unlike rights_revision, this deliberately excludes updated_at so an
+ * idempotent administrative write does not change the contract identity.
+ * valid_from is normalized to its current eligibility state because the
+ * protected bootstrap chooses that timestamp from the server clock.
+ */
+function v2_source_right_contract_revision(array $right): string {
+    $evidenceUri = (string)$right['evidence_uri'];
+    $evidenceHash = strtolower(trim((string)$right['evidence_hash']));
+    $payload = array(
+        'contract_version' => 1,
+        'source_right_id' => (string)$right['source_right_id'],
+        'source_type' => (string)$right['source_type'],
+        'source_key' => (string)$right['source_key'],
+        'source_name' => (string)$right['source_name'],
+        'permission_scope_sha256' => hash(
+            'sha256',
+            (string)$right['permission_scope']
+        ),
+        'evidence_uri_sha256' => $evidenceUri === ''
+            ? null : hash('sha256', $evidenceUri),
+        'evidence_hash' => $evidenceHash === '' ? null : $evidenceHash,
+        'valid_from_state' => (string)$right['valid_from'] <= gmdate('Y-m-d H:i:s')
+            ? 'eligible' : 'future',
+        'valid_until' => $right['valid_until'],
+        'revoked_at' => $right['revoked_at'],
+        'ai_allowed' => (int)$right['ai_allowed'] === 1,
+        'redistribution_allowed' => (int)$right['redistribution_allowed'] === 1,
+        'status' => (string)$right['status'],
+    );
+    return hash(
+        'sha256',
+        v1_strict_canonical_json_encode(
+            $payload,
+            'global_source_right_contract_revision_encode_failed'
+        )
+    );
+}
+
 function v2_source_right_ineligible_reasons(?array $right, string $use): array {
     if ($right === null) {
         return array('not_registered');
@@ -520,8 +561,35 @@ function v2_admin_update_connector(
         ));
     }
 
+    // Discover only the SourceRight identity before the transaction so the
+    // shared lock order can remain release-state -> SourceRight -> connector.
+    // The identity is rechecked after the connector row itself is locked.
+    $identityStatement = $pdo->prepare(
+        'SELECT source_right_id FROM '
+        . table_name($config, 'source_connectors')
+        . ' WHERE connector_id=? LIMIT 1'
+    );
+    $identityStatement->execute(array($connectorId));
+    $identity = $identityStatement->fetch();
+    if (!$identity) {
+        v2_respond(404, array(
+            'ok' => false,
+            'error' => 'connector_not_found',
+        ));
+    }
+    $expectedSourceRightId = $identity['source_right_id'] === null
+        ? null : (string)$identity['source_right_id'];
+
     $pdo->beginTransaction();
     try {
+        v2_release_state_rows_for_update($pdo, $config);
+        $right = $expectedSourceRightId === null
+            ? null : v2_source_right_row(
+                $pdo,
+                $config,
+                $expectedSourceRightId,
+                true
+            );
         $statement = $pdo->prepare(
             'SELECT connector_id,country_code,source_key,source_name,source_type,'
             . 'base_url,source_right_id,coverage_mode,connector_status,'
@@ -538,6 +606,11 @@ function v2_admin_update_connector(
                 'ok' => false,
                 'error' => 'connector_not_found',
             ));
+        }
+        $lockedSourceRightId = $connector['source_right_id'] === null
+            ? null : (string)$connector['source_right_id'];
+        if ($lockedSourceRightId !== $expectedSourceRightId) {
+            throw new RuntimeException('connector_source_right_changed');
         }
         if (
             $targetStatus === 'configured'
@@ -568,13 +641,6 @@ function v2_admin_update_connector(
                 ),
             ));
         }
-        $right = $connector['source_right_id'] === null
-            ? null : v2_source_right_row(
-                $pdo,
-                $config,
-                (string)$connector['source_right_id'],
-                true
-            );
         $view = v2_admin_connector_view($connector, $right);
         if (
             $targetStatus === 'configured'
@@ -846,6 +912,26 @@ function v2_normalize_ingest_record(
         500000,
         false
     );
+    $fixedMetadataOnlySourceRights = array(
+        'official:sec-edgar',
+        'official:edinet',
+        'official:companies-house',
+        'official:ca-issuer-ir',
+        'official:asic-register',
+    );
+    if (
+        in_array(
+            (string)$right['source_right_id'],
+            $fixedMetadataOnlySourceRights,
+            true
+        )
+        && $body !== null
+    ) {
+        v2_write_invalid(
+            $location
+            . '.body_text: fixed Production Alpha source contract requires null'
+        );
+    }
     if ((int)$right['redistribution_allowed'] !== 1 && $body !== null) {
         v2_write_invalid($location . '.body_text: redistribution is not allowed');
     }
@@ -2277,6 +2363,25 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
     $startedAt = gmdate('Y-m-d H:i:s');
     $pdo->beginTransaction();
     try {
+        // Keep the same SourceRight -> connector order as administration and
+        // the legacy DART bridge. This avoids an ingest/admin deadlock and
+        // makes connector inactivity an authoritative kill switch.
+        $lockedRight = v2_source_right_row(
+            $pdo,
+            $config,
+            (string)$normalized['right']['source_right_id'],
+            true
+        );
+        if (
+            $lockedRight === null
+            || count(v2_source_right_ineligible_reasons($lockedRight, 'collect')) > 0
+            || !hash_equals(
+                v2_source_right_revision($lockedRight),
+                $normalized['rights_revision']
+            )
+        ) {
+            throw new RuntimeException('global_source_right_changed');
+        }
         $connectorLock = $pdo->prepare(
             'SELECT connector_id,country_code,source_key,source_type,'
             . 'source_right_id,coverage_mode,connector_status,cursor_json FROM '
@@ -2304,22 +2409,6 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
             )
         ) {
             throw new RuntimeException('global_connector_changed');
-        }
-        $lockedRight = v2_source_right_row(
-            $pdo,
-            $config,
-            (string)$normalized['right']['source_right_id'],
-            true
-        );
-        if (
-            $lockedRight === null
-            || count(v2_source_right_ineligible_reasons($lockedRight, 'collect')) > 0
-            || !hash_equals(
-                v2_source_right_revision($lockedRight),
-                $normalized['rights_revision']
-            )
-        ) {
-            throw new RuntimeException('global_source_right_changed');
         }
         $lockedReceipt = $pdo->prepare(
             'SELECT ingest_id,payload_sha256,raw_count,acknowledged_count,'

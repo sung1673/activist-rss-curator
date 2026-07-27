@@ -24,9 +24,11 @@ def test_source_right_bootstrap_is_manual_and_environment_protected() -> None:
     assert job["environment"]["name"] == "governance-release"
     assert (
         parsed["concurrency"]["group"]
-        == "governance-production-transition-${{ github.repository }}"
+        == "governance-production-official-write-"
+        "${{ github.repository }}-${{ github.ref }}"
     )
     assert parsed["concurrency"]["cancel-in-progress"] is False
+    assert parsed["concurrency"]["queue"] == "max"
 
 
 def test_workflow_binds_exact_sha_and_closed_operating_mode() -> None:

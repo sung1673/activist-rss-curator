@@ -1,0 +1,34 @@
+{
+  "schema": "source-right-contract-v1",
+  "source_right": {
+    "source_right_id": "official:dart",
+    "source_type": "official_disclosure",
+    "source_key": "dart",
+    "source_name": "OpenDART",
+    "permission_scope": "Official OpenDART metadata only: company and filing identifiers, original filing title and language, filing date and time, official source URL, filing type, and correction, cancellation, or withdrawal relationship. Full filing text, document bodies, attachments, media, and third-party content are excluded.",
+    "evidence_uri": "https://opendart.fss.or.kr/guide/main.do?apiGrpCd=DS001",
+    "evidence_hash": null,
+    "valid_until": null,
+    "revoked_at": null,
+    "ai_allowed": false,
+    "redistribution_allowed": true,
+    "status": "active"
+  },
+  "contract_payload": {
+    "contract_version": 1,
+    "source_right_id": "official:dart",
+    "source_type": "official_disclosure",
+    "source_key": "dart",
+    "source_name": "OpenDART",
+    "permission_scope_sha256": "ad2cda2de45c2376ebeccf426c2f3e35244a648b126bc7f127503420bc34d342",
+    "evidence_uri_sha256": "e17b6b265fbb0bb0d6475d6043b279c5ecc14ee8fab0a12d2b466034a35c2c07",
+    "evidence_hash": null,
+    "valid_from_state": "eligible",
+    "valid_until": null,
+    "revoked_at": null,
+    "ai_allowed": false,
+    "redistribution_allowed": true,
+    "status": "active"
+  },
+  "expected_revision": "669906e2201ec5698c823a10cac1f90aa5920a06762a46777eb794640581281c"
+}

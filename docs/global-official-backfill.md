@@ -8,11 +8,13 @@ optional dormant identity이며 `link-only`, `coverage_unavailable`,
 포함하지 않는다. CA·AU도 승인된 링크 메타데이터만 적재하므로 자동 30일 백필
 대상이 아니다.
 
-`global-backfill.yml`은 예약 SEC 증분 수집 `ingest-global.yml`과 같은
-`ingest-global-${{ github.ref_name }}` concurrency group을 사용하고
-`cancel-in-progress=false`로 실행한다. DART 백필은 DART 증분 수집과 공유하는
-별도 non-cancelling lock을 사용한다. 따라서 같은 소스의 증분 수집과 백필은
-겹치지 않는다.
+`global-backfill.yml`은 예약 SEC 증분 수집 `ingest-global.yml`, DART/KIND
+증분·백필, 공식사이트·CA/AU 링크 수집, 보호된 cutover와 같은
+repository·exact Git ref 단위 concurrency group을 사용하고
+`cancel-in-progress=false`로 실행한다. 따라서 공식 소스의 증분 수집·백필
+다중 청크와 정상 `preview → live` 전환은 겹치지 않는다. 긴급 rollback은 장기
+백필을 기다리지 않는 별도 queue에서 API를 즉시 closed로 만들고, Pages lock 안에서
+다시 확인한 뒤 legacy artifact를 복원한다.
 
 출시 전 수동 적재는 `GOVERNANCE_PIPELINE_MODE=off`에서도 실행할 수 있다.
 대신 기본 브랜치의 보호된 `governance-runtime` 환경에서만 실행되며, 수집 전에

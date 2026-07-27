@@ -32,6 +32,7 @@ from .opendart_credentials import (
     load_opendart_credentials,
 )
 from .official_source_rights import (
+    DartOfficialSourceRightClient,
     OfficialSourceRightClient,
     OfficialSourceRightEligibility,
     OfficialSourceRightError,
@@ -112,27 +113,10 @@ def _date_env(name: str, default: date) -> date:
 
 
 def source_right_payloads(config: dict[str, object], *, include_kind: bool) -> list[dict[str, object]]:
-    # OpenDART's public metadata right is a repository-owned bootstrap record.
-    # KIND is deliberately absent: it must already be registered by an editor
-    # and pass the authenticated eligibility preflight before every ingest.
-    records: list[dict[str, object]] = [
-        {
-            "source_right_id": "official:dart",
-            "source_type": "official_disclosure",
-            "source_key": "dart",
-            "source_name": "OpenDART",
-            "permission_scope": "public-disclosure metadata and source links",
-            "evidence_uri": "https://opendart.fss.or.kr/guide/main.do?apiGrpCd=DS001",
-            "valid_from": "2015-01-01T00:00:00+00:00",
-            "ai_allowed": True,
-            "redistribution_allowed": True,
-            "status": "active",
-        }
-    ]
-    # Telegram and other licensed-source rights are operational records managed
-    # through the authenticated SourceRight API. An official-disclosure run
-    # must never create or overwrite an editor-approved right with defaults.
-    return records
+    # SourceRight grants are protected operational records. Neither OpenDART
+    # nor KIND collection payloads may create, revive, or mutate one.
+    _ = config, include_kind
+    return []
 
 
 def _dedupe_disclosures(disclosures: Iterable[OfficialDisclosure]) -> list[OfficialDisclosure]:
@@ -396,6 +380,50 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
     documents = _payload_records(payload, "documents")
     events = _payload_records(payload, "events")
     rights = _payload_records(payload, "source_rights")
+    preconditions_value = payload.get("expected_source_right_revisions")
+    source_right_preconditions = (
+        dict(preconditions_value)
+        if isinstance(preconditions_value, dict)
+        else {}
+    )
+    guarded_dart_write = "official:dart" in source_right_preconditions
+    expected_deployment_code_revision = payload.get(
+        "expected_deployment_code_revision"
+    )
+    expected_release_state = payload.get("expected_release_state")
+    if guarded_dart_write and (
+        not isinstance(expected_deployment_code_revision, str)
+        or len(expected_deployment_code_revision) != 40
+        or any(
+            character not in "0123456789abcdef"
+            for character in expected_deployment_code_revision
+        )
+    ):
+        raise OfficialSourceRightError(
+            "OpenDART remote write requires the exact deployed release SHA"
+        )
+    if guarded_dart_write and expected_release_state not in {
+        "closed",
+        "preview",
+        "live",
+    }:
+        raise OfficialSourceRightError(
+            "OpenDART remote write requires the exact preflighted release state"
+        )
+    remote_action = (
+        "upsert_governance_snapshot_dart_guarded"
+        if guarded_dart_write
+        else "upsert_governance_snapshot"
+    )
+    guarded_preconditions: dict[str, object] = (
+        {
+            "expected_source_right_revisions": source_right_preconditions,
+            "expected_deployment_code_revision": expected_deployment_code_revision,
+            "expected_release_state": expected_release_state,
+        }
+        if guarded_dart_write
+        else {}
+    )
     if not remote_api_configured():
         return {
             "official_remote_synced": 0,
@@ -448,6 +476,7 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
             "documents": document_chunk,
             "events": event_chunk,
             "source_rights": rights if index == 0 else [],
+            **guarded_preconditions,
             # The collection run is written only after every data chunk has
             # returned, so an early partial failure cannot be hidden by a
             # successful final data chunk.
@@ -459,7 +488,7 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
         }
         try:
             response = post_remote_action(
-                "upsert_governance_snapshot",
+                remote_action,
                 submitted,
                 timeout=45.0,
             )
@@ -491,12 +520,13 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
                 "documents": [],
                 "events": [],
                 "source_rights": [],
+                **guarded_preconditions,
                 "run": {},
                 "expected_backend_binding_id": expected_backend_binding_id,
             }
             try:
                 response = post_remote_action(
-                    "upsert_governance_snapshot",
+                    remote_action,
                     submitted,
                     timeout=45.0,
                 )
@@ -532,13 +562,14 @@ def sync_governance_payload(payload: dict[str, object], *, run: dict[str, object
         "documents": [],
         "events": [],
         "source_rights": [],
+        **guarded_preconditions,
         "run": final_run,
         "expected_backend_binding_id": expected_backend_binding_id,
     }
     if not terminal_binding_failure:
         try:
             run_response = post_remote_action(
-                "upsert_governance_snapshot",
+                remote_action,
                 final_payload,
                 timeout=45.0,
             )
@@ -625,6 +656,24 @@ def run(
         idempotency_key=idempotency_key,
         company_master_sync=company_master_sync_requested,
     )
+    dart_enabled = bool(settings.get("dart_enabled", True))
+    dart_rights_client: DartOfficialSourceRightClient | None = None
+    dart_rights_initial: OfficialSourceRightEligibility | None = None
+    dart_deployment_code_revision: str | None = None
+    if not dry_run and dart_enabled:
+        # This occurs before OpenDART network access and before any checkpoint,
+        # data, or run write performed by this collector. Missing protected API
+        # configuration is itself a terminal apply error.
+        dart_rights_client = DartOfficialSourceRightClient()
+        candidate_revision = _code_revision()
+        if candidate_revision is None or len(candidate_revision) != 40:
+            raise OfficialSourceRightError(
+                "OpenDART apply requires the exact 40-character deployed release SHA"
+            )
+        dart_deployment_code_revision = candidate_revision
+        dart_rights_initial = dart_rights_client.preflight(
+            dart_deployment_code_revision
+        )
 
     dart_credential_configuration_error = 0
     try:
@@ -635,7 +684,6 @@ def run(
         # silent legacy fallback.
         dart_credentials = ()
         dart_credential_configuration_error = 1
-    dart_enabled = bool(settings.get("dart_enabled", True))
     page_count = min(100, max(1, int(settings.get("page_count", 100))))
     max_pages = max(1, int(settings.get("max_pages", 100)))
     kind_endpoint = os.environ.get("KIND_DISCLOSURE_ENDPOINT", "").strip()
@@ -815,6 +863,18 @@ def run(
     source_outcomes = {
         "dart": {
             "enabled": dart_enabled,
+            "rights_checked": dart_rights_initial is not None,
+            "rights_eligible": dart_rights_initial is not None,
+            "rights_revision": (
+                dart_rights_initial.rights_revision
+                if dart_rights_initial is not None
+                else None
+            ),
+            "contract_revision": (
+                dart_rights_initial.contract_revision
+                if dart_rights_initial is not None
+                else None
+            ),
             "configured": bool(
                 dart_credentials and not dart_credential_configuration_error
             ),
@@ -920,9 +980,57 @@ def run(
             "kind_rights_revision": (
                 kind_rights.rights_revision if kind_rights is not None else None
             ),
+            "dart_rights_revision": (
+                dart_rights_initial.rights_revision
+                if dart_rights_initial is not None
+                else None
+            ),
+            "dart_contract_revision": (
+                dart_rights_initial.contract_revision
+                if dart_rights_initial is not None
+                else None
+            ),
             **run_provenance,
         },
     }
+    if dart_rights_initial is not None:
+        assert dart_rights_client is not None
+        # Recheck immediately before the first remote write. The signed payload
+        # carries both digests and PHP checks them again under FOR UPDATE.
+        assert dart_deployment_code_revision is not None
+        dart_rights_final = dart_rights_client.preflight(
+            dart_deployment_code_revision
+        )
+        if (
+            dart_rights_final.rights_revision
+            != dart_rights_initial.rights_revision
+            or dart_rights_final.contract_revision
+            != dart_rights_initial.contract_revision
+            or dart_rights_final.release_state
+            != dart_rights_initial.release_state
+        ):
+            raise OfficialSourceRightError(
+                "OpenDART SourceRight or release state changed between "
+                "collection and write"
+            )
+        payload["expected_source_right_revisions"] = {
+            "official:dart": {
+                "rights_revision": dart_rights_final.rights_revision,
+                "contract_revision": dart_rights_final.contract_revision,
+            }
+        }
+        payload[
+            "expected_deployment_code_revision"
+        ] = dart_deployment_code_revision
+        if dart_rights_final.release_state not in {
+            "closed",
+            "preview",
+            "live",
+        }:
+            raise OfficialSourceRightError(
+                "OpenDART preflight did not bind an exact release state"
+            )
+        payload["expected_release_state"] = dart_rights_final.release_state
     remote_summary = (
         {
             "official_remote_synced": 0,

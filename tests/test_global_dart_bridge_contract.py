@@ -5,20 +5,30 @@ ROOT = Path(__file__).resolve().parents[1]
 V1 = (ROOT / "deploy" / "activist" / "governance_v1.php").read_text(
     encoding="utf-8"
 )
+V2 = (ROOT / "deploy" / "activist" / "governance_v2.php").read_text(
+    encoding="utf-8"
+)
+V2_WRITE = (
+    ROOT / "deploy" / "activist" / "governance_v2_write.php"
+).read_text(encoding="utf-8")
+API = (ROOT / "deploy" / "activist" / "api.php").read_text(encoding="utf-8")
+PHP_SMOKE = (
+    ROOT / "tests" / "php73_release_state_smoke.py"
+).read_text(encoding="utf-8")
 
 
 def _section(start: str, end: str) -> str:
     return V1[V1.index(start) : V1.index(end)]
 
 
-def test_bridge_is_additive_and_requires_the_exact_schema_11_manifest():
+def test_bridge_is_additive_and_requires_the_exact_schema_12_manifest():
     gate = _section(
         "function v1_global_dart_bridge_enabled",
         "function v1_global_event_family_for_legacy_type",
     )
     assert "function_exists('v2_schema_manifest_status')" in gate
     assert "$manifest['valid'] === true" in gate
-    assert "(int)$manifest['highest_version'] >= 11" in gate
+    assert "(int)$manifest['highest_version'] >= 12" in gate
     assert "migration_version=11" not in gate
     assert "migration_checksum" not in gate
     assert "return false;" in gate
@@ -28,7 +38,160 @@ def test_bridge_is_additive_and_requires_the_exact_schema_11_manifest():
         "function v1_editorial_reference_exists",
     )
     assert "$globalDartBridgeEnabled = v1_global_dart_bridge_enabled" in ingest
-    assert "if ($globalDartBridgeEnabled)" in ingest
+    assert "$globalDartProjectionEnabled = false" in ingest
+    assert "$globalDartProjectionEnabled = true" in ingest
+    assert "if ($globalDartProjectionEnabled)" in ingest
+    assert "upsert_governance_snapshot_dart_guarded" in API
+    assert "dart_guarded_action_required" in ingest
+    assert "dart_deployment_revision_mismatch" in ingest
+    assert "v2_deployment_identity_status()" in ingest
+    projection = ingest[ingest.index("$globalIssuerStmt = null") :]
+    assert "$globalDartBridgeEnabled" not in projection
+
+
+def test_guarded_lineage_covers_corrections_observations_and_partial_projection_rows():
+    candidate_section = _section(
+        "function v1_governance_snapshot_lineage_candidates",
+        "function v1_lock_existing_dart_lineage",
+    )
+    lineage_section = _section(
+        "function v1_lock_existing_dart_lineage",
+        "function v1_global_event_family_for_legacy_type",
+    )
+    assert "correction_of_document_id" in candidate_section
+    assert "$documentIds[$correctionOf] = true" in candidate_section
+    assert "table_name($config,'event_observations')" in lineage_section
+    assert "eo.source_key=\\'dart\\'" in lineage_section
+    assert "predecessor.source_right_id=\\'official:dart\\'" in lineage_section
+    assert "$issuerId === 'issuer:kr:dart:' . $companyId" in lineage_section
+    assert "$countryCode === 'KR'" in lineage_section
+    ingest = _section(
+        "function upsert_governance_snapshot",
+        "function v1_editorial_reference_exists",
+    )
+    assert ingest.count("predecessor.source_right_id=?") >= 2
+
+
+def test_lineage_uses_derived_document_ids_and_covers_company_and_run_owners():
+    identity = _section(
+        "function v1_governance_snapshot_document_id",
+        "function v1_governance_snapshot_lineage_candidates",
+    )
+    candidates = _section(
+        "function v1_governance_snapshot_lineage_candidates",
+        "function v1_lock_existing_dart_lineage",
+    )
+    lineage = _section(
+        "function v1_lock_existing_dart_lineage",
+        "function v1_global_event_family_for_legacy_type",
+    )
+    ingest = _section(
+        "function upsert_governance_snapshot",
+        "function v1_editorial_reference_exists",
+    )
+
+    assert "function v1_normalize_governance_snapshot_documents" in identity
+    assert "'dart' : 'doc'" in identity
+    assert "$documents = v1_normalize_governance_snapshot_documents" in ingest
+    assert ingest.index(
+        "$documents = v1_normalize_governance_snapshot_documents"
+    ) < ingest.index("v1_governance_snapshot_lineage_candidates(")
+    assert "array $companies" in candidates
+    assert "array $run" in candidates
+    assert "'company_ids'=>array_keys($companyIds)" in candidates
+    assert "'run_ids'=>array_keys($runIds)" in candidates
+    assert "table_name($config,'companies')" in lineage
+    assert "table_name($config,'collection_runs')" in lineage
+    assert "in_array('dart',$sourceTokens,true)" in lineage
+
+
+def test_dart_write_lock_order_and_connector_kill_switch_are_fail_closed():
+    ingest = _section(
+        "function upsert_governance_snapshot",
+        "function v1_editorial_reference_exists",
+    )
+    release_lock = ingest.index(
+        "$dartReleaseStates = v2_release_state_rows_for_update"
+    )
+    right_lock = ingest.index("$dartRight = v2_source_right_row(")
+    connector_lock = ingest.index(
+        "$dartConnector = v1_lock_global_dart_connector"
+    )
+    lineage_lock = ingest.index("v1_lock_existing_dart_lineage(")
+    first_mutation = ingest.index("$companyStmt = $pdo->prepare")
+    assert release_lock < right_lock < connector_lock < lineage_lock < first_mutation
+    assert "array('configured','active')" in ingest
+    assert "dart_connector_inactive" in ingest
+    assert "dart_connector_not_ready" in ingest
+
+    admin = V2_WRITE[
+        V2_WRITE.index("function v2_admin_update_connector") :
+        V2_WRITE.index("function v2_global_issuer_id")
+    ]
+    assert admin.index("v2_release_state_rows_for_update") < admin.index(
+        "v2_source_right_row("
+    ) < admin.index("LIMIT 1 FOR UPDATE")
+
+    global_ingest = V2_WRITE[V2_WRITE.index("function v2_ops_ingest") :]
+    transaction = global_ingest[global_ingest.index("$pdo->beginTransaction()") :]
+    assert transaction.index("$lockedRight = v2_source_right_row(") < transaction.index(
+        "$connectorLock = $pdo->prepare("
+    )
+
+    eligibility = V2[
+        V2.index("function v2_ops_source_right_eligibility") :
+        V2.index("function v2_brief_event_rows")
+    ]
+    assert "'connector:kr:dart'" in eligibility
+    assert "'connector_ready'" in eligibility
+    assert "'connector_status'" not in eligibility[eligibility.index("$response = array(") :]
+
+
+def test_signed_dart_precondition_marks_company_master_only_payload_as_guarded():
+    ingest = _section(
+        "function upsert_governance_snapshot",
+        "function v1_editorial_reference_exists",
+    )
+    expectation = ingest.index(
+        "$dartExpectation = v1_dart_source_right_expectation($payload);"
+    )
+    marks_dart = ingest.index(
+        "if ($dartExpectation !== null) { $containsDartWrite = true; }"
+    )
+    generic_rejection = ingest.index(
+        "if ($containsDartWrite && !$dartGuardedAction)"
+    )
+    guarded_payload_rejection = ingest.index(
+        "if ($dartGuardedAction && !$containsDartWrite)"
+    )
+
+    assert expectation < marks_dart < generic_rejection
+    assert marks_dart < guarded_payload_rejection
+
+
+def test_php_mysql_smoke_proves_all_dart_guards_are_no_mutation():
+    assert 'company_master_only_id = "00999979"' in PHP_SMOKE
+    assert '"upsert_governance_snapshot_dart_guarded",' in PHP_SMOKE
+    assert (
+        "exact guarded DART company-master-only chunk was not projected"
+        in PHP_SMOKE
+    )
+
+    assert 'derived_identity_document.pop("document_id", None)' in PHP_SMOKE
+    assert 'derived_identity_document.pop("source_right_id", None)' in PHP_SMOKE
+    assert 'derived_identity_document.pop("source", None)' in PHP_SMOKE
+    assert '"MAX(original_url),MAX(content_hash) FROM ci_documents "' in PHP_SMOKE
+    assert "missing document_id bypass partially changed" in PHP_SMOKE
+
+    assert "generic_company_rewrite" in PHP_SMOKE
+    assert "company-only generic action changed" in PHP_SMOKE
+    assert "generic_run_rewrite" in PHP_SMOKE
+    assert "generic run-only action changed" in PHP_SMOKE
+
+    assert "connector_ready\") is False" in PHP_SMOKE
+    assert "inactive_write.get(\"error\") == \"dart_connector_inactive\"" in PHP_SMOKE
+    assert '== "0\\t0\\t0\\t0\\tinactive"' in PHP_SMOKE
+    assert "inactive DART connector allowed a data mutation" in PHP_SMOKE
 
 
 def test_dart_companies_are_projected_to_stable_issuer_identity_and_listing_rows():
@@ -167,6 +330,9 @@ def test_connector_freshness_uses_source_scoped_success_and_exact_ack_counts():
     assert "if ($outcome['selected'] !== true) { return; }" in bridge
     assert "connector_id=? AND country_code='KR' AND source_key='dart'" in bridge
     assert "'connector:kr:dart'" in bridge
+    assert "LIMIT 1 FOR UPDATE" not in bridge
+    assert "array('configured','active')" in bridge
+    assert "connector_status IN ('configured','active')" in bridge
     assert "&& $runCompletionValid" in bridge
     assert "$finishedAt !== null && $codeRevision !== null && $hasDurableWindow" in bridge
     assert "window_end_inclusive" in bridge

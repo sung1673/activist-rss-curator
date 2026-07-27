@@ -22,6 +22,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from .official_source_contracts import DART_METADATA_SOURCE_RIGHT
 from .selected_market_ingest import parse_selected_official_links
 
 
@@ -92,20 +93,14 @@ class BootstrapSource:
 CORE_SOURCES = (
     BootstrapSource(
         country_code="KR",
-        source_right_id="official:dart",
-        source_type="official_disclosure",
-        source_key="dart",
-        source_name="OpenDART",
+        source_right_id=str(DART_METADATA_SOURCE_RIGHT["source_right_id"]),
+        source_type=str(DART_METADATA_SOURCE_RIGHT["source_type"]),
+        source_key=str(DART_METADATA_SOURCE_RIGHT["source_key"]),
+        source_name=str(DART_METADATA_SOURCE_RIGHT["source_name"]),
         connector_id="connector:kr:dart",
         coverage_mode="market-wide",
-        permission_scope=(
-            "Official OpenDART metadata only: company and filing identifiers, "
-            "original filing title and language, filing date and time, official "
-            "source URL, filing type, and correction, cancellation, or withdrawal "
-            "relationship. Full filing text, document bodies, attachments, media, "
-            "and third-party content are excluded."
-        ),
-        evidence_uri="https://opendart.fss.or.kr/guide/main.do?apiGrpCd=DS001",
+        permission_scope=str(DART_METADATA_SOURCE_RIGHT["permission_scope"]),
+        evidence_uri=str(DART_METADATA_SOURCE_RIGHT["evidence_uri"]),
     ),
     BootstrapSource(
         country_code="US",

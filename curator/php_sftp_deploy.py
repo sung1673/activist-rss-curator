@@ -4,6 +4,7 @@ import argparse
 import errno
 import hashlib
 import json
+import math
 import os
 import posixpath
 import re
@@ -12,9 +13,10 @@ import socket
 import stat
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 from urllib.parse import quote, unquote, urlsplit
@@ -101,6 +103,61 @@ MAX_PRIVATE_POLICY_BYTES = 256 * 1024
 CORE_RELEASE_CONFIRMATION_ENV = "BSIDE_CORE_RELEASE_SHA"
 CORE_ROLLBACK_RELEASE_ID_ENV = "BSIDE_CORE_ROLLBACK_RELEASE_ID"
 CORE_ROLLBACK_CURRENT_SHA_ENV = "BSIDE_CORE_ROLLBACK_CURRENT_SHA"
+SCHEMA_BRIDGE_ROLLBACK_RELEASE_ID_ENV = (
+    "BSIDE_SCHEMA_BRIDGE_ROLLBACK_RELEASE_ID"
+)
+SCHEMA_BRIDGE_ROLLBACK_CURRENT_SHA_ENV = (
+    "BSIDE_SCHEMA_BRIDGE_ROLLBACK_CURRENT_SHA"
+)
+SCHEMA_BRIDGE_ROLLBACK_PREVIOUS_SHA_ENV = (
+    "BSIDE_SCHEMA_BRIDGE_ROLLBACK_PREVIOUS_SHA"
+)
+SCHEMA_BRIDGE_ROLLBACK_BACKUP_SHA256_ENV = (
+    "BSIDE_SCHEMA_BRIDGE_ROLLBACK_BACKUP_SHA256"
+)
+SCHEMA_BRIDGE_DEPLOY_PREVIOUS_SHA_ENV = (
+    "BSIDE_SCHEMA_BRIDGE_DEPLOY_PREVIOUS_SHA"
+)
+SCHEMA_BRIDGE_DART_DISABLED_EVIDENCE_ENV = (
+    "BSIDE_SCHEMA_BRIDGE_DART_DISABLED_EVIDENCE"
+)
+SCHEMA_BRIDGE_STALE_LOCK_OWNER_ENV = (
+    "BSIDE_SCHEMA_BRIDGE_STALE_LOCK_OWNER_RELEASE_ID"
+)
+SCHEMA_BRIDGE_STALE_LOCK_WRITER_ABSENCE_ENV = (
+    "BSIDE_SCHEMA_BRIDGE_STALE_LOCK_WRITER_ABSENCE_EVIDENCE"
+)
+SCHEMA_BRIDGE_STALE_LOCK_FIRST_OBSERVED_ENV = (
+    "BSIDE_SCHEMA_BRIDGE_STALE_LOCK_FIRST_OBSERVED_AT"
+)
+PRIVATE_REPORT_ROOT_ENV = "BSIDE_PRIVATE_REPORT_ROOT"
+DART_DISABLED_EVIDENCE_PATTERN = re.compile(
+    r"^github-variable:DART_OFFICIAL_INGEST_ENABLED=false@"
+    r"[A-Za-z0-9][A-Za-z0-9:._/@=+-]{7,191}$"
+)
+STALE_LOCK_WRITER_ABSENCE_PATTERN = re.compile(
+    r"^github-actions:no-running-php-writers@"
+    r"(?P<issued_at>[0-9]{8}T[0-9]{6}Z):"
+    r"owner_sha256=(?P<owner_sha256>[0-9a-f]{64}):"
+    r"acquired_at_sha256=(?P<acquired_at_sha256>[0-9a-f]{64}):"
+    r"nonce=(?P<nonce>[0-9a-f]{32})$"
+)
+STALE_LOCK_OWNERLESS = "ownerless"
+STALE_LOCK_MINIMUM_AGE = timedelta(minutes=15)
+STALE_LOCK_EVIDENCE_MAX_AGE = timedelta(minutes=10)
+STALE_LOCK_EVIDENCE_FUTURE_SKEW = timedelta(minutes=1)
+SCHEMA_BRIDGE_STALE_LOCK_PREFIXES = (
+    "php-v2-",
+    "schema11-bridge-rollback-",
+    "schema11-bridge-abort-",
+)
+# This recovery path restores the exact production predecessor. The candidate
+# is not hard-coded because this recovery implementation itself changes the
+# final release SHA; it is instead bound to a clean local checkout, its
+# manifest and the exact remote DeployCore backup.
+ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA = (
+    "c06b374d09e18b29a14cce46719fe4f1842f9047"
+)
 GABIA_COMPATIBILITY_SSH_HOST = "alignpartnerscap.com"
 GABIA_SSH_HOST_KEY_SHA256 = (
     "SHA256:4Y2J13Nis0NOKupLJCOnr2w5X2UdBZH78TkZMVJCVLo"
@@ -109,6 +166,9 @@ GABIA_REMOTE_ROOT = "/www_root/activist"
 GABIA_PUBLIC_URL_ROOT = "https://alignpe.gabia.io/activist"
 GABIA_API_V2_BASE_URL = (
     "https://alignpe.gabia.io/activist/api.php/api/v2"
+)
+GABIA_API_V1_BASE_URL = (
+    "https://alignpe.gabia.io/activist/api.php/api/v1"
 )
 GABIA_ROLLBACK_HEALTH_URL = (
     "https://alignpe.gabia.io/activist/api.php?action=health"
@@ -126,6 +186,8 @@ class PhpDeploymentRollbackError(PhpDeploymentError):
 
 class SftpClient(Protocol):
     def lstat(self, path: str) -> Any: ...
+
+    def listdir(self, path: str) -> list[str]: ...
 
     def mkdir(self, path: str, mode: int = ...) -> None: ...
 
@@ -181,6 +243,9 @@ class BackupSnapshot:
     remote_root: str
     candidate_code_revision: str
     files: tuple[RemoteFileSnapshot, ...]
+    manifest_path: str
+    manifest_sha256: str
+    manifest_size: int
 
     @property
     def file_by_path(self) -> Mapping[str, RemoteFileSnapshot]:
@@ -205,6 +270,8 @@ HttpRequester = Callable[
     [str, str, Mapping[str, str], float],
     HttpResponse,
 ]
+BridgeReportUpdater = Callable[[str, Mapping[str, object]], None]
+BridgeReportLoader = Callable[[], Mapping[str, object]]
 
 
 class ExclusiveBytesWriter(Protocol):
@@ -484,6 +551,239 @@ def confirm_production_rollback(
     ):
         raise PhpDeploymentError(
             "production rollback confirmation does not match"
+        )
+
+
+def confirm_one_time_schema_bridge_rollback(
+    *,
+    release_id: str,
+    release_id_confirmation: object,
+    expected_current_sha: str,
+    current_sha_confirmation: object,
+    expected_previous_sha: str,
+    previous_sha_confirmation: object,
+    expected_backup_manifest_sha256: str | None,
+    backup_sha256_confirmation: object,
+    dart_disabled_evidence: str | None = None,
+    environ: Mapping[str, str] | None = None,
+    allow_missing_backup: bool = False,
+) -> None:
+    """Bind the one-time schema 12-over-11 PHP recovery to exact evidence."""
+
+    safe_release_id = _validate_release_id(release_id)
+    if (
+        SHA1_PATTERN.fullmatch(expected_current_sha) is None
+        or expected_previous_sha != ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+        or (
+            expected_backup_manifest_sha256 is not None
+            and SHA256_PATTERN.fullmatch(
+                expected_backup_manifest_sha256
+            )
+            is None
+        )
+        or (
+            expected_backup_manifest_sha256 is None
+            and not allow_missing_backup
+        )
+        or dart_disabled_evidence is None
+        or DART_DISABLED_EVIDENCE_PATTERN.fullmatch(dart_disabled_evidence)
+        is None
+    ):
+        raise PhpDeploymentError(
+            "one-time schema bridge rollback identity is invalid"
+        )
+    environment = os.environ if environ is None else environ
+    backup_confirmation_valid = (
+        backup_sha256_confirmation == expected_backup_manifest_sha256
+        and (
+            environment.get(
+                SCHEMA_BRIDGE_ROLLBACK_BACKUP_SHA256_ENV
+            )
+            == expected_backup_manifest_sha256
+            if expected_backup_manifest_sha256 is not None
+            else environment.get(
+                SCHEMA_BRIDGE_ROLLBACK_BACKUP_SHA256_ENV
+            )
+            in {None, ""}
+        )
+    )
+    if (
+        release_id_confirmation != safe_release_id
+        or environment.get(SCHEMA_BRIDGE_ROLLBACK_RELEASE_ID_ENV)
+        != safe_release_id
+        or current_sha_confirmation != expected_current_sha
+        or environment.get(SCHEMA_BRIDGE_ROLLBACK_CURRENT_SHA_ENV)
+        != expected_current_sha
+        or previous_sha_confirmation != expected_previous_sha
+        or environment.get(SCHEMA_BRIDGE_ROLLBACK_PREVIOUS_SHA_ENV)
+        != expected_previous_sha
+        or not backup_confirmation_valid
+        or environment.get(SCHEMA_BRIDGE_DART_DISABLED_EVIDENCE_ENV)
+        != dart_disabled_evidence
+    ):
+        raise PhpDeploymentError(
+            "one-time schema bridge rollback confirmation does not match"
+        )
+
+
+def _parse_utc_timestamp(value: str, *, compact: bool = False) -> datetime:
+    try:
+        if compact:
+            parsed = datetime.strptime(
+                value,
+                "%Y%m%dT%H%M%SZ",
+            ).replace(tzinfo=timezone.utc)
+        else:
+            parsed = datetime.fromisoformat(
+                value.replace("Z", "+00:00")
+            )
+    except ValueError as error:
+        raise PhpDeploymentError("stale lock timestamp is invalid") from error
+    if (
+        parsed.tzinfo is None
+        or parsed.utcoffset() != timedelta(0)
+    ):
+        raise PhpDeploymentError("stale lock timestamp is not UTC")
+    return parsed
+
+
+def _validated_stale_lock_writer_absence(
+    evidence: str,
+    *,
+    expected_owner_sha256: str | None = None,
+    acquired_at_reference: str | None = None,
+    now: datetime | None = None,
+) -> Mapping[str, str]:
+    match = STALE_LOCK_WRITER_ABSENCE_PATTERN.fullmatch(evidence)
+    if match is None:
+        raise PhpDeploymentError(
+            "stale lock writer-absence evidence syntax is invalid"
+        )
+    observed_now = datetime.now(timezone.utc) if now is None else now
+    issued_at = _parse_utc_timestamp(
+        match.group("issued_at"),
+        compact=True,
+    )
+    if (
+        issued_at < observed_now - STALE_LOCK_EVIDENCE_MAX_AGE
+        or issued_at > observed_now + STALE_LOCK_EVIDENCE_FUTURE_SKEW
+    ):
+        raise PhpDeploymentError(
+            "stale lock writer-absence evidence is not fresh"
+        )
+    if (
+        expected_owner_sha256 is not None
+        and not secrets.compare_digest(
+            match.group("owner_sha256"),
+            expected_owner_sha256,
+        )
+    ):
+        raise PhpDeploymentError(
+            "stale lock evidence owner digest does not match"
+        )
+    if acquired_at_reference is not None:
+        acquired_at = _parse_utc_timestamp(acquired_at_reference)
+        if acquired_at > observed_now - STALE_LOCK_MINIMUM_AGE:
+            raise PhpDeploymentError(
+                "deployment lock has not reached the minimum stale age"
+            )
+        expected_acquired_digest = _sha256_bytes(
+            acquired_at_reference.encode("ascii")
+        )
+        if not secrets.compare_digest(
+            match.group("acquired_at_sha256"),
+            expected_acquired_digest,
+        ):
+            raise PhpDeploymentError(
+                "stale lock evidence acquisition digest does not match"
+            )
+    return dict(match.groupdict())
+
+
+def confirm_schema_bridge_stale_lock_takeover(
+    *,
+    owner_release_id: str | None,
+    owner_release_id_confirmation: str | None,
+    writer_absence_evidence: str | None,
+    first_observed_at: str | None = None,
+    environ: Mapping[str, str] | None = None,
+    allow_recorded_evidence: bool = False,
+) -> None:
+    """Require independent operator and Actions evidence before lock takeover."""
+
+    values = (
+        owner_release_id,
+        owner_release_id_confirmation,
+        writer_absence_evidence,
+        first_observed_at,
+    )
+    if all(value is None for value in values[:3]) and first_observed_at is None:
+        return
+    if any(value is None for value in values[:3]):
+        raise PhpDeploymentError(
+            "stale lock takeover confirmation is incomplete"
+        )
+    assert owner_release_id is not None
+    assert owner_release_id_confirmation is not None
+    assert writer_absence_evidence is not None
+    safe_owner = (
+        STALE_LOCK_OWNERLESS
+        if owner_release_id == STALE_LOCK_OWNERLESS
+        else _validate_release_id(owner_release_id)
+    )
+    environment = os.environ if environ is None else environ
+    if (
+        safe_owner != owner_release_id
+        or owner_release_id_confirmation != safe_owner
+        or (
+            safe_owner != STALE_LOCK_OWNERLESS
+            and not safe_owner.startswith(
+                SCHEMA_BRIDGE_STALE_LOCK_PREFIXES
+            )
+        )
+        or environment.get(SCHEMA_BRIDGE_STALE_LOCK_OWNER_ENV)
+        != safe_owner
+        or environment.get(
+            SCHEMA_BRIDGE_STALE_LOCK_WRITER_ABSENCE_ENV
+        )
+        != writer_absence_evidence
+        or environment.get(
+            SCHEMA_BRIDGE_STALE_LOCK_FIRST_OBSERVED_ENV,
+            "",
+        )
+        != (first_observed_at or "")
+        or (
+            safe_owner == STALE_LOCK_OWNERLESS
+            and first_observed_at is None
+        )
+        or (
+            safe_owner != STALE_LOCK_OWNERLESS
+            and first_observed_at is not None
+        )
+    ):
+        raise PhpDeploymentError(
+            "stale lock takeover confirmation does not match"
+        )
+    if (
+        STALE_LOCK_WRITER_ABSENCE_PATTERN.fullmatch(
+            writer_absence_evidence
+        )
+        is None
+    ):
+        raise PhpDeploymentError(
+            "schema bridge stale lock evidence is invalid"
+        )
+    if allow_recorded_evidence:
+        return
+    if safe_owner == STALE_LOCK_OWNERLESS:
+        assert first_observed_at is not None
+        _validated_stale_lock_writer_absence(
+            writer_absence_evidence,
+            acquired_at_reference=first_observed_at,
+        )
+    else:
+        _validated_stale_lock_writer_absence(
+            writer_absence_evidence
         )
 
 
@@ -778,6 +1078,55 @@ def _read_remote_bytes(
     content = b"".join(chunks)
     if isinstance(declared_size, int) and len(content) != declared_size:
         raise PhpDeploymentError("remote file size changed during read")
+    return content
+
+
+def _read_stable_remote_regular_bytes(
+    client: SftpClient,
+    path: str,
+    *,
+    required_mode: int | None = None,
+    expected_size: int | None = None,
+    label: str,
+) -> bytes:
+    """Read a regular file while proving its public metadata stayed fixed."""
+
+    before = _lstat_or_none(client, path)
+    if before is None:
+        raise PhpDeploymentError(f"{label} is missing")
+    before_mode = _mode(before)
+    before_size = getattr(before, "st_size", None)
+    if (
+        stat.S_ISLNK(before_mode)
+        or not stat.S_ISREG(before_mode)
+        or not isinstance(before_size, int)
+        or before_size < 0
+        or (
+            required_mode is not None
+            and stat.S_IMODE(before_mode) != required_mode
+        )
+        or (expected_size is not None and before_size != expected_size)
+    ):
+        raise PhpDeploymentError(f"{label} metadata is invalid")
+    content = _read_remote_bytes(client, path)
+    after = _lstat_or_none(client, path)
+    if after is None:
+        raise PhpDeploymentError(f"{label} changed during verification")
+    after_mode = _mode(after)
+    after_size = getattr(after, "st_size", None)
+    if (
+        stat.S_ISLNK(after_mode)
+        or not stat.S_ISREG(after_mode)
+        or stat.S_IMODE(after_mode) != stat.S_IMODE(before_mode)
+        or after_size != before_size
+        or len(content) != before_size
+        or (
+            required_mode is not None
+            and stat.S_IMODE(after_mode) != required_mode
+        )
+        or (expected_size is not None and after_size != expected_size)
+    ):
+        raise PhpDeploymentError(f"{label} changed during verification")
     return content
 
 
@@ -1762,6 +2111,9 @@ def capture_remote_backup(
             remote_root=_remote_absolute_path(remote_root, label="remote root"),
             candidate_code_revision=plan.code_revision,
             files=tuple(snapshots),
+            manifest_path="",
+            manifest_sha256="",
+            manifest_size=0,
         )
         manifest_bytes = _encode_json(_backup_manifest_payload(snapshot))
         manifest_path = _remote_join(
@@ -1775,7 +2127,16 @@ def capture_remote_backup(
             manifest_bytes,
             mode=PRIVATE_FILE_MODE,
         )
-        return snapshot
+        return BackupSnapshot(
+            release_id=snapshot.release_id,
+            backup_directory=snapshot.backup_directory,
+            remote_root=snapshot.remote_root,
+            candidate_code_revision=snapshot.candidate_code_revision,
+            files=snapshot.files,
+            manifest_path=manifest_path,
+            manifest_sha256=_sha256_bytes(manifest_bytes),
+            manifest_size=len(manifest_bytes),
+        )
     except BaseException as operation_error:
         try:
             _cleanup_workspace(
@@ -1892,6 +2253,9 @@ def load_remote_backup(
         remote_root=expected_remote_root,
         candidate_code_revision=payload["candidate_code_revision"],
         files=files,
+        manifest_path=manifest_path,
+        manifest_sha256=_sha256_bytes(raw),
+        manifest_size=len(raw),
     )
     for item in snapshot.files:
         if not item.existed:
@@ -1910,11 +2274,174 @@ def load_remote_backup(
     return snapshot
 
 
+def verify_one_time_schema_bridge_backup(
+    client: SftpClient,
+    *,
+    snapshot: BackupSnapshot,
+    expected_current_sha: str,
+    expected_previous_sha: str,
+    expected_manifest_sha256: str,
+) -> None:
+    """Verify the exact DeployCore backup that precedes the schema bridge."""
+
+    if (
+        SHA1_PATTERN.fullmatch(expected_current_sha) is None
+        or expected_previous_sha != ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+        or snapshot.candidate_code_revision != expected_current_sha
+        or SHA256_PATTERN.fullmatch(expected_manifest_sha256) is None
+        or snapshot.manifest_path
+        != _remote_join(snapshot.backup_directory, "backup-manifest.json")
+        or snapshot.manifest_size < 1
+    ):
+        raise PhpDeploymentError(
+            "one-time schema bridge backup identity does not match"
+        )
+    if not secrets.compare_digest(
+        snapshot.manifest_sha256,
+        expected_manifest_sha256,
+    ):
+        raise PhpDeploymentError(
+            "one-time schema bridge backup manifest hash does not match"
+        )
+    previous_release = inspect_backup_previous_release(
+        client,
+        snapshot=snapshot,
+    )
+    if (
+        previous_release is None
+        or previous_release[0] != expected_previous_sha
+        or previous_release[1] != frozenset(LEGACY_SCHEMA_11_CORE_API_FILES)
+    ):
+        raise PhpDeploymentError(
+            "one-time schema bridge previous manifest identity is invalid"
+        )
+    files = snapshot.file_by_path
+    for relative_path in (
+        *LEGACY_SCHEMA_11_CORE_API_FILES,
+        DEPLOYMENT_MANIFEST_NAME,
+    ):
+        predecessor = files.get(relative_path)
+        if (
+            predecessor is None
+            or not predecessor.existed
+            or predecessor.mode != DEFAULT_FILE_MODE
+        ):
+            raise PhpDeploymentError(
+                "one-time schema bridge predecessor mode is not exact 0644"
+            )
+    migration_012 = files.get("migrations/012_dart_credential_pool.sql")
+    if migration_012 is None or migration_012.existed:
+        raise PhpDeploymentError(
+            "one-time schema bridge backup is not a schema 11 predecessor"
+        )
+
+
+def confirm_one_time_schema_bridge_deploy(
+    *,
+    expected_previous_sha: str,
+    previous_sha_confirmation: object,
+    dart_disabled_evidence: str,
+    environ: Mapping[str, str] | None = None,
+) -> None:
+    """Bind the schema bridge to c06 and durable DART-off evidence."""
+
+    if (
+        expected_previous_sha != ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+        or previous_sha_confirmation != expected_previous_sha
+        or DART_DISABLED_EVIDENCE_PATTERN.fullmatch(dart_disabled_evidence)
+        is None
+    ):
+        raise PhpDeploymentError(
+            "one-time schema bridge deploy identity is invalid"
+        )
+    environment = os.environ if environ is None else environ
+    if (
+        environment.get(SCHEMA_BRIDGE_DEPLOY_PREVIOUS_SHA_ENV)
+        != expected_previous_sha
+        or environment.get(SCHEMA_BRIDGE_DART_DISABLED_EVIDENCE_ENV)
+        != dart_disabled_evidence
+    ):
+        raise PhpDeploymentError(
+            "one-time schema bridge deploy confirmation does not match"
+        )
+
+
+def inspect_backup_previous_release(
+    client: SftpClient,
+    *,
+    snapshot: BackupSnapshot,
+) -> tuple[str, frozenset[str]] | None:
+    """Validate and identify the deployment manifest embedded in a backup."""
+
+    files = snapshot.file_by_path
+    previous_manifest = files.get(DEPLOYMENT_MANIFEST_NAME)
+    if previous_manifest is None:
+        raise PhpDeploymentError("remote backup has no manifest entry")
+    if not previous_manifest.existed:
+        return None
+    if (
+        previous_manifest.backup_blob is None
+        or previous_manifest.sha256 is None
+    ):
+        raise PhpDeploymentError("remote backup previous manifest is incomplete")
+    raw = _read_remote_bytes(
+        client,
+        _remote_join(
+            snapshot.backup_directory,
+            previous_manifest.backup_blob,
+        ),
+    )
+    if not secrets.compare_digest(
+        _sha256_bytes(raw),
+        previous_manifest.sha256,
+    ):
+        raise PhpDeploymentError("remote backup previous manifest bytes changed")
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PhpDeploymentError(
+            "remote backup previous manifest is invalid"
+        ) from error
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != {"schema_version", "code_revision", "files"}
+        or payload.get("schema_version") != 1
+        or not isinstance(payload.get("code_revision"), str)
+        or SHA1_PATTERN.fullmatch(payload["code_revision"]) is None
+        or not isinstance(payload.get("files"), dict)
+    ):
+        raise PhpDeploymentError(
+            "remote backup previous manifest identity is invalid"
+        )
+    manifest_files = frozenset(payload["files"])
+    if manifest_files not in {
+        frozenset(CORE_API_FILES),
+        frozenset(LEGACY_SCHEMA_11_CORE_API_FILES),
+    }:
+        raise PhpDeploymentError(
+            "remote backup previous manifest file set is unsupported"
+        )
+    for relative_path in manifest_files:
+        item = files.get(relative_path)
+        expected_digest = payload["files"].get(relative_path)
+        if (
+            item is None
+            or not item.existed
+            or item.sha256 is None
+            or expected_digest != item.sha256
+        ):
+            raise PhpDeploymentError(
+                "remote backup previous release bytes are incomplete"
+            )
+    return payload["code_revision"], manifest_files
+
+
 def verify_existing_remote_release_identity(
     client: SftpClient,
     *,
     remote_root: str,
     expected_core_files: Sequence[str] = CORE_API_FILES,
+    required_mode: int | None = None,
 ) -> str | None:
     """Verify the current v2 manifest and bytes, or attest a first deploy."""
 
@@ -1955,11 +2482,23 @@ def verify_existing_remote_release_identity(
                 )
         return None
     manifest_mode = _mode(attributes)
-    if stat.S_ISLNK(manifest_mode) or not stat.S_ISREG(manifest_mode):
+    if (
+        stat.S_ISLNK(manifest_mode)
+        or not stat.S_ISREG(manifest_mode)
+        or (
+            required_mode is not None
+            and stat.S_IMODE(manifest_mode) != required_mode
+        )
+    ):
         raise PhpDeploymentError(
             "existing deployment manifest is not a regular file"
         )
-    raw = _read_remote_bytes(client, manifest_path)
+    raw = _read_stable_remote_regular_bytes(
+        client,
+        manifest_path,
+        required_mode=required_mode,
+        label="existing deployment manifest",
+    )
     try:
         payload = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -1987,9 +2526,11 @@ def verify_existing_remote_release_identity(
             raise PhpDeploymentError(
                 "existing deployment manifest file hash is invalid"
             )
-        content = _read_remote_bytes(
+        content = _read_stable_remote_regular_bytes(
             client,
             _remote_join(root, relative_path),
+            required_mode=required_mode,
+            label="existing deployment artifact",
         )
         if not secrets.compare_digest(
             _sha256_bytes(content),
@@ -1999,6 +2540,34 @@ def verify_existing_remote_release_identity(
                 "existing deployment bytes do not match the manifest"
             )
     return payload["code_revision"]
+
+
+def verify_remote_release_matches_plan(
+    client: SftpClient,
+    *,
+    remote_root: str,
+    plan: LocalDeploymentPlan,
+) -> None:
+    """Bind a deployed release to the exact clean local candidate bytes."""
+
+    root = _remote_absolute_path(remote_root, label="remote root")
+    for artifact in plan.artifacts:
+        content = _read_stable_remote_regular_bytes(
+            client,
+            _remote_join(root, artifact.relative_path),
+            required_mode=artifact.mode,
+            label="remote candidate artifact",
+        )
+        if (
+            len(content) != artifact.size
+            or not secrets.compare_digest(
+                _sha256_bytes(content),
+                artifact.sha256,
+            )
+        ):
+            raise PhpDeploymentError(
+                "remote candidate bytes do not match the exact local release"
+            )
 
 
 def verify_remote_targets_match_snapshot(
@@ -2054,6 +2623,102 @@ def verify_remote_targets_match_snapshot(
             raise PhpDeploymentError(
                 "deployment target changed after backup capture"
             )
+
+
+def classify_schema_bridge_targets(
+    client: SftpClient,
+    *,
+    candidate_plan: LocalDeploymentPlan,
+    predecessor: BackupSnapshot,
+) -> str:
+    """Classify exact candidate/predecessor mixtures after an interrupted commit."""
+
+    candidate_files = candidate_plan.artifact_by_path
+    predecessor_files = predecessor.file_by_path
+    if set(candidate_files) != set(predecessor_files):
+        raise PhpDeploymentError("schema bridge recovery target set changed")
+    saw_candidate_only = False
+    saw_predecessor_only = False
+    saw_restore_transition = False
+    for relative_path in DEFAULT_COMMIT_ORDER:
+        artifact = candidate_files[relative_path]
+        previous = predecessor_files[relative_path]
+        target = _remote_join(predecessor.remote_root, relative_path)
+        attributes = _lstat_or_none(client, target)
+        if attributes is None:
+            candidate_match = False
+            previous_match = not previous.existed
+            # restore_remote_backup deliberately removes the commit marker
+            # before it restores dependencies and writes the marker last.
+            transition_match = (
+                relative_path == DEPLOYMENT_MANIFEST_NAME
+                and previous.existed
+            )
+        else:
+            target_mode = _mode(attributes)
+            if stat.S_ISLNK(target_mode) or not stat.S_ISREG(target_mode):
+                raise PhpDeploymentError(
+                    "schema bridge recovery target is not a regular file"
+                )
+            content = _read_stable_remote_regular_bytes(
+                client,
+                target,
+                label="schema bridge recovery target",
+            )
+            after = _lstat_or_none(client, target)
+            if after is None:
+                raise PhpDeploymentError(
+                    "schema bridge recovery target changed during verification"
+                )
+            after_mode = _mode(after)
+            if (
+                stat.S_ISLNK(after_mode)
+                or not stat.S_ISREG(after_mode)
+                or stat.S_IMODE(after_mode)
+                != stat.S_IMODE(target_mode)
+                or getattr(after, "st_size", None) != len(content)
+            ):
+                raise PhpDeploymentError(
+                    "schema bridge recovery target changed during verification"
+                )
+            digest = _sha256_bytes(content)
+            mode = stat.S_IMODE(target_mode)
+            candidate_match = (
+                len(content) == artifact.size
+                and mode == artifact.mode
+                and secrets.compare_digest(digest, artifact.sha256)
+            )
+            previous_match = (
+                previous.existed
+                and previous.size == len(content)
+                and previous.mode == mode
+                and previous.sha256 is not None
+                and secrets.compare_digest(digest, previous.sha256)
+            )
+            transition_match = False
+        if candidate_match and previous_match:
+            continue
+        if candidate_match:
+            saw_candidate_only = True
+        elif previous_match:
+            saw_predecessor_only = True
+        elif transition_match:
+            saw_restore_transition = True
+        else:
+            raise PhpDeploymentError(
+                "schema bridge recovery found an unrecognized target identity"
+            )
+    if saw_candidate_only and not (
+        saw_predecessor_only or saw_restore_transition
+    ):
+        return "candidate"
+    if not saw_candidate_only:
+        return (
+            "predecessor"
+            if not saw_restore_transition
+            else "predecessor_restore_transition"
+        )
+    return "mixed"
 
 
 def _acquire_deployment_lock(
@@ -2154,6 +2819,595 @@ def _release_deployment_lock(
         ) from error
 
 
+def _read_exact_deployment_lock_owner(
+    client: SftpClient,
+    *,
+    lock_path: str,
+    expected_release_id: str,
+) -> tuple[bytes, Mapping[str, object]]:
+    lock_attributes = _lstat_or_none(client, lock_path)
+    if lock_attributes is None:
+        raise PhpDeploymentError("expected stale deployment lock is missing")
+    lock_mode = _mode(lock_attributes)
+    if (
+        stat.S_ISLNK(lock_mode)
+        or not stat.S_ISDIR(lock_mode)
+        or stat.S_IMODE(lock_mode) != PRIVATE_DIRECTORY_MODE
+    ):
+        raise PhpDeploymentError(
+            "stale deployment lock directory identity is invalid"
+        )
+    owner_path = _remote_join(lock_path, "owner.json")
+    owner_attributes = _lstat_or_none(client, owner_path)
+    if owner_attributes is None:
+        raise PhpDeploymentError("stale deployment lock owner is missing")
+    owner_mode = _mode(owner_attributes)
+    if (
+        stat.S_ISLNK(owner_mode)
+        or not stat.S_ISREG(owner_mode)
+        or stat.S_IMODE(owner_mode) != PRIVATE_FILE_MODE
+    ):
+        raise PhpDeploymentError(
+            "stale deployment lock owner mode is invalid"
+        )
+    owner_content = _read_stable_remote_regular_bytes(
+        client,
+        owner_path,
+        required_mode=PRIVATE_FILE_MODE,
+        label="stale deployment lock owner",
+    )
+    try:
+        owner = json.loads(owner_content)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PhpDeploymentError(
+            "stale deployment lock owner JSON is invalid"
+        ) from error
+    if (
+        not isinstance(owner, dict)
+        or set(owner) != {"schema_version", "release_id", "acquired_at"}
+        or owner.get("schema_version") != 1
+        or owner.get("release_id") != expected_release_id
+        or not expected_release_id.startswith(
+            SCHEMA_BRIDGE_STALE_LOCK_PREFIXES
+        )
+        or not isinstance(owner.get("acquired_at"), str)
+    ):
+        raise PhpDeploymentError(
+            "stale deployment lock owner identity does not match"
+        )
+    try:
+        acquired_at = datetime.fromisoformat(str(owner["acquired_at"]))
+    except ValueError as error:
+        raise PhpDeploymentError(
+            "stale deployment lock acquisition time is invalid"
+        ) from error
+    if (
+        acquired_at.tzinfo is None
+        or acquired_at.utcoffset() is None
+        or acquired_at > datetime.now(timezone.utc)
+    ):
+        raise PhpDeploymentError(
+            "stale deployment lock acquisition time is invalid"
+        )
+    return owner_content, owner
+
+
+def _ownerless_lock_remote_identity(
+    attributes: Any,
+    *,
+    lock_path: str,
+    now: datetime | None = None,
+) -> tuple[bytes, Mapping[str, object], str]:
+    lock_mode = _mode(attributes)
+    lock_size = getattr(attributes, "st_size", None)
+    lock_mtime = getattr(attributes, "st_mtime", None)
+    if (
+        stat.S_ISLNK(lock_mode)
+        or not stat.S_ISDIR(lock_mode)
+        or stat.S_IMODE(lock_mode) != PRIVATE_DIRECTORY_MODE
+        or type(lock_size) is not int
+        or not isinstance(lock_mtime, (int, float))
+        or isinstance(lock_mtime, bool)
+        or not math.isfinite(float(lock_mtime))
+        or float(lock_mtime) < 0
+    ):
+        raise PhpDeploymentError(
+            "ownerless deployment lock remote identity is invalid"
+        )
+    observed_now = datetime.now(timezone.utc) if now is None else now
+    remote_mtime = datetime.fromtimestamp(
+        float(lock_mtime),
+        timezone.utc,
+    )
+    if (
+        remote_mtime
+        > observed_now + STALE_LOCK_EVIDENCE_FUTURE_SKEW
+        or remote_mtime > observed_now - STALE_LOCK_MINIMUM_AGE
+    ):
+        raise PhpDeploymentError(
+            "ownerless deployment lock has not reached the minimum "
+            "remote stale age"
+        )
+    identity: dict[str, object] = {
+        "schema_version": 1,
+        "lock_path": lock_path,
+        "st_mode": PRIVATE_DIRECTORY_MODE,
+        "st_size": lock_size,
+        "st_mtime": lock_mtime,
+        "st_uid": (
+            getattr(attributes, "st_uid")
+            if type(getattr(attributes, "st_uid", None)) is int
+            else None
+        ),
+        "st_gid": (
+            getattr(attributes, "st_gid")
+            if type(getattr(attributes, "st_gid", None)) is int
+            else None
+        ),
+        "st_ino": (
+            getattr(attributes, "st_ino")
+            if type(getattr(attributes, "st_ino", None)) is int
+            else None
+        ),
+        "st_dev": (
+            getattr(attributes, "st_dev")
+            if type(getattr(attributes, "st_dev", None)) is int
+            else None
+        ),
+    }
+    encoded = _encode_json(identity)
+    return encoded, identity, remote_mtime.isoformat()
+
+
+def _read_exact_ownerless_deployment_lock(
+    client: SftpClient,
+    *,
+    lock_path: str,
+) -> tuple[bytes, Mapping[str, object], str]:
+    lock_attributes = _lstat_or_none(client, lock_path)
+    if lock_attributes is None:
+        raise PhpDeploymentError("expected ownerless lock is missing")
+    if (
+        _lstat_or_none(
+            client,
+            _remote_join(lock_path, "owner.json"),
+        )
+        is not None
+    ):
+        raise PhpDeploymentError(
+            "ownerless deployment lock identity is invalid"
+        )
+    try:
+        entries = client.listdir(lock_path)
+    except OSError as error:
+        raise PhpDeploymentError(
+            "ownerless deployment lock contents could not be verified"
+        ) from error
+    if entries:
+        raise PhpDeploymentError(
+            "ownerless deployment lock is not empty"
+        )
+    encoded, identity, remote_mtime = _ownerless_lock_remote_identity(
+        lock_attributes,
+        lock_path=lock_path,
+    )
+    after = _lstat_or_none(client, lock_path)
+    if after is None:
+        raise PhpDeploymentError(
+            "ownerless deployment lock changed during verification"
+        )
+    after_encoded, _after_identity, _after_mtime = (
+        _ownerless_lock_remote_identity(
+            after,
+            lock_path=lock_path,
+        )
+    )
+    try:
+        after_entries = client.listdir(lock_path)
+    except OSError as error:
+        raise PhpDeploymentError(
+            "ownerless deployment lock contents changed during "
+            "verification"
+        ) from error
+    if (
+        not secrets.compare_digest(encoded, after_encoded)
+        or after_entries
+        or _lstat_or_none(
+            client,
+            _remote_join(lock_path, "owner.json"),
+        )
+        is not None
+    ):
+        raise PhpDeploymentError(
+            "ownerless deployment lock changed during verification"
+        )
+    return encoded, identity, remote_mtime
+
+
+def inspect_ownerless_deployment_lock(
+    client: SftpClient,
+    *,
+    remote_root: str,
+) -> Mapping[str, object]:
+    """Read and attest the exact stale ownerless lock without mutating it."""
+
+    safe_remote_root = _remote_absolute_path(
+        remote_root,
+        label="remote root",
+    )
+    lock_path = _remote_join(
+        _remote_join(safe_remote_root, "_private"),
+        "deployment-lock",
+    )
+    encoded, identity, remote_mtime = (
+        _read_exact_ownerless_deployment_lock(
+            client,
+            lock_path=lock_path,
+        )
+    )
+    return {
+        "schema_version": 1,
+        "inspection": "schema_bridge_ownerless_lock",
+        "owner_release_id": STALE_LOCK_OWNERLESS,
+        "lock_path": lock_path,
+        "remote_identity": dict(identity),
+        "owner_sha256": _sha256_bytes(encoded),
+        "stale_lock_first_observed_at": remote_mtime,
+        "remote_mtime": remote_mtime,
+        "minimum_remote_age_seconds": int(
+            STALE_LOCK_MINIMUM_AGE.total_seconds()
+        ),
+        "eligible_for_writer_absence_attestation": True,
+        "remote_files_mutated": False,
+    }
+
+
+def _remove_exact_ownerless_deployment_lock(
+    client: SftpClient,
+    *,
+    lock_path: str,
+    expected_remote_identity: bytes,
+) -> None:
+    current_identity, _identity, _mtime = (
+        _read_exact_ownerless_deployment_lock(
+            client,
+            lock_path=lock_path,
+        )
+    )
+    if not secrets.compare_digest(
+        current_identity,
+        expected_remote_identity,
+    ):
+        raise PhpDeploymentError(
+            "ownerless deployment lock remote identity changed before "
+            "takeover"
+        )
+    try:
+        client.rmdir(lock_path)
+    except OSError as error:
+        raise PhpDeploymentError(
+            "ownerless lock takeover refused a non-empty lock"
+        ) from error
+    if _lstat_or_none(client, lock_path) is not None:
+        raise PhpDeploymentError(
+            "ownerless deployment lock cleanup could not be verified"
+        )
+
+
+def _remove_exact_stale_deployment_lock(
+    client: SftpClient,
+    *,
+    lock_path: str,
+    expected_owner_content: bytes,
+    expected_release_id: str,
+    exclusive_writer: ExclusiveBytesWriter,
+) -> None:
+    current_content, _owner = _read_exact_deployment_lock_owner(
+        client,
+        lock_path=lock_path,
+        expected_release_id=expected_release_id,
+    )
+    if not secrets.compare_digest(current_content, expected_owner_content):
+        raise PhpDeploymentError(
+            "stale deployment lock owner changed before takeover"
+        )
+    owner_path = _remote_join(lock_path, "owner.json")
+    _remove_remote_file_if_present(client, owner_path)
+    try:
+        client.rmdir(lock_path)
+    except OSError as error:
+        try:
+            exclusive_writer(
+                client,
+                owner_path,
+                expected_owner_content,
+                mode=PRIVATE_FILE_MODE,
+            )
+        except BaseException as restore_error:
+            raise PhpDeploymentError(
+                "stale lock takeover failed and owner evidence could not "
+                "be restored"
+            ) from restore_error
+        raise PhpDeploymentError(
+            "stale lock takeover refused a non-empty or changed lock"
+        ) from error
+    if _lstat_or_none(client, lock_path) is not None:
+        raise PhpDeploymentError(
+            "stale deployment lock cleanup could not be verified"
+        )
+
+
+def _acquire_schema_bridge_abort_lock(
+    client: SftpClient,
+    *,
+    private_root: str,
+    replacement_release_id: str,
+    stale_owner_release_id: str | None,
+    writer_absence_evidence: str | None,
+    stale_lock_first_observed_at: str | None,
+    exclusive_writer: ExclusiveBytesWriter,
+    bridge_report_update: BridgeReportUpdater,
+) -> tuple[str, Mapping[str, object] | None]:
+    lock_path = _remote_join(private_root, "deployment-lock")
+    state_loader = getattr(
+        bridge_report_update,
+        "_bside_bridge_state_loader",
+        None,
+    )
+    durable_state = state_loader() if callable(state_loader) else None
+    durable_takeover = (
+        durable_state.get("stale_lock_takeover")
+        if isinstance(durable_state, dict)
+        and durable_state.get("status")
+        in (
+            "stale_lock_takeover_ready",
+            "stale_lock_takeover_complete",
+        )
+        else None
+    )
+    if durable_takeover is not None:
+        assert isinstance(durable_state, dict)
+        durable_status = durable_state.get("status")
+        if (
+            not _valid_stale_lock_takeover_identity(durable_takeover)
+            or (
+                durable_status
+                == "stale_lock_takeover_complete"
+                and durable_state.get(
+                    "stale_lock_cleanup_verified"
+                )
+                is not True
+            )
+            or stale_owner_release_id
+            != durable_takeover.get("stale_owner_release_id")
+            or writer_absence_evidence
+            != durable_takeover.get("writer_absence_evidence")
+        ):
+            raise PhpDeploymentError(
+                "durable stale lock takeover identity changed"
+            )
+        persisted_replacement = str(
+            durable_takeover["replacement_release_id"]
+        )
+        lock_attributes = _lstat_or_none(client, lock_path)
+        if lock_attributes is None:
+            replacement = _acquire_deployment_lock(
+                client,
+                private_root,
+                persisted_replacement,
+            )
+        else:
+            replacement = lock_path
+            replacement_present = False
+            try:
+                _read_exact_deployment_lock_owner(
+                    client,
+                    lock_path=lock_path,
+                    expected_release_id=persisted_replacement,
+                )
+                replacement_present = True
+            except PhpDeploymentError:
+                replacement_present = False
+            if not replacement_present:
+                if durable_status == "stale_lock_takeover_complete":
+                    raise PhpDeploymentError(
+                        "completed stale lock takeover found an unrelated "
+                        "replacement lock"
+                    )
+                stale_state = durable_takeover.get("stale_owner_state")
+                if stale_state == "ownerless":
+                    raise PhpDeploymentError(
+                        "ownerless takeover-ready lock cannot be "
+                        "distinguished from a new writer"
+                    )
+                elif stale_state == "owner_present":
+                    owner_content, _owner = (
+                        _read_exact_deployment_lock_owner(
+                            client,
+                            lock_path=lock_path,
+                            expected_release_id=str(
+                                durable_takeover[
+                                    "stale_owner_release_id"
+                                ]
+                            ),
+                        )
+                    )
+                    if not secrets.compare_digest(
+                        _sha256_bytes(owner_content),
+                        str(
+                            durable_takeover[
+                                "stale_owner_sha256"
+                            ]
+                        ),
+                    ):
+                        raise PhpDeploymentError(
+                            "durable stale lock owner digest changed"
+                        )
+                    _remove_exact_stale_deployment_lock(
+                        client,
+                        lock_path=lock_path,
+                        expected_owner_content=owner_content,
+                        expected_release_id=str(
+                            durable_takeover[
+                                "stale_owner_release_id"
+                            ]
+                        ),
+                        exclusive_writer=exclusive_writer,
+                    )
+                else:
+                    raise PhpDeploymentError(
+                        "durable stale lock owner state is invalid"
+                    )
+                replacement = _acquire_deployment_lock(
+                    client,
+                    private_root,
+                    persisted_replacement,
+                )
+        bridge_report_update(
+            "stale_lock_takeover_complete",
+            {
+                "stale_lock_takeover": durable_takeover,
+                "stale_lock_cleanup_verified": True,
+            },
+        )
+        return replacement, dict(durable_takeover)
+    if _lstat_or_none(client, lock_path) is None:
+        return (
+            _acquire_deployment_lock(
+                client,
+                private_root,
+                replacement_release_id,
+            ),
+            None,
+        )
+    if (
+        stale_owner_release_id is None
+        or writer_absence_evidence is None
+        or (
+            stale_owner_release_id != STALE_LOCK_OWNERLESS
+            and not stale_owner_release_id.startswith(
+                SCHEMA_BRIDGE_STALE_LOCK_PREFIXES
+            )
+        )
+        or (
+            stale_owner_release_id == STALE_LOCK_OWNERLESS
+            and stale_lock_first_observed_at is None
+        )
+        or (
+            stale_owner_release_id != STALE_LOCK_OWNERLESS
+            and stale_lock_first_observed_at is not None
+        )
+    ):
+        raise PhpDeploymentError(
+            "schema bridge abort found a lock without takeover evidence"
+        )
+    ownerless = stale_owner_release_id == STALE_LOCK_OWNERLESS
+    ownerless_remote_identity: Mapping[str, object] | None = None
+    ownerless_remote_mtime: str | None = None
+    if ownerless:
+        assert stale_lock_first_observed_at is not None
+        (
+            owner_content,
+            ownerless_remote_identity,
+            ownerless_remote_mtime,
+        ) = _read_exact_ownerless_deployment_lock(
+            client,
+            lock_path=lock_path,
+        )
+        if (
+            ownerless_remote_mtime is None
+            or not secrets.compare_digest(
+                ownerless_remote_mtime,
+                stale_lock_first_observed_at,
+            )
+        ):
+            raise PhpDeploymentError(
+                "ownerless lock attested remote mtime does not match"
+            )
+        acquired_at_reference = ownerless_remote_mtime
+    else:
+        owner_content, owner = _read_exact_deployment_lock_owner(
+            client,
+            lock_path=lock_path,
+            expected_release_id=stale_owner_release_id,
+        )
+        acquired_at_reference = str(owner["acquired_at"])
+    evidence_identity = _validated_stale_lock_writer_absence(
+        writer_absence_evidence,
+        expected_owner_sha256=_sha256_bytes(owner_content),
+        acquired_at_reference=acquired_at_reference,
+    )
+    takeover: dict[str, object] = {
+        "stale_owner_release_id": stale_owner_release_id,
+        "stale_owner_state": (
+            "ownerless" if ownerless else "owner_present"
+        ),
+        "stale_owner_acquired_at": acquired_at_reference,
+        "stale_owner_sha256": _sha256_bytes(owner_content),
+        "writer_absence_evidence": writer_absence_evidence,
+        "writer_absence_nonce": evidence_identity["nonce"],
+        "writer_absence_issued_at": evidence_identity["issued_at"],
+        "replacement_release_id": replacement_release_id,
+        "database_mutated": False,
+    }
+    if ownerless:
+        takeover.update(
+            {
+                "stale_owner_remote_identity": dict(
+                    ownerless_remote_identity or {}
+                ),
+                "stale_owner_remote_mtime": ownerless_remote_mtime,
+            }
+        )
+    takeover["identity_sha256"] = _sha256_bytes(_encode_json(takeover))
+    bridge_report_update(
+        "stale_lock_takeover_ready",
+        {"stale_lock_takeover": takeover},
+    )
+    if ownerless:
+        _remove_exact_ownerless_deployment_lock(
+            client,
+            lock_path=lock_path,
+            expected_remote_identity=owner_content,
+        )
+    else:
+        _remove_exact_stale_deployment_lock(
+            client,
+            lock_path=lock_path,
+            expected_owner_content=owner_content,
+            expected_release_id=stale_owner_release_id,
+            exclusive_writer=exclusive_writer,
+        )
+    replacement = _acquire_deployment_lock(
+        client,
+        private_root,
+        replacement_release_id,
+    )
+    try:
+        bridge_report_update(
+            "stale_lock_takeover_complete",
+            {
+                "stale_lock_takeover": takeover,
+                "stale_lock_cleanup_verified": True,
+            },
+        )
+    except BaseException as error:
+        try:
+            _release_deployment_lock(
+                client,
+                replacement,
+                exclusive_writer=exclusive_writer,
+            )
+        except BaseException as cleanup_error:
+            raise PhpDeploymentError(
+                "replacement lock journal failed and cleanup was incomplete"
+            ) from cleanup_error
+        raise PhpDeploymentError(
+            "replacement lock journal could not be committed"
+        ) from error
+    return replacement, takeover
+
+
 def _cleanup_workspace(
     client: SftpClient,
     workspace: str,
@@ -2232,6 +3486,20 @@ def _stage_backup_files_for_restore(
     return result
 
 
+def _restore_stage_paths(
+    snapshot: BackupSnapshot,
+    workspace: str,
+) -> tuple[str, ...]:
+    return tuple(
+        _remote_join(
+            workspace,
+            f"restore-{index:03d}-{item.sha256}.blob",
+        )
+        for index, item in enumerate(snapshot.files)
+        if item.existed and item.sha256 is not None
+    )
+
+
 def _restore_order(snapshot: BackupSnapshot) -> tuple[str, ...]:
     files = snapshot.file_by_path
     previous_v2 = bool(
@@ -2308,10 +3576,21 @@ def restore_remote_backup(
             continue
         if attributes is None or item.sha256 is None or item.mode is None:
             raise PhpDeploymentError("rollback did not restore an existing file")
-        content = _read_remote_bytes(client, target)
+        content = _read_stable_remote_regular_bytes(
+            client,
+            target,
+            required_mode=item.mode,
+            expected_size=item.size,
+            label="rollback restored artifact",
+        )
+        after = _lstat_or_none(client, target)
         if (
-            not secrets.compare_digest(_sha256_bytes(content), item.sha256)
-            or stat.S_IMODE(_mode(attributes)) != item.mode
+            after is None
+            or not secrets.compare_digest(
+                _sha256_bytes(content),
+                item.sha256,
+            )
+            or stat.S_IMODE(_mode(after)) != item.mode
         ):
             raise PhpDeploymentError("rollback file identity mismatch")
 
@@ -2487,6 +3766,7 @@ def prepare_gabia_core_compatibility(
     rollback_health_url: str,
     expected_current_sha: str | None = None,
     expected_core_files: Sequence[str] = CORE_API_FILES,
+    allow_partial_schema_bridge: bool = False,
 ) -> GabiaCoreCompatibility:
     """Probe the exact Gabia server and bind a fallback to this session."""
 
@@ -2532,14 +3812,28 @@ def prepare_gabia_core_compatibility(
         raise PhpDeploymentError(
             "expected current Gabia release SHA is invalid"
         )
+    if allow_partial_schema_bridge and expected_current_sha is not None:
+        raise PhpDeploymentError(
+            "partial schema bridge compatibility cannot attest a current SHA"
+        )
 
     private_root = _remote_join(GABIA_REMOTE_ROOT, "_private")
     _require_remote_directory(client, GABIA_REMOTE_ROOT, create=False)
     _require_remote_directory(client, private_root, create=False)
-    current_release_sha = verify_existing_remote_release_identity(
-        client,
-        remote_root=GABIA_REMOTE_ROOT,
-        expected_core_files=expected_core_files,
+    current_release_sha = (
+        None
+        if allow_partial_schema_bridge
+        else verify_existing_remote_release_identity(
+            client,
+            remote_root=GABIA_REMOTE_ROOT,
+            expected_core_files=expected_core_files,
+            required_mode=(
+                DEFAULT_FILE_MODE
+                if tuple(expected_core_files)
+                == LEGACY_SCHEMA_11_CORE_API_FILES
+                else None
+            ),
+        )
     )
     if (
         expected_current_sha is not None
@@ -3366,6 +4660,148 @@ def verify_closed_v2_api(
         )
 
 
+def _v1_base_from_v2(base_url: str, *, allow_http: bool = False) -> str:
+    base = _validate_https_url(
+        base_url,
+        label="API v2 base URL",
+        allow_http=allow_http,
+    )
+    if not base.endswith("/api/v2"):
+        raise PhpDeploymentError("API v2 base URL must end with /api/v2")
+    derived = base[: -len("/api/v2")] + "/api/v1"
+    if not allow_http and base == GABIA_API_V2_BASE_URL:
+        if derived != GABIA_API_V1_BASE_URL:
+            raise PhpDeploymentError("derived Gabia API v1 URL is invalid")
+    return derived
+
+
+def verify_closed_v1_api(
+    *,
+    v2_base_url: str,
+    protected_token: str,
+    http_request: HttpRequester = _default_http_request,
+    timeout: float = 20.0,
+    allow_http: bool = False,
+) -> None:
+    """Prove the independent v1 release row is closed and authenticated."""
+
+    token = _validated_protected_token(protected_token)
+    base = _v1_base_from_v2(v2_base_url, allow_http=allow_http)
+    common = {"Accept": "application/json", "Cache-Control": "no-store"}
+    health = http_request("GET", base + "/health", common, timeout)
+    health_payload = _json_response(health, label="v1 health")
+    if (
+        health.status != 200
+        or health.header("x-bside-api-version") != "v1"
+        or health_payload.get("ok") is not True
+        or health_payload.get("service") != "bside-governance-intelligence"
+    ):
+        raise PhpDeploymentError("v1 health identity is invalid")
+
+    events = http_request("GET", base + "/events?limit=1", common, timeout)
+    events_payload = _json_response(events, label="v1 closed events")
+    if (
+        events.status != 503
+        or events.header("x-bside-api-version") != "v1"
+        or events_payload.get("error") != "governance_release_closed"
+    ):
+        raise PhpDeploymentError("v1 public data is not fail-closed")
+
+    admin = http_request("GET", base + "/admin/release-state", common, timeout)
+    admin_payload = _json_response(admin, label="v1 unauthenticated admin")
+    if admin.status != 401 or admin_payload.get("error") != "bearer_token_required":
+        raise PhpDeploymentError("v1 admin authentication smoke failed")
+
+    protected = http_request(
+        "GET",
+        base + "/admin/release-state",
+        {
+            **common,
+            "Authorization": "Bearer " + token,
+        },
+        timeout,
+    )
+    protected_payload = _json_response(protected, label="v1 protected release state")
+    if (
+        protected.status != 200
+        or protected_payload.get("ok") is not True
+        or protected_payload.get("release_state") != "closed"
+        or protected_payload.get("schema_version") != 10
+    ):
+        raise PhpDeploymentError(
+            "authenticated v1 release state is not exactly closed"
+        )
+
+
+def observe_closed_candidate_schema(
+    *,
+    base_url: str,
+    expected_sha: str,
+    protected_token: str,
+    http_request: HttpRequester = _default_http_request,
+    timeout: float = 20.0,
+    allow_http: bool = False,
+) -> int:
+    """Accept only the two bridge states: candidate over DB 11 or DB 12."""
+
+    failures: list[BaseException] = []
+    for actual_schema in (12, 11):
+        try:
+            verify_closed_v2_api(
+                base_url=base_url,
+                expected_sha=expected_sha,
+                protected_token=protected_token,
+                http_request=http_request,
+                timeout=timeout,
+                allow_http=allow_http,
+                expected_schema_version=12,
+                pending_actual_schema_version=(
+                    None if actual_schema == 12 else 11
+                ),
+            )
+            verify_closed_v1_api(
+                v2_base_url=base_url,
+                protected_token=protected_token,
+                http_request=http_request,
+                timeout=timeout,
+                allow_http=allow_http,
+            )
+            return actual_schema
+        except PhpDeploymentError as error:
+            failures.append(error)
+    raise PhpDeploymentError(
+        "candidate did not prove a closed schema-11 or schema-12 bridge state"
+    ) from failures[-1]
+
+
+def verify_c06_forward_compatible_closed(
+    *,
+    base_url: str,
+    protected_token: str,
+    http_request: HttpRequester = _default_http_request,
+    timeout: float = 20.0,
+    allow_http: bool = False,
+) -> None:
+    """Prove c06's schema-11 API contract with both release rows closed."""
+
+    verify_closed_v2_api(
+        base_url=base_url,
+        expected_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        protected_token=protected_token,
+        http_request=http_request,
+        timeout=timeout,
+        allow_http=allow_http,
+        expected_schema_version=11,
+    )
+    verify_closed_v1_api(
+        v2_base_url=base_url,
+        protected_token=protected_token,
+        http_request=http_request,
+        timeout=timeout,
+        allow_http=allow_http,
+    )
+
+
 def verify_rollback_health(
     *,
     url: str,
@@ -3488,10 +4924,34 @@ def deploy_release(
     allow_http: bool = False,
     gabia_compatibility: GabiaCoreCompatibility | None = None,
     schema_upgrade_from: int | None = None,
+    expected_previous_sha: str | None = None,
+    dart_disabled_evidence: str | None = None,
+    bridge_report_update: BridgeReportUpdater | None = None,
 ) -> Mapping[str, object]:
     if schema_upgrade_from not in {None, 11}:
         raise PhpDeploymentError(
             "only the explicit v2 schema 11 to 12 upgrade is supported"
+        )
+    if schema_upgrade_from == 11 and (
+        expected_previous_sha != ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+        or dart_disabled_evidence is None
+        or DART_DISABLED_EVIDENCE_PATTERN.fullmatch(dart_disabled_evidence)
+        is None
+        or not callable(bridge_report_update)
+    ):
+        raise PhpDeploymentError(
+            "schema bridge requires exact c06, DART-off evidence, and a "
+            "durable bridge journal"
+        )
+    selected_release_id = _validate_release_id(
+        release_id or _make_release_id(plan.code_revision)
+    )
+    if (
+        schema_upgrade_from == 11
+        and not selected_release_id.startswith("php-v2-")
+    ):
+        raise PhpDeploymentError(
+            "schema bridge release ID must use the php-v2 prefix"
         )
     _validated_protected_token(protected_token)
     validate_http_endpoint_binding(
@@ -3514,6 +4974,14 @@ def deploy_release(
             api_v2_base_url=api_v2_base_url,
             rollback_health_url=rollback_health_url,
         )
+        if (
+            schema_upgrade_from == 11
+            and gabia_compatibility.current_release_sha
+            != ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+        ):
+            raise PhpDeploymentError(
+                "schema bridge compatibility predecessor is not exact c06"
+            )
     exclusive_writer = (
         None
         if gabia_compatibility is None
@@ -3523,9 +4991,6 @@ def deploy_release(
         root,
         stage_root,
         backup_root,
-    )
-    selected_release_id = _validate_release_id(
-        release_id or _make_release_id(plan.code_revision)
     )
     _require_remote_directory(client, root, create=False)
     existing_core_files = (
@@ -3537,17 +5002,29 @@ def deploy_release(
         client,
         remote_root=root,
         expected_core_files=existing_core_files,
+        required_mode=(
+            DEFAULT_FILE_MODE if schema_upgrade_from == 11 else None
+        ),
     )
     if schema_upgrade_from is not None and existing_revision is None:
         raise PhpDeploymentError(
             "schema upgrade deployment requires an attested existing release"
         )
+    if (
+        schema_upgrade_from == 11
+        and existing_revision != ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+    ):
+        raise PhpDeploymentError(
+            "schema bridge predecessor is not the exact c06 release"
+        )
     if schema_upgrade_from == 11:
         migration_path = "migrations/011_global_terminal_v2.sql"
         migration_artifact = plan.artifact_by_path[migration_path]
-        existing_migration = _read_remote_bytes(
+        existing_migration = _read_stable_remote_regular_bytes(
             client,
             _remote_join(root, migration_path),
+            required_mode=DEFAULT_FILE_MODE,
+            label="schema 11 migration 011",
         )
         if (
             len(existing_migration) != migration_artifact.size
@@ -3572,6 +5049,14 @@ def deploy_release(
             allow_http=allow_http,
             expected_schema_version=existing_schema_version,
         )
+        if schema_upgrade_from == 11:
+            verify_closed_v1_api(
+                v2_base_url=api_v2_base_url,
+                protected_token=protected_token,
+                http_request=http_request,
+                timeout=http_timeout,
+                allow_http=allow_http,
+            )
     ensure_private_root_http_protection(
         client,
         remote_root=root,
@@ -3632,6 +5117,14 @@ def deploy_release(
             backup_root=safe_backup_root,
             release_id=selected_release_id,
         )
+        if schema_upgrade_from == 11:
+            verify_one_time_schema_bridge_backup(
+                client,
+                snapshot=backup,
+                expected_current_sha=plan.code_revision,
+                expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+                expected_manifest_sha256=backup.manifest_sha256,
+            )
         verify_remote_targets_match_snapshot(
             client,
             snapshot=backup,
@@ -3646,10 +5139,30 @@ def deploy_release(
                 allow_http=allow_http,
                 expected_schema_version=existing_schema_version,
             )
+            if schema_upgrade_from == 11:
+                verify_closed_v1_api(
+                    v2_base_url=api_v2_base_url,
+                    protected_token=protected_token,
+                    http_request=http_request,
+                    timeout=http_timeout,
+                    allow_http=allow_http,
+                )
             verify_remote_targets_match_snapshot(
                 client,
                 snapshot=backup,
             )
+        if schema_upgrade_from == 11:
+            if dart_disabled_evidence is None:
+                raise PhpDeploymentError("schema bridge DART-off evidence is missing")
+            ready = _bridge_backup_ready_identity(
+                backup=backup,
+                candidate_code_revision=plan.code_revision,
+                previous_code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+                dart_disabled_evidence=dart_disabled_evidence,
+            )
+            if bridge_report_update is not None:
+                bridge_report_update("backup_ready", {"backup_ready": ready})
+                bridge_report_update("commit_started", {})
         commit_started = True
         _commit_staged_artifacts(
             client,
@@ -3677,6 +5190,36 @@ def deploy_release(
             expected_schema_version=12,
             pending_actual_schema_version=schema_upgrade_from,
         )
+        if schema_upgrade_from == 11:
+            verify_closed_v1_api(
+                v2_base_url=api_v2_base_url,
+                protected_token=protected_token,
+                http_request=http_request,
+                timeout=http_timeout,
+                allow_http=allow_http,
+            )
+            verify_remote_release_matches_plan(
+                client,
+                remote_root=root,
+                plan=plan,
+            )
+            if bridge_report_update is not None:
+                bridge_report_update(
+                    "restored",
+                    {
+                        "candidate_database_schema_version_before": 11,
+                        "database_mutated": False,
+                    },
+                )
+                bridge_report_update(
+                    "verified",
+                    {
+                        "candidate_database_schema_version_before": 11,
+                        "database_mutated": False,
+                        "v1_closed_smoke": True,
+                        "v2_closed_smoke": True,
+                    },
+                )
     except BaseException as error:
         deployment_error = error
         if commit_started and backup is not None and workspace:
@@ -3702,6 +5245,24 @@ def deploy_release(
                     timeout=http_timeout,
                     allow_http=allow_http,
                 )
+                if schema_upgrade_from == 11:
+                    restored_release = verify_existing_remote_release_identity(
+                        client,
+                        remote_root=root,
+                        expected_core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+                        required_mode=DEFAULT_FILE_MODE,
+                    )
+                    if restored_release != ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA:
+                        raise PhpDeploymentError(
+                            "automatic bridge abort did not restore exact c06"
+                        )
+                    verify_c06_forward_compatible_closed(
+                        base_url=api_v2_base_url,
+                        protected_token=protected_token,
+                        http_request=http_request,
+                        timeout=http_timeout,
+                        allow_http=allow_http,
+                    )
             except BaseException as error_during_rollback:
                 rollback_error = error_during_rollback
     finally:
@@ -3789,17 +5350,27 @@ def deploy_release(
         raise PhpDeploymentError(
             "deployment completed without verified OPcache state"
         )
-    return {
+    result: dict[str, object] = {
         "ok": True,
-        "operation": "deploy",
+        "operation": (
+            "schema-bridge-deploy"
+            if schema_upgrade_from == 11
+            else "deploy"
+        ),
         "code_revision": plan.code_revision,
         "release_id": selected_release_id,
-        "backup_manifest": (
-            safe_backup_root
-            + "/"
-            + selected_release_id
-            + "/backup-manifest.json"
-        ),
+        "backup_manifest": backup.manifest_path,
+        "backup_manifest_sha256": backup.manifest_sha256,
+        "backup_identity": {
+            "schema_version": BACKUP_SCHEMA_VERSION,
+            "release_id": backup.release_id,
+            "backup_directory": backup.backup_directory,
+            "manifest_path": backup.manifest_path,
+            "manifest_sha256": backup.manifest_sha256,
+            "manifest_bytes": backup.manifest_size,
+            "remote_root": backup.remote_root,
+            "candidate_code_revision": backup.candidate_code_revision,
+        },
         "files_deployed": len(plan.artifacts),
         "manifest_committed_last": True,
         "opcache_action": opcache_action,
@@ -3814,6 +5385,18 @@ def deploy_release(
         "schema_upgrade_from": schema_upgrade_from,
         "private_root_http_protected": True,
     }
+    if schema_upgrade_from == 11:
+        result.update(
+            {
+                "previous_code_revision": ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+                "database_mutated": False,
+                "dart_disabled_evidence": dart_disabled_evidence,
+                "byte_verification": True,
+                "v1_closed_smoke": True,
+                "v2_closed_smoke": True,
+            }
+        )
+    return result
 
 
 def rollback_release(
@@ -3899,6 +5482,19 @@ def rollback_release(
                 for item in target_snapshot.files
             ],
         }
+    previous_release = inspect_backup_previous_release(
+        client,
+        snapshot=target_snapshot,
+    )
+    if (
+        previous_release is not None
+        and previous_release[1]
+        == frozenset(LEGACY_SCHEMA_11_CORE_API_FILES)
+    ):
+        raise PhpDeploymentError(
+            "normal rollback cannot restore a schema 11 predecessor; "
+            "use schema-bridge-rollback so the database remains intact"
+        )
     _validated_protected_token(protected_token)
     validate_http_endpoint_binding(
         public_url_root=public_url_root,
@@ -4191,6 +5787,1348 @@ def rollback_release(
     }
 
 
+def rollback_one_time_schema_bridge(
+    client: SftpClient,
+    *,
+    candidate_plan: LocalDeploymentPlan,
+    release_id: str,
+    expected_current_sha: str,
+    expected_previous_sha: str,
+    expected_backup_manifest_sha256: str,
+    remote_root: str = DEFAULT_REMOTE_ROOT,
+    stage_root: str | None = None,
+    backup_root: str | None = None,
+    public_url_root: str,
+    api_v2_base_url: str,
+    rollback_health_url: str,
+    protected_token: str,
+    http_request: HttpRequester = _default_http_request,
+    http_timeout: float = 20.0,
+    gabia_compatibility: GabiaCoreCompatibility | None = None,
+    dart_disabled_evidence: str | None = None,
+    bridge_report_update: BridgeReportUpdater | None = None,
+) -> Mapping[str, object]:
+    """Restore exact c06 PHP while leaving a schema-11 or schema-12 DB intact."""
+
+    if gabia_compatibility is None:
+        raise PhpDeploymentError(
+            "one-time schema bridge rollback requires pinned Gabia compatibility"
+        )
+    if (
+        expected_current_sha != candidate_plan.code_revision
+        or expected_previous_sha != ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+        or gabia_compatibility.current_release_sha != expected_current_sha
+        or dart_disabled_evidence is None
+        or DART_DISABLED_EVIDENCE_PATTERN.fullmatch(dart_disabled_evidence)
+        is None
+        or not callable(bridge_report_update)
+    ):
+        raise PhpDeploymentError(
+            "one-time schema bridge release identity does not match"
+        )
+    _validated_protected_token(protected_token)
+    validate_http_endpoint_binding(
+        public_url_root=public_url_root,
+        api_v2_base_url=api_v2_base_url,
+        rollback_health_url=rollback_health_url,
+        allow_http=False,
+    )
+    root = _remote_absolute_path(remote_root, label="remote root")
+    _validate_gabia_core_binding(
+        gabia_compatibility,
+        client=client,
+        remote_root=root,
+        public_url_root=public_url_root,
+        api_v2_base_url=api_v2_base_url,
+        rollback_health_url=rollback_health_url,
+    )
+    private_root, safe_stage_root, safe_backup_root = _private_roots(
+        root,
+        stage_root,
+        backup_root,
+    )
+    safe_release_id = _validate_release_id(release_id)
+
+    current_release_sha = verify_existing_remote_release_identity(
+        client,
+        remote_root=root,
+    )
+    if current_release_sha != expected_current_sha:
+        raise PhpDeploymentError(
+            "one-time schema bridge current release does not match"
+        )
+    verify_remote_release_matches_plan(
+        client,
+        remote_root=root,
+        plan=candidate_plan,
+    )
+    target_snapshot = load_remote_backup(
+        client,
+        backup_root=safe_backup_root,
+        release_id=safe_release_id,
+        expected_remote_root=root,
+    )
+    verify_one_time_schema_bridge_backup(
+        client,
+        snapshot=target_snapshot,
+        expected_current_sha=expected_current_sha,
+        expected_previous_sha=expected_previous_sha,
+        expected_manifest_sha256=expected_backup_manifest_sha256,
+    )
+    ready = _bridge_backup_ready_identity(
+        backup=target_snapshot,
+        candidate_code_revision=expected_current_sha,
+        previous_code_revision=expected_previous_sha,
+        dart_disabled_evidence=dart_disabled_evidence,
+    )
+    bridge_report_update("backup_ready", {"backup_ready": ready})
+    candidate_database_schema_version_before = observe_closed_candidate_schema(
+        base_url=api_v2_base_url,
+        expected_sha=expected_current_sha,
+        protected_token=protected_token,
+        http_request=http_request,
+        timeout=http_timeout,
+    )
+    ensure_private_root_http_protection(
+        client,
+        remote_root=root,
+        private_root=private_root,
+        public_url_root=public_url_root,
+        http_request=http_request,
+        timeout=http_timeout,
+        allow_http=False,
+        exclusive_writer=gabia_compatibility.exclusive_writer,
+        expected_policy=gabia_compatibility.private_policy,
+        expected_policy_mode=gabia_compatibility.private_policy_mode,
+        allowed_private_redirect=GABIA_PRIVATE_DENY_REDIRECT,
+    )
+
+    operation_id = _validate_release_id(
+        _make_release_id(
+            expected_previous_sha,
+            prefix="schema11-bridge-rollback",
+        )
+    )
+    lock_path = _acquire_deployment_lock(
+        client,
+        private_root,
+        operation_id,
+    )
+    workspace = ""
+    recovery_workspace = ""
+    emergency: BackupSnapshot | None = None
+    mutation_started = False
+    operation_error: BaseException | None = None
+    recovery_error: BaseException | None = None
+    cleanup_error: BaseException | None = None
+    recovery_cleanup_error: BaseException | None = None
+    lock_release_error: BaseException | None = None
+    policy_error: BaseException | None = None
+    opcache_action: str | None = None
+    try:
+        workspace = _create_private_workspace(
+            client,
+            safe_stage_root,
+            operation_id,
+        )
+        _verify_posix_rename_capability(client, workspace)
+        synthetic_plan = LocalDeploymentPlan(
+            local_root=Path("."),
+            code_revision=expected_current_sha,
+            artifacts=tuple(
+                LocalArtifact(
+                    relative_path=path,
+                    path=Path("."),
+                    sha256="0" * 64,
+                    size=1,
+                )
+                for path in DEFAULT_COMMIT_ORDER
+            ),
+        )
+        emergency_id = _validate_release_id(
+            _make_release_id(
+                expected_current_sha,
+                prefix="pre-schema11-bridge-rollback",
+            )
+        )
+        emergency = capture_remote_backup(
+            client,
+            plan=synthetic_plan,
+            remote_root=root,
+            backup_root=safe_backup_root,
+            release_id=emergency_id,
+        )
+        emergency_identity = _bridge_emergency_identity(
+            emergency,
+            candidate_code_revision=expected_current_sha,
+        )
+        bridge_report_update(
+            "emergency_ready",
+            {"emergency_backup": emergency_identity},
+        )
+        locked_database_schema_version = observe_closed_candidate_schema(
+            base_url=api_v2_base_url,
+            expected_sha=expected_current_sha,
+            protected_token=protected_token,
+            http_request=http_request,
+            timeout=http_timeout,
+        )
+        if (
+            locked_database_schema_version
+            != candidate_database_schema_version_before
+        ):
+            raise PhpDeploymentError(
+                "candidate database schema changed before restore"
+            )
+        final_current_release_sha = verify_existing_remote_release_identity(
+            client,
+            remote_root=root,
+        )
+        if final_current_release_sha != expected_current_sha:
+            raise PhpDeploymentError(
+                "one-time schema bridge current release changed before restore"
+            )
+        verify_remote_release_matches_plan(
+            client,
+            remote_root=root,
+            plan=candidate_plan,
+        )
+        verify_remote_targets_match_snapshot(
+            client,
+            snapshot=emergency,
+        )
+        locked_target_snapshot = load_remote_backup(
+            client,
+            backup_root=safe_backup_root,
+            release_id=safe_release_id,
+            expected_remote_root=root,
+        )
+        verify_one_time_schema_bridge_backup(
+            client,
+            snapshot=locked_target_snapshot,
+            expected_current_sha=expected_current_sha,
+            expected_previous_sha=expected_previous_sha,
+            expected_manifest_sha256=expected_backup_manifest_sha256,
+        )
+        bridge_report_update(
+            "commit_started",
+            {
+                "candidate_database_schema_version_before": (
+                    candidate_database_schema_version_before
+                ),
+                "database_mutated": False,
+            },
+        )
+        mutation_started = True
+        restore_remote_backup(
+            client,
+            snapshot=locked_target_snapshot,
+            workspace=workspace,
+        )
+        opcache_action = reset_opcache_with_ephemeral_probe(
+            client,
+            remote_root=root,
+            public_url_root=public_url_root,
+            http_request=http_request,
+            timeout=http_timeout,
+            allow_http=False,
+            exclusive_writer=gabia_compatibility.exclusive_writer,
+            require_strict_state=True,
+        )
+        restored_release_sha = verify_existing_remote_release_identity(
+            client,
+            remote_root=root,
+            expected_core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+            required_mode=DEFAULT_FILE_MODE,
+        )
+        if restored_release_sha != expected_previous_sha:
+            raise PhpDeploymentError(
+                "one-time schema bridge previous release was not restored"
+            )
+        bridge_report_update(
+            "restored",
+            {
+                "candidate_database_schema_version_before": (
+                    candidate_database_schema_version_before
+                ),
+                "database_mutated": False,
+            },
+        )
+        verify_c06_forward_compatible_closed(
+            base_url=api_v2_base_url,
+            protected_token=protected_token,
+            http_request=http_request,
+            timeout=http_timeout,
+        )
+        verify_rollback_health(
+            url=rollback_health_url,
+            http_request=http_request,
+            timeout=http_timeout,
+            allow_http=False,
+        )
+        bridge_report_update(
+            "verified",
+            {
+                "candidate_database_schema_version_before": (
+                    candidate_database_schema_version_before
+                ),
+                "database_schema_observation": (
+                    "candidate_schema_"
+                    + str(candidate_database_schema_version_before)
+                ),
+                "database_mutated": False,
+                "v1_closed_smoke": True,
+                "v2_closed_smoke": True,
+                "legacy_health_smoke": True,
+                "forward_compatibility_verified": True,
+            },
+        )
+    except BaseException as error:
+        operation_error = error
+        if mutation_started and emergency is not None:
+            try:
+                recovery_id = _validate_release_id(
+                    _make_release_id(
+                        expected_current_sha,
+                        prefix="recover-schema11-bridge-rollback",
+                    )
+                )
+                recovery_workspace = _create_private_workspace(
+                    client,
+                    safe_stage_root,
+                    recovery_id,
+                )
+                _verify_posix_rename_capability(
+                    client,
+                    recovery_workspace,
+                )
+                restore_remote_backup(
+                    client,
+                    snapshot=emergency,
+                    workspace=recovery_workspace,
+                )
+                reset_opcache_with_ephemeral_probe(
+                    client,
+                    remote_root=root,
+                    public_url_root=public_url_root,
+                    http_request=http_request,
+                    timeout=http_timeout,
+                    allow_http=False,
+                    exclusive_writer=gabia_compatibility.exclusive_writer,
+                    require_strict_state=True,
+                )
+                recovered_database_schema_version = (
+                    observe_closed_candidate_schema(
+                        base_url=api_v2_base_url,
+                        expected_sha=expected_current_sha,
+                        protected_token=protected_token,
+                        http_request=http_request,
+                        timeout=http_timeout,
+                    )
+                )
+                if (
+                    recovered_database_schema_version
+                    != candidate_database_schema_version_before
+                ):
+                    raise PhpDeploymentError(
+                        "candidate recovery changed the database schema"
+                    )
+            except BaseException as error_during_recovery:
+                recovery_error = error_during_recovery
+    finally:
+        if workspace:
+            try:
+                _cleanup_workspace(
+                    client,
+                    workspace,
+                    known_files=_restore_stage_paths(
+                        target_snapshot,
+                        workspace,
+                    ),
+                )
+            except BaseException as error:
+                cleanup_error = error
+        if recovery_workspace:
+            try:
+                _cleanup_workspace(
+                    client,
+                    recovery_workspace,
+                    known_files=(
+                        ()
+                        if emergency is None
+                        else _restore_stage_paths(
+                            emergency,
+                            recovery_workspace,
+                        )
+                    ),
+                )
+            except BaseException as error:
+                recovery_cleanup_error = error
+        try:
+            _release_deployment_lock(
+                client,
+                lock_path,
+                exclusive_writer=gabia_compatibility.exclusive_writer,
+            )
+        except BaseException as error:
+            lock_release_error = error
+        try:
+            _verify_gabia_private_policy(
+                client,
+                gabia_compatibility,
+            )
+        except BaseException as error:
+            policy_error = error
+
+    if operation_error is not None:
+        if mutation_started and recovery_error is not None:
+            raise PhpDeploymentRollbackError(
+                "one-time schema bridge rollback failed and candidate recovery failed"
+            ) from recovery_error
+        if (
+            cleanup_error is not None
+            or recovery_cleanup_error is not None
+            or lock_release_error is not None
+            or policy_error is not None
+        ):
+            raise PhpDeploymentError(
+                "one-time schema bridge rollback failed with incomplete "
+                "private cleanup or policy verification"
+            ) from (
+                cleanup_error
+                or recovery_cleanup_error
+                or lock_release_error
+                or policy_error
+            )
+        if mutation_started:
+            raise PhpDeploymentError(
+                "one-time schema bridge rollback failed safely; "
+                "the candidate was restored"
+            ) from operation_error
+        raise PhpDeploymentError(
+            "one-time schema bridge rollback stopped before production mutation"
+        ) from operation_error
+    if (
+        cleanup_error is not None
+        or recovery_cleanup_error is not None
+        or lock_release_error is not None
+        or policy_error is not None
+    ):
+        raise PhpDeploymentError(
+            "one-time schema bridge rollback was applied, but private "
+            "cleanup or policy verification failed"
+        ) from (
+            cleanup_error
+            or recovery_cleanup_error
+            or lock_release_error
+            or policy_error
+        )
+    if opcache_action not in {"disabled_verified", "reset_verified"}:
+        raise PhpDeploymentError(
+            "one-time schema bridge rollback lacks verified OPcache state"
+        )
+    return {
+        "ok": True,
+        "operation": "schema-bridge-rollback",
+        "release_id": safe_release_id,
+        "backup_manifest": target_snapshot.manifest_path,
+        "backup_manifest_sha256": target_snapshot.manifest_sha256,
+        "restored_code_revision": expected_previous_sha,
+        "restored_api_schema_contract_version": 11,
+        "candidate_code_revision": expected_current_sha,
+        "candidate_expected_schema_version": 12,
+        "candidate_database_schema_version_before": (
+            candidate_database_schema_version_before
+        ),
+        "database_schema_observation": (
+            "candidate_schema_"
+            + str(candidate_database_schema_version_before)
+        ),
+        "database_mutated": False,
+        "dart_disabled_evidence": dart_disabled_evidence,
+        "manifest_committed_last": True,
+        "byte_verification": True,
+        "v1_closed_smoke": True,
+        "v2_closed_smoke": True,
+        "legacy_health_smoke": True,
+        "forward_compatibility_verified": True,
+        "closed_smoke": True,
+        "opcache_action": opcache_action,
+        "private_root_http_protected": True,
+        "emergency_backup_release_id": (
+            None if emergency is None else emergency.release_id
+        ),
+        "emergency_backup_identity": (
+            None
+            if emergency is None
+            else _bridge_emergency_identity(
+                emergency,
+                candidate_code_revision=expected_current_sha,
+            )
+        ),
+    }
+
+
+def _verify_prebackup_c06_public_state(
+    client: SftpClient,
+    *,
+    candidate_plan: LocalDeploymentPlan,
+    remote_root: str,
+    api_v2_base_url: str,
+    protected_token: str,
+    http_request: HttpRequester,
+    http_timeout: float,
+) -> None:
+    """Prove a prepared deploy crashed before changing any public byte."""
+
+    current_release = verify_existing_remote_release_identity(
+        client,
+        remote_root=remote_root,
+        expected_core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+        required_mode=DEFAULT_FILE_MODE,
+    )
+    if current_release != ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA:
+        raise PhpDeploymentError(
+            "schema bridge prebackup recovery is not exact c06"
+        )
+    migration = candidate_plan.artifact_by_path[
+        "migrations/011_global_terminal_v2.sql"
+    ]
+    existing_migration = _read_stable_remote_regular_bytes(
+        client,
+        _remote_join(
+            remote_root,
+            "migrations/011_global_terminal_v2.sql",
+        ),
+        required_mode=DEFAULT_FILE_MODE,
+        expected_size=migration.size,
+        label="schema bridge prebackup migration 011",
+    )
+    if not secrets.compare_digest(
+        _sha256_bytes(existing_migration),
+        migration.sha256,
+    ):
+        raise PhpDeploymentError(
+            "schema bridge prebackup migration 011 differs from candidate"
+        )
+    verify_c06_forward_compatible_closed(
+        base_url=api_v2_base_url,
+        protected_token=protected_token,
+        http_request=http_request,
+        timeout=http_timeout,
+    )
+
+
+def _abort_prebackup_schema_bridge(
+    client: SftpClient,
+    *,
+    candidate_plan: LocalDeploymentPlan,
+    release_id: str,
+    prepared_checkpoint: Mapping[str, object],
+    bridge_deploy_report_load: BridgeReportLoader,
+    bridge_report_update: BridgeReportUpdater,
+    remote_root: str,
+    private_root: str,
+    stage_root: str,
+    backup_root: str,
+    public_url_root: str,
+    api_v2_base_url: str,
+    rollback_health_url: str,
+    protected_token: str,
+    http_request: HttpRequester,
+    http_timeout: float,
+    gabia_compatibility: GabiaCoreCompatibility,
+    stale_lock_owner_release_id: str | None,
+    stale_lock_writer_absence_evidence: str | None,
+    stale_lock_first_observed_at: str | None,
+) -> Mapping[str, object]:
+    """Release a crashed pre-backup lock only after exact c06 attestation."""
+
+    prebackup_identity = _bridge_prebackup_c06_identity(
+        prepared_checkpoint
+    )
+    if not _valid_bridge_prebackup_c06_identity(
+        prebackup_identity,
+        candidate_code_revision=candidate_plan.code_revision,
+        release_id=release_id,
+    ):
+        raise PhpDeploymentError(
+            "schema bridge prepared checkpoint is invalid"
+        )
+    _verify_prebackup_c06_public_state(
+        client,
+        candidate_plan=candidate_plan,
+        remote_root=remote_root,
+        api_v2_base_url=api_v2_base_url,
+        protected_token=protected_token,
+        http_request=http_request,
+        http_timeout=http_timeout,
+    )
+    bridge_report_update(
+        "prebackup_c06_ready",
+        {"prebackup_c06": prebackup_identity},
+    )
+    ensure_private_root_http_protection(
+        client,
+        remote_root=remote_root,
+        private_root=private_root,
+        public_url_root=public_url_root,
+        http_request=http_request,
+        timeout=http_timeout,
+        allow_http=False,
+        exclusive_writer=gabia_compatibility.exclusive_writer,
+        expected_policy=gabia_compatibility.private_policy,
+        expected_policy_mode=gabia_compatibility.private_policy_mode,
+        allowed_private_redirect=GABIA_PRIVATE_DENY_REDIRECT,
+    )
+    operation_id = _validate_release_id(
+        _make_release_id(
+            candidate_plan.code_revision,
+            prefix="schema11-bridge-abort",
+        )
+    )
+    lock_path, stale_lock_takeover = _acquire_schema_bridge_abort_lock(
+        client,
+        private_root=private_root,
+        replacement_release_id=operation_id,
+        stale_owner_release_id=stale_lock_owner_release_id,
+        writer_absence_evidence=stale_lock_writer_absence_evidence,
+        stale_lock_first_observed_at=stale_lock_first_observed_at,
+        exclusive_writer=gabia_compatibility.exclusive_writer,
+        bridge_report_update=bridge_report_update,
+    )
+    operation_error: BaseException | None = None
+    lock_release_error: BaseException | None = None
+    policy_error: BaseException | None = None
+    opcache_action: str | None = None
+    try:
+        if bridge_deploy_report_load() != prepared_checkpoint:
+            raise PhpDeploymentError(
+                "schema bridge prepared journal changed under recovery lock"
+            )
+        _verify_prebackup_c06_public_state(
+            client,
+            candidate_plan=candidate_plan,
+            remote_root=remote_root,
+            api_v2_base_url=api_v2_base_url,
+            protected_token=protected_token,
+            http_request=http_request,
+            http_timeout=http_timeout,
+        )
+        bridge_report_update(
+            "commit_started",
+            {
+                "initial_php_state": "prebackup_c06",
+                "candidate_database_schema_version_before": None,
+                "database_mutated": False,
+            },
+        )
+        opcache_action = reset_opcache_with_ephemeral_probe(
+            client,
+            remote_root=remote_root,
+            public_url_root=public_url_root,
+            http_request=http_request,
+            timeout=http_timeout,
+            allow_http=False,
+            exclusive_writer=gabia_compatibility.exclusive_writer,
+            require_strict_state=True,
+        )
+        _verify_prebackup_c06_public_state(
+            client,
+            candidate_plan=candidate_plan,
+            remote_root=remote_root,
+            api_v2_base_url=api_v2_base_url,
+            protected_token=protected_token,
+            http_request=http_request,
+            http_timeout=http_timeout,
+        )
+        verify_rollback_health(
+            url=rollback_health_url,
+            http_request=http_request,
+            timeout=http_timeout,
+            allow_http=False,
+        )
+        bridge_report_update(
+            "restored",
+            {
+                "initial_php_state": "prebackup_c06",
+                "candidate_database_schema_version_before": None,
+                "database_mutated": False,
+            },
+        )
+        bridge_report_update(
+            "verified",
+            {
+                "initial_php_state": "prebackup_c06",
+                "candidate_database_schema_version_before": None,
+                "database_schema_observation": (
+                    "unavailable_due_c06_contract"
+                ),
+                "database_mutated": False,
+                "v1_closed_smoke": True,
+                "v2_closed_smoke": True,
+                "legacy_health_smoke": True,
+                "forward_compatibility_verified": True,
+            },
+        )
+    except BaseException as error:
+        operation_error = error
+    finally:
+        try:
+            _release_deployment_lock(
+                client,
+                lock_path,
+                exclusive_writer=gabia_compatibility.exclusive_writer,
+            )
+        except BaseException as error:
+            lock_release_error = error
+        try:
+            _verify_gabia_private_policy(client, gabia_compatibility)
+        except BaseException as error:
+            policy_error = error
+    if operation_error is not None:
+        if lock_release_error is not None or policy_error is not None:
+            raise PhpDeploymentError(
+                "schema bridge prebackup abort failed with incomplete cleanup"
+            ) from (lock_release_error or policy_error)
+        raise PhpDeploymentError(
+            "schema bridge prebackup abort did not prove an unchanged c06 "
+            "release"
+        ) from operation_error
+    if lock_release_error is not None or policy_error is not None:
+        raise PhpDeploymentError(
+            "schema bridge prebackup abort verified c06 but cleanup was "
+            "incomplete"
+        ) from (lock_release_error or policy_error)
+    if opcache_action not in {"disabled_verified", "reset_verified"}:
+        raise PhpDeploymentError(
+            "schema bridge prebackup abort lacks verified OPcache state"
+        )
+    preserved_private_paths = [
+        path
+        for path in (
+            _remote_join(stage_root, release_id),
+            _remote_join(backup_root, release_id),
+        )
+        if _lstat_or_none(client, path) is not None
+    ]
+    return {
+        "ok": True,
+        "operation": "schema-bridge-abort",
+        "release_id": release_id,
+        "backup_manifest": None,
+        "backup_manifest_sha256": None,
+        "restored_code_revision": ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        "restored_api_schema_contract_version": 11,
+        "candidate_code_revision": candidate_plan.code_revision,
+        "candidate_expected_schema_version": 12,
+        "candidate_database_schema_version_before": None,
+        "database_schema_observation": (
+            "unavailable_due_c06_contract"
+        ),
+        "database_mutated": False,
+        "dart_disabled_evidence": prepared_checkpoint.get(
+            "dart_disabled_evidence"
+        ),
+        "initial_php_state": "prebackup_c06",
+        "manifest_committed_last": False,
+        "manifest_commit_not_applicable": True,
+        "public_release_files_mutated": False,
+        "ephemeral_opcache_probe_created_and_removed": True,
+        "byte_verification": True,
+        "v1_closed_smoke": True,
+        "v2_closed_smoke": True,
+        "legacy_health_smoke": True,
+        "forward_compatibility_verified": True,
+        "closed_smoke": True,
+        "opcache_action": opcache_action,
+        "private_root_http_protected": True,
+        "emergency_backup_release_id": None,
+        "emergency_backup_identity": None,
+        "stale_lock_takeover": stale_lock_takeover,
+        "stale_lock_cleanup_verified": (
+            stale_lock_takeover is None
+            or _lstat_or_none(
+                client,
+                _remote_join(private_root, "deployment-lock"),
+            )
+            is None
+        ),
+        "prebackup_c06_identity": prebackup_identity,
+        "orphan_private_artifacts_preserved": True,
+        "preserved_private_artifact_paths": preserved_private_paths,
+    }
+
+
+def abort_one_time_schema_bridge(
+    client: SftpClient,
+    *,
+    candidate_plan: LocalDeploymentPlan,
+    release_id: str,
+    expected_backup_manifest_sha256: str | None,
+    dart_disabled_evidence: str,
+    bridge_deploy_report_load: BridgeReportLoader,
+    bridge_report_update: BridgeReportUpdater,
+    remote_root: str = DEFAULT_REMOTE_ROOT,
+    stage_root: str | None = None,
+    backup_root: str | None = None,
+    public_url_root: str,
+    api_v2_base_url: str,
+    rollback_health_url: str,
+    protected_token: str,
+    http_request: HttpRequester = _default_http_request,
+    http_timeout: float = 20.0,
+    gabia_compatibility: GabiaCoreCompatibility | None = None,
+    stale_lock_owner_release_id: str | None = None,
+    stale_lock_writer_absence_evidence: str | None = None,
+    stale_lock_first_observed_at: str | None = None,
+) -> Mapping[str, object]:
+    """Resume an interrupted bridge commit and converge exact files to c06."""
+
+    if (
+        gabia_compatibility is None
+        or gabia_compatibility.current_release_sha is not None
+        or DART_DISABLED_EVIDENCE_PATTERN.fullmatch(dart_disabled_evidence)
+        is None
+        or not callable(bridge_deploy_report_load)
+        or not callable(bridge_report_update)
+        or (
+            (stale_lock_owner_release_id is None)
+            != (stale_lock_writer_absence_evidence is None)
+        )
+        or (
+            stale_lock_owner_release_id is None
+            and stale_lock_first_observed_at is not None
+        )
+    ):
+        raise PhpDeploymentError(
+            "schema bridge abort requires partial-state Gabia compatibility"
+        )
+    if stale_lock_owner_release_id is not None:
+        safe_stale_owner = (
+            STALE_LOCK_OWNERLESS
+            if stale_lock_owner_release_id == STALE_LOCK_OWNERLESS
+            else _validate_release_id(stale_lock_owner_release_id)
+        )
+        if (
+            safe_stale_owner != stale_lock_owner_release_id
+            or (
+                safe_stale_owner != STALE_LOCK_OWNERLESS
+                and not safe_stale_owner.startswith(
+                    SCHEMA_BRIDGE_STALE_LOCK_PREFIXES
+                )
+            )
+            or stale_lock_writer_absence_evidence is None
+            or (
+                safe_stale_owner == STALE_LOCK_OWNERLESS
+                and stale_lock_first_observed_at is None
+            )
+            or (
+                safe_stale_owner != STALE_LOCK_OWNERLESS
+                and stale_lock_first_observed_at is not None
+            )
+        ):
+            raise PhpDeploymentError(
+            "schema bridge abort stale lock evidence is invalid"
+        )
+        if (
+            STALE_LOCK_WRITER_ABSENCE_PATTERN.fullmatch(
+                stale_lock_writer_absence_evidence
+            )
+            is None
+        ):
+            raise PhpDeploymentError(
+                "schema bridge abort stale lock evidence is invalid"
+            )
+    _validated_protected_token(protected_token)
+    validate_http_endpoint_binding(
+        public_url_root=public_url_root,
+        api_v2_base_url=api_v2_base_url,
+        rollback_health_url=rollback_health_url,
+        allow_http=False,
+    )
+    root = _remote_absolute_path(remote_root, label="remote root")
+    _validate_gabia_core_binding(
+        gabia_compatibility,
+        client=client,
+        remote_root=root,
+        public_url_root=public_url_root,
+        api_v2_base_url=api_v2_base_url,
+        rollback_health_url=rollback_health_url,
+    )
+    private_root, safe_stage_root, safe_backup_root = _private_roots(
+        root,
+        stage_root,
+        backup_root,
+    )
+    safe_release_id = _validate_release_id(release_id)
+    ready = bridge_deploy_report_load()
+    if ready.get("checkpoint_state") == "prepared_no_backup":
+        if expected_backup_manifest_sha256 is not None:
+            raise PhpDeploymentError(
+                "prebackup abort must not claim a backup manifest"
+            )
+        return _abort_prebackup_schema_bridge(
+            client,
+            candidate_plan=candidate_plan,
+            release_id=safe_release_id,
+            prepared_checkpoint=ready,
+            bridge_deploy_report_load=bridge_deploy_report_load,
+            bridge_report_update=bridge_report_update,
+            remote_root=root,
+            private_root=private_root,
+            stage_root=safe_stage_root,
+            backup_root=safe_backup_root,
+            public_url_root=public_url_root,
+            api_v2_base_url=api_v2_base_url,
+            rollback_health_url=rollback_health_url,
+            protected_token=protected_token,
+            http_request=http_request,
+            http_timeout=http_timeout,
+            gabia_compatibility=gabia_compatibility,
+            stale_lock_owner_release_id=stale_lock_owner_release_id,
+            stale_lock_writer_absence_evidence=(
+                stale_lock_writer_absence_evidence
+            ),
+            stale_lock_first_observed_at=stale_lock_first_observed_at,
+        )
+    if (
+        expected_backup_manifest_sha256 is None
+        or SHA256_PATTERN.fullmatch(
+            expected_backup_manifest_sha256
+        )
+        is None
+    ):
+        raise PhpDeploymentError(
+            "schema bridge abort backup manifest hash is invalid"
+        )
+    target_snapshot = load_remote_backup(
+        client,
+        backup_root=safe_backup_root,
+        release_id=safe_release_id,
+        expected_remote_root=root,
+    )
+    verify_one_time_schema_bridge_backup(
+        client,
+        snapshot=target_snapshot,
+        expected_current_sha=candidate_plan.code_revision,
+        expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        expected_manifest_sha256=expected_backup_manifest_sha256,
+    )
+    if (
+        ready.get("backup_manifest") != target_snapshot.manifest_path
+        or ready.get("backup_manifest_sha256")
+        != target_snapshot.manifest_sha256
+        or ready.get("identity_sha256")
+        != _bridge_backup_ready_identity(
+            backup=target_snapshot,
+            candidate_code_revision=candidate_plan.code_revision,
+            previous_code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            dart_disabled_evidence=dart_disabled_evidence,
+        ).get("identity_sha256")
+    ):
+        raise PhpDeploymentError(
+            "schema bridge abort backup differs from its durable journal"
+        )
+    bridge_report_update("backup_ready", {"backup_ready": dict(ready)})
+    ensure_private_root_http_protection(
+        client,
+        remote_root=root,
+        private_root=private_root,
+        public_url_root=public_url_root,
+        http_request=http_request,
+        timeout=http_timeout,
+        allow_http=False,
+        exclusive_writer=gabia_compatibility.exclusive_writer,
+        expected_policy=gabia_compatibility.private_policy,
+        expected_policy_mode=gabia_compatibility.private_policy_mode,
+        allowed_private_redirect=GABIA_PRIVATE_DENY_REDIRECT,
+    )
+
+    operation_id = _validate_release_id(
+        _make_release_id(
+            candidate_plan.code_revision,
+            prefix="schema11-bridge-abort",
+        )
+    )
+    lock_path, stale_lock_takeover = _acquire_schema_bridge_abort_lock(
+        client,
+        private_root=private_root,
+        replacement_release_id=operation_id,
+        stale_owner_release_id=stale_lock_owner_release_id,
+        writer_absence_evidence=(
+            stale_lock_writer_absence_evidence
+        ),
+        stale_lock_first_observed_at=stale_lock_first_observed_at,
+        exclusive_writer=gabia_compatibility.exclusive_writer,
+        bridge_report_update=bridge_report_update,
+    )
+    workspace = ""
+    recovery_workspace = ""
+    emergency: BackupSnapshot | None = None
+    mutation_started = False
+    operation_error: BaseException | None = None
+    recovery_error: BaseException | None = None
+    cleanup_error: BaseException | None = None
+    recovery_cleanup_error: BaseException | None = None
+    lock_release_error: BaseException | None = None
+    policy_error: BaseException | None = None
+    opcache_action: str | None = None
+    initial_state = "unknown"
+    database_schema_before: int | None = None
+    try:
+        locked_ready = bridge_deploy_report_load()
+        if locked_ready != ready:
+            raise PhpDeploymentError(
+                "schema bridge deploy journal changed under recovery lock"
+            )
+        locked_snapshot = load_remote_backup(
+            client,
+            backup_root=safe_backup_root,
+            release_id=safe_release_id,
+            expected_remote_root=root,
+        )
+        verify_one_time_schema_bridge_backup(
+            client,
+            snapshot=locked_snapshot,
+            expected_current_sha=candidate_plan.code_revision,
+            expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            expected_manifest_sha256=expected_backup_manifest_sha256,
+        )
+        initial_state = classify_schema_bridge_targets(
+            client,
+            candidate_plan=candidate_plan,
+            predecessor=locked_snapshot,
+        )
+        if initial_state == "candidate":
+            verify_remote_release_matches_plan(
+                client,
+                remote_root=root,
+                plan=candidate_plan,
+            )
+            database_schema_before = observe_closed_candidate_schema(
+                base_url=api_v2_base_url,
+                expected_sha=candidate_plan.code_revision,
+                protected_token=protected_token,
+                http_request=http_request,
+                timeout=http_timeout,
+            )
+            synthetic_plan = LocalDeploymentPlan(
+                local_root=Path("."),
+                code_revision=candidate_plan.code_revision,
+                artifacts=tuple(
+                    LocalArtifact(
+                        relative_path=path,
+                        path=Path("."),
+                        sha256="0" * 64,
+                        size=1,
+                    )
+                    for path in DEFAULT_COMMIT_ORDER
+                ),
+            )
+            emergency_id = _validate_release_id(
+                _make_release_id(
+                    candidate_plan.code_revision,
+                    prefix="pre-schema11-bridge-abort",
+                )
+            )
+            emergency = capture_remote_backup(
+                client,
+                plan=synthetic_plan,
+                remote_root=root,
+                backup_root=safe_backup_root,
+                release_id=emergency_id,
+            )
+            verify_remote_targets_match_snapshot(
+                client,
+                snapshot=emergency,
+            )
+            bridge_report_update(
+                "emergency_ready",
+                {
+                    "emergency_backup": _bridge_emergency_identity(
+                        emergency,
+                        candidate_code_revision=candidate_plan.code_revision,
+                    )
+                },
+            )
+        bridge_report_update(
+            "commit_started",
+            {
+                "initial_php_state": initial_state,
+                "candidate_database_schema_version_before": (
+                    database_schema_before
+                ),
+                "database_mutated": False,
+            },
+        )
+        if initial_state != "predecessor":
+            workspace = _create_private_workspace(
+                client,
+                safe_stage_root,
+                operation_id,
+            )
+            _verify_posix_rename_capability(client, workspace)
+            mutation_started = True
+            restore_remote_backup(
+                client,
+                snapshot=locked_snapshot,
+                workspace=workspace,
+            )
+        opcache_action = reset_opcache_with_ephemeral_probe(
+            client,
+            remote_root=root,
+            public_url_root=public_url_root,
+            http_request=http_request,
+            timeout=http_timeout,
+            allow_http=False,
+            exclusive_writer=gabia_compatibility.exclusive_writer,
+            require_strict_state=True,
+        )
+        restored_release = verify_existing_remote_release_identity(
+            client,
+            remote_root=root,
+            expected_core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+            required_mode=DEFAULT_FILE_MODE,
+        )
+        if restored_release != ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA:
+            raise PhpDeploymentError(
+                "schema bridge abort did not restore exact c06"
+            )
+        bridge_report_update(
+            "restored",
+            {
+                "initial_php_state": initial_state,
+                "candidate_database_schema_version_before": (
+                    database_schema_before
+                ),
+                "database_mutated": False,
+            },
+        )
+        verify_c06_forward_compatible_closed(
+            base_url=api_v2_base_url,
+            protected_token=protected_token,
+            http_request=http_request,
+            timeout=http_timeout,
+        )
+        verify_rollback_health(
+            url=rollback_health_url,
+            http_request=http_request,
+            timeout=http_timeout,
+            allow_http=False,
+        )
+        bridge_report_update(
+            "verified",
+            {
+                "initial_php_state": initial_state,
+                "candidate_database_schema_version_before": (
+                    database_schema_before
+                ),
+                "database_schema_observation": (
+                    "candidate_schema_" + str(database_schema_before)
+                    if database_schema_before in {11, 12}
+                    else (
+                        "unavailable_due_c06_contract"
+                        if initial_state == "predecessor"
+                        else "unavailable_due_partial_php"
+                    )
+                ),
+                "database_mutated": False,
+                "v1_closed_smoke": True,
+                "v2_closed_smoke": True,
+                "legacy_health_smoke": True,
+                "forward_compatibility_verified": True,
+            },
+        )
+    except BaseException as error:
+        operation_error = error
+        if mutation_started and emergency is not None:
+            try:
+                recovery_id = _validate_release_id(
+                    _make_release_id(
+                        candidate_plan.code_revision,
+                        prefix="recover-schema11-bridge-abort",
+                    )
+                )
+                recovery_workspace = _create_private_workspace(
+                    client,
+                    safe_stage_root,
+                    recovery_id,
+                )
+                _verify_posix_rename_capability(
+                    client,
+                    recovery_workspace,
+                )
+                restore_remote_backup(
+                    client,
+                    snapshot=emergency,
+                    workspace=recovery_workspace,
+                )
+                reset_opcache_with_ephemeral_probe(
+                    client,
+                    remote_root=root,
+                    public_url_root=public_url_root,
+                    http_request=http_request,
+                    timeout=http_timeout,
+                    allow_http=False,
+                    exclusive_writer=gabia_compatibility.exclusive_writer,
+                    require_strict_state=True,
+                )
+                recovered_schema = observe_closed_candidate_schema(
+                    base_url=api_v2_base_url,
+                    expected_sha=candidate_plan.code_revision,
+                    protected_token=protected_token,
+                    http_request=http_request,
+                    timeout=http_timeout,
+                )
+                if recovered_schema != database_schema_before:
+                    raise PhpDeploymentError(
+                        "schema bridge abort candidate recovery changed DB state"
+                    )
+            except BaseException as recovery_failure:
+                recovery_error = recovery_failure
+    finally:
+        if workspace:
+            try:
+                _cleanup_workspace(
+                    client,
+                    workspace,
+                    known_files=_restore_stage_paths(
+                        target_snapshot,
+                        workspace,
+                    ),
+                )
+            except BaseException as error:
+                cleanup_error = error
+        if recovery_workspace:
+            try:
+                _cleanup_workspace(
+                    client,
+                    recovery_workspace,
+                    known_files=(
+                        ()
+                        if emergency is None
+                        else _restore_stage_paths(
+                            emergency,
+                            recovery_workspace,
+                        )
+                    ),
+                )
+            except BaseException as error:
+                recovery_cleanup_error = error
+        try:
+            _release_deployment_lock(
+                client,
+                lock_path,
+                exclusive_writer=gabia_compatibility.exclusive_writer,
+            )
+        except BaseException as error:
+            lock_release_error = error
+        try:
+            _verify_gabia_private_policy(client, gabia_compatibility)
+        except BaseException as error:
+            policy_error = error
+
+    if operation_error is not None:
+        if recovery_error is not None:
+            raise PhpDeploymentRollbackError(
+                "schema bridge abort failed and candidate recovery failed"
+            ) from recovery_error
+        if (
+            cleanup_error is not None
+            or recovery_cleanup_error is not None
+            or lock_release_error is not None
+            or policy_error is not None
+        ):
+            raise PhpDeploymentError(
+                "schema bridge abort failed with incomplete cleanup"
+            ) from (
+                cleanup_error
+                or recovery_cleanup_error
+                or lock_release_error
+                or policy_error
+            )
+        if emergency is not None and mutation_started:
+            raise PhpDeploymentError(
+                "schema bridge abort failed safely; candidate was restored"
+            ) from operation_error
+        raise PhpDeploymentError(
+            "schema bridge abort is incomplete; use the original deploy "
+            "journal with a new recovery report"
+        ) from operation_error
+    if (
+        cleanup_error is not None
+        or recovery_cleanup_error is not None
+        or lock_release_error is not None
+        or policy_error is not None
+    ):
+        raise PhpDeploymentError(
+            "schema bridge abort restored c06 but cleanup was incomplete"
+        ) from (
+            cleanup_error
+            or recovery_cleanup_error
+            or lock_release_error
+            or policy_error
+        )
+    if opcache_action not in {"disabled_verified", "reset_verified"}:
+        raise PhpDeploymentError(
+            "schema bridge abort lacks verified OPcache state"
+        )
+    return {
+        "ok": True,
+        "operation": "schema-bridge-abort",
+        "release_id": safe_release_id,
+        "backup_manifest": target_snapshot.manifest_path,
+        "backup_manifest_sha256": target_snapshot.manifest_sha256,
+        "restored_code_revision": ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        "restored_api_schema_contract_version": 11,
+        "candidate_code_revision": candidate_plan.code_revision,
+        "candidate_expected_schema_version": 12,
+        "candidate_database_schema_version_before": database_schema_before,
+        "database_schema_observation": (
+            "candidate_schema_" + str(database_schema_before)
+            if database_schema_before in {11, 12}
+            else (
+                "unavailable_due_c06_contract"
+                if initial_state == "predecessor"
+                else "unavailable_due_partial_php"
+            )
+        ),
+        "database_mutated": False,
+        "dart_disabled_evidence": dart_disabled_evidence,
+        "initial_php_state": initial_state,
+        "manifest_committed_last": True,
+        "byte_verification": True,
+        "v1_closed_smoke": True,
+        "v2_closed_smoke": True,
+        "legacy_health_smoke": True,
+        "forward_compatibility_verified": True,
+        "closed_smoke": True,
+        "opcache_action": opcache_action,
+        "private_root_http_protected": True,
+        "emergency_backup_release_id": (
+            None if emergency is None else emergency.release_id
+        ),
+        "emergency_backup_identity": (
+            None
+            if emergency is None
+            else _bridge_emergency_identity(
+                emergency,
+                candidate_code_revision=candidate_plan.code_revision,
+            )
+        ),
+        "stale_lock_takeover": stale_lock_takeover,
+        "stale_lock_cleanup_verified": (
+            stale_lock_takeover is None
+            or _lstat_or_none(
+                client,
+                _remote_join(private_root, "deployment-lock"),
+            )
+            is None
+        ),
+    }
+
+
 def _add_local_plan_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--local-root",
@@ -4270,6 +7208,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     _add_local_plan_arguments(plan_parser)
 
+    ownerless_inspect_parser = commands.add_parser(
+        "inspect-ownerless-lock",
+        help=(
+            "Read and attest an exact stale ownerless deployment lock "
+            "without mutating it"
+        ),
+    )
+    _add_sftp_arguments(ownerless_inspect_parser)
+
     deploy_parser = commands.add_parser(
         "deploy",
         help="Deploy or inspect the exact release through pinned SFTP",
@@ -4278,6 +7225,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     _add_sftp_arguments(deploy_parser)
     _add_http_arguments(deploy_parser)
     deploy_parser.add_argument("--release-id")
+    deploy_parser.add_argument(
+        "--report-output",
+        type=Path,
+        help=(
+            "Absolute new owner-only JSON checkpoint/report path; required "
+            "for a mutating Gabia deployment"
+        ),
+    )
+    deploy_parser.add_argument("--private-report-root", type=Path)
     deploy_parser.add_argument("--dry-run", action="store_true")
     deploy_parser.add_argument(
         "--confirm-production-write",
@@ -4304,6 +7260,165 @@ def build_arg_parser() -> argparse.ArgumentParser:
     rollback_parser.add_argument("--expected-current-sha")
     rollback_parser.add_argument("--confirm-rollback-release-id")
     rollback_parser.add_argument("--confirm-rollback-current-sha")
+    rollback_parser.add_argument("--report-output", type=Path)
+    rollback_parser.add_argument("--private-report-root", type=Path)
+
+    bridge_rollback_parser = commands.add_parser(
+        "schema-bridge-rollback",
+        help=(
+            "One-time restore of the exact schema-11 PHP predecessor while "
+            "the database remains on schema 11 or schema 12"
+        ),
+    )
+    deploy_parser.add_argument("--expected-previous-sha")
+    deploy_parser.add_argument("--confirm-previous-sha")
+    deploy_parser.add_argument("--dart-disabled-evidence")
+    _add_local_plan_arguments(bridge_rollback_parser)
+    _add_sftp_arguments(bridge_rollback_parser)
+    _add_http_arguments(bridge_rollback_parser)
+    bridge_rollback_parser.add_argument("--release-id", required=True)
+    bridge_rollback_parser.add_argument(
+        "--expected-current-sha",
+        required=True,
+    )
+    bridge_rollback_parser.add_argument(
+        "--expected-previous-sha",
+        required=True,
+    )
+    bridge_rollback_parser.add_argument(
+        "--expected-backup-manifest-sha256",
+        required=True,
+    )
+    bridge_rollback_parser.add_argument(
+        "--confirm-rollback-release-id",
+        required=True,
+    )
+    bridge_rollback_parser.add_argument(
+        "--confirm-rollback-current-sha",
+        required=True,
+    )
+    bridge_rollback_parser.add_argument(
+        "--confirm-rollback-previous-sha",
+        required=True,
+    )
+    bridge_rollback_parser.add_argument(
+        "--confirm-backup-manifest-sha256",
+        required=True,
+    )
+    bridge_rollback_parser.add_argument(
+        "--dart-disabled-evidence",
+        required=True,
+    )
+    bridge_rollback_parser.add_argument(
+        "--report-output",
+        type=Path,
+        required=True,
+        help="Absolute new owner-only JSON checkpoint/report path",
+    )
+    bridge_rollback_parser.add_argument(
+        "--private-report-root",
+        type=Path,
+        required=True,
+        help=(
+            "Absolute owner-only private directory, independently confirmed "
+            "by BSIDE_PRIVATE_REPORT_ROOT"
+        ),
+    )
+
+    bridge_abort_parser = commands.add_parser(
+        "schema-bridge-abort",
+        help=(
+            "Resume an interrupted schema bridge PHP commit and converge "
+            "exactly to c06 without changing MySQL"
+        ),
+    )
+    _add_local_plan_arguments(bridge_abort_parser)
+    _add_sftp_arguments(bridge_abort_parser)
+    _add_http_arguments(bridge_abort_parser)
+    bridge_abort_parser.add_argument("--release-id", required=True)
+    bridge_abort_parser.add_argument(
+        "--expected-current-sha",
+        required=True,
+    )
+    bridge_abort_parser.add_argument(
+        "--expected-previous-sha",
+        required=True,
+    )
+    bridge_abort_parser.add_argument(
+        "--expected-backup-manifest-sha256",
+        help=(
+            "Exact backup manifest SHA-256; omit only when the durable "
+            "deploy journal is still prepared with no backup"
+        ),
+    )
+    bridge_abort_parser.add_argument(
+        "--confirm-rollback-release-id",
+        required=True,
+    )
+    bridge_abort_parser.add_argument(
+        "--confirm-rollback-current-sha",
+        required=True,
+    )
+    bridge_abort_parser.add_argument(
+        "--confirm-rollback-previous-sha",
+        required=True,
+    )
+    bridge_abort_parser.add_argument(
+        "--confirm-backup-manifest-sha256",
+        help=(
+            "Must repeat --expected-backup-manifest-sha256; omit only for "
+            "a prepared-no-backup recovery"
+        ),
+    )
+    bridge_abort_parser.add_argument(
+        "--dart-disabled-evidence",
+        required=True,
+    )
+    bridge_abort_parser.add_argument(
+        "--bridge-deploy-report",
+        type=Path,
+        required=True,
+        help=(
+            "Owner-only schema-bridge-deploy journal containing either the "
+            "fixed prepared precondition or backup_ready"
+        ),
+    )
+    bridge_abort_parser.add_argument(
+        "--stale-lock-owner-release-id",
+        help="Exact owner.json release_id approved for abort-only takeover",
+    )
+    bridge_abort_parser.add_argument(
+        "--confirm-stale-lock-owner-release-id",
+        help="Must exactly repeat --stale-lock-owner-release-id",
+    )
+    bridge_abort_parser.add_argument(
+        "--stale-lock-writer-absence-evidence",
+        help=(
+            "github-actions:no-running-php-writers@... evidence; "
+            "also required in the pinned environment variable"
+        ),
+    )
+    bridge_abort_parser.add_argument(
+        "--stale-lock-first-observed-at",
+        help=(
+            "UTC timestamp required only for an explicit ownerless lock "
+            "takeover"
+        ),
+    )
+    bridge_abort_parser.add_argument(
+        "--report-output",
+        type=Path,
+        required=True,
+        help=(
+            "Absolute owner-only recovery report path; reuse the same path "
+            "only for a durable stale-lock takeover resume"
+        ),
+    )
+    bridge_abort_parser.add_argument(
+        "--private-report-root",
+        type=Path,
+        required=True,
+    )
     return parser
 
 
@@ -4316,6 +7431,1371 @@ def _print_report(report: Mapping[str, object]) -> None:
             sort_keys=True,
         )
     )
+
+
+def _fsync_parent_directory(path: Path) -> None:
+    """Persist a rename where the host OS exposes directory fsync."""
+
+    if os.name == "nt":
+        return
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    descriptor = os.open(path.parent, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _load_durable_report_payload(destination: Path) -> dict[str, object]:
+    try:
+        if destination.is_symlink() or not destination.is_file():
+            raise PhpDeploymentError("durable deployment report is not a regular file")
+        payload = json.loads(destination.read_bytes())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PhpDeploymentError("durable deployment report is invalid") from error
+    if not isinstance(payload, dict):
+        raise PhpDeploymentError("durable deployment report is invalid")
+    return payload
+
+
+def load_schema_bridge_backup_ready(
+    destination: Path,
+    *,
+    private_root: Path,
+    expected_candidate_sha: str,
+    expected_release_id: str,
+    expected_backup_manifest_sha256: str | None,
+    expected_dart_disabled_evidence: str,
+) -> Mapping[str, object]:
+    """Load an immutable predecessor identity from the deploy journal."""
+
+    if (
+        not destination.is_absolute()
+        or not private_root.is_absolute()
+        or destination != destination.resolve(strict=False)
+        or private_root != private_root.resolve(strict=True)
+        or destination.parent.is_symlink()
+        or private_root.is_symlink()
+    ):
+        raise PhpDeploymentError("schema bridge journal path is not canonical")
+    try:
+        destination.parent.resolve(strict=True).relative_to(private_root)
+    except (OSError, ValueError) as error:
+        raise PhpDeploymentError(
+            "schema bridge journal is outside its private root"
+        ) from error
+    payload = _load_durable_report_payload(destination)
+    if not _valid_bridge_journal_base_identity(
+        payload,
+        operation="schema-bridge-deploy",
+        code_revision=expected_candidate_sha,
+        release_id=expected_release_id,
+    ):
+        raise PhpDeploymentError(
+            "schema bridge deploy journal base identity does not match"
+        )
+    if (
+        payload.get("status") == "prepared"
+        and payload.get("backup_ready") is None
+    ):
+        if expected_backup_manifest_sha256 is not None:
+            raise PhpDeploymentError(
+                "prepared schema bridge journal must not claim a backup"
+            )
+        precondition = payload.get("bridge_precondition")
+        if not _valid_bridge_prepared_identity(
+            precondition,
+            candidate_code_revision=expected_candidate_sha,
+            release_id=expected_release_id,
+            journal_nonce=payload.get("journal_nonce"),
+            dart_disabled_evidence=expected_dart_disabled_evidence,
+        ):
+            raise PhpDeploymentError(
+                "schema bridge prepared journal identity does not match"
+            )
+        assert isinstance(precondition, dict)
+        return {
+            "checkpoint_state": "prepared_no_backup",
+            **dict(precondition),
+        }
+    ready = payload.get("backup_ready")
+    if (
+        expected_backup_manifest_sha256 is None
+        or payload.get("status")
+        not in {
+            "backup_ready",
+            "commit_started",
+            "restored",
+            "verified",
+            "completed",
+        }
+        or not isinstance(ready, dict)
+        or ready.get("candidate_code_revision") != expected_candidate_sha
+        or ready.get("previous_code_revision")
+        != ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+        or ready.get("release_id") != expected_release_id
+        or ready.get("backup_manifest_sha256")
+        != expected_backup_manifest_sha256
+        or ready.get("dart_disabled_evidence")
+        != expected_dart_disabled_evidence
+        or ready.get("database_mutated") is not False
+        or not isinstance(ready.get("identity_sha256"), str)
+    ):
+        raise PhpDeploymentError(
+            "schema bridge deploy journal identity does not match"
+        )
+    recomputed = dict(ready)
+    claimed = recomputed.pop("identity_sha256")
+    if not secrets.compare_digest(
+        str(claimed),
+        _sha256_bytes(_encode_json(recomputed)),
+    ):
+        raise PhpDeploymentError(
+            "schema bridge deploy journal backup identity is invalid"
+        )
+    return dict(ready)
+
+
+def _bridge_prepared_identity(
+    *,
+    candidate_code_revision: str,
+    release_id: str,
+    journal_nonce: str,
+    dart_disabled_evidence: str,
+) -> dict[str, object]:
+    identity: dict[str, object] = {
+        "candidate_code_revision": candidate_code_revision,
+        "previous_code_revision": ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        "release_id": release_id,
+        "journal_nonce": journal_nonce,
+        "dart_disabled_evidence": dart_disabled_evidence,
+        "database_mutated": False,
+    }
+    identity["identity_sha256"] = _sha256_bytes(_encode_json(identity))
+    return identity
+
+
+def _valid_bridge_prepared_identity(
+    value: object,
+    *,
+    candidate_code_revision: object,
+    release_id: object,
+    journal_nonce: object,
+    dart_disabled_evidence: object,
+) -> bool:
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != {
+            "candidate_code_revision",
+            "previous_code_revision",
+            "release_id",
+            "journal_nonce",
+            "dart_disabled_evidence",
+            "database_mutated",
+            "identity_sha256",
+        }
+        or value.get("candidate_code_revision")
+        != candidate_code_revision
+        or value.get("previous_code_revision")
+        != ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+        or value.get("release_id") != release_id
+        or value.get("journal_nonce") != journal_nonce
+        or value.get("dart_disabled_evidence")
+        != dart_disabled_evidence
+        or value.get("database_mutated") is not False
+        or not isinstance(value.get("identity_sha256"), str)
+    ):
+        return False
+    recomputed = dict(value)
+    claimed = recomputed.pop("identity_sha256")
+    return secrets.compare_digest(
+        str(claimed),
+        _sha256_bytes(_encode_json(recomputed)),
+    )
+
+
+def _bridge_prebackup_c06_identity(
+    prepared: Mapping[str, object],
+) -> dict[str, object]:
+    identity: dict[str, object] = {
+        "checkpoint_state": "prepared_no_backup",
+        "candidate_code_revision": prepared.get(
+            "candidate_code_revision"
+        ),
+        "previous_code_revision": ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        "release_id": prepared.get("release_id"),
+        "deploy_journal_nonce": prepared.get("journal_nonce"),
+        "dart_disabled_evidence": prepared.get(
+            "dart_disabled_evidence"
+        ),
+        "public_file_mode": DEFAULT_FILE_MODE,
+        "database_mutated": False,
+    }
+    identity["identity_sha256"] = _sha256_bytes(_encode_json(identity))
+    return identity
+
+
+def _valid_bridge_prebackup_c06_identity(
+    value: object,
+    *,
+    candidate_code_revision: object,
+    release_id: object,
+) -> bool:
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != {
+            "checkpoint_state",
+            "candidate_code_revision",
+            "previous_code_revision",
+            "release_id",
+            "deploy_journal_nonce",
+            "dart_disabled_evidence",
+            "public_file_mode",
+            "database_mutated",
+            "identity_sha256",
+        }
+        or value.get("checkpoint_state") != "prepared_no_backup"
+        or value.get("candidate_code_revision")
+        != candidate_code_revision
+        or value.get("previous_code_revision")
+        != ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+        or value.get("release_id") != release_id
+        or not isinstance(value.get("deploy_journal_nonce"), str)
+        or re.fullmatch(
+            r"[0-9a-f]{32}",
+            str(value["deploy_journal_nonce"]),
+        )
+        is None
+        or not isinstance(value.get("dart_disabled_evidence"), str)
+        or DART_DISABLED_EVIDENCE_PATTERN.fullmatch(
+            str(value["dart_disabled_evidence"])
+        )
+        is None
+        or value.get("public_file_mode") != DEFAULT_FILE_MODE
+        or value.get("database_mutated") is not False
+        or not isinstance(value.get("identity_sha256"), str)
+    ):
+        return False
+    recomputed = dict(value)
+    claimed = recomputed.pop("identity_sha256")
+    return secrets.compare_digest(
+        str(claimed),
+        _sha256_bytes(_encode_json(recomputed)),
+    )
+
+
+def _replace_durable_report(
+    destination: Path,
+    payload: Mapping[str, object],
+) -> None:
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.",
+        suffix=".checkpoint",
+        dir=str(destination.parent),
+    )
+    temporary = Path(temporary_name)
+    try:
+        os.chmod(temporary, PRIVATE_FILE_MODE)
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = -1
+            handle.write(_encode_json(payload))
+            handle.flush()
+            os.fsync(handle.fileno())
+        if destination.is_symlink() or not destination.is_file():
+            raise PhpDeploymentError(
+                "durable deployment report changed before checkpoint commit"
+            )
+        os.replace(temporary, destination)
+        os.chmod(destination, PRIVATE_FILE_MODE)
+        _fsync_parent_directory(destination)
+    except BaseException:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def _bridge_backup_ready_identity(
+    *,
+    backup: BackupSnapshot,
+    candidate_code_revision: str,
+    previous_code_revision: str,
+    dart_disabled_evidence: str,
+) -> dict[str, object]:
+    identity = {
+        "release_id": backup.release_id,
+        "candidate_code_revision": candidate_code_revision,
+        "previous_code_revision": previous_code_revision,
+        "backup_directory": backup.backup_directory,
+        "backup_manifest": backup.manifest_path,
+        "backup_manifest_sha256": backup.manifest_sha256,
+        "backup_manifest_bytes": backup.manifest_size,
+        "remote_root": backup.remote_root,
+        "dart_disabled_evidence": dart_disabled_evidence,
+        "database_mutated": False,
+    }
+    identity["identity_sha256"] = _sha256_bytes(_encode_json(identity))
+    return identity
+
+
+def _valid_bridge_backup_ready_identity(
+    value: object,
+    *,
+    candidate_code_revision: object,
+    release_id: object,
+) -> bool:
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != {
+            "release_id",
+            "candidate_code_revision",
+            "previous_code_revision",
+            "backup_directory",
+            "backup_manifest",
+            "backup_manifest_sha256",
+            "backup_manifest_bytes",
+            "remote_root",
+            "dart_disabled_evidence",
+            "database_mutated",
+            "identity_sha256",
+        }
+        or value.get("candidate_code_revision")
+        != candidate_code_revision
+        or value.get("previous_code_revision")
+        != ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+        or value.get("release_id") != release_id
+        or not isinstance(value.get("backup_directory"), str)
+        or not isinstance(value.get("backup_manifest"), str)
+        or not isinstance(value.get("backup_manifest_sha256"), str)
+        or SHA256_PATTERN.fullmatch(
+            str(value["backup_manifest_sha256"])
+        )
+        is None
+        or type(value.get("backup_manifest_bytes")) is not int
+        or int(value["backup_manifest_bytes"]) < 1
+        or not isinstance(value.get("remote_root"), str)
+        or not isinstance(value.get("dart_disabled_evidence"), str)
+        or DART_DISABLED_EVIDENCE_PATTERN.fullmatch(
+            str(value["dart_disabled_evidence"])
+        )
+        is None
+        or value.get("database_mutated") is not False
+        or not isinstance(value.get("identity_sha256"), str)
+    ):
+        return False
+    try:
+        backup_directory = _remote_absolute_path(
+            str(value["backup_directory"]),
+            label="bridge backup directory",
+        )
+        _remote_absolute_path(
+            str(value["remote_root"]),
+            label="bridge remote root",
+        )
+        if value.get("backup_manifest") != _remote_join(
+            backup_directory,
+            "backup-manifest.json",
+        ):
+            return False
+    except PhpDeploymentError:
+        return False
+    recomputed = dict(value)
+    claimed = recomputed.pop("identity_sha256")
+    return secrets.compare_digest(
+        str(claimed),
+        _sha256_bytes(_encode_json(recomputed)),
+    )
+
+
+def _bridge_emergency_identity(
+    backup: BackupSnapshot,
+    *,
+    candidate_code_revision: str,
+) -> dict[str, object]:
+    identity: dict[str, object] = {
+        "release_id": backup.release_id,
+        "candidate_code_revision": candidate_code_revision,
+        "backup_directory": backup.backup_directory,
+        "backup_manifest": backup.manifest_path,
+        "backup_manifest_sha256": backup.manifest_sha256,
+        "backup_manifest_bytes": backup.manifest_size,
+        "remote_root": backup.remote_root,
+        "database_mutated": False,
+    }
+    identity["identity_sha256"] = _sha256_bytes(_encode_json(identity))
+    return identity
+
+
+def _valid_bridge_emergency_identity(
+    value: object,
+    *,
+    candidate_code_revision: object,
+) -> bool:
+    if (
+        not isinstance(value, dict)
+        or value.get("candidate_code_revision") != candidate_code_revision
+        or value.get("database_mutated") is not False
+        or not isinstance(value.get("identity_sha256"), str)
+        or not isinstance(value.get("backup_manifest_sha256"), str)
+        or SHA256_PATTERN.fullmatch(str(value["backup_manifest_sha256"]))
+        is None
+    ):
+        return False
+    recomputed = dict(value)
+    claimed = recomputed.pop("identity_sha256")
+    return secrets.compare_digest(
+        str(claimed),
+        _sha256_bytes(_encode_json(recomputed)),
+    )
+
+
+def _valid_ownerless_remote_identity(
+    value: object,
+    *,
+    remote_mtime: object,
+) -> bool:
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != {
+            "schema_version",
+            "lock_path",
+            "st_mode",
+            "st_size",
+            "st_mtime",
+            "st_uid",
+            "st_gid",
+            "st_ino",
+            "st_dev",
+        }
+        or value.get("schema_version") != 1
+        or not isinstance(value.get("lock_path"), str)
+        or value.get("st_mode") != PRIVATE_DIRECTORY_MODE
+        or type(value.get("st_size")) is not int
+        or not isinstance(value.get("st_mtime"), (int, float))
+        or isinstance(value.get("st_mtime"), bool)
+        or not math.isfinite(float(value["st_mtime"]))
+        or any(
+            value.get(field) is not None
+            and type(value.get(field)) is not int
+            for field in ("st_uid", "st_gid", "st_ino", "st_dev")
+        )
+        or not isinstance(remote_mtime, str)
+    ):
+        return False
+    try:
+        _remote_absolute_path(
+            str(value["lock_path"]),
+            label="ownerless lock path",
+        )
+        expected_mtime = datetime.fromtimestamp(
+            float(value["st_mtime"]),
+            timezone.utc,
+        ).isoformat()
+        _parse_utc_timestamp(remote_mtime)
+    except (OSError, OverflowError, ValueError, PhpDeploymentError):
+        return False
+    return secrets.compare_digest(expected_mtime, remote_mtime)
+
+
+def _valid_stale_lock_takeover_identity(value: object) -> bool:
+    evidence = (
+        None
+        if not isinstance(value, dict)
+        else value.get("writer_absence_evidence")
+    )
+    match = (
+        None
+        if not isinstance(evidence, str)
+        else STALE_LOCK_WRITER_ABSENCE_PATTERN.fullmatch(evidence)
+    )
+    remote_identity = (
+        value.get("stale_owner_remote_identity")
+        if isinstance(value, dict)
+        else None
+    )
+    if (
+        not isinstance(value, dict)
+        or not isinstance(value.get("stale_owner_release_id"), str)
+        or (
+            value.get("stale_owner_release_id") != STALE_LOCK_OWNERLESS
+            and RELEASE_ID_PATTERN.fullmatch(
+                str(value["stale_owner_release_id"])
+            )
+            is None
+        )
+        or (
+            value.get("stale_owner_release_id") != STALE_LOCK_OWNERLESS
+            and not str(value["stale_owner_release_id"]).startswith(
+                SCHEMA_BRIDGE_STALE_LOCK_PREFIXES
+            )
+        )
+        or value.get("stale_owner_state")
+        not in ("owner_present", "ownerless")
+        or not isinstance(value.get("stale_owner_sha256"), str)
+        or SHA256_PATTERN.fullmatch(str(value["stale_owner_sha256"]))
+        is None
+        or not isinstance(value.get("stale_owner_acquired_at"), str)
+        or match is None
+        or match.group("owner_sha256")
+        != value.get("stale_owner_sha256")
+        or match.group("acquired_at_sha256")
+        != _sha256_bytes(
+            str(value["stale_owner_acquired_at"]).encode("ascii")
+        )
+        or match.group("nonce") != value.get("writer_absence_nonce")
+        or match.group("issued_at")
+        != value.get("writer_absence_issued_at")
+        or (
+            value.get("stale_owner_state") == "ownerless"
+            and value.get("stale_owner_release_id")
+            != STALE_LOCK_OWNERLESS
+        )
+        or (
+            value.get("stale_owner_state") == "owner_present"
+            and value.get("stale_owner_release_id")
+            == STALE_LOCK_OWNERLESS
+        )
+        or (
+            value.get("stale_owner_state") == "ownerless"
+            and (
+                not isinstance(remote_identity, dict)
+                or not _valid_ownerless_remote_identity(
+                    remote_identity,
+                    remote_mtime=value.get(
+                        "stale_owner_remote_mtime"
+                    ),
+                )
+                or value.get("stale_owner_acquired_at")
+                != value.get("stale_owner_remote_mtime")
+                or value.get("stale_owner_sha256")
+                != _sha256_bytes(
+                    _encode_json(remote_identity)
+                )
+            )
+        )
+        or (
+            value.get("stale_owner_state") == "owner_present"
+            and (
+                value.get("stale_owner_remote_identity") is not None
+                or value.get("stale_owner_remote_mtime") is not None
+            )
+        )
+        or not isinstance(value.get("replacement_release_id"), str)
+        or RELEASE_ID_PATTERN.fullmatch(
+            str(value["replacement_release_id"])
+        )
+        is None
+        or not str(value["replacement_release_id"]).startswith(
+            "schema11-bridge-abort-"
+        )
+        or value.get("database_mutated") is not False
+        or not isinstance(value.get("identity_sha256"), str)
+    ):
+        return False
+    try:
+        assert match is not None
+        _parse_utc_timestamp(
+            match.group("issued_at"),
+            compact=True,
+        )
+        _parse_utc_timestamp(
+            str(value["stale_owner_acquired_at"])
+        )
+    except PhpDeploymentError:
+        return False
+    recomputed = dict(value)
+    claimed = recomputed.pop("identity_sha256")
+    return secrets.compare_digest(
+        str(claimed),
+        _sha256_bytes(_encode_json(recomputed)),
+    )
+
+
+def _bridge_journal_base_identity(
+    value: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "schema_version": value.get("schema_version"),
+        "operation": value.get("operation"),
+        "code_revision": value.get("code_revision"),
+        "release_id": value.get("release_id"),
+        "journal_nonce": value.get("journal_nonce"),
+        "prepared_at": value.get("prepared_at"),
+    }
+
+
+def _valid_bridge_journal_base_identity(
+    value: object,
+    *,
+    operation: object,
+    code_revision: object,
+    release_id: object,
+) -> bool:
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_version") != 2
+        or value.get("operation") != operation
+        or value.get("code_revision") != code_revision
+        or value.get("release_id") != release_id
+        or not isinstance(value.get("journal_nonce"), str)
+        or re.fullmatch(
+            r"[0-9a-f]{32}",
+            str(value["journal_nonce"]),
+        )
+        is None
+        or not isinstance(value.get("prepared_at"), str)
+        or not isinstance(
+            value.get("journal_identity_sha256"),
+            str,
+        )
+        or SHA256_PATTERN.fullmatch(
+            str(value["journal_identity_sha256"])
+        )
+        is None
+    ):
+        return False
+    try:
+        _parse_utc_timestamp(str(value["prepared_at"]))
+    except PhpDeploymentError:
+        return False
+    return secrets.compare_digest(
+        str(value["journal_identity_sha256"]),
+        _sha256_bytes(
+            _encode_json(_bridge_journal_base_identity(value))
+        ),
+    )
+
+
+def _valid_bridge_fixed_recovery_pair(
+    value: Mapping[str, object],
+    *,
+    code_revision: object,
+    release_id: object,
+) -> bool:
+    ready_valid = _valid_bridge_backup_ready_identity(
+        value.get("backup_ready"),
+        candidate_code_revision=code_revision,
+        release_id=release_id,
+    )
+    prebackup_valid = _valid_bridge_prebackup_c06_identity(
+        value.get("prebackup_c06"),
+        candidate_code_revision=code_revision,
+        release_id=release_id,
+    )
+    return ready_valid != prebackup_valid
+
+
+def _advance_bridge_report(
+    destination: Path,
+    *,
+    operation: str,
+    code_revision: str,
+    release_id: str,
+    expected_statuses: Sequence[str],
+    status: str,
+    evidence: Mapping[str, object],
+) -> None:
+    """Atomically advance a crash-recoverable bridge journal."""
+
+    payload = _load_durable_report_payload(destination)
+    if (
+        not _valid_bridge_journal_base_identity(
+            payload,
+            operation=operation,
+            code_revision=code_revision,
+            release_id=release_id,
+        )
+        or payload.get("status") not in set(expected_statuses)
+    ):
+        raise PhpDeploymentError("schema bridge journal identity is invalid")
+    existing_ready = payload.get("backup_ready")
+    supplied_ready = evidence.get("backup_ready")
+    if existing_ready is not None and (
+        not isinstance(existing_ready, dict)
+        or supplied_ready is not None and supplied_ready != existing_ready
+    ):
+        raise PhpDeploymentError("schema bridge backup_ready identity changed")
+    existing_prebackup = payload.get("prebackup_c06")
+    supplied_prebackup = evidence.get("prebackup_c06")
+    if existing_prebackup is not None and (
+        not isinstance(existing_prebackup, dict)
+        or (
+            supplied_prebackup is not None
+            and supplied_prebackup != existing_prebackup
+        )
+    ):
+        raise PhpDeploymentError(
+            "schema bridge prebackup c06 identity changed"
+        )
+    next_payload = dict(payload)
+    next_payload["status"] = status
+    next_payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    for key, value in evidence.items():
+        if key in {
+            "schema_version",
+            "operation",
+            "code_revision",
+            "release_id",
+            "journal_nonce",
+            "prepared_at",
+        }:
+            raise PhpDeploymentError("schema bridge journal field is reserved")
+        next_payload[key] = value
+    prebackup = next_payload.get("prebackup_c06")
+    if status != "prepared":
+        if (
+            operation != "schema-bridge-abort"
+            and prebackup is not None
+        ) or not _valid_bridge_fixed_recovery_pair(
+            next_payload,
+            code_revision=code_revision,
+            release_id=release_id,
+        ):
+            raise PhpDeploymentError(
+                "schema bridge journal requires exactly one fixed recovery "
+                "identity"
+            )
+    _replace_durable_report(destination, next_payload)
+
+
+def _bridge_report_updater(
+    destination: Path,
+    *,
+    operation: str,
+    code_revision: str,
+    release_id: str,
+) -> BridgeReportUpdater:
+    transitions = {
+        "backup_ready": ("prepared",),
+        "prebackup_c06_ready": ("prepared",),
+        "stale_lock_takeover_ready": (
+            "backup_ready",
+            "prebackup_c06_ready",
+        ),
+        "stale_lock_takeover_complete": (
+            "stale_lock_takeover_ready",
+        ),
+        "emergency_ready": (
+            "prepared",
+            "backup_ready",
+            "stale_lock_takeover_complete",
+        ),
+        "commit_started": (
+            "backup_ready",
+            "prebackup_c06_ready",
+            "emergency_ready",
+            "stale_lock_takeover_complete",
+        ),
+        "restored": ("commit_started",),
+        "verified": ("restored", "commit_started"),
+    }
+
+    def update(status: str, evidence: Mapping[str, object]) -> None:
+        allowed = transitions.get(status)
+        if allowed is None:
+            raise PhpDeploymentError("unsupported schema bridge journal transition")
+        current = _load_durable_report_payload(destination)
+        if (
+            not _valid_bridge_journal_base_identity(
+                current,
+                operation=operation,
+                code_revision=code_revision,
+                release_id=release_id,
+            )
+        ):
+            raise PhpDeploymentError(
+                "schema bridge journal identity is invalid"
+            )
+        if current.get("status") != "prepared" and (
+            (
+                operation != "schema-bridge-abort"
+                and current.get("prebackup_c06") is not None
+            )
+            or not _valid_bridge_fixed_recovery_pair(
+                current,
+                code_revision=code_revision,
+                release_id=release_id,
+            )
+        ):
+            raise PhpDeploymentError(
+                "schema bridge journal fixed recovery identity is invalid"
+            )
+        if (
+            current.get("status") == status
+            and all(current.get(key) == value for key, value in evidence.items())
+        ):
+            return
+        fixed_identity_key = (
+            "backup_ready"
+            if status == "backup_ready"
+            else (
+                "prebackup_c06"
+                if status == "prebackup_c06_ready"
+                else None
+            )
+        )
+        if (
+            fixed_identity_key is not None
+            and current.get(fixed_identity_key)
+            == evidence.get(fixed_identity_key)
+            and current.get("status") != "prepared"
+        ):
+            return
+        _advance_bridge_report(
+            destination,
+            operation=operation,
+            code_revision=code_revision,
+            release_id=release_id,
+            expected_statuses=allowed,
+            status=status,
+            evidence=evidence,
+        )
+
+    setattr(
+        update,
+        "_bside_bridge_state_loader",
+        lambda: _load_durable_report_payload(destination),
+    )
+    return update
+
+
+def _prepare_durable_report(
+    output_path: Path | None,
+    *,
+    private_root: Path | None,
+    operation: str,
+    code_revision: str,
+    release_id: str | None,
+    environ: Mapping[str, str] | None = None,
+    schema_bridge_dart_disabled_evidence: str | None = None,
+    allow_bridge_abort_resume: bool = False,
+) -> Path | None:
+    """Reserve an owner-only report path before a production mutation."""
+
+    if output_path is None:
+        return None
+    if not output_path.is_absolute() or private_root is None:
+        raise PhpDeploymentError(
+            "report output and its private root must be absolute paths"
+        )
+    if not private_root.is_absolute():
+        raise PhpDeploymentError("private report root must be an absolute path")
+    destination = output_path
+    if destination != destination.resolve(strict=False):
+        raise PhpDeploymentError("report output path must be canonical")
+    parent = destination.parent.resolve()
+    safe_private_root = private_root.resolve()
+    environment = os.environ if environ is None else environ
+    configured_private_root = environment.get(PRIVATE_REPORT_ROOT_ENV)
+    try:
+        confirmed_private_root = (
+            None
+            if configured_private_root is None
+            else Path(configured_private_root).resolve()
+        )
+        parent.relative_to(safe_private_root)
+    except (OSError, ValueError) as error:
+        raise PhpDeploymentError(
+            "report output is outside its private root"
+        ) from error
+    if (
+        confirmed_private_root != safe_private_root
+        or private_root.is_symlink()
+        or not safe_private_root.is_dir()
+        or destination.parent.is_symlink()
+        or not parent.is_dir()
+        or destination.is_symlink()
+    ):
+        raise PhpDeploymentError(
+            "report output requires the independently confirmed private root"
+        )
+    if os.name != "nt" and stat.S_IMODE(safe_private_root.stat().st_mode) & 0o077:
+        raise PhpDeploymentError(
+            "private report root must not grant group or other access"
+        )
+    if destination.exists():
+        if (
+            not allow_bridge_abort_resume
+            or operation != "schema-bridge-abort"
+        ):
+            raise PhpDeploymentError(
+                "durable deployment report already exists"
+            )
+        existing = _load_durable_report_payload(destination)
+        destination_mode = stat.S_IMODE(destination.stat().st_mode)
+        ready_valid = _valid_bridge_backup_ready_identity(
+            existing.get("backup_ready"),
+            candidate_code_revision=code_revision,
+            release_id=release_id,
+        )
+        prebackup_valid = _valid_bridge_prebackup_c06_identity(
+            existing.get("prebackup_c06"),
+            candidate_code_revision=code_revision,
+            release_id=release_id,
+        )
+        if (
+            not _valid_bridge_journal_base_identity(
+                existing,
+                operation=operation,
+                code_revision=code_revision,
+                release_id=release_id,
+            )
+            or existing.get("status")
+            not in (
+                "stale_lock_takeover_ready",
+                "stale_lock_takeover_complete",
+            )
+            or not _valid_stale_lock_takeover_identity(
+                existing.get("stale_lock_takeover")
+            )
+            or ready_valid == prebackup_valid
+            or (
+                existing.get("status")
+                == "stale_lock_takeover_complete"
+                and existing.get("stale_lock_cleanup_verified")
+                is not True
+            )
+            or (os.name != "nt" and destination_mode != PRIVATE_FILE_MODE)
+        ):
+            raise PhpDeploymentError(
+                "durable bridge abort report is not resumable"
+            )
+        return destination
+    schema_version = (
+        2
+        if operation
+        in {
+            "schema-bridge-deploy",
+            "schema-bridge-rollback",
+            "schema-bridge-abort",
+        }
+        else 1
+    )
+    prepared_payload: dict[str, object] = {
+        "schema_version": schema_version,
+        "status": "prepared",
+        "operation": operation,
+        "code_revision": code_revision,
+        "release_id": release_id,
+        "prepared_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if schema_version == 2:
+        prepared_payload["journal_nonce"] = secrets.token_hex(16)
+        prepared_payload["journal_identity_sha256"] = _sha256_bytes(
+            _encode_json(
+                _bridge_journal_base_identity(prepared_payload)
+            )
+        )
+    if operation == "schema-bridge-deploy":
+        if (
+            release_id is None
+            or not release_id.startswith("php-v2-")
+            or schema_bridge_dart_disabled_evidence is None
+            or DART_DISABLED_EVIDENCE_PATTERN.fullmatch(
+                schema_bridge_dart_disabled_evidence
+            )
+            is None
+        ):
+            raise PhpDeploymentError(
+                "schema bridge deploy report requires a php-v2 release ID "
+                "and fixed DART-off evidence"
+            )
+        prepared_payload["bridge_precondition"] = (
+            _bridge_prepared_identity(
+                candidate_code_revision=code_revision,
+                release_id=release_id,
+                journal_nonce=str(prepared_payload["journal_nonce"]),
+                dart_disabled_evidence=(
+                    schema_bridge_dart_disabled_evidence
+                ),
+            )
+        )
+    prepared = _encode_json(
+        prepared_payload
+    )
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            destination,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            PRIVATE_FILE_MODE,
+        )
+        os.write(descriptor, prepared)
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        os.chmod(destination, PRIVATE_FILE_MODE)
+        _fsync_parent_directory(destination)
+    except OSError as error:
+        if descriptor >= 0:
+            os.close(descriptor)
+        destination.unlink(missing_ok=True)
+        raise PhpDeploymentError(
+            "durable deployment report could not be prepared"
+        ) from error
+    return destination
+
+
+def _commit_durable_report(
+    destination: Path | None,
+    report: Mapping[str, object],
+) -> None:
+    if destination is None:
+        return
+    prepared = _load_durable_report_payload(destination)
+    operation = prepared.get("operation")
+    bridge_operation = operation in {
+        "schema-bridge-deploy",
+        "schema-bridge-rollback",
+        "schema-bridge-abort",
+    }
+    if (
+        prepared.get("schema_version") != (2 if bridge_operation else 1)
+        or (
+            bridge_operation
+            and not _valid_bridge_journal_base_identity(
+                prepared,
+                operation=operation,
+                code_revision=prepared.get("code_revision"),
+                release_id=prepared.get("release_id"),
+            )
+        )
+        or (
+            prepared.get("status") != "verified"
+            if bridge_operation
+            else prepared.get("status") != "prepared"
+        )
+        or operation not in {
+            "deploy",
+            "rollback",
+            "schema-bridge-deploy",
+            "schema-bridge-rollback",
+            "schema-bridge-abort",
+        }
+        or report.get("ok") is not True
+        or report.get("operation") != operation
+        or report.get("release_id") != prepared.get("release_id")
+    ):
+        raise PhpDeploymentError(
+            "deployment report does not match its prepared checkpoint"
+        )
+    if operation == "deploy":
+        backup_identity = report.get("backup_identity")
+        if (
+            report.get("code_revision") != prepared.get("code_revision")
+            or not isinstance(backup_identity, dict)
+            or backup_identity.get("release_id") != report.get("release_id")
+            or backup_identity.get("candidate_code_revision")
+            != report.get("code_revision")
+            or backup_identity.get("manifest_path")
+            != report.get("backup_manifest")
+            or backup_identity.get("manifest_sha256")
+            != report.get("backup_manifest_sha256")
+            or not isinstance(report.get("backup_manifest_sha256"), str)
+            or SHA256_PATTERN.fullmatch(
+                str(report["backup_manifest_sha256"])
+            )
+            is None
+        ):
+            raise PhpDeploymentError(
+                "deployment report backup identity is incomplete"
+            )
+    elif operation == "schema-bridge-deploy":
+        ready = prepared.get("backup_ready")
+        backup_identity = report.get("backup_identity")
+        required_true: tuple[str, ...] = (
+            "manifest_committed_last",
+            "byte_verification",
+            "v1_closed_smoke",
+            "v2_closed_smoke",
+            "private_root_http_protected",
+        )
+        if (
+            not isinstance(ready, dict)
+            or not isinstance(backup_identity, dict)
+            or report.get("code_revision") != prepared.get("code_revision")
+            or report.get("previous_code_revision")
+            != ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+            or report.get("database_mutated") is not False
+            or report.get("dart_disabled_evidence")
+            != ready.get("dart_disabled_evidence")
+            or report.get("backup_manifest")
+            != ready.get("backup_manifest")
+            or report.get("backup_manifest_sha256")
+            != ready.get("backup_manifest_sha256")
+            or backup_identity.get("manifest_sha256")
+            != ready.get("backup_manifest_sha256")
+            or backup_identity.get("candidate_code_revision")
+            != prepared.get("code_revision")
+            or any(report.get(field) is not True for field in required_true)
+            or report.get("opcache_action")
+            not in {"disabled_verified", "reset_verified"}
+        ):
+            raise PhpDeploymentError(
+                "schema bridge deploy report evidence is incomplete"
+            )
+    elif operation in {"schema-bridge-rollback", "schema-bridge-abort"}:
+        ready = prepared.get("backup_ready")
+        prebackup = prepared.get("prebackup_c06")
+        emergency = prepared.get("emergency_backup")
+        report_emergency = report.get("emergency_backup_identity")
+        stale_takeover = prepared.get("stale_lock_takeover")
+        initial_state = report.get("initial_php_state")
+        database_before = report.get(
+            "candidate_database_schema_version_before"
+        )
+        database_observation = report.get(
+            "database_schema_observation"
+        )
+        prebackup_recovery = (
+            operation == "schema-bridge-abort"
+            and initial_state == "prebackup_c06"
+        )
+        ready_valid = isinstance(ready, dict)
+        if ready_valid:
+            assert isinstance(ready, dict)
+            recomputed_ready = dict(ready)
+            ready_claimed = recomputed_ready.pop(
+                "identity_sha256",
+                None,
+            )
+            ready_valid = (
+                ready.get("candidate_code_revision")
+                == prepared.get("code_revision")
+                and ready.get("previous_code_revision")
+                == ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+                and ready.get("release_id")
+                == prepared.get("release_id")
+                and ready.get("database_mutated") is False
+                and isinstance(ready_claimed, str)
+                and secrets.compare_digest(
+                    ready_claimed,
+                    _sha256_bytes(_encode_json(recomputed_ready)),
+                )
+            )
+        prebackup_valid = _valid_bridge_prebackup_c06_identity(
+            prebackup,
+            candidate_code_revision=prepared.get("code_revision"),
+            release_id=prepared.get("release_id"),
+        )
+        if operation == "schema-bridge-rollback":
+            state_matrix_valid = (
+                initial_state is None
+                and database_before in (11, 12)
+                and database_observation
+                == "candidate_schema_" + str(database_before)
+                and ready_valid
+                and not prebackup_valid
+            )
+            emergency_required = True
+        elif initial_state == "candidate":
+            state_matrix_valid = (
+                database_before in (11, 12)
+                and database_observation
+                == "candidate_schema_" + str(database_before)
+                and ready_valid
+                and not prebackup_valid
+            )
+            emergency_required = True
+        elif initial_state in (
+            "mixed",
+            "predecessor_restore_transition",
+        ):
+            state_matrix_valid = (
+                database_before is None
+                and database_observation
+                == "unavailable_due_partial_php"
+                and ready_valid
+                and not prebackup_valid
+            )
+            emergency_required = False
+        elif initial_state == "predecessor":
+            state_matrix_valid = (
+                database_before is None
+                and database_observation
+                == "unavailable_due_c06_contract"
+                and ready_valid
+                and not prebackup_valid
+            )
+            emergency_required = False
+        elif prebackup_recovery:
+            state_matrix_valid = (
+                database_before is None
+                and database_observation
+                == "unavailable_due_c06_contract"
+                and prebackup_valid
+                and not ready_valid
+                and report.get("prebackup_c06_identity")
+                == prebackup
+            )
+            emergency_required = False
+        else:
+            state_matrix_valid = False
+            emergency_required = False
+        required_true = (
+            "byte_verification",
+            "v1_closed_smoke",
+            "v2_closed_smoke",
+            "legacy_health_smoke",
+            "private_root_http_protected",
+            "forward_compatibility_verified",
+        )
+        if (
+            not state_matrix_valid
+            or report.get("candidate_code_revision")
+            != prepared.get("code_revision")
+            or report.get("restored_code_revision")
+            != ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+            or report.get("restored_api_schema_contract_version") != 11
+            or report.get("database_mutated") is not False
+            or (
+                prebackup_recovery
+                and (
+                    report.get("manifest_committed_last") is not False
+                    or report.get("manifest_commit_not_applicable")
+                    is not True
+                    or report.get("public_release_files_mutated")
+                    is not False
+                    or report.get(
+                        "ephemeral_opcache_probe_created_and_removed"
+                    )
+                    is not True
+                    or report.get(
+                        "orphan_private_artifacts_preserved"
+                    )
+                    is not True
+                    or not isinstance(
+                        report.get(
+                            "preserved_private_artifact_paths"
+                        ),
+                        list,
+                    )
+                )
+            )
+            or (
+                not prebackup_recovery
+                and report.get("manifest_committed_last") is not True
+            )
+            or (
+                ready_valid
+                and (
+                    not isinstance(ready, dict)
+                    or report.get("backup_manifest")
+                    != ready.get("backup_manifest")
+                    or report.get("backup_manifest_sha256")
+                    != ready.get("backup_manifest_sha256")
+                    or report.get("dart_disabled_evidence")
+                    != ready.get("dart_disabled_evidence")
+                )
+            )
+            or (
+                prebackup_valid
+                and (
+                    not isinstance(prebackup, dict)
+                    or report.get("backup_manifest") is not None
+                    or report.get("backup_manifest_sha256") is not None
+                    or report.get("dart_disabled_evidence")
+                    != prebackup.get("dart_disabled_evidence")
+                )
+            )
+            or (
+                emergency_required
+                and (
+                    not _valid_bridge_emergency_identity(
+                        emergency,
+                        candidate_code_revision=prepared.get(
+                            "code_revision"
+                        ),
+                    )
+                    or report_emergency != emergency
+                    or not isinstance(emergency, dict)
+                    or not isinstance(ready, dict)
+                    or emergency.get("remote_root")
+                    != ready.get("remote_root")
+                    or report.get("emergency_backup_release_id")
+                    != emergency.get("release_id")
+                )
+            )
+            or (
+                not emergency_required
+                and (
+                    emergency is not None
+                    or report_emergency is not None
+                    or report.get("emergency_backup_release_id")
+                    is not None
+                )
+            )
+            or (
+                stale_takeover is not None
+                and (
+                    not _valid_stale_lock_takeover_identity(
+                        stale_takeover
+                    )
+                    or report.get("stale_lock_takeover")
+                    != stale_takeover
+                    or report.get("stale_lock_cleanup_verified") is not True
+                    or prepared.get("stale_lock_cleanup_verified")
+                    is not True
+                )
+            )
+            or (
+                stale_takeover is None
+                and report.get("stale_lock_takeover") is not None
+            )
+            or any(report.get(field) is not True for field in required_true)
+            or report.get("opcache_action")
+            not in {"disabled_verified", "reset_verified"}
+        ):
+            raise PhpDeploymentError(
+                "schema bridge recovery report identity is incomplete"
+            )
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.",
+        suffix=".complete",
+        dir=str(destination.parent),
+    )
+    temporary = Path(temporary_name)
+    try:
+        os.chmod(temporary, PRIVATE_FILE_MODE)
+        completed_payload: dict[str, object]
+        if bridge_operation:
+            completed_payload = dict(prepared)
+            completed_payload.update(
+                {
+                    "status": "completed",
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "report": dict(report),
+                }
+            )
+        else:
+            completed_payload = {
+                "schema_version": 1,
+                "status": "completed",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "report": dict(report),
+            }
+        encoded = _encode_json(completed_payload)
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = -1
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+        os.chmod(destination, PRIVATE_FILE_MODE)
+        _fsync_parent_directory(destination)
+    except OSError as error:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+        raise PhpDeploymentError(
+            "deployment completed but its durable report was not committed"
+        ) from error
 
 
 def _required_cli_text(value: object, *, label: str) -> str:
@@ -4364,6 +8844,9 @@ def _prepare_cli_gabia_compatibility(
             )
         return None
     schema_upgrade_from = getattr(args, "schema_upgrade_from", None)
+    partial_schema_bridge = getattr(args, "command", None) == (
+        "schema-bridge-abort"
+    )
     expected_core_files = (
         LEGACY_SCHEMA_11_CORE_API_FILES
         if schema_upgrade_from == 11
@@ -4391,6 +8874,7 @@ def _prepare_cli_gabia_compatibility(
         ),
         expected_current_sha=expected_current_sha,
         expected_core_files=expected_core_files,
+        allow_partial_schema_bridge=partial_schema_bridge,
     )
 
 
@@ -4404,6 +8888,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             verify_release_checkout(plan)
             _print_report(local_plan_report(plan))
+            return 0
+
+        if args.command == "inspect-ownerless-lock":
+            options = ssh_sftp_options_from_args(args)
+            with ParamikoPinnedSftpSession(options) as client:
+                report = inspect_ownerless_deployment_lock(
+                    client,
+                    remote_root=args.remote_root,
+                )
+            _print_report(report)
             return 0
 
         if args.command == "deploy":
@@ -4431,6 +8925,51 @@ def main(argv: Sequence[str] | None = None) -> int:
                     plan.code_revision,
                     args.confirm_production_write,
                 )
+                if args.schema_upgrade_from == 11:
+                    confirm_one_time_schema_bridge_deploy(
+                        expected_previous_sha=_required_cli_text(
+                            args.expected_previous_sha,
+                            label="schema bridge previous SHA",
+                        ),
+                        previous_sha_confirmation=args.confirm_previous_sha,
+                        dart_disabled_evidence=_required_cli_text(
+                            args.dart_disabled_evidence,
+                            label="DART disabled evidence",
+                        ),
+                    )
+            if (
+                not args.dry_run
+                and args.gabia_core_compatibility_host is not None
+                and (
+                    args.report_output is None
+                    or args.private_report_root is None
+                    or args.release_id is None
+                )
+            ):
+                raise PhpDeploymentError(
+                    "mutating Gabia deployment requires an explicit release "
+                    "ID, private report root, and durable report output"
+                )
+            durable_report = (
+                None
+                if args.dry_run
+                else _prepare_durable_report(
+                    args.report_output,
+                    private_root=args.private_report_root,
+                    operation=(
+                        "schema-bridge-deploy"
+                        if args.schema_upgrade_from == 11
+                        else "deploy"
+                    ),
+                    code_revision=plan.code_revision,
+                    release_id=args.release_id,
+                    schema_bridge_dart_disabled_evidence=(
+                        args.dart_disabled_evidence
+                        if args.schema_upgrade_from == 11
+                        else None
+                    ),
+                )
+            )
             options = ssh_sftp_options_from_args(args)
             protected_token = (
                 ""
@@ -4451,6 +8990,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                         client,
                         args=args,
                         options=options,
+                        expected_current_sha=(
+                            ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+                            if args.schema_upgrade_from == 11
+                            else None
+                        ),
+                    )
+                    bridge_report_update = (
+                        None
+                        if args.schema_upgrade_from != 11
+                        or durable_report is None
+                        else _bridge_report_updater(
+                            durable_report,
+                            operation="schema-bridge-deploy",
+                            code_revision=plan.code_revision,
+                            release_id=_required_cli_text(
+                                args.release_id,
+                                label="release ID",
+                            ),
+                        )
                     )
                     report = deploy_release(
                         client,
@@ -4476,7 +9034,297 @@ def main(argv: Sequence[str] | None = None) -> int:
                         allow_http=args.allow_http,
                         gabia_compatibility=compatibility,
                         schema_upgrade_from=args.schema_upgrade_from,
+                        expected_previous_sha=(
+                            args.expected_previous_sha
+                            if args.schema_upgrade_from == 11
+                            else None
+                        ),
+                        dart_disabled_evidence=(
+                            args.dart_disabled_evidence
+                            if args.schema_upgrade_from == 11
+                            else None
+                        ),
+                        bridge_report_update=bridge_report_update,
                     )
+            _commit_durable_report(durable_report, report)
+            _print_report(report)
+            return 0
+
+        if args.command == "schema-bridge-abort":
+            if (
+                args.allow_http
+                or args.gabia_core_compatibility_host
+                != GABIA_COMPATIBILITY_SSH_HOST
+            ):
+                raise PhpDeploymentError(
+                    "schema bridge abort requires the exact pinned Gabia "
+                    "HTTPS compatibility target"
+                )
+            candidate_plan = build_local_deployment_plan(
+                args.local_root,
+                expected_sha=args.expected_sha,
+            )
+            verify_release_checkout(
+                candidate_plan,
+                require_repository_clean=True,
+            )
+            if args.expected_current_sha != candidate_plan.code_revision:
+                raise PhpDeploymentError(
+                    "schema bridge current SHA does not match the local release"
+                )
+            recorded_abort_resume = False
+            if args.report_output.exists():
+                try:
+                    existing_abort = _load_durable_report_payload(
+                        args.report_output
+                    )
+                    recorded_abort_resume = (
+                        _valid_bridge_journal_base_identity(
+                            existing_abort,
+                            operation="schema-bridge-abort",
+                            code_revision=candidate_plan.code_revision,
+                            release_id=args.release_id,
+                        )
+                        and existing_abort.get("status")
+                        in (
+                            "stale_lock_takeover_ready",
+                            "stale_lock_takeover_complete",
+                        )
+                        and _valid_stale_lock_takeover_identity(
+                            existing_abort.get(
+                                "stale_lock_takeover"
+                            )
+                        )
+                        and _valid_bridge_fixed_recovery_pair(
+                            existing_abort,
+                            code_revision=candidate_plan.code_revision,
+                            release_id=args.release_id,
+                        )
+                        and (
+                            existing_abort.get("status")
+                            == "stale_lock_takeover_ready"
+                            or existing_abort.get(
+                                "stale_lock_cleanup_verified"
+                            )
+                            is True
+                        )
+                    )
+                except PhpDeploymentError:
+                    recorded_abort_resume = False
+            confirm_one_time_schema_bridge_rollback(
+                release_id=args.release_id,
+                release_id_confirmation=args.confirm_rollback_release_id,
+                expected_current_sha=args.expected_current_sha,
+                current_sha_confirmation=args.confirm_rollback_current_sha,
+                expected_previous_sha=args.expected_previous_sha,
+                previous_sha_confirmation=args.confirm_rollback_previous_sha,
+                expected_backup_manifest_sha256=(
+                    args.expected_backup_manifest_sha256
+                ),
+                backup_sha256_confirmation=(
+                    args.confirm_backup_manifest_sha256
+                ),
+                dart_disabled_evidence=args.dart_disabled_evidence,
+                allow_missing_backup=(
+                    args.expected_backup_manifest_sha256 is None
+                ),
+            )
+            confirm_schema_bridge_stale_lock_takeover(
+                owner_release_id=args.stale_lock_owner_release_id,
+                owner_release_id_confirmation=(
+                    args.confirm_stale_lock_owner_release_id
+                ),
+                writer_absence_evidence=(
+                    args.stale_lock_writer_absence_evidence
+                ),
+                first_observed_at=args.stale_lock_first_observed_at,
+                allow_recorded_evidence=recorded_abort_resume,
+            )
+            if args.bridge_deploy_report == args.report_output:
+                raise PhpDeploymentError(
+                    "schema bridge deploy and abort journals must differ"
+                )
+            def deploy_report_load() -> Mapping[str, object]:
+                return load_schema_bridge_backup_ready(
+                    args.bridge_deploy_report,
+                    private_root=args.private_report_root,
+                    expected_candidate_sha=candidate_plan.code_revision,
+                    expected_release_id=args.release_id,
+                    expected_backup_manifest_sha256=(
+                        args.expected_backup_manifest_sha256
+                    ),
+                    expected_dart_disabled_evidence=(
+                        args.dart_disabled_evidence
+                    ),
+                )
+            deploy_report_load()
+            durable_report = _prepare_durable_report(
+                args.report_output,
+                private_root=args.private_report_root,
+                operation="schema-bridge-abort",
+                code_revision=candidate_plan.code_revision,
+                release_id=args.release_id,
+                allow_bridge_abort_resume=True,
+            )
+            if durable_report is None:
+                raise PhpDeploymentError(
+                    "schema bridge abort durable report is missing"
+                )
+            bridge_report_update = _bridge_report_updater(
+                durable_report,
+                operation="schema-bridge-abort",
+                code_revision=candidate_plan.code_revision,
+                release_id=args.release_id,
+            )
+            options = ssh_sftp_options_from_args(args)
+            protected_token = _protected_token_from_environment(
+                args.protected_token_env
+            )
+            with ParamikoPinnedSftpSession(options) as client:
+                compatibility = _prepare_cli_gabia_compatibility(
+                    client,
+                    args=args,
+                    options=options,
+                    expected_current_sha=None,
+                )
+                report = abort_one_time_schema_bridge(
+                    client,
+                    candidate_plan=candidate_plan,
+                    release_id=args.release_id,
+                    expected_backup_manifest_sha256=(
+                        args.expected_backup_manifest_sha256
+                    ),
+                    dart_disabled_evidence=args.dart_disabled_evidence,
+                    bridge_deploy_report_load=deploy_report_load,
+                    bridge_report_update=bridge_report_update,
+                    remote_root=args.remote_root,
+                    stage_root=args.stage_root,
+                    backup_root=args.backup_root,
+                    public_url_root=_required_cli_text(
+                        args.public_url_root,
+                        label="public URL root",
+                    ),
+                    api_v2_base_url=_required_cli_text(
+                        args.api_v2_base_url,
+                        label="API v2 base URL",
+                    ),
+                    rollback_health_url=_required_cli_text(
+                        args.rollback_health_url,
+                        label="rollback health URL",
+                    ),
+                    protected_token=protected_token,
+                    http_timeout=args.http_timeout,
+                    gabia_compatibility=compatibility,
+                    stale_lock_owner_release_id=(
+                        args.stale_lock_owner_release_id
+                    ),
+                    stale_lock_writer_absence_evidence=(
+                        args.stale_lock_writer_absence_evidence
+                    ),
+                    stale_lock_first_observed_at=(
+                        args.stale_lock_first_observed_at
+                    ),
+                )
+            _commit_durable_report(durable_report, report)
+            _print_report(report)
+            return 0
+
+        if args.command == "schema-bridge-rollback":
+            if (
+                args.allow_http
+                or args.gabia_core_compatibility_host
+                != GABIA_COMPATIBILITY_SSH_HOST
+            ):
+                raise PhpDeploymentError(
+                    "schema bridge rollback requires the exact pinned Gabia "
+                    "HTTPS compatibility target"
+                )
+            candidate_plan = build_local_deployment_plan(
+                args.local_root,
+                expected_sha=args.expected_sha,
+            )
+            verify_release_checkout(
+                candidate_plan,
+                require_repository_clean=True,
+            )
+            if args.expected_current_sha != candidate_plan.code_revision:
+                raise PhpDeploymentError(
+                    "schema bridge current SHA does not match the local release"
+                )
+            confirm_one_time_schema_bridge_rollback(
+                release_id=args.release_id,
+                release_id_confirmation=args.confirm_rollback_release_id,
+                expected_current_sha=args.expected_current_sha,
+                current_sha_confirmation=args.confirm_rollback_current_sha,
+                expected_previous_sha=args.expected_previous_sha,
+                previous_sha_confirmation=args.confirm_rollback_previous_sha,
+                expected_backup_manifest_sha256=(
+                    args.expected_backup_manifest_sha256
+                ),
+                backup_sha256_confirmation=(
+                    args.confirm_backup_manifest_sha256
+                ),
+                dart_disabled_evidence=args.dart_disabled_evidence,
+            )
+            durable_report = _prepare_durable_report(
+                args.report_output,
+                private_root=args.private_report_root,
+                operation="schema-bridge-rollback",
+                code_revision=candidate_plan.code_revision,
+                release_id=args.release_id,
+            )
+            options = ssh_sftp_options_from_args(args)
+            protected_token = _protected_token_from_environment(
+                args.protected_token_env
+            )
+            with ParamikoPinnedSftpSession(options) as client:
+                compatibility = _prepare_cli_gabia_compatibility(
+                    client,
+                    args=args,
+                    options=options,
+                    expected_current_sha=args.expected_current_sha,
+                )
+                if durable_report is None:
+                    raise PhpDeploymentError(
+                        "schema bridge rollback durable report is missing"
+                    )
+                bridge_report_update = _bridge_report_updater(
+                    durable_report,
+                    operation="schema-bridge-rollback",
+                    code_revision=candidate_plan.code_revision,
+                    release_id=args.release_id,
+                )
+                report = rollback_one_time_schema_bridge(
+                    client,
+                    candidate_plan=candidate_plan,
+                    release_id=args.release_id,
+                    expected_current_sha=args.expected_current_sha,
+                    expected_previous_sha=args.expected_previous_sha,
+                    expected_backup_manifest_sha256=(
+                        args.expected_backup_manifest_sha256
+                    ),
+                    remote_root=args.remote_root,
+                    stage_root=args.stage_root,
+                    backup_root=args.backup_root,
+                    public_url_root=_required_cli_text(
+                        args.public_url_root,
+                        label="public URL root",
+                    ),
+                    api_v2_base_url=_required_cli_text(
+                        args.api_v2_base_url,
+                        label="API v2 base URL",
+                    ),
+                    rollback_health_url=_required_cli_text(
+                        args.rollback_health_url,
+                        label="rollback health URL",
+                    ),
+                    protected_token=protected_token,
+                    http_timeout=args.http_timeout,
+                    gabia_compatibility=compatibility,
+                    dart_disabled_evidence=args.dart_disabled_evidence,
+                    bridge_report_update=bridge_report_update,
+                )
+            _commit_durable_report(durable_report, report)
             _print_report(report)
             return 0
 
@@ -4503,6 +9351,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.confirm_rollback_current_sha,
             )
         options = ssh_sftp_options_from_args(args)
+        durable_report = (
+            None
+            if args.dry_run
+            else _prepare_durable_report(
+                args.report_output,
+                private_root=args.private_report_root,
+                operation="rollback",
+                code_revision=(
+                    expected_current_sha
+                    or "0" * 40
+                ),
+                release_id=args.release_id,
+            )
+        )
         protected_token = (
             ""
             if args.dry_run
@@ -4558,6 +9420,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 gabia_compatibility=compatibility,
                 expected_current_sha=expected_current_sha,
             )
+        _commit_durable_report(durable_report, report)
         _print_report(report)
         return 0
     except PhpDeploymentError:

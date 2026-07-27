@@ -48,13 +48,14 @@ permissions:
   actions: read
 
 concurrency:
-  group: global-brief-${{ github.repository }}
+  group: global-brief-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   candidates:
     if: >-
-      github.ref_name == github.event.repository.default_branch &&
+      github.ref_type == 'branch' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
       (github.event_name == 'schedule' ||
        (github.event_name == 'workflow_dispatch' && inputs.operation == 'candidates')) &&
       (vars.GOVERNANCE_PIPELINE_MODE == 'shadow' ||
@@ -116,13 +117,21 @@ jobs:
 
   publish:
     if: >-
-      github.ref_name == github.event.repository.default_branch &&
+      github.ref_type == 'branch' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
       github.event_name == 'workflow_dispatch' &&
       inputs.operation == 'publish' &&
       (vars.GOVERNANCE_PIPELINE_MODE == 'shadow' ||
        vars.GOVERNANCE_PIPELINE_MODE == 'live')
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Publishing mutates the public BriefEdition snapshot. Candidate generation
+    # stays on the read-only brief lock, while only this write shares the
+    # official-write/release-transition boundary.
+    concurrency:
+      group: governance-production-official-write-${{ github.repository }}-${{ github.ref }}
+      queue: max
+      cancel-in-progress: false
     environment:
       name: governance-release
     env:

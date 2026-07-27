@@ -2304,12 +2304,29 @@ x-hmac-actions:
     ?action={action}; these routes are not accessible with public Bearer tokens.
   actions:
     - upsert_governance_snapshot
+    - upsert_governance_snapshot_dart_guarded
     - upsert_official_site_snapshot
     - upsert_editorial_snapshot
     - export_runtime_state
     - enqueue_link_discoveries
     - claim_link_discoveries
     - resolve_link_discovery
+  dart-guarded-write-contract:
+    action: upsert_governance_snapshot_dart_guarded
+    legacy_action_accepts_dart: false
+    description: >-
+      OpenDART writes use a candidate-only action so an older PHP deployment
+      rejects them as an unknown action. Every signed chunk carries the exact
+      deployment SHA plus mutable and semantic SourceRight revisions. The
+      signed body also carries the exact release state observed by the
+      collector preflight. Under one transaction the server verifies the
+      deployment manifest, schema 12, equal v1/v2 release states matching that
+      signed expectation, stored DART document/event lineage, and the locked
+      SourceRight before any mutation. dart_canary binds closed, shadow binds
+      preview, and live binds live; off, missing, or other modes do not write.
+      official:dart is also a fixed metadata-only contract: body_text/content
+      may be absent, null, or an empty string (stored as SQL NULL), while any
+      non-empty body rejects the entire signed request before a transaction.
   permanently-disabled-actions:
     distribution_mode: web_only
     http_status: 410

@@ -6583,8 +6583,11 @@ function upsert_official_site_snapshot(PDO $pdo, array $config, array $payload, 
 }
 
 /**
- * HMAC action contract: ?action=upsert_governance_snapshot
- * payload={companies,documents,events,source_rights,run,expected_backend_binding_id}.
+ * HMAC action contracts: ?action=upsert_governance_snapshot for non-DART
+ * writes and ?action=upsert_governance_snapshot_dart_guarded for DART.
+ * payload={companies,documents,events,source_rights,run,
+ * expected_source_right_revisions,expected_deployment_code_revision,
+ * expected_backend_binding_id}.
  */
 function v1_official_completion_semantic_sha(array $run): string {
     $semantic = $run;
@@ -6669,15 +6672,348 @@ function v1_governance_snapshot_identity_conflict_code(Throwable $error): ?strin
 
 /**
  * Enable the additive DART -> global-terminal bridge only after the immutable
- * v2 migration manifest is present.  Schema 10 production continues to use
- * the original statements and never references v2-only tables or columns.
+ * v2 migration manifest and the DART credential-pool migration are present.
+ * Older production schemas never reference v2-only tables or columns.
  */
 function v1_global_dart_bridge_enabled(PDO $pdo, array $config): bool {
     if (function_exists('v2_schema_manifest_status')) {
         $manifest = v2_schema_manifest_status($pdo,$config);
         return isset($manifest['valid'],$manifest['highest_version'])
             && $manifest['valid'] === true
-            && (int)$manifest['highest_version'] >= 11;
+            && (int)$manifest['highest_version'] >= 12;
+    }
+    return false;
+}
+
+/**
+ * Validate the signed DART SourceRight precondition without exposing either
+ * digest. The same values are rechecked under a row lock before every write.
+ */
+function v1_dart_source_right_expectation(array $payload): ?array {
+    $all = isset($payload['expected_source_right_revisions'])
+        && is_array($payload['expected_source_right_revisions'])
+        ? $payload['expected_source_right_revisions'] : array();
+    $expected = isset($all['official:dart'])
+        && is_array($all['official:dart']) ? $all['official:dart'] : null;
+    if ($expected === null
+        || count($expected) !== 2
+        || !isset($expected['rights_revision'],$expected['contract_revision'])
+        || preg_match('/^[a-f0-9]{64}$/',(string)$expected['rights_revision']) !== 1
+        || preg_match('/^[a-f0-9]{64}$/',(string)$expected['contract_revision']) !== 1) {
+        return null;
+    }
+    return array(
+        'rights_revision'=>(string)$expected['rights_revision'],
+        'contract_revision'=>(string)$expected['contract_revision'],
+    );
+}
+
+/** Exact candidate deployment SHA carried inside the guarded HMAC body. */
+function v1_dart_deployment_expectation(array $payload): ?string {
+    $expected = isset($payload['expected_deployment_code_revision'])
+        ? strtolower(trim((string)$payload['expected_deployment_code_revision']))
+        : '';
+    return preg_match('/^[a-f0-9]{40}$/',$expected) === 1 ? $expected : null;
+}
+
+/** Exact v1/v2 release state observed by the collector preflight. */
+function v1_dart_release_state_expectation(array $payload): ?string {
+    $expected = isset($payload['expected_release_state'])
+        ? strtolower(trim((string)$payload['expected_release_state'])) : '';
+    return in_array($expected,array('closed','preview','live'),true)
+        ? $expected : null;
+}
+
+/**
+ * Resolve the exact document identity used by the downstream upsert before
+ * lineage checks run. A caller must not be able to omit document_id and make
+ * the generic path miss an existing derived OpenDART identity.
+ */
+function v1_governance_snapshot_document_id(array $document): string {
+    $documentId = trim((string)v1_first(
+        $document,
+        array('document_id'),
+        ''
+    ));
+    if ($documentId !== '') { return $documentId; }
+    $sourceClass = trim((string)v1_first(
+        $document,
+        array('source_class','source_category'),
+        'official_disclosure'
+    ));
+    if ($sourceClass === 'authorized_telegram') {
+        $sourceClass = 'licensed_telegram';
+    }
+    if (!in_array($sourceClass,array(
+        'official_disclosure',
+        'company_statement',
+        'activist_statement',
+        'media_report',
+        'licensed_telegram',
+        'editorial_analysis',
+    ),true)) {
+        return '';
+    }
+    $externalId = trim((string)v1_first(
+        $document,
+        array('external_id','stable_source_id','rcept_no'),
+        ''
+    ));
+    if ($externalId === '') { return ''; }
+    return v1_stable_id(
+        $sourceClass === 'official_disclosure' ? 'dart' : 'doc',
+        $externalId
+    );
+}
+
+function v1_normalize_governance_snapshot_documents(array $documents): array {
+    $normalized = array();
+    foreach ($documents as $document) {
+        if (!is_array($document)) {
+            $normalized[] = $document;
+            continue;
+        }
+        $documentId = v1_governance_snapshot_document_id($document);
+        if ($documentId !== '') { $document['document_id'] = $documentId; }
+        $declaredSource = strtolower(trim((string)v1_first(
+            $document,
+            array('source','source_key'),
+            ''
+        )));
+        $sourceRightId = strtolower(trim((string)v1_first(
+            $document,
+            array('source_right_id'),
+            ''
+        )));
+        $isDart = strpos(strtolower($documentId),'dart:') === 0
+            || $declaredSource === 'dart'
+            || $sourceRightId === 'official:dart';
+        if ($isDart) {
+            foreach (array('body_text','content') as $bodyField) {
+                if (!array_key_exists($bodyField,$document)
+                    || $document[$bodyField] === null) {
+                    continue;
+                }
+                if (!is_string($document[$bodyField])
+                    || $document[$bodyField] !== '') {
+                    respond(409,array(
+                        'ok'=>false,
+                        'error'=>'dart_body_text_forbidden',
+                    ));
+                }
+            }
+            // Empty legacy collector values are normalized to SQL NULL by the
+            // downstream upsert. Never let a secondary content alias revive
+            // source body storage.
+            $document['body_text'] = '';
+            unset($document['content']);
+        }
+        $normalized[] = $document;
+    }
+    return $normalized;
+}
+
+/**
+ * Gather every submitted identity that can resolve to an existing DART-backed
+ * company, document, event or collection run. The rows are re-read under
+ * locks before any mutation.
+ */
+function v1_governance_snapshot_lineage_candidates(
+    array $companies,
+    array $documents,
+    array $events,
+    array $run
+): array {
+    $companyIds = array();
+    $documentIds = array();
+    $eventIds = array();
+    $comparisonKeys = array();
+    $runIds = array();
+    foreach ($companies as $company) {
+        if (!is_array($company)) { continue; }
+        $companyId = trim((string)v1_first(
+            $company,
+            array('company_id','corp_code'),
+            ''
+        ));
+        if (preg_match('/^[0-9]{8}$/',$companyId) === 1) {
+            $companyIds[$companyId] = true;
+        }
+    }
+    foreach ($documents as $document) {
+        if (!is_array($document)) { continue; }
+        $documentId = v1_governance_snapshot_document_id($document);
+        if (v1_valid_entity_id($documentId)) { $documentIds[$documentId] = true; }
+        $correctionOf = trim((string)v1_first(
+            $document,
+            array('correction_of_document_id','correction_of'),
+            ''
+        ));
+        if (v1_valid_entity_id($correctionOf)) {
+            // A caller cannot disguise a relationship to an existing DART
+            // predecessor by declaring the new document as another source.
+            $documentIds[$correctionOf] = true;
+        }
+    }
+    foreach ($events as $event) {
+        if (!is_array($event)) { continue; }
+        $eventId = trim((string)v1_first($event,array('event_id'),''));
+        if (v1_valid_entity_id($eventId)) { $eventIds[$eventId] = true; }
+        $comparisonKey = trim((string)v1_first(
+            $event,
+            array('comparison_key'),
+            ''
+        ));
+        if (preg_match('/^eventcmp:v1:[a-f0-9]{64}$/',$comparisonKey) === 1) {
+            $comparisonKeys[$comparisonKey] = true;
+        }
+        $references = isset($event['document_ids'])
+            && is_array($event['document_ids'])
+            ? $event['document_ids'] : array();
+        if (isset($event['document_id'])) { $references[] = $event['document_id']; }
+        foreach ($references as $reference) {
+            if (!is_string($reference) && !is_int($reference)) { continue; }
+            $documentId = trim((string)$reference);
+            if (v1_valid_entity_id($documentId)) {
+                $documentIds[$documentId] = true;
+            }
+        }
+    }
+    $runId = trim((string)v1_first($run,array('run_id'),''));
+    if (v1_valid_entity_id($runId)) { $runIds[$runId] = true; }
+    $result = array(
+        'company_ids'=>array_keys($companyIds),
+        'document_ids'=>array_keys($documentIds),
+        'event_ids'=>array_keys($eventIds),
+        'comparison_keys'=>array_keys($comparisonKeys),
+        'run_ids'=>array_keys($runIds),
+    );
+    foreach ($result as &$values) { sort($values,SORT_STRING); }
+    unset($values);
+    return $result;
+}
+
+/**
+ * Lock submitted lineage targets and report whether any target is already
+ * backed by an approved OpenDART document.
+ *
+ * Callers must lock release-state rows first. That makes an absent lookup safe
+ * from a concurrent guarded DART writer and preserves cutover lock ordering.
+ */
+function v1_lock_existing_dart_lineage(
+    PDO $pdo,
+    array $config,
+    array $candidates,
+    bool $globalDartBridgeEnabled
+): bool {
+    $companyLookup = $pdo->prepare(
+        'SELECT company_id FROM ' . table_name($config,'companies')
+        . ' WHERE company_id=? LIMIT 1 FOR UPDATE'
+    );
+    foreach ($candidates['company_ids'] as $companyId) {
+        $companyLookup->execute(array($companyId));
+        // Legacy company_id is the eight-digit OpenDART corp_code namespace.
+        if ($companyLookup->fetchColumn() !== false) { return true; }
+    }
+    $documentLookup = $pdo->prepare(
+        'SELECT CASE WHEN current_document.source_right_id=\'official:dart\''
+        . ' OR predecessor.source_right_id=\'official:dart\''
+        . ' THEN \'official:dart\' ELSE current_document.source_right_id END'
+        . ' FROM ' . table_name($config,'documents') . ' current_document'
+        . ' LEFT JOIN ' . table_name($config,'documents') . ' predecessor'
+        . ' ON predecessor.document_id=current_document.correction_of_document_id'
+        . ' WHERE current_document.document_id=? LIMIT 1 FOR UPDATE'
+    );
+    foreach ($candidates['document_ids'] as $documentId) {
+        $documentLookup->execute(array($documentId));
+        if ((string)$documentLookup->fetchColumn() === 'official:dart') {
+            return true;
+        }
+    }
+    $eventProjectionFields = $globalDartBridgeEnabled
+        ? 'issuer_id,country_code' : 'NULL AS issuer_id,NULL AS country_code';
+    $eventIdentityLookup = $pdo->prepare(
+        'SELECT event_id,company_id,' . $eventProjectionFields . ' FROM '
+        . table_name($config,'governance_events')
+        . ' WHERE event_id=? LIMIT 1 FOR UPDATE'
+    );
+    $comparisonIdentityLookup = $pdo->prepare(
+        'SELECT event_id,company_id,' . $eventProjectionFields . ' FROM '
+        . table_name($config,'governance_events')
+        . ' WHERE comparison_key=? LIMIT 1 FOR UPDATE'
+    );
+    $eventDocumentLookup = $pdo->prepare(
+        'SELECT d.document_id FROM '
+        . table_name($config,'governance_events') . ' e'
+        . ' JOIN ' . table_name($config,'event_documents') . ' ed'
+        . ' ON ed.event_id=e.event_id'
+        . ' JOIN ' . table_name($config,'documents') . ' d'
+        . ' ON d.document_id=ed.document_id'
+        . ' LEFT JOIN ' . table_name($config,'documents') . ' predecessor'
+        . ' ON predecessor.document_id=d.correction_of_document_id'
+        . ' WHERE e.event_id=? AND (d.source_right_id=\'official:dart\''
+        . ' OR predecessor.source_right_id=\'official:dart\')'
+        . ' ORDER BY BINARY d.document_id LIMIT 1 FOR UPDATE'
+    );
+    $eventObservationLookup = $pdo->prepare(
+        'SELECT eo.observation_id FROM '
+        . table_name($config,'event_observations') . ' eo'
+        . ' LEFT JOIN ' . table_name($config,'documents') . ' d'
+        . ' ON d.document_id=eo.document_id'
+        . ' LEFT JOIN ' . table_name($config,'documents') . ' predecessor'
+        . ' ON predecessor.document_id=d.correction_of_document_id'
+        . ' WHERE eo.event_id=? AND (eo.source_key=\'dart\''
+        . ' OR d.source_right_id=\'official:dart\''
+        . ' OR predecessor.source_right_id=\'official:dart\')'
+        . ' ORDER BY BINARY eo.observation_id LIMIT 1 FOR UPDATE'
+    );
+    $eventHasDartLineage = function (array $event) use (
+        $eventDocumentLookup,
+        $eventObservationLookup
+    ): bool {
+        $eventId = isset($event['event_id']) ? (string)$event['event_id'] : '';
+        $companyId = isset($event['company_id'])
+            ? (string)$event['company_id'] : '';
+        $issuerId = isset($event['issuer_id'])
+            ? (string)$event['issuer_id'] : '';
+        $countryCode = isset($event['country_code'])
+            ? (string)$event['country_code'] : '';
+        // Migration 011 and the guarded bridge use this exact projection.
+        // Treat a projection-only row conservatively when historical link
+        // tables are partial; generic writers must not claim it.
+        if ($countryCode === 'KR'
+            && preg_match('/^[0-9]{8}$/',$companyId) === 1
+            && $issuerId === 'issuer:kr:dart:' . $companyId) {
+            return true;
+        }
+        $eventDocumentLookup->execute(array($eventId));
+        if ($eventDocumentLookup->fetchColumn() !== false) { return true; }
+        $eventObservationLookup->execute(array($eventId));
+        return $eventObservationLookup->fetchColumn() !== false;
+    };
+    foreach ($candidates['event_ids'] as $eventId) {
+        $eventIdentityLookup->execute(array($eventId));
+        $event = $eventIdentityLookup->fetch();
+        if (is_array($event) && $eventHasDartLineage($event)) { return true; }
+    }
+    foreach ($candidates['comparison_keys'] as $comparisonKey) {
+        $comparisonIdentityLookup->execute(array($comparisonKey));
+        $event = $comparisonIdentityLookup->fetch();
+        if (is_array($event) && $eventHasDartLineage($event)) { return true; }
+    }
+    $runLookup = $pdo->prepare(
+        'SELECT source_key FROM ' . table_name($config,'collection_runs')
+        . ' WHERE run_id=? LIMIT 1 FOR UPDATE'
+    );
+    foreach ($candidates['run_ids'] as $runId) {
+        $runLookup->execute(array($runId));
+        $sourceKey = $runLookup->fetchColumn();
+        if (!is_string($sourceKey)) { continue; }
+        $sourceTokens = array_values(array_filter(array_map(
+            'trim',
+            explode('+',strtolower($sourceKey))
+        )));
+        if (in_array('dart',$sourceTokens,true)) { return true; }
     }
     return false;
 }
@@ -6727,6 +7063,25 @@ function v1_global_dart_window_date($value): ?string {
 }
 
 /**
+ * Lock the single OpenDART connector after release-state and SourceRight rows.
+ * Every DART write path shares this ordering with connector administration.
+ */
+function v1_lock_global_dart_connector(
+    PDO $pdo,
+    array $config
+): ?array {
+    $statement = $pdo->prepare(
+        'SELECT connector_id,country_code,source_key,source_type,'
+        . 'source_right_id,connector_status,cursor_json,last_checked_at,'
+        . 'last_success_at FROM ' . table_name($config,'source_connectors')
+        . ' WHERE connector_id=? LIMIT 1 FOR UPDATE'
+    );
+    $statement->execute(array('connector:kr:dart'));
+    $connector = $statement->fetch();
+    return is_array($connector) ? $connector : null;
+}
+
+/**
  * Extract a source-scoped DART outcome.  A combined DART+KIND run may advance
  * DART freshness when (and only when) DART itself succeeded and its exact
  * document ACK denominator matches.  KIND-only and partial runs cannot pass.
@@ -6767,23 +7122,29 @@ function v1_global_dart_run_outcome(array $run): array {
 /**
  * Project a completed legacy DART run into the v2 connector registry.
  *
- * The connector row is locked and only a source-scoped, ACK-complete run with
- * a durable window and code revision may advance last_success/cursor.  Failed,
- * partial and older observations may update last_checked/error only; they
- * never regress the last successful checkpoint.
+ * The caller supplies the connector row already locked after release-state and
+ * SourceRight. Only a source-scoped, ACK-complete run with a durable window
+ * and code revision may advance last_success/cursor. Failed, partial and older
+ * observations may update last_checked/error only; they never regress the
+ * last successful checkpoint or override an administrative kill switch.
  */
-function v1_bridge_dart_connector_run(PDO $pdo, array $config, array $run, string $runId,
+function v1_bridge_dart_connector_run(PDO $pdo, array $config, array $connector,
+    array $run, string $runId,
     ?string $codeRevision, ?string $finishedAt, string $firstObservedAt, string $now,
     bool $runCompletionValid): void {
     $outcome = v1_global_dart_run_outcome($run);
     if ($outcome['selected'] !== true) { return; }
-    $connectorStmt = $pdo->prepare('SELECT connector_id,cursor_json,last_checked_at,last_success_at FROM '
-        . table_name($config,'source_connectors')
-        . ' WHERE connector_id=? AND country_code=\'KR\' AND source_key=\'dart\' LIMIT 1 FOR UPDATE');
-    $connectorStmt->execute(array('connector:kr:dart'));
-    $connector = $connectorStmt->fetch();
-    if (!is_array($connector)) {
-        throw new RuntimeException('global_dart_connector_missing');
+    if ((string)v1_first($connector,array('connector_id'),'') !== 'connector:kr:dart'
+        || (string)v1_first($connector,array('country_code'),'') !== 'KR'
+        || (string)v1_first($connector,array('source_key'),'') !== 'dart'
+        || (string)v1_first($connector,array('source_type'),'') !== 'official_disclosure'
+        || (string)v1_first($connector,array('source_right_id'),'') !== 'official:dart'
+        || !in_array(
+            (string)v1_first($connector,array('connector_status'),''),
+            array('configured','active'),
+            true
+        )) {
+        throw new RuntimeException('global_dart_connector_not_writable');
     }
     $checkedAt = $finishedAt !== null ? $finishedAt : $now;
     $lastCheckedAt = isset($connector['last_checked_at']) && is_string($connector['last_checked_at'])
@@ -6829,7 +7190,8 @@ function v1_bridge_dart_connector_run(PDO $pdo, array $config, array $run, strin
         $update = $pdo->prepare('UPDATE ' . table_name($config,'source_connectors')
             . ' SET connector_status=\'active\',cursor_json=?,last_checked_at=?,last_success_at=?,'
             . 'last_observed_at=?,last_raw_count=?,last_acknowledged_count=?,last_error_class=NULL,'
-            . 'code_revision=?,updated_at=? WHERE connector_id=? AND country_code=\'KR\' AND source_key=\'dart\'');
+            . 'code_revision=?,updated_at=? WHERE connector_id=? AND country_code=\'KR\''
+            . ' AND source_key=\'dart\' AND connector_status IN (\'configured\',\'active\')');
         $update->execute(array(
             $cursorJson,$checkedAt,$finishedAt,$observedAt,(int)$outcome['raw_count'],
             (int)$outcome['acknowledged_count'],$codeRevision,$now,'connector:kr:dart',
@@ -6842,12 +7204,18 @@ function v1_bridge_dart_connector_run(PDO $pdo, array $config, array $run, strin
         if ($outcome['succeeded'] === true) { $errorClass = 'dart_checkpoint_incomplete'; }
         $failure = $pdo->prepare('UPDATE ' . table_name($config,'source_connectors')
             . ' SET last_checked_at=?,last_error_class=?,updated_at=?'
-            . ' WHERE connector_id=? AND country_code=\'KR\' AND source_key=\'dart\'');
+            . ' WHERE connector_id=? AND country_code=\'KR\' AND source_key=\'dart\''
+            . ' AND connector_status IN (\'configured\',\'active\')');
         $failure->execute(array($checkedAt,$errorClass,$now,'connector:kr:dart'));
     }
 }
 
-function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): void {
+function upsert_governance_snapshot(
+    PDO $pdo,
+    array $config,
+    array $payload,
+    bool $dartGuardedAction = false
+): void {
     $expectedBackendBindingId = isset($payload['expected_backend_binding_id'])
         ? trim((string)$payload['expected_backend_binding_id']) : '';
     if (preg_match('/^[a-f0-9]{64}$/',$expectedBackendBindingId) !== 1) {
@@ -6865,19 +7233,103 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
     if (count($companies) > 2000 || count($documents) > 2500 || count($events) > 2500 || count($rights) > 1000) {
         respond(413, array('ok' => false, 'error' => 'too_many_records'));
     }
+    $documents = v1_normalize_governance_snapshot_documents($documents);
     $globalDartBridgeEnabled = v1_global_dart_bridge_enabled($pdo,$config);
+    $lineageCandidates = v1_governance_snapshot_lineage_candidates(
+        $companies,
+        $documents,
+        $events,
+        $run
+    );
+    $lineageCandidateCount = count($lineageCandidates['company_ids'])
+        + count($lineageCandidates['document_ids'])
+        + count($lineageCandidates['event_ids'])
+        + count($lineageCandidates['comparison_keys'])
+        + count($lineageCandidates['run_ids']);
+    if ($lineageCandidateCount > 7500) {
+        respond(413,array('ok'=>false,'error'=>'too_many_lineage_candidates'));
+    }
+    $containsDartWrite = false;
     $containsKindDocument = false;
     foreach ($documents as $document) {
         if (!is_array($document)) { continue; }
         $documentId = strtolower(trim((string)v1_first($document,array('document_id'),'')));
         $declaredSource = strtolower(trim((string)v1_first($document,array('source','source_key'),'')));
         $sourceRightId = strtolower(trim((string)v1_first($document,array('source_right_id'),'')));
+        $isDart = strpos($documentId,'dart:') === 0 || $declaredSource === 'dart'
+            || $sourceRightId === 'official:dart';
+        if ($isDart && $sourceRightId !== 'official:dart') {
+            respond(409,array('ok'=>false,'error'=>'dart_document_requires_approved_source_right'));
+        }
+        if ($isDart) { $containsDartWrite = true; }
         $isKind = strpos($documentId,'kind:') === 0 || $declaredSource === 'kind' || $sourceRightId === 'official:kind';
         if ($isKind && $sourceRightId !== 'official:kind') {
             respond(409,array('ok'=>false,'error'=>'kind_document_requires_approved_source_right'));
         }
         if ($isKind) { $containsKindDocument = true; }
     }
+    foreach ($lineageCandidates['document_ids'] as $lineageDocumentId) {
+        if (strpos(strtolower($lineageDocumentId),'dart:') === 0) {
+            $containsDartWrite = true;
+        }
+    }
+    $runSourceTokens = array_values(array_filter(array_map(
+        'trim',
+        explode('+',strtolower((string)v1_first($run,array('source_key'),'')))
+    )));
+    if (in_array('dart',$runSourceTokens,true)) { $containsDartWrite = true; }
+    foreach ($rights as $right) {
+        if (!is_array($right)) { continue; }
+        if (strtolower(trim((string)v1_first(
+            $right,
+            array('source_right_id'),
+            ''
+        ))) === 'official:dart') {
+            $containsDartWrite = true;
+            respond(409,array(
+                'ok'=>false,
+                'error'=>'dart_source_right_managed_out_of_band',
+            ));
+        }
+    }
+    $dartExpectation = v1_dart_source_right_expectation($payload);
+    $dartDeploymentExpectation = v1_dart_deployment_expectation($payload);
+    $dartReleaseStateExpectation = v1_dart_release_state_expectation($payload);
+    if (isset($payload['expected_source_right_revisions'])
+        && !is_array($payload['expected_source_right_revisions'])) {
+        respond(400,array('ok'=>false,'error'=>'invalid_source_right_precondition'));
+    }
+    if ($dartExpectation !== null) { $containsDartWrite = true; }
+    if ($containsDartWrite && !$dartGuardedAction) {
+        respond(409,array(
+            'ok'=>false,
+            'error'=>'dart_guarded_action_required',
+        ));
+    }
+    if ($dartGuardedAction && !$globalDartBridgeEnabled) {
+        respond(503,array('ok'=>false,'error'=>'dart_global_bridge_unavailable'));
+    }
+    if ($dartGuardedAction && $dartExpectation === null) {
+        respond(409,array(
+            'ok'=>false,
+            'error'=>'dart_source_right_precondition_required',
+        ));
+    }
+    if ($dartGuardedAction && $dartDeploymentExpectation === null) {
+        respond(409,array(
+            'ok'=>false,
+            'error'=>'dart_deployment_revision_required',
+        ));
+    }
+    if ($dartGuardedAction && $dartReleaseStateExpectation === null) {
+        respond(409,array(
+            'ok'=>false,
+            'error'=>'dart_release_state_precondition_required',
+        ));
+    }
+    // This becomes true only after stored lineage, release state, deployment,
+    // and SourceRight have all been revalidated under the transaction guards.
+    $globalDartProjectionEnabled = false;
     $now = gmdate('Y-m-d H:i:s');
     $counts = array('companies' => 0, 'documents' => 0, 'events' => 0, 'actors' => 0, 'event_actors' => 0,
         'source_rights' => 0, 'source_rights_rejected' => 0,
@@ -6898,10 +7350,152 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
     }
     $pdo->beginTransaction();
     try {
-        // Match the cutover lock order before this payload can upsert any
-        // SourceRight: release-state row first, then rights/data rows.
-        if (v1_release_state($pdo,$config,true) === null) {
+        // Match the shared DART lock order before resolving stored lineage:
+        // release-state rows, SourceRight, connector, existing lineage, then
+        // data rows. An event-only payload therefore cannot hide its existing
+        // DART provenance or race an administrative connector kill switch.
+        $dartReleaseStates = null;
+        $dartRight = null;
+        $dartConnector = null;
+        $mustResolveStoredLineage = $lineageCandidateCount > 0;
+        if ($globalDartBridgeEnabled
+            && ($dartGuardedAction
+                || $containsDartWrite
+                || $mustResolveStoredLineage)) {
+            if (!function_exists('v2_release_state_rows_for_update')) {
+                throw new RuntimeException('global_release_state_guard_unavailable');
+            }
+            $dartReleaseStates = v2_release_state_rows_for_update($pdo,$config);
+            $dartRight = v2_source_right_row(
+                $pdo,
+                $config,
+                'official:dart',
+                true
+            );
+            $dartConnector = v1_lock_global_dart_connector($pdo,$config);
+        } elseif (v1_release_state($pdo,$config,true) === null) {
             throw new RuntimeException('release_state_unavailable');
+        }
+        if ($mustResolveStoredLineage
+            && v1_lock_existing_dart_lineage(
+                $pdo,
+                $config,
+                $lineageCandidates,
+                $globalDartBridgeEnabled
+            )) {
+            $containsDartWrite = true;
+        }
+        if ($containsDartWrite && !$dartGuardedAction) {
+            $pdo->rollBack();
+            respond(409,array(
+                'ok'=>false,
+                'error'=>'dart_guarded_action_required',
+            ));
+        }
+        if ($dartGuardedAction && !$containsDartWrite) {
+            $pdo->rollBack();
+            respond(409,array(
+                'ok'=>false,
+                'error'=>'dart_guarded_payload_required',
+            ));
+        }
+        if ($containsDartWrite && !$globalDartBridgeEnabled) {
+            $pdo->rollBack();
+            respond(503,array(
+                'ok'=>false,
+                'error'=>'dart_global_bridge_unavailable',
+            ));
+        }
+        if ($containsDartWrite) {
+            $storedV1ReleaseState = $dartReleaseStates === null
+                ? '' : (string)$dartReleaseStates[GOV_V1_RELEASE_STATE_KEY]['release_state'];
+            $storedV2ReleaseState = $dartReleaseStates === null
+                ? '' : (string)$dartReleaseStates[GOV_V2_RELEASE_STATE_KEY]['release_state'];
+            if ($dartReleaseStates === null
+                || $storedV1ReleaseState !== $storedV2ReleaseState
+                || $storedV1ReleaseState !== $dartReleaseStateExpectation) {
+                $pdo->rollBack();
+                respond(409,array(
+                    'ok'=>false,
+                    'error'=>'dart_release_state_mismatch',
+                ));
+            }
+            $deploymentIdentity = v2_deployment_identity_status();
+            if ($deploymentIdentity['valid'] !== true
+                || !isset($deploymentIdentity['code_revision'])
+                || !is_string($deploymentIdentity['code_revision'])
+                || !hash_equals(
+                    $dartDeploymentExpectation,
+                    (string)$deploymentIdentity['code_revision']
+                )) {
+                $pdo->rollBack();
+                respond(409,array(
+                    'ok'=>false,
+                    'error'=>'dart_deployment_revision_mismatch',
+                ));
+            }
+            $dartReasons = v2_source_right_ineligible_reasons(
+                $dartRight,
+                'collect'
+            );
+            $dartRevision = $dartRight === null
+                ? null : v2_source_right_revision($dartRight);
+            $dartContractRevision = $dartRight === null
+                ? null : v2_source_right_contract_revision($dartRight);
+            if ($dartReasons
+                || $dartRevision === null
+                || $dartContractRevision === null
+                || !hash_equals(
+                    $dartExpectation['rights_revision'],
+                    $dartRevision
+                )
+                || !hash_equals(
+                    $dartExpectation['contract_revision'],
+                    $dartContractRevision
+                )) {
+                $pdo->rollBack();
+                respond(409,array(
+                    'ok'=>false,
+                    'error'=>'dart_source_right_ineligible_or_changed',
+                    'source_right_id'=>'official:dart',
+                    'reasons'=>$dartReasons,
+                ));
+            }
+            $dartConnectorIdentityValid = is_array($dartConnector)
+                && (string)v1_first($dartConnector,array('connector_id'),'')
+                    === 'connector:kr:dart'
+                && (string)v1_first($dartConnector,array('country_code'),'') === 'KR'
+                && (string)v1_first($dartConnector,array('source_key'),'') === 'dart'
+                && (string)v1_first($dartConnector,array('source_type'),'')
+                    === 'official_disclosure'
+                && (string)v1_first($dartConnector,array('source_right_id'),'')
+                    === 'official:dart';
+            if (!$dartConnectorIdentityValid) {
+                $pdo->rollBack();
+                respond(409,array(
+                    'ok'=>false,
+                    'error'=>'dart_connector_unavailable',
+                ));
+            }
+            $dartConnectorStatus = (string)v1_first(
+                $dartConnector,
+                array('connector_status'),
+                ''
+            );
+            if (!in_array(
+                $dartConnectorStatus,
+                array('configured','active'),
+                true
+            )) {
+                $pdo->rollBack();
+                respond(409,array(
+                    'ok'=>false,
+                    'error'=>$dartConnectorStatus === 'inactive'
+                        ? 'dart_connector_inactive'
+                        : 'dart_connector_not_ready',
+                ));
+            }
+            $globalDartProjectionEnabled = true;
         }
         // This lock is intentionally acquired before processing source_rights
         // from the HMAC payload. A collector cannot bootstrap its own KIND
@@ -6926,7 +7520,7 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
         $globalIssuerStmt = null;
         $globalIdentifierStmt = null;
         $globalListingStmt = null;
-        if ($globalDartBridgeEnabled) {
+        if ($globalDartProjectionEnabled) {
             $globalIssuerTable = table_name($config,'issuers');
             $globalIssuerStmt = $pdo->prepare('INSERT INTO ' . $globalIssuerTable
                 . ' (issuer_id,country_code,legal_name,legal_name_en,short_name,original_language,homepage_url,'
@@ -6995,7 +7589,7 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
                 $companyMasterStmt->execute(array($hasListingStatus ? 1 : 0,$listingStatus,
                     $hasMasterModifiedAt ? 1 : 0,$masterModifiedAt,$companyId));
             }
-            if ($globalDartBridgeEnabled) {
+            if ($globalDartProjectionEnabled) {
                 $issuerId = 'issuer:kr:dart:' . $companyId;
                 $stockCode = mb_substr(trim((string)v1_first($company,array('stock_code'),'')),0,12,'UTF-8');
                 $market = mb_substr(trim((string)v1_first($company,array('market','corp_cls'),'')),0,40,'UTF-8');
@@ -7074,19 +7668,21 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             . 'retrieved_at=VALUES(retrieved_at), verification_status=VALUES(verification_status), publication_status=VALUES(publication_status), '
             . 'payload_json=VALUES(payload_json)');
         $previousDocumentStmt = $pdo->prepare('SELECT predecessor.document_id, predecessor.version_no FROM ' . table_name($config, 'documents') . ' predecessor'
-            . ' WHERE predecessor.company_id=? AND predecessor.source_class=? AND predecessor.collection_key=? AND predecessor.document_id<>?'
+            . ' WHERE predecessor.company_id=? AND predecessor.source_class=? AND predecessor.source_right_id=?'
+            . ' AND predecessor.collection_key=? AND predecessor.document_id<>?'
             . ' AND COALESCE(predecessor.published_at,predecessor.retrieved_at) BETWEEN DATE_SUB(?, INTERVAL ' . V1_CORRECTION_LOOKBACK_DAYS . ' DAY) AND DATE_ADD(?, INTERVAL 7 DAY)'
             . ' AND NOT EXISTS (SELECT 1 FROM ' . table_name($config, 'documents') . ' successor WHERE successor.correction_of_document_id=predecessor.document_id AND successor.document_id<>?)'
             . ' ORDER BY predecessor.version_no DESC, COALESCE(predecessor.published_at,predecessor.retrieved_at) DESC, predecessor.document_id DESC LIMIT 2 FOR UPDATE');
         $providedPredecessorStmt = $pdo->prepare('SELECT predecessor.document_id, predecessor.version_no FROM ' . table_name($config, 'documents') . ' predecessor'
-            . ' WHERE predecessor.document_id=? AND predecessor.company_id=? AND predecessor.source_class=? AND predecessor.collection_key=?'
+            . ' WHERE predecessor.document_id=? AND predecessor.company_id=? AND predecessor.source_class=?'
+            . ' AND predecessor.source_right_id=? AND predecessor.collection_key=?'
             . ' AND COALESCE(predecessor.published_at,predecessor.retrieved_at) BETWEEN DATE_SUB(?, INTERVAL ' . V1_CORRECTION_LOOKBACK_DAYS . ' DAY) AND DATE_ADD(?, INTERVAL 7 DAY)'
             . ' AND NOT EXISTS (SELECT 1 FROM ' . table_name($config, 'documents') . ' successor WHERE successor.correction_of_document_id=predecessor.document_id AND successor.document_id<>?)'
             . ' LIMIT 1 FOR UPDATE');
         $existingDocumentLineageStmt = $pdo->prepare('SELECT correction_of_document_id, version_no FROM '
             . table_name($config, 'documents') . ' WHERE document_id=? LIMIT 1 FOR UPDATE');
         $globalDartDocumentStmt = null;
-        if ($globalDartBridgeEnabled) {
+        if ($globalDartProjectionEnabled) {
             $globalDartDocumentStmt = $pdo->prepare('UPDATE ' . table_name($config,'documents')
                 . ' SET issuer_id=?,country_code=\'KR\',source_key=\'dart\',filed_at=COALESCE(filed_at,?)'
                 . ' WHERE document_id=? AND company_id=? AND source_right_id=\'official:dart\'');
@@ -7100,14 +7696,13 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             $title = trim((string)v1_first($document, array('title', 'report_nm'), ''));
             $url = trim((string)v1_first($document, array('original_url', 'url'), ''));
             if ($externalId === '' || $title === '' || !preg_match('#^https?://#i', $url)) { continue; }
-            $id = trim((string)v1_first($document, array('document_id'), ''));
-            if ($id === '') { $id = v1_stable_id($sourceClass === 'official_disclosure' ? 'dart' : 'doc', $externalId); }
+            $id = v1_governance_snapshot_document_id($document);
             if (!v1_valid_entity_id($id)) { continue; }
             $sourceRightId = strtolower(trim((string)v1_first($document, array('source_right_id'), '')));
             $documentSourceClasses[$id] = $sourceClass;
             $documentSourceRightIds[$id] = $sourceRightId;
             if (
-                $globalDartBridgeEnabled
+                $globalDartProjectionEnabled
                 && $sourceClass === 'official_disclosure'
                 && $sourceRightId === 'official:dart'
             ) {
@@ -7146,11 +7741,17 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
                 if ($companyId === '' || $collectionKey === '' || ($correctionOf !== '' && (!v1_valid_entity_id($correctionOf) || $correctionOf === $id))) {
                     $linkageAmbiguous = true;
                 } elseif ($correctionOf !== '') {
-                    $providedPredecessorStmt->execute(array($correctionOf, $companyId, $sourceClass, $collectionKey, $documentReferenceAt, $documentReferenceAt, $id));
+                    $providedPredecessorStmt->execute(array(
+                        $correctionOf,$companyId,$sourceClass,$sourceRightId,
+                        $collectionKey,$documentReferenceAt,$documentReferenceAt,$id
+                    ));
                     $previousDocument = $providedPredecessorStmt->fetch();
                     if (!$previousDocument) { $linkageAmbiguous = true; }
                 } else {
-                    $previousDocumentStmt->execute(array($companyId, $sourceClass, $collectionKey, $id, $documentReferenceAt, $documentReferenceAt, $id));
+                    $previousDocumentStmt->execute(array(
+                        $companyId,$sourceClass,$sourceRightId,$collectionKey,$id,
+                        $documentReferenceAt,$documentReferenceAt,$id
+                    ));
                     $candidates = $previousDocumentStmt->fetchAll();
                     if (count($candidates) !== 1) { $linkageAmbiguous = true; }
                     else { $previousDocument = $candidates[0]; }
@@ -7198,7 +7799,7 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
                 $publishedAt, $retrievedAt, mb_substr($verification, 0, 24, 'UTF-8'),
                 in_array($publication, array('draft', 'published', 'withdrawn'), true) ? $publication : 'draft', json_value($document), $now, $now,
             ));
-            if ($globalDartBridgeEnabled
+            if ($globalDartProjectionEnabled
                 && $companyId !== ''
                 && strtolower(trim((string)v1_first($document,array('source_right_id'),''))) === 'official:dart') {
                 $globalDartDocumentStmt->execute(array(
@@ -7273,7 +7874,7 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
             . 'VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE first_observed_at=LEAST(first_observed_at,VALUES(first_observed_at)), '
             . 'observed_at=GREATEST(observed_at,VALUES(observed_at)), payload_hash=VALUES(payload_hash), payload_json=VALUES(payload_json), updated_at=VALUES(updated_at)');
         $globalDartEventStmt = null;
-        if ($globalDartBridgeEnabled) {
+        if ($globalDartProjectionEnabled) {
             $globalDartEventStmt = $pdo->prepare('UPDATE ' . table_name($config,'governance_events') . ' bridge_event'
                 . ' SET bridge_event.issuer_id=?,bridge_event.country_code=\'KR\','
                 . 'bridge_event.global_event_family=?,'
@@ -7615,7 +8216,7 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
                     $observationAt,$observationAt,$observationHash,json_value(array('relation_type'=>'evidence','identity_status'=>$identityStatus)), $now,$now));
                 $position++; $counts['event_documents']++; $counts['event_observations']++;
             }
-            if ($globalDartBridgeEnabled) {
+            if ($globalDartProjectionEnabled) {
                 $globalEventFamily = v1_global_event_family_for_legacy_type($eventType);
                 if ($globalEventFamily !== null) {
                     $globalDartEventStmt->execute(array(
@@ -7732,9 +8333,10 @@ function upsert_governance_snapshot(PDO $pdo, array $config, array $payload): vo
                             (string)$slotClaim['claim_id']));
                     }
                 }
-                if ($globalDartBridgeEnabled) {
+                if ($globalDartProjectionEnabled) {
                     v1_bridge_dart_connector_run(
-                        $pdo,$config,$run,$runId,$codeRevision,$finishedAt,$firstObservedAt,$now,
+                        $pdo,$config,$dartConnector,$run,$runId,$codeRevision,
+                        $finishedAt,$firstObservedAt,$now,
                         $terminalReason === null
                     );
                 }

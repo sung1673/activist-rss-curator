@@ -1,6 +1,8 @@
 # Production Alpha 공개 전환과 롤백
 
-두 workflow는 자동 실행되지 않는다. `governance-release` environment의 승인 규칙을 통과한 기본 branch 수동 실행만 운영 상태를 변경한다. cutover와 rollback은 같은 non-cancelling concurrency lock을 사용하므로 동시에 진행할 수 없다. 무인 수집·품질 작업은 별도 `governance-runtime` environment를 사용한다.
+두 workflow는 자동 실행되지 않는다. `governance-release` environment의 승인 규칙을 통과한 기본 branch 수동 실행만 운영 상태를 변경한다. cutover는 DART/KIND `ingest-official`·`official-backfill`, SEC `ingest-global`·`global-backfill`, `ingest-official-sites`, `ingest-selected-markets`, official slot epoch reset, SourceRight bootstrap 및 사람 승인 brief publish와 같은 repository·exact Git ref 단위 non-cancelling concurrency lock을 사용한다. 따라서 공식 데이터의 다중 청크 논리 실행은 `preview → live` 전환의 완전히 앞이나 뒤에서만 실행된다. Global brief의 읽기 전용 candidate 생성은 이 lock에 들어가지 않고 publish job만 들어간다.
+
+긴급 rollback은 최대 6시간의 백필 뒤에서 기다리지 않도록 별도 repository·exact Git ref 단위 non-cancelling lock을 사용한다. 입력과 exact 기본 branch를 확인한 직후, artifact 조회보다 먼저 optimistic version 재시도를 사용해 v2와 v1을 차례로 `closed`로 내린다. transport error와 HTTP 408·409·425·429·5xx는 다음 bounded 반복의 GET으로 실제 commit 여부를 먼저 확인하며, 인증 오류와 그 밖의 비재시도 4xx는 즉시 실패한다. 그 뒤 기존 Pages deployment lock 안에서 두 상태를 한 번 더 idempotent하게 닫고 legacy artifact를 복원한다. cutover의 Pages job도 같은 Pages lock 안에서 artifact upload 직전에 v1·v2가 preflight 때의 정확한 `preview` version인지 다시 확인한다. rollback이 먼저 닫으면 cutover 배포가 중단되고, cutover가 먼저 배포하면 rollback이 그 뒤에 legacy를 복원하며 activation은 closed/version mismatch로 실패한다. 이미 activation이 끝났다면 rollback이 최종 상태를 `closed`로 만든다. 다른 branch 또는 같은 짧은 이름의 tag는 `github.ref_type=branch`와 exact `refs/heads/<default>` 검사를 통과하지 못하며 별도 lock identity를 사용한다. 무인 수집·품질 작업은 별도 `governance-runtime` environment를 사용한다.
 
 ## 공개 전환 전 조건
 

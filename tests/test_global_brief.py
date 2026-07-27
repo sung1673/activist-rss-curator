@@ -666,6 +666,14 @@ def test_workflow_schedules_candidate_only_at_0545_kst_and_manual_publish() -> N
     assert "github.event_name == 'workflow_dispatch'" in workflow["jobs"]["publish"]["if"]
     assert "inputs.operation == 'publish'" in workflow["jobs"]["publish"]["if"]
     assert workflow["concurrency"]["cancel-in-progress"] is False
+    assert workflow["jobs"]["publish"]["concurrency"] == {
+        "group": (
+            "governance-production-official-write-"
+            "${{ github.repository }}-${{ github.ref }}"
+        ),
+        "queue": "max",
+        "cancel-in-progress": False,
+    }
     assert "vars.GOVERNANCE_PIPELINE_MODE == 'shadow'" in text
     assert "vars.GOVERNANCE_PIPELINE_MODE == 'live'" in text
     assert "BSIDE_EDITOR_TOKEN" in text

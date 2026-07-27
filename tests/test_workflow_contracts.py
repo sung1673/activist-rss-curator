@@ -9,6 +9,14 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
+PRODUCTION_OFFICIAL_WRITE_CONCURRENCY = {
+    "group": (
+        "governance-production-official-write-"
+        "${{ github.repository }}-${{ github.ref }}"
+    ),
+    "queue": "max",
+    "cancel-in-progress": "false",
+}
 
 
 def workflow_text(name: str) -> str:
@@ -44,6 +52,12 @@ def test_all_workflows_are_valid_yaml() -> None:
         assert "name" in payload, path
         assert "on" in payload, path
         assert "jobs" in payload, path
+
+
+def test_ci_parses_the_critical_rollback_shell_script() -> None:
+    ci = workflow_text("ci.yml")
+    assert "Validate critical rollback shell syntax" in ci
+    assert "bash -n .github/scripts/close-governance-release-state.sh" in ci
 
 
 @pytest.mark.parametrize(
@@ -175,12 +189,110 @@ def test_dispatch_jobs_with_repository_secrets_use_main_only_environments() -> N
     assert observed_runtime_jobs == runtime_jobs
 
 
-def test_official_ingest_and_backfill_use_non_dropping_shared_queue() -> None:
-    for name in ("ingest-official.yml", "official-backfill.yml"):
+def test_official_writes_and_release_transitions_use_one_non_dropping_queue() -> None:
+    for name in (
+        "ingest-official.yml",
+        "official-backfill.yml",
+        "ingest-global.yml",
+        "global-backfill.yml",
+        "ingest-official-sites.yml",
+        "ingest-selected-markets.yml",
+        "official-slot-epoch-reset.yml",
+        "source-right-bootstrap.yml",
+        "governance-cutover.yml",
+    ):
         workflow = yaml.load(workflow_text(name), Loader=yaml.BaseLoader)
-        assert workflow["concurrency"]["group"] == "ingest-official-${{ github.ref_name }}"
-        assert workflow["concurrency"]["queue"] == "max"
-        assert workflow["concurrency"]["cancel-in-progress"] == "false"
+        assert workflow["concurrency"] == PRODUCTION_OFFICIAL_WRITE_CONCURRENCY, name
+
+
+def test_emergency_rollback_does_not_wait_behind_official_backfill() -> None:
+    workflow = yaml.load(
+        workflow_text("governance-rollback.yml"),
+        Loader=yaml.BaseLoader,
+    )
+    assert workflow["concurrency"] == {
+        "group": (
+            "governance-emergency-rollback-"
+            "${{ github.repository }}-${{ github.ref }}"
+        ),
+        "cancel-in-progress": "false",
+        "queue": "max",
+    }
+    assert (
+        workflow["concurrency"]["group"]
+        != PRODUCTION_OFFICIAL_WRITE_CONCURRENCY["group"]
+    )
+
+
+def test_human_brief_publish_joins_official_write_transition_boundary() -> None:
+    workflow = yaml.load(
+        workflow_text("global-brief.yml"),
+        Loader=yaml.BaseLoader,
+    )
+    assert workflow["jobs"]["publish"]["concurrency"] == (
+        PRODUCTION_OFFICIAL_WRITE_CONCURRENCY
+    )
+    assert workflow["concurrency"]["group"] == (
+        "global-brief-${{ github.repository }}-${{ github.ref }}"
+    )
+
+
+def test_protected_writers_require_the_exact_default_branch_ref() -> None:
+    job_contracts = (
+        ("ingest-official.yml", "ingest"),
+        ("official-backfill.yml", "backfill"),
+        ("official-slot-epoch-reset.yml", "reset"),
+        ("ingest-global.yml", "ingest"),
+        ("global-backfill.yml", "backfill"),
+        ("ingest-official-sites.yml", "ingest"),
+        ("ingest-selected-markets.yml", "ingest"),
+        ("global-brief.yml", "candidates"),
+        ("global-brief.yml", "publish"),
+    )
+    for workflow_name, job_name in job_contracts:
+        workflow = yaml.load(
+            workflow_text(workflow_name),
+            Loader=yaml.BaseLoader,
+        )
+        job_if = str(workflow["jobs"][job_name]["if"])
+        assert "github.ref_type == 'branch'" in job_if, workflow_name
+        assert (
+            "github.ref == format('refs/heads/{0}', "
+            "github.event.repository.default_branch)"
+        ) in job_if, workflow_name
+
+    for workflow_name, job_name, step_name in (
+        (
+            "source-right-bootstrap.yml",
+            "bootstrap",
+            "Enforce protected closed-state bootstrap",
+        ),
+        (
+            "governance-cutover.yml",
+            "validate",
+            "Enforce default branch and safe rollout variables",
+        ),
+        (
+            "governance-rollback.yml",
+            "close",
+            "Enforce protected rollback inputs and default branch",
+        ),
+    ):
+        workflow = yaml.load(
+            workflow_text(workflow_name),
+            Loader=yaml.BaseLoader,
+        )
+        step = next(
+            item
+            for item in workflow["jobs"][job_name]["steps"]
+            if item["name"] == step_name
+        )
+        assert step["env"]["REF"] == "${{ github.ref }}"
+        assert step["env"]["REF_TYPE"] == "${{ github.ref_type }}"
+        assert (
+            '[[ "$REF_TYPE" == "branch" && '
+            '"$REF" == "refs/heads/$DEFAULT_BRANCH" ]]'
+        ) in step["run"]
 
 
 def test_backfill_shell_never_interpolates_dispatch_text_directly() -> None:
@@ -330,7 +442,11 @@ def test_official_ingest_has_day_and_night_kst_schedules() -> None:
         "vars.DART_OFFICIAL_INGEST_ENABLED == 'true' &&"
     )
     assert condition.count("vars.DART_OFFICIAL_INGEST_ENABLED") == 1
-    assert "github.ref_name == github.event.repository.default_branch" in condition
+    assert "github.ref_type == 'branch'" in condition
+    assert (
+        "github.ref == format('refs/heads/{0}', "
+        "github.event.repository.default_branch)"
+    ) in condition
     assert "github.event_name == 'workflow_dispatch'" in condition
     checkout = next(step for step in job["steps"] if step["name"] == "Checkout")
     # Pin the exact workflow revision so the candidate artifact and its
@@ -376,7 +492,24 @@ def test_official_ingest_has_day_and_night_kst_schedules() -> None:
         for step in job["steps"]
         if step["name"] == "Claim oldest due official-ingest slot"
     )
+    dart_preflight = next(
+        step
+        for step in job["steps"]
+        if step["name"]
+        == "Verify DART SourceRight and exact deployed release before claim"
+    )
+    assert job["steps"].index(validation) < job["steps"].index(dart_preflight)
+    assert job["steps"].index(dart_preflight) < job["steps"].index(claim)
     assert job["steps"].index(claim) < job["steps"].index(ingest)
+    assert dart_preflight["env"]["BSIDE_OPS_TOKEN"] == (
+        "${{ secrets.BSIDE_OPS_TOKEN }}"
+    )
+    assert "--preflight-dart" in dart_preflight["run"]
+    assert '--expected-release-sha "$GITHUB_SHA"' in dart_preflight["run"]
+    assert '--pipeline-mode "$GOVERNANCE_PIPELINE_MODE"' in dart_preflight["run"]
+    assert dart_preflight["env"]["GOVERNANCE_PIPELINE_MODE"] == (
+        "${{ steps.rollout.outputs.governance_pipeline_mode }}"
+    )
     ingest_script = str(ingest["run"])
     assert ingest_script.index("CURATOR_OFFICIAL_SLOT_TERMINAL_NOOP") < ingest_script.index(
         "python -m curator.main"
@@ -389,6 +522,52 @@ def test_official_ingest_has_day_and_night_kst_schedules() -> None:
     )
     assert ingest["env"]["OPENDART_API_KEYS"] == validation["env"]["OPENDART_API_KEYS"]
     assert ingest["env"]["DART_API_KEY"] == validation["env"]["DART_API_KEY"]
+    assert ingest["env"]["GOVERNANCE_PIPELINE_MODE"] == (
+        "${{ steps.rollout.outputs.governance_pipeline_mode }}"
+    )
+
+
+def test_official_backfill_preflights_dart_only_for_apply_before_checkpoint_access() -> None:
+    payload = yaml.load(
+        workflow_text("official-backfill.yml"),
+        Loader=yaml.BaseLoader,
+    )
+    steps = payload["jobs"]["backfill"]["steps"]
+    preflight = next(
+        step
+        for step in steps
+        if step["name"] == "Verify DART SourceRight before any apply write"
+    )
+    run = next(
+        step
+        for step in steps
+        if step["name"] == "Run one-day official backfill windows"
+    )
+    previous = next(
+        step
+        for step in steps
+        if step["name"] == "Resolve previous matching checkpoint"
+    )
+    assert preflight["if"] == "inputs.mode == 'apply' && inputs.source != 'kind'"
+    assert steps.index(preflight) < steps.index(previous) < steps.index(run)
+    assert "--preflight-dart" in preflight["run"]
+    assert '--expected-release-sha "$GITHUB_SHA"' in preflight["run"]
+    assert '--pipeline-mode "$GOVERNANCE_PIPELINE_MODE"' in preflight["run"]
+    assert preflight["env"]["BSIDE_OPS_TOKEN"] == "${{ secrets.BSIDE_OPS_TOKEN }}"
+    assert preflight["env"]["GOVERNANCE_PIPELINE_MODE"] == (
+        "${{ steps.rollout.outputs.governance_pipeline_mode }}"
+    )
+    assert run["env"]["GOVERNANCE_PIPELINE_MODE"] == (
+        "${{ steps.rollout.outputs.governance_pipeline_mode }}"
+    )
+
+
+def test_ci_type_checks_the_fixed_official_source_contract() -> None:
+    ci = workflow_text("ci.yml")
+    assert (
+        ci.index("curator/official_source_contracts.py")
+        < ci.index("curator/official_source_rights.py")
+    )
 
 
 def test_official_slot_repair_and_epoch_reset_are_operator_gated() -> None:
@@ -397,11 +576,7 @@ def test_official_slot_repair_and_epoch_reset_are_operator_gated() -> None:
     dispatch_inputs = ingest_payload["on"]["workflow_dispatch"]["inputs"]
     assert "repair_event_schedule" in dispatch_inputs
     assert "repair_expected_slot_at" in dispatch_inputs
-    assert ingest_payload["concurrency"] == {
-        "group": "ingest-official-${{ github.ref_name }}",
-        "queue": "max",
-        "cancel-in-progress": "false",
-    }
+    assert ingest_payload["concurrency"] == PRODUCTION_OFFICIAL_WRITE_CONCURRENCY
     assert "CURATOR_OFFICIAL_SLOT_REPAIR_EXPECTED_AT" in ingest_workflow
     assert "inputs.repair_expected_slot_at != ''" in ingest_workflow
 
@@ -610,7 +785,14 @@ def test_secret_bearing_manual_jobs_run_default_branch_code_only(
     payload = yaml.load(workflow_text(workflow_name), Loader=yaml.BaseLoader)
     job = payload["jobs"][job_name]
 
-    assert "github.ref_name == github.event.repository.default_branch" in job["if"]
+    if workflow_name == "ingest-official.yml":
+        assert "github.ref_type == 'branch'" in job["if"]
+        assert (
+            "github.ref == format('refs/heads/{0}', "
+            "github.event.repository.default_branch)"
+        ) in job["if"]
+    else:
+        assert "github.ref_name == github.event.repository.default_branch" in job["if"]
     checkout = next(step for step in job["steps"] if step["name"] == "Checkout")
     assert checkout["with"]["ref"] == "${{ github.sha }}"
     if workflow_name != "ingest-official.yml":
@@ -1125,11 +1307,7 @@ def test_pages_incident_listener_is_isolated_and_minimally_privileged() -> None:
 
 def test_official_ingest_serializes_overlapping_scheduled_runs() -> None:
     payload = yaml.load(workflow_text("ingest-official.yml"), Loader=yaml.BaseLoader)
-    assert payload["concurrency"] == {
-        "group": "ingest-official-${{ github.ref_name }}",
-        "queue": "max",
-        "cancel-in-progress": "false",
-    }
+    assert payload["concurrency"] == PRODUCTION_OFFICIAL_WRITE_CONCURRENCY
 
 
 def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> None:
@@ -1155,17 +1333,15 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert "end > completed_kst_end_exclusive" in input_validation["run"]
     assert "tomorrow_kst" not in input_validation["run"]
     assert "timedelta(days=1)" not in input_validation["run"]
-    assert payload["concurrency"] == {
-        "group": "ingest-official-${{ github.ref_name }}",
-        "queue": "max",
-        "cancel-in-progress": "false",
-    }
+    assert payload["concurrency"] == PRODUCTION_OFFICIAL_WRITE_CONCURRENCY
     assert payload["permissions"] == {"contents": "read", "actions": "read"}
 
     job = payload["jobs"]["backfill"]
     assert job["if"] == (
         "vars.DART_OFFICIAL_INGEST_ENABLED == 'true' && "
-        "github.ref_name == github.event.repository.default_branch"
+        "github.ref_type == 'branch' && "
+        "github.ref == format('refs/heads/{0}', "
+        "github.event.repository.default_branch)"
     )
     assert int(job["timeout-minutes"]) == 360
     for runtime_path in (
@@ -1338,13 +1514,14 @@ def test_global_backfill_is_bounded_serialized_and_preserves_daily_receipts() ->
     assert dispatch["source"]["options"] == ["all", "US"]
     assert dispatch["mode"]["options"] == ["apply", "replay"]
     assert payload["permissions"] == {"contents": "read"}
-    assert payload["concurrency"] == {
-        "group": "ingest-global-${{ github.ref_name }}",
-        "cancel-in-progress": "false",
-    }
+    assert payload["concurrency"] == PRODUCTION_OFFICIAL_WRITE_CONCURRENCY
 
     job = payload["jobs"]["backfill"]
-    assert job["if"] == "github.ref_name == github.event.repository.default_branch"
+    assert job["if"] == (
+        "github.ref_type == 'branch' && "
+        "github.ref == format('refs/heads/{0}', "
+        "github.event.repository.default_branch)"
+    )
     assert int(job["timeout-minutes"]) == 360
     assert job["environment"]["name"] == "governance-runtime"
     for secret_name in (

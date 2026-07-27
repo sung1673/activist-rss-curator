@@ -21,7 +21,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: governance-production-transition-${{ github.repository }}
+  group: governance-production-official-write-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
   queue: max
 
@@ -48,7 +48,8 @@ jobs:
       - name: Enforce default branch and safe rollout variables
         shell: bash
         env:
-          REF_NAME: ${{ github.ref_name }}
+          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           PAGES_OWNER: ${{ vars.PAGES_OWNER }}
           GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
@@ -61,7 +62,7 @@ jobs:
           CUTOVER_REASON: ${{ inputs.reason }}
         run: |
           set -euo pipefail
-          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]] || {
+          [[ "$REF_TYPE" == "branch" && "$REF" == "refs/heads/$DEFAULT_BRANCH" ]] || {
             echo "::error::Cutover is restricted to the default branch."
             exit 1
           }
@@ -680,6 +681,30 @@ jobs:
 
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Revalidate exact preview versions inside Pages deployment lock
+        env:
+          BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          EXPECTED_V1_VERSION: ${{ needs.preflight.outputs.v1_state_version }}
+          EXPECTED_V2_VERSION: ${{ needs.preflight.outputs.v2_state_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$BSIDE_ADMIN_TOKEN" ]]
+          [[ "${GOVERNANCE_API_BASE_URL%/}" == "https://alignpe.gabia.io/activist/api.php/api/v1" ]]
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v1_api/admin/release-state" > pages-lock-v1-preview.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v2_api/admin/release-state" > pages-lock-v2-preview.json
+          [[ "$(jq -r '.release_state' pages-lock-v1-preview.json)" == "preview" ]]
+          [[ "$(jq -r '.state_version' pages-lock-v1-preview.json)" == "$EXPECTED_V1_VERSION" ]]
+          [[ "$(jq -r '.data.release_state' pages-lock-v2-preview.json)" == "preview" ]]
+          [[ "$(jq -r '.data.state_version' pages-lock-v2-preview.json)" == "$EXPECTED_V2_VERSION" ]]
 
       - name: Upload validated Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

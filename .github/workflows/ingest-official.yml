@@ -41,7 +41,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: ingest-official-${{ github.ref_name }}
+  group: governance-production-official-write-${{ github.repository }}-${{ github.ref }}
   queue: max
   cancel-in-progress: false
 
@@ -49,7 +49,8 @@ jobs:
   ingest:
     if: >-
       vars.DART_OFFICIAL_INGEST_ENABLED == 'true' &&
-      github.ref_name == github.event.repository.default_branch &&
+      github.ref_type == 'branch' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
       (
         github.event_name == 'workflow_dispatch' ||
         vars.GOVERNANCE_PIPELINE_MODE == 'dart_canary' ||
@@ -199,6 +200,20 @@ jobs:
           fi
           python .github/scripts/validate-api-base-urls.py --github-env "$GITHUB_ENV"
 
+      - name: Verify DART SourceRight and exact deployed release before claim
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          GOVERNANCE_PIPELINE_MODE: ${{ steps.rollout.outputs.governance_pipeline_mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m curator.official_source_rights \
+            --preflight-dart \
+            --expected-release-sha "$GITHUB_SHA" \
+            --pipeline-mode "$GOVERNANCE_PIPELINE_MODE"
+
       - name: Claim oldest due official-ingest slot
         if: >-
           (github.event_name == 'schedule' && github.event.schedule != '40 21 * * 0') ||
@@ -232,6 +247,7 @@ jobs:
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
           BSIDE_BACKEND_BINDING_ID: ${{ vars.BSIDE_BACKEND_BINDING_ID }}
+          GOVERNANCE_PIPELINE_MODE: ${{ steps.rollout.outputs.governance_pipeline_mode }}
           ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}
           GITHUB_TOKEN: ${{ github.token }}
           CURATOR_SHADOW_ENGINE_OUTPUT_PATH: ${{ runner.temp }}/candidate-shadow/engine-output.json

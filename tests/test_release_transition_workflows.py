@@ -8,6 +8,14 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
+PRODUCTION_OFFICIAL_WRITE_CONCURRENCY = {
+    "group": (
+        "governance-production-official-write-"
+        "${{ github.repository }}-${{ github.ref }}"
+    ),
+    "cancel-in-progress": "false",
+    "queue": "max",
+}
 
 
 def workflow(name: str) -> tuple[str, dict[str, object]]:
@@ -41,11 +49,7 @@ def test_transition_gate_requires_and_evaluates_all_six_evidence_files() -> None
 def test_cutover_uses_same_sha_protected_evidence_and_pages_artifacts() -> None:
     text, payload = workflow("governance-cutover.yml")
     assert "schedule:" not in text
-    assert payload["concurrency"] == {
-        "group": "governance-production-transition-${{ github.repository }}",
-        "cancel-in-progress": "false",
-        "queue": "max",
-    }
+    assert payload["concurrency"] == PRODUCTION_OFFICIAL_WRITE_CONCURRENCY
     validate = payload["jobs"]["validate"]
     assert validate["permissions"] == {"actions": "write", "contents": "read"}
     assert validate["environment"]["name"] == "governance-release"
@@ -214,8 +218,43 @@ def test_cutover_switches_owner_deploys_smokes_activates_and_can_recover() -> No
     deploy = payload["jobs"]["deploy_pages"]
     assert deploy["needs"] == ["validate", "preflight"]
     assert deploy["environment"]["name"] == "github-pages"
-    assert any(step.get("uses") == "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9" for step in deploy["steps"])
-    assert any(step.get("uses") == "actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128" for step in deploy["steps"])
+    deploy_names = step_names(deploy)
+    revalidate_pages_index = deploy_names.index(
+        "Revalidate exact preview versions inside Pages deployment lock"
+    )
+    upload_pages_index = deploy_names.index("Upload validated Pages artifact")
+    deploy_pages_index = deploy_names.index("Deploy validated governance artifact")
+    assert revalidate_pages_index < upload_pages_index < deploy_pages_index
+    pages_revalidation = deploy["steps"][revalidate_pages_index]
+    assert pages_revalidation["env"]["BSIDE_ADMIN_TOKEN"] == (
+        "${{ secrets.BSIDE_ADMIN_TOKEN }}"
+    )
+    assert pages_revalidation["env"]["EXPECTED_V1_VERSION"] == (
+        "${{ needs.preflight.outputs.v1_state_version }}"
+    )
+    assert pages_revalidation["env"]["EXPECTED_V2_VERSION"] == (
+        "${{ needs.preflight.outputs.v2_state_version }}"
+    )
+    for contract in (
+        "https://alignpe.gabia.io/activist/api.php/api/v1",
+        "pages-lock-v1-preview.json",
+        "pages-lock-v2-preview.json",
+        'release_state\' pages-lock-v1-preview.json)" == "preview"',
+        'state_version\' pages-lock-v1-preview.json)" == "$EXPECTED_V1_VERSION"',
+        'release_state\' pages-lock-v2-preview.json)" == "preview"',
+        'state_version\' pages-lock-v2-preview.json)" == "$EXPECTED_V2_VERSION"',
+    ):
+        assert contract in pages_revalidation["run"]
+    assert any(
+        step.get("uses")
+        == "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9"
+        for step in deploy["steps"]
+    )
+    assert any(
+        step.get("uses")
+        == "actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128"
+        for step in deploy["steps"]
+    )
 
     activate = payload["jobs"]["activate"]
     assert activate["needs"] == ["validate", "preflight", "deploy_pages"]
@@ -348,14 +387,21 @@ def test_cutover_switches_owner_deploys_smokes_activates_and_can_recover() -> No
         assert recovery_job["environment"]["name"] == environment_name
 
 
-def test_rollback_closes_inside_lock_before_deploying_digest_pinned_legacy_artifact() -> None:
+def test_rollback_closes_immediately_and_rechecks_before_legacy_deployment() -> None:
     text, payload = workflow("governance-rollback.yml")
     assert "schedule:" not in text
     assert payload["concurrency"] == {
-        "group": "governance-production-transition-${{ github.repository }}",
+        "group": (
+            "governance-emergency-rollback-"
+            "${{ github.repository }}-${{ github.ref }}"
+        ),
         "cancel-in-progress": "false",
         "queue": "max",
     }
+    assert (
+        payload["concurrency"]["group"]
+        != PRODUCTION_OFFICIAL_WRITE_CONCURRENCY["group"]
+    )
     close = payload["jobs"]["close"]
     assert close["environment"]["name"] == "governance-release"
     assert close["permissions"] == {"actions": "write", "contents": "read"}
@@ -371,8 +417,26 @@ def test_rollback_closes_inside_lock_before_deploying_digest_pinned_legacy_artif
     assert "pinned legacy artifact digest has changed" in resolver
     close_names = step_names(close)
     assert "Prepare or verify rollback recovery bundle before deployment lock" in close_names
-    assert "Close governance release state before Pages rollback" not in close_names
-    assert 'release_state:"closed"' in text
+    input_index = close_names.index(
+        "Enforce protected rollback inputs and default branch"
+    )
+    immediate_close_index = close_names.index(
+        "Immediately close v2 then v1 before recovery preparation"
+    )
+    cancel_index = close_names.index(
+        "Cancel stale Pages producer runs before rollback deployment"
+    )
+    prepare_index = close_names.index(
+        "Prepare or verify rollback recovery bundle before deployment lock"
+    )
+    assert input_index < immediate_close_index < cancel_index < prepare_index
+    immediate_close = close["steps"][immediate_close_index]
+    assert immediate_close["run"] == (
+        "bash .github/scripts/close-governance-release-state.sh"
+    )
+    assert immediate_close["env"]["BSIDE_ADMIN_TOKEN"] == (
+        "${{ secrets.BSIDE_ADMIN_TOKEN }}"
+    )
 
     deploy = payload["jobs"]["deploy_legacy"]
     assert deploy["needs"] == "close"
@@ -391,19 +455,34 @@ def test_rollback_closes_inside_lock_before_deploying_digest_pinned_legacy_artif
     deploy_names = step_names(deploy)
     validate_index = deploy_names.index("Validate legacy artifact without executing its contents")
     close_index = deploy_names.index(
-        "Close v2 then v1 release states after acquiring Pages deployment lock"
+        "Re-close v2 then v1 inside Pages deployment lock"
     )
     verify_index = deploy_names.index(
         "Verify both release states closed before legacy deployment"
     )
     configure_index = deploy_names.index("Configure Pages")
     assert validate_index < close_index < verify_index < configure_index
-    close_run = deploy["steps"][close_index]["run"]
-    assert close_run.index("rollback-v2-before.json") < close_run.index(
-        "rollback-v1-before.json"
+    assert deploy["steps"][close_index]["run"] == (
+        "bash .github/scripts/close-governance-release-state.sh"
     )
-    assert ".data.release_state" in close_run
-    assert "${v1_api%/api/v1}/api/v2" in close_run
+
+    close_script = (
+        ROOT / ".github" / "scripts" / "close-governance-release-state.sh"
+    ).read_text(encoding="utf-8")
+    pinned_api = "https://alignpe.gabia.io/activist/api.php/api/v1"
+    assert close_script.index(pinned_api) < close_script.index(
+        "Authorization: Bearer"
+    )
+    assert close_script.index('"v2"') < close_script.index('"v1"')
+    assert "for attempt in 1 2 3 4 5" in close_script
+    for retryable_status in ("408", "409", "425", "429"):
+        assert f'"$http_status" == "{retryable_status}"' in close_script
+    assert '"$http_status" =~ ^5[0-9][0-9]$' in close_script
+    assert "expected_version:$version" in close_script
+    assert close_script.count('release_state == "closed"') >= 4
+    assert "--connect-timeout 5" in close_script
+    assert "--max-time 20" in close_script
+    assert "Never repeat the POST blindly" in close_script
 
 
 def test_rollback_smokes_closed_boundary_then_requires_postdeploy_owner_change() -> None:
@@ -439,11 +518,14 @@ def test_rollback_smokes_closed_boundary_then_requires_postdeploy_owner_change()
     assert not re.search(r"\b(?:DROP|TRUNCATE|DELETE\s+FROM)\b", text, re.IGNORECASE)
 
 
-def test_cutover_and_rollback_share_non_cancelling_transition_lock() -> None:
+def test_cutover_and_emergency_rollback_use_deliberately_distinct_locks() -> None:
     _cutover_text, cutover = workflow("governance-cutover.yml")
     _rollback_text, rollback = workflow("governance-rollback.yml")
-    assert cutover["concurrency"] == rollback["concurrency"]
+    assert cutover["concurrency"]["group"] != rollback["concurrency"]["group"]
     assert cutover["concurrency"]["cancel-in-progress"] == "false"
+    assert rollback["concurrency"]["cancel-in-progress"] == "false"
+    assert cutover["concurrency"]["queue"] == "max"
+    assert rollback["concurrency"]["queue"] == "max"
 
 
 def test_variable_handoff_is_summary_only_and_never_expands_workflow_authority() -> None:

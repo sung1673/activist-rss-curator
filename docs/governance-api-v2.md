@@ -150,7 +150,7 @@ v2는 v1과 독립적인 `global_terminal_v2` release state를 사용한다.
 공개 승격은 보호된 `governance-release` workflow가 다음 두 단계를 연속 수행할 때만 가능하다.
 
 1. `POST /admin/release-authorizations`는 해당 보호 환경에만 둔 `BSIDE_RELEASE_AUTHORIZER_TOKEN`으로 호출한다. 토큰은 서버에서 정확한 `release_authorizer` 역할이어야 하며 `admin`, `editor`, `ops` 토큰으로 대체할 수 없다. 요청은 현재 배포 manifest의 40자리 candidate SHA, 검증한 GitHub release-evidence artifact의 `sha256:` digest·run ID·artifact ID, v1·v2 preview state version, 32바이트 난수 nonce와 서버 시각 기준 60~900초 유효기간을 함께 고정한다. 서버에는 nonce 원문 대신 SHA-256만 저장하고, 응답에도 nonce를 되돌려 주지 않는다. 새 승인은 이전의 미사용 승인을 철회한다.
-2. `POST /admin/cutover`는 `BSIDE_ADMIN_TOKEN`으로 호출하되 첫 단계에서 마스킹해 보관한 같은 nonce, candidate SHA, evidence digest와 두 state version을 모두 제출한다. 보호 workflow는 호출 전에 evidence run 생성 시각, 보고서 `evidence_as_of`, 관측 종료 시각이 모두 현재로부터 60분 이내인지 검증한다. 서버는 하나의 MySQL transaction 안에서 두 release state row와 승인을 잠근 다음, KR DART·US SEC EDGAR·CA issuer IR link·AU ASIC link의 필수 4개 connector row와 SourceRight row를 `FOR UPDATE`로 잠근다. 현재 공개 문서가 0건인 국가도 예외가 아니다. JP·GB connector는 권한·최신성 gate에는 포함하지 않지만 저장 identity를 별도로 잠그고 검증한다. connector는 등록된 국가·source key/type·SourceRight ID·coverage mode가 정확히 일치하고 `active`여야 하며, 마지막 성공·확인 시각과 SEC intraday cursor 또는 link-only 관측이 위 15~45분 최신성 계약을 만족해야 한다. SourceRight는 정확한 source identity, `active`, 증빙, 비어 있지 않은 permission scope, 유효기간·철회 상태, `collect` 및 공개 재배포 자격을 모두 충족해야 한다. 그 뒤 기존 v1·v2 공개 문서 SourceRight guard를 다시 실행하고, 모든 검사가 통과한 경우에만 `governance_v1`과 `global_terminal_v2`를 같은 `cutover_at`·`sunset_at`으로 함께 `live`로 바꾼다. 두 감사 row에는 같은 `release_authorization_id`가 기록된다.
+2. `POST /admin/cutover`는 `BSIDE_ADMIN_TOKEN`으로 호출하되 첫 단계에서 마스킹해 보관한 같은 nonce, candidate SHA, evidence digest와 두 state version을 모두 제출한다. 보호 workflow는 호출 전에 evidence run 생성 시각, 보고서 `evidence_as_of`, 관측 종료 시각이 모두 현재로부터 60분 이내인지 검증한다. 서버는 하나의 MySQL transaction 안에서 두 release state row와 승인을 잠근 다음, KR DART·US SEC EDGAR·CA issuer IR link·AU ASIC link의 필수 4개 SourceRight row를 ID순으로 먼저, 대응 connector row를 ID순으로 다음에 `FOR UPDATE`로 잠근다. 현재 공개 문서가 0건인 국가도 예외가 아니다. JP·GB의 dormant identity도 같은 SourceRight→connector 순서로 잠그고 검증하며, 권한·최신성 gate에는 포함하지 않는다. 이 순서는 수집 및 connector 관리 transaction과 같아 교차 잠금의 deadlock을 방지한다. connector는 등록된 국가·source key/type·SourceRight ID·coverage mode가 정확히 일치하고 `active`여야 하며, 마지막 성공·확인 시각과 SEC intraday cursor 또는 link-only 관측이 위 15~45분 최신성 계약을 만족해야 한다. SourceRight는 정확한 source identity, `active`, 증빙, 비어 있지 않은 permission scope, 유효기간·철회 상태, `collect` 및 공개 재배포 자격을 모두 충족해야 한다. 그 뒤 기존 v1·v2 공개 문서 SourceRight guard를 다시 실행하고, 모든 검사가 통과한 경우에만 `governance_v1`과 `global_terminal_v2`를 같은 `cutover_at`·`sunset_at`으로 함께 `live`로 바꾼다. 두 감사 row에는 같은 `release_authorization_id`가 기록된다.
 
 승인은 만료·철회·사용·candidate/evidence/version 불일치 중 하나라도 있으면 fail-closed한다. 필수 connector 또는 SourceRight 검사가 실패하면 HTTP 409 `required_alpha_sources_invalid`와 connector별 비민감 사유를 반환하고, 두 release state와 승인 소비 시각은 모두 변경하지 않는다. 소비된 nonce는 긴급 `live → closed` 롤백 뒤에도 다시 쓸 수 없다. 다시 공개하려면 새 증빙과 현재 두 state version에 묶인 새 nonce 승인을 받아야 한다. 반면 긴급 차단은 승인 발급 없이 기존 v1·v2 `POST /admin/release-state`에서 계속 가능하다.
 
@@ -230,6 +230,14 @@ JP·GB connector ID는 payload 정규화나 mutable write 전에 `409 global_ing
 500건을 넘는 한 소스 window는 닫힌 `chunk` 객체의 `index`, `count`, `batch_id`, `window_start`, `window_end_exclusive`로 묶는다. window는 반개구간이며 1~31일만 허용한다. `batch_id`는 source·window·내용뿐 아니라 `code_revision`도 포함한 결정적 해시이므로 배포 SHA가 달라지면 별도 batch가 된다. 각 receipt는 `batch_id`, `chunk_index`, `chunk_count`, 두 window 날짜, chunk의 `request_count`, 전체 `batch_raw_count`, `batch_acknowledged_count`, `batch_request_count`를 기록한다. 이 중 request 수는 소스에 새 페이지가 생기면 중단 후 재시도에서 달라질 수 있는 전송 telemetry이므로 콘텐츠 identity로 고정하지 않는다. 완료 시 최종 chunk가 선언한 `batch_request_count`를 권위 있는 해당 완료 시도의 합계로 사용한다. receipt의 `raw_count`와 `acknowledged_count`는 해당 chunk 수량만 기록하고 `(connector_id, batch_id, chunk_index)`는 유일하다. `raw_count`는 공식 소스에서 요청 window 안에 관측한 행, `acknowledged_count`는 저장 계약이 수락한 record와 lifecycle observation의 합이다. 따라서 서버는 모든 chunk에서 `raw_count >= acknowledged_count`를 강제한다. 증빙 exporter는 스키마 변경 없이 `accepted_count = acknowledged_count`, `filtered_out_count = raw_count - accepted_count`를 산출하고 `raw = filtered_out + accepted`, `ACK = accepted`를 검증한다. 서버는 chunk를 1부터 순서대로만 받는다. final chunk에서는 1..N receipt가 모두 존재하고 code revision·window·chunk count·전체 raw·ACK 합계가 같으며 chunk별 request 합이 최종 chunk의 선언값과 정확히 일치하는지 확인한다. final 선행, 순서 역전, 콘텐츠 metadata 또는 합계 불일치는 HTTP 409로 거절한다. `source_connectors`의 마지막 수집량과 checkpoint는 이 검증을 통과한 final chunk에서만 원자 확정하며, 중간 chunk가 이전 완료 checkpoint를 덮어쓰지 않는다. 운영 재개 시 ops 전용 checkpoint API가 자격정보 없이 이 완료 지점을 반환한다.
 
 수집기가 보내는 `public_allowed`와 `ai_allowed`는 참고 snapshot일 뿐이다. 서버가 현재 등록된 권한을 다시 판단한다.
+
+Production Alpha의 고정 소스 `official:sec-edgar`, `official:edinet`,
+`official:companies-house`, `official:ca-issuer-ir`,
+`official:asic-register`는 서버에 metadata와 공식 URL만 저장한다. 이 다섯
+SourceRight의 `body_text`는 반드시 `null`이어야 하며, permission scope 문구나
+`redistribution_allowed=true`로 이 구조 계약을 확장할 수 없다. 본문이 든
+payload는 transaction 시작 전에 거절되어 document·event·receipt·checkpoint를
+전혀 변경하지 않는다.
 
 자동 수집은 사건을 직접 공개하지 않는다. 신규 사건은 항상 아래 상태로 생성된다.
 
@@ -368,3 +376,30 @@ checkpoint가 없을 때 최근 2일에서 시작하는 자동 수집 계약은 
 다만 Production Alpha 전환 게이트는 DART·SEC EDGAR
 각각에서 동일 SHA의 최근 30일 이상 수집, 30개 이상 성공 window, 실패 window
 0개, 증빙 기준 시각 24시간 이내의 마지막 완료를 별도로 요구한다.
+
+## SourceRight contract revision v1
+
+인증된 `GET /ops/source-right-eligibility`는 기존 `rights_revision`과 함께
+`contract_revision`을 반환한다. 공개 API 응답에는 이 값을 포함하지 않는다.
+`rights_revision`은 `updated_at`까지 포함하는 동시성 검사용 기존 digest이고,
+`contract_revision`은 승인 계약의 의미가 같은지 확인하는 안정적인
+`source-right-contract-v1` SHA-256이다.
+
+contract digest 입력은 UTF-8 JSON, 사전식 key 정렬, 불필요한 공백 없음으로
+canonicalize한다. 버전 `1`, 정확한 SourceRight ID·type·key·name·status, 원문
+permission scope의 SHA-256, 원문 evidence URI의 SHA-256, 소문자 evidence hash,
+현재 `valid_from` 상태(`eligible|future`), nullable `valid_until`·`revoked_at`,
+boolean AI·재배포 허용을 포함한다. `updated_at`은 제외한다. 원 permission
+scope와 evidence URI는 응답에 노출하지 않는다.
+
+OpenDART apply는 고정된 metadata-only 계약의 Python 독립 계산값과 서버
+`contract_revision`이 같아야 한다. 또한 v2 서비스 identity, schema 12, exact
+40자리 배포 SHA, 실행 모드에 대응하는 release state, `collect` eligibility와 기존
+`rights_revision`을 함께 확인한다. 보호된 응답은 OpenDART에 한해 고정
+`connector_id`와 coarse boolean `connector_ready`도 반환한다. 원시 관리자
+상태는 반환하지 않으며, 커넥터가 `configured|active`가 아니면 수집기는
+OpenDART 네트워크 요청을 만들기 전에 중단한다.
+실행 모드는 `dart_canary → closed`, `shadow → preview`, `live → live`로
+고정한다. 수집기는 인증 없는 v1 공개 probe의 상태별 `503`, `401/403`, `200`
+계약과 v2 상태를 함께 확인하고 같은 `expected_release_state`를 HMAC 본문에
+서명한다. `off`, 빈 값, `manual`을 포함한 그 밖의 모드는 fail-closed한다.

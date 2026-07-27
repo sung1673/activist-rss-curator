@@ -8,6 +8,38 @@ from curator import official_ingest
 
 
 BACKEND_BINDING_ID = "b" * 64
+DART_RIGHTS_REVISION = "c" * 64
+DART_CONTRACT_REVISION = "d" * 64
+DART_DEPLOYMENT_REVISION = "e" * 40
+
+
+def _allow_dart_apply(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_SHA", DART_DEPLOYMENT_REVISION)
+    monkeypatch.setenv("GOVERNANCE_PIPELINE_MODE", "dart_canary")
+
+    class EligibleDartRightsClient:
+        def preflight(
+            self,
+            _expected_release_sha: str | None = None,
+        ) -> official_ingest.OfficialSourceRightEligibility:
+            assert _expected_release_sha == DART_DEPLOYMENT_REVISION
+            return official_ingest.OfficialSourceRightEligibility(
+                source_right_id="official:dart",
+                use="collect",
+                rights_revision=DART_RIGHTS_REVISION,
+                source_type="official_disclosure",
+                source_key="dart",
+                redistribution_allowed=True,
+                ai_allowed=False,
+                contract_revision=DART_CONTRACT_REVISION,
+                release_state="closed",
+            )
+
+    monkeypatch.setattr(
+        official_ingest,
+        "DartOfficialSourceRightClient",
+        EligibleDartRightsClient,
+    )
 
 
 def _set_scheduled_claim_env(
@@ -44,7 +76,7 @@ def test_remote_sync_persists_one_final_failed_run_after_all_data_chunks(
     calls: list[dict[str, object]] = []
 
     def fake_post(action: str, payload: dict[str, object], *, timeout: float) -> dict[str, object]:
-        assert action == "upsert_governance_snapshot"
+        assert action == "upsert_governance_snapshot_dart_guarded"
         assert timeout == 45.0
         assert payload["expected_backend_binding_id"] == BACKEND_BINDING_ID
         calls.append(payload)
@@ -70,7 +102,15 @@ def test_remote_sync_persists_one_final_failed_run_after_all_data_chunks(
         "companies": [],
         "documents": [{"document_id": f"dart:{index}"} for index in range(3601)],
         "events": [],
-        "source_rights": [{"source_right_id": "official:dart"}],
+        "source_rights": [],
+        "expected_source_right_revisions": {
+            "official:dart": {
+                "rights_revision": DART_RIGHTS_REVISION,
+                "contract_revision": DART_CONTRACT_REVISION,
+            }
+        },
+        "expected_deployment_code_revision": DART_DEPLOYMENT_REVISION,
+        "expected_release_state": "closed",
     }
     run = {
         "run_id": "run:official-test",
@@ -83,8 +123,18 @@ def test_remote_sync_persists_one_final_failed_run_after_all_data_chunks(
 
     assert len(calls) == 4
     assert all(call["run"] == {} for call in calls[:-1])
-    assert calls[0]["source_rights"] == [{"source_right_id": "official:dart"}]
-    assert all(call["source_rights"] == [] for call in calls[1:])
+    assert all(call["source_rights"] == [] for call in calls)
+    assert all(
+        call["expected_source_right_revisions"]
+        == payload["expected_source_right_revisions"]
+        for call in calls
+    )
+    assert all(
+        call["expected_deployment_code_revision"]
+        == DART_DEPLOYMENT_REVISION
+        for call in calls
+    )
+    assert all(call["expected_release_state"] == "closed" for call in calls)
     final_run = calls[-1]["run"]
     assert isinstance(final_run, dict)
     assert final_run["status"] == "failed"
@@ -106,6 +156,94 @@ def test_remote_sync_persists_one_final_failed_run_after_all_data_chunks(
         "official_remote_raw_count": 3601,
         "official_remote_ack_count": 1801,
     }
+
+
+def test_remote_sync_company_master_only_chunk_keeps_exact_dart_guards(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_post(
+        action: str,
+        payload: dict[str, object],
+        *,
+        timeout: float,
+    ) -> dict[str, object]:
+        assert timeout == 45.0
+        calls.append((action, payload))
+        return {
+            "ok": True,
+            "backend_binding_id": BACKEND_BINDING_ID,
+            "upserted": {
+                key: len(payload[key])
+                for key in ("companies", "documents", "events", "source_rights")
+            }
+            | {
+                "source_rights_rejected": 0,
+                "runs": int(bool(payload["run"])),
+            },
+        }
+
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", BACKEND_BINDING_ID)
+    monkeypatch.setattr(official_ingest, "remote_api_configured", lambda: True)
+    monkeypatch.setattr(official_ingest, "post_remote_action", fake_post)
+    payload: dict[str, object] = {
+        "companies": [
+            {
+                "company_id": "00126380",
+                "legal_name": "DART company master only",
+            }
+        ],
+        "documents": [],
+        "events": [],
+        "source_rights": [],
+        "expected_source_right_revisions": {
+            "official:dart": {
+                "rights_revision": DART_RIGHTS_REVISION,
+                "contract_revision": DART_CONTRACT_REVISION,
+            }
+        },
+        "expected_deployment_code_revision": DART_DEPLOYMENT_REVISION,
+        "expected_release_state": "closed",
+    }
+
+    summary = official_ingest.sync_governance_payload(
+        payload,
+        run={
+            "run_id": "run:dart-company-master-only",
+            "source_key": "dart",
+            "status": "succeeded",
+            "error_count": 0,
+        },
+    )
+
+    company_only_calls = [
+        submitted
+        for action, submitted in calls
+        if submitted["companies"]
+        and submitted["documents"] == []
+        and submitted["events"] == []
+        and submitted["run"] == {}
+    ]
+    assert len(company_only_calls) == 1
+    company_only = company_only_calls[0]
+    assert all(
+        action == "upsert_governance_snapshot_dart_guarded"
+        for action, _submitted in calls
+    )
+    assert (
+        company_only["expected_source_right_revisions"]
+        == payload["expected_source_right_revisions"]
+    )
+    assert (
+        company_only["expected_deployment_code_revision"]
+        == DART_DEPLOYMENT_REVISION
+    )
+    assert company_only["expected_release_state"] == "closed"
+    assert company_only["expected_backend_binding_id"] == BACKEND_BINDING_ID
+    assert summary["official_remote_failed"] == 0
+    assert summary["official_remote_synced"] == 2
+    assert summary["official_remote_run_persisted"] == 1
 
 
 def test_remote_sync_persists_explicit_zero_ack_for_selected_empty_sources(
@@ -403,9 +541,7 @@ def test_explicit_kind_disable_skips_configured_adapter(
     assert summary["official_failed"] == 0
     assert summary["official_kind_enabled"] == 0
     assert summary["official_kind_configured"] == 1
-    assert captured_payload["source_rights"] == [
-        official_ingest.source_right_payloads({}, include_kind=False)[0]
-    ]
+    assert captured_payload["source_rights"] == []
     outcomes = captured_run["source_outcomes"]
     assert isinstance(outcomes, dict)
     assert outcomes["kind"]["requested"] is True
@@ -503,7 +639,7 @@ def test_kind_preflight_failure_never_constructs_connector(
     assert summary["official_kind_fetched"] == 0
 
 
-def test_kind_preflight_revision_is_stored_and_only_dart_right_is_bootstrapped(
+def test_kind_preflight_revision_is_stored_without_collector_managed_rights(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     revision = "b" * 64
@@ -559,9 +695,7 @@ def test_kind_preflight_revision_is_stored_and_only_dart_right_is_bootstrapped(
 
     assert summary["official_failed"] == 0
     assert summary["official_kind_rights_verified"] == 1
-    assert {row["source_right_id"] for row in captured_payload["source_rights"]} == {
-        "official:dart"
-    }
+    assert captured_payload["source_rights"] == []
     outcomes = captured_run["source_outcomes"]
     assert isinstance(outcomes, dict)
     assert outcomes["kind"]["rights_eligible"] is True
@@ -614,6 +748,7 @@ def test_connector_failure_discards_partial_dart_window_before_remote_sync(
         }
 
     monkeypatch.setenv("DART_API_KEY", "a" * 40)
+    _allow_dart_apply(monkeypatch)
     monkeypatch.setattr(official_ingest, "DartConnector", PartialDartConnector)
     monkeypatch.setattr(official_ingest, "sync_governance_payload", fake_sync)
 
@@ -641,6 +776,203 @@ def test_connector_failure_discards_partial_dart_window_before_remote_sync(
     assert outcomes["dart"]["pages_fetched"] == 1
 
 
+def test_direct_dart_apply_requires_protected_preflight_before_connector_or_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class UnexpectedDartConnector:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            raise AssertionError("OpenDART must not run before protected preflight")
+
+    def unexpected_sync(
+        _payload: dict[str, object],
+        *,
+        run: dict[str, object],
+    ) -> dict[str, int]:
+        raise AssertionError(f"remote write was attempted: {run}")
+
+    monkeypatch.setenv("DART_API_KEY", "a" * 40)
+    for name in (
+        "BSIDE_API_BASE_URL",
+        "GOVERNANCE_API_BASE_URL",
+        "ACTIVIST_API_URL",
+        "BSIDE_OPS_TOKEN",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(official_ingest, "DartConnector", UnexpectedDartConnector)
+    monkeypatch.setattr(official_ingest, "sync_governance_payload", unexpected_sync)
+
+    with pytest.raises(
+        official_ingest.OfficialSourceRightError,
+        match="BSIDE_OPS_TOKEN",
+    ):
+        official_ingest.run(
+            now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+            start=date(2026, 7, 15),
+            end=date(2026, 7, 16),
+            settings_overrides={"dart_enabled": True, "kind_enabled": False},
+        )
+
+
+def test_inactive_dart_connector_preflight_blocks_opendart_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class InactiveDartRightsClient:
+        def preflight(
+            self,
+            _expected_release_sha: str | None = None,
+        ) -> official_ingest.OfficialSourceRightEligibility:
+            assert _expected_release_sha == DART_DEPLOYMENT_REVISION
+            raise official_ingest.OfficialSourceRightError(
+                "OpenDART connector is not configured for collection"
+            )
+
+    class UnexpectedDartConnector:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            raise AssertionError(
+                "OpenDART network client must not be constructed while inactive"
+            )
+
+    monkeypatch.setenv("GITHUB_SHA", DART_DEPLOYMENT_REVISION)
+    monkeypatch.setenv("DART_API_KEY", "a" * 40)
+    monkeypatch.setattr(
+        official_ingest,
+        "DartOfficialSourceRightClient",
+        InactiveDartRightsClient,
+    )
+    monkeypatch.setattr(
+        official_ingest,
+        "DartConnector",
+        UnexpectedDartConnector,
+    )
+
+    with pytest.raises(
+        official_ingest.OfficialSourceRightError,
+        match="connector is not configured",
+    ):
+        official_ingest.run(
+            now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+            start=date(2026, 7, 15),
+            end=date(2026, 7, 16),
+            settings_overrides={"dart_enabled": True, "kind_enabled": False},
+        )
+
+
+def test_dart_dry_run_never_constructs_protected_preflight_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class UnexpectedRightsClient:
+        def __init__(self) -> None:
+            raise AssertionError("dry-run must not call the protected API")
+
+    class EmptyDartConnector:
+        list_requests = 0
+        pages_fetched = 0
+        rows_fetched = 0
+        requests_made = 0
+
+        def __init__(self, _credentials: object) -> None:
+            pass
+
+        def iter_disclosure_rows(
+            self,
+            *_args: object,
+            **_kwargs: object,
+        ):  # type: ignore[no-untyped-def]
+            return iter(())
+
+        def fetch_company_master(self) -> list[dict[str, object]]:
+            return []
+
+    monkeypatch.setenv("DART_API_KEY", "a" * 40)
+    monkeypatch.setattr(
+        official_ingest,
+        "DartOfficialSourceRightClient",
+        UnexpectedRightsClient,
+    )
+    monkeypatch.setattr(official_ingest, "DartConnector", EmptyDartConnector)
+
+    summary = official_ingest.run(
+        now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+        start=date(2026, 7, 15),
+        end=date(2026, 7, 16),
+        settings_overrides={"dart_enabled": True, "kind_enabled": False},
+        dry_run=True,
+    )
+    assert summary["official_failed"] == 0
+    assert summary["official_source_rights"] == 0
+
+
+def test_dart_right_change_after_collection_blocks_remote_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_SHA", DART_DEPLOYMENT_REVISION)
+    monkeypatch.setenv("GOVERNANCE_PIPELINE_MODE", "dart_canary")
+
+    class ChangingRightsClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def preflight(
+            self,
+            _expected_release_sha: str | None = None,
+        ) -> official_ingest.OfficialSourceRightEligibility:
+            assert _expected_release_sha == DART_DEPLOYMENT_REVISION
+            self.calls += 1
+            return official_ingest.OfficialSourceRightEligibility(
+                source_right_id="official:dart",
+                use="collect",
+                rights_revision=("a" if self.calls == 1 else "b") * 64,
+                contract_revision=DART_CONTRACT_REVISION,
+                release_state="closed",
+            )
+
+    class EmptyDartConnector:
+        list_requests = 0
+        pages_fetched = 0
+        rows_fetched = 0
+        requests_made = 0
+
+        def __init__(self, _credentials: object) -> None:
+            pass
+
+        def iter_disclosure_rows(
+            self,
+            *_args: object,
+            **_kwargs: object,
+        ):  # type: ignore[no-untyped-def]
+            return iter(())
+
+        def fetch_company_master(self) -> list[dict[str, object]]:
+            return []
+
+    def unexpected_sync(
+        _payload: dict[str, object],
+        *,
+        run: dict[str, object],
+    ) -> dict[str, int]:
+        raise AssertionError(f"write attempted after SourceRight change: {run}")
+
+    monkeypatch.setenv("DART_API_KEY", "a" * 40)
+    monkeypatch.setattr(
+        official_ingest,
+        "DartOfficialSourceRightClient",
+        ChangingRightsClient,
+    )
+    monkeypatch.setattr(official_ingest, "DartConnector", EmptyDartConnector)
+    monkeypatch.setattr(official_ingest, "sync_governance_payload", unexpected_sync)
+
+    with pytest.raises(
+        official_ingest.OfficialSourceRightError,
+        match="changed between collection and write",
+    ):
+        official_ingest.run(
+            now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+            start=date(2026, 7, 15),
+            end=date(2026, 7, 16),
+            settings_overrides={"dart_enabled": True, "kind_enabled": False},
+        )
+
+
 def test_enabled_dart_without_api_key_is_a_failed_source_not_a_skip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -657,6 +989,7 @@ def test_enabled_dart_without_api_key_is_a_failed_source_not_a_skip(
         }
 
     monkeypatch.delenv("DART_API_KEY", raising=False)
+    _allow_dart_apply(monkeypatch)
     monkeypatch.setattr(official_ingest, "sync_governance_payload", fake_sync)
 
     summary = official_ingest.run(
@@ -855,6 +1188,7 @@ def test_dart_quota_exhaustion_is_exposed_to_the_durable_backfill_checkpoint(
         }
 
     monkeypatch.setenv("DART_API_KEY", "a" * 40)
+    _allow_dart_apply(monkeypatch)
     monkeypatch.setattr(official_ingest, "DartConnector", QuotaDartConnector)
     monkeypatch.setattr(official_ingest, "sync_governance_payload", fake_sync)
 

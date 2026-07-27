@@ -339,6 +339,65 @@ def test_release_gate_and_role_security_match_the_php_dispatch():
     assert "v2_require_role($config, array('admin'))" in V2
 
 
+def test_authenticated_source_right_contract_revision_is_stable_and_additive():
+    schema = SPEC["components"]["schemas"]["SourceRightEligibilityEnvelope"]
+    assert {"rights_revision", "contract_revision"} <= set(schema["required"])
+    assert schema["properties"]["rights_revision"]["pattern"] == "^[a-f0-9]{64}$"
+    assert schema["properties"]["contract_revision"]["pattern"] == "^[a-f0-9]{64}$"
+    assert schema["properties"]["connector_id"]["type"] == "string"
+    assert schema["properties"]["connector_ready"]["type"] == "boolean"
+    description = schema["properties"]["contract_revision"]["description"]
+    for required in (
+        "source-right-contract-v1",
+        "permission scope",
+        "evidence URI",
+        "valid_until",
+        "revoked_at",
+        "updated_at is excluded",
+    ):
+        assert required in description
+
+    helper = V2_WRITE[
+        V2_WRITE.index("function v2_source_right_contract_revision") :
+        V2_WRITE.index("function v2_source_right_ineligible_reasons")
+    ]
+    for field in (
+        "contract_version",
+        "source_right_id",
+        "source_type",
+        "source_key",
+        "source_name",
+        "permission_scope_sha256",
+        "evidence_uri_sha256",
+        "evidence_hash",
+        "valid_from_state",
+        "valid_until",
+        "revoked_at",
+        "ai_allowed",
+        "redistribution_allowed",
+        "status",
+    ):
+        assert f"'{field}'" in helper
+    assert "'updated_at'" not in helper
+    assert "v1_strict_canonical_json_encode" in helper
+
+    mutable = V2_WRITE[
+        V2_WRITE.index("function v2_source_right_revision") :
+        V2_WRITE.index("function v2_source_right_contract_revision")
+    ]
+    assert "'updated_at'" in mutable
+    eligibility = V2[
+        V2.index("function v2_ops_source_right_eligibility") :
+        V2.index("function v2_brief_event_rows")
+    ]
+    assert "'rights_revision' => $revision" in eligibility
+    assert "'contract_revision' => $contractRevision" in eligibility
+    assert "'connector:kr:dart'" in eligibility
+    assert "'connector_ready'" in eligibility
+    assert "raw administrative status" in eligibility
+    assert "SourceRight contract revision v1" in DOCS
+
+
 def test_admin_connector_contract_is_closed_audited_and_rights_gated():
     connector_parameter = SPEC["components"]["parameters"]["ConnectorId"]
     assert connector_parameter["name"] == "connector_id"
@@ -512,6 +571,20 @@ def test_automated_ingest_is_idempotent_and_never_publishes_events():
     assert "function v2_global_document_content_hash" in V2_WRITE
     assert "v2_global_document_content_hash(" in V2_WRITE
     assert "content_hash: semantic contract mismatch" in V2_WRITE
+    body_description = record["properties"]["body_text"]["description"]
+    for source_right_id in (
+        "official:sec-edgar",
+        "official:edinet",
+        "official:companies-house",
+        "official:ca-issuer-ir",
+        "official:asic-register",
+    ):
+        assert source_right_id in body_description
+        assert source_right_id in V2_WRITE
+    assert "fixed Production Alpha source contract requires null" in V2_WRITE
+    assert ops_ingest.index("v2_normalize_ingest_payload") < ops_ingest.index(
+        "$pdo->beginTransaction()"
+    )
     assert "global_document_hash_contract_conflict" in V2_WRITE
     assert "'source_type' => (string)$right['source_type']" in V2_WRITE
     assert "'public_allowed' => $record['public_allowed']" in V2_WRITE
@@ -1161,10 +1234,22 @@ def test_atomic_cutover_requires_four_sources_and_locks_optional_identities():
     ):
         assert reason in optional_policy
     assert "v2_optional_alpha_source_policy_reasons($connector)" in optional_guard
-    assert "LEFT JOIN " in optional_guard
     assert "source_rights" in optional_guard
+    assert "LEFT JOIN " not in optional_guard
+    assert (
+        optional_guard.index(
+            "ORDER BY BINARY sr.source_right_id FOR UPDATE"
+        )
+        < optional_guard.index(
+            "ORDER BY BINARY sc.connector_id FOR UPDATE"
+        )
+    )
     assert "ORDER BY BINARY connector_id FOR UPDATE" in guard
     assert "ORDER BY BINARY sr.source_right_id FOR UPDATE" in guard
+    assert (
+        guard.index("ORDER BY BINARY sr.source_right_id FOR UPDATE")
+        < guard.index("ORDER BY BINARY connector_id FOR UPDATE")
+    )
     for field in (
         "country_code",
         "source_key",
@@ -1251,6 +1336,51 @@ def test_atomic_cutover_requires_four_sources_and_locks_optional_identities():
     assert required_guard < public_guard < consume
     assert "required_alpha_sources_invalid" in atomic
     assert "$pdo->rollBack();" in atomic[required_guard:public_guard]
+
+
+def test_source_right_connector_lock_order_is_consistent_across_write_paths():
+    optional_guard = V2[
+        V2.index(
+            "function v2_optional_alpha_source_identity_guard"
+        ) : V2.index("function v2_required_alpha_source_rights_guard")
+    ]
+    required_guard = V2[
+        V2.index("function v2_required_alpha_source_rights_guard") :
+        V2.index("function v2_json_body")
+    ]
+    admin = V2_WRITE[
+        V2_WRITE.index("function v2_admin_update_connector") :
+        V2_WRITE.index("function v2_global_issuer_id")
+    ]
+    ingest = V2_WRITE[V2_WRITE.index("function v2_ops_ingest") :]
+    ingest_transaction = ingest[ingest.index("$pdo->beginTransaction()") :]
+
+    assert optional_guard.index("$rightStatement = $pdo->prepare(") < (
+        optional_guard.index("$connectorStatement = $pdo->prepare(")
+    )
+    assert required_guard.index("$rightStatement = $pdo->prepare(") < (
+        required_guard.index("$connectorStatement = $pdo->prepare(")
+    )
+    for guard in (optional_guard, required_guard):
+        assert "sort($sourceRightIds, SORT_STRING);" in guard
+        assert "sort($connectorIds, SORT_STRING);" in guard
+    assert admin.index("$right = $expectedSourceRightId") < admin.index(
+        "$statement = $pdo->prepare("
+    )
+    assert ingest_transaction.index(
+        "$lockedRight = v2_source_right_row("
+    ) < ingest_transaction.index("$connectorLock = $pdo->prepare(")
+
+    # Joined connector->right locking leaves row acquisition to the optimizer
+    # and can deadlock with the explicit right->connector write paths.
+    assert "JOIN " not in optional_guard[
+        optional_guard.index("$rightStatement = $pdo->prepare(") :
+        optional_guard.index("$invalid = array();")
+    ]
+    assert "JOIN " not in required_guard[
+        required_guard.index("$rightStatement = $pdo->prepare(") :
+        required_guard.index("$invalid = array();")
+    ]
 
 
 def test_release_state_rejects_unknown_fields_before_mutation():

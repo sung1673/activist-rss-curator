@@ -40,6 +40,10 @@ jobs:
           .github/scripts/prepare-legacy-pages.py
           .github/scripts/restore-legacy-pages-archive.py
 
+      - name: Validate critical rollback shell syntax
+        shell: bash
+        run: bash -n .github/scripts/close-governance-release-state.sh
+
       - name: Validate governance UI build and budgets
         run: python -m curator.governance_ui --root .
 
@@ -613,6 +617,7 @@ jobs:
           curator/mysql_migration.py
           curator/mysql_migration_012.py
           curator/opendart_credentials.py
+          curator/official_source_contracts.py
           curator/official_source_rights.py
           curator/official_schedule.py
           curator/official_slot_claim.py
