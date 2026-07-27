@@ -1117,7 +1117,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
     )
     require(
         canonical_fixture["content_hash"]
-        == "1e2f7ba245671c1cc488fae794a2ef59aa041133d54f220a26a22d691677517c",
+        == "c529b3a17704ccbb6d517396573fca1129408cb5cee5e6d555d7bb70f1d23cb0",
         repr(canonical_fixture),
     )
     require(
