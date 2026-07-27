@@ -612,7 +612,7 @@ def test_python_allowlist_exactly_matches_php_persistence_phase_contract() -> No
         / "governance_v1.php"
     ).read_text(encoding="utf-8")
     start = php.index("function v1_dart_quota_persistence_phase")
-    end = php.index("function v1_dart_quota_log_persistence_failure", start)
+    end = php.index("function v1_dart_quota_persistence_outcome", start)
     returned_details = frozenset(
         re.findall(r"return '([^']+)';", php[start:end])
     )

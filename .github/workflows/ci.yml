@@ -484,6 +484,51 @@ jobs:
             --privileged-token-env PHP73_CI_OPS_TOKEN \
             --allow-http
 
+      - name: Validate unbuffered native-PDO DART quota durability
+        timeout-minutes: 2
+        shell: bash
+        env:
+          MYSQL_CONTAINER_ID: ${{ job.services.mysql.id }}
+          OPENDART_API_KEY: ""
+          OPENDART_API_KEYS: ""
+        run: |
+          fixture_root="$RUNNER_TEMP/activist-unbuffered"
+          test ! -e "$fixture_root"
+          python3 tests/prepare_php73_unbuffered_fixture.py \
+            --source deploy/activist \
+            --output "$fixture_root"
+          install -d -m 700 "$fixture_root/_private"
+          install -m 600 tests/php73_config.php "$fixture_root/_private/config.php"
+          python3 -m curator.deployment_manifest \
+            --root "$fixture_root" \
+            --code-revision "$GITHUB_SHA" \
+            --output "$fixture_root/deployment-manifest.json"
+          php -l "$fixture_root/api.php"
+          php -l "$fixture_root/governance_v1.php"
+          docker exec "$MYSQL_CONTAINER_ID" mysql \
+            --user=root --password=activist_ci_root_password activist_ci \
+            --execute="DELETE FROM ci_dart_quota_attempts; DELETE FROM ci_dart_quota_credential_days; DELETE FROM ci_dart_quota_credentials; DELETE FROM ci_dart_quota_days;"
+          php -S 127.0.0.1:8788 -t "$fixture_root" \
+            >"$RUNNER_TEMP/php73-unbuffered-server.log" 2>&1 &
+          fixture_pid="$!"
+          cleanup_unbuffered_fixture() {
+            kill "$fixture_pid" 2>/dev/null || true
+          }
+          trap cleanup_unbuffered_fixture EXIT
+          ready=false
+          for _attempt in {1..30}; do
+            if curl --fail --silent \
+              http://127.0.0.1:8788/api.php/api/v1/health >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 0.2
+          done
+          test "$ready" = "true"
+          python3 tests/php73_dart_quota_unbuffered_smoke.py \
+            --base-url http://127.0.0.1:8788 \
+            --mysql-container-id "$MYSQL_CONTAINER_ID"
+
       - name: Validate Telegram channel identity index migration
         shell: bash
         env:
@@ -532,6 +577,9 @@ jobs:
           if [[ -f "$RUNNER_TEMP/php73-server.log" ]]; then
             cat "$RUNNER_TEMP/php73-server.log"
           fi
+          if [[ -f "$RUNNER_TEMP/php73-unbuffered-server.log" ]]; then
+            cat "$RUNNER_TEMP/php73-unbuffered-server.log"
+          fi
           docker logs "$MYSQL_CONTAINER_ID" >"$RUNNER_TEMP/php73-mysql.log" 2>&1 || true
 
       - name: Preserve failed PHP and MySQL diagnostics
@@ -541,6 +589,7 @@ jobs:
           name: php73-mysql-smoke-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/php73-server.log
+            ${{ runner.temp }}/php73-unbuffered-server.log
             ${{ runner.temp }}/php73-mysql.log
           if-no-files-found: ignore
           retention-days: 14

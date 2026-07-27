@@ -16,10 +16,14 @@ repository·exact Git ref 단위 concurrency group을 사용하고
 백필을 기다리지 않는 별도 queue에서 API를 즉시 closed로 만들고, Pages lock 안에서
 다시 확인한 뒤 legacy artifact를 복원한다.
 
-출시 전 수동 적재는 `GOVERNANCE_PIPELINE_MODE=off`에서도 실행할 수 있다.
-대신 기본 브랜치의 보호된 `governance-runtime` 환경에서만 실행되며, 수집 전에
-운영 API가 정확한 dispatch SHA·schema 12·`closed` 상태인지 확인한다. 이
-검사가 실패하면 공식 소스 요청과 DB 쓰기를 시작하지 않는다.
+이 문서의 SEC `global-backfill.yml` 수동 적재는
+`GOVERNANCE_PIPELINE_MODE=off`에서도 실행할 수 있다. 대신 기본 브랜치의
+보호된 `governance-runtime` 환경에서만 실행되며, 수집 전에 운영 API가 정확한
+dispatch SHA·schema 12·`closed` 상태인지 확인한다. 이 검사가 실패하면 공식
+소스 요청과 DB 쓰기를 시작하지 않는다. 이 예외는 DART
+`official-backfill.yml` apply에 적용되지 않는다. DART는 `off`와 `closed`에서
+dry-run을 통과한 뒤 `GOVERNANCE_PIPELINE_MODE=dart_canary`로 전환하고,
+v1·v2가 계속 `closed`인 상태에서만 apply한다.
 
 ## SEC 입력 계약
 
