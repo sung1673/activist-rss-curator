@@ -57,6 +57,17 @@ commit 또는 독립 readback을 증명하지 못하면 서버는 HTTP 503과 �
 detail에 포함하지 않는다. 클라이언트도 이 고정 code와 detail만 안전한 진단
 정보로 취급한다.
 
+서버 로그의 commit 진단도 별도 allowlist의 내부 `outcome`
+(`commit_threw`, `commit_returned_false`,
+`transaction_state_after_commit`, `cursor_close_threw`,
+`cursor_close_returned_false`, `persistence_failure`)과 정규화된
+`sqlstate_class`·숫자 `driver_code`로만 제한한다. 이 내부 진단 필드는 HTTP
+응답과 OpenAPI schema에 추가하지 않는다. 특히 commit이 예외를 던지거나
+`false`를 반환하거나 commit 뒤 transaction 상태가 남는 경우 모두 공개
+`detail=transaction_commit_failed`로 유지한다. cursor 정리를 증명하지 못한
+경우에도 내부 결과를 공개하지 않고 기존의 안전한 persistence detail로만
+fail-closed한다.
+
 각 consume은 키 원문 대신 그 키 바이트의 전체 소문자 SHA-256
 `credential_id`에 묶인다. OpenDART 상태 `020`을 받으면 해당 consume의
 `attempt_id`로 그 credential만 다음 KST 자정까지 `block_020`하고, pool의

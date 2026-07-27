@@ -2152,18 +2152,20 @@ def test_dart_quota_pool_is_global_kst_day_atomic_and_idempotent():
     assert "$committed = $pdo->commit();" in commit_readback
     commit_call = commit_readback[
         commit_readback.index("try {\n        $committed = $pdo->commit();") :
-        commit_readback.index(
-            "if ($committed !== true || $pdo->inTransaction())"
-        )
+        commit_readback.index("try {\n        $readbackPdo = pdo_conn($config);")
     ]
     assert "catch (Throwable $commitError)" in commit_call
     assert (
-        "throw new RuntimeException(\n"
-        "            'dart_quota_commit_unconfirmed',\n"
-        "            0,\n"
-        "            $commitError"
-    ) in commit_call
-    assert "$committed !== true || $pdo->inTransaction()" in commit_readback
+        "throw new RuntimeException('dart_quota_commit_threw',0,$commitError);"
+        in commit_call
+    )
+    assert "$committed !== true" in commit_call
+    assert "throw new RuntimeException('dart_quota_commit_returned_false');" in commit_call
+    assert "$pdo->inTransaction()" in commit_call
+    assert (
+        "throw new RuntimeException('dart_quota_transaction_state_after_commit');"
+        in commit_call
+    )
     assert commit_readback.index("$committed = $pdo->commit();") < commit_readback.index(
         "$readbackPdo = pdo_conn($config);"
     )
@@ -2173,6 +2175,15 @@ def test_dart_quota_pool_is_global_kst_day_atomic_and_idempotent():
     assert "$attemptReadback = $readbackPdo->prepare(" in commit_readback
     assert "$dayReadback = $readbackPdo->prepare(" in commit_readback
     assert "$credentialReadback = $readbackPdo->prepare(" in commit_readback
+    assert (
+        "$durableAttempt = v1_dart_quota_fetch_one_and_close("
+        in commit_readback
+    )
+    assert "$durableDay = v1_dart_quota_fetch_one_and_close(" in commit_readback
+    assert (
+        "$durableCredentialDay = v1_dart_quota_fetch_one_and_close("
+        in commit_readback
+    )
     assert (
         "WHERE attempt_id=? AND quota_day=? AND credential_id=? AND code_revision=? "
         in commit_readback
@@ -2216,10 +2227,30 @@ def test_dart_quota_pool_is_global_kst_day_atomic_and_idempotent():
     assert logged_phase_literals == expected_persistence_details
     assert "$safePhase = in_array($phase,$allowedPhases,true)" in persistence_log
     assert "? $phase : 'transaction_state_invalid';" in persistence_log
-    assert "get_class($error)" in persistence_log
+    expected_internal_outcomes = {
+        "commit_threw",
+        "commit_returned_false",
+        "transaction_state_after_commit",
+        "cursor_close_threw",
+        "cursor_close_returned_false",
+        "persistence_failure",
+    }
+    logged_outcome_literals = {
+        value
+        for value in expected_internal_outcomes
+        if f"'{value}'" in persistence_log
+    }
+    assert logged_outcome_literals == expected_internal_outcomes
+    assert "$safeOutcome = in_array($outcome,$safeOutcomes,true)" in persistence_log
+    assert "? $outcome : 'persistence_failure';" in persistence_log
+    assert "v1_dart_quota_sql_diagnostic($error)" in persistence_log
     assert persistence_log.count("error_log(") == 1
     assert "phase=' . $safePhase" in persistence_log
-    assert "' exception=' . get_class($error)" in persistence_log
+    assert "' outcome=' . $safeOutcome" in persistence_log
+    assert "' sqlstate_class=' . $sqlStateClass" in persistence_log
+    assert "' driver_code=' . $driverCode" in persistence_log
+    assert "get_class(" not in persistence_log
+    assert " exception=" not in persistence_log
     assert "getMessage(" not in persistence_log
     assert "getPrevious(" not in persistence_log
     assert " message=" not in persistence_log
