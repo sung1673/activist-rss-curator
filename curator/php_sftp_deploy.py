@@ -4712,7 +4712,34 @@ def verify_closed_v1_api(
     if admin.status != 401 or admin_payload.get("error") != "bearer_token_required":
         raise PhpDeploymentError("v1 admin authentication smoke failed")
 
-    protected = http_request(
+    protected_ops = http_request(
+        "GET",
+        base + "/ops/runtime-state?resource=runs&limit=1",
+        {
+            **common,
+            "Authorization": "Bearer " + token,
+        },
+        timeout,
+    )
+    protected_ops_payload = _json_response(
+        protected_ops,
+        label="v1 protected ops runtime state",
+    )
+    protected_ops_data = protected_ops_payload.get("data")
+    if (
+        protected_ops.status != 200
+        or protected_ops.header("x-bside-api-version") != "v1"
+        or protected_ops_payload.get("ok") is not True
+        or protected_ops_payload.get("api_version") != "v1"
+        or not isinstance(protected_ops_data, dict)
+        or protected_ops_data.get("resource") != "runs"
+        or not isinstance(protected_ops_data.get("records"), list)
+    ):
+        raise PhpDeploymentError(
+            "authenticated v1 ops route is invalid"
+        )
+
+    protected_admin = http_request(
         "GET",
         base + "/admin/release-state",
         {
@@ -4721,15 +4748,18 @@ def verify_closed_v1_api(
         },
         timeout,
     )
-    protected_payload = _json_response(protected, label="v1 protected release state")
+    protected_admin_payload = _json_response(
+        protected_admin,
+        label="v1 ops token admin boundary",
+    )
     if (
-        protected.status != 200
-        or protected_payload.get("ok") is not True
-        or protected_payload.get("release_state") != "closed"
-        or protected_payload.get("schema_version") != 10
+        protected_admin.status != 403
+        or protected_admin.header("x-bside-api-version") != "v1"
+        or protected_admin_payload.get("api_version") != "v1"
+        or protected_admin_payload.get("error") != "insufficient_role"
     ):
         raise PhpDeploymentError(
-            "authenticated v1 release state is not exactly closed"
+            "v1 ops token crossed the admin privilege boundary"
         )
 
 

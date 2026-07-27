@@ -273,6 +273,12 @@ API smoke는 다음을 모두 요구한다.
 - 인증 없는 `/admin/release-state`: HTTP 401 `bearer_token_required`
 - 유효한 Bearer를 전달한 `/ops/release-state`: HTTP 200,
   `release_state=closed`
+- schema 11 브리지에서는 v1 `/events`가 정확히 HTTP 503
+  `governance_release_closed`인지 확인한다.
+- 같은 `BSIDE_OPS_TOKEN`으로 v1
+  `/ops/runtime-state?resource=runs&limit=1`은 HTTP 200이어야 하고,
+  v1 `/admin/release-state`는 HTTP 403 `insufficient_role`이어야 한다.
+  배포 검증을 위해 ops 토큰에 admin 권한을 추가하지 않는다.
 
 `BSIDE_OPS_TOKEN` 원문은 로컬 환경변수에만 두고
 `--protected-token-env BSIDE_OPS_TOKEN`처럼 환경변수 이름만 인수로 전달한다.
