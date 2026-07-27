@@ -8,6 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 API = (ROOT / "deploy" / "activist" / "api.php").read_text(encoding="utf-8")
 V1 = (ROOT / "deploy" / "activist" / "governance_v1.php").read_text(encoding="utf-8")
 V2 = (ROOT / "deploy" / "activist" / "governance_v2.php").read_text(encoding="utf-8")
+V2_WRITE = (ROOT / "deploy" / "activist" / "governance_v2_write.php").read_text(
+    encoding="utf-8"
+)
 MIGRATION = (
     ROOT / "deploy" / "activist" / "migrations" / "001_governance_v1.sql"
 ).read_text(encoding="utf-8")
@@ -761,10 +764,65 @@ def test_hmac_cross_source_identity_reuses_the_locked_canonical_event_owner():
     ingest = V1[V1.index("function upsert_governance_snapshot") : V1.index("function v1_editorial_reference_exists")]
     assert "WHERE comparison_key=? LIMIT 1 FOR UPDATE" in ingest
     assert "$eventId = (string)$comparisonOwner" in ingest
-    assert ingest.index("$eventComparisonOwnerStmt->execute") < ingest.index("$eventStmt->execute")
+    assert ingest.index(
+        "v1_pdo_fetch_column_and_close(\n"
+        "                    $eventComparisonOwnerStmt"
+    ) < ingest.index("$eventStmt->execute")
     assert "hash_equals((string)$computedIdentity['comparison_key'],$comparisonKey)" in ingest
     assert "array('high', 'market_sensitive', 'critical')" in ingest
     assert "if ($importance === 'market_sensitive') { $importance = 'critical'; }" not in ingest
+
+
+def test_guarded_dart_snapshot_closes_every_native_pdo_read_cursor():
+    helpers = V1[
+        V1.index("function v1_pdo_fetch_one_and_close") :
+        V1.index("function v1_dart_quota_fetch_one_and_close")
+    ]
+    assert "function v1_pdo_fetch_column_and_close" in helpers
+    assert "function v1_pdo_fetch_all_and_close" in helpers
+    assert helpers.count("$statement->closeCursor()") == 6
+
+    guarded = V1[
+        V1.index("function v1_lock_official_slot_claim_for_run") :
+        V1.index("function v1_editorial_reference_exists")
+    ]
+    unsafe_reads = (
+        "$companyLookup->fetchColumn()",
+        "$documentLookup->fetchColumn()",
+        "$eventDocumentLookup->fetchColumn()",
+        "$eventObservationLookup->fetchColumn()",
+        "$eventIdentityLookup->fetch()",
+        "$comparisonIdentityLookup->fetch()",
+        "$runLookup->fetchColumn()",
+        "$providedPredecessorStmt->fetch()",
+        "$previousDocumentStmt->fetchAll()",
+        "$existingDocumentLineageStmt->fetch()",
+        "$eventByIdStmt->fetch()",
+        "$eventComparisonOwnerStmt->fetchColumn()",
+        "$eventIdentityStmt->fetch()",
+        "$officialActorLookupStmt->fetchColumn()",
+        "$documentClassStmt->fetch()",
+        "$companyPublicationEligibilityStmt->fetch()",
+        "$approvedIdentityActorRelationStmt->fetchColumn()",
+        "$eventLifecycleStmt->fetchColumn()",
+        "$documentObservationStmt->fetch()",
+    )
+    assert all(read not in guarded for read in unsafe_reads)
+    assert guarded.count("v1_pdo_fetch_one_and_close(") >= 9
+    assert guarded.count("v1_pdo_fetch_column_and_close(") >= 10
+    assert "v1_pdo_fetch_all_and_close(" in guarded
+
+    v2_right = V2_WRITE[
+        V2_WRITE.index("function v2_source_right_row") :
+        V2_WRITE.index("function v2_source_right_revision")
+    ]
+    assert "v1_pdo_fetch_one_and_close($statement,array($sourceRightId))" in v2_right
+    release_rows = V2[
+        V2.index("function v2_release_state_rows_for_update") :
+        V2.index("function v2_release_authorization_fields")
+    ]
+    assert "v1_pdo_fetch_all_and_close(" in release_rows
+    assert "while ($row = $statement->fetch())" not in release_rows
 
 
 def test_partial_company_disclosures_do_not_erase_company_master_listing_status():

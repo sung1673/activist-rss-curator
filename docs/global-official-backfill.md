@@ -58,6 +58,12 @@ OpenDART `020`은 해당 키만 다음 KST 자정까지 차단하고 다음 키�
 checkpoint에서 중단하며, 키 원문과 요청 URL은 receipt·로그·artifact에 넣지
 않는다. GitHub Actions는 collector보다 먼저 각 키를 개별 mask한다.
 
+운영 적재의 각 data batch는 PHP 7.3 native PDO가 unbuffered인 경우에도 모든
+조회 cursor를 닫은 뒤 다음 명령을 실행해야 한다. MySQL driver 2014 또는
+`governance_snapshot_persistence_failed`가 한 batch라도 발생하면 ACK는 0으로
+간주하고 해당 날짜 checkpoint를 완료하지 않는다. 같은 checkpoint 재개 전에는
+원인이 해소됐는지 unbuffered guarded-snapshot 통합 테스트로 확인한다.
+
 ## 실행 모드와 멱등성
 
 `apply`는 한 번 수집하고 적재한다. 운영 checkpoint는 들어온 완료 경계가 현재

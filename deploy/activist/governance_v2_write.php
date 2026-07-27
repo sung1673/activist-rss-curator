@@ -361,8 +361,7 @@ function v2_source_right_row(
         . ' WHERE source_right_id=? LIMIT 1'
         . ($forUpdate ? ' FOR UPDATE' : '')
     );
-    $statement->execute(array($sourceRightId));
-    $row = $statement->fetch();
+    $row = v1_pdo_fetch_one_and_close($statement,array($sourceRightId));
     return is_array($row) ? $row : null;
 }
 

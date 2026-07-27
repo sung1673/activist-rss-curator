@@ -1804,6 +1804,102 @@ function v1_dart_quota_error(
 }
 
 /**
+ * Execute a native-PDO lookup, fetch at most one row, and release its cursor.
+ *
+ * This helper is deliberately neutral rather than DART-quota specific because
+ * guarded governance writes also run on hosts where PDO MySQL is unbuffered.
+ * Leaving even a one-row result pending makes the next statement (and
+ * sometimes rollback itself) fail with CR_COMMANDS_OUT_OF_SYNC / driver 2014.
+ *
+ * @return array|false
+ */
+function v1_pdo_fetch_one_and_close(PDOStatement $statement, array $params) {
+    try {
+        if ($statement->execute($params) !== true) {
+            throw new RuntimeException('pdo_query_execute_failed');
+        }
+        $row = $statement->fetch();
+    } catch (Throwable $queryError) {
+        try {
+            $closed = $statement->closeCursor();
+        } catch (Throwable $cursorError) {
+            throw new RuntimeException('pdo_cursor_close_threw',0,$cursorError);
+        }
+        if ($closed !== true) {
+            throw new RuntimeException('pdo_cursor_close_returned_false');
+        }
+        throw $queryError;
+    }
+    try {
+        $closed = $statement->closeCursor();
+    } catch (Throwable $cursorError) {
+        throw new RuntimeException('pdo_cursor_close_threw',0,$cursorError);
+    }
+    if ($closed !== true) {
+        throw new RuntimeException('pdo_cursor_close_returned_false');
+    }
+    return $row;
+}
+
+/** @return mixed */
+function v1_pdo_fetch_column_and_close(PDOStatement $statement, array $params) {
+    try {
+        if ($statement->execute($params) !== true) {
+            throw new RuntimeException('pdo_query_execute_failed');
+        }
+        $value = $statement->fetchColumn();
+    } catch (Throwable $queryError) {
+        try {
+            $closed = $statement->closeCursor();
+        } catch (Throwable $cursorError) {
+            throw new RuntimeException('pdo_cursor_close_threw',0,$cursorError);
+        }
+        if ($closed !== true) {
+            throw new RuntimeException('pdo_cursor_close_returned_false');
+        }
+        throw $queryError;
+    }
+    try {
+        $closed = $statement->closeCursor();
+    } catch (Throwable $cursorError) {
+        throw new RuntimeException('pdo_cursor_close_threw',0,$cursorError);
+    }
+    if ($closed !== true) {
+        throw new RuntimeException('pdo_cursor_close_returned_false');
+    }
+    return $value;
+}
+
+/** @return array<int,array<string,mixed>> */
+function v1_pdo_fetch_all_and_close(PDOStatement $statement, array $params): array {
+    try {
+        if ($statement->execute($params) !== true) {
+            throw new RuntimeException('pdo_query_execute_failed');
+        }
+        $rows = $statement->fetchAll();
+    } catch (Throwable $queryError) {
+        try {
+            $closed = $statement->closeCursor();
+        } catch (Throwable $cursorError) {
+            throw new RuntimeException('pdo_cursor_close_threw',0,$cursorError);
+        }
+        if ($closed !== true) {
+            throw new RuntimeException('pdo_cursor_close_returned_false');
+        }
+        throw $queryError;
+    }
+    try {
+        $closed = $statement->closeCursor();
+    } catch (Throwable $cursorError) {
+        throw new RuntimeException('pdo_cursor_close_threw',0,$cursorError);
+    }
+    if ($closed !== true) {
+        throw new RuntimeException('pdo_cursor_close_returned_false');
+    }
+    return $rows;
+}
+
+/**
  * Execute a quota lookup, fetch at most one row, and release its server cursor.
  *
  * Native, unbuffered PDO drivers may otherwise keep a result pending until the
@@ -7040,7 +7136,7 @@ function v1_lock_official_slot_claim_for_run(PDO $pdo, array $config, array $run
         throw new RuntimeException('invalid_scheduled_slot_claim_provenance:' . $runId);
     }
     $stmt = $pdo->prepare('SELECT * FROM ' . table_name($config,'official_slot_claims') . ' WHERE claim_id=? FOR UPDATE');
-    $stmt->execute(array($claimId)); $claim = $stmt->fetch();
+    $claim = v1_pdo_fetch_one_and_close($stmt,array($claimId));
     if (!$claim
         || (string)$claim['pipeline'] !== $pipeline
         || (string)$claim['event_schedule'] !== $schedule
@@ -7440,9 +7536,13 @@ function v1_lock_existing_dart_lineage(
         . ' WHERE company_id=? LIMIT 1 FOR UPDATE'
     );
     foreach ($candidates['company_ids'] as $companyId) {
-        $companyLookup->execute(array($companyId));
         // Legacy company_id is the eight-digit OpenDART corp_code namespace.
-        if ($companyLookup->fetchColumn() !== false) { return true; }
+        if (v1_pdo_fetch_column_and_close(
+            $companyLookup,
+            array($companyId)
+        ) !== false) {
+            return true;
+        }
     }
     $documentLookup = $pdo->prepare(
         'SELECT CASE WHEN current_document.source_right_id=\'official:dart\''
@@ -7454,8 +7554,10 @@ function v1_lock_existing_dart_lineage(
         . ' WHERE current_document.document_id=? LIMIT 1 FOR UPDATE'
     );
     foreach ($candidates['document_ids'] as $documentId) {
-        $documentLookup->execute(array($documentId));
-        if ((string)$documentLookup->fetchColumn() === 'official:dart') {
+        if ((string)v1_pdo_fetch_column_and_close(
+            $documentLookup,
+            array($documentId)
+        ) === 'official:dart') {
             return true;
         }
     }
@@ -7515,19 +7617,29 @@ function v1_lock_existing_dart_lineage(
             && $issuerId === 'issuer:kr:dart:' . $companyId) {
             return true;
         }
-        $eventDocumentLookup->execute(array($eventId));
-        if ($eventDocumentLookup->fetchColumn() !== false) { return true; }
-        $eventObservationLookup->execute(array($eventId));
-        return $eventObservationLookup->fetchColumn() !== false;
+        if (v1_pdo_fetch_column_and_close(
+            $eventDocumentLookup,
+            array($eventId)
+        ) !== false) {
+            return true;
+        }
+        return v1_pdo_fetch_column_and_close(
+            $eventObservationLookup,
+            array($eventId)
+        ) !== false;
     };
     foreach ($candidates['event_ids'] as $eventId) {
-        $eventIdentityLookup->execute(array($eventId));
-        $event = $eventIdentityLookup->fetch();
+        $event = v1_pdo_fetch_one_and_close(
+            $eventIdentityLookup,
+            array($eventId)
+        );
         if (is_array($event) && $eventHasDartLineage($event)) { return true; }
     }
     foreach ($candidates['comparison_keys'] as $comparisonKey) {
-        $comparisonIdentityLookup->execute(array($comparisonKey));
-        $event = $comparisonIdentityLookup->fetch();
+        $event = v1_pdo_fetch_one_and_close(
+            $comparisonIdentityLookup,
+            array($comparisonKey)
+        );
         if (is_array($event) && $eventHasDartLineage($event)) { return true; }
     }
     $runLookup = $pdo->prepare(
@@ -7535,8 +7647,10 @@ function v1_lock_existing_dart_lineage(
         . ' WHERE run_id=? LIMIT 1 FOR UPDATE'
     );
     foreach ($candidates['run_ids'] as $runId) {
-        $runLookup->execute(array($runId));
-        $sourceKey = $runLookup->fetchColumn();
+        $sourceKey = v1_pdo_fetch_column_and_close(
+            $runLookup,
+            array($runId)
+        );
         if (!is_string($sourceKey)) { continue; }
         $sourceTokens = array_values(array_filter(array_map(
             'trim',
@@ -7605,8 +7719,10 @@ function v1_lock_global_dart_connector(
         . 'last_success_at FROM ' . table_name($config,'source_connectors')
         . ' WHERE connector_id=? LIMIT 1 FOR UPDATE'
     );
-    $statement->execute(array('connector:kr:dart'));
-    $connector = $statement->fetch();
+    $connector = v1_pdo_fetch_one_and_close(
+        $statement,
+        array('connector:kr:dart')
+    );
     return is_array($connector) ? $connector : null;
 }
 
@@ -8302,18 +8418,22 @@ function upsert_governance_snapshot(
                 if ($companyId === '' || $collectionKey === '' || ($correctionOf !== '' && (!v1_valid_entity_id($correctionOf) || $correctionOf === $id))) {
                     $linkageAmbiguous = true;
                 } elseif ($correctionOf !== '') {
-                    $providedPredecessorStmt->execute(array(
-                        $correctionOf,$companyId,$sourceClass,$sourceRightId,
-                        $collectionKey,$documentReferenceAt,$documentReferenceAt,$id
-                    ));
-                    $previousDocument = $providedPredecessorStmt->fetch();
+                    $previousDocument = v1_pdo_fetch_one_and_close(
+                        $providedPredecessorStmt,
+                        array(
+                            $correctionOf,$companyId,$sourceClass,$sourceRightId,
+                            $collectionKey,$documentReferenceAt,$documentReferenceAt,$id
+                        )
+                    );
                     if (!$previousDocument) { $linkageAmbiguous = true; }
                 } else {
-                    $previousDocumentStmt->execute(array(
-                        $companyId,$sourceClass,$sourceRightId,$collectionKey,$id,
-                        $documentReferenceAt,$documentReferenceAt,$id
-                    ));
-                    $candidates = $previousDocumentStmt->fetchAll();
+                    $candidates = v1_pdo_fetch_all_and_close(
+                        $previousDocumentStmt,
+                        array(
+                            $companyId,$sourceClass,$sourceRightId,$collectionKey,$id,
+                            $documentReferenceAt,$documentReferenceAt,$id
+                        )
+                    );
                     if (count($candidates) !== 1) { $linkageAmbiguous = true; }
                     else { $previousDocument = $candidates[0]; }
                 }
@@ -8326,8 +8446,10 @@ function upsert_governance_snapshot(
                     $versionNo = max($versionNo, ((int)$previousDocument['version_no']) + 1);
                 }
             }
-            $existingDocumentLineageStmt->execute(array($id));
-            $existingLineage = $existingDocumentLineageStmt->fetch();
+            $existingLineage = v1_pdo_fetch_one_and_close(
+                $existingDocumentLineageStmt,
+                array($id)
+            );
             if ($existingLineage) {
                 $existingCorrectionOf = trim((string)($existingLineage['correction_of_document_id'] ?? ''));
                 if ($existingCorrectionOf !== '' && $correctionOf !== '' && $existingCorrectionOf !== $correctionOf) {
@@ -8491,8 +8613,10 @@ function upsert_governance_snapshot(
             $canonicalEvent = null;
             $canonicalStoredIdentity = null;
             if ($isEventFollowup && preg_match('/^[0-9]{8}$/', $companyId) && v1_valid_entity_id($eventId)) {
-                $eventByIdStmt->execute(array($eventId, $companyId));
-                $canonicalEvent = $eventByIdStmt->fetch();
+                $canonicalEvent = v1_pdo_fetch_one_and_close(
+                    $eventByIdStmt,
+                    array($eventId,$companyId)
+                );
                 if ($canonicalEvent) {
                     $submittedIdentity = $identityStatus === 'complete'
                         ? v1_build_event_identity($companyId,$eventType,$identityAction,$identityTarget,$identityActorId,
@@ -8580,13 +8704,18 @@ function upsert_governance_snapshot(
                 // The unique comparison-key lookup also locks the absent-key gap
                 // in InnoDB, preventing ON DUPLICATE KEY from ever updating a
                 // different event row during a concurrent cross-source ingest.
-                $eventComparisonOwnerStmt->execute(array($comparisonKey));
-                $comparisonOwner = $eventComparisonOwnerStmt->fetchColumn();
+                $comparisonOwner = v1_pdo_fetch_column_and_close(
+                    $eventComparisonOwnerStmt,
+                    array($comparisonKey)
+                );
                 if ($comparisonOwner !== false && (string)$comparisonOwner !== '') {
                     $eventId = (string)$comparisonOwner;
                 }
             }
-            $eventIdentityStmt->execute(array($eventId)); $storedIdentity = $eventIdentityStmt->fetch();
+            $storedIdentity = v1_pdo_fetch_one_and_close(
+                $eventIdentityStmt,
+                array($eventId)
+            );
             if ($storedIdentity) {
                 if ((string)$storedIdentity['company_id'] !== $companyId || (string)$storedIdentity['event_type'] !== $eventType) {
                     throw new RuntimeException('event_identity_scope_conflict:' . $eventId);
@@ -8644,8 +8773,10 @@ function upsert_governance_snapshot(
                     && (($candidateActorType === 'company' && $candidateCompanyId === $companyId)
                         || ($candidateActorType === 'institution' && $candidateCompanyId === ''));
                 if ($candidateScopeValid) {
-                    $officialActorLookupStmt->execute(array($identityActorId));
-                    $existingActorDisplayName = $officialActorLookupStmt->fetchColumn();
+                    $existingActorDisplayName = v1_pdo_fetch_column_and_close(
+                        $officialActorLookupStmt,
+                        array($identityActorId)
+                    );
                     $actorNameConsistent = $existingActorDisplayName === false
                         || v1_normalize_identity_text((string)$existingActorDisplayName) === v1_normalize_identity_text($candidateDisplayName);
                     if ($actorNameConsistent) {
@@ -8683,8 +8814,10 @@ function upsert_governance_snapshot(
                 $evidenceClass = isset($documentSourceClasses[$evidenceDocumentId]) ? (string)$documentSourceClasses[$evidenceDocumentId] : '';
                 $evidenceSourceRightId = isset($documentSourceRightIds[$evidenceDocumentId]) ? (string)$documentSourceRightIds[$evidenceDocumentId] : '';
                 if ($evidenceClass === '' || $evidenceSourceRightId === '') {
-                    $documentClassStmt->execute(array($evidenceDocumentId));
-                    $storedEvidence = $documentClassStmt->fetch();
+                    $storedEvidence = v1_pdo_fetch_one_and_close(
+                        $documentClassStmt,
+                        array($evidenceDocumentId)
+                    );
                     if (is_array($storedEvidence)) {
                         if ($evidenceClass === '') { $evidenceClass = (string)($storedEvidence['source_class'] ?? ''); }
                         if ($evidenceSourceRightId === '') {
@@ -8706,16 +8839,20 @@ function upsert_governance_snapshot(
             if ($telegramOnly) { $verification = 'signal'; }
             if ($evidenceMissing) { $verification = 'unverified'; }
             $isConfirmed = in_array($verification, array('official', 'confirmed', 'corroborated'), true);
-            $companyPublicationEligibilityStmt->execute(array($companyId));
-            $publicationCompany = $companyPublicationEligibilityStmt->fetch();
+            $publicationCompany = v1_pdo_fetch_one_and_close(
+                $companyPublicationEligibilityStmt,
+                array($companyId)
+            );
             $companyAutoPublishEligible = is_array($publicationCompany)
                 && trim((string)($publicationCompany['stock_code'] ?? '')) !== ''
                 && in_array((string)($publicationCompany['listing_status'] ?? ''),array('listed','suspended'),true)
                 && (string)($publicationCompany['record_status'] ?? '') === 'active';
             $approvedIdentityActorRelation = $identityActorId === '';
             if ($identityActorId !== '') {
-                $approvedIdentityActorRelationStmt->execute(array($eventId,$identityActorId));
-                $approvedIdentityActorRelation = (int)$approvedIdentityActorRelationStmt->fetchColumn() > 0;
+                $approvedIdentityActorRelation = (int)v1_pdo_fetch_column_and_close(
+                    $approvedIdentityActorRelationStmt,
+                    array($eventId,$identityActorId)
+                ) > 0;
             }
             $requiresReview = $identityStatus !== 'complete' || $telegramOnly || $evidenceMissing
                 || !$companyAutoPublishEligible || !$approvedIdentityActorRelation
@@ -8723,13 +8860,17 @@ function upsert_governance_snapshot(
                 || !empty($event['review_required']) || $isEventFollowup;
             $previousLifecycle = 'active';
             if ($isCancelled) {
-                $eventLifecycleStmt->execute(array($eventId));
-                $storedLifecycle = $eventLifecycleStmt->fetchColumn();
+                $storedLifecycle = v1_pdo_fetch_column_and_close(
+                    $eventLifecycleStmt,
+                    array($eventId)
+                );
                 if (is_string($storedLifecycle) && $storedLifecycle !== '') { $previousLifecycle = $storedLifecycle; }
                 $verification = 'withdrawn';
             } elseif ($isCorrection) {
-                $eventLifecycleStmt->execute(array($eventId));
-                $storedLifecycle = $eventLifecycleStmt->fetchColumn();
+                $storedLifecycle = v1_pdo_fetch_column_and_close(
+                    $eventLifecycleStmt,
+                    array($eventId)
+                );
                 if (is_string($storedLifecycle) && $storedLifecycle !== '') { $previousLifecycle = $storedLifecycle; }
                 $verification = 'corrected';
             }
@@ -8766,7 +8907,10 @@ function upsert_governance_snapshot(
                 $documentId = trim((string)$documentId);
                 if (!v1_valid_entity_id($documentId)) { continue; }
                 $eventDocumentStmt->execute(array($eventId, $documentId, 'evidence', $position, $now));
-                $documentObservationStmt->execute(array($documentId)); $observationDocument = $documentObservationStmt->fetch();
+                $observationDocument = v1_pdo_fetch_one_and_close(
+                    $documentObservationStmt,
+                    array($documentId)
+                );
                 if (!$observationDocument) { throw new RuntimeException('event_observation_document_missing:' . $documentId); }
                 $observationSource = mb_substr((string)$observationDocument['source_key'],0,191,'UTF-8');
                 $observationAt = (string)($observationDocument['retrieved_at'] ?: $now);
