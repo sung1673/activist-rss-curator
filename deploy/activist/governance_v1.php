@@ -7233,6 +7233,31 @@ function upsert_governance_snapshot(
     if (count($companies) > 2000 || count($documents) > 2500 || count($events) > 2500 || count($rights) > 1000) {
         respond(413, array('ok' => false, 'error' => 'too_many_records'));
     }
+    $explicitDartDocumentIdentities = array();
+    foreach ($documents as $document) {
+        $explicitDartIdentity = false;
+        if (is_array($document)) {
+            $submittedDocumentId = strtolower(trim((string)v1_first(
+                $document,
+                array('document_id'),
+                ''
+            )));
+            $submittedSource = strtolower(trim((string)v1_first(
+                $document,
+                array('source','source_key'),
+                ''
+            )));
+            $submittedSourceRightId = strtolower(trim((string)v1_first(
+                $document,
+                array('source_right_id'),
+                ''
+            )));
+            $explicitDartIdentity = strpos($submittedDocumentId,'dart:') === 0
+                || $submittedSource === 'dart'
+                || $submittedSourceRightId === 'official:dart';
+        }
+        $explicitDartDocumentIdentities[] = $explicitDartIdentity;
+    }
     $documents = v1_normalize_governance_snapshot_documents($documents);
     $globalDartBridgeEnabled = v1_global_dart_bridge_enabled($pdo,$config);
     $lineageCandidates = v1_governance_snapshot_lineage_candidates(
@@ -7251,7 +7276,7 @@ function upsert_governance_snapshot(
     }
     $containsDartWrite = false;
     $containsKindDocument = false;
-    foreach ($documents as $document) {
+    foreach ($documents as $documentIndex => $document) {
         if (!is_array($document)) { continue; }
         $documentId = strtolower(trim((string)v1_first($document,array('document_id'),'')));
         $declaredSource = strtolower(trim((string)v1_first($document,array('source','source_key'),'')));
@@ -7259,6 +7284,13 @@ function upsert_governance_snapshot(
         $isDart = strpos($documentId,'dart:') === 0 || $declaredSource === 'dart'
             || $sourceRightId === 'official:dart';
         if ($isDart && $sourceRightId !== 'official:dart') {
+            if (!$dartGuardedAction
+                && !empty($explicitDartDocumentIdentities[$documentIndex])) {
+                respond(409,array(
+                    'ok'=>false,
+                    'error'=>'dart_guarded_action_required',
+                ));
+            }
             respond(409,array('ok'=>false,'error'=>'dart_document_requires_approved_source_right'));
         }
         if ($isDart) { $containsDartWrite = true; }
