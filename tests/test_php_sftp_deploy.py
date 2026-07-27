@@ -48,6 +48,7 @@ from curator.php_sftp_deploy import (
     rollback_one_time_schema_bridge,
     rollback_release,
     ssh_sftp_options_from_args,
+    verify_closed_v1_api,
     verify_closed_v2_api,
     verify_existing_remote_release_identity,
 )
@@ -432,6 +433,8 @@ class HttpRouter:
         strict_opcache_action: str | None = None,
         schema_version: int = 12,
         pending_actual_schema_version: int | None = None,
+        v1_ops_mode: str = "valid",
+        v1_admin_mode: str = "forbidden",
     ) -> None:
         self.sftp = sftp
         self.code_revision = code_revision
@@ -444,6 +447,8 @@ class HttpRouter:
         self.strict_opcache_action = strict_opcache_action
         self.schema_version = schema_version
         self.pending_actual_schema_version = pending_actual_schema_version
+        self.v1_ops_mode = v1_ops_mode
+        self.v1_admin_mode = v1_admin_mode
         self.calls: list[tuple[str, str]] = []
         self.probe_tokens: list[str] = []
         self.private_canary_paths: list[str] = []
@@ -599,7 +604,7 @@ class HttpRouter:
                 },
             )
         if url == API_V1 + "/admin/release-state":
-            if headers.get("Authorization") != "Bearer " + PROTECTED_TOKEN:
+            if headers.get("Authorization") is None:
                 return self._v1_json(
                     401,
                     {
@@ -608,13 +613,78 @@ class HttpRouter:
                         "api_version": "v1",
                     },
                 )
+            if headers.get("Authorization") == "Bearer " + PROTECTED_TOKEN:
+                if self.v1_admin_mode == "allowed":
+                    return self._v1_json(
+                        200,
+                        {
+                            "ok": True,
+                            "release_state": "closed",
+                            "schema_version": 10,
+                            "api_version": "v1",
+                        },
+                    )
+                assert self.v1_admin_mode == "forbidden"
+                return self._v1_json(
+                    403,
+                    {
+                        "ok": False,
+                        "error": "insufficient_role",
+                        "api_version": "v1",
+                    },
+                )
+            return self._v1_json(
+                403,
+                {
+                    "ok": False,
+                    "error": "insufficient_role",
+                    "api_version": "v1",
+                },
+            )
+        if url == API_V1 + "/ops/runtime-state?resource=runs&limit=1":
+            if headers.get("Authorization") != "Bearer " + PROTECTED_TOKEN:
+                return self._v1_json(
+                    403,
+                    {
+                        "ok": False,
+                        "error": "insufficient_role",
+                        "api_version": "v1",
+                    },
+                )
+            if self.v1_ops_mode == "forbidden":
+                return self._v1_json(
+                    403,
+                    {
+                        "ok": False,
+                        "error": "insufficient_role",
+                        "api_version": "v1",
+                    },
+                )
+            if self.v1_ops_mode == "invalid-shape":
+                return self._v1_json(
+                    200,
+                    {
+                        "ok": True,
+                        "api_version": "v1",
+                        "data": {
+                            "resource": "articles",
+                            "records": {},
+                        },
+                    },
+                )
+            assert self.v1_ops_mode == "valid"
             return self._v1_json(
                 200,
                 {
                     "ok": True,
-                    "release_state": "closed",
-                    "schema_version": 10,
                     "api_version": "v1",
+                    "data": {
+                        "resource": "runs",
+                        "records": [],
+                        "next_cursor": None,
+                        "has_more": False,
+                        "max_records": 100,
+                    },
                 },
             )
         if url == API_V2 + "/health":
@@ -1965,6 +2035,53 @@ def test_closed_smoke_supports_attested_schema_11_release(
         ),
         expected_schema_version=11,
     )
+
+
+def test_v1_closed_smoke_accepts_ops_without_admin_privilege(
+    production_sftp: MemorySftp,
+) -> None:
+    verify_closed_v1_api(
+        v2_base_url=API_V2,
+        protected_token=PROTECTED_TOKEN,
+        http_request=HttpRouter(
+            production_sftp,
+            code_revision=RELEASE_SHA,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("router_options", "expected_error"),
+    [
+        (
+            {"v1_ops_mode": "forbidden"},
+            "authenticated v1 ops route is invalid",
+        ),
+        (
+            {"v1_ops_mode": "invalid-shape"},
+            "authenticated v1 ops route is invalid",
+        ),
+        (
+            {"v1_admin_mode": "allowed"},
+            "v1 ops token crossed the admin privilege boundary",
+        ),
+    ],
+)
+def test_v1_closed_smoke_enforces_ops_admin_boundary(
+    production_sftp: MemorySftp,
+    router_options: dict[str, object],
+    expected_error: str,
+) -> None:
+    with pytest.raises(PhpDeploymentError, match=expected_error):
+        verify_closed_v1_api(
+            v2_base_url=API_V2,
+            protected_token=PROTECTED_TOKEN,
+            http_request=HttpRouter(
+                production_sftp,
+                code_revision=RELEASE_SHA,
+                **router_options,
+            ),
+        )
 
 
 def test_pending_schema_smoke_requires_exact_12_over_11_mismatch(
