@@ -59,11 +59,13 @@ silently remove the protection and is prohibited.
 - Existing output files are never overwritten. A failed or interrupted run
   has no completed manifest and must not be used for migration.
 - The SSH relay tolerates temporary consumer backpressure without dropping or
-  duplicating the unsent suffix. Each successful partial send or received
-  chunk resets the no-progress budget. Ten consecutive 30-second send
-  timeouts or receive-idle timeouts (about five minutes without progress)
-  terminate the relay; retries are never unbounded. The database stream then
-  fails and the backup cannot produce a completion manifest.
+  duplicating the unsent suffix. Each successful partial send resets the
+  write no-progress budget; ten consecutive 30-second send timeouts terminate
+  the relay. A receive timeout is polling only because one direction of a
+  healthy full-duplex connection may remain idle while the other streams a
+  large result. The tunnel owner, SSH transport and keepalive, MySQL
+  read/write timeouts, EOF, and actual socket errors govern connection
+  lifetime. A failed stream still cannot produce a completion manifest.
 
 ## Gabia legacy `ssh-rsa/SHA-1` exception
 
