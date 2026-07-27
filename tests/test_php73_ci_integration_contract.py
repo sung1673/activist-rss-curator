@@ -91,6 +91,11 @@ def test_php73_release_fixture_preserves_canonical_dart_source_right_id() -> Non
     assert "DELETE FROM ci_event_observations " in identity_fixture
     assert "identity precision fixture must not leak into later corpus checks" in identity_fixture
     assert "official:dart-identity-precision-smoke" not in smoke
+    kind_cross_source_update = identity_fixture[
+        identity_fixture.index("kind = request_hmac_action(") :
+        identity_fixture.index("runtime_events, _ = request_json(")
+    ]
+    assert '"upsert_governance_snapshot_dart_guarded",' in kind_cross_source_update
 
 
 def test_php73_global_fixture_restores_the_latest_source_title_from_mysql() -> None:

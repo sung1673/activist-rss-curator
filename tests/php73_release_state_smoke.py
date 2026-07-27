@@ -1872,7 +1872,10 @@ def exercise_event_identity_datetime_storage(
         "run": {},
     }
     kind = request_hmac_action(
-        base_url, "upsert_governance_snapshot", kind_payload, expected_status=200
+        base_url,
+        "upsert_governance_snapshot_dart_guarded",
+        kind_payload,
+        expected_status=200,
     )
     require(kind.get("ok") is True, repr(kind))
 
