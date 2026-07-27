@@ -23,6 +23,7 @@ from .official_sources import (
     DartRequestBudget,
     DartRequestBudgetError,
     DartRequestQuota,
+    DartResultTruncatedError,
     OfficialDisclosure,
     OfficialSourceError,
     disclosure_payloads,
@@ -64,6 +65,12 @@ DartCredentialInput = str | tuple[OpenDartCredential, ...]
 ConnectorFactory = Callable[[DartCredentialInput, DartRequestQuota], CanaryConnector]
 
 
+def _close_connector(connector: object) -> None:
+    close = getattr(connector, "close", None)
+    if callable(close):
+        close()
+
+
 @dataclass(frozen=True)
 class DartCanarySampleOptions:
     lookback_days: int = 365
@@ -83,6 +90,13 @@ class DartCanarySampleOptions:
             raise ValueError("page_count must be between 1 and 100")
         if self.max_pages < 1:
             raise ValueError("max_pages must be at least 1")
+
+
+@dataclass
+class _WindowScanMetrics:
+    attempted_windows: int = 0
+    completed_leaf_windows: int = 0
+    split_count: int = 0
 
 
 def _default_connector_factory(
@@ -116,25 +130,63 @@ def _collect_window(
     *,
     page_count: int,
     max_pages: int,
+    metrics: _WindowScanMetrics | None = None,
 ) -> tuple[int, list[OfficialDisclosure]]:
+    selected_metrics = metrics or _WindowScanMetrics()
+    selected_metrics.attempted_windows += 1
     fetched = 0
     disclosures: list[OfficialDisclosure] = []
-    for row in connector.iter_disclosure_rows(
-        start,
-        end,
-        page_count=page_count,
-        max_pages=max_pages,
-    ):
-        fetched += 1
-        try:
-            disclosure = parse_dart_disclosure(row)
-        except (TypeError, ValueError) as exc:
-            receipt_no = str(row.get("rcept_no") or "").strip()
-            raise DartCanarySampleError(
-                f"DART canary could not normalize receipt {receipt_no or '<missing>'}"
-            ) from exc
-        if disclosure is not None:
-            disclosures.append(disclosure)
+    try:
+        for row in connector.iter_disclosure_rows(
+            start,
+            end,
+            page_count=page_count,
+            max_pages=max_pages,
+        ):
+            fetched += 1
+            try:
+                disclosure = parse_dart_disclosure(row)
+            except (TypeError, ValueError) as exc:
+                receipt_no = str(row.get("rcept_no") or "").strip()
+                raise DartCanarySampleError(
+                    f"DART canary could not normalize receipt {receipt_no or '<missing>'}"
+                ) from exc
+            if disclosure is not None:
+                disclosures.append(disclosure)
+    except DartResultTruncatedError as exc:
+        if start >= end:
+            raise DartResultTruncatedError(
+                start=exc.window_start,
+                end=exc.window_end,
+                detected_at_page=exc.detected_at_page,
+                total_pages=exc.total_pages,
+                page_limit=exc.page_limit,
+                detail_code=exc.detail_code,
+                terminal_one_day=True,
+            ) from None
+        selected_metrics.split_count += 1
+        midpoint = start + timedelta(days=(end - start).days // 2)
+        left_fetched, left_disclosures = _collect_window(
+            connector,
+            start,
+            midpoint,
+            page_count=page_count,
+            max_pages=max_pages,
+            metrics=selected_metrics,
+        )
+        right_fetched, right_disclosures = _collect_window(
+            connector,
+            midpoint + timedelta(days=1),
+            end,
+            page_count=page_count,
+            max_pages=max_pages,
+            metrics=selected_metrics,
+        )
+        return (
+            left_fetched + right_fetched,
+            [*left_disclosures, *right_disclosures],
+        )
+    selected_metrics.completed_leaf_windows += 1
     return fetched, disclosures
 
 
@@ -191,7 +243,7 @@ def _sample_row(
     }
 
 
-def run_dart_canary_sample(
+def _run_dart_canary_sample(
     api_key: DartCredentialInput,
     *,
     now: datetime | None = None,
@@ -236,6 +288,7 @@ def run_dart_canary_sample(
     history_start = recent_day - timedelta(days=selected_options.lookback_days - 1)
     connector = connector_factory(selected_credentials, budget)
     requests_before = budget.used
+    window_metrics = _WindowScanMetrics()
 
     recent_fetched, recent_disclosures = _collect_window(
         connector,
@@ -243,6 +296,7 @@ def run_dart_canary_sample(
         recent_day,
         page_count=selected_options.page_count,
         max_pages=selected_options.max_pages,
+        metrics=window_metrics,
     )
     history_disclosures = list(recent_disclosures)
     history_fetched = recent_fetched
@@ -258,6 +312,7 @@ def run_dart_canary_sample(
             window_end,
             page_count=selected_options.page_count,
             max_pages=selected_options.max_pages,
+            metrics=window_metrics,
         )
         history_fetched += fetched
         history_disclosures.extend(rows)
@@ -313,7 +368,11 @@ def run_dart_canary_sample(
             "from_date": history_start.isoformat(),
             "to_date": recent_day.isoformat(),
             "days": selected_options.lookback_days,
-            "windows_scanned": len(older_windows) + 1,
+            "windows_scanned": window_metrics.completed_leaf_windows,
+            "planned_windows": len(older_windows) + 1,
+            "attempted_windows": window_metrics.attempted_windows,
+            "completed_leaf_windows": window_metrics.completed_leaf_windows,
+            "split_count": window_metrics.split_count,
             "fetched_count": history_fetched,
             "governance_document_count": len(history_normalized),
         },
@@ -332,6 +391,41 @@ def run_dart_canary_sample(
         },
     }
     return report
+
+
+def run_dart_canary_sample(
+    api_key: DartCredentialInput,
+    *,
+    now: datetime | None = None,
+    options: DartCanarySampleOptions | None = None,
+    request_budget: DartRequestQuota | None = None,
+    connector_factory: ConnectorFactory = _default_connector_factory,
+) -> dict[str, object]:
+    """Run the bounded dry-run sample and always close its connector."""
+
+    connector: CanaryConnector | None = None
+
+    def managed_factory(
+        selected_api_key: DartCredentialInput,
+        selected_budget: DartRequestQuota,
+    ) -> CanaryConnector:
+        nonlocal connector
+        if connector is not None:
+            raise DartCanarySampleError("DART canary created more than one connector")
+        connector = connector_factory(selected_api_key, selected_budget)
+        return connector
+
+    try:
+        return _run_dart_canary_sample(
+            api_key,
+            now=now,
+            options=options,
+            request_budget=request_budget,
+            connector_factory=managed_factory,
+        )
+    finally:
+        if connector is not None:
+            _close_connector(connector)
 
 
 def _write_report(path: Path | None, report: dict[str, object]) -> None:
@@ -404,8 +498,24 @@ def main(argv: list[str] | None = None) -> None:
             "request_budget": args.request_budget,
             "requests_used": budget.used if budget is not None else 0,
         }
+        if isinstance(exc, DartResultTruncatedError):
+            report["truncation"] = {
+                "scope": exc.scope,
+                "detail_code": exc.detail_code,
+                "window_start": exc.window_start.isoformat(),
+                "window_end": exc.window_end.isoformat(),
+                "detected_at_page": exc.detected_at_page,
+                "page_limit": exc.page_limit,
+                "total_pages": exc.total_pages,
+                "terminal_one_day": exc.terminal_one_day,
+            }
         _write_report(args.report, report)
         raise SystemExit(2) from exc
+    finally:
+        if budget is not None:
+            close = getattr(budget, "close", None)
+            if callable(close):
+                close()
     _write_report(args.report, report)
     if report["status"] != "succeeded":
         raise SystemExit(1)

@@ -294,6 +294,152 @@ def test_backfill_shares_one_bounded_dart_request_budget_across_windows(tmp_path
     assert budgets[0].used == 2
 
 
+def test_backfill_reuses_and_closes_one_owned_durable_quota(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DurableQuota:
+        limit = 40_000
+
+        def __init__(self) -> None:
+            self.used = 0
+            self.close_calls = 0
+
+        def consume(self, *, operation: str, credential_id: str) -> object:
+            self.used += 1
+            return operation, credential_id
+
+        def block_020(self, permit: object) -> None:
+            del permit
+
+        def disable_901(self, permit: object) -> None:
+            del permit
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    durable = DurableQuota()
+    budgets: list[object] = []
+    monkeypatch.setattr(
+        official_backfill,
+        "durable_dart_quota_required",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        official_backfill,
+        "durable_dart_quota_configured",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        official_backfill,
+        "durable_dart_quota_client",
+        lambda **_kwargs: durable,
+    )
+
+    def runner(_root: Path, **kwargs: object) -> dict[str, int]:
+        overrides = kwargs["settings_overrides"]
+        assert isinstance(overrides, dict)
+        budget = overrides["dart_request_budget"]
+        budgets.append(budget)
+        budget.consume(  # type: ignore[attr-defined]
+            operation="list",
+            credential_id="c" * 64,
+        )
+        return successful_summary()
+
+    report = run_backfill(
+        tmp_path,
+        BackfillOptions(
+            start=date(2021, 1, 1),
+            end_exclusive=date(2021, 1, 3),
+            checkpoint_path=tmp_path / "official-checkpoint.json",
+            sources=("dart",),
+        ),
+        ingest_runner=runner,
+        now_provider=fixed_now,
+        checkpoint_store=MemoryCheckpointStore(),
+    )
+
+    assert report["status"] == "succeeded"
+    assert len(budgets) == 2
+    assert budgets[0] is budgets[1]
+    assert durable.used == 2
+    assert durable.close_calls == 1
+
+
+def test_backfill_closes_owned_durable_quota_when_checkpoint_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DurableQuota:
+        limit = 40_000
+        used = 0
+
+        def __init__(self) -> None:
+            self.close_calls = 0
+
+        def consume(self, *, operation: str, credential_id: str) -> object:
+            return operation, credential_id
+
+        def block_020(self, permit: object) -> None:
+            del permit
+
+        def disable_901(self, permit: object) -> None:
+            del permit
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    class FailingCheckpointStore(MemoryCheckpointStore):
+        def put(
+            self,
+            fingerprint: str,
+            *,
+            expected_version: int,
+            checkpoint: dict[str, object],
+        ) -> RemoteCheckpointWrite:
+            if self.put_calls:
+                raise RuntimeError("checkpoint write failed")
+            return super().put(
+                fingerprint,
+                expected_version=expected_version,
+                checkpoint=checkpoint,
+            )
+
+    durable = DurableQuota()
+    monkeypatch.setattr(
+        official_backfill,
+        "durable_dart_quota_required",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        official_backfill,
+        "durable_dart_quota_configured",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        official_backfill,
+        "durable_dart_quota_client",
+        lambda **_kwargs: durable,
+    )
+
+    with pytest.raises(RuntimeError, match="checkpoint write failed"):
+        run_backfill(
+            tmp_path,
+            BackfillOptions(
+                start=date(2021, 1, 1),
+                end_exclusive=date(2021, 1, 2),
+                checkpoint_path=tmp_path / "official-checkpoint.json",
+                sources=("dart",),
+            ),
+            ingest_runner=lambda *_args, **_kwargs: successful_summary(),
+            now_provider=fixed_now,
+            checkpoint_store=FailingCheckpointStore(),
+        )
+
+    assert durable.close_calls == 1
+
+
 def test_checkpoint_fingerprint_rejects_changed_job_without_restart(tmp_path: Path) -> None:
     checkpoint_path = tmp_path / "official-checkpoint.json"
     store = MemoryCheckpointStore()

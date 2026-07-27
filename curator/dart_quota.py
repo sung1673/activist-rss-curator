@@ -313,11 +313,50 @@ class DartQuotaClient:
             )
         self.used = 0
         self._counter = 0
-        self._lock = threading.Lock()
+        # One lock protects the exact ACK/replay pair, local counters, and
+        # client shutdown. This keeps a shared client safe if callers invoke a
+        # quota object from multiple worker threads and prevents close() from
+        # racing an in-flight durable acknowledgment.
+        self._lock = threading.RLock()
+        self._close_requested = False
+        self._closed = False
+        self._client = self.client_factory(
+            timeout=self.timeout,
+            transport=self.transport,
+            follow_redirects=False,
+        )
 
     @property
     def endpoint(self) -> str:
         return f"{self.base_url}/ops/dart-quota"
+
+    def _ensure_open(self) -> None:
+        if self._close_requested:
+            raise DartQuotaLedgerError(
+                "DART quota client is closed; DART request was not sent"
+            )
+
+    def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._close_requested = True
+            self._client.close()
+            self._closed = True
+
+    def __enter__(self) -> DartQuotaClient:
+        with self._lock:
+            self._ensure_open()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: object,
+        exc_value: object,
+        traceback: object,
+    ) -> None:
+        del exc_type, exc_value, traceback
+        self.close()
 
     def _next_attempt_id(self) -> str:
         with self._lock:
@@ -404,16 +443,15 @@ class DartQuotaClient:
         last_error: Exception | None = None
         for retry in range(self.max_ack_retries + 1):
             try:
-                with self.client_factory(
-                    timeout=self.timeout,
-                    transport=self.transport,
-                    follow_redirects=False,
-                ) as client:
-                    response = client.post(
-                        self.endpoint,
-                        content=encoded,
-                        headers=self._headers(),
-                    )
+                # Short-lived clients previously isolated every ACK, including
+                # the independent replay. Reuse sockets without allowing a
+                # server cookie to change the headers of the next exact POST.
+                self._client.cookies.clear()
+                response = self._client.post(
+                    self.endpoint,
+                    content=encoded,
+                    headers=self._headers(),
+                )
             except httpx.TransportError as exc:
                 last_error = exc
                 if retry < self.max_ack_retries:
@@ -652,86 +690,94 @@ class DartQuotaClient:
         operation: str = "list",
         credential_id: str | None = None,
     ) -> DartQuotaPermit:
-        if operation not in {"list", "corp_code"}:
-            raise ValueError("unsupported DART quota operation")
-        raw_credential_id = (
-            credential_id if credential_id is not None else self.credential_id
-        )
-        selected_credential_id = raw_credential_id.strip()
-        if (
-            raw_credential_id != selected_credential_id
-            or _CREDENTIAL_ID_RE.fullmatch(selected_credential_id) is None
-        ):
-            raise DartQuotaLedgerError(
-                "DART physical attempt requires a full lowercase SHA-256 credential_id"
+        with self._lock:
+            self._ensure_open()
+            if operation not in {"list", "corp_code"}:
+                raise ValueError("unsupported DART quota operation")
+            raw_credential_id = (
+                credential_id if credential_id is not None else self.credential_id
             )
-        attempt_id = self._next_attempt_id()
-        quota_day = self._current_quota_day()
-        body: dict[str, object] = {
-            "action": "consume",
-            "attempt_id": attempt_id,
-            "quota_day": quota_day,
-            "credential_id": selected_credential_id,
-            "operation": operation,
-            "code_revision": self.code_revision,
-            "expected_backend_binding_id": self.backend_binding_id,
-        }
-        permit = self._post_with_durable_replay(
-            body,
-            action="consume",
-            attempt_id=attempt_id,
-            quota_day=quota_day,
-            credential_id=selected_credential_id,
-            require_blocked_until=False,
-        )
-        # The explicit replay proves the same durable attempt and must not
-        # consume another local physical-request unit.
-        self.used += 1
-        return permit
+            selected_credential_id = raw_credential_id.strip()
+            if (
+                raw_credential_id != selected_credential_id
+                or _CREDENTIAL_ID_RE.fullmatch(selected_credential_id) is None
+            ):
+                raise DartQuotaLedgerError(
+                    "DART physical attempt requires a full lowercase SHA-256 credential_id"
+                )
+            attempt_id = self._next_attempt_id()
+            quota_day = self._current_quota_day()
+            body: dict[str, object] = {
+                "action": "consume",
+                "attempt_id": attempt_id,
+                "quota_day": quota_day,
+                "credential_id": selected_credential_id,
+                "operation": operation,
+                "code_revision": self.code_revision,
+                "expected_backend_binding_id": self.backend_binding_id,
+            }
+            permit = self._post_with_durable_replay(
+                body,
+                action="consume",
+                attempt_id=attempt_id,
+                quota_day=quota_day,
+                credential_id=selected_credential_id,
+                require_blocked_until=False,
+            )
+            # The explicit replay proves the same durable attempt and must not
+            # consume another local physical-request unit.
+            self.used += 1
+            return permit
 
     def block_020(self, permit: object) -> None:
-        if not isinstance(permit, DartQuotaPermit):
-            raise DartQuotaLedgerError("DART status 020 cannot be blocked without its quota permit")
-        body: dict[str, object] = {
-            "action": "block_020",
-            "attempt_id": permit.attempt_id,
-            "quota_day": permit.quota_day,
-            "credential_id": permit.credential_id,
-            "reason": "opendart_status_020",
-            "code_revision": self.code_revision,
-            "expected_backend_binding_id": self.backend_binding_id,
-        }
-        self._post_with_durable_replay(
-            body,
-            action="block_020",
-            attempt_id=permit.attempt_id,
-            quota_day=permit.quota_day,
-            credential_id=permit.credential_id,
-            require_blocked_until=True,
-        )
+        with self._lock:
+            self._ensure_open()
+            if not isinstance(permit, DartQuotaPermit):
+                raise DartQuotaLedgerError(
+                    "DART status 020 cannot be blocked without its quota permit"
+                )
+            body: dict[str, object] = {
+                "action": "block_020",
+                "attempt_id": permit.attempt_id,
+                "quota_day": permit.quota_day,
+                "credential_id": permit.credential_id,
+                "reason": "opendart_status_020",
+                "code_revision": self.code_revision,
+                "expected_backend_binding_id": self.backend_binding_id,
+            }
+            self._post_with_durable_replay(
+                body,
+                action="block_020",
+                attempt_id=permit.attempt_id,
+                quota_day=permit.quota_day,
+                credential_id=permit.credential_id,
+                require_blocked_until=True,
+            )
 
     def disable_901(self, permit: object) -> None:
-        if not isinstance(permit, DartQuotaPermit):
-            raise DartQuotaLedgerError(
-                "DART status 901 cannot disable a credential without its quota permit"
+        with self._lock:
+            self._ensure_open()
+            if not isinstance(permit, DartQuotaPermit):
+                raise DartQuotaLedgerError(
+                    "DART status 901 cannot disable a credential without its quota permit"
+                )
+            body: dict[str, object] = {
+                "action": "disable_901",
+                "attempt_id": permit.attempt_id,
+                "quota_day": permit.quota_day,
+                "credential_id": permit.credential_id,
+                "reason": "opendart_status_901",
+                "code_revision": self.code_revision,
+                "expected_backend_binding_id": self.backend_binding_id,
+            }
+            self._post_with_durable_replay(
+                body,
+                action="disable_901",
+                attempt_id=permit.attempt_id,
+                quota_day=permit.quota_day,
+                credential_id=permit.credential_id,
+                require_blocked_until=False,
             )
-        body: dict[str, object] = {
-            "action": "disable_901",
-            "attempt_id": permit.attempt_id,
-            "quota_day": permit.quota_day,
-            "credential_id": permit.credential_id,
-            "reason": "opendart_status_901",
-            "code_revision": self.code_revision,
-            "expected_backend_binding_id": self.backend_binding_id,
-        }
-        self._post_with_durable_replay(
-            body,
-            action="disable_901",
-            attempt_id=permit.attempt_id,
-            quota_day=permit.quota_day,
-            credential_id=permit.credential_id,
-            require_blocked_until=False,
-        )
 
 
 def durable_dart_quota_client(*, phase: str) -> DartQuotaClient:
