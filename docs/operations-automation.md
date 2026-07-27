@@ -103,7 +103,7 @@ SourceRight 증빙을 등록한 뒤 admin은 `GET /api/v2/admin/connectors/{conn
 
 수집기는 네트워크 요청 전과 각 페이지 전에 `collect` 자격과 rights revision을 다시 확인한다. 공개 사건 검수와 보호된 원자적 `preview → live` 전환은 현재 재배포 자격을 별도로 확인한다. 캐나다·호주 수동 링크 경로는 record마다 권한 API를 호출하지 않는다. SourceRight 단위 batch 앞뒤에서 `collect`와 `public` ACK를 한 번씩 확인하고 네 ACK의 revision이 모두 같아야 한다.
 
-보호된 cutover는 공개 문서에 연결된 권한만 보지 않는다. 위 표의 필수 4개 connector(KR·US·CA·AU) row와 정확히 대응하는 SourceRight row를 같은 transaction에서 모두 `FOR UPDATE`로 잠근다. connector의 국가·source key/type·SourceRight ID·coverage mode가 서버 registry와 정확히 일치하고 상태가 `active`인지, 마지막 성공·확인 시각이 `min(45분, max(15분, 실행 주기의 3배))` 이내이고 현재 오류가 없는지 확인한다. SEC는 `sec-current-v1` cursor 내부 UTC `updated_at`도 같은 한도 안이어야 하며, CA/AU `link-only`는 최근 관측과 1건 이상의 raw/ACK가 필요하다. 권한은 `active`·증빙 보유·현재 유효·미철회·수집 가능·공개 재배포 가능이어야 한다. CA/AU처럼 현재 공개 문서가 0건이어도 최신성·만료·철회·identity 변경은 HTTP 409 `required_alpha_sources_invalid`로 전환을 중단한다. JP·GB connector row는 required freshness·권한 gate에서 제외하지만 같은 transaction에서 별도로 잠그고 exact identity가 정책상 dormant 값과 일치하는지 검증한다. 이 경우 두 release state는 preview에 남고 일회용 승인은 소비되지 않는다. 필수 4개 검사를 통과한 뒤에도 기존 v1·v2 공개 문서 권한 guard를 별도로 유지한다.
+보호된 cutover는 공개 문서에 연결된 권한만 보지 않는다. 위 표의 필수 4개 connector(KR·US·CA·AU)와 정확히 대응하는 SourceRight를 같은 transaction에서 모두 검증하되, SourceRight row 전체를 ID순으로 먼저 잠그고 connector row 전체를 ID순으로 다음에 `FOR UPDATE`로 잠근다. 수집·connector 관리와 같은 SourceRight→connector 순서를 사용해 교차 transaction deadlock을 막는다. connector의 국가·source key/type·SourceRight ID·coverage mode가 서버 registry와 정확히 일치하고 상태가 `active`인지, 마지막 성공·확인 시각이 `min(45분, max(15분, 실행 주기의 3배))` 이내이고 현재 오류가 없는지 확인한다. SEC는 `sec-current-v1` cursor 내부 UTC `updated_at`도 같은 한도 안이어야 하며, CA/AU `link-only`는 최근 관측과 1건 이상의 raw/ACK가 필요하다. 권한은 `active`·증빙 보유·현재 유효·미철회·수집 가능·공개 재배포 가능이어야 한다. CA/AU처럼 현재 공개 문서가 0건이어도 최신성·만료·철회·identity 변경은 HTTP 409 `required_alpha_sources_invalid`로 전환을 중단한다. JP·GB connector row와 대응 SourceRight도 같은 순서로 잠그며 required freshness·권한 gate에서는 제외하되 exact identity가 정책상 dormant 값과 일치하는지 검증한다. 이 경우 두 release state는 preview에 남고 일회용 승인은 소비되지 않는다. 필수 4개 검사를 통과한 뒤에도 기존 v1·v2 공개 문서 권한 guard를 별도로 유지한다.
 
 `CA_OFFICIAL_LINKS_JSON`과 `AU_OFFICIAL_LINKS_JSON`은 최상위 필드가 정확히 `schema_version`, `approved_hosts`, `records`인 닫힌 JSON object다. `schema_version=1`이고 국가별 최대 50개 issuer·50개 승인 호스트 mapping·500개 record를 허용한다. `approved_hosts` 항목은 `hostname`, `issuer_identifier_type`, `issuer_identifier`, `evidence_sha256`만 가지며 64자리 소문자 SHA-256 증빙을 issuer와 호스트에 고정한다. `records` 필수 필드는 `country_code`, `issuer_identifier_type`, `issuer_identifier`, `issuer_name`, `source_right_id`, `official_host`, `original_url`, `title`, `original_language`, `filed_at`, `first_observed_at`, `event_family`이다. `issuer_namespace`, `market`, `ticker`, `external_id`, `document_type`만 선택적으로 허용한다. record의 `official_host`와 issuer 식별자는 승인 호스트 항목과 정확히 일치해야 하며 사용되지 않은 승인 호스트도 거절한다.
 
@@ -124,7 +124,7 @@ Production Alpha의 배포·관측 분모는 Pages/API뿐이다. Telegram outbou
 - `GOVERNANCE_PIPELINE_MODE=off`: 신규 governance 예약 실행 차단. DART canary는 `dart_canary`, 비교 운영은 `shadow`, 공개 후에는 `live`. KIND는 이 단계와 분리된 `KIND_CONNECTOR_MODE`로만 예약 활성화
 - `PAGES_OWNER=legacy`: 기존 Pages만 배포. 보호된 전환 직전 `governance`로 바꾸며 workflow가 직접 Repository Variables를 수정하지 않음
 
-거버넌스 v1 공개 데이터 경로는 repository variable이 아니라 MySQL의 서버 측 release state로 최종 제어한다. migration 001~010을 순서대로 적용한 요구 schema version은 10이며, 공개 상태는 006이 만든 `closed`를 유지한다. 서버는 최댓값이 아니라 1~10의 정확한 버전·이름·체크섬 manifest를 검증한다. DART canary와 백필은 `closed`에서도 HMAC writer로 적재할 수 있지만 API 안내 루트를 포함한 공개 데이터 조회는 503이다. 검수자는 관리자가 `preview`로 전환한 동안에만 preview Bearer token으로 접근하고, 실제 승인 전에는 `closed`로 되돌린다. v1·v2 `POST /admin/release-state`는 `preview → live`를 409 `protected_atomic_cutover_required`로 거절한다. `live` 승격은 아래 보호된 v2 원자 전환만 사용하고, `live → closed` 긴급 차단은 각 관리자 API의 optimistic version과 감사 로그를 사용한다.
+거버넌스 v1 공개 데이터 경로는 repository variable이 아니라 MySQL의 서버 측 release state로 최종 제어한다. migration 001~010을 순서대로 적용한 요구 schema version은 10이며, 공개 상태는 006이 만든 `closed`를 유지한다. 서버는 최댓값이 아니라 1~10의 정확한 버전·이름·체크섬 manifest를 검증한다. DART guarded write는 실행 모드와 공개 상태를 `dart_canary → closed`, `shadow → preview`, `live → live`로 묶는다. collector가 서명한 `expected_release_state`와 transaction 안에서 잠근 v1·v2 상태가 서로 정확히 같을 때만 적재하며 `off`, 빈 값, `manual` 및 상태 경쟁 변경은 mutation 없이 실패한다. 검수자는 관리자가 `preview`로 전환한 동안에만 preview Bearer token으로 접근한다. v1·v2 `POST /admin/release-state`는 `preview → live`를 409 `protected_atomic_cutover_required`로 거절한다. `live` 승격은 아래 보호된 v2 원자 전환만 사용하고, `live → closed` 긴급 차단은 각 관리자 API의 optimistic version과 감사 로그를 사용한다.
 
 ### 보호된 원자적 공개 전환
 
@@ -149,6 +149,25 @@ Alpha evidence workflow는 exact `daily.yml` run의 `pages-<run_id>-<attempt>` a
 실행된다. `active`로 전환하면 KIND 설정·SourceRight·수집 실패를 건너뛰지 않고
 기존처럼 전체 workflow를 실패시킨다. 수동 실행의 `include_kind=true`는 토글이
 `off`여도 KIND를 명시적으로 검증하며, `include_kind=false`는 DART-only smoke다.
+
+예약·수동 `ingest-official`, `official-backfill`, `ingest-global`,
+`global-backfill`, `ingest-official-sites`, `ingest-selected-markets`,
+official slot epoch reset, SourceRight bootstrap, 사람 승인 global brief publish,
+보호된 cutover는
+`governance-production-official-write-${repository}-${ref}` 하나의
+non-cancelling queue를 공유한다. 운영 기본 branch에서는 공식 소스의 다중 청크
+실행·공개 brief 쓰기와 release-state 변경이 절대 겹치지 않는다. Global brief
+candidate 생성은 읽기 전용이므로 기존 별도 queue를 유지하고 publish job만 이
+경계에 참여한다.
+
+긴급 rollback은 6시간 백필을 기다리지 않는 별도 non-cancelling queue를 사용한다.
+입력과 exact 기본 branch를 확인한 직후 artifact 준비보다 먼저 optimistic retry로
+v2→v1을 closed로 만들며, Pages lock 안에서 다시 닫은 뒤 legacy를 복원한다.
+cutover와 rollback의 실제 artifact 배포는 모두 같은 Pages deployment lock 안에서
+실행된다. cutover는 upload 직전 v1·v2가 preflight 때의 정확한 preview version인지
+다시 확인한다. 모든 보호 writer와 transition은 `github.ref_type=branch`와 exact
+`refs/heads/<default>`를 확인한다. lock identity에도 전체 `github.ref`를 포함하므로
+같은 짧은 이름의 tag나 다른 branch가 운영 기본 branch로 오인되지 않는다.
 
 OpenDART credential pool과 schema 12를 배포할 때는 다음 순서를 바꾸지 않는다.
 
@@ -266,3 +285,35 @@ checkpoint가 없는 connector의 자동 최근 2일 bootstrap은 빈 기간을 
 SHA의 시작·종료 시각, 성공/실패 window 수와 멱등 재실행 결과를 기록하며, 한
 connector라도 30일 범위·최신성·실패 0건 조건을 충족하지 못하면 cutover를
 실행하지 않는다.
+
+## OpenDART apply 권한 경계
+
+`source-right-bootstrap.yml`이 등록한 `official:dart`만 OpenDART apply에 사용할
+수 있다. 공식 수집 payload는 더 이상 SourceRight를 생성하거나 upsert하지
+않으며, `official:dart`를 payload에 넣으면 서버가
+`dart_source_right_managed_out_of_band`로 거절한다.
+`official:dart`도 고정 metadata-only 계약이다. `body_text` 또는 `content`의
+빈 문자열은 기존 collector 호환을 위해 허용하되 SQL `NULL`로 저장하고,
+비어 있지 않은 본문은 permission scope와 무관하게 transaction 전체를
+`dart_body_text_forbidden`으로 거절한다.
+
+예약 수집은 durable slot claim 전에, backfill은 `mode=apply`일 때 어떤
+checkpoint write보다 먼저 다음을 확인한다.
+
+1. 고정 production v2 endpoint와 `bside-global-market-terminal` service
+2. schema version 12와 workflow의 exact 40자리 `GITHUB_SHA`
+3. 실행 모드에 대응하는 인증 없는 v1 `/events?limit=1` 계약
+   (`closed=503`, `preview=401/403`, `live=200`)과 동일한 v2 release state
+4. `official:dart / official_disclosure / dart`의 현재 `collect` 자격
+5. `ai_allowed=false`, `redistribution_allowed=true`
+6. 보호된 metadata-only 계약과 같은 `contract_revision`
+
+collector는 OpenDART 요청 전에 한 번, remote write 직전에 다시 확인하고 두
+`rights_revision`·`contract_revision`과 release state가 같을 때만 HMAC payload에
+`expected_release_state` precondition을 담는다. PHP는 각 HMAC write
+transaction에서 v1·v2 release-state row를 cutover와 같은 정렬 순서로 함께
+잠그고 두 상태가 서로 같으며 서명된 기대 상태와도 정확히 같은지 확인한 다음
+`official:dart` row를 `FOR UPDATE`로 잠가 자격과 두 digest를 다시 비교한다.
+누락·계약 변경·만료·철회·경쟁 변경은 데이터, 회사 master, run row를 쓰기 전에
+409로 중단한다. `dry-run`은 이 운영 API preflight를 호출하지 않고 기존처럼
+OpenDART fetch·정규화만 수행한다.

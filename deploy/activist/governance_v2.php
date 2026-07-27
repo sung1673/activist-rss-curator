@@ -1794,19 +1794,51 @@ function v2_ops_source_right_eligibility(PDO $pdo, array $config): void {
     $right = v2_source_right_row($pdo, $config, $sourceRightId);
     $reasons = v2_source_right_ineligible_reasons($right, $use);
     $revision = $right === null ? null : v2_source_right_revision($right);
+    $contractRevision = $right === null
+        ? null : v2_source_right_contract_revision($right);
+    $connectorId = null;
+    $connectorReady = null;
+    if ($sourceRightId === 'official:dart' && $use === 'collect') {
+        $connectorId = 'connector:kr:dart';
+        $connectorStatement = $pdo->prepare(
+            'SELECT connector_id,country_code,source_key,source_type,'
+            . 'source_right_id,connector_status FROM '
+            . table_name($config, 'source_connectors')
+            . ' WHERE connector_id=? LIMIT 1'
+        );
+        $connectorStatement->execute(array($connectorId));
+        $connector = $connectorStatement->fetch();
+        $connectorReady = is_array($connector)
+            && (string)$connector['connector_id'] === $connectorId
+            && (string)$connector['country_code'] === 'KR'
+            && (string)$connector['source_key'] === 'dart'
+            && (string)$connector['source_type'] === 'official_disclosure'
+            && (string)$connector['source_right_id'] === 'official:dart'
+            && in_array(
+                (string)$connector['connector_status'],
+                array('configured', 'active'),
+                true
+            );
+    }
     if ($reasons) {
-        v2_respond(409, array(
+        $response = array(
             'ok' => false,
             'error' => 'source_right_ineligible',
             'source_right_id' => $sourceRightId,
             'use' => $use,
             'eligible' => false,
             'rights_revision' => $revision,
+            'contract_revision' => $contractRevision,
             'reasons' => array_values(array_unique($reasons)),
             'checked_at' => gmdate('c'),
-        ));
+        );
+        if ($connectorId !== null) {
+            $response['connector_id'] = $connectorId;
+            $response['connector_ready'] = $connectorReady === true;
+        }
+        v2_respond(409, $response);
     }
-    v2_respond(200, array(
+    $response = array(
         'ok' => true,
         'source_right_id' => $sourceRightId,
         'source_type' => (string)$right['source_type'],
@@ -1814,10 +1846,18 @@ function v2_ops_source_right_eligibility(PDO $pdo, array $config): void {
         'use' => $use,
         'eligible' => true,
         'rights_revision' => $revision,
+        'contract_revision' => $contractRevision,
         'redistribution_allowed' => (int)$right['redistribution_allowed'] === 1,
         'ai_allowed' => (int)$right['ai_allowed'] === 1,
         'checked_at' => gmdate('c'),
-    ));
+    );
+    if ($connectorId !== null) {
+        // This protected response intentionally exposes only a readiness bit,
+        // never the raw administrative status or permission/evidence values.
+        $response['connector_id'] = $connectorId;
+        $response['connector_ready'] = $connectorReady === true;
+    }
+    v2_respond(200, $response);
 }
 
 function v2_brief_event_rows(PDO $pdo, array $config, string $briefId, string $lane): array {
@@ -2486,12 +2526,34 @@ function v2_optional_alpha_source_identity_guard(
 ): array {
     $expectedRows = v2_optional_alpha_source_identities();
     $connectorIds = array();
+    $sourceRightIds = array();
     foreach ($expectedRows as $expected) {
         $connectorIds[] = (string)$expected['connector_id'];
+        $sourceRightIds[] = (string)$expected['source_right_id'];
     }
+    $sourceRightIds = array_values(array_unique($sourceRightIds));
     sort($connectorIds, SORT_STRING);
-    $placeholders = implode(',', array_fill(0, count($connectorIds), '?'));
-    $statement = $pdo->prepare(
+    sort($sourceRightIds, SORT_STRING);
+
+    // Global ingest and connector administration both lock SourceRight before
+    // connector. Cutover must use the same order for dormant identities too.
+    $rightPlaceholders = implode(',', array_fill(0, count($sourceRightIds), '?'));
+    $rightStatement = $pdo->prepare(
+        'SELECT sr.source_right_id,sr.source_type,sr.source_key,sr.status,'
+        . 'CASE WHEN ' . v2_current_source_right_sql('sr')
+        . ' THEN 1 ELSE 0 END AS collect_eligible FROM '
+        . table_name($config, 'source_rights') . ' sr'
+        . ' WHERE sr.source_right_id IN (' . $rightPlaceholders . ')'
+        . ' ORDER BY BINARY sr.source_right_id FOR UPDATE'
+    );
+    $rightStatement->execute($sourceRightIds);
+    $rights = array();
+    while ($right = $rightStatement->fetch()) {
+        $rights[(string)$right['source_right_id']] = $right;
+    }
+
+    $connectorPlaceholders = implode(',', array_fill(0, count($connectorIds), '?'));
+    $connectorStatement = $pdo->prepare(
         'SELECT sc.connector_id,sc.country_code,sc.source_key,sc.source_type,'
         . 'sc.source_right_id,sc.coverage_mode,sc.connector_status,'
         . 'sc.last_success_at,sc.last_checked_at,sc.last_observed_at,'
@@ -2499,22 +2561,26 @@ function v2_optional_alpha_source_identity_guard(
         . 'sc.country_code AS connector_country_code,'
         . 'sc.source_key AS connector_source_key,'
         . 'sc.source_type AS connector_source_type,'
-        . 'sc.source_right_id AS connector_source_right_id,'
-        . 'sr.source_right_id AS connector_right_row_id,'
-        . 'sr.source_type AS connector_right_source_type,'
-        . 'sr.source_key AS connector_right_source_key,'
-        . 'sr.status AS connector_right_status,'
-        . 'CASE WHEN ' . v2_current_source_right_sql('sr')
-        . ' THEN 1 ELSE 0 END AS connector_right_collect_eligible '
+        . 'sc.source_right_id AS connector_source_right_id '
         . 'FROM ' . table_name($config, 'source_connectors') . ' sc '
-        . 'LEFT JOIN ' . table_name($config, 'source_rights') . ' sr'
-        . ' ON sr.source_right_id=sc.source_right_id'
-        . ' WHERE sc.connector_id IN (' . $placeholders . ')'
-        . ' ORDER BY BINARY connector_id FOR UPDATE'
+        . 'WHERE sc.connector_id IN (' . $connectorPlaceholders . ')'
+        . ' ORDER BY BINARY sc.connector_id FOR UPDATE'
     );
-    $statement->execute($connectorIds);
+    $connectorStatement->execute($connectorIds);
     $connectors = array();
-    while ($connector = $statement->fetch()) {
+    while ($connector = $connectorStatement->fetch()) {
+        $rightId = (string)$connector['source_right_id'];
+        $right = isset($rights[$rightId]) ? $rights[$rightId] : null;
+        $connector['connector_right_row_id'] = $right === null
+            ? null : (string)$right['source_right_id'];
+        $connector['connector_right_source_type'] = $right === null
+            ? null : (string)$right['source_type'];
+        $connector['connector_right_source_key'] = $right === null
+            ? null : (string)$right['source_key'];
+        $connector['connector_right_status'] = $right === null
+            ? null : (string)$right['status'];
+        $connector['connector_right_collect_eligible'] = $right === null
+            ? 0 : (int)$right['collect_eligible'];
         $connectors[(string)$connector['connector_id']] = $connector;
     }
     $invalid = array();
@@ -2566,10 +2632,11 @@ function v2_optional_alpha_source_identity_guard(
 /**
  * Lock and validate every Production Alpha connector and grant.
  *
- * The connector and SourceRight rows are selected in deterministic order to
- * match the global ingest lock order. Every connector must have a recent
- * successful check and be active. Link-only sources must additionally prove a
- * recent acknowledged approved-link observation even when no event is public.
+ * Every SourceRight row is locked first, followed by every connector row; both
+ * sets use deterministic binary order. This matches global ingest and admin
+ * connector updates. Every connector must have a recent successful check and
+ * be active. Link-only sources must additionally prove a recent acknowledged
+ * approved-link observation even when no event is public.
  */
 function v2_required_alpha_source_rights_guard(
     PDO $pdo,
@@ -2585,22 +2652,6 @@ function v2_required_alpha_source_rights_guard(
     $sourceRightIds = array_values(array_unique($sourceRightIds));
     sort($connectorIds, SORT_STRING);
     sort($sourceRightIds, SORT_STRING);
-
-    $connectorPlaceholders = implode(',', array_fill(0, count($connectorIds), '?'));
-    $connectorStatement = $pdo->prepare(
-        'SELECT connector_id,country_code,source_key,source_type,source_right_id,'
-        . 'coverage_mode,connector_status,schedule_minutes,last_checked_at,'
-        . 'last_success_at,last_observed_at,last_raw_count,last_acknowledged_count,'
-        . 'last_error_class,cursor_json FROM '
-        . table_name($config, 'source_connectors')
-        . ' WHERE connector_id IN (' . $connectorPlaceholders . ')'
-        . ' ORDER BY BINARY connector_id FOR UPDATE'
-    );
-    $connectorStatement->execute($connectorIds);
-    $connectors = array();
-    while ($connector = $connectorStatement->fetch()) {
-        $connectors[(string)$connector['connector_id']] = $connector;
-    }
 
     $rightPlaceholders = implode(',', array_fill(0, count($sourceRightIds), '?'));
     $rightStatement = $pdo->prepare(
@@ -2620,6 +2671,22 @@ function v2_required_alpha_source_rights_guard(
     $rights = array();
     while ($right = $rightStatement->fetch()) {
         $rights[(string)$right['source_right_id']] = $right;
+    }
+
+    $connectorPlaceholders = implode(',', array_fill(0, count($connectorIds), '?'));
+    $connectorStatement = $pdo->prepare(
+        'SELECT connector_id,country_code,source_key,source_type,source_right_id,'
+        . 'coverage_mode,connector_status,schedule_minutes,last_checked_at,'
+        . 'last_success_at,last_observed_at,last_raw_count,last_acknowledged_count,'
+        . 'last_error_class,cursor_json FROM '
+        . table_name($config, 'source_connectors')
+        . ' WHERE connector_id IN (' . $connectorPlaceholders . ')'
+        . ' ORDER BY BINARY connector_id FOR UPDATE'
+    );
+    $connectorStatement->execute($connectorIds);
+    $connectors = array();
+    while ($connector = $connectorStatement->fetch()) {
+        $connectors[(string)$connector['connector_id']] = $connector;
     }
 
     $invalid = array();

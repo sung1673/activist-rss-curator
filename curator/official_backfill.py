@@ -28,6 +28,7 @@ from .dart_quota import (
 from .config import load_config
 from .official_ingest import run as run_official_ingest
 from .official_source_rights import (
+    DartOfficialSourceRightClient,
     OfficialSourceRightError,
     source_right_api_configured,
 )
@@ -378,6 +379,13 @@ def validate_runtime(options: BackfillOptions) -> None:
             missing.append("GITHUB_SHA/CURATOR_CODE_REVISION")
     if missing:
         raise BackfillConfigurationError("missing required runtime configuration: " + ", ".join(missing))
+    if not options.dry_run and "dart" in options.sources:
+        try:
+            DartOfficialSourceRightClient().preflight(_code_revision())
+        except OfficialSourceRightError as exc:
+            raise BackfillConfigurationError(
+                f"OpenDART protected SourceRight preflight failed: {exc}"
+            ) from exc
 
 
 def _summary_int(summary: Mapping[str, object], key: str) -> int:

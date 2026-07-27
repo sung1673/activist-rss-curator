@@ -13,6 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -21,6 +22,25 @@ PREVIEW_TOKEN = "php73-ci-preview-token-000000000000000000"
 API_SECRET = b"php73-ci-only-hmac-key-00000000000000000000000000000000"
 KST = timezone(timedelta(hours=9))
 EXPECTED_BACKEND_BINDING_ID = ""
+DART_RIGHTS_REVISION = ""
+DART_CONTRACT_REVISION = ""
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+DART_CONTRACT_FIXTURE = json.loads(
+    (
+        REPOSITORY_ROOT
+        / "tests"
+        / "fixtures"
+        / "dart_source_right_contract_v1.json"
+    ).read_text(encoding="utf-8")
+)
+DEPLOYED_CODE_REVISION = json.loads(
+    (
+        REPOSITORY_ROOT
+        / "deploy"
+        / "activist"
+        / "deployment-manifest.json"
+    ).read_text(encoding="utf-8")
+)["code_revision"]
 
 
 class SmokeFailure(RuntimeError):
@@ -76,6 +96,69 @@ def mysql_backend_binding_id(container_id: str) -> str:
     return hashlib.sha256(
         f"mysql8\n{server_uuid}\n{database_name}\nci_".encode()
     ).hexdigest()
+
+
+def activate_exact_dart_source_right(
+    base_url: str,
+    container_id: str,
+) -> None:
+    global DART_RIGHTS_REVISION, DART_CONTRACT_REVISION
+    source = DART_CONTRACT_FIXTURE["source_right"]
+
+    def sql_text(value: object) -> str:
+        return str(value).replace("\\", "\\\\").replace("'", "''")
+
+    mysql_execute(
+        container_id,
+        "INSERT INTO ci_source_rights "
+        "(source_right_id,source_type,source_key,source_name,permission_scope,"
+        "evidence_uri,evidence_hash,valid_from,valid_until,revoked_at,"
+        "ai_allowed,redistribution_allowed,status,notes,created_at,updated_at) "
+        "VALUES ("
+        f"'{sql_text(source['source_right_id'])}',"
+        f"'{sql_text(source['source_type'])}',"
+        f"'{sql_text(source['source_key'])}',"
+        f"'{sql_text(source['source_name'])}',"
+        f"'{sql_text(source['permission_scope'])}',"
+        f"'{sql_text(source['evidence_uri'])}',NULL,"
+        "'2021-01-01 00:00:00',NULL,NULL,0,1,'active',"
+        "'CI protected metadata-only fixture',UTC_TIMESTAMP(),UTC_TIMESTAMP()) "
+        "ON DUPLICATE KEY UPDATE "
+        f"source_type='{sql_text(source['source_type'])}',"
+        f"source_key='{sql_text(source['source_key'])}',"
+        f"source_name='{sql_text(source['source_name'])}',"
+        f"permission_scope='{sql_text(source['permission_scope'])}',"
+        f"evidence_uri='{sql_text(source['evidence_uri'])}',evidence_hash=NULL,"
+        "valid_from='2021-01-01 00:00:00',valid_until=NULL,revoked_at=NULL,"
+        "ai_allowed=0,redistribution_allowed=1,status='active',"
+        "notes='CI protected metadata-only fixture',updated_at=UTC_TIMESTAMP();",
+    )
+    eligibility, _ = request_json(
+        base_url,
+        (
+            "api.php/api/v2/ops/source-right-eligibility?"
+            + urllib.parse.urlencode(
+                {"source_right_id": "official:dart", "use": "collect"}
+            )
+        ),
+        token=ADMIN_TOKEN,
+    )
+    DART_RIGHTS_REVISION = str(eligibility.get("rights_revision") or "")
+    DART_CONTRACT_REVISION = str(
+        eligibility.get("contract_revision") or ""
+    )
+    require(
+        len(DART_RIGHTS_REVISION) == 64
+        and DART_CONTRACT_REVISION
+        == DART_CONTRACT_FIXTURE["expected_revision"],
+        repr(eligibility),
+    )
+    require(
+        eligibility.get("connector_id") == "connector:kr:dart"
+        and eligibility.get("connector_ready") is True
+        and "connector_status" not in eligibility,
+        repr(eligibility),
+    )
 
 
 def official_slots_for_kst_day(local_day: datetime) -> list[datetime]:
@@ -340,9 +423,16 @@ def request_hmac_action(
     payload: dict[str, Any],
     *,
     expected_status: int,
+    use_guarded_dart_action: bool = True,
+    inject_dart_preconditions: bool = True,
+    expected_release_state: str = "closed",
 ) -> dict[str, Any]:
     signed_payload = dict(payload)
-    if action == "upsert_governance_snapshot":
+    actual_action = action
+    if action in {
+        "upsert_governance_snapshot",
+        "upsert_governance_snapshot_dart_guarded",
+    }:
         require(
             len(EXPECTED_BACKEND_BINDING_ID) == 64,
             "CI backend binding must be initialized before governance HMAC writes",
@@ -351,6 +441,70 @@ def request_hmac_action(
             "expected_backend_binding_id",
             EXPECTED_BACKEND_BINDING_ID,
         )
+        documents = signed_payload.get("documents")
+        run = signed_payload.get("run")
+        dart_document = any(
+            isinstance(document, dict)
+            and (
+                str(document.get("document_id") or "").casefold().startswith(
+                    "dart:"
+                )
+                or str(document.get("source") or "").casefold() == "dart"
+                or str(
+                    document.get("source_right_id") or ""
+                ).casefold()
+                == "official:dart"
+            )
+            for document in (
+                documents if isinstance(documents, list) else []
+            )
+        )
+        run_sources = (
+            {
+                token.strip()
+                for token in str(run.get("source_key") or "")
+                .casefold()
+                .split("+")
+                if token.strip()
+            }
+            if isinstance(run, dict)
+            else set()
+        )
+        guarded_dart_payload = (
+            dart_document
+            or "dart" in run_sources
+            or action == "upsert_governance_snapshot_dart_guarded"
+        )
+        if guarded_dart_payload and inject_dart_preconditions:
+            require(
+                len(DART_RIGHTS_REVISION) == 64
+                and len(DART_CONTRACT_REVISION) == 64,
+                "DART HMAC smoke requires protected SourceRight revisions",
+            )
+            signed_payload.setdefault(
+                "expected_source_right_revisions",
+                {
+                    "official:dart": {
+                        "rights_revision": DART_RIGHTS_REVISION,
+                        "contract_revision": DART_CONTRACT_REVISION,
+                    }
+                },
+            )
+            signed_payload.setdefault(
+                "expected_deployment_code_revision",
+                DEPLOYED_CODE_REVISION,
+            )
+            signed_payload.setdefault(
+                "expected_release_state",
+                expected_release_state,
+            )
+            if (
+                action == "upsert_governance_snapshot"
+                and use_guarded_dart_action
+            ):
+                actual_action = (
+                    "upsert_governance_snapshot_dart_guarded"
+                )
     body = json.dumps(
         signed_payload,
         ensure_ascii=False,
@@ -364,7 +518,7 @@ def request_hmac_action(
         hashlib.sha256,
     ).hexdigest()
     request = urllib.request.Request(
-        f"{base_url.rstrip('/')}/api.php?{urllib.parse.urlencode({'action': action})}",
+        f"{base_url.rstrip('/')}/api.php?{urllib.parse.urlencode({'action': actual_action})}",
         data=body,
         method="POST",
         headers={
@@ -851,19 +1005,6 @@ def exercise_event_identity_datetime_storage(
         "legal_name": "CI Identity Precision Corp",
         "record_status": "active",
     }
-    dart_right = {
-        "source_right_id": source_right_id,
-        "source_type": "official_disclosure",
-        "source_key": "dart",
-        "source_name": "OpenDART identity precision smoke",
-        "permission_scope": "CI runtime identity precision fixture",
-        "evidence_hash": "7" * 64,
-        "valid_from": "2021-01-01T00:00:00Z",
-        "valid_until": None,
-        "ai_allowed": True,
-        "redistribution_allowed": True,
-        "status": "active",
-    }
     kind_right = {
         "source_right_id": "official:kind",
         "source_type": "official_disclosure",
@@ -979,7 +1120,7 @@ def exercise_event_identity_datetime_storage(
         "companies": [company],
         "documents": [original_document],
         "events": [original_event],
-        "source_rights": [dart_right],
+        "source_rights": [],
         "run": {},
     }
     first = request_hmac_action(
@@ -1001,6 +1142,617 @@ def exercise_event_identity_datetime_storage(
         and replay.get("upserted", {}).get("events") == 1
         and replay.get("upserted", {}).get("event_observations") == 1,
         repr(replay),
+    )
+    company_master_only_id = "00999979"
+    company_master_only = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot_dart_guarded",
+        {
+            "companies": [
+                {
+                    "company_id": company_master_only_id,
+                    "stock_code": "999979",
+                    "market": "KOSDAQ",
+                    "legal_name": "CI DART company master only",
+                    "listing_status": "listed",
+                    "record_status": "active",
+                }
+            ],
+            "documents": [],
+            "events": [],
+            "source_rights": [],
+            "run": {},
+        },
+        expected_status=200,
+    )
+    require(
+        company_master_only.get("ok") is True
+        and company_master_only.get("backend_binding_id")
+        == expected_backend_binding
+        and company_master_only.get("upserted", {}).get("companies") == 1
+        and company_master_only.get("upserted", {}).get("documents") == 0
+        and company_master_only.get("upserted", {}).get("events") == 0
+        and company_master_only.get("upserted", {}).get("runs") == 0,
+        repr(company_master_only),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT "
+            "(SELECT COUNT(*) FROM ci_companies "
+            f"WHERE company_id='{company_master_only_id}'),"
+            "(SELECT COUNT(*) FROM ci_issuers "
+            f"WHERE issuer_id='issuer:kr:dart:{company_master_only_id}'),"
+            "(SELECT COUNT(*) FROM ci_issuer_identifiers "
+            f"WHERE issuer_id='issuer:kr:dart:{company_master_only_id}' "
+            "AND identifier_type='DART_CORP_CODE' "
+            f"AND identifier_value='{company_master_only_id}');",
+        )
+        == "1\t1\t1",
+        "exact guarded DART company-master-only chunk was not projected",
+    )
+    for attack_index, attack_fields in enumerate(
+        (
+            {"body_text": "must never be stored"},
+            {"body_text": "", "content": "hidden full-text alias"},
+        ),
+        start=1,
+    ):
+        attack_company_id = f"0099998{attack_index}"
+        attack_document_id = f"dart:2026072499980{attack_index}"
+        attack_company = {
+            **company,
+            "company_id": attack_company_id,
+            "stock_code": f"99998{attack_index}",
+            "legal_name": f"CI forbidden DART body {attack_index}",
+        }
+        attack_document = document(
+            attack_document_id,
+            "dart",
+            source_right_id,
+            f"CI forbidden DART body attack {attack_index}",
+        )
+        attack_document["company_id"] = attack_company_id
+        attack_document.update(attack_fields)
+        body_rejected = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            {
+                "companies": [attack_company],
+                "documents": [attack_document],
+                "events": [],
+                "source_rights": [],
+                "run": {},
+            },
+            expected_status=409,
+        )
+        require(
+            body_rejected.get("error") == "dart_body_text_forbidden",
+            repr(body_rejected),
+        )
+        require(
+            mysql_execute(
+                mysql_container_id,
+                "SELECT CONCAT("
+                f"(SELECT COUNT(*) FROM ci_companies WHERE company_id='{attack_company_id}'),"
+                f"(SELECT COUNT(*) FROM ci_documents WHERE document_id='{attack_document_id}'))",
+            )
+            == "00",
+            "forbidden DART body payload must leave company/document rows unchanged",
+        )
+    stored_event_only = dict(original_event)
+    stored_event_only.pop("document_ids", None)
+    stored_event_only["title"] = "Generic HMAC must not rewrite DART event"
+    generic_event_rewrite = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        {
+            "companies": [],
+            "documents": [],
+            "events": [stored_event_only],
+            "source_rights": [],
+            "run": {},
+        },
+        expected_status=409,
+        use_guarded_dart_action=False,
+        inject_dart_preconditions=False,
+    )
+    require(
+        generic_event_rewrite.get("error") == "dart_guarded_action_required",
+        repr(generic_event_rewrite),
+    )
+    stored_title = mysql_execute(
+        mysql_container_id,
+        "SELECT title FROM ci_governance_events "
+        f"WHERE event_id='{original_event['event_id']}';",
+    )
+    require(
+        stored_title == original_event["title"],
+        "generic action changed an existing DART event by event_id",
+    )
+
+    comparison_only = dict(stored_event_only)
+    comparison_only["event_id"] = "event:generic-comparison-bypass"
+    comparison_only["title"] = "Generic comparison-key rewrite must fail"
+    generic_comparison_rewrite = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        {
+            "companies": [],
+            "documents": [],
+            "events": [comparison_only],
+            "source_rights": [],
+            "run": {},
+        },
+        expected_status=409,
+        use_guarded_dart_action=False,
+        inject_dart_preconditions=False,
+    )
+    require(
+        generic_comparison_rewrite.get("error")
+        == "dart_guarded_action_required",
+        repr(generic_comparison_rewrite),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_governance_events "
+            "WHERE event_id='event:generic-comparison-bypass';",
+        )
+        == "0",
+        "generic action inserted a comparison-key alias for a DART event",
+    )
+
+    disguised_document = dict(original_document)
+    disguised_document["title"] = "Generic action must not rewrite DART document"
+    disguised_document["source_right_id"] = "official:kind"
+    disguised_document["source"] = "kind"
+    generic_document_rewrite = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        {
+            "companies": [],
+            "documents": [disguised_document],
+            "events": [],
+            "source_rights": [],
+            "run": {},
+        },
+        expected_status=409,
+        use_guarded_dart_action=False,
+        inject_dart_preconditions=False,
+    )
+    require(
+        generic_document_rewrite.get("error")
+        == "dart_guarded_action_required",
+        repr(generic_document_rewrite),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT source_right_id FROM ci_documents "
+            f"WHERE document_id='{original_document_id}';",
+        )
+        == "official:dart",
+        "generic action changed existing DART document provenance",
+    )
+
+    derived_identity_document = dict(original_document)
+    derived_identity_document.pop("document_id", None)
+    derived_identity_document.pop("source", None)
+    derived_identity_document.pop("source_key", None)
+    derived_identity_document.pop("source_right_id", None)
+    derived_identity_document["title"] = (
+        "Generic missing-ID action must not rewrite derived DART document"
+    )
+    derived_identity_document["company_id"] = ""
+    derived_identity_document["original_url"] = (
+        "https://example.invalid/generic-derived-id-overwrite"
+    )
+    derived_identity_document["content_hash"] = "f" * 64
+    derived_identity_rewrite = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        {
+            "companies": [],
+            "documents": [derived_identity_document],
+            "events": [],
+            "source_rights": [],
+            "run": {},
+        },
+        expected_status=409,
+        use_guarded_dart_action=False,
+        inject_dart_preconditions=False,
+    )
+    require(
+        derived_identity_rewrite.get("error")
+        == "dart_document_requires_approved_source_right",
+        repr(derived_identity_rewrite),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*),MAX(company_id),MAX(source_right_id),MAX(title),"
+            "MAX(original_url),MAX(content_hash) FROM ci_documents "
+            f"WHERE document_id='{original_document_id}';",
+        )
+        == (
+            f"1\t{company_id}\tofficial:dart\t{original_document['title']}\t"
+            f"{original_document['original_url']}\t"
+            f"{original_document['content_hash']}"
+        ),
+        "missing document_id bypass partially changed a derived DART document",
+    )
+
+    generic_company_rewrite = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        {
+            "companies": [
+                {
+                    **company,
+                    "legal_name": "Generic company-only overwrite must fail",
+                }
+            ],
+            "documents": [],
+            "events": [],
+            "source_rights": [],
+            "run": {},
+        },
+        expected_status=409,
+        use_guarded_dart_action=False,
+        inject_dart_preconditions=False,
+    )
+    require(
+        generic_company_rewrite.get("error")
+        == "dart_guarded_action_required",
+        repr(generic_company_rewrite),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT legal_name FROM ci_companies "
+            f"WHERE company_id='{company_id}';",
+        )
+        == company["legal_name"],
+        "company-only generic action changed an existing DART company",
+    )
+
+    protected_run_id = "run:dart-lineage-no-overwrite"
+    mysql_execute(
+        mysql_container_id,
+        "DELETE FROM ci_collection_runs "
+        f"WHERE run_id='{protected_run_id}';"
+        "INSERT INTO ci_collection_runs "
+        "(run_id,pipeline,source_key,code_revision,status,started_at,finished_at,"
+        "first_observed_at,raw_count,acknowledged_count,fetched_count,"
+        "resolved_count,accepted_count,error_count,lag_seconds_p95,metrics_json,"
+        "created_at,updated_at) VALUES "
+        f"('{protected_run_id}','ingest-official','dart',"
+        f"'{DEPLOYED_CODE_REVISION}','succeeded','2026-07-24 00:00:00',"
+        "'2026-07-24 00:01:00','2026-07-24 00:00:30',1,1,1,1,1,0,NULL,"
+        "'{\"fixture\":\"dart-lineage\"}',UTC_TIMESTAMP(),UTC_TIMESTAMP());",
+    )
+    generic_run_rewrite = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        {
+            "companies": [],
+            "documents": [],
+            "events": [],
+            "source_rights": [],
+            "run": {
+                "run_id": protected_run_id,
+                "pipeline": "generic-overwrite",
+                "source_key": "media",
+                "status": "failed",
+                "raw_count": 9,
+                "acknowledged_count": 0,
+                "metrics": {"fixture": "generic-overwrite"},
+            },
+        },
+        expected_status=409,
+        use_guarded_dart_action=False,
+        inject_dart_preconditions=False,
+    )
+    require(
+        generic_run_rewrite.get("error")
+        == "dart_guarded_action_required",
+        repr(generic_run_rewrite),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT pipeline,source_key,status,raw_count,acknowledged_count,"
+            "metrics_json FROM ci_collection_runs "
+            f"WHERE run_id='{protected_run_id}';",
+        )
+        == (
+            "ingest-official\tdart\tsucceeded\t1\t1\t"
+            '{"fixture":"dart-lineage"}'
+        ),
+        "generic run-only action changed an existing DART collection run",
+    )
+    mysql_execute(
+        mysql_container_id,
+        "DELETE FROM ci_collection_runs "
+        f"WHERE run_id='{protected_run_id}';",
+    )
+
+    inactive_company_id = "00999985"
+    inactive_document_id = "dart:inactive-connector-smoke"
+    inactive_event_id = "event:inactive-connector-smoke"
+    inactive_run_id = "run:inactive-connector-smoke"
+    previous_connector = mysql_execute(
+        mysql_container_id,
+        "SELECT connector_status,COALESCE(last_error_class,'<NULL>') "
+        "FROM ci_source_connectors "
+        "WHERE connector_id='connector:kr:dart';",
+    ).split("\t", 1)
+    require(
+        len(previous_connector) == 2
+        and previous_connector[0] in {"configured", "active"},
+        repr(previous_connector),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "DELETE FROM ci_event_documents "
+        f"WHERE event_id='{inactive_event_id}';"
+        "DELETE FROM ci_event_observations "
+        f"WHERE event_id='{inactive_event_id}';"
+        "DELETE FROM ci_governance_events "
+        f"WHERE event_id='{inactive_event_id}';"
+        "DELETE FROM ci_documents "
+        f"WHERE document_id='{inactive_document_id}';"
+        "DELETE FROM ci_collection_runs "
+        f"WHERE run_id='{inactive_run_id}';"
+        "DELETE FROM ci_companies "
+        f"WHERE company_id='{inactive_company_id}';"
+        "UPDATE ci_source_connectors "
+        "SET connector_status='inactive',last_error_class='admin_inactive',"
+        "updated_at=UTC_TIMESTAMP() "
+        "WHERE connector_id='connector:kr:dart';",
+    )
+    try:
+        inactive_eligibility, _ = request_json(
+            base_url,
+            (
+                "api.php/api/v2/ops/source-right-eligibility?"
+                + urllib.parse.urlencode(
+                    {
+                        "source_right_id": "official:dart",
+                        "use": "collect",
+                    }
+                )
+            ),
+            token=ADMIN_TOKEN,
+        )
+        require(
+            inactive_eligibility.get("eligible") is True
+            and inactive_eligibility.get("connector_id")
+            == "connector:kr:dart"
+            and inactive_eligibility.get("connector_ready") is False
+            and "connector_status" not in inactive_eligibility,
+            repr(inactive_eligibility),
+        )
+        inactive_payload = {
+            "companies": [
+                {
+                    "company_id": inactive_company_id,
+                    "stock_code": "999985",
+                    "market": "KOSDAQ",
+                    "legal_name": "Must not cross inactive DART connector",
+                    "record_status": "active",
+                }
+            ],
+            "documents": [
+                {
+                    "document_id": inactive_document_id,
+                    "company_id": inactive_company_id,
+                    "source": "dart",
+                    "source_right_id": "official:dart",
+                    "source_class": "official_disclosure",
+                    "external_id": "inactive-connector-smoke",
+                    "document_type": "shareholder_proposal",
+                    "original_language": "ko",
+                    "title": "Must not cross inactive DART connector",
+                    "body_text": "",
+                    "original_url": (
+                        "https://opendart.fss.or.kr/"
+                        "inactive-connector-smoke"
+                    ),
+                    "content_hash": hashlib.sha256(
+                        b"inactive-connector-smoke"
+                    ).hexdigest(),
+                    "collection_key": "inactive-connector-smoke",
+                    "published_at": "2026-07-24T00:00:00Z",
+                    "retrieved_at": "2026-07-24T00:01:00Z",
+                    "verification_status": "official",
+                    "publication_status": "draft",
+                }
+            ],
+            "events": [
+                {
+                    "event_id": inactive_event_id,
+                    "company_id": inactive_company_id,
+                    "event_type": "shareholder_proposal",
+                    "title": "Must not cross inactive DART connector",
+                    "original_language": "ko",
+                    "occurred_at": "2026-07-24T00:00:00Z",
+                    "importance": "normal",
+                    "verification_status": "official",
+                    "collection_key": "inactive-connector-smoke",
+                    "document_ids": [inactive_document_id],
+                    "review_required": True,
+                }
+            ],
+            "source_rights": [],
+            "run": {
+                "run_id": inactive_run_id,
+                "pipeline": "ingest-official",
+                "source_key": "dart",
+                "code_revision": DEPLOYED_CODE_REVISION,
+                "status": "succeeded",
+                "started_at": "2026-07-24T00:00:00Z",
+                "finished_at": "2026-07-24T00:01:00Z",
+                "raw_count": 1,
+                "acknowledged_count": 1,
+                "source_outcomes": {
+                    "dart": {
+                        "status": "succeeded",
+                        "raw_count": 1,
+                        "error_count": 0,
+                    }
+                },
+                "source_ack_counts": {"dart": 1},
+                "window_start": "2026-07-24",
+                "window_end": "2026-07-24",
+            },
+        }
+        inactive_write = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot_dart_guarded",
+            inactive_payload,
+            expected_status=409,
+        )
+        require(
+            inactive_write.get("error") == "dart_connector_inactive",
+            repr(inactive_write),
+        )
+        require(
+            mysql_execute(
+                mysql_container_id,
+                "SELECT "
+                "(SELECT COUNT(*) FROM ci_companies "
+                f"WHERE company_id='{inactive_company_id}'),"
+                "(SELECT COUNT(*) FROM ci_documents "
+                f"WHERE document_id='{inactive_document_id}'),"
+                "(SELECT COUNT(*) FROM ci_governance_events "
+                f"WHERE event_id='{inactive_event_id}'),"
+                "(SELECT COUNT(*) FROM ci_collection_runs "
+                f"WHERE run_id='{inactive_run_id}'),"
+                "(SELECT connector_status FROM ci_source_connectors "
+                "WHERE connector_id='connector:kr:dart');",
+            )
+            == "0\t0\t0\t0\tinactive",
+            "inactive DART connector allowed a data mutation or was resurrected",
+        )
+    finally:
+        previous_error_sql = (
+            "NULL"
+            if previous_connector[1] == "<NULL>"
+            else "'"
+            + previous_connector[1].replace("\\", "\\\\").replace("'", "''")
+            + "'"
+        )
+        mysql_execute(
+            mysql_container_id,
+            "UPDATE ci_source_connectors "
+            f"SET connector_status='{previous_connector[0]}',"
+            f"last_error_class={previous_error_sql},updated_at=UTC_TIMESTAMP() "
+            "WHERE connector_id='connector:kr:dart';",
+        )
+
+    cross_source_correction = document(
+        "kind:20260724999005",
+        "kind",
+        "official:kind",
+        "Generic correction reference must not claim DART lineage",
+        correction_of=original_document_id,
+        version_no=2,
+    )
+    generic_correction_rewrite = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        {
+            "companies": [],
+            "documents": [cross_source_correction],
+            "events": [],
+            "source_rights": [],
+            "run": {},
+        },
+        expected_status=409,
+        use_guarded_dart_action=False,
+        inject_dart_preconditions=False,
+    )
+    require(
+        generic_correction_rewrite.get("error")
+        == "dart_guarded_action_required",
+        repr(generic_correction_rewrite),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_documents "
+            "WHERE document_id='kind:20260724999005';",
+        )
+        == "0",
+        "generic correction reference inserted a DART-linked document",
+    )
+
+    mysql_execute(
+        mysql_container_id,
+        "DELETE FROM ci_event_documents "
+        f"WHERE event_id='{original_event['event_id']}';"
+        "UPDATE ci_governance_events SET issuer_id=NULL,country_code=NULL "
+        f"WHERE event_id='{original_event['event_id']}';",
+    )
+    observation_only_rewrite = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        {
+            "companies": [],
+            "documents": [],
+            "events": [stored_event_only],
+            "source_rights": [],
+            "run": {},
+        },
+        expected_status=409,
+        use_guarded_dart_action=False,
+        inject_dart_preconditions=False,
+    )
+    require(
+        observation_only_rewrite.get("error")
+        == "dart_guarded_action_required",
+        repr(observation_only_rewrite),
+    )
+
+    mysql_execute(
+        mysql_container_id,
+        "DELETE FROM ci_event_observations "
+        f"WHERE event_id='{original_event['event_id']}';"
+        "UPDATE ci_governance_events "
+        f"SET issuer_id='issuer:kr:dart:{company_id}',country_code='KR' "
+        f"WHERE event_id='{original_event['event_id']}';",
+    )
+    projection_only_rewrite = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        {
+            "companies": [],
+            "documents": [],
+            "events": [stored_event_only],
+            "source_rights": [],
+            "run": {},
+        },
+        expected_status=409,
+        use_guarded_dart_action=False,
+        inject_dart_preconditions=False,
+    )
+    require(
+        projection_only_rewrite.get("error")
+        == "dart_guarded_action_required",
+        repr(projection_only_rewrite),
+    )
+    restored = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        original_payload,
+        expected_status=200,
+    )
+    require(
+        restored.get("ok") is True
+        and restored.get("upserted", {}).get("event_observations") == 1,
+        repr(restored),
     )
 
     conflict_target = "audit committee seat"
@@ -1036,7 +1788,7 @@ def exercise_event_identity_datetime_storage(
                 is_correction=True,
             )
         ],
-        "source_rights": [dart_right],
+        "source_rights": [],
         "run": {},
     }
     conflict = request_hmac_action(
@@ -1088,7 +1840,7 @@ def exercise_event_identity_datetime_storage(
                 "2026-08-31T00:00:00Z",
             )
         ],
-        "source_rights": [dart_right],
+        "source_rights": [],
         "run": {},
     }
     midnight = request_hmac_action(
@@ -1120,7 +1872,10 @@ def exercise_event_identity_datetime_storage(
         "run": {},
     }
     kind = request_hmac_action(
-        base_url, "upsert_governance_snapshot", kind_payload, expected_status=200
+        base_url,
+        "upsert_governance_snapshot_dart_guarded",
+        kind_payload,
+        expected_status=200,
     )
     require(kind.get("ok") is True, repr(kind))
 
@@ -1670,6 +2425,7 @@ def exercise_dart_review_corpus(base_url: str, mysql_container_id: str) -> None:
 def run(base_url: str, mysql_container_id: str) -> None:
     global EXPECTED_BACKEND_BINDING_ID
     EXPECTED_BACKEND_BINDING_ID = mysql_backend_binding_id(mysql_container_id)
+    activate_exact_dart_source_right(base_url, mysql_container_id)
 
     root, _ = request_json(base_url, "api.php/api/v1/health")
     require(root.get("ok") is True, repr(root))
@@ -1738,6 +2494,240 @@ def run(base_url: str, mysql_container_id: str) -> None:
         == "0",
         "backend binding mismatch must fail before the first governance mutation",
     )
+
+    out_of_band_right = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        {
+            "companies": [],
+            "documents": [],
+            "events": [],
+            "source_rights": [
+                {
+                    **DART_CONTRACT_FIXTURE["source_right"],
+                    "valid_from": "2021-01-01T00:00:00Z",
+                }
+            ],
+            "run": {},
+        },
+        expected_status=409,
+    )
+    require(
+        out_of_band_right.get("error")
+        == "dart_source_right_managed_out_of_band",
+        repr(out_of_band_right),
+    )
+
+    missing_deployment_company = "00999988"
+    missing_deployment = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot_dart_guarded",
+        {
+            "companies": [
+                {
+                    "company_id": missing_deployment_company,
+                    "legal_name": "Must not cross missing deployment guard",
+                }
+            ],
+            "documents": [],
+            "events": [],
+            "source_rights": [],
+            "run": {"source_key": "dart"},
+            "expected_source_right_revisions": {
+                "official:dart": {
+                    "rights_revision": DART_RIGHTS_REVISION,
+                    "contract_revision": DART_CONTRACT_REVISION,
+                }
+            },
+            "expected_release_state": "closed",
+        },
+        expected_status=409,
+        inject_dart_preconditions=False,
+    )
+    require(
+        missing_deployment.get("error")
+        == "dart_deployment_revision_required",
+        repr(missing_deployment),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_companies "
+            f"WHERE company_id='{missing_deployment_company}'",
+        )
+        == "0",
+        "missing deployment precondition must fail before mutation",
+    )
+
+    wrong_deployment_company = "00999987"
+    wrong_deployment_sha = (
+        "0" * 40 if DEPLOYED_CODE_REVISION != "0" * 40 else "1" * 40
+    )
+    wrong_deployment = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot_dart_guarded",
+        {
+            "companies": [
+                {
+                    "company_id": wrong_deployment_company,
+                    "legal_name": "Must not cross deployment mismatch",
+                }
+            ],
+            "documents": [],
+            "events": [],
+            "source_rights": [],
+            "run": {"source_key": "dart"},
+            "expected_source_right_revisions": {
+                "official:dart": {
+                    "rights_revision": DART_RIGHTS_REVISION,
+                    "contract_revision": DART_CONTRACT_REVISION,
+                }
+            },
+            "expected_deployment_code_revision": wrong_deployment_sha,
+            "expected_release_state": "closed",
+        },
+        expected_status=409,
+        inject_dart_preconditions=False,
+    )
+    require(
+        wrong_deployment.get("error")
+        == "dart_deployment_revision_mismatch",
+        repr(wrong_deployment),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_companies "
+            f"WHERE company_id='{wrong_deployment_company}'",
+        )
+        == "0",
+        "deployment revision mismatch must fail before mutation",
+    )
+
+    missing_release_state_company = "00999985"
+    missing_release_state = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot_dart_guarded",
+        {
+            "companies": [
+                {
+                    "company_id": missing_release_state_company,
+                    "legal_name": "Must not cross missing release-state guard",
+                }
+            ],
+            "documents": [],
+            "events": [],
+            "source_rights": [],
+            "run": {"source_key": "dart"},
+            "expected_source_right_revisions": {
+                "official:dart": {
+                    "rights_revision": DART_RIGHTS_REVISION,
+                    "contract_revision": DART_CONTRACT_REVISION,
+                }
+            },
+            "expected_deployment_code_revision": DEPLOYED_CODE_REVISION,
+        },
+        expected_status=409,
+        inject_dart_preconditions=False,
+    )
+    require(
+        missing_release_state.get("error")
+        == "dart_release_state_precondition_required",
+        repr(missing_release_state),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_companies "
+            f"WHERE company_id='{missing_release_state_company}'",
+        )
+        == "0",
+        "missing release-state precondition must fail before mutation",
+    )
+
+    generic_dart_company = "00999986"
+    generic_dart = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        {
+            "companies": [
+                {
+                    "company_id": generic_dart_company,
+                    "legal_name": "Generic action must reject DART",
+                }
+            ],
+            "documents": [],
+            "events": [],
+            "source_rights": [],
+            "run": {"source_key": "dart"},
+        },
+        expected_status=409,
+        use_guarded_dart_action=False,
+        inject_dart_preconditions=False,
+    )
+    require(
+        generic_dart.get("error") == "dart_guarded_action_required",
+        repr(generic_dart),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_companies "
+            f"WHERE company_id='{generic_dart_company}'",
+        )
+        == "0",
+        "generic HMAC action must reject DART before mutation",
+    )
+
+    migration_012_checksum = mysql_execute(
+        mysql_container_id,
+        "SELECT migration_checksum FROM ci_schema_migrations "
+        "WHERE migration_version=12",
+    )
+    require(len(migration_012_checksum) == 64, migration_012_checksum)
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_schema_migrations SET migration_checksum=REPEAT('0',64) "
+        "WHERE migration_version=12",
+    )
+    try:
+        drift_rejected = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            {
+                "companies": [
+                    {
+                        "company_id": "00999990",
+                        "legal_name": "Must not cross schema drift",
+                    }
+                ],
+                "documents": [],
+                "events": [],
+                "source_rights": [],
+                "run": {"source_key": "dart"},
+            },
+            expected_status=503,
+        )
+        require(
+            drift_rejected.get("error") == "dart_global_bridge_unavailable",
+            repr(drift_rejected),
+        )
+        require(
+            mysql_execute(
+                mysql_container_id,
+                "SELECT COUNT(*) FROM ci_companies "
+                "WHERE company_id='00999990'",
+            )
+            == "0",
+            "schema drift must fail before the first DART mutation",
+        )
+    finally:
+        mysql_execute(
+            mysql_container_id,
+            "UPDATE ci_schema_migrations "
+            f"SET migration_checksum='{migration_012_checksum}' "
+            "WHERE migration_version=12",
+        )
 
     exercise_official_slot_claims(base_url, mysql_container_id)
 
@@ -2315,6 +3305,38 @@ def run(base_url: str, mysql_container_id: str) -> None:
         request_id="php73-release-preview",
     )
     require(preview.get("changed") is True and preview.get("state_version") == 1, repr(preview))
+
+    preview_dart_write = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        {
+            "companies": [
+                {
+                    "company_id": "00999989",
+                    "legal_name": "Must not write during preview",
+                }
+            ],
+            "documents": [],
+            "events": [],
+            "source_rights": [],
+            "run": {"source_key": "dart"},
+        },
+        expected_status=409,
+        expected_release_state="preview",
+    )
+    require(
+        preview_dart_write.get("error")
+        == "dart_release_state_mismatch",
+        repr(preview_dart_write),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_companies WHERE company_id='00999989'",
+        )
+        == "0",
+        "v1/v2 preview race mismatch must fail before the first DART mutation",
+    )
 
     missing_preview, _ = request_json(
         base_url,

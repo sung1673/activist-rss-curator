@@ -43,10 +43,11 @@ permissions:
   contents: read
   actions: read
 
-# Backfill and scheduled official ingest share one non-cancelling lock. This
-# prevents overlapping DART/KIND pagination and remote upserts on main.
+# Backfill, scheduled official ingest, protected release transitions, and the
+# related protected metadata operations share one non-cancelling lock. This
+# keeps a multi-request logical run entirely before or after a release change.
 concurrency:
-  group: ingest-official-${{ github.ref_name }}
+  group: governance-production-official-write-${{ github.repository }}-${{ github.ref }}
   queue: max
   cancel-in-progress: false
 
@@ -54,7 +55,8 @@ jobs:
   backfill:
     if: >-
       vars.DART_OFFICIAL_INGEST_ENABLED == 'true' &&
-      github.ref_name == github.event.repository.default_branch
+      github.ref_type == 'branch' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 360
     environment:
@@ -107,6 +109,7 @@ jobs:
         run: python -m pip install -r requirements.txt
 
       - name: Resolve fail-closed rollout mode
+        id: rollout
         env:
           PAGES_OWNER: ${{ vars.PAGES_OWNER }}
           GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
@@ -115,7 +118,7 @@ jobs:
           ENABLE_GOVERNANCE_SHADOW: ${{ vars.ENABLE_GOVERNANCE_SHADOW }}
           ENABLE_TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
           ENABLE_GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
-        run: python -m curator.operation_mode
+        run: python -m curator.operation_mode --github-output "$GITHUB_OUTPUT"
 
       - name: Validate bounded backfill inputs
         env:
@@ -185,6 +188,21 @@ jobs:
           fi
           bash .github/scripts/require-env.sh "${required[@]}"
           python .github/scripts/validate-api-base-urls.py --github-env "$GITHUB_ENV"
+
+      - name: Verify DART SourceRight before any apply write
+        if: inputs.mode == 'apply' && inputs.source != 'kind'
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          GOVERNANCE_PIPELINE_MODE: ${{ steps.rollout.outputs.governance_pipeline_mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m curator.official_source_rights \
+            --preflight-dart \
+            --expected-release-sha "$GITHUB_SHA" \
+            --pipeline-mode "$GOVERNANCE_PIPELINE_MODE"
 
       - name: Verify KIND SourceRight before adapter network access
         if: inputs.source == 'kind' || inputs.source == 'both'
@@ -369,6 +387,7 @@ jobs:
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
           BSIDE_BACKEND_BINDING_ID: ${{ vars.BSIDE_BACKEND_BINDING_ID }}
+          GOVERNANCE_PIPELINE_MODE: ${{ steps.rollout.outputs.governance_pipeline_mode }}
           CURATOR_REQUIRE_DURABLE_DART_QUOTA: "1"
           CURATOR_DART_QUOTA_PHASE: official-backfill
           DART_REQUEST_BUDGET: ${{ steps.dart_budget.outputs.remaining_request_budget }}

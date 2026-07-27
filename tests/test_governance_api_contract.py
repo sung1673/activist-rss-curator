@@ -675,6 +675,70 @@ def test_kind_source_right_is_preflighted_and_revalidated_inside_ingest_transact
     )
 
 
+def test_dart_source_right_is_out_of_band_and_rechecked_under_write_lock():
+    helper = V1[
+        V1.index("function v1_dart_source_right_expectation") :
+        V1.index("function v1_global_event_family_for_legacy_type")
+    ]
+    assert "expected_source_right_revisions" in helper
+    assert "'rights_revision'" in helper
+    assert "'contract_revision'" in helper
+    ingest = V1[V1.index("function upsert_governance_snapshot") :]
+    assert "dart_source_right_managed_out_of_band" in ingest
+    assert "dart_global_bridge_unavailable" in ingest
+    assert "dart_source_right_precondition_required" in ingest
+    assert "dart_deployment_revision_required" in ingest
+    assert "dart_release_state_precondition_required" in ingest
+    assert "dart_deployment_revision_mismatch" in ingest
+    assert "dart_guarded_action_required" in ingest
+    assert "v1_lock_existing_dart_lineage(" in ingest
+    assert "v2_release_state_rows_for_update($pdo,$config)" in ingest
+    assert "dart_release_state_mismatch" in ingest
+    assert "v1_dart_release_state_expectation" in helper
+    assert "expected_release_state" in helper
+    assert "$storedV1ReleaseState !== $storedV2ReleaseState" in ingest
+    assert "$storedV1ReleaseState !== $dartReleaseStateExpectation" in ingest
+    assert "dart_body_text_forbidden" in V1
+    body_guard = V1[
+        V1.index("function v1_normalize_governance_snapshot_documents") :
+        V1.index("function v1_governance_snapshot_lineage_candidates")
+    ]
+    assert "'body_text','content'" in body_guard
+    assert "$document[$bodyField] !== ''" in body_guard
+    assert "$dartReleaseStates[GOV_V1_RELEASE_STATE_KEY]" in ingest
+    assert "$dartReleaseStates[GOV_V2_RELEASE_STATE_KEY]" in ingest
+    assert "v2_source_right_row(" in ingest
+    assert "'official:dart'," in ingest
+    assert "true" in ingest[
+        ingest.index("v2_source_right_row(") :
+        ingest.index("v2_source_right_ineligible_reasons")
+    ]
+    assert "v2_source_right_revision($dartRight)" in ingest
+    assert "v2_source_right_contract_revision($dartRight)" in ingest
+    assert "dart_source_right_ineligible_or_changed" in ingest
+    assert ingest.index("v2_release_state_rows_for_update($pdo,$config)") < ingest.index(
+        "v2_source_right_row("
+    )
+    assert ingest.index("v2_source_right_row(") < ingest.index(
+        "v1_lock_global_dart_connector("
+    )
+    assert ingest.index("v1_lock_global_dart_connector(") < ingest.index(
+        "v1_lock_existing_dart_lineage("
+    )
+    assert ingest.index("dart_global_bridge_unavailable") < ingest.index(
+        "$pdo->beginTransaction()"
+    )
+    assert ingest.index("v2_deployment_identity_status()") < ingest.index(
+        "$companyStmt = $pdo->prepare"
+    )
+    assert ingest.index("v2_source_right_row(") < ingest.index(
+        "$companyStmt = $pdo->prepare"
+    )
+    assert ingest.index("v2_source_right_row(") < ingest.index(
+        "$rightStmt = $pdo->prepare"
+    )
+
+
 def test_editor_identity_completion_recomputes_comparison_key_and_preserves_event_id():
     spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
     route = spec["paths"]["/admin/events/{event_id}/identity"]["post"]
@@ -1032,6 +1096,15 @@ def test_server_to_server_hmac_actions_are_registered():
     for action in actions:
         assert f"'{action}'" in API
         assert f"function {action}" in V1
+    assert "'upsert_governance_snapshot_dart_guarded'" in API
+    assert (
+        "upsert_governance_snapshot($pdo, $config, $payload, true)"
+        in API
+    )
+    assert (
+        "upsert_governance_snapshot($pdo, $config, $payload, false)"
+        in API
+    )
     # handle_write authenticates once before dispatching every registered action.
     auth_position = API.index("$nonce = require_signature($body, $config)")
     dispatch_position = API.index("if ($action === 'upsert_governance_snapshot')")
@@ -1224,8 +1297,10 @@ def test_cancelled_document_remains_public_as_verifiable_lifecycle_evidence():
 
 
 def test_company_master_does_not_erase_non_empty_fields_with_partial_updates():
-    ingest = V1[
-        V1.index("$companyStmt =") : V1.index("foreach ($companies as $company)")
+    upsert = V1[V1.index("function upsert_governance_snapshot") :]
+    ingest = upsert[
+        upsert.index("$companyStmt =")
+        : upsert.index("foreach ($companies as $company)")
     ]
     for field in (
         "stock_code",
@@ -1451,8 +1526,10 @@ def test_hmac_ingest_cannot_reactivate_or_overwrite_administered_source_rights()
             "function enqueue_delivery_outbox"
         )
     ]
+    right_statement = ingest.index("$rightStmt =")
     right_upsert = ingest[
-        ingest.index("$rightStmt =") : ingest.index("foreach ($rights as $right)")
+        right_statement :
+        ingest.index("foreach ($rights as $right)", right_statement)
     ]
     assert "ON DUPLICATE KEY UPDATE source_right_id=source_right_id" in right_upsert
     for administered_field in (

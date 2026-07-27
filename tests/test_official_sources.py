@@ -1415,7 +1415,9 @@ def test_official_connectors_reject_page_drift_empty_success_pages_and_count_mis
             )
 
 
-def test_company_master_zip_and_source_right_payload_contract(config: dict[str, object]) -> None:
+def test_company_master_zip_and_collector_never_manages_source_rights(
+    config: dict[str, object],
+) -> None:
     xml = b"""<?xml version='1.0' encoding='UTF-8'?><result><list><corp_code>00126380</corp_code><corp_name>Samsung</corp_name><stock_code>005930</stock_code><modify_date>20260716</modify_date></list></result>"""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
@@ -1425,9 +1427,7 @@ def test_company_master_zip_and_source_right_payload_contract(config: dict[str, 
     assert companies[0]["listing_status"] == "listed"
     assert companies[0]["master_modified_at"] == "2026-07-16T00:00:00+00:00"
     rights = source_right_payloads(config, include_kind=True)
-    assert {row["source_right_id"] for row in rights} == {"official:dart"}
-    assert all(row["source_key"] != "kind" for row in rights)
-    assert all(row.get("evidence_uri") for row in rights)
+    assert rights == []
 
 
 def test_company_master_marks_missing_stock_code_unlisted_and_rejects_bad_modify_date() -> None:

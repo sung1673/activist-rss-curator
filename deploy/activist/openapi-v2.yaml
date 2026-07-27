@@ -629,10 +629,12 @@ paths:
       tags: [Operations]
       summary: Revalidate one official SourceRight for a proposed use
       description: >-
-        Returns a revision hash only after checking current status, evidence,
+        Returns rights_revision and the stable source-right-contract-v1
+        contract_revision only after checking current status, evidence,
         validity and the requested collection, public-redistribution or AI use.
-        This endpoint bypasses the public release state but still requires
-        schema version 12.
+        contract_revision excludes updated_at and exposes no raw permission or
+        evidence value. This endpoint bypasses the public release state but
+        remains authenticated and requires schema version 12.
       security:
         - OpsBearer: []
       parameters:
@@ -2267,6 +2269,7 @@ components:
         - use
         - eligible
         - rights_revision
+        - contract_revision
         - redistribution_allowed
         - ai_allowed
         - checked_at
@@ -2288,10 +2291,35 @@ components:
         rights_revision:
           type: string
           pattern: '^[a-f0-9]{64}$'
+          description: >-
+            Mutable row revision including updated_at, retained for
+            concurrency and backwards compatibility.
+        contract_revision:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: >-
+            source-right-contract-v1 SHA-256. Canonical JSON keys are sorted
+            and UTF-8 encoded without insignificant whitespace. Inputs are
+            contract_version=1; exact source_right_id, source_type, source_key,
+            source_name and status; SHA-256 of the exact permission scope;
+            SHA-256 of the exact evidence URI plus the normalized lowercase
+            evidence hash; valid_from normalized to eligible or future;
+            exact nullable valid_until and revoked_at; and boolean AI and
+            redistribution permissions. updated_at is excluded.
         redistribution_allowed:
           type: boolean
         ai_allowed:
           type: boolean
+        connector_id:
+          type: string
+          description: >-
+            Present only for protected OpenDART collect preflight and fixed to
+            connector:kr:dart.
+        connector_ready:
+          type: boolean
+          description: >-
+            Protected coarse readiness bit for OpenDART collection. The raw
+            administrative connector status is never returned.
         checked_at:
           type: string
           format: date-time
@@ -2769,7 +2797,14 @@ components:
         body_text:
           type: [string, 'null']
           maxLength: 500000
-          description: Rejected when the current SourceRight forbids redistribution.
+          description: >-
+            Rejected when the current SourceRight forbids redistribution.
+            Independently of permission_scope or redistribution flags, the
+            fixed Production Alpha contracts official:sec-edgar,
+            official:edinet, official:companies-house,
+            official:ca-issuer-ir and official:asic-register require this
+            value to be null; those sources persist metadata and official URLs
+            only.
         correction_of_external_id:
           type: [string, 'null']
           maxLength: 191

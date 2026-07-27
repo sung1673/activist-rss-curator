@@ -1838,6 +1838,7 @@ function handle_write(string $action, array $config): void {
         'upsert_report',
         'upsert_telegram_snapshot',
         'upsert_governance_snapshot',
+        'upsert_governance_snapshot_dart_guarded',
         'upsert_official_site_snapshot',
         'upsert_editorial_snapshot',
         'enqueue_delivery_outbox',
@@ -1889,7 +1890,11 @@ function handle_write(string $action, array $config): void {
     }
     if ($action === 'upsert_governance_snapshot') {
         v1_require_schema_version($pdo, $config);
-        upsert_governance_snapshot($pdo, $config, $payload);
+        upsert_governance_snapshot($pdo, $config, $payload, false);
+    }
+    if ($action === 'upsert_governance_snapshot_dart_guarded') {
+        v1_require_schema_version($pdo, $config);
+        upsert_governance_snapshot($pdo, $config, $payload, true);
     }
     if ($action === 'upsert_official_site_snapshot') {
         v1_require_schema_version($pdo, $config);

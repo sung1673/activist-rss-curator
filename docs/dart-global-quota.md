@@ -80,6 +80,14 @@ fail-closed한다.
 없거나 다른 값이면 job 전체가 skip된다. 이 게이트는 schema 12 클라이언트가 구
 PHP quota API를 호출하지 못하게 하는 배포용 안전장치다.
 
+증분 수집과 백필은 protected cutover·SourceRight bootstrap·slot epoch reset과
+같은 repository·exact Git ref 단위 non-cancelling concurrency queue를 공유한다.
+따라서 정상 공개 전환은 한 논리 실행의 list·회사 master·document chunk·final run
+ACK가 끝난 뒤에만 시작한다. 긴급 rollback은 백필을 기다리지 않고 release state를
+즉시 `closed`로 내린 뒤 Pages lock 안에서 다시 확인한다. 이미 진행 중인 DART 실행은 다음 chunk의 서명된
+기대 상태 검증에서 mutation 없이 실패하며 partial 데이터는 비공개 상태에서 replay
+대상이 된다. 같은 짧은 이름의 tag는 exact 기본 branch 검사를 통과하지 못한다.
+
 전환은 `DART_OFFICIAL_INGEST_ENABLED=false` 설정, `ingest-official`과
 `official-backfill`의 queued·running run 0건 확인, pending-schema-upgrade
 PHP 배포, migration 012 apply·replay, schema 12 exact smoke,

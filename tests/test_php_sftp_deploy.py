@@ -4,10 +4,12 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import posixpath
 import re
 import stat
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import unquote, urlsplit
@@ -29,11 +31,13 @@ from curator.php_sftp_deploy import (
     GABIA_SSH_HOST_KEY_SHA256,
     HttpResponse,
     LEGACY_SCHEMA_11_CORE_API_FILES,
+    ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
     ParamikoPinnedSftpSession,
     PhpDeploymentError,
     build_local_deployment_plan,
     confirm_production_release,
     confirm_production_rollback,
+    confirm_one_time_schema_bridge_rollback,
     deploy_release,
     inspect_remote_deployment,
     load_remote_backup,
@@ -41,6 +45,7 @@ from curator.php_sftp_deploy import (
     main,
     prepare_gabia_core_compatibility,
     reset_opcache_with_ephemeral_probe,
+    rollback_one_time_schema_bridge,
     rollback_release,
     ssh_sftp_options_from_args,
     verify_closed_v2_api,
@@ -53,8 +58,98 @@ LEGACY_RELEASE_SHA = "b" * 40
 RELEASE_ID = "php-v2-aaaaaaaaaaaa-20260725t000000z-12345678"
 PUBLIC_ROOT = "https://alignpe.gabia.io/activist"
 API_V2 = PUBLIC_ROOT + "/api.php/api/v2"
+API_V1 = PUBLIC_ROOT + "/api.php/api/v1"
 ROLLBACK_HEALTH = PUBLIC_ROOT + "/api.php?action=health"
 PROTECTED_TOKEN = "ops-protected-token-" + "z" * 40
+DART_DISABLED_EVIDENCE = (
+    "github-variable:DART_OFFICIAL_INGEST_ENABLED=false@run-20260727"
+)
+
+
+def _stale_writer_absence_evidence(
+    *,
+    owner_content: bytes,
+    acquired_at_reference: str,
+    nonce: str = "1" * 32,
+    issued_at: datetime | None = None,
+) -> str:
+    issued = (
+        datetime.now(timezone.utc)
+        if issued_at is None
+        else issued_at
+    ).strftime("%Y%m%dT%H%M%SZ")
+    return (
+        f"github-actions:no-running-php-writers@{issued}:"
+        f"owner_sha256={hashlib.sha256(owner_content).hexdigest()}:"
+        "acquired_at_sha256="
+        f"{hashlib.sha256(acquired_at_reference.encode('ascii')).hexdigest()}:"
+        f"nonce={nonce}"
+    )
+
+
+def _age_test_lock_owner(
+    client: MemorySftp,
+    lock_path: str,
+) -> tuple[str, str]:
+    owner_path = lock_path + "/owner.json"
+    payload = json.loads(client.files[owner_path])
+    acquired_at = (
+        datetime.now(timezone.utc) - timedelta(minutes=30)
+    ).isoformat()
+    payload["acquired_at"] = acquired_at
+    owner_content = php_deploy._encode_json(payload)
+    client.files[owner_path] = owner_content
+    return acquired_at, _stale_writer_absence_evidence(
+        owner_content=owner_content,
+        acquired_at_reference=acquired_at,
+    )
+
+
+def _age_test_ownerless_lock(
+    client: MemorySftp,
+    lock_path: str,
+    *,
+    first_observed_delta: int = 30,
+    remote_mtime_delta: int = 30,
+    issued_delta: int = 0,
+    owner_content_override: bytes | None = None,
+) -> tuple[str, str, bytes]:
+    now = datetime.now(timezone.utc)
+    client.mtimes[lock_path] = int(
+        (now - timedelta(minutes=remote_mtime_delta)).timestamp()
+    )
+    remote_identity, _identity, remote_mtime = (
+        php_deploy._read_exact_ownerless_deployment_lock(
+            client,
+            lock_path=lock_path,
+        )
+    )
+    first_observed = (
+        remote_mtime
+        if first_observed_delta == remote_mtime_delta
+        else (
+            now - timedelta(minutes=first_observed_delta)
+        ).isoformat()
+    )
+    evidence = _stale_writer_absence_evidence(
+        owner_content=(
+            remote_identity
+            if owner_content_override is None
+            else owner_content_override
+        ),
+        acquired_at_reference=first_observed,
+        issued_at=now - timedelta(minutes=issued_delta),
+    )
+    return first_observed, evidence, remote_identity
+
+
+def _recording_bridge_updater() -> object:
+    states: list[str] = []
+
+    def update(status: str, _evidence: object) -> None:
+        states.append(status)
+
+    return update
 
 
 class _Writer(io.BytesIO):
@@ -75,6 +170,11 @@ class MemorySftp:
         self.files: dict[str, bytes] = {}
         self.modes: dict[str, int] = {}
         self.directories: dict[str, int] = {"/": 0o755}
+        self.mtimes: dict[str, int] = {
+            "/": int(datetime.now(timezone.utc).timestamp())
+        }
+        self.inodes: dict[str, int] = {"/": 1}
+        self.next_inode = 2
         self.symlinks: set[str] = set()
         self.mutations = 0
         self.mkdir_calls: list[str] = []
@@ -90,12 +190,22 @@ class MemorySftp:
         parent = posixpath.dirname(normalized)
         assert parent in self.directories
         self.directories[normalized] = mode
+        self.mtimes[normalized] = int(
+            datetime.now(timezone.utc).timestamp()
+        )
+        self.inodes[normalized] = self.next_inode
+        self.next_inode += 1
 
     def add_file(self, path: str, content: bytes, mode: int = 0o644) -> None:
         normalized = self._path(path)
         assert posixpath.dirname(normalized) in self.directories
         self.files[normalized] = content
         self.modes[normalized] = mode
+        self.mtimes[normalized] = int(
+            datetime.now(timezone.utc).timestamp()
+        )
+        self.inodes[normalized] = self.next_inode
+        self.next_inode += 1
 
     def lstat(self, path: str) -> object:
         normalized = self._path(path)
@@ -105,13 +215,40 @@ class MemorySftp:
             return SimpleNamespace(
                 st_mode=stat.S_IFREG | self.modes[normalized],
                 st_size=len(self.files[normalized]),
+                st_mtime=self.mtimes.get(normalized, 0),
+                st_uid=1000,
+                st_gid=1000,
+                st_ino=self.inodes.get(normalized, 0),
+                st_dev=1,
             )
         if normalized in self.directories:
             return SimpleNamespace(
                 st_mode=stat.S_IFDIR | self.directories[normalized],
                 st_size=0,
+                st_mtime=self.mtimes.get(normalized, 0),
+                st_uid=1000,
+                st_gid=1000,
+                st_ino=self.inodes.get(normalized, 0),
+                st_dev=1,
             )
         raise FileNotFoundError(2, "not found")
+
+    def listdir(self, path: str) -> list[str]:
+        normalized = self._path(path)
+        if normalized not in self.directories:
+            raise FileNotFoundError(2, "not found")
+        prefix = normalized.rstrip("/") + "/"
+        children = {
+            candidate[len(prefix) :].split("/", 1)[0]
+            for candidate in (
+                *self.files,
+                *self.directories,
+                *self.symlinks,
+            )
+            if candidate.startswith(prefix)
+            and candidate != normalized
+        }
+        return sorted(children)
 
     def mkdir(self, path: str, mode: int = 0o777) -> None:
         normalized = self._path(path)
@@ -125,6 +262,11 @@ class MemorySftp:
         if posixpath.dirname(normalized) not in self.directories:
             raise FileNotFoundError(2, "parent missing")
         self.directories[normalized] = mode
+        self.mtimes[normalized] = int(
+            datetime.now(timezone.utc).timestamp()
+        )
+        self.inodes[normalized] = self.next_inode
+        self.next_inode += 1
         self.mutations += 1
 
     def chmod(self, path: str, mode: int) -> None:
@@ -155,8 +297,15 @@ class MemorySftp:
             raise FileNotFoundError(2, "parent missing")
 
         def commit(content: bytes) -> None:
+            created = normalized not in self.files
             self.files[normalized] = content
             self.modes.setdefault(normalized, 0o666)
+            self.mtimes[normalized] = int(
+                datetime.now(timezone.utc).timestamp()
+            )
+            if created:
+                self.inodes[normalized] = self.next_inode
+                self.next_inode += 1
             self.mutations += 1
 
         return _Writer(commit)
@@ -167,6 +316,8 @@ class MemorySftp:
             raise FileNotFoundError(2, "not found")
         del self.files[normalized]
         self.modes.pop(normalized, None)
+        self.mtimes.pop(normalized, None)
+        self.inodes.pop(normalized, None)
         self.mutations += 1
 
     def rmdir(self, path: str) -> None:
@@ -181,6 +332,8 @@ class MemorySftp:
         ):
             raise OSError(39, "not empty")
         del self.directories[normalized]
+        self.mtimes.pop(normalized, None)
+        self.inodes.pop(normalized, None)
         self.mutations += 1
 
     def posix_rename(self, oldpath: str, newpath: str) -> None:
@@ -194,6 +347,8 @@ class MemorySftp:
             raise OSError(21, "target is not a file")
         self.files[target] = self.files.pop(source)
         self.modes[target] = self.modes.pop(source)
+        self.mtimes[target] = self.mtimes.pop(source)
+        self.inodes[target] = self.inodes.pop(source)
         self.mutations += 1
 
     def rename(self, oldpath: str, newpath: str) -> None:
@@ -211,6 +366,8 @@ class MemorySftp:
             raise FileNotFoundError(2, "parent missing")
         self.files[target] = self.files.pop(source)
         self.modes[target] = self.modes.pop(source)
+        self.mtimes[target] = self.mtimes.pop(source)
+        self.inodes[target] = self.inodes.pop(source)
         self.mutations += 1
 
     def close(self) -> None:
@@ -246,6 +403,11 @@ class GabiaMemorySftp(MemorySftp):
             raise FileNotFoundError(2, "parent missing")
         self.files[normalized] = b""
         self.modes[normalized] = 0o644
+        self.mtimes[normalized] = int(
+            datetime.now(timezone.utc).timestamp()
+        )
+        self.inodes[normalized] = self.next_inode
+        self.next_inode += 1
         self.mutations += 1
         return _GabiaExclusiveHandle()
 
@@ -295,6 +457,17 @@ class HttpRouter:
             headers={
                 "Content-Type": "application/json",
                 "X-BSIDE-API-Version": "v2",
+            },
+            body=json.dumps(payload, separators=(",", ":")).encode(),
+        )
+
+    @staticmethod
+    def _v1_json(status: int, payload: object) -> HttpResponse:
+        return HttpResponse(
+            status=status,
+            headers={
+                "Content-Type": "application/json",
+                "X-BSIDE-API-Version": "v1",
             },
             body=json.dumps(payload, separators=(",", ":")).encode(),
         )
@@ -407,6 +580,43 @@ class HttpRouter:
                     "probe_id": match.group(1),
                 },
             )
+        if url == API_V1 + "/health":
+            return self._v1_json(
+                200,
+                {
+                    "ok": True,
+                    "service": "bside-governance-intelligence",
+                    "api_version": "v1",
+                },
+            )
+        if url == API_V1 + "/events?limit=1":
+            return self._v1_json(
+                503,
+                {
+                    "ok": False,
+                    "error": "governance_release_closed",
+                    "api_version": "v1",
+                },
+            )
+        if url == API_V1 + "/admin/release-state":
+            if headers.get("Authorization") != "Bearer " + PROTECTED_TOKEN:
+                return self._v1_json(
+                    401,
+                    {
+                        "ok": False,
+                        "error": "bearer_token_required",
+                        "api_version": "v1",
+                    },
+                )
+            return self._v1_json(
+                200,
+                {
+                    "ok": True,
+                    "release_state": "closed",
+                    "schema_version": 10,
+                    "api_version": "v1",
+                },
+            )
         if url == API_V2 + "/health":
             if self.fail_v2_health:
                 return self._json(500, {"ok": False, "api_version": "v2"})
@@ -510,13 +720,15 @@ class SchemaBridgeHttpRouter:
         self,
         sftp: MemorySftp,
         *,
+        previous_release_sha: str = LEGACY_RELEASE_SHA,
         private_canary_mode: str = "blocked",
         strict_opcache_action: str | None = None,
+        candidate_actual_schema_version: int = 11,
     ) -> None:
         self.sftp = sftp
         self.legacy = HttpRouter(
             sftp,
-            code_revision=LEGACY_RELEASE_SHA,
+            code_revision=previous_release_sha,
             schema_version=11,
             private_canary_mode=private_canary_mode,
             strict_opcache_action=strict_opcache_action,
@@ -525,10 +737,15 @@ class SchemaBridgeHttpRouter:
             sftp,
             code_revision=RELEASE_SHA,
             schema_version=12,
-            pending_actual_schema_version=11,
+            pending_actual_schema_version=(
+                None
+                if candidate_actual_schema_version == 12
+                else candidate_actual_schema_version
+            ),
             private_canary_mode=private_canary_mode,
             strict_opcache_action=strict_opcache_action,
         )
+        self.previous_release_sha = previous_release_sha
 
     def __call__(
         self,
@@ -538,9 +755,11 @@ class SchemaBridgeHttpRouter:
         timeout: float,
     ) -> HttpResponse:
         manifest_path = DEFAULT_REMOTE_ROOT + "/" + DEPLOYMENT_MANIFEST_NAME
+        if manifest_path not in self.sftp.files:
+            return self.legacy(method, url, headers, timeout)
         manifest = json.loads(self.sftp.files[manifest_path])
         revision = manifest["code_revision"]
-        if revision == LEGACY_RELEASE_SHA:
+        if revision == self.previous_release_sha:
             return self.legacy(method, url, headers, timeout)
         if revision == RELEASE_SHA:
             return self.candidate(method, url, headers, timeout)
@@ -975,6 +1194,9 @@ def _copy_sftp_state(
     destination.files = dict(source.files)
     destination.modes = dict(source.modes)
     destination.directories = dict(source.directories)
+    destination.mtimes = dict(source.mtimes)
+    destination.inodes = dict(source.inodes)
+    destination.next_inode = source.next_inode
     destination.symlinks = set(source.symlinks)
     destination.mutations = 0
     destination.mkdir_calls.clear()
@@ -1806,6 +2028,94 @@ def test_schema_upgrade_bridge_requires_attested_existing_release(
                 code_revision=RELEASE_SHA,
             ),
             schema_upgrade_from=11,
+            expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            bridge_report_update=_recording_bridge_updater(),  # type: ignore[arg-type]
+        )
+
+    assert production_sftp.files == before_files
+    assert production_sftp.directories == before_directories
+    assert production_sftp.mutations == before_mutations
+
+
+def test_schema_upgrade_bridge_rejects_non_c06_schema11_predecessor(
+    local_plan: object,
+    production_sftp: MemorySftp,
+) -> None:
+    _install_attested_release(
+        production_sftp,
+        code_revision=LEGACY_RELEASE_SHA,
+        core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+    )
+    before_files = dict(production_sftp.files)
+    before_mutations = production_sftp.mutations
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="predecessor is not the exact c06 release",
+    ):
+        deploy_release(
+            production_sftp,
+            plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=HttpRouter(
+                production_sftp,
+                code_revision=LEGACY_RELEASE_SHA,
+                schema_version=11,
+            ),
+            schema_upgrade_from=11,
+            expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            bridge_report_update=_recording_bridge_updater(),  # type: ignore[arg-type]
+        )
+
+    assert production_sftp.files == before_files
+    assert production_sftp.mutations == before_mutations
+
+
+def test_schema_upgrade_bridge_requires_journal_before_remote_mutation(
+    local_plan: object,
+    production_sftp: MemorySftp,
+) -> None:
+    _install_attested_release(
+        production_sftp,
+        code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+        file_overrides={
+            "migrations/011_global_terminal_v2.sql": _artifact_bytes(
+                local_plan,
+                "migrations/011_global_terminal_v2.sql",
+            )
+        },
+    )
+    before_files = dict(production_sftp.files)
+    before_directories = dict(production_sftp.directories)
+    before_mutations = production_sftp.mutations
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="durable bridge journal",
+    ):
+        deploy_release(
+            production_sftp,
+            plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=SchemaBridgeHttpRouter(
+                production_sftp,
+                previous_release_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            ),
+            schema_upgrade_from=11,
+            expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            bridge_report_update=None,
         )
 
     assert production_sftp.files == before_files
@@ -1819,7 +2129,7 @@ def test_schema_upgrade_bridge_verifies_old_then_pending_candidate(
 ) -> None:
     _install_attested_release(
         production_sftp,
-        code_revision=LEGACY_RELEASE_SHA,
+        code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
         core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
         file_overrides={
             "migrations/011_global_terminal_v2.sql": _artifact_bytes(
@@ -1836,8 +2146,14 @@ def test_schema_upgrade_bridge_verifies_old_then_pending_candidate(
         api_v2_base_url=API_V2,
         rollback_health_url=ROLLBACK_HEALTH,
         protected_token=PROTECTED_TOKEN,
-        http_request=SchemaBridgeHttpRouter(production_sftp),
+        http_request=SchemaBridgeHttpRouter(
+            production_sftp,
+            previous_release_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        ),
         schema_upgrade_from=11,
+        expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+        bridge_report_update=_recording_bridge_updater(),  # type: ignore[arg-type]
     )
 
     manifest = json.loads(
@@ -1872,7 +2188,7 @@ def test_schema_11_manifest_is_rejected_without_explicit_bridge(
 ) -> None:
     _install_attested_release(
         production_sftp,
-        code_revision=LEGACY_RELEASE_SHA,
+        code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
         core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
     )
     before_files = dict(production_sftp.files)
@@ -1893,7 +2209,7 @@ def test_schema_11_manifest_is_rejected_without_explicit_bridge(
             protected_token=PROTECTED_TOKEN,
             http_request=HttpRouter(
                 production_sftp,
-                code_revision=LEGACY_RELEASE_SHA,
+                code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
                 schema_version=11,
             ),
         )
@@ -1909,7 +2225,7 @@ def test_schema_11_bridge_rejects_changed_migration_011_before_mutation(
 ) -> None:
     _install_attested_release(
         production_sftp,
-        code_revision=LEGACY_RELEASE_SHA,
+        code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
         core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
     )
     before_files = dict(production_sftp.files)
@@ -1930,10 +2246,13 @@ def test_schema_11_bridge_rejects_changed_migration_011_before_mutation(
             protected_token=PROTECTED_TOKEN,
             http_request=HttpRouter(
                 production_sftp,
-                code_revision=LEGACY_RELEASE_SHA,
+                code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
                 schema_version=11,
             ),
             schema_upgrade_from=11,
+            expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            bridge_report_update=_recording_bridge_updater(),  # type: ignore[arg-type]
         )
 
     assert production_sftp.files == before_files
@@ -1947,7 +2266,7 @@ def test_schema_11_bridge_rejects_stray_migration_012_before_mutation(
 ) -> None:
     _install_attested_release(
         production_sftp,
-        code_revision=LEGACY_RELEASE_SHA,
+        code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
         core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
         file_overrides={
             "migrations/011_global_terminal_v2.sql": _artifact_bytes(
@@ -1979,10 +2298,13 @@ def test_schema_11_bridge_rejects_stray_migration_012_before_mutation(
             protected_token=PROTECTED_TOKEN,
             http_request=HttpRouter(
                 production_sftp,
-                code_revision=LEGACY_RELEASE_SHA,
+                code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
                 schema_version=11,
             ),
             schema_upgrade_from=11,
+            expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            bridge_report_update=_recording_bridge_updater(),  # type: ignore[arg-type]
         )
 
     assert production_sftp.files == before_files
@@ -2974,3 +3296,2373 @@ def test_existing_v2_requires_protected_closed_smoke_before_remote_mutation(
     assert production_sftp.files == before_files
     assert production_sftp.directories == before_directories
     assert production_sftp.mutations == 0
+
+
+def _deploy_test_schema_bridge(
+    local_plan: object,
+) -> tuple[GabiaMemorySftp, SchemaBridgeHttpRouter, dict[str, object]]:
+    client = _gabia_sftp()
+    _install_attested_release(
+        client,
+        code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+        file_overrides={
+            "migrations/011_global_terminal_v2.sql": _artifact_bytes(
+                local_plan,
+                "migrations/011_global_terminal_v2.sql",
+            )
+        },
+    )
+    compatibility = prepare_gabia_core_compatibility(
+        client,
+        ssh_options=_gabia_options(),  # type: ignore[arg-type]
+        compatibility_host=GABIA_COMPATIBILITY_SSH_HOST,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        expected_current_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        expected_core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+    )
+    router = SchemaBridgeHttpRouter(
+        client,
+        previous_release_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        private_canary_mode="gabia-redirect",
+        strict_opcache_action="disabled_verified",
+    )
+    result = dict(
+        deploy_release(
+            client,
+            plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=router,
+            gabia_compatibility=compatibility,
+            schema_upgrade_from=11,
+            expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            bridge_report_update=_recording_bridge_updater(),  # type: ignore[arg-type]
+        )
+    )
+    return client, router, result
+
+
+def test_schema_bridge_deploy_rejects_non_takeover_release_id_without_io(
+    local_plan: object,
+    production_sftp: MemorySftp,
+) -> None:
+    before_files = dict(production_sftp.files)
+    before_modes = dict(production_sftp.modes)
+    before_directories = dict(production_sftp.directories)
+    before_mutations = production_sftp.mutations
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="must use the php-v2 prefix",
+    ):
+        deploy_release(
+            production_sftp,
+            plan=local_plan,  # type: ignore[arg-type]
+            release_id=(
+                "schema11-bridge-abort-test-"
+                "20260727t000000z-12345678"
+            ),
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            schema_upgrade_from=11,
+            expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            bridge_report_update=_recording_bridge_updater(),  # type: ignore[arg-type]
+        )
+
+    assert production_sftp.files == before_files
+    assert production_sftp.modes == before_modes
+    assert production_sftp.directories == before_directories
+    assert production_sftp.mutations == before_mutations
+
+
+def test_schema_bridge_deploy_rejects_non_0644_c06_before_mutation(
+    local_plan: object,
+) -> None:
+    client = _gabia_sftp()
+    _install_attested_release(
+        client,
+        code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+        file_overrides={
+            "migrations/011_global_terminal_v2.sql": _artifact_bytes(
+                local_plan,
+                "migrations/011_global_terminal_v2.sql",
+            )
+        },
+    )
+    manifest_path = DEFAULT_REMOTE_ROOT + "/" + DEPLOYMENT_MANIFEST_NAME
+    client.modes[manifest_path] = 0o600
+    before_files = dict(client.files)
+    before_modes = dict(client.modes)
+    before_directories = dict(client.directories)
+    before_mutations = client.mutations
+
+    with pytest.raises(PhpDeploymentError):
+        deploy_release(
+            client,
+            plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=HttpRouter(
+                client,
+                code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+                schema_version=11,
+            ),
+            schema_upgrade_from=11,
+            expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            bridge_report_update=_recording_bridge_updater(),  # type: ignore[arg-type]
+        )
+
+    assert client.files == before_files
+    assert client.modes == before_modes
+    assert client.directories == before_directories
+    assert client.mutations == before_mutations
+
+
+def test_release_identity_rejects_mode_change_after_read(
+    local_plan: object,
+) -> None:
+    class ModeFlipAfterReadSftp(GabiaMemorySftp):
+        flip_path: str | None = None
+
+        def open(self, path: str, mode: str = "r") -> object:
+            handle = super().open(path, mode)
+            normalized = self._path(path)
+            if "r" not in mode or normalized != self.flip_path:
+                return handle
+
+            client = self
+
+            class FlipReader(io.BytesIO):
+                def close(self) -> None:
+                    if not self.closed:
+                        client.modes[normalized] = 0o600
+                    super().close()
+
+            assert isinstance(handle, io.BytesIO)
+            return FlipReader(handle.getvalue())
+
+    client = ModeFlipAfterReadSftp()
+    client.add_directory("/www_root")
+    client.add_directory(DEFAULT_REMOTE_ROOT)
+    client.add_directory(DEFAULT_REMOTE_ROOT + "/migrations")
+    _install_attested_release(
+        client,
+        code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+        file_overrides={
+            "migrations/011_global_terminal_v2.sql": _artifact_bytes(
+                local_plan,
+                "migrations/011_global_terminal_v2.sql",
+            )
+        },
+    )
+    client.flip_path = DEFAULT_REMOTE_ROOT + "/api.php"
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="changed during verification",
+    ):
+        verify_existing_remote_release_identity(
+            client,
+            remote_root=DEFAULT_REMOTE_ROOT,
+            expected_core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+            required_mode=0o644,
+        )
+
+
+def _candidate_compatibility(client: GabiaMemorySftp) -> object:
+    return prepare_gabia_core_compatibility(
+        client,
+        ssh_options=_gabia_options(),  # type: ignore[arg-type]
+        compatibility_host=GABIA_COMPATIBILITY_SSH_HOST,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        expected_current_sha=RELEASE_SHA,
+    )
+
+
+def _partial_bridge_compatibility(client: GabiaMemorySftp) -> object:
+    return prepare_gabia_core_compatibility(
+        client,
+        ssh_options=_gabia_options(),  # type: ignore[arg-type]
+        compatibility_host=GABIA_COMPATIBILITY_SSH_HOST,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        allow_partial_schema_bridge=True,
+    )
+
+
+def _bridge_ready(
+    client: GabiaMemorySftp,
+    deploy_result: dict[str, object],
+) -> dict[str, object]:
+    snapshot = load_remote_backup(
+        client,
+        backup_root=(
+            DEFAULT_REMOTE_ROOT + "/_private/deployment-backups"
+        ),
+        release_id=RELEASE_ID,
+        expected_remote_root=DEFAULT_REMOTE_ROOT,
+    )
+    assert snapshot.manifest_sha256 == deploy_result["backup_manifest_sha256"]
+    return php_deploy._bridge_backup_ready_identity(
+        backup=snapshot,
+        candidate_code_revision=RELEASE_SHA,
+        previous_code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+    )
+
+
+def test_deploy_report_exposes_exact_remote_backup_identity(
+    local_plan: object,
+) -> None:
+    client, _router, result = _deploy_test_schema_bridge(local_plan)
+    identity = result["backup_identity"]
+    assert isinstance(identity, dict)
+    manifest_path = str(identity["manifest_path"])
+    assert result["release_id"] == RELEASE_ID
+    assert identity["release_id"] == RELEASE_ID
+    assert identity["candidate_code_revision"] == RELEASE_SHA
+    assert identity["remote_root"] == DEFAULT_REMOTE_ROOT
+    assert identity["backup_directory"].endswith("/" + RELEASE_ID)
+    assert hashlib.sha256(client.files[manifest_path]).hexdigest() == (
+        identity["manifest_sha256"]
+    )
+    assert result["backup_manifest_sha256"] == identity["manifest_sha256"]
+
+
+def test_one_time_schema_bridge_confirmation_binds_all_four_identities() -> None:
+    backup_sha256 = "f" * 64
+    environment = {
+        php_deploy.SCHEMA_BRIDGE_ROLLBACK_RELEASE_ID_ENV: RELEASE_ID,
+        php_deploy.SCHEMA_BRIDGE_ROLLBACK_CURRENT_SHA_ENV: RELEASE_SHA,
+        php_deploy.SCHEMA_BRIDGE_ROLLBACK_PREVIOUS_SHA_ENV: (
+            ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+        ),
+        php_deploy.SCHEMA_BRIDGE_ROLLBACK_BACKUP_SHA256_ENV: backup_sha256,
+        php_deploy.SCHEMA_BRIDGE_DART_DISABLED_EVIDENCE_ENV: (
+            DART_DISABLED_EVIDENCE
+        ),
+    }
+    confirm_one_time_schema_bridge_rollback(
+        release_id=RELEASE_ID,
+        release_id_confirmation=RELEASE_ID,
+        expected_current_sha=RELEASE_SHA,
+        current_sha_confirmation=RELEASE_SHA,
+        expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        previous_sha_confirmation=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        expected_backup_manifest_sha256=backup_sha256,
+        backup_sha256_confirmation=backup_sha256,
+        dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+        environ=environment,
+    )
+    with pytest.raises(PhpDeploymentError, match="confirmation does not match"):
+        confirm_one_time_schema_bridge_rollback(
+            release_id=RELEASE_ID,
+            release_id_confirmation=RELEASE_ID,
+            expected_current_sha=RELEASE_SHA,
+            current_sha_confirmation=RELEASE_SHA,
+            expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            previous_sha_confirmation=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            expected_backup_manifest_sha256=backup_sha256,
+            backup_sha256_confirmation="e" * 64,
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            environ=environment,
+        )
+
+
+def test_schema_bridge_stale_lock_confirmation_requires_cli_and_env() -> None:
+    acquired_at = (
+        datetime.now(timezone.utc) - timedelta(minutes=30)
+    ).isoformat()
+    owner_content = php_deploy._encode_json(
+        {
+            "schema_version": 1,
+            "release_id": RELEASE_ID,
+            "acquired_at": acquired_at,
+        }
+    )
+    evidence = _stale_writer_absence_evidence(
+        owner_content=owner_content,
+        acquired_at_reference=acquired_at,
+    )
+    environment = {
+        php_deploy.SCHEMA_BRIDGE_STALE_LOCK_OWNER_ENV: RELEASE_ID,
+        php_deploy.SCHEMA_BRIDGE_STALE_LOCK_WRITER_ABSENCE_ENV: (
+            evidence
+        ),
+    }
+    php_deploy.confirm_schema_bridge_stale_lock_takeover(
+        owner_release_id=RELEASE_ID,
+        owner_release_id_confirmation=RELEASE_ID,
+        writer_absence_evidence=evidence,
+        environ=environment,
+    )
+    with pytest.raises(
+        PhpDeploymentError,
+        match="confirmation does not match",
+    ):
+        php_deploy.confirm_schema_bridge_stale_lock_takeover(
+            owner_release_id=RELEASE_ID,
+            owner_release_id_confirmation=RELEASE_ID,
+            writer_absence_evidence=evidence,
+            environ={
+                **environment,
+                php_deploy.SCHEMA_BRIDGE_STALE_LOCK_OWNER_ENV: (
+                    "php-v2-other-20260727t000000z-12345678"
+                ),
+            },
+        )
+    stale_recorded = _stale_writer_absence_evidence(
+        owner_content=owner_content,
+        acquired_at_reference=acquired_at,
+        issued_at=(
+            datetime.now(timezone.utc) - timedelta(minutes=30)
+        ),
+    )
+    recorded_environment = {
+        php_deploy.SCHEMA_BRIDGE_STALE_LOCK_OWNER_ENV: RELEASE_ID,
+        php_deploy.SCHEMA_BRIDGE_STALE_LOCK_WRITER_ABSENCE_ENV: (
+            stale_recorded
+        ),
+    }
+    with pytest.raises(PhpDeploymentError):
+        php_deploy.confirm_schema_bridge_stale_lock_takeover(
+            owner_release_id=RELEASE_ID,
+            owner_release_id_confirmation=RELEASE_ID,
+            writer_absence_evidence=stale_recorded,
+            environ=recorded_environment,
+        )
+    php_deploy.confirm_schema_bridge_stale_lock_takeover(
+        owner_release_id=RELEASE_ID,
+        owner_release_id_confirmation=RELEASE_ID,
+        writer_absence_evidence=stale_recorded,
+        environ=recorded_environment,
+        allow_recorded_evidence=True,
+    )
+
+
+def test_schema_bridge_rollback_restores_manifest_last_and_closed_schema11(
+    local_plan: object,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    compatibility = _candidate_compatibility(client)
+    result = rollback_one_time_schema_bridge(
+        client,
+        candidate_plan=local_plan,  # type: ignore[arg-type]
+        release_id=RELEASE_ID,
+        expected_current_sha=RELEASE_SHA,
+        expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        expected_backup_manifest_sha256=str(
+            deploy_result["backup_manifest_sha256"]
+        ),
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        protected_token=PROTECTED_TOKEN,
+        http_request=router,
+        gabia_compatibility=compatibility,  # type: ignore[arg-type]
+        dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+        bridge_report_update=_recording_bridge_updater(),  # type: ignore[arg-type]
+    )
+
+    assert result["restored_code_revision"] == (
+        ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+    )
+    assert result["restored_api_schema_contract_version"] == 11
+    assert result["candidate_database_schema_version_before"] == 11
+    assert result["database_mutated"] is False
+    assert result["manifest_committed_last"] is True
+    assert result["byte_verification"] is True
+    assert (
+        DEFAULT_REMOTE_ROOT + "/migrations/012_dart_credential_pool.sql"
+        not in client.files
+    )
+    assert verify_existing_remote_release_identity(
+        client,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        expected_core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+    ) == ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+
+
+def test_schema_bridge_rollback_accepts_closed_candidate_on_database_schema12(
+    local_plan: object,
+) -> None:
+    client, _router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    compatibility = _candidate_compatibility(client)
+    target_files = {
+        path: content
+        for path, content in client.files.items()
+        if path.startswith(DEFAULT_REMOTE_ROOT + "/")
+        and "/_private/" not in path
+    }
+    healthy_schema12 = SchemaBridgeHttpRouter(
+        client,
+        previous_release_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        private_canary_mode="gabia-redirect",
+        strict_opcache_action="disabled_verified",
+        candidate_actual_schema_version=12,
+    )
+
+    result = rollback_one_time_schema_bridge(
+        client,
+        candidate_plan=local_plan,  # type: ignore[arg-type]
+        release_id=RELEASE_ID,
+        expected_current_sha=RELEASE_SHA,
+        expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        expected_backup_manifest_sha256=str(
+            deploy_result["backup_manifest_sha256"]
+        ),
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        protected_token=PROTECTED_TOKEN,
+        http_request=healthy_schema12,
+        gabia_compatibility=compatibility,  # type: ignore[arg-type]
+        dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+        bridge_report_update=_recording_bridge_updater(),  # type: ignore[arg-type]
+    )
+
+    assert result["candidate_database_schema_version_before"] == 12
+    assert result["database_mutated"] is False
+    assert {
+        path: content
+        for path, content in client.files.items()
+        if path.startswith(DEFAULT_REMOTE_ROOT + "/")
+        and "/_private/" not in path
+    } != target_files
+
+
+def test_schema_bridge_rollback_refuses_current_c06_schema11_state(
+    local_plan: object,
+) -> None:
+    client = _gabia_sftp()
+    _install_attested_release(
+        client,
+        code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+    )
+    compatibility = prepare_gabia_core_compatibility(
+        client,
+        ssh_options=_gabia_options(),  # type: ignore[arg-type]
+        compatibility_host=GABIA_COMPATIBILITY_SSH_HOST,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        expected_current_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        expected_core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+    )
+    before_files = dict(client.files)
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="release identity does not match",
+    ):
+        rollback_one_time_schema_bridge(
+            client,
+            candidate_plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            expected_current_sha=RELEASE_SHA,
+            expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            expected_backup_manifest_sha256="f" * 64,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=HttpRouter(
+                client,
+                code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+                schema_version=11,
+                private_canary_mode="gabia-redirect",
+                strict_opcache_action="disabled_verified",
+            ),
+            gabia_compatibility=compatibility,
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            bridge_report_update=_recording_bridge_updater(),  # type: ignore[arg-type]
+        )
+
+    assert client.files == before_files
+
+
+def test_schema_bridge_rollback_requires_exact_local_candidate_bytes(
+    local_plan: object,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    manifest_path = DEFAULT_REMOTE_ROOT + "/" + DEPLOYMENT_MANIFEST_NAME
+    api_path = DEFAULT_REMOTE_ROOT + "/api.php"
+    alternate_api = b"self-attested-but-not-local-candidate\n"
+    client.files[api_path] = alternate_api
+    alternate_manifest = json.loads(client.files[manifest_path])
+    alternate_manifest["files"]["api.php"] = hashlib.sha256(
+        alternate_api
+    ).hexdigest()
+    client.files[manifest_path] = json.dumps(
+        alternate_manifest,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+    compatibility = _candidate_compatibility(client)
+    before_files = dict(client.files)
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="do not match the exact local release",
+    ):
+        rollback_one_time_schema_bridge(
+            client,
+            candidate_plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            expected_current_sha=RELEASE_SHA,
+            expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            expected_backup_manifest_sha256=str(
+                deploy_result["backup_manifest_sha256"]
+            ),
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=router,
+            gabia_compatibility=compatibility,  # type: ignore[arg-type]
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            bridge_report_update=_recording_bridge_updater(),  # type: ignore[arg-type]
+        )
+
+    assert client.files == before_files
+
+
+def test_schema_bridge_rollback_rejects_candidate_mode_drift_before_mutation(
+    local_plan: object,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    compatibility = _candidate_compatibility(client)
+    api_path = DEFAULT_REMOTE_ROOT + "/api.php"
+    client.modes[api_path] = 0o600
+    before_files = dict(client.files)
+    before_modes = dict(client.modes)
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="remote candidate artifact metadata is invalid",
+    ):
+        rollback_one_time_schema_bridge(
+            client,
+            candidate_plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            expected_current_sha=RELEASE_SHA,
+            expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            expected_backup_manifest_sha256=str(
+                deploy_result["backup_manifest_sha256"]
+            ),
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=router,
+            gabia_compatibility=compatibility,  # type: ignore[arg-type]
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            bridge_report_update=_recording_bridge_updater(),  # type: ignore[arg-type]
+        )
+
+    assert client.files == before_files
+    assert client.modes == before_modes
+
+
+def test_normal_rollback_refuses_schema11_predecessor_backup(
+    local_plan: object,
+) -> None:
+    client, _router, _deploy_result = _deploy_test_schema_bridge(local_plan)
+    compatibility = _candidate_compatibility(client)
+    target_files = {
+        path: content
+        for path, content in client.files.items()
+        if path.startswith(DEFAULT_REMOTE_ROOT + "/")
+        and "/_private/" not in path
+    }
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="normal rollback cannot restore a schema 11 predecessor",
+    ):
+        rollback_release(
+            client,
+            release_id=RELEASE_ID,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=HttpRouter(
+                client,
+                code_revision=RELEASE_SHA,
+                schema_version=12,
+                private_canary_mode="gabia-redirect",
+                strict_opcache_action="disabled_verified",
+            ),
+            gabia_compatibility=compatibility,  # type: ignore[arg-type]
+            expected_current_sha=RELEASE_SHA,
+        )
+
+    assert {
+        path: content
+        for path, content in client.files.items()
+        if path.startswith(DEFAULT_REMOTE_ROOT + "/")
+        and "/_private/" not in path
+    } == target_files
+
+
+def test_schema_bridge_rollback_reloads_top_manifest_under_lock(
+    local_plan: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    compatibility = _candidate_compatibility(client)
+    backup_manifest_path = str(deploy_result["backup_manifest"])
+    target_manifest_path = DEFAULT_REMOTE_ROOT + "/" + DEPLOYMENT_MANIFEST_NAME
+    candidate_manifest = client.files[target_manifest_path]
+    original_capture = php_deploy.capture_remote_backup
+
+    def capture_then_tamper(*args: object, **kwargs: object) -> object:
+        snapshot = original_capture(*args, **kwargs)  # type: ignore[arg-type]
+        if str(getattr(snapshot, "release_id")).startswith(
+            "pre-schema11-bridge-rollback-"
+        ):
+            client.files[backup_manifest_path] += b" "
+        return snapshot
+
+    monkeypatch.setattr(
+        php_deploy,
+        "capture_remote_backup",
+        capture_then_tamper,
+    )
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="stopped before production mutation",
+    ):
+        rollback_one_time_schema_bridge(
+            client,
+            candidate_plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            expected_current_sha=RELEASE_SHA,
+            expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            expected_backup_manifest_sha256=str(
+                deploy_result["backup_manifest_sha256"]
+            ),
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=router,
+            gabia_compatibility=compatibility,  # type: ignore[arg-type]
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            bridge_report_update=_recording_bridge_updater(),  # type: ignore[arg-type]
+        )
+
+    assert client.files[target_manifest_path] == candidate_manifest
+
+
+def _abort_test_schema_bridge(
+    client: GabiaMemorySftp,
+    router: SchemaBridgeHttpRouter,
+    local_plan: object,
+    deploy_result: dict[str, object],
+    *,
+    stale_lock_owner_release_id: str | None = None,
+    stale_lock_writer_absence_evidence: str | None = None,
+    stale_lock_first_observed_at: str | None = None,
+    bridge_report_update: object | None = None,
+) -> dict[str, object]:
+    ready = _bridge_ready(client, deploy_result)
+    return dict(
+        php_deploy.abort_one_time_schema_bridge(
+            client,
+            candidate_plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            expected_backup_manifest_sha256=str(
+                deploy_result["backup_manifest_sha256"]
+            ),
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            bridge_deploy_report_load=lambda: dict(ready),
+            bridge_report_update=(
+                _recording_bridge_updater()
+                if bridge_report_update is None
+                else bridge_report_update
+            ),  # type: ignore[arg-type]
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=router,
+            gabia_compatibility=_partial_bridge_compatibility(client),  # type: ignore[arg-type]
+            stale_lock_owner_release_id=stale_lock_owner_release_id,
+            stale_lock_writer_absence_evidence=(
+                stale_lock_writer_absence_evidence
+            ),
+            stale_lock_first_observed_at=stale_lock_first_observed_at,
+        )
+    )
+
+
+def test_schema_bridge_abort_converges_complete_candidate_to_c06(
+    local_plan: object,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+
+    result = _abort_test_schema_bridge(
+        client,
+        router,
+        local_plan,
+        deploy_result,
+    )
+
+    assert result["initial_php_state"] == "candidate"
+    assert result["candidate_database_schema_version_before"] == 11
+    assert result["database_mutated"] is False
+    assert verify_existing_remote_release_identity(
+        client,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        expected_core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+    ) == ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+
+
+def test_schema_bridge_abort_converges_exact_mixed_files_to_c06(
+    local_plan: object,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    predecessor = load_remote_backup(
+        client,
+        backup_root=(
+            DEFAULT_REMOTE_ROOT + "/_private/deployment-backups"
+        ),
+        release_id=RELEASE_ID,
+        expected_remote_root=DEFAULT_REMOTE_ROOT,
+    )
+    api_snapshot = predecessor.file_by_path["api.php"]
+    assert api_snapshot.backup_blob is not None
+    api_path = DEFAULT_REMOTE_ROOT + "/api.php"
+    client.files[api_path] = client.files[
+        predecessor.backup_directory + "/" + api_snapshot.backup_blob
+    ]
+    assert api_snapshot.mode is not None
+    client.modes[api_path] = api_snapshot.mode
+
+    result = _abort_test_schema_bridge(
+        client,
+        router,
+        local_plan,
+        deploy_result,
+    )
+
+    assert result["initial_php_state"] == "mixed"
+    assert result["candidate_database_schema_version_before"] is None
+    assert (
+        result["database_schema_observation"]
+        == "unavailable_due_partial_php"
+    )
+
+
+def test_schema_bridge_abort_resumes_manifest_absent_c06_restore(
+    local_plan: object,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    predecessor = load_remote_backup(
+        client,
+        backup_root=(
+            DEFAULT_REMOTE_ROOT + "/_private/deployment-backups"
+        ),
+        release_id=RELEASE_ID,
+        expected_remote_root=DEFAULT_REMOTE_ROOT,
+    )
+    for relative_path in DEFAULT_COMMIT_ORDER:
+        item = predecessor.file_by_path[relative_path]
+        target = DEFAULT_REMOTE_ROOT + "/" + relative_path
+        if relative_path == DEPLOYMENT_MANIFEST_NAME:
+            client.files.pop(target)
+            client.modes.pop(target)
+            continue
+        if not item.existed:
+            client.files.pop(target, None)
+            client.modes.pop(target, None)
+            continue
+        assert item.backup_blob is not None
+        assert item.mode is not None
+        client.files[target] = client.files[
+            predecessor.backup_directory + "/" + item.backup_blob
+        ]
+        client.modes[target] = item.mode
+
+    result = _abort_test_schema_bridge(
+        client,
+        router,
+        local_plan,
+        deploy_result,
+    )
+
+    assert result["initial_php_state"] == "predecessor_restore_transition"
+    assert verify_existing_remote_release_identity(
+        client,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        expected_core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+    ) == ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+
+
+def test_schema_bridge_abort_rejects_third_party_bytes_before_mutation(
+    local_plan: object,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    api_path = DEFAULT_REMOTE_ROOT + "/api.php"
+    client.files[api_path] = b"unrecognized third-party bytes\n"
+    before = dict(client.files)
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="schema bridge abort is incomplete",
+    ):
+        _abort_test_schema_bridge(
+            client,
+            router,
+            local_plan,
+            deploy_result,
+        )
+
+    assert client.files == before
+
+
+def test_schema_bridge_abort_takes_over_only_confirmed_stale_bridge_lock(
+    local_plan: object,
+    tmp_path: Path,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    lock_path = php_deploy._acquire_deployment_lock(
+        client,
+        DEFAULT_REMOTE_ROOT + "/_private",
+        RELEASE_ID,
+    )
+    assert lock_path in client.directories
+    _acquired_at, stale_evidence = _age_test_lock_owner(
+        client,
+        lock_path,
+    )
+    private_root = tmp_path.resolve()
+    os.chmod(private_root, 0o700)
+    report_path = (tmp_path / "bridge-abort.json").resolve()
+    php_deploy._prepare_durable_report(
+        report_path,
+        private_root=private_root,
+        operation="schema-bridge-abort",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+        environ={
+            php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+        },
+    )
+    updater = php_deploy._bridge_report_updater(
+        report_path,
+        operation="schema-bridge-abort",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+    )
+
+    result = _abort_test_schema_bridge(
+        client,
+        router,
+        local_plan,
+        deploy_result,
+        stale_lock_owner_release_id=RELEASE_ID,
+        stale_lock_writer_absence_evidence=stale_evidence,
+        bridge_report_update=updater,
+    )
+    php_deploy._commit_durable_report(report_path, result)
+
+    takeover = result["stale_lock_takeover"]
+    assert isinstance(takeover, dict)
+    assert takeover["stale_owner_release_id"] == RELEASE_ID
+    assert takeover["writer_absence_evidence"] == stale_evidence
+    assert result["stale_lock_cleanup_verified"] is True
+    assert lock_path not in client.directories
+    durable = json.loads(report_path.read_text(encoding="utf-8"))
+    assert durable["status"] == "completed"
+    assert durable["stale_lock_takeover"] == takeover
+    assert durable["stale_lock_cleanup_verified"] is True
+
+
+@pytest.mark.parametrize(
+    "crash_point",
+    ("before_replacement_lock", "after_takeover_complete"),
+)
+def test_schema_bridge_abort_resumes_durable_takeover_crash_windows(
+    local_plan: object,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    crash_point: str,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    lock_path = php_deploy._acquire_deployment_lock(
+        client,
+        DEFAULT_REMOTE_ROOT + "/_private",
+        RELEASE_ID,
+    )
+    _acquired_at, stale_evidence = _age_test_lock_owner(
+        client,
+        lock_path,
+    )
+    private_root = tmp_path.resolve()
+    os.chmod(private_root, 0o700)
+    report_path = (tmp_path / "bridge-abort.json").resolve()
+    php_deploy._prepare_durable_report(
+        report_path,
+        private_root=private_root,
+        operation="schema-bridge-abort",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+        environ={
+            php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+        },
+    )
+    updater = php_deploy._bridge_report_updater(
+        report_path,
+        operation="schema-bridge-abort",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+    )
+    first_updater: object = updater
+    original_acquire = php_deploy._acquire_deployment_lock
+    failed = False
+    if crash_point == "before_replacement_lock":
+
+        def fail_replacement_once(
+            selected_client: object,
+            private_path: str,
+            selected_release_id: str,
+        ) -> str:
+            nonlocal failed
+            if (
+                not failed
+                and selected_release_id.startswith(
+                    "schema11-bridge-abort-"
+                )
+            ):
+                failed = True
+                raise RuntimeError("simulated crash before replacement lock")
+            return original_acquire(
+                selected_client,  # type: ignore[arg-type]
+                private_path,
+                selected_release_id,
+            )
+
+        monkeypatch.setattr(
+            php_deploy,
+            "_acquire_deployment_lock",
+            fail_replacement_once,
+        )
+    else:
+
+        def fail_after_complete(
+            status: str,
+            evidence: object,
+        ) -> None:
+            nonlocal failed
+            assert callable(updater)
+            updater(status, evidence)  # type: ignore[arg-type]
+            if status == "stale_lock_takeover_complete" and not failed:
+                failed = True
+                raise RuntimeError("simulated crash after takeover complete")
+
+        first_updater = fail_after_complete
+
+    with pytest.raises((PhpDeploymentError, RuntimeError)):
+        _abort_test_schema_bridge(
+            client,
+            router,
+            local_plan,
+            deploy_result,
+            stale_lock_owner_release_id=RELEASE_ID,
+            stale_lock_writer_absence_evidence=stale_evidence,
+            bridge_report_update=first_updater,
+        )
+
+    assert failed is True
+    assert (
+        php_deploy._prepare_durable_report(
+            report_path,
+            private_root=private_root,
+            operation="schema-bridge-abort",
+            code_revision=RELEASE_SHA,
+            release_id=RELEASE_ID,
+            allow_bridge_abort_resume=True,
+            environ={
+                php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+            },
+        )
+        == report_path
+    )
+    result = _abort_test_schema_bridge(
+        client,
+        router,
+        local_plan,
+        deploy_result,
+        stale_lock_owner_release_id=RELEASE_ID,
+        stale_lock_writer_absence_evidence=stale_evidence,
+        bridge_report_update=updater,
+    )
+    php_deploy._commit_durable_report(report_path, result)
+
+    assert result["stale_lock_cleanup_verified"] is True
+    assert lock_path not in client.directories
+    assert json.loads(report_path.read_text(encoding="utf-8"))[
+        "status"
+    ] == "completed"
+
+
+def test_completed_takeover_preserves_new_ownerless_writer_lock(
+    local_plan: object,
+    tmp_path: Path,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    lock_path = php_deploy._acquire_deployment_lock(
+        client,
+        DEFAULT_REMOTE_ROOT + "/_private",
+        RELEASE_ID,
+    )
+    _acquired_at, stale_evidence = _age_test_lock_owner(
+        client,
+        lock_path,
+    )
+    private_root = tmp_path.resolve()
+    os.chmod(private_root, 0o700)
+    report_path = (tmp_path / "bridge-abort.json").resolve()
+    php_deploy._prepare_durable_report(
+        report_path,
+        private_root=private_root,
+        operation="schema-bridge-abort",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+        environ={
+            php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+        },
+    )
+    updater = php_deploy._bridge_report_updater(
+        report_path,
+        operation="schema-bridge-abort",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+    )
+    failed = False
+
+    def stop_after_complete(status: str, evidence: object) -> None:
+        nonlocal failed
+        updater(status, evidence)  # type: ignore[arg-type]
+        if status == "stale_lock_takeover_complete" and not failed:
+            failed = True
+            raise RuntimeError("simulated stop after takeover completion")
+
+    with pytest.raises(PhpDeploymentError):
+        _abort_test_schema_bridge(
+            client,
+            router,
+            local_plan,
+            deploy_result,
+            stale_lock_owner_release_id=RELEASE_ID,
+            stale_lock_writer_absence_evidence=stale_evidence,
+            bridge_report_update=stop_after_complete,
+        )
+    assert failed is True
+    assert lock_path not in client.directories
+    client.mkdir(lock_path, mode=0o700)
+    client.chmod(lock_path, 0o700)
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="unrelated replacement lock",
+    ):
+        _abort_test_schema_bridge(
+            client,
+            router,
+            local_plan,
+            deploy_result,
+            stale_lock_owner_release_id=RELEASE_ID,
+            stale_lock_writer_absence_evidence=stale_evidence,
+            bridge_report_update=updater,
+        )
+
+    assert lock_path in client.directories
+    assert lock_path + "/owner.json" not in client.files
+    valid = json.loads(report_path.read_text(encoding="utf-8"))
+    for substituted_nonce in (
+        "not-a-valid-journal-nonce",
+        "f" * 32,
+    ):
+        invalid_nonce = dict(valid)
+        invalid_nonce["journal_nonce"] = substituted_nonce
+        report_path.write_bytes(php_deploy._encode_json(invalid_nonce))
+        with pytest.raises(
+            PhpDeploymentError,
+            match="not resumable",
+        ):
+            php_deploy._prepare_durable_report(
+                report_path,
+                private_root=private_root,
+                operation="schema-bridge-abort",
+                code_revision=RELEASE_SHA,
+                release_id=RELEASE_ID,
+                allow_bridge_abort_resume=True,
+                environ={
+                    php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+                },
+            )
+        invalid_nonce_updater = php_deploy._bridge_report_updater(
+            report_path,
+            operation="schema-bridge-abort",
+            code_revision=RELEASE_SHA,
+            release_id=RELEASE_ID,
+        )
+        with pytest.raises(
+            PhpDeploymentError,
+            match="journal identity is invalid",
+        ):
+            invalid_nonce_updater(
+                str(valid["status"]),
+                {
+                    "stale_lock_takeover": valid["stale_lock_takeover"],
+                    "stale_lock_cleanup_verified": True,
+                },
+            )
+
+    forged = dict(valid)
+    forged["backup_ready"] = None
+    report_path.write_bytes(php_deploy._encode_json(forged))
+    forged_fixed_updater = php_deploy._bridge_report_updater(
+        report_path,
+        operation="schema-bridge-abort",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+    )
+    with pytest.raises(
+        PhpDeploymentError,
+        match="fixed recovery identity is invalid",
+    ):
+        forged_fixed_updater(
+            str(valid["status"]),
+            {
+                "stale_lock_takeover": valid["stale_lock_takeover"],
+                "stale_lock_cleanup_verified": True,
+            },
+        )
+    with pytest.raises(
+        PhpDeploymentError,
+        match="not resumable",
+    ):
+        php_deploy._prepare_durable_report(
+            report_path,
+            private_root=private_root,
+            operation="schema-bridge-abort",
+            code_revision=RELEASE_SHA,
+            release_id=RELEASE_ID,
+            allow_bridge_abort_resume=True,
+            environ={
+                php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+            },
+        )
+
+
+def test_ownerless_lock_inspector_cli_attests_without_remote_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    client = GabiaMemorySftp()
+    client.add_directory("/www_root")
+    client.add_directory(DEFAULT_REMOTE_ROOT)
+    client.add_directory(DEFAULT_REMOTE_ROOT + "/_private", 0o700)
+    lock_path = DEFAULT_REMOTE_ROOT + "/_private/deployment-lock"
+    client.mkdir(lock_path, mode=0o700)
+    client.chmod(lock_path, 0o700)
+    first_observed, _evidence, remote_identity = (
+        _age_test_ownerless_lock(
+            client,
+            lock_path,
+        )
+    )
+    mutations_before = client.mutations
+
+    class TestSession:
+        def __init__(self, _options: object) -> None:
+            return
+
+        def __enter__(self) -> MemorySftp:
+            return client
+
+        def __exit__(self, *_args: object) -> None:
+            return
+
+    monkeypatch.setattr(
+        php_deploy,
+        "ParamikoPinnedSftpSession",
+        TestSession,
+    )
+    monkeypatch.setenv("SSH_PASSWORD", "test-password")
+
+    assert (
+        main(
+            [
+                "inspect-ownerless-lock",
+                "--ssh-host",
+                "ssh.example",
+                "--ssh-port",
+                "22",
+                "--ssh-user",
+                "deploy",
+                "--ssh-host-key-sha256",
+                "SHA256:" + "A" * 43,
+                "--remote-root",
+                DEFAULT_REMOTE_ROOT,
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assert captured.err == ""
+    assert report["inspection"] == "schema_bridge_ownerless_lock"
+    assert report["owner_release_id"] == php_deploy.STALE_LOCK_OWNERLESS
+    assert report["remote_identity"] == json.loads(remote_identity)
+    assert report["owner_sha256"] == hashlib.sha256(
+        remote_identity
+    ).hexdigest()
+    assert report["stale_lock_first_observed_at"] == first_observed
+    assert report["remote_mtime"] == first_observed
+    assert report["eligible_for_writer_absence_attestation"] is True
+    assert report["remote_files_mutated"] is False
+    assert client.mutations == mutations_before
+
+
+@pytest.mark.parametrize(
+    "crash_window",
+    ("mkdir_before_owner", "owner_deleted_before_rmdir"),
+)
+def test_schema_bridge_abort_recovers_exact_ownerless_lock_windows(
+    local_plan: object,
+    tmp_path: Path,
+    crash_window: str,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    lock_path = DEFAULT_REMOTE_ROOT + "/_private/deployment-lock"
+    if crash_window == "mkdir_before_owner":
+        client.mkdir(lock_path, mode=0o700)
+        client.chmod(lock_path, 0o700)
+    else:
+        php_deploy._acquire_deployment_lock(
+            client,
+            DEFAULT_REMOTE_ROOT + "/_private",
+            RELEASE_ID,
+        )
+        client.remove(lock_path + "/owner.json")
+    first_observed, evidence, remote_identity = (
+        _age_test_ownerless_lock(
+            client,
+            lock_path,
+        )
+    )
+    private_root = tmp_path.resolve()
+    os.chmod(private_root, 0o700)
+    report_path = (tmp_path / f"{crash_window}.json").resolve()
+    php_deploy._prepare_durable_report(
+        report_path,
+        private_root=private_root,
+        operation="schema-bridge-abort",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+        environ={
+            php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+        },
+    )
+    updater = php_deploy._bridge_report_updater(
+        report_path,
+        operation="schema-bridge-abort",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+    )
+
+    result = _abort_test_schema_bridge(
+        client,
+        router,
+        local_plan,
+        deploy_result,
+        stale_lock_owner_release_id=php_deploy.STALE_LOCK_OWNERLESS,
+        stale_lock_writer_absence_evidence=evidence,
+        stale_lock_first_observed_at=first_observed,
+        bridge_report_update=updater,
+    )
+    php_deploy._commit_durable_report(report_path, result)
+
+    assert lock_path not in client.directories
+    takeover = result["stale_lock_takeover"]
+    assert isinstance(takeover, dict)
+    assert takeover["stale_owner_state"] == "ownerless"
+    assert takeover["stale_owner_remote_mtime"] == first_observed
+    assert takeover["stale_owner_sha256"] == hashlib.sha256(
+        remote_identity
+    ).hexdigest()
+    assert (
+        verify_existing_remote_release_identity(
+            client,
+            remote_root=DEFAULT_REMOTE_ROOT,
+            expected_core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+            required_mode=0o644,
+        )
+        == ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "failure",
+        "first_observed_delta",
+        "issued_delta",
+        "owner_content_override",
+    ),
+    (
+        ("too_young", 5, 0, None),
+        ("stale_evidence", 30, 30, None),
+        ("forged_owner_digest", 30, 0, b"forged-owner"),
+        ("attested_mtime_mismatch", 31, 0, None),
+    ),
+)
+def test_schema_bridge_abort_preserves_ownerless_lock_on_invalid_evidence(
+    local_plan: object,
+    failure: str,
+    first_observed_delta: int,
+    issued_delta: int,
+    owner_content_override: bytes | None,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    lock_path = DEFAULT_REMOTE_ROOT + "/_private/deployment-lock"
+    client.mkdir(lock_path, mode=0o700)
+    client.chmod(lock_path, 0o700)
+    first_observed, evidence, _remote_identity = (
+        _age_test_ownerless_lock(
+            client,
+            lock_path,
+            first_observed_delta=first_observed_delta,
+            issued_delta=issued_delta,
+            owner_content_override=owner_content_override,
+        )
+    )
+    public_before = {
+        path: value
+        for path, value in client.files.items()
+        if path.startswith(DEFAULT_REMOTE_ROOT + "/")
+        and "/_private/" not in path
+    }
+
+    with pytest.raises(PhpDeploymentError):
+        _abort_test_schema_bridge(
+            client,
+            router,
+            local_plan,
+            deploy_result,
+            stale_lock_owner_release_id=(
+                php_deploy.STALE_LOCK_OWNERLESS
+            ),
+            stale_lock_writer_absence_evidence=evidence,
+            stale_lock_first_observed_at=first_observed,
+        )
+
+    assert failure
+    assert lock_path in client.directories
+    assert {
+        path: value
+        for path, value in client.files.items()
+        if path.startswith(DEFAULT_REMOTE_ROOT + "/")
+        and "/_private/" not in path
+    } == public_before
+
+
+def test_ownerless_takeover_preserves_lock_recreated_before_delete(
+    local_plan: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    lock_path = DEFAULT_REMOTE_ROOT + "/_private/deployment-lock"
+    client.mkdir(lock_path, mode=0o700)
+    client.chmod(lock_path, 0o700)
+    first_observed, evidence, old_remote_identity = (
+        _age_test_ownerless_lock(
+            client,
+            lock_path,
+        )
+    )
+    public_before = {
+        path: value
+        for path, value in client.files.items()
+        if path.startswith(DEFAULT_REMOTE_ROOT + "/")
+        and "/_private/" not in path
+    }
+    original_remove = php_deploy._remove_exact_ownerless_deployment_lock
+    replaced = False
+
+    def replace_before_remove(
+        selected_client: MemorySftp,
+        *,
+        lock_path: str,
+        expected_remote_identity: bytes,
+    ) -> None:
+        nonlocal replaced
+        assert expected_remote_identity == old_remote_identity
+        selected_client.rmdir(lock_path)
+        selected_client.mkdir(lock_path, mode=0o700)
+        selected_client.chmod(lock_path, 0o700)
+        replaced = True
+        original_remove(
+            selected_client,
+            lock_path=lock_path,
+            expected_remote_identity=expected_remote_identity,
+        )
+
+    monkeypatch.setattr(
+        php_deploy,
+        "_remove_exact_ownerless_deployment_lock",
+        replace_before_remove,
+    )
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match=(
+            "minimum remote stale age|remote identity changed before takeover"
+        ),
+    ):
+        _abort_test_schema_bridge(
+            client,
+            router,
+            local_plan,
+            deploy_result,
+            stale_lock_owner_release_id=php_deploy.STALE_LOCK_OWNERLESS,
+            stale_lock_writer_absence_evidence=evidence,
+            stale_lock_first_observed_at=first_observed,
+        )
+
+    assert replaced is True
+    assert lock_path in client.directories
+    assert lock_path + "/owner.json" not in client.files
+    assert client.mtimes[lock_path] != json.loads(
+        old_remote_identity
+    )["st_mtime"]
+    assert {
+        path: value
+        for path, value in client.files.items()
+        if path.startswith(DEFAULT_REMOTE_ROOT + "/")
+        and "/_private/" not in path
+    } == public_before
+
+
+def test_schema_bridge_abort_preserves_nonempty_ownerless_lock(
+    local_plan: object,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    lock_path = DEFAULT_REMOTE_ROOT + "/_private/deployment-lock"
+    client.mkdir(lock_path, mode=0o700)
+    client.chmod(lock_path, 0o700)
+    client.add_file(lock_path + "/unexpected-entry", b"foreign\n", 0o600)
+    client.mtimes[lock_path] = int(
+        (
+            datetime.now(timezone.utc) - timedelta(minutes=30)
+        ).timestamp()
+    )
+    remote_identity, _identity, first_observed = (
+        php_deploy._ownerless_lock_remote_identity(
+            client.lstat(lock_path),
+            lock_path=lock_path,
+        )
+    )
+    evidence = _stale_writer_absence_evidence(
+        owner_content=remote_identity,
+        acquired_at_reference=first_observed,
+    )
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="not empty",
+    ):
+        _abort_test_schema_bridge(
+            client,
+            router,
+            local_plan,
+            deploy_result,
+            stale_lock_owner_release_id=(
+                php_deploy.STALE_LOCK_OWNERLESS
+            ),
+            stale_lock_writer_absence_evidence=evidence,
+            stale_lock_first_observed_at=first_observed,
+        )
+
+    assert lock_path in client.directories
+    assert client.files[lock_path + "/unexpected-entry"] == b"foreign\n"
+
+
+def test_schema_bridge_abort_preserves_unconfirmed_third_party_lock(
+    local_plan: object,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    third_owner = "php-v2-thirdparty-20260727t000000z-12345678"
+    lock_path = php_deploy._acquire_deployment_lock(
+        client,
+        DEFAULT_REMOTE_ROOT + "/_private",
+        third_owner,
+    )
+    owner_path = lock_path + "/owner.json"
+    _acquired_at, stale_evidence = _age_test_lock_owner(
+        client,
+        lock_path,
+    )
+    owner_before = client.files[owner_path]
+    candidate_before = {
+        path: content
+        for path, content in client.files.items()
+        if path.startswith(DEFAULT_REMOTE_ROOT + "/")
+        and "/_private/" not in path
+    }
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="owner identity does not match",
+    ):
+        _abort_test_schema_bridge(
+            client,
+            router,
+            local_plan,
+            deploy_result,
+            stale_lock_owner_release_id=RELEASE_ID,
+            stale_lock_writer_absence_evidence=stale_evidence,
+        )
+
+    assert client.files[owner_path] == owner_before
+    assert lock_path in client.directories
+    assert {
+        path: content
+        for path, content in client.files.items()
+        if path.startswith(DEFAULT_REMOTE_ROOT + "/")
+        and "/_private/" not in path
+    } == candidate_before
+
+
+def test_schema_bridge_abort_preserves_nonempty_stale_lock(
+    local_plan: object,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    lock_path = php_deploy._acquire_deployment_lock(
+        client,
+        DEFAULT_REMOTE_ROOT + "/_private",
+        RELEASE_ID,
+    )
+    _acquired_at, stale_evidence = _age_test_lock_owner(
+        client,
+        lock_path,
+    )
+    owner_path = lock_path + "/owner.json"
+    owner_before = client.files[owner_path]
+    client.add_file(lock_path + "/unexpected-entry", b"foreign\n", 0o600)
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="non-empty or changed lock",
+    ):
+        _abort_test_schema_bridge(
+            client,
+            router,
+            local_plan,
+            deploy_result,
+            stale_lock_owner_release_id=RELEASE_ID,
+            stale_lock_writer_absence_evidence=stale_evidence,
+        )
+
+    assert client.files[owner_path] == owner_before
+    assert client.files[lock_path + "/unexpected-entry"] == b"foreign\n"
+    assert lock_path in client.directories
+
+
+def test_durable_report_is_reserved_then_atomically_completed(
+    tmp_path: Path,
+) -> None:
+    private_root = tmp_path.resolve()
+    os.chmod(private_root, 0o700)
+    destination = (tmp_path / "deploy-report.json").resolve()
+    prepared = php_deploy._prepare_durable_report(
+        destination,
+        private_root=private_root,
+        operation="deploy",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+        environ={
+            php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+        },
+    )
+    assert prepared == destination
+    prepared_payload = json.loads(destination.read_text(encoding="utf-8"))
+    assert prepared_payload["status"] == "prepared"
+    assert "report" not in prepared_payload
+
+    report = {
+        "ok": True,
+        "operation": "deploy",
+        "release_id": RELEASE_ID,
+        "backup_manifest_sha256": "f" * 64,
+        "backup_manifest": "/private/backup-manifest.json",
+        "code_revision": RELEASE_SHA,
+        "backup_identity": {
+            "release_id": RELEASE_ID,
+            "candidate_code_revision": RELEASE_SHA,
+            "manifest_path": "/private/backup-manifest.json",
+            "manifest_sha256": "f" * 64,
+        },
+    }
+    php_deploy._commit_durable_report(destination, report)
+    completed = json.loads(destination.read_text(encoding="utf-8"))
+    assert completed["status"] == "completed"
+    assert completed["report"] == report
+
+
+def test_durable_prepared_checkpoint_cannot_commit_failed_report(
+    tmp_path: Path,
+) -> None:
+    private_root = tmp_path.resolve()
+    os.chmod(private_root, 0o700)
+    destination = (tmp_path / "deploy-report.json").resolve()
+    php_deploy._prepare_durable_report(
+        destination,
+        private_root=private_root,
+        operation="deploy",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+        environ={
+            php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+        },
+    )
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="does not match its prepared checkpoint",
+    ):
+        php_deploy._commit_durable_report(
+            destination,
+            {
+                "ok": False,
+                "operation": "deploy",
+                "release_id": RELEASE_ID,
+                "code_revision": RELEASE_SHA,
+            },
+        )
+
+    payload = json.loads(destination.read_text(encoding="utf-8"))
+    assert payload["status"] == "prepared"
+    assert "report" not in payload
+
+
+def _prepared_bridge_deploy(
+    local_plan: object,
+    destination: Path,
+    private_root: Path,
+) -> tuple[
+    GabiaMemorySftp,
+    SchemaBridgeHttpRouter,
+    object,
+    object,
+]:
+    client = _gabia_sftp()
+    _install_attested_release(
+        client,
+        code_revision=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+        file_overrides={
+            "migrations/011_global_terminal_v2.sql": _artifact_bytes(
+                local_plan,
+                "migrations/011_global_terminal_v2.sql",
+            )
+        },
+    )
+    compatibility = prepare_gabia_core_compatibility(
+        client,
+        ssh_options=_gabia_options(),  # type: ignore[arg-type]
+        compatibility_host=GABIA_COMPATIBILITY_SSH_HOST,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        expected_current_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        expected_core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+    )
+    php_deploy._prepare_durable_report(
+        destination,
+        private_root=private_root,
+        operation="schema-bridge-deploy",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+        schema_bridge_dart_disabled_evidence=(
+            DART_DISABLED_EVIDENCE
+        ),
+        environ={
+            php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+        },
+    )
+    updater = php_deploy._bridge_report_updater(
+        destination,
+        operation="schema-bridge-deploy",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+    )
+    router = SchemaBridgeHttpRouter(
+        client,
+        previous_release_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        private_canary_mode="gabia-redirect",
+        strict_opcache_action="disabled_verified",
+    )
+    return client, router, compatibility, updater
+
+
+def test_schema_bridge_abort_recovers_prebackup_crash_without_public_write(
+    local_plan: object,
+    tmp_path: Path,
+) -> None:
+    private_root = tmp_path.resolve()
+    os.chmod(private_root, 0o700)
+    deploy_report = (tmp_path / "bridge-deploy.json").resolve()
+    abort_report = (tmp_path / "bridge-abort.json").resolve()
+    client, router, _compatibility, _updater = (
+        _prepared_bridge_deploy(
+            local_plan,
+            deploy_report,
+            private_root,
+        )
+    )
+    compatibility = _partial_bridge_compatibility(client)
+    lock_path = php_deploy._acquire_deployment_lock(
+        client,
+        DEFAULT_REMOTE_ROOT + "/_private",
+        RELEASE_ID,
+    )
+    _acquired_at, stale_evidence = _age_test_lock_owner(
+        client,
+        lock_path,
+    )
+    public_before = {
+        path: (value, client.modes[path])
+        for path, value in client.files.items()
+        if path.startswith(DEFAULT_REMOTE_ROOT + "/")
+        and "/_private/" not in path
+    }
+
+    def load_prepared() -> object:
+        return php_deploy.load_schema_bridge_backup_ready(
+            deploy_report,
+            private_root=private_root,
+            expected_candidate_sha=RELEASE_SHA,
+            expected_release_id=RELEASE_ID,
+            expected_backup_manifest_sha256=None,
+            expected_dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+        )
+
+    php_deploy._prepare_durable_report(
+        abort_report,
+        private_root=private_root,
+        operation="schema-bridge-abort",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+        environ={
+            php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+        },
+    )
+    updater = php_deploy._bridge_report_updater(
+        abort_report,
+        operation="schema-bridge-abort",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+    )
+    result = php_deploy.abort_one_time_schema_bridge(
+        client,
+        candidate_plan=local_plan,  # type: ignore[arg-type]
+        release_id=RELEASE_ID,
+        expected_backup_manifest_sha256=None,
+        dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+        bridge_deploy_report_load=load_prepared,  # type: ignore[arg-type]
+        bridge_report_update=updater,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        protected_token=PROTECTED_TOKEN,
+        http_request=router,
+        gabia_compatibility=compatibility,  # type: ignore[arg-type]
+        stale_lock_owner_release_id=RELEASE_ID,
+        stale_lock_writer_absence_evidence=stale_evidence,
+    )
+    php_deploy._commit_durable_report(abort_report, result)
+
+    assert result["initial_php_state"] == "prebackup_c06"
+    assert result["public_release_files_mutated"] is False
+    assert (
+        result["ephemeral_opcache_probe_created_and_removed"] is True
+    )
+    assert result["manifest_commit_not_applicable"] is True
+    assert result["backup_manifest"] is None
+    assert result["candidate_database_schema_version_before"] is None
+    assert (
+        result["database_schema_observation"]
+        == "unavailable_due_c06_contract"
+    )
+    assert {
+        path: (value, client.modes[path])
+        for path, value in client.files.items()
+        if path.startswith(DEFAULT_REMOTE_ROOT + "/")
+        and "/_private/" not in path
+    } == public_before
+    assert lock_path not in client.directories
+    assert json.loads(abort_report.read_text(encoding="utf-8"))[
+        "status"
+    ] == "completed"
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    ("mode", "bytes", "stray_migration_012"),
+)
+def test_schema_bridge_prebackup_recovery_preserves_lock_on_public_drift(
+    local_plan: object,
+    tmp_path: Path,
+    corruption: str,
+) -> None:
+    private_root = tmp_path.resolve()
+    os.chmod(private_root, 0o700)
+    deploy_report = (tmp_path / "bridge-deploy.json").resolve()
+    abort_report = (tmp_path / "bridge-abort.json").resolve()
+    client, router, _compatibility, _updater = (
+        _prepared_bridge_deploy(
+            local_plan,
+            deploy_report,
+            private_root,
+        )
+    )
+    compatibility = _partial_bridge_compatibility(client)
+    lock_path = php_deploy._acquire_deployment_lock(
+        client,
+        DEFAULT_REMOTE_ROOT + "/_private",
+        RELEASE_ID,
+    )
+    _acquired_at, stale_evidence = _age_test_lock_owner(
+        client,
+        lock_path,
+    )
+    if corruption == "mode":
+        client.modes[DEFAULT_REMOTE_ROOT + "/api.php"] = 0o600
+    elif corruption == "bytes":
+        client.files[DEFAULT_REMOTE_ROOT + "/api.php"] = b"changed\n"
+    else:
+        client.add_file(
+            DEFAULT_REMOTE_ROOT
+            + "/migrations/012_dart_credential_pool.sql",
+            b"stray\n",
+            0o644,
+        )
+    owner_before = client.files[lock_path + "/owner.json"]
+
+    def load_prepared() -> object:
+        return php_deploy.load_schema_bridge_backup_ready(
+            deploy_report,
+            private_root=private_root,
+            expected_candidate_sha=RELEASE_SHA,
+            expected_release_id=RELEASE_ID,
+            expected_backup_manifest_sha256=None,
+            expected_dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+        )
+
+    php_deploy._prepare_durable_report(
+        abort_report,
+        private_root=private_root,
+        operation="schema-bridge-abort",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+        environ={
+            php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+        },
+    )
+    updater = php_deploy._bridge_report_updater(
+        abort_report,
+        operation="schema-bridge-abort",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+    )
+
+    with pytest.raises(PhpDeploymentError):
+        php_deploy.abort_one_time_schema_bridge(
+            client,
+            candidate_plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            expected_backup_manifest_sha256=None,
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            bridge_deploy_report_load=load_prepared,  # type: ignore[arg-type]
+            bridge_report_update=updater,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=router,
+            gabia_compatibility=compatibility,  # type: ignore[arg-type]
+            stale_lock_owner_release_id=RELEASE_ID,
+            stale_lock_writer_absence_evidence=stale_evidence,
+        )
+
+    assert client.files[lock_path + "/owner.json"] == owner_before
+    assert lock_path in client.directories
+
+
+def test_bridge_deploy_crash_before_first_file_leaves_backup_ready_journal(
+    local_plan: object,
+    tmp_path: Path,
+) -> None:
+    private_root = tmp_path.resolve()
+    os.chmod(private_root, 0o700)
+    destination = (tmp_path / "bridge-deploy.json").resolve()
+    client, router, compatibility, updater = _prepared_bridge_deploy(
+        local_plan,
+        destination,
+        private_root,
+    )
+
+    def crash_before_commit(status: str, evidence: object) -> None:
+        if status == "commit_started":
+            raise RuntimeError("simulated process stop before first file")
+        assert callable(updater)
+        updater(status, evidence)  # type: ignore[arg-type]
+
+    with pytest.raises(PhpDeploymentError, match="stopped before commit"):
+        deploy_release(
+            client,
+            plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=router,
+            gabia_compatibility=compatibility,  # type: ignore[arg-type]
+            schema_upgrade_from=11,
+            expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            bridge_report_update=crash_before_commit,
+        )
+
+    payload = json.loads(destination.read_text(encoding="utf-8"))
+    assert payload["status"] == "backup_ready"
+    assert payload["backup_ready"]["previous_code_revision"] == (
+        ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+    )
+    assert verify_existing_remote_release_identity(
+        client,
+        remote_root=DEFAULT_REMOTE_ROOT,
+        expected_core_files=LEGACY_SCHEMA_11_CORE_API_FILES,
+    ) == ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA
+
+
+def test_bridge_completed_report_preserves_backup_ready_for_later_abort(
+    local_plan: object,
+    tmp_path: Path,
+) -> None:
+    private_root = tmp_path.resolve()
+    os.chmod(private_root, 0o700)
+    destination = (tmp_path / "bridge-deploy.json").resolve()
+    client, router, compatibility, updater = _prepared_bridge_deploy(
+        local_plan,
+        destination,
+        private_root,
+    )
+    result = deploy_release(
+        client,
+        plan=local_plan,  # type: ignore[arg-type]
+        release_id=RELEASE_ID,
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        protected_token=PROTECTED_TOKEN,
+        http_request=router,
+        gabia_compatibility=compatibility,  # type: ignore[arg-type]
+        schema_upgrade_from=11,
+        expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+        bridge_report_update=updater,  # type: ignore[arg-type]
+    )
+    php_deploy._commit_durable_report(destination, result)
+
+    payload = json.loads(destination.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == 2
+    assert payload["status"] == "completed"
+    assert payload["backup_ready"]["backup_manifest_sha256"] == (
+        result["backup_manifest_sha256"]
+    )
+    loaded = php_deploy.load_schema_bridge_backup_ready(
+        destination,
+        private_root=private_root,
+        expected_candidate_sha=RELEASE_SHA,
+        expected_release_id=RELEASE_ID,
+        expected_backup_manifest_sha256=str(
+            result["backup_manifest_sha256"]
+        ),
+        expected_dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+    )
+    assert loaded == payload["backup_ready"]
+
+
+def test_bridge_rollback_completed_report_binds_emergency_snapshot(
+    local_plan: object,
+    tmp_path: Path,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    private_root = tmp_path.resolve()
+    os.chmod(private_root, 0o700)
+    destination = (tmp_path / "bridge-rollback.json").resolve()
+    php_deploy._prepare_durable_report(
+        destination,
+        private_root=private_root,
+        operation="schema-bridge-rollback",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+        environ={
+            php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+        },
+    )
+    updater = php_deploy._bridge_report_updater(
+        destination,
+        operation="schema-bridge-rollback",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+    )
+    result = rollback_one_time_schema_bridge(
+        client,
+        candidate_plan=local_plan,  # type: ignore[arg-type]
+        release_id=RELEASE_ID,
+        expected_current_sha=RELEASE_SHA,
+        expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+        expected_backup_manifest_sha256=str(
+            deploy_result["backup_manifest_sha256"]
+        ),
+        public_url_root=PUBLIC_ROOT,
+        api_v2_base_url=API_V2,
+        rollback_health_url=ROLLBACK_HEALTH,
+        protected_token=PROTECTED_TOKEN,
+        http_request=router,
+        gabia_compatibility=_candidate_compatibility(client),  # type: ignore[arg-type]
+        dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+        bridge_report_update=updater,
+    )
+    php_deploy._commit_durable_report(destination, result)
+
+    payload = json.loads(destination.read_text(encoding="utf-8"))
+    assert payload["status"] == "completed"
+    assert payload["emergency_backup"] == (
+        payload["report"]["emergency_backup_identity"]
+    )
+
+
+def test_bridge_rollback_completed_report_rejects_cross_state_database(
+    local_plan: object,
+    tmp_path: Path,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    private_root = tmp_path.resolve()
+    os.chmod(private_root, 0o700)
+    destination = (tmp_path / "bridge-rollback.json").resolve()
+    php_deploy._prepare_durable_report(
+        destination,
+        private_root=private_root,
+        operation="schema-bridge-rollback",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+        environ={
+            php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+        },
+    )
+    updater = php_deploy._bridge_report_updater(
+        destination,
+        operation="schema-bridge-rollback",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+    )
+    result = dict(
+        rollback_one_time_schema_bridge(
+            client,
+            candidate_plan=local_plan,  # type: ignore[arg-type]
+            release_id=RELEASE_ID,
+            expected_current_sha=RELEASE_SHA,
+            expected_previous_sha=ONE_TIME_SCHEMA_BRIDGE_PREVIOUS_SHA,
+            expected_backup_manifest_sha256=str(
+                deploy_result["backup_manifest_sha256"]
+            ),
+            public_url_root=PUBLIC_ROOT,
+            api_v2_base_url=API_V2,
+            rollback_health_url=ROLLBACK_HEALTH,
+            protected_token=PROTECTED_TOKEN,
+            http_request=router,
+            gabia_compatibility=_candidate_compatibility(client),  # type: ignore[arg-type]
+            dart_disabled_evidence=DART_DISABLED_EVIDENCE,
+            bridge_report_update=updater,
+        )
+    )
+    checkpoint = destination.read_bytes()
+    variants = (
+        {
+            **result,
+            "candidate_database_schema_version_before": None,
+            "database_schema_observation": (
+                "unavailable_due_partial_php"
+            ),
+        },
+        {
+            **result,
+            "database_schema_observation": "candidate_schema_12",
+        },
+        {**result, "initial_php_state": "candidate"},
+    )
+    for index, variant in enumerate(variants):
+        forged = (tmp_path / f"forged-rollback-{index}.json").resolve()
+        forged.write_bytes(checkpoint)
+        with pytest.raises(
+            PhpDeploymentError,
+            match="recovery report identity is incomplete",
+        ):
+            php_deploy._commit_durable_report(forged, variant)
+
+
+def test_bridge_abort_completed_report_rejects_cross_state_evidence(
+    local_plan: object,
+    tmp_path: Path,
+) -> None:
+    client, router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    private_root = tmp_path.resolve()
+    os.chmod(private_root, 0o700)
+    destination = (tmp_path / "bridge-abort.json").resolve()
+    php_deploy._prepare_durable_report(
+        destination,
+        private_root=private_root,
+        operation="schema-bridge-abort",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+        environ={
+            php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+        },
+    )
+    updater = php_deploy._bridge_report_updater(
+        destination,
+        operation="schema-bridge-abort",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+    )
+    result = _abort_test_schema_bridge(
+        client,
+        router,
+        local_plan,
+        deploy_result,
+        bridge_report_update=updater,
+    )
+    checkpoint = destination.read_bytes()
+    variants = (
+        {
+            **result,
+            "candidate_database_schema_version_before": None,
+            "database_schema_observation": (
+                "unavailable_due_partial_php"
+            ),
+        },
+        {
+            **result,
+            "emergency_backup_release_id": None,
+            "emergency_backup_identity": None,
+        },
+        {
+            **result,
+            "initial_php_state": "mixed",
+        },
+        {
+            **result,
+            "initial_php_state": "predecessor",
+            "candidate_database_schema_version_before": None,
+            "database_schema_observation": (
+                "unavailable_due_partial_php"
+            ),
+            "emergency_backup_release_id": None,
+            "emergency_backup_identity": None,
+        },
+    )
+    for index, variant in enumerate(variants):
+        forged = (tmp_path / f"forged-abort-{index}.json").resolve()
+        forged.write_bytes(checkpoint)
+        with pytest.raises(
+            PhpDeploymentError,
+            match="recovery report identity is incomplete",
+        ):
+            php_deploy._commit_durable_report(forged, variant)
+
+
+def test_bridge_recovery_report_rejects_minimal_ok_payload(
+    local_plan: object,
+    tmp_path: Path,
+) -> None:
+    client, _router, deploy_result = _deploy_test_schema_bridge(local_plan)
+    ready = _bridge_ready(client, deploy_result)
+    private_root = tmp_path.resolve()
+    os.chmod(private_root, 0o700)
+    destination = (tmp_path / "bridge-rollback.json").resolve()
+    php_deploy._prepare_durable_report(
+        destination,
+        private_root=private_root,
+        operation="schema-bridge-rollback",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+        environ={
+            php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+        },
+    )
+    updater = php_deploy._bridge_report_updater(
+        destination,
+        operation="schema-bridge-rollback",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+    )
+    updater("backup_ready", {"backup_ready": ready})
+    updater("commit_started", {})
+    updater("restored", {})
+    updater("verified", {})
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="recovery report identity is incomplete",
+    ):
+        php_deploy._commit_durable_report(
+            destination,
+            {
+                "ok": True,
+                "operation": "schema-bridge-rollback",
+                "release_id": RELEASE_ID,
+                "candidate_code_revision": RELEASE_SHA,
+            },
+        )
+
+
+def test_durable_report_rejects_unconfirmed_private_parent(
+    tmp_path: Path,
+) -> None:
+    private_root = tmp_path.resolve()
+    os.chmod(private_root, 0o700)
+    destination = (tmp_path / "deploy-report.json").resolve()
+    with pytest.raises(
+        PhpDeploymentError,
+        match="independently confirmed private root",
+    ):
+        php_deploy._prepare_durable_report(
+            destination,
+            private_root=private_root,
+            operation="deploy",
+            code_revision=RELEASE_SHA,
+            release_id=RELEASE_ID,
+            environ={
+                php_deploy.PRIVATE_REPORT_ROOT_ENV: str(
+                    (tmp_path / "other").resolve()
+                ),
+            },
+        )
+    assert not destination.exists()
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX owner-only mode enforcement",
+)
+def test_bridge_abort_resume_rechecks_private_root_mode(
+    tmp_path: Path,
+) -> None:
+    private_root = tmp_path.resolve()
+    os.chmod(private_root, 0o700)
+    destination = (tmp_path / "bridge-abort.json").resolve()
+    php_deploy._prepare_durable_report(
+        destination,
+        private_root=private_root,
+        operation="schema-bridge-abort",
+        code_revision=RELEASE_SHA,
+        release_id=RELEASE_ID,
+        environ={
+            php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+        },
+    )
+    takeover = {
+        "stale_owner_release_id": RELEASE_ID,
+        "stale_owner_state": "owner_present",
+        "stale_owner_acquired_at": (
+            datetime.now(timezone.utc) - timedelta(minutes=30)
+        ).isoformat(),
+        "stale_owner_sha256": "a" * 64,
+        "writer_absence_evidence": "",
+        "writer_absence_nonce": "1" * 32,
+        "writer_absence_issued_at": "",
+        "replacement_release_id": (
+            "schema11-bridge-abort-test-"
+            "20260727t000000z-12345678"
+        ),
+        "database_mutated": False,
+    }
+    acquired_at = str(takeover["stale_owner_acquired_at"])
+    evidence = _stale_writer_absence_evidence(
+        owner_content=b"placeholder-owner",
+        acquired_at_reference=acquired_at,
+    )
+    evidence_match = php_deploy.STALE_LOCK_WRITER_ABSENCE_PATTERN.fullmatch(
+        evidence
+    )
+    assert evidence_match is not None
+    takeover["stale_owner_sha256"] = evidence_match.group(
+        "owner_sha256"
+    )
+    takeover["writer_absence_evidence"] = evidence
+    takeover["writer_absence_issued_at"] = evidence_match.group(
+        "issued_at"
+    )
+    takeover["identity_sha256"] = hashlib.sha256(
+        php_deploy._encode_json(takeover)
+    ).hexdigest()
+    payload = json.loads(destination.read_text(encoding="utf-8"))
+    payload["status"] = "stale_lock_takeover_ready"
+    payload["stale_lock_takeover"] = takeover
+    destination.write_bytes(php_deploy._encode_json(payload))
+    os.chmod(destination, 0o600)
+    os.chmod(private_root, 0o755)
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="must not grant group or other access",
+    ):
+        php_deploy._prepare_durable_report(
+            destination,
+            private_root=private_root,
+            operation="schema-bridge-abort",
+            code_revision=RELEASE_SHA,
+            release_id=RELEASE_ID,
+            allow_bridge_abort_resume=True,
+            environ={
+                php_deploy.PRIVATE_REPORT_ROOT_ENV: str(private_root),
+            },
+        )

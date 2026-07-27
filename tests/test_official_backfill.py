@@ -478,6 +478,86 @@ def test_dart_only_dry_run_does_not_require_source_right_ops_token(
     validate_runtime(options)
 
 
+def test_dart_apply_runtime_requires_exact_protected_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+
+    class EligibleDartClient:
+        def preflight(self, expected_release_sha: str) -> object:
+            calls.append(expected_release_sha)
+            return object()
+
+    monkeypatch.setenv("DART_API_KEY", "a" * 40)
+    monkeypatch.setenv(
+        "ACTIVIST_API_URL",
+        "https://alignpe.gabia.io/activist/api.php",
+    )
+    monkeypatch.setenv("ACTIVIST_API_SECRET", "hmac-secret")
+    monkeypatch.setenv(
+        "BSIDE_API_BASE_URL",
+        "https://alignpe.gabia.io/activist/api.php/api/v1",
+    )
+    monkeypatch.setenv("BSIDE_OPS_TOKEN", "ops-token")
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", "b" * 64)
+    monkeypatch.setattr(
+        official_backfill,
+        "DartOfficialSourceRightClient",
+        EligibleDartClient,
+    )
+    options = BackfillOptions(
+        start=date(2021, 1, 1),
+        end_exclusive=date(2021, 1, 2),
+        checkpoint_path=tmp_path / "unused.json",
+        sources=("dart",),
+        dry_run=False,
+    )
+
+    validate_runtime(options)
+    assert calls == [CODE_REVISION]
+
+
+def test_dart_apply_runtime_rejects_failed_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class RejectedDartClient:
+        def preflight(self, _expected_release_sha: str) -> object:
+            raise official_backfill.OfficialSourceRightError("revoked")
+
+    monkeypatch.setenv("DART_API_KEY", "a" * 40)
+    monkeypatch.setenv(
+        "ACTIVIST_API_URL",
+        "https://alignpe.gabia.io/activist/api.php",
+    )
+    monkeypatch.setenv("ACTIVIST_API_SECRET", "hmac-secret")
+    monkeypatch.setenv(
+        "BSIDE_API_BASE_URL",
+        "https://alignpe.gabia.io/activist/api.php/api/v1",
+    )
+    monkeypatch.setenv("BSIDE_OPS_TOKEN", "ops-token")
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", "b" * 64)
+    monkeypatch.setattr(
+        official_backfill,
+        "DartOfficialSourceRightClient",
+        RejectedDartClient,
+    )
+    options = BackfillOptions(
+        start=date(2021, 1, 1),
+        end_exclusive=date(2021, 1, 2),
+        checkpoint_path=tmp_path / "unused.json",
+        sources=("dart",),
+        dry_run=False,
+    )
+
+    with pytest.raises(
+        BackfillConfigurationError,
+        match="protected SourceRight preflight failed: revoked",
+    ):
+        validate_runtime(options)
+
+
 def test_backfill_rejects_conflicting_pool_and_legacy_key_without_secret(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

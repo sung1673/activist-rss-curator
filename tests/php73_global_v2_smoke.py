@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import hmac
 import json
 import subprocess
 import sys
@@ -52,6 +53,7 @@ EDITOR_TOKEN = "php73-ci-editor-token-0000000000000000000"
 OPS_TOKEN = "php73-ci-ops-token-000000000000000000000"
 RELEASE_AUTHORIZER_TOKEN = "php73-ci-release-token-000000000000000000"
 PREVIEW_TOKEN = "php73-ci-preview-token-000000000000000000"
+API_SECRET = b"php73-ci-only-hmac-key-00000000000000000000000000000000"
 MYSQL_ROOT_PASSWORD = "activist_ci_root_password"
 DATABASE = "activist_ci"
 TABLE_PREFIX = "ci_"
@@ -69,6 +71,14 @@ REQUIRED_ALPHA_RIGHT_IDS = (
     "official:sec-edgar",
     "official:ca-issuer-ir",
     "official:asic-register",
+)
+DART_CONTRACT_FIXTURE = json.loads(
+    (
+        REPOSITORY_ROOT
+        / "tests"
+        / "fixtures"
+        / "dart_source_right_contract_v1.json"
+    ).read_text(encoding="utf-8")
 )
 
 
@@ -160,6 +170,117 @@ def request_json(
         f"{method} {path} expected {expected_status}, got {status}: {decoded!r}",
     )
     return decoded, response_headers
+
+
+def request_dart_hmac_write(
+    base_url: str,
+    payload: dict[str, Any],
+    *,
+    expected_status: int,
+) -> dict[str, Any]:
+    body = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    timestamp = str(int(datetime.now(timezone.utc).timestamp()))
+    nonce = "global-live-dart-" + hashlib.sha256(body).hexdigest()[:32]
+    signature = hmac.new(
+        API_SECRET,
+        timestamp.encode("ascii")
+        + b"\n"
+        + nonce.encode("ascii")
+        + b"\n"
+        + body,
+        hashlib.sha256,
+    ).hexdigest()
+    request = urllib.request.Request(
+        (
+            f"{base_url.rstrip('/')}/api.php?"
+            "action=upsert_governance_snapshot_dart_guarded"
+        ),
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "X-Activist-Timestamp": timestamp,
+            "X-Activist-Nonce": nonce,
+            "X-Activist-Signature": f"sha256={signature}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            status = response.status
+            raw = response.read()
+    except urllib.error.HTTPError as error:
+        status = error.code
+        raw = error.read()
+    decoded = json.loads(raw.decode("utf-8"))
+    require(
+        status == expected_status and isinstance(decoded, dict),
+        f"DART HMAC write expected {expected_status}, got {status}: {decoded!r}",
+    )
+    return decoded
+
+
+def dart_guarded_metadata_payload(
+    *,
+    company_id: str,
+    external_id: str,
+    expected_release_state: str,
+    rights_revision: str,
+    contract_revision: str,
+    backend_binding_id: str,
+) -> dict[str, Any]:
+    title = f"CI DART metadata-only {expected_release_state} filing"
+    url = f"https://opendart.fss.or.kr/ci/{external_id}"
+    return {
+        "companies": [
+            {
+                "company_id": company_id,
+                "stock_code": company_id[-6:],
+                "market": "KOSPI",
+                "legal_name": f"CI DART {expected_release_state} company",
+                "record_status": "active",
+            }
+        ],
+        "documents": [
+            {
+                "document_id": f"dart:{external_id}",
+                "company_id": company_id,
+                "source": "dart",
+                "source_right_id": "official:dart",
+                "source_class": "official_disclosure",
+                "external_id": external_id,
+                "document_type": "major_holding",
+                "original_language": "ko",
+                "title": title,
+                "body_text": "",
+                "original_url": url,
+                "content_hash": hashlib.sha256(
+                    f"{title}\n{url}\n{external_id}".encode("utf-8")
+                ).hexdigest(),
+                "collection_key": f"ci-dart-{expected_release_state}",
+                "version_no": 1,
+                "published_at": "2026-07-27T00:00:00Z",
+                "retrieved_at": "2026-07-27T00:05:00Z",
+                "verification_status": "official",
+                "publication_status": "published",
+            }
+        ],
+        "events": [],
+        "source_rights": [],
+        "expected_source_right_revisions": {
+            "official:dart": {
+                "rights_revision": rights_revision,
+                "contract_revision": contract_revision,
+            }
+        },
+        "expected_deployment_code_revision": CODE_REVISION,
+        "expected_release_state": expected_release_state,
+        "run": {},
+        "expected_backend_binding_id": backend_binding_id,
+    }
 
 
 def request_bytes(
@@ -275,6 +396,38 @@ def stable_record_id(connector_id: str, issuer_id: str, external_id: str) -> str
     return "globaldoc:" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:40]
 
 
+def refresh_record_content_hash(record: dict[str, Any]) -> None:
+    """Recompute the cross-runtime hash after a deliberate fixture mutation."""
+    semantic_record = GlobalDocumentRecord(
+        record_id=record["record_id"],
+        external_id=record["external_id"],
+        issuer_id=record["issuer_id"],
+        issuer_reference=IssuerReference(**record["issuer_reference"]),
+        country_code=record["country_code"],
+        source_key=record["source_key"],
+        source_right_id=record["source_right_id"],
+        record_kind=record["record_kind"],
+        document_type=record["document_type"],
+        event_family=record["event_family"],
+        title=record["title"],
+        original_language=record["original_language"],
+        filed_at=record["filed_at"],
+        first_observed_at=record["first_observed_at"],
+        original_url=record["original_url"],
+        content_hash="0" * 64,
+        body_text=record["body_text"],
+        correction_of_external_id=record["correction_of_external_id"],
+        change_type=record["change_type"],
+        metadata=record["metadata"],
+    )
+    record["content_hash"] = global_document_content_hash(
+        semantic_record,
+        source_type="official_disclosure",
+        public_allowed=True,
+        ai_allowed=True,
+    )
+
+
 def build_record(
     *,
     title: str,
@@ -321,7 +474,7 @@ def build_record(
             "000032019326000999/ownership.txt"
         ),
         "content_hash": "",
-        "body_text": f"CI source-preserved fixture body {content_version}.",
+        "body_text": None,
         "correction_of_external_id": None,
         "change_type": "new" if content_version == "v1" else "updated",
         "metadata": {
@@ -336,34 +489,7 @@ def build_record(
             },
         },
     }
-    semantic_record = GlobalDocumentRecord(
-        record_id=record["record_id"],
-        external_id=record["external_id"],
-        issuer_id=record["issuer_id"],
-        issuer_reference=IssuerReference(**record["issuer_reference"]),
-        country_code=record["country_code"],
-        source_key=record["source_key"],
-        source_right_id=record["source_right_id"],
-        record_kind=record["record_kind"],
-        document_type=record["document_type"],
-        event_family=record["event_family"],
-        title=record["title"],
-        original_language=record["original_language"],
-        filed_at=record["filed_at"],
-        first_observed_at=record["first_observed_at"],
-        original_url=record["original_url"],
-        content_hash="0" * 64,
-        body_text=record["body_text"],
-        correction_of_external_id=record["correction_of_external_id"],
-        change_type=record["change_type"],
-        metadata=record["metadata"],
-    )
-    record["content_hash"] = global_document_content_hash(
-        semantic_record,
-        source_type="official_disclosure",
-        public_allowed=True,
-        ai_allowed=True,
-    )
+    refresh_record_content_hash(record)
     return record
 
 
@@ -581,12 +707,59 @@ def activate_sec_source_right(mysql_container_id: str) -> None:
     mysql_execute(
         mysql_container_id,
         "UPDATE ci_source_rights "
-        "SET permission_scope='CI-approved SEC filing metadata, source links, and fixture body',"
+        "SET permission_scope='CI-approved SEC filing metadata and source links only',"
         "evidence_uri='https://www.sec.gov/search-filings/edgar-application-programming-interfaces',"
         "evidence_hash=NULL,valid_from='2009-01-01 00:00:00',valid_until=NULL,"
         "revoked_at=NULL,ai_allowed=1,redistribution_allowed=1,status='active',"
         "updated_at=UTC_TIMESTAMP() "
         "WHERE source_right_id='official:sec-edgar';",
+    )
+
+
+def activate_exact_dart_source_right(mysql_container_id: str) -> None:
+    source = DART_CONTRACT_FIXTURE["source_right"]
+
+    def sql_value(value: object) -> str:
+        if value is None:
+            return "NULL"
+        if isinstance(value, bool):
+            return "1" if value else "0"
+        return "'" + str(value).replace("'", "''") + "'"
+
+    mysql_execute(
+        mysql_container_id,
+        "INSERT INTO ci_source_rights "
+        "(source_right_id,source_type,source_key,source_name,permission_scope,"
+        "evidence_uri,evidence_hash,valid_from,valid_until,revoked_at,ai_allowed,"
+        "redistribution_allowed,status,notes,created_at,updated_at) VALUES ("
+        + ",".join(
+            (
+                sql_value(source["source_right_id"]),
+                sql_value(source["source_type"]),
+                sql_value(source["source_key"]),
+                sql_value(source["source_name"]),
+                sql_value(source["permission_scope"]),
+                sql_value(source["evidence_uri"]),
+                sql_value(source["evidence_hash"]),
+                "'2009-01-01 00:00:00'",
+                sql_value(source["valid_until"]),
+                sql_value(source["revoked_at"]),
+                sql_value(source["ai_allowed"]),
+                sql_value(source["redistribution_allowed"]),
+                sql_value(source["status"]),
+                "'cross-runtime source-right-contract-v1 fixture'",
+                "UTC_TIMESTAMP()",
+                "UTC_TIMESTAMP()",
+            )
+        )
+        + ") ON DUPLICATE KEY UPDATE "
+        "source_type=VALUES(source_type),source_key=VALUES(source_key),"
+        "source_name=VALUES(source_name),permission_scope=VALUES(permission_scope),"
+        "evidence_uri=VALUES(evidence_uri),evidence_hash=VALUES(evidence_hash),"
+        "valid_from=VALUES(valid_from),valid_until=VALUES(valid_until),"
+        "revoked_at=VALUES(revoked_at),ai_allowed=VALUES(ai_allowed),"
+        "redistribution_allowed=VALUES(redistribution_allowed),"
+        "status=VALUES(status),updated_at=UTC_TIMESTAMP();",
     )
 
 
@@ -623,7 +796,7 @@ def activate_required_alpha_cutover_sources(mysql_container_id: str) -> None:
         + ",".join(
             f"'{value}'"
             for value in REQUIRED_ALPHA_RIGHT_IDS
-            if value != SEC_RIGHT_ID
+            if value not in {SEC_RIGHT_ID, "official:dart"}
         )
         + ");"
         "UPDATE ci_source_connectors SET connector_status='active',"
@@ -944,7 +1117,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
     )
     require(
         canonical_fixture["content_hash"]
-        == "19711d39dfe0fca47f6397cbbb6911b0ee7621b489ad8d72503c63da2d1514c4",
+        == "c529b3a17704ccbb6d517396573fca1129408cb5cee5e6d555d7bb70f1d23cb0",
         repr(canonical_fixture),
     )
     require(
@@ -1091,6 +1264,27 @@ def run(base_url: str, mysql_container_id: str) -> None:
     require(
         wrong_eligibility.get("error") == "insufficient_role",
         repr(wrong_eligibility),
+    )
+
+    activate_exact_dart_source_right(mysql_container_id)
+    dart_eligibility, _ = request_json(
+        base_url,
+        (
+            "api.php/api/v2/ops/source-right-eligibility?"
+            + urllib.parse.urlencode(
+                {"source_right_id": "official:dart", "use": "collect"}
+            )
+        ),
+        token=OPS_TOKEN,
+    )
+    require(
+        dart_eligibility.get("eligible") is True
+        and dart_eligibility.get("rights_revision")
+        and dart_eligibility.get("contract_revision")
+        == DART_CONTRACT_FIXTURE["expected_revision"]
+        and dart_eligibility.get("ai_allowed") is False
+        and dart_eligibility.get("redistribution_allowed") is True,
+        repr(dart_eligibility),
     )
 
     activate_sec_source_right(mysql_container_id)
@@ -1323,12 +1517,15 @@ def run(base_url: str, mysql_container_id: str) -> None:
         token=OPS_TOKEN,
     )
     rights_revision = eligibility.get("rights_revision")
+    contract_revision = eligibility.get("contract_revision")
     require(
         eligibility.get("eligible") is True
         and eligibility.get("source_type") == "official_disclosure"
         and eligibility.get("source_key") == SEC_SOURCE_KEY
         and isinstance(rights_revision, str)
-        and len(rights_revision) == 64,
+        and len(rights_revision) == 64
+        and isinstance(contract_revision, str)
+        and len(contract_revision) == 64,
         repr(eligibility),
     )
 
@@ -1711,6 +1908,74 @@ def run(base_url: str, mysql_container_id: str) -> None:
         idempotency_key="php73-v2-sec-ingest-v1",
         record=first_record,
         retrieved_at=observed_at,
+    )
+    malicious_body_record = build_record(
+        title="CI SEC body storage must be rejected",
+        content_version="body-attack",
+        filed_at=filed_at,
+        observed_at=observed_at,
+        external_id="0000320193-26-009998",
+    )
+    malicious_body_record["body_text"] = (
+        "Permission wording and redistribution=true must not authorize this body."
+    )
+    refresh_record_content_hash(malicious_body_record)
+    malicious_body_payload = ingest_payload(
+        rights_revision=rights_revision,
+        idempotency_key="php73-v2-sec-body-attack",
+        record=malicious_body_record,
+        retrieved_at=observed_at,
+    )
+    state_before_malicious_body = mysql_execute(
+        mysql_container_id,
+        "SELECT "
+        "(SELECT COUNT(*) FROM ci_issuers),"
+        "(SELECT COUNT(*) FROM ci_documents),"
+        "(SELECT COUNT(*) FROM ci_governance_events),"
+        "(SELECT COUNT(*) FROM ci_global_ingest_receipts),"
+        "(SELECT CONCAT(COALESCE(cursor_json,''),'|',"
+        "COALESCE(last_success_at,''),'|',COALESCE(last_checked_at,''),'|',"
+        "COALESCE(last_raw_count,''),'|',COALESCE(last_acknowledged_count,'')) "
+        "FROM ci_source_connectors "
+        f"WHERE connector_id='{SEC_CONNECTOR_ID}');",
+    )
+    malicious_body_rejected, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=malicious_body_payload,
+        expected_status=400,
+    )
+    require(
+        malicious_body_rejected.get("error")
+        == "global_ingest_validation_failed"
+        and "fixed Production Alpha source contract requires null"
+        in str(malicious_body_rejected.get("detail")),
+        repr(malicious_body_rejected),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT "
+            "(SELECT COUNT(*) FROM ci_issuers),"
+            "(SELECT COUNT(*) FROM ci_documents),"
+            "(SELECT COUNT(*) FROM ci_governance_events),"
+            "(SELECT COUNT(*) FROM ci_global_ingest_receipts),"
+            "(SELECT CONCAT(COALESCE(cursor_json,''),'|',"
+            "COALESCE(last_success_at,''),'|',COALESCE(last_checked_at,''),'|',"
+            "COALESCE(last_raw_count,''),'|',COALESCE(last_acknowledged_count,'')) "
+            "FROM ci_source_connectors "
+            f"WHERE connector_id='{SEC_CONNECTOR_ID}');",
+        )
+        == state_before_malicious_body
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_documents WHERE document_id="
+            f"'{malicious_body_record['record_id']}';",
+        )
+        == "0",
+        "fixed metadata-only body rejection must leave MySQL unchanged",
     )
     replay_only_missing = json.loads(json.dumps(first_payload))
     replay_only_missing["ingest_mode"] = "replay"
@@ -2213,6 +2478,63 @@ def run(base_url: str, mysql_container_id: str) -> None:
         and v1_preview.get("release_state") == "preview"
         and v1_preview.get("state_version") == v1_preview_version,
         repr(v1_preview),
+    )
+    server_uuid, database_name = mysql_execute(
+        mysql_container_id,
+        "SELECT LOWER(@@server_uuid),DATABASE()",
+    ).split("\t")
+    backend_binding_id = hashlib.sha256(
+        f"mysql8\n{server_uuid}\n{database_name}\nci_".encode()
+    ).hexdigest()
+    preview_dart_payload = dart_guarded_metadata_payload(
+        company_id="00999983",
+        external_id="20260727999831",
+        expected_release_state="preview",
+        rights_revision=dart_eligibility["rights_revision"],
+        contract_revision=dart_eligibility["contract_revision"],
+        backend_binding_id=backend_binding_id,
+    )
+    preview_dart_write = request_dart_hmac_write(
+        base_url,
+        preview_dart_payload,
+        expected_status=200,
+    )
+    require(
+        preview_dart_write.get("ok") is True
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT("
+            "(SELECT COUNT(*) FROM ci_companies WHERE company_id='00999983'),"
+            "(SELECT COUNT(*) FROM ci_documents "
+            "WHERE document_id='dart:20260727999831' AND body_text IS NULL))",
+        )
+        == "11",
+        "matching preview state must accept metadata-only DART writes",
+    )
+    preview_state_mismatch_payload = dart_guarded_metadata_payload(
+        company_id="00999984",
+        external_id="20260727999841",
+        expected_release_state="live",
+        rights_revision=dart_eligibility["rights_revision"],
+        contract_revision=dart_eligibility["contract_revision"],
+        backend_binding_id=backend_binding_id,
+    )
+    preview_state_mismatch = request_dart_hmac_write(
+        base_url,
+        preview_state_mismatch_payload,
+        expected_status=409,
+    )
+    require(
+        preview_state_mismatch.get("error") == "dart_release_state_mismatch"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT("
+            "(SELECT COUNT(*) FROM ci_companies WHERE company_id='00999984'),"
+            "(SELECT COUNT(*) FROM ci_documents "
+            "WHERE document_id='dart:20260727999841'))",
+        )
+        == "00",
+        "signed preview/live mismatch must leave MySQL unchanged",
     )
     preview_state, _ = request_json(
         base_url,
@@ -3098,6 +3420,38 @@ def run(base_url: str, mysql_container_id: str) -> None:
         == 2
         and live.get("authorization_id") == authorization.get("authorization_id"),
         repr(live),
+    )
+    server_uuid, database_name = mysql_execute(
+        mysql_container_id,
+        "SELECT LOWER(@@server_uuid),DATABASE()",
+    ).split("\t")
+    backend_binding_id = hashlib.sha256(
+        f"mysql8\n{server_uuid}\n{database_name}\nci_".encode()
+    ).hexdigest()
+    live_dart_payload = dart_guarded_metadata_payload(
+        company_id="00999985",
+        external_id="20260727999851",
+        expected_release_state="live",
+        rights_revision=dart_eligibility["rights_revision"],
+        contract_revision=dart_eligibility["contract_revision"],
+        backend_binding_id=backend_binding_id,
+    )
+    live_dart_write = request_dart_hmac_write(
+        base_url,
+        live_dart_payload,
+        expected_status=200,
+    )
+    require(
+        live_dart_write.get("ok") is True
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT("
+            "(SELECT COUNT(*) FROM ci_companies WHERE company_id='00999985'),"
+            "(SELECT COUNT(*) FROM ci_documents "
+            "WHERE document_id='dart:20260727999851' AND body_text IS NULL))",
+        )
+        == "11",
+        "matching live state must keep DART freshness writable",
     )
     authorization_row = mysql_execute(
         mysql_container_id,

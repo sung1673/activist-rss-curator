@@ -16,7 +16,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: governance-production-transition-${{ github.repository }}
+  # Emergency close must not wait behind a six-hour backfill. The API release
+  # state row lock serializes close with an in-flight chunk, while the separate
+  # Pages deployment lock prevents a legacy/governance artifact overwrite race.
+  group: governance-emergency-rollback-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
   queue: max
 
@@ -33,17 +36,13 @@ jobs:
       - name: Checkout rollback verifier
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up rollback Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-
       - name: Enforce protected rollback inputs and default branch
         shell: bash
         env:
           CONFIRM: ${{ inputs.confirm }}
           ROLLBACK_REASON: ${{ inputs.reason }}
-          REF_NAME: ${{ github.ref_name }}
+          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           PAGES_OWNER: ${{ vars.PAGES_OWNER }}
           GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
@@ -59,7 +58,7 @@ jobs:
             echo "::error::Rollback reason must contain at least eight characters."
             exit 1
           }
-          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]] || {
+          [[ "$REF_TYPE" == "branch" && "$REF" == "refs/heads/$DEFAULT_BRANCH" ]] || {
             echo "::error::Rollback is restricted to the default branch."
             exit 1
           }
@@ -73,6 +72,20 @@ jobs:
           }
           [[ "${ENABLE_TELEGRAM_DELIVERY,,}" != "true" ]]
           [[ "${ENABLE_GOVERNANCE_DELIVERY,,}" != "true" ]]
+
+      - name: Immediately close v2 then v1 before recovery preparation
+        env:
+          BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          ROLLBACK_REASON: ${{ inputs.reason }}
+          ROLLBACK_REQUEST_PREFIX: rollback-immediate-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: bash .github/scripts/close-governance-release-state.sh
+
+      - name: Set up rollback Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
 
       - name: Cancel stale Pages producer runs before rollback deployment
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -229,56 +242,14 @@ jobs:
             --expected-source-code-revision "$LEGACY_CODE_REVISION" \
             --expected-source-artifact-digest "$LEGACY_ARTIFACT_DIGEST"
 
-      - name: Close v2 then v1 release states after acquiring Pages deployment lock
+      - name: Re-close v2 then v1 inside Pages deployment lock
         env:
           BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
           ROLLBACK_REASON: ${{ inputs.reason }}
+          ROLLBACK_REQUEST_PREFIX: rollback-pages-lock-${{ github.run_id }}-${{ github.run_attempt }}
         shell: bash
-        run: |
-          set -euo pipefail
-          [[ -n "$BSIDE_ADMIN_TOKEN" && -n "$GOVERNANCE_API_BASE_URL" ]] || {
-            echo "::error::Protected admin token and governance API base URL are required."
-            exit 1
-          }
-          v1_api="${GOVERNANCE_API_BASE_URL%/}"
-          [[ "$v1_api" == */api/v1 ]] || {
-            echo "::error::GOVERNANCE_API_BASE_URL must end in /api/v1."
-            exit 1
-          }
-          v2_api="${v1_api%/api/v1}/api/v2"
-
-          curl --fail-with-body --silent --show-error \
-            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
-            "$v2_api/admin/release-state" > rollback-v2-before.json
-          v2_state="$(jq -r '.data.release_state' rollback-v2-before.json)"
-          v2_version="$(jq -r '.data.state_version' rollback-v2-before.json)"
-          [[ "$v2_version" =~ ^[0-9]+$ ]] || exit 1
-          if [[ "$v2_state" != "closed" ]]; then
-            payload="$(jq -nc --argjson version "$v2_version" --arg reason "$ROLLBACK_REASON" \
-              '{release_state:"closed",expected_version:$version,reason:$reason}')"
-            curl --fail-with-body --silent --show-error \
-              -X POST -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" -H "Content-Type: application/json" \
-              -H "X-Request-ID: rollback-close-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-              --data "$payload" "$v2_api/admin/release-state" > rollback-v2-closed.json
-            [[ "$(jq -r '.data.release_state' rollback-v2-closed.json)" == "closed" ]] || exit 1
-          fi
-
-          curl --fail-with-body --silent --show-error \
-            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
-            "$v1_api/admin/release-state" > rollback-v1-before.json
-          v1_state="$(jq -r '.release_state' rollback-v1-before.json)"
-          v1_version="$(jq -r '.state_version' rollback-v1-before.json)"
-          [[ "$v1_version" =~ ^[0-9]+$ ]] || exit 1
-          if [[ "$v1_state" != "closed" ]]; then
-            payload="$(jq -nc --argjson version "$v1_version" --arg reason "$ROLLBACK_REASON" \
-              '{release_state:"closed",expected_version:$version,reason:$reason}')"
-            curl --fail-with-body --silent --show-error \
-              -X POST -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" -H "Content-Type: application/json" \
-              -H "X-Request-ID: rollback-close-v1-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-              --data "$payload" "$v1_api/admin/release-state" > rollback-v1-closed.json
-            [[ "$(jq -r '.release_state' rollback-v1-closed.json)" == "closed" ]] || exit 1
-          fi
+        run: bash .github/scripts/close-governance-release-state.sh
 
       - name: Verify both release states closed before legacy deployment
         env:

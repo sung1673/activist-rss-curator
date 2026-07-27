@@ -91,6 +91,11 @@ def test_php73_release_fixture_preserves_canonical_dart_source_right_id() -> Non
     assert "DELETE FROM ci_event_observations " in identity_fixture
     assert "identity precision fixture must not leak into later corpus checks" in identity_fixture
     assert "official:dart-identity-precision-smoke" not in smoke
+    kind_cross_source_update = identity_fixture[
+        identity_fixture.index("kind = request_hmac_action(") :
+        identity_fixture.index("runtime_events, _ = request_json(")
+    ]
+    assert '"upsert_governance_snapshot_dart_guarded",' in kind_cross_source_update
 
 
 def test_php73_global_fixture_restores_the_latest_source_title_from_mysql() -> None:
@@ -116,6 +121,38 @@ def test_php73_global_fixture_refreshes_rights_revision_after_grant_mutation() -
     assert 'use": "collect"' in restored_grant
     assert "rights_revision = restored_eligibility.get" in restored_grant
     assert "rights_revision != stale_rights_revision" in restored_grant
+
+
+def test_php73_global_fixture_checks_cross_runtime_dart_contract_revision() -> None:
+    smoke = (ROOT / "tests" / "php73_global_v2_smoke.py").read_text(
+        encoding="utf-8"
+    )
+    fixture = (
+        ROOT / "tests" / "fixtures" / "dart_source_right_contract_v1.json"
+    ).read_text(encoding="utf-8")
+
+    assert '"schema": "source-right-contract-v1"' in fixture
+    assert "DART_CONTRACT_FIXTURE" in smoke
+    assert "activate_exact_dart_source_right" in smoke
+    assert 'dart_eligibility.get("contract_revision")' in smoke
+    assert 'DART_CONTRACT_FIXTURE["expected_revision"]' in smoke
+
+
+def test_php73_fixtures_bind_dart_writes_to_exact_release_state_schema_12() -> None:
+    release_smoke = (
+        ROOT / "tests" / "php73_release_state_smoke.py"
+    ).read_text(encoding="utf-8")
+    global_smoke = (
+        ROOT / "tests" / "php73_global_v2_smoke.py"
+    ).read_text(encoding="utf-8")
+
+    assert "dart_global_bridge_unavailable" in release_smoke
+    assert "dart_release_state_mismatch" in release_smoke
+    assert "schema drift must fail before the first DART mutation" in release_smoke
+    assert "expected_release_state" in release_smoke
+    assert "dart_body_text_forbidden" in release_smoke
+    assert "dart_release_state_mismatch" in global_smoke
+    assert "expected_release_state" in global_smoke
 
 
 def test_lifecycle_fixture_keeps_raw_and_ack_counts_consistent() -> None:
