@@ -23,6 +23,40 @@ _REVISION_RE = re.compile(r"^[0-9a-f]{7,40}$")
 _BACKEND_BINDING_RE = re.compile(r"^[0-9a-f]{64}$")
 _CREDENTIAL_ID_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_COMPONENT_RE = re.compile(r"[^0-9A-Za-z_.-]+")
+_SAFE_ERROR_CODES = frozenset(
+    {
+        "backend_binding_mismatch",
+        "backend_binding_required",
+        "dart_credential_blocked",
+        "dart_credential_disabled",
+        "dart_quota_exhausted",
+        "dart_quota_idempotency_conflict",
+        "dart_quota_persistence_failed",
+        "invalid_request",
+        "quota_date_mismatch",
+    }
+)
+_SAFE_INVALID_REQUEST_DETAILS = frozenset(
+    {
+        "attempt_or_revision",
+        "consumed_attempt_required",
+        "credential_id",
+        "exact_fields_required",
+        "operation",
+        "reason",
+    }
+)
+_SAFE_PERSISTENCE_DETAILS = frozenset(
+    {
+        "transaction_commit_failed",
+        "transaction_readback_attempt_failed",
+        "transaction_readback_binding_failed",
+        "transaction_readback_connection_failed",
+        "transaction_readback_credential_failed",
+        "transaction_readback_day_failed",
+        "transaction_state_invalid",
+    }
+)
 _DNS_HOST_RE = re.compile(
     r"(?=.{1,253}\Z)"
     r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
@@ -321,11 +355,49 @@ class DartQuotaClient:
         error = payload.get("error")
         if isinstance(error, dict):
             code = error.get("code")
-            return str(code) if isinstance(code, str) and code else "unknown_error"
-        if isinstance(error, str) and error:
+            return (
+                code
+                if isinstance(code, str)
+                and code in _SAFE_ERROR_CODES
+                else "unknown_error"
+            )
+        if isinstance(error, str) and error in _SAFE_ERROR_CODES:
             return error
         code = payload.get("code")
-        return str(code) if isinstance(code, str) and code else "unknown_error"
+        return (
+            code
+            if isinstance(code, str)
+            and code in _SAFE_ERROR_CODES
+            else "unknown_error"
+        )
+
+    @classmethod
+    def _safe_error_detail(cls, payload: dict[str, object]) -> str:
+        error = payload.get("error")
+        if not isinstance(error, dict):
+            return ""
+        detail = error.get("detail")
+        if not isinstance(detail, str):
+            return ""
+        error_code = cls._error_code(payload)
+        allowed = (
+            _SAFE_INVALID_REQUEST_DETAILS
+            if error_code == "invalid_request"
+            else (
+                _SAFE_PERSISTENCE_DETAILS
+                if error_code == "dart_quota_persistence_failed"
+                else frozenset()
+            )
+        )
+        if detail in allowed:
+            return detail
+        return ""
+
+    @classmethod
+    def _safe_error_context(cls, payload: dict[str, object]) -> str:
+        error_code = cls._error_code(payload)
+        detail = cls._safe_error_detail(payload)
+        return f"{error_code}; detail={detail}" if detail else error_code
 
     def _post_with_idempotent_retry(self, body: dict[str, object]) -> dict[str, object]:
         encoded = json.dumps(body, separators=(",", ":"), sort_keys=True).encode("utf-8")
@@ -354,10 +426,11 @@ class DartQuotaClient:
             payload = self._response_object(response)
             if response.status_code != 200:
                 error_code = self._error_code(payload)
+                error_context = self._safe_error_context(payload)
                 if 500 <= response.status_code <= 599:
                     raise DartQuotaLedgerError(
                         "DART quota API did not acknowledge "
-                        f"{body['action']} (HTTP {response.status_code}: {error_code}); "
+                        f"{body['action']} (HTTP {response.status_code}: {error_context}); "
                         "DART request was not sent"
                     )
                 if error_code in {
@@ -393,7 +466,8 @@ class DartQuotaClient:
                     else DartQuotaLedgerError
                 )
                 raise error_type(
-                    f"DART quota API rejected {body['action']} (HTTP {response.status_code}): {error_code}"
+                    f"DART quota API rejected {body['action']} "
+                    f"(HTTP {response.status_code}): {error_context}"
                 )
             return payload
         raise DartQuotaLedgerError(
@@ -410,6 +484,7 @@ class DartQuotaClient:
         credential_id: str,
         backend_binding_id: str,
         require_blocked_until: bool,
+        require_duplicate: bool | None = None,
     ) -> DartQuotaPermit:
         if payload.get("ok") is not True or payload.get("accepted") != 1:
             raise DartQuotaLedgerError("DART quota API omitted the exact accepted=1 acknowledgment")
@@ -455,12 +530,58 @@ class DartQuotaClient:
             or credential_remaining != credential_limit - credential_used
         ):
             raise DartQuotaLedgerError("DART quota API returned inconsistent quota counters")
+        if require_duplicate is not None and duplicate is not require_duplicate:
+            raise DartQuotaLedgerError(
+                "DART quota API explicit replay was not acknowledged as duplicate"
+            )
+        credential_status = payload.get("credential_status")
+        credential_blocked_until = payload.get("credential_blocked_until")
         blocked_until = payload.get("blocked_until")
-        if require_blocked_until:
-            if not isinstance(blocked_until, str) or not blocked_until.strip():
-                raise DartQuotaLedgerError("DART quota block ACK omitted blocked_until")
-        elif action == "consume" and blocked_until not in (None, ""):
-            raise DartQuotaLedgerError("DART quota consume ACK unexpectedly reports a block")
+        if action == "consume":
+            if credential_status != "active":
+                raise DartQuotaLedgerError(
+                    "DART quota consume ACK reports an unavailable credential"
+                )
+            if blocked_until is not None or credential_blocked_until is not None:
+                raise DartQuotaLedgerError(
+                    "DART quota consume ACK unexpectedly reports a block"
+                )
+        elif action == "block_020":
+            if credential_status not in {"active", "disabled_901"}:
+                raise DartQuotaLedgerError(
+                    "DART quota block ACK reports an invalid credential status"
+                )
+            if (
+                not isinstance(blocked_until, str)
+                or not isinstance(credential_blocked_until, str)
+                or blocked_until != credential_blocked_until
+            ):
+                raise DartQuotaLedgerError(
+                    "DART quota block ACK omitted matching block timestamps"
+                )
+            try:
+                parsed_blocked_until = datetime.fromisoformat(
+                    blocked_until.replace("Z", "+00:00")
+                )
+            except ValueError as exc:
+                raise DartQuotaLedgerError(
+                    "DART quota block ACK returned an invalid block timestamp"
+                ) from exc
+            if (
+                not blocked_until.strip()
+                or parsed_blocked_until.tzinfo is None
+                or parsed_blocked_until.utcoffset() is None
+            ):
+                raise DartQuotaLedgerError(
+                    "DART quota block ACK returned an invalid block timestamp"
+                )
+        elif action == "disable_901":
+            if credential_status != "disabled_901":
+                raise DartQuotaLedgerError(
+                    "DART quota disable ACK did not confirm disabled_901"
+                )
+        elif require_blocked_until:
+            raise DartQuotaLedgerError("unsupported DART quota block acknowledgment")
         return DartQuotaPermit(
             attempt_id=attempt_id,
             quota_day=quota_day,
@@ -471,6 +592,59 @@ class DartQuotaClient:
             credential_remaining_count=credential_remaining,
             duplicate=duplicate,
         )
+
+    def _post_with_durable_replay(
+        self,
+        body: dict[str, object],
+        *,
+        action: str,
+        attempt_id: str,
+        quota_day: str,
+        credential_id: str,
+        require_blocked_until: bool,
+    ) -> DartQuotaPermit:
+        """Require a separate exact replay after the first valid HTTP 200 ACK.
+
+        Transport retries within the first POST may already return
+        ``duplicate=true`` after a lost response, so the first ACK may be
+        either new or duplicate. The independent second POST must always be a
+        duplicate. That proves the attempt and its mutation survived beyond
+        the first response before the caller sends or retries a physical DART
+        request.
+        """
+
+        first_payload = self._post_with_idempotent_retry(body)
+        first_permit = self._validate_ack(
+            first_payload,
+            action=action,
+            attempt_id=attempt_id,
+            quota_day=quota_day,
+            credential_id=credential_id,
+            backend_binding_id=self.backend_binding_id,
+            require_blocked_until=require_blocked_until,
+        )
+        replay_payload = self._post_with_idempotent_retry(body)
+        replay_permit = self._validate_ack(
+            replay_payload,
+            action=action,
+            attempt_id=attempt_id,
+            quota_day=quota_day,
+            credential_id=credential_id,
+            backend_binding_id=self.backend_binding_id,
+            require_blocked_until=require_blocked_until,
+            require_duplicate=True,
+        )
+        # Other processes may consume from the same global or credential pool
+        # between these calls, but a durable ledger must never move backwards.
+        if (
+            replay_permit.used_count < first_permit.used_count
+            or replay_permit.credential_used_count
+            < first_permit.credential_used_count
+        ):
+            raise DartQuotaLedgerError(
+                "DART quota API counters regressed during explicit replay"
+            )
+        return first_permit
 
     def consume(
         self,
@@ -502,16 +676,16 @@ class DartQuotaClient:
             "code_revision": self.code_revision,
             "expected_backend_binding_id": self.backend_binding_id,
         }
-        payload = self._post_with_idempotent_retry(body)
-        permit = self._validate_ack(
-            payload,
+        permit = self._post_with_durable_replay(
+            body,
             action="consume",
             attempt_id=attempt_id,
             quota_day=quota_day,
             credential_id=selected_credential_id,
-            backend_binding_id=self.backend_binding_id,
             require_blocked_until=False,
         )
+        # The explicit replay proves the same durable attempt and must not
+        # consume another local physical-request unit.
         self.used += 1
         return permit
 
@@ -527,14 +701,12 @@ class DartQuotaClient:
             "code_revision": self.code_revision,
             "expected_backend_binding_id": self.backend_binding_id,
         }
-        payload = self._post_with_idempotent_retry(body)
-        self._validate_ack(
-            payload,
+        self._post_with_durable_replay(
+            body,
             action="block_020",
             attempt_id=permit.attempt_id,
             quota_day=permit.quota_day,
             credential_id=permit.credential_id,
-            backend_binding_id=self.backend_binding_id,
             require_blocked_until=True,
         )
 
@@ -552,14 +724,12 @@ class DartQuotaClient:
             "code_revision": self.code_revision,
             "expected_backend_binding_id": self.backend_binding_id,
         }
-        payload = self._post_with_idempotent_retry(body)
-        self._validate_ack(
-            payload,
+        self._post_with_durable_replay(
+            body,
             action="disable_901",
             attempt_id=permit.attempt_id,
             quota_day=permit.quota_day,
             credential_id=permit.credential_id,
-            backend_binding_id=self.backend_binding_id,
             require_blocked_until=False,
         )
 

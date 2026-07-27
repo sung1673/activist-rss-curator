@@ -1901,8 +1901,8 @@ def test_official_run_ledger_is_slot_attributed_and_python_digest_compatible():
 
 def test_dart_review_corpus_is_private_exact_bounded_and_digest_compatible():
     spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
-    assert spec["info"]["version"] == "1.12.0"
-    assert spec["x-changelog"][0]["version"] == "1.12.0"
+    assert spec["info"]["version"] == "1.12.1"
+    assert spec["x-changelog"][0]["version"] == "1.12.1"
     route = spec["paths"]["/ops/dart-review-corpus"]["get"]
     assert route["security"] == [{"bearerAuth": []}]
     response = spec["components"]["schemas"]["DartReviewCorpusPage"]
@@ -2045,6 +2045,45 @@ def test_health_accepts_only_complete_acknowledged_scheduled_runs_and_reports_de
 def test_dart_quota_pool_is_global_kst_day_atomic_and_idempotent():
     spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
     assert {"get", "post"} <= spec["paths"]["/ops/dart-quota"].keys()
+    post = spec["paths"]["/ops/dart-quota"]["post"]
+    durable_ack = post["x-durable-ack-contract"]
+    assert durable_ack["commit-confirmed-before-200"] is True
+    assert durable_ack["independent-fresh-connection-readback-before-200"] is True
+    assert durable_ack["exact-post-replay-required"] is True
+    assert durable_ack["explicit-replay-duplicate-required"] is True
+    persistence = durable_ack["persistence-failure"]
+    assert persistence["http-status"] == 503
+    assert persistence["code"] == "dart_quota_persistence_failed"
+    safe_persistence_details = {
+        "transaction_commit_failed",
+        "transaction_state_invalid",
+        "transaction_readback_connection_failed",
+        "transaction_readback_binding_failed",
+        "transaction_readback_attempt_failed",
+        "transaction_readback_day_failed",
+        "transaction_readback_credential_failed",
+    }
+    assert set(persistence["detail-enum"]) == safe_persistence_details
+    persistence_schema = spec["components"]["schemas"]["DartQuotaPersistenceFailure"]
+    assert persistence_schema["additionalProperties"] is False
+    assert set(persistence_schema["required"]) == {
+        "ok",
+        "error",
+        "server_kst_date",
+        "api_version",
+    }
+    persistence_error = persistence_schema["properties"]["error"]
+    assert persistence_error["additionalProperties"] is False
+    assert persistence_error["properties"]["code"]["const"] == (
+        "dart_quota_persistence_failed"
+    )
+    assert (
+        set(persistence_error["properties"]["detail"]["enum"])
+        == safe_persistence_details
+    )
+    assert post["responses"]["503"]["content"]["application/json"]["schema"][
+        "oneOf"
+    ][0] == {"$ref": "#/components/schemas/DartQuotaPersistenceFailure"}
     assert (
         "expected_backend_binding_id"
         in spec["components"]["schemas"]["DartQuotaConsumeRequest"]["required"]
@@ -2105,6 +2144,94 @@ def test_dart_quota_pool_is_global_kst_day_atomic_and_idempotent():
     assert "'backend_binding_id'=>$backendBindingId" in section
     assert "'server_uuid'=>" not in section
     assert "'database_name'=>" not in section
+    commit_readback = section[
+        section.index("function v1_dart_quota_commit_and_readback") :
+        section.index("function v1_dart_quota_validate_credential_id")
+    ]
+    assert "if ($requestHashColumn === '' || !$pdo->inTransaction())" in commit_readback
+    assert "$committed = $pdo->commit();" in commit_readback
+    commit_call = commit_readback[
+        commit_readback.index("try {\n        $committed = $pdo->commit();") :
+        commit_readback.index(
+            "if ($committed !== true || $pdo->inTransaction())"
+        )
+    ]
+    assert "catch (Throwable $commitError)" in commit_call
+    assert (
+        "throw new RuntimeException(\n"
+        "            'dart_quota_commit_unconfirmed',\n"
+        "            0,\n"
+        "            $commitError"
+    ) in commit_call
+    assert "$committed !== true || $pdo->inTransaction()" in commit_readback
+    assert commit_readback.index("$committed = $pdo->commit();") < commit_readback.index(
+        "$readbackPdo = pdo_conn($config);"
+    )
+    assert "$readbackPdo === $pdo" in commit_readback
+    assert "v1_backend_binding_id_value($readbackPdo,$config)" in commit_readback
+    assert "hash_equals($expectedBackendBindingId,$readbackBindingId)" in commit_readback
+    assert "$attemptReadback = $readbackPdo->prepare(" in commit_readback
+    assert "$dayReadback = $readbackPdo->prepare(" in commit_readback
+    assert "$credentialReadback = $readbackPdo->prepare(" in commit_readback
+    assert (
+        "WHERE attempt_id=? AND quota_day=? AND credential_id=? AND code_revision=? "
+        in commit_readback
+    )
+    assert "AND consumed_units=1 LIMIT 1" in commit_readback
+    assert "in_array((string)$durableAttempt['status'],$allowedStatuses,true)" in commit_readback
+    assert "hash_equals((string)$durableAttempt[$requestHashColumn],$requestHash)" in commit_readback
+    assert (
+        "hash_equals($attemptId,(string)$durableCredentialDay['blocked_by_attempt_id'])"
+        in commit_readback
+    )
+    assert (
+        "hash_equals($attemptId,(string)$durableCredentialDay['disabled_by_attempt_id'])"
+        in commit_readback
+    )
+    assert "dart_quota_attempt_readback_failed" in commit_readback
+    assert "dart_quota_day_readback_failed" in commit_readback
+    assert "dart_quota_credential_day_readback_failed" in commit_readback
+    expected_persistence_details = {
+        "transaction_commit_failed",
+        "transaction_state_invalid",
+        "transaction_readback_connection_failed",
+        "transaction_readback_binding_failed",
+        "transaction_readback_attempt_failed",
+        "transaction_readback_day_failed",
+        "transaction_readback_credential_failed",
+    }
+    assert {
+        value
+        for value in expected_persistence_details
+        if f"return '{value}';" in commit_readback
+    } == expected_persistence_details
+    persistence_log = commit_readback[
+        commit_readback.index("function v1_dart_quota_log_persistence_failure") :
+    ]
+    logged_phase_literals = {
+        value
+        for value in expected_persistence_details
+        if f"'{value}'" in persistence_log
+    }
+    assert logged_phase_literals == expected_persistence_details
+    assert "$safePhase = in_array($phase,$allowedPhases,true)" in persistence_log
+    assert "? $phase : 'transaction_state_invalid';" in persistence_log
+    assert "get_class($error)" in persistence_log
+    assert persistence_log.count("error_log(") == 1
+    assert "phase=' . $safePhase" in persistence_log
+    assert "' exception=' . get_class($error)" in persistence_log
+    assert "getMessage(" not in persistence_log
+    assert "getPrevious(" not in persistence_log
+    assert " message=" not in persistence_log
+    assert "preg_replace(" not in persistence_log
+    assert "substr(" not in persistence_log
+    assert (
+        "v1_dart_quota_error(503,'dart_quota_persistence_failed',$phase);"
+        in section
+    )
+    assert "array('blocked_020','disabled_901')" in section
+    assert section.count("v1_dart_quota_commit_and_readback(") == 7
+    assert "$pdo->commit(); v1_respond(200,v1_dart_quota_payload(" not in section
 
 
 def test_official_slot_claims_use_durable_global_oldest_identity_and_epoch_guard():

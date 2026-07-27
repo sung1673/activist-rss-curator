@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: BSIDE Governance Intelligence API
-  version: 1.12.0
+  version: 1.12.1
   description: >-
     Public, read-only governance event records and role-gated operations APIs.
     Document title and body fields preserve their original language; the API
@@ -10,6 +10,12 @@ info:
     while it is preview. Health and this specification remain public; the API
     root descriptor is a public data route and is therefore closed with 503.
 x-changelog:
+  - version: 1.12.1
+    date: '2026-07-27'
+    changes:
+      - DART quota mutation responses now return HTTP 200 only after a confirmed commit and an independent fresh-connection readback of the exact durable attempt and credential state.
+      - Clients must explicitly replay the exact acknowledged POST and require duplicate=true before dispatching a DART request or acting on a credential quarantine.
+      - Published the stable dart_quota_persistence_failed HTTP 503 contract with seven bounded, non-secret detail values.
   - version: 1.12.0
     date: '2026-07-26'
     changes:
@@ -598,6 +604,32 @@ paths:
       tags: [Operations]
       security: [{bearerAuth: []}]
       summary: Atomically consume one physical DART request or quarantine one credential
+      description: >-
+        A successful mutation is acknowledged only after commit succeeds and a
+        separate fresh PDO connection, bound to the same expected MySQL
+        backend, reads back the exact attempt request hash, quota day and
+        credential state. After any valid first HTTP 200 acknowledgement, the
+        client must POST the exact same JSON body again and proceed only when
+        that explicit replay returns duplicate=true. The first acknowledgement
+        may already have duplicate=true when an internal transport retry
+        recovered a lost response; this never removes the separate replay
+        requirement.
+      x-durable-ack-contract:
+        commit-confirmed-before-200: true
+        independent-fresh-connection-readback-before-200: true
+        exact-post-replay-required: true
+        explicit-replay-duplicate-required: true
+        persistence-failure:
+          http-status: 503
+          code: dart_quota_persistence_failed
+          detail-enum:
+            - transaction_commit_failed
+            - transaction_state_invalid
+            - transaction_readback_connection_failed
+            - transaction_readback_binding_failed
+            - transaction_readback_attempt_failed
+            - transaction_readback_day_failed
+            - transaction_readback_credential_failed
       requestBody:
         required: true
         content:
@@ -609,14 +641,37 @@ paths:
                 - {$ref: '#/components/schemas/DartQuotaDisableRequest'}
       responses:
         '200':
-          description: Exact durable acknowledgement; callers must validate it before any DART HTTP request
+          description: >-
+            First or replay acknowledgement based on committed state verified
+            through an independent fresh-connection readback. This response
+            alone is not a physical-request permit: the caller must repeat the
+            exact POST and require duplicate=true on the explicit replay.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/DartQuotaAcknowledgement'}
         '400': {description: Exact request contract or KST day mismatch}
         '409': {description: Requested credential blocked by 020 or disabled by 901, missing cause attempt, backend mismatch, or idempotency conflict}
         '429': {description: The global 40,000-request KST-day hard limit is exhausted}
-        '503': {description: Migration 012 is unavailable or the serving MySQL backend identity cannot be derived safely}
+        '503':
+          description: >-
+            Migration 012 or the backend identity is unavailable, or commit and
+            independent readback could not prove the durable mutation. A
+            persistence failure uses the stable bounded schema below.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/DartQuotaPersistenceFailure'}
+                  - type: object
+                    description: Existing schema- or backend-unavailable fail-closed response.
+                    additionalProperties: true
+                    required: [ok, error, api_version]
+                    properties:
+                      ok: {type: boolean, const: false}
+                      error:
+                        type: string
+                        enum: [dart_quota_schema_unavailable, backend_binding_unavailable]
+                      api_version: {type: string, const: v1}
   /ops/official-site-rights:
     get:
       tags: [Operations]
@@ -2051,6 +2106,11 @@ components:
     DartQuotaAcknowledgement:
       type: object
       additionalProperties: false
+      description: >-
+        A server acknowledgement backed by confirmed commit and independent
+        fresh-connection readback. duplicate may be false or true on the first
+        acknowledged call. The caller must replay the exact POST separately
+        and require duplicate=true before using the result.
       required: [ok, action, attempt_id, quota_day, credential_id, credential_status, accepted, limit_count, used_count, remaining_count, credential_limit_count, credential_used_count, credential_remaining_count, credential_blocked_until, duplicate, blocked_until, backend_binding_id, api_version]
       properties:
         ok: {type: boolean, const: true}
@@ -2067,9 +2127,39 @@ components:
         credential_used_count: {type: integer, minimum: 1, maximum: 40000}
         credential_remaining_count: {type: integer, minimum: 0, maximum: 39999}
         credential_blocked_until: {type: [string, 'null'], format: date-time}
-        duplicate: {type: boolean}
+        duplicate:
+          type: boolean
+          description: Must be true on the caller's mandatory explicit exact-POST replay.
         blocked_until: {type: [string, 'null'], format: date-time}
         backend_binding_id: {type: string, pattern: '^[a-f0-9]{64}$'}
+        api_version: {type: string, const: v1}
+    DartQuotaPersistenceFailure:
+      type: object
+      additionalProperties: false
+      description: >-
+        Stable, non-secret failure returned when commit or the independent
+        durable-state readback cannot be proven. Internal exception text and
+        credential material are never returned.
+      required: [ok, error, server_kst_date, api_version]
+      properties:
+        ok: {type: boolean, const: false}
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, detail]
+          properties:
+            code: {type: string, const: dart_quota_persistence_failed}
+            detail:
+              type: string
+              enum:
+                - transaction_commit_failed
+                - transaction_state_invalid
+                - transaction_readback_connection_failed
+                - transaction_readback_binding_failed
+                - transaction_readback_attempt_failed
+                - transaction_readback_day_failed
+                - transaction_readback_credential_failed
+        server_kst_date: {type: string, format: date}
         api_version: {type: string, const: v1}
     OfficialSiteRight:
       type: object

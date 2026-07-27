@@ -3635,6 +3635,36 @@ def run(base_url: str, mysql_container_id: str) -> None:
         blocked_new.get("error", {}).get("code") == "dart_credential_blocked",
         repr(blocked_new),
     )
+    disable_after_block_payload = {
+        **block_payload,
+        "action": "disable_901",
+        "reason": "opendart_status_901",
+    }
+    disabled_after_block, _ = request_json(
+        base_url,
+        "api.php/api/v1/ops/dart-quota",
+        method="POST",
+        token=ADMIN_TOKEN,
+        payload=disable_after_block_payload,
+    )
+    require(
+        disabled_after_block.get("action") == "disable_901"
+        and disabled_after_block.get("credential_status") == "disabled_901",
+        repr(disabled_after_block),
+    )
+    terminal_block_replay, _ = request_json(
+        base_url,
+        "api.php/api/v1/ops/dart-quota",
+        method="POST",
+        token=ADMIN_TOKEN,
+        payload=block_payload,
+    )
+    require(
+        terminal_block_replay.get("action") == "block_020"
+        and terminal_block_replay.get("duplicate") is True
+        and terminal_block_replay.get("credential_status") == "disabled_901",
+        repr(terminal_block_replay),
+    )
     second_credential = "d" * 64
     second_consume = {
         **consume_payload,
