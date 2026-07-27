@@ -27,16 +27,25 @@ canary는 실행 시점의 KST 당일처럼 아직 완료되지 않은 날짜를
 
 canary, dry-run, apply 백필, 정기 수집과 회사 마스터 수집은 모두 MySQL의
 KST 일자별 전역 OpenDART 요청 원장을 공유한다. 모든 물리 HTTP 시도 직전에
-`/api/v1/ops/dart-quota`가 정확히 1회를 원자적으로 승인·차감하며, 실패한 HTTP
-시도와 재시도도 각각 1회로 센다. quota API timeout·5xx·불완전 ACK가 발생하면
-DART 요청을 보내지 않고 workflow를 실패시킨다. 서로 다른 날짜 범위나 backfill
-fingerprint로 다시 실행해도 모든 키를 합산한 KST 일 40,000회 제한을 우회할
-수 없다. Canary 한 실행의 별도 안전 예산은 계속 10,000회다.
+`/api/v1/ops/dart-quota`가 정확히 1회를 원자적으로 승인·차감한다. 서버는
+transaction commit과 별도 fresh PDO connection의 exact durable readback을
+마친 뒤에만 첫 200 ACK를 반환한다. 클라이언트는 같은 POST를 별도로 replay해
+두 번째 ACK가 `duplicate=true`인지 확인한 뒤에만 DART를 호출한다. 첫 ACK가
+transport retry 결과 이미 duplicate여도 replay는 생략하지 않으며, replay
+자체는 사용량을 추가하지 않는다. quota API timeout·5xx·불완전 ACK,
+`duplicate=false` replay 또는 카운터 역행이 발생하면 DART 요청을 보내지 않고
+workflow를 실패시킨다. commit/readback을 증명하지 못한 503은 고정 code
+`dart_quota_persistence_failed`와 OpenAPI에 열거된 일곱 안전 detail 중 하나만
+노출한다. 실패한 실제 DART HTTP 시도와 물리 재시도는 각각 새 attempt로 1회씩
+센다. 서로 다른 날짜 범위나 backfill fingerprint로 다시 실행해도 모든 키를
+합산한 KST 일 40,000회 제한을 우회할 수 없다. Canary 한 실행의 별도 안전
+예산은 계속 10,000회다.
 
 OpenDART 상태 `020`은 일반 HTTP 재시도 오류로 취급하지 않는다. 원장에 해당
-credential만 다음 KST 자정까지 차단한 ACK를 남기고 pool의 다음 유효 키로
-동일한 논리 요청을 계속한다. `901`은 해당 credential을 durable disable하고
-다음 유효 키로 계속한다. ACK 실패 또는 사용 가능한 키가 없을 때만 workflow를
+credential만 다음 KST 자정까지 차단한 ACK와 exact duplicate replay를 남기고
+pool의 다음 유효 키로 동일한 논리 요청을 계속한다. `901`도 해당 credential의
+durable disable ACK와 duplicate replay를 확인한 뒤에만 다음 유효 키로
+계속한다. ACK 또는 replay 실패, 또는 사용 가능한 키가 없을 때만 workflow를
 실패시키며, 모든 키가 `020`으로 차단된 apply 백필은 기존 durable checkpoint에
 차단일을 남겨 다음 quota 기간에 같은 window에서 재개한다.
 

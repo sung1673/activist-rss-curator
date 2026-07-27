@@ -1803,17 +1803,25 @@ function v1_dart_quota_error(
     ));
 }
 
-function v1_backend_binding_id(PDO $pdo, array $config): string {
+function v1_backend_binding_id_value(PDO $pdo, array $config): string {
     $row = $pdo->query('SELECT @@server_uuid AS server_uuid,DATABASE() AS database_name')->fetch();
     $prefix = isset($config['table_prefix']) ? (string)$config['table_prefix'] : 'activist_';
     if (!is_array($row)
         || preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/',
             strtolower((string)($row['server_uuid'] ?? ''))) !== 1
         || trim((string)($row['database_name'] ?? '')) === '' || preg_match('/^[A-Za-z0-9_]+$/',$prefix) !== 1) {
-        v1_respond(503,array('ok'=>false,'error'=>'backend_binding_unavailable'));
+        throw new RuntimeException('backend_binding_unavailable');
     }
     return hash('sha256',"mysql8\n" . strtolower((string)$row['server_uuid']) . "\n"
         . (string)$row['database_name'] . "\n" . $prefix);
+}
+
+function v1_backend_binding_id(PDO $pdo, array $config): string {
+    try {
+        return v1_backend_binding_id_value($pdo,$config);
+    } catch (Throwable $e) {
+        v1_respond(503,array('ok'=>false,'error'=>'backend_binding_unavailable'));
+    }
 }
 
 function v1_dart_quota_payload(
@@ -1845,6 +1853,203 @@ function v1_dart_quota_payload(
             ? v1_release_iso_time($credentialRow['blocked_until']) : null;
     }
     return $payload;
+}
+
+/**
+ * Commit a DART quota mutation and prove the exact durable state before ACK.
+ *
+ * A successful PDO call alone is not sufficient for this ledger: the response
+ * must be based on a fresh, post-commit read from the same backend binding.
+ */
+function v1_dart_quota_commit_and_readback(
+    PDO $pdo,
+    array $config,
+    string $action,
+    string $attemptId,
+    string $quotaDay,
+    string $credentialId,
+    string $revision,
+    string $requestHash,
+    array $allowedStatuses,
+    string $expectedBackendBindingId
+): array {
+    $requestHashColumn = $action === 'consume'
+        ? 'consume_request_sha256'
+        : ($action === 'block_020'
+            ? 'block_request_sha256'
+            : ($action === 'disable_901' ? 'disable_request_sha256' : ''));
+    if ($requestHashColumn === '' || !$pdo->inTransaction()) {
+        throw new RuntimeException('dart_quota_commit_precondition_failed');
+    }
+    try {
+        $committed = $pdo->commit();
+    } catch (Throwable $commitError) {
+        throw new RuntimeException(
+            'dart_quota_commit_unconfirmed',
+            0,
+            $commitError
+        );
+    }
+    if ($committed !== true || $pdo->inTransaction()) {
+        throw new RuntimeException('dart_quota_commit_unconfirmed');
+    }
+
+    try {
+        $readbackPdo = pdo_conn($config);
+    } catch (Throwable $connectionError) {
+        throw new RuntimeException(
+            'dart_quota_readback_connection_failed',
+            0,
+            $connectionError
+        );
+    }
+    if ($readbackPdo === $pdo) {
+        throw new RuntimeException('dart_quota_readback_connection_not_independent');
+    }
+    try {
+        $readbackBindingId = v1_backend_binding_id_value($readbackPdo,$config);
+    } catch (Throwable $bindingError) {
+        throw new RuntimeException(
+            'dart_quota_readback_backend_failed',
+            0,
+            $bindingError
+        );
+    }
+    if (!hash_equals($expectedBackendBindingId,$readbackBindingId)) {
+        throw new RuntimeException('dart_quota_readback_backend_mismatch');
+    }
+
+    try {
+        $attemptReadback = $readbackPdo->prepare(
+            'SELECT attempt_id,quota_day,credential_id,operation,code_revision,consume_request_sha256,'
+            . 'block_request_sha256,disable_request_sha256,status,consumed_units '
+            . 'FROM ' . table_name($config,'dart_quota_attempts')
+            . ' WHERE attempt_id=? AND quota_day=? AND credential_id=? AND code_revision=? '
+            . 'AND consumed_units=1 LIMIT 1'
+        );
+        $attemptReadback->execute(array($attemptId,$quotaDay,$credentialId,$revision));
+        $durableAttempt = $attemptReadback->fetch();
+    } catch (Throwable $attemptReadbackError) {
+        throw new RuntimeException(
+            'dart_quota_attempt_readback_query_failed',
+            0,
+            $attemptReadbackError
+        );
+    }
+    if (!$durableAttempt
+        || !in_array((string)$durableAttempt['status'],$allowedStatuses,true)
+        || !is_string($durableAttempt[$requestHashColumn] ?? null)
+        || !hash_equals((string)$durableAttempt[$requestHashColumn],$requestHash)) {
+        throw new RuntimeException('dart_quota_attempt_readback_failed');
+    }
+
+    try {
+        $dayReadback = $readbackPdo->prepare(
+            'SELECT quota_day,limit_count,used_count,blocked,block_reason,blocked_until,'
+            . 'blocked_by_attempt_id,blocked_at,updated_at FROM '
+            . table_name($config,'dart_quota_days') . ' WHERE quota_day=? LIMIT 1'
+        );
+        $dayReadback->execute(array($quotaDay)); $durableDay = $dayReadback->fetch();
+    } catch (Throwable $dayReadbackError) {
+        throw new RuntimeException(
+            'dart_quota_day_readback_query_failed',
+            0,
+            $dayReadbackError
+        );
+    }
+    if (!$durableDay
+        || (int)$durableDay['limit_count'] !== GOV_V1_DART_GLOBAL_DAILY_LIMIT
+        || (int)$durableDay['used_count'] < 1
+        || (int)$durableDay['used_count'] > GOV_V1_DART_GLOBAL_DAILY_LIMIT) {
+        throw new RuntimeException('dart_quota_day_readback_failed');
+    }
+
+    try {
+        $credentialReadback = $readbackPdo->prepare(
+            'SELECT c.credential_id,c.status AS credential_status,c.disable_reason,'
+            . 'c.disabled_by_attempt_id,c.disabled_at,cd.quota_day,cd.limit_count,cd.used_count,'
+            . 'cd.blocked,cd.block_reason,cd.blocked_until,cd.blocked_by_attempt_id,'
+            . 'cd.blocked_at,cd.updated_at FROM '
+            . table_name($config,'dart_quota_credentials') . ' c JOIN '
+            . table_name($config,'dart_quota_credential_days')
+            . ' cd ON cd.credential_id=c.credential_id '
+            . 'WHERE c.credential_id=? AND cd.quota_day=? LIMIT 1'
+        );
+        $credentialReadback->execute(array($credentialId,$quotaDay));
+        $durableCredentialDay = $credentialReadback->fetch();
+    } catch (Throwable $credentialReadbackError) {
+        throw new RuntimeException(
+            'dart_quota_credential_readback_query_failed',
+            0,
+            $credentialReadbackError
+        );
+    }
+    if (!$durableCredentialDay
+        || (string)$durableCredentialDay['credential_id'] !== $credentialId
+        || (string)$durableCredentialDay['quota_day'] !== $quotaDay
+        || (int)$durableCredentialDay['limit_count'] !== GOV_V1_DART_GLOBAL_DAILY_LIMIT
+        || (int)$durableCredentialDay['used_count'] < 1
+        || (int)$durableCredentialDay['used_count'] > GOV_V1_DART_GLOBAL_DAILY_LIMIT) {
+        throw new RuntimeException('dart_quota_credential_day_readback_failed');
+    }
+    if ($action === 'block_020'
+        && ((int)$durableCredentialDay['blocked'] !== 1
+            || (string)$durableCredentialDay['block_reason'] !== 'opendart_status_020'
+            || !is_string($durableCredentialDay['blocked_by_attempt_id'])
+            || !hash_equals($attemptId,(string)$durableCredentialDay['blocked_by_attempt_id'])
+            || $durableCredentialDay['blocked_until'] === null)) {
+        throw new RuntimeException('dart_quota_credential_block_readback_failed');
+    }
+    if ($action === 'disable_901'
+        && ((string)$durableCredentialDay['credential_status'] !== 'disabled_901'
+            || (string)$durableCredentialDay['disable_reason'] !== 'opendart_status_901'
+            || !is_string($durableCredentialDay['disabled_by_attempt_id'])
+            || !hash_equals($attemptId,(string)$durableCredentialDay['disabled_by_attempt_id'])
+            || $durableCredentialDay['disabled_at'] === null)) {
+        throw new RuntimeException('dart_quota_credential_disable_readback_failed');
+    }
+    return array($durableDay,$durableCredentialDay,$durableAttempt);
+}
+
+function v1_dart_quota_persistence_phase(Throwable $error): string {
+    $message = $error->getMessage();
+    if ($message === 'dart_quota_commit_unconfirmed') {
+        return 'transaction_commit_failed';
+    }
+    if (strpos($message,'dart_quota_readback_connection_') === 0) {
+        return 'transaction_readback_connection_failed';
+    }
+    if ($message === 'backend_binding_unavailable'
+        || strpos($message,'dart_quota_readback_backend_') === 0) {
+        return 'transaction_readback_binding_failed';
+    }
+    if (strpos($message,'dart_quota_attempt_readback_') === 0) {
+        return 'transaction_readback_attempt_failed';
+    }
+    if (strpos($message,'dart_quota_day_readback_') === 0) {
+        return 'transaction_readback_day_failed';
+    }
+    if (strpos($message,'dart_quota_credential_') === 0
+        && strpos($message,'_readback_') !== false) {
+        return 'transaction_readback_credential_failed';
+    }
+    return 'transaction_state_invalid';
+}
+
+function v1_dart_quota_log_persistence_failure(Throwable $error, string $phase): void {
+    $allowedPhases = array(
+        'transaction_commit_failed',
+        'transaction_state_invalid',
+        'transaction_readback_connection_failed',
+        'transaction_readback_binding_failed',
+        'transaction_readback_attempt_failed',
+        'transaction_readback_day_failed',
+        'transaction_readback_credential_failed',
+    );
+    $safePhase = in_array($phase,$allowedPhases,true)
+        ? $phase : 'transaction_state_invalid';
+    error_log('[activist-api] dart_quota_persistence_failed phase=' . $safePhase
+        . ' exception=' . get_class($error));
 }
 
 function v1_dart_quota_validate_credential_id($value): string {
@@ -1967,8 +2172,10 @@ function v1_ops_dart_quota_write(PDO $pdo, array $config): void {
     }
     $requestHash = hash('sha256',v1_strict_canonical_json_encode($payload,'dart_quota_request_encode_failed'));
     $now = gmdate('Y-m-d H:i:s'); $blockUntil = v1_dart_quota_block_until_utc($quotaDay);
-    $pdo->beginTransaction();
     try {
+        if ($pdo->beginTransaction() !== true || !$pdo->inTransaction()) {
+            throw new RuntimeException('dart_quota_transaction_begin_failed');
+        }
         $dayInsert = $pdo->prepare('INSERT IGNORE INTO ' . table_name($config,'dart_quota_days')
             . ' (quota_day,limit_count,used_count,blocked,block_reason,blocked_until,blocked_by_attempt_id,blocked_at,created_at,updated_at)'
             . ' VALUES (?,40000,0,0,NULL,NULL,NULL,NULL,?,?)');
@@ -2035,7 +2242,15 @@ function v1_ops_dart_quota_write(PDO $pdo, array $config): void {
                     || !hash_equals((string)$attempt['consume_request_sha256'],$requestHash)) {
                     $pdo->rollBack(); v1_dart_quota_error(409,'dart_quota_idempotency_conflict');
                 }
-                $pdo->commit(); v1_respond(200,v1_dart_quota_payload(
+                $attemptStatus = (string)$attempt['status'];
+                if (!in_array($attemptStatus,array('consumed','blocked_020','disabled_901'),true)) {
+                    throw new RuntimeException('dart_quota_attempt_status_integrity_error');
+                }
+                list($day,$credentialDay) = v1_dart_quota_commit_and_readback(
+                    $pdo,$config,'consume',$attemptId,$quotaDay,$credentialId,$revision,
+                    $requestHash,array($attemptStatus),$backendBindingId
+                );
+                v1_respond(200,v1_dart_quota_payload(
                     $day,'consume',$attemptId,true,$backendBindingId,$credentialDay
                 ));
             }
@@ -2081,7 +2296,11 @@ function v1_ops_dart_quota_write(PDO $pdo, array $config): void {
             $credentialDayLookup->execute(array($quotaDay,$credentialId));
             $credentialDay=$credentialDayLookup->fetch();
             $credentialDay['credential_status']=(string)$credential['status'];
-            $pdo->commit(); v1_respond(200,v1_dart_quota_payload(
+            list($day,$credentialDay) = v1_dart_quota_commit_and_readback(
+                $pdo,$config,'consume',$attemptId,$quotaDay,$credentialId,$revision,
+                $requestHash,array('consumed','blocked_020','disabled_901'),$backendBindingId
+            );
+            v1_respond(200,v1_dart_quota_payload(
                 $day,'consume',$attemptId,false,$backendBindingId,$credentialDay
             ));
         }
@@ -2101,7 +2320,11 @@ function v1_ops_dart_quota_write(PDO $pdo, array $config): void {
                 if ((int)$credentialDay['blocked'] !== 1 || $credentialDay['blocked_until'] === null) {
                     throw new RuntimeException('dart_quota_credential_block_integrity_error');
                 }
-                $pdo->commit(); v1_respond(200,v1_dart_quota_payload(
+                list($day,$credentialDay) = v1_dart_quota_commit_and_readback(
+                    $pdo,$config,'block_020',$attemptId,$quotaDay,$credentialId,$revision,
+                    $requestHash,array('blocked_020','disabled_901'),$backendBindingId
+                );
+                v1_respond(200,v1_dart_quota_payload(
                     $day,'block_020',$attemptId,true,$backendBindingId,$credentialDay
                 ));
             }
@@ -2127,7 +2350,11 @@ function v1_ops_dart_quota_write(PDO $pdo, array $config): void {
             $credentialDayLookup->execute(array($quotaDay,$credentialId));
             $credentialDay=$credentialDayLookup->fetch();
             $credentialDay['credential_status']=(string)$credential['status'];
-            $pdo->commit(); v1_respond(200,v1_dart_quota_payload(
+            list($day,$credentialDay) = v1_dart_quota_commit_and_readback(
+                $pdo,$config,'block_020',$attemptId,$quotaDay,$credentialId,$revision,
+                $requestHash,array('blocked_020','disabled_901'),$backendBindingId
+            );
+            v1_respond(200,v1_dart_quota_payload(
                 $day,'block_020',$attemptId,false,$backendBindingId,$credentialDay
             ));
         }
@@ -2140,7 +2367,11 @@ function v1_ops_dart_quota_write(PDO $pdo, array $config): void {
                 throw new RuntimeException('dart_quota_credential_disable_integrity_error');
             }
             $credentialDay['credential_status']='disabled_901';
-            $pdo->commit(); v1_respond(200,v1_dart_quota_payload(
+            list($day,$credentialDay) = v1_dart_quota_commit_and_readback(
+                $pdo,$config,'disable_901',$attemptId,$quotaDay,$credentialId,$revision,
+                $requestHash,array('disabled_901'),$backendBindingId
+            );
+            v1_respond(200,v1_dart_quota_payload(
                 $day,'disable_901',$attemptId,true,$backendBindingId,$credentialDay
             ));
         }
@@ -2170,12 +2401,24 @@ function v1_ops_dart_quota_write(PDO $pdo, array $config): void {
             throw new RuntimeException('dart_quota_credential_disable_integrity_error');
         }
         $credentialDay['credential_status']='disabled_901';
-        $pdo->commit(); v1_respond(200,v1_dart_quota_payload(
+        list($day,$credentialDay) = v1_dart_quota_commit_and_readback(
+            $pdo,$config,'disable_901',$attemptId,$quotaDay,$credentialId,$revision,
+            $requestHash,array('disabled_901'),$backendBindingId
+        );
+        v1_respond(200,v1_dart_quota_payload(
             $day,'disable_901',$attemptId,false,$backendBindingId,$credentialDay
         ));
     } catch (Throwable $e) {
-        if ($pdo->inTransaction()) { $pdo->rollBack(); }
-        throw $e;
+        if ($pdo->inTransaction()) {
+            try { $pdo->rollBack(); }
+            catch (Throwable $rollbackError) {
+                error_log('[activist-api] dart_quota_rollback_failed exception='
+                    . get_class($rollbackError));
+            }
+        }
+        $phase = v1_dart_quota_persistence_phase($e);
+        v1_dart_quota_log_persistence_failure($e,$phase);
+        v1_dart_quota_error(503,'dart_quota_persistence_failed',$phase);
     }
 }
 

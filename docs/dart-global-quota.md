@@ -15,6 +15,48 @@ OpenDART 429/5xx 재시도도 이미 소비된 1회이며 반환하지 않는다
 단조 증가 counter로 구성한다. quota API ACK를 잃어 같은 consume을 재시도할
 때만 동일 ID를 사용한다. 다음 물리 HTTP 재시도와 새 프로세스는 새 ID를 쓴다.
 
+## durable ACK와 명시적 replay
+
+`consume`, `block_020`, `disable_901`의 HTTP 200은 단순히 SQL 실행이
+성공했다는 뜻이 아니다. 서버는 다음 조건을 모두 확인한 뒤에만 200을 반환한다.
+
+1. mutation transaction의 `commit()`이 명시적으로 성공하고 transaction이
+   종료됐는지 확인한다.
+2. 기존 transaction과 다른 fresh PDO connection을 열고 동일한
+   `BSIDE_BACKEND_BINDING_ID`인지 다시 확인한다.
+3. fresh connection에서 해당 `attempt_id`, quota day, credential,
+   code revision, action별 request hash와 `consumed_units=1`을 다시 읽는다.
+4. 전역·credential별 사용량과 `block_020`·`disable_901`의 실제 상태를
+   독립 readback 결과로 검증한다.
+
+클라이언트도 첫 200만으로 DART 요청을 보내거나 다음 credential로 넘어가지
+않는다. 첫 응답의 identity, backend binding, 카운터와 상태를 검증한 다음
+**JSON 필드와 값이 완전히 같은 POST를 별도 호출로 한 번 더 전송**한다. 이
+명시적 replay 응답은 반드시 `duplicate=true`여야 한다. 첫 호출 내부의
+transport retry가 유실된 응답을 복구했다면 첫 ACK부터 `duplicate=true`일 수
+있지만, 이 경우에도 별도 replay는 생략하지 않는다.
+
+replay는 같은 attempt를 다시 소비하지 않으므로 한 번의 논리적 `consume`은
+전역·credential 원장에서 각각 1회만 증가한다. 두 번째 ACK가
+`duplicate=false`이거나 불완전하고, 카운터가 역행하거나, timeout·5xx가
+발생하면 실제 OpenDART 요청과 credential 전환을 모두 중단한다.
+
+commit 또는 독립 readback을 증명하지 못하면 서버는 HTTP 503과 고정 code
+`dart_quota_persistence_failed`를 반환한다. 외부에 공개되는 `detail`은 다음
+일곱 값뿐이다.
+
+- `transaction_commit_failed`
+- `transaction_state_invalid`
+- `transaction_readback_connection_failed`
+- `transaction_readback_binding_failed`
+- `transaction_readback_attempt_failed`
+- `transaction_readback_day_failed`
+- `transaction_readback_credential_failed`
+
+그 밖의 exception message, SQL·host 정보, API key와 provider 응답은 응답
+detail에 포함하지 않는다. 클라이언트도 이 고정 code와 detail만 안전한 진단
+정보로 취급한다.
+
 각 consume은 키 원문 대신 그 키 바이트의 전체 소문자 SHA-256
 `credential_id`에 묶인다. OpenDART 상태 `020`을 받으면 해당 consume의
 `attempt_id`로 그 credential만 다음 KST 자정까지 `block_020`하고, pool의

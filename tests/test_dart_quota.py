@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 import pytest
 
+import curator.dart_quota as dart_quota_module
 from curator.dart_quota import (
     DartCredentialUnavailableError,
     DartGlobalQuotaExceededError,
@@ -54,6 +57,27 @@ def _ack(body: dict[str, object], *, used: int, duplicate: bool = False) -> dict
     }
 
 
+class _DurableAckServer:
+    def __init__(self) -> None:
+        self.bodies: list[dict[str, object]] = []
+        self._seen: set[tuple[str, str]] = set()
+        self.used = 0
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        body: dict[str, object] = json.loads(request.content)
+        self.bodies.append(body)
+        identity = (str(body["action"]), str(body["attempt_id"]))
+        duplicate = identity in self._seen
+        if not duplicate:
+            self._seen.add(identity)
+            if body["action"] == "consume":
+                self.used += 1
+        return httpx.Response(
+            200,
+            json=_ack(body, used=self.used, duplicate=duplicate),
+        )
+
+
 def _client(handler, **overrides: object) -> DartQuotaClient:
     return DartQuotaClient(
         base_url="https://api.example.test/activist/api.php/api/v1",
@@ -83,8 +107,8 @@ def test_consume_retries_lost_ack_with_same_attempt_id() -> None:
     client = _client(handler)
     permit = client.consume(operation="list")
 
-    assert len(bodies) == 2
-    assert bodies[0] == bodies[1]
+    assert len(bodies) == 3
+    assert bodies[0] == bodies[1] == bodies[2]
     assert bodies[0] == {
         "action": "consume",
         "attempt_id": "gha-123-2-ingest-test-00000001",
@@ -99,14 +123,119 @@ def test_consume_retries_lost_ack_with_same_attempt_id() -> None:
     assert client.used == 1
 
 
-def test_each_physical_dart_retry_consumes_a_new_global_attempt() -> None:
+def test_consume_requires_an_independent_duplicate_replay_before_dart_request() -> None:
     quota_bodies: list[dict[str, object]] = []
     dart_calls = 0
 
     def quota_handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
+        body: dict[str, object] = json.loads(request.content)
         quota_bodies.append(body)
-        return httpx.Response(200, json=_ack(body, used=len(quota_bodies)))
+        return httpx.Response(200, json=_ack(body, used=1, duplicate=False))
+
+    def dart_handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal dart_calls
+        dart_calls += 1
+        return httpx.Response(200, json={"status": "013"})
+
+    quota = _client(quota_handler)
+    with httpx.Client(transport=httpx.MockTransport(dart_handler)) as dart_http:
+        connector = DartConnector(
+            "x" * 40,
+            client=dart_http,
+            governance_detail_codes=(),
+            request_budget=quota,
+        )
+        with pytest.raises(DartQuotaLedgerError, match="explicit replay"):
+            list(
+                connector.iter_disclosure_rows(
+                    datetime(2026, 7, 22).date(),
+                    datetime(2026, 7, 22).date(),
+                )
+            )
+
+    assert len(quota_bodies) == 2
+    assert quota_bodies[0] == quota_bodies[1]
+    assert quota.used == 0
+    assert dart_calls == 0
+
+
+@pytest.mark.parametrize("malformed_ack_number", (1, 2))
+@pytest.mark.parametrize(
+    ("malformed_field", "malformed_value"),
+    (
+        ("credential_status", "disabled_901"),
+        ("blocked_until", "2026-07-24T00:00:00+09:00"),
+        ("credential_blocked_until", "2026-07-24T00:00:00+09:00"),
+    ),
+)
+def test_malformed_consume_credential_ack_prevents_physical_dart_request(
+    malformed_ack_number: int,
+    malformed_field: str,
+    malformed_value: str,
+) -> None:
+    quota_calls = 0
+    dart_calls = 0
+
+    def quota_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal quota_calls
+        quota_calls += 1
+        body: dict[str, object] = json.loads(request.content)
+        payload = _ack(body, used=1, duplicate=quota_calls > 1)
+        if quota_calls == malformed_ack_number:
+            payload[malformed_field] = malformed_value
+        return httpx.Response(200, json=payload)
+
+    def dart_handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal dart_calls
+        dart_calls += 1
+        return httpx.Response(200, json={"status": "013"})
+
+    quota = _client(quota_handler)
+    with httpx.Client(transport=httpx.MockTransport(dart_handler)) as dart_http:
+        connector = DartConnector(
+            "x" * 40,
+            client=dart_http,
+            governance_detail_codes=(),
+            request_budget=quota,
+        )
+        with pytest.raises(DartQuotaLedgerError):
+            list(
+                connector.iter_disclosure_rows(
+                    datetime(2026, 7, 22).date(),
+                    datetime(2026, 7, 22).date(),
+                )
+            )
+
+    assert quota_calls == malformed_ack_number
+    assert quota.used == 0
+    assert dart_calls == 0
+
+
+def test_consume_rejects_counter_regression_during_explicit_replay() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        body: dict[str, object] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json=_ack(
+                body,
+                used=2 if calls == 1 else 1,
+                duplicate=calls == 2,
+            ),
+        )
+
+    quota = _client(handler)
+    with pytest.raises(DartQuotaLedgerError, match="counters regressed"):
+        quota.consume()
+    assert quota.used == 0
+
+
+def test_each_physical_dart_retry_consumes_a_new_global_attempt() -> None:
+    quota_server = _DurableAckServer()
+    dart_calls = 0
 
     def dart_handler(_request: httpx.Request) -> httpx.Response:
         nonlocal dart_calls
@@ -118,7 +247,7 @@ def test_each_physical_dart_retry_consumes_a_new_global_attempt() -> None:
             json={"status": "013", "message": "no data"},
         )
 
-    quota = _client(quota_handler)
+    quota = _client(quota_server)
     with httpx.Client(transport=httpx.MockTransport(dart_handler)) as dart_http:
         connector = DartConnector(
             "x" * 40,
@@ -135,10 +264,13 @@ def test_each_physical_dart_retry_consumes_a_new_global_attempt() -> None:
         ) == []
 
     assert dart_calls == 2
-    assert [row["attempt_id"] for row in quota_bodies] == [
+    assert [row["attempt_id"] for row in quota_server.bodies] == [
+        "gha-123-2-ingest-test-00000001",
         "gha-123-2-ingest-test-00000001",
         "gha-123-2-ingest-test-00000002",
+        "gha-123-2-ingest-test-00000002",
     ]
+    assert quota_server.used == 2
     assert quota.used == 2
 
 
@@ -209,15 +341,8 @@ def test_backend_binding_mismatch_prevents_physical_dart_request(
 
 
 def test_status_020_must_receive_durable_block_ack() -> None:
-    actions: list[str] = []
-
-    def quota_handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        actions.append(str(body["action"]))
-        used = 1
-        return httpx.Response(200, json=_ack(body, used=used))
-
-    quota = _client(quota_handler)
+    quota_server = _DurableAckServer()
+    quota = _client(quota_server)
     with httpx.Client(
         transport=httpx.MockTransport(
             lambda _request: httpx.Response(
@@ -238,25 +363,144 @@ def test_status_020_must_receive_durable_block_ack() -> None:
                 )
             )
 
-    assert actions == ["consume", "block_020"]
+    assert [str(body["action"]) for body in quota_server.bodies] == [
+        "consume",
+        "consume",
+        "block_020",
+        "block_020",
+    ]
+    assert quota_server.used == 1
+    assert quota.used == 1
 
 
 def test_status_901_permanently_disables_only_permit_credential() -> None:
-    bodies: list[dict[str, object]] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        bodies.append(body)
-        return httpx.Response(200, json=_ack(body, used=1))
-
-    quota = _client(handler)
+    quota_server = _DurableAckServer()
+    quota = _client(quota_server)
     permit = quota.consume(operation="list")
     quota.disable_901(permit)
 
-    assert [body["action"] for body in bodies] == ["consume", "disable_901"]
-    assert bodies[1]["credential_id"] == CREDENTIAL_ID
-    assert bodies[1]["reason"] == "opendart_status_901"
-    assert bodies[1]["attempt_id"] == permit.attempt_id
+    assert [body["action"] for body in quota_server.bodies] == [
+        "consume",
+        "consume",
+        "disable_901",
+        "disable_901",
+    ]
+    assert quota_server.bodies[2] == quota_server.bodies[3]
+    assert quota_server.bodies[2]["credential_id"] == CREDENTIAL_ID
+    assert quota_server.bodies[2]["reason"] == "opendart_status_901"
+    assert quota_server.bodies[2]["attempt_id"] == permit.attempt_id
+    assert quota_server.used == 1
+    assert quota.used == 1
+
+
+@pytest.mark.parametrize("action", ("block_020", "disable_901"))
+def test_credential_mutation_requires_an_independent_duplicate_replay(
+    action: str,
+) -> None:
+    seen: set[tuple[str, str]] = set()
+    bodies: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body: dict[str, object] = json.loads(request.content)
+        bodies.append(body)
+        identity = (str(body["action"]), str(body["attempt_id"]))
+        duplicate = identity in seen
+        seen.add(identity)
+        if body["action"] == action:
+            duplicate = False
+        return httpx.Response(
+            200,
+            json=_ack(body, used=1, duplicate=duplicate),
+        )
+
+    quota = _client(handler)
+    permit = quota.consume()
+    with pytest.raises(DartQuotaLedgerError, match="explicit replay"):
+        if action == "block_020":
+            quota.block_020(permit)
+        else:
+            quota.disable_901(permit)
+
+    assert [str(body["action"]) for body in bodies] == [
+        "consume",
+        "consume",
+        action,
+        action,
+    ]
+    assert quota.used == 1
+
+
+@pytest.mark.parametrize("malformed_ack_number", (1, 2))
+@pytest.mark.parametrize(
+    ("action", "mutations"),
+    (
+        ("block_020", {"credential_status": "unknown"}),
+        ("block_020", {"credential_blocked_until": None}),
+        (
+            "block_020",
+            {"credential_blocked_until": "2026-07-25T00:00:00+09:00"},
+        ),
+        (
+            "block_020",
+            {
+                "blocked_until": "not-a-timestamp",
+                "credential_blocked_until": "not-a-timestamp",
+            },
+        ),
+        ("disable_901", {"credential_status": "active"}),
+    ),
+)
+def test_credential_mutation_rejects_malformed_effect_ack(
+    malformed_ack_number: int,
+    action: str,
+    mutations: dict[str, object],
+) -> None:
+    seen: set[tuple[str, str]] = set()
+    action_ack_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal action_ack_count
+        body: dict[str, object] = json.loads(request.content)
+        identity = (str(body["action"]), str(body["attempt_id"]))
+        duplicate = identity in seen
+        seen.add(identity)
+        payload = _ack(body, used=1, duplicate=duplicate)
+        if body["action"] == action:
+            action_ack_count += 1
+            if action_ack_count == malformed_ack_number:
+                payload.update(mutations)
+        return httpx.Response(200, json=payload)
+
+    quota = _client(handler)
+    permit = quota.consume()
+    with pytest.raises(DartQuotaLedgerError):
+        if action == "block_020":
+            quota.block_020(permit)
+        else:
+            quota.disable_901(permit)
+
+    assert action_ack_count == malformed_ack_number
+    assert quota.used == 1
+
+
+def test_block_ack_allows_disabled_credential_when_block_timestamps_match() -> None:
+    seen: set[tuple[str, str]] = set()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body: dict[str, object] = json.loads(request.content)
+        identity = (str(body["action"]), str(body["attempt_id"]))
+        duplicate = identity in seen
+        seen.add(identity)
+        payload = _ack(body, used=1, duplicate=duplicate)
+        if body["action"] == "block_020":
+            payload["credential_status"] = "disabled_901"
+        return httpx.Response(200, json=payload)
+
+    quota = _client(handler)
+    permit = quota.consume()
+    quota.block_020(permit)
+
+    assert quota.used == 1
 
 
 @pytest.mark.parametrize(
@@ -314,16 +558,73 @@ def test_non_exhaustion_conflict_is_not_classified_as_global_quota() -> None:
     assert not isinstance(caught.value, DartGlobalQuotaExceededError)
 
 
+@pytest.mark.parametrize(
+    "safe_detail",
+    (
+        "transaction_commit_failed",
+        "transaction_readback_attempt_failed",
+        "transaction_readback_binding_failed",
+        "transaction_readback_connection_failed",
+        "transaction_readback_credential_failed",
+        "transaction_readback_day_failed",
+        "transaction_state_invalid",
+    ),
+)
+def test_rejected_ack_exposes_only_allowlisted_persistence_detail(
+    safe_detail: str,
+) -> None:
+    def safe_handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            503,
+            json={
+                "ok": False,
+                "error": {
+                    "code": "dart_quota_persistence_failed",
+                    "detail": safe_detail,
+                },
+            },
+        )
+
+    with pytest.raises(DartQuotaLedgerError) as safe_error:
+        _client(safe_handler, max_ack_retries=0).consume()
+    assert "dart_quota_persistence_failed" in str(safe_error.value)
+    assert f"detail={safe_detail}" in str(safe_error.value)
+
+    secret = "f" * 40
+
+    def unsafe_handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            500,
+            json={"ok": False, "error": {"code": secret, "detail": secret}},
+        )
+
+    with pytest.raises(DartQuotaLedgerError) as unsafe_error:
+        _client(unsafe_handler, max_ack_retries=0).consume()
+    assert "unknown_error" in str(unsafe_error.value)
+    assert secret not in str(unsafe_error.value)
+
+
+def test_python_allowlist_exactly_matches_php_persistence_phase_contract() -> None:
+    php = (
+        Path(__file__).resolve().parents[1]
+        / "deploy"
+        / "activist"
+        / "governance_v1.php"
+    ).read_text(encoding="utf-8")
+    start = php.index("function v1_dart_quota_persistence_phase")
+    end = php.index("function v1_dart_quota_log_persistence_failure", start)
+    returned_details = frozenset(
+        re.findall(r"return '([^']+)';", php[start:end])
+    )
+    assert returned_details == dart_quota_module._SAFE_PERSISTENCE_DETAILS
+
+
 def test_per_call_credential_id_overrides_default_without_key_material() -> None:
     selected = "d" * 64
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        payload = _ack(body, used=1)
-        return httpx.Response(200, json=payload)
-
-    permit = _client(handler).consume(credential_id=selected)
+    quota_server = _DurableAckServer()
+    permit = _client(quota_server).consume(credential_id=selected)
     assert permit.credential_id == selected
+    assert len(quota_server.bodies) == 2
 
 
 def test_incomplete_ack_fails_closed() -> None:
@@ -353,12 +654,7 @@ def test_new_physical_attempt_requires_full_lowercase_sha256_credential_id(
 def test_generated_attempt_id_always_fits_server_column(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    observed: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        observed.append(str(body["attempt_id"]))
-        return httpx.Response(200, json=_ack(body, used=1))
+    quota_server = _DurableAckServer()
 
     monkeypatch.setenv("GITHUB_RUN_ID", "9" * 30)
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "123")
@@ -370,11 +666,14 @@ def test_generated_attempt_id_always_fits_server_column(
         credential_id=CREDENTIAL_ID,
         code_revision=REVISION,
         phase="very-long-phase-" * 8,
-        transport=httpx.MockTransport(handler),
+        transport=httpx.MockTransport(quota_server),
         now_provider=lambda: NOW,
     )
     quota.consume()
 
+    observed = [str(body["attempt_id"]) for body in quota_server.bodies]
+    assert len(observed) == 2
+    assert observed[0] == observed[1]
     assert len(observed[0]) <= 96
     assert observed[0].endswith("-00000001")
 
@@ -382,12 +681,7 @@ def test_generated_attempt_id_always_fits_server_column(
 def test_restarted_client_in_same_github_job_gets_a_new_process_nonce(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    observed: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        observed.append(str(body["attempt_id"]))
-        return httpx.Response(200, json=_ack(body, used=len(observed)))
+    quota_server = _DurableAckServer()
 
     monkeypatch.setenv("GITHUB_RUN_ID", "123456")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
@@ -399,16 +693,20 @@ def test_restarted_client_in_same_github_job_gets_a_new_process_nonce(
         "credential_id": CREDENTIAL_ID,
         "code_revision": REVISION,
         "phase": "official-ingest",
-        "transport": httpx.MockTransport(handler),
+        "transport": httpx.MockTransport(quota_server),
         "now_provider": lambda: NOW,
     }
     DartQuotaClient(**kwargs).consume()  # type: ignore[arg-type]
     DartQuotaClient(**kwargs).consume()  # type: ignore[arg-type]
 
-    assert len(observed) == 2
-    assert observed[0] != observed[1]
+    observed = [str(body["attempt_id"]) for body in quota_server.bodies]
+    assert len(observed) == 4
+    assert observed[0] == observed[1]
+    assert observed[2] == observed[3]
+    assert observed[0] != observed[2]
     assert all(value.startswith("gha-123456-1-ingest-official-ingest-") for value in observed)
     assert all(value.endswith("-00000001") for value in observed)
+    assert quota_server.used == 2
 
 
 def test_github_actions_and_partial_api_config_force_durable_fail_closed_policy(

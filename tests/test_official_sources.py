@@ -11,6 +11,7 @@ import pytest
 from curator.dart_quota import (
     DartCredentialUnavailableError,
     DartGlobalQuotaExceededError,
+    DartQuotaLedgerError,
 )
 from curator.governance import GovernanceEventType
 from curator.official_ingest import source_right_payloads
@@ -736,6 +737,23 @@ def test_dart_pool_disables_status_901_key_and_retries_same_logical_request() ->
         {"OPENDART_API_KEYS": f"{key_a}\n{key_b}"}
     )
     requested: list[str] = []
+    actions: list[tuple[str, str]] = []
+
+    class RecordingQuota:
+        limit = 40_000
+        used = 0
+
+        def consume(self, *, operation: str, credential_id: str) -> object:
+            assert operation == "list"
+            self.used += 1
+            actions.append(("consume", credential_id))
+            return credential_id
+
+        def block_020(self, permit: object) -> None:
+            raise AssertionError(f"unexpected 020 block for {permit!r}")
+
+        def disable_901(self, permit: object) -> None:
+            actions.append(("disable_901", str(permit)))
 
     def handler(request: httpx.Request) -> httpx.Response:
         key = str(request.url.params["crtfc_key"])
@@ -760,6 +778,7 @@ def test_dart_pool_disables_status_901_key_and_retries_same_logical_request() ->
             credentials,
             client=client,
             governance_detail_codes=(),
+            request_budget=RecordingQuota(),
             quota_day_provider=lambda: date(2026, 7, 26),
         )
         rows = list(
@@ -771,6 +790,59 @@ def test_dart_pool_disables_status_901_key_and_retries_same_logical_request() ->
 
     assert len(rows) == 1
     assert requested == [key_a, key_b]
+    first_id, second_id = (credential.credential_id for credential in credentials)
+    assert actions == [
+        ("consume", first_id),
+        ("disable_901", first_id),
+        ("consume", second_id),
+    ]
+
+
+def test_dart_pool_does_not_try_next_key_when_901_disable_ack_is_unverified() -> None:
+    key_a, key_b = "a" * 40, "b" * 40
+    credentials = load_opendart_credentials(
+        {"OPENDART_API_KEYS": f"{key_a}\n{key_b}"}
+    )
+    requested: list[str] = []
+
+    class UnverifiedDisableQuota:
+        limit = 40_000
+        used = 0
+
+        def consume(self, *, operation: str, credential_id: str) -> object:
+            assert operation == "list"
+            self.used += 1
+            return credential_id
+
+        def block_020(self, permit: object) -> None:
+            raise AssertionError(f"unexpected 020 block for {permit!r}")
+
+        def disable_901(self, _permit: object) -> None:
+            raise DartQuotaLedgerError(
+                "DART quota API explicit replay was not acknowledged as duplicate"
+            )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url.params["crtfc_key"]))
+        return httpx.Response(200, json={"status": "901"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = DartConnector(
+            credentials,
+            client=client,
+            governance_detail_codes=(),
+            request_budget=UnverifiedDisableQuota(),
+            quota_day_provider=lambda: date(2026, 7, 26),
+        )
+        with pytest.raises(DartQuotaLedgerError, match="explicit replay"):
+            list(
+                connector.iter_disclosure_rows(
+                    date(2026, 7, 26),
+                    date(2026, 7, 26),
+                )
+            )
+
+    assert requested == [key_a]
 
 
 def test_dart_pool_binds_durable_actions_to_sha256_credential_identity() -> None:
