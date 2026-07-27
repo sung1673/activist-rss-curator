@@ -1697,6 +1697,8 @@ def test_ci_checks_production_php_73() -> None:
     assert "extension_loaded($extension)" in commands
     assert "find deploy -type f -name '*.php'" in commands
     assert "php tests/php_contracts.php" in commands
+    assert "tests/php73_dart_quota_unbuffered_smoke.py" in commands
+    assert "tests/php73_governance_snapshot_unbuffered_smoke.py" in commands
 
 
 def test_workflows_pin_verified_node24_action_commits() -> None:

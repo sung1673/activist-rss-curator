@@ -528,6 +528,9 @@ jobs:
           python3 tests/php73_dart_quota_unbuffered_smoke.py \
             --base-url http://127.0.0.1:8788 \
             --mysql-container-id "$MYSQL_CONTAINER_ID"
+          python3 tests/php73_governance_snapshot_unbuffered_smoke.py \
+            --base-url http://127.0.0.1:8788 \
+            --mysql-container-id "$MYSQL_CONTAINER_ID"
 
       - name: Validate Telegram channel identity index migration
         shell: bash

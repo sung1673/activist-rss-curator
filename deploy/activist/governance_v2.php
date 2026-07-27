@@ -2781,9 +2781,11 @@ function v2_release_state_rows_for_update(PDO $pdo, array $config): array {
         . table_name($config, 'governance_release_state')
         . ' WHERE state_key IN (?,?) ORDER BY BINARY state_key FOR UPDATE'
     );
-    $statement->execute(array(GOV_V1_RELEASE_STATE_KEY, GOV_V2_RELEASE_STATE_KEY));
     $rows = array();
-    while ($row = $statement->fetch()) {
+    foreach (v1_pdo_fetch_all_and_close(
+        $statement,
+        array(GOV_V1_RELEASE_STATE_KEY, GOV_V2_RELEASE_STATE_KEY)
+    ) as $row) {
         $rows[(string)$row['state_key']] = $row;
     }
     if (
