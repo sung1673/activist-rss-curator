@@ -18,6 +18,7 @@ from curator.official_ingest import source_right_payloads
 from curator.opendart_credentials import load_opendart_credentials
 from curator.official_sources import (
     DART_GOVERNANCE_DETAIL_CODES,
+    DART_LIST_URL,
     DartConnector,
     DartInvocationQuota,
     DartQuotaExceededError,
@@ -629,6 +630,188 @@ def test_dart_connector_paginates_until_total_page() -> None:
     assert [row["rcept_no"] for row in rows] == ["20260716000121", "20260716000122"]
 
 
+def test_dart_connector_owned_pool_is_reused_and_closed_once() -> None:
+    created: list[httpx.Client] = []
+    requests = 0
+    close_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        page = int(request.url.params["page_no"])
+        return httpx.Response(
+            200,
+            json={
+                "status": "000",
+                "page_no": page,
+                "total_page": 2,
+                "list": [dart_row(rcept_no=f"2026071600012{page}")],
+            },
+        )
+
+    class TrackingClient(httpx.Client):
+        def close(self) -> None:
+            nonlocal close_calls
+            close_calls += 1
+            super().close()
+
+    def factory(**kwargs: object) -> httpx.Client:
+        client = TrackingClient(
+            transport=httpx.MockTransport(handler),
+            **kwargs,  # type: ignore[arg-type]
+        )
+        created.append(client)
+        return client
+
+    connector = DartConnector(
+        "x" * 40,
+        client_factory=factory,
+        governance_detail_codes=(),
+    )
+    with connector:
+        rows = list(
+            connector.iter_disclosure_rows(
+                date(2026, 7, 15),
+                date(2026, 7, 16),
+            )
+        )
+
+    assert len(rows) == 2
+    assert requests == 2
+    assert len(created) == 1
+    assert created[0].is_closed is True
+    connector.close()
+    assert close_calls == 1
+
+
+def test_dart_connector_close_failure_is_fail_closed_and_can_be_retried() -> None:
+    close_attempts = 0
+
+    class FlakyCloseClient(httpx.Client):
+        def close(self) -> None:
+            nonlocal close_attempts
+            close_attempts += 1
+            if close_attempts == 1:
+                raise RuntimeError("transient connector close failure")
+            super().close()
+
+    def factory(**kwargs: object) -> httpx.Client:
+        return FlakyCloseClient(
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(
+                    200,
+                    json={"status": "013", "message": "no data"},
+                )
+            ),
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    budget = DartRequestBudget(1)
+    connector = DartConnector(
+        "x" * 40,
+        client_factory=factory,
+        governance_detail_codes=(),
+        request_budget=budget,
+    )
+
+    with pytest.raises(RuntimeError, match="transient connector close failure"):
+        connector.close()
+    with pytest.raises(OfficialSourceError, match="closed"):
+        list(
+            connector.iter_disclosure_rows(
+                date(2026, 7, 15),
+                date(2026, 7, 16),
+            )
+        )
+
+    connector.close()
+    connector.close()
+    assert close_attempts == 2
+    assert budget.used == 0
+
+
+def test_dart_connector_does_not_close_borrowed_client() -> None:
+    borrowed = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={"status": "013", "message": "no data"},
+            )
+        )
+    )
+    connector = DartConnector(
+        "x" * 40,
+        client=borrowed,
+        governance_detail_codes=(),
+    )
+
+    connector.close()
+    assert borrowed.is_closed is False
+    assert borrowed.get(DART_LIST_URL).status_code == 200
+    borrowed.close()
+
+
+def test_closed_dart_connector_fails_before_consuming_quota() -> None:
+    budget = DartRequestBudget(1)
+    with httpx.Client(transport=httpx.MockTransport(lambda _request: httpx.Response(500))) as client:
+        connector = DartConnector(
+            "x" * 40,
+            client=client,
+            governance_detail_codes=(),
+            request_budget=budget,
+        )
+        connector.close()
+        with pytest.raises(OfficialSourceError, match="closed"):
+            list(
+                connector.iter_disclosure_rows(
+                    date(2026, 7, 15),
+                    date(2026, 7, 16),
+                )
+            )
+
+    assert budget.used == 0
+
+
+def test_owned_dart_pool_does_not_carry_cookie_across_credential_rotation() -> None:
+    key_a, key_b = "a" * 40, "b" * 40
+    credentials = load_opendart_credentials(
+        {"OPENDART_API_KEYS": f"{key_a}\n{key_b}"}
+    )
+    observed: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        key = str(request.url.params["crtfc_key"])
+        observed.append((key, request.headers.get("cookie", "")))
+        if key == key_a:
+            return httpx.Response(
+                200,
+                headers={"Set-Cookie": "credential=a; Path=/"},
+                json={"status": "020"},
+            )
+        return httpx.Response(200, json={"status": "013", "message": "no data"})
+
+    def factory(**kwargs: object) -> httpx.Client:
+        return httpx.Client(
+            transport=httpx.MockTransport(handler),
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    with DartConnector(
+        credentials,
+        client_factory=factory,
+        governance_detail_codes=(),
+        quota_day_provider=lambda: date(2026, 7, 26),
+    ) as connector:
+        assert list(
+            connector.iter_disclosure_rows(
+                date(2026, 7, 26),
+                date(2026, 7, 26),
+            )
+        ) == []
+
+    assert observed == [(key_a, ""), (key_b, "")]
+
+
 def test_dart_connector_retries_429_and_5xx_with_bounded_backoff() -> None:
     statuses = iter((429, 503, 200))
     sleeps: list[float] = []
@@ -1140,6 +1323,47 @@ def test_invocation_quota_caps_durable_40k_ledger_without_losing_permit_actions(
         ("block_020", first),
         ("disable_901", second),
     ]
+
+
+def test_owned_invocation_quota_retries_failed_delegate_close_but_stays_closed() -> None:
+    class FlakyLedger:
+        limit = 40_000
+        used = 0
+
+        def __init__(self) -> None:
+            self.close_attempts = 0
+
+        def consume(self, *, operation: str, credential_id: str) -> object:
+            self.used += 1
+            return operation, credential_id
+
+        def block_020(self, permit: object) -> None:
+            del permit
+
+        def disable_901(self, permit: object) -> None:
+            del permit
+
+        def close(self) -> None:
+            self.close_attempts += 1
+            if self.close_attempts == 1:
+                raise RuntimeError("delegate close failed")
+
+    ledger = FlakyLedger()
+    budget = DartInvocationQuota(
+        ledger,
+        limit=2,
+        close_delegate=True,
+    )
+
+    with pytest.raises(RuntimeError, match="delegate close failed"):
+        budget.close()
+    with pytest.raises(DartRequestBudgetError, match="closed"):
+        budget.consume(operation="list", credential_id="d" * 64)
+
+    budget.close()
+    budget.close()
+    assert ledger.close_attempts == 2
+    assert ledger.used == 0
 
 
 def test_dart_http_error_never_exposes_api_key_or_response_body() -> None:

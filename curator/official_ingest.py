@@ -61,6 +61,27 @@ class GovernanceBackendBindingError(RuntimeError):
     """The signed write target cannot be bound to the expected MySQL backend."""
 
 
+def _close_resources_independently(*resources: object | None) -> int:
+    """Close every owned resource, retrying once without leaking cleanup errors."""
+
+    failed_resources = 0
+    for resource in resources:
+        if resource is None:
+            continue
+        close = getattr(resource, "close", None)
+        if not callable(close):
+            continue
+        for attempt in range(2):
+            try:
+                close()
+            except Exception:  # noqa: BLE001 - cleanup must not mask the source failure.
+                if attempt == 1:
+                    failed_resources += 1
+            else:
+                break
+    return failed_resources
+
+
 def _required_backend_binding_id() -> str:
     binding_id = os.environ.get("BSIDE_BACKEND_BINDING_ID", "").strip()
     if _BACKEND_BINDING_RE.fullmatch(binding_id) is None:
@@ -731,10 +752,11 @@ def run(
     company_master: list[dict[str, object]] = []
     if dart_credentials and dart_enabled and not dart_credential_configuration_error:
         shared_budget = settings.get("dart_request_budget")
+        owned_shared_budget: DartInvocationQuota | None = None
         if shared_budget is None and (
             durable_dart_quota_required() or durable_dart_quota_configured()
         ):
-            shared_budget = DartInvocationQuota(
+            owned_shared_budget = DartInvocationQuota(
                 durable_dart_quota_client(
                     phase=os.environ.get(
                         "CURATOR_DART_QUOTA_PHASE",
@@ -742,12 +764,18 @@ def run(
                     )
                 ),
                 limit=10_000,
+                close_delegate=True,
             )
-        dart_connector = (
-            DartConnector(dart_credentials, request_budget=shared_budget)
-            if shared_budget is not None
-            else DartConnector(dart_credentials)
-        )
+            shared_budget = owned_shared_budget
+        try:
+            dart_connector = (
+                DartConnector(dart_credentials, request_budget=shared_budget)
+                if shared_budget is not None
+                else DartConnector(dart_credentials)
+            )
+        except Exception:
+            _close_resources_independently(owned_shared_budget)
+            raise
         source_started = time.perf_counter()
         source_buffer: list[OfficialDisclosure] = []
         try:
@@ -778,13 +806,26 @@ def run(
             source_errors["dart"] += 1
             source_failure_kinds["dart"]["connector"] += 1
         finally:
-            source_metrics["dart"] = {
-                "list_requests": dart_connector.list_requests,
-                "pages_fetched": dart_connector.pages_fetched,
-                "rows_fetched": dart_connector.rows_fetched,
-                "elapsed_ms": max(0, round((time.perf_counter() - source_started) * 1000)),
-                "requests_made": getattr(dart_connector, "requests_made", 0),
-            }
+            cleanup_failures = 0
+            try:
+                source_metrics["dart"] = {
+                    "list_requests": dart_connector.list_requests,
+                    "pages_fetched": dart_connector.pages_fetched,
+                    "rows_fetched": dart_connector.rows_fetched,
+                    "elapsed_ms": max(
+                        0,
+                        round((time.perf_counter() - source_started) * 1000),
+                    ),
+                    "requests_made": getattr(dart_connector, "requests_made", 0),
+                }
+            finally:
+                cleanup_failures = _close_resources_independently(
+                    dart_connector,
+                    owned_shared_budget,
+                )
+        if cleanup_failures:
+            source_errors["dart"] += cleanup_failures
+            source_failure_kinds["dart"]["connector"] += cleanup_failures
         if source_errors["dart"]:
             source_discarded["dart"] = len(source_buffer)
             company_master = []

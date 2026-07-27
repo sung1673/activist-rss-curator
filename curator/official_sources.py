@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import io
 import re
+import threading
 import time
 import zipfile
 from dataclasses import dataclass
@@ -142,12 +143,26 @@ class DartRequestBudget:
 class DartInvocationQuota:
     """Apply a smaller invocation cap in front of a durable daily ledger."""
 
-    def __init__(self, delegate: DartRequestQuota, *, limit: int) -> None:
+    def __init__(
+        self,
+        delegate: DartRequestQuota,
+        *,
+        limit: int,
+        close_delegate: bool = False,
+    ) -> None:
         if limit < 1:
             raise ValueError("DART invocation request budget must be at least 1")
         self._delegate = delegate
+        self._close_delegate = close_delegate
         self.limit = limit
         self.used = 0
+        self._close_requested = False
+        self._closed = False
+        self._lock = threading.RLock()
+
+    def _ensure_open(self) -> None:
+        if self._close_requested:
+            raise DartRequestBudgetError("DART invocation request budget is closed")
 
     def consume(
         self,
@@ -155,25 +170,56 @@ class DartInvocationQuota:
         operation: str = "list",
         credential_id: str,
     ) -> object:
-        if self.used >= self.limit:
-            raise DartRequestBudgetError(
-                f"OpenDART request budget exhausted ({self.used}/{self.limit})"
+        with self._lock:
+            self._ensure_open()
+            if self.used >= self.limit:
+                raise DartRequestBudgetError(
+                    f"OpenDART request budget exhausted ({self.used}/{self.limit})"
+                )
+            permit = self._delegate.consume(
+                operation=operation,
+                credential_id=credential_id,
             )
-        permit = self._delegate.consume(
-            operation=operation,
-            credential_id=credential_id,
-        )
-        # Count only a durably acknowledged physical-request permit. A
-        # pre-blocked credential rejection therefore does not consume the
-        # invocation safety budget.
-        self.used += 1
-        return permit
+            # Count only a durably acknowledged physical-request permit. A
+            # pre-blocked credential rejection therefore does not consume the
+            # invocation safety budget.
+            self.used += 1
+            return permit
 
     def block_020(self, permit: object) -> None:
-        self._delegate.block_020(permit)
+        with self._lock:
+            self._ensure_open()
+            self._delegate.block_020(permit)
 
     def disable_901(self, permit: object) -> None:
-        self._delegate.disable_901(permit)
+        with self._lock:
+            self._ensure_open()
+            self._delegate.disable_901(permit)
+
+    def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._close_requested = True
+            if self._close_delegate:
+                close = getattr(self._delegate, "close", None)
+                if callable(close):
+                    close()
+            self._closed = True
+
+    def __enter__(self) -> DartInvocationQuota:
+        with self._lock:
+            self._ensure_open()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: object,
+        exc_value: object,
+        traceback: object,
+    ) -> None:
+        del exc_type, exc_value, traceback
+        self.close()
 
 
 EVENT_PATTERNS: tuple[tuple[GovernanceEventType, tuple[str, ...]], ...] = (
@@ -867,6 +913,7 @@ class DartConnector:
         api_key: str | Iterable[OpenDartCredential],
         *,
         client: httpx.Client | None = None,
+        client_factory: Callable[..., httpx.Client] = httpx.Client,
         timeout: float = 20.0,
         governance_detail_codes: Iterable[str] | None = None,
         request_budget: DartRequestQuota | None = None,
@@ -896,7 +943,6 @@ class DartConnector:
         self._quota_day_provider = quota_day_provider or (
             lambda: datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Seoul")).date()
         )
-        self._client = client
         self.timeout = timeout
         if max_retries < 0:
             raise ValueError("DART max_retries cannot be negative")
@@ -920,6 +966,45 @@ class DartConnector:
             credential_id: 0
             for credential_id in self._credential_pool.credential_ids
         }
+        self._request_lock = threading.RLock()
+        self._close_requested = False
+        self._closed = False
+        self._owns_client = client is None
+        self._client = (
+            client
+            if client is not None
+            else client_factory(
+                timeout=self.timeout,
+                follow_redirects=True,
+            )
+        )
+
+    def _ensure_open(self) -> None:
+        if self._close_requested:
+            raise OfficialSourceError("OpenDART connector is closed")
+
+    def close(self) -> None:
+        with self._request_lock:
+            if self._closed:
+                return
+            self._close_requested = True
+            if self._owns_client:
+                self._client.close()
+            self._closed = True
+
+    def __enter__(self) -> DartConnector:
+        with self._request_lock:
+            self._ensure_open()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: object,
+        exc_value: object,
+        traceback: object,
+    ) -> None:
+        del exc_type, exc_value, traceback
+        self.close()
 
     def _retry_delay(self, response: httpx.Response | None, attempt: int) -> float:
         retry_after = (
@@ -935,6 +1020,15 @@ class DartConnector:
         return float(min(30.0, max(exponential, requested_delay, 0.0)))
 
     def _get(self, url: str, params: dict[str, str | int]) -> httpx.Response:
+        with self._request_lock:
+            self._ensure_open()
+            return self._get_locked(url, params)
+
+    def _get_locked(
+        self,
+        url: str,
+        params: dict[str, str | int],
+    ) -> httpx.Response:
         operation = "corp_code" if url == DART_CORP_CODE_URL else "list"
         quota_day = self._quota_day_provider()
         while True:
@@ -986,15 +1080,13 @@ class DartConnector:
                 self.requests_made += 1
                 self.credential_requests[credential_id] += 1
                 try:
-                    if self._client is not None:
-                        response = self._client.get(url, params=request_params)
-                    else:
-                        response = httpx.get(
-                            url,
-                            params=request_params,
-                            timeout=self.timeout,
-                            follow_redirects=True,
-                        )
+                    # The previous top-level httpx.get call did not retain
+                    # response cookies between physical requests. Preserve
+                    # that behavior while reusing only the transport pool,
+                    # especially when status 020/901 rotates credentials.
+                    if self._owns_client:
+                        self._client.cookies.clear()
+                    response = self._client.get(url, params=request_params)
                 except httpx.TransportError:
                     if attempt >= self.max_retries:
                         raise OfficialSourceError("OpenDART transport error") from None

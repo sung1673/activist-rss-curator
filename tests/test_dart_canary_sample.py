@@ -50,6 +50,7 @@ class FakeConnector:
         self.requests_made = 0
         self.pages_fetched = 0
         self.rows_fetched = 0
+        self.close_calls = 0
 
     def iter_disclosure_rows(
         self,
@@ -72,6 +73,9 @@ class FakeConnector:
             if start <= received <= end:
                 self.rows_fetched += 1
                 yield row
+
+    def close(self) -> None:
+        self.close_calls += 1
 
 
 def test_canary_scans_last_complete_day_and_exact_365_day_history() -> None:
@@ -136,6 +140,7 @@ def test_canary_scans_last_complete_day_and_exact_365_day_history() -> None:
     assert older_days[-1] == date(2026, 7, 14)
     assert len(older_days) == len(set(older_days)) == 364
     assert report["requests_used"] == len(connector.calls) == 53
+    assert connector.close_calls == 1
 
 
 def test_canary_selects_real_correction_and_withdrawal_without_changing_titles() -> None:
@@ -197,19 +202,27 @@ def test_canary_fails_closed_when_a_required_sample_kind_is_absent() -> None:
 
 def test_canary_propagates_status_020_and_uses_the_shared_bounded_budget() -> None:
     budget = DartRequestBudget(17)
+    holder: dict[str, FakeConnector] = {}
+
+    def factory(_key: object, shared: DartRequestBudget) -> FakeConnector:
+        connector = FakeConnector(
+            shared,
+            [],
+            quota_failure=True,
+        )
+        holder["connector"] = connector
+        return connector
+
     with pytest.raises(DartQuotaExceededError, match="020"):
         run_dart_canary_sample(
             "test-key",
             now=datetime(2026, 7, 16, tzinfo=timezone.utc),
             options=DartCanarySampleOptions(lookback_days=10),
             request_budget=budget,
-            connector_factory=lambda _key, shared: FakeConnector(
-                shared,
-                [],
-                quota_failure=True,
-            ),
+            connector_factory=factory,
         )
     assert budget.used == 1
+    assert holder["connector"].close_calls == 1
 
 
 def test_canary_rejects_a_budget_over_the_single_run_safety_cap() -> None:

@@ -64,6 +64,12 @@ DartCredentialInput = str | tuple[OpenDartCredential, ...]
 ConnectorFactory = Callable[[DartCredentialInput, DartRequestQuota], CanaryConnector]
 
 
+def _close_connector(connector: object) -> None:
+    close = getattr(connector, "close", None)
+    if callable(close):
+        close()
+
+
 @dataclass(frozen=True)
 class DartCanarySampleOptions:
     lookback_days: int = 365
@@ -191,7 +197,7 @@ def _sample_row(
     }
 
 
-def run_dart_canary_sample(
+def _run_dart_canary_sample(
     api_key: DartCredentialInput,
     *,
     now: datetime | None = None,
@@ -334,6 +340,41 @@ def run_dart_canary_sample(
     return report
 
 
+def run_dart_canary_sample(
+    api_key: DartCredentialInput,
+    *,
+    now: datetime | None = None,
+    options: DartCanarySampleOptions | None = None,
+    request_budget: DartRequestQuota | None = None,
+    connector_factory: ConnectorFactory = _default_connector_factory,
+) -> dict[str, object]:
+    """Run the bounded dry-run sample and always close its connector."""
+
+    connector: CanaryConnector | None = None
+
+    def managed_factory(
+        selected_api_key: DartCredentialInput,
+        selected_budget: DartRequestQuota,
+    ) -> CanaryConnector:
+        nonlocal connector
+        if connector is not None:
+            raise DartCanarySampleError("DART canary created more than one connector")
+        connector = connector_factory(selected_api_key, selected_budget)
+        return connector
+
+    try:
+        return _run_dart_canary_sample(
+            api_key,
+            now=now,
+            options=options,
+            request_budget=request_budget,
+            connector_factory=managed_factory,
+        )
+    finally:
+        if connector is not None:
+            _close_connector(connector)
+
+
 def _write_report(path: Path | None, report: dict[str, object]) -> None:
     rendered = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     if path is not None:
@@ -406,6 +447,11 @@ def main(argv: list[str] | None = None) -> None:
         }
         _write_report(args.report, report)
         raise SystemExit(2) from exc
+    finally:
+        if budget is not None:
+            close = getattr(budget, "close", None)
+            if callable(close):
+                close()
     _write_report(args.report, report)
     if report["status"] != "succeeded":
         raise SystemExit(1)

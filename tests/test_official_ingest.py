@@ -1087,6 +1087,7 @@ def test_durable_official_ingest_keeps_a_ten_thousand_request_invocation_cap(
     class DurableQuota:
         limit = 40_000
         used = 0
+        close_calls = 0
 
         def consume(self, **_kwargs: object) -> object:
             return object()
@@ -1097,8 +1098,12 @@ def test_durable_official_ingest_keeps_a_ten_thousand_request_invocation_cap(
         def disable_901(self, _permit: object) -> None:
             return None
 
+        def close(self) -> None:
+            self.close_calls += 1
+
     durable = DurableQuota()
     captured: list[object] = []
+    connector_close_calls = 0
 
     class EmptyConnector:
         list_requests = 0
@@ -1123,6 +1128,10 @@ def test_durable_official_ingest_keeps_a_ten_thousand_request_invocation_cap(
 
         def fetch_company_master(self) -> list[dict[str, object]]:
             return []
+
+        def close(self) -> None:
+            nonlocal connector_close_calls
+            connector_close_calls += 1
 
     monkeypatch.setenv("OPENDART_API_KEYS", "a" * 40)
     monkeypatch.delenv("DART_API_KEY", raising=False)
@@ -1157,12 +1166,161 @@ def test_durable_official_ingest_keeps_a_ten_thousand_request_invocation_cap(
     assert isinstance(budget, official_ingest.DartInvocationQuota)
     assert budget.limit == 10_000
     assert budget.used == 0
+    assert connector_close_calls == 1
+    assert durable.close_calls == 1
+
+
+def test_ingest_cleanup_failures_are_independent_and_do_not_mask_source_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingCloseQuota:
+        limit = 40_000
+        used = 0
+
+        def __init__(self) -> None:
+            self.close_attempts = 0
+
+        def consume(self, **_kwargs: object) -> object:
+            return object()
+
+        def block_020(self, _permit: object) -> None:
+            return None
+
+        def disable_901(self, _permit: object) -> None:
+            return None
+
+        def close(self) -> None:
+            self.close_attempts += 1
+            raise RuntimeError("quota cleanup failed")
+
+    durable = FailingCloseQuota()
+    connector_close_attempts = 0
+
+    class FailingConnector:
+        list_requests = 1
+        pages_fetched = 0
+        rows_fetched = 0
+        requests_made = 1
+
+        def __init__(
+            self,
+            _credentials: object,
+            *,
+            request_budget: object,
+        ) -> None:
+            assert isinstance(request_budget, official_ingest.DartInvocationQuota)
+
+        def iter_disclosure_rows(
+            self,
+            *_args: object,
+            **_kwargs: object,
+        ):  # type: ignore[no-untyped-def]
+            raise ValueError("primary collection failure")
+            yield  # pragma: no cover
+
+        def close(self) -> None:
+            nonlocal connector_close_attempts
+            connector_close_attempts += 1
+            raise RuntimeError("connector cleanup failed")
+
+    monkeypatch.setenv("OPENDART_API_KEYS", "a" * 40)
+    monkeypatch.delenv("DART_API_KEY", raising=False)
+    monkeypatch.setattr(
+        official_ingest,
+        "durable_dart_quota_configured",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        official_ingest,
+        "durable_dart_quota_required",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        official_ingest,
+        "durable_dart_quota_client",
+        lambda **_kwargs: durable,
+    )
+    monkeypatch.setattr(official_ingest, "DartConnector", FailingConnector)
+
+    summary = official_ingest.run(
+        now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+        start=date(2026, 7, 26),
+        end=date(2026, 7, 26),
+        settings_overrides={"kind_enabled": False},
+        dry_run=True,
+    )
+
+    assert summary["official_failed"] == 3
+    assert summary["official_dart_errors"] == 3
+    assert connector_close_attempts == 2
+    assert durable.close_attempts == 2
+
+
+def test_ingest_constructor_error_is_not_masked_by_owned_quota_close_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingCloseQuota:
+        limit = 40_000
+        used = 0
+
+        def __init__(self) -> None:
+            self.close_attempts = 0
+
+        def consume(self, **_kwargs: object) -> object:
+            return object()
+
+        def block_020(self, _permit: object) -> None:
+            return None
+
+        def disable_901(self, _permit: object) -> None:
+            return None
+
+        def close(self) -> None:
+            self.close_attempts += 1
+            raise RuntimeError("quota cleanup failed")
+
+    durable = FailingCloseQuota()
+
+    class ConstructorFailure:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            raise ValueError("primary connector construction failure")
+
+    monkeypatch.setenv("OPENDART_API_KEYS", "a" * 40)
+    monkeypatch.delenv("DART_API_KEY", raising=False)
+    monkeypatch.setattr(
+        official_ingest,
+        "durable_dart_quota_configured",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        official_ingest,
+        "durable_dart_quota_required",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        official_ingest,
+        "durable_dart_quota_client",
+        lambda **_kwargs: durable,
+    )
+    monkeypatch.setattr(official_ingest, "DartConnector", ConstructorFailure)
+
+    with pytest.raises(ValueError, match="primary connector construction failure"):
+        official_ingest.run(
+            now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+            start=date(2026, 7, 26),
+            end=date(2026, 7, 26),
+            settings_overrides={"kind_enabled": False},
+            dry_run=True,
+        )
+
+    assert durable.close_attempts == 2
 
 
 def test_dart_quota_exhaustion_is_exposed_to_the_durable_backfill_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured_run: dict[str, object] = {}
+    connector_close_calls = 0
 
     class QuotaDartConnector:
         list_requests = 1
@@ -1176,6 +1334,10 @@ def test_dart_quota_exhaustion_is_exposed_to_the_durable_backfill_checkpoint(
         def iter_disclosure_rows(self, *_args: object, **_kwargs: object):  # type: ignore[no-untyped-def]
             raise official_ingest.DartQuotaExceededError("status 020")
             yield  # pragma: no cover
+
+        def close(self) -> None:
+            nonlocal connector_close_calls
+            connector_close_calls += 1
 
     def fake_sync(_payload: dict[str, object], *, run: dict[str, object]) -> dict[str, int]:
         captured_run.update(run)
@@ -1204,6 +1366,7 @@ def test_dart_quota_exhaustion_is_exposed_to_the_durable_backfill_checkpoint(
     outcomes = captured_run["source_outcomes"]
     assert isinstance(outcomes, dict)
     assert outcomes["dart"]["failure_kinds"]["quota"] == 1
+    assert connector_close_calls == 1
 
 
 def test_default_incremental_window_uses_kst_date_before_utc_midnight_rollover(

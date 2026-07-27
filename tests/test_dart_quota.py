@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -121,6 +122,126 @@ def test_consume_retries_lost_ack_with_same_attempt_id() -> None:
     assert permit.attempt_id == bodies[0]["attempt_id"]
     assert permit.duplicate is True
     assert client.used == 1
+
+
+def test_quota_client_reuses_one_pool_and_closes_it_exactly_once() -> None:
+    quota_server = _DurableAckServer()
+    created: list[httpx.Client] = []
+    close_calls = 0
+
+    class TrackingClient(httpx.Client):
+        def close(self) -> None:
+            nonlocal close_calls
+            close_calls += 1
+            super().close()
+
+    def factory(**kwargs: object) -> httpx.Client:
+        client = TrackingClient(**kwargs)  # type: ignore[arg-type]
+        created.append(client)
+        return client
+
+    quota = _client(quota_server, client_factory=factory)
+    quota.consume()
+    quota.consume()
+
+    assert len(created) == 1
+    assert len(quota_server.bodies) == 4
+    quota.close()
+    quota.close()
+    assert close_calls == 1
+    assert created[0].is_closed is True
+    with pytest.raises(DartQuotaLedgerError, match="closed.*not sent"):
+        quota.consume()
+    assert len(quota_server.bodies) == 4
+
+
+def test_quota_close_failure_is_fail_closed_and_can_be_retried() -> None:
+    close_attempts = 0
+    quota_server = _DurableAckServer()
+
+    class FlakyCloseClient(httpx.Client):
+        def close(self) -> None:
+            nonlocal close_attempts
+            close_attempts += 1
+            if close_attempts == 1:
+                raise RuntimeError("transient close failure")
+            super().close()
+
+    quota = _client(
+        quota_server,
+        client_factory=lambda **kwargs: FlakyCloseClient(  # type: ignore[arg-type]
+            **kwargs
+        ),
+    )
+    quota.consume()
+
+    with pytest.raises(RuntimeError, match="transient close failure"):
+        quota.close()
+    with pytest.raises(DartQuotaLedgerError, match="closed.*not sent"):
+        quota.consume()
+
+    quota.close()
+    quota.close()
+    assert close_attempts == 2
+    assert quota.used == 1
+    assert len(quota_server.bodies) == 2
+
+
+def test_quota_context_manager_closes_after_failure() -> None:
+    created: list[httpx.Client] = []
+
+    def factory(**kwargs: object) -> httpx.Client:
+        client = httpx.Client(**kwargs)  # type: ignore[arg-type]
+        created.append(client)
+        return client
+
+    with pytest.raises(DartQuotaLedgerError):
+        with _client(
+            lambda _request: httpx.Response(503, json={"error": "temporary"}),
+            client_factory=factory,
+            max_ack_retries=0,
+        ) as quota:
+            quota.consume()
+
+    assert len(created) == 1
+    assert created[0].is_closed is True
+
+
+def test_quota_pool_does_not_carry_server_cookies_into_exact_replay() -> None:
+    cookies: list[str] = []
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        cookies.append(request.headers.get("cookie", ""))
+        body: dict[str, object] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            headers={"Set-Cookie": "quota-session=must-not-replay; Path=/"},
+            json=_ack(body, used=1, duplicate=calls > 1),
+        )
+
+    with _client(handler) as quota:
+        quota.consume()
+
+    assert cookies == ["", ""]
+
+
+def test_concurrent_quota_calls_keep_ack_pairs_atomic_and_attempts_unique() -> None:
+    quota_server = _DurableAckServer()
+    with _client(quota_server) as quota:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            permits = list(executor.map(lambda _index: quota.consume(), range(8)))
+
+        assert quota.used == 8
+
+    attempt_ids = [permit.attempt_id for permit in permits]
+    assert len(set(attempt_ids)) == 8
+    observed = [str(body["attempt_id"]) for body in quota_server.bodies]
+    assert len(observed) == 16
+    assert all(observed[index] == observed[index + 1] for index in range(0, 16, 2))
+    assert {observed[index] for index in range(0, 16, 2)} == set(attempt_ids)
 
 
 def test_consume_requires_an_independent_duplicate_replay_before_dart_request() -> None:

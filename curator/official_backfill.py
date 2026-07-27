@@ -457,13 +457,14 @@ def _summary_totals(results: list[dict[str, object]]) -> dict[str, int]:
     return totals
 
 
-def run_backfill(
+def _run_backfill(
     project_root: Path,
     options: BackfillOptions,
     *,
     ingest_runner: IngestRunner = run_official_ingest,
     now_provider: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     checkpoint_store: CheckpointStore | None = None,
+    owned_resources: list[object],
 ) -> dict[str, object]:
     """Run pending chunks against the authoritative remote checkpoint.
 
@@ -560,7 +561,9 @@ def run_backfill(
                     )
                 ),
                 limit=options.request_budget,
+                close_delegate=True,
             )
+            owned_resources.append(dart_request_budget)
         else:
             dart_request_budget = DartRequestBudget(options.request_budget)
 
@@ -661,7 +664,6 @@ def run_backfill(
         save_checkpoint(options.checkpoint_path, checkpoint)
         if not succeeded and (quota_exhausted or not options.continue_on_error):
             break
-
     remaining = 0 if options.dry_run else len(
         [window for window in all_windows if window.key not in completed_windows]
     )
@@ -687,6 +689,33 @@ def run_backfill(
         "totals": _summary_totals(results),
         "window_results": results,
     }
+
+
+def run_backfill(
+    project_root: Path,
+    options: BackfillOptions,
+    *,
+    ingest_runner: IngestRunner = run_official_ingest,
+    now_provider: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    checkpoint_store: CheckpointStore | None = None,
+) -> dict[str, object]:
+    """Run a backfill and close only durable quota resources created here."""
+
+    owned_resources: list[object] = []
+    try:
+        return _run_backfill(
+            project_root,
+            options,
+            ingest_runner=ingest_runner,
+            now_provider=now_provider,
+            checkpoint_store=checkpoint_store,
+            owned_resources=owned_resources,
+        )
+    finally:
+        for resource in reversed(owned_resources):
+            close = getattr(resource, "close", None)
+            if callable(close):
+                close()
 
 
 def _parse_date(value: str) -> date:
