@@ -1373,35 +1373,52 @@ def test_tunnel_forwarder_resets_send_timeout_budget_after_progress() -> None:
     assert destination.actions == []
 
 
-def test_tunnel_forwarder_bounds_consecutive_receive_idle_timeouts() -> None:
+def test_tunnel_forwarder_allows_one_direction_to_remain_idle() -> None:
+    stop = threading.Event()
+    idle_period = (
+        mysql_backup_module.SSH_FORWARD_MAX_CONSECUTIVE_TIMEOUTS + 3
+    )
+
     class IdleSource:
         def __init__(self) -> None:
-            self.calls = 0
+            self.actions: list[bytes | Exception] = [
+                *(
+                    socket.timeout("synthetic idle source")
+                    for _index in range(idle_period)
+                ),
+                b"reply",
+                b"",
+            ]
 
         def recv(self, _size: int) -> bytes:
-            self.calls += 1
-            raise socket.timeout("synthetic idle source")
+            action = self.actions.pop(0)
+            if isinstance(action, Exception):
+                raise action
+            return action
 
     class Destination:
-        def send(self, _content: bytes | memoryview) -> int:
-            raise AssertionError("idle source must not produce bytes")
+        def __init__(self) -> None:
+            self.received = bytearray()
+
+        def send(self, content: bytes | memoryview) -> int:
+            chunk = bytes(content)
+            self.received.extend(chunk)
+            return len(chunk)
 
     source = IdleSource()
-    stop = threading.Event()
+    destination = Destination()
     mysql_backup_module._DirectTcpipHandler._pump(
         source,
-        Destination(),
+        destination,
         stop,
     )
 
-    assert (
-        source.calls
-        == mysql_backup_module.SSH_FORWARD_MAX_CONSECUTIVE_TIMEOUTS
-    )
+    assert source.actions == []
+    assert bytes(destination.received) == b"reply"
     assert stop.is_set()
 
 
-def test_tunnel_forwarder_resets_receive_idle_budget_after_progress() -> None:
+def test_tunnel_forwarder_continues_across_receive_idle_periods() -> None:
     timeout_budget = (
         mysql_backup_module.SSH_FORWARD_MAX_CONSECUTIVE_TIMEOUTS - 1
     )

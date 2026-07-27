@@ -583,24 +583,19 @@ class _DirectTcpipHandler(socketserver.BaseRequestHandler):
 
     @staticmethod
     def _pump(source: Any, destination: Any, stop: threading.Event) -> None:
-        consecutive_idle_timeouts = 0
         try:
             while not stop.is_set():
                 try:
                     chunk = source.recv(64 * 1024)
                 except (socket.timeout, TimeoutError):
-                    consecutive_idle_timeouts += 1
-                    if (
-                        consecutive_idle_timeouts
-                        >= SSH_FORWARD_MAX_CONSECUTIVE_TIMEOUTS
-                    ):
-                        raise TimeoutError(
-                            "SSH tunnel source made no read progress"
-                        )
+                    # A full-duplex connection can legitimately remain idle
+                    # in one direction while the peer streams a large result
+                    # in the other. The tunnel owner and SSH keepalive govern
+                    # connection lifetime; a receive timeout only gives this
+                    # pump a chance to observe the shared stop event.
                     continue
                 if not chunk:
                     break
-                consecutive_idle_timeouts = 0
                 _DirectTcpipHandler._send_all(destination, chunk, stop)
         except Exception:
             # Forwarding errors fail the DB connection itself; never echo
