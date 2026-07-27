@@ -111,15 +111,21 @@ def _completed_kst_day(now: datetime) -> date:
     return current.astimezone(KST).date() - timedelta(days=1)
 
 
-def _inclusive_windows(start: date, end: date, chunk_days: int) -> list[tuple[date, date]]:
+def _newest_first_inclusive_windows(
+    start: date,
+    end: date,
+    chunk_days: int,
+) -> list[tuple[date, date]]:
+    """Partition an inclusive range into newest-first, end-anchored windows."""
+
     if end < start:
         return []
     windows: list[tuple[date, date]] = []
-    cursor = start
-    while cursor <= end:
-        window_end = min(cursor + timedelta(days=chunk_days - 1), end)
-        windows.append((cursor, window_end))
-        cursor = window_end + timedelta(days=1)
+    cursor = end
+    while cursor >= start:
+        window_start = max(start, cursor - timedelta(days=chunk_days - 1))
+        windows.append((window_start, cursor))
+        cursor = window_start - timedelta(days=1)
     return windows
 
 
@@ -216,6 +222,30 @@ def _most_recent(
     return matching[:limit]
 
 
+def _has_required_samples(
+    disclosures: Iterable[OfficialDisclosure],
+    *,
+    limit_per_kind: int,
+) -> bool:
+    """Return true only after both exact newest-first sample sets are complete."""
+
+    normalized = _dedupe(disclosures)
+    corrections = _most_recent(
+        normalized,
+        predicate=lambda row: row.is_correction,
+        limit=limit_per_kind,
+    )
+    withdrawals = _most_recent(
+        normalized,
+        predicate=lambda row: row.is_cancelled,
+        limit=limit_per_kind,
+    )
+    return (
+        len(corrections) == limit_per_kind
+        and len(withdrawals) == limit_per_kind
+    )
+
+
 def _sample_row(
     disclosure: OfficialDisclosure,
     *,
@@ -249,13 +279,17 @@ def _run_dart_canary_sample(
     now: datetime | None = None,
     options: DartCanarySampleOptions | None = None,
     request_budget: DartRequestQuota | None = None,
+    invocation_request_budget: int | None = None,
     connector_factory: ConnectorFactory = _default_connector_factory,
 ) -> dict[str, object]:
     """Dry-run the last complete day and select real revision samples.
 
-    The history scan covers exactly ``lookback_days`` complete KST dates,
-    including the recent-day canary. It never writes to MySQL or any remote API.
-    All OpenDART calls share one bounded request budget.
+    The recent complete KST date is always scanned in full. Older base windows
+    are scanned newest-first, and the scan stops only at a completed base-window
+    boundary once the exact latest correction and withdrawal samples are known.
+    If either sample kind remains incomplete, all ``lookback_days`` are scanned.
+    It never writes to MySQL or any remote API. All OpenDART calls share one
+    bounded request budget.
     """
 
     if isinstance(api_key, str):
@@ -268,18 +302,29 @@ def _run_dart_canary_sample(
             raise ValueError("OpenDART credentials are required")
     selected_options = options or DartCanarySampleOptions()
     selected_options.validate()
-    supplied_budget = request_budget or DartRequestBudget(MAX_DART_REQUEST_BUDGET)
+    selected_invocation_limit = (
+        MAX_DART_REQUEST_BUDGET
+        if invocation_request_budget is None
+        else invocation_request_budget
+    )
+    if not 1 <= selected_invocation_limit <= MAX_DART_REQUEST_BUDGET:
+        raise ValueError("invocation_request_budget must be between 1 and 10000")
+    supplied_budget = request_budget or DartRequestBudget(selected_invocation_limit)
     if (
         isinstance(supplied_budget, DartRequestBudget)
         and supplied_budget.limit > MAX_DART_REQUEST_BUDGET
     ):
         raise ValueError("DART canary request budget cannot exceed 10000")
+    effective_invocation_limit = min(
+        selected_invocation_limit,
+        supplied_budget.limit,
+    )
     budget: DartRequestQuota = (
         DartInvocationQuota(
             supplied_budget,
-            limit=MAX_DART_REQUEST_BUDGET,
+            limit=effective_invocation_limit,
         )
-        if supplied_budget.limit > MAX_DART_REQUEST_BUDGET
+        if supplied_budget.limit > effective_invocation_limit
         else supplied_budget
     )
 
@@ -300,22 +345,42 @@ def _run_dart_canary_sample(
     )
     history_disclosures = list(recent_disclosures)
     history_fetched = recent_fetched
-    older_windows = _inclusive_windows(
+    older_windows = _newest_first_inclusive_windows(
         history_start,
         recent_day - timedelta(days=1),
         selected_options.scan_chunk_days,
     )
-    for window_start, window_end in older_windows:
-        fetched, rows = _collect_window(
-            connector,
-            window_start,
-            window_end,
-            page_count=selected_options.page_count,
-            max_pages=selected_options.max_pages,
-            metrics=window_metrics,
-        )
-        history_fetched += fetched
-        history_disclosures.extend(rows)
+    completed_base_windows = 0
+    scanned_from = recent_day
+    if not _has_required_samples(
+        history_disclosures,
+        limit_per_kind=selected_options.sample_limit_per_kind,
+    ):
+        for window_start, window_end in older_windows:
+            fetched, rows = _collect_window(
+                connector,
+                window_start,
+                window_end,
+                page_count=selected_options.page_count,
+                max_pages=selected_options.max_pages,
+                metrics=window_metrics,
+            )
+            # _collect_window returns only after the whole base window, including
+            # every recursively split leaf, has completed successfully. This
+            # keeps the early-stop boundary gap-free and reproducible.
+            completed_base_windows += 1
+            scanned_from = window_start
+            history_fetched += fetched
+            history_disclosures.extend(rows)
+            if _has_required_samples(
+                history_disclosures,
+                limit_per_kind=selected_options.sample_limit_per_kind,
+            ):
+                break
+
+    full_range_scanned = completed_base_windows == len(older_windows)
+    early_stopped = not full_range_scanned
+    calendar_days_scanned = (recent_day - scanned_from).days + 1
 
     recent_normalized = _dedupe(recent_disclosures)
     history_normalized = _dedupe(history_disclosures)
@@ -375,6 +440,14 @@ def _run_dart_canary_sample(
             "split_count": window_metrics.split_count,
             "fetched_count": history_fetched,
             "governance_document_count": len(history_normalized),
+            "eligible_days": selected_options.lookback_days,
+            "full_range_scanned": full_range_scanned,
+            "early_stopped": early_stopped,
+            "scanned_from": scanned_from.isoformat(),
+            "scanned_to": recent_day.isoformat(),
+            "calendar_days_scanned": calendar_days_scanned,
+            "planned_base_windows": len(older_windows),
+            "completed_base_windows": completed_base_windows,
         },
         "samples": {
             "limit_per_kind": selected_options.sample_limit_per_kind,
@@ -399,6 +472,7 @@ def run_dart_canary_sample(
     now: datetime | None = None,
     options: DartCanarySampleOptions | None = None,
     request_budget: DartRequestQuota | None = None,
+    invocation_request_budget: int | None = None,
     connector_factory: ConnectorFactory = _default_connector_factory,
 ) -> dict[str, object]:
     """Run the bounded dry-run sample and always close its connector."""
@@ -421,6 +495,7 @@ def run_dart_canary_sample(
             now=now,
             options=options,
             request_budget=request_budget,
+            invocation_request_budget=invocation_request_budget,
             connector_factory=managed_factory,
         )
     finally:
@@ -461,8 +536,12 @@ def main(argv: list[str] | None = None) -> None:
         if not 1 <= args.request_budget <= MAX_DART_REQUEST_BUDGET:
             raise ValueError("request_budget must be between 1 and 10000")
         budget = (
-            durable_dart_quota_client(
-                phase=os.environ.get("CURATOR_DART_QUOTA_PHASE", "dart-canary")
+            DartInvocationQuota(
+                durable_dart_quota_client(
+                    phase=os.environ.get("CURATOR_DART_QUOTA_PHASE", "dart-canary")
+                ),
+                limit=args.request_budget,
+                close_delegate=True,
             )
             if durable_dart_quota_required() or durable_dart_quota_configured()
             else DartRequestBudget(args.request_budget)
@@ -477,6 +556,7 @@ def main(argv: list[str] | None = None) -> None:
                 max_pages=args.max_pages,
             ),
             request_budget=budget,
+            invocation_request_budget=args.request_budget,
         )
     except (
         DartCanarySampleError,

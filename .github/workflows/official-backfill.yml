@@ -38,6 +38,16 @@ on:
         required: true
         type: boolean
         default: false
+      canary_lookback_days:
+        description: Complete KST days eligible for the DART dry-run sample (2-365)
+        required: true
+        type: number
+        default: 365
+      canary_request_budget:
+        description: Hard OpenDART request cap for the DART canary only (1-10000)
+        required: true
+        type: number
+        default: 10000
 
 permissions:
   contents: read
@@ -127,6 +137,8 @@ jobs:
           MAX_WINDOWS: ${{ inputs.max_windows }}
           SOURCE: ${{ inputs.source }}
           SYNC_COMPANY_MASTER: ${{ inputs.sync_company_master }}
+          CANARY_LOOKBACK_DAYS: ${{ inputs.canary_lookback_days }}
+          CANARY_REQUEST_BUDGET: ${{ inputs.canary_request_budget }}
         shell: bash
         run: |
           set -euo pipefail
@@ -139,6 +151,8 @@ jobs:
               start = date.fromisoformat(os.environ["FROM_DATE"])
               end = date.fromisoformat(os.environ["TO_DATE"])
               max_windows = int(os.environ["MAX_WINDOWS"])
+              canary_lookback_days = int(os.environ["CANARY_LOOKBACK_DAYS"])
+              canary_request_budget = int(os.environ["CANARY_REQUEST_BUDGET"])
           except (KeyError, TypeError, ValueError) as exc:
               raise SystemExit(f"invalid backfill input: {exc}") from exc
           if start < date(2021, 1, 1):
@@ -153,6 +167,10 @@ jobs:
               )
           if not 1 <= max_windows <= 31:
               raise SystemExit("max_windows must be between 1 and 31")
+          if not 2 <= canary_lookback_days <= 365:
+              raise SystemExit("canary_lookback_days must be between 2 and 365")
+          if not 1 <= canary_request_budget <= 10_000:
+              raise SystemExit("canary_request_budget must be between 1 and 10000")
           if os.environ["SYNC_COMPANY_MASTER"].lower() == "true" and os.environ["SOURCE"] == "kind":
               raise SystemExit("sync_company_master requires source=dart or source=both")
           PY
@@ -232,16 +250,34 @@ jobs:
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
           BSIDE_BACKEND_BINDING_ID: ${{ vars.BSIDE_BACKEND_BINDING_ID }}
           DART_CANARY_REPORT: ${{ runner.temp }}/dart-canary-sample-report.json
+          CANARY_LOOKBACK_DAYS: ${{ inputs.canary_lookback_days }}
+          CANARY_REQUEST_BUDGET: ${{ inputs.canary_request_budget }}
           CURATOR_REQUIRE_DURABLE_DART_QUOTA: "1"
           CURATOR_DART_QUOTA_PHASE: dart-canary
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$CANARY_LOOKBACK_DAYS" =~ ^[0-9]+$ ]] || {
+            echo "::error::canary_lookback_days must contain ASCII decimal digits."
+            exit 1
+          }
+          [[ "$CANARY_REQUEST_BUDGET" =~ ^[0-9]+$ ]] || {
+            echo "::error::canary_request_budget must contain ASCII decimal digits."
+            exit 1
+          }
+          if (( CANARY_LOOKBACK_DAYS < 2 || CANARY_LOOKBACK_DAYS > 365 )); then
+            echo "::error::canary_lookback_days must be between 2 and 365."
+            exit 1
+          fi
+          if (( CANARY_REQUEST_BUDGET < 1 || CANARY_REQUEST_BUDGET > 10000 )); then
+            echo "::error::canary_request_budget must be between 1 and 10000."
+            exit 1
+          fi
           python -m curator.dart_canary_sample \
-            --lookback-days 365 \
+            --lookback-days "$CANARY_LOOKBACK_DAYS" \
             --scan-chunk-days 7 \
             --sample-limit-per-kind 5 \
-            --request-budget 10000 \
+            --request-budget "$CANARY_REQUEST_BUDGET" \
             --report "$DART_CANARY_REPORT"
           python - <<'PY'
           import json
@@ -251,8 +287,15 @@ jobs:
           report = json.loads(Path(os.environ["DART_CANARY_REPORT"]).read_text(encoding="utf-8"))
           if report.get("status") != "succeeded" or report.get("dry_run") is not True:
               raise SystemExit("DART canary did not produce successful dry-run evidence")
+          requested_lookback = int(os.environ["CANARY_LOOKBACK_DAYS"])
+          requested_budget = int(os.environ["CANARY_REQUEST_BUDGET"])
+          history = report.get("history")
+          if not isinstance(history, dict) or history.get("eligible_days") != requested_lookback:
+              raise SystemExit("DART canary did not preserve the requested eligible-day range")
+          if report.get("request_budget") != requested_budget:
+              raise SystemExit("DART canary did not enforce the requested invocation budget")
           used = report.get("requests_used")
-          if type(used) is not int or used < 0 or used > 10_000:
+          if type(used) is not int or used < 0 or used > requested_budget:
               raise SystemExit("DART canary returned invalid request usage")
           with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
               output.write(f"requests_used={used}\n")
@@ -264,6 +307,7 @@ jobs:
           BACKFILL_MODE: ${{ inputs.mode }}
           BACKFILL_SOURCE: ${{ inputs.source }}
           CANARY_REQUESTS_USED: ${{ steps.dart_canary.outputs.requests_used }}
+          CANARY_REQUEST_BUDGET: ${{ inputs.canary_request_budget }}
         shell: bash
         run: |
           set -euo pipefail
@@ -274,12 +318,20 @@ jobs:
           mode = os.environ["BACKFILL_MODE"]
           source = os.environ["BACKFILL_SOURCE"]
           raw_used = os.environ.get("CANARY_REQUESTS_USED", "")
+          raw_canary_budget = os.environ["CANARY_REQUEST_BUDGET"]
           canary_required = mode == "dry-run" and source != "kind"
 
           if canary_required:
+              if not raw_canary_budget.isascii() or not raw_canary_budget.isdecimal():
+                  raise SystemExit("DART canary request budget is missing or invalid")
+              canary_budget = int(raw_canary_budget)
+              if not 1 <= canary_budget <= 10_000:
+                  raise SystemExit("DART canary request budget is outside the safety cap")
               if not raw_used.isascii() or not raw_used.isdecimal():
                   raise SystemExit("DART canary request usage output is missing or invalid")
               used = int(raw_used)
+              if used > canary_budget:
+                  raise SystemExit("DART canary request usage exceeds its requested hard cap")
           else:
               if raw_used:
                   raise SystemExit("unexpected DART canary request usage output")
