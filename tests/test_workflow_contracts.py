@@ -306,6 +306,8 @@ def test_backfill_shell_never_interpolates_dispatch_text_directly() -> None:
         "to_date",
         "max_windows",
         "sync_company_master",
+        "canary_lookback_days",
+        "canary_request_budget",
     ):
         for step in steps:
             assert f"${{{{ inputs.{input_name} }}}}" not in str(step.get("run", ""))
@@ -1321,9 +1323,13 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
         "to_date",
         "max_windows",
         "sync_company_master",
+        "canary_lookback_days",
+        "canary_request_budget",
     }
     assert dispatch["mode"]["options"] == ["dry-run", "apply"]
     assert dispatch["source"]["options"] == ["dart", "kind", "both"]
+    assert dispatch["canary_lookback_days"]["default"] == "365"
+    assert dispatch["canary_request_budget"]["default"] == "10000"
     input_validation = next(
         step
         for step in payload["jobs"]["backfill"]["steps"]
@@ -1333,6 +1339,8 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert "end > completed_kst_end_exclusive" in input_validation["run"]
     assert "tomorrow_kst" not in input_validation["run"]
     assert "timedelta(days=1)" not in input_validation["run"]
+    assert "canary_lookback_days must be between 2 and 365" in input_validation["run"]
+    assert "canary_request_budget must be between 1 and 10000" in input_validation["run"]
     assert payload["concurrency"] == PRODUCTION_OFFICIAL_WRITE_CONCURRENCY
     assert payload["permissions"] == {"contents": "read", "actions": "read"}
 
@@ -1413,8 +1421,16 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     )
     assert canary["if"] == "inputs.mode == 'dry-run' && inputs.source != 'kind'"
     assert "python -m curator.dart_canary_sample" in canary["run"]
-    assert "--lookback-days 365" in canary["run"]
-    assert "--request-budget 10000" in canary["run"]
+    assert '--lookback-days "$CANARY_LOOKBACK_DAYS"' in canary["run"]
+    assert '--request-budget "$CANARY_REQUEST_BUDGET"' in canary["run"]
+    assert canary["env"]["CANARY_LOOKBACK_DAYS"] == (
+        "${{ inputs.canary_lookback_days }}"
+    )
+    assert canary["env"]["CANARY_REQUEST_BUDGET"] == (
+        "${{ inputs.canary_request_budget }}"
+    )
+    assert 'report.get("request_budget") != requested_budget' in canary["run"]
+    assert 'history.get("eligible_days") != requested_lookback' in canary["run"]
     assert "type(used) is not int" in canary["run"]
     assert 'output.write(f"requests_used={used}\\n")' in canary["run"]
     assert canary["env"]["OPENDART_API_KEYS"] == "${{ secrets.OPENDART_API_KEYS }}"
@@ -1442,10 +1458,12 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
         "BACKFILL_MODE": "${{ inputs.mode }}",
         "BACKFILL_SOURCE": "${{ inputs.source }}",
         "CANARY_REQUESTS_USED": "${{ steps.dart_canary.outputs.requests_used }}",
+        "CANARY_REQUEST_BUDGET": "${{ inputs.canary_request_budget }}",
     }
     assert 'raw_used.isascii()' in dart_budget["run"]
     assert 'raw_used.isdecimal()' in dart_budget["run"]
     assert "remaining = max(0, 10_000 - used)" in dart_budget["run"]
+    assert "used > canary_budget" in dart_budget["run"]
     assert 'output.write(f"canary_requests_used={used}\\n")' in dart_budget["run"]
     assert 'output.write(f"remaining_request_budget={remaining}\\n")' in dart_budget["run"]
     assert "remaining == 0" in dart_budget["run"]

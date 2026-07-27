@@ -1796,7 +1796,8 @@ def exercise_event_identity_datetime_storage(
     )
     require(
         conflict.get("ok") is False
-        and error_code(conflict) == "followup_event_identity_conflict",
+        and error_code(conflict) == "followup_event_identity_conflict"
+        and conflict.get("validation_reason") == "followup_event_identity_conflict",
         repr(conflict),
     )
     require(

@@ -89,7 +89,13 @@ def post_remote_action(action: str, payload: dict[str, Any], *, timeout: float =
         data = response.json()
     except ValueError:
         data = {"ok": False, "error": "invalid_json_response"}
-    data.setdefault("status_code", response.status_code)
+    if not isinstance(data, dict):
+        data = {"ok": False, "error": "invalid_json_response"}
+    data["status_code"] = response.status_code
+    # Callers may retain the byte count as bounded operational evidence, but
+    # must never retain the response body itself.  Overwrite a same-named
+    # server value so an untrusted response cannot forge this measurement.
+    data["_response_body_bytes"] = len(response.content)
     if response.status_code >= 400:
         data["ok"] = False
     return data

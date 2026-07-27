@@ -47,6 +47,12 @@
     "created_at": { "type": "string", "format": "date-time" },
     "updated_at": { "type": "string", "format": "date-time" },
     "company_master_synced": { "type": "boolean" },
+    "dart_quota_blocked_until": {
+      "anyOf": [
+        { "type": "string", "format": "date" },
+        { "type": "null" }
+      ]
+    },
     "completed_windows": {
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/windowResult" }
@@ -78,8 +84,74 @@
         "code_revision": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
         "status": { "enum": ["succeeded", "failed"] },
         "finished_at": { "type": "string", "format": "date-time" },
-        "summary": { "type": "object", "additionalProperties": { "type": "integer" } },
+        "summary": {
+          "type": "object",
+          "properties": {
+            "official_remote_failure_details": {
+              "type": "array",
+              "maxItems": 10002,
+              "items": { "$ref": "#/$defs/remoteFailureTelemetry" }
+            }
+          },
+          "additionalProperties": { "type": "integer" }
+        },
         "error": { "type": "string" }
+      }
+    },
+    "remoteFailureTelemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "batch_number",
+        "http_status",
+        "error_code",
+        "response_body_bytes",
+        "elapsed_ms",
+        "exception_class"
+      ],
+      "properties": {
+        "scope": { "enum": ["data_batch", "company_batch", "final_run"] },
+        "batch_number": {
+          "anyOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "null" }
+          ]
+        },
+        "http_status": {
+          "anyOf": [
+            { "type": "integer", "minimum": 100, "maximum": 599 },
+            { "type": "null" }
+          ]
+        },
+        "error_code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "response_body_bytes": { "type": "integer", "minimum": 0 },
+        "elapsed_ms": { "type": "integer", "minimum": 0 },
+        "exception_class": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,127}$"
+            },
+            { "type": "null" }
+          ]
+        },
+        "sqlstate_class": {
+          "type": "string",
+          "pattern": "^[0-9A-Z]{5}$"
+        },
+        "driver_code": {
+          "type": "integer",
+          "minimum": -2147483648,
+          "maximum": 2147483647
+        },
+        "validation_reason": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        }
       }
     }
   }

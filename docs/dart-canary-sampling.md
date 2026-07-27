@@ -3,7 +3,9 @@
 `official-backfill` workflow를 `mode=dry-run`, `source=dart|both`로 실행하면
 입력한 백필 날짜 창보다 먼저 DART canary를 수행한다. 기존 workflow 입력 계약
 (`mode`, `source`, `from_date`, `to_date`, `max_windows`,
-`sync_company_master`)은 변경하지 않는다.
+`sync_company_master`)은 유지하며, dry-run canary에만 적용되는
+`canary_lookback_days`와 `canary_request_budget`을 추가로 제공한다. 기본값은
+각각 365일과 10,000회이므로 기존 dispatch의 동작은 바뀌지 않는다.
 
 ## 검증 범위
 
@@ -12,16 +14,20 @@ canary는 실행 시점의 KST 당일처럼 아직 완료되지 않은 날짜를
 
 - 직전 완료일 1일: 실제 DART 응답을 끝까지 pagination하고 production과 같은
   parser 및 payload builder로 정규화한다.
-- 직전 완료일을 포함한 최근 365개 완료일: 7일 이하의 작은 창으로 전 범위를
-  조회한 뒤 가장 최근의 정정 공시 5건과 철회·취소 공시 5건을 결정적으로
-  선정한다.
+- 직전 완료일을 포함한 최근 365개 완료일: 과거 구간을 7일 이하의 base
+  window로 나눠 최신순으로 조회한다. 각 base window와 truncation으로 분할된
+  모든 leaf가 완전히 끝난 뒤에만 표본 충족 여부를 확인한다. 가장 최근의 정정
+  공시 5건과 철회·취소 공시 5건이 모두 확보되면 그 경계에서 정확히 종료하고,
+  어느 한쪽이라도 부족하면 365일 전체를 조회한다.
 - 표본 제목, 원문 URL, 원문 언어, 정정·철회 상태를 production payload와
   대조한다. 제목은 번역하거나 정규화해 덮어쓰지 않으며, 저장 제목이 원문과
   한 글자라도 다르면 실패한다.
 
-정정 표본과 철회 표본이 각각 한 건 이상 존재해야 성공한다. 어느 한 종류가
-없거나, 응답 page/count가 바뀌거나, 빈 중간 page, parse 오류, truncation이
-발생하면 표본을 임의로 보완하지 않고 workflow를 실패시킨다.
+정정 표본과 철회 표본이 각각 `sample_limit_per_kind`건(기본 5건)을 모두
+채워야 성공한다. 한 건 이상이더라도 설정 수보다 부족하면 성공으로 간주하지
+않는다. 어느 한 종류가 부족하거나, 응답 page/count가 바뀌거나, 빈 중간 page,
+parse 오류, truncation이 발생하면 표본을 임의로 보완하지 않고 workflow를
+실패시킨다.
 
 ## 요청 예산과 상태 020
 
@@ -39,7 +45,9 @@ workflow를 실패시킨다. commit/readback을 증명하지 못한 503은 고�
 노출한다. 실패한 실제 DART HTTP 시도와 물리 재시도는 각각 새 attempt로 1회씩
 센다. 서로 다른 날짜 범위나 backfill fingerprint로 다시 실행해도 모든 키를
 합산한 KST 일 40,000회 제한을 우회할 수 없다. Canary 한 실행의 별도 안전
-예산은 계속 10,000회다.
+예산의 기본값은 10,000회다. 수동 재검증에서는 1~10,000 범위의 더 작은 값을
+지정할 수 있으며, MySQL 일일 원장의 남은 한도가 더 크더라도 이 값이 해당
+canary 실행의 hard cap으로 적용된다.
 
 OpenDART 상태 `020`은 일반 HTTP 재시도 오류로 취급하지 않는다. 원장에 해당
 credential만 다음 KST 자정까지 차단한 ACK와 exact duplicate replay를 남기고
@@ -59,7 +67,8 @@ workflow artifact `official-backfill-report-<run_id>`에는 다음 파일이 함
 90일간 저장된다.
 
 - `dart-canary-sample-report.json`: 날짜 경계, 실제 요청 수, 수집·정규화 건수,
-  자동 선정 표본과 제목 SHA-256, 누락 표본 종류
+  자동 선정 표본과 제목 SHA-256, 누락 표본 종류, 전체 범위/조기 종료 여부,
+  실제 조회 날짜와 계획·완료 base window 수
 - `official-backfill-report.json`: 입력 날짜 창의 기존 dry-run/apply 결과
 - `official-backfill.stderr.log`: 기존 backfill 오류 로그
 
@@ -82,3 +91,8 @@ python -m curator.dart_canary_sample `
 
 성공 종료 코드는 `0`, 필수 표본 미확보는 `1`, 설정·connector·quota·예산 오류는
 `2`다.
+
+GitHub Actions에서 빠른 수동 재검증을 수행할 때는
+`canary_lookback_days=30`, `canary_request_budget=500`으로 dispatch할 수 있다.
+이 값들은 canary에만 적용되며, 뒤이어 실행되는 기존 dry-run의 공유 10,000회
+한도는 canary가 실제 사용한 요청 수만큼 차감된다.

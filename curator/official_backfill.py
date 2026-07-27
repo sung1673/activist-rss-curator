@@ -132,7 +132,7 @@ class BackfillOptions:
             raise BackfillConfigurationError("sync_company_master requires the dart source")
 
 
-IngestRunner = Callable[..., dict[str, int]]
+IngestRunner = Callable[..., dict[str, object]]
 
 
 class CheckpointStore(Protocol):

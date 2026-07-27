@@ -165,6 +165,7 @@ def test_canary_scans_last_complete_day_and_exact_365_day_history() -> None:
     report = run_dart_canary_sample(
         "test-key",
         now=datetime(2026, 7, 16, 0, 0, tzinfo=timezone.utc),
+        options=DartCanarySampleOptions(sample_limit_per_kind=1),
         connector_factory=factory,
     )
 
@@ -183,9 +184,17 @@ def test_canary_scans_last_complete_day_and_exact_365_day_history() -> None:
     assert history["to_date"] == "2026-07-15"
     assert history["days"] == 365
     assert history["windows_scanned"] == 53
+    assert history["eligible_days"] == 365
+    assert history["full_range_scanned"] is True
+    assert history["early_stopped"] is False
+    assert history["scanned_from"] == "2025-07-16"
+    assert history["scanned_to"] == "2026-07-15"
+    assert history["calendar_days_scanned"] == 365
+    assert history["planned_base_windows"] == 52
+    assert history["completed_base_windows"] == 52
 
     # The completed day is fetched once. The 52 older windows cover every
-    # preceding date exactly once, including both history boundaries.
+    # preceding date exactly once, newest-first, including both boundaries.
     assert connector.calls[0][:2] == (date(2026, 7, 15), date(2026, 7, 15))
     older_days: list[date] = []
     for start, end, page_count, max_pages in connector.calls[1:]:
@@ -195,11 +204,151 @@ def test_canary_scans_last_complete_day_and_exact_365_day_history() -> None:
         while cursor <= end:
             older_days.append(cursor)
             cursor = cursor.fromordinal(cursor.toordinal() + 1)
-    assert older_days[0] == date(2025, 7, 16)
-    assert older_days[-1] == date(2026, 7, 14)
+    assert connector.calls[1][:2] == (date(2026, 7, 8), date(2026, 7, 14))
+    assert connector.calls[-1][:2] == (date(2025, 7, 16), date(2025, 7, 22))
+    assert min(older_days) == date(2025, 7, 16)
+    assert max(older_days) == date(2026, 7, 14)
     assert len(older_days) == len(set(older_days)) == 364
     assert report["requests_used"] == len(connector.calls) == 53
     assert connector.close_calls == 1
+
+
+def test_canary_scans_older_base_windows_newest_first_and_stops_exactly() -> None:
+    rows: list[dict[str, object]] = []
+    for index in range(5):
+        received = date(2026, 7, 14) - timedelta(days=index)
+        prefix = received.strftime("%Y%m%d")
+        rows.extend(
+            [
+                dart_row(
+                    receipt_no=f"{prefix}{index + 1:06d}",
+                    received_date=prefix,
+                    title="Correction Tender Offer",
+                ),
+                dart_row(
+                    receipt_no=f"{prefix}{index + 101:06d}",
+                    received_date=prefix,
+                    title="Withdrawal Tender Offer",
+                ),
+            ]
+        )
+    holder: dict[str, FakeConnector] = {}
+
+    def factory(_api_key: str, budget: DartRequestBudget) -> FakeConnector:
+        connector = FakeConnector(budget, rows)
+        holder["connector"] = connector
+        return connector
+
+    report = run_dart_canary_sample(
+        "test-key",
+        now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+        options=DartCanarySampleOptions(lookback_days=30, scan_chunk_days=7),
+        connector_factory=factory,
+    )
+
+    connector = holder["connector"]
+    assert report["status"] == "succeeded"
+    assert [call[:2] for call in connector.calls] == [
+        (date(2026, 7, 15), date(2026, 7, 15)),
+        (date(2026, 7, 8), date(2026, 7, 14)),
+    ]
+    history = report["history"]
+    assert isinstance(history, dict)
+    assert history["eligible_days"] == 30
+    assert history["full_range_scanned"] is False
+    assert history["early_stopped"] is True
+    assert history["scanned_from"] == "2026-07-08"
+    assert history["scanned_to"] == "2026-07-15"
+    assert history["calendar_days_scanned"] == 8
+    assert history["planned_base_windows"] == 5
+    assert history["completed_base_windows"] == 1
+    assert history["planned_windows"] == 6
+    assert history["windows_scanned"] == 2
+    assert report["requests_used"] == 2
+    samples = report["samples"]
+    assert isinstance(samples, dict)
+    assert samples["correction_count"] == 5
+    assert samples["withdrawal_count"] == 5
+
+
+def test_canary_early_stop_waits_for_every_adaptive_leaf_in_the_base_window() -> None:
+    newest_base = (date(2026, 7, 8), date(2026, 7, 14))
+    rows: list[dict[str, object]] = []
+    for index in range(5):
+        correction_day = date(2026, 7, 8) + timedelta(days=index % 4)
+        withdrawal_day = date(2026, 7, 12) + timedelta(days=index % 3)
+        rows.extend(
+            [
+                dart_row(
+                    receipt_no=f"{correction_day:%Y%m%d}{index + 1:06d}",
+                    received_date=correction_day.strftime("%Y%m%d"),
+                    title="Correction Tender Offer",
+                ),
+                dart_row(
+                    receipt_no=f"{withdrawal_day:%Y%m%d}{index + 101:06d}",
+                    received_date=withdrawal_day.strftime("%Y%m%d"),
+                    title="Withdrawal Tender Offer",
+                ),
+            ]
+        )
+
+    class SplitSampleConnector(FakeConnector):
+        def iter_disclosure_rows(
+            self,
+            start: date,
+            end: date,
+            *,
+            page_count: int = 100,
+            max_pages: int = 100,
+        ):  # type: ignore[no-untyped-def]
+            if (start, end) == newest_base:
+                self.calls.append((start, end, page_count, max_pages))
+                self.budget.consume()
+                self.requests_made += 1
+                raise DartResultTruncatedError(
+                    start=start,
+                    end=end,
+                    detected_at_page=1,
+                    total_pages=max_pages + 1,
+                    page_limit=max_pages,
+                    detail_code="",
+                )
+            yield from super().iter_disclosure_rows(
+                start,
+                end,
+                page_count=page_count,
+                max_pages=max_pages,
+            )
+
+    holder: dict[str, SplitSampleConnector] = {}
+
+    def factory(_api_key: str, budget: DartRequestBudget) -> SplitSampleConnector:
+        connector = SplitSampleConnector(budget, rows)
+        holder["connector"] = connector
+        return connector
+
+    report = run_dart_canary_sample(
+        "test-key",
+        now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+        options=DartCanarySampleOptions(lookback_days=15, scan_chunk_days=7),
+        connector_factory=factory,
+    )
+
+    assert [call[:2] for call in holder["connector"].calls] == [
+        (date(2026, 7, 15), date(2026, 7, 15)),
+        newest_base,
+        (date(2026, 7, 8), date(2026, 7, 11)),
+        (date(2026, 7, 12), date(2026, 7, 14)),
+    ]
+    history = report["history"]
+    assert isinstance(history, dict)
+    assert history["planned_base_windows"] == 2
+    assert history["completed_base_windows"] == 1
+    assert history["attempted_windows"] == 4
+    assert history["completed_leaf_windows"] == 3
+    assert history["split_count"] == 1
+    assert history["early_stopped"] is True
+    assert report["status"] == "succeeded"
 
 
 def test_canary_adaptively_splits_a_truncated_seven_day_window() -> None:
@@ -422,7 +571,11 @@ def test_canary_selects_real_correction_and_withdrawal_without_changing_titles()
     report = run_dart_canary_sample(
         "test-key",
         now=datetime(2026, 7, 16, tzinfo=timezone.utc),
-        options=DartCanarySampleOptions(lookback_days=10, scan_chunk_days=3),
+        options=DartCanarySampleOptions(
+            lookback_days=10,
+            scan_chunk_days=3,
+            sample_limit_per_kind=1,
+        ),
         connector_factory=lambda _key, budget: FakeConnector(budget, rows),
     )
 
@@ -439,6 +592,45 @@ def test_canary_selects_real_correction_and_withdrawal_without_changing_titles()
     assert by_title[withdrawal_title]["is_withdrawn"] is True
     assert by_title[withdrawal_title]["publication_status"] == "withdrawn"
     assert report["missing_sample_kinds"] == []
+    history = report["history"]
+    assert isinstance(history, dict)
+    assert history["full_range_scanned"] is False
+    assert history["early_stopped"] is True
+    assert history["calendar_days_scanned"] == 4
+    assert history["planned_base_windows"] == 3
+    assert history["completed_base_windows"] == 1
+
+
+def test_canary_fails_closed_when_both_sample_kinds_are_underfilled() -> None:
+    rows = [
+        dart_row(
+            receipt_no="20260714000001",
+            received_date="20260714",
+            title="Correction Tender Offer",
+        ),
+        dart_row(
+            receipt_no="20260713000002",
+            received_date="20260713",
+            title="Withdrawal Tender Offer",
+        ),
+    ]
+
+    report = run_dart_canary_sample(
+        "test-key",
+        now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+        options=DartCanarySampleOptions(
+            lookback_days=10,
+            sample_limit_per_kind=5,
+        ),
+        connector_factory=lambda _key, budget: FakeConnector(budget, rows),
+    )
+
+    assert report["status"] == "failed"
+    assert report["missing_sample_kinds"] == ["correction", "withdrawal"]
+    samples = report["samples"]
+    assert isinstance(samples, dict)
+    assert samples["correction_count"] == 1
+    assert samples["withdrawal_count"] == 1
 
 
 def test_canary_fails_closed_when_a_required_sample_kind_is_absent() -> None:
@@ -452,7 +644,10 @@ def test_canary_fails_closed_when_a_required_sample_kind_is_absent() -> None:
     report = run_dart_canary_sample(
         "test-key",
         now=datetime(2026, 7, 16, tzinfo=timezone.utc),
-        options=DartCanarySampleOptions(lookback_days=10),
+        options=DartCanarySampleOptions(
+            lookback_days=10,
+            sample_limit_per_kind=1,
+        ),
         connector_factory=lambda _key, budget: FakeConnector(budget, rows),
     )
 
@@ -544,6 +739,62 @@ def test_canary_layers_10k_invocation_cap_over_40k_durable_budget() -> None:
     assert observed_limits == [MAX_DART_REQUEST_BUDGET]
 
 
+def test_canary_honors_lower_invocation_cap_over_durable_budget() -> None:
+    class DurableBudget:
+        limit = DART_DAILY_LIMIT
+        used = 0
+
+        def consume(self, *, operation: str, credential_id: str) -> object:
+            self.used += 1
+            return operation, credential_id, self.used
+
+        def block_020(self, permit: object) -> None:
+            del permit
+
+        def disable_901(self, permit: object) -> None:
+            del permit
+
+    class ConsumingConnector:
+        requests_made = 0
+        pages_fetched = 0
+        rows_fetched = 0
+
+        def __init__(self, budget: object) -> None:
+            self.budget = budget
+
+        def iter_disclosure_rows(
+            self,
+            *_args: object,
+            **_kwargs: object,
+        ):  # type: ignore[no-untyped-def]
+            self.budget.consume(  # type: ignore[attr-defined]
+                operation="list",
+                credential_id="d" * 64,
+            )
+            self.requests_made += 1
+            return iter(())
+
+    durable = DurableBudget()
+    observed_limits: list[int] = []
+
+    def factory(_key: object, budget: object) -> ConsumingConnector:
+        observed_limits.append(budget.limit)  # type: ignore[attr-defined]
+        return ConsumingConnector(budget)
+
+    with pytest.raises(DartRequestBudgetError, match=r"2/2"):
+        run_dart_canary_sample(
+            "a" * 40,
+            now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+            options=DartCanarySampleOptions(lookback_days=10, scan_chunk_days=1),
+            request_budget=durable,
+            invocation_request_budget=2,
+            connector_factory=factory,  # type: ignore[arg-type]
+        )
+
+    assert observed_limits == [2]
+    assert durable.used == 2
+
+
 def test_canary_accepts_validated_pool_as_one_shared_connector_input() -> None:
     credentials = load_opendart_credentials(
         {"OPENDART_API_KEYS": f"{'a' * 40}\r\n{'b' * 40},{'c' * 40}"}
@@ -592,6 +843,91 @@ def test_cli_preserves_status_020_as_fail_closed_artifact(
     assert report["dry_run"] is True
     assert report["error_kind"] == "dart_quota_exhausted"
     assert report["requests_used"] == 0
+
+
+def test_cli_applies_lower_hard_cap_to_the_durable_quota(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    written: list[dict[str, object]] = []
+
+    class DurableBudget:
+        limit = DART_DAILY_LIMIT
+        used = 0
+
+        def __init__(self) -> None:
+            self.close_calls = 0
+
+        def consume(self, *, operation: str, credential_id: str) -> object:
+            self.used += 1
+            return operation, credential_id, self.used
+
+        def block_020(self, permit: object) -> None:
+            del permit
+
+        def disable_901(self, permit: object) -> None:
+            del permit
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    durable = DurableBudget()
+    monkeypatch.setenv("DART_API_KEY", "a" * 40)
+    monkeypatch.setattr(dart_canary_sample, "durable_dart_quota_required", lambda: True)
+    monkeypatch.setattr(
+        dart_canary_sample,
+        "durable_dart_quota_client",
+        lambda **_kwargs: durable,
+    )
+
+    def bounded_run(*_args: object, **kwargs: object) -> dict[str, object]:
+        budget = kwargs["request_budget"]
+        assert budget.limit == 500  # type: ignore[attr-defined]
+        assert kwargs["invocation_request_budget"] == 500
+        for _ in range(500):
+            budget.consume(  # type: ignore[attr-defined]
+                operation="list",
+                credential_id="d" * 64,
+            )
+        with pytest.raises(DartRequestBudgetError, match=r"500/500"):
+            budget.consume(  # type: ignore[attr-defined]
+                operation="list",
+                credential_id="d" * 64,
+            )
+        return {
+            "status": "succeeded",
+            "dry_run": True,
+            "request_budget": 500,
+            "requests_used": 500,
+        }
+
+    monkeypatch.setattr(dart_canary_sample, "run_dart_canary_sample", bounded_run)
+    monkeypatch.setattr(
+        dart_canary_sample,
+        "_write_report",
+        lambda _path, report: written.append(report),
+    )
+
+    dart_canary_sample.main(
+        [
+            "--lookback-days",
+            "30",
+            "--request-budget",
+            "500",
+            "--report",
+            "dart-canary.json",
+        ]
+    )
+
+    assert written == [
+        {
+            "status": "succeeded",
+            "dry_run": True,
+            "request_budget": 500,
+            "requests_used": 500,
+        }
+    ]
+    assert durable.used == 500
+    assert durable.close_calls == 1
 
 
 def test_cli_preserves_terminal_truncation_metadata_in_failure_artifact(

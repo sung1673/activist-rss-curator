@@ -39,7 +39,7 @@ def applied_backfill_revision(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CURATOR_CODE_REVISION", raising=False)
 
 
-def successful_summary(*, dry_run: bool = False) -> dict[str, int]:
+def successful_summary(*, dry_run: bool = False) -> dict[str, object]:
     return {
         "official_fetched": 9,
         "official_documents": 4,
@@ -525,7 +525,29 @@ def test_failed_remote_sync_is_checkpointed_but_not_completed(tmp_path: Path) ->
     checkpoint_path = tmp_path / "official-checkpoint.json"
     store = MemoryCheckpointStore()
     failed_summary = successful_summary()
-    failed_summary.update(official_failed=1, official_remote_synced=0, official_remote_failed=1)
+    failed_summary.update(
+        official_failed=1,
+        official_remote_synced=2,
+        official_remote_failed=1,
+        official_remote_raw_count=120,
+        official_remote_ack_count=80,
+        official_remote_failure_telemetry_count=1,
+        official_remote_failure_response_body_bytes=321,
+        official_remote_failure_elapsed_ms=9,
+        official_remote_failure_details=[
+            {
+                "scope": "data_batch",
+                "batch_number": 2,
+                "http_status": 503,
+                "error_code": "governance_snapshot_persistence_failed",
+                "response_body_bytes": 321,
+                "elapsed_ms": 9,
+                "exception_class": None,
+                "sqlstate_class": "HY000",
+                "driver_code": 1205,
+            }
+        ],
+    )
     options = BackfillOptions(
         start=date(2021, 1, 1),
         end_exclusive=date(2021, 1, 3),
@@ -542,9 +564,68 @@ def test_failed_remote_sync_is_checkpointed_but_not_completed(tmp_path: Path) ->
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
     assert checkpoint["completed_windows"] == {}
     assert list(checkpoint["failed_windows"]) == ["2021-01-01:2021-01-02"]
+    failed_window = checkpoint["failed_windows"]["2021-01-01:2021-01-02"]
+    assert (
+        failed_window["summary"]["official_remote_failure_details"]
+        == failed_summary["official_remote_failure_details"]
+    )
     remote_checkpoint = next(iter(store.records.values()))[1]
     assert remote_checkpoint["completed_windows"] == {}
     assert list(remote_checkpoint["failed_windows"]) == ["2021-01-01:2021-01-02"]
+    assert (
+        remote_checkpoint["failed_windows"]["2021-01-01:2021-01-02"]["summary"][
+            "official_remote_failure_details"
+        ]
+        == failed_summary["official_remote_failure_details"]
+    )
+
+
+def test_checkpoint_schema_keeps_quota_block_optional_and_nullable() -> None:
+    schema_path = (
+        Path(official_backfill.__file__).resolve().parents[1]
+        / "docs"
+        / "schemas"
+        / "official-backfill-checkpoint.schema.json"
+    )
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    quota_contract = schema["properties"]["dart_quota_blocked_until"]
+    assert quota_contract == {
+        "anyOf": [
+            {"type": "string", "format": "date"},
+            {"type": "null"},
+        ]
+    }
+    assert "dart_quota_blocked_until" not in schema["required"]
+
+    checkpoint = official_backfill.new_checkpoint(
+        {},
+        "f" * 64,
+        now_provider=fixed_now,
+    )
+    assert (
+        official_backfill.validate_checkpoint(
+            checkpoint,
+            label="nullable quota checkpoint",
+        )["dart_quota_blocked_until"]
+        is None
+    )
+    legacy_checkpoint = dict(checkpoint)
+    legacy_checkpoint.pop("dart_quota_blocked_until")
+    assert (
+        official_backfill.validate_checkpoint(
+            legacy_checkpoint,
+            label="legacy quota checkpoint",
+        ).get("dart_quota_blocked_until")
+        is None
+    )
+    checkpoint["dart_quota_blocked_until"] = "2026-07-29"
+    assert (
+        official_backfill.validate_checkpoint(
+            checkpoint,
+            label="blocked quota checkpoint",
+        )["dart_quota_blocked_until"]
+        == "2026-07-29"
+    )
 
 
 def test_kind_rights_failure_is_checkpointed_but_never_completed(tmp_path: Path) -> None:

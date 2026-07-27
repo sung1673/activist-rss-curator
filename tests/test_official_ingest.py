@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 
 import pytest
@@ -70,7 +71,267 @@ def _set_scheduled_claim_env(
     monkeypatch.setenv("CURATOR_GITHUB_RUN_ATTEMPT", "1")
 
 
-def test_remote_sync_persists_one_final_failed_run_after_all_data_chunks(
+def test_guarded_dart_remote_sync_uses_exact_forty_document_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_post(
+        action: str,
+        payload: dict[str, object],
+        *,
+        timeout: float,
+    ) -> dict[str, object]:
+        assert action == "upsert_governance_snapshot_dart_guarded"
+        assert timeout == 45.0
+        calls.append(payload)
+        return {
+            "ok": True,
+            "backend_binding_id": BACKEND_BINDING_ID,
+            "upserted": {
+                key: len(payload[key])
+                for key in ("companies", "documents", "events", "source_rights")
+            }
+            | {
+                "source_rights_rejected": 0,
+                "runs": int(bool(payload["run"])),
+            },
+        }
+
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", BACKEND_BINDING_ID)
+    monkeypatch.setattr(official_ingest, "remote_api_configured", lambda: True)
+    monkeypatch.setattr(official_ingest, "post_remote_action", fake_post)
+    companies = [
+        {"company_id": f"company:{company_number}"}
+        for company_number in range(3)
+    ]
+    documents = [
+        {
+            "document_id": f"dart:{index}",
+            "company_id": f"company:{index // 40}",
+            "source_right_id": "official:dart",
+        }
+        for index in range(120)
+    ]
+    events = [
+        {
+            "event_id": f"event:{index}",
+            "company_id": f"company:{index // 40}",
+            "document_ids": [f"dart:{index}"],
+        }
+        for index in range(120)
+    ]
+    payload: dict[str, object] = {
+        "companies": companies,
+        "documents": documents,
+        "events": events,
+        "source_rights": [],
+        "expected_source_right_revisions": {
+            "official:dart": {
+                "rights_revision": DART_RIGHTS_REVISION,
+                "contract_revision": DART_CONTRACT_REVISION,
+            }
+        },
+        "expected_deployment_code_revision": DART_DEPLOYMENT_REVISION,
+        "expected_release_state": "closed",
+    }
+
+    summary = official_ingest.sync_governance_payload(
+        payload,
+        run={
+            "run_id": "run:guarded-dart-batches",
+            "source_key": "dart",
+            "status": "succeeded",
+            "error_count": 0,
+        },
+    )
+
+    assert len(calls) == 4
+    data_calls = calls[:-1]
+    assert [len(call["documents"]) for call in data_calls] == [40, 40, 40]
+    assert [len(call["events"]) for call in data_calls] == [40, 40, 40]
+    assert [
+        [company["company_id"] for company in call["companies"]]
+        for call in data_calls
+    ] == [["company:0"], ["company:1"], ["company:2"]]
+    assert summary["official_remote_batches_attempted"] == 3
+    assert summary["official_remote_synced"] == 3
+    assert summary["official_remote_failed"] == 0
+    assert summary["official_remote_ack_count"] == 120
+    assert summary["official_remote_run_persisted"] == 1
+    assert summary["official_remote_failure_details"] == []
+
+
+@pytest.mark.parametrize(
+    ("documents", "event_document_ids", "expected_error"),
+    (
+        (
+            [{"document_id": "dart:0"}],
+            [],
+            "dart_guarded_event_document_cardinality_invalid",
+        ),
+        (
+            [{"document_id": "dart:0"}, {"document_id": "dart:1"}],
+            ["dart:0", "dart:1"],
+            "dart_guarded_event_document_cardinality_invalid",
+        ),
+        (
+            [{"document_id": "dart:0"}],
+            ["dart:missing"],
+            "dart_guarded_event_document_reference_missing",
+        ),
+    ),
+)
+def test_guarded_dart_event_transport_contract_fails_before_first_write(
+    monkeypatch: pytest.MonkeyPatch,
+    documents: list[dict[str, object]],
+    event_document_ids: list[str],
+    expected_error: str,
+) -> None:
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", BACKEND_BINDING_ID)
+    monkeypatch.setattr(official_ingest, "remote_api_configured", lambda: True)
+
+    def unexpected_post(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("invalid event allocation must fail before remote write")
+
+    monkeypatch.setattr(official_ingest, "post_remote_action", unexpected_post)
+
+    with pytest.raises(official_ingest.OfficialSourceRightError, match=expected_error):
+        official_ingest.sync_governance_payload(
+            {
+                "companies": [],
+                "documents": documents,
+                "events": [
+                    {
+                        "event_id": "event:private",
+                        "document_ids": event_document_ids,
+                    }
+                ],
+                "source_rights": [],
+                "expected_source_right_revisions": {
+                    "official:dart": {
+                        "rights_revision": DART_RIGHTS_REVISION,
+                        "contract_revision": DART_CONTRACT_REVISION,
+                    }
+                },
+                "expected_deployment_code_revision": DART_DEPLOYMENT_REVISION,
+                "expected_release_state": "closed",
+            },
+            run={"run_id": "run:event-contract", "status": "succeeded"},
+        )
+
+
+def test_guarded_dart_requires_one_event_for_every_document_before_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", BACKEND_BINDING_ID)
+    monkeypatch.setattr(official_ingest, "remote_api_configured", lambda: True)
+    monkeypatch.setattr(
+        official_ingest,
+        "post_remote_action",
+        lambda *_args, **_kwargs: pytest.fail(
+            "document/event bijection must fail before remote write"
+        ),
+    )
+
+    with pytest.raises(
+        official_ingest.OfficialSourceRightError,
+        match="dart_guarded_event_document_bijection_invalid",
+    ):
+        official_ingest.sync_governance_payload(
+            {
+                "companies": [],
+                "documents": [{"document_id": "dart:0"}],
+                "events": [],
+                "source_rights": [],
+                "expected_source_right_revisions": {
+                    "official:dart": {
+                        "rights_revision": DART_RIGHTS_REVISION,
+                        "contract_revision": DART_CONTRACT_REVISION,
+                    }
+                },
+                "expected_deployment_code_revision": DART_DEPLOYMENT_REVISION,
+                "expected_release_state": "closed",
+            },
+            run={"run_id": "run:event-bijection", "status": "succeeded"},
+        )
+
+
+@pytest.mark.parametrize(
+    ("error_code", "status_code"),
+    (
+        ("invalid_signature", 401),
+        ("global_dart_connector_not_writable", 409),
+    ),
+)
+def test_guarded_dart_terminal_failure_stops_batches_and_final_run(
+    monkeypatch: pytest.MonkeyPatch,
+    error_code: str,
+    status_code: int,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_post(
+        _action: str,
+        payload: dict[str, object],
+        *,
+        timeout: float,
+    ) -> dict[str, object]:
+        assert timeout == 45.0
+        calls.append(payload)
+        response: dict[str, object] = {
+            "ok": False,
+            "error": error_code,
+            "status_code": status_code,
+            "_response_body_bytes": 41,
+        }
+        if error_code in official_ingest._REMOTE_VALIDATION_REASON_ALLOWLIST:
+            response["validation_reason"] = error_code
+        return response
+
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", BACKEND_BINDING_ID)
+    monkeypatch.setattr(official_ingest, "remote_api_configured", lambda: True)
+    monkeypatch.setattr(official_ingest, "post_remote_action", fake_post)
+    summary = official_ingest.sync_governance_payload(
+        {
+            "companies": [],
+            "documents": [
+                {"document_id": f"dart:{index}"}
+                for index in range(120)
+            ],
+            "events": [
+                {
+                    "event_id": f"event:{index}",
+                    "document_ids": [f"dart:{index}"],
+                }
+                for index in range(120)
+            ],
+            "source_rights": [],
+            "expected_source_right_revisions": {
+                "official:dart": {
+                    "rights_revision": DART_RIGHTS_REVISION,
+                    "contract_revision": DART_CONTRACT_REVISION,
+                }
+            },
+            "expected_deployment_code_revision": DART_DEPLOYMENT_REVISION,
+            "expected_release_state": "closed",
+        },
+        run={"run_id": "run:terminal-auth", "status": "succeeded"},
+    )
+
+    assert len(calls) == 1
+    assert summary["official_remote_batches_attempted"] == 1
+    assert summary["official_remote_failed"] == 1
+    assert summary["official_remote_run_persisted"] == 0
+    assert summary["official_remote_failure_details"][0]["error_code"] == error_code
+    detail = summary["official_remote_failure_details"][0]
+    if error_code in official_ingest._REMOTE_VALIDATION_REASON_ALLOWLIST:
+        assert detail["validation_reason"] == error_code
+    else:
+        assert "validation_reason" not in detail
+
+
+def test_remote_sync_persists_one_final_failed_run_after_middle_dart_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, object]] = []
@@ -81,7 +342,16 @@ def test_remote_sync_persists_one_final_failed_run_after_all_data_chunks(
         assert payload["expected_backend_binding_id"] == BACKEND_BINDING_ID
         calls.append(payload)
         if len(calls) == 2:
-            return {"ok": False}
+            return {
+                "ok": False,
+                "error": "governance_snapshot_persistence_failed",
+                "status_code": 503,
+                "_response_body_bytes": 321,
+                "sqlstate_class": "HY000",
+                "driver_code": 1205,
+                "private_message": "must-not-survive",
+                "record_id": "dart:secret-record",
+            }
         return {
             "ok": True,
             "backend_binding_id": BACKEND_BINDING_ID,
@@ -100,8 +370,14 @@ def test_remote_sync_persists_one_final_failed_run_after_all_data_chunks(
     monkeypatch.setattr(official_ingest, "post_remote_action", fake_post)
     payload: dict[str, object] = {
         "companies": [],
-        "documents": [{"document_id": f"dart:{index}"} for index in range(3601)],
-        "events": [],
+        "documents": [{"document_id": f"dart:{index}"} for index in range(120)],
+        "events": [
+            {
+                "event_id": f"event:{index}",
+                "document_ids": [f"dart:{index}"],
+            }
+            for index in range(120)
+        ],
         "source_rights": [],
         "expected_source_right_revisions": {
             "official:dart": {
@@ -142,20 +418,227 @@ def test_remote_sync_persists_one_final_failed_run_after_all_data_chunks(
     assert final_run["remote_data_batches_attempted"] == 3
     assert final_run["remote_data_batches_succeeded"] == 2
     assert final_run["remote_data_batches_failed"] == 1
-    assert final_run["raw_count"] == 3601
-    assert final_run["ack_count"] == 1801
-    assert final_run["source_ack_counts"] == {"unknown": 1801}
+    assert final_run["raw_count"] == 120
+    assert final_run["ack_count"] == 80
+    assert final_run["source_ack_counts"] == {"unknown": 80}
     assert final_run["source_outcomes"] == run["source_outcomes"]
-    assert summary == {
-        "official_remote_synced": 2,
-        "official_remote_failed": 1,
-        "official_remote_skipped": 0,
-        "official_remote_batches_attempted": 3,
-        "official_remote_run_persisted": 1,
-        "official_remote_ack_mismatches": 0,
-        "official_remote_raw_count": 3601,
-        "official_remote_ack_count": 1801,
+    assert summary["official_remote_synced"] == 2
+    assert summary["official_remote_failed"] == 1
+    assert summary["official_remote_skipped"] == 0
+    assert summary["official_remote_batches_attempted"] == 3
+    assert summary["official_remote_run_persisted"] == 1
+    assert summary["official_remote_ack_mismatches"] == 0
+    assert summary["official_remote_raw_count"] == 120
+    assert summary["official_remote_ack_count"] == 80
+    details = summary["official_remote_failure_details"]
+    assert details == [
+        {
+            "scope": "data_batch",
+            "batch_number": 2,
+            "http_status": 503,
+            "error_code": "governance_snapshot_persistence_failed",
+            "response_body_bytes": 321,
+            "elapsed_ms": details[0]["elapsed_ms"],
+            "exception_class": None,
+            "sqlstate_class": "HY000",
+            "driver_code": 1205,
+        }
+    ]
+    assert isinstance(details[0]["elapsed_ms"], int)
+    assert details[0]["elapsed_ms"] >= 0
+    assert final_run["official_remote_failure_details"] == details
+    serialized = str(summary)
+    assert "must-not-survive" not in serialized
+    assert "secret-record" not in serialized
+    assert summary["official_remote_failure_telemetry_count"] == 1
+    assert summary["official_remote_failure_response_body_bytes"] == 321
+    assert (
+        summary["official_remote_failure_elapsed_ms"]
+        == details[0]["elapsed_ms"]
+    )
+
+
+@pytest.mark.parametrize(
+    "unsafe_error",
+    (
+        "x" * 1000,
+        "저장 실패: 비밀",
+        "token_" + ("deadbeef" * 8),
+    ),
+)
+def test_remote_failure_telemetry_rejects_oversized_unicode_and_secret_errors(
+    unsafe_error: str,
+) -> None:
+    detail = official_ingest._remote_failure_telemetry(
+        {
+            "ok": False,
+            "error": unsafe_error,
+            "status_code": 500,
+            "_response_body_bytes": 91,
+            "sqlstate_class": "23한글",
+            "driver_code": "9" * 100,
+            "validation_reason": "stored_event_identity_integrity_error",
+            "response_body": "record:dart:secret https://api.invalid/?signature=secret",
+        },
+        {
+            "http_status": 500,
+            "response_body_bytes": 91,
+            "elapsed_ms": 7,
+            "exception_class": None,
+        },
+        scope="data_batch",
+        batch_number=2,
+        ack_mismatch=False,
+    )
+
+    assert detail == {
+        "scope": "data_batch",
+        "batch_number": 2,
+        "http_status": 500,
+        "error_code": "remote_error_unclassified",
+        "response_body_bytes": 91,
+        "elapsed_ms": 7,
+        "exception_class": None,
     }
+    serialized = json.dumps(detail, ensure_ascii=False)
+    assert unsafe_error not in serialized
+    assert "secret" not in serialized
+    assert "dart:" not in serialized
+    assert "signature" not in serialized
+
+
+def test_remote_failure_telemetry_retains_only_allowlisted_server_classification() -> None:
+    detail = official_ingest._remote_failure_telemetry(
+        {
+            "ok": False,
+            "error": "document_lineage_conflict",
+            "status_code": 409,
+            "_response_body_bytes": 144,
+            "sqlstate_class": "23000",
+            "driver_code": "1062",
+            "validation_reason": "document_lineage_conflict",
+            "message": "document_lineage_conflict:dart:secret-record",
+        },
+        {
+            "http_status": 409,
+            "response_body_bytes": 144,
+            "elapsed_ms": 3,
+            "exception_class": None,
+        },
+        scope="final_run",
+        batch_number=None,
+        ack_mismatch=False,
+    )
+
+    assert detail == {
+        "scope": "final_run",
+        "batch_number": None,
+        "http_status": 409,
+        "error_code": "document_lineage_conflict",
+        "response_body_bytes": 144,
+        "elapsed_ms": 3,
+        "exception_class": None,
+        "sqlstate_class": "23000",
+        "driver_code": 1062,
+        "validation_reason": "document_lineage_conflict",
+    }
+    assert "secret-record" not in json.dumps(detail)
+
+
+def test_remote_transport_failure_retains_exception_class_without_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PrivateTransportFailure(RuntimeError):
+        pass
+
+    def failed_post(
+        _action: str,
+        _payload: dict[str, object],
+        *,
+        timeout: float,
+    ) -> dict[str, object]:
+        assert timeout == 45.0
+        raise PrivateTransportFailure(
+            "https://api.invalid/?token=secret signature=private record_id=dart:123"
+        )
+
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", BACKEND_BINDING_ID)
+    monkeypatch.setattr(official_ingest, "remote_api_configured", lambda: True)
+    monkeypatch.setattr(official_ingest, "post_remote_action", failed_post)
+
+    summary = official_ingest.sync_governance_payload(
+        {
+            "companies": [],
+            "documents": [{"document_id": "dart:123"}],
+            "events": [],
+            "source_rights": [],
+        },
+        run={"run_id": "run:private-transport", "status": "succeeded"},
+    )
+
+    details = summary["official_remote_failure_details"]
+    assert len(details) == 2
+    assert [detail["scope"] for detail in details] == [
+        "data_batch",
+        "final_run",
+    ]
+    assert all(
+        detail["error_code"] == "remote_transport_exception"
+        and detail["exception_class"] == "PrivateTransportFailure"
+        for detail in details
+    )
+    serialized = json.dumps(summary)
+    for private_value in ("api.invalid", "token", "secret", "signature", "dart:123"):
+        assert private_value not in serialized
+
+
+def test_generic_remote_sync_keeps_existing_document_batch_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_post(
+        action: str,
+        payload: dict[str, object],
+        *,
+        timeout: float,
+    ) -> dict[str, object]:
+        assert action == "upsert_governance_snapshot"
+        assert timeout == 45.0
+        calls.append(payload)
+        return {
+            "ok": True,
+            "backend_binding_id": BACKEND_BINDING_ID,
+            "upserted": {
+                key: len(payload[key])
+                for key in ("companies", "documents", "events", "source_rights")
+            }
+            | {
+                "source_rights_rejected": 0,
+                "runs": int(bool(payload["run"])),
+            },
+        }
+
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", BACKEND_BINDING_ID)
+    monkeypatch.setattr(official_ingest, "remote_api_configured", lambda: True)
+    monkeypatch.setattr(official_ingest, "post_remote_action", fake_post)
+
+    summary = official_ingest.sync_governance_payload(
+        {
+            "companies": [],
+            "documents": [
+                {"document_id": f"kind:{index}"}
+                for index in range(1801)
+            ],
+            "events": [],
+            "source_rights": [],
+        },
+        run={"run_id": "run:generic-batches", "status": "succeeded"},
+    )
+
+    assert [len(call["documents"]) for call in calls[:-1]] == [1800, 1]
+    assert summary["official_remote_batches_attempted"] == 2
+    assert summary["official_remote_ack_count"] == 1801
 
 
 def test_remote_sync_company_master_only_chunk_keeps_exact_dart_guards(

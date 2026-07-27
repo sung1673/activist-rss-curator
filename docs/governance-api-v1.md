@@ -152,6 +152,14 @@ KIND 지연은 client가 만든 날짜·자정 추정값을 받지 않는다. �
 
 회사 ID는 8자리 DART `corp_code`다. 문서의 `(source_right_id, external_id, version_no)`와 각 엔터티 ID는 멱등 키다. 정정 공시는 새 `version_no` 및 `correction_of_document_id`로 연결한다.
 
+snapshot 트랜잭션이 실패하면 예외 메시지, SQL, URL, 토큰, 서명값, 레코드 ID를
+응답이나 수집 증빙에 복사하지 않는다. `PDOException`은 HTTP 503
+`governance_snapshot_persistence_failed`와 검증된 5자리 `sqlstate_class`, 32비트
+범위의 숫자 `driver_code`만 반환한다. 알려진 요청 검증 실패는 HTTP 409로
+응답하며, `error`와 `validation_reason`에는 첫 `:` 앞의 allowlist 코드만
+반환한다. 콜론 뒤의 문서·사건·실행 ID는 항상 제거한다. allowlist에 없는
+`RuntimeException`과 그 밖의 예외는 HTTP 500 `internal_error`로 축약한다.
+
 ## DeliveryOutbox 보존 계약
 
 현재 배포 모드는 `web_only`다. `enqueue_delivery_outbox`와 `claim_delivery_outbox`는 인증 성공 여부와 무관하게 신규 outbound를 만들거나 lease하기 전에 HTTP 410 `outbound_delivery_disabled`를 반환한다. 아래 payload와 consumer 순서는 과거 row의 스키마·감사 및 호환 문서로만 유지하며 신규 발송 절차로 사용하지 않는다.

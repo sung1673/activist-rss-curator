@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import yaml
@@ -1754,8 +1755,87 @@ def test_official_followup_adopts_a_canonical_event_only_after_exact_raw_identit
     ):
         assert f"'{code}'" in classifier
     assert "stored_event_identity_integrity_error" not in classifier
-    assert "respond(409,array('ok'=>false,'error'=>$identityConflictCode))" in ingest
+    assert "$failure = v1_governance_snapshot_failure_response($failureError)" in ingest
+    assert "respond($failure['status'],$failure['payload'])" in ingest
     assert "'error'=>$e->getMessage()" not in ingest
+    transaction_catch = ingest[
+        ingest.index("} catch (Throwable $e) {") : ingest.index(
+            "if ($terminalCompletionFailure)"
+        )
+    ]
+    assert "throw $e" not in transaction_catch
+    assert "getMessage()" not in transaction_catch
+    assert "catch (Throwable $rollbackError)" in transaction_catch
+    assert "$failureError = $rollbackError" in transaction_catch
+
+
+def test_governance_snapshot_failures_expose_only_allowlisted_safe_diagnostics():
+    classifier = V1[
+        V1.index("function v1_governance_snapshot_validation_reason")
+        : V1.index("function v1_global_dart_bridge_enabled")
+    ]
+    assert "$separator = strpos($message,':')" in classifier
+    assert "$separator === false ? $message : substr($message,0,$separator)" in classifier
+    assert "preg_match('/^[a-z][a-z0-9_]{0,63}$/D',$reason)" in classifier
+    assert "in_array($reason,$allowed,true)" in classifier
+    assert "stored_event_identity_integrity_error" not in classifier
+    assert "preg_match('/^[A-Z0-9]{5}$/D',$sqlState)" in classifier
+    assert "'sqlstate_class'=>$sqlState" in classifier
+    assert "'driver_code'=>$driverCode" in classifier
+    assert "'error'=>'governance_snapshot_persistence_failed'" in classifier
+    assert "'validation_reason'=>$validationReason" in classifier
+    assert "array('ok'=>false,'error'=>'internal_error')" in classifier
+    for unsafe in (
+        "errorInfo[2]",
+        "getTrace",
+        "getFile",
+        "getLine",
+        "error_log(",
+    ):
+        assert unsafe not in classifier
+    expected_validation_reasons = {
+        "dart_document_title_provenance_conflict",
+        "dart_event_metadata_invalid",
+        "dart_title_provenance_conflict",
+        "document_lineage_conflict",
+        "event_identity_field_conflict",
+        "event_identity_scope_conflict",
+        "event_observation_document_missing",
+        "event_observation_hash_invalid",
+        "followup_event_identity_conflict",
+        "global_dart_connector_not_writable",
+        "global_release_state_guard_unavailable",
+        "incomplete_event_identity_has_comparison_key",
+        "invalid_collection_run_code_revision",
+        "invalid_collection_run_counts",
+        "invalid_complete_event_identity",
+        "invalid_scheduled_slot_claim_provenance",
+        "non_scheduled_run_has_slot_claim",
+        "release_state_unavailable",
+        "scheduled_slot_claim_completion_conflict",
+        "scheduled_slot_claim_conflict",
+    }
+    php_allowlist = classifier[
+        classifier.index("$allowed = array(") : classifier.index(
+            ");", classifier.index("$allowed = array(")
+        )
+    ]
+    assert set(re.findall(r"'([a-z][a-z0-9_]{0,63})'", php_allowlist)) == (
+        expected_validation_reasons
+    )
+    python_ingest = (ROOT / "curator" / "official_ingest.py").read_text(
+        encoding="utf-8"
+    )
+    python_allowlist = python_ingest[
+        python_ingest.index("_REMOTE_VALIDATION_REASON_ALLOWLIST = {") :
+        python_ingest.index(
+            "}",
+            python_ingest.index("_REMOTE_VALIDATION_REASON_ALLOWLIST = {"),
+        )
+    ]
+    assert set(re.findall(r'"([a-z][a-z0-9_]{0,63})"', python_allowlist)) == (
+        expected_validation_reasons
+    )
 
 
 def test_editorial_enums_metrics_and_parent_companies_are_revalidated_server_side():
