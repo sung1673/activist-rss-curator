@@ -852,25 +852,33 @@ def _backfill_summary_succeeded(summary: Mapping[str, object]) -> bool:
         "official_remote_failed",
         "official_remote_skipped",
         "official_remote_synced",
+        "official_dart_requests",
+        "official_dart_fetched",
         "official_dart_accepted",
         "official_dart_errors",
+        "official_dart_quota_exhausted",
     )
     try:
         values = {field: _int_field(summary, field) for field in required}
     except DartReviewSampleError:
         return False
     return bool(
-        values["official_failed"] == 0
+        all(value >= 0 for value in values.values())
+        and values["official_failed"] == 0
         and values["official_skipped"] == 0
         and values["official_remote_ack_mismatches"] == 0
         and values["official_remote_run_persisted"] == 1
         and values["official_remote_raw_count"]
         == values["official_remote_ack_count"]
+        == values["official_dart_accepted"]
         and values["official_remote_failed"] == 0
         and values["official_remote_skipped"] == 0
         and values["official_remote_synced"] >= 1
-        and values["official_dart_accepted"] >= 0
+        and values["official_dart_requests"] >= 1
+        and values["official_dart_fetched"]
+        >= values["official_dart_accepted"]
         and values["official_dart_errors"] == 0
+        and values["official_dart_quota_exhausted"] == 0
     )
 
 

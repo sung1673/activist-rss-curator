@@ -136,3 +136,13 @@ ACK를 증명하지 못하므로 사용하지 않는다. 각 완료 window의
 32자리와 정확히 같아야 한다. checkpoint PUT 경로는 이 두 의미 계약을 독립
 재계산하지 않으므로 운영 release exporter와 DART 사람 검수 corpus validator가
 동일한 규칙을 다시 검증한다.
+
+완료 window는 `official_remote_raw_count = official_remote_ack_count =
+official_dart_accepted`여야 하며 부분 ACK를 filtered-out으로 해석하지 않는다.
+출시 증빙의 `raw_count`는 `official_dart_fetched`,
+`filtered_out_count`는 fetched와 accepted의 차이로 계산한다. 또한 remote sync
+1건 이상, 실제 DART request 1건 이상, DART error·quota exhausted 0건을
+요구한다. 공시가 없던 날은 fetched·accepted·remote ACK가 모두 0이어도 실제
+request가 1건 이상이면 정상 완료일로 인정한다. 모든 완료 window key와
+시작·종료일은 canonical job의 `[range_start, range_end_exclusive)` 안에 있어야
+한다.

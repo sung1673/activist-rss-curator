@@ -1115,9 +1115,11 @@ def seed_alpha_automated_evidence(
     fingerprint = backfill_job_fingerprint(job)
     completed_windows: dict[str, object] = {}
     cursor = start
-    for _ in range(30):
+    for index in range(30):
         next_cursor = cursor + timedelta(days=1)
         key = f"{cursor.isoformat()}:{next_cursor.isoformat()}"
+        accepted = 0 if index == 0 else 1
+        fetched = 0 if index == 0 else 3
         idempotency_digest = hashlib.sha256(
             f"{fingerprint}|{key}".encode("utf-8")
         ).hexdigest()[:32]
@@ -1133,11 +1135,16 @@ def seed_alpha_automated_evidence(
                 "official_skipped": 0,
                 "official_remote_ack_mismatches": 0,
                 "official_remote_run_persisted": 1,
-                "official_remote_raw_count": 3,
-                "official_remote_ack_count": 1,
+                "official_remote_raw_count": accepted,
+                "official_remote_ack_count": accepted,
                 "official_remote_failed": 0,
                 "official_remote_skipped": 0,
                 "official_remote_synced": 1,
+                "official_dart_requests": 9,
+                "official_dart_fetched": fetched,
+                "official_dart_accepted": accepted,
+                "official_dart_errors": 0,
+                "official_dart_quota_exhausted": 0,
             },
         }
         cursor = next_cursor
@@ -4551,7 +4558,15 @@ def run(base_url: str, mysql_container_id: str) -> None:
             == window.get("accepted_count")
             for window in evidence_windows
         )
-        and all(window.get("filtered_out_count") == 2 for window in evidence_windows)
+        and sum(
+            window.get("filtered_out_count") == 0
+            for window in evidence_windows
+        )
+        == 1
+        and all(
+            window.get("filtered_out_count") in {0, 2}
+            for window in evidence_windows
+        )
         and preserved_counts.get("source_title_preserved_count") == 1,
         repr(automated_preserved),
     )
@@ -4636,6 +4651,77 @@ def run(base_url: str, mysql_container_id: str) -> None:
             "window idempotency fingerprint mismatch",
             wrong_window_key_checkpoint,
             wrong_window_key_checkpoint["job"]["fingerprint"],
+        )
+    )
+
+    partial_ack_checkpoint = json.loads(json.dumps(valid_dart_checkpoint))
+    partial_ack_summary = next(
+        iter(partial_ack_checkpoint["completed_windows"].values())
+    )["summary"]
+    partial_ack_summary["official_remote_raw_count"] = 2
+    invalid_dart_checkpoints.append(
+        (
+            "partial remote ACK",
+            partial_ack_checkpoint,
+            partial_ack_checkpoint["job"]["fingerprint"],
+        )
+    )
+
+    zero_request_checkpoint = json.loads(json.dumps(valid_dart_checkpoint))
+    zero_request_summary = next(
+        iter(zero_request_checkpoint["completed_windows"].values())
+    )["summary"]
+    zero_request_summary["official_dart_requests"] = 0
+    invalid_dart_checkpoints.append(
+        (
+            "zero DART requests",
+            zero_request_checkpoint,
+            zero_request_checkpoint["job"]["fingerprint"],
+        )
+    )
+
+    quota_checkpoint = json.loads(json.dumps(valid_dart_checkpoint))
+    quota_summary = next(
+        iter(quota_checkpoint["completed_windows"].values())
+    )["summary"]
+    quota_summary["official_dart_quota_exhausted"] = 1
+    invalid_dart_checkpoints.append(
+        (
+            "DART quota exhausted",
+            quota_checkpoint,
+            quota_checkpoint["job"]["fingerprint"],
+        )
+    )
+
+    outside_job_checkpoint = json.loads(json.dumps(valid_dart_checkpoint))
+    first_window_key = next(iter(outside_job_checkpoint["completed_windows"]))
+    outside_window = outside_job_checkpoint["completed_windows"].pop(
+        first_window_key
+    )
+    outside_start = (
+        datetime.fromisoformat(outside_window["window_start"]).date()
+        - timedelta(days=1)
+    )
+    outside_end = outside_start + timedelta(days=1)
+    outside_key = f"{outside_start.isoformat()}:{outside_end.isoformat()}"
+    outside_window["window_start"] = outside_start.isoformat()
+    outside_window["window_end_exclusive"] = outside_end.isoformat()
+    outside_digest = hashlib.sha256(
+        (
+            outside_job_checkpoint["job"]["fingerprint"]
+            + "|"
+            + outside_key
+        ).encode("utf-8")
+    ).hexdigest()[:32]
+    outside_window["idempotency_key"] = (
+        f"official-backfill-v1:{outside_digest}"
+    )
+    outside_job_checkpoint["completed_windows"][outside_key] = outside_window
+    invalid_dart_checkpoints.append(
+        (
+            "window outside job range",
+            outside_job_checkpoint,
+            outside_job_checkpoint["job"]["fingerprint"],
         )
     )
 

@@ -1663,6 +1663,13 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
     assert "$jobFingerprint . '|' . (string)$windowKey" in dart_windows
     assert "hash_equals(" in dart_windows
     assert "$expectedIdempotencyKey" in dart_windows
+    assert "$remoteRawCount !== $ackCount" in dart_windows
+    assert "$acceptedCount !== $remoteRawCount" in dart_windows
+    assert "$rawCount = $summary['official_dart_fetched']" in dart_windows
+    assert "$summary['official_remote_synced'] < 1" in dart_windows
+    assert "$summary['official_dart_requests'] < 1" in dart_windows
+    assert "$summary['official_dart_quota_exhausted'] !== 0" in dart_windows
+    assert "alpha_evidence_dart_window_outside_job" in dart_windows
     assert "v2_alpha_latest_contiguous_windows" in exporter
     assert "'filtered_out_count' =>" in exporter
     assert "'accepted_count' =>" in exporter
@@ -1680,6 +1687,8 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
     smoke = (ROOT / "tests" / "php73_global_v2_smoke.py").read_text(
         encoding="utf-8"
     )
+    assert "accepted = 0 if index == 0 else 1" in smoke
+    assert '"official_dart_requests": 9' in smoke
     for rejection_case in (
         "missing job revision",
         "wrong job revision",
@@ -1687,6 +1696,10 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
         "row fingerprint mismatch",
         "canonical fingerprint mismatch",
         "window idempotency fingerprint mismatch",
+        "partial remote ACK",
+        "zero DART requests",
+        "DART quota exhausted",
+        "window outside job range",
     ):
         assert rejection_case in smoke
 

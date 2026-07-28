@@ -502,8 +502,11 @@ def backfill_files(
                 "official_remote_failed": 0,
                 "official_remote_skipped": 0,
                 "official_remote_synced": 1,
+                "official_dart_requests": 9,
+                "official_dart_fetched": accepted,
                 "official_dart_accepted": accepted,
                 "official_dart_errors": 0,
+                "official_dart_quota_exhausted": 0,
             },
         }
         cursor = next_date
@@ -706,6 +709,105 @@ def test_backfill_evidence_rejects_prefix_only_window_idempotency(
     checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
 
     with pytest.raises(DartReviewSampleError, match="unacknowledged window"):
+        validate_backfill_evidence(
+            report_path=report_path,
+            checkpoint_path=checkpoint_path,
+            from_date=SAMPLE_FROM_DATE,
+            to_date=SAMPLE_TO_DATE,
+            population_count=120,
+            code_revision=CODE_REVISION,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("official_remote_raw_count", 5),
+        ("official_remote_synced", 0),
+        ("official_dart_requests", 0),
+        ("official_dart_fetched", 3),
+        ("official_dart_accepted", 5),
+        ("official_dart_errors", 1),
+        ("official_dart_quota_exhausted", 1),
+    ),
+)
+def test_backfill_evidence_rejects_incomplete_dart_ack_summary(
+    tmp_path: Path,
+    field: str,
+    value: int,
+) -> None:
+    report_path, checkpoint_path = backfill_files(
+        tmp_path,
+        from_date=SAMPLE_FROM_DATE,
+        to_date=SAMPLE_TO_DATE,
+        population_count=120,
+    )
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    first = next(iter(checkpoint["completed_windows"].values()))
+    first["summary"][field] = value
+    checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+
+    with pytest.raises(DartReviewSampleError, match="unacknowledged window"):
+        validate_backfill_evidence(
+            report_path=report_path,
+            checkpoint_path=checkpoint_path,
+            from_date=SAMPLE_FROM_DATE,
+            to_date=SAMPLE_TO_DATE,
+            population_count=120,
+            code_revision=CODE_REVISION,
+        )
+
+
+def test_backfill_evidence_accepts_zero_filing_day_with_actual_request(
+    tmp_path: Path,
+) -> None:
+    report_path, checkpoint_path = backfill_files(
+        tmp_path,
+        from_date=SAMPLE_FROM_DATE,
+        to_date=SAMPLE_TO_DATE,
+        population_count=0,
+    )
+    evidence = validate_backfill_evidence(
+        report_path=report_path,
+        checkpoint_path=checkpoint_path,
+        from_date=SAMPLE_FROM_DATE,
+        to_date=SAMPLE_TO_DATE,
+        population_count=0,
+        code_revision=CODE_REVISION,
+    )
+    assert evidence.expected_dart_document_count == 0
+    assert evidence.completed_window_count == 30
+
+
+def test_backfill_evidence_rejects_completed_window_outside_job_range(
+    tmp_path: Path,
+) -> None:
+    report_path, checkpoint_path = backfill_files(
+        tmp_path,
+        from_date=SAMPLE_FROM_DATE,
+        to_date=SAMPLE_TO_DATE,
+        population_count=120,
+    )
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    first_key = next(iter(checkpoint["completed_windows"]))
+    first = checkpoint["completed_windows"].pop(first_key)
+    outside_start = SAMPLE_FROM_DATE - timedelta(days=1)
+    outside_end = outside_start + timedelta(days=1)
+    outside_key = f"{outside_start.isoformat()}:{outside_end.isoformat()}"
+    first["window_start"] = outside_start.isoformat()
+    first["window_end_exclusive"] = outside_end.isoformat()
+    digest = hashlib.sha256(
+        (
+            checkpoint["job"]["fingerprint"]
+            + "|"
+            + outside_key
+        ).encode("utf-8")
+    ).hexdigest()[:32]
+    first["idempotency_key"] = f"official-backfill-v1:{digest}"
+    checkpoint["completed_windows"][outside_key] = first
+    checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+
+    with pytest.raises(DartReviewSampleError, match="every requested"):
         validate_backfill_evidence(
             report_path=report_path,
             checkpoint_path=checkpoint_path,

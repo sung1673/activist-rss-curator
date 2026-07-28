@@ -3736,6 +3736,8 @@ function v2_alpha_dart_job_is_release_bound(
             '/^\d{4}-\d{2}-\d{2}$/D',
             $job['range_end_exclusive']
         ) !== 1
+        || v2_alpha_date_epoch($job['range_start']) === null
+        || v2_alpha_date_epoch($job['range_end_exclusive']) === null
         || $job['range_end_exclusive'] <= $job['range_start']
         || !is_int($job['chunk_days'])
         || $job['chunk_days'] !== 1
@@ -3844,27 +3846,67 @@ function v2_alpha_dart_windows(
                 continue;
             }
             $summary = $window['summary'];
-            $rawCount = (int)($summary['official_remote_raw_count'] ?? -1);
-            $ackCount = (int)($summary['official_remote_ack_count'] ?? -2);
+            $requiredSummaryFields = array(
+                'official_failed',
+                'official_skipped',
+                'official_remote_ack_mismatches',
+                'official_remote_run_persisted',
+                'official_remote_raw_count',
+                'official_remote_ack_count',
+                'official_remote_failed',
+                'official_remote_skipped',
+                'official_remote_synced',
+                'official_dart_requests',
+                'official_dart_fetched',
+                'official_dart_accepted',
+                'official_dart_errors',
+                'official_dart_quota_exhausted',
+            );
+            foreach ($requiredSummaryFields as $field) {
+                if (
+                    !array_key_exists($field, $summary)
+                    || !is_int($summary[$field])
+                    || $summary[$field] < 0
+                ) {
+                    throw new RuntimeException(
+                        'alpha_evidence_dart_ack_invalid'
+                    );
+                }
+            }
+            $remoteRawCount = $summary['official_remote_raw_count'];
+            $ackCount = $summary['official_remote_ack_count'];
+            $acceptedCount = $summary['official_dart_accepted'];
+            $rawCount = $summary['official_dart_fetched'];
             if (
-                $rawCount < 0
-                || $ackCount < 0
-                || $rawCount < $ackCount
-                || (int)($summary['official_remote_run_persisted'] ?? 0) !== 1
-                || (int)($summary['official_remote_ack_mismatches'] ?? 0) !== 0
-                || (int)($summary['official_remote_failed'] ?? 0) !== 0
-                || (int)($summary['official_remote_skipped'] ?? 0) !== 0
-                || (int)($summary['official_failed'] ?? 0) !== 0
-                || (int)($summary['official_skipped'] ?? 0) !== 0
+                $remoteRawCount !== $ackCount
+                || $acceptedCount !== $remoteRawCount
+                || $rawCount < $acceptedCount
+                || $summary['official_remote_run_persisted'] !== 1
+                || $summary['official_remote_ack_mismatches'] !== 0
+                || $summary['official_remote_failed'] !== 0
+                || $summary['official_remote_skipped'] !== 0
+                || $summary['official_remote_synced'] < 1
+                || $summary['official_failed'] !== 0
+                || $summary['official_skipped'] !== 0
+                || $summary['official_dart_requests'] < 1
+                || $summary['official_dart_errors'] !== 0
+                || $summary['official_dart_quota_exhausted'] !== 0
             ) {
                 throw new RuntimeException('alpha_evidence_dart_ack_invalid');
             }
-            $acceptedCount = $ackCount;
             $filteredOutCount = $rawCount - $acceptedCount;
             $start = (string)($window['window_start'] ?? '');
             $end = (string)($window['window_end_exclusive'] ?? '');
             if ($windowKey !== $start . ':' . $end) {
                 throw new RuntimeException('alpha_evidence_dart_window_key');
+            }
+            if (
+                $start < (string)$job['range_start']
+                || $end > (string)$job['range_end_exclusive']
+            ) {
+                throw new RuntimeException(
+                    'alpha_evidence_dart_window_outside_job'
+                );
             }
             $windows[$windowKey] = array(
                 'window_start' => $start,
