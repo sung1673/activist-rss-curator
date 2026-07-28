@@ -330,6 +330,65 @@ def test_sec_daily_index_connector_is_market_wide_and_filters_forms() -> None:
     assert result.records[0].metadata["title_provenance"] == "generated_metadata"
 
 
+def test_sec_daily_treats_weekend_access_denied_as_missing_index() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/2026/QTR2/master.20260628.idx"):
+            return httpx.Response(403)
+        assert request.url.path.endswith("/2026/QTR2/master.20260629.idx")
+        return httpx.Response(
+            200,
+            text=(
+                "Description\n"
+                "CIK|Company Name|Form Type|Date Filed|Filename\n"
+                "--------------------------------------------------------------------------------\n"
+                "320193|Apple Inc.|SC 13D|2026-06-29|"
+                "edgar/data/320193/0000320193-26-000999.txt\n"
+            ),
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+        ).fetch(
+            GlobalConnectorRequest(
+                window_start=date(2026, 6, 28),
+                window_end_exclusive=date(2026, 6, 30),
+            ),
+            eligibility=eligibility("official:sec-edgar", "sec-edgar"),
+            now=NOW,
+        )
+
+    assert result.request_count == 2
+    assert result.raw_count == 1
+    assert len(result.records) == 1
+    assert result.records[0].external_id == "0000320193-26-000999"
+
+
+def test_sec_daily_keeps_weekday_access_denied_fail_closed() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/2026/QTR2/master.20260629.idx")
+        return httpx.Response(403)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+        )
+        with pytest.raises(GlobalConnectorError, match="HTTP 403"):
+            connector.fetch(
+                GlobalConnectorRequest(
+                    window_start=date(2026, 6, 29),
+                    window_end_exclusive=date(2026, 6, 30),
+                ),
+                eligibility=eligibility(
+                    "official:sec-edgar",
+                    "sec-edgar",
+                ),
+                now=NOW,
+            )
+
+
 def test_sec_daily_preserves_8k_as_private_unclassified_candidate() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
