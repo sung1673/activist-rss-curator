@@ -1732,6 +1732,14 @@ function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): a
         }
         $receiptKind = 'current';
     }
+    if (
+        (string)$connector['connector_id'] === 'connector:us:sec-edgar'
+        && $receiptKind === 'standard'
+    ) {
+        v2_write_invalid(
+            'payload.idempotency_key: SEC classified receipt required'
+        );
+    }
     $isSelectedLinkOnlyApply = (
         $ingestMode === 'apply'
         && in_array($country, array('CA', 'AU'), true)

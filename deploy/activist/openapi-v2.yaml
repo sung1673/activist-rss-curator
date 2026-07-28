@@ -2565,6 +2565,11 @@ components:
           minLength: 8
           maxLength: 191
           pattern: '^[A-Za-z0-9_.:\-]+$'
+          description: >-
+            SEC EDGAR accepts only classified global-ingest-v2-current:us:
+            or global-ingest-v2-day:us: semantic-digest namespaces. Standard
+            receipt keys are rejected for both apply and replay, and every
+            classified SEC receipt requires an expected release-state binding.
         code_revision:
           type: string
           minLength: 7

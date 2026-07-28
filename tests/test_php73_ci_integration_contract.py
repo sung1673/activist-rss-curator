@@ -110,17 +110,20 @@ def test_php73_global_fixture_restores_the_latest_source_title_from_mysql() -> N
     assert "BINARY e.title=BINARY d.title" in restoration
 
 
-def test_php73_global_fixture_refreshes_rights_revision_after_grant_mutation() -> None:
+def test_php73_global_fixture_refreshes_split_rights_after_grant_mutation() -> None:
     smoke = (ROOT / "tests" / "php73_global_v2_smoke.py").read_text(encoding="utf-8")
     restored_grant = smoke[
-        smoke.index("stale_rights_revision = rights_revision") :
+        smoke.index("stale_sec_rights_revision = sec_rights_revision") :
         smoke.index("pagination_ids = add_byte_pagination_fixture_events")
     ]
 
     assert "restored_eligibility" in restored_grant
     assert 'use": "collect"' in restored_grant
-    assert "rights_revision = restored_eligibility.get" in restored_grant
-    assert "rights_revision != stale_rights_revision" in restored_grant
+    assert "sec_rights_revision = restored_eligibility.get" in restored_grant
+    assert "sec_rights_revision != stale_sec_rights_revision" in restored_grant
+    assert "restored_standard_eligibility" in restored_grant
+    assert "restored_standard_revision != standard_rights_revision" in restored_grant
+    assert "standard_rights_revision = restored_standard_revision" in restored_grant
 
 
 def test_php73_global_fixture_checks_cross_runtime_dart_contract_revision() -> None:

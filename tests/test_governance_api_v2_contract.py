@@ -1823,6 +1823,48 @@ def test_sec_current_apply_requires_fresh_request_proof_before_refresh():
     ]["description"]
 
 
+def test_sec_ingest_rejects_unclassified_receipts_before_any_write():
+    normalize = V2_WRITE[
+        V2_WRITE.index("function v2_normalize_ingest_payload") :
+        V2_WRITE.index("function v2_ingest_upsert_issuer")
+    ]
+    standard_guard = (
+        "(string)$connector['connector_id'] === 'connector:us:sec-edgar'"
+        "\n        && $receiptKind === 'standard'"
+    )
+    assert standard_guard in normalize
+    assert "SEC classified receipt required" in normalize
+    assert normalize.index(standard_guard) < normalize.index(
+        "$isSelectedLinkOnlyApply"
+    )
+    assert normalize.index(standard_guard) < normalize.index(
+        "return array("
+    )
+
+    idempotency = SPEC["components"]["schemas"]["GlobalIngestRequest"][
+        "properties"
+    ]["idempotency_key"]["description"]
+    assert "SEC EDGAR accepts only classified" in idempotency
+    assert "global-ingest-v2-current:us:" in idempotency
+    assert "global-ingest-v2-day:us:" in idempotency
+    assert "both apply and replay" in idempotency
+    assert "release-state binding" in idempotency
+
+    smoke = (ROOT / "tests" / "php73_global_v2_smoke.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'for unclassified_mode in ("apply", "replay")' in smoke
+    assert '"php73-v2-sec-unclassified"' in smoke
+    assert 'unclassified_sec["envelope"]["request_count"] = 0' in smoke
+    assert (
+        'unclassified_sec["envelope"]["chunk"]["batch_request_count"] = 0'
+        in smoke
+    )
+    assert 'unclassified_sec.pop("expected_release_state")' in smoke
+    assert "unclassified_state" in smoke
+    assert "SEC classified receipt required" in smoke
+
+
 def test_v2_public_documents_and_urls_always_exclude_telegram():
     exclusion = V2[
         V2.index("function v2_non_telegram_document_sql") : V2.index(
