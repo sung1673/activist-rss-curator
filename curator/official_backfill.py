@@ -241,12 +241,24 @@ def _timestamp(now_provider: Callable[[], datetime]) -> str:
     return value.astimezone(timezone.utc).isoformat()
 
 
-def _code_revision() -> str:
+def _optional_code_revision() -> str | None:
     revision = (
         os.environ.get("GITHUB_SHA", "")
         or os.environ.get("CURATOR_CODE_REVISION", "")
     ).strip().casefold()
+    if not revision:
+        return None
     if _CODE_REVISION_RE.fullmatch(revision) is None:
+        raise BackfillConfigurationError(
+            "GITHUB_SHA or CURATOR_CODE_REVISION must contain "
+            "7-40 lowercase hexadecimal characters"
+        )
+    return revision
+
+
+def _code_revision() -> str:
+    revision = _optional_code_revision()
+    if revision is None:
         raise BackfillConfigurationError(
             "applied backfill requires GITHUB_SHA or CURATOR_CODE_REVISION "
             "(7-40 lowercase hexadecimal characters)"
@@ -691,6 +703,12 @@ def _run_backfill(
 
     options.validate()
     code_revision = None if options.dry_run else _code_revision()
+    # Keep dry-run job identity and per-window idempotency stable for local
+    # reproduction. Only the emitted report is bound to the immutable workflow
+    # revision when one is available.
+    report_code_revision = (
+        _optional_code_revision() if options.dry_run else code_revision
+    )
     job = job_contract(options, code_revision=code_revision)
     fingerprint = job_fingerprint(job)
     remote_version = 0
@@ -1062,7 +1080,7 @@ def _run_backfill(
         "dry_run": options.dry_run,
         "idempotent": bool(options.replay and not invocation_failures),
         "replay_verified": bool(options.replay and not invocation_failures),
-        "code_revision": code_revision,
+        "code_revision": report_code_revision,
         "job_fingerprint": fingerprint,
         "range_start": options.start.isoformat(),
         "range_end_exclusive": options.end_exclusive.isoformat(),
