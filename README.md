@@ -132,6 +132,7 @@ Production Alpha는 `EDINET_API_KEY`와 `COMPANIES_HOUSE_API_KEY`를 사용하�
 - `global-alpha-review-candidates.yml`: 기본 브랜치의 실제 Preview API에서 공식 근거가 있는 사건 60건, 동일 사건 판단용 문서쌍 120개, 현재 Top 5를 사람 검수용 무라벨 artifact로 추출한다.
 - `global-alpha-preview-smoke.yml`: 최종 Preview 배포 뒤 실제 PHP v2·운영 DB를 사용해 Today→사건→발행사→검색→캘린더를 3개 viewport에서 검증한다. mock과 v1 fallback은 허용하지 않는다.
 - `global-alpha-observation-chain.yml`: `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`, `shadow`에서 운영자가 segment 1을 수동 시작한다. 5개 job이 같은 SHA·서버 candidate window를 이어받아 288회 실제 관측을 만들고, predecessor run과 artifact digest를 확인한 뒤에만 다음 구간을 기록한다. 이 체인만 Alpha 출시 증빙으로 사용한다.
+- `global-alpha-observation-chain-preflight.yml`: 실제 24시간 체인 전에 수동 실행한다. `governance-runtime`에서 부모가 같은 workflow의 자식 phase를 exact default-branch SHA로 자체 호출하고, 자식의 first-attempt 성공을 제한 시간 안에 직접 확인한다. API·source·Pages를 변경하거나 운영 credential·artifact를 만들지 않는다.
 - `global-alpha-watchdog.yml`: GitHub 예약 지연 여부를 포함한 상시 진단용이다. best-effort cron 결과는 Alpha 출시 증빙에 사용하지 않는다.
 - `governance-cutover.yml`, `governance-rollback.yml`: 보호된 `governance-release` 환경에서만 수동 전환·복구한다. Alpha evidence는 exact daily Pages run/artifact/digest와 전체 사이트·UI/config content identity를 고정하며, 24시간 preview 관측이 같은 terminal 바이트임을 증명한다. 전환은 evidence가 가리키는 그 artifact만 허용하고 exact SHA·evidence artifact digest·v1/v2 state version에 묶인 짧은 일회용 승인을 발급한 뒤 두 API state를 한 transaction에서 승격한다.
 

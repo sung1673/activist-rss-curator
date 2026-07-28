@@ -14,6 +14,7 @@
 | `global-brief.yml` | 사람 검수용 후보 artifact 생성, 승인된 동일 SHA payload 수동 발행 | KST 05:45 후보 생성, 발행은 수동 |
 | `global-alpha-review-candidates.yml` | 실제 Preview API에서 무라벨 60사건·120문서쌍·Top 5 검수 artifact 생성 | 기본 브랜치에서 운영자 수동 실행 |
 | `global-alpha-preview-smoke.yml` | 실제 PHP v2·운영 DB의 Today·사건·발행사·검색·캘린더와 3개 viewport 증빙 검증 | Preview 배포 뒤 운영자 수동 실행 |
+| `global-alpha-observation-chain-preflight.yml` | `governance-runtime`에서 동일 workflow 자체 호출 권한과 exact-SHA 자식 실행을 상태 변경 없이 검증 | 실제 24시간 관측 직전 운영자 수동 실행 |
 | `global-alpha-observation-chain.yml` | 같은 SHA와 서버 candidate window에 고정된 5개 구간·288회 Production Alpha 출시 관측 | 운영자 수동 시작, 이후 self-chain |
 | `global-alpha-watchdog.yml` | API·release state·source freshness·공개 루트 운영 진단. 출시 증빙에는 사용하지 않음 | best-effort 5분 |
 | `kind-adapter-preflight.yml` | 운영 SourceRight 확인 후 KIND adapter 실제 계약을 1회 검증 | 승인 후 운영자 수동 실행만 |
@@ -249,6 +250,8 @@ PHP 배포 백업은 공개 파일 경로가 아니라 외부 접근이 차단�
 Watchdog은 `/api/v1/ops/health`의 공식 수집 최신성을 확인하고 실제 공개 route를 KST 매시 01·06·11·16·21·26·31·36·41·46·51·56분에 측정해 `/api/v1/ops/availability-observations`에 적재한다. release evidence는 `watchdog-v1-kst-5m-minute01`의 route당 일 288개 slot을 raw `observed_at`으로 재구성하며, 4개 route 일 1,152개와 7일 8,064개가 모두 덮이지 않으면 실패한다. 중복 관측은 missing을 상쇄하지 않고, interval p95와 일 경계 포함 최대 공백이 모두 600초 이하여야 한다. Telegram outbox는 발송이 영구 비활성인 현재 release gate의 분모가 아니다.
 
 Production Alpha 출시 증빙은 GitHub cron이 아니라 수동 시작형 `global-alpha-observation-chain.yml`만 만든다. segment 1은 `GOVERNANCE_PIPELINE_MODE=shadow`와 `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`에서 시작하며, 5개 구간이 같은 SHA·서버 candidate window·5분 cadence anchor를 공유한다. 각 후속 구간은 predecessor가 성공한 first attempt인지와 immutable artifact digest를 먼저 확인한다. 누락·중복·취소·neutral·시간초과·SHA 변경·artifact 변조가 있으면 전체 24시간 창을 폐기한다. `global-alpha-watchdog.yml`은 best-effort 예약 진단용으로 남지만 release evidence의 분모가 아니다. 두 workflow 모두 `BSIDE_OPS_TOKEN`으로 읽기 전용 `GET /api/v2/ops/release-state`를 호출하며 `BSIDE_ADMIN_TOKEN`과 `BSIDE_RELEASE_AUTHORIZER_TOKEN`을 주입하지 않는다.
+
+실제 segment 1을 시작하기 직전에 `global-alpha-observation-chain-preflight.yml`을 기본 입력으로 수동 실행한다. 부모 job은 `GITHUB_TOKEN`의 `actions:write` 권한으로 동일 workflow의 자식 phase를 호출하고, 204 응답만 신뢰하지 않고 같은 default-branch SHA·workflow path·first attempt의 자식 성공을 제한 시간 안에 직접 조회한다. 부모와 자식 모두 `governance-runtime`에서 실행된다. 이 검사는 API·source·Pages·release state를 읽거나 변경하지 않고 artifact도 만들지 않으며, nonce나 token을 로그에 출력하지 않는다. 성공한 preflight SHA와 실제 관측 SHA가 다르면 preflight를 다시 실행한다.
 
 - 마지막 정상 수집이 90분을 넘으면 incident
 - 루트, feed, 활성화된 governance Pages 또는 API health 중 하나라도 실패하면 incident

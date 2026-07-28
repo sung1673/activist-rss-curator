@@ -266,6 +266,17 @@ legacy `global-alpha-watchdog.yml` remains enabled only for operational
 diagnostics. A delayed, coalesced, skipped, cancelled, or neutral cron run does
 not get substituted into the Production Alpha evidence window.
 
+Immediately before starting segment 1, manually run
+`.github/workflows/global-alpha-observation-chain-preflight.yml` with its
+default parent inputs on the default branch. Both phases run in the protected
+`governance-runtime` environment. The parent uses only `GITHUB_TOKEN` with
+`actions:write` to dispatch a nonce-bound child of the same workflow, then
+bounded-polls GitHub until that exact workflow path, default-branch SHA,
+first-attempt child completes successfully. A dispatch HTTP response alone is
+not sufficient. The preflight changes no API, source, Pages, or release state,
+uses no operational application credential, and stores no artifact. If its SHA
+differs from the SHA that will start segment 1, run the preflight again.
+
 Start `.github/workflows/global-alpha-observation-chain.yml` manually on the
 default branch with `segment_index=1` and all internal continuation inputs
 empty. The workflow requires `GOVERNANCE_PIPELINE_MODE=shadow`,
