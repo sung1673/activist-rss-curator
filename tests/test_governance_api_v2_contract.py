@@ -1638,6 +1638,29 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
     assert "global-ingest-v2-day:us:" in exporter
     assert "global-ingest-v2-current" in exporter
     assert "alpha_evidence_completed_day_marker_invalid" in exporter
+    assert "function v2_alpha_dart_job_is_release_bound" in exporter
+    dart_job_binding = exporter[
+        exporter.index("function v2_alpha_dart_job_is_release_bound") :
+        exporter.index("function v2_alpha_dart_windows")
+    ]
+    assert "hash_equals($codeRevision, $job['code_revision'])" in dart_job_binding
+    assert "hash_equals($rowFingerprint, $job['fingerprint'])" in dart_job_binding
+    assert "array_keys($job['sources']) !== array(0)" in dart_job_binding
+    assert "array_values($job['sources']) !== array('dart')" in dart_job_binding
+    assert "unset($contract['fingerprint'])" in dart_job_binding
+    assert "v1_strict_canonical_json_encode(" in dart_job_binding
+    assert (
+        "hash_equals($rowFingerprint, hash('sha256', $canonical))"
+        in dart_job_binding
+    )
+    dart_windows = exporter[
+        exporter.index("function v2_alpha_dart_windows") :
+        exporter.index("function v2_alpha_content_integrity")
+    ]
+    assert "v2_alpha_dart_job_is_release_bound(" in dart_windows
+    assert "$jobFingerprint . '|' . (string)$windowKey" in dart_windows
+    assert "hash_equals(" in dart_windows
+    assert "$expectedIdempotencyKey" in dart_windows
     assert "v2_alpha_latest_contiguous_windows" in exporter
     assert "'filtered_out_count' =>" in exporter
     assert "'accepted_count' =>" in exporter
@@ -1651,6 +1674,19 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
     assert "array('sec-edgar', 'US', 'connector:us:sec-edgar')" in exporter
     assert "array('edinet', 'JP'" not in exporter
     assert "array('companies-house', 'GB'" not in exporter
+
+    smoke = (ROOT / "tests" / "php73_global_v2_smoke.py").read_text(
+        encoding="utf-8"
+    )
+    for rejection_case in (
+        "missing job revision",
+        "wrong job revision",
+        "combined DART KIND sources",
+        "row fingerprint mismatch",
+        "canonical fingerprint mismatch",
+        "window idempotency fingerprint mismatch",
+    ):
+        assert rejection_case in smoke
 
     writer = V2_WRITE
     assert "v2_write_expected_classified_ingest_key" in writer

@@ -482,10 +482,13 @@ def backfill_files(
         next_date = cursor + timedelta(days=1)
         accepted = base_count + (1 if index < remainder else 0)
         key = f"{cursor.isoformat()}:{next_date.isoformat()}"
+        idempotency_digest = hashlib.sha256(
+            f"{fingerprint}|{key}".encode("utf-8")
+        ).hexdigest()[:32]
         completed[key] = {
             "window_start": cursor.isoformat(),
             "window_end_exclusive": next_date.isoformat(),
-            "idempotency_key": f"official-backfill-v1:{index:032x}",
+            "idempotency_key": f"official-backfill-v1:{idempotency_digest}",
             "attempt": 1,
             "code_revision": code_revision,
             "status": "succeeded",
@@ -625,6 +628,84 @@ def test_backfill_evidence_rejects_revision_mismatch(
         checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
 
     with pytest.raises(DartReviewSampleError, match="complete applied range|unacknowledged"):
+        validate_backfill_evidence(
+            report_path=report_path,
+            checkpoint_path=checkpoint_path,
+            from_date=SAMPLE_FROM_DATE,
+            to_date=SAMPLE_TO_DATE,
+            population_count=120,
+            code_revision=CODE_REVISION,
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "value"),
+    (
+        ("missing_revision", None),
+        ("wrong_revision", "b" * 40),
+        ("combined_sources", ["dart", "kind"]),
+    ),
+)
+def test_backfill_evidence_rejects_non_dart_release_job(
+    tmp_path: Path,
+    mutation: str,
+    value: object,
+) -> None:
+    report_path, checkpoint_path = backfill_files(
+        tmp_path,
+        from_date=SAMPLE_FROM_DATE,
+        to_date=SAMPLE_TO_DATE,
+        population_count=120,
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    job = checkpoint["job"]
+    job.pop("fingerprint")
+    if mutation == "missing_revision":
+        job.pop("code_revision")
+    elif mutation == "wrong_revision":
+        job["code_revision"] = value
+    else:
+        job["sources"] = value
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            job,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    job["fingerprint"] = fingerprint
+    report["job_fingerprint"] = fingerprint
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+
+    with pytest.raises(DartReviewSampleError, match="job does not match"):
+        validate_backfill_evidence(
+            report_path=report_path,
+            checkpoint_path=checkpoint_path,
+            from_date=SAMPLE_FROM_DATE,
+            to_date=SAMPLE_TO_DATE,
+            population_count=120,
+            code_revision=CODE_REVISION,
+        )
+
+
+def test_backfill_evidence_rejects_prefix_only_window_idempotency(
+    tmp_path: Path,
+) -> None:
+    report_path, checkpoint_path = backfill_files(
+        tmp_path,
+        from_date=SAMPLE_FROM_DATE,
+        to_date=SAMPLE_TO_DATE,
+        population_count=120,
+    )
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    first = next(iter(checkpoint["completed_windows"].values()))
+    first["idempotency_key"] = "official-backfill-v1:" + "0" * 32
+    checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+
+    with pytest.raises(DartReviewSampleError, match="unacknowledged window"):
         validate_backfill_evidence(
             report_path=report_path,
             checkpoint_path=checkpoint_path,

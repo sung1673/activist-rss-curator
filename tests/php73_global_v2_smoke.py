@@ -931,11 +931,49 @@ def require_cutover_not_consumed(
     require(row == "preview|preview|1", row)
 
 
+def backfill_job_fingerprint(job: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            job,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def replace_dart_checkpoint_fixture(
+    mysql_container_id: str,
+    *,
+    checkpoint: dict[str, Any],
+    row_fingerprint: str,
+    now: datetime,
+) -> None:
+    checkpoint_json = json.dumps(
+        checkpoint,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    payload_hash = hashlib.sha256(checkpoint_json.encode()).hexdigest()
+    escaped_checkpoint = checkpoint_json.replace("\\", "\\\\").replace("'", "''")
+    mysql_execute(
+        mysql_container_id,
+        "DELETE FROM ci_official_backfill_checkpoints;"
+        "INSERT INTO ci_official_backfill_checkpoints "
+        "(job_fingerprint,checkpoint_version,checkpoint_json,payload_hash,"
+        "updated_by,created_at,updated_at) VALUES "
+        f"('{row_fingerprint}',31,'{escaped_checkpoint}','{payload_hash}',"
+        f"'ci-alpha-evidence','{now.strftime('%Y-%m-%d %H:%M:%S')}',"
+        f"'{now.strftime('%Y-%m-%d %H:%M:%S')}');",
+    )
+
+
 def seed_alpha_automated_evidence(
     mysql_container_id: str,
     *,
     now: datetime,
-) -> None:
+) -> dict[str, Any]:
     end = now.date()
     start = end - timedelta(days=30)
     receipt_values: list[str] = []
@@ -1064,15 +1102,29 @@ def seed_alpha_automated_evidence(
         + ";",
     )
 
+    job = {
+        "range_start": start.isoformat(),
+        "range_end_exclusive": end.isoformat(),
+        "chunk_days": 1,
+        "sources": ["dart"],
+        "page_count": 100,
+        "max_pages": 100,
+        "sync_company_master": False,
+        "code_revision": CODE_REVISION,
+    }
+    fingerprint = backfill_job_fingerprint(job)
     completed_windows: dict[str, object] = {}
     cursor = start
-    for index in range(30):
+    for _ in range(30):
         next_cursor = cursor + timedelta(days=1)
         key = f"{cursor.isoformat()}:{next_cursor.isoformat()}"
+        idempotency_digest = hashlib.sha256(
+            f"{fingerprint}|{key}".encode("utf-8")
+        ).hexdigest()[:32]
         completed_windows[key] = {
             "window_start": cursor.isoformat(),
             "window_end_exclusive": next_cursor.isoformat(),
-            "idempotency_key": f"official-backfill-v1:{index:032x}",
+            "idempotency_key": f"official-backfill-v1:{idempotency_digest}",
             "attempt": 1,
             "code_revision": CODE_REVISION,
             "status": "succeeded",
@@ -1089,23 +1141,6 @@ def seed_alpha_automated_evidence(
             },
         }
         cursor = next_cursor
-    job = {
-        "range_start": start.isoformat(),
-        "range_end_exclusive": end.isoformat(),
-        "chunk_days": 1,
-        "sources": ["dart"],
-        "page_count": 100,
-        "max_pages": 100,
-        "sync_company_master": False,
-    }
-    fingerprint = hashlib.sha256(
-        json.dumps(
-            job,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode()
-    ).hexdigest()
     checkpoint = {
         "schema_version": 1,
         "job": {**job, "fingerprint": fingerprint},
@@ -1116,24 +1151,13 @@ def seed_alpha_automated_evidence(
         "completed_windows": completed_windows,
         "failed_windows": {},
     }
-    checkpoint_json = json.dumps(
-        checkpoint,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
-    payload_hash = hashlib.sha256(checkpoint_json.encode()).hexdigest()
-    escaped_checkpoint = checkpoint_json.replace("\\", "\\\\").replace("'", "''")
-    mysql_execute(
+    replace_dart_checkpoint_fixture(
         mysql_container_id,
-        "DELETE FROM ci_official_backfill_checkpoints;"
-        "INSERT INTO ci_official_backfill_checkpoints "
-        "(job_fingerprint,checkpoint_version,checkpoint_json,payload_hash,"
-        "updated_by,created_at,updated_at) VALUES "
-        f"('{fingerprint}',31,'{escaped_checkpoint}','{payload_hash}',"
-        f"'ci-alpha-evidence','{now.strftime('%Y-%m-%d %H:%M:%S')}',"
-        f"'{now.strftime('%Y-%m-%d %H:%M:%S')}');",
+        checkpoint=checkpoint,
+        row_fingerprint=fingerprint,
+        now=now,
     )
+    return checkpoint
 
 
 def attach_public_and_telegram_evidence(
@@ -4347,7 +4371,10 @@ def run(base_url: str, mysql_container_id: str) -> None:
         repr(live_headers),
     )
 
-    seed_alpha_automated_evidence(mysql_container_id, now=now)
+    valid_dart_checkpoint = seed_alpha_automated_evidence(
+        mysql_container_id,
+        now=now,
+    )
     require(
         mysql_execute(
             mysql_container_id,
@@ -4458,6 +4485,119 @@ def run(base_url: str, mysql_container_id: str) -> None:
         and preserved_counts.get("source_title_preserved_count") == 1,
         repr(automated_preserved),
     )
+
+    # DART release evidence is bound to the exact apply-job revision and to
+    # the canonical Python job fingerprint. Legacy and tampered checkpoints
+    # retain valid payload hashes below, so each rejection exercises the job
+    # binding rather than the outer checkpoint-integrity check.
+    invalid_dart_checkpoints: list[tuple[str, dict[str, Any], str]] = []
+
+    legacy_checkpoint = json.loads(json.dumps(valid_dart_checkpoint))
+    legacy_job = legacy_checkpoint["job"]
+    legacy_job.pop("fingerprint")
+    legacy_job.pop("code_revision")
+    legacy_fingerprint = backfill_job_fingerprint(legacy_job)
+    legacy_job["fingerprint"] = legacy_fingerprint
+    invalid_dart_checkpoints.append(
+        ("missing job revision", legacy_checkpoint, legacy_fingerprint)
+    )
+
+    wrong_revision_checkpoint = json.loads(json.dumps(valid_dart_checkpoint))
+    wrong_revision_job = wrong_revision_checkpoint["job"]
+    wrong_revision_job.pop("fingerprint")
+    wrong_revision_job["code_revision"] = (
+        "0" * 40 if CODE_REVISION != "0" * 40 else "1" * 40
+    )
+    wrong_revision_fingerprint = backfill_job_fingerprint(wrong_revision_job)
+    wrong_revision_job["fingerprint"] = wrong_revision_fingerprint
+    invalid_dart_checkpoints.append(
+        (
+            "wrong job revision",
+            wrong_revision_checkpoint,
+            wrong_revision_fingerprint,
+        )
+    )
+
+    combined_sources_checkpoint = json.loads(json.dumps(valid_dart_checkpoint))
+    combined_sources_job = combined_sources_checkpoint["job"]
+    combined_sources_job.pop("fingerprint")
+    combined_sources_job["sources"] = ["dart", "kind"]
+    combined_sources_fingerprint = backfill_job_fingerprint(
+        combined_sources_job
+    )
+    combined_sources_job["fingerprint"] = combined_sources_fingerprint
+    invalid_dart_checkpoints.append(
+        (
+            "combined DART KIND sources",
+            combined_sources_checkpoint,
+            combined_sources_fingerprint,
+        )
+    )
+
+    row_mismatch_checkpoint = json.loads(json.dumps(valid_dart_checkpoint))
+    invalid_dart_checkpoints.append(
+        (
+            "row fingerprint mismatch",
+            row_mismatch_checkpoint,
+            hashlib.sha256(b"wrong DART checkpoint row").hexdigest(),
+        )
+    )
+
+    stale_fingerprint_checkpoint = json.loads(json.dumps(valid_dart_checkpoint))
+    stale_fingerprint_checkpoint["job"]["page_count"] = 99
+    invalid_dart_checkpoints.append(
+        (
+            "canonical fingerprint mismatch",
+            stale_fingerprint_checkpoint,
+            stale_fingerprint_checkpoint["job"]["fingerprint"],
+        )
+    )
+
+    wrong_window_key_checkpoint = json.loads(json.dumps(valid_dart_checkpoint))
+    first_window = next(
+        iter(wrong_window_key_checkpoint["completed_windows"].values())
+    )
+    first_window["idempotency_key"] = (
+        "official-backfill-v1:"
+        + hashlib.sha256(b"wrong DART window identity").hexdigest()[:32]
+    )
+    invalid_dart_checkpoints.append(
+        (
+            "window idempotency fingerprint mismatch",
+            wrong_window_key_checkpoint,
+            wrong_window_key_checkpoint["job"]["fingerprint"],
+        )
+    )
+
+    for label, checkpoint, row_fingerprint in invalid_dart_checkpoints:
+        replace_dart_checkpoint_fixture(
+            mysql_container_id,
+            checkpoint=checkpoint,
+            row_fingerprint=row_fingerprint,
+            now=now,
+        )
+        rejected_evidence, _ = request_json(
+            base_url,
+            (
+                "api.php/api/v2/ops/alpha-release-evidence?"
+                + urllib.parse.urlencode({"code_revision": CODE_REVISION})
+            ),
+            token=OPS_TOKEN,
+            expected_status=409,
+        )
+        require(
+            rejected_evidence.get("error") == "automated_evidence_unavailable",
+            f"{label}: {rejected_evidence!r}",
+        )
+
+    valid_dart_fingerprint = valid_dart_checkpoint["job"]["fingerprint"]
+    replace_dart_checkpoint_fixture(
+        mysql_container_id,
+        checkpoint=valid_dart_checkpoint,
+        row_fingerprint=valid_dart_fingerprint,
+        now=now,
+    )
+
     duplicate_day = now.date() - timedelta(days=1)
     duplicate_end = now.date()
     duplicate_digest = hashlib.sha256(

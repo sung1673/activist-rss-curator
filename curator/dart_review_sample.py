@@ -949,8 +949,7 @@ def validate_backfill_evidence(
         or contract.get("range_end_exclusive") != to_date.isoformat()
         or contract.get("chunk_days") != 1
         or not isinstance(sources, list)
-        or "dart" not in sources
-        or any(source not in {"dart", "kind"} for source in sources)
+        or sources != ["dart"]
     ):
         raise DartReviewSampleError(
             "backfill checkpoint job does not match the review corpus"
@@ -967,6 +966,12 @@ def validate_backfill_evidence(
         if not isinstance(result, dict):
             raise DartReviewSampleError("backfill checkpoint window is invalid")
         start, end = key.split(":", 1)
+        idempotency_digest = hashlib.sha256(
+            f"{fingerprint}|{key}".encode("utf-8")
+        ).hexdigest()[:32]
+        expected_idempotency_key = (
+            f"official-backfill-v1:{idempotency_digest}"
+        )
         summary = result.get("summary")
         if (
             result.get("status") != "succeeded"
@@ -977,9 +982,7 @@ def validate_backfill_evidence(
             or isinstance(result.get("attempt"), bool)
             or int(result["attempt"]) < 1
             or not isinstance(result.get("idempotency_key"), str)
-            or not str(result["idempotency_key"]).startswith(
-                "official-backfill-v1:"
-            )
+            or result.get("idempotency_key") != expected_idempotency_key
             or not isinstance(summary, dict)
             or not _backfill_summary_succeeded(summary)
         ):

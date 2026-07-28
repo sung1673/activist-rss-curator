@@ -118,3 +118,21 @@ receipt/checkpoint의 `code_revision`이 dispatch SHA와 동일,
 `dart/KR`, `sec-edgar/US` 두 항목과 항목별 30개 window만 반환해야 한다. SEC
 exporter는 완료일 namespace만 집계하고 current receipt는 무시한다. 동일
 완료일이 둘 이상 존재하거나 완료일 namespace가 변조되면 fail-closed한다.
+
+DART 증빙은 window의 `code_revision`만 확인하지 않는다. checkpoint의
+`job.code_revision`이 요청한 40자리 출시 SHA와 같고, `job.fingerprint`와 DB
+row의 `job_fingerprint`가 같아야 한다. 또한 `fingerprint` 필드를 제외한 job을
+Python `json.dumps(..., ensure_ascii=False, sort_keys=True,
+separators=(",", ":"))` 계약과 같은 canonical JSON으로 다시 직렬화한
+SHA-256이 두 fingerprint와 일치해야 한다. `code_revision`이 없던 legacy
+checkpoint, 다른 출시 SHA의 checkpoint, row·본문 fingerprint 불일치,
+canonical hash 불일치는 출시 증빙에서 모두 fail-closed한다.
+
+Production Alpha의 DART checkpoint는 `job.sources=["dart"]`만 허용한다.
+`["dart","kind"]`처럼 KIND가 섞인 job의 `official_remote_*` 합계는 DART 단독
+ACK를 증명하지 못하므로 사용하지 않는다. 각 완료 window의
+`idempotency_key`도 단순 prefix가 아니라
+`official-backfill-v1:` + `sha256(job_fingerprint + "|" + window_key)`의 앞
+32자리와 정확히 같아야 한다. checkpoint PUT 경로는 이 두 의미 계약을 독립
+재계산하지 않으므로 운영 release exporter와 DART 사람 검수 corpus validator가
+동일한 규칙을 다시 검증한다.
