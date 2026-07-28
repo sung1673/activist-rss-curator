@@ -4920,7 +4920,6 @@ function v1_dart_review_corpus_item(array $row): array {
     if (preg_match('/^[0-9]{14}$/',$externalId) !== 1 || $documentId !== 'dart:' . $externalId
         || !v1_valid_entity_id($eventId,96) || preg_match('/^[0-9]{8}$/',$companyId) !== 1 || $publishedAt === null
         || !$receiptDate || $receiptDate->format('Ymd') !== substr($externalId,0,8)
-        || str_replace('-','',substr($publishedAt,0,10)) !== substr($externalId,0,8)
         || (string)$row['source_right_id'] !== 'official:dart') {
         throw new RuntimeException('dart_review_corpus_identity_error');
     }

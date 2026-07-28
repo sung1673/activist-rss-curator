@@ -255,6 +255,37 @@ def test_client_bounds_transport_retries_and_does_not_retry_http_contracts() -> 
     assert response_calls == 1
 
 
+def test_client_surfaces_http_status_before_success_contract_validation() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            503,
+            json={
+                "ok": False,
+                "error": "dart_review_corpus_identity_error",
+                "api_version": "v1",
+            },
+        )
+
+    with pytest.raises(DartReviewApiError, match="HTTP 503"):
+        mock_client(handler).fetch(from_date=FROM_DATE, to_date=TO_DATE)
+
+
+def test_corpus_accepts_valid_receipt_number_with_later_publication_date() -> None:
+    item = corpus_item(0)
+    item["external_id"] = "20260626000001"
+    item["document_id"] = "dart:20260626000001"
+    item["published_at"] = "2026-07-01T00:00:00Z"
+
+    normalized = normalize_corpus_item(
+        item,
+        from_date=FROM_DATE,
+        to_date=TO_DATE,
+    )
+
+    assert normalized["external_id"] == "20260626000001"
+    assert normalized["published_at"] == "2026-07-01T00:00:00Z"
+
+
 def test_stratified_sample_is_input_order_invariant_and_balanced() -> None:
     items = normalized_items(180)
     selected = select_stratified_sample(items, sample_size=100, seed=42)

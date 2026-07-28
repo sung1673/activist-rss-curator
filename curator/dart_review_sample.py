@@ -330,14 +330,13 @@ def normalize_corpus_item(
     published_at = _required_text(value, "published_at", maximum=40)
     published = _published_datetime(published_at)
     try:
-        receipt_date = datetime.strptime(external_id[:8], "%Y%m%d").date()
+        datetime.strptime(external_id[:8], "%Y%m%d")
     except ValueError as exc:
         raise DartReviewApiError("corpus item has invalid receipt date") from exc
-    if (
-        not (from_date <= published.date() < to_date)
-        or published.date() != receipt_date
-    ):
-        raise DartReviewApiError("corpus item falls outside the requested receipt-date range")
+    if not (from_date <= published.date() < to_date):
+        raise DartReviewApiError(
+            "corpus item falls outside the requested publication-date range"
+        )
 
     source_right_id = _required_text(value, "source_right_id", maximum=64)
     if source_right_id != "official:dart":
@@ -527,6 +526,10 @@ class DartReviewCorpusClient:
             ) from exc
         if not isinstance(payload, dict):
             raise DartReviewApiError("review corpus API response must be an object")
+        if response.status_code != 200:
+            raise DartReviewApiError(
+                f"review corpus API rejected the request (HTTP {response.status_code})"
+            )
         if set(payload) != _RESPONSE_FIELDS:
             raise DartReviewApiError(
                 "review corpus API response fields do not match the contract"
@@ -569,7 +572,7 @@ class DartReviewCorpusClient:
                         params=params,
                     )
                     payload = self._response_object(response)
-                    if response.status_code != 200 or payload.get("ok") is not True:
+                    if payload.get("ok") is not True:
                         raise DartReviewApiError(
                             f"review corpus API rejected the request (HTTP {response.status_code})"
                         )
