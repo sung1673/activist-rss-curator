@@ -1016,8 +1016,11 @@ class SecDailyIndexConnector(BaseGlobalConnector):
             rights_guard.assert_current()
             response = self._get_day(current)
             request_count += 1
-            if response.status_code == 404:
-                if _sec_expected_daily_index(current):
+            expected_daily_index = _sec_expected_daily_index(current)
+            if response.status_code == 404 or (
+                response.status_code == 403 and not expected_daily_index
+            ):
+                if expected_daily_index:
                     raise GlobalConnectorIncomplete(
                         "SEC daily index is missing for an expected filing day"
                     )
