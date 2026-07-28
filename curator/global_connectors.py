@@ -936,6 +936,20 @@ SEC_EDGAR_DESCRIPTOR = SourceConnectorRecord(
     schedule_minutes=30,
 )
 
+_SEC_ACCESSION = re.compile(r"^\d{10}-\d{2}-\d{6}$")
+_SEC_CIK = re.compile(r"^\d{10}$")
+_SEC_FILING_EXTERNAL_ID_PREFIX = "sec-accession-cik-v1:"
+
+
+def _sec_filing_external_id(accession: str, cik: str) -> str:
+    """Return a stable SEC identity scoped by official accession and issuer CIK."""
+
+    if _SEC_ACCESSION.fullmatch(accession) is None:
+        raise GlobalConnectorContractError("SEC accession number is invalid")
+    if _SEC_CIK.fullmatch(cik) is None:
+        raise GlobalConnectorContractError("SEC CIK is invalid")
+    return f"{_SEC_FILING_EXTERNAL_ID_PREFIX}{accession}:{cik}"
+
 
 @dataclass
 class _SecRequestThrottle:
@@ -1084,7 +1098,7 @@ class SecDailyIndexConnector(BaseGlobalConnector):
             raise GlobalConnectorPaginationError(
                 "SEC daily-index window exceeds max_pages request budget"
             )
-        records: list[GlobalDocumentRecord] = []
+        records_by_identity: dict[str, GlobalDocumentRecord] = {}
         raw_count = 0
         request_count = 0
         current = request.window_start
@@ -1187,7 +1201,7 @@ class SecDailyIndexConnector(BaseGlobalConnector):
                 accession = filename.rsplit("/", 1)[-1]
                 if accession.endswith(".txt"):
                     accession = accession[:-4]
-                if re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession) is None:
+                if _SEC_ACCESSION.fullmatch(accession) is None:
                     raise GlobalConnectorContractError(
                         "SEC daily master accession is invalid"
                     )
@@ -1199,11 +1213,10 @@ class SecDailyIndexConnector(BaseGlobalConnector):
                     legal_name=company_name,
                     market="US",
                 )
-                records.append(
-                    _official_record(
+                record = _official_record(
                         connector=self.descriptor,
                         issuer_reference=reference,
-                        external_id=accession,
+                        external_id=_sec_filing_external_id(accession, cik),
                         record_kind="disclosure",
                         document_type=form,
                         event_family=family,
@@ -1220,6 +1233,7 @@ class SecDailyIndexConnector(BaseGlobalConnector):
                             "corrected" if form.endswith("/A") else "new"
                         ),
                         metadata={
+                            "accession_number": accession,
                             "cik": cik,
                             "form": form,
                             "filing_date": filed_raw,
@@ -1227,7 +1241,11 @@ class SecDailyIndexConnector(BaseGlobalConnector):
                             "title_provenance": "generated_metadata",
                         },
                     )
-                )
+                # SEC can re-disseminate the same accession/CIK association in
+                # more than one daily index. Keep the last observed row in the
+                # requested window so multi-day polling stays deterministic
+                # and the envelope never emits duplicate document identities.
+                records_by_identity[record.external_id] = record
             current += timedelta(days=1)
         return GlobalConnectorEnvelope(
             schema_version=1,
@@ -1238,7 +1256,10 @@ class SecDailyIndexConnector(BaseGlobalConnector):
             retrieved_at=_explicit_utc(retrieved_at, "retrieved_at"),
             coverage_mode=self.descriptor.coverage_mode,
             records=tuple(
-                sorted(records, key=lambda item: (item.filed_at, item.record_id))
+                sorted(
+                    records_by_identity.values(),
+                    key=lambda item: (item.filed_at, item.record_id),
+                )
             ),
             next_cursor=None,
             exhausted=True,
@@ -1254,7 +1275,6 @@ _SEC_CURRENT_TITLE = re.compile(
     r"^(?P<form>.+?) - (?P<company>.+) "
     r"\((?P<cik>\d{10})\) \((?P<role>[^()]{1,40})\)$"
 )
-_SEC_ACCESSION = re.compile(r"^\d{10}-\d{2}-\d{6}$")
 _SEC_CURRENT_FORM_ALIASES = {
     "SCHEDULE 13D": "SC 13D",
     "SCHEDULE 13D/A": "SC 13D/A",
@@ -1572,13 +1592,17 @@ class SecCurrentFilingsConnector(BaseGlobalConnector):
                 if cutoff is not None and entry.updated_at < cutoff:
                     crossed_cutoff = True
                     continue
-                existing = candidates.get(entry.accession)
+                external_id = _sec_filing_external_id(
+                    entry.accession,
+                    entry.cik,
+                )
+                existing = candidates.get(external_id)
                 if (
                     existing is None
                     or _SEC_CURRENT_ROLE_RANK.get(entry.role, -1)
                     > _SEC_CURRENT_ROLE_RANK.get(existing.role, -1)
                 ):
-                    candidates[entry.accession] = entry
+                    candidates[external_id] = entry
             if (
                 cutoff is not None
                 and oldest_entry is not None
@@ -1611,7 +1635,10 @@ class SecCurrentFilingsConnector(BaseGlobalConnector):
                 _official_record(
                     connector=self.descriptor,
                     issuer_reference=reference,
-                    external_id=entry.accession,
+                    external_id=_sec_filing_external_id(
+                        entry.accession,
+                        entry.cik,
+                    ),
                     record_kind="disclosure",
                     document_type=entry.form,
                     event_family=family,
@@ -1714,10 +1741,12 @@ class SecHybridConnector(BaseGlobalConnector):
             retrieved_at=retrieved_at,
             rights_guard=rights_guard,
         )
-        by_accession = {record.external_id: record for record in daily.records}
+        by_external_id = {
+            record.external_id: record for record in daily.records
+        }
         # The Atom record is authoritative for source title, exact acceptance
         # time and filing-index URL when both discovery paths overlap.
-        by_accession.update(
+        by_external_id.update(
             {record.external_id: record for record in current.records}
         )
         return GlobalConnectorEnvelope(
@@ -1730,7 +1759,7 @@ class SecHybridConnector(BaseGlobalConnector):
             coverage_mode=self.descriptor.coverage_mode,
             records=tuple(
                 sorted(
-                    by_accession.values(),
+                    by_external_id.values(),
                     key=lambda item: (item.filed_at, item.record_id),
                 )
             ),
@@ -1951,7 +1980,7 @@ class SecSubmissionsConnector(BaseGlobalConnector):
                     _official_record(
                         connector=self.descriptor,
                         issuer_reference=reference,
-                        external_id=accession,
+                        external_id=_sec_filing_external_id(accession, cik),
                         record_kind="disclosure",
                         document_type=form,
                         event_family=event_family,
@@ -1964,6 +1993,7 @@ class SecSubmissionsConnector(BaseGlobalConnector):
                             "corrected" if form.endswith("/A") else "new"
                         ),
                         metadata={
+                            "accession_number": accession,
                             "cik": cik,
                             "form": form,
                             "filing_date": filing_date,
