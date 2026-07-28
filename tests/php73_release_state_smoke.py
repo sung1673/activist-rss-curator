@@ -947,6 +947,21 @@ def exercise_official_slot_claims(base_url: str, mysql_container_id: str) -> Non
         error_code(boundary) == "official_slot_epoch_boundary_in_evidence_range",
         repr(boundary),
     )
+    # This helper deliberately moved epoch 1 onto a recent cadence slot so it
+    # could exercise repair and boundary rejection.  Re-home that synthetic
+    # history at the already-future reset boundary before the later, unrelated
+    # daily release-evidence fixture runs.  Without this cleanup, a CI job that
+    # starts just after KST midnight can place the synthetic epoch inside the
+    # immediately preceding complete KST day and fail for clock timing alone.
+    reset_active_mysql = reset_active.astimezone(timezone.utc).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_official_slot_claim_epochs "
+        f"SET active_from='{reset_active_mysql}' "
+        "WHERE pipeline='ingest-official' AND epoch_version=1;",
+    )
 
 
 def event_identity_comparison_key(
