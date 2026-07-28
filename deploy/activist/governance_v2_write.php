@@ -1401,6 +1401,28 @@ function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): a
     ) {
         v2_write_invalid('envelope.chunk: single chunk totals mismatch');
     }
+    if (
+        in_array($country, array('CA', 'AU'), true)
+        && $coverageMode === 'link-only'
+        && (
+            count($records) < 1
+            || count($observations) !== 0
+            || (int)$envelope['raw_count'] < 1
+            || $acknowledged < 1
+            || (int)$envelope['request_count'] !== 0
+            || (int)$chunk['index'] !== 1
+            || (int)$chunk['count'] !== 1
+            || (int)$chunk['batch_raw_count'] < 1
+            || (int)$chunk['batch_acknowledged_count'] < 1
+            || (int)$chunk['batch_request_count'] !== 0
+            || $envelope['exhausted'] !== true
+        )
+    ) {
+        v2_write_invalid(
+            'envelope: link-only verification requires one complete '
+            . 'non-empty metadata batch without source requests'
+        );
+    }
     if ($chunk['index'] < $chunk['count'] && $envelope['exhausted'] === true) {
         v2_write_invalid('envelope.chunk: non-final chunk cannot be exhausted');
     }
@@ -1418,6 +1440,7 @@ function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): a
         'connector' => $connector,
         'right' => $right,
         'rights_revision' => $rightsRevision,
+        'source_manifest_sha256' => $sourceManifestSha256,
         'retrieved_at' => $retrievedAt,
         'records' => $records,
         'lifecycle_observations' => $observations,
@@ -2278,6 +2301,128 @@ function v2_ingest_checkpoint_should_advance(
     return $comparison === 0 && $normalized['next_cursor'] !== null;
 }
 
+function v2_ingest_is_link_only_apply(array $normalized): bool {
+    return (
+        $normalized['ingest_mode'] === 'apply'
+        && (string)$normalized['connector']['coverage_mode'] === 'link-only'
+        && in_array(
+            (string)$normalized['connector']['country_code'],
+            array('CA', 'AU'),
+            true
+        )
+    );
+}
+
+function v2_ingest_link_only_receipt_is_complete(
+    array $receipt,
+    array $normalized
+): bool {
+    if (!v2_ingest_is_link_only_apply($normalized)) {
+        return false;
+    }
+    $chunk = $normalized['chunk'];
+    return (
+        (int)$receipt['raw_count'] >= 1
+        && (int)$receipt['acknowledged_count'] >= 1
+        && (int)$receipt['request_count'] === 0
+        && (int)$receipt['chunk_index'] === 1
+        && (int)$receipt['chunk_count'] === 1
+        && (int)$receipt['batch_raw_count'] === (int)$receipt['raw_count']
+        && (int)$receipt['batch_acknowledged_count']
+            === (int)$receipt['acknowledged_count']
+        && (int)$receipt['batch_request_count'] === 0
+        && (string)$receipt['batch_id'] === (string)$chunk['batch_id']
+        && (int)$receipt['raw_count'] === (int)$normalized['raw_count']
+        && (int)$receipt['acknowledged_count']
+            === (int)$normalized['acknowledged_count']
+    );
+}
+
+/**
+ * Revalidate the exact approved manifest and current SourceRight while the
+ * right row is locked. The pre-transaction validation is useful feedback, but
+ * only this check can authorize a link-only freshness heartbeat.
+ */
+function v2_ingest_assert_locked_link_only_right(
+    array $normalized,
+    array $lockedRight
+): void {
+    if (!v2_ingest_is_link_only_apply($normalized)) {
+        return;
+    }
+    $connector = $normalized['connector'];
+    $manifestSha256 = $normalized['source_manifest_sha256'];
+    if (
+        !is_string($manifestSha256)
+        || preg_match('/^[a-f0-9]{64}$/', $manifestSha256) !== 1
+        || (string)$lockedRight['source_right_id']
+            !== (string)$connector['source_right_id']
+        || (string)$lockedRight['source_type']
+            !== (string)$connector['source_type']
+        || (string)$lockedRight['source_key']
+            !== (string)$connector['source_key']
+        || count(v2_source_right_ineligible_reasons(
+            $lockedRight,
+            'collect'
+        )) > 0
+        || count(v2_source_right_ineligible_reasons(
+            $lockedRight,
+            'public'
+        )) > 0
+        || !hash_equals(
+            v2_source_right_revision($lockedRight),
+            (string)$normalized['rights_revision']
+        )
+        || preg_match(
+            '/^[a-f0-9]{64}$/',
+            (string)$lockedRight['evidence_hash']
+        ) !== 1
+        || !hash_equals(
+            (string)$lockedRight['evidence_hash'],
+            $manifestSha256
+        )
+    ) {
+        throw new RuntimeException('global_source_right_changed');
+    }
+}
+
+/**
+ * Refresh only connector verification telemetry. Existing receipts, documents,
+ * review state, and checkpoints stay byte-for-byte untouched.
+ */
+function v2_ingest_refresh_link_only_connector(
+    PDO $pdo,
+    array $config,
+    array $normalized,
+    array $receipt,
+    string $verifiedAt
+): void {
+    if (
+        !v2_ingest_is_link_only_apply($normalized)
+        || (int)$receipt['raw_count'] < 1
+        || (int)$receipt['acknowledged_count'] < 1
+    ) {
+        return;
+    }
+    $update = $pdo->prepare(
+        'UPDATE ' . table_name($config, 'source_connectors')
+        . ' SET connector_status=\'active\',last_checked_at=?,'
+        . 'last_success_at=?,last_observed_at=?,last_raw_count=?,'
+        . 'last_acknowledged_count=?,last_error_class=NULL,code_revision=?,'
+        . 'updated_at=? WHERE connector_id=?'
+    );
+    $update->execute(array(
+        $verifiedAt,
+        $verifiedAt,
+        $verifiedAt,
+        (int)$receipt['raw_count'],
+        (int)$receipt['acknowledged_count'],
+        $normalized['code_revision'],
+        $verifiedAt,
+        $normalized['connector']['connector_id'],
+    ));
+}
+
 function v2_ops_ingest(PDO $pdo, array $config): void {
     $payload = v2_json_body($config);
     $requestedConnectorId = (
@@ -2326,7 +2471,10 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
     }
     $connector = $normalized['connector'];
     $receiptLookup = $pdo->prepare(
-        'SELECT ingest_id,payload_sha256,raw_count,acknowledged_count,code_revision '
+        'SELECT ingest_id,payload_sha256,raw_count,acknowledged_count,'
+        . 'request_count,'
+        . 'batch_id,chunk_index,chunk_count,batch_raw_count,'
+        . 'batch_acknowledged_count,batch_request_count,code_revision '
         . 'FROM ' . table_name($config, 'global_ingest_receipts')
         . ' WHERE connector_id=? AND idempotency_key=? LIMIT 1'
     );
@@ -2348,16 +2496,43 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
                 'error' => 'global_ingest_idempotency_conflict',
             ));
         }
-        v2_respond(200, array(
-            'ok' => true,
-            'data' => array(
-                'ingest_id' => (string)$existingReceipt['ingest_id'],
-                'connector_id' => (string)$connector['connector_id'],
-                'raw_count' => (int)$existingReceipt['raw_count'],
-                'acknowledged_count' => (int)$existingReceipt['acknowledged_count'],
-                'idempotent' => true,
-            ),
-        ));
+        if (
+            v2_ingest_is_link_only_apply($normalized)
+            && (
+                (int)$existingReceipt['raw_count'] >= 1
+                || (int)$existingReceipt['acknowledged_count'] >= 1
+            )
+            && !v2_ingest_link_only_receipt_is_complete(
+                $existingReceipt,
+                $normalized
+            )
+        ) {
+            v2_respond(409, array(
+                'ok' => false,
+                'error' => 'global_ingest_batch_receipt_corrupt',
+            ));
+        }
+        // Replay is strictly read-only. A normal CA/AU apply with a
+        // non-empty, already acknowledged receipt continues into the locked
+        // transaction so the current grant and manifest can authorize a new
+        // verification heartbeat.
+        if (
+            !v2_ingest_is_link_only_apply($normalized)
+            || (int)$existingReceipt['raw_count'] < 1
+            || (int)$existingReceipt['acknowledged_count'] < 1
+        ) {
+            v2_respond(200, array(
+                'ok' => true,
+                'data' => array(
+                    'ingest_id' => (string)$existingReceipt['ingest_id'],
+                    'connector_id' => (string)$connector['connector_id'],
+                    'raw_count' => (int)$existingReceipt['raw_count'],
+                    'acknowledged_count' =>
+                        (int)$existingReceipt['acknowledged_count'],
+                    'idempotent' => true,
+                ),
+            ));
+        }
     }
     $startedAt = gmdate('Y-m-d H:i:s');
     $pdo->beginTransaction();
@@ -2381,6 +2556,10 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
         ) {
             throw new RuntimeException('global_source_right_changed');
         }
+        v2_ingest_assert_locked_link_only_right(
+            $normalized,
+            $lockedRight
+        );
         $connectorLock = $pdo->prepare(
             'SELECT connector_id,country_code,source_key,source_type,'
             . 'source_right_id,coverage_mode,connector_status,cursor_json FROM '
@@ -2411,7 +2590,9 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
         }
         $lockedReceipt = $pdo->prepare(
             'SELECT ingest_id,payload_sha256,raw_count,acknowledged_count,'
-            . 'code_revision FROM '
+            . 'request_count,'
+            . 'batch_id,chunk_index,chunk_count,batch_raw_count,'
+            . 'batch_acknowledged_count,batch_request_count,code_revision FROM '
             . table_name($config, 'global_ingest_receipts')
             . ' WHERE connector_id=? AND idempotency_key=? LIMIT 1 FOR UPDATE'
         );
@@ -2433,6 +2614,21 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
                     'global_ingest_idempotency_conflict'
                 );
             }
+            if (!v2_ingest_link_only_receipt_is_complete(
+                $storedReceipt,
+                $normalized
+            )) {
+                throw new RuntimeException(
+                    'global_ingest_batch_receipt_corrupt'
+                );
+            }
+            v2_ingest_refresh_link_only_connector(
+                $pdo,
+                $config,
+                $normalized,
+                $storedReceipt,
+                gmdate('Y-m-d H:i:s')
+            );
             $pdo->commit();
             v2_respond(200, array(
                 'ok' => true,
@@ -2529,27 +2725,44 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
                 $normalized
             );
             $existingCursor = v2_ingest_locked_checkpoint($lockedConnector);
-            if (v2_ingest_checkpoint_should_advance(
+            $shouldAdvance = v2_ingest_checkpoint_should_advance(
                 $existingCursor,
                 $normalized
-            )) {
-                $cursorPayload = array(
-                    'schema_version' => 1,
-                    'window_end_exclusive' => $chunk['window_end_exclusive'],
-                    'batch_id' => $chunk['batch_id'],
-                );
-                if ($normalized['next_cursor'] !== null) {
-                    $cursorPayload['schema_version'] = 2;
-                    $cursorPayload['source_cursor'] = $normalized['next_cursor'];
-                } elseif (
-                    $existingCursor !== null
-                    && (int)$existingCursor['schema_version'] === 2
-                ) {
-                    $cursorPayload['schema_version'] = 2;
-                    $cursorPayload['source_cursor'] =
-                        $existingCursor['source_cursor'];
+            );
+            $shouldRefreshLinkOnly = (
+                v2_ingest_is_link_only_apply($normalized)
+                && (int)$chunk['batch_raw_count'] >= 1
+                && (int)$chunk['batch_acknowledged_count'] >= 1
+            );
+            // A zero-record link-only receipt is not proof that an approved
+            // link was observed, so it cannot advance freshness or checkpoint
+            // state. A non-empty verification refreshes freshness even when
+            // its historical day boundary is already durable.
+            $shouldUpdateConnector = v2_ingest_is_link_only_apply($normalized)
+                ? $shouldRefreshLinkOnly : $shouldAdvance;
+            if ($shouldUpdateConnector) {
+                $cursorJson = (string)$lockedConnector['cursor_json'];
+                if ($shouldAdvance) {
+                    $cursorPayload = array(
+                        'schema_version' => 1,
+                        'window_end_exclusive' => $chunk['window_end_exclusive'],
+                        'batch_id' => $chunk['batch_id'],
+                    );
+                    if ($normalized['next_cursor'] !== null) {
+                        $cursorPayload['schema_version'] = 2;
+                        $cursorPayload['source_cursor'] = $normalized['next_cursor'];
+                    } elseif (
+                        $existingCursor !== null
+                        && (int)$existingCursor['schema_version'] === 2
+                    ) {
+                        $cursorPayload['schema_version'] = 2;
+                        $cursorPayload['source_cursor'] =
+                            $existingCursor['source_cursor'];
+                    }
+                    $cursorJson = json_value($cursorPayload);
                 }
-                $cursorJson = json_value($cursorPayload);
+                $observedAt = v2_ingest_is_link_only_apply($normalized)
+                    ? $completedAt : $normalized['retrieved_at'];
                 $updateConnector = $pdo->prepare(
                     'UPDATE ' . table_name($config, 'source_connectors')
                     . ' SET connector_status=\'active\',cursor_json=?,last_checked_at=?,'
@@ -2561,7 +2774,7 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
                     $cursorJson,
                     $completedAt,
                     $completedAt,
-                    $normalized['retrieved_at'],
+                    $observedAt,
                     $chunk['batch_raw_count'],
                     $chunk['batch_acknowledged_count'],
                     $normalized['code_revision'],

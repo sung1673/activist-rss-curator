@@ -1987,6 +1987,12 @@ components:
           type: [string, 'null']
           format: date-time
           pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$'
+          description: >-
+            For link-only coverage, the server time when a complete,
+            non-empty approved metadata manifest was revalidated against its
+            active SourceRight. This is metadata verification, not a request
+            to the linked source URL; link-only ingestion has request_count
+            zero.
         last_error_class:
           type: [string, 'null']
         public_note:
@@ -2557,6 +2563,10 @@ components:
             replay is a server-enforced read-only check. Every exact receipt
             must already exist with the same payload and deployment revision;
             otherwise the request fails before any durable state is changed.
+            An authorized CA/AU link-only apply may refresh connector
+            verification timestamps after the exact complete receipt,
+            approved manifest digest, and current SourceRight are revalidated;
+            replay never performs that refresh.
         envelope:
           $ref: '#/components/schemas/GlobalIngestPayload'
     GlobalIngestPayload:
@@ -2610,6 +2620,10 @@ components:
         records:
           type: array
           maxItems: 500
+          description: >-
+            CA/AU link-only verification requires at least one record in one
+            complete chunk, zero lifecycle observations, and zero source
+            requests.
           items:
             $ref: '#/components/schemas/GlobalIngestRecord'
         lifecycle_observations:

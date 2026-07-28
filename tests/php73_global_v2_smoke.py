@@ -18,6 +18,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -491,6 +492,71 @@ def build_record(
     }
     refresh_record_content_hash(record)
     return record
+
+
+def build_ca_link_record(
+    *,
+    filed_at: str,
+    observed_at: str,
+) -> dict[str, Any]:
+    canonical_filed_at = (
+        datetime.fromisoformat(filed_at.replace("Z", "+00:00"))
+        .astimezone(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+    )
+    issuer_reference = IssuerReference(
+        namespace="CA:OFFICIAL",
+        identifier_type="SEDAR_ISSUER_ID",
+        value="CA0001",
+        legal_name="CI Canadian Issuer",
+        market="TSX",
+        ticker="CICA",
+    )
+    issuer_id = "issuer:ca:official:ca0001"
+    record = GlobalDocumentRecord(
+        record_id=stable_record_id(
+            "connector:ca:issuer-ir",
+            issuer_id,
+            "ci-ca-approved-link-1",
+        ),
+        external_id="ci-ca-approved-link-1",
+        issuer_id=issuer_id,
+        issuer_reference=issuer_reference,
+        country_code="CA",
+        source_key="issuer-ir",
+        source_right_id="official:ca-issuer-ir",
+        record_kind="link",
+        document_type="issuer_notice",
+        event_family="meeting_and_vote",
+        title="CI Canadian issuer meeting notice",
+        original_language="en",
+        filed_at=canonical_filed_at,
+        first_observed_at=observed_at,
+        original_url=(
+            "https://investors.ci-canadian-issuer.ca/notices/meeting.pdf"
+        ),
+        content_hash="0" * 64,
+        body_text=None,
+        metadata={
+            "approved_link_only": True,
+            "ingest_mode": "manual-metadata",
+            "title_provenance": "operator_metadata",
+            "official_host": "investors.ci-canadian-issuer.ca",
+            "host_provenance_evidence_sha256": "e" * 64,
+            "source_url_requested": False,
+        },
+    )
+    record = replace(
+        record,
+        content_hash=global_document_content_hash(
+            record,
+            source_type="official_issuer",
+            public_allowed=True,
+            ai_allowed=False,
+        ),
+    )
+    return record.public_payload(allow_body=True)
 
 
 def ingest_payload(
@@ -1590,6 +1656,11 @@ def run(base_url: str, mysql_container_id: str) -> None:
         token=OPS_TOKEN,
     )
     ca_rights_revision = ca_eligibility.get("rights_revision")
+    ca_right_updated_at = mysql_execute(
+        mysql_container_id,
+        "SELECT updated_at FROM ci_source_rights "
+        "WHERE source_right_id='official:ca-issuer-ir';",
+    )
     require(
         ca_eligibility.get("eligible") is True
         and isinstance(ca_rights_revision, str)
@@ -1601,6 +1672,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
         *,
         idempotency_key: str,
         manifest_sha256: str | None,
+        record: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload = empty_chunk_payload(
             rights_revision=ca_rights_revision,
@@ -1625,6 +1697,11 @@ def run(base_url: str, mysql_container_id: str) -> None:
         )
         if manifest_sha256 is not None:
             envelope["source_manifest_sha256"] = manifest_sha256
+        if record is not None:
+            envelope["records"] = [record]
+            envelope["raw_count"] = 1
+            envelope["chunk"]["batch_raw_count"] = 1
+            envelope["chunk"]["batch_acknowledged_count"] = 1
         return payload
 
     for suffix, manifest_sha256 in (
@@ -1648,22 +1725,297 @@ def run(base_url: str, mysql_container_id: str) -> None:
             in str(rejected_manifest.get("detail")),
             repr(rejected_manifest),
         )
+    ca_link_record = build_ca_link_record(
+        filed_at=utc_text(now - timedelta(minutes=5)),
+        observed_at=utc_text(now),
+    )
+    ca_link_payload = ca_empty_payload(
+        idempotency_key="php73-v2-ca-manifest-approved",
+        manifest_sha256=ca_manifest_sha256,
+        record=ca_link_record,
+    )
     approved_manifest, _ = request_json(
         base_url,
         "api.php/api/v2/ops/ingest",
         method="POST",
         token=OPS_TOKEN,
-        payload=ca_empty_payload(
-            idempotency_key="php73-v2-ca-manifest-approved",
-            manifest_sha256=ca_manifest_sha256,
-        ),
+        payload=ca_link_payload,
     )
     require(
         approved_manifest.get("data", {}).get("connector_id")
         == "connector:ca:issuer-ir"
-        and approved_manifest.get("data", {}).get("raw_count") == 0
-        and approved_manifest.get("data", {}).get("acknowledged_count") == 0,
+        and approved_manifest.get("data", {}).get("raw_count") == 1
+        and approved_manifest.get("data", {}).get("acknowledged_count") == 1,
         repr(approved_manifest),
+    )
+    ca_document_id = str(ca_link_record["record_id"])
+    ca_event_id = "global-event:" + ca_document_id
+
+    def ca_link_durable_content_state() -> str:
+        return mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),ingest_id,payload_sha256,"
+            "raw_count,acknowledged_count,batch_id,chunk_index,chunk_count,"
+            "batch_raw_count,batch_acknowledged_count,code_revision,"
+            "started_at,completed_at,created_at),256) "
+            "FROM ci_global_ingest_receipts "
+            "WHERE connector_id='connector:ca:issuer-ir' "
+            "AND idempotency_key='php73-v2-ca-manifest-approved'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),document_id,content_hash,"
+            "retrieved_at,updated_at,publication_status,version_no,"
+            "payload_json),256) FROM ci_documents "
+            f"WHERE document_id='{ca_document_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),event_id,title,"
+            "COALESCE(summary,''),first_observed_at,updated_at,"
+            "publication_status,review_status,identity_status),256) "
+            "FROM ci_governance_events "
+            f"WHERE event_id='{ca_event_id}'));"
+        )
+
+    # A scheduled link-only apply repeats the same approved manifest and
+    # receipt. It must revalidate the current grant and refresh all three
+    # readiness timestamps to the actual server verification time, even after
+    # the previous observation has been stale for more than 45 minutes.
+    stale_link_time = "2006-06-06 06:06:06"
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_connectors SET "
+        f"last_checked_at='{stale_link_time}',"
+        f"last_success_at='{stale_link_time}',"
+        f"last_observed_at='{stale_link_time}',"
+        "last_raw_count=1,last_acknowledged_count=1,"
+        f"updated_at='{stale_link_time}' "
+        "WHERE connector_id='connector:ca:issuer-ir';",
+    )
+    ca_content_before_heartbeat = ca_link_durable_content_state()
+    scheduled_link_repeat, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=ca_link_payload,
+    )
+    require(
+        scheduled_link_repeat.get("data", {}).get("idempotent") is True
+        and scheduled_link_repeat.get("data", {}).get("raw_count") == 1
+        and scheduled_link_repeat.get("data", {}).get(
+            "acknowledged_count"
+        ) == 1
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT "
+            "last_checked_at=last_success_at,"
+            "last_success_at=last_observed_at,"
+            "TIMESTAMPDIFF(SECOND,last_checked_at,UTC_TIMESTAMP()) "
+            "BETWEEN 0 AND 30,"
+            "last_raw_count,last_acknowledged_count "
+            "FROM ci_source_connectors "
+            "WHERE connector_id='connector:ca:issuer-ir';",
+        )
+        == "1\t1\t1\t1\t1"
+        and ca_link_durable_content_state() == ca_content_before_heartbeat,
+        repr(scheduled_link_repeat),
+    )
+
+    # replay proves only that the exact receipt already exists. It must not
+    # act as a collection heartbeat or mutate any connector field.
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_connectors SET "
+        f"last_checked_at='{stale_link_time}',"
+        f"last_success_at='{stale_link_time}',"
+        f"last_observed_at='{stale_link_time}',"
+        f"updated_at='{stale_link_time}' "
+        "WHERE connector_id='connector:ca:issuer-ir';",
+    )
+    link_connector_before_replay = mysql_execute(
+        mysql_container_id,
+        "SELECT CONCAT_WS('|',connector_status,COALESCE(cursor_json,''),"
+        "last_checked_at,last_success_at,last_observed_at,last_raw_count,"
+        "last_acknowledged_count,COALESCE(last_error_class,''),"
+        "COALESCE(code_revision,''),updated_at) "
+        "FROM ci_source_connectors "
+        "WHERE connector_id='connector:ca:issuer-ir';",
+    )
+    ca_content_before_replay = ca_link_durable_content_state()
+    ca_link_replay_payload = json.loads(json.dumps(ca_link_payload))
+    ca_link_replay_payload["ingest_mode"] = "replay"
+    ca_link_replay, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=ca_link_replay_payload,
+    )
+    require(
+        ca_link_replay.get("data", {}).get("idempotent") is True
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',connector_status,COALESCE(cursor_json,''),"
+            "last_checked_at,last_success_at,last_observed_at,last_raw_count,"
+            "last_acknowledged_count,COALESCE(last_error_class,''),"
+            "COALESCE(code_revision,''),updated_at) "
+            "FROM ci_source_connectors "
+            "WHERE connector_id='connector:ca:issuer-ir';",
+        )
+        == link_connector_before_replay
+        and ca_link_durable_content_state() == ca_content_before_replay,
+        repr(ca_link_replay),
+    )
+
+    # Even an exact payload/receipt cannot refresh readiness if its durable
+    # receipt is not a complete one-chunk selected-market batch.
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_global_ingest_receipts SET chunk_count=2 "
+        "WHERE connector_id='connector:ca:issuer-ir' "
+        "AND idempotency_key='php73-v2-ca-manifest-approved';",
+    )
+    ca_content_before_incomplete = ca_link_durable_content_state()
+    incomplete_link_receipt, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=ca_link_payload,
+        expected_status=409,
+    )
+    require(
+        incomplete_link_receipt.get("error")
+        == "global_ingest_batch_receipt_corrupt"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',connector_status,COALESCE(cursor_json,''),"
+            "last_checked_at,last_success_at,last_observed_at,last_raw_count,"
+            "last_acknowledged_count,COALESCE(last_error_class,''),"
+            "COALESCE(code_revision,''),updated_at) "
+            "FROM ci_source_connectors "
+            "WHERE connector_id='connector:ca:issuer-ir';",
+        )
+        == link_connector_before_replay
+        and ca_link_durable_content_state() == ca_content_before_incomplete,
+        repr(incomplete_link_receipt),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_global_ingest_receipts SET chunk_count=1 "
+        "WHERE connector_id='connector:ca:issuer-ir' "
+        "AND idempotency_key='php73-v2-ca-manifest-approved';",
+    )
+
+    # Manifest drift and revocation are checked before any heartbeat. These
+    # direct corruption fixtures intentionally leave the connector snapshot
+    # unchanged so a denied grant can never be made fresh by an old receipt.
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_rights SET evidence_hash='" + ("d" * 64) + "' "
+        "WHERE source_right_id='official:ca-issuer-ir';",
+    )
+    manifest_drift, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=ca_link_payload,
+        expected_status=400,
+    )
+    require(
+        manifest_drift.get("error") == "global_ingest_validation_failed"
+        and "approved manifest mismatch" in str(manifest_drift.get("detail"))
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',connector_status,COALESCE(cursor_json,''),"
+            "last_checked_at,last_success_at,last_observed_at,last_raw_count,"
+            "last_acknowledged_count,COALESCE(last_error_class,''),"
+            "COALESCE(code_revision,''),updated_at) "
+            "FROM ci_source_connectors "
+            "WHERE connector_id='connector:ca:issuer-ir';",
+        )
+        == link_connector_before_replay
+        and ca_link_durable_content_state() == ca_content_before_replay,
+        repr(manifest_drift),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_rights SET evidence_hash='" + ca_manifest_sha256 + "' "
+        "WHERE source_right_id='official:ca-issuer-ir';",
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_rights SET ai_allowed=1,updated_at=UTC_TIMESTAMP() "
+        "WHERE source_right_id='official:ca-issuer-ir';",
+    )
+    stale_link_revision, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=ca_link_payload,
+        expected_status=400,
+    )
+    require(
+        stale_link_revision.get("error")
+        == "global_ingest_validation_failed"
+        and "current server grant mismatch" in str(
+            stale_link_revision.get("detail")
+        )
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',connector_status,COALESCE(cursor_json,''),"
+            "last_checked_at,last_success_at,last_observed_at,last_raw_count,"
+            "last_acknowledged_count,COALESCE(last_error_class,''),"
+            "COALESCE(code_revision,''),updated_at) "
+            "FROM ci_source_connectors "
+            "WHERE connector_id='connector:ca:issuer-ir';",
+        )
+        == link_connector_before_replay
+        and ca_link_durable_content_state() == ca_content_before_replay,
+        repr(stale_link_revision),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_rights SET ai_allowed=0,"
+        f"updated_at='{ca_right_updated_at}' "
+        "WHERE source_right_id='official:ca-issuer-ir';",
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_rights SET status='revoked',"
+        "revoked_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() "
+        "WHERE source_right_id='official:ca-issuer-ir';",
+    )
+    revoked_link_apply, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=ca_link_payload,
+        expected_status=400,
+    )
+    require(
+        revoked_link_apply.get("error") == "global_ingest_validation_failed"
+        and "not eligible for collection" in str(
+            revoked_link_apply.get("detail")
+        )
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',connector_status,COALESCE(cursor_json,''),"
+            "last_checked_at,last_success_at,last_observed_at,last_raw_count,"
+            "last_acknowledged_count,COALESCE(last_error_class,''),"
+            "COALESCE(code_revision,''),updated_at) "
+            "FROM ci_source_connectors "
+            "WHERE connector_id='connector:ca:issuer-ir';",
+        )
+        == link_connector_before_replay
+        and ca_link_durable_content_state() == ca_content_before_replay,
+        repr(revoked_link_apply),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_rights SET status='active',revoked_at=NULL,"
+        "updated_at=UTC_TIMESTAMP() "
+        "WHERE source_right_id='official:ca-issuer-ir';",
     )
 
     # OpenDART remains on the established v1 official-ingest path.
