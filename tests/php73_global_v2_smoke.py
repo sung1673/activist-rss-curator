@@ -5004,8 +5004,8 @@ def run(base_url: str, mysql_container_id: str) -> None:
             "WHERE connector_id='connector:us:sec-edgar' "
             "AND chunk_count=2 GROUP BY batch_id;",
         )
-        == "2,3\t3",
-        "interrupted SEC receipt telemetry fixture is missing",
+        == "1,1\t1",
+        "exact SEC completed-day receipt telemetry fixture is missing",
     )
     automated_with_mutation, _ = request_json(
         base_url,
