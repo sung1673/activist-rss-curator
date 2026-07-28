@@ -18,6 +18,12 @@ from curator.global_alpha_monitor import (
     MonitorConfig,
     run_monitor,
 )
+from curator.global_alpha_observation_segment import (
+    SEGMENT_COUNTS,
+    SEGMENT_KIND,
+    canonical_jsonl,
+    segment_slot_bounds,
+)
 from curator.global_alpha_pages_identity import (
     CONTENT_ALGORITHM,
     build_terminal_content_identity,
@@ -1062,29 +1068,132 @@ def test_protected_base64_bundle_requires_exact_same_sha_file_set(
         )
 
 
-def test_observation_archives_are_digest_checked_and_latest_window_is_compiled(
+def _write_segment_archives(
     tmp_path: Path,
-) -> None:
+    *,
+    slot_override: tuple[int, int, int] | None = None,
+    internal_digest_override_segment: int | None = None,
+) -> tuple[Path, Path, dict[str, object]]:
     archive_dir = tmp_path / "archives"
     archive_dir.mkdir()
-    manifest: list[dict[str, object]] = []
-    for index, record in enumerate(observations()):
-        archive = archive_dir / f"{index}.zip"
+    records = observations()[:288]
+    chain_id = "9001"
+    entries: list[dict[str, object]] = []
+    previous_run_id: str | None = None
+    previous_digest: str | None = None
+    offset = 0
+    for segment_index, count in enumerate(SEGMENT_COUNTS, start=1):
+        run_id = str(9000 + segment_index)
+        first_slot, last_slot = segment_slot_bounds(segment_index)
+        segment_records = deepcopy(records[offset : offset + count])
+        for local_index, record in enumerate(segment_records):
+            slot_index = first_slot + local_index
+            if (
+                slot_override is not None
+                and slot_override[0] == segment_index
+                and slot_override[1] == local_index
+            ):
+                slot_index = slot_override[2]
+            record["observation_chain"] = {
+                "schema_version": 1,
+                "chain_id": chain_id,
+                "segment_index": segment_index,
+                "segment_count": 5,
+                "slot_index": slot_index,
+                "cadence_anchor": START.isoformat(),
+                "candidate_started_at": START.isoformat(),
+                "candidate_ends_at": (START + timedelta(hours=24)).isoformat(),
+                "run_id": run_id,
+                "run_attempt": 1,
+            }
+        observation_bytes = canonical_jsonl(segment_records)
+        segment_manifest = {
+            "schema_version": 1,
+            "kind": SEGMENT_KIND,
+            "status": "complete",
+            "error_code": None,
+            "chain_id": chain_id,
+            "segment_index": segment_index,
+            "segment_count": 5,
+            "code_revision": REVISION,
+            "run_id": run_id,
+            "run_attempt": 1,
+            "predecessor_run_id": previous_run_id,
+            "predecessor_artifact_digest": previous_digest,
+            "candidate_started_at": START.isoformat(),
+            "candidate_ends_at": (START + timedelta(hours=24)).isoformat(),
+            "cadence_anchor": START.isoformat(),
+            "first_slot_index": first_slot,
+            "last_slot_index": last_slot,
+            "expected_record_count": count,
+            "record_count": count,
+            "first_observed_at": segment_records[0]["observed_at"],
+            "last_observed_at": segment_records[-1]["observed_at"],
+            "observations_sha256": (
+                "0" * 64
+                if internal_digest_override_segment == segment_index
+                else hashlib.sha256(observation_bytes).hexdigest()
+            ),
+            "completed_at": (
+                (START + timedelta(hours=24)).isoformat()
+                if segment_index == 5
+                else segment_records[-1]["observed_at"]
+            ),
+        }
+        archive = archive_dir / f"{segment_index}.zip"
         with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
             bundle.writestr(
-                "global-alpha-observation.json",
-                json.dumps(record),
+                "observations.jsonl",
+                observation_bytes,
             )
-        manifest.append(
+            bundle.writestr(
+                "segment-manifest.json",
+                json.dumps(segment_manifest, sort_keys=True),
+            )
+        digest = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
+        entries.append(
             {
-                "artifact_id": str(index + 1),
-                "artifact_digest": "sha256:"
-                + hashlib.sha256(archive.read_bytes()).hexdigest(),
+                "chain_id": chain_id,
+                "segment_index": segment_index,
+                "run_id": run_id,
+                "run_attempt": 1,
+                "run_conclusion": "success",
+                "run_event": "workflow_dispatch",
+                "workflow_path": (
+                    ".github/workflows/global-alpha-observation-chain.yml"
+                ),
+                "run_created_at": (
+                    START + timedelta(minutes=offset * 5)
+                ).isoformat(),
+                "artifact_id": str(1000 + segment_index),
+                "artifact_name": (
+                    f"global-alpha-observation-segment-{chain_id}-"
+                    f"{segment_index}"
+                ),
+                "artifact_digest": digest,
                 "archive_name": archive.name,
+                "code_revision": REVISION,
             }
         )
+        previous_run_id = run_id
+        previous_digest = digest
+        offset += count
+    manifest: dict[str, object] = {
+        "schema_version": 1,
+        "kind": "bside-global-alpha-observation-segment-archive-manifest",
+        "chain_id": chain_id,
+        "code_revision": REVISION,
+        "segments": entries,
+    }
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    return archive_dir, manifest_path, manifest
+
+
+def test_observation_segments_are_chained_digest_checked_and_compiled(
+    tmp_path: Path,
+) -> None:
+    archive_dir, manifest_path, manifest = _write_segment_archives(tmp_path)
     output = tmp_path / "observations.jsonl"
     assert (
         compile_observation_archives(
@@ -1093,17 +1202,99 @@ def test_observation_archives_are_digest_checked_and_latest_window_is_compiled(
             output_path=output,
             expected_revision=REVISION,
         )
-        == 289
+        == 288
     )
-    assert len(output.read_text(encoding="utf-8").splitlines()) == 289
+    assert len(output.read_text(encoding="utf-8").splitlines()) == 288
 
-    manifest[10]["artifact_digest"] = "sha256:" + ("0" * 64)
+    segments = manifest["segments"]
+    assert isinstance(segments, list)
+    assert isinstance(segments[2], dict)
+    segments[2]["artifact_digest"] = "sha256:" + ("0" * 64)
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(AlphaReleaseEvidenceError, match="digest mismatch"):
         compile_observation_archives(
             archive_dir=archive_dir,
             manifest_path=manifest_path,
             output_path=output,
+            expected_revision=REVISION,
+        )
+
+
+def test_observation_segments_reject_missing_neutral_and_overlapping_chain(
+    tmp_path: Path,
+) -> None:
+    missing_root = tmp_path / "missing"
+    missing_root.mkdir()
+    archive_dir, manifest_path, manifest = _write_segment_archives(missing_root)
+    segments = manifest["segments"]
+    assert isinstance(segments, list)
+    segments.pop()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(AlphaReleaseEvidenceError, match="exactly five"):
+        compile_observation_archives(
+            archive_dir=archive_dir,
+            manifest_path=manifest_path,
+            output_path=tmp_path / "missing.jsonl",
+            expected_revision=REVISION,
+        )
+
+    neutral_root = tmp_path / "neutral"
+    neutral_root.mkdir()
+    archive_dir, manifest_path, manifest = _write_segment_archives(neutral_root)
+    segments = manifest["segments"]
+    assert isinstance(segments, list)
+    assert isinstance(segments[3], dict)
+    segments[3]["run_conclusion"] = "neutral"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(AlphaReleaseEvidenceError, match="successful first-attempt"):
+        compile_observation_archives(
+            archive_dir=archive_dir,
+            manifest_path=manifest_path,
+            output_path=tmp_path / "neutral.jsonl",
+            expected_revision=REVISION,
+        )
+
+    cancelled_root = tmp_path / "cancelled"
+    cancelled_root.mkdir()
+    archive_dir, manifest_path, manifest = _write_segment_archives(cancelled_root)
+    segments = manifest["segments"]
+    assert isinstance(segments, list)
+    assert isinstance(segments[1], dict)
+    segments[1]["run_conclusion"] = "cancelled"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(AlphaReleaseEvidenceError, match="successful first-attempt"):
+        compile_observation_archives(
+            archive_dir=archive_dir,
+            manifest_path=manifest_path,
+            output_path=tmp_path / "cancelled.jsonl",
+            expected_revision=REVISION,
+        )
+
+    overlap_root = tmp_path / "overlap"
+    overlap_root.mkdir()
+    archive_dir, manifest_path, _manifest = _write_segment_archives(
+        overlap_root,
+        slot_override=(2, 0, 57),
+    )
+    with pytest.raises(AlphaReleaseEvidenceError, match="chain metadata mismatch"):
+        compile_observation_archives(
+            archive_dir=archive_dir,
+            manifest_path=manifest_path,
+            output_path=tmp_path / "overlap.jsonl",
+            expected_revision=REVISION,
+        )
+
+    tampered_root = tmp_path / "internal-tamper"
+    tampered_root.mkdir()
+    archive_dir, manifest_path, _manifest = _write_segment_archives(
+        tampered_root,
+        internal_digest_override_segment=3,
+    )
+    with pytest.raises(AlphaReleaseEvidenceError, match="observations digest"):
+        compile_observation_archives(
+            archive_dir=archive_dir,
+            manifest_path=manifest_path,
+            output_path=tmp_path / "tampered.jsonl",
             expected_revision=REVISION,
         )
 
@@ -1135,12 +1326,15 @@ def test_alpha_evidence_workflows_and_cutover_use_exact_immutable_contract() -> 
     assert "GLOBAL_ALPHA_RELEASE_INPUTS_GZIP_B64" in inputs_text
     assert "actual human reviewer" in inputs_text
     assert ".github/workflows/global-alpha-evidence-inputs.yml" in evidence_text
-    assert ".github/workflows/global-alpha-watchdog.yml" in evidence_text
-    assert "same-SHA watchdog artifacts" in evidence_text
-    assert '["success", "failure"].includes(run.conclusion)' in evidence_text
+    assert ".github/workflows/global-alpha-observation-chain.yml" in evidence_text
+    assert ".github/workflows/global-alpha-watchdog.yml" not in evidence_text
+    assert "exact self-chained observation segments" in evidence_text
+    assert 'run.conclusion !== "success"' in evidence_text
     assert "run_conclusion: run.conclusion" in evidence_text
     assert "digest.toLowerCase()" in evidence_text
-    assert "selected.length < 287" in evidence_text
+    assert "segmentIndex <= 5" in evidence_text
+    assert "observation_chain_run_id" in evidence_text
+    assert "listArtifactsForRepo" in evidence_text
     assert "governance_pages_run_id" in evidence_text
     assert "governance_pages_artifact_name" in evidence_text
     assert "run.path !== \".github/workflows/daily.yml\"" in evidence_text

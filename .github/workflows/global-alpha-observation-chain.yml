@@ -1,0 +1,282 @@
+name: Production Alpha protected observation chain
+
+on:
+  workflow_dispatch:
+    inputs:
+      segment_index:
+        description: Internal chain segment; start a new chain with 1
+        required: true
+        default: "1"
+        type: string
+      chain_id:
+        description: Internal chain identity; leave empty for segment 1
+        required: false
+        default: ""
+        type: string
+      expected_revision:
+        description: Internal immutable release SHA; leave empty for segment 1
+        required: false
+        default: ""
+        type: string
+      candidate_started_at:
+        description: Internal server candidate boundary; leave empty for segment 1
+        required: false
+        default: ""
+        type: string
+      candidate_ends_at:
+        description: Internal server candidate boundary; leave empty for segment 1
+        required: false
+        default: ""
+        type: string
+      cadence_anchor:
+        description: Internal cadence anchor; leave empty for segment 1
+        required: false
+        default: ""
+        type: string
+      predecessor_run_id:
+        description: Internal predecessor run; leave empty for segment 1
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  observe-segment:
+    if: >-
+      github.ref_name == github.event.repository.default_branch &&
+      vars.GOVERNANCE_PIPELINE_MODE == 'shadow' &&
+      vars.GLOBAL_ALPHA_OBSERVATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    environment:
+      name: governance-runtime
+    env:
+      GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+      GLOBAL_ALPHA_OBSERVATION_ENABLED: ${{ vars.GLOBAL_ALPHA_OBSERVATION_ENABLED }}
+      BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+      BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+      BSIDE_ALPHA_PREVIEW_WEB_URL: ${{ vars.BSIDE_ALPHA_PREVIEW_WEB_URL }}
+      BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+      GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
+
+    steps:
+      - name: Initialize fail-closed segment artifact
+        id: initialize
+        shell: bash
+        env:
+          SEGMENT_ROOT: ${{ runner.temp }}/global-alpha-observation-segment
+        run: |
+          set -euo pipefail
+          mkdir -p "$SEGMENT_ROOT"
+          : > "$SEGMENT_ROOT/observations.jsonl"
+          python -c "import json,os,pathlib; pathlib.Path(os.environ['SEGMENT_ROOT'],'segment-manifest.json').write_text(json.dumps({'schema_version':1,'kind':'bside-global-alpha-observation-segment','status':'not_started','code_revision':os.environ.get('GITHUB_SHA','')},sort_keys=True,indent=2)+'\n',encoding='utf-8')"
+
+      - name: Checkout immutable observation revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Resolve immutable chain identity
+        id: chain
+        shell: bash
+        env:
+          INPUT_SEGMENT_INDEX: ${{ inputs.segment_index }}
+          INPUT_CHAIN_ID: ${{ inputs.chain_id }}
+          INPUT_EXPECTED_REVISION: ${{ inputs.expected_revision }}
+          INPUT_CANDIDATE_STARTED_AT: ${{ inputs.candidate_started_at }}
+          INPUT_CANDIDATE_ENDS_AT: ${{ inputs.candidate_ends_at }}
+          INPUT_CADENCE_ANCHOR: ${{ inputs.cadence_anchor }}
+          INPUT_PREDECESSOR_RUN_ID: ${{ inputs.predecessor_run_id }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          ACTUAL_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]]
+          [[ "$RUN_ATTEMPT" == "1" ]] || {
+            echo "::error::Observation segments cannot be rerun."
+            exit 1
+          }
+          [[ "$INPUT_SEGMENT_INDEX" =~ ^[1-5]$ ]] || {
+            echo "::error::segment_index must be 1 through 5."
+            exit 1
+          }
+          if [[ "$INPUT_SEGMENT_INDEX" == "1" ]]; then
+            [[ -z "$INPUT_CHAIN_ID" ]]
+            [[ -z "$INPUT_EXPECTED_REVISION" ]]
+            [[ -z "$INPUT_CANDIDATE_STARTED_AT" ]]
+            [[ -z "$INPUT_CANDIDATE_ENDS_AT" ]]
+            [[ -z "$INPUT_CADENCE_ANCHOR" ]]
+            [[ -z "$INPUT_PREDECESSOR_RUN_ID" ]]
+            chain_id="$RUN_ID"
+            expected_revision="$ACTUAL_SHA"
+          else
+            [[ "$INPUT_CHAIN_ID" =~ ^[1-9][0-9]*$ ]]
+            [[ "$INPUT_EXPECTED_REVISION" =~ ^[a-f0-9]{40}$ ]]
+            [[ "$INPUT_PREDECESSOR_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+            [[ -n "$INPUT_CANDIDATE_STARTED_AT" ]]
+            [[ -n "$INPUT_CANDIDATE_ENDS_AT" ]]
+            [[ -n "$INPUT_CADENCE_ANCHOR" ]]
+            chain_id="$INPUT_CHAIN_ID"
+            expected_revision="$INPUT_EXPECTED_REVISION"
+          fi
+          [[ "$ACTUAL_SHA" == "$expected_revision" ]] || {
+            echo "::error::The default branch changed during the immutable observation chain."
+            exit 1
+          }
+          {
+            echo "chain_id=$chain_id"
+            echo "expected_revision=$expected_revision"
+            echo "segment_index=$INPUT_SEGMENT_INDEX"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Resolve fail-closed observation mode
+        id: rollout
+        env:
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
+          GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          KIND_CONNECTOR_MODE: ${{ vars.KIND_CONNECTOR_MODE }}
+          GLOBAL_ALPHA_OBSERVATION_ENABLED: ${{ vars.GLOBAL_ALPHA_OBSERVATION_ENABLED }}
+          ENABLE_PAGES: ${{ vars.ENABLE_PAGES }}
+          ENABLE_GOVERNANCE_PAGES: ${{ vars.ENABLE_GOVERNANCE_PAGES }}
+          ENABLE_GOVERNANCE_SHADOW: ${{ vars.ENABLE_GOVERNANCE_SHADOW }}
+        run: python -m curator.operation_mode --github-output "$GITHUB_OUTPUT"
+
+      - name: Verify exact predecessor completion and artifact
+        id: predecessor
+        if: steps.chain.outputs.segment_index != '1'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PREDECESSOR_RUN_ID: ${{ inputs.predecessor_run_id }}
+          CHAIN_ID: ${{ steps.chain.outputs.chain_id }}
+          SEGMENT_INDEX: ${{ steps.chain.outputs.segment_index }}
+          EXPECTED_SHA: ${{ steps.chain.outputs.expected_revision }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          REQUIRED_WORKFLOW_PATH: .github/workflows/global-alpha-observation-chain.yml
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const predecessorId = Number(process.env.PREDECESSOR_RUN_ID);
+            const segmentIndex = Number(process.env.SEGMENT_INDEX);
+            if (
+              !Number.isSafeInteger(predecessorId) ||
+              predecessorId < 1 ||
+              segmentIndex < 2 ||
+              segmentIndex > 5 ||
+              predecessorId === Number(process.env.CURRENT_RUN_ID)
+            ) {
+              core.setFailed("Invalid predecessor chain identity");
+              return;
+            }
+            let run;
+            for (let attempt = 0; attempt < 80; attempt += 1) {
+              const response = await github.rest.actions.getWorkflowRun({
+                owner, repo, run_id: predecessorId,
+              });
+              run = response.data;
+              if (run.status === "completed") break;
+              await new Promise((resolve) => setTimeout(resolve, 15000));
+            }
+            if (
+              !run ||
+              run.status !== "completed" ||
+              run.conclusion !== "success" ||
+              run.run_attempt !== 1 ||
+              run.event !== "workflow_dispatch" ||
+              (run.head_sha || "").toLowerCase() !== process.env.EXPECTED_SHA ||
+              run.head_branch !== process.env.DEFAULT_BRANCH ||
+              run.path !== process.env.REQUIRED_WORKFLOW_PATH
+            ) {
+              core.setFailed("The predecessor segment did not finish as an exact same-SHA success");
+              return;
+            }
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner, repo, run_id: predecessorId, per_page: 100},
+            );
+            const expectedName =
+              `global-alpha-observation-segment-${process.env.CHAIN_ID}-${segmentIndex - 1}`;
+            const matches = artifacts.filter(
+              (item) => item.name === expectedName && !item.expired,
+            );
+            if (
+              matches.length !== 1 ||
+              !/^sha256:[0-9a-f]{64}$/i.test(matches[0].digest || "")
+            ) {
+              core.setFailed("The predecessor has no unique immutable segment artifact");
+              return;
+            }
+            core.setOutput("artifact_digest", matches[0].digest.toLowerCase());
+
+      - name: Run bounded self-chaining observation segment
+        if: steps.rollout.outputs.global_alpha_observation_enabled == 'true'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SEGMENT_ROOT: ${{ runner.temp }}/global-alpha-observation-segment
+          SEGMENT_INDEX: ${{ steps.chain.outputs.segment_index }}
+          CHAIN_ID: ${{ steps.chain.outputs.chain_id }}
+          EXPECTED_REVISION: ${{ steps.chain.outputs.expected_revision }}
+          CANDIDATE_STARTED_AT: ${{ inputs.candidate_started_at }}
+          CANDIDATE_ENDS_AT: ${{ inputs.candidate_ends_at }}
+          CADENCE_ANCHOR: ${{ inputs.cadence_anchor }}
+          PREDECESSOR_RUN_ID: ${{ inputs.predecessor_run_id }}
+          PREDECESSOR_ARTIFACT_DIGEST: ${{ steps.predecessor.outputs.artifact_digest }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          python -m curator.global_alpha_observation_segment \
+            --output-dir "$SEGMENT_ROOT" \
+            --segment-index "$SEGMENT_INDEX" \
+            --chain-id "$CHAIN_ID" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --expected-revision "$EXPECTED_REVISION" \
+            --candidate-started-at "$CANDIDATE_STARTED_AT" \
+            --candidate-ends-at "$CANDIDATE_ENDS_AT" \
+            --cadence-anchor "$CADENCE_ANCHOR" \
+            --predecessor-run-id "$PREDECESSOR_RUN_ID" \
+            --predecessor-artifact-digest "$PREDECESSOR_ARTIFACT_DIGEST" \
+            --repository "$GITHUB_REPOSITORY" \
+            --workflow "global-alpha-observation-chain.yml" \
+            --ref "$DEFAULT_BRANCH"
+
+      - name: Preserve immutable observation segment
+        id: segment_artifact
+        if: always() && steps.initialize.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-observation-segment-${{ steps.chain.outputs.chain_id || github.run_id }}-${{ steps.chain.outputs.segment_index || inputs.segment_index }}
+          path: ${{ runner.temp }}/global-alpha-observation-segment
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Record bounded segment result
+        if: always()
+        shell: bash
+        env:
+          CHAIN_ID: ${{ steps.chain.outputs.chain_id }}
+          SEGMENT_INDEX: ${{ steps.chain.outputs.segment_index }}
+          ARTIFACT_ID: ${{ steps.segment_artifact.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.segment_artifact.outputs.artifact-digest }}
+        run: |
+          {
+            echo "### Production Alpha observation segment"
+            echo "- chain: \`$CHAIN_ID\`"
+            echo "- segment: \`$SEGMENT_INDEX/5\`"
+            echo "- revision: \`$GITHUB_SHA\`"
+            echo "- artifact id: \`$ARTIFACT_ID\`"
+            echo "- artifact digest: \`$ARTIFACT_DIGEST\`"
+          } >> "$GITHUB_STEP_SUMMARY"

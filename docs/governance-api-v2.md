@@ -126,7 +126,7 @@ v2는 v1과 독립적인 `global_terminal_v2` release state를 사용한다.
 - `/ops/source-right-eligibility`: `ops` 또는 `admin` Bearer token
 - `/ops/alpha-release-evidence`: `ops` 또는 `admin` Bearer token
 - `/ops/ingest`: `ops` 또는 `admin` Bearer token
-- `/ops/release-state`: `ops` 또는 `admin` Bearer token. 5분 watchdog은 이 읽기 전용 경로만 사용
+- `/ops/release-state`: `ops` 또는 `admin` Bearer token. Observation chain과 진단 watchdog은 이 읽기 전용 경로만 사용
 - `/admin/review-queue`, `/admin/events/{event_id}/review`: `editor` 역할
 - `/admin/brief-candidates`, `/admin/briefs`: `editor` 역할
 - `/admin/release-state`: `admin` Bearer token
@@ -284,7 +284,7 @@ Production Alpha를 실행하려면 `official:dart`, `official:sec-edgar`, `offi
 
 `.github/workflows/global-brief.yml`의 KST 05:45 예약 작업은 후보 bundle만 만들고 공개 brief를 쓰지 않는다. 사람 1명이 Top 5·근거·빈 결과 이유를 승인한 뒤 후보 작업의 `candidate_run_id`와 승인 JSON을 수동 `publish` 작업에 제출해야 한다. 발행 작업은 그 run이 같은 기본 브랜치·같은 code SHA에서 성공했는지, edition과 run ID에 정확히 묶인 후보 artifact가 하나뿐인지 확인한 뒤 bundle의 실제 `sha256(basis)`와 승인 hash·선택 사건 버전을 다시 대조한다. 후보 artifact는 30일, publication receipt는 90일 보존한다. 필요한 secret은 `BSIDE_EDITOR_TOKEN`, `GOVERNANCE_PREVIEW_TOKEN`, API 주소는 `BSIDE_API_BASE_URL` secret 또는 `GOVERNANCE_API_BASE_URL` variable이다.
 
-`.github/workflows/global-alpha-watchdog.yml`은 `GOVERNANCE_PIPELINE_MODE=shadow|live`와 `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`가 모두 충족될 때만 5분마다 release state, source 상태와 공개 루트를 관측한다. 기본값은 `false`이며 preview·소스·동일 SHA 준비가 끝나기 전에는 관측 분모를 만들지 않는다. 다른 문자열은 fail-closed한다. 관측은 읽기 전용 `GET /ops/release-state`와 `BSIDE_OPS_TOKEN`, `GOVERNANCE_PREVIEW_TOKEN`, `BSIDE_PUBLIC_WEB_URL`을 사용한다. watchdog에는 `BSIDE_ADMIN_TOKEN`이나 `BSIDE_RELEASE_AUTHORIZER_TOKEN`을 제공하지 않는다. 이 Production Alpha의 공개 배포는 web-only다. Telegram은 허가된 내부 신호 읽기에만 남고 outbound는 영구 비활성이므로 `ENABLE_TELEGRAM_DELIVERY=false`와 `ENABLE_GOVERNANCE_DELIVERY=false`를 유지한다.
+`.github/workflows/global-alpha-observation-chain.yml`은 `GOVERNANCE_PIPELINE_MODE=shadow`와 `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`가 모두 충족된 뒤 운영자가 segment 1을 수동 시작한다. 5개 구간은 같은 SHA와 서버 candidate window를 공유하며 약 5분마다 총 288회 release state, source 상태와 Preview 루트를 관측한다. 후속 구간은 predecessor의 성공 first attempt와 immutable artifact digest를 확인한 뒤에만 기록을 시작한다. `.github/workflows/global-alpha-watchdog.yml`의 best-effort cron은 상시 진단용이며 출시 증빙에는 사용하지 않는다. 관측은 읽기 전용 `GET /ops/release-state`와 `BSIDE_OPS_TOKEN`, `GOVERNANCE_PREVIEW_TOKEN`, `BSIDE_PUBLIC_WEB_URL`을 사용한다. 두 workflow에는 `BSIDE_ADMIN_TOKEN`이나 `BSIDE_RELEASE_AUTHORIZER_TOKEN`을 제공하지 않는다. 이 Production Alpha의 공개 배포는 web-only다. Telegram은 허가된 내부 신호 읽기에만 남고 outbound는 영구 비활성이므로 `ENABLE_TELEGRAM_DELIVERY=false`와 `ENABLE_GOVERNANCE_DELIVERY=false`를 유지한다.
 
 ## 사건 검수
 

@@ -14,7 +14,8 @@
 | `global-brief.yml` | 사람 검수용 후보 artifact 생성, 승인된 동일 SHA payload 수동 발행 | KST 05:45 후보 생성, 발행은 수동 |
 | `global-alpha-review-candidates.yml` | 실제 Preview API에서 무라벨 60사건·120문서쌍·Top 5 검수 artifact 생성 | 기본 브랜치에서 운영자 수동 실행 |
 | `global-alpha-preview-smoke.yml` | 실제 PHP v2·운영 DB의 Today·사건·발행사·검색·캘린더와 3개 viewport 증빙 검증 | Preview 배포 뒤 운영자 수동 실행 |
-| `global-alpha-watchdog.yml` | `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`인 Production Alpha의 API·release state·source freshness·공개 루트 관측 | 5분 |
+| `global-alpha-observation-chain.yml` | 같은 SHA와 서버 candidate window에 고정된 5개 구간·288회 Production Alpha 출시 관측 | 운영자 수동 시작, 이후 self-chain |
+| `global-alpha-watchdog.yml` | API·release state·source freshness·공개 루트 운영 진단. 출시 증빙에는 사용하지 않음 | best-effort 5분 |
 | `kind-adapter-preflight.yml` | 운영 SourceRight 확인 후 KIND adapter 실제 계약을 1회 검증 | 승인 후 운영자 수동 실행만 |
 | `ingest-media.yml` | 허가된 Telegram·뉴스 발견 큐 수집 | 30분 |
 | `resolve-links.yml` | Google News 발견 URL 후처리 | 1시간 |
@@ -52,7 +53,7 @@ GitHub cron은 UTC로 해석된다. 일일 생성은 `45 20 * * *`(KST 05:45), �
 - `CURATOR_FEEDS`: 비공개 보조 발견 피드. 운영 범위 정책이 켜져 있으므로 단순 URL 문자열이 아니라 `name`, `url`, `scope`, `enabled`를 담은 JSON 배열로 등록한다. 세부 형식은 [미디어 발견 피드 범위 정책](media-source-scope-policy.md)을 따른다.
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`: 등록하지 않는다. 과거 값이 남아 있으면 삭제하며, 현재 코드와 workflow에서는 outbound Telegram을 재활성화할 수 없다.
 - `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING`: 허가 채널 수집
-- `BSIDE_API_BASE_URL`, `BSIDE_OPS_TOKEN`: v1 운영 관측, v2 공식 source ingest와 5분 Production Alpha watchdog. Watchdog의 release state 조회는 읽기 전용 `GET /api/v2/ops/release-state`만 사용
+- `BSIDE_API_BASE_URL`, `BSIDE_OPS_TOKEN`: v1 운영 관측, v2 공식 source ingest, Production Alpha observation chain과 진단 watchdog. release state 조회는 읽기 전용 `GET /api/v2/ops/release-state`만 사용
 - `BSIDE_ADMIN_TOKEN`: `/api/v1|v2/admin/release-state`의 preview·긴급 차단과, 보호된 승인을 소비하는 `/api/v2/admin/cutover`에만 사용하는 32바이트 이상 token. Watchdog에는 제공하지 않으며 PHP에는 평문 대신 SHA-256을 admin 역할 hash로 등록
 - `BSIDE_RELEASE_AUTHORIZER_TOKEN`: 보호된 `governance-release` environment에만 등록하는 32바이트 이상 token. 정확한 `release_authorizer` 역할로 `/api/v2/admin/release-authorizations`만 호출하며, 일반 repository/environment나 watchdog에는 제공하지 않는다. PHP에는 평문 대신 SHA-256을 별도 역할 hash로 등록
 - `BSIDE_EDITOR_TOKEN`: 사건·캠페인·정정·shadow discrepancy 검수와 v2 brief 후보·발행에 사용하는 32바이트 이상 token. PHP에는 평문 대신 SHA-256을 editor 역할 hash로 등록
@@ -68,7 +69,7 @@ Repository variable의 단일 기준:
 - `ENABLE_TELEGRAM_DELIVERY=false`, `ENABLE_GOVERNANCE_DELIVERY=false`: 영구 비활성. `true`이면 workflow가 fail-closed
 - `ACTIVIST_PUBLIC_API_URL`: 브라우저에서 읽는 공개 API URL
 - `GOVERNANCE_API_BASE_URL`: 공개 거버넌스 UI의 `/api/v1` 기준 URL. 비어 있으면 `ACTIVIST_PUBLIC_API_URL` 뒤에 `/api/v1`을 붙여 사용
-- `BSIDE_PUBLIC_WEB_URL`: Production Alpha watchdog과 전환 smoke가 확인할 공개 루트. 기본값은 `https://news.bside.ai`
+- `BSIDE_PUBLIC_WEB_URL`: Production Alpha observation chain·진단 watchdog과 전환 smoke가 확인할 공개 루트. 기본값은 `https://news.bside.ai`
 - `SEC_EDGAR_USER_AGENT`: SEC 정책에 맞는 서비스명과 실제 연락 가능한 이메일을 포함한 User-Agent. SEC 공개 EDGAR 수집은 별도 API key를 사용하지 않는다.
 - `CA_OFFICIAL_LINKS_JSON`, `AU_OFFICIAL_LINKS_JSON`: 승인된 캐나다·호주 수동 공식 링크 metadata의 닫힌 JSON object. 아래 Production Alpha 계약을 따른다.
 - `KIND_DISCLOSURE_ENDPOINT`: 이 저장소가 정의한 JSON·pagination 계약을 충족하는 검증된 KIND 어댑터 URL. 일반 KIND HTML 화면이나 임의 자리표시자 URL을 넣지 않으며, 값이 없거나 계약 검증에 실패하면 공식 수집 workflow가 fail-closed로 종료
@@ -130,7 +131,7 @@ Production Alpha의 배포·관측 분모는 Pages/API뿐이다. Telegram outbou
 
 `governance-cutover.yml`의 실제 승격 job은 reviewer가 있는 `governance-release` environment에서만 실행한다. 이 environment에만 `BSIDE_RELEASE_AUTHORIZER_TOKEN`을 두고, repository 수준이나 `governance-runtime`, watchdog job에는 복사하지 않는다. PHP의 `release_authorizer` hash에도 이 토큰 하나만 등록한다. 일반 `BSIDE_ADMIN_TOKEN`은 승인 발급 endpoint를 통과할 수 없으므로 environment 승인 없이 직접 공개할 수 없다.
 
-Alpha evidence workflow는 exact `daily.yml` run의 `pages-<run_id>-<attempt>` artifact를 다운로드해 run·attempt·artifact ID·이름·GitHub digest, 모든 정규 파일의 전체 사이트 content digest, root와 `/governance`에서 byte-identical인 `index.html`·`config.js`·`app.js`·`styles.css` terminal identity를 고정한다. 5분 watchdog은 preview에서 같은 네 파일의 원본 UTF-8 바이트를 매번 계산하며, 24시간 전 관측이 해당 terminal identity와 모두 같아야 한다. `daily.yml`과 `build-feed.yml`은 동일한 `BSIDE_PUBLIC_WEB_URL` 값을 UI 구성에 사용한다.
+Alpha evidence workflow는 exact `daily.yml` run의 `pages-<run_id>-<attempt>` artifact를 다운로드해 run·attempt·artifact ID·이름·GitHub digest, 모든 정규 파일의 전체 사이트 content digest, root와 `/governance`에서 byte-identical인 `index.html`·`config.js`·`app.js`·`styles.css` terminal identity를 고정한다. Observation chain은 preview에서 같은 네 파일의 원본 UTF-8 바이트를 매번 계산하며, 24시간 전 관측이 해당 terminal identity와 모두 같아야 한다. `daily.yml`과 `build-feed.yml`은 동일한 `BSIDE_PUBLIC_WEB_URL` 값을 UI 구성에 사용한다.
 
 전환 workflow는 최근 48시간 이내 동일 SHA release-evidence artifact를 digest까지 검증하되, 실제 전환에는 evidence run 생성 시각·보고서 `evidence_as_of`·관측 종료 시각이 모두 현재로부터 60분 이내인 보고서만 허용한다. evidence에 포함된 exact Pages artifact만 GitHub API에서 다시 찾아 전체 사이트·terminal identity를 재계산한다. cutover dispatch는 별도 Pages run/name을 받지 않으므로 같은 SHA의 다른 artifact를 선택할 수 없다. v1·v2를 모두 preview로 확인하고 `/api/v2/sources/status`의 필수 4개 connector가 모두 `public_ready=true`, JP·GB가 정책상 unavailable identity인지 검증한 뒤 다음 순서로 진행한다.
 
@@ -247,7 +248,7 @@ PHP 배포 백업은 공개 파일 경로가 아니라 외부 접근이 차단�
 
 Watchdog은 `/api/v1/ops/health`의 공식 수집 최신성을 확인하고 실제 공개 route를 KST 매시 01·06·11·16·21·26·31·36·41·46·51·56분에 측정해 `/api/v1/ops/availability-observations`에 적재한다. release evidence는 `watchdog-v1-kst-5m-minute01`의 route당 일 288개 slot을 raw `observed_at`으로 재구성하며, 4개 route 일 1,152개와 7일 8,064개가 모두 덮이지 않으면 실패한다. 중복 관측은 missing을 상쇄하지 않고, interval p95와 일 경계 포함 최대 공백이 모두 600초 이하여야 한다. Telegram outbox는 발송이 영구 비활성인 현재 release gate의 분모가 아니다.
 
-Production Alpha의 `global-alpha-watchdog.yml`은 `GOVERNANCE_PIPELINE_MODE=shadow|live`와 `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`가 모두 충족될 때만 `BSIDE_OPS_TOKEN`으로 읽기 전용 `GET /api/v2/ops/release-state`를 호출한다. 빈 값과 `false`는 관측 시작 전 안전한 기본값이며, `true|false` 이외의 값은 fail-closed한다. 이 job에는 `BSIDE_ADMIN_TOKEN`과 `BSIDE_RELEASE_AUTHORIZER_TOKEN`을 주입하지 않는다. 따라서 주기 관측 코드가 탈취되거나 오작동해도 release state 변경이나 일회용 공개 승인 발급 권한을 갖지 않는다.
+Production Alpha 출시 증빙은 GitHub cron이 아니라 수동 시작형 `global-alpha-observation-chain.yml`만 만든다. segment 1은 `GOVERNANCE_PIPELINE_MODE=shadow`와 `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`에서 시작하며, 5개 구간이 같은 SHA·서버 candidate window·5분 cadence anchor를 공유한다. 각 후속 구간은 predecessor가 성공한 first attempt인지와 immutable artifact digest를 먼저 확인한다. 누락·중복·취소·neutral·시간초과·SHA 변경·artifact 변조가 있으면 전체 24시간 창을 폐기한다. `global-alpha-watchdog.yml`은 best-effort 예약 진단용으로 남지만 release evidence의 분모가 아니다. 두 workflow 모두 `BSIDE_OPS_TOKEN`으로 읽기 전용 `GET /api/v2/ops/release-state`를 호출하며 `BSIDE_ADMIN_TOKEN`과 `BSIDE_RELEASE_AUTHORIZER_TOKEN`을 주입하지 않는다.
 
 - 마지막 정상 수집이 90분을 넘으면 incident
 - 루트, feed, 활성화된 governance Pages 또는 API health 중 하나라도 실패하면 incident

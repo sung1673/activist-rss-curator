@@ -109,7 +109,7 @@ durable 합산 40,000건 원장을 공유하고 단일 실행은 최대 10,000�
 
 Production Alpha는 `EDINET_API_KEY`와 `COMPANIES_HOUSE_API_KEY`를 사용하지 않는다. 일본·영국 connector는 서버에서 정책상 비활성화되며, 이전 Secret이나 variable이 남아 있어도 수집을 재활성화할 수 없다.
 
-`BSIDE_RELEASE_AUTHORIZER_TOKEN`은 repository 공용 Secret이 아니라 reviewer가 보호하는 `governance-release` environment에만 둔다. PHP에는 정확한 `release_authorizer` 역할의 SHA-256 hash로 등록하며, 일반 admin token은 승인 발급을 대신할 수 없다. 5분 `global-alpha-watchdog.yml`은 읽기 전용 `BSIDE_OPS_TOKEN`만 사용하고 admin·release-authorizer token을 받지 않는다.
+`BSIDE_RELEASE_AUTHORIZER_TOKEN`은 repository 공용 Secret이 아니라 reviewer가 보호하는 `governance-release` environment에만 둔다. PHP에는 정확한 `release_authorizer` 역할의 SHA-256 hash로 등록하며, 일반 admin token은 승인 발급을 대신할 수 없다. 수동 시작형 `global-alpha-observation-chain.yml`과 진단용 `global-alpha-watchdog.yml`은 읽기 전용 `BSIDE_OPS_TOKEN`만 사용하고 admin·release-authorizer token을 받지 않는다.
 
 `KIND_API_KEY`는 일반 수집에서는 내부 KIND 어댑터가 인증을 요구할 때만 쓰지만,
 승인 직후 실행하는 수동 `kind-adapter-preflight.yml`은 운영 설정 완전성을 확인하기
@@ -131,7 +131,8 @@ Production Alpha는 `EDINET_API_KEY`와 `COMPANIES_HOUSE_API_KEY`를 사용하�
 - `global-brief.yml`: KST 05:45 예약 실행은 검수 후보 artifact만 만든다. 공개 brief는 사람이 승인한 동일 SHA payload를 `workflow_dispatch`의 `publish` 작업으로 전달할 때만 생성한다.
 - `global-alpha-review-candidates.yml`: 기본 브랜치의 실제 Preview API에서 공식 근거가 있는 사건 60건, 동일 사건 판단용 문서쌍 120개, 현재 Top 5를 사람 검수용 무라벨 artifact로 추출한다.
 - `global-alpha-preview-smoke.yml`: 최종 Preview 배포 뒤 실제 PHP v2·운영 DB를 사용해 Today→사건→발행사→검색→캘린더를 3개 viewport에서 검증한다. mock과 v1 fallback은 허용하지 않는다.
-- `global-alpha-watchdog.yml`: `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`인 `shadow|live`에서만 5분마다 `BSIDE_OPS_TOKEN`과 읽기 전용 release-state 경로로 API 상태, source freshness와 공개 루트를 관측한다. 빈 값과 `false`는 관측 준비 단계이며, 그 외 잘못된 값은 workflow를 실패시킨다.
+- `global-alpha-observation-chain.yml`: `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`, `shadow`에서 운영자가 segment 1을 수동 시작한다. 5개 job이 같은 SHA·서버 candidate window를 이어받아 288회 실제 관측을 만들고, predecessor run과 artifact digest를 확인한 뒤에만 다음 구간을 기록한다. 이 체인만 Alpha 출시 증빙으로 사용한다.
+- `global-alpha-watchdog.yml`: GitHub 예약 지연 여부를 포함한 상시 진단용이다. best-effort cron 결과는 Alpha 출시 증빙에 사용하지 않는다.
 - `governance-cutover.yml`, `governance-rollback.yml`: 보호된 `governance-release` 환경에서만 수동 전환·복구한다. Alpha evidence는 exact daily Pages run/artifact/digest와 전체 사이트·UI/config content identity를 고정하며, 24시간 preview 관측이 같은 terminal 바이트임을 증명한다. 전환은 evidence가 가리키는 그 artifact만 허용하고 exact SHA·evidence artifact digest·v1/v2 state version에 묶인 짧은 일회용 승인을 발급한 뒤 두 API state를 한 transaction에서 승격한다.
 
 Migration 011은 미국·일본·영국·캐나다·호주 권한을 `pending`으로만 만든다. 이것은 이용허가가 아니다. 공개 전 필수 4개 SourceRight인 `official:dart`, `official:sec-edgar`, `official:ca-issuer-ir`, `official:asic-register`가 실제 증빙·권한 범위·유효기간과 함께 등록되어야 한다.

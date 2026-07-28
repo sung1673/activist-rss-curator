@@ -651,6 +651,7 @@ jobs:
           curator/php_sftp_deploy.py
           curator/event_identity.py
           curator/global_alpha_monitor.py
+          curator/global_alpha_observation_segment.py
           curator/global_alpha_pages_identity.py
           curator/global_alpha_evidence_bundle.py
           curator/global_alpha_review_export.py

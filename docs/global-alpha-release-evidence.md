@@ -4,7 +4,7 @@
 
 ## 신뢰 경계
 
-모든 파일과 watchdog 관측은 전환 대상과 동일한 40자리 Git SHA에서 생성되어야 한다. SHA 일치만으로는 충분하지 않다. 증빙은 전환할 정확한 `daily.yml` Pages artifact의 run ID·run attempt·artifact ID·이름·GitHub `sha256:` digest와 전체 사이트 content digest를 고정한다. `fixture`, `synthetic`, `sample`, `test` 출처, 합성값, 0인 분모, 다른 SHA, 중복 관측, 불완전한 24시간 관측은 fail-closed로 거절한다.
+모든 파일과 observation-chain 관측은 전환 대상과 동일한 40자리 Git SHA에서 생성되어야 한다. SHA 일치만으로는 충분하지 않다. 증빙은 전환할 정확한 `daily.yml` Pages artifact의 run ID·run attempt·artifact ID·이름·GitHub `sha256:` digest와 전체 사이트 content digest를 고정한다. `fixture`, `synthetic`, `sample`, `test` 출처, 합성값, 0인 분모, 다른 SHA, 중복 관측, 불완전한 24시간 관측은 fail-closed로 거절한다.
 
 사람 검수 및 승인 데이터는 **실제 사람이 직접 검토하고 작성한 결과만** 허용한다. Codex·LLM은 후보와 입력 양식을 준비할 수 있지만 `event_reviews`, `same_event_pair_reviews`, `top5_reviews`, 감독자 승인, SourceRight 승인의 작성자나 정답 라벨러가 될 수 없다. `reviewer_type`과 `approver_type`은 `human`이어야 하고, AI가 정답을 생성했다는 표시는 반드시 `false`여야 한다.
 
@@ -144,16 +144,16 @@ evidence workflow가 고정하는 보호 입력 artifact에서 후보 생성 run
 - 모든 필수 API 경로 응답 250,000 byte 이하
 - 실제 실패 탐지 10분 이하, pinned legacy artifact rollback drill 10분 이하
 
-## 24시간 watchdog 증빙
+## 24시간 observation-chain 증빙
 
-`global-alpha-watchdog.yml`의 같은 SHA·default branch 완료 run을 성공/실패 구분 없이 모두 수집한다. 실패 run을 제외해 incident를 숨길 수 없으며, 취소·시간초과·artifact 누락도 즉시 실패한다. 각 artifact의 GitHub SHA-256 digest가 유효해야 한다. 하나의 preview candidate window에 대해 최소 287개 관측, 첫·마지막 경계 각 5분 이내, 관측 간격 2~8분을 요구한다.
+`global-alpha-observation-chain.yml`의 같은 SHA·default branch first-attempt run 5개만 수집한다. segment 1 run ID로 체인을 고정하고 후속 segment의 predecessor run·artifact digest 연결을 검증한다. 실패·neutral·취소·시간초과·artifact 누락·중복은 즉시 실패한다. 각 artifact의 GitHub SHA-256 digest가 유효해야 한다. 하나의 preview candidate window에 대해 288개 실제 관측, 첫·마지막 경계 각 5분 이내, 관측 간격 2~8분을 요구한다. `global-alpha-watchdog.yml` cron은 진단용이며 출시 증빙에 포함하지 않는다.
 
-Watchdog은 `BSIDE_OPS_TOKEN`과 읽기 전용 `GET /api/v2/ops/release-state`를 사용한다. `BSIDE_ADMIN_TOKEN`과 `BSIDE_RELEASE_AUTHORIZER_TOKEN`은 watchdog environment에 제공하지 않으므로 관측 job은 공개 상태를 바꾸거나 cutover 승인을 발급할 수 없다.
+관측 체인은 `BSIDE_OPS_TOKEN`과 읽기 전용 `GET /api/v2/ops/release-state`를 사용한다. `BSIDE_ADMIN_TOKEN`과 `BSIDE_RELEASE_AUTHORIZER_TOKEN`은 관측 environment에 제공하지 않으므로 관측 job은 공개 상태를 바꾸거나 cutover 승인을 발급할 수 없다.
 
 모든 관측은 다음을 만족해야 한다.
 
 - `pipeline_mode=shadow`, `release_state=preview`, `web_surface=governance-preview`, Pages 배포 SHA·API health `code_revision`·workflow SHA 일치
-- Pages `config.js`의 `apiBase`에서 계산한 canonical v2 주소와, 명시된 경우 `apiV2Base`가 watchdog이 실제 probe한 API base와 정확히 일치
+- Pages `config.js`의 `apiBase`에서 계산한 canonical v2 주소와, 명시된 경우 `apiV2Base`가 관측 체인이 실제 probe한 API base와 정확히 일치
 - preview의 `index.html`, `config.js`, `app.js`, `styles.css` 원본 UTF-8 바이트를 매 관측마다 SHA-256 canonical file manifest로 계산하고 24시간 동안 단 하나의 terminal content identity만 유지
 - public root·health·release state·deployed build·source status·live·search probe 모두 HTTP 200 및 contract valid
 - live 사건이 있으면 같은 credential로 사건 상세를 실제 검증하고, 사건이 없고 소스가 정상일 때만 `event_detail={skipped:true, reason:no_live_event_available}`를 허용
@@ -169,11 +169,11 @@ Watchdog은 `BSIDE_OPS_TOKEN`과 읽기 전용 `GET /api/v2/ops/release-state`�
 
 `global-alpha-release-evidence.yml`을 실행할 때 검토자는 관측 대상과 동일한 `daily.yml` run ID와 `pages-<run_id>-<run_attempt>` 이름을 지정한다. workflow는 same SHA·default branch·성공·72시간 이내·GitHub artifact digest를 검증하고 그 artifact를 직접 다운로드한다. `global_alpha_pages_identity`는 root와 `/governance`의 네 terminal asset이 byte-identical인지 확인하고, 모든 정규 파일을 포함한 전체 사이트 content digest와 terminal content identity를 `pages-artifact-identity.json`에 기록한다. `daily.yml`과 `build-feed.yml`은 같은 `BSIDE_PUBLIC_WEB_URL` 입력을 사용하므로 config 바이트 차이를 기본값으로 숨길 수 없다.
 
-그 다음 보호 입력 artifact와 최근 watchdog artifact를 exact workflow·default branch·same SHA·digest로 검증한다. 모든 watchdog terminal identity가 위 daily artifact의 terminal identity와 정확히 같아야 한다. 통과 시 다음을 포함한 `global-alpha-release-evidence`를 90일 보존한다.
+그 다음 보호 입력 artifact와 정확한 observation segment artifact 5개를 exact workflow·default branch·same SHA·digest로 검증한다. 모든 관측 terminal identity가 위 daily artifact의 terminal identity와 정확히 같아야 한다. 통과 시 다음을 포함한 `global-alpha-release-evidence`를 90일 보존한다.
 
 - 원본 5개 보호 입력
 - `observations.jsonl`
-- watchdog artifact ID·run ID·digest manifest
+- observation segment artifact ID·run ID·predecessor digest manifest
 - 입력/생성 workflow provenance
 - `production-alpha-release-report.json`
 - `pages-artifact-identity.json` — exact daily run/attempt/artifact/name/digest, 전체 사이트 content digest, 관측된 네 UI/config asset digest
@@ -244,3 +244,56 @@ Alpha 전환 증빙으로 인정하지 않는다.
 `operator_metadata` 중 하나다. 세 분류의 합은 labeled count와, labeled count와
 unknown count의 합은 공개 사건 분모와 정확히 일치해야 한다. 생성 표제와
 운영자가 등록한 링크 표제를 원문 제목으로 주장해서는 안 된다.
+
+## Protected 24-hour observation chain
+
+GitHub scheduled workflows are best-effort and are not release evidence. The
+legacy `global-alpha-watchdog.yml` remains enabled only for operational
+diagnostics. A delayed, coalesced, skipped, cancelled, or neutral cron run does
+not get substituted into the Production Alpha evidence window.
+
+Start `.github/workflows/global-alpha-observation-chain.yml` manually on the
+default branch with `segment_index=1` and all internal continuation inputs
+empty. The workflow requires `GOVERNANCE_PIPELINE_MODE=shadow`,
+`GLOBAL_ALPHA_OBSERVATION_ENABLED=true`, and the protected
+`governance-runtime` environment. Segment 1 binds the chain to the exact
+40-character Git SHA and to the 24-hour candidate boundaries returned by the
+server. Do not rerun a failed segment; close the candidate state and start a
+new chain.
+
+The chain contains five fixed segments and 288 actual observations:
+
+| Segment | Global slots | Records | Maximum scheduled span |
+|---|---:|---:|---:|
+| 1 | 0-57 | 58 | 285 minutes |
+| 2 | 58-115 | 58 | 285 minutes |
+| 3 | 116-173 | 58 | 285 minutes |
+| 4 | 174-230 | 57 | 280 minutes |
+| 5 | 231-287 | 57 | 280 minutes |
+
+Each segment runs below the GitHub-hosted six-hour job limit. It dispatches its
+successor about 15 minutes before the successor's first slot. The successor
+waits for the predecessor to finish and verifies the predecessor's exact
+same-SHA successful first attempt and immutable GitHub artifact digest before
+it records anything. A failed predecessor therefore cannot be hidden by an
+already queued successor. Segment 5 records no observation after the server
+candidate boundary and seals the chain at that boundary.
+
+Each segment uploads exactly one artifact named
+`global-alpha-observation-segment-<CHAIN_RUN_ID>-<SEGMENT>`. The artifact
+contains only canonical `observations.jsonl` and `segment-manifest.json`.
+Manifests bind the candidate boundaries, cadence anchor, global slot range,
+workflow run, predecessor run, predecessor artifact digest, record count, and
+JSONL SHA-256. Missing or overlapping slots, duplicate artifacts, reruns,
+wrong-SHA runs, non-success conclusions, changed assets/sources/state,
+out-of-window records, and archive or JSONL tampering all fail closed.
+
+After segment 5 succeeds, run
+`.github/workflows/global-alpha-release-evidence.yml` and provide
+`observation_chain_run_id` equal to the segment 1 run ID. The evidence workflow
+resolves and downloads exactly five artifacts instead of hundreds of cron-run
+artifacts. It verifies each GitHub digest, compiles the exact 288-record chain,
+then applies the existing 24-hour, 2-8 minute cadence, health, source,
+release-state, Pages identity, and API identity gates. The release evidence
+artifact stores `observation-segments.json` as the immutable resolution
+manifest.
