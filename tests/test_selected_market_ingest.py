@@ -20,6 +20,7 @@ from curator.selected_market_ingest import (
     execute_selected_market_ingest,
     main,
     parse_selected_official_links,
+    selected_market_release_state,
 )
 
 
@@ -968,6 +969,49 @@ def test_missing_config_writes_coverage_unavailable_without_api(
     assert evidence["ingest_mode"] == "manual-metadata"
 
 
+def test_release_state_binding_maps_pipeline_modes_and_rejects_drift() -> None:
+    assert selected_market_release_state(
+        {
+            "GOVERNANCE_PIPELINE_MODE": "off",
+            "GLOBAL_INGEST_EXPECTED_RELEASE_STATE": "closed",
+        },
+        require_active_pipeline=False,
+    ) == "closed"
+    assert selected_market_release_state(
+        {
+            "GOVERNANCE_PIPELINE_MODE": "shadow",
+            "GLOBAL_INGEST_EXPECTED_RELEASE_STATE": "preview",
+        },
+        require_active_pipeline=True,
+    ) == "preview"
+    assert selected_market_release_state(
+        {
+            "GOVERNANCE_PIPELINE_MODE": "live",
+            "GLOBAL_INGEST_EXPECTED_RELEASE_STATE": "live",
+        },
+        require_active_pipeline=True,
+    ) == "live"
+    with pytest.raises(
+        SelectedMarketConfigurationError,
+        match="selected_market_release_state_mismatch",
+    ):
+        selected_market_release_state(
+            {
+                "GOVERNANCE_PIPELINE_MODE": "shadow",
+                "GLOBAL_INGEST_EXPECTED_RELEASE_STATE": "live",
+            },
+            require_active_pipeline=True,
+        )
+    with pytest.raises(
+        SelectedMarketConfigurationError,
+        match="missing_expected_release_state",
+    ):
+        selected_market_release_state(
+            {"GOVERNANCE_PIPELINE_MODE": "live"},
+            require_active_pipeline=True,
+        )
+
+
 def test_inactive_pipeline_fails_closed_and_still_writes_evidence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -997,6 +1041,10 @@ def test_configured_scope_without_ops_token_fails_closed(
     evidence_path = tmp_path / "evidence.json"
     monkeypatch.setenv("GOVERNANCE_PIPELINE_MODE", "shadow")
     monkeypatch.setenv(
+        "GLOBAL_INGEST_EXPECTED_RELEASE_STATE",
+        "preview",
+    )
+    monkeypatch.setenv(
         "OFFICIAL_LINKS_JSON",
         json.dumps(_config(_link())),
     )
@@ -1021,6 +1069,46 @@ def test_configured_scope_without_ops_token_fails_closed(
     assert evidence["error"]["code"] == "missing_ops_token"
     assert evidence["source_urls_requested"] == 0
     assert evidence["body_storage"] is False
+
+
+def test_preview_write_requires_token_without_echoing_secrets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence_path = tmp_path / "evidence.json"
+    monkeypatch.setenv("GOVERNANCE_PIPELINE_MODE", "shadow")
+    monkeypatch.setenv(
+        "GLOBAL_INGEST_EXPECTED_RELEASE_STATE",
+        "preview",
+    )
+    monkeypatch.setenv(
+        "OFFICIAL_LINKS_JSON",
+        json.dumps(_config(_link())),
+    )
+    monkeypatch.setenv(
+        "BSIDE_API_BASE_URL",
+        "https://alignpe.gabia.io/activist/api.php",
+    )
+    monkeypatch.setenv(
+        "BSIDE_OPS_TOKEN",
+        "do-not-echo-ops-token",
+    )
+    monkeypatch.delenv("GOVERNANCE_PREVIEW_TOKEN", raising=False)
+    assert main(
+        [
+            "--country",
+            "CA",
+            "--code-revision",
+            REVISION,
+            "--evidence",
+            str(evidence_path),
+            "--require-active-pipeline",
+        ]
+    ) == 1
+    serialized = evidence_path.read_text(encoding="utf-8")
+    evidence = json.loads(serialized)
+    assert evidence["error"]["code"] == "missing_preview_ingest_token"
+    assert "do-not-echo-ops-token" not in serialized
 
 
 def test_malformed_config_evidence_does_not_echo_input(
@@ -1063,6 +1151,14 @@ def test_workflow_is_default_branch_shadow_live_only_and_preserves_evidence() ->
     assert "vars.CA_OFFICIAL_LINKS_JSON" in workflow
     assert "vars.AU_OFFICIAL_LINKS_JSON" in workflow
     assert "curator.selected_market_ingest" in workflow
+    assert "validate-api-base-urls.py" in workflow
+    assert "smoke-global-v2.py" in workflow
+    assert "--release-state preview" in workflow
+    assert "--release-state live" in workflow
+    assert "--preview-token-env GOVERNANCE_PREVIEW_TOKEN" in workflow
+    assert "GLOBAL_INGEST_EXPECTED_RELEASE_STATE=preview" in workflow
+    assert "GLOBAL_INGEST_EXPECTED_RELEASE_STATE=live" in workflow
+    assert "secrets.GOVERNANCE_PREVIEW_TOKEN" in workflow
     assert "'coverage_mode':'link-only'" in workflow
     assert "'ingest_mode':'manual-metadata'" in workflow
     assert "--require-active-pipeline" in workflow

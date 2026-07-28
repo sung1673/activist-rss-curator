@@ -3005,10 +3005,6 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
         }
         if (
             v2_ingest_is_link_only_apply($normalized)
-            && (
-                (int)$existingReceipt['raw_count'] >= 1
-                || (int)$existingReceipt['acknowledged_count'] >= 1
-            )
             && !v2_ingest_link_only_receipt_is_complete(
                 $existingReceipt,
                 $normalized
@@ -3020,9 +3016,10 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
             ));
         }
         // Replay is strictly read-only. A normal CA/AU apply with a
-        // non-empty, already acknowledged receipt continues into the locked
+        // complete, already acknowledged receipt continues into the locked
         // transaction so the current grant and manifest can authorize a new
-        // verification heartbeat.
+        // verification heartbeat. Any corrupt link-only apply receipt was
+        // rejected above, including an impossible empty durable receipt.
         if (
             !v2_ingest_is_link_only_apply($normalized)
             || (int)$existingReceipt['raw_count'] < 1

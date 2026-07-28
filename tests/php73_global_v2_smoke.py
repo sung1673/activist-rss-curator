@@ -1996,6 +1996,59 @@ def run(base_url: str, mysql_container_id: str) -> None:
         "AND idempotency_key='php73-v2-ca-manifest-approved';",
     )
 
+    # An impossible empty durable receipt must also fail closed. Previously it
+    # returned an idempotent success before the locked completeness check.
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_global_ingest_receipts SET "
+        "raw_count=0,acknowledged_count=0,"
+        "batch_raw_count=0,batch_acknowledged_count=0 "
+        "WHERE connector_id='connector:ca:issuer-ir' "
+        "AND idempotency_key='php73-v2-ca-manifest-approved';",
+    )
+    empty_link_connector_before = mysql_execute(
+        mysql_container_id,
+        "SELECT CONCAT_WS('|',connector_status,COALESCE(cursor_json,''),"
+        "last_checked_at,last_success_at,last_observed_at,last_raw_count,"
+        "last_acknowledged_count,COALESCE(last_error_class,''),"
+        "COALESCE(code_revision,''),updated_at) "
+        "FROM ci_source_connectors "
+        "WHERE connector_id='connector:ca:issuer-ir';",
+    )
+    ca_content_before_empty = ca_link_durable_content_state()
+    empty_link_receipt, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=ca_link_payload,
+        expected_status=409,
+    )
+    require(
+        empty_link_receipt.get("error")
+        == "global_ingest_batch_receipt_corrupt"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',connector_status,COALESCE(cursor_json,''),"
+            "last_checked_at,last_success_at,last_observed_at,last_raw_count,"
+            "last_acknowledged_count,COALESCE(last_error_class,''),"
+            "COALESCE(code_revision,''),updated_at) "
+            "FROM ci_source_connectors "
+            "WHERE connector_id='connector:ca:issuer-ir';",
+        )
+        == empty_link_connector_before
+        and ca_link_durable_content_state() == ca_content_before_empty,
+        repr(empty_link_receipt),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_global_ingest_receipts SET "
+        "raw_count=1,acknowledged_count=1,"
+        "batch_raw_count=1,batch_acknowledged_count=1 "
+        "WHERE connector_id='connector:ca:issuer-ir' "
+        "AND idempotency_key='php73-v2-ca-manifest-approved';",
+    )
+
     # Manifest drift and revocation are checked before any heartbeat. These
     # direct corruption fixtures intentionally leave the connector snapshot
     # unchanged so a denied grant can never be made fresh by an old receipt.
