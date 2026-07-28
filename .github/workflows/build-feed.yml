@@ -64,6 +64,8 @@ jobs:
     if: vars.ENABLE_LEGACY_PIPELINE == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 75
+    env:
+      PAGES_OWNER_SNAPSHOT: ${{ vars.PAGES_OWNER }}
     concurrency:
       group: >-
         ${{ vars.PAGES_OWNER == 'legacy' &&
@@ -462,10 +464,8 @@ jobs:
           python .github/scripts/prepare-legacy-pages.py "${arguments[@]}"
           echo "path=$LEGACY_PAGES_ARTIFACT_PATH" >> "$GITHUB_OUTPUT"
 
-      - name: Revalidate legacy ownership at the deployment boundary
+      - name: Enforce the job-start legacy ownership snapshot
         if: steps.run_mode.outputs.deploy_pages == 'true'
-        env:
-          PAGES_OWNER_SNAPSHOT: ${{ vars.PAGES_OWNER }}
         shell: bash
         run: |
           set -euo pipefail
@@ -474,12 +474,59 @@ jobs:
             exit 1
           }
 
-      - name: Configure Pages
+      - name: Revalidate legacy ownership at the deployment boundary
         if: steps.run_mode.outputs.deploy_pages == 'true'
+        id: deployment_boundary
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const readVariable = async (name) => {
+              try {
+                const response = await github.rest.actions.getRepoVariable({
+                  owner, repo, name,
+                });
+                return String(response.data.value || "").trim().toLowerCase();
+              } catch (error) {
+                if (error && error.status === 404) return "";
+                throw error;
+              }
+            };
+            const pagesOwner = await readVariable("PAGES_OWNER");
+            const expeditedObservation = await readVariable(
+              "GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED",
+            );
+            if (pagesOwner !== "legacy") {
+              core.setFailed(
+                "Current repository Pages ownership is not legacy; deployment is blocked.",
+              );
+              return;
+            }
+            if (!["true", "false"].includes(expeditedObservation)) {
+              core.setFailed(
+                "GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED must be explicit true or false.",
+              );
+              return;
+            }
+            const deployAllowed = expeditedObservation === "false";
+            core.setOutput("deploy_allowed", String(deployAllowed));
+            if (!deployAllowed) {
+              core.notice(
+                "Legacy collection and archive generation continue, but Pages deployment " +
+                "is suppressed during the protected expedited observation window.",
+              );
+            }
+
+      - name: Configure Pages
+        if: >-
+          ${{ steps.run_mode.outputs.deploy_pages == 'true' &&
+              steps.deployment_boundary.outputs.deploy_allowed == 'true' }}
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Upload Pages artifact
-        if: steps.run_mode.outputs.deploy_pages == 'true'
+        if: >-
+          ${{ steps.run_mode.outputs.deploy_pages == 'true' &&
+              steps.deployment_boundary.outputs.deploy_allowed == 'true' }}
         id: pages_artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
@@ -498,13 +545,16 @@ jobs:
       - name: Capture shadow preview Pages distribution start
         if: >-
           ${{ steps.run_mode.outputs.deploy_pages == 'true' &&
+              steps.deployment_boundary.outputs.deploy_allowed == 'true' &&
               steps.run_mode.outputs.governance_preview == 'true' }}
         id: pages_distribution_start
         shell: bash
         run: echo "observed_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
       - name: Deploy to GitHub Pages
-        if: steps.run_mode.outputs.deploy_pages == 'true'
+        if: >-
+          ${{ steps.run_mode.outputs.deploy_pages == 'true' &&
+              steps.deployment_boundary.outputs.deploy_allowed == 'true' }}
         id: deployment
         continue-on-error: true
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
@@ -512,11 +562,17 @@ jobs:
           artifact_name: github-pages
 
       - name: Wait before first Pages retry
-        if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' }}
+        if: >-
+          ${{ steps.run_mode.outputs.deploy_pages == 'true' &&
+              steps.deployment_boundary.outputs.deploy_allowed == 'true' &&
+              steps.deployment.outcome == 'failure' }}
         run: sleep 180
 
       - name: Retry GitHub Pages deployment (2/3)
-        if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' }}
+        if: >-
+          ${{ steps.run_mode.outputs.deploy_pages == 'true' &&
+              steps.deployment_boundary.outputs.deploy_allowed == 'true' &&
+              steps.deployment.outcome == 'failure' }}
         id: deployment_retry
         continue-on-error: true
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
@@ -524,11 +580,19 @@ jobs:
           artifact_name: github-pages
 
       - name: Wait before final Pages retry
-        if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' && steps.deployment_retry.outcome == 'failure' }}
+        if: >-
+          ${{ steps.run_mode.outputs.deploy_pages == 'true' &&
+              steps.deployment_boundary.outputs.deploy_allowed == 'true' &&
+              steps.deployment.outcome == 'failure' &&
+              steps.deployment_retry.outcome == 'failure' }}
         run: sleep 300
 
       - name: Retry GitHub Pages deployment (3/3)
-        if: ${{ steps.run_mode.outputs.deploy_pages == 'true' && steps.deployment.outcome == 'failure' && steps.deployment_retry.outcome == 'failure' }}
+        if: >-
+          ${{ steps.run_mode.outputs.deploy_pages == 'true' &&
+              steps.deployment_boundary.outputs.deploy_allowed == 'true' &&
+              steps.deployment.outcome == 'failure' &&
+              steps.deployment_retry.outcome == 'failure' }}
         id: deployment_retry_final
         continue-on-error: true
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
@@ -536,7 +600,10 @@ jobs:
           artifact_name: github-pages
 
       - name: Verify GitHub Pages deployment
-        if: ${{ !cancelled() && steps.run_mode.outputs.deploy_pages == 'true' }}
+        if: >-
+          ${{ !cancelled() &&
+              steps.run_mode.outputs.deploy_pages == 'true' &&
+              steps.deployment_boundary.outputs.deploy_allowed == 'true' }}
         id: pages_deployment_result
         shell: bash
         env:
@@ -606,6 +673,7 @@ jobs:
         if: >-
           ${{ always() && !cancelled() &&
               steps.run_mode.outputs.deploy_pages == 'true' &&
+              steps.deployment_boundary.outputs.deploy_allowed == 'true' &&
               steps.run_mode.outputs.governance_preview == 'true' &&
               steps.pages_distribution_start.outcome == 'success' &&
               (steps.deployment.outcome == 'success' || steps.deployment.outcome == 'failure') }}
@@ -629,7 +697,12 @@ jobs:
             --observed-at "$DISTRIBUTION_OBSERVED_AT"
 
       - name: Preserve failed Pages artifact
-        if: ${{ !cancelled() && steps.run_mode.outputs.deploy_pages == 'true' && steps.legacy_pages_artifact.outcome == 'success' && steps.pages_deployment_result.outcome == 'failure' }}
+        if: >-
+          ${{ !cancelled() &&
+              steps.run_mode.outputs.deploy_pages == 'true' &&
+              steps.deployment_boundary.outputs.deploy_allowed == 'true' &&
+              steps.legacy_pages_artifact.outcome == 'success' &&
+              steps.pages_deployment_result.outcome == 'failure' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pages-failed-${{ github.run_id }}-${{ github.run_attempt }}

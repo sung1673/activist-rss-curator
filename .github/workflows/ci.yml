@@ -648,8 +648,13 @@ jobs:
           curator/dart_quota.py
           curator/dart_review_sample.py
           curator/deployment_manifest.py
+          curator/expedited_legacy_compat.py
+          curator/expedited_legacy_recovery_bundle.py
           curator/php_sftp_deploy.py
           curator/event_identity.py
+          curator/global_alpha_expedited_editorial.py
+          curator/global_alpha_expedited_final_approval.py
+          curator/global_alpha_expedited_gate.py
           curator/global_alpha_monitor.py
           curator/global_alpha_observation_segment.py
           curator/global_alpha_pages_identity.py

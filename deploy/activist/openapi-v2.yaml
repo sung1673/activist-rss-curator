@@ -88,6 +88,7 @@ x-release-gate:
   privileged-bypass:
     - /ops/connectors/{connector_id}/checkpoint
     - /ops/source-right-eligibility
+    - /ops/alpha-replay-state
     - /ops/alpha-release-evidence
     - /ops/ingest
     - /ops/release-state
@@ -97,6 +98,8 @@ x-release-gate:
     - /admin/connectors
     - /admin/connectors/{connector_id}
     - /admin/review-queue
+    - /admin/expedited-review-candidates
+    - /admin/expedited-review-candidates/{event_id}
     - /admin/events/{event_id}/review
     - /admin/brief-candidates
     - /admin/briefs
@@ -715,6 +718,46 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '503':
           $ref: '#/components/responses/Unavailable'
+  /ops/alpha-replay-state:
+    get:
+      tags: [Operations]
+      summary: Export a deterministic DART replay state
+      description: >-
+        Returns deterministic row counts and content digests for all
+        DART-related company, document, governance-event and observation rows,
+        together with the exact 30-day apply checkpoint version and payload
+        hash. This route does not require SEC evidence and is intended to be
+        sampled immediately before and after a protected DART replay.
+      security:
+        - OpsBearer: []
+      parameters:
+        - name: code_revision
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-f0-9]{40}$'
+      responses:
+        '200':
+          description: Same-revision DART state derived from production MySQL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlphaReplayStateEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/RoleAuthenticationRequired'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Revision mismatch or incomplete/corrupt DART checkpoint
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          $ref: '#/components/responses/Unavailable'
   /ops/ingest:
     post:
       tags: [Operations]
@@ -928,6 +971,67 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '503':
           $ref: '#/components/responses/Unavailable'
+  /admin/expedited-review-candidates:
+    get:
+      tags: [Editorial]
+      summary: Export pending events with their immutable official evidence basis
+      description: >-
+        Editor-only Production Alpha review input. Returns pending draft events
+        and currently redistributable official documents only. Document bodies,
+        media and Telegram data are never returned. Every document is bound to
+        an active SourceRight and matching connector identity; content hashes
+        and update timestamps are required by the protected publication
+        preflight.
+      security:
+        - EditorBearer: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 20
+            maximum: 50
+            default: 50
+      responses:
+        '200':
+          description: Deterministically ordered pending event candidates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpeditedReviewCandidateEnvelope'
+        '401':
+          $ref: '#/components/responses/RoleAuthenticationRequired'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /admin/expedited-review-candidates/{event_id}:
+    get:
+      tags: [Editorial]
+      summary: Read the current official evidence and editorial state for one event
+      description: >-
+        Used immediately before protected mutation and during idempotent
+        recovery. The evidence digest changes when the event timestamp or any
+        official document identity, hash, URL, language or timestamp changes.
+      security:
+        - EditorBearer: []
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '200':
+          description: Current event and official evidence snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpeditedReviewCandidateDetailEnvelope'
+        '401':
+          $ref: '#/components/responses/RoleAuthenticationRequired'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/Unavailable'
   /admin/events/{event_id}/review:
     post:
       tags: [Editorial]
@@ -941,6 +1045,8 @@ paths:
         automatically: the editor must repeat approval with
         merge_into_event_id equal to the reported conflicting_event_id.
         Rejection keeps the event non-public.
+        Protected batch publication also supplies expected_evidence_sha256 so
+        any official document change fails before that event is mutated.
       security:
         - EditorBearer: []
       parameters:
@@ -2358,6 +2464,17 @@ components:
           $ref: '#/components/schemas/AlphaAutomatedEvidence'
         api_version:
           const: v2
+    AlphaReplayStateEnvelope:
+      type: object
+      additionalProperties: false
+      required: [ok, data, api_version]
+      properties:
+        ok:
+          const: true
+        data:
+          $ref: '#/components/schemas/AlphaReplayState'
+        api_version:
+          const: v2
     AlphaAutomatedEvidence:
       type: object
       additionalProperties: false
@@ -2418,6 +2535,16 @@ components:
                     const: US
               minContains: 1
               maxContains: 1
+        replay_state:
+          description: >-
+            Additive DART replay snapshot. It contains deterministic digests of
+            the DART-related production rows and the authoritative apply
+            checkpoint version/hash so an apply/replay workflow can prove that
+            the database and checkpoint were unchanged. Older deployments may
+            omit it or return null.
+          anyOf:
+            - $ref: '#/components/schemas/AlphaReplayState'
+            - type: 'null'
         content_integrity:
           $ref: '#/components/schemas/AlphaContentIntegrity'
     AlphaConnectorCoverage:
@@ -2495,6 +2622,136 @@ components:
           type: string
           pattern: '^[a-f0-9]{40}$'
         receipt_sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+    AlphaReplayState:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - kind
+        - environment
+        - evidence_source
+        - is_synthetic
+        - code_revision
+        - collected_at
+        - tables
+        - checkpoint
+        - state_sha256
+      properties:
+        schema_version:
+          const: 1
+        kind:
+          const: bside-global-alpha-replay-state
+        environment:
+          const: production
+        evidence_source:
+          const: production_database_export
+        is_synthetic:
+          const: false
+        code_revision:
+          type: string
+          pattern: '^[a-f0-9]{40}$'
+        collected_at:
+          type: string
+          format: date-time
+        tables:
+          type: object
+          additionalProperties: false
+          required:
+            - companies
+            - issuers
+            - issuer_identifiers
+            - issuer_listings
+            - documents
+            - governance_events
+            - actors
+            - event_actors
+            - event_documents
+            - event_observations
+            - timeline_entries
+            - editorial_revisions
+            - global_lifecycle_observations
+            - collection_runs
+            - source_connectors
+            - official_slot_claims
+          properties:
+            companies:
+              $ref: '#/components/schemas/AlphaReplayTableDigest'
+            issuers:
+              $ref: '#/components/schemas/AlphaReplayTableDigest'
+            issuer_identifiers:
+              $ref: '#/components/schemas/AlphaReplayTableDigest'
+            issuer_listings:
+              $ref: '#/components/schemas/AlphaReplayTableDigest'
+            documents:
+              $ref: '#/components/schemas/AlphaReplayTableDigest'
+            governance_events:
+              $ref: '#/components/schemas/AlphaReplayTableDigest'
+            actors:
+              $ref: '#/components/schemas/AlphaReplayTableDigest'
+            event_actors:
+              $ref: '#/components/schemas/AlphaReplayTableDigest'
+            event_documents:
+              $ref: '#/components/schemas/AlphaReplayTableDigest'
+            event_observations:
+              $ref: '#/components/schemas/AlphaReplayTableDigest'
+            timeline_entries:
+              $ref: '#/components/schemas/AlphaReplayTableDigest'
+            editorial_revisions:
+              $ref: '#/components/schemas/AlphaReplayTableDigest'
+            global_lifecycle_observations:
+              $ref: '#/components/schemas/AlphaReplayTableDigest'
+            collection_runs:
+              $ref: '#/components/schemas/AlphaReplayTableDigest'
+            source_connectors:
+              $ref: '#/components/schemas/AlphaReplayTableDigest'
+            official_slot_claims:
+              $ref: '#/components/schemas/AlphaReplayTableDigest'
+        checkpoint:
+          type: object
+          additionalProperties: false
+          required:
+            - job_fingerprint
+            - checkpoint_version
+            - checkpoint_payload_sha256
+            - range_start
+            - range_end_exclusive
+            - completed_window_count
+            - failed_window_count
+          properties:
+            job_fingerprint:
+              type: string
+              pattern: '^[a-f0-9]{64}$'
+            checkpoint_version:
+              type: integer
+              minimum: 1
+            checkpoint_payload_sha256:
+              type: string
+              pattern: '^[a-f0-9]{64}$'
+            range_start:
+              type: string
+              format: date
+            range_end_exclusive:
+              type: string
+              format: date
+            completed_window_count:
+              type: integer
+              minimum: 30
+            failed_window_count:
+              const: 0
+        state_sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+    AlphaReplayTableDigest:
+      type: object
+      additionalProperties: false
+      required: [row_count, content_sha256]
+      properties:
+        row_count:
+          type: integer
+          minimum: 0
+        content_sha256:
           type: string
           pattern: '^[a-f0-9]{64}$'
     AlphaContentIntegrity:
@@ -3035,6 +3292,241 @@ components:
           $ref: '#/components/schemas/PageMeta'
         api_version:
           const: v2
+    ExpeditedOfficialDocument:
+      type: object
+      additionalProperties: false
+      required:
+        - document_id
+        - issuer_id
+        - country_code
+        - source_right_id
+        - source_class
+        - source_key
+        - document_type
+        - original_language
+        - title
+        - original_url
+        - content_hash
+        - filed_at
+        - published_at
+        - retrieved_at
+        - updated_at
+        - relation_type
+        - position_no
+        - connector_id
+        - connector_base_url
+        - coverage_mode
+        - connector_status
+      properties:
+        document_id:
+          $ref: '#/components/schemas/EntityId'
+        issuer_id:
+          $ref: '#/components/schemas/IssuerId'
+        country_code:
+          $ref: '#/components/schemas/CountryCode'
+        source_right_id:
+          type: string
+        source_class:
+          type: string
+          enum:
+            - official_disclosure
+            - official_register
+            - company_statement
+            - official_issuer
+        source_key:
+          type: [string, 'null']
+        document_type:
+          type: [string, 'null']
+        original_language:
+          type: string
+          pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$'
+        title:
+          type: string
+          description: Original title, never translated.
+        original_url:
+          type: string
+          format: uri
+        content_hash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        filed_at:
+          type: [string, 'null']
+          format: date-time
+        published_at:
+          type: [string, 'null']
+          format: date-time
+        retrieved_at:
+          type: [string, 'null']
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        relation_type:
+          type: string
+        position_no:
+          type: integer
+          minimum: 0
+        connector_id:
+          type: string
+        connector_base_url:
+          type: string
+          format: uri
+        coverage_mode:
+          $ref: '#/components/schemas/CoverageMode'
+        connector_status:
+          const: active
+    ExpeditedReviewCandidate:
+      type: object
+      required:
+        - event_id
+        - issuer_id
+        - issuer_name
+        - country
+        - event_family
+        - title
+        - original_language
+        - occurred_at
+        - importance
+        - verification_status
+        - change_type
+        - review_status
+        - publication_status
+        - identity_status
+        - updated_at
+        - official_documents
+        - official_evidence_count
+        - event_evidence_sha256
+      properties:
+        event_id:
+          $ref: '#/components/schemas/EntityId'
+        issuer_id:
+          $ref: '#/components/schemas/IssuerId'
+        issuer_name:
+          type: string
+        country:
+          $ref: '#/components/schemas/CountryCode'
+        event_family:
+          oneOf:
+            - $ref: '#/components/schemas/EventFamily'
+            - type: string
+              const: unclassified
+        title:
+          type: string
+        original_language:
+          type: string
+        summary:
+          type: [string, 'null']
+        occurred_at:
+          type: [string, 'null']
+          format: date-time
+        deadline_at:
+          type: [string, 'null']
+          format: date-time
+        importance:
+          $ref: '#/components/schemas/EventImportance'
+        verification_status:
+          type: string
+        change_type:
+          type: string
+        current_status:
+          type: [string, 'null']
+        first_observed_at:
+          type: [string, 'null']
+          format: date-time
+        review_status:
+          type: string
+        publication_status:
+          type: string
+        identity_action:
+          type: [string, 'null']
+        identity_target:
+          type: [string, 'null']
+        identity_actor_id:
+          type: [string, 'null']
+        identity_effective_at:
+          type: [string, 'null']
+          format: date-time
+        identity_deadline_at:
+          type: [string, 'null']
+          format: date-time
+        identity_status:
+          type: string
+        comparison_key:
+          type: [string, 'null']
+        updated_at:
+          type: string
+          format: date-time
+        official_documents:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ExpeditedOfficialDocument'
+        official_evidence_count:
+          type: integer
+          minimum: 1
+        event_evidence_sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        actors:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    ExpeditedReviewCandidateEnvelope:
+      type: object
+      required: [ok, data, meta, api_version]
+      properties:
+        ok:
+          const: true
+        data:
+          type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              maxItems: 50
+              items:
+                $ref: '#/components/schemas/ExpeditedReviewCandidate'
+        meta:
+          type: object
+          required: [returned, limit, code_revision, snapshot_sha256]
+          properties:
+            returned:
+              type: integer
+            limit:
+              type: integer
+            code_revision:
+              type: string
+              pattern: '^[a-f0-9]{40}$'
+            snapshot_sha256:
+              type: string
+              pattern: '^[a-f0-9]{64}$'
+        api_version:
+          const: v2
+    ExpeditedReviewCandidateDetailEnvelope:
+      type: object
+      required: [ok, data, meta, api_version]
+      properties:
+        ok:
+          const: true
+        data:
+          type: object
+          required: [event]
+          properties:
+            event:
+              $ref: '#/components/schemas/ExpeditedReviewCandidate'
+        meta:
+          type: object
+          required: [code_revision, snapshot_sha256]
+          properties:
+            code_revision:
+              type: string
+              pattern: '^[a-f0-9]{40}$'
+            snapshot_sha256:
+              type: string
+              pattern: '^[a-f0-9]{64}$'
+        api_version:
+          const: v2
     EditorialActor:
       type: object
       required: [actor_id, display_name, actor_type, actor_role, country_code]
@@ -3059,6 +3551,7 @@ components:
       required:
         - decision
         - expected_updated_at
+        - expected_evidence_sha256
         - reason
         - identity_action
         - identity_target
@@ -3074,6 +3567,9 @@ components:
         expected_updated_at:
           type: string
           format: date-time
+        expected_evidence_sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
         reason:
           type: string
           minLength: 8
@@ -3127,6 +3623,9 @@ components:
         expected_updated_at:
           type: string
           format: date-time
+        expected_evidence_sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
         reason:
           type: string
           minLength: 8
@@ -3221,9 +3720,9 @@ components:
           description: Cannot be more than five minutes in the future.
         build_sha:
           type: string
-          minLength: 7
-          maxLength: 64
-          pattern: '^[a-f0-9]+$'
+          minLength: 40
+          maxLength: 40
+          pattern: '^[a-f0-9]{40}$'
         empty_reason:
           type: [string, 'null']
           enum: [no_confirmed_material_events, coverage_unavailable, null]

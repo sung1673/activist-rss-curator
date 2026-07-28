@@ -1,0 +1,2558 @@
+name: Production Alpha expedited immutable preparation
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type CREATE_EXPEDITED_ALPHA_PREPARATION
+        required: true
+        type: string
+      dart_apply_run_id:
+        description: Successful exact-SHA 30-window DART apply run
+        required: true
+        type: string
+      dart_replay_run_id:
+        description: Successful exact-SHA 30-window DART replay run
+        required: true
+        type: string
+      sec_apply_run_id:
+        description: Successful exact-SHA 30-window SEC apply run
+        required: true
+        type: string
+      sec_replay_run_id:
+        description: Successful exact-SHA 30-window SEC replay run
+        required: true
+        type: string
+      selected_markets_run_id:
+        description: Successful exact-SHA CA and AU metadata run
+        required: true
+        type: string
+      governance_pages_run_id:
+        description: Successful exact-SHA Daily governance Pages producer run
+        required: true
+        type: string
+      preview_smoke_run_id:
+        description: Successful exact-SHA remote Preview smoke run
+        required: true
+        type: string
+      web_vitals_run_id:
+        description: Successful exact-SHA production mobile Web Vitals run
+        required: true
+        type: string
+      web_vitals_artifact_digest:
+        description: Immutable production Web Vitals artifact sha256 digest
+        required: true
+        type: string
+      legacy_preview_pages_run_id:
+        description: Successful exact-SHA build-feed run currently serving legacy plus governance Preview
+        required: true
+        type: string
+      editorial_publication_run_id:
+        description: Successful exact-SHA protected 20/40/5 editorial publication run
+        required: true
+        type: string
+      editorial_publication_artifact_digest:
+        description: Immutable editorial publication artifact sha256 digest
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: global-alpha-expedited-preparation-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare_rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: governance-release
+    outputs:
+      prepared_artifact_id: ${{ steps.prepared.outputs.artifact-id }}
+      prepared_artifact_digest: ${{ steps.prepared.outputs.artifact-digest }}
+    steps:
+      - name: Checkout the exact expedited candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Enforce protected rollback preparation boundary
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
+          PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          STANDARD_OBSERVATION: ${{ vars.GLOBAL_ALPHA_OBSERVATION_ENABLED }}
+          EXPEDITED_OBSERVATION: ${{ vars.GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED }}
+          TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+          KIND_MODE: ${{ vars.KIND_CONNECTOR_MODE }}
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRMATION" == "CREATE_EXPEDITED_ALPHA_PREPARATION" ]]
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]]
+          [[ "$PAGES_OWNER" == "legacy" && "$PIPELINE_MODE" == "shadow" ]]
+          [[ "${STANDARD_OBSERVATION,,}" == "false" ]]
+          [[ "${EXPEDITED_OBSERVATION,,}" == "true" ]]
+          [[ "${TELEGRAM_DELIVERY,,}" == "false" ]]
+          [[ "${GOVERNANCE_DELIVERY,,}" == "false" ]]
+          [[ "${KIND_MODE,,}" == "off" ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+
+      - name: Resolve immutable legacy seed and exact Preview restore artifact
+        id: rollback_sources
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EXPECTED_SHA: ${{ github.sha }}
+          PREVIEW_RUN_ID: ${{ inputs.legacy_preview_pages_run_id }}
+          LEGACY_RUN_ID: ${{ vars.LEGACY_ROLLBACK_RUN_ID }}
+          LEGACY_ARTIFACT_NAME: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_NAME }}
+          LEGACY_CODE_REVISION: ${{ vars.LEGACY_ROLLBACK_CODE_REVISION }}
+          LEGACY_ARTIFACT_DIGEST: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_DIGEST }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const positive = (value) => /^[1-9][0-9]*$/.test(String(value || "").trim());
+            const digest = (value) => /^sha256:[0-9a-f]{64}$/.test(String(value || "").toLowerCase());
+            if (!positive(process.env.PREVIEW_RUN_ID) || !positive(process.env.LEGACY_RUN_ID)) {
+              core.setFailed("Legacy Preview and archive run ids must be positive integers");
+              return;
+            }
+            if (String(process.env.PREVIEW_RUN_ID) === String(process.env.LEGACY_RUN_ID)) {
+              core.setFailed("The Preview restore and archive seed must be independent runs");
+              return;
+            }
+            const previewResponse = await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: Number(process.env.PREVIEW_RUN_ID),
+            });
+            const preview = previewResponse.data;
+            if (
+              preview.status !== "completed" ||
+              preview.conclusion !== "success" ||
+              preview.event !== "workflow_dispatch" ||
+              preview.head_branch !== process.env.DEFAULT_BRANCH ||
+              preview.path !== ".github/workflows/build-feed.yml" ||
+              (preview.head_sha || "").toLowerCase() !== process.env.EXPECTED_SHA.toLowerCase()
+            ) {
+              core.setFailed("Preview restore run is not the exact successful build-feed candidate");
+              return;
+            }
+            const previewArtifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner, repo, run_id: preview.id, per_page: 100},
+            );
+            const previewMatches = previewArtifacts.filter(
+              (item) => item.name === "github-pages" && !item.expired,
+            );
+            if (previewMatches.length !== 1 || !digest(previewMatches[0].digest)) {
+              core.setFailed("Preview restore run must have one immutable github-pages artifact");
+              return;
+            }
+            const legacyRevision = String(process.env.LEGACY_CODE_REVISION || "").toLowerCase();
+            const legacyDigest = String(process.env.LEGACY_ARTIFACT_DIGEST || "").toLowerCase();
+            if (
+              !/^[0-9a-f]{40}$/.test(legacyRevision) ||
+              !digest(legacyDigest) ||
+              !String(process.env.LEGACY_ARTIFACT_NAME || "").trim()
+            ) {
+              core.setFailed("Pinned legacy archive variables are invalid");
+              return;
+            }
+            const legacyResponse = await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: Number(process.env.LEGACY_RUN_ID),
+            });
+            const legacy = legacyResponse.data;
+            if (
+              legacy.status !== "completed" ||
+              legacy.conclusion !== "success" ||
+              legacy.head_branch !== process.env.DEFAULT_BRANCH ||
+              legacy.path !== ".github/workflows/build-feed.yml" ||
+              (legacy.head_sha || "").toLowerCase() !== legacyRevision
+            ) {
+              core.setFailed("Pinned legacy archive producer is invalid");
+              return;
+            }
+            const legacyArtifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner, repo, run_id: legacy.id, per_page: 100},
+            );
+            const legacyMatches = legacyArtifacts.filter(
+              (item) =>
+                item.name === process.env.LEGACY_ARTIFACT_NAME &&
+                !item.expired,
+            );
+            if (
+              legacyMatches.length !== 1 ||
+              (legacyMatches[0].digest || "").toLowerCase() !== legacyDigest
+            ) {
+              core.setFailed("Pinned legacy archive digest changed");
+              return;
+            }
+            core.setOutput("preview_run_id", String(preview.id));
+            core.setOutput("preview_artifact_id", String(previewMatches[0].id));
+            core.setOutput("preview_artifact_name", previewMatches[0].name);
+            core.setOutput("preview_artifact_digest", previewMatches[0].digest.toLowerCase());
+            core.setOutput("legacy_run_id", String(legacy.id));
+            core.setOutput("legacy_artifact_id", String(legacyMatches[0].id));
+            core.setOutput("legacy_artifact_name", legacyMatches[0].name);
+            core.setOutput("legacy_artifact_digest", legacyDigest);
+            core.setOutput("legacy_code_revision", legacyRevision);
+
+      - name: Download raw immutable rollback and Preview artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEGACY_ARTIFACT_ID: ${{ steps.rollback_sources.outputs.legacy_artifact_id }}
+          PREVIEW_ARTIFACT_ID: ${{ steps.rollback_sources.outputs.preview_artifact_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p rollback-prepared
+          for spec in \
+            "$LEGACY_ARTIFACT_ID:rollback-prepared/pinned-legacy.zip" \
+            "$PREVIEW_ARTIFACT_ID:rollback-prepared/preview-pages.zip"; do
+            artifact_id="${spec%%:*}"
+            output="${spec#*:}"
+            curl --fail-with-body --silent --show-error --location \
+              --proto '=https' --proto-redir '=https' --tlsv1.2 \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
+              --output "$output"
+          done
+
+      - name: Set up protected preparation Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Materialize machine-only preparation base
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
+              "+00:00", "Z"
+          )
+          payload = {
+              "schema_version": 1,
+              "kind": "bside-global-alpha-expedited-preparation-base",
+              "environment": "production",
+              "evidence_source": "immutable_actual_producer_chain",
+              "is_synthetic": False,
+              "code_revision": os.environ["GITHUB_SHA"].lower(),
+              "collected_at": now,
+              "evidence_as_of": now,
+              "release_channel": "production_alpha_early_access",
+          }
+          Path("rollback-prepared/protected-input-template.json").write_text(
+              json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Extract actual legacy artifact for rollback drill without waiver
+        shell: bash
+        env:
+          LEGACY_RUN_ID: ${{ steps.rollback_sources.outputs.legacy_run_id }}
+          LEGACY_ARTIFACT_ID: ${{ steps.rollback_sources.outputs.legacy_artifact_id }}
+          LEGACY_ARTIFACT_NAME: ${{ steps.rollback_sources.outputs.legacy_artifact_name }}
+          LEGACY_CODE_REVISION: ${{ steps.rollback_sources.outputs.legacy_code_revision }}
+          LEGACY_ARTIFACT_DIGEST: ${{ steps.rollback_sources.outputs.legacy_artifact_digest }}
+        run: |
+          set -euo pipefail
+          python -m curator.expedited_legacy_recovery_bundle prepare-drill-site \
+            --archive rollback-prepared/pinned-legacy.zip \
+            --output rollback-prepared/legacy-drill-site \
+            --receipt rollback-prepared/legacy-drill-site-receipt.json \
+            --source-run-id "$LEGACY_RUN_ID" \
+            --source-artifact-id "$LEGACY_ARTIFACT_ID" \
+            --source-artifact-name "$LEGACY_ARTIFACT_NAME" \
+            --source-code-revision "$LEGACY_CODE_REVISION" \
+            --source-artifact-digest "$LEGACY_ARTIFACT_DIGEST"
+
+      - name: Extract and verify exact legacy plus governance Preview restore
+        shell: bash
+        env:
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+        run: |
+          set -euo pipefail
+          mkdir -p rollback-prepared/preview-download rollback-prepared/preview-site
+          unzip -q rollback-prepared/preview-pages.zip \
+            -d rollback-prepared/preview-download
+          mapfile -t tarballs < <(
+            find rollback-prepared/preview-download -type f -name artifact.tar -print
+          )
+          [[ "${#tarballs[@]}" -eq 1 ]]
+          tar -xf "${tarballs[0]}" -C rollback-prepared/preview-site
+          python -m curator.governance_site_config \
+            --site rollback-prepared/preview-site \
+            --expected-api-base "$GOVERNANCE_API_BASE_URL" \
+            --expected-web-base "$BSIDE_PUBLIC_WEB_URL" \
+            --expected-build-sha "$GITHUB_SHA"
+          test -f rollback-prepared/preview-site/feed.xml
+          test -f rollback-prepared/preview-site/governance/config.js
+          grep -Rqs --fixed-strings \
+            "production_alpha_early_access" \
+            rollback-prepared/preview-site/governance
+
+      - name: Record immutable rollback preparation provenance
+        shell: bash
+        env:
+          PREVIEW_RUN_ID: ${{ steps.rollback_sources.outputs.preview_run_id }}
+          PREVIEW_ARTIFACT_ID: ${{ steps.rollback_sources.outputs.preview_artifact_id }}
+          PREVIEW_ARTIFACT_NAME: ${{ steps.rollback_sources.outputs.preview_artifact_name }}
+          PREVIEW_ARTIFACT_DIGEST: ${{ steps.rollback_sources.outputs.preview_artifact_digest }}
+          LEGACY_RUN_ID: ${{ steps.rollback_sources.outputs.legacy_run_id }}
+          LEGACY_ARTIFACT_ID: ${{ steps.rollback_sources.outputs.legacy_artifact_id }}
+          LEGACY_ARTIFACT_NAME: ${{ steps.rollback_sources.outputs.legacy_artifact_name }}
+          LEGACY_ARTIFACT_DIGEST: ${{ steps.rollback_sources.outputs.legacy_artifact_digest }}
+          LEGACY_CODE_REVISION: ${{ steps.rollback_sources.outputs.legacy_code_revision }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg code_revision "$GITHUB_SHA" \
+            --argjson preview_run_id "$PREVIEW_RUN_ID" \
+            --argjson preview_artifact_id "$PREVIEW_ARTIFACT_ID" \
+            --arg preview_artifact_name "$PREVIEW_ARTIFACT_NAME" \
+            --arg preview_artifact_digest "$PREVIEW_ARTIFACT_DIGEST" \
+            --argjson legacy_run_id "$LEGACY_RUN_ID" \
+            --argjson legacy_artifact_id "$LEGACY_ARTIFACT_ID" \
+            --arg legacy_artifact_name "$LEGACY_ARTIFACT_NAME" \
+            --arg legacy_artifact_digest "$LEGACY_ARTIFACT_DIGEST" \
+            --arg legacy_code_revision "$LEGACY_CODE_REVISION" \
+            '{
+              schema_version: 1,
+              kind: "bside-expedited-rollback-preparation",
+              code_revision: $code_revision,
+              preview_restore: {
+                run_id: $preview_run_id,
+                artifact_id: $preview_artifact_id,
+                artifact_name: $preview_artifact_name,
+                artifact_digest: $preview_artifact_digest
+              },
+              legacy_archive: {
+                run_id: $legacy_run_id,
+                artifact_id: $legacy_artifact_id,
+                artifact_name: $legacy_artifact_name,
+                artifact_digest: $legacy_artifact_digest,
+                code_revision: $legacy_code_revision
+              }
+            }' > rollback-prepared/rollback-preparation.json
+
+      - name: Preserve protected rollback preparation
+        id: prepared
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-expedited-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            rollback-prepared/protected-input-template.json
+            rollback-prepared/rollback-preparation.json
+            rollback-prepared/pinned-legacy.zip
+            rollback-prepared/legacy-drill-site
+            rollback-prepared/legacy-drill-site-receipt.json
+            rollback-prepared/preview-site
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 9
+
+  rollback_drill:
+    needs: prepare_rollback
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: bside-pages-deployment-${{ github.repository }}
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      actions: read
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.restore_preview.outputs.page_url }}
+    steps:
+      - name: Download protected rollback preparation
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: global-alpha-expedited-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          path: rollback-prepared
+          digest-mismatch: error
+
+      - name: Configure Pages for the actual rollback drill
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Start monotonic rollback timer
+        id: timer
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "started_epoch=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+          echo "started_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
+      - name: Upload full-site legacy rollback candidate
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: expedited-legacy-rollback
+          path: rollback-prepared/legacy-drill-site
+
+      - name: Deploy and verify the real legacy rollback
+        id: deploy_legacy
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        with:
+          artifact_name: expedited-legacy-rollback
+
+      - name: Smoke the deployed legacy root inside ten minutes
+        id: legacy_smoke
+        shell: bash
+        env:
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+          STARTED_EPOCH: ${{ steps.timer.outputs.started_epoch }}
+        run: |
+          set -euo pipefail
+          web="${BSIDE_PUBLIC_WEB_URL%/}"
+          cache_bust="expedited-rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          curl --fail --silent --show-error --location \
+            --retry 6 --retry-all-errors \
+            "$web/?$cache_bust" --output legacy-root.html
+          curl --fail --silent --show-error --location \
+            --retry 6 --retry-all-errors \
+            "$web/feed.xml?$cache_bust" --output legacy-feed.xml
+          cmp --silent \
+            legacy-root.html \
+            rollback-prepared/legacy-drill-site/index.html
+          cmp --silent \
+            legacy-feed.xml \
+            rollback-prepared/legacy-drill-site/feed.xml
+          pinned_date="$(
+            find rollback-prepared/legacy-drill-site/feed \
+              -maxdepth 1 -type f -name '????-??-??.html' -printf '%f\n' \
+              | sed 's/\.html$//' | sort | tail -n 1
+          )"
+          [[ "$pinned_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
+          curl --fail --silent --show-error --location \
+            --retry 6 --retry-all-errors \
+            "$web/feed/$pinned_date.html?$cache_bust" \
+            --output legacy-pinned-date.html
+          cmp --silent \
+            legacy-pinned-date.html \
+            "rollback-prepared/legacy-drill-site/feed/$pinned_date.html"
+          sha256sum \
+            legacy-root.html legacy-feed.xml legacy-pinned-date.html \
+            > deployed-legacy-sha256.txt
+          completed_epoch="$(date -u +%s)"
+          duration_seconds="$((completed_epoch - STARTED_EPOCH))"
+          [[ "$duration_seconds" -ge 0 && "$duration_seconds" -le 600 ]]
+          echo "completed_epoch=$completed_epoch" >> "$GITHUB_OUTPUT"
+          echo "completed_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+          echo "duration_seconds=$duration_seconds" >> "$GITHUB_OUTPUT"
+
+      - name: Upload exact legacy plus governance Preview restore
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: expedited-preview-restore
+          path: rollback-prepared/preview-site
+
+      - name: Restore exact legacy plus governance Preview
+        id: restore_preview
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        with:
+          artifact_name: expedited-preview-restore
+
+      - name: Verify exact Preview restoration and write measured drill receipt
+        shell: bash
+        env:
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          STARTED_AT: ${{ steps.timer.outputs.started_at }}
+          LEGACY_COMPLETED_AT: ${{ steps.legacy_smoke.outputs.completed_at }}
+          DURATION_SECONDS: ${{ steps.legacy_smoke.outputs.duration_seconds }}
+        run: |
+          set -euo pipefail
+          web="${BSIDE_PUBLIC_WEB_URL%/}"
+          cache_bust="expedited-preview-restore-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          paths=(
+            "index.html"
+            "governance/index.html"
+            "governance/config.js"
+            "governance/app.js"
+          )
+          mkdir -p restored-preview
+          for path in "${paths[@]}"; do
+            mkdir -p "$(dirname "restored-preview/$path")"
+            curl --fail --silent --show-error --location \
+              --retry 6 --retry-all-errors \
+              "$web/${path}?$cache_bust" --output "restored-preview/$path"
+            cmp --silent \
+              "restored-preview/$path" \
+              "rollback-prepared/preview-site/$path"
+          done
+          terminal_content_sha256="$(
+            (
+              cd rollback-prepared/preview-site
+              sha256sum "${paths[@]}"
+            ) | sha256sum | cut -d' ' -f1
+          )"
+          [[ "$terminal_content_sha256" =~ ^[0-9a-f]{64}$ ]]
+          grep -qs --fixed-strings \
+            "$GITHUB_SHA" restored-preview/governance/config.js
+          grep -qs --fixed-strings \
+            "$GOVERNANCE_API_BASE_URL" restored-preview/governance/config.js
+          grep -qs --fixed-strings \
+            "production_alpha_early_access" restored-preview/governance/app.js
+          restore_completed_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          archive_digest="$(
+            jq -er '.legacy_archive.artifact_digest' \
+              rollback-prepared/rollback-preparation.json
+          )"
+          jq -n \
+            --arg code_revision "$GITHUB_SHA" \
+            --arg started_at "$STARTED_AT" \
+            --arg completed_at "$LEGACY_COMPLETED_AT" \
+            --arg restored_at "$restore_completed_at" \
+            --arg archive_digest "$archive_digest" \
+            --arg terminal_content_sha256 "$terminal_content_sha256" \
+            --argjson duration_seconds "$DURATION_SECONDS" \
+            '{
+              schema_version: 1,
+              kind: "bside-expedited-actual-rollback-drill",
+              code_revision: $code_revision,
+              status: "succeeded",
+              started_at: $started_at,
+              legacy_deployed_at: $completed_at,
+              preview_restored_at: $restored_at,
+              duration_seconds: $duration_seconds,
+              duration_minutes: ($duration_seconds / 60),
+              succeeded: true,
+              legacy_artifact_sha256: ($archive_digest | sub("^sha256:"; "")),
+              preview_restore_verified: true,
+              preview_terminal_content_sha256: $terminal_content_sha256
+            }' > expedited-rollback-drill.json
+
+      - name: Preserve actual rollback drill receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-expedited-rollback-drill-${{ github.run_id }}-${{ github.run_attempt }}
+          path: expedited-rollback-drill.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 9
+
+  observe:
+    needs: rollback_drill
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: governance-runtime
+    steps:
+      - name: Checkout the exact expedited candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Enforce the explicit 30-minute observation boundary
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
+          PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          STANDARD_OBSERVATION: ${{ vars.GLOBAL_ALPHA_OBSERVATION_ENABLED }}
+          EXPEDITED_OBSERVATION: ${{ vars.GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED }}
+          TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+          KIND_MODE: ${{ vars.KIND_CONNECTOR_MODE }}
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRMATION" == "CREATE_EXPEDITED_ALPHA_PREPARATION" ]] || {
+            echo "::error::The explicit expedited evidence confirmation did not match."
+            exit 1
+          }
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]] || {
+            echo "::error::Expedited evidence is restricted to the default branch."
+            exit 1
+          }
+          [[ "$PAGES_OWNER" == "legacy" && "$PIPELINE_MODE" == "shadow" ]]
+          [[ "${STANDARD_OBSERVATION,,}" == "false" ]]
+          [[ "${EXPEDITED_OBSERVATION,,}" == "true" ]]
+          [[ "${TELEGRAM_DELIVERY,,}" == "false" ]]
+          [[ "${GOVERNANCE_DELIVERY,,}" == "false" ]]
+          [[ "${KIND_MODE,,}" == "off" ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+
+      - name: Set up observation Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Collect seven real five-minute Preview observations
+        shell: bash
+        env:
+          GOVERNANCE_PIPELINE_MODE: shadow
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+          BSIDE_ALPHA_PREVIEW_WEB_URL: ${{ vars.BSIDE_ALPHA_PREVIEW_WEB_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
+          OBSERVATION_ROOT: ${{ runner.temp }}/expedited-observations
+        run: |
+          set -euo pipefail
+          mkdir -p "$OBSERVATION_ROOT"
+          incident_started_epoch="$(date -u +%s)"
+          incident_started_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          if GITHUB_SHA=0000000000000000000000000000000000000000 \
+            python -m curator.global_alpha_monitor \
+              --evidence "$OBSERVATION_ROOT/failure-detection-probe.json" \
+              --require-active-pipeline; then
+            echo "::error::Watchdog did not detect a deliberately mismatched release SHA."
+            exit 1
+          fi
+          detected_epoch="$(date -u +%s)"
+          detected_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          detection_seconds="$((detected_epoch - incident_started_epoch))"
+          [[ "$detection_seconds" -ge 0 && "$detection_seconds" -le 600 ]]
+          jq -e '
+            .status == "incident"
+            and any(.reasons[];
+              . == "api_revision_mismatch"
+              or . == "terminal_build_sha_mismatch"
+              or . == "unexpected_monitor_failure")
+          ' "$OBSERVATION_ROOT/failure-detection-probe.json" > /dev/null
+          jq -n \
+            --arg code_revision "$GITHUB_SHA" \
+            --arg incident_started_at "$incident_started_at" \
+            --arg detected_at "$detected_at" \
+            --argjson detection_seconds "$detection_seconds" \
+            '{
+              schema_version: 1,
+              kind: "bside-expedited-watchdog-failure-detection-drill",
+              code_revision: $code_revision,
+              incident: "deliberate_release_sha_mismatch",
+              incident_started_at: $incident_started_at,
+              detected_at: $detected_at,
+              detection_seconds: $detection_seconds,
+              detection_minutes: ($detection_seconds / 60),
+              succeeded: true
+            }' > "$OBSERVATION_ROOT/failure-detection-drill.json"
+          for slot in 0 1 2 3 4 5 6; do
+            python -m curator.global_alpha_monitor \
+              --evidence "$OBSERVATION_ROOT/observation-$slot.json" \
+              --require-active-pipeline
+            jq -e '
+              .status == "healthy"
+              and .pipeline_mode == "shadow"
+              and .web_surface == "governance-preview"
+              and .release_state == "preview"
+              and .workflow_revision == env.GITHUB_SHA
+              and .api_code_revision == env.GITHUB_SHA
+            ' "$OBSERVATION_ROOT/observation-$slot.json" > /dev/null
+            if [[ "$slot" != "6" ]]; then
+              sleep 300
+            fi
+          done
+          jq -s '.' "$OBSERVATION_ROOT"/observation-*.json \
+            > "$OBSERVATION_ROOT/observations.json"
+          jq -e '
+            length == 7
+            and all(.[]; .status == "healthy")
+            and ((.[-1].observed_at | fromdateiso8601) -
+                 (.[0].observed_at | fromdateiso8601) >= 1790)
+            and ([.[].observed_at | fromdateiso8601] as $times |
+                 all(range(1; length);
+                   (($times[.] - $times[.-1]) >= 120)
+                   and (($times[.] - $times[.-1]) <= 480)))
+          ' "$OBSERVATION_ROOT/observations.json" > /dev/null
+
+      - name: Preserve same-run expedited observations
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-expedited-observations-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/expedited-observations/observations.json
+            ${{ runner.temp }}/expedited-observations/failure-detection-drill.json
+            ${{ runner.temp }}/expedited-observations/failure-detection-probe.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 9
+
+  collect_automated:
+    needs: observe
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: governance-runtime
+    steps:
+      - name: Checkout the exact expedited candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Export same-SHA automated evidence from production MySQL
+        shell: bash
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$BSIDE_API_BASE_URL" && -n "$BSIDE_OPS_TOKEN" ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          mkdir -p automated-evidence
+          v1_api="${BSIDE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
+          curl --fail-with-body --silent --show-error \
+            --retry 2 --retry-all-errors --max-time 60 \
+            -H "Authorization: Bearer $BSIDE_OPS_TOKEN" \
+            "$v2_api/ops/alpha-release-evidence?code_revision=$GITHUB_SHA" \
+            --output automated-evidence/global-alpha-automated-evidence.json
+          jq -e \
+            '.ok == true
+             and .data.evidence_source == "production_database_export"
+             and .data.code_revision == env.GITHUB_SHA' \
+            automated-evidence/global-alpha-automated-evidence.json > /dev/null
+
+      - name: Export exact SourceRight eligibility from production MySQL
+        shell: bash
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          v1_api="${BSIDE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
+          mkdir -p automated-evidence/source-right-evidence
+          : > automated-evidence/source-right-evidence/status.tsv
+          for spec in \
+            'KR|official:dart|active' \
+            'US|official:sec-edgar|active' \
+            'CA|official:ca-issuer-ir|active' \
+            'AU|official:asic-register|active' \
+            'JP|official:edinet|unavailable' \
+            'GB|official:companies-house|unavailable'; do
+            IFS='|' read -r country source_right_id expected <<< "$spec"
+            output="automated-evidence/source-right-evidence/$country.json"
+            status="$(
+              curl --silent --show-error --retry 2 --retry-all-errors \
+                --max-time 60 --output "$output" --write-out '%{http_code}' \
+                -H "Authorization: Bearer $BSIDE_OPS_TOKEN" \
+                --get \
+                --data-urlencode "source_right_id=$source_right_id" \
+                --data-urlencode "use=public" \
+                "$v2_api/ops/source-right-eligibility"
+            )"
+            if [[ "$expected" == "active" ]]; then
+              [[ "$status" == "200" ]]
+              jq -e \
+                --arg source_right_id "$source_right_id" \
+                '.ok == true and .eligible == true
+                 and .source_right_id == $source_right_id
+                 and .use == "public"
+                 and (.rights_revision | type == "string" and length > 0)
+                 and (.contract_revision | type == "string" and length > 0)' \
+                "$output" > /dev/null
+            else
+              [[ "$status" == "409" ]]
+              jq -e \
+                --arg source_right_id "$source_right_id" \
+                '.ok == false and .eligible == false
+                 and .error == "source_right_ineligible"
+                 and .source_right_id == $source_right_id
+                 and .use == "public"
+                 and (.rights_revision | type == "string" and length > 0)
+                 and (.contract_revision | type == "string" and length > 0)
+                 and (.reasons | type == "array" and length > 0)' \
+                "$output" > /dev/null
+            fi
+            printf '%s\t%s\t%s\t%s\n' \
+              "$country" "$source_right_id" "$expected" "$status" \
+              >> automated-evidence/source-right-evidence/status.tsv
+          done
+          jq -n \
+            --arg code_revision "$GITHUB_SHA" \
+            --arg collected_at "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            '{
+              schema_version: 1,
+              kind: "bside-global-alpha-expedited-automated-collection",
+              code_revision: $code_revision,
+              collected_at: $collected_at,
+              environment: "production"
+            }' > automated-evidence/collection-provenance.json
+
+      - name: Preserve same-run protected automated evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-expedited-automated-${{ github.run_id }}-${{ github.run_attempt }}
+          path: automated-evidence
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 9
+
+  evaluate:
+    needs: [prepare_rollback, rollback_drill, observe, collect_automated]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout the exact approved release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Enforce protected default-branch evaluation
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRMATION" == "CREATE_EXPEDITED_ALPHA_PREPARATION" ]] || {
+            echo "::error::The explicit expedited evidence confirmation did not match."
+            exit 1
+          }
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]] || {
+            echo "::error::Expedited evidence is restricted to the default branch."
+            exit 1
+          }
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+
+      - name: Resolve exact named protected producer runs
+        id: producers
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EXPECTED_SHA: ${{ github.sha }}
+          DART_APPLY_RUN_ID: ${{ inputs.dart_apply_run_id }}
+          DART_REPLAY_RUN_ID: ${{ inputs.dart_replay_run_id }}
+          SEC_APPLY_RUN_ID: ${{ inputs.sec_apply_run_id }}
+          SEC_REPLAY_RUN_ID: ${{ inputs.sec_replay_run_id }}
+          SELECTED_MARKETS_RUN_ID: ${{ inputs.selected_markets_run_id }}
+          GOVERNANCE_PAGES_RUN_ID: ${{ inputs.governance_pages_run_id }}
+          PREVIEW_SMOKE_RUN_ID: ${{ inputs.preview_smoke_run_id }}
+          WEB_VITALS_RUN_ID: ${{ inputs.web_vitals_run_id }}
+          WEB_VITALS_DIGEST: ${{ inputs.web_vitals_artifact_digest }}
+          EDITORIAL_PUBLICATION_RUN_ID: ${{ inputs.editorial_publication_run_id }}
+          EDITORIAL_PUBLICATION_DIGEST: ${{ inputs.editorial_publication_artifact_digest }}
+          LEGACY_RUN_ID: ${{ vars.LEGACY_ROLLBACK_RUN_ID }}
+          LEGACY_ARTIFACT_NAME: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_NAME }}
+          LEGACY_CODE_REVISION: ${{ vars.LEGACY_ROLLBACK_CODE_REVISION }}
+          LEGACY_ARTIFACT_DIGEST: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_DIGEST }}
+        with:
+          script: |
+            const fs = require("fs");
+            const {owner, repo} = context.repo;
+            const expectedSha = process.env.EXPECTED_SHA.toLowerCase();
+            const defaultBranch = process.env.DEFAULT_BRANCH;
+            const specs = [
+              ["dart_apply", process.env.DART_APPLY_RUN_ID, "official-backfill.yml",
+                [
+                  {name: (run) => `official-backfill-report-${run.id}`},
+                  {pattern: /^official-backfill-checkpoint-apply-dart-\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}-false$/},
+                ], true],
+              ["dart_replay", process.env.DART_REPLAY_RUN_ID, "official-backfill.yml",
+                [
+                  {name: (run) => `official-backfill-report-${run.id}`},
+                  {pattern: /^official-backfill-checkpoint-replay-dart-\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}-false$/},
+                ], true],
+              ["sec_apply", process.env.SEC_APPLY_RUN_ID, "global-backfill.yml",
+                [{name: (run) => `global-backfill-US-${run.id}-${run.run_attempt}`}], true],
+              ["sec_replay", process.env.SEC_REPLAY_RUN_ID, "global-backfill.yml",
+                [{name: (run) => `global-backfill-US-${run.id}-${run.run_attempt}`}], true],
+              ["selected_markets", process.env.SELECTED_MARKETS_RUN_ID,
+                "ingest-selected-markets.yml",
+                [
+                  {name: (run) => `manual-official-link-ingest-CA-${run.id}-${run.run_attempt}`},
+                  {name: (run) => `manual-official-link-ingest-AU-${run.id}-${run.run_attempt}`},
+                ], true],
+              ["governance_pages", process.env.GOVERNANCE_PAGES_RUN_ID, "daily.yml",
+                [{name: (run) => `pages-${run.id}-${run.run_attempt}`}], true],
+              ["preview_smoke", process.env.PREVIEW_SMOKE_RUN_ID,
+                "global-alpha-preview-smoke.yml",
+                [
+                  {name: (run) =>
+                    `global-alpha-preview-smoke-${expectedSha}-${run.id}-${run.run_attempt}`},
+                ], true],
+              ["web_vitals", process.env.WEB_VITALS_RUN_ID,
+                "web-vitals.yml",
+                [
+                  {name: (run) =>
+                    `governance-web-vitals-${run.id}-${run.run_attempt}`},
+                ], true],
+              ["editorial_publication", process.env.EDITORIAL_PUBLICATION_RUN_ID,
+                "global-alpha-expedited-editorial.yml",
+                [
+                  {name: (run) =>
+                    `global-alpha-expedited-editorial-publication-${expectedSha}-${run.id}-${run.run_attempt}`},
+                ], true],
+            ];
+            const manifest = {
+              schema_version: 1,
+              kind: "bside-global-alpha-expedited-producer-manifest",
+              code_revision: expectedSha,
+              producers: {},
+            };
+            const requestedRunIds = specs.map((spec) => String(spec[1] || "").trim());
+            if (new Set(requestedRunIds).size !== requestedRunIds.length) {
+              core.setFailed("Every protected producer input must use a distinct workflow run");
+              return;
+            }
+            for (const [key, rawId, workflow, selectors, requireSameSha] of specs) {
+              const text = String(rawId || "").trim();
+              if (!/^[1-9][0-9]*$/.test(text)) {
+                core.setFailed(`${key} run id must be a positive integer`);
+                return;
+              }
+              const response = await github.rest.actions.getWorkflowRun({
+                owner, repo, run_id: Number(text),
+              });
+              const run = response.data;
+              const ageHours = (Date.now() - Date.parse(run.created_at)) / 3600000;
+              if (
+                run.conclusion !== "success" ||
+                run.status !== "completed" ||
+                run.event !== "workflow_dispatch" ||
+                run.head_branch !== defaultBranch ||
+                run.path !== `.github/workflows/${workflow}` ||
+                (requireSameSha && (run.head_sha || "").toLowerCase() !== expectedSha) ||
+                ageHours < -0.1 ||
+                ageHours > 72
+              ) {
+                core.setFailed(
+                  `${key} failed the workflow, success, branch, exact-SHA, or freshness contract`,
+                );
+                return;
+              }
+              const artifacts = await github.paginate(
+                github.rest.actions.listWorkflowRunArtifacts,
+                {owner, repo, run_id: run.id, per_page: 100},
+              );
+              const selected = [];
+              for (const selector of selectors) {
+                const matches = artifacts.filter(
+                  (item) =>
+                    !item.expired &&
+                    (
+                      selector.name
+                        ? item.name === selector.name(run)
+                        : selector.pattern.test(item.name)
+                    ),
+                );
+                if (
+                  matches.length !== 1 ||
+                  !/^sha256:[0-9a-f]{64}$/i.test(matches[0].digest || "")
+                ) {
+                  core.setFailed(`${key} has no unique immutable required artifact`);
+                  return;
+                }
+                selected.push({
+                  artifact_id: matches[0].id,
+                  artifact_name: matches[0].name,
+                  artifact_digest: matches[0].digest.toLowerCase(),
+                });
+              }
+              if (
+                key === "editorial_publication" &&
+                selected[0].artifact_digest !==
+                  String(process.env.EDITORIAL_PUBLICATION_DIGEST || "").toLowerCase()
+              ) {
+                core.setFailed("editorial publication artifact digest did not match input");
+                return;
+              }
+              if (
+                key === "web_vitals" &&
+                selected[0].artifact_digest !==
+                  String(process.env.WEB_VITALS_DIGEST || "").toLowerCase()
+              ) {
+                core.setFailed("Web Vitals artifact digest did not match input");
+                return;
+              }
+              manifest.producers[key] = {
+                run_id: run.id,
+                run_attempt: run.run_attempt,
+                run_created_at: run.created_at,
+                workflow: `.github/workflows/${workflow}`,
+                head_sha: (run.head_sha || "").toLowerCase(),
+                artifacts: selected,
+              };
+            }
+            const legacyRunText = String(process.env.LEGACY_RUN_ID || "").trim();
+            const legacyName = String(process.env.LEGACY_ARTIFACT_NAME || "").trim();
+            const legacyRevision = String(process.env.LEGACY_CODE_REVISION || "").toLowerCase();
+            const legacyDigest = String(process.env.LEGACY_ARTIFACT_DIGEST || "").toLowerCase();
+            if (
+              !/^[1-9][0-9]*$/.test(legacyRunText) ||
+              !legacyName ||
+              !/^[0-9a-f]{40}$/.test(legacyRevision) ||
+              !/^sha256:[0-9a-f]{64}$/.test(legacyDigest)
+            ) {
+              core.setFailed("The pinned legacy artifact variables are invalid");
+              return;
+            }
+            const legacyResponse = await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: Number(legacyRunText),
+            });
+            const legacyRun = legacyResponse.data;
+            if (
+              legacyRun.status !== "completed" ||
+              legacyRun.conclusion !== "success" ||
+              legacyRun.head_branch !== defaultBranch ||
+              (legacyRun.head_sha || "").toLowerCase() !== legacyRevision ||
+              legacyRun.path !== ".github/workflows/build-feed.yml"
+            ) {
+              core.setFailed("The pinned legacy producer failed its immutable run contract");
+              return;
+            }
+            const legacyArtifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner, repo, run_id: legacyRun.id, per_page: 100},
+            );
+            const legacyMatches = legacyArtifacts.filter(
+              (item) => item.name === legacyName && !item.expired,
+            );
+            if (
+              legacyMatches.length !== 1 ||
+              (legacyMatches[0].digest || "").toLowerCase() !== legacyDigest
+            ) {
+              core.setFailed("The pinned legacy artifact digest changed");
+              return;
+            }
+            manifest.producers.legacy_archive = {
+              run_id: legacyRun.id,
+              run_attempt: legacyRun.run_attempt,
+              workflow: ".github/workflows/build-feed.yml",
+              head_sha: legacyRevision,
+              artifacts: [{
+                artifact_id: legacyMatches[0].id,
+                artifact_name: legacyMatches[0].name,
+                artifact_digest: legacyDigest,
+              }],
+            };
+            fs.writeFileSync(
+              "expedited-producer-manifest.json",
+              JSON.stringify(manifest, null, 2) + "\n",
+            );
+            const pages = manifest.producers.governance_pages;
+            core.setOutput("pages_run_id", String(pages.run_id));
+            core.setOutput("pages_run_attempt", String(pages.run_attempt));
+            core.setOutput("pages_artifact_id", String(pages.artifacts[0].artifact_id));
+            core.setOutput("pages_artifact_name", pages.artifacts[0].artifact_name);
+            core.setOutput("pages_artifact_digest", pages.artifacts[0].artifact_digest);
+            for (const key of ["dart_apply", "dart_replay", "sec_apply", "sec_replay"]) {
+              const producer = manifest.producers[key];
+              core.setOutput(`${key}_run_id`, String(producer.run_id));
+              producer.artifacts.forEach((artifact, index) => {
+                core.setOutput(`${key}_artifact_${index}_id`, String(artifact.artifact_id));
+              });
+            }
+            const previewSmoke = manifest.producers.preview_smoke;
+            core.setOutput("preview_smoke_run_id", String(previewSmoke.run_id));
+            core.setOutput(
+              "preview_smoke_artifact_id",
+              String(previewSmoke.artifacts[0].artifact_id),
+            );
+            core.setOutput(
+              "preview_smoke_artifact_digest",
+              previewSmoke.artifacts[0].artifact_digest,
+            );
+            const webVitals = manifest.producers.web_vitals;
+            core.setOutput("web_vitals_run_id", String(webVitals.run_id));
+            core.setOutput(
+              "web_vitals_artifact_id",
+              String(webVitals.artifacts[0].artifact_id),
+            );
+            core.setOutput(
+              "web_vitals_artifact_digest",
+              webVitals.artifacts[0].artifact_digest,
+            );
+            const editorialPublication = manifest.producers.editorial_publication;
+            core.setOutput(
+              "editorial_publication_run_id",
+              String(editorialPublication.run_id),
+            );
+            core.setOutput(
+              "editorial_publication_run_attempt",
+              String(editorialPublication.run_attempt),
+            );
+            core.setOutput(
+              "editorial_publication_run_created_at",
+              editorialPublication.run_created_at,
+            );
+            core.setOutput(
+              "editorial_publication_artifact_id",
+              String(editorialPublication.artifacts[0].artifact_id),
+            );
+            core.setOutput(
+              "editorial_publication_artifact_name",
+              editorialPublication.artifacts[0].artifact_name,
+            );
+            core.setOutput(
+              "editorial_publication_artifact_digest",
+              editorialPublication.artifacts[0].artifact_digest,
+            );
+            core.setOutput("legacy_run_id", String(legacyRun.id));
+            core.setOutput("legacy_artifact_id", String(legacyMatches[0].id));
+            core.setOutput("legacy_artifact_name", legacyMatches[0].name);
+            core.setOutput("legacy_artifact_digest", legacyDigest);
+            core.setOutput("legacy_code_revision", legacyRevision);
+
+      - name: Download same-run expedited observations
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: global-alpha-expedited-observations-${{ github.run_id }}-${{ github.run_attempt }}
+          path: expedited-observations
+          digest-mismatch: error
+
+      - name: Download protected rollback preparation
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: global-alpha-expedited-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          path: rollback-prepared
+          digest-mismatch: error
+
+      - name: Download measured rollback drill
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: global-alpha-expedited-rollback-drill-${{ github.run_id }}-${{ github.run_attempt }}
+          path: actual-rollback-drill
+          digest-mismatch: error
+
+      - name: Download same-run protected automated evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: global-alpha-expedited-automated-${{ github.run_id }}-${{ github.run_attempt }}
+          path: automated-evidence
+          digest-mismatch: error
+
+      - name: Download exact candidate Pages artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.producers.outputs.pages_artifact_id }}
+          path: candidate-pages
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.producers.outputs.pages_run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
+      - name: Download immutable DART and SEC producer evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: >-
+            ${{ steps.producers.outputs.dart_apply_artifact_0_id }},
+            ${{ steps.producers.outputs.dart_apply_artifact_1_id }},
+            ${{ steps.producers.outputs.dart_replay_artifact_0_id }},
+            ${{ steps.producers.outputs.dart_replay_artifact_1_id }},
+            ${{ steps.producers.outputs.sec_apply_artifact_0_id }},
+            ${{ steps.producers.outputs.sec_replay_artifact_0_id }}
+          path: connector-artifacts
+          github-token: ${{ github.token }}
+          digest-mismatch: error
+          merge-multiple: false
+
+      - name: Download immutable protected editorial publication
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.producers.outputs.editorial_publication_artifact_id }}
+          path: editorial-publication
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.producers.outputs.editorial_publication_run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
+      - name: Download exact remote Preview smoke evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.producers.outputs.preview_smoke_artifact_id }}
+          path: preview-smoke-evidence
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.producers.outputs.preview_smoke_run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
+      - name: Download exact production mobile Web Vitals evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.producers.outputs.web_vitals_artifact_id }}
+          path: web-vitals-evidence
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.producers.outputs.web_vitals_run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
+      - name: Download immutable pinned legacy ZIP without executing it
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEGACY_ARTIFACT_ID: ${{ steps.producers.outputs.legacy_artifact_id }}
+          LEGACY_ARCHIVE_PATH: ${{ runner.temp }}/pinned-legacy.zip
+        run: |
+          set -euo pipefail
+          [[ "$LEGACY_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          curl --fail-with-body --silent --show-error --location \
+            --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/artifacts/$LEGACY_ARTIFACT_ID/zip" \
+            --output "$LEGACY_ARCHIVE_PATH"
+
+      - name: Set up gate Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Bind exact candidate Pages bytes
+        shell: bash
+        env:
+          PAGES_RUN_ID: ${{ steps.producers.outputs.pages_run_id }}
+          PAGES_RUN_ATTEMPT: ${{ steps.producers.outputs.pages_run_attempt }}
+          PAGES_ARTIFACT_ID: ${{ steps.producers.outputs.pages_artifact_id }}
+          PAGES_ARTIFACT_NAME: ${{ steps.producers.outputs.pages_artifact_name }}
+          PAGES_ARTIFACT_DIGEST: ${{ steps.producers.outputs.pages_artifact_digest }}
+        run: |
+          set -euo pipefail
+          python -m curator.global_alpha_pages_identity create \
+            --site candidate-pages \
+            --code-revision "$GITHUB_SHA" \
+            --producer-run-id "$PAGES_RUN_ID" \
+            --producer-run-attempt "$PAGES_RUN_ATTEMPT" \
+            --artifact-id "$PAGES_ARTIFACT_ID" \
+            --artifact-name "$PAGES_ARTIFACT_NAME" \
+            --artifact-digest "$PAGES_ARTIFACT_DIGEST" \
+            --output pages-artifact-identity.json
+
+      - name: Materialize protected expedited inputs without logging secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(
+              Path("rollback-prepared/protected-input-template.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          observations = json.loads(
+              Path("expedited-observations/observations.json").read_text(encoding="utf-8")
+          )
+          payload["observations"] = observations
+          payload["collected_at"] = observations[-1]["observed_at"]
+          payload["evidence_as_of"] = observations[-1]["observed_at"]
+          Path("expedited-inputs.json").write_text(
+              json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Reverify the actual legacy drill material at preparation time
+        shell: bash
+        env:
+          LEGACY_RUN_ID: ${{ steps.producers.outputs.legacy_run_id }}
+          LEGACY_ARTIFACT_ID: ${{ steps.producers.outputs.legacy_artifact_id }}
+          LEGACY_ARTIFACT_NAME: ${{ steps.producers.outputs.legacy_artifact_name }}
+          LEGACY_CODE_REVISION: ${{ steps.producers.outputs.legacy_code_revision }}
+          LEGACY_ARTIFACT_DIGEST: ${{ steps.producers.outputs.legacy_artifact_digest }}
+        run: |
+          set -euo pipefail
+          test ! -e reverified-legacy-drill-site
+          python -m curator.expedited_legacy_recovery_bundle prepare-drill-site \
+            --archive rollback-prepared/pinned-legacy.zip \
+            --output reverified-legacy-drill-site \
+            --receipt reverified-legacy-drill-site.json \
+            --source-run-id "$LEGACY_RUN_ID" \
+            --source-artifact-id "$LEGACY_ARTIFACT_ID" \
+            --source-artifact-name "$LEGACY_ARTIFACT_NAME" \
+            --source-code-revision "$LEGACY_CODE_REVISION" \
+            --source-artifact-digest "$LEGACY_ARTIFACT_DIGEST"
+          cmp --silent \
+            reverified-legacy-drill-site.json \
+            rollback-prepared/legacy-drill-site-receipt.json
+
+      - name: Derive DART and SEC receipts only from immutable producer artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from curator.backfill_checkpoint_api import checkpoint_payload_hash
+          from curator.official_backfill import validate_checkpoint
+
+          root = Path("connector-artifacts")
+          payload_path = Path("expedited-inputs.json")
+          payload = json.loads(payload_path.read_text(encoding="utf-8"))
+          manifest = json.loads(
+              Path("expedited-producer-manifest.json").read_text(encoding="utf-8")
+          )
+          revision = os.environ["GITHUB_SHA"].lower()
+          as_of = payload["evidence_as_of"]
+
+          def canonical_sha(value):
+              raw = json.dumps(
+                  value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+              ).encode("utf-8")
+              return hashlib.sha256(raw).hexdigest()
+
+          def artifact_dir(producer_key, index):
+              artifact = manifest["producers"][producer_key]["artifacts"][index]
+              path = root / artifact["artifact_name"]
+              if not path.is_dir():
+                  raise SystemExit(f"missing extracted artifact directory: {path}")
+              return path, artifact
+
+          def one_file(path, name):
+              matches = list(path.rglob(name))
+              if len(matches) != 1:
+                  raise SystemExit(f"{path}: expected one {name}, found {len(matches)}")
+              return matches[0]
+
+          def dart_run(producer_key, replay):
+              report_dir, _report_artifact = artifact_dir(producer_key, 0)
+              checkpoint_dir, checkpoint_artifact = artifact_dir(producer_key, 1)
+              report = json.loads(
+                  one_file(report_dir, "official-backfill-report.json").read_text(
+                      encoding="utf-8"
+                  )
+              )
+              checkpoint_file = one_file(
+                  checkpoint_dir, "backfill_official_checkpoint.json"
+              )
+              checkpoint = validate_checkpoint(
+                  json.loads(checkpoint_file.read_text(encoding="utf-8")),
+                  label=producer_key,
+              )
+              expected_report = {
+                  "status": "succeeded",
+                  "dry_run": False,
+                  "code_revision": revision,
+                  "mode": "replay" if replay else "apply",
+                  "windows_total": 30,
+                  "windows_remaining": 0,
+                  "windows_failed": 0,
+                  "windows_attempted": 30,
+                  "windows_succeeded": 30,
+              }
+              for key, expected in expected_report.items():
+                  if report.get(key) != expected:
+                      raise SystemExit(
+                          f"{producer_key} report field {key} is not {expected!r}"
+                      )
+              if replay:
+                  if (
+                      report.get("windows_already_completed") != 30
+                      or report.get("idempotent") is not True
+                      or report.get("replay_verified") is not True
+                      or report.get("checkpoint_before")
+                      != report.get("checkpoint_after")
+                  ):
+                      raise SystemExit(
+                          "DART replay must refetch all 30 windows without changing checkpoint"
+                      )
+              else:
+                  if (
+                      report.get("windows_already_completed") != 0
+                      or report.get("idempotent") is not False
+                      or report.get("replay_verified") is not False
+                  ):
+                      raise SystemExit("DART apply did not execute exactly 30 windows")
+              completed = checkpoint.get("completed_windows")
+              failed = checkpoint.get("failed_windows")
+              if not isinstance(completed, dict) or len(completed) != 30 or failed:
+                  raise SystemExit(f"{producer_key} checkpoint is not a clean 30-window set")
+              job = checkpoint.get("job")
+              if (
+                  not isinstance(job, dict)
+                  or job.get("code_revision") != revision
+                  or job.get("sources") != ["dart"]
+                  or job.get("fingerprint") != report.get("job_fingerprint")
+              ):
+                  raise SystemExit(f"{producer_key} checkpoint job contract is invalid")
+              checkpoint_hash = checkpoint_payload_hash(checkpoint)
+              if report.get("checkpoint_payload_sha256") != checkpoint_hash:
+                  raise SystemExit(
+                      f"{producer_key} report is not bound to its checkpoint bytes"
+                  )
+              contract = report.get("receipt_contract")
+              windows = contract.get("windows") if isinstance(contract, dict) else None
+              if (
+                  not isinstance(contract, dict)
+                  or contract.get("schema_version") != 1
+                  or contract.get("source") != "dart"
+                  or contract.get("mode") != ("replay" if replay else "apply")
+                  or contract.get("job_fingerprint") != report.get("job_fingerprint")
+                  or contract.get("checkpoint_payload_sha256") != checkpoint_hash
+                  or contract.get("window_count") != 30
+                  or not isinstance(windows, list)
+                  or len(windows) != 30
+              ):
+                  raise SystemExit(
+                      f"{producer_key} actual receipt contract is incomplete"
+                  )
+              previous_end = None
+              for index, window in enumerate(windows):
+                  if (
+                      not isinstance(window, dict)
+                      or window.get("status") != "complete"
+                      or window.get("code_revision") != revision
+                      or window.get("raw_count")
+                      != window.get("filtered_out_count")
+                      + window.get("accepted_count")
+                      or window.get("accepted_count")
+                      != window.get("acknowledged_count")
+                      or window.get("idempotent") is not replay
+                      or window.get("replay_verified") is not replay
+                      or (
+                          previous_end is not None
+                          and window.get("window_start") != previous_end
+                      )
+                  ):
+                      raise SystemExit(
+                          f"{producer_key} actual receipt window {index + 1} is invalid"
+                      )
+                  previous_end = window.get("window_end_exclusive")
+              binding = None
+              if replay:
+                  binding = json.loads(
+                      one_file(
+                          report_dir, "dart-replay-state-binding.json"
+                      ).read_text(encoding="utf-8")
+                  )
+                  binding_unsigned = {
+                      key: value
+                      for key, value in binding.items()
+                      if key != "binding_sha256"
+                  }
+                  before = binding.get("before")
+                  after = binding.get("after")
+                  before_contract = (
+                      {
+                          key: value
+                          for key, value in before.items()
+                          if key != "collected_at"
+                      }
+                      if isinstance(before, dict)
+                      else None
+                  )
+                  after_contract = (
+                      {
+                          key: value
+                          for key, value in after.items()
+                          if key != "collected_at"
+                      }
+                      if isinstance(after, dict)
+                      else None
+                  )
+                  replay_state = report.get("replay_state")
+                  if (
+                      binding.get("schema_version") != 1
+                      or binding.get("kind")
+                      != "official-dart-replay-state-binding"
+                      or binding.get("environment") != "production"
+                      or binding.get("is_synthetic") is not False
+                      or binding.get("code_revision") != revision
+                      or binding.get("state_unchanged") is not True
+                      or binding.get("checkpoint_unchanged") is not True
+                      or before_contract != after_contract
+                      or binding.get("receipt_contract_sha256")
+                      != canonical_sha(contract)
+                      or binding.get("binding_sha256")
+                      != canonical_sha(binding_unsigned)
+                      or not isinstance(replay_state, dict)
+                      or replay_state.get("before") != before
+                      or replay_state.get("after") != after
+                      or replay_state.get("state_unchanged") is not True
+                      or replay_state.get("checkpoint_unchanged") is not True
+                      or replay_state.get("binding_sha256")
+                      != binding.get("binding_sha256")
+                  ):
+                      raise SystemExit(
+                          "DART replay state binding does not prove unchanged production state"
+                      )
+                  result_rows = report.get("window_results")
+                  if (
+                      not isinstance(result_rows, list)
+                      or len(result_rows) != 30
+                      or any(
+                          not isinstance(row, dict)
+                          or row.get("apply_summary_counts_sha256")
+                          != row.get("replay_summary_counts_sha256")
+                          for row in result_rows
+                      )
+                  ):
+                      raise SystemExit(
+                          "DART replay results do not bind all apply/replay count hashes"
+                      )
+              producer = manifest["producers"][producer_key]
+              return {
+                  "run_id": producer["run_id"],
+                  "artifact_id": checkpoint_artifact["artifact_id"],
+                  "artifact_name": checkpoint_artifact["artifact_name"],
+                  "artifact_sha256": checkpoint_artifact["artifact_digest"].removeprefix(
+                      "sha256:"
+                  ),
+                  "status": "succeeded",
+                  "code_revision": revision,
+                  "windows": windows,
+              }, checkpoint_file.read_bytes(), checkpoint, report, binding
+
+          (
+              dart_apply,
+              dart_apply_bytes,
+              dart_apply_checkpoint,
+              dart_apply_report,
+              _dart_apply_binding,
+          ) = dart_run("dart_apply", False)
+          (
+              dart_replay,
+              dart_replay_bytes,
+              dart_replay_checkpoint,
+              dart_replay_report,
+              dart_replay_binding,
+          ) = dart_run("dart_replay", True)
+          if (
+              dart_apply_bytes != dart_replay_bytes
+              or dart_apply_checkpoint != dart_replay_checkpoint
+          ):
+              raise SystemExit(
+                  "DART apply and replay checkpoints are not byte/canonical identical"
+              )
+          if dart_replay_report.get("apply_receipt_contract") != (
+              dart_apply_report.get("receipt_contract")
+          ):
+              raise SystemExit(
+                  "DART replay is not bound to the exact apply receipt contract"
+              )
+          stable_fields = (
+              "window_start",
+              "window_end_exclusive",
+              "raw_count",
+              "filtered_out_count",
+              "accepted_count",
+              "acknowledged_count",
+              "status",
+              "code_revision",
+              "payload_sha256",
+              "idempotency_key",
+              "ingest_id",
+          )
+          apply_windows = dart_apply["windows"]
+          replay_windows = dart_replay["windows"]
+          for index, (apply_window, replay_window) in enumerate(
+              zip(apply_windows, replay_windows, strict=True)
+          ):
+              if any(
+                  apply_window.get(field) != replay_window.get(field)
+                  for field in stable_fields
+              ):
+                  raise SystemExit(
+                      f"DART apply/replay receipt counts differ at window {index + 1}"
+                  )
+          if not isinstance(dart_replay_binding, dict):
+              raise SystemExit("DART replay binding artifact is missing")
+
+          def sec_run(producer_key, expected_mode):
+              artifact_dir_path, artifact = artifact_dir(producer_key, 0)
+              summaries = list(
+                  artifact_dir_path.rglob("global-backfill-US-summary.json")
+              )
+              if len(summaries) != 1:
+                  raise SystemExit(f"{producer_key}: exact SEC summary is missing")
+              summary = json.loads(summaries[0].read_text(encoding="utf-8"))
+              if (
+                  summary.get("status") != "succeeded"
+                  or summary.get("country_code") != "US"
+                  or summary.get("mode") != expected_mode
+                  or summary.get("code_revision") != revision
+                  or summary.get("processed_windows") != 30
+                  or len(summary.get("receipts", [])) != 30
+              ):
+                  raise SystemExit(f"{producer_key}: SEC summary contract failed")
+              day_files = sorted(artifact_dir_path.rglob("US-????-??-??.json"))
+              if len(day_files) != 30:
+                  raise SystemExit(f"{producer_key}: SEC requires 30 per-day receipts")
+              windows = []
+              for path in day_files:
+                  item = json.loads(path.read_text(encoding="utf-8"))
+                  window = item.get("window")
+                  raw = item.get("raw_count")
+                  acknowledged = item.get("acknowledged_count")
+                  if (
+                      item.get("status") != "succeeded"
+                      or item.get("country_code") != "US"
+                      or item.get("connector_id") != "connector:us:sec-edgar"
+                      or item.get("code_revision") != revision
+                      or item.get("collection_mode") != "completed-day"
+                      or not isinstance(window, dict)
+                      or not isinstance(raw, int)
+                      or isinstance(raw, bool)
+                      or not isinstance(acknowledged, int)
+                      or isinstance(acknowledged, bool)
+                      or raw < acknowledged
+                      or acknowledged < 0
+                  ):
+                      raise SystemExit(f"{producer_key}: invalid SEC receipt {path.name}")
+                  replay = item.get("replay_verification")
+                  if expected_mode == "replay":
+                      if (
+                          item.get("idempotent") is not True
+                          or not isinstance(replay, dict)
+                          or replay.get("attempted") is not True
+                          or replay.get("same_payload") is not True
+                          or replay.get("idempotent") is not True
+                          or replay.get("read_only") is not True
+                          or replay.get("idempotency_keys_match") is not True
+                          or replay.get("ingest_ids_match") is not True
+                      ):
+                          raise SystemExit(
+                              f"{producer_key}: SEC replay verification failed"
+                          )
+                  elif "replay_verification" in item or item.get("idempotent") is not False:
+                      raise SystemExit(f"{producer_key}: SEC apply is not a first apply")
+                  idempotency_key = item.get("idempotency_key")
+                  ingest_id = item.get("ingest_id")
+                  if not isinstance(idempotency_key, str) or not idempotency_key:
+                      raise SystemExit(f"{producer_key}: missing idempotency key")
+                  if not isinstance(ingest_id, str) or not ingest_id:
+                      raise SystemExit(f"{producer_key}: missing ingest id")
+                  stable = {
+                      "window": window,
+                      "raw_count": raw,
+                      "acknowledged_count": acknowledged,
+                      "idempotency_key": idempotency_key,
+                      "ingest_id": ingest_id,
+                  }
+                  windows.append(
+                      {
+                          "window_start": window["start"],
+                          "window_end_exclusive": window["end_exclusive"],
+                          "status": "complete",
+                          "code_revision": revision,
+                          "raw_count": raw,
+                          "filtered_out_count": raw - acknowledged,
+                          "accepted_count": acknowledged,
+                          "acknowledged_count": acknowledged,
+                          "payload_sha256": canonical_sha(stable),
+                          "receipt_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                          "idempotency_key": idempotency_key,
+                          "ingest_id": ingest_id,
+                          "idempotent": expected_mode == "replay",
+                          "replay_verified": expected_mode == "replay",
+                      }
+                  )
+              windows.sort(key=lambda value: value["window_start"])
+              producer = manifest["producers"][producer_key]
+              return {
+                  "run_id": producer["run_id"],
+                  "artifact_id": artifact["artifact_id"],
+                  "artifact_name": artifact["artifact_name"],
+                  "artifact_sha256": artifact["artifact_digest"].removeprefix(
+                      "sha256:"
+                  ),
+                  "status": "succeeded",
+                  "code_revision": revision,
+                  "windows": windows,
+              }
+
+          sec_apply = sec_run("sec_apply", "apply")
+          sec_replay = sec_run("sec_replay", "replay")
+          payload["connector_receipts"] = {
+              "schema_version": 1,
+              "kind": "bside-global-alpha-expedited-connector-receipts",
+              "environment": "production",
+              "evidence_source": "immutable_producer_artifacts",
+              "is_synthetic": False,
+              "code_revision": revision,
+              "collected_at": as_of,
+              "evidence_as_of": as_of,
+              "connectors": [
+                  {
+                      "connector_family": "dart",
+                      "country": "KR",
+                      "apply_run": dart_apply,
+                      "replay_run": dart_replay,
+                  },
+                  {
+                      "connector_family": "sec-edgar",
+                      "country": "US",
+                      "apply_run": sec_apply,
+                      "replay_run": sec_replay,
+                  },
+              ],
+          }
+          payload_path.write_text(
+              json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Inject actual source, experience, rollback, and integrity evidence
+        shell: bash
+        env:
+          PREVIEW_SMOKE_ARTIFACT_DIGEST: ${{ steps.producers.outputs.preview_smoke_artifact_digest }}
+          WEB_VITALS_ARTIFACT_DIGEST: ${{ steps.producers.outputs.web_vitals_artifact_digest }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          def canonical_sha(value):
+              raw = json.dumps(
+                  value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+              ).encode("utf-8")
+              return hashlib.sha256(raw).hexdigest()
+
+          path = Path("expedited-inputs.json")
+          payload = json.loads(path.read_text(encoding="utf-8"))
+          revision = os.environ["GITHUB_SHA"].lower()
+          as_of = payload["evidence_as_of"]
+          observations = payload["observations"]
+          last_sources = observations[-1]["sources"]
+          if {item.get("country") for item in last_sources} != {
+              "KR", "US", "JP", "GB", "CA", "AU"
+          }:
+              raise SystemExit("actual Preview observation omitted the exact six-country set")
+          rights = {
+              "KR": "official:dart",
+              "US": "official:sec-edgar",
+              "JP": "official:edinet",
+              "GB": "official:companies-house",
+              "CA": "official:ca-issuer-ir",
+              "AU": "official:asic-register",
+          }
+          rights_evidence = {}
+          for evidence_path in Path("automated-evidence/source-right-evidence").glob(
+              "??.json"
+          ):
+              record = json.loads(evidence_path.read_text(encoding="utf-8"))
+              rights_evidence[evidence_path.stem] = record
+          if set(rights_evidence) != set(rights):
+              raise SystemExit("actual SourceRight evidence omitted a required country")
+          source_rows = []
+          for actual in sorted(last_sources, key=lambda item: item["country"]):
+              country = actual["country"]
+              right = rights_evidence[country]
+              expected_active = country in {"KR", "US", "CA", "AU"}
+              right_contract_valid = (
+                  right.get("source_right_id") == rights[country]
+                  and right.get("use") == "public"
+                  and isinstance(right.get("rights_revision"), str)
+                  and bool(right.get("rights_revision"))
+                  and isinstance(right.get("contract_revision"), str)
+                  and bool(right.get("contract_revision"))
+                  and (
+                      (
+                          expected_active
+                          and right.get("ok") is True
+                          and right.get("eligible") is True
+                      )
+                      or (
+                          not expected_active
+                          and right.get("ok") is False
+                          and right.get("eligible") is False
+                          and right.get("error") == "source_right_ineligible"
+                      )
+                  )
+              )
+              source_rows.append(
+                  {
+                      "country": country,
+                      "source_right_id": rights[country],
+                      "source_right_valid": right_contract_valid,
+                      "connector_id": actual["connector_id"],
+                      "coverage_mode": actual["coverage_mode"],
+                      "public_status": actual["public_status"],
+                      "public_ready": actual["public_ready"],
+                      "raw_count": actual["raw_count"],
+                      "acknowledged_count": actual["acknowledged_count"],
+                  }
+              )
+          payload["source_readiness"] = {
+              "schema_version": 1,
+              "kind": "bside-global-alpha-expedited-source-readiness",
+              "environment": "production",
+              "evidence_source": "production_preview_sources_status",
+              "is_synthetic": False,
+              "code_revision": revision,
+              "collected_at": as_of,
+              "evidence_as_of": as_of,
+              "sources": source_rows,
+          }
+
+          preview_receipts = []
+          for receipt_path in Path("preview-smoke-evidence").rglob("preview-*.json"):
+              record = json.loads(receipt_path.read_text(encoding="utf-8"))
+              if record.get("evidence_type") == "global_alpha_remote_preview_smoke":
+                  preview_receipts.append(record)
+          if len(preview_receipts) != 3:
+              raise SystemExit("remote Preview evidence must contain exact three viewports")
+          viewports = []
+          api_responses = None
+          for record in preview_receipts:
+              viewport = record.get("viewport")
+              if (
+                  record.get("status") != "completed"
+                  or record.get("code_revision") != revision
+                  or record.get("ui_build_sha") != revision
+                  or record.get("api_code_revision") != revision
+                  or record.get("used_mock_routes") is not False
+                  or record.get("v1_fallback_count") != 0
+                  or not isinstance(viewport, dict)
+              ):
+                  raise SystemExit("remote Preview receipt failed its production contract")
+              viewport_name = f"{viewport.get('width')}x{viewport.get('height')}"
+              row = {
+                  "viewport": viewport_name,
+                  "visual_regression_passed": (
+                      record.get("visual_regression_passed") is True
+                  ),
+                  "axe_serious_count": record.get("axe_serious_count"),
+                  "axe_critical_count": record.get("axe_critical_count"),
+              }
+              if viewport_name == "390x844":
+                  row["first_important_event_top_px"] = record.get(
+                      "first_important_event_top_px"
+                  )
+              viewports.append(row)
+              budget = record.get("api_budget_receipts")
+              if api_responses is None:
+                  api_responses = budget
+              elif budget != api_responses:
+                  raise SystemExit("API byte receipts changed between viewport journeys")
+          if {item["viewport"] for item in viewports} != {
+              "390x844", "768x1024", "1440x900"
+          }:
+              raise SystemExit("remote Preview omitted a required viewport")
+          if not isinstance(api_responses, list) or len(api_responses) != 10:
+              raise SystemExit("remote Preview omitted exact API byte receipts")
+
+          vitals_paths = list(
+              Path("web-vitals-evidence").rglob("web-vitals-run-summary.json")
+          )
+          if len(vitals_paths) != 1:
+              raise SystemExit("Web Vitals artifact must contain one run summary")
+          vitals = json.loads(vitals_paths[0].read_text(encoding="utf-8"))
+          if (
+              vitals.get("schema_version") != 1
+              or vitals.get("build_sha") != revision
+              or vitals.get("source") != "first_party"
+              or vitals.get("device_class") != "mobile"
+              or vitals.get("accepted_count") != vitals.get("observation_count")
+              or vitals.get("observation_count") != 60
+          ):
+              raise SystemExit("actual production Web Vitals summary failed")
+          metrics = vitals.get("measured_metrics")
+          if not isinstance(metrics, dict):
+              raise SystemExit("actual Web Vitals summary omitted measured p75 values")
+
+          detection = json.loads(
+              Path(
+                  "expedited-observations/failure-detection-drill.json"
+              ).read_text(encoding="utf-8")
+          )
+          if (
+              detection.get("kind")
+              != "bside-expedited-watchdog-failure-detection-drill"
+              or detection.get("code_revision") != revision
+              or detection.get("succeeded") is not True
+              or detection.get("detection_seconds", 601) > 600
+          ):
+              raise SystemExit("actual watchdog failure-detection drill failed")
+          payload["experience"] = {
+              "schema_version": 1,
+              "kind": "bside-global-alpha-experience",
+              "environment": "production",
+              "evidence_source": "immutable_preview_and_web_vitals_artifacts",
+              "is_synthetic": False,
+              "code_revision": revision,
+              "collected_at": observations[-1]["observed_at"],
+              "evidence_as_of": as_of,
+              "viewports": viewports,
+              "web_vitals": metrics,
+              "api_responses": api_responses,
+              "failure_detection_drill": {
+                  "incident_started_at": detection["incident_started_at"],
+                  "detected_at": detection["detected_at"],
+                  "detection_minutes": detection["detection_minutes"],
+              },
+              "producer_artifacts": {
+                  "preview_smoke_artifact_digest": os.environ[
+                      "PREVIEW_SMOKE_ARTIFACT_DIGEST"
+                  ],
+                  "web_vitals_artifact_digest": os.environ[
+                      "WEB_VITALS_ARTIFACT_DIGEST"
+                  ],
+                  "observations_sha256": canonical_sha(observations),
+                  "failure_detection_receipt_sha256": canonical_sha(detection),
+              },
+          }
+
+          drill = json.loads(
+              Path("actual-rollback-drill/expedited-rollback-drill.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          if (
+              drill.get("status") != "succeeded"
+              or drill.get("code_revision") != revision
+              or drill.get("preview_restore_verified") is not True
+              or drill.get("duration_seconds", 601) > 600
+          ):
+              raise SystemExit("actual protected rollback drill is not release eligible")
+          payload["experience"]["rollback_drill"] = {
+              "duration_minutes": drill["duration_minutes"],
+              "succeeded": True,
+              "legacy_artifact_sha256": drill["legacy_artifact_sha256"],
+              "started_at": drill["started_at"],
+              "completed_at": drill["legacy_deployed_at"],
+          }
+          payload["experience"]["rollback_drill_receipt"] = drill
+          payload["experience"]["producer_artifacts"][
+              "rollback_drill_receipt_sha256"
+          ] = canonical_sha(drill)
+
+          automated = json.loads(
+              Path(
+                  "automated-evidence/global-alpha-automated-evidence.json"
+              ).read_text(encoding="utf-8")
+          )
+          data = automated.get("data")
+          if (
+              automated.get("ok") is not True
+              or not isinstance(data, dict)
+              or data.get("evidence_source") != "production_database_export"
+              or data.get("code_revision") != revision
+          ):
+              raise SystemExit("production automated evidence contract failed")
+          actual_content = data.get("content_integrity")
+          if not isinstance(actual_content, dict):
+              raise SystemExit("production automated evidence omitted content integrity")
+          if (
+              actual_content.get("code_revision") != revision
+              or actual_content.get("evidence_source")
+              != "production_database_export"
+              or actual_content.get("is_synthetic") is not False
+          ):
+              raise SystemExit("production content-integrity provenance failed")
+          actual_content = dict(actual_content)
+          actual_content["evidence_as_of"] = as_of
+          payload["content_integrity"] = actual_content
+
+          database_connectors = {
+              item.get("connector_family"): item
+              for item in data.get("connector_coverage", [])
+              if isinstance(item, dict)
+          }
+          if set(database_connectors) != {"dart", "sec-edgar"}:
+              raise SystemExit("production MySQL omitted exact DART/SEC connector coverage")
+          for connector in payload["connector_receipts"]["connectors"]:
+              family = connector["connector_family"]
+              actual_windows = database_connectors[family].get("completed_windows", [])
+              expected_windows = connector["apply_run"]["windows"]
+              actual_by_date = {
+                  row.get("window_start"): row for row in actual_windows
+              }
+              if len(actual_by_date) != 30:
+                  raise SystemExit(f"{family}: production MySQL does not contain 30 windows")
+              for expected in expected_windows:
+                  actual = actual_by_date.get(expected["window_start"])
+                  if actual is None:
+                      raise SystemExit(f"{family}: production window is missing")
+                  for field in (
+                      "window_end_exclusive",
+                      "raw_count",
+                      "filtered_out_count",
+                      "accepted_count",
+                      "acknowledged_count",
+                      "code_revision",
+                  ):
+                      if actual.get(field) != expected.get(field):
+                          raise SystemExit(
+                              f"{family}: artifact and production DB differ on {field}"
+                          )
+
+          path.write_text(
+              json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Verify protected input producer identities
+        shell: bash
+        env:
+          LEGACY_ARTIFACT_ID: ${{ steps.producers.outputs.legacy_artifact_id }}
+          LEGACY_ARTIFACT_NAME: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_NAME }}
+          LEGACY_ARTIFACT_DIGEST: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_DIGEST }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(Path("expedited-inputs.json").read_text(encoding="utf-8"))
+          manifest = json.loads(
+              Path("expedited-producer-manifest.json").read_text(encoding="utf-8")
+          )
+          if payload.get("code_revision") != os.environ["GITHUB_SHA"].lower():
+              raise SystemExit("protected input revision does not match the workflow SHA")
+          expected = {
+              ("dart", "apply_run"): "dart_apply",
+              ("dart", "replay_run"): "dart_replay",
+              ("sec-edgar", "apply_run"): "sec_apply",
+              ("sec-edgar", "replay_run"): "sec_replay",
+          }
+          connectors = payload.get("connector_receipts", {}).get("connectors", [])
+          by_family = {
+              item.get("connector_family"): item
+              for item in connectors
+              if isinstance(item, dict)
+          }
+          for (family, field), producer_key in expected.items():
+              run = by_family.get(family, {}).get(field, {})
+              producer = manifest["producers"][producer_key]
+              artifact_index = 1 if producer_key.startswith("dart_") else 0
+              artifact = producer["artifacts"][artifact_index]
+              actual = {
+                  "run_id": producer["run_id"],
+                  "artifact_id": artifact["artifact_id"],
+                  "artifact_name": artifact["artifact_name"],
+                  "artifact_sha256": artifact["artifact_digest"].removeprefix("sha256:"),
+              }
+              claimed = {
+                  "run_id": run.get("run_id"),
+                  "artifact_id": run.get("artifact_id"),
+                  "artifact_name": run.get("artifact_name"),
+                  "artifact_sha256": str(run.get("artifact_sha256", "")).removeprefix("sha256:"),
+              }
+              if claimed != actual:
+                  raise SystemExit(f"{producer_key} protected provenance mismatch")
+          legacy = payload.get("legacy_archive", {})
+          expected_legacy = {
+              "artifact_id": int(os.environ["LEGACY_ARTIFACT_ID"]),
+              "artifact_name": os.environ["LEGACY_ARTIFACT_NAME"],
+              "archive_sha256": os.environ["LEGACY_ARTIFACT_DIGEST"].removeprefix("sha256:"),
+          }
+          claimed_legacy = {
+              "artifact_id": legacy.get("artifact_id"),
+              "artifact_name": legacy.get("artifact_name"),
+              "archive_sha256": str(legacy.get("archive_sha256", "")).removeprefix("sha256:"),
+          }
+          if claimed_legacy != expected_legacy:
+              raise SystemExit("legacy archive protected provenance mismatch")
+          PY
+
+      - name: Freeze machine-only preparation before editorial binding
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .code_revision == env.GITHUB_SHA
+            and .release_channel == "production_alpha_early_access"
+            and (has("human_review") | not)
+            and (has("approval") | not)
+            and (.observations | length) == 7
+            and (.connector_receipts.connectors | length) == 2
+            and (.source_readiness.sources | length) == 6
+          ' expedited-inputs.json > /dev/null
+          jq '.kind = "bside-global-alpha-expedited-preparation-input"' \
+            expedited-inputs.json > expedited-preparation.json
+          evidence_as_of="$(jq -er '.evidence_as_of' expedited-preparation.json)"
+          echo "evidence_as_of=$evidence_as_of" >> "$GITHUB_OUTPUT"
+
+      - name: Verify actual editorial publication and inject its immutable identity
+        shell: bash
+        env:
+          EDITORIAL_RUN_ID: ${{ steps.producers.outputs.editorial_publication_run_id }}
+          EDITORIAL_RUN_ATTEMPT: ${{ steps.producers.outputs.editorial_publication_run_attempt }}
+          EDITORIAL_RUN_CREATED_AT: ${{ steps.producers.outputs.editorial_publication_run_created_at }}
+          EDITORIAL_ARTIFACT_ID: ${{ steps.producers.outputs.editorial_publication_artifact_id }}
+          EDITORIAL_ARTIFACT_NAME: ${{ steps.producers.outputs.editorial_publication_artifact_name }}
+          EDITORIAL_ARTIFACT_DIGEST: ${{ steps.producers.outputs.editorial_publication_artifact_digest }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          def one(name):
+              paths = list(Path("editorial-publication").rglob(name))
+              if len(paths) != 1:
+                  raise SystemExit(
+                      f"editorial publication must contain exactly one {name}"
+                  )
+              return paths[0]
+
+          def load(name):
+              return json.loads(one(name).read_text(encoding="utf-8"))
+
+          def canonical_sha(value):
+              raw = json.dumps(
+                  value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+              ).encode("utf-8")
+              return hashlib.sha256(raw).hexdigest()
+
+          def file_sha(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          human_path = one("human-review.json")
+          receipt_path = one("publication-receipt.json")
+          replay_path = one("publication-replay-receipt.json")
+          human = json.loads(human_path.read_text(encoding="utf-8"))
+          receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+          replay = json.loads(replay_path.read_text(encoding="utf-8"))
+          revision = os.environ["GITHUB_SHA"].lower()
+          publication_identity = {
+              "artifact_id": int(os.environ["EDITORIAL_ARTIFACT_ID"]),
+              "artifact_name": os.environ["EDITORIAL_ARTIFACT_NAME"],
+              "artifact_sha256": os.environ[
+                  "EDITORIAL_ARTIFACT_DIGEST"
+              ].removeprefix("sha256:"),
+          }
+          expected_candidate = receipt.get("candidate_artifact")
+          if not isinstance(expected_candidate, dict):
+              raise SystemExit("editorial receipt omitted candidate artifact provenance")
+          if replay.get("candidate_artifact") != expected_candidate:
+              raise SystemExit("editorial apply and replay use different candidate artifacts")
+          if human.get("candidate_artifact") != expected_candidate:
+              raise SystemExit("human review is not bound to the published candidate")
+          for field in ("artifact_id", "artifact_name", "artifact_sha256"):
+              if field in human:
+                  raise SystemExit(
+                      "raw human review cannot self-assert publication artifact identity"
+                  )
+          for record, label in ((receipt, "apply"), (replay, "replay")):
+              if (
+                  record.get("schema_version") != 1
+                  or record.get("kind")
+                  != "bside-global-alpha-expedited-editorial-publication"
+                  or record.get("environment") != "production"
+                  or record.get("is_synthetic") is not False
+                  or record.get("code_revision") != revision
+                  or record.get("candidate_sha256") != human.get("candidate_sha256")
+                  or record.get("decision_sha256") != receipt.get("decision_sha256")
+                  or record.get("semantic_receipt_sha256")
+                  != receipt.get("semantic_receipt_sha256")
+              ):
+                  raise SystemExit(f"editorial {label} receipt contract failed")
+              if len(record.get("event_review_outcomes", [])) != 20:
+                  raise SystemExit(f"editorial {label} did not verify 20 events")
+              if len(record.get("same_event_pair_reviews", [])) != 40:
+                  raise SystemExit(f"editorial {label} did not verify 40 pairs")
+              if len(record.get("top5", [])) != 5:
+                  raise SystemExit(f"editorial {label} did not publish exact Top 5")
+              brief = record.get("brief")
+              if (
+                  not isinstance(brief, dict)
+                  or brief.get("build_sha") != revision
+                  or not brief.get("brief_id")
+                  or not brief.get("cutoff_at")
+              ):
+                  raise SystemExit(f"editorial {label} brief provenance failed")
+          if (
+              replay.get("mutations_applied") != 0
+              or replay.get("idempotent_replay") is not True
+              or replay.get("brief", {}).get("idempotent") is not True
+          ):
+              raise SystemExit("editorial publication replay was not idempotent")
+          if receipt.get("brief", {}).get("brief_id") != replay.get("brief", {}).get(
+              "brief_id"
+          ):
+              raise SystemExit("editorial apply and replay published different briefs")
+          counts = human.get("raw_counts")
+          if counts != {
+              "event_review_count": 20,
+              "same_event_pair_review_count": 40,
+              "top5_human_reviewed_count": 5,
+              "top5_published_count": 5,
+          }:
+              raise SystemExit("actual editorial human review is not exact 20/40/5")
+          if (
+              human.get("schema_version") != 1
+              or human.get("kind") != "bside-global-alpha-human-review"
+              or human.get("environment") != "production"
+              or human.get("is_synthetic") is not False
+              or human.get("code_revision") != revision
+              or human.get("ground_truth_source") != "human"
+              or human.get("ai_generated_ground_truth") is not False
+              or human.get("human_attestation") is not True
+          ):
+              raise SystemExit("actual editorial human-review provenance failed")
+          event_reviews = human.get("event_reviews", [])
+          pair_reviews = human.get("same_event_pair_reviews", [])
+          top5_reviews = human.get("top5_reviews", [])
+          event_ids = {item.get("event_id") for item in event_reviews}
+          pair_ids = {item.get("pair_id") for item in pair_reviews}
+          top5_ids = {item.get("event_id") for item in top5_reviews}
+          if (
+              len(event_ids) != 20
+              or len(pair_ids) != 40
+              or len(top5_ids) != 5
+              or not top5_ids.issubset(event_ids)
+          ):
+              raise SystemExit("actual editorial human review contains duplicate records")
+          approved_events = {
+              item.get("event_id")
+              for item in event_reviews
+              if item.get("decision") == "approved"
+              and item.get("reviewer_type") == "human"
+          }
+          if not top5_ids.issubset(approved_events):
+              raise SystemExit("a published Top 5 event lacks human event approval")
+          if any(
+              item.get("decision") != "approved"
+              or item.get("reviewer_type") != "human"
+              or item.get("public_eligible") is not True
+              or int(item.get("official_evidence_count", 0)) < 1
+              for item in top5_reviews
+          ):
+              raise SystemExit("a published Top 5 record failed human or evidence policy")
+          section_fields = (
+              "ground_truth_source",
+              "ai_generated_ground_truth",
+              "human_attestation",
+              "raw_counts",
+              "event_reviews",
+              "same_event_pair_reviews",
+              "top5_reviews",
+          )
+          section = {field: human.get(field) for field in section_fields}
+          if human.get("section_sha256") != canonical_sha(section):
+              raise SystemExit("editorial human-review section digest mismatch")
+          injected = dict(human)
+          injected.update(publication_identity)
+          preparation_path = Path("expedited-preparation.json")
+          preparation = json.loads(preparation_path.read_text(encoding="utf-8"))
+          preparation["human_review"] = injected
+          preparation_path.write_text(
+              json.dumps(preparation, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          provenance = {
+              "schema_version": 1,
+              "kind": "bside-global-alpha-expedited-editorial-publication-provenance",
+              "code_revision": revision,
+              "workflow": ".github/workflows/global-alpha-expedited-editorial.yml",
+              "run_id": int(os.environ["EDITORIAL_RUN_ID"]),
+              "run_attempt": int(os.environ["EDITORIAL_RUN_ATTEMPT"]),
+              "run_created_at": os.environ["EDITORIAL_RUN_CREATED_AT"],
+              "artifact_id": publication_identity["artifact_id"],
+              "artifact_name": publication_identity["artifact_name"],
+              "artifact_digest": os.environ["EDITORIAL_ARTIFACT_DIGEST"],
+              "human_review_bytes_sha256": file_sha(human_path),
+              "publication_receipt_bytes_sha256": file_sha(receipt_path),
+              "publication_replay_receipt_bytes_sha256": file_sha(replay_path),
+              "semantic_receipt_sha256": receipt["semantic_receipt_sha256"],
+              "candidate_artifact": expected_candidate,
+              "candidate_sha256": receipt["candidate_sha256"],
+              "decision_sha256": receipt["decision_sha256"],
+              "brief_id": receipt["brief"]["brief_id"],
+          }
+          Path("editorial-publication-provenance.json").write_text(
+              json.dumps(provenance, ensure_ascii=False, sort_keys=True, indent=2)
+              + "\n",
+              encoding="utf-8",
+          )
+          Path("human-review.json").write_bytes(human_path.read_bytes())
+          Path("publication-receipt.json").write_bytes(receipt_path.read_bytes())
+          Path("publication-replay-receipt.json").write_bytes(replay_path.read_bytes())
+          PY
+
+      - name: Assemble immutable expedited preparation
+        shell: bash
+        env:
+          EVIDENCE_AS_OF: ${{ steps.gate.outputs.evidence_as_of }}
+          PAGES_ARTIFACT_DIGEST: ${{ steps.producers.outputs.pages_artifact_digest }}
+        run: |
+          set -euo pipefail
+          jq -e '
+            .kind == "bside-global-alpha-expedited-preparation-input"
+            and .code_revision == env.GITHUB_SHA
+            and (has("human_review") and (.human_review | type == "object"))
+            and (has("approval") | not)
+            and (has("legacy_archive") | not)
+            and (.observations | length) == 7
+            and (.connector_receipts.connectors | length) == 2
+            and (.source_readiness.sources | length) == 6
+            and (.experience | type == "object")
+            and (.content_integrity | type == "object")
+          ' expedited-preparation.json > /dev/null
+          mkdir -p global-alpha-expedited-preparation/pages-terminal
+          cp expedited-preparation.json expedited-producer-manifest.json \
+            pages-artifact-identity.json \
+            global-alpha-expedited-preparation/
+          cp rollback-prepared/pinned-legacy.zip \
+            rollback-prepared/legacy-drill-site-receipt.json \
+            rollback-prepared/rollback-preparation.json \
+            global-alpha-expedited-preparation/
+          cp actual-rollback-drill/expedited-rollback-drill.json \
+            global-alpha-expedited-preparation/
+          cp -R automated-evidence \
+            global-alpha-expedited-preparation/automated-evidence
+          cp human-review.json publication-receipt.json \
+            publication-replay-receipt.json \
+            editorial-publication-provenance.json \
+            global-alpha-expedited-preparation/
+          cp -R preview-smoke-evidence \
+            global-alpha-expedited-preparation/preview-smoke-evidence
+          cp -R web-vitals-evidence \
+            global-alpha-expedited-preparation/web-vitals-evidence
+          cp -R expedited-observations \
+            global-alpha-expedited-preparation/expedited-observations
+          cp candidate-pages/index.html \
+            global-alpha-expedited-preparation/pages-terminal/index.html
+          mkdir -p global-alpha-expedited-preparation/pages-terminal/governance
+          for path in index.html config.js app.js; do
+            cp "candidate-pages/governance/$path" \
+              "global-alpha-expedited-preparation/pages-terminal/governance/$path"
+          done
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          def digest(value):
+              encoded = json.dumps(
+                  value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+              ).encode("utf-8")
+              return hashlib.sha256(encoded).hexdigest()
+
+          preparation = json.loads(
+              Path("expedited-preparation.json").read_text(encoding="utf-8")
+          )
+          observations = preparation["observations"]
+          content = preparation["content_integrity"]
+          experience = preparation["experience"]
+          human = preparation["human_review"]
+          rollback = json.loads(
+              Path("actual-rollback-drill/expedited-rollback-drill.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          legacy_source = json.loads(
+              Path("rollback-prepared/rollback-preparation.json").read_text(
+                  encoding="utf-8"
+              )
+          )["legacy_archive"]
+          human_fields = (
+              "ground_truth_source",
+              "ai_generated_ground_truth",
+              "human_attestation",
+              "raw_counts",
+              "event_reviews",
+              "same_event_pair_reviews",
+              "top5_reviews",
+          )
+          sections = {
+              "human_review_section_sha256": digest(
+                  {field: human.get(field) for field in human_fields}
+              ),
+              "pages_terminal_content_sha256": digest(
+                  observations[0]["terminal_content"]
+              ),
+              "content_integrity_sha256": digest(content),
+              "experience_sha256": digest(experience),
+              "rollback_drill_sha256": digest(rollback),
+              "observations_sha256": digest(observations),
+              "legacy_source_artifact_sha256": str(
+                  legacy_source["artifact_digest"]
+              ).removeprefix("sha256:"),
+          }
+          Path(
+              "global-alpha-expedited-preparation/approval-binding-materials.json"
+          ).write_text(
+              json.dumps(
+                  {
+                      "schema_version": 1,
+                      "kind": "bside-global-alpha-expedited-approval-binding-materials",
+                      "code_revision": preparation["code_revision"],
+                      "evidence_as_of": preparation["evidence_as_of"],
+                      **sections,
+                      "binding_base_sha256": digest(sections),
+                  },
+                  ensure_ascii=False,
+                  sort_keys=True,
+                  indent=2,
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          PY
+          jq -n \
+            --arg code_revision "$GITHUB_SHA" \
+            --arg evidence_as_of "$EVIDENCE_AS_OF" \
+            --arg workflow ".github/workflows/global-alpha-expedited-preparation.yml" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg pages_digest "$PAGES_ARTIFACT_DIGEST" \
+            '{
+              schema_version: 1,
+              kind: "bside-global-alpha-expedited-preparation-provenance",
+              code_revision: $code_revision,
+              evidence_as_of: $evidence_as_of,
+              release_channel: "production_alpha_early_access",
+              workflow: $workflow,
+              run_id: ($run_id | tonumber),
+              run_attempt: ($run_attempt | tonumber),
+              pages_artifact_digest: $pages_digest
+            }' > global-alpha-expedited-preparation/preparation-provenance.json
+
+      - name: Upload immutable expedited preparation
+        id: evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-expedited-preparation
+          path: global-alpha-expedited-preparation
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 9
+
+      - name: Record bounded Early Access preparation
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ steps.evidence.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.evidence.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Production Alpha Early Access preparation completed"
+            echo "- revision: \`$GITHUB_SHA\`"
+            echo "- artifact id: \`$ARTIFACT_ID\`"
+            echo "- artifact digest: \`$ARTIFACT_DIGEST\`"
+            echo "- observation: 7 real checks over at least 30 minutes"
+            echo "- confirmation: \`CREATE_EXPEDITED_ALPHA_PREPARATION\`"
+            echo "- actual editorial publication is bound; final release approval remains separate"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  recover_preview_on_failure:
+    needs: [prepare_rollback, rollback_drill]
+    if: >-
+      ${{ always() &&
+          needs.prepare_rollback.result == 'success' &&
+          needs.rollback_drill.result != 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    concurrency:
+      group: bside-pages-deployment-${{ github.repository }}
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      actions: read
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.restore.outputs.page_url }}
+    steps:
+      - name: Download protected Preview recovery source
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: global-alpha-expedited-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          path: rollback-prepared
+          digest-mismatch: error
+
+      - name: Configure Pages recovery
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload pinned legacy plus governance Preview recovery
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: expedited-preview-failure-recovery
+          path: rollback-prepared/preview-site
+
+      - name: Restore Preview after interrupted rollback drill
+        id: restore
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        with:
+          artifact_name: expedited-preview-failure-recovery
+
+      - name: Verify restored Preview bytes
+        shell: bash
+        env:
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+        run: |
+          set -euo pipefail
+          web="${BSIDE_PUBLIC_WEB_URL%/}"
+          cache_bust="expedited-preparation-recovery-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          specs=(
+            "/|index.html"
+            "/governance/|governance/index.html"
+            "/governance/config.js|governance/config.js"
+            "/governance/app.js|governance/app.js"
+          )
+          mkdir -p recovered
+          for spec in "${specs[@]}"; do
+            IFS='|' read -r url_path artifact_path <<< "$spec"
+            output="recovered/${artifact_path//\//__}"
+            curl --fail --silent --show-error --location \
+              --retry 6 --retry-all-errors \
+              "$web$url_path?$cache_bust" --output "$output"
+            cmp --silent "$output" "rollback-prepared/preview-site/$artifact_path"
+          done
+
+  cleanup_variables:
+    needs:
+      - prepare_rollback
+      - rollback_drill
+      - observe
+      - collect_automated
+      - evaluate
+      - recover_preview_on_failure
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: governance-runtime
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Disable expedited observation and verify immutable safety policy
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            await github.rest.actions.updateRepoVariable({
+              owner,
+              repo,
+              name: "GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED",
+              value: "false",
+            });
+            for (const [name, expected] of [
+              ["GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED", "false"],
+              ["PAGES_OWNER", "legacy"],
+              ["GOVERNANCE_PIPELINE_MODE", "shadow"],
+              ["ENABLE_TELEGRAM_DELIVERY", "false"],
+              ["ENABLE_GOVERNANCE_DELIVERY", "false"],
+              ["KIND_CONNECTOR_MODE", "off"],
+            ]) {
+              const response = await github.rest.actions.getRepoVariable({
+                owner, repo, name,
+              });
+              if (response.data.value.toLowerCase() !== expected) {
+                core.setFailed(`${name} violated the expedited preparation cleanup`);
+                return;
+              }
+            }

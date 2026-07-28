@@ -330,6 +330,105 @@ def test_sec_daily_index_connector_is_market_wide_and_filters_forms() -> None:
     assert result.records[0].metadata["title_provenance"] == "generated_metadata"
 
 
+def test_sec_daily_accepts_current_official_header_and_compact_date() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/2026/QTR2/master.20260629.idx")
+        return httpx.Response(
+            200,
+            text=(
+                "Description: Daily Index of EDGAR Dissemination Feed\n"
+                "CIK|Company Name|Form Type|Date Filed|File Name\n"
+                "--------------------------------------------------------------------------------\n"
+                "320193|Apple Inc.|SC 13D|20260629|"
+                "edgar/data/320193/0000320193-26-000999.txt\n"
+            ),
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+        ).fetch(
+            GlobalConnectorRequest(
+                window_start=date(2026, 6, 29),
+                window_end_exclusive=date(2026, 6, 30),
+            ),
+            eligibility=eligibility("official:sec-edgar", "sec-edgar"),
+            now=NOW,
+        )
+
+    assert result.raw_count == 1
+    assert len(result.records) == 1
+    assert result.records[0].filed_at == "2026-06-29T04:00:00+00:00"
+    assert result.records[0].external_id == "0000320193-26-000999"
+
+
+def test_sec_daily_preserves_late_added_historical_filing_date() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/2026/QTR2/master.20260630.idx")
+        return httpx.Response(
+            200,
+            text=(
+                "Description: Daily Index of EDGAR Dissemination Feed\n"
+                "CIK|Company Name|Form Type|Date Filed|File Name\n"
+                "--------------------------------------------------------------------------------\n"
+                "1289868|Historical Issuer|DEF 14A|20230922|"
+                "edgar/data/1289868/0001289868-23-000011.txt\n"
+            ),
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+        ).fetch(
+            GlobalConnectorRequest(
+                window_start=date(2026, 6, 30),
+                window_end_exclusive=date(2026, 7, 1),
+            ),
+            eligibility=eligibility("official:sec-edgar", "sec-edgar"),
+            now=NOW,
+        )
+
+    assert len(result.records) == 1
+    assert result.records[0].external_id == "0001289868-23-000011"
+    assert result.records[0].filed_at == "2023-09-22T04:00:00+00:00"
+
+
+def test_sec_daily_rejects_future_filing_date() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text=(
+                "CIK|Company Name|Form Type|Date Filed|File Name\n"
+                "--------------------------------------------------------------------------------\n"
+                "320193|Apple Inc.|SC 13D|20260701|"
+                "edgar/data/320193/0000320193-26-000999.txt\n"
+            ),
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+        )
+        with pytest.raises(
+            GlobalConnectorContractError,
+            match="date exceeds requested index",
+        ):
+            connector.fetch(
+                GlobalConnectorRequest(
+                    window_start=date(2026, 6, 30),
+                    window_end_exclusive=date(2026, 7, 1),
+                ),
+                eligibility=eligibility(
+                    "official:sec-edgar",
+                    "sec-edgar",
+                ),
+                now=NOW,
+            )
+
+
 def test_sec_daily_treats_weekend_access_denied_as_missing_index() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/2026/QTR2/master.20260628.idx"):
@@ -387,6 +486,97 @@ def test_sec_daily_keeps_weekday_access_denied_fail_closed() -> None:
                 ),
                 now=NOW,
             )
+
+
+def test_sec_daily_retries_429_with_retry_after_and_counts_attempts() -> None:
+    calls = 0
+    rights_checks = 0
+    retry_delays: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(429, headers={"Retry-After": "3"})
+        return httpx.Response(
+            200,
+            text=(
+                "CIK|Company Name|Form Type|Date Filed|File Name\n"
+                "--------------------------------------------------------------------------------\n"
+                "320193|Apple Inc.|SC 13D|20260629|"
+                "edgar/data/320193/0000320193-26-000999.txt\n"
+            ),
+        )
+
+    def recheck() -> OfficialSourceRightEligibility:
+        nonlocal rights_checks
+        rights_checks += 1
+        return replace(
+            eligibility("official:sec-edgar", "sec-edgar"),
+            checked_at=datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat(),
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+            max_retries=3,
+            sleep=lambda _delay: None,
+            retry_sleep=retry_delays.append,
+        ).fetch(
+            GlobalConnectorRequest(
+                window_start=date(2026, 6, 29),
+                window_end_exclusive=date(2026, 6, 30),
+            ),
+            eligibility=eligibility("official:sec-edgar", "sec-edgar"),
+            eligibility_provider=recheck,
+            now=NOW,
+        )
+
+    assert calls == rights_checks == result.request_count == 2
+    assert retry_delays == [3.0]
+    assert result.raw_count == 1
+    assert len(result.records) == 1
+
+
+def test_sec_daily_5xx_retries_are_bounded_and_structured() -> None:
+    calls = 0
+    retry_delays: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(503)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+            max_retries=2,
+            sleep=lambda _delay: None,
+            retry_sleep=retry_delays.append,
+        )
+        with pytest.raises(
+            GlobalConnectorError,
+            match="failed after retries",
+        ) as raised:
+            connector.fetch(
+                GlobalConnectorRequest(
+                    window_start=date(2026, 6, 29),
+                    window_end_exclusive=date(2026, 6, 30),
+                ),
+                eligibility=eligibility(
+                    "official:sec-edgar",
+                    "sec-edgar",
+                ),
+                now=NOW,
+            )
+
+    assert calls == 3
+    assert retry_delays == [1.0, 2.0]
+    assert raised.value.http_status == 503
 
 
 def test_sec_daily_preserves_8k_as_private_unclassified_candidate() -> None:

@@ -27,8 +27,13 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from .global_connectors import (
+    GlobalConnectorContractError,
     GlobalConnectorEnvelope,
+    GlobalConnectorError,
+    GlobalConnectorIncomplete,
+    GlobalConnectorPaginationError,
     GlobalConnectorRequest,
+    GlobalSourceRightDenied,
     GlobalSourceConnector,
     IssuerReference,
     SecDailyIndexConnector,
@@ -1403,11 +1408,27 @@ def _failure_evidence(
     started_at: str,
     error: BaseException,
 ) -> dict[str, object]:
-    code = (
-        error.code
-        if isinstance(error, GlobalIngestError)
-        else "global_ingest_failed"
-    )
+    if isinstance(error, GlobalIngestError):
+        code = error.code
+        stage = "ingest"
+    elif isinstance(error, GlobalSourceRightDenied):
+        code = "official_source_right_denied"
+        stage = "source"
+    elif isinstance(error, GlobalConnectorIncomplete):
+        code = "official_source_window_incomplete"
+        stage = "source"
+    elif isinstance(error, GlobalConnectorPaginationError):
+        code = "official_source_pagination_failed"
+        stage = "source"
+    elif isinstance(error, GlobalConnectorContractError):
+        code = "official_source_contract_failed"
+        stage = "source"
+    elif isinstance(error, GlobalConnectorError):
+        code = "official_source_request_failed"
+        stage = "source"
+    else:
+        code = "global_ingest_failed"
+        stage = "unknown"
     payload: dict[str, object] = {
         "schema_version": 1,
         "status": "failed",
@@ -1428,10 +1449,16 @@ def _failure_evidence(
         "error": {
             "code": code,
             "class": type(error).__name__,
+            "stage": stage,
         },
     }
-    if isinstance(error, GlobalIngestError) and error.http_status is not None:
-        payload["error"]["http_status"] = error.http_status  # type: ignore[index]
+    http_status = (
+        error.http_status
+        if isinstance(error, (GlobalIngestError, GlobalConnectorError))
+        else None
+    )
+    if http_status is not None:
+        payload["error"]["http_status"] = http_status  # type: ignore[index]
     return payload
 
 

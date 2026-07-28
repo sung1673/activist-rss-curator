@@ -593,7 +593,12 @@ def test_legacy_and_governance_daily_deployers_use_fail_closed_owner_snapshot() 
     legacy_text, legacy = workflow("build-feed.yml")
     daily_text, daily = workflow("daily.yml")
     assert "gh variable get PAGES_OWNER" not in legacy_text
+    assert legacy["jobs"]["build-feed"]["env"]["PAGES_OWNER_SNAPSHOT"] == (
+        "${{ vars.PAGES_OWNER }}"
+    )
     assert 'PAGES_OWNER_SNAPSHOT" == "legacy"' in legacy_text
+    assert 'readVariable("PAGES_OWNER")' in legacy_text
+    assert '"GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED"' in legacy_text
     assert "gh variable get PAGES_OWNER" not in daily_text
     assert 'PAGES_OWNER_SNAPSHOT" == "governance"' in daily_text
     assert "/ops/release-state" in daily_text

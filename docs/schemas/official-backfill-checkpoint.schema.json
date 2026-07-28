@@ -84,6 +84,11 @@
         "attempt": { "type": "integer", "minimum": 1 },
         "code_revision": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
         "status": { "enum": ["succeeded", "failed"] },
+        "started_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Stable source retrieval clock reused by protected replay."
+        },
         "finished_at": { "type": "string", "format": "date-time" },
         "summary": {
           "type": "object",

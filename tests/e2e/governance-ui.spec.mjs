@@ -624,8 +624,23 @@ test.beforeEach(async ({ page }) => {
   await mockPublicApi(page);
 });
 
+test("early access release notice persists across every major public route", async ({ page }) => {
+  for (const route of ["today", "events", "issuers", "calendar", "revisions", "search"]) {
+    await page.goto(`#/${route}`);
+    const releaseNotice = page.locator(".release-notice");
+    await expect(releaseNotice).toBeVisible();
+    await expect(releaseNotice).toHaveAttribute("data-release-channel", "production_alpha_early_access");
+    await expect(releaseNotice).toContainText("Production Alpha · Early Access");
+  }
+});
+
 test("today to evidence journey preserves source language and accessibility @webkit-smoke", async ({ page }) => {
   await page.goto("#/today");
+  const releaseNotice = page.locator(".release-notice");
+  await expect(releaseNotice).toBeVisible();
+  await expect(releaseNotice).toHaveAttribute("data-release-channel", "production_alpha_early_access");
+  await expect(releaseNotice).toContainText("Production Alpha · Early Access");
+  await expect(releaseNotice).toContainText("KR·US 공식 시장 데이터 · CA·AU 공식 링크 · JP·GB 현재 수집 불가");
   const topPanel = page.locator(".terminal-main .terminal-panel").first();
   await expect(page.getByRole("heading", { name: "Top 5" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Live / 최신 변화" })).toBeVisible();
@@ -1153,7 +1168,7 @@ test("web vitals telemetry contains only route template, metric, value, device c
   await page.route("**/governance/config.js", (route) => route.fulfill({
     status: 200,
     contentType: "text/javascript; charset=utf-8",
-    body: `window.__BSIDE_GOVERNANCE_CONFIG__=Object.freeze({"apiBase":"/api/v1","webBase":"https://news.bside.ai","buildSha":"${buildSha}"});`
+    body: `window.__BSIDE_GOVERNANCE_CONFIG__=Object.freeze({"apiBase":"/api/v1","webBase":"https://news.bside.ai","buildSha":"${buildSha}","releaseChannel":"production_alpha_early_access"});`
   }));
   await page.route("**/api/v1/metrics/web-vitals", async (route) => {
     observations.push(route.request().postDataJSON());

@@ -16,6 +16,7 @@
 | `global-alpha-preview-smoke.yml` | 실제 PHP v2·운영 DB의 Today·사건·발행사·검색·캘린더와 3개 viewport 증빙 검증 | Preview 배포 뒤 운영자 수동 실행 |
 | `global-alpha-observation-chain-preflight.yml` | `governance-runtime`에서 동일 workflow 자체 호출 권한과 exact-SHA 자식 실행을 상태 변경 없이 검증 | 실제 24시간 관측 직전 운영자 수동 실행 |
 | `global-alpha-observation-chain.yml` | 같은 SHA와 서버 candidate window에 고정된 5개 구간·288회 Production Alpha 출시 관측 | 운영자 수동 시작, 이후 self-chain |
+| `global-alpha-expedited-evidence.yml` | 실제 DART·SEC apply/replay, 사람 20/40/5 검수, rollback 및 30분 Preview 관측을 결합한 Early Access 증빙 | 보호된 운영자 수동 실행 |
 | `global-alpha-watchdog.yml` | API·release state·source freshness·공개 루트 운영 진단. 출시 증빙에는 사용하지 않음 | best-effort 5분 |
 | `kind-adapter-preflight.yml` | 운영 SourceRight 확인 후 KIND adapter 실제 계약을 1회 검증 | 승인 후 운영자 수동 실행만 |
 | `ingest-media.yml` | 허가된 Telegram·뉴스 발견 큐 수집 | 30분 |
@@ -28,6 +29,7 @@
 | `repair-telegram-history.yml` | MySQL 상태를 먼저 복원한 뒤 허가 채널 이력을 멱등 백필 | 운영자 수동 실행만 |
 | `release-gate.yml` | production 증빙 artifact의 14일 shadow·7일 운영·성능·benchmark 전환 판정 | 운영자 수동 실행 |
 | `governance-cutover.yml` | 증빙에 고정된 exact daily Pages artifact·현재 SourceRight를 확인한 보호된 공개 전환 | 운영자 수동 실행 |
+| `governance-expedited-cutover.yml` | exact Early Access evidence와 Pages artifact를 재검증한 뒤 원자 승격하거나 legacy로 자동 복구 | 보호된 운영자 수동 실행 |
 | `governance-rollback.yml` | API를 먼저 닫고 고정 legacy artifact를 복구하는 보호된 롤백 | 운영자 수동 실행 |
 
 `ci.yml`의 테스트와 품질 job은 모두 필수다. 린트, 신규 거버넌스 핵심 모듈 타입 검사, `requirements.txt` 의존성 취약점 감사 중 하나라도 실패하면 CI가 실패한다. 기존 수집기 전체에 일괄 예외를 두지 않고 typed-core 범위를 점진적으로 넓힌다.
@@ -67,6 +69,7 @@ Repository variable의 단일 기준:
 - `GOVERNANCE_PIPELINE_MODE=off|dart_canary|shadow|live`: 공식 수집과 후보 파이프라인 단계
 - `KIND_CONNECTOR_MODE=off|active`: 기본 `off`. `off`에서는 `shadow|live` 예약 실행도 DART만 수집하고 일반 watchdog도 KIND 설정·freshness를 요구하지 않는다. `active`에서는 기존처럼 KIND endpoint·SourceRight·수집 최신성을 fail-closed로 요구한다. 수동 `include_kind=true`와 `kind-adapter-preflight.yml`은 이 예약 토글과 별개인 명시적 검증 경로다.
 - `GLOBAL_ALPHA_OBSERVATION_ENABLED=false|true`: 기본 `false`. `false` 또는 빈 값에서는 5분 Alpha 관측 job을 만들지 않는다. 소스·preview·동일 SHA가 준비된 뒤 `true`로 바꾸며, 다른 값은 관측 run을 실패시킨다.
+- `GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED=false|true`: 기본 `false`. 표준 24시간 변수와 독립이며 보호된 Early Access 증빙이 같은 SHA·preview asset을 30분 관측하는 동안만 `true`로 둔다. 7회 미만, 30분 미만, 2~8분 밖의 간격은 출시 증빙으로 인정하지 않는다.
 - `ENABLE_TELEGRAM_DELIVERY=false`, `ENABLE_GOVERNANCE_DELIVERY=false`: 영구 비활성. `true`이면 workflow가 fail-closed
 - `ACTIVIST_PUBLIC_API_URL`: 브라우저에서 읽는 공개 API URL
 - `GOVERNANCE_API_BASE_URL`: 공개 거버넌스 UI의 `/api/v1` 기준 URL. 비어 있으면 `ACTIVIST_PUBLIC_API_URL` 뒤에 `/api/v1`을 붙여 사용
@@ -249,7 +252,7 @@ PHP 배포 백업은 공개 파일 경로가 아니라 외부 접근이 차단�
 
 Watchdog은 `/api/v1/ops/health`의 공식 수집 최신성을 확인하고 실제 공개 route를 KST 매시 01·06·11·16·21·26·31·36·41·46·51·56분에 측정해 `/api/v1/ops/availability-observations`에 적재한다. release evidence는 `watchdog-v1-kst-5m-minute01`의 route당 일 288개 slot을 raw `observed_at`으로 재구성하며, 4개 route 일 1,152개와 7일 8,064개가 모두 덮이지 않으면 실패한다. 중복 관측은 missing을 상쇄하지 않고, interval p95와 일 경계 포함 최대 공백이 모두 600초 이하여야 한다. Telegram outbox는 발송이 영구 비활성인 현재 release gate의 분모가 아니다.
 
-Production Alpha 출시 증빙은 GitHub cron이 아니라 수동 시작형 `global-alpha-observation-chain.yml`만 만든다. segment 1은 `GOVERNANCE_PIPELINE_MODE=shadow`와 `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`에서 시작하며, 5개 구간이 같은 SHA·서버 candidate window·5분 cadence anchor를 공유한다. 각 후속 구간은 predecessor가 성공한 first attempt인지와 immutable artifact digest를 먼저 확인한다. 누락·중복·취소·neutral·시간초과·SHA 변경·artifact 변조가 있으면 전체 24시간 창을 폐기한다. `global-alpha-watchdog.yml`은 best-effort 예약 진단용으로 남지만 release evidence의 분모가 아니다. 두 workflow 모두 `BSIDE_OPS_TOKEN`으로 읽기 전용 `GET /api/v2/ops/release-state`를 호출하며 `BSIDE_ADMIN_TOKEN`과 `BSIDE_RELEASE_AUTHORIZER_TOKEN`을 주입하지 않는다.
+표준 Production Alpha 출시 증빙은 GitHub cron이 아니라 수동 시작형 `global-alpha-observation-chain.yml`이 만든다. segment 1은 `GOVERNANCE_PIPELINE_MODE=shadow`와 `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`에서 시작하며, 5개 구간이 같은 SHA·서버 candidate window·5분 cadence anchor를 공유한다. 각 후속 구간은 predecessor가 성공한 first attempt인지와 immutable artifact digest를 먼저 확인한다. 누락·중복·취소·neutral·시간초과·SHA 변경·artifact 변조가 있으면 전체 24시간 창을 폐기한다. Early Access 단축 경로는 별도 `global-alpha-expedited-evidence.yml`에서만 만들며 표준 상수나 artifact를 완화하지 않는다. `global-alpha-watchdog.yml`은 best-effort 예약 진단용으로 남지만 release evidence의 분모가 아니다. 관측 경로는 `BSIDE_OPS_TOKEN`으로 읽기 전용 `GET /api/v2/ops/release-state`를 호출하며 일반 관측 job에는 `BSIDE_ADMIN_TOKEN`과 `BSIDE_RELEASE_AUTHORIZER_TOKEN`을 주입하지 않는다.
 
 실제 segment 1을 시작하기 직전에 `global-alpha-observation-chain-preflight.yml`을 기본 입력으로 수동 실행한다. 부모 job은 `GITHUB_TOKEN`의 `actions:write` 권한으로 동일 workflow의 자식 phase를 호출하고, 204 응답만 신뢰하지 않고 같은 default-branch SHA·workflow path·first attempt의 자식 성공을 제한 시간 안에 직접 조회한다. 부모와 자식 모두 `governance-runtime`에서 실행된다. 이 검사는 API·source·Pages·release state를 읽거나 변경하지 않고 artifact도 만들지 않으며, nonce나 token을 로그에 출력하지 않는다. 성공한 preflight SHA와 실제 관측 SHA가 다르면 preflight를 다시 실행한다.
 
@@ -303,6 +306,20 @@ heartbeat만 갱신하고 receipt·문서·사건·checkpoint를 변경하지 �
 확인한 뒤 SourceRight→connector 순서로 잠근다. closed backfill도 같은 경계를
 사용한다. replay는 상태 경계를 확인하되 heartbeat를 포함한 모든 운영 데이터를
 읽기 전용으로 유지한다.
+
+## Early Access 일회성 Secret 수명주기
+
+단축 출시에서 사람 입력과 기계 증빙을 섞지 않는다.
+
+1. `global-alpha-expedited-editorial.yml`의 export artifact를 사람이 검수한 뒤, 결정 payload만 gzip/base64로 인코딩해 보호된 `governance-release` 환경의 `GLOBAL_ALPHA_EXPEDITED_EDITORIAL_DECISIONS_GZIP_B64`에 등록한다.
+2. editorial apply 실행이 성공하고 `global-alpha-expedited-editorial-publication-<SHA>-<run>-<attempt>` artifact의 ID와 digest를 확인한 즉시 해당 Secret을 삭제한다. 실패한 payload는 재사용하지 않는다.
+3. 기계 전용 preparation artifact가 만들어진 뒤 최종 승인자는 그 artifact의 binding과 실제 89일 또는 90일 rollback 자료를 확인한다.
+4. 최종 승인 및 필요한 경우의 89일 한시 승인만 `GLOBAL_ALPHA_EXPEDITED_RELEASE_INPUTS_GZIP_B64`로 등록한다.
+5. `global-alpha-expedited-evidence-inputs.yml`이 `global-alpha-expedited-final-approval-<SHA>` artifact를 성공적으로 만들면 해당 Secret을 즉시 삭제한다.
+
+두 Secret의 압축 해제 결과는 최대 500KB로 제한한다. 토큰, SourceRight 원문, 수집 receipt, 성능 결과, 관측 결과, 롤백 결과 등 기계 증빙은 Secret payload로 대체할 수 없으며 exact immutable producer artifact에서만 읽는다.
+
+최종 승인 binding은 수작업으로 다시 구현하지 않는다. preparation artifact를 내려받은 뒤 실제 90일 자료라면 `python -m curator.global_alpha_expedited_final_approval template --preparation <dir> --output <dir> --expected-revision <SHA>`를 사용한다. 89일 한시 예외라면 같은 명령에 `--waiver-json <approved-waiver.json>`을 추가한다. 생성된 `final-approval-template.json`에서 사람 참조·결정·UTC 시각만 채우고 `seal` 명령으로 검증·봉인한 JSON만 gzip/base64 처리한다. workflow도 같은 helper로 binding과 recovery bytes를 재생성하므로 서로 다른 알고리즘이나 실행 후 시각값이 승인 hash에 섞이지 않는다.
 
 ## OpenDART apply 권한 경계
 

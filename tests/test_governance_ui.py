@@ -71,7 +71,9 @@ def test_config_javascript_contains_only_public_normalized_base() -> None:
     build_sha = "a" * 40
     javascript = config_javascript("https://api.example.com/root", build_sha=build_sha)
     assert javascript == (
-        'window.__BSIDE_GOVERNANCE_CONFIG__=Object.freeze({"apiBase":"https://api.example.com/root/api/v1","webBase":"https://news.bside.ai","buildSha":"' + build_sha + '"});\n'
+        'window.__BSIDE_GOVERNANCE_CONFIG__=Object.freeze({"apiBase":"https://api.example.com/root/api/v1","webBase":"https://news.bside.ai","buildSha":"'
+        + build_sha
+        + '","releaseChannel":"production_alpha_early_access"});\n'
     )
     assert "secret" not in javascript.casefold()
 
@@ -95,11 +97,15 @@ def test_build_writes_config_and_enforces_performance_budget(tmp_path: Path, mon
     assert result["api_base"] == "https://api.example.com/api/v1"
     assert result["web_base"] == "https://web.example/governance"
     assert result["build_sha"] == "c" * 40
+    assert result["release_channel"] == "production_alpha_early_access"
     assert result["html_bytes"] < HTML_BUDGET_BYTES
     assert result["asset_gzip_bytes"] < ASSET_GZIP_BUDGET_BYTES
     assert '"apiBase":"https://api.example.com/api/v1"' in (target / "config.js").read_text(encoding="utf-8")
     assert '"webBase":"https://web.example/governance"' in (target / "config.js").read_text(encoding="utf-8")
     assert '"buildSha":"' + "c" * 40 + '"' in (target / "config.js").read_text(encoding="utf-8")
+    assert '"releaseChannel":"production_alpha_early_access"' in (
+        target / "config.js"
+    ).read_text(encoding="utf-8")
 
 
 def test_checked_in_assets_are_far_below_initial_budgets() -> None:
@@ -256,6 +262,23 @@ def test_production_alpha_ui_keeps_jp_and_gb_link_only_and_unavailable() -> None
     assert "JP·GB는 링크 전용·현재 수집 불가" in html
     assert "JP·GB 시장 전체" not in html
     assert "GB 공식 등록부" not in html
+
+
+def test_production_alpha_early_access_channel_is_visible_on_every_route() -> None:
+    javascript = (UI / "app.js").read_text(encoding="utf-8")
+    html = (UI / "index.html").read_text(encoding="utf-8")
+    css = (UI / "styles.css").read_text(encoding="utf-8")
+    assert '<body data-release-channel="production_alpha_early_access">' in html
+    assert 'aria-label="출시 상태 / Release status"' in html
+    assert "Production Alpha · Early Access" in html
+    assert "KR·US 공식 시장 데이터 · CA·AU 공식 링크 · JP·GB 현재 수집 불가" in html
+    assert 'config.releaseChannel || "production_alpha_early_access"' in javascript
+    assert '"releaseChannel":"production_alpha_early_access"' in (
+        UI / "config.js"
+    ).read_text(encoding="utf-8")
+    assert "document.body.dataset.releaseChannel = PUBLIC_UI_CONFIG.releaseChannel;" in javascript
+    assert ".release-strip {" in css
+    assert ".release-notice {" in css
 
 
 def test_v2_issuer_identity_archive_and_calendar_never_alias_to_legacy_company() -> None:

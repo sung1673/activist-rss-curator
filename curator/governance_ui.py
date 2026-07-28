@@ -12,6 +12,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_API_BASE = "/api/v1"
 DEFAULT_WEB_BASE = "https://news.bside.ai"
 DEFAULT_BUILD_SHA = "development"
+DEFAULT_RELEASE_CHANNEL = "production_alpha_early_access"
+ALLOWED_RELEASE_CHANNELS = frozenset(
+    ("production_alpha_early_access", "production_alpha")
+)
 HTML_BUDGET_BYTES = 250_000
 ASSET_GZIP_BUDGET_BYTES = 250_000
 
@@ -86,16 +90,25 @@ def normalize_build_sha(value: str) -> str:
     raise ValueError("governance build SHA must be a 40- or 64-character hexadecimal digest")
 
 
+def normalize_release_channel(value: str) -> str:
+    raw = str(value or DEFAULT_RELEASE_CHANNEL).strip()
+    if raw not in ALLOWED_RELEASE_CHANNELS:
+        raise ValueError("governance release channel is invalid")
+    return raw
+
+
 def config_javascript(
     api_base: str,
     web_base: str = DEFAULT_WEB_BASE,
     build_sha: str | None = None,
+    release_channel: str = DEFAULT_RELEASE_CHANNEL,
 ) -> str:
     payload = json.dumps(
         {
             "apiBase": normalize_api_base(api_base),
             "webBase": normalize_web_base(web_base),
             "buildSha": normalize_build_sha(configured_build_sha(build_sha)),
+            "releaseChannel": normalize_release_channel(release_channel),
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -139,6 +152,7 @@ def build_governance_ui(
         "api_base": normalized,
         "web_base": normalized_web,
         "build_sha": normalized_build,
+        "release_channel": DEFAULT_RELEASE_CHANNEL,
         **assert_asset_budget(governance_dir),
     }
 

@@ -117,7 +117,7 @@ Production Alpha는 `EDINET_API_KEY`와 `COMPANIES_HOUSE_API_KEY`를 사용하�
 
 현재 제품 정책은 Telegram 채팅으로 콘텐츠를 발송하지 않는 것이다. `ENABLE_TELEGRAM_DELIVERY=false`, `config.yaml`의 `telegram.enabled=false`, 빈 `telegram.chat_id`를 함께 유지하며, Python sender·로컬/원격 outbox·PHP enqueue/claim·Actions worker가 모두 코드 수준에서 거절하므로 runtime 값이나 수동 입력으로 재활성화할 수 없다. `TELEGRAM_API_ID`·`TELEGRAM_API_HASH`·`TELEGRAM_SESSION_STRING`을 이용한 허가 공개 채널 읽기 수집은 이 발송 정책과 분리되어 계속 운영한다. 비공개 Telegram 관리자 채팅과 `TELEGRAM_ADMIN_CHAT_ID`도 사용하지 않으며, 관리자는 고정 URL `https://news.bside.ai/feed/telegram-admin.html`에서 `TELEGRAM_ADMIN_ACCESS_TOKEN`을 직접 입력한다.
 
-주요 Repository variable은 `ACTIVIST_PUBLIC_API_URL`, `GOVERNANCE_API_BASE_URL`, `BSIDE_PUBLIC_WEB_URL`, `KIND_DISCLOSURE_ENDPOINT`, `SEC_EDGAR_USER_AGENT`, `CA_OFFICIAL_LINKS_JSON`, `AU_OFFICIAL_LINKS_JSON`, `PAGES_OWNER=legacy|governance`, `GOVERNANCE_PIPELINE_MODE=off|dart_canary|shadow|live`, `DART_OFFICIAL_INGEST_ENABLED=false|true`, `KIND_CONNECTOR_MODE=off|active`, `GLOBAL_ALPHA_OBSERVATION_ENABLED=false|true`다. DART gate는 schema 12 PHP·MySQL exact smoke 전까지 `false`로 유지하며 예약 수집과 수동 공식 백필을 함께 차단한다. KIND는 Production Alpha에서 기본 `off`이며 `active`로 명시한 경우에만 예약 DART 실행과 일반 watchdog이 KIND 설정·수집 최신성을 함께 요구한다. 일본·영국의 과거 mode·allowlist·Secret은 Alpha runtime이 읽지 않으며 관리 API로도 활성화할 수 없다. Alpha 24시간 관측은 기본 `false`이고 준비가 끝난 뒤에만 `true`로 연다. 잘못된 값과 이전 boolean 충돌은 fail-closed한다. `ENABLE_TELEGRAM_DELIVERY=false`와 `ENABLE_GOVERNANCE_DELIVERY=false`는 유지하지만 어떤 runtime 값도 outbound를 다시 활성화할 수 없다. 전체 목록과 예약 시각은 [운영 자동화 문서](docs/operations-automation.md)를 따른다.
+주요 Repository variable은 `ACTIVIST_PUBLIC_API_URL`, `GOVERNANCE_API_BASE_URL`, `BSIDE_PUBLIC_WEB_URL`, `KIND_DISCLOSURE_ENDPOINT`, `SEC_EDGAR_USER_AGENT`, `CA_OFFICIAL_LINKS_JSON`, `AU_OFFICIAL_LINKS_JSON`, `PAGES_OWNER=legacy|governance`, `GOVERNANCE_PIPELINE_MODE=off|dart_canary|shadow|live`, `DART_OFFICIAL_INGEST_ENABLED=false|true`, `KIND_CONNECTOR_MODE=off|active`, `GLOBAL_ALPHA_OBSERVATION_ENABLED=false|true`, `GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED=false|true`다. DART gate는 schema 12 PHP·MySQL exact smoke 전까지 `false`로 유지하며 예약 수집과 수동 공식 백필을 함께 차단한다. KIND는 Production Alpha에서 기본 `off`이며 `active`로 명시한 경우에만 예약 DART 실행과 일반 watchdog이 KIND 설정·수집 최신성을 함께 요구한다. 일본·영국의 과거 mode·allowlist·Secret은 Alpha runtime이 읽지 않으며 관리 API로도 활성화할 수 없다. Alpha 24시간 관측과 30분 단축 관측은 각각 기본 `false`이고 서로 대체하지 않는다. 단축 변수는 보호된 Early Access 증빙을 생성하는 30분 동안만 `true`로 둔다. 잘못된 값과 이전 boolean 충돌은 fail-closed한다. `ENABLE_TELEGRAM_DELIVERY=false`와 `ENABLE_GOVERNANCE_DELIVERY=false`는 유지하지만 어떤 runtime 값도 outbound를 다시 활성화할 수 없다. 전체 목록과 예약 시각은 [운영 자동화 문서](docs/operations-automation.md)를 따른다.
 
 ### 글로벌 터미널 Production Alpha
 
@@ -131,10 +131,11 @@ Production Alpha는 `EDINET_API_KEY`와 `COMPANIES_HOUSE_API_KEY`를 사용하�
 - `global-brief.yml`: KST 05:45 예약 실행은 검수 후보 artifact만 만든다. 공개 brief는 사람이 승인한 동일 SHA payload를 `workflow_dispatch`의 `publish` 작업으로 전달할 때만 생성한다.
 - `global-alpha-review-candidates.yml`: 기본 브랜치의 실제 Preview API에서 공식 근거가 있는 사건 60건, 동일 사건 판단용 문서쌍 120개, 현재 Top 5를 사람 검수용 무라벨 artifact로 추출한다.
 - `global-alpha-preview-smoke.yml`: 최종 Preview 배포 뒤 실제 PHP v2·운영 DB를 사용해 Today→사건→발행사→검색→캘린더를 3개 viewport에서 검증한다. mock과 v1 fallback은 허용하지 않는다.
-- `global-alpha-observation-chain.yml`: `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`, `shadow`에서 운영자가 segment 1을 수동 시작한다. 5개 job이 같은 SHA·서버 candidate window를 이어받아 288회 실제 관측을 만들고, predecessor run과 artifact digest를 확인한 뒤에만 다음 구간을 기록한다. 이 체인만 Alpha 출시 증빙으로 사용한다.
+- `global-alpha-observation-chain.yml`: `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`, `shadow`에서 운영자가 segment 1을 수동 시작한다. 5개 job이 같은 SHA·서버 candidate window를 이어받아 288회 실제 관측을 만들고, predecessor run과 artifact digest를 확인한 뒤에만 다음 구간을 기록한다. 이 체인은 표준 24시간 Alpha 출시 증빙으로 사용한다.
 - `global-alpha-observation-chain-preflight.yml`: 실제 24시간 체인 전에 수동 실행한다. `governance-runtime`에서 부모가 같은 workflow의 자식 phase를 exact default-branch SHA로 자체 호출하고, 자식의 first-attempt 성공을 제한 시간 안에 직접 확인한다. API·source·Pages를 변경하거나 운영 credential·artifact를 만들지 않는다.
 - `global-alpha-watchdog.yml`: GitHub 예약 지연 여부를 포함한 상시 진단용이다. best-effort cron 결과는 Alpha 출시 증빙에 사용하지 않는다.
 - `governance-cutover.yml`, `governance-rollback.yml`: 보호된 `governance-release` 환경에서만 수동 전환·복구한다. Alpha evidence는 exact daily Pages run/artifact/digest와 전체 사이트·UI/config content identity를 고정하며, 24시간 preview 관측이 같은 terminal 바이트임을 증명한다. 전환은 evidence가 가리키는 그 artifact만 허용하고 exact SHA·evidence artifact digest·v1/v2 state version에 묶인 짧은 일회용 승인을 발급한 뒤 두 API state를 한 transaction에서 승격한다.
+- `global-alpha-expedited-evidence.yml`, `governance-expedited-cutover.yml`: 표준 24시간 경로를 변경하지 않는 별도 **Production Alpha · Early Access** 경로다. DART·SEC의 서로 다른 30일 apply/replay artifact, 20개 사건·40개 동일 사건쌍·Top 5 사람 검수, 실제 rollback drill, 7회 이상·30분 이상 Preview 관측을 같은 기본 브랜치 SHA에 묶는다. 89일 예외는 `2026-05-01~2026-07-28` 실제 자료와 사람 승인에만 적용되며 `2026-07-29 05:45 KST` 이후에는 자동 거절하고 최신 실제 90일 artifact를 요구한다. 성공 전까지 공개 루트는 legacy이고 API는 preview이며, 실패 시 API를 closed로 내리고 고정 legacy 전체 사이트를 복구한다.
 
 Migration 011은 미국·일본·영국·캐나다·호주 권한을 `pending`으로만 만든다. 이것은 이용허가가 아니다. 공개 전 필수 4개 SourceRight인 `official:dart`, `official:sec-edgar`, `official:ca-issuer-ir`, `official:asic-register`가 실제 증빙·권한 범위·유효기간과 함께 등록되어야 한다.
 
@@ -147,6 +148,15 @@ Production Alpha에서도 Telegram은 허가 채널의 내부 신호 수집에�
 ### 미디어 발견 피드 범위
 
 운영 뉴스 수집은 네트워크 요청 전에 fail-closed 범위 정책을 적용한다. `korean_governance` 또는 `korean_governance_context`로 승인되지 않은 거시경제·산업·STO/ISA/IB·비한국 해외 행동주의 피드는 가져오지 않는다. Google News는 계속 발견 큐로만 사용하고 원문 제목과 언어를 바꾸지 않는다. 분류 기준과 비공개 피드 JSON 형식은 [미디어 발견 피드 범위 정책](docs/media-source-scope-policy.md)에 있다.
+
+### Early Access 일회성 승인 Secret
+
+단축 출시의 사람 판단은 두 개의 일회성 Secret으로만 전달한다.
+
+- `GLOBAL_ALPHA_EXPEDITED_EDITORIAL_DECISIONS_GZIP_B64`: 사건 20건, 동일 사건쌍 40개, Top 5의 사람 판단을 editorial apply workflow에 한 번 전달한다. publication artifact가 성공적으로 생성되면 즉시 삭제한다.
+- `GLOBAL_ALPHA_EXPEDITED_RELEASE_INPUTS_GZIP_B64`: 최종 사람 승인과, 실제 90일 자료가 아직 없을 때만 사용하는 89일 한시 승인 문서를 final-approval workflow에 한 번 전달한다. final-approval artifact가 성공적으로 생성되면 즉시 삭제한다.
+
+두 값 모두 repository 일반 Secret이 아니라 보호된 `governance-release` 환경 Secret으로 등록한다. workflow 로그·artifact·PR·채팅에 원문을 남기지 않으며, 실패한 실행 뒤에는 기존 값을 재사용하지 않고 새 payload를 만든다. 기계 수집·성능·SourceRight·롤백 증빙은 이 Secret에 넣을 수 없다.
 
 ### Telegram 이용권한
 

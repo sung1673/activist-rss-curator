@@ -56,6 +56,30 @@ def successful_summary(*, dry_run: bool = False) -> dict[str, object]:
         "official_remote_ack_mismatches": 0,
         "official_remote_raw_count": 4,
         "official_remote_ack_count": 4,
+        "official_dart_fetched": 9,
+        "official_dart_accepted": 4,
+        "official_dart_rejected": 5,
+        "official_dart_duplicates": 0,
+        "official_dart_discarded": 0,
+        "official_dart_pages": 1,
+        "official_dart_requests": 1,
+        "official_dart_errors": 0,
+        "official_dart_quota_exhausted": 0,
+        "official_kind_required": 0,
+        "official_kind_enabled": 0,
+        "official_kind_configured": 0,
+        "official_kind_rights_verified": 0,
+        "official_kind_fetched": 0,
+        "official_kind_accepted": 0,
+        "official_kind_rejected": 0,
+        "official_kind_duplicates": 0,
+        "official_kind_discarded": 0,
+        "official_kind_pages": 0,
+        "official_kind_errors": 0,
+        "official_remote_batches_attempted": 1,
+        "official_remote_failure_telemetry_count": 0,
+        "official_remote_failure_response_body_bytes": 0,
+        "official_remote_failure_elapsed_ms": 0,
     }
 
 
@@ -1154,6 +1178,238 @@ def test_revision_change_creates_a_new_exact_release_checkpoint(
     assert {row["code_revision"] for row in completed.values()} == {
         next_revision,
     }
+
+
+def test_dart_replay_refetches_all_30_windows_and_preserves_checkpoint(
+    tmp_path: Path,
+) -> None:
+    store = MemoryCheckpointStore()
+    checkpoint_path = tmp_path / "official-checkpoint.json"
+    apply_options = BackfillOptions(
+        start=date(2026, 6, 1),
+        end_exclusive=date(2026, 7, 1),
+        checkpoint_path=checkpoint_path,
+        sources=("dart",),
+    )
+    apply_report = run_backfill(
+        tmp_path,
+        apply_options,
+        ingest_runner=lambda *_args, **_kwargs: successful_summary(),
+        now_provider=fixed_now,
+        checkpoint_store=store,
+    )
+    assert apply_report["windows_attempted"] == 30
+    assert apply_report["receipt_contract"]["window_count"] == 30  # type: ignore[index]
+    before_put_count = len(store.put_calls)
+    before_record = copy.deepcopy(next(iter(store.records.values())))
+    replay_calls: list[dict[str, object]] = []
+
+    def replay_runner(root: Path, **kwargs: object) -> dict[str, object]:
+        replay_calls.append({"root": root, **kwargs})
+        return successful_summary()
+
+    replay_report = run_backfill(
+        tmp_path,
+        replace(apply_options, replay=True, max_chunks=30),
+        ingest_runner=replay_runner,
+        now_provider=fixed_now,
+        checkpoint_store=store,
+    )
+
+    assert replay_report["status"] == "succeeded"
+    assert replay_report["mode"] == "replay"
+    assert replay_report["windows_already_completed"] == 30
+    assert replay_report["windows_attempted"] == 30
+    assert replay_report["windows_succeeded"] == 30
+    assert replay_report["windows_failed"] == 0
+    assert replay_report["windows_remaining"] == 0
+    assert replay_report["idempotent"] is True
+    assert replay_report["replay_verified"] is True
+    assert replay_report["checkpoint_before"] == replay_report["checkpoint_after"]
+    assert (
+        replay_report["checkpoint_payload_sha256"]
+        == replay_report["checkpoint_before"]["payload_sha256"]  # type: ignore[index]
+    )
+    assert len(store.put_calls) == before_put_count
+    assert next(iter(store.records.values())) == before_record
+    assert len(replay_calls) == 30
+    assert all(call["dry_run"] is False for call in replay_calls)
+    assert {
+        str(call["idempotency_key"]) for call in replay_calls
+    } == {
+        row["idempotency_key"]  # type: ignore[index]
+        for row in apply_report["window_results"]  # type: ignore[union-attr]
+    }
+    contract = replay_report["receipt_contract"]
+    assert contract["mode"] == "replay"  # type: ignore[index]
+    assert contract["window_count"] == 30  # type: ignore[index]
+    assert all(  # type: ignore[union-attr]
+        row["idempotent"] is True and row["replay_verified"] is True
+        for row in contract["windows"]  # type: ignore[index]
+    )
+    assert all(
+        row["apply_summary_counts_sha256"]
+        == row["replay_summary_counts_sha256"]
+        for row in replay_report["window_results"]  # type: ignore[union-attr]
+    )
+
+
+def test_dart_replay_rejects_count_drift_without_mutating_checkpoint(
+    tmp_path: Path,
+) -> None:
+    store = MemoryCheckpointStore()
+    apply_options = BackfillOptions(
+        start=date(2026, 6, 1),
+        end_exclusive=date(2026, 7, 1),
+        checkpoint_path=tmp_path / "official-checkpoint.json",
+        sources=("dart",),
+    )
+    run_backfill(
+        tmp_path,
+        apply_options,
+        ingest_runner=lambda *_args, **_kwargs: successful_summary(),
+        now_provider=fixed_now,
+        checkpoint_store=store,
+    )
+    before_put_count = len(store.put_calls)
+    before_record = copy.deepcopy(next(iter(store.records.values())))
+    call_count = 0
+
+    def drifting_runner(_root: Path, **_kwargs: object) -> dict[str, object]:
+        nonlocal call_count
+        call_count += 1
+        summary = successful_summary()
+        if call_count == 1:
+            summary["official_dart_rejected"] = 6
+        return summary
+
+    report = run_backfill(
+        tmp_path,
+        replace(apply_options, replay=True),
+        ingest_runner=drifting_runner,
+        now_provider=fixed_now,
+        checkpoint_store=store,
+    )
+
+    assert report["status"] == "failed"
+    assert report["replay_verified"] is False
+    assert report["idempotent"] is False
+    assert report["windows_attempted"] == 1
+    assert "do not exactly match" in report["window_results"][0]["error"]  # type: ignore[index]
+    assert report["receipt_contract"] is None
+    assert len(store.put_calls) == before_put_count
+    assert next(iter(store.records.values())) == before_record
+
+
+def test_dart_replay_rejects_checkpoint_mutation_during_replay(
+    tmp_path: Path,
+) -> None:
+    class MutatingCheckpointStore(MemoryCheckpointStore):
+        def get(self, fingerprint: str) -> RemoteCheckpointSnapshot:
+            snapshot = super().get(fingerprint)
+            if len(self.get_calls) == 2 and snapshot.checkpoint is not None:
+                changed = copy.deepcopy(snapshot.checkpoint)
+                changed["updated_at"] = "2026-07-16T00:00:01+00:00"
+                normalized = canonical_checkpoint(changed)
+                payload_hash = checkpoint_payload_hash(normalized)
+                self.records[fingerprint] = (
+                    snapshot.version + 1,
+                    normalized,
+                    payload_hash,
+                )
+                return RemoteCheckpointSnapshot(
+                    checkpoint=copy.deepcopy(normalized),
+                    version=snapshot.version + 1,
+                    payload_hash=payload_hash,
+                )
+            return snapshot
+
+    seed_store = MemoryCheckpointStore()
+    apply_options = BackfillOptions(
+        start=date(2026, 6, 1),
+        end_exclusive=date(2026, 7, 1),
+        checkpoint_path=tmp_path / "official-checkpoint.json",
+        sources=("dart",),
+    )
+    run_backfill(
+        tmp_path,
+        apply_options,
+        ingest_runner=lambda *_args, **_kwargs: successful_summary(),
+        now_provider=fixed_now,
+        checkpoint_store=seed_store,
+    )
+    store = MutatingCheckpointStore()
+    store.records = copy.deepcopy(seed_store.records)
+
+    with pytest.raises(CheckpointError, match="mutated"):
+        run_backfill(
+            tmp_path,
+            replace(apply_options, replay=True),
+            ingest_runner=lambda *_args, **_kwargs: successful_summary(),
+            now_provider=fixed_now,
+            checkpoint_store=store,
+        )
+
+    assert store.put_calls == []
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"sources": ("kind",)}, "source=dart"),
+        ({"chunk_days": 2}, "one-day"),
+        ({"end_exclusive": date(2026, 6, 30)}, "exact completed 30-day"),
+        ({"max_chunks": 29}, "all 30"),
+        ({"sync_company_master": True}, "company master"),
+        ({"dry_run": True}, "dry_run"),
+        ({"restart": True}, "apply checkpoint"),
+    ],
+)
+def test_dart_replay_requires_exact_apply_contract(
+    tmp_path: Path,
+    changes: dict[str, object],
+    message: str,
+) -> None:
+    base = BackfillOptions(
+        start=date(2026, 6, 1),
+        end_exclusive=date(2026, 7, 1),
+        checkpoint_path=tmp_path / "unused.json",
+        sources=("dart",),
+        replay=True,
+    )
+
+    with pytest.raises(BackfillConfigurationError, match=message):
+        replace(base, **changes).validate()
+
+
+def test_cli_exposes_dart_replay_without_changing_the_job_fingerprint(
+    tmp_path: Path,
+) -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--root",
+            str(Path(__file__).resolve().parents[1]),
+            "--from-date",
+            "2026-06-01",
+            "--to-date",
+            "2026-07-01",
+            "--source",
+            "dart",
+            "--max-chunks",
+            "30",
+            "--checkpoint",
+            str(tmp_path / "checkpoint.json"),
+            "--replay",
+        ]
+    )
+    _, replay_options = options_from_args(args)
+    apply_options = replace(replay_options, replay=False)
+
+    assert replay_options.replay is True
+    assert official_backfill.job_contract(replay_options, code_revision=CODE_REVISION) == (
+        official_backfill.job_contract(apply_options, code_revision=CODE_REVISION)
+    )
 
 
 def test_company_master_sync_requires_dart_source(tmp_path: Path) -> None:

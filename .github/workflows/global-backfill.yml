@@ -221,6 +221,15 @@ jobs:
               f"- Raw / ACK: `{payload.get('total_raw_count', 0)}` / "
               f"`{payload.get('total_acknowledged_count', 0)}`",
           ]
+          window_error = payload.get("window_error")
+          if isinstance(window_error, dict):
+              lines.extend(
+                  [
+                      f"- Failed window: `{payload.get('failed_window', 'unknown')}`",
+                      f"- Safe failure: `{window_error.get('code', 'unknown')}` "
+                      f"(`{window_error.get('stage', 'unknown')}`)",
+                  ]
+              )
           with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as output:
               output.write("\n".join(lines) + "\n")
           PY

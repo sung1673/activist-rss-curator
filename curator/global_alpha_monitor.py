@@ -51,6 +51,7 @@ EVENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:\-]{1,191}$")
 CONFIG_PATTERN = re.compile(
     r"^window\.__BSIDE_GOVERNANCE_CONFIG__=Object\.freeze\((\{.*\})\);\s*$"
 )
+EARLY_ACCESS_RELEASE_CHANNEL = "production_alpha_early_access"
 
 
 class MonitorContractError(ValueError):
@@ -620,6 +621,8 @@ def _validate_build(
         raise MonitorContractError("build_sha_invalid")
     if not isinstance(payload, dict):
         raise MonitorContractError("build_config_contract")
+    if payload.get("releaseChannel") != EARLY_ACCESS_RELEASE_CHANNEL:
+        raise MonitorContractError("build_release_channel_invalid")
     configured_v1 = payload.get("apiBase")
     configured_v2 = payload.get("apiV2Base")
     if not isinstance(configured_v1, str) or not configured_v1.strip():

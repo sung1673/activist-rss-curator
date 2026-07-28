@@ -325,7 +325,7 @@ def test_connector_freshness_uses_source_scoped_success_and_exact_ack_counts():
 
     bridge = _section(
         "function v1_bridge_dart_connector_run",
-        "function upsert_governance_snapshot",
+        "function v1_dart_replay_expectation",
     ).replace("\\'", "'")
     assert "if ($outcome['selected'] !== true) { return; }" in bridge
     assert "connector_id=? AND country_code='KR' AND source_key='dart'" in bridge

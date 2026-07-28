@@ -238,3 +238,59 @@ def test_runner_fails_closed_and_keeps_partial_summary_on_bad_replay(
     assert summary["error"]["code"] == (
         "global_backfill_replay_verification_failed"
     )
+
+
+def test_runner_preserves_only_safe_failed_window_diagnostics(
+    tmp_path: Path,
+) -> None:
+    def ingest(arguments: Sequence[str] | None) -> int:
+        assert arguments is not None
+        values = list(arguments)
+        receipt_path = Path(
+            values[values.index("--evidence") + 1]
+        )
+        receipt_path.write_text(
+            json.dumps(
+                {
+                    "status": "failed",
+                    "error": {
+                        "code": "official_source_contract_failed",
+                        "class": "GlobalConnectorContractError",
+                        "stage": "source",
+                        "unsafe_detail": "must never be copied",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return 1
+
+    plan = plan_global_backfill(
+        country_code="US",
+        mode="apply",
+        from_date="2026-06-29",
+        to_date="2026-06-30",
+        max_windows=1,
+        now=NOW,
+    )
+    summary_path = tmp_path / "summary.json"
+    with pytest.raises(
+        GlobalBackfillError,
+        match="global_backfill_window_failed",
+    ):
+        run_global_backfill(
+            plan=plan,
+            code_revision=REVISION,
+            evidence_dir=tmp_path / "receipts",
+            summary_path=summary_path,
+            max_pages=200,
+            ingest_entrypoint=ingest,
+        )
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["window_error"] == {
+        "code": "official_source_contract_failed",
+        "class": "GlobalConnectorContractError",
+        "stage": "source",
+    }
+    assert "unsafe_detail" not in json.dumps(summary)

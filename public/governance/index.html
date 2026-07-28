@@ -12,14 +12,14 @@
   <script src="./config.js" defer></script>
   <script src="./app.js" defer></script>
 </head>
-<body>
+<body data-release-channel="production_alpha_early_access">
   <a class="skip-link" href="#app">본문으로 이동 / Skip to content</a>
   <header class="site-header">
     <div class="header-inner">
       <a class="brand" href="#/today" aria-label="BSIDE 마켓 인텔리전스 홈">
         <span class="brand-mark" aria-hidden="true">B</span>
         <span><strong>BSIDE</strong><small>MARKET INTELLIGENCE</small></span>
-        <span class="alpha-label">PRODUCTION ALPHA</span>
+        <span class="alpha-label">ALPHA · EARLY ACCESS</span>
       </a>
       <nav class="primary-nav" aria-label="주요 메뉴 / Primary navigation">
         <a href="#/today" data-nav="today">오늘 <span lang="en">Today</span></a>
@@ -65,6 +65,15 @@
       <span class="shortcut-hint" aria-hidden="true"><kbd>J</kbd><kbd>K</kbd> 이동 · <kbd>Enter</kbd> 열기 · <kbd>Esc</kbd> 닫기</span>
     </div>
   </nav>
+
+  <div class="release-strip">
+    <section class="release-notice" role="status"
+      aria-label="출시 상태 / Release status"
+      data-release-channel="production_alpha_early_access">
+      <strong>Production Alpha · Early Access</strong>
+      <span>KR·US 공식 시장 데이터 · CA·AU 공식 링크 · JP·GB 현재 수집 불가</span>
+    </section>
+  </div>
 
   <main id="app" tabindex="-1" aria-live="off">
     <section class="loading-state" aria-label="불러오는 중 / Loading">

@@ -25,6 +25,9 @@ SUPPORTED_BACKFILL_COUNTRIES = ("US",)
 SUPPORTED_BACKFILL_MODES = ("apply", "replay")
 MAX_BACKFILL_WINDOWS = 31
 _CODE_REVISION = re.compile(r"^[a-f0-9]{7,64}$")
+_SAFE_ERROR_CODE = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
+_SAFE_ERROR_CLASS = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,95}$")
+_SAFE_ERROR_STAGE = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
 
 
 class GlobalBackfillError(RuntimeError):
@@ -182,6 +185,44 @@ def _read_receipt(
     return payload
 
 
+def _read_failed_window_error(path: Path) -> dict[str, object] | None:
+    """Return only the allowlisted diagnostic fields from a failed receipt."""
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("status") != "failed":
+        return None
+    raw_error = payload.get("error")
+    if not isinstance(raw_error, dict):
+        return None
+    code = raw_error.get("code")
+    error_class = raw_error.get("class")
+    stage = raw_error.get("stage")
+    if (
+        not isinstance(code, str)
+        or _SAFE_ERROR_CODE.fullmatch(code) is None
+        or not isinstance(error_class, str)
+        or _SAFE_ERROR_CLASS.fullmatch(error_class) is None
+    ):
+        return None
+    safe: dict[str, object] = {
+        "code": code,
+        "class": error_class,
+    }
+    if isinstance(stage, str) and _SAFE_ERROR_STAGE.fullmatch(stage):
+        safe["stage"] = stage
+    http_status = raw_error.get("http_status")
+    if (
+        isinstance(http_status, int)
+        and not isinstance(http_status, bool)
+        and 100 <= http_status <= 599
+    ):
+        safe["http_status"] = http_status
+    return safe
+
+
 def run_global_backfill(
     *,
     plan: GlobalBackfillPlan,
@@ -210,6 +251,7 @@ def run_global_backfill(
     total_raw = 0
     total_acknowledged = 0
     failed_window: str | None = None
+    failed_window_error: dict[str, object] | None = None
     try:
         for window in plan.windows:
             failed_window = window.start.isoformat()
@@ -236,6 +278,7 @@ def run_global_backfill(
                 arguments.extend(("--verify-replay", "--replay-only"))
             exit_code = ingest_entrypoint(arguments)
             if exit_code != 0:
+                failed_window_error = _read_failed_window_error(receipt_path)
                 raise GlobalBackfillError("global_backfill_window_failed")
             payload = _read_receipt(
                 receipt_path,
@@ -319,6 +362,8 @@ def run_global_backfill(
             .replace(microsecond=0)
             .isoformat(),
         }
+        if failed_window_error is not None:
+            failure["window_error"] = failed_window_error
         write_evidence(summary_path, failure)
         raise
 
