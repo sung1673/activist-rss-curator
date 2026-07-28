@@ -82,6 +82,19 @@ def _failed_report() -> dict[str, object]:
     return report
 
 
+def _dry_run_success_report() -> dict[str, object]:
+    report = _success_report()
+    report.update(
+        {
+            "mode": "dry-run",
+            "dry_run": True,
+        }
+    )
+    result = report["window_results"][0]  # type: ignore[index]
+    result["status"] = "dry-run-succeeded"  # type: ignore[index]
+    return report
+
+
 def _expected(command_exit_code: int = 0) -> object:
     return BOUNDARY.ExpectedReport(
         mode="apply",
@@ -90,6 +103,33 @@ def _expected(command_exit_code: int = 0) -> object:
         code_revision=REVISION,
         command_exit_code=command_exit_code,
     )
+
+
+def test_revision_bound_dry_run_report_passes_artifact_boundary(
+    tmp_path: Path,
+) -> None:
+    raw = tmp_path / "raw.json"
+    output = tmp_path / "report.json"
+    raw.write_text(json.dumps(_dry_run_success_report()), encoding="utf-8")
+    expected = BOUNDARY.ExpectedReport(
+        mode="dry-run",
+        from_date=BOUNDARY.date(2026, 6, 28),
+        to_date=BOUNDARY.date(2026, 6, 29),
+        code_revision=REVISION,
+        command_exit_code=0,
+    )
+
+    sanitized = BOUNDARY.sanitize_report(
+        raw,
+        output,
+        expected=expected,
+        environment={},
+    )
+
+    assert sanitized["status"] == "succeeded"
+    assert sanitized["mode"] == "dry-run"
+    assert sanitized["code_revision"] == REVISION
+    assert sanitized["artifact_sanitization"]["status"] == "verified"
 
 
 def test_success_report_is_validated_and_written_atomically(
@@ -201,6 +241,10 @@ def _mutate(
         ),
         (
             _mutate(lambda report: report.update(code_revision="b" * 40)),
+            "report_code_revision_mismatch",
+        ),
+        (
+            _mutate(lambda report: report.update(code_revision=None)),
             "report_code_revision_mismatch",
         ),
         (

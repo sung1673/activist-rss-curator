@@ -545,6 +545,65 @@ def test_dry_run_reads_and_normalizes_without_checkpoint_or_remote_success(
     assert store.put_calls == []
 
 
+def test_workflow_dry_run_binds_report_to_dispatch_revision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_SHA", CODE_REVISION)
+    options = BackfillOptions(
+        start=date(2021, 1, 1),
+        end_exclusive=date(2021, 1, 2),
+        checkpoint_path=tmp_path / "must-not-exist.json",
+        sources=("dart",),
+        dry_run=True,
+    )
+    store = MemoryCheckpointStore()
+
+    report = run_backfill(
+        tmp_path,
+        options,
+        ingest_runner=lambda *_args, **_kwargs: successful_summary(dry_run=True),
+        now_provider=fixed_now,
+        checkpoint_store=store,
+    )
+
+    assert report["status"] == "succeeded"
+    assert report["code_revision"] == CODE_REVISION
+    assert report["job_fingerprint"] == official_backfill.job_fingerprint(
+        official_backfill.job_contract(options, code_revision=None)
+    )
+    assert "code_revision" not in report["window_results"][0]
+    assert not options.checkpoint_path.exists()
+    assert store.get_calls == []
+    assert store.put_calls == []
+
+
+def test_workflow_dry_run_rejects_malformed_dispatch_revision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_SHA", "not-a-revision")
+    options = BackfillOptions(
+        start=date(2021, 1, 1),
+        end_exclusive=date(2021, 1, 2),
+        checkpoint_path=tmp_path / "must-not-exist.json",
+        sources=("dart",),
+        dry_run=True,
+    )
+
+    with pytest.raises(
+        BackfillConfigurationError,
+        match="GITHUB_SHA or CURATOR_CODE_REVISION",
+    ):
+        run_backfill(
+            tmp_path,
+            options,
+            ingest_runner=lambda *_args, **_kwargs: successful_summary(dry_run=True),
+            now_provider=fixed_now,
+            checkpoint_store=MemoryCheckpointStore(),
+        )
+
+
 def test_failed_remote_sync_is_checkpointed_but_not_completed(tmp_path: Path) -> None:
     checkpoint_path = tmp_path / "official-checkpoint.json"
     store = MemoryCheckpointStore()
