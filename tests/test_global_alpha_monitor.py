@@ -210,7 +210,8 @@ class FakeHttpClient:
                     "window.__BSIDE_GOVERNANCE_CONFIG__=Object.freeze("
                     '{"apiBase":"https://api.example.test/api/v1",'
                     '"webBase":"https://news.example.test",'
-                    f'"buildSha":"{DEPLOYED}"'
+                    f'"buildSha":"{DEPLOYED}",'
+                    '"releaseChannel":"production_alpha_early_access"'
                     "});\n"
                 ),
             ),
@@ -559,7 +560,8 @@ def test_deployed_pages_revision_must_match_observer_revision() -> None:
             "window.__BSIDE_GOVERNANCE_CONFIG__=Object.freeze("
             '{"apiBase":"https://api.example.test/api/v2",'
             '"webBase":"https://news.example.test",'
-            f'"buildSha":"{MISMATCHED_DEPLOYED}"'
+            f'"buildSha":"{MISMATCHED_DEPLOYED}",'
+            '"releaseChannel":"production_alpha_early_access"'
             "});\n"
         ),
     )
@@ -574,6 +576,30 @@ def test_deployed_pages_revision_must_match_observer_revision() -> None:
     assert evidence["status"] == "incident"
     assert "deployed_revision_mismatch" in evidence["reasons"]
     assert evidence["deployed_build_sha"] == MISMATCHED_DEPLOYED
+
+
+def test_pages_config_must_identify_the_early_access_release_channel() -> None:
+    config_probe = HttpProbe(
+        200,
+        14,
+        text=(
+            "window.__BSIDE_GOVERNANCE_CONFIG__=Object.freeze("
+            '{"apiBase":"https://api.example.test/api/v1",'
+            '"webBase":"https://news.example.test",'
+            f'"buildSha":"{DEPLOYED}",'
+            '"releaseChannel":"production_alpha"'
+            "});\n"
+        ),
+    )
+    evidence = run_monitor(
+        monitor_config(),
+        client=FakeHttpClient(overrides={"/config.js": config_probe}),
+        now=NOW,
+    )
+
+    assert evidence["status"] == "incident"
+    assert "build_release_channel_invalid" in evidence["reasons"]
+    assert evidence["deployed_build_sha"] is None
 
 
 def test_api_health_revision_must_match_observer_revision() -> None:
@@ -611,7 +637,8 @@ def test_pages_config_must_point_to_the_probed_v2_api_base() -> None:
             '{"apiBase":"https://other.example.test/api/v1",'
             '"apiV2Base":"https://other.example.test/api/v2",'
             '"webBase":"https://news.example.test",'
-            f'"buildSha":"{DEPLOYED}"'
+            f'"buildSha":"{DEPLOYED}",'
+            '"releaseChannel":"production_alpha_early_access"'
             "});\n"
         ),
     )

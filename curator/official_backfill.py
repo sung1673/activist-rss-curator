@@ -18,7 +18,9 @@ from .backfill_checkpoint_api import (
     RemoteCheckpointError,
     RemoteCheckpointSnapshot,
     RemoteCheckpointWrite,
+    canonical_checkpoint,
     checkpoint_api_configured,
+    checkpoint_payload_hash,
 )
 from .dart_quota import (
     durable_dart_quota_client,
@@ -98,6 +100,7 @@ class BackfillOptions:
     # 40,000-request KST-day ceiling.
     request_budget: int = 10_000
     dry_run: bool = False
+    replay: bool = False
     restart: bool = False
     continue_on_error: bool = False
     sync_company_master: bool = False
@@ -130,6 +133,27 @@ class BackfillOptions:
             raise BackfillConfigurationError("sources must contain dart and/or kind")
         if self.sync_company_master and "dart" not in self.sources:
             raise BackfillConfigurationError("sync_company_master requires the dart source")
+        if self.replay:
+            if self.dry_run:
+                raise BackfillConfigurationError("replay cannot be combined with dry_run")
+            if self.restart:
+                raise BackfillConfigurationError("replay cannot replace its apply checkpoint")
+            if self.sources != ("dart",):
+                raise BackfillConfigurationError("replay currently requires source=dart")
+            if self.chunk_days != 1:
+                raise BackfillConfigurationError("replay requires one-day windows")
+            if (self.end_exclusive - self.start).days != 30:
+                raise BackfillConfigurationError(
+                    "replay requires the exact completed 30-day apply range"
+                )
+            if self.max_chunks not in {0, 30}:
+                raise BackfillConfigurationError(
+                    "replay must reprocess all 30 completed windows"
+                )
+            if self.sync_company_master:
+                raise BackfillConfigurationError(
+                    "replay cannot mutate the DART company master"
+                )
 
 
 IngestRunner = Callable[..., dict[str, object]]
@@ -464,6 +488,190 @@ def _summary_totals(results: list[dict[str, object]]) -> dict[str, int]:
     return totals
 
 
+def _canonical_sha256(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _summary_replay_counts(
+    summary: Mapping[str, object],
+    *,
+    location: str,
+) -> dict[str, int]:
+    """Return the complete numeric official-ingest contract for one window."""
+
+    counts: dict[str, int] = {}
+    for key, value in summary.items():
+        if not str(key).startswith("official_"):
+            continue
+        if isinstance(value, bool):
+            counts[str(key)] = int(value)
+        elif isinstance(value, int):
+            counts[str(key)] = value
+    required = {
+        "official_dart_fetched",
+        "official_dart_accepted",
+        "official_dart_rejected",
+        "official_dart_requests",
+        "official_dart_errors",
+        "official_dart_quota_exhausted",
+        "official_remote_raw_count",
+        "official_remote_ack_count",
+        "official_remote_ack_mismatches",
+        "official_remote_run_persisted",
+        "official_remote_synced",
+        "official_remote_failed",
+        "official_failed",
+    }
+    missing = sorted(required - counts.keys())
+    if missing:
+        raise CheckpointError(
+            f"{location} is missing replay count fields: {', '.join(missing)}"
+        )
+    raw = counts["official_dart_fetched"]
+    accepted = counts["official_dart_accepted"]
+    remote_raw = counts["official_remote_raw_count"]
+    acknowledged = counts["official_remote_ack_count"]
+    if (
+        min(counts.values()) < 0
+        or raw < accepted
+        or accepted != remote_raw
+        or remote_raw != acknowledged
+        or counts["official_remote_ack_mismatches"] != 0
+        or counts["official_remote_run_persisted"] != 1
+        or counts["official_remote_synced"] < 1
+        or counts["official_remote_failed"] != 0
+        or counts["official_failed"] != 0
+        or counts["official_dart_errors"] != 0
+        or counts["official_dart_quota_exhausted"] != 0
+        or counts["official_dart_requests"] < 1
+    ):
+        raise CheckpointError(f"{location} does not contain an exact remote ACK")
+    return counts
+
+
+def _window_receipt(
+    *,
+    fingerprint: str,
+    checkpoint_hash: str,
+    window_key: str,
+    result: Mapping[str, object],
+    replay: bool,
+) -> dict[str, object]:
+    summary = result.get("summary")
+    if not isinstance(summary, Mapping):
+        raise CheckpointError(f"window {window_key} is missing its ingest summary")
+    counts = _summary_replay_counts(summary, location=f"window {window_key}")
+    start = str(result.get("window_start") or "")
+    end = str(result.get("window_end_exclusive") or "")
+    idempotency_key = str(result.get("idempotency_key") or "")
+    if (
+        window_key != f"{start}:{end}"
+        or not idempotency_key.startswith("official-backfill-v1:")
+        or str(result.get("status") or "") != "succeeded"
+    ):
+        raise CheckpointError(f"window {window_key} is not a completed apply receipt")
+    raw = counts["official_dart_fetched"]
+    accepted = counts["official_dart_accepted"]
+    acknowledged = counts["official_remote_ack_count"]
+    payload_contract = {
+        "job_fingerprint": fingerprint,
+        "window_key": window_key,
+        "idempotency_key": idempotency_key,
+        "summary_counts": counts,
+    }
+    payload_digest = _canonical_sha256(payload_contract)
+    receipt_contract: dict[str, object] = {
+        "window_start": start,
+        "window_end_exclusive": end,
+        "raw_count": raw,
+        "filtered_out_count": raw - accepted,
+        "accepted_count": accepted,
+        "acknowledged_count": acknowledged,
+        "status": "complete",
+        "code_revision": str(result.get("code_revision") or ""),
+        "payload_sha256": payload_digest,
+        "idempotency_key": idempotency_key,
+        "ingest_id": f"official-dart:{payload_digest[:64]}",
+        "idempotent": replay,
+        "replay_verified": replay,
+    }
+    if replay:
+        replay_attempted_at = str(result.get("replay_attempted_at") or "")
+        try:
+            parsed_replay_attempt = datetime.fromisoformat(
+                replay_attempted_at.replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise CheckpointError(
+                f"window {window_key} has no valid replay_attempted_at"
+            ) from exc
+        if (
+            parsed_replay_attempt.tzinfo is None
+            or parsed_replay_attempt.utcoffset() is None
+        ):
+            raise CheckpointError(
+                f"window {window_key} replay_attempted_at lacks a timezone"
+            )
+        receipt_contract["replay_attempted_at"] = (
+            parsed_replay_attempt.astimezone(timezone.utc).isoformat()
+        )
+    receipt_contract["receipt_sha256"] = _canonical_sha256(
+        {
+            "checkpoint_payload_sha256": checkpoint_hash,
+            **receipt_contract,
+        }
+    )
+    return receipt_contract
+
+
+def _checkpoint_receipt_contract(
+    checkpoint: Mapping[str, object],
+    *,
+    fingerprint: str,
+    checkpoint_hash: str,
+    replay: bool,
+    replay_results: Mapping[str, Mapping[str, object]] | None = None,
+) -> dict[str, object]:
+    completed = checkpoint.get("completed_windows")
+    if not isinstance(completed, Mapping):
+        raise CheckpointError("checkpoint completed_windows is missing")
+    windows: list[dict[str, object]] = []
+    for window_key in sorted(str(key) for key in completed):
+        apply_result = completed.get(window_key)
+        if not isinstance(apply_result, Mapping):
+            raise CheckpointError(f"checkpoint window {window_key} is invalid")
+        source_result = apply_result
+        if replay:
+            if replay_results is None or window_key not in replay_results:
+                raise CheckpointError(f"replay result for {window_key} is missing")
+            source_result = replay_results[window_key]
+        windows.append(
+            _window_receipt(
+                fingerprint=fingerprint,
+                checkpoint_hash=checkpoint_hash,
+                window_key=window_key,
+                result=source_result,
+                replay=replay,
+            )
+        )
+    return {
+        "schema_version": 1,
+        "source": "dart",
+        "mode": "replay" if replay else "apply",
+        "job_fingerprint": fingerprint,
+        "checkpoint_payload_sha256": checkpoint_hash,
+        "window_count": len(windows),
+        "windows": windows,
+        "contract_sha256": _canonical_sha256(windows),
+    }
+
+
 def _run_backfill(
     project_root: Path,
     options: BackfillOptions,
@@ -486,6 +694,10 @@ def _run_backfill(
     job = job_contract(options, code_revision=code_revision)
     fingerprint = job_fingerprint(job)
     remote_version = 0
+    remote_payload_hash: str | None = None
+    checkpoint_before: dict[str, object] | None = None
+    checkpoint_before_version: int | None = None
+    checkpoint_before_hash: str | None = None
     store: CheckpointStore | None = None
     if options.dry_run:
         checkpoint = new_checkpoint(job, fingerprint, now_provider=now_provider)
@@ -493,6 +705,7 @@ def _run_backfill(
         store = checkpoint_store or RemoteCheckpointClient()
         snapshot = store.get(fingerprint)
         remote_version = snapshot.version
+        remote_payload_hash = snapshot.payload_hash
         checkpoint = (
             new_checkpoint(job, fingerprint, now_provider=now_provider)
             if options.restart or snapshot.checkpoint is None
@@ -515,6 +728,24 @@ def _run_backfill(
             raise CheckpointError(
                 "remote checkpoint job fingerprint does not match the requested range/options; use --restart"
             )
+        if options.replay:
+            if snapshot.checkpoint is None or snapshot.version < 1:
+                raise CheckpointError(
+                    "replay requires the existing completed apply checkpoint"
+                )
+            canonical_before = canonical_checkpoint(checkpoint)
+            calculated_before_hash = checkpoint_payload_hash(canonical_before)
+            if (
+                not isinstance(snapshot.payload_hash, str)
+                or len(snapshot.payload_hash) != 64
+                or calculated_before_hash != snapshot.payload_hash
+            ):
+                raise CheckpointError(
+                    "replay apply checkpoint payload hash is missing or inconsistent"
+                )
+            checkpoint_before = copy.deepcopy(canonical_before)
+            checkpoint_before_version = snapshot.version
+            checkpoint_before_hash = snapshot.payload_hash
         if options.restart or snapshot.checkpoint is None:
             write = store.put(
                 fingerprint,
@@ -522,6 +753,7 @@ def _run_backfill(
                 checkpoint=checkpoint,
             )
             remote_version = write.version
+            remote_payload_hash = write.payload_hash
         save_checkpoint(options.checkpoint_path, checkpoint)
 
         blocked_until_text = checkpoint.get("dart_quota_blocked_until")
@@ -549,7 +781,17 @@ def _run_backfill(
             "checkpoint contains windows outside the requested job: "
             + ", ".join(sorted(unknown_window_keys))
         )
+    if options.replay and (
+        set(completed_windows) != expected_window_keys
+        or failed_windows
+        or len(completed_windows) != 30
+    ):
+        raise CheckpointError(
+            "replay requires exactly 30 completed apply windows and no failed windows"
+        )
     if options.dry_run:
+        pending = all_windows
+    elif options.replay:
         pending = all_windows
     else:
         pending = [window for window in all_windows if window.key not in completed_windows]
@@ -579,6 +821,11 @@ def _run_backfill(
         previous_attempts = (
             int(previous_failure.get("attempt") or 0) if isinstance(previous_failure, dict) else 0
         )
+        attempt_time = now_provider()
+        if attempt_time.tzinfo is None:
+            attempt_time = attempt_time.replace(tzinfo=timezone.utc)
+        else:
+            attempt_time = attempt_time.astimezone(timezone.utc)
         master_sync_needed = options.sync_company_master and not bool(checkpoint.get("company_master_synced"))
         overrides: dict[str, object] = {
             "dart_enabled": "dart" in options.sources,
@@ -595,26 +842,70 @@ def _run_backfill(
             "source_end_inclusive": window.source_end_inclusive.isoformat(),
             "idempotency_key": window_idempotency_key(fingerprint, window),
             "attempt": previous_attempts + 1,
+            "started_at": attempt_time.isoformat(),
         }
         if code_revision is not None:
             result["code_revision"] = code_revision
+        if options.replay:
+            # Keep the real replay clock in the immutable receipt. Replay
+            # identity comes from the stable window idempotency key and payload
+            # digest; an apply timestamp must never be fabricated here.
+            result["replay_attempted_at"] = attempt_time.isoformat()
         try:
             summary = ingest_runner(
                 project_root,
                 # Retrieval metadata must describe the real attempt time. The
                 # stable window idempotency key, not a fabricated historical
                 # timestamp, makes retries update the same collection run.
-                now=now_provider(),
+                now=attempt_time,
                 start=window.start,
                 end=window.source_end_inclusive,
                 settings_overrides=overrides,
                 dry_run=options.dry_run,
                 idempotency_key=result["idempotency_key"],
+                replay=options.replay,
             )
             result["summary"] = summary
             succeeded = _summary_succeeded(summary, dry_run=options.dry_run)
+            if succeeded and options.replay:
+                apply_result = completed_windows.get(window.key)
+                apply_summary = (
+                    apply_result.get("summary")
+                    if isinstance(apply_result, Mapping)
+                    else None
+                )
+                if not isinstance(apply_summary, Mapping):
+                    raise CheckpointError(
+                        f"apply checkpoint window {window.key} is missing its summary"
+                    )
+                apply_counts = _summary_replay_counts(
+                    apply_summary,
+                    location=f"apply window {window.key}",
+                )
+                replay_counts = _summary_replay_counts(
+                    summary,
+                    location=f"replay window {window.key}",
+                )
+                result["apply_summary_counts_sha256"] = _canonical_sha256(
+                    apply_counts
+                )
+                result["replay_summary_counts_sha256"] = _canonical_sha256(
+                    replay_counts
+                )
+                if apply_counts != replay_counts:
+                    succeeded = False
+                    result["error"] = (
+                        "replay summary counts do not exactly match the apply "
+                        f"checkpoint for {window.key}"
+                    )
+                else:
+                    result["idempotent"] = True
+                    result["replay_verified"] = True
             if not succeeded:
-                result["error"] = "official ingest or required remote sync did not succeed"
+                result.setdefault(
+                    "error",
+                    "official ingest or required remote sync did not succeed",
+                )
         except Exception as exc:  # the checkpoint must record connector/API failures
             succeeded = False
             result["error"] = f"{type(exc).__name__}: {exc}"
@@ -626,6 +917,12 @@ def _run_backfill(
         results.append(result)
 
         if options.dry_run:
+            if not succeeded:
+                invocation_failures += 1
+                if not options.continue_on_error:
+                    break
+            continue
+        if options.replay:
             if not succeeded:
                 invocation_failures += 1
                 if not options.continue_on_error:
@@ -665,25 +962,120 @@ def _run_backfill(
             checkpoint=candidate,
         )
         remote_version = write.version
+        remote_payload_hash = write.payload_hash
         checkpoint = candidate
         completed_windows = candidate_completed
         failed_windows = candidate_failed
         save_checkpoint(options.checkpoint_path, checkpoint)
         if not succeeded and (quota_exhausted or not options.continue_on_error):
             break
-    remaining = 0 if options.dry_run else len(
-        [window for window in all_windows if window.key not in completed_windows]
+    checkpoint_after_version: int | None = None
+    checkpoint_after_hash: str | None = None
+    if options.replay:
+        assert store is not None
+        assert checkpoint_before is not None
+        assert checkpoint_before_version is not None
+        assert checkpoint_before_hash is not None
+        replay_snapshot = store.get(fingerprint)
+        if replay_snapshot.checkpoint is None:
+            raise CheckpointError("replay apply checkpoint disappeared during the run")
+        canonical_after = canonical_checkpoint(
+            validate_checkpoint(
+                replay_snapshot.checkpoint,
+                label="post-replay remote MySQL checkpoint",
+            )
+        )
+        calculated_after_hash = checkpoint_payload_hash(canonical_after)
+        checkpoint_after_version = replay_snapshot.version
+        checkpoint_after_hash = replay_snapshot.payload_hash
+        if (
+            checkpoint_after_hash is None
+            or calculated_after_hash != checkpoint_after_hash
+            or checkpoint_after_version != checkpoint_before_version
+            or checkpoint_after_hash != checkpoint_before_hash
+            or canonical_after != checkpoint_before
+        ):
+            raise CheckpointError(
+                "replay mutated the authoritative apply checkpoint version or payload"
+            )
+        remote_version = checkpoint_after_version
+        remote_payload_hash = checkpoint_after_hash
+
+    checkpoint_hash = (
+        checkpoint_payload_hash(canonical_checkpoint(checkpoint))
+        if options.dry_run
+        else remote_payload_hash
+    )
+    receipt_contract: dict[str, object] | None = None
+    apply_receipt_contract: dict[str, object] | None = None
+    if (
+        not options.dry_run
+        and options.sources == ("dart",)
+        and isinstance(checkpoint_hash, str)
+    ):
+        apply_receipt_contract = _checkpoint_receipt_contract(
+            checkpoint,
+            fingerprint=fingerprint,
+            checkpoint_hash=checkpoint_hash,
+            replay=False,
+        )
+        if options.replay:
+            replay_results = {
+                f"{result.get('window_start')}:{result.get('window_end_exclusive')}": result
+                for result in results
+                if result.get("window_start") and result.get("window_end_exclusive")
+            }
+            if not invocation_failures and len(replay_results) == len(all_windows):
+                receipt_contract = _checkpoint_receipt_contract(
+                    checkpoint,
+                    fingerprint=fingerprint,
+                    checkpoint_hash=checkpoint_hash,
+                    replay=True,
+                    replay_results=replay_results,
+                )
+        else:
+            receipt_contract = apply_receipt_contract
+    replay_succeeded = sum(
+        1 for row in results if row.get("status") == "succeeded"
+    )
+    remaining = (
+        0
+        if options.dry_run
+        else (
+            len(all_windows) - replay_succeeded
+            if options.replay
+            else len(
+                [
+                    window
+                    for window in all_windows
+                    if window.key not in completed_windows
+                ]
+            )
+        )
     )
     return {
         "schema_version": 1,
         "status": "failed" if invocation_failures else "succeeded",
+        "mode": "replay" if options.replay else (
+            "dry-run" if options.dry_run else "apply"
+        ),
         "dry_run": options.dry_run,
+        "idempotent": bool(options.replay and not invocation_failures),
+        "replay_verified": bool(options.replay and not invocation_failures),
         "code_revision": code_revision,
         "job_fingerprint": fingerprint,
         "range_start": options.start.isoformat(),
         "range_end_exclusive": options.end_exclusive.isoformat(),
         "windows_total": len(all_windows),
-        "windows_already_completed": 0 if options.dry_run else len(all_windows) - pending_before_limit,
+        "windows_already_completed": (
+            0
+            if options.dry_run
+            else (
+                len(completed_windows)
+                if options.replay
+                else len(all_windows) - pending_before_limit
+            )
+        ),
         "windows_pending_before_limit": pending_before_limit,
         "windows_selected": len(selected),
         "windows_attempted": len(results),
@@ -693,6 +1085,25 @@ def _run_backfill(
         "checkpoint_path": None if options.dry_run else str(options.checkpoint_path),
         "checkpoint_source": None if options.dry_run else "mysql_remote",
         "checkpoint_version": None if options.dry_run else remote_version,
+        "checkpoint_payload_sha256": None if options.dry_run else checkpoint_hash,
+        "checkpoint_before": (
+            {
+                "version": checkpoint_before_version,
+                "payload_sha256": checkpoint_before_hash,
+            }
+            if options.replay
+            else None
+        ),
+        "checkpoint_after": (
+            {
+                "version": checkpoint_after_version,
+                "payload_sha256": checkpoint_after_hash,
+            }
+            if options.replay
+            else None
+        ),
+        "apply_receipt_contract": apply_receipt_contract,
+        "receipt_contract": receipt_contract,
         "totals": _summary_totals(results),
         "window_results": results,
     }
@@ -765,6 +1176,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT_PATH)
     parser.add_argument("--dry-run", action="store_true", help="fetch/normalize but do not sync or mutate checkpoint")
+    parser.add_argument(
+        "--replay",
+        action="store_true",
+        help=(
+            "re-fetch and remotely upsert every window from one exact completed "
+            "30-day DART apply checkpoint without mutating that checkpoint"
+        ),
+    )
     parser.add_argument("--restart", action="store_true", help="replace the checkpoint for this requested job")
     parser.add_argument("--continue-on-error", action="store_true")
     parser.add_argument("--sync-company-master", action="store_true")
@@ -790,6 +1209,7 @@ def options_from_args(args: argparse.Namespace) -> tuple[Path, BackfillOptions]:
         max_chunks=args.max_chunks,
         request_budget=args.request_budget,
         dry_run=args.dry_run,
+        replay=args.replay,
         restart=args.restart,
         continue_on_error=args.continue_on_error,
         sync_company_master=args.sync_company_master,

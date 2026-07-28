@@ -1,0 +1,341 @@
+name: Production Alpha expedited protected final approval
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type UPLOAD_EXPEDITED_ALPHA_FINAL_APPROVAL
+        required: true
+        type: string
+      preparation_run_id:
+        description: Successful exact-SHA expedited preparation workflow run
+        required: true
+        type: string
+      preparation_artifact_digest:
+        description: Immutable global-alpha-expedited-preparation sha256 digest
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: global-alpha-expedited-final-approval-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment:
+      name: governance-release
+    steps:
+      - name: Checkout exact approved revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Enforce protected same-SHA approval
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRMATION" == "UPLOAD_EXPEDITED_ALPHA_FINAL_APPROVAL" ]]
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+
+      - name: Resolve exact immutable expedited preparation
+        id: preparation
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REQUESTED_RUN_ID: ${{ inputs.preparation_run_id }}
+          REQUESTED_DIGEST: ${{ inputs.preparation_artifact_digest }}
+          EXPECTED_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const text = String(process.env.REQUESTED_RUN_ID || "").trim();
+            const digest = String(process.env.REQUESTED_DIGEST || "").toLowerCase();
+            if (!/^[1-9][0-9]*$/.test(text) || !/^sha256:[0-9a-f]{64}$/.test(digest)) {
+              core.setFailed("The preparation run id or digest is invalid");
+              return;
+            }
+            const response = await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: Number(text),
+            });
+            const run = response.data;
+            const ageHours = (Date.now() - Date.parse(run.updated_at)) / 3600000;
+            if (
+              run.status !== "completed" ||
+              run.conclusion !== "success" ||
+              run.event !== "workflow_dispatch" ||
+              run.head_branch !== process.env.DEFAULT_BRANCH ||
+              (run.head_sha || "").toLowerCase() !== process.env.EXPECTED_SHA.toLowerCase() ||
+              run.path !== ".github/workflows/global-alpha-expedited-preparation.yml" ||
+              ageHours < -0.1 ||
+              ageHours > 72
+            ) {
+              core.setFailed("The preparation producer failed its protected contract");
+              return;
+            }
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner, repo, run_id: run.id, per_page: 100},
+            );
+            const matches = artifacts.filter(
+              (item) =>
+                item.name === "global-alpha-expedited-preparation" &&
+                !item.expired,
+            );
+            if (
+              matches.length !== 1 ||
+              (matches[0].digest || "").toLowerCase() !== digest
+            ) {
+              core.setFailed("The exact immutable preparation artifact did not match");
+              return;
+            }
+            core.setOutput("run_id", String(run.id));
+            core.setOutput("run_attempt", String(run.run_attempt));
+            core.setOutput("artifact_id", String(matches[0].id));
+            core.setOutput("artifact_name", matches[0].name);
+            core.setOutput("artifact_digest", digest);
+
+      - name: Download exact immutable expedited preparation
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.preparation.outputs.artifact_id }}
+          path: preparation
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.preparation.outputs.run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
+      - name: Set up protected input Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Verify preparation provenance before accepting final approval
+        shell: bash
+        env:
+          PREPARATION_RUN_ID: ${{ steps.preparation.outputs.run_id }}
+          PREPARATION_RUN_ATTEMPT: ${{ steps.preparation.outputs.run_attempt }}
+          PREPARATION_ARTIFACT_ID: ${{ steps.preparation.outputs.artifact_id }}
+          PREPARATION_ARTIFACT_NAME: ${{ steps.preparation.outputs.artifact_name }}
+          PREPARATION_ARTIFACT_DIGEST: ${{ steps.preparation.outputs.artifact_digest }}
+        run: |
+          set -euo pipefail
+          for path in \
+            preparation/expedited-preparation.json \
+            preparation/preparation-provenance.json \
+            preparation/approval-binding-materials.json \
+            preparation/human-review.json \
+            preparation/editorial-publication-provenance.json; do
+            test -f "$path"
+          done
+          jq -e \
+            --argjson run_id "$PREPARATION_RUN_ID" \
+            --argjson run_attempt "$PREPARATION_RUN_ATTEMPT" '
+            .kind == "bside-global-alpha-expedited-preparation-provenance"
+            and .code_revision == env.GITHUB_SHA
+            and .workflow == ".github/workflows/global-alpha-expedited-preparation.yml"
+            and .run_id == $run_id
+            and .run_attempt == $run_attempt
+          ' preparation/preparation-provenance.json > /dev/null
+          jq -e '
+            .kind == "bside-global-alpha-expedited-preparation-input"
+            and .code_revision == env.GITHUB_SHA
+            and (has("human_review") and (.human_review | type == "object"))
+            and (has("approval") | not)
+          ' preparation/expedited-preparation.json > /dev/null
+          jq -e '
+            .kind == "bside-global-alpha-expedited-approval-binding-materials"
+            and .code_revision == env.GITHUB_SHA
+            and (.human_review_section_sha256 | test("^[0-9a-f]{64}$"))
+            and (.pages_terminal_content_sha256 | test("^[0-9a-f]{64}$"))
+            and (.content_integrity_sha256 | test("^[0-9a-f]{64}$"))
+            and (.experience_sha256 | test("^[0-9a-f]{64}$"))
+            and (.rollback_drill_sha256 | test("^[0-9a-f]{64}$"))
+            and (.observations_sha256 | test("^[0-9a-f]{64}$"))
+            and (.legacy_source_artifact_sha256 | test("^[0-9a-f]{64}$"))
+            and (.binding_base_sha256 | test("^[0-9a-f]{64}$"))
+          ' preparation/approval-binding-materials.json > /dev/null
+          jq -n \
+            --argjson run_id "$PREPARATION_RUN_ID" \
+            --argjson run_attempt "$PREPARATION_RUN_ATTEMPT" \
+            --argjson artifact_id "$PREPARATION_ARTIFACT_ID" \
+            --arg artifact_name "$PREPARATION_ARTIFACT_NAME" \
+            --arg artifact_digest "$PREPARATION_ARTIFACT_DIGEST" \
+            --arg code_revision "$GITHUB_SHA" \
+            '{
+              schema_version: 1,
+              kind: "bside-global-alpha-expedited-preparation-identity",
+              code_revision: $code_revision,
+              run_id: $run_id,
+              run_attempt: $run_attempt,
+              artifact_id: $artifact_id,
+              artifact_name: $artifact_name,
+              artifact_digest: $artifact_digest
+            }' > preparation-identity.json
+
+      - name: Decode one-use final human approval without logging it
+        shell: bash
+        env:
+          GLOBAL_ALPHA_EXPEDITED_RELEASE_INPUTS_GZIP_B64: ${{ secrets.GLOBAL_ALPHA_EXPEDITED_RELEASE_INPUTS_GZIP_B64 }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64
+          import gzip
+          import io
+          import json
+          import os
+          from pathlib import Path
+
+          encoded = os.environ.get(
+              "GLOBAL_ALPHA_EXPEDITED_RELEASE_INPUTS_GZIP_B64", ""
+          )
+          if not encoded:
+              raise SystemExit("GLOBAL_ALPHA_EXPEDITED_RELEASE_INPUTS_GZIP_B64 is required")
+          if len(encoded) > 1_000_000:
+              raise SystemExit("protected final approval encoding exceeds the size limit")
+          try:
+              compressed = base64.b64decode(encoded, validate=True)
+              with gzip.GzipFile(fileobj=io.BytesIO(compressed)) as handle:
+                  raw = handle.read(500_001)
+          except (ValueError, OSError, EOFError) as exc:
+              raise SystemExit("protected final approval encoding is invalid") from exc
+          if len(raw) > 500_000:
+              raise SystemExit("protected final approval exceeds the size limit")
+          payload = json.loads(raw.decode("utf-8"))
+          if set(payload) not in ({"approval"}, {"approval", "legacy_waiver"}):
+              raise SystemExit(
+                  "protected input must contain approval and optional legacy_waiver only"
+              )
+          approval = payload.get("approval")
+          if not isinstance(approval, dict):
+              raise SystemExit("protected input must contain exactly one approval object")
+          for field in ("artifact_id", "artifact_name", "artifact_sha256"):
+              if field in approval:
+                  raise SystemExit(
+                      "final approval cannot self-assert its post-upload artifact identity"
+                  )
+          Path("approval.json").write_text(
+              json.dumps(approval, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          waiver = payload.get("legacy_waiver")
+          if waiver is not None:
+              if not isinstance(waiver, dict):
+                  raise SystemExit("legacy_waiver must be an object")
+              Path("legacy-waiver.json").write_text(
+                  json.dumps(waiver, ensure_ascii=False, sort_keys=True, indent=2)
+                  + "\n",
+                  encoding="utf-8",
+              )
+          PY
+
+      - name: Finalize actual 89-or-90-day recovery evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          waiver_args=()
+          if [[ -f legacy-waiver.json ]]; then
+            waiver_args=(--waiver-json legacy-waiver.json)
+          fi
+          python -m curator.global_alpha_expedited_final_approval template \
+            --preparation preparation \
+            --output derived-final-approval \
+            --expected-revision "$GITHUB_SHA" \
+            "${waiver_args[@]}" > /dev/null
+
+      - name: Bind final human approval to the exact preparation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          from curator.global_alpha_expedited_gate import validate_expedited_approval
+
+          materials = json.loads(
+              Path(
+                  "derived-final-approval/final-approval-binding-materials.json"
+              ).read_text(
+                  encoding="utf-8"
+              )
+          )
+          binding_fields = (
+              "human_review_section_sha256",
+              "pages_terminal_content_sha256",
+              "content_integrity_sha256",
+              "experience_sha256",
+              "rollback_drill_sha256",
+              "observations_sha256",
+              "legacy_source_artifact_sha256",
+              "legacy_manifest_sha256",
+              "binding_sha256",
+          )
+          binding = {field: materials[field] for field in binding_fields}
+          approval = json.loads(Path("approval.json").read_text(encoding="utf-8"))
+          if approval.get("evidence_binding") != binding:
+              raise SystemExit("final approval is not bound to the exact preparation")
+          validation_copy = dict(approval)
+          validation_copy.update(
+              {
+                  "artifact_id": 1,
+                  "artifact_name": "pending-expedited-final-approval",
+                  "artifact_sha256": "0" * 64,
+              }
+          )
+          evidence_as_of = datetime.now(timezone.utc)
+          _summary, gates = validate_expedited_approval(
+              validation_copy,
+              expected_revision=os.environ["GITHUB_SHA"].lower(),
+              evidence_as_of=evidence_as_of,
+              required_evidence_binding=binding,
+          )
+          if any(gate.get("passed") is not True for gate in gates):
+              raise SystemExit("final human approval gates did not pass")
+          PY
+          mkdir -p expedited-final-approval
+          cp approval.json preparation-identity.json \
+            derived-final-approval/legacy-archive.json \
+            derived-final-approval/final-approval-binding-materials.json \
+            expedited-final-approval/
+          cp -R derived-final-approval/finalized-legacy-recovery-bundle \
+            expedited-final-approval/finalized-legacy-recovery-bundle
+
+      - name: Upload immutable expedited final approval
+        id: artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-expedited-final-approval-${{ github.sha }}
+          path: expedited-final-approval
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Record final approval identity and cleanup requirement
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ steps.artifact.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.artifact.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Expedited final human approval artifact"
+            echo "- artifact id: \`$ARTIFACT_ID\`"
+            echo "- artifact name: \`global-alpha-expedited-final-approval-$GITHUB_SHA\`"
+            echo "- artifact digest: \`$ARTIFACT_DIGEST\`"
+            echo "- preparation artifact id: \`${{ steps.preparation.outputs.artifact_id }}\`"
+            echo "- operator action: delete GLOBAL_ALPHA_EXPEDITED_RELEASE_INPUTS_GZIP_B64 now"
+          } >> "$GITHUB_STEP_SUMMARY"

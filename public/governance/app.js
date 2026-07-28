@@ -72,6 +72,10 @@
   capturePreviewToken();
 
   const config = window.__BSIDE_GOVERNANCE_CONFIG__ || {};
+  const PUBLIC_UI_CONFIG = Object.freeze({
+    releaseChannel: String(config.releaseChannel || "production_alpha_early_access")
+  });
+  document.body.dataset.releaseChannel = PUBLIC_UI_CONFIG.releaseChannel;
   const CANONICAL_EVENT_FAMILIES = new Set([
     "large_ownership",
     "meeting_and_vote",

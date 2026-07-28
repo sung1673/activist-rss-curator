@@ -8040,6 +8040,193 @@ function v1_bridge_dart_connector_run(PDO $pdo, array $config, array $connector,
     }
 }
 
+/**
+ * Validate the signed, DART-only replay marker.
+ *
+ * A replay is not an upsert retry. It must prove that the exact successful
+ * apply receipt already exists, after which the transaction returns a
+ * read-only acknowledgement.
+ */
+function v1_dart_replay_expectation(array $payload): ?array {
+    $mode = isset($payload['ingest_mode'])
+        ? strtolower(trim((string)$payload['ingest_mode'])) : 'apply';
+    $hasContract = array_key_exists('dart_replay',$payload);
+    if ($mode !== 'apply' && $mode !== 'replay') {
+        respond(400,array('ok'=>false,'error'=>'dart_replay_contract_invalid'));
+    }
+    if ($mode !== 'replay') {
+        if ($hasContract) {
+            respond(400,array('ok'=>false,'error'=>'dart_replay_contract_invalid'));
+        }
+        return null;
+    }
+    if (!$hasContract || !is_array($payload['dart_replay'])) {
+        respond(400,array('ok'=>false,'error'=>'dart_replay_contract_invalid'));
+    }
+    $contract = $payload['dart_replay'];
+    $required = array(
+        'contract_version','run_id','pipeline','source_key','code_revision',
+        'idempotency_key','stable_payload_sha256','attempted_at','raw_count',
+        'acknowledged_count','fetched_count','resolved_count','accepted_count',
+        'error_count',
+    );
+    $actual = array_keys($contract); sort($actual);
+    $expected = $required; sort($expected);
+    if ($actual !== $expected
+        || !isset($contract['contract_version'])
+        || !is_int($contract['contract_version'])
+        || $contract['contract_version'] !== 1) {
+        respond(400,array('ok'=>false,'error'=>'dart_replay_contract_invalid'));
+    }
+    $runId = trim((string)$contract['run_id']);
+    $pipeline = trim((string)$contract['pipeline']);
+    $sourceKey = strtolower(trim((string)$contract['source_key']));
+    $codeRevision = strtolower(trim((string)$contract['code_revision']));
+    $idempotencyKey = trim((string)$contract['idempotency_key']);
+    $stablePayloadSha = strtolower(trim((string)$contract['stable_payload_sha256']));
+    $attemptedAt = trim((string)$contract['attempted_at']);
+    $attemptedEpoch = strtotime($attemptedAt);
+    if (!v1_valid_entity_id($runId)
+        || $pipeline !== 'ingest-official'
+        || $sourceKey !== 'dart'
+        || preg_match('/^[a-f0-9]{40}$/D',$codeRevision) !== 1
+        || strpos($idempotencyKey,'official-backfill-v1:') !== 0
+        || strlen($idempotencyKey) > 255
+        || preg_match('/^[a-f0-9]{64}$/D',$stablePayloadSha) !== 1
+        || $attemptedEpoch === false) {
+        respond(400,array('ok'=>false,'error'=>'dart_replay_contract_invalid'));
+    }
+    $counts = array();
+    foreach (array(
+        'raw_count','acknowledged_count','fetched_count','resolved_count',
+        'accepted_count','error_count',
+    ) as $field) {
+        if (!isset($contract[$field])
+            || !is_int($contract[$field])
+            || $contract[$field] < 0) {
+            respond(400,array('ok'=>false,'error'=>'dart_replay_contract_invalid'));
+        }
+        $counts[$field] = $contract[$field];
+    }
+    return array(
+        'run_id'=>$runId,
+        'pipeline'=>$pipeline,
+        'source_key'=>$sourceKey,
+        'code_revision'=>$codeRevision,
+        'idempotency_key'=>$idempotencyKey,
+        'stable_payload_sha256'=>$stablePayloadSha,
+        'attempted_at'=>gmdate('Y-m-d\TH:i:s\Z',$attemptedEpoch),
+        'counts'=>$counts,
+    );
+}
+
+function v1_dart_replay_error(PDO $pdo, string $code): void {
+    if ($pdo->inTransaction()) { $pdo->rollBack(); }
+    respond(409,array('ok'=>false,'error'=>$code));
+}
+
+function v1_dart_replay_read_only_ack(
+    PDO $pdo,
+    array $config,
+    array $expectation,
+    array $payload,
+    string $backendBindingId
+): void {
+    $statement = $pdo->prepare(
+        'SELECT run_id,pipeline,source_key,code_revision,status,raw_count,'
+        . 'acknowledged_count,fetched_count,resolved_count,accepted_count,'
+        . 'error_count,metrics_json FROM '
+        . table_name($config,'collection_runs')
+        . ' WHERE run_id=? LIMIT 1 FOR UPDATE'
+    );
+    $statement->execute(array($expectation['run_id']));
+    $existing = $statement->fetch();
+    $statement->closeCursor();
+    if (!$existing) {
+        v1_dart_replay_error($pdo,'dart_replay_existing_run_missing');
+    }
+    if (!in_array(
+        strtolower(trim((string)$existing['status'])),
+        array('success','succeeded'),
+        true
+    )) {
+        v1_dart_replay_error($pdo,'dart_replay_existing_run_not_successful');
+    }
+    if ((string)$existing['pipeline'] !== $expectation['pipeline']
+        || strtolower(trim((string)$existing['source_key']))
+            !== $expectation['source_key']
+        || !is_string($existing['code_revision'])
+        || !hash_equals(
+            $expectation['code_revision'],
+            strtolower((string)$existing['code_revision'])
+        )) {
+        v1_dart_replay_error($pdo,'dart_replay_revision_mismatch');
+    }
+    $metrics = json_decode((string)$existing['metrics_json'],true);
+    if (!is_array($metrics)
+        || !isset($metrics['stable_payload_contract_version'])
+        || (int)$metrics['stable_payload_contract_version'] !== 1
+        || !isset($metrics['stable_payload_sha256'])
+        || !is_string($metrics['stable_payload_sha256'])
+        || !hash_equals(
+            $expectation['stable_payload_sha256'],
+            strtolower((string)$metrics['stable_payload_sha256'])
+        )
+        || !isset($metrics['idempotency_key'])
+        || !is_string($metrics['idempotency_key'])
+        || !hash_equals(
+            $expectation['idempotency_key'],
+            (string)$metrics['idempotency_key']
+        )) {
+        v1_dart_replay_error($pdo,'dart_replay_semantic_mismatch');
+    }
+    foreach ($expectation['counts'] as $field=>$expectedCount) {
+        if (!array_key_exists($field,$existing)
+            || (int)$existing[$field] !== $expectedCount) {
+            v1_dart_replay_error($pdo,'dart_replay_count_mismatch');
+        }
+    }
+    $run = isset($payload['run']) && is_array($payload['run'])
+        ? $payload['run'] : array();
+    if ($run) {
+        if (!isset($run['run_id'])
+            || (string)$run['run_id'] !== $expectation['run_id']
+            || !isset($run['stable_payload_sha256'])
+            || !is_string($run['stable_payload_sha256'])
+            || !hash_equals(
+                $expectation['stable_payload_sha256'],
+                strtolower((string)$run['stable_payload_sha256'])
+            )) {
+            v1_dart_replay_error($pdo,'dart_replay_semantic_mismatch');
+        }
+    }
+    $counts = array(
+        'companies'=>count(isset($payload['companies']) && is_array($payload['companies'])
+            ? $payload['companies'] : array()),
+        'documents'=>count(isset($payload['documents']) && is_array($payload['documents'])
+            ? $payload['documents'] : array()),
+        'events'=>count(isset($payload['events']) && is_array($payload['events'])
+            ? $payload['events'] : array()),
+        'actors'=>0,'event_actors'=>0,
+        'source_rights'=>count(isset($payload['source_rights']) && is_array($payload['source_rights'])
+            ? $payload['source_rights'] : array()),
+        'source_rights_rejected'=>0,'event_documents'=>0,
+        'event_observations'=>0,'timeline_entries'=>0,
+        'editorial_revisions'=>0,'correction_link_ambiguous'=>0,
+        'event_link_ambiguous'=>0,'runs'=>$run ? 1 : 0,
+    );
+    $pdo->commit();
+    respond(200,array(
+        'ok'=>true,
+        'upserted'=>$counts,
+        'backend_binding_id'=>$backendBindingId,
+        'replay_verified'=>true,
+        'replay_run_id'=>$expectation['run_id'],
+        'stable_payload_sha256'=>$expectation['stable_payload_sha256'],
+        'replay_attempted_at'=>$expectation['attempted_at'],
+    ));
+}
+
 function upsert_governance_snapshot(
     PDO $pdo,
     array $config,
@@ -8060,6 +8247,7 @@ function upsert_governance_snapshot(
     $events = isset($payload['events']) && is_array($payload['events']) ? $payload['events'] : array();
     $rights = isset($payload['source_rights']) && is_array($payload['source_rights']) ? $payload['source_rights'] : array();
     $run = isset($payload['run']) && is_array($payload['run']) ? $payload['run'] : array();
+    $dartReplayExpectation = v1_dart_replay_expectation($payload);
     if (count($companies) > 2000 || count($documents) > 2500 || count($events) > 2500 || count($rights) > 1000) {
         respond(413, array('ok' => false, 'error' => 'too_many_records'));
     }
@@ -8187,6 +8375,12 @@ function upsert_governance_snapshot(
         respond(409,array(
             'ok'=>false,
             'error'=>'dart_release_state_precondition_required',
+        ));
+    }
+    if ($dartReplayExpectation !== null && !$dartGuardedAction) {
+        respond(409,array(
+            'ok'=>false,
+            'error'=>'dart_guarded_action_required',
         ));
     }
     // This becomes true only after stored lineage, release state, deployment,
@@ -8358,6 +8552,18 @@ function upsert_governance_snapshot(
                 ));
             }
             $globalDartProjectionEnabled = true;
+            if ($dartReplayExpectation !== null) {
+                // This is intentionally before the first company/document/event
+                // upsert. The existing successful apply run is the immutable
+                // replay receipt; an exact replay only acknowledges it.
+                v1_dart_replay_read_only_ack(
+                    $pdo,
+                    $config,
+                    $dartReplayExpectation,
+                    $payload,
+                    $backendBindingId
+                );
+            }
         }
         // This lock is intentionally acquired before processing source_rights
         // from the HMAC payload. A collector cannot bootstrap its own KIND

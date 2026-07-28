@@ -11,6 +11,7 @@ export const RUNS_PER_ROUTE = 5;
 export const MAX_API_BATCH = 50;
 const PREVIEW_SESSION_KEY = "bside.governance.preview";
 const CONFIG_PREFIX = "window.__BSIDE_GOVERNANCE_CONFIG__=Object.freeze(";
+const EXPECTED_RELEASE_CHANNEL = "production_alpha_early_access";
 const SHA_RE = /^[a-f0-9]{40}$/;
 const TOKEN_RE = /^[A-Za-z0-9._~-]{32,512}$/;
 
@@ -82,7 +83,12 @@ export function parseDeployedConfig(source, expectedSha, expectedApiBase, expect
     throw new ProbeError("invalid_deployed_config");
   }
   const keys = Object.keys(payload).sort();
-  if (keys.join(",") !== "apiBase,buildSha,webBase") throw new ProbeError("invalid_deployed_config_fields");
+  if (keys.join(",") !== "apiBase,buildSha,releaseChannel,webBase") {
+    throw new ProbeError("invalid_deployed_config_fields");
+  }
+  if (payload.releaseChannel !== EXPECTED_RELEASE_CHANNEL) {
+    throw new ProbeError("deployed_release_channel_mismatch");
+  }
 
   const revision = requiredText(expectedSha, "missing_expected_build_sha").toLowerCase();
   const deployedRevision = requiredText(payload.buildSha, "missing_deployed_build_sha").toLowerCase();
@@ -99,6 +105,7 @@ export function parseDeployedConfig(source, expectedSha, expectedApiBase, expect
   return Object.freeze({
     apiBase: configuredApi.href,
     buildSha: deployedRevision,
+    releaseChannel: EXPECTED_RELEASE_CHANNEL,
     webBase: requiredText(payload.webBase, "missing_deployed_web_base"),
   });
 }
@@ -395,6 +402,12 @@ function parseArguments(argv) {
   return values;
 }
 
+function percentile75(values) {
+  const sorted = [...values].sort((left, right) => left - right);
+  if (!sorted.length) throw new ProbeError("missing_metric_samples");
+  return sorted[Math.max(0, Math.ceil(sorted.length * 0.75) - 1)];
+}
+
 
 export async function runProbe({ env = process.env, fetchImpl = fetch, browserFactory = chromium }) {
   const webBase = normalizeHttpsBase(env.BSIDE_PUBLIC_WEB_URL, "web").href;
@@ -432,6 +445,14 @@ export async function runProbe({ env = process.env, fetchImpl = fetch, browserFa
   assertObservationMatrix(observations, deployed.buildSha, startKstDate);
   const submission = await submitObservations(deployed.apiBase, previewToken, observations, fetchImpl);
   assert.equal(submission.acceptedCount, observations.length);
+  const metricValues = Object.fromEntries(
+    METRIC_NAMES.map((metric) => [
+      metric,
+      observations
+        .filter((record) => record.metric === metric)
+        .map((record) => record.value),
+    ]),
+  );
   return {
     schema_version: 1,
     observation_date_kst: startKstDate,
@@ -444,6 +465,20 @@ export async function runProbe({ env = process.env, fetchImpl = fetch, browserFa
     observation_count: observations.length,
     accepted_count: submission.acceptedCount,
     api_batch_sizes: submission.batchSizes,
+    measured_metrics: {
+      lcp: {
+        p75_seconds: Number((percentile75(metricValues.LCP) / 1000).toFixed(6)),
+        sample_count: metricValues.LCP.length,
+      },
+      inp: {
+        p75_ms: Number(percentile75(metricValues.INP).toFixed(3)),
+        sample_count: metricValues.INP.length,
+      },
+      cls: {
+        p75: Number(percentile75(metricValues.CLS).toFixed(6)),
+        sample_count: metricValues.CLS.length,
+      },
+    },
     token_transport: "sessionStorage",
   };
 }

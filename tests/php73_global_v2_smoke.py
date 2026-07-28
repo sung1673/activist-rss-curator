@@ -13,6 +13,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import subprocess
 import sys
 import urllib.error
@@ -3789,6 +3790,21 @@ def run(base_url: str, mysql_container_id: str) -> None:
         target_queue_item["updated_at"],
         "review_queue.target.updated_at",
     )
+    expedited_detail, _ = request_json(
+        base_url,
+        f"api.php/api/v2/admin/expedited-review-candidates/{event_id}",
+        token=EDITOR_TOKEN,
+    )
+    expected_evidence_sha256 = (
+        expedited_detail.get("data", {})
+        .get("event", {})
+        .get("event_evidence_sha256")
+    )
+    require(
+        isinstance(expected_evidence_sha256, str)
+        and len(expected_evidence_sha256) == 64,
+        repr(expedited_detail),
+    )
     reviewed, _ = request_json(
         base_url,
         f"api.php/api/v2/admin/events/{event_id}/review",
@@ -3797,6 +3813,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
         payload={
             "decision": "approve",
             "expected_updated_at": expected_updated_at,
+            "expected_evidence_sha256": expected_evidence_sha256,
             "reason": "CI editor verified identity and official evidence.",
             "identity_action": "reported beneficial ownership",
             "identity_target": "voting securities",
@@ -4996,6 +5013,22 @@ def run(base_url: str, mysql_container_id: str) -> None:
         mysql_container_id,
         now=now,
     )
+    mysql_execute(
+        mysql_container_id,
+        "INSERT INTO ci_governance_events "
+        "(event_id,company_id,event_type,title,original_language,summary,"
+        "occurred_at,deadline_at,importance,verification_status,review_status,"
+        "publication_status,collection_key,payload_json,created_at,updated_at) "
+        "VALUES ('ci-dart-replay-event','00999985','five_percent_holding',"
+        "'CI DART replay bridge event','ko',NULL,'2026-07-27 00:00:00',NULL,"
+        "'medium','official','pending','draft','ci-dart-replay','{}',"
+        "UTC_TIMESTAMP(),UTC_TIMESTAMP()) "
+        "ON DUPLICATE KEY UPDATE event_id=event_id;"
+        "INSERT INTO ci_event_documents "
+        "(event_id,document_id,relation_type,position_no,created_at) VALUES "
+        "('ci-dart-replay-event','dart:20260727999851','evidence',0,"
+        "UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE position_no=VALUES(position_no);",
+    )
     require(
         mysql_execute(
             mysql_container_id,
@@ -5065,6 +5098,9 @@ def run(base_url: str, mysql_container_id: str) -> None:
     )
     preserved_data = automated_preserved.get("data", {})
     preserved_counts = preserved_data.get("content_integrity", {}).get("raw_counts", {})
+    replay_state = preserved_data.get("replay_state", {})
+    replay_tables = replay_state.get("tables", {})
+    replay_checkpoint = replay_state.get("checkpoint", {})
     evidence_windows = [
         window
         for connector in preserved_data.get("connector_coverage", [])
@@ -5111,8 +5147,107 @@ def run(base_url: str, mysql_container_id: str) -> None:
             window.get("filtered_out_count") in {0, 2}
             for window in evidence_windows
         )
+        and replay_state.get("kind") == "bside-global-alpha-replay-state"
+        and replay_state.get("code_revision") == CODE_REVISION
+        and set(replay_tables) == {
+            "companies",
+            "issuers",
+            "issuer_identifiers",
+            "issuer_listings",
+            "documents",
+            "governance_events",
+            "actors",
+            "event_actors",
+            "event_documents",
+            "event_observations",
+            "timeline_entries",
+            "editorial_revisions",
+            "global_lifecycle_observations",
+            "collection_runs",
+            "source_connectors",
+            "official_slot_claims",
+        }
+        and all(
+            isinstance(value.get("row_count"), int)
+            and value.get("row_count") >= 0
+            and re.fullmatch(
+                r"[a-f0-9]{64}",
+                str(value.get("content_sha256", "")),
+            )
+            for value in replay_tables.values()
+            if isinstance(value, dict)
+        )
+        and replay_checkpoint.get("job_fingerprint")
+        == valid_dart_checkpoint["job"]["fingerprint"]
+        and replay_checkpoint.get("checkpoint_version") >= 1
+        and replay_checkpoint.get("completed_window_count") == 30
+        and replay_checkpoint.get("failed_window_count") == 0
+        and re.fullmatch(
+            r"[a-f0-9]{64}",
+            str(replay_checkpoint.get("checkpoint_payload_sha256", "")),
+        )
+        and re.fullmatch(
+            r"[a-f0-9]{64}",
+            str(replay_state.get("state_sha256", "")),
+        )
         and preserved_counts.get("source_title_preserved_count") == 1,
         repr(automated_preserved),
+    )
+    baseline_replay_state, _ = request_json(
+        base_url,
+        (
+            "api.php/api/v2/ops/alpha-replay-state?"
+            + urllib.parse.urlencode({"code_revision": CODE_REVISION})
+        ),
+        token=OPS_TOKEN,
+    )
+    baseline_state = baseline_replay_state.get("data", {})
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_event_documents SET position_no=7 "
+        "WHERE event_id='ci-dart-replay-event' "
+        "AND document_id='dart:20260727999851' "
+        "AND relation_type='evidence';",
+    )
+    changed_replay_state, _ = request_json(
+        base_url,
+        (
+            "api.php/api/v2/ops/alpha-replay-state?"
+            + urllib.parse.urlencode({"code_revision": CODE_REVISION})
+        ),
+        token=OPS_TOKEN,
+    )
+    changed_state = changed_replay_state.get("data", {})
+    require(
+        baseline_state.get("tables", {})
+        .get("event_documents", {})
+        .get("content_sha256")
+        != changed_state.get("tables", {})
+        .get("event_documents", {})
+        .get("content_sha256")
+        and baseline_state.get("state_sha256")
+        != changed_state.get("state_sha256"),
+        "DART event-document relationship mutation must change replay_state",
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_event_documents SET position_no=0 "
+        "WHERE event_id='ci-dart-replay-event' "
+        "AND document_id='dart:20260727999851' "
+        "AND relation_type='evidence';",
+    )
+    restored_replay_state, _ = request_json(
+        base_url,
+        (
+            "api.php/api/v2/ops/alpha-replay-state?"
+            + urllib.parse.urlencode({"code_revision": CODE_REVISION})
+        ),
+        token=OPS_TOKEN,
+    )
+    restored_state = restored_replay_state.get("data", {})
+    require(
+        restored_state.get("state_sha256") == baseline_state.get("state_sha256"),
+        "restoring the DART relationship must restore replay_state",
     )
 
     # DART release evidence is bound to the exact apply-job revision and to

@@ -52,7 +52,8 @@ TERMINAL_ASSET_BYTES = {
     "config.js": (
         "window.__BSIDE_GOVERNANCE_CONFIG__=Object.freeze("
         f'{{"apiBase":"https://example.invalid/api/v1",'
-        f'"buildSha":"{REVISION}"}});\n'
+        f'"buildSha":"{REVISION}",'
+        '"releaseChannel":"production_alpha_early_access"});\n'
     ).encode(),
     "app.js": b"window.__BSIDE_ALPHA_APP__=true;\n",
     "styles.css": b":root{color:#111827}\n",

@@ -529,7 +529,7 @@ def test_official_ingest_has_day_and_night_kst_schedules() -> None:
     )
 
 
-def test_official_backfill_preflights_dart_only_for_apply_before_checkpoint_access() -> None:
+def test_official_backfill_preflights_dart_apply_and_replay_before_checkpoint_access() -> None:
     payload = yaml.load(
         workflow_text("official-backfill.yml"),
         Loader=yaml.BaseLoader,
@@ -538,7 +538,7 @@ def test_official_backfill_preflights_dart_only_for_apply_before_checkpoint_acce
     preflight = next(
         step
         for step in steps
-        if step["name"] == "Verify DART SourceRight before any apply write"
+        if step["name"] == "Verify DART SourceRight before any durable DART write"
     )
     run = next(
         step
@@ -550,7 +550,7 @@ def test_official_backfill_preflights_dart_only_for_apply_before_checkpoint_acce
         for step in steps
         if step["name"] == "Resolve previous matching checkpoint"
     )
-    assert preflight["if"] == "inputs.mode == 'apply' && inputs.source != 'kind'"
+    assert preflight["if"] == "inputs.mode != 'dry-run' && inputs.source != 'kind'"
     assert steps.index(preflight) < steps.index(previous) < steps.index(run)
     assert "--preflight-dart" in preflight["run"]
     assert '--expected-release-sha "$GITHUB_SHA"' in preflight["run"]
@@ -1326,7 +1326,7 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
         "canary_lookback_days",
         "canary_request_budget",
     }
-    assert dispatch["mode"]["options"] == ["dry-run", "apply"]
+    assert dispatch["mode"]["options"] == ["dry-run", "apply", "replay"]
     assert dispatch["source"]["options"] == ["dart", "kind", "both"]
     assert dispatch["canary_lookback_days"]["default"] == "365"
     assert dispatch["canary_request_budget"]["default"] == "10000"
@@ -1341,6 +1341,10 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert "timedelta(days=1)" not in input_validation["run"]
     assert "canary_lookback_days must be between 2 and 365" in input_validation["run"]
     assert "canary_request_budget must be between 1 and 10000" in input_validation["run"]
+    assert "replay requires source=dart" in input_validation["run"]
+    assert "replay requires one exact 30-day range" in input_validation["run"]
+    assert "replay requires max_windows=30" in input_validation["run"]
+    assert "replay cannot sync the DART company master" in input_validation["run"]
     assert payload["concurrency"] == PRODUCTION_OFFICIAL_WRITE_CONCURRENCY
     assert payload["permissions"] == {"contents": "read", "actions": "read"}
 
@@ -1368,6 +1372,15 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
         "DART_REVIEW_SAMPLE_CSV": "${{ runner.temp }}/dart-review-sample.csv",
         "DART_REVIEW_SAMPLE_MANIFEST": (
             "${{ runner.temp }}/dart-review-sample-manifest.json"
+        ),
+        "DART_REPLAY_STATE_BEFORE": (
+            "${{ runner.temp }}/dart-replay-state-before.json"
+        ),
+        "DART_REPLAY_STATE_AFTER": (
+            "${{ runner.temp }}/dart-replay-state-after.json"
+        ),
+        "DART_REPLAY_STATE_BINDING": (
+            "${{ runner.temp }}/dart-replay-state-binding.json"
         ),
     }
     checkout = next(step for step in steps if step["name"] == "Checkout immutable dispatch revision")
@@ -1398,7 +1411,14 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
         "${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}"
     )
     assert run_step["env"]["CURATOR_REQUIRE_DURABLE_DART_QUOTA"] == "1"
-    assert run_step["env"]["CURATOR_DART_QUOTA_PHASE"] == "official-backfill"
+    assert run_step["env"]["CURATOR_DART_QUOTA_PHASE"] == (
+        "${{ inputs.mode == 'replay' && "
+        "'official-backfill-replay' || 'official-backfill' }}"
+    )
+    assert run_step["env"]["CURATOR_REQUIRE_REMOTE_API"] == (
+        "${{ inputs.mode != 'dry-run' && '1' || '0' }}"
+    )
+    assert 'args+=(--replay)' in run_step["run"]
     assert run_step["env"]["OPENDART_API_KEYS"] == "${{ secrets.OPENDART_API_KEYS }}"
     assert run_step["env"]["DART_API_KEY"] == (
         "${{ secrets.OPENDART_API_KEYS == '' && secrets.DART_API_KEY || '' }}"
@@ -1467,6 +1487,43 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert 'output.write(f"canary_requests_used={used}\\n")' in dart_budget["run"]
     assert 'output.write(f"remaining_request_budget={remaining}\\n")' in dart_budget["run"]
     assert "remaining == 0" in dart_budget["run"]
+    replay_before = next(
+        step
+        for step in steps
+        if step["name"] == "Capture production DART state before replay"
+    )
+    replay_after = next(
+        step
+        for step in steps
+        if step["name"] == "Capture production DART state after replay"
+    )
+    replay_binding = next(
+        step
+        for step in steps
+        if step["name"] == "Bind replay receipts to unchanged production state"
+    )
+    receipt_contract = next(
+        step
+        for step in steps
+        if step["name"] == "Validate exact 30-window DART receipt contract"
+    )
+    assert replay_before["if"] == "inputs.mode == 'replay'"
+    assert replay_after["if"] == "always() && inputs.mode == 'replay'"
+    assert replay_binding["if"] == "inputs.mode == 'replay'"
+    assert (
+        receipt_contract["if"]
+        == "inputs.mode != 'dry-run' && inputs.source == 'dart' && inputs.max_windows == 30"
+    )
+    assert "/ops/alpha-replay-state?code_revision=${GITHUB_SHA}" in replay_before["run"]
+    assert "/ops/alpha-replay-state?code_revision=${GITHUB_SHA}" in replay_after["run"]
+    assert "before_contract != after_contract" in replay_binding["run"]
+    assert 'report.get("windows_attempted") != 30' in replay_binding["run"]
+    assert 'report.get("replay_verified") is not True' in replay_binding["run"]
+    assert "apply_summary_counts_sha256" in replay_binding["run"]
+    assert "receipt_contract_sha256" in replay_binding["run"]
+    assert "len(windows) != 30" in receipt_contract["run"]
+    assert steps.index(replay_before) < steps.index(run_step) < steps.index(replay_after)
+    assert steps.index(replay_after) < steps.index(replay_binding)
     review_sample = next(
         step
         for step in steps
@@ -1509,6 +1566,9 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
         "${{ runner.temp }}/dart-review-sample.jsonl",
         "${{ runner.temp }}/dart-review-sample.csv",
         "${{ runner.temp }}/dart-review-sample-manifest.json",
+        "${{ runner.temp }}/dart-replay-state-before.json",
+        "${{ runner.temp }}/dart-replay-state-after.json",
+        "${{ runner.temp }}/dart-replay-state-binding.json",
     ]
     checkpoint = next(step for step in uploads if step["name"] == "Preserve resumable checkpoint")
     assert checkpoint["with"]["name"] == "${{ env.CHECKPOINT_ARTIFACT_NAME }}"

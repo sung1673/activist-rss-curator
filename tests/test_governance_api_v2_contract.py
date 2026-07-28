@@ -241,12 +241,15 @@ def test_spec_documents_only_dispatch_paths_that_exist_in_v2():
         "/feeds/events.atom",
         "/ops/connectors/{connector_id}/checkpoint",
         "/ops/source-right-eligibility",
+        "/ops/alpha-replay-state",
         "/ops/alpha-release-evidence",
         "/ops/release-state",
         "/ops/ingest",
         "/admin/connectors",
         "/admin/connectors/{connector_id}",
         "/admin/review-queue",
+        "/admin/expedited-review-candidates",
+        "/admin/expedited-review-candidates/{event_id}",
         "/admin/events/{event_id}/review",
         "/admin/brief-candidates",
         "/admin/briefs",
@@ -262,6 +265,7 @@ def test_spec_documents_only_dispatch_paths_that_exist_in_v2():
         "/ops/connectors/{connector_id}/checkpoint",
         "/admin/connectors/{connector_id}",
         "/admin/events/{event_id}/review",
+        "/admin/expedited-review-candidates/{event_id}",
     }:
         assert f"'{literal_path}'" in V2
     assert "#^/events/" in V2
@@ -269,6 +273,7 @@ def test_spec_documents_only_dispatch_paths_that_exist_in_v2():
     assert "#^/ops/connectors/" in V2
     assert "#^/admin/connectors/" in V2
     assert "#^/admin/events/" in V2
+    assert "#^/admin/expedited-review-candidates/" in V2
     assert "function handle_v2_request" in V2
 
 
@@ -285,6 +290,7 @@ def test_release_gate_and_role_security_match_the_php_dispatch():
     assert gate["privileged-bypass"] == [
         "/ops/connectors/{connector_id}/checkpoint",
         "/ops/source-right-eligibility",
+        "/ops/alpha-replay-state",
         "/ops/alpha-release-evidence",
         "/ops/ingest",
         "/ops/release-state",
@@ -294,6 +300,8 @@ def test_release_gate_and_role_security_match_the_php_dispatch():
         "/admin/connectors",
         "/admin/connectors/{connector_id}",
         "/admin/review-queue",
+        "/admin/expedited-review-candidates",
+        "/admin/expedited-review-candidates/{event_id}",
         "/admin/events/{event_id}/review",
         "/admin/brief-candidates",
         "/admin/briefs",
@@ -314,6 +322,8 @@ def test_release_gate_and_role_security_match_the_php_dispatch():
     assert SPEC["paths"]["/ops/ingest"]["post"]["security"] == [{"OpsBearer": []}]
     for route, method in (
         ("/admin/review-queue", "get"),
+        ("/admin/expedited-review-candidates", "get"),
+        ("/admin/expedited-review-candidates/{event_id}", "get"),
         ("/admin/events/{event_id}/review", "post"),
         ("/admin/brief-candidates", "get"),
         ("/admin/briefs", "post"),
@@ -1671,6 +1681,22 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
     assert "$summary['official_dart_quota_exhausted'] !== 0" in dart_windows
     assert "alpha_evidence_dart_window_outside_job" in dart_windows
     assert "v2_alpha_latest_contiguous_windows" in exporter
+    assert "function v2_alpha_replay_table_digest" in exporter
+    assert "function v2_alpha_replay_state" in exporter
+    assert "SELECT c.company_id,c.stock_code" in exporter
+    assert "SELECT d.document_id,d.company_id,d.issuer_id" in exporter
+    assert "SELECT e.event_id,e.company_id,e.issuer_id" in exporter
+    assert "SELECT eo.observation_id,eo.event_id,eo.document_id" in exporter
+    assert "SELECT ed.event_id,ed.document_id,ed.relation_type" in exporter
+    assert "official:dart" in exporter
+    assert "ORDER BY c.company_id" in exporter
+    assert "ORDER BY d.document_id" in exporter
+    assert "ORDER BY e.event_id" in exporter
+    assert "ORDER BY eo.observation_id" in exporter
+    assert "v1_strict_canonical_json_encode(" in exporter
+    assert "'checkpoint_version' => (int)$row['checkpoint_version']" in exporter
+    assert "'checkpoint_payload_sha256' => $payloadHash" in exporter
+    assert "'replay_state' => v2_alpha_replay_state(" in exporter
     assert "'filtered_out_count' =>" in exporter
     assert "'accepted_count' =>" in exporter
     assert "$raw < $acknowledged" in exporter
@@ -1683,6 +1709,69 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
     assert "array('sec-edgar', 'US', 'connector:us:sec-edgar')" in exporter
     assert "array('edinet', 'JP'" not in exporter
     assert "array('companies-house', 'GB'" not in exporter
+
+    automated = SPEC["components"]["schemas"]["AlphaAutomatedEvidence"]
+    assert "replay_state" not in automated["required"]
+    replay_property = automated["properties"]["replay_state"]
+    assert replay_property["anyOf"] == [
+        {"$ref": "#/components/schemas/AlphaReplayState"},
+        {"type": "null"},
+    ]
+    replay_schema = SPEC["components"]["schemas"]["AlphaReplayState"]
+    assert replay_schema["additionalProperties"] is False
+    assert replay_schema["properties"]["kind"]["const"] == (
+        "bside-global-alpha-replay-state"
+    )
+    assert set(replay_schema["properties"]["tables"]["required"]) == {
+        "companies",
+        "issuers",
+        "issuer_identifiers",
+        "issuer_listings",
+        "documents",
+        "governance_events",
+        "actors",
+        "event_actors",
+        "event_documents",
+        "event_observations",
+        "timeline_entries",
+        "editorial_revisions",
+        "global_lifecycle_observations",
+        "collection_runs",
+        "source_connectors",
+        "official_slot_claims",
+    }
+    checkpoint = replay_schema["properties"]["checkpoint"]
+    assert {
+        "job_fingerprint",
+        "checkpoint_version",
+        "checkpoint_payload_sha256",
+        "range_start",
+        "range_end_exclusive",
+        "completed_window_count",
+        "failed_window_count",
+    } == set(checkpoint["required"])
+    assert checkpoint["properties"]["failed_window_count"]["const"] == 0
+    table_digest = SPEC["components"]["schemas"]["AlphaReplayTableDigest"]
+    assert table_digest["required"] == ["row_count", "content_sha256"]
+    assert table_digest["properties"]["content_sha256"]["pattern"] == (
+        "^[a-f0-9]{64}$"
+    )
+    replay_operation = SPEC["paths"]["/ops/alpha-replay-state"]["get"]
+    assert replay_operation["security"] == [{"OpsBearer": []}]
+    assert replay_operation["parameters"][0] == revision
+    assert (
+        replay_operation["responses"]["200"]["content"]["application/json"][
+            "schema"
+        ]["$ref"]
+        == "#/components/schemas/AlphaReplayStateEnvelope"
+    )
+    replay_handler = V2[
+        V2.index("function v2_ops_alpha_replay_state") :
+        V2.index("function handle_v2_request")
+    ]
+    assert "v2_alpha_dart_windows(" in replay_handler
+    assert "v2_alpha_replay_state(" in replay_handler
+    assert "replay_state_unavailable" in replay_handler
 
     smoke = (ROOT / "tests" / "php73_global_v2_smoke.py").read_text(
         encoding="utf-8"
@@ -1708,7 +1797,8 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
     assert "global-ingest-v2-day" in writer
     assert "global-ingest-v2-current" in writer
     assert "daily-master-index" in writer
-    assert "(int)$chunk['batch_request_count'] !== 1" in writer
+    assert "(int)$chunk['batch_request_count'] < 1" in writer
+    assert "(int)$chunk['batch_request_count'] > 6" in writer
     assert "v2_ingest_refresh_idempotent_current_poll" in writer
     assert "(string)$normalized['ingest_mode'] !== 'apply'" in writer
     assert "v2_ingest_require_preview_binding" in writer

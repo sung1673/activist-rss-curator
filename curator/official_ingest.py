@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import hashlib
 import json
 import os
 import re
@@ -100,6 +101,12 @@ _REMOTE_ERROR_CODE_ALLOWLIST = {
     "dart_guarded_payload_required",
     "dart_release_state_mismatch",
     "dart_release_state_precondition_required",
+    "dart_replay_contract_invalid",
+    "dart_replay_count_mismatch",
+    "dart_replay_existing_run_missing",
+    "dart_replay_existing_run_not_successful",
+    "dart_replay_revision_mismatch",
+    "dart_replay_semantic_mismatch",
     "dart_source_right_ineligible_or_changed",
     "dart_source_right_managed_out_of_band",
     "dart_source_right_precondition_required",
@@ -146,6 +153,16 @@ _REMOTE_VALIDATION_REASON_ALLOWLIST = {
     "scheduled_slot_claim_completion_conflict",
 }
 _REMOTE_ERROR_CODE_ALLOWLIST.update(_REMOTE_VALIDATION_REASON_ALLOWLIST)
+_TERMINAL_REMOTE_ERROR_CODES.update(
+    {
+        "dart_replay_contract_invalid",
+        "dart_replay_count_mismatch",
+        "dart_replay_existing_run_missing",
+        "dart_replay_existing_run_not_successful",
+        "dart_replay_revision_mismatch",
+        "dart_replay_semantic_mismatch",
+    }
+)
 
 
 class GovernanceBackendBindingError(RuntimeError):
@@ -253,6 +270,47 @@ def _payload_records(payload: dict[str, object], key: str) -> list[dict[str, obj
     if not isinstance(value, list):
         return []
     return [row for row in value if isinstance(row, dict)]
+
+
+def _stable_dart_payload_sha256(payload: dict[str, object]) -> str:
+    """Hash the complete stable DART document/event submission.
+
+    ``retrieved_at`` describes the current network attempt and is deliberately
+    excluded. Every other submitted document/event field remains covered. Rows
+    are ordered by their stable IDs so the contract does not depend on connector
+    iteration order.
+    """
+
+    documents = [
+        {key: value for key, value in row.items() if key != "retrieved_at"}
+        for row in _payload_records(payload, "documents")
+        if str(row.get("source_right_id") or "").strip().casefold()
+        == "official:dart"
+    ]
+    document_ids = {
+        str(row.get("document_id") or "")
+        for row in documents
+        if str(row.get("document_id") or "")
+    }
+    events = [
+        dict(row)
+        for row in _payload_records(payload, "events")
+        if _event_document_ids(row) & document_ids
+    ]
+    documents.sort(key=lambda row: str(row.get("document_id") or ""))
+    events.sort(key=lambda row: str(row.get("event_id") or ""))
+    contract = {
+        "contract_version": 1,
+        "documents": documents,
+        "events": events,
+    }
+    encoded = json.dumps(
+        contract,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _int_value(value: object, default: int = 0) -> int:
@@ -514,6 +572,19 @@ def _remote_acknowledges_payload(
     expected_runs = 1 if isinstance(run, dict) and bool(run) else 0
     if _int_value(upserted.get("runs"), default=-1) != expected_runs:
         return False
+    replay_contract = payload.get("dart_replay")
+    if replay_contract is not None:
+        if (
+            payload.get("ingest_mode") != "replay"
+            or not isinstance(replay_contract, dict)
+            or response.get("replay_verified") is not True
+            or response.get("replay_run_id") != replay_contract.get("run_id")
+            or response.get("stable_payload_sha256")
+            != replay_contract.get("stable_payload_sha256")
+            or response.get("replay_attempted_at")
+            != replay_contract.get("attempted_at")
+        ):
+            return False
     return (
         "source_rights_rejected" in upserted
         and _int_value(upserted.get("source_rights_rejected"), default=-1) == 0
@@ -720,6 +791,76 @@ def sync_governance_payload(
         if guarded_dart_write
         else {}
     )
+    ingest_mode = str(run.get("ingest_mode") or "apply").strip().casefold()
+    if ingest_mode not in {"apply", "replay"}:
+        raise OfficialSourceRightError("invalid official ingest mode")
+    if ingest_mode == "replay":
+        if not guarded_dart_write or str(run.get("source_key") or "") != "dart":
+            raise OfficialSourceRightError(
+                "DART replay requires an exact guarded DART-only payload"
+            )
+        stable_payload_sha256 = str(
+            run.get("stable_payload_sha256") or ""
+        ).strip().casefold()
+        current_payload_sha256 = _stable_dart_payload_sha256(payload)
+        if (
+            run.get("stable_payload_contract_version") != 1
+            or not re.fullmatch(r"[a-f0-9]{64}", stable_payload_sha256)
+            or not hmac.compare_digest(
+                stable_payload_sha256,
+                current_payload_sha256,
+            )
+        ):
+            raise OfficialSourceRightError(
+                "DART replay stable payload contract is invalid"
+            )
+        replay_attempted_at = str(run.get("replay_attempted_at") or "").strip()
+        try:
+            parsed_replay_attempt = datetime.fromisoformat(
+                replay_attempted_at.replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise OfficialSourceRightError(
+                "DART replay attempted_at is invalid"
+            ) from exc
+        if (
+            parsed_replay_attempt.tzinfo is None
+            or parsed_replay_attempt.utcoffset() is None
+        ):
+            raise OfficialSourceRightError(
+                "DART replay attempted_at must include a timezone"
+            )
+        code_revision = str(run.get("code_revision") or "").strip().casefold()
+        idempotency_key = str(run.get("idempotency_key") or "").strip()
+        run_id = str(run.get("run_id") or "").strip()
+        if (
+            re.fullmatch(r"[a-f0-9]{40}", code_revision) is None
+            or not run_id
+            or not idempotency_key.startswith("official-backfill-v1:")
+        ):
+            raise OfficialSourceRightError(
+                "DART replay run identity is invalid"
+            )
+        replay_contract = {
+            "contract_version": 1,
+            "run_id": run_id,
+            "pipeline": "ingest-official",
+            "source_key": "dart",
+            "code_revision": code_revision,
+            "idempotency_key": idempotency_key,
+            "stable_payload_sha256": stable_payload_sha256,
+            "attempted_at": parsed_replay_attempt.astimezone(
+                timezone.utc
+            ).isoformat().replace("+00:00", "Z"),
+            "raw_count": len(documents),
+            "acknowledged_count": len(documents),
+            "fetched_count": _int_value(run.get("fetched_count")),
+            "resolved_count": _int_value(run.get("resolved_count")),
+            "accepted_count": _int_value(run.get("accepted_count")),
+            "error_count": _int_value(run.get("error_count")),
+        }
+        guarded_preconditions["ingest_mode"] = "replay"
+        guarded_preconditions["dart_replay"] = replay_contract
     if not remote_api_configured():
         return {
             "official_remote_synced": 0,
@@ -813,7 +954,7 @@ def sync_governance_payload(
             if _response_has_terminal_remote_failure(
                 response,
                 expected_backend_binding_id,
-            ):
+            ) or ingest_mode == "replay":
                 terminal_remote_failure = True
                 break
 
@@ -853,7 +994,7 @@ def sync_governance_payload(
                 if _response_has_terminal_remote_failure(
                     response,
                     expected_backend_binding_id,
-                ):
+                ) or ingest_mode == "replay":
                     terminal_remote_failure = True
                     break
 
@@ -922,6 +1063,7 @@ def run(
     settings_overrides: dict[str, object] | None = None,
     dry_run: bool = False,
     idempotency_key: str | None = None,
+    replay: bool = False,
 ) -> dict[str, object]:
     """Collect and normalize one inclusive official-disclosure date window.
 
@@ -1269,6 +1411,9 @@ def run(
         payload["companies"] = list(by_id.values())
     rights = source_right_payloads(config, include_kind=kind_enabled)
     payload["source_rights"] = rights
+    stable_dart_payload_sha256 = (
+        _stable_dart_payload_sha256(payload) if dart_enabled else None
+    )
     slot_claim_id = str(run_provenance.get("slot_claim_id") or "")
     run_id = (
         stable_id("run", "ingest-official", slot_claim_id, length=32)
@@ -1307,6 +1452,7 @@ def run(
         "window_start": window_start.isoformat(),
         "window_end": window_end.isoformat(),
         "idempotency_key": idempotency_key,
+        "ingest_mode": "replay" if replay else "apply",
         **run_provenance,
         # list.json exposes only a receipt date, not a stable receipt time.
         # Do not publish a fabricated p95 collection lag from midnight.
@@ -1333,6 +1479,15 @@ def run(
             **run_provenance,
         },
     }
+    if stable_dart_payload_sha256 is not None:
+        run_record["stable_payload_contract_version"] = 1
+        run_record["stable_payload_sha256"] = stable_dart_payload_sha256
+        run_metrics = run_record.get("metrics")
+        if isinstance(run_metrics, dict):
+            run_metrics["stable_payload_contract_version"] = 1
+            run_metrics["stable_payload_sha256"] = stable_dart_payload_sha256
+    if replay:
+        run_record["replay_attempted_at"] = collection_started_at.isoformat()
     if dart_rights_initial is not None:
         assert dart_rights_client is not None
         # Recheck immediately before the first remote write. The signed payload

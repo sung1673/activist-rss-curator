@@ -12,7 +12,9 @@ import pytest
 import yaml
 
 from curator.global_connectors import (
+    GlobalConnectorContractError,
     GlobalConnectorEnvelope,
+    GlobalConnectorError,
     GlobalConnectorRequest,
     GlobalDocumentRecord,
     GlobalLifecycleObservation,
@@ -1539,7 +1541,49 @@ def test_failure_evidence_never_contains_credentials_or_response_body(
     assert json.loads(serialized)["error"] == {
         "class": "RuntimeError",
         "code": "global_ingest_failed",
+        "stage": "unknown",
     }
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    (
+        (
+            GlobalConnectorContractError("unsafe source detail"),
+            "official_source_contract_failed",
+        ),
+        (
+            GlobalConnectorError(
+                "SEC HTTP 503 response=private",
+                http_status=503,
+            ),
+            "official_source_request_failed",
+        ),
+    ),
+)
+def test_failure_evidence_classifies_source_failures_without_raw_detail(
+    error: Exception,
+    code: str,
+) -> None:
+    evidence = _failure_evidence(
+        country_code="US",
+        window_start=date(2026, 6, 29),
+        window_end_exclusive=date(2026, 6, 30),
+        code_revision=REVISION,
+        started_at=NOW,
+        error=error,
+    )
+
+    expected_error = {
+        "class": type(error).__name__,
+        "code": code,
+        "stage": "source",
+    }
+    if isinstance(error, GlobalConnectorError) and error.http_status is not None:
+        expected_error["http_status"] = error.http_status
+    assert evidence["error"] == expected_error
+    assert "unsafe source detail" not in json.dumps(evidence)
+    assert "response=private" not in json.dumps(evidence)
 
 
 def test_workflow_is_matrixed_guarded_serial_and_never_uses_telegram() -> None:

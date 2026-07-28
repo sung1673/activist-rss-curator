@@ -172,6 +172,34 @@ button:disabled { cursor: wait; opacity: .58; }
   white-space: nowrap;
 }
 
+.release-strip {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  border-bottom: 1px solid #d8c9f7;
+}
+
+.release-notice {
+  display: flex;
+  width: min(calc(100% - 40px), var(--max));
+  min-height: 18px;
+  margin: 0 auto;
+  padding: 0;
+  align-items: center;
+  gap: .7rem;
+  font-size: .64rem;
+  line-height: 1.05;
+}
+
+.release-notice strong {
+  flex: 0 0 auto;
+  font-size: .64rem;
+  letter-spacing: .025em;
+}
+
+.release-notice span {
+  color: #51486d;
+}
+
 .primary-nav {
   display: flex;
   align-self: stretch;
@@ -1369,6 +1397,17 @@ body.drawer-open { overflow: hidden; }
   .brand-mark { width: 30px; height: 30px; border-radius: 7px; }
   .brand small { display: none; }
   .alpha-label { display: none; }
+  .release-notice {
+    width: 100%;
+    min-height: 18px;
+    padding: 0 10px;
+    gap: .45rem;
+    overflow: hidden;
+    font-size: .64rem;
+    white-space: nowrap;
+  }
+  .release-notice strong { font-size: .64rem; }
+  .release-notice span { display: none; }
   .header-search {
     width: auto;
     min-width: 0;
@@ -1390,7 +1429,7 @@ body.drawer-open { overflow: hidden; }
   .market-nav a { flex: 0 0 auto; min-width: 48px; padding: 0 .65rem; }
   .market-nav__spacer,
   .source-health { display: none; }
-  #app { padding: 10px 0 36px; }
+  #app { padding: 6px 0 36px; }
   .terminal-header { min-height: 38px; margin-bottom: 7px; }
   .terminal-header h1 { font-size: 1.05rem; }
   .terminal-header p { display: none; }
@@ -1540,6 +1579,7 @@ body.drawer-open { overflow: hidden; }
 @media print {
   .site-header,
   .market-nav,
+  .release-strip,
   .site-footer,
   .mobile-bottom-nav,
   .mobile-terminal-tabs,

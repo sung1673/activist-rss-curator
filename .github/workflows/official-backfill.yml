@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Fetch-only validation or durable remote upsert
+        description: Fetch-only validation, durable upsert, or exact 30-day DART replay
         required: true
         type: choice
         options:
           - dry-run
           - apply
+          - replay
         default: dry-run
       source:
         description: Official source selection
@@ -83,6 +84,9 @@ jobs:
           DART_REVIEW_SAMPLE_JSONL: ${{ runner.temp }}/dart-review-sample.jsonl
           DART_REVIEW_SAMPLE_CSV: ${{ runner.temp }}/dart-review-sample.csv
           DART_REVIEW_SAMPLE_MANIFEST: ${{ runner.temp }}/dart-review-sample-manifest.json
+          DART_REPLAY_STATE_BEFORE: ${{ runner.temp }}/dart-replay-state-before.json
+          DART_REPLAY_STATE_AFTER: ${{ runner.temp }}/dart-replay-state-after.json
+          DART_REPLAY_STATE_BINDING: ${{ runner.temp }}/dart-replay-state-binding.json
         shell: bash
         run: |
           set -euo pipefail
@@ -92,6 +96,9 @@ jobs:
           : > "$DART_REVIEW_SAMPLE_CSV"
           printf '%s\n' '{"status":"not_applicable","release_eligible":false}' \
             > "$DART_REVIEW_SAMPLE_MANIFEST"
+          printf '%s\n' '{"status":"not_applicable"}' > "$DART_REPLAY_STATE_BEFORE"
+          printf '%s\n' '{"status":"not_applicable"}' > "$DART_REPLAY_STATE_AFTER"
+          printf '%s\n' '{"status":"not_applicable"}' > "$DART_REPLAY_STATE_BINDING"
           : > "$BACKFILL_LOG"
 
       - name: Checkout immutable dispatch revision
@@ -134,6 +141,7 @@ jobs:
         env:
           FROM_DATE: ${{ inputs.from_date }}
           TO_DATE: ${{ inputs.to_date }}
+          MODE: ${{ inputs.mode }}
           MAX_WINDOWS: ${{ inputs.max_windows }}
           SOURCE: ${{ inputs.source }}
           SYNC_COMPANY_MASTER: ${{ inputs.sync_company_master }}
@@ -173,6 +181,15 @@ jobs:
               raise SystemExit("canary_request_budget must be between 1 and 10000")
           if os.environ["SYNC_COMPANY_MASTER"].lower() == "true" and os.environ["SOURCE"] == "kind":
               raise SystemExit("sync_company_master requires source=dart or source=both")
+          if os.environ["MODE"] == "replay":
+              if os.environ["SOURCE"] != "dart":
+                  raise SystemExit("replay requires source=dart")
+              if (end - start).days != 30:
+                  raise SystemExit("replay requires one exact 30-day range")
+              if max_windows != 30:
+                  raise SystemExit("replay requires max_windows=30")
+              if os.environ["SYNC_COMPANY_MASTER"].lower() != "false":
+                  raise SystemExit("replay cannot sync the DART company master")
           PY
 
       - name: Validate operational configuration
@@ -201,14 +218,14 @@ jobs:
           if [[ "$SOURCE" == "kind" || "$SOURCE" == "both" ]]; then
             required+=(KIND_DISCLOSURE_ENDPOINT BSIDE_API_BASE_URL BSIDE_OPS_TOKEN BSIDE_BACKEND_BINDING_ID)
           fi
-          if [[ "$MODE" == "apply" ]]; then
+          if [[ "$MODE" == "apply" || "$MODE" == "replay" ]]; then
             required+=(ACTIVIST_API_URL ACTIVIST_API_SECRET BSIDE_OPS_TOKEN)
           fi
           bash .github/scripts/require-env.sh "${required[@]}"
           python .github/scripts/validate-api-base-urls.py --github-env "$GITHUB_ENV"
 
-      - name: Verify DART SourceRight before any apply write
-        if: inputs.mode == 'apply' && inputs.source != 'kind'
+      - name: Verify DART SourceRight before any durable DART write
+        if: inputs.mode != 'dry-run' && inputs.source != 'kind'
         env:
           BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
           GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
@@ -350,6 +367,111 @@ jobs:
               output.write(f"remaining_request_budget={remaining}\n")
           PY
 
+      - name: Capture production DART state before replay
+        if: inputs.mode == 'replay'
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          DART_REPLAY_STATE_BEFORE: ${{ runner.temp }}/dart-replay-state-before.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_base="${BSIDE_API_BASE_URL%/}"
+          case "$api_base" in
+            */api/v1) api_base="${api_base%/api/v1}/api/v2" ;;
+            */api/v2) ;;
+            *) api_base="${api_base}/api/v2" ;;
+          esac
+          response="${DART_REPLAY_STATE_BEFORE}.response"
+          curl --silent --show-error --fail-with-body \
+            --retry 2 --retry-all-errors --connect-timeout 15 --max-time 120 \
+            -H "Accept: application/json" \
+            -H "Authorization: Bearer ${BSIDE_OPS_TOKEN}" \
+            -o "$response" \
+            "${api_base}/ops/alpha-replay-state?code_revision=${GITHUB_SHA}"
+          REPLAY_RESPONSE="$response" python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          response = json.loads(
+              Path(os.environ["REPLAY_RESPONSE"]).read_text(encoding="utf-8")
+          )
+          state = response.get("data") if response.get("ok") is True else None
+          if not isinstance(state, dict):
+              raise SystemExit("pre-replay API response is missing replay_state")
+          revision = os.environ["GITHUB_SHA"]
+          if (
+              state.get("kind") != "bside-global-alpha-replay-state"
+              or state.get("environment") != "production"
+              or state.get("evidence_source") != "production_database_export"
+              or state.get("is_synthetic") is not False
+              or state.get("code_revision") != revision
+          ):
+              raise SystemExit("pre-replay state provenance is invalid")
+          tables = state.get("tables")
+          checkpoint = state.get("checkpoint")
+          if (
+              not isinstance(tables, dict)
+              or set(tables)
+              != {
+                  "companies",
+                  "issuers",
+                  "issuer_identifiers",
+                  "issuer_listings",
+                  "documents",
+                  "governance_events",
+                  "actors",
+                  "event_actors",
+                  "event_documents",
+                  "event_observations",
+                  "timeline_entries",
+                  "editorial_revisions",
+                  "global_lifecycle_observations",
+                  "collection_runs",
+                  "source_connectors",
+                  "official_slot_claims",
+              }
+              or not isinstance(checkpoint, dict)
+              or checkpoint.get("completed_window_count") != 30
+              or checkpoint.get("failed_window_count") != 0
+          ):
+              raise SystemExit("pre-replay state is not bound to a complete apply checkpoint")
+          for name, digest in tables.items():
+              if (
+                  not isinstance(digest, dict)
+                  or type(digest.get("row_count")) is not int
+                  or digest["row_count"] < 0
+                  or len(str(digest.get("content_sha256") or "")) != 64
+              ):
+                  raise SystemExit(f"invalid pre-replay table digest: {name}")
+          contract = {
+              "code_revision": revision,
+              "tables": tables,
+              "checkpoint": checkpoint,
+          }
+          calculated = hashlib.sha256(
+              json.dumps(
+                  contract,
+                  ensure_ascii=False,
+                  separators=(",", ":"),
+                  sort_keys=True,
+              ).encode("utf-8")
+          ).hexdigest()
+          if calculated != state.get("state_sha256"):
+              raise SystemExit("pre-replay state digest is invalid")
+          destination = Path(os.environ["DART_REPLAY_STATE_BEFORE"])
+          temporary = destination.with_suffix(".tmp")
+          temporary.write_text(
+              json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True)
+              + "\n",
+              encoding="utf-8",
+          )
+          temporary.replace(destination)
+          PY
+          rm -f "$response"
+
       - name: Resolve previous matching checkpoint
         if: inputs.mode == 'apply'
         id: previous_checkpoint
@@ -453,7 +575,7 @@ jobs:
           CURATOR_DELIVERY_MODE: disabled
           ENABLE_TELEGRAM_DELIVERY: "false"
           ENABLE_GOVERNANCE_DELIVERY: "false"
-          CURATOR_REQUIRE_REMOTE_API: ${{ inputs.mode == 'apply' && '1' || '0' }}
+          CURATOR_REQUIRE_REMOTE_API: ${{ inputs.mode != 'dry-run' && '1' || '0' }}
           CURATOR_ENABLE_KIND: ${{ inputs.source == 'dart' && '0' || '1' }}
           CURATOR_REQUIRE_KIND: ${{ inputs.source == 'dart' && '0' || '1' }}
           OPENDART_API_KEYS: ${{ secrets.OPENDART_API_KEYS }}
@@ -468,7 +590,7 @@ jobs:
           BSIDE_BACKEND_BINDING_ID: ${{ vars.BSIDE_BACKEND_BINDING_ID }}
           GOVERNANCE_PIPELINE_MODE: ${{ steps.rollout.outputs.governance_pipeline_mode }}
           CURATOR_REQUIRE_DURABLE_DART_QUOTA: "1"
-          CURATOR_DART_QUOTA_PHASE: official-backfill
+          CURATOR_DART_QUOTA_PHASE: ${{ inputs.mode == 'replay' && 'official-backfill-replay' || 'official-backfill' }}
           DART_REQUEST_BUDGET: ${{ steps.dart_budget.outputs.remaining_request_budget }}
         shell: bash
         run: |
@@ -493,6 +615,9 @@ jobs:
           if [[ "$BACKFILL_MODE" == "dry-run" ]]; then
             args+=(--dry-run)
           fi
+          if [[ "$BACKFILL_MODE" == "replay" ]]; then
+            args+=(--replay)
+          fi
           if [[ "$BACKFILL_SYNC_COMPANY_MASTER" == "true" ]]; then
             args+=(--sync-company-master)
           fi
@@ -505,6 +630,273 @@ jobs:
             printf '{"status":"failed","exit_code":%d}\n' "$exit_code" > "$BACKFILL_REPORT"
             exit "$exit_code"
           fi
+
+      - name: Capture production DART state after replay
+        if: always() && inputs.mode == 'replay'
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          DART_REPLAY_STATE_AFTER: ${{ runner.temp }}/dart-replay-state-after.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_base="${BSIDE_API_BASE_URL%/}"
+          case "$api_base" in
+            */api/v1) api_base="${api_base%/api/v1}/api/v2" ;;
+            */api/v2) ;;
+            *) api_base="${api_base}/api/v2" ;;
+          esac
+          response="${DART_REPLAY_STATE_AFTER}.response"
+          curl --silent --show-error --fail-with-body \
+            --retry 2 --retry-all-errors --connect-timeout 15 --max-time 120 \
+            -H "Accept: application/json" \
+            -H "Authorization: Bearer ${BSIDE_OPS_TOKEN}" \
+            -o "$response" \
+            "${api_base}/ops/alpha-replay-state?code_revision=${GITHUB_SHA}"
+          REPLAY_RESPONSE="$response" python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          response = json.loads(
+              Path(os.environ["REPLAY_RESPONSE"]).read_text(encoding="utf-8")
+          )
+          state = response.get("data") if response.get("ok") is True else None
+          if not isinstance(state, dict):
+              raise SystemExit("post-replay API response is missing replay_state")
+          revision = os.environ["GITHUB_SHA"]
+          contract = {
+              "code_revision": revision,
+              "tables": state.get("tables"),
+              "checkpoint": state.get("checkpoint"),
+          }
+          calculated = hashlib.sha256(
+              json.dumps(
+                  contract,
+                  ensure_ascii=False,
+                  separators=(",", ":"),
+                  sort_keys=True,
+              ).encode("utf-8")
+          ).hexdigest()
+          if (
+              state.get("kind") != "bside-global-alpha-replay-state"
+              or state.get("code_revision") != revision
+              or calculated != state.get("state_sha256")
+          ):
+              raise SystemExit("post-replay state provenance or digest is invalid")
+          destination = Path(os.environ["DART_REPLAY_STATE_AFTER"])
+          temporary = destination.with_suffix(".tmp")
+          temporary.write_text(
+              json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True)
+              + "\n",
+              encoding="utf-8",
+          )
+          temporary.replace(destination)
+          PY
+          rm -f "$response"
+
+      - name: Bind replay receipts to unchanged production state
+        if: inputs.mode == 'replay'
+        env:
+          BACKFILL_REPORT: ${{ runner.temp }}/official-backfill-report.json
+          DART_REPLAY_STATE_BEFORE: ${{ runner.temp }}/dart-replay-state-before.json
+          DART_REPLAY_STATE_AFTER: ${{ runner.temp }}/dart-replay-state-after.json
+          DART_REPLAY_STATE_BINDING: ${{ runner.temp }}/dart-replay-state-binding.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from datetime import date, timedelta
+          from pathlib import Path
+
+          def load(name):
+              return json.loads(Path(os.environ[name]).read_text(encoding="utf-8"))
+
+          def digest(value):
+              return hashlib.sha256(
+                  json.dumps(
+                      value,
+                      ensure_ascii=False,
+                      separators=(",", ":"),
+                      sort_keys=True,
+                  ).encode("utf-8")
+              ).hexdigest()
+
+          report = load("BACKFILL_REPORT")
+          before = load("DART_REPLAY_STATE_BEFORE")
+          after = load("DART_REPLAY_STATE_AFTER")
+          revision = os.environ["GITHUB_SHA"]
+          before_contract = {
+              key: value for key, value in before.items() if key != "collected_at"
+          }
+          after_contract = {
+              key: value for key, value in after.items() if key != "collected_at"
+          }
+          if before_contract != after_contract:
+              raise SystemExit("DART-related production state changed during replay")
+          checkpoint_before = report.get("checkpoint_before")
+          checkpoint_after = report.get("checkpoint_after")
+          if (
+              report.get("status") != "succeeded"
+              or report.get("mode") != "replay"
+              or report.get("code_revision") != revision
+              or report.get("windows_total") != 30
+              or report.get("windows_attempted") != 30
+              or report.get("windows_succeeded") != 30
+              or report.get("windows_failed") != 0
+              or report.get("windows_remaining") != 0
+              or report.get("idempotent") is not True
+              or report.get("replay_verified") is not True
+              or checkpoint_before != checkpoint_after
+              or not isinstance(checkpoint_before, dict)
+          ):
+              raise SystemExit("replay report is not a complete idempotent 30-window run")
+          state_checkpoint = before.get("checkpoint")
+          if (
+              not isinstance(state_checkpoint, dict)
+              or checkpoint_before.get("version")
+              != state_checkpoint.get("checkpoint_version")
+              or checkpoint_before.get("payload_sha256")
+              != state_checkpoint.get("checkpoint_payload_sha256")
+              or report.get("checkpoint_payload_sha256")
+              != state_checkpoint.get("checkpoint_payload_sha256")
+          ):
+              raise SystemExit("replay checkpoint and database state are not bound")
+          receipt = report.get("receipt_contract")
+          windows = receipt.get("windows") if isinstance(receipt, dict) else None
+          if (
+              not isinstance(receipt, dict)
+              or receipt.get("schema_version") != 1
+              or receipt.get("source") != "dart"
+              or receipt.get("mode") != "replay"
+              or receipt.get("window_count") != 30
+              or not isinstance(windows, list)
+              or len(windows) != 30
+              or receipt.get("checkpoint_payload_sha256")
+              != checkpoint_before.get("payload_sha256")
+          ):
+              raise SystemExit("replay receipt contract is incomplete")
+          cursor = date.fromisoformat(report["range_start"])
+          for index, window in enumerate(windows):
+              next_cursor = cursor + timedelta(days=1)
+              if (
+                  window.get("window_start") != cursor.isoformat()
+                  or window.get("window_end_exclusive") != next_cursor.isoformat()
+                  or window.get("raw_count")
+                  != window.get("filtered_out_count")
+                  + window.get("accepted_count")
+                  or window.get("accepted_count")
+                  != window.get("acknowledged_count")
+                  or window.get("status") != "complete"
+                  or window.get("code_revision") != revision
+                  or window.get("idempotent") is not True
+                  or window.get("replay_verified") is not True
+              ):
+                  raise SystemExit(f"replay receipt {index + 1} is invalid")
+              cursor = next_cursor
+          result_rows = report.get("window_results")
+          if (
+              not isinstance(result_rows, list)
+              or len(result_rows) != 30
+              or any(
+                  row.get("apply_summary_counts_sha256")
+                  != row.get("replay_summary_counts_sha256")
+                  for row in result_rows
+              )
+          ):
+              raise SystemExit("apply and replay summaries are not byte-bound")
+          binding = {
+              "schema_version": 1,
+              "kind": "official-dart-replay-state-binding",
+              "environment": "production",
+              "is_synthetic": False,
+              "code_revision": revision,
+              "before": before,
+              "after": after,
+              "state_unchanged": True,
+              "checkpoint_unchanged": True,
+              "receipt_contract_sha256": digest(receipt),
+          }
+          binding["binding_sha256"] = digest(binding)
+          report["replay_state"] = {
+              "before": before,
+              "after": after,
+              "state_unchanged": True,
+              "checkpoint_unchanged": True,
+              "binding_sha256": binding["binding_sha256"],
+          }
+          report_path = Path(os.environ["BACKFILL_REPORT"])
+          report_tmp = report_path.with_suffix(".tmp")
+          report_tmp.write_text(
+              json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
+              + "\n",
+              encoding="utf-8",
+          )
+          report_tmp.replace(report_path)
+          destination = Path(os.environ["DART_REPLAY_STATE_BINDING"])
+          temporary = destination.with_suffix(".tmp")
+          temporary.write_text(
+              json.dumps(binding, ensure_ascii=False, indent=2, sort_keys=True)
+              + "\n",
+              encoding="utf-8",
+          )
+          temporary.replace(destination)
+          PY
+
+      - name: Validate exact 30-window DART receipt contract
+        if: inputs.mode != 'dry-run' && inputs.source == 'dart' && inputs.max_windows == 30
+        env:
+          BACKFILL_REPORT: ${{ runner.temp }}/official-backfill-report.json
+          EXPECTED_MODE: ${{ inputs.mode }}
+          EXPECTED_FROM_DATE: ${{ inputs.from_date }}
+          EXPECTED_TO_DATE: ${{ inputs.to_date }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from datetime import date, timedelta
+          from pathlib import Path
+
+          report = json.loads(
+              Path(os.environ["BACKFILL_REPORT"]).read_text(encoding="utf-8")
+          )
+          contract = report.get("receipt_contract")
+          windows = contract.get("windows") if isinstance(contract, dict) else None
+          start = date.fromisoformat(os.environ["EXPECTED_FROM_DATE"])
+          end = date.fromisoformat(os.environ["EXPECTED_TO_DATE"])
+          if (
+              (end - start).days != 30
+              or report.get("status") != "succeeded"
+              or not isinstance(contract, dict)
+              or contract.get("source") != "dart"
+              or contract.get("mode") != os.environ["EXPECTED_MODE"]
+              or contract.get("window_count") != 30
+              or not isinstance(windows, list)
+              or len(windows) != 30
+          ):
+              raise SystemExit("exact 30-window DART receipt contract is missing")
+          cursor = start
+          for window in windows:
+              next_cursor = cursor + timedelta(days=1)
+              if (
+                  window.get("window_start") != cursor.isoformat()
+                  or window.get("window_end_exclusive") != next_cursor.isoformat()
+                  or window.get("raw_count")
+                  != window.get("filtered_out_count")
+                  + window.get("accepted_count")
+                  or window.get("accepted_count")
+                  != window.get("acknowledged_count")
+                  or window.get("code_revision") != os.environ["GITHUB_SHA"]
+              ):
+                  raise SystemExit("DART receipt count, boundary, or revision mismatch")
+              cursor = next_cursor
+          PY
 
       - name: Build deterministic 30-day DART review sample
         if: inputs.mode == 'apply' && inputs.source != 'kind'
@@ -594,6 +986,9 @@ jobs:
             ${{ runner.temp }}/dart-review-sample.jsonl
             ${{ runner.temp }}/dart-review-sample.csv
             ${{ runner.temp }}/dart-review-sample-manifest.json
+            ${{ runner.temp }}/dart-replay-state-before.json
+            ${{ runner.temp }}/dart-replay-state-after.json
+            ${{ runner.temp }}/dart-replay-state-binding.json
           if-no-files-found: error
           retention-days: 90
 

@@ -33,7 +33,20 @@ from .official_sources import (
 
 
 class GlobalConnectorError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        http_status: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.http_status = (
+            http_status
+            if isinstance(http_status, int)
+            and not isinstance(http_status, bool)
+            and 100 <= http_status <= 599
+            else None
+        )
 
 
 class GlobalConnectorContractError(GlobalConnectorError):
@@ -958,22 +971,56 @@ class SecDailyIndexConnector(BaseGlobalConnector):
         user_agent: str,
         client: httpx.Client | None = None,
         timeout: float = 20.0,
+        max_retries: int = 3,
         sleep: Callable[[float], None] = time.sleep,
+        retry_sleep: Callable[[float], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
         minimum_request_interval: float = 0.12,
         _throttle: _SecRequestThrottle | None = None,
     ) -> None:
+        if max_retries < 0 or max_retries > 5:
+            raise ValueError("SEC max_retries must be between 0 and 5")
         self.user_agent = _validated_sec_user_agent(user_agent)
         self.client = client
         self.timeout = timeout
+        self.max_retries = max_retries
+        self.retry_sleep = retry_sleep or sleep
         self.throttle = _throttle or _SecRequestThrottle(
             minimum_interval=minimum_request_interval,
             sleep=sleep,
             clock=clock,
         )
 
-    def _get_day(self, day: date) -> httpx.Response:
-        self.throttle.wait()
+    @staticmethod
+    def _retry_after_seconds(response: httpx.Response) -> float | None:
+        value = str(response.headers.get("Retry-After") or "").strip()
+        if not value:
+            return None
+        try:
+            delay = float(value)
+        except ValueError:
+            try:
+                retry_at = parsedate_to_datetime(value)
+            except (TypeError, ValueError, OverflowError):
+                return None
+            if retry_at.tzinfo is None or retry_at.utcoffset() is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            delay = (
+                retry_at.astimezone(timezone.utc)
+                - datetime.now(timezone.utc)
+            ).total_seconds()
+        if not math.isfinite(delay):
+            return None
+        if delay < 0:
+            return 0.0
+        return min(delay, 60.0)
+
+    def _get_day(
+        self,
+        day: date,
+        *,
+        before_request: Callable[[], object],
+    ) -> tuple[httpx.Response, int]:
         quarter = ((day.month - 1) // 3) + 1
         url = (
             f"{SEC_DAILY_INDEX_BASE_URL}/{day.year}/QTR{quarter}/"
@@ -984,15 +1031,44 @@ class SecDailyIndexConnector(BaseGlobalConnector):
             "Accept-Encoding": "gzip, deflate",
             "Accept": "text/plain",
         }
-        return (
-            self.client.get(url, headers=headers, follow_redirects=False)
-            if self.client is not None
-            else httpx.get(
-                url,
-                headers=headers,
-                timeout=self.timeout,
-                follow_redirects=False,
+        for attempt in range(self.max_retries + 1):
+            before_request()
+            self.throttle.wait()
+            response = (
+                self.client.get(
+                    url,
+                    headers=headers,
+                    follow_redirects=False,
+                )
+                if self.client is not None
+                else httpx.get(
+                    url,
+                    headers=headers,
+                    timeout=self.timeout,
+                    follow_redirects=False,
+                )
             )
+            attempts = attempt + 1
+            retryable = (
+                response.status_code == 429
+                or 500 <= response.status_code < 600
+            )
+            if not retryable:
+                return response, attempts
+            if attempt >= self.max_retries:
+                raise GlobalConnectorError(
+                    "SEC EDGAR daily index request failed after retries",
+                    http_status=response.status_code,
+                )
+            advertised = self._retry_after_seconds(response)
+            delay = (
+                advertised
+                if advertised is not None
+                else min(float(2**attempt), 8.0)
+            )
+            self.retry_sleep(delay)
+        raise GlobalConnectorError(
+            "SEC EDGAR daily index retry loop exhausted"
         )
 
     def _fetch_authorized(
@@ -1013,9 +1089,11 @@ class SecDailyIndexConnector(BaseGlobalConnector):
         request_count = 0
         current = request.window_start
         while current < request.window_end_exclusive:
-            rights_guard.assert_current()
-            response = self._get_day(current)
-            request_count += 1
+            response, attempts = self._get_day(
+                current,
+                before_request=rights_guard.assert_current,
+            )
+            request_count += attempts
             expected_daily_index = _sec_expected_daily_index(current)
             if response.status_code == 404 or (
                 response.status_code == 403 and not expected_daily_index
@@ -1028,11 +1106,24 @@ class SecDailyIndexConnector(BaseGlobalConnector):
                 continue
             if response.status_code >= 400:
                 raise GlobalConnectorError(
-                    f"SEC EDGAR daily index HTTP {response.status_code}"
+                    f"SEC EDGAR daily index HTTP {response.status_code}",
+                    http_status=response.status_code,
                 )
             lines = response.text.splitlines()
+            # The published EDGAR master index currently spells the final
+            # column ``File Name`` and emits compact YYYYMMDD filing dates.
+            # Older fixtures/archives use ``Filename`` and ISO dates, so keep
+            # both explicit official variants instead of loosening the parser.
+            accepted_headers = {
+                "CIK|Company Name|Form Type|Date Filed|File Name",
+                "CIK|Company Name|Form Type|Date Filed|Filename",
+            }
             header_index = next(
-                (index for index, line in enumerate(lines) if line == "CIK|Company Name|Form Type|Date Filed|Filename"),
+                (
+                    index
+                    for index, line in enumerate(lines)
+                    if line in accepted_headers
+                ),
                 None,
             )
             if header_index is None:
@@ -1066,14 +1157,24 @@ class SecDailyIndexConnector(BaseGlobalConnector):
                         "SEC daily master issuer identity is invalid"
                     )
                 try:
-                    filed_day = date.fromisoformat(filed_raw)
+                    filed_day = (
+                        datetime.strptime(filed_raw, "%Y%m%d").date()
+                        if re.fullmatch(r"\d{8}", filed_raw)
+                        else date.fromisoformat(filed_raw)
+                    )
                 except ValueError as exc:
                     raise GlobalConnectorContractError(
                         "SEC daily master filing date is invalid"
                     ) from exc
-                if filed_day != current:
+                # A daily dissemination index can legitimately contain a
+                # late-added or reprocessed filing whose filing date predates
+                # the index date. The receipt window is bound to the index
+                # filename; preserve the source filing date on the document.
+                # A future filing date, however, is an invalid source
+                # contract and remains fail-closed.
+                if filed_day > current:
                     raise GlobalConnectorContractError(
-                        "SEC daily master row date does not match requested index"
+                        "SEC daily master row date exceeds requested index"
                     )
                 if (
                     not filename.startswith("edgar/data/")

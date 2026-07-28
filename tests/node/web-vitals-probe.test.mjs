@@ -48,16 +48,26 @@ function observationMatrix() {
 
 
 test("deployed config requires an exact full revision and API base", () => {
-  const source = `window.__BSIDE_GOVERNANCE_CONFIG__=Object.freeze({"apiBase":"${API}","webBase":"${WEB}","buildSha":"${SHA}"});\n`;
+  const source = `window.__BSIDE_GOVERNANCE_CONFIG__=Object.freeze({"apiBase":"${API}","webBase":"${WEB}","buildSha":"${SHA}","releaseChannel":"production_alpha_early_access"});\n`;
   assert.deepEqual(parseDeployedConfig(source, SHA, API, WEB), {
     apiBase: API,
     buildSha: SHA,
+    releaseChannel: "production_alpha_early_access",
     webBase: WEB,
   });
   assert.throws(() => parseDeployedConfig(source, "a".repeat(39), API, WEB), ProbeError);
   assert.throws(() => parseDeployedConfig(source.replace(SHA, "b".repeat(40)), SHA, API, WEB), ProbeError);
   assert.throws(() => parseDeployedConfig(source, SHA, `${API}/wrong`, WEB), ProbeError);
   assert.throws(() => parseDeployedConfig(source, SHA, API, "https://other.example"), ProbeError);
+  assert.throws(
+    () => parseDeployedConfig(
+      source.replace("production_alpha_early_access", "production_alpha"),
+      SHA,
+      API,
+      WEB,
+    ),
+    ProbeError,
+  );
 });
 
 

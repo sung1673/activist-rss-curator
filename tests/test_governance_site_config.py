@@ -25,7 +25,12 @@ def write_site(site: Path, payload: dict[str, object]) -> None:
 
 
 def expected_payload() -> dict[str, object]:
-    return {"apiBase": API_BASE, "webBase": WEB_BASE, "buildSha": REVISION}
+    return {
+        "apiBase": API_BASE,
+        "webBase": WEB_BASE,
+        "buildSha": REVISION,
+        "releaseChannel": "production_alpha_early_access",
+    }
 
 
 def test_exact_root_and_nested_release_config_is_accepted(tmp_path: Path) -> None:
@@ -45,6 +50,7 @@ def test_exact_root_and_nested_release_config_is_accepted(tmp_path: Path) -> Non
         ("apiBase", "/api/v1", "embedded apiBase"),
         ("webBase", "https://stale.example", "embedded webBase"),
         ("buildSha", "b" * 40, "embedded buildSha"),
+        ("releaseChannel", "production_alpha", "embedded releaseChannel"),
     ),
 )
 def test_stale_embedded_release_identity_is_rejected(

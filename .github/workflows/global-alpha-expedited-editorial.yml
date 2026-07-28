@@ -1,0 +1,397 @@
+name: Expedited Alpha editorial review and publication
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Export immutable candidates or apply a completed human review
+        required: true
+        default: export
+        type: choice
+        options:
+          - export
+          - apply
+      confirmation:
+        description: Type EXPORT_EXPEDITED_EDITORIAL or APPLY_EXPEDITED_EDITORIAL
+        required: true
+        type: string
+      candidate_run_id:
+        description: Export workflow run ID (apply only)
+        required: false
+        type: string
+      candidate_artifact_id:
+        description: Immutable candidate artifact ID (apply only)
+        required: false
+        type: string
+      candidate_artifact_name:
+        description: Immutable candidate artifact name (apply only)
+        required: false
+        type: string
+      candidate_artifact_digest:
+        description: Immutable candidate artifact sha256 digest (apply only)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: global-alpha-expedited-editorial-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  export:
+    if: inputs.operation == 'export'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: governance-runtime
+    env:
+      BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+      BSIDE_EDITOR_TOKEN: ${{ secrets.BSIDE_EDITOR_TOKEN }}
+    steps:
+      - name: Enforce the exact deployed default-branch candidate
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]] || {
+            echo "::error::Editorial candidates must use the default branch."
+            exit 1
+          }
+          [[ "$CONFIRMATION" == "EXPORT_EXPEDITED_EDITORIAL" ]] || {
+            echo "::error::The export confirmation did not match."
+            exit 1
+          }
+          [[ -n "$BSIDE_API_BASE_URL" && -n "$BSIDE_EDITOR_TOKEN" ]] || {
+            echo "::error::The API base and editor token are required."
+            exit 1
+          }
+          case "${BSIDE_API_BASE_URL%/}" in
+            "https://alignpe.gabia.io/activist/api.php/api/v1" | \
+            "https://alignpe.gabia.io/activist/api.php/api/v2") ;;
+            *)
+              echo "::error::The editor token may only be sent to the protected production API."
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout the exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Verify checkout identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install the pinned API client
+        run: >-
+          python -m pip install
+          --disable-pip-version-check
+          "httpx==0.27.2"
+
+      - name: Export exact 20/40/5 blank human-review candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m curator.global_alpha_expedited_editorial export \
+            --output-dir editorial-candidate-artifact
+          test -s editorial-candidate-artifact/editorial-candidates.json
+          test -s editorial-candidate-artifact/human-decisions-template.json
+          test -s editorial-candidate-artifact/review-pack.md
+
+      - name: Upload immutable editorial candidates
+        id: candidate_artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-expedited-editorial-candidates-${{ github.sha }}
+          path: editorial-candidate-artifact
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Record immutable candidate identity
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ steps.candidate_artifact.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.candidate_artifact.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          candidate_sha="$(
+            python -c 'import json; from pathlib import Path; print(json.loads(Path("editorial-candidate-artifact/editorial-candidates.json").read_text(encoding="utf-8"))["candidate_sha256"])'
+          )"
+          {
+            echo "### Expedited Alpha editorial candidates"
+            echo "- code revision: \`$GITHUB_SHA\`"
+            echo "- workflow run id: \`$GITHUB_RUN_ID\`"
+            echo "- artifact id: \`$ARTIFACT_ID\`"
+            echo "- artifact name: \`global-alpha-expedited-editorial-candidates-$GITHUB_SHA\`"
+            echo "- artifact digest: \`$ARTIFACT_DIGEST\`"
+            echo "- candidate SHA-256: \`$candidate_sha\`"
+            echo "- contains blank decisions only; no human judgment was generated"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    if: inputs.operation == 'apply'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: governance-release
+    env:
+      BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+      BSIDE_EDITOR_TOKEN: ${{ secrets.BSIDE_EDITOR_TOKEN }}
+      HUMAN_DECISIONS_GZIP_B64: ${{ secrets.GLOBAL_ALPHA_EXPEDITED_EDITORIAL_DECISIONS_GZIP_B64 }}
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+      CANDIDATE_ARTIFACT_ID: ${{ inputs.candidate_artifact_id }}
+      CANDIDATE_ARTIFACT_NAME: ${{ inputs.candidate_artifact_name }}
+      CANDIDATE_ARTIFACT_DIGEST: ${{ inputs.candidate_artifact_digest }}
+    steps:
+      - name: Enforce protected apply inputs and default branch
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]]
+          [[ "$CONFIRMATION" == "APPLY_EXPEDITED_EDITORIAL" ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_ARTIFACT_NAME" == \
+            "global-alpha-expedited-editorial-candidates-$GITHUB_SHA" ]]
+          [[ "$CANDIDATE_ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ -n "$BSIDE_API_BASE_URL" && -n "$BSIDE_EDITOR_TOKEN" ]]
+          [[ -n "$HUMAN_DECISIONS_GZIP_B64" ]]
+          case "${BSIDE_API_BASE_URL%/}" in
+            "https://alignpe.gabia.io/activist/api.php/api/v1" | \
+            "https://alignpe.gabia.io/activist/api.php/api/v2") ;;
+            *)
+              echo "::error::The editor token may only be sent to the protected production API."
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout the exact approved release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Verify checkout identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+
+      - name: Resolve exact immutable candidate artifact metadata
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          run_metadata="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN_ID"
+          )"
+          artifacts_metadata="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN_ID/artifacts?per_page=100"
+          )"
+          export RUN_METADATA="$run_metadata"
+          export ARTIFACTS_METADATA="$artifacts_metadata"
+          python -c '
+          import datetime as dt, json, os
+          run = json.loads(os.environ["RUN_METADATA"])
+          listing = json.loads(os.environ["ARTIFACTS_METADATA"])
+          expected_run_id = int(os.environ["CANDIDATE_RUN_ID"])
+          expected_artifact = {
+              "id": int(os.environ["CANDIDATE_ARTIFACT_ID"]),
+              "name": os.environ["CANDIDATE_ARTIFACT_NAME"],
+              "digest": os.environ["CANDIDATE_ARTIFACT_DIGEST"],
+              "workflow_run_id": expected_run_id,
+          }
+          actual_run = {
+              "id": run.get("id"),
+              "path": run.get("path"),
+              "head_sha": run.get("head_sha"),
+              "head_branch": run.get("head_branch"),
+              "event": run.get("event"),
+              "status": run.get("status"),
+              "conclusion": run.get("conclusion"),
+              "repository": (run.get("head_repository") or {}).get("full_name"),
+          }
+          expected_run = {
+              "id": expected_run_id,
+              "path": ".github/workflows/global-alpha-expedited-editorial.yml",
+              "head_sha": os.environ["GITHUB_SHA"],
+              "head_branch": os.environ["DEFAULT_BRANCH"],
+              "event": "workflow_dispatch",
+              "status": "completed",
+              "conclusion": "success",
+              "repository": os.environ["GITHUB_REPOSITORY"],
+          }
+          artifacts = listing.get("artifacts")
+          if (
+              actual_run != expected_run
+              or not isinstance(run.get("run_attempt"), int)
+              or run["run_attempt"] < 1
+              or listing.get("total_count") != 1
+              or not isinstance(artifacts, list)
+              or len(artifacts) != 1
+          ):
+              raise SystemExit("candidate producer run provenance mismatch")
+          artifact = artifacts[0]
+          actual_artifact = {
+              "id": artifact.get("id"),
+              "name": artifact.get("name"),
+              "digest": artifact.get("digest"),
+              "workflow_run_id": (artifact.get("workflow_run") or {}).get("id"),
+          }
+          def instant(value):
+              return dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+          now = dt.datetime.now(dt.timezone.utc)
+          created = instant(artifact.get("created_at"))
+          updated = instant(run.get("updated_at"))
+          fresh = all(
+              now - dt.timedelta(hours=72) <= value <= now + dt.timedelta(minutes=5)
+              for value in (created, updated)
+          )
+          if (
+              artifact.get("expired") is not False
+              or actual_artifact != expected_artifact
+              or not fresh
+          ):
+              raise SystemExit("candidate artifact provenance mismatch")
+          '
+
+      - name: Download exact immutable candidate artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ inputs.candidate_artifact_id }}
+          path: editorial-candidate-artifact
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.candidate_run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install the pinned API client
+        run: >-
+          python -m pip install
+          --disable-pip-version-check
+          "httpx==0.27.2"
+
+      - name: Materialize one-use human decisions without logging
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python -m curator.global_alpha_expedited_editorial \
+            decode-decisions \
+            --output human-decisions.json
+          test -s human-decisions.json
+          [[ "$(wc -c < human-decisions.json)" -le 5000000 ]]
+
+      - name: Preflight and apply exact human decisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m curator.global_alpha_expedited_editorial apply \
+            --candidate editorial-candidate-artifact/editorial-candidates.json \
+            --decisions human-decisions.json \
+            --candidate-run-id "$CANDIDATE_RUN_ID" \
+            --candidate-artifact-id "$CANDIDATE_ARTIFACT_ID" \
+            --candidate-artifact-name "$CANDIDATE_ARTIFACT_NAME" \
+            --candidate-artifact-digest "$CANDIDATE_ARTIFACT_DIGEST" \
+            --output-dir editorial-publication
+          test -s editorial-publication/human-review.json
+          test -s editorial-publication/publication-receipt.json
+
+      - name: Replay the exact publication and prove idempotency
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m curator.global_alpha_expedited_editorial apply \
+            --candidate editorial-candidate-artifact/editorial-candidates.json \
+            --decisions human-decisions.json \
+            --candidate-run-id "$CANDIDATE_RUN_ID" \
+            --candidate-artifact-id "$CANDIDATE_ARTIFACT_ID" \
+            --candidate-artifact-name "$CANDIDATE_ARTIFACT_NAME" \
+            --candidate-artifact-digest "$CANDIDATE_ARTIFACT_DIGEST" \
+            --output-dir editorial-replay
+          cp editorial-replay/publication-receipt.json \
+            editorial-publication/publication-replay-receipt.json
+          python -c '
+          import json
+          from pathlib import Path
+          first = json.loads(Path("editorial-publication/publication-receipt.json").read_text(encoding="utf-8"))
+          replay = json.loads(Path("editorial-publication/publication-replay-receipt.json").read_text(encoding="utf-8"))
+          if first["semantic_receipt_sha256"] != replay["semantic_receipt_sha256"]:
+              raise SystemExit("publication semantic receipt changed on replay")
+          if replay["mutations_applied"] != 0 or replay["idempotent_replay"] is not True:
+              raise SystemExit("publication replay was not idempotent")
+          if replay["brief"]["idempotent"] is not True:
+              raise SystemExit("brief replay was not idempotent")
+          '
+
+      - name: Remove the materialized human decision file
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f human-decisions.json ]]; then
+            shred -u human-decisions.json 2>/dev/null || rm -f human-decisions.json
+          fi
+
+      - name: Upload protected publication evidence
+        id: publication_artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-expedited-editorial-publication-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: editorial-publication
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Record publication identity
+        shell: bash
+        env:
+          PUBLICATION_ARTIFACT_ID: ${{ steps.publication_artifact.outputs.artifact-id }}
+          PUBLICATION_ARTIFACT_DIGEST: ${{ steps.publication_artifact.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          semantic="$(
+            python -c 'import json; from pathlib import Path; print(json.loads(Path("editorial-publication/publication-receipt.json").read_text(encoding="utf-8"))["semantic_receipt_sha256"])'
+          )"
+          {
+            echo "### Expedited Alpha protected editorial publication"
+            echo "- code revision: \`$GITHUB_SHA\`"
+            echo "- candidate artifact id: \`$CANDIDATE_ARTIFACT_ID\`"
+            echo "- publication artifact id: \`$PUBLICATION_ARTIFACT_ID\`"
+            echo "- publication artifact digest: \`$PUBLICATION_ARTIFACT_DIGEST\`"
+            echo "- semantic publication receipt: \`$semantic\`"
+            echo "- exact replay: idempotent"
+            echo "- operator action: delete GLOBAL_ALPHA_EXPEDITED_EDITORIAL_DECISIONS_GZIP_B64 now"
+          } >> "$GITHUB_STEP_SUMMARY"

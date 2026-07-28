@@ -1671,7 +1671,8 @@ function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): a
         if (
             (string)$connector['connector_id'] !== 'connector:us:sec-edgar'
             || $windowDays !== 1
-            || (int)$chunk['batch_request_count'] !== 1
+            || (int)$chunk['batch_request_count'] < 1
+            || (int)$chunk['batch_request_count'] > 6
             || ($isFinalChunk && $cursor !== null)
             || (!$isFinalChunk && !$hasValidSyntheticChunkCursor)
             || ($isFinalChunk && $envelope['exhausted'] !== true)
@@ -3830,6 +3831,261 @@ function v2_admin_review_queue(PDO $pdo, array $config): void {
     ));
 }
 
+/**
+ * Return the exact official-document basis used by the expedited human review.
+ *
+ * This is an editor-only contract. It deliberately excludes document bodies,
+ * media, Telegram, unapproved rights and documents that cannot be bound to the
+ * active connector identity. The returned updated_at and content_hash values
+ * are later required by the protected publication preflight.
+ */
+function v2_expedited_review_documents(
+    PDO $pdo,
+    array $config,
+    string $eventId,
+    bool $lockRows = false
+): array {
+    $statement = $pdo->prepare(
+        'SELECT d.document_id,d.issuer_id,d.country_code,d.source_right_id,'
+        . 'd.source_class,d.source_key,d.document_type,d.original_language,'
+        . 'd.title,d.original_url,d.content_hash,d.filed_at,d.published_at,'
+        . 'd.retrieved_at,d.updated_at,ed.relation_type,ed.position_no,'
+        . 'sc.connector_id,sc.base_url AS connector_base_url,'
+        . 'sc.coverage_mode,sc.connector_status '
+        . 'FROM ' . table_name($config, 'event_documents') . ' ed '
+        . 'JOIN ' . table_name($config, 'documents') . ' d '
+        . ' ON d.document_id=ed.document_id '
+        . 'JOIN ' . table_name($config, 'governance_events') . ' ge '
+        . ' ON ge.event_id=ed.event_id AND ge.issuer_id=d.issuer_id '
+        . ' AND ge.country_code=d.country_code '
+        . 'JOIN ' . table_name($config, 'source_rights') . ' sr '
+        . ' ON sr.source_right_id=d.source_right_id '
+        . 'JOIN ' . table_name($config, 'source_connectors') . ' sc '
+        . ' ON sc.source_right_id=d.source_right_id '
+        . ' AND sc.country_code=d.country_code '
+        . ' AND sc.source_key=COALESCE(NULLIF(d.source_key,\'\'),sr.source_key) '
+        . 'WHERE ed.event_id=? '
+        . ' AND d.issuer_id IS NOT NULL '
+        . ' AND d.verification_status=\'official\' '
+        . ' AND d.source_class IN (\'official_disclosure\',\'official_register\','
+        . '\'company_statement\',\'official_issuer\') '
+        . ' AND sc.connector_status=\'active\' '
+        . ' AND ' . source_right_redistribution_sql('sr')
+        . ' ORDER BY ed.position_no,d.filed_at,d.document_id'
+        . ($lockRows ? ' FOR UPDATE' : '')
+    );
+    $statement->execute(array($eventId));
+    $rows = $statement->fetchAll();
+    foreach ($rows as &$row) {
+        $row['position_no'] = (int)$row['position_no'];
+        foreach (array(
+            'filed_at', 'published_at', 'retrieved_at', 'updated_at',
+        ) as $field) {
+            $row[$field] = v1_release_iso_time(
+                isset($row[$field]) ? $row[$field] : null
+            );
+        }
+    }
+    unset($row);
+    return $rows;
+}
+
+function v2_expedited_review_actors(
+    PDO $pdo,
+    array $config,
+    string $eventId
+): array {
+    $statement = $pdo->prepare(
+        'SELECT a.actor_id,a.display_name,a.actor_type,a.country_code,'
+        . 'a.review_status AS actor_review_status,a.record_status,'
+        . 'ea.actor_role,ea.review_status AS relation_review_status,'
+        . 'ea.updated_at '
+        . 'FROM ' . table_name($config, 'event_actors') . ' ea '
+        . 'JOIN ' . table_name($config, 'actors') . ' a '
+        . ' ON a.actor_id=ea.actor_id '
+        . 'WHERE ea.event_id=? '
+        . 'ORDER BY ea.actor_role,a.actor_id'
+    );
+    $statement->execute(array($eventId));
+    $rows = $statement->fetchAll();
+    foreach ($rows as &$row) {
+        $row['updated_at'] = v1_release_iso_time(
+            isset($row['updated_at']) ? $row['updated_at'] : null
+        );
+    }
+    unset($row);
+    return $rows;
+}
+
+function v2_expedited_review_event_row(
+    PDO $pdo,
+    array $config,
+    string $eventId
+): ?array {
+    $statement = $pdo->prepare(
+        'SELECT e.event_id,e.issuer_id,i.legal_name AS issuer_name,'
+        . 'e.country_code AS country,e.global_event_family AS event_family,'
+        . 'e.title,e.original_language,e.summary,e.occurred_at,e.deadline_at,'
+        . 'e.importance,e.verification_status,e.change_type,e.current_status,'
+        . 'e.first_observed_at,e.review_status,e.publication_status,'
+        . 'e.identity_action,e.identity_target,e.identity_actor_id,'
+        . 'e.identity_effective_at,e.identity_deadline_at,e.identity_status,'
+        . 'e.comparison_key,e.updated_at,'
+        . 'JSON_UNQUOTE(JSON_EXTRACT(e.payload_json,'
+        . '\'$.merged_into_event_id\')) AS merged_into_event_id,'
+        . '(SELECT er.reason FROM '
+        . table_name($config, 'editorial_revisions') . ' er '
+        . ' WHERE er.entity_type=\'event\' AND er.entity_id=e.event_id '
+        . ' ORDER BY er.updated_at DESC,er.revision_id DESC LIMIT 1'
+        . ') AS latest_revision_reason,'
+        . '(SELECT er.revised_value FROM '
+        . table_name($config, 'editorial_revisions') . ' er '
+        . ' WHERE er.entity_type=\'event\' AND er.entity_id=e.event_id '
+        . ' ORDER BY er.updated_at DESC,er.revision_id DESC LIMIT 1'
+        . ') AS latest_revision_value '
+        . 'FROM ' . table_name($config, 'governance_events') . ' e '
+        . 'JOIN ' . table_name($config, 'issuers') . ' i '
+        . ' ON i.issuer_id=e.issuer_id '
+        . 'WHERE e.event_id=? AND e.issuer_id IS NOT NULL '
+        . ' AND e.country_code IN (\'KR\',\'US\') LIMIT 1'
+    );
+    $statement->execute(array($eventId));
+    $row = $statement->fetch();
+    if (!$row) {
+        return null;
+    }
+    foreach (array(
+        'occurred_at', 'deadline_at', 'first_observed_at',
+        'identity_effective_at', 'identity_deadline_at', 'updated_at',
+    ) as $field) {
+        $row[$field] = v1_release_iso_time(
+            isset($row[$field]) ? $row[$field] : null
+        );
+    }
+    $documents = v2_expedited_review_documents($pdo, $config, $eventId);
+    $row['official_documents'] = $documents;
+    $row['official_evidence_count'] = count($documents);
+    $row['actors'] = v2_expedited_review_actors($pdo, $config, $eventId);
+    $row['event_evidence_sha256'] = v2_write_canonical_payload_hash(array(
+        'event_id' => $eventId,
+        'event_updated_at' => $row['updated_at'],
+        'official_documents' => $documents,
+    ));
+    return $row;
+}
+
+function v2_admin_expedited_review_candidates(
+    PDO $pdo,
+    array $config,
+    ?string $eventId = null
+): void {
+    $identity = v2_deployment_identity_status();
+    if ($identity['valid'] !== true) {
+        v2_respond(503, array(
+            'ok' => false,
+            'error' => 'deployment_identity_unavailable',
+        ));
+    }
+    $pdo->beginTransaction();
+    try {
+        if ($eventId !== null) {
+            $event = v2_expedited_review_event_row(
+                $pdo,
+                $config,
+                $eventId
+            );
+            if ($event === null) {
+                $pdo->rollBack();
+                v2_respond(404, array(
+                    'ok' => false,
+                    'error' => 'event_not_found',
+                ));
+            }
+            $pdo->commit();
+            v2_respond(200, array(
+                'ok' => true,
+                'data' => array('event' => $event),
+                'meta' => array(
+                    'code_revision' => $identity['code_revision'],
+                    'snapshot_sha256' => v2_write_canonical_payload_hash(
+                        array('event' => $event)
+                    ),
+                ),
+            ));
+        }
+        $limit = isset($_GET['limit'])
+            ? max(20, min(50, (int)$_GET['limit'])) : 50;
+        $statement = $pdo->prepare(
+            'SELECT e.event_id FROM '
+            . table_name($config, 'governance_events') . ' e '
+            . 'JOIN ' . table_name($config, 'issuers') . ' i '
+            . ' ON i.issuer_id=e.issuer_id '
+            . 'WHERE e.issuer_id IS NOT NULL '
+            . ' AND e.identity_status=\'needs_review\' '
+            . ' AND e.review_status=\'pending\' '
+            . ' AND e.publication_status=\'draft\' '
+            . ' AND e.country_code IN (\'KR\',\'US\') '
+            . ' AND i.record_status=\'active\' '
+            . ' AND EXISTS (SELECT 1 FROM '
+            . table_name($config, 'event_documents') . ' ced '
+            . ' JOIN ' . table_name($config, 'documents') . ' cd '
+            . ' ON cd.document_id=ced.document_id '
+            . ' JOIN ' . table_name($config, 'source_rights') . ' csr '
+            . ' ON csr.source_right_id=cd.source_right_id '
+            . ' JOIN ' . table_name($config, 'source_connectors') . ' csc '
+            . ' ON csc.source_right_id=cd.source_right_id '
+            . ' AND csc.country_code=cd.country_code '
+            . ' AND csc.source_key=COALESCE(NULLIF(cd.source_key,\'\'),csr.source_key) '
+            . ' WHERE ced.event_id=e.event_id '
+            . ' AND cd.issuer_id=e.issuer_id '
+            . ' AND cd.verification_status=\'official\' '
+            . ' AND cd.source_class IN (\'official_disclosure\',\'official_register\','
+            . '\'company_statement\',\'official_issuer\') '
+            . ' AND csc.connector_status=\'active\' '
+            . ' AND ' . source_right_redistribution_sql('csr')
+            . ') '
+            . 'ORDER BY CASE e.importance WHEN \'critical\' THEN 0 '
+            . ' WHEN \'market_sensitive\' THEN 1 WHEN \'high\' THEN 2 '
+            . ' WHEN \'medium\' THEN 3 ELSE 4 END,'
+            . 'e.occurred_at DESC,e.event_id LIMIT ' . $limit
+        );
+        $statement->execute();
+        $items = array();
+        foreach ($statement->fetchAll() as $row) {
+            $event = v2_expedited_review_event_row(
+                $pdo,
+                $config,
+                (string)$row['event_id']
+            );
+            if ($event !== null && $event['official_evidence_count'] > 0) {
+                $items[] = $event;
+            }
+        }
+        $snapshot = array(
+            'code_revision' => $identity['code_revision'],
+            'items' => $items,
+        );
+        $pdo->commit();
+        v2_respond(200, array(
+            'ok' => true,
+            'data' => array('items' => $items),
+            'meta' => array(
+                'returned' => count($items),
+                'limit' => $limit,
+                'code_revision' => $identity['code_revision'],
+                'snapshot_sha256' => v2_write_canonical_payload_hash(
+                    $snapshot
+                ),
+            ),
+        ));
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $error;
+    }
+}
+
 function v2_admin_review_event(
     PDO $pdo,
     array $config,
@@ -3842,7 +4098,7 @@ function v2_admin_review_event(
             'decision', 'expected_updated_at', 'reason', 'identity_action',
             'identity_target', 'identity_effective_at', 'identity_deadline_at',
             'event_family', 'importance', 'summary', 'current_status', 'actor',
-            'merge_into_event_id',
+            'merge_into_event_id', 'expected_evidence_sha256',
         ), 'payload');
         $decision = v2_write_code(
             $payload,
@@ -3858,6 +4114,18 @@ function v2_admin_review_event(
         $reason = v2_write_text($payload, 'reason', 'payload', 2000);
         if ($reason === null || mb_strlen($reason, 'UTF-8') < 8) {
             v2_write_invalid('payload.reason: at least 8 characters required');
+        }
+        $expectedEvidenceSha256 = v2_write_code(
+            $payload,
+            'expected_evidence_sha256',
+            'payload',
+            '/^[a-f0-9]{64}$/',
+            false
+        );
+        if ($decision === 'approve' && $expectedEvidenceSha256 === null) {
+            v2_write_invalid(
+                'payload.expected_evidence_sha256: approval requires evidence binding'
+            );
         }
     } catch (InvalidArgumentException $error) {
         v2_respond(400, array(
@@ -3889,6 +4157,29 @@ function v2_admin_review_event(
                 'error' => 'stale_event_review',
                 'current_updated_at' => (string)$event['updated_at'],
             ));
+        }
+        if ($expectedEvidenceSha256 !== null) {
+            $evidenceRows = v2_expedited_review_documents(
+                $pdo,
+                $config,
+                $eventId,
+                true
+            );
+            $currentEvidenceSha256 = v2_write_canonical_payload_hash(array(
+                'event_id' => $eventId,
+                'event_updated_at' => v1_release_iso_time(
+                    (string)$event['updated_at']
+                ),
+                'official_documents' => $evidenceRows,
+            ));
+            if (!hash_equals($expectedEvidenceSha256, $currentEvidenceSha256)) {
+                $pdo->rollBack();
+                v2_respond(409, array(
+                    'ok' => false,
+                    'error' => 'stale_event_evidence',
+                    'current_evidence_sha256' => $currentEvidenceSha256,
+                ));
+            }
         }
         if ($decision === 'reject') {
             $reject = $pdo->prepare(
@@ -4387,7 +4678,7 @@ function v2_admin_publish_brief(
             $payload,
             'build_sha',
             'payload',
-            '/^[a-f0-9]{7,64}$/'
+            '/^[a-f0-9]{40}$/'
         );
         $emptyReason = v2_write_code(
             $payload,
@@ -4422,6 +4713,19 @@ function v2_admin_publish_brief(
     $now = gmdate('Y-m-d H:i:s');
     if ($cutoffAt > gmdate('Y-m-d H:i:s', time() + 300)) {
         v2_respond(400, array('ok' => false, 'error' => 'brief_cutoff_in_future'));
+    }
+    $deploymentIdentity = v2_deployment_identity_status();
+    if ($deploymentIdentity['valid'] !== true) {
+        v2_respond(503, array(
+            'ok' => false,
+            'error' => 'deployment_identity_unavailable',
+        ));
+    }
+    if (!hash_equals((string)$deploymentIdentity['code_revision'], $buildSha)) {
+        v2_respond(409, array(
+            'ok' => false,
+            'error' => 'brief_build_sha_mismatch',
+        ));
     }
     $briefId = v1_stable_id('brief', (string)$edition . '|' . $cutoffAt);
     $semanticPayload = array(

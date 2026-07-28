@@ -570,6 +570,7 @@ function v2_path_is_defined(string $path): bool {
         '/search',
         '/sources/status',
         '/ops/source-right-eligibility',
+        '/ops/alpha-replay-state',
         '/ops/alpha-release-evidence',
         '/ops/release-state',
         '/ops/ingest',
@@ -581,6 +582,7 @@ function v2_path_is_defined(string $path): bool {
         '/admin/cutover',
         '/admin/connectors',
         '/admin/review-queue',
+        '/admin/expedited-review-candidates',
         '/admin/brief-candidates',
         '/admin/briefs',
     ), true)) {
@@ -592,6 +594,7 @@ function v2_path_is_defined(string $path): bool {
         '#^/ops/connectors/connector:[a-z]{2}:[a-z0-9_.:\-]{1,64}/checkpoint$#',
         '#^/admin/connectors/connector:[a-z]{2}:[a-z0-9_.:\-]{1,64}$#',
         '#^/admin/events/[A-Za-z0-9_.:\-]{1,96}/review$#',
+        '#^/admin/expedited-review-candidates/[A-Za-z0-9_.:\-]{1,96}$#',
     ) as $pattern) {
         if (preg_match($pattern, $path) === 1) {
             return true;
@@ -3776,15 +3779,18 @@ function v2_alpha_dart_job_is_release_bound(
 function v2_alpha_dart_windows(
     PDO $pdo,
     array $config,
-    string $codeRevision
+    string $codeRevision,
+    ?array &$checkpointState = null
 ): array {
     $statement = $pdo->query(
-        'SELECT job_fingerprint,checkpoint_json,payload_hash,updated_at FROM '
+        'SELECT job_fingerprint,checkpoint_version,checkpoint_json,'
+        . 'payload_hash,updated_at FROM '
         . table_name($config, 'official_backfill_checkpoints')
         . ' ORDER BY updated_at DESC LIMIT 100'
     );
     $best = array();
     $bestEnd = '';
+    $bestCheckpointState = null;
     foreach ($statement->fetchAll() as $row) {
         $raw = (string)$row['checkpoint_json'];
         $payloadHash = (string)$row['payload_hash'];
@@ -3949,12 +3955,338 @@ function v2_alpha_dart_windows(
         if ($candidateEnd > $bestEnd) {
             $best = $candidate;
             $bestEnd = $candidateEnd;
+            $bestCheckpointState = array(
+                'job_fingerprint' => $jobFingerprint,
+                'checkpoint_version' => (int)$row['checkpoint_version'],
+                'checkpoint_payload_sha256' => $payloadHash,
+                'range_start' => (string)$job['range_start'],
+                'range_end_exclusive' =>
+                    (string)$job['range_end_exclusive'],
+                'completed_window_count' => count($completed),
+                'failed_window_count' => count($failed),
+            );
         }
     }
-    if (!$best) {
+    if (!$best || !is_array($bestCheckpointState)) {
         throw new RuntimeException('alpha_evidence_dart_30_day_horizon_missing');
     }
+    $checkpointState = $bestCheckpointState;
     return $best;
+}
+
+/**
+ * Hash every DART-related semantic row in primary-key order without loading
+ * the full table into memory. Length-prefixing each canonical JSON row makes
+ * the stream unambiguous. Deliberately volatile collection/check timestamps
+ * are excluded by each explicit SELECT, while identities, relationships,
+ * source content, lifecycle state and counts remain covered.
+ */
+function v2_alpha_replay_table_digest(
+    PDO $pdo,
+    string $sql
+): array {
+    $statement = $pdo->query($sql);
+    $context = hash_init('sha256');
+    $rowCount = 0;
+    try {
+        while ($row = $statement->fetch(PDO::FETCH_ASSOC)) {
+            $encoded = v1_strict_canonical_json_encode(
+                $row,
+                'alpha_evidence_replay_state_encoding_failed'
+            );
+            hash_update($context, (string)strlen($encoded) . ':');
+            hash_update($context, $encoded);
+            $rowCount++;
+        }
+    } finally {
+        // An unbuffered MySQL cursor must be closed before the next table
+        // query can run on this connection.
+        $statement->closeCursor();
+    }
+    return array(
+        'row_count' => $rowCount,
+        'content_sha256' => hash_final($context),
+    );
+}
+
+/**
+ * Start one endpoint-local, memory-bounded evidence snapshot.
+ *
+ * MySQL establishes the consistent snapshot on the first InnoDB read in this
+ * REPEATABLE READ, READ ONLY transaction. Disabling buffered queries on this
+ * connection prevents a documents.body_text export from being materialized in
+ * PHP memory. The caller must always invoke v2_alpha_snapshot_finish().
+ */
+function v2_alpha_snapshot_begin(PDO $pdo): array {
+    if ($pdo->inTransaction()) {
+        throw new RuntimeException('alpha_evidence_snapshot_nested_transaction');
+    }
+    if (!defined('PDO::MYSQL_ATTR_USE_BUFFERED_QUERY')) {
+        throw new RuntimeException('alpha_evidence_unbuffered_query_unavailable');
+    }
+    $attribute = constant('PDO::MYSQL_ATTR_USE_BUFFERED_QUERY');
+    $previous = $pdo->getAttribute($attribute);
+    if ($pdo->setAttribute($attribute,false) !== true) {
+        throw new RuntimeException('alpha_evidence_unbuffered_query_unavailable');
+    }
+    try {
+        $pdo->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+        $pdo->exec('SET TRANSACTION READ ONLY');
+        if ($pdo->beginTransaction() !== true) {
+            throw new RuntimeException('alpha_evidence_snapshot_start_failed');
+        }
+    } catch (Throwable $error) {
+        $pdo->setAttribute($attribute,$previous);
+        throw $error;
+    }
+    return array(
+        'buffered_query_attribute'=>$attribute,
+        'previous_buffered_query'=>$previous,
+    );
+}
+
+function v2_alpha_snapshot_finish(
+    PDO $pdo,
+    array $snapshot,
+    bool $commit
+): void {
+    $transactionError = null;
+    try {
+        if ($pdo->inTransaction()) {
+            if ($commit) {
+                if ($pdo->commit() !== true) {
+                    throw new RuntimeException('alpha_evidence_snapshot_commit_failed');
+                }
+            } elseif ($pdo->rollBack() !== true) {
+                throw new RuntimeException('alpha_evidence_snapshot_rollback_failed');
+            }
+        }
+    } catch (Throwable $error) {
+        $transactionError = $error;
+    }
+    $attribute = $snapshot['buffered_query_attribute'];
+    $previous = $snapshot['previous_buffered_query'];
+    if ($pdo->setAttribute($attribute,$previous) !== true
+        && $transactionError === null) {
+        $transactionError = new RuntimeException(
+            'alpha_evidence_buffer_restore_failed'
+        );
+    }
+    if ($transactionError !== null) { throw $transactionError; }
+}
+
+function v2_alpha_replay_state(
+    PDO $pdo,
+    array $config,
+    string $codeRevision,
+    string $collectedAt,
+    array $checkpointState
+): array {
+    $companies = table_name($config, 'companies');
+    $documents = table_name($config, 'documents');
+    $events = table_name($config, 'governance_events');
+    $eventDocuments = table_name($config, 'event_documents');
+    $observations = table_name($config, 'event_observations');
+    $actors = table_name($config, 'actors');
+    $eventActors = table_name($config, 'event_actors');
+    $issuers = table_name($config, 'issuers');
+    $issuerIdentifiers = table_name($config, 'issuer_identifiers');
+    $issuerListings = table_name($config, 'issuer_listings');
+    $timelineEntries = table_name($config, 'timeline_entries');
+    $editorialRevisions = table_name($config, 'editorial_revisions');
+    $lifecycleObservations = table_name(
+        $config,
+        'global_lifecycle_observations'
+    );
+    $collectionRuns = table_name($config, 'collection_runs');
+    $sourceConnectors = table_name($config, 'source_connectors');
+    $officialSlotClaims = table_name($config, 'official_slot_claims');
+    $sourceRightId = $pdo->quote('official:dart');
+    $dartEventPredicate = 'EXISTS (SELECT 1 FROM ' . $eventDocuments
+        . ' replay_ed JOIN ' . $documents
+        . ' replay_d ON replay_d.document_id=replay_ed.document_id'
+        . ' WHERE replay_ed.event_id=e.event_id'
+        . ' AND replay_d.source_right_id=' . $sourceRightId . ')';
+    $tables = array(
+        'companies' => v2_alpha_replay_table_digest(
+            $pdo,
+            'SELECT c.company_id,c.stock_code,c.market,c.legal_name,'
+            . 'c.legal_name_en,c.short_name,c.aliases_json,c.homepage_url,'
+            . 'c.record_status,c.listing_status,c.master_modified_at FROM '
+            . $companies . ' c WHERE EXISTS (SELECT 1 FROM '
+            . $documents . ' d WHERE d.company_id=c.company_id AND '
+            . 'd.source_right_id=' . $sourceRightId . ') ORDER BY c.company_id'
+        ),
+        'issuers' => v2_alpha_replay_table_digest(
+            $pdo,
+            'SELECT i.issuer_id,i.country_code,i.legal_name,i.legal_name_en,'
+            . 'i.short_name,i.original_language,i.homepage_url,'
+            . 'i.listing_status,i.record_status,i.master_modified_at,'
+            . 'i.payload_json FROM ' . $issuers
+            . ' i WHERE i.issuer_id LIKE \'issuer:kr:dart:%\''
+            . ' ORDER BY i.issuer_id'
+        ),
+        'issuer_identifiers' => v2_alpha_replay_table_digest(
+            $pdo,
+            'SELECT ii.issuer_id,ii.identifier_type,ii.identifier_value,'
+            . 'ii.market,ii.is_primary,ii.valid_from,ii.valid_until FROM '
+            . $issuerIdentifiers
+            . ' ii WHERE ii.issuer_id LIKE \'issuer:kr:dart:%\''
+            . ' ORDER BY ii.issuer_id,ii.identifier_type,'
+            . 'ii.identifier_value,ii.market'
+        ),
+        'issuer_listings' => v2_alpha_replay_table_digest(
+            $pdo,
+            'SELECT il.listing_id,il.issuer_id,il.country_code,il.market,'
+            . 'il.ticker,il.isin,il.currency_code,il.listing_status,'
+            . 'il.is_primary FROM ' . $issuerListings
+            . ' il WHERE il.issuer_id LIKE \'issuer:kr:dart:%\''
+            . ' ORDER BY il.listing_id'
+        ),
+        'documents' => v2_alpha_replay_table_digest(
+            $pdo,
+            'SELECT d.document_id,d.company_id,d.issuer_id,d.country_code,'
+            . 'd.source_right_id,d.source_class,d.source_key,d.external_id,'
+            . 'd.document_type,d.original_language,d.title,d.body_text,'
+            . 'd.original_url,d.content_hash,d.collection_key,'
+            . 'd.correction_of_document_id,d.version_no,d.published_at,'
+            . 'd.filed_at,d.verification_status,d.publication_status FROM '
+            . $documents . ' d WHERE d.source_right_id=' . $sourceRightId
+            . ' ORDER BY d.document_id'
+        ),
+        'governance_events' => v2_alpha_replay_table_digest(
+            $pdo,
+            'SELECT e.event_id,e.company_id,e.issuer_id,e.country_code,'
+            . 'e.event_type,e.global_event_family,e.title,'
+            . 'e.original_language,e.summary,e.occurred_at,e.deadline_at,'
+            . 'e.importance,e.verification_status,e.review_status,'
+            . 'e.publication_status,e.collection_key,e.identity_action,'
+            . 'e.identity_target,e.identity_actor_id,e.identity_effective_at,'
+            . 'e.identity_deadline_at,e.identity_status,e.comparison_key,'
+            . 'e.change_type,e.current_status,e.payload_json FROM '
+            . $events . ' e WHERE '
+            . $dartEventPredicate . ' ORDER BY e.event_id'
+        ),
+        'actors' => v2_alpha_replay_table_digest(
+            $pdo,
+            'SELECT a.actor_id,a.actor_type,a.display_name,a.display_name_en,'
+            . 'a.company_id,a.country_code,a.aliases_json,a.homepage_url,'
+            . 'a.review_status,a.record_status FROM ' . $actors
+            . ' a WHERE EXISTS (SELECT 1 FROM ' . $eventActors
+            . ' ea JOIN ' . $events . ' e ON e.event_id=ea.event_id'
+            . ' WHERE ea.actor_id=a.actor_id AND ' . $dartEventPredicate
+            . ') ORDER BY a.actor_id'
+        ),
+        'event_actors' => v2_alpha_replay_table_digest(
+            $pdo,
+            'SELECT ea.event_id,ea.actor_id,ea.actor_role,ea.review_status'
+            . ' FROM ' . $eventActors . ' ea JOIN ' . $events
+            . ' e ON e.event_id=ea.event_id WHERE ' . $dartEventPredicate
+            . ' ORDER BY ea.event_id,ea.actor_id,ea.actor_role'
+        ),
+        'event_documents' => v2_alpha_replay_table_digest(
+            $pdo,
+            'SELECT ed.event_id,ed.document_id,ed.relation_type,ed.position_no'
+            . ' FROM ' . $eventDocuments . ' ed JOIN ' . $documents
+            . ' d ON d.document_id=ed.document_id WHERE d.source_right_id='
+            . $sourceRightId
+            . ' ORDER BY ed.event_id,ed.document_id,ed.relation_type'
+        ),
+        'event_observations' => v2_alpha_replay_table_digest(
+            $pdo,
+            'SELECT eo.observation_id,eo.event_id,eo.document_id,'
+            . 'eo.source_class,eo.source_key,eo.payload_hash,eo.payload_json'
+            . ' FROM ' . $observations . ' eo JOIN ' . $documents
+            . ' d ON d.document_id=eo.document_id WHERE d.source_right_id='
+            . $sourceRightId . ' ORDER BY eo.observation_id'
+        ),
+        'timeline_entries' => v2_alpha_replay_table_digest(
+            $pdo,
+            'SELECT te.timeline_entry_id,te.event_id,te.campaign_id,'
+            . 'te.document_id,te.occurred_at,te.entry_type,te.title,'
+            . 'te.description,te.original_language,te.review_status,'
+            . 'te.publication_status FROM ' . $timelineEntries
+            . ' te JOIN ' . $events . ' e ON e.event_id=te.event_id WHERE '
+            . $dartEventPredicate . ' ORDER BY te.timeline_entry_id'
+        ),
+        'editorial_revisions' => v2_alpha_replay_table_digest(
+            $pdo,
+            'SELECT er.revision_id,er.entity_type,er.entity_id,er.field_name,'
+            . 'er.previous_value,er.revised_value,er.reason,'
+            . 'er.revision_status,er.requested_by,er.reviewed_by,'
+            . 'er.reviewed_at,er.published_at FROM ' . $editorialRevisions
+            . ' er JOIN ' . $events
+            . ' e ON er.entity_type=\'event\' AND e.event_id=er.entity_id'
+            . ' WHERE ' . $dartEventPredicate . ' ORDER BY er.revision_id'
+        ),
+        'global_lifecycle_observations' => v2_alpha_replay_table_digest(
+            $pdo,
+            'SELECT glo.observation_id,glo.connector_id,glo.country_code,'
+            . 'glo.source_key,glo.external_id,glo.parent_external_id,'
+            . 'glo.change_type,glo.payload_json,glo.resolution_status,'
+            . 'glo.resolved_document_id,glo.resolved_event_id FROM '
+            . $lifecycleObservations
+            . ' glo WHERE glo.connector_id=\'connector:kr:dart\''
+            . ' ORDER BY glo.observation_id'
+        ),
+        'collection_runs' => v2_alpha_replay_table_digest(
+            $pdo,
+            'SELECT cr.run_id,cr.pipeline,cr.source_key,cr.code_revision,'
+            . 'cr.status,cr.raw_count,cr.acknowledged_count,cr.fetched_count,'
+            . 'cr.resolved_count,cr.accepted_count,cr.error_count,'
+            . 'cr.lag_seconds_p95 FROM ' . $collectionRuns
+            . ' cr WHERE FIND_IN_SET(\'dart\',REPLACE(LOWER('
+            . 'COALESCE(cr.source_key,\'\')),\'+\',\',\'))>0'
+            . ' ORDER BY cr.run_id'
+        ),
+        'source_connectors' => v2_alpha_replay_table_digest(
+            $pdo,
+            'SELECT sc.connector_id,sc.country_code,sc.source_key,'
+            . 'sc.source_name,sc.source_type,sc.base_url,sc.source_right_id,'
+            . 'sc.coverage_mode,sc.connector_status,sc.schedule_minutes,'
+            . 'sc.cursor_json,sc.last_raw_count,sc.last_acknowledged_count,'
+            . 'sc.last_error_class,sc.code_revision FROM ' . $sourceConnectors
+            . ' sc WHERE sc.connector_id=\'connector:kr:dart\''
+            . ' ORDER BY sc.connector_id'
+        ),
+        'official_slot_claims' => v2_alpha_replay_table_digest(
+            $pdo,
+            'SELECT osc.claim_id,osc.scheduled_slot_at,'
+            . 'osc.next_cadence_slot_at,'
+            . 'osc.status,osc.pipeline,osc.code_revision,osc.github_run_id,'
+            . 'osc.github_run_attempt,osc.completed_run_id,'
+            . 'osc.completed_run_attempt,osc.completion_raw_count,'
+            . 'osc.completion_ack_count,osc.completion_sha256,'
+            . 'osc.terminal_reason FROM ' . $officialSlotClaims
+            . ' osc WHERE EXISTS (SELECT 1 FROM ' . $collectionRuns
+            . ' cr WHERE cr.run_id=osc.completed_run_id AND FIND_IN_SET('
+            . '\'dart\',REPLACE(LOWER(COALESCE(cr.source_key,\'\')),'
+            . '\'+\',\',\'))>0) ORDER BY osc.claim_id'
+        ),
+    );
+    $stateContract = array(
+        'code_revision' => $codeRevision,
+        'tables' => $tables,
+        'checkpoint' => $checkpointState,
+    );
+    return array(
+        'schema_version' => 1,
+        'kind' => 'bside-global-alpha-replay-state',
+        'environment' => 'production',
+        'evidence_source' => 'production_database_export',
+        'is_synthetic' => false,
+        'code_revision' => $codeRevision,
+        'collected_at' => $collectedAt,
+        'tables' => $tables,
+        'checkpoint' => $checkpointState,
+        'state_sha256' => hash(
+            'sha256',
+            v1_strict_canonical_json_encode(
+                $stateContract,
+                'alpha_evidence_replay_state_contract_encoding_failed'
+            )
+        ),
+    );
 }
 
 function v2_alpha_content_integrity(
@@ -4121,15 +4453,23 @@ function v2_ops_alpha_release_evidence(PDO $pdo, array $config): void {
             'error' => 'deployed_revision_mismatch',
         ));
     }
+    $snapshot = null;
     try {
+        $snapshot = v2_alpha_snapshot_begin($pdo);
         $definitions = array(
             array('dart', 'KR', null),
             array('sec-edgar', 'US', 'connector:us:sec-edgar'),
         );
         $coverage = array();
+        $dartCheckpointState = null;
         foreach ($definitions as $definition) {
             $windows = $definition[2] === null
-                ? v2_alpha_dart_windows($pdo, $config, $revision)
+                ? v2_alpha_dart_windows(
+                    $pdo,
+                    $config,
+                    $revision,
+                    $dartCheckpointState
+                )
                 : v2_alpha_global_connector_windows(
                     $pdo,
                     $config,
@@ -4150,7 +4490,7 @@ function v2_ops_alpha_release_evidence(PDO $pdo, array $config): void {
             );
         }
         $collectedAt = gmdate('Y-m-d\TH:i:s\Z');
-        v2_respond(200, array(
+        $response = array(
             'ok' => true,
             'data' => array(
                 'schema_version' => 1,
@@ -4161,6 +4501,15 @@ function v2_ops_alpha_release_evidence(PDO $pdo, array $config): void {
                 'code_revision' => $revision,
                 'collected_at' => $collectedAt,
                 'connector_coverage' => $coverage,
+                'replay_state' => v2_alpha_replay_state(
+                    $pdo,
+                    $config,
+                    $revision,
+                    $collectedAt,
+                    is_array($dartCheckpointState)
+                        ? $dartCheckpointState
+                        : array()
+                ),
                 'content_integrity' => v2_alpha_content_integrity(
                     $pdo,
                     $config,
@@ -4168,11 +4517,79 @@ function v2_ops_alpha_release_evidence(PDO $pdo, array $config): void {
                     $collectedAt
                 ),
             ),
-        ));
+        );
+        v2_alpha_snapshot_finish($pdo,$snapshot,true);
+        $snapshot = null;
+        v2_respond(200,$response);
     } catch (Throwable $error) {
+        if (is_array($snapshot)) {
+            try {
+                v2_alpha_snapshot_finish($pdo,$snapshot,false);
+            } catch (Throwable $cleanupError) {
+                // The endpoint remains fail-closed; never expose DB details.
+            }
+        }
         v2_respond(409, array(
             'ok' => false,
             'error' => 'automated_evidence_unavailable',
+        ));
+    }
+}
+
+function v2_ops_alpha_replay_state(PDO $pdo, array $config): void {
+    $revision = isset($_GET['code_revision'])
+        ? strtolower(trim((string)$_GET['code_revision'])) : '';
+    if (preg_match('/^[a-f0-9]{40}$/D', $revision) !== 1) {
+        v2_respond(400, array(
+            'ok' => false,
+            'error' => 'invalid_code_revision',
+        ));
+    }
+    $identity = v2_deployment_identity_status();
+    if (
+        $identity['valid'] !== true
+        || !hash_equals((string)$identity['code_revision'], $revision)
+    ) {
+        v2_respond(409, array(
+            'ok' => false,
+            'error' => 'deployed_revision_mismatch',
+        ));
+    }
+    $snapshot = null;
+    try {
+        $snapshot = v2_alpha_snapshot_begin($pdo);
+        $checkpointState = null;
+        v2_alpha_dart_windows(
+            $pdo,
+            $config,
+            $revision,
+            $checkpointState
+        );
+        $collectedAt = gmdate('Y-m-d\TH:i:s\Z');
+        $response = array(
+            'ok' => true,
+            'data' => v2_alpha_replay_state(
+                $pdo,
+                $config,
+                $revision,
+                $collectedAt,
+                is_array($checkpointState) ? $checkpointState : array()
+            ),
+        );
+        v2_alpha_snapshot_finish($pdo,$snapshot,true);
+        $snapshot = null;
+        v2_respond(200,$response);
+    } catch (Throwable $error) {
+        if (is_array($snapshot)) {
+            try {
+                v2_alpha_snapshot_finish($pdo,$snapshot,false);
+            } catch (Throwable $cleanupError) {
+                // The endpoint remains fail-closed; never expose DB details.
+            }
+        }
+        v2_respond(409, array(
+            'ok' => false,
+            'error' => 'replay_state_unavailable',
         ));
     }
 }
@@ -4218,8 +4635,13 @@ function handle_v2_request(string $method, string $path, array $config): void {
         $role = v2_require_role($config, array('admin'));
     } elseif (
         $path === '/admin/review-queue'
+        || $path === '/admin/expedited-review-candidates'
         || $path === '/admin/brief-candidates'
         || $path === '/admin/briefs'
+        || preg_match(
+            '#^/admin/expedited-review-candidates/[A-Za-z0-9_.:\-]{1,96}$#',
+            $path
+        ) === 1
         || preg_match('#^/admin/events/[A-Za-z0-9_.:\-]{1,96}/review$#', $path) === 1
     ) {
         $role = v2_require_role($config, array('editor'));
@@ -4284,6 +4706,9 @@ function handle_v2_request(string $method, string $path, array $config): void {
         if ($path === '/ops/alpha-release-evidence') {
             v2_ops_alpha_release_evidence($pdo, $config);
         }
+        if ($path === '/ops/alpha-replay-state') {
+            v2_ops_alpha_replay_state($pdo, $config);
+        }
         if ($path === '/ops/release-state') {
             v2_admin_release_state($pdo, $config);
         }
@@ -4313,6 +4738,22 @@ function handle_v2_request(string $method, string $path, array $config): void {
         }
         if ($path === '/admin/review-queue') {
             v2_admin_review_queue($pdo, $config);
+        }
+        if ($path === '/admin/expedited-review-candidates') {
+            v2_admin_expedited_review_candidates($pdo, $config);
+        }
+        if (
+            preg_match(
+                '#^/admin/expedited-review-candidates/([A-Za-z0-9_.:\-]{1,96})$#',
+                $path,
+                $matches
+            ) === 1
+        ) {
+            v2_admin_expedited_review_candidates(
+                $pdo,
+                $config,
+                $matches[1]
+            );
         }
         if ($path === '/admin/brief-candidates') {
             v2_admin_brief_candidates($pdo, $config);

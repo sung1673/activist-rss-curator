@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { readFile, stat, writeFile } from "node:fs/promises";
 
@@ -175,6 +176,10 @@ test("remote Production Alpha preview renders real v2 data without mocks", async
   const receiptPath = testInfo.outputPath(`preview-${project}-${environment.expectedSha}.json`);
   let completed = false;
   let traceStarted = false;
+  let axeSeriousCount = null;
+  let axeCriticalCount = null;
+  let firstImportantEventTopPx = null;
+  let apiBudgetReceipts = [];
 
   await context.addInitScript(
     ({ key, token }) => {
@@ -219,17 +224,67 @@ test("remote Production Alpha preview renders real v2 data without mocks", async
       const value = window.__BSIDE_GOVERNANCE_CONFIG__ || {};
       return {
         apiBase: String(value.apiBase || ""),
-        buildSha: String(value.buildSha || "").toLowerCase()
+        buildSha: String(value.buildSha || "").toLowerCase(),
+        releaseChannel: String(value.releaseChannel || "")
       };
     });
     expect(publicConfig.buildSha).toBe(environment.expectedSha);
     expect(normalizeApiV1(publicConfig.apiBase)).toBe(environment.apiV1);
+    expect(publicConfig.releaseChannel).toBe("production_alpha_early_access");
     observed.push(await browserHealth(page, environment.apiV2, environment.expectedSha));
+    apiBudgetReceipts = await page.evaluate(async ({ apiBase, storageKey }) => {
+      const token = String(sessionStorage.getItem(storageKey) || "");
+      const routes = [
+        "/briefs/latest?edition=global",
+        "/live?limit=100",
+        "/events?limit=100",
+        "/issuers?limit=100",
+        "/calendar?limit=100",
+        "/search?q=capital",
+        "/sources/status",
+        "/exports/events.json?limit=100",
+        "/exports/events.csv?limit=100",
+        "/feeds/events.atom?limit=100"
+      ];
+      const results = [];
+      for (const route of routes) {
+        const response = await fetch(`${apiBase.replace(/\/$/, "")}${route}`, {
+          headers: {
+            Accept: "*/*",
+            Authorization: `Bearer ${token}`
+          },
+          cache: "no-store",
+          credentials: "omit",
+          referrerPolicy: "no-referrer"
+        });
+        const bytes = (await response.arrayBuffer()).byteLength;
+        results.push({ route, http_status: response.status, size_bytes: bytes });
+      }
+      return results;
+    }, { apiBase: environment.apiV2, storageKey: PREVIEW_SESSION_KEY });
+    expect(apiBudgetReceipts).toHaveLength(10);
+    for (const receipt of apiBudgetReceipts) {
+      expect(receipt.http_status).toBe(200);
+      expect(receipt.size_bytes).toBeGreaterThan(0);
+      expect(receipt.size_bytes).toBeLessThanOrEqual(250_000);
+    }
     expect(page.url().includes(environment.token)).toBe(false);
     expect(new URL(page.url()).search).toBe("");
 
     const firstEvent = page.locator("[data-event-drawer]:visible").first();
     await expect(firstEvent).toBeVisible();
+    const firstEventBox = await firstEvent.boundingBox();
+    expect(firstEventBox).not.toBeNull();
+    firstImportantEventTopPx = firstEventBox.y;
+    const accessibility = await new AxeBuilder({ page }).analyze();
+    axeSeriousCount = accessibility.violations.filter(
+      (item) => item.impact === "serious"
+    ).length;
+    axeCriticalCount = accessibility.violations.filter(
+      (item) => item.impact === "critical"
+    ).length;
+    expect(axeSeriousCount).toBe(0);
+    expect(axeCriticalCount).toBe(0);
     const eventId = String(await firstEvent.getAttribute("data-event-drawer") || "");
     expect(eventId.length).toBeGreaterThan(0);
     const eventTitle = String(await firstEvent.textContent() || "").trim();
@@ -302,6 +357,11 @@ test("remote Production Alpha preview renders real v2 data without mocks", async
       used_mock_routes: false,
       preview_token_in_url: false,
       v1_fallback_count: v1Fallbacks.length,
+      visual_regression_passed: completed,
+      axe_serious_count: axeSeriousCount,
+      axe_critical_count: axeCriticalCount,
+      first_important_event_top_px: firstImportantEventTopPx,
+      api_budget_receipts: apiBudgetReceipts,
       observations: observed
     };
     await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");

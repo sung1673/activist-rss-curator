@@ -1,0 +1,495 @@
+name: Production Alpha expedited immutable evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type CREATE_EXPEDITED_ALPHA_EVIDENCE
+        required: true
+        type: string
+      preparation_run_id:
+        description: Successful exact-SHA expedited preparation run
+        required: true
+        type: string
+      preparation_artifact_digest:
+        description: Immutable preparation artifact sha256 digest
+        required: true
+        type: string
+      final_approval_run_id:
+        description: Successful exact-SHA protected final approval run
+        required: true
+        type: string
+      final_approval_artifact_digest:
+        description: Immutable protected final approval artifact sha256 digest
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: global-alpha-expedited-evidence-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: governance-release
+    steps:
+      - name: Checkout the exact approved release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Enforce protected default-branch evaluation
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRMATION" == "CREATE_EXPEDITED_ALPHA_EVIDENCE" ]]
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+
+      - name: Resolve exact preparation and final approval artifacts
+        id: artifacts
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PREPARATION_RUN_ID: ${{ inputs.preparation_run_id }}
+          PREPARATION_DIGEST: ${{ inputs.preparation_artifact_digest }}
+          APPROVAL_RUN_ID: ${{ inputs.final_approval_run_id }}
+          APPROVAL_DIGEST: ${{ inputs.final_approval_artifact_digest }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const specs = [
+              {
+                key: "preparation",
+                runId: process.env.PREPARATION_RUN_ID,
+                digest: process.env.PREPARATION_DIGEST,
+                workflow: ".github/workflows/global-alpha-expedited-preparation.yml",
+                artifact: "global-alpha-expedited-preparation",
+              },
+              {
+                key: "approval",
+                runId: process.env.APPROVAL_RUN_ID,
+                digest: process.env.APPROVAL_DIGEST,
+                workflow: ".github/workflows/global-alpha-expedited-evidence-inputs.yml",
+                artifact: `global-alpha-expedited-final-approval-${process.env.EXPECTED_SHA}`,
+              },
+            ];
+            if (String(specs[0].runId) === String(specs[1].runId)) {
+              core.setFailed("Preparation and final approval require distinct producers");
+              return;
+            }
+            for (const spec of specs) {
+              const text = String(spec.runId || "").trim();
+              const digest = String(spec.digest || "").toLowerCase();
+              if (
+                !/^[1-9][0-9]*$/.test(text) ||
+                !/^sha256:[0-9a-f]{64}$/.test(digest)
+              ) {
+                core.setFailed(`${spec.key} producer identity is invalid`);
+                return;
+              }
+              const response = await github.rest.actions.getWorkflowRun({
+                owner, repo, run_id: Number(text),
+              });
+              const run = response.data;
+              const ageHours = (Date.now() - Date.parse(run.updated_at)) / 3600000;
+              if (
+                run.status !== "completed" ||
+                run.conclusion !== "success" ||
+                run.event !== "workflow_dispatch" ||
+                run.head_branch !== process.env.DEFAULT_BRANCH ||
+                (run.head_sha || "").toLowerCase() !== process.env.EXPECTED_SHA.toLowerCase() ||
+                run.path !== spec.workflow ||
+                ageHours < -0.1 ||
+                ageHours > 72
+              ) {
+                core.setFailed(`${spec.key} producer failed its protected contract`);
+                return;
+              }
+              const artifacts = await github.paginate(
+                github.rest.actions.listWorkflowRunArtifacts,
+                {owner, repo, run_id: run.id, per_page: 100},
+              );
+              const matches = artifacts.filter(
+                (item) => item.name === spec.artifact && !item.expired,
+              );
+              if (
+                matches.length !== 1 ||
+                (matches[0].digest || "").toLowerCase() !== digest
+              ) {
+                core.setFailed(`${spec.key} immutable artifact did not match`);
+                return;
+              }
+              core.setOutput(`${spec.key}_run_id`, String(run.id));
+              core.setOutput(`${spec.key}_run_attempt`, String(run.run_attempt));
+              core.setOutput(`${spec.key}_artifact_id`, String(matches[0].id));
+              core.setOutput(`${spec.key}_artifact_name`, matches[0].name);
+              core.setOutput(`${spec.key}_artifact_digest`, digest);
+            }
+
+      - name: Download exact immutable preparation
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.artifacts.outputs.preparation_artifact_id }}
+          path: preparation
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.artifacts.outputs.preparation_run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
+      - name: Download exact immutable final approval
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.artifacts.outputs.approval_artifact_id }}
+          path: final-approval
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.artifacts.outputs.approval_run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
+      - name: Set up gate Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Verify final approval binds the exact preparation
+        shell: bash
+        env:
+          PREPARATION_RUN_ID: ${{ steps.artifacts.outputs.preparation_run_id }}
+          PREPARATION_RUN_ATTEMPT: ${{ steps.artifacts.outputs.preparation_run_attempt }}
+          PREPARATION_ARTIFACT_ID: ${{ steps.artifacts.outputs.preparation_artifact_id }}
+          PREPARATION_ARTIFACT_NAME: ${{ steps.artifacts.outputs.preparation_artifact_name }}
+          PREPARATION_ARTIFACT_DIGEST: ${{ steps.artifacts.outputs.preparation_artifact_digest }}
+        run: |
+          set -euo pipefail
+          for path in \
+            preparation/expedited-preparation.json \
+            preparation/preparation-provenance.json \
+            preparation/approval-binding-materials.json \
+            preparation/human-review.json \
+            preparation/editorial-publication-provenance.json \
+            final-approval/approval.json \
+            final-approval/legacy-archive.json \
+            final-approval/final-approval-binding-materials.json \
+            final-approval/finalized-legacy-recovery-bundle/expedited-legacy-recovery-bundle.json \
+            final-approval/preparation-identity.json; do
+            test -f "$path"
+          done
+          jq -e \
+            --argjson run_id "$PREPARATION_RUN_ID" \
+            --argjson run_attempt "$PREPARATION_RUN_ATTEMPT" \
+            --argjson artifact_id "$PREPARATION_ARTIFACT_ID" \
+            --arg artifact_name "$PREPARATION_ARTIFACT_NAME" \
+            --arg artifact_digest "$PREPARATION_ARTIFACT_DIGEST" '
+            .kind == "bside-global-alpha-expedited-preparation-identity"
+            and .code_revision == env.GITHUB_SHA
+            and .run_id == $run_id
+            and .run_attempt == $run_attempt
+            and .artifact_id == $artifact_id
+            and .artifact_name == $artifact_name
+            and .artifact_digest == $artifact_digest
+          ' final-approval/preparation-identity.json > /dev/null
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          def canonical_sha(value):
+              raw = json.dumps(
+                  value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+              ).encode("utf-8")
+              return hashlib.sha256(raw).hexdigest()
+
+          preparation = json.loads(
+              Path("preparation/expedited-preparation.json").read_text(encoding="utf-8")
+          )
+          human_review = preparation.get("human_review")
+          if not isinstance(human_review, dict):
+              raise SystemExit("preparation omitted the actual editorial human review")
+          fields = (
+              "ground_truth_source",
+              "ai_generated_ground_truth",
+              "human_attestation",
+              "raw_counts",
+              "event_reviews",
+              "same_event_pair_reviews",
+              "top5_reviews",
+          )
+          section = {field: human_review.get(field) for field in fields}
+          materials = json.loads(
+              Path(
+                  "final-approval/final-approval-binding-materials.json"
+              ).read_text(
+                  encoding="utf-8"
+              )
+          )
+          if canonical_sha(section) != materials.get("human_review_section_sha256"):
+              raise SystemExit("editorial human review changed after preparation")
+          binding_fields = (
+              "human_review_section_sha256",
+              "legacy_manifest_sha256",
+              "pages_terminal_content_sha256",
+              "content_integrity_sha256",
+              "experience_sha256",
+              "rollback_drill_sha256",
+              "observations_sha256",
+              "legacy_source_artifact_sha256",
+              "binding_sha256",
+          )
+          expected_binding = {field: materials[field] for field in binding_fields}
+          approval = json.loads(
+              Path("final-approval/approval.json").read_text(encoding="utf-8")
+          )
+          if approval.get("evidence_binding") != expected_binding:
+              raise SystemExit("final approval binding does not match preparation")
+          for field in ("artifact_id", "artifact_name", "artifact_sha256"):
+              if field in approval:
+                  raise SystemExit("final approval self-asserted post-upload identity")
+          PY
+
+      - name: Assemble and evaluate the exact expedited bundle
+        id: gate
+        shell: bash
+        env:
+          APPROVAL_ARTIFACT_ID: ${{ steps.artifacts.outputs.approval_artifact_id }}
+          APPROVAL_ARTIFACT_NAME: ${{ steps.artifacts.outputs.approval_artifact_name }}
+          APPROVAL_ARTIFACT_DIGEST: ${{ steps.artifacts.outputs.approval_artifact_digest }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          bundle = json.loads(
+              Path("preparation/expedited-preparation.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          bundle["kind"] = "bside-global-production-alpha-expedited-inputs"
+          evaluated_at = datetime.now(timezone.utc).replace(
+              microsecond=0
+          ).isoformat().replace("+00:00", "Z")
+          bundle["preparation_evidence_as_of"] = bundle.pop("evidence_as_of")
+          bundle["evidence_as_of"] = evaluated_at
+          bundle["collected_at"] = evaluated_at
+          # preparation_evidence_as_of is immutable provenance, not part of the
+          # strict evaluator root contract.
+          preparation_evidence_as_of = bundle.pop("preparation_evidence_as_of")
+          approval = json.loads(
+              Path("final-approval/approval.json").read_text(encoding="utf-8")
+          )
+          legacy_archive = json.loads(
+              Path("final-approval/legacy-archive.json").read_text(encoding="utf-8")
+          )
+          artifact_identity = {
+              "artifact_id": int(os.environ["APPROVAL_ARTIFACT_ID"]),
+              "artifact_name": os.environ["APPROVAL_ARTIFACT_NAME"],
+              "artifact_sha256": os.environ["APPROVAL_ARTIFACT_DIGEST"].removeprefix(
+                  "sha256:"
+              ),
+          }
+          for field in artifact_identity:
+              if field in approval:
+                  raise SystemExit(
+                      "protected final approval cannot self-assert post-upload identity"
+                  )
+          approval.update(artifact_identity)
+          bundle["approval"] = approval
+          bundle["legacy_archive"] = legacy_archive
+          if bundle.get("code_revision") != os.environ["GITHUB_SHA"].lower():
+              raise SystemExit("final expedited bundle revision mismatch")
+          Path("expedited-inputs.json").write_text(
+              json.dumps(bundle, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          Path("preparation-evidence-as-of.txt").write_text(
+              preparation_evidence_as_of + "\n", encoding="utf-8"
+          )
+          PY
+          python -m curator.global_alpha_expedited_gate evaluate \
+            --input "$PWD/expedited-inputs.json" \
+            --expected-revision "$GITHUB_SHA" \
+            --output "$PWD/global-alpha-expedited-release-report.json"
+          jq -e '
+            .release_gate_passed == true
+            and .code_revision == env.GITHUB_SHA
+            and .release_channel == "production_alpha_early_access"
+          ' global-alpha-expedited-release-report.json > /dev/null
+          echo "evidence_as_of=$(jq -er '.evidence_as_of' global-alpha-expedited-release-report.json)" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Assemble immutable expedited evidence
+        shell: bash
+        env:
+          EVIDENCE_AS_OF: ${{ steps.gate.outputs.evidence_as_of }}
+          PREPARATION_RUN_ID: ${{ steps.artifacts.outputs.preparation_run_id }}
+          PREPARATION_ARTIFACT_ID: ${{ steps.artifacts.outputs.preparation_artifact_id }}
+          PREPARATION_ARTIFACT_DIGEST: ${{ steps.artifacts.outputs.preparation_artifact_digest }}
+          APPROVAL_RUN_ID: ${{ steps.artifacts.outputs.approval_run_id }}
+          APPROVAL_ARTIFACT_ID: ${{ steps.artifacts.outputs.approval_artifact_id }}
+          APPROVAL_ARTIFACT_NAME: ${{ steps.artifacts.outputs.approval_artifact_name }}
+          APPROVAL_ARTIFACT_DIGEST: ${{ steps.artifacts.outputs.approval_artifact_digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p global-alpha-expedited-evidence
+          cp global-alpha-expedited-release-report.json expedited-inputs.json \
+            preparation-evidence-as-of.txt \
+            global-alpha-expedited-evidence/
+          cp preparation/expedited-producer-manifest.json \
+            preparation/pages-artifact-identity.json \
+            preparation/expedited-rollback-drill.json \
+            preparation/preparation-provenance.json \
+            global-alpha-expedited-evidence/
+          cp preparation/approval-binding-materials.json \
+            global-alpha-expedited-evidence/preparation-binding-base.json
+          cp final-approval/final-approval-binding-materials.json \
+            global-alpha-expedited-evidence/approval-binding-materials.json
+          cp final-approval/legacy-archive.json \
+            global-alpha-expedited-evidence/
+          cp -R final-approval/finalized-legacy-recovery-bundle \
+            global-alpha-expedited-evidence/expedited-legacy-recovery-bundle
+          cp -R preparation/automated-evidence \
+            global-alpha-expedited-evidence/automated-evidence
+          cp preparation/human-review.json \
+            preparation/editorial-publication-provenance.json \
+            preparation/publication-receipt.json \
+            preparation/publication-replay-receipt.json \
+            global-alpha-expedited-evidence/
+          cp -R preparation/preview-smoke-evidence \
+            global-alpha-expedited-evidence/preview-smoke-evidence
+          cp -R preparation/web-vitals-evidence \
+            global-alpha-expedited-evidence/web-vitals-evidence
+          cp -R preparation/expedited-observations \
+            global-alpha-expedited-evidence/expedited-observations
+          cp final-approval/approval.json \
+            final-approval/preparation-identity.json \
+            global-alpha-expedited-evidence/
+          human_review_bytes_sha256="$(
+            sha256sum preparation/human-review.json | cut -d' ' -f1
+          )"
+          approval_bytes_sha256="$(
+            sha256sum final-approval/approval.json | cut -d' ' -f1
+          )"
+          editorial_run_id="$(
+            jq -er '.run_id' preparation/editorial-publication-provenance.json
+          )"
+          editorial_artifact_id="$(
+            jq -er '.artifact_id' preparation/editorial-publication-provenance.json
+          )"
+          editorial_artifact_name="$(
+            jq -er '.artifact_name' preparation/editorial-publication-provenance.json
+          )"
+          editorial_artifact_digest="$(
+            jq -er '.artifact_digest' preparation/editorial-publication-provenance.json
+          )"
+          jq -n \
+            --arg code_revision "$GITHUB_SHA" \
+            --argjson preparation_run_id "$PREPARATION_RUN_ID" \
+            --argjson preparation_artifact_id "$PREPARATION_ARTIFACT_ID" \
+            --arg preparation_artifact_digest "$PREPARATION_ARTIFACT_DIGEST" \
+            --argjson editorial_run_id "$editorial_run_id" \
+            --argjson editorial_artifact_id "$editorial_artifact_id" \
+            --arg editorial_artifact_name "$editorial_artifact_name" \
+            --arg editorial_artifact_digest "$editorial_artifact_digest" \
+            --argjson approval_run_id "$APPROVAL_RUN_ID" \
+            --argjson approval_artifact_id "$APPROVAL_ARTIFACT_ID" \
+            --arg approval_artifact_name "$APPROVAL_ARTIFACT_NAME" \
+            --arg approval_artifact_digest "$APPROVAL_ARTIFACT_DIGEST" \
+            --arg human_review_bytes_sha256 "$human_review_bytes_sha256" \
+            --arg approval_bytes_sha256 "$approval_bytes_sha256" \
+            '{
+              schema_version: 1,
+              kind: "bside-global-alpha-expedited-protected-input-provenance",
+              code_revision: $code_revision,
+              preparation: {
+                run_id: $preparation_run_id,
+                artifact_id: $preparation_artifact_id,
+                artifact_digest: $preparation_artifact_digest
+              },
+              editorial_human_review: {
+                run_id: $editorial_run_id,
+                artifact_id: $editorial_artifact_id,
+                artifact_name: $editorial_artifact_name,
+                artifact_digest: $editorial_artifact_digest,
+                human_review_bytes_sha256: $human_review_bytes_sha256,
+                post_upload_identity_injected_only_in_evaluator_wrapper: true
+              },
+              final_approval: {
+                run_id: $approval_run_id,
+                artifact_id: $approval_artifact_id,
+                artifact_name: $approval_artifact_name,
+                artifact_digest: $approval_artifact_digest,
+                approval_bytes_sha256: $approval_bytes_sha256,
+                post_upload_identity_injected_only_in_evaluator_wrapper: true
+              }
+            }' > global-alpha-expedited-evidence/protected-input-provenance.json
+          pages_digest="$(
+            jq -er '.artifact_digest' preparation/pages-artifact-identity.json
+          )"
+          source_right_digest="$(
+            (
+              cd preparation/automated-evidence
+              find source-right-evidence -type f -print0 \
+                | sort -z \
+                | xargs -0 sha256sum
+            ) | sha256sum | cut -d' ' -f1
+          )"
+          jq -n \
+            --arg code_revision "$GITHUB_SHA" \
+            --arg evidence_as_of "$EVIDENCE_AS_OF" \
+            --arg workflow ".github/workflows/global-alpha-expedited-evidence.yml" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg pages_digest "$pages_digest" \
+            --arg source_right_digest "$source_right_digest" \
+            '{
+              schema_version: 1,
+              kind: "bside-global-alpha-expedited-artifact-provenance",
+              code_revision: $code_revision,
+              evidence_as_of: $evidence_as_of,
+              release_channel: "production_alpha_early_access",
+              workflow: $workflow,
+              run_id: ($run_id | tonumber),
+              run_attempt: ($run_attempt | tonumber),
+              pages_artifact_digest: $pages_digest,
+              source_right_evidence_sha256: $source_right_digest
+            }' > global-alpha-expedited-evidence/artifact-provenance.json
+
+      - name: Upload immutable expedited release evidence
+        id: evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-expedited-evidence
+          path: global-alpha-expedited-evidence
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 9
+
+      - name: Record bounded Early Access result
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ steps.evidence.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.evidence.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Production Alpha Early Access evidence passed"
+            echo "- revision: \`$GITHUB_SHA\`"
+            echo "- artifact id: \`$ARTIFACT_ID\`"
+            echo "- artifact digest: \`$ARTIFACT_DIGEST\`"
+            echo "- preparation and protected human decisions were independently bound"
+            echo "- this is expedited Early Access evidence, not GA certification"
+          } >> "$GITHUB_STEP_SUMMARY"

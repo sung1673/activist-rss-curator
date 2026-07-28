@@ -5,12 +5,18 @@ import json
 from pathlib import Path
 from typing import Mapping
 
-from .governance_ui import normalize_api_base, normalize_build_sha, normalize_web_base
+from .governance_ui import (
+    DEFAULT_RELEASE_CHANNEL,
+    normalize_api_base,
+    normalize_build_sha,
+    normalize_release_channel,
+    normalize_web_base,
+)
 
 
 CONFIG_PREFIX = "window.__BSIDE_GOVERNANCE_CONFIG__=Object.freeze("
 CONFIG_SUFFIX = ");\n"
-CONFIG_KEYS = frozenset({"apiBase", "webBase", "buildSha"})
+CONFIG_KEYS = frozenset({"apiBase", "webBase", "buildSha", "releaseChannel"})
 MAX_CONFIG_BYTES = 16 * 1024
 
 
@@ -48,6 +54,7 @@ def verify_governance_site_config(
     expected_api_base: str,
     expected_web_base: str,
     expected_build_sha: str,
+    expected_release_channel: str = DEFAULT_RELEASE_CHANNEL,
 ) -> Mapping[str, str]:
     root = site.resolve()
     if site.is_symlink() or not root.is_dir():
@@ -61,6 +68,7 @@ def verify_governance_site_config(
         "apiBase": normalize_api_base(expected_api_base),
         "webBase": normalize_web_base(expected_web_base),
         "buildSha": normalize_build_sha(expected_build_sha),
+        "releaseChannel": normalize_release_channel(expected_release_channel),
     }
     if len(expected["buildSha"]) != 40:
         raise GovernanceSiteConfigError("release build SHA must be a full 40-character Git SHA")
@@ -70,6 +78,10 @@ def verify_governance_site_config(
         raise GovernanceSiteConfigError("embedded webBase is not canonical")
     if primary["buildSha"] != normalize_build_sha(primary["buildSha"]):
         raise GovernanceSiteConfigError("embedded buildSha is not canonical")
+    if primary["releaseChannel"] != normalize_release_channel(
+        primary["releaseChannel"]
+    ):
+        raise GovernanceSiteConfigError("embedded releaseChannel is not canonical")
     for key, expected_value in expected.items():
         if primary[key] != expected_value:
             raise GovernanceSiteConfigError(
@@ -84,6 +96,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-api-base", required=True)
     parser.add_argument("--expected-web-base", required=True)
     parser.add_argument("--expected-build-sha", required=True)
+    parser.add_argument(
+        "--expected-release-channel",
+        default=DEFAULT_RELEASE_CHANNEL,
+    )
     return parser
 
 
@@ -94,11 +110,13 @@ def main(argv: list[str] | None = None) -> int:
         expected_api_base=args.expected_api_base,
         expected_web_base=args.expected_web_base,
         expected_build_sha=args.expected_build_sha,
+        expected_release_channel=args.expected_release_channel,
     )
     print(
         "Governance site config verified: "
         f"api_base={config['apiBase']}, web_base={config['webBase']}, "
-        f"build_sha={config['buildSha']}"
+        f"build_sha={config['buildSha']}, "
+        f"release_channel={config['releaseChannel']}"
     )
     return 0
 
