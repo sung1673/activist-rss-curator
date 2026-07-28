@@ -3739,6 +3739,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
         "SELECT version_no,content_hash,correction_of_document_id IS NOT NULL,"
         "publication_status FROM ci_documents "
         "WHERE source_class='official_disclosure' "
+        f"AND source_right_id='{STANDARD_RIGHT_ID}' "
         f"AND external_id='{first_record['external_id']}' "
         "ORDER BY version_no;",
     ).splitlines()
