@@ -17,6 +17,10 @@ from .legacy_feed_compat import (
     prepare_legacy_feed_compatibility,
     verify_legacy_feed_compatibility,
 )
+from .legacy_telegram_safety import (
+    LegacyTelegramSafetyError,
+    verify_public_site,
+)
 
 
 MANIFEST_NAME = "legacy-feed-expedited-compatibility.json"
@@ -371,6 +375,10 @@ def verify_expedited_legacy_compatibility(
     observed_at: datetime,
 ) -> dict[str, Any]:
     observed_at = _observed_at(observed_at)
+    try:
+        verify_public_site(site, minimum_dated_reports=EXPEDITED_WINDOW_DAYS)
+    except LegacyTelegramSafetyError as exc:
+        raise LegacyFeedCompatibilityError(str(exc)) from exc
     manifest = _load_manifest(site)
     if manifest.get("schema_version") != MANIFEST_SCHEMA_VERSION:
         raise LegacyFeedCompatibilityError(

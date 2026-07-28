@@ -34,6 +34,7 @@ def build_full_archive(
     unexpected: bool = False,
     duplicate: bool = False,
     symlink: bool = False,
+    embedded_telegram: bool = False,
 ) -> Path:
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("CNAME", "news.bside.ai\n")
@@ -44,7 +45,14 @@ def build_full_archive(
             archive.writestr(f"feed/{name}.html", html(name))
         for offset in range(95):
             report_date = WINDOW_END - timedelta(days=94 - offset)
-            archive.writestr(f"feed/{report_date.isoformat()}.html", html(str(report_date)))
+            body = str(report_date)
+            if embedded_telegram and report_date == WINDOW_END:
+                body = (
+                    "<script data-story-telegram-mentions>"
+                    '[{"message_url":"https://t.me/private/42"}]'
+                    "</script>"
+                )
+            archive.writestr(f"feed/{report_date.isoformat()}.html", html(body))
         if unexpected:
             archive.writestr("state.json", "{}")
         if duplicate:
@@ -77,10 +85,13 @@ def test_prepare_and_verify_preserve_full_site_and_compatibility(tmp_path: Path)
     manifest = prepare_legacy_recovery_bundle(archive, bundle, identity=identity)
 
     assert (bundle / FULL_SITE_DIR / "index.html").is_file()
+    assert (bundle / FULL_SITE_DIR / "feed.xml").is_file()
+    assert not (bundle / FULL_SITE_DIR / "feed" / "telegram-admin.html").exists()
+    assert not (bundle / FULL_SITE_DIR / "feed" / "telegram.html").exists()
     assert len(list((bundle / FULL_SITE_DIR / "feed").glob("20*.html"))) == 95
     assert len(list((bundle / COMPATIBILITY_DIR / "feed").glob("*.html"))) == 90
     assert manifest["source"]["artifact_digest"] == identity.artifact_digest
-    assert manifest["full_site"]["file_count"] == 104
+    assert manifest["full_site"]["file_count"] == 102
     assert verify_legacy_recovery_bundle(bundle, expected_identity=identity) == manifest
 
 
@@ -92,6 +103,47 @@ def test_verify_rejects_changed_full_site_file(tmp_path: Path) -> None:
     (bundle / FULL_SITE_DIR / "index.html").write_text(html("changed"), encoding="utf-8")
 
     with pytest.raises(LegacyRecoveryBundleError, match="does not match"):
+        verify_legacy_recovery_bundle(bundle, expected_identity=identity)
+
+
+def test_prepare_redacts_embedded_telegram_exposure(tmp_path: Path) -> None:
+    archive = build_full_archive(
+        tmp_path / "legacy.zip",
+        embedded_telegram=True,
+    )
+    bundle = tmp_path / "bundle"
+    identity = identity_for(archive)
+
+    prepare_legacy_recovery_bundle(archive, bundle, identity=identity)
+
+    full_report = (
+        bundle / FULL_SITE_DIR / "feed" / f"{WINDOW_END.isoformat()}.html"
+    ).read_bytes()
+    compatibility_report = (
+        bundle / COMPATIBILITY_DIR / "feed" / f"{WINDOW_END.isoformat()}.html"
+    ).read_bytes()
+    for report in (full_report, compatibility_report):
+        assert b"data-story-telegram-mentions>[]</script>" in report
+        assert b"https://t.me/" not in report
+    assert verify_legacy_recovery_bundle(bundle, expected_identity=identity)
+
+
+def test_verify_rejects_reintroduced_telegram_exposure(tmp_path: Path) -> None:
+    archive = build_full_archive(tmp_path / "legacy.zip")
+    identity = identity_for(archive)
+    bundle = tmp_path / "bundle"
+    prepare_legacy_recovery_bundle(archive, bundle, identity=identity)
+    report = bundle / FULL_SITE_DIR / "feed" / f"{WINDOW_END.isoformat()}.html"
+    report.write_text(
+        html(
+            "<script data-story-telegram-mentions>"
+            '[{"message_url":"https://t.me/private/42"}]'
+            "</script>"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(LegacyRecoveryBundleError, match="Telegram"):
         verify_legacy_recovery_bundle(bundle, expected_identity=identity)
 
 

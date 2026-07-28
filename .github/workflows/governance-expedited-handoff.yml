@@ -527,6 +527,12 @@ jobs:
             --expected-source-artifact-name "$LEGACY_ARTIFACT_NAME" \
             --expected-source-code-revision "$LEGACY_CODE_REVISION" \
             --expected-source-artifact-digest "$LEGACY_ARTIFACT_DIGEST"
+          site="recovery-evidence/expedited-legacy-recovery-bundle/full-site"
+          test ! -e "$site/feed/telegram.html"
+          test ! -e "$site/feed/telegram-admin.html"
+          python -m curator.legacy_telegram_safety verify-site \
+            --site "$site" \
+            --minimum-dated-reports 89
           echo "legacy_root_sha256=$(sha256sum "$root_file" | cut -d' ' -f1)" \
             >> "$GITHUB_OUTPUT"
           echo "legacy_feed_sha256=$(sha256sum "$feed_file" | cut -d' ' -f1)" \
@@ -581,6 +587,19 @@ jobs:
             "${BSIDE_PUBLIC_WEB_URL%/}/" --output restored-root.html
           curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
             "${BSIDE_PUBLIC_WEB_URL%/}/feed.xml" --output restored-feed.xml
+          cache_bust="expedited-handoff-recovery-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          for forbidden_path in feed/telegram.html feed/telegram-admin.html; do
+            status="$(
+              curl --silent --show-error --location \
+                --retry 3 --retry-all-errors \
+                --output /dev/null --write-out '%{http_code}' \
+                "${BSIDE_PUBLIC_WEB_URL%/}/$forbidden_path?$cache_bust"
+            )"
+            if [[ "$status" != "404" ]]; then
+              echo "::error::$forbidden_path must return HTTP 404 after recovery; got $status."
+              exit 1
+            fi
+          done
           [[ "$(sha256sum restored-root.html | cut -d' ' -f1)" == "$EXPECTED_ROOT_SHA256" ]]
           [[ "$(sha256sum restored-feed.xml | cut -d' ' -f1)" == "$EXPECTED_FEED_SHA256" ]]
           if grep -q --fixed-strings \

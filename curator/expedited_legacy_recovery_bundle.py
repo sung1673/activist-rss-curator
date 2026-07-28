@@ -19,8 +19,13 @@ from .expedited_legacy_compat import (
     verify_expedited_legacy_compatibility,
 )
 from .legacy_feed_compat import LegacyArtifactIdentity, LegacyFeedCompatibilityError
+from .legacy_telegram_safety import (
+    LegacyTelegramSafetyError,
+    redact_telegram_mentions,
+)
 from .legacy_recovery_bundle import (
     DATED_REPORT,
+    DROPPED_SOURCE_FILES,
     GOVERNANCE_FILES,
     MAX_ARCHIVE_BYTES,
     MAX_ARCHIVE_FILES,
@@ -204,6 +209,8 @@ def _write_full_site(archive: Path, output: Path, *, mode: str) -> None:
                 raise LegacyRecoveryBundleError(
                     "expedited legacy recovery archive exceeds the safe size budget"
                 )
+            if relative in DROPPED_SOURCE_FILES:
+                continue
             if not _allowed_file(relative):
                 raise LegacyRecoveryBundleError(
                     "expedited legacy recovery archive contains an unexpected file: "
@@ -216,6 +223,10 @@ def _write_full_site(archive: Path, output: Path, *, mode: str) -> None:
                     "expedited legacy recovery archive member size is invalid: "
                     + relative
                 )
+            try:
+                payload = redact_telegram_mentions(payload, path=relative)
+            except LegacyTelegramSafetyError as exc:
+                raise LegacyRecoveryBundleError(str(exc)) from exc
             _validate_payload(relative, payload)
             destination = output.joinpath(*PurePosixPath(relative).parts)
             destination.parent.mkdir(parents=True, exist_ok=True)

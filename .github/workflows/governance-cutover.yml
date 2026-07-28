@@ -494,7 +494,7 @@ jobs:
       - name: Preserve verified legacy recovery for cutover and rollback
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: legacy-recovery-carry-forward
+          name: legacy-recovery-carry-forward-v2
           path: ${{ runner.temp }}/legacy-recovery-bundle
           if-no-files-found: error
           retention-days: 90
@@ -1152,7 +1152,7 @@ jobs:
       - name: Download same-run verified legacy recovery bundle
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: legacy-recovery-carry-forward
+          name: legacy-recovery-carry-forward-v2
           path: legacy-recovery-bundle
           digest-mismatch: error
 

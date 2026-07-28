@@ -12,6 +12,13 @@ from datetime import date, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .legacy_telegram_safety import (
+    LegacyTelegramSafetyError,
+    redact_telegram_mentions,
+    validate_public_payload,
+    verify_public_site,
+)
+
 
 MANIFEST_NAME = "legacy-feed-compatibility.json"
 MANIFEST_SCHEMA_VERSION = 1
@@ -106,6 +113,10 @@ def _validate_html(payload: bytes, path: str) -> None:
         raise LegacyFeedCompatibilityError(f"legacy dated report has an unsafe size: {path}")
     if b"<html" not in payload[:4096].lower() or b"</html>" not in payload[-4096:].lower():
         raise LegacyFeedCompatibilityError(f"legacy dated report is incomplete: {path}")
+    try:
+        validate_public_payload(payload, path=path)
+    except LegacyTelegramSafetyError as exc:
+        raise LegacyFeedCompatibilityError(str(exc)) from exc
 
 
 def _register_payload(
@@ -116,6 +127,10 @@ def _register_payload(
     reports: dict[date, bytes],
     optional: dict[str, bytes],
 ) -> None:
+    try:
+        validate_public_payload(payload, path=relative)
+    except LegacyTelegramSafetyError as exc:
+        raise LegacyFeedCompatibilityError(str(exc)) from exc
     if relative == "feed.xml":
         if not payload or len(payload) > MAX_FEED_XML_BYTES:
             raise LegacyFeedCompatibilityError("legacy feed.xml has an unsafe size")
@@ -199,6 +214,11 @@ def _load_zip_archive(archive: Path) -> tuple[bytes, dict[date, bytes], dict[str
                 continue
             with opened.open(member, "r") as handle:
                 payload = handle.read(max(MAX_FEED_XML_BYTES, MAX_REPORT_BYTES) + 1)
+            if DATED_REPORT.fullmatch(relative):
+                try:
+                    payload = redact_telegram_mentions(payload, path=relative)
+                except LegacyTelegramSafetyError as exc:
+                    raise LegacyFeedCompatibilityError(str(exc)) from exc
             _register_payload(
                 relative,
                 payload,
@@ -378,6 +398,10 @@ def verify_legacy_feed_compatibility(
     *,
     expected_identity: LegacyArtifactIdentity | None = None,
 ) -> dict[str, Any]:
+    try:
+        verify_public_site(site, minimum_dated_reports=REQUIRED_WINDOW_DAYS)
+    except LegacyTelegramSafetyError as exc:
+        raise LegacyFeedCompatibilityError(str(exc)) from exc
     manifest = _load_manifest(site)
     if manifest.get("schema_version") != MANIFEST_SCHEMA_VERSION:
         raise LegacyFeedCompatibilityError("legacy compatibility manifest schema is unsupported")

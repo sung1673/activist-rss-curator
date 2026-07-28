@@ -2,10 +2,19 @@ from __future__ import annotations
 
 import argparse
 import re
-import shutil
 import sys
 from datetime import date, timedelta
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from curator.legacy_telegram_safety import (  # noqa: E402
+    LegacyTelegramSafetyError,
+    redact_telegram_mentions,
+    verify_public_site,
+)
 
 
 REQUIRED_ROOT_FILES = ("CNAME", "404.html", "feed.xml", "index.html")
@@ -16,8 +25,12 @@ REQUIRED_FEED_FILES = (
     "index.html",
     "latest.html",
     "search.html",
-    "telegram-admin.html",
-    "telegram.html",
+)
+DROPPED_FEED_FILES = frozenset(
+    {
+        "telegram-admin.html",
+        "telegram.html",
+    }
 )
 DATED_REPORT_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}\.html\Z")
 ARCHIVE_START_DATE = date(2026, 5, 1)
@@ -111,6 +124,8 @@ def _collect_feed_files(feed_dir: Path) -> list[Path]:
             candidate.name in REQUIRED_FEED_FILES or _dated_report_date(candidate) is not None
         ):
             allowed_files.append(candidate)
+        elif candidate.is_file() and candidate.name in DROPPED_FEED_FILES:
+            continue
         else:
             unexpected_paths.append(candidate.name)
 
@@ -120,6 +135,14 @@ def _collect_feed_files(feed_dir: Path) -> list[Path]:
         )
     _validate_dated_report_continuity(allowed_files)
     return sorted(allowed_files, key=lambda candidate: candidate.name)
+
+
+def _copy_public_file(source: Path, destination: Path, *, relative: str) -> None:
+    try:
+        payload = redact_telegram_mentions(source.read_bytes(), path=relative)
+    except LegacyTelegramSafetyError as exc:
+        raise PreparationError(str(exc)) from exc
+    destination.write_bytes(payload)
 
 
 def _copy_governance_preview(source: Path, destination: Path) -> None:
@@ -138,7 +161,11 @@ def _copy_governance_preview(source: Path, destination: Path) -> None:
             raise PreparationError(
                 f"required governance preview file is missing or unsafe: {filename}"
             )
-        shutil.copy2(candidate, destination / filename)
+        _copy_public_file(
+            candidate,
+            destination / filename,
+            relative=f"governance/{filename}",
+        )
 
 
 def prepare_legacy_pages(
@@ -173,11 +200,19 @@ def prepare_legacy_pages(
 
     destination.mkdir(parents=True)
     for filename in REQUIRED_ROOT_FILES:
-        shutil.copy2(source / filename, destination / filename)
+        _copy_public_file(
+            source / filename,
+            destination / filename,
+            relative=filename,
+        )
     destination_feed = destination / "feed"
     destination_feed.mkdir()
     for source_file in feed_files:
-        shutil.copy2(source_file, destination_feed / source_file.name)
+        _copy_public_file(
+            source_file,
+            destination_feed / source_file.name,
+            relative=f"feed/{source_file.name}",
+        )
     if governance_preview is not None:
         _copy_governance_preview(
             governance_preview.resolve(),
@@ -194,6 +229,10 @@ def prepare_legacy_pages(
     if governance_preview is None and (destination / "governance").exists():
         raise PreparationError("governance UI must not be present in the legacy Pages artifact")
     _assert_no_symlinks(destination)
+    try:
+        verify_public_site(destination)
+    except LegacyTelegramSafetyError as exc:
+        raise PreparationError(str(exc)) from exc
 
     files = [path for path in destination.rglob("*") if path.is_file()]
     return {

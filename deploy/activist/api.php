@@ -2737,6 +2737,28 @@ function public_article_row(array $row, string $query): array {
         $row['search_snippet'] = text_excerpt((string)($row['summary'] ?: ''), 150);
         $row['match_reasons'] = array();
     }
+    return legacy_public_row($row);
+}
+
+function legacy_public_row(array $row): array {
+    foreach (array(
+        'status',
+        'reason',
+        'priority_score',
+        'priority_level',
+        'source_right_id',
+        'search_score',
+        'score_breakdown',
+        'signal_score',
+        'analysis_bucket',
+        'queue_status',
+        'review_status',
+        'risk_flags_json',
+        'payload_json',
+        'idempotency_key',
+    ) as $field) {
+        unset($row[$field]);
+    }
     return $row;
 }
 
@@ -3206,33 +3228,19 @@ function handle_search(PDO $pdo, array $config): void {
         $stories[] = search_public_story_row($row, $query, $sort);
     }
 
-    $signalsTable = table_name($config, 'telegram_issue_signals');
-    $signalSql = 'SELECT sig.article_id, sig.related_telegram_count, sig.related_telegram_channels_count, sig.first_seen_at, sig.latest_seen_at, sig.confidence_score, sig.payload_json, sig.updated_at FROM '
-        . $signalsTable . ' sig'
-        . ' WHERE sig.latest_seen_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $days . ' DAY)'
-        . ' AND ' . telegram_signal_visibility_sql($config, 'sig')
-        . ' ORDER BY sig.related_telegram_channels_count DESC, sig.related_telegram_count DESC, sig.latest_seen_at DESC LIMIT 160';
-    $stmt = $pdo->prepare($signalSql);
-    $stmt->execute();
+    // Telegram is an internal signal source. The public compatibility search
+    // intentionally returns no Telegram rows; authorized analysis remains on
+    // the separately protected Telegram admin endpoints.
     $telegram = array();
-    $allowedTelegramHandles = active_telegram_source_keys($pdo, $config);
-    foreach ($stmt->fetchAll() as $row) {
-        $signal = search_public_telegram_row($row, $query, $sort, $allowedTelegramHandles);
-        $text = mb_strtolower(search_text_blob($signal), 'UTF-8');
-        $matches = false;
-        foreach ($tokens as $token) {
-            if (mb_strpos($text, mb_strtolower((string)$token, 'UTF-8'), 0, 'UTF-8') !== false) {
-                $matches = true;
-                break;
-            }
-        }
-        if ($matches) {
-            $telegram[] = $signal;
-        }
-    }
 
-    $articles = array_slice(search_sort_rows($articles, 'article', $query, $sort), 0, $limit);
-    $stories = array_slice(search_sort_rows($stories, 'story', $query, $sort), 0, $limit);
+    $articles = array_map(
+        'legacy_public_row',
+        array_slice(search_sort_rows($articles, 'article', $query, $sort), 0, $limit)
+    );
+    $stories = array_map(
+        'legacy_public_row',
+        array_slice(search_sort_rows($stories, 'story', $query, $sort), 0, $limit)
+    );
     $telegram = array_slice(search_sort_rows($telegram, 'telegram', $query, $sort), 0, $limit);
     $allRows = array_merge($stories, $articles, $telegram);
     $interpretation = search_query_interpretation($query, $allRows);
@@ -3296,9 +3304,13 @@ function handle_read(string $action, array $config): void {
         $stmt = $pdo->prepare('SELECT s.story_key, s.guid, s.representative_title, s.representative_url, s.relevance_level, s.theme_group, s.status, s.article_count, s.priority_score, s.source_right_id, s.published_at, s.last_article_seen_at FROM '
             . table_name($config, 'stories') . ' s WHERE ' . legacy_story_visibility_sql($config, 's') . ' ORDER BY s.sort_at DESC LIMIT ' . $limit);
         $stmt->execute();
-        respond(200, array('ok' => true, 'stories' => $stmt->fetchAll()));
+        respond(200, array(
+            'ok' => true,
+            'stories' => array_map('legacy_public_row', $stmt->fetchAll()),
+        ));
     }
     if ($action === 'telegram_reactions') {
+        require_telegram_admin_access($config);
         $limit = isset($_GET['limit']) ? max(1, min(20, (int)$_GET['limit'])) : 5;
         $days = isset($_GET['days']) ? max(1, min(180, (int)$_GET['days'])) : 180;
         $url = isset($_GET['url']) ? trim((string)$_GET['url']) : '';

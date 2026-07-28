@@ -152,6 +152,32 @@ def test_expedited_evidence_collects_seven_real_observations() -> None:
     assert "GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED" in text
 
 
+def test_expedited_preparation_rejects_telegram_recovery_payloads_and_smokes_404() -> None:
+    _text, payload = workflow("global-alpha-expedited-preparation.yml")
+    prepared = payload["jobs"]["prepare_rollback"]["steps"]
+    safety = next(
+        step
+        for step in prepared
+        if step["name"] == "Fail closed on Telegram data in prepared legacy recovery"
+    )["run"]
+    for contract in (
+        'test ! -e "$site/feed/telegram.html"',
+        'test ! -e "$site/feed/telegram-admin.html"',
+        "python -m curator.legacy_telegram_safety verify-site",
+        '--site "$site"',
+        "--minimum-dated-reports 89",
+    ):
+        assert contract in safety
+    smoke = next(
+        step
+        for step in payload["jobs"]["rollback_drill"]["steps"]
+        if step["name"] == "Smoke the deployed legacy root inside ten minutes"
+    )["run"]
+    assert "for forbidden_path in feed/telegram.html feed/telegram-admin.html" in smoke
+    assert '[[ "$status" != "404" ]]' in smoke
+    assert "--write-out '%{http_code}'" in smoke
+
+
 def test_expedited_evidence_binds_all_fixed_producers_and_gate() -> None:
     text, payload = workflow("global-alpha-expedited-preparation.yml")
     evaluate = payload["jobs"]["evaluate"]
@@ -337,6 +363,13 @@ def test_expedited_cutover_rechecks_gate_pages_and_preview() -> None:
     assert "python -m curator.expedited_legacy_recovery_bundle verify" in (
         legacy_deadline["run"]
     )
+    for contract in (
+        'test ! -e "$site/feed/telegram.html"',
+        'test ! -e "$site/feed/telegram-admin.html"',
+        "python -m curator.legacy_telegram_safety verify-site",
+        "--minimum-dated-reports 89",
+    ):
+        assert contract in legacy_deadline["run"]
     binding = next(
         step
         for step in validate["steps"]
@@ -479,10 +512,32 @@ def test_expedited_cutover_has_fail_safe_close_and_legacy_recovery() -> None:
     assert recover_pages["environment"]["name"] == "github-pages"
     assert "Restore pinned legacy artifact" in step_names(recover_pages)
     assert "evidence/expedited-legacy-recovery-bundle/full-site" in text
+    recovery_safety = next(
+        step
+        for step in recover_pages["steps"]
+        if step["name"] == "Verify pinned legacy recovery before deployment"
+    )["run"]
+    for contract in (
+        'test ! -e "$site/feed/telegram.html"',
+        'test ! -e "$site/feed/telegram-admin.html"',
+        "python -m curator.legacy_telegram_safety verify-site",
+        "--minimum-dated-reports 89",
+    ):
+        assert contract in recovery_safety
     verify = payload["jobs"]["recover_verify"]
     assert verify["environment"]["name"] == "governance-runtime"
     assert "Verify failed cutover remains fenced" in step_names(verify)
     assert "Verify closed APIs and restored legacy root" in step_names(verify)
+    recovery_smoke = next(
+        step
+        for step in verify["steps"]
+        if step["name"] == "Verify closed APIs and restored legacy root"
+    )["run"]
+    assert (
+        "for forbidden_path in feed/telegram.html feed/telegram-admin.html"
+        in recovery_smoke
+    )
+    assert '[[ "$status" != "404" ]]' in recovery_smoke
     assert '[[ "$PAGES_OWNER" == "governance" ]]' in text
     assert "must set PAGES_OWNER=legacy before disabling" in text
 

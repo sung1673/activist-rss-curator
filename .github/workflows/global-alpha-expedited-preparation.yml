@@ -417,6 +417,17 @@ jobs:
             --source-code-revision "$LEGACY_CODE_REVISION" \
             --source-artifact-digest "$LEGACY_ARTIFACT_DIGEST"
 
+      - name: Fail closed on Telegram data in prepared legacy recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          site="rollback-prepared/legacy-drill-site"
+          test ! -e "$site/feed/telegram.html"
+          test ! -e "$site/feed/telegram-admin.html"
+          python -m curator.legacy_telegram_safety verify-site \
+            --site "$site" \
+            --minimum-dated-reports 89
+
       - name: Extract and verify exact legacy plus governance Preview restore
         shell: bash
         env:
@@ -585,6 +596,18 @@ jobs:
           cmp --silent \
             legacy-pinned-date.html \
             "rollback-prepared/legacy-drill-site/feed/$pinned_date.html"
+          for forbidden_path in feed/telegram.html feed/telegram-admin.html; do
+            status="$(
+              curl --silent --show-error --location \
+                --retry 6 --retry-all-errors \
+                --output /dev/null --write-out '%{http_code}' \
+                "$web/$forbidden_path?$cache_bust"
+            )"
+            if [[ "$status" != "404" ]]; then
+              echo "::error::$forbidden_path must return HTTP 404 after rollback; got $status."
+              exit 1
+            fi
+          done
           sha256sum \
             legacy-root.html legacy-feed.xml legacy-pinned-date.html \
             > deployed-legacy-sha256.txt

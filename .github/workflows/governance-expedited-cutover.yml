@@ -404,6 +404,12 @@ jobs:
             --expected-source-artifact-name "$LEGACY_ARTIFACT_NAME" \
             --expected-source-code-revision "$LEGACY_CODE_REVISION" \
             --expected-source-artifact-digest "$LEGACY_ARTIFACT_DIGEST"
+          site="evidence/expedited-legacy-recovery-bundle/full-site"
+          test ! -e "$site/feed/telegram.html"
+          test ! -e "$site/feed/telegram-admin.html"
+          python -m curator.legacy_telegram_safety verify-site \
+            --site "$site" \
+            --minimum-dated-reports 89
 
       - name: Bind exact recovery bytes for protected handoff
         shell: bash
@@ -1068,6 +1074,12 @@ jobs:
             --expected-source-artifact-name "$LEGACY_ARTIFACT_NAME" \
             --expected-source-code-revision "$LEGACY_CODE_REVISION" \
             --expected-source-artifact-digest "$LEGACY_ARTIFACT_DIGEST"
+          site="evidence/expedited-legacy-recovery-bundle/full-site"
+          test ! -e "$site/feed/telegram.html"
+          test ! -e "$site/feed/telegram-admin.html"
+          python -m curator.legacy_telegram_safety verify-site \
+            --site "$site" \
+            --minimum-dated-reports 89
 
       - name: Configure Pages for automatic recovery
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
@@ -1142,6 +1154,19 @@ jobs:
             "$v1_api/admin/release-state" | jq -e '.release_state == "closed"'
           curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
             "${BSIDE_PUBLIC_WEB_URL%/}/" --output restored-root.html
+          cache_bust="expedited-recovery-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          for forbidden_path in feed/telegram.html feed/telegram-admin.html; do
+            status="$(
+              curl --silent --show-error --location \
+                --retry 3 --retry-all-errors \
+                --output /dev/null --write-out '%{http_code}' \
+                "${BSIDE_PUBLIC_WEB_URL%/}/$forbidden_path?$cache_bust"
+            )"
+            if [[ "$status" != "404" ]]; then
+              echo "::error::$forbidden_path must return HTTP 404 after recovery; got $status."
+              exit 1
+            fi
+          done
           if grep -q --fixed-strings "Production Alpha · Early Access" restored-root.html; then
             echo "::error::Legacy recovery did not restore the legacy root."
             exit 1

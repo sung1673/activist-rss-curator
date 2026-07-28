@@ -1134,6 +1134,55 @@ def test_telegram_admin_token_is_header_only():
     assert "$_GET['admin_token']" not in API
 
 
+def test_telegram_reactions_requires_admin_access_before_reading_inputs():
+    reactions = API[
+        API.index("if ($action === 'telegram_reactions') {") :
+    ]
+    assert reactions.index("require_telegram_admin_access($config);") < reactions.index(
+        "$limit = isset($_GET['limit'])"
+    )
+
+
+def test_public_legacy_search_never_queries_or_returns_telegram_signal_data():
+    search = API[
+        API.index("function handle_search(PDO $pdo, array $config): void {") :
+        API.index("function handle_read(string $action, array $config): void {")
+    ]
+    assert "$telegram = array();" in search
+    assert "telegram_issue_signals" not in search
+    assert "search_public_telegram_row" not in search
+    assert "active_telegram_source_keys" not in search
+
+
+def test_legacy_public_rows_strip_internal_scores_and_workflow_fields():
+    helper = API[
+        API.index("function legacy_public_row(array $row): array {") :
+        API.index("function telegram_event_token(string $token): bool {")
+    ]
+    for field in (
+        "status",
+        "reason",
+        "priority_score",
+        "priority_level",
+        "source_right_id",
+        "search_score",
+        "score_breakdown",
+        "signal_score",
+        "analysis_bucket",
+        "queue_status",
+        "review_status",
+        "payload_json",
+        "idempotency_key",
+    ):
+        assert f"'{field}'" in helper
+    assert "array_map('legacy_public_row', $stmt->fetchAll())" in API
+    search = API[
+        API.index("function handle_search(PDO $pdo, array $config): void {") :
+        API.index("function handle_read(string $action, array $config): void {")
+    ]
+    assert search.count("'legacy_public_row'") >= 2
+
+
 def test_shared_host_preserves_standard_authorization_header():
     assert 'SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1' in HTACCESS
     assert "Options -Indexes" in HTACCESS

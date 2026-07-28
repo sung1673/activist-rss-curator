@@ -34,6 +34,7 @@ def build_archive(
     duplicate: bool = False,
     unsafe_path: bool = False,
     symlink: bool = False,
+    embedded_telegram: bool = False,
 ) -> Path:
     missing = missing or set()
     with zipfile.ZipFile(path, "w") as archive:
@@ -44,9 +45,17 @@ def build_archive(
             report_date = WINDOW_END - timedelta(days=report_days - offset - 1)
             if report_date in missing:
                 continue
+            payload = html_payload(report_date)
+            if embedded_telegram and report_date == WINDOW_END:
+                payload = (
+                    b"<!doctype html><html><body>"
+                    b"<script data-story-telegram-mentions>"
+                    b'[{"message_url":"https://t.me/private/42"}]'
+                    b"</script></body></html>"
+                )
             archive.writestr(
                 f"feed/{report_date.isoformat()}.html",
-                html_payload(report_date),
+                payload,
             )
         if duplicate:
             with warnings.catch_warnings():
@@ -110,6 +119,19 @@ def test_prepare_rejects_artifact_digest_mismatch(tmp_path: Path) -> None:
         prepare_legacy_feed_compatibility(archive, tmp_path / "compat", identity=wrong)
 
 
+def test_prepare_redacts_embedded_telegram_exposure(tmp_path: Path) -> None:
+    archive = build_archive(tmp_path / "legacy.zip", embedded_telegram=True)
+    output = tmp_path / "compat"
+    identity = identity_for(archive)
+
+    prepare_legacy_feed_compatibility(archive, output, identity=identity)
+
+    report = (output / "feed" / f"{WINDOW_END.isoformat()}.html").read_bytes()
+    assert b"data-story-telegram-mentions>[]</script>" in report
+    assert b"https://t.me/" not in report
+    assert verify_legacy_feed_compatibility(output, expected_identity=identity)
+
+
 def test_prepare_fails_closed_when_90_continuous_days_do_not_exist(tmp_path: Path) -> None:
     missing = {WINDOW_END - timedelta(days=10)}
     archive = build_archive(tmp_path / "legacy.zip", report_days=91, missing=missing)
@@ -156,6 +178,23 @@ def test_verify_rejects_tampered_report_and_manifest_count(tmp_path: Path) -> No
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     with pytest.raises(LegacyFeedCompatibilityError, match="count must be exactly 90"):
+        verify_legacy_feed_compatibility(output, expected_identity=identity)
+
+
+def test_verify_rejects_reintroduced_telegram_exposure(tmp_path: Path) -> None:
+    archive = build_archive(tmp_path / "legacy.zip")
+    output = tmp_path / "compat"
+    identity = identity_for(archive)
+    prepare_legacy_feed_compatibility(archive, output, identity=identity)
+    report = output / "feed" / f"{WINDOW_END.isoformat()}.html"
+    report.write_bytes(
+        b"<!doctype html><html><body>"
+        b"<script data-story-telegram-mentions>"
+        b'[{"message_url":"https://t.me/private/42"}]'
+        b"</script></body></html>"
+    )
+
+    with pytest.raises(LegacyFeedCompatibilityError, match="Telegram"):
         verify_legacy_feed_compatibility(output, expected_identity=identity)
 
 

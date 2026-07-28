@@ -158,7 +158,7 @@ def test_cutover_uses_same_sha_protected_evidence_and_pages_artifacts() -> None:
         for step in validate["steps"]
         if step["name"] == "Preserve verified legacy recovery for cutover and rollback"
     )
-    assert carry["with"]["name"] == "legacy-recovery-carry-forward"
+    assert carry["with"]["name"] == "legacy-recovery-carry-forward-v2"
     assert carry["with"]["retention-days"] == "90"
     config = next(
         step
