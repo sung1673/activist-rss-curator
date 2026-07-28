@@ -2807,7 +2807,7 @@ def exercise_dart_review_corpus(base_url: str, mysql_container_id: str) -> None:
         f"mysql8\n{server_uuid}\n{database_name}\nci_".encode()
     ).hexdigest()
     to_day = datetime.now(KST).date()
-    from_day = to_day - timedelta(days=1)
+    from_day = to_day - timedelta(days=2)
     receipt_date = from_day.strftime("%Y%m%d")
     external_ids = tuple(
         f"{receipt_date}{999101 + index:06d}"
@@ -3124,9 +3124,11 @@ def exercise_dart_review_corpus(base_url: str, mysql_container_id: str) -> None:
         mysql_execute(mysql_container_id, restore_sql)
 
     mismatched_published = (
-        datetime.combine(from_day, datetime.min.time(), KST)
-        .replace(minute=30)
-        .astimezone(timezone.utc)
+        datetime.combine(
+            from_day + timedelta(days=1),
+            datetime.min.time(),
+            timezone.utc,
+        )
         .strftime("%Y-%m-%d %H:%M:%S")
     )
     mysql_execute(
@@ -3135,15 +3137,21 @@ def exercise_dart_review_corpus(base_url: str, mysql_container_id: str) -> None:
         f"SET published_at='{mismatched_published}' "
         f"WHERE document_id='{document_ids[3]}'",
     )
-    receipt_mismatch, _ = request_json(
+    later_publication_date, _ = request_json(
         base_url,
         path,
         token=ADMIN_TOKEN,
-        expected_status=503,
     )
     require(
-        receipt_mismatch.get("error") == "dart_review_corpus_identity_error",
-        repr(receipt_mismatch),
+        later_publication_date.get("ok") is True
+        and later_publication_date.get("population_count") == 4
+        and any(
+            item.get("document_id") == document_ids[3]
+            and item.get("published_at")
+            == mismatched_published.replace(" ", "T") + "Z"
+            for item in later_publication_date.get("items", [])
+        ),
+        repr(later_publication_date),
     )
     mysql_execute(
         mysql_container_id,

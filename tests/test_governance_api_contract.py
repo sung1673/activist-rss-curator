@@ -2150,7 +2150,7 @@ def test_dart_review_corpus_is_private_exact_bounded_and_digest_compatible():
     assert "$correctionOf === $documentId" in section
     assert "successor.document_id<>d.document_id" in section
     assert "createFromFormat('!Ymd',substr($externalId,0,8)" in section
-    assert "str_replace('-','',substr($publishedAt,0,10))" in section
+    assert "str_replace('-','',substr($publishedAt,0,10))" not in section
     assert "v1_dart_review_corpus_required_text($companyName,255)" in section
     assert "v1_dart_review_corpus_required_text($title,700)" in section
     assert "/^[a-z]{2,3}(?:-[A-Z]{2})?$/" in section
