@@ -37,6 +37,7 @@ _DNS_HOST = re.compile(
 )
 _MAX_RESPONSE_BYTES = 512_000
 _MAX_ALLOWLIST_BYTES = 50_000
+_IDEMPOTENT_GET_TRANSPORT_ATTEMPTS = 3
 _PRODUCTION_V1_BASE = "https://alignpe.gabia.io/activist/api.php/api/v1"
 _ALLOWED_EXISTING_CONNECTOR_STATUSES = {
     "active",
@@ -340,6 +341,7 @@ class _BootstrapClient:
                 "Accept": "application/json",
                 "Authorization": f"Bearer {self._token}",
                 "Cache-Control": "no-cache",
+                "Connection": "close",
             },
         )
 
@@ -365,31 +367,45 @@ class _BootstrapClient:
         params: Mapping[str, str | int] | None = None,
         api_version: str,
     ) -> dict[str, object]:
-        try:
-            response = self._client.request(
-                method,
-                url,
-                content=(
-                    json.dumps(
-                        payload,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                        sort_keys=True,
-                    ).encode("utf-8")
-                    if payload is not None
-                    else None
-                ),
-                params=params,
-                headers=(
-                    {"Content-Type": "application/json; charset=utf-8"}
-                    if payload is not None
-                    else None
-                ),
-            )
-        except httpx.HTTPError as exc:
+        content = (
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+            if payload is not None
+            else None
+        )
+        request_headers = (
+            {"Content-Type": "application/json; charset=utf-8"}
+            if payload is not None
+            else None
+        )
+        attempts = (
+            _IDEMPOTENT_GET_TRANSPORT_ATTEMPTS
+            if method.upper() == "GET"
+            else 1
+        )
+        response: httpx.Response | None = None
+        last_error: httpx.HTTPError | None = None
+        for _attempt in range(attempts):
+            try:
+                response = self._client.request(
+                    method,
+                    url,
+                    content=content,
+                    params=params,
+                    headers=request_headers,
+                )
+                break
+            except httpx.HTTPError as exc:
+                last_error = exc
+        if response is None:
+            assert last_error is not None
             raise SourceRightBootstrapError(
-                f"{operation} transport failed ({type(exc).__name__})"
-            ) from exc
+                f"{operation} transport failed ({type(last_error).__name__})"
+            ) from None
         content = response.content
         content_type = response.headers.get("content-type", "").casefold()
         if (

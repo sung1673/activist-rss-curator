@@ -181,8 +181,12 @@ def load_env_files(
     return loaded
 
 
-def job_contract(options: BackfillOptions) -> dict[str, object]:
-    return {
+def job_contract(
+    options: BackfillOptions,
+    *,
+    code_revision: str | None = None,
+) -> dict[str, object]:
+    contract: dict[str, object] = {
         "range_start": options.start.isoformat(),
         "range_end_exclusive": options.end_exclusive.isoformat(),
         "chunk_days": options.chunk_days,
@@ -191,6 +195,9 @@ def job_contract(options: BackfillOptions) -> dict[str, object]:
         "max_pages": options.max_pages,
         "sync_company_master": options.sync_company_master,
     }
+    if code_revision is not None:
+        contract["code_revision"] = code_revision
+    return contract
 
 
 def job_fingerprint(job: Mapping[str, object]) -> str:
@@ -476,7 +483,7 @@ def _run_backfill(
 
     options.validate()
     code_revision = None if options.dry_run else _code_revision()
-    job = job_contract(options)
+    job = job_contract(options, code_revision=code_revision)
     fingerprint = job_fingerprint(job)
     remote_version = 0
     store: CheckpointStore | None = None

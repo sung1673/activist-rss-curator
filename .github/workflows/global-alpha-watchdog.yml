@@ -1,4 +1,8 @@
-name: Production Alpha watchdog
+name: Production Alpha diagnostic watchdog
+
+# GitHub scheduled workflows are best-effort and can be delayed or coalesced.
+# This workflow remains useful for operational diagnostics, but release
+# evidence is produced only by global-alpha-observation-chain.yml.
 
 on:
   schedule:

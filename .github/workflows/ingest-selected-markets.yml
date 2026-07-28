@@ -75,12 +75,52 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
+      - name: Validate the public and privileged API binding
+        env:
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+        run: python .github/scripts/validate-api-base-urls.py --github-env "$GITHUB_ENV"
+
+      - name: Verify exact active API v2 release boundary
+        env:
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          smoke_args=(
+            --base-url "${v1_api%/api/v1}/api/v2"
+            --expected-sha "$GITHUB_SHA"
+            --privileged-token-env BSIDE_OPS_TOKEN
+          )
+          if [[ "$GOVERNANCE_PIPELINE_MODE" == "shadow" ]]; then
+            smoke_args+=(
+              --release-state preview
+              --preview-token-env GOVERNANCE_PREVIEW_TOKEN
+            )
+          elif [[ "$GOVERNANCE_PIPELINE_MODE" == "live" ]]; then
+            smoke_args+=(--release-state live)
+          else
+            echo "::error::Selected-market refresh requires shadow or live pipeline mode."
+            exit 1
+          fi
+          python .github/scripts/smoke-global-v2.py "${smoke_args[@]}"
+
       - name: Validate and ingest approved manual metadata links
         shell: bash
         env:
+          GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
           EVIDENCE_PATH: ${{ runner.temp }}/manual-official-link-ingest-${{ matrix.country }}.json
         run: |
           set -euo pipefail
+          if [[ "$GOVERNANCE_PIPELINE_MODE" == "shadow" ]]; then
+            export GLOBAL_INGEST_EXPECTED_RELEASE_STATE=preview
+          elif [[ "$GOVERNANCE_PIPELINE_MODE" == "live" ]]; then
+            export GLOBAL_INGEST_EXPECTED_RELEASE_STATE=live
+          else
+            echo "::error::Selected-market refresh requires shadow or live pipeline mode."
+            exit 1
+          fi
           python -m curator.selected_market_ingest \
             --country "${{ matrix.country }}" \
             --code-revision "$GITHUB_SHA" \

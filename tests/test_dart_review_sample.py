@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import traceback
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
@@ -178,6 +179,80 @@ def test_client_pages_complete_corpus_and_verifies_digest() -> None:
     assert snapshot.backend_binding_id == BACKEND_BINDING_ID
     assert snapshot.corpus_sha256 == corpus_sha256(items)
     assert len(snapshot.items) == 137
+
+
+def test_client_retries_transient_read_timeout_on_a_fresh_get() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        assert request.headers["Connection"] == "close"
+        if calls == 1:
+            raise httpx.ReadTimeout(
+                f"transient {OPS_TOKEN}",
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            json=response_payload(
+                all_items=[],
+                page_items=[],
+                next_cursor=None,
+            ),
+        )
+
+    snapshot = mock_client(handler).fetch(
+        from_date=FROM_DATE,
+        to_date=TO_DATE,
+    )
+
+    assert calls == 2
+    assert snapshot.population_count == 0
+
+
+def test_client_bounds_transport_retries_and_does_not_retry_http_contracts() -> None:
+    transport_calls = 0
+
+    def transport_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal transport_calls
+        transport_calls += 1
+        raise httpx.RemoteProtocolError(
+            f"hostile {OPS_TOKEN}",
+            request=request,
+        )
+
+    with pytest.raises(DartReviewApiError, match="RemoteProtocolError") as error:
+        mock_client(transport_handler).fetch(
+            from_date=FROM_DATE,
+            to_date=TO_DATE,
+        )
+    assert transport_calls == 3
+    assert OPS_TOKEN not in str(error.value)
+    assert OPS_TOKEN not in "".join(
+        traceback.format_exception(error.type, error.value, error.tb)
+    )
+
+    response_calls = 0
+
+    def response_handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal response_calls
+        response_calls += 1
+        return httpx.Response(
+            503,
+            json=response_payload(
+                all_items=[],
+                page_items=[],
+                next_cursor=None,
+            ),
+        )
+
+    with pytest.raises(DartReviewApiError, match="HTTP 503"):
+        mock_client(response_handler).fetch(
+            from_date=FROM_DATE,
+            to_date=TO_DATE,
+        )
+    assert response_calls == 1
 
 
 def test_stratified_sample_is_input_order_invariant_and_balanced() -> None:
@@ -383,6 +458,7 @@ def backfill_files(
 ) -> tuple[Path, Path]:
     window_count = (to_date - from_date).days
     contract: dict[str, object] = {
+        "code_revision": code_revision,
         "range_start": from_date.isoformat(),
         "range_end_exclusive": to_date.isoformat(),
         "chunk_days": 1,
@@ -406,10 +482,13 @@ def backfill_files(
         next_date = cursor + timedelta(days=1)
         accepted = base_count + (1 if index < remainder else 0)
         key = f"{cursor.isoformat()}:{next_date.isoformat()}"
+        idempotency_digest = hashlib.sha256(
+            f"{fingerprint}|{key}".encode("utf-8")
+        ).hexdigest()[:32]
         completed[key] = {
             "window_start": cursor.isoformat(),
             "window_end_exclusive": next_date.isoformat(),
-            "idempotency_key": f"official-backfill-v1:{index:032x}",
+            "idempotency_key": f"official-backfill-v1:{idempotency_digest}",
             "attempt": 1,
             "code_revision": code_revision,
             "status": "succeeded",
@@ -423,8 +502,11 @@ def backfill_files(
                 "official_remote_failed": 0,
                 "official_remote_skipped": 0,
                 "official_remote_synced": 1,
+                "official_dart_requests": 9,
+                "official_dart_fetched": accepted,
                 "official_dart_accepted": accepted,
                 "official_dart_errors": 0,
+                "official_dart_quota_exhausted": 0,
             },
         }
         cursor = next_date
@@ -549,6 +631,183 @@ def test_backfill_evidence_rejects_revision_mismatch(
         checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
 
     with pytest.raises(DartReviewSampleError, match="complete applied range|unacknowledged"):
+        validate_backfill_evidence(
+            report_path=report_path,
+            checkpoint_path=checkpoint_path,
+            from_date=SAMPLE_FROM_DATE,
+            to_date=SAMPLE_TO_DATE,
+            population_count=120,
+            code_revision=CODE_REVISION,
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "value"),
+    (
+        ("missing_revision", None),
+        ("wrong_revision", "b" * 40),
+        ("combined_sources", ["dart", "kind"]),
+    ),
+)
+def test_backfill_evidence_rejects_non_dart_release_job(
+    tmp_path: Path,
+    mutation: str,
+    value: object,
+) -> None:
+    report_path, checkpoint_path = backfill_files(
+        tmp_path,
+        from_date=SAMPLE_FROM_DATE,
+        to_date=SAMPLE_TO_DATE,
+        population_count=120,
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    job = checkpoint["job"]
+    job.pop("fingerprint")
+    if mutation == "missing_revision":
+        job.pop("code_revision")
+    elif mutation == "wrong_revision":
+        job["code_revision"] = value
+    else:
+        job["sources"] = value
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            job,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    job["fingerprint"] = fingerprint
+    report["job_fingerprint"] = fingerprint
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+
+    with pytest.raises(DartReviewSampleError, match="job does not match"):
+        validate_backfill_evidence(
+            report_path=report_path,
+            checkpoint_path=checkpoint_path,
+            from_date=SAMPLE_FROM_DATE,
+            to_date=SAMPLE_TO_DATE,
+            population_count=120,
+            code_revision=CODE_REVISION,
+        )
+
+
+def test_backfill_evidence_rejects_prefix_only_window_idempotency(
+    tmp_path: Path,
+) -> None:
+    report_path, checkpoint_path = backfill_files(
+        tmp_path,
+        from_date=SAMPLE_FROM_DATE,
+        to_date=SAMPLE_TO_DATE,
+        population_count=120,
+    )
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    first = next(iter(checkpoint["completed_windows"].values()))
+    first["idempotency_key"] = "official-backfill-v1:" + "0" * 32
+    checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+
+    with pytest.raises(DartReviewSampleError, match="unacknowledged window"):
+        validate_backfill_evidence(
+            report_path=report_path,
+            checkpoint_path=checkpoint_path,
+            from_date=SAMPLE_FROM_DATE,
+            to_date=SAMPLE_TO_DATE,
+            population_count=120,
+            code_revision=CODE_REVISION,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("official_remote_raw_count", 5),
+        ("official_remote_synced", 0),
+        ("official_dart_requests", 0),
+        ("official_dart_fetched", 3),
+        ("official_dart_accepted", 5),
+        ("official_dart_errors", 1),
+        ("official_dart_quota_exhausted", 1),
+    ),
+)
+def test_backfill_evidence_rejects_incomplete_dart_ack_summary(
+    tmp_path: Path,
+    field: str,
+    value: int,
+) -> None:
+    report_path, checkpoint_path = backfill_files(
+        tmp_path,
+        from_date=SAMPLE_FROM_DATE,
+        to_date=SAMPLE_TO_DATE,
+        population_count=120,
+    )
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    first = next(iter(checkpoint["completed_windows"].values()))
+    first["summary"][field] = value
+    checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+
+    with pytest.raises(DartReviewSampleError, match="unacknowledged window"):
+        validate_backfill_evidence(
+            report_path=report_path,
+            checkpoint_path=checkpoint_path,
+            from_date=SAMPLE_FROM_DATE,
+            to_date=SAMPLE_TO_DATE,
+            population_count=120,
+            code_revision=CODE_REVISION,
+        )
+
+
+def test_backfill_evidence_accepts_zero_filing_day_with_actual_request(
+    tmp_path: Path,
+) -> None:
+    report_path, checkpoint_path = backfill_files(
+        tmp_path,
+        from_date=SAMPLE_FROM_DATE,
+        to_date=SAMPLE_TO_DATE,
+        population_count=0,
+    )
+    evidence = validate_backfill_evidence(
+        report_path=report_path,
+        checkpoint_path=checkpoint_path,
+        from_date=SAMPLE_FROM_DATE,
+        to_date=SAMPLE_TO_DATE,
+        population_count=0,
+        code_revision=CODE_REVISION,
+    )
+    assert evidence.expected_dart_document_count == 0
+    assert evidence.completed_window_count == 30
+
+
+def test_backfill_evidence_rejects_completed_window_outside_job_range(
+    tmp_path: Path,
+) -> None:
+    report_path, checkpoint_path = backfill_files(
+        tmp_path,
+        from_date=SAMPLE_FROM_DATE,
+        to_date=SAMPLE_TO_DATE,
+        population_count=120,
+    )
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    first_key = next(iter(checkpoint["completed_windows"]))
+    first = checkpoint["completed_windows"].pop(first_key)
+    outside_start = SAMPLE_FROM_DATE - timedelta(days=1)
+    outside_end = outside_start + timedelta(days=1)
+    outside_key = f"{outside_start.isoformat()}:{outside_end.isoformat()}"
+    first["window_start"] = outside_start.isoformat()
+    first["window_end_exclusive"] = outside_end.isoformat()
+    digest = hashlib.sha256(
+        (
+            checkpoint["job"]["fingerprint"]
+            + "|"
+            + outside_key
+        ).encode("utf-8")
+    ).hexdigest()[:32]
+    first["idempotency_key"] = f"official-backfill-v1:{digest}"
+    checkpoint["completed_windows"][outside_key] = first
+    checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+
+    with pytest.raises(DartReviewSampleError, match="every requested"):
         validate_backfill_evidence(
             report_path=report_path,
             checkpoint_path=checkpoint_path,

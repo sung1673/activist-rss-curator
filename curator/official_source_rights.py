@@ -18,6 +18,7 @@ _REVISION_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _RELEASE_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _PRODUCTION_V2_BASE = "https://alignpe.gabia.io/activist/api.php/api/v2"
 _MAX_RESPONSE_BYTES = 512_000
+_IDEMPOTENT_GET_TRANSPORT_ATTEMPTS = 3
 _DART_RELEASE_STATE_BY_PIPELINE_MODE = {
     "dart_canary": "closed",
     "shadow": "preview",
@@ -238,6 +239,33 @@ class GlobalOfficialSourceRightClient:
                 "global official ingest requires a v2 API URL and BSIDE_OPS_TOKEN"
             )
 
+    def _get_with_transport_retry(
+        self,
+        client: httpx.Client,
+        url: str,
+        *,
+        params: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        """Retry an idempotent GET on a fresh connection after transport failure."""
+
+        last_error: httpx.TransportError | None = None
+        for attempt in range(_IDEMPOTENT_GET_TRANSPORT_ATTEMPTS):
+            try:
+                if attempt == 0:
+                    return client.get(url, params=params, headers=headers)
+                with self.client_factory(
+                    timeout=self.timeout,
+                    transport=self.transport,
+                    follow_redirects=False,
+                ) as retry_client:
+                    return retry_client.get(url, params=params, headers=headers)
+            except httpx.TransportError as exc:
+                last_error = exc
+        if last_error is None:  # pragma: no cover - defensive invariant
+            raise RuntimeError("idempotent GET retry exhausted without an error")
+        raise last_error
+
     def check(
         self,
         source_right_id: str,
@@ -426,10 +454,12 @@ class DartOfficialSourceRightClient(GlobalOfficialSourceRightClient):
             "Accept": "application/json",
             "Authorization": f"Bearer {self.token}",
             "Cache-Control": "no-cache",
+            "Connection": "close",
         }
         public_headers = {
             "Accept": "application/json",
             "Cache-Control": "no-cache",
+            "Connection": "close",
         }
         try:
             with self.client_factory(
@@ -437,7 +467,8 @@ class DartOfficialSourceRightClient(GlobalOfficialSourceRightClient):
                 transport=self.transport,
                 follow_redirects=False,
             ) as client:
-                health_response = client.get(
+                health_response = self._get_with_transport_retry(
+                    client,
                     f"{self.base_url}/health",
                     headers=headers,
                 )
@@ -454,7 +485,8 @@ class DartOfficialSourceRightClient(GlobalOfficialSourceRightClient):
                         "OpenDART deployed release does not match the exact SHA/schema 12"
                     )
 
-                v1_health_response = client.get(
+                v1_health_response = self._get_with_transport_retry(
+                    client,
                     f"{self.v1_base_url}/health",
                     headers=public_headers,
                 )
@@ -476,7 +508,8 @@ class DartOfficialSourceRightClient(GlobalOfficialSourceRightClient):
                 # This intentionally has no Authorization header. Its exact
                 # public contract independently proves the v1 state without
                 # granting the collector admin or preview access.
-                v1_events_response = client.get(
+                v1_events_response = self._get_with_transport_retry(
+                    client,
                     f"{self.v1_base_url}/events",
                     params={"limit": "1"},
                     headers=public_headers,
@@ -513,7 +546,8 @@ class DartOfficialSourceRightClient(GlobalOfficialSourceRightClient):
                         f"{expected_release_state} contract"
                     )
 
-                state_response = client.get(
+                state_response = self._get_with_transport_retry(
+                    client,
                     f"{self.base_url}/ops/release-state",
                     headers=headers,
                 )
@@ -532,7 +566,8 @@ class DartOfficialSourceRightClient(GlobalOfficialSourceRightClient):
                         f"{expected_release_state} contract"
                     )
 
-                eligibility_response = client.get(
+                eligibility_response = self._get_with_transport_retry(
+                    client,
                     f"{self.base_url}/ops/source-right-eligibility",
                     params={
                         "source_right_id": "official:dart",
@@ -547,7 +582,7 @@ class DartOfficialSourceRightClient(GlobalOfficialSourceRightClient):
         except httpx.HTTPError as exc:
             raise OfficialSourceRightError(
                 f"OpenDART apply preflight request failed: {type(exc).__name__}"
-            ) from exc
+            ) from None
 
         revision = eligibility_payload.get("rights_revision")
         contract_revision = eligibility_payload.get("contract_revision")

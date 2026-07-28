@@ -8,9 +8,9 @@
 
 다음을 먼저 확인한다.
 
-- release candidate가 기본 branch에 있으며 30일 수집·24시간 watchdog·사람 검수에 사용한 40자리 SHA와 같다.
+- release candidate가 기본 branch에 있으며 30일 수집·24시간 self-chained 관측·사람 검수에 사용한 40자리 SHA와 같다.
 - 최근 48시간 이내 같은 SHA에서 생성된 `global-alpha-release-evidence` artifact가 있고, 전환 시점의 run 생성·`evidence_as_of`·관측 종료 시각은 모두 60분 이내다.
-- evidence에는 DB에서 다시 계산한 DART·SEC 정확히 2개 실제 connector의 30일 수집 영수증, 최소 287개 watchdog 관측, 실제 사건 60건·동일 사건 후보 120쌍·Top 5 사람 검수, 화면·성능·롤백 훈련과 감독자·SourceRight 승인이 있다.
+- evidence에는 DB에서 다시 계산한 DART·SEC 정확히 2개 실제 connector의 30일 수집 영수증, 5개 immutable segment에 담긴 288개 실제 관측, 실제 사건 60건·동일 사건 후보 120쌍·Top 5 사람 검수, 화면·성능·롤백 훈련과 감독자·SourceRight 승인이 있다.
 - 필수 4개국 범위는 `KR/US=market-wide`, `CA/AU=link-only`다. JP·GB는 dormant identity이며 `link-only`, `coverage_unavailable`, `public_ready=false`, raw·ACK 0으로 표시된다. 캐나다 SEDAR+와 호주 ASX 전문, 일본 TDnet과 영국 RNS 전문을 수집하거나 저장하지 않는다.
 - 같은 SHA의 `daily.yml` 성공 run에 `pages-<run_id>-<attempt>` governance artifact가 있고, 그 exact run·attempt·artifact ID·이름·GitHub digest·전체 사이트 content digest가 Alpha evidence의 `pages-artifact-identity.json`에 고정돼 있다.
 - v1과 v2 서버 release state가 모두 승인된 `preview`이며 state version이 증빙 이후 바뀌지 않았다.
@@ -21,7 +21,7 @@
 - 보호된 release 설정에 `BSIDE_ADMIN_TOKEN`, `BSIDE_RELEASE_AUTHORIZER_TOKEN`, `GOVERNANCE_PREVIEW_TOKEN`이 있고 `GOVERNANCE_API_BASE_URL`이 실제 Gabia API base를 가리킨다.
 - `BSIDE_RELEASE_AUTHORIZER_TOKEN`은 reviewer가 보호하는 `governance-release` environment에만 있고, PHP에는 평문이 아닌 정확한 `release_authorizer` 역할의 SHA-256으로 등록되어 있다. 일반 admin token은 승인 발급에 사용할 수 없다.
 
-`Governance protected cutover`에는 evidence run ID/name과 8자 이상의 사유만 입력한다. 별도 governance Pages run ID/name 입력은 받지 않는다. workflow는 evidence에 고정된 daily run·attempt·artifact ID·이름·GitHub SHA-256만 다시 조회해 다운로드하며, 같은 SHA의 다른 artifact도 거절한다. 다운로드 뒤 root와 `/governance`의 `index.html`, `config.js`, `app.js`, `styles.css`가 서로 byte-identical인지, 해당 terminal content identity가 24시간 watchdog 전 관측과 같은지, 전체 사이트 content digest가 evidence와 같은지 재계산한다. 하나라도 다르거나 digest mismatch가 발생하면 배포 전 fail-closed한다.
+`Governance protected cutover`에는 evidence run ID/name과 8자 이상의 사유만 입력한다. 별도 governance Pages run ID/name 입력은 받지 않는다. workflow는 evidence에 고정된 daily run·attempt·artifact ID·이름·GitHub SHA-256만 다시 조회해 다운로드하며, 같은 SHA의 다른 artifact도 거절한다. 다운로드 뒤 root와 `/governance`의 `index.html`, `config.js`, `app.js`, `styles.css`가 서로 byte-identical인지, 해당 terminal content identity가 24시간 observation chain 전 관측과 같은지, 전체 사이트 content digest가 evidence와 같은지 재계산한다. 하나라도 다르거나 digest mismatch가 발생하면 배포 전 fail-closed한다.
 
 검증된 artifact만 Pages에 올리기 전에 preview `/sources/status`가 정확히 6개
 country row를 반환하는지 확인한다. 필수 4개 connector인 KR DART·US SEC·CA

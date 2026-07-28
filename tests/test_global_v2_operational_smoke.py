@@ -409,7 +409,8 @@ def test_workflows_reuse_the_same_operational_smoke() -> None:
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
     assert "--release-state closed" in deployment
-    assert "--release-state closed" in backfill
+    assert '--release-state "$REQUIRED_RELEASE_STATE"' in backfill
+    assert "--preview-token-env GOVERNANCE_PREVIEW_TOKEN" in backfill
     assert "--release-state preview" in preview
     assert cutover.count(".github/scripts/smoke-global-v2.py") >= 3
     assert "--release-state preview" in cutover

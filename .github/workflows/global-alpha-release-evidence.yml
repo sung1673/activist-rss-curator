@@ -20,6 +20,10 @@ on:
         description: Exact immutable daily Pages artifact observed for 24 hours
         required: true
         type: string
+      observation_chain_run_id:
+        description: Segment 1 run ID of the completed protected observation chain
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -193,13 +197,15 @@ jobs:
           digest-mismatch: error
           merge-multiple: true
 
-      - name: Resolve and download 24-hour same-SHA watchdog evidence
+      - name: Resolve and download exact self-chained observation segments
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           EXPECTED_SHA: ${{ github.sha }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          ARCHIVE_ROOT: ${{ runner.temp }}/global-alpha-observation-archives
-          MANIFEST_PATH: ${{ runner.temp }}/global-alpha-observation-manifest.json
+          REQUESTED_CHAIN_RUN_ID: ${{ inputs.observation_chain_run_id }}
+          ARCHIVE_ROOT: ${{ runner.temp }}/global-alpha-observation-segment-archives
+          MANIFEST_PATH: ${{ runner.temp }}/global-alpha-observation-segment-manifest.json
+          REQUIRED_WORKFLOW_PATH: .github/workflows/global-alpha-observation-chain.yml
         with:
           script: |
             const fs = require("fs");
@@ -207,48 +213,60 @@ jobs:
             const crypto = require("crypto");
             const {owner, repo} = context.repo;
             const expectedSha = process.env.EXPECTED_SHA.toLowerCase();
+            const chainId = process.env.REQUESTED_CHAIN_RUN_ID.trim();
+            if (!/^[1-9][0-9]*$/.test(chainId)) {
+              core.setFailed("observation_chain_run_id must be a positive integer");
+              return;
+            }
             const cutoff = Date.now() - 30 * 3600000;
-            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
-              owner,
-              repo,
-              workflow_id: "global-alpha-watchdog.yml",
-              branch: process.env.DEFAULT_BRANCH,
-              status: "completed",
-              per_page: 100,
-            });
-            const selected = [];
-            for (const run of runs) {
-              const created = Date.parse(run.created_at);
+            fs.mkdirSync(process.env.ARCHIVE_ROOT, {recursive: true});
+            const segments = [];
+            let previousCreatedAt = 0;
+            for (let segmentIndex = 1; segmentIndex <= 5; segmentIndex += 1) {
+              const artifactName =
+                `global-alpha-observation-segment-${chainId}-${segmentIndex}`;
+              const artifacts = await github.paginate(
+                github.rest.actions.listArtifactsForRepo,
+                {owner, repo, name: artifactName, per_page: 100},
+              );
+              const matches = artifacts.filter(
+                (item) => item.name === artifactName && !item.expired,
+              );
               if (
-                created < cutoff ||
-                (run.head_sha || "").toLowerCase() !== expectedSha ||
-                run.head_branch !== process.env.DEFAULT_BRANCH ||
-                run.path !== ".github/workflows/global-alpha-watchdog.yml"
-              ) continue;
-              if (!["success", "failure"].includes(run.conclusion)) {
+                matches.length !== 1 ||
+                !/^sha256:[0-9a-f]{64}$/i.test(matches[0].digest || "") ||
+                !matches[0].workflow_run ||
+                !matches[0].workflow_run.id
+              ) {
                 throw new Error(
-                  `Watchdog run ${run.id} ended as ${run.conclusion}; observation continuity is invalid`,
+                  `Segment ${segmentIndex} has no unique immutable artifact`,
                 );
               }
-              const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
-                owner, repo, run_id: run.id, per_page: 100,
+              const artifact = matches[0];
+              const runResponse = await github.rest.actions.getWorkflowRun({
+                owner,
+                repo,
+                run_id: artifact.workflow_run.id,
               });
-              const expectedName = `global-alpha-observation-${run.id}-${run.run_attempt}`;
-              const matches = artifacts.filter(
-                (item) => item.name === expectedName && !item.expired,
-              );
-              if (matches.length !== 1 || !/^sha256:[0-9a-f]{64}$/i.test(matches[0].digest || "")) {
-                throw new Error(`Watchdog run ${run.id} has no unique immutable observation artifact`);
+              const run = runResponse.data;
+              const created = Date.parse(run.created_at);
+              if (
+                run.status !== "completed" ||
+                run.conclusion !== "success" ||
+                run.run_attempt !== 1 ||
+                run.event !== "workflow_dispatch" ||
+                created < cutoff ||
+                created > Date.now() + 300000 ||
+                created <= previousCreatedAt ||
+                (run.head_sha || "").toLowerCase() !== expectedSha ||
+                run.head_branch !== process.env.DEFAULT_BRANCH ||
+                run.path !== process.env.REQUIRED_WORKFLOW_PATH ||
+                (segmentIndex === 1 && String(run.id) !== chainId)
+              ) {
+                throw new Error(
+                  `Segment ${segmentIndex} failed its run provenance contract`,
+                );
               }
-              selected.push({run, artifact: matches[0]});
-            }
-            if (selected.length < 287) {
-              throw new Error(`Only ${selected.length} same-SHA watchdog artifacts were found; at least 287 are required`);
-            }
-            selected.sort((left, right) => Date.parse(left.run.created_at) - Date.parse(right.run.created_at));
-            fs.mkdirSync(process.env.ARCHIVE_ROOT, {recursive: true});
-            const manifest = [];
-            for (const {run, artifact} of selected) {
               const response = await github.rest.actions.downloadArtifact({
                 owner, repo, artifact_id: artifact.id, archive_format: "zip",
               });
@@ -259,10 +277,14 @@ jobs:
               }
               const archiveName = `${artifact.id}.zip`;
               fs.writeFileSync(path.join(process.env.ARCHIVE_ROOT, archiveName), archive);
-              manifest.push({
+              segments.push({
+                chain_id: chainId,
+                segment_index: segmentIndex,
                 run_id: String(run.id),
                 run_attempt: run.run_attempt,
                 run_conclusion: run.conclusion,
+                run_event: run.event,
+                workflow_path: run.path,
                 run_created_at: run.created_at,
                 artifact_id: String(artifact.id),
                 artifact_name: artifact.name,
@@ -270,8 +292,19 @@ jobs:
                 archive_name: archiveName,
                 code_revision: expectedSha,
               });
+              previousCreatedAt = created;
             }
-            fs.writeFileSync(process.env.MANIFEST_PATH, JSON.stringify(manifest, null, 2) + "\n");
+            const manifest = {
+              schema_version: 1,
+              kind: "bside-global-alpha-observation-segment-archive-manifest",
+              chain_id: chainId,
+              code_revision: expectedSha,
+              segments,
+            };
+            fs.writeFileSync(
+              process.env.MANIFEST_PATH,
+              JSON.stringify(manifest, null, 2) + "\n",
+            );
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -301,8 +334,8 @@ jobs:
       - name: Compile the exact candidate observation window
         run: >-
           python -m curator.global_alpha_release_gate compile-observations
-          --archive-dir "${{ runner.temp }}/global-alpha-observation-archives"
-          --manifest "${{ runner.temp }}/global-alpha-observation-manifest.json"
+          --archive-dir "${{ runner.temp }}/global-alpha-observation-segment-archives"
+          --manifest "${{ runner.temp }}/global-alpha-observation-segment-manifest.json"
           --output global-alpha-evidence/observations.jsonl
           --expected-revision "$GITHUB_SHA"
 
@@ -331,18 +364,20 @@ jobs:
           INPUT_RUN_ID: ${{ steps.protected_inputs.outputs.run_id }}
           INPUT_ARTIFACT_ID: ${{ steps.protected_inputs.outputs.artifact_id }}
           INPUT_ARTIFACT_DIGEST: ${{ steps.protected_inputs.outputs.digest }}
+          OBSERVATION_CHAIN_RUN_ID: ${{ inputs.observation_chain_run_id }}
           EVIDENCE_AS_OF: ${{ steps.alpha_gate.outputs.evidence_as_of }}
         run: |
           set -euo pipefail
           cp protected-inputs/*.json global-alpha-evidence/
-          cp "${{ runner.temp }}/global-alpha-observation-manifest.json" \
-            global-alpha-evidence/observation-artifacts.json
+          cp "${{ runner.temp }}/global-alpha-observation-segment-manifest.json" \
+            global-alpha-evidence/observation-segments.json
           jq -n \
             --arg code_revision "$GITHUB_SHA" \
             --arg evidence_as_of "$EVIDENCE_AS_OF" \
             --arg input_run_id "$INPUT_RUN_ID" \
             --arg input_artifact_id "$INPUT_ARTIFACT_ID" \
             --arg input_artifact_digest "$INPUT_ARTIFACT_DIGEST" \
+            --arg observation_chain_run_id "$OBSERVATION_CHAIN_RUN_ID" \
             --slurpfile pages global-alpha-evidence/pages-artifact-identity.json \
             '{
               schema_version: 1,
@@ -356,7 +391,11 @@ jobs:
                 artifact_digest: $input_artifact_digest
               },
               pages_artifact: $pages[0],
-              observation_workflow: ".github/workflows/global-alpha-watchdog.yml",
+              observation_chain: {
+                workflow: ".github/workflows/global-alpha-observation-chain.yml",
+                seed_run_id: $observation_chain_run_id,
+                segment_count: 5
+              },
               release_workflow: ".github/workflows/global-alpha-release-evidence.yml"
             }' > global-alpha-evidence/artifact-provenance.json
 

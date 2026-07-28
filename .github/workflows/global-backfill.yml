@@ -27,6 +27,14 @@ on:
         options:
           - apply
           - replay
+      release_state:
+        description: Exact private API boundary required before the backfill
+        required: true
+        type: choice
+        default: closed
+        options:
+          - closed
+          - preview
       max_windows:
         description: Maximum one-day windows; the full range must fit (1-31)
         required: true
@@ -134,18 +142,32 @@ jobs:
           bash .github/scripts/require-env.sh "${required[@]}"
           python .github/scripts/validate-api-base-urls.py --github-env "$GITHUB_ENV"
 
-      - name: Verify exact closed API v2 deployment
+      - name: Verify exact private API v2 deployment
         env:
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
+          REQUIRED_RELEASE_STATE: ${{ inputs.release_state }}
         shell: bash
         run: |
           set -euo pipefail
           v1_api="${GOVERNANCE_API_BASE_URL%/}"
-          python .github/scripts/smoke-global-v2.py \
-            --base-url "${v1_api%/api/v1}/api/v2" \
-            --expected-sha "$GITHUB_SHA" \
-            --release-state closed \
+          smoke_args=(
+            --base-url "${v1_api%/api/v1}/api/v2"
+            --expected-sha "$GITHUB_SHA"
+            --release-state "$REQUIRED_RELEASE_STATE"
             --privileged-token-env BSIDE_OPS_TOKEN
+          )
+          if [[ "$REQUIRED_RELEASE_STATE" == "preview" ]]; then
+            [[ "$GOVERNANCE_PIPELINE_MODE" == "shadow" ]] || {
+              echo "::error::Preview backfill requires GOVERNANCE_PIPELINE_MODE=shadow."
+              exit 1
+            }
+            smoke_args+=(--preview-token-env GOVERNANCE_PREVIEW_TOKEN)
+          elif [[ "$REQUIRED_RELEASE_STATE" != "closed" ]]; then
+            echo "::error::Backfill release_state must be closed or preview."
+            exit 1
+          fi
+          python .github/scripts/smoke-global-v2.py "${smoke_args[@]}"
 
       - name: Run sequential one-day global backfill
         env:
@@ -156,6 +178,8 @@ jobs:
           BACKFILL_MAX_WINDOWS: ${{ inputs.max_windows }}
           EVIDENCE_DIR: ${{ runner.temp }}/global-backfill-${{ matrix.country }}
           SUMMARY_PATH: ${{ runner.temp }}/global-backfill-${{ matrix.country }}-summary.json
+          GLOBAL_INGEST_EXPECTED_RELEASE_STATE: ${{ inputs.release_state }}
+          GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail

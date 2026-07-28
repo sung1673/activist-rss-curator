@@ -1527,10 +1527,13 @@ def test_global_backfill_is_bounded_serialized_and_preserves_daily_receipts() ->
         "from_date",
         "to_date",
         "mode",
+        "release_state",
         "max_windows",
     }
     assert dispatch["source"]["options"] == ["all", "US"]
     assert dispatch["mode"]["options"] == ["apply", "replay"]
+    assert dispatch["release_state"]["options"] == ["closed", "preview"]
+    assert dispatch["release_state"]["default"] == "closed"
     assert payload["permissions"] == {"contents": "read"}
     assert payload["concurrency"] == PRODUCTION_OFFICIAL_WRITE_CONCURRENCY
 
@@ -1584,14 +1587,26 @@ def test_global_backfill_is_bounded_serialized_and_preserves_daily_receipts() ->
     deployment_smoke = next(
         step
         for step in steps
-        if step["name"] == "Verify exact closed API v2 deployment"
+        if step["name"] == "Verify exact private API v2 deployment"
     )
     assert ".github/scripts/smoke-global-v2.py" in deployment_smoke["run"]
     assert '--expected-sha "$GITHUB_SHA"' in deployment_smoke["run"]
-    assert "--release-state closed" in deployment_smoke["run"]
+    assert '--release-state "$REQUIRED_RELEASE_STATE"' in deployment_smoke["run"]
     assert "--privileged-token-env BSIDE_OPS_TOKEN" in deployment_smoke["run"]
+    assert "--preview-token-env GOVERNANCE_PREVIEW_TOKEN" in (
+        deployment_smoke["run"]
+    )
+    assert '"$GOVERNANCE_PIPELINE_MODE" == "shadow"' in (
+        deployment_smoke["run"]
+    )
     assert deployment_smoke["env"]["BSIDE_OPS_TOKEN"] == (
         "${{ secrets.BSIDE_OPS_TOKEN }}"
+    )
+    assert deployment_smoke["env"]["GOVERNANCE_PREVIEW_TOKEN"] == (
+        "${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}"
+    )
+    assert deployment_smoke["env"]["REQUIRED_RELEASE_STATE"] == (
+        "${{ inputs.release_state }}"
     )
 
     run_step = next(
@@ -1610,6 +1625,12 @@ def test_global_backfill_is_bounded_serialized_and_preserves_daily_receipts() ->
     assert run_step["env"]["BACKFILL_MAX_WINDOWS"] == (
         "${{ inputs.max_windows }}"
     )
+    assert run_step["env"]["GLOBAL_INGEST_EXPECTED_RELEASE_STATE"] == (
+        "${{ inputs.release_state }}"
+    )
+    assert run_step["env"]["GOVERNANCE_PREVIEW_TOKEN"] == (
+        "${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}"
+    )
     assert "BSIDE_OPS_TOKEN" in run_step["env"]
     assert "EDINET_API_KEY" not in run_step["env"]
     assert "COMPANIES_HOUSE_API_KEY" not in run_step["env"]
@@ -1623,6 +1644,46 @@ def test_global_backfill_is_bounded_serialized_and_preserves_daily_receipts() ->
     assert preserve["with"]["if-no-files-found"] == "error"
     assert int(preserve["with"]["retention-days"]) == 30
     assert "global-backfill-${{ matrix.country }}" in preserve["with"]["path"]
+
+
+def test_global_refresh_is_exact_sha_ops_authenticated_and_preview_bound() -> None:
+    payload = yaml.load(
+        workflow_text("ingest-global.yml"),
+        Loader=yaml.BaseLoader,
+    )
+    steps = payload["jobs"]["ingest"]["steps"]
+    boundary = next(
+        step
+        for step in steps
+        if step["name"] == "Verify exact active API v2 release boundary"
+    )
+    run = boundary["run"]
+    assert '--expected-sha "$GITHUB_SHA"' in run
+    assert "--privileged-token-env BSIDE_OPS_TOKEN" in run
+    assert "--release-state preview" in run
+    assert "--preview-token-env GOVERNANCE_PREVIEW_TOKEN" in run
+    assert "--release-state live" in run
+    assert "GOVERNANCE_PIPELINE_MODE" in run
+    assert boundary["env"]["BSIDE_OPS_TOKEN"] == (
+        "${{ secrets.BSIDE_OPS_TOKEN }}"
+    )
+    assert boundary["env"]["GOVERNANCE_PREVIEW_TOKEN"] == (
+        "${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}"
+    )
+    collect = next(
+        step
+        for step in steps
+        if step["name"] == "Collect and ingest official source"
+    )
+    assert steps.index(boundary) < steps.index(collect)
+    assert collect["env"]["BSIDE_OPS_TOKEN"] == (
+        "${{ secrets.BSIDE_OPS_TOKEN }}"
+    )
+    assert collect["env"]["GOVERNANCE_PREVIEW_TOKEN"] == (
+        "${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}"
+    )
+    assert "GLOBAL_INGEST_EXPECTED_RELEASE_STATE=preview" in collect["run"]
+    assert "GLOBAL_INGEST_EXPECTED_RELEASE_STATE=live" in collect["run"]
 
 
 def test_ci_audits_python_and_browser_dependencies() -> None:

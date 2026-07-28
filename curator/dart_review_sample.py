@@ -84,6 +84,7 @@ _TOKEN_RE = re.compile(r"^[a-z][a-z0-9_.:\-]{0,63}$")
 _CURSOR_RE = re.compile(r"^[A-Za-z0-9_-]{1,512}$")
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 _REVISION_RE = re.compile(r"^[a-f0-9]{7,40}$")
+_IDEMPOTENT_GET_TRANSPORT_ATTEMPTS = 3
 _DNS_HOST_RE = re.compile(
     r"(?=.{1,253}\Z)"
     r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
@@ -430,7 +431,7 @@ class DartReviewCorpusClient:
         base_url: str | None = None,
         token: str | None = None,
         backend_binding_id: str | None = None,
-        timeout: float = 30.0,
+        timeout: float = 90.0,
         max_population: int = MAX_CORPUS_SIZE,
         transport: httpx.BaseTransport | None = None,
         client_factory: Callable[..., httpx.Client] = httpx.Client,
@@ -480,7 +481,41 @@ class DartReviewCorpusClient:
         return {
             "Accept": "application/json",
             "Authorization": f"Bearer {self.token}",
+            "Cache-Control": "no-cache",
+            "Connection": "close",
         }
+
+    def _get_with_transport_retry(
+        self,
+        client: httpx.Client,
+        *,
+        params: dict[str, str],
+    ) -> httpx.Response:
+        """Retry only an idempotent corpus GET after a transport failure."""
+
+        last_error: httpx.TransportError | None = None
+        for attempt in range(_IDEMPOTENT_GET_TRANSPORT_ATTEMPTS):
+            try:
+                if attempt == 0:
+                    return client.get(
+                        self.endpoint,
+                        params=params,
+                        headers=self._headers(),
+                    )
+                with self.client_factory(
+                    timeout=self.timeout,
+                    transport=self.transport,
+                ) as retry_client:
+                    return retry_client.get(
+                        self.endpoint,
+                        params=params,
+                        headers=self._headers(),
+                    )
+            except httpx.TransportError as exc:
+                last_error = exc
+        if last_error is None:  # pragma: no cover - defensive invariant
+            raise RuntimeError("review corpus GET retry exhausted without an error")
+        raise last_error
 
     @staticmethod
     def _response_object(response: httpx.Response) -> dict[str, object]:
@@ -529,10 +564,9 @@ class DartReviewCorpusClient:
                     }
                     if cursor is not None:
                         params["cursor"] = cursor
-                    response = client.get(
-                        self.endpoint,
+                    response = self._get_with_transport_retry(
+                        client,
                         params=params,
-                        headers=self._headers(),
                     )
                     payload = self._response_object(response)
                     if response.status_code != 200 or payload.get("ok") is not True:
@@ -637,7 +671,7 @@ class DartReviewCorpusClient:
         except httpx.HTTPError as exc:
             raise DartReviewApiError(
                 f"review corpus API request failed ({type(exc).__name__})"
-            ) from exc
+            ) from None
 
         if expected_population is None or expected_sha256 is None:
             raise DartReviewApiError("review corpus API returned no terminal page")
@@ -818,25 +852,33 @@ def _backfill_summary_succeeded(summary: Mapping[str, object]) -> bool:
         "official_remote_failed",
         "official_remote_skipped",
         "official_remote_synced",
+        "official_dart_requests",
+        "official_dart_fetched",
         "official_dart_accepted",
         "official_dart_errors",
+        "official_dart_quota_exhausted",
     )
     try:
         values = {field: _int_field(summary, field) for field in required}
     except DartReviewSampleError:
         return False
     return bool(
-        values["official_failed"] == 0
+        all(value >= 0 for value in values.values())
+        and values["official_failed"] == 0
         and values["official_skipped"] == 0
         and values["official_remote_ack_mismatches"] == 0
         and values["official_remote_run_persisted"] == 1
         and values["official_remote_raw_count"]
         == values["official_remote_ack_count"]
+        == values["official_dart_accepted"]
         and values["official_remote_failed"] == 0
         and values["official_remote_skipped"] == 0
         and values["official_remote_synced"] >= 1
-        and values["official_dart_accepted"] >= 0
+        and values["official_dart_requests"] >= 1
+        and values["official_dart_fetched"]
+        >= values["official_dart_accepted"]
         and values["official_dart_errors"] == 0
+        and values["official_dart_quota_exhausted"] == 0
     )
 
 
@@ -910,12 +952,12 @@ def validate_backfill_evidence(
     if (
         contract_sha != fingerprint
         or report.get("job_fingerprint") != fingerprint
+        or contract.get("code_revision") != revision
         or contract.get("range_start") != from_date.isoformat()
         or contract.get("range_end_exclusive") != to_date.isoformat()
         or contract.get("chunk_days") != 1
         or not isinstance(sources, list)
-        or "dart" not in sources
-        or any(source not in {"dart", "kind"} for source in sources)
+        or sources != ["dart"]
     ):
         raise DartReviewSampleError(
             "backfill checkpoint job does not match the review corpus"
@@ -932,6 +974,12 @@ def validate_backfill_evidence(
         if not isinstance(result, dict):
             raise DartReviewSampleError("backfill checkpoint window is invalid")
         start, end = key.split(":", 1)
+        idempotency_digest = hashlib.sha256(
+            f"{fingerprint}|{key}".encode("utf-8")
+        ).hexdigest()[:32]
+        expected_idempotency_key = (
+            f"official-backfill-v1:{idempotency_digest}"
+        )
         summary = result.get("summary")
         if (
             result.get("status") != "succeeded"
@@ -942,9 +990,7 @@ def validate_backfill_evidence(
             or isinstance(result.get("attempt"), bool)
             or int(result["attempt"]) < 1
             or not isinstance(result.get("idempotency_key"), str)
-            or not str(result["idempotency_key"]).startswith(
-                "official-backfill-v1:"
-            )
+            or result.get("idempotency_key") != expected_idempotency_key
             or not isinstance(summary, dict)
             or not _backfill_summary_succeeded(summary)
         ):

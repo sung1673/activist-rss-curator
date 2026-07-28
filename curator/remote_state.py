@@ -2,13 +2,53 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+import httpx
 
 from .normalize import normalize_title_parts
 from .remote_api import post_remote_action, remote_api_configured
 from .source_rights import find_source_right, source_is_authorized
 from .telegram_sources import channel_key, telegram_remote_payload_budget
+
+
+_RUNTIME_READ_ATTEMPTS = 3
+
+
+def _read_runtime_state_page(
+    payload: dict[str, object],
+    *,
+    resource: str,
+) -> dict[str, Any]:
+    """Retry only an idempotent runtime-state read on transient failures."""
+
+    for attempt in range(_RUNTIME_READ_ATTEMPTS):
+        try:
+            response = post_remote_action(
+                "export_runtime_state",
+                payload,
+                timeout=30.0,
+            )
+        except httpx.TransportError as exc:
+            if attempt + 1 >= _RUNTIME_READ_ATTEMPTS:
+                raise RuntimeError(
+                    f"runtime state export transport failed for {resource}: "
+                    f"{type(exc).__name__}"
+                ) from None
+            time.sleep(0.2 * (attempt + 1))
+            continue
+        if (
+            response.get("ok")
+            or response.get("error") != "internal_error"
+            or attempt + 1 >= _RUNTIME_READ_ATTEMPTS
+        ):
+            return response
+        time.sleep(0.2 * (attempt + 1))
+    raise RuntimeError(  # pragma: no cover - loop always returns or raises
+        f"runtime state export retry exhausted for {resource}"
+    )
 
 
 def mysql_runtime_enabled() -> bool:
@@ -165,8 +205,7 @@ def fetch_runtime_resource(
     cursor = ""
     while len(records) < max_records:
         requested_limit = min(100, max_records - len(records))
-        response = post_remote_action(
-            "export_runtime_state",
+        response = _read_runtime_state_page(
             {
                 "resource": resource,
                 "limit": requested_limit,
@@ -174,7 +213,7 @@ def fetch_runtime_resource(
                 "since": since.isoformat(),
                 "order": "updated_desc",
             },
-            timeout=30.0,
+            resource=resource,
         )
         if not response.get("ok"):
             raise RuntimeError(

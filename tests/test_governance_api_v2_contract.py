@@ -516,6 +516,11 @@ def test_automated_ingest_is_idempotent_and_never_publishes_events():
     }
     assert request["properties"]["ingest_mode"]["enum"] == ["apply", "replay"]
     assert request["properties"]["ingest_mode"]["default"] == "apply"
+    assert request["properties"]["expected_release_state"]["enum"] == [
+        "closed",
+        "preview",
+        "live",
+    ]
     envelope = SPEC["components"]["schemas"]["GlobalIngestPayload"]
     assert envelope["properties"]["records"]["maxItems"] == 500
     assert envelope["properties"]["lifecycle_observations"]["maxItems"] == 500
@@ -556,9 +561,12 @@ def test_automated_ingest_is_idempotent_and_never_publishes_events():
     )
     assert "smaller than accepted entity count" in V2_WRITE
     assert "global_ingest_idempotency_conflict" in V2_WRITE
+    assert "link-only apply requires " in V2_WRITE
+    assert "'release binding'" in V2_WRITE
     assert "global_ingest_code_revision_mismatch" in V2_WRITE
     assert "global_ingest_replay_missing" in V2_WRITE
     assert "unset($semantic['ingest_mode'])" in V2_WRITE
+    assert "unset($semantic['expected_release_state'])" in V2_WRITE
     record = SPEC["components"]["schemas"]["GlobalIngestRecord"]
     assert "metadata" in record["required"]
     assert (
@@ -594,8 +602,15 @@ def test_automated_ingest_is_idempotent_and_never_publishes_events():
     assert "\\'pending\\',\\'draft\\'" in V2_WRITE
     assert "\\'needs_review\\',NULL" in V2_WRITE
     assert "'public_events_created' => 0" in V2_WRITE
-    assert "자동 수집은 사건을 직접 공개하지 않는다" in DOCS
     operation = SPEC["paths"]["/ops/ingest"]["post"]
+    preview_header = next(
+        parameter
+        for parameter in operation["parameters"]
+        if parameter["name"] == "X-BSIDE-Preview-Token"
+    )
+    assert preview_header["in"] == "header"
+    assert preview_header["required"] is False
+    assert preview_header["schema"]["minLength"] == 32
     assert operation["x-rejected-connector-ids"] == [
         "connector:kr:dart",
         "connector:jp:edinet",
@@ -603,7 +618,97 @@ def test_automated_ingest_is_idempotent_and_never_publishes_events():
     ]
     assert "connector:kr:dart" in V2_WRITE
     assert "OpenDART uses the established official-ingest pipeline" in V2_WRITE
+    assert "자동 수집은 사건을 직접 공개하지 않는다" in DOCS
     assert "한국 공시는 기존 `official-ingest` 파이프라인" in DOCS
+
+
+def test_link_only_apply_refreshes_only_after_complete_locked_revalidation():
+    normalize = V2_WRITE[
+        V2_WRITE.index("function v2_normalize_ingest_payload") :
+        V2_WRITE.index("function v2_ingest_upsert_issuer")
+    ]
+    ingest = V2_WRITE[V2_WRITE.index("function v2_ops_ingest") :]
+    assert "link-only verification requires one complete" in normalize
+    assert "(int)$chunk['index'] !== 1" in normalize
+    assert "(int)$chunk['count'] !== 1" in normalize
+    assert "(int)$envelope['request_count'] !== 0" in normalize
+    assert "'source_manifest_sha256' => $sourceManifestSha256" in normalize
+
+    locked_right = V2_WRITE[
+        V2_WRITE.index(
+            "function v2_ingest_assert_locked_link_only_right"
+        ) : V2_WRITE.index(
+            "function v2_ingest_refresh_link_only_connector"
+        )
+    ]
+    assert "v2_source_right_ineligible_reasons(" in locked_right
+    assert "'collect'" in locked_right
+    assert "'public'" in locked_right
+    assert "v2_source_right_revision($lockedRight)" in locked_right
+    assert "$lockedRight['evidence_hash']" in locked_right
+    assert "$normalized['source_manifest_sha256']" in locked_right
+
+    complete_receipt = V2_WRITE[
+        V2_WRITE.index(
+            "function v2_ingest_link_only_receipt_is_complete"
+        ) : V2_WRITE.index(
+            "function v2_ingest_assert_locked_link_only_right"
+        )
+    ]
+    for field in (
+        "chunk_index",
+        "chunk_count",
+        "batch_raw_count",
+        "batch_acknowledged_count",
+        "request_count",
+        "batch_request_count",
+        "batch_id",
+    ):
+        assert field in complete_receipt
+    assert "global_ingest_batch_receipt_corrupt" in ingest
+
+    refresh = V2_WRITE[
+        V2_WRITE.index(
+            "function v2_ingest_refresh_link_only_connector"
+        ) : V2_WRITE.index("function v2_ops_ingest")
+    ]
+    assert "last_checked_at=?" in refresh
+    assert "last_success_at=?" in refresh
+    assert "last_observed_at=?" in refresh
+    assert "cursor_json" not in refresh
+    for forbidden_table in (
+        "global_ingest_receipts",
+        "documents",
+        "governance_events",
+    ):
+        assert forbidden_table not in refresh
+
+    replay_guard = ingest[
+        ingest.index("// Replay is strictly read-only.") :
+        ingest.index("$startedAt = gmdate")
+    ]
+    assert "!v2_ingest_is_link_only_apply($normalized)" in replay_guard
+    assert "$normalized['ingest_mode'] === 'apply'" in V2_WRITE
+
+    status_schema = SPEC["components"]["schemas"]["SourceStatus"][
+        "properties"
+    ]
+    assert "approved metadata manifest" in status_schema[
+        "last_observed_at"
+    ]["description"]
+    ingest_mode = SPEC["components"]["schemas"]["GlobalIngestRequest"][
+        "properties"
+    ]["ingest_mode"]["description"]
+    assert "replay never performs that refresh" in ingest_mode
+
+    smoke = (ROOT / "tests" / "php73_global_v2_smoke.py").read_text(
+        encoding="utf-8"
+    )
+    assert "scheduled_link_repeat" in smoke
+    assert "ca_link_replay_payload" in smoke
+    assert "incomplete_link_receipt" in smoke
+    assert "stale_link_revision" in smoke
+    assert "revoked_link_apply" in smoke
 
 
 def test_editor_review_is_optimistic_and_official_evidence_gated():
@@ -1532,6 +1637,39 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
     assert "official_backfill_checkpoints" in exporter
     assert "hash_equals($payloadHash, hash('sha256', $raw))" in exporter
     assert "alpha_evidence_duplicate_window" in exporter
+    assert "global-ingest-v2-day:us:" in exporter
+    assert "global-ingest-v2-current" in exporter
+    assert "alpha_evidence_completed_day_marker_invalid" in exporter
+    assert "function v2_alpha_dart_job_is_release_bound" in exporter
+    dart_job_binding = exporter[
+        exporter.index("function v2_alpha_dart_job_is_release_bound") :
+        exporter.index("function v2_alpha_dart_windows")
+    ]
+    assert "hash_equals($codeRevision, $job['code_revision'])" in dart_job_binding
+    assert "hash_equals($rowFingerprint, $job['fingerprint'])" in dart_job_binding
+    assert "array_keys($job['sources']) !== array(0)" in dart_job_binding
+    assert "array_values($job['sources']) !== array('dart')" in dart_job_binding
+    assert "unset($contract['fingerprint'])" in dart_job_binding
+    assert "v1_strict_canonical_json_encode(" in dart_job_binding
+    assert (
+        "hash_equals($rowFingerprint, hash('sha256', $canonical))"
+        in dart_job_binding
+    )
+    dart_windows = exporter[
+        exporter.index("function v2_alpha_dart_windows") :
+        exporter.index("function v2_alpha_content_integrity")
+    ]
+    assert "v2_alpha_dart_job_is_release_bound(" in dart_windows
+    assert "$jobFingerprint . '|' . (string)$windowKey" in dart_windows
+    assert "hash_equals(" in dart_windows
+    assert "$expectedIdempotencyKey" in dart_windows
+    assert "$remoteRawCount !== $ackCount" in dart_windows
+    assert "$acceptedCount !== $remoteRawCount" in dart_windows
+    assert "$rawCount = $summary['official_dart_fetched']" in dart_windows
+    assert "$summary['official_remote_synced'] < 1" in dart_windows
+    assert "$summary['official_dart_requests'] < 1" in dart_windows
+    assert "$summary['official_dart_quota_exhausted'] !== 0" in dart_windows
+    assert "alpha_evidence_dart_window_outside_job" in dart_windows
     assert "v2_alpha_latest_contiguous_windows" in exporter
     assert "'filtered_out_count' =>" in exporter
     assert "'accepted_count' =>" in exporter
@@ -1545,6 +1683,44 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
     assert "array('sec-edgar', 'US', 'connector:us:sec-edgar')" in exporter
     assert "array('edinet', 'JP'" not in exporter
     assert "array('companies-house', 'GB'" not in exporter
+
+    smoke = (ROOT / "tests" / "php73_global_v2_smoke.py").read_text(
+        encoding="utf-8"
+    )
+    assert "accepted = 0 if index == 0 else 1" in smoke
+    assert '"official_dart_requests": 9' in smoke
+    for rejection_case in (
+        "missing job revision",
+        "wrong job revision",
+        "combined DART KIND sources",
+        "row fingerprint mismatch",
+        "canonical fingerprint mismatch",
+        "window idempotency fingerprint mismatch",
+        "partial remote ACK",
+        "zero DART requests",
+        "DART quota exhausted",
+        "window outside job range",
+    ):
+        assert rejection_case in smoke
+
+    writer = V2_WRITE
+    assert "v2_write_expected_classified_ingest_key" in writer
+    assert "global-ingest-v2-day" in writer
+    assert "global-ingest-v2-current" in writer
+    assert "daily-master-index" in writer
+    assert "(int)$chunk['batch_request_count'] !== 1" in writer
+    assert "v2_ingest_refresh_idempotent_current_poll" in writer
+    assert "(string)$normalized['ingest_mode'] !== 'apply'" in writer
+    assert "v2_ingest_require_preview_binding" in writer
+    assert "HTTP_X_BSIDE_PREVIEW_TOKEN" in writer
+    assert "v2_ingest_assert_release_boundary" in writer
+    assert "GOV_V1_RELEASE_STATE_KEY" in writer
+    assert "GOV_V2_RELEASE_STATE_KEY" in writer
+    assert "global_ingest_release_state_mismatch" in writer
+    assert "v2_write_valid_sec_current_cursor" in writer
+    assert "$isFinalChunk && $envelope['exhausted'] !== true" in writer
+    assert "rtrim(" in writer
+    assert "hash_equals($canonical, $decoded)" in writer
 
     evidence_schema = SPEC["components"]["schemas"]["AlphaAutomatedEvidence"]
     connector_coverage = evidence_schema["properties"]["connector_coverage"]
@@ -1586,6 +1762,107 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
         "receipt_sha256",
     }
     assert window_schema["additionalProperties"] is False
+
+
+def test_sec_current_apply_requires_fresh_request_proof_before_refresh():
+    normalize = V2_WRITE[
+        V2_WRITE.index("function v2_normalize_ingest_payload") :
+        V2_WRITE.index("function v2_ingest_upsert_issuer")
+    ]
+    assert "v2_write_assert_current_poll_apply_evidence(" in normalize
+    assert "(int)$chunk['batch_request_count'] < 1" in V2_WRITE
+    assert "$isFinalChunk && (int)$envelope['request_count'] < 1" in V2_WRITE
+    assert "$retrievedEpoch < $completedEpoch - 900" in V2_WRITE
+    assert "$retrievedEpoch > $completedEpoch + 60" in V2_WRITE
+    assert "current-poll request proof required" in V2_WRITE
+    assert "current-poll freshness window mismatch" in V2_WRITE
+
+    refresh = V2_WRITE[
+        V2_WRITE.index(
+            "function v2_ingest_current_poll_observation_is_newer"
+        ) :
+        V2_WRITE.index("function v2_ingest_checkpoint_should_advance")
+    ]
+    assert "(int)$normalized['chunk']['batch_request_count'] < 1" in refresh
+    assert "$normalized['retrieved_at']" in refresh
+    assert "$lastObservedAt" in refresh
+    assert ") > 0;" in refresh
+    assert "(int)$normalized['request_count'] >= 1" in refresh
+    assert "v2_ingest_current_poll_observation_is_newer(" in refresh
+
+    locked_connector = V2_WRITE[
+        V2_WRITE.index("$connectorLock = $pdo->prepare(") :
+        V2_WRITE.index("$lockedReceipt = $pdo->prepare(")
+    ]
+    assert "code_revision,last_observed_at" in locked_connector
+    assert "$shouldAdvance && $shouldRefreshCurrent" in V2_WRITE
+    ingest = V2_WRITE[V2_WRITE.index("function v2_ops_ingest") :]
+    new_current_guard = ingest.index(
+        "global_ingest_current_observation_not_newer"
+    )
+    record_write = ingest.index("foreach ($normalized['records'] as $record)")
+    assert new_current_guard < record_write
+
+    stored_batch = V2_WRITE[
+        V2_WRITE.index("function v2_ingest_assert_stored_batch_complete") :
+        V2_WRITE.index("function v2_ingest_locked_checkpoint")
+    ]
+    assert "(int)$final['request_count'] < 1" in stored_batch
+    assert "(int)$final['batch_request_count'] < 1" in stored_batch
+    assert "global_ingest_batch_receipt_corrupt" in stored_batch
+
+    envelope = SPEC["components"]["schemas"]["GlobalIngestPayload"][
+        "properties"
+    ]
+    assert "15 minutes" in envelope["retrieved_at"]["description"]
+    assert "strictly newer" in envelope["retrieved_at"]["description"]
+    assert "final chunk" in envelope["request_count"]["description"]
+    chunk = SPEC["components"]["schemas"]["GlobalIngestChunk"]["properties"]
+    assert "at least one source request" in chunk[
+        "batch_request_count"
+    ]["description"]
+
+
+def test_sec_ingest_rejects_unclassified_receipts_before_any_write():
+    normalize = V2_WRITE[
+        V2_WRITE.index("function v2_normalize_ingest_payload") :
+        V2_WRITE.index("function v2_ingest_upsert_issuer")
+    ]
+    standard_guard = (
+        "(string)$connector['connector_id'] === 'connector:us:sec-edgar'"
+        "\n        && $receiptKind === 'standard'"
+    )
+    assert standard_guard in normalize
+    assert "SEC classified receipt required" in normalize
+    assert normalize.index(standard_guard) < normalize.index(
+        "$isSelectedLinkOnlyApply"
+    )
+    assert normalize.index(standard_guard) < normalize.index(
+        "return array("
+    )
+
+    idempotency = SPEC["components"]["schemas"]["GlobalIngestRequest"][
+        "properties"
+    ]["idempotency_key"]["description"]
+    assert "SEC EDGAR accepts only classified" in idempotency
+    assert "global-ingest-v2-current:us:" in idempotency
+    assert "global-ingest-v2-day:us:" in idempotency
+    assert "both apply and replay" in idempotency
+    assert "release-state binding" in idempotency
+
+    smoke = (ROOT / "tests" / "php73_global_v2_smoke.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'for unclassified_mode in ("apply", "replay")' in smoke
+    assert '"php73-v2-sec-unclassified"' in smoke
+    assert 'unclassified_sec["envelope"]["request_count"] = 0' in smoke
+    assert (
+        'unclassified_sec["envelope"]["chunk"]["batch_request_count"] = 0'
+        in smoke
+    )
+    assert 'unclassified_sec.pop("expected_release_state")' in smoke
+    assert "unclassified_state" in smoke
+    assert "SEC classified receipt required" in smoke
 
 
 def test_v2_public_documents_and_urls_always_exclude_telegram():

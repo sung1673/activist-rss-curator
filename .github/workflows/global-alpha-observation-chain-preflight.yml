@@ -1,0 +1,288 @@
+name: Production Alpha observation chain preflight
+
+run-name: >-
+  Production Alpha observation chain preflight /
+  ${{ inputs.phase }} / parent ${{ inputs.parent_run_id || github.run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: Internal phase; operators must leave this as parent
+        required: true
+        default: parent
+        type: string
+      expected_revision:
+        description: Internal same-SHA child provenance
+        required: false
+        default: ""
+        type: string
+      nonce:
+        description: Internal one-use child challenge
+        required: false
+        default: ""
+        type: string
+      nonce_sha256:
+        description: Internal child challenge digest
+        required: false
+        default: ""
+        type: string
+      parent_run_id:
+        description: Internal parent run provenance
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  reject-invalid-phase:
+    if: inputs.phase != 'parent' && inputs.phase != 'child'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Reject an unsupported internal phase
+        run: |
+          echo "::error::phase must be parent; child is reserved for self-dispatch."
+          exit 1
+
+  parent:
+    if: inputs.phase == 'parent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    environment:
+      name: governance-runtime
+    steps:
+      - name: Dispatch and verify an exact same-SHA child
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EXPECTED_REVISION: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_EXPECTED_REVISION: ${{ inputs.expected_revision }}
+          INPUT_NONCE: ${{ inputs.nonce }}
+          INPUT_NONCE_SHA256: ${{ inputs.nonce_sha256 }}
+          INPUT_PARENT_RUN_ID: ${{ inputs.parent_run_id }}
+          INPUT_PHASE: ${{ inputs.phase }}
+          PARENT_REF: ${{ github.ref }}
+          PARENT_REF_NAME: ${{ github.ref_name }}
+          PARENT_REF_TYPE: ${{ github.ref_type }}
+          PARENT_RUN_ATTEMPT: ${{ github.run_attempt }}
+          PARENT_RUN_ID: ${{ github.run_id }}
+          REQUIRED_WORKFLOW_PATH: >-
+            .github/workflows/global-alpha-observation-chain-preflight.yml
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const crypto = require("crypto");
+            const {owner, repo} = context.repo;
+            const requiredPath = process.env.REQUIRED_WORKFLOW_PATH;
+            const defaultBranch = process.env.DEFAULT_BRANCH;
+            const expectedRevision = process.env.EXPECTED_REVISION.toLowerCase();
+            const parentRunId = Number(process.env.PARENT_RUN_ID);
+            const expectedRef = `refs/heads/${defaultBranch}`;
+
+            if (
+              process.env.EVENT_NAME !== "workflow_dispatch" ||
+              process.env.INPUT_PHASE !== "parent" ||
+              process.env.PARENT_REF_TYPE !== "branch" ||
+              process.env.PARENT_REF_NAME !== defaultBranch ||
+              process.env.PARENT_REF !== expectedRef ||
+              process.env.PARENT_RUN_ATTEMPT !== "1" ||
+              !/^[0-9a-f]{40}$/.test(expectedRevision) ||
+              !Number.isSafeInteger(parentRunId) ||
+              parentRunId < 1 ||
+              process.env.INPUT_EXPECTED_REVISION !== "" ||
+              process.env.INPUT_NONCE !== "" ||
+              process.env.INPUT_NONCE_SHA256 !== "" ||
+              process.env.INPUT_PARENT_RUN_ID !== ""
+            ) {
+              core.setFailed(
+                "Preflight must be a first-attempt parent on the exact default branch",
+              );
+              return;
+            }
+
+            const nonce = crypto.randomBytes(32).toString("hex");
+            core.setSecret(nonce);
+            const nonceDigest = crypto
+              .createHash("sha256")
+              .update(nonce, "ascii")
+              .digest("hex");
+            const dispatchStartedAt = Date.now();
+            const childTitle =
+              `Production Alpha observation chain preflight / child / parent ${parentRunId}`;
+
+            await github.rest.actions.createWorkflowDispatch({
+              owner,
+              repo,
+              workflow_id: requiredPath,
+              ref: defaultBranch,
+              inputs: {
+                phase: "child",
+                expected_revision: expectedRevision,
+                nonce,
+                nonce_sha256: nonceDigest,
+                parent_run_id: String(parentRunId),
+              },
+            });
+
+            const deadline = dispatchStartedAt + 110_000;
+            let childRun = null;
+            while (Date.now() < deadline) {
+              const response = await github.rest.actions.listWorkflowRuns({
+                owner,
+                repo,
+                workflow_id: requiredPath,
+                branch: defaultBranch,
+                event: "workflow_dispatch",
+                per_page: 100,
+              });
+              const candidates = response.data.workflow_runs.filter((run) => {
+                const createdAt = Date.parse(run.created_at || "");
+                return (
+                  Number(run.id) !== parentRunId &&
+                  run.display_title === childTitle &&
+                  run.path === requiredPath &&
+                  run.event === "workflow_dispatch" &&
+                  run.head_branch === defaultBranch &&
+                  (run.head_sha || "").toLowerCase() === expectedRevision &&
+                  run.run_attempt === 1 &&
+                  Number.isFinite(createdAt) &&
+                  createdAt >= dispatchStartedAt - 10_000
+                );
+              });
+              if (candidates.length > 1) {
+                core.setFailed("More than one exact child preflight run exists");
+                return;
+              }
+              if (candidates.length === 1) {
+                const response = await github.rest.actions.getWorkflowRun({
+                  owner,
+                  repo,
+                  run_id: candidates[0].id,
+                });
+                childRun = response.data;
+                if (childRun.status === "completed") {
+                  break;
+                }
+              }
+              await new Promise((resolve) => setTimeout(resolve, 4_000));
+            }
+
+            if (
+              !childRun ||
+              childRun.status !== "completed" ||
+              childRun.conclusion !== "success" ||
+              childRun.run_attempt !== 1 ||
+              childRun.event !== "workflow_dispatch" ||
+              childRun.path !== requiredPath ||
+              childRun.head_branch !== defaultBranch ||
+              (childRun.head_sha || "").toLowerCase() !== expectedRevision ||
+              childRun.display_title !== childTitle
+            ) {
+              core.setFailed(
+                "The exact same-SHA governance-runtime child did not succeed in time",
+              );
+              return;
+            }
+            core.info(
+              `Verified child run ${childRun.id} at the exact preflight revision`,
+            );
+
+  child:
+    if: inputs.phase == 'child'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    environment:
+      name: governance-runtime
+    steps:
+      - name: Verify the protected child challenge
+        shell: bash
+        env:
+          ACTUAL_REVISION: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_EXPECTED_REVISION: ${{ inputs.expected_revision }}
+          INPUT_NONCE: ${{ inputs.nonce }}
+          INPUT_NONCE_SHA256: ${{ inputs.nonce_sha256 }}
+          INPUT_PARENT_RUN_ID: ${{ inputs.parent_run_id }}
+          INPUT_PHASE: ${{ inputs.phase }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RUN_ID: ${{ github.run_id }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          REQUIRED_WORKFLOW_PATH: >-
+            .github/workflows/global-alpha-observation-chain-preflight.yml
+        run: |
+          set -euo pipefail
+          [[ -n "$INPUT_NONCE" ]] && echo "::add-mask::$INPUT_NONCE"
+          python - <<'PY'
+          import hashlib
+          import hmac
+          import os
+          import re
+
+          def require(condition: bool, message: str) -> None:
+              if not condition:
+                  raise SystemExit(message)
+
+          default_branch = os.environ["DEFAULT_BRANCH"]
+          expected_revision = os.environ["INPUT_EXPECTED_REVISION"]
+          nonce = os.environ["INPUT_NONCE"]
+          nonce_digest = os.environ["INPUT_NONCE_SHA256"]
+          parent_run_id = os.environ["INPUT_PARENT_RUN_ID"]
+          run_id = os.environ["RUN_ID"]
+          required_path = os.environ["REQUIRED_WORKFLOW_PATH"]
+          expected_workflow_ref = (
+              f"{os.environ['REPOSITORY']}/{required_path}"
+              f"@refs/heads/{default_branch}"
+          )
+
+          require(os.environ["INPUT_PHASE"] == "child", "Invalid child phase")
+          require(
+              os.environ["EVENT_NAME"] == "workflow_dispatch",
+              "Invalid child event",
+          )
+          require(os.environ["RUN_ATTEMPT"] == "1", "Child reruns are forbidden")
+          require(os.environ["REF_TYPE"] == "branch", "Child ref is not a branch")
+          require(
+              os.environ["REF_NAME"] == default_branch,
+              "Child is not on the default branch",
+          )
+          require(
+              os.environ["WORKFLOW_REF"] == expected_workflow_ref,
+              "Child workflow path or ref is invalid",
+          )
+          require(
+              re.fullmatch(r"[0-9a-f]{40}", expected_revision) is not None,
+              "Invalid expected revision",
+          )
+          require(
+              os.environ["ACTUAL_REVISION"] == expected_revision,
+              "Child revision differs from the parent",
+          )
+          require(
+              re.fullmatch(r"[0-9a-f]{64}", nonce) is not None,
+              "Invalid child challenge",
+          )
+          require(
+              re.fullmatch(r"[0-9a-f]{64}", nonce_digest) is not None,
+              "Invalid child challenge digest",
+          )
+          require(
+              re.fullmatch(r"[1-9][0-9]*", parent_run_id) is not None,
+              "Invalid parent run identity",
+          )
+          require(parent_run_id != run_id, "Child cannot be its own parent")
+          actual_digest = hashlib.sha256(nonce.encode("ascii")).hexdigest()
+          require(
+              hmac.compare_digest(actual_digest, nonce_digest),
+              "Child challenge digest mismatch",
+          )
+          print("Protected same-SHA child preflight succeeded")
+          PY

@@ -15,6 +15,17 @@ from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 from urllib.parse import urlsplit
 
+from .global_alpha_observation_segment import (
+    MAX_SLOT_LATENESS_SECONDS,
+    OBSERVATION_INTERVAL_SECONDS,
+    SEGMENT_COUNT,
+    SEGMENT_COUNTS,
+    SEGMENT_KIND,
+    SEGMENT_SCHEMA_VERSION,
+    TOTAL_OBSERVATIONS,
+    canonical_jsonl,
+    segment_slot_bounds,
+)
 from .global_alpha_pages_identity import (
     PagesArtifactIdentityError,
     validate_pages_artifact_binding,
@@ -2001,30 +2012,123 @@ def compile_observation_archives(
     revision = _revision(
         expected_revision,
         "expected_revision",
-        "observation-archives",
+        "observation-segments",
     )
     try:
         decoded_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise AlphaReleaseEvidenceError(
-            "observation-archive-manifest: invalid JSON"
+            "observation-segment-archive-manifest: invalid JSON"
         ) from exc
-    manifest = _list(decoded_manifest, "observation-archive-manifest")
-    if len(manifest) < 287:
-        raise AlphaReleaseEvidenceError(
-            "observation-archive-manifest: fewer than 287 artifacts"
+    manifest = _mapping(
+        decoded_manifest,
+        "observation-segment-archive-manifest",
+    )
+    if (
+        _int(
+            manifest.get("schema_version"),
+            "schema_version",
+            "observation-segment-archive-manifest",
         )
+        != SEGMENT_SCHEMA_VERSION
+        or manifest.get("kind")
+        != "bside-global-alpha-observation-segment-archive-manifest"
+    ):
+        raise AlphaReleaseEvidenceError(
+            "observation-segment-archive-manifest: unsupported contract"
+        )
+    chain_id = _text(
+        manifest.get("chain_id"),
+        "chain_id",
+        "observation-segment-archive-manifest",
+    )
+    if not chain_id.isdigit() or chain_id.startswith("0"):
+        raise AlphaReleaseEvidenceError(
+            "observation-segment-archive-manifest: invalid chain_id"
+        )
+    if _revision(
+        manifest.get("code_revision"),
+        "code_revision",
+        "observation-segment-archive-manifest",
+    ) != revision:
+        raise AlphaReleaseEvidenceError(
+            "observation-segment-archive-manifest: revision mismatch"
+        )
+    segment_entries = _list(
+        manifest.get("segments"),
+        "observation-segment-archive-manifest.segments",
+    )
+    if len(segment_entries) != SEGMENT_COUNT:
+        raise AlphaReleaseEvidenceError(
+            "observation-segment-archive-manifest: exactly five segments required"
+        )
+
     records: list[dict[str, object]] = []
     artifact_ids: set[str] = set()
-    for index, raw_entry in enumerate(manifest):
-        location = f"observation-archive-manifest[{index}]"
+    run_ids: set[str] = set()
+    previous_run_id: str | None = None
+    previous_artifact_digest: str | None = None
+    candidate_started_at: datetime | None = None
+    candidate_ends_at: datetime | None = None
+    cadence_anchor: datetime | None = None
+    for index, raw_entry in enumerate(segment_entries, start=1):
+        location = f"observation-segment-archive-manifest.segments[{index - 1}]"
         entry = _mapping(raw_entry, location)
+        segment_index = _int(
+            entry.get("segment_index"),
+            "segment_index",
+            location,
+        )
+        if segment_index != index:
+            raise AlphaReleaseEvidenceError(
+                f"{location}: segment order is incomplete or overlapping"
+            )
+        if entry.get("chain_id") != chain_id:
+            raise AlphaReleaseEvidenceError(
+                f"{location}: chain_id mismatch"
+            )
+        if _revision(
+            entry.get("code_revision"),
+            "code_revision",
+            location,
+        ) != revision:
+            raise AlphaReleaseEvidenceError(
+                f"{location}: revision mismatch"
+            )
+        if (
+            entry.get("run_conclusion") != "success"
+            or entry.get("run_event") != "workflow_dispatch"
+            or entry.get("workflow_path")
+            != ".github/workflows/global-alpha-observation-chain.yml"
+            or _int(entry.get("run_attempt"), "run_attempt", location) != 1
+        ):
+            raise AlphaReleaseEvidenceError(
+                f"{location}: successful first-attempt chain workflow required"
+            )
+        run_id = _text(entry.get("run_id"), "run_id", location)
+        if (
+            not run_id.isdigit()
+            or run_id.startswith("0")
+            or run_id in run_ids
+            or (index == 1 and run_id != chain_id)
+        ):
+            raise AlphaReleaseEvidenceError(
+                f"{location}: invalid or duplicate run_id"
+            )
+        run_ids.add(run_id)
         artifact_id = _text(entry.get("artifact_id"), "artifact_id", location)
         if artifact_id in artifact_ids:
             raise AlphaReleaseEvidenceError(
                 f"{location}: duplicate artifact_id"
             )
         artifact_ids.add(artifact_id)
+        expected_artifact_name = (
+            f"global-alpha-observation-segment-{chain_id}-{index}"
+        )
+        if entry.get("artifact_name") != expected_artifact_name:
+            raise AlphaReleaseEvidenceError(
+                f"{location}: artifact_name mismatch"
+            )
         archive_name = _text(entry.get("archive_name"), "archive_name", location)
         if Path(archive_name).name != archive_name or not archive_name.endswith(".zip"):
             raise AlphaReleaseEvidenceError(
@@ -2046,74 +2150,331 @@ def compile_observation_archives(
         try:
             with zipfile.ZipFile(archive) as bundle:
                 members = [item for item in bundle.infolist() if not item.is_dir()]
-                if len(members) != 1:
+                if len(members) != 2:
                     raise AlphaReleaseEvidenceError(
-                        f"{location}: artifact must contain exactly one file"
+                        f"{location}: segment artifact must contain exactly two files"
                     )
-                member = members[0]
-                member_path = Path(member.filename)
-                file_type = (member.external_attr >> 16) & 0o170000
-                if (
-                    member_path.name != member.filename
-                    or member.filename != "global-alpha-observation.json"
-                    or member.file_size < 2
-                    or member.file_size > 500_000
-                    or file_type == 0o120000
-                ):
+                by_name = {item.filename: item for item in members}
+                if set(by_name) != {
+                    "observations.jsonl",
+                    "segment-manifest.json",
+                }:
                     raise AlphaReleaseEvidenceError(
-                        f"{location}: unsafe observation archive member"
+                        f"{location}: unexpected segment archive members"
                     )
-                decoded = json.loads(bundle.read(member).decode("utf-8"))
+                for member in members:
+                    member_path = Path(member.filename)
+                    file_type = (member.external_attr >> 16) & 0o170000
+                    maximum_size = (
+                        50_000_000
+                        if member.filename == "observations.jsonl"
+                        else 100_000
+                    )
+                    if (
+                        member_path.name != member.filename
+                        or member.file_size < 2
+                        or member.file_size > maximum_size
+                        or file_type == 0o120000
+                    ):
+                        raise AlphaReleaseEvidenceError(
+                            f"{location}: unsafe segment archive member"
+                        )
+                observation_bytes = bundle.read(by_name["observations.jsonl"])
+                segment_decoded = json.loads(
+                    bundle.read(by_name["segment-manifest.json"]).decode("utf-8")
+                )
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
             raise AlphaReleaseEvidenceError(
-                f"{location}: invalid observation archive"
+                f"{location}: invalid observation segment archive"
             ) from exc
-        record = dict(_mapping(decoded, f"{location}.observation"))
-        if _revision(
-            record.get("workflow_revision"),
-            "workflow_revision",
-            f"{location}.observation",
-        ) != revision:
-            raise AlphaReleaseEvidenceError(
-                f"{location}: observation revision mismatch"
+        segment = _mapping(segment_decoded, f"{location}.segment-manifest")
+        if (
+            _int(
+                segment.get("schema_version"),
+                "schema_version",
+                f"{location}.segment-manifest",
             )
-        records.append(record)
+            != SEGMENT_SCHEMA_VERSION
+            or segment.get("kind") != SEGMENT_KIND
+            or segment.get("status") != "complete"
+            or segment.get("error_code") is not None
+            or segment.get("chain_id") != chain_id
+            or _int(
+                segment.get("segment_index"),
+                "segment_index",
+                f"{location}.segment-manifest",
+            )
+            != index
+            or _int(
+                segment.get("segment_count"),
+                "segment_count",
+                f"{location}.segment-manifest",
+            )
+            != SEGMENT_COUNT
+            or _revision(
+                segment.get("code_revision"),
+                "code_revision",
+                f"{location}.segment-manifest",
+            )
+            != revision
+            or segment.get("run_id") != run_id
+            or _int(
+                segment.get("run_attempt"),
+                "run_attempt",
+                f"{location}.segment-manifest",
+            )
+            != 1
+        ):
+            raise AlphaReleaseEvidenceError(
+                f"{location}: segment manifest identity mismatch"
+            )
+        expected_predecessor_run = previous_run_id if index > 1 else None
+        expected_predecessor_digest = (
+            previous_artifact_digest if index > 1 else None
+        )
+        if (
+            segment.get("predecessor_run_id") != expected_predecessor_run
+            or segment.get("predecessor_artifact_digest")
+            != expected_predecessor_digest
+        ):
+            raise AlphaReleaseEvidenceError(
+                f"{location}: predecessor artifact chain mismatch"
+            )
+        first_slot, last_slot = segment_slot_bounds(index)
+        expected_count = SEGMENT_COUNTS[index - 1]
+        if (
+            _int(
+                segment.get("first_slot_index"),
+                "first_slot_index",
+                f"{location}.segment-manifest",
+            )
+            != first_slot
+            or _int(
+                segment.get("last_slot_index"),
+                "last_slot_index",
+                f"{location}.segment-manifest",
+            )
+            != last_slot
+            or _int(
+                segment.get("expected_record_count"),
+                "expected_record_count",
+                f"{location}.segment-manifest",
+            )
+            != expected_count
+            or _int(
+                segment.get("record_count"),
+                "record_count",
+                f"{location}.segment-manifest",
+            )
+            != expected_count
+        ):
+            raise AlphaReleaseEvidenceError(
+                f"{location}: incomplete or overlapping segment slots"
+            )
+        expected_observations_digest = _digest(
+            segment.get("observations_sha256"),
+            "observations_sha256",
+            f"{location}.segment-manifest",
+        )
+        if hashlib.sha256(observation_bytes).hexdigest() != expected_observations_digest:
+            raise AlphaReleaseEvidenceError(
+                f"{location}: observations digest mismatch"
+            )
+        try:
+            observation_text = observation_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise AlphaReleaseEvidenceError(
+                f"{location}: observations are not UTF-8"
+            ) from exc
+        if not observation_text.endswith("\n"):
+            raise AlphaReleaseEvidenceError(
+                f"{location}: observations JSONL must end with a newline"
+            )
+        segment_records: list[dict[str, object]] = []
+        for line_index, line in enumerate(observation_text.splitlines()):
+            if not line:
+                raise AlphaReleaseEvidenceError(
+                    f"{location}: blank observation JSONL line"
+                )
+            try:
+                decoded_record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise AlphaReleaseEvidenceError(
+                    f"{location}: invalid observation JSONL"
+                ) from exc
+            segment_records.append(
+                dict(
+                    _mapping(
+                        decoded_record,
+                        f"{location}.observations[{line_index}]",
+                    )
+                )
+            )
+        if (
+            len(segment_records) != expected_count
+            or canonical_jsonl(segment_records) != observation_bytes
+        ):
+            raise AlphaReleaseEvidenceError(
+                f"{location}: non-canonical or incomplete observations"
+            )
+        segment_start = _timestamp(
+            segment.get("candidate_started_at"),
+            "candidate_started_at",
+            f"{location}.segment-manifest",
+        )
+        segment_end = _timestamp(
+            segment.get("candidate_ends_at"),
+            "candidate_ends_at",
+            f"{location}.segment-manifest",
+        )
+        segment_anchor = _timestamp(
+            segment.get("cadence_anchor"),
+            "cadence_anchor",
+            f"{location}.segment-manifest",
+        )
+        segment_completed_at = _timestamp(
+            segment.get("completed_at"),
+            "completed_at",
+            f"{location}.segment-manifest",
+        )
+        if (
+            segment_end - segment_start != timedelta(hours=24)
+            or not segment_start
+            <= segment_anchor
+            <= segment_start + timedelta(minutes=5)
+            or segment_anchor
+            + timedelta(
+                seconds=(TOTAL_OBSERVATIONS - 1)
+                * OBSERVATION_INTERVAL_SECONDS
+            )
+            > segment_end
+        ):
+            raise AlphaReleaseEvidenceError(
+                f"{location}: candidate window or cadence anchor invalid"
+            )
+        if index == SEGMENT_COUNT and not (
+            segment_end
+            <= segment_completed_at
+            <= segment_end
+            + timedelta(seconds=MAX_SLOT_LATENESS_SECONDS)
+        ):
+            raise AlphaReleaseEvidenceError(
+                f"{location}: final segment was not sealed at the candidate end"
+            )
+        if candidate_started_at is None:
+            candidate_started_at = segment_start
+            candidate_ends_at = segment_end
+            cadence_anchor = segment_anchor
+        elif (
+            segment_start != candidate_started_at
+            or segment_end != candidate_ends_at
+            or segment_anchor != cadence_anchor
+        ):
+            raise AlphaReleaseEvidenceError(
+                f"{location}: candidate window changed between segments"
+            )
+        for offset, record in enumerate(segment_records):
+            record_location = f"{location}.observations[{offset}]"
+            slot_index = first_slot + offset
+            chain = _mapping(
+                record.get("observation_chain"),
+                f"{record_location}.observation_chain",
+            )
+            if (
+                _int(
+                    chain.get("schema_version"),
+                    "schema_version",
+                    f"{record_location}.observation_chain",
+                )
+                != SEGMENT_SCHEMA_VERSION
+                or chain.get("chain_id") != chain_id
+                or _int(
+                    chain.get("segment_index"),
+                    "segment_index",
+                    f"{record_location}.observation_chain",
+                )
+                != index
+                or _int(
+                    chain.get("segment_count"),
+                    "segment_count",
+                    f"{record_location}.observation_chain",
+                )
+                != SEGMENT_COUNT
+                or _int(
+                    chain.get("slot_index"),
+                    "slot_index",
+                    f"{record_location}.observation_chain",
+                )
+                != slot_index
+                or chain.get("run_id") != run_id
+                or _int(
+                    chain.get("run_attempt"),
+                    "run_attempt",
+                    f"{record_location}.observation_chain",
+                )
+                != 1
+                or _timestamp(
+                    chain.get("candidate_started_at"),
+                    "candidate_started_at",
+                    f"{record_location}.observation_chain",
+                )
+                != segment_start
+                or _timestamp(
+                    chain.get("candidate_ends_at"),
+                    "candidate_ends_at",
+                    f"{record_location}.observation_chain",
+                )
+                != segment_end
+                or _timestamp(
+                    chain.get("cadence_anchor"),
+                    "cadence_anchor",
+                    f"{record_location}.observation_chain",
+                )
+                != segment_anchor
+            ):
+                raise AlphaReleaseEvidenceError(
+                    f"{record_location}: observation chain metadata mismatch"
+                )
+            observed_at = _timestamp(
+                record.get("observed_at"),
+                "observed_at",
+                record_location,
+            )
+            expected_at = segment_anchor + timedelta(
+                seconds=slot_index * OBSERVATION_INTERVAL_SECONDS
+            )
+            lateness = (observed_at - expected_at).total_seconds()
+            if (
+                lateness < -1
+                or lateness > MAX_SLOT_LATENESS_SECONDS
+                or observed_at > segment_end
+                or _revision(
+                    record.get("workflow_revision"),
+                    "workflow_revision",
+                    record_location,
+                )
+                != revision
+            ):
+                raise AlphaReleaseEvidenceError(
+                    f"{record_location}: observation slot timing or revision mismatch"
+                )
+        if (
+            segment.get("first_observed_at")
+            != segment_records[0].get("observed_at")
+            or segment.get("last_observed_at")
+            != segment_records[-1].get("observed_at")
+        ):
+            raise AlphaReleaseEvidenceError(
+                f"{location}: observed boundary metadata mismatch"
+            )
+        records.extend(segment_records)
+        previous_run_id = run_id
+        previous_artifact_digest = "sha256:" + expected_digest
 
-    groups: dict[tuple[str, str], list[dict[str, object]]] = {}
-    for index, record in enumerate(records):
-        location = f"observation-archives.records[{index}]"
-        window = _mapping(
-            record.get("observation_window"),
-            f"{location}.observation_window",
-        )
-        started_at = _timestamp(
-            window.get("started_at"),
-            "started_at",
-            f"{location}.observation_window",
-        )
-        ends_at = _timestamp(
-            window.get("ends_at"),
-            "ends_at",
-            f"{location}.observation_window",
-        )
-        if window.get("within_window") is True:
-            groups.setdefault(
-                (started_at.isoformat(), ends_at.isoformat()),
-                [],
-            ).append(record)
-    if not groups:
+    if len(records) != TOTAL_OBSERVATIONS:
         raise AlphaReleaseEvidenceError(
-            "observation-archives: no candidate window records"
+            "observation-segments: complete 288-record chain required"
         )
-    selected_key = max(groups, key=lambda key: key[0])
-    selected = groups[selected_key]
-    selected.sort(
-        key=lambda item: _timestamp(
-            item.get("observed_at"),
-            "observed_at",
-            "observation-archives.selected",
-        )
-    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         "".join(
@@ -2124,12 +2485,12 @@ def compile_observation_archives(
                 separators=(",", ":"),
             )
             + "\n"
-            for record in selected
+            for record in records
         ),
         encoding="utf-8",
         newline="\n",
     )
-    return len(selected)
+    return len(records)
 
 
 def _write_report(path: Path, report: Mapping[str, object]) -> None:

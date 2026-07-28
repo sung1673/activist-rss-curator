@@ -239,6 +239,9 @@ def test_sec_connector_preserves_source_title_and_is_idempotent() -> None:
         public_allowed=True,
         ai_allowed=False,
     )
+    assert nested_empty_object.public_payload(
+        allow_body=True
+    )["metadata"] == {"nested": []}
     with pytest.raises(
         GlobalConnectorContractError,
         match="floats are not cross-runtime canonical",

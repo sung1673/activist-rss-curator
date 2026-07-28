@@ -60,6 +60,12 @@ SELECTED_SOURCE_RIGHTS = {
     "CA": "official:ca-issuer-ir",
     "AU": "official:asic-register",
 }
+_RELEASE_STATE_BY_PIPELINE_MODE = {
+    "off": "closed",
+    "dart_canary": "closed",
+    "shadow": "preview",
+    "live": "live",
+}
 MANUAL_LINK_EVENT_FAMILIES = {
     "CA": (
         "meeting_and_vote",
@@ -1243,6 +1249,48 @@ def _configured_json(
     ).strip()
 
 
+def selected_market_release_state(
+    environment: Mapping[str, str],
+    *,
+    require_active_pipeline: bool,
+) -> str:
+    """Return the exact server release state authorized for this write."""
+
+    pipeline_mode = str(
+        environment.get("GOVERNANCE_PIPELINE_MODE", "")
+    ).strip()
+    if require_active_pipeline and pipeline_mode not in {"shadow", "live"}:
+        raise SelectedMarketConfigurationError(
+            "governance_pipeline_not_active"
+        )
+    if pipeline_mode and pipeline_mode not in _RELEASE_STATE_BY_PIPELINE_MODE:
+        raise SelectedMarketConfigurationError(
+            "invalid_governance_pipeline_mode"
+        )
+    expected_release_state = str(
+        environment.get(
+            "GLOBAL_INGEST_EXPECTED_RELEASE_STATE",
+            "",
+        )
+    ).strip()
+    if expected_release_state not in {"closed", "preview", "live"}:
+        raise SelectedMarketConfigurationError(
+            "missing_expected_release_state"
+        )
+    mapped_state = _RELEASE_STATE_BY_PIPELINE_MODE.get(pipeline_mode)
+    if (
+        mapped_state is not None
+        and not hmac.compare_digest(
+            mapped_state,
+            expected_release_state,
+        )
+    ):
+        raise SelectedMarketConfigurationError(
+            "selected_market_release_state_mismatch"
+        )
+    return expected_release_state
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _argument_parser().parse_args(argv)
     started_at = datetime.now(timezone.utc).replace(
@@ -1282,6 +1330,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             )
             return 0
+        expected_release_state = selected_market_release_state(
+            os.environ,
+            require_active_pipeline=args.require_active_pipeline,
+        )
         base_url, token = _api_configuration(os.environ)
         rights_client = GlobalOfficialSourceRightClient(
             base_url=base_url,
@@ -1290,6 +1342,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         ingest_client = V2GlobalIngestClient(
             base_url=base_url,
             token=token,
+            expected_release_state=expected_release_state,
+            preview_token=(
+                os.environ.get("GOVERNANCE_PREVIEW_TOKEN", "")
+                if expected_release_state == "preview"
+                else ""
+            ),
         )
         result = execute_selected_market_ingest(
             country_code=args.country,

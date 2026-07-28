@@ -35,6 +35,8 @@ WORKFLOWS = {
         "ingest-global.yml",
         "ingest-selected-markets.yml",
         "global-brief.yml",
+        "global-alpha-observation-chain-preflight.yml",
+        "global-alpha-observation-chain.yml",
         "global-alpha-watchdog.yml",
         "governance-cutover.yml",
         "governance-rollback.yml",

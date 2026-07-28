@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import traceback
 
+import httpx
 import pytest
 
 from curator.remote_state import (
@@ -11,6 +13,106 @@ from curator.remote_state import (
     preflight_telegram_signal_runtime,
 )
 from curator.telegram_sources import pending_remote_messages
+
+
+def test_runtime_resource_retries_transient_server_and_transport_failures(
+    now, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("ACTIVIST_API_URL", "https://api.example.test")
+    monkeypatch.setenv("ACTIVIST_API_SECRET", "secret")
+    sleeps: list[float] = []
+    monkeypatch.setattr("curator.remote_state.time.sleep", sleeps.append)
+    responses: list[object] = [
+        {"ok": False, "error": "internal_error"},
+        httpx.ReadTimeout(
+            "transient",
+            request=httpx.Request("POST", "https://api.example.test"),
+        ),
+        {
+            "ok": True,
+            "state": {
+                "records": [{"record_id": "article:1"}],
+                "has_more": False,
+                "next_cursor": None,
+            },
+        },
+    ]
+    calls = 0
+
+    def fake_post(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        value = responses[calls]
+        calls += 1
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+    monkeypatch.setattr("curator.remote_state.post_remote_action", fake_post)
+
+    records = fetch_runtime_resource(
+        "articles",
+        since=now,
+        max_records=10,
+    )
+
+    assert records == [{"record_id": "article:1"}]
+    assert calls == 3
+    assert sleeps == [0.2, 0.4]
+
+
+def test_runtime_resource_bounds_internal_error_and_does_not_retry_auth(
+    now, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("ACTIVIST_API_URL", "https://api.example.test")
+    monkeypatch.setenv("ACTIVIST_API_SECRET", "secret")
+    monkeypatch.setattr("curator.remote_state.time.sleep", lambda _seconds: None)
+    calls = 0
+
+    def internal_error(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        return {"ok": False, "error": "internal_error"}
+
+    monkeypatch.setattr("curator.remote_state.post_remote_action", internal_error)
+    with pytest.raises(RuntimeError, match="internal_error"):
+        fetch_runtime_resource("articles", since=now, max_records=10)
+    assert calls == 3
+
+    calls = 0
+
+    def auth_error(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        return {"ok": False, "error": "invalid_signature"}
+
+    monkeypatch.setattr("curator.remote_state.post_remote_action", auth_error)
+    with pytest.raises(RuntimeError, match="invalid_signature"):
+        fetch_runtime_resource("articles", since=now, max_records=10)
+    assert calls == 1
+
+
+def test_runtime_resource_transport_traceback_never_exposes_secret(
+    now, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    secret = "runtime-state-secret-" + ("x" * 32)
+    monkeypatch.setenv("ACTIVIST_API_URL", "https://api.example.test")
+    monkeypatch.setenv("ACTIVIST_API_SECRET", secret)
+    monkeypatch.setattr("curator.remote_state.time.sleep", lambda _seconds: None)
+
+    def fail(request_action, _payload, **_kwargs):  # type: ignore[no-untyped-def]
+        assert request_action == "export_runtime_state"
+        raise httpx.RemoteProtocolError(
+            f"hostile {secret}",
+            request=httpx.Request("POST", "https://api.example.test"),
+        )
+
+    monkeypatch.setattr("curator.remote_state.post_remote_action", fail)
+    with pytest.raises(RuntimeError, match="RemoteProtocolError") as error:
+        fetch_runtime_resource("articles", since=now, max_records=10)
+    rendered = "".join(
+        traceback.format_exception(error.type, error.value, error.tb)
+    )
+    assert secret not in rendered
 
 
 def test_complete_runtime_resource_fails_instead_of_returning_a_capped_prefix(

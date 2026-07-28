@@ -126,7 +126,7 @@ v2는 v1과 독립적인 `global_terminal_v2` release state를 사용한다.
 - `/ops/source-right-eligibility`: `ops` 또는 `admin` Bearer token
 - `/ops/alpha-release-evidence`: `ops` 또는 `admin` Bearer token
 - `/ops/ingest`: `ops` 또는 `admin` Bearer token
-- `/ops/release-state`: `ops` 또는 `admin` Bearer token. 5분 watchdog은 이 읽기 전용 경로만 사용
+- `/ops/release-state`: `ops` 또는 `admin` Bearer token. Observation chain과 진단 watchdog은 이 읽기 전용 경로만 사용
 - `/admin/review-queue`, `/admin/events/{event_id}/review`: `editor` 역할
 - `/admin/brief-candidates`, `/admin/briefs`: `editor` 역할
 - `/admin/release-state`: `admin` Bearer token
@@ -258,6 +258,22 @@ OpenDART는 이 v2 수집 경로의 대상이 아니다. 한국 공시는 기존
 
 `.github/workflows/ingest-global.yml`은 기본 브랜치에서 `GOVERNANCE_PIPELINE_MODE=shadow|live`일 때 매시 17분·47분에 미국 SEC connector만 실행한다. 수동 실행에서도 US만 선택할 수 있다. 기본 범위는 아직 끝난 최근 2개 UTC 날짜이며, 각 실행은 SourceRight를 첫 요청 전·각 페이지 전·API 전송 전에 확인하고 ACK가 실제 record와 lifecycle observation 합계와 다르면 실패한다. 실행 결과는 원문이나 자격정보를 넣지 않은 30일 보존 evidence artifact로 남긴다.
 
+runner는 공식 소스 요청 전에 ops 인증으로 배포 manifest의 exact SHA와 현재
+release state를 확인한다. `shadow`는 `preview` 상태와 preview Bearer token을,
+`live`는 `live` 상태를 요구하며 다른 모드는 요청 전에 중단한다. SEC
+completed-day backfill은 `global-ingest-v2-day`, Atom/current refresh는
+`global-ingest-v2-current` idempotency namespace를 사용한다. 서버는 namespace
+접두사를 신뢰하지 않고 canonical payload digest와 daily/current cursor 계약을
+재계산한다.
+
+classified SEC 요청은 본문의 `expected_release_state=closed|preview|live`를
+필수로 보낸다. 서버는 ops 인증과 별개로 preview 요청의
+`X-BSIDE-Preview-Token`을 검증하고, v1·v2 release state가 모두 기대 상태인지
+확인한다. apply는 transaction에서 두 상태 row를 먼저 `FOR UPDATE`로 잠근 뒤
+SourceRight와 connector를 잠가 cutover와의 경쟁을 막는다. replay는 같은 상태
+경계를 확인하지만 쓰기와 heartbeat 갱신을 하지 않는다. release state와 preview
+token은 semantic idempotency digest에 포함되지 않는다.
+
 필요한 설정은 다음과 같다.
 
 - 공통: `BSIDE_API_BASE_URL` secret 또는 `GOVERNANCE_API_BASE_URL` variable, `BSIDE_OPS_TOKEN` secret, `GOVERNANCE_PIPELINE_MODE` variable
@@ -266,9 +282,15 @@ OpenDART는 이 v2 수집 경로의 대상이 아니다. 한국 공시는 기존
 
 예약 실행처럼 `from_date`와 `to_date`가 모두 비어 있으면 runner는 `GET /ops/connectors/{connector_id}/checkpoint`에서 MySQL durable checkpoint를 읽는다. 완료된 `window_end_exclusive`의 하루 전부터 겹쳐 읽고 한 번에 최대 31일의 half-open window를 순서대로 처리해 긴 장애 뒤에도 날짜를 건너뛰지 않는다. 아직 checkpoint가 없으면 최근 완료 2일부터 시작한다. SEC는 completed-day 날짜 checkpoint와 별도로 `sec-current-v1` source cursor를 같은 schema v2 cursor에 저장하며, 90분 overlap으로 재관측한 Atom 항목은 content idempotency key와 DB upsert로 멱등 처리한다. 수동 범위에서도 SEC source cursor를 읽고, 다른 connector는 지정 범위만 처리한다. 둘 중 하나만 입력하면 `partial_explicit_window`로 fail-closed한다.
 
+같은 current content를 exact source cursor와 exact SHA로 다시 확인한 apply는
+SourceRight와 connector row를 다시 잠가 검증한 뒤 connector의 성공·확인
+heartbeat만 갱신한다. receipt·문서·사건·checkpoint는 불변이다. replay와
+completed-day receipt는 이 heartbeat 경로를 사용할 수 없으므로 역사 replay가
+현재 최신성을 가장하지 못한다.
+
 ### 캐나다·호주 수동 공식 링크 metadata runner
 
-`.github/workflows/ingest-selected-markets.yml`은 `GOVERNANCE_PIPELINE_MODE=shadow|live`일 때 매시 07분·37분에 캐나다와 호주를 분리 실행한다. 입력은 Repository variable `CA_OFFICIAL_LINKS_JSON`, `AU_OFFICIAL_LINKS_JSON`이고 공통 v2 API와 `BSIDE_OPS_TOKEN`을 사용한다.
+`.github/workflows/ingest-selected-markets.yml`은 `GOVERNANCE_PIPELINE_MODE=shadow|live`일 때 매시 07분·37분에 캐나다와 호주를 분리 실행한다. 입력은 Repository variable `CA_OFFICIAL_LINKS_JSON`, `AU_OFFICIAL_LINKS_JSON`이고 공통 v2 API와 `BSIDE_OPS_TOKEN`을 사용한다. 실행 전 배포 SHA와 서버 release state를 확인하고, 모든 apply 본문을 `shadow → preview`, `live → live`의 `expected_release_state`에 묶는다. Preview 적재에는 별도 `GOVERNANCE_PREVIEW_TOKEN`도 필요하며 서버는 두 release-state row를 transaction에서 다시 잠가 확인한다.
 
 이 경로는 명시적으로 승인된 링크 metadata만 적재한다. 설정된 `original_url`을 요청하지 않고 본문을 저장하지 않으며, 국가별 최대 50개 issuer·50개 승인 호스트 mapping·500개 record를 허용한다. 캐나다는 `official:ca-issuer-ir`, 호주는 `official:asic-register`만 사용할 수 있다. SourceRight 권한 확인은 record마다 호출하지 않고 권한 단위 batch의 앞뒤에서 `collect`와 `public`을 한 번씩 확인하며 네 ACK의 revision이 같아야 한다. 빈 설정은 무사건 성공으로 가장하지 않고 secret-free artifact에 `coverage_unavailable`을 기록한다.
 
@@ -284,7 +306,7 @@ Production Alpha를 실행하려면 `official:dart`, `official:sec-edgar`, `offi
 
 `.github/workflows/global-brief.yml`의 KST 05:45 예약 작업은 후보 bundle만 만들고 공개 brief를 쓰지 않는다. 사람 1명이 Top 5·근거·빈 결과 이유를 승인한 뒤 후보 작업의 `candidate_run_id`와 승인 JSON을 수동 `publish` 작업에 제출해야 한다. 발행 작업은 그 run이 같은 기본 브랜치·같은 code SHA에서 성공했는지, edition과 run ID에 정확히 묶인 후보 artifact가 하나뿐인지 확인한 뒤 bundle의 실제 `sha256(basis)`와 승인 hash·선택 사건 버전을 다시 대조한다. 후보 artifact는 30일, publication receipt는 90일 보존한다. 필요한 secret은 `BSIDE_EDITOR_TOKEN`, `GOVERNANCE_PREVIEW_TOKEN`, API 주소는 `BSIDE_API_BASE_URL` secret 또는 `GOVERNANCE_API_BASE_URL` variable이다.
 
-`.github/workflows/global-alpha-watchdog.yml`은 `GOVERNANCE_PIPELINE_MODE=shadow|live`와 `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`가 모두 충족될 때만 5분마다 release state, source 상태와 공개 루트를 관측한다. 기본값은 `false`이며 preview·소스·동일 SHA 준비가 끝나기 전에는 관측 분모를 만들지 않는다. 다른 문자열은 fail-closed한다. 관측은 읽기 전용 `GET /ops/release-state`와 `BSIDE_OPS_TOKEN`, `GOVERNANCE_PREVIEW_TOKEN`, `BSIDE_PUBLIC_WEB_URL`을 사용한다. watchdog에는 `BSIDE_ADMIN_TOKEN`이나 `BSIDE_RELEASE_AUTHORIZER_TOKEN`을 제공하지 않는다. 이 Production Alpha의 공개 배포는 web-only다. Telegram은 허가된 내부 신호 읽기에만 남고 outbound는 영구 비활성이므로 `ENABLE_TELEGRAM_DELIVERY=false`와 `ENABLE_GOVERNANCE_DELIVERY=false`를 유지한다.
+`.github/workflows/global-alpha-observation-chain.yml`은 `GOVERNANCE_PIPELINE_MODE=shadow`와 `GLOBAL_ALPHA_OBSERVATION_ENABLED=true`가 모두 충족된 뒤 운영자가 segment 1을 수동 시작한다. 5개 구간은 같은 SHA와 서버 candidate window를 공유하며 약 5분마다 총 288회 release state, source 상태와 Preview 루트를 관측한다. 후속 구간은 predecessor의 성공 first attempt와 immutable artifact digest를 확인한 뒤에만 기록을 시작한다. `.github/workflows/global-alpha-watchdog.yml`의 best-effort cron은 상시 진단용이며 출시 증빙에는 사용하지 않는다. 관측은 읽기 전용 `GET /ops/release-state`와 `BSIDE_OPS_TOKEN`, `GOVERNANCE_PREVIEW_TOKEN`, `BSIDE_PUBLIC_WEB_URL`을 사용한다. 두 workflow에는 `BSIDE_ADMIN_TOKEN`이나 `BSIDE_RELEASE_AUTHORIZER_TOKEN`을 제공하지 않는다. 이 Production Alpha의 공개 배포는 web-only다. Telegram은 허가된 내부 신호 읽기에만 남고 outbound는 영구 비활성이므로 `ENABLE_TELEGRAM_DELIVERY=false`와 `ENABLE_GOVERNANCE_DELIVERY=false`를 유지한다.
 
 ## 사건 검수
 

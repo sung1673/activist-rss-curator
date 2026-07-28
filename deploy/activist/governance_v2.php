@@ -3550,6 +3550,36 @@ function v2_alpha_global_connector_windows(
     }
     $batches = array();
     foreach ($rows as $row) {
+        $idempotencyKey = (string)$row['idempotency_key'];
+        $completedDayPrefix = 'global-ingest-v2-day:us:';
+        $currentPollPrefix = 'global-ingest-v2-current:us:';
+        if (preg_match(
+            '/^' . preg_quote($completedDayPrefix, '/') . '[a-f0-9]{64}$/D',
+            $idempotencyKey
+        ) !== 1) {
+            if (strpos($idempotencyKey, 'global-ingest-v2-day:') === 0) {
+                throw new RuntimeException(
+                    'alpha_evidence_completed_day_marker_invalid'
+                );
+            }
+            if (preg_match(
+                '/^' . preg_quote($currentPollPrefix, '/')
+                    . '[a-f0-9]{64}$/D',
+                $idempotencyKey
+            ) === 1) {
+                // Intraday/current receipts prove operational freshness, not
+                // immutable completed-day coverage.
+                continue;
+            }
+            if (strpos($idempotencyKey, 'global-ingest-v2-current:') === 0) {
+                throw new RuntimeException(
+                    'alpha_evidence_current_poll_marker_invalid'
+                );
+            }
+            // Intraday/hybrid cursor receipts are operational freshness
+            // observations, not completed-day evidence windows.
+            continue;
+        }
         $batchId = (string)$row['batch_id'];
         $key = (string)$row['window_start']
             . ':' . (string)$row['window_end_exclusive'];
@@ -3593,6 +3623,7 @@ function v2_alpha_global_connector_windows(
                 || (int)$row['batch_raw_count'] !== (int)$first['batch_raw_count']
                 || (int)$row['batch_acknowledged_count']
                     !== (int)$first['batch_acknowledged_count']
+                || (int)$row['batch_request_count'] !== 1
                 || (string)$row['code_revision'] !== $codeRevision
                 || preg_match(
                     '/^[a-f0-9]{64}$/D',
@@ -3626,6 +3657,7 @@ function v2_alpha_global_connector_windows(
         if (
             $raw !== (int)$first['batch_raw_count']
             || $acknowledged !== (int)$first['batch_acknowledged_count']
+            || (int)$final['batch_request_count'] !== 1
             || $requests !== (int)$final['batch_request_count']
             || $raw < $acknowledged
         ) {
@@ -3666,6 +3698,81 @@ function v2_alpha_global_connector_windows(
     return v2_alpha_latest_contiguous_windows($windows);
 }
 
+/**
+ * Bind a DART evidence checkpoint to the exact Python apply-job contract.
+ *
+ * ``curator.official_backfill`` hashes the canonical job object before adding
+ * its ``fingerprint`` member.  The database path key, embedded member, and
+ * recomputed hash must all agree, and an apply checkpoint must carry the exact
+ * release revision requested by the evidence exporter.  Legacy checkpoints
+ * without a revision and checkpoints from another release are not evidence.
+ */
+function v2_alpha_dart_job_is_release_bound(
+    array $job,
+    string $rowFingerprint,
+    string $codeRevision
+): bool {
+    $expectedKeys = array(
+        'chunk_days',
+        'code_revision',
+        'fingerprint',
+        'max_pages',
+        'page_count',
+        'range_end_exclusive',
+        'range_start',
+        'sources',
+        'sync_company_master',
+    );
+    $actualKeys = array_keys($job);
+    sort($actualKeys, SORT_STRING);
+    if ($actualKeys !== $expectedKeys) {
+        return false;
+    }
+    if (
+        !is_string($job['range_start'])
+        || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $job['range_start']) !== 1
+        || !is_string($job['range_end_exclusive'])
+        || preg_match(
+            '/^\d{4}-\d{2}-\d{2}$/D',
+            $job['range_end_exclusive']
+        ) !== 1
+        || v2_alpha_date_epoch($job['range_start']) === null
+        || v2_alpha_date_epoch($job['range_end_exclusive']) === null
+        || $job['range_end_exclusive'] <= $job['range_start']
+        || !is_int($job['chunk_days'])
+        || $job['chunk_days'] !== 1
+        || !is_array($job['sources'])
+        || array_keys($job['sources']) !== array(0)
+        || array_values($job['sources']) !== array('dart')
+        || !is_int($job['page_count'])
+        || $job['page_count'] < 1
+        || $job['page_count'] > 100
+        || !is_int($job['max_pages'])
+        || $job['max_pages'] < 1
+        || !is_bool($job['sync_company_master'])
+        || !is_string($job['code_revision'])
+        || preg_match('/^[a-f0-9]{40}$/D', $job['code_revision']) !== 1
+        || !hash_equals($codeRevision, $job['code_revision'])
+        || !is_string($job['fingerprint'])
+        || preg_match('/^[a-f0-9]{64}$/D', $job['fingerprint']) !== 1
+        || preg_match('/^[a-f0-9]{64}$/D', $rowFingerprint) !== 1
+        || !hash_equals($rowFingerprint, $job['fingerprint'])
+    ) {
+        return false;
+    }
+    $contract = $job;
+    unset($contract['fingerprint']);
+    try {
+        $canonical = v1_strict_canonical_json_encode(
+            $contract,
+            'alpha_evidence_dart_job_encoding_failed'
+        );
+    } catch (Throwable $error) {
+        return false;
+    }
+    return hash_equals($rowFingerprint, hash('sha256', $canonical));
+}
+
 function v2_alpha_dart_windows(
     PDO $pdo,
     array $config,
@@ -3701,6 +3808,14 @@ function v2_alpha_dart_windows(
         ) {
             continue;
         }
+        if (!v2_alpha_dart_job_is_release_bound(
+            $job,
+            (string)$row['job_fingerprint'],
+            $codeRevision
+        )) {
+            continue;
+        }
+        $jobFingerprint = (string)$row['job_fingerprint'];
         $failed = isset($checkpoint['failed_windows'])
             && is_array($checkpoint['failed_windows'])
             ? $checkpoint['failed_windows'] : null;
@@ -3712,41 +3827,86 @@ function v2_alpha_dart_windows(
         }
         $windows = array();
         foreach ($completed as $windowKey => $window) {
+            $expectedIdempotencyKey = 'official-backfill-v1:' . substr(
+                hash('sha256', $jobFingerprint . '|' . (string)$windowKey),
+                0,
+                32
+            );
             if (
                 !is_array($window)
                 || (string)($window['status'] ?? '') !== 'succeeded'
                 || (string)($window['code_revision'] ?? '') !== $codeRevision
-                || strpos(
-                    (string)($window['idempotency_key'] ?? ''),
-                    'official-backfill-v1:'
-                ) !== 0
+                || !hash_equals(
+                    $expectedIdempotencyKey,
+                    (string)($window['idempotency_key'] ?? '')
+                )
                 || !isset($window['summary'])
                 || !is_array($window['summary'])
             ) {
                 continue;
             }
             $summary = $window['summary'];
-            $rawCount = (int)($summary['official_remote_raw_count'] ?? -1);
-            $ackCount = (int)($summary['official_remote_ack_count'] ?? -2);
+            $requiredSummaryFields = array(
+                'official_failed',
+                'official_skipped',
+                'official_remote_ack_mismatches',
+                'official_remote_run_persisted',
+                'official_remote_raw_count',
+                'official_remote_ack_count',
+                'official_remote_failed',
+                'official_remote_skipped',
+                'official_remote_synced',
+                'official_dart_requests',
+                'official_dart_fetched',
+                'official_dart_accepted',
+                'official_dart_errors',
+                'official_dart_quota_exhausted',
+            );
+            foreach ($requiredSummaryFields as $field) {
+                if (
+                    !array_key_exists($field, $summary)
+                    || !is_int($summary[$field])
+                    || $summary[$field] < 0
+                ) {
+                    throw new RuntimeException(
+                        'alpha_evidence_dart_ack_invalid'
+                    );
+                }
+            }
+            $remoteRawCount = $summary['official_remote_raw_count'];
+            $ackCount = $summary['official_remote_ack_count'];
+            $acceptedCount = $summary['official_dart_accepted'];
+            $rawCount = $summary['official_dart_fetched'];
             if (
-                $rawCount < 0
-                || $ackCount < 0
-                || $rawCount < $ackCount
-                || (int)($summary['official_remote_run_persisted'] ?? 0) !== 1
-                || (int)($summary['official_remote_ack_mismatches'] ?? 0) !== 0
-                || (int)($summary['official_remote_failed'] ?? 0) !== 0
-                || (int)($summary['official_remote_skipped'] ?? 0) !== 0
-                || (int)($summary['official_failed'] ?? 0) !== 0
-                || (int)($summary['official_skipped'] ?? 0) !== 0
+                $remoteRawCount !== $ackCount
+                || $acceptedCount !== $remoteRawCount
+                || $rawCount < $acceptedCount
+                || $summary['official_remote_run_persisted'] !== 1
+                || $summary['official_remote_ack_mismatches'] !== 0
+                || $summary['official_remote_failed'] !== 0
+                || $summary['official_remote_skipped'] !== 0
+                || $summary['official_remote_synced'] < 1
+                || $summary['official_failed'] !== 0
+                || $summary['official_skipped'] !== 0
+                || $summary['official_dart_requests'] < 1
+                || $summary['official_dart_errors'] !== 0
+                || $summary['official_dart_quota_exhausted'] !== 0
             ) {
                 throw new RuntimeException('alpha_evidence_dart_ack_invalid');
             }
-            $acceptedCount = $ackCount;
             $filteredOutCount = $rawCount - $acceptedCount;
             $start = (string)($window['window_start'] ?? '');
             $end = (string)($window['window_end_exclusive'] ?? '');
             if ($windowKey !== $start . ':' . $end) {
                 throw new RuntimeException('alpha_evidence_dart_window_key');
+            }
+            if (
+                $start < (string)$job['range_start']
+                || $end > (string)$job['range_end_exclusive']
+            ) {
+                throw new RuntimeException(
+                    'alpha_evidence_dart_window_outside_job'
+                );
             }
             $windows[$windowKey] = array(
                 'window_start' => $start,
@@ -3762,7 +3922,7 @@ function v2_alpha_dart_windows(
                     v1_strict_canonical_json_encode(
                         array(
                             'job_fingerprint' =>
-                                (string)$row['job_fingerprint'],
+                                $jobFingerprint,
                             'checkpoint_payload_sha256' => $payloadHash,
                             'window_key' => (string)$windowKey,
                             'idempotency_key' =>

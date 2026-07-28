@@ -98,6 +98,44 @@ function v2_write_timestamp(
     return $normalized;
 }
 
+/**
+ * Require a recent server-observed fetch for a mutating SEC current poll.
+ *
+ * Request counters are attempt telemetry and therefore remain outside content
+ * identity, but an apply request may only establish freshness when the batch
+ * proves that at least one source request occurred.  The server clock bounds
+ * retrieved_at so a signed payload cannot revive readiness with stale or
+ * future-dated evidence.
+ */
+function v2_write_assert_current_poll_apply_evidence(
+    array $envelope,
+    array $chunk,
+    bool $isFinalChunk,
+    string $retrievedAt,
+    string $serverCompletedAt
+): void {
+    if (
+        (int)$chunk['batch_request_count'] < 1
+        || ($isFinalChunk && (int)$envelope['request_count'] < 1)
+    ) {
+        v2_write_invalid(
+            'payload.idempotency_key: current-poll request proof required'
+        );
+    }
+    $retrievedEpoch = strtotime($retrievedAt . ' UTC');
+    $completedEpoch = strtotime($serverCompletedAt . ' UTC');
+    if (
+        $retrievedEpoch === false
+        || $completedEpoch === false
+        || $retrievedEpoch < $completedEpoch - 900
+        || $retrievedEpoch > $completedEpoch + 60
+    ) {
+        v2_write_invalid(
+            'envelope.retrieved_at: current-poll freshness window mismatch'
+        );
+    }
+}
+
 function v2_write_https_url(string $value, string $location): string {
     if (strlen($value) > 4096 || preg_match('/[\x00-\x1f\x7f]/', $value) === 1) {
         v2_write_invalid($location . ': invalid URL');
@@ -320,6 +358,7 @@ function v2_write_ingest_idempotency_hash(array $payload): string {
     // replay-only request must match the receipt created by the original
     // apply request without being allowed to create a replacement receipt.
     unset($semantic['ingest_mode']);
+    unset($semantic['expected_release_state']);
     if (
         isset($semantic['envelope'])
         && is_array($semantic['envelope'])
@@ -345,6 +384,139 @@ function v2_write_ingest_idempotency_hash(array $payload): string {
         }
     }
     return v2_write_canonical_payload_hash($semantic);
+}
+
+/**
+ * Recompute the Python content-idempotency digest for a classified SEC poll.
+ *
+ * The namespace is evidence-significant, so accepting a caller-selected
+ * prefix would let an ops credential relabel hybrid data as completed-day
+ * evidence. Keep this byte contract aligned with content_idempotency_key().
+ */
+function v2_write_expected_classified_ingest_key(
+    array $payload,
+    string $codeRevision,
+    string $country,
+    array $chunk,
+    array $normalizedRecords,
+    string $namespace
+): string {
+    $stableEnvelope = $payload['envelope'];
+    unset($stableEnvelope['retrieved_at']);
+    unset($stableEnvelope['request_count']);
+    unset($stableEnvelope['chunk']);
+    if (
+        isset($stableEnvelope['records'])
+        && is_array($stableEnvelope['records'])
+    ) {
+        foreach ($stableEnvelope['records'] as $index => &$record) {
+            if (is_array($record)) {
+                unset($record['first_observed_at']);
+                if (
+                    isset($normalizedRecords[$index])
+                    && is_array($normalizedRecords[$index])
+                    && isset($normalizedRecords[$index]['metadata'])
+                ) {
+                    // json_decode(..., true) cannot distinguish an empty JSON
+                    // object from an empty list. The normalized metadata tree
+                    // restores stdClass object nodes for cross-runtime parity.
+                    $record['metadata'] =
+                        $normalizedRecords[$index]['metadata'];
+                }
+            }
+        }
+        unset($record);
+    }
+    $content = array(
+        'code_revision' => $codeRevision,
+        'window_start' => (string)$chunk['window_start'],
+        'window_end_exclusive' => (string)$chunk['window_end_exclusive'],
+        'chunk_index' => (int)$chunk['index'] - 1,
+        'envelope' => $stableEnvelope,
+    );
+    return $namespace . ':'
+        . strtolower($country) . ':'
+        . hash(
+            'sha256',
+            v1_strict_canonical_json_encode(
+                $content,
+                'global_ingest_classified_key_encode_failed'
+            )
+        );
+}
+
+function v2_write_valid_sec_current_cursor($value): bool {
+    if (!is_string($value)) {
+        return false;
+    }
+    $prefix = 'sec-current-v1:';
+    if (strpos($value, $prefix) !== 0) {
+        return false;
+    }
+    $encoded = substr($value, strlen($prefix));
+    if (
+        $encoded === ''
+        || strlen($encoded) > 1000
+        || preg_match('/^[A-Za-z0-9_-]+$/D', $encoded) !== 1
+        || strlen($encoded) % 4 === 1
+    ) {
+        return false;
+    }
+    $standard = strtr($encoded, '-_', '+/');
+    $standard .= str_repeat('=', (4 - strlen($standard) % 4) % 4);
+    $decoded = base64_decode($standard, true);
+    if (
+        $decoded === false
+        || strlen($decoded) > 512
+        || rtrim(
+            strtr(base64_encode($decoded), '+/', '-_'),
+            '='
+        ) !== $encoded
+    ) {
+        return false;
+    }
+    $payload = json_decode($decoded, true);
+    if (
+        json_last_error() !== JSON_ERROR_NONE
+        || !is_array($payload)
+        || !v2_exact_string_keys(
+            $payload,
+            array('schema_version', 'updated_at')
+        )
+        || !isset($payload['schema_version'])
+        || $payload['schema_version'] !== 1
+        || !isset($payload['updated_at'])
+        || !is_string($payload['updated_at'])
+        || preg_match(
+            '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$/D',
+            (string)$payload['updated_at']
+        ) !== 1
+    ) {
+        return false;
+    }
+    $parsed = DateTimeImmutable::createFromFormat(
+        '!Y-m-d\TH:i:sP',
+        (string)$payload['updated_at'],
+        new DateTimeZone('UTC')
+    );
+    $errors = DateTimeImmutable::getLastErrors();
+    if (
+        $parsed === false
+        || (
+            is_array($errors)
+            && (
+                (int)$errors['warning_count'] !== 0
+                || (int)$errors['error_count'] !== 0
+            )
+        )
+        || $parsed->format('Y-m-d\TH:i:sP')
+            !== (string)$payload['updated_at']
+    ) {
+        return false;
+    }
+    $canonical = '{"schema_version":1,"updated_at":"'
+        . (string)$payload['updated_at'] . '"}';
+    return hash_equals($canonical, $decoded);
 }
 
 function v2_source_right_row(
@@ -1068,7 +1240,13 @@ function v2_normalize_lifecycle_observation(
 function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): array {
     v2_write_assert_keys(
         $payload,
-        array('idempotency_key', 'code_revision', 'ingest_mode', 'envelope'),
+        array(
+            'idempotency_key',
+            'code_revision',
+            'expected_release_state',
+            'ingest_mode',
+            'envelope',
+        ),
         'payload'
     );
     $idempotencyKey = v2_write_code(
@@ -1091,6 +1269,17 @@ function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): a
             '/^(apply|replay)$/'
         )
         : 'apply';
+    $expectedReleaseState = array_key_exists(
+        'expected_release_state',
+        $payload
+    )
+        ? v2_write_code(
+            $payload,
+            'expected_release_state',
+            'payload',
+            '/^(closed|preview|live)$/'
+        )
+        : null;
     $envelope = isset($payload['envelope']) && is_array($payload['envelope'])
         && !v2_write_is_list($payload['envelope']) ? $payload['envelope'] : null;
     if ($envelope === null) {
@@ -1401,6 +1590,28 @@ function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): a
     ) {
         v2_write_invalid('envelope.chunk: single chunk totals mismatch');
     }
+    if (
+        in_array($country, array('CA', 'AU'), true)
+        && $coverageMode === 'link-only'
+        && (
+            count($records) < 1
+            || count($observations) !== 0
+            || (int)$envelope['raw_count'] < 1
+            || $acknowledged < 1
+            || (int)$envelope['request_count'] !== 0
+            || (int)$chunk['index'] !== 1
+            || (int)$chunk['count'] !== 1
+            || (int)$chunk['batch_raw_count'] < 1
+            || (int)$chunk['batch_acknowledged_count'] < 1
+            || (int)$chunk['batch_request_count'] !== 0
+            || $envelope['exhausted'] !== true
+        )
+    ) {
+        v2_write_invalid(
+            'envelope: link-only verification requires one complete '
+            . 'non-empty metadata batch without source requests'
+        );
+    }
     if ($chunk['index'] < $chunk['count'] && $envelope['exhausted'] === true) {
         v2_write_invalid('envelope.chunk: non-final chunk cannot be exhausted');
     }
@@ -1411,13 +1622,170 @@ function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): a
         }
         $cursor = $envelope['next_cursor'];
     }
+    $completedDayPrefix = 'global-ingest-v2-day:'
+        . strtolower((string)$country) . ':';
+    $currentPollPrefix = 'global-ingest-v2-current:'
+        . strtolower((string)$country) . ':';
+    $hasCompletedDayNamespace = strpos(
+        (string)$idempotencyKey,
+        'global-ingest-v2-day:'
+    ) === 0;
+    $hasCurrentPollNamespace = strpos(
+        (string)$idempotencyKey,
+        'global-ingest-v2-current:'
+    ) === 0;
+    $isCompletedDayEvidence = preg_match(
+        '/^' . preg_quote($completedDayPrefix, '/') . '[a-f0-9]{64}$/D',
+        (string)$idempotencyKey
+    ) === 1;
+    $isCurrentPoll = preg_match(
+        '/^' . preg_quote($currentPollPrefix, '/') . '[a-f0-9]{64}$/D',
+        (string)$idempotencyKey
+    ) === 1;
+    if ($hasCompletedDayNamespace && !$isCompletedDayEvidence) {
+        v2_write_invalid(
+            'payload.idempotency_key: invalid completed-day evidence namespace'
+        );
+    }
+    if ($hasCurrentPollNamespace && !$isCurrentPoll) {
+        v2_write_invalid(
+            'payload.idempotency_key: invalid current-poll namespace'
+        );
+    }
+    $isFinalChunk = (int)$chunk['index'] === (int)$chunk['count'];
+    $syntheticChunkCursorPattern = '/^global-ingest-chunk:'
+        . preg_quote((string)$windowStart, '/') . ':'
+        . preg_quote((string)$windowEnd, '/') . ':'
+        . (int)$chunk['index'] . ':' . (int)$chunk['count']
+        . ':[a-f0-9]{24}$/D';
+    $hasValidSyntheticChunkCursor = (
+        !$isFinalChunk
+        && $cursor !== null
+        && preg_match(
+            $syntheticChunkCursorPattern,
+            (string)$cursor
+        ) === 1
+    );
+    $receiptKind = 'standard';
+    if ($isCompletedDayEvidence) {
+        if (
+            (string)$connector['connector_id'] !== 'connector:us:sec-edgar'
+            || $windowDays !== 1
+            || (int)$chunk['batch_request_count'] !== 1
+            || ($isFinalChunk && $cursor !== null)
+            || (!$isFinalChunk && !$hasValidSyntheticChunkCursor)
+            || ($isFinalChunk && $envelope['exhausted'] !== true)
+            || count($observations) !== 0
+        ) {
+            v2_write_invalid(
+                'payload.idempotency_key: completed-day evidence contract mismatch'
+            );
+        }
+        foreach ($records as $record) {
+            $metadata = isset($record['metadata'])
+                && is_object($record['metadata'])
+                ? get_object_vars($record['metadata'])
+                : (
+                    isset($record['metadata'])
+                    && is_array($record['metadata'])
+                    ? $record['metadata'] : array()
+                );
+            if (
+                !isset($metadata['discovery'])
+                || !is_string($metadata['discovery'])
+                || !hash_equals(
+                    'daily-master-index',
+                    (string)$metadata['discovery']
+                )
+            ) {
+                v2_write_invalid(
+                    'payload.idempotency_key: completed-day source provenance mismatch'
+                );
+            }
+        }
+        $receiptKind = 'completed-day';
+    } elseif ($isCurrentPoll) {
+        if (
+            (string)$connector['connector_id'] !== 'connector:us:sec-edgar'
+            || ($isFinalChunk && $envelope['exhausted'] !== true)
+            || (
+                $isFinalChunk
+                && (
+                    $cursor === null
+                    || !v2_write_valid_sec_current_cursor($cursor)
+                )
+            )
+            || (!$isFinalChunk && !$hasValidSyntheticChunkCursor)
+        ) {
+            v2_write_invalid(
+                'payload.idempotency_key: current-poll contract mismatch'
+            );
+        }
+        if ($ingestMode === 'apply') {
+            v2_write_assert_current_poll_apply_evidence(
+                $envelope,
+                $chunk,
+                $isFinalChunk,
+                (string)$retrievedAt,
+                gmdate('Y-m-d H:i:s')
+            );
+        }
+        $receiptKind = 'current';
+    }
+    if (
+        (string)$connector['connector_id'] === 'connector:us:sec-edgar'
+        && $receiptKind === 'standard'
+    ) {
+        v2_write_invalid(
+            'payload.idempotency_key: SEC classified receipt required'
+        );
+    }
+    $isSelectedLinkOnlyApply = (
+        $ingestMode === 'apply'
+        && in_array($country, array('CA', 'AU'), true)
+        && $coverageMode === 'link-only'
+    );
+    if ($isSelectedLinkOnlyApply && $expectedReleaseState === null) {
+        v2_write_invalid(
+            'payload.expected_release_state: link-only apply requires '
+            . 'release binding'
+        );
+    }
+    if ($receiptKind !== 'standard') {
+        if ($expectedReleaseState === null) {
+            v2_write_invalid(
+                'payload.expected_release_state: classified receipt requires release binding'
+            );
+        }
+        $expectedClassifiedKey = v2_write_expected_classified_ingest_key(
+            $payload,
+            (string)$codeRevision,
+            (string)$country,
+            array(
+                'index' => (int)$chunk['index'],
+                'window_start' => (string)$windowStart,
+                'window_end_exclusive' => (string)$windowEnd,
+            ),
+            $records,
+            $receiptKind === 'completed-day'
+                ? 'global-ingest-v2-day'
+                : 'global-ingest-v2-current'
+        );
+        if (!hash_equals($expectedClassifiedKey, (string)$idempotencyKey)) {
+            v2_write_invalid(
+                'payload.idempotency_key: classified semantic digest mismatch'
+            );
+        }
+    }
     return array(
         'idempotency_key' => $idempotencyKey,
         'code_revision' => $codeRevision,
+        'expected_release_state' => $expectedReleaseState,
         'ingest_mode' => $ingestMode,
         'connector' => $connector,
         'right' => $right,
         'rights_revision' => $rightsRevision,
+        'source_manifest_sha256' => $sourceManifestSha256,
         'retrieved_at' => $retrievedAt,
         'records' => $records,
         'lifecycle_observations' => $observations,
@@ -1436,6 +1804,7 @@ function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): a
         ),
         'next_cursor' => $cursor,
         'exhausted' => $envelope['exhausted'],
+        'receipt_kind' => $receiptKind,
         'payload_hash' => v2_write_ingest_idempotency_hash($payload),
     );
 }
@@ -2197,6 +2566,67 @@ function v2_ingest_assert_batch_complete(
     }
 }
 
+/**
+ * Verify an already committed batch without comparing attempt-only request
+ * telemetry from the new poll. Content identity intentionally excludes those
+ * counters, while the stored batch must still be internally complete.
+ */
+function v2_ingest_assert_stored_batch_complete(
+    array $rows,
+    array $normalized
+): void {
+    $chunk = $normalized['chunk'];
+    if (
+        (int)$chunk['index'] !== (int)$chunk['count']
+        || count($rows) !== (int)$chunk['count']
+        || !$rows
+    ) {
+        throw new RuntimeException('global_ingest_batch_incomplete');
+    }
+    $first = $rows[0];
+    $rawTotal = 0;
+    $acknowledgedTotal = 0;
+    $requestTotal = 0;
+    foreach ($rows as $position => $row) {
+        if (
+            (int)$row['chunk_index'] !== $position + 1
+            || (int)$row['batch_request_count']
+                !== (int)$first['batch_request_count']
+        ) {
+            throw new RuntimeException(
+                'global_ingest_batch_receipt_corrupt'
+            );
+        }
+        v2_ingest_assert_batch_metadata($row, $normalized);
+        $rawTotal += (int)$row['raw_count'];
+        $acknowledgedTotal += (int)$row['acknowledged_count'];
+        $requestTotal += (int)$row['request_count'];
+    }
+    if (
+        $rawTotal !== (int)$first['batch_raw_count']
+        || $acknowledgedTotal
+            !== (int)$first['batch_acknowledged_count']
+        || $requestTotal !== (int)$first['batch_request_count']
+    ) {
+        throw new RuntimeException(
+            'global_ingest_batch_totals_mismatch'
+        );
+    }
+    $final = $rows[count($rows) - 1];
+    if (
+        (string)$normalized['receipt_kind'] === 'current'
+        && (string)$normalized['ingest_mode'] === 'apply'
+        && (
+            (int)$final['request_count'] < 1
+            || (int)$final['batch_request_count'] < 1
+        )
+    ) {
+        throw new RuntimeException(
+            'global_ingest_batch_receipt_corrupt'
+        );
+    }
+}
+
 function v2_ingest_locked_checkpoint(array $connector): ?array {
     $raw = isset($connector['cursor_json'])
         ? trim((string)$connector['cursor_json']) : '';
@@ -2259,6 +2689,56 @@ function v2_ingest_locked_checkpoint(array $connector): ?array {
     return $cursor;
 }
 
+/**
+ * A current-poll apply may mutate connector readiness only for a strictly
+ * newer observation. Equal or older exact retries remain successful reads of
+ * the durable receipt, without touching timestamps or the source cursor.
+ */
+function v2_ingest_current_poll_observation_is_newer(
+    array $lockedConnector,
+    array $normalized
+): bool {
+    if (
+        (string)$normalized['receipt_kind'] !== 'current'
+        || (string)$normalized['ingest_mode'] !== 'apply'
+        || (int)$normalized['chunk']['batch_request_count'] < 1
+    ) {
+        return false;
+    }
+    $lastObservedAt = isset($lockedConnector['last_observed_at'])
+        ? trim((string)$lockedConnector['last_observed_at']) : '';
+    if ($lastObservedAt === '') {
+        return true;
+    }
+    if (
+        preg_match(
+            '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/D',
+            $lastObservedAt
+        ) !== 1
+    ) {
+        return false;
+    }
+    return strcmp(
+        (string)$normalized['retrieved_at'],
+        $lastObservedAt
+    ) > 0;
+}
+
+function v2_ingest_current_poll_can_refresh(
+    array $lockedConnector,
+    array $normalized
+): bool {
+    return (
+        (int)$normalized['chunk']['index']
+            === (int)$normalized['chunk']['count']
+        && (int)$normalized['request_count'] >= 1
+        && v2_ingest_current_poll_observation_is_newer(
+            $lockedConnector,
+            $normalized
+        )
+    );
+}
+
 function v2_ingest_checkpoint_should_advance(
     ?array $existing,
     array $normalized
@@ -2276,6 +2756,285 @@ function v2_ingest_checkpoint_should_advance(
     // changing the completed-day boundary. Historical completed-day runs
     // never replace an equal or newer durable checkpoint.
     return $comparison === 0 && $normalized['next_cursor'] !== null;
+}
+
+function v2_ingest_is_link_only_apply(array $normalized): bool {
+    return (
+        $normalized['ingest_mode'] === 'apply'
+        && (string)$normalized['connector']['coverage_mode'] === 'link-only'
+        && in_array(
+            (string)$normalized['connector']['country_code'],
+            array('CA', 'AU'),
+            true
+        )
+    );
+}
+
+function v2_ingest_link_only_receipt_is_complete(
+    array $receipt,
+    array $normalized
+): bool {
+    if (!v2_ingest_is_link_only_apply($normalized)) {
+        return false;
+    }
+    $chunk = $normalized['chunk'];
+    return (
+        (int)$receipt['raw_count'] >= 1
+        && (int)$receipt['acknowledged_count'] >= 1
+        && (int)$receipt['request_count'] === 0
+        && (int)$receipt['chunk_index'] === 1
+        && (int)$receipt['chunk_count'] === 1
+        && (int)$receipt['batch_raw_count'] === (int)$receipt['raw_count']
+        && (int)$receipt['batch_acknowledged_count']
+            === (int)$receipt['acknowledged_count']
+        && (int)$receipt['batch_request_count'] === 0
+        && (string)$receipt['batch_id'] === (string)$chunk['batch_id']
+        && (int)$receipt['raw_count'] === (int)$normalized['raw_count']
+        && (int)$receipt['acknowledged_count']
+            === (int)$normalized['acknowledged_count']
+    );
+}
+
+/**
+ * Revalidate the exact approved manifest and current SourceRight while the
+ * right row is locked. The pre-transaction validation is useful feedback, but
+ * only this check can authorize a link-only freshness heartbeat.
+ */
+function v2_ingest_assert_locked_link_only_right(
+    array $normalized,
+    array $lockedRight
+): void {
+    if (!v2_ingest_is_link_only_apply($normalized)) {
+        return;
+    }
+    $connector = $normalized['connector'];
+    $manifestSha256 = $normalized['source_manifest_sha256'];
+    if (
+        !is_string($manifestSha256)
+        || preg_match('/^[a-f0-9]{64}$/', $manifestSha256) !== 1
+        || (string)$lockedRight['source_right_id']
+            !== (string)$connector['source_right_id']
+        || (string)$lockedRight['source_type']
+            !== (string)$connector['source_type']
+        || (string)$lockedRight['source_key']
+            !== (string)$connector['source_key']
+        || count(v2_source_right_ineligible_reasons(
+            $lockedRight,
+            'collect'
+        )) > 0
+        || count(v2_source_right_ineligible_reasons(
+            $lockedRight,
+            'public'
+        )) > 0
+        || !hash_equals(
+            v2_source_right_revision($lockedRight),
+            (string)$normalized['rights_revision']
+        )
+        || preg_match(
+            '/^[a-f0-9]{64}$/',
+            (string)$lockedRight['evidence_hash']
+        ) !== 1
+        || !hash_equals(
+            (string)$lockedRight['evidence_hash'],
+            $manifestSha256
+        )
+    ) {
+        throw new RuntimeException('global_source_right_changed');
+    }
+}
+
+/**
+ * Refresh only connector verification telemetry. Existing receipts, documents,
+ * review state, and checkpoints stay byte-for-byte untouched.
+ */
+function v2_ingest_refresh_link_only_connector(
+    PDO $pdo,
+    array $config,
+    array $normalized,
+    array $receipt,
+    string $verifiedAt
+): void {
+    if (
+        !v2_ingest_is_link_only_apply($normalized)
+        || (int)$receipt['raw_count'] < 1
+        || (int)$receipt['acknowledged_count'] < 1
+    ) {
+        return;
+    }
+    $update = $pdo->prepare(
+        'UPDATE ' . table_name($config, 'source_connectors')
+        . ' SET connector_status=\'active\',last_checked_at=?,'
+        . 'last_success_at=?,last_observed_at=?,last_raw_count=?,'
+        . 'last_acknowledged_count=?,last_error_class=NULL,code_revision=?,'
+        . 'updated_at=? WHERE connector_id=?'
+    );
+    $update->execute(array(
+        $verifiedAt,
+        $verifiedAt,
+        $verifiedAt,
+        (int)$receipt['raw_count'],
+        (int)$receipt['acknowledged_count'],
+        $normalized['code_revision'],
+        $verifiedAt,
+        $normalized['connector']['connector_id'],
+    ));
+}
+
+function v2_ingest_require_preview_binding(
+    array $config,
+    array $normalized
+): void {
+    if (
+        !isset($normalized['expected_release_state'])
+        || (string)$normalized['expected_release_state'] !== 'preview'
+    ) {
+        return;
+    }
+    $token = isset($_SERVER['HTTP_X_BSIDE_PREVIEW_TOKEN'])
+        ? trim((string)$_SERVER['HTTP_X_BSIDE_PREVIEW_TOKEN']) : '';
+    if ($token === '' || strlen($token) > 4096) {
+        v2_respond(401, array(
+            'ok' => false,
+            'error' => 'ingest_preview_token_required',
+        ));
+    }
+    $candidate = hash('sha256', $token);
+    foreach (v1_preview_token_hashes($config) as $expected) {
+        if (hash_equals($expected, $candidate)) {
+            return;
+        }
+    }
+    v2_respond(403, array(
+        'ok' => false,
+        'error' => 'invalid_ingest_preview_token',
+    ));
+}
+
+/**
+ * Bind a classified official-source write to both release-state rows.
+ *
+ * Apply calls repeat this check with FOR UPDATE before the SourceRight and
+ * connector locks, matching the protected cutover lock order. Read-only
+ * replay still receives a non-locking boundary check before its early return.
+ */
+function v2_ingest_assert_release_boundary(
+    PDO $pdo,
+    array $config,
+    array $normalized,
+    bool $forUpdate
+): void {
+    $expected = isset($normalized['expected_release_state'])
+        ? (string)$normalized['expected_release_state'] : '';
+    if ($expected === '') {
+        return;
+    }
+    $statement = $pdo->prepare(
+        'SELECT state_key,release_state FROM '
+        . table_name($config, 'governance_release_state')
+        . ' WHERE state_key IN (?,?) ORDER BY BINARY state_key'
+        . ($forUpdate ? ' FOR UPDATE' : '')
+    );
+    $statement->execute(array(
+        GOV_V1_RELEASE_STATE_KEY,
+        GOV_V2_RELEASE_STATE_KEY,
+    ));
+    $rows = array();
+    foreach ($statement->fetchAll() as $row) {
+        $rows[(string)$row['state_key']] = (string)$row['release_state'];
+    }
+    if (
+        count($rows) !== 2
+        || !isset(
+            $rows[GOV_V1_RELEASE_STATE_KEY],
+            $rows[GOV_V2_RELEASE_STATE_KEY]
+        )
+        || !hash_equals(
+            $expected,
+            (string)$rows[GOV_V1_RELEASE_STATE_KEY]
+        )
+        || !hash_equals(
+            $expected,
+            (string)$rows[GOV_V2_RELEASE_STATE_KEY]
+        )
+    ) {
+        throw new RuntimeException(
+            'global_ingest_release_state_mismatch'
+        );
+    }
+}
+
+/**
+ * Refresh SEC readiness after a real, unchanged current-feed poll.
+ *
+ * This path is deliberately unavailable to replay-only and completed-day
+ * requests. It preserves the durable completed-day checkpoint verbatim and
+ * only refreshes when the locked source cursor exactly matches the fetched
+ * current-feed cursor, preventing a stale receipt from reviving readiness.
+ */
+function v2_ingest_refresh_idempotent_current_poll(
+    PDO $pdo,
+    array $config,
+    array $lockedConnector,
+    array $normalized,
+    string $completedAt
+): bool {
+    if (
+        (string)$normalized['receipt_kind'] !== 'current'
+        || (string)$normalized['ingest_mode'] !== 'apply'
+        || (int)$normalized['chunk']['index']
+            !== (int)$normalized['chunk']['count']
+        || !v2_ingest_current_poll_can_refresh(
+            $lockedConnector,
+            $normalized
+        )
+    ) {
+        return false;
+    }
+    $checkpoint = v2_ingest_locked_checkpoint($lockedConnector);
+    if (
+        $checkpoint === null
+        || (int)$checkpoint['schema_version'] !== 2
+        || !isset($checkpoint['source_cursor'])
+        || !is_string($checkpoint['source_cursor'])
+        || $normalized['next_cursor'] === null
+        || !hash_equals(
+            (string)$checkpoint['source_cursor'],
+            (string)$normalized['next_cursor']
+        )
+        || !isset($lockedConnector['code_revision'])
+        || !is_string($lockedConnector['code_revision'])
+        || !hash_equals(
+            (string)$lockedConnector['code_revision'],
+            (string)$normalized['code_revision']
+        )
+    ) {
+        return false;
+    }
+    $rows = v2_ingest_batch_receipts(
+        $pdo,
+        $config,
+        (string)$lockedConnector['connector_id'],
+        (string)$normalized['chunk']['batch_id']
+    );
+    v2_ingest_assert_stored_batch_complete($rows, $normalized);
+    $update = $pdo->prepare(
+        'UPDATE ' . table_name($config, 'source_connectors')
+        . ' SET connector_status=\'active\',last_checked_at=?,'
+        . 'last_success_at=?,last_observed_at=?,last_raw_count=?,'
+        . 'last_acknowledged_count=?,last_error_class=NULL,updated_at=?'
+        . ' WHERE connector_id=? AND code_revision=?'
+    );
+    $update->execute(array(
+        $completedAt,
+        $completedAt,
+        $normalized['retrieved_at'],
+        $normalized['chunk']['batch_raw_count'],
+        $normalized['chunk']['batch_acknowledged_count'],
+        $completedAt,
+        $lockedConnector['connector_id'],
+        $normalized['code_revision'],
+    ));
+    return true;
 }
 
 function v2_ops_ingest(PDO $pdo, array $config): void {
@@ -2324,9 +3083,32 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
             'error' => 'global_ingest_code_revision_mismatch',
         ));
     }
+    v2_ingest_require_preview_binding($config, $normalized);
+    try {
+        v2_ingest_assert_release_boundary(
+            $pdo,
+            $config,
+            $normalized,
+            false
+        );
+    } catch (RuntimeException $error) {
+        if (
+            $error->getMessage()
+                !== 'global_ingest_release_state_mismatch'
+        ) {
+            throw $error;
+        }
+        v2_respond(409, array(
+            'ok' => false,
+            'error' => 'global_ingest_release_state_mismatch',
+        ));
+    }
     $connector = $normalized['connector'];
     $receiptLookup = $pdo->prepare(
-        'SELECT ingest_id,payload_sha256,raw_count,acknowledged_count,code_revision '
+        'SELECT ingest_id,payload_sha256,raw_count,acknowledged_count,'
+        . 'request_count,'
+        . 'batch_id,chunk_index,chunk_count,batch_raw_count,'
+        . 'batch_acknowledged_count,batch_request_count,code_revision '
         . 'FROM ' . table_name($config, 'global_ingest_receipts')
         . ' WHERE connector_id=? AND idempotency_key=? LIMIT 1'
     );
@@ -2335,7 +3117,13 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
         $normalized['idempotency_key'],
     ));
     $existingReceipt = $receiptLookup->fetch();
-    if ($existingReceipt) {
+    if (
+        $existingReceipt
+        && (
+            (string)$normalized['receipt_kind'] !== 'current'
+            || (string)$normalized['ingest_mode'] !== 'apply'
+        )
+    ) {
         if (
             !hash_equals(
                 (string)$existingReceipt['payload_sha256'],
@@ -2348,23 +3136,54 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
                 'error' => 'global_ingest_idempotency_conflict',
             ));
         }
-        v2_respond(200, array(
-            'ok' => true,
-            'data' => array(
-                'ingest_id' => (string)$existingReceipt['ingest_id'],
-                'connector_id' => (string)$connector['connector_id'],
-                'raw_count' => (int)$existingReceipt['raw_count'],
-                'acknowledged_count' => (int)$existingReceipt['acknowledged_count'],
-                'idempotent' => true,
-            ),
-        ));
+        if (
+            v2_ingest_is_link_only_apply($normalized)
+            && !v2_ingest_link_only_receipt_is_complete(
+                $existingReceipt,
+                $normalized
+            )
+        ) {
+            v2_respond(409, array(
+                'ok' => false,
+                'error' => 'global_ingest_batch_receipt_corrupt',
+            ));
+        }
+        // Replay is strictly read-only. A normal CA/AU apply with a
+        // complete, already acknowledged receipt continues into the locked
+        // transaction so the current grant and manifest can authorize a new
+        // verification heartbeat. Any corrupt link-only apply receipt was
+        // rejected above, including an impossible empty durable receipt.
+        if (
+            !v2_ingest_is_link_only_apply($normalized)
+            || (int)$existingReceipt['raw_count'] < 1
+            || (int)$existingReceipt['acknowledged_count'] < 1
+        ) {
+            v2_respond(200, array(
+                'ok' => true,
+                'data' => array(
+                    'ingest_id' => (string)$existingReceipt['ingest_id'],
+                    'connector_id' => (string)$connector['connector_id'],
+                    'raw_count' => (int)$existingReceipt['raw_count'],
+                    'acknowledged_count' =>
+                        (int)$existingReceipt['acknowledged_count'],
+                    'idempotent' => true,
+                ),
+            ));
+        }
     }
     $startedAt = gmdate('Y-m-d H:i:s');
     $pdo->beginTransaction();
     try {
-        // Keep the same SourceRight -> connector order as administration and
-        // the legacy DART bridge. This avoids an ingest/admin deadlock and
-        // makes connector inactivity an authoritative kill switch.
+        v2_ingest_assert_release_boundary(
+            $pdo,
+            $config,
+            $normalized,
+            true
+        );
+        // Release state was locked first; keep the remaining
+        // SourceRight -> connector order used by cutover and the DART bridge.
+        // This avoids an ingest/admin deadlock and makes connector inactivity
+        // an authoritative kill switch.
         $lockedRight = v2_source_right_row(
             $pdo,
             $config,
@@ -2381,9 +3200,14 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
         ) {
             throw new RuntimeException('global_source_right_changed');
         }
+        v2_ingest_assert_locked_link_only_right(
+            $normalized,
+            $lockedRight
+        );
         $connectorLock = $pdo->prepare(
             'SELECT connector_id,country_code,source_key,source_type,'
-            . 'source_right_id,coverage_mode,connector_status,cursor_json FROM '
+            . 'source_right_id,coverage_mode,connector_status,cursor_json,'
+            . 'code_revision,last_observed_at FROM '
             . table_name($config, 'source_connectors')
             . ' WHERE connector_id=? LIMIT 1 FOR UPDATE'
         );
@@ -2411,7 +3235,9 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
         }
         $lockedReceipt = $pdo->prepare(
             'SELECT ingest_id,payload_sha256,raw_count,acknowledged_count,'
-            . 'code_revision FROM '
+            . 'request_count,'
+            . 'batch_id,chunk_index,chunk_count,batch_raw_count,'
+            . 'batch_acknowledged_count,batch_request_count,code_revision FROM '
             . table_name($config, 'global_ingest_receipts')
             . ' WHERE connector_id=? AND idempotency_key=? LIMIT 1 FOR UPDATE'
         );
@@ -2433,6 +3259,31 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
                     'global_ingest_idempotency_conflict'
                 );
             }
+            if (v2_ingest_is_link_only_apply($normalized)) {
+                if (!v2_ingest_link_only_receipt_is_complete(
+                    $storedReceipt,
+                    $normalized
+                )) {
+                    throw new RuntimeException(
+                        'global_ingest_batch_receipt_corrupt'
+                    );
+                }
+                v2_ingest_refresh_link_only_connector(
+                    $pdo,
+                    $config,
+                    $normalized,
+                    $storedReceipt,
+                    gmdate('Y-m-d H:i:s')
+                );
+            } else {
+                v2_ingest_refresh_idempotent_current_poll(
+                    $pdo,
+                    $config,
+                    $lockedConnector,
+                    $normalized,
+                    gmdate('Y-m-d H:i:s')
+                );
+            }
             $pdo->commit();
             v2_respond(200, array(
                 'ok' => true,
@@ -2445,6 +3296,22 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
                     'idempotent' => true,
                 ),
             ));
+        }
+        // An equal timestamp is read-only only when it resolves to the exact
+        // durable receipt above. New current content must carry a strictly
+        // newer observation before any document, event, receipt, or cursor is
+        // written. Same-second content is retried with a newer source fetch.
+        if (
+            (string)$normalized['receipt_kind'] === 'current'
+            && (string)$normalized['ingest_mode'] === 'apply'
+            && !v2_ingest_current_poll_observation_is_newer(
+                $lockedConnector,
+                $normalized
+            )
+        ) {
+            throw new RuntimeException(
+                'global_ingest_current_observation_not_newer'
+            );
         }
         if ($normalized['ingest_mode'] === 'replay') {
             throw new RuntimeException('global_ingest_replay_missing');
@@ -2529,27 +3396,52 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
                 $normalized
             );
             $existingCursor = v2_ingest_locked_checkpoint($lockedConnector);
-            if (v2_ingest_checkpoint_should_advance(
+            $shouldAdvance = v2_ingest_checkpoint_should_advance(
                 $existingCursor,
                 $normalized
-            )) {
-                $cursorPayload = array(
-                    'schema_version' => 1,
-                    'window_end_exclusive' => $chunk['window_end_exclusive'],
-                    'batch_id' => $chunk['batch_id'],
-                );
-                if ($normalized['next_cursor'] !== null) {
-                    $cursorPayload['schema_version'] = 2;
-                    $cursorPayload['source_cursor'] = $normalized['next_cursor'];
-                } elseif (
-                    $existingCursor !== null
-                    && (int)$existingCursor['schema_version'] === 2
-                ) {
-                    $cursorPayload['schema_version'] = 2;
-                    $cursorPayload['source_cursor'] =
-                        $existingCursor['source_cursor'];
+            );
+            $shouldRefreshLinkOnly = (
+                v2_ingest_is_link_only_apply($normalized)
+                && (int)$chunk['batch_raw_count'] >= 1
+                && (int)$chunk['batch_acknowledged_count'] >= 1
+            );
+            $shouldRefreshCurrent = (
+                (string)$normalized['receipt_kind'] !== 'current'
+                || v2_ingest_current_poll_can_refresh(
+                    $lockedConnector,
+                    $normalized
+                )
+            );
+            // A zero-record link-only receipt is not proof that an approved
+            // link was observed, so it cannot advance freshness or checkpoint
+            // state. A non-empty verification refreshes freshness even when
+            // its historical day boundary is already durable.
+            $shouldUpdateConnector = v2_ingest_is_link_only_apply($normalized)
+                ? $shouldRefreshLinkOnly
+                : ($shouldAdvance && $shouldRefreshCurrent);
+            if ($shouldUpdateConnector) {
+                $cursorJson = (string)$lockedConnector['cursor_json'];
+                if ($shouldAdvance) {
+                    $cursorPayload = array(
+                        'schema_version' => 1,
+                        'window_end_exclusive' => $chunk['window_end_exclusive'],
+                        'batch_id' => $chunk['batch_id'],
+                    );
+                    if ($normalized['next_cursor'] !== null) {
+                        $cursorPayload['schema_version'] = 2;
+                        $cursorPayload['source_cursor'] = $normalized['next_cursor'];
+                    } elseif (
+                        $existingCursor !== null
+                        && (int)$existingCursor['schema_version'] === 2
+                    ) {
+                        $cursorPayload['schema_version'] = 2;
+                        $cursorPayload['source_cursor'] =
+                            $existingCursor['source_cursor'];
+                    }
+                    $cursorJson = json_value($cursorPayload);
                 }
-                $cursorJson = json_value($cursorPayload);
+                $observedAt = v2_ingest_is_link_only_apply($normalized)
+                    ? $completedAt : $normalized['retrieved_at'];
                 $updateConnector = $pdo->prepare(
                     'UPDATE ' . table_name($config, 'source_connectors')
                     . ' SET connector_status=\'active\',cursor_json=?,last_checked_at=?,'
@@ -2561,7 +3453,7 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
                     $cursorJson,
                     $completedAt,
                     $completedAt,
-                    $normalized['retrieved_at'],
+                    $observedAt,
                     $chunk['batch_raw_count'],
                     $chunk['batch_acknowledged_count'],
                     $normalized['code_revision'],
@@ -2614,6 +3506,8 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
             'global_source_right_changed',
             'global_ingest_acknowledgment_mismatch',
             'global_ingest_idempotency_conflict',
+            'global_ingest_current_observation_not_newer',
+            'global_ingest_release_state_mismatch',
             'global_ingest_replay_missing',
             'global_ingest_chunk_out_of_order',
             'global_ingest_batch_metadata_conflict',

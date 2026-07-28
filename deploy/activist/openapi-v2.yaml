@@ -741,6 +741,11 @@ paths:
         established official-ingest pipeline. connector:jp:edinet and
         connector:gb:companies-house return global_ingest_source_disabled
         before normalization or any mutable write.
+        Classified SEC completed-day/current requests must carry the expected
+        closed, preview, or live state. The server checks both v1 and v2 state
+        before processing and locks them again before an apply write. Preview
+        additionally requires X-BSIDE-Preview-Token, independently of the ops
+        Bearer credential.
         Unclassified candidates remain private until an editor assigns one of
         the eight public event families.
       x-rejected-connector-ids:
@@ -749,6 +754,17 @@ paths:
         - connector:gb:companies-house
       security:
         - OpsBearer: []
+      parameters:
+        - name: X-BSIDE-Preview-Token
+          in: header
+          required: false
+          description: >-
+            Required in addition to OpsBearer when expected_release_state is
+            preview. Never place this value in a URL or request body.
+          schema:
+            type: string
+            minLength: 32
+            maxLength: 4096
       requestBody:
         required: true
         content:
@@ -1987,6 +2003,12 @@ components:
           type: [string, 'null']
           format: date-time
           pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$'
+          description: >-
+            For link-only coverage, the server time when a complete,
+            non-empty approved metadata manifest was revalidated against its
+            active SourceRight. This is metadata verification, not a request
+            to the linked source URL; link-only ingestion has request_count
+            zero.
         last_error_class:
           type: [string, 'null']
         public_note:
@@ -2543,12 +2565,25 @@ components:
           minLength: 8
           maxLength: 191
           pattern: '^[A-Za-z0-9_.:\-]+$'
+          description: >-
+            SEC EDGAR accepts only classified global-ingest-v2-current:us:
+            or global-ingest-v2-day:us: semantic-digest namespaces. Standard
+            receipt keys are rejected for both apply and replay, and every
+            classified SEC receipt requires an expected release-state binding.
         code_revision:
           type: string
           minLength: 7
           maxLength: 64
           pattern: '^[a-f0-9]+$'
           description: Must equal the verified deployment manifest revision.
+        expected_release_state:
+          type: string
+          enum: [closed, preview, live]
+          description: >-
+            Required for classified SEC completed-day/current receipts and
+            CA/AU link-only apply requests. Both v1 and v2 release-state rows
+            must match; apply rechecks under transaction locks. Preview writes
+            also require the independent preview token.
         ingest_mode:
           type: string
           enum: [apply, replay]
@@ -2557,6 +2592,10 @@ components:
             replay is a server-enforced read-only check. Every exact receipt
             must already exist with the same payload and deployment revision;
             otherwise the request fails before any durable state is changed.
+            An authorized CA/AU link-only apply may refresh connector
+            verification timestamps after the exact complete receipt,
+            approved manifest digest, and current SourceRight are revalidated;
+            replay never performs that refresh.
         envelope:
           $ref: '#/components/schemas/GlobalIngestPayload'
     GlobalIngestPayload:
@@ -2604,12 +2643,21 @@ components:
         retrieved_at:
           type: string
           format: date-time
+          description: >-
+            Source retrieval time. A mutating SEC current-poll receipt must be
+            no more than 15 minutes behind or 1 minute ahead of server time;
+            only a value strictly newer than the connector's last observation
+            may refresh readiness.
         coverage_mode:
           type: string
           enum: [market-wide, official-register, selected-issuers, link-only]
         records:
           type: array
           maxItems: 500
+          description: >-
+            CA/AU link-only verification requires at least one record in one
+            complete chunk, zero lifecycle observations, and zero source
+            requests.
           items:
             $ref: '#/components/schemas/GlobalIngestRecord'
         lifecycle_observations:
@@ -2626,6 +2674,9 @@ components:
         request_count:
           type: integer
           minimum: 0
+          description: >-
+            Requests performed for this chunk. The final chunk of a mutating
+            SEC current poll must report at least one source request.
         raw_count:
           type: integer
           minimum: 0
@@ -2673,6 +2724,9 @@ components:
         batch_request_count:
           type: integer
           minimum: 0
+          description: >-
+            Requests performed for the complete batch. A mutating SEC current
+            poll must report at least one source request.
         batch_id:
           type: string
           pattern: '^global-batch:[a-f0-9]{64}$'

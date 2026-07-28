@@ -94,9 +94,36 @@ jobs:
           BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
         run: python .github/scripts/validate-api-base-urls.py --github-env "$GITHUB_ENV"
 
+      - name: Verify exact active API v2 release boundary
+        env:
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          smoke_args=(
+            --base-url "${v1_api%/api/v1}/api/v2"
+            --expected-sha "$GITHUB_SHA"
+            --privileged-token-env BSIDE_OPS_TOKEN
+          )
+          if [[ "$GOVERNANCE_PIPELINE_MODE" == "shadow" ]]; then
+            smoke_args+=(
+              --release-state preview
+              --preview-token-env GOVERNANCE_PREVIEW_TOKEN
+            )
+          elif [[ "$GOVERNANCE_PIPELINE_MODE" == "live" ]]; then
+            smoke_args+=(--release-state live)
+          else
+            echo "::error::Global refresh requires shadow or live pipeline mode."
+            exit 1
+          fi
+          python .github/scripts/smoke-global-v2.py "${smoke_args[@]}"
+
       - name: Collect and ingest official source
         env:
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          GOVERNANCE_PREVIEW_TOKEN: ${{ secrets.GOVERNANCE_PREVIEW_TOKEN }}
           FROM_DATE: ${{ inputs.from_date }}
           TO_DATE: ${{ inputs.to_date }}
           MAX_PAGES_INPUT: ${{ inputs.max_pages }}
@@ -104,6 +131,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          case "$GOVERNANCE_PIPELINE_MODE" in
+            shadow)
+              export GLOBAL_INGEST_EXPECTED_RELEASE_STATE=preview
+              ;;
+            live)
+              export GLOBAL_INGEST_EXPECTED_RELEASE_STATE=live
+              ;;
+            *)
+              echo "::error::Global refresh requires shadow or live pipeline mode."
+              exit 1
+              ;;
+          esac
           if [[ -n "${MAX_PAGES_INPUT:-}" ]]; then
             max_pages="$MAX_PAGES_INPUT"
           else
