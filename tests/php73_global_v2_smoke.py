@@ -1794,6 +1794,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
             envelope["raw_count"] = 1
             envelope["chunk"]["batch_raw_count"] = 1
             envelope["chunk"]["batch_acknowledged_count"] = 1
+        payload["expected_release_state"] = "closed"
         return payload
 
     for suffix, manifest_sha256 in (
@@ -1825,6 +1826,22 @@ def run(base_url: str, mysql_container_id: str) -> None:
         idempotency_key="php73-v2-ca-manifest-approved",
         manifest_sha256=ca_manifest_sha256,
         record=ca_link_record,
+    )
+    unbound_ca_link_payload = json.loads(json.dumps(ca_link_payload))
+    unbound_ca_link_payload.pop("expected_release_state")
+    unbound_ca_link, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=unbound_ca_link_payload,
+        expected_status=400,
+    )
+    require(
+        unbound_ca_link.get("error") == "global_ingest_validation_failed"
+        and "link-only apply requires release binding"
+        in str(unbound_ca_link.get("detail")),
+        repr(unbound_ca_link),
     )
     approved_manifest, _ = request_json(
         base_url,

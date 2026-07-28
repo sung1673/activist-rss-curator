@@ -2575,9 +2575,10 @@ components:
           type: string
           enum: [closed, preview, live]
           description: >-
-            Required for classified SEC completed-day and current receipts.
-            Both v1 and v2 release-state rows must match; apply rechecks under
-            transaction locks.
+            Required for classified SEC completed-day/current receipts and
+            CA/AU link-only apply requests. Both v1 and v2 release-state rows
+            must match; apply rechecks under transaction locks. Preview writes
+            also require the independent preview token.
         ingest_mode:
           type: string
           enum: [apply, replay]

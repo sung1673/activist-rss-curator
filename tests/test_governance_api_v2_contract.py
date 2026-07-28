@@ -561,6 +561,8 @@ def test_automated_ingest_is_idempotent_and_never_publishes_events():
     )
     assert "smaller than accepted entity count" in V2_WRITE
     assert "global_ingest_idempotency_conflict" in V2_WRITE
+    assert "link-only apply requires " in V2_WRITE
+    assert "'release binding'" in V2_WRITE
     assert "global_ingest_code_revision_mismatch" in V2_WRITE
     assert "global_ingest_replay_missing" in V2_WRITE
     assert "unset($semantic['ingest_mode'])" in V2_WRITE

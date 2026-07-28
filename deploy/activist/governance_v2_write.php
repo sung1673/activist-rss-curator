@@ -1685,6 +1685,17 @@ function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): a
         }
         $receiptKind = 'current';
     }
+    $isSelectedLinkOnlyApply = (
+        $ingestMode === 'apply'
+        && in_array($country, array('CA', 'AU'), true)
+        && $coverageMode === 'link-only'
+    );
+    if ($isSelectedLinkOnlyApply && $expectedReleaseState === null) {
+        v2_write_invalid(
+            'payload.expected_release_state: link-only apply requires '
+            . 'release binding'
+        );
+    }
     if ($receiptKind !== 'standard') {
         if ($expectedReleaseState === null) {
             v2_write_invalid(

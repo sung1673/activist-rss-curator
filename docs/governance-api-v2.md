@@ -290,7 +290,7 @@ completed-day receipt는 이 heartbeat 경로를 사용할 수 없으므로 역�
 
 ### 캐나다·호주 수동 공식 링크 metadata runner
 
-`.github/workflows/ingest-selected-markets.yml`은 `GOVERNANCE_PIPELINE_MODE=shadow|live`일 때 매시 07분·37분에 캐나다와 호주를 분리 실행한다. 입력은 Repository variable `CA_OFFICIAL_LINKS_JSON`, `AU_OFFICIAL_LINKS_JSON`이고 공통 v2 API와 `BSIDE_OPS_TOKEN`을 사용한다.
+`.github/workflows/ingest-selected-markets.yml`은 `GOVERNANCE_PIPELINE_MODE=shadow|live`일 때 매시 07분·37분에 캐나다와 호주를 분리 실행한다. 입력은 Repository variable `CA_OFFICIAL_LINKS_JSON`, `AU_OFFICIAL_LINKS_JSON`이고 공통 v2 API와 `BSIDE_OPS_TOKEN`을 사용한다. 실행 전 배포 SHA와 서버 release state를 확인하고, 모든 apply 본문을 `shadow → preview`, `live → live`의 `expected_release_state`에 묶는다. Preview 적재에는 별도 `GOVERNANCE_PREVIEW_TOKEN`도 필요하며 서버는 두 release-state row를 transaction에서 다시 잠가 확인한다.
 
 이 경로는 명시적으로 승인된 링크 metadata만 적재한다. 설정된 `original_url`을 요청하지 않고 본문을 저장하지 않으며, 국가별 최대 50개 issuer·50개 승인 호스트 mapping·500개 record를 허용한다. 캐나다는 `official:ca-issuer-ir`, 호주는 `official:asic-register`만 사용할 수 있다. SourceRight 권한 확인은 record마다 호출하지 않고 권한 단위 batch의 앞뒤에서 `collect`와 `public`을 한 번씩 확인하며 네 ACK의 revision이 같아야 한다. 빈 설정은 무사건 성공으로 가장하지 않고 secret-free artifact에 `coverage_unavailable`을 기록한다.
 
