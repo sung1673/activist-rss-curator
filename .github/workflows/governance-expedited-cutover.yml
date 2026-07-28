@@ -81,8 +81,8 @@ jobs:
             exit 1
           }
           [[ ${#REASON} -ge 16 && ${#REASON} -le 500 ]]
-          [[ "$PAGES_OWNER" == "legacy" ]] || {
-            echo "::error::PAGES_OWNER must remain legacy until validation and preflight pass."
+          [[ "$PAGES_OWNER" == "governance" ]] || {
+            echo "::error::PAGES_OWNER must be committed to governance by the authenticated operator before protected cutover."
             exit 1
           }
           [[ "$PIPELINE_MODE" == "shadow" ]] || {
@@ -90,7 +90,7 @@ jobs:
             exit 1
           }
           [[ "${STANDARD_OBSERVATION,,}" == "false" ]]
-          [[ "${EXPEDITED_OBSERVATION,,}" == "false" ]]
+          [[ "${EXPEDITED_OBSERVATION,,}" == "true" ]]
           [[ "${TELEGRAM_DELIVERY,,}" == "false" ]]
           [[ "${GOVERNANCE_DELIVERY,,}" == "false" ]]
           [[ "${KIND_MODE,,}" == "off" ]]
@@ -405,6 +405,91 @@ jobs:
             --expected-source-code-revision "$LEGACY_CODE_REVISION" \
             --expected-source-artifact-digest "$LEGACY_ARTIFACT_DIGEST"
 
+      - name: Bind exact recovery bytes for protected handoff
+        shell: bash
+        env:
+          EVIDENCE_RUN_ID: ${{ steps.evidence.outputs.run_id }}
+          EVIDENCE_ARTIFACT_ID: ${{ steps.evidence.outputs.artifact_id }}
+          EVIDENCE_ARTIFACT_DIGEST: ${{ steps.evidence.outputs.artifact_digest }}
+          LEGACY_RUN_ID: ${{ vars.LEGACY_ROLLBACK_RUN_ID }}
+          LEGACY_ARTIFACT_NAME: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_NAME }}
+          LEGACY_CODE_REVISION: ${{ vars.LEGACY_ROLLBACK_CODE_REVISION }}
+          LEGACY_ARTIFACT_DIGEST: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_DIGEST }}
+        run: |
+          set -euo pipefail
+          mkdir -p cutover-handoff-recovery
+          cp -R evidence/expedited-legacy-recovery-bundle \
+            cutover-handoff-recovery/expedited-legacy-recovery-bundle
+          cp evidence/global-alpha-expedited-release-report.json \
+            cutover-handoff-recovery/global-alpha-expedited-release-report.json
+          bundle_manifest="cutover-handoff-recovery/expedited-legacy-recovery-bundle/expedited-legacy-recovery-bundle.json"
+          release_report="cutover-handoff-recovery/global-alpha-expedited-release-report.json"
+          root_file="cutover-handoff-recovery/expedited-legacy-recovery-bundle/full-site/index.html"
+          feed_file="cutover-handoff-recovery/expedited-legacy-recovery-bundle/full-site/feed.xml"
+          test -f "$bundle_manifest"
+          test -f "$release_report"
+          test -f "$root_file"
+          test -f "$feed_file"
+          source_artifact_id="$(
+            jq -er '.source.artifact_id | select(type == "string" and test("^[1-9][0-9]*$"))' \
+              "$bundle_manifest"
+          )"
+          jq -n \
+            --arg kind "bside-global-alpha-expedited-cutover-recovery" \
+            --arg release_channel "production_alpha_early_access" \
+            --arg code_revision "$GITHUB_SHA" \
+            --arg workflow ".github/workflows/governance-expedited-cutover.yml" \
+            --arg evidence_artifact_digest "$EVIDENCE_ARTIFACT_DIGEST" \
+            --arg legacy_artifact_name "$LEGACY_ARTIFACT_NAME" \
+            --arg legacy_code_revision "$LEGACY_CODE_REVISION" \
+            --arg legacy_artifact_digest "$LEGACY_ARTIFACT_DIGEST" \
+            --arg bundle_manifest_sha256 "$(sha256sum "$bundle_manifest" | cut -d' ' -f1)" \
+            --arg release_report_sha256 "$(sha256sum "$release_report" | cut -d' ' -f1)" \
+            --arg legacy_root_sha256 "$(sha256sum "$root_file" | cut -d' ' -f1)" \
+            --arg legacy_feed_sha256 "$(sha256sum "$feed_file" | cut -d' ' -f1)" \
+            --argjson cutover_run_id "$GITHUB_RUN_ID" \
+            --argjson cutover_run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --argjson evidence_run_id "$EVIDENCE_RUN_ID" \
+            --argjson evidence_artifact_id "$EVIDENCE_ARTIFACT_ID" \
+            --argjson legacy_run_id "$LEGACY_RUN_ID" \
+            --argjson legacy_artifact_id "$source_artifact_id" \
+            '{
+              schema_version:1,
+              kind:$kind,
+              release_channel:$release_channel,
+              code_revision:$code_revision,
+              workflow:$workflow,
+              cutover_run_id:$cutover_run_id,
+              cutover_run_attempt:$cutover_run_attempt,
+              evidence:{
+                run_id:$evidence_run_id,
+                artifact_id:$evidence_artifact_id,
+                artifact_digest:$evidence_artifact_digest
+              },
+              legacy_source:{
+                run_id:$legacy_run_id,
+                artifact_id:$legacy_artifact_id,
+                artifact_name:$legacy_artifact_name,
+                code_revision:$legacy_code_revision,
+                artifact_digest:$legacy_artifact_digest
+              },
+              payload:{
+                bundle_manifest_sha256:$bundle_manifest_sha256,
+                release_report_sha256:$release_report_sha256,
+                legacy_root_sha256:$legacy_root_sha256,
+                legacy_feed_sha256:$legacy_feed_sha256
+              }
+            }' > cutover-handoff-recovery/cutover-recovery-binding.json
+
+      - name: Preserve exact recovery bundle for protected handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-expedited-cutover-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: cutover-handoff-recovery
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 9
+
   preflight:
     needs: validate
     runs-on: ubuntu-latest
@@ -433,13 +518,17 @@ jobs:
         with:
           script: |
             const {owner, repo} = context.repo;
-            const active = new Set(["queued", "in_progress", "pending", "waiting"]);
+            const activeStatuses = [
+              "queued", "in_progress", "pending", "waiting", "requested",
+            ];
             for (const workflow_id of ["build-feed.yml", "daily.yml"]) {
-              const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
-                owner, repo, workflow_id, per_page: 100,
-              });
-              for (const run of runs) {
-                if (active.has(run.status) && Number(run.id) !== Number(context.runId)) {
+              for (const status of activeStatuses) {
+                const runs = await github.paginate(
+                  github.rest.actions.listWorkflowRuns,
+                  {owner, repo, workflow_id, status, per_page: 100},
+                );
+                for (const run of runs) {
+                  if (Number(run.id) === Number(context.runId)) continue;
                   await github.rest.actions.cancelWorkflowRun({
                     owner, repo, run_id: run.id,
                   });
@@ -521,7 +610,7 @@ jobs:
       cancel-in-progress: false
       queue: max
     permissions:
-      actions: write
+      actions: read
       contents: read
       pages: write
       id-token: write
@@ -531,20 +620,23 @@ jobs:
     outputs:
       page_url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Commit governance Pages ownership after protected preflight
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const {owner, repo} = context.repo;
-            await github.rest.actions.updateRepoVariable({
-              owner, repo, name: "PAGES_OWNER", value: "governance",
-            });
-            const response = await github.rest.actions.getRepoVariable({
-              owner, repo, name: "PAGES_OWNER",
-            });
-            if (response.data.value !== "governance") {
-              core.setFailed("PAGES_OWNER did not commit after protected preflight");
-            }
+      - name: Verify protected ownership and deployment fence
+        shell: bash
+        env:
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
+          PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          EXPEDITED_OBSERVATION: ${{ vars.GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED }}
+          TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+          KIND_MODE: ${{ vars.KIND_CONNECTOR_MODE }}
+        run: |
+          set -euo pipefail
+          [[ "$PAGES_OWNER" == "governance" ]]
+          [[ "$PIPELINE_MODE" == "shadow" ]]
+          [[ "${EXPEDITED_OBSERVATION,,}" == "true" ]]
+          [[ "${TELEGRAM_DELIVERY,,}" == "false" ]]
+          [[ "${GOVERNANCE_DELIVERY,,}" == "false" ]]
+          [[ "${KIND_MODE,,}" == "off" ]]
 
       - name: Download exact validated candidate Pages
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -696,7 +788,7 @@ jobs:
     environment:
       name: governance-release
     permissions:
-      actions: write
+      actions: read
       contents: read
     steps:
       - name: Revalidate both exact Preview versions
@@ -823,38 +915,24 @@ jobs:
             -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
             "$v2_api/admin/release-state" | jq -e '.data.release_state == "live"'
 
-      - name: Commit and verify live repository operation mode
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const {owner, repo} = context.repo;
-            for (const [name, value] of [
-              ["PAGES_OWNER", "governance"],
-              ["GOVERNANCE_PIPELINE_MODE", "live"],
-              ["GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED", "false"],
-            ]) {
-              await github.rest.actions.updateRepoVariable({owner, repo, name, value});
-              const response = await github.rest.actions.getRepoVariable({
-                owner, repo, name,
-              });
-              if (response.data.value !== value) {
-                core.setFailed(`${name} did not commit the protected live mode`);
-                return;
-              }
-            }
-            for (const [name, value] of [
-              ["ENABLE_TELEGRAM_DELIVERY", "false"],
-              ["ENABLE_GOVERNANCE_DELIVERY", "false"],
-              ["KIND_CONNECTOR_MODE", "off"],
-            ]) {
-              const response = await github.rest.actions.getRepoVariable({
-                owner, repo, name,
-              });
-              if (response.data.value.toLowerCase() !== value) {
-                core.setFailed(`${name} violated the protected final-state invariant`);
-                return;
-              }
-            }
+      - name: Verify protected handoff remains fenced
+        shell: bash
+        env:
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
+          PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          EXPEDITED_OBSERVATION: ${{ vars.GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED }}
+          TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+          KIND_MODE: ${{ vars.KIND_CONNECTOR_MODE }}
+        run: |
+          set -euo pipefail
+          [[ "$PAGES_OWNER" == "governance" ]]
+          [[ "$PIPELINE_MODE" == "shadow" ]]
+          [[ "${EXPEDITED_OBSERVATION,,}" == "true" ]]
+          [[ "${TELEGRAM_DELIVERY,,}" == "false" ]]
+          [[ "${GOVERNANCE_DELIVERY,,}" == "false" ]]
+          [[ "${KIND_MODE,,}" == "off" ]]
+          echo "::notice::Protected Pages and APIs are live. The authenticated operator must now set GOVERNANCE_PIPELINE_MODE=live, verify it, and only then disable the expedited deployment fence."
 
       - name: Record Early Access activation
         shell: bash
@@ -866,7 +944,7 @@ jobs:
             echo "- confirmation: \`CUTOVER_EXPEDITED_ALPHA_EARLY_ACCESS\`"
             echo "- v1 and v2 were activated in one protected atomic transaction"
             echo "- Telegram and governance outbound delivery remained disabled"
-            echo "- repository operation mode was committed and verified as governance/live"
+            echo "- governance ownership is committed and the deployment fence remains active until the authenticated operator commits live mode"
           } >> "$GITHUB_STEP_SUMMARY"
 
   recover_close:
@@ -1024,41 +1102,27 @@ jobs:
     environment:
       name: governance-runtime
     permissions:
-      actions: write
+      actions: read
       contents: read
     steps:
-      - name: Commit and verify fail-closed repository operation mode
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const {owner, repo} = context.repo;
-            for (const [name, value] of [
-              ["PAGES_OWNER", "legacy"],
-              ["GOVERNANCE_PIPELINE_MODE", "shadow"],
-              ["GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED", "false"],
-            ]) {
-              await github.rest.actions.updateRepoVariable({owner, repo, name, value});
-              const response = await github.rest.actions.getRepoVariable({
-                owner, repo, name,
-              });
-              if (response.data.value !== value) {
-                core.setFailed(`${name} did not commit the recovery mode`);
-                return;
-              }
-            }
-            for (const [name, value] of [
-              ["ENABLE_TELEGRAM_DELIVERY", "false"],
-              ["ENABLE_GOVERNANCE_DELIVERY", "false"],
-              ["KIND_CONNECTOR_MODE", "off"],
-            ]) {
-              const response = await github.rest.actions.getRepoVariable({
-                owner, repo, name,
-              });
-              if (response.data.value.toLowerCase() !== value) {
-                core.setFailed(`${name} violated the recovery-state invariant`);
-                return;
-              }
-            }
+      - name: Verify failed cutover remains fenced
+        shell: bash
+        env:
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
+          PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          EXPEDITED_OBSERVATION: ${{ vars.GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED }}
+          TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+          KIND_MODE: ${{ vars.KIND_CONNECTOR_MODE }}
+        run: |
+          set -euo pipefail
+          [[ "$PAGES_OWNER" == "governance" ]]
+          [[ "$PIPELINE_MODE" == "shadow" ]]
+          [[ "${EXPEDITED_OBSERVATION,,}" == "true" ]]
+          [[ "${TELEGRAM_DELIVERY,,}" == "false" ]]
+          [[ "${GOVERNANCE_DELIVERY,,}" == "false" ]]
+          [[ "${KIND_MODE,,}" == "off" ]]
+          echo "::notice::Recovery restored the legacy root and closed APIs. The authenticated operator must set PAGES_OWNER=legacy before disabling the expedited deployment fence."
 
       - name: Verify closed APIs and restored legacy root
         shell: bash

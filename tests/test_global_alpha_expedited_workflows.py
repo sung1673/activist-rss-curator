@@ -33,6 +33,7 @@ def step_names(job: dict[str, object]) -> list[str]:
 def test_expedited_evidence_is_separate_protected_same_sha_workflow() -> None:
     text, payload = workflow("global-alpha-expedited-preparation.yml")
     assert set(payload["jobs"]) == {
+        "drain_pages_producers",
         "prepare_rollback",
         "rollback_drill",
         "observe",
@@ -65,6 +66,29 @@ def test_expedited_evidence_is_separate_protected_same_sha_workflow() -> None:
     assert "CREATE_EXPEDITED_ALPHA_PREPARATION" in text
     assert "github.event.repository.default_branch" in text
     assert '[[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]' in text
+    drain = payload["jobs"]["drain_pages_producers"]
+    assert drain["environment"]["name"] == "governance-release"
+    assert drain["permissions"] == {"actions": "write", "contents": "read"}
+    assert payload["jobs"]["prepare_rollback"]["needs"] == "drain_pages_producers"
+    drain_step = next(
+        step
+        for step in drain["steps"]
+        if step["name"] == "Cancel and drain pre-fence Pages producers"
+    )
+    drain_script = drain_step["with"]["script"]
+    for contract in (
+        ".github/workflows/build-feed.yml",
+        ".github/workflows/daily.yml",
+        "github.rest.actions.cancelWorkflowRun",
+        "github.rest.actions.forceCancelWorkflowRun",
+        "await listActive()",
+        "remaining.length === 0",
+        "consecutiveEmptyScans >= 2",
+        "Date.now() + 9 * 60 * 1000",
+        "Date.now() + 60 * 1000",
+        "setTimeout(resolve, 10000)",
+    ):
+        assert contract in drain_script
     assert payload["jobs"]["observe"]["environment"]["name"] == "governance-runtime"
     assert payload["jobs"]["prepare_rollback"]["environment"]["name"] == (
         "governance-release"
@@ -313,6 +337,38 @@ def test_expedited_cutover_rechecks_gate_pages_and_preview() -> None:
     assert "python -m curator.expedited_legacy_recovery_bundle verify" in (
         legacy_deadline["run"]
     )
+    binding = next(
+        step
+        for step in validate["steps"]
+        if step["name"] == "Bind exact recovery bytes for protected handoff"
+    )
+    for contract in (
+        "cutover-recovery-binding.json",
+        "bside-global-alpha-expedited-cutover-recovery",
+        "cutover_run_id",
+        "cutover_run_attempt",
+        "evidence_artifact_digest",
+        "legacy_artifact_digest",
+        "bundle_manifest_sha256",
+        "legacy_root_sha256",
+        "legacy_feed_sha256",
+    ):
+        assert contract in binding["run"]
+    relay = next(
+        step
+        for step in validate["steps"]
+        if step["name"] == "Preserve exact recovery bundle for protected handoff"
+    )
+    assert relay["with"] == {
+        "name": (
+            "global-alpha-expedited-cutover-recovery-"
+            "${{ github.run_id }}-${{ github.run_attempt }}"
+        ),
+        "path": "cutover-handoff-recovery",
+        "if-no-files-found": "error",
+        "retention-days": "90",
+        "compression-level": "9",
+    }
 
     preflight = payload["jobs"]["preflight"]
     assert preflight["environment"]["name"] == "governance-runtime"
@@ -392,9 +448,13 @@ def test_expedited_cutover_deploys_smokes_then_atomically_activates() -> None:
     )
     assert atomic["env"]["BSIDE_ADMIN_TOKEN"] == "${{ secrets.BSIDE_ADMIN_TOKEN }}"
     assert "Final public Early Access smoke" in step_names(activate)
-    assert "PAGES_OWNER must remain legacy until validation and preflight pass" in text
-    assert "Commit governance Pages ownership after protected preflight" in step_names(
-        deploy
+    assert (
+        "PAGES_OWNER must be committed to governance by the authenticated operator"
+        in text
+    )
+    assert (
+        "Verify protected ownership and deployment fence"
+        in step_names(deploy)
     )
     assert "GOVERNANCE_PIPELINE_MODE must remain shadow until live activation" in text
 
@@ -421,8 +481,10 @@ def test_expedited_cutover_has_fail_safe_close_and_legacy_recovery() -> None:
     assert "evidence/expedited-legacy-recovery-bundle/full-site" in text
     verify = payload["jobs"]["recover_verify"]
     assert verify["environment"]["name"] == "governance-runtime"
+    assert "Verify failed cutover remains fenced" in step_names(verify)
     assert "Verify closed APIs and restored legacy root" in step_names(verify)
-    assert '["PAGES_OWNER", "legacy"]' in text
+    assert '[[ "$PAGES_OWNER" == "governance" ]]' in text
+    assert "must set PAGES_OWNER=legacy before disabling" in text
 
 
 def test_expedited_workflow_actions_are_immutable_pins() -> None:
@@ -431,6 +493,7 @@ def test_expedited_workflow_actions_are_immutable_pins() -> None:
         "global-alpha-expedited-evidence-inputs.yml",
         "global-alpha-expedited-evidence.yml",
         "governance-expedited-cutover.yml",
+        "governance-expedited-handoff.yml",
     ):
         _text, payload = workflow(workflow_name)
         for job in payload["jobs"].values():
@@ -508,28 +571,35 @@ def test_expedited_evidence_uses_actual_receipts_human_bytes_and_rights() -> Non
     assert '"source_right_valid": True' not in text
 
 
-def test_expedited_cutover_commits_live_and_recovery_variables() -> None:
+def test_expedited_cutover_leaves_repository_variables_for_authenticated_handoff() -> None:
     text, payload = workflow("governance-expedited-cutover.yml")
+    deploy = payload["jobs"]["deploy_pages"]
+    assert deploy["permissions"]["actions"] == "read"
     activate = payload["jobs"]["activate"]
-    assert activate["permissions"]["actions"] == "write"
+    assert activate["permissions"]["actions"] == "read"
     live = next(
         step
         for step in activate["steps"]
-        if step["name"] == "Commit and verify live repository operation mode"
-    )["with"]["script"]
-    assert "github.rest.actions.updateRepoVariable" in live
-    assert '["PAGES_OWNER", "governance"]' in live
-    assert '["GOVERNANCE_PIPELINE_MODE", "live"]' in live
+        if step["name"] == "Verify protected handoff remains fenced"
+    )
+    assert live["env"]["PAGES_OWNER"] == "${{ vars.PAGES_OWNER }}"
+    assert '[[ "$PAGES_OWNER" == "governance" ]]' in live["run"]
+    assert '[[ "$PIPELINE_MODE" == "shadow" ]]' in live["run"]
+    assert "authenticated operator must now set GOVERNANCE_PIPELINE_MODE=live" in (
+        live["run"]
+    )
     recovery = payload["jobs"]["recover_verify"]
-    assert recovery["permissions"]["actions"] == "write"
+    assert recovery["permissions"]["actions"] == "read"
     fail_closed = next(
         step
         for step in recovery["steps"]
-        if step["name"]
-        == "Commit and verify fail-closed repository operation mode"
-    )["with"]["script"]
-    assert '["PAGES_OWNER", "legacy"]' in fail_closed
-    assert '["GOVERNANCE_PIPELINE_MODE", "shadow"]' in fail_closed
+        if step["name"] == "Verify failed cutover remains fenced"
+    )["run"]
+    assert '[[ "$PAGES_OWNER" == "governance" ]]' in fail_closed
+    assert '[[ "$PIPELINE_MODE" == "shadow" ]]' in fail_closed
+    assert "must set PAGES_OWNER=legacy before disabling" in fail_closed
+    assert "github.rest.actions.updateRepoVariable" not in text
+    assert "github.rest.actions.getRepoVariable" not in text
     assert "(.data.items | length) == 6" in text
     assert "remote-preview-config.js" in text
     assert "final-config.js" in text
@@ -606,7 +676,7 @@ def test_preparation_runtime_secrets_are_isolated_from_pure_evaluation() -> None
     assert "Download same-run protected automated evidence" in step_names(evaluator)
 
 
-def test_preparation_always_disables_observation_and_recovers_preview() -> None:
+def test_preparation_always_verifies_observation_handoff_and_recovers_preview() -> None:
     text, payload = workflow("global-alpha-expedited-preparation.yml")
     recovery = payload["jobs"]["recover_preview_on_failure"]
     assert "always()" in recovery["if"]
@@ -620,16 +690,19 @@ def test_preparation_always_disables_observation_and_recovers_preview() -> None:
     assert "cmp --silent" in exact
     cleanup = payload["jobs"]["cleanup_variables"]
     assert cleanup["if"] == "${{ always() }}"
-    script = cleanup["steps"][0]["with"]["script"]
-    for contract in (
-        'name: "GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED"',
-        '["PAGES_OWNER", "legacy"]',
-        '["GOVERNANCE_PIPELINE_MODE", "shadow"]',
-        '["ENABLE_TELEGRAM_DELIVERY", "false"]',
-        '["ENABLE_GOVERNANCE_DELIVERY", "false"]',
-        '["KIND_CONNECTOR_MODE", "off"]',
-    ):
-        assert contract in script
+    assert cleanup["permissions"]["actions"] == "read"
+    step = cleanup["steps"][0]
+    assert step["name"] == "Verify immutable deployment fence remains active"
+    script = step["run"]
+    assert '[[ "${EXPEDITED_OBSERVATION,,}" == "true" ]]' in script
+    assert '[[ "$PAGES_OWNER" == "legacy" ]]' in script
+    assert '[[ "$PIPELINE_MODE" == "shadow" ]]' in script
+    assert '[[ "${TELEGRAM_DELIVERY,,}" == "false" ]]' in script
+    assert '[[ "${GOVERNANCE_DELIVERY,,}" == "false" ]]' in script
+    assert '[[ "${KIND_MODE,,}" == "off" ]]' in script
+    assert "Keep GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED=true" in script
+    assert "github.rest.actions.updateRepoVariable" not in script
+    assert "github.rest.actions.getRepoVariable" not in script
     assert "preview_terminal_content_sha256" in text
 
 
@@ -685,18 +758,18 @@ def test_expedited_workflows_have_no_disabled_steps_or_corrupt_badge_text() -> N
     assert "Production Alpha · Early Access" in cutover_text
 
 
-def test_cutover_changes_owner_only_after_preflight_and_compares_exact_bytes() -> None:
+def test_cutover_keeps_owner_fail_closed_and_compares_exact_bytes() -> None:
     text, payload = workflow("governance-expedited-cutover.yml")
     boundary = next(
         step
         for step in payload["jobs"]["validate"]["steps"]
         if step["name"] == "Enforce protected expedited cutover inputs"
     )["run"]
-    assert '[[ "$PAGES_OWNER" == "legacy" ]]' in boundary
+    assert '[[ "$PAGES_OWNER" == "governance" ]]' in boundary
     deploy = payload["jobs"]["deploy_pages"]
-    assert deploy["permissions"]["actions"] == "write"
+    assert deploy["permissions"]["actions"] == "read"
     assert step_names(deploy)[0] == (
-        "Commit governance Pages ownership after protected preflight"
+        "Verify protected ownership and deployment fence"
     )
     preview = payload["jobs"]["preview_smoke"]
     assert "Download evidence-bound candidate Pages for byte comparison" in (

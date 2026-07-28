@@ -65,7 +65,142 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  drain_pages_producers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment:
+      name: governance-release
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Enforce the active expedited deployment fence
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
+          PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          STANDARD_OBSERVATION: ${{ vars.GLOBAL_ALPHA_OBSERVATION_ENABLED }}
+          EXPEDITED_OBSERVATION: ${{ vars.GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED }}
+          TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+          KIND_MODE: ${{ vars.KIND_CONNECTOR_MODE }}
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRMATION" == "CREATE_EXPEDITED_ALPHA_PREPARATION" ]]
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]]
+          [[ "$PAGES_OWNER" == "legacy" && "$PIPELINE_MODE" == "shadow" ]]
+          [[ "${STANDARD_OBSERVATION,,}" == "false" ]]
+          [[ "${EXPEDITED_OBSERVATION,,}" == "true" ]]
+          [[ "${TELEGRAM_DELIVERY,,}" == "false" ]]
+          [[ "${GOVERNANCE_DELIVERY,,}" == "false" ]]
+          [[ "${KIND_MODE,,}" == "off" ]]
+
+      - name: Cancel and drain pre-fence Pages producers
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const workflowIds = [
+              ".github/workflows/build-feed.yml",
+              ".github/workflows/daily.yml",
+            ];
+            const activeStatuses = [
+              "queued", "in_progress", "waiting", "pending", "requested",
+            ];
+            const listActive = async () => {
+              const found = new Map();
+              for (const workflowId of workflowIds) {
+                for (const status of activeStatuses) {
+                  const response = await github.paginate(
+                    github.rest.actions.listWorkflowRuns,
+                    {
+                      owner,
+                      repo,
+                      workflow_id: workflowId,
+                      branch: process.env.DEFAULT_BRANCH,
+                      status,
+                      per_page: 100,
+                    },
+                  );
+                  for (const run of response) {
+                    if (run.id !== context.runId) {
+                      found.set(run.id, {run, workflowId, status});
+                    }
+                  }
+                }
+              }
+              return [...found.values()];
+            };
+            const initial = await listActive();
+            const forceCancelled = new Set();
+            for (const {run, workflowId, status} of initial) {
+              core.notice(
+                `Cancelling pre-fence Pages producer ${run.id} ` +
+                `(${workflowId}, ${status}).`,
+              );
+              try {
+                await github.rest.actions.cancelWorkflowRun({
+                  owner,
+                  repo,
+                  run_id: run.id,
+                });
+              } catch (error) {
+                if (![409, 422].includes(error.status)) {
+                  throw error;
+                }
+              }
+            }
+            const deadline = Date.now() + 9 * 60 * 1000;
+            const forceCancelAt = Date.now() + 60 * 1000;
+            let consecutiveEmptyScans = 0;
+            while (true) {
+              const remaining = await listActive();
+              if (remaining.length === 0) {
+                consecutiveEmptyScans += 1;
+                if (consecutiveEmptyScans >= 2) {
+                  core.notice(
+                    `Pages producer drain complete; cancelled ${initial.length} run(s).`,
+                  );
+                  break;
+                }
+              } else {
+                consecutiveEmptyScans = 0;
+                if (Date.now() >= forceCancelAt) {
+                  for (const {run} of remaining) {
+                    if (forceCancelled.has(run.id)) {
+                      continue;
+                    }
+                    try {
+                      await github.rest.actions.forceCancelWorkflowRun({
+                        owner,
+                        repo,
+                        run_id: run.id,
+                      });
+                      forceCancelled.add(run.id);
+                    } catch (error) {
+                      if (![409, 422].includes(error.status)) {
+                        throw error;
+                      }
+                    }
+                  }
+                }
+              }
+              if (Date.now() >= deadline) {
+                core.setFailed(
+                  `Pages producer drain timed out with ${remaining.length} active run(s).`,
+                );
+                return;
+              }
+              await new Promise((resolve) => setTimeout(resolve, 10000));
+            }
+
   prepare_rollback:
+    needs: drain_pages_producers
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
@@ -2526,33 +2661,24 @@ jobs:
     environment:
       name: governance-runtime
     permissions:
-      actions: write
+      actions: read
       contents: read
     steps:
-      - name: Disable expedited observation and verify immutable safety policy
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const {owner, repo} = context.repo;
-            await github.rest.actions.updateRepoVariable({
-              owner,
-              repo,
-              name: "GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED",
-              value: "false",
-            });
-            for (const [name, expected] of [
-              ["GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED", "false"],
-              ["PAGES_OWNER", "legacy"],
-              ["GOVERNANCE_PIPELINE_MODE", "shadow"],
-              ["ENABLE_TELEGRAM_DELIVERY", "false"],
-              ["ENABLE_GOVERNANCE_DELIVERY", "false"],
-              ["KIND_CONNECTOR_MODE", "off"],
-            ]) {
-              const response = await github.rest.actions.getRepoVariable({
-                owner, repo, name,
-              });
-              if (response.data.value.toLowerCase() !== expected) {
-                core.setFailed(`${name} violated the expedited preparation cleanup`);
-                return;
-              }
-            }
+      - name: Verify immutable deployment fence remains active
+        shell: bash
+        env:
+          EXPEDITED_OBSERVATION: ${{ vars.GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED }}
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
+          PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+          KIND_MODE: ${{ vars.KIND_CONNECTOR_MODE }}
+        run: |
+          set -euo pipefail
+          [[ "${EXPEDITED_OBSERVATION,,}" == "true" ]]
+          [[ "$PAGES_OWNER" == "legacy" ]]
+          [[ "$PIPELINE_MODE" == "shadow" ]]
+          [[ "${TELEGRAM_DELIVERY,,}" == "false" ]]
+          [[ "${GOVERNANCE_DELIVERY,,}" == "false" ]]
+          [[ "${KIND_MODE,,}" == "off" ]]
+          echo "::notice::Keep GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED=true until governance ownership and live mode are committed after cutover."

@@ -15,22 +15,32 @@ def _workflow() -> dict[str, object]:
 
 def test_legacy_pages_deploy_is_suppressed_during_expedited_observation() -> None:
     payload = _workflow()
+    concurrency = payload["jobs"]["build-feed"]["concurrency"]["group"]  # type: ignore[index]
+    assert "vars.PAGES_OWNER == 'legacy'" in concurrency
+    assert (
+        "vars.GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED == 'false'"
+        in concurrency
+    )
+    assert "bside-pages-nondeploy-legacy" in concurrency
     steps = payload["jobs"]["build-feed"]["steps"]  # type: ignore[index]
     boundary = next(
         step
         for step in steps
-        if step["name"] == "Revalidate legacy ownership at the deployment boundary"
+        if step["name"]
+        == "Enforce job-start deployment snapshots at the Pages boundary"
     )
     assert boundary["id"] == "deployment_boundary"
-    assert boundary["uses"] == (
-        "actions/github-script@"
-        "3a2844b7e9c422d3c10d287c895573f7108da1b3"
+    assert (
+        payload["jobs"]["build-feed"]["env"]["EXPEDITED_OBSERVATION_SNAPSHOT"]
+        == "${{ vars.GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED }}"
     )
-    script = boundary["with"]["script"]
-    assert 'readVariable("PAGES_OWNER")' in script
-    assert '"GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED"' in script
-    assert 'const deployAllowed = expeditedObservation === "false"' in script
-    assert 'core.setOutput("deploy_allowed", String(deployAllowed))' in script
+    script = boundary["run"]
+    assert 'PAGES_OWNER_SNAPSHOT" == "legacy"' in script
+    assert '"${EXPEDITED_OBSERVATION_SNAPSHOT,,}"' in script
+    assert "deploy_allowed=true" in script
+    assert "deploy_allowed=false" in script
+    assert 'echo "deploy_allowed=$deploy_allowed" >> "$GITHUB_OUTPUT"' in script
+    assert "github.rest.actions.getRepoVariable" not in script
 
     protected_steps = {
         "Configure Pages",

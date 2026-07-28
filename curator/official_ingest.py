@@ -830,6 +830,9 @@ def sync_governance_payload(
             raise OfficialSourceRightError(
                 "DART replay attempted_at must include a timezone"
             )
+        canonical_replay_attempt = parsed_replay_attempt.astimezone(
+            timezone.utc
+        ).replace(microsecond=0)
         code_revision = str(run.get("code_revision") or "").strip().casefold()
         idempotency_key = str(run.get("idempotency_key") or "").strip()
         run_id = str(run.get("run_id") or "").strip()
@@ -849,9 +852,13 @@ def sync_governance_payload(
             "code_revision": code_revision,
             "idempotency_key": idempotency_key,
             "stable_payload_sha256": stable_payload_sha256,
-            "attempted_at": parsed_replay_attempt.astimezone(
-                timezone.utc
-            ).isoformat().replace("+00:00", "Z"),
+            # PHP persists the replay attempt with gmdate(), whose contract is
+            # whole-second UTC precision. Sign and compare that same canonical
+            # representation so a Python microsecond cannot create a false ACK
+            # mismatch after the server has verified the replay.
+            "attempted_at": canonical_replay_attempt.isoformat().replace(
+                "+00:00", "Z"
+            ),
             "raw_count": len(documents),
             "acknowledged_count": len(documents),
             "fetched_count": _int_value(run.get("fetched_count")),

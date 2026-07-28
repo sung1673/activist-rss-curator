@@ -952,6 +952,7 @@ def test_workflows_do_not_send_private_admin_messages_or_token_links() -> None:
 def test_workflow_permissions_are_scoped_to_the_jobs_that_need_them() -> None:
     daily = yaml.load(workflow_text("daily.yml"), Loader=yaml.BaseLoader)
     official = yaml.load(workflow_text("ingest-official.yml"), Loader=yaml.BaseLoader)
+    build_feed = yaml.load(workflow_text("build-feed.yml"), Loader=yaml.BaseLoader)
     assert daily["permissions"] == {"contents": "read", "models": "read"}
     assert daily["jobs"]["generate"]["permissions"] == {
         "actions": "read",
@@ -962,6 +963,24 @@ def test_workflow_permissions_are_scoped_to_the_jobs_that_need_them() -> None:
     }
     assert "send" not in daily["jobs"]
     assert official["permissions"] == {"contents": "read", "actions": "read"}
+    assert build_feed["permissions"] == {
+        "actions": "read",
+        "contents": "read",
+        "models": "read",
+        "pages": "write",
+        "id-token": "write",
+    }
+    boundary = next(
+        step
+        for step in build_feed["jobs"]["build-feed"]["steps"]
+        if step["name"]
+        == "Enforce job-start deployment snapshots at the Pages boundary"
+    )
+    assert "github.rest.actions.getRepoVariable" not in boundary["run"]
+    assert "EXPEDITED_OBSERVATION_SNAPSHOT" in boundary["run"]
+    assert "deploy_allowed=true" in boundary["run"]
+    assert "deploy_allowed=false" in boundary["run"]
+    assert "BSIDE_ADMIN_TOKEN" not in boundary.get("env", {})
 
 
 def test_daily_governance_pages_deploy_only_after_authenticated_live_state() -> None:
@@ -1366,7 +1385,6 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     initialize = next(step for step in steps if step["name"] == "Initialize backfill evidence")
     assert initialize["env"] == {
         "BACKFILL_REPORT": "${{ runner.temp }}/official-backfill-report.json",
-        "BACKFILL_LOG": "${{ runner.temp }}/official-backfill.stderr.log",
         "DART_CANARY_REPORT": "${{ runner.temp }}/dart-canary-sample-report.json",
         "DART_REVIEW_SAMPLE_JSONL": "${{ runner.temp }}/dart-review-sample.jsonl",
         "DART_REVIEW_SAMPLE_CSV": "${{ runner.temp }}/dart-review-sample.csv",
@@ -1556,12 +1574,18 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
         "Preserve backfill report",
         "Preserve resumable checkpoint",
     }
-    assert all(step["if"] == "always()" for step in uploads)
-    assert all(step["with"]["if-no-files-found"] == "error" for step in uploads)
     report_upload = next(step for step in uploads if step["name"] == "Preserve backfill report")
+    checkpoint_upload = next(
+        step for step in uploads if step["name"] == "Preserve resumable checkpoint"
+    )
+    assert report_upload["if"] == (
+        "always() && "
+        "steps.backfill_artifact_boundary.outputs.evidence_safe == 'true'"
+    )
+    assert checkpoint_upload["if"] == "always()"
+    assert all(step["with"]["if-no-files-found"] == "error" for step in uploads)
     assert report_upload["with"]["path"].splitlines() == [
         "${{ runner.temp }}/official-backfill-report.json",
-        "${{ runner.temp }}/official-backfill.stderr.log",
         "${{ runner.temp }}/dart-canary-sample-report.json",
         "${{ runner.temp }}/dart-review-sample.jsonl",
         "${{ runner.temp }}/dart-review-sample.csv",
@@ -1780,6 +1804,7 @@ def test_ci_audits_python_and_browser_dependencies() -> None:
     assert "npm audit --audit-level=high" in workflow
     assert ".github/scripts/prepare-legacy-pages.py" in workflow
     assert ".github/scripts/restore-legacy-pages-archive.py" in workflow
+    assert ".github/scripts/sanitize-official-backfill-report.py" in workflow
 
 
 def test_ci_type_checks_every_release_critical_governance_module() -> None:
@@ -1814,6 +1839,7 @@ def test_ci_type_checks_every_release_critical_governance_module() -> None:
         "curator/release_evidence_inputs.py",
         "curator/shadow_compare.py",
         "curator/shadow_engine.py",
+        ".github/scripts/sanitize-official-backfill-report.py",
     }
     assert all(module in command for module in required_modules)
     assert "--disallow-untyped-defs" in command

@@ -631,6 +631,7 @@ jobs:
           .github/scripts/restore-legacy-pages-archive.py
           .github/scripts/validate-api-base-urls.py
           .github/scripts/mask-opendart-credentials.py
+          .github/scripts/sanitize-official-backfill-report.py
           --output-format=github
 
       - name: Type check governance core
@@ -694,6 +695,7 @@ jobs:
           curator/shadow_compare.py
           curator/shadow_engine.py
           .github/scripts/validate-api-base-urls.py
+          .github/scripts/sanitize-official-backfill-report.py
           --ignore-missing-imports
           --follow-imports=skip
           --check-untyped-defs

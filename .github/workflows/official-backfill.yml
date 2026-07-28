@@ -79,7 +79,6 @@ jobs:
       - name: Initialize backfill evidence
         env:
           BACKFILL_REPORT: ${{ runner.temp }}/official-backfill-report.json
-          BACKFILL_LOG: ${{ runner.temp }}/official-backfill.stderr.log
           DART_CANARY_REPORT: ${{ runner.temp }}/dart-canary-sample-report.json
           DART_REVIEW_SAMPLE_JSONL: ${{ runner.temp }}/dart-review-sample.jsonl
           DART_REVIEW_SAMPLE_CSV: ${{ runner.temp }}/dart-review-sample.csv
@@ -99,7 +98,6 @@ jobs:
           printf '%s\n' '{"status":"not_applicable"}' > "$DART_REPLAY_STATE_BEFORE"
           printf '%s\n' '{"status":"not_applicable"}' > "$DART_REPLAY_STATE_AFTER"
           printf '%s\n' '{"status":"not_applicable"}' > "$DART_REPLAY_STATE_BINDING"
-          : > "$BACKFILL_LOG"
 
       - name: Checkout immutable dispatch revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -568,7 +566,6 @@ jobs:
           BACKFILL_MAX_WINDOWS: ${{ inputs.max_windows }}
           BACKFILL_SYNC_COMPANY_MASTER: ${{ inputs.sync_company_master }}
           BACKFILL_REPORT: ${{ runner.temp }}/official-backfill-report.json
-          BACKFILL_LOG: ${{ runner.temp }}/official-backfill.stderr.log
           CURATOR_INGEST_SCOPE: official
           CURATOR_DATA_SOURCE: mysql
           CURATOR_DISABLE_TELEGRAM_SEND: "1"
@@ -622,13 +619,38 @@ jobs:
             args+=(--sync-company-master)
           fi
 
-          temporary_report="${BACKFILL_REPORT}.tmp"
-          if python -m curator.official_backfill "${args[@]}" > "$temporary_report" 2> >(tee "$BACKFILL_LOG" >&2); then
-            mv "$temporary_report" "$BACKFILL_REPORT"
-          else
-            exit_code=$?
-            printf '{"status":"failed","exit_code":%d}\n' "$exit_code" > "$BACKFILL_REPORT"
+          raw_report="${BACKFILL_REPORT}.raw"
+          raw_stderr="${BACKFILL_REPORT}.stderr.raw"
+          cleanup_raw_backfill_output() {
+            rm -f "$raw_report" "$raw_stderr"
+          }
+          trap cleanup_raw_backfill_output EXIT
+
+          set +e
+          python -m curator.official_backfill "${args[@]}" \
+            > "$raw_report" 2> "$raw_stderr"
+          exit_code=$?
+          set -e
+
+          sanitizer_exit=0
+          python .github/scripts/sanitize-official-backfill-report.py \
+            --input "$raw_report" \
+            --output "$BACKFILL_REPORT" \
+            --mode "$BACKFILL_MODE" \
+            --from-date "$BACKFILL_FROM_DATE" \
+            --to-date "$BACKFILL_TO_DATE" \
+            --code-revision "$GITHUB_SHA" \
+            --command-exit-code "$exit_code" || sanitizer_exit=$?
+
+          cleanup_raw_backfill_output
+          trap - EXIT
+          if (( exit_code != 0 )); then
+            echo "::error::Official backfill failed with exit code ${exit_code}; sanitized diagnostics are in the report artifact."
             exit "$exit_code"
+          fi
+          if (( sanitizer_exit != 0 )); then
+            echo "::error::Official backfill output did not pass the artifact safety boundary."
+            exit 1
           fi
 
       - name: Capture production DART state after replay
@@ -974,14 +996,74 @@ jobs:
             "$MODE" "$SOURCE" "$FROM_DATE" "$TO_DATE" "$([[ -f "$CHECKPOINT_PATH" ]] && echo true || echo false)" \
             > "$evidence_dir/checkpoint-metadata.json"
 
-      - name: Preserve backfill report
+      - name: Enforce sanitized backfill artifact boundary
         if: always()
+        id: backfill_artifact_boundary
+        env:
+          BACKFILL_MODE: ${{ inputs.mode }}
+          BACKFILL_FROM_DATE: ${{ inputs.from_date }}
+          BACKFILL_TO_DATE: ${{ inputs.to_date }}
+          BACKFILL_REPORT: ${{ runner.temp }}/official-backfill-report.json
+          OPENDART_API_KEYS: ${{ secrets.OPENDART_API_KEYS }}
+          DART_API_KEY: ${{ secrets.OPENDART_API_KEYS == '' && secrets.DART_API_KEY || '' }}
+          KIND_API_KEY: ${{ secrets.KIND_API_KEY }}
+          ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
+          ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f \
+            "${BACKFILL_REPORT}.raw" \
+            "${BACKFILL_REPORT}.stderr.raw" \
+            "${BACKFILL_REPORT}.tmp"
+          command_exit_code="$(
+            REPORT_PATH="$BACKFILL_REPORT" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          try:
+              report = json.loads(
+                  Path(os.environ["REPORT_PATH"]).read_text(encoding="utf-8")
+              )
+              value = report.get("command_exit_code")
+              print(value if type(value) is int and 0 <= value <= 255 else 1)
+          except (OSError, UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+              print(1)
+          PY
+          )"
+          boundary_exit=0
+          python .github/scripts/sanitize-official-backfill-report.py \
+            --output "$BACKFILL_REPORT" \
+            --mode "$BACKFILL_MODE" \
+            --from-date "$BACKFILL_FROM_DATE" \
+            --to-date "$BACKFILL_TO_DATE" \
+            --code-revision "$GITHUB_SHA" \
+            --command-exit-code "$command_exit_code" \
+            --verify-existing || boundary_exit=$?
+          if (( boundary_exit != 0 && boundary_exit != 2 )); then
+            echo "::error::No safe official backfill report is available for upload."
+            exit 1
+          fi
+          if find "${{ runner.temp }}" -maxdepth 1 -type f \
+            \( -name 'official-backfill-report.json.raw*' \
+               -o -name 'official-backfill-report.json.stderr.raw*' \
+               -o -name 'official-backfill-report.json.tmp*' \) \
+            -print -quit | grep -q .; then
+            echo "::error::Raw official backfill temporary output remains at the artifact boundary."
+            exit 1
+          fi
+          echo "evidence_safe=true" >> "$GITHUB_OUTPUT"
+
+      - name: Preserve backfill report
+        if: always() && steps.backfill_artifact_boundary.outputs.evidence_safe == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: official-backfill-report-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/official-backfill-report.json
-            ${{ runner.temp }}/official-backfill.stderr.log
             ${{ runner.temp }}/dart-canary-sample-report.json
             ${{ runner.temp }}/dart-review-sample.jsonl
             ${{ runner.temp }}/dart-review-sample.csv

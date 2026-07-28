@@ -235,6 +235,50 @@ def test_replay_contract_is_signed_into_every_remote_request(
     assert summary["official_remote_failed"] == 0
 
 
+def test_replay_contract_matches_php_whole_second_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _dart_payload("2026-07-28T10:30:00+00:00")
+    run = _replay_run(payload)
+    run["replay_attempted_at"] = "2026-07-28T10:30:00.987654+00:00"
+    calls: list[dict[str, object]] = []
+
+    def php_style_post(
+        _action: str, submitted: dict[str, object], **_kwargs: object
+    ) -> dict[str, object]:
+        calls.append(copy.deepcopy(submitted))
+        replay = submitted["dart_replay"]
+        assert isinstance(replay, dict)
+        assert replay["attempted_at"] == "2026-07-28T10:30:00Z"
+        return {
+            "ok": True,
+            "backend_binding_id": BACKEND_BINDING_ID,
+            "replay_verified": True,
+            "replay_run_id": replay["run_id"],
+            "stable_payload_sha256": replay["stable_payload_sha256"],
+            "replay_attempted_at": "2026-07-28T10:30:00Z",
+            "upserted": {
+                key: len(submitted[key])
+                for key in ("companies", "documents", "events", "source_rights")
+            }
+            | {
+                "source_rights_rejected": 0,
+                "runs": int(bool(submitted["run"])),
+            },
+        }
+
+    monkeypatch.setenv("BSIDE_BACKEND_BINDING_ID", BACKEND_BINDING_ID)
+    monkeypatch.setattr(official_ingest, "remote_api_configured", lambda: True)
+    monkeypatch.setattr(official_ingest, "post_remote_action", php_style_post)
+
+    summary = official_ingest.sync_governance_payload(payload, run=run)
+
+    assert len(calls) == 2
+    assert summary["official_remote_run_persisted"] == 1
+    assert summary["official_remote_failed"] == 0
+    assert summary["official_remote_ack_mismatches"] == 0
+
+
 def test_replay_ack_without_server_noop_proof_is_terminal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
