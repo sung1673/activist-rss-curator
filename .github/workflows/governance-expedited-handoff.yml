@@ -1,0 +1,597 @@
+name: Production Alpha expedited operator handoff
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type VERIFY_EXPEDITED_ALPHA_HANDOFF"
+        required: true
+        type: string
+      cutover_run_id:
+        description: "Successful expedited cutover workflow run ID"
+        required: true
+        type: string
+      reason:
+        description: "Auditable reason for finalizing the operator handoff"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: global-alpha-expedited-handoff-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  source:
+    if: >-
+      ${{ github.ref_type == 'branch' &&
+          github.ref_name == github.event.repository.default_branch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment:
+      name: governance-release
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      cutover_run_id: ${{ steps.source.outputs.cutover_run_id }}
+      cutover_run_attempt: ${{ steps.source.outputs.cutover_run_attempt }}
+    steps:
+      - name: Checkout exact finalized revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Verify exact successful expedited cutover
+        id: source
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          CUTOVER_RUN_ID: ${{ inputs.cutover_run_id }}
+          HANDOFF_REASON: ${{ inputs.reason }}
+          EXPECTED_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        with:
+          script: |
+            const confirmation = process.env.CONFIRMATION;
+            const reason = process.env.HANDOFF_REASON;
+            const runText = process.env.CUTOVER_RUN_ID;
+            if (confirmation !== "VERIFY_EXPEDITED_ALPHA_HANDOFF") {
+              core.setFailed("The explicit operator handoff confirmation did not match.");
+              return;
+            }
+            if (!/^[1-9][0-9]*$/.test(runText)) {
+              core.setFailed("cutover_run_id must be a positive integer.");
+              return;
+            }
+            if (reason.length < 16 || reason.length > 500) {
+              core.setFailed("The handoff reason must contain 16 to 500 characters.");
+              return;
+            }
+            const runId = Number(runText);
+            const {owner, repo} = context.repo;
+            const response = await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: runId,
+            });
+            const run = response.data;
+            const workflowPath = String(run.path || "").split("@", 1)[0];
+            if (
+              workflowPath !== ".github/workflows/governance-expedited-cutover.yml" ||
+              run.event !== "workflow_dispatch" ||
+              run.status !== "completed" ||
+              run.conclusion !== "success" ||
+              run.head_sha !== process.env.EXPECTED_SHA ||
+              run.head_branch !== process.env.DEFAULT_BRANCH ||
+              run.head_repository?.full_name !== `${owner}/${repo}`
+            ) {
+              core.setFailed("The referenced cutover run is not the exact successful release.");
+              return;
+            }
+            core.setOutput("cutover_run_id", String(runId));
+            core.setOutput("cutover_run_attempt", String(run.run_attempt));
+
+  resolve_recovery:
+    needs: source
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      recovery_artifact_id: ${{ steps.recovery.outputs.recovery_artifact_id }}
+      recovery_artifact_digest: ${{ steps.recovery.outputs.recovery_artifact_digest }}
+    steps:
+      - name: Resolve exact cutover-carried recovery artifact
+        id: recovery
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          CUTOVER_RUN_ID: ${{ needs.source.outputs.cutover_run_id }}
+          CUTOVER_RUN_ATTEMPT: ${{ needs.source.outputs.cutover_run_attempt }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const runId = Number(process.env.CUTOVER_RUN_ID);
+            const runAttempt = Number(process.env.CUTOVER_RUN_ATTEMPT);
+            const recoveryName =
+              `global-alpha-expedited-cutover-recovery-${runId}-${runAttempt}`;
+            let recovery = [];
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+              const artifacts = await github.paginate(
+                github.rest.actions.listWorkflowRunArtifacts,
+                {owner, repo, run_id: runId, per_page: 100},
+              );
+              recovery = artifacts.filter(
+                (item) => item.name === recoveryName && !item.expired,
+              );
+              if (recovery.length === 1) {
+                break;
+              }
+              if (attempt < 2) {
+                await new Promise((resolve) => setTimeout(resolve, 5000));
+              }
+            }
+            if (
+              recovery.length !== 1 ||
+              !/^sha256:[0-9a-f]{64}$/.test(
+                String(recovery[0].digest || "").toLowerCase(),
+              )
+            ) {
+              core.setFailed(
+                "The successful cutover is missing its exact recovery artifact.",
+              );
+              return;
+            }
+            core.setOutput("recovery_artifact_id", String(recovery[0].id));
+            core.setOutput(
+              "recovery_artifact_digest",
+              String(recovery[0].digest).toLowerCase(),
+            );
+
+  verify:
+    needs: [source, resolve_recovery]
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment:
+      name: governance-release
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout exact finalized revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Verify final Pages producers are idle
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const activeStatuses = [
+              "queued", "in_progress", "waiting", "pending", "requested",
+            ];
+            for (const workflowId of [
+              ".github/workflows/build-feed.yml",
+              ".github/workflows/daily.yml",
+            ]) {
+              for (const status of activeStatuses) {
+                const active = await github.rest.actions.listWorkflowRuns({
+                  owner,
+                  repo,
+                  workflow_id: workflowId,
+                  branch: process.env.DEFAULT_BRANCH,
+                  status,
+                  per_page: 1,
+                });
+                if (active.data.total_count > 0) {
+                  core.setFailed(
+                    `${workflowId} still has an active ${status} Pages producer run.`,
+                  );
+                  return;
+                }
+              }
+            }
+
+      - name: Verify fresh final repository mode
+        shell: bash
+        env:
+          PAGES_OWNER: ${{ vars.PAGES_OWNER }}
+          PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+          STANDARD_OBSERVATION: ${{ vars.GLOBAL_ALPHA_OBSERVATION_ENABLED }}
+          EXPEDITED_OBSERVATION: ${{ vars.GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED }}
+          TELEGRAM_DELIVERY: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+          GOVERNANCE_DELIVERY: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+          KIND_MODE: ${{ vars.KIND_CONNECTOR_MODE }}
+        run: |
+          set -euo pipefail
+          [[ "$PAGES_OWNER" == "governance" ]]
+          [[ "$PIPELINE_MODE" == "live" ]]
+          [[ "${STANDARD_OBSERVATION,,}" == "false" ]]
+          [[ "${EXPEDITED_OBSERVATION,,}" == "false" ]]
+          [[ "${TELEGRAM_DELIVERY,,}" == "false" ]]
+          [[ "${GOVERNANCE_DELIVERY,,}" == "false" ]]
+          [[ "${KIND_MODE,,}" == "off" ]]
+
+      - name: Set up final smoke verifier
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Verify live APIs and exact Early Access Pages
+        shell: bash
+        env:
+          BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+        run: |
+          set -euo pipefail
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
+          python .github/scripts/smoke-global-v2.py \
+            --base-url "$v2_api" \
+            --expected-sha "$GITHUB_SHA" \
+            --release-state live \
+            --privileged-token-env BSIDE_ADMIN_TOKEN
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v1_api/admin/release-state" | jq -e '.release_state == "live"'
+          web="${BSIDE_PUBLIC_WEB_URL%/}"
+          cache_bust="expedited-handoff-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          for path in / /governance/ /feed.xml; do
+            curl --fail --silent --show-error --location \
+              --retry 3 --retry-all-errors \
+              "$web$path?$cache_bust" --output /dev/null
+          done
+          curl --fail --silent --show-error --location \
+            "$web/governance/config.js?$cache_bust" --output final-config.js
+          curl --fail --silent --show-error --location \
+            "$web/governance/app.js?$cache_bust" --output final-app.js
+          grep -qs --fixed-strings "$GITHUB_SHA" final-config.js
+          grep -qs --fixed-strings "$GOVERNANCE_API_BASE_URL" final-config.js
+          grep -qs --fixed-strings "production_alpha_early_access" final-app.js
+          if grep -Eqi 'telegram|internal_score|queue_status|admin[_-]?token' \
+            final-config.js final-app.js; then
+            echo "::error::A prohibited internal marker is present in public assets."
+            exit 1
+          fi
+
+      - name: Create immutable operator handoff receipt
+        shell: bash
+        env:
+          CUTOVER_RUN_ID: ${{ needs.source.outputs.cutover_run_id }}
+          HANDOFF_REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          observed_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          jq -n \
+            --arg schema_version "1" \
+            --arg status "verified" \
+            --arg code_revision "$GITHUB_SHA" \
+            --arg observed_at "$observed_at" \
+            --arg reason "$HANDOFF_REASON" \
+            --argjson cutover_run_id "$CUTOVER_RUN_ID" \
+            --argjson handoff_run_id "$GITHUB_RUN_ID" \
+            --argjson handoff_run_attempt "$GITHUB_RUN_ATTEMPT" \
+            '{
+              schema_version:($schema_version|tonumber),
+              status:$status,
+              code_revision:$code_revision,
+              cutover_run_id:$cutover_run_id,
+              handoff_run_id:$handoff_run_id,
+              handoff_run_attempt:$handoff_run_attempt,
+              observed_at:$observed_at,
+              reason:$reason,
+              repository_mode:{
+                pages_owner:"governance",
+                governance_pipeline_mode:"live",
+                standard_observation_enabled:false,
+                expedited_observation_enabled:false,
+                telegram_delivery_enabled:false,
+                governance_delivery_enabled:false,
+                kind_connector_mode:"off"
+              },
+              smoke:{pages:true,v1_live:true,v2_live:true,exact_sha:true}
+            }' > global-alpha-expedited-handoff.json
+
+      - name: Upload immutable operator handoff receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-expedited-handoff-${{ github.sha }}
+          path: global-alpha-expedited-handoff.json
+          if-no-files-found: error
+          retention-days: 90
+
+  recover_close:
+    needs: [source, resolve_recovery, verify]
+    if: >-
+      ${{ always() &&
+          needs.source.result == 'success' &&
+          (needs.resolve_recovery.result != 'success' ||
+           needs.verify.result != 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: governance-runtime
+    permissions:
+      contents: read
+    steps:
+      - name: Fail safe by closing v2 then v1 after handoff failure
+        shell: bash
+        env:
+          BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+        run: |
+          set -euo pipefail
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v2_api/admin/release-state" > recover-v2.json
+          v2_state="$(jq -r '.data.release_state' recover-v2.json)"
+          v2_version="$(jq -r '.data.state_version' recover-v2.json)"
+          if [[ "$v2_state" != "closed" ]]; then
+            payload="$(jq -nc --argjson version "$v2_version" \
+              '{release_state:"closed",expected_version:$version,
+                reason:"Expedited operator handoff failed; close v2 before v1"}')"
+            curl --fail-with-body --silent --show-error \
+              -X POST -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+              -H "Content-Type: application/json" \
+              -H "X-Request-ID: expedited-handoff-close-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+              --data "$payload" "$v2_api/admin/release-state" \
+              > recover-v2-closed.json
+          fi
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v1_api/admin/release-state" > recover-v1.json
+          v1_state="$(jq -r '.release_state' recover-v1.json)"
+          v1_version="$(jq -r '.state_version' recover-v1.json)"
+          if [[ "$v1_state" != "closed" ]]; then
+            payload="$(jq -nc --argjson version "$v1_version" \
+              '{release_state:"closed",expected_version:$version,
+                reason:"Expedited operator handoff failed; automatic legacy recovery"}')"
+            curl --fail-with-body --silent --show-error \
+              -X POST -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+              -H "Content-Type: application/json" \
+              -H "X-Request-ID: expedited-handoff-close-v1-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+              --data "$payload" "$v1_api/admin/release-state" \
+              > recover-v1-closed.json
+          fi
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v2_api/admin/release-state" | jq -e '.data.release_state == "closed"'
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v1_api/admin/release-state" | jq -e '.release_state == "closed"'
+
+  recover_pages:
+    needs: [source, resolve_recovery, recover_close]
+    if: >-
+      ${{ always() &&
+          needs.recover_close.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: bside-pages-deployment-${{ github.repository }}
+      cancel-in-progress: false
+      queue: max
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      actions: read
+      contents: read
+      pages: write
+      id-token: write
+    outputs:
+      legacy_root_sha256: ${{ steps.binding.outputs.legacy_root_sha256 }}
+      legacy_feed_sha256: ${{ steps.binding.outputs.legacy_feed_sha256 }}
+    steps:
+      - name: Re-resolve exact cutover recovery after API close
+        id: recovery
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          CUTOVER_RUN_ID: ${{ needs.source.outputs.cutover_run_id }}
+          CUTOVER_RUN_ATTEMPT: ${{ needs.source.outputs.cutover_run_attempt }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const runId = Number(process.env.CUTOVER_RUN_ID);
+            const runAttempt = Number(process.env.CUTOVER_RUN_ATTEMPT);
+            const name =
+              `global-alpha-expedited-cutover-recovery-${runId}-${runAttempt}`;
+            let match = [];
+            for (let attempt = 0; attempt < 4; attempt += 1) {
+              const artifacts = await github.paginate(
+                github.rest.actions.listWorkflowRunArtifacts,
+                {owner, repo, run_id: runId, per_page: 100},
+              );
+              match = artifacts.filter(
+                (item) => item.name === name && !item.expired,
+              );
+              if (match.length === 1) {
+                break;
+              }
+              if (attempt < 3) {
+                await new Promise((resolve) => setTimeout(resolve, 10000));
+              }
+            }
+            if (
+              match.length !== 1 ||
+              !/^sha256:[0-9a-f]{64}$/.test(
+                String(match[0].digest || "").toLowerCase(),
+              )
+            ) {
+              core.setFailed("The exact cutover recovery artifact is unavailable.");
+              return;
+            }
+            core.setOutput("artifact_id", String(match[0].id));
+            core.setOutput(
+              "artifact_digest",
+              String(match[0].digest).toLowerCase(),
+            );
+
+      - name: Checkout exact recovery verifier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up handoff recovery Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Download exact cutover-carried recovery bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.recovery.outputs.artifact_id }}
+          path: recovery-evidence
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.source.outputs.cutover_run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
+      - name: Verify exact handoff recovery bytes
+        id: binding
+        shell: bash
+        env:
+          EXPECTED_ARTIFACT_DIGEST: ${{ steps.recovery.outputs.artifact_digest }}
+          CUTOVER_RUN_ID: ${{ needs.source.outputs.cutover_run_id }}
+          CUTOVER_RUN_ATTEMPT: ${{ needs.source.outputs.cutover_run_attempt }}
+          LEGACY_RUN_ID: ${{ vars.LEGACY_ROLLBACK_RUN_ID }}
+          LEGACY_ARTIFACT_NAME: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_NAME }}
+          LEGACY_CODE_REVISION: ${{ vars.LEGACY_ROLLBACK_CODE_REVISION }}
+          LEGACY_ARTIFACT_DIGEST: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_DIGEST }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          binding="recovery-evidence/cutover-recovery-binding.json"
+          test -f \
+            recovery-evidence/expedited-legacy-recovery-bundle/expedited-legacy-recovery-bundle.json
+          test -f recovery-evidence/global-alpha-expedited-release-report.json
+          test -f "$binding"
+          bundle_manifest="recovery-evidence/expedited-legacy-recovery-bundle/expedited-legacy-recovery-bundle.json"
+          release_report="recovery-evidence/global-alpha-expedited-release-report.json"
+          root_file="recovery-evidence/expedited-legacy-recovery-bundle/full-site/index.html"
+          feed_file="recovery-evidence/expedited-legacy-recovery-bundle/full-site/feed.xml"
+          test -f "$root_file"
+          test -f "$feed_file"
+          source_artifact_id="$(
+            jq -er '.source.artifact_id | select(type == "string" and test("^[1-9][0-9]*$"))' \
+              "$bundle_manifest"
+          )"
+          jq -e \
+            --arg sha "$GITHUB_SHA" \
+            --argjson cutover_run_id "$CUTOVER_RUN_ID" \
+            --argjson cutover_run_attempt "$CUTOVER_RUN_ATTEMPT" \
+            --arg legacy_run_id "$LEGACY_RUN_ID" \
+            --arg legacy_artifact_name "$LEGACY_ARTIFACT_NAME" \
+            --arg legacy_code_revision "$LEGACY_CODE_REVISION" \
+            --arg legacy_artifact_digest "$LEGACY_ARTIFACT_DIGEST" \
+            --argjson legacy_artifact_id "$source_artifact_id" \
+            --arg bundle_manifest_sha256 "$(sha256sum "$bundle_manifest" | cut -d' ' -f1)" \
+            --arg release_report_sha256 "$(sha256sum "$release_report" | cut -d' ' -f1)" \
+            --arg legacy_root_sha256 "$(sha256sum "$root_file" | cut -d' ' -f1)" \
+            --arg legacy_feed_sha256 "$(sha256sum "$feed_file" | cut -d' ' -f1)" '
+              .schema_version == 1
+              and .kind == "bside-global-alpha-expedited-cutover-recovery"
+              and .release_channel == "production_alpha_early_access"
+              and .code_revision == $sha
+              and .workflow == ".github/workflows/governance-expedited-cutover.yml"
+              and .cutover_run_id == $cutover_run_id
+              and .cutover_run_attempt == $cutover_run_attempt
+              and (.evidence.run_id | type) == "number"
+              and (.evidence.artifact_id | type) == "number"
+              and (.evidence.artifact_digest | test("^sha256:[0-9a-f]{64}$"))
+              and (.legacy_source.run_id | tostring) == $legacy_run_id
+              and .legacy_source.artifact_id == $legacy_artifact_id
+              and .legacy_source.artifact_name == $legacy_artifact_name
+              and .legacy_source.code_revision == $legacy_code_revision
+              and .legacy_source.artifact_digest == $legacy_artifact_digest
+              and .payload.bundle_manifest_sha256 == $bundle_manifest_sha256
+              and .payload.release_report_sha256 == $release_report_sha256
+              and .payload.legacy_root_sha256 == $legacy_root_sha256
+              and .payload.legacy_feed_sha256 == $legacy_feed_sha256
+            ' "$binding" > /dev/null
+          evidence_as_of="$(
+            jq -er '.evidence_as_of' \
+              "$release_report"
+          )"
+          python -m curator.expedited_legacy_recovery_bundle verify \
+            --bundle recovery-evidence/expedited-legacy-recovery-bundle \
+            --observed-at "$evidence_as_of" \
+            --expected-source-run-id "$LEGACY_RUN_ID" \
+            --expected-source-artifact-id "$source_artifact_id" \
+            --expected-source-artifact-name "$LEGACY_ARTIFACT_NAME" \
+            --expected-source-code-revision "$LEGACY_CODE_REVISION" \
+            --expected-source-artifact-digest "$LEGACY_ARTIFACT_DIGEST"
+          echo "legacy_root_sha256=$(sha256sum "$root_file" | cut -d' ' -f1)" \
+            >> "$GITHUB_OUTPUT"
+          echo "legacy_feed_sha256=$(sha256sum "$feed_file" | cut -d' ' -f1)" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Configure Pages for failed-handoff recovery
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload pinned legacy handoff recovery
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: github-pages
+          path: recovery-evidence/expedited-legacy-recovery-bundle/full-site
+
+      - name: Restore pinned legacy after failed handoff
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        with:
+          artifact_name: github-pages
+
+  recover_verify:
+    needs: [recover_pages]
+    if: ${{ always() && needs.recover_pages.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment:
+      name: governance-runtime
+    permissions:
+      contents: read
+    steps:
+      - name: Verify fail-closed APIs and restored legacy root
+        shell: bash
+        env:
+          BSIDE_ADMIN_TOKEN: ${{ secrets.BSIDE_ADMIN_TOKEN }}
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+          EXPECTED_ROOT_SHA256: ${{ needs.recover_pages.outputs.legacy_root_sha256 }}
+          EXPECTED_FEED_SHA256: ${{ needs.recover_pages.outputs.legacy_feed_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_ROOT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_FEED_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          v1_api="${GOVERNANCE_API_BASE_URL%/}"
+          v2_api="${v1_api%/api/v1}/api/v2"
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v2_api/admin/release-state" | jq -e '.data.release_state == "closed"'
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $BSIDE_ADMIN_TOKEN" \
+            "$v1_api/admin/release-state" | jq -e '.release_state == "closed"'
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+            "${BSIDE_PUBLIC_WEB_URL%/}/" --output restored-root.html
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+            "${BSIDE_PUBLIC_WEB_URL%/}/feed.xml" --output restored-feed.xml
+          [[ "$(sha256sum restored-root.html | cut -d' ' -f1)" == "$EXPECTED_ROOT_SHA256" ]]
+          [[ "$(sha256sum restored-feed.xml | cut -d' ' -f1)" == "$EXPECTED_FEED_SHA256" ]]
+          if grep -q --fixed-strings \
+            "Production Alpha · Early Access" restored-root.html; then
+            echo "::error::Failed-handoff recovery did not restore the legacy root."
+            exit 1
+          fi
+          {
+            echo "### Failed operator handoff recovered"
+            echo "- v2 and v1 are closed"
+            echo "- the exact cutover-carried legacy site is restored"
+            echo "- closed APIs prevent the live daily producer from redeploying governance"
+            echo "- the authenticated operator must restore owner=legacy, mode=shadow, and the fence=false"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -596,9 +596,12 @@ def test_legacy_and_governance_daily_deployers_use_fail_closed_owner_snapshot() 
     assert legacy["jobs"]["build-feed"]["env"]["PAGES_OWNER_SNAPSHOT"] == (
         "${{ vars.PAGES_OWNER }}"
     )
+    assert legacy["jobs"]["build-feed"]["env"]["EXPEDITED_OBSERVATION_SNAPSHOT"] == (
+        "${{ vars.GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED }}"
+    )
     assert 'PAGES_OWNER_SNAPSHOT" == "legacy"' in legacy_text
-    assert 'readVariable("PAGES_OWNER")' in legacy_text
-    assert '"GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED"' in legacy_text
+    assert "github.rest.actions.getRepoVariable" not in legacy_text
+    assert '"${EXPEDITED_OBSERVATION_SNAPSHOT,,}"' in legacy_text
     assert "gh variable get PAGES_OWNER" not in daily_text
     assert 'PAGES_OWNER_SNAPSHOT" == "governance"' in daily_text
     assert "/ops/release-state" in daily_text
@@ -606,4 +609,4 @@ def test_legacy_and_governance_daily_deployers_use_fail_closed_owner_snapshot() 
     assert "BSIDE_ADMIN_TOKEN" not in daily_text
     assert '"$state" == "live"' in daily_text
     assert daily["jobs"]["generate"]["permissions"]["actions"] == "read"
-    assert legacy["jobs"]["build-feed"]["permissions"] if "permissions" in legacy["jobs"]["build-feed"] else legacy["permissions"]
+    assert legacy["permissions"]["actions"] == "read"

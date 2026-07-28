@@ -66,9 +66,11 @@ jobs:
     timeout-minutes: 75
     env:
       PAGES_OWNER_SNAPSHOT: ${{ vars.PAGES_OWNER }}
+      EXPEDITED_OBSERVATION_SNAPSHOT: ${{ vars.GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED }}
     concurrency:
       group: >-
         ${{ vars.PAGES_OWNER == 'legacy' &&
+            vars.GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED == 'false' &&
             format('bside-pages-deployment-{0}', github.repository) ||
             format('bside-pages-nondeploy-legacy-{0}-{1}', github.repository, github.run_id) }}
       cancel-in-progress: false
@@ -464,8 +466,9 @@ jobs:
           python .github/scripts/prepare-legacy-pages.py "${arguments[@]}"
           echo "path=$LEGACY_PAGES_ARTIFACT_PATH" >> "$GITHUB_OUTPUT"
 
-      - name: Enforce the job-start legacy ownership snapshot
+      - name: Enforce job-start deployment snapshots at the Pages boundary
         if: steps.run_mode.outputs.deploy_pages == 'true'
+        id: deployment_boundary
         shell: bash
         run: |
           set -euo pipefail
@@ -473,49 +476,20 @@ jobs:
             echo "::error::This run did not start with legacy Pages ownership; deployment is blocked."
             exit 1
           }
-
-      - name: Revalidate legacy ownership at the deployment boundary
-        if: steps.run_mode.outputs.deploy_pages == 'true'
-        id: deployment_boundary
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const {owner, repo} = context.repo;
-            const readVariable = async (name) => {
-              try {
-                const response = await github.rest.actions.getRepoVariable({
-                  owner, repo, name,
-                });
-                return String(response.data.value || "").trim().toLowerCase();
-              } catch (error) {
-                if (error && error.status === 404) return "";
-                throw error;
-              }
-            };
-            const pagesOwner = await readVariable("PAGES_OWNER");
-            const expeditedObservation = await readVariable(
-              "GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED",
-            );
-            if (pagesOwner !== "legacy") {
-              core.setFailed(
-                "Current repository Pages ownership is not legacy; deployment is blocked.",
-              );
-              return;
-            }
-            if (!["true", "false"].includes(expeditedObservation)) {
-              core.setFailed(
-                "GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED must be explicit true or false.",
-              );
-              return;
-            }
-            const deployAllowed = expeditedObservation === "false";
-            core.setOutput("deploy_allowed", String(deployAllowed));
-            if (!deployAllowed) {
-              core.notice(
-                "Legacy collection and archive generation continue, but Pages deployment " +
-                "is suppressed during the protected expedited observation window.",
-              );
-            }
+          case "${EXPEDITED_OBSERVATION_SNAPSHOT,,}" in
+            false)
+              deploy_allowed=true
+              ;;
+            true)
+              deploy_allowed=false
+              echo "::notice::Legacy collection and archive generation continue, but Pages deployment is suppressed during the protected expedited observation window."
+              ;;
+            *)
+              echo "::error::GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED must be explicit true or false."
+              exit 1
+              ;;
+          esac
+          echo "deploy_allowed=$deploy_allowed" >> "$GITHUB_OUTPUT"
 
       - name: Configure Pages
         if: >-
