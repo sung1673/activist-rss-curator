@@ -7175,6 +7175,192 @@ function v1_governance_snapshot_identity_conflict_code(Throwable $error): ?strin
 }
 
 /**
+ * Return whether OpenDART added only its monotonic "later correction exists"
+ * marker to a previously stored list row.
+ *
+ * DART's `rm` field is mutable: after a later correction is filed, an older
+ * receipt can gain the `정` marker without changing the receipt itself.  This
+ * must not weaken any event identity, ownership or document-lineage check.
+ */
+function v1_dart_later_correction_marker_added(array $stored, array $submitted): bool {
+    if (!array_key_exists('has_later_correction',$stored)
+        || !array_key_exists('has_later_correction',$submitted)
+        || $stored['has_later_correction'] !== false
+        || $submitted['has_later_correction'] !== true) {
+        return false;
+    }
+    if (!array_key_exists('is_withdrawn_by_remark',$stored)
+        || !array_key_exists('is_withdrawn_by_remark',$submitted)
+        || !is_bool($stored['is_withdrawn_by_remark'])
+        || !is_bool($submitted['is_withdrawn_by_remark'])
+        || $stored['is_withdrawn_by_remark']
+            !== $submitted['is_withdrawn_by_remark']) {
+        return false;
+    }
+    $storedRemarks = (string)($stored['remarks'] ?? '');
+    $submittedRemarks = (string)($submitted['remarks'] ?? '');
+    if (strpos($storedRemarks,'철') !== false
+        || strpos($submittedRemarks,'철') !== false) {
+        return false;
+    }
+    $markerCount = 0;
+    $withoutLaterCorrectionMarker = str_replace(
+        '정',
+        '',
+        $submittedRemarks,
+        $markerCount
+    );
+    return $markerCount === 1
+        && $withoutLaterCorrectionMarker === $storedRemarks;
+}
+
+/**
+ * Compare an isolated event replay while permitting only the DART marker
+ * upgrade whose matching evidence document is checked separately.
+ */
+function v1_followup_event_replay_payload_matches(
+    array $stored,
+    array $submitted,
+    bool $allowDartMarkerUpgrade,
+    &$dartMarkerUpgrade
+): bool {
+    $dartMarkerUpgrade = false;
+    $storedHash = hash('sha256',v1_strict_canonical_json_encode(
+        $stored,
+        'stored_followup_event_payload_encode_failed'
+    ));
+    $submittedHash = hash('sha256',v1_strict_canonical_json_encode(
+        $submitted,
+        'submitted_followup_event_payload_encode_failed'
+    ));
+    if (hash_equals($storedHash,$submittedHash)) {
+        return true;
+    }
+    if (!$allowDartMarkerUpgrade
+        || !array_key_exists('has_later_correction',$stored)
+        || !array_key_exists('has_later_correction',$submitted)
+        || $stored['has_later_correction'] !== false
+        || $submitted['has_later_correction'] !== true) {
+        return false;
+    }
+    $normalizedSubmitted = $submitted;
+    $normalizedSubmitted['has_later_correction'] =
+        $stored['has_later_correction'];
+    $normalizedHash = hash('sha256',v1_strict_canonical_json_encode(
+        $normalizedSubmitted,
+        'normalized_followup_event_payload_encode_failed'
+    ));
+    if (!hash_equals($storedHash,$normalizedHash)) {
+        return false;
+    }
+    $dartMarkerUpgrade = true;
+    return true;
+}
+
+/**
+ * Compare an isolated DART document replay and identify the same monotonic
+ * marker upgrade. The two content hashes must be exactly derivable from the
+ * immutable title/URL plus their respective DART remarks.
+ */
+function v1_followup_document_replay_payload_matches(
+    array $stored,
+    array $submitted,
+    bool $allowDartMarkerUpgrade,
+    &$dartMarkerUpgrade
+): bool {
+    $dartMarkerUpgrade = false;
+    $storedHash = hash('sha256',v1_strict_canonical_json_encode(
+        $stored,
+        'stored_followup_document_payload_encode_failed'
+    ));
+    $submittedHash = hash('sha256',v1_strict_canonical_json_encode(
+        $submitted,
+        'submitted_followup_document_payload_encode_failed'
+    ));
+    if (hash_equals($storedHash,$submittedHash)) {
+        return true;
+    }
+    if (!$allowDartMarkerUpgrade
+        || !v1_dart_later_correction_marker_added($stored,$submitted)) {
+        return false;
+    }
+    $storedRemarks = (string)($stored['remarks'] ?? '');
+    $submittedRemarks = (string)($submitted['remarks'] ?? '');
+    $title = (string)($stored['title'] ?? '');
+    $url = (string)($stored['original_url'] ?? '');
+    $storedContentHash = strtolower((string)($stored['content_hash'] ?? ''));
+    $submittedContentHash = strtolower((string)($submitted['content_hash'] ?? ''));
+    if (preg_match('/^[a-f0-9]{64}$/',$storedContentHash) !== 1
+        || preg_match('/^[a-f0-9]{64}$/',$submittedContentHash) !== 1
+        || !hash_equals(
+            hash('sha256',$title . "\n" . $url . "\n" . $storedRemarks),
+            $storedContentHash
+        )
+        || !hash_equals(
+            hash('sha256',$title . "\n" . $url . "\n" . $submittedRemarks),
+            $submittedContentHash
+        )) {
+        return false;
+    }
+    $normalizedSubmitted = $submitted;
+    $normalizedSubmitted['has_later_correction'] =
+        $stored['has_later_correction'];
+    $normalizedSubmitted['remarks'] = $storedRemarks;
+    $normalizedSubmitted['content_hash'] = $storedContentHash;
+    $normalizedHash = hash('sha256',v1_strict_canonical_json_encode(
+        $normalizedSubmitted,
+        'normalized_followup_document_payload_encode_failed'
+    ));
+    if (!hash_equals($storedHash,$normalizedHash)) {
+        return false;
+    }
+    $dartMarkerUpgrade = true;
+    return true;
+}
+
+/**
+ * Match an append-only DART lifecycle row while deliberately retaining the
+ * first server observation timestamp on exact replays.
+ */
+function v1_dart_lifecycle_observation_matches(
+    array $stored,
+    array $submitted
+): bool {
+    $storedMetadata = json_decode((string)($stored['payload_json'] ?? ''),true);
+    if (!is_array($storedMetadata)) {
+        return false;
+    }
+    $storedParent = $stored['parent_external_id'] === null
+        ? null : (string)$stored['parent_external_id'];
+    $submittedParent = $submitted['parent_external_id'] === null
+        ? null : (string)$submitted['parent_external_id'];
+    if ((string)($stored['connector_id'] ?? '') !== 'connector:kr:dart'
+        || (string)($stored['country_code'] ?? '') !== 'KR'
+        || (string)($stored['source_key'] ?? '') !== 'dart'
+        || (string)($stored['external_id'] ?? '')
+            !== (string)$submitted['external_id']
+        || $storedParent !== $submittedParent
+        || (string)($stored['change_type'] ?? '') !== 'updated'
+        || (string)($stored['resolution_status'] ?? '') !== 'resolved'
+        || (string)($stored['resolved_document_id'] ?? '')
+            !== (string)$submitted['document_id']
+        || (string)($stored['resolved_event_id'] ?? '')
+            !== (string)$submitted['event_id']) {
+        return false;
+    }
+    return hash_equals(
+        hash('sha256',v1_strict_canonical_json_encode(
+            $storedMetadata,
+            'stored_dart_lifecycle_payload_encode_failed'
+        )),
+        hash('sha256',v1_strict_canonical_json_encode(
+            $submitted['metadata'],
+            'submitted_dart_lifecycle_payload_encode_failed'
+        ))
+    );
+}
+
+/**
  * Return only a stable, caller-actionable validation reason.
  *
  * Runtime exceptions may append a record identifier after a colon for local
@@ -8187,10 +8373,12 @@ function upsert_governance_snapshot(
         }
         // An incomplete correction/cancellation is deliberately isolated under
         // its receipt-derived event_id. Once stored, only an exact semantic
-        // replay may touch that row or any of its evidence documents. Perform
-        // this check before the first company/document upsert so a reused ID
-        // cannot transiently rewrite content even inside this transaction.
-        $isolatedReplayEventStmt = $pdo->prepare('SELECT event_id,company_id,identity_status,verification_status,payload_json FROM '
+        // replay is accepted; DART's one-way later-correction marker is kept
+        // as a separate append-only lifecycle observation without rewriting
+        // the row or evidence document. Perform this check before the first
+        // company/document upsert so a reused ID cannot transiently rewrite
+        // content even inside this transaction.
+        $isolatedReplayEventStmt = $pdo->prepare('SELECT event_id,company_id,identity_status,verification_status,review_status,publication_status,payload_json FROM '
             . table_name($config,'governance_events') . ' WHERE event_id=? LIMIT 1 FOR UPDATE');
         $isolatedReplayDocumentsStmt = $pdo->prepare('SELECT ed.document_id,ed.relation_type,ed.position_no,d.company_id,d.source_right_id,d.source_class,d.external_id,'
             . 'd.document_type,d.original_language,d.title,d.body_text,d.original_url,d.content_hash,d.collection_key,d.published_at,'
@@ -8204,8 +8392,28 @@ function upsert_governance_snapshot(
         $submittedDocumentsById = array();
         $duplicateSubmittedDocumentIds = array();
         $isolatedReplayDocumentSnapshots = array();
+        $isolatedReplayCanonicalEventPayloads = array();
+        $pendingDartLifecycleObservations = array();
         $approvedIsolatedReplayEventIds = array();
         $submittedDocumentReferenceEventIds = array();
+        $dartLifecycleObservationByIdStmt = null;
+        $dartLifecycleObservationInsertStmt = null;
+        if ($globalDartProjectionEnabled) {
+            $dartLifecycleObservationByIdStmt = $pdo->prepare(
+                'SELECT connector_id,country_code,source_key,external_id,'
+                . 'parent_external_id,change_type,payload_json,resolution_status,'
+                . 'resolved_document_id,resolved_event_id FROM '
+                . table_name($config,'global_lifecycle_observations')
+                . ' WHERE observation_id=? LIMIT 1 FOR UPDATE'
+            );
+            $dartLifecycleObservationInsertStmt = $pdo->prepare(
+                'INSERT INTO ' . table_name($config,'global_lifecycle_observations')
+                . ' (observation_id,connector_id,country_code,source_key,external_id,'
+                . 'parent_external_id,change_type,observed_at,payload_json,'
+                . 'resolution_status,resolved_document_id,resolved_event_id,'
+                . 'created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+            );
+        }
         foreach ($documents as $submittedDocument) {
             if (!is_array($submittedDocument)) { continue; }
             $submittedDocumentId = v1_governance_snapshot_document_id($submittedDocument);
@@ -8289,15 +8497,20 @@ function upsert_governance_snapshot(
                     $canonicalSubmittedEvent['metadata']['title_provenance'] = 'source';
                 }
             }
-            $storedEventHash = hash('sha256',v1_strict_canonical_json_encode(
-                $storedEventPayload,
-                'stored_followup_event_payload_encode_failed'
-            ));
-            $submittedEventHash = hash('sha256',v1_strict_canonical_json_encode(
-                $canonicalSubmittedEvent,
-                'submitted_followup_event_payload_encode_failed'
-            ));
-            if (!hash_equals($storedEventHash,$submittedEventHash)) {
+            $eventDartMarkerUpgrade = false;
+            $allowDartMarkerUpgrade = $globalDartProjectionEnabled
+                && $dartGuardedAction
+                && $isolatedHasOfficialDartEvidence;
+            $eventCanCreateDartLifecycleObservation =
+                (string)$isolatedReplayEvent['review_status'] === 'pending'
+                && (string)$isolatedReplayEvent['publication_status'] === 'draft';
+            if (!is_array($storedEventPayload)
+                || !v1_followup_event_replay_payload_matches(
+                    $storedEventPayload,
+                    $canonicalSubmittedEvent,
+                    $allowDartMarkerUpgrade,
+                    $eventDartMarkerUpgrade
+                )) {
                 throw new RuntimeException('followup_event_identity_conflict:' . $submittedEventId);
             }
             $rawSubmittedDocumentIds = isset($submittedEvent['document_ids']) && is_array($submittedEvent['document_ids'])
@@ -8341,6 +8554,7 @@ function upsert_governance_snapshot(
                 || $storedDocumentRelations !== $submittedDocumentRelations) {
                 throw new RuntimeException('followup_event_identity_conflict:' . $submittedEventId);
             }
+            $dartMarkerUpgradeDocuments = array();
             foreach ($storedDocumentRows as $storedDocumentRow) {
                 $storedDocumentId = (string)$storedDocumentRow['document_id'];
                 if (!isset($submittedDocumentsById[$storedDocumentId])) {
@@ -8425,21 +8639,106 @@ function upsert_governance_snapshot(
                     && !isset($submittedDocumentPayload['correction_link_status'])) {
                     $submittedDocumentPayload['correction_link_status'] = 'ambiguous_independent';
                 }
+                $documentDartMarkerUpgrade = false;
                 $documentPayloadMatches = is_array($storedDocumentPayload)
-                    && hash_equals(
-                        hash('sha256',v1_strict_canonical_json_encode(
-                            $storedDocumentPayload,
-                            'stored_followup_document_payload_encode_failed'
-                        )),
-                        hash('sha256',v1_strict_canonical_json_encode(
-                            $submittedDocumentPayload,
-                            'submitted_followup_document_payload_encode_failed'
-                        ))
+                    && v1_followup_document_replay_payload_matches(
+                        $storedDocumentPayload,
+                        $submittedDocumentPayload,
+                        $allowDartMarkerUpgrade
+                            && $sourceClass === 'official_disclosure'
+                            && $sourceRightId === 'official:dart',
+                        $documentDartMarkerUpgrade
                     );
-                if ($storedDocumentFields !== $submittedDocumentFields || !$documentPayloadMatches) {
+                $replayDocumentFields = $submittedDocumentFields;
+                if ($documentDartMarkerUpgrade) {
+                    // The content hash includes DART's mutable rm field. The
+                    // helper above independently proved both hashes, so compare
+                    // every other persisted scalar against the first-seen row.
+                    if (!hash_equals(
+                        strtolower((string)$storedDocumentFields[9]),
+                        strtolower((string)($storedDocumentPayload['content_hash'] ?? ''))
+                    ) || !hash_equals(
+                        strtolower((string)$submittedDocumentFields[9]),
+                        strtolower((string)($submittedDocumentPayload['content_hash'] ?? ''))
+                    )) {
+                        throw new RuntimeException(
+                            'followup_event_identity_conflict:' . $submittedEventId
+                        );
+                    }
+                    $replayDocumentFields[9] = $storedDocumentFields[9];
+                }
+                if ($storedDocumentFields !== $replayDocumentFields
+                    || !$documentPayloadMatches) {
                     throw new RuntimeException('followup_event_identity_conflict:' . $submittedEventId);
                 }
+                if ($documentDartMarkerUpgrade) {
+                    $storedRemarks = (string)($storedDocumentPayload['remarks'] ?? '');
+                    $submittedRemarks = (string)($submittedDocumentPayload['remarks'] ?? '');
+                    $dartMarkerUpgradeDocuments[] = array(
+                        'document_id'=>$storedDocumentId,
+                        'observation_id'=>v1_stable_id(
+                            'dart-lifecycle',
+                            'has-later-correction-v1|'
+                                . $submittedEventId . '|' . $storedDocumentId . '|'
+                                . (string)$storedDocumentFields[9] . '|'
+                                . (string)$submittedDocumentFields[9]
+                        ),
+                        'country_code'=>'KR',
+                        'source_key'=>'dart',
+                        'external_id'=>(string)$storedDocumentRow['external_id'],
+                        'parent_external_id'=>null,
+                        'change_type'=>'updated',
+                        'metadata'=>array(
+                            'source_semantics'=>'has_later_correction',
+                            'marker'=>'정',
+                            'source_right_id'=>'official:dart',
+                            'previous_remarks'=>$storedRemarks,
+                            'current_remarks'=>$submittedRemarks,
+                            'previous_content_hash'=>(string)$storedDocumentFields[9],
+                            'current_content_hash'=>(string)$submittedDocumentFields[9],
+                        ),
+                    );
+                }
                 $isolatedReplayDocumentSnapshots[$storedDocumentId] = $storedDocumentRow;
+            }
+            $hasDartDocumentMarkerUpgrade = count($dartMarkerUpgradeDocuments) === 1
+                && count($storedDocumentRows) === 1;
+            if ($eventDartMarkerUpgrade !== $hasDartDocumentMarkerUpgrade
+                || count($dartMarkerUpgradeDocuments) > 1) {
+                throw new RuntimeException('followup_event_identity_conflict:' . $submittedEventId);
+            }
+            if ($eventDartMarkerUpgrade) {
+                $lifecycleObservation = $dartMarkerUpgradeDocuments[0];
+                $lifecycleObservation['event_id'] = $submittedEventId;
+                if (!$dartLifecycleObservationByIdStmt) {
+                    throw new RuntimeException('global_lifecycle_guard_unavailable');
+                }
+                $existingLifecycleObservation = v1_pdo_fetch_one_and_close(
+                    $dartLifecycleObservationByIdStmt,
+                    array($lifecycleObservation['observation_id'])
+                );
+                if ($existingLifecycleObservation) {
+                    if (!v1_dart_lifecycle_observation_matches(
+                        $existingLifecycleObservation,
+                        $lifecycleObservation
+                    )) {
+                        throw new RuntimeException(
+                            'followup_event_identity_conflict:' . $submittedEventId
+                        );
+                    }
+                } elseif (!$eventCanCreateDartLifecycleObservation) {
+                    // A newly observed source change cannot silently alter a
+                    // reviewed or public event. An already-recorded exact
+                    // lifecycle replay remains safe after later human review.
+                    throw new RuntimeException(
+                        'followup_event_identity_conflict:' . $submittedEventId
+                    );
+                }
+                $pendingDartLifecycleObservations[] = $lifecycleObservation;
+                // Preserve the first-seen canonical payload. The source's
+                // monotonic marker change lives only in the lifecycle record.
+                $isolatedReplayCanonicalEventPayloads[$submittedEventId] =
+                    $storedEventPayload;
             }
             $approvedIsolatedReplayEventIds[$submittedEventId] = true;
         }
@@ -8485,6 +8784,44 @@ function upsert_governance_snapshot(
                     }
                 }
             }
+        }
+        foreach ($pendingDartLifecycleObservations as $lifecycleObservation) {
+            if (!$dartLifecycleObservationByIdStmt
+                || !$dartLifecycleObservationInsertStmt) {
+                throw new RuntimeException('global_lifecycle_guard_unavailable');
+            }
+            $storedLifecycleObservation = v1_pdo_fetch_one_and_close(
+                $dartLifecycleObservationByIdStmt,
+                array($lifecycleObservation['observation_id'])
+            );
+            if ($storedLifecycleObservation) {
+                if (!v1_dart_lifecycle_observation_matches(
+                    $storedLifecycleObservation,
+                    $lifecycleObservation
+                )) {
+                    throw new RuntimeException(
+                        'followup_event_identity_conflict:'
+                        . (string)$lifecycleObservation['event_id']
+                    );
+                }
+                continue;
+            }
+            $dartLifecycleObservationInsertStmt->execute(array(
+                (string)$lifecycleObservation['observation_id'],
+                'connector:kr:dart',
+                'KR',
+                'dart',
+                (string)$lifecycleObservation['external_id'],
+                $lifecycleObservation['parent_external_id'],
+                'updated',
+                $now,
+                json_value($lifecycleObservation['metadata']),
+                'resolved',
+                (string)$lifecycleObservation['document_id'],
+                (string)$lifecycleObservation['event_id'],
+                $now,
+                $now,
+            ));
         }
         $companyStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'companies') . ' (company_id, stock_code, market, legal_name, legal_name_en, short_name, aliases_json, homepage_url, record_status, listing_status, master_modified_at, created_at, updated_at) '
             . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE stock_code=COALESCE(NULLIF(VALUES(stock_code),\'\'),stock_code), '
@@ -8902,8 +9239,11 @@ function upsert_governance_snapshot(
             . ' AND ingest_identity_a.record_status=\'active\' AND NULLIF(TRIM(ingest_identity_a.display_name),\'\') IS NOT NULL');
         foreach ($events as $event) {
             if (!is_array($event)) { continue; }
+            $submittedEventId = trim((string)v1_first($event, array('event_id'), ''));
+            if (isset($isolatedReplayCanonicalEventPayloads[$submittedEventId])) {
+                $event = $isolatedReplayCanonicalEventPayloads[$submittedEventId];
+            }
             $eventId = trim((string)v1_first($event, array('event_id'), ''));
-            $submittedEventId = $eventId;
             $companyId = trim((string)v1_first($event, array('company_id', 'corp_code'), ''));
             $eventType = trim((string)v1_first($event, array('event_type'), ''));
             $title = trim((string)v1_first($event, array('title', 'action'), ''));
