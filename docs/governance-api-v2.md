@@ -258,6 +258,22 @@ OpenDART는 이 v2 수집 경로의 대상이 아니다. 한국 공시는 기존
 
 `.github/workflows/ingest-global.yml`은 기본 브랜치에서 `GOVERNANCE_PIPELINE_MODE=shadow|live`일 때 매시 17분·47분에 미국 SEC connector만 실행한다. 수동 실행에서도 US만 선택할 수 있다. 기본 범위는 아직 끝난 최근 2개 UTC 날짜이며, 각 실행은 SourceRight를 첫 요청 전·각 페이지 전·API 전송 전에 확인하고 ACK가 실제 record와 lifecycle observation 합계와 다르면 실패한다. 실행 결과는 원문이나 자격정보를 넣지 않은 30일 보존 evidence artifact로 남긴다.
 
+runner는 공식 소스 요청 전에 ops 인증으로 배포 manifest의 exact SHA와 현재
+release state를 확인한다. `shadow`는 `preview` 상태와 preview Bearer token을,
+`live`는 `live` 상태를 요구하며 다른 모드는 요청 전에 중단한다. SEC
+completed-day backfill은 `global-ingest-v2-day`, Atom/current refresh는
+`global-ingest-v2-current` idempotency namespace를 사용한다. 서버는 namespace
+접두사를 신뢰하지 않고 canonical payload digest와 daily/current cursor 계약을
+재계산한다.
+
+classified SEC 요청은 본문의 `expected_release_state=closed|preview|live`를
+필수로 보낸다. 서버는 ops 인증과 별개로 preview 요청의
+`X-BSIDE-Preview-Token`을 검증하고, v1·v2 release state가 모두 기대 상태인지
+확인한다. apply는 transaction에서 두 상태 row를 먼저 `FOR UPDATE`로 잠근 뒤
+SourceRight와 connector를 잠가 cutover와의 경쟁을 막는다. replay는 같은 상태
+경계를 확인하지만 쓰기와 heartbeat 갱신을 하지 않는다. release state와 preview
+token은 semantic idempotency digest에 포함되지 않는다.
+
 필요한 설정은 다음과 같다.
 
 - 공통: `BSIDE_API_BASE_URL` secret 또는 `GOVERNANCE_API_BASE_URL` variable, `BSIDE_OPS_TOKEN` secret, `GOVERNANCE_PIPELINE_MODE` variable
@@ -265,6 +281,12 @@ OpenDART는 이 v2 수집 경로의 대상이 아니다. 한국 공시는 기존
 - 일본·영국: Production Alpha runner 설정이 없다. `EDINET_API_KEY`, `COMPANIES_HOUSE_API_KEY`, 과거 connector mode·allowlist가 남아 있어도 읽지 않으며 EDINET·Companies House HTML/API를 요청하지 않는다. dormant connector schema의 회사 allowlist 상한은 최대 50개지만 Alpha 실행 경로에서는 사용되지 않는다. 캐나다·호주는 이 runner가 원문 수집하지 않는다.
 
 예약 실행처럼 `from_date`와 `to_date`가 모두 비어 있으면 runner는 `GET /ops/connectors/{connector_id}/checkpoint`에서 MySQL durable checkpoint를 읽는다. 완료된 `window_end_exclusive`의 하루 전부터 겹쳐 읽고 한 번에 최대 31일의 half-open window를 순서대로 처리해 긴 장애 뒤에도 날짜를 건너뛰지 않는다. 아직 checkpoint가 없으면 최근 완료 2일부터 시작한다. SEC는 completed-day 날짜 checkpoint와 별도로 `sec-current-v1` source cursor를 같은 schema v2 cursor에 저장하며, 90분 overlap으로 재관측한 Atom 항목은 content idempotency key와 DB upsert로 멱등 처리한다. 수동 범위에서도 SEC source cursor를 읽고, 다른 connector는 지정 범위만 처리한다. 둘 중 하나만 입력하면 `partial_explicit_window`로 fail-closed한다.
+
+같은 current content를 exact source cursor와 exact SHA로 다시 확인한 apply는
+SourceRight와 connector row를 다시 잠가 검증한 뒤 connector의 성공·확인
+heartbeat만 갱신한다. receipt·문서·사건·checkpoint는 불변이다. replay와
+completed-day receipt는 이 heartbeat 경로를 사용할 수 없으므로 역사 replay가
+현재 최신성을 가장하지 못한다.
 
 ### 캐나다·호주 수동 공식 링크 metadata runner
 

@@ -244,12 +244,18 @@ class _ExactReplayConnector:
 
 
 def _canonical_json(value: object) -> str:
-    return json.dumps(
+    canonical = json.dumps(
         value,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
         allow_nan=False,
+    )
+    # PHP 7.3 json_encode escapes JavaScript line separators even with
+    # JSON_UNESCAPED_UNICODE. Keep cross-runtime receipt hashes byte-identical.
+    return canonical.replace("\u2028", "\\u2028").replace(
+        "\u2029",
+        "\\u2029",
     )
 
 
@@ -260,6 +266,8 @@ def content_idempotency_key(
     window_start: date | None = None,
     window_end_exclusive: date | None = None,
     chunk_index: int = 0,
+    completed_day_evidence: bool = False,
+    current_poll: bool = False,
 ) -> str:
     """Return a stable key that excludes observation-time-only fields."""
 
@@ -287,7 +295,17 @@ def content_idempotency_key(
         "envelope": stable_envelope,
     }
     digest = hashlib.sha256(_canonical_json(content).encode("utf-8")).hexdigest()
-    return f"global-ingest-v2:{envelope.country_code.casefold()}:{digest}"
+    if completed_day_evidence and current_poll:
+        raise GlobalIngestConfigurationError(
+            "conflicting_ingest_receipt_class"
+        )
+    if completed_day_evidence:
+        namespace = "global-ingest-v2-day"
+    elif current_poll:
+        namespace = "global-ingest-v2-current"
+    else:
+        namespace = "global-ingest-v2"
+    return f"{namespace}:{envelope.country_code.casefold()}:{digest}"
 
 
 def global_ingest_batch_id(
@@ -448,6 +466,8 @@ class V2GlobalIngestClient:
         *,
         base_url: str,
         token: str,
+        expected_release_state: str | None = None,
+        preview_token: str = "",
         timeout: float = 30.0,
         transport: httpx.BaseTransport | None = None,
         client_factory: Callable[..., httpx.Client] = httpx.Client,
@@ -456,6 +476,28 @@ class V2GlobalIngestClient:
         self.token = str(token or "").strip()
         if not self.token or "\r" in self.token or "\n" in self.token:
             raise GlobalIngestConfigurationError("missing_ops_token")
+        release_state = str(expected_release_state or "").strip()
+        if release_state and release_state not in {
+            "closed",
+            "preview",
+            "live",
+        }:
+            raise GlobalIngestConfigurationError(
+                "invalid_expected_release_state"
+            )
+        self.expected_release_state = release_state or None
+        self.preview_token = str(preview_token or "").strip()
+        if (
+            self.expected_release_state == "preview"
+            and (
+                not self.preview_token
+                or "\r" in self.preview_token
+                or "\n" in self.preview_token
+            )
+        ):
+            raise GlobalIngestConfigurationError(
+                "missing_preview_ingest_token"
+            )
         self.timeout = timeout
         self.transport = transport
         self.client_factory = client_factory
@@ -653,8 +695,18 @@ class V2GlobalIngestClient:
                 "chunk": chunk.to_payload(),
             },
         }
+        if self.expected_release_state is not None:
+            body["expected_release_state"] = self.expected_release_state
         if replay_only:
             body["ingest_mode"] = "replay"
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.token}",
+            "Idempotency-Key": idempotency_key,
+        }
+        if self.expected_release_state == "preview":
+            headers["X-BSIDE-Preview-Token"] = self.preview_token
         try:
             with self.client_factory(
                 timeout=self.timeout,
@@ -662,12 +714,7 @@ class V2GlobalIngestClient:
             ) as client:
                 response = client.post(
                     f"{self.base_url}/ops/ingest",
-                    headers={
-                        "Accept": "application/json",
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {self.token}",
-                        "Idempotency-Key": idempotency_key,
-                    },
+                    headers=headers,
                     content=_canonical_json(body).encode("utf-8"),
                 )
         except httpx.HTTPError as exc:
@@ -972,6 +1019,7 @@ def execute_global_ingest(
     max_pages: int = 100,
     source_cursor: str | None = None,
     replay_only: bool = False,
+    completed_day_evidence: bool = False,
 ) -> GlobalIngestResult:
     country = str(country_code or "").strip().upper()
     if country not in SUPPORTED_COUNTRIES or country == "KR":
@@ -1045,6 +1093,8 @@ def execute_global_ingest(
             window_start=window_start,
             window_end_exclusive=window_end_exclusive,
             chunk_index=chunk_index,
+            completed_day_evidence=completed_day_evidence,
+            current_poll=not completed_day_evidence,
         )
         chunk_metadata = global_ingest_chunk(
             envelope=envelope,
@@ -1094,7 +1144,14 @@ def execute_global_ingest(
         digest = hashlib.sha256(
             "\x1f".join(idempotency_keys).encode("utf-8")
         ).hexdigest()
-        batch_key = f"global-ingest-v2:{country.casefold()}:batch:{digest}"
+        batch_namespace = (
+            "global-ingest-v2-day"
+            if completed_day_evidence
+            else "global-ingest-v2-current"
+        )
+        batch_key = (
+            f"{batch_namespace}:{country.casefold()}:batch:{digest}"
+        )
     final_receipt = receipts[-1]
     return GlobalIngestResult(
         country_code=country,
@@ -1134,10 +1191,12 @@ def execute_global_ingest_with_replay(
     page_size: int = 100,
     max_pages: int = 100,
     source_cursor: str | None = None,
+    completed_day_evidence: bool = False,
 ) -> tuple[GlobalIngestResult, GlobalIngestResult]:
     """Submit one fetched envelope twice and require an exact idempotent replay."""
 
     replay_connector = _ExactReplayConnector(connector)
+
     def execute() -> GlobalIngestResult:
         return execute_global_ingest(
             country_code=country_code,
@@ -1151,6 +1210,7 @@ def execute_global_ingest_with_replay(
             page_size=page_size,
             max_pages=max_pages,
             source_cursor=source_cursor,
+            completed_day_evidence=completed_day_evidence,
         )
 
     initial = execute()
@@ -1414,10 +1474,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     end: date | None = None
     revision: str | None = None
     try:
+        pipeline_mode = str(
+            os.environ.get("GOVERNANCE_PIPELINE_MODE", "")
+        ).strip()
         if args.require_active_pipeline:
-            pipeline_mode = str(
-                os.environ.get("GOVERNANCE_PIPELINE_MODE", "")
-            ).strip()
             if pipeline_mode not in {"shadow", "live"}:
                 raise GlobalIngestConfigurationError(
                     "governance_pipeline_not_active"
@@ -1468,6 +1528,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             completed_day_only=args.completed_day_only,
         )
         base_url, token = _api_configuration(os.environ)
+        expected_release_state = str(
+            os.environ.get(
+                "GLOBAL_INGEST_EXPECTED_RELEASE_STATE",
+                "",
+            )
+        ).strip()
+        if expected_release_state not in {
+            "closed",
+            "preview",
+            "live",
+        }:
+            raise GlobalIngestConfigurationError(
+                "missing_expected_release_state"
+            )
         rights_client = GlobalOfficialSourceRightClient(
             base_url=base_url,
             token=token,
@@ -1475,6 +1549,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         ingest_client = V2GlobalIngestClient(
             base_url=base_url,
             token=token,
+            expected_release_state=expected_release_state,
+            preview_token=(
+                os.environ.get("GOVERNANCE_PREVIEW_TOKEN", "")
+                if expected_release_state == "preview"
+                else ""
+            ),
         )
         checkpoint = ingest_client.fetch_checkpoint(
             connector.descriptor.connector_id
@@ -1511,6 +1591,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     else checkpoint.source_cursor
                 ),
                 replay_only=True,
+                completed_day_evidence=args.completed_day_only,
             )
             replay_result = result
         elif args.verify_replay:
@@ -1530,6 +1611,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     if args.completed_day_only
                     else checkpoint.source_cursor
                 ),
+                completed_day_evidence=args.completed_day_only,
             )
         else:
             result = execute_global_ingest(
@@ -1548,6 +1630,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     if args.completed_day_only
                     else checkpoint.source_cursor
                 ),
+                completed_day_evidence=args.completed_day_only,
             )
         evidence = result.evidence()
         evidence["collection_mode"] = (

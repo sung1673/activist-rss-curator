@@ -741,6 +741,11 @@ paths:
         established official-ingest pipeline. connector:jp:edinet and
         connector:gb:companies-house return global_ingest_source_disabled
         before normalization or any mutable write.
+        Classified SEC completed-day/current requests must carry the expected
+        closed, preview, or live state. The server checks both v1 and v2 state
+        before processing and locks them again before an apply write. Preview
+        additionally requires X-BSIDE-Preview-Token, independently of the ops
+        Bearer credential.
         Unclassified candidates remain private until an editor assigns one of
         the eight public event families.
       x-rejected-connector-ids:
@@ -749,6 +754,17 @@ paths:
         - connector:gb:companies-house
       security:
         - OpsBearer: []
+      parameters:
+        - name: X-BSIDE-Preview-Token
+          in: header
+          required: false
+          description: >-
+            Required in addition to OpsBearer when expected_release_state is
+            preview. Never place this value in a URL or request body.
+          schema:
+            type: string
+            minLength: 32
+            maxLength: 4096
       requestBody:
         required: true
         content:
@@ -2555,6 +2571,13 @@ components:
           maxLength: 64
           pattern: '^[a-f0-9]+$'
           description: Must equal the verified deployment manifest revision.
+        expected_release_state:
+          type: string
+          enum: [closed, preview, live]
+          description: >-
+            Required for classified SEC completed-day and current receipts.
+            Both v1 and v2 release-state rows must match; apply rechecks under
+            transaction locks.
         ingest_mode:
           type: string
           enum: [apply, replay]

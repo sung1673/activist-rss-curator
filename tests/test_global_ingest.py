@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
+from dataclasses import replace
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -406,6 +408,57 @@ def test_content_idempotency_key_is_stable_for_exact_content() -> None:
     assert first == second
     assert first.startswith("global-ingest-v2:us:")
     assert changed != first
+    current_poll = content_idempotency_key(
+        envelope=_envelope(),
+        code_revision=REVISION,
+        window_start=date(2026, 7, 23),
+        window_end_exclusive=date(2026, 7, 24),
+        current_poll=True,
+    )
+    assert current_poll.startswith("global-ingest-v2-current:us:")
+    assert current_poll != first
+    completed_day = content_idempotency_key(
+        envelope=_envelope(),
+        code_revision=REVISION,
+        window_start=date(2026, 7, 23),
+        window_end_exclusive=date(2026, 7, 24),
+        completed_day_evidence=True,
+    )
+    assert completed_day.startswith("global-ingest-v2-day:us:")
+    assert completed_day != first
+    with pytest.raises(
+        GlobalIngestConfigurationError,
+        match="conflicting_ingest_receipt_class",
+    ):
+        content_idempotency_key(
+            envelope=_envelope(),
+            code_revision=REVISION,
+            completed_day_evidence=True,
+            current_poll=True,
+        )
+
+
+def test_classified_key_matches_php73_line_separator_encoding() -> None:
+    record = replace(
+        _record(9),
+        title="SEC title\u2028line\u2029separator",
+        metadata={
+            "title_provenance": "source",
+            "separator": "\u2028\u2029",
+            "nested_empty": {},
+        },
+    )
+    key = content_idempotency_key(
+        envelope=_envelope(raw_count=1, records=(record,)),
+        code_revision=REVISION,
+        window_start=date(2026, 7, 23),
+        window_end_exclusive=date(2026, 7, 24),
+        current_poll=True,
+    )
+    assert key == (
+        "global-ingest-v2-current:us:"
+        "3d4c412a01646230813862d6de7971a092fbddbdc94f6431202ec851019fdcc3"
+    )
 
 
 def test_connector_envelope_rejects_more_accepted_entities_than_raw_rows() -> None:
@@ -519,7 +572,11 @@ class _LargeConnector:
     ) -> GlobalConnectorEnvelope:
         del request, eligibility, eligibility_provider, now
         records = tuple(_record(index) for index in range(1001))
-        return _envelope(raw_count=1200, records=records)
+        return _envelope(
+            raw_count=1200,
+            request_count=1,
+            records=records,
+        )
 
 
 class _ChunkIngest:
@@ -562,6 +619,7 @@ def test_large_official_window_is_submitted_in_stable_acknowledged_chunks() -> N
         code_revision=REVISION,
         rights_client=rights,
         ingest_client=ingest,
+        completed_day_evidence=True,
     )
 
     assert [len(item.records) for item, _key, _chunk in ingest.submissions] == [
@@ -577,14 +635,27 @@ def test_large_official_window_is_submitted_in_stable_acknowledged_chunks() -> N
     assert [item.request_count for item, _key, _chunk in ingest.submissions] == [
         0,
         0,
-        2,
+        1,
     ]
     assert [item.exhausted for item, _key, _chunk in ingest.submissions] == [
         False,
         False,
         True,
     ]
-    assert ingest.submissions[0][0].next_cursor
+    assert all(
+        re.fullmatch(
+            (
+                rf"global-ingest-chunk:2026-07-23:2026-07-24:"
+                rf"{index}:3:[a-f0-9]{{24}}"
+            ),
+            str(item.next_cursor),
+        )
+        is not None
+        for index, (item, _key, _chunk) in enumerate(
+            ingest.submissions[:2],
+            start=1,
+        )
+    )
     assert ingest.submissions[-1][0].next_cursor is None
     assert len({key for _item, key, _chunk in ingest.submissions}) == 3
     chunks = [chunk for _item, _key, chunk in ingest.submissions]
@@ -592,7 +663,7 @@ def test_large_official_window_is_submitted_in_stable_acknowledged_chunks() -> N
     assert all(chunk.count == 3 for chunk in chunks)
     assert all(chunk.batch_raw_count == 1200 for chunk in chunks)
     assert all(chunk.batch_acknowledged_count == 1001 for chunk in chunks)
-    assert all(chunk.batch_request_count == 2 for chunk in chunks)
+    assert all(chunk.batch_request_count == 1 for chunk in chunks)
     assert all(chunk.window_start == "2026-07-23" for chunk in chunks)
     assert all(
         chunk.window_end_exclusive == "2026-07-24"
@@ -608,7 +679,13 @@ def test_large_official_window_is_submitted_in_stable_acknowledged_chunks() -> N
     )
     assert result.idempotent_chunk_count == 0
     assert result.idempotent is False
-    assert result.idempotency_key.startswith("global-ingest-v2:us:batch:")
+    assert result.idempotency_key.startswith(
+        "global-ingest-v2-day:us:batch:"
+    )
+    assert all(
+        key.startswith("global-ingest-v2-day:us:")
+        for _item, key, _chunk in ingest.submissions
+    )
 
 
 def test_chunk_cursor_is_stable_across_collection_times() -> None:
@@ -756,6 +833,53 @@ def test_v2_client_marks_replay_as_server_enforced_read_only() -> None:
         replay_only=True,
     )
     assert receipt.idempotent is True
+
+
+def test_v2_client_binds_preview_write_to_state_and_second_credential() -> None:
+    envelope = _envelope()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["expected_release_state"] == "preview"
+        assert request.headers["authorization"] == "Bearer ops-secret"
+        assert request.headers["x-bside-preview-token"] == "preview-secret"
+        return httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "api_version": "v2",
+                "data": {
+                    "ingest_id": "global-ingest:preview",
+                    "connector_id": envelope.connector_id,
+                    "raw_count": 0,
+                    "acknowledged_count": 0,
+                    "idempotent": True,
+                },
+            },
+        )
+
+    receipt = V2GlobalIngestClient(
+        base_url="https://example.test/api/v2",
+        token="ops-secret",
+        expected_release_state="preview",
+        preview_token="preview-secret",
+        transport=httpx.MockTransport(handler),
+    ).submit(
+        envelope=envelope,
+        chunk=_single_chunk(envelope),
+        idempotency_key="global-ingest-v2-current:us:" + "c" * 64,
+        code_revision=REVISION,
+    )
+    assert receipt.idempotent is True
+    with pytest.raises(
+        GlobalIngestConfigurationError,
+        match="missing_preview_ingest_token",
+    ):
+        V2GlobalIngestClient(
+            base_url="https://example.test/api/v2",
+            token="ops-secret",
+            expected_release_state="preview",
+        )
 
 
 def test_v2_client_reads_strict_durable_connector_checkpoint() -> None:

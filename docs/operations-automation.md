@@ -287,6 +287,20 @@ SHA의 시작·종료 시각, 성공/실패 window 수와 멱등 재실행 결�
 connector라도 30일 범위·최신성·실패 0건 조건을 충족하지 못하면 cutover를
 실행하지 않는다.
 
+SEC 영수증은 목적별로 분리한다. `global-backfill.yml`의 정확한 1일 daily
+master-index 적재만 `global-ingest-v2-day`로 30일 출시 증빙에 포함한다.
+`ingest-global.yml`의 Atom/current refresh는 `global-ingest-v2-current`이며
+증빙 exporter가 기간 window로 계산하지 않는다. 예약 refresh는 실행 전에 ops
+인증으로 exact SHA를 확인하고, shadow에서는 preview token까지 제시해
+`release_state=preview`에 묶는다. 내용이 같은 current poll의 재실행은 connector
+heartbeat만 갱신하고 receipt·문서·사건·checkpoint를 변경하지 않는다.
+실제 `/ops/ingest` 요청도 본문의 `expected_release_state`로 v1·v2 상태에
+묶인다. preview에서는 ops Bearer와 별도의 `X-BSIDE-Preview-Token`을 함께
+보내며, 서버는 apply transaction의 첫 잠금으로 두 release-state row를 다시
+확인한 뒤 SourceRight→connector 순서로 잠근다. closed backfill도 같은 경계를
+사용한다. replay는 상태 경계를 확인하되 heartbeat를 포함한 모든 운영 데이터를
+읽기 전용으로 유지한다.
+
 ## OpenDART apply 권한 경계
 
 `source-right-bootstrap.yml`이 등록한 `official:dart`만 OpenDART apply에 사용할

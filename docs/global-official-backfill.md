@@ -17,10 +17,13 @@ repository·exact Git ref 단위 concurrency group을 사용하고
 다시 확인한 뒤 legacy artifact를 복원한다.
 
 이 문서의 SEC `global-backfill.yml` 수동 적재는
-`GOVERNANCE_PIPELINE_MODE=off`에서도 실행할 수 있다. 대신 기본 브랜치의
-보호된 `governance-runtime` 환경에서만 실행되며, 수집 전에 운영 API가 정확한
-dispatch SHA·schema 12·`closed` 상태인지 확인한다. 이 검사가 실패하면 공식
-소스 요청과 DB 쓰기를 시작하지 않는다. 이 예외는 DART
+`release_state=closed|preview`를 명시적으로 선택한다. 기본값은 `closed`이며,
+`GOVERNANCE_PIPELINE_MODE=off`에서도 실행할 수 있다. `preview`는
+`GOVERNANCE_PIPELINE_MODE=shadow`, ops 인증, 별도의 preview token을 모두
+요구한다. 두 모드 모두 기본 브랜치의 보호된 `governance-runtime` 환경에서만
+실행되며, 수집 전에 운영 API가 정확한 dispatch SHA·schema 12·선택한 비공개
+상태인지 확인한다. 이 검사가 실패하면 공식 소스 요청과 DB 쓰기를 시작하지
+않는다. 이 예외는 DART
 `official-backfill.yml` apply에 적용되지 않는다. DART는 `off`와 `closed`에서
 dry-run을 통과한 뒤 `GOVERNANCE_PIPELINE_MODE=dart_canary`로 전환하고,
 v1·v2가 계속 `closed`인 상태에서만 apply한다.
@@ -31,6 +34,7 @@ v1·v2가 계속 `closed`인 상태에서만 apply한다.
 - `from_date`: 포함 시작일, `YYYY-MM-DD`
 - `to_date`: 미포함 종료일, `YYYY-MM-DD`
 - `mode`: `apply|replay`
+- `release_state`: `closed|preview` (기본 `closed`)
 - `max_windows`: `1..31`
 
 날짜 범위는 완료된 날짜만 포함해야 한다. 요청 범위 전체가 `max_windows` 안에
@@ -74,6 +78,23 @@ hash, 배포 SHA의 receipt가 이미 존재해야 한다. 없거나 내용이 �
 사건, receipt, checkpoint를 변경하기 전에 실패한다. 성공 증빙은 모든 날짜에
 대해 `idempotent=true`, `read_only=true`여야 한다.
 
+SEC 완료일 receipt만 `global-ingest-v2-day:us:<64자리 SHA-256>` namespace를
+사용한다. 서버는 정확한 1일 window, 실제 `batch_request_count=1`, daily master
+index provenance와 Python producer가 계산한 semantic digest를 다시 검증한다.
+예약 Atom/current refresh는 `global-ingest-v2-current:us:<digest>`를 사용하며
+30일 출시 증빙 대상이 아니다. 같은 current 결과를 다시 확인하면 문서·사건·
+receipt·checkpoint는 바꾸지 않고 exact source cursor와 SHA가 일치할 때 connector
+heartbeat만 갱신한다. 완료일 replay는 heartbeat도 갱신하지 않는다.
+
+완료일과 current SEC 요청은 본문에 `expected_release_state`를 포함한다. `preview`
+쓰기에는 ops Bearer와 별도로 `X-BSIDE-Preview-Token`을 보내며, 서버는 v1·v2
+release state 두 row가 모두 기대 상태인지 먼저 확인한다. `apply`는 같은 두 row를
+transaction에서 다시 잠근 다음 SourceRight와 connector를 잠가 상태 전환 경쟁을
+차단한다. `closed` 적재도 같은 경계를 사용한다. `replay`는 경계를 확인하지만
+receipt·heartbeat·문서·사건·checkpoint를 변경하지 않는다. 상태와 preview token은
+semantic idempotency identity에서 제외되므로 같은 공식 자료의 증빙 key는 전환
+과정에서 바뀌지 않는다.
+
 SEC 각 날짜는 `US-<YYYY-MM-DD>.json` receipt로 저장된다. summary는
 처리 날짜, receipt SHA-256, raw·ACK 합계, replay 검증 여부를 기록한다.
 workflow artifact는 날짜별 receipt와 summary를 함께 30일 보존하고, 실패해도
@@ -94,4 +115,6 @@ receipt/checkpoint의 `code_revision`이 dispatch SHA와 동일,
 `acknowledged_count = accepted_count`다. SEC replay는 모든 날짜의
 `replay_verified=true`, DART 재실행은 문서·사건·checkpoint 증가 0이어야 한다.
 운영 `/ops/alpha-release-evidence`의 `connector_coverage`는 정확히
-`dart/KR`, `sec-edgar/US` 두 항목과 항목별 30개 window만 반환해야 한다.
+`dart/KR`, `sec-edgar/US` 두 항목과 항목별 30개 window만 반환해야 한다. SEC
+exporter는 완료일 namespace만 집계하고 current receipt는 무시한다. 동일
+완료일이 둘 이상 존재하거나 완료일 namespace가 변조되면 fail-closed한다.

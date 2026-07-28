@@ -825,6 +825,7 @@ def test_exact_config_has_a_stable_content_idempotency_key() -> None:
         ingest_client=second_ingest,
     )
     assert first_ingest.calls[0][1] == second_ingest.calls[0][1]
+    assert first_ingest.calls[0][1].startswith("global-ingest-v2:ca:")
     assert first_ingest.calls[0][0].to_payload() == (
         second_ingest.calls[0][0].to_payload()
     )

@@ -516,6 +516,11 @@ def test_automated_ingest_is_idempotent_and_never_publishes_events():
     }
     assert request["properties"]["ingest_mode"]["enum"] == ["apply", "replay"]
     assert request["properties"]["ingest_mode"]["default"] == "apply"
+    assert request["properties"]["expected_release_state"]["enum"] == [
+        "closed",
+        "preview",
+        "live",
+    ]
     envelope = SPEC["components"]["schemas"]["GlobalIngestPayload"]
     assert envelope["properties"]["records"]["maxItems"] == 500
     assert envelope["properties"]["lifecycle_observations"]["maxItems"] == 500
@@ -559,6 +564,7 @@ def test_automated_ingest_is_idempotent_and_never_publishes_events():
     assert "global_ingest_code_revision_mismatch" in V2_WRITE
     assert "global_ingest_replay_missing" in V2_WRITE
     assert "unset($semantic['ingest_mode'])" in V2_WRITE
+    assert "unset($semantic['expected_release_state'])" in V2_WRITE
     record = SPEC["components"]["schemas"]["GlobalIngestRecord"]
     assert "metadata" in record["required"]
     assert (
@@ -595,6 +601,14 @@ def test_automated_ingest_is_idempotent_and_never_publishes_events():
     assert "\\'needs_review\\',NULL" in V2_WRITE
     assert "'public_events_created' => 0" in V2_WRITE
     operation = SPEC["paths"]["/ops/ingest"]["post"]
+    preview_header = next(
+        parameter
+        for parameter in operation["parameters"]
+        if parameter["name"] == "X-BSIDE-Preview-Token"
+    )
+    assert preview_header["in"] == "header"
+    assert preview_header["required"] is False
+    assert preview_header["schema"]["minLength"] == 32
     assert operation["x-rejected-connector-ids"] == [
         "connector:kr:dart",
         "connector:jp:edinet",
@@ -1621,6 +1635,9 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
     assert "official_backfill_checkpoints" in exporter
     assert "hash_equals($payloadHash, hash('sha256', $raw))" in exporter
     assert "alpha_evidence_duplicate_window" in exporter
+    assert "global-ingest-v2-day:us:" in exporter
+    assert "global-ingest-v2-current" in exporter
+    assert "alpha_evidence_completed_day_marker_invalid" in exporter
     assert "v2_alpha_latest_contiguous_windows" in exporter
     assert "'filtered_out_count' =>" in exporter
     assert "'accepted_count' =>" in exporter
@@ -1634,6 +1651,25 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
     assert "array('sec-edgar', 'US', 'connector:us:sec-edgar')" in exporter
     assert "array('edinet', 'JP'" not in exporter
     assert "array('companies-house', 'GB'" not in exporter
+
+    writer = V2_WRITE
+    assert "v2_write_expected_classified_ingest_key" in writer
+    assert "global-ingest-v2-day" in writer
+    assert "global-ingest-v2-current" in writer
+    assert "daily-master-index" in writer
+    assert "(int)$chunk['batch_request_count'] !== 1" in writer
+    assert "v2_ingest_refresh_idempotent_current_poll" in writer
+    assert "(string)$normalized['ingest_mode'] !== 'apply'" in writer
+    assert "v2_ingest_require_preview_binding" in writer
+    assert "HTTP_X_BSIDE_PREVIEW_TOKEN" in writer
+    assert "v2_ingest_assert_release_boundary" in writer
+    assert "GOV_V1_RELEASE_STATE_KEY" in writer
+    assert "GOV_V2_RELEASE_STATE_KEY" in writer
+    assert "global_ingest_release_state_mismatch" in writer
+    assert "v2_write_valid_sec_current_cursor" in writer
+    assert "$isFinalChunk && $envelope['exhausted'] !== true" in writer
+    assert "rtrim(" in writer
+    assert "hash_equals($canonical, $decoded)" in writer
 
     evidence_schema = SPEC["components"]["schemas"]["AlphaAutomatedEvidence"]
     connector_coverage = evidence_schema["properties"]["connector_coverage"]

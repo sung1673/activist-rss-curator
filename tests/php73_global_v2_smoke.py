@@ -127,6 +127,7 @@ def request_json(
     *,
     method: str = "GET",
     token: str | None = None,
+    preview_token: str | None = None,
     payload: dict[str, Any] | None = None,
     expected_status: int = 200,
 ) -> tuple[dict[str, Any], dict[str, str]]:
@@ -134,6 +135,8 @@ def request_json(
     headers = {"Accept": "application/json"}
     if token is not None:
         headers["Authorization"] = f"Bearer {token}"
+    if preview_token is not None:
+        headers["X-BSIDE-Preview-Token"] = preview_token
     if payload is not None:
         body = json.dumps(
             payload,
@@ -600,6 +603,40 @@ def ingest_payload(
     }
 
 
+def bind_classified_ingest_key(
+    payload: dict[str, Any],
+    *,
+    namespace: str,
+) -> str:
+    envelope = json.loads(json.dumps(payload["envelope"], ensure_ascii=False))
+    chunk = envelope.pop("chunk")
+    envelope.pop("retrieved_at", None)
+    envelope.pop("request_count", None)
+    for record in envelope.get("records", []):
+        record.pop("first_observed_at", None)
+    semantic = {
+        "code_revision": payload["code_revision"],
+        "window_start": chunk["window_start"],
+        "window_end_exclusive": chunk["window_end_exclusive"],
+        "chunk_index": chunk["index"] - 1,
+        "envelope": envelope,
+    }
+    digest = hashlib.sha256(
+        json.dumps(
+            semantic,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+        .encode("utf-8")
+    ).hexdigest()
+    key = f"{namespace}:us:{digest}"
+    payload["idempotency_key"] = key
+    return key
+
+
 def empty_chunk_payload(
     *,
     rights_revision: str,
@@ -911,7 +948,7 @@ def seed_alpha_automated_evidence(
             digest = hashlib.sha256(identity.encode()).hexdigest()
             batch_id = "global-batch:" + digest
             ingest_id = "alpha:" + digest[:80]
-            idempotency_key = "alpha-evidence:" + digest
+            idempotency_key = "global-ingest-v2-day:us:" + digest
             completed = now.strftime("%Y-%m-%d %H:%M:%S")
             if connector_id == "connector:us:sec-edgar" and index == 0:
                 for (
@@ -921,8 +958,8 @@ def seed_alpha_automated_evidence(
                     acknowledged_count,
                     batch_request_count,
                 ) in (
-                    (1, 0, 1, 0, 2),
-                    (2, 3, 2, 1, 3),
+                    (1, 0, 1, 0, 1),
+                    (2, 1, 2, 1, 1),
                 ):
                     chunk_digest = hashlib.sha256(
                         f"{identity}:chunk:{chunk_index}".encode()
@@ -933,7 +970,7 @@ def seed_alpha_automated_evidence(
                             (
                                 f"'alpha:{chunk_digest[:80]}'",
                                 f"'{connector_id}'",
-                                f"'alpha-evidence:{chunk_digest}'",
+                                f"'global-ingest-v2-day:us:{chunk_digest}'",
                                 f"'{chunk_digest}'",
                                 f"'{batch_id}'",
                                 str(chunk_index),
@@ -984,6 +1021,37 @@ def seed_alpha_automated_evidence(
                 + ")"
             )
             cursor = next_cursor
+    hybrid_digest = hashlib.sha256(
+        f"hybrid:{CODE_REVISION}".encode()
+    ).hexdigest()
+    hybrid_completed = now.strftime("%Y-%m-%d %H:%M:%S")
+    receipt_values.append(
+        "("
+        + ",".join(
+            (
+                f"'alpha-hybrid:{hybrid_digest}'",
+                f"'{SEC_CONNECTOR_ID}'",
+                f"'global-ingest-v2-current:us:{hybrid_digest}'",
+                f"'{hybrid_digest}'",
+                f"'global-batch:{hybrid_digest}'",
+                "1",
+                "1",
+                f"'{(end - timedelta(days=2)).isoformat()}'",
+                f"'{end.isoformat()}'",
+                "2",
+                "4",
+                "1",
+                "4",
+                "1",
+                "2",
+                f"'{CODE_REVISION}'",
+                f"'{hybrid_completed}'",
+                f"'{hybrid_completed}'",
+                f"'{hybrid_completed}'",
+            )
+        )
+        + ")"
+    )
     mysql_execute(mysql_container_id, "DELETE FROM ci_global_ingest_receipts;")
     mysql_execute(
         mysql_container_id,
@@ -2501,6 +2569,341 @@ def run(base_url: str, mysql_container_id: str) -> None:
         == "1\t1",
         repr(telemetry_retry),
     )
+
+    # Classified current receipts are bound to the same canonical semantic
+    # digest in Python and PHP, including Unicode and nested empty objects.
+    # A real unchanged poll may refresh connector readiness, but it must not
+    # create another receipt, document version, or event.
+    current_payload = json.loads(json.dumps(first_payload, ensure_ascii=False))
+    current_payload["expected_release_state"] = "closed"
+    current_payload["envelope"]["records"][0]["title"] = (
+        "CI canonical current\u2028line\u2029separator"
+    )
+    current_payload["envelope"]["records"][0]["metadata"][
+        "canonical_fixture"
+    ]["empty_object"] = []
+    current_payload["envelope"]["records"][0]["metadata"][
+        "line_separators"
+    ] = "\u2028\u2029"
+    refresh_record_content_hash(current_payload["envelope"]["records"][0])
+    current_cursor = sec_current_cursor(now)
+    current_payload["envelope"]["next_cursor"] = current_cursor
+    current_payload["envelope"]["chunk"]["batch_id"] = (
+        "global-batch:"
+        + hashlib.sha256(b"php73-v2-current-heartbeat").hexdigest()
+    )
+    current_key = bind_classified_ingest_key(
+        current_payload,
+        namespace="global-ingest-v2-current",
+    )
+    unbound_current = json.loads(
+        json.dumps(current_payload, ensure_ascii=False)
+    )
+    unbound_current.pop("expected_release_state")
+    unbound_current_rejected, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=unbound_current,
+        expected_status=400,
+    )
+    require(
+        unbound_current_rejected.get("error")
+        == "global_ingest_validation_failed"
+        and "classified receipt requires release binding"
+        in str(unbound_current_rejected.get("detail")),
+        repr(unbound_current_rejected),
+    )
+    current_ingest, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=current_payload,
+    )
+    require(
+        current_ingest.get("data", {}).get("idempotent") is False,
+        repr(current_ingest),
+    )
+    tampered_current = json.loads(
+        json.dumps(current_payload, ensure_ascii=False)
+    )
+    tampered_current["idempotency_key"] = (
+        current_key[:-1] + ("0" if current_key[-1] != "0" else "1")
+    )
+    tampered_current_rejected, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=tampered_current,
+        expected_status=400,
+    )
+    require(
+        tampered_current_rejected.get("error")
+        == "global_ingest_validation_failed"
+        and "classified semantic digest mismatch"
+        in str(tampered_current_rejected.get("detail")),
+        repr(tampered_current_rejected),
+    )
+    incomplete_current = json.loads(
+        json.dumps(current_payload, ensure_ascii=False)
+    )
+    incomplete_current["envelope"]["exhausted"] = False
+    bind_classified_ingest_key(
+        incomplete_current,
+        namespace="global-ingest-v2-current",
+    )
+    incomplete_current_rejected, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=incomplete_current,
+        expected_status=400,
+    )
+    require(
+        incomplete_current_rejected.get("error")
+        == "global_ingest_validation_failed"
+        and "current-poll contract mismatch"
+        in str(incomplete_current_rejected.get("detail")),
+        repr(incomplete_current_rejected),
+    )
+    malformed_cursor_current = json.loads(
+        json.dumps(current_payload, ensure_ascii=False)
+    )
+    malformed_cursor_current["envelope"]["next_cursor"] = (
+        "sec-current-v1:not-canonical"
+    )
+    bind_classified_ingest_key(
+        malformed_cursor_current,
+        namespace="global-ingest-v2-current",
+    )
+    malformed_cursor_rejected, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=malformed_cursor_current,
+        expected_status=400,
+    )
+    require(
+        malformed_cursor_rejected.get("error")
+        == "global_ingest_validation_failed"
+        and "current-poll contract mismatch"
+        in str(malformed_cursor_rejected.get("detail")),
+        repr(malformed_cursor_rejected),
+    )
+    stale_heartbeat = "2000-01-01 00:00:00"
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_connectors SET "
+        f"last_checked_at='{stale_heartbeat}',"
+        f"last_success_at='{stale_heartbeat}',"
+        f"last_observed_at='{stale_heartbeat}',"
+        f"updated_at='{stale_heartbeat}' "
+        f"WHERE connector_id='{SEC_CONNECTOR_ID}';",
+    )
+    immutable_before_heartbeat = mysql_execute(
+        mysql_container_id,
+        "SELECT CONCAT("
+        "(SELECT COUNT(*) FROM ci_global_ingest_receipts),'|',"
+        "(SELECT COUNT(*) FROM ci_documents),'|',"
+        "(SELECT COUNT(*) FROM ci_governance_events),'|',"
+        "(SELECT cursor_json FROM ci_source_connectors "
+        f"WHERE connector_id='{SEC_CONNECTOR_ID}'));",
+    )
+    current_retry = json.loads(json.dumps(current_payload, ensure_ascii=False))
+    current_retry["envelope"]["retrieved_at"] = utc_text(
+        now + timedelta(minutes=5)
+    )
+    current_retry["envelope"]["records"][0]["first_observed_at"] = utc_text(
+        now + timedelta(minutes=5)
+    )
+    current_retry["envelope"]["request_count"] = 3
+    current_retry["envelope"]["chunk"]["batch_request_count"] = 3
+    require(
+        bind_classified_ingest_key(
+            current_retry,
+            namespace="global-ingest-v2-current",
+        )
+        == current_key,
+        "current receipt identity must ignore attempt-only telemetry",
+    )
+    current_heartbeat, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=current_retry,
+    )
+    immutable_after_heartbeat = mysql_execute(
+        mysql_container_id,
+        "SELECT CONCAT("
+        "(SELECT COUNT(*) FROM ci_global_ingest_receipts),'|',"
+        "(SELECT COUNT(*) FROM ci_documents),'|',"
+        "(SELECT COUNT(*) FROM ci_governance_events),'|',"
+        "(SELECT cursor_json FROM ci_source_connectors "
+        f"WHERE connector_id='{SEC_CONNECTOR_ID}'));",
+    )
+    require(
+        current_heartbeat.get("data", {}).get("idempotent") is True
+        and immutable_after_heartbeat == immutable_before_heartbeat
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT(last_checked_at<>'2000-01-01 00:00:00','|',"
+            "last_success_at<>'2000-01-01 00:00:00','|',"
+            f"JSON_UNQUOTE(JSON_EXTRACT(cursor_json,'$.source_cursor'))="
+            f"'{current_cursor}','|',"
+            "(SELECT COUNT(*) FROM ci_global_ingest_receipts "
+            f"WHERE idempotency_key='{current_key}')) "
+            "FROM ci_source_connectors "
+            f"WHERE connector_id='{SEC_CONNECTOR_ID}';",
+        )
+        == "1|1|1|1",
+        repr(current_heartbeat),
+    )
+
+    # A completed-day evidence marker needs one actual daily-index request.
+    # Exact replay remains read-only and cannot refresh the intraday heartbeat.
+    zero_request_day = empty_chunk_payload(
+        rights_revision=rights_revision,
+        idempotency_key="placeholder-zero-day",
+        retrieved_at=observed_at,
+        batch_id=(
+            "global-batch:"
+            + hashlib.sha256(b"php73-v2-zero-request-day").hexdigest()
+        ),
+        index=1,
+        count=1,
+    )
+    zero_request_day["expected_release_state"] = "closed"
+    bind_classified_ingest_key(
+        zero_request_day,
+        namespace="global-ingest-v2-day",
+    )
+    zero_day_rejected, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=zero_request_day,
+        expected_status=400,
+    )
+    require(
+        zero_day_rejected.get("error") == "global_ingest_validation_failed"
+        and "completed-day evidence contract mismatch"
+        in str(zero_day_rejected.get("detail")),
+        repr(zero_day_rejected),
+    )
+    wrong_provenance_day = json.loads(
+        json.dumps(current_payload, ensure_ascii=False)
+    )
+    wrong_provenance_day["envelope"]["next_cursor"] = None
+    wrong_provenance_day["envelope"]["exhausted"] = True
+    wrong_provenance_day["envelope"]["chunk"]["batch_id"] = (
+        "global-batch:"
+        + hashlib.sha256(b"php73-v2-wrong-day-provenance").hexdigest()
+    )
+    bind_classified_ingest_key(
+        wrong_provenance_day,
+        namespace="global-ingest-v2-day",
+    )
+    wrong_provenance_rejected, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=wrong_provenance_day,
+        expected_status=400,
+    )
+    require(
+        wrong_provenance_rejected.get("error")
+        == "global_ingest_validation_failed"
+        and "completed-day source provenance mismatch"
+        in str(wrong_provenance_rejected.get("detail")),
+        repr(wrong_provenance_rejected),
+    )
+    completed_day = json.loads(json.dumps(zero_request_day))
+    completed_day["envelope"]["request_count"] = 1
+    completed_day["envelope"]["chunk"]["batch_request_count"] = 1
+    completed_day["envelope"]["chunk"]["batch_id"] = (
+        "global-batch:"
+        + hashlib.sha256(b"php73-v2-empty-weekend-day").hexdigest()
+    )
+    completed_day["envelope"]["chunk"]["window_start"] = "2026-07-18"
+    completed_day["envelope"]["chunk"]["window_end_exclusive"] = "2026-07-19"
+    completed_day_key = bind_classified_ingest_key(
+        completed_day,
+        namespace="global-ingest-v2-day",
+    )
+    completed_day_ingest, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=completed_day,
+    )
+    require(
+        completed_day_ingest.get("data", {}).get("idempotent") is False,
+        repr(completed_day_ingest),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_connectors SET "
+        f"last_checked_at='{stale_heartbeat}',"
+        f"last_success_at='{stale_heartbeat}',"
+        f"last_observed_at='{stale_heartbeat}',"
+        f"updated_at='{stale_heartbeat}' "
+        f"WHERE connector_id='{SEC_CONNECTOR_ID}';",
+    )
+    state_before_completed_replay = mysql_execute(
+        mysql_container_id,
+        "SELECT CONCAT(cursor_json,'|',last_checked_at,'|',last_success_at,'|',"
+        "last_observed_at,'|',"
+        "(SELECT COUNT(*) FROM ci_global_ingest_receipts), '|',"
+        "(SELECT COUNT(*) FROM ci_documents), '|',"
+        "(SELECT COUNT(*) FROM ci_governance_events)) "
+        "FROM ci_source_connectors "
+        f"WHERE connector_id='{SEC_CONNECTOR_ID}';",
+    )
+    completed_day_replay = json.loads(json.dumps(completed_day))
+    completed_day_replay["ingest_mode"] = "replay"
+    completed_day_replay["envelope"]["retrieved_at"] = utc_text(
+        now + timedelta(minutes=10)
+    )
+    require(
+        bind_classified_ingest_key(
+            completed_day_replay,
+            namespace="global-ingest-v2-day",
+        )
+        == completed_day_key,
+        "completed-day replay identity must ignore retrieval time",
+    )
+    completed_replay_result, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=completed_day_replay,
+    )
+    require(
+        completed_replay_result.get("data", {}).get("idempotent") is True
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT(cursor_json,'|',last_checked_at,'|',last_success_at,'|',"
+            "last_observed_at,'|',"
+            "(SELECT COUNT(*) FROM ci_global_ingest_receipts), '|',"
+            "(SELECT COUNT(*) FROM ci_documents), '|',"
+            "(SELECT COUNT(*) FROM ci_governance_events)) "
+            "FROM ci_source_connectors "
+            f"WHERE connector_id='{SEC_CONNECTOR_ID}';",
+        )
+        == state_before_completed_replay,
+        repr(completed_replay_result),
+    )
+
     conflicting_payload = json.loads(json.dumps(first_payload))
     conflicting_payload["envelope"]["raw_count"] = 2
     conflicting_payload["envelope"]["chunk"]["batch_raw_count"] = 2
@@ -2830,6 +3233,91 @@ def run(base_url: str, mysql_container_id: str) -> None:
         and v1_preview.get("release_state") == "preview"
         and v1_preview.get("state_version") == v1_preview_version,
         repr(v1_preview),
+    )
+    preview_current = json.loads(
+        json.dumps(current_payload, ensure_ascii=False)
+    )
+    preview_current["expected_release_state"] = "preview"
+    require(
+        bind_classified_ingest_key(
+            preview_current,
+            namespace="global-ingest-v2-current",
+        )
+        == current_key,
+        "release boundary must not change current content identity",
+    )
+    missing_preview_write_token, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=preview_current,
+        expected_status=401,
+    )
+    require(
+        missing_preview_write_token.get("error")
+        == "ingest_preview_token_required",
+        repr(missing_preview_write_token),
+    )
+    invalid_preview_write_token, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        preview_token="not-the-preview-token",
+        payload=preview_current,
+        expected_status=403,
+    )
+    require(
+        invalid_preview_write_token.get("error")
+        == "invalid_ingest_preview_token",
+        repr(invalid_preview_write_token),
+    )
+    stale_boundary_current = json.loads(
+        json.dumps(preview_current, ensure_ascii=False)
+    )
+    stale_boundary_current["expected_release_state"] = "closed"
+    stale_boundary_rejected, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=stale_boundary_current,
+        expected_status=409,
+    )
+    require(
+        stale_boundary_rejected.get("error")
+        == "global_ingest_release_state_mismatch",
+        repr(stale_boundary_rejected),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_connectors SET "
+        "last_checked_at='2000-01-01 00:00:00',"
+        "last_success_at='2000-01-01 00:00:00',"
+        "last_observed_at='2000-01-01 00:00:00',"
+        "updated_at='2000-01-01 00:00:00' "
+        f"WHERE connector_id='{SEC_CONNECTOR_ID}';",
+    )
+    preview_bound_current, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        preview_token=PREVIEW_TOKEN,
+        payload=preview_current,
+    )
+    require(
+        preview_bound_current.get("data", {}).get("idempotent") is True
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT(last_checked_at<>'2000-01-01 00:00:00','|',"
+            "last_success_at<>'2000-01-01 00:00:00') "
+            "FROM ci_source_connectors "
+            f"WHERE connector_id='{SEC_CONNECTOR_ID}';",
+        )
+        == "1|1",
+        repr(preview_bound_current),
     )
     server_uuid, database_name = mysql_execute(
         mysql_container_id,
@@ -3969,6 +4457,45 @@ def run(base_url: str, mysql_container_id: str) -> None:
         and all(window.get("filtered_out_count") == 2 for window in evidence_windows)
         and preserved_counts.get("source_title_preserved_count") == 1,
         repr(automated_preserved),
+    )
+    duplicate_day = now.date() - timedelta(days=1)
+    duplicate_end = now.date()
+    duplicate_digest = hashlib.sha256(
+        f"duplicate-day:{CODE_REVISION}".encode()
+    ).hexdigest()
+    duplicate_batch = "global-batch:" + duplicate_digest
+    duplicate_completed = now.strftime("%Y-%m-%d %H:%M:%S")
+    mysql_execute(
+        mysql_container_id,
+        "INSERT INTO ci_global_ingest_receipts "
+        "(ingest_id,connector_id,idempotency_key,payload_sha256,batch_id,"
+        "chunk_index,chunk_count,window_start,window_end_exclusive,request_count,"
+        "raw_count,acknowledged_count,batch_raw_count,batch_acknowledged_count,"
+        "batch_request_count,code_revision,started_at,completed_at,created_at) "
+        "VALUES ("
+        f"'alpha-duplicate:{duplicate_digest}','{SEC_CONNECTOR_ID}',"
+        f"'global-ingest-v2-day:us:{duplicate_digest}','{duplicate_digest}',"
+        f"'{duplicate_batch}',1,1,'{duplicate_day.isoformat()}',"
+        f"'{duplicate_end.isoformat()}',1,3,1,3,1,1,'{CODE_REVISION}',"
+        f"'{duplicate_completed}','{duplicate_completed}','{duplicate_completed}');",
+    )
+    duplicate_evidence, _ = request_json(
+        base_url,
+        (
+            "api.php/api/v2/ops/alpha-release-evidence?"
+            + urllib.parse.urlencode({"code_revision": CODE_REVISION})
+        ),
+        token=OPS_TOKEN,
+        expected_status=409,
+    )
+    require(
+        duplicate_evidence.get("error") == "automated_evidence_unavailable",
+        repr(duplicate_evidence),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "DELETE FROM ci_global_ingest_receipts "
+        f"WHERE batch_id='{duplicate_batch}';",
     )
 
     # Public reads and source status use the same exact connector/document to

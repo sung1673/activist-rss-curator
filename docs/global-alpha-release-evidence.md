@@ -231,6 +231,20 @@ ISO-8601이어야 하고, 마지막 완료 시각이 증빙 기준 시각의 24�
 창이 0개여야 한다. 예약 수집의 최초 2일 bootstrap은 운영 복구용 안전장치일 뿐
 Alpha 전환 증빙으로 인정하지 않는다.
 
+SEC window는 서버가 검증한
+`global-ingest-v2-day:us:<64자리 semantic SHA-256>` receipt만 집계한다.
+Atom/current cursor의 `global-ingest-v2-current` receipt와 기존 일반 namespace는
+운영 최신성 자료일 뿐 completed window로 계산하지 않는다. 동일 완료일의 서로
+다른 completed-day batch가 둘 이상이거나 day namespace가 잘못된 경우 exporter는
+합성·선택하지 않고 즉시 실패한다.
+
+current refresh가 이 30일 증빙을 오염시키지 않도록 classified SEC 요청은
+`expected_release_state`에 묶는다. preview 요청은 ops Bearer와 별도의
+`X-BSIDE-Preview-Token`을 요구하고, apply는 transaction에서 v1·v2 상태를
+잠근 뒤 SourceRight와 connector를 다시 검증한다. 같은 current content의
+멱등 apply는 이 경계를 모두 통과한 경우에만 connector heartbeat를 갱신한다.
+replay와 completed-day 재실행은 heartbeat를 갱신하지 않는다.
+
 운영 DB exporter는 `content-integrity.json`에 다음 원시 건수를 산출한다.
 
 - `title_provenance_labeled_count / public_event_count = 100%`

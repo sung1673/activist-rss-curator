@@ -133,6 +133,13 @@ class GlobalDocumentRecord:
 
     def public_payload(self, *, allow_body: bool) -> dict[str, Any]:
         payload = asdict(self)
+        # Keep the wire representation identical to the cross-runtime
+        # content-hash contract. PHP's associative JSON decoder cannot
+        # distinguish a nested empty object from an empty list.
+        payload["metadata"] = _cross_runtime_metadata(
+            self.metadata,
+            root=True,
+        )
         if not allow_body:
             payload["body_text"] = None
         return payload

@@ -3550,6 +3550,36 @@ function v2_alpha_global_connector_windows(
     }
     $batches = array();
     foreach ($rows as $row) {
+        $idempotencyKey = (string)$row['idempotency_key'];
+        $completedDayPrefix = 'global-ingest-v2-day:us:';
+        $currentPollPrefix = 'global-ingest-v2-current:us:';
+        if (preg_match(
+            '/^' . preg_quote($completedDayPrefix, '/') . '[a-f0-9]{64}$/D',
+            $idempotencyKey
+        ) !== 1) {
+            if (strpos($idempotencyKey, 'global-ingest-v2-day:') === 0) {
+                throw new RuntimeException(
+                    'alpha_evidence_completed_day_marker_invalid'
+                );
+            }
+            if (preg_match(
+                '/^' . preg_quote($currentPollPrefix, '/')
+                    . '[a-f0-9]{64}$/D',
+                $idempotencyKey
+            ) === 1) {
+                // Intraday/current receipts prove operational freshness, not
+                // immutable completed-day coverage.
+                continue;
+            }
+            if (strpos($idempotencyKey, 'global-ingest-v2-current:') === 0) {
+                throw new RuntimeException(
+                    'alpha_evidence_current_poll_marker_invalid'
+                );
+            }
+            // Intraday/hybrid cursor receipts are operational freshness
+            // observations, not completed-day evidence windows.
+            continue;
+        }
         $batchId = (string)$row['batch_id'];
         $key = (string)$row['window_start']
             . ':' . (string)$row['window_end_exclusive'];
@@ -3593,6 +3623,7 @@ function v2_alpha_global_connector_windows(
                 || (int)$row['batch_raw_count'] !== (int)$first['batch_raw_count']
                 || (int)$row['batch_acknowledged_count']
                     !== (int)$first['batch_acknowledged_count']
+                || (int)$row['batch_request_count'] !== 1
                 || (string)$row['code_revision'] !== $codeRevision
                 || preg_match(
                     '/^[a-f0-9]{64}$/D',
@@ -3626,6 +3657,7 @@ function v2_alpha_global_connector_windows(
         if (
             $raw !== (int)$first['batch_raw_count']
             || $acknowledged !== (int)$first['batch_acknowledged_count']
+            || (int)$final['batch_request_count'] !== 1
             || $requests !== (int)$final['batch_request_count']
             || $raw < $acknowledged
         ) {
