@@ -165,7 +165,11 @@ def test_sec_connector_preserves_source_title_and_is_idempotent() -> None:
     assert first.raw_count == 2
     assert len(first.records) == 1
     record = first.records[0]
+    assert record.external_id == (
+        "sec-accession-cik-v1:0000320193-26-000123:0000320193"
+    )
     assert record.title == "Current report"
+    assert record.metadata["accession_number"] == "0000320193-26-000123"
     assert record.metadata["title_provenance"] == "source"
     assert record.event_family == "board_and_compensation"
     assert record.original_language == "en"
@@ -327,6 +331,12 @@ def test_sec_daily_index_connector_is_market_wide_and_filters_forms() -> None:
     assert result.raw_count == 2
     assert [record.document_type for record in result.records] == ["SC 13D"]
     assert result.records[0].issuer_id == "issuer:us:cik:0000320193"
+    assert result.records[0].external_id == (
+        "sec-accession-cik-v1:0000320193-26-000999:0000320193"
+    )
+    assert result.records[0].metadata["accession_number"] == (
+        "0000320193-26-000999"
+    )
     assert result.records[0].metadata["title_provenance"] == "generated_metadata"
 
 
@@ -360,7 +370,9 @@ def test_sec_daily_accepts_current_official_header_and_compact_date() -> None:
     assert result.raw_count == 1
     assert len(result.records) == 1
     assert result.records[0].filed_at == "2026-06-29T04:00:00+00:00"
-    assert result.records[0].external_id == "0000320193-26-000999"
+    assert result.records[0].external_id == (
+        "sec-accession-cik-v1:0000320193-26-000999:0000320193"
+    )
 
 
 def test_sec_daily_preserves_late_added_historical_filing_date() -> None:
@@ -391,8 +403,99 @@ def test_sec_daily_preserves_late_added_historical_filing_date() -> None:
         )
 
     assert len(result.records) == 1
-    assert result.records[0].external_id == "0001289868-23-000011"
+    assert result.records[0].external_id == (
+        "sec-accession-cik-v1:0001289868-23-000011:0001289868"
+    )
     assert result.records[0].filed_at == "2023-09-22T04:00:00+00:00"
+
+
+def test_sec_daily_scopes_shared_accession_by_cik_and_preserves_provenance() -> None:
+    accession = "0001104659-26-086735"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/2026/QTR2/master.20260629.idx")
+        return httpx.Response(
+            200,
+            text=(
+                "Description: Daily Index of EDGAR Dissemination Feed\n"
+                "CIK|Company Name|Form Type|Date Filed|File Name\n"
+                "--------------------------------------------------------------------------------\n"
+                "1009268|D. E. SHAW & CO., L.P.|SC 13D/A|20260629|"
+                f"edgar/data/1104659/{accession}.txt\n"
+                "1728117|Gossamer Bio, Inc.|SC 13D/A|20260629|"
+                f"edgar/data/1104659/{accession}.txt\n"
+            ),
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+        ).fetch(
+            GlobalConnectorRequest(
+                window_start=date(2026, 6, 29),
+                window_end_exclusive=date(2026, 6, 30),
+            ),
+            eligibility=eligibility("official:sec-edgar", "sec-edgar"),
+            now=NOW,
+        )
+
+    assert result.raw_count == 2
+    assert len(result.records) == 2
+    by_cik = {record.metadata["cik"]: record for record in result.records}
+    assert set(by_cik) == {"0001009268", "0001728117"}
+    assert by_cik["0001009268"].external_id == (
+        f"sec-accession-cik-v1:{accession}:0001009268"
+    )
+    assert by_cik["0001728117"].external_id == (
+        f"sec-accession-cik-v1:{accession}:0001728117"
+    )
+    assert len({record.external_id for record in result.records}) == 2
+    assert len({record.record_id for record in result.records}) == 2
+    assert {
+        record.metadata["accession_number"] for record in result.records
+    } == {accession}
+
+
+def test_sec_daily_deduplicates_reprocessed_identity_across_index_days() -> None:
+    accession = "0001104659-26-086735"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith(
+            ("/master.20260629.idx", "/master.20260630.idx")
+        )
+        return httpx.Response(
+            200,
+            text=(
+                "Description: Daily Index of EDGAR Dissemination Feed\n"
+                "CIK|Company Name|Form Type|Date Filed|File Name\n"
+                "--------------------------------------------------------------------------------\n"
+                "1728117|Gossamer Bio, Inc.|SC 13D/A|20260629|"
+                f"edgar/data/1104659/{accession}.txt\n"
+            ),
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+        ).fetch(
+            GlobalConnectorRequest(
+                window_start=date(2026, 6, 29),
+                window_end_exclusive=date(2026, 7, 1),
+                max_pages=2,
+            ),
+            eligibility=eligibility("official:sec-edgar", "sec-edgar"),
+            now=NOW,
+        )
+
+    assert result.request_count == 2
+    assert result.raw_count == 2
+    assert len(result.records) == 1
+    assert result.records[0].external_id == (
+        f"sec-accession-cik-v1:{accession}:0001728117"
+    )
+    assert result.records[0].metadata["accession_number"] == accession
 
 
 def test_sec_daily_rejects_future_filing_date() -> None:
@@ -461,7 +564,9 @@ def test_sec_daily_treats_weekend_access_denied_as_missing_index() -> None:
     assert result.request_count == 2
     assert result.raw_count == 1
     assert len(result.records) == 1
-    assert result.records[0].external_id == "0000320193-26-000999"
+    assert result.records[0].external_id == (
+        "sec-accession-cik-v1:0000320193-26-000999:0000320193"
+    )
 
 
 def test_sec_daily_keeps_weekday_access_denied_fail_closed() -> None:
@@ -722,13 +827,16 @@ def test_sec_current_atom_is_cursor_driven_exact_and_preserves_source_fields() -
     assert len(first.records) == 1
     assert first.next_cursor and first.next_cursor.startswith("sec-current-v1:")
     record = first.records[0]
-    assert record.external_id == accession
+    assert record.external_id == (
+        f"sec-accession-cik-v1:{accession}:0001728117"
+    )
     assert record.document_type == "SC 13D/A"
     assert record.title == (
         "SCHEDULE 13D/A - Gossamer Bio, Inc. (0001728117) (Subject)"
     )
     assert record.original_language == "en"
     assert record.original_url.startswith("https://www.sec.gov/Archives/")
+    assert record.metadata["accession_number"] == accession
     assert record.metadata["discovery"] == "current-filings-atom"
     assert replay.next_cursor == first.next_cursor
     assert [item.content_hash for item in replay.records] == [
@@ -856,6 +964,134 @@ def test_sec_submissions_observes_shared_fair_access_interval_and_budget() -> No
     assert result.request_count == 2
     assert len(requests) == 2
     assert sleeps == [pytest.approx(0.12)]
+
+
+def test_sec_submissions_uses_same_cik_scoped_identity_as_market_wide_paths() -> None:
+    accession = "0001104659-26-086735"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/submissions/CIK0001728117.json"
+        return httpx.Response(
+            200,
+            json={
+                "cik": "1728117",
+                "name": "Gossamer Bio, Inc.",
+                "filings": {
+                    "recent": {
+                        "accessionNumber": [accession],
+                        "filingDate": ["2026-07-24"],
+                        "acceptanceDateTime": ["20260724090000"],
+                        "form": ["SC 13D/A"],
+                        "primaryDocument": ["ownership.htm"],
+                        "primaryDocDescription": [
+                            "Amended beneficial ownership report"
+                        ],
+                        "items": [""],
+                    }
+                },
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = SecSubmissionsConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+        ).fetch(
+            GlobalConnectorRequest(
+                window_start=date(2026, 7, 24),
+                window_end_exclusive=date(2026, 7, 25),
+                issuers=(
+                    IssuerReference(
+                        namespace="US:CIK",
+                        identifier_type="CIK",
+                        value="1728117",
+                    ),
+                ),
+            ),
+            eligibility=eligibility("official:sec-edgar", "sec-edgar"),
+            now=NOW,
+        )
+
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.external_id == (
+        f"sec-accession-cik-v1:{accession}:0001728117"
+    )
+    assert record.metadata["accession_number"] == accession
+    assert record.metadata["cik"] == "0001728117"
+
+
+def test_sec_hybrid_merges_current_and_daily_by_cik_scoped_identity() -> None:
+    accession = "0001104659-26-086735"
+    atom = _sec_current_atom(
+        _sec_current_entry(
+            accession=accession,
+            title=(
+                "SCHEDULE 13D/A - Gossamer Bio, Inc. "
+                "(0001728117) (Subject)"
+            ),
+            form="SCHEDULE 13D/A",
+            cik="0001728117",
+        ),
+        _sec_current_entry(
+            accession=accession,
+            title=(
+                "SCHEDULE 13D/A - D. E. SHAW &amp; CO, L.P. "
+                "(0001009268) (Filed by)"
+            ),
+            form="SCHEDULE 13D/A",
+            cik="0001009268",
+        ),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/master.20260723.idx"):
+            return httpx.Response(
+                200,
+                text=(
+                    "Description\n"
+                    "CIK|Company Name|Form Type|Date Filed|Filename\n"
+                    "------------------------------------------------------------\n"
+                    "1009268|D. E. SHAW & CO., L.P.|SC 13D/A|20260723|"
+                    f"edgar/data/1104659/{accession}.txt\n"
+                    "1728117|Gossamer Bio, Inc.|SC 13D/A|20260723|"
+                    f"edgar/data/1104659/{accession}.txt\n"
+                ),
+            )
+        assert request.url.path == "/cgi-bin/browse-edgar"
+        return httpx.Response(200, content=atom.encode("iso-8859-1"))
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = SecHybridConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+        ).fetch(
+            GlobalConnectorRequest(
+                window_start=date(2026, 7, 23),
+                window_end_exclusive=date(2026, 7, 24),
+                max_pages=3,
+            ),
+            eligibility=eligibility("official:sec-edgar", "sec-edgar"),
+            now=NOW,
+        )
+
+    assert result.raw_count == 4
+    assert len(result.records) == 2
+    by_cik = {record.metadata["cik"]: record for record in result.records}
+    assert by_cik["0001009268"].external_id == (
+        f"sec-accession-cik-v1:{accession}:0001009268"
+    )
+    assert by_cik["0001009268"].metadata["discovery"] == "daily-master-index"
+    assert by_cik["0001728117"].external_id == (
+        f"sec-accession-cik-v1:{accession}:0001728117"
+    )
+    assert (
+        by_cik["0001728117"].metadata["discovery"]
+        == "current-filings-atom"
+    )
+    assert {
+        record.metadata["accession_number"] for record in result.records
+    } == {accession}
 
 
 def test_sec_hybrid_fails_when_current_feed_fails() -> None:

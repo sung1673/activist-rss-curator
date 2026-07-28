@@ -19,6 +19,28 @@ expect_true(v1_mysql_datetime_utc('2026-07-16 06:30:00') === '2026-07-16 06:30:0
 expect_true(v1_mysql_datetime_utc('') === null, 'empty database timestamps must be rejected');
 expect_true(v1_editorial_datetime_utc('2026-07-16T15:30:00+09:00') === '2026-07-16 06:30:00', 'editorial timestamps must normalize explicit offsets');
 expect_true(v1_editorial_datetime_utc('2026-07-16 06:30:00') === null, 'editorial timestamps without an offset must fail closed');
+$previousTimezone = date_default_timezone_get();
+expect_true(date_default_timezone_set('Asia/Seoul'), 'PHP contract test timezone must be configurable');
+try {
+    expect_true(
+        v1_official_schedule_slot_matches('0,15,30,45 22-23 * * *', '2026-07-28 22:45:00'),
+        'UTC database slots in the 22-23 cron family must not inherit the PHP host timezone'
+    );
+    expect_true(
+        v1_official_schedule_slot_matches('0,15,30,45 0-14 * * *', '2026-07-28 14:45:00'),
+        'UTC database slots in the 00-14 cron family must not inherit the PHP host timezone'
+    );
+    expect_true(
+        v1_official_schedule_slot_matches('0,30 15-21 * * *', '2026-07-28 15:30:00'),
+        'UTC database slots in the 15-21 cron family must not inherit the PHP host timezone'
+    );
+    expect_true(
+        v1_official_schedule_slot_matches('0,30 15-21 * * *', '2026-07-29T00:00:00+09:00'),
+        'explicit offset slots must still normalize to their UTC cron family'
+    );
+} finally {
+    date_default_timezone_set($previousTimezone);
+}
 expect_true(v1_editorial_language('ko') === 'ko', 'lowercase source language must be accepted');
 expect_true(v1_editorial_language('ko-KR') === 'ko-KR', 'language-region source tags must be accepted');
 expect_true(v1_editorial_language('KO') === null, 'non-canonical source language must be rejected');

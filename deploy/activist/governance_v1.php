@@ -4148,7 +4148,10 @@ function v1_official_schedule_slot_matches($eventSchedule, $slot): bool {
     try {
         // GitHub Actions cron expressions are UTC.  The slot is later assigned
         // to a KST evidence date, but cron-family validation uses UTC fields.
-        $utcSlot = (new DateTimeImmutable($slot))->setTimezone(new DateTimeZone('UTC'));
+        // MySQL DATETIME values have no offset, so parse them explicitly as UTC
+        // instead of inheriting the PHP host's default timezone.
+        $utc = new DateTimeZone('UTC');
+        $utcSlot = (new DateTimeImmutable($slot,$utc))->setTimezone($utc);
     } catch (Throwable $e) { return false; }
     if ((int)$utcSlot->format('s') !== 0) { return false; }
     $hour = (int)$utcSlot->format('G'); $minute = (int)$utcSlot->format('i');
