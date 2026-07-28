@@ -1516,6 +1516,34 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert resolver["uses"] == "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3"
     assert "official-backfill.yml" in resolver["with"]["script"]
     assert "!item.expired" in resolver["with"]["script"]
+    restore = next(
+        step for step in steps if step["name"] == "Restore previous matching checkpoint"
+    )
+    assert restore["env"] == {
+        "EXPECTED_MODE": "${{ inputs.mode }}",
+        "EXPECTED_SOURCE": "${{ inputs.source }}",
+        "EXPECTED_FROM_DATE": "${{ inputs.from_date }}",
+        "EXPECTED_TO_DATE": "${{ inputs.to_date }}",
+    }
+    assert "mapfile -d '' -t restored_files" in restore["run"]
+    assert "mapfile -d '' -t metadata_files" in restore["run"]
+    assert (
+        "find \"$restore_root\" -type f "
+        "-name 'backfill_official_checkpoint.json' -print0"
+        in restore["run"]
+    )
+    assert (
+        "find \"$restore_root\" -type f -name 'checkpoint-metadata.json' -print0"
+        in restore["run"]
+    )
+    assert "if (( ${#restored_files[@]} > 1 ))" in restore["run"]
+    assert "if (( ${#restored_files[@]} == 0 ))" in restore["run"]
+    assert "if (( ${#metadata_files[@]} != 1 ))" in restore["run"]
+    assert "validate-backfill-checkpoint-metadata.py" in restore["run"]
+    assert '--mode "$EXPECTED_MODE"' in restore["run"]
+    assert '--source "$EXPECTED_SOURCE"' in restore["run"]
+    assert '--from-date "$EXPECTED_FROM_DATE"' in restore["run"]
+    assert '--to-date "$EXPECTED_TO_DATE"' in restore["run"]
 
 
 def test_global_backfill_is_bounded_serialized_and_preserves_daily_receipts() -> None:

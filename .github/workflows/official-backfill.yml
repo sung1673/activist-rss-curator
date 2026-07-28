@@ -399,16 +399,43 @@ jobs:
 
       - name: Restore previous matching checkpoint
         if: inputs.mode == 'apply' && steps.previous_checkpoint.outputs.found == 'true'
+        env:
+          EXPECTED_MODE: ${{ inputs.mode }}
+          EXPECTED_SOURCE: ${{ inputs.source }}
+          EXPECTED_FROM_DATE: ${{ inputs.from_date }}
+          EXPECTED_TO_DATE: ${{ inputs.to_date }}
         shell: bash
         run: |
           set -euo pipefail
-          restored="$(find "${{ runner.temp }}/previous-official-backfill" -type f -name 'backfill_official_checkpoint.json' -print -quit)"
-          if [[ -z "$restored" ]]; then
-            echo "::error::The matching checkpoint artifact does not contain a resumable checkpoint."
+          restore_root="${{ runner.temp }}/previous-official-backfill"
+          resume_inventory="${{ runner.temp }}/official-backfill-resume-files.list"
+          metadata_inventory="${{ runner.temp }}/official-backfill-metadata-files.list"
+          find "$restore_root" -type f -name 'backfill_official_checkpoint.json' -print0 \
+            > "$resume_inventory"
+          mapfile -d '' -t restored_files < "$resume_inventory"
+          if (( ${#restored_files[@]} > 1 )); then
+            echo "::error::The matching checkpoint artifact contains multiple resume files."
             exit 1
           fi
+          if (( ${#restored_files[@]} == 0 )); then
+            find "$restore_root" -type f -name 'checkpoint-metadata.json' -print0 \
+              > "$metadata_inventory"
+            mapfile -d '' -t metadata_files < "$metadata_inventory"
+            if (( ${#metadata_files[@]} != 1 )); then
+              echo "::error::The non-resumable checkpoint artifact must contain exactly one metadata file."
+              exit 1
+            fi
+            python .github/scripts/validate-backfill-checkpoint-metadata.py \
+              --metadata "${metadata_files[0]}" \
+              --mode "$EXPECTED_MODE" \
+              --source "$EXPECTED_SOURCE" \
+              --from-date "$EXPECTED_FROM_DATE" \
+              --to-date "$EXPECTED_TO_DATE"
+            echo "::notice::No prior resume file exists; starting the idempotent backfill from the requested boundary."
+            exit 0
+          fi
           mkdir -p "$(dirname "$CHECKPOINT_PATH")"
-          cp "$restored" "$CHECKPOINT_PATH"
+          cp "${restored_files[0]}" "$CHECKPOINT_PATH"
 
       - name: Run one-day official backfill windows
         env:
