@@ -98,6 +98,44 @@ function v2_write_timestamp(
     return $normalized;
 }
 
+/**
+ * Require a recent server-observed fetch for a mutating SEC current poll.
+ *
+ * Request counters are attempt telemetry and therefore remain outside content
+ * identity, but an apply request may only establish freshness when the batch
+ * proves that at least one source request occurred.  The server clock bounds
+ * retrieved_at so a signed payload cannot revive readiness with stale or
+ * future-dated evidence.
+ */
+function v2_write_assert_current_poll_apply_evidence(
+    array $envelope,
+    array $chunk,
+    bool $isFinalChunk,
+    string $retrievedAt,
+    string $serverCompletedAt
+): void {
+    if (
+        (int)$chunk['batch_request_count'] < 1
+        || ($isFinalChunk && (int)$envelope['request_count'] < 1)
+    ) {
+        v2_write_invalid(
+            'payload.idempotency_key: current-poll request proof required'
+        );
+    }
+    $retrievedEpoch = strtotime($retrievedAt . ' UTC');
+    $completedEpoch = strtotime($serverCompletedAt . ' UTC');
+    if (
+        $retrievedEpoch === false
+        || $completedEpoch === false
+        || $retrievedEpoch < $completedEpoch - 900
+        || $retrievedEpoch > $completedEpoch + 60
+    ) {
+        v2_write_invalid(
+            'envelope.retrieved_at: current-poll freshness window mismatch'
+        );
+    }
+}
+
 function v2_write_https_url(string $value, string $location): string {
     if (strlen($value) > 4096 || preg_match('/[\x00-\x1f\x7f]/', $value) === 1) {
         v2_write_invalid($location . ': invalid URL');
@@ -1683,6 +1721,15 @@ function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): a
                 'payload.idempotency_key: current-poll contract mismatch'
             );
         }
+        if ($ingestMode === 'apply') {
+            v2_write_assert_current_poll_apply_evidence(
+                $envelope,
+                $chunk,
+                $isFinalChunk,
+                (string)$retrievedAt,
+                gmdate('Y-m-d H:i:s')
+            );
+        }
         $receiptKind = 'current';
     }
     $isSelectedLinkOnlyApply = (
@@ -2557,6 +2604,19 @@ function v2_ingest_assert_stored_batch_complete(
             'global_ingest_batch_totals_mismatch'
         );
     }
+    $final = $rows[count($rows) - 1];
+    if (
+        (string)$normalized['receipt_kind'] === 'current'
+        && (string)$normalized['ingest_mode'] === 'apply'
+        && (
+            (int)$final['request_count'] < 1
+            || (int)$final['batch_request_count'] < 1
+        )
+    ) {
+        throw new RuntimeException(
+            'global_ingest_batch_receipt_corrupt'
+        );
+    }
 }
 
 function v2_ingest_locked_checkpoint(array $connector): ?array {
@@ -2619,6 +2679,56 @@ function v2_ingest_locked_checkpoint(array $connector): ?array {
         }
     }
     return $cursor;
+}
+
+/**
+ * A current-poll apply may mutate connector readiness only for a strictly
+ * newer observation. Equal or older exact retries remain successful reads of
+ * the durable receipt, without touching timestamps or the source cursor.
+ */
+function v2_ingest_current_poll_observation_is_newer(
+    array $lockedConnector,
+    array $normalized
+): bool {
+    if (
+        (string)$normalized['receipt_kind'] !== 'current'
+        || (string)$normalized['ingest_mode'] !== 'apply'
+        || (int)$normalized['chunk']['batch_request_count'] < 1
+    ) {
+        return false;
+    }
+    $lastObservedAt = isset($lockedConnector['last_observed_at'])
+        ? trim((string)$lockedConnector['last_observed_at']) : '';
+    if ($lastObservedAt === '') {
+        return true;
+    }
+    if (
+        preg_match(
+            '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/D',
+            $lastObservedAt
+        ) !== 1
+    ) {
+        return false;
+    }
+    return strcmp(
+        (string)$normalized['retrieved_at'],
+        $lastObservedAt
+    ) > 0;
+}
+
+function v2_ingest_current_poll_can_refresh(
+    array $lockedConnector,
+    array $normalized
+): bool {
+    return (
+        (int)$normalized['chunk']['index']
+            === (int)$normalized['chunk']['count']
+        && (int)$normalized['request_count'] >= 1
+        && v2_ingest_current_poll_observation_is_newer(
+            $lockedConnector,
+            $normalized
+        )
+    );
 }
 
 function v2_ingest_checkpoint_should_advance(
@@ -2865,6 +2975,10 @@ function v2_ingest_refresh_idempotent_current_poll(
         || (string)$normalized['ingest_mode'] !== 'apply'
         || (int)$normalized['chunk']['index']
             !== (int)$normalized['chunk']['count']
+        || !v2_ingest_current_poll_can_refresh(
+            $lockedConnector,
+            $normalized
+        )
     ) {
         return false;
     }
@@ -3085,7 +3199,7 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
         $connectorLock = $pdo->prepare(
             'SELECT connector_id,country_code,source_key,source_type,'
             . 'source_right_id,coverage_mode,connector_status,cursor_json,'
-            . 'code_revision FROM '
+            . 'code_revision,last_observed_at FROM '
             . table_name($config, 'source_connectors')
             . ' WHERE connector_id=? LIMIT 1 FOR UPDATE'
         );
@@ -3174,6 +3288,22 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
                     'idempotent' => true,
                 ),
             ));
+        }
+        // An equal timestamp is read-only only when it resolves to the exact
+        // durable receipt above. New current content must carry a strictly
+        // newer observation before any document, event, receipt, or cursor is
+        // written. Same-second content is retried with a newer source fetch.
+        if (
+            (string)$normalized['receipt_kind'] === 'current'
+            && (string)$normalized['ingest_mode'] === 'apply'
+            && !v2_ingest_current_poll_observation_is_newer(
+                $lockedConnector,
+                $normalized
+            )
+        ) {
+            throw new RuntimeException(
+                'global_ingest_current_observation_not_newer'
+            );
         }
         if ($normalized['ingest_mode'] === 'replay') {
             throw new RuntimeException('global_ingest_replay_missing');
@@ -3267,12 +3397,20 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
                 && (int)$chunk['batch_raw_count'] >= 1
                 && (int)$chunk['batch_acknowledged_count'] >= 1
             );
+            $shouldRefreshCurrent = (
+                (string)$normalized['receipt_kind'] !== 'current'
+                || v2_ingest_current_poll_can_refresh(
+                    $lockedConnector,
+                    $normalized
+                )
+            );
             // A zero-record link-only receipt is not proof that an approved
             // link was observed, so it cannot advance freshness or checkpoint
             // state. A non-empty verification refreshes freshness even when
             // its historical day boundary is already durable.
             $shouldUpdateConnector = v2_ingest_is_link_only_apply($normalized)
-                ? $shouldRefreshLinkOnly : $shouldAdvance;
+                ? $shouldRefreshLinkOnly
+                : ($shouldAdvance && $shouldRefreshCurrent);
             if ($shouldUpdateConnector) {
                 $cursorJson = (string)$lockedConnector['cursor_json'];
                 if ($shouldAdvance) {
@@ -3360,6 +3498,7 @@ function v2_ops_ingest(PDO $pdo, array $config): void {
             'global_source_right_changed',
             'global_ingest_acknowledgment_mismatch',
             'global_ingest_idempotency_conflict',
+            'global_ingest_current_observation_not_newer',
             'global_ingest_release_state_mismatch',
             'global_ingest_replay_missing',
             'global_ingest_chunk_out_of_order',

@@ -1764,6 +1764,65 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
     assert window_schema["additionalProperties"] is False
 
 
+def test_sec_current_apply_requires_fresh_request_proof_before_refresh():
+    normalize = V2_WRITE[
+        V2_WRITE.index("function v2_normalize_ingest_payload") :
+        V2_WRITE.index("function v2_ingest_upsert_issuer")
+    ]
+    assert "v2_write_assert_current_poll_apply_evidence(" in normalize
+    assert "(int)$chunk['batch_request_count'] < 1" in V2_WRITE
+    assert "$isFinalChunk && (int)$envelope['request_count'] < 1" in V2_WRITE
+    assert "$retrievedEpoch < $completedEpoch - 900" in V2_WRITE
+    assert "$retrievedEpoch > $completedEpoch + 60" in V2_WRITE
+    assert "current-poll request proof required" in V2_WRITE
+    assert "current-poll freshness window mismatch" in V2_WRITE
+
+    refresh = V2_WRITE[
+        V2_WRITE.index(
+            "function v2_ingest_current_poll_observation_is_newer"
+        ) :
+        V2_WRITE.index("function v2_ingest_checkpoint_should_advance")
+    ]
+    assert "(int)$normalized['chunk']['batch_request_count'] < 1" in refresh
+    assert "$normalized['retrieved_at']" in refresh
+    assert "$lastObservedAt" in refresh
+    assert ") > 0;" in refresh
+    assert "(int)$normalized['request_count'] >= 1" in refresh
+    assert "v2_ingest_current_poll_observation_is_newer(" in refresh
+
+    locked_connector = V2_WRITE[
+        V2_WRITE.index("$connectorLock = $pdo->prepare(") :
+        V2_WRITE.index("$lockedReceipt = $pdo->prepare(")
+    ]
+    assert "code_revision,last_observed_at" in locked_connector
+    assert "$shouldAdvance && $shouldRefreshCurrent" in V2_WRITE
+    ingest = V2_WRITE[V2_WRITE.index("function v2_ops_ingest") :]
+    new_current_guard = ingest.index(
+        "global_ingest_current_observation_not_newer"
+    )
+    record_write = ingest.index("foreach ($normalized['records'] as $record)")
+    assert new_current_guard < record_write
+
+    stored_batch = V2_WRITE[
+        V2_WRITE.index("function v2_ingest_assert_stored_batch_complete") :
+        V2_WRITE.index("function v2_ingest_locked_checkpoint")
+    ]
+    assert "(int)$final['request_count'] < 1" in stored_batch
+    assert "(int)$final['batch_request_count'] < 1" in stored_batch
+    assert "global_ingest_batch_receipt_corrupt" in stored_batch
+
+    envelope = SPEC["components"]["schemas"]["GlobalIngestPayload"][
+        "properties"
+    ]
+    assert "15 minutes" in envelope["retrieved_at"]["description"]
+    assert "strictly newer" in envelope["retrieved_at"]["description"]
+    assert "final chunk" in envelope["request_count"]["description"]
+    chunk = SPEC["components"]["schemas"]["GlobalIngestChunk"]["properties"]
+    assert "at least one source request" in chunk[
+        "batch_request_count"
+    ]["description"]
+
+
 def test_v2_public_documents_and_urls_always_exclude_telegram():
     exclusion = V2[
         V2.index("function v2_non_telegram_document_sql") : V2.index(

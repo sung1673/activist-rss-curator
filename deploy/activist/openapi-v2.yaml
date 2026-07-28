@@ -2638,6 +2638,11 @@ components:
         retrieved_at:
           type: string
           format: date-time
+          description: >-
+            Source retrieval time. A mutating SEC current-poll receipt must be
+            no more than 15 minutes behind or 1 minute ahead of server time;
+            only a value strictly newer than the connector's last observation
+            may refresh readiness.
         coverage_mode:
           type: string
           enum: [market-wide, official-register, selected-issuers, link-only]
@@ -2664,6 +2669,9 @@ components:
         request_count:
           type: integer
           minimum: 0
+          description: >-
+            Requests performed for this chunk. The final chunk of a mutating
+            SEC current poll must report at least one source request.
         raw_count:
           type: integer
           minimum: 0
@@ -2711,6 +2719,9 @@ components:
         batch_request_count:
           type: integer
           minimum: 0
+          description: >-
+            Requests performed for the complete batch. A mutating SEC current
+            poll must report at least one source request.
         batch_id:
           type: string
           pattern: '^global-batch:[a-f0-9]{64}$'

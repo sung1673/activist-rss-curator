@@ -272,6 +272,10 @@ def content_idempotency_key(
     """Return a stable key that excludes observation-time-only fields."""
 
     revision = _validate_code_revision(code_revision)
+    if completed_day_evidence and current_poll:
+        raise GlobalIngestConfigurationError(
+            "conflicting_ingest_receipt_class"
+        )
     stable_envelope = envelope.to_payload()
     stable_envelope.pop("retrieved_at", None)
     # Transport work can grow when a current-history endpoint gains newer
@@ -295,10 +299,6 @@ def content_idempotency_key(
         "envelope": stable_envelope,
     }
     digest = hashlib.sha256(_canonical_json(content).encode("utf-8")).hexdigest()
-    if completed_day_evidence and current_poll:
-        raise GlobalIngestConfigurationError(
-            "conflicting_ingest_receipt_class"
-        )
     if completed_day_evidence:
         namespace = "global-ingest-v2-day"
     elif current_poll:
@@ -1063,6 +1063,14 @@ def execute_global_ingest(
         or envelope.source_right_id != descriptor.source_right_id
     ):
         raise GlobalIngestError("connector_envelope_contract_mismatch")
+    if (
+        not completed_day_evidence
+        and descriptor.connector_id == "connector:us:sec-edgar"
+        and envelope.request_count < 1
+    ):
+        raise GlobalIngestConfigurationError(
+            "current_poll_requires_source_request"
+        )
 
     chunks = chunk_connector_envelope(
         envelope,

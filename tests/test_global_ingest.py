@@ -193,6 +193,21 @@ class _PagedConnector:
         return _envelope()
 
 
+class _ZeroRequestCurrentConnector:
+    descriptor = SecDailyIndexConnector.descriptor
+
+    def fetch(
+        self,
+        request: GlobalConnectorRequest,
+        *,
+        eligibility: OfficialSourceRightEligibility,
+        eligibility_provider=None,
+        now=None,
+    ) -> GlobalConnectorEnvelope:
+        del request, eligibility, eligibility_provider, now
+        return _envelope(request_count=0)
+
+
 class _Ingest:
     def __init__(self) -> None:
         self.key = ""
@@ -236,6 +251,25 @@ def test_execution_preflights_rechecks_each_page_and_checks_before_post() -> Non
     assert result.api_version == "v2"
     assert result.raw_count == result.acknowledged_count == 0
     assert ingest.key == result.idempotency_key
+
+
+def test_current_poll_requires_a_real_source_request_before_submission() -> None:
+    ingest = _Ingest()
+    with pytest.raises(
+        GlobalIngestConfigurationError,
+        match="current_poll_requires_source_request",
+    ):
+        execute_global_ingest(
+            country_code="US",
+            connector=_ZeroRequestCurrentConnector(),
+            issuers=(),
+            window_start=date(2026, 7, 22),
+            window_end_exclusive=date(2026, 7, 24),
+            code_revision=REVISION,
+            rights_client=_Rights(),
+            ingest_client=ingest,
+        )
+    assert ingest.key == ""
 
 
 class _ReplayIngest:
@@ -686,6 +720,35 @@ def test_large_official_window_is_submitted_in_stable_acknowledged_chunks() -> N
         key.startswith("global-ingest-v2-day:us:")
         for _item, key, _chunk in ingest.submissions
     )
+
+
+def test_large_current_poll_keeps_request_proof_on_the_final_chunk() -> None:
+    ingest = _ChunkIngest()
+    result = execute_global_ingest(
+        country_code="US",
+        connector=_LargeConnector(),
+        issuers=(),
+        window_start=date(2026, 7, 23),
+        window_end_exclusive=date(2026, 7, 24),
+        code_revision=REVISION,
+        rights_client=_Rights(),
+        ingest_client=ingest,
+    )
+
+    assert [item.request_count for item, _key, _chunk in ingest.submissions] == [
+        0,
+        0,
+        1,
+    ]
+    assert all(
+        chunk.batch_request_count == 1
+        for _item, _key, chunk in ingest.submissions
+    )
+    assert all(
+        key.startswith("global-ingest-v2-current:us:")
+        for _item, key, _chunk in ingest.submissions
+    )
+    assert result.chunk_count == 3
 
 
 def test_chunk_cursor_is_stable_across_collection_times() -> None:
