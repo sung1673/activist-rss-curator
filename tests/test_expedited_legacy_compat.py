@@ -40,6 +40,7 @@ def _archive(
     end: date = EXPEDITED_WINDOW_END,
     missing: set[date] | None = None,
     duplicate_content: bool = False,
+    embedded_telegram: bool = False,
 ) -> Path:
     missing = missing or set()
     with zipfile.ZipFile(path, "w") as opened:
@@ -49,7 +50,15 @@ def _archive(
         while current <= end:
             if current not in missing:
                 marker = "cloned" if duplicate_content else None
-                opened.writestr(f"feed/{current.isoformat()}.html", _html(current, marker=marker))
+                payload = _html(current, marker=marker)
+                if embedded_telegram and current == end:
+                    payload = (
+                        b"<!doctype html><html><body>"
+                        b"<script data-story-telegram-mentions>"
+                        b'[{"message_url":"https://t.me/private/42"}]'
+                        b"</script></body></html>"
+                    )
+                opened.writestr(f"feed/{current.isoformat()}.html", payload)
             current += timedelta(days=1)
     return path
 
@@ -109,6 +118,31 @@ def test_exact_89_day_human_waiver_is_accepted_before_deadline(tmp_path: Path) -
             observed_at=BEFORE_DEADLINE,
         )
         == manifest
+    )
+
+
+def test_dirty_89_day_archive_is_redacted_before_compatibility_is_sealed(
+    tmp_path: Path,
+) -> None:
+    archive = _archive(tmp_path / "legacy.zip", embedded_telegram=True)
+    identity = _identity(archive)
+    site = tmp_path / "site"
+
+    prepare_expedited_legacy_compatibility(
+        archive,
+        site,
+        identity=identity,
+        observed_at=BEFORE_DEADLINE,
+        waiver=_waiver(),
+    )
+
+    report = (site / "feed" / "2026-07-28.html").read_bytes()
+    assert b"data-story-telegram-mentions>[]</script>" in report
+    assert b"https://t.me/" not in report
+    assert verify_expedited_legacy_compatibility(
+        site,
+        expected_identity=identity,
+        observed_at=BEFORE_DEADLINE,
     )
 
 
@@ -250,6 +284,32 @@ def test_manifest_or_report_tampering_is_rejected(tmp_path: Path) -> None:
     manifest["dated_report_count"] = 88
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(LegacyFeedCompatibilityError, match="manifest does not match"):
+        verify_expedited_legacy_compatibility(
+            site,
+            expected_identity=identity,
+            observed_at=BEFORE_DEADLINE,
+        )
+
+
+def test_verify_rejects_reintroduced_telegram_exposure(tmp_path: Path) -> None:
+    archive = _archive(tmp_path / "legacy.zip")
+    identity = _identity(archive)
+    site = tmp_path / "site"
+    prepare_expedited_legacy_compatibility(
+        archive,
+        site,
+        identity=identity,
+        observed_at=BEFORE_DEADLINE,
+        waiver=_waiver(),
+    )
+    (site / "feed" / "2026-07-28.html").write_bytes(
+        b"<!doctype html><html><body>"
+        b"<script data-story-telegram-mentions>"
+        b'[{"message_url":"https://t.me/private/42"}]'
+        b"</script></body></html>"
+    )
+
+    with pytest.raises(LegacyFeedCompatibilityError, match="Telegram"):
         verify_expedited_legacy_compatibility(
             site,
             expected_identity=identity,

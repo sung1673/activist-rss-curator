@@ -179,6 +179,10 @@ def test_handoff_failure_closes_apis_and_restores_exact_legacy_bytes() -> None:
         "legacy_root_sha256",
         "legacy_feed_sha256",
         "python -m curator.expedited_legacy_recovery_bundle verify",
+        'test ! -e "$site/feed/telegram.html"',
+        'test ! -e "$site/feed/telegram-admin.html"',
+        "python -m curator.legacy_telegram_safety verify-site",
+        "--minimum-dated-reports 89",
     ):
         assert contract in binding
     upload = next(
@@ -202,5 +206,11 @@ def test_handoff_failure_closes_apis_and_restores_exact_legacy_bytes() -> None:
     assert "restored-feed.xml" in verify_run
     assert "EXPECTED_ROOT_SHA256" in verify_run
     assert "EXPECTED_FEED_SHA256" in verify_run
+    assert (
+        "for forbidden_path in feed/telegram.html feed/telegram-admin.html"
+        in verify_run
+    )
+    assert '[[ "$status" != "404" ]]' in verify_run
+    assert "--write-out '%{http_code}'" in verify_run
     assert "operator must restore owner=legacy" in verify_run
     assert "repo variables were restored" not in text

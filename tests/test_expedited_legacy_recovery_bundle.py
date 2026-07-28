@@ -44,6 +44,7 @@ def _archive(
     *,
     end: date = date(2026, 7, 28),
     unexpected: bool = False,
+    embedded_telegram: bool = False,
 ) -> Path:
     start = date(2026, 5, 1)
     with zipfile.ZipFile(path, "w") as opened:
@@ -55,9 +56,16 @@ def _archive(
             opened.writestr(f"feed/{name}.html", _html(name))
         current = start
         while current <= end:
+            body = current.isoformat()
+            if embedded_telegram and current == end:
+                body = (
+                    "<script data-story-telegram-mentions>"
+                    '[{"message_url":"https://t.me/private/42"}]'
+                    "</script>"
+                )
             opened.writestr(
                 f"feed/{current.isoformat()}.html",
-                _html(current.isoformat()),
+                _html(body),
             )
             current += timedelta(days=1)
         if unexpected:
@@ -162,7 +170,7 @@ def _preparation(
     return root
 
 
-def test_89_day_bundle_preserves_and_verifies_the_complete_legacy_site(
+def test_89_day_bundle_sanitizes_and_verifies_the_legacy_site(
     tmp_path: Path,
 ) -> None:
     archive = _archive(tmp_path / "legacy.zip")
@@ -180,10 +188,12 @@ def test_89_day_bundle_preserves_and_verifies_the_complete_legacy_site(
     assert manifest["mode"] == "89_day_human_waiver"
     assert manifest["window_days"] == 89
     assert (bundle / FULL_SITE_DIR / "index.html").is_file()
-    assert (bundle / FULL_SITE_DIR / "feed" / "telegram.html").is_file()
+    assert (bundle / FULL_SITE_DIR / "feed.xml").is_file()
+    assert not (bundle / FULL_SITE_DIR / "feed" / "telegram-admin.html").exists()
+    assert not (bundle / FULL_SITE_DIR / "feed" / "telegram.html").exists()
     assert len(list((bundle / FULL_SITE_DIR / "feed").glob("20*.html"))) == 89
     assert len(list((bundle / COMPATIBILITY_DIR / "feed").glob("*.html"))) == 89
-    assert manifest["full_site"]["file_count"] == 98
+    assert manifest["full_site"]["file_count"] == 96
     assert verify_expedited_legacy_recovery_bundle(
         bundle,
         expected_identity=identity,
@@ -209,6 +219,9 @@ def test_drill_site_uses_real_immutable_archive_without_creating_waiver_evidence
     assert receipt["window_days"] == 89
     assert receipt["source"] == identity.validated().as_dict()
     assert (drill_site / "index.html").is_file()
+    assert (drill_site / "feed.xml").is_file()
+    assert not (drill_site / "feed" / "telegram-admin.html").exists()
+    assert not (drill_site / "feed" / "telegram.html").exists()
     assert len(list((drill_site / "feed").glob("20*.html"))) == 89
     assert not (drill_site / COMPATIBILITY_DIR).exists()
     assert not (drill_site / MANIFEST_NAME).exists()
@@ -337,6 +350,63 @@ def test_bundle_rejects_89_days_after_cutoff_and_unexpected_files(
             identity=_identity(unexpected),
             observed_at=BEFORE_DEADLINE,
             waiver=_waiver(),
+        )
+
+
+def test_bundle_redacts_embedded_telegram_exposure(tmp_path: Path) -> None:
+    archive = _archive(tmp_path / "legacy.zip", embedded_telegram=True)
+    bundle = tmp_path / "bundle"
+    identity = _identity(archive)
+
+    prepare_expedited_legacy_recovery_bundle(
+        archive,
+        bundle,
+        identity=identity,
+        observed_at=BEFORE_DEADLINE,
+        waiver=_waiver(),
+    )
+
+    for root in (FULL_SITE_DIR, COMPATIBILITY_DIR):
+        report = (
+            bundle / root / "feed" / "2026-07-28.html"
+        ).read_bytes()
+        assert b"data-story-telegram-mentions>[]</script>" in report
+        assert b"https://t.me/" not in report
+    assert verify_expedited_legacy_recovery_bundle(
+        bundle,
+        expected_identity=identity,
+        observed_at=BEFORE_DEADLINE,
+    )
+
+
+def test_bundle_verify_rejects_reintroduced_telegram_exposure(
+    tmp_path: Path,
+) -> None:
+    archive = _archive(tmp_path / "legacy.zip")
+    identity = _identity(archive)
+    bundle = tmp_path / "bundle"
+    prepare_expedited_legacy_recovery_bundle(
+        archive,
+        bundle,
+        identity=identity,
+        observed_at=BEFORE_DEADLINE,
+        waiver=_waiver(),
+    )
+    report = bundle / FULL_SITE_DIR / "feed" / "2026-07-28.html"
+    report.write_text(
+        _html(
+            "<script data-story-telegram-mentions>"
+            '[{"message_url":"https://t.me/private/42"}]'
+            "</script>"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(LegacyRecoveryBundleError, match="Telegram"):
+        verify_expedited_legacy_recovery_bundle(
+            bundle,
+            expected_identity=identity,
+            observed_at=BEFORE_DEADLINE,
         )
 
 

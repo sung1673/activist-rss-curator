@@ -4,6 +4,10 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const resolve = require("../../.github/scripts/resolve-legacy-recovery.cjs");
 
+test("uses the v2 carry-forward namespace and cannot select legacy carry artifacts", () => {
+  assert.equal(resolve.CARRY_FORWARD_ARTIFACT, "legacy-recovery-carry-forward-v2");
+});
+
 const PIN = {
   LEGACY_RUN_ID: "12345",
   LEGACY_ARTIFACT_NAME: "legacy-pages-archive-seed",
@@ -70,7 +74,7 @@ test("prefers an unexpired carry-forward from a successful trusted default-branc
         assert.equal(args.run_id, 777);
         return [{
           id: 888,
-          name: "legacy-recovery-carry-forward",
+          name: "legacy-recovery-carry-forward-v2",
           expired: false,
           digest: `sha256:${"d".repeat(64)}`,
         }];
@@ -150,7 +154,7 @@ test("fails closed on an ambiguous carry-forward artifact", async () => {
       async paginate() {
         return [1, 2].map((id) => ({
           id,
-          name: "legacy-recovery-carry-forward",
+          name: "legacy-recovery-carry-forward-v2",
           expired: false,
           digest: `sha256:${"d".repeat(64)}`,
         }));

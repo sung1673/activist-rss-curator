@@ -16,6 +16,11 @@ from .legacy_feed_compat import (
     prepare_legacy_feed_compatibility,
     verify_legacy_feed_compatibility,
 )
+from .legacy_telegram_safety import (
+    LegacyTelegramSafetyError,
+    redact_telegram_mentions,
+    validate_public_payload,
+)
 
 
 MANIFEST_NAME = "legacy-recovery-bundle.json"
@@ -33,6 +38,10 @@ REQUIRED_FEED_FILES = frozenset(
         "feed/index.html",
         "feed/latest.html",
         "feed/search.html",
+    }
+)
+DROPPED_SOURCE_FILES = frozenset(
+    {
         "feed/telegram-admin.html",
         "feed/telegram.html",
     }
@@ -120,6 +129,10 @@ def _validate_payload(path: str, payload: bytes) -> None:
         lowered_end = payload[-4096:].lower()
         if b"<html" not in lowered_start or b"</html>" not in lowered_end:
             raise LegacyRecoveryBundleError(f"legacy recovery HTML is incomplete: {path}")
+    try:
+        validate_public_payload(payload, path=path)
+    except LegacyTelegramSafetyError as exc:
+        raise LegacyRecoveryBundleError(str(exc)) from exc
 
 
 def _inventory(root: Path) -> list[dict[str, Any]]:
@@ -213,6 +226,8 @@ def _write_full_site(archive: Path, output: Path) -> None:
                 raise LegacyRecoveryBundleError(
                     "legacy recovery archive exceeds the safe size budget"
                 )
+            if relative in DROPPED_SOURCE_FILES:
+                continue
             if not _allowed_file(relative):
                 raise LegacyRecoveryBundleError(
                     f"legacy recovery archive contains an unexpected file: {relative}"
@@ -223,6 +238,10 @@ def _write_full_site(archive: Path, output: Path) -> None:
                 raise LegacyRecoveryBundleError(
                     f"legacy recovery archive member size is invalid: {relative}"
                 )
+            try:
+                payload = redact_telegram_mentions(payload, path=relative)
+            except LegacyTelegramSafetyError as exc:
+                raise LegacyRecoveryBundleError(str(exc)) from exc
             _validate_payload(relative, payload)
             destination = output.joinpath(*PurePosixPath(relative).parts)
             destination.parent.mkdir(parents=True, exist_ok=True)

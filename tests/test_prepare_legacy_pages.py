@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import subprocess
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 from types import ModuleType
@@ -19,6 +21,23 @@ def load_preparer() -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_preparer_cli_can_import_curator_from_the_repository_root() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / ".github" / "scripts" / "prepare-legacy-pages.py"),
+            "--help",
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "Prepare the allowlisted legacy GitHub Pages artifact" in completed.stdout
 
 
 def build_source(root: Path) -> Path:
@@ -42,6 +61,18 @@ def build_source(root: Path) -> Path:
         filename = f"{cursor.isoformat()}.html"
         (feed / filename).write_text(filename, encoding="utf-8")
         cursor += timedelta(days=1)
+    (feed / "2026-06-01.html").write_text(
+        "<!doctype html><html><body>"
+        '<script type="application/json" data-story-telegram-mentions>'
+        '[{"message_url":"https://t.me/private/42","text":"signal"}]'
+        "</script>"
+        "<script>"
+        "function telegramChannelUrl(handle) {"
+        "return handle ? `https://t.me/${handle}` : '';"
+        "}"
+        "</script></body></html>",
+        encoding="utf-8",
+    )
     for filename in ("app.js", "config.js", "index.html", "styles.css"):
         (governance / filename).write_text(f"preview {filename}", encoding="utf-8")
     (source / "unexpected.txt").write_text("must not ship", encoding="utf-8")
@@ -56,8 +87,17 @@ def test_preparer_copies_only_the_legacy_allowlist(tmp_path: Path) -> None:
     result = preparer.prepare_legacy_pages(source, destination)
 
     assert result["root_paths"] == ["404.html", "CNAME", "feed", "feed.xml", "index.html"]
-    assert result["file_count"] == 91
-    assert (destination / "feed" / "telegram-admin.html").exists()
+    assert result["file_count"] == 89
+    assert not (destination / "feed" / "telegram-admin.html").exists()
+    assert not (destination / "feed" / "telegram.html").exists()
+    assert (destination / "feed.xml").is_file()
+    assert len(list((destination / "feed").glob("20*.html"))) == 82
+    redacted = (destination / "feed" / "2026-06-01.html").read_text(
+        encoding="utf-8"
+    )
+    assert "data-story-telegram-mentions>[]</script>" in redacted
+    assert "https://t.me/" not in redacted
+    assert "return handle ? '' : '';" in redacted
     assert not (destination / "governance").exists()
     assert not (destination / "unexpected.txt").exists()
 
@@ -81,13 +121,26 @@ def test_preparer_can_mount_only_the_public_governance_preview_subpath(tmp_path:
         "governance",
         "index.html",
     ]
-    assert result["file_count"] == 95
+    assert result["file_count"] == 93
     assert sorted(path.name for path in (destination / "governance").iterdir()) == [
         "app.js",
         "config.js",
         "index.html",
         "styles.css",
     ]
+
+
+def test_preparer_accepts_sources_without_the_known_dropped_telegram_pages(
+    tmp_path: Path,
+) -> None:
+    preparer = load_preparer()
+    source = build_source(tmp_path)
+    (source / "feed" / "telegram-admin.html").unlink()
+    (source / "feed" / "telegram.html").unlink()
+
+    result = preparer.prepare_legacy_pages(source, tmp_path / "artifact")
+
+    assert result["file_count"] == 89
 
 
 def test_preparer_rejects_unexpected_governance_preview_assets(tmp_path: Path) -> None:
@@ -119,6 +172,21 @@ def test_preparer_fails_closed_when_required_output_is_missing(tmp_path: Path) -
     (source / "feed.xml").unlink()
 
     with pytest.raises(preparer.PreparationError, match="feed.xml"):
+        preparer.prepare_legacy_pages(source, tmp_path / "artifact")
+
+
+def test_preparer_rejects_a_telegram_url_outside_the_redactable_payload(
+    tmp_path: Path,
+) -> None:
+    preparer = load_preparer()
+    source = build_source(tmp_path)
+    (source / "feed" / "2026-06-01.html").write_text(
+        '<!doctype html><html><body><a href="https://t.me/private/42">signal</a>'
+        "</body></html>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(preparer.PreparationError, match="Telegram URL"):
         preparer.prepare_legacy_pages(source, tmp_path / "artifact")
 
 

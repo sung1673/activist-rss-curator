@@ -931,7 +931,7 @@ def test_daily_legacy_recovery_is_digest_pinned_and_rolled_only_from_trusted_run
         for step in steps
         if step["name"] == "Refresh verified legacy recovery bundle retention"
     )
-    assert carry_upload["with"]["name"] == "legacy-recovery-carry-forward"
+    assert carry_upload["with"]["name"] == "legacy-recovery-carry-forward-v2"
     assert carry_upload["with"]["retention-days"] == "90"
 
 
