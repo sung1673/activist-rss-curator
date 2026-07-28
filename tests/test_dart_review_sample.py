@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import traceback
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
@@ -178,6 +179,80 @@ def test_client_pages_complete_corpus_and_verifies_digest() -> None:
     assert snapshot.backend_binding_id == BACKEND_BINDING_ID
     assert snapshot.corpus_sha256 == corpus_sha256(items)
     assert len(snapshot.items) == 137
+
+
+def test_client_retries_transient_read_timeout_on_a_fresh_get() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        assert request.headers["Connection"] == "close"
+        if calls == 1:
+            raise httpx.ReadTimeout(
+                f"transient {OPS_TOKEN}",
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            json=response_payload(
+                all_items=[],
+                page_items=[],
+                next_cursor=None,
+            ),
+        )
+
+    snapshot = mock_client(handler).fetch(
+        from_date=FROM_DATE,
+        to_date=TO_DATE,
+    )
+
+    assert calls == 2
+    assert snapshot.population_count == 0
+
+
+def test_client_bounds_transport_retries_and_does_not_retry_http_contracts() -> None:
+    transport_calls = 0
+
+    def transport_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal transport_calls
+        transport_calls += 1
+        raise httpx.RemoteProtocolError(
+            f"hostile {OPS_TOKEN}",
+            request=request,
+        )
+
+    with pytest.raises(DartReviewApiError, match="RemoteProtocolError") as error:
+        mock_client(transport_handler).fetch(
+            from_date=FROM_DATE,
+            to_date=TO_DATE,
+        )
+    assert transport_calls == 3
+    assert OPS_TOKEN not in str(error.value)
+    assert OPS_TOKEN not in "".join(
+        traceback.format_exception(error.type, error.value, error.tb)
+    )
+
+    response_calls = 0
+
+    def response_handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal response_calls
+        response_calls += 1
+        return httpx.Response(
+            503,
+            json=response_payload(
+                all_items=[],
+                page_items=[],
+                next_cursor=None,
+            ),
+        )
+
+    with pytest.raises(DartReviewApiError, match="HTTP 503"):
+        mock_client(response_handler).fetch(
+            from_date=FROM_DATE,
+            to_date=TO_DATE,
+        )
+    assert response_calls == 1
 
 
 def test_stratified_sample_is_input_order_invariant_and_balanced() -> None:
@@ -383,6 +458,7 @@ def backfill_files(
 ) -> tuple[Path, Path]:
     window_count = (to_date - from_date).days
     contract: dict[str, object] = {
+        "code_revision": code_revision,
         "range_start": from_date.isoformat(),
         "range_end_exclusive": to_date.isoformat(),
         "chunk_days": 1,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import traceback
 from pathlib import Path
 
 import httpx
@@ -283,6 +284,108 @@ def test_dart_apply_preflight_verifies_release_state_and_exact_contract() -> Non
     assert eligibility.contract_revision == DART_SOURCE_RIGHT_CONTRACT_REVISION
     assert eligibility.release_state == "closed"
     assert len(calls) == 5
+
+
+def test_dart_apply_preflight_retries_only_transport_failures() -> None:
+    calls: list[str] = []
+    failed_once = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal failed_once
+        calls.append(request.url.path)
+        assert request.headers["Connection"] == "close"
+        if request.url.path.endswith("/api/v2/health"):
+            if not failed_once:
+                failed_once = True
+                raise httpx.RemoteProtocolError(
+                    "transient connection reuse failure",
+                    request=request,
+                )
+            return _v2_response(
+                200,
+                {
+                    "ok": True,
+                    "service": "bside-global-market-terminal",
+                    "schema_version": 12,
+                    "code_revision": RELEASE_SHA,
+                },
+            )
+        if request.url.path.endswith("/api/v1/health"):
+            return _v1_response(
+                200,
+                {
+                    "ok": True,
+                    "service": "bside-governance-intelligence",
+                    "api_version": "v1",
+                },
+            )
+        if request.url.path.endswith("/api/v1/events"):
+            return _v1_response(
+                503,
+                {
+                    "ok": False,
+                    "error": "governance_release_closed",
+                    "api_version": "v1",
+                },
+            )
+        if request.url.path.endswith("/api/v2/ops/release-state"):
+            return _v2_response(
+                200,
+                {"ok": True, "data": {"release_state": "closed"}},
+            )
+        return _v2_response(
+            200,
+            {
+                "ok": True,
+                "source_right_id": "official:dart",
+                "source_type": "official_disclosure",
+                "source_key": "dart",
+                "use": "collect",
+                "eligible": True,
+                "rights_revision": REVISION,
+                "contract_revision": DART_SOURCE_RIGHT_CONTRACT_REVISION,
+                "redistribution_allowed": True,
+                "ai_allowed": False,
+                "connector_id": "connector:kr:dart",
+                "connector_ready": True,
+            },
+        )
+
+    eligibility = DartOfficialSourceRightClient(
+        base_url=PRODUCTION_BASE,
+        token="ops-token",
+        transport=httpx.MockTransport(handler),
+    ).preflight(RELEASE_SHA, "dart_canary")
+
+    assert eligibility.release_state == "closed"
+    assert calls.count("/activist/api.php/api/v2/health") == 2
+    assert len(calls) == 6
+
+
+def test_dart_apply_preflight_bounds_transport_retries_without_token_leak() -> None:
+    calls = 0
+    token = "super-secret-ops-token"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise httpx.RemoteProtocolError(
+            f"hostile {token}",
+            request=request,
+        )
+
+    client = DartOfficialSourceRightClient(
+        base_url=PRODUCTION_BASE,
+        token=token,
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(OfficialSourceRightError, match="RemoteProtocolError") as error:
+        client.preflight(RELEASE_SHA, "dart_canary")
+    assert calls == 3
+    assert token not in str(error.value)
+    assert token not in "".join(
+        traceback.format_exception(error.type, error.value, error.tb)
+    )
 
 
 @pytest.mark.parametrize(

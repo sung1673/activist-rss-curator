@@ -1113,7 +1113,7 @@ def test_request_budget_change_keeps_the_same_logical_job_checkpoint(tmp_path: P
     assert second_report["windows_attempted"] == 0
 
 
-def test_revision_change_does_not_change_job_fingerprint(
+def test_revision_change_creates_a_new_exact_release_checkpoint(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1144,15 +1144,16 @@ def test_revision_change_does_not_change_job_fingerprint(
         checkpoint_store=store,
     )
 
-    assert first_report["job_fingerprint"] == second_report["job_fingerprint"]
+    assert first_report["job_fingerprint"] != second_report["job_fingerprint"]
+    assert second_report["windows_attempted"] == 2
+    assert len(store.records) == 2
     checkpoint = load_checkpoint(checkpoint_path)
     assert checkpoint is not None
     completed = checkpoint["completed_windows"]
     assert isinstance(completed, dict)
-    assert [row["code_revision"] for row in completed.values()] == [
-        CODE_REVISION,
+    assert {row["code_revision"] for row in completed.values()} == {
         next_revision,
-    ]
+    }
 
 
 def test_company_master_sync_requires_dart_source(tmp_path: Path) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import traceback
 from datetime import datetime, timezone
 from typing import Any
 
@@ -355,6 +356,93 @@ def test_core_bootstrap_is_metadata_only_and_verifies_connectors() -> None:
         for call in api.calls[:first_post_index]
     ) == 2
     assert ADMIN_TOKEN not in json.dumps(result)
+
+
+def test_bootstrap_retries_get_transport_failure_but_not_post() -> None:
+    api = BootstrapApi()
+    get_attempts = 0
+
+    def transient_get(request: httpx.Request) -> httpx.Response:
+        nonlocal get_attempts
+        if request.method == "GET" and request.url.path.endswith("/api/v2/health"):
+            get_attempts += 1
+            if get_attempts == 1:
+                raise httpx.RemoteProtocolError(
+                    f"transient {ADMIN_TOKEN}",
+                    request=request,
+                )
+        return api(request)
+
+    result = bootstrap_source_rights(
+        base_url=API_BASE,
+        admin_token=ADMIN_TOKEN,
+        expected_release_sha=RELEASE_SHA,
+        code_revision=RELEASE_SHA,
+        reason="Human approved metadata-only official source registration.",
+        confirmation=CONFIRMATION,
+        transport=httpx.MockTransport(transient_get),
+        now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+    )
+    assert result["source_count"] == 2
+    # The bootstrap reads health both before and after mutation; one additional
+    # call is the bounded retry of the first transient failure.
+    assert get_attempts == 3
+
+    api = BootstrapApi()
+    post_attempts = 0
+
+    def failed_post(request: httpx.Request) -> httpx.Response:
+        nonlocal post_attempts
+        if request.method == "POST":
+            post_attempts += 1
+            raise httpx.RemoteProtocolError(
+                f"unsafe retry {ADMIN_TOKEN}",
+                request=request,
+            )
+        return api(request)
+
+    with pytest.raises(SourceRightBootstrapError, match="RemoteProtocolError") as error:
+        bootstrap_source_rights(
+            base_url=API_BASE,
+            admin_token=ADMIN_TOKEN,
+            expected_release_sha=RELEASE_SHA,
+            code_revision=RELEASE_SHA,
+            reason="Human approved metadata-only official source registration.",
+            confirmation=CONFIRMATION,
+            transport=httpx.MockTransport(failed_post),
+            now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+        )
+    assert post_attempts == 1
+    assert ADMIN_TOKEN not in str(error.value)
+
+
+def test_bootstrap_bounds_get_transport_retries_without_token_leak() -> None:
+    calls = 0
+
+    def failed_get(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise httpx.RemoteProtocolError(
+            f"hostile {ADMIN_TOKEN}",
+            request=request,
+        )
+
+    with pytest.raises(SourceRightBootstrapError, match="RemoteProtocolError") as error:
+        bootstrap_source_rights(
+            base_url=API_BASE,
+            admin_token=ADMIN_TOKEN,
+            expected_release_sha=RELEASE_SHA,
+            code_revision=RELEASE_SHA,
+            reason="Human approved metadata-only official source registration.",
+            confirmation=CONFIRMATION,
+            transport=httpx.MockTransport(failed_get),
+            now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+        )
+    assert calls == 3
+    assert ADMIN_TOKEN not in str(error.value)
+    assert ADMIN_TOKEN not in "".join(
+        traceback.format_exception(error.type, error.value, error.tb)
+    )
 
 
 def test_selected_link_rights_require_explicit_valid_allowlists() -> None:
