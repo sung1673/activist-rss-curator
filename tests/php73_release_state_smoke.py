@@ -1973,6 +1973,15 @@ def exercise_event_identity_datetime_storage(
         "CI incomplete correction receipt",
     )
     correction_document["is_correction"] = True
+    correction_document["remarks"] = ""
+    correction_document["has_later_correction"] = False
+    correction_document["is_withdrawn_by_remark"] = False
+    correction_document["content_hash"] = hashlib.sha256(
+        (
+            f"{correction_document['title']}\n"
+            f"{correction_document['original_url']}\n"
+        ).encode("utf-8")
+    ).hexdigest()
     cancellation_document = document(
         incomplete_cancellation_document_id,
         "dart",
@@ -1986,6 +1995,7 @@ def exercise_event_identity_datetime_storage(
         is_correction=True,
         is_cancelled=False,
     )
+    correction_event["has_later_correction"] = False
     cancellation_event = incomplete_followup(
         incomplete_cancellation_event_id,
         incomplete_cancellation_document_id,
@@ -2443,6 +2453,279 @@ def exercise_event_identity_datetime_storage(
         "relation mismatch checks did not restore the semantic fixture",
     )
 
+    later_correction_document = {
+        **correction_document,
+        "remarks": "정",
+        "has_later_correction": True,
+    }
+    later_correction_document["content_hash"] = hashlib.sha256(
+        (
+            f"{later_correction_document['title']}\n"
+            f"{later_correction_document['original_url']}\n"
+            f"{later_correction_document['remarks']}"
+        ).encode("utf-8")
+    ).hexdigest()
+    later_correction_event = {
+        **correction_event,
+        "has_later_correction": True,
+    }
+    rejected_published_marker = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(later_correction_document, later_correction_event),
+        expected_status=409,
+    )
+    require(
+        error_code(rejected_published_marker)
+        == "followup_event_identity_conflict",
+        "a reviewed/published isolated event accepted an automatic DART marker "
+        f"change: {rejected_published_marker!r}",
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_global_lifecycle_observations "
+            f"WHERE resolved_event_id='{incomplete_correction_event_id}' "
+            f"AND resolved_document_id='{incomplete_correction_document_id}'",
+        )
+        == "0",
+        "rejected reviewed/published marker change wrote lifecycle state",
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_governance_events "
+        "SET review_status='pending',publication_status='draft' "
+        f"WHERE event_id='{incomplete_correction_event_id}';",
+    )
+    marker_canonical_signature = followup_semantic_signature(
+        incomplete_correction_event_id,
+        incomplete_correction_document_id,
+    )
+    marker_lifecycle_state = mysql_execute(
+        mysql_container_id,
+        "SELECT CONCAT_WS('|',identity_status,review_status,publication_status,"
+        "COALESCE(comparison_key,'<NULL>')) FROM ci_governance_events "
+        f"WHERE event_id='{incomplete_correction_event_id}'",
+    )
+    require(
+        marker_lifecycle_state == "needs_review|pending|draft|<NULL>",
+        "DART lifecycle fixture must remain fail-closed before the marker change: "
+        f"{marker_lifecycle_state!r}",
+    )
+
+    accepted_marker = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(later_correction_document, later_correction_event),
+        expected_status=200,
+    )
+    require(accepted_marker.get("ok") is True, repr(accepted_marker))
+    require(
+        followup_semantic_signature(
+            incomplete_correction_event_id,
+            incomplete_correction_document_id,
+        )
+        == marker_canonical_signature,
+        "DART later-correction marker changed first-seen canonical state",
+    )
+    marker_observation = mysql_execute(
+        mysql_container_id,
+        "SELECT COUNT(*),MIN(connector_id),MIN(country_code),MIN(source_key),"
+        "MIN(change_type),MIN(resolution_status),MIN(resolved_document_id),"
+        "MIN(resolved_event_id),"
+        "MIN(JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.source_semantics'))),"
+        "MIN(HEX(JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.marker')))),"
+        "MIN(HEX(JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.previous_remarks')))),"
+        "MIN(HEX(JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.current_remarks')))) "
+        "FROM ci_global_lifecycle_observations "
+        f"WHERE resolved_event_id='{incomplete_correction_event_id}' "
+        f"AND resolved_document_id='{incomplete_correction_document_id}'",
+    )
+    require(
+        marker_observation
+        == (
+            "1\tconnector:kr:dart\tKR\tdart\tupdated\tresolved\t"
+            f"{incomplete_correction_document_id}\t"
+            f"{incomplete_correction_event_id}\thas_later_correction\t"
+            "ECA095\t\tECA095"
+        ),
+        f"DART marker lifecycle observation is incomplete: {marker_observation!r}",
+    )
+    marker_observation_signature = mysql_execute(
+        mysql_container_id,
+        "SELECT CONCAT_WS('|',observation_id,connector_id,country_code,source_key,"
+        "external_id,COALESCE(parent_external_id,'<NULL>'),change_type,observed_at,"
+        "SHA2(payload_json,256),resolution_status,resolved_document_id,"
+        "resolved_event_id,created_at,updated_at) "
+        "FROM ci_global_lifecycle_observations "
+        f"WHERE resolved_event_id='{incomplete_correction_event_id}' "
+        f"AND resolved_document_id='{incomplete_correction_document_id}'",
+    )
+    replay_marker = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(later_correction_document, later_correction_event),
+        expected_status=200,
+    )
+    require(replay_marker.get("ok") is True, repr(replay_marker))
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',observation_id,connector_id,country_code,"
+            "source_key,external_id,COALESCE(parent_external_id,'<NULL>'),"
+            "change_type,observed_at,SHA2(payload_json,256),resolution_status,"
+            "resolved_document_id,resolved_event_id,created_at,updated_at) "
+            "FROM ci_global_lifecycle_observations "
+            f"WHERE resolved_event_id='{incomplete_correction_event_id}' "
+            f"AND resolved_document_id='{incomplete_correction_document_id}'",
+        )
+        == marker_observation_signature
+        and followup_semantic_signature(
+            incomplete_correction_event_id,
+            incomplete_correction_document_id,
+        )
+        == marker_canonical_signature,
+        "exact DART marker replay changed canonical or lifecycle state",
+    )
+
+    marker_rejection_payloads: list[
+        tuple[str, dict[str, Any], dict[str, Any]]
+    ] = []
+    for label, remarks, marker_value, withdrawn_value in (
+        ("withdrawal_marker", "철", True, False),
+        ("duplicate_correction_marker", "정정", True, False),
+        ("non_boolean_marker", "정", 1, False),
+        ("withdrawal_flag", "정", True, True),
+    ):
+        invalid_marker_document = {
+            **correction_document,
+            "remarks": remarks,
+            "has_later_correction": marker_value,
+            "is_withdrawn_by_remark": withdrawn_value,
+        }
+        invalid_marker_document["content_hash"] = hashlib.sha256(
+            (
+                f"{invalid_marker_document['title']}\n"
+                f"{invalid_marker_document['original_url']}\n"
+                f"{invalid_marker_document['remarks']}"
+            ).encode("utf-8")
+        ).hexdigest()
+        marker_rejection_payloads.append(
+            (
+                label,
+                invalid_marker_document,
+                later_correction_event,
+            )
+        )
+    marker_rejection_payloads.extend(
+        (
+            (
+                "event_marker_missing",
+                later_correction_document,
+                correction_event,
+            ),
+            (
+                "document_marker_missing",
+                correction_document,
+                later_correction_event,
+            ),
+        )
+    )
+    for label, rejected_document, rejected_event in marker_rejection_payloads:
+        rejected_marker = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(rejected_document, rejected_event),
+            expected_status=409,
+        )
+        require(
+            error_code(rejected_marker) == "followup_event_identity_conflict",
+            f"{label} did not fail closed: {rejected_marker!r}",
+        )
+        require(
+            followup_semantic_signature(
+                incomplete_correction_event_id,
+                incomplete_correction_document_id,
+            )
+            == marker_canonical_signature
+            and mysql_execute(
+                mysql_container_id,
+                "SELECT CONCAT_WS('|',observation_id,connector_id,country_code,"
+                "source_key,external_id,COALESCE(parent_external_id,'<NULL>'),"
+                "change_type,observed_at,SHA2(payload_json,256),resolution_status,"
+                "resolved_document_id,resolved_event_id,created_at,updated_at) "
+                "FROM ci_global_lifecycle_observations "
+                f"WHERE resolved_event_id='{incomplete_correction_event_id}' "
+                f"AND resolved_document_id='{incomplete_correction_document_id}'",
+            )
+            == marker_observation_signature,
+            f"{label} changed canonical or append-only lifecycle state",
+        )
+
+    canonical_false_replay = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(correction_document, correction_event),
+        expected_status=200,
+    )
+    require(canonical_false_replay.get("ok") is True, repr(canonical_false_replay))
+    require(
+        followup_semantic_signature(
+            incomplete_correction_event_id,
+            incomplete_correction_document_id,
+        )
+        == marker_canonical_signature
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',observation_id,connector_id,country_code,"
+            "source_key,external_id,COALESCE(parent_external_id,'<NULL>'),"
+            "change_type,observed_at,SHA2(payload_json,256),resolution_status,"
+            "resolved_document_id,resolved_event_id,created_at,updated_at) "
+            "FROM ci_global_lifecycle_observations "
+            f"WHERE resolved_event_id='{incomplete_correction_event_id}' "
+            f"AND resolved_document_id='{incomplete_correction_document_id}'",
+        )
+        == marker_observation_signature,
+        "first-seen canonical replay erased or rewrote append-only lifecycle state",
+    )
+
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_governance_events "
+        "SET review_status='approved',publication_status='published' "
+        f"WHERE event_id='{incomplete_correction_event_id}';",
+    )
+    approved_marker_signature = followup_semantic_signature(
+        incomplete_correction_event_id,
+        incomplete_correction_document_id,
+    )
+    approved_marker_replay = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(later_correction_document, later_correction_event),
+        expected_status=200,
+    )
+    require(approved_marker_replay.get("ok") is True, repr(approved_marker_replay))
+    require(
+        followup_semantic_signature(
+            incomplete_correction_event_id,
+            incomplete_correction_document_id,
+        )
+        == approved_marker_signature
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',observation_id,connector_id,country_code,"
+            "source_key,external_id,COALESCE(parent_external_id,'<NULL>'),"
+            "change_type,observed_at,SHA2(payload_json,256),resolution_status,"
+            "resolved_document_id,resolved_event_id,created_at,updated_at) "
+            "FROM ci_global_lifecycle_observations "
+            f"WHERE resolved_event_id='{incomplete_correction_event_id}' "
+            f"AND resolved_document_id='{incomplete_correction_document_id}'",
+        )
+        == marker_observation_signature,
+        "an already-recorded exact marker replay changed later human approval",
+    )
+
     mysql_execute(
         mysql_container_id,
         "UPDATE ci_governance_events "
@@ -2483,6 +2766,8 @@ def exercise_event_identity_datetime_storage(
     )
     mysql_execute(
         mysql_container_id,
+        "DELETE FROM ci_global_lifecycle_observations "
+        f"WHERE resolved_event_id IN ({event_ids});"
         "DELETE FROM ci_timeline_entries "
         f"WHERE event_id IN ({event_ids});"
         "DELETE FROM ci_editorial_revisions "

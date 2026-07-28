@@ -76,6 +76,7 @@ _TERMINAL_REMOTE_ERROR_CODES = {
     "dart_source_right_ineligible_or_changed",
     "dart_source_right_managed_out_of_band",
     "dart_source_right_precondition_required",
+    "followup_event_identity_conflict",
     "global_dart_connector_not_writable",
     "global_release_state_guard_unavailable",
     "invalid_signature",
