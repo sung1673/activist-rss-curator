@@ -1921,12 +1921,572 @@ def exercise_event_identity_datetime_storage(
         == "2\t2",
         "DART and KIND must contribute two observations to one date-only event",
     )
-    event_ids = f"'{date_key}','{midnight_key}'"
+    incomplete_correction_event_id = "event:ci-incomplete-correction-self-replay"
+    incomplete_cancellation_event_id = "event:ci-incomplete-cancellation-self-replay"
+    incomplete_correction_document_id = "dart:20260724999005"
+    incomplete_cancellation_document_id = "dart:20260724999006"
+
+    def incomplete_followup(
+        event_id: str,
+        document_id: str,
+        *,
+        is_correction: bool,
+        is_cancelled: bool,
+    ) -> dict[str, Any]:
+        return {
+            "event_id": event_id,
+            "company_id": company_id,
+            "event_type": event_type,
+            "title": (
+                "CI incomplete correction self replay"
+                if is_correction
+                else "CI incomplete cancellation self replay"
+            ),
+            "metadata": {"title_provenance": "source"},
+            "original_language": "ko",
+            "summary": "",
+            "occurred_at": "2026-07-22T00:00:00Z",
+            "deadline_at": None,
+            "importance": "normal",
+            "verification_status": "official",
+            "collection_key": f"identity-incomplete-{event_id}",
+            "document_ids": [document_id],
+            "is_correction": is_correction,
+            "is_cancelled": is_cancelled,
+            "review_required": True,
+            "actor_id": None,
+            "action": action,
+            "target": target,
+            "identity_action": action,
+            "identity_target": target,
+            "identity_actor_id": None,
+            "identity_effective_at": "2026-07-22T00:00:00Z",
+            "identity_deadline_at": None,
+            "identity_status": "needs_review",
+            "comparison_key": None,
+        }
+
+    correction_document = document(
+        incomplete_correction_document_id,
+        "dart",
+        source_right_id,
+        "CI incomplete correction receipt",
+    )
+    correction_document["is_correction"] = True
+    cancellation_document = document(
+        incomplete_cancellation_document_id,
+        "dart",
+        source_right_id,
+        "CI incomplete cancellation receipt",
+    )
+    cancellation_document["is_cancelled"] = True
+    correction_event = incomplete_followup(
+        incomplete_correction_event_id,
+        incomplete_correction_document_id,
+        is_correction=True,
+        is_cancelled=False,
+    )
+    cancellation_event = incomplete_followup(
+        incomplete_cancellation_event_id,
+        incomplete_cancellation_document_id,
+        is_correction=False,
+        is_cancelled=True,
+    )
+
+    def followup_payload(
+        followup_document: dict[str, Any], followup_event: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {
+            "companies": [company],
+            "documents": [followup_document],
+            "events": [followup_event],
+            "source_rights": [],
+            "run": {},
+        }
+
+    def followup_row_signature(event_id: str, document_id: str) -> str:
+        return mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',"
+            f"(SELECT COUNT(*) FROM ci_governance_events WHERE event_id='{event_id}'),"
+            f"(SELECT COUNT(*) FROM ci_documents WHERE document_id='{document_id}'),"
+            f"(SELECT COUNT(*) FROM ci_event_documents WHERE event_id='{event_id}'),"
+            f"(SELECT COUNT(*) FROM ci_event_observations WHERE event_id='{event_id}'),"
+            f"(SELECT COUNT(*) FROM ci_timeline_entries WHERE event_id='{event_id}'),"
+            "(SELECT COUNT(*) FROM ci_editorial_revisions "
+            f"WHERE entity_type='event' AND entity_id='{event_id}'))",
+        )
+
+    def followup_semantic_signature(event_id: str, document_id: str) -> str:
+        return mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),payload_json,verification_status,"
+            "review_status,publication_status,event_type,title,original_language,"
+            "occurred_at,COALESCE(deadline_at,'<NULL>'),identity_status,"
+            "COALESCE(comparison_key,'<NULL>')) ,256) "
+            f"FROM ci_governance_events WHERE event_id='{event_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),payload_json,verification_status,"
+            "publication_status,source_class,COALESCE(source_right_id,'<NULL>'),"
+            "external_id,COALESCE(document_type,'<NULL>'),original_language,title,"
+            "COALESCE(body_text,'<NULL>'),original_url,content_hash,"
+            "COALESCE(collection_key,'<NULL>'),"
+            "COALESCE(correction_of_document_id,'<NULL>'),version_no,"
+            "COALESCE(retrieved_at,'<NULL>')) ,256) "
+            f"FROM ci_documents WHERE document_id='{document_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),document_id,relation_type,position_no),256) "
+            f"FROM ci_event_documents WHERE event_id='{event_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),document_id,source_class,source_key,"
+            "payload_hash,payload_json),256) "
+            f"FROM ci_event_observations WHERE event_id='{event_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),COALESCE(document_id,'<NULL>'),"
+            "occurred_at,entry_type,title,COALESCE(description,'<NULL>'),"
+            "original_language,review_status,publication_status),256) "
+            f"FROM ci_timeline_entries WHERE event_id='{event_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),field_name,"
+            "COALESCE(previous_value,'<NULL>'),COALESCE(revised_value,'<NULL>'),"
+            "reason,revision_status,requested_by,COALESCE(reviewed_by,'<NULL>')),256) "
+            "FROM ci_editorial_revisions "
+            f"WHERE entity_type='event' AND entity_id='{event_id}'))",
+        )
+
+    for followup_document, followup_event in (
+        (correction_document, correction_event),
+        (cancellation_document, cancellation_event),
+    ):
+        first_followup = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(followup_document, followup_event),
+            expected_status=200,
+        )
+        require(first_followup.get("ok") is True, repr(first_followup))
+        mysql_execute(
+            mysql_container_id,
+            "UPDATE ci_governance_events "
+            "SET review_status='approved',publication_status='published' "
+            f"WHERE event_id='{followup_event['event_id']}';"
+            "UPDATE ci_timeline_entries "
+            "SET review_status='approved',publication_status='published' "
+            f"WHERE event_id='{followup_event['event_id']}';"
+            "UPDATE ci_editorial_revisions "
+            "SET revision_status='rejected',reviewed_by='ci-sentinel-reviewer' "
+            f"WHERE entity_type='event' AND entity_id='{followup_event['event_id']}';",
+        )
+        before_replay = followup_row_signature(
+            str(followup_event["event_id"]),
+            str(followup_document["document_id"]),
+        )
+        require(
+            before_replay == "1|1|1|1|1|1",
+            f"incomplete follow-up fixture is incomplete: {before_replay!r}",
+        )
+        semantic_before_replay = followup_semantic_signature(
+            str(followup_event["event_id"]),
+            str(followup_document["document_id"]),
+        )
+        require(
+            len(semantic_before_replay.split("|")) == 6
+            and all(len(value) == 64 for value in semantic_before_replay.split("|")),
+            f"incomplete follow-up semantic signature is incomplete: {semantic_before_replay!r}",
+        )
+        require(
+            mysql_execute(
+                mysql_container_id,
+                "SELECT CONCAT_WS('|',identity_status,"
+                "JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.event_link_status'))) "
+                "FROM ci_governance_events "
+                f"WHERE event_id='{followup_event['event_id']}'",
+            )
+            == "needs_review|ambiguous_independent",
+            "incomplete follow-up must retain its fail-closed isolation marker",
+        )
+        replay_followup = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(followup_document, followup_event),
+            expected_status=200,
+        )
+        require(replay_followup.get("ok") is True, repr(replay_followup))
+        require(
+            followup_row_signature(
+                str(followup_event["event_id"]),
+                str(followup_document["document_id"]),
+            )
+            == before_replay,
+            "exact incomplete correction/cancellation replay increased row counts",
+        )
+        require(
+            followup_semantic_signature(
+                str(followup_event["event_id"]),
+                str(followup_document["document_id"]),
+            )
+            == semantic_before_replay,
+            "exact incomplete correction/cancellation replay changed semantic state",
+        )
+
+    immutable_mutations: tuple[tuple[str, Any], ...] = (
+        ("event_id", incomplete_correction_event_id.upper()),
+        ("event_type", "annual_meeting"),
+        ("title", "CI mutated incomplete correction"),
+        ("summary", "mutated summary"),
+        ("original_language", "en"),
+        ("occurred_at", "2026-07-23T00:00:00Z"),
+        ("deadline_at", "2026-09-01T00:00:00Z"),
+        ("importance", "high"),
+        ("verification_status", "signal"),
+        ("review_required", False),
+        ("collection_key", "identity-mutated-collection"),
+        ("metadata", {"title_provenance": "derived"}),
+        (
+            "actor",
+            {
+                "actor_id": "actor:mutated-incomplete-followup",
+                "actor_type": "institution",
+                "display_name": "Mutated Actor",
+                "company_id": None,
+                "review_status": "pending",
+                "record_status": "inactive",
+            },
+        ),
+        (
+            "event_actor",
+            {
+                "event_id": incomplete_correction_event_id,
+                "actor_id": "actor:mutated-incomplete-followup",
+                "actor_role": "filer",
+                "review_status": "pending",
+            },
+        ),
+        ("action", "withdraw"),
+        ("target", "mutated alias target"),
+        ("actor_id", "actor:mutated-alias"),
+        ("identity_action", "withdraw"),
+        ("identity_target", "audit committee seat"),
+        ("identity_actor_id", "actor:mutated-incomplete-followup"),
+        ("identity_effective_at", "2026-07-23T00:00:00Z"),
+        ("identity_deadline_at", "2026-09-02T00:00:00Z"),
+        ("identity_status", "complete"),
+        ("comparison_key", "eventcmp:v1:" + ("a" * 64)),
+        ("is_correction", False),
+        ("is_cancelled", True),
+        ("company_id", ""),
+    )
+    correction_signature = followup_row_signature(
+        incomplete_correction_event_id,
+        incomplete_correction_document_id,
+    )
+    correction_semantic_signature = followup_semantic_signature(
+        incomplete_correction_event_id,
+        incomplete_correction_document_id,
+    )
+    for field, changed_value in immutable_mutations:
+        mutated_event = dict(correction_event)
+        mutated_event[field] = changed_value
+        rejected_mutation = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(correction_document, mutated_event),
+            expected_status=409,
+        )
+        require(
+            error_code(rejected_mutation) == "followup_event_identity_conflict",
+            f"{field} mutation was not rejected fail-closed: {rejected_mutation!r}",
+        )
+        require(
+            followup_row_signature(
+                incomplete_correction_event_id,
+                incomplete_correction_document_id,
+            )
+            == correction_signature,
+            f"{field} mutation changed stored follow-up rows",
+        )
+        require(
+            followup_semantic_signature(
+                incomplete_correction_event_id,
+                incomplete_correction_document_id,
+            )
+            == correction_semantic_signature,
+            f"{field} mutation changed stored follow-up semantic state",
+        )
+
+    mismatched_document_event = dict(correction_event)
+    mismatched_document_event["document_ids"] = [original_document_id]
+    rejected_document_relation = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(correction_document, mismatched_document_event),
+        expected_status=409,
+    )
+    require(
+        error_code(rejected_document_relation) == "followup_event_identity_conflict",
+        repr(rejected_document_relation),
+    )
+    require(
+        followup_row_signature(
+            incomplete_correction_event_id,
+            incomplete_correction_document_id,
+        )
+        == correction_signature,
+        "different evidence relation changed stored follow-up rows",
+    )
+    require(
+        followup_semantic_signature(
+            incomplete_correction_event_id,
+            incomplete_correction_document_id,
+        )
+        == correction_semantic_signature,
+        "different evidence relation changed stored follow-up semantic state",
+    )
+
+    for document_field, changed_value in (
+        ("title", "CI mutated correction document title"),
+        ("original_url", "https://example.com/dart/mutated-followup-url"),
+        ("content_hash", "b" * 64),
+    ):
+        mutated_document = dict(correction_document)
+        mutated_document[document_field] = changed_value
+        rejected_document_mutation = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(mutated_document, correction_event),
+            expected_status=409,
+        )
+        require(
+            error_code(rejected_document_mutation)
+            == "followup_event_identity_conflict",
+            f"{document_field} document mutation was not rejected: "
+            f"{rejected_document_mutation!r}",
+        )
+        require(
+            followup_row_signature(
+                incomplete_correction_event_id,
+                incomplete_correction_document_id,
+            )
+            == correction_signature
+            and followup_semantic_signature(
+                incomplete_correction_event_id,
+                incomplete_correction_document_id,
+            )
+            == correction_semantic_signature,
+            f"{document_field} mutation changed stored document/event state",
+        )
+
+    document_only_variants = (
+        correction_document,
+        {
+            **correction_document,
+            "title": "CI protected document-only mutation",
+        },
+    )
+    for protected_document in document_only_variants:
+        rejected_document_only = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            {
+                "companies": [company],
+                "documents": [protected_document],
+                "events": [],
+                "source_rights": [],
+                "run": {},
+            },
+            expected_status=409,
+        )
+        require(
+            error_code(rejected_document_only)
+            == "followup_event_identity_conflict",
+            f"protected document-only write was not rejected: "
+            f"{rejected_document_only!r}",
+        )
+    require(
+        followup_semantic_signature(
+            incomplete_correction_event_id,
+            incomplete_correction_document_id,
+        )
+        == correction_semantic_signature,
+        "protected document-only write changed stored state",
+    )
+
+    case_variant_document = {
+        **correction_document,
+        "document_id": incomplete_correction_document_id.upper(),
+        "title": "CI case-variant protected document mutation",
+    }
+    rejected_case_variant_document = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(case_variant_document, correction_event),
+        expected_status=409,
+    )
+    require(
+        error_code(rejected_case_variant_document)
+        == "followup_event_identity_conflict",
+        repr(rejected_case_variant_document),
+    )
+    require(
+        followup_semantic_signature(
+            incomplete_correction_event_id,
+            incomplete_correction_document_id,
+        )
+        == correction_semantic_signature,
+        "case-variant protected document_id changed stored state",
+    )
+
+    reused_document_event = dict(correction_event)
+    reused_document_event["event_id"] = "event:ci-reused-incomplete-document"
+    reused_document_event["collection_key"] = "identity-reused-incomplete-document"
+    for protected_document in document_only_variants:
+        rejected_reused_document = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(protected_document, reused_document_event),
+            expected_status=409,
+        )
+        require(
+            error_code(rejected_reused_document)
+            == "followup_event_identity_conflict",
+            f"new event_id reused protected evidence: "
+            f"{rejected_reused_document!r}",
+        )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_governance_events "
+            "WHERE event_id='event:ci-reused-incomplete-document'",
+        )
+        == "0"
+        and followup_semantic_signature(
+            incomplete_correction_event_id,
+            incomplete_correction_document_id,
+        )
+        == correction_semantic_signature,
+        "protected evidence reuse created or changed an event",
+    )
+
+    duplicated_document_replay = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        {
+            "companies": [company],
+            "documents": [correction_document, dict(correction_document)],
+            "events": [correction_event],
+            "source_rights": [],
+            "run": {},
+        },
+        expected_status=409,
+    )
+    require(
+        error_code(duplicated_document_replay)
+        == "followup_event_identity_conflict",
+        repr(duplicated_document_replay),
+    )
+    require(
+        followup_row_signature(
+            incomplete_correction_event_id,
+            incomplete_correction_document_id,
+        )
+        == correction_signature
+        and followup_semantic_signature(
+            incomplete_correction_event_id,
+            incomplete_correction_document_id,
+        )
+        == correction_semantic_signature,
+        "duplicate submitted document_id changed stored follow-up state",
+    )
+
+    for relation_field, changed_value, restored_value in (
+        ("relation_type", "context", "evidence"),
+        ("position_no", 7, 0),
+    ):
+        mysql_execute(
+            mysql_container_id,
+            "UPDATE ci_event_documents "
+            f"SET {relation_field}="
+            + (
+                f"'{changed_value}'"
+                if isinstance(changed_value, str)
+                else str(changed_value)
+            )
+            + f" WHERE event_id='{incomplete_correction_event_id}' "
+            f"AND document_id='{incomplete_correction_document_id}';",
+        )
+        rejected_relation_replay = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(correction_document, correction_event),
+            expected_status=409,
+        )
+        require(
+            error_code(rejected_relation_replay)
+            == "followup_event_identity_conflict",
+            f"{relation_field} mismatch was not rejected: "
+            f"{rejected_relation_replay!r}",
+        )
+        mysql_execute(
+            mysql_container_id,
+            "UPDATE ci_event_documents "
+            f"SET {relation_field}="
+            + (
+                f"'{restored_value}'"
+                if isinstance(restored_value, str)
+                else str(restored_value)
+            )
+            + f" WHERE event_id='{incomplete_correction_event_id}' "
+            f"AND document_id='{incomplete_correction_document_id}';",
+        )
+    require(
+        followup_semantic_signature(
+            incomplete_correction_event_id,
+            incomplete_correction_document_id,
+        )
+        == correction_semantic_signature,
+        "relation mismatch checks did not restore the semantic fixture",
+    )
+
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_governance_events "
+        "SET payload_json=JSON_REMOVE(payload_json,'$.event_link_status') "
+        f"WHERE event_id='{incomplete_cancellation_event_id}';",
+    )
+    missing_marker_replay = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(cancellation_document, cancellation_event),
+        expected_status=409,
+    )
+    require(
+        error_code(missing_marker_replay) == "followup_event_identity_conflict",
+        repr(missing_marker_replay),
+    )
+    missing_marker_non_followup = dict(cancellation_event)
+    missing_marker_non_followup["is_correction"] = False
+    missing_marker_non_followup["is_cancelled"] = False
+    missing_marker_bypass = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(cancellation_document, missing_marker_non_followup),
+        expected_status=409,
+    )
+    require(
+        error_code(missing_marker_bypass) == "followup_event_identity_conflict",
+        repr(missing_marker_bypass),
+    )
+
+    event_ids = (
+        f"'{date_key}','{midnight_key}','{incomplete_correction_event_id}',"
+        f"'{incomplete_cancellation_event_id}'"
+    )
     document_ids = (
-        f"'{original_document_id}','{midnight_document_id}','{kind_document_id}'"
+        f"'{original_document_id}','{midnight_document_id}','{kind_document_id}',"
+        f"'{incomplete_correction_document_id}','{incomplete_cancellation_document_id}'"
     )
     mysql_execute(
         mysql_container_id,
+        "DELETE FROM ci_timeline_entries "
+        f"WHERE event_id IN ({event_ids});"
+        "DELETE FROM ci_editorial_revisions "
+        f"WHERE entity_type='event' AND entity_id IN ({event_ids});"
         "DELETE FROM ci_event_observations "
         f"WHERE event_id IN ({event_ids});"
         "DELETE FROM ci_event_documents "

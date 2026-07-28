@@ -19,6 +19,8 @@ EFFECTIVE_AT = "2026-07-27"
 DEADLINE_AT = "2026-08-31"
 ORIGINAL_DOCUMENT_ID = "dart:20260727888001"
 CORRECTION_DOCUMENT_ID = "dart:20260727888002"
+INCOMPLETE_CORRECTION_DOCUMENT_ID = "dart:20260727888003"
+INCOMPLETE_CORRECTION_EVENT_ID = "event:unbuffered-incomplete-correction"
 
 
 def require(condition: bool, message: str) -> None:
@@ -243,6 +245,100 @@ def run(base_url: str, container_id: str) -> None:
         "correction replay",
     )
 
+    incomplete_document = document(
+        INCOMPLETE_CORRECTION_DOCUMENT_ID,
+        "CI unbuffered incomplete correction",
+    )
+    incomplete_document["collection_key"] = "unbuffered-incomplete-correction"
+    incomplete_document["is_correction"] = True
+    incomplete_event = {
+        "event_id": INCOMPLETE_CORRECTION_EVENT_ID,
+        "company_id": COMPANY_ID,
+        "event_type": EVENT_TYPE,
+        "title": "CI unbuffered incomplete correction",
+        "metadata": {"title_provenance": "source"},
+        "original_language": "ko",
+        "summary": "",
+        "occurred_at": "2026-07-27T00:00:00Z",
+        "deadline_at": None,
+        "importance": "normal",
+        "verification_status": "official",
+        "collection_key": "unbuffered-incomplete-correction",
+        "document_ids": [INCOMPLETE_CORRECTION_DOCUMENT_ID],
+        "is_correction": True,
+        "is_cancelled": False,
+        "review_required": True,
+        "actor_id": None,
+        "action": ACTION,
+        "target": TARGET,
+        "identity_action": ACTION,
+        "identity_target": TARGET,
+        "identity_actor_id": None,
+        "identity_effective_at": "2026-07-27T00:00:00Z",
+        "identity_deadline_at": None,
+        "identity_status": "needs_review",
+        "comparison_key": None,
+    }
+    incomplete_payload = {
+        "companies": [company()],
+        "documents": [incomplete_document],
+        "events": [incomplete_event],
+        "source_rights": [],
+        "run": {},
+    }
+    incomplete_first = release.request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        incomplete_payload,
+        expected_status=200,
+    )
+    require(incomplete_first.get("ok") is True, repr(incomplete_first))
+    incomplete_before = release.mysql_execute(
+        container_id,
+        "SELECT CONCAT_WS('|',"
+        "(SELECT COUNT(*) FROM ci_governance_events "
+        f"WHERE event_id='{INCOMPLETE_CORRECTION_EVENT_ID}'),"
+        "(SELECT COUNT(*) FROM ci_documents "
+        f"WHERE document_id='{INCOMPLETE_CORRECTION_DOCUMENT_ID}'),"
+        "(SELECT COUNT(*) FROM ci_event_documents "
+        f"WHERE event_id='{INCOMPLETE_CORRECTION_EVENT_ID}'),"
+        "(SELECT COUNT(*) FROM ci_event_observations "
+        f"WHERE event_id='{INCOMPLETE_CORRECTION_EVENT_ID}'),"
+        "(SELECT JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.event_link_status')) "
+        "FROM ci_governance_events "
+        f"WHERE event_id='{INCOMPLETE_CORRECTION_EVENT_ID}'))",
+    )
+    require(
+        incomplete_before == "1|1|1|1|ambiguous_independent",
+        incomplete_before,
+    )
+    incomplete_replay = release.request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        incomplete_payload,
+        expected_status=200,
+    )
+    require(incomplete_replay.get("ok") is True, repr(incomplete_replay))
+    require(
+        release.mysql_execute(
+            container_id,
+            "SELECT CONCAT_WS('|',"
+            "(SELECT COUNT(*) FROM ci_governance_events "
+            f"WHERE event_id='{INCOMPLETE_CORRECTION_EVENT_ID}'),"
+            "(SELECT COUNT(*) FROM ci_documents "
+            f"WHERE document_id='{INCOMPLETE_CORRECTION_DOCUMENT_ID}'),"
+            "(SELECT COUNT(*) FROM ci_event_documents "
+            f"WHERE event_id='{INCOMPLETE_CORRECTION_EVENT_ID}'),"
+            "(SELECT COUNT(*) FROM ci_event_observations "
+            f"WHERE event_id='{INCOMPLETE_CORRECTION_EVENT_ID}'),"
+            "(SELECT JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.event_link_status')) "
+            "FROM ci_governance_events "
+            f"WHERE event_id='{INCOMPLETE_CORRECTION_EVENT_ID}'))",
+        )
+        == incomplete_before,
+        "unbuffered incomplete correction replay changed row state",
+    )
+
     conflict_target = "conflicting board seat"
     conflict_key = release.event_identity_comparison_key(
         COMPANY_ID,
@@ -275,7 +371,7 @@ def run(base_url: str, container_id: str) -> None:
     )
     print(
         "PHP 7.3 unbuffered guarded DART snapshot smoke passed "
-        "(apply, replay, correction, actor, rollback)."
+        "(apply, replay, correction, incomplete self-replay, actor, rollback)."
     )
 
 
