@@ -24,6 +24,7 @@ THIRD_ACTOR_ID = "actor:dart-filer-third"
 ORIGINAL_ACTOR_NAME = "CI Original Filing Agent"
 MUTATED_ACTOR_NAME = "CI Mutated Filing Agent"
 THIRD_ACTOR_NAME = "CI Third Filing Agent"
+ORIGINAL_TARGET = "existing ownership purpose"
 
 
 def require(condition: bool, message: str) -> None:
@@ -102,7 +103,7 @@ def ordinary_event(
     actor_id: str,
     actor_name: str,
     *,
-    target: str = "",
+    target: str = ORIGINAL_TARGET,
 ) -> dict[str, Any]:
     actor, event_actor = actor_candidate(
         ORDINARY_EVENT_ID,
