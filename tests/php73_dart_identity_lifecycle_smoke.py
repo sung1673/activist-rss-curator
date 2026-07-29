@@ -149,14 +149,15 @@ def complete_event(
     actor_name: str,
 ) -> dict[str, Any]:
     target = "5-percent ownership"
-    deadline = "2026-07-07T00:00:00Z"
+    effective_at = "2026-06-30"
+    deadline = "2026-07-07"
     comparison_key = release.event_identity_comparison_key(
         COMPANY_ID,
         EVENT_TYPE,
         ACTION,
         target,
         actor_id,
-        EFFECTIVE_AT,
+        effective_at,
         deadline,
     )
     actor, event_actor = actor_candidate(
@@ -172,7 +173,7 @@ def complete_event(
         "metadata": {"title_provenance": "source"},
         "original_language": "ko",
         "summary": "",
-        "occurred_at": EFFECTIVE_AT,
+        "occurred_at": effective_at,
         "deadline_at": deadline,
         "importance": "normal",
         "verification_status": "official",
@@ -189,7 +190,7 @@ def complete_event(
         "identity_target": target,
         "actor_id": actor_id,
         "identity_actor_id": actor_id,
-        "identity_effective_at": EFFECTIVE_AT,
+        "identity_effective_at": effective_at,
         "identity_deadline_at": deadline,
         "identity_status": "complete",
         "comparison_key": comparison_key,
