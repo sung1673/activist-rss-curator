@@ -42,6 +42,7 @@ jobs:
       name: governance-runtime
     env:
       GOVERNANCE_PIPELINE_MODE: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+      GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
       BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
       BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
       OFFICIAL_LINKS_JSON: ${{ matrix.country == 'CA' && vars.CA_OFFICIAL_LINKS_JSON || vars.AU_OFFICIAL_LINKS_JSON }}
