@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import pytest
+import yaml
 
 from curator.global_connectors import GlobalConnectorEnvelope
 from curator.global_connectors import global_document_content_hash
@@ -1168,3 +1169,12 @@ def test_workflow_is_default_branch_shadow_live_only_and_preserves_evidence() ->
     assert "BSIDE_ADMIN_TOKEN" not in workflow
     assert "telegram" not in workflow.casefold()
     assert "curl " not in workflow.casefold()
+    payload = yaml.load(workflow, Loader=yaml.BaseLoader)
+    job = payload["jobs"]["ingest"]
+    assert job["env"]["GOVERNANCE_API_BASE_URL"] == (
+        "${{ vars.GOVERNANCE_API_BASE_URL }}"
+    )
+    assert job["env"]["BSIDE_API_BASE_URL"] == (
+        "${{ secrets.BSIDE_API_BASE_URL || "
+        "vars.GOVERNANCE_API_BASE_URL }}"
+    )
