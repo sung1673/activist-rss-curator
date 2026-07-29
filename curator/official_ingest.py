@@ -8,7 +8,7 @@ import re
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable, Mapping
 from zoneinfo import ZoneInfo
 
 from .config import load_config
@@ -1071,6 +1071,10 @@ def run(
     dry_run: bool = False,
     idempotency_key: str | None = None,
     replay: bool = False,
+    payload_capture: Callable[
+        [dict[str, object], dict[str, object]], None
+    ]
+    | None = None,
 ) -> dict[str, object]:
     """Collect and normalize one inclusive official-disclosure date window.
 
@@ -1533,6 +1537,12 @@ def run(
                 "OpenDART preflight did not bind an exact release state"
             )
         payload["expected_release_state"] = dart_rights_final.release_state
+    if payload_capture is not None:
+        # The callback is used by the private frozen-replay artifact writer.
+        # It runs after both SourceRight checks and before the first remote
+        # mutation so the exact normalized submission can be durably frozen.
+        # The callback receives no provider response body or credential.
+        payload_capture(payload, run_record)
     remote_summary = (
         {
             "official_remote_synced": 0,
@@ -1592,6 +1602,156 @@ def run(
         "official_kind_discarded": source_discarded["kind"],
         "official_kind_pages": source_metrics["kind"]["pages_fetched"],
         "official_kind_errors": source_errors["kind"],
+        **remote_summary,
+    }
+
+
+def replay_frozen_dart_window(
+    frozen_leaf: Mapping[str, object],
+    *,
+    now: datetime,
+) -> dict[str, object]:
+    """Replay an apply payload through the PHP read-only DART contract.
+
+    This path deliberately does not load OpenDART credentials, construct a
+    ``DartConnector``, consume quota, or fetch the source. A separate drift
+    probe owns fresh source observation. SourceRight and release-state guards
+    are still checked immediately before the signed read-only request.
+    """
+
+    from .dart_frozen_replay_bundle import (  # local import avoids a cycle
+        FrozenReplayBundleError,
+        public_dart_payload,
+        stable_payload_sha256,
+    )
+
+    if now.tzinfo is None:
+        raise FrozenReplayBundleError("frozen replay clock must include a timezone")
+    attempted_at = now.astimezone(timezone.utc)
+    payload_value = frozen_leaf.get("payload")
+    run_contract = frozen_leaf.get("run_contract")
+    source_counts = frozen_leaf.get("source_semantic_counts")
+    if (
+        not isinstance(payload_value, Mapping)
+        or not isinstance(run_contract, Mapping)
+        or not isinstance(source_counts, Mapping)
+    ):
+        raise FrozenReplayBundleError("frozen replay leaf contract is incomplete")
+    payload = public_dart_payload(payload_value)
+    stable_hash = stable_payload_sha256(payload)
+    if (
+        frozen_leaf.get("stable_payload_contract_version") != 1
+        or not hmac.compare_digest(
+            stable_hash,
+            str(frozen_leaf.get("stable_payload_sha256") or ""),
+        )
+    ):
+        raise FrozenReplayBundleError("frozen replay semantic digest mismatch")
+    code_revision = str(frozen_leaf.get("code_revision") or "").strip().casefold()
+    idempotency_key = str(frozen_leaf.get("idempotency_key") or "")
+    if (
+        re.fullmatch(r"[a-f0-9]{40}", code_revision) is None
+        or _code_revision() != code_revision
+        or not idempotency_key.startswith("official-backfill-v1:")
+    ):
+        raise FrozenReplayBundleError("frozen replay revision or identity mismatch")
+
+    rights_client = DartOfficialSourceRightClient()
+    initial = rights_client.preflight(code_revision)
+    final = rights_client.preflight(code_revision)
+    if (
+        initial.rights_revision != final.rights_revision
+        or initial.contract_revision != final.contract_revision
+        or initial.release_state != final.release_state
+        or final.release_state not in {"closed", "preview", "live"}
+    ):
+        raise OfficialSourceRightError(
+            "OpenDART SourceRight or release state changed before frozen replay"
+        )
+    payload["expected_source_right_revisions"] = {
+        "official:dart": {
+            "rights_revision": final.rights_revision,
+            "contract_revision": final.contract_revision,
+        }
+    }
+    payload["expected_deployment_code_revision"] = code_revision
+    payload["expected_release_state"] = final.release_state
+
+    def count(name: str) -> int:
+        value = source_counts.get(name)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise FrozenReplayBundleError(
+                f"frozen replay source count {name} is invalid"
+            )
+        return value
+
+    fetched_count = count("fetched_count")
+    accepted_count = count("accepted_count")
+    rejected_count = count("rejected_count")
+    duplicate_count = count("duplicate_count")
+    discarded_count = count("discarded_count")
+    source_error_count = count("error_count")
+    run_record: dict[str, object] = {
+        "run_id": str(run_contract.get("run_id") or ""),
+        "pipeline": "ingest-official",
+        "source_key": "dart",
+        "status": "succeeded",
+        "code_revision": code_revision,
+        "idempotency_key": idempotency_key,
+        "ingest_mode": "replay",
+        "stable_payload_contract_version": 1,
+        "stable_payload_sha256": stable_hash,
+        "replay_attempted_at": attempted_at.isoformat(),
+        "raw_count": len(_payload_records(payload, "documents")),
+        "fetched_count": int(run_contract.get("fetched_count") or 0),
+        "resolved_count": int(run_contract.get("resolved_count") or 0),
+        "accepted_count": int(run_contract.get("accepted_count") or 0),
+        "error_count": int(run_contract.get("error_count") or 0),
+    }
+    if (
+        not run_record["run_id"]
+        or run_record["error_count"] != 0
+        or source_error_count != 0
+    ):
+        raise FrozenReplayBundleError("frozen replay apply run was not successful")
+    remote_summary = sync_governance_payload(payload, run=run_record)
+    remote_failed = _int_value(remote_summary.get("official_remote_failed"))
+    remote_skipped = _int_value(remote_summary.get("official_remote_skipped"))
+    require_remote = _truthy_env("CURATOR_REQUIRE_REMOTE_API")
+    failed = remote_failed + int(bool(require_remote and remote_skipped))
+    return {
+        "official_fetched": fetched_count,
+        "official_documents": len(_payload_records(payload, "documents")),
+        "official_events": len(_payload_records(payload, "events")),
+        "official_companies": len(_payload_records(payload, "companies")),
+        "official_source_rights": 0,
+        "official_failed": failed,
+        "official_skipped": 0,
+        "official_dry_run": 0,
+        "official_dart_fetched": fetched_count,
+        "official_dart_accepted": accepted_count,
+        "official_dart_rejected": rejected_count,
+        "official_dart_duplicates": duplicate_count,
+        "official_dart_discarded": discarded_count,
+        # These are actual replay execution metrics. They intentionally remain
+        # zero instead of pretending that the source was fetched again.
+        "official_dart_pages": 0,
+        "official_dart_requests": 0,
+        "official_dart_errors": source_error_count,
+        "official_dart_quota_exhausted": 0,
+        "official_frozen_replay": 1,
+        "official_frozen_stable_payload_sha256": stable_hash,
+        "official_kind_required": 0,
+        "official_kind_enabled": 0,
+        "official_kind_configured": 0,
+        "official_kind_rights_verified": 0,
+        "official_kind_fetched": 0,
+        "official_kind_accepted": 0,
+        "official_kind_rejected": 0,
+        "official_kind_duplicates": 0,
+        "official_kind_discarded": 0,
+        "official_kind_pages": 0,
+        "official_kind_errors": 0,
         **remote_summary,
     }
 

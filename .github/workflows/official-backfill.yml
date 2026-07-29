@@ -12,6 +12,11 @@ on:
           - apply
           - replay
         default: dry-run
+      frozen_apply_run_id:
+        description: Exact successful apply workflow run id required only for replay
+        required: false
+        type: string
+        default: ""
       source:
         description: Official source selection
         required: true
@@ -75,6 +80,7 @@ jobs:
     env:
       CHECKPOINT_PATH: data/backfill_official_checkpoint.json
       CHECKPOINT_ARTIFACT_NAME: official-backfill-checkpoint-${{ inputs.mode }}-${{ inputs.source }}-${{ inputs.from_date }}-${{ inputs.to_date }}-${{ inputs.sync_company_master }}
+      DART_FROZEN_APPLY_ARTIFACT_NAME: official-dart-frozen-replay-apply-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Initialize backfill evidence
         env:
@@ -86,6 +92,9 @@ jobs:
           DART_REPLAY_STATE_BEFORE: ${{ runner.temp }}/dart-replay-state-before.json
           DART_REPLAY_STATE_AFTER: ${{ runner.temp }}/dart-replay-state-after.json
           DART_REPLAY_STATE_BINDING: ${{ runner.temp }}/dart-replay-state-binding.json
+          DART_FROZEN_APPLY_ARTIFACT_BINDING: ${{ runner.temp }}/dart-frozen-apply-artifact-binding.json
+          DART_FROZEN_REPLAY_ARTIFACT_BINDING: ${{ runner.temp }}/dart-frozen-replay-artifact-binding.json
+          DART_DRIFT_PROBE_REPORT: ${{ runner.temp }}/dart-replay-drift-probe.json
         shell: bash
         run: |
           set -euo pipefail
@@ -98,6 +107,11 @@ jobs:
           printf '%s\n' '{"status":"not_applicable"}' > "$DART_REPLAY_STATE_BEFORE"
           printf '%s\n' '{"status":"not_applicable"}' > "$DART_REPLAY_STATE_AFTER"
           printf '%s\n' '{"status":"not_applicable"}' > "$DART_REPLAY_STATE_BINDING"
+          printf '%s\n' '{"status":"not_applicable"}' \
+            > "$DART_FROZEN_APPLY_ARTIFACT_BINDING"
+          printf '%s\n' '{"status":"not_applicable"}' \
+            > "$DART_FROZEN_REPLAY_ARTIFACT_BINDING"
+          printf '%s\n' '{"status":"not_applicable"}' > "$DART_DRIFT_PROBE_REPORT"
 
       - name: Checkout immutable dispatch revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -113,6 +127,27 @@ jobs:
             echo "::error::Checked-out backfill revision $actual does not match dispatch revision $GITHUB_SHA."
             exit 1
           }
+
+      - name: Require exact current default-branch revision
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const defaultBranch = context.payload.repository.default_branch;
+            const branch = await github.rest.repos.getBranch({
+              owner,
+              repo,
+              branch: defaultBranch,
+            });
+            if (context.ref !== `refs/heads/${defaultBranch}`) {
+              core.setFailed("Official backfill must run from the default branch");
+              return;
+            }
+            if (branch.data.commit.sha !== context.sha) {
+              core.setFailed(
+                `Dispatch revision ${context.sha} is not the current default-branch revision`,
+              );
+            }
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -140,6 +175,7 @@ jobs:
           FROM_DATE: ${{ inputs.from_date }}
           TO_DATE: ${{ inputs.to_date }}
           MODE: ${{ inputs.mode }}
+          FROZEN_APPLY_RUN_ID: ${{ inputs.frozen_apply_run_id }}
           MAX_WINDOWS: ${{ inputs.max_windows }}
           SOURCE: ${{ inputs.source }}
           SYNC_COMPANY_MASTER: ${{ inputs.sync_company_master }}
@@ -180,6 +216,13 @@ jobs:
           if os.environ["SYNC_COMPANY_MASTER"].lower() == "true" and os.environ["SOURCE"] == "kind":
               raise SystemExit("sync_company_master requires source=dart or source=both")
           if os.environ["MODE"] == "replay":
+              frozen_apply_run_id = os.environ["FROZEN_APPLY_RUN_ID"]
+              if (
+                  not frozen_apply_run_id.isascii()
+                  or not frozen_apply_run_id.isdecimal()
+                  or int(frozen_apply_run_id) <= 0
+              ):
+                  raise SystemExit("replay requires a positive frozen_apply_run_id")
               if os.environ["SOURCE"] != "dart":
                   raise SystemExit("replay requires source=dart")
               if (end - start).days != 30:
@@ -188,6 +231,8 @@ jobs:
                   raise SystemExit("replay requires max_windows=30")
               if os.environ["SYNC_COMPANY_MASTER"].lower() != "false":
                   raise SystemExit("replay cannot sync the DART company master")
+          elif os.environ["FROZEN_APPLY_RUN_ID"]:
+              raise SystemExit("frozen_apply_run_id is forbidden outside replay mode")
           PY
 
       - name: Validate operational configuration
@@ -195,8 +240,8 @@ jobs:
         env:
           MODE: ${{ inputs.mode }}
           SOURCE: ${{ inputs.source }}
-          OPENDART_API_KEYS: ${{ secrets.OPENDART_API_KEYS }}
-          DART_API_KEY: ${{ secrets.OPENDART_API_KEYS == '' && secrets.DART_API_KEY || '' }}
+          OPENDART_API_KEYS: ${{ inputs.mode != 'replay' && secrets.OPENDART_API_KEYS || '' }}
+          DART_API_KEY: ${{ inputs.mode != 'replay' && secrets.OPENDART_API_KEYS == '' && secrets.DART_API_KEY || '' }}
           KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
           ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
           ACTIVIST_API_SECRET: ${{ secrets.ACTIVIST_API_SECRET }}
@@ -208,7 +253,7 @@ jobs:
         run: |
           set -euo pipefail
           required=()
-          if [[ "$SOURCE" == "dart" || "$SOURCE" == "both" ]]; then
+          if [[ "$MODE" != "replay" && ( "$SOURCE" == "dart" || "$SOURCE" == "both" ) ]]; then
             python .github/scripts/mask-opendart-credentials.py \
               --github-output "$GITHUB_OUTPUT"
             required+=(BSIDE_API_BASE_URL BSIDE_OPS_TOKEN BSIDE_BACKEND_BINDING_ID)
@@ -365,6 +410,101 @@ jobs:
               output.write(f"remaining_request_budget={remaining}\n")
           PY
 
+      - name: Resolve exact immutable DART apply bundle
+        if: inputs.mode == 'replay'
+        id: frozen_apply
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          FROZEN_APPLY_RUN_ID: ${{ inputs.frozen_apply_run_id }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const defaultBranch = context.payload.repository.default_branch;
+            const now = Date.now();
+            const cutoff = now - (72 * 60 * 60 * 1000);
+            const digestPattern = /^sha256:[0-9a-f]{64}$/;
+            const runId = Number(process.env.FROZEN_APPLY_RUN_ID);
+            if (!Number.isSafeInteger(runId) || runId <= 0) {
+              core.setFailed("frozen_apply_run_id must be a positive safe integer");
+              return;
+            }
+            const response = await github.rest.actions.getWorkflowRun({
+              owner,
+              repo,
+              run_id: runId,
+            });
+            const run = response.data;
+            const expectedArtifactName =
+              `official-dart-frozen-replay-apply-${run.id}-${run.run_attempt}`;
+            const startedAt = Date.parse(run.run_started_at || run.created_at || "");
+            const updatedAt = Date.parse(run.updated_at || "");
+            const workflowPath = String(run.path || "").split("@", 1)[0];
+            if (
+              Number(run.id) === Number(context.runId) ||
+              run.event !== "workflow_dispatch" ||
+              run.status !== "completed" ||
+              run.conclusion !== "success" ||
+              run.head_sha !== context.sha ||
+              run.head_branch !== defaultBranch ||
+              run.head_repository?.full_name !== `${owner}/${repo}` ||
+              workflowPath !== ".github/workflows/official-backfill.yml" ||
+              !Number.isFinite(startedAt) ||
+              !Number.isFinite(updatedAt) ||
+              startedAt < cutoff ||
+              updatedAt < cutoff ||
+              startedAt > now + 300000 ||
+              updatedAt > now + 300000
+            ) {
+              core.setFailed(
+                "The selected apply run is not an exact-SHA successful default-branch workflow_dispatch within 72 hours",
+              );
+              return;
+            }
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              { owner, repo, run_id: run.id, per_page: 100 },
+            );
+            const matches = artifacts.filter((artifact) =>
+              artifact.name === expectedArtifactName &&
+              !artifact.expired &&
+              digestPattern.test(String(artifact.digest || "").toLowerCase())
+            );
+            if (matches.length !== 1) {
+              core.setFailed(
+                "The selected apply run must expose exactly one unexpired immutable DART apply bundle",
+              );
+              return;
+            }
+            const artifact = matches[0];
+            const artifactCreatedAt = Date.parse(artifact.created_at || "");
+            if (
+              !Number.isFinite(artifactCreatedAt) ||
+              artifactCreatedAt < cutoff ||
+              artifactCreatedAt > now + 300000
+            ) {
+              core.setFailed("The selected DART apply bundle is outside its 72-hour freshness window");
+              return;
+            }
+            core.setOutput("run_id", String(run.id));
+            core.setOutput("run_attempt", String(run.run_attempt));
+            core.setOutput("run_started_at", run.run_started_at);
+            core.setOutput("artifact_id", String(artifact.id));
+            core.setOutput("artifact_name", artifact.name);
+            core.setOutput("artifact_digest", artifact.digest.toLowerCase());
+            core.setOutput("artifact_created_at", artifact.created_at);
+
+      - name: Download exact immutable DART apply bundle
+        if: inputs.mode == 'replay'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.frozen_apply.outputs.artifact_id }}
+          path: ${{ runner.temp }}/dart-frozen-replay-input
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.frozen_apply.outputs.run_id }}
+          merge-multiple: true
+          digest-mismatch: error
+
       - name: Capture production DART state before replay
         if: inputs.mode == 'replay'
         env:
@@ -470,6 +610,45 @@ jobs:
           PY
           rm -f "$response"
 
+      - name: Verify and bind immutable DART apply bundle
+        if: inputs.mode == 'replay'
+        env:
+          FROZEN_BUNDLE_DIR: ${{ runner.temp }}/dart-frozen-replay-input
+          DART_REPLAY_STATE_BEFORE: ${{ runner.temp }}/dart-replay-state-before.json
+          DART_FROZEN_REPLAY_ARTIFACT_BINDING: ${{ runner.temp }}/dart-frozen-replay-artifact-binding.json
+          EXPECTED_FROM_DATE: ${{ inputs.from_date }}
+          EXPECTED_TO_DATE: ${{ inputs.to_date }}
+          EXPECTED_ARTIFACT_ID: ${{ steps.frozen_apply.outputs.artifact_id }}
+          EXPECTED_ARTIFACT_NAME: ${{ steps.frozen_apply.outputs.artifact_name }}
+          EXPECTED_ARTIFACT_DIGEST: ${{ steps.frozen_apply.outputs.artifact_digest }}
+          EXPECTED_ARTIFACT_CREATED_AT: ${{ steps.frozen_apply.outputs.artifact_created_at }}
+          EXPECTED_PRODUCER_RUN_ID: ${{ steps.frozen_apply.outputs.run_id }}
+          EXPECTED_PRODUCER_RUN_ATTEMPT: ${{ steps.frozen_apply.outputs.run_attempt }}
+          EXPECTED_PRODUCER_RUN_STARTED_AT: ${{ steps.frozen_apply.outputs.run_started_at }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m curator.dart_frozen_replay_bundle build-binding \
+            --path "$FROZEN_BUNDLE_DIR" \
+            --replay-state "$DART_REPLAY_STATE_BEFORE" \
+            --output "$DART_FROZEN_REPLAY_ARTIFACT_BINDING" \
+            --artifact-id "$EXPECTED_ARTIFACT_ID" \
+            --artifact-name "$EXPECTED_ARTIFACT_NAME" \
+            --artifact-digest "$EXPECTED_ARTIFACT_DIGEST" \
+            --artifact-created-at "$EXPECTED_ARTIFACT_CREATED_AT" \
+            --producer-run-id "$EXPECTED_PRODUCER_RUN_ID" \
+            --producer-run-attempt "$EXPECTED_PRODUCER_RUN_ATTEMPT" \
+            --producer-run-started-at "$EXPECTED_PRODUCER_RUN_STARTED_AT" \
+            --consumer-repository "$GITHUB_REPOSITORY" \
+            --consumer-workflow official-backfill.yml \
+            --consumer-run-id "$GITHUB_RUN_ID" \
+            --consumer-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --expected-code-revision "$GITHUB_SHA" \
+            --expected-from-date "$EXPECTED_FROM_DATE" \
+            --expected-to-date "$EXPECTED_TO_DATE" \
+            --freshness-hours 72 \
+            > /dev/null
+
       - name: Resolve previous matching checkpoint
         if: inputs.mode == 'apply'
         id: previous_checkpoint
@@ -479,25 +658,38 @@ jobs:
         with:
           script: |
             const { owner, repo } = context.repo;
+            const defaultBranch = context.payload.repository.default_branch;
             const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
               owner,
               repo,
               workflow_id: "official-backfill.yml",
-              branch: context.payload.repository.default_branch,
+              branch: defaultBranch,
               status: "completed",
               per_page: 100,
             });
             for (const run of runs) {
               if (Number(run.id) === Number(context.runId)) continue;
+              const workflowPath = String(run.path || "").split("@", 1)[0];
+              if (run.event !== "workflow_dispatch") continue;
+              if (run.head_sha !== context.sha) continue;
+              if (run.head_branch !== defaultBranch) continue;
               if (run.head_repository?.full_name !== `${owner}/${repo}`) continue;
+              if (workflowPath !== ".github/workflows/official-backfill.yml") continue;
               const artifacts = await github.paginate(
                 github.rest.actions.listWorkflowRunArtifacts,
                 { owner, repo, run_id: run.id, per_page: 100 },
               );
-              const artifact = artifacts.find((item) =>
+              const matches = artifacts.filter((item) =>
                 item.name === process.env.EXPECTED_ARTIFACT_NAME && !item.expired
               );
-              if (!artifact) continue;
+              if (matches.length > 1) {
+                core.setFailed(
+                  "The exact-SHA checkpoint run contains ambiguous matching artifacts",
+                );
+                return;
+              }
+              if (matches.length === 0) continue;
+              const artifact = matches[0];
               core.setOutput("found", "true");
               core.setOutput("run_id", String(run.id));
               core.setOutput("artifact_id", String(artifact.id));
@@ -530,6 +722,7 @@ jobs:
           restore_root="${{ runner.temp }}/previous-official-backfill"
           resume_inventory="${{ runner.temp }}/official-backfill-resume-files.list"
           metadata_inventory="${{ runner.temp }}/official-backfill-metadata-files.list"
+          frozen_inventory="${{ runner.temp }}/official-backfill-frozen-bundles.list"
           find "$restore_root" -type f -name 'backfill_official_checkpoint.json' -print0 \
             > "$resume_inventory"
           mapfile -d '' -t restored_files < "$resume_inventory"
@@ -556,6 +749,75 @@ jobs:
           fi
           mkdir -p "$(dirname "$CHECKPOINT_PATH")"
           cp "${restored_files[0]}" "$CHECKPOINT_PATH"
+          find "$restore_root" -type f -path '*/frozen-replay-bundle/manifest.json' -print0 \
+            > "$frozen_inventory"
+          mapfile -d '' -t frozen_manifests < "$frozen_inventory"
+          if (( ${#frozen_manifests[@]} > 1 )); then
+            echo "::error::The matching checkpoint artifact contains multiple frozen resume bundles."
+            exit 1
+          fi
+          completed_count="$(
+            CHECKPOINT_FILE="$CHECKPOINT_PATH" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          checkpoint = json.loads(
+              Path(os.environ["CHECKPOINT_FILE"]).read_text(encoding="utf-8")
+          )
+          completed = checkpoint.get("completed_windows")
+          if not isinstance(completed, dict):
+              raise SystemExit("restored checkpoint completed_windows is invalid")
+          print(len(completed))
+          PY
+          )"
+          expected_checkpoint_sha256="$(
+            CHECKPOINT_FILE="$CHECKPOINT_PATH" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from curator.backfill_checkpoint_api import (
+              canonical_checkpoint,
+              checkpoint_payload_hash,
+          )
+          from curator.official_backfill import validate_checkpoint
+
+          checkpoint = validate_checkpoint(
+              json.loads(
+                  Path(os.environ["CHECKPOINT_FILE"]).read_text(
+                      encoding="utf-8"
+                  )
+              ),
+              label="restored artifact",
+          )
+          print(checkpoint_payload_hash(canonical_checkpoint(checkpoint)))
+          PY
+          )"
+          if (( completed_count > 0 && ${#frozen_manifests[@]} != 1 )); then
+            echo "::error::A partial DART apply checkpoint cannot resume without its exact frozen bundle."
+            exit 1
+          fi
+          if (( ${#frozen_manifests[@]} == 1 )); then
+            frozen_root="$(dirname "${frozen_manifests[0]}")"
+            if [[ -e "${{ runner.temp }}/dart-frozen-apply" ]]; then
+              echo "::error::Refusing to overwrite an existing frozen apply workspace."
+              exit 1
+            fi
+            cp -R "$frozen_root" "${{ runner.temp }}/dart-frozen-apply"
+            expected_job_fingerprint="$(
+              jq -er '.job.fingerprint | select(type == "string" and test("^[0-9a-f]{64}$"))' \
+                "$CHECKPOINT_PATH"
+            )"
+            python -m curator.dart_frozen_replay_bundle validate-resume \
+              --path "${{ runner.temp }}/dart-frozen-apply" \
+              --expected-code-revision "$GITHUB_SHA" \
+              --expected-job-fingerprint "$expected_job_fingerprint" \
+              --expected-checkpoint-sha256 "$expected_checkpoint_sha256" \
+              --expected-from-date "$EXPECTED_FROM_DATE" \
+              --expected-to-date "$EXPECTED_TO_DATE" \
+              > /dev/null
+          fi
 
       - name: Run one-day official backfill windows
         env:
@@ -566,6 +828,10 @@ jobs:
           BACKFILL_MAX_WINDOWS: ${{ inputs.max_windows }}
           BACKFILL_SYNC_COMPANY_MASTER: ${{ inputs.sync_company_master }}
           BACKFILL_REPORT: ${{ runner.temp }}/official-backfill-report.json
+          DART_FROZEN_APPLY_DIR: ${{ runner.temp }}/dart-frozen-apply
+          DART_FROZEN_REPLAY_INPUT_DIR: ${{ runner.temp }}/dart-frozen-replay-input
+          DART_FROZEN_REPLAY_ARTIFACT_BINDING: ${{ runner.temp }}/dart-frozen-replay-artifact-binding.json
+          DART_DRIFT_PROBE_REPORT: ${{ runner.temp }}/dart-replay-drift-probe.json
           CURATOR_INGEST_SCOPE: official
           CURATOR_DATA_SOURCE: mysql
           CURATOR_DISABLE_TELEGRAM_SEND: "1"
@@ -575,8 +841,8 @@ jobs:
           CURATOR_REQUIRE_REMOTE_API: ${{ inputs.mode != 'dry-run' && '1' || '0' }}
           CURATOR_ENABLE_KIND: ${{ inputs.source == 'dart' && '0' || '1' }}
           CURATOR_REQUIRE_KIND: ${{ inputs.source == 'dart' && '0' || '1' }}
-          OPENDART_API_KEYS: ${{ secrets.OPENDART_API_KEYS }}
-          DART_API_KEY: ${{ secrets.OPENDART_API_KEYS == '' && secrets.DART_API_KEY || '' }}
+          OPENDART_API_KEYS: ${{ inputs.mode != 'replay' && secrets.OPENDART_API_KEYS || '' }}
+          DART_API_KEY: ${{ inputs.mode != 'replay' && secrets.OPENDART_API_KEYS == '' && secrets.DART_API_KEY || '' }}
           KIND_DISCLOSURE_ENDPOINT: ${{ vars.KIND_DISCLOSURE_ENDPOINT }}
           KIND_API_KEY: ${{ secrets.KIND_API_KEY }}
           ACTIVIST_API_URL: ${{ secrets.ACTIVIST_API_URL }}
@@ -586,8 +852,9 @@ jobs:
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
           BSIDE_BACKEND_BINDING_ID: ${{ vars.BSIDE_BACKEND_BINDING_ID }}
           GOVERNANCE_PIPELINE_MODE: ${{ steps.rollout.outputs.governance_pipeline_mode }}
-          CURATOR_REQUIRE_DURABLE_DART_QUOTA: "1"
+          CURATOR_REQUIRE_DURABLE_DART_QUOTA: ${{ inputs.mode != 'replay' && '1' || '0' }}
           CURATOR_DART_QUOTA_PHASE: ${{ inputs.mode == 'replay' && 'official-backfill-replay' || 'official-backfill' }}
+          CURATOR_DART_DRIFT_PROBE_READ_ONLY: "1"
           DART_REQUEST_BUDGET: ${{ steps.dart_budget.outputs.remaining_request_budget }}
         shell: bash
         run: |
@@ -613,7 +880,33 @@ jobs:
             args+=(--dry-run)
           fi
           if [[ "$BACKFILL_MODE" == "replay" ]]; then
-            args+=(--replay)
+            args+=(
+              --replay
+              --frozen-bundle-dir "$DART_FROZEN_REPLAY_INPUT_DIR"
+              --frozen-artifact-binding "$DART_FROZEN_REPLAY_ARTIFACT_BINDING"
+            )
+          elif [[
+            "$BACKFILL_MODE" == "apply" &&
+            "$BACKFILL_SOURCE" == "dart" &&
+            "$BACKFILL_MAX_WINDOWS" == "30" &&
+            "$BACKFILL_SYNC_COMPANY_MASTER" == "false"
+          ]]; then
+            range_days="$(
+              FROM_DATE="$BACKFILL_FROM_DATE" TO_DATE="$BACKFILL_TO_DATE" python - <<'PY'
+            import os
+            from datetime import date
+
+            print(
+                (
+                    date.fromisoformat(os.environ["TO_DATE"])
+                    - date.fromisoformat(os.environ["FROM_DATE"])
+                ).days
+            )
+            PY
+            )"
+            if [[ "$range_days" == "30" ]]; then
+              args+=(--write-frozen-bundle-dir "$DART_FROZEN_APPLY_DIR")
+            fi
           fi
           if [[ "$BACKFILL_SYNC_COMPANY_MASTER" == "true" ]]; then
             args+=(--sync-company-master)
@@ -652,6 +945,81 @@ jobs:
             echo "::error::Official backfill output did not pass the artifact safety boundary."
             exit 1
           fi
+
+      - name: Run fresh read-only DART drift probe
+        if: inputs.mode == 'replay'
+        env:
+          BACKFILL_FROM_DATE: ${{ inputs.from_date }}
+          BACKFILL_TO_DATE: ${{ inputs.to_date }}
+          BACKFILL_MAX_WINDOWS: ${{ inputs.max_windows }}
+          DART_FROZEN_REPLAY_INPUT_DIR: ${{ runner.temp }}/dart-frozen-replay-input
+          DART_FROZEN_REPLAY_ARTIFACT_BINDING: ${{ runner.temp }}/dart-frozen-replay-artifact-binding.json
+          DART_DRIFT_PROBE_REPORT: ${{ runner.temp }}/dart-replay-drift-probe.json
+          OPENDART_API_KEYS: ${{ secrets.OPENDART_API_KEYS }}
+          DART_API_KEY: ${{ secrets.OPENDART_API_KEYS == '' && secrets.DART_API_KEY || '' }}
+          BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
+          BSIDE_BACKEND_BINDING_ID: ${{ vars.BSIDE_BACKEND_BINDING_ID }}
+          CURATOR_REQUIRE_DURABLE_DART_QUOTA: "1"
+          CURATOR_DART_QUOTA_PHASE: official-backfill-drift-probe
+          CURATOR_DART_DRIFT_PROBE_READ_ONLY: "1"
+          DART_REQUEST_BUDGET: ${{ steps.dart_budget.outputs.remaining_request_budget }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_stdout="${{ runner.temp }}/dart-drift-probe.stdout.raw"
+          raw_stderr="${{ runner.temp }}/dart-drift-probe.stderr.raw"
+          cleanup_probe_raw() {
+            rm -f "$raw_stdout" "$raw_stderr"
+          }
+          trap cleanup_probe_raw EXIT
+          set +e
+          python -m curator.official_backfill \
+            --from-date "$BACKFILL_FROM_DATE" \
+            --to-date "$BACKFILL_TO_DATE" \
+            --source dart \
+            --chunk-days 1 \
+            --max-chunks "$BACKFILL_MAX_WINDOWS" \
+            --request-budget "$DART_REQUEST_BUDGET" \
+            --frozen-bundle-dir "$DART_FROZEN_REPLAY_INPUT_DIR" \
+            --frozen-artifact-binding "$DART_FROZEN_REPLAY_ARTIFACT_BINDING" \
+            --drift-probe-only \
+            --drift-probe-output "$DART_DRIFT_PROBE_REPORT" \
+            > "$raw_stdout" 2> "$raw_stderr"
+          probe_exit=$?
+          set -e
+          cleanup_probe_raw
+          trap - EXIT
+          if (( probe_exit != 0 )); then
+            echo "::error::Fresh DART drift probe failed; raw connector output was discarded."
+            exit "$probe_exit"
+          fi
+
+      - name: Validate read-only DART drift probe diagnostic
+        if: inputs.mode == 'replay'
+        id: dart_drift_probe
+        env:
+          DART_DRIFT_PROBE_REPORT: ${{ runner.temp }}/dart-replay-drift-probe.json
+          DART_FROZEN_REPLAY_ARTIFACT_BINDING: ${{ runner.temp }}/dart-frozen-replay-artifact-binding.json
+          EXPECTED_FROM_DATE: ${{ inputs.from_date }}
+          EXPECTED_TO_DATE: ${{ inputs.to_date }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_job_fingerprint="$(
+            jq -er '.job_fingerprint | select(type == "string" and test("^[0-9a-f]{64}$"))' \
+              "$DART_FROZEN_REPLAY_ARTIFACT_BINDING"
+          )"
+          jq -e '.artifact_sanitization.status == "verified"' \
+            "$DART_DRIFT_PROBE_REPORT" > /dev/null
+          python -m curator.dart_frozen_replay_bundle validate-probe \
+            --path "$DART_DRIFT_PROBE_REPORT" \
+            --expected-code-revision "$GITHUB_SHA" \
+            --expected-from-date "$EXPECTED_FROM_DATE" \
+            --expected-to-date "$EXPECTED_TO_DATE" \
+            --expected-job-fingerprint "$expected_job_fingerprint" \
+            --github-output "$GITHUB_OUTPUT" \
+            > /dev/null
 
       - name: Capture production DART state after replay
         if: always() && inputs.mode == 'replay'
@@ -869,6 +1237,69 @@ jobs:
           temporary.replace(destination)
           PY
 
+      - name: Bind frozen replay and drift status into report
+        if: inputs.mode == 'replay'
+        env:
+          BACKFILL_REPORT: ${{ runner.temp }}/official-backfill-report.json
+          DART_FROZEN_REPLAY_ARTIFACT_BINDING: ${{ runner.temp }}/dart-frozen-replay-artifact-binding.json
+          DART_DRIFT_PROBE_REPORT: ${{ runner.temp }}/dart-replay-drift-probe.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          def load(name):
+              path = Path(os.environ[name])
+              raw = path.read_bytes()
+              return path, raw, json.loads(raw.decode("utf-8"))
+
+          report_path, _report_raw, report = load("BACKFILL_REPORT")
+          _binding_path, binding_raw, binding = load(
+              "DART_FROZEN_REPLAY_ARTIFACT_BINDING"
+          )
+          _probe_path, probe_raw, probe = load("DART_DRIFT_PROBE_REPORT")
+          if (
+              binding.get("kind") != "official-dart-frozen-replay-artifact-binding"
+              or binding.get("consumer", {}).get("code_revision")
+              != os.environ["GITHUB_SHA"]
+              or binding.get("artifact_sanitization", {}).get("status")
+              != "verified"
+              or probe.get("kind") != "official-dart-fresh-drift-probe"
+              or probe.get("code_revision") != os.environ["GITHUB_SHA"]
+              or probe.get("read_only") is not True
+              or probe.get("governance_write_attempted") is not False
+              or probe.get("checkpoint_write_attempted") is not False
+              or probe.get("quota_ledger_write_attempted") is not True
+              or probe.get("status") not in {"matched", "drift_detected", "probe_failed"}
+              or probe.get("artifact_sanitization", {}).get("status") != "verified"
+          ):
+              raise SystemExit("frozen replay or drift diagnostic binding is invalid")
+          report["frozen_replay"] = {
+              "schema_version": 1,
+              "apply_artifact_binding_sha256": hashlib.sha256(binding_raw).hexdigest(),
+              "apply_manifest_sha256": binding["manifest_sha256"],
+              "drift_probe": {
+                  "status": probe["status"],
+                  "read_only": True,
+                  "governance_write_attempted": False,
+                  "checkpoint_write_attempted": False,
+                  "quota_ledger_write_attempted": True,
+                  "sha256": hashlib.sha256(probe_raw).hexdigest(),
+                  "release_gate_matched": probe["status"] == "matched",
+              },
+          }
+          temporary = report_path.with_suffix(".tmp")
+          temporary.write_text(
+              json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          temporary.replace(report_path)
+          PY
+
       - name: Validate exact 30-window DART receipt contract
         if: inputs.mode != 'dry-run' && inputs.source == 'dart' && inputs.max_windows == 30
         env:
@@ -918,6 +1349,134 @@ jobs:
               ):
                   raise SystemExit("DART receipt count, boundary, or revision mismatch")
               cursor = next_cursor
+          PY
+
+      - name: Validate private frozen DART apply bundle
+        if: inputs.mode == 'apply' && inputs.source == 'dart'
+        id: frozen_apply_bundle
+        env:
+          FROZEN_BUNDLE_DIR: ${{ runner.temp }}/dart-frozen-apply
+          BACKFILL_REPORT: ${{ runner.temp }}/official-backfill-report.json
+          EXPECTED_FROM_DATE: ${{ inputs.from_date }}
+          EXPECTED_TO_DATE: ${{ inputs.to_date }}
+          EXPECTED_MAX_WINDOWS: ${{ inputs.max_windows }}
+          EXPECTED_SYNC_COMPANY_MASTER: ${{ inputs.sync_company_master }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          eligible="$(
+            python -c \
+              'from datetime import date; import os; print(str((date.fromisoformat(os.environ["EXPECTED_TO_DATE"]) - date.fromisoformat(os.environ["EXPECTED_FROM_DATE"])).days == 30 and os.environ["EXPECTED_MAX_WINDOWS"] == "30" and os.environ["EXPECTED_SYNC_COMPANY_MASTER"].lower() == "false").lower())'
+          )"
+          if [[ "$eligible" != "true" ]]; then
+            {
+              echo "eligible=false"
+              echo "evidence_safe=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          expected_job_fingerprint="$(
+            jq -er '.job_fingerprint | select(type == "string" and test("^[0-9a-f]{64}$"))' \
+              "$BACKFILL_REPORT"
+          )"
+          expected_checkpoint_sha256="$(
+            jq -er '.checkpoint_payload_sha256 | select(type == "string" and test("^[0-9a-f]{64}$"))' \
+              "$BACKFILL_REPORT"
+          )"
+          jq -e \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+            '.producer.repository == $repository and
+             .producer.workflow == "official-backfill.yml" and
+             .producer.run_id == $run_id and
+             .producer.run_attempt == $run_attempt and
+             .artifact_sanitization.status == "verified"' \
+            "$FROZEN_BUNDLE_DIR/manifest.json" > /dev/null
+          python -m curator.dart_frozen_replay_bundle validate-apply \
+            --path "$FROZEN_BUNDLE_DIR" \
+            --expected-code-revision "$GITHUB_SHA" \
+            --expected-from-date "$EXPECTED_FROM_DATE" \
+            --expected-to-date "$EXPECTED_TO_DATE" \
+            --expected-job-fingerprint "$expected_job_fingerprint" \
+            --expected-checkpoint-sha256 "$expected_checkpoint_sha256" \
+            --github-output "$GITHUB_OUTPUT" \
+            > /dev/null
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+
+      - name: Preserve immutable private frozen DART apply bundle
+        if: >-
+          inputs.mode == 'apply' &&
+          steps.frozen_apply_bundle.outputs.eligible == 'true' &&
+          steps.frozen_apply_bundle.outputs.evidence_safe == 'true'
+        id: frozen_apply_upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.DART_FROZEN_APPLY_ARTIFACT_NAME }}
+          path: ${{ runner.temp }}/dart-frozen-apply
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 9
+          include-hidden-files: false
+
+      - name: Bind uploaded frozen DART apply artifact
+        if: steps.frozen_apply_upload.outcome == 'success'
+        env:
+          DART_FROZEN_APPLY_ARTIFACT_BINDING: ${{ runner.temp }}/dart-frozen-apply-artifact-binding.json
+          ARTIFACT_ID: ${{ steps.frozen_apply_upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.frozen_apply_upload.outputs.artifact-digest }}
+          MANIFEST_SHA256: ${{ steps.frozen_apply_bundle.outputs.manifest_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          digest = os.environ["ARTIFACT_DIGEST"].lower()
+          if re.fullmatch(r"[0-9a-f]{64}", digest):
+              digest = f"sha256:{digest}"
+          if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+              raise SystemExit("uploaded frozen DART apply artifact digest is invalid")
+          if not os.environ["ARTIFACT_ID"].isascii() or not os.environ["ARTIFACT_ID"].isdecimal():
+              raise SystemExit("uploaded frozen DART apply artifact id is invalid")
+          binding = {
+              "schema_version": 1,
+              "kind": "official-dart-frozen-apply-artifact-binding",
+              "producer": {
+                  "repository": os.environ["GITHUB_REPOSITORY"],
+                  "workflow": "official-backfill.yml",
+                  "run_id": int(os.environ["GITHUB_RUN_ID"]),
+                  "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+                  "code_revision": os.environ["GITHUB_SHA"],
+              },
+              "artifact": {
+                  "id": int(os.environ["ARTIFACT_ID"]),
+                  "name": os.environ["DART_FROZEN_APPLY_ARTIFACT_NAME"],
+                  "digest": digest,
+                  "freshness_hours": 72,
+                  "retention_days": 90,
+              },
+              "manifest_sha256": os.environ["MANIFEST_SHA256"],
+              "artifact_sanitization": {"status": "verified"},
+          }
+          canonical = json.dumps(
+              binding,
+              ensure_ascii=False,
+              separators=(",", ":"),
+              sort_keys=True,
+          ).encode("utf-8")
+          binding["binding_sha256"] = hashlib.sha256(canonical).hexdigest()
+          destination = Path(os.environ["DART_FROZEN_APPLY_ARTIFACT_BINDING"])
+          temporary = destination.with_suffix(".tmp")
+          temporary.write_text(
+              json.dumps(binding, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          temporary.replace(destination)
           PY
 
       - name: Build deterministic 30-day DART review sample
@@ -977,8 +1536,66 @@ jobs:
             --manifest-output "$DART_REVIEW_SAMPLE_MANIFEST" \
             --code-revision "$GITHUB_SHA"
 
+      - name: Validate partial frozen DART resume boundary
+        if: always() && inputs.mode == 'apply' && inputs.source == 'dart'
+        id: frozen_resume_boundary
+        env:
+          FROZEN_BUNDLE_DIR: ${{ runner.temp }}/dart-frozen-apply
+          EXPECTED_FROM_DATE: ${{ inputs.from_date }}
+          EXPECTED_TO_DATE: ${{ inputs.to_date }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -d "$FROZEN_BUNDLE_DIR" ]] || \
+             ! find "$FROZEN_BUNDLE_DIR/windows" -maxdepth 1 -type f -name '*.json' \
+               -print -quit 2>/dev/null | grep -q .; then
+            echo "evidence_safe=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ ! -f "$CHECKPOINT_PATH" ]]; then
+            echo "::error::A partial frozen bundle exists without its checkpoint."
+            exit 1
+          fi
+          expected_job_fingerprint="$(
+            jq -er '.job.fingerprint | select(type == "string" and test("^[0-9a-f]{64}$"))' \
+              "$CHECKPOINT_PATH"
+          )"
+          expected_checkpoint_sha256="$(
+            CHECKPOINT_FILE="$CHECKPOINT_PATH" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from curator.backfill_checkpoint_api import (
+              canonical_checkpoint,
+              checkpoint_payload_hash,
+          )
+          from curator.official_backfill import validate_checkpoint
+
+          checkpoint = validate_checkpoint(
+              json.loads(
+                  Path(os.environ["CHECKPOINT_FILE"]).read_text(
+                      encoding="utf-8"
+                  )
+              ),
+              label="current run",
+          )
+          print(checkpoint_payload_hash(canonical_checkpoint(checkpoint)))
+          PY
+          )"
+          python -m curator.dart_frozen_replay_bundle validate-resume \
+            --path "$FROZEN_BUNDLE_DIR" \
+            --expected-code-revision "$GITHUB_SHA" \
+            --expected-job-fingerprint "$expected_job_fingerprint" \
+            --expected-checkpoint-sha256 "$expected_checkpoint_sha256" \
+            --expected-from-date "$EXPECTED_FROM_DATE" \
+            --expected-to-date "$EXPECTED_TO_DATE" \
+            --github-output "$GITHUB_OUTPUT" \
+            > /dev/null
+
       - name: Prepare checkpoint evidence
         if: always()
+        id: checkpoint_evidence
         env:
           MODE: ${{ inputs.mode }}
           SOURCE: ${{ inputs.source }}
@@ -988,13 +1605,64 @@ jobs:
         run: |
           set -euo pipefail
           evidence_dir="${{ runner.temp }}/official-backfill-checkpoint"
-          mkdir -p "$evidence_dir"
+          diagnostic_dir="${{ runner.temp }}/official-backfill-checkpoint-diagnostic"
+          mkdir -p "$diagnostic_dir"
+          checkpoint_present=false
+          completed_count=0
           if [[ -f "$CHECKPOINT_PATH" ]]; then
-            cp "$CHECKPOINT_PATH" "$evidence_dir/backfill_official_checkpoint.json"
+            checkpoint_present=true
+            completed_count="$(
+              CHECKPOINT_FILE="$CHECKPOINT_PATH" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          checkpoint = json.loads(
+              Path(os.environ["CHECKPOINT_FILE"]).read_text(encoding="utf-8")
+          )
+          completed = checkpoint.get("completed_windows")
+          if not isinstance(completed, dict):
+              raise SystemExit("checkpoint completed_windows is invalid")
+          print(len(completed))
+          PY
+            )"
           fi
-          printf '{"mode":"%s","source":"%s","from_date":"%s","to_date":"%s","checkpoint_present":%s}\n' \
-            "$MODE" "$SOURCE" "$FROM_DATE" "$TO_DATE" "$([[ -f "$CHECKPOINT_PATH" ]] && echo true || echo false)" \
-            > "$evidence_dir/checkpoint-metadata.json"
+          resumable=false
+          upload_checkpoint=false
+          frozen_present=false
+          if [[ "$MODE" == "apply" && "$checkpoint_present" == "true" ]]; then
+            if [[ "$SOURCE" == "dart" ]]; then
+              if (( completed_count > 0 )) && \
+                 [[ "${{ steps.frozen_resume_boundary.outputs.evidence_safe }}" == "true" ]]; then
+                mkdir -p "$evidence_dir"
+                cp "$CHECKPOINT_PATH" \
+                  "$evidence_dir/backfill_official_checkpoint.json"
+                cp -R "${{ runner.temp }}/dart-frozen-apply" \
+                  "$evidence_dir/frozen-replay-bundle"
+                resumable=true
+                upload_checkpoint=true
+                frozen_present=true
+              fi
+            else
+              mkdir -p "$evidence_dir"
+              cp "$CHECKPOINT_PATH" \
+                "$evidence_dir/backfill_official_checkpoint.json"
+              resumable=true
+              upload_checkpoint=true
+            fi
+          elif [[ "$MODE" == "replay" && "$checkpoint_present" == "true" ]]; then
+            mkdir -p "$evidence_dir"
+            cp "$CHECKPOINT_PATH" \
+              "$evidence_dir/backfill_official_checkpoint.json"
+            upload_checkpoint=true
+          fi
+          printf '{"mode":"%s","source":"%s","from_date":"%s","to_date":"%s","checkpoint_present":%s,"completed_window_count":%s,"resumable":%s,"upload_checkpoint":%s,"frozen_bundle_present":%s}\n' \
+            "$MODE" "$SOURCE" "$FROM_DATE" "$TO_DATE" \
+            "$checkpoint_present" "$completed_count" "$resumable" \
+            "$upload_checkpoint" "$frozen_present" \
+            > "$diagnostic_dir/checkpoint-metadata.json"
+          echo "resumable=$resumable" >> "$GITHUB_OUTPUT"
+          echo "upload_checkpoint=$upload_checkpoint" >> "$GITHUB_OUTPUT"
 
       - name: Enforce sanitized backfill artifact boundary
         if: always()
@@ -1071,14 +1739,28 @@ jobs:
             ${{ runner.temp }}/dart-replay-state-before.json
             ${{ runner.temp }}/dart-replay-state-after.json
             ${{ runner.temp }}/dart-replay-state-binding.json
+            ${{ runner.temp }}/dart-frozen-apply-artifact-binding.json
+            ${{ runner.temp }}/dart-frozen-replay-artifact-binding.json
+            ${{ runner.temp }}/dart-replay-drift-probe.json
           if-no-files-found: error
           retention-days: 90
 
       - name: Preserve resumable checkpoint
-        if: always()
+        if: >-
+          always() &&
+          steps.checkpoint_evidence.outputs.upload_checkpoint == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.CHECKPOINT_ARTIFACT_NAME }}
           path: ${{ runner.temp }}/official-backfill-checkpoint
           if-no-files-found: error
           retention-days: 90
+
+      - name: Preserve checkpoint diagnostic
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: official-backfill-checkpoint-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/official-backfill-checkpoint-diagnostic
+          if-no-files-found: error
+          retention-days: 30

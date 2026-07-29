@@ -1018,6 +1018,8 @@ jobs:
                 [
                   {name: (run) => `official-backfill-report-${run.id}`},
                   {pattern: /^official-backfill-checkpoint-apply-dart-\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}-false$/},
+                  {name: (run) =>
+                    `official-dart-frozen-replay-apply-${run.id}-${run.run_attempt}`},
                 ], true],
               ["dart_replay", process.env.DART_REPLAY_RUN_ID, "official-backfill.yml",
                 [
@@ -1309,6 +1311,7 @@ jobs:
           artifact-ids: >-
             ${{ steps.producers.outputs.dart_apply_artifact_0_id }},
             ${{ steps.producers.outputs.dart_apply_artifact_1_id }},
+            ${{ steps.producers.outputs.dart_apply_artifact_2_id }},
             ${{ steps.producers.outputs.dart_replay_artifact_0_id }},
             ${{ steps.producers.outputs.dart_replay_artifact_1_id }},
             ${{ steps.producers.outputs.sec_apply_artifact_0_id }},
@@ -1450,6 +1453,10 @@ jobs:
           from pathlib import Path
 
           from curator.backfill_checkpoint_api import checkpoint_payload_hash
+          from curator.dart_frozen_replay_bundle import (
+              FrozenReplayBundleError,
+              validate_probe_contract,
+          )
           from curator.official_backfill import validate_checkpoint
 
           root = Path("connector-artifacts")
@@ -1480,13 +1487,34 @@ jobs:
                   raise SystemExit(f"{path}: expected one {name}, found {len(matches)}")
               return matches[0]
 
-          def dart_run(producer_key, replay):
-              report_dir, _report_artifact = artifact_dir(producer_key, 0)
-              checkpoint_dir, checkpoint_artifact = artifact_dir(producer_key, 1)
-              report = json.loads(
-                  one_file(report_dir, "official-backfill-report.json").read_text(
-                      encoding="utf-8"
+          def strict_json_bytes(raw, label):
+              def reject_pairs(pairs):
+                  result = {}
+                  for key, value in pairs:
+                      if key in result:
+                          raise ValueError(f"{label}: duplicate JSON key")
+                      result[key] = value
+                  return result
+
+              def reject_constant(_value):
+                  raise ValueError(f"{label}: non-finite JSON number")
+
+              try:
+                  return json.loads(
+                      raw.decode("utf-8"),
+                      object_pairs_hook=reject_pairs,
+                      parse_constant=reject_constant,
                   )
+              except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                  raise SystemExit(f"{label}: invalid strict UTF-8 JSON") from exc
+
+          def dart_run(producer_key, replay):
+              report_dir, report_artifact = artifact_dir(producer_key, 0)
+              checkpoint_dir, checkpoint_artifact = artifact_dir(producer_key, 1)
+              report_file = one_file(report_dir, "official-backfill-report.json")
+              report = strict_json_bytes(
+                  report_file.read_bytes(),
+                  f"{producer_key} report",
               )
               checkpoint_file = one_file(
                   checkpoint_dir, "backfill_official_checkpoint.json"
@@ -1503,8 +1531,6 @@ jobs:
                   "windows_total": 30,
                   "windows_remaining": 0,
                   "windows_failed": 0,
-                  "windows_attempted": 30,
-                  "windows_succeeded": 30,
               }
               for key, expected in expected_report.items():
                   if report.get(key) != expected:
@@ -1514,6 +1540,8 @@ jobs:
               if replay:
                   if (
                       report.get("windows_already_completed") != 30
+                      or report.get("windows_attempted") != 30
+                      or report.get("windows_succeeded") != 30
                       or report.get("idempotent") is not True
                       or report.get("replay_verified") is not True
                       or report.get("checkpoint_before")
@@ -1523,12 +1551,26 @@ jobs:
                           "DART replay must refetch all 30 windows without changing checkpoint"
                       )
               else:
+                  attempted = report.get("windows_attempted")
+                  previously_completed = report.get("windows_already_completed")
                   if (
-                      report.get("windows_already_completed") != 0
+                      not isinstance(attempted, int)
+                      or isinstance(attempted, bool)
+                      or not 0 <= attempted <= 30
+                      or not isinstance(previously_completed, int)
+                      or isinstance(previously_completed, bool)
+                      or not 0 <= previously_completed <= 30
+                      or attempted + previously_completed != 30
+                      or report.get("windows_succeeded") != attempted
+                      or report.get("windows_selected") != attempted
+                      or report.get("windows_pending_before_limit") != attempted
                       or report.get("idempotent") is not False
                       or report.get("replay_verified") is not False
                   ):
-                      raise SystemExit("DART apply did not execute exactly 30 windows")
+                      raise SystemExit(
+                          "DART apply execution and authoritative 30-window "
+                          "resume evidence are inconsistent"
+                      )
               completed = checkpoint.get("completed_windows")
               failed = checkpoint.get("failed_windows")
               if not isinstance(completed, dict) or len(completed) != 30 or failed:
@@ -1585,6 +1627,10 @@ jobs:
                       )
                   previous_end = window.get("window_end_exclusive")
               binding = None
+              immutable = {
+                  "report_artifact": report_artifact,
+                  "report_sha256": hashlib.sha256(report_file.read_bytes()).hexdigest(),
+              }
               if replay:
                   binding = json.loads(
                       one_file(
@@ -1656,6 +1702,198 @@ jobs:
                       raise SystemExit(
                           "DART replay results do not bind all apply/replay count hashes"
                       )
+                  frozen_binding_file = one_file(
+                      report_dir, "dart-frozen-replay-artifact-binding.json"
+                  )
+                  drift_file = one_file(report_dir, "dart-replay-drift-probe.json")
+                  frozen_binding_bytes = frozen_binding_file.read_bytes()
+                  drift_bytes = drift_file.read_bytes()
+                  frozen_binding = strict_json_bytes(
+                      frozen_binding_bytes,
+                      "DART frozen replay artifact binding",
+                  )
+                  drift = strict_json_bytes(
+                      drift_bytes,
+                      "DART fresh drift probe",
+                  )
+                  frozen_report = report.get("frozen_replay")
+                  drift_report = (
+                      frozen_report.get("drift_probe")
+                      if isinstance(frozen_report, dict)
+                      else None
+                  )
+                  probe_range_start = frozen_binding.get("range_start")
+                  probe_range_end = frozen_binding.get(
+                      "range_end_exclusive"
+                  )
+                  probe_fingerprint = frozen_binding.get("job_fingerprint")
+                  if (
+                      not isinstance(probe_range_start, str)
+                      or not isinstance(probe_range_end, str)
+                      or not isinstance(probe_fingerprint, str)
+                      or probe_range_start != report.get("range_start")
+                      or probe_range_end != report.get("range_end_exclusive")
+                      or probe_fingerprint != report.get("job_fingerprint")
+                  ):
+                      raise SystemExit(
+                          "DART fresh drift probe expected range is not bound "
+                          "to the replay producer"
+                      )
+                  try:
+                      drift_validation = validate_probe_contract(
+                          drift,
+                          expected_code_revision=revision,
+                          expected_range_start=probe_range_start,
+                          expected_range_end_exclusive=probe_range_end,
+                          expected_job_fingerprint=probe_fingerprint,
+                      )
+                  except FrozenReplayBundleError as exc:
+                      raise SystemExit(
+                          "DART fresh drift probe raw bytes do not prove an "
+                          "exact fully matched 30-day source observation"
+                      ) from exc
+                  if (
+                      frozen_binding.get("kind")
+                      != "official-dart-frozen-replay-artifact-binding"
+                      or frozen_binding.get("consumer", {}).get("run_id")
+                      != manifest["producers"][producer_key]["run_id"]
+                      or frozen_binding.get("consumer", {}).get("code_revision")
+                      != revision
+                      or frozen_binding.get("artifact_sanitization", {}).get("status")
+                      != "verified"
+                      or drift.get("kind") != "official-dart-fresh-drift-probe"
+                      or drift.get("code_revision") != revision
+                      or drift.get("status") != "matched"
+                      or drift.get("read_only") is not True
+                      or drift.get("governance_write_attempted") is not False
+                      or drift.get("checkpoint_write_attempted") is not False
+                      or drift.get("quota_ledger_write_attempted") is not True
+                      or drift.get("artifact_sanitization", {}).get("status")
+                      != "verified"
+                      or drift_validation.get("fully_matched") is not True
+                      or drift_validation.get("window_count") != 30
+                      or drift_validation.get("matched_window_count") != 30
+                      or not isinstance(frozen_report, dict)
+                      or frozen_report.get("apply_artifact_binding_sha256")
+                      != hashlib.sha256(frozen_binding_bytes).hexdigest()
+                      or frozen_report.get("apply_manifest_sha256")
+                      != frozen_binding.get("manifest_sha256")
+                      or not isinstance(drift_report, dict)
+                      or drift_report.get("status") != "matched"
+                      or drift_report.get("release_gate_matched") is not True
+                      or drift_report.get("read_only") is not True
+                      or drift_report.get("governance_write_attempted") is not False
+                      or drift_report.get("checkpoint_write_attempted") is not False
+                      or drift_report.get("quota_ledger_write_attempted") is not True
+                      or drift_report.get("sha256")
+                      != hashlib.sha256(drift_bytes).hexdigest()
+                  ):
+                      raise SystemExit(
+                          "DART fresh drift probe is not a matched, read-only, "
+                          "immutable release-gate diagnostic"
+                      )
+                  immutable.update(
+                      {
+                          "frozen_binding": frozen_binding,
+                          "frozen_binding_sha256": hashlib.sha256(
+                              frozen_binding_bytes
+                          ).hexdigest(),
+                          "drift_probe": drift,
+                          "drift_probe_sha256": hashlib.sha256(drift_bytes).hexdigest(),
+                      }
+                  )
+              else:
+                  frozen_dir, frozen_artifact = artifact_dir(producer_key, 2)
+                  frozen_manifest_file = one_file(frozen_dir, "manifest.json")
+                  frozen_manifest_bytes = frozen_manifest_file.read_bytes()
+                  frozen_manifest = strict_json_bytes(
+                      frozen_manifest_bytes,
+                      "DART frozen apply manifest",
+                  )
+                  artifact_binding_file = one_file(
+                      report_dir, "dart-frozen-apply-artifact-binding.json"
+                  )
+                  artifact_binding_bytes = artifact_binding_file.read_bytes()
+                  artifact_binding = strict_json_bytes(
+                      artifact_binding_bytes,
+                      "DART frozen apply upload binding",
+                  )
+                  frozen_windows = frozen_manifest.get("windows")
+                  if (
+                      frozen_manifest.get("kind")
+                      != "official-dart-frozen-replay-bundle"
+                      or frozen_manifest.get("code_revision") != revision
+                      or frozen_manifest.get("mode") != "apply"
+                      or frozen_manifest.get("source") != "dart"
+                      or frozen_manifest.get("job", {}).get("fingerprint")
+                      != report.get("job_fingerprint")
+                      or frozen_manifest.get("checkpoint", {}).get("payload_sha256")
+                      != checkpoint_hash
+                      or not isinstance(frozen_windows, list)
+                      or len(frozen_windows) != 30
+                      or artifact_binding.get("kind")
+                      != "official-dart-frozen-apply-artifact-binding"
+                      or artifact_binding.get("producer", {}).get("run_id")
+                      != manifest["producers"][producer_key]["run_id"]
+                      or artifact_binding.get("producer", {}).get("code_revision")
+                      != revision
+                      or artifact_binding.get("artifact", {}).get("id")
+                      != frozen_artifact["artifact_id"]
+                      or artifact_binding.get("artifact", {}).get("name")
+                      != frozen_artifact["artifact_name"]
+                      or artifact_binding.get("artifact", {}).get("digest")
+                      != frozen_artifact["artifact_digest"]
+                      or artifact_binding.get("manifest_sha256")
+                      != hashlib.sha256(frozen_manifest_bytes).hexdigest()
+                      or artifact_binding.get("artifact_sanitization", {}).get("status")
+                      != "verified"
+                  ):
+                      raise SystemExit(
+                          "DART apply frozen bundle is not bound to its immutable artifact"
+                      )
+                  listed = {"manifest.json"}
+                  for index, row in enumerate(frozen_windows):
+                      relative = row.get("path") if isinstance(row, dict) else None
+                      leaf = frozen_dir / str(relative or "")
+                      if (
+                          not isinstance(row, dict)
+                          or row.get("index") != index
+                          or not isinstance(relative, str)
+                          or not relative.startswith("windows/")
+                          or ".." in Path(relative).parts
+                          or not leaf.is_file()
+                          or leaf.stat().st_size != row.get("byte_size")
+                          or hashlib.sha256(leaf.read_bytes()).hexdigest()
+                          != row.get("sha256")
+                      ):
+                          raise SystemExit(
+                              f"DART frozen apply leaf {index + 1} is invalid"
+                          )
+                      strict_json_bytes(
+                          leaf.read_bytes(),
+                          f"DART frozen apply leaf {index + 1}",
+                      )
+                      listed.add(Path(relative).as_posix())
+                  actual = {
+                      path.relative_to(frozen_dir).as_posix()
+                      for path in frozen_dir.rglob("*")
+                      if path.is_file()
+                  }
+                  if actual != listed:
+                      raise SystemExit("DART frozen apply artifact has an unlisted file")
+                  immutable.update(
+                      {
+                          "frozen_artifact": frozen_artifact,
+                          "frozen_manifest": frozen_manifest,
+                          "frozen_manifest_sha256": hashlib.sha256(
+                              frozen_manifest_bytes
+                          ).hexdigest(),
+                          "frozen_artifact_binding": artifact_binding,
+                          "frozen_artifact_binding_sha256": hashlib.sha256(
+                              artifact_binding_bytes
+                          ).hexdigest(),
+                      }
+                  )
               producer = manifest["producers"][producer_key]
               return {
                   "run_id": producer["run_id"],
@@ -1666,8 +1904,13 @@ jobs:
                   ),
                   "status": "succeeded",
                   "code_revision": revision,
+                  "execution_window_count": report.get("windows_attempted"),
+                  "preexisting_window_count": report.get(
+                      "windows_already_completed"
+                  ),
+                  "evidenced_window_count": len(windows),
                   "windows": windows,
-              }, checkpoint_file.read_bytes(), checkpoint, report, binding
+              }, checkpoint_file.read_bytes(), checkpoint, report, binding, immutable
 
           (
               dart_apply,
@@ -1675,6 +1918,7 @@ jobs:
               dart_apply_checkpoint,
               dart_apply_report,
               _dart_apply_binding,
+              dart_apply_immutable,
           ) = dart_run("dart_apply", False)
           (
               dart_replay,
@@ -1682,6 +1926,7 @@ jobs:
               dart_replay_checkpoint,
               dart_replay_report,
               dart_replay_binding,
+              dart_replay_immutable,
           ) = dart_run("dart_replay", True)
           if (
               dart_apply_bytes != dart_replay_bytes
@@ -1723,6 +1968,53 @@ jobs:
                   )
           if not isinstance(dart_replay_binding, dict):
               raise SystemExit("DART replay binding artifact is missing")
+          apply_artifact = dart_apply_immutable["frozen_artifact"]
+          replay_artifact = dart_replay_immutable["frozen_binding"]["artifact"]
+          if (
+              replay_artifact.get("id") != apply_artifact["artifact_id"]
+              or replay_artifact.get("name") != apply_artifact["artifact_name"]
+              or replay_artifact.get("digest") != apply_artifact["artifact_digest"]
+              or dart_replay_immutable["frozen_binding"].get("manifest_sha256")
+              != dart_apply_immutable["frozen_manifest_sha256"]
+          ):
+              raise SystemExit(
+                  "DART replay did not consume the exact immutable apply artifact"
+              )
+          apply_receipt = dart_apply_report.get("receipt_contract")
+          replay_receipt = dart_replay_report.get("receipt_contract")
+          frozen_manifest_sha256 = dart_apply_immutable["frozen_manifest_sha256"]
+          if (
+              not isinstance(apply_receipt, dict)
+              or apply_receipt.get("frozen_bundle_manifest_sha256")
+              != frozen_manifest_sha256
+              or not isinstance(replay_receipt, dict)
+              or replay_receipt.get("frozen_bundle_manifest_sha256")
+              != frozen_manifest_sha256
+              or replay_receipt.get("frozen_artifact_binding_sha256")
+              != dart_replay_immutable["frozen_binding_sha256"]
+              or replay_receipt.get("source_network_accessed") is not False
+          ):
+              raise SystemExit(
+                  "DART apply/replay receipt payloads are not bound to frozen bytes"
+              )
+          dart_apply["frozen_bundle_manifest_sha256"] = frozen_manifest_sha256
+          dart_replay.update(
+              {
+                  "frozen_bundle_manifest_sha256": frozen_manifest_sha256,
+                  "frozen_artifact_binding_sha256": dart_replay_immutable[
+                      "frozen_binding_sha256"
+                  ],
+                  "source_network_accessed": False,
+                  "fresh_drift_probe": {
+                      "status": "matched",
+                      "sha256": dart_replay_immutable["drift_probe_sha256"],
+                      "read_only": True,
+                      "governance_write_attempted": False,
+                      "checkpoint_write_attempted": False,
+                      "quota_ledger_write_attempted": True,
+                  },
+              }
+          )
 
           def sec_run(producer_key, expected_mode):
               artifact_dir_path, artifact = artifact_dir(producer_key, 0)
@@ -1831,7 +2123,7 @@ jobs:
           sec_replay = sec_run("sec_replay", "replay")
           payload["connector_receipts"] = {
               "schema_version": 1,
-              "kind": "bside-global-alpha-expedited-connector-receipts",
+              "kind": "bside-global-alpha-expedited-connector-receipts-v2",
               "environment": "production",
               "evidence_source": "immutable_producer_artifacts",
               "is_synthetic": False,

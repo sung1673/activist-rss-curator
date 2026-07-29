@@ -37,7 +37,7 @@ SCHEMA_VERSION = 1
 INPUT_KIND = "bside-global-production-alpha-expedited-inputs"
 REPORT_KIND = "bside-global-production-alpha-expedited-release-report"
 RELEASE_CHANNEL = "production_alpha_early_access"
-CONNECTOR_KIND = "bside-global-alpha-expedited-connector-receipts"
+CONNECTOR_KIND = "bside-global-alpha-expedited-connector-receipts-v2"
 SOURCE_READINESS_KIND = "bside-global-alpha-expedited-source-readiness"
 HUMAN_REVIEW_KIND = "bside-global-alpha-human-review"
 APPROVAL_KIND = "bside-global-alpha-expedited-release-approval"
@@ -762,6 +762,7 @@ def validate_connector_receipts(
     summaries: list[dict[str, object]] = []
     replay_verified = 0
     current_coverage = 0
+    frozen_replay_verified = 0
     for index, raw_connector in enumerate(connectors):
         location = f"connector-receipts.connectors[{index}]"
         connector = _mapping(raw_connector, location)
@@ -815,6 +816,134 @@ def validate_connector_receipts(
                     f"{location}: apply/replay payload differs on {window_date}"
                 )
             matches += 1
+        if family == "dart":
+            apply_run = _mapping(
+                connector.get("apply_run"),
+                f"{location}.apply_run",
+            )
+            replay_run = _mapping(
+                connector.get("replay_run"),
+                f"{location}.replay_run",
+            )
+            apply_execution_windows = _int(
+                apply_run.get("execution_window_count"),
+                "execution_window_count",
+                f"{location}.apply_run",
+                minimum=0,
+            )
+            apply_preexisting_windows = _int(
+                apply_run.get("preexisting_window_count"),
+                "preexisting_window_count",
+                f"{location}.apply_run",
+                minimum=0,
+            )
+            apply_evidenced_windows = _int(
+                apply_run.get("evidenced_window_count"),
+                "evidenced_window_count",
+                f"{location}.apply_run",
+                minimum=1,
+            )
+            replay_execution_windows = _int(
+                replay_run.get("execution_window_count"),
+                "execution_window_count",
+                f"{location}.replay_run",
+                minimum=1,
+            )
+            replay_preexisting_windows = _int(
+                replay_run.get("preexisting_window_count"),
+                "preexisting_window_count",
+                f"{location}.replay_run",
+                minimum=0,
+            )
+            replay_evidenced_windows = _int(
+                replay_run.get("evidenced_window_count"),
+                "evidenced_window_count",
+                f"{location}.replay_run",
+                minimum=1,
+            )
+            if (
+                apply_execution_windows > 30
+                or apply_preexisting_windows > 30
+                or apply_execution_windows + apply_preexisting_windows != 30
+                or apply_evidenced_windows != 30
+                or replay_execution_windows != 30
+                or replay_preexisting_windows != 30
+                or replay_evidenced_windows != 30
+            ):
+                raise ExpeditedAlphaEvidenceError(
+                    f"{location}: DART execution and authoritative frozen "
+                    "30-window evidence are inconsistent"
+                )
+            apply_summary.update(
+                {
+                    "execution_window_count": apply_execution_windows,
+                    "preexisting_window_count": apply_preexisting_windows,
+                    "evidenced_window_count": apply_evidenced_windows,
+                }
+            )
+            replay_summary.update(
+                {
+                    "execution_window_count": replay_execution_windows,
+                    "preexisting_window_count": replay_preexisting_windows,
+                    "evidenced_window_count": replay_evidenced_windows,
+                }
+            )
+            apply_manifest = _digest(
+                apply_run.get("frozen_bundle_manifest_sha256"),
+                "frozen_bundle_manifest_sha256",
+                f"{location}.apply_run",
+            )
+            replay_manifest = _digest(
+                replay_run.get("frozen_bundle_manifest_sha256"),
+                "frozen_bundle_manifest_sha256",
+                f"{location}.replay_run",
+            )
+            _digest(
+                replay_run.get("frozen_artifact_binding_sha256"),
+                "frozen_artifact_binding_sha256",
+                f"{location}.replay_run",
+            )
+            if apply_manifest != replay_manifest:
+                raise ExpeditedAlphaEvidenceError(
+                    f"{location}: apply/replay frozen bundle manifest differs"
+                )
+            if _bool(
+                replay_run.get("source_network_accessed"),
+                "source_network_accessed",
+                f"{location}.replay_run",
+            ):
+                raise ExpeditedAlphaEvidenceError(
+                    f"{location}: frozen replay accessed the source network"
+                )
+            drift = _mapping(
+                replay_run.get("fresh_drift_probe"),
+                f"{location}.replay_run.fresh_drift_probe",
+            )
+            drift_location = f"{location}.replay_run.fresh_drift_probe"
+            if (
+                _text(drift.get("status"), "status", drift_location) != "matched"
+                or not _bool(drift.get("read_only"), "read_only", drift_location)
+                or _bool(
+                    drift.get("governance_write_attempted"),
+                    "governance_write_attempted",
+                    drift_location,
+                )
+                or _bool(
+                    drift.get("checkpoint_write_attempted"),
+                    "checkpoint_write_attempted",
+                    drift_location,
+                )
+                or not _bool(
+                    drift.get("quota_ledger_write_attempted"),
+                    "quota_ledger_write_attempted",
+                    drift_location,
+                )
+            ):
+                raise ExpeditedAlphaEvidenceError(
+                    f"{location}: fresh DART drift probe is not matched and read-only"
+                )
+            _digest(drift.get("sha256"), "sha256", drift_location)
+            frozen_replay_verified += 1
         last_end = date.fromisoformat(
             str(apply_summary["ended_on_exclusive"])
         )
@@ -861,6 +990,12 @@ def validate_connector_receipts(
             exact_set and current_coverage == len(EXPECTED_CONNECTORS),
             required=len(EXPECTED_CONNECTORS),
             actual=current_coverage,
+        ),
+        _gate(
+            "expedited_connectors.dart_frozen_replay",
+            frozen_replay_verified == 1,
+            required=1,
+            actual=frozen_replay_verified,
         ),
     ]
     return {"connectors": summaries}, gates
