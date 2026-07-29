@@ -892,17 +892,9 @@ jobs:
             "$BACKFILL_SYNC_COMPANY_MASTER" == "false"
           ]]; then
             range_days="$(
-              FROM_DATE="$BACKFILL_FROM_DATE" TO_DATE="$BACKFILL_TO_DATE" python - <<'PY'
-            import os
-            from datetime import date
-
-            print(
-                (
-                    date.fromisoformat(os.environ["TO_DATE"])
-                    - date.fromisoformat(os.environ["FROM_DATE"])
-                ).days
-            )
-            PY
+              FROM_DATE="$BACKFILL_FROM_DATE" TO_DATE="$BACKFILL_TO_DATE" \
+                python -c \
+                'import os; from datetime import date; print((date.fromisoformat(os.environ["TO_DATE"]) - date.fromisoformat(os.environ["FROM_DATE"])).days)'
             )"
             if [[ "$range_days" == "30" ]]; then
               args+=(--write-frozen-bundle-dir "$DART_FROZEN_APPLY_DIR")
