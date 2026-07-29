@@ -649,6 +649,7 @@ jobs:
           curator/backfill_checkpoint_api.py
           curator/benchmark_candidates.py
           curator/dart_canary_sample.py
+          curator/dart_frozen_replay_bundle.py
           curator/dart_quota.py
           curator/dart_review_sample.py
           curator/deployment_manifest.py

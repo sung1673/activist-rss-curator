@@ -301,6 +301,7 @@ def test_backfill_shell_never_interpolates_dispatch_text_directly() -> None:
     steps = payload["jobs"]["backfill"]["steps"]
     for input_name in (
         "mode",
+        "frozen_apply_run_id",
         "source",
         "from_date",
         "to_date",
@@ -566,6 +567,7 @@ def test_official_backfill_preflights_dart_apply_and_replay_before_checkpoint_ac
 
 def test_ci_type_checks_the_fixed_official_source_contract() -> None:
     ci = workflow_text("ci.yml")
+    assert "curator/dart_frozen_replay_bundle.py" in ci
     assert (
         ci.index("curator/official_source_contracts.py")
         < ci.index("curator/official_source_rights.py")
@@ -1337,6 +1339,7 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     dispatch = payload["on"]["workflow_dispatch"]["inputs"]
     assert set(dispatch) == {
         "mode",
+        "frozen_apply_run_id",
         "source",
         "from_date",
         "to_date",
@@ -1346,6 +1349,7 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
         "canary_request_budget",
     }
     assert dispatch["mode"]["options"] == ["dry-run", "apply", "replay"]
+    assert dispatch["frozen_apply_run_id"]["default"] == ""
     assert dispatch["source"]["options"] == ["dart", "kind", "both"]
     assert dispatch["canary_lookback_days"]["default"] == "365"
     assert dispatch["canary_request_budget"]["default"] == "10000"
@@ -1364,6 +1368,8 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert "replay requires one exact 30-day range" in input_validation["run"]
     assert "replay requires max_windows=30" in input_validation["run"]
     assert "replay cannot sync the DART company master" in input_validation["run"]
+    assert "replay requires a positive frozen_apply_run_id" in input_validation["run"]
+    assert "frozen_apply_run_id is forbidden outside replay mode" in input_validation["run"]
     assert payload["concurrency"] == PRODUCTION_OFFICIAL_WRITE_CONCURRENCY
     assert payload["permissions"] == {"contents": "read", "actions": "read"}
 
@@ -1400,6 +1406,15 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
         "DART_REPLAY_STATE_BINDING": (
             "${{ runner.temp }}/dart-replay-state-binding.json"
         ),
+        "DART_FROZEN_APPLY_ARTIFACT_BINDING": (
+            "${{ runner.temp }}/dart-frozen-apply-artifact-binding.json"
+        ),
+        "DART_FROZEN_REPLAY_ARTIFACT_BINDING": (
+            "${{ runner.temp }}/dart-frozen-replay-artifact-binding.json"
+        ),
+        "DART_DRIFT_PROBE_REPORT": (
+            "${{ runner.temp }}/dart-replay-drift-probe.json"
+        ),
     }
     checkout = next(step for step in steps if step["name"] == "Checkout immutable dispatch revision")
     assert checkout["with"]["ref"] == "${{ github.sha }}"
@@ -1428,7 +1443,9 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert run_step["env"]["BSIDE_API_BASE_URL"] == (
         "${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}"
     )
-    assert run_step["env"]["CURATOR_REQUIRE_DURABLE_DART_QUOTA"] == "1"
+    assert run_step["env"]["CURATOR_REQUIRE_DURABLE_DART_QUOTA"] == (
+        "${{ inputs.mode != 'replay' && '1' || '0' }}"
+    )
     assert run_step["env"]["CURATOR_DART_QUOTA_PHASE"] == (
         "${{ inputs.mode == 'replay' && "
         "'official-backfill-replay' || 'official-backfill' }}"
@@ -1436,10 +1453,15 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert run_step["env"]["CURATOR_REQUIRE_REMOTE_API"] == (
         "${{ inputs.mode != 'dry-run' && '1' || '0' }}"
     )
-    assert 'args+=(--replay)' in run_step["run"]
-    assert run_step["env"]["OPENDART_API_KEYS"] == "${{ secrets.OPENDART_API_KEYS }}"
+    assert "--replay" in run_step["run"]
+    assert "--frozen-bundle-dir" in run_step["run"]
+    assert "--frozen-artifact-binding" in run_step["run"]
+    assert run_step["env"]["OPENDART_API_KEYS"] == (
+        "${{ inputs.mode != 'replay' && secrets.OPENDART_API_KEYS || '' }}"
+    )
     assert run_step["env"]["DART_API_KEY"] == (
-        "${{ secrets.OPENDART_API_KEYS == '' && secrets.DART_API_KEY || '' }}"
+        "${{ inputs.mode != 'replay' && secrets.OPENDART_API_KEYS == '' && "
+        "secrets.DART_API_KEY || '' }}"
     )
     validation = next(step for step in steps if step["name"] == "Validate operational configuration")
     assert "BSIDE_OPS_TOKEN" in validation["run"]
@@ -1448,7 +1470,9 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert "python .github/scripts/validate-api-base-urls.py" in validation["run"]
     assert "mask-opendart-credentials.py" in validation["run"]
     assert "required+=(DART_API_KEY" not in validation["run"]
-    assert validation["env"]["OPENDART_API_KEYS"] == "${{ secrets.OPENDART_API_KEYS }}"
+    assert validation["env"]["OPENDART_API_KEYS"] == (
+        "${{ inputs.mode != 'replay' && secrets.OPENDART_API_KEYS || '' }}"
+    )
     assert validation["env"]["GOVERNANCE_API_BASE_URL"] == (
         "${{ vars.GOVERNANCE_API_BASE_URL }}"
     )
@@ -1542,6 +1566,25 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert "len(windows) != 30" in receipt_contract["run"]
     assert steps.index(replay_before) < steps.index(run_step) < steps.index(replay_after)
     assert steps.index(replay_after) < steps.index(replay_binding)
+    frozen_resolver = next(
+        step for step in steps if step["name"] == "Resolve exact immutable DART apply bundle"
+    )
+    assert frozen_resolver["if"] == "inputs.mode == 'replay'"
+    assert "getWorkflowRun" in frozen_resolver["with"]["script"]
+    assert "FROZEN_APPLY_RUN_ID" in frozen_resolver["env"]
+    assert "matches.length !== 1" in frozen_resolver["with"]["script"]
+    assert "72 * 60 * 60 * 1000" in frozen_resolver["with"]["script"]
+    assert "run.head_sha !== context.sha" in frozen_resolver["with"]["script"]
+    drift_probe = next(
+        step for step in steps if step["name"] == "Run fresh read-only DART drift probe"
+    )
+    assert drift_probe["env"]["OPENDART_API_KEYS"] == "${{ secrets.OPENDART_API_KEYS }}"
+    assert drift_probe["env"]["CURATOR_DART_QUOTA_PHASE"] == (
+        "official-backfill-drift-probe"
+    )
+    assert "--drift-probe-only" in drift_probe["run"]
+    assert "dart-drift-probe.stderr.raw" in drift_probe["run"]
+    assert "raw connector output was discarded" in drift_probe["run"]
     review_sample = next(
         step
         for step in steps
@@ -1571,8 +1614,10 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
 
     uploads = [step for step in steps if step.get("uses") == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"]
     assert {step["name"] for step in uploads} == {
+        "Preserve immutable private frozen DART apply bundle",
         "Preserve backfill report",
         "Preserve resumable checkpoint",
+        "Preserve checkpoint diagnostic",
     }
     report_upload = next(step for step in uploads if step["name"] == "Preserve backfill report")
     checkpoint_upload = next(
@@ -1582,7 +1627,10 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
         "always() && "
         "steps.backfill_artifact_boundary.outputs.evidence_safe == 'true'"
     )
-    assert checkpoint_upload["if"] == "always()"
+    assert checkpoint_upload["if"] == (
+        "always() && "
+        "steps.checkpoint_evidence.outputs.upload_checkpoint == 'true'"
+    )
     assert all(step["with"]["if-no-files-found"] == "error" for step in uploads)
     assert report_upload["with"]["path"].splitlines() == [
         "${{ runner.temp }}/official-backfill-report.json",
@@ -1593,9 +1641,55 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
         "${{ runner.temp }}/dart-replay-state-before.json",
         "${{ runner.temp }}/dart-replay-state-after.json",
         "${{ runner.temp }}/dart-replay-state-binding.json",
+        "${{ runner.temp }}/dart-frozen-apply-artifact-binding.json",
+        "${{ runner.temp }}/dart-frozen-replay-artifact-binding.json",
+        "${{ runner.temp }}/dart-replay-drift-probe.json",
     ]
+    frozen_upload = next(
+        step
+        for step in uploads
+        if step["name"] == "Preserve immutable private frozen DART apply bundle"
+    )
+    assert frozen_upload["with"]["retention-days"] == "90"
+    assert frozen_upload["with"]["name"] == (
+        "${{ env.DART_FROZEN_APPLY_ARTIFACT_NAME }}"
+    )
     checkpoint = next(step for step in uploads if step["name"] == "Preserve resumable checkpoint")
     assert checkpoint["with"]["name"] == "${{ env.CHECKPOINT_ARTIFACT_NAME }}"
+    diagnostic = next(
+        step
+        for step in uploads
+        if step["name"] == "Preserve checkpoint diagnostic"
+    )
+    assert diagnostic["if"] == "always()"
+    assert diagnostic["with"]["name"] == (
+        "official-backfill-checkpoint-diagnostic-"
+        "${{ github.run_id }}-${{ github.run_attempt }}"
+    )
+    assert diagnostic["with"]["retention-days"] == "30"
+    prepare_checkpoint = next(
+        step for step in steps if step["name"] == "Prepare checkpoint evidence"
+    )
+    assert prepare_checkpoint["id"] == "checkpoint_evidence"
+    assert 'if [[ "$MODE" == "apply"' in prepare_checkpoint["run"]
+    assert "if (( completed_count > 0 ))" in prepare_checkpoint["run"]
+    assert "steps.frozen_resume_boundary.outputs.evidence_safe" in (
+        prepare_checkpoint["run"]
+    )
+    assert 'echo "resumable=$resumable"' in prepare_checkpoint["run"]
+    assert 'echo "upload_checkpoint=$upload_checkpoint"' in (
+        prepare_checkpoint["run"]
+    )
+    assert (
+        'elif [[ "$MODE" == "replay" && '
+        '"$checkpoint_present" == "true" ]]'
+        in prepare_checkpoint["run"]
+    )
+    assert prepare_checkpoint["run"].count('cp "$CHECKPOINT_PATH"') >= 2
+    assert "$evidence_dir/backfill_official_checkpoint.json" in (
+        prepare_checkpoint["run"]
+    )
+    assert "official-backfill-checkpoint-diagnostic" in prepare_checkpoint["run"]
     resolver = next(step for step in steps if step["name"] == "Resolve previous matching checkpoint")
     assert resolver["uses"] == "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3"
     assert "official-backfill.yml" in resolver["with"]["script"]

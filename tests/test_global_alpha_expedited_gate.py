@@ -191,7 +191,7 @@ def receipt_window(
 
 
 def connector_run(family: str, mode: str) -> dict[str, object]:
-    return {
+    result: dict[str, object] = {
         "run_id": 100 if mode == "apply" else 101,
         "artifact_id": 200 if mode == "apply" else 201,
         "artifact_name": f"global-backfill-{family}-{mode}-production",
@@ -202,6 +202,35 @@ def connector_run(family: str, mode: str) -> dict[str, object]:
             receipt_window(family, mode, index) for index in range(30)
         ],
     }
+    if family == "dart":
+        result.update(
+            {
+                "execution_window_count": 30,
+                "preexisting_window_count": 0 if mode == "apply" else 30,
+                "evidenced_window_count": 30,
+            }
+        )
+        result["frozen_bundle_manifest_sha256"] = digest(
+            "dart:frozen-bundle-manifest"
+        )
+        if mode == "replay":
+            result.update(
+                {
+                    "frozen_artifact_binding_sha256": digest(
+                        "dart:frozen-artifact-binding"
+                    ),
+                    "source_network_accessed": False,
+                    "fresh_drift_probe": {
+                        "status": "matched",
+                        "sha256": digest("dart:fresh-drift-probe"),
+                        "read_only": True,
+                        "governance_write_attempted": False,
+                        "checkpoint_write_attempted": False,
+                        "quota_ledger_write_attempted": True,
+                    },
+                }
+            )
+    return result
 
 
 def connector_report(*, as_of: datetime = AS_OF) -> dict[str, object]:
@@ -722,6 +751,95 @@ def test_connector_apply_and_replay_require_distinct_producers(
         ExpeditedAlphaEvidenceError,
         match="reused producer identity fields",
     ):
+        build_expedited_release_report(bundle, expected_revision=REVISION)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("source_network_accessed", True, "source network"),
+        (
+            "frozen_bundle_manifest_sha256",
+            digest("different-frozen-manifest"),
+            "frozen bundle manifest differs",
+        ),
+    ],
+)
+def test_dart_release_requires_exact_offline_frozen_replay(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    bundle = valid_bundle()
+    dart = bundle["connector_receipts"]["connectors"][0]  # type: ignore[index]
+    dart["replay_run"][field] = value
+    with pytest.raises(ExpeditedAlphaEvidenceError, match=message):
+        build_expedited_release_report(bundle, expected_revision=REVISION)
+
+
+def test_dart_release_accepts_transparent_partial_apply_resume() -> None:
+    bundle = valid_bundle()
+    dart = bundle["connector_receipts"]["connectors"][0]  # type: ignore[index]
+    dart["apply_run"]["execution_window_count"] = 12
+    dart["apply_run"]["preexisting_window_count"] = 18
+    refresh_protected_bindings(bundle)
+
+    report = build_expedited_release_report(bundle, expected_revision=REVISION)
+
+    assert report["release_gate_passed"] is True
+    summary = report["connector_receipts"]["connectors"][0]["apply_run"]  # type: ignore[index]
+    assert summary["execution_window_count"] == 12
+    assert summary["preexisting_window_count"] == 18
+    assert summary["evidenced_window_count"] == 30
+
+
+@pytest.mark.parametrize(
+    ("execution", "preexisting", "evidenced"),
+    [
+        (12, 17, 30),
+        (12, 18, 29),
+        (0, 29, 30),
+    ],
+)
+def test_dart_release_rejects_unbound_partial_apply_resume(
+    execution: int,
+    preexisting: int,
+    evidenced: int,
+) -> None:
+    bundle = valid_bundle()
+    dart = bundle["connector_receipts"]["connectors"][0]  # type: ignore[index]
+    dart["apply_run"]["execution_window_count"] = execution
+    dart["apply_run"]["preexisting_window_count"] = preexisting
+    dart["apply_run"]["evidenced_window_count"] = evidenced
+    with pytest.raises(
+        ExpeditedAlphaEvidenceError,
+        match="execution and authoritative frozen 30-window evidence",
+    ):
+        build_expedited_release_report(bundle, expected_revision=REVISION)
+
+
+def test_dart_release_accepts_complete_checkpoint_after_zero_window_resume() -> None:
+    bundle = valid_bundle()
+    dart = bundle["connector_receipts"]["connectors"][0]  # type: ignore[index]
+    dart["apply_run"]["execution_window_count"] = 0
+    dart["apply_run"]["preexisting_window_count"] = 30
+    refresh_protected_bindings(bundle)
+
+    report = build_expedited_release_report(bundle, expected_revision=REVISION)
+
+    assert report["release_gate_passed"] is True
+    summary = report["connector_receipts"]["connectors"][0]["apply_run"]  # type: ignore[index]
+    assert summary["execution_window_count"] == 0
+    assert summary["preexisting_window_count"] == 30
+    assert summary["evidenced_window_count"] == 30
+
+
+@pytest.mark.parametrize("status", ["drift_detected", "probe_failed"])
+def test_dart_release_rejects_unmatched_fresh_drift_probe(status: str) -> None:
+    bundle = valid_bundle()
+    dart = bundle["connector_receipts"]["connectors"][0]  # type: ignore[index]
+    dart["replay_run"]["fresh_drift_probe"]["status"] = status
+    with pytest.raises(ExpeditedAlphaEvidenceError, match="not matched"):
         build_expedited_release_report(bundle, expected_revision=REVISION)
 
 

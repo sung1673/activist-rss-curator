@@ -27,8 +27,25 @@ from .dart_quota import (
     durable_dart_quota_configured,
     durable_dart_quota_required,
 )
+from .dart_frozen_replay_bundle import (
+    artifact_binding_checkpoint_sha256,
+    FrozenBundle,
+    FrozenReplayBundleError,
+    build_window_leaf,
+    compare_fresh_payload,
+    finalize_apply_bundle,
+    load_bundle,
+    load_window,
+    source_semantic_counts,
+    write_partial_apply_bundle,
+    write_probe_report,
+    write_window_leaf,
+)
 from .config import load_config
-from .official_ingest import run as run_official_ingest
+from .official_ingest import (
+    replay_frozen_dart_window,
+    run as run_official_ingest,
+)
 from .official_source_rights import (
     DartOfficialSourceRightClient,
     OfficialSourceRightError,
@@ -104,6 +121,11 @@ class BackfillOptions:
     restart: bool = False
     continue_on_error: bool = False
     sync_company_master: bool = False
+    write_frozen_bundle_dir: Path | None = None
+    frozen_bundle_dir: Path | None = None
+    frozen_artifact_binding: Path | None = None
+    drift_probe_output: Path | None = None
+    drift_probe_only: bool = False
 
     def validate(self) -> None:
         if self.start < MIN_BACKFILL_DATE:
@@ -154,6 +176,49 @@ class BackfillOptions:
                 raise BackfillConfigurationError(
                     "replay cannot mutate the DART company master"
                 )
+        if self.write_frozen_bundle_dir is not None:
+            if (
+                self.dry_run
+                or self.replay
+                or self.drift_probe_only
+                or self.sources != ("dart",)
+                or self.chunk_days != 1
+                or (self.end_exclusive - self.start).days != 30
+                or self.max_chunks not in {0, 30}
+                or self.sync_company_master
+            ):
+                raise BackfillConfigurationError(
+                    "frozen apply bundle requires an exact 30-day, DART-only "
+                    "apply with one-day windows and no company-master sync"
+                )
+        frozen_replay_requested = self.frozen_bundle_dir is not None
+        if frozen_replay_requested != (self.frozen_artifact_binding is not None):
+            raise BackfillConfigurationError(
+                "frozen bundle and artifact binding must be supplied together"
+            )
+        if self.replay and not frozen_replay_requested:
+            # Preserve the legacy replay interface for local compatibility;
+            # protected workflows require the frozen arguments.
+            pass
+        if self.drift_probe_only:
+            if (
+                self.replay
+                or self.dry_run
+                or not frozen_replay_requested
+                or self.drift_probe_output is None
+                or self.sources != ("dart",)
+                or self.chunk_days != 1
+                or (self.end_exclusive - self.start).days != 30
+                or self.max_chunks not in {0, 30}
+                or self.sync_company_master
+            ):
+                raise BackfillConfigurationError(
+                    "drift probe requires one exact 30-day frozen DART bundle"
+                )
+        elif self.drift_probe_output is not None:
+            raise BackfillConfigurationError(
+                "--drift-probe-output requires --drift-probe-only"
+            )
 
 
 IngestRunner = Callable[..., dict[str, object]]
@@ -384,7 +449,10 @@ def save_checkpoint(path: Path, checkpoint: dict[str, object]) -> None:
 
 def validate_runtime(options: BackfillOptions) -> None:
     missing: list[str] = []
-    if "dart" in options.sources:
+    frozen_database_replay = bool(
+        options.replay and options.frozen_bundle_dir is not None
+    )
+    if "dart" in options.sources and not frozen_database_replay:
         try:
             dart_credentials = load_opendart_credentials()
         except OpenDartCredentialConfigurationError as exc:
@@ -405,24 +473,25 @@ def validate_runtime(options: BackfillOptions) -> None:
                 "BSIDE_API_BASE_URL (or GOVERNANCE_API_BASE_URL/ACTIVIST_API_URL)"
                 "/BSIDE_OPS_TOKEN for KIND SourceRight preflight"
             )
-    if not options.dry_run and not remote_api_configured():
+    governance_write_or_replay = not options.dry_run and not options.drift_probe_only
+    if governance_write_or_replay and not remote_api_configured():
         missing.append("ACTIVIST_API_URL/ACTIVIST_API_SECRET")
-    if not options.dry_run and not checkpoint_api_configured():
+    if governance_write_or_replay and not checkpoint_api_configured():
         missing.append("BSIDE_API_BASE_URL/BSIDE_OPS_TOKEN")
     backend_binding_id = os.environ.get("BSIDE_BACKEND_BINDING_ID", "").strip()
-    if not options.dry_run and (
+    if governance_write_or_replay and (
         len(backend_binding_id) != 64
         or any(character not in "0123456789abcdef" for character in backend_binding_id)
     ):
         missing.append("BSIDE_BACKEND_BINDING_ID")
-    if not options.dry_run:
+    if governance_write_or_replay or options.drift_probe_only:
         try:
             _code_revision()
         except BackfillConfigurationError:
             missing.append("GITHUB_SHA/CURATOR_CODE_REVISION")
     if missing:
         raise BackfillConfigurationError("missing required runtime configuration: " + ", ".join(missing))
-    if not options.dry_run and "dart" in options.sources:
+    if governance_write_or_replay and "dart" in options.sources:
         try:
             DartOfficialSourceRightClient().preflight(_code_revision())
         except OfficialSourceRightError as exc:
@@ -549,6 +618,7 @@ def _summary_replay_counts(
     accepted = counts["official_dart_accepted"]
     remote_raw = counts["official_remote_raw_count"]
     acknowledged = counts["official_remote_ack_count"]
+    frozen_replay = counts.get("official_frozen_replay", 0) == 1
     if (
         min(counts.values()) < 0
         or raw < accepted
@@ -561,9 +631,57 @@ def _summary_replay_counts(
         or counts["official_failed"] != 0
         or counts["official_dart_errors"] != 0
         or counts["official_dart_quota_exhausted"] != 0
-        or counts["official_dart_requests"] < 1
+        or (
+            counts["official_dart_requests"] != 0
+            if frozen_replay
+            else counts["official_dart_requests"] < 1
+        )
     ):
         raise CheckpointError(f"{location} does not contain an exact remote ACK")
+    return counts
+
+
+def _summary_replay_semantic_counts(
+    summary: Mapping[str, object],
+    *,
+    location: str,
+) -> dict[str, int]:
+    """Compare source semantics without fabricating replay network activity."""
+
+    keys = (
+        "official_fetched",
+        "official_documents",
+        "official_events",
+        "official_companies",
+        "official_dart_fetched",
+        "official_dart_accepted",
+        "official_dart_rejected",
+        "official_dart_duplicates",
+        "official_dart_discarded",
+        "official_dart_errors",
+        "official_dart_quota_exhausted",
+        "official_remote_raw_count",
+        "official_remote_ack_count",
+        "official_remote_ack_mismatches",
+        "official_remote_run_persisted",
+        "official_remote_failed",
+        "official_failed",
+    )
+    counts = {key: _summary_int(summary, key) for key in keys}
+    if (
+        min(counts.values()) < 0
+        or counts["official_dart_accepted"]
+        != counts["official_remote_raw_count"]
+        or counts["official_remote_raw_count"]
+        != counts["official_remote_ack_count"]
+        or counts["official_remote_ack_mismatches"] != 0
+        or counts["official_remote_run_persisted"] != 1
+        or counts["official_remote_failed"] != 0
+        or counts["official_failed"] != 0
+        or counts["official_dart_errors"] != 0
+        or counts["official_dart_quota_exhausted"] != 0
+    ):
+        raise CheckpointError(f"{location} lacks an exact semantic ACK")
     return counts
 
 
@@ -597,7 +715,20 @@ def _window_receipt(
         "idempotency_key": idempotency_key,
         "summary_counts": counts,
     }
-    payload_digest = _canonical_sha256(payload_contract)
+    stable_payload_digest = str(result.get("stable_payload_sha256") or "")
+    payload_digest = (
+        stable_payload_digest
+        if re.fullmatch(r"[a-f0-9]{64}", stable_payload_digest)
+        else _canonical_sha256(payload_contract)
+    )
+    ingest_digest = _canonical_sha256(
+        {
+            "job_fingerprint": fingerprint,
+            "window_key": window_key,
+            "idempotency_key": idempotency_key,
+            "payload_sha256": payload_digest,
+        }
+    )
     receipt_contract: dict[str, object] = {
         "window_start": start,
         "window_end_exclusive": end,
@@ -609,7 +740,7 @@ def _window_receipt(
         "code_revision": str(result.get("code_revision") or ""),
         "payload_sha256": payload_digest,
         "idempotency_key": idempotency_key,
-        "ingest_id": f"official-dart:{payload_digest[:64]}",
+        "ingest_id": f"official-dart:{ingest_digest}",
         "idempotent": replay,
         "replay_verified": replay,
     }
@@ -649,6 +780,9 @@ def _checkpoint_receipt_contract(
     checkpoint_hash: str,
     replay: bool,
     replay_results: Mapping[str, Mapping[str, object]] | None = None,
+    frozen_bundle_manifest_sha256: str | None = None,
+    frozen_artifact_binding_sha256: str | None = None,
+    source_network_accessed: bool | None = None,
 ) -> dict[str, object]:
     completed = checkpoint.get("completed_windows")
     if not isinstance(completed, Mapping):
@@ -672,7 +806,7 @@ def _checkpoint_receipt_contract(
                 replay=replay,
             )
         )
-    return {
+    contract: dict[str, object] = {
         "schema_version": 1,
         "source": "dart",
         "mode": "replay" if replay else "apply",
@@ -682,6 +816,29 @@ def _checkpoint_receipt_contract(
         "windows": windows,
         "contract_sha256": _canonical_sha256(windows),
     }
+    if frozen_bundle_manifest_sha256 is not None:
+        if re.fullmatch(r"[a-f0-9]{64}", frozen_bundle_manifest_sha256) is None:
+            raise CheckpointError("frozen bundle manifest digest is invalid")
+        contract["frozen_bundle_manifest_sha256"] = (
+            frozen_bundle_manifest_sha256
+        )
+    if frozen_artifact_binding_sha256 is not None:
+        if (
+            not replay
+            or re.fullmatch(r"[a-f0-9]{64}", frozen_artifact_binding_sha256)
+            is None
+        ):
+            raise CheckpointError("frozen artifact binding digest is invalid")
+        contract["frozen_artifact_binding_sha256"] = (
+            frozen_artifact_binding_sha256
+        )
+    if source_network_accessed is not None:
+        if not replay or source_network_accessed is not False:
+            raise CheckpointError(
+                "only a network-free frozen replay may set source access evidence"
+            )
+        contract["source_network_accessed"] = False
+    return contract
 
 
 def _run_backfill(
@@ -716,6 +873,7 @@ def _run_backfill(
     checkpoint_before: dict[str, object] | None = None
     checkpoint_before_version: int | None = None
     checkpoint_before_hash: str | None = None
+    frozen_bundle: FrozenBundle | None = None
     store: CheckpointStore | None = None
     if options.dry_run:
         checkpoint = new_checkpoint(job, fingerprint, now_provider=now_provider)
@@ -775,7 +933,11 @@ def _run_backfill(
         save_checkpoint(options.checkpoint_path, checkpoint)
 
         blocked_until_text = checkpoint.get("dart_quota_blocked_until")
-        if "dart" in options.sources and blocked_until_text:
+        if (
+            "dart" in options.sources
+            and blocked_until_text
+            and not (options.replay and options.frozen_bundle_dir is not None)
+        ):
             blocked_until = date.fromisoformat(str(blocked_until_text))
             current_time = now_provider()
             if current_time.tzinfo is None:
@@ -786,6 +948,19 @@ def _run_backfill(
                     "OpenDART status 020 already exhausted this KST quota day; "
                     f"resume from the same MySQL checkpoint on or after {blocked_until.isoformat()}"
                 )
+        if options.replay and options.frozen_bundle_dir is not None:
+            assert options.frozen_artifact_binding is not None
+            if not isinstance(snapshot.payload_hash, str):
+                raise CheckpointError(
+                    "frozen replay requires an exact apply checkpoint hash"
+                )
+            frozen_bundle = load_bundle(
+                options.frozen_bundle_dir,
+                options.frozen_artifact_binding,
+                expected_code_revision=str(code_revision),
+                expected_job_fingerprint=fingerprint,
+                expected_checkpoint_sha256=snapshot.payload_hash,
+            )
 
     completed_windows = checkpoint["completed_windows"]
     failed_windows = checkpoint["failed_windows"]
@@ -818,7 +993,7 @@ def _run_backfill(
     results: list[dict[str, object]] = []
     invocation_failures = 0
     dart_request_budget: DartRequestQuota | None = None
-    if "dart" in options.sources:
+    if "dart" in options.sources and frozen_bundle is None:
         if durable_dart_quota_required() or durable_dart_quota_configured():
             dart_request_budget = DartInvocationQuota(
                 durable_dart_quota_client(
@@ -834,6 +1009,8 @@ def _run_backfill(
         else:
             dart_request_budget = DartRequestBudget(options.request_budget)
 
+    window_indexes = {window.key: index for index, window in enumerate(all_windows)}
+    frozen_leaf_metadata: dict[str, dict[str, object]] = {}
     for window in selected:
         previous_failure = failed_windows.get(window.key)
         previous_attempts = (
@@ -870,19 +1047,79 @@ def _run_backfill(
             # digest; an apply timestamp must never be fabricated here.
             result["replay_attempted_at"] = attempt_time.isoformat()
         try:
-            summary = ingest_runner(
-                project_root,
-                # Retrieval metadata must describe the real attempt time. The
-                # stable window idempotency key, not a fabricated historical
-                # timestamp, makes retries update the same collection run.
-                now=attempt_time,
-                start=window.start,
-                end=window.source_end_inclusive,
-                settings_overrides=overrides,
-                dry_run=options.dry_run,
-                idempotency_key=result["idempotency_key"],
-                replay=options.replay,
-            )
+            if frozen_bundle is not None:
+                frozen_leaf = load_window(
+                    frozen_bundle,
+                    index=window_indexes[window.key],
+                )
+                if (
+                    frozen_leaf.get("window_start") != window.start.isoformat()
+                    or frozen_leaf.get("window_end_exclusive")
+                    != window.end_exclusive.isoformat()
+                    or frozen_leaf.get("idempotency_key")
+                    != result["idempotency_key"]
+                ):
+                    raise FrozenReplayBundleError(
+                        f"frozen replay window {window.key} identity mismatch"
+                    )
+                summary = replay_frozen_dart_window(
+                    frozen_leaf,
+                    now=attempt_time,
+                )
+                result["stable_payload_sha256"] = frozen_leaf[
+                    "stable_payload_sha256"
+                ]
+                result["frozen_leaf_sha256"] = frozen_bundle.manifest[
+                    "windows"
+                ][window_indexes[window.key]]["sha256"]  # type: ignore[index]
+            else:
+                captured_leaf: dict[str, object] | None = None
+
+                def capture_payload(
+                    payload: dict[str, object],
+                    run: dict[str, object],
+                ) -> None:
+                    nonlocal captured_leaf
+                    if options.write_frozen_bundle_dir is None:
+                        return
+                    captured_leaf = build_window_leaf(
+                        code_revision=str(code_revision),
+                        job_fingerprint=fingerprint,
+                        window_start=window.start.isoformat(),
+                        window_end_exclusive=window.end_exclusive.isoformat(),
+                        idempotency_key=str(result["idempotency_key"]),
+                        payload=payload,
+                        run=run,
+                    )
+                    frozen_leaf_metadata[window.key] = write_window_leaf(
+                        options.write_frozen_bundle_dir,
+                        index=window_indexes[window.key],
+                        leaf=captured_leaf,
+                    )
+
+                summary = ingest_runner(
+                    project_root,
+                    # Retrieval metadata must describe the real attempt time.
+                    now=attempt_time,
+                    start=window.start,
+                    end=window.source_end_inclusive,
+                    settings_overrides=overrides,
+                    dry_run=options.dry_run,
+                    idempotency_key=result["idempotency_key"],
+                    replay=options.replay,
+                    **(
+                        {"payload_capture": capture_payload}
+                        if options.write_frozen_bundle_dir is not None
+                        else {}
+                    ),
+                )
+                if captured_leaf is not None:
+                    result["stable_payload_sha256"] = captured_leaf[
+                        "stable_payload_sha256"
+                    ]
+                    result["frozen_bundle_leaf"] = frozen_leaf_metadata[
+                        window.key
+                    ]
             result["summary"] = summary
             succeeded = _summary_succeeded(summary, dry_run=options.dry_run)
             if succeeded and options.replay:
@@ -896,11 +1133,11 @@ def _run_backfill(
                     raise CheckpointError(
                         f"apply checkpoint window {window.key} is missing its summary"
                     )
-                apply_counts = _summary_replay_counts(
+                apply_counts = _summary_replay_semantic_counts(
                     apply_summary,
                     location=f"apply window {window.key}",
                 )
-                replay_counts = _summary_replay_counts(
+                replay_counts = _summary_replay_semantic_counts(
                     summary,
                     location=f"replay window {window.key}",
                 )
@@ -910,6 +1147,12 @@ def _run_backfill(
                 result["replay_summary_counts_sha256"] = _canonical_sha256(
                     replay_counts
                 )
+                result["apply_semantic_counts_sha256"] = result[
+                    "apply_summary_counts_sha256"
+                ]
+                result["replay_semantic_counts_sha256"] = result[
+                    "replay_summary_counts_sha256"
+                ]
                 if apply_counts != replay_counts:
                     succeeded = False
                     result["error"] = (
@@ -985,6 +1228,27 @@ def _run_backfill(
         completed_windows = candidate_completed
         failed_windows = candidate_failed
         save_checkpoint(options.checkpoint_path, checkpoint)
+        if options.write_frozen_bundle_dir is not None:
+            partial_metadata: list[Mapping[str, object]] = []
+            for applied_window in all_windows:
+                completed_result = candidate_completed.get(applied_window.key)
+                metadata = (
+                    completed_result.get("frozen_bundle_leaf")
+                    if isinstance(completed_result, Mapping)
+                    else None
+                )
+                if isinstance(metadata, Mapping):
+                    partial_metadata.append(metadata)
+            write_partial_apply_bundle(
+                options.write_frozen_bundle_dir,
+                code_revision=str(code_revision),
+                job_fingerprint=fingerprint,
+                range_start=options.start.isoformat(),
+                range_end_exclusive=options.end_exclusive.isoformat(),
+                checkpoint_payload_sha256=remote_payload_hash,
+                checkpoint_version=remote_version,
+                completed_window_metadata=partial_metadata,
+            )
         if not succeeded and (quota_exhausted or not options.continue_on_error):
             break
     checkpoint_after_version: int | None = None
@@ -1024,6 +1288,73 @@ def _run_backfill(
         if options.dry_run
         else remote_payload_hash
     )
+    if frozen_bundle is not None:
+        assert options.frozen_artifact_binding is not None
+        assert isinstance(checkpoint_hash, str)
+        post_replay_bundle = load_bundle(
+            frozen_bundle.root,
+            options.frozen_artifact_binding,
+            expected_code_revision=str(code_revision),
+            expected_job_fingerprint=fingerprint,
+            expected_checkpoint_sha256=checkpoint_hash,
+        )
+        if post_replay_bundle.manifest != frozen_bundle.manifest:
+            raise CheckpointError("frozen bundle changed during read-only replay")
+    frozen_manifest: dict[str, object] | None = None
+    frozen_manifest_sha256: str | None = None
+    if options.write_frozen_bundle_dir is not None:
+        frozen_output_dir = options.write_frozen_bundle_dir
+        if (
+            invocation_failures
+            or not isinstance(checkpoint_hash, str)
+            or len(completed_windows) != len(all_windows)
+        ):
+            raise CheckpointError(
+                "frozen apply bundle cannot be finalized before all windows "
+                "have exact remote ACKs"
+            )
+        manifest_windows: list[Mapping[str, object]] = []
+        for window in all_windows:
+            stored_result = completed_windows.get(window.key)
+            metadata = (
+                stored_result.get("frozen_bundle_leaf")
+                if isinstance(stored_result, Mapping)
+                else None
+            )
+            if not isinstance(metadata, Mapping):
+                raise CheckpointError(
+                    f"completed window {window.key} lacks its frozen leaf binding; "
+                    "restore the partial frozen bundle before resuming"
+                )
+            manifest_windows.append(metadata)
+        frozen_manifest = finalize_apply_bundle(
+            options.write_frozen_bundle_dir,
+            code_revision=str(code_revision),
+            job_fingerprint=fingerprint,
+            range_start=options.start.isoformat(),
+            range_end_exclusive=options.end_exclusive.isoformat(),
+            checkpoint_payload_sha256=checkpoint_hash,
+            checkpoint_version=remote_version,
+            window_metadata=manifest_windows,
+        )
+        frozen_manifest_sha256 = hashlib.sha256(
+            (frozen_output_dir / "manifest.json").read_bytes()
+        ).hexdigest()
+    replay_manifest_sha256: str | None = None
+    replay_binding_sha256: str | None = None
+    if frozen_bundle is not None:
+        assert options.frozen_artifact_binding is not None
+        replay_manifest_sha256 = hashlib.sha256(
+            (frozen_bundle.root / "manifest.json").read_bytes()
+        ).hexdigest()
+        replay_binding_sha256 = hashlib.sha256(
+            options.frozen_artifact_binding.read_bytes()
+        ).hexdigest()
+    receipt_manifest_sha256 = (
+        replay_manifest_sha256
+        if options.replay
+        else frozen_manifest_sha256
+    )
     receipt_contract: dict[str, object] | None = None
     apply_receipt_contract: dict[str, object] | None = None
     if (
@@ -1036,6 +1367,7 @@ def _run_backfill(
             fingerprint=fingerprint,
             checkpoint_hash=checkpoint_hash,
             replay=False,
+            frozen_bundle_manifest_sha256=receipt_manifest_sha256,
         )
         if options.replay:
             replay_results = {
@@ -1050,6 +1382,11 @@ def _run_backfill(
                     checkpoint_hash=checkpoint_hash,
                     replay=True,
                     replay_results=replay_results,
+                    frozen_bundle_manifest_sha256=replay_manifest_sha256,
+                    frozen_artifact_binding_sha256=replay_binding_sha256,
+                    source_network_accessed=(
+                        False if frozen_bundle is not None else None
+                    ),
                 )
         else:
             receipt_contract = apply_receipt_contract
@@ -1122,6 +1459,25 @@ def _run_backfill(
         ),
         "apply_receipt_contract": apply_receipt_contract,
         "receipt_contract": receipt_contract,
+        "frozen_replay_bundle": (
+            {
+                "status": "verified",
+                "manifest_sha256": frozen_manifest_sha256,
+                "window_count": 30,
+            }
+            if frozen_manifest is not None
+            else (
+                {
+                    "status": "consumed",
+                    "manifest_sha256": hashlib.sha256(
+                        (frozen_bundle.root / "manifest.json").read_bytes()
+                    ).hexdigest(),
+                    "window_count": 30,
+                }
+                if frozen_bundle is not None
+                else None
+            )
+        ),
         "totals": _summary_totals(results),
         "window_results": results,
     }
@@ -1152,6 +1508,168 @@ def run_backfill(
             close = getattr(resource, "close", None)
             if callable(close):
                 close()
+
+
+def run_drift_probe(
+    project_root: Path,
+    options: BackfillOptions,
+    *,
+    ingest_runner: IngestRunner = run_official_ingest,
+    now_provider: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+) -> dict[str, object]:
+    """Compare a fresh DART observation with the immutable apply payload.
+
+    Governance and checkpoint APIs are never called. Physical source requests
+    still consume the durable quota ledger and are reported as such.
+    """
+
+    options.validate()
+    if not options.drift_probe_only:
+        raise BackfillConfigurationError("drift probe mode was not requested")
+    assert options.frozen_bundle_dir is not None
+    assert options.frozen_artifact_binding is not None
+    assert options.drift_probe_output is not None
+    revision = _code_revision()
+    job = job_contract(options, code_revision=revision)
+    fingerprint = job_fingerprint(job)
+    checkpoint_hash = artifact_binding_checkpoint_sha256(
+        options.frozen_artifact_binding
+    )
+    bundle = load_bundle(
+        options.frozen_bundle_dir,
+        options.frozen_artifact_binding,
+        expected_code_revision=revision,
+        expected_job_fingerprint=fingerprint,
+        expected_checkpoint_sha256=checkpoint_hash,
+    )
+    windows = build_date_windows(
+        options.start,
+        options.end_exclusive,
+        options.chunk_days,
+    )
+    probe_windows: list[dict[str, object]] = []
+    overall_status = "matched"
+    error_code: str | None = None
+    request_budget: DartRequestQuota
+    durable_quota = durable_dart_quota_required() or durable_dart_quota_configured()
+    if durable_quota:
+        request_budget = DartInvocationQuota(
+            durable_dart_quota_client(phase="official-backfill-drift-probe"),
+            limit=options.request_budget,
+            close_delegate=True,
+        )
+    else:
+        request_budget = DartRequestBudget(options.request_budget)
+    try:
+        for index, window in enumerate(windows):
+            expected = load_window(bundle, index=index)
+            captured_payload: dict[str, object] | None = None
+            captured_run: dict[str, object] | None = None
+
+            def capture(
+                payload: dict[str, object],
+                run: dict[str, object],
+            ) -> None:
+                nonlocal captured_payload, captured_run
+                captured_payload = copy.deepcopy(payload)
+                captured_run = copy.deepcopy(run)
+
+            try:
+                summary = ingest_runner(
+                    project_root,
+                    now=now_provider(),
+                    start=window.start,
+                    end=window.source_end_inclusive,
+                    settings_overrides={
+                        "dart_enabled": True,
+                        "kind_enabled": False,
+                        "page_count": options.page_count,
+                        "max_pages": options.max_pages,
+                        "sync_company_master": False,
+                        "dart_request_budget": request_budget,
+                    },
+                    dry_run=True,
+                    idempotency_key=window_idempotency_key(
+                        fingerprint, window
+                    ),
+                    replay=False,
+                    payload_capture=capture,
+                )
+                if (
+                    _summary_int(summary, "official_failed")
+                    or captured_payload is None
+                    or captured_run is None
+                ):
+                    raise FrozenReplayBundleError("source_probe_failed")
+                outcomes = captured_run.get("source_outcomes")
+                dart_outcome = (
+                    outcomes.get("dart")
+                    if isinstance(outcomes, Mapping)
+                    else None
+                )
+                if not isinstance(dart_outcome, Mapping):
+                    raise FrozenReplayBundleError(
+                        "source_probe_outcome_missing"
+                    )
+                comparison = compare_fresh_payload(
+                    expected,
+                    captured_payload,
+                    actual_source_counts=source_semantic_counts(dart_outcome),
+                )
+                probe_windows.append(
+                    {
+                        "index": index,
+                        "window_start": window.start.isoformat(),
+                        "window_end_exclusive": window.end_exclusive.isoformat(),
+                        **comparison,
+                        "probe_execution": {
+                            "source_requests": _summary_int(
+                                summary, "official_dart_requests"
+                            ),
+                            "source_pages": _summary_int(
+                                summary, "official_dart_pages"
+                            ),
+                            "source_rows_fetched": _summary_int(
+                                summary, "official_dart_fetched"
+                            ),
+                        },
+                    }
+                )
+                if comparison["matched"] is not True:
+                    overall_status = "drift_detected"
+            except Exception as exc:  # noqa: BLE001 - emit sanitized probe evidence.
+                overall_status = "probe_failed"
+                error_code = re.sub(
+                    r"[^a-z0-9_]",
+                    "_",
+                    type(exc).__name__.casefold(),
+                )[:64]
+                probe_windows.append(
+                    {
+                        "index": index,
+                        "window_start": window.start.isoformat(),
+                        "window_end_exclusive": window.end_exclusive.isoformat(),
+                        "matched": False,
+                        "status": "probe_failed",
+                        "error_code": error_code,
+                    }
+                )
+                break
+    finally:
+        close = getattr(request_budget, "close", None)
+        if callable(close):
+            close()
+    return write_probe_report(
+        options.drift_probe_output,
+        code_revision=revision,
+        job_fingerprint=fingerprint,
+        range_start=options.start.isoformat(),
+        range_end_exclusive=options.end_exclusive.isoformat(),
+        status=overall_status,
+        windows=probe_windows,
+        error_code=error_code,
+        quota_ledger_write_attempted=durable_quota,
+    )
 
 
 def _parse_date(value: str) -> date:
@@ -1205,6 +1723,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--restart", action="store_true", help="replace the checkpoint for this requested job")
     parser.add_argument("--continue-on-error", action="store_true")
     parser.add_argument("--sync-company-master", action="store_true")
+    parser.add_argument(
+        "--write-frozen-bundle-dir",
+        type=Path,
+        help="private output directory for an exact DART apply replay bundle",
+    )
+    parser.add_argument(
+        "--frozen-bundle-dir",
+        type=Path,
+        help="downloaded immutable DART apply replay bundle",
+    )
+    parser.add_argument(
+        "--frozen-artifact-binding",
+        type=Path,
+        help="GitHub artifact identity/digest binding for the frozen bundle",
+    )
+    parser.add_argument(
+        "--drift-probe-output",
+        type=Path,
+        help="sanitized output path for the separate live source drift probe",
+    )
+    parser.add_argument(
+        "--drift-probe-only",
+        action="store_true",
+        help="read live DART only; never write governance data or checkpoints",
+    )
     return parser
 
 
@@ -1216,6 +1759,11 @@ def options_from_args(args: argparse.Namespace) -> tuple[Path, BackfillOptions]:
     start = args.from_date or _parse_date(configured_start)
     end_exclusive = args.to_date or _completed_kst_end_exclusive()
     checkpoint = args.checkpoint if args.checkpoint.is_absolute() else project_root / args.checkpoint
+    def resolved_optional(path: Path | None) -> Path | None:
+        if path is None:
+            return None
+        return path.resolve() if path.is_absolute() else (project_root / path).resolve()
+
     return project_root, BackfillOptions(
         start=start,
         end_exclusive=end_exclusive,
@@ -1231,6 +1779,11 @@ def options_from_args(args: argparse.Namespace) -> tuple[Path, BackfillOptions]:
         restart=args.restart,
         continue_on_error=args.continue_on_error,
         sync_company_master=args.sync_company_master,
+        write_frozen_bundle_dir=resolved_optional(args.write_frozen_bundle_dir),
+        frozen_bundle_dir=resolved_optional(args.frozen_bundle_dir),
+        frozen_artifact_binding=resolved_optional(args.frozen_artifact_binding),
+        drift_probe_output=resolved_optional(args.drift_probe_output),
+        drift_probe_only=args.drift_probe_only,
     )
 
 
@@ -1242,10 +1795,15 @@ def main(argv: list[str] | None = None) -> None:
         load_env_files(project_root)
         options.validate()
         validate_runtime(options)
-        report = run_backfill(project_root, options)
+        report = (
+            run_drift_probe(project_root, options)
+            if options.drift_probe_only
+            else run_backfill(project_root, options)
+        )
     except (
         BackfillConfigurationError,
         CheckpointError,
+        FrozenReplayBundleError,
         RemoteCheckpointError,
         OSError,
         ValueError,
@@ -1253,7 +1811,8 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         raise SystemExit(2) from exc
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
-    if report["status"] != "succeeded":
+    expected_status = "matched" if options.drift_probe_only else "succeeded"
+    if report["status"] != expected_status:
         raise SystemExit(1)
 
 
