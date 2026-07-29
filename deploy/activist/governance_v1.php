@@ -7363,6 +7363,377 @@ function v1_dart_lifecycle_observation_matches(
 }
 
 /**
+ * Validate the pending filer candidate that accompanies an incomplete DART
+ * identity. It is internal review evidence, not an approved canonical actor.
+ */
+function v1_dart_pending_filer_candidate_matches(
+    array $payload,
+    string $eventId,
+    string $companyId,
+    string $identityActorId
+): bool {
+    $actor = isset($payload['actor']) && is_array($payload['actor'])
+        ? $payload['actor'] : null;
+    $eventActor = isset($payload['event_actor']) && is_array($payload['event_actor'])
+        ? $payload['event_actor'] : null;
+    if ($actor === null || $eventActor === null
+        || (string)($payload['actor_id'] ?? '') !== $identityActorId
+        || (string)($payload['identity_actor_id'] ?? '') !== $identityActorId
+        || (string)($actor['actor_id'] ?? '') !== $identityActorId
+        || (string)($eventActor['actor_id'] ?? '') !== $identityActorId
+        || (string)($eventActor['event_id'] ?? '') !== $eventId
+        || (string)($eventActor['actor_role'] ?? '') !== 'filer'
+        || (string)($eventActor['review_status'] ?? '') !== 'pending'
+        || (string)($actor['review_status'] ?? '') !== 'pending'
+        || (string)($actor['record_status'] ?? '') !== 'inactive'
+        || !in_array((string)($actor['actor_type'] ?? ''),array('company','institution'),true)
+        || trim((string)($actor['display_name'] ?? '')) === '') {
+        return false;
+    }
+    $actorCompanyId = trim((string)($actor['company_id'] ?? ''));
+    return (string)$actor['actor_type'] === 'company'
+        ? $actorCompanyId === $companyId
+        : $actorCompanyId === '';
+}
+
+/**
+ * Detect only a mutable OpenDART filer identity on the same unpublished,
+ * incomplete event. Every other source-derived event field must be identical.
+ *
+ * The returned values are hashes only; raw actor identifiers and names are
+ * intentionally excluded from the append-only lifecycle metadata.
+ */
+function v1_dart_pending_identity_actor_change(
+    array $storedEvent,
+    array $storedPayload,
+    array $submittedEvent
+): ?array {
+    $eventId = trim((string)($storedEvent['event_id'] ?? ''));
+    $companyId = trim((string)($storedEvent['company_id'] ?? ''));
+    $eventType = trim((string)($storedEvent['event_type'] ?? ''));
+    $submittedEventId = trim((string)v1_first($submittedEvent,array('event_id'),''));
+    $submittedCompanyId = trim((string)v1_first(
+        $submittedEvent,
+        array('company_id','corp_code'),
+        ''
+    ));
+    $submittedEventType = trim((string)v1_first($submittedEvent,array('event_type'),''));
+    $submittedIdentityStatus = trim((string)v1_first(
+        $submittedEvent,
+        array('identity_status'),
+        'needs_review'
+    ));
+    if (!v1_valid_entity_id($eventId)
+        || $eventId !== $submittedEventId
+        || preg_match('/^[0-9]{8}$/',$companyId) !== 1
+        || $companyId !== $submittedCompanyId
+        || $eventType === ''
+        || $eventType !== $submittedEventType
+        || (string)($storedEvent['identity_status'] ?? '') !== 'needs_review'
+        || $submittedIdentityStatus !== 'needs_review'
+        || (string)($storedEvent['verification_status'] ?? '') !== 'official'
+        || trim((string)v1_first(
+            $submittedEvent,
+            array('verification_status','status'),
+            ''
+        )) !== 'official'
+        || (string)($storedEvent['review_status'] ?? '') !== 'pending'
+        || (string)($storedEvent['publication_status'] ?? '') !== 'draft'
+        || !empty($storedPayload['is_correction'])
+        || !empty($storedPayload['is_cancelled'])
+        || !empty($submittedEvent['is_correction'])
+        || !empty($submittedEvent['is_cancelled'])
+        || trim((string)($storedPayload['event_link_status'] ?? '')) !== ''
+        || trim((string)($submittedEvent['event_link_status'] ?? '')) !== '') {
+        return null;
+    }
+
+    $storedIdentity = array(
+        'company_id'=>$companyId,
+        'event_type'=>$eventType,
+        'identity_action'=>trim((string)($storedEvent['identity_action'] ?? '')),
+        'identity_target'=>trim((string)($storedEvent['identity_target'] ?? '')),
+        'identity_actor_id'=>trim((string)($storedEvent['identity_actor_id'] ?? '')),
+        'identity_effective_at'=>trim((string)($storedEvent['identity_effective_at'] ?? '')),
+        'identity_deadline_at'=>trim((string)($storedEvent['identity_deadline_at'] ?? '')),
+        'identity_status'=>'needs_review',
+        'comparison_key'=>trim((string)($storedEvent['comparison_key'] ?? '')),
+    );
+    $submittedIdentity = array(
+        'company_id'=>$submittedCompanyId,
+        'event_type'=>$submittedEventType,
+        'identity_action'=>trim((string)v1_first(
+            $submittedEvent,
+            array('identity_action'),
+            ''
+        )),
+        'identity_target'=>trim((string)v1_first(
+            $submittedEvent,
+            array('identity_target'),
+            ''
+        )),
+        'identity_actor_id'=>trim((string)v1_first(
+            $submittedEvent,
+            array('identity_actor_id','actor_id'),
+            ''
+        )),
+        'identity_effective_at'=>(string)(mysql_dt(v1_first(
+            $submittedEvent,
+            array('identity_effective_at'),
+            null
+        )) ?? ''),
+        'identity_deadline_at'=>(string)(mysql_dt(v1_first(
+            $submittedEvent,
+            array('identity_deadline_at'),
+            null
+        )) ?? ''),
+        'identity_status'=>'needs_review',
+        'comparison_key'=>trim((string)v1_first(
+            $submittedEvent,
+            array('comparison_key'),
+            ''
+        )),
+    );
+    if ($storedIdentity['identity_actor_id'] === ''
+        || $submittedIdentity['identity_actor_id'] === ''
+        || hash_equals(
+            $storedIdentity['identity_actor_id'],
+            $submittedIdentity['identity_actor_id']
+        )
+        || $storedIdentity['comparison_key'] !== ''
+        || $submittedIdentity['comparison_key'] !== '') {
+        return null;
+    }
+    foreach (array(
+        'company_id','event_type','identity_action','identity_target',
+        'identity_effective_at','identity_deadline_at','identity_status',
+        'comparison_key',
+    ) as $identityField) {
+        if ((string)$storedIdentity[$identityField]
+            !== (string)$submittedIdentity[$identityField]) {
+            return null;
+        }
+    }
+    if (!v1_dart_pending_filer_candidate_matches(
+            $storedPayload,
+            $eventId,
+            $companyId,
+            $storedIdentity['identity_actor_id']
+        )
+        || !v1_dart_pending_filer_candidate_matches(
+            $submittedEvent,
+            $eventId,
+            $companyId,
+            $submittedIdentity['identity_actor_id']
+        )) {
+        return null;
+    }
+
+    $normalizedStored = $storedPayload;
+    $normalizedSubmitted = $submittedEvent;
+    foreach (array('actor_id','identity_actor_id','actor','event_actor') as $actorField) {
+        unset($normalizedStored[$actorField],$normalizedSubmitted[$actorField]);
+    }
+    foreach (array(&$normalizedStored,&$normalizedSubmitted) as &$normalizedPayload) {
+        if (isset($normalizedPayload['metadata'])
+            && !is_array($normalizedPayload['metadata'])) {
+            return null;
+        }
+        if (!isset($normalizedPayload['metadata'])) {
+            $normalizedPayload['metadata'] = array();
+        }
+        $titleProvenance = trim((string)(
+            $normalizedPayload['metadata']['title_provenance'] ?? ''
+        ));
+        if ($titleProvenance !== '' && $titleProvenance !== 'source') {
+            return null;
+        }
+        $normalizedPayload['metadata']['title_provenance'] = 'source';
+    }
+    unset($normalizedPayload);
+    if (!hash_equals(
+        hash('sha256',v1_strict_canonical_json_encode(
+            $normalizedStored,
+            'stored_dart_identity_change_payload_encode_failed'
+        )),
+        hash('sha256',v1_strict_canonical_json_encode(
+            $normalizedSubmitted,
+            'submitted_dart_identity_change_payload_encode_failed'
+        ))
+    )) {
+        return null;
+    }
+    return array(
+        'previous_identity_sha256'=>hash(
+            'sha256',
+            v1_strict_canonical_json_encode(
+                $storedIdentity,
+                'stored_dart_identity_change_encode_failed'
+            )
+        ),
+        'current_identity_sha256'=>hash(
+            'sha256',
+            v1_strict_canonical_json_encode(
+                $submittedIdentity,
+                'submitted_dart_identity_change_encode_failed'
+            )
+        ),
+    );
+}
+
+/**
+ * Require the evidence document of a filer-identity change to be the exact
+ * same official DART receipt. The collector timestamp is deliberately ignored.
+ */
+function v1_dart_identity_change_document_matches(
+    array $stored,
+    array $submitted
+): bool {
+    if (!empty($submitted['is_correction']) || !empty($submitted['is_cancelled'])) {
+        return false;
+    }
+    $sourceClass = trim((string)v1_first(
+        $submitted,
+        array('source_class','source_category'),
+        'official_disclosure'
+    ));
+    $sourceRightId = strtolower(trim((string)v1_first(
+        $submitted,
+        array('source_right_id'),
+        ''
+    )));
+    $externalId = trim((string)v1_first(
+        $submitted,
+        array('external_id','stable_source_id','rcept_no'),
+        ''
+    ));
+    $companyId = trim((string)v1_first(
+        $submitted,
+        array('company_id','corp_code'),
+        ''
+    ));
+    $title = trim((string)v1_first($submitted,array('title','report_nm'),''));
+    $url = trim((string)v1_first($submitted,array('original_url','url'),''));
+    $body = (string)v1_first($submitted,array('body_text','content'),'');
+    $contentHash = strtolower(trim((string)v1_first(
+        $submitted,
+        array('content_hash'),
+        ''
+    )));
+    if (preg_match('/^[a-f0-9]{64}$/',$contentHash) !== 1) {
+        $contentHash = hash('sha256',$title . "\n" . $url . "\n" . $body);
+    }
+    $publication = trim((string)v1_first(
+        $submitted,
+        array('publication_status'),
+        'published'
+    ));
+    $verification = trim((string)v1_first(
+        $submitted,
+        array('verification_status'),
+        'official'
+    ));
+    $submittedFields = array(
+        $companyId,
+        $sourceRightId,
+        $sourceClass,
+        mb_substr($externalId,0,191,'UTF-8'),
+        mb_substr((string)v1_first(
+            $submitted,
+            array('document_type','pblntf_detail_ty'),
+            ''
+        ),0,80,'UTF-8'),
+        v1_language(v1_first($submitted,array('original_language','language'),'ko'),'ko'),
+        mb_substr($title,0,700,'UTF-8'),
+        $body,
+        $url,
+        $contentHash,
+        mb_substr(trim((string)v1_first(
+            $submitted,
+            array('collection_key'),
+            ''
+        )),0,96,'UTF-8'),
+        (string)(mysql_dt(v1_first(
+            $submitted,
+            array('published_at','received_at','rcept_dt'),
+            null
+        )) ?? ''),
+        $verification,
+        $publication,
+        trim((string)v1_first(
+            $submitted,
+            array('correction_of_document_id','correction_of'),
+            ''
+        )),
+        max(1,(int)v1_first(
+            $submitted,
+            array('version_no'),
+            ((int)v1_first($submitted,array('correction_sequence'),0)) + 1
+        )),
+    );
+    $storedFields = array(
+        (string)($stored['company_id'] ?? ''),
+        strtolower((string)($stored['source_right_id'] ?? '')),
+        (string)($stored['source_class'] ?? ''),
+        (string)($stored['external_id'] ?? ''),
+        (string)($stored['document_type'] ?? ''),
+        (string)($stored['original_language'] ?? ''),
+        (string)($stored['title'] ?? ''),
+        (string)($stored['body_text'] ?? ''),
+        (string)($stored['original_url'] ?? ''),
+        strtolower((string)($stored['content_hash'] ?? '')),
+        (string)($stored['collection_key'] ?? ''),
+        (string)($stored['published_at'] ?? ''),
+        (string)($stored['verification_status'] ?? ''),
+        (string)($stored['publication_status'] ?? ''),
+        (string)($stored['correction_of_document_id'] ?? ''),
+        (int)($stored['version_no'] ?? 0),
+    );
+    if ($sourceClass !== 'official_disclosure'
+        || $sourceRightId !== 'official:dart'
+        || preg_match('/^[0-9]{14}$/',$externalId) !== 1
+        || preg_match('/^[0-9]{8}$/',$companyId) !== 1
+        || $verification !== 'official'
+        || $publication !== 'published'
+        || $storedFields !== $submittedFields) {
+        return false;
+    }
+    $storedPayload = json_decode((string)($stored['payload_json'] ?? ''),true);
+    if (!is_array($storedPayload)) {
+        return false;
+    }
+    $submittedPayload = $submitted;
+    unset($storedPayload['retrieved_at'],$submittedPayload['retrieved_at']);
+    foreach (array(&$storedPayload,&$submittedPayload) as &$documentPayload) {
+        if (isset($documentPayload['metadata'])
+            && !is_array($documentPayload['metadata'])) {
+            return false;
+        }
+        if (!isset($documentPayload['metadata'])) {
+            $documentPayload['metadata'] = array();
+        }
+        $titleProvenance = trim((string)(
+            $documentPayload['metadata']['title_provenance'] ?? ''
+        ));
+        if ($titleProvenance !== '' && $titleProvenance !== 'source') {
+            return false;
+        }
+        $documentPayload['metadata']['title_provenance'] = 'source';
+    }
+    unset($documentPayload);
+    return hash_equals(
+        hash('sha256',v1_strict_canonical_json_encode(
+            $storedPayload,
+            'stored_dart_identity_change_document_encode_failed'
+        )),
+        hash('sha256',v1_strict_canonical_json_encode(
+            $submittedPayload,
+            'submitted_dart_identity_change_document_encode_failed'
+        ))
+    );
+}
+
+/**
  * Return only a stable, caller-actionable validation reason.
  *
  * Runtime exceptions may append a record identifier after a colon for local
@@ -8586,7 +8957,8 @@ function upsert_governance_snapshot(
         // the row or evidence document. Perform this check before the first
         // company/document upsert so a reused ID cannot transiently rewrite
         // content even inside this transaction.
-        $isolatedReplayEventStmt = $pdo->prepare('SELECT event_id,company_id,identity_status,verification_status,review_status,publication_status,payload_json FROM '
+        $isolatedReplayEventStmt = $pdo->prepare('SELECT event_id,company_id,event_type,identity_action,identity_target,identity_actor_id,'
+            . 'identity_effective_at,identity_deadline_at,identity_status,comparison_key,verification_status,review_status,publication_status,payload_json FROM '
             . table_name($config,'governance_events') . ' WHERE event_id=? LIMIT 1 FOR UPDATE');
         $isolatedReplayDocumentsStmt = $pdo->prepare('SELECT ed.document_id,ed.relation_type,ed.position_no,d.company_id,d.source_right_id,d.source_class,d.external_id,'
             . 'd.document_type,d.original_language,d.title,d.body_text,d.original_url,d.content_hash,d.collection_key,d.published_at,'
@@ -8601,6 +8973,7 @@ function upsert_governance_snapshot(
         $duplicateSubmittedDocumentIds = array();
         $isolatedReplayDocumentSnapshots = array();
         $isolatedReplayCanonicalEventPayloads = array();
+        $readOnlyDartIdentityMutationEventIds = array();
         $pendingDartLifecycleObservations = array();
         $approvedIsolatedReplayEventIds = array();
         $submittedDocumentReferenceEventIds = array();
@@ -8674,6 +9047,136 @@ function upsert_governance_snapshot(
                 true
             );
             if (!$storedFollowupFlag && $storedIsolationMarker === '' && !$storedFollowupLifecycle) {
+                $dartIdentityActorChange = $globalDartProjectionEnabled && $dartGuardedAction
+                    && is_array($storedEventPayload)
+                    ? v1_dart_pending_identity_actor_change(
+                        $isolatedReplayEvent,
+                        $storedEventPayload,
+                        $submittedEvent
+                    )
+                    : null;
+                if ($dartIdentityActorChange === null) {
+                    continue;
+                }
+                $storedDocumentRows = v1_pdo_fetch_all_and_close(
+                    $isolatedReplayDocumentsStmt,
+                    array($submittedEventId)
+                );
+                $rawSubmittedDocumentIds = isset($submittedEvent['document_ids'])
+                    && is_array($submittedEvent['document_ids'])
+                    ? $submittedEvent['document_ids'] : array();
+                if (isset($submittedEvent['document_id'])) {
+                    array_unshift($rawSubmittedDocumentIds,$submittedEvent['document_id']);
+                }
+                $submittedDocumentIdSet = array();
+                foreach ($rawSubmittedDocumentIds as $rawSubmittedDocumentId) {
+                    if (!is_string($rawSubmittedDocumentId)
+                        && !is_int($rawSubmittedDocumentId)) {
+                        continue;
+                    }
+                    $submittedDocumentId = trim((string)$rawSubmittedDocumentId);
+                    if (v1_valid_entity_id($submittedDocumentId)) {
+                        $submittedDocumentIdSet[$submittedDocumentId] = true;
+                    }
+                }
+                if (count($storedDocumentRows) !== 1
+                    || count($submittedDocumentIdSet) !== 1) {
+                    throw new RuntimeException(
+                        'event_identity_field_conflict:' . $submittedEventId
+                    );
+                }
+                $storedDocumentRow = $storedDocumentRows[0];
+                $storedDocumentId = trim((string)($storedDocumentRow['document_id'] ?? ''));
+                $submittedDocumentIds = array_keys($submittedDocumentIdSet);
+                $submittedDocumentId = (string)$submittedDocumentIds[0];
+                if ($storedDocumentId === ''
+                    || $storedDocumentId !== $submittedDocumentId
+                    || (string)($storedDocumentRow['relation_type'] ?? '') !== 'evidence'
+                    || (int)($storedDocumentRow['position_no'] ?? -1) !== 0
+                    || isset($duplicateSubmittedDocumentIds[$storedDocumentId])
+                    || !isset($submittedDocumentsById[$storedDocumentId])
+                    || !v1_dart_identity_change_document_matches(
+                        $storedDocumentRow,
+                        $submittedDocumentsById[$storedDocumentId]
+                    )) {
+                    throw new RuntimeException(
+                        'event_identity_field_conflict:' . $submittedEventId
+                    );
+                }
+                $storedDocumentOwners = v1_pdo_fetch_all_and_close(
+                    $isolatedReplayDocumentOwnersStmt,
+                    array($storedDocumentId)
+                );
+                $submittedReferenceOwners = isset(
+                    $submittedDocumentReferenceEventIds[$storedDocumentId]
+                ) ? array_keys(
+                    $submittedDocumentReferenceEventIds[$storedDocumentId]
+                ) : array();
+                if (count($storedDocumentOwners) !== 1
+                    || count($submittedReferenceOwners) !== 1
+                    || (string)$submittedReferenceOwners[0] !== $submittedEventId
+                    || (string)($storedDocumentOwners[0]['document_id'] ?? '')
+                        !== $storedDocumentId
+                    || (string)($storedDocumentOwners[0]['event_id'] ?? '')
+                        !== $submittedEventId
+                    || (string)($storedDocumentOwners[0]['company_id'] ?? '')
+                        !== $submittedCompanyId
+                    || (string)($storedDocumentOwners[0]['identity_status'] ?? '')
+                        !== 'needs_review') {
+                    throw new RuntimeException(
+                        'event_identity_field_conflict:' . $submittedEventId
+                    );
+                }
+                $lifecycleObservation = array(
+                    'document_id'=>$storedDocumentId,
+                    'event_id'=>$submittedEventId,
+                    'observation_id'=>v1_stable_id(
+                        'dart-lifecycle',
+                        'identity-actor-change-v1|' . $submittedEventId . '|'
+                            . $storedDocumentId . '|'
+                            . (string)$dartIdentityActorChange['previous_identity_sha256']
+                            . '|'
+                            . (string)$dartIdentityActorChange['current_identity_sha256']
+                    ),
+                    'country_code'=>'KR',
+                    'source_key'=>'dart',
+                    'external_id'=>(string)$storedDocumentRow['external_id'],
+                    'parent_external_id'=>null,
+                    'change_type'=>'updated',
+                    'metadata'=>array(
+                        'source_semantics'=>'event_identity_changed',
+                        'conflict_field'=>'identity_actor_id',
+                        'source_right_id'=>'official:dart',
+                        'previous_identity_sha256'=>
+                            (string)$dartIdentityActorChange['previous_identity_sha256'],
+                        'current_identity_sha256'=>
+                            (string)$dartIdentityActorChange['current_identity_sha256'],
+                    ),
+                );
+                if (!$dartLifecycleObservationByIdStmt) {
+                    throw new RuntimeException('global_lifecycle_guard_unavailable');
+                }
+                $existingLifecycleObservation = v1_pdo_fetch_one_and_close(
+                    $dartLifecycleObservationByIdStmt,
+                    array($lifecycleObservation['observation_id'])
+                );
+                if ($existingLifecycleObservation
+                    && !v1_dart_lifecycle_observation_matches(
+                        $existingLifecycleObservation,
+                        $lifecycleObservation
+                    )) {
+                    throw new RuntimeException(
+                        'event_identity_field_conflict:' . $submittedEventId
+                    );
+                }
+                $pendingDartLifecycleObservations[] = $lifecycleObservation;
+                $isolatedReplayDocumentSnapshots[$storedDocumentId] =
+                    $storedDocumentRow;
+                $isolatedReplayCanonicalEventPayloads[$submittedEventId] =
+                    $storedEventPayload;
+                $readOnlyDartIdentityMutationEventIds[$submittedEventId] =
+                    count($storedDocumentRows);
+                $approvedIsolatedReplayEventIds[$submittedEventId] = true;
                 continue;
             }
             if (!$storedFollowupFlag || $storedIsolationMarker !== 'ambiguous_independent') {
@@ -9448,6 +9951,18 @@ function upsert_governance_snapshot(
         foreach ($events as $event) {
             if (!is_array($event)) { continue; }
             $submittedEventId = trim((string)v1_first($event, array('event_id'), ''));
+            if (isset($readOnlyDartIdentityMutationEventIds[$submittedEventId])) {
+                // The preflight locked and proved the canonical event, its sole
+                // DART evidence document and the append-only lifecycle row.
+                // Acknowledge the isolated source mutation without touching
+                // canonical rows or their observation timestamps.
+                $readOnlyEvidenceCount =
+                    (int)$readOnlyDartIdentityMutationEventIds[$submittedEventId];
+                $counts['events']++;
+                $counts['event_documents'] += $readOnlyEvidenceCount;
+                $counts['event_observations'] += $readOnlyEvidenceCount;
+                continue;
+            }
             if (isset($isolatedReplayCanonicalEventPayloads[$submittedEventId])) {
                 $event = $isolatedReplayCanonicalEventPayloads[$submittedEventId];
             }
