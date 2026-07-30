@@ -151,6 +151,7 @@ def _read_receipt(
         raise GlobalBackfillError("invalid_global_backfill_receipt")
     raw_count = payload.get("raw_count")
     acknowledged_count = payload.get("acknowledged_count")
+    request_count = payload.get("request_count")
     if (
         not isinstance(raw_count, int)
         or isinstance(raw_count, bool)
@@ -160,6 +161,14 @@ def _read_receipt(
         or acknowledged_count < 0
     ):
         raise GlobalBackfillError("invalid_global_backfill_receipt_counts")
+    if (
+        not isinstance(request_count, int)
+        or isinstance(request_count, bool)
+        or not 1 <= request_count <= 6
+    ):
+        raise GlobalBackfillError(
+            "invalid_global_backfill_receipt_request_count"
+        )
     if plan.mode == "replay":
         replay = payload.get("replay_verification")
         if (
@@ -305,6 +314,7 @@ def run_global_backfill(
                     "window_end_exclusive": window.end_exclusive.isoformat(),
                     "path": receipt_path.name,
                     "receipt_sha256": _receipt_sha256(receipt_path),
+                    "request_count": payload["request_count"],
                     "raw_count": raw_count,
                     "acknowledged_count": acknowledged_count,
                     "initial_idempotent": payload.get("idempotent"),

@@ -2935,7 +2935,8 @@ components:
           minimum: 0
           description: >-
             Requests performed for this chunk. The final chunk of a mutating
-            SEC current poll must report at least one source request.
+            SEC current poll must report at least one source request. An SEC
+            completed-day batch must report one to six total source requests.
         raw_count:
           type: integer
           minimum: 0
@@ -2985,7 +2986,8 @@ components:
           minimum: 0
           description: >-
             Requests performed for the complete batch. A mutating SEC current
-            poll must report at least one source request.
+            poll must report at least one source request. An SEC completed-day
+            batch must report one to six total source requests.
         batch_id:
           type: string
           pattern: '^global-batch:[a-f0-9]{64}$'

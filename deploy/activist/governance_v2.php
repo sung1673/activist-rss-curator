@@ -3955,7 +3955,8 @@ function v2_alpha_global_connector_windows(
                 || (int)$row['batch_raw_count'] !== (int)$first['batch_raw_count']
                 || (int)$row['batch_acknowledged_count']
                     !== (int)$first['batch_acknowledged_count']
-                || (int)$row['batch_request_count'] !== 1
+                || (int)$row['batch_request_count'] < 1
+                || (int)$row['batch_request_count'] > 6
                 || (string)$row['code_revision'] !== $codeRevision
                 || preg_match(
                     '/^[a-f0-9]{64}$/D',
@@ -3989,7 +3990,8 @@ function v2_alpha_global_connector_windows(
         if (
             $raw !== (int)$first['batch_raw_count']
             || $acknowledged !== (int)$first['batch_acknowledged_count']
-            || (int)$final['batch_request_count'] !== 1
+            || (int)$final['batch_request_count'] < 1
+            || (int)$final['batch_request_count'] > 6
             || $requests !== (int)$final['batch_request_count']
             || $raw < $acknowledged
         ) {

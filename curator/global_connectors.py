@@ -895,6 +895,17 @@ SEC_DAILY_INDEX_BASE_URL = (
 )
 _SEC_DAILY_INDEX_MAX_RETRIES = 5
 _SEC_DAILY_INDEX_BACKOFF_CAP_SECONDS = 16.0
+_SEC_QUARTER_MANIFEST_ITEM_KEYS = frozenset(
+    {"last-modified", "name", "type", "href", "size"}
+)
+_SEC_QUARTER_MANIFEST_FILENAME = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+)
+_SEC_QUARTER_MASTER_FILENAME = re.compile(
+    r"^master\.(?P<day>\d{8})\.idx$"
+)
+_SEC_QUARTER_MANIFEST_MAX_BYTES = 1024 * 1024
+_SEC_QUARTER_MANIFEST_MAX_ITEMS = 10_000
 SEC_SUBMISSIONS_BASE_URL = "https://data.sec.gov/submissions"
 SEC_ARCHIVES_BASE_URL = "https://www.sec.gov/Archives"
 _SEC_USER_AGENT_EMAIL = re.compile(
@@ -903,6 +914,19 @@ _SEC_USER_AGENT_EMAIL = re.compile(
     r"(?![A-Z0-9._%+-])",
     re.IGNORECASE,
 )
+
+
+def _strict_sec_manifest_object(
+    pairs: list[tuple[str, Any]],
+) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise GlobalConnectorContractError(
+                "SEC quarter manifest JSON contains duplicate keys"
+            )
+        result[key] = value
+    return result
 
 
 def _validated_sec_user_agent(value: str) -> str:
@@ -1039,7 +1063,17 @@ class SecDailyIndexConnector(BaseGlobalConnector):
         day: date,
         *,
         before_request: Callable[[], object],
+        max_attempts: int | None = None,
     ) -> tuple[httpx.Response, int]:
+        attempt_limit = (
+            self.max_retries + 1
+            if max_attempts is None
+            else max_attempts
+        )
+        if attempt_limit < 1 or attempt_limit > self.max_retries + 1:
+            raise GlobalConnectorContractError(
+                "SEC daily index request budget is invalid"
+            )
         quarter = ((day.month - 1) // 3) + 1
         url = (
             f"{SEC_DAILY_INDEX_BASE_URL}/{day.year}/QTR{quarter}/"
@@ -1050,7 +1084,7 @@ class SecDailyIndexConnector(BaseGlobalConnector):
             "Accept-Encoding": "gzip, deflate",
             "Accept": "text/plain",
         }
-        for attempt in range(self.max_retries + 1):
+        for attempt in range(attempt_limit):
             before_request()
             self.throttle.wait()
             response = (
@@ -1074,11 +1108,8 @@ class SecDailyIndexConnector(BaseGlobalConnector):
             )
             if not retryable:
                 return response, attempts
-            if attempt >= self.max_retries:
-                raise GlobalConnectorError(
-                    "SEC EDGAR daily index request failed after retries",
-                    http_status=response.status_code,
-                )
+            if attempt >= attempt_limit - 1:
+                return response, attempts
             advertised = self._retry_after_seconds(response)
             delay = (
                 advertised
@@ -1091,6 +1122,190 @@ class SecDailyIndexConnector(BaseGlobalConnector):
             self.retry_sleep(delay)
         raise GlobalConnectorError(
             "SEC EDGAR daily index retry loop exhausted"
+        )
+
+    def _get_quarter_manifest(
+        self,
+        day: date,
+        *,
+        before_request: Callable[[], object],
+        max_attempts: int,
+    ) -> tuple[frozenset[str], frozenset[date], int]:
+        if max_attempts < 1 or max_attempts > self.max_retries + 1:
+            raise GlobalConnectorContractError(
+                "SEC quarter manifest request budget is invalid"
+            )
+        quarter = ((day.month - 1) // 3) + 1
+        url = (
+            f"{SEC_DAILY_INDEX_BASE_URL}/{day.year}/QTR{quarter}/"
+            "index.json"
+        )
+        headers = {
+            "User-Agent": self.user_agent,
+            "Accept-Encoding": "gzip, deflate",
+            "Accept": "application/json",
+        }
+        response: httpx.Response | None = None
+        attempts = 0
+        for attempt in range(max_attempts):
+            before_request()
+            self.throttle.wait()
+            response = (
+                self.client.get(
+                    url,
+                    headers=headers,
+                    follow_redirects=False,
+                )
+                if self.client is not None
+                else httpx.get(
+                    url,
+                    headers=headers,
+                    timeout=self.timeout,
+                    follow_redirects=False,
+                )
+            )
+            attempts = attempt + 1
+            retryable = (
+                response.status_code == 429
+                or 500 <= response.status_code < 600
+            )
+            if not retryable:
+                break
+            if attempt >= max_attempts - 1:
+                raise GlobalConnectorError(
+                    "SEC EDGAR quarter manifest request failed after retries",
+                    http_status=response.status_code,
+                )
+            advertised = self._retry_after_seconds(response)
+            delay = (
+                advertised
+                if advertised is not None
+                else min(
+                    float(2**attempt),
+                    _SEC_DAILY_INDEX_BACKOFF_CAP_SECONDS,
+                )
+            )
+            self.retry_sleep(delay)
+        if response is None:
+            raise GlobalConnectorError(
+                "SEC EDGAR quarter manifest retry loop exhausted"
+            )
+        if response.status_code != 200:
+            raise GlobalConnectorError(
+                f"SEC EDGAR quarter manifest HTTP {response.status_code}",
+                http_status=response.status_code,
+            )
+        if response.headers.get("Content-Range") is not None:
+            raise GlobalConnectorContractError(
+                "SEC quarter manifest partial response is invalid"
+            )
+        content_type = str(response.headers.get("Content-Type") or "")
+        if content_type.split(";", 1)[0].strip().lower() != "application/json":
+            raise GlobalConnectorContractError(
+                "SEC quarter manifest content type is invalid"
+            )
+        content = response.content
+        if not content or len(content) > _SEC_QUARTER_MANIFEST_MAX_BYTES:
+            raise GlobalConnectorContractError(
+                "SEC quarter manifest body size is invalid"
+            )
+        try:
+            text = content.decode("utf-8", errors="strict")
+            payload = json.loads(
+                text,
+                object_pairs_hook=_strict_sec_manifest_object,
+            )
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise GlobalConnectorContractError(
+                "SEC quarter manifest JSON is invalid"
+            ) from exc
+        if not isinstance(payload, dict) or set(payload) != {"directory"}:
+            raise GlobalConnectorContractError(
+                "SEC quarter manifest root is invalid"
+            )
+        directory = payload.get("directory")
+        if (
+            not isinstance(directory, dict)
+            or set(directory) != {"item", "name", "parent-dir"}
+            or directory.get("name")
+            != f"daily-index/{day.year}/QTR{quarter}/"
+            or directory.get("parent-dir") != "../"
+        ):
+            raise GlobalConnectorContractError(
+                "SEC quarter manifest directory identity is invalid"
+            )
+        items = directory.get("item")
+        if (
+            not isinstance(items, list)
+            or not items
+            or len(items) > _SEC_QUARTER_MANIFEST_MAX_ITEMS
+        ):
+            raise GlobalConnectorContractError(
+                "SEC quarter manifest item list is invalid"
+            )
+        names: set[str] = set()
+        master_days: set[date] = set()
+        for item in items:
+            if (
+                not isinstance(item, dict)
+                or set(item) != _SEC_QUARTER_MANIFEST_ITEM_KEYS
+            ):
+                raise GlobalConnectorContractError(
+                    "SEC quarter manifest item shape is invalid"
+                )
+            name = item.get("name")
+            if (
+                not isinstance(name, str)
+                or _SEC_QUARTER_MANIFEST_FILENAME.fullmatch(name) is None
+                or item.get("href") != name
+                or item.get("type") != "file"
+                or not isinstance(item.get("size"), str)
+                or not str(item.get("size")).strip()
+                or not isinstance(item.get("last-modified"), str)
+            ):
+                raise GlobalConnectorContractError(
+                    "SEC quarter manifest file metadata is invalid"
+                )
+            try:
+                datetime.strptime(
+                    str(item["last-modified"]),
+                    "%m/%d/%Y %I:%M:%S %p",
+                )
+            except ValueError as exc:
+                raise GlobalConnectorContractError(
+                    "SEC quarter manifest modification time is invalid"
+                ) from exc
+            if name in names:
+                raise GlobalConnectorContractError(
+                    "SEC quarter manifest contains duplicate filenames"
+                )
+            names.add(name)
+            master_match = _SEC_QUARTER_MASTER_FILENAME.fullmatch(name)
+            if master_match is None:
+                continue
+            try:
+                master_day = datetime.strptime(
+                    master_match.group("day"),
+                    "%Y%m%d",
+                ).date()
+            except ValueError as exc:
+                raise GlobalConnectorContractError(
+                    "SEC quarter manifest master filename is invalid"
+                ) from exc
+            master_quarter = ((master_day.month - 1) // 3) + 1
+            if master_day.year != day.year or master_quarter != quarter:
+                raise GlobalConnectorContractError(
+                    "SEC quarter manifest master filename is out of range"
+                )
+            master_days.add(master_day)
+        if not master_days:
+            raise GlobalConnectorContractError(
+                "SEC quarter manifest has no master index evidence"
+            )
+        return (
+            frozenset(names),
+            frozenset(master_days),
+            attempts,
         )
 
     def _fetch_authorized(
@@ -1111,21 +1326,73 @@ class SecDailyIndexConnector(BaseGlobalConnector):
         request_count = 0
         current = request.window_start
         while current < request.window_end_exclusive:
+            expected_daily_index = _sec_expected_daily_index(current)
+            daily_attempt_budget = self.max_retries + 1
+            manifest_listed_daily_index = False
+            if not expected_daily_index:
+                (
+                    manifest_names,
+                    manifest_master_days,
+                    manifest_attempts,
+                ) = self._get_quarter_manifest(
+                    current,
+                    before_request=rights_guard.assert_current,
+                    max_attempts=daily_attempt_budget,
+                )
+                request_count += manifest_attempts
+                expected_filename = f"master.{current:%Y%m%d}.idx"
+                manifest_listed_daily_index = (
+                    expected_filename in manifest_names
+                )
+                if not manifest_listed_daily_index:
+                    if not any(
+                        master_day > current
+                        for master_day in manifest_master_days
+                    ):
+                        raise GlobalConnectorIncomplete(
+                            "SEC quarter manifest cannot prove daily index "
+                            "absence without a later master index"
+                        )
+                    current += timedelta(days=1)
+                    continue
+                daily_attempt_budget -= manifest_attempts
+                if daily_attempt_budget < 1:
+                    raise GlobalConnectorIncomplete(
+                        "SEC completed-day request budget was exhausted "
+                        "before fetching a listed daily index"
+                    )
             response, attempts = self._get_day(
                 current,
                 before_request=rights_guard.assert_current,
+                max_attempts=daily_attempt_budget,
             )
             request_count += attempts
-            expected_daily_index = _sec_expected_daily_index(current)
-            if response.status_code == 404 or (
-                response.status_code == 403 and not expected_daily_index
-            ):
-                if expected_daily_index:
+            retryable = (
+                response.status_code == 429
+                or 500 <= response.status_code < 600
+            )
+            if retryable:
+                raise GlobalConnectorError(
+                    "SEC EDGAR daily index request failed after retries",
+                    http_status=response.status_code,
+                )
+            if response.status_code == 404:
+                if expected_daily_index or manifest_listed_daily_index:
                     raise GlobalConnectorIncomplete(
                         "SEC daily index is missing for an expected filing day"
                     )
-                current += timedelta(days=1)
-                continue
+                raise GlobalConnectorContractError(
+                    "SEC non-filing day reached daily index without "
+                    "manifest evidence"
+                )
+            if (
+                response.status_code == 403
+                and manifest_listed_daily_index
+            ):
+                raise GlobalConnectorIncomplete(
+                    "SEC daily index is inaccessible although the quarter "
+                    "manifest lists it"
+                )
             if response.status_code >= 400:
                 raise GlobalConnectorError(
                     f"SEC EDGAR daily index HTTP {response.status_code}",

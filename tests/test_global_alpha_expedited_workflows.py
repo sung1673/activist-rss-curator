@@ -605,6 +605,7 @@ def test_expedited_evidence_uses_actual_receipts_human_bytes_and_rights() -> Non
         "DART replay is not bound to the exact apply receipt contract",
         "global-backfill-US-summary.json",
         "US-????-??-??.json",
+        "not 1 <= request_count <= 6",
         'replay.get("read_only") is not True',
     ):
         assert contract in derive

@@ -1859,6 +1859,10 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
     assert "global-ingest-v2-day:us:" in exporter
     assert "global-ingest-v2-current" in exporter
     assert "alpha_evidence_completed_day_marker_invalid" in exporter
+    assert "(int)$row['batch_request_count'] < 1" in exporter
+    assert "(int)$row['batch_request_count'] > 6" in exporter
+    assert "(int)$final['batch_request_count'] < 1" in exporter
+    assert "(int)$final['batch_request_count'] > 6" in exporter
     assert "function v2_alpha_dart_job_is_release_bound" in exporter
     dart_job_binding = exporter[
         exporter.index("function v2_alpha_dart_job_is_release_bound") :
@@ -2116,10 +2120,12 @@ def test_sec_current_apply_requires_fresh_request_proof_before_refresh():
     assert "15 minutes" in envelope["retrieved_at"]["description"]
     assert "strictly newer" in envelope["retrieved_at"]["description"]
     assert "final chunk" in envelope["request_count"]["description"]
+    assert "one to six" in envelope["request_count"]["description"]
     chunk = SPEC["components"]["schemas"]["GlobalIngestChunk"]["properties"]
     assert "at least one source request" in chunk[
         "batch_request_count"
     ]["description"]
+    assert "one to six" in chunk["batch_request_count"]["description"]
 
 
 def test_sec_ingest_rejects_unclassified_receipts_before_any_write():
@@ -2226,6 +2232,10 @@ def test_partial_batch_allows_request_telemetry_to_change_on_retry():
         )
     ]
     assert "$final = $batchRows[$chunkCount - 1]" in exporter
+    assert "(int)$row['batch_request_count'] < 1" in exporter
+    assert "(int)$row['batch_request_count'] > 6" in exporter
+    assert "(int)$final['batch_request_count'] < 1" in exporter
+    assert "(int)$final['batch_request_count'] > 6" in exporter
     assert "$requests !== (int)$final['batch_request_count']" in exporter
     assert (
         "$requests !== (int)$first['batch_request_count']"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -13,7 +14,9 @@ from curator.global_connectors import (
     CompaniesHouseFilingHistoryConnector,
     EdinetDocumentsConnector,
     GlobalConnectorContractError,
+    GlobalConnectorEnvelope,
     GlobalConnectorError,
+    GlobalConnectorIncomplete,
     GlobalConnectorPaginationError,
     GlobalConnectorRequest,
     GlobalSourceRightDenied,
@@ -533,10 +536,18 @@ def test_sec_daily_rejects_future_filing_date() -> None:
             )
 
 
-def test_sec_daily_treats_weekend_access_denied_as_missing_index() -> None:
+def test_sec_daily_uses_manifest_first_for_weekend_absence() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/2026/QTR2/master.20260628.idx"):
-            return httpx.Response(403)
+        if request.url.path.endswith("/2026/QTR2/index.json"):
+            return httpx.Response(
+                200,
+                content=_sec_quarter_manifest(
+                    year=2026,
+                    quarter=2,
+                    master_days=(date(2026, 6, 29),),
+                ),
+                headers={"Content-Type": "application/json"},
+            )
         assert request.url.path.endswith("/2026/QTR2/master.20260629.idx")
         return httpx.Response(
             200,
@@ -722,6 +733,588 @@ def test_sec_daily_5xx_retries_are_bounded_and_structured() -> None:
 
     assert calls == 3
     assert retry_delays == [1.0, 2.0]
+    assert raised.value.http_status == 503
+
+
+def _sec_quarter_manifest(
+    *,
+    year: int,
+    quarter: int,
+    master_days: tuple[date, ...],
+) -> bytes:
+    payload = {
+        "directory": {
+            "item": [
+                {
+                    "last-modified": f"{day:%m/%d/%Y} 10:01:46 PM",
+                    "name": f"master.{day:%Y%m%d}.idx",
+                    "type": "file",
+                    "href": f"master.{day:%Y%m%d}.idx",
+                    "size": "723 KB",
+                }
+                for day in master_days
+            ],
+            "name": f"daily-index/{year}/QTR{quarter}/",
+            "parent-dir": "../",
+        }
+    }
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+
+def _fetch_sec_nonbusiness_manifest(
+    content: bytes,
+    *,
+    headers: dict[str, str] | None = None,
+) -> GlobalConnectorEnvelope:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/2026/QTR3/index.json")
+        return httpx.Response(
+            200,
+            content=content,
+            headers=headers or {"Content-Type": "application/json"},
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        return SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+            max_retries=0,
+            sleep=lambda _delay: None,
+        ).fetch(
+            GlobalConnectorRequest(
+                window_start=date(2026, 7, 5),
+                window_end_exclusive=date(2026, 7, 6),
+            ),
+            eligibility=eligibility(
+                "official:sec-edgar",
+                "sec-edgar",
+            ),
+            now=NOW,
+        )
+
+
+def _sec_duplicate_manifest_cases() -> tuple[tuple[str, bytes], ...]:
+    valid = _sec_quarter_manifest(
+        year=2026,
+        quarter=3,
+        master_days=(date(2026, 7, 6),),
+    )
+    payload = json.loads(valid)
+    directory = json.dumps(
+        payload["directory"],
+        separators=(",", ":"),
+    )
+    duplicate_root = (
+        '{"directory":'
+        + directory
+        + ',"directory":'
+        + directory
+        + "}"
+    ).encode("utf-8")
+    duplicate_directory = valid.replace(
+        b'"name":"daily-index/2026/QTR3/"',
+        (
+            b'"name":"ignored-directory/",'
+            b'"name":"daily-index/2026/QTR3/"'
+        ),
+        1,
+    )
+    duplicate_item = valid.replace(
+        b'"name":"master.20260706.idx"',
+        (
+            b'"name":"ignored-master.idx",'
+            b'"name":"master.20260706.idx"'
+        ),
+        1,
+    )
+    return (
+        ("root", duplicate_root),
+        ("directory", duplicate_directory),
+        ("item", duplicate_item),
+    )
+
+
+@pytest.mark.parametrize(
+    ("duplicate_location", "content"),
+    _sec_duplicate_manifest_cases(),
+)
+def test_sec_daily_weekend_rejects_duplicate_manifest_keys(
+    duplicate_location: str,
+    content: bytes,
+) -> None:
+    with pytest.raises(
+        GlobalConnectorContractError,
+        match="contains duplicate keys",
+    ):
+        _fetch_sec_nonbusiness_manifest(content)
+    assert duplicate_location in {"root", "directory", "item"}
+
+
+def test_sec_daily_weekend_rejects_invalid_utf8_manifest() -> None:
+    manifest = _sec_quarter_manifest(
+        year=2026,
+        quarter=3,
+        master_days=(date(2026, 7, 6),),
+    )
+
+    with pytest.raises(
+        GlobalConnectorContractError,
+        match="JSON is invalid",
+    ):
+        _fetch_sec_nonbusiness_manifest(manifest + b"\xff")
+
+
+def test_sec_daily_weekend_rejects_oversized_manifest() -> None:
+    manifest = _sec_quarter_manifest(
+        year=2026,
+        quarter=3,
+        master_days=(date(2026, 7, 6),),
+    )
+
+    with pytest.raises(
+        GlobalConnectorContractError,
+        match="body size is invalid",
+    ):
+        _fetch_sec_nonbusiness_manifest(
+            manifest + b" " * (1024 * 1024),
+        )
+
+
+def test_sec_daily_weekend_rejects_partial_manifest() -> None:
+    manifest = _sec_quarter_manifest(
+        year=2026,
+        quarter=3,
+        master_days=(date(2026, 7, 6),),
+    )
+
+    with pytest.raises(
+        GlobalConnectorContractError,
+        match="partial response is invalid",
+    ):
+        _fetch_sec_nonbusiness_manifest(
+            manifest,
+            headers={
+                "Content-Type": "application/json",
+                "Content-Range": "bytes 0-100/200",
+            },
+        )
+
+
+def test_sec_daily_weekend_rejects_excessive_manifest_items() -> None:
+    content = json.dumps(
+        {
+            "directory": {
+                "item": [
+                    {
+                        "last-modified": "",
+                        "name": "",
+                        "type": "",
+                        "href": "",
+                        "size": "",
+                    }
+                    for _index in range(10_001)
+                ],
+                "name": "daily-index/2026/QTR3/",
+                "parent-dir": "../",
+            }
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert len(content) < 1024 * 1024
+
+    with pytest.raises(
+        GlobalConnectorContractError,
+        match="item list is invalid",
+    ):
+        _fetch_sec_nonbusiness_manifest(content)
+
+
+def test_sec_daily_weekend_manifest_absence_proof_retries_first() -> None:
+    manifest_calls = 0
+    rights_checks = 0
+    retry_delays: list[float] = []
+    manifest = _sec_quarter_manifest(
+        year=2026,
+        quarter=3,
+        master_days=(date(2026, 7, 6),),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal manifest_calls
+        assert request.url.path.endswith("/2026/QTR3/index.json")
+        assert request.headers["accept"] == "application/json"
+        manifest_calls += 1
+        if manifest_calls == 1:
+            return httpx.Response(503)
+        return httpx.Response(
+            200,
+            content=manifest,
+            headers={"Content-Type": "application/json"},
+        )
+
+    def recheck() -> OfficialSourceRightEligibility:
+        nonlocal rights_checks
+        rights_checks += 1
+        return replace(
+            eligibility("official:sec-edgar", "sec-edgar"),
+            checked_at=datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat(),
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+            max_retries=2,
+            sleep=lambda _delay: None,
+            retry_sleep=retry_delays.append,
+        ).fetch(
+            GlobalConnectorRequest(
+                window_start=date(2026, 7, 5),
+                window_end_exclusive=date(2026, 7, 6),
+            ),
+            eligibility=eligibility("official:sec-edgar", "sec-edgar"),
+            eligibility_provider=recheck,
+            now=NOW,
+        )
+
+    assert manifest_calls == 2
+    assert rights_checks == manifest_calls
+    assert retry_delays == [1.0]
+    assert result.request_count == 2
+    assert result.raw_count == 0
+    assert result.records == ()
+    assert result.source_manifest_sha256 is None
+
+
+def test_sec_daily_weekend_manifest_listed_target_fetches_daily_index() -> None:
+    paths: list[str] = []
+    manifest = _sec_quarter_manifest(
+        year=2026,
+        quarter=3,
+        master_days=(date(2026, 7, 5), date(2026, 7, 6)),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("/2026/QTR3/index.json"):
+            return httpx.Response(
+                200,
+                content=manifest,
+                headers={"Content-Type": "application/json"},
+            )
+        assert request.url.path.endswith("/master.20260705.idx")
+        return httpx.Response(
+            200,
+            text=(
+                "CIK|Company Name|Form Type|Date Filed|File Name\n"
+                "--------------------------------------------------------\n"
+                "320193|Apple Inc.|SC 13D|20260705|"
+                "edgar/data/320193/0000320193-26-000999.txt\n"
+            ),
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+            max_retries=5,
+            sleep=lambda _delay: None,
+        ).fetch(
+            GlobalConnectorRequest(
+                window_start=date(2026, 7, 5),
+                window_end_exclusive=date(2026, 7, 6),
+            ),
+            eligibility=eligibility(
+                "official:sec-edgar",
+                "sec-edgar",
+            ),
+            now=NOW,
+        )
+
+    assert paths == [
+        "/Archives/edgar/daily-index/2026/QTR3/index.json",
+        "/Archives/edgar/daily-index/2026/QTR3/master.20260705.idx",
+    ]
+    assert result.request_count == 2
+    assert result.raw_count == 1
+    assert len(result.records) == 1
+    assert result.records[0].document_type == "SC 13D"
+    assert result.source_manifest_sha256 is None
+
+
+def test_sec_daily_weekend_manifest_and_daily_retries_share_success_budget() -> None:
+    manifest_calls = 0
+    daily_calls = 0
+    rights_checks = 0
+    retry_delays: list[float] = []
+    manifest = _sec_quarter_manifest(
+        year=2026,
+        quarter=3,
+        master_days=(date(2026, 7, 5), date(2026, 7, 6)),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal manifest_calls, daily_calls
+        if request.url.path.endswith("/2026/QTR3/index.json"):
+            manifest_calls += 1
+            if manifest_calls == 1:
+                return httpx.Response(503)
+            return httpx.Response(
+                200,
+                content=manifest,
+                headers={"Content-Type": "application/json"},
+            )
+        assert request.url.path.endswith("/master.20260705.idx")
+        daily_calls += 1
+        if daily_calls <= 2:
+            return httpx.Response(503)
+        return httpx.Response(
+            200,
+            text=(
+                "CIK|Company Name|Form Type|Date Filed|File Name\n"
+                "--------------------------------------------------------\n"
+                "320193|Apple Inc.|SC 13D|20260705|"
+                "edgar/data/320193/0000320193-26-000999.txt\n"
+            ),
+        )
+
+    def recheck() -> OfficialSourceRightEligibility:
+        nonlocal rights_checks
+        rights_checks += 1
+        return replace(
+            eligibility("official:sec-edgar", "sec-edgar"),
+            checked_at=datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat(),
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+            max_retries=5,
+            sleep=lambda _delay: None,
+            retry_sleep=retry_delays.append,
+        ).fetch(
+            GlobalConnectorRequest(
+                window_start=date(2026, 7, 5),
+                window_end_exclusive=date(2026, 7, 6),
+            ),
+            eligibility=eligibility(
+                "official:sec-edgar",
+                "sec-edgar",
+            ),
+            eligibility_provider=recheck,
+            now=NOW,
+        )
+
+    assert manifest_calls == 2
+    assert daily_calls == 3
+    assert manifest_calls + daily_calls == rights_checks == 5
+    assert result.request_count == 5
+    assert retry_delays == [1.0, 1.0, 2.0]
+    assert result.raw_count == 1
+    assert len(result.records) == 1
+    assert result.source_manifest_sha256 is None
+
+
+def test_sec_daily_weekend_target_listed_uses_shared_six_request_budget() -> None:
+    manifest_calls = 0
+    daily_calls = 0
+    retry_delays: list[float] = []
+    manifest = _sec_quarter_manifest(
+        year=2026,
+        quarter=3,
+        master_days=(date(2026, 7, 5), date(2026, 7, 6)),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal manifest_calls, daily_calls
+        if request.url.path.endswith("/master.20260705.idx"):
+            daily_calls += 1
+            return httpx.Response(503)
+        assert request.url.path.endswith("/2026/QTR3/index.json")
+        manifest_calls += 1
+        return httpx.Response(
+            200,
+            content=manifest,
+            headers={"Content-Type": "application/json"},
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+            max_retries=5,
+            sleep=lambda _delay: None,
+            retry_sleep=retry_delays.append,
+        )
+        with pytest.raises(
+            GlobalConnectorError,
+            match="daily index request failed after retries",
+        ) as raised:
+            connector.fetch(
+                GlobalConnectorRequest(
+                    window_start=date(2026, 7, 5),
+                    window_end_exclusive=date(2026, 7, 6),
+                ),
+                eligibility=eligibility(
+                    "official:sec-edgar",
+                    "sec-edgar",
+                ),
+                now=NOW,
+            )
+
+    assert manifest_calls == 1
+    assert daily_calls == 5
+    assert manifest_calls + daily_calls == 6
+    assert retry_delays == [1.0, 2.0, 4.0, 8.0]
+    assert raised.value.http_status == 503
+
+
+def test_sec_daily_weekend_invalid_manifest_fails_closed() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/2026/QTR3/index.json")
+        return httpx.Response(
+            200,
+            json={
+                "directory": {
+                    "item": [],
+                    "name": "daily-index/2026/QTR3/",
+                    "parent-dir": "../",
+                }
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+            max_retries=0,
+            sleep=lambda _delay: None,
+        )
+        with pytest.raises(
+            GlobalConnectorContractError,
+            match="item list is invalid",
+        ):
+            connector.fetch(
+                GlobalConnectorRequest(
+                    window_start=date(2026, 7, 5),
+                    window_end_exclusive=date(2026, 7, 6),
+                ),
+                eligibility=eligibility(
+                    "official:sec-edgar",
+                    "sec-edgar",
+                ),
+                now=NOW,
+            )
+
+
+def test_sec_daily_weekend_without_later_manifest_sentinel_fails_closed() -> None:
+    manifest = _sec_quarter_manifest(
+        year=2026,
+        quarter=3,
+        master_days=(date(2026, 7, 3),),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/2026/QTR3/index.json")
+        return httpx.Response(
+            200,
+            content=manifest,
+            headers={"Content-Type": "application/json"},
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+            max_retries=0,
+            sleep=lambda _delay: None,
+        )
+        with pytest.raises(
+            GlobalConnectorIncomplete,
+            match="without a later master index",
+        ):
+            connector.fetch(
+                GlobalConnectorRequest(
+                    window_start=date(2026, 7, 5),
+                    window_end_exclusive=date(2026, 7, 6),
+                ),
+                eligibility=eligibility(
+                    "official:sec-edgar",
+                    "sec-edgar",
+                ),
+                now=NOW,
+            )
+
+
+def test_sec_daily_weekend_failed_manifest_fails_closed() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/2026/QTR3/index.json")
+        return httpx.Response(503)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+            max_retries=0,
+            sleep=lambda _delay: None,
+        )
+        with pytest.raises(
+            GlobalConnectorError,
+            match="quarter manifest request failed after retries",
+        ) as raised:
+            connector.fetch(
+                GlobalConnectorRequest(
+                    window_start=date(2026, 7, 5),
+                    window_end_exclusive=date(2026, 7, 6),
+                ),
+                eligibility=eligibility(
+                    "official:sec-edgar",
+                    "sec-edgar",
+                ),
+                now=NOW,
+            )
+
+    assert raised.value.http_status == 503
+
+
+def test_sec_daily_retryable_business_day_does_not_use_manifest() -> None:
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        assert request.url.path.endswith("/master.20260706.idx")
+        return httpx.Response(503)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+            max_retries=2,
+            sleep=lambda _delay: None,
+        )
+        with pytest.raises(
+            GlobalConnectorError,
+            match="failed after retries",
+        ) as raised:
+            connector.fetch(
+                GlobalConnectorRequest(
+                    window_start=date(2026, 7, 6),
+                    window_end_exclusive=date(2026, 7, 7),
+                ),
+                eligibility=eligibility(
+                    "official:sec-edgar",
+                    "sec-edgar",
+                ),
+                now=NOW,
+            )
+
+    assert len(paths) == 3
+    assert all(path.endswith("/master.20260706.idx") for path in paths)
     assert raised.value.http_status == 503
 
 

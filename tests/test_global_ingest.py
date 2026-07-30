@@ -210,6 +210,33 @@ class _ZeroRequestCurrentConnector:
         return _envelope(request_count=0)
 
 
+class _CompletedDayContractConnector:
+    descriptor = SecDailyIndexConnector.descriptor
+
+    def __init__(
+        self,
+        *,
+        request_count: int,
+        source_manifest_sha256: str | None = None,
+    ) -> None:
+        self.request_count = request_count
+        self.source_manifest_sha256 = source_manifest_sha256
+
+    def fetch(
+        self,
+        request: GlobalConnectorRequest,
+        *,
+        eligibility: OfficialSourceRightEligibility,
+        eligibility_provider=None,
+        now=None,
+    ) -> GlobalConnectorEnvelope:
+        del request, eligibility, eligibility_provider, now
+        return replace(
+            _envelope(request_count=self.request_count),
+            source_manifest_sha256=self.source_manifest_sha256,
+        )
+
+
 class _Ingest:
     def __init__(self) -> None:
         self.key = ""
@@ -270,6 +297,69 @@ def test_current_poll_requires_a_real_source_request_before_submission() -> None
             code_revision=REVISION,
             rights_client=_Rights(),
             ingest_client=ingest,
+        )
+    assert ingest.key == ""
+
+
+@pytest.mark.parametrize("request_count", [0, 7])
+def test_completed_day_requires_one_to_six_source_requests(
+    request_count: int,
+) -> None:
+    ingest = _Ingest()
+    with pytest.raises(
+        GlobalIngestConfigurationError,
+        match="completed_day_requires_bounded_source_requests",
+    ):
+        execute_global_ingest(
+            country_code="US",
+            connector=_CompletedDayContractConnector(
+                request_count=request_count,
+            ),
+            issuers=(),
+            window_start=date(2026, 7, 22),
+            window_end_exclusive=date(2026, 7, 23),
+            code_revision=REVISION,
+            rights_client=_Rights(),
+            ingest_client=ingest,
+            completed_day_evidence=True,
+        )
+    assert ingest.key == ""
+
+
+def test_completed_day_accepts_six_requests_without_source_manifest() -> None:
+    result = execute_global_ingest(
+        country_code="US",
+        connector=_CompletedDayContractConnector(request_count=6),
+        issuers=(),
+        window_start=date(2026, 7, 22),
+        window_end_exclusive=date(2026, 7, 23),
+        code_revision=REVISION,
+        rights_client=_Rights(),
+        ingest_client=_Ingest(),
+        completed_day_evidence=True,
+    )
+    assert result.request_count == 6
+
+
+def test_completed_day_rejects_source_manifest_before_submission() -> None:
+    ingest = _Ingest()
+    with pytest.raises(
+        GlobalIngestConfigurationError,
+        match="completed_day_rejects_source_manifest",
+    ):
+        execute_global_ingest(
+            country_code="US",
+            connector=_CompletedDayContractConnector(
+                request_count=1,
+                source_manifest_sha256="c" * 64,
+            ),
+            issuers=(),
+            window_start=date(2026, 7, 22),
+            window_end_exclusive=date(2026, 7, 23),
+            code_revision=REVISION,
+            rights_client=_Rights(),
+            ingest_client=ingest,
+            completed_day_evidence=True,
         )
     assert ingest.key == ""
 
