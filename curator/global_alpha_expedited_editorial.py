@@ -624,6 +624,12 @@ def _event_basis(event: Mapping[str, object]) -> dict[str, object]:
     for index, raw in enumerate(_list(event.get("actors"), "event.actors")):
         location = f"event.actors[{index}]"
         actor = _mapping(raw, location)
+        country_code = _optional_text(
+            actor.get("country_code"),
+            "country_code",
+            location,
+            maximum=2,
+        )
         safe: dict[str, object] = {
             "actor_id": _text(
                 actor.get("actor_id"), "actor_id", location, maximum=64
@@ -640,12 +646,7 @@ def _event_basis(event: Mapping[str, object]) -> dict[str, object]:
             "actor_role": _text(
                 actor.get("actor_role"), "actor_role", location, maximum=40
             ),
-            "country_code": _text(
-                actor.get("country_code"),
-                "country_code",
-                location,
-                maximum=2,
-            ),
+            "country_code": country_code,
         }
         if re.fullmatch(
             r"[A-Za-z0-9_.:\-]{1,64}",
@@ -658,7 +659,7 @@ def _event_basis(event: Mapping[str, object]) -> dict[str, object]:
                 str(safe[field]),
             ) is None:
                 raise ExpeditedEditorialError(f"{location}: invalid {field}")
-        if safe["country_code"] not in COUNTRIES:
+        if country_code is not None and country_code not in COUNTRIES:
             raise ExpeditedEditorialError(f"{location}: invalid country_code")
         identity = (str(safe["actor_id"]), str(safe["actor_role"]))
         if identity in seen:
@@ -990,6 +991,11 @@ def _review_pack(candidate: Mapping[str, object]) -> str:
         "| # | 회사 | 유형 | 원문 제목 | 공식 근거 | 현재 제안 |",
         "|---:|---|---|---|---|---|",
     ]
+    lines.insert(
+        4,
+        "- 당사자 국가가 `국가 미확인`이면 사건 국가로 추론하지 말고, "
+        "공식 근거로 확인한 국가만 승인 JSON에 입력합니다. 확인할 수 없으면 사건을 거절합니다.",
+    )
     events = _list(basis.get("events"), "basis.events")
     for index, raw in enumerate(events, start=1):
         event = _mapping(raw, f"events[{index}]")
@@ -1259,7 +1265,106 @@ def _validate_actor(value: object, location: str) -> dict[str, object]:
             raise ExpeditedEditorialError(f"{location}: invalid {field}")
     if result["country_code"] not in COUNTRIES:
         raise ExpeditedEditorialError(f"{location}: invalid country_code")
+    if any(actor.get(field) != result[field] for field in SAFE_ACTOR_FIELDS):
+        raise ExpeditedEditorialError(
+            f"{location}: exact actor field values required"
+        )
     return result
+
+
+def _validate_candidate_actor(
+    value: object,
+    location: str,
+) -> dict[str, object]:
+    actor = _mapping(value, location)
+    if set(actor) != set(SAFE_ACTOR_FIELDS):
+        raise ExpeditedEditorialError(
+            f"{location}: exact candidate actor fields required"
+        )
+    country_code = _optional_text(
+        actor.get("country_code"),
+        "country_code",
+        location,
+        maximum=2,
+    )
+    result: dict[str, object] = {
+        "actor_id": _text(
+            actor.get("actor_id"), "actor_id", location, maximum=64
+        ),
+        "display_name": _text(
+            actor.get("display_name"),
+            "display_name",
+            location,
+            maximum=255,
+        ),
+        "actor_type": _text(
+            actor.get("actor_type"), "actor_type", location, maximum=40
+        ),
+        "actor_role": _text(
+            actor.get("actor_role"), "actor_role", location, maximum=40
+        ),
+        "country_code": country_code,
+    }
+    if re.fullmatch(r"[A-Za-z0-9_.:\-]{1,64}", str(result["actor_id"])) is None:
+        raise ExpeditedEditorialError(f"{location}: invalid actor_id")
+    for field in ("actor_type", "actor_role"):
+        if re.fullmatch(
+            r"[a-z][a-z0-9_]{1,39}",
+            str(result[field]),
+        ) is None:
+            raise ExpeditedEditorialError(f"{location}: invalid {field}")
+    if country_code is not None and country_code not in COUNTRIES:
+        raise ExpeditedEditorialError(f"{location}: invalid country_code")
+    if any(actor.get(field) != result[field] for field in SAFE_ACTOR_FIELDS):
+        raise ExpeditedEditorialError(
+            f"{location}: exact candidate actor field values required"
+        )
+    return result
+
+
+def _bind_review_actor(
+    actor: Mapping[str, object],
+    event: Mapping[str, object],
+    location: str,
+) -> dict[str, object]:
+    candidates = [
+        _validate_candidate_actor(raw, f"{location}.candidate_actors[{index}]")
+        for index, raw in enumerate(
+            _list(event.get("actors"), f"{location}.candidate_actors")
+        )
+    ]
+    identity_fields = (
+        "actor_id",
+        "display_name",
+        "actor_type",
+        "actor_role",
+    )
+    matches = [
+        candidate
+        for candidate in candidates
+        if all(candidate[field] == actor[field] for field in identity_fields)
+    ]
+    if not candidates:
+        raise ExpeditedEditorialError(
+            f"{location}: candidate actor required"
+        )
+    if len(matches) == 0:
+        raise ExpeditedEditorialError(
+            f"{location}: candidate actor binding mismatch"
+        )
+    if len(matches) != 1:
+        raise ExpeditedEditorialError(
+            f"{location}: ambiguous candidate actor binding"
+        )
+    candidate_country = matches[0]["country_code"]
+    if (
+        candidate_country is not None
+        and candidate_country != actor["country_code"]
+    ):
+        raise ExpeditedEditorialError(
+            f"{location}: candidate actor country mismatch"
+        )
+    return dict(actor)
 
 
 def _validate_review_payload(
@@ -1311,6 +1416,15 @@ def _validate_review_payload(
     importance = _text(payload.get("importance"), "importance", location)
     if importance not in IMPORTANCE:
         raise ExpeditedEditorialError(f"{location}: invalid importance")
+    reviewed_actor = _validate_actor(
+        payload.get("actor"),
+        location + ".actor",
+    )
+    reviewed_actor = _bind_review_actor(
+        reviewed_actor,
+        event,
+        location + ".actor",
+    )
     result.update(
         {
             "event_family": family,
@@ -1346,7 +1460,7 @@ def _validate_review_payload(
                 location,
                 maximum=64,
             ),
-            "actor": _validate_actor(payload.get("actor"), location + ".actor"),
+            "actor": reviewed_actor,
         }
     )
     merge_target = payload.get("merge_into_event_id")
@@ -1368,6 +1482,7 @@ def validate_decisions(
     candidate_artifact_digest: str,
     now: datetime,
 ) -> tuple[dict[str, object], list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+    candidate = _validate_candidate(candidate, revision)
     if decisions.get("schema_version") != SCHEMA_VERSION or decisions.get("kind") != DECISION_KIND:
         raise ExpeditedEditorialError("decisions: schema or kind mismatch")
     if decisions.get("environment") != "production" or decisions.get("is_synthetic"):

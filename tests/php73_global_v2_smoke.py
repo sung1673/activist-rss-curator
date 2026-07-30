@@ -3805,31 +3805,99 @@ def run(base_url: str, mysql_container_id: str) -> None:
         and len(expected_evidence_sha256) == 64,
         repr(expedited_detail),
     )
+    mysql_execute(
+        mysql_container_id,
+        "INSERT INTO ci_actors "
+        "(actor_id,actor_type,display_name,display_name_en,company_id,"
+        "country_code,aliases_json,homepage_url,review_status,record_status,"
+        "created_at,updated_at) VALUES "
+        "('actor:ci:sec-filer','institutional_investor',"
+        "'CI Reporting Person',NULL,NULL,NULL,'[]',NULL,'pending','inactive',"
+        "UTC_TIMESTAMP(),UTC_TIMESTAMP());"
+        "INSERT INTO ci_event_actors "
+        "(event_id,actor_id,actor_role,review_status,created_at,updated_at) "
+        f"VALUES ('{event_id}','actor:ci:sec-filer','reporting_person',"
+        "'pending',UTC_TIMESTAMP(),UTC_TIMESTAMP());",
+    )
+    approved_review_payload = {
+        "decision": "approve",
+        "expected_updated_at": expected_updated_at,
+        "expected_evidence_sha256": expected_evidence_sha256,
+        "reason": "CI editor verified identity and official evidence.",
+        "identity_action": "reported beneficial ownership",
+        "identity_target": "voting securities",
+        "identity_effective_at": filed_at,
+        "identity_deadline_at": None,
+        "importance": "high",
+        "summary": "The reporting person amended an official beneficial ownership filing.",
+        "current_status": "official filing active",
+        "actor": {
+            "actor_id": "actor:ci:sec-filer",
+            "display_name": "CI Reporting Person",
+            "actor_type": "institutional_investor",
+            "actor_role": "reporting_person",
+            "country_code": "US",
+        },
+    }
+    whitespace_actor_payload = json.loads(json.dumps(approved_review_payload))
+    whitespace_actor_payload["reason"] = (
+        "CI rejects actor identity whitespace instead of normalizing it."
+    )
+    whitespace_actor_payload["actor"]["display_name"] += " "
+    whitespace_actor, _ = request_json(
+        base_url,
+        f"api.php/api/v2/admin/events/{event_id}/review",
+        method="POST",
+        token=EDITOR_TOKEN,
+        payload=whitespace_actor_payload,
+        expected_status=400,
+    )
+    require(
+        whitespace_actor.get("error") == "event_review_validation_failed"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT COALESCE(country_code,'NULL') FROM ci_actors "
+            "WHERE actor_id='actor:ci:sec-filer';",
+        )
+        == "NULL",
+        repr(whitespace_actor),
+    )
+    arbitrary_actor_payload = json.loads(json.dumps(approved_review_payload))
+    arbitrary_actor_payload["reason"] = (
+        "CI rejects an actor that was not present in the source candidate."
+    )
+    arbitrary_actor_payload["actor"]["actor_id"] = "actor:ci:arbitrary"
+    arbitrary_actor, _ = request_json(
+        base_url,
+        f"api.php/api/v2/admin/events/{event_id}/review",
+        method="POST",
+        token=EDITOR_TOKEN,
+        payload=arbitrary_actor_payload,
+        expected_status=409,
+    )
+    require(
+        arbitrary_actor.get("error")
+        == "event_actor_candidate_binding_conflict"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_actors "
+            "WHERE actor_id='actor:ci:arbitrary';",
+        )
+        == "0"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT COALESCE(country_code,'NULL') FROM ci_actors "
+            "WHERE actor_id='actor:ci:sec-filer';",
+        )
+        == "NULL",
+        repr(arbitrary_actor),
+    )
     reviewed, _ = request_json(
         base_url,
         f"api.php/api/v2/admin/events/{event_id}/review",
         method="POST",
         token=EDITOR_TOKEN,
-        payload={
-            "decision": "approve",
-            "expected_updated_at": expected_updated_at,
-            "expected_evidence_sha256": expected_evidence_sha256,
-            "reason": "CI editor verified identity and official evidence.",
-            "identity_action": "reported beneficial ownership",
-            "identity_target": "voting securities",
-            "identity_effective_at": filed_at,
-            "identity_deadline_at": None,
-            "importance": "high",
-            "summary": "The reporting person amended an official beneficial ownership filing.",
-            "current_status": "official filing active",
-            "actor": {
-                "actor_id": "actor:ci:sec-filer",
-                "display_name": "CI Reporting Person",
-                "actor_type": "institutional_investor",
-                "actor_role": "reporting_person",
-                "country_code": "US",
-            },
-        },
+        payload=approved_review_payload,
     )
     require(
         reviewed.get("data", {}).get("decision") == "approved"
@@ -3838,6 +3906,173 @@ def run(base_url: str, mysql_container_id: str) -> None:
             "global:"
         ),
         repr(reviewed),
+    )
+    actor_enrichment_state = mysql_execute(
+        mysql_container_id,
+        "SELECT CONCAT(COALESCE(country_code,'NULL'),'|',review_status,'|',"
+        "record_status) FROM ci_actors "
+        "WHERE actor_id='actor:ci:sec-filer';",
+    )
+    actor_enrichment_audit_count = mysql_execute(
+        mysql_container_id,
+        "SELECT COUNT(*) FROM ci_editorial_revisions "
+        "WHERE entity_type='actor' AND entity_id='actor:ci:sec-filer' "
+        "AND field_name='country_code' AND previous_value IS NULL "
+        "AND revised_value='US' AND revision_status='internal_approved' "
+        "AND published_at IS NULL;",
+    )
+    require(
+        actor_enrichment_state == "US|approved|active"
+        and actor_enrichment_audit_count == "1",
+        actor_enrichment_state + "|" + actor_enrichment_audit_count,
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_governance_events "
+        "SET updated_at=DATE_SUB(UTC_TIMESTAMP(),INTERVAL 1 DAY) "
+        f"WHERE event_id='{event_id}';",
+    )
+    actor_replay_detail, _ = request_json(
+        base_url,
+        f"api.php/api/v2/admin/expedited-review-candidates/{event_id}",
+        token=EDITOR_TOKEN,
+    )
+    actor_replay_event = actor_replay_detail.get("data", {}).get("event", {})
+    actor_replay_payload = json.loads(json.dumps(approved_review_payload))
+    actor_replay_payload["expected_updated_at"] = actor_replay_event.get(
+        "updated_at"
+    )
+    actor_replay_payload["expected_evidence_sha256"] = actor_replay_event.get(
+        "event_evidence_sha256"
+    )
+    actor_replay_payload["reason"] = (
+        "CI reuses the same reviewed actor country without another audit."
+    )
+    actor_replay, _ = request_json(
+        base_url,
+        f"api.php/api/v2/admin/events/{event_id}/review",
+        method="POST",
+        token=EDITOR_TOKEN,
+        payload=actor_replay_payload,
+    )
+    require(
+        actor_replay.get("data", {}).get("decision") == "approved"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT country_code FROM ci_actors "
+            "WHERE actor_id='actor:ci:sec-filer';",
+        )
+        == "US"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_editorial_revisions "
+            "WHERE entity_type='actor' "
+            "AND entity_id='actor:ci:sec-filer' "
+            "AND field_name='country_code';",
+        )
+        == "1",
+        repr(actor_replay),
+    )
+    approved_detail, _ = request_json(
+        base_url,
+        f"api.php/api/v2/admin/expedited-review-candidates/{event_id}",
+        token=EDITOR_TOKEN,
+    )
+    approved_event = approved_detail.get("data", {}).get("event", {})
+    mismatch_payload = json.loads(json.dumps(approved_review_payload))
+    mismatch_payload["expected_updated_at"] = approved_event.get("updated_at")
+    mismatch_payload["expected_evidence_sha256"] = approved_event.get(
+        "event_evidence_sha256"
+    )
+    mismatch_payload["reason"] = (
+        "CI rejects a non-null canonical actor country mismatch."
+    )
+    mismatch_payload["actor"]["country_code"] = "CA"
+    mismatch, _ = request_json(
+        base_url,
+        f"api.php/api/v2/admin/events/{event_id}/review",
+        method="POST",
+        token=EDITOR_TOKEN,
+        payload=mismatch_payload,
+        expected_status=409,
+    )
+    require(
+        mismatch.get("error") == "event_actor_country_conflict"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT(country_code,'|',review_status,'|',record_status) "
+            "FROM ci_actors WHERE actor_id='actor:ci:sec-filer';",
+        )
+        == "US|approved|active"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_editorial_revisions "
+            "WHERE entity_type='actor' "
+            "AND entity_id='actor:ci:sec-filer' "
+            "AND field_name='country_code';",
+        )
+        == "1",
+        repr(mismatch),
+    )
+
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_actors SET country_code=NULL "
+        "WHERE actor_id='actor:ci:sec-filer';"
+        "DROP TRIGGER IF EXISTS ci_actor_country_rollback_guard;"
+        "CREATE TRIGGER ci_actor_country_rollback_guard "
+        "BEFORE UPDATE ON ci_governance_events FOR EACH ROW "
+        "SIGNAL SQLSTATE '45000' "
+        "SET MESSAGE_TEXT='CI forces actor enrichment rollback';",
+    )
+    rollback_detail, _ = request_json(
+        base_url,
+        f"api.php/api/v2/admin/expedited-review-candidates/{event_id}",
+        token=EDITOR_TOKEN,
+    )
+    rollback_event = rollback_detail.get("data", {}).get("event", {})
+    rollback_payload = json.loads(json.dumps(approved_review_payload))
+    rollback_payload["expected_updated_at"] = rollback_event.get("updated_at")
+    rollback_payload["expected_evidence_sha256"] = rollback_event.get(
+        "event_evidence_sha256"
+    )
+    rollback_payload["reason"] = (
+        "CI proves actor country enrichment and its audit are transactional."
+    )
+    rollback_failure, _ = request_json(
+        base_url,
+        f"api.php/api/v2/admin/events/{event_id}/review",
+        method="POST",
+        token=EDITOR_TOKEN,
+        payload=rollback_payload,
+        expected_status=500,
+    )
+    mysql_execute(
+        mysql_container_id,
+        "DROP TRIGGER IF EXISTS ci_actor_country_rollback_guard;",
+    )
+    require(
+        rollback_failure.get("error") == "internal_error"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT COALESCE(country_code,'NULL') FROM ci_actors "
+            "WHERE actor_id='actor:ci:sec-filer';",
+        )
+        == "NULL"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_editorial_revisions "
+            "WHERE entity_type='actor' "
+            "AND entity_id='actor:ci:sec-filer' "
+            "AND field_name='country_code';",
+        )
+        == "1",
+        repr(rollback_failure),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_actors SET country_code='US' "
+        "WHERE actor_id='actor:ci:sec-filer';",
     )
     require(
         mysql_execute(

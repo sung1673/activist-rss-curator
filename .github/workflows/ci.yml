@@ -742,6 +742,9 @@ jobs:
       - name: Run rolling legacy recovery resolver contracts
         run: npm run test:legacy-recovery-resolver
 
+      - name: Run orphaned Pages run classifier contracts
+        run: npm run test:orphaned-pages-run
+
       - name: Run governance UI journeys and WCAG checks
         run: npm run test:ui
 

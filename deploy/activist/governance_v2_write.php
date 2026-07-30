@@ -4315,6 +4315,23 @@ function v2_admin_review_event(
                 'payload.actor',
                 '/^(KR|US|JP|GB|CA|AU)$/'
             );
+            foreach (array(
+                'actor_id' => $actorId,
+                'display_name' => $actorName,
+                'actor_type' => $actorType,
+                'actor_role' => $actorRole,
+                'country_code' => $actorCountry,
+            ) as $actorField => $validatedActorValue) {
+                if (
+                    !is_string($actor[$actorField])
+                    || $actor[$actorField] !== $validatedActorValue
+                ) {
+                    v2_write_invalid(
+                        'payload.actor.' . $actorField
+                        . ': exact value required'
+                    );
+                }
+            }
             $mergeIntoEventId = v2_write_code(
                 $payload,
                 'merge_into_event_id',
@@ -4347,6 +4364,43 @@ function v2_admin_review_event(
         if ((int)$evidence->fetchColumn() < 1) {
             throw new RuntimeException('event_official_evidence_required');
         }
+        $actorCandidateLookup = $pdo->prepare(
+            'SELECT a.display_name,a.actor_type,a.country_code FROM '
+            . table_name($config, 'actors') . ' a JOIN '
+            . table_name($config, 'event_actors') . ' ea'
+            . ' ON BINARY ea.actor_id=BINARY a.actor_id'
+            . ' WHERE BINARY ea.event_id=BINARY ?'
+            . ' AND BINARY a.actor_id=BINARY ?'
+            . ' AND BINARY a.display_name=BINARY ?'
+            . ' AND BINARY a.actor_type=BINARY ?'
+            . ' AND BINARY ea.actor_role=BINARY ?'
+            . ' AND a.review_status IN (\'pending\',\'approved\')'
+            . ' AND a.record_status IN (\'inactive\',\'active\')'
+            . ' AND ea.review_status IN (\'pending\',\'approved\')'
+            . ' LIMIT 2 FOR UPDATE'
+        );
+        $actorCandidateLookup->execute(array(
+            $eventId,
+            $actorId,
+            $actorName,
+            $actorType,
+            $actorRole,
+        ));
+        $actorCandidates = $actorCandidateLookup->fetchAll();
+        if (count($actorCandidates) !== 1) {
+            throw new RuntimeException(
+                'event_actor_candidate_binding_conflict'
+            );
+        }
+        $existingActor = $actorCandidates[0];
+        $existingActorCountry = $existingActor
+            ? trim((string)$existingActor['country_code']) : '';
+        if ($existingActorCountry !== ''
+            && !hash_equals($existingActorCountry, $actorCountry)) {
+            throw new RuntimeException('event_actor_country_conflict');
+        }
+        $actorCountryNeedsEnrichment = $existingActor
+            && $existingActorCountry === '';
         $normalizedAction = v1_normalize_identity_text((string)$action);
         $normalizedTarget = v1_normalize_identity_text((string)$target);
         $normalizedActorId = v1_normalize_identity_text((string)$actorId);
@@ -4420,17 +4474,9 @@ function v2_admin_review_event(
                 ),
             ));
         }
-        $actorLookup = $pdo->prepare(
-            'SELECT display_name,actor_type,country_code FROM '
-            . table_name($config, 'actors')
-            . ' WHERE actor_id=? LIMIT 1 FOR UPDATE'
-        );
-        $actorLookup->execute(array($actorId));
-        $existingActor = $actorLookup->fetch();
         if ($existingActor && (
             (string)$existingActor['display_name'] !== $actorName
             || (string)$existingActor['actor_type'] !== $actorType
-            || (string)$existingActor['country_code'] !== $actorCountry
         )) {
             throw new RuntimeException('event_actor_identity_conflict');
         }
@@ -4440,7 +4486,9 @@ function v2_admin_review_event(
             . 'country_code,aliases_json,homepage_url,review_status,record_status,'
             . 'created_at,updated_at)'
             . ' VALUES (?,?,?,NULL,NULL,?,NULL,NULL,\'approved\',\'active\',?,?)'
-            . ' ON DUPLICATE KEY UPDATE review_status=\'approved\','
+            . ' ON DUPLICATE KEY UPDATE '
+            . 'country_code=COALESCE(NULLIF(TRIM(country_code),\'\'),'
+            . 'VALUES(country_code)),review_status=\'approved\','
             . 'record_status=\'active\',updated_at=VALUES(updated_at)'
         );
         $actorInsert->execute(array(
@@ -4451,6 +4499,33 @@ function v2_admin_review_event(
             $now,
             $now,
         ));
+        if ($actorCountryNeedsEnrichment) {
+            $actorCountryRevisionId = v1_stable_id(
+                'revision',
+                $actorId . '|country_code|' . $actorCountry . '|'
+                . $eventId . '|' . $now . '|' . $reason
+            );
+            $actorCountryRevision = $pdo->prepare(
+                'INSERT INTO ' . table_name($config, 'editorial_revisions')
+                . ' (revision_id,entity_type,entity_id,field_name,previous_value,'
+                . 'revised_value,reason,revision_status,requested_by,reviewed_by,'
+                . 'reviewed_at,published_at,created_at,updated_at)'
+                . ' VALUES (?,\'actor\',?,\'country_code\',?,?,?,'
+                . '\'internal_approved\',?,?,?,NULL,?,?)'
+            );
+            $actorCountryRevision->execute(array(
+                $actorCountryRevisionId,
+                $actorId,
+                $existingActor['country_code'],
+                $actorCountry,
+                $reason,
+                $role,
+                $role,
+                $now,
+                $now,
+                $now,
+            ));
+        }
         $eventActor = $pdo->prepare(
             'INSERT INTO ' . table_name($config, 'event_actors')
             . ' (event_id,actor_id,actor_role,review_status,created_at,updated_at)'
@@ -4533,6 +4608,8 @@ function v2_admin_review_event(
         }
         $known = array(
             'event_official_evidence_required',
+            'event_actor_candidate_binding_conflict',
+            'event_actor_country_conflict',
             'event_actor_identity_conflict',
             'canonical_merge_target_not_publishable',
             'stale_event_review',

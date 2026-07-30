@@ -807,6 +807,70 @@ def test_event_actor_review_and_merge_populate_required_updated_at():
     assert ". 'review_status=\\'approved\\',updated_at=VALUES(updated_at)'" in review
 
 
+def test_human_review_atomically_enriches_only_an_unknown_actor_country():
+    review = V2_WRITE[
+        V2_WRITE.index("function v2_admin_review_event") : V2_WRITE.index(
+            "function v2_admin_brief_candidates"
+        )
+    ]
+    assert "$existingActorCountry === ''" in review
+    assert "$existingActorCountry !== ''" in review
+    assert "hash_equals($existingActorCountry, $actorCountry)" in review
+    assert "$actor[$actorField] !== $validatedActorValue" in review
+    assert "': exact value required'" in review
+    assert "event_actor_candidate_binding_conflict" in review
+    assert "event_actor_country_conflict" in review
+    for exact_binding in (
+        "BINARY ea.event_id=BINARY ?",
+        "BINARY a.actor_id=BINARY ?",
+        "BINARY a.display_name=BINARY ?",
+        "BINARY a.actor_type=BINARY ?",
+        "BINARY ea.actor_role=BINARY ?",
+    ):
+        assert exact_binding in review
+    assert "LIMIT 2 FOR UPDATE" in review
+    assert review.index("$actorCandidateLookup->execute") < review.index(
+        "$actorInsert->execute"
+    )
+    assert review.index("$actorCandidateLookup->execute") < review.index(
+        "v2_merge_reviewed_event("
+    )
+    assert (
+        "country_code=COALESCE(NULLIF(TRIM(country_code),\\'\\'),"
+        in review
+    )
+    assert "VALUES(country_code)),review_status=\\'approved\\'" in review
+    assert "$actorCountryNeedsEnrichment" in review
+    assert "'revision',\n                $actorId . '|country_code|'" in review
+    assert (
+        "' VALUES (?,\\'actor\\',?,\\'country_code\\',?,?,?,"
+        in review
+    )
+    assert "\\'internal_approved\\'" in review
+    assert review.index("$actorCountryRevision->execute") < review.index(
+        "$eventActor->execute"
+    )
+    assert review.index("$actorCountryRevision->execute") < review.rindex(
+        "$pdo->commit()"
+    )
+    assert "if ($pdo->inTransaction())" in review
+    assert "$pdo->rollBack();" in review
+
+    human_actor = SPEC["components"]["schemas"]["EditorialActor"]
+    assert "country_code" in human_actor["required"]
+    assert human_actor["properties"]["country_code"] == {
+        "$ref": "#/components/schemas/CountryCode",
+    }
+    public_actor = SPEC["components"]["schemas"]["PublicEventActor"]
+    assert "country_code" not in public_actor["required"]
+    assert public_actor["properties"]["country_code"] == {
+        "oneOf": [
+            {"$ref": "#/components/schemas/CountryCode"},
+            {"type": "null"},
+        ]
+    }
+
+
 def test_public_event_and_release_state_timestamps_are_canonical_utc():
     utc_pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
     event = SPEC["components"]["schemas"]["Event"]
