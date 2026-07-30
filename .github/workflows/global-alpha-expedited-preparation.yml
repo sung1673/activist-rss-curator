@@ -73,7 +73,14 @@ jobs:
     permissions:
       actions: write
       contents: read
+    outputs:
+      orphaned_unstarted_json: ${{ steps.drain.outputs.orphaned_unstarted_json }}
     steps:
+      - name: Checkout the exact expedited candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
       - name: Enforce the active expedited deployment fence
         shell: bash
         env:
@@ -99,11 +106,16 @@ jobs:
           [[ "${KIND_MODE,,}" == "off" ]]
 
       - name: Cancel and drain pre-fence Pages producers
+        id: drain
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EXPECTED_SHA: ${{ github.sha }}
         with:
           script: |
+            const orphanClassifier = require(
+              "./.github/scripts/orphaned-pages-run.cjs",
+            );
             const {owner, repo} = context.repo;
             const workflowIds = [
               ".github/workflows/build-feed.yml",
@@ -136,9 +148,15 @@ jobs:
               }
               return [...found.values()];
             };
-            const initial = await listActive();
+            const orphanedUnstarted = new Map();
+            const orphanSnapshots = new Map();
+            const attemptedCancel = new Set();
             const forceCancelled = new Set();
-            for (const {run, workflowId, status} of initial) {
+            const cancelOrClassify = async ({run, workflowId, status}) => {
+              if (attemptedCancel.has(run.id) || orphanedUnstarted.has(run.id)) {
+                return;
+              }
+              attemptedCancel.add(run.id);
               core.notice(
                 `Cancelling pre-fence Pages producer ${run.id} ` +
                 `(${workflowId}, ${status}).`,
@@ -150,21 +168,106 @@ jobs:
                   run_id: run.id,
                 });
               } catch (error) {
-                if (![409, 422].includes(error.status)) {
-                  throw error;
+                if ([409, 422].includes(orphanClassifier.statusOf(error))) {
+                  await orphanClassifier.confirmTerminalAfterCancelConflict({
+                    github,
+                    owner,
+                    repo,
+                    runId: run.id,
+                    error,
+                  });
+                  return;
+                }
+                const result = await orphanClassifier.handleCancelServerError({
+                  github,
+                  owner,
+                  repo,
+                  run,
+                  workflowId,
+                  currentSha: process.env.EXPECTED_SHA,
+                  nowMs: Date.now(),
+                  cancelError: error,
+                });
+                if (result.forceCancelled) {
+                  forceCancelled.add(run.id);
+                }
+                if (result.orphanedUnstarted) {
+                  orphanedUnstarted.set(run.id, result.orphanedUnstarted);
+                  orphanSnapshots.set(run.id, {
+                    id: run.id,
+                    path: run.path,
+                    status: run.status,
+                    head_sha: run.head_sha,
+                    run_attempt: run.run_attempt,
+                    created_at: run.created_at,
+                    run_started_at: run.run_started_at,
+                    updated_at: run.updated_at,
+                  });
+                  core.warning(
+                    `Quarantined orphaned_unstarted Pages producer ${run.id}.`,
+                  );
                 }
               }
+            };
+            const initial = await listActive();
+            for (const entry of initial) {
+              await cancelOrClassify(entry);
             }
             const deadline = Date.now() + 9 * 60 * 1000;
             const forceCancelAt = Date.now() + 60 * 1000;
             let consecutiveEmptyScans = 0;
             while (true) {
-              const remaining = await listActive();
+              const scanned = await listActive();
+              for (const entry of scanned) {
+                await cancelOrClassify(entry);
+              }
+              const remaining = scanned.filter(
+                ({run}) => !orphanedUnstarted.has(run.id),
+              );
               if (remaining.length === 0) {
                 consecutiveEmptyScans += 1;
                 if (consecutiveEmptyScans >= 2) {
+                  for (const [runId, audit] of orphanedUnstarted) {
+                    const revalidated =
+                      await orphanClassifier.revalidateOrphanedUnstarted({
+                        github,
+                        owner,
+                        repo,
+                        listedRun: orphanSnapshots.get(runId),
+                        currentSha: process.env.EXPECTED_SHA,
+                        nowMs: Date.now(),
+                      });
+                    if (
+                      revalidated.run_id !== audit.run_id ||
+                      revalidated.head_sha !== audit.head_sha ||
+                      revalidated.created_at !== audit.created_at
+                    ) {
+                      throw new Error(
+                        `Orphaned Pages run ${runId} audit changed during revalidation`,
+                      );
+                    }
+                  }
+                  const orphanAudit = [...orphanedUnstarted.values()].sort(
+                    (left, right) => left.run_id - right.run_id,
+                  );
+                  core.setOutput(
+                    "orphaned_unstarted_json",
+                    JSON.stringify(orphanAudit),
+                  );
+                  await core.summary
+                    .addHeading("Pages producer drain audit", 3)
+                    .addCodeBlock(
+                      JSON.stringify(
+                        {orphaned_unstarted: orphanAudit},
+                        null,
+                        2,
+                      ),
+                      "json",
+                    )
+                    .write();
                   core.notice(
-                    `Pages producer drain complete; cancelled ${initial.length} run(s).`,
+                    `Pages producer drain complete; inspected ${attemptedCancel.size} ` +
+                    `run(s), quarantined ${orphanAudit.length}.`,
                   );
                   break;
                 }
@@ -183,9 +286,13 @@ jobs:
                       });
                       forceCancelled.add(run.id);
                     } catch (error) {
-                      if (![409, 422].includes(error.status)) {
-                        throw error;
-                      }
+                      await orphanClassifier.confirmTerminalAfterCancelConflict({
+                        github,
+                        owner,
+                        repo,
+                        runId: run.id,
+                        error,
+                      });
                     }
                   }
                 }
@@ -466,6 +573,7 @@ jobs:
           LEGACY_ARTIFACT_NAME: ${{ steps.rollback_sources.outputs.legacy_artifact_name }}
           LEGACY_ARTIFACT_DIGEST: ${{ steps.rollback_sources.outputs.legacy_artifact_digest }}
           LEGACY_CODE_REVISION: ${{ steps.rollback_sources.outputs.legacy_code_revision }}
+          ORPHANED_UNSTARTED_JSON: ${{ needs.drain_pages_producers.outputs.orphaned_unstarted_json }}
         run: |
           set -euo pipefail
           jq -n \
@@ -479,6 +587,7 @@ jobs:
             --arg legacy_artifact_name "$LEGACY_ARTIFACT_NAME" \
             --arg legacy_artifact_digest "$LEGACY_ARTIFACT_DIGEST" \
             --arg legacy_code_revision "$LEGACY_CODE_REVISION" \
+            --argjson orphaned_unstarted "$ORPHANED_UNSTARTED_JSON" \
             '{
               schema_version: 1,
               kind: "bside-expedited-rollback-preparation",
@@ -495,6 +604,9 @@ jobs:
                 artifact_name: $legacy_artifact_name,
                 artifact_digest: $legacy_artifact_digest,
                 code_revision: $legacy_code_revision
+              },
+              pages_producer_drain: {
+                orphaned_unstarted: $orphaned_unstarted
               }
             }' > rollback-prepared/rollback-preparation.json
 

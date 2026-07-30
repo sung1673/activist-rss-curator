@@ -104,7 +104,15 @@ def _event(index: int, *, country: str | None = None) -> dict[str, object]:
         "merged_into_event_id": None,
         "official_documents": [document],
         "official_evidence_count": 1,
-        "actors": [],
+        "actors": [
+            {
+                "actor_id": f"actor:{index:03d}",
+                "display_name": f"Actor {index}",
+                "actor_type": "institution",
+                "actor_role": "filer",
+                "country_code": None,
+            }
+        ],
     }
     event["event_evidence_sha256"] = canonical_sha256(
         {
@@ -374,6 +382,48 @@ def test_export_sanitizes_actor_metadata_and_markdown_link_injection() -> None:
     assert "\\]\\(https://evil.example\\)" in markdown
 
 
+def test_export_preserves_unknown_actor_country_for_human_verification() -> None:
+    events = [_event(index) for index in range(30)]
+    events[0]["actors"] = [
+        {
+            "actor_id": "actor:unknown-country",
+            "display_name": "Cross-Border Reporting Person",
+            "actor_type": "institution",
+            "country_code": None,
+            "actor_role": "filer",
+        }
+    ]
+    candidate, _, markdown = export_candidates(  # type: ignore[arg-type]
+        _ExportClient(events),
+        expected_revision=REVISION,
+    )
+    actors = candidate["basis"]["events"][0]["actors"]  # type: ignore[index]
+    assert actors[0]["country_code"] is None  # type: ignore[index]
+    assert "국가 미확인" in markdown
+    assert "사건 국가로 추론하지 말고" in markdown
+
+
+@pytest.mark.parametrize("country_code", ["", "ZZ", "kr", "KOR"])
+def test_export_rejects_nonempty_or_malformed_actor_country(
+    country_code: str,
+) -> None:
+    events = [_event(index) for index in range(30)]
+    events[0]["actors"] = [
+        {
+            "actor_id": "actor:invalid-country",
+            "display_name": "Invalid Country Reporting Person",
+            "actor_type": "institution",
+            "country_code": country_code,
+            "actor_role": "filer",
+        }
+    ]
+    with pytest.raises(ExpeditedEditorialError, match="invalid country_code"):
+        export_candidates(  # type: ignore[arg-type]
+            _ExportClient(events),
+            expected_revision=REVISION,
+        )
+
+
 class _ApplyClient:
     def __init__(self, candidate: Mapping[str, object]) -> None:
         basis = candidate["basis"]
@@ -510,6 +560,10 @@ def test_protected_apply_publishes_then_replays_idempotently() -> None:
     assert replay["mutations_applied"] == 0
     assert replay["idempotent_replay"] is True
     assert first["semantic_receipt_sha256"] == replay["semantic_receipt_sha256"]
+    first_event = client.events["event:000"]
+    first_actors = first_event["actors"]
+    assert isinstance(first_actors, list)
+    assert first_actors[0]["country_code"] == "KR"
 
 
 def test_stale_event_fails_before_first_mutation() -> None:
@@ -571,6 +625,220 @@ def test_invalid_human_actor_contract_fails_before_first_mutation() -> None:
             candidate_artifact_digest=ARTIFACT_DIGEST,
             now=datetime.fromisoformat(NOW.replace("Z", "+00:00")),
         )
+    assert all(
+        event["review_status"] == "pending" for event in client.events.values()
+    )
+
+
+@pytest.mark.parametrize("country_code", [None, "", "ZZ", "kr", "KOR"])
+def test_human_actor_country_remains_required_and_strict_before_mutation(
+    country_code: object,
+) -> None:
+    candidate, template = _candidate_bundle()
+    decisions = _human_decisions(candidate, template)
+    reviews = decisions["event_reviews"]
+    assert isinstance(reviews, list)
+    payload = reviews[0]["review_payload"]
+    assert isinstance(payload, dict)
+    actor = payload["actor"]
+    assert isinstance(actor, dict)
+    actor["country_code"] = country_code
+    client = _ApplyClient(candidate)
+    with pytest.raises(ExpeditedEditorialError, match="invalid country_code"):
+        apply_publication(  # type: ignore[arg-type]
+            client,
+            candidate=candidate,
+            decisions=decisions,
+            revision=REVISION,
+            candidate_run_id=123,
+            candidate_artifact_id=456,
+            candidate_artifact_name=(
+                "global-alpha-expedited-editorial-candidates-" + REVISION
+            ),
+            candidate_artifact_digest=ARTIFACT_DIGEST,
+            now=datetime.fromisoformat(NOW.replace("Z", "+00:00")),
+        )
+    assert all(
+        event["review_status"] == "pending" for event in client.events.values()
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("actor_id", "actor:arbitrary"),
+        ("display_name", "Different Reporting Person"),
+        ("actor_type", "company"),
+        ("actor_role", "beneficial_owner"),
+    ],
+)
+def test_human_actor_identity_must_exactly_bind_to_candidate_before_mutation(
+    field: str,
+    value: str,
+) -> None:
+    # The actor_id variant is the original exploit: before candidate binding,
+    # this otherwise-valid arbitrary actor was accepted and written.
+    candidate, template = _candidate_bundle()
+    decisions = _human_decisions(candidate, template)
+    reviews = decisions["event_reviews"]
+    assert isinstance(reviews, list)
+    payload = reviews[0]["review_payload"]
+    assert isinstance(payload, dict)
+    actor = payload["actor"]
+    assert isinstance(actor, dict)
+    actor[field] = value
+    client = _ApplyClient(candidate)
+    with pytest.raises(
+        ExpeditedEditorialError,
+        match="candidate actor binding mismatch",
+    ):
+        apply_publication(  # type: ignore[arg-type]
+            client,
+            candidate=candidate,
+            decisions=decisions,
+            revision=REVISION,
+            candidate_run_id=123,
+            candidate_artifact_id=456,
+            candidate_artifact_name=(
+                "global-alpha-expedited-editorial-candidates-" + REVISION
+            ),
+            candidate_artifact_digest=ARTIFACT_DIGEST,
+            now=datetime.fromisoformat(NOW.replace("Z", "+00:00")),
+        )
+    assert client.brief_payload is None
+    assert all(
+        event["review_status"] == "pending" for event in client.events.values()
+    )
+
+
+def test_human_actor_whitespace_is_not_normalized_into_a_candidate_match() -> None:
+    candidate, template = _candidate_bundle()
+    decisions = _human_decisions(candidate, template)
+    reviews = decisions["event_reviews"]
+    assert isinstance(reviews, list)
+    payload = reviews[0]["review_payload"]
+    assert isinstance(payload, dict)
+    actor = payload["actor"]
+    assert isinstance(actor, dict)
+    actor["display_name"] = "Actor 0 "
+    client = _ApplyClient(candidate)
+    with pytest.raises(
+        ExpeditedEditorialError,
+        match="exact actor field values required",
+    ):
+        apply_publication(  # type: ignore[arg-type]
+            client,
+            candidate=candidate,
+            decisions=decisions,
+            revision=REVISION,
+            candidate_run_id=123,
+            candidate_artifact_id=456,
+            candidate_artifact_name=(
+                "global-alpha-expedited-editorial-candidates-" + REVISION
+            ),
+            candidate_artifact_digest=ARTIFACT_DIGEST,
+            now=datetime.fromisoformat(NOW.replace("Z", "+00:00")),
+        )
+    assert client.brief_payload is None
+    assert all(
+        event["review_status"] == "pending" for event in client.events.values()
+    )
+
+
+@pytest.mark.parametrize(
+    ("candidate_actors", "message"),
+    [
+        ([], "candidate actor required"),
+        (
+            [
+                {
+                    "actor_id": "actor:000",
+                    "display_name": "Actor 0",
+                    "actor_type": "institution",
+                    "actor_role": "filer",
+                    "country_code": None,
+                },
+                {
+                    "actor_id": "actor:000",
+                    "display_name": "Actor 0",
+                    "actor_type": "institution",
+                    "actor_role": "filer",
+                    "country_code": None,
+                },
+            ],
+            "ambiguous candidate actor binding",
+        ),
+    ],
+)
+def test_missing_or_ambiguous_candidate_actor_fails_before_mutation(
+    candidate_actors: list[dict[str, object]],
+    message: str,
+) -> None:
+    candidate, template = _candidate_bundle()
+    basis = candidate["basis"]
+    assert isinstance(basis, dict)
+    events = basis["events"]
+    assert isinstance(events, list)
+    event = events[0]
+    assert isinstance(event, dict)
+    event["actors"] = copy.deepcopy(candidate_actors)
+    candidate["candidate_sha256"] = canonical_sha256(basis)
+    decisions = _human_decisions(candidate, template)
+    client = _ApplyClient(candidate)
+    with pytest.raises(ExpeditedEditorialError, match=message):
+        apply_publication(  # type: ignore[arg-type]
+            client,
+            candidate=candidate,
+            decisions=decisions,
+            revision=REVISION,
+            candidate_run_id=123,
+            candidate_artifact_id=456,
+            candidate_artifact_name=(
+                "global-alpha-expedited-editorial-candidates-" + REVISION
+            ),
+            candidate_artifact_digest=ARTIFACT_DIGEST,
+            now=datetime.fromisoformat(NOW.replace("Z", "+00:00")),
+        )
+    assert client.brief_payload is None
+    assert all(
+        event["review_status"] == "pending" for event in client.events.values()
+    )
+
+
+def test_nonnull_candidate_actor_country_cannot_be_overridden() -> None:
+    candidate, template = _candidate_bundle()
+    basis = candidate["basis"]
+    assert isinstance(basis, dict)
+    events = basis["events"]
+    assert isinstance(events, list)
+    event = events[0]
+    assert isinstance(event, dict)
+    actors = event["actors"]
+    assert isinstance(actors, list)
+    actor = actors[0]
+    assert isinstance(actor, dict)
+    actor["country_code"] = "US"
+    candidate["candidate_sha256"] = canonical_sha256(basis)
+    decisions = _human_decisions(candidate, template)
+    client = _ApplyClient(candidate)
+    with pytest.raises(
+        ExpeditedEditorialError,
+        match="candidate actor country mismatch",
+    ):
+        apply_publication(  # type: ignore[arg-type]
+            client,
+            candidate=candidate,
+            decisions=decisions,
+            revision=REVISION,
+            candidate_run_id=123,
+            candidate_artifact_id=456,
+            candidate_artifact_name=(
+                "global-alpha-expedited-editorial-candidates-" + REVISION
+            ),
+            candidate_artifact_digest=ARTIFACT_DIGEST,
+            now=datetime.fromisoformat(NOW.replace("Z", "+00:00")),
+        )
+    assert client.brief_payload is None
     assert all(
         event["review_status"] == "pending" for event in client.events.values()
     )
