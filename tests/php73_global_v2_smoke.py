@@ -1188,8 +1188,8 @@ def seed_alpha_automated_evidence(
                     acknowledged_count,
                     batch_request_count,
                 ) in (
-                    (1, 0, 1, 0, 1),
-                    (2, 1, 2, 1, 1),
+                    (1, 0, 1, 0, 5),
+                    (2, 5, 2, 1, 5),
                 ):
                     chunk_digest = hashlib.sha256(
                         f"{identity}:chunk:{chunk_index}".encode()
@@ -3580,6 +3580,32 @@ def run(base_url: str, mysql_container_id: str) -> None:
         in str(zero_day_rejected.get("detail")),
         repr(zero_day_rejected),
     )
+    excessive_request_day = json.loads(json.dumps(zero_request_day))
+    excessive_request_day["envelope"]["request_count"] = 7
+    excessive_request_day["envelope"]["chunk"]["batch_request_count"] = 7
+    excessive_request_day["envelope"]["chunk"]["batch_id"] = (
+        "global-batch:"
+        + hashlib.sha256(b"php73-v2-excessive-request-day").hexdigest()
+    )
+    bind_classified_ingest_key(
+        excessive_request_day,
+        namespace="global-ingest-v2-day",
+    )
+    excessive_day_rejected, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=excessive_request_day,
+        expected_status=400,
+    )
+    require(
+        excessive_day_rejected.get("error")
+        == "global_ingest_validation_failed"
+        and "completed-day evidence contract mismatch"
+        in str(excessive_day_rejected.get("detail")),
+        repr(excessive_day_rejected),
+    )
     wrong_provenance_day = json.loads(
         json.dumps(current_payload, ensure_ascii=False)
     )
@@ -3609,8 +3635,8 @@ def run(base_url: str, mysql_container_id: str) -> None:
         repr(wrong_provenance_rejected),
     )
     completed_day = json.loads(json.dumps(zero_request_day))
-    completed_day["envelope"]["request_count"] = 1
-    completed_day["envelope"]["chunk"]["batch_request_count"] = 1
+    completed_day["envelope"]["request_count"] = 6
+    completed_day["envelope"]["chunk"]["batch_request_count"] = 6
     completed_day["envelope"]["chunk"]["batch_id"] = (
         "global-batch:"
         + hashlib.sha256(b"php73-v2-empty-weekend-day").hexdigest()
@@ -3620,6 +3646,31 @@ def run(base_url: str, mysql_container_id: str) -> None:
     completed_day_key = bind_classified_ingest_key(
         completed_day,
         namespace="global-ingest-v2-day",
+    )
+    sec_manifest_day = json.loads(json.dumps(completed_day))
+    sec_manifest_day["envelope"]["source_manifest_sha256"] = "d" * 64
+    sec_manifest_day["envelope"]["chunk"]["batch_id"] = (
+        "global-batch:"
+        + hashlib.sha256(b"php73-v2-sec-manifest-day").hexdigest()
+    )
+    bind_classified_ingest_key(
+        sec_manifest_day,
+        namespace="global-ingest-v2-day",
+    )
+    sec_manifest_rejected, _ = request_json(
+        base_url,
+        "api.php/api/v2/ops/ingest",
+        method="POST",
+        token=OPS_TOKEN,
+        payload=sec_manifest_day,
+        expected_status=400,
+    )
+    require(
+        sec_manifest_rejected.get("error")
+        == "global_ingest_validation_failed"
+        and "not permitted for this connector"
+        in str(sec_manifest_rejected.get("detail")),
+        repr(sec_manifest_rejected),
     )
     completed_day_ingest, _ = request_json(
         base_url,
@@ -5451,7 +5502,7 @@ def run(base_url: str, mysql_container_id: str) -> None:
             "WHERE connector_id='connector:us:sec-edgar' "
             "AND chunk_count=2 GROUP BY batch_id;",
         )
-        == "1,1\t1",
+        == "5,5\t5",
         "exact SEC completed-day receipt telemetry fixture is missing",
     )
     mysql_execute(

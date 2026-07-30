@@ -115,6 +115,7 @@ def _receipt_from_arguments(
         "window": {"start": start, "end_exclusive": end},
         "code_revision": value("--code-revision"),
         "collection_mode": "completed-day",
+        "request_count": 5,
         "raw_count": 7,
         "acknowledged_count": 2,
         "idempotent": "--replay-only" in values,
@@ -189,8 +190,49 @@ def test_runner_preserves_one_receipt_per_day_and_exact_replay_summary(
     receipts = summary["receipts"]
     assert isinstance(receipts, list)
     assert all(receipt["replay_verified"] is True for receipt in receipts)
+    assert all(receipt["request_count"] == 5 for receipt in receipts)
     assert all(len(receipt["receipt_sha256"]) == 64 for receipt in receipts)
     assert json.loads(summary_path.read_text(encoding="utf-8")) == summary
+
+
+@pytest.mark.parametrize("request_count", [0, 7, True, "1"])
+def test_runner_rejects_unbounded_or_non_integer_request_count(
+    tmp_path: Path,
+    request_count: object,
+) -> None:
+    def ingest(arguments: Sequence[str] | None) -> int:
+        assert arguments is not None
+        receipt_path, payload = _receipt_from_arguments(
+            arguments,
+            replay_valid=True,
+        )
+        payload["request_count"] = request_count
+        receipt_path.write_text(
+            json.dumps(payload, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return 0
+
+    plan = plan_global_backfill(
+        country_code="US",
+        mode="apply",
+        from_date="2026-07-21",
+        to_date="2026-07-22",
+        max_windows=1,
+        now=NOW,
+    )
+    with pytest.raises(
+        GlobalBackfillError,
+        match="invalid_global_backfill_receipt_request_count",
+    ):
+        run_global_backfill(
+            plan=plan,
+            code_revision=REVISION,
+            evidence_dir=tmp_path / "receipts",
+            summary_path=tmp_path / "summary.json",
+            max_pages=200,
+            ingest_entrypoint=ingest,
+        )
 
 
 def test_runner_fails_closed_and_keeps_partial_summary_on_bad_replay(

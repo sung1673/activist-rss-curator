@@ -2193,6 +2193,7 @@ jobs:
                   window = item.get("window")
                   raw = item.get("raw_count")
                   acknowledged = item.get("acknowledged_count")
+                  request_count = item.get("request_count")
                   if (
                       item.get("status") != "succeeded"
                       or item.get("country_code") != "US"
@@ -2204,6 +2205,9 @@ jobs:
                       or isinstance(raw, bool)
                       or not isinstance(acknowledged, int)
                       or isinstance(acknowledged, bool)
+                      or not isinstance(request_count, int)
+                      or isinstance(request_count, bool)
+                      or not 1 <= request_count <= 6
                       or raw < acknowledged
                       or acknowledged < 0
                   ):

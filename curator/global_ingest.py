@@ -1068,14 +1068,20 @@ def execute_global_ingest(
         or envelope.source_right_id != descriptor.source_right_id
     ):
         raise GlobalIngestError("connector_envelope_contract_mismatch")
-    if (
-        not completed_day_evidence
-        and descriptor.connector_id == "connector:us:sec-edgar"
-        and envelope.request_count < 1
-    ):
-        raise GlobalIngestConfigurationError(
-            "current_poll_requires_source_request"
-        )
+    if descriptor.connector_id == "connector:us:sec-edgar":
+        if completed_day_evidence:
+            if not 1 <= envelope.request_count <= 6:
+                raise GlobalIngestConfigurationError(
+                    "completed_day_requires_bounded_source_requests"
+                )
+            if envelope.source_manifest_sha256 is not None:
+                raise GlobalIngestConfigurationError(
+                    "completed_day_rejects_source_manifest"
+                )
+        elif envelope.request_count < 1:
+            raise GlobalIngestConfigurationError(
+                "current_poll_requires_source_request"
+            )
 
     chunks = chunk_connector_envelope(
         envelope,
