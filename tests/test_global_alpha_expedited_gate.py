@@ -341,6 +341,7 @@ def content_integrity(*, as_of: datetime = AS_OF) -> dict[str, object]:
         "scanned_response_count": 180,
         "telegram_exposure_count": 0,
         "internal_field_exposure_count": 0,
+        "persisted_snapshot_forbidden_key_count": 0,
     }
     return result
 
@@ -1112,6 +1113,24 @@ def test_content_performance_and_rollback_gates_are_enforced() -> None:
     refresh_protected_bindings(slow)
     report = build_expedited_release_report(slow, expected_revision=REVISION)
     assert gate(report, "experience.lcp")["passed"] is False
+
+    persisted_snapshot = valid_bundle()
+    persisted_snapshot["content_integrity"]["raw_counts"][  # type: ignore[index]
+        "persisted_snapshot_forbidden_key_count"
+    ] = 1
+    refresh_protected_bindings(persisted_snapshot)
+    report = build_expedited_release_report(
+        persisted_snapshot,
+        expected_revision=REVISION,
+    )
+    assert gate(
+        report,
+        "content.no_persisted_snapshot_forbidden_keys",
+    )["passed"] is False
+    assert (
+        report["content_integrity"]["persisted_snapshot_forbidden_key_count"]  # type: ignore[index]
+        == 1
+    )
 
     rollback = valid_bundle()
     exp = rollback["experience"]  # type: ignore[assignment]

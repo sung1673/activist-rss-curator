@@ -2799,6 +2799,7 @@ components:
             - scanned_response_count
             - telegram_exposure_count
             - internal_field_exposure_count
+            - persisted_snapshot_forbidden_key_count
           properties:
             public_event_count: {type: integer, minimum: 0}
             original_language_preserved_count: {type: integer, minimum: 0}
@@ -2812,6 +2813,7 @@ components:
             scanned_response_count: {type: integer, minimum: 0}
             telegram_exposure_count: {type: integer, minimum: 0}
             internal_field_exposure_count: {type: integer, minimum: 0}
+            persisted_snapshot_forbidden_key_count: {type: integer, minimum: 0}
     GlobalIngestRequest:
       type: object
       required: [idempotency_key, code_revision, envelope]

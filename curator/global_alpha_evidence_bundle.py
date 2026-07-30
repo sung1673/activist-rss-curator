@@ -145,6 +145,7 @@ CONTENT_COUNT_FIELDS = {
     "scanned_response_count",
     "telegram_exposure_count",
     "internal_field_exposure_count",
+    "persisted_snapshot_forbidden_key_count",
 }
 EXPERIENCE_FIELDS = COMMON_FIELDS | {
     "viewports",

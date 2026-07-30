@@ -478,6 +478,7 @@ def content_report() -> dict[str, object]:
         "scanned_response_count": 800,
         "telegram_exposure_count": 0,
         "internal_field_exposure_count": 0,
+        "persisted_snapshot_forbidden_key_count": 0,
     }
     return result
 
@@ -627,6 +628,15 @@ def test_valid_evidence_passes_as_production_alpha_without_ga_claim() -> None:
     )
     assert report["failed_gates"] == []
     assert report["pages_artifact"]["artifact_id"] == 5678
+    assert (
+        report["content_integrity"]["persisted_snapshot_forbidden_key_count"]  # type: ignore[index]
+        == 0
+    )
+    assert next(
+        gate
+        for gate in report["gates"]
+        if gate["name"] == "content.no_persisted_snapshot_forbidden_keys"
+    )["passed"] is True
     assert (
         report["observation"]["terminal_content_sha256"]
         == TERMINAL_CONTENT["sha256"]
@@ -841,6 +851,20 @@ def test_content_integrity_performance_accessibility_and_recovery_gates() -> Non
     assert "content.source_title_preservation" in report["failed_gates"]
     assert "content.no_unknown_title_provenance" in report["failed_gates"]
     assert "content.no_telegram_exposure" in report["failed_gates"]
+
+    persisted_snapshot = content_report()
+    persisted_snapshot["raw_counts"][  # type: ignore[index]
+        "persisted_snapshot_forbidden_key_count"
+    ] = 1
+    report = build(content_integrity=persisted_snapshot)
+    assert (
+        "content.no_persisted_snapshot_forbidden_keys"
+        in report["failed_gates"]
+    )
+    assert (
+        report["content_integrity"]["persisted_snapshot_forbidden_key_count"]  # type: ignore[index]
+        == 1
+    )
 
     experience = experience_report()
     experience["web_vitals"]["lcp"]["p75_seconds"] = 2.6  # type: ignore[index]

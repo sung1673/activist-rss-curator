@@ -33,6 +33,11 @@ def test_remote_preview_spec_is_separate_and_contains_no_mock_routing() -> None:
     assert 'sessionStorage.removeItem(key)' in spec
     assert "code_revision" in spec
     assert "x-bside-api-version" in spec
+    assert spec.count('response.headers.get("x-response-bytes") || "0"') == 2
+    assert "expect(result.xResponseBytes).toBe(result.responseBytes)" in spec
+    assert (
+        "expect(receipt.response_bytes_header).toBe(receipt.size_bytes)" in spec
+    )
     assert 'redirect: "error"' in spec
     assert "const body = await response.arrayBuffer();" in spec
     assert 'xBsideApiVersion: String(response.headers.get("x-bside-api-version")' in spec

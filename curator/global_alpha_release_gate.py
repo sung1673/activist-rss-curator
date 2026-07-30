@@ -1248,6 +1248,11 @@ def validate_content_integrity(
         "internal_field_exposure_count",
         "content-integrity.raw_counts",
     )
+    persisted_snapshot_forbidden_keys = _int(
+        counts.get("persisted_snapshot_forbidden_key_count"),
+        "persisted_snapshot_forbidden_key_count",
+        "content-integrity.raw_counts",
+    )
     if url_denominator != event_count:
         raise AlphaReleaseEvidenceError(
             "content-integrity: public event denominators disagree"
@@ -1309,6 +1314,12 @@ def validate_content_integrity(
             required=0,
             actual=internal,
         ),
+        _gate(
+            "content.no_persisted_snapshot_forbidden_keys",
+            persisted_snapshot_forbidden_keys == 0,
+            required=0,
+            actual=persisted_snapshot_forbidden_keys,
+        ),
     ]
     return {
         "public_event_count": event_count,
@@ -1323,6 +1334,9 @@ def validate_content_integrity(
         "scanned_response_count": scanned,
         "telegram_exposure_count": telegram,
         "internal_field_exposure_count": internal,
+        "persisted_snapshot_forbidden_key_count": (
+            persisted_snapshot_forbidden_keys
+        ),
     }, gates
 
 

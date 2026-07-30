@@ -11,6 +11,7 @@ import pytest
 
 from curator.global_alpha_evidence_bundle import (
     EvidenceBundleError,
+    _validate_exact_evidence_file,
     decode_input_bundle,
     finalize_bundle,
     prepare_candidate_bundle,
@@ -100,8 +101,21 @@ def content_integrity(collected_at: datetime) -> dict[str, object]:
             "scanned_response_count": 600,
             "telegram_exposure_count": 0,
             "internal_field_exposure_count": 0,
+            "persisted_snapshot_forbidden_key_count": 0,
         },
     }
+
+
+def test_content_integrity_exact_contract_requires_snapshot_hygiene_count() -> None:
+    report = content_integrity(datetime.now(timezone.utc))
+    _validate_exact_evidence_file("content-integrity.json", report)
+
+    del report["raw_counts"]["persisted_snapshot_forbidden_key_count"]  # type: ignore[index]
+    with pytest.raises(
+        EvidenceBundleError,
+        match="persisted_snapshot_forbidden_key_count",
+    ):
+        _validate_exact_evidence_file("content-integrity.json", report)
 
 
 def automated_response(collected_at: datetime) -> dict[str, object]:

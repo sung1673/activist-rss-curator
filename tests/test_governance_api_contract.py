@@ -1477,6 +1477,37 @@ def test_cors_and_hmac_fail_closed_before_mutating_dispatch():
     assert "function valid_cors_origin" in API
     assert "preg_match('/[\\r\\n]/', $origin)" in API
     assert "Access-Control-Allow-Credentials" not in API
+    cors = API[
+        API.index("if ($corsOrigin !== '')")
+        : API.index("if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS')")
+    ]
+    exposed_match = re.search(
+        r"header\('Access-Control-Expose-Headers:\s*([^']+)'\);",
+        cors,
+    )
+    assert exposed_match is not None
+    exposed_headers = {
+        header.strip() for header in exposed_match.group(1).split(",")
+    }
+    assert exposed_headers == {
+        "X-BSIDE-API-Version",
+        "X-Response-Bytes",
+        "X-BSIDE-Offset",
+        "X-BSIDE-Returned",
+        "X-BSIDE-Has-More",
+        "X-BSIDE-Next-Offset",
+        "X-Has-More",
+        "X-Next-Page",
+        "Content-Disposition",
+        "Retry-After",
+        "Deprecation",
+        "Sunset",
+        "Link",
+        "Warning",
+        "X-BSIDE-Legacy-Adapter",
+    }
+    for private_header in ("WWW-Authenticate", "Set-Cookie", "Server"):
+        assert private_header not in exposed_headers
     assert "strpos($versionedPath, '/ops/') !== 0" in API
     assert "strpos($versionedPath, '/admin/') !== 0" in API
     assert "strlen($secret) < 32" in API

@@ -40,6 +40,7 @@ if ($corsOrigin !== '') {
     header('Vary: Origin');
     header('Access-Control-Allow-Methods: GET, POST, PUT, OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Request-ID, X-Activist-Timestamp, X-Activist-Nonce, X-Activist-Signature, X-Telegram-Admin-Token');
+    header('Access-Control-Expose-Headers: X-BSIDE-API-Version, X-Response-Bytes, X-BSIDE-Offset, X-BSIDE-Returned, X-BSIDE-Has-More, X-BSIDE-Next-Offset, X-Has-More, X-Next-Page, Content-Disposition, Retry-After, Deprecation, Sunset, Link, Warning, X-BSIDE-Legacy-Adapter');
     header('Access-Control-Max-Age: 600');
 }
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {

@@ -158,6 +158,7 @@ async function browserHealth(page, apiV2, expectedSha) {
     return {
       status: response.status,
       xBsideApiVersion: String(response.headers.get("x-bside-api-version") || ""),
+      xResponseBytes: Number(response.headers.get("x-response-bytes") || "0"),
       responseBytes: body.byteLength,
       apiVersion: String(payload?.api_version || ""),
       codeRevision: String(payload?.code_revision || "").toLowerCase(),
@@ -168,6 +169,7 @@ async function browserHealth(page, apiV2, expectedSha) {
   expect(result.xBsideApiVersion).toBe("v2");
   expect(result.responseBytes).toBeGreaterThan(0);
   expect(result.responseBytes).toBeLessThanOrEqual(250_000);
+  expect(result.xResponseBytes).toBe(result.responseBytes);
   expect(result.apiVersion).toBe("v2");
   expect(result.ok).toBe(true);
   expect(result.codeRevision).toBe(expectedSha);
@@ -275,7 +277,17 @@ test("remote Production Alpha preview renders real v2 data without mocks", async
           referrerPolicy: "no-referrer"
         });
         const bytes = (await response.arrayBuffer()).byteLength;
-        results.push({ route, http_status: response.status, size_bytes: bytes });
+        results.push({
+          route,
+          http_status: response.status,
+          size_bytes: bytes,
+          api_version_header: String(
+            response.headers.get("x-bside-api-version") || ""
+          ),
+          response_bytes_header: Number(
+            response.headers.get("x-response-bytes") || "0"
+          )
+        });
       }
       return results;
     }, { apiBase: environment.apiV2, storageKey: PREVIEW_SESSION_KEY });
@@ -284,6 +296,8 @@ test("remote Production Alpha preview renders real v2 data without mocks", async
       expect(receipt.http_status).toBe(200);
       expect(receipt.size_bytes).toBeGreaterThan(0);
       expect(receipt.size_bytes).toBeLessThanOrEqual(250_000);
+      expect(receipt.api_version_header).toBe("v2");
+      expect(receipt.response_bytes_header).toBe(receipt.size_bytes);
     }
     expect(page.url().includes(environment.token)).toBe(false);
     expect(new URL(page.url()).search).toBe("");
