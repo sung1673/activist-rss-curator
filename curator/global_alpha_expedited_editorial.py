@@ -826,18 +826,18 @@ def _select_events(
         for issuer_queues in queues:
             if len(selected) >= EVENT_COUNT:
                 break
-            item: dict[str, object] | None = None
-            while issuer_queues and item is None:
+            selected_item: dict[str, object] | None = None
+            while issuer_queues and selected_item is None:
                 queue = issuer_queues.pop(0)
                 while queue and str(queue[0]["event_id"]) in selected_ids:
                     queue.pop(0)
                 if queue:
-                    item = queue.pop(0)
+                    selected_item = queue.pop(0)
                 if queue:
                     issuer_queues.append(queue)
-            if item is not None:
-                selected.append(item)
-                selected_ids.add(str(item["event_id"]))
+            if selected_item is not None:
+                selected.append(selected_item)
+                selected_ids.add(str(selected_item["event_id"]))
             if issuer_queues:
                 remaining.append(issuer_queues)
         queues = remaining
