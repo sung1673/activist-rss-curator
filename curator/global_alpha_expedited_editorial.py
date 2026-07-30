@@ -11,7 +11,6 @@ import json
 import os
 import re
 import unicodedata
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -803,33 +802,44 @@ def _build_pairs(
 def _select_events(
     rows: Sequence[Mapping[str, object]],
 ) -> list[dict[str, object]]:
-    """Keep the five highest-ranked rows, then deterministically diversify."""
+    """Keep the five highest-ranked rows, then diversify by market and family."""
     selected = [dict(item) for item in rows[:TOP5_COUNT]]
     selected_ids = {str(item["event_id"]) for item in selected}
-    groups: dict[tuple[str, str, str], list[dict[str, object]]] = defaultdict(list)
+    strata: dict[
+        tuple[str, str],
+        dict[str, list[dict[str, object]]],
+    ] = {}
     for raw in rows[TOP5_COUNT:]:
         item = dict(raw)
-        groups[
-            (
-                str(item["country"]),
-                str(item["event_family"]),
-                str(item["issuer_id"]),
-            )
-        ].append(item)
-    queues = [groups[key] for key in sorted(groups)]
+        stratum_key = (
+            str(item["country"]),
+            str(item["event_family"]),
+        )
+        issuer_groups = strata.setdefault(stratum_key, {})
+        issuer_groups.setdefault(str(item["issuer_id"]), []).append(item)
+    queues = [
+        [strata[key][issuer_id] for issuer_id in sorted(strata[key])]
+        for key in sorted(strata)
+    ]
     while queues and len(selected) < EVENT_COUNT:
-        remaining: list[list[dict[str, object]]] = []
-        for queue in queues:
+        remaining: list[list[list[dict[str, object]]]] = []
+        for issuer_queues in queues:
             if len(selected) >= EVENT_COUNT:
                 break
-            while queue and str(queue[0]["event_id"]) in selected_ids:
-                queue.pop(0)
-            if queue:
-                item = queue.pop(0)
-                selected.append(item)
-                selected_ids.add(str(item["event_id"]))
-            if queue:
-                remaining.append(queue)
+            selected_item: dict[str, object] | None = None
+            while issuer_queues and selected_item is None:
+                queue = issuer_queues.pop(0)
+                while queue and str(queue[0]["event_id"]) in selected_ids:
+                    queue.pop(0)
+                if queue:
+                    selected_item = queue.pop(0)
+                if queue:
+                    issuer_queues.append(queue)
+            if selected_item is not None:
+                selected.append(selected_item)
+                selected_ids.add(str(selected_item["event_id"]))
+            if issuer_queues:
+                remaining.append(issuer_queues)
         queues = remaining
     if len(selected) != EVENT_COUNT:
         raise ExpeditedEditorialError("candidate export requires 20 distinct events")

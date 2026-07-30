@@ -295,6 +295,60 @@ def test_export_produces_exact_blank_20_40_5_and_readable_pack() -> None:
     assert str(candidate["candidate_sha256"]) in markdown
 
 
+def test_export_diversifies_production_shaped_family_skew_deterministically() -> None:
+    events = [_event(index, country="KR") for index in range(50)]
+    for index, event in enumerate(events):
+        if index < 38:
+            event["event_family"] = "capital_issuance"
+        elif index < 45:
+            event["event_family"] = "tender_offer_and_mna"
+        else:
+            event["event_family"] = "listing_status"
+
+    first, _, _ = export_candidates(  # type: ignore[arg-type]
+        _ExportClient(events),
+        expected_revision=REVISION,
+    )
+    second, _, _ = export_candidates(  # type: ignore[arg-type]
+        _ExportClient(events),
+        expected_revision=REVISION,
+    )
+
+    selected = first["basis"]["events"]  # type: ignore[index]
+    pairs = first["basis"]["same_event_pair_candidates"]  # type: ignore[index]
+    selected_families = {item["event_family"] for item in selected}
+    pair_strata = [item["stratum"] for item in pairs]
+
+    assert len(selected) == EVENT_COUNT
+    assert [item["event_id"] for item in selected[:TOP5_COUNT]] == [
+        f"event:{index:03d}" for index in range(TOP5_COUNT)
+    ]
+    assert selected_families == {
+        "capital_issuance",
+        "tender_offer_and_mna",
+        "listing_status",
+    }
+    assert pair_strata.count("hard_same_issuer_or_family") == PAIR_COUNT // 2
+    assert pair_strata.count("easy_cross_issuer_and_family") == PAIR_COUNT // 2
+    assert first["candidate_sha256"] == second["candidate_sha256"]
+    assert first["basis"] == second["basis"]
+
+
+def test_export_keeps_single_family_pair_shortage_fail_closed() -> None:
+    events = [_event(index, country="KR") for index in range(50)]
+    for event in events:
+        event["event_family"] = "capital_issuance"
+
+    with pytest.raises(
+        ExpeditedEditorialError,
+        match="at least 20 hard and 20 easy",
+    ):
+        export_candidates(  # type: ignore[arg-type]
+            _ExportClient(events),
+            expected_revision=REVISION,
+        )
+
+
 def test_export_rejects_any_non_kr_us_event() -> None:
     events = [_event(index) for index in range(29)]
     events.append(_event(29, country="JP"))
