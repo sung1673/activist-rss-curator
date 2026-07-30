@@ -71,6 +71,75 @@ ALTERNATE_RIGHT_ID = "official:sec-ci-alternate"
 ALTERNATE_URL = "https://www.sec.gov/Archives/edgar/data/320193/ci-alternate.txt"
 TELEGRAM_RIGHT_ID = "telegram:ci-authorized"
 TELEGRAM_URL = "https://t.me/ci_private_signal/42"
+CORS_ALLOWED_ORIGIN = "http://127.0.0.1:8787"
+CORS_DISALLOWED_ORIGIN = "https://untrusted.example"
+EXPECTED_CORS_EXPOSED_HEADERS = frozenset(
+    {
+        "X-BSIDE-API-Version",
+        "X-Response-Bytes",
+        "X-BSIDE-Offset",
+        "X-BSIDE-Returned",
+        "X-BSIDE-Has-More",
+        "X-BSIDE-Next-Offset",
+        "X-Has-More",
+        "X-Next-Page",
+        "Content-Disposition",
+        "Retry-After",
+        "Deprecation",
+        "Sunset",
+        "Link",
+        "Warning",
+        "X-BSIDE-Legacy-Adapter",
+    }
+)
+FORBIDDEN_PUBLIC_FIELD_NAMES = frozenset(
+    {
+        "access_key",
+        "access_token",
+        "admin_token",
+        "analysis_bucket",
+        "api_key",
+        "approved_by",
+        "authorization",
+        "changed_by",
+        "client_secret",
+        "connector_status",
+        "cookie",
+        "cookies",
+        "credential",
+        "credentials",
+        "cursor_json",
+        "editor_token",
+        "evidence_hash",
+        "evidence_uri",
+        "idempotency_key",
+        "internal_score",
+        "ops_token",
+        "password",
+        "passwd",
+        "payload_json",
+        "preview_token",
+        "priority_level",
+        "priority_score",
+        "private_key",
+        "publication_status",
+        "queue_status",
+        "record_status",
+        "refresh_token",
+        "release_authorizer_token",
+        "requested_by",
+        "review_status",
+        "reviewed_by",
+        "risk_flags_json",
+        "score_breakdown",
+        "search_score",
+        "secret",
+        "set_cookie",
+        "signal_score",
+        "source_right_id",
+        "updated_by",
+    }
+)
 REQUIRED_ALPHA_RIGHT_IDS = (
     "official:dart",
     "official:sec-edgar",
@@ -90,6 +159,51 @@ DART_CONTRACT_FIXTURE = json.loads(
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def cors_exposed_header_names(headers: dict[str, str]) -> frozenset[str]:
+    value = headers.get("Access-Control-Expose-Headers", "")
+    return frozenset(
+        header.strip() for header in value.split(",") if header.strip()
+    )
+
+
+def require_no_forbidden_public_fields(
+    value: object,
+    *,
+    location: str,
+) -> None:
+    if isinstance(value, dict):
+        for raw_key, child in value.items():
+            normalized = str(raw_key).strip().lower().replace("-", "_")
+            require(
+                normalized not in FORBIDDEN_PUBLIC_FIELD_NAMES,
+                f"{location}: forbidden public key {raw_key!r}",
+            )
+            require_no_forbidden_public_fields(
+                child,
+                location=f"{location}.{raw_key}",
+            )
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            require_no_forbidden_public_fields(
+                child,
+                location=f"{location}[{index}]",
+            )
+
+
+def is_public_v2_path(path: str) -> bool:
+    route = urllib.parse.urlsplit(path).path
+    normalized = "/" + route.lstrip("/")
+    marker = "/api/v2"
+    position = normalized.find(marker)
+    if position < 0:
+        return False
+    rest = normalized[position + len(marker) :]
+    if rest and not rest.startswith("/"):
+        return False
+    suffix = rest.lstrip("/")
+    return not (suffix.startswith("admin/") or suffix.startswith("ops/"))
 
 
 def token_hash(token: str) -> str:
@@ -134,9 +248,12 @@ def request_json(
     preview_token: str | None = None,
     payload: dict[str, Any] | None = None,
     expected_status: int = 200,
+    origin: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, str]]:
     body = None
     headers = {"Accept": "application/json"}
+    if origin is not None:
+        headers["Origin"] = origin
     if token is not None:
         headers["Authorization"] = f"Bearer {token}"
     if preview_token is not None:
@@ -177,6 +294,11 @@ def request_json(
         status == expected_status,
         f"{method} {path} expected {expected_status}, got {status}: {decoded!r}",
     )
+    if is_public_v2_path(path):
+        require_no_forbidden_public_fields(
+            decoded,
+            location=f"{method} {path}",
+        )
     return decoded, response_headers
 
 
@@ -297,8 +419,11 @@ def request_bytes(
     *,
     token: str | None = None,
     expected_status: int = 200,
+    origin: str | None = None,
 ) -> tuple[bytes, dict[str, str]]:
     headers = {"Accept": "*/*"}
+    if origin is not None:
+        headers["Origin"] = origin
     if token is not None:
         headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(
@@ -1374,6 +1499,33 @@ def run(base_url: str, mysql_container_id: str) -> None:
         token_hash(RELEASE_AUTHORIZER_TOKEN)
         == "83a00f2797d3a214080e86809cb2eba45e0163581c1612ee7699055fa109ecb7",
         "CI release token does not match tests/php73_config.php",
+    )
+
+    cors_health, cors_health_headers = request_json(
+        base_url,
+        "api.php/api/v2/health",
+        origin=CORS_ALLOWED_ORIGIN,
+    )
+    require(
+        cors_health.get("ok") is True
+        and cors_health.get("api_version") == "v2"
+        and cors_health_headers.get("Access-Control-Allow-Origin")
+        == CORS_ALLOWED_ORIGIN
+        and cors_exposed_header_names(cors_health_headers)
+        == EXPECTED_CORS_EXPOSED_HEADERS
+        and cors_health_headers.get("X-BSIDE-API-Version") == "v2"
+        and int(cors_health_headers.get("X-Response-Bytes", "0")) > 0,
+        repr(cors_health_headers),
+    )
+    _, disallowed_cors_headers = request_json(
+        base_url,
+        "api.php/api/v2/health",
+        origin=CORS_DISALLOWED_ORIGIN,
+    )
+    require(
+        "Access-Control-Allow-Origin" not in disallowed_cors_headers
+        and "Access-Control-Expose-Headers" not in disallowed_cors_headers,
+        repr(disallowed_cors_headers),
     )
 
     # Migration 011 must leave v1 functional and v2 independently closed.
@@ -4332,6 +4484,33 @@ def run(base_url: str, mysql_container_id: str) -> None:
         repr(preview_headers),
     )
 
+    # Forbidden-field protection examines JSON keys only. Source-controlled
+    # prose may contain the same words and must remain byte-for-byte visible.
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_governance_events "
+        "SET current_status='literal queue_status and admin-token text' "
+        f"WHERE event_id='{event_id}';",
+    )
+    key_name_as_text, _ = request_json(
+        base_url,
+        "api.php/api/v2/events?country=US&limit=10",
+        token=PREVIEW_TOKEN,
+    )
+    require(
+        key_name_as_text.get("data", {}).get("items", [])[0].get(
+            "current_status"
+        )
+        == "literal queue_status and admin-token text",
+        repr(key_name_as_text),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_governance_events "
+        "SET current_status='official filing active' "
+        f"WHERE event_id='{event_id}';",
+    )
+
     # The automatic connector window intentionally overlaps a completed day.
     # A new receipt for the same semantic document may lower first_observed_at,
     # but it must not make the already-published canonical event look changed
@@ -5275,6 +5454,49 @@ def run(base_url: str, mysql_container_id: str) -> None:
         == "1,1\t1",
         "exact SEC completed-day receipt telemetry fixture is missing",
     )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_brief_items SET event_snapshot_json=JSON_SET("
+        "event_snapshot_json,'$.queue_status','pending',"
+        "'$.nested',JSON_OBJECT('admin-token','must-not-leak')) "
+        f"WHERE brief_id='{brief_id}' AND event_id='{event_id}';",
+    )
+    projected_brief, _ = request_json(
+        base_url,
+        "api.php/api/v2/briefs/latest?edition=global",
+    )
+    require(
+        projected_brief.get("data", {}).get("top", [])[0].get("event_id")
+        == event_id
+        and "queue_status"
+        not in projected_brief.get("data", {}).get("top", [])[0]
+        and "nested" not in projected_brief.get("data", {}).get("top", [])[0],
+        repr(projected_brief),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_brief_items SET event_snapshot_json=JSON_REMOVE("
+        "event_snapshot_json,'$.updated_at') "
+        f"WHERE brief_id='{brief_id}' AND event_id='{event_id}';",
+    )
+    incomplete_brief, _ = request_json(
+        base_url,
+        "api.php/api/v2/briefs/latest?edition=global",
+        expected_status=500,
+    )
+    require(
+        incomplete_brief.get("error") == "invalid_public_brief_snapshot"
+        and incomplete_brief.get("api_version") == "v2"
+        and "coverage_notice" not in incomplete_brief
+        and "empty_reason" not in incomplete_brief,
+        repr(incomplete_brief),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_brief_items SET event_snapshot_json=JSON_SET("
+        f"event_snapshot_json,'$.updated_at','{stable_live_updated_at}') "
+        f"WHERE brief_id='{brief_id}' AND event_id='{event_id}';",
+    )
     automated_with_mutation, _ = request_json(
         base_url,
         (
@@ -5291,8 +5513,16 @@ def run(base_url: str, mysql_container_id: str) -> None:
     require(
         mutated_counts.get("public_event_count") == 1
         and mutated_counts.get("source_title_event_count") == 1
-        and mutated_counts.get("source_title_preserved_count") == 0,
+        and mutated_counts.get("source_title_preserved_count") == 0
+        and mutated_counts.get("internal_field_exposure_count") == 0
+        and mutated_counts.get("persisted_snapshot_forbidden_key_count") == 2,
         repr(automated_with_mutation),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_brief_items SET event_snapshot_json=JSON_REMOVE("
+        "event_snapshot_json,'$.queue_status','$.nested') "
+        f"WHERE brief_id='{brief_id}' AND event_id='{event_id}';",
     )
     mysql_execute(
         mysql_container_id,
@@ -5425,7 +5655,11 @@ def run(base_url: str, mysql_container_id: str) -> None:
             r"[a-f0-9]{64}",
             str(replay_state.get("state_sha256", "")),
         )
-        and preserved_counts.get("source_title_preserved_count") == 1,
+        and preserved_counts.get("source_title_preserved_count") == 1
+        and preserved_counts.get("internal_field_exposure_count") == 0
+        and preserved_counts.get("persisted_snapshot_forbidden_key_count") == 0
+        and preserved_counts.get("scanned_response_count", 0)
+        > preserved_counts.get("public_event_count", 0),
         repr(automated_preserved),
     )
     baseline_replay_state, _ = request_json(
@@ -5859,9 +6093,14 @@ def run(base_url: str, mysql_container_id: str) -> None:
             base_url,
             "api.php/api/v2/exports/events.csv?"
             + urllib.parse.urlencode({"country": "US", "limit": 100, "offset": 0}),
+            origin=CORS_ALLOWED_ORIGIN,
         )
         require(
             len(csv_page) <= 250000
+            and csv_headers.get("Access-Control-Allow-Origin")
+            == CORS_ALLOWED_ORIGIN
+            and cors_exposed_header_names(csv_headers)
+            == EXPECTED_CORS_EXPOSED_HEADERS
             and csv_headers.get("X-BSIDE-Has-More") in {"true", "false"}
             and int(csv_headers.get("X-BSIDE-Returned", "0")) > 0
             and (

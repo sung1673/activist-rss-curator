@@ -979,8 +979,8 @@ def test_latest_brief_uses_immutable_snapshot_and_never_hides_latest_outage():
     assert "'coverage_notice' => $coverageNotice" in latest
     assert "current_source_url" in latest
     assert "unset($snapshot['source_url'])" in latest
-    assert "!isset($snapshot['title_provenance'])" in latest
-    assert "array('source', 'generated_metadata', 'operator_metadata')" in latest
+    assert "v2_public_event_snapshot_is_valid(" in latest
+    assert "invalid_public_brief_snapshot" in latest
     assert "v2_document_visibility_sql('current_url_d', 'current_url_sr')" in latest
     assert "unset($normalizedRow['source_url'])" in V2_WRITE
     brief_schema = SPEC["components"]["schemas"]["BriefEnvelope"]["properties"]["data"]
@@ -997,6 +997,151 @@ def test_latest_brief_uses_immutable_snapshot_and_never_hides_latest_outage():
     }.issubset(set(notice["required"]))
     assert "항상 canonical latest" in DOCS
     assert "이전 발행본으로 되돌아가지 않고" in DOCS
+
+
+def test_public_json_forbidden_fields_are_recursively_blocked_by_key_only():
+    policy = V2[
+        V2.index("function v2_forbidden_public_field_names") :
+        V2.index("function v2_respond")
+    ]
+    for field in (
+        "internal_score",
+        "priority_score",
+        "queue_status",
+        "review_status",
+        "payload_json",
+        "source_right_id",
+        "idempotency_key",
+        "admin_token",
+        "api_key",
+        "access_token",
+        "secret",
+    ):
+        assert f"'{field}'" in policy
+    assert "str_replace('-', '_'" in policy
+    assert "is_string($key)" in policy
+    assert "is_array($child)" in policy
+    assert "v2_public_internal_field_exposure_count($child)" in policy
+    assert "is_string($child)" not in policy
+    assert "strpos($path, '/admin/') === 0" in policy
+    assert "strpos($path, '/ops/') === 0" in policy
+
+    responder = V2[
+        V2.index("function v2_respond") :
+        V2.index("function v2_integer_query_param")
+    ]
+    assert "!v2_response_path_is_privileged()" in responder
+    assert "v2_public_internal_field_exposure_count($payload) > 0" in responder
+    assert "'error' => 'unsafe_public_response_blocked'" in responder
+    assert "$status = 500;" in responder
+
+
+def test_public_event_and_brief_snapshots_use_one_allowlist_projection():
+    projection = V2[
+        V2.index("function v2_public_event_field_names") :
+        V2.index("function v2_query_events")
+    ]
+    for field in (
+        "event_id",
+        "issuer_id",
+        "title",
+        "title_provenance",
+        "actor_name",
+        "actor_role",
+        "official_evidence_count",
+        "source_url",
+    ):
+        assert f"'{field}'" in projection
+    for internal in (
+        "review_status",
+        "publication_status",
+        "payload_json",
+        "source_right_id",
+        "queue_status",
+    ):
+        assert f"'{internal}'" not in projection
+    assert "$row = v2_public_event_projection($row);" in projection
+
+    validator = V2[
+        V2.index("function v2_public_event_snapshot_is_valid") :
+        V2.index("function v2_public_document_field_names")
+    ]
+    required = (
+        "event_id",
+        "issuer_id",
+        "issuer_name",
+        "country",
+        "event_family",
+        "importance",
+        "verification_status",
+        "change_type",
+        "title",
+        "title_provenance",
+        "original_language",
+        "occurred_at",
+        "filed_at",
+        "first_observed_at",
+        "updated_at",
+        "deadline_at",
+        "official_evidence_count",
+        "media_count",
+        "coverage_mode",
+    )
+    assert len(required) == 19
+    for field in required:
+        assert f"'{field}'" in validator
+    assert "array_key_exists($field, $snapshot)" in validator
+    assert "is_int($snapshot['official_evidence_count'])" in validator
+    assert "is_int($snapshot['media_count'])" in validator
+    assert "$snapshot['official_evidence_count'] < 0" in validator
+    assert "$snapshot['media_count'] < 0" in validator
+    assert "v2_valid_country($snapshot['country'])" in validator
+    assert "market-wide" in validator
+    assert "operator_metadata" in validator
+    assert "market_sensitive" in validator
+    assert "withdrawn" in validator
+    assert (
+        r"/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/D"
+        in validator
+    )
+
+    latest = V2[
+        V2.index("function v2_brief_event_rows") : V2.index(
+            "function v2_latest_brief"
+        )
+    ]
+    assert "v2_public_event_snapshot_is_valid(" in latest
+    assert "invalid_public_brief_snapshot" in latest
+    assert "v2_respond(500, array(" in latest
+    assert "$snapshot = v2_normalize_event_rows(array($snapshot))[0];" in latest
+
+
+def test_alpha_content_integrity_measures_serialized_objects_and_snapshot_storage():
+    integrity = V2[
+        V2.index("function v2_alpha_content_integrity") :
+        V2.index("function v2_ops_alpha_release_evidence")
+    ]
+    assert "'internal_field_exposure_count' => 0" in integrity
+    assert "'persisted_snapshot_forbidden_key_count' => 0" in integrity
+    assert "'scanned_response_count' => 0" in integrity
+    assert "serialized public" in integrity
+    assert "not completed HTTP responses" in integrity
+    assert "v2_event_select($config)" in integrity
+    assert "v2_public_document_projection($document)" in integrity
+    assert "v2_source_status_data($pdo, $config)" in integrity
+    assert "bi.event_snapshot_json" in integrity
+    assert "latest_be.edition=be.edition" in integrity
+    assert "bi.review_status=\\'approved\\'" in integrity
+    assert "v2_event_visibility_sql($config, 'e')" in integrity
+    assert "alpha_evidence_invalid_public_brief_snapshot" in integrity
+    assert (
+        "$counts['persisted_snapshot_forbidden_key_count'] +="
+        in integrity
+    )
+    assert "v2_public_internal_field_exposure_count($briefSnapshot)" in integrity
+    assert "v2_public_internal_field_exposure_count($publicBriefEvent)" in integrity
+    assert integrity.count("v2_public_internal_field_exposure_count(") >= 5
+    assert "$counts['scanned_response_count']++;" in integrity
 
 
 def test_response_budget_and_pagination_limits_match_php():

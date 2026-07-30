@@ -177,7 +177,121 @@ function v2_request_path(): ?string {
     return null;
 }
 
+/**
+ * Fields that belong to collection, review, authentication or persistence
+ * must never cross a public v2 JSON boundary.
+ *
+ * Keep this an exact key policy. User-controlled source text may legitimately
+ * contain one of these words, so values are deliberately never inspected.
+ */
+function v2_forbidden_public_field_names(): array {
+    return array(
+        'access_key',
+        'access_token',
+        'admin_token',
+        'analysis_bucket',
+        'api_key',
+        'approved_by',
+        'authorization',
+        'changed_by',
+        'client_secret',
+        'connector_status',
+        'cookie',
+        'cookies',
+        'credential',
+        'credentials',
+        'cursor_json',
+        'editor_token',
+        'evidence_hash',
+        'evidence_uri',
+        'idempotency_key',
+        'internal_score',
+        'ops_token',
+        'password',
+        'passwd',
+        'payload_json',
+        'preview_token',
+        'priority_level',
+        'priority_score',
+        'private_key',
+        'publication_status',
+        'queue_status',
+        'record_status',
+        'refresh_token',
+        'release_authorizer_token',
+        'requested_by',
+        'review_status',
+        'reviewed_by',
+        'risk_flags_json',
+        'score_breakdown',
+        'search_score',
+        'secret',
+        'set_cookie',
+        'signal_score',
+        'source_right_id',
+        'updated_by',
+    );
+}
+
+function v2_normalize_public_field_name(string $name): string {
+    return strtolower(str_replace('-', '_', trim($name)));
+}
+
+/**
+ * Count forbidden keys recursively without considering scalar values.
+ *
+ * Lists use numeric keys and are traversed normally. Counting occurrences
+ * instead of distinct names preserves an auditable raw numerator.
+ *
+ * @param mixed $value
+ */
+function v2_public_internal_field_exposure_count($value): int {
+    if (!is_array($value)) {
+        return 0;
+    }
+    static $forbidden = null;
+    if ($forbidden === null) {
+        $forbidden = array_fill_keys(
+            v2_forbidden_public_field_names(),
+            true
+        );
+    }
+    $count = 0;
+    foreach ($value as $key => $child) {
+        if (
+            is_string($key)
+            && isset($forbidden[v2_normalize_public_field_name($key)])
+        ) {
+            $count++;
+        }
+        if (is_array($child)) {
+            $count += v2_public_internal_field_exposure_count($child);
+        }
+    }
+    return $count;
+}
+
+function v2_response_path_is_privileged(): bool {
+    $path = v2_request_path();
+    return is_string($path) && (
+        strpos($path, '/admin/') === 0
+        || strpos($path, '/ops/') === 0
+    );
+}
+
 function v2_respond(int $status, array $payload): void {
+    if (
+        !v2_response_path_is_privileged()
+        && v2_public_internal_field_exposure_count($payload) > 0
+    ) {
+        // Do not include the rejected key, its path, or its value in either
+        // the public response or an error detail.
+        $status = 500;
+        $payload = array(
+            'ok' => false,
+            'error' => 'unsafe_public_response_blocked',
+        );
+    }
     $payload['api_version'] = 'v2';
     $encoded = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if ($encoded === false) {
@@ -930,8 +1044,220 @@ function v2_normalize_public_time_fields(
     return $row;
 }
 
+function v2_public_event_field_names(): array {
+    return array(
+        'event_id',
+        'issuer_id',
+        'issuer_name',
+        'ticker',
+        'market',
+        'country',
+        'event_family',
+        'importance',
+        'verification_status',
+        'change_type',
+        'title',
+        'title_provenance',
+        'original_language',
+        'change_summary',
+        'current_status',
+        'actor_name',
+        'actor_role',
+        'occurred_at',
+        'filed_at',
+        'first_observed_at',
+        'updated_at',
+        'deadline_at',
+        'official_evidence_count',
+        'media_count',
+        'coverage_mode',
+        'source_url',
+    );
+}
+
+function v2_public_row_projection(array $row, array $fields): array {
+    $projected = array();
+    foreach ($fields as $field) {
+        if (array_key_exists($field, $row)) {
+            $projected[$field] = $row[$field];
+        }
+    }
+    return $projected;
+}
+
+function v2_public_event_projection(array $row): array {
+    return v2_public_row_projection($row, v2_public_event_field_names());
+}
+
+/**
+ * Validate the 19 fields required by the OpenAPI Event schema before a
+ * persisted BriefItem snapshot is allowed to become a public wire object.
+ */
+function v2_public_event_snapshot_is_valid(
+    array $snapshot,
+    string $expectedEventId
+): bool {
+    $required = array(
+        'event_id',
+        'issuer_id',
+        'issuer_name',
+        'country',
+        'event_family',
+        'importance',
+        'verification_status',
+        'change_type',
+        'title',
+        'title_provenance',
+        'original_language',
+        'occurred_at',
+        'filed_at',
+        'first_observed_at',
+        'updated_at',
+        'deadline_at',
+        'official_evidence_count',
+        'media_count',
+        'coverage_mode',
+    );
+    foreach ($required as $field) {
+        if (!array_key_exists($field, $snapshot)) {
+            return false;
+        }
+    }
+    if (
+        !is_string($snapshot['event_id'])
+        || !hash_equals($expectedEventId, $snapshot['event_id'])
+        || preg_match(
+            '/^[A-Za-z0-9_.:\-]{1,96}$/D',
+            $snapshot['event_id']
+        ) !== 1
+        || !is_string($snapshot['issuer_id'])
+        || preg_match(
+            '/^[A-Za-z0-9_.:\-]{1,96}$/D',
+            $snapshot['issuer_id']
+        ) !== 1
+        || !is_string($snapshot['issuer_name'])
+        || !is_string($snapshot['change_type'])
+        || !is_string($snapshot['title'])
+        || !is_string($snapshot['original_language'])
+    ) {
+        return false;
+    }
+    $country = is_string($snapshot['country'])
+        ? v2_valid_country($snapshot['country']) : null;
+    if (
+        $country === null
+        || !hash_equals($country, (string)$snapshot['country'])
+        || !in_array(
+            $snapshot['event_family'],
+            array(
+                'large_ownership',
+                'meeting_and_vote',
+                'tender_offer_and_mna',
+                'capital_issuance',
+                'capital_return',
+                'board_and_compensation',
+                'listing_status',
+                'correction_and_withdrawal',
+            ),
+            true
+        )
+        || !in_array(
+            $snapshot['importance'],
+            array('low', 'medium', 'high', 'critical', 'market_sensitive'),
+            true
+        )
+        || !in_array(
+            $snapshot['verification_status'],
+            array(
+                'official',
+                'confirmed',
+                'corroborated',
+                'corrected',
+                'withdrawn',
+            ),
+            true
+        )
+        || !in_array(
+            $snapshot['title_provenance'],
+            array('source', 'generated_metadata', 'operator_metadata'),
+            true
+        )
+        || !in_array(
+            $snapshot['coverage_mode'],
+            array(
+                'market-wide',
+                'official-register',
+                'selected-issuers',
+                'link-only',
+                'unavailable',
+            ),
+            true
+        )
+    ) {
+        return false;
+    }
+    foreach (
+        array('occurred_at', 'filed_at', 'first_observed_at', 'deadline_at')
+        as $field
+    ) {
+        if (
+            $snapshot[$field] !== null
+            && (
+                !is_string($snapshot[$field])
+                || preg_match(
+                    '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/D',
+                    $snapshot[$field]
+                ) !== 1
+            )
+        ) {
+            return false;
+        }
+    }
+    if (
+        !is_string($snapshot['updated_at'])
+        || preg_match(
+            '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/D',
+            $snapshot['updated_at']
+        ) !== 1
+        || !is_int($snapshot['official_evidence_count'])
+        || $snapshot['official_evidence_count'] < 0
+        || !is_int($snapshot['media_count'])
+        || $snapshot['media_count'] < 0
+    ) {
+        return false;
+    }
+    return true;
+}
+
+function v2_public_document_field_names(): array {
+    return array(
+        'document_id',
+        'document_type',
+        'source_class',
+        'source_key',
+        'original_language',
+        'title',
+        'original_url',
+        'filed_at',
+        'published_at',
+        'verification_status',
+        'correction_of_document_id',
+    );
+}
+
+function v2_public_document_projection(array $row): array {
+    return v2_public_row_projection(
+        $row,
+        v2_public_document_field_names()
+    );
+}
+
 function v2_normalize_event_rows(array $rows): array {
     foreach ($rows as &$row) {
+        // In particular, BriefItem snapshots are persistence records rather
+        // than trusted wire objects. Project every event through the same
+        // public allowlist before it can reach an endpoint.
+        $row = v2_public_event_projection($row);
         $row = v2_normalize_public_time_fields(
             $row,
             array(
@@ -997,6 +1323,7 @@ function v2_get_event(PDO $pdo, array $config, string $eventId): void {
     $documents->execute(array($eventId));
     $documentRows = $documents->fetchAll();
     foreach ($documentRows as &$documentRow) {
+        $documentRow = v2_public_document_projection($documentRow);
         $documentRow = v2_normalize_public_time_fields(
             $documentRow,
             array('filed_at', 'published_at')
@@ -1890,16 +2217,18 @@ function v2_brief_event_rows(PDO $pdo, array $config, string $briefId, string $l
         $snapshot = json_decode((string)$row['event_snapshot_json'], true);
         if (
             !is_array($snapshot)
-            || !isset($snapshot['event_id'])
-            || (string)$snapshot['event_id'] !== (string)$row['event_id']
-            || !isset($snapshot['title_provenance'])
-            || !in_array(
-                (string)$snapshot['title_provenance'],
-                array('source', 'generated_metadata', 'operator_metadata'),
-                true
+            || !v2_public_event_snapshot_is_valid(
+                $snapshot,
+                (string)$row['event_id']
             )
         ) {
-            continue;
+            // A corrupted current edition is not equivalent to a genuine
+            // coverage outage and must never be converted into an empty
+            // coverage notice by v2_latest_brief().
+            v2_respond(500, array(
+                'ok' => false,
+                'error' => 'invalid_public_brief_snapshot',
+            ));
         }
         // URLs are never trusted from the frozen snapshot. Reconstruct the
         // representative URL from a currently eligible, non-Telegram
@@ -4296,14 +4625,11 @@ function v2_alpha_content_integrity(
     string $collectedAt
 ): array {
     $eventStatement = $pdo->query(
-        'SELECT e.event_id,e.title,e.original_language,'
-        . 'JSON_UNQUOTE(JSON_EXTRACT(e.payload_json,'
-        . '\'$.metadata.title_provenance\')) AS title_provenance FROM '
-        . table_name($config, 'governance_events') . ' e WHERE '
+        v2_event_select($config) . ' WHERE '
         . v2_event_visibility_sql($config, 'e')
         . ' ORDER BY e.event_id LIMIT 10001'
     );
-    $events = $eventStatement->fetchAll();
+    $events = v2_normalize_event_rows($eventStatement->fetchAll());
     if (count($events) > 10000) {
         throw new RuntimeException('alpha_evidence_content_scan_limit');
     }
@@ -4316,8 +4642,10 @@ function v2_alpha_content_integrity(
     foreach (array_chunk($eventIds, 100) as $ids) {
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $documentStatement = $pdo->prepare(
-            'SELECT ed.event_id,d.title,d.original_language,d.original_url,'
-            . 'd.source_class,d.payload_json FROM '
+            'SELECT ed.event_id,d.document_id,d.document_type,d.source_class,'
+            . 'd.source_key,d.original_language,d.title,d.original_url,'
+            . 'd.filed_at,d.published_at,d.verification_status,'
+            . 'd.correction_of_document_id,d.payload_json FROM '
             . table_name($config, 'event_documents') . ' ed JOIN '
             . table_name($config, 'documents')
             . ' d ON d.document_id=ed.document_id LEFT JOIN '
@@ -4343,9 +4671,12 @@ function v2_alpha_content_integrity(
         'generated_metadata_title_count' => 0,
         'operator_metadata_title_count' => 0,
         'unknown_title_provenance_count' => 0,
-        'scanned_response_count' => count($events),
+        // Backward-compatible field name: this counts serialized public
+        // objects inspected by the exporter, not completed HTTP responses.
+        'scanned_response_count' => 0,
         'telegram_exposure_count' => 0,
         'internal_field_exposure_count' => 0,
+        'persisted_snapshot_forbidden_key_count' => 0,
     );
     $officialClasses = array(
         'official_disclosure',
@@ -4354,6 +4685,9 @@ function v2_alpha_content_integrity(
         'official_issuer',
     );
     foreach ($events as $event) {
+        $counts['scanned_response_count']++;
+        $counts['internal_field_exposure_count'] +=
+            v2_public_internal_field_exposure_count($event);
         $provenance = (string)$event['title_provenance'];
         if (
             in_array(
@@ -4377,6 +4711,10 @@ function v2_alpha_content_integrity(
         $urlPreserved = false;
         $sourceTitlePreserved = false;
         foreach ($documentsByEvent[(string)$event['event_id']] as $document) {
+            $publicDocument = v2_public_document_projection($document);
+            $counts['scanned_response_count']++;
+            $counts['internal_field_exposure_count'] +=
+                v2_public_internal_field_exposure_count($publicDocument);
             $sourceClass = strtolower((string)$document['source_class']);
             if (strpos($sourceClass, 'telegram') !== false) {
                 $counts['telegram_exposure_count']++;
@@ -4421,6 +4759,68 @@ function v2_alpha_content_integrity(
         $counts['official_url_preserved_count'] += $urlPreserved ? 1 : 0;
         $counts['source_title_preserved_count'] +=
             $sourceTitlePreserved ? 1 : 0;
+    }
+
+    // Source status is a public response assembled from operational rows.
+    // Scan the final public projection rather than the underlying connector
+    // and SourceRight columns that are intentionally removed by the serializer.
+    foreach (v2_source_status_data($pdo, $config) as $sourceStatus) {
+        $counts['scanned_response_count']++;
+        $counts['internal_field_exposure_count'] +=
+            v2_public_internal_field_exposure_count($sourceStatus);
+    }
+
+    // BriefItem snapshots are persisted JSON and therefore the only public
+    // event-shaped input whose keys can vary independently of a SELECT list.
+    // Inspect the canonical latest published edition for every edition using
+    // the same event visibility and review rules as the public brief reader.
+    $briefEditions = table_name($config, 'brief_editions');
+    $briefItems = table_name($config, 'brief_items');
+    $governanceEvents = table_name($config, 'governance_events');
+    $briefSnapshotStatement = $pdo->query(
+        'SELECT bi.event_id,bi.event_snapshot_json FROM ' . $briefItems
+        . ' bi JOIN ' . $briefEditions . ' be ON be.brief_id=bi.brief_id'
+        . ' JOIN ' . $governanceEvents . ' e ON e.event_id=bi.event_id'
+        . ' WHERE be.publication_status=\'published\''
+        . ' AND be.published_at IS NOT NULL'
+        . ' AND bi.review_status=\'approved\''
+        . ' AND be.brief_id=(SELECT latest_be.brief_id FROM '
+        . $briefEditions . ' latest_be WHERE latest_be.edition=be.edition'
+        . ' AND latest_be.publication_status=\'published\''
+        . ' AND latest_be.published_at IS NOT NULL'
+        . ' ORDER BY latest_be.cutoff_at DESC,latest_be.brief_id DESC LIMIT 1)'
+        . ' AND ' . v2_event_visibility_sql($config, 'e')
+        . ' ORDER BY be.edition,bi.lane,bi.position_no,bi.event_id'
+        . ' LIMIT 10001'
+    );
+    $briefSnapshots = $briefSnapshotStatement->fetchAll();
+    if (count($briefSnapshots) > 10000) {
+        throw new RuntimeException('alpha_evidence_content_scan_limit');
+    }
+    foreach ($briefSnapshots as $briefSnapshotRow) {
+        $briefSnapshot = json_decode(
+            (string)$briefSnapshotRow['event_snapshot_json'],
+            true
+        );
+        if (
+            !is_array($briefSnapshot)
+            || !v2_public_event_snapshot_is_valid(
+                $briefSnapshot,
+                (string)$briefSnapshotRow['event_id']
+            )
+        ) {
+            throw new RuntimeException(
+                'alpha_evidence_invalid_public_brief_snapshot'
+            );
+        }
+        $counts['persisted_snapshot_forbidden_key_count'] +=
+            v2_public_internal_field_exposure_count($briefSnapshot);
+        $publicBriefEvent = v2_normalize_event_rows(
+            array($briefSnapshot)
+        )[0];
+        $counts['scanned_response_count']++;
+        $counts['internal_field_exposure_count'] +=
+            v2_public_internal_field_exposure_count($publicBriefEvent);
     }
     return array(
         'schema_version' => 1,
