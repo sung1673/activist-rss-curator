@@ -893,6 +893,8 @@ SEC_CURRENT_FILINGS_ATOM_ENDPOINT = (
 SEC_DAILY_INDEX_BASE_URL = (
     "https://www.sec.gov/Archives/edgar/daily-index"
 )
+_SEC_DAILY_INDEX_MAX_RETRIES = 5
+_SEC_DAILY_INDEX_BACKOFF_CAP_SECONDS = 16.0
 SEC_SUBMISSIONS_BASE_URL = "https://data.sec.gov/submissions"
 SEC_ARCHIVES_BASE_URL = "https://www.sec.gov/Archives"
 _SEC_USER_AGENT_EMAIL = re.compile(
@@ -985,15 +987,18 @@ class SecDailyIndexConnector(BaseGlobalConnector):
         user_agent: str,
         client: httpx.Client | None = None,
         timeout: float = 20.0,
-        max_retries: int = 3,
+        max_retries: int = _SEC_DAILY_INDEX_MAX_RETRIES,
         sleep: Callable[[float], None] = time.sleep,
         retry_sleep: Callable[[float], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
         minimum_request_interval: float = 0.12,
         _throttle: _SecRequestThrottle | None = None,
     ) -> None:
-        if max_retries < 0 or max_retries > 5:
-            raise ValueError("SEC max_retries must be between 0 and 5")
+        if max_retries < 0 or max_retries > _SEC_DAILY_INDEX_MAX_RETRIES:
+            raise ValueError(
+                "SEC max_retries must be between 0 and "
+                f"{_SEC_DAILY_INDEX_MAX_RETRIES}"
+            )
         self.user_agent = _validated_sec_user_agent(user_agent)
         self.client = client
         self.timeout = timeout
@@ -1078,7 +1083,10 @@ class SecDailyIndexConnector(BaseGlobalConnector):
             delay = (
                 advertised
                 if advertised is not None
-                else min(float(2**attempt), 8.0)
+                else min(
+                    float(2**attempt),
+                    _SEC_DAILY_INDEX_BACKOFF_CAP_SECONDS,
+                )
             )
             self.retry_sleep(delay)
         raise GlobalConnectorError(

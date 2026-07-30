@@ -647,6 +647,46 @@ def test_sec_daily_retries_429_with_retry_after_and_counts_attempts() -> None:
     assert len(result.records) == 1
 
 
+def test_sec_daily_default_retries_recover_from_transient_503_at_backoff_cap() -> None:
+    calls = 0
+    retry_delays: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls <= 5:
+            return httpx.Response(503)
+        return httpx.Response(
+            200,
+            text=(
+                "CIK|Company Name|Form Type|Date Filed|File Name\n"
+                "--------------------------------------------------------------------------------\n"
+                "320193|Apple Inc.|SC 13D|20260629|"
+                "edgar/data/320193/0000320193-26-000999.txt\n"
+            ),
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = SecDailyIndexConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+            sleep=lambda _delay: None,
+            retry_sleep=retry_delays.append,
+        ).fetch(
+            GlobalConnectorRequest(
+                window_start=date(2026, 6, 29),
+                window_end_exclusive=date(2026, 6, 30),
+            ),
+            eligibility=eligibility("official:sec-edgar", "sec-edgar"),
+            now=NOW,
+        )
+
+    assert calls == result.request_count == 6
+    assert retry_delays == [1.0, 2.0, 4.0, 8.0, 16.0]
+    assert result.raw_count == 1
+    assert len(result.records) == 1
+
+
 def test_sec_daily_5xx_retries_are_bounded_and_structured() -> None:
     calls = 0
     retry_delays: list[float] = []
