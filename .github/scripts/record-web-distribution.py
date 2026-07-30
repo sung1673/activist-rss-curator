@@ -8,6 +8,7 @@ acknowledge either one insert or one exact duplicate with HTTP 202.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -19,14 +20,14 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 ENDPOINT_PATH = "/ops/web-distribution-observations"
 MAX_RESPONSE_BYTES = 64 * 1024
 MAX_DURATION_MS = 3_600_000
 SOURCE = "github_actions"
-USER_AGENT = "bside-web-distribution-recorder/1.0"
+USER_AGENT = "BSIDE-Governance-Intelligence/1.0 support@bside.ai"
 SHA_PATTERN = re.compile(r"^[a-f0-9]{40}$")
 OPERATION_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,31}$")
 RETRYABLE_HTTP_STATUSES = {408, 425, 429, 500, 502, 503, 504}
@@ -34,6 +35,22 @@ RETRYABLE_HTTP_STATUSES = {408, 425, 429, 500, 502, 503, 504}
 
 class DistributionObservationError(RuntimeError):
     """Raised when an observation cannot be validated or acknowledged."""
+
+
+class RejectRedirectHandler(HTTPRedirectHandler):
+    """Never forward the privileged bearer token to a redirect target."""
+
+    def redirect_request(
+        self,
+        req: Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> None:
+        del req, fp, code, msg, headers, newurl
+        return None
 
 
 @dataclass(frozen=True)
@@ -193,14 +210,73 @@ def validate_acknowledgement(payload: object) -> dict[str, Any]:
     return payload
 
 
-def _read_json_response(response: Any) -> object:
+def _header(response: Any, name: str) -> str:
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return ""
+    try:
+        value = headers.get(name, "")
+    except (AttributeError, TypeError):
+        return ""
+    return str(value or "").strip()
+
+
+def _content_type(response: Any) -> str:
+    return _header(response, "Content-Type").partition(";")[0].strip().casefold()
+
+
+def _redirect_host(response: Any) -> str:
+    location = _header(response, "Location")
+    if not location:
+        return ""
+    try:
+        return str(urlsplit(location).hostname or "").casefold()
+    except ValueError:
+        return ""
+
+
+def _safe_response_diagnostics(response: Any, *, status: int, body: bytes) -> str:
+    """Return response metadata safe for Actions logs.
+
+    The body and redirect URL are intentionally never included.  A bounded body
+    digest is sufficient to correlate repeated edge/WAF responses.
+    """
+
+    return (
+        f"status={status} "
+        f"content_type={_content_type(response) or 'missing'} "
+        f"body_length={len(body)} "
+        f"body_sha256={hashlib.sha256(body).hexdigest()} "
+        f"redirect_host={_redirect_host(response) or 'none'}"
+    )
+
+
+def _read_response_body(response: Any) -> bytes:
     body = response.read(MAX_RESPONSE_BYTES + 1)
     if len(body) > MAX_RESPONSE_BYTES:
-        raise DistributionObservationError("operations API response exceeds 64 KiB")
+        diagnostics = _safe_response_diagnostics(
+            response,
+            status=int(getattr(response, "status", 0)),
+            body=body,
+        )
+        raise DistributionObservationError(
+            f"operations API response exceeds 64 KiB ({diagnostics})"
+        )
+    return body
+
+
+def _read_json_response(response: Any, *, status: int, body: bytes) -> object:
+    diagnostics = _safe_response_diagnostics(response, status=status, body=body)
+    if _content_type(response) != "application/json":
+        raise DistributionObservationError(
+            f"operations API returned a non-JSON content type ({diagnostics})"
+        )
     try:
         return json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise DistributionObservationError("operations API returned invalid JSON") from exc
+        raise DistributionObservationError(
+            f"operations API returned invalid JSON ({diagnostics})"
+        ) from exc
 
 
 def submit_observation(
@@ -210,7 +286,7 @@ def submit_observation(
     observation: WebDistributionObservation,
     attempts: int = 3,
     timeout_seconds: float = 15,
-    opener: Callable[..., Any] = urlopen,
+    opener: Callable[..., Any] | None = None,
     sleeper: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
     if len(token.strip()) < 20 or any(character.isspace() for character in token.strip()):
@@ -234,18 +310,28 @@ def submit_observation(
             "User-Agent": USER_AGENT,
         },
     )
+    request_opener = opener or build_opener(RejectRedirectHandler()).open
 
     for attempt_number in range(1, attempts + 1):
         try:
-            with opener(request, timeout=timeout_seconds) as response:
+            with request_opener(request, timeout=timeout_seconds) as response:
                 status = int(response.status)
-                payload = _read_json_response(response)
+                response_body = _read_response_body(response)
         except HTTPError as exc:
             if exc.code in RETRYABLE_HTTP_STATUSES and attempt_number < attempts:
                 sleeper(float(2 ** (attempt_number - 1)))
                 continue
+            try:
+                error_body = _read_response_body(exc)
+            except DistributionObservationError as diagnostic_error:
+                raise diagnostic_error from exc
+            diagnostics = _safe_response_diagnostics(
+                exc,
+                status=int(exc.code),
+                body=error_body,
+            )
             raise DistributionObservationError(
-                f"operations API returned HTTP {exc.code}"
+                f"operations API returned HTTP {exc.code} ({diagnostics})"
             ) from exc
         except (URLError, TimeoutError, OSError) as exc:
             if attempt_number < attempts:
@@ -256,9 +342,16 @@ def submit_observation(
             ) from exc
 
         if status != 202:
-            raise DistributionObservationError(
-                f"operations API returned HTTP {status}; exactly 202 is required"
+            diagnostics = _safe_response_diagnostics(
+                response,
+                status=status,
+                body=response_body,
             )
+            raise DistributionObservationError(
+                "operations API returned an unexpected status; "
+                f"exactly 202 is required ({diagnostics})"
+            )
+        payload = _read_json_response(response, status=status, body=response_body)
         return validate_acknowledgement(payload)
 
     raise DistributionObservationError("operations API request was not attempted")

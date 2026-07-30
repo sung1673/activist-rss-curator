@@ -33,6 +33,13 @@ def test_remote_preview_spec_is_separate_and_contains_no_mock_routing() -> None:
     assert 'sessionStorage.removeItem(key)' in spec
     assert "code_revision" in spec
     assert "x-bside-api-version" in spec
+    assert 'redirect: "error"' in spec
+    assert "const body = await response.arrayBuffer();" in spec
+    assert 'xBsideApiVersion: String(response.headers.get("x-bside-api-version")' in spec
+    assert "responseBytes: body.byteLength" in spec
+    assert 'const pending = waitForV2(page, apiV2, "/health");' not in spec
+    assert 'await assertV2Response(response, "/health")' not in spec
+    assert "await response.json()" not in spec
     assert "#preview=" not in spec
     assert "preview_token=" not in spec.casefold()
     assert "fullPage: true" not in spec
