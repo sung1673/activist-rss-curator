@@ -117,6 +117,25 @@ def test_private_bundle_and_diagnostics_cross_the_sanitized_artifact_boundary() 
     assert "dart-drift-probe.stderr.raw" not in paths
 
 
+def test_replay_report_preserves_raw_drift_and_binds_release_gate_derivation() -> None:
+    _text, payload = workflow("official-backfill.yml")
+    job = payload["jobs"]["backfill"]  # type: ignore[index]
+    binding = step(job, "Bind frozen replay and drift status into report")
+    script = binding["run"]
+    for contract in (
+        'probe.get("status") not in {"matched", "drift_detected"}',
+        '"stable-public-payload-source-count-diagnostic-v1"',
+        'probe.get("release_gate_matched") is not True',
+        'probe.get("blocking_drift_window_count") != 0',
+        '"status": probe["status"]',
+        '"diagnostic_only_window_count": diagnostic_only_window_count',
+        '"blocking_drift_window_count": 0',
+    ):
+        assert contract in script
+    assert '"status": "matched"' not in script
+    assert 'probe["status"] == "matched"' not in script
+
+
 def test_partial_apply_resume_is_checkpoint_bound_and_never_refetched_silently() -> None:
     _text, payload = workflow("official-backfill.yml")
     job = payload["jobs"]["backfill"]  # type: ignore[index]
@@ -200,11 +219,15 @@ def test_expedited_preparation_requires_frozen_bytes_and_matched_probe() -> None
         "expected_range_start=probe_range_start",
         "expected_range_end_exclusive=probe_range_end",
         "expected_job_fingerprint=probe_fingerprint",
-        'drift_validation.get("fully_matched") is not True',
+        'drift_validation.get("release_gate_policy")',
+        'drift_validation.get("release_gate_matched") is not True',
+        'drift_validation.get("blocking_drift_window_count") != 0',
+        'drift_validation.get("diagnostic_only_window_count")',
         'drift_validation.get("window_count") != 30',
-        'drift_validation.get("matched_window_count") != 30',
-        'drift.get("status") != "matched"',
+        'drift.get("status") not in {"matched", "drift_detected"}',
+        'drift.get("release_gate_policy")',
         'drift_report.get("release_gate_matched") is not True',
+        'drift_report.get("blocking_drift_window_count") != 0',
         'replay_receipt.get("source_network_accessed") is not False',
         "DART replay did not consume the exact immutable apply artifact",
         "bside-global-alpha-expedited-connector-receipts-v2",

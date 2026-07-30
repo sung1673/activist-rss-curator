@@ -222,6 +222,12 @@ def connector_run(family: str, mode: str) -> dict[str, object]:
                     "source_network_accessed": False,
                     "fresh_drift_probe": {
                         "status": "matched",
+                        "release_gate_policy": (
+                            "stable-public-payload-source-count-diagnostic-v1"
+                        ),
+                        "release_gate_matched": True,
+                        "diagnostic_only_window_count": 0,
+                        "blocking_drift_window_count": 0,
                         "sha256": digest("dart:fresh-drift-probe"),
                         "read_only": True,
                         "governance_write_attempted": False,
@@ -834,12 +840,63 @@ def test_dart_release_accepts_complete_checkpoint_after_zero_window_resume() -> 
     assert summary["evidenced_window_count"] == 30
 
 
-@pytest.mark.parametrize("status", ["drift_detected", "probe_failed"])
-def test_dart_release_rejects_unmatched_fresh_drift_probe(status: str) -> None:
+def test_dart_release_accepts_source_count_only_diagnostic_drift() -> None:
     bundle = valid_bundle()
     dart = bundle["connector_receipts"]["connectors"][0]  # type: ignore[index]
-    dart["replay_run"]["fresh_drift_probe"]["status"] = status
-    with pytest.raises(ExpeditedAlphaEvidenceError, match="not matched"):
+    drift = dart["replay_run"]["fresh_drift_probe"]
+    drift["status"] = "drift_detected"
+    drift["diagnostic_only_window_count"] = 2
+    refresh_protected_bindings(bundle)
+
+    report = build_expedited_release_report(bundle, expected_revision=REVISION)
+
+    assert report["release_gate_passed"] is True
+    replay_summary = report["connector_receipts"]["connectors"][0][  # type: ignore[index]
+        "replay_run"
+    ]
+    drift_summary = replay_summary["fresh_drift_probe"]
+    assert drift_summary["status"] == "drift_detected"
+    assert drift_summary["release_gate_policy"] == (
+        "stable-public-payload-source-count-diagnostic-v1"
+    )
+    assert drift_summary["release_gate_matched"] is True
+    assert drift_summary["diagnostic_only_window_count"] == 2
+    assert drift_summary["blocking_drift_window_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("status", "release_gate_matched", "diagnostic_count", "blocking_count"),
+    [
+        ("probe_failed", False, 0, 0),
+        ("drift_detected", False, 0, 1),
+        ("drift_detected", True, 0, 0),
+        ("matched", True, 1, 0),
+    ],
+)
+def test_dart_release_rejects_unsafe_or_inconsistent_fresh_drift_probe(
+    status: str,
+    release_gate_matched: bool,
+    diagnostic_count: int,
+    blocking_count: int,
+) -> None:
+    bundle = valid_bundle()
+    dart = bundle["connector_receipts"]["connectors"][0]  # type: ignore[index]
+    drift = dart["replay_run"]["fresh_drift_probe"]
+    drift["status"] = status
+    drift["release_gate_matched"] = release_gate_matched
+    drift["diagnostic_only_window_count"] = diagnostic_count
+    drift["blocking_drift_window_count"] = blocking_count
+    with pytest.raises(ExpeditedAlphaEvidenceError, match="not release-gate safe"):
+        build_expedited_release_report(bundle, expected_revision=REVISION)
+
+
+def test_dart_release_rejects_unknown_drift_release_gate_policy() -> None:
+    bundle = valid_bundle()
+    dart = bundle["connector_receipts"]["connectors"][0]  # type: ignore[index]
+    dart["replay_run"]["fresh_drift_probe"]["release_gate_policy"] = (
+        "unapproved-policy"
+    )
+    with pytest.raises(ExpeditedAlphaEvidenceError, match="not release-gate safe"):
         build_expedited_release_report(bundle, expected_revision=REVISION)
 
 

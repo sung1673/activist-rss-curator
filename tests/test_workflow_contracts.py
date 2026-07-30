@@ -307,6 +307,7 @@ def test_backfill_shell_never_interpolates_dispatch_text_directly() -> None:
         "to_date",
         "max_windows",
         "sync_company_master",
+        "defer_review_sample",
         "canary_lookback_days",
         "canary_request_budget",
     ):
@@ -1345,12 +1346,16 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
         "to_date",
         "max_windows",
         "sync_company_master",
+        "defer_review_sample",
         "canary_lookback_days",
         "canary_request_budget",
     }
     assert dispatch["mode"]["options"] == ["dry-run", "apply", "replay"]
     assert dispatch["frozen_apply_run_id"]["default"] == ""
     assert dispatch["source"]["options"] == ["dart", "kind", "both"]
+    assert dispatch["defer_review_sample"]["default"] == "false"
+    assert dispatch["defer_review_sample"]["required"] == "true"
+    assert dispatch["defer_review_sample"]["type"] == "boolean"
     assert dispatch["canary_lookback_days"]["default"] == "365"
     assert dispatch["canary_request_budget"]["default"] == "10000"
     input_validation = next(
@@ -1370,6 +1375,25 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
     assert "replay cannot sync the DART company master" in input_validation["run"]
     assert "replay requires a positive frozen_apply_run_id" in input_validation["run"]
     assert "frozen_apply_run_id is forbidden outside replay mode" in input_validation["run"]
+    assert input_validation["env"]["DEFER_REVIEW_SAMPLE"] == (
+        "${{ inputs.defer_review_sample }}"
+    )
+    assert "defer_review_sample must be true or false" in input_validation["run"]
+    assert 'os.environ["MODE"] != "apply"' in input_validation["run"]
+    assert 'os.environ["SOURCE"] != "dart"' in input_validation["run"]
+    assert "(end - start).days != 30" in input_validation["run"]
+    assert "max_windows != 30" in input_validation["run"]
+    assert 'os.environ["SYNC_COMPANY_MASTER"].lower() != "false"' in (
+        input_validation["run"]
+    )
+    assert (
+        "defer_review_sample requires mode=apply, source=dart, one exact"
+        in input_validation["run"]
+    )
+    assert (
+        "30-day range, max_windows=30, and sync_company_master=false"
+        in input_validation["run"]
+    )
     assert payload["concurrency"] == PRODUCTION_OFFICIAL_WRITE_CONCURRENCY
     assert payload["permissions"] == {"contents": "read", "actions": "read"}
 
@@ -1590,7 +1614,51 @@ def test_official_backfill_is_bounded_serialized_and_preserves_evidence() -> Non
         for step in steps
         if step["name"] == "Build deterministic 30-day DART review sample"
     )
-    assert review_sample["if"] == "inputs.mode == 'apply' && inputs.source != 'kind'"
+    deferred_review_sample = next(
+        step
+        for step in steps
+        if step["name"] == "Defer deterministic 30-day DART review sample"
+    )
+    assert deferred_review_sample["if"] == "inputs.defer_review_sample"
+    assert deferred_review_sample["env"] == {
+        "DART_REVIEW_SAMPLE_JSONL": (
+            "${{ runner.temp }}/dart-review-sample.jsonl"
+        ),
+        "DART_REVIEW_SAMPLE_CSV": "${{ runner.temp }}/dart-review-sample.csv",
+        "DART_REVIEW_SAMPLE_MANIFEST": (
+            "${{ runner.temp }}/dart-review-sample-manifest.json"
+        ),
+        "EXPECTED_FROM_DATE": "${{ inputs.from_date }}",
+        "EXPECTED_TO_DATE": "${{ inputs.to_date }}",
+    }
+    assert ': > "$DART_REVIEW_SAMPLE_JSONL"' in deferred_review_sample["run"]
+    assert ': > "$DART_REVIEW_SAMPLE_CSV"' in deferred_review_sample["run"]
+    assert '"status": "deferred"' in deferred_review_sample["run"]
+    assert '"release_eligible": False' in deferred_review_sample["run"]
+    assert '"reason": "operator_requested_review_sample_deferral"' in (
+        deferred_review_sample["run"]
+    )
+    assert '"code_revision": os.environ["GITHUB_SHA"]' in (
+        deferred_review_sample["run"]
+    )
+    assert '"run_id": int(os.environ["GITHUB_RUN_ID"])' in (
+        deferred_review_sample["run"]
+    )
+    assert '"run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"])' in (
+        deferred_review_sample["run"]
+    )
+    assert '"from": os.environ["EXPECTED_FROM_DATE"]' in (
+        deferred_review_sample["run"]
+    )
+    assert '"to": os.environ["EXPECTED_TO_DATE"]' in (
+        deferred_review_sample["run"]
+    )
+    assert "python -m curator.dart_review_sample" not in deferred_review_sample["run"]
+    assert review_sample["if"] == (
+        "inputs.mode == 'apply' && "
+        "inputs.source != 'kind' && "
+        "!inputs.defer_review_sample"
+    )
     assert "python -m curator.dart_review_sample" in review_sample["run"]
     assert "report.get(\"windows_total\") == 30" in review_sample["run"]
     assert "report.get(\"windows_remaining\") == 0" in review_sample["run"]

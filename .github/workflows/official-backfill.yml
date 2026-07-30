@@ -44,6 +44,11 @@ on:
         required: true
         type: boolean
         default: false
+      defer_review_sample:
+        description: Defer the deterministic review sample for an exact 30-day DART apply only
+        required: true
+        type: boolean
+        default: false
       canary_lookback_days:
         description: Complete KST days eligible for the DART dry-run sample (2-365)
         required: true
@@ -179,6 +184,7 @@ jobs:
           MAX_WINDOWS: ${{ inputs.max_windows }}
           SOURCE: ${{ inputs.source }}
           SYNC_COMPANY_MASTER: ${{ inputs.sync_company_master }}
+          DEFER_REVIEW_SAMPLE: ${{ inputs.defer_review_sample }}
           CANARY_LOOKBACK_DAYS: ${{ inputs.canary_lookback_days }}
           CANARY_REQUEST_BUDGET: ${{ inputs.canary_request_budget }}
         shell: bash
@@ -215,6 +221,20 @@ jobs:
               raise SystemExit("canary_request_budget must be between 1 and 10000")
           if os.environ["SYNC_COMPANY_MASTER"].lower() == "true" and os.environ["SOURCE"] == "kind":
               raise SystemExit("sync_company_master requires source=dart or source=both")
+          defer_review_sample = os.environ["DEFER_REVIEW_SAMPLE"].lower()
+          if defer_review_sample not in {"true", "false"}:
+              raise SystemExit("defer_review_sample must be true or false")
+          if defer_review_sample == "true" and (
+              os.environ["MODE"] != "apply"
+              or os.environ["SOURCE"] != "dart"
+              or (end - start).days != 30
+              or max_windows != 30
+              or os.environ["SYNC_COMPANY_MASTER"].lower() != "false"
+          ):
+              raise SystemExit(
+                  "defer_review_sample requires mode=apply, source=dart, one exact "
+                  "30-day range, max_windows=30, and sync_company_master=false"
+              )
           if os.environ["MODE"] == "replay":
               frozen_apply_run_id = os.environ["FROZEN_APPLY_RUN_ID"]
               if (
@@ -1254,6 +1274,9 @@ jobs:
               "DART_FROZEN_REPLAY_ARTIFACT_BINDING"
           )
           _probe_path, probe_raw, probe = load("DART_DRIFT_PROBE_REPORT")
+          diagnostic_only_window_count = probe.get(
+              "diagnostic_only_window_count"
+          )
           if (
               binding.get("kind") != "official-dart-frozen-replay-artifact-binding"
               or binding.get("consumer", {}).get("code_revision")
@@ -1266,7 +1289,22 @@ jobs:
               or probe.get("governance_write_attempted") is not False
               or probe.get("checkpoint_write_attempted") is not False
               or probe.get("quota_ledger_write_attempted") is not True
-              or probe.get("status") not in {"matched", "drift_detected", "probe_failed"}
+              or probe.get("status") not in {"matched", "drift_detected"}
+              or probe.get("release_gate_policy")
+              != "stable-public-payload-source-count-diagnostic-v1"
+              or probe.get("release_gate_matched") is not True
+              or isinstance(diagnostic_only_window_count, bool)
+              or not isinstance(diagnostic_only_window_count, int)
+              or not 0 <= diagnostic_only_window_count <= 30
+              or probe.get("blocking_drift_window_count") != 0
+              or (
+                  probe.get("status") == "matched"
+                  and diagnostic_only_window_count != 0
+              )
+              or (
+                  probe.get("status") == "drift_detected"
+                  and diagnostic_only_window_count < 1
+              )
               or probe.get("artifact_sanitization", {}).get("status") != "verified"
           ):
               raise SystemExit("frozen replay or drift diagnostic binding is invalid")
@@ -1276,12 +1314,15 @@ jobs:
               "apply_manifest_sha256": binding["manifest_sha256"],
               "drift_probe": {
                   "status": probe["status"],
+                  "release_gate_policy": probe["release_gate_policy"],
+                  "release_gate_matched": True,
+                  "diagnostic_only_window_count": diagnostic_only_window_count,
+                  "blocking_drift_window_count": 0,
                   "read_only": True,
                   "governance_write_attempted": False,
                   "checkpoint_write_attempted": False,
                   "quota_ledger_write_attempted": True,
                   "sha256": hashlib.sha256(probe_raw).hexdigest(),
-                  "release_gate_matched": probe["status"] == "matched",
               },
           }
           temporary = report_path.with_suffix(".tmp")
@@ -1471,8 +1512,58 @@ jobs:
           temporary.replace(destination)
           PY
 
+      - name: Defer deterministic 30-day DART review sample
+        if: inputs.defer_review_sample
+        env:
+          DART_REVIEW_SAMPLE_JSONL: ${{ runner.temp }}/dart-review-sample.jsonl
+          DART_REVIEW_SAMPLE_CSV: ${{ runner.temp }}/dart-review-sample.csv
+          DART_REVIEW_SAMPLE_MANIFEST: ${{ runner.temp }}/dart-review-sample-manifest.json
+          EXPECTED_FROM_DATE: ${{ inputs.from_date }}
+          EXPECTED_TO_DATE: ${{ inputs.to_date }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > "$DART_REVIEW_SAMPLE_JSONL"
+          : > "$DART_REVIEW_SAMPLE_CSV"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          manifest = {
+              "schema_version": 1,
+              "contract_version": "dart-review-sample-deferred-v1",
+              "status": "deferred",
+              "release_eligible": False,
+              "reason": "operator_requested_review_sample_deferral",
+              "code_revision": os.environ["GITHUB_SHA"],
+              "workflow_run": {
+                  "repository": os.environ["GITHUB_REPOSITORY"],
+                  "workflow": "official-backfill.yml",
+                  "run_id": int(os.environ["GITHUB_RUN_ID"]),
+                  "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              },
+              "range": {
+                  "from": os.environ["EXPECTED_FROM_DATE"],
+                  "to": os.environ["EXPECTED_TO_DATE"],
+                  "semantics": "half_open",
+              },
+              "sample_count": 0,
+          }
+          destination = Path(os.environ["DART_REVIEW_SAMPLE_MANIFEST"])
+          temporary = destination.with_suffix(".tmp")
+          temporary.write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          temporary.replace(destination)
+          PY
+
       - name: Build deterministic 30-day DART review sample
-        if: inputs.mode == 'apply' && inputs.source != 'kind'
+        if: >-
+          inputs.mode == 'apply' &&
+          inputs.source != 'kind' &&
+          !inputs.defer_review_sample
         env:
           BACKFILL_REPORT: ${{ runner.temp }}/official-backfill-report.json
           BACKFILL_CHECKPOINT: ${{ env.CHECKPOINT_PATH }}

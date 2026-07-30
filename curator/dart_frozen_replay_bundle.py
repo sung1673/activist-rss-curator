@@ -18,6 +18,7 @@ BUNDLE_KIND = "official-dart-frozen-replay-bundle"
 WINDOW_KIND = "official-dart-frozen-replay-window"
 ARTIFACT_BINDING_KIND = "official-dart-frozen-replay-artifact-binding"
 PROBE_KIND = "official-dart-fresh-drift-probe"
+PROBE_RELEASE_GATE_POLICY = "stable-public-payload-source-count-diagnostic-v1"
 MAX_BUNDLE_BYTES = 25_000_000
 MAX_WINDOW_BYTES = 1_000_000
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -1068,14 +1069,78 @@ def compare_fresh_payload(
                 "actual_leaf_sha256": canonical_sha256(normalized_actual_counts),
             }
         )
+    expected_stable_payload_sha256 = str(
+        expected_leaf.get("stable_payload_sha256") or ""
+    )
+    actual_stable_payload_sha256 = stable_payload_sha256(actual)
+    diagnostic_change_count = sum(
+        1 for change in changes if change.get("entity") == "source_counts"
+    )
+    blocking_change_count = len(changes) - diagnostic_change_count
+    release_gate_matched = (
+        expected_stable_payload_sha256 == actual_stable_payload_sha256
+        and blocking_change_count == 0
+    )
     return {
         "matched": not changes,
-        "expected_stable_payload_sha256": str(
-            expected_leaf.get("stable_payload_sha256") or ""
-        ),
-        "actual_stable_payload_sha256": stable_payload_sha256(actual),
+        "release_gate_policy": PROBE_RELEASE_GATE_POLICY,
+        "release_gate_matched": release_gate_matched,
+        "diagnostic_change_count": diagnostic_change_count,
+        "blocking_change_count": blocking_change_count,
+        "expected_stable_payload_sha256": expected_stable_payload_sha256,
+        "actual_stable_payload_sha256": actual_stable_payload_sha256,
         "changed_entity_count": len(changes),
         "changes": changes,
+    }
+
+
+def _probe_release_gate_summary(
+    windows: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    diagnostic_only_window_count = 0
+    blocking_drift_window_count = 0
+    failed_window_count = 0
+    for raw_window in windows:
+        if raw_window.get("status") == "probe_failed":
+            failed_window_count += 1
+            continue
+        changes = raw_window.get("changes")
+        expected_digest = str(
+            raw_window.get("expected_stable_payload_sha256") or ""
+        )
+        actual_digest = str(
+            raw_window.get("actual_stable_payload_sha256") or ""
+        )
+        if not isinstance(changes, list):
+            blocking_drift_window_count += 1
+            continue
+        entities = [
+            change.get("entity")
+            for change in changes
+            if isinstance(change, Mapping)
+        ]
+        stable_payload_matched = (
+            _SHA256_RE.fullmatch(expected_digest) is not None
+            and hmac.compare_digest(expected_digest, actual_digest)
+        )
+        source_counts_only = bool(entities) and all(
+            entity == "source_counts" for entity in entities
+        )
+        if stable_payload_matched and source_counts_only:
+            diagnostic_only_window_count += 1
+        elif not stable_payload_matched or any(
+            entity != "source_counts" for entity in entities
+        ):
+            blocking_drift_window_count += 1
+    return {
+        "release_gate_policy": PROBE_RELEASE_GATE_POLICY,
+        "release_gate_matched": (
+            len(windows) == 30
+            and failed_window_count == 0
+            and blocking_drift_window_count == 0
+        ),
+        "diagnostic_only_window_count": diagnostic_only_window_count,
+        "blocking_drift_window_count": blocking_drift_window_count,
     }
 
 
@@ -1093,6 +1158,13 @@ def write_probe_report(
 ) -> dict[str, object]:
     if status not in {"matched", "drift_detected", "probe_failed"}:
         raise FrozenReplayBundleError("invalid drift probe status")
+    release_gate = _probe_release_gate_summary(windows)
+    release_gate["release_gate_matched"] = (
+        release_gate["release_gate_matched"] is True
+        and status in {"matched", "drift_detected"}
+        and error_code is None
+        and quota_ledger_write_attempted is True
+    )
     report: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "kind": PROBE_KIND,
@@ -1109,6 +1181,7 @@ def write_probe_report(
         # explicitly rather than hidden behind a generic read-only claim.
         "quota_ledger_write_attempted": quota_ledger_write_attempted,
         "status": status,
+        **release_gate,
         "window_count": len(windows),
         "windows": [dict(row) for row in windows],
         "error_code": error_code,
@@ -1328,10 +1401,20 @@ def validate_probe_contract(
     status = probe.get("status")
     sanitization = probe.get("artifact_sanitization")
     windows = probe.get("windows")
+    diagnostic_only_window_count = probe.get("diagnostic_only_window_count")
+    blocking_drift_window_count = probe.get("blocking_drift_window_count")
     if (
         probe.get("schema_version") != SCHEMA_VERSION
         or probe.get("kind") != PROBE_KIND
         or probe.get("source") != "dart"
+        or probe.get("release_gate_policy") != PROBE_RELEASE_GATE_POLICY
+        or type(probe.get("release_gate_matched")) is not bool
+        or isinstance(diagnostic_only_window_count, bool)
+        or not isinstance(diagnostic_only_window_count, int)
+        or diagnostic_only_window_count < 0
+        or isinstance(blocking_drift_window_count, bool)
+        or not isinstance(blocking_drift_window_count, int)
+        or blocking_drift_window_count < 0
         or _CODE_REVISION_RE.fullmatch(
             str(probe.get("code_revision") or "")
         )
@@ -1395,6 +1478,8 @@ def validate_probe_contract(
     matched_count = 0
     drift_count = 0
     failure_count = 0
+    derived_diagnostic_only_window_count = 0
+    derived_blocking_drift_window_count = 0
     failure_code: str | None = None
     for index, raw_window in enumerate(windows):
         if not isinstance(raw_window, Mapping):
@@ -1453,6 +1538,33 @@ def validate_probe_contract(
             raise FrozenReplayBundleError(
                 "DART drift probe comparison row is invalid"
             )
+        diagnostic_change_count = sum(
+            1
+            for change in changes
+            if change.get("entity") == "source_counts"
+        )
+        blocking_change_count = len(changes) - diagnostic_change_count
+        stable_payload_matched = hmac.compare_digest(
+            expected_digest,
+            actual_digest,
+        )
+        derived_release_gate_matched = (
+            stable_payload_matched and blocking_change_count == 0
+        )
+        if (
+            raw_window.get("release_gate_policy")
+            != PROBE_RELEASE_GATE_POLICY
+            or raw_window.get("release_gate_matched")
+            is not derived_release_gate_matched
+            or raw_window.get("diagnostic_change_count")
+            != diagnostic_change_count
+            or raw_window.get("blocking_change_count")
+            != blocking_change_count
+        ):
+            raise FrozenReplayBundleError(
+                "DART drift probe release-gate classification is not derived "
+                "from raw changes and stable payload hashes"
+            )
         source_requests = execution.get("source_requests")
         source_pages = execution.get("source_pages")
         source_rows = execution.get("source_rows_fetched")
@@ -1474,7 +1586,7 @@ def validate_probe_contract(
             if (
                 changed_count != 0
                 or changes
-                or expected_digest != actual_digest
+                or not stable_payload_matched
             ):
                 raise FrozenReplayBundleError(
                     "DART drift probe matched row contains drift"
@@ -1486,6 +1598,10 @@ def validate_probe_contract(
                     "DART drift probe drift row has no changed entity"
                 )
             drift_count += 1
+            if derived_release_gate_matched:
+                derived_diagnostic_only_window_count += 1
+            else:
+                derived_blocking_drift_window_count += 1
         cursor = next_cursor
     top_error = probe.get("error_code")
     fully_matched = (
@@ -1517,12 +1633,37 @@ def validate_probe_contract(
         raise FrozenReplayBundleError(
             "DART drift probe status is not derived from its window evidence"
         )
+    release_gate_matched = (
+        status in {"matched", "drift_detected"}
+        and len(windows) == 30
+        and cursor == range_end
+        and matched_count + drift_count == 30
+        and failure_count == 0
+        and top_error is None
+        and probe.get("quota_ledger_write_attempted") is True
+        and derived_blocking_drift_window_count == 0
+    )
+    if (
+        probe.get("release_gate_matched") is not release_gate_matched
+        or diagnostic_only_window_count
+        != derived_diagnostic_only_window_count
+        or blocking_drift_window_count
+        != derived_blocking_drift_window_count
+    ):
+        raise FrozenReplayBundleError(
+            "DART drift probe release-gate summary is not derived from raw "
+            "window evidence"
+        )
     return {
         "status": status,
+        "release_gate_policy": PROBE_RELEASE_GATE_POLICY,
+        "release_gate_matched": release_gate_matched,
         "window_count": len(windows),
         "matched_window_count": matched_count,
         "drift_window_count": drift_count,
         "failed_window_count": failure_count,
+        "diagnostic_only_window_count": derived_diagnostic_only_window_count,
+        "blocking_drift_window_count": derived_blocking_drift_window_count,
         "fully_matched": fully_matched,
     }
 
@@ -1546,9 +1687,9 @@ def _validate_probe(args: argparse.Namespace) -> dict[str, object]:
         expected_range_end_exclusive=args.expected_to_date,
         expected_job_fingerprint=args.expected_job_fingerprint,
     )
-    if validation.get("fully_matched") is not True:
+    if validation.get("release_gate_matched") is not True:
         raise FrozenReplayBundleError(
-            "release DART drift probe is not fully matched"
+            "release DART drift probe has blocking public payload drift"
         )
     return {
         "evidence_safe": True,

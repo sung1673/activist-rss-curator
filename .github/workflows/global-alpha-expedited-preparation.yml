@@ -1750,8 +1750,11 @@ jobs:
                   except FrozenReplayBundleError as exc:
                       raise SystemExit(
                           "DART fresh drift probe raw bytes do not prove an "
-                          "exact fully matched 30-day source observation"
+                          "exact release-gate-safe 30-day source observation"
                       ) from exc
+                  diagnostic_only_window_count = drift.get(
+                      "diagnostic_only_window_count"
+                  )
                   if (
                       frozen_binding.get("kind")
                       != "official-dart-frozen-replay-artifact-binding"
@@ -1763,24 +1766,48 @@ jobs:
                       != "verified"
                       or drift.get("kind") != "official-dart-fresh-drift-probe"
                       or drift.get("code_revision") != revision
-                      or drift.get("status") != "matched"
+                      or drift.get("status") not in {"matched", "drift_detected"}
+                      or drift.get("release_gate_policy")
+                      != "stable-public-payload-source-count-diagnostic-v1"
+                      or drift.get("release_gate_matched") is not True
+                      or isinstance(diagnostic_only_window_count, bool)
+                      or not isinstance(diagnostic_only_window_count, int)
+                      or not 0 <= diagnostic_only_window_count <= 30
+                      or drift.get("blocking_drift_window_count") != 0
+                      or (
+                          drift.get("status") == "matched"
+                          and diagnostic_only_window_count != 0
+                      )
+                      or (
+                          drift.get("status") == "drift_detected"
+                          and diagnostic_only_window_count < 1
+                      )
                       or drift.get("read_only") is not True
                       or drift.get("governance_write_attempted") is not False
                       or drift.get("checkpoint_write_attempted") is not False
                       or drift.get("quota_ledger_write_attempted") is not True
                       or drift.get("artifact_sanitization", {}).get("status")
                       != "verified"
-                      or drift_validation.get("fully_matched") is not True
+                      or drift_validation.get("release_gate_policy")
+                      != "stable-public-payload-source-count-diagnostic-v1"
+                      or drift_validation.get("release_gate_matched") is not True
+                      or drift_validation.get("diagnostic_only_window_count")
+                      != diagnostic_only_window_count
+                      or drift_validation.get("blocking_drift_window_count") != 0
                       or drift_validation.get("window_count") != 30
-                      or drift_validation.get("matched_window_count") != 30
                       or not isinstance(frozen_report, dict)
                       or frozen_report.get("apply_artifact_binding_sha256")
                       != hashlib.sha256(frozen_binding_bytes).hexdigest()
                       or frozen_report.get("apply_manifest_sha256")
                       != frozen_binding.get("manifest_sha256")
                       or not isinstance(drift_report, dict)
-                      or drift_report.get("status") != "matched"
+                      or drift_report.get("status") != drift.get("status")
+                      or drift_report.get("release_gate_policy")
+                      != drift.get("release_gate_policy")
                       or drift_report.get("release_gate_matched") is not True
+                      or drift_report.get("diagnostic_only_window_count")
+                      != diagnostic_only_window_count
+                      or drift_report.get("blocking_drift_window_count") != 0
                       or drift_report.get("read_only") is not True
                       or drift_report.get("governance_write_attempted") is not False
                       or drift_report.get("checkpoint_write_attempted") is not False
@@ -1789,8 +1816,8 @@ jobs:
                       != hashlib.sha256(drift_bytes).hexdigest()
                   ):
                       raise SystemExit(
-                          "DART fresh drift probe is not a matched, read-only, "
-                          "immutable release-gate diagnostic"
+                          "DART fresh drift probe is not release-gate safe, "
+                          "read-only, and immutably bound"
                       )
                   immutable.update(
                       {
@@ -2006,7 +2033,19 @@ jobs:
                   ],
                   "source_network_accessed": False,
                   "fresh_drift_probe": {
-                      "status": "matched",
+                      "status": dart_replay_immutable["drift_probe"]["status"],
+                      "release_gate_policy": (
+                          dart_replay_immutable["drift_probe"][
+                              "release_gate_policy"
+                          ]
+                      ),
+                      "release_gate_matched": True,
+                      "diagnostic_only_window_count": (
+                          dart_replay_immutable["drift_probe"][
+                              "diagnostic_only_window_count"
+                          ]
+                      ),
+                      "blocking_drift_window_count": 0,
                       "sha256": dart_replay_immutable["drift_probe_sha256"],
                       "read_only": True,
                       "governance_write_attempted": False,
