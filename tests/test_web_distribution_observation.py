@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import sys
+from email.message import Message
 from pathlib import Path
 from types import ModuleType
 from urllib.error import HTTPError
+from urllib.request import Request
 
 import pytest
 
@@ -97,9 +100,23 @@ def test_build_observation_rejects_invalid_identity_or_timing(
 
 
 class Response:
-    def __init__(self, payload: object, status: int = 202) -> None:
+    def __init__(
+        self,
+        payload: object,
+        status: int = 202,
+        *,
+        content_type: str = "application/json",
+        location: str = "",
+        raw_body: bytes | None = None,
+    ) -> None:
         self.status = status
-        self.body = json.dumps(payload).encode("utf-8")
+        self.body = (
+            raw_body if raw_body is not None else json.dumps(payload).encode("utf-8")
+        )
+        self.headers = Message()
+        self.headers["Content-Type"] = content_type
+        if location:
+            self.headers["Location"] = location
 
     def __enter__(self):  # type: ignore[no-untyped-def]
         return self
@@ -143,6 +160,9 @@ def test_submit_posts_one_exact_bearer_authenticated_observation() -> None:
     assert request.method == "POST"
     assert request.get_header("Authorization") == f"Bearer {'x' * 32}"
     assert request.get_header("Content-type") == "application/json"
+    assert request.get_header("User-agent") == (
+        "BSIDE-Governance-Intelligence/1.0 support@bside.ai"
+    )
     assert timeout == 15
     body = json.loads(request.data)
     assert body == {"observations": [observation(recorder).as_api_dict()]}
@@ -191,6 +211,98 @@ def test_submit_requires_exact_http_202() -> None:
             token="x" * 32,
             observation=observation(recorder),
             opener=lambda *_args, **_kwargs: Response(acknowledged(), status=200),
+            sleeper=lambda _delay: None,
+        )
+
+
+def test_submit_rejects_redirect_without_exposing_location_or_body() -> None:
+    recorder = load_recorder()
+    assert (
+        recorder.RejectRedirectHandler().redirect_request(
+            Request("https://api.example.test"),
+            None,
+            302,
+            "Found",
+            {},
+            "https://blocked.example.test/private/path?token=must-not-leak",
+        )
+        is None
+    )
+    redirect_body = b"edge redirect secret marker"
+    redirect = Response(
+        {},
+        status=302,
+        content_type="text/html; charset=utf-8",
+        location="https://blocked.example.test/private/path?token=must-not-leak",
+        raw_body=redirect_body,
+    )
+
+    with pytest.raises(recorder.DistributionObservationError) as caught:
+        recorder.submit_observation(
+            base_url="https://api.example.test",
+            token="x" * 32,
+            observation=observation(recorder),
+            opener=lambda *_args, **_kwargs: redirect,
+            sleeper=lambda _delay: None,
+        )
+
+    message = str(caught.value)
+    assert "status=302" in message
+    assert "content_type=text/html" in message
+    assert f"body_length={len(redirect_body)}" in message
+    assert f"body_sha256={hashlib.sha256(redirect_body).hexdigest()}" in message
+    assert "redirect_host=blocked.example.test" in message
+    assert "private/path" not in message
+    assert "token=must-not-leak" not in message
+    assert "secret marker" not in message
+
+
+def test_submit_rejects_http_200_html_with_safe_diagnostics() -> None:
+    recorder = load_recorder()
+    html = b"<html>Gabia edge block secret marker</html>"
+
+    with pytest.raises(recorder.DistributionObservationError) as caught:
+        recorder.submit_observation(
+            base_url="https://api.example.test",
+            token="x" * 32,
+            observation=observation(recorder),
+            opener=lambda *_args, **_kwargs: Response(
+                {},
+                status=200,
+                content_type="text/html; charset=UTF-8",
+                raw_body=html,
+            ),
+            sleeper=lambda _delay: None,
+        )
+
+    message = str(caught.value)
+    assert "exactly 202 is required" in message
+    assert "status=200" in message
+    assert "content_type=text/html" in message
+    assert f"body_length={len(html)}" in message
+    assert f"body_sha256={hashlib.sha256(html).hexdigest()}" in message
+    assert "redirect_host=none" in message
+    assert "Gabia" not in message
+    assert "secret marker" not in message
+
+
+def test_submit_requires_json_content_type_for_http_202() -> None:
+    recorder = load_recorder()
+    body = json.dumps(acknowledged()).encode("utf-8")
+
+    with pytest.raises(
+        recorder.DistributionObservationError,
+        match="non-JSON content type",
+    ):
+        recorder.submit_observation(
+            base_url="https://api.example.test",
+            token="x" * 32,
+            observation=observation(recorder),
+            opener=lambda *_args, **_kwargs: Response(
+                {},
+                content_type="text/html",
+                raw_body=body,
+            ),
             sleeper=lambda _delay: None,
         )
 

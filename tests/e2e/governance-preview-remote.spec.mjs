@@ -141,7 +141,6 @@ async function navigateWithResponses(page, hash, apiV2, paths) {
 }
 
 async function browserHealth(page, apiV2, expectedSha) {
-  const pending = waitForV2(page, apiV2, "/health");
   const result = await page.evaluate(async ({ apiBase, storageKey }) => {
     const token = String(sessionStorage.getItem(storageKey) || "");
     const response = await fetch(`${apiBase.replace(/\/$/, "")}/health`, {
@@ -151,16 +150,34 @@ async function browserHealth(page, apiV2, expectedSha) {
       },
       cache: "no-store",
       credentials: "omit",
+      redirect: "error",
       referrerPolicy: "no-referrer"
     });
-    return { status: response.status };
+    const body = await response.arrayBuffer();
+    const payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
+    return {
+      status: response.status,
+      xBsideApiVersion: String(response.headers.get("x-bside-api-version") || ""),
+      responseBytes: body.byteLength,
+      apiVersion: String(payload?.api_version || ""),
+      codeRevision: String(payload?.code_revision || "").toLowerCase(),
+      ok: payload?.ok === true
+    };
   }, { apiBase: apiV2, storageKey: PREVIEW_SESSION_KEY });
-  const response = await pending;
   expect(result.status).toBe(200);
-  const observation = await assertV2Response(response, "/health");
-  const payload = await response.json();
-  expect(payload.code_revision).toBe(expectedSha);
-  return { ...observation, code_revision: payload.code_revision };
+  expect(result.xBsideApiVersion).toBe("v2");
+  expect(result.responseBytes).toBeGreaterThan(0);
+  expect(result.responseBytes).toBeLessThanOrEqual(250_000);
+  expect(result.apiVersion).toBe("v2");
+  expect(result.ok).toBe(true);
+  expect(result.codeRevision).toBe(expectedSha);
+  return {
+    path: "/health",
+    status: result.status,
+    response_bytes: result.responseBytes,
+    api_version: result.apiVersion,
+    code_revision: result.codeRevision
+  };
 }
 
 test("remote Production Alpha preview renders real v2 data without mocks", async (
