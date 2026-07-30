@@ -1271,6 +1271,7 @@ class SecDailyIndexConnector(BaseGlobalConnector):
 _ATOM_NAMESPACE = "http://www.w3.org/2005/Atom"
 _SEC_CURRENT_CURSOR_PREFIX = "sec-current-v1:"
 _SEC_CURRENT_CURSOR_OVERLAP = timedelta(minutes=90)
+_SEC_CURRENT_TIMEZONE = ZoneInfo("America/New_York")
 _SEC_CURRENT_TITLE = re.compile(
     r"^(?P<form>.+?) - (?P<company>.+) "
     r"\((?P<cik>\d{10})\) \((?P<role>[^()]{1,40})\)$"
@@ -1336,6 +1337,23 @@ def _encode_sec_current_cursor(updated_at: datetime) -> str:
     ).encode("utf-8")
     encoded = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
     return _SEC_CURRENT_CURSOR_PREFIX + encoded
+
+
+def _sec_current_cutoff(
+    request: GlobalConnectorRequest,
+    previous: datetime | None,
+) -> datetime:
+    if previous is not None:
+        return previous - _SEC_CURRENT_CURSOR_OVERLAP
+    completed_boundary = datetime.combine(
+        request.window_end_exclusive,
+        datetime.min.time(),
+        tzinfo=_SEC_CURRENT_TIMEZONE,
+    )
+    return (
+        completed_boundary.astimezone(timezone.utc)
+        - _SEC_CURRENT_CURSOR_OVERLAP
+    )
 
 
 @dataclass(frozen=True)
@@ -1546,11 +1564,7 @@ class SecCurrentFilingsConnector(BaseGlobalConnector):
         rights_guard: _SourceRightGuard,
     ) -> GlobalConnectorEnvelope:
         previous = _sec_current_cursor(request.cursor)
-        cutoff = (
-            previous - _SEC_CURRENT_CURSOR_OVERLAP
-            if previous is not None
-            else None
-        )
+        cutoff = _sec_current_cutoff(request, previous)
         page_size = 100
         raw_count = 0
         request_count = 0
@@ -1589,7 +1603,7 @@ class SecCurrentFilingsConnector(BaseGlobalConnector):
                 feed_high_water = feed_updated
             raw_count += page_raw_count
             for entry in entries:
-                if cutoff is not None and entry.updated_at < cutoff:
+                if entry.updated_at < cutoff:
                     crossed_cutoff = True
                     continue
                 external_id = _sec_filing_external_id(
@@ -1604,12 +1618,17 @@ class SecCurrentFilingsConnector(BaseGlobalConnector):
                 ):
                     candidates[external_id] = entry
             if (
-                cutoff is not None
-                and oldest_entry is not None
+                oldest_entry is not None
                 and oldest_entry < cutoff
             ):
                 crossed_cutoff = True
-            if page_raw_count < page_size or crossed_cutoff:
+            if crossed_cutoff:
+                break
+            if page_raw_count < page_size:
+                if previous is None:
+                    raise GlobalConnectorPaginationError(
+                        "SEC current-filings bootstrap cutoff was not reached"
+                    )
                 break
         else:
             raise GlobalConnectorPaginationError(

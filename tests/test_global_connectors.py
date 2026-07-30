@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -22,6 +22,7 @@ from curator.global_connectors import (
     SecDailyIndexConnector,
     SecHybridConnector,
     SecSubmissionsConnector,
+    _sec_current_cutoff,
     global_document_content_hash,
 )
 from curator.global_market import (
@@ -714,12 +715,15 @@ def test_sec_daily_preserves_8k_as_private_unclassified_candidate() -> None:
     assert result.records[0].event_family == "unclassified"
 
 
-def _sec_current_atom(*entries: str) -> str:
+def _sec_current_atom(
+    *entries: str,
+    updated: str = "2026-07-24T03:05:00-04:00",
+) -> str:
     return (
         '<?xml version="1.0" encoding="ISO-8859-1" ?>'
         '<feed xmlns="http://www.w3.org/2005/Atom">'
         "<title>Latest Filings</title>"
-        "<updated>2026-07-24T03:05:00-04:00</updated>"
+        f"<updated>{updated}</updated>"
         + "".join(entries)
         + "</feed>"
     )
@@ -774,6 +778,13 @@ def test_sec_current_atom_is_cursor_driven_exact_and_preserves_source_fields() -
             form="10-Q",
             cik="0000320193",
         ),
+        _sec_current_entry(
+            accession="0000320193-26-000110",
+            title="10-Q - Apple Inc. (0000320193) (Filer)",
+            form="10-Q",
+            cik="0000320193",
+            accepted="2026-07-23T21:00:00-04:00",
+        ),
     )
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -822,7 +833,7 @@ def test_sec_current_atom_is_cursor_driven_exact_and_preserves_source_fields() -
             now=NOW,
         )
 
-    assert first.raw_count == 3
+    assert first.raw_count == 4
     assert first.request_count == 1
     assert len(first.records) == 1
     assert first.next_cursor and first.next_cursor.startswith("sec-current-v1:")
@@ -850,7 +861,10 @@ def test_sec_current_pagination_observes_fair_access_rate_limit() -> None:
         '<category scheme="https://www.sec.gov/" term="10-Q"/></entry>'
     )
     first_page = _sec_current_atom(*(filtered_entry for _ in range(100)))
-    final_page = _sec_current_atom()
+    final_page = _sec_current_atom(
+        "<entry><updated>2026-07-23T21:00:00-04:00</updated>"
+        '<category scheme="https://www.sec.gov/" term="10-Q"/></entry>'
+    )
     clock_value = [0.0]
     sleeps: list[float] = []
 
@@ -880,9 +894,180 @@ def test_sec_current_pagination_observes_fair_access_rate_limit() -> None:
         )
 
     assert result.request_count == 2
-    assert result.raw_count == 100
+    assert result.raw_count == 101
     assert result.records == ()
     assert sleeps == [pytest.approx(0.12)]
+
+
+def test_sec_current_bootstrap_stops_at_completed_day_boundary() -> None:
+    current_entry = (
+        "<entry><updated>2026-07-29T12:00:00-04:00</updated>"
+        '<category scheme="https://www.sec.gov/" term="10-Q"/></entry>'
+    )
+    old_irrelevant_entry = (
+        "<entry><updated>2026-07-28T21:00:00-04:00</updated>"
+        '<category scheme="https://www.sec.gov/" term="10-Q"/></entry>'
+    )
+    overlap_accession = "0001104659-26-090001"
+    older_accession = "0001104659-26-090000"
+    pages = {
+        "0": _sec_current_atom(
+            *(current_entry for _ in range(100)),
+            updated="2026-07-29T12:05:00-04:00",
+        ),
+        "100": _sec_current_atom(
+            _sec_current_entry(
+                accession=overlap_accession,
+                title=(
+                    "SCHEDULE 13D - Example Corp. "
+                    "(0001728117) (Subject)"
+                ),
+                form="SCHEDULE 13D",
+                cik="0001728117",
+                accepted="2026-07-28T22:45:00-04:00",
+            ),
+            _sec_current_entry(
+                accession=older_accession,
+                title=(
+                    "SCHEDULE 13D - Older Corp. "
+                    "(0001728118) (Subject)"
+                ),
+                form="SCHEDULE 13D",
+                cik="0001728118",
+                accepted="2026-07-28T22:15:00-04:00",
+            ),
+            *(old_irrelevant_entry for _ in range(98)),
+            updated="2026-07-29T12:05:00-04:00",
+        ),
+    }
+    starts: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        start = request.url.params["start"]
+        starts.append(start)
+        if start not in pages:
+            raise AssertionError("bootstrap read beyond the completed-day overlap")
+        return httpx.Response(
+            200,
+            content=pages[start].encode("iso-8859-1"),
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = SecCurrentFilingsConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+        ).fetch(
+            GlobalConnectorRequest(
+                window_start=date(2026, 7, 27),
+                window_end_exclusive=date(2026, 7, 29),
+                max_pages=10,
+            ),
+            eligibility=eligibility("official:sec-edgar", "sec-edgar"),
+            now=NOW,
+        )
+
+    assert starts == ["0", "100"]
+    assert result.request_count == 2
+    assert result.raw_count == 200
+    assert [record.metadata["accession_number"] for record in result.records] == [
+        overlap_accession
+    ]
+    assert result.next_cursor and result.next_cursor.startswith(
+        "sec-current-v1:"
+    )
+
+
+def test_sec_current_bootstrap_short_page_before_cutoff_fails_closed() -> None:
+    atom = _sec_current_atom(
+        "<entry><updated>2026-07-29T12:00:00-04:00</updated>"
+        '<category scheme="https://www.sec.gov/" term="10-Q"/></entry>'
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=atom.encode("iso-8859-1"))
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = SecCurrentFilingsConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+        )
+        with pytest.raises(
+            GlobalConnectorPaginationError,
+            match="bootstrap cutoff was not reached",
+        ):
+            connector.fetch(
+                GlobalConnectorRequest(
+                    window_start=date(2026, 7, 27),
+                    window_end_exclusive=date(2026, 7, 29),
+                    max_pages=10,
+                ),
+                eligibility=eligibility(
+                    "official:sec-edgar",
+                    "sec-edgar",
+                ),
+                now=NOW,
+            )
+
+
+def test_sec_current_bootstrap_page_budget_before_cutoff_fails_closed() -> None:
+    current_entry = (
+        "<entry><updated>2026-07-29T12:00:00-04:00</updated>"
+        '<category scheme="https://www.sec.gov/" term="10-Q"/></entry>'
+    )
+    atom = _sec_current_atom(
+        *(current_entry for _ in range(100)),
+        updated="2026-07-29T12:05:00-04:00",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=atom.encode("iso-8859-1"))
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        connector = SecCurrentFilingsConnector(
+            user_agent="BSIDE test ops@example.com",
+            client=client,
+        )
+        with pytest.raises(
+            GlobalConnectorPaginationError,
+            match="exceeded max_pages request budget",
+        ):
+            connector.fetch(
+                GlobalConnectorRequest(
+                    window_start=date(2026, 7, 27),
+                    window_end_exclusive=date(2026, 7, 29),
+                    max_pages=1,
+                ),
+                eligibility=eligibility(
+                    "official:sec-edgar",
+                    "sec-edgar",
+                ),
+                now=NOW,
+            )
+
+
+@pytest.mark.parametrize(
+    ("window_end", "expected"),
+    (
+        (
+            date(2026, 3, 9),
+            datetime(2026, 3, 9, 2, 30, tzinfo=timezone.utc),
+        ),
+        (
+            date(2026, 11, 2),
+            datetime(2026, 11, 2, 3, 30, tzinfo=timezone.utc),
+        ),
+    ),
+)
+def test_sec_current_bootstrap_cutoff_respects_eastern_dst(
+    window_end: date,
+    expected: datetime,
+) -> None:
+    request = GlobalConnectorRequest(
+        window_start=window_end - timedelta(days=1),
+        window_end_exclusive=window_end,
+    )
+
+    assert _sec_current_cutoff(request, None) == expected
 
 
 def test_sec_submissions_observes_shared_fair_access_interval_and_budget() -> None:
@@ -1042,6 +1227,13 @@ def test_sec_hybrid_merges_current_and_daily_by_cik_scoped_identity() -> None:
             form="SCHEDULE 13D/A",
             cik="0001009268",
         ),
+        _sec_current_entry(
+            accession="0000320193-26-000110",
+            title="10-Q - Apple Inc. (0000320193) (Filer)",
+            form="10-Q",
+            cik="0000320193",
+            accepted="2026-07-23T21:00:00-04:00",
+        ),
     )
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1075,7 +1267,7 @@ def test_sec_hybrid_merges_current_and_daily_by_cik_scoped_identity() -> None:
             now=NOW,
         )
 
-    assert result.raw_count == 4
+    assert result.raw_count == 5
     assert len(result.records) == 2
     by_cik = {record.metadata["cik"]: record for record in result.records}
     assert by_cik["0001009268"].external_id == (
