@@ -42,6 +42,10 @@ def matched_probe() -> dict[str, object]:
                     window_start + timedelta(days=1)
                 ).isoformat(),
                 "matched": True,
+                "release_gate_policy": frozen.PROBE_RELEASE_GATE_POLICY,
+                "release_gate_matched": True,
+                "diagnostic_change_count": 0,
+                "blocking_change_count": 0,
                 "expected_stable_payload_sha256": digest,
                 "actual_stable_payload_sha256": digest,
                 "changed_entity_count": 0,
@@ -66,6 +70,10 @@ def matched_probe() -> dict[str, object]:
         "checkpoint_write_attempted": False,
         "quota_ledger_write_attempted": True,
         "status": "matched",
+        "release_gate_policy": frozen.PROBE_RELEASE_GATE_POLICY,
+        "release_gate_matched": True,
+        "diagnostic_only_window_count": 0,
+        "blocking_drift_window_count": 0,
         "window_count": 30,
         "windows": windows,
         "error_code": None,
@@ -75,6 +83,81 @@ def matched_probe() -> dict[str, object]:
             "contains_credentials": False,
         },
     }
+
+
+def source_count_diagnostic_probe() -> dict[str, object]:
+    probe = matched_probe()
+    windows = probe["windows"]
+    assert isinstance(windows, list)
+    window = windows[8]
+    assert isinstance(window, dict)
+    window.update(
+        {
+            "matched": False,
+            "release_gate_matched": True,
+            "diagnostic_change_count": 1,
+            "blocking_change_count": 0,
+            "changed_entity_count": 1,
+            "changes": [
+                {
+                    "entity": "source_counts",
+                    "id": "dart",
+                    "field_names": ["fetched_count"],
+                    "expected_leaf_sha256": "1" * 64,
+                    "actual_leaf_sha256": "2" * 64,
+                }
+            ],
+        }
+    )
+    probe.update(
+        {
+            "status": "drift_detected",
+            "release_gate_matched": True,
+            "diagnostic_only_window_count": 1,
+            "blocking_drift_window_count": 0,
+        }
+    )
+    return probe
+
+
+def blocking_probe(*, entity: str = "document") -> dict[str, object]:
+    probe = matched_probe()
+    windows = probe["windows"]
+    assert isinstance(windows, list)
+    window = windows[8]
+    assert isinstance(window, dict)
+    window.update(
+        {
+            "matched": False,
+            "release_gate_matched": False,
+            "diagnostic_change_count": (
+                1 if entity == "source_counts" else 0
+            ),
+            "blocking_change_count": (
+                0 if entity == "source_counts" else 1
+            ),
+            "actual_stable_payload_sha256": "e" * 64,
+            "changed_entity_count": 1,
+            "changes": [
+                {
+                    "entity": entity,
+                    "id": "dart:20260709000001",
+                    "field_names": ["title"],
+                    "expected_leaf_sha256": "1" * 64,
+                    "actual_leaf_sha256": "2" * 64,
+                }
+            ],
+        }
+    )
+    probe.update(
+        {
+            "status": "drift_detected",
+            "release_gate_matched": False,
+            "diagnostic_only_window_count": 0,
+            "blocking_drift_window_count": 1,
+        }
+    )
+    return probe
 
 
 def validate_release_probe(tmp_path: Path, probe: dict[str, object]):
@@ -178,6 +261,26 @@ def test_semantic_digest_excludes_only_retrieval_clock_and_reports_hash_only_dri
         actual_source_counts=expected["source_semantic_counts"],
     )
     assert comparison["matched"] is True
+    assert comparison["release_gate_matched"] is True
+    assert comparison["diagnostic_change_count"] == 0
+    assert comparison["blocking_change_count"] == 0
+
+    source_count_drift = frozen.compare_fresh_payload(
+        expected,
+        same,
+        actual_source_counts={
+            **expected["source_semantic_counts"],
+            "fetched_count": expected["source_semantic_counts"]["fetched_count"]
+            + 1,
+        },
+    )
+    assert source_count_drift["matched"] is False
+    assert source_count_drift["release_gate_matched"] is True
+    assert source_count_drift["diagnostic_change_count"] == 1
+    assert source_count_drift["blocking_change_count"] == 0
+    assert {
+        row["entity"] for row in source_count_drift["changes"]
+    } == {"source_counts"}
 
     changed = payload(title="변경된 원문 제목")
     drift = frozen.compare_fresh_payload(
@@ -186,6 +289,9 @@ def test_semantic_digest_excludes_only_retrieval_clock_and_reports_hash_only_dri
         actual_source_counts=expected["source_semantic_counts"],
     )
     assert drift["matched"] is False
+    assert drift["release_gate_matched"] is False
+    assert drift["diagnostic_change_count"] == 0
+    assert drift["blocking_change_count"] == 2
     rendered = json.dumps(drift, ensure_ascii=False)
     assert "변경된 원문 제목" not in rendered
     assert {row["entity"] for row in drift["changes"]} == {"document", "event"}
@@ -419,7 +525,7 @@ def test_probe_contract_admits_quota_ledger_but_no_governance_or_checkpoint_writ
     assert diagnostic["fully_matched"] is False
     with pytest.raises(
         frozen.FrozenReplayBundleError,
-        match="not fully matched",
+        match="blocking public payload drift",
     ):
         validate_release_probe(tmp_path, report)
 
@@ -433,6 +539,89 @@ def test_release_probe_accepts_only_exact_fully_matched_30_day_evidence(
     assert result["window_count"] == 30
     assert result["matched_window_count"] == 30
     assert result["fully_matched"] is True
+    assert result["release_gate_matched"] is True
+    assert result["diagnostic_only_window_count"] == 0
+    assert result["blocking_drift_window_count"] == 0
+
+
+def test_release_probe_accepts_source_count_only_drift_as_diagnostic(
+    tmp_path: Path,
+) -> None:
+    result = validate_release_probe(tmp_path, source_count_diagnostic_probe())
+
+    assert result["status"] == "drift_detected"
+    assert result["fully_matched"] is False
+    assert result["release_gate_matched"] is True
+    assert result["matched_window_count"] == 29
+    assert result["drift_window_count"] == 1
+    assert result["diagnostic_only_window_count"] == 1
+    assert result["blocking_drift_window_count"] == 0
+
+
+@pytest.mark.parametrize("entity", ["company", "document", "event", "unknown"])
+def test_release_probe_rejects_public_payload_or_unknown_entity_drift(
+    tmp_path: Path,
+    entity: str,
+) -> None:
+    probe = blocking_probe(entity=entity)
+    validation = frozen.validate_probe_contract(probe)
+
+    assert validation["release_gate_matched"] is False
+    assert validation["blocking_drift_window_count"] == 1
+    with pytest.raises(
+        frozen.FrozenReplayBundleError,
+        match="blocking public payload drift",
+    ):
+        validate_release_probe(tmp_path, probe)
+
+
+def test_release_probe_rejects_hash_drift_even_when_change_is_source_counts(
+    tmp_path: Path,
+) -> None:
+    probe = blocking_probe(entity="source_counts")
+    validation = frozen.validate_probe_contract(probe)
+
+    assert validation["diagnostic_only_window_count"] == 0
+    assert validation["blocking_drift_window_count"] == 1
+    assert validation["release_gate_matched"] is False
+    with pytest.raises(
+        frozen.FrozenReplayBundleError,
+        match="blocking public payload drift",
+    ):
+        validate_release_probe(tmp_path, probe)
+
+
+def test_release_probe_rejects_self_asserted_release_gate_summary() -> None:
+    probe = blocking_probe()
+    probe["release_gate_matched"] = True
+    probe["blocking_drift_window_count"] = 0
+
+    with pytest.raises(
+        frozen.FrozenReplayBundleError,
+        match="summary is not derived",
+    ):
+        frozen.validate_probe_contract(probe)
+
+
+def test_official_backfill_exit_contract_uses_derived_release_gate() -> None:
+    assert official_backfill._execution_report_succeeded(
+        {
+            "status": "drift_detected",
+            "release_gate_matched": True,
+        },
+        drift_probe_only=True,
+    )
+    assert not official_backfill._execution_report_succeeded(
+        {
+            "status": "drift_detected",
+            "release_gate_matched": False,
+        },
+        drift_probe_only=True,
+    )
+    assert official_backfill._execution_report_succeeded(
+        {"status": "succeeded"},
+        drift_probe_only=False,
+    )
 
 
 @pytest.mark.parametrize(

@@ -1787,6 +1787,16 @@ def options_from_args(args: argparse.Namespace) -> tuple[Path, BackfillOptions]:
     )
 
 
+def _execution_report_succeeded(
+    report: Mapping[str, object],
+    *,
+    drift_probe_only: bool,
+) -> bool:
+    if drift_probe_only:
+        return report.get("release_gate_matched") is True
+    return report.get("status") == "succeeded"
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -1811,8 +1821,10 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         raise SystemExit(2) from exc
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
-    expected_status = "matched" if options.drift_probe_only else "succeeded"
-    if report["status"] != expected_status:
+    if not _execution_report_succeeded(
+        report,
+        drift_probe_only=options.drift_probe_only,
+    ):
         raise SystemExit(1)
 
 

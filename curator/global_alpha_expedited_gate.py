@@ -61,6 +61,9 @@ EXPECTED_SOURCES = {
 }
 ACTIVE_COUNTRIES = frozenset(("KR", "US", "CA", "AU"))
 UNAVAILABLE_COUNTRIES = frozenset(("JP", "GB"))
+DART_DRIFT_RELEASE_GATE_POLICY = (
+    "stable-public-payload-source-count-diagnostic-v1"
+)
 MINIMUM_REVIEWED_EVENTS = 20
 MINIMUM_REVIEWED_PAIRS = 40
 REQUIRED_TOP5 = 5
@@ -920,8 +923,47 @@ def validate_connector_receipts(
                 f"{location}.replay_run.fresh_drift_probe",
             )
             drift_location = f"{location}.replay_run.fresh_drift_probe"
+            drift_status = _text(
+                drift.get("status"),
+                "status",
+                drift_location,
+            )
+            drift_policy = _text(
+                drift.get("release_gate_policy"),
+                "release_gate_policy",
+                drift_location,
+            )
+            drift_release_gate_matched = _bool(
+                drift.get("release_gate_matched"),
+                "release_gate_matched",
+                drift_location,
+            )
+            diagnostic_only_window_count = _int(
+                drift.get("diagnostic_only_window_count"),
+                "diagnostic_only_window_count",
+                drift_location,
+                minimum=0,
+            )
+            blocking_drift_window_count = _int(
+                drift.get("blocking_drift_window_count"),
+                "blocking_drift_window_count",
+                drift_location,
+                minimum=0,
+            )
             if (
-                _text(drift.get("status"), "status", drift_location) != "matched"
+                drift_status not in {"matched", "drift_detected"}
+                or drift_policy != DART_DRIFT_RELEASE_GATE_POLICY
+                or not drift_release_gate_matched
+                or diagnostic_only_window_count > 30
+                or blocking_drift_window_count != 0
+                or (
+                    drift_status == "matched"
+                    and diagnostic_only_window_count != 0
+                )
+                or (
+                    drift_status == "drift_detected"
+                    and diagnostic_only_window_count < 1
+                )
                 or not _bool(drift.get("read_only"), "read_only", drift_location)
                 or _bool(
                     drift.get("governance_write_attempted"),
@@ -940,9 +982,26 @@ def validate_connector_receipts(
                 )
             ):
                 raise ExpeditedAlphaEvidenceError(
-                    f"{location}: fresh DART drift probe is not matched and read-only"
+                    f"{location}: fresh DART drift probe is not release-gate safe "
+                    "and read-only"
                 )
-            _digest(drift.get("sha256"), "sha256", drift_location)
+            drift_sha256 = _digest(
+                drift.get("sha256"),
+                "sha256",
+                drift_location,
+            )
+            replay_summary["fresh_drift_probe"] = {
+                "status": drift_status,
+                "release_gate_policy": drift_policy,
+                "release_gate_matched": drift_release_gate_matched,
+                "diagnostic_only_window_count": diagnostic_only_window_count,
+                "blocking_drift_window_count": blocking_drift_window_count,
+                "sha256": drift_sha256,
+                "read_only": True,
+                "governance_write_attempted": False,
+                "checkpoint_write_attempted": False,
+                "quota_ledger_write_attempted": True,
+            }
             frozen_replay_verified += 1
         last_end = date.fromisoformat(
             str(apply_summary["ended_on_exclusive"])
