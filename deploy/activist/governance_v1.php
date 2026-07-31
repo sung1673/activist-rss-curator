@@ -188,6 +188,7 @@ function v1_role_hashes(array $config, string $role): array {
 }
 
 function v1_require_role(array $config, array $allowedRoles): string {
+    v1_require_disjoint_protected_role_hashes($config);
     $token = v1_bearer_token();
     if ($token === '') {
         header('WWW-Authenticate: Bearer realm="BSIDE API", charset="UTF-8"');
@@ -412,11 +413,71 @@ function v1_preview_token_hashes(array $config): array {
     return array_values(array_unique($hashes));
 }
 
+/**
+ * Fail closed when one bearer credential is assigned to more than one
+ * protected role. Administrator fallback is implemented by v1_require_role;
+ * copying the administrator hash into another role is therefore unnecessary
+ * and would erase the separation required by protected release approval.
+ *
+ * The returned status intentionally contains role names only. Token hashes
+ * must never appear in an API response, log or diagnostic artifact.
+ */
+function v1_protected_role_hash_overlap_status(array $config): array {
+    $roleHashes = array(
+        'admin'=>v1_role_hashes($config,'admin'),
+        'editor'=>v1_role_hashes($config,'editor'),
+        'ops'=>v1_role_hashes($config,'ops'),
+        'preview'=>v1_preview_token_hashes($config),
+        'release_authorizer'=>v1_role_hashes($config,'release_authorizer'),
+        'rights'=>v1_role_hashes($config,'rights'),
+    );
+    $owners = array();
+    foreach ($roleHashes as $role=>$hashes) {
+        foreach ($hashes as $hash) {
+            if (!isset($owners[$hash])) { $owners[$hash]=array(); }
+            $owners[$hash][]=$role;
+        }
+    }
+    $pairs = array();
+    foreach ($owners as $roles) {
+        $roles=array_values(array_unique($roles));
+        sort($roles,SORT_STRING);
+        $roleCount=count($roles);
+        for ($left=0;$left<$roleCount;$left++) {
+            for ($right=$left+1;$right<$roleCount;$right++) {
+                $pairKey=$roles[$left]."\x1f".$roles[$right];
+                $pairs[$pairKey]=array($roles[$left],$roles[$right]);
+            }
+        }
+    }
+    ksort($pairs,SORT_STRING);
+    $conflicts=array_values($pairs);
+    return array(
+        'valid'=>count($conflicts)===0,
+        'conflict_count'=>count($conflicts),
+        'conflicting_roles'=>$conflicts,
+    );
+}
+
+function v1_require_disjoint_protected_role_hashes(array $config): void {
+    $status=v1_protected_role_hash_overlap_status($config);
+    if ($status['valid']!==true) {
+        header('Retry-After: 300');
+        v1_respond(503,array(
+            'ok'=>false,
+            'error'=>'protected_role_token_hash_overlap',
+            'conflict_count'=>$status['conflict_count'],
+            'conflicting_roles'=>$status['conflicting_roles'],
+        ));
+    }
+}
+
 function v1_preview_auth_configured(array $config): bool {
     return count(v1_preview_token_hashes($config)) > 0;
 }
 
 function v1_require_preview_token(array $config): void {
+    v1_require_disjoint_protected_role_hashes($config);
     $token = v1_bearer_token();
     if ($token === '') {
         header('WWW-Authenticate: Bearer realm="BSIDE governance preview", charset="UTF-8"');
@@ -665,6 +726,24 @@ function v1_serve_openapi(string $path): void {
     exit;
 }
 
+/**
+ * A document may use only the grant registered for its exact source identity.
+ * BINARY comparisons keep this fail-closed under the database's
+ * case-insensitive default collation.
+ */
+function v1_document_source_right_identity_sql(
+    string $documentAlias = 'd',
+    string $rightsAlias = 'sr'
+): string {
+    return '(' . $documentAlias . '.source_right_id IS NOT NULL'
+        . ' AND ' . $rightsAlias . '.source_right_id='
+        . $documentAlias . '.source_right_id'
+        . ' AND BINARY ' . $documentAlias . '.source_class=BINARY '
+        . $rightsAlias . '.source_type'
+        . ' AND BINARY ' . $documentAlias . '.source_key=BINARY '
+        . $rightsAlias . '.source_key)';
+}
+
 function v1_document_visibility_sql(
     string $documentAlias = 'd',
     string $rightsAlias = 'sr',
@@ -686,6 +765,10 @@ function v1_document_visibility_sql(
         . ' AND (NULLIF(TRIM(' . $rightsAlias . '.evidence_uri), \'\') IS NOT NULL'
         . ' OR ' . $rightsAlias . '.evidence_hash'
         . ' REGEXP \'^[A-Fa-f0-9]{64}$\')'
+        . ' AND ' . v1_document_source_right_identity_sql(
+            $documentAlias,
+            $rightsAlias
+        )
         . '))';
 }
 
@@ -3515,7 +3598,21 @@ function v1_content_document_right_valid_at(array $document, string $at): bool {
         && ($document['valid_until'] === null || (string)$document['valid_until'] > $at)
         && ($document['revoked_at'] === null || (string)$document['revoked_at'] > $at)
         && (trim((string)$document['evidence_uri']) !== ''
-            || preg_match('/^[a-f0-9]{64}$/',(string)$document['evidence_hash']) === 1);
+            || preg_match('/^[a-f0-9]{64}$/',(string)$document['evidence_hash']) === 1)
+        && isset(
+            $document['document_source_class'],
+            $document['document_source_key'],
+            $document['right_source_type'],
+            $document['right_source_key']
+        )
+        && hash_equals(
+            (string)$document['right_source_type'],
+            (string)$document['document_source_class']
+        )
+        && hash_equals(
+            (string)$document['right_source_key'],
+            (string)$document['document_source_key']
+        );
 }
 
 /** Measure the actual 2021+ in-scope corpus as it stood at one completed KST day end. */
@@ -3549,6 +3646,8 @@ function v1_content_corpus_snapshot(PDO $pdo, array $config, string $date): arra
     // denominator and make the release gate pass.
     $publicDocumentRefs = v1_content_corpus_document_refs_sql($config);
     $documentStmt = $pdo->prepare('SELECT d.retrieved_at,d.original_language,d.title,d.body_text,d.payload_json,'
+        . 'd.source_class AS document_source_class,d.source_key AS document_source_key,'
+        . 'sr.source_type AS right_source_type,sr.source_key AS right_source_key,'
         . 'sr.status AS right_status,sr.valid_from,sr.valid_until,sr.revoked_at,sr.ai_allowed,sr.redistribution_allowed,'
         . 'sr.evidence_uri,sr.evidence_hash FROM '
         . table_name($config,'documents') . ' d JOIN (' . $publicDocumentRefs . ') public_document_refs '
@@ -3589,7 +3688,10 @@ function v1_current_public_document_rights_guard(PDO $pdo, array $config): array
     $checkedAt = gmdate('Y-m-d H:i:s');
     $scopeStart = '2020-12-31 15:00:00';
     $refs = v1_content_corpus_document_refs_sql($config);
-    $stmt = $pdo->prepare('SELECT d.document_id,sr.status AS right_status,sr.valid_from,sr.valid_until,sr.revoked_at,'
+    $stmt = $pdo->prepare('SELECT d.document_id,'
+        . 'd.source_class AS document_source_class,d.source_key AS document_source_key,'
+        . 'sr.source_type AS right_source_type,sr.source_key AS right_source_key,'
+        . 'sr.status AS right_status,sr.valid_from,sr.valid_until,sr.revoked_at,'
         . 'sr.ai_allowed,sr.redistribution_allowed,sr.evidence_uri,sr.evidence_hash FROM '
         . table_name($config,'documents') . ' d JOIN (' . $refs . ') current_public_document_refs '
         . 'ON current_public_document_refs.document_id=d.document_id LEFT JOIN ' . table_name($config,'source_rights')
@@ -6878,6 +6980,11 @@ function upsert_official_site_snapshot(PDO $pdo, array $config, array $payload, 
         if (v1_official_site_source_right($pdo,$config,$sourceRightId,$sourceType,$sourceKey,true) === null) {
             throw new RuntimeException('official_site_source_right_ineligible');
         }
+        // Migration 011 adds the canonical document source identity. Keep the
+        // schema-10 writer compatible during a staged DB-first deployment, and
+        // persist the exact locked SourceRight key whenever the global schema
+        // is available.
+        $documentSourceIdentityEnabled = v1_global_dart_bridge_enabled($pdo,$config);
 
         $companyStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'companies')
             . ' (company_id,stock_code,market,legal_name,legal_name_en,short_name,aliases_json,homepage_url,record_status,listing_status,master_modified_at,created_at,updated_at)'
@@ -6898,13 +7005,22 @@ function upsert_official_site_snapshot(PDO $pdo, array $config, array $payload, 
             if ($companyExists->fetchColumn() === false) { throw new RuntimeException('official_site_company_missing'); }
         }
 
-        $documentExisting = $pdo->prepare('SELECT source_right_id,source_class,external_id,content_hash,collection_key,version_no,'
+        $documentExisting = $pdo->prepare('SELECT source_right_id,source_class,'
+            . ($documentSourceIdentityEnabled ? 'source_key,' : '')
+            . 'external_id,content_hash,collection_key,version_no,'
             . 'correction_of_document_id,original_language,title,body_text,original_url,verification_status,publication_status,retrieved_at FROM '
             . table_name($config,'documents') . ' WHERE document_id=? FOR UPDATE');
-        $documentStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'documents')
-            . ' (document_id,company_id,source_right_id,source_class,external_id,document_type,original_language,title,body_text,original_url,content_hash,'
-            . 'collection_key,correction_of_document_id,version_no,published_at,retrieved_at,verification_status,publication_status,payload_json,created_at,updated_at)'
-            . ' VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,\'unverified\',\'draft\',?,?,?)');
+        if ($documentSourceIdentityEnabled) {
+            $documentStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'documents')
+                . ' (document_id,company_id,source_right_id,source_class,source_key,external_id,document_type,original_language,title,body_text,original_url,content_hash,'
+                . 'collection_key,correction_of_document_id,version_no,published_at,retrieved_at,verification_status,publication_status,payload_json,created_at,updated_at)'
+                . ' VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,\'unverified\',\'draft\',?,?,?)');
+        } else {
+            $documentStmt = $pdo->prepare('INSERT INTO ' . table_name($config,'documents')
+                . ' (document_id,company_id,source_right_id,source_class,external_id,document_type,original_language,title,body_text,original_url,content_hash,'
+                . 'collection_key,correction_of_document_id,version_no,published_at,retrieved_at,verification_status,publication_status,payload_json,created_at,updated_at)'
+                . ' VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,\'unverified\',\'draft\',?,?,?)');
+        }
         $documentLatest = $pdo->prepare('SELECT document_id,source_right_id,version_no FROM '
             . table_name($config,'documents') . ' WHERE source_right_id=? AND source_class=? AND external_id=?'
             . ' ORDER BY version_no DESC,created_at DESC,document_id DESC LIMIT 1 FOR UPDATE');
@@ -6914,6 +7030,7 @@ function upsert_official_site_snapshot(PDO $pdo, array $config, array $payload, 
             $documentExisting->execute(array($document['document_id'])); $existing = $documentExisting->fetch();
             if ($existing) {
                 if ((string)$existing['source_right_id'] !== $sourceRightId || (string)$existing['source_class'] !== $sourceType
+                    || ($documentSourceIdentityEnabled && (string)($existing['source_key'] ?? '') !== $sourceKey)
                     || (string)$existing['external_id'] !== $document['external_id'] || (string)$existing['content_hash'] !== $document['content_hash']
                     || (string)$existing['collection_key'] !== $document['collection_key']
                     || (string)$existing['original_language'] !== $document['original_language']
@@ -6932,10 +7049,13 @@ function upsert_official_site_snapshot(PDO $pdo, array $config, array $payload, 
             }
             $versionNo = $latest ? (int)$latest['version_no'] + 1 : 1;
             $correctionOf = $latest ? (string)$latest['document_id'] : null;
-            $documentStmt->execute(array($document['document_id'],$document['company_id'],$sourceRightId,$sourceType,$document['external_id'],
-                $document['document_type'],$document['original_language'],$document['title'],$document['body_text'],
-                $document['original_url'],$document['content_hash'],$document['collection_key'],$correctionOf,$versionNo,
+            $documentValues = array($document['document_id'],$document['company_id'],$sourceRightId,$sourceType);
+            if ($documentSourceIdentityEnabled) { $documentValues[] = $sourceKey; }
+            $documentValues = array_merge($documentValues,array($document['external_id'],$document['document_type'],
+                $document['original_language'],$document['title'],$document['body_text'],$document['original_url'],
+                $document['content_hash'],$document['collection_key'],$correctionOf,$versionNo,
                 $document['published_at'],$document['retrieved_at'],json_value($document['payload']),$now,$now));
+            $documentStmt->execute($documentValues);
         }
 
         $eventExisting = $pdo->prepare('SELECT company_id,event_type,identity_action,identity_target,identity_actor_id,'
@@ -7363,6 +7483,254 @@ function v1_dart_lifecycle_observation_matches(
 }
 
 /**
+ * Identify reviewed DART rows that must never re-enter the generic source
+ * upsert path. The source payload, evidence and canonical identity are checked
+ * separately before an exact replay can be acknowledged.
+ */
+function v1_dart_reviewed_event_is_protected(
+    array $storedEvent
+): bool {
+    $companyId = trim((string)($storedEvent['company_id'] ?? ''));
+    return preg_match('/^[0-9]{8}$/',$companyId) === 1
+        && (string)($storedEvent['issuer_id'] ?? '')
+            === 'issuer:kr:dart:' . $companyId
+        && (string)($storedEvent['country_code'] ?? '') === 'KR'
+        && (string)($storedEvent['identity_status'] ?? '') === 'complete'
+        && (string)($storedEvent['review_status'] ?? '') === 'approved'
+        && (string)($storedEvent['publication_status'] ?? '') === 'published';
+}
+
+/**
+ * Recompute the Production Alpha identity written by the v2 editorial review
+ * endpoint. This prevents a merely labelled "complete" row from entering the
+ * reviewed DART replay exception.
+ */
+function v1_dart_reviewed_event_canonical_identity(
+    array $storedEvent,
+    bool $isCorrection
+): ?array {
+    $eventId = trim((string)($storedEvent['event_id'] ?? ''));
+    $companyId = trim((string)($storedEvent['company_id'] ?? ''));
+    $issuerId = trim((string)($storedEvent['issuer_id'] ?? ''));
+    $countryCode = trim((string)($storedEvent['country_code'] ?? ''));
+    $eventFamily = trim((string)($storedEvent['global_event_family'] ?? ''));
+    $eventType = trim((string)($storedEvent['event_type'] ?? ''));
+    $action = v1_normalize_identity_text(
+        (string)($storedEvent['identity_action'] ?? '')
+    );
+    $target = v1_normalize_identity_text(
+        (string)($storedEvent['identity_target'] ?? '')
+    );
+    $actorId = v1_normalize_identity_text(
+        (string)($storedEvent['identity_actor_id'] ?? '')
+    );
+    $effectiveAt = trim((string)($storedEvent['identity_effective_at'] ?? ''));
+    $deadlineAt = ($storedEvent['identity_deadline_at'] ?? null) === null
+        ? null : trim((string)$storedEvent['identity_deadline_at']);
+    $eventDeadlineAt = ($storedEvent['deadline_at'] ?? null) === null
+        ? null : trim((string)$storedEvent['deadline_at']);
+    $comparisonKey = trim((string)($storedEvent['comparison_key'] ?? ''));
+    $families = array(
+        'large_ownership',
+        'meeting_and_vote',
+        'tender_offer_and_mna',
+        'capital_issuance',
+        'capital_return',
+        'board_and_compensation',
+        'listing_status',
+        'correction_and_withdrawal',
+    );
+    if (!v1_valid_entity_id($eventId)
+        || preg_match('/^[0-9]{8}$/',$companyId) !== 1
+        || $issuerId !== 'issuer:kr:dart:' . $companyId
+        || $countryCode !== 'KR'
+        || !in_array($eventFamily,$families,true)
+        || $eventType !== $eventFamily
+        || $action === ''
+        || $target === ''
+        || !v1_valid_entity_id($actorId,64)
+        || preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/',$effectiveAt)
+            !== 1
+        || ($deadlineAt !== null
+            && preg_match(
+                '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/',
+                $deadlineAt
+            ) !== 1)
+        || $eventDeadlineAt !== $deadlineAt
+        || (string)($storedEvent['verification_status'] ?? '')
+            !== ($isCorrection ? 'corrected' : 'official')
+        || trim((string)($storedEvent['title'] ?? '')) === '') {
+        return null;
+    }
+    $identity = array(
+        'issuer_id'=>$issuerId,
+        'event_family'=>$eventFamily,
+        'action'=>$action,
+        'target'=>$target,
+        'actor_id'=>$actorId,
+        'effective_at'=>$effectiveAt,
+        'deadline_at'=>$deadlineAt,
+    );
+    $expectedComparisonKey = 'global:' . substr(
+        hash(
+            'sha256',
+            v1_strict_canonical_json_encode(
+                $identity,
+                'reviewed_dart_event_identity_encode_failed'
+            )
+        ),
+        0,
+        64
+    );
+    if (!hash_equals($expectedComparisonKey,$comparisonKey)) {
+        return null;
+    }
+    $identity['comparison_key'] = $comparisonKey;
+    return $identity;
+}
+
+/**
+ * Match the exact first-seen source event behind an editorially canonicalized
+ * DART event. Editorial event fields may differ from that raw payload, but the
+ * source payload, actor and deadlines may not change. Corrections normalize
+ * only the server-owned isolation marker; cancellations are never eligible.
+ */
+function v1_dart_reviewed_event_replay(
+    array $storedEvent,
+    array $storedPayload,
+    array $submittedEvent
+): ?array {
+    if (!empty($storedPayload['is_cancelled'])) {
+        return null;
+    }
+    $isCorrection = !empty($storedPayload['is_correction']);
+    if ($isCorrection) {
+        if ((string)($storedPayload['event_link_status'] ?? '')
+            !== 'ambiguous_independent') {
+            return null;
+        }
+    } elseif (array_key_exists('event_link_status',$storedPayload)) {
+        return null;
+    }
+    $canonicalIdentity = v1_dart_reviewed_event_canonical_identity(
+        $storedEvent,
+        $isCorrection
+    );
+    $eventId = trim((string)($storedEvent['event_id'] ?? ''));
+    $companyId = trim((string)($storedEvent['company_id'] ?? ''));
+    $submittedEventId = trim((string)v1_first(
+        $submittedEvent,
+        array('event_id'),
+        ''
+    ));
+    $submittedCompanyId = trim((string)v1_first(
+        $submittedEvent,
+        array('company_id','corp_code'),
+        ''
+    ));
+    $submittedActorId = v1_normalize_identity_text((string)v1_first(
+        $submittedEvent,
+        array('identity_actor_id','actor_id'),
+        ''
+    ));
+    $submittedDeadlineAt = mysql_dt(v1_first(
+        $submittedEvent,
+        array('deadline_at','deadline'),
+        null
+    ));
+    $submittedIdentityDeadlineAt = mysql_dt(v1_first(
+        $submittedEvent,
+        array('identity_deadline_at'),
+        null
+    ));
+    $canonicalActorId = $canonicalIdentity === null
+        ? '' : (string)$canonicalIdentity['actor_id'];
+    $canonicalDeadlineAt = $canonicalIdentity === null
+        ? null : $canonicalIdentity['deadline_at'];
+    $actor = isset($submittedEvent['actor'])
+        && is_array($submittedEvent['actor'])
+        ? $submittedEvent['actor'] : null;
+    $eventActor = isset($submittedEvent['event_actor'])
+        && is_array($submittedEvent['event_actor'])
+        ? $submittedEvent['event_actor'] : null;
+    if ($canonicalIdentity === null
+        || $eventId !== $submittedEventId
+        || $companyId !== $submittedCompanyId
+        || (!empty($submittedEvent['is_correction'])) !== $isCorrection
+        || !empty($submittedEvent['is_cancelled'])
+        || trim((string)v1_first(
+            $submittedEvent,
+            array('verification_status','status'),
+            ''
+        )) !== 'official'
+        || $submittedActorId === ''
+        || !hash_equals($canonicalActorId,$submittedActorId)
+        || $submittedDeadlineAt !== $canonicalDeadlineAt
+        || $submittedIdentityDeadlineAt !== $canonicalDeadlineAt
+        || $actor === null
+        || $eventActor === null
+        || v1_normalize_identity_text(
+            (string)($actor['actor_id'] ?? '')
+        ) !== $canonicalActorId
+        || v1_normalize_identity_text(
+            (string)($eventActor['actor_id'] ?? '')
+        ) !== $canonicalActorId
+        || (string)($eventActor['event_id'] ?? '') !== $eventId
+        || (string)($eventActor['actor_role'] ?? '') !== 'filer') {
+        return null;
+    }
+    $canonicalSubmittedEvent = $submittedEvent;
+    if ($isCorrection) {
+        if (array_key_exists(
+                'event_link_status',
+                $canonicalSubmittedEvent
+            )
+            && (string)$canonicalSubmittedEvent['event_link_status']
+                !== 'ambiguous_independent') {
+            return null;
+        }
+        $canonicalSubmittedEvent['event_link_status'] =
+            'ambiguous_independent';
+    } elseif (array_key_exists(
+        'event_link_status',
+        $canonicalSubmittedEvent
+    )) {
+        return null;
+    }
+    if (isset($storedPayload['metadata'])
+        && is_array($storedPayload['metadata'])
+        && (string)($storedPayload['metadata']['title_provenance'] ?? '')
+            === 'source') {
+        if (!isset($canonicalSubmittedEvent['metadata'])) {
+            $canonicalSubmittedEvent['metadata'] = array();
+        }
+        if (!is_array($canonicalSubmittedEvent['metadata'])) {
+            return null;
+        }
+        if (!isset(
+            $canonicalSubmittedEvent['metadata']['title_provenance']
+        )) {
+            $canonicalSubmittedEvent['metadata']['title_provenance'] =
+                'source';
+        }
+    }
+    $dartMarkerUpgrade = false;
+    if (!v1_followup_event_replay_payload_matches(
+            $storedPayload,
+            $canonicalSubmittedEvent,
+            false,
+            $dartMarkerUpgrade
+        )
+        || $dartMarkerUpgrade) {
+        return null;
+    }
+    return array(
+        'canonical_actor_id'=>$canonicalActorId,
+        'is_correction'=>$isCorrection,
+    );
+}
+
+/**
  * Validate the pending filer candidate that accompanies an incomplete DART
  * identity. It is internal review evidence, not an approved canonical actor.
  */
@@ -7587,9 +7955,13 @@ function v1_dart_pending_identity_actor_change(
  */
 function v1_dart_identity_change_document_matches(
     array $stored,
-    array $submitted
+    array $submitted,
+    bool $allowCorrectionReplay = false
 ): bool {
-    if (!empty($submitted['is_correction']) || !empty($submitted['is_cancelled'])) {
+    if (!empty($submitted['is_cancelled'])
+        || ($allowCorrectionReplay
+            ? empty($submitted['is_correction'])
+            : !empty($submitted['is_correction']))) {
         return false;
     }
     $sourceClass = trim((string)v1_first(
@@ -7704,6 +8076,13 @@ function v1_dart_identity_change_document_matches(
     }
     $submittedPayload = $submitted;
     unset($storedPayload['retrieved_at'],$submittedPayload['retrieved_at']);
+    if ($allowCorrectionReplay
+        && (string)($storedPayload['correction_link_status'] ?? '')
+            === 'ambiguous_independent'
+        && !isset($submittedPayload['correction_link_status'])) {
+        $submittedPayload['correction_link_status'] =
+            'ambiguous_independent';
+    }
     foreach (array(&$storedPayload,&$submittedPayload) as &$documentPayload) {
         if (isset($documentPayload['metadata'])
             && !is_array($documentPayload['metadata'])) {
@@ -7731,6 +8110,278 @@ function v1_dart_identity_change_document_matches(
             'submitted_dart_identity_change_document_encode_failed'
         ))
     );
+}
+
+/**
+ * Prove that a company row accompanying a reviewed DART event replay would be
+ * a semantic no-op and that the guarded global issuer projection is intact.
+ *
+ * The reviewed event/document exception must not silently swallow a legitimate
+ * company-master change. Empty optional values retain the generic upsert's
+ * existing "preserve stored value" semantics; every caller-provided value that
+ * would otherwise update a row must already match. Projection rows are locked
+ * and checked separately because the read-only path deliberately skips their
+ * timestamp-changing upserts.
+ */
+function v1_dart_reviewed_company_replay_matches(
+    PDO $pdo,
+    array $config,
+    array $submitted
+): bool {
+    $companyId = trim((string)v1_first(
+        $submitted,
+        array('company_id','corp_code'),
+        ''
+    ));
+    $legalName = trim((string)v1_first(
+        $submitted,
+        array('legal_name','corp_name'),
+        ''
+    ));
+    if (preg_match('/^[0-9]{8}$/',$companyId) !== 1 || $legalName === '') {
+        return false;
+    }
+
+    $companyStatement = $pdo->prepare(
+        'SELECT company_id,stock_code,market,legal_name,legal_name_en,'
+        . 'short_name,aliases_json,homepage_url,record_status,listing_status,'
+        . 'master_modified_at FROM ' . table_name($config,'companies')
+        . ' WHERE company_id=? LIMIT 1 FOR UPDATE'
+    );
+    $stored = v1_pdo_fetch_one_and_close(
+        $companyStatement,
+        array($companyId)
+    );
+    if (!$stored || (string)$stored['company_id'] !== $companyId) {
+        return false;
+    }
+
+    $submittedStockCode = mb_substr(
+        (string)v1_first($submitted,array('stock_code'),''),
+        0,
+        12,
+        'UTF-8'
+    ) ?: null;
+    $submittedMarket = mb_substr(
+        (string)v1_first($submitted,array('market','corp_cls'),''),
+        0,
+        40,
+        'UTF-8'
+    ) ?: null;
+    $submittedLegalNameEn = mb_substr(
+        (string)v1_first(
+            $submitted,
+            array('legal_name_en','corp_name_eng'),
+            ''
+        ),
+        0,
+        255,
+        'UTF-8'
+    ) ?: null;
+    $submittedShortName = mb_substr(
+        (string)v1_first($submitted,array('short_name'),''),
+        0,
+        255,
+        'UTF-8'
+    ) ?: null;
+    $submittedHomepage = (string)v1_first(
+        $submitted,
+        array('homepage_url','hm_url'),
+        ''
+    ) ?: null;
+    $submittedAliases = array();
+    foreach (array_slice(
+        isset($submitted['aliases']) && is_array($submitted['aliases'])
+            ? $submitted['aliases'] : array(),
+        0,
+        20
+    ) as $alias) {
+        $alias = mb_substr(trim((string)$alias),0,255,'UTF-8');
+        if ($alias !== '') { $submittedAliases[] = $alias; }
+    }
+    $submittedAliases = array_values(array_unique($submittedAliases));
+    $storedAliases = json_decode((string)($stored['aliases_json'] ?? ''),true);
+    $recordStatus = (string)v1_first(
+        $submitted,
+        array('record_status'),
+        'active'
+    );
+    if (!in_array(
+        $recordStatus,
+        array('active','inactive','merged','delisted'),
+        true
+    )) {
+        $recordStatus = 'active';
+    }
+    $allowedListingStatuses = array(
+        'unknown','listed','unlisted','suspended','delisted'
+    );
+    $requestedListingStatus = trim((string)v1_first(
+        $submitted,
+        array('listing_status'),
+        ''
+    ));
+    $hasListingStatus = array_key_exists('listing_status',$submitted)
+        && in_array(
+            $requestedListingStatus,
+            $allowedListingStatuses,
+            true
+        );
+    $hasMasterModifiedAt = array_key_exists('master_modified_at',$submitted)
+        || array_key_exists('modified_at',$submitted);
+    $submittedMasterModifiedAt = mysql_dt(v1_first(
+        $submitted,
+        array('master_modified_at','modified_at'),
+        null
+    ));
+    if ($hasMasterModifiedAt && $submittedMasterModifiedAt === null) {
+        return false;
+    }
+    if ((string)$stored['legal_name']
+            !== mb_substr($legalName,0,255,'UTF-8')
+        || (string)$stored['record_status'] !== $recordStatus
+        || ($submittedStockCode !== null
+            && (string)($stored['stock_code'] ?? '')
+                !== $submittedStockCode)
+        || ($submittedMarket !== null
+            && (string)($stored['market'] ?? '') !== $submittedMarket)
+        || ($submittedLegalNameEn !== null
+            && (string)($stored['legal_name_en'] ?? '')
+                !== $submittedLegalNameEn)
+        || ($submittedShortName !== null
+            && (string)($stored['short_name'] ?? '')
+                !== $submittedShortName)
+        || ($submittedHomepage !== null
+            && (string)($stored['homepage_url'] ?? '')
+                !== $submittedHomepage)
+        || (count($submittedAliases) > 0
+            && (!is_array($storedAliases)
+                || array_values($storedAliases) !== $submittedAliases))
+        || ($hasListingStatus
+            && (string)$stored['listing_status']
+                !== $requestedListingStatus)
+        || ($hasMasterModifiedAt
+            && (string)($stored['master_modified_at'] ?? '')
+                !== $submittedMasterModifiedAt)) {
+        return false;
+    }
+
+    $issuerId = 'issuer:kr:dart:' . $companyId;
+    $issuerStatement = $pdo->prepare(
+        'SELECT issuer_id,country_code,legal_name,legal_name_en,short_name,'
+        . 'original_language,homepage_url,listing_status,record_status,'
+        . 'master_modified_at,payload_json FROM '
+        . table_name($config,'issuers')
+        . ' WHERE issuer_id=? LIMIT 1 FOR UPDATE'
+    );
+    $issuer = v1_pdo_fetch_one_and_close(
+        $issuerStatement,
+        array($issuerId)
+    );
+    $expectedIssuerPayload = array(
+        'legacy_company_id'=>$companyId,
+        'identity_namespace'=>'DART_CORP_CODE',
+        'bridge'=>'v1_official_ingest',
+    );
+    $issuerPayload = $issuer
+        ? json_decode((string)($issuer['payload_json'] ?? ''),true) : null;
+    if (!$issuer
+        || (string)$issuer['issuer_id'] !== $issuerId
+        || (string)$issuer['country_code'] !== 'KR'
+        || (string)$issuer['legal_name'] !== (string)$stored['legal_name']
+        || (string)$issuer['original_language'] !== 'ko'
+        || (string)$issuer['listing_status']
+            !== (string)$stored['listing_status']
+        || (string)$issuer['record_status']
+            !== (string)$stored['record_status']
+        || ((string)($stored['legal_name_en'] ?? '') !== ''
+            && (string)($issuer['legal_name_en'] ?? '')
+                !== (string)$stored['legal_name_en'])
+        || ((string)($stored['short_name'] ?? '') !== ''
+            && (string)($issuer['short_name'] ?? '')
+                !== (string)$stored['short_name'])
+        || ((string)($stored['homepage_url'] ?? '') !== ''
+            && (string)($issuer['homepage_url'] ?? '')
+                !== (string)$stored['homepage_url'])
+        || (($stored['master_modified_at'] ?? null) !== null
+            && (string)($issuer['master_modified_at'] ?? '')
+                !== (string)$stored['master_modified_at'])
+        || !is_array($issuerPayload)
+        || $issuerPayload != $expectedIssuerPayload) {
+        return false;
+    }
+
+    $identifierStatement = $pdo->prepare(
+        'SELECT issuer_id,identifier_type,identifier_value,market,is_primary'
+        . ' FROM ' . table_name($config,'issuer_identifiers')
+        . ' WHERE identifier_type=? AND identifier_value=? AND market=?'
+        . ' ORDER BY issuer_id LIMIT 2 FOR UPDATE'
+    );
+    $dartIdentifiers = v1_pdo_fetch_all_and_close(
+        $identifierStatement,
+        array('DART_CORP_CODE',$companyId,'KRX')
+    );
+    if (count($dartIdentifiers) !== 1
+        || (string)$dartIdentifiers[0]['issuer_id'] !== $issuerId
+        || (int)$dartIdentifiers[0]['is_primary'] !== 1) {
+        return false;
+    }
+
+    $projectionStockCode = mb_substr(
+        trim((string)v1_first($submitted,array('stock_code'),'')),
+        0,
+        12,
+        'UTF-8'
+    );
+    $projectionMarket = mb_substr(
+        trim((string)v1_first($submitted,array('market','corp_cls'),'')),
+        0,
+        40,
+        'UTF-8'
+    );
+    if ($projectionMarket === '') { $projectionMarket = 'KRX'; }
+    $storedStockCode = trim((string)($stored['stock_code'] ?? ''));
+    if ($storedStockCode === '') {
+        return $projectionStockCode === '';
+    }
+    $storedMarket = trim((string)($stored['market'] ?? ''));
+    if ($storedMarket === '') { $storedMarket = 'KRX'; }
+    if ($projectionStockCode !== ''
+        && ($projectionStockCode !== $storedStockCode
+            || $projectionMarket !== $storedMarket)) {
+        return false;
+    }
+    $tickerIdentifiers = v1_pdo_fetch_all_and_close(
+        $identifierStatement,
+        array('TICKER',$storedStockCode,$storedMarket)
+    );
+    if (count($tickerIdentifiers) !== 1
+        || (string)$tickerIdentifiers[0]['issuer_id'] !== $issuerId
+        || (int)$tickerIdentifiers[0]['is_primary'] !== 0) {
+        return false;
+    }
+
+    $listingStatement = $pdo->prepare(
+        'SELECT listing_id,issuer_id,country_code,market,ticker,'
+        . 'listing_status,is_primary FROM '
+        . table_name($config,'issuer_listings')
+        . ' WHERE listing_id=? LIMIT 1 FOR UPDATE'
+    );
+    $listing = v1_pdo_fetch_one_and_close(
+        $listingStatement,
+        array('listing:kr:' . $companyId)
+    );
+    return $listing
+        && (string)$listing['issuer_id'] === $issuerId
+        && (string)$listing['country_code'] === 'KR'
+        && (string)$listing['market'] === $storedMarket
+        && (string)$listing['ticker'] === $storedStockCode
+        && (int)$listing['is_primary'] === 1
+        && (
+            (string)$stored['listing_status'] === 'unknown'
+            || (string)$listing['listing_status']
+                === (string)$stored['listing_status']
+        );
 }
 
 /**
@@ -8957,7 +9608,8 @@ function upsert_governance_snapshot(
         // the row or evidence document. Perform this check before the first
         // company/document upsert so a reused ID cannot transiently rewrite
         // content even inside this transaction.
-        $isolatedReplayEventStmt = $pdo->prepare('SELECT event_id,company_id,event_type,identity_action,identity_target,identity_actor_id,'
+        $isolatedReplayEventStmt = $pdo->prepare('SELECT event_id,company_id,issuer_id,country_code,global_event_family,event_type,title,original_language,summary,'
+            . 'occurred_at,deadline_at,importance,current_status,collection_key,identity_action,identity_target,identity_actor_id,'
             . 'identity_effective_at,identity_deadline_at,identity_status,comparison_key,verification_status,review_status,publication_status,payload_json FROM '
             . table_name($config,'governance_events') . ' WHERE event_id=? LIMIT 1 FOR UPDATE');
         $isolatedReplayDocumentsStmt = $pdo->prepare('SELECT ed.document_id,ed.relation_type,ed.position_no,d.company_id,d.source_right_id,d.source_class,d.external_id,'
@@ -8966,7 +9618,8 @@ function upsert_governance_snapshot(
             . table_name($config,'event_documents') . ' ed'
             . ' JOIN ' . table_name($config,'documents') . ' d ON d.document_id=ed.document_id'
             . ' WHERE ed.event_id=? ORDER BY ed.position_no,ed.document_id FOR UPDATE');
-        $isolatedReplayDocumentOwnersStmt = $pdo->prepare('SELECT ed.document_id,e.event_id,e.company_id,e.identity_status,e.verification_status,e.payload_json FROM '
+        $isolatedReplayDocumentOwnersStmt = $pdo->prepare('SELECT ed.document_id,e.event_id,e.company_id,e.issuer_id,e.country_code,'
+            . 'e.identity_status,e.verification_status,e.review_status,e.publication_status,e.payload_json FROM '
             . table_name($config,'event_documents') . ' ed JOIN ' . table_name($config,'governance_events') . ' e'
             . ' ON e.event_id=ed.event_id WHERE ed.document_id=? ORDER BY e.event_id FOR UPDATE');
         $submittedDocumentsById = array();
@@ -8974,11 +9627,15 @@ function upsert_governance_snapshot(
         $isolatedReplayDocumentSnapshots = array();
         $isolatedReplayCanonicalEventPayloads = array();
         $readOnlyDartIdentityMutationEventIds = array();
+        $readOnlyDartReviewedEventCompanyIds = array();
+        $readOnlyDartReviewedDocumentIds = array();
         $pendingDartLifecycleObservations = array();
         $approvedIsolatedReplayEventIds = array();
         $submittedDocumentReferenceEventIds = array();
         $dartLifecycleObservationByIdStmt = null;
         $dartLifecycleObservationInsertStmt = null;
+        $reviewedDartIdentityActorStmt = null;
+        $reviewedDartEventObservationsStmt = null;
         if ($globalDartProjectionEnabled) {
             $dartLifecycleObservationByIdStmt = $pdo->prepare(
                 'SELECT connector_id,country_code,source_key,external_id,'
@@ -8993,6 +9650,26 @@ function upsert_governance_snapshot(
                 . 'parent_external_id,change_type,observed_at,payload_json,'
                 . 'resolution_status,resolved_document_id,resolved_event_id,'
                 . 'created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+            );
+            $reviewedDartIdentityActorStmt = $pdo->prepare(
+                'SELECT reviewed_replay_ea.actor_id FROM ' . table_name($config,'event_actors')
+                . ' reviewed_replay_ea JOIN ' . table_name($config,'actors')
+                . ' reviewed_replay_a'
+                . ' ON reviewed_replay_a.actor_id=reviewed_replay_ea.actor_id'
+                . ' WHERE reviewed_replay_ea.event_id=?'
+                . ' AND reviewed_replay_ea.actor_id=?'
+                . ' AND reviewed_replay_ea.actor_role=\'filer\''
+                . ' AND reviewed_replay_ea.review_status=\'approved\''
+                . ' AND reviewed_replay_a.review_status=\'approved\''
+                . ' AND reviewed_replay_a.record_status=\'active\''
+                . ' AND reviewed_replay_a.country_code=\'KR\''
+                . ' ORDER BY reviewed_replay_ea.actor_id LIMIT 2 FOR UPDATE'
+            );
+            $reviewedDartEventObservationsStmt = $pdo->prepare(
+                'SELECT observation_id,event_id,document_id,source_class,'
+                . 'source_key FROM '
+                . table_name($config,'event_observations')
+                . ' WHERE event_id=? ORDER BY observation_id FOR UPDATE'
             );
         }
         foreach ($documents as $submittedDocument) {
@@ -9033,10 +9710,148 @@ function upsert_governance_snapshot(
                 $isolatedReplayEventStmt,
                 array($submittedEventId)
             );
-            if (!$isolatedReplayEvent || (string)$isolatedReplayEvent['identity_status'] !== 'needs_review') {
+            if (!$isolatedReplayEvent) {
                 continue;
             }
             $storedEventPayload = json_decode((string)$isolatedReplayEvent['payload_json'],true);
+            if (v1_dart_reviewed_event_is_protected(
+                $isolatedReplayEvent
+            )) {
+                if (!$globalDartProjectionEnabled
+                    || !$dartGuardedAction
+                    || !$reviewedDartIdentityActorStmt
+                    || !$reviewedDartEventObservationsStmt
+                    || !is_array($storedEventPayload)) {
+                    throw new RuntimeException(
+                        'followup_event_identity_conflict:' . $submittedEventId
+                    );
+                }
+                $reviewedEventReplay =
+                    v1_dart_reviewed_event_replay(
+                        $isolatedReplayEvent,
+                        $storedEventPayload,
+                        $submittedEvent
+                    );
+                if ($reviewedEventReplay === null) {
+                    throw new RuntimeException(
+                        'followup_event_identity_conflict:' . $submittedEventId
+                    );
+                }
+                $storedDocumentRows = v1_pdo_fetch_all_and_close(
+                    $isolatedReplayDocumentsStmt,
+                    array($submittedEventId)
+                );
+                $rawSubmittedDocumentIds = isset($submittedEvent['document_ids'])
+                    && is_array($submittedEvent['document_ids'])
+                    ? $submittedEvent['document_ids'] : array();
+                if (isset($submittedEvent['document_id'])) {
+                    array_unshift(
+                        $rawSubmittedDocumentIds,
+                        $submittedEvent['document_id']
+                    );
+                }
+                $submittedDocumentIdSet = array();
+                foreach ($rawSubmittedDocumentIds as $rawSubmittedDocumentId) {
+                    if (!is_string($rawSubmittedDocumentId)
+                        && !is_int($rawSubmittedDocumentId)) {
+                        continue;
+                    }
+                    $submittedDocumentId =
+                        trim((string)$rawSubmittedDocumentId);
+                    if (v1_valid_entity_id($submittedDocumentId)) {
+                        $submittedDocumentIdSet[$submittedDocumentId] = true;
+                    }
+                }
+                if (count($storedDocumentRows) !== 1
+                    || count($submittedDocumentIdSet) !== 1) {
+                    throw new RuntimeException(
+                        'followup_event_identity_conflict:' . $submittedEventId
+                    );
+                }
+                $storedDocumentRow = $storedDocumentRows[0];
+                $storedDocumentId = trim((string)(
+                    $storedDocumentRow['document_id'] ?? ''
+                ));
+                $submittedDocumentIds = array_keys($submittedDocumentIdSet);
+                $submittedDocumentId = (string)$submittedDocumentIds[0];
+                if ($storedDocumentId === ''
+                    || $storedDocumentId !== $submittedDocumentId
+                    || (string)($storedDocumentRow['relation_type'] ?? '')
+                        !== 'evidence'
+                    || (int)($storedDocumentRow['position_no'] ?? -1) !== 0
+                    || isset($duplicateSubmittedDocumentIds[$storedDocumentId])
+                    || !isset($submittedDocumentsById[$storedDocumentId])
+                    || !v1_dart_identity_change_document_matches(
+                        $storedDocumentRow,
+                        $submittedDocumentsById[$storedDocumentId],
+                        !empty($reviewedEventReplay['is_correction'])
+                    )) {
+                    throw new RuntimeException(
+                        'followup_event_identity_conflict:' . $submittedEventId
+                    );
+                }
+                $storedDocumentOwners = v1_pdo_fetch_all_and_close(
+                    $isolatedReplayDocumentOwnersStmt,
+                    array($storedDocumentId)
+                );
+                $submittedReferenceOwners = isset(
+                    $submittedDocumentReferenceEventIds[$storedDocumentId]
+                ) ? array_keys(
+                    $submittedDocumentReferenceEventIds[$storedDocumentId]
+                ) : array();
+                $canonicalActorId =
+                    (string)$reviewedEventReplay['canonical_actor_id'];
+                $approvedActorRows = v1_pdo_fetch_all_and_close(
+                    $reviewedDartIdentityActorStmt,
+                    array($submittedEventId,$canonicalActorId)
+                );
+                $storedObservationRows = v1_pdo_fetch_all_and_close(
+                    $reviewedDartEventObservationsStmt,
+                    array($submittedEventId)
+                );
+                if (count($storedDocumentOwners) !== 1
+                    || count($submittedReferenceOwners) !== 1
+                    || (string)$submittedReferenceOwners[0]
+                        !== $submittedEventId
+                    || (string)($storedDocumentOwners[0]['document_id'] ?? '')
+                        !== $storedDocumentId
+                    || (string)($storedDocumentOwners[0]['event_id'] ?? '')
+                        !== $submittedEventId
+                    || (string)($storedDocumentOwners[0]['company_id'] ?? '')
+                        !== $submittedCompanyId
+                    || (string)($storedDocumentOwners[0]['identity_status'] ?? '')
+                        !== 'complete'
+                    || count($storedObservationRows) !== 1
+                    || (string)($storedObservationRows[0]['event_id'] ?? '')
+                        !== $submittedEventId
+                    || (string)($storedObservationRows[0]['document_id'] ?? '')
+                        !== $storedDocumentId
+                    || (string)($storedObservationRows[0]['source_class'] ?? '')
+                        !== 'official_disclosure'
+                    || strtolower((string)(
+                        $storedObservationRows[0]['source_key'] ?? ''
+                    )) !== 'dart'
+                    || count($approvedActorRows) !== 1) {
+                    throw new RuntimeException(
+                        'followup_event_identity_conflict:' . $submittedEventId
+                    );
+                }
+                $isolatedReplayDocumentSnapshots[$storedDocumentId] =
+                    $storedDocumentRow;
+                $readOnlyDartIdentityMutationEventIds[$submittedEventId] =
+                    array(
+                        'event_documents'=>count($storedDocumentRows),
+                        'event_observations'=>count($storedObservationRows),
+                    );
+                $readOnlyDartReviewedEventCompanyIds[$submittedEventId] =
+                    $submittedCompanyId;
+                $readOnlyDartReviewedDocumentIds[$storedDocumentId] = true;
+                continue;
+            }
+            if ((string)$isolatedReplayEvent['identity_status']
+                !== 'needs_review') {
+                continue;
+            }
             $storedFollowupFlag = is_array($storedEventPayload)
                 && (!empty($storedEventPayload['is_correction']) || !empty($storedEventPayload['is_cancelled']));
             $storedIsolationMarker = is_array($storedEventPayload)
@@ -9175,7 +9990,12 @@ function upsert_governance_snapshot(
                 $isolatedReplayCanonicalEventPayloads[$submittedEventId] =
                     $storedEventPayload;
                 $readOnlyDartIdentityMutationEventIds[$submittedEventId] =
-                    count($storedDocumentRows);
+                    array(
+                        'event_documents'=>count($storedDocumentRows),
+                        // Preserve the existing ACK contract: this guarded
+                        // event already owns one observation per evidence row.
+                        'event_observations'=>count($storedDocumentRows),
+                    );
                 $approvedIsolatedReplayEventIds[$submittedEventId] = true;
                 continue;
             }
@@ -9464,6 +10284,39 @@ function upsert_governance_snapshot(
                 array($submittedOrReferencedDocumentId)
             );
             foreach ($storedOwnerRows as $storedOwnerRow) {
+                $storedOwnerEventId = (string)$storedOwnerRow['event_id'];
+                $submittedReferenceOwners = isset(
+                    $submittedDocumentReferenceEventIds[
+                        $submittedOrReferencedDocumentId
+                    ]
+                ) ? array_keys(
+                    $submittedDocumentReferenceEventIds[
+                        $submittedOrReferencedDocumentId
+                    ]
+                ) : array();
+                if (v1_dart_reviewed_event_is_protected($storedOwnerRow)) {
+                    if ((string)$storedOwnerRow['document_id']
+                            !== $submittedOrReferencedDocumentId
+                        || count($submittedReferenceOwners) !== 1
+                        || (string)$submittedReferenceOwners[0]
+                            !== $storedOwnerEventId
+                        || !isset(
+                            $readOnlyDartReviewedEventCompanyIds[
+                                $storedOwnerEventId
+                            ]
+                        )
+                        || !isset(
+                            $readOnlyDartReviewedDocumentIds[
+                                $submittedOrReferencedDocumentId
+                            ]
+                        )) {
+                        throw new RuntimeException(
+                            'followup_event_identity_conflict:'
+                            . $storedOwnerEventId
+                        );
+                    }
+                    continue;
+                }
                 if ((string)($storedOwnerRow['identity_status'] ?? '') !== 'needs_review') {
                     continue;
                 }
@@ -9480,15 +10333,12 @@ function upsert_governance_snapshot(
                 if (!$storedOwnerFollowup && $storedOwnerMarker === '' && !$storedOwnerLifecycle) {
                     continue;
                 }
-                $storedOwnerEventId = (string)$storedOwnerRow['event_id'];
                 if ((string)$storedOwnerRow['document_id'] !== $submittedOrReferencedDocumentId
                     || !$storedOwnerFollowup
                     || $storedOwnerMarker !== 'ambiguous_independent'
                     || !isset($approvedIsolatedReplayEventIds[$storedOwnerEventId])) {
                     throw new RuntimeException('followup_event_identity_conflict:' . $storedOwnerEventId);
                 }
-                $submittedReferenceOwners = isset($submittedDocumentReferenceEventIds[$submittedOrReferencedDocumentId])
-                    ? array_keys($submittedDocumentReferenceEventIds[$submittedOrReferencedDocumentId]) : array();
                 foreach ($submittedReferenceOwners as $submittedReferenceOwner) {
                     if ($submittedReferenceOwner !== $storedOwnerEventId) {
                         throw new RuntimeException('followup_event_identity_conflict:' . $storedOwnerEventId);
@@ -9533,6 +10383,76 @@ function upsert_governance_snapshot(
                 $now,
                 $now,
             ));
+        }
+        $readOnlyDartReviewedCompanyIds = array_fill_keys(
+            array_values($readOnlyDartReviewedEventCompanyIds),
+            true
+        );
+        foreach ($events as $submittedEvent) {
+            if (!is_array($submittedEvent)) { continue; }
+            $submittedEventId = trim((string)v1_first(
+                $submittedEvent,
+                array('event_id'),
+                ''
+            ));
+            $submittedCompanyId = trim((string)v1_first(
+                $submittedEvent,
+                array('company_id','corp_code'),
+                ''
+            ));
+            if (isset($readOnlyDartReviewedCompanyIds[$submittedCompanyId])
+                && !isset(
+                    $readOnlyDartReviewedEventCompanyIds[$submittedEventId]
+                )) {
+                unset($readOnlyDartReviewedCompanyIds[$submittedCompanyId]);
+            }
+        }
+        foreach ($documents as $submittedDocument) {
+            if (!is_array($submittedDocument)) { continue; }
+            $submittedDocumentId =
+                v1_governance_snapshot_document_id($submittedDocument);
+            $submittedCompanyId = trim((string)v1_first(
+                $submittedDocument,
+                array('company_id','corp_code'),
+                ''
+            ));
+            if (isset($readOnlyDartReviewedCompanyIds[$submittedCompanyId])
+                && !isset(
+                    $readOnlyDartReviewedDocumentIds[$submittedDocumentId]
+                )) {
+                unset($readOnlyDartReviewedCompanyIds[$submittedCompanyId]);
+            }
+        }
+        $submittedReadOnlyCompanies = array();
+        foreach ($companies as $submittedCompany) {
+            if (!is_array($submittedCompany)) { continue; }
+            $submittedCompanyId = trim((string)v1_first(
+                $submittedCompany,
+                array('company_id','corp_code'),
+                ''
+            ));
+            if (!isset($readOnlyDartReviewedCompanyIds[$submittedCompanyId])) {
+                continue;
+            }
+            if (isset($submittedReadOnlyCompanies[$submittedCompanyId])) {
+                throw new RuntimeException(
+                    'followup_event_identity_conflict:' . $submittedCompanyId
+                );
+            }
+            $submittedReadOnlyCompanies[$submittedCompanyId] =
+                $submittedCompany;
+        }
+        foreach ($readOnlyDartReviewedCompanyIds as $companyId => $_unused) {
+            if (!isset($submittedReadOnlyCompanies[$companyId])
+                || !v1_dart_reviewed_company_replay_matches(
+                    $pdo,
+                    $config,
+                    $submittedReadOnlyCompanies[$companyId]
+                )) {
+                throw new RuntimeException(
+                    'followup_event_identity_conflict:' . $companyId
+                );
+            }
         }
         $companyStmt = $pdo->prepare('INSERT INTO ' . table_name($config, 'companies') . ' (company_id, stock_code, market, legal_name, legal_name_en, short_name, aliases_json, homepage_url, record_status, listing_status, master_modified_at, created_at, updated_at) '
             . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE stock_code=COALESCE(NULLIF(VALUES(stock_code),\'\'),stock_code), '
@@ -9583,6 +10503,9 @@ function upsert_governance_snapshot(
         foreach ($companies as $company) {
             if (!is_array($company)) { continue; }
             $companyId = trim((string)v1_first($company, array('company_id', 'corp_code'), ''));
+            if (isset($readOnlyDartReviewedCompanyIds[$companyId])) {
+                continue;
+            }
             $legalName = trim((string)v1_first($company, array('legal_name', 'corp_name'), ''));
             if (!preg_match('/^[0-9]{8}$/', $companyId) || $legalName === '') { continue; }
             $aliases = array();
@@ -9953,14 +10876,29 @@ function upsert_governance_snapshot(
             $submittedEventId = trim((string)v1_first($event, array('event_id'), ''));
             if (isset($readOnlyDartIdentityMutationEventIds[$submittedEventId])) {
                 // The preflight locked and proved the canonical event, its sole
-                // DART evidence document and the append-only lifecycle row.
-                // Acknowledge the isolated source mutation without touching
-                // canonical rows or their observation timestamps.
-                $readOnlyEvidenceCount =
-                    (int)$readOnlyDartIdentityMutationEventIds[$submittedEventId];
+                // DART evidence document and observation, approved actor
+                // relation and exact raw source payload. Acknowledge it without
+                // touching canonical rows, lifecycle rows or timestamps.
+                $readOnlyAckCounts =
+                    $readOnlyDartIdentityMutationEventIds[$submittedEventId];
+                if (!is_array($readOnlyAckCounts)
+                    || !isset(
+                        $readOnlyAckCounts['event_documents'],
+                        $readOnlyAckCounts['event_observations']
+                    )
+                    || !is_int($readOnlyAckCounts['event_documents'])
+                    || !is_int($readOnlyAckCounts['event_observations'])
+                    || $readOnlyAckCounts['event_documents'] < 0
+                    || $readOnlyAckCounts['event_observations'] < 0) {
+                    throw new RuntimeException(
+                        'followup_event_identity_conflict:' . $submittedEventId
+                    );
+                }
                 $counts['events']++;
-                $counts['event_documents'] += $readOnlyEvidenceCount;
-                $counts['event_observations'] += $readOnlyEvidenceCount;
+                $counts['event_documents'] +=
+                    (int)$readOnlyAckCounts['event_documents'];
+                $counts['event_observations'] +=
+                    (int)$readOnlyAckCounts['event_observations'];
                 continue;
             }
             if (isset($isolatedReplayCanonicalEventPayloads[$submittedEventId])) {

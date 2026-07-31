@@ -37,6 +37,7 @@ jobs:
       legacy_pin_artifact_name: ${{ steps.legacy_recovery.outputs.pin_artifact_name }}
       legacy_pin_code_revision: ${{ steps.legacy_recovery.outputs.pin_code_revision }}
       legacy_pin_artifact_digest: ${{ steps.legacy_recovery.outputs.pin_artifact_digest }}
+      orphaned_unstarted_json: ${{ steps.pages_producers.outputs.orphaned_unstarted_json }}
     steps:
       - name: Checkout rollback verifier
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -92,21 +93,212 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Cancel stale Pages producer runs before rollback deployment
+      - name: Cancel or quarantine stale Pages producer runs before rollback deployment
+        id: pages_producers
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EXPECTED_SHA: ${{ github.sha }}
         with:
           script: |
+            const orphanClassifier = require(
+              "./.github/scripts/orphaned-pages-run.cjs",
+            );
             const {owner, repo} = context.repo;
-            const active = new Set(["queued", "in_progress", "pending", "waiting"]);
-            for (const workflow_id of ["build-feed.yml", "daily.yml"]) {
-              const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
-                owner, repo, workflow_id, per_page: 100,
-              });
-              for (const run of runs) {
-                if (active.has(run.status)) {
-                  await github.rest.actions.cancelWorkflowRun({owner, repo, run_id: run.id});
+            const workflowSpecs = [
+              {
+                id: "build-feed.yml",
+                path: ".github/workflows/build-feed.yml",
+              },
+              {
+                id: "daily.yml",
+                path: ".github/workflows/daily.yml",
+              },
+            ];
+            const activeStatuses = [
+              "queued", "in_progress", "pending", "waiting", "requested",
+            ];
+            const listActive = async () => {
+              const found = new Map();
+              for (const workflow of workflowSpecs) {
+                for (const status of activeStatuses) {
+                  const runs = await github.paginate(
+                    github.rest.actions.listWorkflowRuns,
+                    {
+                      owner,
+                      repo,
+                      workflow_id: workflow.id,
+                      branch: process.env.DEFAULT_BRANCH,
+                      status,
+                      per_page: 100,
+                    },
+                  );
+                  for (const run of runs) {
+                    if (Number(run.id) !== Number(context.runId)) {
+                      found.set(run.id, {
+                        run,
+                        workflowId: workflow.path,
+                        status,
+                      });
+                    }
+                  }
                 }
               }
+              return [...found.values()];
+            };
+            const orphanedUnstarted = new Map();
+            const orphanSnapshots = new Map();
+            const attemptedCancel = new Set();
+            const forceCancelled = new Set();
+            const cancelOrClassify = async ({run, workflowId, status}) => {
+              if (attemptedCancel.has(run.id) || orphanedUnstarted.has(run.id)) {
+                return;
+              }
+              attemptedCancel.add(run.id);
+              core.notice(
+                `Cancelling pre-rollback Pages producer ${run.id} ` +
+                `(${workflowId}, ${status}).`,
+              );
+              try {
+                await github.rest.actions.cancelWorkflowRun({
+                  owner,
+                  repo,
+                  run_id: run.id,
+                });
+              } catch (error) {
+                if ([409, 422].includes(orphanClassifier.statusOf(error))) {
+                  await orphanClassifier.confirmTerminalAfterCancelConflict({
+                    github,
+                    owner,
+                    repo,
+                    runId: run.id,
+                    error,
+                  });
+                  return;
+                }
+                const result = await orphanClassifier.handleCancelServerError({
+                  github,
+                  owner,
+                  repo,
+                  run,
+                  workflowId,
+                  currentSha: process.env.EXPECTED_SHA,
+                  nowMs: Date.now(),
+                  cancelError: error,
+                });
+                if (result.forceCancelled) {
+                  forceCancelled.add(run.id);
+                }
+                if (result.orphanedUnstarted) {
+                  orphanedUnstarted.set(run.id, result.orphanedUnstarted);
+                  orphanSnapshots.set(run.id, {
+                    id: run.id,
+                    path: run.path,
+                    status: run.status,
+                    head_sha: run.head_sha,
+                    run_attempt: run.run_attempt,
+                    created_at: run.created_at,
+                    run_started_at: run.run_started_at,
+                    updated_at: run.updated_at,
+                  });
+                  core.warning(
+                    `Quarantined orphaned_unstarted Pages producer ${run.id}.`,
+                  );
+                }
+              }
+            };
+            for (const entry of await listActive()) {
+              await cancelOrClassify(entry);
+            }
+            const deadline = Date.now() + 4 * 60 * 1000;
+            const forceCancelAt = Date.now() + 30 * 1000;
+            let consecutiveEmptyScans = 0;
+            while (true) {
+              const scanned = await listActive();
+              for (const entry of scanned) {
+                await cancelOrClassify(entry);
+              }
+              const remaining = scanned.filter(
+                ({run}) => !orphanedUnstarted.has(run.id),
+              );
+              if (remaining.length === 0) {
+                consecutiveEmptyScans += 1;
+                if (consecutiveEmptyScans >= 2) {
+                  for (const [runId, classification] of orphanedUnstarted) {
+                    const revalidated =
+                      await orphanClassifier.revalidateOrphanedUnstarted({
+                        github,
+                        owner,
+                        repo,
+                        listedRun: orphanSnapshots.get(runId),
+                        currentSha: process.env.EXPECTED_SHA,
+                        nowMs: Date.now(),
+                      });
+                    if (
+                      revalidated.run_id !== classification.run_id ||
+                      revalidated.head_sha !== classification.head_sha ||
+                      revalidated.created_at !== classification.created_at
+                    ) {
+                      throw new Error(
+                        `Orphaned Pages run ${runId} audit changed during revalidation`,
+                      );
+                    }
+                  }
+                  const auditEntries = [...orphanedUnstarted.keys()]
+                    .sort((left, right) => left - right)
+                    .map((runId) => ({
+                      classification: orphanedUnstarted.get(runId),
+                      snapshot: orphanSnapshots.get(runId),
+                    }));
+                  core.setOutput(
+                    "orphaned_unstarted_json",
+                    JSON.stringify(auditEntries),
+                  );
+                  await core.summary
+                    .addHeading("Rollback Pages producer drain audit", 3)
+                    .addCodeBlock(
+                      JSON.stringify(
+                        {orphaned_unstarted: auditEntries},
+                        null,
+                        2,
+                      ),
+                      "json",
+                    )
+                    .write();
+                  break;
+                }
+              } else {
+                consecutiveEmptyScans = 0;
+                if (Date.now() >= forceCancelAt) {
+                  for (const {run} of remaining) {
+                    if (forceCancelled.has(run.id)) {
+                      continue;
+                    }
+                    try {
+                      await github.rest.actions.forceCancelWorkflowRun({
+                        owner,
+                        repo,
+                        run_id: run.id,
+                      });
+                      forceCancelled.add(run.id);
+                    } catch (error) {
+                      await orphanClassifier.confirmTerminalAfterCancelConflict({
+                        github,
+                        owner,
+                        repo,
+                        runId: run.id,
+                        error,
+                      });
+                    }
+                  }
+                }
+              }
+              if (Date.now() >= deadline) {
+                throw new Error(
+                  `Pages producer drain timed out with ${remaining.length} active run(s).`,
+                );
+              }
+              await new Promise((resolve) => setTimeout(resolve, 5000));
             }
 
       - name: Resolve rolling legacy recovery source
@@ -246,6 +438,88 @@ jobs:
             --expected-source-artifact-name "$LEGACY_ARTIFACT_NAME" \
             --expected-source-code-revision "$LEGACY_CODE_REVISION" \
             --expected-source-artifact-digest "$LEGACY_ARTIFACT_DIGEST"
+
+      - name: Revalidate quarantined orphaned Pages producers before deployment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          ORPHANED_UNSTARTED_JSON: ${{ needs.close.outputs.orphaned_unstarted_json }}
+        with:
+          script: |
+            const orphanClassifier = require(
+              "./.github/scripts/orphaned-pages-run.cjs",
+            );
+            const {owner, repo} = context.repo;
+            let entries;
+            try {
+              entries = JSON.parse(process.env.ORPHANED_UNSTARTED_JSON || "[]");
+            } catch (error) {
+              throw new Error("Rollback orphan audit output is not valid JSON");
+            }
+            if (!Array.isArray(entries)) {
+              throw new Error("Rollback orphan audit output must be an array");
+            }
+            const seen = new Set();
+            for (const entry of entries) {
+              const classification = entry && entry.classification;
+              const snapshot = entry && entry.snapshot;
+              const runId = Number(classification && classification.run_id);
+              if (
+                !Number.isSafeInteger(runId) ||
+                runId <= 0 ||
+                seen.has(runId) ||
+                !snapshot ||
+                Number(snapshot.id) !== runId
+              ) {
+                throw new Error("Rollback orphan audit entry is malformed");
+              }
+              seen.add(runId);
+              const live = await github.rest.actions.getWorkflowRun({
+                owner,
+                repo,
+                run_id: runId,
+              });
+              const revalidated =
+                live && live.data && live.data.status === "completed"
+                  ? await orphanClassifier.confirmCancelledOrphanedUnstarted({
+                      github,
+                      owner,
+                      repo,
+                      listedRun: snapshot,
+                      currentSha: process.env.EXPECTED_SHA,
+                    })
+                  : await orphanClassifier.revalidateOrphanedUnstarted({
+                      github,
+                      owner,
+                      repo,
+                      listedRun: snapshot,
+                      currentSha: process.env.EXPECTED_SHA,
+                      nowMs: Date.now(),
+                    });
+              if (
+                revalidated.run_id !== classification.run_id ||
+                revalidated.head_sha !== classification.head_sha ||
+                revalidated.created_at !== classification.created_at
+              ) {
+                throw new Error(
+                  `Orphaned Pages run ${runId} changed before rollback deployment`,
+                );
+              }
+            }
+            await core.summary
+              .addHeading("Rollback orphan revalidation", 3)
+              .addCodeBlock(
+                JSON.stringify(
+                  {
+                    status: "verified",
+                    orphaned_unstarted_count: entries.length,
+                  },
+                  null,
+                  2,
+                ),
+                "json",
+              )
+              .write();
 
       - name: Re-close v2 then v1 inside Pages deployment lock
         env:

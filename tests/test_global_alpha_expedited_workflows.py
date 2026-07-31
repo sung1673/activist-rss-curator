@@ -502,6 +502,11 @@ def test_expedited_cutover_deploys_smokes_then_atomically_activates() -> None:
     )
     assert "/admin/release-authorizations" in atomic["run"]
     assert "/admin/cutover" in atomic["run"]
+    assert (
+        '[[ "$BSIDE_RELEASE_AUTHORIZER_TOKEN" != "$BSIDE_ADMIN_TOKEN" ]]'
+        in atomic["run"]
+    )
+    assert "Protected release roles must use distinct credentials." in atomic["run"]
     assert "openssl rand -hex 32" in atomic["run"]
     assert "::add-mask::$release_nonce" in atomic["run"]
     assert "expected_v1_state_version" in atomic["run"]

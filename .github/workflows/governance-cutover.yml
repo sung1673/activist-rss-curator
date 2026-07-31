@@ -863,6 +863,10 @@ jobs:
             echo "::error::BSIDE_RELEASE_AUTHORIZER_TOKEN is required in the protected governance-release environment."
             exit 1
           }
+          [[ "$BSIDE_RELEASE_AUTHORIZER_TOKEN" != "$BSIDE_ADMIN_TOKEN" ]] || {
+            echo "::error::Protected release roles must use distinct credentials."
+            exit 1
+          }
           [[ "$EVIDENCE_ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$EVIDENCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$EVIDENCE_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]

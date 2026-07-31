@@ -2075,6 +2075,50 @@ def exercise_event_identity_datetime_storage(
             f"WHERE entity_type='event' AND entity_id='{event_id}'))",
         )
 
+    def reviewed_company_master_signature() -> str:
+        issuer_id = f"issuer:kr:dart:{company_id}"
+        return mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),stock_code,market,legal_name,"
+            "COALESCE(legal_name_en,'<NULL>'),COALESCE(short_name,'<NULL>'),"
+            "COALESCE(aliases_json,'<NULL>'),COALESCE(homepage_url,'<NULL>'),"
+            "record_status,listing_status,"
+            "COALESCE(master_modified_at,'<NULL>'),created_at,updated_at),256) "
+            f"FROM ci_companies WHERE company_id='{company_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),country_code,legal_name,"
+            "COALESCE(legal_name_en,'<NULL>'),COALESCE(short_name,'<NULL>'),"
+            "original_language,COALESCE(homepage_url,'<NULL>'),listing_status,"
+            "record_status,COALESCE(master_modified_at,'<NULL>'),"
+            "COALESCE(payload_json,'<NULL>'),created_at,updated_at),256) "
+            f"FROM ci_issuers WHERE issuer_id='{issuer_id}'),"
+            "(SELECT COALESCE(SHA2(GROUP_CONCAT(CONCAT_WS(CHAR(31),"
+            "identifier_type,identifier_value,market,is_primary,"
+            "COALESCE(valid_from,'<NULL>'),COALESCE(valid_until,'<NULL>'),"
+            "created_at,updated_at) ORDER BY identifier_type,identifier_value,"
+            "market),256),SHA2('<NONE>',256)) FROM ci_issuer_identifiers "
+            f"WHERE issuer_id='{issuer_id}'),"
+            "(SELECT COALESCE(SHA2(GROUP_CONCAT(CONCAT_WS(CHAR(31),listing_id,"
+            "country_code,market,COALESCE(ticker,'<NULL>'),"
+            "COALESCE(isin,'<NULL>'),COALESCE(currency_code,'<NULL>'),"
+            "listing_status,is_primary,created_at,updated_at) "
+            "ORDER BY listing_id),256),SHA2('<NONE>',256)) "
+            f"FROM ci_issuer_listings WHERE issuer_id='{issuer_id}'))",
+        )
+
+    def reviewed_company_master_rows() -> str:
+        issuer_id = f"issuer:kr:dart:{company_id}"
+        return mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',"
+            f"(SELECT COUNT(*) FROM ci_companies WHERE company_id='{company_id}'),"
+            f"(SELECT COUNT(*) FROM ci_issuers WHERE issuer_id='{issuer_id}'),"
+            "(SELECT COUNT(*) FROM ci_issuer_identifiers "
+            f"WHERE issuer_id='{issuer_id}'),"
+            "(SELECT COUNT(*) FROM ci_issuer_listings "
+            f"WHERE issuer_id='{issuer_id}'))",
+        )
+
     for followup_document, followup_event in (
         (correction_document, correction_event),
         (cancellation_document, cancellation_event),
@@ -2771,13 +2815,1024 @@ def exercise_event_identity_datetime_storage(
         repr(missing_marker_bypass),
     )
 
+    reviewed_ordinary_event_id = "event:ci-reviewed-ordinary-read-only"
+    reviewed_ordinary_document_id = "dart:20260724999009"
+    rejected_ordinary_document_id = "dart:20260724999010"
+    reviewed_ordinary_actor_id = "actor:ci-reviewed-ordinary"
+    reviewed_ordinary_document = document(
+        reviewed_ordinary_document_id,
+        "dart",
+        source_right_id,
+        "CI reviewed ordinary source receipt",
+    )
+    reviewed_ordinary_event = incomplete_followup(
+        reviewed_ordinary_event_id,
+        reviewed_ordinary_document_id,
+        is_correction=False,
+        is_cancelled=False,
+    )
+    reviewed_ordinary_event.update(
+        {
+            "title": "CI reviewed ordinary source event",
+            "deadline_at": f"{deadline_date}T00:00:00Z",
+            "actor_id": reviewed_ordinary_actor_id,
+            "identity_actor_id": reviewed_ordinary_actor_id,
+            "identity_deadline_at": f"{deadline_date}T00:00:00Z",
+            "actor": {
+                "actor_id": reviewed_ordinary_actor_id,
+                "actor_type": "institution",
+                "display_name": "CI Reviewed Ordinary Filer",
+                "company_id": None,
+                "country_code": "KR",
+                "review_status": "pending",
+                "record_status": "inactive",
+            },
+            "event_actor": {
+                "event_id": reviewed_ordinary_event_id,
+                "actor_id": reviewed_ordinary_actor_id,
+                "actor_role": "filer",
+                "review_status": "pending",
+            },
+        }
+    )
+    reviewed_ordinary_source_write = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(
+            reviewed_ordinary_document,
+            reviewed_ordinary_event,
+        ),
+        expected_status=200,
+    )
+    require(
+        reviewed_ordinary_source_write.get("ok") is True,
+        repr(reviewed_ordinary_source_write),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',identity_status,review_status,"
+            "publication_status,"
+            "JSON_CONTAINS_PATH(payload_json,'one','$.event_link_status')) "
+            "FROM ci_governance_events "
+            f"WHERE event_id='{reviewed_ordinary_event_id}'",
+        )
+        == "needs_review|pending|draft|0",
+        "reviewed ordinary source fixture did not retain its raw no-marker state",
+    )
+
+    reviewed_ordinary_family = "meeting_and_vote"
+    reviewed_ordinary_action = "confirm meeting agenda"
+    reviewed_ordinary_target = "editorial canonical voting item"
+    reviewed_ordinary_effective_at = "2026-07-22 00:00:00"
+    reviewed_ordinary_deadline_at = f"{deadline_date} 00:00:00"
+    reviewed_ordinary_identity = {
+        "issuer_id": f"issuer:kr:dart:{company_id}",
+        "event_family": reviewed_ordinary_family,
+        "action": reviewed_ordinary_action,
+        "target": reviewed_ordinary_target,
+        "actor_id": reviewed_ordinary_actor_id,
+        "effective_at": reviewed_ordinary_effective_at,
+        "deadline_at": reviewed_ordinary_deadline_at,
+    }
+    reviewed_ordinary_comparison_key = (
+        "global:" + canonical_sha256(reviewed_ordinary_identity)
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_actors SET country_code='KR',review_status='approved',"
+        "record_status='active',"
+        "updated_at=GREATEST(UTC_TIMESTAMP(),DATE_ADD(updated_at,INTERVAL 1 SECOND)) "
+        f"WHERE actor_id='{reviewed_ordinary_actor_id}';"
+        "UPDATE ci_event_actors SET review_status='approved',"
+        "updated_at=GREATEST(UTC_TIMESTAMP(),DATE_ADD(updated_at,INTERVAL 1 SECOND)) "
+        f"WHERE event_id='{reviewed_ordinary_event_id}' "
+        f"AND actor_id='{reviewed_ordinary_actor_id}' AND actor_role='filer';"
+        "UPDATE ci_documents SET publication_status='published',"
+        "updated_at=GREATEST(UTC_TIMESTAMP(),DATE_ADD(updated_at,INTERVAL 1 SECOND)) "
+        f"WHERE document_id='{reviewed_ordinary_document_id}';"
+        "UPDATE ci_governance_events SET "
+        f"global_event_family='{reviewed_ordinary_family}',"
+        f"event_type='{reviewed_ordinary_family}',"
+        "title='CI editorial canonical ordinary event',"
+        "summary='Human-reviewed canonical ordinary summary',"
+        "importance='high',current_status='reviewed',"
+        f"deadline_at='{reviewed_ordinary_deadline_at}',"
+        f"identity_action='{reviewed_ordinary_action}',"
+        f"identity_target='{reviewed_ordinary_target}',"
+        f"identity_actor_id='{reviewed_ordinary_actor_id}',"
+        f"identity_effective_at='{reviewed_ordinary_effective_at}',"
+        f"identity_deadline_at='{reviewed_ordinary_deadline_at}',"
+        "identity_status='complete',"
+        f"comparison_key='{reviewed_ordinary_comparison_key}',"
+        "verification_status='official',review_status='approved',"
+        "publication_status='published',"
+        "updated_at=GREATEST(UTC_TIMESTAMP(),DATE_ADD(updated_at,INTERVAL 1 SECOND)) "
+        f"WHERE event_id='{reviewed_ordinary_event_id}';",
+    )
+
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_governance_events SET review_status='pending',"
+        "publication_status='draft' "
+        f"WHERE event_id='{reviewed_ordinary_event_id}';",
+    )
+    unreviewed_ordinary_replay = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(
+            reviewed_ordinary_document,
+            reviewed_ordinary_event,
+        ),
+        expected_status=409,
+    )
+    require(
+        unreviewed_ordinary_replay.get("ok") is False,
+        "unreviewed ordinary event entered the reviewed read-only ACK path",
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_governance_events SET review_status='approved',"
+        "publication_status='published' "
+        f"WHERE event_id='{reviewed_ordinary_event_id}';",
+    )
+
+    def reviewed_ordinary_canonical_signature() -> str:
+        return mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),payload_json,"
+            "COALESCE(issuer_id,'<NULL>'),COALESCE(country_code,'<NULL>'),"
+            "COALESCE(global_event_family,'<NULL>'),event_type,title,"
+            "COALESCE(summary,'<NULL>'),occurred_at,"
+            "COALESCE(deadline_at,'<NULL>'),importance,"
+            "COALESCE(current_status,'<NULL>'),verification_status,"
+            "review_status,publication_status,identity_action,identity_target,"
+            "identity_actor_id,identity_effective_at,"
+            "COALESCE(identity_deadline_at,'<NULL>'),identity_status,"
+            "comparison_key,created_at,updated_at),256) "
+            "FROM ci_governance_events "
+            f"WHERE event_id='{reviewed_ordinary_event_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),payload_json,company_id,"
+            "source_right_id,source_class,external_id,document_type,"
+            "original_language,title,COALESCE(body_text,'<NULL>'),original_url,"
+            "content_hash,collection_key,"
+            "COALESCE(correction_of_document_id,'<NULL>'),version_no,"
+            "published_at,retrieved_at,verification_status,publication_status,"
+            "created_at,updated_at),256) FROM ci_documents "
+            f"WHERE document_id='{reviewed_ordinary_document_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),document_id,relation_type,"
+            "position_no,created_at),256) FROM ci_event_documents "
+            f"WHERE event_id='{reviewed_ordinary_event_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),document_id,source_class,"
+            "source_key,first_observed_at,observed_at,payload_hash,payload_json,"
+            "created_at,updated_at),256) FROM ci_event_observations "
+            f"WHERE event_id='{reviewed_ordinary_event_id}'),"
+            "COALESCE((SELECT SHA2(CONCAT_WS(CHAR(31),document_id,occurred_at,"
+            "entry_type,title,COALESCE(description,'<NULL>'),original_language,"
+            "review_status,publication_status,created_at,updated_at),256) "
+            "FROM ci_timeline_entries "
+            f"WHERE event_id='{reviewed_ordinary_event_id}'),SHA2('<NONE>',256)),"
+            "(SELECT COALESCE(SHA2(GROUP_CONCAT(CONCAT_WS(CHAR(31),revision_id,"
+            "field_name,COALESCE(previous_value,'<NULL>'),"
+            "COALESCE(revised_value,'<NULL>'),reason,revision_status,"
+            "requested_by,COALESCE(reviewed_by,'<NULL>'),"
+            "COALESCE(reviewed_at,'<NULL>'),"
+            "COALESCE(published_at,'<NULL>'),created_at,updated_at) "
+            "ORDER BY revision_id),256),SHA2('<NONE>',256)) "
+            "FROM ci_editorial_revisions "
+            f"WHERE entity_type='event' AND entity_id='{reviewed_ordinary_event_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),review_status,record_status,"
+            "country_code,created_at,updated_at),256) FROM ci_actors "
+            f"WHERE actor_id='{reviewed_ordinary_actor_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),actor_role,review_status,"
+            "created_at,updated_at),256) FROM ci_event_actors "
+            f"WHERE event_id='{reviewed_ordinary_event_id}' "
+            f"AND actor_id='{reviewed_ordinary_actor_id}'))",
+        )
+
+    reviewed_ordinary_before = reviewed_ordinary_canonical_signature()
+    require(
+        len(reviewed_ordinary_before.split("|")) == 8
+        and all(
+            len(value) == 64
+            for value in reviewed_ordinary_before.split("|")
+        ),
+        "reviewed ordinary canonical fixture signature is incomplete: "
+        f"{reviewed_ordinary_before!r}",
+    )
+    reviewed_ordinary_rows_before = followup_row_signature(
+        reviewed_ordinary_event_id,
+        reviewed_ordinary_document_id,
+    )
+    reviewed_ordinary_master_before = reviewed_company_master_signature()
+    reviewed_ordinary_master_rows_before = reviewed_company_master_rows()
+    require(
+        reviewed_ordinary_rows_before == "1|1|1|1|0|0",
+        "reviewed ordinary fixture row counts are incomplete: "
+        f"{reviewed_ordinary_rows_before!r}",
+    )
+    require(
+        len(reviewed_ordinary_master_before.split("|")) == 4
+        and all(
+            len(value) == 64
+            for value in reviewed_ordinary_master_before.split("|")
+        )
+        and reviewed_ordinary_master_rows_before == "1|1|2|1",
+        "reviewed ordinary company/issuer fixture is incomplete",
+    )
+    reviewed_ordinary_lifecycle_before = mysql_execute(
+        mysql_container_id,
+        "SELECT COUNT(*) FROM ci_global_lifecycle_observations "
+        f"WHERE resolved_event_id='{reviewed_ordinary_event_id}'",
+    )
+    require(
+        reviewed_ordinary_lifecycle_before == "0",
+        "reviewed ordinary fixture unexpectedly has lifecycle writes",
+    )
+    for replay_number in (1, 2):
+        reviewed_ordinary_ack = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(
+                reviewed_ordinary_document,
+                reviewed_ordinary_event,
+            ),
+            expected_status=200,
+        )
+        require(
+            reviewed_ordinary_ack.get("ok") is True
+            and reviewed_ordinary_ack.get("upserted", {}).get("documents") == 1
+            and reviewed_ordinary_ack.get("upserted", {}).get("events") == 1
+            and reviewed_ordinary_ack.get("upserted", {}).get(
+                "event_documents"
+            )
+            == 1
+            and reviewed_ordinary_ack.get("upserted", {}).get(
+                "event_observations"
+            )
+            == 1,
+            repr(reviewed_ordinary_ack),
+        )
+        require(
+            reviewed_ordinary_canonical_signature()
+            == reviewed_ordinary_before
+            and followup_row_signature(
+                reviewed_ordinary_event_id,
+                reviewed_ordinary_document_id,
+            )
+            == reviewed_ordinary_rows_before
+            and reviewed_company_master_signature()
+            == reviewed_ordinary_master_before
+            and reviewed_company_master_rows()
+            == reviewed_ordinary_master_rows_before
+            and mysql_execute(
+                mysql_container_id,
+                "SELECT COUNT(*) FROM ci_global_lifecycle_observations "
+                f"WHERE resolved_event_id='{reviewed_ordinary_event_id}'",
+            )
+            == reviewed_ordinary_lifecycle_before,
+            f"reviewed ordinary ACK {replay_number} changed canonical state",
+        )
+
+    reviewed_company_mutations = (
+        ("legal_name", "CI changed legal name"),
+        ("stock_code", "888888"),
+        ("market", "KOSPI"),
+        ("legal_name_en", "CI Changed English Name"),
+        ("short_name", "CI Changed"),
+        ("aliases", ["CI changed alias"]),
+        ("homepage_url", "https://example.com/changed-company"),
+        ("record_status", "inactive"),
+        ("listing_status", "listed"),
+        ("master_modified_at", "2026-07-31T00:00:00Z"),
+    )
+    for field, mutated_value in reviewed_company_mutations:
+        mutated_company_payload = followup_payload(
+            reviewed_ordinary_document,
+            reviewed_ordinary_event,
+        )
+        mutated_company_payload["companies"] = [
+            {**company, field: mutated_value}
+        ]
+        rejected_company_replay = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            mutated_company_payload,
+            expected_status=409,
+        )
+        require(
+            error_code(rejected_company_replay)
+            == "followup_event_identity_conflict",
+            f"{field} company mutation entered the reviewed ACK path: "
+            f"{rejected_company_replay!r}",
+        )
+        require(
+            reviewed_ordinary_canonical_signature()
+            == reviewed_ordinary_before
+            and reviewed_company_master_signature()
+            == reviewed_ordinary_master_before
+            and reviewed_company_master_rows()
+            == reviewed_ordinary_master_rows_before,
+            f"{field} company mutation changed reviewed canonical state",
+        )
+
+    omitted_market_payload = followup_payload(
+        reviewed_ordinary_document,
+        reviewed_ordinary_event,
+    )
+    omitted_market_company = dict(company)
+    omitted_market_company.pop("market")
+    omitted_market_payload["companies"] = [omitted_market_company]
+    rejected_omitted_market_replay = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        omitted_market_payload,
+        expected_status=409,
+    )
+    require(
+        error_code(rejected_omitted_market_replay)
+        == "followup_event_identity_conflict",
+        "omitted market entered the reviewed ACK path even though the "
+        "generic projection would replace KOSDAQ with KRX",
+    )
+    require(
+        reviewed_ordinary_canonical_signature()
+        == reviewed_ordinary_before
+        and reviewed_company_master_signature()
+        == reviewed_ordinary_master_before
+        and reviewed_company_master_rows()
+        == reviewed_ordinary_master_rows_before,
+        "omitted market replay changed reviewed canonical state",
+    )
+
+    projection_mutations = (
+        (
+            "issuer",
+            "UPDATE ci_issuers SET legal_name='CI corrupted issuer' "
+            f"WHERE issuer_id='issuer:kr:dart:{company_id}';",
+            "UPDATE ci_issuers SET legal_name='CI Identity Precision Corp' "
+            f"WHERE issuer_id='issuer:kr:dart:{company_id}';",
+        ),
+        (
+            "dart_identifier",
+            "UPDATE ci_issuer_identifiers SET is_primary=0 "
+            f"WHERE issuer_id='issuer:kr:dart:{company_id}' "
+            "AND identifier_type='DART_CORP_CODE' "
+            f"AND identifier_value='{company_id}' AND market='KRX';",
+            "UPDATE ci_issuer_identifiers SET is_primary=1 "
+            f"WHERE issuer_id='issuer:kr:dart:{company_id}' "
+            "AND identifier_type='DART_CORP_CODE' "
+            f"AND identifier_value='{company_id}' AND market='KRX';",
+        ),
+        (
+            "ticker_identifier",
+            "UPDATE ci_issuer_identifiers SET is_primary=1 "
+            f"WHERE issuer_id='issuer:kr:dart:{company_id}' "
+            "AND identifier_type='TICKER' "
+            "AND identifier_value='999991' AND market='KOSDAQ';",
+            "UPDATE ci_issuer_identifiers SET is_primary=0 "
+            f"WHERE issuer_id='issuer:kr:dart:{company_id}' "
+            "AND identifier_type='TICKER' "
+            "AND identifier_value='999991' AND market='KOSDAQ';",
+        ),
+        (
+            "listing",
+            "UPDATE ci_issuer_listings SET market='CORRUPTED' "
+            f"WHERE listing_id='listing:kr:{company_id}';",
+            "UPDATE ci_issuer_listings SET market='KOSDAQ' "
+            f"WHERE listing_id='listing:kr:{company_id}';",
+        ),
+    )
+    for label, corrupt_sql, restore_sql in projection_mutations:
+        mysql_execute(mysql_container_id, corrupt_sql)
+        rejected_projection_replay = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(
+                reviewed_ordinary_document,
+                reviewed_ordinary_event,
+            ),
+            expected_status=409,
+        )
+        require(
+            error_code(rejected_projection_replay)
+            == "followup_event_identity_conflict",
+            f"{label} projection drift entered the reviewed ACK path: "
+            f"{rejected_projection_replay!r}",
+        )
+        mysql_execute(mysql_container_id, restore_sql)
+        require(
+            reviewed_ordinary_canonical_signature()
+            == reviewed_ordinary_before
+            and reviewed_company_master_signature()
+            == reviewed_ordinary_master_before
+            and reviewed_company_master_rows()
+            == reviewed_ordinary_master_rows_before,
+            f"{label} projection drift was not restored cleanly",
+        )
+
+    ordinary_mutated_summary = {
+        **reviewed_ordinary_event,
+        "summary": "third-party ordinary summary mutation",
+    }
+    ordinary_mutated_title_document = {
+        **reviewed_ordinary_document,
+        "title": "third-party ordinary document title mutation",
+    }
+    ordinary_mutated_hash_document = {
+        **reviewed_ordinary_document,
+        "content_hash": "e" * 64,
+    }
+    ordinary_mutated_actor_id = "actor:ci-reviewed-ordinary-mutated"
+    ordinary_mutated_actor = {
+        **reviewed_ordinary_event,
+        "actor_id": ordinary_mutated_actor_id,
+        "identity_actor_id": ordinary_mutated_actor_id,
+        "actor": {
+            **reviewed_ordinary_event["actor"],
+            "actor_id": ordinary_mutated_actor_id,
+        },
+        "event_actor": {
+            **reviewed_ordinary_event["event_actor"],
+            "actor_id": ordinary_mutated_actor_id,
+        },
+    }
+    ordinary_mutated_deadline = {
+        **reviewed_ordinary_event,
+        "deadline_at": "2026-09-02T00:00:00Z",
+        "identity_deadline_at": "2026-09-02T00:00:00Z",
+    }
+    rejected_ordinary_event_id = "event:ci-reviewed-ordinary-mutated-id"
+    ordinary_mutated_event_id = {
+        **reviewed_ordinary_event,
+        "event_id": rejected_ordinary_event_id,
+        "event_actor": {
+            **reviewed_ordinary_event["event_actor"],
+            "event_id": rejected_ordinary_event_id,
+        },
+    }
+    ordinary_cancellation = {
+        **reviewed_ordinary_event,
+        "is_cancelled": True,
+    }
+    ordinary_mutated_id_document = {
+        **reviewed_ordinary_document,
+        "document_id": rejected_ordinary_document_id,
+        "external_id": rejected_ordinary_document_id.split(":", 1)[1],
+        "original_url": (
+            "https://example.com/dart/"
+            + rejected_ordinary_document_id.split(":", 1)[1]
+        ),
+    }
+    ordinary_mutated_id_document["content_hash"] = hashlib.sha256(
+        (
+            f"{ordinary_mutated_id_document['title']}\n"
+            f"{ordinary_mutated_id_document['original_url']}\n"
+            f"{ordinary_mutated_id_document['external_id']}"
+        ).encode("utf-8")
+    ).hexdigest()
+    ordinary_mutated_id_event = {
+        **reviewed_ordinary_event,
+        "document_ids": [rejected_ordinary_document_id],
+    }
+    ordinary_rejections = (
+        (
+            "source_summary",
+            reviewed_ordinary_document,
+            ordinary_mutated_summary,
+        ),
+        (
+            "document_title",
+            ordinary_mutated_title_document,
+            reviewed_ordinary_event,
+        ),
+        (
+            "document_hash",
+            ordinary_mutated_hash_document,
+            reviewed_ordinary_event,
+        ),
+        (
+            "document_id",
+            ordinary_mutated_id_document,
+            ordinary_mutated_id_event,
+        ),
+        (
+            "event_id",
+            reviewed_ordinary_document,
+            ordinary_mutated_event_id,
+        ),
+        (
+            "actor",
+            reviewed_ordinary_document,
+            ordinary_mutated_actor,
+        ),
+        (
+            "deadline",
+            reviewed_ordinary_document,
+            ordinary_mutated_deadline,
+        ),
+        (
+            "cancellation",
+            reviewed_ordinary_document,
+            ordinary_cancellation,
+        ),
+    )
+    for label, rejected_document, rejected_event in ordinary_rejections:
+        rejected_ordinary_replay = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(rejected_document, rejected_event),
+            expected_status=409,
+        )
+        require(
+            error_code(rejected_ordinary_replay)
+            == "followup_event_identity_conflict",
+            f"{label} mutation entered the reviewed ordinary ACK path: "
+            f"{rejected_ordinary_replay!r}",
+        )
+        require(
+            reviewed_ordinary_canonical_signature()
+            == reviewed_ordinary_before
+            and followup_row_signature(
+                reviewed_ordinary_event_id,
+                reviewed_ordinary_document_id,
+            )
+            == reviewed_ordinary_rows_before
+            and reviewed_company_master_signature()
+            == reviewed_ordinary_master_before
+            and reviewed_company_master_rows()
+            == reviewed_ordinary_master_rows_before
+            and mysql_execute(
+                mysql_container_id,
+                "SELECT COUNT(*) FROM ci_global_lifecycle_observations "
+                f"WHERE resolved_event_id='{reviewed_ordinary_event_id}'",
+            )
+            == reviewed_ordinary_lifecycle_before,
+            f"{label} mutation changed canonical reviewed ordinary state",
+        )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT "
+            "(SELECT COUNT(*) FROM ci_documents "
+            f"WHERE document_id='{rejected_ordinary_document_id}'),"
+            "(SELECT COUNT(*) FROM ci_governance_events "
+            f"WHERE event_id='{rejected_ordinary_event_id}')",
+        )
+        == "0\t0",
+        "rejected reviewed ordinary event/document ID was persisted",
+    )
+
+    reviewed_correction_event_id = "event:ci-reviewed-correction-observation"
+    reviewed_correction_document_id = "dart:20260724999007"
+    rejected_correction_document_id = "dart:20260724999008"
+    reviewed_actor_id = "actor:ci-reviewed-correction"
+    reviewed_document = document(
+        reviewed_correction_document_id,
+        "dart",
+        source_right_id,
+        "CI reviewed correction source receipt",
+    )
+    reviewed_document["is_correction"] = True
+    reviewed_event = incomplete_followup(
+        reviewed_correction_event_id,
+        reviewed_correction_document_id,
+        is_correction=True,
+        is_cancelled=False,
+    )
+    reviewed_event.update(
+        {
+            "deadline_at": f"{deadline_date}T00:00:00Z",
+            "actor_id": reviewed_actor_id,
+            "identity_actor_id": reviewed_actor_id,
+            "identity_deadline_at": f"{deadline_date}T00:00:00Z",
+            "actor": {
+                "actor_id": reviewed_actor_id,
+                "actor_type": "institution",
+                "display_name": "CI Reviewed Correction Filer",
+                "company_id": None,
+                "country_code": "KR",
+                "review_status": "pending",
+                "record_status": "inactive",
+            },
+            "event_actor": {
+                "event_id": reviewed_correction_event_id,
+                "actor_id": reviewed_actor_id,
+                "actor_role": "filer",
+                "review_status": "pending",
+            },
+        }
+    )
+    reviewed_source_write = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(reviewed_document, reviewed_event),
+        expected_status=200,
+    )
+    require(reviewed_source_write.get("ok") is True, repr(reviewed_source_write))
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',identity_status,review_status,"
+            "publication_status,"
+            "JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.event_link_status'))) "
+            "FROM ci_governance_events "
+            f"WHERE event_id='{reviewed_correction_event_id}'",
+        )
+        == "needs_review|pending|draft|ambiguous_independent",
+        "reviewed correction source fixture was not isolated fail-closed",
+    )
+
+    reviewed_family = "correction_and_withdrawal"
+    reviewed_action = "confirm corrected disclosure"
+    reviewed_target = "editorial canonical board action"
+    reviewed_effective_at = "2026-07-22 00:00:00"
+    reviewed_deadline_at = f"{deadline_date} 00:00:00"
+    reviewed_identity = {
+        "issuer_id": f"issuer:kr:dart:{company_id}",
+        "event_family": reviewed_family,
+        "action": reviewed_action,
+        "target": reviewed_target,
+        "actor_id": reviewed_actor_id,
+        "effective_at": reviewed_effective_at,
+        "deadline_at": reviewed_deadline_at,
+    }
+    reviewed_comparison_key = "global:" + canonical_sha256(reviewed_identity)
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_actors SET country_code='KR',review_status='approved',"
+        "record_status='active',"
+        "updated_at=GREATEST(UTC_TIMESTAMP(),DATE_ADD(updated_at,INTERVAL 1 SECOND)) "
+        f"WHERE actor_id='{reviewed_actor_id}';"
+        "UPDATE ci_event_actors SET review_status='approved',"
+        "updated_at=GREATEST(UTC_TIMESTAMP(),DATE_ADD(updated_at,INTERVAL 1 SECOND)) "
+        f"WHERE event_id='{reviewed_correction_event_id}' "
+        f"AND actor_id='{reviewed_actor_id}' AND actor_role='filer';"
+        "UPDATE ci_documents SET publication_status='published',"
+        "updated_at=GREATEST(UTC_TIMESTAMP(),DATE_ADD(updated_at,INTERVAL 1 SECOND)) "
+        f"WHERE document_id='{reviewed_correction_document_id}';"
+        "UPDATE ci_governance_events SET "
+        f"global_event_family='{reviewed_family}',event_type='{reviewed_family}',"
+        "title='CI editorial canonical correction',"
+        "summary='Human-reviewed canonical correction summary',"
+        "importance='high',current_status='reviewed',"
+        f"deadline_at='{reviewed_deadline_at}',"
+        f"identity_action='{reviewed_action}',"
+        f"identity_target='{reviewed_target}',"
+        f"identity_actor_id='{reviewed_actor_id}',"
+        f"identity_effective_at='{reviewed_effective_at}',"
+        f"identity_deadline_at='{reviewed_deadline_at}',"
+        "identity_status='complete',"
+        f"comparison_key='{reviewed_comparison_key}',"
+        "verification_status='corrected',review_status='approved',"
+        "publication_status='published',"
+        "updated_at=GREATEST(UTC_TIMESTAMP(),DATE_ADD(updated_at,INTERVAL 1 SECOND)) "
+        f"WHERE event_id='{reviewed_correction_event_id}';",
+    )
+
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_governance_events SET review_status='pending',"
+        "publication_status='draft' "
+        f"WHERE event_id='{reviewed_correction_event_id}';",
+    )
+    unreviewed_replay = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(reviewed_document, reviewed_event),
+        expected_status=409,
+    )
+    require(
+        error_code(unreviewed_replay) == "followup_event_identity_conflict",
+        f"unreviewed complete correction entered the observation-only path: "
+        f"{unreviewed_replay!r}",
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_governance_events SET review_status='approved',"
+        "publication_status='published' "
+        f"WHERE event_id='{reviewed_correction_event_id}';",
+    )
+
+    def reviewed_correction_canonical_signature() -> str:
+        return mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),payload_json,"
+            "COALESCE(issuer_id,'<NULL>'),COALESCE(country_code,'<NULL>'),"
+            "COALESCE(global_event_family,'<NULL>'),event_type,title,"
+            "COALESCE(summary,'<NULL>'),occurred_at,"
+            "COALESCE(deadline_at,'<NULL>'),importance,"
+            "COALESCE(current_status,'<NULL>'),verification_status,"
+            "review_status,publication_status,identity_action,identity_target,"
+            "identity_actor_id,identity_effective_at,"
+            "COALESCE(identity_deadline_at,'<NULL>'),identity_status,"
+            "comparison_key,created_at,updated_at),256) "
+            "FROM ci_governance_events "
+            f"WHERE event_id='{reviewed_correction_event_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),payload_json,company_id,"
+            "source_right_id,source_class,external_id,document_type,"
+            "original_language,title,COALESCE(body_text,'<NULL>'),original_url,"
+            "content_hash,collection_key,"
+            "COALESCE(correction_of_document_id,'<NULL>'),version_no,"
+            "published_at,retrieved_at,verification_status,publication_status,"
+            "created_at,updated_at),256) FROM ci_documents "
+            f"WHERE document_id='{reviewed_correction_document_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),document_id,relation_type,"
+            "position_no,created_at),256) FROM ci_event_documents "
+            f"WHERE event_id='{reviewed_correction_event_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),document_id,source_class,"
+            "source_key,first_observed_at,observed_at,payload_hash,payload_json,"
+            "created_at,updated_at),256) FROM ci_event_observations "
+            f"WHERE event_id='{reviewed_correction_event_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),document_id,occurred_at,"
+            "entry_type,title,COALESCE(description,'<NULL>'),original_language,"
+            "review_status,publication_status,created_at,updated_at),256) "
+            "FROM ci_timeline_entries "
+            f"WHERE event_id='{reviewed_correction_event_id}'),"
+            "(SELECT SHA2(GROUP_CONCAT(CONCAT_WS(CHAR(31),revision_id,"
+            "field_name,COALESCE(previous_value,'<NULL>'),"
+            "COALESCE(revised_value,'<NULL>'),reason,revision_status,"
+            "requested_by,COALESCE(reviewed_by,'<NULL>'),"
+            "COALESCE(reviewed_at,'<NULL>'),"
+            "COALESCE(published_at,'<NULL>'),created_at,updated_at) "
+            "ORDER BY revision_id),256) FROM ci_editorial_revisions "
+            f"WHERE entity_type='event' AND entity_id='{reviewed_correction_event_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),review_status,record_status,"
+            "country_code,created_at,updated_at),256) FROM ci_actors "
+            f"WHERE actor_id='{reviewed_actor_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),actor_role,review_status,"
+            "created_at,updated_at),256) FROM ci_event_actors "
+            f"WHERE event_id='{reviewed_correction_event_id}' "
+            f"AND actor_id='{reviewed_actor_id}'))",
+        )
+
+    reviewed_canonical_before = reviewed_correction_canonical_signature()
+    require(
+        len(reviewed_canonical_before.split("|")) == 8
+        and all(
+            len(value) == 64 for value in reviewed_canonical_before.split("|")
+        ),
+        "reviewed correction canonical fixture signature is incomplete: "
+        f"{reviewed_canonical_before!r}",
+    )
+    reviewed_rows_before = followup_row_signature(
+        reviewed_correction_event_id,
+        reviewed_correction_document_id,
+    )
+    reviewed_master_before = reviewed_company_master_signature()
+    reviewed_master_rows_before = reviewed_company_master_rows()
+    require(
+        reviewed_rows_before == "1|1|1|1|1|1",
+        "reviewed correction fixture row counts are incomplete: "
+        f"{reviewed_rows_before!r}",
+    )
+    require(
+        len(reviewed_master_before.split("|")) == 4
+        and all(
+            len(value) == 64
+            for value in reviewed_master_before.split("|")
+        )
+        and reviewed_master_rows_before == "1|1|2|1",
+        "reviewed correction company/issuer fixture is incomplete",
+    )
+    reviewed_lifecycle_before = mysql_execute(
+        mysql_container_id,
+        "SELECT COUNT(*) FROM ci_global_lifecycle_observations "
+        f"WHERE resolved_event_id='{reviewed_correction_event_id}'",
+    )
+    require(
+        reviewed_lifecycle_before == "0",
+        "reviewed correction fixture unexpectedly has lifecycle writes",
+    )
+    reviewed_read_only_ack = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(reviewed_document, reviewed_event),
+        expected_status=200,
+    )
+    require(
+        reviewed_read_only_ack.get("ok") is True
+        and reviewed_read_only_ack.get("upserted", {}).get("documents") == 1
+        and reviewed_read_only_ack.get("upserted", {}).get("events") == 1
+        and reviewed_read_only_ack.get("upserted", {}).get(
+            "event_documents"
+        )
+        == 1
+        and reviewed_read_only_ack.get("upserted", {}).get(
+            "event_observations"
+        )
+        == 1,
+        repr(reviewed_read_only_ack),
+    )
+    require(
+        reviewed_correction_canonical_signature() == reviewed_canonical_before
+        and followup_row_signature(
+            reviewed_correction_event_id,
+            reviewed_correction_document_id,
+        )
+        == reviewed_rows_before
+        and reviewed_company_master_signature() == reviewed_master_before
+        and reviewed_company_master_rows() == reviewed_master_rows_before
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_global_lifecycle_observations "
+            f"WHERE resolved_event_id='{reviewed_correction_event_id}'",
+        )
+        == reviewed_lifecycle_before,
+        "first reviewed correction ACK changed rows, canonical state, or timestamps",
+    )
+    reviewed_correction_replay = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(reviewed_document, reviewed_event),
+        expected_status=200,
+    )
+    require(
+        reviewed_correction_replay.get("ok") is True,
+        repr(reviewed_correction_replay),
+    )
+    require(
+        reviewed_correction_canonical_signature() == reviewed_canonical_before
+        and followup_row_signature(
+            reviewed_correction_event_id,
+            reviewed_correction_document_id,
+        )
+        == reviewed_rows_before
+        and reviewed_company_master_signature() == reviewed_master_before
+        and reviewed_company_master_rows() == reviewed_master_rows_before
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_global_lifecycle_observations "
+            f"WHERE resolved_event_id='{reviewed_correction_event_id}'",
+        )
+        == reviewed_lifecycle_before,
+        "reviewed correction replay was not idempotent",
+    )
+
+    mutated_summary_event = {
+        **reviewed_event,
+        "summary": "third-party summary mutation",
+    }
+    mutated_title_document = {
+        **reviewed_document,
+        "title": "third-party document title mutation",
+    }
+    mutated_hash_document = {
+        **reviewed_document,
+        "content_hash": "f" * 64,
+    }
+    mutated_actor_id = "actor:ci-reviewed-correction-mutated"
+    mutated_actor_event = {
+        **reviewed_event,
+        "actor_id": mutated_actor_id,
+        "identity_actor_id": mutated_actor_id,
+        "actor": {
+            **reviewed_event["actor"],
+            "actor_id": mutated_actor_id,
+        },
+        "event_actor": {
+            **reviewed_event["event_actor"],
+            "actor_id": mutated_actor_id,
+        },
+    }
+    mutated_deadline_event = {
+        **reviewed_event,
+        "deadline_at": "2026-09-01T00:00:00Z",
+        "identity_deadline_at": "2026-09-01T00:00:00Z",
+    }
+    rejected_correction_event_id = "event:ci-reviewed-correction-mutated-id"
+    mutated_event_id_event = {
+        **reviewed_event,
+        "event_id": rejected_correction_event_id,
+        "event_actor": {
+            **reviewed_event["event_actor"],
+            "event_id": rejected_correction_event_id,
+        },
+    }
+    reviewed_cancellation_event = {
+        **reviewed_event,
+        "is_cancelled": True,
+    }
+    mutated_id_document = {
+        **reviewed_document,
+        "document_id": rejected_correction_document_id,
+        "external_id": rejected_correction_document_id.split(":", 1)[1],
+        "original_url": (
+            "https://example.com/dart/"
+            + rejected_correction_document_id.split(":", 1)[1]
+        ),
+    }
+    mutated_id_document["content_hash"] = hashlib.sha256(
+        (
+            f"{mutated_id_document['title']}\n"
+            f"{mutated_id_document['original_url']}\n"
+            f"{mutated_id_document['external_id']}"
+        ).encode("utf-8")
+    ).hexdigest()
+    mutated_id_event = {
+        **reviewed_event,
+        "document_ids": [rejected_correction_document_id],
+    }
+    reviewed_rejections = (
+        (
+            "source_summary",
+            reviewed_document,
+            mutated_summary_event,
+        ),
+        (
+            "document_title",
+            mutated_title_document,
+            reviewed_event,
+        ),
+        (
+            "document_hash",
+            mutated_hash_document,
+            reviewed_event,
+        ),
+        (
+            "document_id",
+            mutated_id_document,
+            mutated_id_event,
+        ),
+        (
+            "event_id",
+            reviewed_document,
+            mutated_event_id_event,
+        ),
+        (
+            "actor",
+            reviewed_document,
+            mutated_actor_event,
+        ),
+        (
+            "deadline",
+            reviewed_document,
+            mutated_deadline_event,
+        ),
+        (
+            "cancellation",
+            reviewed_document,
+            reviewed_cancellation_event,
+        ),
+    )
+    for label, rejected_document, rejected_event in reviewed_rejections:
+        rejected_reviewed_replay = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(rejected_document, rejected_event),
+            expected_status=409,
+        )
+        require(
+            error_code(rejected_reviewed_replay)
+            == "followup_event_identity_conflict",
+            f"{label} mutation entered the reviewed correction ACK path: "
+            f"{rejected_reviewed_replay!r}",
+        )
+        require(
+            reviewed_correction_canonical_signature()
+            == reviewed_canonical_before
+            and followup_row_signature(
+                reviewed_correction_event_id,
+                reviewed_correction_document_id,
+            )
+            == reviewed_rows_before
+            and reviewed_company_master_signature() == reviewed_master_before
+            and reviewed_company_master_rows()
+            == reviewed_master_rows_before
+            and mysql_execute(
+                mysql_container_id,
+                "SELECT COUNT(*) FROM ci_global_lifecycle_observations "
+                f"WHERE resolved_event_id='{reviewed_correction_event_id}'",
+            )
+            == reviewed_lifecycle_before,
+            f"{label} mutation changed canonical reviewed state or row counts",
+        )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT "
+            "(SELECT COUNT(*) FROM ci_documents "
+            f"WHERE document_id='{rejected_correction_document_id}'),"
+            "(SELECT COUNT(*) FROM ci_governance_events "
+            f"WHERE event_id='{rejected_correction_event_id}')",
+        )
+        == "0\t0",
+        "rejected reviewed correction event/document ID was persisted",
+    )
+
     event_ids = (
         f"'{date_key}','{midnight_key}','{incomplete_correction_event_id}',"
-        f"'{incomplete_cancellation_event_id}'"
+        f"'{incomplete_cancellation_event_id}','{reviewed_ordinary_event_id}',"
+        f"'{rejected_ordinary_event_id}','{reviewed_correction_event_id}',"
+        f"'{rejected_correction_event_id}'"
     )
     document_ids = (
         f"'{original_document_id}','{midnight_document_id}','{kind_document_id}',"
-        f"'{incomplete_correction_document_id}','{incomplete_cancellation_document_id}'"
+        f"'{incomplete_correction_document_id}','{incomplete_cancellation_document_id}',"
+        f"'{reviewed_ordinary_document_id}','{rejected_ordinary_document_id}',"
+        f"'{reviewed_correction_document_id}','{rejected_correction_document_id}'"
     )
     mysql_execute(
         mysql_container_id,
@@ -2797,7 +3852,8 @@ def exercise_event_identity_datetime_storage(
         f"WHERE document_id IN ({document_ids});"
         "DELETE FROM ci_governance_events "
         f"WHERE event_id IN ({event_ids});"
-        f"DELETE FROM ci_actors WHERE actor_id='{actor_id}';"
+        "DELETE FROM ci_actors WHERE actor_id IN "
+        f"('{actor_id}','{reviewed_ordinary_actor_id}','{reviewed_actor_id}');"
         f"DELETE FROM ci_companies WHERE company_id='{company_id}';",
     )
     require(
@@ -3774,6 +4830,16 @@ def run(base_url: str, mysql_container_id: str) -> None:
         first_document.get("publication_status") == "draft"
         and changed_document.get("publication_status") == "draft",
         repr(document_rows),
+    )
+    source_identity_rows = mysql_execute(
+        mysql_container_id,
+        "SELECT CONCAT(COUNT(*),'|',SUM(BINARY source_key=BINARY "
+        "'company-site:00123456')) FROM ci_documents WHERE document_id IN ("
+        f"'{first_document_id}','{changed_document_id}');",
+    )
+    require(
+        source_identity_rows == "2|2",
+        "official-site documents must persist their exact SourceRight source_key",
     )
 
     legacy_before, legacy_before_headers = request_json(base_url, "api.php?action=reports")

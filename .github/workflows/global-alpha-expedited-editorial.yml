@@ -4,15 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Export immutable candidates or apply a completed human review
+        description: Export, apply, or safely carry an immutable human review
         required: true
         default: export
         type: choice
         options:
           - export
           - apply
+          - carry-forward
+          - carry-forward-recover
       confirmation:
-        description: Type EXPORT_EXPEDITED_EDITORIAL or APPLY_EXPEDITED_EDITORIAL
+        description: Type the exact confirmation required by the selected operation
         required: true
         type: string
       candidate_run_id:
@@ -29,6 +31,38 @@ on:
         type: string
       candidate_artifact_digest:
         description: Immutable candidate artifact sha256 digest (apply only)
+        required: false
+        type: string
+      publication_run_id:
+        description: Prior protected publication workflow run ID (carry-forward only)
+        required: false
+        type: string
+      publication_artifact_id:
+        description: Prior protected publication artifact ID (carry-forward only)
+        required: false
+        type: string
+      publication_artifact_name:
+        description: Prior protected publication artifact name (carry-forward only)
+        required: false
+        type: string
+      publication_artifact_digest:
+        description: Prior protected publication sha256 digest (carry-forward only)
+        required: false
+        type: string
+      intent_run_id:
+        description: Pre-uploaded carry intent workflow run ID (recovery only)
+        required: false
+        type: string
+      intent_artifact_id:
+        description: Pre-uploaded carry intent artifact ID (recovery only)
+        required: false
+        type: string
+      intent_artifact_name:
+        description: Pre-uploaded carry intent artifact name (recovery only)
+        required: false
+        type: string
+      intent_artifact_digest:
+        description: Pre-uploaded carry intent sha256 digest (recovery only)
         required: false
         type: string
 
@@ -394,4 +428,687 @@ jobs:
             echo "- semantic publication receipt: \`$semantic\`"
             echo "- exact replay: idempotent"
             echo "- operator action: delete GLOBAL_ALPHA_EXPEDITED_EDITORIAL_DECISIONS_GZIP_B64 now"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  carry_forward_prepare:
+    name: Freeze and upload carry-forward intent
+    if: inputs.operation == 'carry-forward'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: governance-release
+    outputs:
+      intent_run_id: ${{ steps.intent_identity.outputs.run_id }}
+      intent_artifact_id: ${{ steps.intent_identity.outputs.artifact_id }}
+      intent_artifact_name: ${{ steps.intent_identity.outputs.artifact_name }}
+      intent_artifact_digest: ${{ steps.intent_identity.outputs.artifact_digest }}
+    env:
+      BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+      BSIDE_EDITOR_TOKEN: ${{ secrets.BSIDE_EDITOR_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+      CANDIDATE_ARTIFACT_ID: ${{ inputs.candidate_artifact_id }}
+      CANDIDATE_ARTIFACT_NAME: ${{ inputs.candidate_artifact_name }}
+      CANDIDATE_ARTIFACT_DIGEST: ${{ inputs.candidate_artifact_digest }}
+      PUBLICATION_RUN_ID: ${{ inputs.publication_run_id }}
+      PUBLICATION_ARTIFACT_ID: ${{ inputs.publication_artifact_id }}
+      PUBLICATION_ARTIFACT_NAME: ${{ inputs.publication_artifact_name }}
+      PUBLICATION_ARTIFACT_DIGEST: ${{ inputs.publication_artifact_digest }}
+    steps:
+      - name: Enforce protected carry-forward inputs
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]]
+          [[ "$CONFIRMATION" == "CARRY_FORWARD_EXPEDITED_EDITORIAL" ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CANDIDATE_RUN_ID" == "30581161308" ]]
+          [[ "$CANDIDATE_ARTIFACT_ID" == "8774655231" ]]
+          [[ "$CANDIDATE_ARTIFACT_NAME" == \
+            "global-alpha-expedited-editorial-candidates-b44a1aebc2eb6e7b58e5960b0f8245b87e901052" ]]
+          [[ "$CANDIDATE_ARTIFACT_DIGEST" == \
+            "sha256:f7eec4481564f52b89fbda166544cb1bc0b79e8ee940a8173ed5859aade40afd" ]]
+          [[ "$PUBLICATION_RUN_ID" == "30587485449" ]]
+          [[ "$PUBLICATION_ARTIFACT_ID" == "8777083749" ]]
+          [[ "$PUBLICATION_ARTIFACT_NAME" == \
+            "global-alpha-expedited-editorial-publication-b44a1aebc2eb6e7b58e5960b0f8245b87e901052-30587485449-1" ]]
+          [[ "$PUBLICATION_ARTIFACT_DIGEST" == \
+            "sha256:95028a16adedfc19b5dfe3c6e0b0c36696b5c2619a44f0040d51ef3b1ffcbbaa" ]]
+          [[ "$CANDIDATE_RUN_ID" != "$PUBLICATION_RUN_ID" ]]
+          [[ -n "$BSIDE_API_BASE_URL" && -n "$BSIDE_EDITOR_TOKEN" ]]
+          case "${BSIDE_API_BASE_URL%/}" in
+            "https://alignpe.gabia.io/activist/api.php/api/v1" | \
+            "https://alignpe.gabia.io/activist/api.php/api/v2") ;;
+            *)
+              echo "::error::The editor token may only be sent to the protected production API."
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout the exact current release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Reuse an intent already frozen by this workflow run
+        id: existing_intent
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const prefix =
+              `global-alpha-expedited-editorial-carry-intent-${context.sha}-${context.runId}-`;
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner, repo, run_id: context.runId, per_page: 100},
+            );
+            const matches = artifacts.filter((item) =>
+              String(item.name || "").startsWith(prefix),
+            );
+            if (matches.length > 1) {
+              core.setFailed("multiple frozen intents exist for this workflow run");
+              return;
+            }
+            if (matches.length === 0) {
+              core.setOutput("exists", "false");
+              return;
+            }
+            const artifact = matches[0];
+            const digest = String(artifact.digest || "").toLowerCase();
+            if (
+              artifact.expired ||
+              !/^sha256:[0-9a-f]{64}$/.test(digest) ||
+              (artifact.workflow_run || {}).id !== context.runId
+            ) {
+              core.setFailed("existing frozen intent provenance mismatch");
+              return;
+            }
+            core.setOutput("exists", "true");
+            core.setOutput("artifact_id", String(artifact.id));
+            core.setOutput("artifact_name", artifact.name);
+            core.setOutput("artifact_digest", digest);
+
+      - name: Resolve immutable source publication chain
+        if: steps.existing_intent.outputs.exists != 'true'
+        id: source
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const currentSha = context.sha.toLowerCase();
+            const runIds = {
+              candidate: Number(process.env.CANDIDATE_RUN_ID),
+              publication: Number(process.env.PUBLICATION_RUN_ID),
+            };
+            const expectedArtifacts = {
+              candidate: {
+                id: Number(process.env.CANDIDATE_ARTIFACT_ID),
+                name: process.env.CANDIDATE_ARTIFACT_NAME,
+                digest: process.env.CANDIDATE_ARTIFACT_DIGEST.toLowerCase(),
+              },
+              publication: {
+                id: Number(process.env.PUBLICATION_ARTIFACT_ID),
+                name: process.env.PUBLICATION_ARTIFACT_NAME,
+                digest: process.env.PUBLICATION_ARTIFACT_DIGEST.toLowerCase(),
+              },
+            };
+            const resolved = {};
+            for (const key of ["candidate", "publication"]) {
+              const response = await github.rest.actions.getWorkflowRun({
+                owner, repo, run_id: runIds[key],
+              });
+              const run = response.data;
+              const ageHours = (Date.now() - Date.parse(run.created_at)) / 3600000;
+              if (
+                run.status !== "completed" ||
+                run.conclusion !== "success" ||
+                run.event !== "workflow_dispatch" ||
+                run.path !== ".github/workflows/global-alpha-expedited-editorial.yml" ||
+                run.head_branch !== process.env.DEFAULT_BRANCH ||
+                !/^[0-9a-f]{40}$/i.test(run.head_sha || "") ||
+                ageHours < -0.1 ||
+                ageHours > 72
+              ) {
+                core.setFailed(`${key} source run failed protected provenance`);
+                return;
+              }
+              const artifacts = await github.paginate(
+                github.rest.actions.listWorkflowRunArtifacts,
+                {owner, repo, run_id: run.id, per_page: 100},
+              );
+              if (artifacts.length !== 1) {
+                core.setFailed(`${key} source run must contain exactly one artifact`);
+                return;
+              }
+              const artifact = artifacts[0];
+              const actual = {
+                id: artifact.id,
+                name: artifact.name,
+                digest: String(artifact.digest || "").toLowerCase(),
+              };
+              if (
+                artifact.expired ||
+                JSON.stringify(actual) !== JSON.stringify(expectedArtifacts[key])
+              ) {
+                core.setFailed(`${key} source artifact identity mismatch`);
+                return;
+              }
+              resolved[key] = {run, artifact};
+            }
+            const sourceSha = resolved.candidate.run.head_sha.toLowerCase();
+            if (
+              sourceSha === currentSha ||
+              resolved.publication.run.head_sha.toLowerCase() !== sourceSha ||
+              resolved.candidate.artifact.name !==
+                `global-alpha-expedited-editorial-candidates-${sourceSha}` ||
+              resolved.publication.artifact.name !==
+                `global-alpha-expedited-editorial-publication-${sourceSha}-${resolved.publication.run.id}-${resolved.publication.run.run_attempt}` ||
+              Date.parse(resolved.candidate.run.created_at) >
+                Date.parse(resolved.publication.run.created_at)
+            ) {
+              core.setFailed("source candidate/publication chain mismatch");
+              return;
+            }
+            core.setOutput("source_sha", sourceSha);
+
+      - name: Prove the reviewed source is an ancestor of this code-only release
+        if: steps.existing_intent.outputs.exists != 'true'
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          git merge-base --is-ancestor "$SOURCE_SHA" "$GITHUB_SHA"
+
+      - name: Download exact source candidate artifact
+        if: steps.existing_intent.outputs.exists != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ inputs.candidate_artifact_id }}
+          path: source-candidate
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.candidate_run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
+      - name: Download exact source publication artifact
+        if: steps.existing_intent.outputs.exists != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ inputs.publication_artifact_id }}
+          path: source-publication
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.publication_run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
+      - name: Set up Python
+        if: steps.existing_intent.outputs.exists != 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install the pinned API client
+        if: steps.existing_intent.outputs.exists != 'true'
+        run: >-
+          python -m pip install
+          --disable-pip-version-check
+          "httpx==0.27.2"
+
+      - name: Freeze unchanged current-SHA basis without publishing
+        if: steps.existing_intent.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f source-candidate/editorial-candidates.json
+          test -f source-publication/human-review.json
+          test -f source-publication/publication-receipt.json
+          test -f source-publication/publication-replay-receipt.json
+          python -m curator.global_alpha_expedited_editorial \
+            carry-forward-prepare \
+            --candidate source-candidate/editorial-candidates.json \
+            --source-human-review source-publication/human-review.json \
+            --source-publication-receipt \
+              source-publication/publication-receipt.json \
+            --source-publication-replay-receipt \
+              source-publication/publication-replay-receipt.json \
+            --candidate-run-id "$CANDIDATE_RUN_ID" \
+            --candidate-artifact-id "$CANDIDATE_ARTIFACT_ID" \
+            --candidate-artifact-name "$CANDIDATE_ARTIFACT_NAME" \
+            --candidate-artifact-digest "$CANDIDATE_ARTIFACT_DIGEST" \
+            --publication-run-id "$PUBLICATION_RUN_ID" \
+            --publication-artifact-id "$PUBLICATION_ARTIFACT_ID" \
+            --publication-artifact-name "$PUBLICATION_ARTIFACT_NAME" \
+            --publication-artifact-digest "$PUBLICATION_ARTIFACT_DIGEST" \
+            --output-dir editorial-intent
+          test -s editorial-intent/carry-forward-intent.json
+          jq -e '
+            .code_revision == env.GITHUB_SHA
+            and .kind == "bside-global-alpha-expedited-editorial-carry-forward-intent"
+            and .is_synthetic == false
+            and .source_human_review_section.ground_truth_source == "human"
+            and .source_human_review_section.ai_generated_ground_truth == false
+            and .carry_forward.event_mutations_applied == 0
+            and (.intent_sha256 | test("^[0-9a-f]{64}$"))
+          ' editorial-intent/carry-forward-intent.json > /dev/null
+
+      - name: Upload immutable carry-forward intent before any POST
+        if: steps.existing_intent.outputs.exists != 'true'
+        id: new_intent
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-expedited-editorial-carry-intent-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: editorial-intent/carry-forward-intent.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Resolve the one immutable intent identity
+        id: intent_identity
+        shell: bash
+        env:
+          EXISTING: ${{ steps.existing_intent.outputs.exists }}
+          EXISTING_ID: ${{ steps.existing_intent.outputs.artifact_id }}
+          EXISTING_NAME: ${{ steps.existing_intent.outputs.artifact_name }}
+          EXISTING_DIGEST: ${{ steps.existing_intent.outputs.artifact_digest }}
+          NEW_ID: ${{ steps.new_intent.outputs.artifact-id }}
+          NEW_NAME: global-alpha-expedited-editorial-carry-intent-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          NEW_DIGEST: ${{ steps.new_intent.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          if [[ "$EXISTING" == "true" ]]; then
+            artifact_id="$EXISTING_ID"
+            artifact_name="$EXISTING_NAME"
+            artifact_digest="$EXISTING_DIGEST"
+          else
+            artifact_id="$NEW_ID"
+            artifact_name="$NEW_NAME"
+            artifact_digest="$NEW_DIGEST"
+          fi
+          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]]
+          [[ "$artifact_name" == \
+            "global-alpha-expedited-editorial-carry-intent-$GITHUB_SHA-$GITHUB_RUN_ID-"* ]]
+          [[ "$artifact_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          {
+            echo "run_id=$GITHUB_RUN_ID"
+            echo "artifact_id=$artifact_id"
+            echo "artifact_name=$artifact_name"
+            echo "artifact_digest=$artifact_digest"
+          } >> "$GITHUB_OUTPUT"
+
+  carry_forward_publish:
+    name: Publish only the pre-uploaded carry-forward intent
+    if: inputs.operation == 'carry-forward'
+    needs: carry_forward_prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: governance-release
+    env:
+      BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+      BSIDE_EDITOR_TOKEN: ${{ secrets.BSIDE_EDITOR_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Enforce same-run intent publication boundary
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]]
+          [[ -n "$BSIDE_API_BASE_URL" && -n "$BSIDE_EDITOR_TOKEN" ]]
+          case "${BSIDE_API_BASE_URL%/}" in
+            "https://alignpe.gabia.io/activist/api.php/api/v1" | \
+            "https://alignpe.gabia.io/activist/api.php/api/v2") ;;
+            *)
+              echo "::error::The editor token may only be sent to the protected production API."
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout the exact current release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Resolve the one exact pre-uploaded intent artifact
+        id: intent
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const prefix =
+              `global-alpha-expedited-editorial-carry-intent-${context.sha}-${context.runId}-`;
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner, repo, run_id: context.runId, per_page: 100},
+            );
+            const matches = artifacts.filter((item) =>
+              String(item.name || "").startsWith(prefix),
+            );
+            if (matches.length !== 1) {
+              core.setFailed("same run must contain exactly one frozen intent");
+              return;
+            }
+            const artifact = matches[0];
+            const digest = String(artifact.digest || "").toLowerCase();
+            if (
+              artifact.expired ||
+              !/^sha256:[0-9a-f]{64}$/.test(digest) ||
+              (artifact.workflow_run || {}).id !== context.runId
+            ) {
+              core.setFailed("frozen intent artifact identity mismatch");
+              return;
+            }
+            core.setOutput("run_id", String(context.runId));
+            core.setOutput("artifact_id", String(artifact.id));
+            core.setOutput("artifact_name", artifact.name);
+            core.setOutput("artifact_digest", digest);
+
+      - name: Download the exact pre-uploaded intent
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.intent.outputs.artifact_id }}
+          path: editorial-intent
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.intent.outputs.run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install the pinned API client
+        run: >-
+          python -m pip install
+          --disable-pip-version-check
+          "httpx==0.27.2"
+
+      - name: Publish and replay only the frozen intent
+        shell: bash
+        env:
+          INTENT_RUN_ID: ${{ steps.intent.outputs.run_id }}
+          INTENT_ARTIFACT_ID: ${{ steps.intent.outputs.artifact_id }}
+          INTENT_ARTIFACT_NAME: ${{ steps.intent.outputs.artifact_name }}
+          INTENT_ARTIFACT_DIGEST: ${{ steps.intent.outputs.artifact_digest }}
+        run: |
+          set -euo pipefail
+          test -s editorial-intent/carry-forward-intent.json
+          python -m curator.global_alpha_expedited_editorial \
+            carry-forward-publish \
+            --intent editorial-intent/carry-forward-intent.json \
+            --intent-run-id "$INTENT_RUN_ID" \
+            --intent-artifact-id "$INTENT_ARTIFACT_ID" \
+            --intent-artifact-name "$INTENT_ARTIFACT_NAME" \
+            --intent-artifact-digest "$INTENT_ARTIFACT_DIGEST" \
+            --output-dir editorial-publication
+          test -s editorial-publication/human-review.json
+          test -s editorial-publication/publication-receipt.json
+          test -s editorial-publication/publication-replay-receipt.json
+          jq -e '
+            .code_revision == env.GITHUB_SHA
+            and .ground_truth_source == "human"
+            and .ai_generated_ground_truth == false
+            and .human_attestation == true
+            and .carry_forward.event_mutations_applied == 0
+            and .carry_forward.prepared_intent_artifact.run_id
+              == (env.INTENT_RUN_ID | tonumber)
+            and .carry_forward.prepared_intent_artifact.artifact_id
+              == (env.INTENT_ARTIFACT_ID | tonumber)
+          ' editorial-publication/human-review.json > /dev/null
+          jq -e '
+            .code_revision == env.GITHUB_SHA
+            and .mutations_applied == 0
+            and .event_mutations_applied == 0
+            and .brief.idempotent == .recovered_existing_brief
+          ' editorial-publication/publication-receipt.json > /dev/null
+          jq -e '
+            .code_revision == env.GITHUB_SHA
+            and .mutations_applied == 0
+            and .event_mutations_applied == 0
+            and .idempotent_replay == true
+            and .brief.idempotent == true
+          ' editorial-publication/publication-replay-receipt.json > /dev/null
+
+      - name: Upload current-SHA protected publication evidence
+        id: publication_artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-expedited-editorial-publication-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: editorial-publication
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Record carry-forward identity
+        shell: bash
+        env:
+          INTENT_RUN_ID: ${{ steps.intent.outputs.run_id }}
+          INTENT_ARTIFACT_ID: ${{ steps.intent.outputs.artifact_id }}
+          PUBLICATION_ARTIFACT_ID: ${{ steps.publication_artifact.outputs.artifact-id }}
+          PUBLICATION_ARTIFACT_DIGEST: ${{ steps.publication_artifact.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          semantic="$(jq -er '.semantic_receipt_sha256' \
+            editorial-publication/publication-receipt.json)"
+          {
+            echo "### Expedited Alpha editorial carry-forward"
+            echo "- current code revision: \`$GITHUB_SHA\`"
+            echo "- frozen intent run: \`$INTENT_RUN_ID\`"
+            echo "- frozen intent artifact id: \`$INTENT_ARTIFACT_ID\`"
+            echo "- publication artifact id: \`$PUBLICATION_ARTIFACT_ID\`"
+            echo "- publication artifact digest: \`$PUBLICATION_ARTIFACT_DIGEST\`"
+            echo "- semantic publication receipt: \`$semantic\`"
+            echo "- event mutations: \`0\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  carry_forward_recover:
+    name: Recover only an existing immutable carry-forward intent
+    if: inputs.operation == 'carry-forward-recover'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: governance-release
+    env:
+      BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
+      BSIDE_EDITOR_TOKEN: ${{ secrets.BSIDE_EDITOR_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      INTENT_RUN_ID: ${{ inputs.intent_run_id }}
+      INTENT_ARTIFACT_ID: ${{ inputs.intent_artifact_id }}
+      INTENT_ARTIFACT_NAME: ${{ inputs.intent_artifact_name }}
+      INTENT_ARTIFACT_DIGEST: ${{ inputs.intent_artifact_digest }}
+    steps:
+      - name: Enforce protected recovery inputs
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]]
+          [[ "$CONFIRMATION" == \
+            "RECOVER_CARRY_FORWARD_EXPEDITED_EDITORIAL" ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$INTENT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$INTENT_RUN_ID" != "$GITHUB_RUN_ID" ]]
+          [[ "$INTENT_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$INTENT_ARTIFACT_NAME" == \
+            "global-alpha-expedited-editorial-carry-intent-$GITHUB_SHA-$INTENT_RUN_ID-"* ]]
+          [[ "$INTENT_ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ -n "$BSIDE_API_BASE_URL" && -n "$BSIDE_EDITOR_TOKEN" ]]
+          case "${BSIDE_API_BASE_URL%/}" in
+            "https://alignpe.gabia.io/activist/api.php/api/v1" | \
+            "https://alignpe.gabia.io/activist/api.php/api/v2") ;;
+            *)
+              echo "::error::The editor token may only be sent to the protected production API."
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout the exact current release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Resolve the exact prior protected intent
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const runId = Number(process.env.INTENT_RUN_ID);
+            const response = await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: runId,
+            });
+            const run = response.data;
+            if (
+              run.status !== "completed" ||
+              !["success", "failure", "cancelled", "timed_out"].includes(run.conclusion) ||
+              run.event !== "workflow_dispatch" ||
+              run.path !== ".github/workflows/global-alpha-expedited-editorial.yml" ||
+              run.head_branch !== process.env.DEFAULT_BRANCH ||
+              String(run.head_sha || "").toLowerCase() !== context.sha.toLowerCase()
+            ) {
+              core.setFailed("prior intent run provenance mismatch");
+              return;
+            }
+            const jobs = await github.paginate(
+              github.rest.actions.listJobsForWorkflowRun,
+              {owner, repo, run_id: runId, filter: "all", per_page: 100},
+            );
+            const prepareJobs = jobs.filter((job) =>
+              job.name === "Freeze and upload carry-forward intent" &&
+              job.conclusion === "success",
+            );
+            if (prepareJobs.length < 1) {
+              core.setFailed("prior run has no successful intent preparation");
+              return;
+            }
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner, repo, run_id: runId, per_page: 100},
+            );
+            const prefix =
+              `global-alpha-expedited-editorial-carry-intent-${context.sha}-${runId}-`;
+            const matches = artifacts.filter((item) =>
+              String(item.name || "").startsWith(prefix),
+            );
+            if (matches.length !== 1) {
+              core.setFailed("prior run must have exactly one frozen intent");
+              return;
+            }
+            const artifact = matches[0];
+            if (
+              artifact.expired ||
+              artifact.id !== Number(process.env.INTENT_ARTIFACT_ID) ||
+              artifact.name !== process.env.INTENT_ARTIFACT_NAME ||
+              String(artifact.digest || "").toLowerCase() !==
+                process.env.INTENT_ARTIFACT_DIGEST.toLowerCase() ||
+              (artifact.workflow_run || {}).id !== runId
+            ) {
+              core.setFailed("prior frozen intent artifact identity mismatch");
+            }
+
+      - name: Download only the prior immutable intent
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ inputs.intent_artifact_id }}
+          path: editorial-intent
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.intent_run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install the pinned API client
+        run: >-
+          python -m pip install
+          --disable-pip-version-check
+          "httpx==0.27.2"
+
+      - name: Recover publication from only the frozen intent
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s editorial-intent/carry-forward-intent.json
+          python -m curator.global_alpha_expedited_editorial \
+            carry-forward-publish \
+            --intent editorial-intent/carry-forward-intent.json \
+            --intent-run-id "$INTENT_RUN_ID" \
+            --intent-artifact-id "$INTENT_ARTIFACT_ID" \
+            --intent-artifact-name "$INTENT_ARTIFACT_NAME" \
+            --intent-artifact-digest "$INTENT_ARTIFACT_DIGEST" \
+            --output-dir editorial-publication
+          test -s editorial-publication/human-review.json
+          test -s editorial-publication/publication-receipt.json
+          test -s editorial-publication/publication-replay-receipt.json
+          jq -e '
+            .code_revision == env.GITHUB_SHA
+            and .ground_truth_source == "human"
+            and .ai_generated_ground_truth == false
+            and .carry_forward.prepared_intent_artifact.run_id
+              == (env.INTENT_RUN_ID | tonumber)
+            and .carry_forward.prepared_intent_artifact.artifact_id
+              == (env.INTENT_ARTIFACT_ID | tonumber)
+          ' editorial-publication/human-review.json > /dev/null
+          jq -e '
+            .mutations_applied == 0
+            and .event_mutations_applied == 0
+            and .brief.idempotent == .recovered_existing_brief
+          ' editorial-publication/publication-receipt.json > /dev/null
+          jq -e '
+            .mutations_applied == 0
+            and .event_mutations_applied == 0
+            and .idempotent_replay == true
+            and .brief.idempotent == true
+          ' editorial-publication/publication-replay-receipt.json > /dev/null
+
+      - name: Upload recovered current-SHA publication evidence
+        id: publication_artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-expedited-editorial-publication-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: editorial-publication
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Record recovered carry-forward identity
+        shell: bash
+        env:
+          PUBLICATION_ARTIFACT_ID: ${{ steps.publication_artifact.outputs.artifact-id }}
+          PUBLICATION_ARTIFACT_DIGEST: ${{ steps.publication_artifact.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          semantic="$(jq -er '.semantic_receipt_sha256' \
+            editorial-publication/publication-receipt.json)"
+          {
+            echo "### Recovered expedited editorial carry-forward"
+            echo "- current code revision: \`$GITHUB_SHA\`"
+            echo "- source intent run: \`$INTENT_RUN_ID\`"
+            echo "- source intent artifact id: \`$INTENT_ARTIFACT_ID\`"
+            echo "- publication artifact id: \`$PUBLICATION_ARTIFACT_ID\`"
+            echo "- publication artifact digest: \`$PUBLICATION_ARTIFACT_DIGEST\`"
+            echo "- semantic publication receipt: \`$semantic\`"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import argparse
 import base64
+import concurrent.futures
 import hashlib
 import hmac
 import json
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -159,6 +161,17 @@ DART_CONTRACT_FIXTURE = json.loads(
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def canonical_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def cors_exposed_header_names(headers: dict[str, str]) -> frozenset[str]:
@@ -456,6 +469,7 @@ def mysql_execute(container_id: str, sql: str) -> str:
             "mysql",
             "--user=root",
             f"--password={MYSQL_ROOT_PASSWORD}",
+            "--default-character-set=utf8mb4",
             "--batch",
             "--skip-column-names",
             DATABASE,
@@ -4755,6 +4769,429 @@ def run(base_url: str, mysql_container_id: str) -> None:
         in str(duplicate_lane_brief.get("detail")),
         repr(duplicate_lane_brief),
     )
+
+    protected_cutoff_at = utc_text(now - timedelta(seconds=2))
+    protected_reason = "CI protected human-reviewed top selection."
+    protected_before_revision, _ = request_json(
+        base_url,
+        f"api.php/api/v2/admin/expedited-review-candidates/{event_id}",
+        token=EDITOR_TOKEN,
+    )
+    stale_protected_snapshot = protected_before_revision.get("meta", {}).get(
+        "snapshot_sha256"
+    )
+    require(
+        isinstance(stale_protected_snapshot, str)
+        and len(stale_protected_snapshot) == 64,
+        repr(protected_before_revision),
+    )
+
+    def protected_brief_payload(snapshot_sha256: str) -> dict[str, Any]:
+        basis = [
+            {
+                "event_id": event_id,
+                "snapshot_sha256": snapshot_sha256,
+            }
+        ]
+        return {
+            "edition": "global",
+            "cutoff_at": protected_cutoff_at,
+            "build_sha": CODE_REVISION,
+            "empty_reason": None,
+            "items": [
+                {
+                    "event_id": event_id,
+                    "lane": "top",
+                    "position_no": 1,
+                    "selection_reason": protected_reason,
+                    "expected_snapshot_sha256": snapshot_sha256,
+                }
+            ],
+            "expected_event_basis_sha256": canonical_sha256(basis),
+        }
+
+    missing_recovery_payload = protected_brief_payload(
+        stale_protected_snapshot
+    )
+    missing_recovery_payload["require_existing"] = True
+    missing_recovery, _ = request_json(
+        base_url,
+        "api.php/api/v2/admin/briefs",
+        method="POST",
+        token=EDITOR_TOKEN,
+        payload=missing_recovery_payload,
+        expected_status=409,
+    )
+    require(
+        missing_recovery.get("error") == "brief_recovery_not_found"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT("
+            "(SELECT COUNT(*) FROM ci_brief_editions WHERE cutoff_at='"
+            + protected_cutoff_at.replace("T", " ").removesuffix("Z")
+            + "'),'|',"
+            "(SELECT COUNT(*) FROM ci_brief_items bi JOIN ci_brief_editions be "
+            "ON be.brief_id=bi.brief_id WHERE be.cutoff_at='"
+            + protected_cutoff_at.replace("T", " ").removesuffix("Z")
+            + "'));",
+        )
+        == "0|0",
+        repr(missing_recovery),
+    )
+
+    # This mutation does not touch governance_events. It proves that the
+    # protected hash includes the revision range instead of relying only on an
+    # event updated_at comparison at the publication boundary.
+    mysql_execute(
+        mysql_container_id,
+        "INSERT INTO ci_editorial_revisions "
+        "(revision_id,entity_type,entity_id,field_name,previous_value,"
+        "revised_value,reason,revision_status,requested_by,reviewed_by,"
+        "reviewed_at,published_at,created_at,updated_at) VALUES "
+        "('revision:ci-protected-brief-boundary','event',"
+        f"'{event_id}','brief_boundary','before','after',"
+        "'CI protected brief revision boundary.','published','ci','ci',"
+        "UTC_TIMESTAMP(),UTC_TIMESTAMP(),UTC_TIMESTAMP(),UTC_TIMESTAMP());",
+    )
+    stale_protected_publish, _ = request_json(
+        base_url,
+        "api.php/api/v2/admin/briefs",
+        method="POST",
+        token=EDITOR_TOKEN,
+        payload=protected_brief_payload(stale_protected_snapshot),
+        expected_status=409,
+    )
+    require(
+        stale_protected_publish.get("error")
+        == "brief_event_snapshot_mismatch"
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT("
+            "(SELECT COUNT(*) FROM ci_brief_editions WHERE cutoff_at='"
+            + protected_cutoff_at.replace("T", " ").removesuffix("Z")
+            + "'),'|',"
+            "(SELECT COUNT(*) FROM ci_brief_items bi JOIN ci_brief_editions be "
+            "ON be.brief_id=bi.brief_id WHERE be.cutoff_at='"
+            + protected_cutoff_at.replace("T", " ").removesuffix("Z")
+            + "'));",
+        )
+        == "0|0",
+        repr(stale_protected_publish),
+    )
+
+    # Exercise the harder empty-range boundary. The protected publisher must
+    # block the first revision insert even when there is no existing revision
+    # row whose record lock could accidentally make the test pass.
+    mysql_execute(
+        mysql_container_id,
+        "DELETE FROM ci_editorial_revisions WHERE entity_type='event' "
+        f"AND entity_id='{event_id}';",
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_editorial_revisions "
+            "WHERE entity_type='event' "
+            f"AND entity_id='{event_id}';",
+        )
+        == "0",
+        "protected revision empty-range fixture is not empty",
+    )
+
+    protected_detail, _ = request_json(
+        base_url,
+        f"api.php/api/v2/admin/expedited-review-candidates/{event_id}",
+        token=EDITOR_TOKEN,
+    )
+    protected_snapshot = protected_detail.get("meta", {}).get("snapshot_sha256")
+    require(
+        isinstance(protected_snapshot, str)
+        and len(protected_snapshot) == 64,
+        repr(protected_detail),
+    )
+    protected_payload = protected_brief_payload(protected_snapshot)
+    protected_cutoff_mysql = protected_cutoff_at.replace(
+        "T", " "
+    ).removesuffix("Z")
+    mysql_execute(
+        mysql_container_id,
+        "DROP TRIGGER IF EXISTS ci_protected_brief_lock_pause;"
+        "CREATE TRIGGER ci_protected_brief_lock_pause BEFORE INSERT "
+        "ON ci_brief_editions FOR EACH ROW SET @ci_protected_brief_pause="
+        "IF(NEW.cutoff_at='"
+        + protected_cutoff_mysql
+        + "',IF(GET_LOCK('ci_protected_brief_pause',0)=1,"
+        + "IF(SLEEP(5)=0,RELEASE_LOCK('ci_protected_brief_pause'),-2),-1),0);",
+    )
+    protected_published: dict[str, Any]
+    concurrent_revision = subprocess.CompletedProcess([], 1, "", "not run")
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            publication = executor.submit(
+                request_json,
+                base_url,
+                "api.php/api/v2/admin/briefs",
+                method="POST",
+                token=EDITOR_TOKEN,
+                payload=protected_payload,
+            )
+            pause_observed = False
+            wait_until = time.monotonic() + 4
+            while time.monotonic() < wait_until:
+                active_insert = mysql_execute(
+                    mysql_container_id,
+                    "SELECT IF(IS_USED_LOCK('ci_protected_brief_pause') "
+                    "IS NULL,0,1);",
+                )
+                if active_insert != "0":
+                    pause_observed = True
+                    break
+                time.sleep(0.1)
+            require(
+                pause_observed,
+                "protected publication did not reach the transaction pause",
+            )
+            concurrent_revision = subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    mysql_container_id,
+                    "mysql",
+                    "--user=root",
+                    f"--password={MYSQL_ROOT_PASSWORD}",
+                    "--batch",
+                    "--skip-column-names",
+                    DATABASE,
+                    "--execute=SET SESSION innodb_lock_wait_timeout=1;"
+                    "INSERT INTO ci_editorial_revisions "
+                    "(revision_id,entity_type,entity_id,field_name,"
+                    "previous_value,revised_value,reason,revision_status,"
+                    "requested_by,reviewed_by,reviewed_at,published_at,"
+                    "created_at,updated_at) VALUES "
+                    "('revision:ci-protected-concurrent-gap','event',"
+                    f"'{event_id}','brief_boundary','before','after',"
+                    "'CI concurrent protected revision.','published','ci',"
+                    "'ci',UTC_TIMESTAMP(),UTC_TIMESTAMP(),UTC_TIMESTAMP(),"
+                    "UTC_TIMESTAMP());",
+                ],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            protected_published = publication.result(timeout=15)[0]
+            require(
+                mysql_execute(
+                    mysql_container_id,
+                    "SELECT IF(IS_USED_LOCK('ci_protected_brief_pause') "
+                    "IS NULL,0,1);",
+                )
+                == "0",
+                "protected publication leaked its CI observation lock",
+            )
+    finally:
+        mysql_execute(
+            mysql_container_id,
+            "DROP TRIGGER IF EXISTS ci_protected_brief_lock_pause;",
+        )
+    if concurrent_revision.returncode == 0:
+        mysql_execute(
+            mysql_container_id,
+            "DELETE FROM ci_editorial_revisions WHERE revision_id="
+            "'revision:ci-protected-concurrent-gap';",
+        )
+    require(
+        concurrent_revision.returncode != 0
+        and "lock wait timeout" in concurrent_revision.stderr.casefold(),
+        "protected empty revision range did not block the first insert: "
+        + concurrent_revision.stderr,
+    )
+    protected_brief_id = protected_published.get("data", {}).get("brief_id")
+    require(
+        isinstance(protected_brief_id, str)
+        and protected_published.get("data", {}).get("idempotent") is False,
+        repr(protected_published),
+    )
+    protected_edition_payload = json.loads(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT payload_json FROM ci_brief_editions "
+            f"WHERE brief_id='{protected_brief_id}';",
+        )
+    )
+    protected_manifest = protected_edition_payload.get("stored_item_manifest")
+    protected_edition_manifest = protected_edition_payload.get(
+        "stored_edition_manifest"
+    )
+    protected_item_snapshot = json.loads(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT event_snapshot_json FROM ci_brief_items "
+            f"WHERE brief_id='{protected_brief_id}' AND event_id='{event_id}';",
+        )
+    )
+    require(
+        protected_edition_payload.get("contract_version") == 2
+        and isinstance(protected_manifest, list)
+        and len(protected_manifest) == 1
+        and protected_edition_payload.get("stored_item_manifest_sha256")
+        == canonical_sha256(protected_manifest)
+        and protected_manifest[0].get("event_snapshot_sha256")
+        == canonical_sha256(protected_item_snapshot)
+        and protected_manifest[0].get("expected_snapshot_sha256")
+        == protected_snapshot
+        and protected_manifest[0].get("selection_reason") == protected_reason
+        and protected_manifest[0].get("brief_id") == protected_brief_id
+        and protected_manifest[0].get("review_status") == "approved"
+        and bool(protected_manifest[0].get("approved_by"))
+        and all(
+            protected_manifest[0].get(field)
+            for field in ("approved_at", "created_at", "updated_at")
+        )
+        and isinstance(protected_edition_manifest, dict)
+        and protected_edition_payload.get("stored_edition_manifest_sha256")
+        == canonical_sha256(protected_edition_manifest)
+        and protected_edition_manifest.get("brief_id") == protected_brief_id
+        and protected_edition_manifest.get("edition") == "global"
+        and protected_edition_manifest.get("cutoff_at") == protected_cutoff_at
+        and protected_edition_manifest.get("publication_status") == "published"
+        and protected_edition_manifest.get("build_sha") == CODE_REVISION
+        and protected_edition_manifest.get("stored_item_manifest_sha256")
+        == canonical_sha256(protected_manifest)
+        and all(
+            protected_edition_manifest.get(field)
+            for field in (
+                "published_at",
+                "approved_by",
+                "approved_at",
+                "created_at",
+                "updated_at",
+            )
+        ),
+        repr(protected_edition_payload),
+    )
+
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_governance_events SET title='CI live drift after protected "
+        "brief',updated_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 3 SECOND) "
+        f"WHERE event_id='{event_id}';",
+    )
+    protected_recovery_payload = dict(protected_payload)
+    protected_recovery_payload["require_existing"] = True
+    protected_recovery, _ = request_json(
+        base_url,
+        "api.php/api/v2/admin/briefs",
+        method="POST",
+        token=EDITOR_TOKEN,
+        payload=protected_recovery_payload,
+    )
+    require(
+        protected_recovery.get("data", {}).get("idempotent") is True,
+        repr(protected_recovery),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_governance_events SET title='"
+        + second_title
+        + "' WHERE event_id='"
+        + event_id
+        + "';",
+    )
+
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_brief_items SET selection_reason='CI tampered reason' "
+        f"WHERE brief_id='{protected_brief_id}' AND event_id='{event_id}';",
+    )
+    tampered_protected_recovery, _ = request_json(
+        base_url,
+        "api.php/api/v2/admin/briefs",
+        method="POST",
+        token=EDITOR_TOKEN,
+        payload=protected_recovery_payload,
+        expected_status=409,
+    )
+    require(
+        tampered_protected_recovery.get("error")
+        == "brief_stored_item_manifest_mismatch",
+        repr(tampered_protected_recovery),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_brief_items SET selection_reason='"
+        + protected_reason
+        + "' WHERE brief_id='"
+        + protected_brief_id
+        + "' AND event_id='"
+        + event_id
+        + "';",
+    )
+    original_item_approver = str(protected_manifest[0]["approved_by"])
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_brief_items SET approved_by='CI tampered approver' "
+        f"WHERE brief_id='{protected_brief_id}' AND event_id='{event_id}';",
+    )
+    tampered_item_audit_recovery, _ = request_json(
+        base_url,
+        "api.php/api/v2/admin/briefs",
+        method="POST",
+        token=EDITOR_TOKEN,
+        payload=protected_recovery_payload,
+        expected_status=409,
+    )
+    require(
+        tampered_item_audit_recovery.get("error")
+        == "brief_stored_item_manifest_mismatch",
+        repr(tampered_item_audit_recovery),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_brief_items SET approved_by='"
+        + original_item_approver.replace("'", "''")
+        + "' WHERE brief_id='"
+        + protected_brief_id
+        + "' AND event_id='"
+        + event_id
+        + "';",
+    )
+
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_brief_editions SET publication_status='draft' "
+        f"WHERE brief_id='{protected_brief_id}';",
+    )
+    tampered_edition_recovery, _ = request_json(
+        base_url,
+        "api.php/api/v2/admin/briefs",
+        method="POST",
+        token=EDITOR_TOKEN,
+        payload=protected_recovery_payload,
+        expected_status=409,
+    )
+    require(
+        tampered_edition_recovery.get("error")
+        == "brief_stored_edition_manifest_mismatch",
+        repr(tampered_edition_recovery),
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_brief_editions SET publication_status='published' "
+        f"WHERE brief_id='{protected_brief_id}';",
+    )
+    restored_protected_recovery, _ = request_json(
+        base_url,
+        "api.php/api/v2/admin/briefs",
+        method="POST",
+        token=EDITOR_TOKEN,
+        payload=protected_recovery_payload,
+    )
+    require(
+        restored_protected_recovery.get("data", {}).get("idempotent") is True,
+        repr(restored_protected_recovery),
+    )
+
     published_brief, _ = request_json(
         base_url,
         "api.php/api/v2/admin/briefs",
@@ -4781,6 +5218,19 @@ def run(base_url: str, mysql_container_id: str) -> None:
         and published_brief.get("data", {}).get("top_count") == 1
         and published_brief.get("data", {}).get("published") is True,
         repr(published_brief),
+    )
+    legacy_brief_payload = json.loads(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT payload_json FROM ci_brief_editions "
+            f"WHERE brief_id='{brief_id}';",
+        )
+    )
+    require(
+        legacy_brief_payload.get("contract_version") == 1
+        and "stored_item_manifest" not in legacy_brief_payload
+        and "stored_item_manifest_sha256" not in legacy_brief_payload,
+        repr(legacy_brief_payload),
     )
     snapshot_has_url = mysql_execute(
         mysql_container_id,
@@ -4857,6 +5307,25 @@ def run(base_url: str, mysql_container_id: str) -> None:
         repr(frozen),
     )
 
+    mysql_execute(
+        mysql_container_id,
+        "DELETE FROM ci_brief_items "
+        f"WHERE brief_id='{protected_brief_id}' AND event_id='{event_id}';",
+    )
+    missing_protected_recovery, _ = request_json(
+        base_url,
+        "api.php/api/v2/admin/briefs",
+        method="POST",
+        token=EDITOR_TOKEN,
+        payload=protected_recovery_payload,
+        expected_status=409,
+    )
+    require(
+        missing_protected_recovery.get("error")
+        == "brief_stored_item_manifest_mismatch",
+        repr(missing_protected_recovery),
+    )
+
     # Neither administrative release-state endpoint may bypass the protected
     # cutover authorization, even with the administrator credential.
     direct_v2_live, _ = request_json(
@@ -4915,6 +5384,107 @@ def run(base_url: str, mysql_container_id: str) -> None:
         release_cannot_activate.get("error") == "insufficient_role",
         repr(release_cannot_activate),
     )
+
+    # Runtime configuration must preserve two-person release control. Even if
+    # an operator accidentally assigns the administrator hash to the exact
+    # release-authorizer role, neither authorization issuance nor cutover may
+    # proceed. Diagnostics identify role names only and never echo a token or
+    # token hash.
+    runtime_config_path = (
+        REPOSITORY_ROOT / "deploy" / "activist" / "_private" / "config.php"
+    )
+    runtime_config = runtime_config_path.read_text(encoding="utf-8")
+    admin_hash = token_hash(ADMIN_TOKEN)
+    release_authorizer_hash = token_hash(RELEASE_AUTHORIZER_TOKEN)
+    require(
+        runtime_config.count(release_authorizer_hash) == 1,
+        "CI runtime config must contain exactly one release-authorizer hash",
+    )
+    overlapping_config = runtime_config.replace(
+        release_authorizer_hash,
+        admin_hash,
+        1,
+    )
+    runtime_config_path.write_text(overlapping_config, encoding="utf-8")
+    try:
+        overlap_authorization, _ = request_json(
+            base_url,
+            "api.php/api/v2/admin/release-authorizations",
+            method="POST",
+            token=ADMIN_TOKEN,
+            payload={},
+            expected_status=503,
+        )
+        overlap_cutover, _ = request_json(
+            base_url,
+            "api.php/api/v2/admin/cutover",
+            method="POST",
+            token=ADMIN_TOKEN,
+            payload={},
+            expected_status=503,
+        )
+        for overlap_response in (overlap_authorization, overlap_cutover):
+            require(
+                overlap_response.get("error")
+                == "protected_role_token_hash_overlap"
+                and overlap_response.get("conflict_count") == 1
+                and overlap_response.get("conflicting_roles")
+                == [["admin", "release_authorizer"]],
+                repr(overlap_response),
+            )
+            serialized_response = json.dumps(
+                overlap_response,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            for secret_value in (
+                ADMIN_TOKEN,
+                RELEASE_AUTHORIZER_TOKEN,
+                admin_hash,
+                release_authorizer_hash,
+            ):
+                require(
+                    secret_value not in serialized_response,
+                    "role-overlap response exposed credential material",
+                )
+    finally:
+        runtime_config_path.write_text(runtime_config, encoding="utf-8")
+
+    mysql_execute(
+        mysql_container_id,
+        "ALTER TABLE ci_governance_release_audit ENGINE=MyISAM;",
+    )
+    try:
+        drifted_authorization, _ = request_json(
+            base_url,
+            "api.php/api/v2/admin/release-authorizations",
+            method="POST",
+            token=RELEASE_AUTHORIZER_TOKEN,
+            payload={
+                "candidate_sha": CODE_REVISION,
+                "evidence_artifact_digest": EVIDENCE_ARTIFACT_DIGEST,
+                "evidence_run_id": 101,
+                "evidence_artifact_id": 202,
+                "release_nonce": "0" * 64,
+                "expected_v1_state_version": v1_preview_version,
+                "expected_v2_state_version": 1,
+                "expires_at": utc_text(
+                    datetime.now(timezone.utc) + timedelta(minutes=10)
+                ),
+                "reason": "CI rejects authorization under engine drift.",
+            },
+            expected_status=503,
+        )
+        require(
+            drifted_authorization.get("error")
+            == "protected_release_transaction_engine_invalid",
+            repr(drifted_authorization),
+        )
+    finally:
+        mysql_execute(
+            mysql_container_id,
+            "ALTER TABLE ci_governance_release_audit ENGINE=InnoDB;",
+        )
 
     # Expiry and every immutable binding fail closed before a valid
     # authorization is consumed.
@@ -4987,6 +5557,63 @@ def run(base_url: str, mysql_container_id: str) -> None:
         wrong_digest.get("error") == "release_authorization_binding_mismatch",
         repr(wrong_digest),
     )
+
+    # A same-name non-transactional table must be rejected before either
+    # release-state row or the one-time authorization can change. Restore the
+    # fixture engine even when the HTTP assertion fails so later smoke checks
+    # remain diagnostic.
+    mysql_execute(
+        mysql_container_id,
+        "ALTER TABLE ci_governance_release_audit ENGINE=MyISAM;",
+    )
+    try:
+        engine_drift = atomic_cutover(
+            base_url,
+            nonce=release_nonce,
+            expected_v1_version=v1_preview_version,
+            expected_v2_version=1,
+            expected_status=503,
+        )
+        require(
+            engine_drift.get("error")
+            == "protected_release_transaction_engine_invalid"
+            and engine_drift.get("checked_table_count") == 5
+            and engine_drift.get("invalid_table_count") == 1
+            and engine_drift.get("invalid_tables")
+            == [
+                {
+                    "table": "governance_release_audit",
+                    "reason": "engine_not_innodb",
+                }
+            ],
+            repr(engine_drift),
+        )
+        require_cutover_not_consumed(
+            mysql_container_id,
+            authorization["authorization_id"],
+        )
+        engine_v1_state = mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT(release_state,'|',state_version) "
+            "FROM ci_governance_release_state "
+            "WHERE state_key='governance_v1';",
+        )
+        engine_v2_state = mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT(release_state,'|',state_version) "
+            "FROM ci_governance_release_state "
+            "WHERE state_key='global_terminal_v2';",
+        )
+        require(
+            engine_v1_state == f"preview|{v1_preview_version}"
+            and engine_v2_state == "preview|1",
+            repr((engine_v1_state, engine_v2_state)),
+        )
+    finally:
+        mysql_execute(
+            mysql_container_id,
+            "ALTER TABLE ci_governance_release_audit ENGINE=InnoDB;",
+        )
 
     # Required-source validation is independent of published documents. The
     # three still-pending non-SEC required grants block cutover without consuming
@@ -5359,6 +5986,89 @@ def run(base_url: str, mysql_container_id: str) -> None:
         "UPDATE ci_source_rights SET source_key='sec-ci-alternate',"
         "updated_at=UTC_TIMESTAMP() "
         f"WHERE source_right_id='{ALTERNATE_RIGHT_ID}';",
+    )
+
+    # A legacy-only document cannot borrow an unrelated active grant. It must
+    # be hidden by v1 and must independently block cutover even though v2 does
+    # not include issuer_id=NULL documents in its public corpus.
+    v1_mismatch_document_id = "ci-v1-right-mismatch-doc"
+    v1_mismatch_event_id = "ci-v1-right-mismatch-event"
+    v1_mismatch_hash = hashlib.sha256(b"v1 source-right mismatch").hexdigest()
+    mysql_execute(
+        mysql_container_id,
+        "INSERT INTO ci_companies "
+        "(company_id,legal_name,record_status,created_at,updated_at) VALUES "
+        "('00999984','CI v1-only issuer','active',UTC_TIMESTAMP(),"
+        "UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE company_id=company_id;"
+        "INSERT INTO ci_documents "
+        "(document_id,company_id,issuer_id,country_code,source_right_id,"
+        "source_class,source_key,external_id,document_type,original_language,"
+        "title,body_text,original_url,content_hash,collection_key,"
+        "correction_of_document_id,version_no,published_at,filed_at,retrieved_at,"
+        "verification_status,publication_status,payload_json,created_at,updated_at)"
+        " VALUES "
+        f"('{v1_mismatch_document_id}','00999984',NULL,'KR','official:dart',"
+        "'media_report','unrelated-media','ci-v1-right-mismatch',"
+        "'news','ko','CI unrelated grant mismatch',NULL,"
+        "'https://example.invalid/v1-right-mismatch',"
+        f"'{v1_mismatch_hash}',NULL,NULL,1,UTC_TIMESTAMP(),UTC_TIMESTAMP(),"
+        "UTC_TIMESTAMP(),'confirmed','published','{}',UTC_TIMESTAMP(),"
+        "UTC_TIMESTAMP());"
+        "INSERT INTO ci_governance_events "
+        "(event_id,company_id,issuer_id,country_code,event_type,title,"
+        "original_language,summary,occurred_at,deadline_at,importance,"
+        "verification_status,review_status,publication_status,collection_key,"
+        "identity_status,payload_json,created_at,updated_at) VALUES "
+        f"('{v1_mismatch_event_id}','00999984',NULL,'KR','general_meeting',"
+        "'CI v1-only mismatched evidence event','ko',NULL,UTC_TIMESTAMP(),NULL,"
+        "'medium','official','approved','published',NULL,'complete','{}',"
+        "UTC_TIMESTAMP(),UTC_TIMESTAMP());"
+        "INSERT INTO ci_event_documents "
+        "(event_id,document_id,relation_type,position_no,created_at) VALUES "
+        f"('{v1_mismatch_event_id}','{v1_mismatch_document_id}','evidence',0,"
+        "UTC_TIMESTAMP());",
+    )
+    hidden_v1_document, _ = request_json(
+        base_url,
+        f"api.php/api/v1/documents/{v1_mismatch_document_id}",
+        token=PREVIEW_TOKEN,
+        expected_status=404,
+    )
+    require(
+        hidden_v1_document.get("error") == "document_not_found",
+        repr(hidden_v1_document),
+    )
+    v1_identity_mismatch = atomic_cutover(
+        base_url,
+        nonce=release_nonce,
+        expected_v1_version=v1_preview_version,
+        expected_v2_version=1,
+        expected_status=409,
+    )
+    require(
+        v1_identity_mismatch.get("error") == "current_source_rights_invalid"
+        and v1_identity_mismatch.get(
+            "v1_invalid_source_right_document_count",
+            0,
+        )
+        == 1
+        and v1_identity_mismatch.get(
+            "v2_invalid_source_right_document_count",
+            -1,
+        )
+        == 0,
+        repr(v1_identity_mismatch),
+    )
+    require_cutover_not_consumed(
+        mysql_container_id,
+        authorization["authorization_id"],
+    )
+    mysql_execute(
+        mysql_container_id,
+        f"DELETE FROM ci_event_documents WHERE event_id='{v1_mismatch_event_id}';"
+        f"DELETE FROM ci_governance_events WHERE event_id='{v1_mismatch_event_id}';"
+        f"DELETE FROM ci_documents WHERE document_id='{v1_mismatch_document_id}';"
+        "DELETE FROM ci_companies WHERE company_id='00999984';",
     )
     live_response = atomic_cutover(
         base_url,

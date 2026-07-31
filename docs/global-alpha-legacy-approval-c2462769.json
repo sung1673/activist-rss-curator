@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "kind": "bside-global-alpha-expedited-legacy-human-approval",
+  "environment": "production",
+  "is_synthetic": false,
+  "ground_truth_source": "human",
+  "ai_generated_ground_truth": false,
+  "human_attestation": true,
+  "reviewer_reference": "bside-owner-20260731",
+  "reviewed_at": "2026-07-30T22:17:45Z",
+  "attestation_source": "codex_thread_human_message_2026-07-31",
+  "attestation_text_sha256": "148a7f5b89fd1edcd5e2b7e548ae2ec747cfee774b8ad0066b4020eae3ba95a6",
+  "source_candidate_sha256": "c24627699633cf02084a2caeb3334c182c404861f85e8f4d27acf116fc6d8f76",
+  "source_decision_sha256": "0056e948bfbb635362a2244cda5f0f25350112dd6a3e06f4f22cb18badd3523b",
+  "source_candidate_artifact": {
+    "run_id": 30581161308,
+    "artifact_id": 8774655231,
+    "artifact_name": "global-alpha-expedited-editorial-candidates-b44a1aebc2eb6e7b58e5960b0f8245b87e901052",
+    "artifact_digest": "sha256:f7eec4481564f52b89fbda166544cb1bc0b79e8ee940a8173ed5859aade40afd"
+  },
+  "source_publication_artifact": {
+    "run_id": 30587485449,
+    "artifact_id": 8777083749,
+    "artifact_name": "global-alpha-expedited-editorial-publication-b44a1aebc2eb6e7b58e5960b0f8245b87e901052-30587485449-1",
+    "artifact_digest": "sha256:95028a16adedfc19b5dfe3c6e0b0c36696b5c2619a44f0040d51ef3b1ffcbbaa"
+  },
+  "approved_transform_contract": {
+    "event_decision": "approved",
+    "country": "KR",
+    "identity_target": "candidate.issuer_name",
+    "identity_effective_at": "candidate.identity_effective_at_or_occurred_at",
+    "identity_deadline_at": null,
+    "deadline_at": null,
+    "summary": "candidate.issuer_name — candidate.title",
+    "importance": "candidate.importance",
+    "current_status": "candidate.verification_status",
+    "verification_status": "preserve_corrected_or_withdrawn_else_official",
+    "actor": "exact_unique_candidate_actor_with_country_KR",
+    "official_evidence": "exact_candidate_official_document_basis",
+    "same_event_pair_decision": false,
+    "top5_decision": "approved"
+  },
+  "event_approvals": [
+    {"position_no": 1, "event_id": "event:05cf497fae5fe6f9a901741961fbdf09", "event_family": "capital_issuance", "identity_action": "rights_issue", "decision": "approved"},
+    {"position_no": 2, "event_id": "event:098ef0a895ef0384809b26fdb3a5b1f4", "event_family": "tender_offer_and_mna", "identity_action": "merger", "decision": "approved"},
+    {"position_no": 3, "event_id": "event:0b8682c596d54cb8ed5991b950223572", "event_family": "capital_issuance", "identity_action": "rights_issue_price_finalized", "decision": "approved"},
+    {"position_no": 4, "event_id": "event:1b504770e55ce66b6e33314ea877c354", "event_family": "capital_issuance", "identity_action": "treasury_convertible_bond_sale", "decision": "approved"},
+    {"position_no": 5, "event_id": "event:1bab93b4db3bd4aed6c21a764aaa24d2", "event_family": "capital_issuance", "identity_action": "rights_issue", "decision": "approved"},
+    {"position_no": 6, "event_id": "event:bbb63590e98bd6865f0251c8f52ceb10", "event_family": "capital_issuance", "identity_action": "rights_issue", "decision": "approved"},
+    {"position_no": 7, "event_id": "event:6fe8cc863cdb3faa55b667f440204f72", "event_family": "listing_status", "identity_action": "trading_suspension_lifted", "decision": "approved"},
+    {"position_no": 8, "event_id": "event:2a39e6936b61400b46c64d45057cbb59", "event_family": "tender_offer_and_mna", "identity_action": "merger", "decision": "approved"},
+    {"position_no": 9, "event_id": "event:1ce9e8c3f9c4c249ed07bff1384dfda5", "event_family": "capital_issuance", "identity_action": "treasury_convertible_bond_sale", "decision": "approved"},
+    {"position_no": 10, "event_id": "event:241d63264e99fadbfe08cb1f6b219c41", "event_family": "listing_status", "identity_action": "delisting_objection_filed", "decision": "approved"},
+    {"position_no": 11, "event_id": "event:e90d2124ba3c3459851db2d9a4ee9408", "event_family": "listing_status", "identity_action": "trading_suspension_for_share_consolidation_or_split", "decision": "approved"},
+    {"position_no": 12, "event_id": "event:c66528ba938e734898495ac457ef424f", "event_family": "capital_issuance", "identity_action": "capital_issuance_result", "decision": "approved"},
+    {"position_no": 13, "event_id": "event:c866f5f7841b74642a636049b92e8c0a", "event_family": "listing_status", "identity_action": "trading_suspension_lifted", "decision": "approved"},
+    {"position_no": 14, "event_id": "event:4c62b6b939285e7bc7dc1214a9b3fa16", "event_family": "tender_offer_and_mna", "identity_action": "merger", "decision": "approved"},
+    {"position_no": 15, "event_id": "event:8c4b4dea0fecbd459a1d17e9c0eea803", "event_family": "capital_issuance", "identity_action": "rights_issue", "decision": "approved"},
+    {"position_no": 16, "event_id": "event:961ed4d77655b41b247e9d05d3b458c8", "event_family": "listing_status", "identity_action": "delisting_review_pending", "decision": "approved"},
+    {"position_no": 17, "event_id": "event:593f9fdf1471a2c15ae47cca886e2b71", "event_family": "tender_offer_and_mna", "identity_action": "merger", "decision": "approved"},
+    {"position_no": 18, "event_id": "event:d230aa7b4335fe0338f744cb9292cd1c", "event_family": "capital_issuance", "identity_action": "capital_issuance_result", "decision": "approved"},
+    {"position_no": 19, "event_id": "event:dba39b9797cbf6efd554cc07c808aea9", "event_family": "listing_status", "identity_action": "delisting_injunction_requested", "decision": "approved"},
+    {"position_no": 20, "event_id": "event:6a2076309c3c63255b0d9c8fd88391c0", "event_family": "tender_offer_and_mna", "identity_action": "merger", "decision": "approved"}
+  ],
+  "pair_approval": {
+    "candidate_pair_count": 40,
+    "decision": false
+  },
+  "top5_approvals": [
+    {"position_no": 1, "event_id": "event:05cf497fae5fe6f9a901741961fbdf09", "decision": "approved"},
+    {"position_no": 2, "event_id": "event:098ef0a895ef0384809b26fdb3a5b1f4", "decision": "approved"},
+    {"position_no": 3, "event_id": "event:0b8682c596d54cb8ed5991b950223572", "decision": "approved"},
+    {"position_no": 4, "event_id": "event:1b504770e55ce66b6e33314ea877c354", "decision": "approved"},
+    {"position_no": 5, "event_id": "event:1bab93b4db3bd4aed6c21a764aaa24d2", "decision": "approved"}
+  ]
+}

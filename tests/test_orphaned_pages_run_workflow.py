@@ -14,6 +14,7 @@ CUTOVER_WORKFLOW = (
 HANDOFF_WORKFLOW = (
     ROOT / ".github" / "workflows" / "governance-expedited-handoff.yml"
 )
+ROLLBACK_WORKFLOW = ROOT / ".github" / "workflows" / "governance-rollback.yml"
 CLASSIFIER = ROOT / ".github" / "scripts" / "orphaned-pages-run.cjs"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 PACKAGE = ROOT / "package.json"
@@ -178,4 +179,60 @@ def test_same_narrow_classifier_is_reused_at_cutover_and_handoff() -> None:
     assert (
         "global-alpha-expedited-cutover-pages-drain-${runId}-${runAttempt}"
         in handoff
+    )
+
+
+def test_standard_rollback_reuses_and_revalidates_the_narrow_classifier() -> None:
+    text = ROLLBACK_WORKFLOW.read_text(encoding="utf-8")
+    payload = yaml.load(text, Loader=yaml.BaseLoader)
+    close = payload["jobs"]["close"]
+    deploy = payload["jobs"]["deploy_legacy"]
+
+    assert "30535379482" not in text
+    assert close["outputs"]["orphaned_unstarted_json"] == (
+        "${{ steps.pages_producers.outputs.orphaned_unstarted_json }}"
+    )
+    drain = _step(
+        close,
+        "Cancel or quarantine stale Pages producer runs before rollback deployment",
+    )
+    script = str(drain["with"]["script"])
+    assert drain["id"] == "pages_producers"
+    assert drain["env"]["EXPECTED_SHA"] == "${{ github.sha }}"
+    assert "./.github/scripts/orphaned-pages-run.cjs" in script
+    assert '"requested"' in script
+    assert "const orphanedUnstarted = new Map();" in script
+    assert "const orphanSnapshots = new Map();" in script
+    assert "handleCancelServerError" in script
+    assert "confirmTerminalAfterCancelConflict" in script
+    assert "revalidateOrphanedUnstarted" in script
+    assert "JSON.stringify(auditEntries)" in script
+
+    close_names = [step["name"] for step in close["steps"]]
+    assert close_names.index(
+        "Immediately close v2 then v1 before recovery preparation"
+    ) < close_names.index(
+        "Cancel or quarantine stale Pages producer runs before rollback deployment"
+    )
+
+    revalidate = _step(
+        deploy,
+        "Revalidate quarantined orphaned Pages producers before deployment",
+    )
+    assert revalidate["env"]["EXPECTED_SHA"] == "${{ github.sha }}"
+    assert revalidate["env"]["ORPHANED_UNSTARTED_JSON"] == (
+        "${{ needs.close.outputs.orphaned_unstarted_json }}"
+    )
+    revalidate_script = str(revalidate["with"]["script"])
+    assert "revalidateOrphanedUnstarted" in revalidate_script
+    assert "confirmCancelledOrphanedUnstarted" in revalidate_script
+    assert "Rollback orphan audit entry is malformed" in revalidate_script
+
+    deploy_names = [step["name"] for step in deploy["steps"]]
+    assert deploy_names.index(
+        "Validate legacy artifact without executing its contents"
+    ) < deploy_names.index(
+        "Revalidate quarantined orphaned Pages producers before deployment"
+    ) < deploy_names.index(
+        "Re-close v2 then v1 inside Pages deployment lock"
     )

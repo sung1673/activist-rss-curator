@@ -328,6 +328,14 @@ def test_content_corpus_v2_keeps_every_public_object_document_reference_in_scope
 
 
 def test_preview_to_live_rechecks_current_v2_rights_under_one_lock_order():
+    identity = V1[
+        V1.index("function v1_document_source_right_identity_sql")
+        : V1.index("function v1_document_visibility_sql")
+    ]
+    visibility = V1[
+        V1.index("function v1_document_visibility_sql")
+        : V1.index("function v1_event_visibility_sql")
+    ]
     guard = V1[
         V1.index("function v1_current_public_document_rights_guard")
         : V1.index("function v1_quality_observation_payload_hash")
@@ -345,9 +353,24 @@ def test_preview_to_live_rechecks_current_v2_rights_under_one_lock_order():
         : V1.index("function v1_editorial_reference_exists")
     ]
 
+    assert "BINARY ' . $documentAlias . '.source_class=BINARY " in identity
+    assert "BINARY ' . $documentAlias . '.source_key=BINARY " in identity
+    assert "v1_document_source_right_identity_sql(" in visibility
     assert "v1_content_corpus_document_refs_sql($config)" in guard
     assert "v1_content_corpus_document_refs_params($checkedAt,$scopeStart)" in guard
     assert "v1_content_document_right_valid_at($document,$checkedAt)" in guard
+    for field in (
+        "document_source_class",
+        "document_source_key",
+        "right_source_type",
+        "right_source_key",
+    ):
+        assert field in guard
+    right_validator = V1[
+        V1.index("function v1_content_document_right_valid_at")
+        : V1.index("function v1_content_corpus_snapshot")
+    ]
+    assert right_validator.count("hash_equals(") == 2
     assert "$before = v1_release_state($pdo, $config, true)" in transition
     assert "'protected_atomic_cutover_required'" in transition
     atomic_cutover = V2[
@@ -371,6 +394,53 @@ def test_preview_to_live_rechecks_current_v2_rights_under_one_lock_order():
     assert ingest_writer.index("v1_release_state($pdo,$config,true)") < ingest_writer.index(
         "$rightStmt = $pdo->prepare"
     )
+
+
+def test_protected_role_hashes_are_pairwise_disjoint_without_secret_diagnostics():
+    overlap = V1[
+        V1.index("function v1_protected_role_hash_overlap_status")
+        : V1.index("function v1_require_disjoint_protected_role_hashes")
+    ]
+    for role in (
+        "admin",
+        "editor",
+        "ops",
+        "preview",
+        "release_authorizer",
+        "rights",
+    ):
+        assert f"'{role}'" in overlap
+    assert "v1_preview_token_hashes($config)" in overlap
+    assert "conflicting_roles" in overlap
+    assert "'hash'" not in overlap
+    returned_status = overlap[overlap.index("return array(") :]
+    assert "$owners" not in returned_status
+    assert "$roleHashes" not in returned_status
+
+    failure = V1[
+        V1.index("function v1_require_disjoint_protected_role_hashes")
+        : V1.index("function v1_preview_auth_configured")
+    ]
+    assert "protected_role_token_hash_overlap" in failure
+    assert "conflicting_roles" in failure
+    assert "$owners" not in failure
+    assert "$roleHashes" not in failure
+
+    role_auth = V1[
+        V1.index("function v1_require_role")
+        : V1.index("function v1_normalize_identity_text")
+    ]
+    preview_auth = V1[
+        V1.index("function v1_require_preview_token")
+        : V1.index("function v1_release_state")
+    ]
+    for auth in (role_auth, preview_auth):
+        assert "v1_require_disjoint_protected_role_hashes($config);" in auth
+
+    spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
+    policy = spec["x-release-gate"]["protected-live-transition"]
+    assert "pairwise disjoint" in policy
+    assert "without returning credential hashes" in policy
 
 
 def test_canonical_json_encode_calls_supply_explicit_failure_context():
@@ -1907,6 +1977,183 @@ def test_official_followup_adopts_a_canonical_event_only_after_exact_raw_identit
     assert "$failureError = $rollbackError" in transaction_catch
 
 
+def test_reviewed_dart_event_replay_is_an_exact_read_only_ack():
+    helpers = V1[
+        V1.index("function v1_dart_reviewed_event_is_protected")
+        : V1.index("function v1_governance_snapshot_validation_reason")
+    ]
+    for required_state in (
+        "identity_status",
+        "complete",
+        "review_status",
+        "approved",
+        "publication_status",
+        "published",
+        "is_correction",
+        "is_cancelled",
+        "official",
+        "corrected",
+        "ambiguous_independent",
+    ):
+        assert required_state in helpers
+    assert "$issuerId !== 'issuer:kr:dart:' . $companyId" in helpers
+    assert "$countryCode !== 'KR'" in helpers
+    assert "$eventType !== $eventFamily" in helpers
+    assert "$eventDeadlineAt !== $deadlineAt" in helpers
+    assert "'global:' . substr(" in helpers
+    assert "!hash_equals($expectedComparisonKey,$comparisonKey)" in helpers
+    assert "$companyId !== $submittedCompanyId" in helpers
+    assert "!hash_equals($canonicalActorId,$submittedActorId)" in helpers
+    assert "$submittedDeadlineAt !== $canonicalDeadlineAt" in helpers
+    assert "$submittedIdentityDeadlineAt !== $canonicalDeadlineAt" in helpers
+    assert "array_key_exists('event_link_status',$storedPayload)" in helpers
+    assert "($isCorrection ? 'corrected' : 'official')" in helpers
+    assert "$canonicalSubmittedEvent['event_link_status']" in helpers
+    assert "v1_followup_event_replay_payload_matches(" in helpers
+    assert "$storedPayload," in helpers
+    assert "$canonicalSubmittedEvent," in helpers
+    assert "false," in helpers
+    assert "function v1_dart_reviewed_company_replay_matches(" in helpers
+    company_guard = helpers[
+        helpers.index("function v1_dart_reviewed_company_replay_matches(")
+        : helpers.index(
+            "/**\n * Return only a stable, caller-actionable validation reason.",
+            helpers.index("function v1_dart_reviewed_company_replay_matches("),
+        )
+    ]
+    for table in (
+        "companies",
+        "issuers",
+        "issuer_identifiers",
+        "issuer_listings",
+    ):
+        assert f"table_name($config,'{table}')" in company_guard
+    assert company_guard.count("FOR UPDATE") == 4
+    assert "$submittedStockCode !== null" in company_guard
+    assert "$submittedMarket !== null" in company_guard
+    assert "$submittedLegalNameEn !== null" in company_guard
+    assert "$submittedShortName !== null" in company_guard
+    assert "$submittedHomepage !== null" in company_guard
+    assert "count($submittedAliases) > 0" in company_guard
+    assert "$hasListingStatus" in company_guard
+    assert "$hasMasterModifiedAt" in company_guard
+    assert "'DART_CORP_CODE',$companyId,'KRX'" in company_guard
+    assert "$projectionStockCode !== ''" in company_guard
+    assert "$projectionStockCode !== $storedStockCode" in company_guard
+    assert "$projectionMarket !== $storedMarket" in company_guard
+    assert "'TICKER',$storedStockCode,$storedMarket" in company_guard
+    assert "'listing:kr:' . $companyId" in company_guard
+
+    ingest = V1[
+        V1.index("function upsert_governance_snapshot") : V1.index(
+            "function upsert_editorial_snapshot"
+        )
+    ]
+    preflight = ingest[
+        ingest.index("$isolatedReplayEventStmt = $pdo->prepare")
+        : ingest.index("$companyStmt = $pdo->prepare")
+    ]
+    assert "v1_dart_reviewed_event_is_protected(" in preflight
+    assert "v1_dart_reviewed_event_replay(" in preflight
+    assert "$globalDartProjectionEnabled" in preflight
+    assert "$dartGuardedAction" in preflight
+    assert "count($storedDocumentRows) !== 1" in preflight
+    assert "count($submittedDocumentIdSet) !== 1" in preflight
+    assert "(int)($storedDocumentRow['position_no'] ?? -1) !== 0" in preflight
+    assert "isset($duplicateSubmittedDocumentIds[$storedDocumentId])" in preflight
+    assert "v1_dart_identity_change_document_matches(" in preflight
+    assert "$submittedDocumentsById[$storedDocumentId]," in preflight
+    assert "!empty($reviewedEventReplay['is_correction'])" in preflight
+    assert "count($storedDocumentOwners) !== 1" in preflight
+    assert "count($submittedReferenceOwners) !== 1" in preflight
+    assert "count($approvedActorRows) !== 1" in preflight
+    assert "count($storedObservationRows) !== 1" in preflight
+    assert "$storedObservationRows[0]['document_id']" in preflight
+    assert "$isolatedReplayDocumentSnapshots[$storedDocumentId]" in preflight
+    assert "$readOnlyDartIdentityMutationEventIds[$submittedEventId]" in preflight
+    assert "$readOnlyDartReviewedEventCompanyIds[$submittedEventId]" in preflight
+    assert "$readOnlyDartReviewedDocumentIds[$storedDocumentId]" in preflight
+    assert "$readOnlyDartReviewedCompanyIds = array_fill_keys(" in preflight
+    assert "$submittedReadOnlyCompanies = array();" in preflight
+    assert "v1_dart_reviewed_company_replay_matches(" in preflight
+    pending_identity_branch = preflight[
+        preflight.index(
+            "if (!$storedFollowupFlag && $storedIsolationMarker === ''"
+        ) : preflight.index(
+            "if (!$storedFollowupFlag || $storedIsolationMarker"
+        )
+    ]
+    assert (
+        "'event_documents'=>count($storedDocumentRows)"
+        in pending_identity_branch
+    )
+    assert (
+        "'event_observations'=>count($storedDocumentRows)"
+        in pending_identity_branch
+    )
+    assert (
+        "!isset(\n"
+        "                    $readOnlyDartReviewedEventCompanyIds"
+        "[$submittedEventId]"
+    ) in preflight
+    assert (
+        "!isset(\n"
+        "                    $readOnlyDartReviewedDocumentIds"
+        "[$submittedDocumentId]"
+    ) in preflight
+    assert preflight.count(
+        "unset($readOnlyDartReviewedCompanyIds[$submittedCompanyId]);"
+    ) == 2
+    assert ingest.index(
+        "v1_dart_reviewed_company_replay_matches("
+    ) < ingest.index("$companyStmt = $pdo->prepare")
+    assert "v1_dart_reviewed_event_is_protected($storedOwnerRow)" in preflight
+    assert "count($submittedReferenceOwners) !== 1" in preflight
+    assert "$readOnlyDartReviewedEventCompanyIds[" in preflight
+    assert preflight.index(
+        "v1_dart_reviewed_event_is_protected("
+    ) < preflight.index("$storedFollowupFlag")
+    reviewed_branch = preflight[
+        preflight.index("v1_dart_reviewed_event_is_protected(")
+        : preflight.index(
+            "if ((string)$isolatedReplayEvent['identity_status']"
+        )
+    ]
+    assert "$pendingDartLifecycleObservations[]" not in reviewed_branch
+    assert "$dartLifecycleObservationInsertStmt" not in reviewed_branch
+    company_loop = ingest[
+        ingest.index("foreach ($companies as $company)") : ingest.index(
+            "$rightStmt = $pdo->prepare"
+        )
+    ]
+    assert "isset($readOnlyDartReviewedCompanyIds[$companyId])" in company_loop
+    assert company_loop.index(
+        "isset($readOnlyDartReviewedCompanyIds[$companyId])"
+    ) < company_loop.index("$companyStmt->execute")
+
+    write_loop = ingest[
+        ingest.index("foreach ($events as $event)") : ingest.index(
+            "if ($run) {", ingest.index("foreach ($events as $event)")
+        )
+    ]
+    skip = write_loop[
+        write_loop.index(
+            "isset($readOnlyDartIdentityMutationEventIds[$submittedEventId])"
+        ) : write_loop.index(
+            "if (isset($isolatedReplayCanonicalEventPayloads[$submittedEventId]))"
+        )
+    ]
+    assert "$counts['events']++" in skip
+    assert "(int)$readOnlyAckCounts['event_documents']" in skip
+    assert "(int)$readOnlyAckCounts['event_observations']" in skip
+    assert "!is_array($readOnlyAckCounts)" in skip
+    assert "!is_int($readOnlyAckCounts['event_documents'])" in skip
+    assert "!is_int($readOnlyAckCounts['event_observations'])" in skip
+    assert "continue;" in skip
+    assert "eventStmt->execute" not in skip
+    assert "timelineStmt->execute" not in skip
+
+
 def test_governance_snapshot_failures_expose_only_allowlisted_safe_diagnostics():
     classifier = V1[
         V1.index("function v1_governance_snapshot_validation_reason")
@@ -2037,6 +2284,10 @@ def test_official_site_receipt_is_atomic_exact_and_never_downgrades_existing_con
     assert "expected_ack_count" in section
     assert "official_site_source_right_ineligible" in section
     assert "v1_official_site_stable_id('site-doc',array($connectorId,$externalId,$contentHash),32)" in section
+    assert "source_right_id,source_class,source_key,external_id" in section
+    assert "$documentSourceIdentityEnabled = v1_global_dart_bridge_enabled" in section
+    assert "if ($documentSourceIdentityEnabled) { $documentValues[] = $sourceKey; }" in section
+    assert "($existing['source_key'] ?? '') !== $sourceKey" in section
     assert "SET retrieved_at=GREATEST(retrieved_at,?),updated_at=?" in section
     assert "correction_of_document_id" in section and "$versionNo = $latest ? (int)$latest['version_no'] + 1 : 1" in section
     assert "publication_status=VALUES(publication_status)" not in section

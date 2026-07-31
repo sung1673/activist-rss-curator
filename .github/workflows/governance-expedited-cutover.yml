@@ -1034,6 +1034,10 @@ jobs:
           set -euo pipefail
           [[ ${#BSIDE_RELEASE_AUTHORIZER_TOKEN} -ge 32 ]]
           [[ ${#BSIDE_ADMIN_TOKEN} -ge 32 ]]
+          [[ "$BSIDE_RELEASE_AUTHORIZER_TOKEN" != "$BSIDE_ADMIN_TOKEN" ]] || {
+            echo "::error::Protected release roles must use distinct credentials."
+            exit 1
+          }
           v1_api="${GOVERNANCE_API_BASE_URL%/}"
           v2_api="${v1_api%/api/v1}/api/v2"
           release_nonce="$(openssl rand -hex 32)"

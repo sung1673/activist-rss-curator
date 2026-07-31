@@ -24,6 +24,89 @@ CANDIDATE_KIND = "bside-global-alpha-expedited-editorial-candidates"
 DECISION_KIND = "bside-global-alpha-expedited-editorial-human-decisions"
 HUMAN_REVIEW_KIND = "bside-global-alpha-human-review"
 PUBLICATION_KIND = "bside-global-alpha-expedited-editorial-publication"
+CARRY_FORWARD_KIND = "bside-global-alpha-expedited-editorial-carry-forward"
+CARRY_FORWARD_INTENT_KIND = (
+    "bside-global-alpha-expedited-editorial-carry-forward-intent"
+)
+CARRY_FORWARD_INTENT_MAX_FRESH_AGE = timedelta(minutes=30)
+APPROVED_CANONICAL_BASIS_KIND = (
+    "bside-global-alpha-expedited-approved-canonical-basis"
+)
+LEGACY_APPROVAL_CANDIDATE_SHA256 = (
+    "c24627699633cf02084a2caeb3334c182c404861f85e8f4d27acf116fc6d8f76"
+)
+LEGACY_APPROVAL_REVIEWER = "bside-owner-20260731"
+LEGACY_APPROVAL_ATTESTATION_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "docs"
+    / "global-alpha-legacy-approval-c2462769.json"
+)
+LEGACY_APPROVAL_ATTESTATION_SHA256 = (
+    "3c64d0dd3567e1c6ec39f4484805dd1754c97370fa415503fedefb713487591e"
+)
+LEGACY_APPROVAL_TEXT_SHA256 = (
+    "148a7f5b89fd1edcd5e2b7e548ae2ec747cfee774b8ad0066b4020eae3ba95a6"
+)
+LEGACY_APPROVAL_SOURCE_DECISION_SHA256 = (
+    "0056e948bfbb635362a2244cda5f0f25350112dd6a3e06f4f22cb18badd3523b"
+)
+LEGACY_APPROVAL_CANDIDATE_ARTIFACT = {
+    "run_id": 30581161308,
+    "artifact_id": 8774655231,
+    "artifact_name": (
+        "global-alpha-expedited-editorial-candidates-"
+        "b44a1aebc2eb6e7b58e5960b0f8245b87e901052"
+    ),
+    "artifact_digest": (
+        "sha256:"
+        "f7eec4481564f52b89fbda166544cb1bc0b79e8ee940a8173ed5859aade40afd"
+    ),
+}
+LEGACY_APPROVAL_PUBLICATION_ARTIFACT = {
+    "run_id": 30587485449,
+    "artifact_id": 8777083749,
+    "artifact_name": (
+        "global-alpha-expedited-editorial-publication-"
+        "b44a1aebc2eb6e7b58e5960b0f8245b87e901052-30587485449-1"
+    ),
+    "artifact_digest": (
+        "sha256:"
+        "95028a16adedfc19b5dfe3c6e0b0c36696b5c2619a44f0040d51ef3b1ffcbbaa"
+    ),
+}
+LEGACY_APPROVAL_ACTION_OVERRIDES = {
+    3: "rights_issue_price_finalized",
+    4: "treasury_convertible_bond_sale",
+    7: "trading_suspension_lifted",
+    9: "treasury_convertible_bond_sale",
+    10: "delisting_objection_filed",
+    11: "trading_suspension_for_share_consolidation_or_split",
+    12: "capital_issuance_result",
+    13: "trading_suspension_lifted",
+    16: "delisting_review_pending",
+    18: "capital_issuance_result",
+    19: "delisting_injunction_requested",
+}
+LEGACY_APPROVED_TRANSFORM_CONTRACT = {
+    "event_decision": "approved",
+    "country": "KR",
+    "identity_target": "candidate.issuer_name",
+    "identity_effective_at": (
+        "candidate.identity_effective_at_or_occurred_at"
+    ),
+    "identity_deadline_at": None,
+    "deadline_at": None,
+    "summary": "candidate.issuer_name — candidate.title",
+    "importance": "candidate.importance",
+    "current_status": "candidate.verification_status",
+    "verification_status": (
+        "preserve_corrected_or_withdrawn_else_official"
+    ),
+    "actor": "exact_unique_candidate_actor_with_country_KR",
+    "official_evidence": "exact_candidate_official_document_basis",
+    "same_event_pair_decision": False,
+    "top5_decision": "approved",
+}
 EVENT_COUNT = 20
 PAIR_COUNT = 40
 TOP5_COUNT = 5
@@ -109,6 +192,12 @@ EVENT_FAMILIES = frozenset(
 IMPORTANCE = frozenset({"low", "medium", "high", "critical", "market_sensitive"})
 COUNTRIES = frozenset({"KR", "US", "JP", "GB", "CA", "AU"})
 MAX_HUMAN_REVIEW_AGE = timedelta(hours=72)
+CARRY_FORWARD_ARTIFACT_FIELDS = (
+    "run_id",
+    "artifact_id",
+    "artifact_name",
+    "artifact_digest",
+)
 
 
 class ExpeditedEditorialError(ValueError):
@@ -2022,6 +2111,2061 @@ def apply_publication(
     return human_review, receipt
 
 
+def _artifact_identity(
+    *,
+    run_id: int,
+    artifact_id: int,
+    artifact_name: str,
+    artifact_digest: str,
+    location: str,
+) -> dict[str, object]:
+    return {
+        "run_id": _positive_int(run_id, "run_id", location),
+        "artifact_id": _positive_int(artifact_id, "artifact_id", location),
+        "artifact_name": _text(
+            artifact_name,
+            "artifact_name",
+            location,
+            maximum=255,
+        ),
+        "artifact_digest": "sha256:"
+        + _sha256(
+            str(artifact_digest).removeprefix("sha256:"),
+            "artifact_digest",
+            location,
+        ),
+    }
+
+
+def _carry_document_basis(documents: object, location: str) -> list[dict[str, object]]:
+    """Return evidence identity fields that an editorial action cannot change.
+
+    Retrieval and row-update timestamps are intentionally excluded. They may
+    advance when an official connector safely observes the same source bytes
+    again; every source/document identity and content-bearing field remains
+    bound.
+    """
+
+    fields = (
+        "document_id",
+        "issuer_id",
+        "country_code",
+        "source_right_id",
+        "source_class",
+        "source_key",
+        "document_type",
+        "original_language",
+        "title",
+        "original_url",
+        "content_hash",
+        "filed_at",
+        "published_at",
+        "relation_type",
+        "position_no",
+        "connector_id",
+        "connector_base_url",
+        "coverage_mode",
+        "connector_status",
+    )
+    result = []
+    for index, raw in enumerate(_list(documents, location)):
+        document = _mapping(raw, f"{location}[{index}]")
+        result.append({field: document.get(field) for field in fields})
+    return sorted(
+        result,
+        key=lambda item: (
+            str(item.get("position_no")),
+            str(item.get("document_id")),
+        ),
+    )
+
+
+def _global_identity_mysql_timestamp(value: object, location: str) -> str:
+    normalized = _timestamp(value, "identity timestamp", location)
+    parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _global_comparison_key(
+    *,
+    issuer_id: object,
+    event_family: object,
+    action: object,
+    target: object,
+    actor_id: object,
+    effective_at: object,
+    deadline_at: object,
+    location: str,
+) -> str:
+    """Mirror the PHP v2 global event identity contract byte-for-byte."""
+
+    identity = {
+        "issuer_id": _text(
+            issuer_id,
+            "issuer_id",
+            location,
+            maximum=96,
+        ),
+        "event_family": _text(
+            event_family,
+            "event_family",
+            location,
+            maximum=64,
+        ),
+        "action": _normalize_identity(action),
+        "target": _normalize_identity(target),
+        "actor_id": _normalize_identity(actor_id),
+        "effective_at": _global_identity_mysql_timestamp(
+            effective_at,
+            location,
+        ),
+        "deadline_at": (
+            None
+            if deadline_at is None
+            else _global_identity_mysql_timestamp(deadline_at, location)
+        ),
+    }
+    for field in ("action", "target", "actor_id"):
+        if not identity[field]:
+            raise ExpeditedEditorialError(
+                f"{location}: complete identity requires {field}"
+            )
+    return "global:" + canonical_sha256(identity)
+
+
+def _load_legacy_human_approval_artifact() -> dict[str, object]:
+    return _load_json(
+        LEGACY_APPROVAL_ATTESTATION_PATH,
+        "legacy human approval artifact",
+    )
+
+
+def _validate_legacy_human_approval_artifact(
+    value: object,
+    *,
+    candidate: Mapping[str, object],
+    candidate_artifact: Mapping[str, object],
+    publication_artifact: Mapping[str, object],
+    events: Sequence[Mapping[str, object]],
+    event_reviews: Sequence[Mapping[str, object]],
+    source_decision_sha256: object,
+    publication_top5: Sequence[Mapping[str, object]],
+) -> tuple[dict[str, object], str]:
+    artifact = _mapping(value, "legacy human approval artifact")
+    artifact_sha = canonical_sha256(artifact)
+    if artifact_sha != LEGACY_APPROVAL_ATTESTATION_SHA256:
+        raise ExpeditedEditorialError(
+            "legacy human approval artifact: digest mismatch"
+        )
+    expected_fields = {
+        "schema_version",
+        "kind",
+        "environment",
+        "is_synthetic",
+        "ground_truth_source",
+        "ai_generated_ground_truth",
+        "human_attestation",
+        "reviewer_reference",
+        "reviewed_at",
+        "attestation_source",
+        "attestation_text_sha256",
+        "source_candidate_sha256",
+        "source_decision_sha256",
+        "source_candidate_artifact",
+        "source_publication_artifact",
+        "approved_transform_contract",
+        "event_approvals",
+        "pair_approval",
+        "top5_approvals",
+    }
+    if (
+        set(artifact) != expected_fields
+        or artifact.get("schema_version") != SCHEMA_VERSION
+        or artifact.get("kind")
+        != "bside-global-alpha-expedited-legacy-human-approval"
+        or artifact.get("environment") != "production"
+        or artifact.get("is_synthetic") is not False
+        or artifact.get("ground_truth_source") != "human"
+        or artifact.get("ai_generated_ground_truth") is not False
+        or artifact.get("human_attestation") is not True
+        or artifact.get("reviewer_reference")
+        != LEGACY_APPROVAL_REVIEWER
+        or artifact.get("source_candidate_sha256")
+        != LEGACY_APPROVAL_CANDIDATE_SHA256
+        or artifact.get("source_candidate_artifact")
+        != LEGACY_APPROVAL_CANDIDATE_ARTIFACT
+        or artifact.get("source_publication_artifact")
+        != LEGACY_APPROVAL_PUBLICATION_ARTIFACT
+        or artifact.get("approved_transform_contract")
+        != LEGACY_APPROVED_TRANSFORM_CONTRACT
+    ):
+        raise ExpeditedEditorialError(
+            "legacy human approval artifact: provenance mismatch"
+        )
+    if artifact.get("attestation_text_sha256") != LEGACY_APPROVAL_TEXT_SHA256:
+        raise ExpeditedEditorialError(
+            "legacy human approval artifact: text digest mismatch"
+        )
+    source_decision_sha = _sha256(
+        source_decision_sha256,
+        "source_decision_sha256",
+        "source publication",
+    )
+    if (
+        source_decision_sha != LEGACY_APPROVAL_SOURCE_DECISION_SHA256
+        or artifact.get("source_decision_sha256") != source_decision_sha
+        or artifact.get("source_candidate_sha256")
+        != candidate.get("candidate_sha256")
+        or dict(candidate_artifact) != LEGACY_APPROVAL_CANDIDATE_ARTIFACT
+        or dict(publication_artifact)
+        != LEGACY_APPROVAL_PUBLICATION_ARTIFACT
+    ):
+        raise ExpeditedEditorialError(
+            "legacy human approval artifact: source binding mismatch"
+        )
+    reviewed_at = _timestamp(
+        artifact.get("reviewed_at"),
+        "reviewed_at",
+        "legacy human approval artifact",
+    )
+    if any(
+        item.get("reviewer_reference") != LEGACY_APPROVAL_REVIEWER
+        or item.get("reviewed_at") != reviewed_at
+        for item in event_reviews
+    ):
+        raise ExpeditedEditorialError(
+            "legacy human approval artifact: reviewer binding mismatch"
+        )
+
+    event_approvals = [
+        _mapping(
+            item,
+            f"legacy human approval artifact.event_approvals[{index}]",
+        )
+        for index, item in enumerate(
+            _list(
+                artifact.get("event_approvals"),
+                "legacy human approval artifact.event_approvals",
+            )
+        )
+    ]
+    expected_event_approvals = []
+    for position, event in enumerate(events, start=1):
+        expected_event_approvals.append(
+            {
+                "position_no": position,
+                "event_id": event["event_id"],
+                "event_family": (
+                    "listing_status"
+                    if position == 11
+                    else event["event_family"]
+                ),
+                "identity_action": LEGACY_APPROVAL_ACTION_OVERRIDES.get(
+                    position,
+                    event["identity_action"],
+                ),
+                "decision": "approved",
+            }
+        )
+    if event_approvals != expected_event_approvals:
+        raise ExpeditedEditorialError(
+            "legacy human approval artifact: event approval mismatch"
+        )
+    if artifact.get("pair_approval") != {
+        "candidate_pair_count": PAIR_COUNT,
+        "decision": False,
+    }:
+        raise ExpeditedEditorialError(
+            "legacy human approval artifact: pair approval mismatch"
+        )
+    expected_top5 = [
+        {
+            "position_no": item["position_no"],
+            "event_id": item["event_id"],
+            "decision": "approved",
+        }
+        for item in publication_top5
+    ]
+    if artifact.get("top5_approvals") != expected_top5:
+        raise ExpeditedEditorialError(
+            "legacy human approval artifact: Top 5 approval mismatch"
+        )
+    return artifact, artifact_sha
+
+
+def _legacy_approved_canonical_basis(
+    *,
+    candidate: Mapping[str, object],
+    candidate_artifact: Mapping[str, object],
+    publication_artifact: Mapping[str, object],
+    approval_attestation: Mapping[str, object],
+    source_decision_sha256: object,
+    events: Sequence[Mapping[str, object]],
+    event_reviews: Sequence[Mapping[str, object]],
+    pair_reviews: Sequence[Mapping[str, object]],
+    top_reviews: Sequence[Mapping[str, object]],
+    source_outcomes: Mapping[str, Mapping[str, object]],
+    publication_top5: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Reconstruct the one approved legacy judgment without re-reviewing it."""
+
+    candidate_sha = _sha256(
+        candidate.get("candidate_sha256"),
+        "candidate_sha256",
+        "legacy approval candidate",
+    )
+    if candidate_sha != LEGACY_APPROVAL_CANDIDATE_SHA256:
+        raise ExpeditedEditorialError(
+            "legacy approval profile: exact candidate SHA required"
+        )
+    if (
+        dict(candidate_artifact) != LEGACY_APPROVAL_CANDIDATE_ARTIFACT
+        or dict(publication_artifact)
+        != LEGACY_APPROVAL_PUBLICATION_ARTIFACT
+    ):
+        raise ExpeditedEditorialError(
+            "legacy approval profile: exact protected artifacts required"
+        )
+    attestation, attestation_sha = (
+        _validate_legacy_human_approval_artifact(
+            approval_attestation,
+            candidate=candidate,
+            candidate_artifact=candidate_artifact,
+            publication_artifact=publication_artifact,
+            events=events,
+            event_reviews=event_reviews,
+            source_decision_sha256=source_decision_sha256,
+            publication_top5=publication_top5,
+        )
+    )
+    if [str(item.get("event_id")) for item in event_reviews] != [
+        str(item["event_id"]) for item in events
+    ]:
+        raise ExpeditedEditorialError(
+            "legacy approval profile: event order changed"
+        )
+    if any(
+        item.get("decision") != "approved"
+        or item.get("reviewer_type") != "human"
+        or item.get("reviewer_reference") != LEGACY_APPROVAL_REVIEWER
+        for item in event_reviews
+    ):
+        raise ExpeditedEditorialError(
+            "legacy approval profile: exact human event approval required"
+        )
+    if any(
+        item.get("decision") is not False
+        or item.get("reviewer_type") != "human"
+        or item.get("reviewer_reference") != LEGACY_APPROVAL_REVIEWER
+        for item in pair_reviews
+    ):
+        raise ExpeditedEditorialError(
+            "legacy approval profile: exact separate-event decisions required"
+        )
+    if any(
+        item.get("decision") != "approved"
+        or item.get("reviewer_type") != "human"
+        or item.get("reviewer_reference") != LEGACY_APPROVAL_REVIEWER
+        for item in top_reviews
+    ):
+        raise ExpeditedEditorialError(
+            "legacy approval profile: exact Top 5 approvals required"
+        )
+
+    approved_events: list[dict[str, object]] = []
+    for position, candidate_event in enumerate(events, start=1):
+        location = f"legacy approval E{position:02d}"
+        event_id = str(candidate_event["event_id"])
+        if candidate_event.get("country") != "KR":
+            raise ExpeditedEditorialError(
+                f"{location}: exact KR candidate required"
+            )
+        candidate_actors = [
+            _validate_candidate_actor(raw, f"{location}.actors[{index}]")
+            for index, raw in enumerate(
+                _list(candidate_event.get("actors"), f"{location}.actors")
+            )
+        ]
+        if len(candidate_actors) != 1:
+            raise ExpeditedEditorialError(
+                f"{location}: exactly one candidate filer required"
+            )
+        candidate_actor = candidate_actors[0]
+        actor = {
+            **candidate_actor,
+            "country_code": "KR",
+            "actor_review_status": "approved",
+            "relation_review_status": "approved",
+            "record_status": "active",
+        }
+        family = (
+            "listing_status"
+            if position == 11
+            else _text(
+                candidate_event.get("event_family"),
+                "event_family",
+                location,
+                maximum=64,
+            )
+        )
+        action = LEGACY_APPROVAL_ACTION_OVERRIDES.get(
+            position,
+            _text(
+                candidate_event.get("identity_action"),
+                "identity_action",
+                location,
+                maximum=255,
+            ),
+        )
+        target = _text(
+            candidate_event.get("issuer_name"),
+            "issuer_name",
+            location,
+            maximum=255,
+        )
+        effective_at = _optional_timestamp(
+            candidate_event.get("identity_effective_at"),
+            "identity_effective_at",
+            location,
+        ) or _timestamp(
+            candidate_event.get("occurred_at"),
+            "occurred_at",
+            location,
+        )
+        verification = _text(
+            candidate_event.get("verification_status"),
+            "verification_status",
+            location,
+            maximum=40,
+        )
+        stored_verification = (
+            verification
+            if verification in {"withdrawn", "corrected"}
+            else "official"
+        )
+        normalized_action = _normalize_identity(action)
+        normalized_target = _normalize_identity(target)
+        normalized_actor_id = _normalize_identity(actor["actor_id"])
+        comparison_key = _global_comparison_key(
+            issuer_id=candidate_event.get("issuer_id"),
+            event_family=family,
+            action=normalized_action,
+            target=normalized_target,
+            actor_id=normalized_actor_id,
+            effective_at=effective_at,
+            deadline_at=None,
+            location=location,
+        )
+        source_outcome = _mapping(
+            source_outcomes.get(event_id),
+            f"{location}.source_outcome",
+        )
+        approved_events.append(
+            {
+                "position_no": position,
+                "event_id": event_id,
+                "issuer_id": candidate_event["issuer_id"],
+                "issuer_name": target,
+                "country": "KR",
+                "title": candidate_event["title"],
+                "original_language": candidate_event["original_language"],
+                "event_family": family,
+                "summary": target + " — " + str(candidate_event["title"]),
+                "importance": candidate_event["importance"],
+                "current_status": verification,
+                "deadline_at": None,
+                "verification_status": stored_verification,
+                "change_type": candidate_event["change_type"],
+                "review_status": "approved",
+                "publication_status": "published",
+                "identity_action": normalized_action,
+                "identity_target": normalized_target,
+                "identity_actor_id": actor["actor_id"],
+                "identity_effective_at": effective_at,
+                "identity_deadline_at": None,
+                "identity_status": "complete",
+                "comparison_key": comparison_key,
+                "occurred_at": candidate_event["occurred_at"],
+                "first_observed_at": candidate_event["first_observed_at"],
+                "actor": actor,
+                "official_documents": _carry_document_basis(
+                    candidate_event.get("official_documents"),
+                    f"{location}.official_documents",
+                ),
+                "official_evidence_count": candidate_event[
+                    "official_evidence_count"
+                ],
+                "source_event_evidence_sha256": candidate_event[
+                    "event_evidence_sha256"
+                ],
+                "source_final_updated_at": _timestamp(
+                    source_outcome.get("final_updated_at"),
+                    "final_updated_at",
+                    f"{location}.source_outcome",
+                ),
+            }
+        )
+
+    pair_basis = [
+        {
+            "pair_id": item["pair_id"],
+            "left_document_id": item["left_document_id"],
+            "right_document_id": item["right_document_id"],
+            "decision": False,
+        }
+        for item in pair_reviews
+    ]
+    top_review_by_event = {
+        str(item["event_id"]): item for item in top_reviews
+    }
+    top5_basis = []
+    for item in publication_top5:
+        event_id = str(item["event_id"])
+        human_top = top_review_by_event.get(event_id)
+        if human_top is None:
+            raise ExpeditedEditorialError(
+                "legacy approval profile: Top 5 publication mismatch"
+            )
+        top5_basis.append(
+            {
+                "edition_id": item["edition_id"],
+                "event_id": event_id,
+                "position_no": item["position_no"],
+                "decision": "approved",
+                "selection_reason": item["selection_reason"],
+                "official_evidence_count": item[
+                    "official_evidence_count"
+                ],
+                "event_evidence_sha256": item[
+                    "event_evidence_sha256"
+                ],
+                "public_eligible": True,
+            }
+        )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "kind": APPROVED_CANONICAL_BASIS_KIND,
+        "profile_id": (
+            "legacy:"
+            + LEGACY_APPROVAL_CANDIDATE_SHA256
+            + ":"
+            + LEGACY_APPROVAL_REVIEWER
+        ),
+        "source_candidate_sha256": candidate_sha,
+        "reviewer_reference": LEGACY_APPROVAL_REVIEWER,
+        "source_candidate_artifact": dict(candidate_artifact),
+        "source_publication_artifact": dict(publication_artifact),
+        "source_decision_sha256": _sha256(
+            source_decision_sha256,
+            "source_decision_sha256",
+            "legacy approval profile",
+        ),
+        "human_approval_artifact": attestation,
+        "human_approval_artifact_sha256": attestation_sha,
+        "event_decisions": [
+            {"event_id": item["event_id"], "decision": "approved"}
+            for item in event_reviews
+        ],
+        "same_event_pair_decisions": pair_basis,
+        "top5_decisions": top5_basis,
+        "events": approved_events,
+    }
+
+
+def _validate_approved_canonical_basis(
+    value: object,
+    digest: object,
+) -> dict[str, object]:
+    basis = _mapping(value, "approved canonical basis")
+    approval_artifact = _mapping(
+        basis.get("human_approval_artifact"),
+        "approved canonical basis.human_approval_artifact",
+    )
+    if (
+        basis.get("schema_version") != SCHEMA_VERSION
+        or basis.get("kind") != APPROVED_CANONICAL_BASIS_KIND
+        or basis.get("source_candidate_sha256")
+        != LEGACY_APPROVAL_CANDIDATE_SHA256
+        or basis.get("reviewer_reference") != LEGACY_APPROVAL_REVIEWER
+        or basis.get("source_candidate_artifact")
+        != LEGACY_APPROVAL_CANDIDATE_ARTIFACT
+        or basis.get("source_publication_artifact")
+        != LEGACY_APPROVAL_PUBLICATION_ARTIFACT
+        or basis.get("source_decision_sha256")
+        != LEGACY_APPROVAL_SOURCE_DECISION_SHA256
+        or basis.get("human_approval_artifact_sha256")
+        != LEGACY_APPROVAL_ATTESTATION_SHA256
+        or canonical_sha256(approval_artifact)
+        != LEGACY_APPROVAL_ATTESTATION_SHA256
+        or len(_list(basis.get("events"), "approved canonical basis.events"))
+        != EVENT_COUNT
+        or len(
+            _list(
+                basis.get("same_event_pair_decisions"),
+                "approved canonical basis.same_event_pair_decisions",
+            )
+        )
+        != PAIR_COUNT
+        or len(
+            _list(
+                basis.get("top5_decisions"),
+                "approved canonical basis.top5_decisions",
+            )
+        )
+        != TOP5_COUNT
+    ):
+        raise ExpeditedEditorialError(
+            "approved canonical basis: profile mismatch"
+        )
+    claimed = _sha256(
+        digest,
+        "approved_canonical_basis_sha256",
+        "approved canonical basis",
+    )
+    if claimed != canonical_sha256(basis):
+        raise ExpeditedEditorialError(
+            "approved canonical basis: digest mismatch"
+        )
+    return basis
+
+
+def _validate_carry_source_candidate(
+    candidate: Mapping[str, object],
+) -> tuple[str, list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+    source_revision = _sha40(candidate.get("code_revision"), "source candidate")
+    _validate_candidate(candidate, source_revision)
+    counts = _mapping(candidate.get("raw_counts"), "source candidate.raw_counts")
+    if counts != {
+        "event_candidate_count": EVENT_COUNT,
+        "same_event_pair_candidate_count": PAIR_COUNT,
+        "top5_candidate_count": TOP5_COUNT,
+    }:
+        raise ExpeditedEditorialError("source candidate: exact raw counts required")
+    basis = _mapping(candidate.get("basis"), "source candidate.basis")
+    _sha256(
+        basis.get("source_snapshot_sha256"),
+        "source_snapshot_sha256",
+        "source candidate.basis",
+    )
+    cutoff_at = _timestamp(
+        basis.get("brief_cutoff_at"),
+        "brief_cutoff_at",
+        "source candidate.basis",
+    )
+    events: list[dict[str, object]] = []
+    for index, raw in enumerate(
+        _list(basis.get("events"), "source candidate.basis.events")
+    ):
+        event = _validate_event(raw, f"source candidate.events[{index}]")
+        if _event_basis(event) != raw:
+            raise ExpeditedEditorialError(
+                f"source candidate.events[{index}]: noncanonical event basis"
+            )
+        events.append(event)
+    event_map = {str(item["event_id"]): item for item in events}
+    if len(event_map) != EVENT_COUNT:
+        raise ExpeditedEditorialError("source candidate: duplicate event")
+
+    pairs = [
+        dict(_mapping(raw, f"source candidate.pairs[{index}]"))
+        for index, raw in enumerate(
+            _list(
+                basis.get("same_event_pair_candidates"),
+                "source candidate.basis.same_event_pair_candidates",
+            )
+        )
+    ]
+    seen_pair_ids: set[str] = set()
+    seen_document_pairs: set[tuple[str, str]] = set()
+    for index, pair in enumerate(pairs):
+        location = f"source candidate.pairs[{index}]"
+        pair_id = _text(pair.get("pair_id"), "pair_id", location)
+        stratum = _text(pair.get("stratum"), "stratum", location)
+        left_event_id = _text(
+            pair.get("left_event_id"), "left_event_id", location
+        )
+        right_event_id = _text(
+            pair.get("right_event_id"), "right_event_id", location
+        )
+        if left_event_id not in event_map or right_event_id not in event_map:
+            raise ExpeditedEditorialError(
+                f"{location}: pair references an unknown event"
+            )
+        expected = _pair(
+            stratum=stratum,
+            left_event=event_map[left_event_id],
+            right_event=event_map[right_event_id],
+            revision=source_revision,
+        )
+        if pair != expected:
+            raise ExpeditedEditorialError(f"{location}: pair basis mismatch")
+        document_ids = sorted(
+            (
+                str(pair["left_document_id"]),
+                str(pair["right_document_id"]),
+            )
+        )
+        document_pair = (document_ids[0], document_ids[1])
+        if pair_id in seen_pair_ids or document_pair in seen_document_pairs:
+            raise ExpeditedEditorialError(f"{location}: duplicate pair")
+        seen_pair_ids.add(pair_id)
+        seen_document_pairs.add(document_pair)
+
+    top5 = [
+        dict(_mapping(raw, f"source candidate.top5[{index}]"))
+        for index, raw in enumerate(
+            _list(
+                basis.get("top5_candidates"),
+                "source candidate.basis.top5_candidates",
+            )
+        )
+    ]
+    edition_id = _brief_id(cutoff_at)
+    expected_top5 = [
+        {
+            "edition_id": edition_id,
+            "event_id": event["event_id"],
+            "position_no": index,
+            "official_evidence_count": event["official_evidence_count"],
+            "event_evidence_sha256": event["event_evidence_sha256"],
+            "public_eligible": True,
+        }
+        for index, event in enumerate(events[:TOP5_COUNT], start=1)
+    ]
+    if top5 != expected_top5:
+        raise ExpeditedEditorialError("source candidate: Top 5 basis mismatch")
+    return source_revision, events, pairs, top5
+
+
+def _validate_carry_source_human_review(
+    human_review: Mapping[str, object],
+    *,
+    candidate: Mapping[str, object],
+    source_revision: str,
+    events: Sequence[Mapping[str, object]],
+    pairs: Sequence[Mapping[str, object]],
+    top5: Sequence[Mapping[str, object]],
+    candidate_artifact: Mapping[str, object],
+    now: datetime,
+) -> tuple[
+    list[dict[str, object]],
+    list[dict[str, object]],
+    list[dict[str, object]],
+]:
+    if (
+        human_review.get("schema_version") != SCHEMA_VERSION
+        or human_review.get("kind") != HUMAN_REVIEW_KIND
+        or human_review.get("environment") != "production"
+        or human_review.get("is_synthetic") is not False
+        or _sha40(human_review.get("code_revision"), "source human review")
+        != source_revision
+        or human_review.get("ground_truth_source") != "human"
+        or human_review.get("ai_generated_ground_truth") is not False
+        or human_review.get("human_attestation") is not True
+        or human_review.get("evidence_source")
+        != "protected_editorial_publication"
+        or "carry_forward" in human_review
+    ):
+        raise ExpeditedEditorialError(
+            "source human review: original protected publication required"
+        )
+    candidate_sha = _sha256(
+        candidate.get("candidate_sha256"),
+        "candidate_sha256",
+        "source candidate",
+    )
+    if (
+        human_review.get("candidate_sha256") != candidate_sha
+        or human_review.get("candidate_artifact") != candidate_artifact
+    ):
+        raise ExpeditedEditorialError(
+            "source human review: candidate binding mismatch"
+        )
+    counts = _mapping(
+        human_review.get("raw_counts"),
+        "source human review.raw_counts",
+    )
+    if counts != {
+        "event_review_count": EVENT_COUNT,
+        "same_event_pair_review_count": PAIR_COUNT,
+        "top5_human_reviewed_count": TOP5_COUNT,
+        "top5_published_count": TOP5_COUNT,
+    }:
+        raise ExpeditedEditorialError("source human review: exact 20/40/5 required")
+
+    event_by_id = {str(item["event_id"]): item for item in events}
+    raw_event_reviews = _list(
+        human_review.get("event_reviews"),
+        "source human review.event_reviews",
+    )
+    event_reviews: list[dict[str, object]] = []
+    reviewers: set[tuple[str, str]] = set()
+    for index, raw in enumerate(raw_event_reviews):
+        location = f"source human review.event_reviews[{index}]"
+        review = dict(_mapping(raw, location))
+        event_id = _text(review.get("event_id"), "event_id", location)
+        if event_id not in event_by_id:
+            raise ExpeditedEditorialError(f"{location}: unknown event")
+        if review.get("decision") not in {"approved", "rejected"}:
+            raise ExpeditedEditorialError(f"{location}: invalid decision")
+        if review.get("reviewer_type") != "human":
+            raise ExpeditedEditorialError(f"{location}: human reviewer required")
+        reviewer = _text(
+            review.get("reviewer_reference"),
+            "reviewer_reference",
+            location,
+            maximum=255,
+        )
+        reviewed_at = _review_time(review.get("reviewed_at"), location, now)
+        if set(review) != {
+            "event_id",
+            "decision",
+            "reviewer_type",
+            "reviewer_reference",
+            "reviewed_at",
+        }:
+            raise ExpeditedEditorialError(f"{location}: exact fields required")
+        reviewers.add((reviewer, reviewed_at))
+        event_reviews.append(review)
+    if (
+        len(event_reviews) != EVENT_COUNT
+        or {str(item["event_id"]) for item in event_reviews} != set(event_by_id)
+        or len(reviewers) != 1
+    ):
+        raise ExpeditedEditorialError(
+            "source human review: event set or reviewer mismatch"
+        )
+
+    pair_by_id = {str(item["pair_id"]): item for item in pairs}
+    pair_reviews: list[dict[str, object]] = []
+    for index, raw in enumerate(
+        _list(
+            human_review.get("same_event_pair_reviews"),
+            "source human review.same_event_pair_reviews",
+        )
+    ):
+        location = f"source human review.same_event_pair_reviews[{index}]"
+        review = dict(_mapping(raw, location))
+        pair_id = _text(review.get("pair_id"), "pair_id", location)
+        candidate_pair = pair_by_id.get(pair_id)
+        if candidate_pair is None:
+            raise ExpeditedEditorialError(f"{location}: unknown pair")
+        if (
+            isinstance(review.get("decision"), bool) is False
+            or review.get("reviewer_type") != "human"
+            or (
+                review.get("left_document_id"),
+                review.get("right_document_id"),
+            )
+            != (
+                candidate_pair["left_document_id"],
+                candidate_pair["right_document_id"],
+            )
+        ):
+            raise ExpeditedEditorialError(f"{location}: pair decision mismatch")
+        reviewer = _text(
+            review.get("reviewer_reference"),
+            "reviewer_reference",
+            location,
+            maximum=255,
+        )
+        reviewed_at = _review_time(review.get("reviewed_at"), location, now)
+        if (reviewer, reviewed_at) not in reviewers or set(review) != {
+            "pair_id",
+            "left_document_id",
+            "right_document_id",
+            "decision",
+            "reviewer_type",
+            "reviewer_reference",
+            "reviewed_at",
+        }:
+            raise ExpeditedEditorialError(f"{location}: reviewer or fields mismatch")
+        pair_reviews.append(review)
+    if (
+        len(pair_reviews) != PAIR_COUNT
+        or {str(item["pair_id"]) for item in pair_reviews} != set(pair_by_id)
+    ):
+        raise ExpeditedEditorialError("source human review: pair set mismatch")
+
+    top_by_event = {str(item["event_id"]): item for item in top5}
+    top_reviews: list[dict[str, object]] = []
+    for index, raw in enumerate(
+        _list(
+            human_review.get("top5_reviews"),
+            "source human review.top5_reviews",
+        )
+    ):
+        location = f"source human review.top5_reviews[{index}]"
+        review = dict(_mapping(raw, location))
+        event_id = _text(review.get("event_id"), "event_id", location)
+        candidate_top = top_by_event.get(event_id)
+        if candidate_top is None:
+            raise ExpeditedEditorialError(f"{location}: unknown Top 5 item")
+        if (
+            review.get("decision") != "approved"
+            or review.get("reviewer_type") != "human"
+            or review.get("edition_id") != candidate_top["edition_id"]
+            or review.get("official_evidence_count")
+            != candidate_top["official_evidence_count"]
+            or review.get("public_eligible") is not True
+            or review.get("event_evidence_sha256")
+            != candidate_top["event_evidence_sha256"]
+        ):
+            raise ExpeditedEditorialError(f"{location}: Top 5 binding mismatch")
+        reviewer = _text(
+            review.get("reviewer_reference"),
+            "reviewer_reference",
+            location,
+            maximum=255,
+        )
+        reviewed_at = _review_time(review.get("reviewed_at"), location, now)
+        if (reviewer, reviewed_at) not in reviewers or set(review) != {
+            "edition_id",
+            "event_id",
+            "decision",
+            "reviewer_type",
+            "reviewer_reference",
+            "reviewed_at",
+            "official_evidence_count",
+            "public_eligible",
+            "event_evidence_sha256",
+        }:
+            raise ExpeditedEditorialError(f"{location}: reviewer or fields mismatch")
+        top_reviews.append(review)
+    if (
+        len(top_reviews) != TOP5_COUNT
+        or {str(item["event_id"]) for item in top_reviews} != set(top_by_event)
+    ):
+        raise ExpeditedEditorialError("source human review: Top 5 set mismatch")
+    approved_ids = {
+        str(item["event_id"])
+        for item in event_reviews
+        if item["decision"] == "approved"
+    }
+    if any(str(item["event_id"]) not in approved_ids for item in top_reviews):
+        raise ExpeditedEditorialError(
+            "source human review: Top 5 event was not approved"
+        )
+    section = {
+        field: human_review.get(field)
+        for field in (
+            "ground_truth_source",
+            "ai_generated_ground_truth",
+            "human_attestation",
+            "raw_counts",
+            "event_reviews",
+            "same_event_pair_reviews",
+            "top5_reviews",
+        )
+    }
+    if human_review.get("section_sha256") != canonical_sha256(section):
+        raise ExpeditedEditorialError(
+            "source human review: section digest mismatch"
+        )
+    return event_reviews, pair_reviews, top_reviews
+
+
+def _validate_carry_source_receipts(
+    receipt: Mapping[str, object],
+    replay: Mapping[str, object],
+    *,
+    candidate: Mapping[str, object],
+    source_revision: str,
+    candidate_artifact: Mapping[str, object],
+    event_reviews: Sequence[Mapping[str, object]],
+    pair_reviews: Sequence[Mapping[str, object]],
+    top_reviews: Sequence[Mapping[str, object]],
+    now: datetime,
+) -> tuple[dict[str, dict[str, object]], list[dict[str, object]]]:
+    candidate_sha = _sha256(
+        candidate.get("candidate_sha256"),
+        "candidate_sha256",
+        "source candidate",
+    )
+    decision_sha = _sha256(
+        receipt.get("decision_sha256"),
+        "decision_sha256",
+        "source publication",
+    )
+    semantic_sha = _sha256(
+        receipt.get("semantic_receipt_sha256"),
+        "semantic_receipt_sha256",
+        "source publication",
+    )
+    review_by_id = {str(item["event_id"]): item for item in event_reviews}
+    human_top_by_id = {str(item["event_id"]): item for item in top_reviews}
+    candidate_top_by_id: dict[str, dict[str, object]] = {}
+    for index, raw in enumerate(
+        _list(
+            _mapping(candidate.get("basis"), "source candidate.basis").get(
+                "top5_candidates"
+            ),
+            "source candidate.basis.top5_candidates",
+        )
+    ):
+        item = dict(_mapping(raw, f"source candidate.top5[{index}]"))
+        candidate_top_by_id[str(item["event_id"])] = item
+    receipt_top5 = [
+        dict(_mapping(raw, f"source publication.top5[{index}]"))
+        for index, raw in enumerate(
+            _list(receipt.get("top5"), "source publication.top5")
+        )
+    ]
+    if len(receipt_top5) != TOP5_COUNT:
+        raise ExpeditedEditorialError("source publication: exact Top 5 required")
+    for index, item in enumerate(receipt_top5):
+        location = f"source publication.top5[{index}]"
+        event_id = _text(item.get("event_id"), "event_id", location)
+        human_top = human_top_by_id.get(event_id)
+        candidate_top = candidate_top_by_id.get(event_id)
+        if human_top is None or candidate_top is None:
+            raise ExpeditedEditorialError(f"{location}: unknown Top 5 event")
+        shared_fields = (
+            "edition_id",
+            "event_id",
+            "decision",
+            "reviewer_type",
+            "reviewer_reference",
+            "reviewed_at",
+            "official_evidence_count",
+            "public_eligible",
+            "event_evidence_sha256",
+        )
+        if (
+            any(item.get(field) != human_top.get(field) for field in shared_fields)
+            or item.get("position_no") != candidate_top.get("position_no")
+        ):
+            raise ExpeditedEditorialError(f"{location}: human/candidate mismatch")
+        _text(
+            item.get("selection_reason"),
+            "selection_reason",
+            location,
+            maximum=500,
+        )
+    outcome_map: dict[str, dict[str, object]] = {}
+    basis = _mapping(candidate.get("basis"), "source candidate.basis")
+    cutoff_at = _timestamp(
+        basis.get("brief_cutoff_at"),
+        "brief_cutoff_at",
+        "source candidate.basis",
+    )
+    expected_brief_id = _brief_id(cutoff_at)
+
+    for record, label in ((receipt, "source publication"), (replay, "source replay")):
+        if (
+            record.get("schema_version") != SCHEMA_VERSION
+            or record.get("kind") != PUBLICATION_KIND
+            or record.get("environment") != "production"
+            or record.get("is_synthetic") is not False
+            or record.get("evidence_source") != "protected_editor_api_v2"
+            or "carry_forward" in record
+            or _sha40(record.get("code_revision"), label) != source_revision
+            or record.get("candidate_artifact") != candidate_artifact
+            or record.get("candidate_sha256") != candidate_sha
+            or record.get("decision_sha256") != decision_sha
+            or record.get("semantic_receipt_sha256") != semantic_sha
+            or record.get("same_event_pair_reviews") != list(pair_reviews)
+            or record.get("top5") != receipt_top5
+        ):
+            raise ExpeditedEditorialError(f"{label}: provenance mismatch")
+        collected = datetime.fromisoformat(
+            _timestamp(record.get("collected_at"), "collected_at", label).replace(
+                "Z", "+00:00"
+            )
+        )
+        if collected > now + timedelta(minutes=5) or now - collected > MAX_HUMAN_REVIEW_AGE:
+            raise ExpeditedEditorialError(f"{label}: stale or future receipt")
+        outcomes = _list(
+            record.get("event_review_outcomes"),
+            f"{label}.event_review_outcomes",
+        )
+        current_outcomes: dict[str, dict[str, object]] = {}
+        for index, raw in enumerate(outcomes):
+            location = f"{label}.event_review_outcomes[{index}]"
+            outcome = dict(_mapping(raw, location))
+            event_id = _text(outcome.get("event_id"), "event_id", location)
+            review = review_by_id.get(event_id)
+            if review is None or outcome.get("decision") != review["decision"]:
+                raise ExpeditedEditorialError(f"{location}: decision mismatch")
+            expected_status = (
+                ("approved", "published", "complete")
+                if review["decision"] == "approved"
+                else ("rejected", "draft", "rejected")
+            )
+            if (
+                (
+                    outcome.get("final_review_status"),
+                    outcome.get("final_publication_status"),
+                    outcome.get("final_identity_status"),
+                )
+                != expected_status
+                or outcome.get("result") not in {"applied", "verified_existing"}
+            ):
+                raise ExpeditedEditorialError(f"{location}: final state mismatch")
+            outcome["final_updated_at"] = _timestamp(
+                outcome.get("final_updated_at"),
+                "final_updated_at",
+                location,
+            )
+            if event_id in current_outcomes:
+                raise ExpeditedEditorialError(f"{location}: duplicate event")
+            current_outcomes[event_id] = outcome
+        if set(current_outcomes) != set(review_by_id):
+            raise ExpeditedEditorialError(f"{label}: event outcome set mismatch")
+        if label == "source publication":
+            outcome_map = current_outcomes
+        elif any(
+            current_outcomes[event_id]["final_updated_at"]
+            != outcome_map[event_id]["final_updated_at"]
+            for event_id in outcome_map
+        ):
+            raise ExpeditedEditorialError(
+                "source replay: final event timestamps changed"
+            )
+
+        brief = _mapping(record.get("brief"), f"{label}.brief")
+        if (
+            brief.get("brief_id") != expected_brief_id
+            or brief.get("build_sha") != source_revision
+            or brief.get("cutoff_at") != cutoff_at
+        ):
+            raise ExpeditedEditorialError(f"{label}: brief binding mismatch")
+        brief_payload = {
+            "edition": "global",
+            "cutoff_at": cutoff_at,
+            "build_sha": source_revision,
+            "empty_reason": None,
+            "items": [
+                {
+                    "event_id": item["event_id"],
+                    "lane": "top",
+                    "position_no": item["position_no"],
+                    "selection_reason": item["selection_reason"],
+                }
+                for item in receipt_top5
+            ],
+        }
+        if brief.get("payload_sha256") != canonical_sha256(brief_payload):
+            raise ExpeditedEditorialError(f"{label}: brief payload digest mismatch")
+
+    mutations = receipt.get("mutations_applied")
+    if (
+        isinstance(mutations, bool)
+        or not isinstance(mutations, int)
+        or not 0 <= mutations <= EVENT_COUNT
+        or replay.get("mutations_applied") != 0
+        or replay.get("idempotent_replay") is not True
+        or _mapping(replay.get("brief"), "source replay.brief").get("idempotent")
+        is not True
+    ):
+        raise ExpeditedEditorialError("source publication: replay is not idempotent")
+    semantic = {
+        "candidate_artifact": dict(candidate_artifact),
+        "candidate_sha256": candidate_sha,
+        "decision_sha256": decision_sha,
+        "code_revision": source_revision,
+        "event_reviews": [
+            {"event_id": item["event_id"], "decision": item["decision"]}
+            for item in event_reviews
+        ],
+        "same_event_pair_reviews": list(pair_reviews),
+        "top5": [
+            {
+                "event_id": item["event_id"],
+                "position_no": item["position_no"],
+                "selection_reason": item["selection_reason"],
+            }
+            for item in receipt_top5
+        ],
+        "brief": {
+            "brief_id": expected_brief_id,
+            "build_sha": source_revision,
+            "cutoff_at": cutoff_at,
+            "payload_sha256": _mapping(
+                receipt.get("brief"), "source publication.brief"
+            )["payload_sha256"],
+        },
+    }
+    if canonical_sha256(semantic) != semantic_sha:
+        raise ExpeditedEditorialError(
+            "source publication: semantic receipt digest mismatch"
+        )
+    return outcome_map, receipt_top5
+
+
+def _validate_current_carry_event(
+    current: Mapping[str, object],
+    *,
+    approved_event: Mapping[str, object],
+    source_outcome: Mapping[str, object],
+    candidate_marker: str,
+) -> dict[str, object]:
+    event_id = str(approved_event["event_id"])
+    if (
+        str(current.get("event_id")) != event_id
+        or current.get("updated_at")
+        != approved_event["source_final_updated_at"]
+        or current.get("updated_at") != source_outcome["final_updated_at"]
+        or candidate_marker
+        not in str(current.get("latest_revision_reason") or "")
+    ):
+        raise ExpeditedEditorialError(
+            f"carry-forward: editorial state drift for {event_id}"
+        )
+    exact_fields = (
+        "issuer_id",
+        "issuer_name",
+        "country",
+        "title",
+        "original_language",
+        "event_family",
+        "summary",
+        "importance",
+        "current_status",
+        "deadline_at",
+        "verification_status",
+        "change_type",
+        "review_status",
+        "publication_status",
+        "identity_action",
+        "identity_target",
+        "identity_actor_id",
+        "identity_effective_at",
+        "identity_deadline_at",
+        "identity_status",
+        "comparison_key",
+        "occurred_at",
+        "first_observed_at",
+    )
+    for field in exact_fields:
+        if current.get(field) != approved_event.get(field):
+            raise ExpeditedEditorialError(
+                f"carry-forward: {field} drift for {event_id}"
+            )
+    current_documents = _carry_document_basis(
+        current.get("official_documents"),
+        f"current event {event_id}.official_documents",
+    )
+    if (
+        approved_event.get("official_documents") != current_documents
+        or current.get("official_evidence_count")
+        != approved_event.get("official_evidence_count")
+    ):
+        raise ExpeditedEditorialError(
+            f"carry-forward: official evidence drift for {event_id}"
+        )
+    actor_fields = (
+        "actor_id",
+        "display_name",
+        "actor_type",
+        "actor_role",
+        "country_code",
+        "actor_review_status",
+        "relation_review_status",
+        "record_status",
+    )
+    current_actors = [
+        {
+            field: _mapping(
+                raw,
+                f"current event {event_id}.actors[{index}]",
+            ).get(field)
+            for field in actor_fields
+        }
+        for index, raw in enumerate(
+            _list(current.get("actors"), f"current event {event_id}.actors")
+        )
+    ]
+    if current_actors != [
+        {field: _mapping(approved_event["actor"], "approved actor").get(field)
+         for field in actor_fields}
+    ]:
+        raise ExpeditedEditorialError(
+            f"carry-forward: approved actor drift for {event_id}"
+        )
+    current_evidence_sha = _sha256(
+        current.get("event_evidence_sha256"),
+        "event_evidence_sha256",
+        f"current event {event_id}",
+    )
+    stable_basis = {
+        "event_id": event_id,
+        "issuer_id": approved_event["issuer_id"],
+        "country": approved_event["country"],
+        "official_documents": approved_event["official_documents"],
+        "official_evidence_count": approved_event[
+            "official_evidence_count"
+        ],
+    }
+    return {
+        "event_id": event_id,
+        "decision": "approved",
+        "result": "verified_unchanged",
+        "final_review_status": current.get("review_status"),
+        "final_publication_status": current.get("publication_status"),
+        "final_identity_status": current.get("identity_status"),
+        "final_updated_at": current.get("updated_at"),
+        "source_event_evidence_sha256": approved_event[
+            "source_event_evidence_sha256"
+        ],
+        "current_event_evidence_sha256": current_evidence_sha,
+        "approved_event_basis_sha256": canonical_sha256(approved_event),
+        "immutable_evidence_basis_sha256": canonical_sha256(stable_basis),
+    }
+
+
+def _current_carry_event_with_snapshot(
+    client: EditorialClient,
+    event_id: str,
+    expected_revision: str,
+) -> tuple[dict[str, object], str]:
+    payload = client.event(event_id)
+    meta = _mapping(payload.get("meta"), "event.meta")
+    event = _validate_event(
+        _mapping(payload.get("data"), "event.data").get("event"),
+        "event.data.event",
+    )
+    if _sha40(meta.get("code_revision"), "event.meta") != expected_revision:
+        raise ExpeditedEditorialError("event: code_revision mismatch")
+    snapshot_sha = _sha256(
+        meta.get("snapshot_sha256"),
+        "snapshot_sha256",
+        f"event {event_id}.meta",
+    )
+    return event, snapshot_sha
+
+
+def prepare_carry_forward_publication(
+    client: EditorialClient,
+    *,
+    candidate: Mapping[str, object],
+    source_human_review: Mapping[str, object],
+    source_receipt: Mapping[str, object],
+    source_replay_receipt: Mapping[str, object],
+    revision: str,
+    candidate_artifact: Mapping[str, object],
+    publication_artifact: Mapping[str, object],
+    now: datetime,
+) -> dict[str, object]:
+    """Freeze a reviewed current-SHA publication intent without publishing.
+
+    This never calls the event review endpoint. It proves the source
+    publication, verifies all current event/evidence rows are unchanged, and
+    freezes the complete human and current-event basis before any brief write.
+    """
+
+    revision = _sha40(revision, "carry-forward revision")
+    health = client.health()
+    if (
+        health.get("service") != "bside-global-market-terminal"
+        or _sha40(health.get("code_revision"), "health") != revision
+        or health.get("schema_version") != 12
+    ):
+        raise ExpeditedEditorialError("carry-forward: current health mismatch")
+    source_revision, events, pairs, top5 = _validate_carry_source_candidate(
+        candidate
+    )
+    expected_candidate_artifact = _mapping(
+        candidate_artifact, "candidate artifact"
+    )
+    expected_publication_artifact = _mapping(
+        publication_artifact, "publication artifact"
+    )
+    if set(expected_candidate_artifact) != set(CARRY_FORWARD_ARTIFACT_FIELDS):
+        raise ExpeditedEditorialError("candidate artifact: exact fields required")
+    if set(expected_publication_artifact) != set(CARRY_FORWARD_ARTIFACT_FIELDS):
+        raise ExpeditedEditorialError("publication artifact: exact fields required")
+    event_reviews, pair_reviews, top_reviews = (
+        _validate_carry_source_human_review(
+            source_human_review,
+            candidate=candidate,
+            source_revision=source_revision,
+            events=events,
+            pairs=pairs,
+            top5=top5,
+            candidate_artifact=expected_candidate_artifact,
+            now=now,
+        )
+    )
+    source_outcomes, publication_top5 = _validate_carry_source_receipts(
+        source_receipt,
+        source_replay_receipt,
+        candidate=candidate,
+        source_revision=source_revision,
+        candidate_artifact=expected_candidate_artifact,
+        event_reviews=event_reviews,
+        pair_reviews=pair_reviews,
+        top_reviews=top_reviews,
+        now=now,
+    )
+    approval_attestation = _load_legacy_human_approval_artifact()
+    approved_canonical_basis = _legacy_approved_canonical_basis(
+        candidate=candidate,
+        candidate_artifact=expected_candidate_artifact,
+        publication_artifact=expected_publication_artifact,
+        approval_attestation=approval_attestation,
+        source_decision_sha256=source_receipt.get("decision_sha256"),
+        events=events,
+        event_reviews=event_reviews,
+        pair_reviews=pair_reviews,
+        top_reviews=top_reviews,
+        source_outcomes=source_outcomes,
+        publication_top5=publication_top5,
+    )
+    approved_canonical_basis_sha = canonical_sha256(
+        approved_canonical_basis
+    )
+    _validate_approved_canonical_basis(
+        approved_canonical_basis,
+        approved_canonical_basis_sha,
+    )
+    candidate_sha = _sha256(
+        candidate.get("candidate_sha256"),
+        "candidate_sha256",
+        "source candidate",
+    )
+    marker = "[expedited-candidate:" + candidate_sha + "]"
+    approved_events = [
+        _mapping(item, f"approved canonical basis.events[{index}]")
+        for index, item in enumerate(
+            _list(
+                approved_canonical_basis.get("events"),
+                "approved canonical basis.events",
+            )
+        )
+    ]
+    approved_by_id = {
+        str(item["event_id"]): item for item in approved_events
+    }
+
+    def verify_current_basis() -> list[dict[str, object]]:
+        outcomes = []
+        for candidate_event in events:
+            event_id = str(candidate_event["event_id"])
+            current, snapshot_sha = _current_carry_event_with_snapshot(
+                client,
+                event_id,
+                revision,
+            )
+            outcome = _validate_current_carry_event(
+                current,
+                approved_event=_mapping(
+                    approved_by_id[event_id],
+                    f"approved canonical event {event_id}",
+                ),
+                source_outcome=source_outcomes[event_id],
+                candidate_marker=marker,
+            )
+            outcome["current_snapshot_sha256"] = snapshot_sha
+            outcomes.append(outcome)
+        return outcomes
+
+    first_verified_outcomes = verify_current_basis()
+    verified_outcomes = verify_current_basis()
+    current_basis_fence_sha = canonical_sha256(verified_outcomes)
+    if canonical_sha256(first_verified_outcomes) != current_basis_fence_sha:
+        raise ExpeditedEditorialError(
+            "carry-forward: current event basis changed during pre-publication fence"
+        )
+    immutable_basis_sha = canonical_sha256(
+        [
+            {
+                "event_id": item["event_id"],
+                "final_updated_at": item["final_updated_at"],
+                "source_event_evidence_sha256": item[
+                    "source_event_evidence_sha256"
+                ],
+                "current_event_evidence_sha256": item[
+                    "current_event_evidence_sha256"
+                ],
+                "current_snapshot_sha256": item[
+                    "current_snapshot_sha256"
+                ],
+                "immutable_evidence_basis_sha256": item[
+                    "immutable_evidence_basis_sha256"
+                ],
+            }
+            for item in verified_outcomes
+        ]
+    )
+    collected_at = (
+        now.astimezone(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+    source_cutoff_at = _timestamp(
+        source_receipt.get("collected_at"),
+        "collected_at",
+        "source publication",
+    )
+    # A brief ID is edition|cutoff. Reusing the reviewed source cutoff with a
+    # new build SHA would deterministically conflict with the already-frozen
+    # source brief. Freeze one distinct current-SHA cutoff in this intent.
+    cutoff_at = collected_at
+    top_event_ids = {
+        str(item["event_id"]) for item in publication_top5
+    }
+    top_snapshots = {
+        str(item["event_id"]): item["current_snapshot_sha256"]
+        for item in verified_outcomes
+        if str(item["event_id"]) in top_event_ids
+    }
+    snapshot_basis = [
+        {
+            "event_id": event_id,
+            "snapshot_sha256": top_snapshots[event_id],
+        }
+        for event_id in sorted(top_snapshots)
+    ]
+    brief_payload = {
+        "edition": "global",
+        "cutoff_at": cutoff_at,
+        "build_sha": revision,
+        "empty_reason": None,
+        "items": [
+            {
+                "event_id": item["event_id"],
+                "lane": "top",
+                "position_no": item["position_no"],
+                "selection_reason": item["selection_reason"],
+                "expected_snapshot_sha256": top_snapshots[
+                    str(item["event_id"])
+                ],
+            }
+            for item in publication_top5
+        ],
+        "expected_event_basis_sha256": canonical_sha256(snapshot_basis),
+    }
+    expected_brief_id = _brief_id(cutoff_at)
+    original_section = {
+        field: source_human_review.get(field)
+        for field in (
+            "ground_truth_source",
+            "ai_generated_ground_truth",
+            "human_attestation",
+            "raw_counts",
+            "event_reviews",
+            "same_event_pair_reviews",
+            "top5_reviews",
+        )
+    }
+    source_semantic = _sha256(
+        source_receipt.get("semantic_receipt_sha256"),
+        "semantic_receipt_sha256",
+        "source publication",
+    )
+    carry_provenance = {
+        "kind": CARRY_FORWARD_KIND,
+        "source_code_revision": source_revision,
+        "source_candidate_artifact": dict(expected_candidate_artifact),
+        "source_publication_artifact": dict(expected_publication_artifact),
+        "source_publication_semantic_receipt_sha256": source_semantic,
+        "source_human_review_section_sha256": source_human_review[
+            "section_sha256"
+        ],
+        "source_brief_cutoff_at": source_cutoff_at,
+        "approved_canonical_basis": approved_canonical_basis,
+        "approved_canonical_basis_sha256": approved_canonical_basis_sha,
+        "current_immutable_editorial_basis_sha256": immutable_basis_sha,
+        "current_basis_fence_sha256": current_basis_fence_sha,
+        "event_mutations_applied": 0,
+    }
+    decision_sha = _sha256(
+        source_receipt.get("decision_sha256"),
+        "decision_sha256",
+        "source publication",
+    )
+    prepared_at = collected_at
+    fresh_until = (
+        datetime.fromisoformat(prepared_at.replace("Z", "+00:00"))
+        + CARRY_FORWARD_INTENT_MAX_FRESH_AGE
+    ).isoformat().replace("+00:00", "Z")
+    intent_payload = {
+        "schema_version": SCHEMA_VERSION,
+        "kind": CARRY_FORWARD_INTENT_KIND,
+        "environment": "production",
+        "is_synthetic": False,
+        "code_revision": revision,
+        "prepared_at": prepared_at,
+        "fresh_until": fresh_until,
+        "candidate_artifact": dict(expected_candidate_artifact),
+        "source_publication_artifact": dict(expected_publication_artifact),
+        "candidate_sha256": candidate_sha,
+        "decision_sha256": decision_sha,
+        "source_human_review_section": original_section,
+        "source_human_review_section_sha256": canonical_sha256(
+            original_section
+        ),
+        "carry_forward": carry_provenance,
+        "event_reviews": [
+            {"event_id": item["event_id"], "decision": item["decision"]}
+            for item in event_reviews
+        ],
+        "same_event_pair_reviews": list(pair_reviews),
+        "top5": list(publication_top5),
+        "verified_outcomes": verified_outcomes,
+        "brief_payload": brief_payload,
+        "expected_brief_id": expected_brief_id,
+    }
+    return {
+        **intent_payload,
+        "intent_sha256": canonical_sha256(intent_payload),
+    }
+
+
+def _validate_carry_forward_intent(
+    value: object,
+    *,
+    revision: str,
+) -> dict[str, object]:
+    intent = _mapping(value, "carry-forward intent")
+    expected_fields = {
+        "schema_version",
+        "kind",
+        "environment",
+        "is_synthetic",
+        "code_revision",
+        "prepared_at",
+        "fresh_until",
+        "candidate_artifact",
+        "source_publication_artifact",
+        "candidate_sha256",
+        "decision_sha256",
+        "source_human_review_section",
+        "source_human_review_section_sha256",
+        "carry_forward",
+        "event_reviews",
+        "same_event_pair_reviews",
+        "top5",
+        "verified_outcomes",
+        "brief_payload",
+        "expected_brief_id",
+        "intent_sha256",
+    }
+    if (
+        set(intent) != expected_fields
+        or intent.get("schema_version") != SCHEMA_VERSION
+        or intent.get("kind") != CARRY_FORWARD_INTENT_KIND
+        or intent.get("environment") != "production"
+        or intent.get("is_synthetic") is not False
+        or _sha40(intent.get("code_revision"), "carry-forward intent")
+        != revision
+    ):
+        raise ExpeditedEditorialError("carry-forward intent: contract mismatch")
+    supplied_digest = _sha256(
+        intent.get("intent_sha256"),
+        "intent_sha256",
+        "carry-forward intent",
+    )
+    digest_basis = {
+        key: item for key, item in intent.items() if key != "intent_sha256"
+    }
+    if canonical_sha256(digest_basis) != supplied_digest:
+        raise ExpeditedEditorialError("carry-forward intent: digest mismatch")
+    prepared_at = _timestamp(
+        intent.get("prepared_at"),
+        "prepared_at",
+        "carry-forward intent",
+    )
+    fresh_until = _timestamp(
+        intent.get("fresh_until"),
+        "fresh_until",
+        "carry-forward intent",
+    )
+    expected_fresh_until = (
+        datetime.fromisoformat(prepared_at.replace("Z", "+00:00"))
+        + CARRY_FORWARD_INTENT_MAX_FRESH_AGE
+    ).isoformat().replace("+00:00", "Z")
+    if fresh_until != expected_fresh_until:
+        raise ExpeditedEditorialError(
+            "carry-forward intent: freshness contract mismatch"
+        )
+    candidate_artifact = _mapping(
+        intent.get("candidate_artifact"),
+        "carry-forward intent.candidate_artifact",
+    )
+    publication_artifact = _mapping(
+        intent.get("source_publication_artifact"),
+        "carry-forward intent.source_publication_artifact",
+    )
+    if (
+        candidate_artifact != LEGACY_APPROVAL_CANDIDATE_ARTIFACT
+        or publication_artifact != LEGACY_APPROVAL_PUBLICATION_ARTIFACT
+        or intent.get("candidate_sha256")
+        != LEGACY_APPROVAL_CANDIDATE_SHA256
+        or intent.get("decision_sha256")
+        != LEGACY_APPROVAL_SOURCE_DECISION_SHA256
+    ):
+        raise ExpeditedEditorialError(
+            "carry-forward intent: approved source binding mismatch"
+        )
+    original_section = _mapping(
+        intent.get("source_human_review_section"),
+        "carry-forward intent.source_human_review_section",
+    )
+    if (
+        canonical_sha256(original_section)
+        != intent.get("source_human_review_section_sha256")
+        or original_section.get("ground_truth_source") != "human"
+        or original_section.get("ai_generated_ground_truth") is not False
+        or original_section.get("human_attestation") is not True
+    ):
+        raise ExpeditedEditorialError(
+            "carry-forward intent: human review binding mismatch"
+        )
+    carry = _mapping(
+        intent.get("carry_forward"),
+        "carry-forward intent.carry_forward",
+    )
+    approved_basis = _validate_approved_canonical_basis(
+        carry.get("approved_canonical_basis"),
+        carry.get("approved_canonical_basis_sha256"),
+    )
+    if (
+        carry.get("kind") != CARRY_FORWARD_KIND
+        or carry.get("event_mutations_applied") != 0
+        or carry.get("source_candidate_artifact") != candidate_artifact
+        or carry.get("source_publication_artifact")
+        != publication_artifact
+        or len(_list(approved_basis.get("events"), "approved events"))
+        != EVENT_COUNT
+    ):
+        raise ExpeditedEditorialError(
+            "carry-forward intent: provenance mismatch"
+        )
+    event_reviews = [
+        _mapping(item, f"carry-forward intent.event_reviews[{index}]")
+        for index, item in enumerate(
+            _list(intent.get("event_reviews"), "intent.event_reviews")
+        )
+    ]
+    pair_reviews = _list(
+        intent.get("same_event_pair_reviews"),
+        "intent.same_event_pair_reviews",
+    )
+    top5 = [
+        _mapping(item, f"carry-forward intent.top5[{index}]")
+        for index, item in enumerate(
+            _list(intent.get("top5"), "intent.top5")
+        )
+    ]
+    outcomes = [
+        _mapping(item, f"carry-forward intent.verified_outcomes[{index}]")
+        for index, item in enumerate(
+            _list(intent.get("verified_outcomes"), "intent.verified_outcomes")
+        )
+    ]
+    if (
+        len(event_reviews) != EVENT_COUNT
+        or len(pair_reviews) != PAIR_COUNT
+        or len(top5) != TOP5_COUNT
+        or len(outcomes) != EVENT_COUNT
+        or any(item.get("decision") != "approved" for item in event_reviews)
+        or any(
+            item.get("result") != "verified_unchanged"
+            or not SHA256.fullmatch(
+                str(item.get("current_snapshot_sha256") or "")
+            )
+            for item in outcomes
+        )
+    ):
+        raise ExpeditedEditorialError(
+            "carry-forward intent: frozen review basis mismatch"
+        )
+    brief_payload = _mapping(
+        intent.get("brief_payload"),
+        "carry-forward intent.brief_payload",
+    )
+    if set(brief_payload) != {
+        "edition",
+        "cutoff_at",
+        "build_sha",
+        "empty_reason",
+        "items",
+        "expected_event_basis_sha256",
+    }:
+        raise ExpeditedEditorialError(
+            "carry-forward intent: brief payload fields mismatch"
+        )
+    brief_items = [
+        _mapping(item, f"carry-forward intent.brief_payload.items[{index}]")
+        for index, item in enumerate(
+            _list(brief_payload.get("items"), "intent.brief_payload.items")
+        )
+    ]
+    outcome_snapshots = {
+        str(item["event_id"]): item["current_snapshot_sha256"]
+        for item in outcomes
+        if str(item["event_id"])
+        in {str(top["event_id"]) for top in top5}
+    }
+    expected_top_items = [
+        {
+            "event_id": item["event_id"],
+            "lane": "top",
+            "position_no": item["position_no"],
+            "selection_reason": item["selection_reason"],
+            "expected_snapshot_sha256": outcome_snapshots[
+                str(item["event_id"])
+            ],
+        }
+        for item in top5
+    ]
+    expected_snapshot_basis = [
+        {
+            "event_id": event_id,
+            "snapshot_sha256": outcome_snapshots[event_id],
+        }
+        for event_id in sorted(outcome_snapshots)
+    ]
+    if (
+        brief_payload.get("edition") != "global"
+        or brief_payload.get("cutoff_at") != prepared_at
+        or brief_payload.get("build_sha") != revision
+        or brief_payload.get("empty_reason") is not None
+        or brief_items != expected_top_items
+        or brief_payload.get("expected_event_basis_sha256")
+        != canonical_sha256(expected_snapshot_basis)
+        or intent.get("expected_brief_id") != _brief_id(prepared_at)
+    ):
+        raise ExpeditedEditorialError(
+            "carry-forward intent: frozen brief mismatch"
+        )
+    return intent
+
+
+def _validate_carry_intent_artifact(
+    value: object,
+    *,
+    revision: str,
+) -> dict[str, object]:
+    artifact = _mapping(value, "carry-forward intent artifact")
+    if set(artifact) != set(CARRY_FORWARD_ARTIFACT_FIELDS):
+        raise ExpeditedEditorialError(
+            "carry-forward intent artifact: exact fields required"
+        )
+    run_id = artifact.get("run_id")
+    artifact_id = artifact.get("artifact_id")
+    name = _text(
+        artifact.get("artifact_name"),
+        "artifact_name",
+        "carry-forward intent artifact",
+        maximum=255,
+    )
+    digest = "sha256:" + _sha256(
+        str(artifact.get("artifact_digest") or "").removeprefix("sha256:"),
+        "artifact_digest",
+        "carry-forward intent artifact",
+    )
+    expected_prefix = (
+        "global-alpha-expedited-editorial-carry-intent-" + revision + "-"
+    )
+    if (
+        isinstance(run_id, bool)
+        or not isinstance(run_id, int)
+        or run_id < 1
+        or isinstance(artifact_id, bool)
+        or not isinstance(artifact_id, int)
+        or artifact_id < 1
+        or not name.startswith(expected_prefix)
+    ):
+        raise ExpeditedEditorialError(
+            "carry-forward intent artifact: identity mismatch"
+        )
+    return {
+        "run_id": run_id,
+        "artifact_id": artifact_id,
+        "artifact_name": name,
+        "artifact_digest": digest,
+    }
+
+
+def publish_carry_forward_intent(
+    client: EditorialClient,
+    *,
+    intent: Mapping[str, object],
+    revision: str,
+    intent_artifact: Mapping[str, object],
+    now: datetime,
+) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+    """Publish or safely recover one pre-uploaded immutable carry intent."""
+
+    revision = _sha40(revision, "carry-forward revision")
+    health = client.health()
+    if (
+        health.get("service") != "bside-global-market-terminal"
+        or _sha40(health.get("code_revision"), "health") != revision
+        or health.get("schema_version") != 12
+    ):
+        raise ExpeditedEditorialError("carry-forward: current health mismatch")
+    frozen = _validate_carry_forward_intent(intent, revision=revision)
+    artifact = _validate_carry_intent_artifact(
+        intent_artifact,
+        revision=revision,
+    )
+    prepared_at = datetime.fromisoformat(
+        str(frozen["prepared_at"]).replace("Z", "+00:00")
+    ).astimezone(timezone.utc)
+    fresh_until = datetime.fromisoformat(
+        str(frozen["fresh_until"]).replace("Z", "+00:00")
+    ).astimezone(timezone.utc)
+    current = now.astimezone(timezone.utc)
+    if current < prepared_at - timedelta(minutes=5):
+        raise ExpeditedEditorialError(
+            "carry-forward intent: prepared_at is in the future"
+        )
+    recovery_only = current > fresh_until
+    brief_payload = dict(
+        _mapping(frozen.get("brief_payload"), "carry-forward intent brief")
+    )
+    if recovery_only:
+        brief_payload["require_existing"] = True
+    first_brief = _mapping(
+        client.publish_brief(brief_payload).get("data"),
+        "carry-forward brief response",
+    )
+    replay_brief = _mapping(
+        client.publish_brief(brief_payload).get("data"),
+        "carry-forward brief replay response",
+    )
+    expected_brief_id = str(frozen["expected_brief_id"])
+    for response, label in (
+        (first_brief, "carry-forward brief"),
+        (replay_brief, "carry-forward brief replay"),
+    ):
+        if (
+            response.get("brief_id") != expected_brief_id
+            or response.get("edition") != "global"
+            or response.get("published") is not True
+        ):
+            raise ExpeditedEditorialError(f"{label}: publication mismatch")
+    recovered_existing_brief = first_brief.get("idempotent") is True
+    if (
+        first_brief.get("idempotent") is not False
+        and first_brief.get("idempotent") is not True
+    ):
+        raise ExpeditedEditorialError(
+            "carry-forward brief omitted idempotency state"
+        )
+    if recovery_only and not recovered_existing_brief:
+        raise ExpeditedEditorialError(
+            "carry-forward stale intent created a new brief"
+        )
+    if replay_brief.get("idempotent") is not True:
+        raise ExpeditedEditorialError(
+            "carry-forward brief replay was not idempotent"
+        )
+
+    collected_at = (
+        current.replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+    original_section = _mapping(
+        frozen.get("source_human_review_section"),
+        "carry-forward intent human section",
+    )
+    carry_provenance = {
+        **_mapping(
+            frozen.get("carry_forward"),
+            "carry-forward intent provenance",
+        ),
+        "prepared_intent_artifact": artifact,
+        "prepared_intent_sha256": frozen["intent_sha256"],
+    }
+    human_review = {
+        "schema_version": SCHEMA_VERSION,
+        "kind": HUMAN_REVIEW_KIND,
+        "environment": "production",
+        "evidence_source": "protected_editorial_carry_forward",
+        "is_synthetic": False,
+        "code_revision": revision,
+        "collected_at": collected_at,
+        "evidence_as_of": collected_at,
+        "candidate_artifact": frozen["candidate_artifact"],
+        "candidate_sha256": frozen["candidate_sha256"],
+        **original_section,
+        "section_sha256": canonical_sha256(original_section),
+        "carry_forward": carry_provenance,
+    }
+    top5 = [
+        _mapping(item, f"carry-forward intent.top5[{index}]")
+        for index, item in enumerate(
+            _list(frozen.get("top5"), "carry-forward intent.top5")
+        )
+    ]
+    semantic_brief_payload = dict(
+        _mapping(
+            frozen.get("brief_payload"),
+            "carry-forward intent.brief_payload",
+        )
+    )
+    semantic = {
+        "candidate_artifact": frozen["candidate_artifact"],
+        "candidate_sha256": frozen["candidate_sha256"],
+        "decision_sha256": frozen["decision_sha256"],
+        "code_revision": revision,
+        "prepared_intent_artifact": artifact,
+        "prepared_intent_sha256": frozen["intent_sha256"],
+        "carry_forward": carry_provenance,
+        "event_reviews": frozen["event_reviews"],
+        "same_event_pair_reviews": frozen["same_event_pair_reviews"],
+        "top5": [
+            {
+                "event_id": item["event_id"],
+                "position_no": item["position_no"],
+                "selection_reason": item["selection_reason"],
+            }
+            for item in top5
+        ],
+        "brief": {
+            "brief_id": expected_brief_id,
+            "build_sha": revision,
+            "cutoff_at": frozen["prepared_at"],
+            "payload_sha256": canonical_sha256(semantic_brief_payload),
+        },
+    }
+    semantic_sha = canonical_sha256(semantic)
+
+    def receipt(brief: Mapping[str, object]) -> dict[str, object]:
+        idempotent = brief.get("idempotent") is True
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "kind": PUBLICATION_KIND,
+            "environment": "production",
+            "evidence_source": "protected_editorial_carry_forward",
+            "is_synthetic": False,
+            "code_revision": revision,
+            "collected_at": collected_at,
+            "candidate_artifact": frozen["candidate_artifact"],
+            "candidate_sha256": frozen["candidate_sha256"],
+            "decision_sha256": frozen["decision_sha256"],
+            "prepared_intent_artifact": artifact,
+            "prepared_intent_sha256": frozen["intent_sha256"],
+            "publication_mode": (
+                "existing_only_recovery" if recovery_only else "fresh"
+            ),
+            "event_review_outcomes": frozen["verified_outcomes"],
+            "same_event_pair_reviews": frozen[
+                "same_event_pair_reviews"
+            ],
+            "top5": top5,
+            "brief": {
+                **_mapping(semantic["brief"], "carry-forward semantic brief"),
+                "idempotent": idempotent,
+            },
+            "mutations_applied": 0,
+            "event_mutations_applied": 0,
+            "idempotent_replay": idempotent,
+            "recovered_existing_brief": recovered_existing_brief,
+            "semantic_receipt_sha256": semantic_sha,
+            "carry_forward": carry_provenance,
+        }
+
+    return human_review, receipt(first_brief), receipt(replay_brief)
+
+
 def _environment_client() -> tuple[EditorialClient, str]:
     api_base = (
         os.environ.get("BSIDE_API_BASE_URL")
@@ -2048,6 +4192,80 @@ def _parser() -> argparse.ArgumentParser:
     apply_parser.add_argument("--candidate-artifact-name", required=True)
     apply_parser.add_argument("--candidate-artifact-digest", required=True)
     apply_parser.add_argument("--output-dir", type=Path, required=True)
+    def add_carry_source_arguments(
+        command_parser: argparse.ArgumentParser,
+    ) -> None:
+        command_parser.add_argument("--candidate", type=Path, required=True)
+        command_parser.add_argument(
+            "--source-human-review",
+            type=Path,
+            required=True,
+        )
+        command_parser.add_argument(
+            "--source-publication-receipt",
+            type=Path,
+            required=True,
+        )
+        command_parser.add_argument(
+            "--source-publication-replay-receipt",
+            type=Path,
+            required=True,
+        )
+        command_parser.add_argument(
+            "--candidate-run-id",
+            type=int,
+            required=True,
+        )
+        command_parser.add_argument(
+            "--candidate-artifact-id",
+            type=int,
+            required=True,
+        )
+        command_parser.add_argument(
+            "--candidate-artifact-name",
+            required=True,
+        )
+        command_parser.add_argument(
+            "--candidate-artifact-digest",
+            required=True,
+        )
+        command_parser.add_argument(
+            "--publication-run-id",
+            type=int,
+            required=True,
+        )
+        command_parser.add_argument(
+            "--publication-artifact-id",
+            type=int,
+            required=True,
+        )
+        command_parser.add_argument(
+            "--publication-artifact-name",
+            required=True,
+        )
+        command_parser.add_argument(
+            "--publication-artifact-digest",
+            required=True,
+        )
+        command_parser.add_argument(
+            "--output-dir",
+            type=Path,
+            required=True,
+        )
+
+    prepare_parser = sub.add_parser("carry-forward-prepare")
+    add_carry_source_arguments(prepare_parser)
+    publish_parser = sub.add_parser("carry-forward-publish")
+    publish_parser.add_argument("--intent", type=Path, required=True)
+    publish_parser.add_argument("--intent-run-id", type=int, required=True)
+    publish_parser.add_argument(
+        "--intent-artifact-id",
+        type=int,
+        required=True,
+    )
+    publish_parser.add_argument("--intent-artifact-name", required=True)
+    publish_parser.add_argument("--intent-artifact-digest", required=True)
+    publish_parser.add_argument("--output-dir", type=Path, required=True)
     decode_parser = sub.add_parser("decode-decisions")
     decode_parser.add_argument("--output", type=Path, required=True)
     return parser
@@ -2083,6 +4301,86 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "expedited editorial candidates ready: "
                 f"events={EVENT_COUNT} pairs={PAIR_COUNT} top5={TOP5_COUNT} "
                 f"candidate_sha256={candidate['candidate_sha256']}"
+            )
+            return 0
+        if args.command == "carry-forward-prepare":
+            candidate = _load_json(args.candidate, "source candidate")
+            candidate_artifact = _artifact_identity(
+                run_id=args.candidate_run_id,
+                artifact_id=args.candidate_artifact_id,
+                artifact_name=args.candidate_artifact_name,
+                artifact_digest=args.candidate_artifact_digest,
+                location="source candidate artifact",
+            )
+            publication_artifact = _artifact_identity(
+                run_id=args.publication_run_id,
+                artifact_id=args.publication_artifact_id,
+                artifact_name=args.publication_artifact_name,
+                artifact_digest=args.publication_artifact_digest,
+                location="source publication artifact",
+            )
+            intent = prepare_carry_forward_publication(
+                client,
+                candidate=candidate,
+                source_human_review=_load_json(
+                    args.source_human_review,
+                    "source human review",
+                ),
+                source_receipt=_load_json(
+                    args.source_publication_receipt,
+                    "source publication receipt",
+                ),
+                source_replay_receipt=_load_json(
+                    args.source_publication_replay_receipt,
+                    "source publication replay receipt",
+                ),
+                revision=revision,
+                candidate_artifact=candidate_artifact,
+                publication_artifact=publication_artifact,
+                now=datetime.now(timezone.utc),
+            )
+            _write_json(
+                args.output_dir / "carry-forward-intent.json",
+                intent,
+            )
+            print(
+                "expedited editorial carry-forward intent verified: "
+                "event_mutations=0 brief_mutations=0 "
+                f"intent_sha256={intent['intent_sha256']}"
+            )
+            return 0
+        if args.command == "carry-forward-publish":
+            intent_artifact = _artifact_identity(
+                run_id=args.intent_run_id,
+                artifact_id=args.intent_artifact_id,
+                artifact_name=args.intent_artifact_name,
+                artifact_digest=args.intent_artifact_digest,
+                location="carry-forward intent artifact",
+            )
+            human_review, receipt, replay = publish_carry_forward_intent(
+                client,
+                intent=_load_json(
+                    args.intent,
+                    "carry-forward intent",
+                ),
+                revision=revision,
+                intent_artifact=intent_artifact,
+                now=datetime.now(timezone.utc),
+            )
+            _write_json(args.output_dir / "human-review.json", human_review)
+            _write_json(
+                args.output_dir / "publication-receipt.json",
+                receipt,
+            )
+            _write_json(
+                args.output_dir / "publication-replay-receipt.json",
+                replay,
+            )
+            print(
+                "expedited editorial carry-forward verified: "
+                "event_mutations=0 "
+                f"idempotent_replay={replay['idempotent_replay']} "
+                f"semantic_receipt_sha256={receipt['semantic_receipt_sha256']}"
             )
             return 0
         candidate = _validate_candidate(

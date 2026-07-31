@@ -963,6 +963,211 @@ def test_brief_publication_freezes_top_five_or_an_explicit_empty_reason():
     assert "Top은 최대 5건" in DOCS
 
 
+def test_brief_publication_supports_atomic_expedited_basis_and_recovery():
+    request = SPEC["components"]["schemas"]["BriefPublicationRequest"]
+    item = SPEC["components"]["schemas"]["BriefPublicationItem"]
+    assert request["properties"]["require_existing"]["type"] == "boolean"
+    assert request["properties"]["expected_event_basis_sha256"]["pattern"] == (
+        "^[a-f0-9]{64}$"
+    )
+    assert item["properties"]["expected_snapshot_sha256"]["pattern"] == (
+        "^[a-f0-9]{64}$"
+    )
+
+    publish = V2_WRITE[
+        V2_WRITE.index("function v2_admin_publish_brief") :
+    ]
+    existing_at = publish.index("$stored = v2_locked_brief_edition_row(")
+    recovery_missing_at = publish.index("brief_recovery_not_found")
+    locked_basis_at = publish.index("v2_expedited_review_event_row(")
+    insert_at = publish.index("$editionInsert->execute(")
+    assert existing_at < recovery_missing_at < locked_basis_at < insert_at
+    assert "'require_existing', 'expected_event_basis_sha256'" in publish
+    assert "'expected_snapshot_sha256'" in publish
+    assert "$semanticPayload['expected_event_basis_sha256']" in publish
+    assert "$semanticPayload['require_existing']" not in publish
+    assert "'expected_event_snapshots'" in publish
+    assert "brief_event_snapshot_mismatch" in publish
+    assert "brief_event_basis_mismatch" in publish
+    assert "brief_stored_item_manifest_mismatch" in publish
+    assert "brief_stored_edition_manifest_mismatch" in publish
+    assert "array('event' => $lockedEvent)" in publish
+    assert "true\n                );" in publish
+    assert publish.index("$pdo->commit();") < locked_basis_at
+    existing_branch = publish[
+        publish.index("if ($stored) {") : publish.index("if ($requireExisting) {")
+    ]
+    assert "v2_locked_protected_brief_item_manifest(" in existing_branch
+    assert "v2_event_select(" not in existing_branch
+    assert "$storedContractVersion === 2" in existing_branch
+    assert "stored_item_manifest_sha256" in existing_branch
+    assert "stored_edition_manifest_sha256" in existing_branch
+    assert "'contract_version' => $hasExpectedBasis ? 2 : 1" in publish
+    isolation_at = publish.index(
+        "$pdo->exec('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');"
+    )
+    transaction_at = publish.index("$pdo->beginTransaction();")
+    assert isolation_at < transaction_at < existing_at
+    isolation_guard = publish[publish.rfind("if ($hasExpectedBasis)", 0, isolation_at) : transaction_at]
+    assert "SERIALIZABLE" in isolation_guard
+
+    fresh = publish[publish.index("$editionInsert = $pdo->prepare(") :]
+    edition_insert_at = fresh.index("$editionInsert->execute(")
+    item_insert_at = fresh.index("$itemInsert->execute(")
+    persisted_readback_at = fresh.index(
+        "$storedItemManifest = v2_locked_protected_brief_item_manifest("
+    )
+    final_payload_update_at = fresh.index("$editionUpdate->execute(")
+    verification_readback_at = fresh.index(
+        "$verifiedItems = v2_locked_protected_brief_item_manifest("
+    )
+    assert (
+        edition_insert_at
+        < item_insert_at
+        < persisted_readback_at
+        < final_payload_update_at
+        < verification_readback_at
+    )
+
+    stored_manifest = V2_WRITE[
+        V2_WRITE.index("function v2_locked_protected_brief_item_manifest") :
+        V2_WRITE.index("function v2_protected_brief_manifest_matches_request")
+    ]
+    assert "table_name($config, 'brief_items')" in stored_manifest
+    assert "event_snapshot_json" in stored_manifest
+    assert "event_snapshot_sha256" in stored_manifest
+    assert "expected_snapshot_sha256" in stored_manifest
+    assert "review_status'] !== 'approved'" in stored_manifest
+    for audit_field in (
+        "brief_id",
+        "approved_by",
+        "approved_at",
+        "created_at",
+        "updated_at",
+    ):
+        assert audit_field in stored_manifest
+    assert "FOR UPDATE" in stored_manifest
+
+    edition_manifest = V2_WRITE[
+        V2_WRITE.index("function v2_protected_brief_edition_manifest(") :
+        V2_WRITE.index("function v2_admin_publish_brief")
+    ]
+    for edition_field in (
+        "brief_id",
+        "edition",
+        "cutoff_at",
+        "published_at",
+        "publication_status",
+        "approved_by",
+        "approved_at",
+        "build_sha",
+        "created_at",
+        "updated_at",
+        "stored_item_manifest_sha256",
+    ):
+        assert edition_field in edition_manifest
+    edition_manifest_builder = V2_WRITE[
+        V2_WRITE.index("function v2_protected_brief_edition_manifest(") :
+        V2_WRITE.index(
+            "function v2_protected_brief_edition_manifest_matches_request"
+        )
+    ]
+    assert "payload_json" not in edition_manifest_builder
+    locked_edition = edition_manifest[
+        edition_manifest.index("function v2_locked_brief_edition_row") :
+    ]
+    assert "payload_json" in locked_edition
+    assert "LIMIT 1 FOR UPDATE" in locked_edition
+
+    event_detail = V2_WRITE[
+        V2_WRITE.index("function v2_expedited_review_event_row") :
+        V2_WRITE.index("function v2_admin_expedited_review_candidates")
+    ]
+    assert "bool $lockRows = false" in event_detail
+    assert "$lockRows" in event_detail
+    assert "v2_expedited_review_documents(" in event_detail
+    assert "v2_expedited_review_actors(" in event_detail
+    assert "v2_expedited_review_latest_revision(" in event_detail
+    assert event_detail.index(
+        "v2_expedited_review_latest_revision("
+    ) < event_detail.index("v2_expedited_review_actors(") < event_detail.index(
+        "v2_expedited_review_documents("
+    )
+    assert "array('event' => $event)" in V2_WRITE
+    assert "table_name($config, 'governance_events')" in event_detail
+    assert "table_name($config, 'issuers')" in event_detail
+    assert "($lockRows ? ' FOR UPDATE' : '')" in event_detail
+
+    actor_lock = V2_WRITE[
+        V2_WRITE.index("function v2_expedited_review_actors") :
+        V2_WRITE.index("function v2_expedited_review_latest_revision")
+    ]
+    assert "table_name($config, 'event_actors')" in actor_lock
+    assert "table_name($config, 'actors')" in actor_lock
+    assert "($lockRows ? ' FOR UPDATE' : '')" in actor_lock
+
+    document_lock = V2_WRITE[
+        V2_WRITE.index("function v2_expedited_review_documents") :
+        V2_WRITE.index("function v2_expedited_review_actors")
+    ]
+    for table in (
+        "event_documents",
+        "documents",
+        "governance_events",
+        "source_rights",
+        "source_connectors",
+    ):
+        assert f"table_name($config, '{table}')" in document_lock
+    assert "($lockRows ? ' FOR UPDATE' : '')" in document_lock
+
+    revision_lock = V2_WRITE[
+        V2_WRITE.index("function v2_expedited_review_latest_revision") :
+        V2_WRITE.index("function v2_expedited_review_event_row")
+    ]
+    assert "table_name($config, 'editorial_revisions')" in revision_lock
+    assert "entity_type=\\'event\\' AND entity_id=?" in revision_lock
+    assert "ORDER BY updated_at DESC,revision_id DESC" in revision_lock
+    assert "$lockRows ? ' FOR UPDATE' : ' LIMIT 1'" in revision_lock
+    assert "LIMIT 1 FOR UPDATE" not in revision_lock
+
+    description = SPEC["paths"]["/admin/briefs"]["post"]["description"]
+    assert "contract_version 2" in description
+    assert "SERIALIZABLE isolation" in description
+    assert "actual stored" in description
+    assert "except payload_json" in description
+    assert "without consulting mutable live event state" in description
+
+    smoke = (ROOT / "tests" / "php73_global_v2_smoke.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"--default-character-set=utf8mb4",' in smoke
+    protected_smoke = smoke[
+        smoke.index("protected_cutoff_at =") : smoke.index(
+            "published_brief, _ = request_json(",
+            smoke.index("protected_cutoff_at ="),
+        )
+    ]
+    empty_revision_at = protected_smoke.index(
+        "DELETE FROM ci_editorial_revisions WHERE entity_type='event'"
+    )
+    publish_pause_at = protected_smoke.index(
+        "CREATE TRIGGER ci_protected_brief_lock_pause"
+    )
+    first_revision_at = protected_smoke.index(
+        "revision:ci-protected-concurrent-gap"
+    )
+    assert empty_revision_at < publish_pause_at < first_revision_at
+    assert "protected revision empty-range fixture is not empty" in protected_smoke
+    assert "GET_LOCK('ci_protected_brief_pause',0)" in protected_smoke
+    assert "IS_USED_LOCK('ci_protected_brief_pause')" in protected_smoke
+    assert "RELEASE_LOCK('ci_protected_brief_pause')" in protected_smoke
+    assert "protected publication leaked its CI observation lock" in protected_smoke
+    assert "lock wait timeout" in protected_smoke
+    assert "CI tampered approver" in protected_smoke
+    assert "publication_status='draft'" in protected_smoke
+    assert "brief_stored_edition_manifest_mismatch" in protected_smoke
+
+
 def test_latest_brief_uses_immutable_snapshot_and_never_hides_latest_outage():
     latest = V2[
         V2.index("function v2_brief_event_rows") : V2.index("function v2_calendar")
@@ -1764,6 +1969,26 @@ def test_protected_cutover_requires_exact_authorizer_and_consumes_once_atomicall
         "$path === '/admin/release-state'"
     )
 
+    overlap_guard = V2[
+        V2.index("function v2_require_disjoint_protected_role_hashes")
+        : V2.index("function v2_require_role")
+    ]
+    assert "v1_protected_role_hash_overlap_status($config)" in overlap_guard
+    assert "protected_role_token_hash_overlap" in overlap_guard
+    assert "conflicting_roles" in overlap_guard
+    assert "$status['conflicting_roles']" in overlap_guard
+    for function_name, next_function_name in (
+        ("function v2_require_role", "function v2_require_exact_role"),
+        ("function v2_require_exact_role", "function v2_require_preview_token"),
+        ("function v2_require_preview_token", "function v2_expected_migration_manifest"),
+    ):
+        auth = V2[V2.index(function_name) : V2.index(next_function_name)]
+        assert "v2_require_disjoint_protected_role_hashes($config);" in auth
+
+    release_policy = SPEC["x-release-gate"]["transition-policy"]
+    assert "pairwise disjoint" in release_policy
+    assert "without exposing a credential hash" in release_policy
+
     issue = V2[
         V2.index("function v2_admin_issue_release_authorization") : V2.index(
             "function v2_atomic_cutover_fields"
@@ -1781,6 +2006,11 @@ def test_protected_cutover_requires_exact_authorizer_and_consumes_once_atomicall
     ):
         assert binding in issue
     assert "v2_assert_deployed_candidate($fields)" in issue
+    assert "v2_require_atomic_cutover_transaction_engines($pdo, $config)" in issue
+    assert "v2_lock_atomic_cutover_transaction_table_metadata($pdo, $config)" in issue
+    assert issue.index(
+        "v2_lock_atomic_cutover_transaction_table_metadata($pdo, $config)"
+    ) < issue.index("v2_release_state_rows_for_update($pdo, $config)")
     assert "V2_RELEASE_AUTHORIZATION_MIN_TTL_SECONDS" in issue
     assert "V2_RELEASE_AUTHORIZATION_MAX_TTL_SECONDS" in issue
     assert "release_nonce" not in issue.split("v2_respond(201", 1)[1]
@@ -1791,6 +2021,14 @@ def test_protected_cutover_requires_exact_authorizer_and_consumes_once_atomicall
         )
     ]
     assert "$pdo->beginTransaction()" in atomic
+    assert atomic.index(
+        "v2_require_atomic_cutover_transaction_engines($pdo, $config)"
+    ) < atomic.index("$pdo->beginTransaction()")
+    assert atomic.index("$pdo->beginTransaction()") < atomic.index(
+        "v2_lock_atomic_cutover_transaction_table_metadata($pdo, $config)"
+    ) < atomic.index(
+        "v2_require_atomic_cutover_transaction_engines($pdo, $config, true)"
+    ) < atomic.index("v2_release_state_rows_for_update($pdo, $config)")
     assert "v2_release_state_rows_for_update($pdo, $config)" in atomic
     assert "LIMIT 1 FOR UPDATE" in atomic
     assert "release_authorization_replayed" in atomic
@@ -1801,6 +2039,24 @@ def test_protected_cutover_requires_exact_authorizer_and_consumes_once_atomicall
     assert "fully_consumed_at" in atomic
     assert atomic.index("fully_consumed_at") < atomic.index("$pdo->commit()")
     assert "WHERE authorization_id=? AND fully_consumed_at IS NULL" in atomic
+
+    engine_tables = V2[
+        V2.index("function v2_atomic_cutover_transaction_tables") : V2.index(
+            "function v2_release_authorization_fields"
+        )
+    ]
+    for table in (
+        "governance_release_state",
+        "governance_release_audit",
+        "release_authorizations",
+        "source_rights",
+        "source_connectors",
+    ):
+        assert f"table_plain_name($config, '{table}')" in engine_tables
+    assert "information_schema.TABLES" in engine_tables
+    assert "hash_equals('InnoDB'" in engine_tables
+    assert "SELECT 1 FROM ' . table_name($config, $name) . ' LIMIT 0" in engine_tables
+    assert "protected_release_transaction_engine_invalid" in engine_tables
 
     direct = V2[
         V2.index("function v2_admin_update_release_state") : V2.index(
@@ -1834,6 +2090,19 @@ def test_protected_cutover_requires_exact_authorizer_and_consumes_once_atomicall
     ]
     assert '"expected_version": 1' in direct_v2
     assert '"expected_version": v1_preview_version' in direct_v1
+    overlap_smoke = smoke[
+        smoke.index("runtime_config_path = (") : smoke.index(
+            "ALTER TABLE ci_governance_release_audit ENGINE=MyISAM"
+        )
+    ]
+    assert "release_authorizer_hash" in overlap_smoke
+    assert "admin_hash" in overlap_smoke
+    assert overlap_smoke.count('expected_status=503') == 2
+    assert "protected_role_token_hash_overlap" in overlap_smoke
+    assert '[["admin", "release_authorizer"]]' in overlap_smoke
+    assert "secret_value not in serialized_response" in overlap_smoke
+    assert "finally:" in overlap_smoke
+    assert "runtime_config_path.write_text(runtime_config" in overlap_smoke
 
 
 def test_alpha_release_evidence_is_ops_only_and_database_derived():
