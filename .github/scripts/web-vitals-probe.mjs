@@ -255,14 +255,16 @@ export function observerInitScript() {
 }
 
 
-function interactionDestination(routeTemplate) {
+export function interactionDestination(routeTemplate) {
   const destinations = {
-    "/today": "events",
-    "/events": "companies",
+    "/today": "live",
+    "/events": "calendar",
     "/issuers": "calendar",
     "/calendar": "today",
   };
-  return destinations[routeTemplate];
+  const destination = destinations[routeTemplate];
+  if (!destination) throw new ProbeError("unsupported_interaction_route");
+  return destination;
 }
 
 
@@ -310,7 +312,9 @@ async function measureRoute(browser, { webBase, previewToken, buildSha, routeTem
     }
 
     const destination = interactionDestination(routeTemplate);
-    await page.locator(`[data-nav="${destination}"]`).click({ timeout: 10_000 });
+    await page
+      .locator(`.mobile-bottom-nav [data-nav="${destination}"]:visible`)
+      .click({ timeout: 10_000 });
     await page.waitForFunction(
       () => {
         const state = window.__BSIDE_PRODUCTION_VITALS_PROBE__;

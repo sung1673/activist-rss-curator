@@ -41,6 +41,11 @@ jobs:
       evidence_created_at: ${{ steps.resolve.outputs.evidence_created_at }}
       pages_artifact_id: ${{ steps.pages_binding.outputs.pages_artifact_id }}
       pages_run_id: ${{ steps.pages_binding.outputs.pages_run_id }}
+      legacy_carry_artifact_name: ${{ steps.legacy_recovery.outputs.carry_artifact_name }}
+      legacy_pin_run_id: ${{ steps.legacy_recovery.outputs.pin_run_id }}
+      legacy_pin_artifact_name: ${{ steps.legacy_recovery.outputs.pin_artifact_name }}
+      legacy_pin_code_revision: ${{ steps.legacy_recovery.outputs.pin_code_revision }}
+      legacy_pin_artifact_digest: ${{ steps.legacy_recovery.outputs.pin_artifact_digest }}
     steps:
       - name: Checkout release candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -388,11 +393,11 @@ jobs:
           LEGACY_SOURCE_MODE: ${{ steps.legacy_recovery.outputs.mode }}
           LEGACY_ARCHIVE_PATH: ${{ runner.temp }}/legacy-recovery-seed.zip
           LEGACY_RECOVERY_ROOT: ${{ runner.temp }}/legacy-recovery-bundle
-          LEGACY_RUN_ID: ${{ vars.LEGACY_ROLLBACK_RUN_ID }}
+          LEGACY_RUN_ID: ${{ steps.legacy_recovery.outputs.pin_run_id }}
           LEGACY_SEED_ARTIFACT_ID: ${{ steps.legacy_recovery.outputs.artifact_id }}
-          LEGACY_ARTIFACT_NAME: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_NAME }}
-          LEGACY_CODE_REVISION: ${{ vars.LEGACY_ROLLBACK_CODE_REVISION }}
-          LEGACY_ARTIFACT_DIGEST: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_DIGEST }}
+          LEGACY_ARTIFACT_NAME: ${{ steps.legacy_recovery.outputs.pin_artifact_name }}
+          LEGACY_CODE_REVISION: ${{ steps.legacy_recovery.outputs.pin_code_revision }}
+          LEGACY_ARTIFACT_DIGEST: ${{ steps.legacy_recovery.outputs.pin_artifact_digest }}
         run: |
           set -euo pipefail
           if [[ "$LEGACY_SOURCE_MODE" == "seed" ]]; then
@@ -421,11 +426,11 @@ jobs:
       - name: Validate pinned 90-day legacy feed compatibility window
         shell: bash
         env:
-          LEGACY_RUN_ID: ${{ vars.LEGACY_ROLLBACK_RUN_ID }}
+          LEGACY_RUN_ID: ${{ steps.legacy_recovery.outputs.pin_run_id }}
           LEGACY_ARTIFACT_ID: ${{ steps.recovery_bundle.outputs.source_artifact_id }}
-          LEGACY_ARTIFACT_NAME: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_NAME }}
-          LEGACY_CODE_REVISION: ${{ vars.LEGACY_ROLLBACK_CODE_REVISION }}
-          LEGACY_ARTIFACT_DIGEST: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_DIGEST }}
+          LEGACY_ARTIFACT_NAME: ${{ steps.legacy_recovery.outputs.pin_artifact_name }}
+          LEGACY_CODE_REVISION: ${{ steps.legacy_recovery.outputs.pin_code_revision }}
+          LEGACY_ARTIFACT_DIGEST: ${{ steps.legacy_recovery.outputs.pin_artifact_digest }}
         run: |
           set -euo pipefail
           python -m curator.legacy_feed_compat verify \
@@ -494,7 +499,7 @@ jobs:
       - name: Preserve verified legacy recovery for cutover and rollback
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: legacy-recovery-carry-forward-v2
+          name: ${{ steps.legacy_recovery.outputs.carry_artifact_name }}
           path: ${{ runner.temp }}/legacy-recovery-bundle
           if-no-files-found: error
           retention-days: 90
@@ -1152,16 +1157,16 @@ jobs:
       - name: Download same-run verified legacy recovery bundle
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: legacy-recovery-carry-forward-v2
+          name: ${{ needs.validate.outputs.legacy_carry_artifact_name }}
           path: legacy-recovery-bundle
           digest-mismatch: error
 
       - name: Validate pinned legacy recovery contents
         env:
-          LEGACY_RUN_ID: ${{ vars.LEGACY_ROLLBACK_RUN_ID }}
-          LEGACY_ARTIFACT_NAME: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_NAME }}
-          LEGACY_CODE_REVISION: ${{ vars.LEGACY_ROLLBACK_CODE_REVISION }}
-          LEGACY_ARTIFACT_DIGEST: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_DIGEST }}
+          LEGACY_RUN_ID: ${{ needs.validate.outputs.legacy_pin_run_id }}
+          LEGACY_ARTIFACT_NAME: ${{ needs.validate.outputs.legacy_pin_artifact_name }}
+          LEGACY_CODE_REVISION: ${{ needs.validate.outputs.legacy_pin_code_revision }}
+          LEGACY_ARTIFACT_DIGEST: ${{ needs.validate.outputs.legacy_pin_artifact_digest }}
         shell: bash
         run: |
           set -euo pipefail

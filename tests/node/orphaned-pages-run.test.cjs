@@ -4,7 +4,9 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
   BUILD_FEED_WORKFLOW,
+  BUILD_FEED_WORKFLOW_ID,
   classifyOrphanedUnstarted,
+  confirmCancelledOrphanedUnstarted,
   confirmTerminalAfterCancelConflict,
   handleCancelServerError,
   revalidateOrphanedUnstarted,
@@ -149,6 +151,37 @@ test("quarantines only a disabled, unstarted, old queued build after both server
 
 test("production ghost metadata qualifies without a SHA-level deployment lookup", () => {
   const {liveRun, responses, run} = fixture();
+  assert.deepEqual(
+    classifyOrphanedUnstarted({
+      listedRun: run,
+      liveRun,
+      workflowId: BUILD_FEED_WORKFLOW,
+      currentSha: CURRENT_SHA,
+      nowMs: NOW,
+      workflow: responses.workflow,
+      jobs: responses.jobs,
+      artifacts: responses.artifacts,
+      cancelError: serverError(500),
+      forceError: serverError(503),
+    }),
+    {
+      run_id: PRODUCTION_GHOST_RUN_ID,
+      head_sha: OLD_SHA,
+      created_at: CREATED_AT,
+    },
+  );
+});
+
+test("workflow run paths with an @ref suffix normalize to the trusted workflow", () => {
+  const path = `${BUILD_FEED_WORKFLOW}@refs/heads/main`;
+  const {liveRun, responses, run} = fixture({
+    run: {path},
+    responses: {
+      workflow: {
+        data: {path, state: "disabled_manually"},
+      },
+    },
+  });
   assert.deepEqual(
     classifyOrphanedUnstarted({
       listedRun: run,
@@ -373,6 +406,76 @@ test("quarantined runs are fail-closed if they start, gain jobs, or their workfl
           nowMs: NOW,
         }),
       /changed after quarantine/,
+    );
+  }
+});
+
+test("handoff accepts only a cancelled orphan that remained unstarted", async () => {
+  const cancelled = fixture({
+    liveRun: {
+      status: "completed",
+      conclusion: "cancelled",
+      updated_at: "2026-07-30T11:08:00Z",
+    },
+  });
+  assert.deepEqual(
+    await confirmCancelledOrphanedUnstarted({
+      github: cancelled.github,
+      owner: "owner",
+      repo: "repo",
+      listedRun: cancelled.run,
+      currentSha: CURRENT_SHA,
+    }),
+    {
+      run_id: PRODUCTION_GHOST_RUN_ID,
+      head_sha: OLD_SHA,
+      created_at: CREATED_AT,
+    },
+  );
+  const workflowCall = cancelled.calls.find(([name]) => name === "workflow");
+  assert.equal(workflowCall[1].workflow_id, BUILD_FEED_WORKFLOW_ID);
+
+  for (const changed of [
+    fixture({
+      liveRun: {
+        status: "completed",
+        conclusion: "success",
+        updated_at: "2026-07-30T11:08:00Z",
+      },
+    }),
+    fixture({
+      liveRun: {
+        status: "completed",
+        conclusion: "cancelled",
+        updated_at: "2026-07-30T11:08:00Z",
+      },
+      responses: {
+        jobs: {data: {total_count: 1, jobs: [{id: 7}]}},
+      },
+    }),
+    fixture({
+      liveRun: {
+        status: "completed",
+        conclusion: "cancelled",
+        updated_at: "2026-07-30T11:08:00Z",
+      },
+      responses: {
+        artifacts: {
+          data: {total_count: 1, artifacts: [{id: 8}]},
+        },
+      },
+    }),
+  ]) {
+    await assert.rejects(
+      () =>
+        confirmCancelledOrphanedUnstarted({
+          github: changed.github,
+          owner: "owner",
+          repo: "repo",
+          listedRun: changed.run,
+          currentSha: CURRENT_SHA,
+        }),
+      /did not remain unstarted/,
     );
   }
 });

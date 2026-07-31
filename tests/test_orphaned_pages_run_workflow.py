@@ -8,6 +8,12 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "global-alpha-expedited-preparation.yml"
+CUTOVER_WORKFLOW = (
+    ROOT / ".github" / "workflows" / "governance-expedited-cutover.yml"
+)
+HANDOFF_WORKFLOW = (
+    ROOT / ".github" / "workflows" / "governance-expedited-handoff.yml"
+)
 CLASSIFIER = ROOT / ".github" / "scripts" / "orphaned-pages-run.cjs"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 PACKAGE = ROOT / "package.json"
@@ -89,7 +95,7 @@ def test_orphan_drain_only_excludes_qualified_ids_on_later_scans() -> None:
 def test_classifier_proves_the_run_never_started_without_sha_deployments() -> None:
     classifier = CLASSIFIER.read_text(encoding="utf-8")
     for contract in (
-        'liveRun.path !== BUILD_FEED_WORKFLOW',
+        "workflowPath(liveRun.path) !== BUILD_FEED_WORKFLOW",
         'liveRun.status !== "queued"',
         "liveRun.run_attempt !== 1",
         "liveRun.run_started_at !== createdAt",
@@ -150,3 +156,26 @@ def test_orphan_classifier_runs_in_the_standard_ci_job() -> None:
             "run": "npm run test:orphaned-pages-run",
         }
     ]
+
+
+def test_same_narrow_classifier_is_reused_at_cutover_and_handoff() -> None:
+    cutover = CUTOVER_WORKFLOW.read_text(encoding="utf-8")
+    handoff = HANDOFF_WORKFLOW.read_text(encoding="utf-8")
+    for workflow in (cutover, handoff):
+        assert "./.github/scripts/orphaned-pages-run.cjs" in workflow
+        assert "revalidateOrphanedUnstarted" in workflow
+        assert "30535379482" not in workflow
+    assert "handleCancelServerError" in cutover
+    assert "cancelWorkflowRun" in cutover
+    assert "forceCancelWorkflowRun" in cutover
+    assert "cancelWorkflowRun" not in handoff
+    assert "forceCancelWorkflowRun" not in handoff
+    assert "confirmCancelledOrphanedUnstarted" in handoff
+    assert (
+        "global-alpha-expedited-cutover-pages-drain-"
+        "${{ github.run_id }}-${{ github.run_attempt }}"
+    ) in cutover
+    assert (
+        "global-alpha-expedited-cutover-pages-drain-${runId}-${runAttempt}"
+        in handoff
+    )

@@ -147,18 +147,20 @@ def test_cutover_uses_same_sha_protected_evidence_and_pages_artifacts() -> None:
     )
     assert "python -m curator.legacy_feed_compat verify" in compatibility["run"]
     assert compatibility["env"] == {
-        "LEGACY_RUN_ID": "${{ vars.LEGACY_ROLLBACK_RUN_ID }}",
+        "LEGACY_RUN_ID": "${{ steps.legacy_recovery.outputs.pin_run_id }}",
         "LEGACY_ARTIFACT_ID": "${{ steps.recovery_bundle.outputs.source_artifact_id }}",
-        "LEGACY_ARTIFACT_NAME": "${{ vars.LEGACY_ROLLBACK_ARTIFACT_NAME }}",
-        "LEGACY_CODE_REVISION": "${{ vars.LEGACY_ROLLBACK_CODE_REVISION }}",
-        "LEGACY_ARTIFACT_DIGEST": "${{ vars.LEGACY_ROLLBACK_ARTIFACT_DIGEST }}",
+        "LEGACY_ARTIFACT_NAME": "${{ steps.legacy_recovery.outputs.pin_artifact_name }}",
+        "LEGACY_CODE_REVISION": "${{ steps.legacy_recovery.outputs.pin_code_revision }}",
+        "LEGACY_ARTIFACT_DIGEST": "${{ steps.legacy_recovery.outputs.pin_artifact_digest }}",
     }
     carry = next(
         step
         for step in validate["steps"]
         if step["name"] == "Preserve verified legacy recovery for cutover and rollback"
     )
-    assert carry["with"]["name"] == "legacy-recovery-carry-forward-v2"
+    assert carry["with"]["name"] == (
+        "${{ steps.legacy_recovery.outputs.carry_artifact_name }}"
+    )
     assert carry["with"]["retention-days"] == "90"
     config = next(
         step
@@ -405,6 +407,18 @@ def test_rollback_closes_immediately_and_rechecks_before_legacy_deployment() -> 
     close = payload["jobs"]["close"]
     assert close["environment"]["name"] == "governance-release"
     assert close["permissions"] == {"actions": "write", "contents": "read"}
+    assert close["outputs"] == {
+        "legacy_pin_run_id": "${{ steps.legacy_recovery.outputs.pin_run_id }}",
+        "legacy_pin_artifact_name": (
+            "${{ steps.legacy_recovery.outputs.pin_artifact_name }}"
+        ),
+        "legacy_pin_code_revision": (
+            "${{ steps.legacy_recovery.outputs.pin_code_revision }}"
+        ),
+        "legacy_pin_artifact_digest": (
+            "${{ steps.legacy_recovery.outputs.pin_artifact_digest }}"
+        ),
+    }
     assert "Cancel stale Pages producer runs before rollback deployment" in text
     assert "LEGACY_ROLLBACK_RUN_ID" in text
     assert "LEGACY_ROLLBACK_ARTIFACT_NAME" in text
@@ -415,6 +429,9 @@ def test_rollback_closes_immediately_and_rechecks_before_legacy_deployment() -> 
         encoding="utf-8"
     )
     assert "pinned legacy artifact digest has changed" in resolver
+    assert "legacy-recovery-carry-forward-v3" in resolver
+    assert "expectedArtifactName: expectedCarryArtifactName" in resolver
+    assert "if (!carry)" in resolver
     close_names = step_names(close)
     assert "Prepare or verify rollback recovery bundle before deployment lock" in close_names
     input_index = close_names.index(
@@ -454,6 +471,21 @@ def test_rollback_closes_immediately_and_rechecks_before_legacy_deployment() -> 
     assert any(step.get("uses") == "actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128" for step in deploy["steps"])
     deploy_names = step_names(deploy)
     validate_index = deploy_names.index("Validate legacy artifact without executing its contents")
+    validate = deploy["steps"][validate_index]
+    assert validate["env"]["LEGACY_RUN_ID"] == (
+        "${{ needs.close.outputs.legacy_pin_run_id }}"
+    )
+    assert validate["env"]["LEGACY_ARTIFACT_DIGEST"] == (
+        "${{ needs.close.outputs.legacy_pin_artifact_digest }}"
+    )
+    distribution = next(
+        step
+        for step in deploy["steps"]
+        if step["name"] == "Record legacy Pages distribution outcome"
+    )
+    assert distribution["env"]["DISTRIBUTION_BUILD_SHA"] == (
+        "${{ needs.close.outputs.legacy_pin_code_revision }}"
+    )
     close_index = deploy_names.index(
         "Re-close v2 then v1 inside Pages deployment lock"
     )

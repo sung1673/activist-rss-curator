@@ -64,6 +64,9 @@ PUBLIC_SOURCE_STATUSES = frozenset(
         "redistribution_blocked",
         "excluded_source",
         "stale",
+        "delayed",
+        "blocked_identity",
+        "blocked_policy_activity",
         "coverage_unavailable",
     }
 )

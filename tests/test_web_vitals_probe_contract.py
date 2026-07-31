@@ -19,6 +19,7 @@ def test_probe_uses_real_mobile_event_timing_without_secret_urls() -> None:
     assert 'install("layout-shift"' in source
     assert 'install("event"' in source
     assert "entry.interactionId > 0" in source
+    assert '.mobile-bottom-nav [data-nav="${destination}"]:visible' in source
     assert ".click({ timeout: 10_000 })" in source
     assert 'source: "first_party"' in source
     assert "sessionStorage.setItem(key, token)" in source
