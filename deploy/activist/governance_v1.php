@@ -7958,10 +7958,12 @@ function v1_dart_identity_change_document_matches(
     array $submitted,
     bool $allowCorrectionReplay = false
 ): bool {
-    if (!empty($submitted['is_cancelled'])
-        || ($allowCorrectionReplay
-            ? empty($submitted['is_correction'])
-            : !empty($submitted['is_correction']))) {
+    if (!empty($submitted['is_cancelled'])) {
+        return false;
+    }
+    if (array_key_exists('is_correction',$submitted)
+        && (!is_bool($submitted['is_correction'])
+            || $submitted['is_correction'] !== $allowCorrectionReplay)) {
         return false;
     }
     $sourceClass = trim((string)v1_first(
@@ -8075,6 +8077,19 @@ function v1_dart_identity_change_document_matches(
         return false;
     }
     $submittedPayload = $submitted;
+    foreach (array(&$storedPayload,&$submittedPayload) as &$documentPayload) {
+        if (array_key_exists('is_correction',$documentPayload)
+            && (!is_bool($documentPayload['is_correction'])
+                || $documentPayload['is_correction']
+                    !== $allowCorrectionReplay)) {
+            return false;
+        }
+        // Older exact DART receipts may omit this redundant document flag.
+        // The already-validated reviewed event is authoritative, so compare
+        // both immutable payloads with the same strict boolean representation.
+        $documentPayload['is_correction'] = $allowCorrectionReplay;
+    }
+    unset($documentPayload);
     unset($storedPayload['retrieved_at'],$submittedPayload['retrieved_at']);
     if ($allowCorrectionReplay
         && (string)($storedPayload['correction_link_status'] ?? '')

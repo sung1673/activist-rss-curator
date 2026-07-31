@@ -2008,6 +2008,33 @@ def test_reviewed_dart_event_replay_is_an_exact_read_only_ack():
     assert "$submittedIdentityDeadlineAt !== $canonicalDeadlineAt" in helpers
     assert "array_key_exists('event_link_status',$storedPayload)" in helpers
     assert "($isCorrection ? 'corrected' : 'official')" in helpers
+    document_guard = helpers[
+        helpers.index("function v1_dart_identity_change_document_matches("):
+        helpers.index(
+            "function v1_dart_reviewed_company_replay_matches(",
+            helpers.index("function v1_dart_identity_change_document_matches("),
+        )
+    ]
+    assert "if (!empty($submitted['is_cancelled']))" in document_guard
+    assert "array_key_exists('is_correction',$submitted)" in document_guard
+    assert "!is_bool($submitted['is_correction'])" in document_guard
+    assert (
+        "$submitted['is_correction'] !== $allowCorrectionReplay"
+        in document_guard
+    )
+    assert "foreach (array(&$storedPayload,&$submittedPayload)" in document_guard
+    assert (
+        "$documentPayload['is_correction'] = $allowCorrectionReplay"
+        in document_guard
+    )
+    assert "!is_bool($documentPayload['is_correction'])" in document_guard
+    assert (
+        "$documentPayload['is_correction']\n"
+        "                    !== $allowCorrectionReplay"
+        in document_guard
+    )
+    assert "? empty($submitted['is_correction'])" not in document_guard
+    assert ": !empty($submitted['is_correction'])" not in document_guard
     assert "$canonicalSubmittedEvent['event_link_status']" in helpers
     assert "v1_followup_event_replay_payload_matches(" in helpers
     assert "$storedPayload," in helpers

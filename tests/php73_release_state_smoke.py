@@ -3050,12 +3050,19 @@ def exercise_event_identity_datetime_storage(
         reviewed_ordinary_lifecycle_before == "0",
         "reviewed ordinary fixture unexpectedly has lifecycle writes",
     )
-    for replay_number in (1, 2):
+    reviewed_ordinary_document_without_correction_flag = dict(
+        reviewed_ordinary_document
+    )
+    reviewed_ordinary_document_without_correction_flag.pop("is_correction")
+    for replay_label, replay_document in (
+        ("explicit_false", reviewed_ordinary_document),
+        ("omitted", reviewed_ordinary_document_without_correction_flag),
+    ):
         reviewed_ordinary_ack = request_hmac_action(
             base_url,
             "upsert_governance_snapshot",
             followup_payload(
-                reviewed_ordinary_document,
+                replay_document,
                 reviewed_ordinary_event,
             ),
             expected_status=200,
@@ -3092,7 +3099,88 @@ def exercise_event_identity_datetime_storage(
                 f"WHERE resolved_event_id='{reviewed_ordinary_event_id}'",
             )
             == reviewed_ordinary_lifecycle_before,
-            f"reviewed ordinary ACK {replay_number} changed canonical state",
+            f"reviewed ordinary ACK {replay_label} changed canonical state",
+        )
+
+    reviewed_ordinary_payload_hex = mysql_execute(
+        mysql_container_id,
+        "SELECT HEX(payload_json) FROM ci_documents "
+        f"WHERE document_id='{reviewed_ordinary_document_id}'",
+    )
+    require(
+        reviewed_ordinary_payload_hex != "",
+        "reviewed ordinary document payload fixture is missing",
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_documents SET "
+        "payload_json=JSON_REMOVE(payload_json,'$.is_correction') "
+        f"WHERE document_id='{reviewed_ordinary_document_id}';",
+    )
+    reviewed_ordinary_missing_flag_before = (
+        reviewed_ordinary_canonical_signature()
+    )
+    for replay_label, replay_document in (
+        ("omitted", reviewed_ordinary_document_without_correction_flag),
+        ("explicit_false", reviewed_ordinary_document),
+    ):
+        reviewed_ordinary_missing_flag_ack = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(replay_document, reviewed_ordinary_event),
+            expected_status=200,
+        )
+        require(
+            reviewed_ordinary_missing_flag_ack.get("ok") is True
+            and reviewed_ordinary_canonical_signature()
+            == reviewed_ordinary_missing_flag_before,
+            "reviewed ordinary stored-omitted document flag with "
+            f"{replay_label} submission was not a read-only ACK",
+        )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_documents SET "
+        f"payload_json=UNHEX('{reviewed_ordinary_payload_hex}') "
+        f"WHERE document_id='{reviewed_ordinary_document_id}';",
+    )
+    require(
+        reviewed_ordinary_canonical_signature() == reviewed_ordinary_before,
+        "reviewed ordinary fixture did not restore its strict false flag",
+    )
+    for stored_correction_json in ('\"false\"', "true"):
+        mysql_execute(
+            mysql_container_id,
+            "UPDATE ci_documents SET payload_json=JSON_SET("
+            "payload_json,'$.is_correction',JSON_EXTRACT("
+            f"'{stored_correction_json}','$')) "
+            f"WHERE document_id='{reviewed_ordinary_document_id}';",
+        )
+        rejected_stored_flag = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(
+                reviewed_ordinary_document_without_correction_flag,
+                reviewed_ordinary_event,
+            ),
+            expected_status=409,
+        )
+        require(
+            error_code(rejected_stored_flag)
+            == "followup_event_identity_conflict",
+            "stored ordinary correction flag type/value mismatch entered "
+            f"the ACK path: {rejected_stored_flag!r}",
+        )
+        mysql_execute(
+            mysql_container_id,
+            "UPDATE ci_documents SET "
+            f"payload_json=UNHEX('{reviewed_ordinary_payload_hex}') "
+            f"WHERE document_id='{reviewed_ordinary_document_id}';",
+        )
+        require(
+            reviewed_ordinary_canonical_signature()
+            == reviewed_ordinary_before,
+            "reviewed ordinary fixture did not recover after stored flag "
+            "rejection",
         )
 
     reviewed_company_mutations = (
@@ -3244,6 +3332,25 @@ def exercise_event_identity_datetime_storage(
         **reviewed_ordinary_document,
         "content_hash": "e" * 64,
     }
+    ordinary_mutated_url_document = {
+        **reviewed_ordinary_document,
+        "original_url": "https://example.com/dart/mutated-reviewed-receipt",
+    }
+    ordinary_mutated_source_document = {
+        **reviewed_ordinary_document,
+        # Keep the approved DART right so this reaches the reviewed-receipt
+        # identity comparison instead of being rejected earlier by the
+        # independent source-right guard.
+        "source": "dart-mutated",
+    }
+    ordinary_explicit_correction_document = {
+        **reviewed_ordinary_document,
+        "is_correction": True,
+    }
+    ordinary_string_false_correction_document = {
+        **reviewed_ordinary_document,
+        "is_correction": "false",
+    }
     ordinary_mutated_actor_id = "actor:ci-reviewed-ordinary-mutated"
     ordinary_mutated_actor = {
         **reviewed_ordinary_event,
@@ -3313,6 +3420,26 @@ def exercise_event_identity_datetime_storage(
             reviewed_ordinary_event,
         ),
         (
+            "document_url",
+            ordinary_mutated_url_document,
+            reviewed_ordinary_event,
+        ),
+        (
+            "document_source",
+            ordinary_mutated_source_document,
+            reviewed_ordinary_event,
+        ),
+        (
+            "document_correction_flag",
+            ordinary_explicit_correction_document,
+            reviewed_ordinary_event,
+        ),
+        (
+            "document_correction_flag_string",
+            ordinary_string_false_correction_document,
+            reviewed_ordinary_event,
+        ),
+        (
             "document_id",
             ordinary_mutated_id_document,
             ordinary_mutated_id_event,
@@ -3371,6 +3498,52 @@ def exercise_event_identity_datetime_storage(
             == reviewed_ordinary_lifecycle_before,
             f"{label} mutation changed canonical reviewed ordinary state",
         )
+    rejected_ordinary_owner_event_id = (
+        "event:ci-reviewed-ordinary-owner-mismatch"
+    )
+    ordinary_owner_mismatch_event = {
+        **reviewed_ordinary_event,
+        "event_id": rejected_ordinary_owner_event_id,
+        "event_actor": {
+            **reviewed_ordinary_event["event_actor"],
+            "event_id": rejected_ordinary_owner_event_id,
+        },
+    }
+    ordinary_owner_mismatch_payload = followup_payload(
+        reviewed_ordinary_document,
+        reviewed_ordinary_event,
+    )
+    ordinary_owner_mismatch_payload["events"].append(
+        ordinary_owner_mismatch_event
+    )
+    rejected_owner_replay = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        ordinary_owner_mismatch_payload,
+        expected_status=409,
+    )
+    require(
+        error_code(rejected_owner_replay)
+        == "followup_event_identity_conflict",
+        "shared document owner mutation entered the reviewed ordinary ACK "
+        f"path: {rejected_owner_replay!r}",
+    )
+    require(
+        reviewed_ordinary_canonical_signature()
+        == reviewed_ordinary_before
+        and followup_row_signature(
+            reviewed_ordinary_event_id,
+            reviewed_ordinary_document_id,
+        )
+        == reviewed_ordinary_rows_before
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_governance_events "
+            f"WHERE event_id='{rejected_ordinary_owner_event_id}'",
+        )
+        == "0",
+        "shared document owner mutation changed reviewed state",
+    )
     require(
         mysql_execute(
             mysql_container_id,
@@ -3606,10 +3779,15 @@ def exercise_event_identity_datetime_storage(
         reviewed_lifecycle_before == "0",
         "reviewed correction fixture unexpectedly has lifecycle writes",
     )
+    reviewed_document_without_correction_flag = dict(reviewed_document)
+    reviewed_document_without_correction_flag.pop("is_correction")
     reviewed_read_only_ack = request_hmac_action(
         base_url,
         "upsert_governance_snapshot",
-        followup_payload(reviewed_document, reviewed_event),
+        followup_payload(
+            reviewed_document,
+            reviewed_event,
+        ),
         expected_status=200,
     )
     require(
@@ -3646,7 +3824,10 @@ def exercise_event_identity_datetime_storage(
     reviewed_correction_replay = request_hmac_action(
         base_url,
         "upsert_governance_snapshot",
-        followup_payload(reviewed_document, reviewed_event),
+        followup_payload(
+            reviewed_document_without_correction_flag,
+            reviewed_event,
+        ),
         expected_status=200,
     )
     require(
@@ -3670,6 +3851,86 @@ def exercise_event_identity_datetime_storage(
         == reviewed_lifecycle_before,
         "reviewed correction replay was not idempotent",
     )
+    reviewed_correction_payload_hex = mysql_execute(
+        mysql_container_id,
+        "SELECT HEX(payload_json) FROM ci_documents "
+        f"WHERE document_id='{reviewed_correction_document_id}'",
+    )
+    require(
+        reviewed_correction_payload_hex != "",
+        "reviewed correction document payload fixture is missing",
+    )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_documents SET "
+        "payload_json=JSON_REMOVE(payload_json,'$.is_correction') "
+        f"WHERE document_id='{reviewed_correction_document_id}';",
+    )
+    reviewed_correction_missing_flag_before = (
+        reviewed_correction_canonical_signature()
+    )
+    for replay_label, replay_document in (
+        ("omitted", reviewed_document_without_correction_flag),
+        ("explicit_true", reviewed_document),
+    ):
+        reviewed_correction_missing_flag_ack = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(replay_document, reviewed_event),
+            expected_status=200,
+        )
+        require(
+            reviewed_correction_missing_flag_ack.get("ok") is True
+            and reviewed_correction_canonical_signature()
+            == reviewed_correction_missing_flag_before,
+            "reviewed correction stored-omitted document flag with "
+            f"{replay_label} submission was not a read-only ACK",
+        )
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_documents SET "
+        f"payload_json=UNHEX('{reviewed_correction_payload_hex}') "
+        f"WHERE document_id='{reviewed_correction_document_id}';",
+    )
+    require(
+        reviewed_correction_canonical_signature() == reviewed_canonical_before,
+        "reviewed correction fixture did not restore its strict true flag",
+    )
+    for stored_correction_json in ('\"true\"', "false"):
+        mysql_execute(
+            mysql_container_id,
+            "UPDATE ci_documents SET payload_json=JSON_SET("
+            "payload_json,'$.is_correction',JSON_EXTRACT("
+            f"'{stored_correction_json}','$')) "
+            f"WHERE document_id='{reviewed_correction_document_id}';",
+        )
+        rejected_stored_flag = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(
+                reviewed_document_without_correction_flag,
+                reviewed_event,
+            ),
+            expected_status=409,
+        )
+        require(
+            error_code(rejected_stored_flag)
+            == "followup_event_identity_conflict",
+            "stored correction flag type/value mismatch entered the ACK "
+            f"path: {rejected_stored_flag!r}",
+        )
+        mysql_execute(
+            mysql_container_id,
+            "UPDATE ci_documents SET "
+            f"payload_json=UNHEX('{reviewed_correction_payload_hex}') "
+            f"WHERE document_id='{reviewed_correction_document_id}';",
+        )
+        require(
+            reviewed_correction_canonical_signature()
+            == reviewed_canonical_before,
+            "reviewed correction fixture did not recover after stored flag "
+            "rejection",
+        )
 
     mutated_summary_event = {
         **reviewed_event,
@@ -3682,6 +3943,14 @@ def exercise_event_identity_datetime_storage(
     mutated_hash_document = {
         **reviewed_document,
         "content_hash": "f" * 64,
+    }
+    explicit_ordinary_document = {
+        **reviewed_document,
+        "is_correction": False,
+    }
+    numeric_correction_document = {
+        **reviewed_document,
+        "is_correction": 0,
     }
     mutated_actor_id = "actor:ci-reviewed-correction-mutated"
     mutated_actor_event = {
@@ -3749,6 +4018,16 @@ def exercise_event_identity_datetime_storage(
         (
             "document_hash",
             mutated_hash_document,
+            reviewed_event,
+        ),
+        (
+            "document_correction_flag",
+            explicit_ordinary_document,
+            reviewed_event,
+        ),
+        (
+            "document_correction_flag_numeric",
+            numeric_correction_document,
             reviewed_event,
         ),
         (
@@ -3825,7 +4104,8 @@ def exercise_event_identity_datetime_storage(
     event_ids = (
         f"'{date_key}','{midnight_key}','{incomplete_correction_event_id}',"
         f"'{incomplete_cancellation_event_id}','{reviewed_ordinary_event_id}',"
-        f"'{rejected_ordinary_event_id}','{reviewed_correction_event_id}',"
+        f"'{rejected_ordinary_event_id}','{rejected_ordinary_owner_event_id}',"
+        f"'{reviewed_correction_event_id}',"
         f"'{rejected_correction_event_id}'"
     )
     document_ids = (
