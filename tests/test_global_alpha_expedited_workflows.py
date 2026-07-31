@@ -406,9 +406,39 @@ def test_expedited_cutover_rechecks_gate_pages_and_preview() -> None:
     preflight = payload["jobs"]["preflight"]
     assert preflight["environment"]["name"] == "governance-runtime"
     assert preflight["permissions"]["actions"] == "write"
-    assert "Cancel stale Pages producers before protected deployment" in step_names(
+    assert "Cancel, drain, and audit stale Pages producers" in step_names(
         preflight
     )
+    drain = next(
+        step
+        for step in preflight["steps"]
+        if step["name"] == "Cancel, drain, and audit stale Pages producers"
+    )
+    for contract in (
+        "./.github/scripts/orphaned-pages-run.cjs",
+        "handleCancelServerError",
+        "revalidateOrphanedUnstarted",
+        "cutover-pages-producer-drain-audit.json",
+        "orphaned_unstarted: auditEntries",
+        "left - right",
+    ):
+        assert contract in drain["with"]["script"]
+    assert "30535379482" not in drain["with"]["script"]
+    drain_upload = next(
+        step
+        for step in preflight["steps"]
+        if step["name"] == "Upload exact Pages producer drain audit"
+    )
+    assert drain_upload["with"] == {
+        "name": (
+            "global-alpha-expedited-cutover-pages-drain-"
+            "${{ github.run_id }}-${{ github.run_attempt }}"
+        ),
+        "path": "cutover-pages-producer-drain-audit.json",
+        "if-no-files-found": "error",
+        "retention-days": "90",
+        "compression-level": "9",
+    }
     source_gate = next(
         step
         for step in preflight["steps"]

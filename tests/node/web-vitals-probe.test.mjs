@@ -14,6 +14,7 @@ import {
   chunkObservations,
   deployedConfigUrl,
   governanceRouteUrl,
+  interactionDestination,
   kstDate,
   observerInitScript,
   parseDeployedConfig,
@@ -79,6 +80,23 @@ test("route URLs contain only the SPA fragment and never a preview credential", 
     assert.equal(url.hash, `#${route}`);
     assert.equal(url.href.includes("preview"), false);
   }
+});
+
+
+test("mobile journeys choose a bottom-navigation destination", () => {
+  assert.deepEqual(
+    Object.fromEntries(ROUTE_TEMPLATES.map((route) => [
+      route,
+      interactionDestination(route),
+    ])),
+    {
+      "/today": "live",
+      "/events": "calendar",
+      "/issuers": "calendar",
+      "/calendar": "today",
+    },
+  );
+  assert.throws(() => interactionDestination("/unsupported"), ProbeError);
 });
 
 

@@ -925,6 +925,12 @@ def test_daily_legacy_recovery_is_digest_pinned_and_rolled_only_from_trusted_run
     assert "python -m curator.legacy_recovery_bundle prepare" in prepare["run"]
     assert "python -m curator.legacy_recovery_bundle verify" in prepare["run"]
     assert "--source-artifact-digest \"$LEGACY_ARTIFACT_DIGEST\"" in prepare["run"]
+    assert prepare["env"]["LEGACY_RUN_ID"] == (
+        "${{ steps.legacy_recovery.outputs.pin_run_id }}"
+    )
+    assert prepare["env"]["LEGACY_ARTIFACT_DIGEST"] == (
+        "${{ steps.legacy_recovery.outputs.pin_artifact_digest }}"
+    )
     carry_download = next(
         step for step in steps if step["name"] == "Download rolling legacy recovery bundle"
     )
@@ -934,7 +940,9 @@ def test_daily_legacy_recovery_is_digest_pinned_and_rolled_only_from_trusted_run
         for step in steps
         if step["name"] == "Refresh verified legacy recovery bundle retention"
     )
-    assert carry_upload["with"]["name"] == "legacy-recovery-carry-forward-v2"
+    assert carry_upload["with"]["name"] == (
+        "${{ steps.legacy_recovery.outputs.carry_artifact_name }}"
+    )
     assert carry_upload["with"]["retention-days"] == "90"
 
 

@@ -903,6 +903,40 @@ test("market filters, URL state, keyboard shortcuts, and responsive terminal lay
   await expectNoCriticalAccessibilityViolations(page);
 });
 
+test("mobile Web Vitals journeys use one visible bottom-navigation target", async ({ page }, testInfo) => {
+  test.skip(
+    !testInfo.project.name.includes("mobile"),
+    "The production Web Vitals probe uses the Pixel 5 mobile layout.",
+  );
+  const journeys = [
+    ["/today", "live", "/today", "live"],
+    ["/events", "calendar", "/calendar", null],
+    ["/issuers", "calendar", "/calendar", null],
+    ["/calendar", "today", "/today", null],
+  ];
+  for (const [route, destination, expectedRoute, expectedView] of journeys) {
+    await page.goto(`#${route}`);
+    await expect(page.locator("#app h1")).toBeVisible();
+    const target = page.locator(
+      `.mobile-bottom-nav [data-nav="${destination}"]:visible`,
+    );
+    await expect(target).toHaveCount(1);
+    await expect(target).toBeVisible();
+    await target.click();
+    await expect.poll(() => page.evaluate(() => {
+      const [routePath, query = ""] = window.location.hash.slice(1).split("?", 2);
+      const parameters = new URLSearchParams(query);
+      return {
+        route: routePath,
+        view: parameters.get("view"),
+      };
+    })).toEqual({
+      route: expectedRoute,
+      view: expectedView,
+    });
+  }
+});
+
 test("v2 unsupported endpoints gracefully fall back to the public v1 contracts", async ({ page }) => {
   const requests = [];
   page.on("request", (request) => {

@@ -101,6 +101,8 @@ jobs:
     outputs:
       recovery_artifact_id: ${{ steps.recovery.outputs.recovery_artifact_id }}
       recovery_artifact_digest: ${{ steps.recovery.outputs.recovery_artifact_digest }}
+      drain_artifact_id: ${{ steps.recovery.outputs.drain_artifact_id }}
+      drain_artifact_digest: ${{ steps.recovery.outputs.drain_artifact_digest }}
     steps:
       - name: Resolve exact cutover-carried recovery artifact
         id: recovery
@@ -115,7 +117,10 @@ jobs:
             const runAttempt = Number(process.env.CUTOVER_RUN_ATTEMPT);
             const recoveryName =
               `global-alpha-expedited-cutover-recovery-${runId}-${runAttempt}`;
+            const drainName =
+              `global-alpha-expedited-cutover-pages-drain-${runId}-${runAttempt}`;
             let recovery = [];
+            let drain = [];
             for (let attempt = 0; attempt < 3; attempt += 1) {
               const artifacts = await github.paginate(
                 github.rest.actions.listWorkflowRunArtifacts,
@@ -124,7 +129,10 @@ jobs:
               recovery = artifacts.filter(
                 (item) => item.name === recoveryName && !item.expired,
               );
-              if (recovery.length === 1) {
+              drain = artifacts.filter(
+                (item) => item.name === drainName && !item.expired,
+              );
+              if (recovery.length === 1 && drain.length === 1) {
                 break;
               }
               if (attempt < 2) {
@@ -142,10 +150,26 @@ jobs:
               );
               return;
             }
+            if (
+              drain.length !== 1 ||
+              !/^sha256:[0-9a-f]{64}$/.test(
+                String(drain[0].digest || "").toLowerCase(),
+              )
+            ) {
+              core.setFailed(
+                "The successful cutover is missing its exact Pages drain audit.",
+              );
+              return;
+            }
             core.setOutput("recovery_artifact_id", String(recovery[0].id));
             core.setOutput(
               "recovery_artifact_digest",
               String(recovery[0].digest).toLowerCase(),
+            );
+            core.setOutput("drain_artifact_id", String(drain[0].id));
+            core.setOutput(
+              "drain_artifact_digest",
+              String(drain[0].digest).toLowerCase(),
             );
 
   verify:
@@ -163,37 +187,204 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
+      - name: Download exact cutover Pages producer drain audit
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.resolve_recovery.outputs.drain_artifact_id }}
+          path: cutover-pages-drain-audit
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.source.outputs.cutover_run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
       - name: Verify final Pages producers are idle
+        id: producer_idle
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EXPECTED_SHA: ${{ github.sha }}
+          CUTOVER_RUN_ID: ${{ needs.source.outputs.cutover_run_id }}
+          CUTOVER_RUN_ATTEMPT: ${{ needs.source.outputs.cutover_run_attempt }}
+          DRAIN_ARTIFACT_ID: ${{ needs.resolve_recovery.outputs.drain_artifact_id }}
+          DRAIN_ARTIFACT_DIGEST: ${{ needs.resolve_recovery.outputs.drain_artifact_digest }}
         with:
           script: |
+            const fs = require("node:fs");
+            const orphanClassifier = require(
+              "./.github/scripts/orphaned-pages-run.cjs",
+            );
             const {owner, repo} = context.repo;
+            const auditPath =
+              "cutover-pages-drain-audit/cutover-pages-producer-drain-audit.json";
+            const audit = JSON.parse(fs.readFileSync(auditPath, "utf8"));
+            const expectedRunId = Number(process.env.CUTOVER_RUN_ID);
+            const expectedRunAttempt = Number(process.env.CUTOVER_RUN_ATTEMPT);
+            const expectedSha = process.env.EXPECTED_SHA;
+            if (
+              audit.schema_version !== 1 ||
+              audit.kind !==
+                "bside-global-alpha-expedited-cutover-pages-producer-drain-audit" ||
+              audit.code_revision !== expectedSha ||
+              audit.workflow !==
+                ".github/workflows/governance-expedited-cutover.yml" ||
+              audit.cutover_run_id !== expectedRunId ||
+              audit.cutover_run_attempt !== expectedRunAttempt ||
+              !Array.isArray(audit.orphaned_unstarted) ||
+              !/^sha256:[0-9a-f]{64}$/.test(
+                process.env.DRAIN_ARTIFACT_DIGEST,
+              ) ||
+              !/^[1-9][0-9]*$/.test(process.env.DRAIN_ARTIFACT_ID)
+            ) {
+              throw new Error("The cutover Pages producer drain audit is invalid.");
+            }
+            const allowedClassificationFields =
+              ["created_at", "head_sha", "run_id"];
+            const allowedSnapshotFields = [
+              "created_at",
+              "head_sha",
+              "id",
+              "path",
+              "run_attempt",
+              "run_started_at",
+              "status",
+              "updated_at",
+            ];
+            const audited = new Map();
+            for (const entry of audit.orphaned_unstarted) {
+              const classification = entry && entry.classification;
+              const snapshot = entry && entry.snapshot;
+              if (
+                !classification ||
+                !snapshot ||
+                JSON.stringify(Object.keys(classification).sort()) !==
+                  JSON.stringify(allowedClassificationFields) ||
+                JSON.stringify(Object.keys(snapshot).sort()) !==
+                  JSON.stringify(allowedSnapshotFields) ||
+                !Number.isSafeInteger(classification.run_id) ||
+                classification.run_id <= 0 ||
+                classification.run_id !== snapshot.id ||
+                classification.head_sha !== snapshot.head_sha ||
+                classification.created_at !== snapshot.created_at ||
+                orphanClassifier.workflowPath(snapshot.path) !==
+                  ".github/workflows/build-feed.yml" ||
+                snapshot.status !== "queued" ||
+                snapshot.run_attempt !== 1 ||
+                snapshot.head_sha === expectedSha ||
+                !/^[0-9a-f]{40}$/.test(snapshot.head_sha) ||
+                audited.has(snapshot.id)
+              ) {
+                throw new Error("The cutover orphan classification is invalid.");
+              }
+              audited.set(snapshot.id, {classification, snapshot});
+            }
             const activeStatuses = [
               "queued", "in_progress", "waiting", "pending", "requested",
             ];
-            for (const workflowId of [
-              ".github/workflows/build-feed.yml",
-              ".github/workflows/daily.yml",
-            ]) {
+            const activeRuns = new Map();
+            const workflowSpecs = [
+              {
+                id: "build-feed.yml",
+                path: ".github/workflows/build-feed.yml",
+              },
+              {
+                id: "daily.yml",
+                path: ".github/workflows/daily.yml",
+              },
+            ];
+            for (const workflow of workflowSpecs) {
               for (const status of activeStatuses) {
-                const active = await github.rest.actions.listWorkflowRuns({
-                  owner,
-                  repo,
-                  workflow_id: workflowId,
-                  branch: process.env.DEFAULT_BRANCH,
-                  status,
-                  per_page: 1,
-                });
-                if (active.data.total_count > 0) {
-                  core.setFailed(
-                    `${workflowId} still has an active ${status} Pages producer run.`,
-                  );
-                  return;
+                const active = await github.paginate(
+                  github.rest.actions.listWorkflowRuns,
+                  {
+                    owner,
+                    repo,
+                    workflow_id: workflow.id,
+                    branch: process.env.DEFAULT_BRANCH,
+                    status,
+                    per_page: 100,
+                  },
+                );
+                for (const run of active) {
+                  activeRuns.set(run.id, {
+                    run,
+                    workflowId: workflow.path,
+                    status,
+                  });
                 }
               }
             }
+            const activeAudited = new Set();
+            for (const {run, workflowId, status} of activeRuns.values()) {
+              const entry = audited.get(run.id);
+              if (!entry) {
+                throw new Error(
+                  `${workflowId} still has an unaudited active ${status} ` +
+                  `Pages producer run ${run.id}.`,
+                );
+              }
+              const revalidated =
+                await orphanClassifier.revalidateOrphanedUnstarted({
+                  github,
+                  owner,
+                  repo,
+                  listedRun: entry.snapshot,
+                  currentSha: expectedSha,
+                  nowMs: Date.now(),
+                });
+              if (
+                revalidated.run_id !== entry.classification.run_id ||
+                revalidated.head_sha !== entry.classification.head_sha ||
+                revalidated.created_at !== entry.classification.created_at
+              ) {
+                throw new Error(
+                  `Audited Pages producer run ${run.id} changed before handoff.`,
+                );
+              }
+              activeAudited.add(run.id);
+            }
+            for (const [runId] of audited) {
+              if (activeAudited.has(runId)) continue;
+              const entry = audited.get(runId);
+              const cancelled =
+                await orphanClassifier.confirmCancelledOrphanedUnstarted({
+                  github,
+                  owner,
+                  repo,
+                  listedRun: entry.snapshot,
+                  currentSha: expectedSha,
+                });
+              if (
+                cancelled.run_id !== entry.classification.run_id ||
+                cancelled.head_sha !== entry.classification.head_sha ||
+                cancelled.created_at !== entry.classification.created_at
+              ) {
+                throw new Error(
+                  `Audited Pages producer run ${runId} changed before cancellation.`,
+                );
+              }
+            }
+            const classifications = [...audited.values()]
+              .map((entry) => entry.classification)
+              .sort((left, right) => left.run_id - right.run_id);
+            core.setOutput(
+              "orphaned_unstarted_json",
+              JSON.stringify(classifications),
+            );
+            await core.summary
+              .addHeading("Final Pages producer audit", 3)
+              .addCodeBlock(
+                JSON.stringify(
+                  {
+                    artifact_id: Number(process.env.DRAIN_ARTIFACT_ID),
+                    artifact_digest: process.env.DRAIN_ARTIFACT_DIGEST,
+                    orphaned_unstarted: classifications,
+                  },
+                  null,
+                  2,
+                ),
+                "json",
+              )
+              .write();
 
       - name: Verify fresh final repository mode
         shell: bash
@@ -262,17 +453,27 @@ jobs:
         shell: bash
         env:
           CUTOVER_RUN_ID: ${{ needs.source.outputs.cutover_run_id }}
+          CUTOVER_RUN_ATTEMPT: ${{ needs.source.outputs.cutover_run_attempt }}
           HANDOFF_REASON: ${{ inputs.reason }}
+          DRAIN_ARTIFACT_ID: ${{ needs.resolve_recovery.outputs.drain_artifact_id }}
+          DRAIN_ARTIFACT_DIGEST: ${{ needs.resolve_recovery.outputs.drain_artifact_digest }}
+          ORPHANED_UNSTARTED_JSON: ${{ steps.producer_idle.outputs.orphaned_unstarted_json }}
         run: |
           set -euo pipefail
           observed_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          drain_artifact_name="global-alpha-expedited-cutover-pages-drain-${CUTOVER_RUN_ID}-${CUTOVER_RUN_ATTEMPT}"
           jq -n \
             --arg schema_version "1" \
             --arg status "verified" \
             --arg code_revision "$GITHUB_SHA" \
             --arg observed_at "$observed_at" \
             --arg reason "$HANDOFF_REASON" \
+            --arg drain_artifact_name "$drain_artifact_name" \
+            --arg drain_artifact_digest "$DRAIN_ARTIFACT_DIGEST" \
             --argjson cutover_run_id "$CUTOVER_RUN_ID" \
+            --argjson cutover_run_attempt "$CUTOVER_RUN_ATTEMPT" \
+            --argjson drain_artifact_id "$DRAIN_ARTIFACT_ID" \
+            --argjson orphaned_unstarted "$ORPHANED_UNSTARTED_JSON" \
             --argjson handoff_run_id "$GITHUB_RUN_ID" \
             --argjson handoff_run_attempt "$GITHUB_RUN_ATTEMPT" \
             '{
@@ -280,10 +481,17 @@ jobs:
               status:$status,
               code_revision:$code_revision,
               cutover_run_id:$cutover_run_id,
+              cutover_run_attempt:$cutover_run_attempt,
               handoff_run_id:$handoff_run_id,
               handoff_run_attempt:$handoff_run_attempt,
               observed_at:$observed_at,
               reason:$reason,
+              pages_producer_drain_audit:{
+                artifact_id:$drain_artifact_id,
+                artifact_name:$drain_artifact_name,
+                artifact_digest:$drain_artifact_digest,
+                orphaned_unstarted:$orphaned_unstarted
+              },
               repository_mode:{
                 pages_owner:"governance",
                 governance_pipeline_mode:"live",

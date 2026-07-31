@@ -58,6 +58,13 @@ def test_handoff_binds_exact_successful_cutover_and_recovery_artifact() -> None:
     assert "recovery.length !== 1" in resolve_script
     assert "item.name === recoveryName && !item.expired" in resolve_script
     assert "sha256:[0-9a-f]{64}" in resolve_script
+    assert (
+        "global-alpha-expedited-cutover-pages-drain-${runId}-${runAttempt}"
+        in resolve_script
+    )
+    assert "item.name === drainName && !item.expired" in resolve_script
+    assert 'core.setOutput("drain_artifact_id"' in resolve_script
+    assert '"drain_artifact_digest"' in resolve_script
 
 
 def test_handoff_requires_final_mode_before_smoke_and_receipt() -> None:
@@ -71,10 +78,28 @@ def test_handoff_requires_final_mode_before_smoke_and_receipt() -> None:
         ".github/workflows/build-feed.yml",
         ".github/workflows/daily.yml",
         "for (const status of activeStatuses)",
-        "active.data.total_count > 0",
-        "per_page: 1",
+        "./.github/scripts/orphaned-pages-run.cjs",
+        "revalidateOrphanedUnstarted",
+        "confirmCancelledOrphanedUnstarted",
+        "unaudited active",
+        "changed before cancellation",
+        "cutover-pages-producer-drain-audit.json",
     ):
         assert contract in idle_script
+    assert "cancelWorkflowRun" not in idle_script
+    assert "forceCancelWorkflowRun" not in idle_script
+    download = next(
+        step
+        for step in steps
+        if step["name"] == "Download exact cutover Pages producer drain audit"
+    )
+    assert download["with"]["artifact-ids"] == (
+        "${{ needs.resolve_recovery.outputs.drain_artifact_id }}"
+    )
+    assert download["with"]["run-id"] == (
+        "${{ needs.source.outputs.cutover_run_id }}"
+    )
+    assert download["with"]["digest-mismatch"] == "error"
     mode = next(step for step in steps if step["name"] == "Verify fresh final repository mode")
     for contract in (
         '[[ "$PAGES_OWNER" == "governance" ]]',
@@ -111,6 +136,19 @@ def test_handoff_requires_final_mode_before_smoke_and_receipt() -> None:
         "global-alpha-expedited-handoff-${{ github.sha }}"
     )
     assert upload["with"]["retention-days"] == "90"
+    receipt = next(
+        step
+        for step in steps
+        if step["name"] == "Create immutable operator handoff receipt"
+    )
+    for contract in (
+        "DRAIN_ARTIFACT_ID",
+        "DRAIN_ARTIFACT_DIGEST",
+        "ORPHANED_UNSTARTED_JSON",
+        "pages_producer_drain_audit",
+        "orphaned_unstarted:$orphaned_unstarted",
+    ):
+        assert contract in str(receipt)
 
 
 def test_handoff_failure_closes_apis_and_restores_exact_legacy_bytes() -> None:

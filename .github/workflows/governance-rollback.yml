@@ -32,6 +32,11 @@ jobs:
       contents: read
     environment:
       name: governance-release
+    outputs:
+      legacy_pin_run_id: ${{ steps.legacy_recovery.outputs.pin_run_id }}
+      legacy_pin_artifact_name: ${{ steps.legacy_recovery.outputs.pin_artifact_name }}
+      legacy_pin_code_revision: ${{ steps.legacy_recovery.outputs.pin_code_revision }}
+      legacy_pin_artifact_digest: ${{ steps.legacy_recovery.outputs.pin_artifact_digest }}
     steps:
       - name: Checkout rollback verifier
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -152,11 +157,11 @@ jobs:
           LEGACY_SOURCE_MODE: ${{ steps.legacy_recovery.outputs.mode }}
           LEGACY_ARCHIVE_PATH: ${{ runner.temp }}/legacy-recovery-seed.zip
           LEGACY_RECOVERY_ROOT: ${{ runner.temp }}/legacy-recovery-bundle
-          LEGACY_RUN_ID: ${{ vars.LEGACY_ROLLBACK_RUN_ID }}
+          LEGACY_RUN_ID: ${{ steps.legacy_recovery.outputs.pin_run_id }}
           LEGACY_SEED_ARTIFACT_ID: ${{ steps.legacy_recovery.outputs.artifact_id }}
-          LEGACY_ARTIFACT_NAME: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_NAME }}
-          LEGACY_CODE_REVISION: ${{ vars.LEGACY_ROLLBACK_CODE_REVISION }}
-          LEGACY_ARTIFACT_DIGEST: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_DIGEST }}
+          LEGACY_ARTIFACT_NAME: ${{ steps.legacy_recovery.outputs.pin_artifact_name }}
+          LEGACY_CODE_REVISION: ${{ steps.legacy_recovery.outputs.pin_code_revision }}
+          LEGACY_ARTIFACT_DIGEST: ${{ steps.legacy_recovery.outputs.pin_artifact_digest }}
         run: |
           set -euo pipefail
           if [[ "$LEGACY_SOURCE_MODE" == "seed" ]]; then
@@ -225,10 +230,10 @@ jobs:
 
       - name: Validate legacy artifact without executing its contents
         env:
-          LEGACY_RUN_ID: ${{ vars.LEGACY_ROLLBACK_RUN_ID }}
-          LEGACY_ARTIFACT_NAME: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_NAME }}
-          LEGACY_CODE_REVISION: ${{ vars.LEGACY_ROLLBACK_CODE_REVISION }}
-          LEGACY_ARTIFACT_DIGEST: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_DIGEST }}
+          LEGACY_RUN_ID: ${{ needs.close.outputs.legacy_pin_run_id }}
+          LEGACY_ARTIFACT_NAME: ${{ needs.close.outputs.legacy_pin_artifact_name }}
+          LEGACY_CODE_REVISION: ${{ needs.close.outputs.legacy_pin_code_revision }}
+          LEGACY_ARTIFACT_DIGEST: ${{ needs.close.outputs.legacy_pin_artifact_digest }}
         shell: bash
         run: |
           set -euo pipefail
@@ -295,7 +300,7 @@ jobs:
         env:
           BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
           BSIDE_OPS_TOKEN: ${{ secrets.BSIDE_OPS_TOKEN }}
-          DISTRIBUTION_BUILD_SHA: ${{ vars.LEGACY_ROLLBACK_CODE_REVISION }}
+          DISTRIBUTION_BUILD_SHA: ${{ needs.close.outputs.legacy_pin_code_revision }}
           DISTRIBUTION_OBSERVED_AT: ${{ steps.pages_distribution_start.outputs.observed_at }}
           DEPLOYMENT_OUTCOME: ${{ steps.deployment.outcome }}
         shell: bash

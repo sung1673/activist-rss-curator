@@ -292,6 +292,26 @@ def test_optional_jp_gb_coverage_unavailable_does_not_block_global_brief() -> No
     )
 
 
+@pytest.mark.parametrize(
+    "public_status",
+    ("delayed", "blocked_identity", "blocked_policy_activity"),
+)
+def test_api_public_status_variants_are_preserved_fail_closed(
+    public_status: str,
+) -> None:
+    status = _source("US", ready=False, public_ready=False)
+    status["public_status"] = public_status
+    bundle = _bundle(candidates=[], statuses=[status], edition="US")
+    item = bundle["basis"]["source_snapshot"]["items"][0]
+    assert item["public_status"] == public_status
+    assert item["public_ready"] is False
+    assert bundle["basis"]["source_snapshot"]["readiness"]["ready"] is False
+    assert (
+        bundle["approval_template"]["publication"]["empty_reason"]
+        == "coverage_unavailable"
+    )
+
+
 def test_client_uses_separate_editor_and_preview_tokens_and_strict_v2() -> None:
     requests: list[httpx.Request] = []
     event = _event("event:one")

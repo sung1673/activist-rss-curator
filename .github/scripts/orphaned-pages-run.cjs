@@ -1,6 +1,7 @@
 "use strict";
 
 const BUILD_FEED_WORKFLOW = ".github/workflows/build-feed.yml";
+const BUILD_FEED_WORKFLOW_ID = "build-feed.yml";
 const MINIMUM_AGE_MS = 30 * 60 * 1000;
 
 function statusOf(error) {
@@ -46,10 +47,13 @@ function parsedGitHubTimestamp(value) {
   return timestampMs;
 }
 
+function workflowPath(value) {
+  return String(value || "").split("@")[0];
+}
+
 function isSameImmutableRunSnapshot(listedRun, liveRun) {
   const immutableFields = [
     "id",
-    "path",
     "status",
     "head_sha",
     "run_attempt",
@@ -57,8 +61,12 @@ function isSameImmutableRunSnapshot(listedRun, liveRun) {
     "run_started_at",
     "updated_at",
   ];
-  return immutableFields.every(
-    (field) => listedRun && liveRun && listedRun[field] === liveRun[field],
+  return (
+    workflowPath(listedRun && listedRun.path) ===
+      workflowPath(liveRun && liveRun.path) &&
+    immutableFields.every(
+      (field) => listedRun && liveRun && listedRun[field] === liveRun[field],
+    )
   );
 }
 
@@ -83,7 +91,7 @@ function qualifyOrphanedUnstarted({
     !Number.isSafeInteger(runId) ||
     runId <= 0 ||
     !isSameImmutableRunSnapshot(listedRun, liveRun) ||
-    liveRun.path !== BUILD_FEED_WORKFLOW ||
+    workflowPath(liveRun.path) !== BUILD_FEED_WORKFLOW ||
     liveRun.status !== "queued" ||
     liveRun.run_attempt !== 1 ||
     liveRun.run_started_at !== createdAt ||
@@ -96,7 +104,7 @@ function qualifyOrphanedUnstarted({
     nowMs - createdAtMs < MINIMUM_AGE_MS ||
     !workflow ||
     !workflow.data ||
-    workflow.data.path !== BUILD_FEED_WORKFLOW ||
+    workflowPath(workflow.data.path) !== BUILD_FEED_WORKFLOW ||
     workflow.data.state !== "disabled_manually" ||
     !countIsExactlyZero(jobs, "jobs") ||
     !countIsExactlyZero(artifacts, "artifacts")
@@ -160,7 +168,7 @@ async function readCandidateEvidence({github, owner, repo, run}) {
   const workflow = await github.rest.actions.getWorkflow({
     owner,
     repo,
-    workflow_id: BUILD_FEED_WORKFLOW,
+    workflow_id: BUILD_FEED_WORKFLOW_ID,
   });
   const jobs = await github.rest.actions.listJobsForWorkflowRun({
     owner,
@@ -220,6 +228,71 @@ async function revalidateOrphanedUnstarted({
     );
   }
   return revalidated;
+}
+
+async function confirmCancelledOrphanedUnstarted({
+  github,
+  owner,
+  repo,
+  listedRun,
+  currentSha,
+}) {
+  if (
+    !listedRun ||
+    !Number.isSafeInteger(listedRun.id) ||
+    listedRun.id <= 0
+  ) {
+    throw new Error("Cancelled orphan verification requires a valid run");
+  }
+  const current = await readCandidateEvidence({
+    github,
+    owner,
+    repo,
+    run: listedRun,
+  });
+  const liveRun = current.liveRun;
+  const listedSha = normalizedSha(listedRun.head_sha);
+  const expectedSha = normalizedSha(currentSha);
+  const createdAt = String(listedRun.created_at || "").trim();
+  const createdAtMs = parsedGitHubTimestamp(createdAt);
+  const updatedAtMs = parsedGitHubTimestamp(liveRun && liveRun.updated_at);
+  if (
+    workflowPath(listedRun.path) !== BUILD_FEED_WORKFLOW ||
+    listedRun.status !== "queued" ||
+    listedRun.run_attempt !== 1 ||
+    listedRun.run_started_at !== createdAt ||
+    listedRun.updated_at !== createdAt ||
+    !listedSha ||
+    !expectedSha ||
+    listedSha === expectedSha ||
+    !Number.isFinite(createdAtMs) ||
+    !liveRun ||
+    liveRun.id !== listedRun.id ||
+    workflowPath(liveRun.path) !== BUILD_FEED_WORKFLOW ||
+    liveRun.head_sha !== listedRun.head_sha ||
+    liveRun.run_attempt !== listedRun.run_attempt ||
+    liveRun.created_at !== listedRun.created_at ||
+    liveRun.run_started_at !== listedRun.run_started_at ||
+    liveRun.status !== "completed" ||
+    liveRun.conclusion !== "cancelled" ||
+    !Number.isFinite(updatedAtMs) ||
+    updatedAtMs < createdAtMs ||
+    !current.workflow ||
+    !current.workflow.data ||
+    workflowPath(current.workflow.data.path) !== BUILD_FEED_WORKFLOW ||
+    current.workflow.data.state !== "disabled_manually" ||
+    !countIsExactlyZero(current.jobs, "jobs") ||
+    !countIsExactlyZero(current.artifacts, "artifacts")
+  ) {
+    throw new Error(
+      `Orphaned Pages run ${listedRun.id} did not remain unstarted when cancelled`,
+    );
+  }
+  return {
+    run_id: liveRun.id,
+    head_sha: listedSha,
+    created_at: createdAt,
+  };
 }
 
 async function handleCancelServerError({
@@ -294,12 +367,15 @@ async function handleCancelServerError({
 
 module.exports = {
   BUILD_FEED_WORKFLOW,
+  BUILD_FEED_WORKFLOW_ID,
   MINIMUM_AGE_MS,
   classifyOrphanedUnstarted,
+  confirmCancelledOrphanedUnstarted,
   confirmTerminalAfterCancelConflict,
   handleCancelServerError,
   isServerError,
   qualifyOrphanedUnstarted,
   revalidateOrphanedUnstarted,
   statusOf,
+  workflowPath,
 };

@@ -4,8 +4,11 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const resolve = require("../../.github/scripts/resolve-legacy-recovery.cjs");
 
-test("uses the v2 carry-forward namespace and cannot select legacy carry artifacts", () => {
-  assert.equal(resolve.CARRY_FORWARD_ARTIFACT, "legacy-recovery-carry-forward-v2");
+test("uses a pin-bound v3 carry-forward namespace", () => {
+  assert.equal(
+    resolve.CARRY_FORWARD_ARTIFACT_PREFIX,
+    "legacy-recovery-carry-forward-v3",
+  );
 });
 
 const PIN = {
@@ -15,6 +18,19 @@ const PIN = {
   LEGACY_ARTIFACT_DIGEST: `sha256:${"b".repeat(64)}`,
   DEFAULT_BRANCH: "main",
 };
+const CARRY_NAME = `legacy-recovery-carry-forward-v3-12345-${"b".repeat(64)}`;
+
+function carryArtifact(overrides = {}) {
+  return {
+    id: 888,
+    name: CARRY_NAME,
+    expired: false,
+    digest: `sha256:${"d".repeat(64)}`,
+    created_at: "2026-07-23T00:01:00Z",
+    workflow_run: {id: 777},
+    ...overrides,
+  };
+}
 
 async function withEnvironment(callback) {
   const before = {};
@@ -58,26 +74,20 @@ test("prefers an unexpired carry-forward from a successful trusted default-branc
       head_branch: "main",
       head_sha: "c".repeat(40),
       path: ".github/workflows/daily.yml",
-      created_at: "2026-07-22T00:00:00Z",
+      created_at: "2026-07-23T00:00:00Z",
     };
     const github = {
       rest: {actions: {
-        async listWorkflowRuns({workflow_id}) {
-          return {data: {workflow_runs: workflow_id === "daily.yml" ? [carryRun] : []}};
-        },
+        async listArtifactsForRepo() {},
         async listWorkflowRunArtifacts() {},
-        async getWorkflowRun() {
-          throw new Error("seed fallback must not be used");
+        async getWorkflowRun({run_id}) {
+          assert.equal(run_id, 777);
+          return {data: carryRun};
         },
       }},
       async paginate(_method, args) {
-        assert.equal(args.run_id, 777);
-        return [{
-          id: 888,
-          name: "legacy-recovery-carry-forward-v2",
-          expired: false,
-          digest: `sha256:${"d".repeat(64)}`,
-        }];
+        assert.equal(args.name, CARRY_NAME);
+        return [carryArtifact()];
       },
     };
     await resolve({
@@ -89,6 +99,12 @@ test("prefers an unexpired carry-forward from a successful trusted default-branc
     assert.equal(collector.outputs.get("mode"), "carry");
     assert.equal(collector.outputs.get("artifact_id"), "888");
     assert.equal(collector.outputs.get("run_id"), "777");
+    assert.equal(collector.outputs.get("carry_artifact_name"), CARRY_NAME);
+    assert.equal(collector.outputs.get("pin_run_id"), "12345");
+    assert.equal(
+      collector.outputs.get("pin_artifact_digest"),
+      `sha256:${"b".repeat(64)}`,
+    );
   });
 });
 
@@ -101,18 +117,18 @@ test("falls back to the exact original digest pin when no carry-forward exists",
       head_branch: "main",
       head_sha: "a".repeat(40),
       path: ".github/workflows/build-feed.yml",
+      created_at: "2026-07-22T00:00:00Z",
     };
     const github = {
       rest: {actions: {
-        async listWorkflowRuns() {
-          return {data: {workflow_runs: []}};
-        },
+        async listArtifactsForRepo() {},
         async listWorkflowRunArtifacts() {},
         async getWorkflowRun() {
           return {data: originalRun};
         },
       }},
       async paginate(_method, args) {
+        if (args.name === CARRY_NAME) return [];
         assert.equal(args.run_id, 12345);
         return [{
           id: 67890,
@@ -133,31 +149,150 @@ test("falls back to the exact original digest pin when no carry-forward exists",
   });
 });
 
+test("ignores an unbound legacy carry-forward from before pin rotation", async () => {
+  await withEnvironment(async () => {
+    const collector = outputCollector();
+    const originalRun = {
+      id: 12345,
+      conclusion: "success",
+      head_branch: "main",
+      head_sha: "a".repeat(40),
+      path: ".github/workflows/build-feed.yml",
+      created_at: "2026-07-31T00:00:00Z",
+    };
+    const github = {
+      rest: {actions: {
+        async listArtifactsForRepo() {},
+        async listWorkflowRunArtifacts() {},
+        async getWorkflowRun() {
+          return {data: originalRun};
+        },
+      }},
+      async paginate(_method, args) {
+        if (args.name === CARRY_NAME) return [];
+        assert.equal(args.run_id, 12345);
+        return [{
+          id: 67890,
+          name: "legacy-pages-archive-seed",
+          expired: false,
+          digest: `sha256:${"b".repeat(64)}`,
+        }];
+      },
+    };
+    await resolve({
+      github,
+      context: {
+        repo: {owner: "sung1673", repo: "activist-rss-curator"},
+        runId: 999,
+      },
+      core: collector.core,
+    });
+    assert.equal(collector.failure(), null);
+    assert.equal(collector.outputs.get("mode"), "seed");
+    assert.equal(collector.outputs.get("artifact_id"), "67890");
+    assert.equal(collector.outputs.get("run_id"), "12345");
+  });
+});
+
+test("uses a valid pin-bound carry when the original seed artifact has expired", async () => {
+  await withEnvironment(async () => {
+    const collector = outputCollector();
+    const carryRun = {
+      id: 777,
+      conclusion: "success",
+      head_branch: "main",
+      head_sha: "c".repeat(40),
+      path: ".github/workflows/daily.yml",
+      created_at: "2026-07-23T00:00:00Z",
+    };
+    const github = {
+      rest: {actions: {
+        async listArtifactsForRepo() {},
+        async listWorkflowRunArtifacts() {},
+        async getWorkflowRun({run_id}) {
+          assert.equal(run_id, 777, "the original seed run must not be read");
+          return {data: carryRun};
+        },
+      }},
+      async paginate(_method, args) {
+        assert.equal(args.name, CARRY_NAME);
+        return [carryArtifact()];
+      },
+    };
+    await resolve({
+      github,
+      context: {
+        repo: {owner: "sung1673", repo: "activist-rss-curator"},
+        runId: 999,
+      },
+      core: collector.core,
+    });
+    assert.equal(collector.failure(), null);
+    assert.equal(collector.outputs.get("mode"), "carry");
+    assert.equal(collector.outputs.get("artifact_id"), "888");
+  });
+});
+
+test("ignores a newer carry-forward bound to a different pin", async () => {
+  await withEnvironment(async () => {
+    const collector = outputCollector();
+    const github = {
+      rest: {actions: {
+        async listArtifactsForRepo() {},
+        async listWorkflowRunArtifacts() {},
+        async getWorkflowRun() {
+          return {data: {
+            id: 12345,
+            conclusion: "success",
+            head_branch: "main",
+            head_sha: "a".repeat(40),
+            path: ".github/workflows/build-feed.yml",
+            created_at: "2026-07-22T00:00:00Z",
+          }};
+        },
+      }},
+      async paginate(_method, args) {
+        if (args.name === CARRY_NAME) return [];
+        assert.equal(args.run_id, 12345);
+        return [{
+          id: 67890,
+          name: "legacy-pages-archive-seed",
+          expired: false,
+          digest: `sha256:${"b".repeat(64)}`,
+        }];
+      },
+    };
+    await resolve({
+      github,
+      context: {
+        repo: {owner: "sung1673", repo: "activist-rss-curator"},
+        runId: 999,
+      },
+      core: collector.core,
+    });
+    assert.equal(collector.failure(), null);
+    assert.equal(collector.outputs.get("mode"), "seed");
+    assert.equal(collector.outputs.get("artifact_id"), "67890");
+  });
+});
+
 test("fails closed on an ambiguous carry-forward artifact", async () => {
   await withEnvironment(async () => {
     const collector = outputCollector();
     const github = {
       rest: {actions: {
-        async listWorkflowRuns({workflow_id}) {
-          return {data: {workflow_runs: workflow_id === "daily.yml" ? [{
-            id: 777,
-            conclusion: "success",
-            head_branch: "main",
-            head_sha: "c".repeat(40),
-            path: ".github/workflows/daily.yml",
-            created_at: "2026-07-22T00:00:00Z",
-          }] : []}};
-        },
+        async listArtifactsForRepo() {},
         async listWorkflowRunArtifacts() {},
-        async getWorkflowRun() {},
+        async getWorkflowRun() {
+          throw new Error("ambiguous carry must fail before producer lookup");
+        },
       }},
-      async paginate() {
-        return [1, 2].map((id) => ({
-          id,
-          name: "legacy-recovery-carry-forward-v2",
-          expired: false,
-          digest: `sha256:${"d".repeat(64)}`,
-        }));
+      async paginate(_method, args) {
+        assert.equal(args.name, CARRY_NAME);
+        return [
+          carryArtifact({id: 1}),
+          carryArtifact({id: 2, created_at: "2026-07-23T00:00:59Z"}),
+        ];
       },
     };
     await resolve({

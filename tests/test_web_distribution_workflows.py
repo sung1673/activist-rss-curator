@@ -156,7 +156,7 @@ def test_rollback_records_the_pinned_legacy_build_outcome() -> None:
         operation="rollback-legacy",
     )
     assert recorder["env"]["DISTRIBUTION_BUILD_SHA"] == (  # type: ignore[index]
-        "${{ vars.LEGACY_ROLLBACK_CODE_REVISION }}"
+        "${{ needs.close.outputs.legacy_pin_code_revision }}"
     )
     assert '--build-sha "$DISTRIBUTION_BUILD_SHA"' in str(recorder["run"])
 
