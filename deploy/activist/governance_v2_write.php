@@ -3893,7 +3893,8 @@ function v2_expedited_review_documents(
 function v2_expedited_review_actors(
     PDO $pdo,
     array $config,
-    string $eventId
+    string $eventId,
+    bool $lockRows = false
 ): array {
     $statement = $pdo->prepare(
         'SELECT a.actor_id,a.display_name,a.actor_type,a.country_code,'
@@ -3905,6 +3906,7 @@ function v2_expedited_review_actors(
         . ' ON a.actor_id=ea.actor_id '
         . 'WHERE ea.event_id=? '
         . 'ORDER BY ea.actor_role,a.actor_id'
+        . ($lockRows ? ' FOR UPDATE' : '')
     );
     $statement->execute(array($eventId));
     $rows = $statement->fetchAll();
@@ -3917,10 +3919,43 @@ function v2_expedited_review_actors(
     return $rows;
 }
 
+/**
+ * Read the latest event revision while locking the complete event-revision
+ * range for protected publication. The full range lock is intentional: a
+ * concurrent v1 revision request can insert a newer row without touching the
+ * event row, so locking only the current latest revision would leave a gap for
+ * a publication-time TOCTOU.
+ */
+function v2_expedited_review_latest_revision(
+    PDO $pdo,
+    array $config,
+    string $eventId,
+    bool $lockRows = false
+): ?array {
+    $statement = $pdo->prepare(
+        'SELECT revision_id,reason,revised_value,updated_at FROM '
+        . table_name($config, 'editorial_revisions')
+        . ' WHERE entity_type=\'event\' AND entity_id=? '
+        . 'ORDER BY updated_at DESC,revision_id DESC'
+        . ($lockRows ? ' FOR UPDATE' : ' LIMIT 1')
+    );
+    $statement->execute(array($eventId));
+    $rows = $statement->fetchAll();
+    if (count($rows) === 0) {
+        return null;
+    }
+    $latest = $rows[0];
+    $latest['updated_at'] = v1_release_iso_time(
+        isset($latest['updated_at']) ? $latest['updated_at'] : null
+    );
+    return $latest;
+}
+
 function v2_expedited_review_event_row(
     PDO $pdo,
     array $config,
-    string $eventId
+    string $eventId,
+    bool $lockRows = false
 ): ?array {
     $statement = $pdo->prepare(
         'SELECT e.event_id,e.issuer_id,i.legal_name AS issuer_name,'
@@ -3932,22 +3967,13 @@ function v2_expedited_review_event_row(
         . 'e.identity_effective_at,e.identity_deadline_at,e.identity_status,'
         . 'e.comparison_key,e.updated_at,'
         . 'JSON_UNQUOTE(JSON_EXTRACT(e.payload_json,'
-        . '\'$.merged_into_event_id\')) AS merged_into_event_id,'
-        . '(SELECT er.reason FROM '
-        . table_name($config, 'editorial_revisions') . ' er '
-        . ' WHERE er.entity_type=\'event\' AND er.entity_id=e.event_id '
-        . ' ORDER BY er.updated_at DESC,er.revision_id DESC LIMIT 1'
-        . ') AS latest_revision_reason,'
-        . '(SELECT er.revised_value FROM '
-        . table_name($config, 'editorial_revisions') . ' er '
-        . ' WHERE er.entity_type=\'event\' AND er.entity_id=e.event_id '
-        . ' ORDER BY er.updated_at DESC,er.revision_id DESC LIMIT 1'
-        . ') AS latest_revision_value '
+        . '\'$.merged_into_event_id\')) AS merged_into_event_id '
         . 'FROM ' . table_name($config, 'governance_events') . ' e '
         . 'JOIN ' . table_name($config, 'issuers') . ' i '
         . ' ON i.issuer_id=e.issuer_id '
         . 'WHERE e.event_id=? AND e.issuer_id IS NOT NULL '
         . ' AND e.country_code IN (\'KR\',\'US\') LIMIT 1'
+        . ($lockRows ? ' FOR UPDATE' : '')
     );
     $statement->execute(array($eventId));
     $row = $statement->fetch();
@@ -3962,10 +3988,33 @@ function v2_expedited_review_event_row(
             isset($row[$field]) ? $row[$field] : null
         );
     }
-    $documents = v2_expedited_review_documents($pdo, $config, $eventId);
+    // Every protected publisher takes locks in this order. Event review
+    // writers also lock the event first, so their later actor/document/revision
+    // writes serialize behind this transaction instead of forming a cycle.
+    $latestRevision = v2_expedited_review_latest_revision(
+        $pdo,
+        $config,
+        $eventId,
+        $lockRows
+    );
+    $row['latest_revision_reason'] = $latestRevision === null
+        ? null : $latestRevision['reason'];
+    $row['latest_revision_value'] = $latestRevision === null
+        ? null : $latestRevision['revised_value'];
+    $row['actors'] = v2_expedited_review_actors(
+        $pdo,
+        $config,
+        $eventId,
+        $lockRows
+    );
+    $documents = v2_expedited_review_documents(
+        $pdo,
+        $config,
+        $eventId,
+        $lockRows
+    );
     $row['official_documents'] = $documents;
     $row['official_evidence_count'] = count($documents);
-    $row['actors'] = v2_expedited_review_actors($pdo, $config, $eventId);
     $row['event_evidence_sha256'] = v2_write_canonical_payload_hash(array(
         'event_id' => $eventId,
         'event_updated_at' => $row['updated_at'],
@@ -4681,11 +4730,10 @@ function v2_normalize_brief_items(array $items): array {
         if (!is_array($item) || v2_write_is_list($item)) {
             v2_write_invalid($location . ': object required');
         }
-        v2_write_assert_keys(
-            $item,
-            array('event_id', 'lane', 'position_no', 'selection_reason'),
-            $location
-        );
+        v2_write_assert_keys($item, array(
+            'event_id', 'lane', 'position_no', 'selection_reason',
+            'expected_snapshot_sha256',
+        ), $location);
         $eventId = v2_write_code(
             $item,
             'event_id',
@@ -4703,6 +4751,13 @@ function v2_normalize_brief_items(array $items): array {
             v2_write_invalid($location . '.position_no: invalid');
         }
         $reason = v2_write_text($item, 'selection_reason', $location, 500);
+        $expectedSnapshot = v2_write_code(
+            $item,
+            'expected_snapshot_sha256',
+            $location,
+            '/^[a-f0-9]{64}$/',
+            false
+        );
         $positionKey = $lane . ':' . $item['position_no'];
         $eventKey = $eventId;
         if (isset($positions[$positionKey]) || isset($events[$eventKey])) {
@@ -4717,6 +4772,10 @@ function v2_normalize_brief_items(array $items): array {
             'position_no' => $item['position_no'],
             'selection_reason' => $reason,
         );
+        if ($expectedSnapshot !== null) {
+            $normalized[count($normalized) - 1]['expected_snapshot_sha256']
+                = $expectedSnapshot;
+        }
     }
     if (
         $laneCounts['top'] > 5
@@ -4734,6 +4793,255 @@ function v2_normalize_brief_items(array $items): array {
     return $normalized;
 }
 
+function v2_brief_item_manifest_sort(array $items): array {
+    usort($items, function (array $left, array $right): int {
+        $laneOrder = array('top' => 0, 'watch' => 1, 'deadline' => 2);
+        $leftLane = isset($laneOrder[$left['lane']])
+            ? $laneOrder[$left['lane']] : 99;
+        $rightLane = isset($laneOrder[$right['lane']])
+            ? $laneOrder[$right['lane']] : 99;
+        if ($leftLane !== $rightLane) {
+            return $leftLane <=> $rightLane;
+        }
+        $position = (int)$left['position_no'] <=> (int)$right['position_no'];
+        return $position !== 0 ? $position : strcmp(
+            (string)$left['event_id'],
+            (string)$right['event_id']
+        );
+    });
+    return $items;
+}
+
+function v2_protected_brief_manifest_from_snapshots(
+    array $snapshots,
+    array $expectedSnapshots,
+    string $briefId,
+    string $approvedBy,
+    string $approvedAt
+): array {
+    $manifest = array();
+    foreach ($snapshots as $snapshot) {
+        $item = $snapshot['item'];
+        $event = $snapshot['event'];
+        $eventId = (string)$item['event_id'];
+        if (!isset($expectedSnapshots[$eventId])) {
+            throw new RuntimeException('brief_stored_item_manifest_mismatch');
+        }
+        $manifest[] = array(
+            'brief_id' => $briefId,
+            'event_id' => $eventId,
+            'lane' => (string)$item['lane'],
+            'position_no' => (int)$item['position_no'],
+            'selection_reason' => (string)$item['selection_reason'],
+            'event_updated_at' => (string)$event['updated_at'],
+            'event_snapshot_sha256' => v2_write_canonical_payload_hash($event),
+            'expected_snapshot_sha256' => (string)$expectedSnapshots[$eventId],
+            'review_status' => 'approved',
+            'approved_by' => $approvedBy,
+            'approved_at' => v1_release_iso_time($approvedAt),
+            'created_at' => v1_release_iso_time($approvedAt),
+            'updated_at' => v1_release_iso_time($approvedAt),
+        );
+    }
+    return v2_brief_item_manifest_sort($manifest);
+}
+
+/**
+ * Lock and hash only the immutable BriefItem rows. Recovery must never consult
+ * mutable live events, but it must also never acknowledge an edition whose
+ * stored public snapshot has been removed or changed.
+ */
+function v2_locked_protected_brief_item_manifest(
+    PDO $pdo,
+    array $config,
+    string $briefId,
+    array $expectedSnapshots
+): array {
+    $statement = $pdo->prepare(
+        'SELECT brief_id,event_id,lane,position_no,event_updated_at,'
+        . 'event_snapshot_json,selection_reason,review_status,approved_by,'
+        . 'approved_at,created_at,updated_at FROM '
+        . table_name($config, 'brief_items')
+        . ' WHERE brief_id=? ORDER BY '
+        . 'CASE lane WHEN \'top\' THEN 0 WHEN \'watch\' THEN 1 '
+        . 'WHEN \'deadline\' THEN 2 ELSE 3 END,position_no,event_id FOR UPDATE'
+    );
+    $statement->execute(array($briefId));
+    $manifest = array();
+    foreach ($statement->fetchAll() as $row) {
+        $eventId = (string)$row['event_id'];
+        $eventSnapshot = json_decode(
+            (string)$row['event_snapshot_json'],
+            true
+        );
+        if (
+            !isset($expectedSnapshots[$eventId])
+            || !is_array($eventSnapshot)
+            || v2_write_is_list($eventSnapshot)
+            || (string)$row['review_status'] !== 'approved'
+            || trim((string)$row['approved_by']) === ''
+        ) {
+            throw new RuntimeException('brief_stored_item_manifest_mismatch');
+        }
+        $approvedAt = v1_release_iso_time($row['approved_at']);
+        $createdAt = v1_release_iso_time($row['created_at']);
+        $updatedAt = v1_release_iso_time($row['updated_at']);
+        $eventUpdatedAt = v1_release_iso_time($row['event_updated_at']);
+        if (
+            $approvedAt === null
+            || $createdAt === null
+            || $updatedAt === null
+            || $eventUpdatedAt === null
+        ) {
+            throw new RuntimeException('brief_stored_item_manifest_mismatch');
+        }
+        $manifest[] = array(
+            'brief_id' => (string)$row['brief_id'],
+            'event_id' => $eventId,
+            'lane' => (string)$row['lane'],
+            'position_no' => (int)$row['position_no'],
+            'selection_reason' => (string)$row['selection_reason'],
+            'event_updated_at' => $eventUpdatedAt,
+            'event_snapshot_sha256' => v2_write_canonical_payload_hash(
+                $eventSnapshot
+            ),
+            'expected_snapshot_sha256' => (string)$expectedSnapshots[$eventId],
+            'review_status' => (string)$row['review_status'],
+            'approved_by' => (string)$row['approved_by'],
+            'approved_at' => $approvedAt,
+            'created_at' => $createdAt,
+            'updated_at' => $updatedAt,
+        );
+    }
+    return v2_brief_item_manifest_sort($manifest);
+}
+
+function v2_protected_brief_manifest_matches_request(
+    array $manifest,
+    array $items,
+    array $expectedSnapshots,
+    string $briefId
+): bool {
+    if (count($manifest) !== count($items)) {
+        return false;
+    }
+    $sortedItems = v2_brief_item_manifest_sort($items);
+    foreach ($sortedItems as $index => $item) {
+        if (!isset($manifest[$index])) {
+            return false;
+        }
+        $stored = $manifest[$index];
+        $eventId = (string)$item['event_id'];
+        if (
+            !isset($expectedSnapshots[$eventId])
+            || (string)($stored['brief_id'] ?? '') !== $briefId
+            || (string)($stored['event_id'] ?? '') !== $eventId
+            || (string)($stored['lane'] ?? '') !== (string)$item['lane']
+            || (int)($stored['position_no'] ?? 0)
+                !== (int)$item['position_no']
+            || (string)($stored['selection_reason'] ?? '')
+                !== (string)$item['selection_reason']
+            || (string)($stored['expected_snapshot_sha256'] ?? '')
+                !== (string)$expectedSnapshots[$eventId]
+            || preg_match(
+                '/^[a-f0-9]{64}$/',
+                (string)($stored['event_snapshot_sha256'] ?? '')
+            ) !== 1
+            || (string)($stored['review_status'] ?? '') !== 'approved'
+            || trim((string)($stored['approved_by'] ?? '')) === ''
+            || v1_mysql_datetime_utc(
+                $stored['event_updated_at'] ?? null
+            ) === null
+            || v1_mysql_datetime_utc(
+                $stored['approved_at'] ?? null
+            ) === null
+            || v1_mysql_datetime_utc(
+                $stored['created_at'] ?? null
+            ) === null
+            || v1_mysql_datetime_utc(
+                $stored['updated_at'] ?? null
+            ) === null
+        ) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function v2_protected_brief_edition_manifest(
+    array $row,
+    string $itemManifestSha256
+): array {
+    $publishedAt = v1_release_iso_time($row['published_at'] ?? null);
+    $approvedAt = v1_release_iso_time($row['approved_at'] ?? null);
+    $createdAt = v1_release_iso_time($row['created_at'] ?? null);
+    $updatedAt = v1_release_iso_time($row['updated_at'] ?? null);
+    if (
+        preg_match('/^[a-f0-9]{64}$/', $itemManifestSha256) !== 1
+        || $publishedAt === null
+        || $approvedAt === null
+        || $createdAt === null
+        || $updatedAt === null
+        || trim((string)($row['approved_by'] ?? '')) === ''
+    ) {
+        throw new RuntimeException('brief_stored_edition_manifest_mismatch');
+    }
+    return array(
+        'brief_id' => (string)($row['brief_id'] ?? ''),
+        'edition' => (string)($row['edition'] ?? ''),
+        'cutoff_at' => v1_release_iso_time($row['cutoff_at'] ?? null),
+        'published_at' => $publishedAt,
+        'publication_status' => (string)($row['publication_status'] ?? ''),
+        'approved_by' => (string)$row['approved_by'],
+        'approved_at' => $approvedAt,
+        'build_sha' => (string)($row['build_sha'] ?? ''),
+        'created_at' => $createdAt,
+        'updated_at' => $updatedAt,
+        'stored_item_manifest_sha256' => $itemManifestSha256,
+    );
+}
+
+function v2_protected_brief_edition_manifest_matches_request(
+    array $manifest,
+    string $briefId,
+    string $edition,
+    string $cutoffAt,
+    string $buildSha,
+    string $itemManifestSha256
+): bool {
+    return (string)($manifest['brief_id'] ?? '') === $briefId
+        && (string)($manifest['edition'] ?? '') === $edition
+        && v1_mysql_datetime_utc($manifest['cutoff_at'] ?? null) === $cutoffAt
+        && v1_mysql_datetime_utc($manifest['published_at'] ?? null) !== null
+        && (string)($manifest['publication_status'] ?? '') === 'published'
+        && trim((string)($manifest['approved_by'] ?? '')) !== ''
+        && v1_mysql_datetime_utc($manifest['approved_at'] ?? null) !== null
+        && (string)($manifest['build_sha'] ?? '') === $buildSha
+        && v1_mysql_datetime_utc($manifest['created_at'] ?? null) !== null
+        && v1_mysql_datetime_utc($manifest['updated_at'] ?? null) !== null
+        && (string)($manifest['stored_item_manifest_sha256'] ?? '')
+            === $itemManifestSha256;
+}
+
+function v2_locked_brief_edition_row(
+    PDO $pdo,
+    array $config,
+    string $briefId,
+    string $edition,
+    string $cutoffAt
+): ?array {
+    $statement = $pdo->prepare(
+        'SELECT brief_id,edition,cutoff_at,published_at,publication_status,'
+        . 'approved_by,approved_at,build_sha,payload_json,created_at,updated_at '
+        . 'FROM ' . table_name($config, 'brief_editions')
+        . ' WHERE brief_id=? OR (edition=? AND cutoff_at=?)'
+        . ' LIMIT 1 FOR UPDATE'
+    );
+    $statement->execute(array($briefId, $edition, $cutoffAt));
+    $row = $statement->fetch();
+    return $row ? $row : null;
+}
+
 function v2_admin_publish_brief(
     PDO $pdo,
     array $config,
@@ -4743,6 +5051,7 @@ function v2_admin_publish_brief(
     try {
         v2_write_assert_keys($payload, array(
             'edition', 'cutoff_at', 'build_sha', 'empty_reason', 'items',
+            'require_existing', 'expected_event_basis_sha256',
         ), 'payload');
         $editionRaw = v2_write_text($payload, 'edition', 'payload', 16);
         $edition = strtolower((string)$editionRaw) === 'global'
@@ -4768,6 +5077,59 @@ function v2_admin_publish_brief(
             v2_write_invalid('payload.items: array required');
         }
         $items = v2_normalize_brief_items($payload['items']);
+        $requireExisting = false;
+        if (array_key_exists('require_existing', $payload)) {
+            if (!is_bool($payload['require_existing'])) {
+                v2_write_invalid('payload.require_existing: boolean required');
+            }
+            $requireExisting = $payload['require_existing'];
+        }
+        $expectedBasisSha = v2_write_code(
+            $payload,
+            'expected_event_basis_sha256',
+            'payload',
+            '/^[a-f0-9]{64}$/',
+            false
+        );
+        $expectedSnapshots = array();
+        foreach ($items as $item) {
+            if (isset($item['expected_snapshot_sha256'])) {
+                $expectedSnapshots[(string)$item['event_id']]
+                    = (string)$item['expected_snapshot_sha256'];
+            }
+        }
+        $hasExpectedBasis = $expectedBasisSha !== null;
+        if (
+            ($hasExpectedBasis && count($expectedSnapshots) !== count($items))
+            || (!$hasExpectedBasis && count($expectedSnapshots) !== 0)
+        ) {
+            v2_write_invalid(
+                'payload: aggregate and per-item expected snapshots are all-or-none'
+            );
+        }
+        if ($requireExisting && !$hasExpectedBasis) {
+            v2_write_invalid(
+                'payload.require_existing: expected event basis required'
+            );
+        }
+        if ($hasExpectedBasis) {
+            ksort($expectedSnapshots, SORT_STRING);
+            $expectedBasisRows = array();
+            foreach ($expectedSnapshots as $eventId => $snapshotSha) {
+                $expectedBasisRows[] = array(
+                    'event_id' => $eventId,
+                    'snapshot_sha256' => $snapshotSha,
+                );
+            }
+            if (!hash_equals(
+                (string)$expectedBasisSha,
+                v2_write_canonical_payload_hash($expectedBasisRows)
+            )) {
+                v2_write_invalid(
+                    'payload.expected_event_basis_sha256: item basis mismatch'
+                );
+            }
+        }
     } catch (InvalidArgumentException $error) {
         v2_respond(400, array(
             'ok' => false,
@@ -4812,31 +5174,168 @@ function v2_admin_publish_brief(
         'empty_reason' => $emptyReason,
         'items' => $items,
     );
+    if ($hasExpectedBasis) {
+        $semanticPayload['expected_event_basis_sha256'] = $expectedBasisSha;
+    }
     $semanticHash = v2_write_canonical_payload_hash($semanticPayload);
+    if ($hasExpectedBasis) {
+        // Protected publication relies on next-key locks for empty actor,
+        // document and editorial-revision ranges. Pin the next transaction's
+        // isolation explicitly so a server/session override cannot turn the
+        // first concurrent insert into an unreviewed publication-time drift.
+        $pdo->exec('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
+    }
     $pdo->beginTransaction();
     try {
-        $existing = $pdo->prepare(
-            'SELECT brief_id,build_sha,payload_json FROM '
-            . table_name($config, 'brief_editions')
-            . ' WHERE brief_id=? OR (edition=? AND cutoff_at=?)'
-            . ' LIMIT 1 FOR UPDATE'
+        $stored = v2_locked_brief_edition_row(
+            $pdo,
+            $config,
+            $briefId,
+            $edition,
+            $cutoffAt
         );
-        $existing->execute(array($briefId, $edition, $cutoffAt));
-        $stored = $existing->fetch();
         if ($stored) {
             $storedPayload = json_decode((string)$stored['payload_json'], true);
             $storedHash = is_array($storedPayload)
                 && isset($storedPayload['semantic_sha256'])
                 ? (string)$storedPayload['semantic_sha256'] : '';
+            $storedExpectedBasis = is_array($storedPayload)
+                && isset($storedPayload['expected_event_basis_sha256'])
+                ? (string)$storedPayload['expected_event_basis_sha256'] : null;
+            $storedExpectedSnapshots = is_array($storedPayload)
+                && isset($storedPayload['expected_event_snapshots'])
+                && is_array($storedPayload['expected_event_snapshots'])
+                ? $storedPayload['expected_event_snapshots'] : null;
+            $storedContractVersion = is_array($storedPayload)
+                && isset($storedPayload['contract_version'])
+                && is_int($storedPayload['contract_version'])
+                ? $storedPayload['contract_version'] : null;
+            $storedItemManifest = is_array($storedPayload)
+                && isset($storedPayload['stored_item_manifest'])
+                && is_array($storedPayload['stored_item_manifest'])
+                && v2_write_is_list($storedPayload['stored_item_manifest'])
+                ? $storedPayload['stored_item_manifest'] : null;
+            $storedItemManifestSha = is_array($storedPayload)
+                && isset($storedPayload['stored_item_manifest_sha256'])
+                && is_string($storedPayload['stored_item_manifest_sha256'])
+                ? $storedPayload['stored_item_manifest_sha256'] : null;
+            $storedEditionManifest = is_array($storedPayload)
+                && isset($storedPayload['stored_edition_manifest'])
+                && is_array($storedPayload['stored_edition_manifest'])
+                && !v2_write_is_list($storedPayload['stored_edition_manifest'])
+                ? $storedPayload['stored_edition_manifest'] : null;
+            $storedEditionManifestSha = is_array($storedPayload)
+                && isset($storedPayload['stored_edition_manifest_sha256'])
+                && is_string($storedPayload['stored_edition_manifest_sha256'])
+                ? $storedPayload['stored_edition_manifest_sha256'] : null;
+            $expectedMetadataMatches = true;
+            if ($hasExpectedBasis) {
+                $expectedMetadataMatches = $storedExpectedBasis !== null
+                    && $storedContractVersion === 2
+                    && hash_equals(
+                        (string)$expectedBasisSha,
+                        $storedExpectedBasis
+                    )
+                    && $storedExpectedSnapshots !== null
+                    && hash_equals(
+                        v2_write_canonical_payload_hash($expectedSnapshots),
+                        v2_write_canonical_payload_hash(
+                            $storedExpectedSnapshots
+                        )
+                    )
+                    && $storedItemManifest !== null
+                    && $storedItemManifestSha !== null
+                    && preg_match(
+                        '/^[a-f0-9]{64}$/',
+                        $storedItemManifestSha
+                    ) === 1
+                    && v2_protected_brief_manifest_matches_request(
+                        $storedItemManifest,
+                        $items,
+                        $expectedSnapshots,
+                        $briefId
+                    )
+                    && hash_equals(
+                        $storedItemManifestSha,
+                        v2_write_canonical_payload_hash($storedItemManifest)
+                    )
+                    && $storedEditionManifest !== null
+                    && $storedEditionManifestSha !== null
+                    && preg_match(
+                        '/^[a-f0-9]{64}$/',
+                        $storedEditionManifestSha
+                    ) === 1
+                    && hash_equals(
+                        $storedEditionManifestSha,
+                        v2_write_canonical_payload_hash(
+                            $storedEditionManifest
+                        )
+                    );
+            }
             if (
                 (string)$stored['brief_id'] !== $briefId
+                || (string)$stored['build_sha'] !== $buildSha
                 || !hash_equals($semanticHash, $storedHash)
+                || !$expectedMetadataMatches
             ) {
                 $pdo->rollBack();
                 v2_respond(409, array(
                     'ok' => false,
                     'error' => 'brief_edition_conflict',
                 ));
+            }
+            if ($hasExpectedBasis) {
+                $lockedStoredManifest =
+                    v2_locked_protected_brief_item_manifest(
+                        $pdo,
+                        $config,
+                        $briefId,
+                        $expectedSnapshots
+                    );
+                if (
+                    !v2_protected_brief_manifest_matches_request(
+                        $lockedStoredManifest,
+                        $items,
+                        $expectedSnapshots,
+                        $briefId
+                    )
+                    || !hash_equals(
+                        (string)$storedItemManifestSha,
+                        v2_write_canonical_payload_hash(
+                            $lockedStoredManifest
+                        )
+                    )
+                ) {
+                    throw new RuntimeException(
+                        'brief_stored_item_manifest_mismatch'
+                    );
+                }
+                $lockedStoredManifestSha =
+                    v2_write_canonical_payload_hash($lockedStoredManifest);
+                $lockedEditionManifest = v2_protected_brief_edition_manifest(
+                    $stored,
+                    $lockedStoredManifestSha
+                );
+                if (
+                    !v2_protected_brief_edition_manifest_matches_request(
+                        $lockedEditionManifest,
+                        $briefId,
+                        $edition,
+                        $cutoffAt,
+                        $buildSha,
+                        $lockedStoredManifestSha
+                    )
+                    || !hash_equals(
+                        (string)$storedEditionManifestSha,
+                        v2_write_canonical_payload_hash(
+                            $lockedEditionManifest
+                        )
+                    )
+                ) {
+                    throw new RuntimeException(
+                        'brief_stored_edition_manifest_mismatch'
+                    );
+                }
             }
             $pdo->commit();
             v2_respond(200, array(
@@ -4849,8 +5348,44 @@ function v2_admin_publish_brief(
                 ),
             ));
         }
+        if ($requireExisting) {
+            $pdo->rollBack();
+            v2_respond(409, array(
+                'ok' => false,
+                'error' => 'brief_recovery_not_found',
+            ));
+        }
         $snapshots = array();
+        $actualExpectedBasisRows = array();
         foreach ($items as $item) {
+            if ($hasExpectedBasis) {
+                $lockedEvent = v2_expedited_review_event_row(
+                    $pdo,
+                    $config,
+                    (string)$item['event_id'],
+                    true
+                );
+                if ($lockedEvent === null) {
+                    throw new RuntimeException(
+                        'brief_event_snapshot_mismatch'
+                    );
+                }
+                $actualSnapshotSha = v2_write_canonical_payload_hash(
+                    array('event' => $lockedEvent)
+                );
+                if (!hash_equals(
+                    (string)$item['expected_snapshot_sha256'],
+                    $actualSnapshotSha
+                )) {
+                    throw new RuntimeException(
+                        'brief_event_snapshot_mismatch'
+                    );
+                }
+                $actualExpectedBasisRows[] = array(
+                    'event_id' => (string)$item['event_id'],
+                    'snapshot_sha256' => $actualSnapshotSha,
+                );
+            }
             $sql = v2_event_select($config)
                 . ' WHERE e.event_id=? AND '
                 . v2_event_visibility_sql($config, 'e')
@@ -4883,6 +5418,23 @@ function v2_admin_publish_brief(
                 'item' => $item,
                 'event' => $normalizedRow,
             );
+        }
+        if ($hasExpectedBasis) {
+            usort(
+                $actualExpectedBasisRows,
+                function (array $left, array $right): int {
+                    return strcmp(
+                        (string)$left['event_id'],
+                        (string)$right['event_id']
+                    );
+                }
+            );
+            if (!hash_equals(
+                (string)$expectedBasisSha,
+                v2_write_canonical_payload_hash($actualExpectedBasisRows)
+            )) {
+                throw new RuntimeException('brief_event_basis_mismatch');
+            }
         }
         if ($topCount === 0) {
             $statusCountry = $edition === 'global' ? '' : (string)$edition;
@@ -4918,8 +5470,12 @@ function v2_admin_publish_brief(
             'empty_reason' => $emptyReason,
             'item_count' => count($items),
             'top_count' => $topCount,
-            'contract_version' => 1,
+            'contract_version' => $hasExpectedBasis ? 2 : 1,
         );
+        if ($hasExpectedBasis) {
+            $editionPayload['expected_event_basis_sha256'] = $expectedBasisSha;
+            $editionPayload['expected_event_snapshots'] = $expectedSnapshots;
+        }
         $editionInsert = $pdo->prepare(
             'INSERT INTO ' . table_name($config, 'brief_editions')
             . ' (brief_id,edition,cutoff_at,published_at,publication_status,'
@@ -4962,6 +5518,195 @@ function v2_admin_publish_brief(
                 $now,
             ));
         }
+        if ($hasExpectedBasis) {
+            $expectedStoredItemManifest =
+                v2_protected_brief_manifest_from_snapshots(
+                    $snapshots,
+                    $expectedSnapshots,
+                    $briefId,
+                    $role,
+                    $now
+                );
+            $storedItemManifest = v2_locked_protected_brief_item_manifest(
+                $pdo,
+                $config,
+                $briefId,
+                $expectedSnapshots
+            );
+            $storedItemManifestSha =
+                v2_write_canonical_payload_hash($storedItemManifest);
+            if (
+                !v2_protected_brief_manifest_matches_request(
+                    $storedItemManifest,
+                    $items,
+                    $expectedSnapshots,
+                    $briefId
+                )
+                || !hash_equals(
+                    v2_write_canonical_payload_hash(
+                        $expectedStoredItemManifest
+                    ),
+                    $storedItemManifestSha
+                )
+            ) {
+                throw new RuntimeException(
+                    'brief_stored_item_manifest_mismatch'
+                );
+            }
+            $storedEdition = v2_locked_brief_edition_row(
+                $pdo,
+                $config,
+                $briefId,
+                $edition,
+                $cutoffAt
+            );
+            if ($storedEdition === null) {
+                throw new RuntimeException(
+                    'brief_stored_edition_manifest_mismatch'
+                );
+            }
+            $storedEditionManifest = v2_protected_brief_edition_manifest(
+                $storedEdition,
+                $storedItemManifestSha
+            );
+            $expectedStoredEditionManifest =
+                v2_protected_brief_edition_manifest(
+                    array(
+                        'brief_id' => $briefId,
+                        'edition' => $edition,
+                        'cutoff_at' => $cutoffAt,
+                        'published_at' => $now,
+                        'publication_status' => 'published',
+                        'approved_by' => $role,
+                        'approved_at' => $now,
+                        'build_sha' => $buildSha,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ),
+                    $storedItemManifestSha
+                );
+            if (
+                !v2_protected_brief_edition_manifest_matches_request(
+                    $storedEditionManifest,
+                    $briefId,
+                    $edition,
+                    $cutoffAt,
+                    $buildSha,
+                    $storedItemManifestSha
+                )
+                || !hash_equals(
+                    v2_write_canonical_payload_hash(
+                        $expectedStoredEditionManifest
+                    ),
+                    v2_write_canonical_payload_hash(
+                        $storedEditionManifest
+                    )
+                )
+            ) {
+                throw new RuntimeException(
+                    'brief_stored_edition_manifest_mismatch'
+                );
+            }
+            $editionPayload['stored_item_manifest'] = $storedItemManifest;
+            $editionPayload['stored_item_manifest_sha256'] =
+                $storedItemManifestSha;
+            $editionPayload['stored_edition_manifest'] =
+                $storedEditionManifest;
+            $editionPayload['stored_edition_manifest_sha256'] =
+                v2_write_canonical_payload_hash($storedEditionManifest);
+            $editionUpdate = $pdo->prepare(
+                'UPDATE ' . table_name($config, 'brief_editions')
+                . ' SET payload_json=? WHERE brief_id=?'
+            );
+            $editionUpdate->execute(array(
+                json_value($editionPayload),
+                $briefId,
+            ));
+            if ($editionUpdate->rowCount() !== 1) {
+                throw new RuntimeException(
+                    'brief_stored_edition_manifest_mismatch'
+                );
+            }
+
+            // Re-read both persisted ranges after the final payload update.
+            // Recovery executes these same checks and never consults live
+            // event state once the immutable edition exists.
+            $verifiedItems = v2_locked_protected_brief_item_manifest(
+                $pdo,
+                $config,
+                $briefId,
+                $expectedSnapshots
+            );
+            $verifiedItemSha = v2_write_canonical_payload_hash($verifiedItems);
+            $verifiedEdition = v2_locked_brief_edition_row(
+                $pdo,
+                $config,
+                $briefId,
+                $edition,
+                $cutoffAt
+            );
+            $verifiedPayload = $verifiedEdition === null
+                ? null : json_decode(
+                    (string)$verifiedEdition['payload_json'],
+                    true
+                );
+            $verifiedEditionManifest = $verifiedEdition === null
+                ? null : v2_protected_brief_edition_manifest(
+                    $verifiedEdition,
+                    $verifiedItemSha
+                );
+            if (
+                !is_array($verifiedPayload)
+                || !hash_equals($storedItemManifestSha, $verifiedItemSha)
+                || !isset($verifiedPayload['stored_item_manifest'])
+                || !is_array($verifiedPayload['stored_item_manifest'])
+                || !hash_equals(
+                    $verifiedItemSha,
+                    v2_write_canonical_payload_hash(
+                        $verifiedPayload['stored_item_manifest']
+                    )
+                )
+                || !isset($verifiedPayload['stored_item_manifest_sha256'])
+                || !hash_equals(
+                    $verifiedItemSha,
+                    (string)$verifiedPayload['stored_item_manifest_sha256']
+                )
+                || !is_array($verifiedEditionManifest)
+                || !v2_protected_brief_edition_manifest_matches_request(
+                    $verifiedEditionManifest,
+                    $briefId,
+                    $edition,
+                    $cutoffAt,
+                    $buildSha,
+                    $verifiedItemSha
+                )
+                || !isset($verifiedPayload['stored_edition_manifest'])
+                || !is_array($verifiedPayload['stored_edition_manifest'])
+                || !isset(
+                    $verifiedPayload['stored_edition_manifest_sha256']
+                )
+                || !hash_equals(
+                    v2_write_canonical_payload_hash(
+                        $verifiedEditionManifest
+                    ),
+                    (string)$verifiedPayload[
+                        'stored_edition_manifest_sha256'
+                    ]
+                )
+                || !hash_equals(
+                    v2_write_canonical_payload_hash(
+                        $verifiedEditionManifest
+                    ),
+                    v2_write_canonical_payload_hash(
+                        $verifiedPayload['stored_edition_manifest']
+                    )
+                )
+            ) {
+                throw new RuntimeException(
+                    'brief_stored_edition_manifest_mismatch'
+                );
+            }
+        }
         $pdo->commit();
     } catch (Throwable $error) {
         if ($pdo->inTransaction()) {
@@ -4972,6 +5717,10 @@ function v2_admin_publish_brief(
             'brief_top_official_evidence_required',
             'brief_sources_unavailable',
             'brief_coverage_is_available',
+            'brief_event_snapshot_mismatch',
+            'brief_event_basis_mismatch',
+            'brief_stored_item_manifest_mismatch',
+            'brief_stored_edition_manifest_mismatch',
         );
         if (in_array($error->getMessage(), $known, true)
             || (string)$error->getCode() === '23000') {

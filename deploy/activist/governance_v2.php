@@ -448,7 +448,21 @@ function v2_like_literal(string $value): string {
     );
 }
 
+function v2_require_disjoint_protected_role_hashes(array $config): void {
+    $status=v1_protected_role_hash_overlap_status($config);
+    if ($status['valid']!==true) {
+        header('Retry-After: 300');
+        v2_respond(503,array(
+            'ok'=>false,
+            'error'=>'protected_role_token_hash_overlap',
+            'conflict_count'=>$status['conflict_count'],
+            'conflicting_roles'=>$status['conflicting_roles'],
+        ));
+    }
+}
+
 function v2_require_role(array $config, array $allowedRoles): string {
+    v2_require_disjoint_protected_role_hashes($config);
     $token = v1_bearer_token();
     if ($token === '') {
         header('WWW-Authenticate: Bearer realm="BSIDE API v2", charset="UTF-8"');
@@ -467,6 +481,7 @@ function v2_require_role(array $config, array $allowedRoles): string {
 }
 
 function v2_require_exact_role(array $config, string $requiredRole): string {
+    v2_require_disjoint_protected_role_hashes($config);
     $token = v1_bearer_token();
     if ($token === '') {
         header('WWW-Authenticate: Bearer realm="BSIDE protected release", charset="UTF-8"');
@@ -482,6 +497,7 @@ function v2_require_exact_role(array $config, string $requiredRole): string {
 }
 
 function v2_require_preview_token(array $config): void {
+    v2_require_disjoint_protected_role_hashes($config);
     $token = v1_bearer_token();
     if ($token === '') {
         header('WWW-Authenticate: Bearer realm="BSIDE global preview", charset="UTF-8"');
@@ -3130,6 +3146,108 @@ function v2_release_state_rows_for_update(PDO $pdo, array $config): array {
     return $rows;
 }
 
+/**
+ * Tables whose transactional semantics are part of protected cutover.
+ *
+ * The first three are mutated atomically. SourceRight and connector rows are
+ * locked to keep their eligibility stable until both release states commit.
+ */
+function v2_atomic_cutover_transaction_tables(array $config): array {
+    return array(
+        'governance_release_state' =>
+            table_plain_name($config, 'governance_release_state'),
+        'governance_release_audit' =>
+            table_plain_name($config, 'governance_release_audit'),
+        'release_authorizations' =>
+            table_plain_name($config, 'release_authorizations'),
+        'source_rights' => table_plain_name($config, 'source_rights'),
+        'source_connectors' =>
+            table_plain_name($config, 'source_connectors'),
+    );
+}
+
+/** Fail closed before cutover if any lock or mutation is non-transactional. */
+function v2_atomic_cutover_transaction_engine_guard(
+    PDO $pdo,
+    array $config
+): array {
+    $tables = v2_atomic_cutover_transaction_tables($config);
+    $physicalNames = array_values($tables);
+    $placeholders = implode(',', array_fill(0, count($physicalNames), '?'));
+    $statement = $pdo->prepare(
+        'SELECT TABLE_NAME,ENGINE FROM information_schema.TABLES'
+        . ' WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('
+        . $placeholders . ')'
+    );
+    $engines = array();
+    foreach (v1_pdo_fetch_all_and_close($statement, $physicalNames) as $row) {
+        $physicalName = isset($row['TABLE_NAME'])
+            ? (string)$row['TABLE_NAME'] : '';
+        if (in_array($physicalName, $physicalNames, true)) {
+            $engines[$physicalName] = isset($row['ENGINE'])
+                ? (string)$row['ENGINE'] : '';
+        }
+    }
+    $invalid = array();
+    foreach ($tables as $logicalName => $physicalName) {
+        if (!isset($engines[$physicalName])) {
+            $invalid[] = array(
+                'table' => $logicalName,
+                'reason' => 'table_missing',
+            );
+            continue;
+        }
+        if (!hash_equals('InnoDB', $engines[$physicalName])) {
+            $invalid[] = array(
+                'table' => $logicalName,
+                'reason' => 'engine_not_innodb',
+            );
+        }
+    }
+    return array(
+        'checked_count' => count($tables),
+        'invalid_count' => count($invalid),
+        'invalid_tables' => $invalid,
+    );
+}
+
+/**
+ * Hold shared metadata locks until commit, then re-check the engine while an
+ * ALTER TABLE is unable to cross the validation-to-mutation boundary.
+ */
+function v2_lock_atomic_cutover_transaction_table_metadata(
+    PDO $pdo,
+    array $config
+): void {
+    foreach (array_keys(v2_atomic_cutover_transaction_tables($config)) as $name) {
+        $statement = $pdo->query(
+            'SELECT 1 FROM ' . table_name($config, $name) . ' LIMIT 0'
+        );
+        $statement->closeCursor();
+    }
+}
+
+function v2_require_atomic_cutover_transaction_engines(
+    PDO $pdo,
+    array $config,
+    bool $rollback = false
+): void {
+    $guard = v2_atomic_cutover_transaction_engine_guard($pdo, $config);
+    if ((int)$guard['invalid_count'] < 1) {
+        return;
+    }
+    if ($rollback && $pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    v2_respond(503, array(
+        'ok' => false,
+        'error' => 'protected_release_transaction_engine_invalid',
+        'checked_table_count' => (int)$guard['checked_count'],
+        'invalid_table_count' => (int)$guard['invalid_count'],
+        'invalid_tables' => $guard['invalid_tables'],
+    ));
+}
+
 function v2_release_authorization_fields(array $payload): array {
     try {
         v2_write_assert_keys(
@@ -3245,6 +3363,7 @@ function v2_admin_issue_release_authorization(
 ): void {
     $fields = v2_release_authorization_fields(v2_json_body($config));
     v2_assert_deployed_candidate($fields);
+    v2_require_atomic_cutover_transaction_engines($pdo, $config);
     $authorizationId = 'release-auth:' . substr(hash(
         'sha256',
         $fields['candidate_sha'] . "\x1f"
@@ -3253,6 +3372,8 @@ function v2_admin_issue_release_authorization(
     ), 0, 48);
     $pdo->beginTransaction();
     try {
+        v2_lock_atomic_cutover_transaction_table_metadata($pdo, $config);
+        v2_require_atomic_cutover_transaction_engines($pdo, $config, true);
         $states = v2_release_state_rows_for_update($pdo, $config);
         if (
             (string)$states[GOV_V1_RELEASE_STATE_KEY]['release_state'] !== 'preview'
@@ -3419,8 +3540,11 @@ function v2_atomic_cutover_fields(array $payload): array {
 function v2_admin_atomic_cutover(PDO $pdo, array $config, string $role): void {
     $fields = v2_atomic_cutover_fields(v2_json_body($config));
     v2_assert_deployed_candidate($fields);
+    v2_require_atomic_cutover_transaction_engines($pdo, $config);
     $pdo->beginTransaction();
     try {
+        v2_lock_atomic_cutover_transaction_table_metadata($pdo, $config);
+        v2_require_atomic_cutover_transaction_engines($pdo, $config, true);
         $states = v2_release_state_rows_for_update($pdo, $config);
         if (
             (string)$states[GOV_V1_RELEASE_STATE_KEY]['release_state'] !== 'preview'

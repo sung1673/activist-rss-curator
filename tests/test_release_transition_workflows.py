@@ -328,6 +328,11 @@ def test_cutover_switches_owner_deploys_smokes_activates_and_can_recover() -> No
     )
     assert "/admin/release-authorizations" in atomic_step["run"]
     assert "/admin/cutover" in atomic_step["run"]
+    assert (
+        '[[ "$BSIDE_RELEASE_AUTHORIZER_TOKEN" != "$BSIDE_ADMIN_TOKEN" ]]'
+        in atomic_step["run"]
+    )
+    assert "Protected release roles must use distinct credentials." in atomic_step["run"]
     assert "openssl rand -hex 32" in atomic_step["run"]
     assert "::add-mask::$release_nonce" in atomic_step["run"]
     assert "expected_v1_state_version" in atomic_step["run"]
@@ -418,8 +423,14 @@ def test_rollback_closes_immediately_and_rechecks_before_legacy_deployment() -> 
         "legacy_pin_artifact_digest": (
             "${{ steps.legacy_recovery.outputs.pin_artifact_digest }}"
         ),
+        "orphaned_unstarted_json": (
+            "${{ steps.pages_producers.outputs.orphaned_unstarted_json }}"
+        ),
     }
-    assert "Cancel stale Pages producer runs before rollback deployment" in text
+    assert (
+        "Cancel or quarantine stale Pages producer runs before rollback deployment"
+        in text
+    )
     assert "LEGACY_ROLLBACK_RUN_ID" in text
     assert "LEGACY_ROLLBACK_ARTIFACT_NAME" in text
     assert "LEGACY_ROLLBACK_CODE_REVISION" in text
@@ -441,7 +452,7 @@ def test_rollback_closes_immediately_and_rechecks_before_legacy_deployment() -> 
         "Immediately close v2 then v1 before recovery preparation"
     )
     cancel_index = close_names.index(
-        "Cancel stale Pages producer runs before rollback deployment"
+        "Cancel or quarantine stale Pages producer runs before rollback deployment"
     )
     prepare_index = close_names.index(
         "Prepare or verify rollback recovery bundle before deployment lock"
@@ -454,6 +465,17 @@ def test_rollback_closes_immediately_and_rechecks_before_legacy_deployment() -> 
     assert immediate_close["env"]["BSIDE_ADMIN_TOKEN"] == (
         "${{ secrets.BSIDE_ADMIN_TOKEN }}"
     )
+    cancel = close["steps"][cancel_index]
+    cancel_script = cancel["with"]["script"]
+    assert cancel["id"] == "pages_producers"
+    assert cancel["env"]["EXPECTED_SHA"] == "${{ github.sha }}"
+    assert "./.github/scripts/orphaned-pages-run.cjs" in cancel_script
+    assert '"requested"' in cancel_script
+    assert "handleCancelServerError" in cancel_script
+    assert "confirmTerminalAfterCancelConflict" in cancel_script
+    assert "revalidateOrphanedUnstarted" in cancel_script
+    assert "orphaned_unstarted_json" in cancel_script
+    assert "30535379482" not in text
 
     deploy = payload["jobs"]["deploy_legacy"]
     assert deploy["needs"] == "close"
@@ -489,11 +511,29 @@ def test_rollback_closes_immediately_and_rechecks_before_legacy_deployment() -> 
     close_index = deploy_names.index(
         "Re-close v2 then v1 inside Pages deployment lock"
     )
+    orphan_revalidation_index = deploy_names.index(
+        "Revalidate quarantined orphaned Pages producers before deployment"
+    )
     verify_index = deploy_names.index(
         "Verify both release states closed before legacy deployment"
     )
     configure_index = deploy_names.index("Configure Pages")
-    assert validate_index < close_index < verify_index < configure_index
+    assert (
+        validate_index
+        < orphan_revalidation_index
+        < close_index
+        < verify_index
+        < configure_index
+    )
+    orphan_revalidation = deploy["steps"][orphan_revalidation_index]
+    assert orphan_revalidation["env"]["EXPECTED_SHA"] == "${{ github.sha }}"
+    assert orphan_revalidation["env"]["ORPHANED_UNSTARTED_JSON"] == (
+        "${{ needs.close.outputs.orphaned_unstarted_json }}"
+    )
+    orphan_revalidation_script = orphan_revalidation["with"]["script"]
+    assert "revalidateOrphanedUnstarted" in orphan_revalidation_script
+    assert "confirmCancelledOrphanedUnstarted" in orphan_revalidation_script
+    assert "30535379482" not in orphan_revalidation_script
     assert deploy["steps"][close_index]["run"] == (
         "bash .github/scripts/close-governance-release-state.sh"
     )

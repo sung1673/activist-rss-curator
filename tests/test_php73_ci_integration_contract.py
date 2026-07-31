@@ -41,7 +41,10 @@ def test_php73_job_runs_isolated_mysql_http_staging_smoke() -> None:
 
     smoke = steps["Run PHP 7.3 and MySQL Telegram staging smoke"]
     assert int(smoke["timeout-minutes"]) <= 3
-    assert "php -S 127.0.0.1:8787" in smoke["run"]
+    assert "opcache.enable_cli=0" in smoke["run"]
+    assert "opcache.validate_timestamps=1" in smoke["run"]
+    assert "opcache.revalidate_freq=0" in smoke["run"]
+    assert "-S 127.0.0.1:8787" in smoke["run"]
     assert "tests/php73_router.php" in smoke["run"]
     assert "python3 tests/php73_staging_smoke.py" in smoke["run"]
 
@@ -96,6 +99,26 @@ def test_php73_release_fixture_preserves_canonical_dart_source_right_id() -> Non
         identity_fixture.index("runtime_events, _ = request_json(")
     ]
     assert '"upsert_governance_snapshot_dart_guarded",' in kind_cross_source_update
+
+
+def test_php73_reviewed_ordinary_fixture_tracks_empty_timeline_as_state() -> None:
+    smoke = (ROOT / "tests" / "php73_release_state_smoke.py").read_text(
+        encoding="utf-8"
+    )
+    ordinary_fixture = smoke[
+        smoke.index(
+            'reviewed_ordinary_event_id = "event:ci-reviewed-ordinary-read-only"'
+        ) : smoke.index('reviewed_correction_event_id = "')
+    ]
+
+    assert "is_correction=False" in ordinary_fixture
+    assert "is_cancelled=False" in ordinary_fixture
+    assert (
+        "COALESCE((SELECT SHA2(CONCAT_WS(CHAR(31),document_id,occurred_at,"
+        in ordinary_fixture
+    )
+    assert ordinary_fixture.count("SHA2('<NONE>',256)") == 2
+    assert 'reviewed_ordinary_rows_before == "1|1|1|1|0|0"' in ordinary_fixture
 
 
 def test_php73_global_fixture_restores_the_latest_source_title_from_mysql() -> None:

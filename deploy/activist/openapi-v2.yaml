@@ -60,7 +60,11 @@ x-release-gate:
     and global_terminal_v2 are promoted together only by POST /admin/cutover
     after POST /admin/release-authorizations has issued a short-lived,
     single-use authorization bound to the exact deployed candidate SHA,
-    release-evidence artifact digest and both state versions.
+    release-evidence artifact digest and both state versions. The SHA-256
+    hashes configured for admin, release_authorizer, editor, ops, rights and
+    preview credentials must be pairwise disjoint; protected and preview
+    authentication fails closed without exposing a credential hash if any
+    overlap is detected.
   behavior:
     closed: Public data routes return HTTP 503.
     preview: A preview Bearer token is required and responses are not cacheable.
@@ -82,8 +86,11 @@ x-release-gate:
     they stay link-only, coverage_unavailable and never public-ready; no
     credential-free HTML fallback is permitted. The existing
     published v1/v2 document rights guard then runs before the authorization is
-    consumed. Any failure rolls back both release states and leaves the
-    authorization unconsumed.
+    consumed. Before entering that transaction, and again under
+    transaction-held metadata locks, the release-state, release-audit,
+    release-authorization, SourceRight and connector tables must all be present
+    with the exact InnoDB engine. Any failure rolls back both release states and
+    leaves the authorization unconsumed.
   always-available: [/health, /openapi.yaml, /openapi.json]
   privileged-bypass:
     - /ops/connectors/{connector_id}/checkpoint
@@ -1137,7 +1144,24 @@ paths:
         returns an empty Top lane instead of exposing an older edition. Reusing
         an edition and cutoff is
         idempotent only for the identical semantic payload; a changed payload
-        conflicts instead of mutating the published snapshot.
+        conflicts instead of mutating the published snapshot. A protected
+        expedited publication may bind every item to the full editor-only
+        expedited-review snapshot hash and bind their event-id-sorted aggregate.
+        Those hashes are verified from event, issuer, revision, actor, document,
+        SourceRight and connector rows locked in the publication transaction.
+        The protected transaction explicitly uses SERIALIZABLE isolation so
+        empty actor, document and editorial-revision ranges also block the first
+        concurrent insert. Protected editions persist contract_version 2 plus
+        canonical manifests and hashes read back from the actual stored
+        BriefItem and BriefEdition rows. The item manifest binds its frozen
+        event content, selection and complete approval/audit metadata. The
+        edition manifest binds every edition column except payload_json (to
+        avoid recursive hashing) and the item-manifest hash. require_existing
+        is recovery-only: it locks and verifies the full stored edition and
+        item rows without consulting mutable live event state, rejects a
+        missing, extra or altered row, and never creates a missing edition.
+        Legacy publications without the protected hash fields retain the
+        additive contract_version 1 replay behavior.
       security:
         - EditorBearer: []
       requestBody:
@@ -1160,7 +1184,9 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          description: Edition conflict, ineligible event or source-availability mismatch
+          description: >-
+            Edition conflict, missing or altered protected BriefItem, ineligible
+            event, or source-availability mismatch
           content:
             application/json:
               schema:
@@ -1253,8 +1279,9 @@ paths:
         verified GitHub evidence artifact digest and identifiers, and the
         current v1 and v2 preview state versions. The server stores only the
         nonce SHA-256, accepts an expiry 60 to 900 seconds in the future, and
-        revokes every older unused authorization. The nonce is deliberately
-        omitted from the response.
+        revokes every older unused authorization. Authorization mutation uses
+        the same preflight and metadata-lock-protected InnoDB engine guard as
+        cutover. The nonce is deliberately omitted from the response.
       security:
         - ReleaseAuthorizerBearer: []
       requestBody:
@@ -1307,8 +1334,12 @@ paths:
         current, collectable and publicly redistributable; each connector must
         be configured or active and retain its registered country, source
         key/type, SourceRight id and coverage mode. Current public SourceRights
-        for both API versions are then revalidated under lock. Failure leaves
-        both release states unchanged and does not consume the authorization.
+        for both API versions are then revalidated under lock, including exact
+        document source class/key to grant source type/key identity. Before the
+        transaction starts, and again after acquiring transaction-held metadata
+        locks, every table mutated or locked by cutover must be an exact InnoDB
+        table. Failure leaves both release states unchanged and does not consume
+        the authorization.
         Success writes both release audits with one authorization id and one
         cutover/sunset clock. A used authorization is never reusable, including
         after an emergency rollback.
@@ -1359,7 +1390,9 @@ components:
       type: http
       scheme: bearer
       bearerFormat: Opaque preview token
-      description: Required only while a public data route is in preview.
+      description: >-
+        Required only while a public data route is in preview. Its configured
+        SHA-256 hash must not be assigned to any privileged role.
     OpsBearer:
       type: http
       scheme: bearer
@@ -1377,7 +1410,8 @@ components:
       description: >-
         Required for administrative release-state changes and consumption of a
         previously issued protected cutover authorization. It cannot issue an
-        authorization.
+        authorization, and its configured SHA-256 hash must be distinct from
+        every other protected role hash.
     ReleaseAuthorizerBearer:
       type: http
       scheme: bearer
@@ -1387,7 +1421,8 @@ components:
         BSIDE_RELEASE_AUTHORIZER_TOKEN only by the protected
         governance-release environment. It can issue a short-lived, single-use
         cutover authorization. Admin, editor and ops fallback is intentionally
-        forbidden; the server stores only SHA-256 token hashes.
+        forbidden; its hash must be distinct from every other protected role,
+        and the server stores only SHA-256 token hashes.
   parameters:
     Page:
       name: page
@@ -3706,6 +3741,12 @@ components:
           type: string
           minLength: 1
           maxLength: 500
+        expected_snapshot_sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: >-
+            Optional full expedited-review detail snapshot hash returned as
+            meta.snapshot_sha256 by the editor-only event detail endpoint.
     BriefPublicationRequest:
       type: object
       required: [edition, cutoff_at, build_sha, items]
@@ -3713,7 +3754,10 @@ components:
       description: >-
         Across items, top is limited to 5 and watch/deadline to 50 each. When
         top is empty, empty_reason is required; when top is non-empty,
-        empty_reason must be absent or null.
+        empty_reason must be absent or null. expected_event_basis_sha256 and
+        every item expected_snapshot_sha256 are all-or-none. require_existing
+        requires that protected basis and never participates in semantic
+        identity; both expected hash fields do participate.
       properties:
         edition:
           type: string
@@ -3730,6 +3774,18 @@ components:
         empty_reason:
           type: [string, 'null']
           enum: [no_confirmed_material_events, coverage_unavailable, null]
+        require_existing:
+          type: boolean
+          default: false
+          description: >-
+            Recovery-only control. When true, an identical edition must already
+            exist or the request fails with 409 before any event read or insert.
+        expected_event_basis_sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: >-
+            Canonical SHA-256 of the event-id-sorted array of objects containing
+            event_id and the corresponding expected_snapshot_sha256.
         items:
           type: array
           maxItems: 105

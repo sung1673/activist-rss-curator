@@ -126,8 +126,14 @@ x-release-gate:
     global_terminal_v2 in the same transaction only after locking and
     revalidating the four required KR/US/CA/AU Production Alpha
     connector/SourceRight pairs, the optional JP/GB connector identities, plus
-    every currently published document SourceRight. Document-empty required
-    countries are not exempt.
+    every currently published document SourceRight with an exact document
+    source class/key to grant source type/key identity. All tables mutated or
+    locked by authorization and cutover must remain InnoDB under
+    transaction-held metadata locks. Document-empty required countries are not
+    exempt. The configured SHA-256 hashes for admin, release_authorizer,
+    editor, ops, rights and preview credentials must be pairwise disjoint;
+    protected and preview authentication fails closed on overlap without
+    returning credential hashes.
 tags:
   - name: Public
   - name: Feedback
@@ -1142,10 +1148,16 @@ components:
       type: http
       scheme: bearer
       bearerFormat: opaque-role-token
+      description: >-
+        Protected role token. Each configured role SHA-256 hash must be
+        pairwise disjoint from all other protected and preview roles.
     previewBearerAuth:
       type: http
       scheme: bearer
       bearerFormat: opaque-preview-token
+      description: >-
+        Preview-only token whose configured SHA-256 hash must not be assigned
+        to a privileged role.
   parameters:
     Page:
       name: page
