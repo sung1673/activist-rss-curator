@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       run_mode:
-        description: "Execution mode. Use page_only for layout/template-only deploys without article collection."
+        description: "Execution mode. page_only stays collection-free only when Pages deployment is disabled; deployable runs are promoted to a verified full run."
         required: false
         type: choice
         default: auto
@@ -214,6 +214,11 @@ jobs:
 
           if [[ "$page_run" == "true" && "$full_run" != "true" && "$EVENT_NAME" == "push" && "$COMMIT_MESSAGE" != *"[page-only]"* ]]; then
             echo "::notice::Promoting an automatic page-code push to a verified full run so publication metrics are produced in the same job."
+            full_run=true
+          fi
+
+          if [[ "$page_run" == "true" && "$full_run" != "true" && "$REF_NAME" == "$DEFAULT_BRANCH" && "$LEGACY_PAGES_ENABLED" == "true" && "$GOVERNANCE_PAGES_ENABLED" != "true" && "$ALLOW_PAGES_DEPLOY" == "true" ]]; then
+            echo "::notice::Promoting a deployable page_only run to a verified full run so collection, metrics verification, and publication happen in the same job."
             full_run=true
           fi
 
@@ -403,7 +408,7 @@ jobs:
           --destination-feed public/feed
 
       - name: Build daily report page
-        if: ${{ steps.run_mode.outputs.full == 'true' || steps.run_mode.outputs.page == 'true' }}
+        if: ${{ steps.run_mode.outputs.full == 'true' }}
         env:
           CURATOR_DATA_SOURCE: mysql
           CURATOR_REQUIRE_REMOTE_API: "1"
@@ -418,7 +423,7 @@ jobs:
         run: python -m curator.daily_report
 
       - name: Build token-gated Telegram admin shell
-        if: ${{ steps.run_mode.outputs.full == 'true' || steps.run_mode.outputs.page == 'true' }}
+        if: ${{ steps.run_mode.outputs.full == 'true' }}
         env:
           TELEGRAM_ADMIN_ACCESS_TOKEN: ${{ secrets.TELEGRAM_ADMIN_ACCESS_TOKEN }}
           ACTIVIST_PUBLIC_API_URL: ${{ vars.ACTIVIST_PUBLIC_API_URL }}

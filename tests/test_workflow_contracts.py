@@ -353,10 +353,19 @@ def test_legacy_shadow_baseline_does_not_commit_generated_files() -> None:
     assert "send_daily_report:" not in legacy
     assert "default: false" in legacy
     assert '"$ALLOW_PAGES_DEPLOY" == "true"' in legacy
-    assert (
-        "steps.run_mode.outputs.full == 'true' || steps.run_mode.outputs.page == 'true'"
-        in legacy
-    )
+    assert "Promoting a deployable page_only run to a verified full run" in legacy
+    baseline = yaml.load(legacy, Loader=yaml.BaseLoader)
+    baseline_steps = baseline["jobs"]["build-feed"]["steps"]
+    for step_name in (
+        "Build daily report page",
+        "Build token-gated Telegram admin shell",
+    ):
+        publication_step = next(
+            step for step in baseline_steps if step["name"] == step_name
+        )
+        assert publication_step["if"] == (
+            "${{ steps.run_mode.outputs.full == 'true' }}"
+        )
     assert "deploy_pages=$deploy_pages" in legacy
     assert "ENABLE_PAGES and ENABLE_GOVERNANCE_PAGES are mutually exclusive" in legacy
     assert "Prepare allowlisted legacy Pages artifact" in legacy
@@ -1223,32 +1232,110 @@ def test_build_feed_page_only_work_is_promoted_before_publication() -> None:
     assert "publication metrics are produced in the same job" in promoted_block
 
 
-def test_build_feed_explicit_page_only_modes_remain_collection_free() -> None:
+def test_build_feed_deployable_page_only_is_promoted_to_verified_full_run() -> None:
     workflow = workflow_text("build-feed.yml")
     dispatch_block = workflow[
         workflow.index('elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]'):
         workflow.index('elif [[ "$EVENT_NAME" == "push" ]]')
     ]
-    push_block = workflow[
-        workflow.index('elif [[ "$EVENT_NAME" == "push" ]]'):
-        workflow.index(
-            '          if [[ "$LEGACY_PAGES_ENABLED" == "true" '
-            '&& "$GOVERNANCE_PAGES_ENABLED" == "true" ]]'
-        )
-    ]
+    promotion = (
+        'if [[ "$page_run" == "true" && "$full_run" != "true" '
+        '&& "$REF_NAME" == "$DEFAULT_BRANCH" '
+        '&& "$LEGACY_PAGES_ENABLED" == "true" '
+        '&& "$GOVERNANCE_PAGES_ENABLED" != "true" '
+        '&& "$ALLOW_PAGES_DEPLOY" == "true" ]]; then'
+    )
+    promotion_index = workflow.index(promotion)
+    deployment_index = workflow.index("          deploy_pages=false")
 
     assert "page_only)" in dispatch_block
     assert "page_run=true" in dispatch_block
-    assert "full_run=true" not in dispatch_block[
-        dispatch_block.index("page_only)"):
-        dispatch_block.index("full|auto")
+    assert promotion_index < deployment_index
+    promoted_block = workflow[promotion_index:deployment_index]
+    assert "full_run=true" in promoted_block
+    assert "deployable page_only run" in promoted_block
+    assert "metrics verification" in promoted_block
+
+
+def test_build_feed_nondeploy_page_only_remains_collection_free() -> None:
+    workflow = workflow_text("build-feed.yml")
+    payload = yaml.load(workflow, Loader=yaml.BaseLoader)
+    steps = payload["jobs"]["build-feed"]["steps"]
+    promotion_index = workflow.index(
+        'if [[ "$page_run" == "true" && "$full_run" != "true" '
+        '&& "$REF_NAME" == "$DEFAULT_BRANCH" '
+        '&& "$LEGACY_PAGES_ENABLED" == "true" '
+        '&& "$GOVERNANCE_PAGES_ENABLED" != "true" '
+        '&& "$ALLOW_PAGES_DEPLOY" == "true" ]]; then'
+    )
+    deployment_index = workflow.index("          deploy_pages=false")
+    promoted_block = workflow[promotion_index:deployment_index]
+    deploy_block = workflow[deployment_index:workflow.index(
+        '          echo "full=$full_run" >> "$GITHUB_OUTPUT"'
+    )]
+
+    assert '"$ALLOW_PAGES_DEPLOY" == "true"' in promoted_block
+    assert '"$REF_NAME" == "$DEFAULT_BRANCH"' in promoted_block
+    assert '"$ALLOW_PAGES_DEPLOY" == "true"' in deploy_block
+    assert '"$full_run" == "true" || "$page_run" == "true"' in deploy_block
+    daily_report = next(
+        step for step in steps if step["name"] == "Build daily report page"
+    )
+    admin_shell = next(
+        step
+        for step in steps
+        if step["name"] == "Build token-gated Telegram admin shell"
+    )
+    assert daily_report["if"] == (
+        "${{ steps.run_mode.outputs.full == 'true' }}"
+    )
+    assert admin_shell["if"] == (
+        "${{ steps.run_mode.outputs.full == 'true' }}"
+    )
+
+
+def test_build_feed_metrics_are_verified_before_any_page_publication() -> None:
+    payload = yaml.load(workflow_text("build-feed.yml"), Loader=yaml.BaseLoader)
+    steps = payload["jobs"]["build-feed"]["steps"]
+    initialize = next(
+        step for step in steps if step["name"] == "Initialize curator run metrics"
+    )
+    collect = next(step for step in steps if step["name"] == "Build feed")
+    verify = next(
+        step for step in steps if step["name"] == "Verify curator run metrics"
+    )
+    daily_report = next(
+        step for step in steps if step["name"] == "Build daily report page"
+    )
+    pages_upload = next(
+        step
+        for step in steps
+        if step.get("uses")
+        == "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9"
+    )
+
+    assert (
+        steps.index(initialize)
+        < steps.index(collect)
+        < steps.index(verify)
+        < steps.index(daily_report)
+        < steps.index(pages_upload)
+    )
+    assert verify["if"] == "${{ success() && steps.run_mode.outputs.full == 'true' }}"
+
+
+def test_build_feed_allow_pages_deploy_false_cannot_deploy() -> None:
+    workflow = workflow_text("build-feed.yml")
+    deploy_block = workflow[
+        workflow.index("          deploy_pages=false"):
+        workflow.index('          echo "full=$full_run" >> "$GITHUB_OUTPUT"')
     ]
-    explicit_marker_block = push_block[
-        push_block.index('if [[ "$COMMIT_MESSAGE" == *"[page-only]"* ]]'):
-        push_block.index('elif [[ "$COMMIT_MESSAGE" == *"[force-collect]"* ]]')
-    ]
-    assert "page_run=true" in explicit_marker_block
-    assert "full_run=true" not in explicit_marker_block
+
+    assert "deploy_pages=false" in deploy_block
+    assert '"$ALLOW_PAGES_DEPLOY" == "true"' in deploy_block
+    assert deploy_block.index('"$ALLOW_PAGES_DEPLOY" == "true"') < deploy_block.index(
+        "deploy_pages=true"
+    )
 
 
 def test_legacy_pages_archive_download_and_seed_are_fail_closed() -> None:
