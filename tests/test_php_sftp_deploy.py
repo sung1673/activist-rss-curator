@@ -18,7 +18,11 @@ import pytest
 
 import curator.php_sftp_deploy as php_deploy
 from curator.deployment_manifest import CORE_API_FILES, write_deployment_manifest
-from curator.mysql_backup import legacy_ssh_rsa_sha1_is_allowed
+from curator.mysql_backup import (
+    SSH_KEEPALIVE_INTERVAL_SECONDS,
+    legacy_ssh_rsa_sha1_is_allowed,
+    ssh_host_key_sha256,
+)
 from curator.php_sftp_deploy import (
     CORE_RELEASE_CONFIRMATION_ENV,
     CORE_ROLLBACK_CURRENT_SHA_ENV,
@@ -2700,6 +2704,173 @@ def test_session_wraps_unexpected_transport_errors_without_sensitive_values(
 
     assert secret not in str(caught.value)
     assert secret not in repr(caught.value)
+
+
+def test_session_sets_keepalive_only_after_pinned_password_authentication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[object] = []
+    host_key = b"pinned-sftp-host-key"
+
+    class FakeSocket:
+        def close(self) -> None:
+            events.append("socket-close")
+
+    class FakeServerKey:
+        def asbytes(self) -> bytes:
+            events.append("host-key")
+            return host_key
+
+    class FakeTransport:
+        def __init__(
+            self,
+            _socket: object,
+            *,
+            disabled_algorithms: object,
+        ) -> None:
+            self.auth_timeout = 0
+            self.disabled_algorithms = disabled_algorithms
+            events.append("transport")
+
+        def start_client(self, *, timeout: int) -> None:
+            events.append(("start-client", timeout))
+
+        def get_remote_server_key(self) -> FakeServerKey:
+            return FakeServerKey()
+
+        def auth_password(
+            self,
+            *,
+            username: str,
+            password: str,
+            fallback: bool,
+        ) -> None:
+            events.append(("auth", username, password, fallback))
+
+        def is_authenticated(self) -> bool:
+            events.append("authenticated")
+            return True
+
+        def set_keepalive(self, interval: int) -> None:
+            events.append(("keepalive", interval))
+
+        def close(self) -> None:
+            events.append("transport-close")
+
+    class FakeSftp:
+        def close(self) -> None:
+            events.append("sftp-close")
+
+    class FakeSftpClient:
+        @staticmethod
+        def from_transport(transport: object) -> FakeSftp:
+            assert isinstance(transport, FakeTransport)
+            events.append("sftp")
+            return FakeSftp()
+
+    monkeypatch.setattr(
+        php_deploy.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: FakeSocket(),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "paramiko",
+        SimpleNamespace(
+            Transport=FakeTransport,
+            SFTPClient=FakeSftpClient,
+        ),
+    )
+    options = ssh_sftp_options_from_args(
+        _ssh_args(ssh_host_key_sha256=ssh_host_key_sha256(host_key)),
+        environ={"DEPLOY_PASSWORD": "sftp-secret"},
+    )
+
+    with ParamikoPinnedSftpSession(options):
+        assert events == [
+            "transport",
+            ("start-client", 15),
+            "host-key",
+            ("auth", "deploy", "sftp-secret", False),
+            "authenticated",
+            ("keepalive", SSH_KEEPALIVE_INTERVAL_SECONDS),
+            "sftp",
+        ]
+
+    assert events[-3:] == [
+        "sftp-close",
+        "transport-close",
+        "socket-close",
+    ]
+
+
+def test_session_wrong_host_pin_never_authenticates_or_enables_keepalive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class FakeSocket:
+        def close(self) -> None:
+            events.append("socket-close")
+
+    class FakeServerKey:
+        def asbytes(self) -> bytes:
+            return b"unexpected-sftp-host-key"
+
+    class FakeTransport:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            self.auth_timeout = 0
+
+        def start_client(self, *, timeout: int) -> None:
+            assert timeout == 15
+
+        def get_remote_server_key(self) -> FakeServerKey:
+            return FakeServerKey()
+
+        def auth_password(self, **_kwargs: object) -> None:
+            events.append("auth")
+
+        def set_keepalive(self, _interval: int) -> None:
+            events.append("keepalive")
+
+        def close(self) -> None:
+            events.append("transport-close")
+
+    class FakeSftpClient:
+        @staticmethod
+        def from_transport(_transport: object) -> object:
+            events.append("sftp")
+            return object()
+
+    monkeypatch.setattr(
+        php_deploy.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: FakeSocket(),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "paramiko",
+        SimpleNamespace(
+            Transport=FakeTransport,
+            SFTPClient=FakeSftpClient,
+        ),
+    )
+    options = ssh_sftp_options_from_args(
+        _ssh_args(
+            ssh_host_key_sha256=ssh_host_key_sha256(
+                b"expected-sftp-host-key"
+            )
+        ),
+        environ={"DEPLOY_PASSWORD": "sftp-secret"},
+    )
+
+    with pytest.raises(
+        PhpDeploymentError,
+        match="SSH server host key does not match the pinned fingerprint",
+    ):
+        ParamikoPinnedSftpSession(options).__enter__()
+
+    assert events == ["transport-close", "socket-close"]
 
 
 def test_cli_unexpected_error_prints_only_generic_safe_line(

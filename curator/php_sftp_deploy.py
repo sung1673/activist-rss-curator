@@ -24,6 +24,7 @@ from urllib.parse import quote, unquote, urlsplit
 from curator.deployment_manifest import CORE_API_FILES
 from curator.mysql_backup import (
     MySqlBackupError,
+    SSH_KEEPALIVE_INTERVAL_SECONDS,
     SshTunnelOptions,
     _enable_paramiko_legacy_ssh_rsa_sha1,
     legacy_ssh_rsa_sha1_is_allowed,
@@ -953,6 +954,7 @@ class ParamikoPinnedSftpSession:
             )
             if not self._transport.is_authenticated():
                 raise PhpDeploymentError("SSH authentication did not complete")
+            self._transport.set_keepalive(SSH_KEEPALIVE_INTERVAL_SECONDS)
             self._sftp = paramiko.SFTPClient.from_transport(self._transport)
             if self._sftp is None:
                 raise PhpDeploymentError("SFTP subsystem did not start")
