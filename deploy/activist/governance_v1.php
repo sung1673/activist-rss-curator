@@ -10519,6 +10519,11 @@ function upsert_governance_snapshot(
             if (!is_array($company)) { continue; }
             $companyId = trim((string)v1_first($company, array('company_id', 'corp_code'), ''));
             if (isset($readOnlyDartReviewedCompanyIds[$companyId])) {
+                // The reviewed-event preflight already proved this exact
+                // company projection and deliberately keeps it immutable.
+                // Snapshot ACK counts represent submitted/idempotently
+                // acknowledged rows, not only rows that executed an upsert.
+                $counts['companies']++;
                 continue;
             }
             $legalName = trim((string)v1_first($company, array('legal_name', 'corp_name'), ''));

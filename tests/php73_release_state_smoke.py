@@ -3069,6 +3069,8 @@ def exercise_event_identity_datetime_storage(
         )
         require(
             reviewed_ordinary_ack.get("ok") is True
+            and reviewed_ordinary_ack.get("upserted", {}).get("companies")
+            == 1
             and reviewed_ordinary_ack.get("upserted", {}).get("documents") == 1
             and reviewed_ordinary_ack.get("upserted", {}).get("events") == 1
             and reviewed_ordinary_ack.get("upserted", {}).get(
@@ -3792,6 +3794,7 @@ def exercise_event_identity_datetime_storage(
     )
     require(
         reviewed_read_only_ack.get("ok") is True
+        and reviewed_read_only_ack.get("upserted", {}).get("companies") == 1
         and reviewed_read_only_ack.get("upserted", {}).get("documents") == 1
         and reviewed_read_only_ack.get("upserted", {}).get("events") == 1
         and reviewed_read_only_ack.get("upserted", {}).get(
@@ -3831,7 +3834,9 @@ def exercise_event_identity_datetime_storage(
         expected_status=200,
     )
     require(
-        reviewed_correction_replay.get("ok") is True,
+        reviewed_correction_replay.get("ok") is True
+        and reviewed_correction_replay.get("upserted", {}).get("companies")
+        == 1,
         repr(reviewed_correction_replay),
     )
     require(

@@ -2157,6 +2157,20 @@ def test_reviewed_dart_event_replay_is_an_exact_read_only_ack():
     assert company_loop.index(
         "isset($readOnlyDartReviewedCompanyIds[$companyId])"
     ) < company_loop.index("$companyStmt->execute")
+    reviewed_company_ack = company_loop[
+        company_loop.index(
+            "if (isset($readOnlyDartReviewedCompanyIds[$companyId]))"
+        ) : company_loop.index(
+            "$companyStmt->execute",
+            company_loop.index(
+                "if (isset($readOnlyDartReviewedCompanyIds[$companyId]))"
+            ),
+        )
+    ]
+    assert "$counts['companies']++;" in reviewed_company_ack
+    assert reviewed_company_ack.index("$counts['companies']++;") < (
+        reviewed_company_ack.index("continue;")
+    )
 
     write_loop = ingest[
         ingest.index("foreach ($events as $event)") : ingest.index(
