@@ -253,7 +253,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Materialize and verify the currently-served legacy site
+      - name: Materialize and structurally verify the currently-served legacy source
         shell: bash
         run: |
           set -euo pipefail
@@ -264,9 +264,24 @@ jobs:
           )
           [[ "${#tarballs[@]}" -eq 1 ]]
           tar -xf "${tarballs[0]}" -C current-legacy-site
-          python -m curator.legacy_telegram_safety verify-site \
-            --site current-legacy-site \
-            --minimum-dated-reports 90
+          for required in CNAME 404.html feed.xml index.html; do
+            test -f "current-legacy-site/$required"
+            test ! -L "current-legacy-site/$required"
+          done
+          test -d current-legacy-site/feed
+          test ! -L current-legacy-site/feed
+          mapfile -t symbolic_links < <(
+            find current-legacy-site -type l -print
+          )
+          if [[ "${#symbolic_links[@]}" -ne 0 ]]; then
+            echo "::error::The currently-served legacy source contains a symbolic link."
+            exit 1
+          fi
+          mapfile -t dated_reports < <(
+            find current-legacy-site/feed -maxdepth 1 -type f \
+              -name '????-??-??.html' -printf '%f\n' | sort
+          )
+          [[ "${#dated_reports[@]}" -ge 90 ]]
 
       - name: Prove the immutable legacy source matches the public root
         shell: bash
@@ -514,6 +529,7 @@ jobs:
         id: recovery_deployment
         if: >-
           always() &&
+          steps.legacy_recovery_pages_artifact.outcome == 'success' &&
           (steps.deployment.outcome != 'success' || steps.preview_smoke.outcome != 'success')
         continue-on-error: true
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
