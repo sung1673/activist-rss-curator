@@ -884,6 +884,14 @@ def test_daily_generation_uses_requested_kst_boundary_and_has_no_delivery_job() 
     )
     payload = yaml.load(workflow, Loader=yaml.BaseLoader)
     assert set(payload["jobs"]) == {"generate"}
+    staging = next(
+        step
+        for step in payload["jobs"]["generate"]["steps"]
+        if step["name"] == "Stage governance-only Pages artifact"
+    )
+    assert "python -m curator.legacy_internal_safety verify-site" in staging["run"]
+    assert "--site governance-pages-artifact" in staging["run"]
+    assert "--minimum-dated-reports 90" in staging["run"]
 
 
 def test_daily_legacy_recovery_is_digest_pinned_and_rolled_only_from_trusted_runs() -> None:

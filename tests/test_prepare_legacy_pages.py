@@ -66,6 +66,18 @@ def build_source(root: Path) -> Path:
         filename = f"{cursor.isoformat()}.html"
         (feed / filename).write_text(filename, encoding="utf-8")
         cursor += timedelta(days=1)
+    (feed / "2026-06-02.html").write_text(
+        "<!doctype html><html><body><h1>지배구조 점수 개선</h1><script>\n"
+        "const priority = Number(story.priority_score || 0);\n"
+        "if (priority) {\n"
+        "  const score = document.createElement('span');\n"
+        "  score.textContent = `점수 ${priority}`;\n"
+        "  meta.appendChild(score);\n"
+        "}\n"
+        "const localScore = article.summary ? 1 : 0;\n"
+        "</script></body></html>",
+        encoding="utf-8",
+    )
     (feed / "2026-06-01.html").write_text(
         "<!doctype html><html><body>"
         '<a href="article.html">원문 기사</a>'
@@ -115,6 +127,26 @@ def test_preparer_copies_only_the_legacy_allowlist(tmp_path: Path) -> None:
     assert 'href="index.html"' in safe_search
     assert not (destination / "governance").exists()
     assert not (destination / "unexpected.txt").exists()
+    score_safe = (destination / "feed" / "2026-06-02.html").read_text(
+        encoding="utf-8"
+    )
+    assert "story.priority_score" not in score_safe
+    assert "지배구조 점수 개선" in score_safe
+    assert "localScore" in score_safe
+
+
+def test_preparer_fails_closed_for_unknown_internal_score_usage(tmp_path: Path) -> None:
+    preparer = load_preparer()
+    source = build_source(tmp_path)
+    (source / "feed" / "2026-06-02.html").write_text(
+        "<!doctype html><html><body>"
+        "<script>console.log(story.priority_score)</script>"
+        "</body></html>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(preparer.PreparationError, match="internal priority score"):
+        preparer.prepare_legacy_pages(source, tmp_path / "artifact")
 
 
 def test_preparer_can_mount_only_the_public_governance_preview_subpath(tmp_path: Path) -> None:

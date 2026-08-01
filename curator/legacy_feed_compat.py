@@ -393,6 +393,67 @@ def _load_manifest(site: Path) -> dict[str, Any]:
     return payload
 
 
+def _manifest_identity(manifest: dict[str, Any]) -> LegacyArtifactIdentity:
+    source = manifest.get("source")
+    if not isinstance(source, dict):
+        raise LegacyFeedCompatibilityError(
+            "legacy compatibility source metadata is missing"
+        )
+    try:
+        identity = LegacyArtifactIdentity(
+            run_id=str(source["run_id"]),
+            artifact_id=str(source["artifact_id"]),
+            artifact_name=str(source["artifact_name"]),
+            code_revision=str(source["code_revision"]),
+            artifact_digest=str(source["artifact_digest"]),
+        ).validated()
+    except (KeyError, TypeError) as exc:
+        raise LegacyFeedCompatibilityError(
+            "legacy compatibility source metadata is incomplete"
+        ) from exc
+    if source.get("workflow") != ".github/workflows/build-feed.yml":
+        raise LegacyFeedCompatibilityError(
+            "legacy compatibility source workflow is invalid"
+        )
+    return identity
+
+
+def refresh_legacy_feed_compatibility_manifest(
+    site: Path,
+    *,
+    verified_source_manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """Rebind a verified compatibility copy after an approved public transform."""
+    current = _load_manifest(site)
+    if current != verified_source_manifest:
+        raise LegacyFeedCompatibilityError(
+            "legacy compatibility source manifest changed before public transform"
+        )
+    identity = _manifest_identity(current)
+    feed_xml, reports, optional = _load_site_directory(site)
+    window_start, window_end, required = _required_window(reports)
+    if set(reports) != set(required):
+        raise LegacyFeedCompatibilityError(
+            "legacy compatibility site must contain exactly 90 reports"
+        )
+    if (
+        current.get("window_start") != window_start.isoformat()
+        or current.get("window_end") != window_end.isoformat()
+        or current.get("dated_report_count") != len(required)
+    ):
+        raise LegacyFeedCompatibilityError(
+            "legacy compatibility window changed before public transform"
+        )
+    refreshed = _manifest(identity, feed_xml, reports, required, optional)
+    (site / MANIFEST_NAME).write_text(
+        json.dumps(refreshed, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    verify_legacy_feed_compatibility(site, expected_identity=identity)
+    return refreshed
+
+
 def verify_legacy_feed_compatibility(
     site: Path,
     *,
@@ -407,21 +468,7 @@ def verify_legacy_feed_compatibility(
         raise LegacyFeedCompatibilityError("legacy compatibility manifest schema is unsupported")
     if manifest.get("window_days") != REQUIRED_WINDOW_DAYS:
         raise LegacyFeedCompatibilityError("legacy compatibility window must be exactly 90 days")
-    source = manifest.get("source")
-    if not isinstance(source, dict):
-        raise LegacyFeedCompatibilityError("legacy compatibility source metadata is missing")
-    try:
-        identity = LegacyArtifactIdentity(
-            run_id=str(source["run_id"]),
-            artifact_id=str(source["artifact_id"]),
-            artifact_name=str(source["artifact_name"]),
-            code_revision=str(source["code_revision"]),
-            artifact_digest=str(source["artifact_digest"]),
-        ).validated()
-    except (KeyError, TypeError) as exc:
-        raise LegacyFeedCompatibilityError("legacy compatibility source metadata is incomplete") from exc
-    if source.get("workflow") != ".github/workflows/build-feed.yml":
-        raise LegacyFeedCompatibilityError("legacy compatibility source workflow is invalid")
+    identity = _manifest_identity(manifest)
     if expected_identity is not None and identity != expected_identity.validated():
         raise LegacyFeedCompatibilityError("legacy compatibility source does not match the current pin")
 

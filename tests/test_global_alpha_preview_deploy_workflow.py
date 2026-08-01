@@ -86,6 +86,8 @@ def test_collection_free_preview_redacts_only_after_proving_the_live_legacy_sour
     assert "--source current-legacy-site" in assemble
     assert "--destination preview-site" in assemble
     assert "curator.legacy_telegram_safety verify-site" in assemble
+    assert "curator.legacy_internal_safety verify-site" in assemble
+    assert "--minimum-dated-reports 90" in assemble
 
 
 def test_collection_free_preview_never_runs_collection_or_delivery() -> None:

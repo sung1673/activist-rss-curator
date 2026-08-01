@@ -8,13 +8,33 @@ from pathlib import Path
 import pytest
 
 from curator.governance_site import build_governance_site
-from curator.legacy_feed_compat import LegacyArtifactIdentity, prepare_legacy_feed_compatibility
+from curator.legacy_feed_compat import (
+    LegacyArtifactIdentity,
+    prepare_legacy_feed_compatibility,
+    verify_legacy_feed_compatibility,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def prepared_legacy(tmp_path: Path) -> Path:
+KNOWN_INTERNAL_SCORE_BLOCK = """<script>
+const title = '지배구조 점수 개선';
+const priority = Number(story.priority_score || 0);
+if (priority) {
+  const score = document.createElement('span');
+  score.textContent = `점수 ${priority}`;
+  meta.appendChild(score);
+}
+const localScore = article.summary ? 1 : 0;
+</script>"""
+
+
+def prepared_legacy(
+    tmp_path: Path,
+    *,
+    score_block: str = KNOWN_INTERNAL_SCORE_BLOCK,
+) -> Path:
     archive = tmp_path / "legacy.zip"
     end = date(2026, 7, 22)
     with zipfile.ZipFile(archive, "w") as bundle:
@@ -23,9 +43,12 @@ def prepared_legacy(tmp_path: Path) -> Path:
         bundle.writestr("feed.xml", "<rss/>")
         for offset in range(90):
             report_date = end - timedelta(days=89 - offset)
+            body = report_date.isoformat()
+            if offset == 0:
+                body += score_block
             bundle.writestr(
                 f"feed/{report_date.isoformat()}.html",
-                f"<!doctype html><html><body>{report_date.isoformat()}</body></html>",
+                f"<!doctype html><html><body>{body}</body></html>",
             )
     identity = LegacyArtifactIdentity(
         run_id="123",
@@ -66,6 +89,24 @@ def test_governance_site_stages_root_alias_and_safe_legacy_assets(tmp_path: Path
     assert result["compatibility_file_count"] == 94
     assert result["compatibility_report_count"] == 90
     assert result["compatibility_window_end"] == "2026-07-22"
+    first_report = output / "feed" / "2026-04-24.html"
+    payload = first_report.read_text(encoding="utf-8")
+    assert "story.priority_score" not in payload
+    assert "지배구조 점수 개선" in payload
+    assert "localScore" in payload
+    verify_legacy_feed_compatibility(output)
+
+
+def test_governance_site_fails_closed_for_unknown_internal_score_usage(
+    tmp_path: Path,
+) -> None:
+    legacy = prepared_legacy(
+        tmp_path,
+        score_block="<script>console.log(story.priority_score)</script>",
+    )
+
+    with pytest.raises(RuntimeError, match="internal priority score"):
+        build_governance_site(ROOT, output=tmp_path / "site", legacy_root=legacy)
 
 
 def test_governance_site_removes_stale_output_and_never_copies_telegram_admin(tmp_path: Path) -> None:
