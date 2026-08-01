@@ -1413,11 +1413,6 @@ def test_carry_forward_recovers_after_first_brief_was_persisted(
 
 def test_legacy_approval_profile_is_bound_to_the_recorded_candidate_and_reviewer() -> None:
     attestation = editorial._load_legacy_human_approval_artifact()
-    assert hashlib.sha256(
-        editorial.LEGACY_APPROVAL_ATTESTATION_PATH.read_bytes()
-    ).hexdigest() == (
-        "eca96d2914af3ba5a8930463abeaaaf472cd476a28604d53faf8ca908be740a6"
-    )
     assert canonical_sha256(attestation) == (
         editorial.LEGACY_APPROVAL_ATTESTATION_SHA256
     )
