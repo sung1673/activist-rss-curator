@@ -194,10 +194,11 @@ paths:
         Returns only a published BriefEdition and approved BriefItems whose
         linked events remain publicly eligible. Item values come from immutable
         publication-time snapshots. A coverage_unavailable edition is never
-        replaced by an older snapshot: it returns an empty Top lane and a
-        blocking coverage_notice. When only some required sources are
-        unavailable, currently visible events remain available with a
-        partial_coverage warning.
+        replaced by an older snapshot. If any required Production Alpha source
+        (KR, US, CA or AU) in the requested scope is not public-ready, the
+        current Top lane is empty and coverage_notice is blocking. For the
+        global edition, the intentionally unavailable optional JP and GB
+        sources alone do not block Top; they produce a partial_coverage warning.
         When no approved brief exists, the request succeeds with empty arrays
         and empty_reason=no_approved_brief.
       x-release-gated: true
@@ -2317,8 +2318,10 @@ components:
             coverage_notice:
               type: [object, 'null']
               description: >-
-                A blocking notice for an unavailable canonical edition or a
-                warning that the edition is based on partial source coverage.
+                A blocking notice when the canonical edition is unavailable or
+                any required KR/US/CA/AU source in scope is not public-ready.
+                Optional JP/GB unavailability alone is a partial-coverage
+                warning for the global edition and does not suppress Top.
               required:
                 - reason
                 - scope

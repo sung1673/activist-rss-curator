@@ -5638,6 +5638,53 @@ def run(base_url: str, mysql_container_id: str) -> None:
     )
     activate_required_alpha_cutover_sources(mysql_container_id)
 
+    # Optional JP/GB coverage limitations remain a warning when every required
+    # Alpha source is ready. They must not suppress an already approved Top row.
+    optional_only_coverage, _ = request_json(
+        base_url,
+        "api.php/api/v2/briefs/latest?edition=global",
+        token=PREVIEW_TOKEN,
+    )
+    optional_only_data = optional_only_coverage.get("data", {})
+    optional_only_notice = optional_only_data.get("coverage_notice", {})
+    require(
+        len(optional_only_data.get("top", [])) == 1
+        and optional_only_data.get("empty_reason") is None
+        and optional_only_notice.get("reason") == "partial_coverage"
+        and optional_only_notice.get("scope") == "warning"
+        and set(optional_only_notice.get("unavailable_countries", []))
+        == {"JP", "GB"},
+        repr(optional_only_coverage),
+    )
+
+    # A blocking current-readiness state is fail-closed even when the frozen
+    # edition contains an approved Top row. JP/GB are still optional; the block
+    # below is caused only by making one required CA connector stale.
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_source_connectors SET "
+        "last_checked_at=UTC_TIMESTAMP()-INTERVAL 46 MINUTE,"
+        "last_success_at=UTC_TIMESTAMP()-INTERVAL 46 MINUTE,"
+        "last_observed_at=UTC_TIMESTAMP()-INTERVAL 46 MINUTE "
+        "WHERE connector_id='connector:ca:issuer-ir';",
+    )
+    blocking_current_coverage, _ = request_json(
+        base_url,
+        "api.php/api/v2/briefs/latest?edition=global",
+        token=PREVIEW_TOKEN,
+    )
+    blocking_current_data = blocking_current_coverage.get("data", {})
+    blocking_current_notice = blocking_current_data.get("coverage_notice", {})
+    require(
+        blocking_current_data.get("top") == []
+        and blocking_current_data.get("empty_reason") == "coverage_unavailable"
+        and blocking_current_notice.get("reason") == "coverage_unavailable"
+        and blocking_current_notice.get("scope") == "blocking"
+        and "CA" in blocking_current_notice.get("unavailable_countries", []),
+        repr(blocking_current_coverage),
+    )
+    activate_required_alpha_cutover_sources(mysql_container_id)
+
     # Cutover locks and rechecks current readiness rather than trusting an
     # evidence artifact created before a source became stale.
     mysql_execute(

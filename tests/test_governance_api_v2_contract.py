@@ -1204,6 +1204,24 @@ def test_latest_brief_uses_immutable_snapshot_and_never_hides_latest_outage():
     assert "이전 발행본으로 되돌아가지 않고" in DOCS
 
 
+def test_latest_brief_fail_closes_top_on_required_source_block_only():
+    latest = V2[
+        V2.index("function v2_latest_brief") : V2.index("function v2_calendar")
+    ]
+
+    assert "v2_required_alpha_source_identities()" in latest
+    assert "$readyRequiredSourceCount" in latest
+    assert "count($requiredConnectorIds) > 0" in latest
+    assert "$readyRequiredSourceCount < count($requiredConnectorIds)" in latest
+    assert "$top = array();" in latest
+    assert "$emptyReason = 'coverage_unavailable';" in latest
+    assert "Optional JP/GB rows" in latest
+    description = SPEC["paths"]["/briefs/latest"]["get"]["description"]
+    assert "any required Production Alpha source" in description
+    assert "optional JP and GB" in description
+    assert "do not block Top" in description
+
+
 def test_public_json_forbidden_fields_are_recursively_blocked_by_key_only():
     policy = V2[
         V2.index("function v2_forbidden_public_field_names") :

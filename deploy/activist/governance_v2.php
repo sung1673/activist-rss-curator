@@ -2316,6 +2316,17 @@ function v2_latest_brief(PDO $pdo, array $config): void {
         $emptyReason = 'coverage_unavailable';
     }
     $readySourceCount = 0;
+    $requiredConnectorIds = array();
+    foreach (v2_required_alpha_source_identities() as $requiredSource) {
+        if (
+            $statusCountry !== ''
+            && (string)$requiredSource['country_code'] !== $statusCountry
+        ) {
+            continue;
+        }
+        $requiredConnectorIds[(string)$requiredSource['connector_id']] = true;
+    }
+    $readyRequiredSourceCount = 0;
     $unavailableCountries = array();
     $unavailableSources = array();
     foreach ($sourceStatus as $sourceRow) {
@@ -2324,6 +2335,10 @@ function v2_latest_brief(PDO $pdo, array $config): void {
             && $sourceRow['public_ready'] === true
         ) {
             $readySourceCount++;
+            $readyConnectorId = trim((string)($sourceRow['connector_id'] ?? ''));
+            if (isset($requiredConnectorIds[$readyConnectorId])) {
+                $readyRequiredSourceCount++;
+            }
             continue;
         }
         $country = strtoupper(trim((string)($sourceRow['country'] ?? '')));
@@ -2344,7 +2359,22 @@ function v2_latest_brief(PDO $pdo, array $config): void {
         || count($unavailableSources) > 0
     ) {
         $blockingCoverage = $emptyReason === 'coverage_unavailable'
-            || $readySourceCount === 0;
+            || (
+                count($requiredConnectorIds) > 0
+                && $readyRequiredSourceCount < count($requiredConnectorIds)
+            )
+            || (
+                count($requiredConnectorIds) === 0
+                && $readySourceCount === 0
+            );
+        if ($blockingCoverage) {
+            // Current source readiness is evaluated on every read. A frozen
+            // Top selection must not remain public when any required source in
+            // the requested scope is not currently ready. Optional JP/GB rows are
+            // deliberately excluded from this required-source decision.
+            $top = array();
+            $emptyReason = 'coverage_unavailable';
+        }
         $coverageNotice = array(
             'reason' => $blockingCoverage
                 ? 'coverage_unavailable' : 'partial_coverage',
