@@ -69,6 +69,25 @@ def test_collection_free_preview_uses_only_immutable_existing_sources() -> None:
     assert "curator.legacy_telegram_safety verify-site" in text
 
 
+def test_collection_free_preview_redacts_only_after_proving_the_live_legacy_source() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+    materialize = text[
+        text.index("Materialize and structurally verify the currently-served legacy source") :
+        text.index("Prove the immutable legacy source matches the public root")
+    ]
+    assemble = text[
+        text.index("Assemble legacy root plus exact governance Preview") :
+        text.index("Record collection-free source provenance")
+    ]
+
+    assert "legacy_telegram_safety verify-site" not in materialize
+    assert '[[ "${#symbolic_links[@]}" -ne 0 ]]' in materialize
+    assert '[[ "${#dated_reports[@]}" -ge 90 ]]' in materialize
+    assert "--source current-legacy-site" in assemble
+    assert "--destination preview-site" in assemble
+    assert "curator.legacy_telegram_safety verify-site" in assemble
+
+
 def test_collection_free_preview_never_runs_collection_or_delivery() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
 
@@ -132,6 +151,7 @@ def test_collection_free_preview_has_exact_automatic_legacy_recovery() -> None:
     }
     assert recovery_deploy["with"]["artifact_name"] == "legacy-restore-pages"
     assert recovery_deploy["continue-on-error"] == "true"
+    assert "steps.legacy_recovery_pages_artifact.outcome == 'success'" in recovery_deploy["if"]
     assert "steps.preview_smoke.outcome != 'success'" in recovery_deploy["if"]
     assert "Verify automatic legacy recovery bytes" in text
     assert "Preview deployment failed and the exact legacy site was restored" in text
