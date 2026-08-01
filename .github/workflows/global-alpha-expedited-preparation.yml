@@ -120,6 +120,7 @@ jobs:
             const workflowIds = [
               ".github/workflows/build-feed.yml",
               ".github/workflows/daily.yml",
+              ".github/workflows/global-alpha-preview-deploy.yml",
             ];
             const activeStatuses = [
               "queued", "in_progress", "waiting", "pending", "requested",
@@ -374,15 +375,19 @@ jobs:
               owner, repo, run_id: Number(process.env.PREVIEW_RUN_ID),
             });
             const preview = previewResponse.data;
+            const allowedPreviewWorkflows = new Set([
+              ".github/workflows/build-feed.yml",
+              ".github/workflows/global-alpha-preview-deploy.yml",
+            ]);
             if (
               preview.status !== "completed" ||
               preview.conclusion !== "success" ||
               preview.event !== "workflow_dispatch" ||
               preview.head_branch !== process.env.DEFAULT_BRANCH ||
-              preview.path !== ".github/workflows/build-feed.yml" ||
+              !allowedPreviewWorkflows.has(preview.path) ||
               (preview.head_sha || "").toLowerCase() !== process.env.EXPECTED_SHA.toLowerCase()
             ) {
-              core.setFailed("Preview restore run is not the exact successful build-feed candidate");
+              core.setFailed("Preview restore run is not an exact successful protected Preview candidate");
               return;
             }
             const previewArtifacts = await github.paginate(
@@ -550,11 +555,20 @@ jobs:
           )
           [[ "${#tarballs[@]}" -eq 1 ]]
           tar -xf "${tarballs[0]}" -C rollback-prepared/preview-site
+          test ! -e rollback-prepared/preview-site/config.js
+          mkdir -p rollback-prepared/preview-config-check/governance
+          cp \
+            rollback-prepared/preview-site/governance/config.js \
+            rollback-prepared/preview-config-check/config.js
+          cp \
+            rollback-prepared/preview-site/governance/config.js \
+            rollback-prepared/preview-config-check/governance/config.js
           python -m curator.governance_site_config \
-            --site rollback-prepared/preview-site \
+            --site rollback-prepared/preview-config-check \
             --expected-api-base "$GOVERNANCE_API_BASE_URL" \
             --expected-web-base "$BSIDE_PUBLIC_WEB_URL" \
             --expected-build-sha "$GITHUB_SHA"
+          rm -rf rollback-prepared/preview-config-check
           test -f rollback-prepared/preview-site/feed.xml
           test -f rollback-prepared/preview-site/governance/config.js
           grep -Rqs --fixed-strings \

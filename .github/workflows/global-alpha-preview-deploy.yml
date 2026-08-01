@@ -1,0 +1,568 @@
+name: Production Alpha collection-free Preview deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type DEPLOY_COLLECTION_FREE_GOVERNANCE_PREVIEW
+        required: true
+        type: string
+      legacy_pages_run_id:
+        description: Successful currently-served legacy Pages producer run
+        required: true
+        type: string
+      governance_pages_run_id:
+        description: Successful exact-SHA Daily governance Pages producer run
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: bside-pages-deployment-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-preview:
+    if: >-
+      github.ref_type == 'branch' &&
+      github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      PAGES_OWNER_SNAPSHOT: ${{ vars.PAGES_OWNER }}
+      PIPELINE_MODE_SNAPSHOT: ${{ vars.GOVERNANCE_PIPELINE_MODE }}
+      STANDARD_OBSERVATION_SNAPSHOT: ${{ vars.GLOBAL_ALPHA_OBSERVATION_ENABLED }}
+      EXPEDITED_OBSERVATION_SNAPSHOT: ${{ vars.GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED }}
+      TELEGRAM_DELIVERY_SNAPSHOT: ${{ vars.ENABLE_TELEGRAM_DELIVERY }}
+      GOVERNANCE_DELIVERY_SNAPSHOT: ${{ vars.ENABLE_GOVERNANCE_DELIVERY }}
+      KIND_MODE_SNAPSHOT: ${{ vars.KIND_CONNECTOR_MODE }}
+
+    steps:
+      - name: Checkout the exact Preview revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Enforce collection-free Preview boundary
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRMATION" == "DEPLOY_COLLECTION_FREE_GOVERNANCE_PREVIEW" ]]
+          [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ "$PAGES_OWNER_SNAPSHOT" == "legacy" ]]
+          [[ "$PIPELINE_MODE_SNAPSHOT" == "shadow" ]]
+          [[ "${STANDARD_OBSERVATION_SNAPSHOT,,}" == "false" ]]
+          [[ "${EXPEDITED_OBSERVATION_SNAPSHOT,,}" == "false" ]]
+          [[ "${TELEGRAM_DELIVERY_SNAPSHOT,,}" == "false" ]]
+          [[ "${GOVERNANCE_DELIVERY_SNAPSHOT,,}" == "false" ]]
+          [[ "${KIND_MODE_SNAPSHOT,,}" == "off" ]]
+
+      - name: Resolve exact Daily and pinned legacy artifacts
+        id: sources
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REQUESTED_DAILY_RUN_ID: ${{ inputs.governance_pages_run_id }}
+          REQUESTED_LEGACY_PAGES_RUN_ID: ${{ inputs.legacy_pages_run_id }}
+          EXPECTED_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          LEGACY_RUN_ID: ${{ vars.LEGACY_ROLLBACK_RUN_ID }}
+          LEGACY_ARTIFACT_NAME: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_NAME }}
+          LEGACY_CODE_REVISION: ${{ vars.LEGACY_ROLLBACK_CODE_REVISION }}
+          LEGACY_ARTIFACT_DIGEST: ${{ vars.LEGACY_ROLLBACK_ARTIFACT_DIGEST }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const positive = (value) => /^[1-9][0-9]*$/.test(String(value || "").trim());
+            const digest = (value) => /^sha256:[0-9a-f]{64}$/.test(String(value || "").toLowerCase());
+            const requestedDaily = String(process.env.REQUESTED_DAILY_RUN_ID || "").trim();
+            const requestedLegacyPages = String(
+              process.env.REQUESTED_LEGACY_PAGES_RUN_ID || "",
+            ).trim();
+            const legacyRunText = String(process.env.LEGACY_RUN_ID || "").trim();
+            if (
+              !positive(requestedDaily) ||
+              !positive(requestedLegacyPages) ||
+              !positive(legacyRunText)
+            ) {
+              core.setFailed("Daily, current legacy Pages, and rollback run ids must be positive integers");
+              return;
+            }
+            if (requestedDaily === requestedLegacyPages) {
+              core.setFailed("Daily governance and current legacy Pages must be independent runs");
+              return;
+            }
+            const daily = (await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: Number(requestedDaily),
+            })).data;
+            if (
+              daily.status !== "completed" ||
+              daily.conclusion !== "success" ||
+              daily.event !== "workflow_dispatch" ||
+              daily.head_branch !== process.env.DEFAULT_BRANCH ||
+              daily.path !== ".github/workflows/daily.yml" ||
+              daily.head_repository?.full_name !== `${owner}/${repo}` ||
+              String(daily.head_sha || "").toLowerCase() !== process.env.EXPECTED_SHA.toLowerCase()
+            ) {
+              core.setFailed("Daily Pages source is not the exact successful default-branch candidate");
+              return;
+            }
+            const dailyArtifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner, repo, run_id: daily.id, per_page: 100},
+            );
+            const dailyName = `pages-${daily.id}-${daily.run_attempt}`;
+            const dailyMatches = dailyArtifacts.filter(
+              (item) => item.name === dailyName && !item.expired,
+            );
+            if (dailyMatches.length !== 1 || !digest(dailyMatches[0].digest)) {
+              core.setFailed("Daily Pages source must have one immutable run-bound artifact");
+              return;
+            }
+
+            const currentLegacy = (await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: Number(requestedLegacyPages),
+            })).data;
+            if (
+              currentLegacy.status !== "completed" ||
+              currentLegacy.conclusion !== "success" ||
+              !["schedule", "workflow_dispatch"].includes(currentLegacy.event) ||
+              currentLegacy.head_branch !== process.env.DEFAULT_BRANCH ||
+              currentLegacy.path !== ".github/workflows/build-feed.yml" ||
+              currentLegacy.head_repository?.full_name !== `${owner}/${repo}`
+            ) {
+              core.setFailed("Current legacy Pages source is not a successful trusted producer");
+              return;
+            }
+            const currentLegacyArtifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner, repo, run_id: currentLegacy.id, per_page: 100},
+            );
+            const currentLegacyMatches = currentLegacyArtifacts.filter(
+              (item) => item.name === "github-pages" && !item.expired,
+            );
+            if (
+              currentLegacyMatches.length !== 1 ||
+              !digest(currentLegacyMatches[0].digest)
+            ) {
+              core.setFailed("Current legacy Pages run must have one immutable github-pages artifact");
+              return;
+            }
+
+            const legacyRevision = String(process.env.LEGACY_CODE_REVISION || "").toLowerCase();
+            const legacyDigest = String(process.env.LEGACY_ARTIFACT_DIGEST || "").toLowerCase();
+            const legacyName = String(process.env.LEGACY_ARTIFACT_NAME || "").trim();
+            if (!/^[0-9a-f]{40}$/.test(legacyRevision) || !digest(legacyDigest) || !legacyName) {
+              core.setFailed("Pinned legacy artifact variables are invalid");
+              return;
+            }
+            const legacy = (await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: Number(legacyRunText),
+            })).data;
+            if (
+              legacy.status !== "completed" ||
+              legacy.conclusion !== "success" ||
+              legacy.head_branch !== process.env.DEFAULT_BRANCH ||
+              legacy.path !== ".github/workflows/build-feed.yml" ||
+              legacy.head_repository?.full_name !== `${owner}/${repo}` ||
+              String(legacy.head_sha || "").toLowerCase() !== legacyRevision
+            ) {
+              core.setFailed("Pinned legacy producer is invalid");
+              return;
+            }
+            const legacyArtifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner, repo, run_id: legacy.id, per_page: 100},
+            );
+            const legacyMatches = legacyArtifacts.filter(
+              (item) => item.name === legacyName && !item.expired,
+            );
+            if (
+              legacyMatches.length !== 1 ||
+              String(legacyMatches[0].digest || "").toLowerCase() !== legacyDigest
+            ) {
+              core.setFailed("Pinned legacy artifact digest changed");
+              return;
+            }
+            core.setOutput("daily_run_id", String(daily.id));
+            core.setOutput("daily_run_attempt", String(daily.run_attempt));
+            core.setOutput("daily_artifact_id", String(dailyMatches[0].id));
+            core.setOutput("daily_artifact_name", dailyName);
+            core.setOutput("daily_artifact_digest", String(dailyMatches[0].digest).toLowerCase());
+            core.setOutput("current_legacy_run_id", String(currentLegacy.id));
+            core.setOutput("current_legacy_run_attempt", String(currentLegacy.run_attempt));
+            core.setOutput("current_legacy_artifact_id", String(currentLegacyMatches[0].id));
+            core.setOutput("current_legacy_artifact_name", currentLegacyMatches[0].name);
+            core.setOutput(
+              "current_legacy_artifact_digest",
+              String(currentLegacyMatches[0].digest).toLowerCase(),
+            );
+            core.setOutput(
+              "current_legacy_code_revision",
+              String(currentLegacy.head_sha || "").toLowerCase(),
+            );
+            core.setOutput("legacy_run_id", String(legacy.id));
+            core.setOutput("legacy_artifact_id", String(legacyMatches[0].id));
+            core.setOutput("legacy_artifact_name", legacyName);
+            core.setOutput("legacy_artifact_digest", legacyDigest);
+            core.setOutput("legacy_code_revision", legacyRevision);
+
+      - name: Download exact Daily governance Pages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.sources.outputs.daily_artifact_id }}
+          path: daily-pages
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.sources.outputs.daily_run_id }}
+          digest-mismatch: error
+          merge-multiple: true
+
+      - name: Download exact currently-served legacy Pages artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_LEGACY_ARTIFACT_ID: ${{ steps.sources.outputs.current_legacy_artifact_id }}
+          CURRENT_LEGACY_ARTIFACT_DIGEST: ${{ steps.sources.outputs.current_legacy_artifact_digest }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --location \
+            --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/artifacts/$CURRENT_LEGACY_ARTIFACT_ID/zip" \
+            --output current-legacy-pages.zip
+          actual_digest="sha256:$(sha256sum current-legacy-pages.zip | cut -d' ' -f1)"
+          [[ "$actual_digest" == "$CURRENT_LEGACY_ARTIFACT_DIGEST" ]]
+
+      - name: Set up protected Preview Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Materialize and verify the currently-served legacy site
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-legacy-download current-legacy-site
+          unzip -q current-legacy-pages.zip -d current-legacy-download
+          mapfile -t tarballs < <(
+            find current-legacy-download -type f -name artifact.tar -print
+          )
+          [[ "${#tarballs[@]}" -eq 1 ]]
+          tar -xf "${tarballs[0]}" -C current-legacy-site
+          python -m curator.legacy_telegram_safety verify-site \
+            --site current-legacy-site \
+            --minimum-dated-reports 90
+
+      - name: Prove the immutable legacy source matches the public root
+        shell: bash
+        env:
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+        run: |
+          set -euo pipefail
+          web="${BSIDE_PUBLIC_WEB_URL%/}"
+          cache_bust="legacy-source-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          latest_report="$(
+            find current-legacy-site/feed -maxdepth 1 -type f -name '????-??-??.html' \
+              -printf '%f\n' | sort | tail -n 1
+          )"
+          [[ "$latest_report" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\.html$ ]]
+          mkdir -p current-remote/feed
+          curl --fail --silent --show-error --location \
+            "$web/?$cache_bust" --output current-remote/index.html
+          curl --fail --silent --show-error --location \
+            "$web/feed.xml?$cache_bust" --output current-remote/feed.xml
+          curl --fail --silent --show-error --location \
+            "$web/feed/$latest_report?$cache_bust" \
+            --output "current-remote/feed/$latest_report"
+          cmp --silent current-legacy-site/index.html current-remote/index.html
+          cmp --silent current-legacy-site/feed.xml current-remote/feed.xml
+          cmp --silent \
+            "current-legacy-site/feed/$latest_report" \
+            "current-remote/feed/$latest_report"
+
+      - name: Assemble legacy root plus exact governance Preview
+        shell: bash
+        env:
+          GOVERNANCE_API_BASE_URL: ${{ vars.GOVERNANCE_API_BASE_URL }}
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+        run: |
+          set -euo pipefail
+          python -m curator.governance_site_config \
+            --site daily-pages \
+            --expected-api-base "$GOVERNANCE_API_BASE_URL" \
+            --expected-web-base "$BSIDE_PUBLIC_WEB_URL" \
+            --expected-build-sha "$GITHUB_SHA"
+          python .github/scripts/prepare-legacy-pages.py \
+            --source current-legacy-site \
+            --destination preview-site \
+            --governance-preview-source daily-pages/governance
+          for asset in app.js config.js index.html styles.css; do
+            cmp --silent \
+              "daily-pages/governance/$asset" \
+              "preview-site/governance/$asset"
+          done
+          grep -qs --fixed-strings "$GITHUB_SHA" preview-site/governance/config.js
+          python -m curator.legacy_telegram_safety verify-site \
+            --site preview-site \
+            --minimum-dated-reports 90
+          test ! -e preview-site/feed/telegram.html
+          test ! -e preview-site/feed/telegram-admin.html
+          grep -Rqs --fixed-strings "production_alpha_early_access" preview-site/governance
+
+      - name: Record collection-free source provenance
+        shell: bash
+        env:
+          DAILY_RUN_ID: ${{ steps.sources.outputs.daily_run_id }}
+          DAILY_RUN_ATTEMPT: ${{ steps.sources.outputs.daily_run_attempt }}
+          DAILY_ARTIFACT_ID: ${{ steps.sources.outputs.daily_artifact_id }}
+          DAILY_ARTIFACT_NAME: ${{ steps.sources.outputs.daily_artifact_name }}
+          DAILY_ARTIFACT_DIGEST: ${{ steps.sources.outputs.daily_artifact_digest }}
+          CURRENT_LEGACY_RUN_ID: ${{ steps.sources.outputs.current_legacy_run_id }}
+          CURRENT_LEGACY_RUN_ATTEMPT: ${{ steps.sources.outputs.current_legacy_run_attempt }}
+          CURRENT_LEGACY_ARTIFACT_ID: ${{ steps.sources.outputs.current_legacy_artifact_id }}
+          CURRENT_LEGACY_ARTIFACT_NAME: ${{ steps.sources.outputs.current_legacy_artifact_name }}
+          CURRENT_LEGACY_ARTIFACT_DIGEST: ${{ steps.sources.outputs.current_legacy_artifact_digest }}
+          CURRENT_LEGACY_CODE_REVISION: ${{ steps.sources.outputs.current_legacy_code_revision }}
+          LEGACY_RUN_ID: ${{ steps.sources.outputs.legacy_run_id }}
+          LEGACY_ARTIFACT_ID: ${{ steps.sources.outputs.legacy_artifact_id }}
+          LEGACY_ARTIFACT_NAME: ${{ steps.sources.outputs.legacy_artifact_name }}
+          LEGACY_ARTIFACT_DIGEST: ${{ steps.sources.outputs.legacy_artifact_digest }}
+          LEGACY_CODE_REVISION: ${{ steps.sources.outputs.legacy_code_revision }}
+        run: |
+          set -euo pipefail
+          mkdir -p preview-provenance
+          site_digest="$(find preview-site -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
+          governance_digest="$(find preview-site/governance -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
+          jq -n \
+            --arg code_revision "$GITHUB_SHA" \
+            --arg created_at "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            --argjson daily_run_id "$DAILY_RUN_ID" \
+            --argjson daily_run_attempt "$DAILY_RUN_ATTEMPT" \
+            --argjson daily_artifact_id "$DAILY_ARTIFACT_ID" \
+            --arg daily_artifact_name "$DAILY_ARTIFACT_NAME" \
+            --arg daily_artifact_digest "$DAILY_ARTIFACT_DIGEST" \
+            --argjson current_legacy_run_id "$CURRENT_LEGACY_RUN_ID" \
+            --argjson current_legacy_run_attempt "$CURRENT_LEGACY_RUN_ATTEMPT" \
+            --argjson current_legacy_artifact_id "$CURRENT_LEGACY_ARTIFACT_ID" \
+            --arg current_legacy_artifact_name "$CURRENT_LEGACY_ARTIFACT_NAME" \
+            --arg current_legacy_artifact_digest "$CURRENT_LEGACY_ARTIFACT_DIGEST" \
+            --arg current_legacy_code_revision "$CURRENT_LEGACY_CODE_REVISION" \
+            --argjson legacy_run_id "$LEGACY_RUN_ID" \
+            --argjson legacy_artifact_id "$LEGACY_ARTIFACT_ID" \
+            --arg legacy_artifact_name "$LEGACY_ARTIFACT_NAME" \
+            --arg legacy_artifact_digest "$LEGACY_ARTIFACT_DIGEST" \
+            --arg legacy_code_revision "$LEGACY_CODE_REVISION" \
+            --arg site_sha256 "$site_digest" \
+            --arg governance_sha256 "$governance_digest" \
+            '{
+              schema_version: 1,
+              kind: "bside-global-alpha-collection-free-preview",
+              code_revision: $code_revision,
+              created_at: $created_at,
+              telegram_collection_executed: false,
+              telegram_delivery_executed: false,
+              daily_pages: {
+                run_id: $daily_run_id,
+                run_attempt: $daily_run_attempt,
+                artifact_id: $daily_artifact_id,
+                artifact_name: $daily_artifact_name,
+                artifact_digest: $daily_artifact_digest
+              },
+              legacy_root: {
+                run_id: $current_legacy_run_id,
+                run_attempt: $current_legacy_run_attempt,
+                artifact_id: $current_legacy_artifact_id,
+                artifact_name: $current_legacy_artifact_name,
+                artifact_digest: $current_legacy_artifact_digest,
+                code_revision: $current_legacy_code_revision
+              },
+              rollback_archive: {
+                run_id: $legacy_run_id,
+                artifact_id: $legacy_artifact_id,
+                artifact_name: $legacy_artifact_name,
+                artifact_digest: $legacy_artifact_digest,
+                code_revision: $legacy_code_revision
+              },
+              content: {
+                site_sha256: $site_sha256,
+                governance_sha256: $governance_sha256
+              }
+            }' > preview-provenance/collection-free-preview.json
+
+      - name: Revalidate live repository boundary
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const expected = {
+              PAGES_OWNER: "legacy",
+              GOVERNANCE_PIPELINE_MODE: "shadow",
+              GLOBAL_ALPHA_OBSERVATION_ENABLED: "false",
+              GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED: "false",
+              ENABLE_TELEGRAM_DELIVERY: "false",
+              ENABLE_GOVERNANCE_DELIVERY: "false",
+              KIND_CONNECTOR_MODE: "off",
+            };
+            for (const [name, value] of Object.entries(expected)) {
+              const response = await github.rest.actions.getRepoVariable({
+                ...context.repo,
+                name,
+              });
+              if (String(response.data.value || "").toLowerCase() !== value) {
+                core.setFailed(`Repository variable ${name} changed before Preview deployment`);
+                return;
+              }
+            }
+
+      - name: Preserve immutable collection-free Preview provenance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: global-alpha-collection-free-preview-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: preview-provenance/collection-free-preview.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload exact pre-deployment legacy recovery artifact
+        id: legacy_recovery_pages_artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: legacy-restore-pages
+          path: current-legacy-site
+
+      - name: Upload exact Preview Pages artifact
+        id: pages_artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: github-pages
+          path: preview-site
+
+      - name: Deploy exact collection-free Preview
+        id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        with:
+          artifact_name: github-pages
+
+      - name: Verify remote legacy root and exact Preview bytes
+        id: preview_smoke
+        if: steps.deployment.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+        run: |
+          set -euo pipefail
+          web="${BSIDE_PUBLIC_WEB_URL%/}"
+          cache_bust="collection-free-preview-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          matched=false
+          for attempt in $(seq 1 18); do
+            rm -rf remote-preview
+            mkdir -p remote-preview/governance
+            if \
+              curl --fail --silent --show-error --location \
+                "$web/?$cache_bust-$attempt" --output remote-preview/index.html && \
+              curl --fail --silent --show-error --location \
+                "$web/feed.xml?$cache_bust-$attempt" --output remote-preview/feed.xml && \
+              curl --fail --silent --show-error --location \
+                "$web/governance/index.html?$cache_bust-$attempt" --output remote-preview/governance/index.html && \
+              curl --fail --silent --show-error --location \
+                "$web/governance/app.js?$cache_bust-$attempt" --output remote-preview/governance/app.js && \
+              curl --fail --silent --show-error --location \
+                "$web/governance/config.js?$cache_bust-$attempt" --output remote-preview/governance/config.js && \
+              curl --fail --silent --show-error --location \
+                "$web/governance/styles.css?$cache_bust-$attempt" --output remote-preview/governance/styles.css && \
+              cmp --silent preview-site/index.html remote-preview/index.html && \
+              cmp --silent preview-site/feed.xml remote-preview/feed.xml && \
+              cmp --silent preview-site/governance/index.html remote-preview/governance/index.html && \
+              cmp --silent preview-site/governance/app.js remote-preview/governance/app.js && \
+              cmp --silent preview-site/governance/config.js remote-preview/governance/config.js && \
+              cmp --silent preview-site/governance/styles.css remote-preview/governance/styles.css; then
+              matched=true
+              break
+            fi
+            sleep 10
+          done
+          [[ "$matched" == "true" ]]
+          grep -qs --fixed-strings "$GITHUB_SHA" remote-preview/governance/config.js
+          grep -Rqs --fixed-strings "production_alpha_early_access" remote-preview/governance
+          if grep -Eqi 'telegram|internal_score|queue_status|admin[_-]?token' \
+            remote-preview/governance/config.js \
+            remote-preview/governance/app.js; then
+            echo "::error::A prohibited internal marker is present in Preview assets."
+            exit 1
+          fi
+
+      - name: Restore exact pre-deployment legacy Pages on Preview failure
+        id: recovery_deployment
+        if: >-
+          always() &&
+          (steps.deployment.outcome != 'success' || steps.preview_smoke.outcome != 'success')
+        continue-on-error: true
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        with:
+          artifact_name: legacy-restore-pages
+
+      - name: Verify automatic legacy recovery bytes
+        id: recovery_smoke
+        if: steps.recovery_deployment.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+        run: |
+          set -euo pipefail
+          web="${BSIDE_PUBLIC_WEB_URL%/}"
+          cache_bust="legacy-recovery-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          matched=false
+          for attempt in $(seq 1 18); do
+            rm -rf remote-recovery
+            mkdir -p remote-recovery
+            if \
+              curl --fail --silent --show-error --location \
+                "$web/?$cache_bust-$attempt" --output remote-recovery/index.html && \
+              curl --fail --silent --show-error --location \
+                "$web/feed.xml?$cache_bust-$attempt" --output remote-recovery/feed.xml && \
+              cmp --silent current-legacy-site/index.html remote-recovery/index.html && \
+              cmp --silent current-legacy-site/feed.xml remote-recovery/feed.xml; then
+              matched=true
+              break
+            fi
+            sleep 10
+          done
+          [[ "$matched" == "true" ]]
+
+      - name: Enforce successful Preview or proven automatic recovery
+        if: always()
+        shell: bash
+        env:
+          DEPLOYMENT_OUTCOME: ${{ steps.deployment.outcome }}
+          PREVIEW_SMOKE_OUTCOME: ${{ steps.preview_smoke.outcome }}
+          RECOVERY_DEPLOYMENT_OUTCOME: ${{ steps.recovery_deployment.outcome }}
+          RECOVERY_SMOKE_OUTCOME: ${{ steps.recovery_smoke.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "$DEPLOYMENT_OUTCOME" == "success" && "$PREVIEW_SMOKE_OUTCOME" == "success" ]]; then
+            exit 0
+          fi
+          [[ "$RECOVERY_DEPLOYMENT_OUTCOME" == "success" ]]
+          [[ "$RECOVERY_SMOKE_OUTCOME" == "success" ]]
+          echo "::error::Preview deployment failed and the exact legacy site was restored."
+          exit 1
