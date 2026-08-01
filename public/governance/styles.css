@@ -901,6 +901,11 @@ kbd {
   line-height: 1.35;
 }
 
+.mobile-coverage-context,
+.mobile-edition-time {
+  display: none;
+}
+
 .coverage-alert {
   margin: 0 0 12px;
   padding: .72rem .82rem;
@@ -1430,9 +1435,36 @@ body.drawer-open { overflow: hidden; }
   .market-nav__spacer,
   .source-health { display: none; }
   #app { padding: 6px 0 36px; }
-  .terminal-header { min-height: 38px; margin-bottom: 7px; }
-  .terminal-header h1 { font-size: 1.05rem; }
-  .terminal-header p { display: none; }
+  .terminal-header {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    min-height: 0;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+  .desktop-coverage-context:not(.desktop-coverage-context--mobile-visible) { display: none; }
+  .mobile-coverage-context {
+    display: block;
+    grid-column: 1 / -1;
+    padding: 0 10px 10px;
+    border-top: 1px solid var(--line);
+  }
+  .mobile-coverage-context .coverage-alert { margin: 10px 0 7px; }
+  .mobile-coverage-context .coverage-scope-note { margin: 0; }
+  .terminal-panel__header--top > p { display: none; }
+  .mobile-edition-time {
+    display: inline;
+    color: var(--ink-soft);
+    font-size: .58rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
   .coverage-scope-note {
     margin: -2px 0 7px;
     padding: .35rem .5rem;

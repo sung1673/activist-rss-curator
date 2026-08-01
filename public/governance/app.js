@@ -24,6 +24,8 @@
     CA: Object.freeze({ coverage_mode: "link-only", public_status: "active", public_ready: true }),
     AU: Object.freeze({ coverage_mode: "link-only", public_status: "active", public_ready: true })
   });
+  const REQUIRED_ALPHA_MARKETS = Object.freeze(["KR", "US", "CA", "AU"]);
+  const OPTIONAL_ALPHA_MARKETS = Object.freeze(["JP", "GB"]);
   let drawerTrigger = null;
   let drawerController = null;
   let filterSheetTrigger = null;
@@ -1357,7 +1359,7 @@
     ].filter(Boolean);
   }
 
-  function terminalEvent(event, rank) {
+  function terminalEvent(event, rank, mobileCoverageContext = null) {
     const eventLink = eventRouteLink(event);
     const market = marketForEvent(event) || event.market || "—";
     return element("li", {
@@ -1391,8 +1393,9 @@
           event.deadline_at ? element("span", { text: `기한 ${formatDate(event.deadline_at, false)}` }) : null,
           ...eventTimestampMetadata(event).map((text) => element("span", { text }))
         ].filter(Boolean))
-      ].filter(Boolean))
-    ]);
+      ].filter(Boolean)),
+      mobileCoverageContext
+    ].filter(Boolean));
   }
 
   function liveEventRow(event) {
@@ -1479,7 +1482,7 @@
     ]);
   }
 
-  function updateSourceCoverage(sources, events) {
+  function updateSourceCoverage(sources, events, market = "GLOBAL") {
     if (!globalCoverage) return;
     const rows = Array.isArray(sources) ? sources : [];
     const publicStates = rows.map(publicSourceState);
@@ -1489,6 +1492,34 @@
       "down", "error", "failed", "blocked_rights", "redistribution_blocked",
       "excluded_source", "inactive", "stale"
     ].includes(item.status)).length;
+    if (rows.length && market === "GLOBAL") {
+      const countryRows = (country) => rows.filter((item) => (
+        String(item.country || "").toUpperCase() === country
+      ));
+      const requiredReady = REQUIRED_ALPHA_MARKETS.filter((country) => (
+        countryRows(country).some((item) => publicSourceState(item).ready)
+      ));
+      const requiredDown = REQUIRED_ALPHA_MARKETS.filter((country) => (
+        countryRows(country).some((item) => [
+          "down", "error", "failed", "blocked_rights", "redistribution_blocked",
+          "excluded_source", "inactive", "stale"
+        ].includes(publicSourceState(item).status))
+      ));
+      const optionalReady = OPTIONAL_ALPHA_MARKETS.filter((country) => (
+        countryRows(country).some((item) => publicSourceState(item).ready)
+      ));
+      const optionalUnavailable = OPTIONAL_ALPHA_MARKETS.filter((country) => !optionalReady.includes(country));
+      globalCoverage.lastChild.textContent = [
+        `필수 ${requiredReady.length}/${REQUIRED_ALPHA_MARKETS.length} 정상`,
+        `선택 ${optionalReady.length}/${OPTIONAL_ALPHA_MARKETS.length} 제공`,
+        optionalUnavailable.length ? `${optionalUnavailable.join("·")} 미지원` : "",
+        linkOnly ? `링크 전용 ${linkOnly}` : ""
+      ].filter(Boolean).join(" · ");
+      globalCoverage.dataset.health = requiredDown.length
+        ? "down"
+        : requiredReady.length < REQUIRED_ALPHA_MARKETS.length ? "degraded" : "healthy";
+      return;
+    }
     if (rows.length) {
       globalCoverage.lastChild.textContent = `${healthy}/${rows.length} 소스 정상${linkOnly ? ` · 링크 전용 ${linkOnly}` : ""}`;
       globalCoverage.dataset.health = down ? "down" : healthy < rows.length ? "degraded" : "healthy";
@@ -1650,7 +1681,7 @@
       .filter((item) => market === "GLOBAL" || !item.country || String(item.country).toUpperCase() === market)
       .slice(0, 12);
     const allVisibleEvents = [...top, ...live];
-    updateSourceCoverage(sources, allVisibleEvents);
+    updateSourceCoverage(sources, allVisibleEvents, market);
     syncMarketTabs(query);
 
     const publishedAt = brief.last_updated_at || brief.published_at || brief.cutoff_at || "";
@@ -1680,7 +1711,7 @@
     const noticeTimestamp = coverageNotice
       ? coverageNotice.cutoff_at || coverageNotice.published_at || brief.cutoff_at
       : brief.cutoff_at;
-    const coverageAlert = coverageNotice ? element("section", {
+    const createCoverageAlert = () => coverageNotice ? element("section", {
       className: `coverage-alert coverage-alert--${coverageBlocking ? "blocking" : "warning"}`,
       attrs: {
         role: coverageBlocking ? "alert" : "status",
@@ -1706,7 +1737,7 @@
         className: "coverage-alert__meta"
       })
     ]) : null;
-    const staleAlert = brief.stale === true ? element("section", {
+    const createStaleAlert = () => brief.stale === true ? element("section", {
       className: "coverage-alert coverage-alert--stale",
       attrs: { role: "status" },
       dataset: { briefStale: "true" }
@@ -1716,16 +1747,42 @@
         text: `이 발행본은 36시간보다 오래되었습니다. 기준 ${formatDate(brief.cutoff_at, true)}`
       })
     ]) : null;
+    const createCoverageScopeNote = () => element("p", {
+      text: marketCoverageDescription(market),
+      className: "coverage-scope-note",
+      attrs: { "data-market-coverage": market }
+    });
+    const mobileCoverageContext = element("div", {
+      className: "mobile-coverage-context"
+    }, [
+      createCoverageAlert(),
+      createStaleAlert(),
+      createCoverageScopeNote()
+    ].filter(Boolean));
+    const desktopCoverageContext = element("div", {
+      className: `desktop-coverage-context${top.length ? "" : " desktop-coverage-context--mobile-visible"}`
+    }, [
+      createCoverageAlert(),
+      createStaleAlert(),
+      createCoverageScopeNote()
+    ].filter(Boolean));
     const topSection = element("section", {
       className: "terminal-panel",
       attrs: { "aria-labelledby": "top-title" }
     }, [
-      element("div", { className: "terminal-panel__header" }, [
+      element("div", { className: "terminal-panel__header terminal-panel__header--top" }, [
         element("h2", { text: "Top 5", attrs: { id: "top-title" } }),
-        element("p", { text: "공식 근거·시장 영향 기준" })
+        element("p", { text: "공식 근거·시장 영향 기준" }),
+        element("time", {
+          text: publishedAt ? `업데이트 ${formatDate(publishedAt, true)}` : "최신 공개 기록",
+          className: "mobile-edition-time",
+          attrs: { datetime: publishedAt }
+        })
       ]),
       top.length
-        ? element("ol", { className: "terminal-top-list" }, top.map((item, index) => terminalEvent(item, index + 1)))
+        ? element("ol", { className: "terminal-top-list" }, top.map((item, index) => (
+          terminalEvent(item, index + 1, index === 0 ? mobileCoverageContext : null)
+        )))
         : terminalEmpty(topEmptyMessage)
     ]);
     const liveSection = element("section", {
@@ -1832,12 +1889,7 @@
           attrs: { datetime: publishedAt }
         })
       ]),
-      fragment([coverageAlert, staleAlert]),
-      element("p", {
-        text: marketCoverageDescription(market),
-        className: "coverage-scope-note",
-        attrs: { "data-market-coverage": market }
-      }),
+      desktopCoverageContext,
       mobileTerminalTabs(),
       element("div", { className: "terminal-grid" }, [
         element("div", { className: "terminal-main" }, [
