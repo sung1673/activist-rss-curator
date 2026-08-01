@@ -269,7 +269,7 @@ def test_workflow_commands_are_real_cli_subcommands_and_prepare_precedes_post() 
 
     prepare_at = WORKFLOW_TEXT.index("carry-forward-prepare")
     upload_at = WORKFLOW_TEXT.index(
-        "Upload immutable carry-forward intent before any POST"
+        "Upload immutable carry-forward intent before any brief POST"
     )
     publish_job_at = WORKFLOW_TEXT.index("  carry_forward_publish:")
     publish_at = WORKFLOW_TEXT.index("carry-forward-publish", publish_job_at)
