@@ -4,10 +4,12 @@ import copy
 import base64
 import gzip
 import hashlib
+import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Mapping
 
+import httpx
 import pytest
 
 import curator.global_alpha_expedited_editorial as editorial
@@ -21,6 +23,7 @@ from curator.global_alpha_expedited_editorial import (
     PAIR_COUNT,
     TOP5_COUNT,
     ExpeditedEditorialError,
+    EditorialClient,
     _brief_id,
     _global_comparison_key,
     _validate_approved_canonical_basis,
@@ -57,6 +60,123 @@ TEST_PUBLICATION_ARTIFACT = {
     ),
     "artifact_digest": "sha256:" + "d" * 64,
 }
+
+
+def _editorial_response() -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "ok": True,
+            "api_version": "v2",
+            "service": "bside-global-market-terminal",
+            "code_revision": REVISION,
+            "schema_version": 12,
+        },
+    )
+
+
+def test_editorial_client_retries_only_idempotent_get_transport_errors() -> None:
+    calls: list[tuple[str, str]] = []
+    clients: list[httpx.Client] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.headers["Connection"]))
+        if len(calls) < 3:
+            raise httpx.RemoteProtocolError(
+                "transient server disconnect",
+                request=request,
+            )
+        return _editorial_response()
+
+    def client_factory(**kwargs: object) -> httpx.Client:
+        client = httpx.Client(**kwargs)  # type: ignore[arg-type]
+        clients.append(client)
+        return client
+
+    client = EditorialClient(
+        "https://alignpe.gabia.io/activist/api.php/api/v2",
+        "x" * 32,
+        transport=httpx.MockTransport(handler),
+        client_factory=client_factory,
+    )
+    try:
+        response = client.health()
+    finally:
+        client.close()
+
+    assert response["ok"] is True
+    assert calls == [("GET", "close")] * 3
+    assert len(clients) == 3
+
+
+def test_editorial_client_bounds_get_retries_and_never_retries_post() -> None:
+    get_calls = 0
+    secret_token = "token-" + "z" * 32
+
+    def failing_get(request: httpx.Request) -> httpx.Response:
+        nonlocal get_calls
+        get_calls += 1
+        raise httpx.RemoteProtocolError("transient", request=request)
+
+    get_client = EditorialClient(
+        "https://alignpe.gabia.io/activist/api.php/api/v2",
+        secret_token,
+        transport=httpx.MockTransport(failing_get),
+    )
+    try:
+        with pytest.raises(ExpeditedEditorialError, match="request failed") as error:
+            get_client.health()
+    finally:
+        get_client.close()
+    assert get_calls == 3
+    assert secret_token not in str(error.value)
+    assert secret_token not in "".join(
+        traceback.format_exception(error.type, error.value, error.tb)
+    )
+
+    write_calls = 0
+
+    def failing_write(request: httpx.Request) -> httpx.Response:
+        nonlocal write_calls
+        write_calls += 1
+        raise httpx.RemoteProtocolError("do not retry writes", request=request)
+
+    for method in ("POST", "PATCH"):
+        write_client = EditorialClient(
+            "https://alignpe.gabia.io/activist/api.php/api/v2",
+            "x" * 32,
+            transport=httpx.MockTransport(failing_write),
+        )
+        try:
+            with pytest.raises(ExpeditedEditorialError, match="request failed"):
+                write_client._json(method, "/admin/write", payload={})
+        finally:
+            write_client.close()
+    assert write_calls == 2
+
+
+def test_editorial_client_does_not_retry_http_contract_failures() -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            503,
+            json={"ok": False, "api_version": "v2", "error": "unavailable"},
+        )
+
+    client = EditorialClient(
+        "https://alignpe.gabia.io/activist/api.php/api/v2",
+        "x" * 32,
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        with pytest.raises(ExpeditedEditorialError, match="HTTP 503"):
+            client.health()
+    finally:
+        client.close()
+    assert calls == 1
 
 
 def _document(index: int, country: str) -> dict[str, object]:
