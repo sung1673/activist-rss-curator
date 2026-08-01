@@ -13,13 +13,14 @@ import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
 
 SCHEMA_VERSION = 1
+_IDEMPOTENT_GET_TRANSPORT_ATTEMPTS = 3
 CANDIDATE_KIND = "bside-global-alpha-expedited-editorial-candidates"
 DECISION_KIND = "bside-global-alpha-expedited-editorial-human-decisions"
 HUMAN_REVIEW_KIND = "bside-global-alpha-human-review"
@@ -450,22 +451,78 @@ def normalize_api_base(value: str) -> str:
 
 
 class EditorialClient:
-    def __init__(self, api_base: str, editor_token: str) -> None:
+    def __init__(
+        self,
+        api_base: str,
+        editor_token: str,
+        *,
+        transport: httpx.BaseTransport | None = None,
+        client_factory: Callable[..., httpx.Client] = httpx.Client,
+    ) -> None:
         self.api_base = normalize_api_base(api_base)
         token = editor_token.strip()
         if not token or any(ord(char) < 33 or ord(char) > 126 for char in token):
             raise ExpeditedEditorialError("invalid_editor_token")
-        self._client = httpx.Client(
-            timeout=httpx.Timeout(45.0, connect=15.0),
+        self._timeout = httpx.Timeout(45.0, connect=15.0)
+        self._transport = transport
+        self._client_factory = client_factory
+        self._client_headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+            "Cache-Control": "no-cache",
+            "Connection": "close",
+        }
+        self._client = self._new_client()
+
+    def _new_client(self) -> httpx.Client:
+        return self._client_factory(
+            timeout=self._timeout,
             follow_redirects=False,
-            headers={
-                "Accept": "application/json",
-                "Authorization": f"Bearer {token}",
-            },
+            headers=self._client_headers,
+            transport=self._transport,
         )
 
     def close(self) -> None:
         self._client.close()
+
+    def _request_with_transport_retry(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Mapping[str, str | int] | None,
+        payload: Mapping[str, object] | None,
+        headers: Mapping[str, str] | None,
+    ) -> httpx.Response:
+        """Retry transport failures only for idempotent GET requests."""
+
+        attempts = (
+            _IDEMPOTENT_GET_TRANSPORT_ATTEMPTS if method == "GET" else 1
+        )
+        last_error: httpx.TransportError | None = None
+        for attempt in range(attempts):
+            try:
+                if attempt == 0:
+                    return self._client.request(
+                        method,
+                        self.api_base + path,
+                        params=params,
+                        json=payload,
+                        headers=headers,
+                    )
+                with self._new_client() as retry_client:
+                    return retry_client.request(
+                        method,
+                        self.api_base + path,
+                        params=params,
+                        json=payload,
+                        headers=headers,
+                    )
+            except httpx.TransportError as exc:
+                last_error = exc
+        if last_error is None:  # pragma: no cover - defensive invariant
+            raise RuntimeError("editorial request retry exhausted without an error")
+        raise last_error
 
     def _json(
         self,
@@ -476,17 +533,20 @@ class EditorialClient:
         payload: Mapping[str, object] | None = None,
         authenticated: bool = True,
     ) -> dict[str, object]:
+        normalized_method = method.upper()
         headers = None if authenticated else {"Authorization": ""}
         try:
-            response = self._client.request(
-                method,
-                self.api_base + path,
+            response = self._request_with_transport_retry(
+                normalized_method,
+                path,
                 params=params,
-                json=payload,
+                payload=payload,
                 headers=headers,
             )
         except httpx.HTTPError as exc:
-            raise ExpeditedEditorialError(f"{path}: request failed") from exc
+            raise ExpeditedEditorialError(
+                f"{path}: request failed ({type(exc).__name__})"
+            ) from None
         if 300 <= response.status_code < 400:
             raise ExpeditedEditorialError(f"{path}: redirect forbidden")
         if response.status_code != 200:
