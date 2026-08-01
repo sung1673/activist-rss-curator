@@ -149,6 +149,25 @@ LEGACY_APPROVAL_PRESERVED_DECISIONS = {
 EVENT_COUNT = 20
 PAIR_COUNT = 40
 TOP5_COUNT = 5
+CARRY_FORWARD_OUTCOME_FIELDS = frozenset(
+    {
+        "event_id",
+        "decision",
+        "result",
+        "final_review_status",
+        "final_publication_status",
+        "final_identity_status",
+        "final_updated_at",
+        "source_issuer_name",
+        "current_issuer_name",
+        "issuer_name_drift",
+        "source_event_evidence_sha256",
+        "current_event_evidence_sha256",
+        "approved_event_basis_sha256",
+        "immutable_evidence_basis_sha256",
+        "current_snapshot_sha256",
+    }
+)
 MAX_RESPONSE_BYTES = 250_000
 MAX_COMPRESSED_DECISIONS_BYTES = 1_000_000
 MAX_DECISIONS_BYTES = 5_000_000
@@ -3673,9 +3692,20 @@ def _validate_current_carry_event(
         raise ExpeditedEditorialError(
             f"carry-forward: editorial state drift for {event_id}"
         )
+    source_issuer_name = _text(
+        approved_event.get("issuer_name"),
+        "issuer_name",
+        f"approved event {event_id}",
+        maximum=255,
+    )
+    current_issuer_name = _text(
+        current.get("issuer_name"),
+        "issuer_name",
+        f"current event {event_id}",
+        maximum=255,
+    )
     exact_fields = (
         "issuer_id",
-        "issuer_name",
         "country",
         "title",
         "original_language",
@@ -3766,6 +3796,9 @@ def _validate_current_carry_event(
         "final_publication_status": current.get("publication_status"),
         "final_identity_status": current.get("identity_status"),
         "final_updated_at": current.get("updated_at"),
+        "source_issuer_name": source_issuer_name,
+        "current_issuer_name": current_issuer_name,
+        "issuer_name_drift": current_issuer_name != source_issuer_name,
         "source_event_evidence_sha256": approved_event[
             "source_event_evidence_sha256"
         ],
@@ -3935,6 +3968,9 @@ def prepare_carry_forward_publication(
             {
                 "event_id": item["event_id"],
                 "final_updated_at": item["final_updated_at"],
+                "source_issuer_name": item["source_issuer_name"],
+                "current_issuer_name": item["current_issuer_name"],
+                "issuer_name_drift": item["issuer_name_drift"],
                 "source_event_evidence_sha256": item[
                     "source_event_evidence_sha256"
                 ],
@@ -4226,11 +4262,37 @@ def _validate_carry_forward_intent(
             _list(intent.get("verified_outcomes"), "intent.verified_outcomes")
         )
     ]
+    outcome_audit_valid = True
+    for index, item in enumerate(outcomes):
+        location = f"carry-forward intent.verified_outcomes[{index}]"
+        if set(item) != CARRY_FORWARD_OUTCOME_FIELDS:
+            outcome_audit_valid = False
+            break
+        source_name = _text(
+            item.get("source_issuer_name"),
+            "source_issuer_name",
+            location,
+            maximum=255,
+        )
+        current_name = _text(
+            item.get("current_issuer_name"),
+            "current_issuer_name",
+            location,
+            maximum=255,
+        )
+        name_drift = item.get("issuer_name_drift")
+        if (
+            not isinstance(name_drift, bool)
+            or name_drift != (source_name != current_name)
+        ):
+            outcome_audit_valid = False
+            break
     if (
         len(event_reviews) != EVENT_COUNT
         or len(pair_reviews) != PAIR_COUNT
         or len(top5) != TOP5_COUNT
         or len(outcomes) != EVENT_COUNT
+        or not outcome_audit_valid
         or any(item.get("decision") != "approved" for item in event_reviews)
         or any(
             item.get("result") != "verified_unchanged"
@@ -4479,6 +4541,7 @@ def publish_carry_forward_intent(
         "prepared_intent_artifact": artifact,
         "prepared_intent_sha256": frozen["intent_sha256"],
         "carry_forward": carry_provenance,
+        "event_review_outcomes": frozen["verified_outcomes"],
         "event_reviews": frozen["event_reviews"],
         "same_event_pair_reviews": frozen["same_event_pair_reviews"],
         "top5": [

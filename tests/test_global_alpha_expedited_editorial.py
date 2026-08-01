@@ -1194,6 +1194,12 @@ def test_code_only_sha_carry_forward_preserves_human_review_without_event_mutati
     assert receipt["event_review_outcomes"][0]["result"] == (  # type: ignore[index]
         "verified_unchanged"
     )
+    assert receipt["event_review_outcomes"][0][  # type: ignore[index]
+        "source_issuer_name"
+    ] == receipt["event_review_outcomes"][0]["current_issuer_name"]  # type: ignore[index]
+    assert receipt["event_review_outcomes"][0][  # type: ignore[index]
+        "issuer_name_drift"
+    ] is False
     assert receipt["mutations_applied"] == 0
     assert receipt["event_mutations_applied"] == 0
     assert receipt["idempotent_replay"] is False
@@ -1213,6 +1219,110 @@ def test_code_only_sha_carry_forward_preserves_human_review_without_event_mutati
         "source_human_review"
     ]["same_event_pair_reviews"]  # type: ignore[index]
     assert receipt["top5"] == common["source_receipt"]["top5"]  # type: ignore[index]
+
+
+def test_carry_forward_audits_issuer_master_name_drift_without_event_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, common = _carry_common(monkeypatch)
+    event_id = next(iter(client.events))
+    event = client.events[event_id]
+    assert isinstance(event, dict)
+    source_name = str(event["issuer_name"])
+    current_name = "Renamed current issuer"
+    event["issuer_name"] = current_name
+    before = copy.deepcopy(client.events)
+
+    intent = _prepare_carry_from_common(client, common)
+    outcomes = intent["verified_outcomes"]
+    assert isinstance(outcomes, list)
+    outcome = next(
+        item for item in outcomes if item["event_id"] == event_id
+    )
+    assert outcome["source_issuer_name"] == source_name
+    assert outcome["current_issuer_name"] == current_name
+    assert outcome["issuer_name_drift"] is True
+    assert intent["carry_forward"]["event_mutations_applied"] == 0  # type: ignore[index]
+    assert client.events == before
+
+    human, receipt, replay = publish_carry_forward_intent(
+        client,
+        intent=intent,
+        revision=str(common["revision"]),
+        intent_artifact=common["intent_artifact"],  # type: ignore[arg-type]
+        now=common["now"],  # type: ignore[arg-type]
+    )
+    assert client.events == before
+    assert human["carry_forward"]["event_mutations_applied"] == 0  # type: ignore[index]
+    receipt_outcome = next(
+        item
+        for item in receipt["event_review_outcomes"]  # type: ignore[union-attr]
+        if item["event_id"] == event_id
+    )
+    assert receipt_outcome["source_issuer_name"] == source_name
+    assert receipt_outcome["current_issuer_name"] == current_name
+    assert receipt_outcome["issuer_name_drift"] is True
+    assert receipt["event_mutations_applied"] == 0
+    assert replay["event_review_outcomes"] == receipt["event_review_outcomes"]
+
+    brief = receipt["brief"]
+    assert isinstance(brief, dict)
+    semantic = {
+        "candidate_artifact": receipt["candidate_artifact"],
+        "candidate_sha256": receipt["candidate_sha256"],
+        "decision_sha256": receipt["decision_sha256"],
+        "code_revision": receipt["code_revision"],
+        "prepared_intent_artifact": receipt["prepared_intent_artifact"],
+        "prepared_intent_sha256": receipt["prepared_intent_sha256"],
+        "carry_forward": receipt["carry_forward"],
+        "event_review_outcomes": receipt["event_review_outcomes"],
+        "event_reviews": intent["event_reviews"],
+        "same_event_pair_reviews": receipt["same_event_pair_reviews"],
+        "top5": [
+            {
+                "event_id": item["event_id"],
+                "position_no": item["position_no"],
+                "selection_reason": item["selection_reason"],
+            }
+            for item in receipt["top5"]  # type: ignore[union-attr]
+        ],
+        "brief": {
+            "brief_id": brief["brief_id"],
+            "build_sha": brief["build_sha"],
+            "cutoff_at": brief["cutoff_at"],
+            "payload_sha256": brief["payload_sha256"],
+        },
+    }
+    assert receipt["semantic_receipt_sha256"] == canonical_sha256(semantic)
+
+
+def test_carry_forward_rejects_inconsistent_issuer_name_drift_audit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, common = _carry_common(monkeypatch)
+    intent = _prepare_carry_from_common(client, common)
+    outcomes = intent["verified_outcomes"]
+    assert isinstance(outcomes, list)
+    outcomes[0]["issuer_name_drift"] = True
+    intent["intent_sha256"] = canonical_sha256(
+        {
+            key: value
+            for key, value in intent.items()
+            if key != "intent_sha256"
+        }
+    )
+    with pytest.raises(
+        ExpeditedEditorialError,
+        match="frozen review basis mismatch",
+    ):
+        publish_carry_forward_intent(
+            client,
+            intent=intent,
+            revision=str(common["revision"]),
+            intent_artifact=common["intent_artifact"],  # type: ignore[arg-type]
+            now=common["now"],  # type: ignore[arg-type]
+        )
+    assert client.brief_calls == 0
 
 
 def test_preuploaded_intent_is_write_free_and_uses_a_new_frozen_cutoff(
@@ -1641,7 +1751,6 @@ def test_global_comparison_key_matches_the_php_v2_identity_contract() -> None:
     ("field", "mutated"),
     [
         ("issuer_id", "issuer:kr:mutated"),
-        ("issuer_name", "Mutated issuer"),
         ("country", "US"),
         ("title", "Mutated original title"),
         ("original_language", "en"),
