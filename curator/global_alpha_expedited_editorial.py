@@ -28,6 +28,9 @@ CARRY_FORWARD_KIND = "bside-global-alpha-expedited-editorial-carry-forward"
 CARRY_FORWARD_INTENT_KIND = (
     "bside-global-alpha-expedited-editorial-carry-forward-intent"
 )
+DISPLAY_TARGET_REPAIR_KIND = (
+    "bside-global-alpha-expedited-editorial-display-target-repair"
+)
 CARRY_FORWARD_INTENT_MAX_FRESH_AGE = timedelta(minutes=30)
 APPROVED_CANONICAL_BASIS_KIND = (
     "bside-global-alpha-expedited-approved-canonical-basis"
@@ -94,6 +97,26 @@ LEGACY_APPROVAL_PUBLICATION_ARTIFACT = {
         "95028a16adedfc19b5dfe3c6e0b0c36696b5c2619a44f0040d51ef3b1ffcbbaa"
     ),
 }
+LEGACY_DISPLAY_TARGET_REPAIR_DISCOVERY_ARTIFACT = {
+    "run_id": 30693489935,
+    "artifact_id": 8816492404,
+    "artifact_name": (
+        "global-alpha-expedited-editorial-carry-intent-"
+        "e8a3ff6acfdd2233cc32ed3b8890598528cf984b-30693489935-1"
+    ),
+    "artifact_digest": (
+        "sha256:"
+        "f1a6ab55e28867139f505fe09a445bd45503ad606cc6f709b9e471be3302d6c8"
+    ),
+}
+LEGACY_DISPLAY_TARGET_REPAIR_EVENT_IDS = (
+    "event:6fe8cc863cdb3faa55b667f440204f72",
+    "event:241d63264e99fadbfe08cb1f6b219c41",
+    "event:e90d2124ba3c3459851db2d9a4ee9408",
+    "event:c866f5f7841b74642a636049b92e8c0a",
+    "event:961ed4d77655b41b247e9d05d3b458c8",
+    "event:dba39b9797cbf6efd554cc07c808aea9",
+)
 LEGACY_APPROVAL_ACTION_OVERRIDES = {
     3: "rights_issue_price_finalized",
     4: "treasury_convertible_bond_sale",
@@ -2922,8 +2945,9 @@ def _legacy_approved_canonical_basis(
             "review_status": "approved",
             "publication_status": "published",
             "identity_action": normalized_action,
-            "identity_target": _normalize_identity(
-                _legacy_approved_identity_target(issuer_name, title)
+            "identity_target": _legacy_approved_identity_target(
+                issuer_name,
+                title,
             ),
             "identity_actor_id": actor["actor_id"],
             "identity_effective_at": effective_at,
@@ -3829,6 +3853,733 @@ def _current_carry_event_with_snapshot(
     return event, snapshot_sha
 
 
+def _reconstruct_legacy_carry_forward_basis(
+    *,
+    candidate: Mapping[str, object],
+    source_human_review: Mapping[str, object],
+    source_receipt: Mapping[str, object],
+    source_replay_receipt: Mapping[str, object],
+    candidate_artifact: Mapping[str, object],
+    publication_artifact: Mapping[str, object],
+    now: datetime,
+) -> dict[str, object]:
+    """Reconstruct the one immutable human-approved source chain."""
+
+    source_revision, events, pairs, top5 = _validate_carry_source_candidate(
+        candidate
+    )
+    expected_candidate_artifact = _mapping(
+        candidate_artifact, "candidate artifact"
+    )
+    expected_publication_artifact = _mapping(
+        publication_artifact, "publication artifact"
+    )
+    if set(expected_candidate_artifact) != set(CARRY_FORWARD_ARTIFACT_FIELDS):
+        raise ExpeditedEditorialError("candidate artifact: exact fields required")
+    if set(expected_publication_artifact) != set(CARRY_FORWARD_ARTIFACT_FIELDS):
+        raise ExpeditedEditorialError(
+            "publication artifact: exact fields required"
+        )
+    event_reviews, pair_reviews, top_reviews = (
+        _validate_carry_source_human_review(
+            source_human_review,
+            candidate=candidate,
+            source_revision=source_revision,
+            events=events,
+            pairs=pairs,
+            top5=top5,
+            candidate_artifact=expected_candidate_artifact,
+            now=now,
+        )
+    )
+    source_outcomes, publication_top5 = _validate_carry_source_receipts(
+        source_receipt,
+        source_replay_receipt,
+        candidate=candidate,
+        source_revision=source_revision,
+        candidate_artifact=expected_candidate_artifact,
+        event_reviews=event_reviews,
+        pair_reviews=pair_reviews,
+        top_reviews=top_reviews,
+        now=now,
+    )
+    approval_attestation = _load_legacy_human_approval_artifact()
+    approval_correction = _load_legacy_human_approval_correction()
+    approved_canonical_basis = _legacy_approved_canonical_basis(
+        candidate=candidate,
+        candidate_artifact=expected_candidate_artifact,
+        publication_artifact=expected_publication_artifact,
+        approval_attestation=approval_attestation,
+        approval_correction=approval_correction,
+        source_decision_sha256=source_receipt.get("decision_sha256"),
+        events=events,
+        event_reviews=event_reviews,
+        pair_reviews=pair_reviews,
+        top_reviews=top_reviews,
+        source_outcomes=source_outcomes,
+        publication_top5=publication_top5,
+    )
+    approved_canonical_basis_sha = canonical_sha256(
+        approved_canonical_basis
+    )
+    _validate_approved_canonical_basis(
+        approved_canonical_basis,
+        approved_canonical_basis_sha,
+    )
+    approved_events = [
+        _mapping(item, f"approved canonical basis.events[{index}]")
+        for index, item in enumerate(
+            _list(
+                approved_canonical_basis.get("events"),
+                "approved canonical basis.events",
+            )
+        )
+    ]
+    return {
+        "source_revision": source_revision,
+        "events": events,
+        "event_reviews": event_reviews,
+        "pair_reviews": pair_reviews,
+        "top_reviews": top_reviews,
+        "source_outcomes": source_outcomes,
+        "publication_top5": publication_top5,
+        "candidate_artifact": dict(expected_candidate_artifact),
+        "publication_artifact": dict(expected_publication_artifact),
+        "approved_canonical_basis": approved_canonical_basis,
+        "approved_canonical_basis_sha256": approved_canonical_basis_sha,
+        "approved_by_id": {
+            str(item["event_id"]): item for item in approved_events
+        },
+        "candidate_sha256": _sha256(
+            candidate.get("candidate_sha256"),
+            "candidate_sha256",
+            "source candidate",
+        ),
+    }
+
+
+def _display_target_repair_reason(
+    candidate_sha256: str,
+    human_approval_chain_sha256: str,
+) -> str:
+    return (
+        f"[expedited-candidate:{candidate_sha256}] "
+        f"[human-approval:{human_approval_chain_sha256}] "
+        f"[display-target-repair:{LEGACY_APPROVAL_CORRECTION_SHA256}] "
+        "Apply the exact human-approved display target without changing "
+        "canonical identity, evidence, or timestamps."
+    )
+
+
+def _validate_display_target_repair_current(
+    current: Mapping[str, object],
+    *,
+    approved_event: Mapping[str, object],
+    source_outcome: Mapping[str, object],
+    candidate_marker: str,
+    require_exact_target: bool,
+) -> dict[str, object]:
+    event_id = str(approved_event["event_id"])
+    exact_target = _text(
+        approved_event.get("identity_target"),
+        "identity_target",
+        f"approved display target {event_id}",
+        maximum=700,
+    )
+    normalized_target = _normalize_identity(exact_target)
+    if exact_target == normalized_target:
+        raise ExpeditedEditorialError(
+            f"display-target repair: {event_id} has no approved raw-form delta"
+        )
+    current_target = _text(
+        current.get("identity_target"),
+        "identity_target",
+        f"current display target {event_id}",
+        maximum=700,
+    )
+    if _normalize_identity(current_target) != normalized_target:
+        raise ExpeditedEditorialError(
+            f"display-target repair: normalized target drift for {event_id}"
+        )
+    if current_target not in {exact_target, normalized_target}:
+        raise ExpeditedEditorialError(
+            f"display-target repair: unexpected raw target for {event_id}"
+        )
+    if require_exact_target and current_target != exact_target:
+        raise ExpeditedEditorialError(
+            f"display-target repair: exact target was not persisted for {event_id}"
+        )
+
+    # Reuse the complete carry-forward fence after substituting only the one
+    # explicitly permitted raw-form field. This binds every other canonical
+    # field, official document, actor, source timestamp and comparison key to
+    # the immutable human-approved basis.
+    allowed_basis = dict(approved_event)
+    allowed_basis["identity_target"] = current_target
+    outcome = _validate_current_carry_event(
+        current,
+        approved_event=allowed_basis,
+        source_outcome=source_outcome,
+        candidate_marker=candidate_marker,
+    )
+    actors = [
+        {
+            field: _mapping(raw, f"current event {event_id}.actor").get(field)
+            for field in (
+                "actor_id",
+                "display_name",
+                "actor_type",
+                "actor_role",
+                "country_code",
+                "actor_review_status",
+                "relation_review_status",
+                "record_status",
+            )
+        }
+        for raw in _list(current.get("actors"), f"current event {event_id}.actors")
+    ]
+    state_basis = {
+        "event_id": event_id,
+        "identity_target": current_target,
+        "updated_at": current.get("updated_at"),
+        "event_evidence_sha256": outcome["current_event_evidence_sha256"],
+        "comparison_key": current.get("comparison_key"),
+        "official_documents": _carry_document_basis(
+            current.get("official_documents"),
+            f"current event {event_id}.official_documents",
+        ),
+        "actors": actors,
+    }
+    return {
+        "event_id": event_id,
+        "exact_identity_target": exact_target,
+        "normalized_identity_target": normalized_target,
+        "current_identity_target": current_target,
+        "updated_at": current.get("updated_at"),
+        "event_evidence_sha256": outcome["current_event_evidence_sha256"],
+        "comparison_key": current.get("comparison_key"),
+        "official_documents_sha256": canonical_sha256(
+            state_basis["official_documents"]
+        ),
+        "actors_sha256": canonical_sha256(actors),
+        "state_sha256": canonical_sha256(state_basis),
+    }
+
+
+def repair_legacy_display_targets(
+    client: EditorialClient,
+    *,
+    candidate: Mapping[str, object],
+    source_human_review: Mapping[str, object],
+    source_receipt: Mapping[str, object],
+    source_replay_receipt: Mapping[str, object],
+    revision: str,
+    candidate_artifact: Mapping[str, object],
+    publication_artifact: Mapping[str, object],
+    now: datetime,
+) -> dict[str, object]:
+    """Repair only six human-approved display targets, fail-closed."""
+
+    revision = _sha40(revision, "display-target repair revision")
+    health = client.health()
+    if (
+        health.get("service") != "bside-global-market-terminal"
+        or _sha40(health.get("code_revision"), "health") != revision
+        or health.get("schema_version") != 12
+    ):
+        raise ExpeditedEditorialError(
+            "display-target repair: current health mismatch"
+        )
+    chain = _reconstruct_legacy_carry_forward_basis(
+        candidate=candidate,
+        source_human_review=source_human_review,
+        source_receipt=source_receipt,
+        source_replay_receipt=source_replay_receipt,
+        candidate_artifact=candidate_artifact,
+        publication_artifact=publication_artifact,
+        now=now,
+    )
+    approved_basis = _mapping(
+        chain["approved_canonical_basis"],
+        "approved canonical basis",
+    )
+    approved_by_id = _mapping(chain["approved_by_id"], "approved event map")
+    source_outcomes = _mapping(chain["source_outcomes"], "source outcomes")
+    candidate_sha = str(chain["candidate_sha256"])
+    human_chain_sha = _sha256(
+        approved_basis.get("human_approval_chain_sha256"),
+        "human_approval_chain_sha256",
+        "approved canonical basis",
+    )
+    expected_ids = list(LEGACY_DISPLAY_TARGET_REPAIR_EVENT_IDS)
+    derived_ids: list[str] = []
+    for raw_approved_event in _list(
+        approved_basis.get("events"), "approved events"
+    ):
+        approved_event = _mapping(raw_approved_event, "approved event")
+        approved_target = _text(
+            approved_event.get("identity_target"),
+            "identity_target",
+            "approved event",
+            maximum=700,
+        )
+        if approved_target != _normalize_identity(approved_target):
+            derived_ids.append(str(approved_event["event_id"]))
+    if derived_ids != expected_ids:
+        raise ExpeditedEditorialError(
+            "display-target repair: exact six-event basis changed"
+        )
+    candidate_marker = f"[expedited-candidate:{candidate_sha}]"
+    human_marker = f"[human-approval:{human_chain_sha}]"
+    correction_marker = (
+        f"[display-target-repair:{LEGACY_APPROVAL_CORRECTION_SHA256}]"
+    )
+    reason = _display_target_repair_reason(candidate_sha, human_chain_sha)
+
+    preflight: dict[str, tuple[dict[str, object], str]] = {}
+    for event_id in expected_ids:
+        current, snapshot_sha = _current_carry_event_with_snapshot(
+            client,
+            event_id,
+            revision,
+        )
+        state = _validate_display_target_repair_current(
+            current,
+            approved_event=_mapping(
+                approved_by_id[event_id],
+                f"approved canonical event {event_id}",
+            ),
+            source_outcome=_mapping(
+                source_outcomes[event_id],
+                f"source outcome {event_id}",
+            ),
+            candidate_marker=candidate_marker,
+            require_exact_target=False,
+        )
+        if state["current_identity_target"] == state["exact_identity_target"]:
+            latest_reason = str(current.get("latest_revision_reason") or "")
+            if human_marker not in latest_reason or correction_marker not in latest_reason:
+                raise ExpeditedEditorialError(
+                    f"display-target repair: unproven existing raw target for {event_id}"
+                )
+        preflight[event_id] = (state, snapshot_sha)
+
+    applied_ids: list[str] = []
+    response_flags: dict[str, dict[str, object]] = {}
+    for event_id in expected_ids:
+        before, _ = preflight[event_id]
+        if before["current_identity_target"] == before["exact_identity_target"]:
+            continue
+        approved = _mapping(
+            approved_by_id[event_id],
+            f"approved canonical event {event_id}",
+        )
+        actor = _mapping(approved.get("actor"), f"approved actor {event_id}")
+        payload = {
+            "decision": "approve",
+            "expected_updated_at": before["updated_at"],
+            "expected_evidence_sha256": before["event_evidence_sha256"],
+            "reason": reason,
+            "event_family": approved["event_family"],
+            "identity_action": approved["identity_action"],
+            "identity_target": approved["identity_target"],
+            "identity_effective_at": approved["identity_effective_at"],
+            "identity_deadline_at": approved["identity_deadline_at"],
+            "importance": approved["importance"],
+            "summary": approved["summary"],
+            "current_status": approved["current_status"],
+            "actor": {field: actor.get(field) for field in SAFE_ACTOR_FIELDS},
+        }
+        response = _mapping(
+            client.review(event_id, payload).get("data"),
+            f"display-target repair response {event_id}",
+        )
+        if (
+            response.get("event_id") != event_id
+            or response.get("decision") != "approved"
+            or response.get("published") is not True
+            or response.get("display_target_repaired") is not True
+            or response.get("updated_at_preserved") is not True
+        ):
+            raise ExpeditedEditorialError(
+                f"display-target repair: response mismatch for {event_id}"
+            )
+        applied_ids.append(event_id)
+        response_flags[event_id] = {
+            "display_target_repaired": True,
+            "updated_at_preserved": True,
+        }
+
+    event_results: list[dict[str, object]] = []
+    verified_ids: list[str] = []
+    for event_id in expected_ids:
+        before, before_snapshot = preflight[event_id]
+        current, after_snapshot = _current_carry_event_with_snapshot(
+            client,
+            event_id,
+            revision,
+        )
+        after = _validate_display_target_repair_current(
+            current,
+            approved_event=_mapping(
+                approved_by_id[event_id],
+                f"approved canonical event {event_id}",
+            ),
+            source_outcome=_mapping(
+                source_outcomes[event_id],
+                f"source outcome {event_id}",
+            ),
+            candidate_marker=candidate_marker,
+            require_exact_target=True,
+        )
+        latest_reason = str(current.get("latest_revision_reason") or "")
+        if human_marker not in latest_reason or correction_marker not in latest_reason:
+            raise ExpeditedEditorialError(
+                f"display-target repair: approval markers missing for {event_id}"
+            )
+        for field in (
+            "updated_at",
+            "event_evidence_sha256",
+            "comparison_key",
+            "official_documents_sha256",
+            "actors_sha256",
+        ):
+            if before[field] != after[field]:
+                raise ExpeditedEditorialError(
+                    f"display-target repair: {field} changed for {event_id}"
+                )
+        applied = event_id in applied_ids
+        event_results.append(
+            {
+                "event_id": event_id,
+                "expected_identity_target": after["exact_identity_target"],
+                "normalized_identity_target": after[
+                    "normalized_identity_target"
+                ],
+                "before_identity_target": before["current_identity_target"],
+                "after_identity_target": after["current_identity_target"],
+                "applied": applied,
+                "verified": True,
+                "updated_at": after["updated_at"],
+                "event_evidence_sha256": after["event_evidence_sha256"],
+                "comparison_key": after["comparison_key"],
+                "official_documents_sha256": after[
+                    "official_documents_sha256"
+                ],
+                "actors_sha256": after["actors_sha256"],
+                "before_state_sha256": before["state_sha256"],
+                "after_state_sha256": after["state_sha256"],
+                "before_snapshot_sha256": before_snapshot,
+                "after_snapshot_sha256": after_snapshot,
+                "response_flags": response_flags.get(event_id),
+            }
+        )
+        verified_ids.append(event_id)
+
+    collected_at = (
+        now.astimezone(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+    receipt = {
+        "schema_version": SCHEMA_VERSION,
+        "kind": DISPLAY_TARGET_REPAIR_KIND,
+        "environment": "production",
+        "is_synthetic": False,
+        "code_revision": revision,
+        "collected_at": collected_at,
+        "source_code_revision": chain["source_revision"],
+        "candidate_artifact": chain["candidate_artifact"],
+        "source_publication_artifact": chain["publication_artifact"],
+        "candidate_sha256": candidate_sha,
+        "source_decision_sha256": _sha256(
+            source_receipt.get("decision_sha256"),
+            "decision_sha256",
+            "source publication",
+        ),
+        "approved_canonical_basis_sha256": chain[
+            "approved_canonical_basis_sha256"
+        ],
+        "human_approval_chain_sha256": human_chain_sha,
+        "human_approval_attestation_sha256": LEGACY_APPROVAL_ATTESTATION_SHA256,
+        "human_approval_correction_sha256": LEGACY_APPROVAL_CORRECTION_SHA256,
+        "human_approval_correction_text_sha256": (
+            LEGACY_APPROVAL_CORRECTION_TEXT_SHA256
+        ),
+        "reviewer_type": "human",
+        "reviewer_reference": LEGACY_APPROVAL_REVIEWER,
+        "ai_generated_ground_truth": False,
+        "discovery_artifact": dict(
+            LEGACY_DISPLAY_TARGET_REPAIR_DISCOVERY_ARTIFACT
+        ),
+        "expected_event_ids": expected_ids,
+        "applied_event_ids": applied_ids,
+        "verified_event_ids": verified_ids,
+        "mutations_applied": len(applied_ids),
+        "idempotent_replay": len(applied_ids) == 0,
+        "event_results": event_results,
+    }
+    return {
+        **receipt,
+        "receipt_sha256": canonical_sha256(receipt),
+    }
+
+
+def _validate_display_target_repair_receipt(
+    value: object,
+    *,
+    revision: str,
+) -> dict[str, object]:
+    receipt = dict(_mapping(value, "display-target repair receipt"))
+    expected_fields = {
+        "schema_version",
+        "kind",
+        "environment",
+        "is_synthetic",
+        "code_revision",
+        "collected_at",
+        "source_code_revision",
+        "candidate_artifact",
+        "source_publication_artifact",
+        "candidate_sha256",
+        "source_decision_sha256",
+        "approved_canonical_basis_sha256",
+        "human_approval_chain_sha256",
+        "human_approval_attestation_sha256",
+        "human_approval_correction_sha256",
+        "human_approval_correction_text_sha256",
+        "reviewer_type",
+        "reviewer_reference",
+        "ai_generated_ground_truth",
+        "discovery_artifact",
+        "expected_event_ids",
+        "applied_event_ids",
+        "verified_event_ids",
+        "mutations_applied",
+        "idempotent_replay",
+        "event_results",
+        "receipt_sha256",
+    }
+    if (
+        set(receipt) != expected_fields
+        or receipt.get("schema_version") != SCHEMA_VERSION
+        or receipt.get("kind") != DISPLAY_TARGET_REPAIR_KIND
+        or receipt.get("environment") != "production"
+        or receipt.get("is_synthetic") is not False
+        or _sha40(receipt.get("code_revision"), "display-target repair")
+        != revision
+        or receipt.get("candidate_artifact")
+        != LEGACY_APPROVAL_CANDIDATE_ARTIFACT
+        or receipt.get("source_publication_artifact")
+        != LEGACY_APPROVAL_PUBLICATION_ARTIFACT
+        or receipt.get("candidate_sha256")
+        != LEGACY_APPROVAL_CANDIDATE_SHA256
+        or receipt.get("source_decision_sha256")
+        != LEGACY_APPROVAL_SOURCE_DECISION_SHA256
+        or receipt.get("human_approval_chain_sha256")
+        != LEGACY_APPROVAL_CHAIN_SHA256
+        or receipt.get("human_approval_attestation_sha256")
+        != LEGACY_APPROVAL_ATTESTATION_SHA256
+        or receipt.get("human_approval_correction_sha256")
+        != LEGACY_APPROVAL_CORRECTION_SHA256
+        or receipt.get("human_approval_correction_text_sha256")
+        != LEGACY_APPROVAL_CORRECTION_TEXT_SHA256
+        or receipt.get("reviewer_type") != "human"
+        or receipt.get("reviewer_reference") != LEGACY_APPROVAL_REVIEWER
+        or receipt.get("ai_generated_ground_truth") is not False
+        or receipt.get("discovery_artifact")
+        != LEGACY_DISPLAY_TARGET_REPAIR_DISCOVERY_ARTIFACT
+    ):
+        raise ExpeditedEditorialError(
+            "display-target repair receipt: provenance mismatch"
+        )
+    _sha40(receipt.get("source_code_revision"), "display-target repair source")
+    _timestamp(receipt.get("collected_at"), "collected_at", "display-target repair")
+    _sha256(
+        receipt.get("approved_canonical_basis_sha256"),
+        "approved_canonical_basis_sha256",
+        "display-target repair",
+    )
+    supplied_sha = _sha256(
+        receipt.get("receipt_sha256"),
+        "receipt_sha256",
+        "display-target repair",
+    )
+    if canonical_sha256(
+        {key: item for key, item in receipt.items() if key != "receipt_sha256"}
+    ) != supplied_sha:
+        raise ExpeditedEditorialError(
+            "display-target repair receipt: digest mismatch"
+        )
+    expected_ids = list(LEGACY_DISPLAY_TARGET_REPAIR_EVENT_IDS)
+    applied_ids = _list(
+        receipt.get("applied_event_ids"),
+        "display-target repair.applied_event_ids",
+    )
+    verified_ids = _list(
+        receipt.get("verified_event_ids"),
+        "display-target repair.verified_event_ids",
+    )
+    mutations = receipt.get("mutations_applied")
+    if (
+        receipt.get("expected_event_ids") != expected_ids
+        or verified_ids != expected_ids
+        or len(applied_ids) != len(set(str(item) for item in applied_ids))
+        or any(item not in expected_ids for item in applied_ids)
+        or isinstance(mutations, bool)
+        or not isinstance(mutations, int)
+        or mutations != len(applied_ids)
+        or not 0 <= mutations <= len(expected_ids)
+        or receipt.get("idempotent_replay") is not (mutations == 0)
+    ):
+        raise ExpeditedEditorialError(
+            "display-target repair receipt: event count mismatch"
+        )
+    results = [
+        _mapping(item, f"display-target repair.event_results[{index}]")
+        for index, item in enumerate(
+            _list(receipt.get("event_results"), "display-target repair results")
+        )
+    ]
+    result_fields = {
+        "event_id",
+        "expected_identity_target",
+        "normalized_identity_target",
+        "before_identity_target",
+        "after_identity_target",
+        "applied",
+        "verified",
+        "updated_at",
+        "event_evidence_sha256",
+        "comparison_key",
+        "official_documents_sha256",
+        "actors_sha256",
+        "before_state_sha256",
+        "after_state_sha256",
+        "before_snapshot_sha256",
+        "after_snapshot_sha256",
+        "response_flags",
+    }
+    if len(results) != len(expected_ids):
+        raise ExpeditedEditorialError(
+            "display-target repair receipt: result count mismatch"
+        )
+    for event_id, item in zip(expected_ids, results, strict=True):
+        applied = event_id in applied_ids
+        expected_target = _text(
+            item.get("expected_identity_target"),
+            "expected_identity_target",
+            f"display-target repair result {event_id}",
+            maximum=700,
+        )
+        normalized_target = _text(
+            item.get("normalized_identity_target"),
+            "normalized_identity_target",
+            f"display-target repair result {event_id}",
+            maximum=700,
+        )
+        if (
+            set(item) != result_fields
+            or item.get("event_id") != event_id
+            or item.get("verified") is not True
+            or item.get("applied") is not applied
+            or expected_target == normalized_target
+            or _normalize_identity(expected_target) != normalized_target
+            or item.get("after_identity_target") != expected_target
+            or item.get("before_identity_target")
+            not in {expected_target, normalized_target}
+            or (not applied and item.get("before_identity_target") != expected_target)
+        ):
+            raise ExpeditedEditorialError(
+                f"display-target repair receipt: result mismatch for {event_id}"
+            )
+        for field in (
+            "event_evidence_sha256",
+            "official_documents_sha256",
+            "actors_sha256",
+            "before_state_sha256",
+            "after_state_sha256",
+            "before_snapshot_sha256",
+            "after_snapshot_sha256",
+        ):
+            _sha256(item.get(field), field, f"display-target repair {event_id}")
+        comparison_key = item.get("comparison_key")
+        if not isinstance(comparison_key, str) or re.fullmatch(
+            r"global:[0-9a-f]{64}", comparison_key
+        ) is None:
+            raise ExpeditedEditorialError(
+                "display-target repair receipt: invalid comparison key for "
+                + event_id
+            )
+        _timestamp(item.get("updated_at"), "updated_at", f"display-target repair {event_id}")
+        flags = item.get("response_flags")
+        if applied:
+            if flags != {
+                "display_target_repaired": True,
+                "updated_at_preserved": True,
+            }:
+                raise ExpeditedEditorialError(
+                    f"display-target repair receipt: response flags for {event_id}"
+                )
+        elif flags is not None:
+            raise ExpeditedEditorialError(
+                f"display-target repair receipt: unexpected response for {event_id}"
+            )
+    return receipt
+
+
+def validate_display_target_repair_receipts(
+    receipt: object,
+    replay: object,
+    *,
+    revision: str,
+    approved_canonical_basis_sha256: object,
+) -> tuple[dict[str, object], dict[str, object]]:
+    revision = _sha40(revision, "display-target repair revision")
+    first = _validate_display_target_repair_receipt(receipt, revision=revision)
+    second = _validate_display_target_repair_receipt(replay, revision=revision)
+    approved_sha = _sha256(
+        approved_canonical_basis_sha256,
+        "approved_canonical_basis_sha256",
+        "carry-forward intent",
+    )
+    if (
+        first["approved_canonical_basis_sha256"] != approved_sha
+        or second["approved_canonical_basis_sha256"] != approved_sha
+        or second["mutations_applied"] != 0
+        or second["applied_event_ids"] != []
+        or second["idempotent_replay"] is not True
+    ):
+        raise ExpeditedEditorialError(
+            "display-target repair receipts: replay/provenance mismatch"
+        )
+    first_results = _list(first["event_results"], "first repair results")
+    second_results = _list(second["event_results"], "second repair results")
+    for first_raw, second_raw in zip(first_results, second_results, strict=True):
+        first_item = _mapping(first_raw, "first repair result")
+        second_item = _mapping(second_raw, "second repair result")
+        if (
+            first_item["event_id"] != second_item["event_id"]
+            or second_item["before_identity_target"]
+            != first_item["after_identity_target"]
+            or second_item["after_identity_target"]
+            != first_item["after_identity_target"]
+            or second_item["before_state_sha256"]
+            != first_item["after_state_sha256"]
+            or second_item["after_state_sha256"]
+            != first_item["after_state_sha256"]
+            or second_item["updated_at"] != first_item["updated_at"]
+            or second_item["event_evidence_sha256"]
+            != first_item["event_evidence_sha256"]
+            or second_item["comparison_key"] != first_item["comparison_key"]
+        ):
+            raise ExpeditedEditorialError(
+                "display-target repair receipts: idempotent state mismatch"
+            )
+    return first, second
+
+
 def prepare_carry_forward_publication(
     client: EditorialClient,
     *,
@@ -4686,8 +5437,20 @@ def _parser() -> argparse.ArgumentParser:
             required=True,
         )
 
+    repair_parser = sub.add_parser("carry-forward-repair-targets")
+    add_carry_source_arguments(repair_parser)
     prepare_parser = sub.add_parser("carry-forward-prepare")
     add_carry_source_arguments(prepare_parser)
+    prepare_parser.add_argument(
+        "--display-target-repair-receipt",
+        type=Path,
+        required=True,
+    )
+    prepare_parser.add_argument(
+        "--display-target-repair-replay-receipt",
+        type=Path,
+        required=True,
+    )
     publish_parser = sub.add_parser("carry-forward-publish")
     publish_parser.add_argument("--intent", type=Path, required=True)
     publish_parser.add_argument("--intent-run-id", type=int, required=True)
@@ -4698,6 +5461,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     publish_parser.add_argument("--intent-artifact-name", required=True)
     publish_parser.add_argument("--intent-artifact-digest", required=True)
+    publish_parser.add_argument(
+        "--display-target-repair-receipt",
+        type=Path,
+        required=True,
+    )
+    publish_parser.add_argument(
+        "--display-target-repair-replay-receipt",
+        type=Path,
+        required=True,
+    )
     publish_parser.add_argument("--output-dir", type=Path, required=True)
     decode_parser = sub.add_parser("decode-decisions")
     decode_parser.add_argument("--output", type=Path, required=True)
@@ -4736,7 +5509,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"candidate_sha256={candidate['candidate_sha256']}"
             )
             return 0
-        if args.command == "carry-forward-prepare":
+        if args.command in {
+            "carry-forward-repair-targets",
+            "carry-forward-prepare",
+        }:
             candidate = _load_json(args.candidate, "source candidate")
             candidate_artifact = _artifact_identity(
                 run_id=args.candidate_run_id,
@@ -4752,29 +5528,80 @@ def main(argv: Sequence[str] | None = None) -> int:
                 artifact_digest=args.publication_artifact_digest,
                 location="source publication artifact",
             )
+            source_human_review = _load_json(
+                args.source_human_review,
+                "source human review",
+            )
+            source_receipt = _load_json(
+                args.source_publication_receipt,
+                "source publication receipt",
+            )
+            source_replay_receipt = _load_json(
+                args.source_publication_replay_receipt,
+                "source publication replay receipt",
+            )
+            if args.command == "carry-forward-repair-targets":
+                repair_receipt = repair_legacy_display_targets(
+                    client,
+                    candidate=candidate,
+                    source_human_review=source_human_review,
+                    source_receipt=source_receipt,
+                    source_replay_receipt=source_replay_receipt,
+                    revision=revision,
+                    candidate_artifact=candidate_artifact,
+                    publication_artifact=publication_artifact,
+                    now=datetime.now(timezone.utc),
+                )
+                _write_json(
+                    args.output_dir / "display-target-repair-receipt.json",
+                    repair_receipt,
+                )
+                print(
+                    "expedited editorial display-target repair verified: "
+                    f"expected={len(LEGACY_DISPLAY_TARGET_REPAIR_EVENT_IDS)} "
+                    f"mutations={repair_receipt['mutations_applied']} "
+                    f"idempotent_replay={repair_receipt['idempotent_replay']}"
+                )
+                return 0
             intent = prepare_carry_forward_publication(
                 client,
                 candidate=candidate,
-                source_human_review=_load_json(
-                    args.source_human_review,
-                    "source human review",
-                ),
-                source_receipt=_load_json(
-                    args.source_publication_receipt,
-                    "source publication receipt",
-                ),
-                source_replay_receipt=_load_json(
-                    args.source_publication_replay_receipt,
-                    "source publication replay receipt",
-                ),
+                source_human_review=source_human_review,
+                source_receipt=source_receipt,
+                source_replay_receipt=source_replay_receipt,
                 revision=revision,
                 candidate_artifact=candidate_artifact,
                 publication_artifact=publication_artifact,
                 now=datetime.now(timezone.utc),
             )
+            repair_receipt, repair_replay_receipt = (
+                validate_display_target_repair_receipts(
+                    _load_json(
+                        args.display_target_repair_receipt,
+                        "display-target repair receipt",
+                    ),
+                    _load_json(
+                        args.display_target_repair_replay_receipt,
+                        "display-target repair replay receipt",
+                    ),
+                    revision=revision,
+                    approved_canonical_basis_sha256=_mapping(
+                        intent.get("carry_forward"),
+                        "carry-forward intent provenance",
+                    ).get("approved_canonical_basis_sha256"),
+                )
+            )
             _write_json(
                 args.output_dir / "carry-forward-intent.json",
                 intent,
+            )
+            _write_json(
+                args.output_dir / "display-target-repair-receipt.json",
+                repair_receipt,
+            )
+            _write_json(
+                args.output_dir / "display-target-repair-replay-receipt.json",
+                repair_replay_receipt,
             )
             print(
                 "expedited editorial carry-forward intent verified: "
@@ -4790,12 +5617,30 @@ def main(argv: Sequence[str] | None = None) -> int:
                 artifact_digest=args.intent_artifact_digest,
                 location="carry-forward intent artifact",
             )
+            frozen_intent = _load_json(
+                args.intent,
+                "carry-forward intent",
+            )
+            repair_receipt, repair_replay_receipt = (
+                validate_display_target_repair_receipts(
+                    _load_json(
+                        args.display_target_repair_receipt,
+                        "display-target repair receipt",
+                    ),
+                    _load_json(
+                        args.display_target_repair_replay_receipt,
+                        "display-target repair replay receipt",
+                    ),
+                    revision=revision,
+                    approved_canonical_basis_sha256=_mapping(
+                        frozen_intent.get("carry_forward"),
+                        "carry-forward intent provenance",
+                    ).get("approved_canonical_basis_sha256"),
+                )
+            )
             human_review, receipt, replay = publish_carry_forward_intent(
                 client,
-                intent=_load_json(
-                    args.intent,
-                    "carry-forward intent",
-                ),
+                intent=frozen_intent,
                 revision=revision,
                 intent_artifact=intent_artifact,
                 now=datetime.now(timezone.utc),
@@ -4808,6 +5653,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             _write_json(
                 args.output_dir / "publication-replay-receipt.json",
                 replay,
+            )
+            _write_json(
+                args.output_dir / "display-target-repair-receipt.json",
+                repair_receipt,
+            )
+            _write_json(
+                args.output_dir / "display-target-repair-replay-receipt.json",
+                repair_replay_receipt,
             )
             print(
                 "expedited editorial carry-forward verified: "
