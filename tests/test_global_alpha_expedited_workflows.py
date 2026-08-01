@@ -758,6 +758,32 @@ def test_corrected_human_approval_chain_is_bound_end_to_end() -> None:
     assert '"human_approval_chain_sha256": human_summary[' in gate_helper
 
 
+def test_expedited_preparation_requires_exact_approved_identity_targets() -> None:
+    _text, preparation = workflow(
+        "global-alpha-expedited-preparation.yml"
+    )
+    verify_publication = next(
+        step
+        for step in preparation["jobs"]["evaluate"]["steps"]
+        if step["name"]
+        == "Verify actual editorial publication and inject its immutable identity"
+    )["run"]
+
+    for contract in (
+        'human_carry = human.get("carry_forward")',
+        'human_carry.get("approved_canonical_basis")',
+        'approved_basis.get("events")',
+        "not isinstance(approved_events, list) or len(approved_events) != 20",
+        'expected_target = issuer_name + " — " + title',
+        'event.get("identity_target") != expected_target',
+    ):
+        assert contract in verify_publication
+    assert "issuer_name.strip" not in verify_publication
+    assert "title.strip" not in verify_publication
+    assert "issuer_name.casefold" not in verify_publication
+    assert "title.casefold" not in verify_publication
+
+
 def test_expedited_cutover_leaves_repository_variables_for_authenticated_handoff() -> None:
     text, payload = workflow("governance-expedited-cutover.yml")
     deploy = payload["jobs"]["deploy_pages"]

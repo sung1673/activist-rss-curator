@@ -30,6 +30,8 @@ from curator.global_alpha_expedited_editorial import (
     export_candidates,
     prepare_carry_forward_publication,
     publish_carry_forward_intent,
+    repair_legacy_display_targets,
+    validate_display_target_repair_receipts,
 )
 
 
@@ -103,12 +105,16 @@ def _event(index: int, *, country: str | None = None) -> dict[str, object]:
     event = {
         "event_id": f"event:{index:03d}",
         "issuer_id": document["issuer_id"],
-        "issuer_name": f"Issuer {index % 10}",
+        "issuer_name": f"issuer {index % 10}",
         "country": selected_country,
         "event_family": (
             "large_ownership" if index % 2 == 0 else "meeting_and_vote"
         ),
-        "title": f"Original event title {index}",
+        "title": (
+            f"original event title              ({index})"
+            if index in {5, 7, 11, 14, 20, 23}
+            else f"original event title {index}"
+        ),
         "original_language": document["original_language"],
         "summary": f"Source-grounded summary {index}",
         "occurred_at": NOW,
@@ -684,7 +690,9 @@ class _ApplyClient:
             assert isinstance(actor, dict)
             event_family = str(payload["event_family"])
             identity_action = str(payload["identity_action"]).casefold()
-            identity_target = str(payload["identity_target"]).casefold()
+            identity_target = editorial._normalize_identity(
+                str(payload["identity_target"])
+            )
             comparison_key = _global_comparison_key(
                 issuer_id=event["issuer_id"],
                 event_family=event_family,
@@ -783,6 +791,7 @@ class _CarryClient:
         self.mutate_document_clock = False
         self.fail_brief_call: int | None = None
         self.fail_after_persist_call: int | None = None
+        self.review_calls = 0
 
     def health(self) -> dict[str, object]:
         return {
@@ -829,10 +838,45 @@ class _CarryClient:
 
     def review(
         self,
-        _event_id: str,
-        _payload: Mapping[str, object],
+        event_id: str,
+        payload: Mapping[str, object],
     ) -> dict[str, object]:
-        raise AssertionError("carry-forward must not mutate an event")
+        self.review_calls += 1
+        event = self.events[event_id]
+        assert isinstance(event, dict)
+        reason = str(payload["reason"])
+        assert reason.startswith("[expedited-candidate:")
+        assert "] [human-approval:" in reason
+        assert "] [display-target-repair:" in reason
+        assert payload["expected_updated_at"] == event["updated_at"]
+        assert payload["expected_evidence_sha256"] == event[
+            "event_evidence_sha256"
+        ]
+        before = {
+            key: copy.deepcopy(event[key])
+            for key in (
+                "updated_at",
+                "event_evidence_sha256",
+                "comparison_key",
+                "official_documents",
+                "actors",
+            )
+        }
+        event["identity_target"] = payload["identity_target"]
+        event["latest_revision_reason"] = reason
+        for key, value in before.items():
+            assert event[key] == value
+        return {
+            "ok": True,
+            "data": {
+                "event_id": event_id,
+                "decision": "approved",
+                "published": True,
+                "display_target_repaired": True,
+                "updated_at_preserved": True,
+            },
+            "api_version": "v2",
+        }
 
     def publish_brief(
         self,
@@ -922,6 +966,8 @@ def _published_carry_source(
 
 def _carry_common(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    display_targets_repaired: bool = True,
 ) -> tuple[_CarryClient, dict[str, object]]:
     candidate, human_review, receipt, replay, source = (
         _published_carry_source(monkeypatch)
@@ -1029,6 +1075,36 @@ def _carry_common(
     )
     revision = "c" * 40
     client = _CarryClient(source.events, revision=revision)
+    approved_repair_ids = []
+    candidate_by_id = {
+        str(item["event_id"]): item for item in candidate_events
+    }
+    for event_id, event in client.events.items():
+        assert isinstance(event, dict)
+        candidate_event = candidate_by_id[event_id]
+        exact_target = (
+            str(candidate_event["issuer_name"])
+            + " — "
+            + str(candidate_event["title"])
+        )
+        if exact_target == editorial._normalize_identity(exact_target):
+            continue
+        approved_repair_ids.append(event_id)
+        if display_targets_repaired:
+            event["identity_target"] = exact_target
+            event["latest_revision_reason"] = (
+                str(event["latest_revision_reason"])
+                + f" [human-approval:{chain_sha}]"
+                + " [display-target-repair:"
+                + editorial.LEGACY_APPROVAL_CORRECTION_SHA256
+                + "]"
+            )
+    assert len(approved_repair_ids) == 6
+    monkeypatch.setattr(
+        editorial,
+        "LEGACY_DISPLAY_TARGET_REPAIR_EVENT_IDS",
+        tuple(approved_repair_ids),
+    )
     common = {
         "client": client,
         "candidate": candidate,
@@ -1082,6 +1158,27 @@ def _prepare_carry_from_common(
 ) -> dict[str, object]:
     return prepare_carry_forward_publication(
         client,
+        candidate=common["candidate"],  # type: ignore[arg-type]
+        source_human_review=common["source_human_review"],  # type: ignore[arg-type]
+        source_receipt=common["source_receipt"],  # type: ignore[arg-type]
+        source_replay_receipt=common[  # type: ignore[arg-type]
+            "source_replay_receipt"
+        ],
+        revision=str(common["revision"]),
+        candidate_artifact=common["candidate_artifact"],  # type: ignore[arg-type]
+        publication_artifact=common[  # type: ignore[arg-type]
+            "publication_artifact"
+        ],
+        now=common["now"],  # type: ignore[arg-type]
+    )
+
+
+def _repair_targets_from_common(
+    client: _CarryClient,
+    common: Mapping[str, object],
+) -> dict[str, object]:
+    return repair_legacy_display_targets(
+        client,  # type: ignore[arg-type]
         candidate=common["candidate"],  # type: ignore[arg-type]
         source_human_review=common["source_human_review"],  # type: ignore[arg-type]
         source_receipt=common["source_receipt"],  # type: ignore[arg-type]
@@ -1167,7 +1264,7 @@ def test_code_only_sha_carry_forward_preserves_human_review_without_event_mutati
             str(candidate["issuer_name"])
             + " — "
             + str(candidate["title"])
-        ).casefold()
+        )
         assert approved["summary"] == (
             str(candidate["issuer_name"])
             + "는 DART에 「"
@@ -1219,6 +1316,109 @@ def test_code_only_sha_carry_forward_preserves_human_review_without_event_mutati
         "source_human_review"
     ]["same_event_pair_reviews"]  # type: ignore[index]
     assert receipt["top5"] == common["source_receipt"]["top5"]  # type: ignore[index]
+
+
+def test_six_human_approved_display_targets_repair_once_then_replay_idempotently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, common = _carry_common(
+        monkeypatch,
+        display_targets_repaired=False,
+    )
+    stable_before = {
+        event_id: {
+            field: copy.deepcopy(event[field])
+            for field in (
+                "updated_at",
+                "event_evidence_sha256",
+                "comparison_key",
+                "official_documents",
+                "actors",
+            )
+        }
+        for event_id, event in client.events.items()
+        if event_id in editorial.LEGACY_DISPLAY_TARGET_REPAIR_EVENT_IDS
+    }
+    first = _repair_targets_from_common(client, common)
+    replay = _repair_targets_from_common(client, common)
+    assert first["expected_event_ids"] == list(
+        editorial.LEGACY_DISPLAY_TARGET_REPAIR_EVENT_IDS
+    )
+    assert first["applied_event_ids"] == first["expected_event_ids"]
+    assert first["mutations_applied"] == 6
+    assert first["idempotent_replay"] is False
+    assert replay["applied_event_ids"] == []
+    assert replay["mutations_applied"] == 0
+    assert replay["idempotent_replay"] is True
+    assert client.review_calls == 6
+    for event_id, before in stable_before.items():
+        event = client.events[event_id]
+        assert isinstance(event, dict)
+        for field, value in before.items():
+            assert event[field] == value
+
+    intent = _prepare_carry_from_common(client, common)
+    validated_first, validated_replay = (
+        validate_display_target_repair_receipts(
+            first,
+            replay,
+            revision=str(common["revision"]),
+            approved_canonical_basis_sha256=intent["carry_forward"][  # type: ignore[index]
+                "approved_canonical_basis_sha256"
+            ],
+        )
+    )
+    assert validated_first == first
+    assert validated_replay == replay
+
+
+def test_display_target_repair_fails_before_write_on_non_target_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, common = _carry_common(
+        monkeypatch,
+        display_targets_repaired=False,
+    )
+    event_id = editorial.LEGACY_DISPLAY_TARGET_REPAIR_EVENT_IDS[-1]
+    event = client.events[event_id]
+    assert isinstance(event, dict)
+    event["summary"] = "unapproved drift"
+    with pytest.raises(ExpeditedEditorialError, match="summary drift"):
+        _repair_targets_from_common(client, common)
+    assert client.review_calls == 0
+
+
+def test_display_target_repair_receipts_reject_replay_state_tamper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, common = _carry_common(
+        monkeypatch,
+        display_targets_repaired=False,
+    )
+    first = _repair_targets_from_common(client, common)
+    replay = _repair_targets_from_common(client, common)
+    intent = _prepare_carry_from_common(client, common)
+    tampered = copy.deepcopy(replay)
+    tampered["event_results"][0]["before_state_sha256"] = "f" * 64  # type: ignore[index]
+    tampered["receipt_sha256"] = canonical_sha256(  # type: ignore[index]
+        {
+            key: value
+            for key, value in tampered.items()
+            if key != "receipt_sha256"
+        }
+    )
+    with pytest.raises(
+        ExpeditedEditorialError,
+        match="idempotent state mismatch",
+    ):
+        validate_display_target_repair_receipts(
+            first,
+            tampered,
+            revision=str(common["revision"]),
+            approved_canonical_basis_sha256=intent["carry_forward"][  # type: ignore[index]
+                "approved_canonical_basis_sha256"
+            ],
+        )
 
 
 def test_carry_forward_audits_issuer_master_name_drift_without_event_mutation(

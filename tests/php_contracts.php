@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../deploy/activist/governance_v1.php';
+require_once __DIR__ . '/../deploy/activist/governance_v2_write.php';
 
 function expect_true(bool $condition, string $message): void {
     if (!$condition) {
@@ -147,6 +148,147 @@ expect_true(
         '2026-07-20', '2026-08-31 00:00:00', $dateOnlyIdentity['comparison_key']
     ) === null,
     'stored identity dates must use the exact MySQL DATETIME representation'
+);
+
+$rawReviewedTarget = 'ACME Holdings  —  Original TITLE';
+$reviewedTargetValues = v2_review_identity_target_values($rawReviewedTarget);
+expect_true(
+    $reviewedTargetValues['stored'] === $rawReviewedTarget,
+    'editor-approved target case and internal whitespace must be stored verbatim'
+);
+expect_true(
+    $reviewedTargetValues['normalized'] === 'acme holdings — original title',
+    'event identity must use a normalized target independently of display storage'
+);
+$rawTargetKey = v2_global_comparison_key(
+    'issuer:kr:00126380',
+    'correction_and_withdrawal',
+    'official disclosure',
+    $rawReviewedTarget,
+    'actor:dart:00126380',
+    '2026-07-31 00:00:00',
+    null
+);
+$normalizedTargetKey = v2_global_comparison_key(
+    'issuer:kr:00126380',
+    'correction_and_withdrawal',
+    'official disclosure',
+    (string)$reviewedTargetValues['normalized'],
+    'actor:dart:00126380',
+    '2026-07-31 00:00:00',
+    null
+);
+expect_true(
+    $rawTargetKey === $normalizedTargetKey,
+    'raw display target variants must retain one normalized comparison key'
+);
+$repairReason = '[expedited-candidate:'
+    . 'c24627699633cf02084a2caeb3334c182c404861f85e8f4d27acf116fc6d8f76] '
+    . '[human-approval:'
+    . '848696ec784ca0af613cd32b0de67b8e8f97b4837d8eb32dff464942266c970f] '
+    . '[display-target-repair:'
+    . '5e52208a48d6a118b33956f9802378da13a709c76b8573895b365e177fd525da] '
+    . 'owner correction';
+expect_true(
+    v2_display_target_repair_reason_is_bound($repairReason),
+    'display-only correction must bind candidate, human approval and correction evidence'
+);
+expect_true(
+    !v2_display_target_repair_reason_is_bound(
+        '[expedited-candidate:'
+        . 'c24627699633cf02084a2caeb3334c182c404861f85e8f4d27acf116fc6d8f70] '
+        . '[human-approval:'
+        . '848696ec784ca0af613cd32b0de67b8e8f97b4837d8eb32dff464942266c970f] '
+        . '[display-target-repair:'
+        . '5e52208a48d6a118b33956f9802378da13a709c76b8573895b365e177fd525da] '
+        . 'owner correction'
+    ),
+    'display-only correction must reject a one-character digest mismatch'
+);
+$displayCorrectionEvent = array(
+    'event_id' => 'event:6fe8cc863cdb3faa55b667f440204f72',
+    'review_status' => 'approved',
+    'publication_status' => 'published',
+    'identity_status' => 'complete',
+    'comparison_key' => $rawTargetKey,
+    'global_event_family' => 'correction_and_withdrawal',
+    'identity_action' => 'official disclosure',
+    'identity_target' => 'acme holdings — original title',
+    'identity_actor_id' => 'actor:dart:00126380',
+    'identity_effective_at' => '2026-07-31 00:00:00',
+    'identity_deadline_at' => null,
+    'deadline_at' => null,
+    'importance' => 'high',
+    'summary' => 'ACME Holdings는 DART에 원문 제목을 공시했다.',
+    'current_status' => 'official_disclosure_confirmed',
+);
+$displayCorrectionActor = array(
+    'actor_id' => 'actor:dart:00126380',
+    'display_name' => 'ACME Holdings',
+    'actor_type' => 'issuer',
+    'country_code' => 'KR',
+    'actor_review_status' => 'approved',
+    'record_status' => 'active',
+    'actor_role' => 'filer',
+    'relation_review_status' => 'approved',
+);
+$displayCorrectionRequest = array(
+    'event_family' => 'correction_and_withdrawal',
+    'identity_action' => 'official disclosure',
+    'identity_target' => $rawReviewedTarget,
+    'identity_effective_at' => '2026-07-31 00:00:00',
+    'identity_deadline_at' => null,
+    'importance' => 'high',
+    'summary' => 'ACME Holdings는 DART에 원문 제목을 공시했다.',
+    'current_status' => 'official_disclosure_confirmed',
+    'actor_id' => 'actor:dart:00126380',
+    'actor_name' => 'ACME Holdings',
+    'actor_type' => 'issuer',
+    'actor_role' => 'filer',
+    'actor_country' => 'KR',
+    'merge_into_event_id' => null,
+);
+expect_true(
+    v2_is_display_only_target_correction(
+        $displayCorrectionEvent,
+        $displayCorrectionActor,
+        $displayCorrectionRequest,
+        $rawTargetKey
+    ),
+    'case/whitespace-only target re-approval must qualify as display-only'
+);
+$changedSummaryRequest = $displayCorrectionRequest;
+$changedSummaryRequest['summary'] = 'A different summary';
+expect_true(
+    !v2_is_display_only_target_correction(
+        $displayCorrectionEvent,
+        $displayCorrectionActor,
+        $changedSummaryRequest,
+        $rawTargetKey
+    ),
+    'display-only correction must reject any other event-field change'
+);
+$changedActorRequest = $displayCorrectionRequest;
+$changedActorRequest['actor_role'] = 'subject';
+expect_true(
+    !v2_is_display_only_target_correction(
+        $displayCorrectionEvent,
+        $displayCorrectionActor,
+        $changedActorRequest,
+        $rawTargetKey
+    ),
+    'display-only correction must reject any actor binding change'
+);
+$unapprovedEventCorrection = $displayCorrectionEvent;
+$unapprovedEventCorrection['event_id'] = 'event:not-human-approved-for-repair';
+expect_true(
+    !v2_is_display_only_target_correction(
+        $unapprovedEventCorrection,
+        $displayCorrectionActor,
+        $displayCorrectionRequest,
+        $rawTargetKey
+    ),
+    'display-only correction must fail closed outside the six approved event IDs'
 );
 
 foreach (array(

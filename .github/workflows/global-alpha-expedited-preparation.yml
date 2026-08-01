@@ -2742,6 +2742,37 @@ jobs:
           if len(set(approval_chains)) != 1:
               raise SystemExit("editorial human approval chain digest mismatch")
           human_approval_chain_sha256 = approval_chains[0]
+          human_carry = human.get("carry_forward")
+          approved_basis = (
+              human_carry.get("approved_canonical_basis")
+              if isinstance(human_carry, dict)
+              else None
+          )
+          approved_events = (
+              approved_basis.get("events")
+              if isinstance(approved_basis, dict)
+              else None
+          )
+          if not isinstance(approved_events, list) or len(approved_events) != 20:
+              raise SystemExit(
+                  "editorial approved canonical basis must contain exactly 20 events"
+              )
+          for position, event in enumerate(approved_events, start=1):
+              if not isinstance(event, dict):
+                  raise SystemExit(
+                      f"editorial approved event E{position:02d} is not an object"
+                  )
+              issuer_name = event.get("issuer_name")
+              title = event.get("title")
+              if not isinstance(issuer_name, str) or not isinstance(title, str):
+                  raise SystemExit(
+                      f"editorial approved event E{position:02d} omitted issuer or title"
+                  )
+              expected_target = issuer_name + " — " + title
+              if event.get("identity_target") != expected_target:
+                  raise SystemExit(
+                      f"editorial approved event E{position:02d} identity target mismatch"
+                  )
           revision = os.environ["GITHUB_SHA"].lower()
           publication_identity = {
               "artifact_id": int(os.environ["EDITORIAL_ARTIFACT_ID"]),

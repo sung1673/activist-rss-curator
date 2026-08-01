@@ -665,6 +665,53 @@ jobs:
           --disable-pip-version-check
           "httpx==0.27.2"
 
+      - name: Repair only the six approved display targets and prove replay
+        if: steps.existing_intent.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_args=(
+            --candidate source-candidate/editorial-candidates.json
+            --source-human-review source-publication/human-review.json
+            --source-publication-receipt source-publication/publication-receipt.json
+            --source-publication-replay-receipt source-publication/publication-replay-receipt.json
+            --candidate-run-id "$CANDIDATE_RUN_ID"
+            --candidate-artifact-id "$CANDIDATE_ARTIFACT_ID"
+            --candidate-artifact-name "$CANDIDATE_ARTIFACT_NAME"
+            --candidate-artifact-digest "$CANDIDATE_ARTIFACT_DIGEST"
+            --publication-run-id "$PUBLICATION_RUN_ID"
+            --publication-artifact-id "$PUBLICATION_ARTIFACT_ID"
+            --publication-artifact-name "$PUBLICATION_ARTIFACT_NAME"
+            --publication-artifact-digest "$PUBLICATION_ARTIFACT_DIGEST"
+          )
+          python -m curator.global_alpha_expedited_editorial \
+            carry-forward-repair-targets \
+            "${source_args[@]}" \
+            --output-dir display-target-repair-first
+          python -m curator.global_alpha_expedited_editorial \
+            carry-forward-repair-targets \
+            "${source_args[@]}" \
+            --output-dir display-target-repair-replay
+          test -s display-target-repair-first/display-target-repair-receipt.json
+          test -s display-target-repair-replay/display-target-repair-receipt.json
+          jq -e '
+            .code_revision == env.GITHUB_SHA
+            and .kind == "bside-global-alpha-expedited-editorial-display-target-repair"
+            and (.expected_event_ids | length) == 6
+            and (.verified_event_ids | length) == 6
+            and (.mutations_applied >= 0 and .mutations_applied <= 6)
+            and (.receipt_sha256 | test("^[0-9a-f]{64}$"))
+          ' display-target-repair-first/display-target-repair-receipt.json > /dev/null
+          jq -e '
+            .code_revision == env.GITHUB_SHA
+            and .kind == "bside-global-alpha-expedited-editorial-display-target-repair"
+            and .mutations_applied == 0
+            and .applied_event_ids == []
+            and .idempotent_replay == true
+            and (.verified_event_ids | length) == 6
+            and (.receipt_sha256 | test("^[0-9a-f]{64}$"))
+          ' display-target-repair-replay/display-target-repair-receipt.json > /dev/null
+
       - name: Freeze unchanged current-SHA basis without publishing
         if: steps.existing_intent.outputs.exists != 'true'
         shell: bash
@@ -690,8 +737,14 @@ jobs:
             --publication-artifact-id "$PUBLICATION_ARTIFACT_ID" \
             --publication-artifact-name "$PUBLICATION_ARTIFACT_NAME" \
             --publication-artifact-digest "$PUBLICATION_ARTIFACT_DIGEST" \
+            --display-target-repair-receipt \
+              display-target-repair-first/display-target-repair-receipt.json \
+            --display-target-repair-replay-receipt \
+              display-target-repair-replay/display-target-repair-receipt.json \
             --output-dir editorial-intent
           test -s editorial-intent/carry-forward-intent.json
+          test -s editorial-intent/display-target-repair-receipt.json
+          test -s editorial-intent/display-target-repair-replay-receipt.json
           jq -e '
             .code_revision == env.GITHUB_SHA
             and .kind == "bside-global-alpha-expedited-editorial-carry-forward-intent"
@@ -704,13 +757,13 @@ jobs:
             and (.intent_sha256 | test("^[0-9a-f]{64}$"))
           ' editorial-intent/carry-forward-intent.json > /dev/null
 
-      - name: Upload immutable carry-forward intent before any POST
+      - name: Upload immutable carry-forward intent before any brief POST
         if: steps.existing_intent.outputs.exists != 'true'
         id: new_intent
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: global-alpha-expedited-editorial-carry-intent-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: editorial-intent/carry-forward-intent.json
+          path: editorial-intent
           if-no-files-found: error
           retention-days: 30
           compression-level: 9
@@ -736,6 +789,10 @@ jobs:
             artifact_id="$NEW_ID"
             artifact_name="$NEW_NAME"
             artifact_digest="$NEW_DIGEST"
+          fi
+          artifact_digest="${artifact_digest,,}"
+          if [[ "$artifact_digest" =~ ^[0-9a-f]{64}$ ]]; then
+            artifact_digest="sha256:$artifact_digest"
           fi
           [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]]
           [[ "$artifact_name" == \
@@ -850,6 +907,8 @@ jobs:
         run: |
           set -euo pipefail
           test -s editorial-intent/carry-forward-intent.json
+          test -s editorial-intent/display-target-repair-receipt.json
+          test -s editorial-intent/display-target-repair-replay-receipt.json
           python -m curator.global_alpha_expedited_editorial \
             carry-forward-publish \
             --intent editorial-intent/carry-forward-intent.json \
@@ -857,10 +916,16 @@ jobs:
             --intent-artifact-id "$INTENT_ARTIFACT_ID" \
             --intent-artifact-name "$INTENT_ARTIFACT_NAME" \
             --intent-artifact-digest "$INTENT_ARTIFACT_DIGEST" \
+            --display-target-repair-receipt \
+              editorial-intent/display-target-repair-receipt.json \
+            --display-target-repair-replay-receipt \
+              editorial-intent/display-target-repair-replay-receipt.json \
             --output-dir editorial-publication
           test -s editorial-publication/human-review.json
           test -s editorial-publication/publication-receipt.json
           test -s editorial-publication/publication-replay-receipt.json
+          test -s editorial-publication/display-target-repair-receipt.json
+          test -s editorial-publication/display-target-repair-replay-receipt.json
           jq -e '
             .code_revision == env.GITHUB_SHA
             and .ground_truth_source == "human"
@@ -1082,6 +1147,8 @@ jobs:
         run: |
           set -euo pipefail
           test -s editorial-intent/carry-forward-intent.json
+          test -s editorial-intent/display-target-repair-receipt.json
+          test -s editorial-intent/display-target-repair-replay-receipt.json
           python -m curator.global_alpha_expedited_editorial \
             carry-forward-publish \
             --intent editorial-intent/carry-forward-intent.json \
@@ -1089,10 +1156,16 @@ jobs:
             --intent-artifact-id "$INTENT_ARTIFACT_ID" \
             --intent-artifact-name "$INTENT_ARTIFACT_NAME" \
             --intent-artifact-digest "$INTENT_ARTIFACT_DIGEST" \
+            --display-target-repair-receipt \
+              editorial-intent/display-target-repair-receipt.json \
+            --display-target-repair-replay-receipt \
+              editorial-intent/display-target-repair-replay-receipt.json \
             --output-dir editorial-publication
           test -s editorial-publication/human-review.json
           test -s editorial-publication/publication-receipt.json
           test -s editorial-publication/publication-replay-receipt.json
+          test -s editorial-publication/display-target-repair-receipt.json
+          test -s editorial-publication/display-target-repair-replay-receipt.json
           jq -e '
             .code_revision == env.GITHUB_SHA
             and .ground_truth_source == "human"

@@ -222,8 +222,12 @@ def test_protected_carry_forward_is_ancestor_bound_and_event_write_free() -> Non
     )
     assert "carry-forward-prepare" in prepare_text
     assert "carry-forward-publish" not in prepare_text
-    assert "Upload immutable carry-forward intent before any POST" in prepare_text
+    assert "Upload immutable carry-forward intent before any brief POST" in prepare_text
     assert "multiple frozen intents exist for this workflow run" in prepare_text
+    assert 'artifact_digest="${artifact_digest,,}"' in prepare_text
+    assert '[[ "$artifact_digest" =~ ^[0-9a-f]{64}$ ]]' in prepare_text
+    assert 'artifact_digest="sha256:$artifact_digest"' in prepare_text
+    assert '[[ "$artifact_digest" =~ ^sha256:[0-9a-f]{64}$ ]]' in prepare_text
     assert "carry-forward-publish" in publish_text
     assert "carry-forward-prepare" not in publish_text
     assert "Resolve the one exact pre-uploaded intent artifact" in publish_text

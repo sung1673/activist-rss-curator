@@ -3580,6 +3580,113 @@ function v2_global_comparison_key(
     );
 }
 
+/**
+ * Keep the editor-approved display value separate from the normalized value
+ * used for event identity and de-duplication.
+ */
+function v2_review_identity_target_values(string $target): array {
+    return array(
+        'stored' => $target,
+        'normalized' => v1_normalize_identity_text($target),
+    );
+}
+
+/** Normalize only case and whitespace for a display-only target correction. */
+function v2_display_identity_target(string $target): string {
+    $collapsed = preg_replace('/\s+/u', ' ', trim($target));
+    if (!is_string($collapsed)) {
+        return '';
+    }
+    return mb_strtolower($collapsed, 'UTF-8');
+}
+
+function v2_display_target_repair_reason_is_bound(string $reason): bool {
+    $approvedPrefix =
+        '[expedited-candidate:'
+        . 'c24627699633cf02084a2caeb3334c182c404861f85e8f4d27acf116fc6d8f76] '
+        . '[human-approval:'
+        . '848696ec784ca0af613cd32b0de67b8e8f97b4837d8eb32dff464942266c970f] '
+        . '[display-target-repair:'
+        . '5e52208a48d6a118b33956f9802378da13a709c76b8573895b365e177fd525da]';
+    return $reason === $approvedPrefix
+        || strpos($reason, $approvedPrefix . ' ') === 0;
+}
+
+function v2_display_target_repair_event_allowed(string $eventId): bool {
+    return in_array($eventId, array(
+        'event:6fe8cc863cdb3faa55b667f440204f72',
+        'event:241d63264e99fadbfe08cb1f6b219c41',
+        'event:e90d2124ba3c3459851db2d9a4ee9408',
+        'event:c866f5f7841b74642a636049b92e8c0a',
+        'event:961ed4d77655b41b247e9d05d3b458c8',
+        'event:dba39b9797cbf6efd554cc07c808aea9',
+    ), true);
+}
+
+/**
+ * A published event may retain its immutable evidence binding when an editor
+ * corrects only the display spelling/spacing of identity_target.  Every other
+ * submitted field and the selected actor must still match the locked rows.
+ */
+function v2_is_display_only_target_correction(
+    array $event,
+    array $storedActor,
+    array $submitted,
+    string $comparisonKey
+): bool {
+    $storedTarget = (string)($event['identity_target'] ?? '');
+    $submittedTarget = (string)($submitted['identity_target'] ?? '');
+    $storedDeadline = array_key_exists('identity_deadline_at', $event)
+        && $event['identity_deadline_at'] !== null
+        ? (string)$event['identity_deadline_at'] : null;
+    $submittedDeadline = array_key_exists('identity_deadline_at', $submitted)
+        && $submitted['identity_deadline_at'] !== null
+        ? (string)$submitted['identity_deadline_at'] : null;
+    return v2_display_target_repair_event_allowed(
+        (string)($event['event_id'] ?? '')
+    )
+        && (string)($event['review_status'] ?? '') === 'approved'
+        && (string)($event['publication_status'] ?? '') === 'published'
+        && (string)($event['identity_status'] ?? '') === 'complete'
+        && preg_match('/^global:[a-f0-9]{64}$/', $comparisonKey) === 1
+        && hash_equals((string)($event['comparison_key'] ?? ''), $comparisonKey)
+        && $storedTarget !== $submittedTarget
+        && v2_display_identity_target($storedTarget) !== ''
+        && v2_display_identity_target($storedTarget)
+            === v2_display_identity_target($submittedTarget)
+        && (string)($event['global_event_family'] ?? '')
+            === (string)($submitted['event_family'] ?? '')
+        && (string)($event['identity_action'] ?? '')
+            === (string)($submitted['identity_action'] ?? '')
+        && (string)($event['identity_actor_id'] ?? '')
+            === (string)($submitted['actor_id'] ?? '')
+        && (string)($event['identity_effective_at'] ?? '')
+            === (string)($submitted['identity_effective_at'] ?? '')
+        && $storedDeadline === $submittedDeadline
+        && (string)($event['deadline_at'] ?? '')
+            === ($submittedDeadline === null ? '' : $submittedDeadline)
+        && (string)($event['importance'] ?? '')
+            === (string)($submitted['importance'] ?? '')
+        && (string)($event['summary'] ?? '')
+            === (string)($submitted['summary'] ?? '')
+        && (string)($event['current_status'] ?? '')
+            === (string)($submitted['current_status'] ?? '')
+        && ($submitted['merge_into_event_id'] ?? null) === null
+        && (string)($storedActor['actor_id'] ?? '')
+            === (string)($submitted['actor_id'] ?? '')
+        && (string)($storedActor['display_name'] ?? '')
+            === (string)($submitted['actor_name'] ?? '')
+        && (string)($storedActor['actor_type'] ?? '')
+            === (string)($submitted['actor_type'] ?? '')
+        && (string)($storedActor['actor_role'] ?? '')
+            === (string)($submitted['actor_role'] ?? '')
+        && (string)($storedActor['country_code'] ?? '')
+            === (string)($submitted['actor_country'] ?? '')
+        && (string)($storedActor['actor_review_status'] ?? '') === 'approved'
+        && (string)($storedActor['record_status'] ?? '') === 'active'
+        && (string)($storedActor['relation_review_status'] ?? '') === 'approved';
+}
+
 function v2_publish_event_documents(
     PDO $pdo,
     array $config,
@@ -4189,6 +4296,9 @@ function v2_admin_review_event(
         $statement = $pdo->prepare(
             'SELECT event_id,issuer_id,country_code,global_event_family,title,'
             . 'original_language,occurred_at,verification_status,change_type,'
+            . 'summary,deadline_at,importance,current_status,identity_action,'
+            . 'identity_target,identity_actor_id,identity_effective_at,'
+            . 'identity_deadline_at,identity_status,comparison_key,'
             . 'review_status,publication_status,updated_at FROM '
             . table_name($config, 'governance_events')
             . ' WHERE event_id=? LIMIT 1 FOR UPDATE'
@@ -4414,7 +4524,9 @@ function v2_admin_review_event(
             throw new RuntimeException('event_official_evidence_required');
         }
         $actorCandidateLookup = $pdo->prepare(
-            'SELECT a.display_name,a.actor_type,a.country_code FROM '
+            'SELECT a.actor_id,a.display_name,a.actor_type,a.country_code,'
+            . 'a.review_status AS actor_review_status,a.record_status,'
+            . 'ea.actor_role,ea.review_status AS relation_review_status FROM '
             . table_name($config, 'actors') . ' a JOIN '
             . table_name($config, 'event_actors') . ' ea'
             . ' ON BINARY ea.actor_id=BINARY a.actor_id'
@@ -4451,7 +4563,8 @@ function v2_admin_review_event(
         $actorCountryNeedsEnrichment = $existingActor
             && $existingActorCountry === '';
         $normalizedAction = v1_normalize_identity_text((string)$action);
-        $normalizedTarget = v1_normalize_identity_text((string)$target);
+        $targetIdentity = v2_review_identity_target_values((string)$target);
+        $normalizedTarget = (string)$targetIdentity['normalized'];
         $normalizedActorId = v1_normalize_identity_text((string)$actorId);
         $comparisonKey = v2_global_comparison_key(
             (string)$event['issuer_id'],
@@ -4462,6 +4575,83 @@ function v2_admin_review_event(
             (string)$effectiveAt,
             $deadlineAt
         );
+        if (v2_display_target_repair_reason_is_bound((string)$reason)
+            && v2_is_display_only_target_correction(
+            $event,
+            $existingActor,
+            array(
+                'event_family' => $reviewedEventFamily,
+                'identity_action' => $action,
+                'identity_target' => $targetIdentity['stored'],
+                'identity_effective_at' => $effectiveAt,
+                'identity_deadline_at' => $deadlineAt,
+                'importance' => $importance,
+                'summary' => $summary,
+                'current_status' => $currentStatus,
+                'actor_id' => $actorId,
+                'actor_name' => $actorName,
+                'actor_type' => $actorType,
+                'actor_role' => $actorRole,
+                'actor_country' => $actorCountry,
+                'merge_into_event_id' => $mergeIntoEventId,
+            ),
+            $comparisonKey
+        )) {
+            $displayCorrection = $pdo->prepare(
+                'UPDATE ' . table_name($config, 'governance_events')
+                . ' SET identity_target=? WHERE event_id=? AND updated_at=?'
+                . ' AND BINARY identity_target=BINARY ?'
+            );
+            $displayCorrection->execute(array(
+                $targetIdentity['stored'],
+                $eventId,
+                $expectedUpdatedAt,
+                (string)$event['identity_target'],
+            ));
+            if ($displayCorrection->rowCount() !== 1) {
+                throw new RuntimeException('stale_event_review');
+            }
+            $revisionId = v1_stable_id(
+                'revision',
+                $eventId . '|identity_target|' . (string)$event['identity_target']
+                . '|' . (string)$targetIdentity['stored'] . '|' . $now . '|' . $reason
+            );
+            $revision = $pdo->prepare(
+                'INSERT INTO ' . table_name($config, 'editorial_revisions')
+                . ' (revision_id,entity_type,entity_id,field_name,previous_value,'
+                . 'revised_value,reason,revision_status,requested_by,reviewed_by,'
+                . 'reviewed_at,published_at,created_at,updated_at)'
+                . ' VALUES (?,\'event\',?,\'identity_target\',?,?,?,'
+                . '\'internal_approved\',?,?,?,NULL,?,?)'
+            );
+            $revision->execute(array(
+                $revisionId,
+                $eventId,
+                (string)$event['identity_target'],
+                (string)$targetIdentity['stored'],
+                $reason,
+                $role,
+                $role,
+                $now,
+                $now,
+                $now,
+            ));
+            $pdo->commit();
+            v2_respond(200, array(
+                'ok' => true,
+                'data' => array(
+                    'event_id' => $eventId,
+                    'decision' => 'approved',
+                    'published' => true,
+                    'event_family' => $reviewedEventFamily,
+                    'comparison_key' => $comparisonKey,
+                    'display_only_correction' => true,
+                    'display_target_repaired' => true,
+                    'updated_at_preserved' => true,
+                    'event_updated_at' => v1_release_iso_time($expectedUpdatedAt),
+                ),
+            ));
+        }
         $conflict = $pdo->prepare(
             'SELECT event_id FROM ' . table_name($config, 'governance_events')
             . ' WHERE event_id<>? AND identity_status=\'complete\''
@@ -4615,7 +4805,7 @@ function v2_admin_review_event(
             $verification,
             $currentStatus,
             $normalizedAction,
-            $normalizedTarget,
+            $targetIdentity['stored'],
             $actorId,
             $effectiveAt,
             $deadlineAt,
