@@ -7307,9 +7307,13 @@ def run(base_url: str, mysql_container_id: str) -> None:
         "api.php/api/v2/briefs/latest?edition=global",
     )
     revoked_top = revoked_brief.get("data", {}).get("top", [])
+    revoked_notice = revoked_brief.get("data", {}).get("coverage_notice", {})
     require(
-        len(revoked_top) == 1
-        and revoked_top[0].get("source_url") == ALTERNATE_URL
+        revoked_top == []
+        and revoked_brief.get("data", {}).get("empty_reason")
+        == "coverage_unavailable"
+        and revoked_notice.get("scope") == "blocking"
+        and "US" in revoked_notice.get("unavailable_countries", [])
         and TELEGRAM_URL not in json.dumps(revoked_brief, ensure_ascii=False),
         repr(revoked_brief),
     )
