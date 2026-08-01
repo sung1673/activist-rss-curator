@@ -1252,6 +1252,23 @@ def validate_expedited_human_review(
         fields=HUMAN_REVIEW_SECTION_FIELDS,
         location="human-review",
     )
+    carry_forward = _mapping(
+        report.get("carry_forward"),
+        "human-review.carry_forward",
+    )
+    supplied_approval_chain_sha256 = carry_forward.get(
+        "human_approval_chain_sha256"
+    )
+    human_approval_chain_sha256 = _digest(
+        supplied_approval_chain_sha256,
+        "human_approval_chain_sha256",
+        "human-review.carry_forward",
+    )
+    if supplied_approval_chain_sha256 != human_approval_chain_sha256:
+        raise ExpeditedAlphaEvidenceError(
+            "human-review.carry_forward: human_approval_chain_sha256 "
+            "must be lowercase"
+        )
     counts = _mapping(report.get("raw_counts"), "human-review.raw_counts")
     event_count = _int(
         counts.get("event_review_count"),
@@ -1407,10 +1424,17 @@ def validate_expedited_human_review(
                 "approved": approved_top,
             },
         ),
+        _gate(
+            "expedited_human_review.approval_chain_bound",
+            True,
+            required="lowercase SHA-256 digest",
+            actual=human_approval_chain_sha256,
+        ),
     ]
     return {
         **artifact,
         "section_sha256": section_sha256,
+        "human_approval_chain_sha256": human_approval_chain_sha256,
         "event_review_count": event_count,
         "same_event_pair_review_count": pair_count,
         "top5_published_count": top_published,
@@ -1967,6 +1991,9 @@ def build_expedited_release_report(
     )
     binding_sections = {
         "human_review_section_sha256": human_summary["section_sha256"],
+        "human_approval_chain_sha256": human_summary[
+            "human_approval_chain_sha256"
+        ],
         "legacy_manifest_sha256": archive_summary[
             "compatibility_manifest_sha256"
         ],

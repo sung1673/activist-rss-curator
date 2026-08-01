@@ -321,6 +321,11 @@ def human_review(*, as_of: datetime = AS_OF) -> dict[str, object]:
             "artifact_name": "human-review-production",
             "artifact_sha256": digest("human-review-artifact"),
             "section_sha256": json_digest(section),
+            "carry_forward": {
+                "human_approval_chain_sha256": digest(
+                    "human-approval-chain"
+                ),
+            },
         }
     )
     return result
@@ -559,6 +564,9 @@ def valid_bundle(
     )
     binding_sections = {
         "human_review_section_sha256": human["section_sha256"],
+        "human_approval_chain_sha256": human["carry_forward"][  # type: ignore[index]
+            "human_approval_chain_sha256"
+        ],
         "legacy_manifest_sha256": legacy[
             "compatibility_manifest_sha256"
         ],
@@ -621,6 +629,9 @@ def refresh_protected_bindings(bundle: dict[str, object]) -> None:
     experience_record = bundle["experience"]
     binding_sections = {
         "human_review_section_sha256": human["section_sha256"],  # type: ignore[index]
+        "human_approval_chain_sha256": human["carry_forward"][  # type: ignore[index]
+            "human_approval_chain_sha256"
+        ],
         "legacy_manifest_sha256": legacy[  # type: ignore[index]
             "compatibility_manifest_sha256"
         ],
@@ -682,6 +693,46 @@ def test_expedited_report_passes_and_is_deterministic() -> None:
     assert first["failed_gates"] == []
     assert first["legacy_archive"]["waiver_used"] is True  # type: ignore[index]
     assert len(first["connector_receipts"]["connectors"]) == 2  # type: ignore[index]
+    chain = bundle["human_review"]["carry_forward"][  # type: ignore[index]
+        "human_approval_chain_sha256"
+    ]
+    assert first["human_review"]["human_approval_chain_sha256"] == chain  # type: ignore[index]
+    assert first["approval"]["evidence_binding"]["binding_sha256"]  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("omitted", "malformed", "uppercase", "mismatched"),
+)
+def test_expedited_report_fails_closed_on_human_approval_chain(
+    mutation: str,
+) -> None:
+    bundle = valid_bundle()
+    human = bundle["human_review"]  # type: ignore[assignment]
+    carry_forward = human["carry_forward"]  # type: ignore[index]
+    if mutation == "omitted":
+        carry_forward.pop("human_approval_chain_sha256")  # type: ignore[union-attr]
+    elif mutation == "malformed":
+        carry_forward["human_approval_chain_sha256"] = "not-a-digest"  # type: ignore[index]
+    elif mutation == "uppercase":
+        carry_forward["human_approval_chain_sha256"] = (  # type: ignore[index]
+            str(carry_forward["human_approval_chain_sha256"]).upper()  # type: ignore[index]
+        )
+    else:
+        carry_forward["human_approval_chain_sha256"] = "f" * 64  # type: ignore[index]
+
+    with pytest.raises(
+        ExpeditedAlphaEvidenceError,
+        match=(
+            "human_approval_chain_sha256"
+            if mutation != "mismatched"
+            else "evidence_binding"
+        ),
+    ):
+        build_expedited_release_report(
+            bundle,
+            expected_revision=REVISION,
+        )
 
 
 @pytest.mark.parametrize(

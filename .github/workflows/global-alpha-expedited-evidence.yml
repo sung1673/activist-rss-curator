@@ -179,6 +179,8 @@ jobs:
             preparation/approval-binding-materials.json \
             preparation/human-review.json \
             preparation/editorial-publication-provenance.json \
+            preparation/publication-receipt.json \
+            preparation/publication-replay-receipt.json \
             final-approval/approval.json \
             final-approval/legacy-archive.json \
             final-approval/final-approval-binding-materials.json \
@@ -203,6 +205,7 @@ jobs:
           python - <<'PY'
           import hashlib
           import json
+          import re
           from pathlib import Path
 
           def canonical_sha(value):
@@ -217,6 +220,27 @@ jobs:
           human_review = preparation.get("human_review")
           if not isinstance(human_review, dict):
               raise SystemExit("preparation omitted the actual editorial human review")
+          standalone_human_review = json.loads(
+              Path("preparation/human-review.json").read_text(encoding="utf-8")
+          )
+          publication_receipt = json.loads(
+              Path("preparation/publication-receipt.json").read_text(encoding="utf-8")
+          )
+          publication_replay_receipt = json.loads(
+              Path("preparation/publication-replay-receipt.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          publication_provenance = json.loads(
+              Path("preparation/editorial-publication-provenance.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          preparation_materials = json.loads(
+              Path("preparation/approval-binding-materials.json").read_text(
+                  encoding="utf-8"
+              )
+          )
           fields = (
               "ground_truth_source",
               "ai_generated_ground_truth",
@@ -236,8 +260,34 @@ jobs:
           )
           if canonical_sha(section) != materials.get("human_review_section_sha256"):
               raise SystemExit("editorial human review changed after preparation")
+          approval_chains = []
+          for record, label in (
+              (human_review, "prepared human review"),
+              (standalone_human_review, "standalone human review"),
+              (publication_receipt, "publication receipt"),
+              (publication_replay_receipt, "publication replay receipt"),
+          ):
+              carry = record.get("carry_forward")
+              chain = carry.get("human_approval_chain_sha256") if isinstance(carry, dict) else None
+              if not isinstance(chain, str) or re.fullmatch(r"[0-9a-f]{64}", chain) is None:
+                  raise SystemExit(f"{label} omitted a valid human approval chain digest")
+              approval_chains.append(chain)
+          approval_chains.extend(
+              (
+                  publication_provenance.get("human_approval_chain_sha256"),
+                  preparation_materials.get("human_approval_chain_sha256"),
+                  materials.get("human_approval_chain_sha256"),
+              )
+          )
+          if any(
+              not isinstance(chain, str)
+              or re.fullmatch(r"[0-9a-f]{64}", chain) is None
+              for chain in approval_chains
+          ) or len(set(approval_chains)) != 1:
+              raise SystemExit("human approval chain digest changed after publication")
           binding_fields = (
               "human_review_section_sha256",
+              "human_approval_chain_sha256",
               "legacy_manifest_sha256",
               "pages_terminal_content_sha256",
               "content_integrity_sha256",
@@ -395,6 +445,11 @@ jobs:
           editorial_artifact_digest="$(
             jq -er '.artifact_digest' preparation/editorial-publication-provenance.json
           )"
+          human_approval_chain_sha256="$(
+            jq -er '.human_review.carry_forward.human_approval_chain_sha256' \
+              preparation/expedited-preparation.json
+          )"
+          [[ "$human_approval_chain_sha256" =~ ^[0-9a-f]{64}$ ]]
           jq -n \
             --arg code_revision "$GITHUB_SHA" \
             --argjson preparation_run_id "$PREPARATION_RUN_ID" \
@@ -404,6 +459,8 @@ jobs:
             --argjson editorial_artifact_id "$editorial_artifact_id" \
             --arg editorial_artifact_name "$editorial_artifact_name" \
             --arg editorial_artifact_digest "$editorial_artifact_digest" \
+            --arg human_approval_chain_sha256 \
+              "$human_approval_chain_sha256" \
             --argjson approval_run_id "$APPROVAL_RUN_ID" \
             --argjson approval_artifact_id "$APPROVAL_ARTIFACT_ID" \
             --arg approval_artifact_name "$APPROVAL_ARTIFACT_NAME" \
@@ -425,6 +482,7 @@ jobs:
                 artifact_name: $editorial_artifact_name,
                 artifact_digest: $editorial_artifact_digest,
                 human_review_bytes_sha256: $human_review_bytes_sha256,
+                human_approval_chain_sha256: $human_approval_chain_sha256,
                 post_upload_identity_injected_only_in_evaluator_wrapper: true
               },
               final_approval: {
@@ -455,6 +513,8 @@ jobs:
             --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
             --arg pages_digest "$pages_digest" \
             --arg source_right_digest "$source_right_digest" \
+            --arg human_approval_chain_sha256 \
+              "$human_approval_chain_sha256" \
             '{
               schema_version: 1,
               kind: "bside-global-alpha-expedited-artifact-provenance",
@@ -465,6 +525,7 @@ jobs:
               run_id: ($run_id | tonumber),
               run_attempt: ($run_attempt | tonumber),
               pages_artifact_digest: $pages_digest,
+              human_approval_chain_sha256: $human_approval_chain_sha256,
               source_right_evidence_sha256: $source_right_digest
             }' > global-alpha-expedited-evidence/artifact-provenance.json
 

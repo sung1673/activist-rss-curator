@@ -146,17 +146,21 @@ jobs:
             and .workflow == ".github/workflows/global-alpha-expedited-preparation.yml"
             and .run_id == $run_id
             and .run_attempt == $run_attempt
+            and (.human_approval_chain_sha256 | test("^[0-9a-f]{64}$"))
           ' preparation/preparation-provenance.json > /dev/null
           jq -e '
             .kind == "bside-global-alpha-expedited-preparation-input"
             and .code_revision == env.GITHUB_SHA
             and (has("human_review") and (.human_review | type == "object"))
+            and (.human_review.carry_forward.human_approval_chain_sha256
+              | test("^[0-9a-f]{64}$"))
             and (has("approval") | not)
           ' preparation/expedited-preparation.json > /dev/null
           jq -e '
             .kind == "bside-global-alpha-expedited-approval-binding-materials"
             and .code_revision == env.GITHUB_SHA
             and (.human_review_section_sha256 | test("^[0-9a-f]{64}$"))
+            and (.human_approval_chain_sha256 | test("^[0-9a-f]{64}$"))
             and (.pages_terminal_content_sha256 | test("^[0-9a-f]{64}$"))
             and (.content_integrity_sha256 | test("^[0-9a-f]{64}$"))
             and (.experience_sha256 | test("^[0-9a-f]{64}$"))
@@ -165,6 +169,52 @@ jobs:
             and (.legacy_source_artifact_sha256 | test("^[0-9a-f]{64}$"))
             and (.binding_base_sha256 | test("^[0-9a-f]{64}$"))
           ' preparation/approval-binding-materials.json > /dev/null
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          preparation = json.loads(
+              Path("preparation/expedited-preparation.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          human = json.loads(
+              Path("preparation/human-review.json").read_text(encoding="utf-8")
+          )
+          editorial_provenance = json.loads(
+              Path("preparation/editorial-publication-provenance.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          preparation_provenance = json.loads(
+              Path("preparation/preparation-provenance.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          materials = json.loads(
+              Path("preparation/approval-binding-materials.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          records = (
+              preparation.get("human_review", {}).get("carry_forward", {}).get(
+                  "human_approval_chain_sha256"
+              ),
+              human.get("carry_forward", {}).get(
+                  "human_approval_chain_sha256"
+              ),
+              editorial_provenance.get("human_approval_chain_sha256"),
+              preparation_provenance.get("human_approval_chain_sha256"),
+              materials.get("human_approval_chain_sha256"),
+          )
+          if any(
+              not isinstance(value, str)
+              or re.fullmatch(r"[0-9a-f]{64}", value) is None
+              for value in records
+          ) or len(set(records)) != 1:
+              raise SystemExit("preparation human approval chain digest mismatch")
+          PY
           jq -n \
             --argjson run_id "$PREPARATION_RUN_ID" \
             --argjson run_attempt "$PREPARATION_RUN_ATTEMPT" \
@@ -275,6 +325,7 @@ jobs:
           )
           binding_fields = (
               "human_review_section_sha256",
+              "human_approval_chain_sha256",
               "pages_terminal_content_sha256",
               "content_integrity_sha256",
               "experience_sha256",

@@ -44,6 +44,26 @@ LEGACY_APPROVAL_ATTESTATION_PATH = (
 LEGACY_APPROVAL_ATTESTATION_SHA256 = (
     "3c64d0dd3567e1c6ec39f4484805dd1754c97370fa415503fedefb713487591e"
 )
+LEGACY_APPROVAL_CORRECTION_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "docs"
+    / "global-alpha-legacy-approval-c2462769-transform-correction-v1.json"
+)
+LEGACY_APPROVAL_CORRECTION_SHA256 = (
+    "5e52208a48d6a118b33956f9802378da13a709c76b8573895b365e177fd525da"
+)
+LEGACY_APPROVAL_CORRECTION_RAW_SHA256 = (
+    "a98a13fb3a4b8ee6a4dd0673b0e73547540707f027366f760484bf14c062ddf7"
+)
+LEGACY_APPROVAL_CHAIN_SHA256 = (
+    "848696ec784ca0af613cd32b0de67b8e8f97b4837d8eb32dff464942266c970f"
+)
+LEGACY_APPROVAL_CORRECTION_TEXT_SHA256 = (
+    "a2aac9ad15a4446b7dcdd90d4a0d56ff3175fd5a81312367553590b2927f8b40"
+)
+LEGACY_APPROVAL_EVENT_IDS_SHA256 = (
+    "fd7421931f90a8c7428c99289963d9456a7e64f2fe4b830c42e6e413a0c941fb"
+)
 LEGACY_APPROVAL_TEXT_SHA256 = (
     "148a7f5b89fd1edcd5e2b7e548ae2ec747cfee774b8ad0066b4020eae3ba95a6"
 )
@@ -106,6 +126,25 @@ LEGACY_APPROVED_TRANSFORM_CONTRACT = {
     "official_evidence": "exact_candidate_official_document_basis",
     "same_event_pair_decision": False,
     "top5_decision": "approved",
+}
+LEGACY_APPROVAL_CORRECTED_TRANSFORM_CONTRACT = {
+    "identity_target": "회사명 — 원문 제목",
+    "summary": "회사명는 DART에 「원문 제목」을 공시했다.",
+    "current_status": {
+        "corrected": "corrected_official_disclosure",
+        "official": "official_disclosure_confirmed",
+    },
+}
+LEGACY_APPROVAL_PRESERVED_DECISIONS = {
+    "event_count": 20,
+    "event_decision": "approved",
+    "same_event_pair_count": 40,
+    "same_event_pair_decision": False,
+    "top5_count": 5,
+    "top5_decision": "approved",
+    "actor": "unchanged",
+    "country": "KR",
+    "official_evidence": "unchanged",
 }
 EVENT_COUNT = 20
 PAIR_COUNT = 40
@@ -2240,6 +2279,44 @@ def _load_legacy_human_approval_artifact() -> dict[str, object]:
     )
 
 
+def _load_legacy_human_approval_correction() -> dict[str, object]:
+    try:
+        raw = LEGACY_APPROVAL_CORRECTION_PATH.read_bytes()
+    except OSError as error:
+        raise ExpeditedEditorialError(
+            "legacy human approval correction: could not read immutable bytes"
+        ) from error
+    if hashlib.sha256(raw).hexdigest() != LEGACY_APPROVAL_CORRECTION_RAW_SHA256:
+        raise ExpeditedEditorialError(
+            "legacy human approval correction: raw file digest mismatch"
+        )
+    return _load_json(
+        LEGACY_APPROVAL_CORRECTION_PATH,
+        "legacy human approval correction",
+    )
+
+
+def _legacy_human_approval_chain_basis() -> dict[str, object]:
+    return {
+        "base_approval_canonical_sha256": LEGACY_APPROVAL_ATTESTATION_SHA256,
+        "correction_canonical_sha256": LEGACY_APPROVAL_CORRECTION_SHA256,
+        "correction_raw_sha256": LEGACY_APPROVAL_CORRECTION_RAW_SHA256,
+        "event_ids_sha256": LEGACY_APPROVAL_EVENT_IDS_SHA256,
+        "reviewer_reference": LEGACY_APPROVAL_REVIEWER,
+        "source_candidate_sha256": LEGACY_APPROVAL_CANDIDATE_SHA256,
+        "source_decision_sha256": LEGACY_APPROVAL_SOURCE_DECISION_SHA256,
+    }
+
+
+def _legacy_human_approval_chain_sha256() -> str:
+    digest = canonical_sha256(_legacy_human_approval_chain_basis())
+    if digest != LEGACY_APPROVAL_CHAIN_SHA256:
+        raise ExpeditedEditorialError(
+            "legacy human approval chain: pinned digest mismatch"
+        )
+    return digest
+
+
 def _validate_legacy_human_approval_artifact(
     value: object,
     *,
@@ -2393,12 +2470,255 @@ def _validate_legacy_human_approval_artifact(
     return artifact, artifact_sha
 
 
+def _validate_legacy_human_approval_correction(
+    value: object,
+    *,
+    base_approval: Mapping[str, object],
+    candidate: Mapping[str, object],
+    candidate_artifact: Mapping[str, object],
+    publication_artifact: Mapping[str, object],
+    events: Sequence[Mapping[str, object]],
+    source_decision_sha256: object,
+) -> tuple[dict[str, object], str, str]:
+    location = "legacy human approval correction"
+    correction = _mapping(value, location)
+    correction_sha = canonical_sha256(correction)
+    if correction_sha != LEGACY_APPROVAL_CORRECTION_SHA256:
+        raise ExpeditedEditorialError(f"{location}: digest mismatch")
+    expected_fields = {
+        "schema_version",
+        "kind",
+        "environment",
+        "is_synthetic",
+        "ground_truth_source",
+        "ai_generated_ground_truth",
+        "human_attestation",
+        "reviewer_type",
+        "reviewer_reference",
+        "reviewed_at",
+        "attestation_source",
+        "attestation_text_sha256",
+        "base_approval_canonical_sha256",
+        "source_candidate_sha256",
+        "source_decision_sha256",
+        "source_candidate_artifact",
+        "source_publication_artifact",
+        "correction_scope",
+        "preserved_decisions",
+        "event_ids",
+        "event_ids_sha256",
+        "replaced_transform_fields",
+        "corrected_transform_contract",
+    }
+    if (
+        set(correction) != expected_fields
+        or correction.get("schema_version") != SCHEMA_VERSION
+        or correction.get("kind")
+        != (
+            "bside-global-alpha-expedited-legacy-human-approval-"
+            "transform-correction"
+        )
+        or correction.get("environment") != "production"
+        or correction.get("is_synthetic") is not False
+        or correction.get("ground_truth_source") != "human"
+        or correction.get("ai_generated_ground_truth") is not False
+        or correction.get("human_attestation") is not True
+        or correction.get("reviewer_type") != "human"
+        or correction.get("reviewer_reference") != LEGACY_APPROVAL_REVIEWER
+        or correction.get("attestation_source")
+        != "codex_thread_human_message_2026-08-01"
+        or correction.get("attestation_text_sha256")
+        != LEGACY_APPROVAL_CORRECTION_TEXT_SHA256
+        or correction.get("base_approval_canonical_sha256")
+        != LEGACY_APPROVAL_ATTESTATION_SHA256
+        or correction.get("source_candidate_sha256")
+        != LEGACY_APPROVAL_CANDIDATE_SHA256
+        or correction.get("source_decision_sha256")
+        != LEGACY_APPROVAL_SOURCE_DECISION_SHA256
+        or correction.get("source_candidate_artifact")
+        != LEGACY_APPROVAL_CANDIDATE_ARTIFACT
+        or correction.get("source_publication_artifact")
+        != LEGACY_APPROVAL_PUBLICATION_ARTIFACT
+        or correction.get("correction_scope") != "transform_contract_only"
+        or correction.get("preserved_decisions")
+        != LEGACY_APPROVAL_PRESERVED_DECISIONS
+        or correction.get("replaced_transform_fields")
+        != ["identity_target", "summary", "current_status"]
+        or correction.get("corrected_transform_contract")
+        != LEGACY_APPROVAL_CORRECTED_TRANSFORM_CONTRACT
+    ):
+        raise ExpeditedEditorialError(f"{location}: provenance mismatch")
+    correction_reviewed_at = _timestamp(
+        correction.get("reviewed_at"), "reviewed_at", location
+    )
+    base_reviewed_at = _timestamp(
+        base_approval.get("reviewed_at"),
+        "reviewed_at",
+        "legacy human approval artifact",
+    )
+    if datetime.fromisoformat(
+        correction_reviewed_at.replace("Z", "+00:00")
+    ) <= datetime.fromisoformat(base_reviewed_at.replace("Z", "+00:00")):
+        raise ExpeditedEditorialError(
+            f"{location}: correction must follow base approval"
+        )
+
+    base_sha = canonical_sha256(base_approval)
+    source_decision_sha = _sha256(
+        source_decision_sha256,
+        "source_decision_sha256",
+        "source publication",
+    )
+    if (
+        base_sha != LEGACY_APPROVAL_ATTESTATION_SHA256
+        or correction.get("base_approval_canonical_sha256") != base_sha
+        or candidate.get("candidate_sha256")
+        != LEGACY_APPROVAL_CANDIDATE_SHA256
+        or source_decision_sha != LEGACY_APPROVAL_SOURCE_DECISION_SHA256
+        or dict(candidate_artifact) != LEGACY_APPROVAL_CANDIDATE_ARTIFACT
+        or dict(publication_artifact)
+        != LEGACY_APPROVAL_PUBLICATION_ARTIFACT
+    ):
+        raise ExpeditedEditorialError(f"{location}: source binding mismatch")
+
+    base_event_approvals = [
+        _mapping(item, f"base approval.event_approvals[{index}]")
+        for index, item in enumerate(
+            _list(base_approval.get("event_approvals"), "base event approvals")
+        )
+    ]
+    expected_event_ids = [str(item["event_id"]) for item in base_event_approvals]
+    event_ids = _list(correction.get("event_ids"), f"{location}.event_ids")
+    live_event_ids = [str(item.get("event_id")) for item in events]
+    if (
+        event_ids != expected_event_ids
+        or live_event_ids != expected_event_ids
+        or len(event_ids) != EVENT_COUNT
+        or len(set(event_ids)) != EVENT_COUNT
+        or canonical_sha256(event_ids) != LEGACY_APPROVAL_EVENT_IDS_SHA256
+        or correction.get("event_ids_sha256")
+        != LEGACY_APPROVAL_EVENT_IDS_SHA256
+    ):
+        raise ExpeditedEditorialError(f"{location}: event binding mismatch")
+
+    effective_contract: dict[str, object] = dict(
+        LEGACY_APPROVED_TRANSFORM_CONTRACT
+    )
+    effective_contract.update(
+        {
+            "identity_target": LEGACY_APPROVAL_CORRECTED_TRANSFORM_CONTRACT[
+                "identity_target"
+            ],
+            "summary": LEGACY_APPROVAL_CORRECTED_TRANSFORM_CONTRACT["summary"],
+            "current_status": LEGACY_APPROVAL_CORRECTED_TRANSFORM_CONTRACT[
+                "current_status"
+            ],
+        }
+    )
+    changed_fields = sorted(
+        key
+        for key, value_item in effective_contract.items()
+        if LEGACY_APPROVED_TRANSFORM_CONTRACT.get(key) != value_item
+    )
+    if changed_fields != ["current_status", "identity_target", "summary"]:
+        raise ExpeditedEditorialError(
+            f"{location}: exact three-field correction required"
+        )
+    chain_sha = _legacy_human_approval_chain_sha256()
+    return correction, correction_sha, chain_sha
+
+
+def _legacy_approved_identity_target(issuer_name: str, title: str) -> str:
+    return issuer_name + " — " + title
+
+
+def _legacy_approved_summary(issuer_name: str, title: str) -> str:
+    return issuer_name + "는 DART에 「" + title + "」을 공시했다."
+
+
+def _legacy_approved_current_status(verification_status: str) -> str:
+    if verification_status == "corrected":
+        return "corrected_official_disclosure"
+    if verification_status == "official":
+        return "official_disclosure_confirmed"
+    raise ExpeditedEditorialError(
+        "legacy approval correction: unsupported verification status"
+    )
+
+
+LEGACY_CORRECTED_EVENT_ALLOWED_DELTA_FIELDS = frozenset(
+    {"identity_target", "summary", "current_status", "comparison_key"}
+)
+
+
+def _legacy_event_comparison_key(
+    event: Mapping[str, object],
+    location: str,
+) -> str:
+    return _global_comparison_key(
+        issuer_id=event.get("issuer_id"),
+        event_family=event.get("event_family"),
+        action=event.get("identity_action"),
+        target=event.get("identity_target"),
+        actor_id=event.get("identity_actor_id"),
+        effective_at=event.get("identity_effective_at"),
+        deadline_at=event.get("identity_deadline_at"),
+        location=location,
+    )
+
+
+def _validate_legacy_corrected_event_delta(
+    base_event: Mapping[str, object],
+    corrected_event: Mapping[str, object],
+    location: str,
+) -> None:
+    if set(base_event) != set(corrected_event):
+        raise ExpeditedEditorialError(
+            f"{location}: correction changed the canonical field set"
+        )
+    changed_fields = {
+        field
+        for field in base_event
+        if base_event[field] != corrected_event[field]
+    }
+    if changed_fields != LEGACY_CORRECTED_EVENT_ALLOWED_DELTA_FIELDS:
+        raise ExpeditedEditorialError(
+            f"{location}: correction changed fields outside the exact scope"
+        )
+
+    for label, event in (("base", base_event), ("corrected", corrected_event)):
+        expected_key = _legacy_event_comparison_key(
+            event,
+            f"{location}.{label}",
+        )
+        if event.get("comparison_key") != expected_key:
+            raise ExpeditedEditorialError(
+                f"{location}: {label} comparison_key is not deterministically derived"
+            )
+
+    preserved_fields = (
+        "actor",
+        "country",
+        "official_documents",
+        "official_evidence_count",
+        "source_event_evidence_sha256",
+    )
+    if any(
+        base_event.get(field) != corrected_event.get(field)
+        for field in preserved_fields
+    ):
+        raise ExpeditedEditorialError(
+            f"{location}: actor, country or official evidence changed"
+        )
+
+
 def _legacy_approved_canonical_basis(
     *,
     candidate: Mapping[str, object],
     candidate_artifact: Mapping[str, object],
     publication_artifact: Mapping[str, object],
     approval_attestation: Mapping[str, object],
+    approval_correction: Mapping[str, object],
     source_decision_sha256: object,
     events: Sequence[Mapping[str, object]],
     event_reviews: Sequence[Mapping[str, object]],
@@ -2436,6 +2756,17 @@ def _legacy_approved_canonical_basis(
             event_reviews=event_reviews,
             source_decision_sha256=source_decision_sha256,
             publication_top5=publication_top5,
+        )
+    )
+    correction, correction_sha, approval_chain_sha = (
+        _validate_legacy_human_approval_correction(
+            approval_correction,
+            base_approval=attestation,
+            candidate=candidate,
+            candidate_artifact=candidate_artifact,
+            publication_artifact=publication_artifact,
+            events=events,
+            source_decision_sha256=source_decision_sha256,
         )
     )
     if [str(item.get("event_id")) for item in event_reviews] != [
@@ -2517,11 +2848,17 @@ def _legacy_approved_canonical_basis(
                 maximum=255,
             ),
         )
-        target = _text(
+        issuer_name = _text(
             candidate_event.get("issuer_name"),
             "issuer_name",
             location,
             maximum=255,
+        )
+        title = _text(
+            candidate_event.get("title"),
+            "title",
+            location,
+            maximum=700,
         )
         effective_at = _optional_timestamp(
             candidate_event.get("identity_effective_at"),
@@ -2544,67 +2881,76 @@ def _legacy_approved_canonical_basis(
             else "official"
         )
         normalized_action = _normalize_identity(action)
-        normalized_target = _normalize_identity(target)
-        normalized_actor_id = _normalize_identity(actor["actor_id"])
-        comparison_key = _global_comparison_key(
-            issuer_id=candidate_event.get("issuer_id"),
-            event_family=family,
-            action=normalized_action,
-            target=normalized_target,
-            actor_id=normalized_actor_id,
-            effective_at=effective_at,
-            deadline_at=None,
-            location=location,
-        )
         source_outcome = _mapping(
             source_outcomes.get(event_id),
             f"{location}.source_outcome",
         )
-        approved_events.append(
+        corrected_event: dict[str, object] = {
+            "position_no": position,
+            "event_id": event_id,
+            "issuer_id": candidate_event["issuer_id"],
+            "issuer_name": issuer_name,
+            "country": "KR",
+            "title": title,
+            "original_language": candidate_event["original_language"],
+            "event_family": family,
+            "summary": _legacy_approved_summary(issuer_name, title),
+            "importance": candidate_event["importance"],
+            "current_status": _legacy_approved_current_status(verification),
+            "deadline_at": None,
+            "verification_status": stored_verification,
+            "change_type": candidate_event["change_type"],
+            "review_status": "approved",
+            "publication_status": "published",
+            "identity_action": normalized_action,
+            "identity_target": _normalize_identity(
+                _legacy_approved_identity_target(issuer_name, title)
+            ),
+            "identity_actor_id": actor["actor_id"],
+            "identity_effective_at": effective_at,
+            "identity_deadline_at": None,
+            "identity_status": "complete",
+            "occurred_at": candidate_event["occurred_at"],
+            "first_observed_at": candidate_event["first_observed_at"],
+            "actor": actor,
+            "official_documents": _carry_document_basis(
+                candidate_event.get("official_documents"),
+                f"{location}.official_documents",
+            ),
+            "official_evidence_count": candidate_event[
+                "official_evidence_count"
+            ],
+            "source_event_evidence_sha256": candidate_event[
+                "event_evidence_sha256"
+            ],
+            "source_final_updated_at": _timestamp(
+                source_outcome.get("final_updated_at"),
+                "final_updated_at",
+                f"{location}.source_outcome",
+            ),
+        }
+        corrected_event["comparison_key"] = _legacy_event_comparison_key(
+            corrected_event,
+            f"{location}.corrected",
+        )
+        base_event = dict(corrected_event)
+        base_event.update(
             {
-                "position_no": position,
-                "event_id": event_id,
-                "issuer_id": candidate_event["issuer_id"],
-                "issuer_name": target,
-                "country": "KR",
-                "title": candidate_event["title"],
-                "original_language": candidate_event["original_language"],
-                "event_family": family,
-                "summary": target + " — " + str(candidate_event["title"]),
-                "importance": candidate_event["importance"],
-                "current_status": verification,
-                "deadline_at": None,
-                "verification_status": stored_verification,
-                "change_type": candidate_event["change_type"],
-                "review_status": "approved",
-                "publication_status": "published",
-                "identity_action": normalized_action,
-                "identity_target": normalized_target,
-                "identity_actor_id": actor["actor_id"],
-                "identity_effective_at": effective_at,
-                "identity_deadline_at": None,
-                "identity_status": "complete",
-                "comparison_key": comparison_key,
-                "occurred_at": candidate_event["occurred_at"],
-                "first_observed_at": candidate_event["first_observed_at"],
-                "actor": actor,
-                "official_documents": _carry_document_basis(
-                    candidate_event.get("official_documents"),
-                    f"{location}.official_documents",
-                ),
-                "official_evidence_count": candidate_event[
-                    "official_evidence_count"
-                ],
-                "source_event_evidence_sha256": candidate_event[
-                    "event_evidence_sha256"
-                ],
-                "source_final_updated_at": _timestamp(
-                    source_outcome.get("final_updated_at"),
-                    "final_updated_at",
-                    f"{location}.source_outcome",
-                ),
+            "summary": issuer_name + " — " + title,
+            "current_status": verification,
+            "identity_target": _normalize_identity(issuer_name),
             }
         )
+        base_event["comparison_key"] = _legacy_event_comparison_key(
+            base_event,
+            f"{location}.base",
+        )
+        _validate_legacy_corrected_event_delta(
+            base_event,
+            corrected_event,
+            location,
+        )
+        approved_events.append(corrected_event)
 
     pair_basis = [
         {
@@ -2650,6 +2996,8 @@ def _legacy_approved_canonical_basis(
             + LEGACY_APPROVAL_CANDIDATE_SHA256
             + ":"
             + LEGACY_APPROVAL_REVIEWER
+            + ":correction:"
+            + LEGACY_APPROVAL_CORRECTION_SHA256
         ),
         "source_candidate_sha256": candidate_sha,
         "reviewer_reference": LEGACY_APPROVAL_REVIEWER,
@@ -2662,6 +3010,9 @@ def _legacy_approved_canonical_basis(
         ),
         "human_approval_artifact": attestation,
         "human_approval_artifact_sha256": attestation_sha,
+        "human_approval_correction_artifact": correction,
+        "human_approval_correction_artifact_sha256": correction_sha,
+        "human_approval_chain_sha256": approval_chain_sha,
         "event_decisions": [
             {"event_id": item["event_id"], "decision": "approved"}
             for item in event_reviews
@@ -2681,6 +3032,10 @@ def _validate_approved_canonical_basis(
         basis.get("human_approval_artifact"),
         "approved canonical basis.human_approval_artifact",
     )
+    correction_artifact = _mapping(
+        basis.get("human_approval_correction_artifact"),
+        "approved canonical basis.human_approval_correction_artifact",
+    )
     if (
         basis.get("schema_version") != SCHEMA_VERSION
         or basis.get("kind") != APPROVED_CANONICAL_BASIS_KIND
@@ -2697,6 +3052,12 @@ def _validate_approved_canonical_basis(
         != LEGACY_APPROVAL_ATTESTATION_SHA256
         or canonical_sha256(approval_artifact)
         != LEGACY_APPROVAL_ATTESTATION_SHA256
+        or basis.get("human_approval_correction_artifact_sha256")
+        != LEGACY_APPROVAL_CORRECTION_SHA256
+        or canonical_sha256(correction_artifact)
+        != LEGACY_APPROVAL_CORRECTION_SHA256
+        or basis.get("human_approval_chain_sha256")
+        != _legacy_human_approval_chain_sha256()
         or len(_list(basis.get("events"), "approved canonical basis.events"))
         != EVENT_COUNT
         or len(
@@ -3499,11 +3860,13 @@ def prepare_carry_forward_publication(
         now=now,
     )
     approval_attestation = _load_legacy_human_approval_artifact()
+    approval_correction = _load_legacy_human_approval_correction()
     approved_canonical_basis = _legacy_approved_canonical_basis(
         candidate=candidate,
         candidate_artifact=expected_candidate_artifact,
         publication_artifact=expected_publication_artifact,
         approval_attestation=approval_attestation,
+        approval_correction=approval_correction,
         source_decision_sha256=source_receipt.get("decision_sha256"),
         events=events,
         event_reviews=event_reviews,
@@ -3667,6 +4030,9 @@ def prepare_carry_forward_publication(
         "source_brief_cutoff_at": source_cutoff_at,
         "approved_canonical_basis": approved_canonical_basis,
         "approved_canonical_basis_sha256": approved_canonical_basis_sha,
+        "human_approval_chain_sha256": approved_canonical_basis[
+            "human_approval_chain_sha256"
+        ],
         "current_immutable_editorial_basis_sha256": immutable_basis_sha,
         "current_basis_fence_sha256": current_basis_fence_sha,
         "event_mutations_applied": 0,
@@ -3828,6 +4194,10 @@ def _validate_carry_forward_intent(
         or carry.get("source_candidate_artifact") != candidate_artifact
         or carry.get("source_publication_artifact")
         != publication_artifact
+        or carry.get("human_approval_chain_sha256")
+        != _legacy_human_approval_chain_sha256()
+        or approved_basis.get("human_approval_chain_sha256")
+        != carry.get("human_approval_chain_sha256")
         or len(_list(approved_basis.get("events"), "approved events"))
         != EVENT_COUNT
     ):
