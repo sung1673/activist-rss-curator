@@ -665,11 +665,13 @@ test("today to evidence journey preserves source language and accessibility @web
     "Manual issuer-controlled IR link metadata only; SEDAR+ excluded",
     "Manual asic.gov.au link metadata only; ASX excluded"
   ]);
-  await expect(page.locator("#global-source-coverage")).toContainText("3/6");
-  await expect(page.locator("#global-source-coverage")).toContainText("링크 전용 4");
-  await expect(page.locator("[data-coverage-scope='warning']")).toContainText("일부 공식 소스 지연");
-  await expect(page.locator("[data-coverage-scope='warning']")).toContainText("JP · GB · AU");
-  await expect(page.locator(".coverage-scope-note")).toContainText("CA·AU 링크 전용 / link-only");
+  await expect(page.locator("#global-source-coverage")).toContainText("필수 3/4 정상");
+  await expect(page.locator("#global-source-coverage")).toContainText("선택 0/2 제공");
+  await expect(page.locator("#global-source-coverage")).toContainText("JP·GB 미지원");
+  await expect(page.locator("#global-source-coverage")).toContainText("링크 전용 1");
+  await expect(page.locator("[data-coverage-scope='warning']:visible")).toContainText("일부 공식 소스 지연");
+  await expect(page.locator("[data-coverage-scope='warning']:visible")).toContainText("JP · GB · AU");
+  await expect(page.locator(".coverage-scope-note:visible")).toContainText("CA·AU 링크 전용 / link-only");
   await expect(page.locator("a[data-api-link='/feeds/events.atom']")).toHaveAttribute("href", /\/api\/v2\/feeds\/events\.atom$/);
   await expect(page.locator("a[data-api-link='/exports/events.csv']")).toHaveAttribute("href", /\/api\/v2\/exports\/events\.csv$/);
   await expect(page.locator("a[data-api-link='/exports/events.json']")).toHaveAttribute("href", /\/api\/v2\/exports\/events\.json$/);
@@ -784,7 +786,7 @@ test("market filters, URL state, keyboard shortcuts, and responsive terminal lay
   await expect(topPanel.getByRole("link", { name: "Shareholder proposal filed on board accountability", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "자기주식취득결정", exact: true })).toHaveCount(0);
   await expect(topPanel.locator(".coverage-badge").first()).toContainText("공식 1 · 보도 4");
-  await expect(page.locator(".coverage-scope-note")).toContainText("SEC EDGAR 시장 전체 / Market-wide");
+  await expect(page.locator(".coverage-scope-note:visible")).toContainText("SEC EDGAR 시장 전체 / Market-wide");
   await expect(page.locator("[data-coverage-scope='warning']")).toHaveCount(0);
   const firstEvent = await page.locator(".terminal-event").first().boundingBox();
   expect(firstEvent).not.toBeNull();
@@ -901,6 +903,58 @@ test("market filters, URL state, keyboard shortcuts, and responsive terminal lay
   // the viewport can sit partially behind the sticky market navigation.
   await page.evaluate(() => window.scrollTo({ top: 0, behavior: "auto" }));
   await expectNoCriticalAccessibilityViolations(page);
+});
+
+test("global source summary excludes intentionally unavailable optional markets from readiness", async ({ page }) => {
+  const requiredReadySources = sourceStatus.map((item) => (
+    item.country === "AU"
+      ? {
+          ...item,
+          status: "active",
+          fresh: true,
+          public_status: "active",
+          public_ready: true,
+          last_success_at: "2026-07-24T03:04:00Z",
+          error_class: null
+        }
+      : item
+  ));
+  await page.route("**/api/v2/sources/status**", (route) => v2Json(route, {
+    ok: true,
+    data: { items: requiredReadySources },
+    meta: { page: 1, limit: 50, returned: requiredReadySources.length, has_more: false }
+  }));
+
+  await page.goto("#/today");
+  const summary = page.locator("#global-source-coverage");
+  await expect(summary).toContainText("필수 4/4 정상");
+  await expect(summary).toContainText("선택 0/2 제공");
+  await expect(summary).toContainText("JP·GB 미지원");
+  await expect(summary).toContainText("링크 전용 2");
+  await expect(summary).not.toContainText("4/6");
+  await expect(summary).toHaveAttribute("data-health", "healthy");
+});
+
+test("mobile priority layout keeps the first verified event above coverage detail", async ({ page }, testInfo) => {
+  test.skip(
+    !testInfo.project.name.includes("mobile"),
+    "The 300px first-event budget applies to the 390x844 mobile terminal.",
+  );
+
+  await page.goto("#/today");
+  const firstEvent = page.locator("[data-event-drawer]:visible").first();
+  const mobileCoverage = page.locator(".mobile-coverage-context:visible");
+  await expect(firstEvent).toBeVisible();
+  await expect(mobileCoverage).toBeVisible();
+  await expect(mobileCoverage).toContainText("일부 공식 소스 지연 / Partial source coverage");
+  await expect(mobileCoverage).toContainText("CA·AU 링크 전용 / link-only");
+
+  const firstEventBox = await firstEvent.boundingBox();
+  const coverageBox = await mobileCoverage.boundingBox();
+  expect(firstEventBox).not.toBeNull();
+  expect(coverageBox).not.toBeNull();
+  expect(firstEventBox.y).toBeLessThanOrEqual(300);
+  expect(coverageBox.y).toBeGreaterThan(firstEventBox.y);
 });
 
 test("mobile Web Vitals journeys use one visible bottom-navigation target", async ({ page }, testInfo) => {
