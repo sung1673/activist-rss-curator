@@ -49,9 +49,14 @@ def build_archive(
             if embedded_telegram and report_date == WINDOW_END:
                 payload = (
                     b"<!doctype html><html><body>"
+                    b'<a href="article.html">original article</a>'
+                    b'<a href="telegram.html">Telegram daily</a>'
                     b"<script data-story-telegram-mentions>"
                     b'[{"message_url":"https://t.me/private/42"}]'
-                    b"</script></body></html>"
+                    b"</script>"
+                    b"<script>function renderTelegramMentions() { return true; }</script>"
+                    b"<style>.story{color:black}.story-context__telegram{display:grid}</style>"
+                    b"</body></html>"
                 )
             archive.writestr(
                 f"feed/{report_date.isoformat()}.html",
@@ -127,8 +132,9 @@ def test_prepare_redacts_embedded_telegram_exposure(tmp_path: Path) -> None:
     prepare_legacy_feed_compatibility(archive, output, identity=identity)
 
     report = (output / "feed" / f"{WINDOW_END.isoformat()}.html").read_bytes()
-    assert b"data-story-telegram-mentions>[]</script>" in report
-    assert b"https://t.me/" not in report
+    assert b"telegram" not in report.lower()
+    assert b'<a href="article.html">original article</a>' in report
+    assert b".story{color:black}" in report
     assert verify_legacy_feed_compatibility(output, expected_identity=identity)
 
 

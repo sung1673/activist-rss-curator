@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
@@ -9,6 +10,7 @@ export const ROUTE_TEMPLATES = Object.freeze(["/today", "/events", "/issuers", "
 export const METRIC_NAMES = Object.freeze(["LCP", "INP", "CLS"]);
 export const RUNS_PER_ROUTE = 5;
 export const MAX_API_BATCH = 50;
+export const MAX_JOURNEY_RETRIES = 1;
 const PREVIEW_SESSION_KEY = "bside.governance.preview";
 const CONFIG_PREFIX = "window.__BSIDE_GOVERNANCE_CONFIG__=Object.freeze(";
 const EXPECTED_RELEASE_CHANNEL = "production_alpha_early_access";
@@ -22,6 +24,59 @@ export class ProbeError extends Error {
     this.name = "ProbeError";
     this.code = code;
   }
+}
+
+
+function safeErrorText(value, previewToken = "") {
+  let text = String(value || "unknown_error")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (previewToken) text = text.split(previewToken).join("[REDACTED]");
+  return text.slice(0, 1000) || "unknown_error";
+}
+
+
+function errorMessageSha256(value) {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+
+export class RouteAttemptError extends ProbeError {
+  constructor({ routeTemplate, runNumber, attemptNumber, substep, cause, previewToken = "" }) {
+    super(`route_measurement_failed_${routeTemplate.slice(1)}_${runNumber}`);
+    this.name = "RouteAttemptError";
+    this.retryable = true;
+    this.routeTemplate = routeTemplate;
+    this.runNumber = runNumber;
+    this.attemptNumber = attemptNumber;
+    this.substep = substep;
+    this.originalErrorName = safeErrorText(cause && cause.name, previewToken);
+    this.originalErrorMessage = safeErrorText(cause && cause.message, previewToken);
+    this.originalErrorMessageSha256 = errorMessageSha256(this.originalErrorMessage);
+    this.cause = cause;
+  }
+
+  auditRecord() {
+    return {
+      route_template: this.routeTemplate,
+      run_number: this.runNumber,
+      failed_attempt: this.attemptNumber,
+      substep: this.substep,
+      original_error_name: this.originalErrorName,
+      original_error_message_sha256: this.originalErrorMessageSha256,
+    };
+  }
+}
+
+
+function logRetryableAttempt(error) {
+  process.stderr.write(
+    `web-vitals journey retry: ${error.code}`
+    + ` attempt=${error.attemptNumber}/${MAX_JOURNEY_RETRIES + 1}`
+    + ` substep=${error.substep}`
+    + ` original=${error.originalErrorName}: ${error.originalErrorMessage}\n`,
+  );
 }
 
 
@@ -268,30 +323,48 @@ export function interactionDestination(routeTemplate) {
 }
 
 
-async function measureRoute(browser, { webBase, previewToken, buildSha, routeTemplate, runNumber }) {
-  const context = await browser.newContext({
-    ...devices["Pixel 5"],
-    locale: "ko-KR",
-    timezoneId: "Asia/Seoul",
-    serviceWorkers: "block",
-  });
+async function measureRouteAttempt(browser, {
+  webBase,
+  previewToken,
+  buildSha,
+  routeTemplate,
+  runNumber,
+  attemptNumber,
+}) {
+  let context = null;
+  let substep = "create_context";
   try {
+    context = await browser.newContext({
+      ...devices["Pixel 5"],
+      locale: "ko-KR",
+      timezoneId: "Asia/Seoul",
+      serviceWorkers: "block",
+    });
+    substep = "resolve_origin";
     const origin = normalizeHttpsBase(webBase, "web").origin;
+    substep = "install_preview_session";
     await context.addInitScript(
       ({ expectedOrigin, key, token }) => {
         if (window.location.origin === expectedOrigin) sessionStorage.setItem(key, token);
       },
       { expectedOrigin: origin, key: PREVIEW_SESSION_KEY, token: previewToken },
     );
+    substep = "install_observers";
     await context.addInitScript(observerInitScript);
+    substep = "block_client_telemetry";
     await context.route("**/metrics/web-vitals", (route) => route.abort("blockedbyclient"));
+    substep = "create_page";
     const page = await context.newPage();
+    substep = "create_cdp_session";
     const cdp = await context.newCDPSession(page);
+    substep = "set_cpu_throttle";
     await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+    substep = "navigate";
     await page.goto(governanceRouteUrl(webBase, routeTemplate).href, {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
+    substep = "wait_route_ready";
     await page.waitForFunction(
       (expectedRoute) => window.location.hash.split("?", 1)[0] === `#${expectedRoute}`
         && !document.querySelector("#app[aria-busy='true']")
@@ -299,8 +372,11 @@ async function measureRoute(browser, { webBase, previewToken, buildSha, routeTem
       routeTemplate,
       { timeout: 30_000 },
     );
+    substep = "check_error_state";
     if (await page.locator("#app .error-state").count()) throw new ProbeError("route_render_failed");
+    substep = "settle_paint";
     await page.waitForTimeout(750);
+    substep = "freeze_paint";
     const support = await page.evaluate(() => {
       const state = window.__BSIDE_PRODUCTION_VITALS_PROBE__;
       if (!state) return null;
@@ -311,10 +387,13 @@ async function measureRoute(browser, { webBase, previewToken, buildSha, routeTem
       throw new ProbeError("browser_vitals_unsupported");
     }
 
+    substep = "resolve_interaction";
     const destination = interactionDestination(routeTemplate);
+    substep = "click_bottom_navigation";
     await page
       .locator(`.mobile-bottom-nav [data-nav="${destination}"]:visible`)
       .click({ timeout: 10_000 });
+    substep = "wait_for_inp";
     await page.waitForFunction(
       () => {
         const state = window.__BSIDE_PRODUCTION_VITALS_PROBE__;
@@ -323,6 +402,7 @@ async function measureRoute(browser, { webBase, previewToken, buildSha, routeTem
       null,
       { timeout: 10_000 },
     );
+    substep = "read_metrics";
     const values = await page.evaluate(() => window.__BSIDE_PRODUCTION_VITALS_PROBE__.flushEvents());
     if (!values || !Number.isFinite(values.lcp) || values.lcp <= 0
         || !Number.isFinite(values.inp) || values.inp <= 0
@@ -344,10 +424,46 @@ async function measureRoute(browser, { webBase, previewToken, buildSha, routeTem
     ];
   } catch (error) {
     if (error instanceof ProbeError) throw error;
-    throw new ProbeError(`route_measurement_failed_${routeTemplate.slice(1)}_${runNumber}`);
+    throw new RouteAttemptError({
+      routeTemplate,
+      runNumber,
+      attemptNumber,
+      substep,
+      cause: error,
+      previewToken,
+    });
   } finally {
-    await context.close().catch(() => {});
+    if (context) await context.close().catch(() => {});
   }
+}
+
+
+export async function measureJourneyWithRetry(
+  browser,
+  options,
+  measureAttempt = measureRouteAttempt,
+  onRetry = logRetryableAttempt,
+) {
+  const failedAttempts = [];
+  for (let attemptNumber = 1; attemptNumber <= MAX_JOURNEY_RETRIES + 1; attemptNumber += 1) {
+    try {
+      const observations = await measureAttempt(browser, { ...options, attemptNumber });
+      return {
+        observations,
+        attemptCount: attemptNumber,
+        retryAudit: failedAttempts.map((error) => error.auditRecord()),
+      };
+    } catch (error) {
+      if (!(error instanceof RouteAttemptError) || error.retryable !== true) throw error;
+      failedAttempts.push(error);
+      if (attemptNumber > MAX_JOURNEY_RETRIES) {
+        error.attempts = failedAttempts.map((item) => item.auditRecord());
+        throw error;
+      }
+      onRetry(error);
+    }
+  }
+  throw new ProbeError("journey_retry_state_invalid");
 }
 
 
@@ -413,7 +529,13 @@ function percentile75(values) {
 }
 
 
-export async function runProbe({ env = process.env, fetchImpl = fetch, browserFactory = chromium }) {
+export async function runProbe({
+  env = process.env,
+  fetchImpl = fetch,
+  browserFactory = chromium,
+  measureAttempt = measureRouteAttempt,
+  onRetry = logRetryableAttempt,
+} = {}) {
   const webBase = normalizeHttpsBase(env.BSIDE_PUBLIC_WEB_URL, "web").href;
   const apiBase = normalizeHttpsBase(env.BSIDE_API_BASE_URL, "api").href;
   const expectedSha = requiredText(env.PROBE_EXPECTED_BUILD_SHA, "missing_expected_build_sha").toLowerCase();
@@ -429,17 +551,21 @@ export async function runProbe({ env = process.env, fetchImpl = fetch, browserFa
   const startKstDate = kstDate(new Date());
   const browser = await browserFactory.launch({ headless: true });
   const observations = [];
+  const retryAudit = [];
+  let totalAttemptCount = 0;
   try {
     for (const routeTemplate of ROUTE_TEMPLATES) {
       for (let runNumber = 1; runNumber <= RUNS_PER_ROUTE; runNumber += 1) {
-        const measured = await measureRoute(browser, {
+        const measured = await measureJourneyWithRetry(browser, {
           webBase,
           previewToken,
           buildSha: deployed.buildSha,
           routeTemplate,
           runNumber,
-        });
-        observations.push(...measured);
+        }, measureAttempt, onRetry);
+        observations.push(...measured.observations);
+        retryAudit.push(...measured.retryAudit);
+        totalAttemptCount += measured.attemptCount;
         process.stdout.write(`measured ${routeTemplate} ${runNumber}/${RUNS_PER_ROUTE}\n`);
       }
     }
@@ -469,6 +595,13 @@ export async function runProbe({ env = process.env, fetchImpl = fetch, browserFa
     observation_count: observations.length,
     accepted_count: submission.acceptedCount,
     api_batch_sizes: submission.batchSizes,
+    journey_attempt_audit: {
+      successful_journey_count: ROUTE_TEMPLATES.length * RUNS_PER_ROUTE,
+      total_attempt_count: totalAttemptCount,
+      retry_count: retryAudit.length,
+      max_retries_per_journey: MAX_JOURNEY_RETRIES,
+      retried_journeys: retryAudit,
+    },
     measured_metrics: {
       lcp: {
         p75_seconds: Number((percentile75(metricValues.LCP) / 1000).toFixed(6)),
@@ -496,7 +629,12 @@ async function main() {
     process.stdout.write(`accepted ${summary.accepted_count} privacy-minimal Web Vitals observations\n`);
   } catch (error) {
     const code = error instanceof ProbeError ? error.code : "unexpected_probe_failure";
-    process.stderr.write(`web-vitals probe failed: ${code}\n`);
+    const detail = error instanceof RouteAttemptError
+      ? ` attempt=${error.attemptNumber}/${MAX_JOURNEY_RETRIES + 1}`
+        + ` substep=${error.substep}`
+        + ` original=${error.originalErrorName}: ${error.originalErrorMessage}`
+      : "";
+    process.stderr.write(`web-vitals probe failed: ${code}${detail}\n`);
     process.exitCode = 1;
   }
 }

@@ -1,6 +1,6 @@
 'use strict';
 
-const CARRY_FORWARD_ARTIFACT_PREFIX = "legacy-recovery-carry-forward-v3";
+const CARRY_FORWARD_ARTIFACT_PREFIX = "legacy-recovery-carry-forward-v4";
 const CARRY_FORWARD_WORKFLOWS = new Set([
   ".github/workflows/daily.yml",
   ".github/workflows/governance-cutover.yml",

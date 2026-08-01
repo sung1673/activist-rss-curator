@@ -21,6 +21,7 @@ TELEGRAM_URL = re.compile(
     r"|(?:tg://)",
     re.IGNORECASE,
 )
+TELEGRAM_LITERAL = re.compile(r"telegram", re.IGNORECASE)
 TELEGRAM_MENTIONS_OPEN = re.compile(
     rb"<script\b(?=[^>]*\bdata-story-telegram-mentions\b)[^>]*>",
     re.IGNORECASE,
@@ -32,6 +33,48 @@ TELEGRAM_MENTIONS_SCRIPT = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 LEGACY_TELEGRAM_CHANNEL_TEMPLATE = b"`https://t.me/${handle}`"
+HTML_SCRIPT = re.compile(
+    rb"<script\b[^>]*>.*?</script\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+HTML_ANCHOR = re.compile(
+    rb"<a\b[^>]*>.*?</a\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+HTML_PARAGRAPH = re.compile(
+    rb"<p\b[^>]*>.*?</p\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+HTML_STYLE = re.compile(
+    rb"(<style\b[^>]*>)(.*?)(</style\s*>)",
+    re.IGNORECASE | re.DOTALL,
+)
+HREF_ATTRIBUTE = re.compile(
+    rb"\bhref\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))",
+    re.IGNORECASE,
+)
+TELEGRAM_CSS_RULE = re.compile(
+    rb"(?im)(?:^[ \t]*|(?<=\})[ \t]*)"
+    rb"[^{}\r\n]*telegram[^{}\r\n]*\{[^{}]*\}[ \t]*(?:\r?\n|$)?",
+)
+KNOWN_TELEGRAM_SCRIPT_MARKERS = (
+    b"fetchtelegrammentions",
+    b"rendertelegrammentions",
+    b"statictelegrammentions",
+    b"telegramchannelurl",
+    b"telegram_reactions",
+    b"telegram_messages",
+)
+KNOWN_TELEGRAM_TEMPLATE_TEXT = frozenset(
+    {
+        "기사·이슈·telegram 신호를 함께 보려면 별도 검색 화면에서 확인하세요.",
+        (
+            "뉴스 기사, 이슈 묶음, telegram 공개 채널 신호를 한 화면에서 함께 "
+            "확인합니다. 검색 결과는 투자 추천이 아니라 시장 언급과 공개 출처를 "
+            "정리한 보조 정보입니다."
+        ),
+    }
+)
 
 
 class LegacyTelegramSafetyError(RuntimeError):
@@ -55,8 +98,56 @@ def _telegram_scan_text(payload: bytes) -> str:
     return text
 
 
+def _markup_text(payload: bytes) -> str:
+    text = _telegram_scan_text(payload)
+    text = re.sub(r"<[^>]*>", " ", text)
+    return re.sub(r"\s+", " ", text).strip().casefold()
+
+
+def _is_telegram_page_anchor(payload: bytes) -> bool:
+    start_tag = payload.split(b">", 1)[0] + b">"
+    match = HREF_ATTRIBUTE.search(start_tag)
+    if match is None:
+        return False
+    raw = next((value for value in match.groups() if value is not None), b"")
+    href = html.unescape(raw.decode("utf-8", errors="ignore")).strip()
+    path = href.split("#", 1)[0].split("?", 1)[0].replace("\\", "/")
+    return path.rstrip("/").rsplit("/", 1)[-1].casefold() in {
+        "telegram.html",
+        "telegram-admin.html",
+    }
+
+
+def _remove_telegram_scripts(match: re.Match[bytes]) -> bytes:
+    payload = match.group(0)
+    lowered = payload.lower()
+    if b"data-story-telegram-mentions" in lowered:
+        return b""
+    if any(marker in lowered for marker in KNOWN_TELEGRAM_SCRIPT_MARKERS):
+        return b""
+    return payload
+
+
+def _remove_telegram_anchor(match: re.Match[bytes]) -> bytes:
+    return b"" if _is_telegram_page_anchor(match.group(0)) else match.group(0)
+
+
+def _remove_telegram_template_paragraph(match: re.Match[bytes]) -> bytes:
+    return (
+        b""
+        if _markup_text(match.group(0)) in KNOWN_TELEGRAM_TEMPLATE_TEXT
+        else match.group(0)
+    )
+
+
+def _remove_telegram_css(match: re.Match[bytes]) -> bytes:
+    body = TELEGRAM_CSS_RULE.sub(b"", match.group(2))
+    return match.group(1) + body + match.group(3)
+
+
 def validate_public_payload(payload: bytes, *, path: str) -> None:
-    if TELEGRAM_URL.search(_telegram_scan_text(payload)):
+    scan_text = _telegram_scan_text(payload)
+    if TELEGRAM_URL.search(scan_text):
         raise LegacyTelegramSafetyError(
             f"legacy public artifact contains a Telegram URL: {path}"
         )
@@ -72,17 +163,25 @@ def validate_public_payload(payload: bytes, *, path: str) -> None:
             raise LegacyTelegramSafetyError(
                 f"legacy public artifact contains Telegram mention data: {path}"
             )
+    if TELEGRAM_LITERAL.search(scan_text):
+        raise LegacyTelegramSafetyError(
+            f"legacy public artifact contains a Telegram literal: {path}"
+        )
 
 
 def redact_telegram_mentions(payload: bytes, *, path: str) -> bytes:
-    redacted = TELEGRAM_MENTIONS_SCRIPT.sub(
-        lambda match: match.group(1) + b"[]" + match.group(3),
-        payload,
-    )
-    # Historical dated reports include this inert helper even after their
-    # mention payload is emptied. Neutralize only the exact known template;
-    # every other Telegram URL remains a fail-closed validation error.
-    redacted = redacted.replace(LEGACY_TELEGRAM_CHANNEL_TEMPLATE, b"''")
+    redacted = payload
+    if path.casefold().endswith(".html"):
+        # Compatibility pages are deliberately static. Removing a known
+        # Telegram-coupled script as a complete DOM node avoids leaving
+        # syntactically broken helpers or hidden network paths behind.
+        redacted = HTML_SCRIPT.sub(_remove_telegram_scripts, redacted)
+        redacted = HTML_ANCHOR.sub(_remove_telegram_anchor, redacted)
+        redacted = HTML_PARAGRAPH.sub(
+            _remove_telegram_template_paragraph,
+            redacted,
+        )
+        redacted = HTML_STYLE.sub(_remove_telegram_css, redacted)
     validate_public_payload(redacted, path=path)
     return redacted
 
@@ -142,6 +241,7 @@ def verify_public_site(
         "forbidden_page_count": 0,
         "telegram_url_count": 0,
         "nonempty_mention_payload_count": 0,
+        "telegram_literal_count": 0,
     }
 
 

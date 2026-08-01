@@ -137,7 +137,7 @@ def test_dirty_89_day_archive_is_redacted_before_compatibility_is_sealed(
     )
 
     report = (site / "feed" / "2026-07-28.html").read_bytes()
-    assert b"data-story-telegram-mentions>[]</script>" in report
+    assert b"telegram" not in report.lower()
     assert b"https://t.me/" not in report
     assert verify_expedited_legacy_compatibility(
         site,

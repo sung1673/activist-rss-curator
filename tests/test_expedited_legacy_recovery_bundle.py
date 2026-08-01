@@ -413,7 +413,7 @@ def test_bundle_redacts_embedded_telegram_exposure(tmp_path: Path) -> None:
         report = (
             bundle / root / "feed" / "2026-07-28.html"
         ).read_bytes()
-        assert b"data-story-telegram-mentions>[]</script>" in report
+        assert b"telegram" not in report.lower()
         assert b"https://t.me/" not in report
     assert verify_expedited_legacy_recovery_bundle(
         bundle,
