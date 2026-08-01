@@ -541,6 +541,10 @@ jobs:
                 id: "daily.yml",
                 path: ".github/workflows/daily.yml",
               },
+              {
+                id: "global-alpha-preview-deploy.yml",
+                path: ".github/workflows/global-alpha-preview-deploy.yml",
+              },
             ];
             const activeStatuses = [
               "queued", "in_progress", "pending", "waiting", "requested",

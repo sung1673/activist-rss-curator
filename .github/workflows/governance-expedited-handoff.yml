@@ -290,6 +290,10 @@ jobs:
                 id: "daily.yml",
                 path: ".github/workflows/daily.yml",
               },
+              {
+                id: "global-alpha-preview-deploy.yml",
+                path: ".github/workflows/global-alpha-preview-deploy.yml",
+              },
             ];
             for (const workflow of workflowSpecs) {
               for (const status of activeStatuses) {
