@@ -5270,12 +5270,13 @@ def run(base_url: str, mysql_container_id: str) -> None:
         token=PREVIEW_TOKEN,
     )
     latest_data = latest.get("data", {})
+    latest_notice = latest_data.get("coverage_notice", {})
     require(
         latest_data.get("brief_id") == brief_id
-        and len(latest_data.get("top", [])) == 1
-        and latest_data["top"][0].get("title") == second_title
-        and latest_data["top"][0].get("importance") == "high"
-        and latest_data["top"][0].get("source_url") == first_record["original_url"],
+        and latest_data.get("top") == []
+        and latest_data.get("empty_reason") == "coverage_unavailable"
+        and latest_notice.get("reason") == "coverage_unavailable"
+        and latest_notice.get("scope") == "blocking",
         repr(latest),
     )
     for timestamp_field in (
@@ -5287,24 +5288,11 @@ def run(base_url: str, mysql_container_id: str) -> None:
             latest_data.get(timestamp_field),
             f"latest_brief.{timestamp_field}",
         )
-    require_public_event_timestamps(
-        latest_data["top"][0],
-        "latest_brief.top[0]",
-    )
     mysql_execute(
         mysql_container_id,
         "UPDATE ci_governance_events "
         "SET title='CI mutable current event title',updated_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 2 SECOND) "
         f"WHERE event_id='{event_id}';",
-    )
-    frozen, _ = request_json(
-        base_url,
-        "api.php/api/v2/briefs/latest?edition=global",
-        token=PREVIEW_TOKEN,
-    )
-    require(
-        frozen.get("data", {}).get("top", [])[0].get("title") == second_title,
-        repr(frozen),
     )
 
     mysql_execute(
@@ -5650,11 +5638,28 @@ def run(base_url: str, mysql_container_id: str) -> None:
     require(
         len(optional_only_data.get("top", [])) == 1
         and optional_only_data.get("empty_reason") is None
+        and optional_only_data["top"][0].get("title") == second_title
+        and optional_only_data["top"][0].get("importance") == "high"
+        and optional_only_data["top"][0].get("source_url")
+        == first_record["original_url"]
         and optional_only_notice.get("reason") == "partial_coverage"
         and optional_only_notice.get("scope") == "warning"
         and set(optional_only_notice.get("unavailable_countries", []))
         == {"JP", "GB"},
         repr(optional_only_coverage),
+    )
+    for timestamp_field in (
+        "cutoff_at",
+        "published_at",
+        "last_updated_at",
+    ):
+        require_rfc3339_utc(
+            optional_only_data.get(timestamp_field),
+            f"optional_only_coverage.{timestamp_field}",
+        )
+    require_public_event_timestamps(
+        optional_only_data["top"][0],
+        "optional_only_coverage.top[0]",
     )
 
     # A blocking current-readiness state is fail-closed even when the frozen
