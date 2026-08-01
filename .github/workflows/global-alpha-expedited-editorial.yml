@@ -699,6 +699,8 @@ jobs:
             and .source_human_review_section.ground_truth_source == "human"
             and .source_human_review_section.ai_generated_ground_truth == false
             and .carry_forward.event_mutations_applied == 0
+            and (.carry_forward.human_approval_chain_sha256
+              | test("^[0-9a-f]{64}$"))
             and (.intent_sha256 | test("^[0-9a-f]{64}$"))
           ' editorial-intent/carry-forward-intent.json > /dev/null
 
@@ -865,6 +867,8 @@ jobs:
             and .ai_generated_ground_truth == false
             and .human_attestation == true
             and .carry_forward.event_mutations_applied == 0
+            and (.carry_forward.human_approval_chain_sha256
+              | test("^[0-9a-f]{64}$"))
             and .carry_forward.prepared_intent_artifact.run_id
               == (env.INTENT_RUN_ID | tonumber)
             and .carry_forward.prepared_intent_artifact.artifact_id
@@ -875,6 +879,8 @@ jobs:
             and .mutations_applied == 0
             and .event_mutations_applied == 0
             and .brief.idempotent == .recovered_existing_brief
+            and (.carry_forward.human_approval_chain_sha256
+              | test("^[0-9a-f]{64}$"))
           ' editorial-publication/publication-receipt.json > /dev/null
           jq -e '
             .code_revision == env.GITHUB_SHA
@@ -882,7 +888,31 @@ jobs:
             and .event_mutations_applied == 0
             and .idempotent_replay == true
             and .brief.idempotent == true
+            and (.carry_forward.human_approval_chain_sha256
+              | test("^[0-9a-f]{64}$"))
           ' editorial-publication/publication-replay-receipt.json > /dev/null
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          paths = (
+              Path("editorial-intent/carry-forward-intent.json"),
+              Path("editorial-publication/human-review.json"),
+              Path("editorial-publication/publication-receipt.json"),
+              Path("editorial-publication/publication-replay-receipt.json"),
+          )
+          chains = []
+          for path in paths:
+              record = json.loads(path.read_text(encoding="utf-8"))
+              carry = record.get("carry_forward")
+              chain = carry.get("human_approval_chain_sha256") if isinstance(carry, dict) else None
+              if not isinstance(chain, str) or re.fullmatch(r"[0-9a-f]{64}", chain) is None:
+                  raise SystemExit(f"{path}: human approval chain digest is missing or invalid")
+              chains.append(chain)
+          if len(set(chains)) != 1:
+              raise SystemExit("human approval chain digest changed during publication")
+          PY
 
       - name: Upload current-SHA protected publication evidence
         id: publication_artifact
@@ -1067,6 +1097,8 @@ jobs:
             .code_revision == env.GITHUB_SHA
             and .ground_truth_source == "human"
             and .ai_generated_ground_truth == false
+            and (.carry_forward.human_approval_chain_sha256
+              | test("^[0-9a-f]{64}$"))
             and .carry_forward.prepared_intent_artifact.run_id
               == (env.INTENT_RUN_ID | tonumber)
             and .carry_forward.prepared_intent_artifact.artifact_id
@@ -1076,13 +1108,39 @@ jobs:
             .mutations_applied == 0
             and .event_mutations_applied == 0
             and .brief.idempotent == .recovered_existing_brief
+            and (.carry_forward.human_approval_chain_sha256
+              | test("^[0-9a-f]{64}$"))
           ' editorial-publication/publication-receipt.json > /dev/null
           jq -e '
             .mutations_applied == 0
             and .event_mutations_applied == 0
             and .idempotent_replay == true
             and .brief.idempotent == true
+            and (.carry_forward.human_approval_chain_sha256
+              | test("^[0-9a-f]{64}$"))
           ' editorial-publication/publication-replay-receipt.json > /dev/null
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          paths = (
+              Path("editorial-intent/carry-forward-intent.json"),
+              Path("editorial-publication/human-review.json"),
+              Path("editorial-publication/publication-receipt.json"),
+              Path("editorial-publication/publication-replay-receipt.json"),
+          )
+          chains = []
+          for path in paths:
+              record = json.loads(path.read_text(encoding="utf-8"))
+              carry = record.get("carry_forward")
+              chain = carry.get("human_approval_chain_sha256") if isinstance(carry, dict) else None
+              if not isinstance(chain, str) or re.fullmatch(r"[0-9a-f]{64}", chain) is None:
+                  raise SystemExit(f"{path}: human approval chain digest is missing or invalid")
+              chains.append(chain)
+          if len(set(chains)) != 1:
+              raise SystemExit("human approval chain digest changed during recovery")
+          PY
 
       - name: Upload recovered current-SHA publication evidence
         id: publication_artifact

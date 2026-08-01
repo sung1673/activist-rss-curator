@@ -33,6 +33,7 @@ LEGACY_ARCHIVE_KIND = "bside-global-alpha-expedited-legacy-archive"
 RELEASE_CHANNEL = "production_alpha_early_access"
 BASE_BINDING_FIELDS = (
     "human_review_section_sha256",
+    "human_approval_chain_sha256",
     "pages_terminal_content_sha256",
     "content_integrity_sha256",
     "experience_sha256",
@@ -194,6 +195,21 @@ def _validate_preparation(
     ):
         raise FinalApprovalMaterialError(
             "preparation binding materials contract is invalid"
+        )
+    human_review = record["human_review"]
+    carry_forward = human_review.get("carry_forward")
+    if not isinstance(carry_forward, dict):
+        raise FinalApprovalMaterialError(
+            "preparation human review omitted carry_forward"
+        )
+    approval_chain_sha256 = _require_digest(
+        carry_forward.get("human_approval_chain_sha256"),
+        "preparation.human_review.carry_forward."
+        "human_approval_chain_sha256",
+    )
+    if materials.get("human_approval_chain_sha256") != approval_chain_sha256:
+        raise FinalApprovalMaterialError(
+            "preparation human approval chain digest mismatch"
         )
     base = {
         field: _require_digest(materials.get(field), field)

@@ -663,6 +663,101 @@ def test_expedited_evidence_uses_actual_receipts_human_bytes_and_rights() -> Non
     assert '"source_right_valid": True' not in text
 
 
+def test_corrected_human_approval_chain_is_bound_end_to_end() -> None:
+    editorial_text, editorial = workflow(
+        "global-alpha-expedited-editorial.yml"
+    )
+    prepare = next(
+        step
+        for step in editorial["jobs"]["carry_forward_prepare"]["steps"]
+        if step["name"]
+        == "Freeze unchanged current-SHA basis without publishing"
+    )["run"]
+    publish = next(
+        step
+        for step in editorial["jobs"]["carry_forward_publish"]["steps"]
+        if step["name"] == "Publish and replay only the frozen intent"
+    )["run"]
+    recover = next(
+        step
+        for step in editorial["jobs"]["carry_forward_recover"]["steps"]
+        if step["name"]
+        == "Recover publication from only the frozen intent"
+    )["run"]
+    assert "human_approval_chain_sha256" in prepare
+    assert "human approval chain digest changed during publication" in publish
+    assert "human approval chain digest changed during recovery" in recover
+    assert editorial_text.count("human_approval_chain_sha256") >= 9
+
+    preparation_text, preparation = workflow(
+        "global-alpha-expedited-preparation.yml"
+    )
+    preparation_steps = preparation["jobs"]["evaluate"]["steps"]
+    verify_publication = next(
+        step
+        for step in preparation_steps
+        if step["name"]
+        == "Verify actual editorial publication and inject its immutable identity"
+    )["run"]
+    assemble_preparation = next(
+        step
+        for step in preparation_steps
+        if step["name"] == "Assemble immutable expedited preparation"
+    )["run"]
+    assert "editorial human approval chain digest mismatch" in verify_publication
+    assert '"human_approval_chain_sha256": human[' in assemble_preparation
+    assert "human_approval_chain_sha256" in preparation_text
+
+    approval_text, approval_workflow = workflow(
+        "global-alpha-expedited-evidence-inputs.yml"
+    )
+    approval_steps = approval_workflow["jobs"]["materialize"]["steps"]
+    verify_preparation = next(
+        step
+        for step in approval_steps
+        if step["name"]
+        == "Verify preparation provenance before accepting final approval"
+    )["run"]
+    bind_approval = next(
+        step
+        for step in approval_steps
+        if step["name"] == "Bind final human approval to the exact preparation"
+    )["run"]
+    assert "preparation human approval chain digest mismatch" in verify_preparation
+    assert '"human_approval_chain_sha256",' in bind_approval
+    assert approval_text.count("human_approval_chain_sha256") >= 6
+
+    evidence_text, evidence = workflow(
+        "global-alpha-expedited-evidence.yml"
+    )
+    evidence_steps = evidence["jobs"]["evaluate"]["steps"]
+    verify_final = next(
+        step
+        for step in evidence_steps
+        if step["name"] == "Verify final approval binds the exact preparation"
+    )["run"]
+    assemble_evidence = next(
+        step
+        for step in evidence_steps
+        if step["name"] == "Assemble immutable expedited evidence"
+    )["run"]
+    assert "human approval chain digest changed after publication" in verify_final
+    assert '"human_approval_chain_sha256",' in verify_final
+    assert "human_approval_chain_sha256" in assemble_evidence
+    assert evidence_text.count("human_approval_chain_sha256") >= 6
+
+    final_helper = (
+        ROOT / "curator" / "global_alpha_expedited_final_approval.py"
+    ).read_text(encoding="utf-8")
+    gate_helper = (
+        ROOT / "curator" / "global_alpha_expedited_gate.py"
+    ).read_text(encoding="utf-8")
+    assert '"human_approval_chain_sha256",' in final_helper
+    assert "preparation human approval chain digest mismatch" in final_helper
+    assert "expedited_human_review.approval_chain_bound" in gate_helper
+    assert '"human_approval_chain_sha256": human_summary[' in gate_helper
+
+
 def test_expedited_cutover_leaves_repository_variables_for_authenticated_handoff() -> None:
     text, payload = workflow("governance-expedited-cutover.yml")
     deploy = payload["jobs"]["deploy_pages"]

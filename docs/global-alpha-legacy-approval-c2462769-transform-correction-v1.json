@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "bside-global-alpha-expedited-legacy-human-approval-transform-correction",
+  "environment": "production",
+  "is_synthetic": false,
+  "ground_truth_source": "human",
+  "ai_generated_ground_truth": false,
+  "human_attestation": true,
+  "reviewer_type": "human",
+  "reviewer_reference": "bside-owner-20260731",
+  "reviewed_at": "2026-08-01T00:13:46Z",
+  "attestation_source": "codex_thread_human_message_2026-08-01",
+  "attestation_text_sha256": "a2aac9ad15a4446b7dcdd90d4a0d56ff3175fd5a81312367553590b2927f8b40",
+  "base_approval_canonical_sha256": "3c64d0dd3567e1c6ec39f4484805dd1754c97370fa415503fedefb713487591e",
+  "source_candidate_sha256": "c24627699633cf02084a2caeb3334c182c404861f85e8f4d27acf116fc6d8f76",
+  "source_decision_sha256": "0056e948bfbb635362a2244cda5f0f25350112dd6a3e06f4f22cb18badd3523b",
+  "source_candidate_artifact": {
+    "run_id": 30581161308,
+    "artifact_id": 8774655231,
+    "artifact_name": "global-alpha-expedited-editorial-candidates-b44a1aebc2eb6e7b58e5960b0f8245b87e901052",
+    "artifact_digest": "sha256:f7eec4481564f52b89fbda166544cb1bc0b79e8ee940a8173ed5859aade40afd"
+  },
+  "source_publication_artifact": {
+    "run_id": 30587485449,
+    "artifact_id": 8777083749,
+    "artifact_name": "global-alpha-expedited-editorial-publication-b44a1aebc2eb6e7b58e5960b0f8245b87e901052-30587485449-1",
+    "artifact_digest": "sha256:95028a16adedfc19b5dfe3c6e0b0c36696b5c2619a44f0040d51ef3b1ffcbbaa"
+  },
+  "correction_scope": "transform_contract_only",
+  "preserved_decisions": {
+    "event_count": 20,
+    "event_decision": "approved",
+    "same_event_pair_count": 40,
+    "same_event_pair_decision": false,
+    "top5_count": 5,
+    "top5_decision": "approved",
+    "actor": "unchanged",
+    "country": "KR",
+    "official_evidence": "unchanged"
+  },
+  "event_ids": [
+    "event:05cf497fae5fe6f9a901741961fbdf09",
+    "event:098ef0a895ef0384809b26fdb3a5b1f4",
+    "event:0b8682c596d54cb8ed5991b950223572",
+    "event:1b504770e55ce66b6e33314ea877c354",
+    "event:1bab93b4db3bd4aed6c21a764aaa24d2",
+    "event:bbb63590e98bd6865f0251c8f52ceb10",
+    "event:6fe8cc863cdb3faa55b667f440204f72",
+    "event:2a39e6936b61400b46c64d45057cbb59",
+    "event:1ce9e8c3f9c4c249ed07bff1384dfda5",
+    "event:241d63264e99fadbfe08cb1f6b219c41",
+    "event:e90d2124ba3c3459851db2d9a4ee9408",
+    "event:c66528ba938e734898495ac457ef424f",
+    "event:c866f5f7841b74642a636049b92e8c0a",
+    "event:4c62b6b939285e7bc7dc1214a9b3fa16",
+    "event:8c4b4dea0fecbd459a1d17e9c0eea803",
+    "event:961ed4d77655b41b247e9d05d3b458c8",
+    "event:593f9fdf1471a2c15ae47cca886e2b71",
+    "event:d230aa7b4335fe0338f744cb9292cd1c",
+    "event:dba39b9797cbf6efd554cc07c808aea9",
+    "event:6a2076309c3c63255b0d9c8fd88391c0"
+  ],
+  "event_ids_sha256": "fd7421931f90a8c7428c99289963d9456a7e64f2fe4b830c42e6e413a0c941fb",
+  "replaced_transform_fields": [
+    "identity_target",
+    "summary",
+    "current_status"
+  ],
+  "corrected_transform_contract": {
+    "identity_target": "회사명 — 원문 제목",
+    "summary": "회사명는 DART에 「원문 제목」을 공시했다.",
+    "current_status": {
+      "corrected": "corrected_official_disclosure",
+      "official": "official_disclosure_confirmed"
+    }
+  }
+}

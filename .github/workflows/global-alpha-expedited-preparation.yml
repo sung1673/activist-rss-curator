@@ -2699,6 +2699,7 @@ jobs:
           import hashlib
           import json
           import os
+          import re
           from pathlib import Path
 
           def one(name):
@@ -2727,6 +2728,20 @@ jobs:
           human = json.loads(human_path.read_text(encoding="utf-8"))
           receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
           replay = json.loads(replay_path.read_text(encoding="utf-8"))
+          approval_chains = []
+          for record, label in (
+              (human, "human review"),
+              (receipt, "publication receipt"),
+              (replay, "publication replay receipt"),
+          ):
+              carry = record.get("carry_forward")
+              chain = carry.get("human_approval_chain_sha256") if isinstance(carry, dict) else None
+              if not isinstance(chain, str) or re.fullmatch(r"[0-9a-f]{64}", chain) is None:
+                  raise SystemExit(f"{label} omitted a valid human approval chain digest")
+              approval_chains.append(chain)
+          if len(set(approval_chains)) != 1:
+              raise SystemExit("editorial human approval chain digest mismatch")
+          human_approval_chain_sha256 = approval_chains[0]
           revision = os.environ["GITHUB_SHA"].lower()
           publication_identity = {
               "artifact_id": int(os.environ["EDITORIAL_ARTIFACT_ID"]),
@@ -2868,6 +2883,7 @@ jobs:
               "human_review_bytes_sha256": file_sha(human_path),
               "publication_receipt_bytes_sha256": file_sha(receipt_path),
               "publication_replay_receipt_bytes_sha256": file_sha(replay_path),
+              "human_approval_chain_sha256": human_approval_chain_sha256,
               "semantic_receipt_sha256": receipt["semantic_receipt_sha256"],
               "candidate_artifact": expected_candidate,
               "candidate_sha256": receipt["candidate_sha256"],
@@ -2895,6 +2911,8 @@ jobs:
             .kind == "bside-global-alpha-expedited-preparation-input"
             and .code_revision == env.GITHUB_SHA
             and (has("human_review") and (.human_review | type == "object"))
+            and (.human_review.carry_forward.human_approval_chain_sha256
+              | test("^[0-9a-f]{64}$"))
             and (has("approval") | not)
             and (has("legacy_archive") | not)
             and (.observations | length) == 7
@@ -2973,6 +2991,9 @@ jobs:
               "human_review_section_sha256": digest(
                   {field: human.get(field) for field in human_fields}
               ),
+              "human_approval_chain_sha256": human[
+                  "carry_forward"
+              ]["human_approval_chain_sha256"],
               "pages_terminal_content_sha256": digest(
                   observations[0]["terminal_content"]
               ),
@@ -3004,6 +3025,11 @@ jobs:
               encoding="utf-8",
           )
           PY
+          human_approval_chain_sha256="$(
+            jq -er '.human_review.carry_forward.human_approval_chain_sha256' \
+              expedited-preparation.json
+          )"
+          [[ "$human_approval_chain_sha256" =~ ^[0-9a-f]{64}$ ]]
           jq -n \
             --arg code_revision "$GITHUB_SHA" \
             --arg evidence_as_of "$EVIDENCE_AS_OF" \
@@ -3011,6 +3037,8 @@ jobs:
             --arg run_id "$GITHUB_RUN_ID" \
             --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
             --arg pages_digest "$PAGES_ARTIFACT_DIGEST" \
+            --arg human_approval_chain_sha256 \
+              "$human_approval_chain_sha256" \
             '{
               schema_version: 1,
               kind: "bside-global-alpha-expedited-preparation-provenance",
@@ -3020,7 +3048,8 @@ jobs:
               workflow: $workflow,
               run_id: ($run_id | tonumber),
               run_attempt: ($run_attempt | tonumber),
-              pages_artifact_digest: $pages_digest
+              pages_artifact_digest: $pages_digest,
+              human_approval_chain_sha256: $human_approval_chain_sha256
             }' > global-alpha-expedited-preparation/preparation-provenance.json
 
       - name: Upload immutable expedited preparation

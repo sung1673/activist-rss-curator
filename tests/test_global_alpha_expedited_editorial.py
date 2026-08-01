@@ -5,6 +5,7 @@ import base64
 import gzip
 import hashlib
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Mapping
 
 import pytest
@@ -380,16 +381,25 @@ def _legacy_human_decisions(
                 "decision": "approve",
                 "event_family": family,
                 "identity_action": action,
-                "identity_target": event["issuer_name"],
+                "identity_target": (
+                    str(event["issuer_name"])
+                    + " — "
+                    + str(event["title"])
+                ),
                 "identity_effective_at": effective_at,
                 "identity_deadline_at": None,
                 "importance": event["importance"],
                 "summary": (
                     str(event["issuer_name"])
-                    + " — "
+                    + "는 DART에 「"
                     + str(event["title"])
+                    + "」을 공시했다."
                 ),
-                "current_status": event["verification_status"],
+                "current_status": (
+                    "corrected_official_disclosure"
+                    if event["verification_status"] == "corrected"
+                    else "official_disclosure_confirmed"
+                ),
                 "actor": actor,
                 "merge_into_event_id": None,
                 "reason": f"Legacy human approval E{position:02d}",
@@ -985,6 +995,38 @@ def _carry_common(
         "_load_legacy_human_approval_artifact",
         lambda: copy.deepcopy(attestation),
     )
+    correction = editorial._load_legacy_human_approval_correction()
+    event_ids = [str(item["event_id"]) for item in candidate_events]
+    event_ids_sha = canonical_sha256(event_ids)
+    correction.update(
+        {
+            "base_approval_canonical_sha256": attestation_sha,
+            "source_candidate_sha256": candidate["candidate_sha256"],
+            "source_decision_sha256": receipt["decision_sha256"],
+            "source_candidate_artifact": TEST_CANDIDATE_ARTIFACT,
+            "source_publication_artifact": TEST_PUBLICATION_ARTIFACT,
+            "event_ids": event_ids,
+            "event_ids_sha256": event_ids_sha,
+        }
+    )
+    correction_sha = canonical_sha256(correction)
+    monkeypatch.setattr(
+        editorial,
+        "LEGACY_APPROVAL_CORRECTION_SHA256",
+        correction_sha,
+    )
+    monkeypatch.setattr(
+        editorial,
+        "LEGACY_APPROVAL_EVENT_IDS_SHA256",
+        event_ids_sha,
+    )
+    chain_sha = canonical_sha256(editorial._legacy_human_approval_chain_basis())
+    monkeypatch.setattr(editorial, "LEGACY_APPROVAL_CHAIN_SHA256", chain_sha)
+    monkeypatch.setattr(
+        editorial,
+        "_load_legacy_human_approval_correction",
+        lambda: copy.deepcopy(correction),
+    )
     revision = "c" * 40
     client = _CarryClient(source.events, revision=revision)
     common = {
@@ -1011,6 +1053,27 @@ def _carry_common(
         ).astimezone(timezone.utc),
     }
     return client, common
+
+
+def _install_rehashed_correction(
+    monkeypatch: pytest.MonkeyPatch,
+    correction: dict[str, object],
+) -> None:
+    monkeypatch.setattr(
+        editorial,
+        "LEGACY_APPROVAL_CORRECTION_SHA256",
+        canonical_sha256(correction),
+    )
+    monkeypatch.setattr(
+        editorial,
+        "LEGACY_APPROVAL_CHAIN_SHA256",
+        canonical_sha256(editorial._legacy_human_approval_chain_basis()),
+    )
+    monkeypatch.setattr(
+        editorial,
+        "_load_legacy_human_approval_correction",
+        lambda: copy.deepcopy(correction),
+    )
 
 
 def _prepare_carry_from_common(
@@ -1100,20 +1163,34 @@ def test_code_only_sha_carry_forward_preserves_human_review_without_event_mutati
             if position == 11
             else candidate["event_family"]
         )
-        assert approved["identity_target"] == str(
-            candidate["issuer_name"]
-        ).casefold()
-        assert approved["summary"] == (
+        assert approved["identity_target"] == (
             str(candidate["issuer_name"])
             + " — "
             + str(candidate["title"])
+        ).casefold()
+        assert approved["summary"] == (
+            str(candidate["issuer_name"])
+            + "는 DART에 「"
+            + str(candidate["title"])
+            + "」을 공시했다."
         )
-        assert approved["current_status"] == candidate[
-            "verification_status"
-        ]
+        assert approved["current_status"] == (
+            "corrected_official_disclosure"
+            if candidate["verification_status"] == "corrected"
+            else "official_disclosure_confirmed"
+        )
         assert approved["deadline_at"] is None
         assert approved["identity_deadline_at"] is None
         assert approved["actor"]["country_code"] == "KR"
+    assert approved_basis["human_approval_chain_sha256"] == (
+        editorial.LEGACY_APPROVAL_CHAIN_SHA256
+    )
+    assert human["carry_forward"]["human_approval_chain_sha256"] == (  # type: ignore[index]
+        editorial.LEGACY_APPROVAL_CHAIN_SHA256
+    )
+    assert receipt["carry_forward"]["human_approval_chain_sha256"] == (  # type: ignore[index]
+        editorial.LEGACY_APPROVAL_CHAIN_SHA256
+    )
     assert receipt["event_review_outcomes"][0]["result"] == (  # type: ignore[index]
         "verified_unchanged"
     )
@@ -1336,6 +1413,11 @@ def test_carry_forward_recovers_after_first_brief_was_persisted(
 
 def test_legacy_approval_profile_is_bound_to_the_recorded_candidate_and_reviewer() -> None:
     attestation = editorial._load_legacy_human_approval_artifact()
+    assert hashlib.sha256(
+        editorial.LEGACY_APPROVAL_ATTESTATION_PATH.read_bytes()
+    ).hexdigest() == (
+        "eca96d2914af3ba5a8930463abeaaaf472cd476a28604d53faf8ca908be740a6"
+    )
     assert canonical_sha256(attestation) == (
         editorial.LEGACY_APPROVAL_ATTESTATION_SHA256
     )
@@ -1382,6 +1464,166 @@ def test_legacy_approval_profile_is_bound_to_the_recorded_candidate_and_reviewer
             "95028a16adedfc19b5dfe3c6e0b0c36696b5c2619a44f0040d51ef3b1ffcbbaa"
         ),
     }
+    correction = editorial._load_legacy_human_approval_correction()
+    assert hashlib.sha256(
+        editorial.LEGACY_APPROVAL_CORRECTION_PATH.read_bytes()
+    ).hexdigest() == editorial.LEGACY_APPROVAL_CORRECTION_RAW_SHA256
+    assert canonical_sha256(correction) == (
+        editorial.LEGACY_APPROVAL_CORRECTION_SHA256
+    )
+    assert correction["ground_truth_source"] == "human"
+    assert correction["ai_generated_ground_truth"] is False
+    assert correction["human_attestation"] is True
+    assert correction["reviewer_type"] == "human"
+    assert correction["reviewer_reference"] == LEGACY_APPROVAL_REVIEWER
+    correction_attestation_text = (
+        "기존 E01~E20, P01~P40, T01~T05, 당사자·국가·공식 근거 판단은 "
+        "변경하지 않습니다. 대상=회사명 — 원문 제목, 요약=회사명는 DART에 "
+        "「원문 제목」을 공시했다., 상태=정정 공시는 "
+        "corrected_official_disclosure, 그 외는 "
+        "official_disclosure_confirmed 규칙만 별도 정정 증빙으로 추가하는 것을 "
+        "승인합니다. 이는 사람이 직접 판단한 것이며 AI 생성 정답이 아닙니다."
+    )
+    assert hashlib.sha256(
+        correction_attestation_text.encode("utf-8")
+    ).hexdigest() == correction["attestation_text_sha256"]
+    assert correction["base_approval_canonical_sha256"] == (
+        editorial.LEGACY_APPROVAL_ATTESTATION_SHA256
+    )
+    assert correction["source_candidate_sha256"] == (
+        editorial.LEGACY_APPROVAL_CANDIDATE_SHA256
+    )
+    assert correction["source_decision_sha256"] == (
+        editorial.LEGACY_APPROVAL_SOURCE_DECISION_SHA256
+    )
+    assert correction["source_publication_artifact"] == (
+        editorial.LEGACY_APPROVAL_PUBLICATION_ARTIFACT
+    )
+    assert len(correction["event_ids"]) == EVENT_COUNT
+    assert canonical_sha256(correction["event_ids"]) == (
+        editorial.LEGACY_APPROVAL_EVENT_IDS_SHA256
+    )
+    assert correction["corrected_transform_contract"] == {
+        "identity_target": "회사명 — 원문 제목",
+        "summary": "회사명는 DART에 「원문 제목」을 공시했다.",
+        "current_status": {
+            "corrected": "corrected_official_disclosure",
+            "official": "official_disclosure_confirmed",
+        },
+    }
+    assert editorial._legacy_human_approval_chain_sha256() == (
+        editorial.LEGACY_APPROVAL_CHAIN_SHA256
+    )
+
+
+def test_corrected_current_status_is_exact_and_unknown_values_fail_closed() -> None:
+    assert editorial._legacy_approved_current_status("corrected") == (
+        "corrected_official_disclosure"
+    )
+    assert editorial._legacy_approved_current_status("official") == (
+        "official_disclosure_confirmed"
+    )
+    for value in ("withdrawn", "signal", "", "OFFICIAL"):
+        with pytest.raises(
+            ExpeditedEditorialError,
+            match="unsupported verification status",
+        ):
+            editorial._legacy_approved_current_status(value)
+
+
+def test_corrected_event_delta_is_exact_and_fail_closed() -> None:
+    base: dict[str, object] = {
+        "issuer_id": "issuer:test",
+        "event_family": "capital_issuance",
+        "identity_action": "rights_issue",
+        "identity_target": "issuer",
+        "identity_actor_id": "actor:test",
+        "identity_effective_at": "2026-07-30T00:00:00Z",
+        "identity_deadline_at": None,
+        "summary": "issuer — title",
+        "current_status": "official",
+        "actor": {"actor_id": "actor:test"},
+        "country": "KR",
+        "official_documents": [{"document_id": "dart:test"}],
+        "official_evidence_count": 1,
+        "source_event_evidence_sha256": "a" * 64,
+    }
+    base["comparison_key"] = editorial._legacy_event_comparison_key(base, "base")
+    corrected = copy.deepcopy(base)
+    corrected.update(
+        identity_target="issuer — title",
+        summary="issuer는 DART에 「title」을 공시했다.",
+        current_status="official_disclosure_confirmed",
+    )
+    corrected["comparison_key"] = editorial._legacy_event_comparison_key(
+        corrected, "corrected"
+    )
+    editorial._validate_legacy_corrected_event_delta(base, corrected, "test")
+    for field, value in {
+        "actor": {"actor_id": "actor:changed"},
+        "country": "US",
+        "official_documents": [{"document_id": "dart:changed"}],
+        "official_evidence_count": 2,
+        "source_event_evidence_sha256": "b" * 64,
+    }.items():
+        tampered = copy.deepcopy(corrected)
+        tampered[field] = value
+        with pytest.raises(ExpeditedEditorialError, match="correction"):
+            editorial._validate_legacy_corrected_event_delta(
+                base, tampered, "test"
+            )
+
+
+def test_correction_loader_rejects_byte_only_file_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    path = editorial.LEGACY_APPROVAL_CORRECTION_PATH
+    altered = tmp_path / "correction.json"
+    altered.write_bytes(path.read_bytes() + b"\n")
+    monkeypatch.setattr(editorial, "LEGACY_APPROVAL_CORRECTION_PATH", altered)
+    with pytest.raises(ExpeditedEditorialError, match="raw file digest mismatch"):
+        editorial._load_legacy_human_approval_correction()
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda value: value.__setitem__("ai_generated_ground_truth", True),
+         "provenance mismatch"),
+        (lambda value: value.__setitem__("reviewer_type", "ai"),
+         "provenance mismatch"),
+        (lambda value: value.__setitem__("unexpected", "field"),
+         "provenance mismatch"),
+        (
+            lambda value: value.__setitem__(
+                "reviewed_at", "2026-07-01T00:00:00Z"
+            ),
+            "correction must follow base approval",
+        ),
+        (lambda value: value["event_ids"].reverse(), "event binding mismatch"),
+        (
+            lambda value: value["corrected_transform_contract"].__setitem__(
+                "summary", "tampered"
+            ),
+            "provenance mismatch",
+        ),
+    ],
+)
+def test_correction_rejects_ai_extra_field_reorder_and_transform_tampering(
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: object,
+    message: str,
+) -> None:
+    client, common = _carry_common(monkeypatch)
+    correction = editorial._load_legacy_human_approval_correction()
+    assert isinstance(correction, dict)
+    assert callable(mutation)
+    mutation(correction)
+    _install_rehashed_correction(monkeypatch, correction)
+    with pytest.raises(ExpeditedEditorialError, match=message):
+        _prepare_carry_from_common(client, common)
+    assert client.brief_calls == 0
 
 
 def test_global_comparison_key_matches_the_php_v2_identity_contract() -> None:
@@ -1540,6 +1782,9 @@ def test_approved_canonical_basis_digest_is_mandatory_and_tamper_evident(
         approval_attestation=(
             editorial._load_legacy_human_approval_artifact()
         ),
+        approval_correction=(
+            editorial._load_legacy_human_approval_correction()
+        ),
         source_decision_sha256=source_receipt["decision_sha256"],
         events=events,
         event_reviews=event_reviews,
@@ -1554,6 +1799,22 @@ def test_approved_canonical_basis_digest_is_mandatory_and_tamper_evident(
     tampered["events"][0]["summary"] = "tampered"  # type: ignore[index]
     with pytest.raises(ExpeditedEditorialError, match="digest mismatch"):
         _validate_approved_canonical_basis(tampered, digest)
+    tampered_correction = copy.deepcopy(basis)
+    tampered_correction["human_approval_correction_artifact"][  # type: ignore[index]
+        "reviewer_type"
+    ] = "ai"
+    with pytest.raises(ExpeditedEditorialError, match="profile mismatch"):
+        _validate_approved_canonical_basis(
+            tampered_correction,
+            canonical_sha256(tampered_correction),
+        )
+    tampered_chain = copy.deepcopy(basis)
+    tampered_chain["human_approval_chain_sha256"] = "f" * 64
+    with pytest.raises(ExpeditedEditorialError, match="profile mismatch"):
+        _validate_approved_canonical_basis(
+            tampered_chain,
+            canonical_sha256(tampered_chain),
+        )
     with pytest.raises(ExpeditedEditorialError):
         _validate_approved_canonical_basis(basis, None)
     wrong_artifact = copy.deepcopy(common["candidate_artifact"])
@@ -1569,6 +1830,9 @@ def test_approved_canonical_basis_digest_is_mandatory_and_tamper_evident(
             publication_artifact=common["publication_artifact"],
             approval_attestation=(
                 editorial._load_legacy_human_approval_artifact()
+            ),
+            approval_correction=(
+                editorial._load_legacy_human_approval_correction()
             ),
             source_decision_sha256=source_receipt["decision_sha256"],
             events=events,

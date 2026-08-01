@@ -230,6 +230,9 @@ def test_protected_carry_forward_is_ancestor_bound_and_event_write_free() -> Non
     assert "same run must contain exactly one frozen intent" in publish_text
     assert ".carry_forward.event_mutations_applied == 0" in publish_text
     assert ".event_mutations_applied == 0" in publish_text
+    assert ".carry_forward.human_approval_chain_sha256" in prepare_text
+    assert ".carry_forward.human_approval_chain_sha256" in publish_text
+    assert ".carry_forward.human_approval_chain_sha256" in recover_text
     assert "GLOBAL_ALPHA_EXPEDITED_EDITORIAL_DECISIONS_GZIP_B64" not in (
         prepare_text + publish_text + recover_text
     )

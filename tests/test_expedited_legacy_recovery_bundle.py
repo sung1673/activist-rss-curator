@@ -25,6 +25,7 @@ from curator.expedited_legacy_recovery_bundle import (
     verify_expedited_legacy_recovery_bundle,
 )
 from curator.global_alpha_expedited_final_approval import (
+    FinalApprovalMaterialError,
     build_final_approval_template,
     derive_final_approval_materials,
     seal_final_approval,
@@ -107,8 +108,12 @@ def _preparation(
     shutil.copyfile(archive, root / "pinned-legacy.zip")
     identity = _identity(archive)
     revision = "a" * 40
+    human_approval_chain_sha256 = hashlib.sha256(
+        b"human-approval-chain"
+    ).hexdigest()
     base = {
         "human_review_section_sha256": "1" * 64,
+        "human_approval_chain_sha256": human_approval_chain_sha256,
         "pages_terminal_content_sha256": "2" * 64,
         "content_integrity_sha256": "3" * 64,
         "experience_sha256": "4" * 64,
@@ -134,7 +139,13 @@ def _preparation(
                 "code_revision": revision,
                 "release_channel": "production_alpha_early_access",
                 "evidence_as_of": evidence_as_of.isoformat(),
-                "human_review": {},
+                "human_review": {
+                    "carry_forward": {
+                        "human_approval_chain_sha256": (
+                            human_approval_chain_sha256
+                        )
+                    }
+                },
             }
         ),
         encoding="utf-8",
@@ -285,6 +296,9 @@ def test_final_approval_helper_reproduces_exact_binding_and_seals_human_input(
     )
 
     assert first["binding"] == second["binding"]
+    assert first["binding"]["human_approval_chain_sha256"] == hashlib.sha256(
+        b"human-approval-chain"
+    ).hexdigest()
     assert (
         first["legacy_archive"]["compatibility_manifest_sha256"]
         == second["legacy_archive"]["compatibility_manifest_sha256"]
@@ -310,6 +324,35 @@ def test_final_approval_helper_reproduces_exact_binding_and_seals_human_input(
     assert sealed["approval"]["evidence_binding"] == first["binding"]
     assert len(sealed["approval"]["section_sha256"]) == 64
     assert sealed["legacy_waiver"] == _waiver()
+
+
+@pytest.mark.parametrize("mutation", ("omitted", "mismatched"))
+def test_final_approval_rejects_unbound_human_approval_chain(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    archive = _archive(tmp_path / "legacy.zip")
+    preparation = _preparation(tmp_path / "preparation", archive)
+    record_path = preparation / "expedited-preparation.json"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    carry_forward = record["human_review"]["carry_forward"]
+    if mutation == "omitted":
+        carry_forward.pop("human_approval_chain_sha256")
+    else:
+        carry_forward["human_approval_chain_sha256"] = "f" * 64
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    with pytest.raises(
+        FinalApprovalMaterialError,
+        match="human approval chain|human_approval_chain_sha256",
+    ):
+        derive_final_approval_materials(
+            preparation,
+            tmp_path / "final",
+            expected_revision="a" * 40,
+            current_time=BEFORE_DEADLINE + timedelta(minutes=1),
+            waiver=_waiver(),
+        )
 
 
 def test_90_day_bundle_uses_standard_mode_after_deadline(tmp_path: Path) -> None:
