@@ -33,6 +33,39 @@ TELEGRAM_MENTIONS_SCRIPT = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 LEGACY_TELEGRAM_CHANNEL_TEMPLATE = b"`https://t.me/${handle}`"
+LEGACY_SEARCH_PATH = "feed/search.html"
+LEGACY_SEARCH_FALLBACK = """<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>BSIDE 아카이브 안내</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #f6f7f9; color: #111827; }
+    main { box-sizing: border-box; max-width: 680px; margin: 12vh auto; padding: 32px; background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; }
+    .eyebrow { margin: 0 0 10px; color: #6d28d9; font-weight: 800; letter-spacing: .08em; }
+    h1 { margin: 0 0 14px; font-size: clamp(26px, 5vw, 34px); }
+    p { margin: 0; color: #4b5563; line-height: 1.65; }
+    nav { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+    a { min-height: 44px; display: inline-flex; align-items: center; padding: 0 16px; border-radius: 10px; background: #6d28d9; color: #fff; font-weight: 700; text-decoration: none; }
+    a + a { background: #ede9fe; color: #4c1d95; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">BSIDE</p>
+    <h1>검색 화면을 준비 중입니다</h1>
+    <p>안전한 이전 버전 복구 중에는 검색 기능을 제공하지 않습니다. 최신 일보와 날짜별 아카이브는 계속 이용할 수 있습니다.</p>
+    <nav aria-label="아카이브 이동">
+      <a href="latest.html">최신 일보</a>
+      <a href="index.html">날짜별 아카이브</a>
+      <a href="../index.html">홈</a>
+    </nav>
+  </main>
+</body>
+</html>
+""".encode("utf-8")
 HTML_SCRIPT = re.compile(
     rb"<script\b[^>]*>.*?</script\s*>",
     re.IGNORECASE | re.DOTALL,
@@ -170,6 +203,14 @@ def validate_public_payload(payload: bytes, *, path: str) -> None:
 
 
 def redact_telegram_mentions(payload: bytes, *, path: str) -> bytes:
+    if path.casefold() == LEGACY_SEARCH_PATH:
+        # The historical search application mixes article search with the
+        # retired signal dashboard throughout one tightly coupled script.
+        # Surgical token removal would leave a misleading or broken public
+        # surface, so recovery artifacts replace only this known route with a
+        # deterministic, data-free compatibility page.
+        validate_public_payload(LEGACY_SEARCH_FALLBACK, path=path)
+        return LEGACY_SEARCH_FALLBACK
     redacted = payload
     if path.casefold().endswith(".html"):
         # Compatibility pages are deliberately static. Removing a known
