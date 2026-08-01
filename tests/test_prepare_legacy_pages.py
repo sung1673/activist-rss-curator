@@ -56,6 +56,11 @@ def build_source(root: Path) -> Path:
         "telegram.html",
     ):
         (feed / filename).write_text(filename, encoding="utf-8")
+    (feed / "search.html").write_text(
+        '<!doctype html><html><body><a href="telegram.html">signal</a>'
+        '<script>fetch("https://t.me/private/42")</script></body></html>',
+        encoding="utf-8",
+    )
     cursor = date(2026, 5, 1)
     while cursor <= date(2026, 7, 21):
         filename = f"{cursor.isoformat()}.html"
@@ -102,6 +107,12 @@ def test_preparer_copies_only_the_legacy_allowlist(tmp_path: Path) -> None:
     assert "telegram" not in redacted.casefold()
     assert '<a href="article.html">원문 기사</a>' in redacted
     assert ".story{color:black}" in redacted
+    safe_search = (destination / "feed" / "search.html").read_text(
+        encoding="utf-8"
+    )
+    assert "telegram" not in safe_search.casefold()
+    assert 'href="latest.html"' in safe_search
+    assert 'href="index.html"' in safe_search
     assert not (destination / "governance").exists()
     assert not (destination / "unexpected.txt").exists()
 

@@ -35,6 +35,7 @@ def build_full_archive(
     duplicate: bool = False,
     symlink: bool = False,
     embedded_telegram: bool = False,
+    coupled_search: bool = False,
 ) -> Path:
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("CNAME", "news.bside.ai\n")
@@ -42,7 +43,13 @@ def build_full_archive(
         archive.writestr("feed.xml", "<rss><channel/></rss>")
         archive.writestr("index.html", html("root"))
         for name in ("index", "latest", "search", "telegram-admin", "telegram"):
-            archive.writestr(f"feed/{name}.html", html(name))
+            body = name
+            if name == "search" and coupled_search:
+                body = (
+                    '<a href="telegram.html">signal</a>'
+                    '<script>fetch("https://t.me/private/42")</script>'
+                )
+            archive.writestr(f"feed/{name}.html", html(body))
         for offset in range(95):
             report_date = WINDOW_END - timedelta(days=94 - offset)
             body = str(report_date)
@@ -125,6 +132,23 @@ def test_prepare_redacts_embedded_telegram_exposure(tmp_path: Path) -> None:
     for report in (full_report, compatibility_report):
         assert b"telegram" not in report.lower()
         assert b"https://t.me/" not in report
+    assert verify_legacy_recovery_bundle(bundle, expected_identity=identity)
+
+
+def test_prepare_replaces_the_coupled_legacy_search_surface(tmp_path: Path) -> None:
+    archive = build_full_archive(
+        tmp_path / "legacy.zip",
+        coupled_search=True,
+    )
+    bundle = tmp_path / "bundle"
+    identity = identity_for(archive)
+
+    prepare_legacy_recovery_bundle(archive, bundle, identity=identity)
+
+    search = (bundle / FULL_SITE_DIR / "feed" / "search.html").read_bytes()
+    assert b"telegram" not in search.lower()
+    assert b"t.me" not in search.lower()
+    assert b'href="latest.html"' in search
     assert verify_legacy_recovery_bundle(bundle, expected_identity=identity)
 
 

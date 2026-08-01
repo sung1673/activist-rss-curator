@@ -64,6 +64,24 @@ def test_redaction_fails_closed_instead_of_mutating_unknown_visible_text() -> No
         redact_telegram_mentions(source, path="feed/2026-07-29.html")
 
 
+def test_redaction_replaces_the_coupled_legacy_search_with_a_safe_fallback() -> None:
+    source = _html(
+        '<a href="telegram.html">signal dashboard</a>'
+        '<script>fetch("https://t.me/private/42")</script>'
+    )
+
+    first = redact_telegram_mentions(source, path="feed/search.html")
+    second = redact_telegram_mentions(source, path="FEED/SEARCH.HTML")
+
+    assert first == second
+    assert b"telegram" not in first.lower()
+    assert b"t.me" not in first.lower()
+    assert 'href="latest.html"'.encode() in first
+    assert 'href="index.html"'.encode() in first
+    assert 'href="../index.html"'.encode() in first
+    validate_public_payload(first, path="feed/search.html")
+
+
 @pytest.mark.parametrize(
     "payload",
     [
