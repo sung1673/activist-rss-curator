@@ -1487,7 +1487,9 @@
     const rows = Array.isArray(sources) ? sources : [];
     const publicStates = rows.map(publicSourceState);
     const healthy = publicStates.filter((item) => item.ready).length;
-    const linkOnly = rows.filter((item) => item.coverage_mode === "link-only").length;
+    const linkOnly = rows.filter((item) => (
+      item.coverage_mode === "link-only" && publicSourceState(item).ready
+    )).length;
     const down = publicStates.filter((item) => [
       "down", "error", "failed", "blocked_rights", "redistribution_blocked",
       "excluded_source", "inactive", "stale"

@@ -668,7 +668,7 @@ test("today to evidence journey preserves source language and accessibility @web
   await expect(page.locator("#global-source-coverage")).toContainText("필수 3/4 정상");
   await expect(page.locator("#global-source-coverage")).toContainText("선택 0/2 제공");
   await expect(page.locator("#global-source-coverage")).toContainText("JP·GB 미지원");
-  await expect(page.locator("#global-source-coverage")).toContainText("링크 전용 4");
+  await expect(page.locator("#global-source-coverage")).toContainText("링크 전용 1");
   await expect(page.locator("[data-coverage-scope='warning']:visible")).toContainText("일부 공식 소스 지연");
   await expect(page.locator("[data-coverage-scope='warning']:visible")).toContainText("JP · GB · AU");
   await expect(page.locator(".coverage-scope-note:visible")).toContainText("CA·AU 링크 전용 / link-only");
@@ -930,6 +930,7 @@ test("global source summary excludes intentionally unavailable optional markets 
   await expect(summary).toContainText("필수 4/4 정상");
   await expect(summary).toContainText("선택 0/2 제공");
   await expect(summary).toContainText("JP·GB 미지원");
+  await expect(summary).toContainText("링크 전용 2");
   await expect(summary).not.toContainText("4/6");
   await expect(summary).toHaveAttribute("data-health", "healthy");
 });
