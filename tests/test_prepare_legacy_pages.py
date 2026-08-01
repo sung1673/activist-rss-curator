@@ -63,6 +63,10 @@ def build_source(root: Path) -> Path:
         cursor += timedelta(days=1)
     (feed / "2026-06-01.html").write_text(
         "<!doctype html><html><body>"
+        '<a href="article.html">원문 기사</a>'
+        '<a href="telegram.html">Telegram 데일리 보기</a>'
+        "<p>기사·이슈·Telegram 신호를 함께 보려면 별도 검색 화면에서 확인하세요.</p>"
+        "<style>.story{color:black}.story-context__telegram{display:grid}</style>"
         '<script type="application/json" data-story-telegram-mentions>'
         '[{"message_url":"https://t.me/private/42","text":"signal"}]'
         "</script>"
@@ -95,9 +99,9 @@ def test_preparer_copies_only_the_legacy_allowlist(tmp_path: Path) -> None:
     redacted = (destination / "feed" / "2026-06-01.html").read_text(
         encoding="utf-8"
     )
-    assert "data-story-telegram-mentions>[]</script>" in redacted
-    assert "https://t.me/" not in redacted
-    assert "return handle ? '' : '';" in redacted
+    assert "telegram" not in redacted.casefold()
+    assert '<a href="article.html">원문 기사</a>' in redacted
+    assert ".story{color:black}" in redacted
     assert not (destination / "governance").exists()
     assert not (destination / "unexpected.txt").exists()
 

@@ -440,7 +440,7 @@ def test_rollback_closes_immediately_and_rechecks_before_legacy_deployment() -> 
         encoding="utf-8"
     )
     assert "pinned legacy artifact digest has changed" in resolver
-    assert "legacy-recovery-carry-forward-v3" in resolver
+    assert "legacy-recovery-carry-forward-v4" in resolver
     assert "expectedArtifactName: expectedCarryArtifactName" in resolver
     assert "if (!carry)" in resolver
     close_names = step_names(close)

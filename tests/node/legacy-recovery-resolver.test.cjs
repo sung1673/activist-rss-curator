@@ -4,10 +4,10 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const resolve = require("../../.github/scripts/resolve-legacy-recovery.cjs");
 
-test("uses a pin-bound v3 carry-forward namespace", () => {
+test("uses a pin-bound v4 carry-forward namespace", () => {
   assert.equal(
     resolve.CARRY_FORWARD_ARTIFACT_PREFIX,
-    "legacy-recovery-carry-forward-v3",
+    "legacy-recovery-carry-forward-v4",
   );
 });
 
@@ -18,7 +18,7 @@ const PIN = {
   LEGACY_ARTIFACT_DIGEST: `sha256:${"b".repeat(64)}`,
   DEFAULT_BRANCH: "main",
 };
-const CARRY_NAME = `legacy-recovery-carry-forward-v3-12345-${"b".repeat(64)}`;
+const CARRY_NAME = `legacy-recovery-carry-forward-v4-12345-${"b".repeat(64)}`;
 
 function carryArtifact(overrides = {}) {
   return {

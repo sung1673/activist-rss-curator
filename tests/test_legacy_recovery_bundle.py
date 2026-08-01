@@ -123,7 +123,7 @@ def test_prepare_redacts_embedded_telegram_exposure(tmp_path: Path) -> None:
         bundle / COMPATIBILITY_DIR / "feed" / f"{WINDOW_END.isoformat()}.html"
     ).read_bytes()
     for report in (full_report, compatibility_report):
-        assert b"data-story-telegram-mentions>[]</script>" in report
+        assert b"telegram" not in report.lower()
         assert b"https://t.me/" not in report
     assert verify_legacy_recovery_bundle(bundle, expected_identity=identity)
 
