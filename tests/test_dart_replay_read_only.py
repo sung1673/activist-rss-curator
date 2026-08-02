@@ -395,6 +395,10 @@ def test_replay_state_uses_consistent_unbuffered_snapshot_and_closes_cursor() ->
     assert "finally" in digest
     assert "$statement->closeCursor();" in digest
     assert "PDO::MYSQL_ATTR_USE_BUFFERED_QUERY" in snapshot
+    assert "getAttribute(" not in snapshot
+    assert "$previous = true;" in snapshot
+    assert "$pdo->setAttribute($attribute,false)" in snapshot
+    assert "$pdo->setAttribute($attribute,$previous)" in snapshot
     assert "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ" in snapshot
     assert "SET TRANSACTION READ ONLY" in snapshot
     assert "$pdo->beginTransaction()" in snapshot
@@ -402,3 +406,42 @@ def test_replay_state_uses_consistent_unbuffered_snapshot_and_closes_cursor() ->
     assert "v2_alpha_snapshot_begin($pdo)" in endpoint
     assert "v2_alpha_snapshot_finish($pdo,$snapshot,true)" in endpoint
     assert "v2_alpha_snapshot_finish($pdo,$snapshot,false)" in endpoint
+    assert "v2_alpha_replay_phase_codes()" in endpoint
+    assert "'reason_code' => $reasonCode" in endpoint
+    assert "'correlation_id' => $correlationId" in endpoint
+    assert "$error->getMessage()" in endpoint
+    response = endpoint[endpoint.rindex("v2_respond(409") :]
+    assert "$error->getMessage()" not in response[response.index("array(") :]
+
+
+def test_replay_state_scopes_global_issuer_rows_to_dart_documents() -> None:
+    replay = V2[
+        V2.index("function v2_alpha_replay_state") :
+        V2.index("function v2_alpha_content_integrity")
+    ]
+
+    assert "issuer_id LIKE \\'issuer:kr:dart:%\\'" not in replay
+    assert replay.count("replay_d.source_right_id=") >= 3
+    assert "replay_d.issuer_id=i.issuer_id" in replay
+    assert "replay_d.issuer_id=ii.issuer_id" in replay
+    assert "replay_d.issuer_id=il.issuer_id" in replay
+    assert "v2_alpha_replay_named_table_digest(" in replay
+    for name in (
+        "companies",
+        "issuers",
+        "issuer_identifiers",
+        "issuer_listings",
+        "documents",
+        "governance_events",
+        "actors",
+        "event_actors",
+        "event_documents",
+        "event_observations",
+        "timeline_entries",
+        "editorial_revisions",
+        "global_lifecycle_observations",
+        "collection_runs",
+        "source_connectors",
+        "official_slot_claims",
+    ):
+        assert f"'{name}'" in replay

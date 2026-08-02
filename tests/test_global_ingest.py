@@ -749,21 +749,29 @@ def test_large_official_window_is_submitted_in_stable_acknowledged_chunks() -> N
     )
 
     assert [len(item.records) for item, _key, _chunk in ingest.submissions] == [
-        500,
-        500,
+        250,
+        250,
+        250,
+        250,
         1,
     ]
     assert [item.raw_count for item, _key, _chunk in ingest.submissions] == [
-        500,
-        500,
+        250,
+        250,
+        250,
+        250,
         200,
     ]
     assert [item.request_count for item, _key, _chunk in ingest.submissions] == [
         0,
         0,
+        0,
+        0,
         1,
     ]
     assert [item.exhausted for item, _key, _chunk in ingest.submissions] == [
+        False,
+        False,
         False,
         False,
         True,
@@ -772,21 +780,21 @@ def test_large_official_window_is_submitted_in_stable_acknowledged_chunks() -> N
         re.fullmatch(
             (
                 rf"global-ingest-chunk:2026-07-23:2026-07-24:"
-                rf"{index}:3:[a-f0-9]{{24}}"
+                rf"{index}:5:[a-f0-9]{{24}}"
             ),
             str(item.next_cursor),
         )
         is not None
         for index, (item, _key, _chunk) in enumerate(
-            ingest.submissions[:2],
+            ingest.submissions[:4],
             start=1,
         )
     )
     assert ingest.submissions[-1][0].next_cursor is None
-    assert len({key for _item, key, _chunk in ingest.submissions}) == 3
+    assert len({key for _item, key, _chunk in ingest.submissions}) == 5
     chunks = [chunk for _item, _key, chunk in ingest.submissions]
-    assert [chunk.index for chunk in chunks] == [1, 2, 3]
-    assert all(chunk.count == 3 for chunk in chunks)
+    assert [chunk.index for chunk in chunks] == [1, 2, 3, 4, 5]
+    assert all(chunk.count == 5 for chunk in chunks)
     assert all(chunk.batch_raw_count == 1200 for chunk in chunks)
     assert all(chunk.batch_acknowledged_count == 1001 for chunk in chunks)
     assert all(chunk.batch_request_count == 1 for chunk in chunks)
@@ -796,12 +804,14 @@ def test_large_official_window_is_submitted_in_stable_acknowledged_chunks() -> N
         for chunk in chunks
     )
     assert len({chunk.batch_id for chunk in chunks}) == 1
-    assert result.chunk_count == 3
+    assert result.chunk_count == 5
     assert result.record_count == result.acknowledged_count == 1001
     assert result.ingest_ids == (
         "global-ingest:chunk:1",
         "global-ingest:chunk:2",
         "global-ingest:chunk:3",
+        "global-ingest:chunk:4",
+        "global-ingest:chunk:5",
     )
     assert result.idempotent_chunk_count == 0
     assert result.idempotent is False
@@ -830,6 +840,8 @@ def test_large_current_poll_keeps_request_proof_on_the_final_chunk() -> None:
     assert [item.request_count for item, _key, _chunk in ingest.submissions] == [
         0,
         0,
+        0,
+        0,
         1,
     ]
     assert all(
@@ -840,7 +852,7 @@ def test_large_current_poll_keeps_request_proof_on_the_final_chunk() -> None:
         key.startswith("global-ingest-v2-current:us:")
         for _item, key, _chunk in ingest.submissions
     )
-    assert result.chunk_count == 3
+    assert result.chunk_count == 5
 
 
 def test_chunk_cursor_is_stable_across_collection_times() -> None:
@@ -953,6 +965,77 @@ def test_v2_client_posts_exact_envelope_and_validates_counts() -> None:
     assert receipt.raw_count == 7
     assert receipt.acknowledged_count == 0
     assert receipt.idempotent is True
+
+
+def test_v2_client_uses_bounded_production_timeout_budget() -> None:
+    envelope = _envelope(raw_count=7)
+    captured_timeouts: list[httpx.Timeout] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "api_version": "v2",
+                "data": {
+                    "ingest_id": "global-ingest:timeout-contract",
+                    "connector_id": envelope.connector_id,
+                    "raw_count": 7,
+                    "acknowledged_count": 0,
+                    "idempotent": False,
+                },
+            },
+        )
+
+    def client_factory(**kwargs: object) -> httpx.Client:
+        timeout = kwargs.get("timeout")
+        assert isinstance(timeout, httpx.Timeout)
+        captured_timeouts.append(timeout)
+        return httpx.Client(**kwargs)
+
+    V2GlobalIngestClient(
+        base_url="https://example.test/api/v2",
+        token="ops-secret",
+        transport=httpx.MockTransport(handler),
+        client_factory=client_factory,
+    ).submit(
+        envelope=envelope,
+        chunk=_single_chunk(envelope),
+        idempotency_key="global-ingest-v2:us:" + "c" * 64,
+        code_revision=REVISION,
+    )
+
+    assert len(captured_timeouts) == 1
+    timeout = captured_timeouts[0]
+    assert timeout.connect == 15.0
+    assert timeout.read == 120.0
+    assert timeout.write == 60.0
+    assert timeout.pool == 15.0
+
+
+def test_v2_client_read_timeout_fails_closed_without_post_retry() -> None:
+    envelope = _envelope(raw_count=7)
+    attempted_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempted_requests.append(request)
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    client = V2GlobalIngestClient(
+        base_url="https://example.test/api/v2",
+        token="ops-secret",
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(GlobalIngestApiError, match="api_request_failed"):
+        client.submit(
+            envelope=envelope,
+            chunk=_single_chunk(envelope),
+            idempotency_key="global-ingest-v2:us:" + "c" * 64,
+            code_revision=REVISION,
+        )
+
+    assert len(attempted_requests) == 1
+    assert attempted_requests[0].method == "POST"
 
 
 def test_v2_client_marks_replay_as_server_enforced_read_only() -> None:
