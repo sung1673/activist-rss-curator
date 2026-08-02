@@ -177,6 +177,50 @@ def test_preparer_can_mount_only_the_public_governance_preview_subpath(tmp_path:
     ]
 
 
+def test_preparer_produces_identical_public_legacy_bytes_with_preview_mounted(
+    tmp_path: Path,
+) -> None:
+    preparer = load_preparer()
+    source = build_source(tmp_path)
+    public_legacy = tmp_path / "public-legacy"
+    preview_site = tmp_path / "preview-site"
+
+    preparer.prepare_legacy_pages(source, public_legacy)
+    preparer.prepare_legacy_pages(
+        source,
+        preview_site,
+        governance_preview=source / "governance",
+    )
+
+    public_files = sorted(
+        path.relative_to(public_legacy)
+        for path in public_legacy.rglob("*")
+        if path.is_file()
+    )
+    preview_legacy_files = sorted(
+        path.relative_to(preview_site)
+        for path in preview_site.rglob("*")
+        if path.is_file() and "governance" not in path.relative_to(preview_site).parts
+    )
+    assert preview_legacy_files == public_files
+    for relative in public_files:
+        assert (public_legacy / relative).read_bytes() == (
+            preview_site / relative
+        ).read_bytes()
+
+    for staged in (public_legacy, preview_site):
+        telegram_safe = (staged / "feed" / "2026-06-01.html").read_text(
+            encoding="utf-8"
+        )
+        score_safe = (staged / "feed" / "2026-06-02.html").read_text(
+            encoding="utf-8"
+        )
+        assert "telegram" not in telegram_safe.casefold()
+        assert "story.priority_score" not in score_safe
+        assert not (staged / "feed" / "telegram.html").exists()
+        assert not (staged / "feed" / "telegram-admin.html").exists()
+
+
 def test_preparer_accepts_sources_without_the_known_dropped_telegram_pages(
     tmp_path: Path,
 ) -> None:
