@@ -52,7 +52,17 @@ _COMPANY_NUMBER = re.compile(r"^[A-Z0-9]{6,10}$")
 _CONNECTOR_ID = re.compile(r"^connector:[a-z]{2}:[a-z0-9_.:-]{1,64}$")
 _GLOBAL_BATCH_ID = re.compile(r"^global-batch:[a-f0-9]{64}$")
 _SAFE_SERVER_ERROR = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
-MAX_RECORDS_PER_INGEST = 500
+# Keep production transactions comfortably below the public API's 500-record
+# ceiling.  Large SEC completed-day batches have to finish their database
+# commit and response within the client read budget, so the producer uses a
+# smaller fail-closed chunk without changing the server contract.
+MAX_RECORDS_PER_INGEST = 250
+DEFAULT_V2_HTTP_TIMEOUT = httpx.Timeout(
+    connect=15.0,
+    read=120.0,
+    write=60.0,
+    pool=15.0,
+)
 MAX_COMPANIES_HOUSE_ISSUERS = 50
 MAX_AUTOMATIC_WINDOW_DAYS = 31
 AUTOMATIC_OVERLAP_DAYS = 1
@@ -474,7 +484,7 @@ class V2GlobalIngestClient:
         token: str,
         expected_release_state: str | None = None,
         preview_token: str = "",
-        timeout: float = 30.0,
+        timeout: float | httpx.Timeout = DEFAULT_V2_HTTP_TIMEOUT,
         transport: httpx.BaseTransport | None = None,
         client_factory: Callable[..., httpx.Client] = httpx.Client,
     ) -> None:

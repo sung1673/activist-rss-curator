@@ -4494,6 +4494,53 @@ function v2_alpha_replay_table_digest(
     );
 }
 
+function v2_alpha_replay_table_names(): array {
+    return array(
+        'companies',
+        'issuers',
+        'issuer_identifiers',
+        'issuer_listings',
+        'documents',
+        'governance_events',
+        'actors',
+        'event_actors',
+        'event_documents',
+        'event_observations',
+        'timeline_entries',
+        'editorial_revisions',
+        'global_lifecycle_observations',
+        'collection_runs',
+        'source_connectors',
+        'official_slot_claims',
+    );
+}
+
+function v2_alpha_replay_phase_codes(): array {
+    $phases = array(
+        'snapshot_begin',
+        'dart_checkpoint',
+        'state_contract',
+        'snapshot_finish',
+    );
+    foreach (v2_alpha_replay_table_names() as $name) {
+        $phases[] = 'table_digest_' . $name;
+    }
+    return $phases;
+}
+
+function v2_alpha_replay_named_table_digest(
+    PDO $pdo,
+    string $name,
+    string $sql,
+    ?string &$phase = null
+): array {
+    if (!in_array($name,v2_alpha_replay_table_names(),true)) {
+        throw new RuntimeException('alpha_evidence_replay_table_name_invalid');
+    }
+    $phase = 'table_digest_' . $name;
+    return v2_alpha_replay_table_digest($pdo,$sql);
+}
+
 /**
  * Start one endpoint-local, memory-bounded evidence snapshot.
  *
@@ -4510,7 +4557,11 @@ function v2_alpha_snapshot_begin(PDO $pdo): array {
         throw new RuntimeException('alpha_evidence_unbuffered_query_unavailable');
     }
     $attribute = constant('PDO::MYSQL_ATTR_USE_BUFFERED_QUERY');
-    $previous = $pdo->getAttribute($attribute);
+    // pdo_conn() creates a request-local connection and never changes the
+    // MySQL buffered-query default before this endpoint. Some production
+    // drivers cannot read this driver-specific attribute even though setting
+    // it is supported, so restore the known request default explicitly.
+    $previous = true;
     if ($pdo->setAttribute($attribute,false) !== true) {
         throw new RuntimeException('alpha_evidence_unbuffered_query_unavailable');
     }
@@ -4565,7 +4616,8 @@ function v2_alpha_replay_state(
     array $config,
     string $codeRevision,
     string $collectedAt,
-    array $checkpointState
+    array $checkpointState,
+    ?string &$phase = null
 ): array {
     $companies = table_name($config, 'companies');
     $documents = table_name($config, 'documents');
@@ -4592,44 +4644,62 @@ function v2_alpha_replay_state(
         . ' replay_d ON replay_d.document_id=replay_ed.document_id'
         . ' WHERE replay_ed.event_id=e.event_id'
         . ' AND replay_d.source_right_id=' . $sourceRightId . ')';
+    // The company master is much larger than the release evidence horizon.
+    // Hash only issuer rows referenced by an official DART document so the
+    // replay state has the same semantic boundary as the other table digests.
     $tables = array(
-        'companies' => v2_alpha_replay_table_digest(
+        'companies' => v2_alpha_replay_named_table_digest(
             $pdo,
+            'companies',
             'SELECT c.company_id,c.stock_code,c.market,c.legal_name,'
             . 'c.legal_name_en,c.short_name,c.aliases_json,c.homepage_url,'
             . 'c.record_status,c.listing_status,c.master_modified_at FROM '
             . $companies . ' c WHERE EXISTS (SELECT 1 FROM '
             . $documents . ' d WHERE d.company_id=c.company_id AND '
-            . 'd.source_right_id=' . $sourceRightId . ') ORDER BY c.company_id'
+            . 'd.source_right_id=' . $sourceRightId . ') ORDER BY c.company_id',
+            $phase
         ),
-        'issuers' => v2_alpha_replay_table_digest(
+        'issuers' => v2_alpha_replay_named_table_digest(
             $pdo,
+            'issuers',
             'SELECT i.issuer_id,i.country_code,i.legal_name,i.legal_name_en,'
             . 'i.short_name,i.original_language,i.homepage_url,'
             . 'i.listing_status,i.record_status,i.master_modified_at,'
             . 'i.payload_json FROM ' . $issuers
-            . ' i WHERE i.issuer_id LIKE \'issuer:kr:dart:%\''
-            . ' ORDER BY i.issuer_id'
+            . ' i WHERE EXISTS (SELECT 1 FROM ' . $documents
+            . ' replay_d WHERE replay_d.issuer_id=i.issuer_id'
+            . ' AND replay_d.source_right_id=' . $sourceRightId . ')'
+            . ' ORDER BY i.issuer_id',
+            $phase
         ),
-        'issuer_identifiers' => v2_alpha_replay_table_digest(
+        'issuer_identifiers' => v2_alpha_replay_named_table_digest(
             $pdo,
+            'issuer_identifiers',
             'SELECT ii.issuer_id,ii.identifier_type,ii.identifier_value,'
             . 'ii.market,ii.is_primary,ii.valid_from,ii.valid_until FROM '
             . $issuerIdentifiers
-            . ' ii WHERE ii.issuer_id LIKE \'issuer:kr:dart:%\''
+            . ' ii WHERE EXISTS (SELECT 1 FROM ' . $documents
+            . ' replay_d WHERE replay_d.issuer_id=ii.issuer_id'
+            . ' AND replay_d.source_right_id=' . $sourceRightId . ')'
             . ' ORDER BY ii.issuer_id,ii.identifier_type,'
-            . 'ii.identifier_value,ii.market'
+            . 'ii.identifier_value,ii.market',
+            $phase
         ),
-        'issuer_listings' => v2_alpha_replay_table_digest(
+        'issuer_listings' => v2_alpha_replay_named_table_digest(
             $pdo,
+            'issuer_listings',
             'SELECT il.listing_id,il.issuer_id,il.country_code,il.market,'
             . 'il.ticker,il.isin,il.currency_code,il.listing_status,'
             . 'il.is_primary FROM ' . $issuerListings
-            . ' il WHERE il.issuer_id LIKE \'issuer:kr:dart:%\''
-            . ' ORDER BY il.listing_id'
+            . ' il WHERE EXISTS (SELECT 1 FROM ' . $documents
+            . ' replay_d WHERE replay_d.issuer_id=il.issuer_id'
+            . ' AND replay_d.source_right_id=' . $sourceRightId . ')'
+            . ' ORDER BY il.listing_id',
+            $phase
         ),
-        'documents' => v2_alpha_replay_table_digest(
+        'documents' => v2_alpha_replay_named_table_digest(
             $pdo,
+            'documents',
             'SELECT d.document_id,d.company_id,d.issuer_id,d.country_code,'
             . 'd.source_right_id,d.source_class,d.source_key,d.external_id,'
             . 'd.document_type,d.original_language,d.title,d.body_text,'
@@ -4637,10 +4707,12 @@ function v2_alpha_replay_state(
             . 'd.correction_of_document_id,d.version_no,d.published_at,'
             . 'd.filed_at,d.verification_status,d.publication_status FROM '
             . $documents . ' d WHERE d.source_right_id=' . $sourceRightId
-            . ' ORDER BY d.document_id'
+            . ' ORDER BY d.document_id',
+            $phase
         ),
-        'governance_events' => v2_alpha_replay_table_digest(
+        'governance_events' => v2_alpha_replay_named_table_digest(
             $pdo,
+            'governance_events',
             'SELECT e.event_id,e.company_id,e.issuer_id,e.country_code,'
             . 'e.event_type,e.global_event_family,e.title,'
             . 'e.original_language,e.summary,e.occurred_at,e.deadline_at,'
@@ -4650,92 +4722,112 @@ function v2_alpha_replay_state(
             . 'e.identity_deadline_at,e.identity_status,e.comparison_key,'
             . 'e.change_type,e.current_status,e.payload_json FROM '
             . $events . ' e WHERE '
-            . $dartEventPredicate . ' ORDER BY e.event_id'
+            . $dartEventPredicate . ' ORDER BY e.event_id',
+            $phase
         ),
-        'actors' => v2_alpha_replay_table_digest(
+        'actors' => v2_alpha_replay_named_table_digest(
             $pdo,
+            'actors',
             'SELECT a.actor_id,a.actor_type,a.display_name,a.display_name_en,'
             . 'a.company_id,a.country_code,a.aliases_json,a.homepage_url,'
             . 'a.review_status,a.record_status FROM ' . $actors
             . ' a WHERE EXISTS (SELECT 1 FROM ' . $eventActors
             . ' ea JOIN ' . $events . ' e ON e.event_id=ea.event_id'
             . ' WHERE ea.actor_id=a.actor_id AND ' . $dartEventPredicate
-            . ') ORDER BY a.actor_id'
+            . ') ORDER BY a.actor_id',
+            $phase
         ),
-        'event_actors' => v2_alpha_replay_table_digest(
+        'event_actors' => v2_alpha_replay_named_table_digest(
             $pdo,
+            'event_actors',
             'SELECT ea.event_id,ea.actor_id,ea.actor_role,ea.review_status'
             . ' FROM ' . $eventActors . ' ea JOIN ' . $events
             . ' e ON e.event_id=ea.event_id WHERE ' . $dartEventPredicate
-            . ' ORDER BY ea.event_id,ea.actor_id,ea.actor_role'
+            . ' ORDER BY ea.event_id,ea.actor_id,ea.actor_role',
+            $phase
         ),
-        'event_documents' => v2_alpha_replay_table_digest(
+        'event_documents' => v2_alpha_replay_named_table_digest(
             $pdo,
+            'event_documents',
             'SELECT ed.event_id,ed.document_id,ed.relation_type,ed.position_no'
             . ' FROM ' . $eventDocuments . ' ed JOIN ' . $documents
             . ' d ON d.document_id=ed.document_id WHERE d.source_right_id='
             . $sourceRightId
-            . ' ORDER BY ed.event_id,ed.document_id,ed.relation_type'
+            . ' ORDER BY ed.event_id,ed.document_id,ed.relation_type',
+            $phase
         ),
-        'event_observations' => v2_alpha_replay_table_digest(
+        'event_observations' => v2_alpha_replay_named_table_digest(
             $pdo,
+            'event_observations',
             'SELECT eo.observation_id,eo.event_id,eo.document_id,'
             . 'eo.source_class,eo.source_key,eo.payload_hash,eo.payload_json'
             . ' FROM ' . $observations . ' eo JOIN ' . $documents
             . ' d ON d.document_id=eo.document_id WHERE d.source_right_id='
-            . $sourceRightId . ' ORDER BY eo.observation_id'
+            . $sourceRightId . ' ORDER BY eo.observation_id',
+            $phase
         ),
-        'timeline_entries' => v2_alpha_replay_table_digest(
+        'timeline_entries' => v2_alpha_replay_named_table_digest(
             $pdo,
+            'timeline_entries',
             'SELECT te.timeline_entry_id,te.event_id,te.campaign_id,'
             . 'te.document_id,te.occurred_at,te.entry_type,te.title,'
             . 'te.description,te.original_language,te.review_status,'
             . 'te.publication_status FROM ' . $timelineEntries
             . ' te JOIN ' . $events . ' e ON e.event_id=te.event_id WHERE '
-            . $dartEventPredicate . ' ORDER BY te.timeline_entry_id'
+            . $dartEventPredicate . ' ORDER BY te.timeline_entry_id',
+            $phase
         ),
-        'editorial_revisions' => v2_alpha_replay_table_digest(
+        'editorial_revisions' => v2_alpha_replay_named_table_digest(
             $pdo,
+            'editorial_revisions',
             'SELECT er.revision_id,er.entity_type,er.entity_id,er.field_name,'
             . 'er.previous_value,er.revised_value,er.reason,'
             . 'er.revision_status,er.requested_by,er.reviewed_by,'
             . 'er.reviewed_at,er.published_at FROM ' . $editorialRevisions
             . ' er JOIN ' . $events
             . ' e ON er.entity_type=\'event\' AND e.event_id=er.entity_id'
-            . ' WHERE ' . $dartEventPredicate . ' ORDER BY er.revision_id'
+            . ' WHERE ' . $dartEventPredicate . ' ORDER BY er.revision_id',
+            $phase
         ),
-        'global_lifecycle_observations' => v2_alpha_replay_table_digest(
+        'global_lifecycle_observations' => v2_alpha_replay_named_table_digest(
             $pdo,
+            'global_lifecycle_observations',
             'SELECT glo.observation_id,glo.connector_id,glo.country_code,'
             . 'glo.source_key,glo.external_id,glo.parent_external_id,'
             . 'glo.change_type,glo.payload_json,glo.resolution_status,'
             . 'glo.resolved_document_id,glo.resolved_event_id FROM '
             . $lifecycleObservations
             . ' glo WHERE glo.connector_id=\'connector:kr:dart\''
-            . ' ORDER BY glo.observation_id'
+            . ' ORDER BY glo.observation_id',
+            $phase
         ),
-        'collection_runs' => v2_alpha_replay_table_digest(
+        'collection_runs' => v2_alpha_replay_named_table_digest(
             $pdo,
+            'collection_runs',
             'SELECT cr.run_id,cr.pipeline,cr.source_key,cr.code_revision,'
             . 'cr.status,cr.raw_count,cr.acknowledged_count,cr.fetched_count,'
             . 'cr.resolved_count,cr.accepted_count,cr.error_count,'
             . 'cr.lag_seconds_p95 FROM ' . $collectionRuns
             . ' cr WHERE FIND_IN_SET(\'dart\',REPLACE(LOWER('
             . 'COALESCE(cr.source_key,\'\')),\'+\',\',\'))>0'
-            . ' ORDER BY cr.run_id'
+            . ' ORDER BY cr.run_id',
+            $phase
         ),
-        'source_connectors' => v2_alpha_replay_table_digest(
+        'source_connectors' => v2_alpha_replay_named_table_digest(
             $pdo,
+            'source_connectors',
             'SELECT sc.connector_id,sc.country_code,sc.source_key,'
             . 'sc.source_name,sc.source_type,sc.base_url,sc.source_right_id,'
             . 'sc.coverage_mode,sc.connector_status,sc.schedule_minutes,'
             . 'sc.cursor_json,sc.last_raw_count,sc.last_acknowledged_count,'
             . 'sc.last_error_class,sc.code_revision FROM ' . $sourceConnectors
             . ' sc WHERE sc.connector_id=\'connector:kr:dart\''
-            . ' ORDER BY sc.connector_id'
+            . ' ORDER BY sc.connector_id',
+            $phase
         ),
-        'official_slot_claims' => v2_alpha_replay_table_digest(
+        'official_slot_claims' => v2_alpha_replay_named_table_digest(
             $pdo,
+            'official_slot_claims',
             'SELECT osc.claim_id,osc.scheduled_slot_at,'
             . 'osc.next_cadence_slot_at,'
             . 'osc.status,osc.pipeline,osc.code_revision,osc.github_run_id,'
@@ -4746,9 +4838,11 @@ function v2_alpha_replay_state(
             . ' osc WHERE EXISTS (SELECT 1 FROM ' . $collectionRuns
             . ' cr WHERE cr.run_id=osc.completed_run_id AND FIND_IN_SET('
             . '\'dart\',REPLACE(LOWER(COALESCE(cr.source_key,\'\')),'
-            . '\'+\',\',\'))>0) ORDER BY osc.claim_id'
+            . '\'+\',\',\'))>0) ORDER BY osc.claim_id',
+            $phase
         ),
     );
+    $phase = 'state_contract';
     $stateContract = array(
         'code_revision' => $codeRevision,
         'tables' => $tables,
@@ -5112,8 +5206,10 @@ function v2_ops_alpha_replay_state(PDO $pdo, array $config): void {
         ));
     }
     $snapshot = null;
+    $phase = 'snapshot_begin';
     try {
         $snapshot = v2_alpha_snapshot_begin($pdo);
+        $phase = 'dart_checkpoint';
         $checkpointState = null;
         v2_alpha_dart_windows(
             $pdo,
@@ -5129,9 +5225,11 @@ function v2_ops_alpha_replay_state(PDO $pdo, array $config): void {
                 $config,
                 $revision,
                 $collectedAt,
-                is_array($checkpointState) ? $checkpointState : array()
+                is_array($checkpointState) ? $checkpointState : array(),
+                $phase
             ),
         );
+        $phase = 'snapshot_finish';
         v2_alpha_snapshot_finish($pdo,$snapshot,true);
         $snapshot = null;
         v2_respond(200,$response);
@@ -5143,9 +5241,33 @@ function v2_ops_alpha_replay_state(PDO $pdo, array $config): void {
                 // The endpoint remains fail-closed; never expose DB details.
             }
         }
+        $reasonCode = in_array(
+            $phase,
+            v2_alpha_replay_phase_codes(),
+            true
+        ) ? $phase : 'state_contract';
+        $errorDigest = hash(
+            'sha256',
+            get_class($error) . '|' . $error->getMessage()
+        );
+        $correlationId = substr(
+            hash(
+                'sha256',
+                gmdate('c') . '|' . getmypid() . '|' . microtime(true)
+            ),
+            0,
+            16
+        );
+        error_log(
+            'bside_alpha_replay_state correlation=' . $correlationId
+            . ' reason=' . $reasonCode
+            . ' exception_sha256=' . $errorDigest
+        );
         v2_respond(409, array(
             'ok' => false,
             'error' => 'replay_state_unavailable',
+            'reason_code' => $reasonCode,
+            'correlation_id' => $correlationId,
         ));
     }
 }
