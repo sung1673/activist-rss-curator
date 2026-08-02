@@ -1314,6 +1314,24 @@ def _repair_targets_from_common(
     )
 
 
+def _reconstruct_carry_from_common(
+    common: Mapping[str, object],
+) -> dict[str, object]:
+    return editorial._reconstruct_legacy_carry_forward_basis(
+        candidate=common["candidate"],  # type: ignore[arg-type]
+        source_human_review=common["source_human_review"],  # type: ignore[arg-type]
+        source_receipt=common["source_receipt"],  # type: ignore[arg-type]
+        source_replay_receipt=common[  # type: ignore[arg-type]
+            "source_replay_receipt"
+        ],
+        candidate_artifact=common["candidate_artifact"],  # type: ignore[arg-type]
+        publication_artifact=common[  # type: ignore[arg-type]
+            "publication_artifact"
+        ],
+        now=common["now"],  # type: ignore[arg-type]
+    )
+
+
 def _publish_prepared_carry_from_common(
     client: _CarryClient,
     common: Mapping[str, object],
@@ -1436,6 +1454,35 @@ def test_code_only_sha_carry_forward_preserves_human_review_without_event_mutati
         "source_human_review"
     ]["same_event_pair_reviews"]  # type: ignore[index]
     assert receipt["top5"] == common["source_receipt"]["top5"]  # type: ignore[index]
+
+
+def test_pinned_legacy_source_age_extension_is_narrow_and_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, common = _carry_common(monkeypatch)
+    reviewed_at = datetime.fromisoformat(NOW.replace("Z", "+00:00"))
+
+    common["now"] = reviewed_at + timedelta(hours=80)
+    reconstructed = _reconstruct_carry_from_common(common)
+    assert reconstructed["candidate_artifact"] == TEST_CANDIDATE_ARTIFACT
+
+    common["now"] = reviewed_at + timedelta(hours=169)
+    with pytest.raises(ExpeditedEditorialError, match="stale or future"):
+        _reconstruct_carry_from_common(common)
+
+    common["now"] = editorial.LEGACY_CARRY_FORWARD_SOURCE_DEADLINE + timedelta(
+        seconds=1
+    )
+    with pytest.raises(ExpeditedEditorialError, match="stale or future"):
+        _reconstruct_carry_from_common(common)
+
+    mismatched = dict(TEST_CANDIDATE_ARTIFACT)
+    mismatched["artifact_id"] = 999
+    assert editorial._legacy_carry_forward_source_max_age(
+        now=reviewed_at + timedelta(hours=80),
+        candidate_artifact=mismatched,
+        publication_artifact=TEST_PUBLICATION_ARTIFACT,
+    ) == timedelta(hours=72)
 
 
 def test_six_human_approved_display_targets_repair_once_then_replay_idempotently(

@@ -274,6 +274,16 @@ EVENT_FAMILIES = frozenset(
 IMPORTANCE = frozenset({"low", "medium", "high", "critical", "market_sensitive"})
 COUNTRIES = frozenset({"KR", "US", "JP", "GB", "CA", "AU"})
 MAX_HUMAN_REVIEW_AGE = timedelta(hours=72)
+LEGACY_CARRY_FORWARD_SOURCE_MAX_AGE = timedelta(hours=168)
+LEGACY_CARRY_FORWARD_SOURCE_DEADLINE = datetime(
+    2026,
+    8,
+    4,
+    23,
+    59,
+    59,
+    tzinfo=timezone.utc,
+)
 CARRY_FORWARD_ARTIFACT_FIELDS = (
     "run_id",
     "artifact_id",
@@ -1422,12 +1432,40 @@ def _validate_candidate(candidate: Mapping[str, object], revision: str) -> dict[
     return dict(candidate)
 
 
-def _review_time(value: object, location: str, now: datetime) -> str:
+def _review_time(
+    value: object,
+    location: str,
+    now: datetime,
+    *,
+    max_age: timedelta = MAX_HUMAN_REVIEW_AGE,
+) -> str:
     normalized = _timestamp(value, "reviewed_at", location)
     parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
-    if parsed > now + timedelta(minutes=5) or now - parsed > MAX_HUMAN_REVIEW_AGE:
+    if (
+        max_age <= timedelta(0)
+        or max_age > LEGACY_CARRY_FORWARD_SOURCE_MAX_AGE
+        or parsed > now + timedelta(minutes=5)
+        or now - parsed > max_age
+    ):
         raise ExpeditedEditorialError(f"{location}: stale or future human review")
     return normalized
+
+
+def _legacy_carry_forward_source_max_age(
+    *,
+    now: datetime,
+    candidate_artifact: Mapping[str, object],
+    publication_artifact: Mapping[str, object],
+) -> timedelta:
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ExpeditedEditorialError("carry-forward: timezone-aware now required")
+    if (
+        now <= LEGACY_CARRY_FORWARD_SOURCE_DEADLINE
+        and dict(candidate_artifact) == LEGACY_APPROVAL_CANDIDATE_ARTIFACT
+        and dict(publication_artifact) == LEGACY_APPROVAL_PUBLICATION_ARTIFACT
+    ):
+        return LEGACY_CARRY_FORWARD_SOURCE_MAX_AGE
+    return MAX_HUMAN_REVIEW_AGE
 
 
 def _validate_artifact_binding(
@@ -3311,6 +3349,7 @@ def _validate_carry_source_human_review(
     top5: Sequence[Mapping[str, object]],
     candidate_artifact: Mapping[str, object],
     now: datetime,
+    source_max_age: timedelta,
 ) -> tuple[
     list[dict[str, object]],
     list[dict[str, object]],
@@ -3380,7 +3419,12 @@ def _validate_carry_source_human_review(
             location,
             maximum=255,
         )
-        reviewed_at = _review_time(review.get("reviewed_at"), location, now)
+        reviewed_at = _review_time(
+            review.get("reviewed_at"),
+            location,
+            now,
+            max_age=source_max_age,
+        )
         if set(review) != {
             "event_id",
             "decision",
@@ -3433,7 +3477,12 @@ def _validate_carry_source_human_review(
             location,
             maximum=255,
         )
-        reviewed_at = _review_time(review.get("reviewed_at"), location, now)
+        reviewed_at = _review_time(
+            review.get("reviewed_at"),
+            location,
+            now,
+            max_age=source_max_age,
+        )
         if (reviewer, reviewed_at) not in reviewers or set(review) != {
             "pair_id",
             "left_document_id",
@@ -3482,7 +3531,12 @@ def _validate_carry_source_human_review(
             location,
             maximum=255,
         )
-        reviewed_at = _review_time(review.get("reviewed_at"), location, now)
+        reviewed_at = _review_time(
+            review.get("reviewed_at"),
+            location,
+            now,
+            max_age=source_max_age,
+        )
         if (reviewer, reviewed_at) not in reviewers or set(review) != {
             "edition_id",
             "event_id",
@@ -3540,6 +3594,7 @@ def _validate_carry_source_receipts(
     pair_reviews: Sequence[Mapping[str, object]],
     top_reviews: Sequence[Mapping[str, object]],
     now: datetime,
+    source_max_age: timedelta,
 ) -> tuple[dict[str, dict[str, object]], list[dict[str, object]]]:
     candidate_sha = _sha256(
         candidate.get("candidate_sha256"),
@@ -3637,7 +3692,10 @@ def _validate_carry_source_receipts(
                 "Z", "+00:00"
             )
         )
-        if collected > now + timedelta(minutes=5) or now - collected > MAX_HUMAN_REVIEW_AGE:
+        if (
+            collected > now + timedelta(minutes=5)
+            or now - collected > source_max_age
+        ):
             raise ExpeditedEditorialError(f"{label}: stale or future receipt")
         outcomes = _list(
             record.get("event_review_outcomes"),
@@ -3940,6 +3998,11 @@ def _reconstruct_legacy_carry_forward_basis(
         raise ExpeditedEditorialError(
             "publication artifact: exact fields required"
         )
+    source_max_age = _legacy_carry_forward_source_max_age(
+        now=now,
+        candidate_artifact=expected_candidate_artifact,
+        publication_artifact=expected_publication_artifact,
+    )
     event_reviews, pair_reviews, top_reviews = (
         _validate_carry_source_human_review(
             source_human_review,
@@ -3950,6 +4013,7 @@ def _reconstruct_legacy_carry_forward_basis(
             top5=top5,
             candidate_artifact=expected_candidate_artifact,
             now=now,
+            source_max_age=source_max_age,
         )
     )
     source_outcomes, publication_top5 = _validate_carry_source_receipts(
@@ -3962,6 +4026,7 @@ def _reconstruct_legacy_carry_forward_basis(
         pair_reviews=pair_reviews,
         top_reviews=top_reviews,
         now=now,
+        source_max_age=source_max_age,
     )
     approval_attestation = _load_legacy_human_approval_artifact()
     approval_correction = _load_legacy_human_approval_correction()
@@ -4680,6 +4745,11 @@ def prepare_carry_forward_publication(
         raise ExpeditedEditorialError("candidate artifact: exact fields required")
     if set(expected_publication_artifact) != set(CARRY_FORWARD_ARTIFACT_FIELDS):
         raise ExpeditedEditorialError("publication artifact: exact fields required")
+    source_max_age = _legacy_carry_forward_source_max_age(
+        now=now,
+        candidate_artifact=expected_candidate_artifact,
+        publication_artifact=expected_publication_artifact,
+    )
     event_reviews, pair_reviews, top_reviews = (
         _validate_carry_source_human_review(
             source_human_review,
@@ -4690,6 +4760,7 @@ def prepare_carry_forward_publication(
             top5=top5,
             candidate_artifact=expected_candidate_artifact,
             now=now,
+            source_max_age=source_max_age,
         )
     )
     source_outcomes, publication_top5 = _validate_carry_source_receipts(
@@ -4702,6 +4773,7 @@ def prepare_carry_forward_publication(
         pair_reviews=pair_reviews,
         top_reviews=top_reviews,
         now=now,
+        source_max_age=source_max_age,
     )
     approval_attestation = _load_legacy_human_approval_artifact()
     approval_correction = _load_legacy_human_approval_correction()
