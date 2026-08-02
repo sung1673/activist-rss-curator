@@ -302,7 +302,9 @@ test("remote Production Alpha preview renders real v2 data without mocks", async
     expect(page.url().includes(environment.token)).toBe(false);
     expect(new URL(page.url()).search).toBe("");
 
-    const firstEvent = page.locator("[data-event-drawer]:visible").first();
+    const topEvents = page.locator(".terminal-top-list [data-event-drawer]:visible");
+    await expect(topEvents).toHaveCount(5);
+    const firstEvent = topEvents.first();
     await expect(firstEvent).toBeVisible();
     const firstEventBox = await firstEvent.boundingBox();
     expect(firstEventBox).not.toBeNull();

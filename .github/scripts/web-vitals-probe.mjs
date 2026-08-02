@@ -290,6 +290,11 @@ export function observerInitScript() {
   };
   install("largest-contentful-paint", lcpEntries);
   install("layout-shift", clsEntries);
+  // Event Timing always exposes the first trusted interaction through the
+  // first-input entry, even when it completes below the 16 ms event floor.
+  // Feed it through the same interactionId aggregator so a fast real click is
+  // measured without fabricating or substituting an INP value.
+  install("first-input", eventEntries);
   install("event", eventEntries, { durationThreshold: 16 });
   state.freezePaint = () => {
     if (state.observers["largest-contentful-paint"]) {
@@ -378,7 +383,8 @@ async function measureRouteAttempt(browser, {
       state.freezePaint();
       return state.supported;
     });
-    if (!support || !support["largest-contentful-paint"] || !support["layout-shift"] || !support.event) {
+    if (!support || !support["largest-contentful-paint"] || !support["layout-shift"]
+        || !support["first-input"] || !support.event) {
       throw new ProbeError("browser_vitals_unsupported");
     }
 
@@ -400,23 +406,6 @@ async function measureRouteAttempt(browser, {
       null,
       { timeout: 30_000 },
     );
-    // A very fast hash-navigation click can legitimately finish below the
-    // Event Timing API's 16 ms reporting floor. Continue the same real user
-    // journey by opening and closing the first live event. These are trusted
-    // Playwright pointer interactions against the deployed UI; no timing is
-    // synthesized and a browser-produced interactionId is still mandatory.
-    substep = "click_live_event";
-    await page
-      .locator("[data-event-drawer]:visible")
-      .first()
-      .click({ timeout: 10_000 });
-    substep = "wait_event_drawer";
-    await page.locator("#event-drawer").waitFor({ state: "visible", timeout: 10_000 });
-    substep = "close_event_drawer";
-    await page
-      .locator(".icon-button[data-drawer-close]:visible")
-      .click({ timeout: 10_000 });
-    await page.locator("#event-drawer-shell").waitFor({ state: "hidden", timeout: 10_000 });
     substep = "wait_for_inp";
     await page.waitForFunction(
       () => {
