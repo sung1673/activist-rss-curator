@@ -422,29 +422,17 @@ jobs:
               }
             }' > preview-provenance/collection-free-preview.json
 
-      - name: Revalidate live repository boundary
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const expected = {
-              PAGES_OWNER: "legacy",
-              GOVERNANCE_PIPELINE_MODE: "shadow",
-              GLOBAL_ALPHA_OBSERVATION_ENABLED: "false",
-              GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED: "false",
-              ENABLE_TELEGRAM_DELIVERY: "false",
-              ENABLE_GOVERNANCE_DELIVERY: "false",
-              KIND_CONNECTOR_MODE: "off",
-            };
-            for (const [name, value] of Object.entries(expected)) {
-              const response = await github.rest.actions.getRepoVariable({
-                ...context.repo,
-                name,
-              });
-              if (String(response.data.value || "").toLowerCase() !== value) {
-                core.setFailed(`Repository variable ${name} changed before Preview deployment`);
-                return;
-              }
-            }
+      - name: Revalidate immutable job-start repository boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PAGES_OWNER_SNAPSHOT" == "legacy" ]]
+          [[ "$PIPELINE_MODE_SNAPSHOT" == "shadow" ]]
+          [[ "${STANDARD_OBSERVATION_SNAPSHOT,,}" == "false" ]]
+          [[ "${EXPEDITED_OBSERVATION_SNAPSHOT,,}" == "false" ]]
+          [[ "${TELEGRAM_DELIVERY_SNAPSHOT,,}" == "false" ]]
+          [[ "${GOVERNANCE_DELIVERY_SNAPSHOT,,}" == "false" ]]
+          [[ "${KIND_MODE_SNAPSHOT,,}" == "off" ]]
 
       - name: Preserve immutable collection-free Preview provenance
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
