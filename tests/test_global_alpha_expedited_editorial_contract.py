@@ -220,6 +220,12 @@ def test_protected_carry_forward_is_ancestor_bound_and_event_write_free() -> Non
         "95028a16adedfc19b5dfe3c6e0b0c36696b5c2619a44f0040d51ef3b1ffcbbaa"
         in prepare_text
     )
+    assert 'Date.parse("2026-08-04T23:59:59Z")' in prepare_text
+    assert WORKFLOW_TEXT.count("2026-08-04T23:59:59Z") == 5
+    assert "oneTimeLegacyChain && Date.now() <= oneTimeLegacyDeadline" in prepare_text
+    assert "? 168 : 72" in prepare_text
+    assert "ageHours > sourceAgeLimitHours" in prepare_text
+    assert "ageHours > 72" not in prepare_text
     assert "carry-forward-prepare" in prepare_text
     assert "carry-forward-publish" not in prepare_text
     assert "Upload immutable carry-forward intent before any brief POST" in prepare_text
@@ -230,6 +236,15 @@ def test_protected_carry_forward_is_ancestor_bound_and_event_write_free() -> Non
     assert '[[ "$artifact_digest" =~ ^sha256:[0-9a-f]{64}$ ]]' in prepare_text
     assert "carry-forward-publish" in publish_text
     assert "carry-forward-prepare" not in publish_text
+    assert "The one-time legacy carry-forward publication window expired." in publish_text
+    assert "(( now_epoch <= deadline_epoch ))" in publish_text
+    assert publish_text.index("publication window expired") < publish_text.index(
+        "Resolve the one exact pre-uploaded intent artifact"
+    )
+    assert "The one-time legacy carry-forward expired before publication." in publish_text
+    assert publish_text.rindex("expired before publication") < publish_text.index(
+        "carry-forward-publish"
+    )
     assert "Resolve the one exact pre-uploaded intent artifact" in publish_text
     assert "same run must contain exactly one frozen intent" in publish_text
     assert ".carry_forward.event_mutations_applied == 0" in publish_text
@@ -247,6 +262,18 @@ def test_protected_carry_forward_is_ancestor_bound_and_event_write_free() -> Non
     ) in publish_text
 
     assert "RECOVER_CARRY_FORWARD_EXPEDITED_EDITORIAL" in recover_text
+    assert "The one-time legacy carry-forward recovery window expired." in recover_text
+    assert "(( now_epoch <= deadline_epoch ))" in recover_text
+    assert recover_text.index("recovery window expired") < recover_text.index(
+        "Resolve the exact prior protected intent"
+    )
+    assert (
+        "The one-time legacy carry-forward expired before recovery publication."
+        in recover_text
+    )
+    assert recover_text.rindex("expired before recovery publication") < recover_text.index(
+        "carry-forward-publish"
+    )
     assert "carry-forward-publish" in recover_text
     assert "carry-forward-prepare" not in recover_text
     assert "prior run must have exactly one frozen intent" in recover_text
