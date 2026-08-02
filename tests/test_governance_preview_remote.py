@@ -48,6 +48,8 @@ def test_remote_preview_spec_is_separate_and_contains_no_mock_routing() -> None:
     assert "#preview=" not in spec
     assert "preview_token=" not in spec.casefold()
     assert "fullPage: true" not in spec
+    assert "testInfo.project.use.viewport?.width === 390" in spec
+    assert "expect(firstImportantEventTopPx).toBeLessThanOrEqual(300)" in spec
 
 
 def test_remote_preview_workflow_is_manual_default_branch_runtime_only() -> None:

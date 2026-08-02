@@ -23,7 +23,16 @@ def test_probe_uses_real_mobile_event_timing_without_secret_urls() -> None:
     assert "entry.interactionId > 0" in source
     assert 'return "live"' in source
     assert '.mobile-bottom-nav [data-nav="${destination}"]:visible' in source
-    assert ".click({ timeout: 10_000 })" in source
+    assert 'window.location.hash.startsWith("#/today?view=live")' in source
+    assert 'locator("[data-event-drawer]:visible")' in source
+    assert 'locator(".icon-button[data-drawer-close]:visible")' in source
+    assert 'locator("#event-drawer-shell").waitFor({ state: "hidden"' in source
+    assert source.index('substep = "click_bottom_navigation"') < source.index(
+        'substep = "click_live_event"'
+    )
+    assert source.index('substep = "click_live_event"') < source.index(
+        'substep = "wait_for_inp"'
+    )
     assert "state.flushEvents().inp > 0" in source
     assert "values.inp <= 0" in source
     assert 'source: "first_party"' in source

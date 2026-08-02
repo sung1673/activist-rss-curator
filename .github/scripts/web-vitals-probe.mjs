@@ -388,6 +388,31 @@ async function measureRouteAttempt(browser, {
     await page
       .locator(`.mobile-bottom-nav [data-nav="${destination}"]:visible`)
       .click({ timeout: 10_000 });
+    substep = "wait_live_route_ready";
+    await page.waitForFunction(
+      () => window.location.hash.startsWith("#/today?view=live")
+        && !document.querySelector("#app[aria-busy='true']")
+        && Boolean(document.querySelector("[data-event-drawer]")),
+      null,
+      { timeout: 30_000 },
+    );
+    // A very fast hash-navigation click can legitimately finish below the
+    // Event Timing API's 16 ms reporting floor. Continue the same real user
+    // journey by opening and closing the first live event. These are trusted
+    // Playwright pointer interactions against the deployed UI; no timing is
+    // synthesized and a browser-produced interactionId is still mandatory.
+    substep = "click_live_event";
+    await page
+      .locator("[data-event-drawer]:visible")
+      .first()
+      .click({ timeout: 10_000 });
+    substep = "wait_event_drawer";
+    await page.locator("#event-drawer").waitFor({ state: "visible", timeout: 10_000 });
+    substep = "close_event_drawer";
+    await page
+      .locator(".icon-button[data-drawer-close]:visible")
+      .click({ timeout: 10_000 });
+    await page.locator("#event-drawer-shell").waitFor({ state: "hidden", timeout: 10_000 });
     substep = "wait_for_inp";
     await page.waitForFunction(
       () => {

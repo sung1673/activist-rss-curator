@@ -307,6 +307,9 @@ test("remote Production Alpha preview renders real v2 data without mocks", async
     const firstEventBox = await firstEvent.boundingBox();
     expect(firstEventBox).not.toBeNull();
     firstImportantEventTopPx = firstEventBox.y;
+    if (testInfo.project.use.viewport?.width === 390) {
+      expect(firstImportantEventTopPx).toBeLessThanOrEqual(300);
+    }
     const accessibility = await new AxeBuilder({ page }).analyze();
     axeSeriousCount = accessibility.violations.filter(
       (item) => item.impact === "serious"
