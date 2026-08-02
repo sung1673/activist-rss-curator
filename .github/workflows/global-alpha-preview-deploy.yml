@@ -350,6 +350,16 @@ jobs:
           test ! -e preview-site/feed/telegram.html
           test ! -e preview-site/feed/telegram-admin.html
           grep -Rqs --fixed-strings "production_alpha_early_access" preview-site/governance
+          (
+            cd current-public-legacy-site
+            find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+          ) > current-public-legacy.manifest
+          (
+            cd preview-site
+            find . -type f ! -path './governance/*' -print0 \
+              | LC_ALL=C sort -z | xargs -0 sha256sum
+          ) > preview-legacy.manifest
+          cmp --silent current-public-legacy.manifest preview-legacy.manifest
 
       - name: Record collection-free source provenance
         shell: bash
@@ -375,6 +385,7 @@ jobs:
           mkdir -p preview-provenance
           site_digest="$(find preview-site -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
           governance_digest="$(find preview-site/governance -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
+          public_legacy_digest="$(find current-public-legacy-site -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
           jq -n \
             --arg code_revision "$GITHUB_SHA" \
             --arg created_at "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
@@ -396,6 +407,7 @@ jobs:
             --arg legacy_code_revision "$LEGACY_CODE_REVISION" \
             --arg site_sha256 "$site_digest" \
             --arg governance_sha256 "$governance_digest" \
+            --arg public_legacy_sha256 "$public_legacy_digest" \
             '{
               schema_version: 1,
               kind: "bside-global-alpha-collection-free-preview",
@@ -427,7 +439,8 @@ jobs:
               },
               content: {
                 site_sha256: $site_sha256,
-                governance_sha256: $governance_sha256
+                governance_sha256: $governance_sha256,
+                public_legacy_sha256: $public_legacy_sha256
               }
             }' > preview-provenance/collection-free-preview.json
 
@@ -451,6 +464,34 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           compression-level: 9
+
+      - name: Revalidate public legacy identity immediately before Pages upload
+        shell: bash
+        env:
+          BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
+        run: |
+          set -euo pipefail
+          web="${BSIDE_PUBLIC_WEB_URL%/}"
+          cache_bust="legacy-pre-upload-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          latest_report="$(
+            find current-public-legacy-site/feed -maxdepth 1 -type f -name '????-??-??.html' \
+              -printf '%f\n' | sort | tail -n 1
+          )"
+          [[ "$latest_report" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\.html$ ]]
+          rm -rf pre-upload-remote
+          mkdir -p pre-upload-remote/feed
+          curl --fail --silent --show-error --location \
+            "$web/?$cache_bust" --output pre-upload-remote/index.html
+          curl --fail --silent --show-error --location \
+            "$web/feed.xml?$cache_bust" --output pre-upload-remote/feed.xml
+          curl --fail --silent --show-error --location \
+            "$web/feed/$latest_report?$cache_bust" \
+            --output "pre-upload-remote/feed/$latest_report"
+          cmp --silent current-public-legacy-site/index.html pre-upload-remote/index.html
+          cmp --silent current-public-legacy-site/feed.xml pre-upload-remote/feed.xml
+          cmp --silent \
+            "current-public-legacy-site/feed/$latest_report" \
+            "pre-upload-remote/feed/$latest_report"
 
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
@@ -547,17 +588,28 @@ jobs:
           set -euo pipefail
           web="${BSIDE_PUBLIC_WEB_URL%/}"
           cache_bust="legacy-recovery-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          latest_report="$(
+            find current-public-legacy-site/feed -maxdepth 1 -type f -name '????-??-??.html' \
+              -printf '%f\n' | sort | tail -n 1
+          )"
+          [[ "$latest_report" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\.html$ ]]
           matched=false
           for attempt in $(seq 1 18); do
             rm -rf remote-recovery
-            mkdir -p remote-recovery
+            mkdir -p remote-recovery/feed
             if \
               curl --fail --silent --show-error --location \
                 "$web/?$cache_bust-$attempt" --output remote-recovery/index.html && \
               curl --fail --silent --show-error --location \
                 "$web/feed.xml?$cache_bust-$attempt" --output remote-recovery/feed.xml && \
+              curl --fail --silent --show-error --location \
+                "$web/feed/$latest_report?$cache_bust-$attempt" \
+                --output "remote-recovery/feed/$latest_report" && \
               cmp --silent current-public-legacy-site/index.html remote-recovery/index.html && \
-              cmp --silent current-public-legacy-site/feed.xml remote-recovery/feed.xml; then
+              cmp --silent current-public-legacy-site/feed.xml remote-recovery/feed.xml && \
+              cmp --silent \
+                "current-public-legacy-site/feed/$latest_report" \
+                "remote-recovery/feed/$latest_report"; then
               matched=true
               break
             fi

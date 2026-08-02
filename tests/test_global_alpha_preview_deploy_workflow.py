@@ -145,6 +145,32 @@ def test_collection_free_preview_compares_the_prepared_public_legacy_tree() -> N
     assert "curator.legacy_telegram_safety verify-site" in assemble
     assert "curator.legacy_internal_safety verify-site" in assemble
     assert "--minimum-dated-reports 90" in assemble
+    assert "current-public-legacy.manifest" in assemble
+    assert "preview-legacy.manifest" in assemble
+    assert "find . -type f ! -path './governance/*'" in assemble
+    assert "cmp --silent current-public-legacy.manifest preview-legacy.manifest" in assemble
+
+    provenance = text[
+        text.index("Record collection-free source provenance") :
+        text.index("Revalidate immutable job-start repository boundary")
+    ]
+    assert "public_legacy_sha256" in provenance
+
+    revalidate = next(
+        step
+        for step in steps
+        if step.get("name")
+        == "Revalidate public legacy identity immediately before Pages upload"
+    )
+    assert "continue-on-error" not in revalidate
+    assert "current-public-legacy-site/index.html" in revalidate["run"]
+    assert "current-public-legacy-site/feed.xml" in revalidate["run"]
+    assert '"current-public-legacy-site/feed/$latest_report"' in revalidate["run"]
+    assert steps.index(revalidate) < next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("name") == "Upload exact Preview Pages artifact"
+    )
 
 
 def test_collection_free_preview_never_runs_collection_or_delivery() -> None:
@@ -214,6 +240,13 @@ def test_collection_free_preview_has_exact_automatic_legacy_recovery() -> None:
     assert "steps.preview_smoke.outcome != 'success'" in recovery_deploy["if"]
     assert "cmp --silent current-public-legacy-site/index.html" in text
     assert "cmp --silent current-public-legacy-site/feed.xml" in text
+    recovery_smoke = next(
+        step
+        for step in steps
+        if step.get("name") == "Verify automatic legacy recovery bytes"
+    )
+    assert '"current-public-legacy-site/feed/$latest_report"' in recovery_smoke["run"]
+    assert '"remote-recovery/feed/$latest_report"' in recovery_smoke["run"]
     assert "Verify automatic legacy recovery bytes" in text
     assert "Preview deployment failed and the exact legacy site was restored" in text
 
