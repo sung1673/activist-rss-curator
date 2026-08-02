@@ -869,6 +869,7 @@ def test_content_integrity_performance_accessibility_and_recovery_gates() -> Non
     experience = experience_report()
     experience["web_vitals"]["lcp"]["p75_seconds"] = 2.6  # type: ignore[index]
     experience["viewports"][0]["axe_serious_count"] = 1  # type: ignore[index]
+    experience["viewports"][0]["first_important_event_top_px"] = 301  # type: ignore[index]
     experience["api_responses"][0]["size_bytes"] = 250_001  # type: ignore[index]
     experience["failure_detection_drill"]["detection_minutes"] = 11  # type: ignore[index]
     experience["failure_detection_drill"]["detected_at"] = (  # type: ignore[index]
@@ -881,6 +882,7 @@ def test_content_integrity_performance_accessibility_and_recovery_gates() -> Non
     report = build(experience=experience)
     assert {
         "experience.viewports_and_axe",
+        "experience.mobile_first_event",
         "experience.lcp",
         "experience.api_budget",
         "experience.failure_detection",

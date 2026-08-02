@@ -18,12 +18,25 @@ def test_probe_uses_real_mobile_event_timing_without_secret_urls() -> None:
     assert 'devices["Pixel 5"]' in source
     assert 'install("largest-contentful-paint"' in source
     assert 'install("layout-shift"' in source
+    assert 'install("first-input", eventEntries)' in source
+    assert 'state.observers["first-input"].takeRecords()' in source
     assert 'install("event"' in source
     assert 'durationThreshold: 16' in source
     assert "entry.interactionId > 0" in source
     assert 'return "live"' in source
     assert '.mobile-bottom-nav [data-nav="${destination}"]:visible' in source
-    assert ".click({ timeout: 10_000 })" in source
+    assert 'window.location.hash.replace(/^#/, "").split("?", 2)' in source
+    assert 'path === "/today"' in source
+    assert 'new URLSearchParams(query).get("view") === "live"' in source
+    assert 'startsWith("#/today?view=live")' not in source
+    assert '!support["first-input"]' in source
+    assert "fabricating or substituting an INP value" in source
+    assert source.index('substep = "click_bottom_navigation"') < source.index(
+        'substep = "wait_live_route_ready"'
+    )
+    assert source.index('substep = "wait_live_route_ready"') < source.index(
+        'substep = "wait_for_inp"'
+    )
     assert "state.flushEvents().inp > 0" in source
     assert "values.inp <= 0" in source
     assert 'source: "first_party"' in source

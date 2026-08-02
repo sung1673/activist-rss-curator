@@ -290,6 +290,11 @@ export function observerInitScript() {
   };
   install("largest-contentful-paint", lcpEntries);
   install("layout-shift", clsEntries);
+  // Event Timing always exposes the first trusted interaction through the
+  // first-input entry, even when it completes below the 16 ms event floor.
+  // Feed it through the same interactionId aggregator so a fast real click is
+  // measured without fabricating or substituting an INP value.
+  install("first-input", eventEntries);
   install("event", eventEntries, { durationThreshold: 16 });
   state.freezePaint = () => {
     if (state.observers["largest-contentful-paint"]) {
@@ -303,6 +308,9 @@ export function observerInitScript() {
     state.frozen = true;
   };
   state.flushEvents = () => {
+    if (state.observers["first-input"]) {
+      eventEntries(state.observers["first-input"].takeRecords());
+    }
     if (state.observers.event) eventEntries(state.observers.event.takeRecords());
     return { lcp: state.lcp, cls: state.cls, inp: state.inp, supported: state.supported };
   };
@@ -378,7 +386,8 @@ async function measureRouteAttempt(browser, {
       state.freezePaint();
       return state.supported;
     });
-    if (!support || !support["largest-contentful-paint"] || !support["layout-shift"] || !support.event) {
+    if (!support || !support["largest-contentful-paint"] || !support["layout-shift"]
+        || !support["first-input"] || !support.event) {
       throw new ProbeError("browser_vitals_unsupported");
     }
 
@@ -388,6 +397,18 @@ async function measureRouteAttempt(browser, {
     await page
       .locator(`.mobile-bottom-nav [data-nav="${destination}"]:visible`)
       .click({ timeout: 10_000 });
+    substep = "wait_live_route_ready";
+    await page.waitForFunction(
+      () => {
+        const [path, query = ""] = window.location.hash.replace(/^#/, "").split("?", 2);
+        return path === "/today"
+          && new URLSearchParams(query).get("view") === "live"
+          && !document.querySelector("#app[aria-busy='true']")
+          && Boolean(document.querySelector("[data-event-drawer]"));
+      },
+      null,
+      { timeout: 30_000 },
+    );
     substep = "wait_for_inp";
     await page.waitForFunction(
       () => {
