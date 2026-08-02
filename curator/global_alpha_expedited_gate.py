@@ -31,6 +31,7 @@ from .global_alpha_release_gate import (
     validate_content_integrity,
     validate_experience,
 )
+from .global_ingest import sec_completed_day_limit
 
 
 SCHEMA_VERSION = 1
@@ -1006,15 +1007,21 @@ def validate_connector_receipts(
         last_end = date.fromisoformat(
             str(apply_summary["ended_on_exclusive"])
         )
-        age = evidence_as_of - datetime.combine(
-            last_end,
-            datetime.min.time(),
-            tzinfo=timezone.utc,
-        )
-        coverage_ok = (
-            timedelta(0) <= age <= timedelta(hours=24, minutes=1)
-            and EXPECTED_CONNECTORS.get(family) == country
-        )
+        if family == "sec-edgar":
+            coverage_ok = (
+                last_end == sec_completed_day_limit(now=evidence_as_of)
+                and EXPECTED_CONNECTORS.get(family) == country
+            )
+        else:
+            age = evidence_as_of - datetime.combine(
+                last_end,
+                datetime.min.time(),
+                tzinfo=timezone.utc,
+            )
+            coverage_ok = (
+                timedelta(0) <= age <= timedelta(hours=24, minutes=1)
+                and EXPECTED_CONNECTORS.get(family) == country
+            )
         replay_verified += int(matches == 30)
         current_coverage += int(coverage_ok)
         summaries.append(
