@@ -283,16 +283,25 @@ jobs:
           )
           [[ "${#dated_reports[@]}" -ge 90 ]]
 
-      - name: Prove the immutable legacy source matches the public root
+      - name: Prove the prepared public legacy tree matches the public root
         shell: bash
         env:
           BSIDE_PUBLIC_WEB_URL: ${{ vars.BSIDE_PUBLIC_WEB_URL || 'https://news.bside.ai' }}
         run: |
           set -euo pipefail
+          python .github/scripts/prepare-legacy-pages.py \
+            --source current-legacy-site \
+            --destination current-public-legacy-site
+          python -m curator.legacy_telegram_safety verify-site \
+            --site current-public-legacy-site \
+            --minimum-dated-reports 90
+          python -m curator.legacy_internal_safety verify-site \
+            --site current-public-legacy-site \
+            --minimum-dated-reports 90
           web="${BSIDE_PUBLIC_WEB_URL%/}"
           cache_bust="legacy-source-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           latest_report="$(
-            find current-legacy-site/feed -maxdepth 1 -type f -name '????-??-??.html' \
+            find current-public-legacy-site/feed -maxdepth 1 -type f -name '????-??-??.html' \
               -printf '%f\n' | sort | tail -n 1
           )"
           [[ "$latest_report" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\.html$ ]]
@@ -304,10 +313,10 @@ jobs:
           curl --fail --silent --show-error --location \
             "$web/feed/$latest_report?$cache_bust" \
             --output "current-remote/feed/$latest_report"
-          cmp --silent current-legacy-site/index.html current-remote/index.html
-          cmp --silent current-legacy-site/feed.xml current-remote/feed.xml
+          cmp --silent current-public-legacy-site/index.html current-remote/index.html
+          cmp --silent current-public-legacy-site/feed.xml current-remote/feed.xml
           cmp --silent \
-            "current-legacy-site/feed/$latest_report" \
+            "current-public-legacy-site/feed/$latest_report" \
             "current-remote/feed/$latest_report"
 
       - name: Assemble legacy root plus exact governance Preview
@@ -451,7 +460,7 @@ jobs:
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           name: legacy-restore-pages
-          path: current-legacy-site
+          path: current-public-legacy-site
 
       - name: Upload exact Preview Pages artifact
         id: pages_artifact
@@ -547,8 +556,8 @@ jobs:
                 "$web/?$cache_bust-$attempt" --output remote-recovery/index.html && \
               curl --fail --silent --show-error --location \
                 "$web/feed.xml?$cache_bust-$attempt" --output remote-recovery/feed.xml && \
-              cmp --silent current-legacy-site/index.html remote-recovery/index.html && \
-              cmp --silent current-legacy-site/feed.xml remote-recovery/feed.xml; then
+              cmp --silent current-public-legacy-site/index.html remote-recovery/index.html && \
+              cmp --silent current-public-legacy-site/feed.xml remote-recovery/feed.xml; then
               matched=true
               break
             fi

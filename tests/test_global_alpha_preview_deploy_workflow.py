@@ -80,7 +80,7 @@ def test_collection_free_preview_uses_only_immutable_existing_sources() -> None:
     assert 'currentLegacy.path !== ".github/workflows/build-feed.yml"' in text
     assert 'item.name === "github-pages"' in text
     assert "Current legacy Pages run must have one immutable github-pages artifact" in text
-    assert "Prove the immutable legacy source matches the public root" in text
+    assert "Prove the prepared public legacy tree matches the public root" in text
     assert "LEGACY_ROLLBACK_RUN_ID" in text
     assert "LEGACY_ROLLBACK_ARTIFACT_DIGEST" in text
     assert "Pinned legacy artifact digest changed" in text
@@ -93,11 +93,17 @@ def test_collection_free_preview_uses_only_immutable_existing_sources() -> None:
     assert "curator.legacy_telegram_safety verify-site" in text
 
 
-def test_collection_free_preview_redacts_only_after_proving_the_live_legacy_source() -> None:
+def test_collection_free_preview_compares_the_prepared_public_legacy_tree() -> None:
+    payload = _payload()
+    steps = payload["jobs"]["deploy-preview"]["steps"]  # type: ignore[index]
     text = WORKFLOW.read_text(encoding="utf-8")
     materialize = text[
         text.index("Materialize and structurally verify the currently-served legacy source") :
-        text.index("Prove the immutable legacy source matches the public root")
+        text.index("Prove the prepared public legacy tree matches the public root")
+    ]
+    preflight = text[
+        text.index("Prove the prepared public legacy tree matches the public root") :
+        text.index("Assemble legacy root plus exact governance Preview")
     ]
     assemble = text[
         text.index("Assemble legacy root plus exact governance Preview") :
@@ -107,6 +113,33 @@ def test_collection_free_preview_redacts_only_after_proving_the_live_legacy_sour
     assert "legacy_telegram_safety verify-site" not in materialize
     assert '[[ "${#symbolic_links[@]}" -ne 0 ]]' in materialize
     assert '[[ "${#dated_reports[@]}" -ge 90 ]]' in materialize
+    assert "python .github/scripts/prepare-legacy-pages.py" in preflight
+    assert "--source current-legacy-site" in preflight
+    assert "--destination current-public-legacy-site" in preflight
+    assert "legacy_telegram_safety verify-site" in preflight
+    assert "legacy_internal_safety verify-site" in preflight
+    assert "current-public-legacy-site/index.html" in preflight
+    assert "current-public-legacy-site/feed.xml" in preflight
+    assert '"current-public-legacy-site/feed/$latest_report"' in preflight
+    assert "current-legacy-site/index.html current-remote/index.html" not in preflight
+    assert preflight.index("prepare-legacy-pages.py") < preflight.index("curl --fail")
+    preflight_step = next(
+        step
+        for step in steps
+        if step.get("name")
+        == "Prove the prepared public legacy tree matches the public root"
+    )
+    assert "continue-on-error" not in preflight_step
+    assert steps.index(preflight_step) < next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("name") == "Upload exact Preview Pages artifact"
+    )
+    assert steps.index(preflight_step) < next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("name") == "Deploy exact collection-free Preview"
+    )
     assert "--source current-legacy-site" in assemble
     assert "--destination preview-site" in assemble
     assert "curator.legacy_telegram_safety verify-site" in assemble
@@ -173,12 +206,14 @@ def test_collection_free_preview_has_exact_automatic_legacy_recovery() -> None:
     )
     assert recovery_upload["with"] == {
         "name": "legacy-restore-pages",
-        "path": "current-legacy-site",
+        "path": "current-public-legacy-site",
     }
     assert recovery_deploy["with"]["artifact_name"] == "legacy-restore-pages"
     assert recovery_deploy["continue-on-error"] == "true"
     assert "steps.legacy_recovery_pages_artifact.outcome == 'success'" in recovery_deploy["if"]
     assert "steps.preview_smoke.outcome != 'success'" in recovery_deploy["if"]
+    assert "cmp --silent current-public-legacy-site/index.html" in text
+    assert "cmp --silent current-public-legacy-site/feed.xml" in text
     assert "Verify automatic legacy recovery bytes" in text
     assert "Preview deployment failed and the exact legacy site was restored" in text
 
