@@ -559,6 +559,18 @@ jobs:
                 digest: process.env.PUBLICATION_ARTIFACT_DIGEST.toLowerCase(),
               },
             };
+            const oneTimeLegacyChain =
+              runIds.candidate === 30581161308 &&
+              runIds.publication === 30587485449 &&
+              expectedArtifacts.candidate.id === 8774655231 &&
+              expectedArtifacts.candidate.digest ===
+                "sha256:f7eec4481564f52b89fbda166544cb1bc0b79e8ee940a8173ed5859aade40afd" &&
+              expectedArtifacts.publication.id === 8777083749 &&
+              expectedArtifacts.publication.digest ===
+                "sha256:95028a16adedfc19b5dfe3c6e0b0c36696b5c2619a44f0040d51ef3b1ffcbbaa";
+            const oneTimeLegacyDeadline = Date.parse("2026-08-04T23:59:59Z");
+            const sourceAgeLimitHours =
+              oneTimeLegacyChain && Date.now() <= oneTimeLegacyDeadline ? 168 : 72;
             const resolved = {};
             for (const key of ["candidate", "publication"]) {
               const response = await github.rest.actions.getWorkflowRun({
@@ -574,7 +586,7 @@ jobs:
                 run.head_branch !== process.env.DEFAULT_BRANCH ||
                 !/^[0-9a-f]{40}$/i.test(run.head_sha || "") ||
                 ageHours < -0.1 ||
-                ageHours > 72
+                ageHours > sourceAgeLimitHours
               ) {
                 core.setFailed(`${key} source run failed protected provenance`);
                 return;
@@ -826,6 +838,12 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]]
+          deadline_epoch="$(date -u -d '2026-08-04T23:59:59Z' +%s)"
+          now_epoch="$(date -u +%s)"
+          (( now_epoch <= deadline_epoch )) || {
+            echo "::error::The one-time legacy carry-forward publication window expired."
+            exit 1
+          }
           [[ -n "$BSIDE_API_BASE_URL" && -n "$BSIDE_EDITOR_TOKEN" ]]
           case "${BSIDE_API_BASE_URL%/}" in
             "https://alignpe.gabia.io/activist/api.php/api/v1" | \
@@ -909,6 +927,12 @@ jobs:
           test -s editorial-intent/carry-forward-intent.json
           test -s editorial-intent/display-target-repair-receipt.json
           test -s editorial-intent/display-target-repair-replay-receipt.json
+          deadline_epoch="$(date -u -d '2026-08-04T23:59:59Z' +%s)"
+          now_epoch="$(date -u +%s)"
+          (( now_epoch <= deadline_epoch )) || {
+            echo "::error::The one-time legacy carry-forward expired before publication."
+            exit 1
+          }
           python -m curator.global_alpha_expedited_editorial \
             carry-forward-publish \
             --intent editorial-intent/carry-forward-intent.json \
@@ -1036,6 +1060,12 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]]
+          deadline_epoch="$(date -u -d '2026-08-04T23:59:59Z' +%s)"
+          now_epoch="$(date -u +%s)"
+          (( now_epoch <= deadline_epoch )) || {
+            echo "::error::The one-time legacy carry-forward recovery window expired."
+            exit 1
+          }
           [[ "$CONFIRMATION" == \
             "RECOVER_CARRY_FORWARD_EXPEDITED_EDITORIAL" ]]
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
@@ -1149,6 +1179,12 @@ jobs:
           test -s editorial-intent/carry-forward-intent.json
           test -s editorial-intent/display-target-repair-receipt.json
           test -s editorial-intent/display-target-repair-replay-receipt.json
+          deadline_epoch="$(date -u -d '2026-08-04T23:59:59Z' +%s)"
+          now_epoch="$(date -u +%s)"
+          (( now_epoch <= deadline_epoch )) || {
+            echo "::error::The one-time legacy carry-forward expired before recovery publication."
+            exit 1
+          }
           python -m curator.global_alpha_expedited_editorial \
             carry-forward-publish \
             --intent editorial-intent/carry-forward-intent.json \

@@ -313,9 +313,10 @@ heartbeat만 갱신하고 receipt·문서·사건·checkpoint를 변경하지 �
 
 1. `global-alpha-expedited-editorial.yml`의 export artifact를 사람이 검수한 뒤, 결정 payload만 gzip/base64로 인코딩해 보호된 `governance-release` 환경의 `GLOBAL_ALPHA_EXPEDITED_EDITORIAL_DECISIONS_GZIP_B64`에 등록한다.
 2. editorial apply 실행이 성공하고 `global-alpha-expedited-editorial-publication-<SHA>-<run>-<attempt>` artifact의 ID와 digest를 확인한 즉시 해당 Secret을 삭제한다. 실패한 payload는 재사용하지 않는다.
-3. 기계 전용 preparation artifact가 만들어진 뒤 최종 승인자는 그 artifact의 binding과 실제 89일 또는 90일 rollback 자료를 확인한다.
-4. 최종 승인 및 필요한 경우의 89일 한시 승인만 `GLOBAL_ALPHA_EXPEDITED_RELEASE_INPUTS_GZIP_B64`로 등록한다.
-5. `global-alpha-expedited-evidence-inputs.yml`이 `global-alpha-expedited-final-approval-<SHA>` artifact를 성공적으로 만들면 해당 Secret을 즉시 삭제한다.
+3. 2026-08-04 23:59:59 UTC까지는 코드에 고정된 기존 사람 검수 candidate/publication ID와 digest 한 쌍에 한해 72시간을 넘긴 승계를 허용한다. 이 일회성 경로도 168시간 상한, artifact 미만료, default branch, 성공 workflow, 정확한 SHA 조상 관계와 무변경 재생 검증을 모두 요구하며 기한 뒤에는 자동으로 기존 72시간 제한으로 복귀한다.
+4. 기계 전용 preparation artifact가 만들어진 뒤 최종 승인자는 그 artifact의 binding과 실제 89일 또는 90일 rollback 자료를 확인한다.
+5. 최종 승인 및 필요한 경우의 89일 한시 승인만 `GLOBAL_ALPHA_EXPEDITED_RELEASE_INPUTS_GZIP_B64`로 등록한다.
+6. `global-alpha-expedited-evidence-inputs.yml`이 `global-alpha-expedited-final-approval-<SHA>` artifact를 성공적으로 만들면 해당 Secret을 즉시 삭제한다.
 
 두 Secret의 압축 해제 결과는 최대 500KB로 제한한다. 토큰, SourceRight 원문, 수집 receipt, 성능 결과, 관측 결과, 롤백 결과 등 기계 증빙은 Secret payload로 대체할 수 없으며 exact immutable producer artifact에서만 읽는다.
 
