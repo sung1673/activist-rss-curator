@@ -644,6 +644,27 @@ def test_expedited_evidence_uses_actual_receipts_human_bytes_and_rights() -> Non
     assert "new Set(requestedRunIds).size !== requestedRunIds.length" in resolver
     assert "official-backfill-checkpoint-apply-dart-" in resolver
     assert "official-backfill-checkpoint-replay-dart-" in resolver
+    producer_downloads = {
+        step["name"]: step["with"]
+        for step in evaluate["steps"]
+        if step.get("name", "").startswith("Download immutable ")
+        and step.get("name", "").endswith(" producer evidence")
+    }
+    for key, label in (
+        ("dart_apply", "DART apply"),
+        ("dart_replay", "DART replay"),
+        ("sec_apply", "SEC apply"),
+        ("sec_replay", "SEC replay"),
+    ):
+        download = producer_downloads[
+            f"Download immutable {label} producer evidence"
+        ]
+        assert download["run-id"] == (
+            "${{ steps.producers.outputs." + key + "_run_id }}"
+        )
+        assert download["repository"] == "${{ github.repository }}"
+        assert download["path"] == "connector-artifacts"
+        assert download["merge-multiple"] == "false"
     derive = next(
         step
         for step in evaluate["steps"]
