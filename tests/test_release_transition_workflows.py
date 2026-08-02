@@ -169,6 +169,9 @@ def test_cutover_uses_same_sha_protected_evidence_and_pages_artifacts() -> None:
     )
     assert "python -m curator.governance_site_config" in config["run"]
     assert "--expected-build-sha \"$GITHUB_SHA\"" in config["run"]
+    assert "python -m curator.legacy_internal_safety verify-site" in config["run"]
+    assert "--site candidate-pages" in config["run"]
+    assert "--minimum-dated-reports 90" in config["run"]
     identity = next(
         step
         for step in validate["steps"]

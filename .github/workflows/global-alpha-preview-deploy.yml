@@ -335,6 +335,9 @@ jobs:
           python -m curator.legacy_telegram_safety verify-site \
             --site preview-site \
             --minimum-dated-reports 90
+          python -m curator.legacy_internal_safety verify-site \
+            --site preview-site \
+            --minimum-dated-reports 90
           test ! -e preview-site/feed/telegram.html
           test ! -e preview-site/feed/telegram-admin.html
           grep -Rqs --fixed-strings "production_alpha_early_access" preview-site/governance

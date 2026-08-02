@@ -2474,12 +2474,6 @@ def render_report_html(
         const count = document.createElement('span');
         count.textContent = `${{Number(story.article_count || 1)}}건`;
         meta.appendChild(count);
-        const priority = Number(story.priority_score || 0);
-        if (priority) {{
-          const score = document.createElement('span');
-          score.textContent = `점수 ${{priority}}`;
-          meta.appendChild(score);
-        }}
         const date = storyDateLabel(story);
         if (date) {{
           const dateEl = document.createElement('span');

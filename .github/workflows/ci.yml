@@ -677,6 +677,7 @@ jobs:
           curator/governance_site_config.py
           curator/label_agreement.py
           curator/legacy_feed_compat.py
+          curator/legacy_internal_safety.py
           curator/legacy_recovery_bundle.py
           curator/mysql_backup.py
           curator/mysql_migration.py

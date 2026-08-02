@@ -30,6 +30,29 @@ def step_names(job: dict[str, object]) -> list[str]:
     return [str(step.get("name")) for step in steps]
 
 
+def test_candidate_pages_are_rechecked_for_internal_scores_at_expedited_boundaries() -> None:
+    _preparation_text, preparation = workflow(
+        "global-alpha-expedited-preparation.yml"
+    )
+    _cutover_text, cutover = workflow("governance-expedited-cutover.yml")
+    boundaries = (
+        (
+            preparation["jobs"]["evaluate"],
+            "Bind exact candidate Pages bytes",
+        ),
+        (
+            cutover["jobs"]["validate"],
+            "Verify exact Pages bytes and Early Access channel",
+        ),
+    )
+    for job, step_name in boundaries:
+        step = next(step for step in job["steps"] if step["name"] == step_name)
+        run = step["run"]
+        assert "python -m curator.legacy_internal_safety verify-site" in run
+        assert "--site candidate-pages" in run
+        assert "--minimum-dated-reports 90" in run
+
+
 def test_expedited_evidence_is_separate_protected_same_sha_workflow() -> None:
     text, payload = workflow("global-alpha-expedited-preparation.yml")
     assert set(payload["jobs"]) == {

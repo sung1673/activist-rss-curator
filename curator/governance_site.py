@@ -6,7 +6,16 @@ import shutil
 from pathlib import Path
 
 from .governance_ui import assert_asset_budget, config_javascript, configured_api_base, normalize_api_base
-from .legacy_feed_compat import MANIFEST_NAME, verify_legacy_feed_compatibility
+from .legacy_feed_compat import (
+    MANIFEST_NAME,
+    refresh_legacy_feed_compatibility_manifest,
+    verify_legacy_feed_compatibility,
+)
+from .legacy_internal_safety import (
+    redact_internal_score_display,
+    validate_no_internal_score,
+    verify_no_internal_score_site,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +34,13 @@ def _safe_copy(source: Path, destination: Path) -> None:
     _require_regular_file(source, label="site asset")
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, destination)
+
+
+def _safe_public_copy(source: Path, destination: Path, *, relative: str) -> None:
+    _require_regular_file(source, label="site asset")
+    payload = redact_internal_score_display(source.read_bytes(), path=relative)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(payload)
 
 
 def _copy_legacy_compatibility(legacy_root: Path, output: Path) -> tuple[int, dict[str, object]]:
@@ -47,8 +63,17 @@ def _copy_legacy_compatibility(legacy_root: Path, output: Path) -> tuple[int, di
             raise RuntimeError(f"denied legacy asset: {source.name}")
         if source.is_dir() or not DATED_FEED_ASSET.fullmatch(source.name):
             continue
-        _safe_copy(source, output / "feed" / source.name)
+        _safe_public_copy(
+            source,
+            output / "feed" / source.name,
+            relative=f"feed/{source.name}",
+        )
         copied += 1
+    manifest = refresh_legacy_feed_compatibility_manifest(
+        output,
+        verified_source_manifest=manifest,
+    )
+    verify_no_internal_score_site(output)
     return copied, manifest
 
 
@@ -60,6 +85,7 @@ def _validate_output(output: Path) -> None:
             relative = path.relative_to(output).as_posix().casefold()
             if any(part in relative for part in DENIED_NAME_PARTS):
                 raise RuntimeError(f"site staging contains a denied public asset: {relative}")
+            validate_no_internal_score(path.read_bytes(), path=relative)
 
 
 def build_governance_site(

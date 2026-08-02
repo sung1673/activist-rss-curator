@@ -15,6 +15,11 @@ from curator.legacy_telegram_safety import (  # noqa: E402
     redact_telegram_mentions,
     verify_public_site,
 )
+from curator.legacy_internal_safety import (  # noqa: E402
+    LegacyInternalSafetyError,
+    redact_internal_score_display,
+    verify_no_internal_score_site,
+)
 
 
 REQUIRED_ROOT_FILES = ("CNAME", "404.html", "feed.xml", "index.html")
@@ -140,7 +145,8 @@ def _collect_feed_files(feed_dir: Path) -> list[Path]:
 def _copy_public_file(source: Path, destination: Path, *, relative: str) -> None:
     try:
         payload = redact_telegram_mentions(source.read_bytes(), path=relative)
-    except LegacyTelegramSafetyError as exc:
+        payload = redact_internal_score_display(payload, path=relative)
+    except (LegacyTelegramSafetyError, LegacyInternalSafetyError) as exc:
         raise PreparationError(str(exc)) from exc
     destination.write_bytes(payload)
 
@@ -231,7 +237,8 @@ def prepare_legacy_pages(
     _assert_no_symlinks(destination)
     try:
         verify_public_site(destination)
-    except LegacyTelegramSafetyError as exc:
+        verify_no_internal_score_site(destination)
+    except (LegacyTelegramSafetyError, LegacyInternalSafetyError) as exc:
         raise PreparationError(str(exc)) from exc
 
     files = [path for path in destination.rglob("*") if path.is_file()]

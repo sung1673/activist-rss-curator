@@ -365,6 +365,9 @@ jobs:
             --site candidate-pages \
             --binding evidence/pages-artifact-identity.json \
             --expected-revision "$GITHUB_SHA"
+          python -m curator.legacy_internal_safety verify-site \
+            --site candidate-pages \
+            --minimum-dated-reports 90
           python -m curator.governance_site_config \
             --site candidate-pages \
             --expected-api-base "$GOVERNANCE_API_BASE_URL" \
