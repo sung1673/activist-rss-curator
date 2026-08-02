@@ -364,7 +364,14 @@ test("remote Production Alpha preview renders real v2 data without mocks", async
       environment.apiV2,
       ["/briefs/latest", "/live", "/sources/status"]
     ));
-    await expect(page.locator("[data-event-drawer]:visible").first()).toBeVisible();
+    const finalTopEvents = page.locator(".terminal-top-list [data-event-drawer]:visible");
+    await expect(finalTopEvents).toHaveCount(5);
+    const finalFirstEventBox = await finalTopEvents.first().boundingBox();
+    expect(finalFirstEventBox).not.toBeNull();
+    firstImportantEventTopPx = finalFirstEventBox.y;
+    if (testInfo.project.use.viewport?.width === 390) {
+      expect(firstImportantEventTopPx).toBeLessThanOrEqual(300);
+    }
     expect(v1Fallbacks).toEqual([]);
     expect(page.url().includes(environment.token)).toBe(false);
     const restoreScrollBehavior = await stabilizeViewportScreenshot(page);

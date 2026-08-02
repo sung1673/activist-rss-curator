@@ -52,6 +52,8 @@ def test_remote_preview_spec_is_separate_and_contains_no_mock_routing() -> None:
     assert "expect(firstImportantEventTopPx).toBeLessThanOrEqual(300)" in spec
     assert 'page.locator(".terminal-top-list [data-event-drawer]:visible")' in spec
     assert "expect(topEvents).toHaveCount(5)" in spec
+    assert "expect(finalTopEvents).toHaveCount(5)" in spec
+    assert "firstImportantEventTopPx = finalFirstEventBox.y" in spec
 
 
 def test_remote_preview_workflow_is_manual_default_branch_runtime_only() -> None:

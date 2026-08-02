@@ -433,3 +433,42 @@ test("Chromium produces LCP, CLS support, and INP from a trusted click", { timeo
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+
+test("Chromium first-input preserves a trusted INP when event entries are unavailable", { timeout: 30_000 }, async () => {
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.end(`<!doctype html>
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      <main><h1>Fast governance journey</h1><button id="interact">Open</button></main>`);
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext({ viewport: { width: 393, height: 851 } });
+    await context.addInitScript(observerInitScript);
+    const page = await context.newPage();
+    await page.goto(`http://127.0.0.1:${address.port}/`, { waitUntil: "load" });
+    await page.waitForTimeout(250);
+    await page.evaluate(() => {
+      const state = window.__BSIDE_PRODUCTION_VITALS_PROBE__;
+      state.freezePaint();
+      state.observers.event.disconnect();
+    });
+    await page.locator("#interact").click();
+    await page.waitForFunction(() => window.__BSIDE_PRODUCTION_VITALS_PROBE__.flushEvents().inp > 0);
+    const values = await page.evaluate(() => window.__BSIDE_PRODUCTION_VITALS_PROBE__.flushEvents());
+    assert.equal(values.supported["first-input"], true);
+    assert.equal(values.supported.event, true);
+    assert.ok(values.inp > 0);
+    await context.close();
+  } finally {
+    await browser.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

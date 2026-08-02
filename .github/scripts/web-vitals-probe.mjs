@@ -308,6 +308,9 @@ export function observerInitScript() {
     state.frozen = true;
   };
   state.flushEvents = () => {
+    if (state.observers["first-input"]) {
+      eventEntries(state.observers["first-input"].takeRecords());
+    }
     if (state.observers.event) eventEntries(state.observers.event.takeRecords());
     return { lcp: state.lcp, cls: state.cls, inp: state.inp, supported: state.supported };
   };

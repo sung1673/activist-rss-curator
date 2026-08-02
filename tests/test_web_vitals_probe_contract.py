@@ -19,6 +19,7 @@ def test_probe_uses_real_mobile_event_timing_without_secret_urls() -> None:
     assert 'install("largest-contentful-paint"' in source
     assert 'install("layout-shift"' in source
     assert 'install("first-input", eventEntries)' in source
+    assert 'state.observers["first-input"].takeRecords()' in source
     assert 'install("event"' in source
     assert 'durationThreshold: 16' in source
     assert "entry.interactionId > 0" in source
