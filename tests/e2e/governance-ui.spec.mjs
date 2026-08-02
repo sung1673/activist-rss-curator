@@ -964,9 +964,9 @@ test("mobile Web Vitals journeys use one visible bottom-navigation target", asyn
   );
   const journeys = [
     ["/today", "live", "/today", "live"],
-    ["/events", "calendar", "/calendar", null],
-    ["/issuers", "calendar", "/calendar", null],
-    ["/calendar", "today", "/today", null],
+    ["/events", "live", "/today", "live"],
+    ["/issuers", "live", "/today", "live"],
+    ["/calendar", "live", "/today", "live"],
   ];
   for (const [route, destination, expectedRoute, expectedView] of journeys) {
     await page.goto(`#${route}`);

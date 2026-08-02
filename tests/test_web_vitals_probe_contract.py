@@ -21,6 +21,7 @@ def test_probe_uses_real_mobile_event_timing_without_secret_urls() -> None:
     assert 'install("event"' in source
     assert 'durationThreshold: 16' in source
     assert "entry.interactionId > 0" in source
+    assert 'return "live"' in source
     assert '.mobile-bottom-nav [data-nav="${destination}"]:visible' in source
     assert ".click({ timeout: 10_000 })" in source
     assert "state.flushEvents().inp > 0" in source

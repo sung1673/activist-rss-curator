@@ -159,7 +159,7 @@ test("route URLs contain only the SPA fragment and never a preview credential", 
 });
 
 
-test("mobile journeys choose a bottom-navigation destination", () => {
+test("all mobile journeys use the real Live bottom-navigation destination", () => {
   assert.deepEqual(
     Object.fromEntries(ROUTE_TEMPLATES.map((route) => [
       route,
@@ -167,18 +167,22 @@ test("mobile journeys choose a bottom-navigation destination", () => {
     ])),
     {
       "/today": "live",
-      "/events": "calendar",
-      "/issuers": "calendar",
-      "/calendar": "today",
+      "/events": "live",
+      "/issuers": "live",
+      "/calendar": "live",
     },
   );
   assert.throws(() => interactionDestination("/unsupported"), ProbeError);
 });
 
 
-test("matrix requires exactly four routes times five real samples for every metric", () => {
+test("matrix requires all twenty journeys and five real samples per route and metric", () => {
   const rows = observationMatrix();
+  assert.equal(ROUTE_TEMPLATES.length * RUNS_PER_ROUTE, 20);
   assert.equal(rows.length, 60);
+  for (const route of ROUTE_TEMPLATES) {
+    assert.equal(rows.filter((row) => row.route_template === route).length, 15);
+  }
   assert.doesNotThrow(() => assertObservationMatrix(rows, SHA, "2026-07-22"));
   assert.throws(() => assertObservationMatrix(rows.slice(1), SHA, "2026-07-22"), ProbeError);
   const unsupported = structuredClone(rows);
