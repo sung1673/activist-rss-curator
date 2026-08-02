@@ -201,9 +201,31 @@ def test_expedited_preparation_requires_frozen_bytes_and_matched_probe() -> None
     assert "official-backfill-checkpoint-replay-dart-" in (
         resolver["with"]["script"]
     )
-    download = step(evaluate, "Download immutable DART and SEC producer evidence")
-    assert "dart_apply_artifact_2_id" in download["with"]["artifact-ids"]
-    assert "dart_replay_artifact_1_id" in download["with"]["artifact-ids"]
+    downloads = {
+        name: step(evaluate, name)
+        for name in (
+            "Download immutable DART apply producer evidence",
+            "Download immutable DART replay producer evidence",
+            "Download immutable SEC apply producer evidence",
+            "Download immutable SEC replay producer evidence",
+        )
+    }
+    assert "dart_apply_artifact_2_id" in (
+        downloads["Download immutable DART apply producer evidence"]["with"]
+        ["artifact-ids"]
+    )
+    assert "dart_replay_artifact_1_id" in (
+        downloads["Download immutable DART replay producer evidence"]["with"]
+        ["artifact-ids"]
+    )
+    for source in ("DART apply", "DART replay", "SEC apply", "SEC replay"):
+        download = downloads[f"Download immutable {source} producer evidence"]
+        assert download["with"]["run-id"].endswith(
+            f"{source.lower().replace(' ', '_')}_run_id }}}}"
+        )
+        assert download["with"]["path"] == "connector-artifacts"
+        assert download["with"]["repository"] == "${{ github.repository }}"
+        assert download["with"]["merge-multiple"] == "false"
     derive = step(
         evaluate,
         "Derive DART and SEC receipts only from immutable producer artifacts",
