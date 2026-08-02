@@ -1314,6 +1314,24 @@ def _repair_targets_from_common(
     )
 
 
+def _reconstruct_carry_from_common(
+    common: Mapping[str, object],
+) -> dict[str, object]:
+    return editorial._reconstruct_legacy_carry_forward_basis(
+        candidate=common["candidate"],  # type: ignore[arg-type]
+        source_human_review=common["source_human_review"],  # type: ignore[arg-type]
+        source_receipt=common["source_receipt"],  # type: ignore[arg-type]
+        source_replay_receipt=common[  # type: ignore[arg-type]
+            "source_replay_receipt"
+        ],
+        candidate_artifact=common["candidate_artifact"],  # type: ignore[arg-type]
+        publication_artifact=common[  # type: ignore[arg-type]
+            "publication_artifact"
+        ],
+        now=common["now"],  # type: ignore[arg-type]
+    )
+
+
 def _publish_prepared_carry_from_common(
     client: _CarryClient,
     common: Mapping[str, object],
@@ -1436,6 +1454,112 @@ def test_code_only_sha_carry_forward_preserves_human_review_without_event_mutati
         "source_human_review"
     ]["same_event_pair_reviews"]  # type: ignore[index]
     assert receipt["top5"] == common["source_receipt"]["top5"]  # type: ignore[index]
+
+
+def test_pinned_legacy_source_age_extension_is_narrow_and_expires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, common = _carry_common(monkeypatch)
+    reviewed_at = datetime.fromisoformat(NOW.replace("Z", "+00:00"))
+
+    common["now"] = reviewed_at + timedelta(hours=80)
+    reconstructed = _reconstruct_carry_from_common(common)
+    assert reconstructed["candidate_artifact"] == TEST_CANDIDATE_ARTIFACT
+
+    common["now"] = reviewed_at + timedelta(hours=169)
+    with pytest.raises(ExpeditedEditorialError, match="stale or future"):
+        _reconstruct_carry_from_common(common)
+
+    common["now"] = editorial.LEGACY_CARRY_FORWARD_SOURCE_DEADLINE + timedelta(
+        seconds=1
+    )
+    with pytest.raises(ExpeditedEditorialError, match="stale or future"):
+        _reconstruct_carry_from_common(common)
+
+    mismatched = dict(TEST_CANDIDATE_ARTIFACT)
+    mismatched["artifact_id"] = 999
+    assert editorial._legacy_carry_forward_source_max_age(
+        now=reviewed_at + timedelta(hours=80),
+        candidate_artifact=mismatched,
+        publication_artifact=TEST_PUBLICATION_ARTIFACT,
+    ) == timedelta(hours=72)
+
+    mismatched_publication = dict(TEST_PUBLICATION_ARTIFACT)
+    mismatched_publication["artifact_id"] = 999
+    assert editorial._legacy_carry_forward_source_max_age(
+        now=reviewed_at + timedelta(hours=80),
+        candidate_artifact=TEST_CANDIDATE_ARTIFACT,
+        publication_artifact=mismatched_publication,
+    ) == timedelta(hours=72)
+    assert editorial._legacy_carry_forward_source_max_age(
+        now=editorial.LEGACY_CARRY_FORWARD_SOURCE_DEADLINE,
+        candidate_artifact=TEST_CANDIDATE_ARTIFACT,
+        publication_artifact=TEST_PUBLICATION_ARTIFACT,
+    ) == timedelta(hours=168)
+    with pytest.raises(ExpeditedEditorialError, match="timezone-aware"):
+        editorial._legacy_carry_forward_source_max_age(
+            now=reviewed_at.replace(tzinfo=None),
+            candidate_artifact=TEST_CANDIDATE_ARTIFACT,
+            publication_artifact=TEST_PUBLICATION_ARTIFACT,
+        )
+
+
+def test_pinned_source_review_and_receipt_age_limits_are_independent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, common = _carry_common(monkeypatch)
+    candidate = common["candidate"]
+    assert isinstance(candidate, dict)
+    source_human_review = common["source_human_review"]
+    assert isinstance(source_human_review, dict)
+    source_receipt = common["source_receipt"]
+    assert isinstance(source_receipt, dict)
+    source_replay = common["source_replay_receipt"]
+    assert isinstance(source_replay, dict)
+    source_revision, events, pairs, top5 = (
+        editorial._validate_carry_source_candidate(candidate)
+    )
+    reviewed_at = datetime.fromisoformat(NOW.replace("Z", "+00:00"))
+    source_max_age = timedelta(hours=168)
+
+    event_reviews, pair_reviews, top_reviews = (
+        editorial._validate_carry_source_human_review(
+            source_human_review,
+            candidate=candidate,
+            source_revision=source_revision,
+            events=events,
+            pairs=pairs,
+            top5=top5,
+            candidate_artifact=common["candidate_artifact"],
+            now=reviewed_at + timedelta(hours=80),
+            source_max_age=source_max_age,
+        )
+    )
+    with pytest.raises(ExpeditedEditorialError, match="stale or future receipt"):
+        editorial._validate_carry_source_receipts(
+            source_receipt,
+            source_replay,
+            candidate=candidate,
+            source_revision=source_revision,
+            candidate_artifact=common["candidate_artifact"],
+            event_reviews=event_reviews,
+            pair_reviews=pair_reviews,
+            top_reviews=top_reviews,
+            now=reviewed_at + timedelta(hours=169),
+            source_max_age=source_max_age,
+        )
+    with pytest.raises(ExpeditedEditorialError, match="stale or future"):
+        editorial._validate_carry_source_human_review(
+            source_human_review,
+            candidate=candidate,
+            source_revision=source_revision,
+            events=events,
+            pairs=pairs,
+            top5=top5,
+            candidate_artifact=common["candidate_artifact"],
+            now=reviewed_at + timedelta(hours=73),
+            source_max_age=timedelta(hours=72),
+        )
 
 
 def test_six_human_approved_display_targets_repair_once_then_replay_idempotently(
@@ -2174,6 +2298,11 @@ def test_approved_canonical_basis_digest_is_mandatory_and_tamper_evident(
     source_revision, events, pairs, top5 = (
         editorial._validate_carry_source_candidate(candidate)
     )
+    source_max_age = editorial._legacy_carry_forward_source_max_age(
+        now=common["now"],
+        candidate_artifact=common["candidate_artifact"],
+        publication_artifact=common["publication_artifact"],
+    )
     event_reviews, pair_reviews, top_reviews = (
         editorial._validate_carry_source_human_review(
             source_human_review,
@@ -2184,6 +2313,7 @@ def test_approved_canonical_basis_digest_is_mandatory_and_tamper_evident(
             top5=top5,
             candidate_artifact=common["candidate_artifact"],
             now=common["now"],
+            source_max_age=source_max_age,
         )
     )
     source_outcomes, publication_top5 = (
@@ -2197,6 +2327,7 @@ def test_approved_canonical_basis_digest_is_mandatory_and_tamper_evident(
             pair_reviews=pair_reviews,
             top_reviews=top_reviews,
             now=common["now"],
+            source_max_age=source_max_age,
         )
     )
     basis = editorial._legacy_approved_canonical_basis(
