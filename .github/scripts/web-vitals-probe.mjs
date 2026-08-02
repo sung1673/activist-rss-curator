@@ -311,15 +311,10 @@ export function observerInitScript() {
 
 
 export function interactionDestination(routeTemplate) {
-  const destinations = {
-    "/today": "live",
-    "/events": "calendar",
-    "/issuers": "calendar",
-    "/calendar": "today",
-  };
-  const destination = destinations[routeTemplate];
-  if (!destination) throw new ProbeError("unsupported_interaction_route");
-  return destination;
+  if (!ROUTE_TEMPLATES.includes(routeTemplate)) {
+    throw new ProbeError("unsupported_interaction_route");
+  }
+  return "live";
 }
 
 
