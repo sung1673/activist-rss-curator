@@ -23,7 +23,10 @@ def test_probe_uses_real_mobile_event_timing_without_secret_urls() -> None:
     assert "entry.interactionId > 0" in source
     assert 'return "live"' in source
     assert '.mobile-bottom-nav [data-nav="${destination}"]:visible' in source
-    assert 'window.location.hash.startsWith("#/today?view=live")' in source
+    assert 'window.location.hash.replace(/^#/, "").split("?", 2)' in source
+    assert 'path === "/today"' in source
+    assert 'new URLSearchParams(query).get("view") === "live"' in source
+    assert 'startsWith("#/today?view=live")' not in source
     assert 'locator("[data-event-drawer]:visible")' in source
     assert 'locator(".icon-button[data-drawer-close]:visible")' in source
     assert 'locator("#event-drawer-shell").waitFor({ state: "hidden"' in source

@@ -390,9 +390,13 @@ async function measureRouteAttempt(browser, {
       .click({ timeout: 10_000 });
     substep = "wait_live_route_ready";
     await page.waitForFunction(
-      () => window.location.hash.startsWith("#/today?view=live")
-        && !document.querySelector("#app[aria-busy='true']")
-        && Boolean(document.querySelector("[data-event-drawer]")),
+      () => {
+        const [path, query = ""] = window.location.hash.replace(/^#/, "").split("?", 2);
+        return path === "/today"
+          && new URLSearchParams(query).get("view") === "live"
+          && !document.querySelector("#app[aria-busy='true']")
+          && Boolean(document.querySelector("[data-event-drawer]"));
+      },
       null,
       { timeout: 30_000 },
     );
