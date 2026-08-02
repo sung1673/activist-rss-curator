@@ -19,6 +19,7 @@ from curator.global_alpha_expedited_gate import (
     ExpeditedAlphaEvidenceError,
     build_expedited_release_report,
     main,
+    validate_connector_receipts,
 )
 from curator.global_alpha_pages_identity import build_terminal_content_identity
 
@@ -251,6 +252,90 @@ def connector_report(*, as_of: datetime = AS_OF) -> dict[str, object]:
         for family, country in (("dart", "KR"), ("sec-edgar", "US"))
     ]
     return result
+
+
+def retime_connector_windows(
+    connector: dict[str, object],
+    *,
+    start: date,
+) -> None:
+    family = str(connector["connector_family"])
+    for mode in ("apply", "replay"):
+        run = connector[f"{mode}_run"]  # type: ignore[index]
+        for index, item in enumerate(run["windows"]):  # type: ignore[index]
+            day = start + timedelta(days=index)
+            item.update(
+                {
+                    "window_start": day.isoformat(),
+                    "window_end_exclusive": (day + timedelta(days=1)).isoformat(),
+                    "payload_sha256": digest(f"{family}:{day}:payload"),
+                    "receipt_sha256": digest(
+                        f"{family}:{mode}:{day}:receipt"
+                    ),
+                    "idempotency_key": f"{family}:{day}:production",
+                    "ingest_id": f"{family}:{day}:ingest",
+                }
+            )
+
+
+def test_sec_horizon_uses_latest_provable_business_day_on_weekend() -> None:
+    as_of = datetime.fromisoformat("2026-08-02T10:30:00+00:00")
+    report = connector_report(as_of=as_of)
+    connectors = report["connectors"]  # type: ignore[assignment]
+    retime_connector_windows(connectors[0], start=date(2026, 7, 3))
+    retime_connector_windows(connectors[1], start=date(2026, 7, 2))
+
+    summary, gates = validate_connector_receipts(
+        report,
+        expected_revision=REVISION,
+        evidence_as_of=as_of,
+    )
+
+    assert gate({"gates": gates}, "expedited_connectors.current_30_day_horizon")[
+        "passed"
+    ] is True
+    sec = next(
+        item
+        for item in summary["connectors"]  # type: ignore[index]
+        if item["connector_family"] == "sec-edgar"
+    )
+    assert sec["apply_run"]["ended_on_exclusive"] == "2026-08-01"
+
+
+def test_sec_weekend_horizon_stays_fail_closed_for_stale_or_future_end() -> None:
+    as_of = datetime.fromisoformat("2026-08-02T10:30:00+00:00")
+    for sec_start in (date(2026, 7, 1), date(2026, 7, 3)):
+        report = connector_report(as_of=as_of)
+        connectors = report["connectors"]  # type: ignore[assignment]
+        retime_connector_windows(connectors[0], start=date(2026, 7, 3))
+        retime_connector_windows(connectors[1], start=sec_start)
+        _, gates = validate_connector_receipts(
+            report,
+            expected_revision=REVISION,
+            evidence_as_of=as_of,
+        )
+
+        assert gate(
+            {"gates": gates},
+            "expedited_connectors.current_30_day_horizon",
+        )["passed"] is False
+
+
+def test_dart_horizon_keeps_the_existing_24_hour_limit_on_weekend() -> None:
+    as_of = datetime.fromisoformat("2026-08-02T10:30:00+00:00")
+    report = connector_report(as_of=as_of)
+    connectors = report["connectors"]  # type: ignore[assignment]
+    retime_connector_windows(connectors[0], start=date(2026, 7, 2))
+    retime_connector_windows(connectors[1], start=date(2026, 7, 2))
+    _, gates = validate_connector_receipts(
+        report,
+        expected_revision=REVISION,
+        evidence_as_of=as_of,
+    )
+
+    assert gate({"gates": gates}, "expedited_connectors.current_30_day_horizon")[
+        "passed"
+    ] is False
 
 
 def source_readiness(*, as_of: datetime = AS_OF) -> dict[str, object]:

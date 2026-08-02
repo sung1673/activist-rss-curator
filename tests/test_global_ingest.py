@@ -1485,6 +1485,26 @@ def test_completed_day_connector_excludes_sec_intraday_atom() -> None:
             datetime.fromisoformat("2026-07-25T10:00:00+00:00"),
             date(2026, 7, 25),
         ),
+        (
+            datetime.fromisoformat("2026-08-02T06:00:00-04:00"),
+            date(2026, 8, 1),
+        ),
+        (
+            datetime.fromisoformat("2026-08-03T06:00:00-04:00"),
+            date(2026, 8, 1),
+        ),
+        (
+            datetime.fromisoformat("2026-08-04T05:59:59-04:00"),
+            date(2026, 8, 1),
+        ),
+        (
+            datetime.fromisoformat("2026-08-04T06:00:00-04:00"),
+            date(2026, 8, 4),
+        ),
+        (
+            datetime.fromisoformat("2026-07-06T06:00:00-04:00"),
+            date(2026, 7, 3),
+        ),
     ],
 )
 def test_sec_daily_index_uses_conservative_six_am_eastern_cutoff(

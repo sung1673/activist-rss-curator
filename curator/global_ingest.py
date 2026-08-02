@@ -38,6 +38,7 @@ from .global_connectors import (
     IssuerReference,
     SecDailyIndexConnector,
     SecHybridConnector,
+    sec_expected_daily_index,
 )
 from .official_source_rights import (
     GlobalOfficialSourceRightClient,
@@ -921,13 +922,21 @@ def sec_completed_day_limit(
     The current Atom feed remains intraday.  Historical reconciliation does
     not require the prior filing day's daily index until 06:00 America/New_York,
     leaving a fail-closed publication buffer after the SEC's overnight build.
+    The returned exclusive boundary ends immediately after the latest expected
+    SEC filing day, so weekends and observed federal holidays never become an
+    unprovable trailing daily-index window.
     """
 
     observed = now or datetime.now(timezone.utc)
     if observed.tzinfo is None or observed.utcoffset() is None:
         raise GlobalIngestConfigurationError("sec_completed_limit_requires_timezone")
     eastern = observed.astimezone(ZoneInfo("America/New_York"))
-    return eastern.date() - (timedelta(days=1) if eastern.hour < 6 else timedelta())
+    latest_candidate = eastern.date() - timedelta(days=1)
+    if eastern.hour < 6:
+        latest_candidate -= timedelta(days=1)
+    while not sec_expected_daily_index(latest_candidate):
+        latest_candidate -= timedelta(days=1)
+    return latest_candidate + timedelta(days=1)
 
 
 def automatic_completed_window(

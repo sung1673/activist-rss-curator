@@ -40,6 +40,32 @@ def test_plan_is_exact_bounded_and_oldest_first() -> None:
     )
 
 
+def test_plan_uses_latest_provable_sec_business_day_on_weekend() -> None:
+    observed = datetime.fromisoformat("2026-08-02T10:30:00+00:00")
+    plan = plan_global_backfill(
+        country_code="US",
+        mode="apply",
+        from_date="2026-07-02",
+        to_date="2026-08-01",
+        max_windows=30,
+        now=observed,
+    )
+
+    assert len(plan.windows) == 30
+    assert plan.windows[-1].end_exclusive == date(2026, 8, 1)
+    with pytest.raises(
+        GlobalBackfillError,
+        match="global_backfill_requires_completed_days",
+    ):
+        plan_global_backfill(
+            country_code="US",
+            mode="apply",
+            from_date="2026-07-03",
+            to_date="2026-08-02",
+            max_windows=30,
+            now=observed,
+        )
+
 @pytest.mark.parametrize("country", ["JP", "GB"])
 def test_optional_markets_are_not_supported_by_alpha_backfill(
     country: str,

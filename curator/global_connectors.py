@@ -876,7 +876,7 @@ def _us_federal_holidays(year: int) -> set[date]:
     return holidays
 
 
-def _sec_expected_daily_index(day: date) -> bool:
+def sec_expected_daily_index(day: date) -> bool:
     return day.weekday() < 5 and day not in _us_federal_holidays(day.year)
 
 SEC_8K_ITEM_FAMILIES = {
@@ -1326,7 +1326,7 @@ class SecDailyIndexConnector(BaseGlobalConnector):
         request_count = 0
         current = request.window_start
         while current < request.window_end_exclusive:
-            expected_daily_index = _sec_expected_daily_index(current)
+            expected_daily_index = sec_expected_daily_index(current)
             daily_attempt_budget = self.max_retries + 1
             manifest_listed_daily_index = False
             if not expected_daily_index:
