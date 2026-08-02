@@ -48,6 +48,30 @@ def test_collection_free_preview_is_manual_protected_and_exact_sha() -> None:
         assert marker in text
 
 
+def test_collection_free_preview_revalidates_only_immutable_job_snapshots() -> None:
+    payload = _payload()
+    steps = payload["jobs"]["deploy-preview"]["steps"]  # type: ignore[index]
+    boundary = next(
+        step
+        for step in steps
+        if step.get("name")
+        == "Revalidate immutable job-start repository boundary"
+    )
+
+    assert boundary["shell"] == "bash"
+    assert "github.rest.actions.getRepoVariable" not in boundary["run"]
+    for marker in (
+        '"$PAGES_OWNER_SNAPSHOT" == "legacy"',
+        '"$PIPELINE_MODE_SNAPSHOT" == "shadow"',
+        '"${STANDARD_OBSERVATION_SNAPSHOT,,}" == "false"',
+        '"${EXPEDITED_OBSERVATION_SNAPSHOT,,}" == "false"',
+        '"${TELEGRAM_DELIVERY_SNAPSHOT,,}" == "false"',
+        '"${GOVERNANCE_DELIVERY_SNAPSHOT,,}" == "false"',
+        '"${KIND_MODE_SNAPSHOT,,}" == "off"',
+    ):
+        assert marker in boundary["run"]
+
+
 def test_collection_free_preview_uses_only_immutable_existing_sources() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
 
