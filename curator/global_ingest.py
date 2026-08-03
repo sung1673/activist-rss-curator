@@ -282,6 +282,7 @@ def content_idempotency_key(
     window_start: date | None = None,
     window_end_exclusive: date | None = None,
     chunk_index: int = 0,
+    batch_id: str | None = None,
     completed_day_evidence: bool = False,
     current_poll: bool = False,
 ) -> str:
@@ -292,6 +293,14 @@ def content_idempotency_key(
         raise GlobalIngestConfigurationError(
             "conflicting_ingest_receipt_class"
         )
+    classified_batch_id: str | None = None
+    if completed_day_evidence or current_poll:
+        candidate_batch_id = str(batch_id or "").strip()
+        if _GLOBAL_BATCH_ID.fullmatch(candidate_batch_id) is None:
+            raise GlobalIngestConfigurationError(
+                "classified_ingest_requires_full_batch_identity"
+            )
+        classified_batch_id = candidate_batch_id
     stable_envelope = envelope.to_payload()
     stable_envelope.pop("retrieved_at", None)
     # Transport work can grow when a current-history endpoint gains newer
@@ -314,6 +323,11 @@ def content_idempotency_key(
         "chunk_index": chunk_index,
         "envelope": stable_envelope,
     }
+    if classified_batch_id is not None:
+        # Every classified chunk is bound to the complete source result. This
+        # prevents an unchanged leading chunk from reusing a semantic key when
+        # only the final cursor, filtered total, or tail record changed.
+        content["batch_id"] = classified_batch_id
     digest = hashlib.sha256(_canonical_json(content).encode("utf-8")).hexdigest()
     if completed_day_evidence:
         namespace = "global-ingest-v2-day"
@@ -1125,15 +1139,6 @@ def execute_global_ingest(
         ):
             raise GlobalIngestError("source_right_changed_before_ingest")
 
-        key = content_idempotency_key(
-            envelope=chunk,
-            code_revision=revision,
-            window_start=window_start,
-            window_end_exclusive=window_end_exclusive,
-            chunk_index=chunk_index,
-            completed_day_evidence=completed_day_evidence,
-            current_poll=not completed_day_evidence,
-        )
         chunk_metadata = global_ingest_chunk(
             envelope=envelope,
             window_start=window_start,
@@ -1141,6 +1146,16 @@ def execute_global_ingest(
             index=chunk_index,
             count=len(chunks),
             code_revision=revision,
+        )
+        key = content_idempotency_key(
+            envelope=chunk,
+            code_revision=revision,
+            window_start=window_start,
+            window_end_exclusive=window_end_exclusive,
+            chunk_index=chunk_index,
+            batch_id=chunk_metadata.batch_id,
+            completed_day_evidence=completed_day_evidence,
+            current_poll=not completed_day_evidence,
         )
         if replay_only:
             receipt = ingest_client.submit(

@@ -780,6 +780,7 @@ def bind_classified_ingest_key(
         "window_start": chunk["window_start"],
         "window_end_exclusive": chunk["window_end_exclusive"],
         "chunk_index": chunk["index"] - 1,
+        "batch_id": chunk["batch_id"],
         "envelope": envelope,
     }
     digest = hashlib.sha256(
@@ -3556,6 +3557,83 @@ def run(base_url: str, mysql_container_id: str) -> None:
         ),
         multi_batch,
     )
+
+    # Recollect the same leading chunks with a changed full-batch identity and
+    # final SEC cursor. Before full-batch binding, the first two semantic keys
+    # collided with the prior payload and the second batch stopped at a 409.
+    changed_multi_observed = multi_observed + timedelta(seconds=2)
+    changed_multi_cursor = sec_current_cursor(changed_multi_observed)
+    changed_multi_batch = (
+        "global-batch:"
+        + hashlib.sha256(b"php73-v2-current-three-chunk-tail-change").hexdigest()
+    )
+    changed_multi_keys: list[str] = []
+    for chunk_index in (1, 2, 3):
+        changed_multi = json.loads(
+            json.dumps(current_payload, ensure_ascii=False)
+        )
+        changed_multi["envelope"]["retrieved_at"] = utc_text(
+            changed_multi_observed
+        )
+        changed_multi["envelope"]["records"] = []
+        changed_multi["envelope"]["raw_count"] = 0
+        changed_multi["envelope"]["request_count"] = (
+            1 if chunk_index == 3 else 0
+        )
+        changed_multi["envelope"]["exhausted"] = chunk_index == 3
+        changed_multi["envelope"]["next_cursor"] = (
+            changed_multi_cursor
+            if chunk_index == 3
+            else (
+                "global-ingest-chunk:2026-07-23:2026-07-24:"
+                f"{chunk_index}:3:{multi_scope}"
+            )
+        )
+        changed_multi["envelope"]["chunk"] = {
+            "index": chunk_index,
+            "count": 3,
+            "batch_raw_count": 0,
+            "batch_acknowledged_count": 0,
+            "batch_request_count": 1,
+            "batch_id": changed_multi_batch,
+            "window_start": "2026-07-23",
+            "window_end_exclusive": "2026-07-24",
+        }
+        changed_key = bind_classified_ingest_key(
+            changed_multi,
+            namespace="global-ingest-v2-current",
+        )
+        changed_multi_keys.append(changed_key)
+        changed_result, _ = request_json(
+            base_url,
+            "api.php/api/v2/ops/ingest",
+            method="POST",
+            token=OPS_TOKEN,
+            payload=changed_multi,
+        )
+        require(
+            changed_result.get("data", {}).get("idempotent") is False
+            and changed_result.get("data", {}).get("acknowledged_count") == 0,
+            repr(changed_result),
+        )
+    require(
+        all(
+            first_key != changed_key
+            for first_key, changed_key in zip(
+                multi_keys,
+                changed_multi_keys,
+                strict=True,
+            )
+        )
+        and mysql_execute(
+            mysql_container_id,
+            "SELECT GROUP_CONCAT(chunk_index ORDER BY chunk_index),"
+            "COUNT(*) FROM ci_global_ingest_receipts "
+            f"WHERE batch_id='{changed_multi_batch}';",
+        )
+        == "1,2,3\t3",
+        changed_multi_batch,
+    )
     # Restore the earlier current fixture cursor for the later exact-receipt
     # preview-bound heartbeat checks.
     set_sec_current_cursor(mysql_container_id, now)
@@ -3810,6 +3888,17 @@ def run(base_url: str, mysql_container_id: str) -> None:
     require(
         stored_core_conflict.get("error") == "global_document_hash_contract_conflict",
         repr(stored_core_conflict),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_global_ingest_receipts "
+            "WHERE batch_id='"
+            + stored_core_conflict_payload["envelope"]["chunk"]["batch_id"]
+            + "';",
+        )
+        == "0",
+        "a failed 409 transaction left an orphaned batch receipt prefix",
     )
     mysql_execute(
         mysql_container_id,

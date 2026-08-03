@@ -432,6 +432,7 @@ function v2_write_expected_classified_ingest_key(
         'window_start' => (string)$chunk['window_start'],
         'window_end_exclusive' => (string)$chunk['window_end_exclusive'],
         'chunk_index' => (int)$chunk['index'] - 1,
+        'batch_id' => (string)$chunk['batch_id'],
         'envelope' => $stableEnvelope,
     );
     return $namespace . ':'
@@ -1764,6 +1765,7 @@ function v2_normalize_ingest_payload(PDO $pdo, array $config, array $payload): a
             (string)$country,
             array(
                 'index' => (int)$chunk['index'],
+                'batch_id' => (string)$chunk['batch_id'],
                 'window_start' => (string)$windowStart,
                 'window_end_exclusive' => (string)$windowEnd,
             ),
