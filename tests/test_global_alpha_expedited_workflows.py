@@ -203,14 +203,74 @@ def test_expedited_preparation_rejects_telegram_recovery_payloads_and_smokes_404
 
 def test_expedited_evidence_binds_all_fixed_producers_and_gate() -> None:
     text, payload = workflow("global-alpha-expedited-preparation.yml")
+    dependency_pins = {
+        "feedparser==6.0.11",
+        "httpx==0.27.2",
+        "beautifulsoup4==4.12.3",
+        "python-dateutil==2.9.0.post0",
+        "PyYAML==6.0.2",
+    }
+    requirements = {
+        line.strip()
+        for line in (ROOT / "requirements.txt")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    assert dependency_pins <= requirements
+
+    drain = payload["jobs"]["drain_pages_producers"]
+    drain_names = step_names(drain)
+    preflight_install_index = drain_names.index(
+        "Install pinned evaluator preflight dependencies"
+    )
+    preflight_import_index = drain_names.index(
+        "Verify evaluator import closure before producer drain"
+    )
+    producer_drain_index = drain_names.index(
+        "Cancel and drain pre-fence Pages producers"
+    )
+    assert preflight_install_index < preflight_import_index < producer_drain_index
+    preflight_install = drain["steps"][preflight_install_index]["run"]
+    for pin in dependency_pins:
+        assert f'"{pin}"' in preflight_install
+    assert preflight_install.count("==") == len(dependency_pins)
+    assert "-r requirements.txt" not in preflight_install
+    preflight_import = drain["steps"][preflight_import_index]["run"]
+    assert (
+        "from curator.official_backfill import validate_checkpoint" in preflight_import
+    )
+
     evaluate = payload["jobs"]["evaluate"]
     names = step_names(evaluate)
     setup_index = names.index("Set up gate Python")
     assert names[setup_index + 1] == "Install pinned evaluator dependencies"
     evaluator_install = evaluate["steps"][setup_index + 1]["run"]
     assert "python -m pip install --disable-pip-version-check" in evaluator_install
-    assert '"httpx==0.27.2"' in evaluator_install
-    assert '"PyYAML==6.0.2"' in evaluator_install
+    for pin in dependency_pins:
+        assert f'"{pin}"' in evaluator_install
+    assert evaluator_install.count("==") == len(dependency_pins)
+    assert "-r requirements.txt" not in evaluator_install
+
+    _ci_text, ci = workflow("ci.yml")
+    ci_steps = ci["jobs"]["test"]["steps"]
+    ci_names = step_names(ci["jobs"]["test"])
+    ci_install_index = ci_names.index(
+        "Install expedited evaluator dependency closure"
+    )
+    ci_import_index = ci_names.index(
+        "Verify expedited evaluator imports before full requirements"
+    )
+    ci_full_install_index = ci_names.index("Install runtime dependencies")
+    assert ci_install_index < ci_import_index < ci_full_install_index
+    ci_install = ci_steps[ci_install_index]["run"]
+    for pin in dependency_pins:
+        assert f'"{pin}"' in ci_install
+    assert ci_install.count("==") == len(dependency_pins)
+    assert "-r requirements.txt" not in ci_install
+    ci_import = ci_steps[ci_import_index]["run"]
+    assert "from curator.official_backfill import validate_checkpoint" in ci_import
+
     resolver = next(
         step
         for step in evaluate["steps"]
