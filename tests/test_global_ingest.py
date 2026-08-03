@@ -519,6 +519,13 @@ def test_replay_only_requires_preexisting_idempotent_receipts() -> None:
 
 
 def test_content_idempotency_key_is_stable_for_exact_content() -> None:
+    classified_envelope = _envelope()
+    classified_batch_id = global_ingest_batch_id(
+        envelope=classified_envelope,
+        window_start=date(2026, 7, 23),
+        window_end_exclusive=date(2026, 7, 24),
+        code_revision=REVISION,
+    )
     first = content_idempotency_key(
         envelope=_envelope(),
         code_revision=REVISION,
@@ -535,23 +542,36 @@ def test_content_idempotency_key_is_stable_for_exact_content() -> None:
     assert first.startswith("global-ingest-v2:us:")
     assert changed != first
     current_poll = content_idempotency_key(
-        envelope=_envelope(),
+        envelope=classified_envelope,
         code_revision=REVISION,
         window_start=date(2026, 7, 23),
         window_end_exclusive=date(2026, 7, 24),
+        batch_id=classified_batch_id,
         current_poll=True,
     )
     assert current_poll.startswith("global-ingest-v2-current:us:")
     assert current_poll != first
     completed_day = content_idempotency_key(
-        envelope=_envelope(),
+        envelope=classified_envelope,
         code_revision=REVISION,
         window_start=date(2026, 7, 23),
         window_end_exclusive=date(2026, 7, 24),
+        batch_id=classified_batch_id,
         completed_day_evidence=True,
     )
     assert completed_day.startswith("global-ingest-v2-day:us:")
     assert completed_day != first
+    with pytest.raises(
+        GlobalIngestConfigurationError,
+        match="classified_ingest_requires_full_batch_identity",
+    ):
+        content_idempotency_key(
+            envelope=classified_envelope,
+            code_revision=REVISION,
+            window_start=date(2026, 7, 23),
+            window_end_exclusive=date(2026, 7, 24),
+            current_poll=True,
+        )
     with pytest.raises(
         GlobalIngestConfigurationError,
         match="conflicting_ingest_receipt_class",
@@ -574,16 +594,23 @@ def test_classified_key_matches_php73_line_separator_encoding() -> None:
             "nested_empty": {},
         },
     )
+    envelope = _envelope(raw_count=1, records=(record,))
     key = content_idempotency_key(
-        envelope=_envelope(raw_count=1, records=(record,)),
+        envelope=envelope,
         code_revision=REVISION,
         window_start=date(2026, 7, 23),
         window_end_exclusive=date(2026, 7, 24),
+        batch_id=global_ingest_batch_id(
+            envelope=envelope,
+            window_start=date(2026, 7, 23),
+            window_end_exclusive=date(2026, 7, 24),
+            code_revision=REVISION,
+        ),
         current_poll=True,
     )
     assert key == (
         "global-ingest-v2-current:us:"
-        "3d4c412a01646230813862d6de7971a092fbddbdc94f6431202ec851019fdcc3"
+        "82b8e04b9dba2ffe74ec1ba02c1b257977e32bc4a5773d3bdbf03747a5ccfc96"
     )
 
 
@@ -703,6 +730,24 @@ class _LargeConnector:
             request_count=1,
             records=records,
         )
+
+
+class _FixedEnvelopeConnector:
+    descriptor = SecDailyIndexConnector.descriptor
+
+    def __init__(self, envelope: GlobalConnectorEnvelope) -> None:
+        self.envelope = envelope
+
+    def fetch(
+        self,
+        request: GlobalConnectorRequest,
+        *,
+        eligibility: OfficialSourceRightEligibility,
+        eligibility_provider=None,
+        now=None,
+    ) -> GlobalConnectorEnvelope:
+        del request, eligibility, eligibility_provider, now
+        return self.envelope
 
 
 class _ChunkIngest:
@@ -853,6 +898,66 @@ def test_large_current_poll_keeps_request_proof_on_the_final_chunk() -> None:
         for _item, key, _chunk in ingest.submissions
     )
     assert result.chunk_count == 5
+
+
+def test_classified_chunk_keys_bind_the_complete_batch_identity() -> None:
+    records = tuple(_record(index) for index in range(1, 502))
+    first_envelope = replace(
+        _envelope(raw_count=600, records=records),
+        next_cursor="sec-current:tail-a",
+        exhausted=False,
+    )
+    changed_tail = replace(
+        _envelope(raw_count=601, records=records),
+        next_cursor="sec-current:tail-b",
+        exhausted=False,
+    )
+    first_ingest = _ChunkIngest()
+    changed_ingest = _ChunkIngest()
+
+    execute_global_ingest(
+        country_code="US",
+        connector=_FixedEnvelopeConnector(first_envelope),
+        issuers=(),
+        window_start=date(2026, 7, 23),
+        window_end_exclusive=date(2026, 7, 24),
+        code_revision=REVISION,
+        rights_client=_Rights(),
+        ingest_client=first_ingest,
+    )
+    execute_global_ingest(
+        country_code="US",
+        connector=_FixedEnvelopeConnector(changed_tail),
+        issuers=(),
+        window_start=date(2026, 7, 23),
+        window_end_exclusive=date(2026, 7, 24),
+        code_revision=REVISION,
+        rights_client=_Rights(),
+        ingest_client=changed_ingest,
+    )
+
+    first_chunks = first_ingest.submissions
+    changed_chunks = changed_ingest.submissions
+    assert len(first_chunks) == len(changed_chunks) == 3
+    # The first two chunk envelopes are byte-for-byte semantically equal. Only
+    # the complete batch's filtered total and final source cursor changed.
+    assert [item.to_payload() for item, _key, _chunk in first_chunks[:2]] == [
+        item.to_payload() for item, _key, _chunk in changed_chunks[:2]
+    ]
+    first_batch_ids = {chunk.batch_id for _item, _key, chunk in first_chunks}
+    changed_batch_ids = {
+        chunk.batch_id for _item, _key, chunk in changed_chunks
+    }
+    assert len(first_batch_ids) == len(changed_batch_ids) == 1
+    assert first_batch_ids.isdisjoint(changed_batch_ids)
+    assert all(
+        first_key != changed_key
+        for (_first, first_key, _first_chunk), (
+            _changed,
+            changed_key,
+            _changed_chunk,
+        ) in zip(first_chunks, changed_chunks, strict=True)
+    )
 
 
 def test_chunk_cursor_is_stable_across_collection_times() -> None:

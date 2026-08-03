@@ -2294,6 +2294,16 @@ def test_alpha_release_evidence_is_ops_only_and_database_derived():
 
     writer = V2_WRITE
     assert "v2_write_expected_classified_ingest_key" in writer
+    classified_key = writer[
+        writer.index("function v2_write_expected_classified_ingest_key") :
+        writer.index("function v2_write_valid_sec_current_cursor")
+    ]
+    assert "'batch_id' => (string)$chunk['batch_id']" in classified_key
+    classified_call = writer[
+        writer.index("$expectedClassifiedKey =") :
+        writer.index("if (!hash_equals($expectedClassifiedKey")
+    ]
+    assert "'batch_id' => (string)$chunk['batch_id']" in classified_call
     assert "global-ingest-v2-day" in writer
     assert "global-ingest-v2-current" in writer
     assert "daily-master-index" in writer
@@ -2445,6 +2455,7 @@ def test_sec_ingest_rejects_unclassified_receipts_before_any_write():
     smoke = (ROOT / "tests" / "php73_global_v2_smoke.py").read_text(
         encoding="utf-8"
     )
+    assert '"batch_id": chunk["batch_id"]' in smoke
     assert 'for unclassified_mode in ("apply", "replay")' in smoke
     assert '"php73-v2-sec-unclassified"' in smoke
     assert 'unclassified_sec["envelope"]["request_count"] = 0' in smoke

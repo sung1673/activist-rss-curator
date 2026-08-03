@@ -204,6 +204,13 @@ def test_expedited_preparation_rejects_telegram_recovery_payloads_and_smokes_404
 def test_expedited_evidence_binds_all_fixed_producers_and_gate() -> None:
     text, payload = workflow("global-alpha-expedited-preparation.yml")
     evaluate = payload["jobs"]["evaluate"]
+    names = step_names(evaluate)
+    setup_index = names.index("Set up gate Python")
+    assert names[setup_index + 1] == "Install pinned evaluator dependencies"
+    evaluator_install = evaluate["steps"][setup_index + 1]["run"]
+    assert "python -m pip install --disable-pip-version-check" in evaluator_install
+    assert '"httpx==0.27.2"' in evaluator_install
+    assert '"PyYAML==6.0.2"' in evaluator_install
     resolver = next(
         step
         for step in evaluate["steps"]
