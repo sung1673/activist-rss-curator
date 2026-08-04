@@ -4475,6 +4475,31 @@ def _validate_current_carry_event(
     }
 
 
+def _fresh_rejected_actor_basis_matches(
+    current: Sequence[Mapping[str, object]],
+    candidate: Sequence[Mapping[str, object]],
+) -> bool:
+    if current == candidate:
+        return True
+    if len(current) != len(candidate) or len(current) != 1:
+        return False
+    non_country_fields = tuple(
+        field for field in SAFE_ACTOR_FIELDS if field != "country_code"
+    )
+    for current_actor, candidate_actor in zip(current, candidate, strict=True):
+        if any(
+            current_actor.get(field) != candidate_actor.get(field)
+            for field in non_country_fields
+        ):
+            return False
+        if not (
+            candidate_actor.get("country_code") is None
+            and current_actor.get("country_code") == "KR"
+        ):
+            return False
+    return True
+
+
 def _validate_current_fresh_rejected_event(
     current: Mapping[str, object],
     *,
@@ -4559,7 +4584,22 @@ def _validate_current_fresh_rejected_event(
             _list(current.get("actors"), f"current rejected event {event_id}.actors")
         )
     ]
-    if current_actor_basis != approved_event.get("candidate_actors"):
+    candidate_actor_basis = [
+        _validate_candidate_actor(
+            raw,
+            f"approved rejected event {event_id}.candidate_actors[{index}]",
+        )
+        for index, raw in enumerate(
+            _list(
+                approved_event.get("candidate_actors"),
+                f"approved rejected event {event_id}.candidate_actors",
+            )
+        )
+    ]
+    if not _fresh_rejected_actor_basis_matches(
+        current_actor_basis,
+        candidate_actor_basis,
+    ):
         raise ExpeditedEditorialError(
             f"fresh carry-forward: rejected actor drift for {event_id}"
         )

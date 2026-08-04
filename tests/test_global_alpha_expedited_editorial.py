@@ -1732,6 +1732,108 @@ def test_fresh_rejected_e15_current_basis_is_fail_closed(
     assert client.review_calls == 0
 
 
+def test_fresh_rejected_e15_accepts_shared_actor_kr_country_enrichment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, common = _fresh_carry_common(monkeypatch)
+    event_id = editorial.FRESH_APPROVAL_EVENT_DECISIONS[14][0]
+    candidate_events = common["candidate"]["basis"]["events"]  # type: ignore[index]
+    candidate_event = next(
+        item for item in candidate_events if item["event_id"] == event_id
+    )
+    candidate_actor = candidate_event["actors"][0]
+    assert candidate_actor["country_code"] is None
+
+    # An approved event for the same global actor can enrich the shared actor
+    # record even though this rejected event remains otherwise unchanged.
+    current_event = client.events[event_id]
+    assert isinstance(current_event, dict)
+    current_actors = current_event["actors"]
+    assert isinstance(current_actors, list) and len(current_actors) == 1
+    current_actor = current_actors[0]
+    assert isinstance(current_actor, dict)
+    current_actor["country_code"] = "KR"
+
+    intent = _prepare_carry_from_common(client, common)
+    _, receipt, replay = publish_carry_forward_intent(
+        client,
+        intent=intent,
+        revision=str(common["revision"]),
+        intent_artifact=common["intent_artifact"],  # type: ignore[arg-type]
+        now=common["now"],  # type: ignore[arg-type]
+    )
+    outcomes = receipt["event_review_outcomes"]
+    assert isinstance(outcomes, list)
+    assert outcomes[14]["decision"] == "rejected"
+    assert outcomes[14]["result"] == "verified_unchanged"
+    assert receipt["event_mutations_applied"] == 0
+    assert replay["event_mutations_applied"] == 0
+    assert replay["idempotent_replay"] is True
+    assert client.review_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("drift", "mutated"),
+    [
+        ("country_code", "US"),
+        ("actor_id", "actor:other"),
+        ("display_name", "Other filer"),
+        ("actor_type", "company"),
+        ("actor_role", "target"),
+        ("count", None),
+    ],
+)
+def test_fresh_rejected_e15_rejects_non_kr_actor_enrichment_and_other_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    drift: str,
+    mutated: object,
+) -> None:
+    client, common = _fresh_carry_common(monkeypatch)
+    event_id = editorial.FRESH_APPROVAL_EVENT_DECISIONS[14][0]
+    event = client.events[event_id]
+    assert isinstance(event, dict)
+    actors = event["actors"]
+    assert isinstance(actors, list) and len(actors) == 1
+    actor = actors[0]
+    assert isinstance(actor, dict)
+    if drift == "count":
+        actors.append(copy.deepcopy(actor))
+    else:
+        actor[drift] = mutated
+    with pytest.raises(
+        ExpeditedEditorialError,
+        match="fresh carry-forward: rejected actor drift",
+    ):
+        _prepare_carry_from_common(client, common)
+    assert client.brief_calls == 0
+    assert client.review_calls == 0
+
+
+def test_fresh_rejected_actor_basis_rejects_order_drift() -> None:
+    first = {
+        "actor_id": "actor:first",
+        "display_name": "First filer",
+        "actor_type": "company",
+        "actor_role": "filer",
+        "country_code": None,
+    }
+    second = {
+        "actor_id": "actor:second",
+        "display_name": "Second filer",
+        "actor_type": "company",
+        "actor_role": "filer",
+        "country_code": None,
+    }
+    assert editorial._fresh_rejected_actor_basis_matches(
+        [first, second],
+        [first, second],
+    )
+    assert not editorial._fresh_rejected_actor_basis_matches(
+        [second, first],
+        [first, second],
+    )
+
+
 def test_fresh_profile_rejects_mixed_source_artifact_tuple(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
