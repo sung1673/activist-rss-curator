@@ -122,6 +122,22 @@ def test_collection_free_preview_allows_only_the_exact_pinned_90_day_fallback() 
     assert 'case "$CURRENT_LEGACY_SOURCE_KIND" in' in materialize
     assert "pages_artifact_tar)" in materialize
     assert "pinned_immutable_seed)" in materialize
+    assert "mkdir -p current-legacy-download current-legacy-site" not in materialize
+    assert materialize.index("mkdir -p current-legacy-download") < materialize.index(
+        'case "$CURRENT_LEGACY_SOURCE_KIND" in'
+    )
+    pages_branch = materialize[
+        materialize.index("pages_artifact_tar)") : materialize.index(
+            "pinned_immutable_seed)"
+        )
+    ]
+    pinned_branch = materialize[
+        materialize.index("pinned_immutable_seed)") : materialize.index(
+            'echo "::error::Unknown trusted current legacy source kind."'
+        )
+    ]
+    assert "mkdir -p current-legacy-site" in pages_branch
+    assert "mkdir -p current-legacy-site" not in pinned_branch
     assert 'find current-legacy-download -type f -name artifact.tar' in materialize
     assert "curator.expedited_legacy_recovery_bundle prepare-drill-site" in materialize
     assert '--archive current-legacy-pages.zip' in materialize

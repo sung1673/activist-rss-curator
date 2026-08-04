@@ -287,9 +287,10 @@ jobs:
           CURRENT_LEGACY_CODE_REVISION: ${{ steps.sources.outputs.current_legacy_code_revision }}
         run: |
           set -euo pipefail
-          mkdir -p current-legacy-download current-legacy-site
+          mkdir -p current-legacy-download
           case "$CURRENT_LEGACY_SOURCE_KIND" in
             pages_artifact_tar)
+              mkdir -p current-legacy-site
               unzip -q current-legacy-pages.zip -d current-legacy-download
               mapfile -t tarballs < <(
                 find current-legacy-download -type f -name artifact.tar -print
