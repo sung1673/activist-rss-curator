@@ -104,6 +104,17 @@ jobs:
               core.setFailed("Daily governance and current legacy Pages must be independent runs");
               return;
             }
+            const legacyRevision = String(process.env.LEGACY_CODE_REVISION || "").toLowerCase();
+            const legacyDigest = String(process.env.LEGACY_ARTIFACT_DIGEST || "").toLowerCase();
+            const legacyName = String(process.env.LEGACY_ARTIFACT_NAME || "").trim();
+            if (
+              !/^[0-9a-f]{40}$/.test(legacyRevision) ||
+              !digest(legacyDigest) ||
+              legacyName !== "legacy-pages-archive-seed"
+            ) {
+              core.setFailed("Pinned legacy artifact variables are invalid");
+              return;
+            }
             const daily = (await github.rest.actions.getWorkflowRun({
               owner, repo, run_id: Number(requestedDaily),
             })).data;
@@ -146,26 +157,29 @@ jobs:
               core.setFailed("Current legacy Pages source is not a successful trusted producer");
               return;
             }
+            const reusedPinnedRollbackSeed = requestedLegacyPages === legacyRunText;
+            const currentLegacyArtifactName = reusedPinnedRollbackSeed
+              ? legacyName
+              : "github-pages";
             const currentLegacyArtifacts = await github.paginate(
               github.rest.actions.listWorkflowRunArtifacts,
               {owner, repo, run_id: currentLegacy.id, per_page: 100},
             );
             const currentLegacyMatches = currentLegacyArtifacts.filter(
-              (item) => item.name === "github-pages" && !item.expired,
+              (item) => item.name === currentLegacyArtifactName && !item.expired,
             );
             if (
               currentLegacyMatches.length !== 1 ||
               !digest(currentLegacyMatches[0].digest)
             ) {
-              core.setFailed("Current legacy Pages run must have one immutable github-pages artifact");
+              core.setFailed("Current legacy Pages run must have one immutable expected artifact");
               return;
             }
-
-            const legacyRevision = String(process.env.LEGACY_CODE_REVISION || "").toLowerCase();
-            const legacyDigest = String(process.env.LEGACY_ARTIFACT_DIGEST || "").toLowerCase();
-            const legacyName = String(process.env.LEGACY_ARTIFACT_NAME || "").trim();
-            if (!/^[0-9a-f]{40}$/.test(legacyRevision) || !digest(legacyDigest) || !legacyName) {
-              core.setFailed("Pinned legacy artifact variables are invalid");
+            if (
+              reusedPinnedRollbackSeed &&
+              String(currentLegacyMatches[0].digest || "").toLowerCase() !== legacyDigest
+            ) {
+              core.setFailed("Pinned current legacy artifact digest changed");
               return;
             }
             const legacy = (await github.rest.actions.getWorkflowRun({
@@ -174,6 +188,7 @@ jobs:
             if (
               legacy.status !== "completed" ||
               legacy.conclusion !== "success" ||
+              legacy.event !== "workflow_dispatch" ||
               legacy.head_branch !== process.env.DEFAULT_BRANCH ||
               legacy.path !== ".github/workflows/build-feed.yml" ||
               legacy.head_repository?.full_name !== `${owner}/${repo}` ||
@@ -212,6 +227,14 @@ jobs:
             core.setOutput(
               "current_legacy_code_revision",
               String(currentLegacy.head_sha || "").toLowerCase(),
+            );
+            core.setOutput(
+              "current_legacy_source_kind",
+              reusedPinnedRollbackSeed ? "pinned_immutable_seed" : "pages_artifact_tar",
+            );
+            core.setOutput(
+              "reused_pinned_rollback_seed",
+              reusedPinnedRollbackSeed ? "true" : "false",
             );
             core.setOutput("legacy_run_id", String(legacy.id));
             core.setOutput("legacy_artifact_id", String(legacyMatches[0].id));
@@ -255,15 +278,44 @@ jobs:
 
       - name: Materialize and structurally verify the currently-served legacy source
         shell: bash
+        env:
+          CURRENT_LEGACY_SOURCE_KIND: ${{ steps.sources.outputs.current_legacy_source_kind }}
+          CURRENT_LEGACY_RUN_ID: ${{ steps.sources.outputs.current_legacy_run_id }}
+          CURRENT_LEGACY_ARTIFACT_ID: ${{ steps.sources.outputs.current_legacy_artifact_id }}
+          CURRENT_LEGACY_ARTIFACT_NAME: ${{ steps.sources.outputs.current_legacy_artifact_name }}
+          CURRENT_LEGACY_ARTIFACT_DIGEST: ${{ steps.sources.outputs.current_legacy_artifact_digest }}
+          CURRENT_LEGACY_CODE_REVISION: ${{ steps.sources.outputs.current_legacy_code_revision }}
         run: |
           set -euo pipefail
           mkdir -p current-legacy-download current-legacy-site
-          unzip -q current-legacy-pages.zip -d current-legacy-download
-          mapfile -t tarballs < <(
-            find current-legacy-download -type f -name artifact.tar -print
-          )
-          [[ "${#tarballs[@]}" -eq 1 ]]
-          tar -xf "${tarballs[0]}" -C current-legacy-site
+          case "$CURRENT_LEGACY_SOURCE_KIND" in
+            pages_artifact_tar)
+              unzip -q current-legacy-pages.zip -d current-legacy-download
+              mapfile -t tarballs < <(
+                find current-legacy-download -type f -name artifact.tar -print
+              )
+              [[ "${#tarballs[@]}" -eq 1 ]]
+              tar -xf "${tarballs[0]}" -C current-legacy-site
+              ;;
+            pinned_immutable_seed)
+              python -m curator.expedited_legacy_recovery_bundle prepare-drill-site \
+                --archive current-legacy-pages.zip \
+                --output current-legacy-site \
+                --receipt current-legacy-drill-receipt.json \
+                --source-run-id "$CURRENT_LEGACY_RUN_ID" \
+                --source-artifact-id "$CURRENT_LEGACY_ARTIFACT_ID" \
+                --source-artifact-name "$CURRENT_LEGACY_ARTIFACT_NAME" \
+                --source-code-revision "$CURRENT_LEGACY_CODE_REVISION" \
+                --source-artifact-digest "$CURRENT_LEGACY_ARTIFACT_DIGEST"
+              jq -e \
+                '.mode == "standard_90_day" and (.window_days >= 90)' \
+                current-legacy-drill-receipt.json >/dev/null
+              ;;
+            *)
+              echo "::error::Unknown trusted current legacy source kind."
+              exit 1
+              ;;
+          esac
           for required in CNAME 404.html feed.xml index.html; do
             test -f "current-legacy-site/$required"
             test ! -L "current-legacy-site/$required"
@@ -375,6 +427,8 @@ jobs:
           CURRENT_LEGACY_ARTIFACT_NAME: ${{ steps.sources.outputs.current_legacy_artifact_name }}
           CURRENT_LEGACY_ARTIFACT_DIGEST: ${{ steps.sources.outputs.current_legacy_artifact_digest }}
           CURRENT_LEGACY_CODE_REVISION: ${{ steps.sources.outputs.current_legacy_code_revision }}
+          CURRENT_LEGACY_SOURCE_KIND: ${{ steps.sources.outputs.current_legacy_source_kind }}
+          REUSED_PINNED_ROLLBACK_SEED: ${{ steps.sources.outputs.reused_pinned_rollback_seed }}
           LEGACY_RUN_ID: ${{ steps.sources.outputs.legacy_run_id }}
           LEGACY_ARTIFACT_ID: ${{ steps.sources.outputs.legacy_artifact_id }}
           LEGACY_ARTIFACT_NAME: ${{ steps.sources.outputs.legacy_artifact_name }}
@@ -382,6 +436,17 @@ jobs:
           LEGACY_CODE_REVISION: ${{ steps.sources.outputs.legacy_code_revision }}
         run: |
           set -euo pipefail
+          if [[ "$REUSED_PINNED_ROLLBACK_SEED" == "true" ]]; then
+            [[ "$CURRENT_LEGACY_SOURCE_KIND" == "pinned_immutable_seed" ]]
+            [[ "$CURRENT_LEGACY_RUN_ID" == "$LEGACY_RUN_ID" ]]
+            [[ "$CURRENT_LEGACY_ARTIFACT_ID" == "$LEGACY_ARTIFACT_ID" ]]
+            [[ "$CURRENT_LEGACY_ARTIFACT_NAME" == "$LEGACY_ARTIFACT_NAME" ]]
+            [[ "$CURRENT_LEGACY_ARTIFACT_DIGEST" == "$LEGACY_ARTIFACT_DIGEST" ]]
+            [[ "$CURRENT_LEGACY_CODE_REVISION" == "$LEGACY_CODE_REVISION" ]]
+          else
+            [[ "$REUSED_PINNED_ROLLBACK_SEED" == "false" ]]
+            [[ "$CURRENT_LEGACY_SOURCE_KIND" == "pages_artifact_tar" ]]
+          fi
           mkdir -p preview-provenance
           site_digest="$(find preview-site -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
           governance_digest="$(find preview-site/governance -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
@@ -400,6 +465,8 @@ jobs:
             --arg current_legacy_artifact_name "$CURRENT_LEGACY_ARTIFACT_NAME" \
             --arg current_legacy_artifact_digest "$CURRENT_LEGACY_ARTIFACT_DIGEST" \
             --arg current_legacy_code_revision "$CURRENT_LEGACY_CODE_REVISION" \
+            --arg current_legacy_source_kind "$CURRENT_LEGACY_SOURCE_KIND" \
+            --argjson reused_pinned_rollback_seed "$REUSED_PINNED_ROLLBACK_SEED" \
             --argjson legacy_run_id "$LEGACY_RUN_ID" \
             --argjson legacy_artifact_id "$LEGACY_ARTIFACT_ID" \
             --arg legacy_artifact_name "$LEGACY_ARTIFACT_NAME" \
@@ -415,6 +482,7 @@ jobs:
               created_at: $created_at,
               telegram_collection_executed: false,
               telegram_delivery_executed: false,
+              reused_pinned_rollback_seed: $reused_pinned_rollback_seed,
               daily_pages: {
                 run_id: $daily_run_id,
                 run_attempt: $daily_run_attempt,
@@ -428,7 +496,8 @@ jobs:
                 artifact_id: $current_legacy_artifact_id,
                 artifact_name: $current_legacy_artifact_name,
                 artifact_digest: $current_legacy_artifact_digest,
-                code_revision: $current_legacy_code_revision
+                code_revision: $current_legacy_code_revision,
+                source_kind: $current_legacy_source_kind
               },
               rollback_archive: {
                 run_id: $legacy_run_id,
