@@ -1780,6 +1780,7 @@ def test_fresh_rejected_e15_accepts_shared_actor_kr_country_enrichment(
         ("display_name", "Other filer"),
         ("actor_type", "company"),
         ("actor_role", "target"),
+        ("missing_country_code", None),
         ("count", None),
     ],
 )
@@ -1798,6 +1799,8 @@ def test_fresh_rejected_e15_rejects_non_kr_actor_enrichment_and_other_drift(
     assert isinstance(actor, dict)
     if drift == "count":
         actors.append(copy.deepcopy(actor))
+    elif drift == "missing_country_code":
+        actor.pop("country_code")
     else:
         actor[drift] = mutated
     with pytest.raises(
