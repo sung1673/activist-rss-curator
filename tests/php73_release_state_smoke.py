@@ -3559,6 +3559,246 @@ def exercise_event_identity_datetime_storage(
         "rejected reviewed ordinary event/document ID was persisted",
     )
 
+    rejected_event_id = "event:ci-rejected-correction-read-only"
+    rejected_document_id = "dart:20260724999011"
+    rejected_actor_id = "actor:ci-rejected-correction"
+    rejected_document = document(
+        rejected_document_id,
+        "dart",
+        source_right_id,
+        "CI rejected correction source receipt",
+    )
+    rejected_document["is_correction"] = True
+    rejected_event = incomplete_followup(
+        rejected_event_id,
+        rejected_document_id,
+        is_correction=True,
+        is_cancelled=False,
+    )
+    rejected_event.update(
+        {
+            "title": "CI rejected correction source event",
+            "actor_id": rejected_actor_id,
+            "identity_actor_id": rejected_actor_id,
+            "actor": {
+                "actor_id": rejected_actor_id,
+                "actor_type": "institution",
+                "display_name": "CI Rejected Correction Filer",
+                "company_id": None,
+                "review_status": "pending",
+                "record_status": "inactive",
+            },
+            "event_actor": {
+                "event_id": rejected_event_id,
+                "actor_id": rejected_actor_id,
+                "actor_role": "filer",
+                "review_status": "pending",
+            },
+        }
+    )
+    rejected_source_write = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(rejected_document, rejected_event),
+        expected_status=200,
+    )
+    require(rejected_source_write.get("ok") is True, repr(rejected_source_write))
+    mysql_execute(
+        mysql_container_id,
+        "UPDATE ci_governance_events SET review_status='rejected',"
+        "publication_status='draft',identity_status='rejected',"
+        "comparison_key=NULL,"
+        "updated_at=GREATEST(UTC_TIMESTAMP(),DATE_ADD(updated_at,INTERVAL 1 SECOND)) "
+        f"WHERE event_id='{rejected_event_id}';"
+        "INSERT INTO ci_editorial_revisions "
+        "(revision_id,entity_type,entity_id,field_name,previous_value,"
+        "revised_value,reason,revision_status,requested_by,reviewed_by,"
+        "reviewed_at,published_at,created_at,updated_at) VALUES "
+        f"('revision:ci-rejected-correction','event','{rejected_event_id}',"
+        "'review_status','pending','rejected','CI human rejection fixture',"
+        "'internal_rejected','ci-human-reviewer','ci-human-reviewer',"
+        "UTC_TIMESTAMP(),NULL,UTC_TIMESTAMP(),UTC_TIMESTAMP());",
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',identity_status,review_status,"
+            "publication_status,COALESCE(comparison_key,'<NULL>')) "
+            "FROM ci_governance_events "
+            f"WHERE event_id='{rejected_event_id}'",
+        )
+        == "rejected|rejected|draft|<NULL>",
+        "human-rejected DART fixture did not retain its fail-closed state",
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',a.review_status,a.record_status,"
+            "COALESCE(a.country_code,'<NULL>'),ea.review_status) "
+            "FROM ci_event_actors ea JOIN ci_actors a "
+            "ON a.actor_id=ea.actor_id "
+            f"WHERE ea.event_id='{rejected_event_id}' "
+            f"AND ea.actor_id='{rejected_actor_id}'",
+        )
+        == "pending|inactive|<NULL>|pending",
+        "rejected event must exercise the pending/inactive filer path",
+    )
+
+    def rejected_read_only_signature() -> str:
+        return mysql_execute(
+            mysql_container_id,
+            "SELECT CONCAT_WS('|',"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),payload_json,event_type,title,"
+            "COALESCE(summary,'<NULL>'),occurred_at,"
+            "COALESCE(deadline_at,'<NULL>'),importance,verification_status,"
+            "review_status,publication_status,identity_action,identity_target,"
+            "identity_actor_id,identity_effective_at,"
+            "COALESCE(identity_deadline_at,'<NULL>'),identity_status,"
+            "COALESCE(comparison_key,'<NULL>'),created_at,updated_at),256) "
+            "FROM ci_governance_events "
+            f"WHERE event_id='{rejected_event_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),payload_json,title,original_url,"
+            "content_hash,verification_status,publication_status,created_at,"
+            "updated_at),256) FROM ci_documents "
+            f"WHERE document_id='{rejected_document_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),document_id,relation_type,"
+            "position_no,created_at),256) FROM ci_event_documents "
+            f"WHERE event_id='{rejected_event_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),document_id,source_class,"
+            "source_key,first_observed_at,observed_at,payload_hash,payload_json,"
+            "created_at,updated_at),256) FROM ci_event_observations "
+            f"WHERE event_id='{rejected_event_id}'),"
+            "(SELECT SHA2(GROUP_CONCAT(CONCAT_WS(CHAR(31),revision_id,"
+            "field_name,revision_status,requested_by,reviewed_by,created_at,"
+            "updated_at) ORDER BY revision_id),256) "
+            "FROM ci_editorial_revisions "
+            f"WHERE entity_type='event' AND entity_id='{rejected_event_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),actor_type,display_name,"
+            "COALESCE(company_id,'<NULL>'),COALESCE(country_code,'<NULL>'),"
+            "review_status,record_status,created_at,updated_at),256) "
+            f"FROM ci_actors WHERE actor_id='{rejected_actor_id}'),"
+            "(SELECT SHA2(CONCAT_WS(CHAR(31),actor_role,review_status,"
+            "created_at,updated_at),256) FROM ci_event_actors "
+            f"WHERE event_id='{rejected_event_id}' "
+            f"AND actor_id='{rejected_actor_id}'))",
+        )
+
+    rejected_before = rejected_read_only_signature()
+    rejected_rows_before = followup_row_signature(
+        rejected_event_id,
+        rejected_document_id,
+    )
+    rejected_master_before = reviewed_company_master_signature()
+    rejected_master_rows_before = reviewed_company_master_rows()
+    require(
+        rejected_rows_before == "1|1|1|1|1|2"
+        and len(rejected_before.split("|")) == 7
+        and all(len(value) == 64 for value in rejected_before.split("|")),
+        "human-rejected fixture is incomplete: "
+        f"{rejected_rows_before!r} {rejected_before!r}",
+    )
+    rejected_read_only_ack = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot",
+        followup_payload(rejected_document, rejected_event),
+        expected_status=200,
+    )
+    require(
+        rejected_read_only_ack.get("ok") is True
+        and rejected_read_only_ack.get("upserted", {}).get("companies") == 1
+        and rejected_read_only_ack.get("upserted", {}).get("documents") == 1
+        and rejected_read_only_ack.get("upserted", {}).get("events") == 1
+        and rejected_read_only_ack.get("upserted", {}).get(
+            "event_documents"
+        )
+        == 1
+        and rejected_read_only_ack.get("upserted", {}).get(
+            "event_observations"
+        )
+        == 1,
+        repr(rejected_read_only_ack),
+    )
+    require(
+        rejected_read_only_signature() == rejected_before
+        and followup_row_signature(rejected_event_id, rejected_document_id)
+        == rejected_rows_before
+        and reviewed_company_master_signature() == rejected_master_before
+        and reviewed_company_master_rows() == rejected_master_rows_before,
+        "exact human-rejected DART replay changed state, rows, or timestamps",
+    )
+
+    rejected_mutated_actor_id = "actor:ci-rejected-correction-mutated"
+    rejected_mutations = (
+        (
+            "event_payload",
+            rejected_document,
+            {**rejected_event, "summary": "mutated rejected summary"},
+        ),
+        (
+            "document",
+            {**rejected_document, "title": "mutated rejected document"},
+            rejected_event,
+        ),
+        (
+            "actor",
+            rejected_document,
+            {
+                **rejected_event,
+                "actor_id": rejected_mutated_actor_id,
+                "identity_actor_id": rejected_mutated_actor_id,
+                "actor": {
+                    **rejected_event["actor"],
+                    "actor_id": rejected_mutated_actor_id,
+                },
+                "event_actor": {
+                    **rejected_event["event_actor"],
+                    "actor_id": rejected_mutated_actor_id,
+                },
+            },
+        ),
+        (
+            "actor_country",
+            rejected_document,
+            {
+                **rejected_event,
+                "actor": {
+                    **rejected_event["actor"],
+                    "country_code": "US",
+                },
+            },
+        ),
+    )
+    for mutation_label, mutated_document, mutated_event in rejected_mutations:
+        rejected_mutation = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(mutated_document, mutated_event),
+            expected_status=409,
+        )
+        require(
+            error_code(rejected_mutation)
+            == "followup_event_identity_conflict",
+            f"{mutation_label} entered rejected read-only ACK path: "
+            f"{rejected_mutation!r}",
+        )
+        require(
+            rejected_read_only_signature() == rejected_before
+            and followup_row_signature(rejected_event_id, rejected_document_id)
+            == rejected_rows_before
+            and reviewed_company_master_signature() == rejected_master_before
+            and reviewed_company_master_rows() == rejected_master_rows_before,
+            f"{mutation_label} changed human-rejected canonical state",
+        )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT COUNT(*) FROM ci_actors "
+            f"WHERE actor_id='{rejected_mutated_actor_id}'",
+        )
+        == "0",
+        "rejected actor mutation persisted a synthetic actor",
+    )
+
     reviewed_correction_event_id = "event:ci-reviewed-correction-observation"
     reviewed_correction_document_id = "dart:20260724999007"
     rejected_correction_document_id = "dart:20260724999008"
