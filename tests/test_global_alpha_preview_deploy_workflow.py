@@ -146,7 +146,11 @@ def test_collection_free_preview_allows_only_the_exact_pinned_90_day_fallback() 
     assert '--source-artifact-name "$CURRENT_LEGACY_ARTIFACT_NAME"' in materialize
     assert '--source-code-revision "$CURRENT_LEGACY_CODE_REVISION"' in materialize
     assert '--source-artifact-digest "$CURRENT_LEGACY_ARTIFACT_DIGEST"' in materialize
-    assert '.mode == "standard_90_day" and (.window_days >= 90)' in materialize
+    assert (
+        '.mode == "pinned_snapshot_90_day_fallback" and (.window_days >= 90)'
+        in materialize
+    )
+    assert '.mode == "standard_90_day"' not in pinned_branch
     assert "Unknown trusted current legacy source kind" in materialize
     assert "89_day_human_waiver" not in materialize
     assert "if unzip" not in materialize
