@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping
 
-from .expedited_legacy_compat import WAIVER_EXPIRES_AT
+from .expedited_legacy_compat import PINNED_SNAPSHOT_MODE, WAIVER_EXPIRES_AT
 from .expedited_legacy_recovery_bundle import (
     COMPATIBILITY_DIR,
     prepare_expedited_legacy_recovery_bundle,
@@ -286,6 +286,11 @@ def derive_final_approval_materials(
         if current_time >= WAIVER_EXPIRES_AT:
             raise FinalApprovalMaterialError(
                 "the 89-day exception expired; an actual 90-day archive is required"
+            )
+    elif mode == PINNED_SNAPSHOT_MODE:
+        if waiver_object is not None:
+            raise FinalApprovalMaterialError(
+                "a legacy waiver is forbidden for the pinned snapshot fallback"
             )
     elif mode == "standard_90_day":
         if waiver_object is not None:

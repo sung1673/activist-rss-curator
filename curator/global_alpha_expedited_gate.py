@@ -7,6 +7,20 @@ from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from .expedited_legacy_compat import (
+    PINNED_SNAPSHOT_ARTIFACT_DIGEST,
+    PINNED_SNAPSHOT_ARTIFACT_ID,
+    PINNED_SNAPSHOT_ARTIFACT_NAME,
+    PINNED_SNAPSHOT_CODE_REVISION,
+    PINNED_SNAPSHOT_DAY_COUNT,
+    PINNED_SNAPSHOT_MAX_PAGE_BYTES,
+    PINNED_SNAPSHOT_MIN_PAGE_BYTES,
+    PINNED_SNAPSHOT_MODE,
+    PINNED_SNAPSHOT_RUN_ID,
+    PINNED_SNAPSHOT_WAIVER,
+    PINNED_SNAPSHOT_WINDOW_END,
+    PINNED_SNAPSHOT_WINDOW_START,
+)
 from .global_alpha_pages_identity import (
     PagesArtifactIdentityError,
     validate_terminal_content_identity,
@@ -1660,7 +1674,11 @@ def validate_legacy_archive(
         "mode",
         "legacy-archive.compatibility_manifest",
     )
-    if mode not in {"89_day_human_waiver", "standard_90_day"}:
+    if mode not in {
+        "89_day_human_waiver",
+        "standard_90_day",
+        PINNED_SNAPSHOT_MODE,
+    }:
         raise ExpeditedAlphaEvidenceError(
             "legacy-archive: compatibility manifest mode is invalid"
         )
@@ -1698,12 +1716,12 @@ def validate_legacy_archive(
         "artifact_name",
         source_location,
     )
-    _production_identifier(
+    source_run_id = _production_identifier(
         source.get("run_id"),
         "run_id",
         source_location,
     )
-    _revision(
+    source_revision = _revision(
         source.get("code_revision"),
         "code_revision",
         source_location,
@@ -1780,6 +1798,7 @@ def validate_legacy_archive(
         )
 
     waiver_used = mode == "89_day_human_waiver"
+    pinned_snapshot_used = mode == PINNED_SNAPSHOT_MODE
     if waiver_used:
         waiver_approved_at = _timestamp(
             waiver.get("approved_at"),
@@ -1822,6 +1841,40 @@ def validate_legacy_archive(
             "reason",
             "legacy-archive.compatibility_manifest.waiver",
         )
+    elif pinned_snapshot_used:
+        audit = _mapping(
+            manifest.get("pinned_snapshot_audit"),
+            "legacy-archive.compatibility_manifest.pinned_snapshot_audit",
+        )
+        expected_audit = {
+            "actual_dated_report_count": PINNED_SNAPSHOT_DAY_COUNT,
+            "actual_window_start": PINNED_SNAPSHOT_WINDOW_START.isoformat(),
+            "actual_window_end": PINNED_SNAPSHOT_WINDOW_END.isoformat(),
+            "gap_count": 0,
+            "unique_dated_report_content_count": PINNED_SNAPSHOT_DAY_COUNT,
+            "duplicate_content_group_count": 0,
+            "contains_placeholder": False,
+            "is_synthetic": False,
+            "audited_min_page_bytes": PINNED_SNAPSHOT_MIN_PAGE_BYTES,
+            "audited_max_page_bytes": PINNED_SNAPSHOT_MAX_PAGE_BYTES,
+        }
+        if (
+            source_run_id != PINNED_SNAPSHOT_RUN_ID
+            or source_artifact_id_text != PINNED_SNAPSHOT_ARTIFACT_ID
+            or source_artifact_name != PINNED_SNAPSHOT_ARTIFACT_NAME
+            or source_revision != PINNED_SNAPSHOT_CODE_REVISION
+            or source_archive_digest
+            != PINNED_SNAPSHOT_ARTIFACT_DIGEST.removeprefix("sha256:")
+            or day_count != PINNED_SNAPSHOT_DAY_COUNT
+            or first_date != PINNED_SNAPSHOT_WINDOW_START
+            or last_date != PINNED_SNAPSHOT_WINDOW_END
+            or manifest.get("complete_legacy_feed_window") is not True
+            or dict(audit) != expected_audit
+            or dict(waiver) != PINNED_SNAPSHOT_WAIVER
+        ):
+            raise ExpeditedAlphaEvidenceError(
+                "legacy-archive: pinned snapshot fallback does not match the exact immutable pin"
+            )
     else:
         latest_required = _latest_recovery_date(evidence_as_of)
         current_kst_date = evidence_as_of.astimezone(KST).date()
@@ -1860,14 +1913,24 @@ def validate_legacy_archive(
                 and day_count == WAIVER_DAY_COUNT
                 and evidence_as_of < WAIVER_CUTOFF
             )
-            or (not waiver_used and day_count == 90),
+            or (
+                pinned_snapshot_used
+                and day_count == PINNED_SNAPSHOT_DAY_COUNT
+            )
+            or (
+                not waiver_used
+                and not pinned_snapshot_used
+                and day_count == 90
+            ),
             required=(
                 "bound eligible 89-day human waiver before cutoff or "
+                "the exact pinned 94-day snapshot fallback or "
                 "latest standard 90-day manifest"
             ),
             actual={
                 "consecutive_day_count": day_count,
                 "waiver_used": waiver_used,
+                "pinned_snapshot_used": pinned_snapshot_used,
                 "mode": mode,
             },
         ),
@@ -1885,6 +1948,7 @@ def validate_legacy_archive(
         "content_sha256": content_sha256,
         "waiver_sha256": waiver_digest,
         "waiver_used": waiver_used,
+        "pinned_snapshot_used": pinned_snapshot_used,
         "waiver_cutoff": WAIVER_CUTOFF.isoformat(),
     }, gates
 
