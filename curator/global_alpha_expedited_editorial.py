@@ -4575,15 +4575,18 @@ def _validate_current_fresh_rejected_event(
         raise ExpeditedEditorialError(
             f"fresh carry-forward: rejected official evidence drift for {event_id}"
         )
-    current_actor_basis = [
-        {
-            field: _mapping(raw, f"current rejected actor {index}").get(field)
-            for field in SAFE_ACTOR_FIELDS
-        }
-        for index, raw in enumerate(
-            _list(current.get("actors"), f"current rejected event {event_id}.actors")
+    current_actor_basis: list[dict[str, object]] = []
+    for index, raw in enumerate(
+        _list(current.get("actors"), f"current rejected event {event_id}.actors")
+    ):
+        current_actor = _mapping(raw, f"current rejected actor {index}")
+        if any(field not in current_actor for field in SAFE_ACTOR_FIELDS):
+            raise ExpeditedEditorialError(
+                f"fresh carry-forward: rejected actor drift for {event_id}"
+            )
+        current_actor_basis.append(
+            {field: current_actor[field] for field in SAFE_ACTOR_FIELDS}
         )
-    ]
     candidate_actor_basis = [
         _validate_candidate_actor(
             raw,
