@@ -766,13 +766,19 @@ def test_export_rejects_nonempty_or_malformed_actor_country(
 
 
 class _ApplyClient:
-    def __init__(self, candidate: Mapping[str, object]) -> None:
+    def __init__(
+        self,
+        candidate: Mapping[str, object],
+        *,
+        preserve_identity_target: bool = False,
+    ) -> None:
         basis = candidate["basis"]
         assert isinstance(basis, dict)
         self.events = {
             str(event["event_id"]): copy.deepcopy(event)
             for event in basis["events"]
         }
+        self.preserve_identity_target = preserve_identity_target
         self.brief_payload: dict[str, object] | None = None
 
     def health(self) -> dict[str, object]:
@@ -810,8 +816,10 @@ class _ApplyClient:
             assert isinstance(actor, dict)
             event_family = str(payload["event_family"])
             identity_action = str(payload["identity_action"]).casefold()
-            identity_target = editorial._normalize_identity(
+            identity_target = (
                 str(payload["identity_target"])
+                if self.preserve_identity_target
+                else editorial._normalize_identity(str(payload["identity_target"]))
             )
             comparison_key = _global_comparison_key(
                 issuer_id=event["issuer_id"],
@@ -1159,6 +1167,7 @@ def _fresh_carry_common(
     raw_events = [_event(index, country="KR") for index in range(30)]
     for index, event in enumerate(raw_events):
         event["title"] = f"Fresh official filing {index}"
+    raw_events[1]["title"] = "Fresh official    filing 1"
     candidate, template, _ = export_candidates(
         _ExportClient(raw_events),  # type: ignore[arg-type]
         expected_revision=REVISION,
@@ -1220,7 +1229,7 @@ def _fresh_carry_common(
     )
     monkeypatch.setattr(editorial, "FRESH_APPROVAL_EVENT_OVERRIDES", overrides)
     decisions = _fresh_human_decisions(candidate, template)
-    source = _ApplyClient(candidate)
+    source = _ApplyClient(candidate, preserve_identity_target=True)
     apply_common = {
         "client": source,
         "candidate": candidate,

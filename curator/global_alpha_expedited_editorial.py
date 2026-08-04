@@ -3529,8 +3529,9 @@ def _fresh_approved_canonical_basis(
                 "review_status": "approved",
                 "publication_status": "published",
                 "identity_action": _normalize_identity(action),
-                "identity_target": _normalize_identity(
-                    issuer_name + " — " + title
+                "identity_target": _legacy_approved_identity_target(
+                    issuer_name,
+                    title,
                 ),
                 "identity_actor_id": actor["actor_id"],
                 "identity_effective_at": effective_at,
