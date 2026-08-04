@@ -291,6 +291,113 @@ CARRY_FORWARD_ARTIFACT_FIELDS = (
     "artifact_digest",
 )
 
+LEGACY_APPROVAL_PROFILE_ID = "legacy:c2462769"
+FRESH_APPROVAL_PROFILE_ID = "fresh:38be7d45:20260804"
+FRESH_APPROVAL_SOURCE_REVISION = (
+    "38be7d450a6e7865d94798ab6b57f3688413f743"
+)
+FRESH_APPROVAL_CANDIDATE_SHA256 = (
+    "995a11f37b530869b2858f9aeb085bd7a9bf226f2c645d7afcb85d66280da0e7"
+)
+FRESH_APPROVAL_SOURCE_DECISION_SHA256 = (
+    "15a4212d7a246392dd3577b31f41d858c6755df9593528b0536ac0dd1de1dc78"
+)
+FRESH_APPROVAL_SOURCE_SEMANTIC_SHA256 = (
+    "908d668f1a5e559741f3dde979d20cca79e64537fcdd2aad40ee4719ce48f997"
+)
+FRESH_APPROVAL_HUMAN_SECTION_SHA256 = (
+    "bd2b06b99afad9dfaaab251bfc7a881e63e5509278d7d2d6d1198e9674e004de"
+)
+FRESH_APPROVAL_REVIEWER = "bside-owner-20260731"
+FRESH_APPROVAL_CANDIDATE_ARTIFACT = {
+    "run_id": 30909694091,
+    "artifact_id": 8892512377,
+    "artifact_name": (
+        "global-alpha-expedited-editorial-candidates-"
+        + FRESH_APPROVAL_SOURCE_REVISION
+    ),
+    "artifact_digest": (
+        "sha256:"
+        "329a32cb071f180d7af94877349077f58470b5a05936ae6da61cdf518b4baff7"
+    ),
+}
+FRESH_APPROVAL_PUBLICATION_ARTIFACT = {
+    "run_id": 30914113940,
+    "artifact_id": 8894369336,
+    "artifact_name": (
+        "global-alpha-expedited-editorial-publication-"
+        + FRESH_APPROVAL_SOURCE_REVISION
+        + "-30914113940-1"
+    ),
+    "artifact_digest": (
+        "sha256:"
+        "736c6360470928593e921787486e01a73cc9ed680b84835ee03170196027217d"
+    ),
+}
+FRESH_APPROVAL_SOURCE_EDITORIAL_BLOBS = {
+    ".github/workflows/global-alpha-expedited-editorial.yml": (
+        "c30c26b8329fce1fc2a7f5a1afc89258e8d73324"
+    ),
+    "curator/global_alpha_expedited_editorial.py": (
+        "d9d3bb523034c10990efa0935c3f26872a05d374"
+    ),
+}
+FRESH_APPROVAL_EVENT_DECISIONS = (
+    ("event:029d3183d684065834ae0a9a9f2adcb4", "approved"),
+    ("event:0617e5e75afdebaa5be9e127c66075b1", "approved"),
+    ("event:0b69804b3bb8be578bd47a37d7eb3824", "approved"),
+    ("event:0e08dd9c841444192ec045d50bf1ad76", "approved"),
+    ("event:11e854085314b158b474d3a49f00658e", "approved"),
+    ("event:0945d336bf2a2d8af2960be2f36636e1", "approved"),
+    ("event:1b031fed8eb49834fe3396b87b544ce4", "approved"),
+    ("event:e975a73b073329e6fd759f73f51f4cb1", "approved"),
+    ("event:8981ab8f22ecb089c452af901b459d93", "approved"),
+    ("event:2c89f24ab5fa6b85c5b7f47144d70e54", "approved"),
+    ("event:7bafa8ffe5deea63ab9fa8fa6571b535", "approved"),
+    ("event:6640909718061b08da5c1d8042a1e2a0", "approved"),
+    ("event:f4ae69ed0e533884b0083eca8ba05fd4", "approved"),
+    ("event:38bc673214e507b3568496c74d44614c", "approved"),
+    ("event:32cbeea255589c482f21056f9691c826", "rejected"),
+    ("event:0ea4feafba2982a5c6b7b3755a7b7892", "approved"),
+    ("event:bbf40f4e91e4b2362f5fb14a198f1351", "approved"),
+    ("event:8dafc899551b5d9266b9eae1ba1d5a12", "approved"),
+    ("event:42b850c245c4250d43e82d0795a4e06e", "approved"),
+    ("event:d919df9b205251a80212220372cc572e", "approved"),
+)
+FRESH_APPROVAL_EVENT_OVERRIDES = {
+    "event:0e08dd9c841444192ec045d50bf1ad76": {
+        "identity_action": "rights_issue_price_finalized",
+    },
+    "event:1b031fed8eb49834fe3396b87b544ce4": {
+        "event_family": "listing_status",
+        "identity_action": "listing_eligibility_improvement_plan_disclosed",
+    },
+    "event:e975a73b073329e6fd759f73f51f4cb1": {
+        "event_family": "listing_status",
+        "identity_action": (
+            "trading_suspension_for_share_consolidation_or_split"
+        ),
+    },
+    "event:7bafa8ffe5deea63ab9fa8fa6571b535": {
+        "event_family": "listing_status",
+        "identity_action": (
+            "trading_suspension_for_share_consolidation_or_split"
+        ),
+    },
+    "event:6640909718061b08da5c1d8042a1e2a0": {
+        "identity_action": "treasury_convertible_bond_early_acquisition",
+    },
+    "event:38bc673214e507b3568496c74d44614c": {
+        "identity_action": "rights_issue_initial_price_determined",
+    },
+    "event:bbf40f4e91e4b2362f5fb14a198f1351": {
+        "event_family": "listing_status",
+        "identity_action": (
+            "trading_suspension_for_share_consolidation_or_split"
+        ),
+    },
+}
+
 
 class ExpeditedEditorialError(ValueError):
     """Raised when protected editorial publication cannot fail closed."""
@@ -307,6 +414,27 @@ def _canonical_bytes(value: object) -> bytes:
 
 def canonical_sha256(value: object) -> str:
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+
+
+def _carry_forward_profile_id(
+    candidate_artifact: Mapping[str, object],
+    publication_artifact: Mapping[str, object],
+) -> str:
+    candidate = dict(candidate_artifact)
+    publication = dict(publication_artifact)
+    if (
+        candidate == LEGACY_APPROVAL_CANDIDATE_ARTIFACT
+        and publication == LEGACY_APPROVAL_PUBLICATION_ARTIFACT
+    ):
+        return LEGACY_APPROVAL_PROFILE_ID
+    if (
+        candidate == FRESH_APPROVAL_CANDIDATE_ARTIFACT
+        and publication == FRESH_APPROVAL_PUBLICATION_ARTIFACT
+    ):
+        return FRESH_APPROVAL_PROFILE_ID
+    raise ExpeditedEditorialError(
+        "carry-forward: source artifact profile is not approved"
+    )
 
 
 def _mapping(value: object, location: str) -> dict[str, object]:
@@ -3164,11 +3292,407 @@ def _legacy_approved_canonical_basis(
     }
 
 
+def _fresh_human_approval_chain_basis(
+    *,
+    event_decisions: Sequence[Mapping[str, object]],
+    pair_decisions: Sequence[Mapping[str, object]],
+    top5_decisions: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    return {
+        "profile_id": FRESH_APPROVAL_PROFILE_ID,
+        "source_code_revision": FRESH_APPROVAL_SOURCE_REVISION,
+        "source_candidate_artifact": dict(FRESH_APPROVAL_CANDIDATE_ARTIFACT),
+        "source_publication_artifact": dict(
+            FRESH_APPROVAL_PUBLICATION_ARTIFACT
+        ),
+        "source_candidate_sha256": FRESH_APPROVAL_CANDIDATE_SHA256,
+        "source_decision_sha256": FRESH_APPROVAL_SOURCE_DECISION_SHA256,
+        "source_semantic_receipt_sha256": (
+            FRESH_APPROVAL_SOURCE_SEMANTIC_SHA256
+        ),
+        "source_human_review_section_sha256": (
+            FRESH_APPROVAL_HUMAN_SECTION_SHA256
+        ),
+        "reviewer_reference": FRESH_APPROVAL_REVIEWER,
+        "event_decisions": list(event_decisions),
+        "same_event_pair_decisions": list(pair_decisions),
+        "top5_decisions": list(top5_decisions),
+    }
+
+
+def _fresh_approved_canonical_basis(
+    *,
+    candidate: Mapping[str, object],
+    candidate_artifact: Mapping[str, object],
+    publication_artifact: Mapping[str, object],
+    source_human_review: Mapping[str, object],
+    source_receipt: Mapping[str, object],
+    events: Sequence[Mapping[str, object]],
+    event_reviews: Sequence[Mapping[str, object]],
+    pair_reviews: Sequence[Mapping[str, object]],
+    top_reviews: Sequence[Mapping[str, object]],
+    source_outcomes: Mapping[str, Mapping[str, object]],
+    publication_top5: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    if (
+        candidate.get("code_revision") != FRESH_APPROVAL_SOURCE_REVISION
+        or candidate.get("candidate_sha256")
+        != FRESH_APPROVAL_CANDIDATE_SHA256
+        or dict(candidate_artifact) != FRESH_APPROVAL_CANDIDATE_ARTIFACT
+        or dict(publication_artifact)
+        != FRESH_APPROVAL_PUBLICATION_ARTIFACT
+        or source_human_review.get("section_sha256")
+        != FRESH_APPROVAL_HUMAN_SECTION_SHA256
+        or source_receipt.get("decision_sha256")
+        != FRESH_APPROVAL_SOURCE_DECISION_SHA256
+        or source_receipt.get("semantic_receipt_sha256")
+        != FRESH_APPROVAL_SOURCE_SEMANTIC_SHA256
+    ):
+        raise ExpeditedEditorialError(
+            "fresh approval profile: exact protected source required"
+        )
+    expected_decisions = [
+        {"event_id": event_id, "decision": decision}
+        for event_id, decision in FRESH_APPROVAL_EVENT_DECISIONS
+    ]
+    actual_decisions = [
+        {"event_id": item.get("event_id"), "decision": item.get("decision")}
+        for item in event_reviews
+    ]
+    if (
+        actual_decisions != expected_decisions
+        or [str(item.get("event_id")) for item in events]
+        != [item["event_id"] for item in expected_decisions]
+        or any(
+            item.get("reviewer_type") != "human"
+            or item.get("reviewer_reference") != FRESH_APPROVAL_REVIEWER
+            for item in event_reviews
+        )
+        or any(
+            item.get("decision") is not False
+            or item.get("reviewer_type") != "human"
+            or item.get("reviewer_reference") != FRESH_APPROVAL_REVIEWER
+            for item in pair_reviews
+        )
+        or any(
+            item.get("decision") != "approved"
+            or item.get("reviewer_type") != "human"
+            or item.get("reviewer_reference") != FRESH_APPROVAL_REVIEWER
+            for item in top_reviews
+        )
+    ):
+        raise ExpeditedEditorialError(
+            "fresh approval profile: exact 19/1, 40 and Top 5 decisions required"
+        )
+
+    approved_events: list[dict[str, object]] = []
+    for position, (candidate_event, decision_item) in enumerate(
+        zip(events, expected_decisions, strict=True),
+        start=1,
+    ):
+        location = f"fresh approval E{position:02d}"
+        event_id = str(candidate_event["event_id"])
+        if candidate_event.get("country") != "KR":
+            raise ExpeditedEditorialError(f"{location}: exact KR candidate required")
+        source_outcome = _mapping(
+            source_outcomes.get(event_id),
+            f"{location}.source_outcome",
+        )
+        if source_outcome.get("decision") != decision_item["decision"]:
+            raise ExpeditedEditorialError(
+                f"{location}: source outcome decision mismatch"
+            )
+        immutable = {
+            "position_no": position,
+            "event_id": event_id,
+            "decision": decision_item["decision"],
+            "issuer_id": candidate_event["issuer_id"],
+            "issuer_name": candidate_event["issuer_name"],
+            "country": "KR",
+            "title": candidate_event["title"],
+            "original_language": candidate_event["original_language"],
+            "occurred_at": candidate_event["occurred_at"],
+            "first_observed_at": candidate_event["first_observed_at"],
+            "official_documents": _carry_document_basis(
+                candidate_event.get("official_documents"),
+                f"{location}.official_documents",
+            ),
+            "official_evidence_count": candidate_event[
+                "official_evidence_count"
+            ],
+            "source_event_evidence_sha256": candidate_event[
+                "event_evidence_sha256"
+            ],
+            "source_final_updated_at": _timestamp(
+                source_outcome.get("final_updated_at"),
+                "final_updated_at",
+                f"{location}.source_outcome",
+            ),
+        }
+        if decision_item["decision"] == "rejected":
+            immutable.update(
+                {
+                    "event_family": candidate_event["event_family"],
+                    "summary": candidate_event["summary"],
+                    "importance": candidate_event["importance"],
+                    "current_status": candidate_event["current_status"],
+                    "deadline_at": candidate_event["deadline_at"],
+                    "verification_status": candidate_event[
+                        "verification_status"
+                    ],
+                    "change_type": candidate_event["change_type"],
+                    "identity_action": candidate_event["identity_action"],
+                    "identity_target": candidate_event["identity_target"],
+                    "identity_actor_id": candidate_event[
+                        "identity_actor_id"
+                    ],
+                    "identity_effective_at": candidate_event[
+                        "identity_effective_at"
+                    ],
+                    "identity_deadline_at": candidate_event[
+                        "identity_deadline_at"
+                    ],
+                    "comparison_key": candidate_event["comparison_key"],
+                    "candidate_actors": [
+                        _validate_candidate_actor(
+                            raw, f"{location}.actors[{index}]"
+                        )
+                        for index, raw in enumerate(
+                            _list(
+                                candidate_event.get("actors"),
+                                f"{location}.actors",
+                            )
+                        )
+                    ],
+                    "review_status": "rejected",
+                    "publication_status": "draft",
+                    "identity_status": "rejected",
+                }
+            )
+            approved_events.append(immutable)
+            continue
+
+        actors = [
+            _validate_candidate_actor(raw, f"{location}.actors[{index}]")
+            for index, raw in enumerate(
+                _list(candidate_event.get("actors"), f"{location}.actors")
+            )
+        ]
+        if len(actors) != 1:
+            raise ExpeditedEditorialError(
+                f"{location}: exactly one candidate filer required"
+            )
+        actor = {
+            **actors[0],
+            "country_code": "KR",
+            "actor_review_status": "approved",
+            "relation_review_status": "approved",
+            "record_status": "active",
+        }
+        override = FRESH_APPROVAL_EVENT_OVERRIDES.get(event_id, {})
+        family = str(override.get("event_family") or candidate_event["event_family"])
+        action = str(
+            override.get("identity_action") or candidate_event["identity_action"]
+        )
+        issuer_name = _text(
+            candidate_event.get("issuer_name"), "issuer_name", location, maximum=255
+        )
+        title = _text(
+            candidate_event.get("title"), "title", location, maximum=700
+        )
+        verification = _text(
+            candidate_event.get("verification_status"),
+            "verification_status",
+            location,
+            maximum=40,
+        )
+        effective_at = _timestamp(
+            candidate_event.get("occurred_at"), "occurred_at", location
+        )
+        immutable.update(
+            {
+                "event_family": family,
+                "summary": issuer_name + " — DART에 「" + title + "」 공시.",
+                "importance": candidate_event["importance"],
+                "current_status": (
+                    "corrected_official_disclosure"
+                    if verification == "corrected"
+                    else "official_disclosure_confirmed"
+                ),
+                "deadline_at": None,
+                "verification_status": (
+                    verification
+                    if verification in {"withdrawn", "corrected"}
+                    else "official"
+                ),
+                "change_type": candidate_event["change_type"],
+                "review_status": "approved",
+                "publication_status": "published",
+                "identity_action": _normalize_identity(action),
+                "identity_target": _normalize_identity(
+                    issuer_name + " — " + title
+                ),
+                "identity_actor_id": actor["actor_id"],
+                "identity_effective_at": effective_at,
+                "identity_deadline_at": None,
+                "identity_status": "complete",
+                "actor": actor,
+            }
+        )
+        immutable["comparison_key"] = _legacy_event_comparison_key(
+            immutable, f"{location}.approved"
+        )
+        approved_events.append(immutable)
+
+    pair_basis = [
+        {
+            "pair_id": item["pair_id"],
+            "left_document_id": item["left_document_id"],
+            "right_document_id": item["right_document_id"],
+            "decision": False,
+        }
+        for item in pair_reviews
+    ]
+    top_by_event = {str(item["event_id"]): item for item in top_reviews}
+    top5_basis = []
+    for item in publication_top5:
+        human = top_by_event.get(str(item["event_id"]))
+        if human is None:
+            raise ExpeditedEditorialError(
+                "fresh approval profile: Top 5 publication mismatch"
+            )
+        top5_basis.append(
+            {
+                "edition_id": item["edition_id"],
+                "event_id": item["event_id"],
+                "position_no": item["position_no"],
+                "decision": "approved",
+                "selection_reason": item["selection_reason"],
+                "official_evidence_count": item["official_evidence_count"],
+                "event_evidence_sha256": item["event_evidence_sha256"],
+                "public_eligible": True,
+            }
+        )
+    chain_basis = _fresh_human_approval_chain_basis(
+        event_decisions=expected_decisions,
+        pair_decisions=pair_basis,
+        top5_decisions=top5_basis,
+    )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "kind": APPROVED_CANONICAL_BASIS_KIND,
+        "profile_id": FRESH_APPROVAL_PROFILE_ID,
+        "source_candidate_sha256": FRESH_APPROVAL_CANDIDATE_SHA256,
+        "reviewer_reference": FRESH_APPROVAL_REVIEWER,
+        "source_candidate_artifact": dict(candidate_artifact),
+        "source_publication_artifact": dict(publication_artifact),
+        "source_decision_sha256": FRESH_APPROVAL_SOURCE_DECISION_SHA256,
+        "source_semantic_receipt_sha256": (
+            FRESH_APPROVAL_SOURCE_SEMANTIC_SHA256
+        ),
+        "source_human_review_section_sha256": (
+            FRESH_APPROVAL_HUMAN_SECTION_SHA256
+        ),
+        "source_editorial_blobs": dict(FRESH_APPROVAL_SOURCE_EDITORIAL_BLOBS),
+        "human_approval_chain_basis": chain_basis,
+        "human_approval_chain_sha256": canonical_sha256(chain_basis),
+        "event_decisions": expected_decisions,
+        "same_event_pair_decisions": pair_basis,
+        "top5_decisions": top5_basis,
+        "events": approved_events,
+    }
+
+
+def _validate_fresh_approved_canonical_basis(
+    basis: Mapping[str, object],
+    digest: object,
+) -> dict[str, object]:
+    expected_decisions = [
+        {"event_id": event_id, "decision": decision}
+        for event_id, decision in FRESH_APPROVAL_EVENT_DECISIONS
+    ]
+    pair_decisions = [
+        _mapping(item, f"fresh approved pairs[{index}]")
+        for index, item in enumerate(
+            _list(basis.get("same_event_pair_decisions"), "fresh approved pairs")
+        )
+    ]
+    top5_decisions = [
+        _mapping(item, f"fresh approved Top 5[{index}]")
+        for index, item in enumerate(
+            _list(basis.get("top5_decisions"), "fresh approved Top 5")
+        )
+    ]
+    chain_basis = _fresh_human_approval_chain_basis(
+        event_decisions=expected_decisions,
+        pair_decisions=pair_decisions,
+        top5_decisions=top5_decisions,
+    )
+    events = [
+        _mapping(item, f"fresh approved events[{index}]")
+        for index, item in enumerate(
+            _list(basis.get("events"), "fresh approved events")
+        )
+    ]
+    if (
+        basis.get("schema_version") != SCHEMA_VERSION
+        or basis.get("kind") != APPROVED_CANONICAL_BASIS_KIND
+        or basis.get("profile_id") != FRESH_APPROVAL_PROFILE_ID
+        or basis.get("source_candidate_sha256")
+        != FRESH_APPROVAL_CANDIDATE_SHA256
+        or basis.get("reviewer_reference") != FRESH_APPROVAL_REVIEWER
+        or basis.get("source_candidate_artifact")
+        != FRESH_APPROVAL_CANDIDATE_ARTIFACT
+        or basis.get("source_publication_artifact")
+        != FRESH_APPROVAL_PUBLICATION_ARTIFACT
+        or basis.get("source_decision_sha256")
+        != FRESH_APPROVAL_SOURCE_DECISION_SHA256
+        or basis.get("source_semantic_receipt_sha256")
+        != FRESH_APPROVAL_SOURCE_SEMANTIC_SHA256
+        or basis.get("source_human_review_section_sha256")
+        != FRESH_APPROVAL_HUMAN_SECTION_SHA256
+        or basis.get("source_editorial_blobs")
+        != FRESH_APPROVAL_SOURCE_EDITORIAL_BLOBS
+        or basis.get("event_decisions") != expected_decisions
+        or len(events) != EVENT_COUNT
+        or len(pair_decisions) != PAIR_COUNT
+        or any(item.get("decision") is not False for item in pair_decisions)
+        or len(top5_decisions) != TOP5_COUNT
+        or any(item.get("decision") != "approved" for item in top5_decisions)
+        or basis.get("human_approval_chain_basis") != chain_basis
+        or basis.get("human_approval_chain_sha256")
+        != canonical_sha256(chain_basis)
+    ):
+        raise ExpeditedEditorialError(
+            "fresh approved canonical basis: profile mismatch"
+        )
+    for expected, event in zip(expected_decisions, events, strict=True):
+        if (
+            event.get("event_id") != expected["event_id"]
+            or event.get("decision") != expected["decision"]
+        ):
+            raise ExpeditedEditorialError(
+                "fresh approved canonical basis: event decision mismatch"
+            )
+    claimed = _sha256(
+        digest,
+        "approved_canonical_basis_sha256",
+        "fresh approved canonical basis",
+    )
+    if claimed != canonical_sha256(basis):
+        raise ExpeditedEditorialError(
+            "fresh approved canonical basis: digest mismatch"
+        )
+    return dict(basis)
+
+
 def _validate_approved_canonical_basis(
     value: object,
     digest: object,
 ) -> dict[str, object]:
     basis = _mapping(value, "approved canonical basis")
+    if basis.get("profile_id") == FRESH_APPROVAL_PROFILE_ID:
+        return _validate_fresh_approved_canonical_basis(basis, digest)
     approval_artifact = _mapping(
         basis.get("human_approval_artifact"),
         "approved canonical basis.human_approval_artifact",
@@ -3950,6 +4474,155 @@ def _validate_current_carry_event(
     }
 
 
+def _validate_current_fresh_rejected_event(
+    current: Mapping[str, object],
+    *,
+    approved_event: Mapping[str, object],
+    source_outcome: Mapping[str, object],
+    candidate_marker: str,
+) -> dict[str, object]:
+    event_id = str(approved_event["event_id"])
+    if (
+        approved_event.get("decision") != "rejected"
+        or source_outcome.get("decision") != "rejected"
+        or str(current.get("event_id")) != event_id
+        or current.get("updated_at")
+        != approved_event.get("source_final_updated_at")
+        or current.get("updated_at") != source_outcome.get("final_updated_at")
+        or candidate_marker
+        not in str(current.get("latest_revision_reason") or "")
+        or current.get("review_status") != "rejected"
+        or current.get("publication_status") != "draft"
+        or current.get("identity_status") != "rejected"
+    ):
+        raise ExpeditedEditorialError(
+            f"fresh carry-forward: rejected state drift for {event_id}"
+        )
+    exact_fields = (
+        "issuer_id",
+        "country",
+        "title",
+        "original_language",
+        "event_family",
+        "summary",
+        "importance",
+        "current_status",
+        "deadline_at",
+        "verification_status",
+        "change_type",
+        "identity_action",
+        "identity_target",
+        "identity_actor_id",
+        "identity_effective_at",
+        "identity_deadline_at",
+        "comparison_key",
+        "occurred_at",
+        "first_observed_at",
+    )
+    for field in exact_fields:
+        if current.get(field) != approved_event.get(field):
+            raise ExpeditedEditorialError(
+                f"fresh carry-forward: rejected {field} drift for {event_id}"
+            )
+    current_documents = _carry_document_basis(
+        current.get("official_documents"),
+        f"current rejected event {event_id}.official_documents",
+    )
+    current_evidence_sha = _sha256(
+        current.get("event_evidence_sha256"),
+        "event_evidence_sha256",
+        f"current rejected event {event_id}",
+    )
+    expected_current_evidence_sha = canonical_sha256(
+        {
+            "event_id": event_id,
+            "event_updated_at": current.get("updated_at"),
+            "official_documents": current.get("official_documents"),
+        }
+    )
+    if (
+        current_documents != approved_event.get("official_documents")
+        or current.get("official_evidence_count")
+        != approved_event.get("official_evidence_count")
+        or current_evidence_sha != expected_current_evidence_sha
+    ):
+        raise ExpeditedEditorialError(
+            f"fresh carry-forward: rejected official evidence drift for {event_id}"
+        )
+    current_actor_basis = [
+        {
+            field: _mapping(raw, f"current rejected actor {index}").get(field)
+            for field in SAFE_ACTOR_FIELDS
+        }
+        for index, raw in enumerate(
+            _list(current.get("actors"), f"current rejected event {event_id}.actors")
+        )
+    ]
+    if current_actor_basis != approved_event.get("candidate_actors"):
+        raise ExpeditedEditorialError(
+            f"fresh carry-forward: rejected actor drift for {event_id}"
+        )
+    source_issuer_name = _text(
+        approved_event.get("issuer_name"),
+        "issuer_name",
+        f"approved rejected event {event_id}",
+        maximum=255,
+    )
+    current_issuer_name = _text(
+        current.get("issuer_name"),
+        "issuer_name",
+        f"current rejected event {event_id}",
+        maximum=255,
+    )
+    stable_basis = {
+        "event_id": event_id,
+        "issuer_id": approved_event["issuer_id"],
+        "country": approved_event["country"],
+        "official_documents": approved_event["official_documents"],
+        "official_evidence_count": approved_event["official_evidence_count"],
+    }
+    return {
+        "event_id": event_id,
+        "decision": "rejected",
+        "result": "verified_unchanged",
+        "final_review_status": "rejected",
+        "final_publication_status": "draft",
+        "final_identity_status": "rejected",
+        "final_updated_at": current.get("updated_at"),
+        "source_issuer_name": source_issuer_name,
+        "current_issuer_name": current_issuer_name,
+        "issuer_name_drift": current_issuer_name != source_issuer_name,
+        "source_event_evidence_sha256": approved_event[
+            "source_event_evidence_sha256"
+        ],
+        "current_event_evidence_sha256": current_evidence_sha,
+        "approved_event_basis_sha256": canonical_sha256(approved_event),
+        "immutable_evidence_basis_sha256": canonical_sha256(stable_basis),
+    }
+
+
+def _validate_current_profile_event(
+    current: Mapping[str, object],
+    *,
+    approved_event: Mapping[str, object],
+    source_outcome: Mapping[str, object],
+    candidate_marker: str,
+) -> dict[str, object]:
+    if approved_event.get("decision") == "rejected":
+        return _validate_current_fresh_rejected_event(
+            current,
+            approved_event=approved_event,
+            source_outcome=source_outcome,
+            candidate_marker=candidate_marker,
+        )
+    return _validate_current_carry_event(
+        current,
+        approved_event=approved_event,
+        source_outcome=source_outcome,
+        candidate_marker=candidate_marker,
+    )
+
+
 def _current_carry_event_with_snapshot(
     client: EditorialClient,
     event_id: str,
@@ -3982,6 +4655,12 @@ def _reconstruct_legacy_carry_forward_basis(
     now: datetime,
 ) -> dict[str, object]:
     """Reconstruct the one immutable human-approved source chain."""
+
+    if (
+        _carry_forward_profile_id(candidate_artifact, publication_artifact)
+        != LEGACY_APPROVAL_PROFILE_ID
+    ):
+        raise ExpeditedEditorialError("legacy carry-forward: profile mismatch")
 
     source_revision, events, pairs, top5 = _validate_carry_source_candidate(
         candidate
@@ -4061,6 +4740,7 @@ def _reconstruct_legacy_carry_forward_basis(
         )
     ]
     return {
+        "profile_id": LEGACY_APPROVAL_PROFILE_ID,
         "source_revision": source_revision,
         "events": events,
         "event_reviews": event_reviews,
@@ -4081,6 +4761,128 @@ def _reconstruct_legacy_carry_forward_basis(
             "source candidate",
         ),
     }
+
+
+def _reconstruct_fresh_carry_forward_basis(
+    *,
+    candidate: Mapping[str, object],
+    source_human_review: Mapping[str, object],
+    source_receipt: Mapping[str, object],
+    source_replay_receipt: Mapping[str, object],
+    candidate_artifact: Mapping[str, object],
+    publication_artifact: Mapping[str, object],
+    now: datetime,
+) -> dict[str, object]:
+    if (
+        _carry_forward_profile_id(candidate_artifact, publication_artifact)
+        != FRESH_APPROVAL_PROFILE_ID
+    ):
+        raise ExpeditedEditorialError("fresh carry-forward: profile mismatch")
+    source_revision, events, pairs, top5 = _validate_carry_source_candidate(
+        candidate
+    )
+    if source_revision != FRESH_APPROVAL_SOURCE_REVISION:
+        raise ExpeditedEditorialError(
+            "fresh carry-forward: exact source revision required"
+        )
+    event_reviews, pair_reviews, top_reviews = (
+        _validate_carry_source_human_review(
+            source_human_review,
+            candidate=candidate,
+            source_revision=source_revision,
+            events=events,
+            pairs=pairs,
+            top5=top5,
+            candidate_artifact=candidate_artifact,
+            now=now,
+            source_max_age=MAX_HUMAN_REVIEW_AGE,
+        )
+    )
+    source_outcomes, publication_top5 = _validate_carry_source_receipts(
+        source_receipt,
+        source_replay_receipt,
+        candidate=candidate,
+        source_revision=source_revision,
+        candidate_artifact=candidate_artifact,
+        event_reviews=event_reviews,
+        pair_reviews=pair_reviews,
+        top_reviews=top_reviews,
+        now=now,
+        source_max_age=MAX_HUMAN_REVIEW_AGE,
+    )
+    approved_basis = _fresh_approved_canonical_basis(
+        candidate=candidate,
+        candidate_artifact=candidate_artifact,
+        publication_artifact=publication_artifact,
+        source_human_review=source_human_review,
+        source_receipt=source_receipt,
+        events=events,
+        event_reviews=event_reviews,
+        pair_reviews=pair_reviews,
+        top_reviews=top_reviews,
+        source_outcomes=source_outcomes,
+        publication_top5=publication_top5,
+    )
+    approved_sha = canonical_sha256(approved_basis)
+    _validate_fresh_approved_canonical_basis(approved_basis, approved_sha)
+    approved_events = [
+        _mapping(item, f"fresh approved events[{index}]")
+        for index, item in enumerate(
+            _list(approved_basis.get("events"), "fresh approved events")
+        )
+    ]
+    return {
+        "profile_id": FRESH_APPROVAL_PROFILE_ID,
+        "source_revision": source_revision,
+        "events": events,
+        "event_reviews": event_reviews,
+        "pair_reviews": pair_reviews,
+        "top_reviews": top_reviews,
+        "source_outcomes": source_outcomes,
+        "publication_top5": publication_top5,
+        "candidate_artifact": dict(candidate_artifact),
+        "publication_artifact": dict(publication_artifact),
+        "approved_canonical_basis": approved_basis,
+        "approved_canonical_basis_sha256": approved_sha,
+        "approved_by_id": {
+            str(item["event_id"]): item for item in approved_events
+        },
+        "candidate_sha256": FRESH_APPROVAL_CANDIDATE_SHA256,
+    }
+
+
+def _reconstruct_carry_forward_basis(
+    *,
+    candidate: Mapping[str, object],
+    source_human_review: Mapping[str, object],
+    source_receipt: Mapping[str, object],
+    source_replay_receipt: Mapping[str, object],
+    candidate_artifact: Mapping[str, object],
+    publication_artifact: Mapping[str, object],
+    now: datetime,
+) -> dict[str, object]:
+    profile_id = _carry_forward_profile_id(
+        candidate_artifact, publication_artifact
+    )
+    if profile_id == FRESH_APPROVAL_PROFILE_ID:
+        return _reconstruct_fresh_carry_forward_basis(
+            candidate=candidate,
+            source_human_review=source_human_review,
+            source_receipt=source_receipt,
+            source_replay_receipt=source_replay_receipt,
+            candidate_artifact=candidate_artifact,
+            publication_artifact=publication_artifact,
+            now=now,
+        )
+    return _reconstruct_legacy_carry_forward_basis(
+        candidate=candidate,
+        source_human_review=source_human_review,
+        source_receipt=source_receipt,
+        source_replay_receipt=source_replay_receipt,
+        candidate_artifact=candidate_artifact,
+        publication_artifact=publication_artifact,
+        now=now,
+    )
 
 
 def _display_target_repair_reason(
@@ -4732,9 +5534,6 @@ def prepare_carry_forward_publication(
         or health.get("schema_version") != 12
     ):
         raise ExpeditedEditorialError("carry-forward: current health mismatch")
-    source_revision, events, pairs, top5 = _validate_carry_source_candidate(
-        candidate
-    )
     expected_candidate_artifact = _mapping(
         candidate_artifact, "candidate artifact"
     )
@@ -4745,77 +5544,51 @@ def prepare_carry_forward_publication(
         raise ExpeditedEditorialError("candidate artifact: exact fields required")
     if set(expected_publication_artifact) != set(CARRY_FORWARD_ARTIFACT_FIELDS):
         raise ExpeditedEditorialError("publication artifact: exact fields required")
-    source_max_age = _legacy_carry_forward_source_max_age(
-        now=now,
+    chain = _reconstruct_carry_forward_basis(
+        candidate=candidate,
+        source_human_review=source_human_review,
+        source_receipt=source_receipt,
+        source_replay_receipt=source_replay_receipt,
         candidate_artifact=expected_candidate_artifact,
         publication_artifact=expected_publication_artifact,
-    )
-    event_reviews, pair_reviews, top_reviews = (
-        _validate_carry_source_human_review(
-            source_human_review,
-            candidate=candidate,
-            source_revision=source_revision,
-            events=events,
-            pairs=pairs,
-            top5=top5,
-            candidate_artifact=expected_candidate_artifact,
-            now=now,
-            source_max_age=source_max_age,
-        )
-    )
-    source_outcomes, publication_top5 = _validate_carry_source_receipts(
-        source_receipt,
-        source_replay_receipt,
-        candidate=candidate,
-        source_revision=source_revision,
-        candidate_artifact=expected_candidate_artifact,
-        event_reviews=event_reviews,
-        pair_reviews=pair_reviews,
-        top_reviews=top_reviews,
         now=now,
-        source_max_age=source_max_age,
     )
-    approval_attestation = _load_legacy_human_approval_artifact()
-    approval_correction = _load_legacy_human_approval_correction()
-    approved_canonical_basis = _legacy_approved_canonical_basis(
-        candidate=candidate,
-        candidate_artifact=expected_candidate_artifact,
-        publication_artifact=expected_publication_artifact,
-        approval_attestation=approval_attestation,
-        approval_correction=approval_correction,
-        source_decision_sha256=source_receipt.get("decision_sha256"),
-        events=events,
-        event_reviews=event_reviews,
-        pair_reviews=pair_reviews,
-        top_reviews=top_reviews,
-        source_outcomes=source_outcomes,
-        publication_top5=publication_top5,
-    )
-    approved_canonical_basis_sha = canonical_sha256(
-        approved_canonical_basis
-    )
-    _validate_approved_canonical_basis(
-        approved_canonical_basis,
-        approved_canonical_basis_sha,
-    )
-    candidate_sha = _sha256(
-        candidate.get("candidate_sha256"),
-        "candidate_sha256",
-        "source candidate",
-    )
-    marker = "[expedited-candidate:" + candidate_sha + "]"
-    approved_events = [
-        _mapping(item, f"approved canonical basis.events[{index}]")
+    profile_id = str(chain["profile_id"])
+    source_revision = str(chain["source_revision"])
+    events = [
+        _mapping(item, f"carry-forward source event[{index}]")
+        for index, item in enumerate(_list(chain["events"], "source events"))
+    ]
+    event_reviews = [
+        _mapping(item, f"carry-forward event review[{index}]")
         for index, item in enumerate(
-            _list(
-                approved_canonical_basis.get("events"),
-                "approved canonical basis.events",
-            )
+            _list(chain["event_reviews"], "source event reviews")
         )
     ]
-    approved_by_id = {
-        str(item["event_id"]): item for item in approved_events
-    }
+    pair_reviews = [
+        _mapping(item, f"carry-forward pair review[{index}]")
+        for index, item in enumerate(
+            _list(chain["pair_reviews"], "source pair reviews")
+        )
+    ]
+    publication_top5 = [
+        _mapping(item, f"carry-forward Top 5[{index}]")
+        for index, item in enumerate(
+            _list(chain["publication_top5"], "source Top 5")
+        )
+    ]
+    source_outcomes = _mapping(chain["source_outcomes"], "source outcomes")
+    approved_canonical_basis = _mapping(
+        chain["approved_canonical_basis"], "approved canonical basis"
+    )
+    approved_canonical_basis_sha = _sha256(
+        chain["approved_canonical_basis_sha256"],
+        "approved_canonical_basis_sha256",
+        "carry-forward source chain",
+    )
+    candidate_sha = str(chain["candidate_sha256"])
+    marker = "[expedited-candidate:" + candidate_sha + "]"
+    approved_by_id = _mapping(chain["approved_by_id"], "approved event map")
 
     def verify_current_basis() -> list[dict[str, object]]:
         outcomes = []
@@ -4826,13 +5599,16 @@ def prepare_carry_forward_publication(
                 event_id,
                 revision,
             )
-            outcome = _validate_current_carry_event(
+            outcome = _validate_current_profile_event(
                 current,
                 approved_event=_mapping(
                     approved_by_id[event_id],
                     f"approved canonical event {event_id}",
                 ),
-                source_outcome=source_outcomes[event_id],
+                source_outcome=_mapping(
+                    source_outcomes[event_id],
+                    f"source outcome {event_id}",
+                ),
                 candidate_marker=marker,
             )
             outcome["current_snapshot_sha256"] = snapshot_sha
@@ -4939,6 +5715,7 @@ def prepare_carry_forward_publication(
     )
     carry_provenance = {
         "kind": CARRY_FORWARD_KIND,
+        "profile_id": profile_id,
         "source_code_revision": source_revision,
         "source_candidate_artifact": dict(expected_candidate_artifact),
         "source_publication_artifact": dict(expected_publication_artifact),
@@ -5074,13 +5851,27 @@ def _validate_carry_forward_intent(
         intent.get("source_publication_artifact"),
         "carry-forward intent.source_publication_artifact",
     )
+    profile_id = _carry_forward_profile_id(
+        candidate_artifact,
+        publication_artifact,
+    )
+    expected_event_decisions: list[dict[str, object]] | None
+    if profile_id == FRESH_APPROVAL_PROFILE_ID:
+        expected_candidate_sha = FRESH_APPROVAL_CANDIDATE_SHA256
+        expected_decision_sha = FRESH_APPROVAL_SOURCE_DECISION_SHA256
+        expected_section_sha = FRESH_APPROVAL_HUMAN_SECTION_SHA256
+        expected_event_decisions = [
+            {"event_id": event_id, "decision": decision}
+            for event_id, decision in FRESH_APPROVAL_EVENT_DECISIONS
+        ]
+    else:
+        expected_candidate_sha = LEGACY_APPROVAL_CANDIDATE_SHA256
+        expected_decision_sha = LEGACY_APPROVAL_SOURCE_DECISION_SHA256
+        expected_section_sha = None
+        expected_event_decisions = None
     if (
-        candidate_artifact != LEGACY_APPROVAL_CANDIDATE_ARTIFACT
-        or publication_artifact != LEGACY_APPROVAL_PUBLICATION_ARTIFACT
-        or intent.get("candidate_sha256")
-        != LEGACY_APPROVAL_CANDIDATE_SHA256
-        or intent.get("decision_sha256")
-        != LEGACY_APPROVAL_SOURCE_DECISION_SHA256
+        intent.get("candidate_sha256") != expected_candidate_sha
+        or intent.get("decision_sha256") != expected_decision_sha
     ):
         raise ExpeditedEditorialError(
             "carry-forward intent: approved source binding mismatch"
@@ -5092,6 +5883,11 @@ def _validate_carry_forward_intent(
     if (
         canonical_sha256(original_section)
         != intent.get("source_human_review_section_sha256")
+        or (
+            expected_section_sha is not None
+            and intent.get("source_human_review_section_sha256")
+            != expected_section_sha
+        )
         or original_section.get("ground_truth_source") != "human"
         or original_section.get("ai_generated_ground_truth") is not False
         or original_section.get("human_attestation") is not True
@@ -5109,14 +5905,31 @@ def _validate_carry_forward_intent(
     )
     if (
         carry.get("kind") != CARRY_FORWARD_KIND
+        or carry.get("profile_id") != profile_id
         or carry.get("event_mutations_applied") != 0
         or carry.get("source_candidate_artifact") != candidate_artifact
         or carry.get("source_publication_artifact")
         != publication_artifact
-        or carry.get("human_approval_chain_sha256")
-        != _legacy_human_approval_chain_sha256()
+        or carry.get("source_human_review_section_sha256")
+        != intent.get("source_human_review_section_sha256")
         or approved_basis.get("human_approval_chain_sha256")
         != carry.get("human_approval_chain_sha256")
+        or (
+            profile_id == LEGACY_APPROVAL_PROFILE_ID
+            and carry.get("human_approval_chain_sha256")
+            != _legacy_human_approval_chain_sha256()
+        )
+        or (
+            profile_id == FRESH_APPROVAL_PROFILE_ID
+            and (
+                carry.get("source_code_revision")
+                != FRESH_APPROVAL_SOURCE_REVISION
+                or carry.get(
+                    "source_publication_semantic_receipt_sha256"
+                )
+                != FRESH_APPROVAL_SOURCE_SEMANTIC_SHA256
+            )
+        )
         or len(_list(approved_basis.get("events"), "approved events"))
         != EVENT_COUNT
     ):
@@ -5176,7 +5989,30 @@ def _validate_carry_forward_intent(
         or len(top5) != TOP5_COUNT
         or len(outcomes) != EVENT_COUNT
         or not outcome_audit_valid
-        or any(item.get("decision") != "approved" for item in event_reviews)
+        or (
+            [
+                {
+                    "event_id": item.get("event_id"),
+                    "decision": item.get("decision"),
+                }
+                for item in event_reviews
+            ]
+            != (
+                expected_event_decisions
+                if expected_event_decisions is not None
+                else [
+                    {
+                        "event_id": item.get("event_id"),
+                        "decision": "approved",
+                    }
+                    for item in event_reviews
+                ]
+            )
+        )
+        or any(
+            item.get("decision") != event_reviews[index].get("decision")
+            for index, item in enumerate(outcomes)
+        )
         or any(
             item.get("result") != "verified_unchanged"
             or not SHA256.fullmatch(
@@ -5576,12 +6412,10 @@ def _parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument(
         "--display-target-repair-receipt",
         type=Path,
-        required=True,
     )
     prepare_parser.add_argument(
         "--display-target-repair-replay-receipt",
         type=Path,
-        required=True,
     )
     publish_parser = sub.add_parser("carry-forward-publish")
     publish_parser.add_argument("--intent", type=Path, required=True)
@@ -5596,12 +6430,10 @@ def _parser() -> argparse.ArgumentParser:
     publish_parser.add_argument(
         "--display-target-repair-receipt",
         type=Path,
-        required=True,
     )
     publish_parser.add_argument(
         "--display-target-repair-replay-receipt",
         type=Path,
-        required=True,
     )
     publish_parser.add_argument("--output-dir", type=Path, required=True)
     decode_parser = sub.add_parser("decode-decisions")
@@ -5660,6 +6492,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 artifact_digest=args.publication_artifact_digest,
                 location="source publication artifact",
             )
+            carry_profile_id = _carry_forward_profile_id(
+                candidate_artifact,
+                publication_artifact,
+            )
             source_human_review = _load_json(
                 args.source_human_review,
                 "source human review",
@@ -5706,14 +6542,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                 publication_artifact=publication_artifact,
                 now=datetime.now(timezone.utc),
             )
-            repair_receipt, repair_replay_receipt = (
-                validate_display_target_repair_receipts(
+            repair_paths = (
+                args.display_target_repair_receipt,
+                args.display_target_repair_replay_receipt,
+            )
+            if carry_profile_id == FRESH_APPROVAL_PROFILE_ID:
+                if any(path is not None for path in repair_paths):
+                    raise ExpeditedEditorialError(
+                        "fresh carry-forward: display-target repair inputs forbidden"
+                    )
+                repair_receipts = None
+            else:
+                if any(path is None for path in repair_paths):
+                    raise ExpeditedEditorialError(
+                        "legacy carry-forward: both display-target repair inputs required"
+                    )
+                repair_receipts = validate_display_target_repair_receipts(
                     _load_json(
-                        args.display_target_repair_receipt,
+                        repair_paths[0],
                         "display-target repair receipt",
                     ),
                     _load_json(
-                        args.display_target_repair_replay_receipt,
+                        repair_paths[1],
                         "display-target repair replay receipt",
                     ),
                     revision=revision,
@@ -5722,19 +6572,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "carry-forward intent provenance",
                     ).get("approved_canonical_basis_sha256"),
                 )
-            )
             _write_json(
                 args.output_dir / "carry-forward-intent.json",
                 intent,
             )
-            _write_json(
-                args.output_dir / "display-target-repair-receipt.json",
-                repair_receipt,
-            )
-            _write_json(
-                args.output_dir / "display-target-repair-replay-receipt.json",
-                repair_replay_receipt,
-            )
+            if repair_receipts is not None:
+                _write_json(
+                    args.output_dir / "display-target-repair-receipt.json",
+                    repair_receipts[0],
+                )
+                _write_json(
+                    args.output_dir
+                    / "display-target-repair-replay-receipt.json",
+                    repair_receipts[1],
+                )
             print(
                 "expedited editorial carry-forward intent verified: "
                 "event_mutations=0 brief_mutations=0 "
@@ -5753,23 +6604,49 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.intent,
                 "carry-forward intent",
             )
-            repair_receipt, repair_replay_receipt = (
-                validate_display_target_repair_receipts(
+            validated_intent = _validate_carry_forward_intent(
+                frozen_intent,
+                revision=revision,
+            )
+            carry_profile_id = _text(
+                _mapping(
+                    validated_intent.get("carry_forward"),
+                    "carry-forward intent provenance",
+                ).get("profile_id"),
+                "profile_id",
+                "carry-forward intent provenance",
+                maximum=96,
+            )
+            repair_paths = (
+                args.display_target_repair_receipt,
+                args.display_target_repair_replay_receipt,
+            )
+            if carry_profile_id == FRESH_APPROVAL_PROFILE_ID:
+                if any(path is not None for path in repair_paths):
+                    raise ExpeditedEditorialError(
+                        "fresh carry-forward: display-target repair inputs forbidden"
+                    )
+                repair_receipts = None
+            else:
+                if any(path is None for path in repair_paths):
+                    raise ExpeditedEditorialError(
+                        "legacy carry-forward: both display-target repair inputs required"
+                    )
+                repair_receipts = validate_display_target_repair_receipts(
                     _load_json(
-                        args.display_target_repair_receipt,
+                        repair_paths[0],
                         "display-target repair receipt",
                     ),
                     _load_json(
-                        args.display_target_repair_replay_receipt,
+                        repair_paths[1],
                         "display-target repair replay receipt",
                     ),
                     revision=revision,
                     approved_canonical_basis_sha256=_mapping(
-                        frozen_intent.get("carry_forward"),
+                        validated_intent.get("carry_forward"),
                         "carry-forward intent provenance",
                     ).get("approved_canonical_basis_sha256"),
                 )
-            )
             human_review, receipt, replay = publish_carry_forward_intent(
                 client,
                 intent=frozen_intent,
@@ -5786,14 +6663,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.output_dir / "publication-replay-receipt.json",
                 replay,
             )
-            _write_json(
-                args.output_dir / "display-target-repair-receipt.json",
-                repair_receipt,
-            )
-            _write_json(
-                args.output_dir / "display-target-repair-replay-receipt.json",
-                repair_replay_receipt,
-            )
+            if repair_receipts is not None:
+                _write_json(
+                    args.output_dir / "display-target-repair-receipt.json",
+                    repair_receipts[0],
+                )
+                _write_json(
+                    args.output_dir
+                    / "display-target-repair-replay-receipt.json",
+                    repair_receipts[1],
+                )
             print(
                 "expedited editorial carry-forward verified: "
                 "event_mutations=0 "

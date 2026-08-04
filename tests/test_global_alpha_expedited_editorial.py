@@ -1084,6 +1084,196 @@ def _published_carry_source(
     return candidate, human_review, receipt, replay, source
 
 
+def _fresh_human_decisions(
+    candidate: Mapping[str, object],
+    template: Mapping[str, object],
+) -> dict[str, object]:
+    decisions = _legacy_human_decisions(candidate, template)
+    events = candidate["basis"]["events"]  # type: ignore[index]
+    reviews = decisions["event_reviews"]
+    assert isinstance(events, list) and isinstance(reviews, list)
+    for position, (event, review) in enumerate(
+        zip(events, reviews, strict=True), start=1
+    ):
+        assert isinstance(event, dict) and isinstance(review, dict)
+        payload = review["review_payload"]
+        assert isinstance(payload, dict)
+        review["reviewer_reference"] = editorial.FRESH_APPROVAL_REVIEWER
+        if position == 15:
+            review["decision"] = "rejected"
+            payload["decision"] = "reject"
+            for field in (
+                "event_family",
+                "identity_action",
+                "identity_target",
+                "identity_effective_at",
+                "identity_deadline_at",
+                "importance",
+                "summary",
+                "current_status",
+                "actor",
+                "merge_into_event_id",
+            ):
+                payload[field] = None
+            payload["reason"] = "Fresh human rejection E15"
+            continue
+        override = editorial.FRESH_APPROVAL_EVENT_OVERRIDES.get(
+            str(event["event_id"]), {}
+        )
+        payload.update(
+            {
+                "event_family": override.get(
+                    "event_family", event["event_family"]
+                ),
+                "identity_action": override.get(
+                    "identity_action", event["identity_action"]
+                ),
+                "identity_target": (
+                    str(event["issuer_name"]) + " — " + str(event["title"])
+                ),
+                "identity_effective_at": event["occurred_at"],
+                "identity_deadline_at": None,
+                "summary": (
+                    str(event["issuer_name"])
+                    + " — DART에 「"
+                    + str(event["title"])
+                    + "」 공시."
+                ),
+                "current_status": "official_disclosure_confirmed",
+                "reason": f"Fresh human approval E{position:02d}",
+            }
+        )
+    decisions["reviewer_reference"] = editorial.FRESH_APPROVAL_REVIEWER
+    for group in ("same_event_pair_reviews", "top5_reviews"):
+        items = decisions[group]
+        assert isinstance(items, list)
+        for item in items:
+            assert isinstance(item, dict)
+            item["reviewer_reference"] = editorial.FRESH_APPROVAL_REVIEWER
+    return decisions
+
+
+def _fresh_carry_common(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[_CarryClient, dict[str, object]]:
+    raw_events = [_event(index, country="KR") for index in range(30)]
+    for index, event in enumerate(raw_events):
+        event["title"] = f"Fresh official filing {index}"
+    candidate, template, _ = export_candidates(
+        _ExportClient(raw_events),  # type: ignore[arg-type]
+        expected_revision=REVISION,
+    )
+    candidate_events = candidate["basis"]["events"]  # type: ignore[index]
+    assert isinstance(candidate_events, list)
+    event_ids = [str(item["event_id"]) for item in candidate_events]
+    decisions_profile = tuple(
+        (event_id, "rejected" if position == 15 else "approved")
+        for position, event_id in enumerate(event_ids, start=1)
+    )
+    override_positions = {
+        4: {"identity_action": "rights_issue_price_finalized"},
+        7: {
+            "event_family": "listing_status",
+            "identity_action": "listing_eligibility_improvement_plan_disclosed",
+        },
+        8: {
+            "event_family": "listing_status",
+            "identity_action": (
+                "trading_suspension_for_share_consolidation_or_split"
+            ),
+        },
+        11: {
+            "event_family": "listing_status",
+            "identity_action": (
+                "trading_suspension_for_share_consolidation_or_split"
+            ),
+        },
+        12: {
+            "identity_action": "treasury_convertible_bond_early_acquisition"
+        },
+        14: {"identity_action": "rights_issue_initial_price_determined"},
+        17: {
+            "event_family": "listing_status",
+            "identity_action": (
+                "trading_suspension_for_share_consolidation_or_split"
+            ),
+        },
+    }
+    overrides = {
+        event_ids[position - 1]: value
+        for position, value in override_positions.items()
+    }
+    monkeypatch.setattr(editorial, "FRESH_APPROVAL_SOURCE_REVISION", REVISION)
+    monkeypatch.setattr(
+        editorial, "FRESH_APPROVAL_CANDIDATE_ARTIFACT", TEST_CANDIDATE_ARTIFACT
+    )
+    monkeypatch.setattr(
+        editorial,
+        "FRESH_APPROVAL_PUBLICATION_ARTIFACT",
+        TEST_PUBLICATION_ARTIFACT,
+    )
+    monkeypatch.setattr(
+        editorial, "FRESH_APPROVAL_CANDIDATE_SHA256", candidate["candidate_sha256"]
+    )
+    monkeypatch.setattr(
+        editorial, "FRESH_APPROVAL_EVENT_DECISIONS", decisions_profile
+    )
+    monkeypatch.setattr(editorial, "FRESH_APPROVAL_EVENT_OVERRIDES", overrides)
+    decisions = _fresh_human_decisions(candidate, template)
+    source = _ApplyClient(candidate)
+    apply_common = {
+        "client": source,
+        "candidate": candidate,
+        "decisions": decisions,
+        "revision": REVISION,
+        "candidate_run_id": 123,
+        "candidate_artifact_id": 456,
+        "candidate_artifact_name": TEST_CANDIDATE_ARTIFACT["artifact_name"],
+        "candidate_artifact_digest": ARTIFACT_DIGEST,
+        "now": datetime.fromisoformat(NOW.replace("Z", "+00:00")),
+    }
+    human_review, receipt = apply_publication(**apply_common)  # type: ignore[arg-type]
+    _, replay = apply_publication(**apply_common)  # type: ignore[arg-type]
+    monkeypatch.setattr(
+        editorial,
+        "FRESH_APPROVAL_SOURCE_DECISION_SHA256",
+        receipt["decision_sha256"],
+    )
+    monkeypatch.setattr(
+        editorial,
+        "FRESH_APPROVAL_SOURCE_SEMANTIC_SHA256",
+        receipt["semantic_receipt_sha256"],
+    )
+    monkeypatch.setattr(
+        editorial,
+        "FRESH_APPROVAL_HUMAN_SECTION_SHA256",
+        human_review["section_sha256"],
+    )
+    revision = "c" * 40
+    client = _CarryClient(source.events, revision=revision)
+    return client, {
+        "client": client,
+        "candidate": candidate,
+        "source_human_review": human_review,
+        "source_receipt": receipt,
+        "source_replay_receipt": replay,
+        "revision": revision,
+        "candidate_artifact": TEST_CANDIDATE_ARTIFACT,
+        "publication_artifact": TEST_PUBLICATION_ARTIFACT,
+        "intent_artifact": {
+            "run_id": 1001,
+            "artifact_id": 2001,
+            "artifact_name": (
+                "global-alpha-expedited-editorial-carry-intent-"
+                + revision
+                + "-1001-1"
+            ),
+            "artifact_digest": "sha256:" + "9" * 64,
+        },
+        "now": datetime.fromisoformat(CARRY_NOW.replace("Z", "+00:00")),
+    }
+
+
 def _carry_common(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -1454,6 +1644,97 @@ def test_code_only_sha_carry_forward_preserves_human_review_without_event_mutati
         "source_human_review"
     ]["same_event_pair_reviews"]  # type: ignore[index]
     assert receipt["top5"] == common["source_receipt"]["top5"]  # type: ignore[index]
+
+
+def test_fresh_carry_forward_preserves_exact_19_1_40_5_without_event_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, common = _fresh_carry_common(monkeypatch)
+    before = copy.deepcopy(client.events)
+    intent = _prepare_carry_from_common(client, common)
+    human, receipt, replay = publish_carry_forward_intent(
+        client,
+        intent=intent,
+        revision=str(common["revision"]),
+        intent_artifact=common["intent_artifact"],  # type: ignore[arg-type]
+        now=common["now"],  # type: ignore[arg-type]
+    )
+    event_reviews = human["event_reviews"]
+    pairs = human["same_event_pair_reviews"]
+    top5 = human["top5_reviews"]
+    outcomes = receipt["event_review_outcomes"]
+    assert isinstance(event_reviews, list)
+    assert isinstance(pairs, list)
+    assert isinstance(top5, list)
+    assert isinstance(outcomes, list)
+    assert [item["decision"] for item in event_reviews].count("approved") == 19
+    assert [item["decision"] for item in event_reviews].count("rejected") == 1
+    assert event_reviews[14]["decision"] == "rejected"
+    assert all(item["decision"] is False for item in pairs)
+    assert len(top5) == TOP5_COUNT
+    assert all(item["decision"] == "approved" for item in top5)
+    assert outcomes[14]["decision"] == "rejected"
+    assert outcomes[14]["final_review_status"] == "rejected"
+    assert outcomes[14]["final_publication_status"] == "draft"
+    assert outcomes[14]["final_identity_status"] == "rejected"
+    assert outcomes[14]["result"] == "verified_unchanged"
+    rejected_id = event_reviews[14]["event_id"]
+    assert rejected_id not in {item["event_id"] for item in receipt["top5"]}
+    assert client.events == before
+    assert client.review_calls == 0
+    assert client.event_calls == EVENT_COUNT * 2
+    assert receipt["event_mutations_applied"] == 0
+    assert replay["event_mutations_applied"] == 0
+    assert replay["idempotent_replay"] is True
+    assert receipt["semantic_receipt_sha256"] == replay[
+        "semantic_receipt_sha256"
+    ]
+    assert intent["carry_forward"]["profile_id"] == (  # type: ignore[index]
+        editorial.FRESH_APPROVAL_PROFILE_ID
+    )
+
+
+@pytest.mark.parametrize("drift", ["state", "evidence"])
+def test_fresh_rejected_e15_current_basis_is_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    drift: str,
+) -> None:
+    client, common = _fresh_carry_common(monkeypatch)
+    event_id = editorial.FRESH_APPROVAL_EVENT_DECISIONS[14][0]
+    event = client.events[event_id]
+    assert isinstance(event, dict)
+    if drift == "state":
+        event["publication_status"] = "published"
+    else:
+        documents = event["official_documents"]
+        assert isinstance(documents, list)
+        document = documents[0]
+        assert isinstance(document, dict)
+        document["content_hash"] = "f" * 64
+    with pytest.raises(
+        ExpeditedEditorialError,
+        match=(
+            "rejected (state|official evidence) drift|"
+            "event.data.event: evidence digest mismatch"
+        ),
+    ):
+        _prepare_carry_from_common(client, common)
+    assert client.brief_calls == 0
+    assert client.review_calls == 0
+
+
+def test_fresh_profile_rejects_mixed_source_artifact_tuple(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, common = _fresh_carry_common(monkeypatch)
+    common["publication_artifact"] = editorial.LEGACY_APPROVAL_PUBLICATION_ARTIFACT
+    with pytest.raises(
+        ExpeditedEditorialError,
+        match="source artifact profile is not approved",
+    ):
+        _prepare_carry_from_common(client, common)
+    assert client.brief_calls == 0
+    assert client.review_calls == 0
 
 
 def test_pinned_legacy_source_age_extension_is_narrow_and_expires(
