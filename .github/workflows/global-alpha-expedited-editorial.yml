@@ -438,6 +438,7 @@ jobs:
     environment:
       name: governance-release
     outputs:
+      profile_id: ${{ steps.profile.outputs.profile_id }}
       intent_run_id: ${{ steps.intent_identity.outputs.run_id }}
       intent_artifact_id: ${{ steps.intent_identity.outputs.artifact_id }}
       intent_artifact_name: ${{ steps.intent_identity.outputs.artifact_name }}
@@ -456,6 +457,7 @@ jobs:
       PUBLICATION_ARTIFACT_DIGEST: ${{ inputs.publication_artifact_digest }}
     steps:
       - name: Enforce protected carry-forward inputs
+        id: profile
         shell: bash
         env:
           CONFIRMATION: ${{ inputs.confirmation }}
@@ -466,18 +468,41 @@ jobs:
           [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]]
           [[ "$CONFIRMATION" == "CARRY_FORWARD_EXPEDITED_EDITORIAL" ]]
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$CANDIDATE_RUN_ID" == "30581161308" ]]
-          [[ "$CANDIDATE_ARTIFACT_ID" == "8774655231" ]]
-          [[ "$CANDIDATE_ARTIFACT_NAME" == \
-            "global-alpha-expedited-editorial-candidates-b44a1aebc2eb6e7b58e5960b0f8245b87e901052" ]]
-          [[ "$CANDIDATE_ARTIFACT_DIGEST" == \
-            "sha256:f7eec4481564f52b89fbda166544cb1bc0b79e8ee940a8173ed5859aade40afd" ]]
-          [[ "$PUBLICATION_RUN_ID" == "30587485449" ]]
-          [[ "$PUBLICATION_ARTIFACT_ID" == "8777083749" ]]
-          [[ "$PUBLICATION_ARTIFACT_NAME" == \
-            "global-alpha-expedited-editorial-publication-b44a1aebc2eb6e7b58e5960b0f8245b87e901052-30587485449-1" ]]
-          [[ "$PUBLICATION_ARTIFACT_DIGEST" == \
-            "sha256:95028a16adedfc19b5dfe3c6e0b0c36696b5c2619a44f0040d51ef3b1ffcbbaa" ]]
+          legacy=false
+          fresh=false
+          if [[ "$CANDIDATE_RUN_ID" == "30581161308" \
+            && "$CANDIDATE_ARTIFACT_ID" == "8774655231" \
+            && "$CANDIDATE_ARTIFACT_NAME" == \
+              "global-alpha-expedited-editorial-candidates-b44a1aebc2eb6e7b58e5960b0f8245b87e901052" \
+            && "$CANDIDATE_ARTIFACT_DIGEST" == \
+              "sha256:f7eec4481564f52b89fbda166544cb1bc0b79e8ee940a8173ed5859aade40afd" \
+            && "$PUBLICATION_RUN_ID" == "30587485449" \
+            && "$PUBLICATION_ARTIFACT_ID" == "8777083749" \
+            && "$PUBLICATION_ARTIFACT_NAME" == \
+              "global-alpha-expedited-editorial-publication-b44a1aebc2eb6e7b58e5960b0f8245b87e901052-30587485449-1" \
+            && "$PUBLICATION_ARTIFACT_DIGEST" == \
+              "sha256:95028a16adedfc19b5dfe3c6e0b0c36696b5c2619a44f0040d51ef3b1ffcbbaa" ]]; then
+            legacy=true
+            echo "profile_id=legacy:c2462769" >> "$GITHUB_OUTPUT"
+          elif [[ "$CANDIDATE_RUN_ID" == "30909694091" \
+            && "$CANDIDATE_ARTIFACT_ID" == "8892512377" \
+            && "$CANDIDATE_ARTIFACT_NAME" == \
+              "global-alpha-expedited-editorial-candidates-38be7d450a6e7865d94798ab6b57f3688413f743" \
+            && "$CANDIDATE_ARTIFACT_DIGEST" == \
+              "sha256:329a32cb071f180d7af94877349077f58470b5a05936ae6da61cdf518b4baff7" \
+            && "$PUBLICATION_RUN_ID" == "30914113940" \
+            && "$PUBLICATION_ARTIFACT_ID" == "8894369336" \
+            && "$PUBLICATION_ARTIFACT_NAME" == \
+              "global-alpha-expedited-editorial-publication-38be7d450a6e7865d94798ab6b57f3688413f743-30914113940-1" \
+            && "$PUBLICATION_ARTIFACT_DIGEST" == \
+              "sha256:736c6360470928593e921787486e01a73cc9ed680b84835ee03170196027217d" ]]; then
+            fresh=true
+            echo "profile_id=fresh:38be7d45:20260804" >> "$GITHUB_OUTPUT"
+          fi
+          [[ "$legacy" == "true" || "$fresh" == "true" ]] || {
+            echo "::error::The carry-forward source is not an exact approved profile."
+            exit 1
+          }
           [[ "$CANDIDATE_RUN_ID" != "$PUBLICATION_RUN_ID" ]]
           [[ -n "$BSIDE_API_BASE_URL" && -n "$BSIDE_EDITOR_TOKEN" ]]
           case "${BSIDE_API_BASE_URL%/}" in
@@ -539,6 +564,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          CARRY_PROFILE_ID: ${{ steps.profile.outputs.profile_id }}
         with:
           script: |
             const {owner, repo} = context.repo;
@@ -571,6 +597,25 @@ jobs:
             const oneTimeLegacyDeadline = Date.parse("2026-08-04T23:59:59Z");
             const sourceAgeLimitHours =
               oneTimeLegacyChain && Date.now() <= oneTimeLegacyDeadline ? 168 : 72;
+            const freshChain =
+              process.env.CARRY_PROFILE_ID === "fresh:38be7d45:20260804" &&
+              runIds.candidate === 30909694091 &&
+              runIds.publication === 30914113940 &&
+              expectedArtifacts.candidate.id === 8892512377 &&
+              expectedArtifacts.candidate.digest ===
+                "sha256:329a32cb071f180d7af94877349077f58470b5a05936ae6da61cdf518b4baff7" &&
+              expectedArtifacts.publication.id === 8894369336 &&
+              expectedArtifacts.publication.digest ===
+                "sha256:736c6360470928593e921787486e01a73cc9ed680b84835ee03170196027217d";
+            if (
+              (process.env.CARRY_PROFILE_ID === "legacy:c2462769") !==
+                oneTimeLegacyChain ||
+              (process.env.CARRY_PROFILE_ID === "fresh:38be7d45:20260804") !==
+                freshChain
+            ) {
+              core.setFailed("source profile and exact artifact tuple mismatch");
+              return;
+            }
             const resolved = {};
             for (const key of ["candidate", "publication"]) {
               const response = await github.rest.actions.getWorkflowRun({
@@ -628,6 +673,13 @@ jobs:
               core.setFailed("source candidate/publication chain mismatch");
               return;
             }
+            if (
+              freshChain &&
+              sourceSha !== "38be7d450a6e7865d94798ab6b57f3688413f743"
+            ) {
+              core.setFailed("fresh source revision mismatch");
+              return;
+            }
             core.setOutput("source_sha", sourceSha);
 
       - name: Prove the reviewed source is an ancestor of this code-only release
@@ -635,10 +687,39 @@ jobs:
         shell: bash
         env:
           SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          CARRY_PROFILE_ID: ${{ steps.profile.outputs.profile_id }}
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
           git merge-base --is-ancestor "$SOURCE_SHA" "$GITHUB_SHA"
+          if [[ "$CARRY_PROFILE_ID" == "fresh:38be7d45:20260804" ]]; then
+            [[ "$SOURCE_SHA" == "38be7d450a6e7865d94798ab6b57f3688413f743" ]]
+            [[ "$(git rev-parse "$SOURCE_SHA:.github/workflows/global-alpha-expedited-editorial.yml")" == \
+              "c30c26b8329fce1fc2a7f5a1afc89258e8d73324" ]]
+            [[ "$(git rev-parse "$SOURCE_SHA:curator/global_alpha_expedited_editorial.py")" == \
+              "d9d3bb523034c10990efa0935c3f26872a05d374" ]]
+            allowed=(
+              ".github/workflows/global-alpha-expedited-editorial.yml"
+              ".github/workflows/global-alpha-preview-deploy.yml"
+              "curator/global_alpha_expedited_editorial.py"
+              "tests/test_global_alpha_expedited_editorial.py"
+              "tests/test_global_alpha_expedited_editorial_contract.py"
+              "tests/test_global_alpha_preview_deploy_workflow.py"
+            )
+            mapfile -t changed < <(git diff --name-only --diff-filter=ACMRT \
+              "$SOURCE_SHA" "$GITHUB_SHA")
+            [[ "$(git diff --name-only --diff-filter=D "$SOURCE_SHA" "$GITHUB_SHA")" == "" ]]
+            for path in "${changed[@]}"; do
+              permitted=false
+              for expected in "${allowed[@]}"; do
+                [[ "$path" == "$expected" ]] && permitted=true
+              done
+              [[ "$permitted" == "true" ]] || {
+                echo "::error::Fresh carry-forward disallows target diff: $path"
+                exit 1
+              }
+            done
+          fi
 
       - name: Download exact source candidate artifact
         if: steps.existing_intent.outputs.exists != 'true'
@@ -678,7 +759,9 @@ jobs:
           "httpx==0.27.2"
 
       - name: Repair only the six approved display targets and prove replay
-        if: steps.existing_intent.outputs.exists != 'true'
+        if: >-
+          steps.existing_intent.outputs.exists != 'true' &&
+          steps.profile.outputs.profile_id == 'legacy:c2462769'
         shell: bash
         run: |
           set -euo pipefail
@@ -727,12 +810,28 @@ jobs:
       - name: Freeze unchanged current-SHA basis without publishing
         if: steps.existing_intent.outputs.exists != 'true'
         shell: bash
+        env:
+          CARRY_PROFILE_ID: ${{ steps.profile.outputs.profile_id }}
         run: |
           set -euo pipefail
           test -f source-candidate/editorial-candidates.json
           test -f source-publication/human-review.json
           test -f source-publication/publication-receipt.json
           test -f source-publication/publication-replay-receipt.json
+          repair_args=()
+          if [[ "$CARRY_PROFILE_ID" == "legacy:c2462769" ]]; then
+            test -s display-target-repair-first/display-target-repair-receipt.json
+            test -s display-target-repair-replay/display-target-repair-receipt.json
+            repair_args=(
+              --display-target-repair-receipt
+              display-target-repair-first/display-target-repair-receipt.json
+              --display-target-repair-replay-receipt
+              display-target-repair-replay/display-target-repair-receipt.json
+            )
+          elif [[ "$CARRY_PROFILE_ID" != "fresh:38be7d45:20260804" ]]; then
+            echo "::error::Unknown carry-forward profile."
+            exit 1
+          fi
           python -m curator.global_alpha_expedited_editorial \
             carry-forward-prepare \
             --candidate source-candidate/editorial-candidates.json \
@@ -749,20 +848,23 @@ jobs:
             --publication-artifact-id "$PUBLICATION_ARTIFACT_ID" \
             --publication-artifact-name "$PUBLICATION_ARTIFACT_NAME" \
             --publication-artifact-digest "$PUBLICATION_ARTIFACT_DIGEST" \
-            --display-target-repair-receipt \
-              display-target-repair-first/display-target-repair-receipt.json \
-            --display-target-repair-replay-receipt \
-              display-target-repair-replay/display-target-repair-receipt.json \
+            "${repair_args[@]}" \
             --output-dir editorial-intent
           test -s editorial-intent/carry-forward-intent.json
-          test -s editorial-intent/display-target-repair-receipt.json
-          test -s editorial-intent/display-target-repair-replay-receipt.json
+          if [[ "$CARRY_PROFILE_ID" == "legacy:c2462769" ]]; then
+            test -s editorial-intent/display-target-repair-receipt.json
+            test -s editorial-intent/display-target-repair-replay-receipt.json
+          else
+            test ! -e editorial-intent/display-target-repair-receipt.json
+            test ! -e editorial-intent/display-target-repair-replay-receipt.json
+          fi
           jq -e '
             .code_revision == env.GITHUB_SHA
             and .kind == "bside-global-alpha-expedited-editorial-carry-forward-intent"
             and .is_synthetic == false
             and .source_human_review_section.ground_truth_source == "human"
             and .source_human_review_section.ai_generated_ground_truth == false
+            and .carry_forward.profile_id == env.CARRY_PROFILE_ID
             and .carry_forward.event_mutations_applied == 0
             and (.carry_forward.human_approval_chain_sha256
               | test("^[0-9a-f]{64}$"))
@@ -829,6 +931,7 @@ jobs:
       BSIDE_API_BASE_URL: ${{ secrets.BSIDE_API_BASE_URL || vars.GOVERNANCE_API_BASE_URL }}
       BSIDE_EDITOR_TOKEN: ${{ secrets.BSIDE_EDITOR_TOKEN }}
       GH_TOKEN: ${{ github.token }}
+      CARRY_PROFILE_ID: ${{ needs.carry_forward_prepare.outputs.profile_id }}
     steps:
       - name: Enforce same-run intent publication boundary
         shell: bash
@@ -838,12 +941,17 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]]
-          deadline_epoch="$(date -u -d '2026-08-04T23:59:59Z' +%s)"
-          now_epoch="$(date -u +%s)"
-          (( now_epoch <= deadline_epoch )) || {
-            echo "::error::The one-time legacy carry-forward publication window expired."
+          if [[ "$CARRY_PROFILE_ID" == "legacy:c2462769" ]]; then
+            deadline_epoch="$(date -u -d '2026-08-04T23:59:59Z' +%s)"
+            now_epoch="$(date -u +%s)"
+            (( now_epoch <= deadline_epoch )) || {
+              echo "::error::The one-time legacy carry-forward publication window expired."
+              exit 1
+            }
+          elif [[ "$CARRY_PROFILE_ID" != "fresh:38be7d45:20260804" ]]; then
+            echo "::error::Unknown carry-forward profile."
             exit 1
-          }
+          fi
           [[ -n "$BSIDE_API_BASE_URL" && -n "$BSIDE_EDITOR_TOKEN" ]]
           case "${BSIDE_API_BASE_URL%/}" in
             "https://alignpe.gabia.io/activist/api.php/api/v1" | \
@@ -925,14 +1033,28 @@ jobs:
         run: |
           set -euo pipefail
           test -s editorial-intent/carry-forward-intent.json
-          test -s editorial-intent/display-target-repair-receipt.json
-          test -s editorial-intent/display-target-repair-replay-receipt.json
-          deadline_epoch="$(date -u -d '2026-08-04T23:59:59Z' +%s)"
-          now_epoch="$(date -u +%s)"
-          (( now_epoch <= deadline_epoch )) || {
-            echo "::error::The one-time legacy carry-forward expired before publication."
-            exit 1
-          }
+          [[ "$(jq -er '.carry_forward.profile_id' \
+            editorial-intent/carry-forward-intent.json)" == "$CARRY_PROFILE_ID" ]]
+          repair_args=()
+          if [[ "$CARRY_PROFILE_ID" == "legacy:c2462769" ]]; then
+            test -s editorial-intent/display-target-repair-receipt.json
+            test -s editorial-intent/display-target-repair-replay-receipt.json
+            deadline_epoch="$(date -u -d '2026-08-04T23:59:59Z' +%s)"
+            now_epoch="$(date -u +%s)"
+            (( now_epoch <= deadline_epoch )) || {
+              echo "::error::The one-time legacy carry-forward expired before publication."
+              exit 1
+            }
+            repair_args=(
+              --display-target-repair-receipt
+              editorial-intent/display-target-repair-receipt.json
+              --display-target-repair-replay-receipt
+              editorial-intent/display-target-repair-replay-receipt.json
+            )
+          else
+            test ! -e editorial-intent/display-target-repair-receipt.json
+            test ! -e editorial-intent/display-target-repair-replay-receipt.json
+          fi
           python -m curator.global_alpha_expedited_editorial \
             carry-forward-publish \
             --intent editorial-intent/carry-forward-intent.json \
@@ -940,16 +1062,18 @@ jobs:
             --intent-artifact-id "$INTENT_ARTIFACT_ID" \
             --intent-artifact-name "$INTENT_ARTIFACT_NAME" \
             --intent-artifact-digest "$INTENT_ARTIFACT_DIGEST" \
-            --display-target-repair-receipt \
-              editorial-intent/display-target-repair-receipt.json \
-            --display-target-repair-replay-receipt \
-              editorial-intent/display-target-repair-replay-receipt.json \
+            "${repair_args[@]}" \
             --output-dir editorial-publication
           test -s editorial-publication/human-review.json
           test -s editorial-publication/publication-receipt.json
           test -s editorial-publication/publication-replay-receipt.json
-          test -s editorial-publication/display-target-repair-receipt.json
-          test -s editorial-publication/display-target-repair-replay-receipt.json
+          if [[ "$CARRY_PROFILE_ID" == "legacy:c2462769" ]]; then
+            test -s editorial-publication/display-target-repair-receipt.json
+            test -s editorial-publication/display-target-repair-replay-receipt.json
+          else
+            test ! -e editorial-publication/display-target-repair-receipt.json
+            test ! -e editorial-publication/display-target-repair-replay-receipt.json
+          fi
           jq -e '
             .code_revision == env.GITHUB_SHA
             and .ground_truth_source == "human"
@@ -1060,12 +1184,6 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$REF_NAME" == "$DEFAULT_BRANCH" ]]
-          deadline_epoch="$(date -u -d '2026-08-04T23:59:59Z' +%s)"
-          now_epoch="$(date -u +%s)"
-          (( now_epoch <= deadline_epoch )) || {
-            echo "::error::The one-time legacy carry-forward recovery window expired."
-            exit 1
-          }
           [[ "$CONFIRMATION" == \
             "RECOVER_CARRY_FORWARD_EXPEDITED_EDITORIAL" ]]
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
@@ -1177,14 +1295,31 @@ jobs:
         run: |
           set -euo pipefail
           test -s editorial-intent/carry-forward-intent.json
-          test -s editorial-intent/display-target-repair-receipt.json
-          test -s editorial-intent/display-target-repair-replay-receipt.json
-          deadline_epoch="$(date -u -d '2026-08-04T23:59:59Z' +%s)"
-          now_epoch="$(date -u +%s)"
-          (( now_epoch <= deadline_epoch )) || {
-            echo "::error::The one-time legacy carry-forward expired before recovery publication."
+          carry_profile_id="$(jq -er '.carry_forward.profile_id' \
+            editorial-intent/carry-forward-intent.json)"
+          repair_args=()
+          if [[ "$carry_profile_id" == "legacy:c2462769" ]]; then
+            test -s editorial-intent/display-target-repair-receipt.json
+            test -s editorial-intent/display-target-repair-replay-receipt.json
+            deadline_epoch="$(date -u -d '2026-08-04T23:59:59Z' +%s)"
+            now_epoch="$(date -u +%s)"
+            (( now_epoch <= deadline_epoch )) || {
+              echo "::error::The one-time legacy carry-forward expired before recovery publication."
+              exit 1
+            }
+            repair_args=(
+              --display-target-repair-receipt
+              editorial-intent/display-target-repair-receipt.json
+              --display-target-repair-replay-receipt
+              editorial-intent/display-target-repair-replay-receipt.json
+            )
+          elif [[ "$carry_profile_id" == "fresh:38be7d45:20260804" ]]; then
+            test ! -e editorial-intent/display-target-repair-receipt.json
+            test ! -e editorial-intent/display-target-repair-replay-receipt.json
+          else
+            echo "::error::Unknown carry-forward profile."
             exit 1
-          }
+          fi
           python -m curator.global_alpha_expedited_editorial \
             carry-forward-publish \
             --intent editorial-intent/carry-forward-intent.json \
@@ -1192,16 +1327,18 @@ jobs:
             --intent-artifact-id "$INTENT_ARTIFACT_ID" \
             --intent-artifact-name "$INTENT_ARTIFACT_NAME" \
             --intent-artifact-digest "$INTENT_ARTIFACT_DIGEST" \
-            --display-target-repair-receipt \
-              editorial-intent/display-target-repair-receipt.json \
-            --display-target-repair-replay-receipt \
-              editorial-intent/display-target-repair-replay-receipt.json \
+            "${repair_args[@]}" \
             --output-dir editorial-publication
           test -s editorial-publication/human-review.json
           test -s editorial-publication/publication-receipt.json
           test -s editorial-publication/publication-replay-receipt.json
-          test -s editorial-publication/display-target-repair-receipt.json
-          test -s editorial-publication/display-target-repair-replay-receipt.json
+          if [[ "$carry_profile_id" == "legacy:c2462769" ]]; then
+            test -s editorial-publication/display-target-repair-receipt.json
+            test -s editorial-publication/display-target-repair-replay-receipt.json
+          else
+            test ! -e editorial-publication/display-target-repair-receipt.json
+            test ! -e editorial-publication/display-target-repair-replay-receipt.json
+          fi
           jq -e '
             .code_revision == env.GITHUB_SHA
             and .ground_truth_source == "human"

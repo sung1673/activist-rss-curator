@@ -208,10 +208,17 @@ def test_protected_carry_forward_is_ancestor_bound_and_event_write_free() -> Non
     assert "source candidate/publication chain mismatch" in prepare_text
     assert "artifacts.length !== 1" in prepare_text
     assert "digest-mismatch: error" in prepare_text
-    assert '[[ "$CANDIDATE_RUN_ID" == "30581161308" ]]' in prepare_text
-    assert '[[ "$CANDIDATE_ARTIFACT_ID" == "8774655231" ]]' in prepare_text
-    assert '[[ "$PUBLICATION_RUN_ID" == "30587485449" ]]' in prepare_text
-    assert '[[ "$PUBLICATION_ARTIFACT_ID" == "8777083749" ]]' in prepare_text
+    for exact_id in (
+        "30581161308",
+        "8774655231",
+        "30587485449",
+        "8777083749",
+        "30909694091",
+        "8892512377",
+        "30914113940",
+        "8894369336",
+    ):
+        assert exact_id in prepare_text
     assert (
         "f7eec4481564f52b89fbda166544cb1bc0b79e8ee940a8173ed5859aade40afd"
         in prepare_text
@@ -220,8 +227,22 @@ def test_protected_carry_forward_is_ancestor_bound_and_event_write_free() -> Non
         "95028a16adedfc19b5dfe3c6e0b0c36696b5c2619a44f0040d51ef3b1ffcbbaa"
         in prepare_text
     )
+    assert (
+        "329a32cb071f180d7af94877349077f58470b5a05936ae6da61cdf518b4baff7"
+        in prepare_text
+    )
+    assert (
+        "736c6360470928593e921787486e01a73cc9ed680b84835ee03170196027217d"
+        in prepare_text
+    )
+    assert "fresh:38be7d45:20260804" in prepare_text
+    assert "source profile and exact artifact tuple mismatch" in prepare_text
+    assert "38be7d450a6e7865d94798ab6b57f3688413f743" in prepare_text
+    assert "c30c26b8329fce1fc2a7f5a1afc89258e8d73324" in prepare_text
+    assert "d9d3bb523034c10990efa0935c3f26872a05d374" in prepare_text
+    assert "Fresh carry-forward disallows target diff" in prepare_text
     assert 'Date.parse("2026-08-04T23:59:59Z")' in prepare_text
-    assert WORKFLOW_TEXT.count("2026-08-04T23:59:59Z") == 5
+    assert WORKFLOW_TEXT.count("2026-08-04T23:59:59Z") == 4
     assert "oneTimeLegacyChain && Date.now() <= oneTimeLegacyDeadline" in prepare_text
     assert "? 168 : 72" in prepare_text
     assert "ageHours > sourceAgeLimitHours" in prepare_text
@@ -262,11 +283,7 @@ def test_protected_carry_forward_is_ancestor_bound_and_event_write_free() -> Non
     ) in publish_text
 
     assert "RECOVER_CARRY_FORWARD_EXPEDITED_EDITORIAL" in recover_text
-    assert "The one-time legacy carry-forward recovery window expired." in recover_text
-    assert "(( now_epoch <= deadline_epoch ))" in recover_text
-    assert recover_text.index("recovery window expired") < recover_text.index(
-        "Resolve the exact prior protected intent"
-    )
+    assert "fresh:38be7d45:20260804" in recover_text
     assert (
         "The one-time legacy carry-forward expired before recovery publication."
         in recover_text
@@ -280,6 +297,36 @@ def test_protected_carry_forward_is_ancestor_bound_and_event_write_free() -> Non
     assert "prior frozen intent artifact identity mismatch" in recover_text
     assert "Freeze and upload carry-forward intent" in recover_text
     assert "run.head_sha || \"\"" in recover_text
+
+
+def test_fresh_profile_is_repair_free_and_intent_first() -> None:
+    prepare_start = WORKFLOW_TEXT.index("  carry_forward_prepare:")
+    publish_start = WORKFLOW_TEXT.index("  carry_forward_publish:")
+    recover_start = WORKFLOW_TEXT.index("  carry_forward_recover:")
+    prepare_text = WORKFLOW_TEXT[prepare_start:publish_start]
+    publish_text = WORKFLOW_TEXT[publish_start:recover_start]
+    recover_text = WORKFLOW_TEXT[recover_start:]
+    assert "steps.profile.outputs.profile_id == 'legacy:c2462769'" in prepare_text
+    assert "fresh carry-forward: display-target repair inputs forbidden" not in (
+        prepare_text + publish_text + recover_text
+    )
+    assert 'repair_args=()' in prepare_text
+    assert 'repair_args=()' in publish_text
+    assert 'repair_args=()' in recover_text
+    assert 'test ! -e editorial-intent/display-target-repair-receipt.json' in (
+        prepare_text + publish_text + recover_text
+    )
+    repair_step = prepare_text.index(
+        "Repair only the six approved display targets and prove replay"
+    )
+    prepare_command = prepare_text.index("carry-forward-prepare")
+    upload = prepare_text.index(
+        "Upload immutable carry-forward intent before any brief POST"
+    )
+    assert repair_step < prepare_command < upload
+    assert publish_text.index("Download the exact pre-uploaded intent") < (
+        publish_text.index("carry-forward-publish")
+    )
 
 
 def test_workflow_commands_are_real_cli_subcommands_and_prepare_precedes_post() -> None:
