@@ -10,9 +10,12 @@ from pathlib import Path
 import pytest
 
 from curator.expedited_legacy_compat import (
+    PINNED_SNAPSHOT_ARTIFACT_DIGEST,
+    PINNED_SNAPSHOT_MODE,
     RELEASE_CHANNEL,
     WAIVER_EXCEPTION_ID,
     WAIVER_EXPIRES_AT,
+    pinned_snapshot_identity,
 )
 from curator.expedited_legacy_recovery_bundle import (
     COMPATIBILITY_DIR,
@@ -103,10 +106,11 @@ def _preparation(
     archive: Path,
     *,
     evidence_as_of: datetime = BEFORE_DEADLINE,
+    identity: LegacyArtifactIdentity | None = None,
 ) -> Path:
     root.mkdir()
     shutil.copyfile(archive, root / "pinned-legacy.zip")
-    identity = _identity(archive)
+    identity = identity or _identity(archive)
     revision = "a" * 40
     human_approval_chain_sha256 = hashlib.sha256(
         b"human-approval-chain"
@@ -370,6 +374,56 @@ def test_90_day_bundle_uses_standard_mode_after_deadline(tmp_path: Path) -> None
     assert manifest["mode"] == "standard_90_day"
     assert manifest["window_days"] == 90
     assert manifest["window_end"] == "2026-07-29"
+
+
+def test_exact_pinned_snapshot_is_manifest_bound_without_a_waiver(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _archive(tmp_path / "legacy.zip", end=date(2026, 8, 2))
+    identity = pinned_snapshot_identity()
+    monkeypatch.setattr(
+        "curator.expedited_legacy_compat._file_sha256",
+        lambda _path: PINNED_SNAPSHOT_ARTIFACT_DIGEST,
+    )
+    monkeypatch.setattr(
+        "curator.expedited_legacy_recovery_bundle._file_sha256",
+        lambda _path: PINNED_SNAPSHOT_ARTIFACT_DIGEST,
+    )
+    observed_at = datetime(2026, 8, 4, 10, 0, tzinfo=UTC)
+    preparation = _preparation(
+        tmp_path / "preparation",
+        archive,
+        evidence_as_of=observed_at,
+        identity=identity,
+    )
+
+    derived = derive_final_approval_materials(
+        preparation,
+        tmp_path / "final",
+        expected_revision="a" * 40,
+        current_time=observed_at + timedelta(minutes=1),
+    )
+
+    legacy = derived["legacy_archive"]
+    assert derived["recovery"]["mode"] == PINNED_SNAPSHOT_MODE
+    assert legacy["consecutive_day_count"] == 94
+    assert legacy["first_date"] == "2026-05-01"
+    assert legacy["last_date"] == "2026-08-02"
+    assert legacy["waiver"]["status"] == "forbidden"
+    assert (
+        derived["binding"]["legacy_manifest_sha256"]
+        == legacy["compatibility_manifest_sha256"]
+    )
+
+    with pytest.raises(FinalApprovalMaterialError, match="waiver is forbidden"):
+        derive_final_approval_materials(
+            preparation,
+            tmp_path / "waiver-final",
+            expected_revision="a" * 40,
+            current_time=observed_at + timedelta(minutes=2),
+            waiver=_waiver(),
+        )
 
 
 def test_bundle_rejects_89_days_after_cutoff_and_unexpected_files(

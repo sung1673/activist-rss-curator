@@ -8,6 +8,18 @@ from pathlib import Path
 
 import pytest
 
+from curator.expedited_legacy_compat import (
+    PINNED_SNAPSHOT_ARTIFACT_DIGEST,
+    PINNED_SNAPSHOT_ARTIFACT_ID,
+    PINNED_SNAPSHOT_ARTIFACT_NAME,
+    PINNED_SNAPSHOT_CODE_REVISION,
+    PINNED_SNAPSHOT_DAY_COUNT,
+    PINNED_SNAPSHOT_MAX_PAGE_BYTES,
+    PINNED_SNAPSHOT_MIN_PAGE_BYTES,
+    PINNED_SNAPSHOT_MODE,
+    PINNED_SNAPSHOT_RUN_ID,
+    PINNED_SNAPSHOT_WAIVER,
+)
 from curator.global_alpha_expedited_gate import (
     APPROVAL_KIND,
     CONNECTOR_KIND,
@@ -688,6 +700,62 @@ def valid_bundle(
         }
     )
     return result
+
+
+def pinned_snapshot_bundle() -> dict[str, object]:
+    as_of = datetime(2026, 8, 4, 10, 0, tzinfo=timezone.utc)
+    bundle = valid_bundle(as_of=as_of, day_count=94)
+    connectors = bundle["connector_receipts"]["connectors"]  # type: ignore[index]
+    for connector in connectors:
+        retime_connector_windows(connector, start=date(2026, 7, 5))
+    legacy = bundle["legacy_archive"]  # type: ignore[assignment]
+    archive_digest = PINNED_SNAPSHOT_ARTIFACT_DIGEST.removeprefix("sha256:")
+    legacy.update(  # type: ignore[union-attr]
+        {
+            "archive_sha256": archive_digest,
+            "artifact_id": int(PINNED_SNAPSHOT_ARTIFACT_ID),
+            "artifact_name": PINNED_SNAPSHOT_ARTIFACT_NAME,
+            "first_date": "2026-05-01",
+            "last_date": "2026-08-02",
+        }
+    )
+    manifest = legacy["compatibility_manifest"]  # type: ignore[index]
+    manifest.update(
+        {
+            "mode": PINNED_SNAPSHOT_MODE,
+            "source": {
+                "run_id": PINNED_SNAPSHOT_RUN_ID,
+                "artifact_id": PINNED_SNAPSHOT_ARTIFACT_ID,
+                "artifact_name": PINNED_SNAPSHOT_ARTIFACT_NAME,
+                "code_revision": PINNED_SNAPSHOT_CODE_REVISION,
+                "artifact_digest": PINNED_SNAPSHOT_ARTIFACT_DIGEST,
+                "workflow": ".github/workflows/build-feed.yml",
+            },
+            "complete_legacy_feed_window": True,
+            "pinned_snapshot_audit": {
+                "actual_dated_report_count": PINNED_SNAPSHOT_DAY_COUNT,
+                "actual_window_start": "2026-05-01",
+                "actual_window_end": "2026-08-02",
+                "gap_count": 0,
+                "unique_dated_report_content_count": PINNED_SNAPSHOT_DAY_COUNT,
+                "duplicate_content_group_count": 0,
+                "contains_placeholder": False,
+                "is_synthetic": False,
+                "audited_min_page_bytes": PINNED_SNAPSHOT_MIN_PAGE_BYTES,
+                "audited_max_page_bytes": PINNED_SNAPSHOT_MAX_PAGE_BYTES,
+            },
+            "waiver": dict(PINNED_SNAPSHOT_WAIVER),
+        }
+    )
+    manifest.pop("standard_manifest_sha256", None)
+    experience_record = bundle["experience"]  # type: ignore[assignment]
+    experience_record["rollback_drill"][  # type: ignore[index]
+        "legacy_artifact_sha256"
+    ] = archive_digest
+    rollback = experience_record["rollback_drill_receipt"]  # type: ignore[index]
+    rollback["legacy_artifact_sha256"] = archive_digest
+    refresh_protected_bindings(bundle)
+    return bundle
 
 
 def refresh_protected_bindings(bundle: dict[str, object]) -> None:
@@ -1376,6 +1444,74 @@ def test_standard_90_day_manifest_must_be_current_at_kst_boundary() -> None:
         match="latest real 90-day window",
     ):
         build_expedited_release_report(stale, expected_revision=REVISION)
+
+
+def test_exact_pinned_snapshot_fallback_is_manifest_bound_and_risk_approved() -> None:
+    bundle = pinned_snapshot_bundle()
+    report = build_expedited_release_report(bundle, expected_revision=REVISION)
+
+    assert report["release_gate_passed"] is True
+    archive = report["legacy_archive"]
+    assert archive["mode"] == PINNED_SNAPSHOT_MODE  # type: ignore[index]
+    assert archive["consecutive_day_count"] == 94  # type: ignore[index]
+    assert archive["pinned_snapshot_used"] is True  # type: ignore[index]
+    assert archive["waiver_used"] is False  # type: ignore[index]
+    assert (
+        report["approval"]["evidence_binding"]["legacy_manifest_sha256"]  # type: ignore[index]
+        == archive["compatibility_manifest_sha256"]  # type: ignore[index]
+    )
+    assert report["approval"]["roles"]["expedited-risk"] is True  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("run_id", "30743899773"),
+        ("artifact_id", "8832612653"),
+        ("artifact_name", "legacy-pages-archive-other"),
+        ("code_revision", "f" * 40),
+        ("artifact_digest", f"sha256:{'e' * 64}"),
+    ],
+)
+def test_pinned_snapshot_fallback_rejects_every_nonexact_pin(
+    field: str,
+    value: str,
+) -> None:
+    bundle = pinned_snapshot_bundle()
+    manifest = bundle["legacy_archive"]["compatibility_manifest"]  # type: ignore[index]
+    manifest["source"][field] = value
+    refresh_protected_bindings(bundle)
+
+    with pytest.raises(
+        ExpeditedAlphaEvidenceError,
+        match="exact immutable pin|pinned artifact",
+    ):
+        build_expedited_release_report(bundle, expected_revision=REVISION)
+
+
+def test_pinned_snapshot_fallback_rejects_waiver_and_missing_risk_approval() -> None:
+    waiver = pinned_snapshot_bundle()
+    manifest = waiver["legacy_archive"]["compatibility_manifest"]  # type: ignore[index]
+    manifest["waiver"] = {
+        "status": "active",
+        "approved": True,
+        "reviewer_type": "human",
+    }
+    refresh_protected_bindings(waiver)
+    with pytest.raises(ExpeditedAlphaEvidenceError, match="exact immutable pin"):
+        build_expedited_release_report(waiver, expected_revision=REVISION)
+
+    missing_risk = pinned_snapshot_bundle()
+    approvals = missing_risk["approval"]["approvals"]  # type: ignore[index]
+    risk = next(item for item in approvals if item["role"] == "expedited-risk")
+    risk["decision"] = "rejected"
+    refresh_protected_bindings(missing_risk)
+    report = build_expedited_release_report(
+        missing_risk,
+        expected_revision=REVISION,
+    )
+    assert report["release_gate_passed"] is False
+    assert gate(report, "expedited_approval.human_roles")["passed"] is False
 
 
 def test_archive_must_match_the_drilled_artifact() -> None:

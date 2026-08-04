@@ -32,6 +32,37 @@ EXPEDITED_WINDOW_END = date(2026, 7, 28)
 WAIVER_EXPIRES_AT = datetime(2026, 7, 28, 20, 45, tzinfo=UTC)
 WAIVER_EXCEPTION_ID = "production-alpha-early-access-89-day-2026-07-28"
 RELEASE_CHANNEL = "production_alpha_early_access"
+PINNED_SNAPSHOT_MODE = "pinned_snapshot_90_day_fallback"
+PINNED_SNAPSHOT_RUN_ID = "30743899772"
+PINNED_SNAPSHOT_ARTIFACT_ID = "8832612652"
+PINNED_SNAPSHOT_ARTIFACT_NAME = "legacy-pages-archive-seed"
+PINNED_SNAPSHOT_CODE_REVISION = "3418d034f6776620cb70020836f29751e961db12"
+PINNED_SNAPSHOT_ARTIFACT_DIGEST = (
+    "sha256:7bc40006a307ea696169940f3f9380f4632edcbf7a56de399c81d995ec4370e9"
+)
+PINNED_SNAPSHOT_WINDOW_START = date(2026, 5, 1)
+PINNED_SNAPSHOT_WINDOW_END = date(2026, 8, 2)
+PINNED_SNAPSHOT_DAY_COUNT = 94
+PINNED_SNAPSHOT_MIN_PAGE_BYTES = 57_695
+PINNED_SNAPSHOT_MAX_PAGE_BYTES = 360_734
+PINNED_SNAPSHOT_WAIVER = {
+    "status": "forbidden",
+    "reason": "pinned_snapshot_90_day_fallback_never_accepts_legacy_waiver",
+}
+
+
+def pinned_snapshot_identity() -> LegacyArtifactIdentity:
+    return LegacyArtifactIdentity(
+        run_id=PINNED_SNAPSHOT_RUN_ID,
+        artifact_id=PINNED_SNAPSHOT_ARTIFACT_ID,
+        artifact_name=PINNED_SNAPSHOT_ARTIFACT_NAME,
+        code_revision=PINNED_SNAPSHOT_CODE_REVISION,
+        artifact_digest=PINNED_SNAPSHOT_ARTIFACT_DIGEST,
+    ).validated()
+
+
+def _is_pinned_snapshot_identity(identity: LegacyArtifactIdentity) -> bool:
+    return identity.validated() == pinned_snapshot_identity()
 
 
 def _parse_timestamp(value: object, location: str) -> datetime:
@@ -202,6 +233,92 @@ def _expedited_required_window(reports: dict[date, bytes]) -> list[date]:
     return required
 
 
+def _pinned_snapshot_required_window(reports: dict[date, bytes]) -> list[date]:
+    required = [
+        PINNED_SNAPSHOT_WINDOW_START + timedelta(days=offset)
+        for offset in range(PINNED_SNAPSHOT_DAY_COUNT)
+    ]
+    if required[-1] != PINNED_SNAPSHOT_WINDOW_END:
+        raise LegacyFeedCompatibilityError(
+            "pinned legacy snapshot policy window is inconsistent"
+        )
+    if len(required) < 90 or set(reports) != set(required):
+        missing = [item.isoformat() for item in required if item not in reports]
+        extra = sorted(item.isoformat() for item in set(reports) - set(required))
+        detail = ", ".join((missing + extra)[:10])
+        raise LegacyFeedCompatibilityError(
+            "pinned legacy snapshot must contain all 94 actual consecutive pages"
+            + (f": {detail}" if detail else "")
+        )
+    return required
+
+
+def _pinned_snapshot_manifest(
+    identity: LegacyArtifactIdentity,
+    feed_xml: bytes,
+    reports: dict[date, bytes],
+    required: list[date],
+    optional: dict[str, bytes],
+    *,
+    prepared_at: datetime,
+) -> dict[str, Any]:
+    feed_record, report_records, root_records, content_digest = _content_records(
+        feed_xml,
+        reports,
+        required,
+        optional,
+    )
+    return {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "kind": MANIFEST_KIND,
+        "mode": PINNED_SNAPSHOT_MODE,
+        "release_channel": RELEASE_CHANNEL,
+        "prepared_at": _timestamp(prepared_at),
+        "source": identity.as_dict(),
+        "window_days": len(report_records),
+        "window_start": required[0].isoformat(),
+        "window_end": required[-1].isoformat(),
+        "dated_report_count": len(report_records),
+        "complete_legacy_feed_window": True,
+        "feed_xml": feed_record,
+        "dated_reports": report_records,
+        "root_assets": root_records,
+        "content_sha256": content_digest,
+        "pinned_snapshot_audit": {
+            "actual_dated_report_count": PINNED_SNAPSHOT_DAY_COUNT,
+            "actual_window_start": PINNED_SNAPSHOT_WINDOW_START.isoformat(),
+            "actual_window_end": PINNED_SNAPSHOT_WINDOW_END.isoformat(),
+            "gap_count": 0,
+            "unique_dated_report_content_count": PINNED_SNAPSHOT_DAY_COUNT,
+            "duplicate_content_group_count": 0,
+            "contains_placeholder": False,
+            "is_synthetic": False,
+            "audited_min_page_bytes": PINNED_SNAPSHOT_MIN_PAGE_BYTES,
+            "audited_max_page_bytes": PINNED_SNAPSHOT_MAX_PAGE_BYTES,
+        },
+        "waiver": dict(PINNED_SNAPSHOT_WAIVER),
+    }
+
+
+def _write_compatibility_site(
+    output: Path,
+    *,
+    feed_xml: bytes,
+    reports: dict[date, bytes],
+    required: list[date],
+    optional: dict[str, bytes],
+) -> None:
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "feed").mkdir()
+    (output / "feed.xml").write_bytes(feed_xml)
+    for report_date in required:
+        (output / "feed" / f"{report_date.isoformat()}.html").write_bytes(
+            reports[report_date]
+        )
+    for name, payload in optional.items():
+        (output / name).write_bytes(payload)
+
+
 def _expedited_manifest(
     identity: LegacyArtifactIdentity,
     feed_xml: bytes,
@@ -319,6 +436,33 @@ def prepare_expedited_legacy_compatibility(
         raise LegacyFeedCompatibilityError("legacy compatibility output must be absent or empty")
 
     feed_xml, reports, optional = _load_zip_archive(archive)
+    if _is_pinned_snapshot_identity(identity):
+        if waiver is not None:
+            raise LegacyFeedCompatibilityError(
+                "a legacy waiver is forbidden for the pinned snapshot fallback"
+            )
+        required = _pinned_snapshot_required_window(reports)
+        manifest = _pinned_snapshot_manifest(
+            identity,
+            feed_xml,
+            reports,
+            required,
+            optional,
+            prepared_at=observed_at,
+        )
+        _write_compatibility_site(
+            output,
+            feed_xml=feed_xml,
+            reports=reports,
+            required=required,
+            optional=optional,
+        )
+        _write_manifest(output, manifest)
+        return verify_expedited_legacy_compatibility(
+            output,
+            expected_identity=identity,
+            observed_at=observed_at,
+        )
     if len(reports) >= 90:
         standard = prepare_legacy_feed_compatibility(
             archive,
@@ -427,6 +571,25 @@ def verify_expedited_legacy_compatibility(
             optional,
             prepared_at=prepared_at,
             waiver=canonical_waiver,
+        )
+    elif mode == PINNED_SNAPSHOT_MODE:
+        if not _is_pinned_snapshot_identity(identity):
+            raise LegacyFeedCompatibilityError(
+                "pinned snapshot fallback source does not match the immutable pin"
+            )
+        if manifest.get("waiver") != PINNED_SNAPSHOT_WAIVER:
+            raise LegacyFeedCompatibilityError(
+                "pinned snapshot fallback cannot contain a legacy waiver"
+            )
+        feed_xml, reports, optional = _load_site_directory(site)
+        required = _pinned_snapshot_required_window(reports)
+        expected = _pinned_snapshot_manifest(
+            identity,
+            feed_xml,
+            reports,
+            required,
+            optional,
+            prepared_at=prepared_at,
         )
     else:
         raise LegacyFeedCompatibilityError("expedited legacy mode is invalid")

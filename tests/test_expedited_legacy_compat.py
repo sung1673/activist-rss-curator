@@ -12,10 +12,18 @@ from curator.expedited_legacy_compat import (
     EXPEDITED_WINDOW_END,
     EXPEDITED_WINDOW_START,
     MANIFEST_NAME,
+    PINNED_SNAPSHOT_ARTIFACT_DIGEST,
+    PINNED_SNAPSHOT_DAY_COUNT,
+    PINNED_SNAPSHOT_MAX_PAGE_BYTES,
+    PINNED_SNAPSHOT_MIN_PAGE_BYTES,
+    PINNED_SNAPSHOT_MODE,
+    PINNED_SNAPSHOT_WINDOW_END,
+    PINNED_SNAPSHOT_WINDOW_START,
     RELEASE_CHANNEL,
     WAIVER_EXCEPTION_ID,
     WAIVER_EXPIRES_AT,
     prepare_expedited_legacy_compatibility,
+    pinned_snapshot_identity,
     verify_expedited_legacy_compatibility,
 )
 from curator.legacy_feed_compat import (
@@ -203,6 +211,109 @@ def test_standard_90_day_artifact_is_preferred_and_needs_no_waiver(tmp_path: Pat
         expected_identity=identity,
         observed_at=observed_at,
     ) == manifest
+
+
+def test_exact_pinned_94_day_snapshot_uses_narrow_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _archive(
+        tmp_path / "legacy.zip",
+        start=PINNED_SNAPSHOT_WINDOW_START,
+        end=PINNED_SNAPSHOT_WINDOW_END,
+    )
+    monkeypatch.setattr(
+        "curator.expedited_legacy_compat._file_sha256",
+        lambda _path: PINNED_SNAPSHOT_ARTIFACT_DIGEST,
+    )
+    observed_at = datetime(2026, 8, 4, 10, 0, tzinfo=UTC)
+
+    manifest = prepare_expedited_legacy_compatibility(
+        archive,
+        tmp_path / "site",
+        identity=pinned_snapshot_identity(),
+        observed_at=observed_at,
+    )
+
+    assert manifest["mode"] == PINNED_SNAPSHOT_MODE
+    assert manifest["window_days"] == PINNED_SNAPSHOT_DAY_COUNT == 94
+    assert manifest["window_start"] == "2026-05-01"
+    assert manifest["window_end"] == "2026-08-02"
+    assert manifest["dated_report_count"] == 94
+    assert len({row["sha256"] for row in manifest["dated_reports"]}) == 94
+    assert manifest["waiver"]["status"] == "forbidden"
+    assert manifest["source"] == pinned_snapshot_identity().as_dict()
+    assert manifest["pinned_snapshot_audit"] == {
+        "actual_dated_report_count": 94,
+        "actual_window_start": "2026-05-01",
+        "actual_window_end": "2026-08-02",
+        "gap_count": 0,
+        "unique_dated_report_content_count": 94,
+        "duplicate_content_group_count": 0,
+        "contains_placeholder": False,
+        "is_synthetic": False,
+        "audited_min_page_bytes": PINNED_SNAPSHOT_MIN_PAGE_BYTES,
+        "audited_max_page_bytes": PINNED_SNAPSHOT_MAX_PAGE_BYTES,
+    }
+    assert PINNED_SNAPSHOT_MIN_PAGE_BYTES == 57_695
+    assert PINNED_SNAPSHOT_MAX_PAGE_BYTES == 360_734
+    assert verify_expedited_legacy_compatibility(
+        tmp_path / "site",
+        expected_identity=pinned_snapshot_identity(),
+        observed_at=observed_at,
+    ) == manifest
+
+
+def test_pinned_snapshot_fallback_rejects_waiver_gap_and_duplicate_content(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "curator.expedited_legacy_compat._file_sha256",
+        lambda _path: PINNED_SNAPSHOT_ARTIFACT_DIGEST,
+    )
+    observed_at = datetime(2026, 8, 4, 10, 0, tzinfo=UTC)
+    archive = _archive(
+        tmp_path / "legacy.zip",
+        start=PINNED_SNAPSHOT_WINDOW_START,
+        end=PINNED_SNAPSHOT_WINDOW_END,
+    )
+    with pytest.raises(LegacyFeedCompatibilityError, match="waiver is forbidden"):
+        prepare_expedited_legacy_compatibility(
+            archive,
+            tmp_path / "waiver-site",
+            identity=pinned_snapshot_identity(),
+            observed_at=observed_at,
+            waiver=_waiver(),
+        )
+
+    missing = _archive(
+        tmp_path / "missing.zip",
+        start=PINNED_SNAPSHOT_WINDOW_START,
+        end=PINNED_SNAPSHOT_WINDOW_END,
+        missing={date(2026, 7, 1)},
+    )
+    with pytest.raises(LegacyFeedCompatibilityError, match="94 actual consecutive"):
+        prepare_expedited_legacy_compatibility(
+            missing,
+            tmp_path / "missing-site",
+            identity=pinned_snapshot_identity(),
+            observed_at=observed_at,
+        )
+
+    duplicate = _archive(
+        tmp_path / "duplicate.zip",
+        start=PINNED_SNAPSHOT_WINDOW_START,
+        end=PINNED_SNAPSHOT_WINDOW_END,
+        duplicate_content=True,
+    )
+    with pytest.raises(LegacyFeedCompatibilityError, match="duplicated dated report"):
+        prepare_expedited_legacy_compatibility(
+            duplicate,
+            tmp_path / "duplicate-site",
+            identity=pinned_snapshot_identity(),
+            observed_at=observed_at,
+        )
 
 
 @pytest.mark.parametrize(

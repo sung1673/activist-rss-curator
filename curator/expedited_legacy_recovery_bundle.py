@@ -13,8 +13,12 @@ from .expedited_legacy_compat import (
     EXPEDITED_WINDOW_DAYS,
     EXPEDITED_WINDOW_START,
     MANIFEST_NAME as COMPATIBILITY_MANIFEST_NAME,
+    PINNED_SNAPSHOT_DAY_COUNT,
+    PINNED_SNAPSHOT_MODE,
+    PINNED_SNAPSHOT_WINDOW_START,
     _load_waiver,
     _observed_at,
+    pinned_snapshot_identity,
     prepare_expedited_legacy_compatibility,
     verify_expedited_legacy_compatibility,
 )
@@ -94,6 +98,15 @@ def _validate_layout(paths: set[str], *, mode: str) -> None:
         if len(dated) < 90:
             raise LegacyRecoveryBundleError(
                 "standard expedited recovery requires at least 90 dated reports"
+            )
+    elif mode == PINNED_SNAPSHOT_MODE:
+        expected = {
+            date.fromordinal(PINNED_SNAPSHOT_WINDOW_START.toordinal() + offset)
+            for offset in range(PINNED_SNAPSHOT_DAY_COUNT)
+        }
+        if len(expected) < 90 or dated != expected:
+            raise LegacyRecoveryBundleError(
+                "pinned snapshot fallback must contain the exact 94-day full site"
             )
     else:
         raise LegacyRecoveryBundleError("expedited legacy compatibility mode is invalid")
@@ -421,7 +434,17 @@ def prepare_expedited_legacy_drill_site(
         date.fromordinal(EXPEDITED_WINDOW_START.toordinal() + offset)
         for offset in range(EXPEDITED_WINDOW_DAYS)
     }
-    if dated == exact_89:
+    if identity == pinned_snapshot_identity():
+        expected_pinned = {
+            date.fromordinal(PINNED_SNAPSHOT_WINDOW_START.toordinal() + offset)
+            for offset in range(PINNED_SNAPSHOT_DAY_COUNT)
+        }
+        if dated != expected_pinned:
+            raise LegacyRecoveryBundleError(
+                "pinned snapshot fallback must contain the exact 94-day full site"
+            )
+        mode = PINNED_SNAPSHOT_MODE
+    elif dated == exact_89:
         mode = "89_day_human_waiver"
     elif len(dated) >= 90:
         mode = "standard_90_day"
