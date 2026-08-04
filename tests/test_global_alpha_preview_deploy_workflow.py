@@ -78,11 +78,14 @@ def test_collection_free_preview_uses_only_immutable_existing_sources() -> None:
     assert 'daily.path !== ".github/workflows/daily.yml"' in text
     assert "daily.head_sha" in text
     assert 'currentLegacy.path !== ".github/workflows/build-feed.yml"' in text
-    assert 'item.name === "github-pages"' in text
-    assert "Current legacy Pages run must have one immutable github-pages artifact" in text
+    assert 'currentLegacyArtifactName' in text
+    assert '"github-pages"' in text
+    assert "Current legacy Pages run must have one immutable expected artifact" in text
     assert "Prove the prepared public legacy tree matches the public root" in text
     assert "LEGACY_ROLLBACK_RUN_ID" in text
     assert "LEGACY_ROLLBACK_ARTIFACT_DIGEST" in text
+    assert 'legacyName !== "legacy-pages-archive-seed"' in text
+    assert 'legacy.event !== "workflow_dispatch"' in text
     assert "Pinned legacy artifact digest changed" in text
     assert ".github/scripts/prepare-legacy-pages.py" in text
     assert "--governance-preview-source daily-pages/governance" in text
@@ -91,6 +94,64 @@ def test_collection_free_preview_uses_only_immutable_existing_sources() -> None:
     assert '"preview-site/governance/$asset"' in text
     assert "python -m curator.governance_site_config \\\n            --site preview-site" not in text
     assert "curator.legacy_telegram_safety verify-site" in text
+
+
+def test_collection_free_preview_allows_only_the_exact_pinned_90_day_fallback() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+    resolver = text[
+        text.index("const requestedDaily") : text.index(
+            "Download exact Daily governance Pages"
+        )
+    ]
+    materialize = text[
+        text.index("Materialize and structurally verify the currently-served legacy source") :
+        text.index("Prove the prepared public legacy tree matches the public root")
+    ]
+
+    assert "requestedLegacyPages === legacyRunText" in resolver
+    assert 'reusedPinnedRollbackSeed ? "pinned_immutable_seed" : "pages_artifact_tar"' in resolver
+    assert 'legacyName !== "legacy-pages-archive-seed"' in resolver
+    assert 'legacy.event !== "workflow_dispatch"' in resolver
+    assert 'legacy.head_branch !== process.env.DEFAULT_BRANCH' in resolver
+    assert 'legacy.path !== ".github/workflows/build-feed.yml"' in resolver
+    assert "legacy.head_repository?.full_name" in resolver
+    assert "legacy.head_sha" in resolver
+    assert "legacyMatches.length !== 1" in resolver
+    assert "legacyMatches[0].digest" in resolver
+    assert "item.name === legacyName && !item.expired" in resolver
+    assert 'case "$CURRENT_LEGACY_SOURCE_KIND" in' in materialize
+    assert "pages_artifact_tar)" in materialize
+    assert "pinned_immutable_seed)" in materialize
+    assert 'find current-legacy-download -type f -name artifact.tar' in materialize
+    assert "curator.expedited_legacy_recovery_bundle prepare-drill-site" in materialize
+    assert '--archive current-legacy-pages.zip' in materialize
+    assert '--source-run-id "$CURRENT_LEGACY_RUN_ID"' in materialize
+    assert '--source-artifact-id "$CURRENT_LEGACY_ARTIFACT_ID"' in materialize
+    assert '--source-artifact-name "$CURRENT_LEGACY_ARTIFACT_NAME"' in materialize
+    assert '--source-code-revision "$CURRENT_LEGACY_CODE_REVISION"' in materialize
+    assert '--source-artifact-digest "$CURRENT_LEGACY_ARTIFACT_DIGEST"' in materialize
+    assert '.mode == "standard_90_day" and (.window_days >= 90)' in materialize
+    assert "Unknown trusted current legacy source kind" in materialize
+    assert "89_day_human_waiver" not in materialize
+    assert "if unzip" not in materialize
+    assert "|| python -m curator.expedited_legacy_recovery_bundle" not in materialize
+
+
+def test_collection_free_preview_records_and_revalidates_pinned_identity() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+    provenance = text[
+        text.index("Record collection-free source provenance") :
+        text.index("Revalidate immutable job-start repository boundary")
+    ]
+
+    assert '[[ "$CURRENT_LEGACY_RUN_ID" == "$LEGACY_RUN_ID" ]]' in provenance
+    assert '[[ "$CURRENT_LEGACY_ARTIFACT_ID" == "$LEGACY_ARTIFACT_ID" ]]' in provenance
+    assert '[[ "$CURRENT_LEGACY_ARTIFACT_NAME" == "$LEGACY_ARTIFACT_NAME" ]]' in provenance
+    assert '[[ "$CURRENT_LEGACY_ARTIFACT_DIGEST" == "$LEGACY_ARTIFACT_DIGEST" ]]' in provenance
+    assert '[[ "$CURRENT_LEGACY_CODE_REVISION" == "$LEGACY_CODE_REVISION" ]]' in provenance
+    assert "reused_pinned_rollback_seed: $reused_pinned_rollback_seed" in provenance
+    assert "source_kind: $current_legacy_source_kind" in provenance
+    assert "public_legacy_sha256" in provenance
 
 
 def test_collection_free_preview_compares_the_prepared_public_legacy_tree() -> None:
