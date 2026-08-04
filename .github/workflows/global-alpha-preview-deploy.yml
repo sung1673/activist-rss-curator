@@ -309,7 +309,7 @@ jobs:
                 --source-code-revision "$CURRENT_LEGACY_CODE_REVISION" \
                 --source-artifact-digest "$CURRENT_LEGACY_ARTIFACT_DIGEST"
               jq -e \
-                '.mode == "standard_90_day" and (.window_days >= 90)' \
+                '.mode == "pinned_snapshot_90_day_fallback" and (.window_days >= 90)' \
                 current-legacy-drill-receipt.json >/dev/null
               ;;
             *)
