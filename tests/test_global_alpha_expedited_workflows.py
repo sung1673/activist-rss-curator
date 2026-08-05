@@ -782,6 +782,23 @@ def test_expedited_evidence_uses_actual_receipts_human_bytes_and_rights() -> Non
     assert '"source_right_valid": True' not in text
 
 
+def test_preparation_verifies_legacy_provenance_from_protected_rollback_input() -> None:
+    _text, payload = workflow("global-alpha-expedited-preparation.yml")
+    evaluate = payload["jobs"]["evaluate"]
+    verify = next(
+        step
+        for step in evaluate["steps"]
+        if step["name"] == "Verify protected input producer identities"
+    )["run"]
+
+    assert 'Path("rollback-prepared/rollback-preparation.json")' in verify
+    assert 'rollback_preparation.get("legacy_archive", {})' in verify
+    assert 'manifest.get("producers", {}).get("legacy_archive", {})' in verify
+    assert 'legacy.get("run_id") != protected_legacy.get("run_id")' in verify
+    assert 'protected_legacy.get("head_sha", "")' in verify
+    assert 'payload.get("legacy_archive", {})' not in verify
+
+
 def test_corrected_human_approval_chain_is_bound_end_to_end() -> None:
     editorial_text, editorial = workflow(
         "global-alpha-expedited-editorial.yml"

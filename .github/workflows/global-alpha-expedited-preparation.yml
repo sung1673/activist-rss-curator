@@ -2739,7 +2739,12 @@ jobs:
               }
               if claimed != actual:
                   raise SystemExit(f"{producer_key} protected provenance mismatch")
-          legacy = payload.get("legacy_archive", {})
+          rollback_preparation = json.loads(
+              Path("rollback-prepared/rollback-preparation.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          legacy = rollback_preparation.get("legacy_archive", {})
           expected_legacy = {
               "artifact_id": int(os.environ["LEGACY_ARTIFACT_ID"]),
               "artifact_name": os.environ["LEGACY_ARTIFACT_NAME"],
@@ -2748,9 +2753,27 @@ jobs:
           claimed_legacy = {
               "artifact_id": legacy.get("artifact_id"),
               "artifact_name": legacy.get("artifact_name"),
-              "archive_sha256": str(legacy.get("archive_sha256", "")).removeprefix("sha256:"),
+              "archive_sha256": str(legacy.get("artifact_digest", "")).removeprefix("sha256:"),
           }
-          if claimed_legacy != expected_legacy:
+          protected_legacy = manifest.get("producers", {}).get("legacy_archive", {})
+          protected_artifacts = protected_legacy.get("artifacts", [])
+          if len(protected_artifacts) != 1:
+              raise SystemExit("legacy archive protected provenance mismatch")
+          protected_artifact = protected_artifacts[0]
+          manifest_legacy = {
+              "artifact_id": protected_artifact.get("artifact_id"),
+              "artifact_name": protected_artifact.get("artifact_name"),
+              "archive_sha256": str(
+                  protected_artifact.get("artifact_digest", "")
+              ).removeprefix("sha256:"),
+          }
+          if (
+              claimed_legacy != expected_legacy
+              or manifest_legacy != expected_legacy
+              or legacy.get("run_id") != protected_legacy.get("run_id")
+              or str(legacy.get("code_revision", "")).lower()
+              != str(protected_legacy.get("head_sha", "")).lower()
+          ):
               raise SystemExit("legacy archive protected provenance mismatch")
           PY
 
