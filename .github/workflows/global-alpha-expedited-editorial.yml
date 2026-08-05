@@ -698,10 +698,16 @@ jobs:
               "c30c26b8329fce1fc2a7f5a1afc89258e8d73324" ]]
             [[ "$(git rev-parse "$SOURCE_SHA:curator/global_alpha_expedited_editorial.py")" == \
               "d9d3bb523034c10990efa0935c3f26872a05d374" ]]
+            [[ "$(git rev-parse "$GITHUB_SHA:deploy/activist/governance_v1.php")" == \
+              "73178a8323e1c7050d9bd7f2978363ae28be7132" ]]
+            [[ "$(git rev-parse "$GITHUB_SHA:tests/php73_release_state_smoke.py")" == \
+              "21ba42d4145ecb8a4159cc6351b17fadb6e4272c" ]]
             allowed=(
               ".github/workflows/global-alpha-expedited-editorial.yml"
               ".github/workflows/global-alpha-preview-deploy.yml"
               "curator/global_alpha_expedited_editorial.py"
+              "deploy/activist/governance_v1.php"
+              "tests/php73_release_state_smoke.py"
               "tests/test_global_alpha_expedited_editorial.py"
               "tests/test_global_alpha_expedited_editorial_contract.py"
               "tests/test_global_alpha_preview_deploy_workflow.py"
