@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import argparse
+import re
 
 import yaml
 
@@ -240,7 +241,35 @@ def test_protected_carry_forward_is_ancestor_bound_and_event_write_free() -> Non
     assert "38be7d450a6e7865d94798ab6b57f3688413f743" in prepare_text
     assert "c30c26b8329fce1fc2a7f5a1afc89258e8d73324" in prepare_text
     assert "d9d3bb523034c10990efa0935c3f26872a05d374" in prepare_text
+    assert (
+        'git rev-parse "$GITHUB_SHA:deploy/activist/governance_v1.php"'
+        in prepare_text
+    )
+    assert "73178a8323e1c7050d9bd7f2978363ae28be7132" in prepare_text
+    assert (
+        'git rev-parse "$GITHUB_SHA:tests/php73_release_state_smoke.py"'
+        in prepare_text
+    )
+    assert "21ba42d4145ecb8a4159cc6351b17fadb6e4272c" in prepare_text
     assert "Fresh carry-forward disallows target diff" in prepare_text
+    fresh_allowlist_match = re.search(
+        r'allowed=\(\n(?P<entries>(?:\s+"[^"]+"\n)+)\s+\)\n'
+        r'\s+mapfile -t changed',
+        prepare_text,
+    )
+    assert fresh_allowlist_match is not None
+    assert re.findall(r'"([^"]+)"', fresh_allowlist_match.group("entries")) == [
+        ".github/workflows/global-alpha-expedited-editorial.yml",
+        ".github/workflows/global-alpha-preview-deploy.yml",
+        "curator/global_alpha_expedited_editorial.py",
+        "deploy/activist/governance_v1.php",
+        "tests/php73_release_state_smoke.py",
+        "tests/test_global_alpha_expedited_editorial.py",
+        "tests/test_global_alpha_expedited_editorial_contract.py",
+        "tests/test_global_alpha_preview_deploy_workflow.py",
+    ]
+    assert '[[ "$permitted" == "true" ]] || {' in prepare_text
+    assert 'exit 1' in prepare_text
     assert 'Date.parse("2026-08-04T23:59:59Z")' in prepare_text
     assert WORKFLOW_TEXT.count("2026-08-04T23:59:59Z") == 4
     assert "oneTimeLegacyChain && Date.now() <= oneTimeLegacyDeadline" in prepare_text
