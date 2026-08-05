@@ -730,8 +730,16 @@ def test_expedited_evidence_uses_actual_receipts_human_bytes_and_rights() -> Non
             "${{ steps.producers.outputs." + key + "_run_id }}"
         )
         assert download["repository"] == "${{ github.repository }}"
-        assert download["path"] == "connector-artifacts"
+        expected_path = "connector-artifacts"
+        if key.startswith("sec_"):
+            expected_path += (
+                "/${{ steps.producers.outputs."
+                + key
+                + "_artifact_0_name }}"
+            )
+        assert download["path"] == expected_path
         assert download["merge-multiple"] == "false"
+    assert "`${key}_artifact_${index}_name`" in resolver
     derive = next(
         step
         for step in evaluate["steps"]
