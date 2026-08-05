@@ -8397,6 +8397,52 @@ function v1_dart_identity_change_document_matches(
 }
 
 /**
+ * Match the raw DART document behind a rejected correction without reviving
+ * its server-owned draft lifecycle.  The generic matcher remains authoritative
+ * for every ordinary or already-equal document.  The sole extra normalization
+ * covers an ambiguous independent correction whose immutable raw payload said
+ * published while the server intentionally stored the document row as draft.
+ */
+function v1_dart_rejected_document_replay_matches(
+    array $stored,
+    array $submitted,
+    bool $isCorrection
+): bool {
+    if (v1_dart_identity_change_document_matches(
+        $stored,
+        $submitted,
+        $isCorrection
+    )) {
+        return true;
+    }
+    if (!$isCorrection
+        || (string)($stored['publication_status'] ?? '') !== 'draft'
+        || trim((string)($stored['correction_of_document_id'] ?? '')) !== ''
+        || (int)($stored['version_no'] ?? 0) !== 1
+        || !array_key_exists('publication_status',$submitted)
+        || !is_string($submitted['publication_status'])
+        || $submitted['publication_status'] !== 'published') {
+        return false;
+    }
+    $storedPayload = json_decode((string)($stored['payload_json'] ?? ''),true);
+    if (!is_array($storedPayload)
+        || (string)($storedPayload['correction_link_status'] ?? '')
+            !== 'ambiguous_independent'
+        || !array_key_exists('publication_status',$storedPayload)
+        || !is_string($storedPayload['publication_status'])
+        || $storedPayload['publication_status'] !== 'published') {
+        return false;
+    }
+    $normalizedStored = $stored;
+    $normalizedStored['publication_status'] = 'published';
+    return v1_dart_identity_change_document_matches(
+        $normalizedStored,
+        $submitted,
+        true
+    );
+}
+
+/**
  * Prove that a company row accompanying a reviewed DART event replay would be
  * a semantic no-op and that the guarded global issuer projection is intact.
  *
@@ -10086,6 +10132,19 @@ function upsert_governance_snapshot(
                 ));
                 $submittedDocumentIds = array_keys($submittedDocumentIdSet);
                 $submittedDocumentId = (string)$submittedDocumentIds[0];
+                $protectedDocumentMatches =
+                    isset($submittedDocumentsById[$storedDocumentId])
+                    && ($rejectedDartEventProtected
+                        ? v1_dart_rejected_document_replay_matches(
+                            $storedDocumentRow,
+                            $submittedDocumentsById[$storedDocumentId],
+                            !empty($reviewedEventReplay['is_correction'])
+                        )
+                        : v1_dart_identity_change_document_matches(
+                            $storedDocumentRow,
+                            $submittedDocumentsById[$storedDocumentId],
+                            !empty($reviewedEventReplay['is_correction'])
+                        ));
                 if ($storedDocumentId === ''
                     || $storedDocumentId !== $submittedDocumentId
                     || (string)($storedDocumentRow['relation_type'] ?? '')
@@ -10093,11 +10152,7 @@ function upsert_governance_snapshot(
                     || (int)($storedDocumentRow['position_no'] ?? -1) !== 0
                     || isset($duplicateSubmittedDocumentIds[$storedDocumentId])
                     || !isset($submittedDocumentsById[$storedDocumentId])
-                    || !v1_dart_identity_change_document_matches(
-                        $storedDocumentRow,
-                        $submittedDocumentsById[$storedDocumentId],
-                        !empty($reviewedEventReplay['is_correction'])
-                    )) {
+                    || !$protectedDocumentMatches) {
                     throw new RuntimeException(
                         'followup_event_identity_conflict:' . $submittedEventId
                     );

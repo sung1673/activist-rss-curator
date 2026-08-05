@@ -3728,6 +3728,12 @@ def exercise_event_identity_datetime_storage(
     )
 
     rejected_mutated_actor_id = "actor:ci-rejected-correction-mutated"
+    rejected_document_without_publication = dict(rejected_document)
+    rejected_document_without_publication.pop("publication_status")
+    rejected_document_draft_publication = {
+        **rejected_document,
+        "publication_status": "draft",
+    }
     rejected_mutations = (
         (
             "event_payload",
@@ -3737,6 +3743,16 @@ def exercise_event_identity_datetime_storage(
         (
             "document",
             {**rejected_document, "title": "mutated rejected document"},
+            rejected_event,
+        ),
+        (
+            "document_publication_missing",
+            rejected_document_without_publication,
+            rejected_event,
+        ),
+        (
+            "document_publication_draft",
+            rejected_document_draft_publication,
             rejected_event,
         ),
         (
@@ -3798,6 +3814,62 @@ def exercise_event_identity_datetime_storage(
         == "0",
         "rejected actor mutation persisted a synthetic actor",
     )
+
+    rejected_document_payload_hex = mysql_execute(
+        mysql_container_id,
+        "SELECT HEX(payload_json) FROM ci_documents "
+        f"WHERE document_id='{rejected_document_id}'",
+    )
+    rejected_document_updated_at = mysql_execute(
+        mysql_container_id,
+        "SELECT updated_at FROM ci_documents "
+        f"WHERE document_id='{rejected_document_id}'",
+    )
+    for tamper_label, tamper_sql in (
+        (
+            "publication_scalar",
+            "UPDATE ci_documents SET publication_status='withdrawn' "
+            f"WHERE document_id='{rejected_document_id}';",
+        ),
+        (
+            "server_marker",
+            "UPDATE ci_documents SET payload_json=JSON_REMOVE("
+            "payload_json,'$.correction_link_status') "
+            f"WHERE document_id='{rejected_document_id}';",
+        ),
+        (
+            "version",
+            "UPDATE ci_documents SET version_no=2 "
+            f"WHERE document_id='{rejected_document_id}';",
+        ),
+    ):
+        mysql_execute(mysql_container_id, tamper_sql)
+        rejected_stored_tamper = request_hmac_action(
+            base_url,
+            "upsert_governance_snapshot",
+            followup_payload(rejected_document, rejected_event),
+            expected_status=409,
+        )
+        require(
+            error_code(rejected_stored_tamper)
+            == "followup_event_identity_conflict",
+            f"stored {tamper_label} drift entered rejected ACK path: "
+            f"{rejected_stored_tamper!r}",
+        )
+        mysql_execute(
+            mysql_container_id,
+            "UPDATE ci_documents SET publication_status='draft',"
+            "correction_of_document_id=NULL,version_no=1,"
+            f"payload_json=UNHEX('{rejected_document_payload_hex}'),"
+            f"updated_at='{rejected_document_updated_at}' "
+            f"WHERE document_id='{rejected_document_id}';",
+        )
+        require(
+            rejected_read_only_signature() == rejected_before
+            and followup_row_signature(rejected_event_id, rejected_document_id)
+            == rejected_rows_before,
+            f"stored {tamper_label} fixture did not restore exactly",
+        )
 
     reviewed_correction_event_id = "event:ci-reviewed-correction-observation"
     reviewed_correction_document_id = "dart:20260724999007"
