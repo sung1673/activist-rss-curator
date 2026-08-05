@@ -251,6 +251,16 @@ def test_protected_carry_forward_is_ancestor_bound_and_event_write_free() -> Non
         in prepare_text
     )
     assert "21ba42d4145ecb8a4159cc6351b17fadb6e4272c" in prepare_text
+    assert (
+        'git rev-parse "$GITHUB_SHA:curator/global_alpha_expedited_gate.py"'
+        in prepare_text
+    )
+    assert "f89c9379f82afb9022eb714415b9609d3d014dcf" in prepare_text
+    assert (
+        'git rev-parse "$GITHUB_SHA:tests/test_global_alpha_expedited_gate.py"'
+        in prepare_text
+    )
+    assert "c307e470111439547eb3b297efd413b96b2e0429" in prepare_text
     assert "Fresh carry-forward disallows target diff" in prepare_text
     fresh_allowlist_match = re.search(
         r'allowed=\(\n(?P<entries>(?:\s+"[^"]+"\n)+)\s+\)\n'
@@ -263,11 +273,13 @@ def test_protected_carry_forward_is_ancestor_bound_and_event_write_free() -> Non
         ".github/workflows/global-alpha-expedited-preparation.yml",
         ".github/workflows/global-alpha-preview-deploy.yml",
         "curator/global_alpha_expedited_editorial.py",
+        "curator/global_alpha_expedited_gate.py",
         "deploy/activist/governance_v1.php",
         "tests/php73_release_state_smoke.py",
         "tests/test_dart_frozen_replay_workflow.py",
         "tests/test_global_alpha_expedited_editorial.py",
         "tests/test_global_alpha_expedited_editorial_contract.py",
+        "tests/test_global_alpha_expedited_gate.py",
         "tests/test_global_alpha_expedited_workflows.py",
         "tests/test_global_alpha_preview_deploy_workflow.py",
     ]
