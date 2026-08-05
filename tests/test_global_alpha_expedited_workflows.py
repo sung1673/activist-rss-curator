@@ -909,11 +909,15 @@ def test_expedited_preparation_requires_exact_approved_identity_targets() -> Non
         'human_carry = human.get("carry_forward")',
         'human_carry.get("approved_canonical_basis")',
         'approved_basis.get("events")',
-        "not isinstance(approved_events, list) or len(approved_events) != 20",
-        'expected_target = issuer_name + " — " + title',
-        'event.get("identity_target") != expected_target',
+        "from curator.global_alpha_expedited_gate import (",
+        "validate_editorial_canonical_event_targets,",
+        "validate_editorial_canonical_event_targets(",
+        'approved_basis.get("event_decisions")',
+        'human_event_reviews=human.get("event_reviews")',
     ):
         assert contract in verify_publication
+    assert "for position, event in enumerate(approved_events" not in verify_publication
+    assert 'event.get("identity_target") != expected_target' not in verify_publication
     assert "issuer_name.strip" not in verify_publication
     assert "title.strip" not in verify_publication
     assert "issuer_name.casefold" not in verify_publication

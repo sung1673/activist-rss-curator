@@ -2814,6 +2814,10 @@ jobs:
           import re
           from pathlib import Path
 
+          from curator.global_alpha_expedited_gate import (
+              validate_editorial_canonical_event_targets,
+          )
+
           def one(name):
               paths = list(Path("editorial-publication").rglob(name))
               if len(paths) != 1:
@@ -2860,31 +2864,20 @@ jobs:
               if isinstance(human_carry, dict)
               else None
           )
-          approved_events = (
+          canonical_events = (
               approved_basis.get("events")
               if isinstance(approved_basis, dict)
               else None
           )
-          if not isinstance(approved_events, list) or len(approved_events) != 20:
-              raise SystemExit(
-                  "editorial approved canonical basis must contain exactly 20 events"
-              )
-          for position, event in enumerate(approved_events, start=1):
-              if not isinstance(event, dict):
-                  raise SystemExit(
-                      f"editorial approved event E{position:02d} is not an object"
-                  )
-              issuer_name = event.get("issuer_name")
-              title = event.get("title")
-              if not isinstance(issuer_name, str) or not isinstance(title, str):
-                  raise SystemExit(
-                      f"editorial approved event E{position:02d} omitted issuer or title"
-                  )
-              expected_target = issuer_name + " — " + title
-              if event.get("identity_target") != expected_target:
-                  raise SystemExit(
-                      f"editorial approved event E{position:02d} identity target mismatch"
-                  )
+          validate_editorial_canonical_event_targets(
+              canonical_events,
+              decision_basis=(
+                  approved_basis.get("event_decisions")
+                  if isinstance(approved_basis, dict)
+                  else None
+              ),
+              human_event_reviews=human.get("event_reviews"),
+          )
           revision = os.environ["GITHUB_SHA"].lower()
           publication_identity = {
               "artifact_id": int(os.environ["EDITORIAL_ARTIFACT_ID"]),
