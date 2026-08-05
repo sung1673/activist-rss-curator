@@ -1235,6 +1235,88 @@ def _validate_human_record(
     return identities
 
 
+def validate_editorial_canonical_event_targets(
+    value: object,
+    *,
+    decision_basis: object,
+    human_event_reviews: object,
+) -> None:
+    """Validate public targets without promoting rejected review rows."""
+
+    events = [
+        _mapping(item, f"editorial canonical event E{position:02d}")
+        for position, item in enumerate(
+            _list(value, "editorial canonical events"), start=1
+        )
+    ]
+    canonical_decisions = [
+        _mapping(item, f"editorial canonical decision E{position:02d}")
+        for position, item in enumerate(
+            _list(decision_basis, "editorial canonical decisions"), start=1
+        )
+    ]
+    human_decisions = [
+        _mapping(item, f"editorial human decision E{position:02d}")
+        for position, item in enumerate(
+            _list(human_event_reviews, "editorial human decisions"), start=1
+        )
+    ]
+    if (
+        len(events) != MINIMUM_REVIEWED_EVENTS
+        or len(canonical_decisions) != MINIMUM_REVIEWED_EVENTS
+        or len(human_decisions) != MINIMUM_REVIEWED_EVENTS
+    ):
+        raise ExpeditedAlphaEvidenceError(
+            "editorial canonical basis must contain exactly 20 events"
+        )
+    expected_decisions = [
+        {"event_id": item.get("event_id"), "decision": item.get("decision")}
+        for item in canonical_decisions
+    ]
+    if [
+        {"event_id": item.get("event_id"), "decision": item.get("decision")}
+        for item in human_decisions
+    ] != expected_decisions:
+        raise ExpeditedAlphaEvidenceError(
+            "editorial canonical decisions do not match human review"
+        )
+
+    for position, (event, decision_item) in enumerate(
+        zip(events, canonical_decisions, strict=True), start=1
+    ):
+        location = f"editorial canonical event E{position:02d}"
+        event_id = _text(event.get("event_id"), "event_id", location)
+        issuer_name = _text(event.get("issuer_name"), "issuer_name", location)
+        title = _text(event.get("title"), "title", location)
+        decision = event.get("decision")
+        if (
+            decision_item.get("event_id") != event_id
+            or decision_item.get("decision") != decision
+        ):
+            raise ExpeditedAlphaEvidenceError(
+                f"{location}: canonical decision sequence mismatch"
+            )
+        if decision == "rejected":
+            if (
+                event.get("publication_status") != "draft"
+                or event.get("review_status") != "rejected"
+                or event.get("identity_status") != "rejected"
+            ):
+                raise ExpeditedAlphaEvidenceError(
+                    f"{location}: rejected event escaped the draft boundary"
+                )
+            continue
+        if decision != "approved":
+            raise ExpeditedAlphaEvidenceError(
+                f"{location}: invalid editorial decision"
+            )
+        expected_target = f"{issuer_name} — {title}"
+        if event.get("identity_target") != expected_target:
+            raise ExpeditedAlphaEvidenceError(
+                f"{location}: approved identity target mismatch"
+            )
+
+
 def validate_expedited_human_review(
     report: Mapping[str, object],
     *,

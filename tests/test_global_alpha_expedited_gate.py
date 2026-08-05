@@ -32,6 +32,7 @@ from curator.global_alpha_expedited_gate import (
     build_expedited_release_report,
     main,
     validate_connector_receipts,
+    validate_editorial_canonical_event_targets,
 )
 from curator.global_alpha_pages_identity import build_terminal_content_identity
 
@@ -1167,6 +1168,113 @@ def test_human_review_requires_20_40_and_exact_approved_top5() -> None:
     review["raw_counts"]["top5_published_count"] = 4  # type: ignore[index]
     with pytest.raises(ExpeditedAlphaEvidenceError, match="section_sha256"):
         build_expedited_release_report(top4, expected_revision=REVISION)
+
+
+def _editorial_canonical_events() -> list[dict[str, object]]:
+    return [
+        {
+            "event_id": f"event:{position:02d}",
+            "decision": "approved",
+            "issuer_name": f"Issuer {position}",
+            "title": f"Official title {position}",
+            "identity_target": (
+                f"Issuer {position} — Official title {position}"
+            ),
+            "publication_status": "published",
+            "review_status": "approved",
+            "identity_status": "complete",
+        }
+        for position in range(1, 21)
+    ]
+
+
+def _editorial_decisions(
+    events: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    return [
+        {
+            "event_id": event["event_id"],
+            "decision": event["decision"],
+        }
+        for event in events
+    ]
+
+
+def test_editorial_target_gate_keeps_rejected_candidate_non_public() -> None:
+    events = _editorial_canonical_events()
+    events[14].update(
+        {
+            "decision": "rejected",
+            "identity_target": None,
+            "publication_status": "draft",
+            "review_status": "rejected",
+            "identity_status": "rejected",
+        }
+    )
+    decisions = _editorial_decisions(events)
+
+    validate_editorial_canonical_event_targets(
+        events,
+        decision_basis=decisions,
+        human_event_reviews=decisions,
+    )
+
+
+def test_editorial_target_gate_rejects_bad_approved_target() -> None:
+    events = _editorial_canonical_events()
+    events[14]["identity_target"] = None
+    decisions = _editorial_decisions(events)
+
+    with pytest.raises(
+        ExpeditedAlphaEvidenceError,
+        match="approved identity target mismatch",
+    ):
+        validate_editorial_canonical_event_targets(
+            events,
+            decision_basis=decisions,
+            human_event_reviews=decisions,
+        )
+
+
+def test_editorial_target_gate_rejects_published_rejection() -> None:
+    events = _editorial_canonical_events()
+    events[14].update(
+        {
+            "decision": "rejected",
+            "identity_target": None,
+            "publication_status": "published",
+            "review_status": "rejected",
+            "identity_status": "rejected",
+        }
+    )
+    decisions = _editorial_decisions(events)
+
+    with pytest.raises(
+        ExpeditedAlphaEvidenceError,
+        match="escaped the draft boundary",
+    ):
+        validate_editorial_canonical_event_targets(
+            events,
+            decision_basis=decisions,
+            human_event_reviews=decisions,
+        )
+
+
+def test_editorial_target_gate_binds_canonical_and_human_decisions() -> None:
+    events = _editorial_canonical_events()
+    decisions = _editorial_decisions(events)
+    human_decisions = deepcopy(decisions)
+    human_decisions[14]["decision"] = "rejected"
+
+    with pytest.raises(
+        ExpeditedAlphaEvidenceError,
+        match="do not match human review",
+    ):
+        validate_editorial_canonical_event_targets(
+            events,
+            decision_basis=decisions,
+            human_event_reviews=human_decisions,
+        )
 
 
 @pytest.mark.parametrize(
