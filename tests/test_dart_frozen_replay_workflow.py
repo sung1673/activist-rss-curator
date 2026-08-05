@@ -220,10 +220,18 @@ def test_expedited_preparation_requires_frozen_bytes_and_matched_probe() -> None
     )
     for source in ("DART apply", "DART replay", "SEC apply", "SEC replay"):
         download = downloads[f"Download immutable {source} producer evidence"]
+        key = source.lower().replace(" ", "_")
         assert download["with"]["run-id"].endswith(
-            f"{source.lower().replace(' ', '_')}_run_id }}}}"
+            f"{key}_run_id }}}}"
         )
-        assert download["with"]["path"] == "connector-artifacts"
+        expected_path = "connector-artifacts"
+        if key.startswith("sec_"):
+            expected_path += (
+                "/${{ steps.producers.outputs."
+                + key
+                + "_artifact_0_name }}"
+            )
+        assert download["with"]["path"] == expected_path
         assert download["with"]["repository"] == "${{ github.repository }}"
         assert download["with"]["merge-multiple"] == "false"
     derive = step(
