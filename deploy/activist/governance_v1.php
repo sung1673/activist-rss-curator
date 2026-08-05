@@ -7501,6 +7501,275 @@ function v1_dart_reviewed_event_is_protected(
 }
 
 /**
+ * Identify a DART event whose human rejection is final for this source
+ * snapshot.  A rejected event is deliberately not a canonicalized reviewed
+ * event: its first-seen source payload remains the comparison basis and its
+ * rejected/draft lifecycle must never re-enter the generic upsert path.
+ */
+function v1_dart_rejected_event_is_protected(
+    array $storedEvent
+): bool {
+    $companyId = trim((string)($storedEvent['company_id'] ?? ''));
+    return preg_match('/^[0-9]{8}$/',$companyId) === 1
+        && (string)($storedEvent['issuer_id'] ?? '')
+            === 'issuer:kr:dart:' . $companyId
+        && (string)($storedEvent['country_code'] ?? '') === 'KR'
+        && (string)($storedEvent['identity_status'] ?? '') === 'rejected'
+        && (string)($storedEvent['review_status'] ?? '') === 'rejected'
+        && (string)($storedEvent['publication_status'] ?? '') === 'draft'
+        && trim((string)($storedEvent['comparison_key'] ?? '')) === '';
+}
+
+/**
+ * Prove an exact source replay of a human-rejected DART event.  Unlike the
+ * approved-event matcher below, this compares the immutable raw source event
+ * and never treats a rejected row as a canonicalized Production Alpha event.
+ */
+function v1_dart_rejected_event_replay(
+    array $storedEvent,
+    array $storedPayload,
+    array $submittedEvent
+): ?array {
+    if (!v1_dart_rejected_event_is_protected($storedEvent)
+        || !empty($storedPayload['is_cancelled'])
+        || !empty($submittedEvent['is_cancelled'])) {
+        return null;
+    }
+    $isCorrection = !empty($storedPayload['is_correction']);
+    if ((!empty($submittedEvent['is_correction'])) !== $isCorrection) {
+        return null;
+    }
+    $canonicalSubmittedEvent = $submittedEvent;
+    if ($isCorrection) {
+        if ((string)($storedPayload['event_link_status'] ?? '')
+                !== 'ambiguous_independent'
+            || (array_key_exists('event_link_status',$canonicalSubmittedEvent)
+                && (string)$canonicalSubmittedEvent['event_link_status']
+                    !== 'ambiguous_independent')) {
+            return null;
+        }
+        $canonicalSubmittedEvent['event_link_status'] =
+            'ambiguous_independent';
+    } elseif (array_key_exists('event_link_status',$storedPayload)
+        || array_key_exists('event_link_status',$canonicalSubmittedEvent)) {
+        return null;
+    }
+    foreach (array(&$storedPayload,&$canonicalSubmittedEvent) as &$eventPayload) {
+        if (isset($eventPayload['metadata'])
+            && !is_array($eventPayload['metadata'])) {
+            return null;
+        }
+        if (!isset($eventPayload['metadata'])) {
+            $eventPayload['metadata'] = array();
+        }
+        $titleProvenance = trim((string)(
+            $eventPayload['metadata']['title_provenance'] ?? ''
+        ));
+        if ($titleProvenance !== '' && $titleProvenance !== 'source') {
+            return null;
+        }
+        $eventPayload['metadata']['title_provenance'] = 'source';
+    }
+    unset($eventPayload);
+    $markerUpgrade = false;
+    if (!v1_followup_event_replay_payload_matches(
+            $storedPayload,
+            $canonicalSubmittedEvent,
+            false,
+            $markerUpgrade
+        ) || $markerUpgrade) {
+        return null;
+    }
+
+    $eventId = trim((string)($storedEvent['event_id'] ?? ''));
+    $companyId = trim((string)($storedEvent['company_id'] ?? ''));
+    $submittedEventId = trim((string)v1_first(
+        $submittedEvent,
+        array('event_id'),
+        ''
+    ));
+    $submittedCompanyId = trim((string)v1_first(
+        $submittedEvent,
+        array('company_id','corp_code'),
+        ''
+    ));
+    $eventType = trim((string)v1_first(
+        $submittedEvent,
+        array('event_type'),
+        ''
+    ));
+    $title = trim((string)v1_first(
+        $submittedEvent,
+        array('title','action'),
+        ''
+    ));
+    $language = v1_language(v1_first(
+        $submittedEvent,
+        array('original_language','language'),
+        'ko'
+    ),'ko');
+    $summary = (string)v1_first(
+        $submittedEvent,
+        array('summary','target'),
+        ''
+    ) ?: null;
+    $occurredAt = mysql_dt(v1_first(
+        $submittedEvent,
+        array('occurred_at','occurred_on'),
+        null
+    ));
+    $deadlineAt = mysql_dt(v1_first(
+        $submittedEvent,
+        array('deadline_at','deadline'),
+        null
+    ));
+    $importance = trim((string)v1_first(
+        $submittedEvent,
+        array('importance'),
+        'medium'
+    ));
+    if ($importance === 'normal') { $importance = 'medium'; }
+    if (!in_array(
+        $importance,
+        array('low','medium','high','market_sensitive','critical'),
+        true
+    )) {
+        $importance = 'medium';
+    }
+    $identityAction = trim((string)v1_first(
+        $submittedEvent,
+        array('identity_action'),
+        ''
+    ));
+    $identityTarget = trim((string)v1_first(
+        $submittedEvent,
+        array('identity_target'),
+        ''
+    ));
+    $identityActorId = trim((string)v1_first(
+        $submittedEvent,
+        array('identity_actor_id','actor_id'),
+        ''
+    ));
+    $identityEffectiveAt = mysql_dt(v1_first(
+        $submittedEvent,
+        array('identity_effective_at'),
+        null
+    ));
+    $identityDeadlineAt = mysql_dt(v1_first(
+        $submittedEvent,
+        array('identity_deadline_at'),
+        null
+    ));
+    $identityStatus = trim((string)v1_first(
+        $submittedEvent,
+        array('identity_status'),
+        'needs_review'
+    ));
+    $comparisonKey = trim((string)v1_first(
+        $submittedEvent,
+        array('comparison_key'),
+        ''
+    ));
+    $expectedFamily = v1_global_event_family_for_legacy_type($eventType);
+    $expectedVerification = $isCorrection ? 'corrected' : 'official';
+    $storedFields = array(
+        (string)($storedEvent['event_type'] ?? ''),
+        (string)($storedEvent['title'] ?? ''),
+        (string)($storedEvent['original_language'] ?? ''),
+        (string)($storedEvent['summary'] ?? ''),
+        (string)($storedEvent['occurred_at'] ?? ''),
+        (string)($storedEvent['deadline_at'] ?? ''),
+        (string)($storedEvent['importance'] ?? ''),
+        (string)($storedEvent['verification_status'] ?? ''),
+        (string)($storedEvent['collection_key'] ?? ''),
+        (string)($storedEvent['identity_action'] ?? ''),
+        (string)($storedEvent['identity_target'] ?? ''),
+        (string)($storedEvent['identity_actor_id'] ?? ''),
+        (string)($storedEvent['identity_effective_at'] ?? ''),
+        (string)($storedEvent['identity_deadline_at'] ?? ''),
+    );
+    $submittedFields = array(
+        $eventType,
+        mb_substr($title,0,700,'UTF-8'),
+        $language,
+        (string)$summary,
+        (string)($occurredAt ?? ''),
+        (string)($deadlineAt ?? ''),
+        $importance,
+        $expectedVerification,
+        mb_substr(trim((string)v1_first(
+            $submittedEvent,
+            array('collection_key'),
+            ''
+        )),0,96,'UTF-8'),
+        $identityAction,
+        $identityTarget,
+        $identityActorId,
+        (string)($identityEffectiveAt ?? ''),
+        (string)($identityDeadlineAt ?? ''),
+    );
+    $actor = isset($submittedEvent['actor'])
+        && is_array($submittedEvent['actor'])
+        ? $submittedEvent['actor'] : null;
+    $eventActor = isset($submittedEvent['event_actor'])
+        && is_array($submittedEvent['event_actor'])
+        ? $submittedEvent['event_actor'] : null;
+    $submittedActorCountryCode = $actor === null
+        ? '' : trim((string)($actor['country_code'] ?? ''));
+    if ($eventId !== $submittedEventId
+        || $companyId !== $submittedCompanyId
+        || $eventType === ''
+        || $title === ''
+        || $occurredAt === null
+        || $expectedFamily === null
+        || (string)($storedEvent['global_event_family'] ?? '')
+            !== $expectedFamily
+        || trim((string)v1_first(
+            $submittedEvent,
+            array('verification_status','status'),
+            ''
+        )) !== 'official'
+        || $identityStatus !== 'needs_review'
+        || $comparisonKey !== ''
+        || !v1_valid_entity_id($identityActorId,64)
+        || $storedFields !== $submittedFields
+        || $actor === null
+        || $eventActor === null
+        || (string)($actor['actor_id'] ?? '') !== $identityActorId
+        || (string)($eventActor['actor_id'] ?? '') !== $identityActorId
+        || (string)($eventActor['event_id'] ?? '') !== $eventId
+        || (string)($eventActor['actor_role'] ?? '') !== 'filer'
+        || !in_array(
+            (string)($actor['actor_type'] ?? ''),
+            array('company','institution'),
+            true
+        )
+        || trim((string)($actor['display_name'] ?? '')) === ''
+        || ($submittedActorCountryCode !== ''
+            && $submittedActorCountryCode !== 'KR')
+        || (string)($actor['review_status'] ?? '') !== 'pending'
+        || (string)($actor['record_status'] ?? '') !== 'inactive'
+        || (string)($eventActor['review_status'] ?? '') !== 'pending') {
+        return null;
+    }
+    $actorCompanyId = trim((string)($actor['company_id'] ?? ''));
+    if (((string)$actor['actor_type'] === 'company'
+            && $actorCompanyId !== $companyId)
+        || ((string)$actor['actor_type'] === 'institution'
+            && $actorCompanyId !== '')) {
+        return null;
+    }
+    return array(
+        'canonical_actor_id'=>$identityActorId,
+        'is_correction'=>$isCorrection,
+        'actor_type'=>(string)$actor['actor_type'],
+        'actor_display_name'=>(string)$actor['display_name'],
+        'actor_company_id'=>$actorCompanyId,
+    );
+}
+
+/**
  * Recompute the Production Alpha identity written by the v2 editorial review
  * endpoint. This prevents a merely labelled "complete" row from entering the
  * reviewed DART replay exception.
@@ -8124,6 +8393,52 @@ function v1_dart_identity_change_document_matches(
             $submittedPayload,
             'submitted_dart_identity_change_document_encode_failed'
         ))
+    );
+}
+
+/**
+ * Match the raw DART document behind a rejected correction without reviving
+ * its server-owned draft lifecycle.  The generic matcher remains authoritative
+ * for every ordinary or already-equal document.  The sole extra normalization
+ * covers an ambiguous independent correction whose immutable raw payload said
+ * published while the server intentionally stored the document row as draft.
+ */
+function v1_dart_rejected_document_replay_matches(
+    array $stored,
+    array $submitted,
+    bool $isCorrection
+): bool {
+    if (v1_dart_identity_change_document_matches(
+        $stored,
+        $submitted,
+        $isCorrection
+    )) {
+        return true;
+    }
+    if (!$isCorrection
+        || (string)($stored['publication_status'] ?? '') !== 'draft'
+        || trim((string)($stored['correction_of_document_id'] ?? '')) !== ''
+        || (int)($stored['version_no'] ?? 0) !== 1
+        || !array_key_exists('publication_status',$submitted)
+        || !is_string($submitted['publication_status'])
+        || $submitted['publication_status'] !== 'published') {
+        return false;
+    }
+    $storedPayload = json_decode((string)($stored['payload_json'] ?? ''),true);
+    if (!is_array($storedPayload)
+        || (string)($storedPayload['correction_link_status'] ?? '')
+            !== 'ambiguous_independent'
+        || !array_key_exists('publication_status',$storedPayload)
+        || !is_string($storedPayload['publication_status'])
+        || $storedPayload['publication_status'] !== 'published') {
+        return false;
+    }
+    $normalizedStored = $stored;
+    $normalizedStored['publication_status'] = 'published';
+    return v1_dart_identity_change_document_matches(
+        $normalizedStored,
+        $submitted,
+        true
     );
 }
 
@@ -9634,7 +9949,7 @@ function upsert_governance_snapshot(
             . ' JOIN ' . table_name($config,'documents') . ' d ON d.document_id=ed.document_id'
             . ' WHERE ed.event_id=? ORDER BY ed.position_no,ed.document_id FOR UPDATE');
         $isolatedReplayDocumentOwnersStmt = $pdo->prepare('SELECT ed.document_id,e.event_id,e.company_id,e.issuer_id,e.country_code,'
-            . 'e.identity_status,e.verification_status,e.review_status,e.publication_status,e.payload_json FROM '
+            . 'e.identity_status,e.comparison_key,e.verification_status,e.review_status,e.publication_status,e.payload_json FROM '
             . table_name($config,'event_documents') . ' ed JOIN ' . table_name($config,'governance_events') . ' e'
             . ' ON e.event_id=ed.event_id WHERE ed.document_id=? ORDER BY e.event_id FOR UPDATE');
         $submittedDocumentsById = array();
@@ -9650,6 +9965,7 @@ function upsert_governance_snapshot(
         $dartLifecycleObservationByIdStmt = null;
         $dartLifecycleObservationInsertStmt = null;
         $reviewedDartIdentityActorStmt = null;
+        $rejectedDartIdentityActorStmt = null;
         $reviewedDartEventObservationsStmt = null;
         if ($globalDartProjectionEnabled) {
             $dartLifecycleObservationByIdStmt = $pdo->prepare(
@@ -9679,6 +9995,25 @@ function upsert_governance_snapshot(
                 . ' AND reviewed_replay_a.record_status=\'active\''
                 . ' AND reviewed_replay_a.country_code=\'KR\''
                 . ' ORDER BY reviewed_replay_ea.actor_id LIMIT 2 FOR UPDATE'
+            );
+            $rejectedDartIdentityActorStmt = $pdo->prepare(
+                'SELECT rejected_replay_ea.actor_id,'
+                . 'rejected_replay_ea.actor_role,'
+                . 'rejected_replay_ea.review_status AS relation_review_status,'
+                . 'rejected_replay_a.actor_type,'
+                . 'rejected_replay_a.display_name,'
+                . 'rejected_replay_a.company_id,'
+                . 'rejected_replay_a.country_code,'
+                . 'rejected_replay_a.review_status AS actor_review_status,'
+                . 'rejected_replay_a.record_status FROM '
+                . table_name($config,'event_actors')
+                . ' rejected_replay_ea JOIN ' . table_name($config,'actors')
+                . ' rejected_replay_a'
+                . ' ON rejected_replay_a.actor_id=rejected_replay_ea.actor_id'
+                . ' WHERE rejected_replay_ea.event_id=?'
+                . ' AND rejected_replay_ea.actor_id=?'
+                . ' AND rejected_replay_ea.actor_role=\'filer\''
+                . ' ORDER BY rejected_replay_ea.actor_id LIMIT 2 FOR UPDATE'
             );
             $reviewedDartEventObservationsStmt = $pdo->prepare(
                 'SELECT observation_id,event_id,document_id,source_class,'
@@ -9729,20 +10064,28 @@ function upsert_governance_snapshot(
                 continue;
             }
             $storedEventPayload = json_decode((string)$isolatedReplayEvent['payload_json'],true);
-            if (v1_dart_reviewed_event_is_protected(
-                $isolatedReplayEvent
-            )) {
+            $reviewedDartEventProtected =
+                v1_dart_reviewed_event_is_protected($isolatedReplayEvent);
+            $rejectedDartEventProtected =
+                v1_dart_rejected_event_is_protected($isolatedReplayEvent);
+            if ($reviewedDartEventProtected || $rejectedDartEventProtected) {
                 if (!$globalDartProjectionEnabled
                     || !$dartGuardedAction
                     || !$reviewedDartIdentityActorStmt
+                    || !$rejectedDartIdentityActorStmt
                     || !$reviewedDartEventObservationsStmt
                     || !is_array($storedEventPayload)) {
                     throw new RuntimeException(
                         'followup_event_identity_conflict:' . $submittedEventId
                     );
                 }
-                $reviewedEventReplay =
-                    v1_dart_reviewed_event_replay(
+                $reviewedEventReplay = $reviewedDartEventProtected
+                    ? v1_dart_reviewed_event_replay(
+                        $isolatedReplayEvent,
+                        $storedEventPayload,
+                        $submittedEvent
+                    )
+                    : v1_dart_rejected_event_replay(
                         $isolatedReplayEvent,
                         $storedEventPayload,
                         $submittedEvent
@@ -9789,6 +10132,19 @@ function upsert_governance_snapshot(
                 ));
                 $submittedDocumentIds = array_keys($submittedDocumentIdSet);
                 $submittedDocumentId = (string)$submittedDocumentIds[0];
+                $protectedDocumentMatches =
+                    isset($submittedDocumentsById[$storedDocumentId])
+                    && ($rejectedDartEventProtected
+                        ? v1_dart_rejected_document_replay_matches(
+                            $storedDocumentRow,
+                            $submittedDocumentsById[$storedDocumentId],
+                            !empty($reviewedEventReplay['is_correction'])
+                        )
+                        : v1_dart_identity_change_document_matches(
+                            $storedDocumentRow,
+                            $submittedDocumentsById[$storedDocumentId],
+                            !empty($reviewedEventReplay['is_correction'])
+                        ));
                 if ($storedDocumentId === ''
                     || $storedDocumentId !== $submittedDocumentId
                     || (string)($storedDocumentRow['relation_type'] ?? '')
@@ -9796,11 +10152,7 @@ function upsert_governance_snapshot(
                     || (int)($storedDocumentRow['position_no'] ?? -1) !== 0
                     || isset($duplicateSubmittedDocumentIds[$storedDocumentId])
                     || !isset($submittedDocumentsById[$storedDocumentId])
-                    || !v1_dart_identity_change_document_matches(
-                        $storedDocumentRow,
-                        $submittedDocumentsById[$storedDocumentId],
-                        !empty($reviewedEventReplay['is_correction'])
-                    )) {
+                    || !$protectedDocumentMatches) {
                     throw new RuntimeException(
                         'followup_event_identity_conflict:' . $submittedEventId
                     );
@@ -9817,7 +10169,9 @@ function upsert_governance_snapshot(
                 $canonicalActorId =
                     (string)$reviewedEventReplay['canonical_actor_id'];
                 $approvedActorRows = v1_pdo_fetch_all_and_close(
-                    $reviewedDartIdentityActorStmt,
+                    $rejectedDartEventProtected
+                        ? $rejectedDartIdentityActorStmt
+                        : $reviewedDartIdentityActorStmt,
                     array($submittedEventId,$canonicalActorId)
                 );
                 $storedObservationRows = v1_pdo_fetch_all_and_close(
@@ -9835,7 +10189,8 @@ function upsert_governance_snapshot(
                     || (string)($storedDocumentOwners[0]['company_id'] ?? '')
                         !== $submittedCompanyId
                     || (string)($storedDocumentOwners[0]['identity_status'] ?? '')
-                        !== 'complete'
+                        !== ($rejectedDartEventProtected
+                            ? 'rejected' : 'complete')
                     || count($storedObservationRows) !== 1
                     || (string)($storedObservationRows[0]['event_id'] ?? '')
                         !== $submittedEventId
@@ -9850,6 +10205,53 @@ function upsert_governance_snapshot(
                     throw new RuntimeException(
                         'followup_event_identity_conflict:' . $submittedEventId
                     );
+                }
+                if ($rejectedDartEventProtected) {
+                    $rejectedActorRow = $approvedActorRows[0];
+                    $actorReviewStatus = (string)(
+                        $rejectedActorRow['actor_review_status'] ?? ''
+                    );
+                    $actorRecordStatus = (string)(
+                        $rejectedActorRow['record_status'] ?? ''
+                    );
+                    $actorCountryCode = (string)(
+                        $rejectedActorRow['country_code'] ?? ''
+                    );
+                    $relationReviewStatus = (string)(
+                        $rejectedActorRow['relation_review_status'] ?? ''
+                    );
+                    $pendingActorState = $actorReviewStatus === 'pending'
+                        && $actorRecordStatus === 'inactive'
+                        && $actorCountryCode === '';
+                    $approvedActorState = $actorReviewStatus === 'approved'
+                        && $actorRecordStatus === 'active'
+                        && $actorCountryCode === 'KR';
+                    if ((string)($rejectedActorRow['actor_id'] ?? '')
+                            !== $canonicalActorId
+                        || (string)($rejectedActorRow['actor_role'] ?? '')
+                            !== 'filer'
+                        || (string)($rejectedActorRow['actor_type'] ?? '')
+                            !== (string)$reviewedEventReplay['actor_type']
+                        || v1_normalize_identity_text((string)(
+                            $rejectedActorRow['display_name'] ?? ''
+                        )) !== v1_normalize_identity_text((string)
+                            $reviewedEventReplay['actor_display_name'])
+                        || trim((string)(
+                            $rejectedActorRow['company_id'] ?? ''
+                        )) !== (string)$reviewedEventReplay['actor_company_id']
+                        || (!$pendingActorState && !$approvedActorState)
+                        || !in_array(
+                            $relationReviewStatus,
+                            array('pending','approved'),
+                            true
+                        )
+                        || ($relationReviewStatus === 'approved'
+                            && !$approvedActorState)) {
+                        throw new RuntimeException(
+                            'followup_event_identity_conflict:'
+                            . $submittedEventId
+                        );
+                    }
                 }
                 $isolatedReplayDocumentSnapshots[$storedDocumentId] =
                     $storedDocumentRow;
@@ -10309,7 +10711,8 @@ function upsert_governance_snapshot(
                         $submittedOrReferencedDocumentId
                     ]
                 ) : array();
-                if (v1_dart_reviewed_event_is_protected($storedOwnerRow)) {
+                if (v1_dart_reviewed_event_is_protected($storedOwnerRow)
+                    || v1_dart_rejected_event_is_protected($storedOwnerRow)) {
                     if ((string)$storedOwnerRow['document_id']
                             !== $submittedOrReferencedDocumentId
                         || count($submittedReferenceOwners) !== 1
