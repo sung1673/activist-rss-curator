@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -28,6 +30,67 @@ def step_names(job: dict[str, object]) -> list[str]:
     steps = job["steps"]
     assert isinstance(steps, list)
     return [str(step.get("name")) for step in steps]
+
+
+def preview_api_receipt_aggregator():
+    _text, payload = workflow("global-alpha-expedited-preparation.yml")
+    step = next(
+        step
+        for step in payload["jobs"]["evaluate"]["steps"]
+        if step["name"]
+        == "Inject actual source, experience, rollback, and integrity evidence"
+    )
+    run = step["run"]
+    python_source = run.split("python - <<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+    module = ast.parse(python_source)
+    selected = []
+    for node in module.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name)
+            and target.id
+            in {
+                "PREVIEW_API_BUDGET_LIMIT_BYTES",
+                "EXPECTED_PREVIEW_API_BUDGET_ROUTES",
+            }
+            for target in node.targets
+        ):
+            selected.append(node)
+        elif (
+            isinstance(node, ast.FunctionDef)
+            and node.name == "aggregate_preview_api_budget_receipts"
+        ):
+            selected.append(node)
+    namespace: dict[str, object] = {}
+    exec(
+        compile(
+            ast.Module(body=selected, type_ignores=[]),
+            filename="global-alpha-expedited-preparation.yml",
+            mode="exec",
+        ),
+        namespace,
+    )
+    return (
+        namespace["aggregate_preview_api_budget_receipts"],
+        namespace["EXPECTED_PREVIEW_API_BUDGET_ROUTES"],
+        namespace["PREVIEW_API_BUDGET_LIMIT_BYTES"],
+    )
+
+
+def preview_api_receipts(
+    routes: tuple[str, ...],
+    *,
+    size_offset: int = 0,
+) -> list[dict[str, object]]:
+    return [
+        {
+            "route": route,
+            "http_status": 200,
+            "size_bytes": 1_000 + index + size_offset,
+            "api_version_header": "v2",
+            "response_bytes_header": 1_000 + index + size_offset,
+        }
+        for index, route in enumerate(routes)
+    ]
 
 
 def test_candidate_pages_are_rechecked_for_internal_scores_at_expedited_boundaries() -> None:
@@ -173,6 +236,71 @@ def test_expedited_evidence_collects_seven_real_observations() -> None:
     ):
         assert contract in boundary["run"]
     assert "GLOBAL_ALPHA_EXPEDITED_OBSERVATION_ENABLED" in text
+
+
+def test_expedited_preparation_aggregates_independently_validated_api_receipts() -> None:
+    text, _payload = workflow("global-alpha-expedited-preparation.yml")
+    assert "aggregate_preview_api_budget_receipts" in text
+    assert "viewport_api_receipts.append" in text
+    assert "API byte receipts changed between viewport journeys" not in text
+
+    aggregate, routes, _limit = preview_api_receipt_aggregator()
+    result = aggregate(
+        [
+            preview_api_receipts(routes, size_offset=1),
+            list(reversed(preview_api_receipts(routes, size_offset=9))),
+            preview_api_receipts(routes, size_offset=4),
+        ]
+    )
+    assert [item["route"] for item in result] == list(routes)
+    assert [item["size_bytes"] for item in result] == [
+        1_009 + index for index in range(len(routes))
+    ]
+    assert all(
+        item["response_bytes_header"] == item["size_bytes"]
+        and item["http_status"] == 200
+        and item["api_version_header"] == "v2"
+        for item in result
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("http_status", 503, "HTTP 200"),
+        ("api_version_header", "v1", "API v2"),
+        ("response_bytes_header", 999, "does not match the body"),
+        ("size_bytes", 250_001, "250000-byte API budget"),
+    ),
+)
+def test_expedited_preparation_rejects_invalid_viewport_api_receipt(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    aggregate, routes, _limit = preview_api_receipt_aggregator()
+    viewports = [
+        preview_api_receipts(routes),
+        preview_api_receipts(routes),
+        preview_api_receipts(routes),
+    ]
+    viewports[1][3][field] = value
+    if field == "size_bytes":
+        viewports[1][3]["response_bytes_header"] = value
+    with pytest.raises(SystemExit, match=message):
+        aggregate(viewports)
+
+
+def test_expedited_preparation_requires_each_viewport_exact_route_set() -> None:
+    aggregate, routes, _limit = preview_api_receipt_aggregator()
+    viewports = [
+        preview_api_receipts(routes),
+        preview_api_receipts(routes),
+        preview_api_receipts(routes),
+    ]
+    viewports[2][-1] = dict(viewports[2][0])
+    with pytest.raises(SystemExit, match="duplicates Preview API route"):
+        aggregate(viewports)
 
 
 def test_expedited_preparation_rejects_telegram_recovery_payloads_and_smokes_404() -> None:

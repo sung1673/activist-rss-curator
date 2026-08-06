@@ -2408,6 +2408,114 @@ jobs:
           import os
           from pathlib import Path
 
+          PREVIEW_API_BUDGET_LIMIT_BYTES = 250_000
+          EXPECTED_PREVIEW_API_BUDGET_ROUTES = (
+              "/briefs/latest?edition=global",
+              "/live?limit=100",
+              "/events?limit=100",
+              "/issuers?limit=100",
+              "/calendar?limit=100",
+              "/search?q=capital",
+              "/sources/status",
+              "/exports/events.json?limit=100",
+              "/exports/events.csv?limit=100",
+              "/feeds/events.atom?limit=100",
+          )
+
+          def aggregate_preview_api_budget_receipts(viewport_receipt_lists):
+              if not isinstance(viewport_receipt_lists, list) or len(
+                  viewport_receipt_lists
+              ) != 3:
+                  raise SystemExit(
+                      "Preview API evidence must contain exactly three viewport "
+                      "receipt lists"
+                  )
+              expected_routes = frozenset(EXPECTED_PREVIEW_API_BUDGET_ROUTES)
+              reference_contract = None
+              largest_sizes = {
+                  route: 0 for route in EXPECTED_PREVIEW_API_BUDGET_ROUTES
+              }
+              for viewport_index, receipts in enumerate(viewport_receipt_lists):
+                  location = f"Preview API viewport {viewport_index + 1}"
+                  if not isinstance(receipts, list) or len(receipts) != len(
+                      EXPECTED_PREVIEW_API_BUDGET_ROUTES
+                  ):
+                      raise SystemExit(
+                          f"{location} must contain exactly ten route receipts"
+                      )
+                  by_route = {}
+                  for receipt_index, receipt in enumerate(receipts):
+                      receipt_location = f"{location} receipt {receipt_index + 1}"
+                      if not isinstance(receipt, dict):
+                          raise SystemExit(f"{receipt_location} must be an object")
+                      route = receipt.get("route")
+                      if not isinstance(route, str) or route not in expected_routes:
+                          raise SystemExit(
+                              f"{receipt_location} has an unexpected route"
+                          )
+                      if route in by_route:
+                          raise SystemExit(
+                              f"{receipt_location} duplicates Preview API route {route}"
+                          )
+                      status = receipt.get("http_status")
+                      version = receipt.get("api_version_header")
+                      size = receipt.get("size_bytes")
+                      response_bytes = receipt.get("response_bytes_header")
+                      if status != 200 or isinstance(status, bool):
+                          raise SystemExit(
+                              f"{receipt_location} must be an HTTP 200 response"
+                          )
+                      if version != "v2":
+                          raise SystemExit(
+                              f"{receipt_location} must identify API v2"
+                          )
+                      if (
+                          isinstance(size, bool)
+                          or not isinstance(size, int)
+                          or size < 1
+                          or size > PREVIEW_API_BUDGET_LIMIT_BYTES
+                      ):
+                          raise SystemExit(
+                              f"{receipt_location} violates the 250000-byte API budget"
+                          )
+                      if (
+                          isinstance(response_bytes, bool)
+                          or not isinstance(response_bytes, int)
+                          or response_bytes != size
+                      ):
+                          raise SystemExit(
+                              f"{receipt_location} response byte header does not "
+                              "match the body"
+                          )
+                      by_route[route] = (status, version, size)
+                  if frozenset(by_route) != expected_routes:
+                      raise SystemExit(f"{location} omitted a required API route")
+                  contract = tuple(
+                      (route, by_route[route][0], by_route[route][1])
+                      for route in EXPECTED_PREVIEW_API_BUDGET_ROUTES
+                  )
+                  if reference_contract is None:
+                      reference_contract = contract
+                  elif contract != reference_contract:
+                      raise SystemExit(
+                          "Preview API route/status/version contract changed between "
+                          "viewport journeys"
+                      )
+                  for route in EXPECTED_PREVIEW_API_BUDGET_ROUTES:
+                      largest_sizes[route] = max(
+                          largest_sizes[route], by_route[route][2]
+                      )
+              return [
+                  {
+                      "route": route,
+                      "http_status": 200,
+                      "size_bytes": largest_sizes[route],
+                      "api_version_header": "v2",
+                      "response_bytes_header": largest_sizes[route],
+                  }
+                  for route in EXPECTED_PREVIEW_API_BUDGET_ROUTES
+              ]
+
           def canonical_sha(value):
               raw = json.dumps(
                   value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -2499,7 +2607,7 @@ jobs:
           if len(preview_receipts) != 3:
               raise SystemExit("remote Preview evidence must contain exact three viewports")
           viewports = []
-          api_responses = None
+          viewport_api_receipts = []
           for record in preview_receipts:
               viewport = record.get("viewport")
               if (
@@ -2526,17 +2634,14 @@ jobs:
                       "first_important_event_top_px"
                   )
               viewports.append(row)
-              budget = record.get("api_budget_receipts")
-              if api_responses is None:
-                  api_responses = budget
-              elif budget != api_responses:
-                  raise SystemExit("API byte receipts changed between viewport journeys")
+              viewport_api_receipts.append(record.get("api_budget_receipts"))
           if {item["viewport"] for item in viewports} != {
               "390x844", "768x1024", "1440x900"
           }:
               raise SystemExit("remote Preview omitted a required viewport")
-          if not isinstance(api_responses, list) or len(api_responses) != 10:
-              raise SystemExit("remote Preview omitted exact API byte receipts")
+          api_responses = aggregate_preview_api_budget_receipts(
+              viewport_api_receipts
+          )
 
           vitals_paths = list(
               Path("web-vitals-evidence").rglob("web-vitals-run-summary.json")
