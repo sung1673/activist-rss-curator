@@ -1010,7 +1010,7 @@ def test_apply_bundle_and_network_free_replay_are_checkpoint_bound(
     )
 
 
-def test_partial_apply_manifest_survives_failure_and_changed_resume_cannot_overwrite(
+def test_partial_apply_records_only_remote_success_and_changed_failed_window_can_resume(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1066,9 +1066,11 @@ def test_partial_apply_manifest_survives_failure_and_changed_resume_cannot_overw
         )
     )
     assert resume["completed_window_count"] == 1
-    assert resume["window_count"] == 2
+    assert resume["window_count"] == 1
+    acknowledged_leaf = root / "windows" / "00-2026-06-01.json"
+    acknowledged_digest = hashlib.sha256(acknowledged_leaf.read_bytes()).hexdigest()
     failed_leaf = root / "windows" / "01-2026-06-02.json"
-    original_digest = hashlib.sha256(failed_leaf.read_bytes()).hexdigest()
+    assert not failed_leaf.exists()
 
     def changed_resume(_root, **kwargs):
         record = run_record(1)
@@ -1079,6 +1081,57 @@ def test_partial_apply_manifest_survives_failure_and_changed_resume_cannot_overw
         kwargs["payload_capture"](changed, record)
         return _successful_summary()
 
+    report = official_backfill.run_backfill(
+        tmp_path,
+        options,
+        ingest_runner=changed_resume,
+        now_provider=lambda: datetime(2026, 7, 2, 1, tzinfo=timezone.utc),
+        checkpoint_store=store,
+    )
+    assert report["status"] == "succeeded"
+    assert report["windows_already_completed"] == 1
+    assert report["windows_succeeded"] == 29
+    assert hashlib.sha256(acknowledged_leaf.read_bytes()).hexdigest() == acknowledged_digest
+    assert failed_leaf.is_file()
+    resumed_leaf = json.loads(failed_leaf.read_text(encoding="utf-8"))
+    assert resumed_leaf["payload"]["documents"][0]["title"] == (
+        "source changed after failed ACK"
+    )
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["bundle_status"] == "complete"
+    assert len(manifest["windows"]) == 30
+
+
+def test_first_window_failure_has_a_resumable_zero_leaf_partial_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("GITHUB_SHA", REVISION)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_RUN_ID", "791")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    store = MemoryCheckpointStore()
+    root = tmp_path / "first-window-failure"
+    options = official_backfill.BackfillOptions(
+        start=date(2026, 6, 1),
+        end_exclusive=date(2026, 7, 1),
+        checkpoint_path=tmp_path / "checkpoint.json",
+        sources=("dart",),
+        max_chunks=30,
+        write_frozen_bundle_dir=root,
+    )
+
+    def fail_first(_root, **kwargs):
+        record = run_record(0)
+        record["idempotency_key"] = kwargs["idempotency_key"]
+        record["run_id"] = "run:first-failed"
+        kwargs["payload_capture"](payload(), record)
+        summary = _successful_summary()
+        summary["official_failed"] = 1
+        summary["official_remote_run_persisted"] = 0
+        summary["official_remote_synced"] = 0
+        return summary
+
     with pytest.raises(
         official_backfill.CheckpointError,
         match="cannot be finalized",
@@ -1086,11 +1139,161 @@ def test_partial_apply_manifest_survives_failure_and_changed_resume_cannot_overw
         official_backfill.run_backfill(
             tmp_path,
             options,
-            ingest_runner=changed_resume,
-            now_provider=lambda: datetime(2026, 7, 2, 1, tzinfo=timezone.utc),
+            ingest_runner=fail_first,
+            now_provider=lambda: datetime(2026, 7, 2, tzinfo=timezone.utc),
             checkpoint_store=store,
         )
-    assert hashlib.sha256(failed_leaf.read_bytes()).hexdigest() == original_digest
+    assert {path.name for path in root.iterdir()} == {"manifest.json"}
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["bundle_status"] == "partial"
+    assert manifest["windows"] == []
+    resume = frozen._validate_resume_tree(
+        SimpleNamespace(
+            path=root,
+            expected_code_revision=REVISION,
+            expected_job_fingerprint=manifest["job"]["fingerprint"],
+        )
+    )
+    assert resume["completed_window_count"] == 0
+    assert resume["window_count"] == 0
+
+    resumed_calls = 0
+
+    def resume_all(_root, **kwargs):
+        nonlocal resumed_calls
+        record = run_record(resumed_calls)
+        record["idempotency_key"] = kwargs["idempotency_key"]
+        record["run_id"] = f"run:resumed:{resumed_calls}"
+        kwargs["payload_capture"](payload(), record)
+        resumed_calls += 1
+        return _successful_summary()
+
+    report = official_backfill.run_backfill(
+        tmp_path,
+        options,
+        ingest_runner=resume_all,
+        now_provider=lambda: datetime(2026, 7, 2, 1, tzinfo=timezone.utc),
+        checkpoint_store=store,
+    )
+    assert report["status"] == "succeeded"
+    assert report["windows_already_completed"] == 0
+    assert report["windows_succeeded"] == 30
+    assert resumed_calls == 30
+    final_manifest = json.loads(
+        (root / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert final_manifest["bundle_status"] == "complete"
+    assert len(final_manifest["windows"]) == 30
+
+
+@pytest.mark.parametrize(
+    ("capture_count", "expected_error"),
+    (
+        (0, "must capture exactly one payload"),
+        (2, "captured more than one payload"),
+    ),
+)
+def test_successful_frozen_window_requires_exactly_one_payload_capture_before_cas(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capture_count: int,
+    expected_error: str,
+):
+    monkeypatch.setenv("GITHUB_SHA", REVISION)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_RUN_ID", "792")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    store = MemoryCheckpointStore()
+    root = tmp_path / f"invalid-capture-count-{capture_count}"
+    options = official_backfill.BackfillOptions(
+        start=date(2026, 6, 1),
+        end_exclusive=date(2026, 7, 1),
+        checkpoint_path=tmp_path / "checkpoint.json",
+        sources=("dart",),
+        max_chunks=30,
+        write_frozen_bundle_dir=root,
+    )
+
+    def invalid_capture_runner(_root, **kwargs):
+        for capture_index in range(capture_count):
+            record = run_record(capture_index)
+            record["idempotency_key"] = kwargs["idempotency_key"]
+            record["run_id"] = f"run:invalid-capture:{capture_index}"
+            captured_payload = payload(title=f"capture {capture_index}")
+            record["stable_payload_sha256"] = frozen.stable_payload_sha256(
+                captured_payload
+            )
+            kwargs["payload_capture"](
+                captured_payload,
+                record,
+            )
+        return _successful_summary()
+
+    with pytest.raises(
+        official_backfill.CheckpointError,
+        match="cannot be finalized",
+    ):
+        official_backfill.run_backfill(
+            tmp_path,
+            options,
+            ingest_runner=invalid_capture_runner,
+            now_provider=lambda: datetime(2026, 7, 2, tzinfo=timezone.utc),
+            checkpoint_store=store,
+        )
+    assert store.record is not None
+    checkpoint = store.record[1]
+    assert checkpoint["completed_windows"] == {}
+    assert len(checkpoint["failed_windows"]) == 1
+    failed = next(iter(checkpoint["failed_windows"].values()))
+    assert expected_error in failed["error"]
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["windows"] == []
+    assert not (root / "windows").exists()
+
+
+def test_partial_resume_rejects_unacknowledged_extra_leaf_and_preserves_acknowledged_leaf(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("GITHUB_RUN_ID", "790")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    root = tmp_path / "partial-extra-leaf"
+    acknowledged = frozen.write_window_leaf(root, index=0, leaf=leaf(0))
+    frozen.write_partial_apply_bundle(
+        root,
+        code_revision=REVISION,
+        job_fingerprint=FINGERPRINT,
+        range_start="2026-07-01",
+        range_end_exclusive="2026-07-31",
+        checkpoint_payload_sha256=CHECKPOINT,
+        checkpoint_version=1,
+        completed_window_metadata=[acknowledged],
+    )
+    acknowledged_path = root / str(acknowledged["path"])
+    acknowledged_bytes = acknowledged_path.read_bytes()
+
+    changed_acknowledged = leaf(0)
+    changed_acknowledged["payload"]["documents"][0]["title"] = "changed"
+    with pytest.raises(
+        frozen.FrozenReplayBundleError,
+        match="refusing to overwrite changed frozen leaf",
+    ):
+        frozen.write_window_leaf(root, index=0, leaf=changed_acknowledged)
+    assert acknowledged_path.read_bytes() == acknowledged_bytes
+
+    frozen.write_window_leaf(root, index=1, leaf=leaf(1))
+    with pytest.raises(
+        frozen.FrozenReplayBundleError,
+        match="unacknowledged window leaf",
+    ):
+        frozen._validate_resume_tree(
+            SimpleNamespace(
+                path=root,
+                expected_code_revision=REVISION,
+                expected_job_fingerprint=FINGERPRINT,
+            )
+        )
+    assert acknowledged_path.read_bytes() == acknowledged_bytes
 
 
 def test_partial_apply_resumes_to_complete_authoritative_bundle(

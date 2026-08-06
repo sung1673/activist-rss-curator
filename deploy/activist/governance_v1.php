@@ -10884,6 +10884,7 @@ function upsert_governance_snapshot(
         $globalIssuerStmt = null;
         $globalIdentifierStmt = null;
         $globalListingStmt = null;
+        $globalCompanyProjectionStmt = null;
         if ($globalDartProjectionEnabled) {
             $globalIssuerTable = table_name($config,'issuers');
             $globalIssuerStmt = $pdo->prepare('INSERT INTO ' . $globalIssuerTable
@@ -10917,6 +10918,8 @@ function upsert_governance_snapshot(
                 . ' AND VALUES(listing_status)<>\'unknown\',VALUES(listing_status),listing_status),'
                 . 'is_primary=IF(listing_id=VALUES(listing_id),1,is_primary),'
                 . 'updated_at=IF(listing_id=VALUES(listing_id),VALUES(updated_at),updated_at)');
+            $globalCompanyProjectionStmt = $pdo->prepare('SELECT stock_code,market,listing_status FROM '
+                . table_name($config,'companies') . ' WHERE company_id=? LIMIT 1 FOR UPDATE');
         }
         foreach ($companies as $company) {
             if (!is_array($company)) { continue; }
@@ -10963,9 +10966,22 @@ function upsert_governance_snapshot(
             }
             if ($globalDartProjectionEnabled) {
                 $issuerId = 'issuer:kr:dart:' . $companyId;
-                $stockCode = mb_substr(trim((string)v1_first($company,array('stock_code'),'')),0,12,'UTF-8');
-                $market = mb_substr(trim((string)v1_first($company,array('market','corp_cls'),'')),0,40,'UTF-8');
+                if (!$globalCompanyProjectionStmt) {
+                    throw new RuntimeException('global_dart_projection_guard_unavailable');
+                }
+                $storedCompanyProjection = v1_pdo_fetch_one_and_close(
+                    $globalCompanyProjectionStmt,array($companyId)
+                );
+                if (!$storedCompanyProjection) {
+                    throw new RuntimeException('global_dart_projection_guard_unavailable');
+                }
+                $stockCode = mb_substr(trim((string)$storedCompanyProjection['stock_code']),0,12,'UTF-8');
+                $market = mb_substr(trim((string)$storedCompanyProjection['market']),0,40,'UTF-8');
                 if ($market === '') { $market = 'KRX'; }
+                $projectedListingStatus = trim((string)$storedCompanyProjection['listing_status']);
+                if (!in_array($projectedListingStatus,$allowedListingStatuses,true)) {
+                    throw new RuntimeException('global_dart_projection_guard_unavailable');
+                }
                 $globalIssuerStmt->execute(array(
                     $issuerId,json_value(array(
                         'legacy_company_id'=>$companyId,
@@ -10982,7 +10998,7 @@ function upsert_governance_snapshot(
                     ));
                     $globalListingStmt->execute(array(
                         'listing:kr:' . $companyId,$issuerId,$market,$stockCode,
-                        $listingStatus,$now,$now,
+                        $projectedListingStatus,$now,$now,
                     ));
                 }
             }

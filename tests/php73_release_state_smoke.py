@@ -1206,6 +1206,55 @@ def exercise_event_identity_datetime_storage(
         == "1\t1\t1",
         "exact guarded DART company-master-only chunk was not projected",
     )
+    company_master_sparse_replay = request_hmac_action(
+        base_url,
+        "upsert_governance_snapshot_dart_guarded",
+        {
+            "companies": [
+                {
+                    "company_id": company_master_only_id,
+                    "stock_code": "",
+                    "market": "",
+                    "legal_name": "CI DART company master only",
+                    "record_status": "active",
+                }
+            ],
+            "documents": [],
+            "events": [],
+            "source_rights": [],
+            "run": {},
+        },
+        expected_status=200,
+    )
+    require(
+        company_master_sparse_replay.get("ok") is True
+        and company_master_sparse_replay.get("backend_binding_id")
+        == expected_backend_binding
+        and company_master_sparse_replay.get("upserted", {}).get("companies") == 1,
+        repr(company_master_sparse_replay),
+    )
+    require(
+        mysql_execute(
+            mysql_container_id,
+            "SELECT "
+            "(SELECT market FROM ci_companies "
+            f"WHERE company_id='{company_master_only_id}'),"
+            "(SELECT market FROM ci_issuer_listings "
+            f"WHERE listing_id='listing:kr:{company_master_only_id}'),"
+            "(SELECT COUNT(*) FROM ci_issuer_identifiers "
+            f"WHERE issuer_id='issuer:kr:dart:{company_master_only_id}' "
+            "AND identifier_type='TICKER' AND identifier_value='999979' "
+            "AND market='KOSDAQ'),"
+            "(SELECT COUNT(*) FROM ci_issuer_identifiers "
+            f"WHERE issuer_id='issuer:kr:dart:{company_master_only_id}' "
+            "AND identifier_type='TICKER' AND identifier_value='999979' "
+            "AND market='KRX'),"
+            "(SELECT listing_status FROM ci_issuer_listings "
+            f"WHERE listing_id='listing:kr:{company_master_only_id}');",
+        )
+        == "KOSDAQ\tKOSDAQ\t1\t0\tlisted",
+        "sparse DART company-master replay corrupted the persisted global projection",
+    )
     for attack_index, attack_fields in enumerate(
         (
             {"body_text": "must never be stored"},
