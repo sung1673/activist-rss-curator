@@ -708,8 +708,11 @@ jobs:
               "c307e470111439547eb3b297efd413b96b2e0429" ]]
             allowed=(
               ".github/workflows/global-alpha-expedited-editorial.yml"
+              ".github/workflows/global-alpha-expedited-evidence-inputs.yml"
+              ".github/workflows/global-alpha-expedited-evidence.yml"
               ".github/workflows/global-alpha-expedited-preparation.yml"
               ".github/workflows/global-alpha-preview-deploy.yml"
+              ".github/workflows/governance-expedited-cutover.yml"
               "curator/global_alpha_expedited_editorial.py"
               "curator/global_alpha_expedited_gate.py"
               "deploy/activist/governance_v1.php"

@@ -270,8 +270,11 @@ def test_protected_carry_forward_is_ancestor_bound_and_event_write_free() -> Non
     assert fresh_allowlist_match is not None
     assert re.findall(r'"([^"]+)"', fresh_allowlist_match.group("entries")) == [
         ".github/workflows/global-alpha-expedited-editorial.yml",
+        ".github/workflows/global-alpha-expedited-evidence-inputs.yml",
+        ".github/workflows/global-alpha-expedited-evidence.yml",
         ".github/workflows/global-alpha-expedited-preparation.yml",
         ".github/workflows/global-alpha-preview-deploy.yml",
+        ".github/workflows/governance-expedited-cutover.yml",
         "curator/global_alpha_expedited_editorial.py",
         "curator/global_alpha_expedited_gate.py",
         "deploy/activist/governance_v1.php",
