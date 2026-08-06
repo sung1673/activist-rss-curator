@@ -252,6 +252,54 @@ def test_expedited_evidence_binds_all_fixed_producers_and_gate() -> None:
     assert evaluator_install.count("==") == len(dependency_pins)
     assert "-r requirements.txt" not in evaluator_install
 
+    protected_consumers = (
+        (
+            "global-alpha-expedited-evidence-inputs.yml",
+            "materialize",
+            "Set up protected input Python",
+            "Install pinned final approval dependencies",
+            "Verify final approval import closure",
+            "from curator.global_alpha_expedited_final_approval import",
+        ),
+        (
+            "global-alpha-expedited-evidence.yml",
+            "evaluate",
+            "Set up gate Python",
+            "Install pinned evidence evaluator dependencies",
+            "Verify evidence evaluator import closure",
+            "from curator.global_alpha_expedited_gate import",
+        ),
+        (
+            "governance-expedited-cutover.yml",
+            "validate",
+            "Set up validation Python",
+            "Install pinned cutover evaluator dependencies",
+            "Verify cutover evaluator import closure",
+            "from curator.global_alpha_expedited_gate import",
+        ),
+    )
+    for (
+        workflow_name,
+        job_name,
+        setup_name,
+        install_name,
+        import_name,
+        import_contract,
+    ) in protected_consumers:
+        _consumer_text, consumer = workflow(workflow_name)
+        consumer_job = consumer["jobs"][job_name]
+        consumer_names = step_names(consumer_job)
+        consumer_setup_index = consumer_names.index(setup_name)
+        assert consumer_names[consumer_setup_index + 1] == install_name
+        assert consumer_names[consumer_setup_index + 2] == import_name
+        consumer_install = consumer_job["steps"][consumer_setup_index + 1]["run"]
+        for pin in dependency_pins:
+            assert f'"{pin}"' in consumer_install
+        assert consumer_install.count("==") == len(dependency_pins)
+        assert "-r requirements.txt" not in consumer_install
+        consumer_import = consumer_job["steps"][consumer_setup_index + 2]["run"]
+        assert import_contract in consumer_import
+
     _ci_text, ci = workflow("ci.yml")
     ci_steps = ci["jobs"]["test"]["steps"]
     ci_names = step_names(ci["jobs"]["test"])
