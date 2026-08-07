@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -228,6 +230,123 @@ def test_powershell_parser_accepts_script() -> None:
         check=False,
     )
     assert completed.returncode == 0, completed.stderr or completed.stdout
+
+
+@pytest.mark.skipif(_powershell() is None, reason="PowerShell is unavailable")
+def test_firewall_collection_supports_split_interface_filters(tmp_path: Path) -> None:
+    """Windows exposes interface alias and interface type via different filters."""
+    powershell = _powershell()
+    assert powershell is not None
+    harness = tmp_path / "firewall-filter-harness.ps1"
+    escaped_script = str(SCRIPT).replace("'", "''")
+    harness.write_text(
+        f"""
+. '{escaped_script}' -LibraryMode
+function Get-NetFirewallProfile {{
+    [CmdletBinding()] param([string]$PolicyStore)
+    [pscustomobject]@{{ Name='Private'; Enabled=$true; DefaultInboundAction='Block'; AllowInboundRules='True'; AllowLocalFirewallRules='True'; LogAllowed=$false; LogBlocked=$false }}
+}}
+function Get-NetFirewallPortFilter {{
+    [CmdletBinding()] param([string]$PolicyStore)
+    [pscustomobject]@{{ Protocol='TCP'; LocalPort='2000' }}
+}}
+function Get-NetFirewallRule {{
+    [CmdletBinding()] param([Parameter(ValueFromPipeline=$true)]$InputObject)
+    process {{ [pscustomobject]@{{ DisplayName='Fixture allow'; Enabled=$true; Direction='Inbound'; Action='Allow'; Profile='Private'; EnforcementStatus='Full'; PolicyStoreSourceType='Local'; EdgeTraversalPolicy='Block' }} }}
+}}
+function Get-NetFirewallAddressFilter {{
+    [CmdletBinding()] param([Parameter(ValueFromPipeline=$true)]$InputObject)
+    process {{ [pscustomobject]@{{ RemoteAddress=@('Any'); LocalAddress=@('Any') }} }}
+}}
+function Get-NetFirewallApplicationFilter {{
+    [CmdletBinding()] param([Parameter(ValueFromPipeline=$true)]$InputObject)
+    process {{ [pscustomobject]@{{ Program='Any' }} }}
+}}
+function Get-NetFirewallInterfaceFilter {{
+    [CmdletBinding()] param([Parameter(ValueFromPipeline=$true)]$InputObject)
+    process {{ [pscustomobject]@{{ InterfaceAlias=@('Any') }} }}
+}}
+function Get-NetFirewallInterfaceTypeFilter {{
+    [CmdletBinding()] param([Parameter(ValueFromPipeline=$true)]$InputObject)
+    process {{ [pscustomobject]@{{ InterfaceType='Any' }} }}
+}}
+function Get-NetFirewallServiceFilter {{
+    [CmdletBinding()] param([Parameter(ValueFromPipeline=$true)]$InputObject)
+    process {{ [pscustomobject]@{{ Service='Any' }} }}
+}}
+$result = Get-FirewallSnapshot -Ports @(2000)
+$result | ConvertTo-Json -Depth 8 -Compress
+""",
+        encoding="utf-8-sig",
+    )
+    completed = subprocess.run(
+        [
+            powershell,
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(harness),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+    snapshot = json.loads(completed.stdout.strip())
+    assert snapshot["errors"] == []
+    assert snapshot["rules"][0]["interface_alias"] == ["Any"]
+    assert snapshot["rules"][0]["interface_type"] == "Any"
+
+
+@pytest.mark.skipif(_powershell() is None, reason="PowerShell is unavailable")
+def test_ipv6_loopback_probe_uses_target_address_family() -> None:
+    powershell = _powershell()
+    assert powershell is not None
+    listener = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    try:
+        listener.bind(("::1", 0))
+    except OSError as exc:
+        listener.close()
+        pytest.skip(f"IPv6 loopback is unavailable: {exc}")
+    listener.listen(1)
+    listener.settimeout(10)
+    port = listener.getsockname()[1]
+
+    def serve_banner() -> None:
+        connection, _ = listener.accept()
+        with connection:
+            connection.sendall(b"SSH-2.0-BSIDE-fixture\r\n")
+
+    server = threading.Thread(target=serve_banner, daemon=True)
+    server.start()
+    escaped_script = str(SCRIPT).replace("'", "''")
+    command = (
+        f". '{escaped_script}' -LibraryMode; "
+        f"Invoke-ProtocolProbe -Address '::1' -Port {port} -Protocol ssh "
+        "-Vantage loopback -TimeoutMs 3000 | ConvertTo-Json -Compress"
+    )
+    try:
+        completed = subprocess.run(
+            [powershell, "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
+    finally:
+        listener.close()
+        server.join(timeout=2)
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+    result = json.loads(completed.stdout.strip())
+    assert result["result"] == "ssh_banner"
+    assert result["protocol_ok"] is True
 
 
 @pytest.mark.skipif(_powershell() is None, reason="PowerShell is unavailable")

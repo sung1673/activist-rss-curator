@@ -616,13 +616,17 @@ function Get-FirewallSnapshot {
                 $addressFilter = @($rule | Get-NetFirewallAddressFilter -ErrorAction SilentlyContinue | Select-Object -First 1)
                 $applicationFilter = @($rule | Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue | Select-Object -First 1)
                 $interfaceFilter = @($rule | Get-NetFirewallInterfaceFilter -ErrorAction SilentlyContinue | Select-Object -First 1)
+                $interfaceTypeFilter = @()
+                if (Get-Command Get-NetFirewallInterfaceTypeFilter -ErrorAction SilentlyContinue) {
+                    $interfaceTypeFilter = @($rule | Get-NetFirewallInterfaceTypeFilter -ErrorAction SilentlyContinue | Select-Object -First 1)
+                }
                 $serviceFilter = @($rule | Get-NetFirewallServiceFilter -ErrorAction SilentlyContinue | Select-Object -First 1)
-                $remoteAddress = if ($addressFilter.Count -gt 0) { @($addressFilter[0].RemoteAddress) } else { @("Unknown") }
-                $localAddress = if ($addressFilter.Count -gt 0) { @($addressFilter[0].LocalAddress) } else { @("Unknown") }
-                $program = if ($applicationFilter.Count -gt 0) { [string]$applicationFilter[0].Program } else { "Unknown" }
-                $interfaceAlias = if ($interfaceFilter.Count -gt 0) { @($interfaceFilter[0].InterfaceAlias) } else { @("Unknown") }
-                $interfaceType = if ($interfaceFilter.Count -gt 0) { [string]$interfaceFilter[0].InterfaceType } else { "Unknown" }
-                $serviceName = if ($serviceFilter.Count -gt 0) { [string]$serviceFilter[0].Service } else { "Unknown" }
+                $remoteAddress = if ($addressFilter.Count -gt 0) { @(Get-ObjectField $addressFilter[0] "RemoteAddress" @("Unknown")) } else { @("Unknown") }
+                $localAddress = if ($addressFilter.Count -gt 0) { @(Get-ObjectField $addressFilter[0] "LocalAddress" @("Unknown")) } else { @("Unknown") }
+                $program = if ($applicationFilter.Count -gt 0) { [string](Get-ObjectField $applicationFilter[0] "Program" "Unknown") } else { "Unknown" }
+                $interfaceAlias = if ($interfaceFilter.Count -gt 0) { @(Get-ObjectField $interfaceFilter[0] "InterfaceAlias" @("Unknown")) } else { @("Unknown") }
+                $interfaceType = if ($interfaceTypeFilter.Count -gt 0) { [string](Get-ObjectField $interfaceTypeFilter[0] "InterfaceType" "Unknown") } else { "Unknown" }
+                $serviceName = if ($serviceFilter.Count -gt 0) { [string](Get-ObjectField $serviceFilter[0] "Service" "Unknown") } else { "Unknown" }
                 $rules.Add([pscustomobject][ordered]@{
                     display_name = Protect-DiagnosticText $rule.DisplayName 500
                     enabled = [bool]$rule.Enabled
@@ -835,9 +839,18 @@ function Invoke-ProtocolProbe {
     )
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    $client = New-Object System.Net.Sockets.TcpClient
+    $client = $null
     try {
-        $connectTask = $client.ConnectAsync($Address, $Port)
+        [System.Net.IPAddress]$parsedAddress = $null
+        if ([System.Net.IPAddress]::TryParse($Address, [ref]$parsedAddress)) {
+            # TcpClient() can select an IPv4 socket on Windows PowerShell 5.1.
+            # Construct it with the target family so ::1 is probed with IPv6.
+            $client = [System.Net.Sockets.TcpClient]::new($parsedAddress.AddressFamily)
+            $connectTask = $client.ConnectAsync($parsedAddress, $Port)
+        } else {
+            $client = New-Object System.Net.Sockets.TcpClient
+            $connectTask = $client.ConnectAsync($Address, $Port)
+        }
         try {
             $connectCompleted = $connectTask.Wait($TimeoutMs)
         } catch {
@@ -954,14 +967,20 @@ function Invoke-ProtocolProbe {
         }
     } catch {
         $stopwatch.Stop()
+        $wasConnected = $false
+        if ($null -ne $client) {
+            $wasConnected = $client.Connected
+        }
         return [pscustomobject][ordered]@{
             address = $Address; port = $Port; protocol = $Protocol; vantage = $Vantage
-            result = "probe_error"; connected = $client.Connected; protocol_ok = $false
+            result = "probe_error"; connected = $wasConnected; protocol_ok = $false
             duration_ms = [int]$stopwatch.ElapsedMilliseconds
             evidence = Protect-DiagnosticText $_.Exception.GetBaseException().Message 500
         }
     } finally {
-        $client.Dispose()
+        if ($null -ne $client) {
+            $client.Dispose()
+        }
     }
 }
 
