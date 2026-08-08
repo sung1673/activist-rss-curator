@@ -1074,14 +1074,20 @@ def _run_backfill(
                 ][window_indexes[window.key]]["sha256"]  # type: ignore[index]
             else:
                 captured_leaf: dict[str, object] | None = None
+                captured_leaf_count = 0
 
                 def capture_payload(
                     payload: dict[str, object],
                     run: dict[str, object],
                 ) -> None:
-                    nonlocal captured_leaf
+                    nonlocal captured_leaf, captured_leaf_count
                     if options.write_frozen_bundle_dir is None:
                         return
+                    captured_leaf_count += 1
+                    if captured_leaf_count != 1:
+                        raise FrozenReplayBundleError(
+                            "DART frozen apply window captured more than one payload"
+                        )
                     captured_leaf = build_window_leaf(
                         code_revision=str(code_revision),
                         job_fingerprint=fingerprint,
@@ -1090,11 +1096,6 @@ def _run_backfill(
                         idempotency_key=str(result["idempotency_key"]),
                         payload=payload,
                         run=run,
-                    )
-                    frozen_leaf_metadata[window.key] = write_window_leaf(
-                        options.write_frozen_bundle_dir,
-                        index=window_indexes[window.key],
-                        leaf=captured_leaf,
                     )
 
                 summary = ingest_runner(
@@ -1113,7 +1114,26 @@ def _run_backfill(
                         else {}
                     ),
                 )
-                if captured_leaf is not None:
+                result["summary"] = summary
+                remote_summary_succeeded = _summary_succeeded(
+                    summary,
+                    dry_run=options.dry_run,
+                )
+                if (
+                    remote_summary_succeeded
+                    and options.write_frozen_bundle_dir is not None
+                    and (captured_leaf_count != 1 or captured_leaf is None)
+                ):
+                    raise FrozenReplayBundleError(
+                        "successful DART frozen apply window must capture exactly one payload"
+                    )
+                if captured_leaf is not None and remote_summary_succeeded:
+                    assert options.write_frozen_bundle_dir is not None
+                    frozen_leaf_metadata[window.key] = write_window_leaf(
+                        options.write_frozen_bundle_dir,
+                        index=window_indexes[window.key],
+                        leaf=captured_leaf,
+                    )
                     result["stable_payload_sha256"] = captured_leaf[
                         "stable_payload_sha256"
                     ]

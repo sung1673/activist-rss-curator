@@ -2103,6 +2103,19 @@ def test_reviewed_dart_event_replay_is_an_exact_read_only_ack():
     assert "$readOnlyDartReviewedCompanyIds = array_fill_keys(" in preflight
     assert "$submittedReadOnlyCompanies = array();" in preflight
     assert "v1_dart_reviewed_company_replay_matches(" in preflight
+    projection = ingest[
+        ingest.index("$globalIssuerStmt = null;") : ingest.index(
+            "$rightStmt = $pdo->prepare"
+        )
+    ]
+    assert "$globalCompanyProjectionStmt = $pdo->prepare(" in projection
+    assert "SELECT stock_code,market,listing_status FROM " in projection
+    assert "WHERE company_id=? LIMIT 1 FOR UPDATE" in projection
+    assert "$storedCompanyProjection = v1_pdo_fetch_one_and_close(" in projection
+    assert "$storedCompanyProjection['stock_code']" in projection
+    assert "$storedCompanyProjection['market']" in projection
+    assert "$storedCompanyProjection['listing_status']" in projection
+    assert "v1_first($company,array('market','corp_cls')" not in projection
     pending_identity_branch = preflight[
         preflight.index(
             "if (!$storedFollowupFlag && $storedIsolationMarker === ''"

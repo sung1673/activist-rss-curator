@@ -1764,10 +1764,8 @@ def _validate_resume_tree(args: argparse.Namespace) -> dict[str, object]:
     windows_root = root / "windows"
     root_entries = list(root.iterdir())
     if (
-        {entry.name for entry in root_entries} != {"manifest.json", "windows"}
-        or any(link_like(entry) for entry in root_entries)
+        any(link_like(entry) for entry in root_entries)
         or not manifest_path.is_file()
-        or not windows_root.is_dir()
     ):
         raise FrozenReplayBundleError(
             "partial frozen bundle inventory contains an extra, missing, "
@@ -1829,7 +1827,22 @@ def _validate_resume_tree(args: argparse.Namespace) -> dict[str, object]:
         )
     ):
         raise FrozenReplayBundleError("partial frozen manifest binding is invalid")
-    window_entries = list(windows_root.iterdir())
+    completed_count = len(completed_metadata)
+    expected_root_names = {"manifest.json", "windows"}
+    if completed_count == 0 and manifest.get("bundle_status") == "partial":
+        allowed_root_names = ({"manifest.json"}, expected_root_names)
+    else:
+        allowed_root_names = (expected_root_names,)
+    if (
+        {entry.name for entry in root_entries} not in allowed_root_names
+        or (windows_root.exists() and not windows_root.is_dir())
+        or (completed_count > 0 and not windows_root.is_dir())
+    ):
+        raise FrozenReplayBundleError(
+            "partial frozen bundle inventory contains an extra, missing, "
+            "or linked entry"
+        )
+    window_entries = list(windows_root.iterdir()) if windows_root.is_dir() else []
     if any(
         link_like(entry)
         or not entry.is_file()
@@ -1840,8 +1853,12 @@ def _validate_resume_tree(args: argparse.Namespace) -> dict[str, object]:
             "partial frozen bundle windows inventory is invalid"
         )
     paths = sorted(window_entries)
-    if not paths or len(paths) > 30:
+    if len(paths) > 30:
         raise FrozenReplayBundleError("partial frozen bundle leaf count is invalid")
+    if len(paths) != len(completed_metadata):
+        raise FrozenReplayBundleError(
+            "partial frozen bundle contains an unacknowledged window leaf"
+        )
     total_bytes = manifest_path.stat().st_size + sum(
         path.stat().st_size for path in paths
     )
